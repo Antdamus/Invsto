@@ -67,6 +67,7 @@
       ebayConversations: [],
       ebayConversationFilter: "all",
       ebayConversationSearchQuery: "",
+      ebayConversationDensityMode: overrides.ebayConversationDensityMode || "compact",
       selectedEbayConversationId: null,
       ebayConversationLastLoadedAt: null,
       ebayConversationMessagesById: {},

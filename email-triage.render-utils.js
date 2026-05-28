@@ -3,6 +3,7 @@
 
   const LOW_CONFIDENCE_THRESHOLD = 0.75;
   const DENSITY_STORAGE_KEY = "og-email-triage-density";
+  const EBAY_CONVERSATION_DENSITY_STORAGE_KEY = "og-ebay-conversation-density";
   const PANEL_WIDTHS_STORAGE_KEY = "og-email-triage-panel-widths";
   const PANEL_WIDTH_LIMITS = {
     category: { min: 150, max: 340, fallback: 220 },
@@ -23,6 +24,23 @@
       window.localStorage?.setItem(DENSITY_STORAGE_KEY, mode);
     } catch (error) {
       // Ignore storage failures; density still works for the current session.
+    }
+  }
+
+  function getStoredEbayConversationDensityMode() {
+    try {
+      const stored = window.localStorage?.getItem(EBAY_CONVERSATION_DENSITY_STORAGE_KEY);
+      return stored === "expanded" ? "expanded" : "compact";
+    } catch (error) {
+      return "compact";
+    }
+  }
+
+  function storeEbayConversationDensityMode(mode) {
+    try {
+      window.localStorage?.setItem(EBAY_CONVERSATION_DENSITY_STORAGE_KEY, mode === "expanded" ? "expanded" : "compact");
+    } catch (error) {
+      // The conversation density toggle still works for the current session.
     }
   }
 
@@ -482,10 +500,13 @@
   window.EmailTriageRenderUtils = {
     LOW_CONFIDENCE_THRESHOLD,
     DENSITY_STORAGE_KEY,
+    EBAY_CONVERSATION_DENSITY_STORAGE_KEY,
     PANEL_WIDTHS_STORAGE_KEY,
     PANEL_WIDTH_LIMITS,
     getStoredDensityMode,
     storeDensityMode,
+    getStoredEbayConversationDensityMode,
+    storeEbayConversationDensityMode,
     clampNumber,
     getStoredPanelWidths,
     storePanelWidths,

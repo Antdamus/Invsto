@@ -25,6 +25,8 @@
   const {
     getStoredDensityMode,
     storeDensityMode,
+    getStoredEbayConversationDensityMode,
+    storeEbayConversationDensityMode,
     clampNumber,
     getStoredPanelWidths,
     storePanelWidths,
@@ -125,6 +127,7 @@
     ebayConversationFilterTabs: document.querySelectorAll("[data-ebay-conversation-filter]"),
     ebayConversationSearch: document.getElementById("ebay-conversation-search"),
     ebayConversationSearchClear: document.getElementById("ebay-conversation-search-clear"),
+    ebayConversationDensityInputs: document.querySelectorAll("input[name='ebay-conversation-density']"),
     ebayConversationSyncResult: document.getElementById("ebay-conversation-sync-result"),
     ebayConversationSummary: document.getElementById("ebay-conversation-summary"),
     ebayConversationList: document.getElementById("ebay-conversation-list"),
@@ -214,6 +217,7 @@
   const triageStore = createStore(createInitialState({
     data: normalizeAdminViewPayload({}),
     densityMode: getStoredDensityMode(),
+    ebayConversationDensityMode: getStoredEbayConversationDensityMode(),
     categorySortMode: getStoredCategorySortMode(),
     customCategoryOrder: getStoredCustomCategoryOrder(),
     operationalDashboardCollapsed: getStoredDashboardCollapsed(),
@@ -313,6 +317,7 @@
       ebayConversationLoading: state.ebayConversationLoading,
       ebayConversationCount: state.ebayConversations?.length || 0,
       ebayConversationSearchQuery: state.ebayConversationSearchQuery || "",
+      ebayConversationDensityMode: state.ebayConversationDensityMode || "compact",
       selectedEbayConversationId: state.selectedEbayConversationId,
       ebayConversationSyncLoading: state.ebayConversationSyncLoading,
       ebayConversationSyncResult: state.ebayConversationSyncResult,
@@ -2349,16 +2354,17 @@
     renderEbayConversationInbox(adminClassificationState);
   }
 
-  function renderEbayConversationBadges(conversation) {
+  function renderEbayConversationBadges(conversation, options = {}) {
     const summary = ebayConversationSummary(conversation);
     const status = compactConversationText(conversation.conversation_status);
+    const compact = options.compact === true;
     const badges = [
       Number(conversation.unread_count || 0) > 0 ? renderBadge(`${conversation.unread_count} unread`, "warning") : "",
       summary.has_order_link ? renderBadge("Order", "success") : "",
       summary.has_return_link ? renderBadge("Return", "warning") : "",
       summary.has_media ? renderBadge(`${summary.media_count || 1} media`, "category") : "",
-      summary.needs_context_review ? renderBadge("Context review", "warning") : "",
-      status ? renderBadge(humanizeValue(status), "muted") : "",
+      summary.needs_context_review ? renderBadge(compact ? "Review" : "Context review", "warning") : "",
+      !compact && status ? renderBadge(humanizeValue(status), "muted") : "",
       summary.warnings.length ? renderBadge("Warning", "danger") : "",
     ].filter(Boolean);
     return `<span class="ebay-conversation-badges">${badges.join("")}</span>`;
@@ -2391,6 +2397,10 @@
   function renderEbayConversationList(state) {
     if (!els.ebayConversationList) return;
     const rows = filteredEbayConversations(state);
+    const densityMode = state.ebayConversationDensityMode === "expanded" ? "expanded" : "compact";
+    const compact = densityMode === "compact";
+    els.ebayConversationList.classList.toggle("is-compact-density", compact);
+    els.ebayConversationList.classList.toggle("is-expanded-density", !compact);
     if (!rows.length) {
       const query = compactConversationText(state.ebayConversationSearchQuery);
       els.ebayConversationList.innerHTML = `<div class="classification-empty">${query ? `No canonical eBay conversations match "${escapeHtml(query)}".` : "No canonical eBay conversations match this filter."}</div>`;
@@ -2404,24 +2414,26 @@
       const metaItems = ebayConversationMetaItems(conversation, 3);
       const unread = Number(conversation.unread_count || 0) > 0;
       return `
-        <button type="button" class="ebay-conversation-row${selected ? " is-selected" : ""}${unread ? " is-unread" : ""}" data-ebay-conversation-id="${escapeHtml(conversation.id)}">
+        <button type="button" class="ebay-conversation-row is-${escapeHtml(densityMode)}${selected ? " is-selected" : ""}${unread ? " is-unread" : ""}" data-ebay-conversation-id="${escapeHtml(conversation.id)}">
           <span class="ebay-conversation-row-top">
             <span class="ebay-conversation-party">
               <span class="ebay-conversation-avatar" aria-hidden="true">${escapeHtml(ebayConversationInitials(conversation))}</span>
               <span class="ebay-conversation-party-copy">
                 <strong>${escapeHtml(identity.displayName)}</strong>
-                <small>${escapeHtml(ebayIdentitySourceLabel(identity.source))}</small>
+                ${compact ? "" : `<small>${escapeHtml(ebayIdentitySourceLabel(identity.source))}</small>`}
               </span>
             </span>
             <time>${escapeHtml(formatCompactEmailAge(ebayConversationTime(conversation)))}</time>
           </span>
           <span class="ebay-conversation-row-title">${escapeHtml(ebayConversationTitle(conversation))}</span>
           <span class="ebay-conversation-row-preview">${escapeHtml(ebayConversationSnippet(conversation))}</span>
-          <span class="ebay-conversation-row-meta">
-            ${metaItems.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
-            ${summary.seller_username ? `<span>Seller ${escapeHtml(summary.seller_username)}</span>` : ""}
-          </span>
-          ${renderEbayConversationBadges(conversation)}
+          ${compact ? "" : `
+            <span class="ebay-conversation-row-meta">
+              ${metaItems.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+              ${summary.seller_username ? `<span>Seller ${escapeHtml(summary.seller_username)}</span>` : ""}
+            </span>
+          `}
+          ${renderEbayConversationBadges(conversation, { compact })}
         </button>
       `;
     }).join("");
@@ -2682,6 +2694,9 @@
       els.ebayConversationSearchClear.disabled = !compactConversationText(searchQuery);
     }
     els.ebayConversationSearch?.closest(".ebay-conversation-search")?.classList.toggle("has-query", Boolean(compactConversationText(searchQuery)));
+    els.ebayConversationDensityInputs?.forEach((input) => {
+      input.checked = input.value === (state.ebayConversationDensityMode || "compact");
+    });
 
     renderEbaySyncResult(state);
     renderEbayConversationSummary(state);
@@ -2866,6 +2881,14 @@
       if (els.ebayConversationSearch) els.ebayConversationSearch.value = "";
       applyEbayConversationListControls(context, { ebayConversationSearchQuery: "" });
       els.ebayConversationSearch?.focus();
+    });
+    els.ebayConversationDensityInputs?.forEach((input) => {
+      input.addEventListener("change", () => {
+        if (!input.checked) return;
+        const ebayConversationDensityMode = input.value === "expanded" ? "expanded" : "compact";
+        storeEbayConversationDensityMode(ebayConversationDensityMode);
+        setEbayConversationState({ ebayConversationDensityMode });
+      });
     });
     els.ebayConversationList?.addEventListener("click", (event) => {
       const row = event.target.closest("[data-ebay-conversation-id]");
