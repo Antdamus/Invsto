@@ -88,7 +88,7 @@
 
     if (options.greetingEl) {
       const name = employee.display_name ? `, ${employee.display_name}` : "";
-      options.greetingEl.textContent = `Email Triage${name}`;
+      options.greetingEl.textContent = `eBay Messaging${name}`;
     }
 
     return { client, session, employee };
@@ -1012,6 +1012,168 @@
     throw readError;
   }
 
+  function compactEbayText(value, maxLength = 1000) {
+    return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, maxLength);
+  }
+
+  function ebayKey(value) {
+    return compactEbayText(value, 240).toLowerCase();
+  }
+
+  function uniqueEbayText(values = [], maxItems = 50) {
+    const seen = new Set();
+    const output = [];
+    values.forEach((value) => {
+      const text = compactEbayText(value, 500);
+      const key = ebayKey(text);
+      if (!text || seen.has(key)) return;
+      seen.add(key);
+      output.push(text);
+    });
+    return output.slice(0, maxItems);
+  }
+
+  function groupEbayRowsBy(rows = [], key) {
+    return rows.reduce((groups, row) => {
+      const value = row?.[key];
+      if (!value) return groups;
+      groups.set(value, [...(groups.get(value) || []), row]);
+      return groups;
+    }, new Map());
+  }
+
+  function mapEbayRowsById(rows = []) {
+    return rows.reduce((map, row) => {
+      if (row?.id) map.set(row.id, row);
+      return map;
+    }, new Map());
+  }
+
+  function ebayMetadataText(link, key) {
+    const metadata = link?.metadata && typeof link.metadata === "object" ? link.metadata : {};
+    return compactEbayText(metadata[key], 500);
+  }
+
+  function pushUniqueEbayValue(target, value, maxItems = 20) {
+    const text = compactEbayText(value, 500);
+    if (!text) return;
+    const exists = target.some((item) => ebayKey(item) === ebayKey(text));
+    if (!exists && target.length < maxItems) target.push(text);
+  }
+
+  function linkedEbayIds(links = [], field) {
+    return uniqueEbayText(links.map((link) => link?.[field]), 500);
+  }
+
+  async function fetchEbayRowsByIds(context, table, select, ids, fallbackCode) {
+    const uniqueIds = uniqueEbayText(ids, 500);
+    if (!uniqueIds.length) return [];
+    const { data, error } = await context.client
+      .from(table)
+      .select(select)
+      .in("id", uniqueIds)
+      .limit(2000);
+    throwSupabaseReadError(error, fallbackCode);
+    return data || [];
+  }
+
+  async function fetchEbayLinkedContextRows(context, links = []) {
+    const directOrderIds = linkedEbayIds(links, "ebay_order_id");
+    const orderLineIds = linkedEbayIds(links, "ebay_order_line_id");
+    const returnCaseIds = linkedEbayIds(links, "ebay_return_case_id");
+
+    const [orderLines, returnCases] = await Promise.all([
+      fetchEbayRowsByIds(
+        context,
+        "ebay_order_lines",
+        "id, order_id, item_number, transaction_id, custom_label, item_title",
+        orderLineIds,
+        "ebay_conversation_order_line_summary_failed",
+      ),
+      fetchEbayRowsByIds(
+        context,
+        "ebay_return_cases",
+        "id, ebay_return_id, order_id, order_number, buyer_username, status",
+        returnCaseIds,
+        "ebay_conversation_return_summary_failed",
+      ),
+    ]);
+
+    const orderIds = uniqueEbayText([
+      ...directOrderIds,
+      ...orderLines.map((line) => line.order_id),
+      ...returnCases.map((returnCase) => returnCase.order_id),
+    ], 500);
+    const orders = await fetchEbayRowsByIds(
+      context,
+      "ebay_orders",
+      "id, order_number, buyer_username, buyer_name, buyer_email, status",
+      orderIds,
+      "ebay_conversation_order_summary_failed",
+    );
+
+    return {
+      ordersById: mapEbayRowsById(orders),
+      orderLinesById: mapEbayRowsById(orderLines),
+      returnsById: mapEbayRowsById(returnCases),
+    };
+  }
+
+  function addEbayBuyerCandidate(summary, username, source, rank, confidence = "derived", extra = {}) {
+    const text = compactEbayText(username, 120);
+    const key = ebayKey(text);
+    if (!text || !key || summary.seller_username_keys.includes(key)) return;
+    summary.buyer_candidates.push({
+      username: text,
+      source,
+      rank,
+      confidence,
+      name: compactEbayText(extra.name, 160),
+      email: compactEbayText(extra.email, 180),
+    });
+  }
+
+  function chooseEbayBuyerIdentity(summary, conversation) {
+    const sorted = [...summary.buyer_candidates].sort((left, right) => right.rank - left.rank);
+    if (sorted.length) {
+      const selected = sorted[0];
+      return {
+        username: selected.username,
+        display_name: selected.username,
+        source: selected.source,
+        confidence: selected.confidence,
+        name: selected.name || "",
+        email: selected.email || "",
+      };
+    }
+    if (conversation?.conversation_type === "FROM_EBAY") {
+      return {
+        username: "eBay",
+        display_name: "eBay",
+        source: "platform",
+        confidence: "platform",
+        name: "",
+        email: "",
+      };
+    }
+    return {
+      username: "",
+      display_name: "Unknown buyer",
+      source: "none",
+      confidence: "none",
+      name: "",
+      email: "",
+    };
+  }
+
+  function appendEbaySearchParts(summary, parts = []) {
+    parts.forEach((part) => {
+      if (part === null || part === undefined || part === "") return;
+      const text = typeof part === "object" ? JSON.stringify(part) : compactEbayText(part, 5000);
+      if (text && text !== "{}" && text !== "[]") summary.search_parts.push(text);
+    });
+  }
+
   function normalizeEbayConversationRow(row = {}, summary = {}) {
     return {
       id: row.id || null,
@@ -1021,12 +1183,20 @@
       conversation_status: row.conversation_status || "",
       conversation_title: row.conversation_title || "",
       other_party_username: row.other_party_username || "",
+      buyer_identity: summary.buyer_identity || {
+        username: row.other_party_username || "",
+        display_name: row.other_party_username || (row.conversation_type === "FROM_EBAY" ? "eBay" : "Unknown buyer"),
+        source: row.other_party_username ? "other_party" : "none",
+        confidence: row.other_party_username ? "api" : "none",
+        name: "",
+        email: "",
+      },
       reference_id: row.reference_id || "",
       reference_type: row.reference_type || "",
       unread_count: Number(row.unread_count || 0),
       latest_message_id: row.latest_message_id || "",
       latest_message_created_at: row.latest_message_created_at || row.last_message_created_at || null,
-      latest_message_preview: row.latest_message_preview || "",
+      latest_message_preview: row.latest_message_preview || summary.latest_message_preview || "",
       first_message_created_at: row.first_message_created_at || null,
       last_message_created_at: row.last_message_created_at || row.latest_message_created_at || null,
       message_count: Number(row.message_count || 0),
@@ -1039,9 +1209,18 @@
     };
   }
 
-  function buildEbayConversationSummaries(conversations = [], links = [], mediaRows = []) {
+  function buildEbayConversationSummaries(conversations = [], links = [], messages = [], sellerAccounts = [], linkedRows = {}) {
     const summaries = new Map();
+    const sellerById = mapEbayRowsById(sellerAccounts);
+    const linksByConversation = groupEbayRowsBy(links, "conversation_id");
+    const messagesByConversation = groupEbayRowsBy(messages, "conversation_id");
+    const ordersById = linkedRows.ordersById || new Map();
+    const orderLinesById = linkedRows.orderLinesById || new Map();
+    const returnsById = linkedRows.returnsById || new Map();
+
     conversations.forEach((conversation) => {
+      const seller = sellerById.get(conversation.seller_account_id) || {};
+      const sellerUsername = compactEbayText(seller.seller_username, 120);
       summaries.set(conversation.id, {
         link_count: 0,
         confirmed_link_count: 0,
@@ -1056,6 +1235,20 @@
         needs_context_review: false,
         warnings: [],
         link_types: [],
+        buyer_candidates: [],
+        buyer_identity: null,
+        seller_username: sellerUsername,
+        seller_username_keys: uniqueEbayText([sellerUsername], 10).map(ebayKey),
+        buyer_usernames: [],
+        participant_usernames: [],
+        order_numbers: [],
+        return_ids: [],
+        item_titles: [],
+        item_numbers: [],
+        listing_ids: [],
+        latest_message_preview: "",
+        search_parts: [],
+        search_text: "",
       });
     });
 
@@ -1074,17 +1267,139 @@
       if (type === "buyer_username") summary.has_buyer_link = true;
     });
 
-    mediaRows.forEach((row) => {
-      const summary = summaries.get(row.conversation_id);
+    conversations.forEach((conversation) => {
+      const summary = summaries.get(conversation.id);
       if (!summary) return;
-      summary.has_media = true;
-      summary.media_count += Number(row.media_count || 1);
+      const conversationLinks = linksByConversation.get(conversation.id) || [];
+      const conversationMessages = messagesByConversation.get(conversation.id) || [];
+      const otherParty = compactEbayText(conversation.other_party_username, 120);
+      const otherPartyKey = ebayKey(otherParty);
+
+      appendEbaySearchParts(summary, [
+        conversation.ebay_conversation_id,
+        conversation.conversation_type,
+        conversation.conversation_status,
+        conversation.conversation_title,
+        conversation.other_party_username,
+        conversation.reference_id,
+        conversation.reference_type,
+        conversation.latest_message_preview,
+        summary.seller_username,
+      ]);
+
+      if (otherParty && !summary.seller_username_keys.includes(otherPartyKey)) {
+        addEbayBuyerCandidate(summary, otherParty, "other_party", 60, "api");
+      }
+      pushUniqueEbayValue(summary.listing_ids, conversation.reference_id);
+
+      conversationLinks.forEach((link) => {
+        const order = ordersById.get(link.ebay_order_id);
+        const line = orderLinesById.get(link.ebay_order_line_id);
+        const lineOrder = line?.order_id ? ordersById.get(line.order_id) : null;
+        const returnCase = returnsById.get(link.ebay_return_case_id);
+        const metadata = link.metadata && typeof link.metadata === "object" ? link.metadata : {};
+
+        addEbayBuyerCandidate(summary, link.buyer_username, "conversation_link", 80, link.status || "linked");
+        addEbayBuyerCandidate(summary, order?.buyer_username, "order", 100, "linked", {
+          name: order?.buyer_name,
+          email: order?.buyer_email,
+        });
+        addEbayBuyerCandidate(summary, lineOrder?.buyer_username, "order_line", 95, "linked", {
+          name: lineOrder?.buyer_name,
+          email: lineOrder?.buyer_email,
+        });
+        addEbayBuyerCandidate(summary, returnCase?.buyer_username, "return_case", 90, "linked");
+
+        pushUniqueEbayValue(summary.order_numbers, order?.order_number);
+        pushUniqueEbayValue(summary.order_numbers, lineOrder?.order_number);
+        pushUniqueEbayValue(summary.order_numbers, returnCase?.order_number);
+        pushUniqueEbayValue(summary.order_numbers, ebayMetadataText(link, "order_number"));
+        pushUniqueEbayValue(summary.return_ids, returnCase?.ebay_return_id);
+        pushUniqueEbayValue(summary.return_ids, ebayMetadataText(link, "ebay_return_id"));
+        pushUniqueEbayValue(summary.item_titles, line?.item_title);
+        pushUniqueEbayValue(summary.item_numbers, line?.item_number);
+        pushUniqueEbayValue(summary.item_numbers, ebayMetadataText(link, "item_number"));
+        pushUniqueEbayValue(summary.listing_ids, link.reference_id);
+        pushUniqueEbayValue(summary.listing_ids, ebayMetadataText(link, "listing_id"));
+        pushUniqueEbayValue(summary.listing_ids, ebayMetadataText(link, "item_number"));
+
+        appendEbaySearchParts(summary, [
+          link.link_type,
+          link.link_key,
+          link.reference_id,
+          link.reference_type,
+          link.buyer_username,
+          link.matched_value,
+          metadata,
+          order,
+          line,
+          lineOrder,
+          returnCase,
+        ]);
+      });
+
+      conversationMessages.forEach((message) => {
+        const sender = compactEbayText(message.sender_username, 120);
+        const recipient = compactEbayText(message.recipient_username, 120);
+        const direction = String(message.direction || "").toLowerCase();
+        const bodyPreview = compactEbayText(message.message_body_preview || message.message_body, 500);
+        if (!summary.latest_message_preview && bodyPreview) summary.latest_message_preview = bodyPreview;
+
+        [sender, recipient].forEach((username) => {
+          const key = ebayKey(username);
+          if (username && !summary.seller_username_keys.includes(key)) pushUniqueEbayValue(summary.participant_usernames, username);
+        });
+
+        if (direction === "inbound") addEbayBuyerCandidate(summary, sender, "message_inbound_sender", 40, "inferred");
+        if (direction === "outbound") addEbayBuyerCandidate(summary, recipient, "message_outbound_recipient", 40, "inferred");
+
+        if (message.has_media) {
+          summary.has_media = true;
+          summary.media_count += Number(message.media_count || 1);
+        }
+
+        appendEbaySearchParts(summary, [
+          message.ebay_message_id,
+          message.sender_username,
+          message.recipient_username,
+          message.subject,
+          message.message_body_preview,
+          message.message_body,
+        ]);
+      });
+
+      if (!summary.buyer_candidates.length && summary.seller_username_keys.length && summary.participant_usernames.length === 1) {
+        addEbayBuyerCandidate(summary, summary.participant_usernames[0], "message_participant", 30, "inferred");
+      }
+
+      summary.buyer_identity = chooseEbayBuyerIdentity(summary, conversation);
+      pushUniqueEbayValue(summary.buyer_usernames, summary.buyer_identity.username);
+      summary.buyer_candidates.forEach((candidate) => pushUniqueEbayValue(summary.buyer_usernames, candidate.username));
+      appendEbaySearchParts(summary, [
+        summary.buyer_identity.username,
+        summary.buyer_identity.name,
+        summary.buyer_identity.email,
+        summary.buyer_usernames,
+        summary.participant_usernames,
+        summary.order_numbers,
+        summary.return_ids,
+        summary.item_titles,
+        summary.item_numbers,
+        summary.listing_ids,
+      ]);
     });
 
     summaries.forEach((summary) => {
       summary.needs_context_review = summary.link_count === 0 || summary.suggested_link_count > 0;
       if (summary.link_count === 0) summary.warnings.push("No active context links");
       if (summary.suggested_link_count > 0) summary.warnings.push("Suggested links need review");
+      summary.search_text = summary.search_parts
+        .map((part) => typeof part === "string" ? part : JSON.stringify(part || {}))
+        .join("\n")
+        .toLowerCase();
+      delete summary.search_parts;
+      delete summary.buyer_candidates;
+      delete summary.seller_username_keys;
     });
 
     return summaries;
@@ -1102,25 +1417,40 @@
     throwSupabaseReadError(error, "ebay_conversation_list_failed");
 
     const ids = (conversations || []).map((conversation) => conversation.id).filter(Boolean);
-    const [linksResult, mediaResult] = ids.length ? await Promise.all([
+    const sellerAccountIds = uniqueEbayText((conversations || []).map((conversation) => conversation.seller_account_id), 500);
+    const [linksResult, messagesResult, sellersResult] = ids.length ? await Promise.all([
       context.client
         .from("ebay_conversation_links")
-        .select("conversation_id, link_type, status, confidence")
+        .select("conversation_id, link_type, link_key, status, confidence, ebay_order_id, ebay_order_line_id, ebay_return_case_id, reference_id, reference_type, buyer_username, matched_value, metadata")
         .in("conversation_id", ids)
         .in("status", ["confirmed", "suggested"])
         .limit(2000),
       context.client
         .from("ebay_conversation_messages")
-        .select("conversation_id, media_count")
+        .select("conversation_id, ebay_message_id, sender_username, recipient_username, direction, subject, message_body, message_body_preview, has_media, media_count, created_at_ebay, created_at")
         .in("conversation_id", ids)
-        .eq("has_media", true)
-        .limit(2000),
-    ]) : [{ data: [], error: null }, { data: [], error: null }];
+        .order("created_at_ebay", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false })
+        .limit(Math.min(limit * 200, 5000)),
+      sellerAccountIds.length ? context.client
+        .from("ebay_seller_accounts")
+        .select("id, seller_username")
+        .in("id", sellerAccountIds)
+        .limit(500) : Promise.resolve({ data: [], error: null }),
+    ]) : [{ data: [], error: null }, { data: [], error: null }, { data: [], error: null }];
 
     throwSupabaseReadError(linksResult.error, "ebay_conversation_link_summary_failed");
-    throwSupabaseReadError(mediaResult.error, "ebay_conversation_media_summary_failed");
+    throwSupabaseReadError(messagesResult.error, "ebay_conversation_message_summary_failed");
+    throwSupabaseReadError(sellersResult.error, "ebay_conversation_seller_summary_failed");
 
-    const summaries = buildEbayConversationSummaries(conversations || [], linksResult.data || [], mediaResult.data || []);
+    const linkedRows = await fetchEbayLinkedContextRows(context, linksResult.data || []);
+    const summaries = buildEbayConversationSummaries(
+      conversations || [],
+      linksResult.data || [],
+      messagesResult.data || [],
+      sellersResult.data || [],
+      linkedRows,
+    );
     return {
       ok: true,
       conversations: (conversations || []).map((conversation) => normalizeEbayConversationRow(conversation, summaries.get(conversation.id) || {})),

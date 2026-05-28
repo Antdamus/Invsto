@@ -66,6 +66,7 @@
       ebayConversationError: null,
       ebayConversations: [],
       ebayConversationFilter: "all",
+      ebayConversationSearchQuery: "",
       selectedEbayConversationId: null,
       ebayConversationLastLoadedAt: null,
       ebayConversationMessagesById: {},
