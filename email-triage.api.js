@@ -8,6 +8,8 @@
   const CLASSIFY_FUNCTION = "microsoft-email-classify";
   const SYNC_FUNCTION = "microsoft-email-sync";
   const PROCESS_FUNCTION = "microsoft-email-process";
+  const EBAY_CONVERSATION_CONTEXT_FUNCTION = "ebay-conversation-context";
+  const EBAY_MESSAGE_SYNC_FUNCTION = "ebay-message-sync";
 
   const DEFAULT_LIMITS = {
     classificationLimit: 25,
@@ -28,6 +30,10 @@
     mailboxPrepare: 60000,
     rematchExisting: 60000,
     operationalDashboard: 30000,
+    ebayConversations: 15000,
+    ebayConversationMessages: 15000,
+    ebayConversationContext: 30000,
+    ebayMessageSync: 90000,
   };
 
   function waitForSupabaseReady(timeoutMs = 8000) {
@@ -998,6 +1004,184 @@
     return normalizeRematchExistingPayload(payload);
   }
 
+  function throwSupabaseReadError(error, fallbackCode) {
+    if (!error) return;
+    const readError = new Error(error.code || error.message || fallbackCode);
+    readError.code = error.code || fallbackCode;
+    readError.detail = error.message || "";
+    throw readError;
+  }
+
+  function normalizeEbayConversationRow(row = {}, summary = {}) {
+    return {
+      id: row.id || null,
+      seller_account_id: row.seller_account_id || null,
+      ebay_conversation_id: row.ebay_conversation_id || "",
+      conversation_type: row.conversation_type || "",
+      conversation_status: row.conversation_status || "",
+      conversation_title: row.conversation_title || "",
+      other_party_username: row.other_party_username || "",
+      reference_id: row.reference_id || "",
+      reference_type: row.reference_type || "",
+      unread_count: Number(row.unread_count || 0),
+      latest_message_id: row.latest_message_id || "",
+      latest_message_created_at: row.latest_message_created_at || row.last_message_created_at || null,
+      latest_message_preview: row.latest_message_preview || "",
+      first_message_created_at: row.first_message_created_at || null,
+      last_message_created_at: row.last_message_created_at || row.latest_message_created_at || null,
+      message_count: Number(row.message_count || 0),
+      last_synced_at: row.last_synced_at || null,
+      last_detail_synced_at: row.last_detail_synced_at || null,
+      updated_at: row.updated_at || null,
+      created_at: row.created_at || null,
+      summary,
+      raw: row,
+    };
+  }
+
+  function buildEbayConversationSummaries(conversations = [], links = [], mediaRows = []) {
+    const summaries = new Map();
+    conversations.forEach((conversation) => {
+      summaries.set(conversation.id, {
+        link_count: 0,
+        confirmed_link_count: 0,
+        suggested_link_count: 0,
+        has_order_link: false,
+        has_return_link: false,
+        has_inventory_link: false,
+        has_listing_reference: false,
+        has_buyer_link: false,
+        has_media: false,
+        media_count: 0,
+        needs_context_review: false,
+        warnings: [],
+        link_types: [],
+      });
+    });
+
+    links.forEach((link) => {
+      const summary = summaries.get(link.conversation_id);
+      if (!summary) return;
+      const type = String(link.link_type || "");
+      summary.link_count += 1;
+      if (link.status === "confirmed") summary.confirmed_link_count += 1;
+      if (link.status === "suggested") summary.suggested_link_count += 1;
+      if (!summary.link_types.includes(type)) summary.link_types.push(type);
+      if (type === "ebay_order" || type === "ebay_order_line") summary.has_order_link = true;
+      if (type === "ebay_return_case") summary.has_return_link = true;
+      if (type === "inventory_listing") summary.has_inventory_link = true;
+      if (type === "listing_reference") summary.has_listing_reference = true;
+      if (type === "buyer_username") summary.has_buyer_link = true;
+    });
+
+    mediaRows.forEach((row) => {
+      const summary = summaries.get(row.conversation_id);
+      if (!summary) return;
+      summary.has_media = true;
+      summary.media_count += Number(row.media_count || 1);
+    });
+
+    summaries.forEach((summary) => {
+      summary.needs_context_review = summary.link_count === 0 || summary.suggested_link_count > 0;
+      if (summary.link_count === 0) summary.warnings.push("No active context links");
+      if (summary.suggested_link_count > 0) summary.warnings.push("Suggested links need review");
+    });
+
+    return summaries;
+  }
+
+  async function fetchEbayConversations(context, values = {}) {
+    await currentSession(context, "eBay conversations");
+    const limit = Math.min(Math.max(Number(values.limit || 100), 1), 250);
+    const { data: conversations, error } = await context.client
+      .from("ebay_conversations")
+      .select("id, seller_account_id, ebay_conversation_id, conversation_type, conversation_status, conversation_title, other_party_username, reference_id, reference_type, unread_count, latest_message_id, latest_message_created_at, latest_message_preview, first_message_created_at, last_message_created_at, message_count, last_synced_at, last_detail_synced_at, updated_at, created_at")
+      .order("latest_message_created_at", { ascending: false, nullsFirst: false })
+      .order("updated_at", { ascending: false })
+      .limit(limit);
+    throwSupabaseReadError(error, "ebay_conversation_list_failed");
+
+    const ids = (conversations || []).map((conversation) => conversation.id).filter(Boolean);
+    const [linksResult, mediaResult] = ids.length ? await Promise.all([
+      context.client
+        .from("ebay_conversation_links")
+        .select("conversation_id, link_type, status, confidence")
+        .in("conversation_id", ids)
+        .in("status", ["confirmed", "suggested"])
+        .limit(2000),
+      context.client
+        .from("ebay_conversation_messages")
+        .select("conversation_id, media_count")
+        .in("conversation_id", ids)
+        .eq("has_media", true)
+        .limit(2000),
+    ]) : [{ data: [], error: null }, { data: [], error: null }];
+
+    throwSupabaseReadError(linksResult.error, "ebay_conversation_link_summary_failed");
+    throwSupabaseReadError(mediaResult.error, "ebay_conversation_media_summary_failed");
+
+    const summaries = buildEbayConversationSummaries(conversations || [], linksResult.data || [], mediaResult.data || []);
+    return {
+      ok: true,
+      conversations: (conversations || []).map((conversation) => normalizeEbayConversationRow(conversation, summaries.get(conversation.id) || {})),
+      loaded_at: new Date().toISOString(),
+    };
+  }
+
+  async function fetchEbayConversationMessages(context, conversationId) {
+    await currentSession(context, "eBay conversation messages");
+    if (!conversationId) {
+      const error = new Error("conversation_id_required");
+      error.code = "conversation_id_required";
+      throw error;
+    }
+
+    const { data, error } = await context.client
+      .from("ebay_conversation_messages")
+      .select("id, conversation_id, ebay_message_id, sender_username, recipient_username, direction, direction_confidence, subject, message_body, message_body_preview, read_status, is_read, message_status, created_at_ebay, has_media, media_count, message_media, created_at")
+      .eq("conversation_id", conversationId)
+      .order("created_at_ebay", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true })
+      .limit(200);
+    throwSupabaseReadError(error, "ebay_conversation_messages_failed");
+
+    return {
+      ok: true,
+      conversation_id: conversationId,
+      messages: data || [],
+      loaded_at: new Date().toISOString(),
+    };
+  }
+
+  async function fetchEbayConversationContext(context, conversationId) {
+    const session = await currentSession(context, "eBay conversation context");
+    return edgeFetchWithTimeout(EBAY_CONVERSATION_CONTEXT_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: "context",
+        conversationId,
+      }),
+    }, TIMEOUTS.ebayConversationContext);
+  }
+
+  async function runEbayMessageSync(context, values = {}) {
+    const session = await currentSession(context, "eBay message sync");
+    const payload = await edgeFetchWithTimeout(EBAY_MESSAGE_SYNC_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: "sync",
+        runType: "manual",
+        conversationTypes: values.conversationTypes || ["FROM_MEMBERS", "FROM_EBAY"],
+        conversationPageLimit: Number(values.conversationPageLimit || 25),
+        messagePageLimit: Number(values.messagePageLimit || 25),
+        maxConversationPages: Number(values.maxConversationPages || 1),
+        maxDetailPagesPerConversation: Number(values.maxDetailPagesPerConversation || 20),
+        readOnly: true,
+      }),
+    }, TIMEOUTS.ebayMessageSync);
+    return payload;
+  }
+
   async function fetchOperationalDashboard(context) {
     const session = await currentSession(context, "Operational dashboard");
     const [mailboxResult, pipelineResult, liveSyncResult] = await Promise.allSettled([
@@ -1027,6 +1211,8 @@
       CLASSIFY_FUNCTION,
       SYNC_FUNCTION,
       PROCESS_FUNCTION,
+      EBAY_CONVERSATION_CONTEXT_FUNCTION,
+      EBAY_MESSAGE_SYNC_FUNCTION,
     },
     DEFAULT_LIMITS,
     TIMEOUTS,
@@ -1057,6 +1243,10 @@
     normalizeLiveRefreshPayload,
     normalizeRematchExistingPayload,
     normalizeOperationalDashboardPayload,
+    fetchEbayConversations,
+    fetchEbayConversationMessages,
+    fetchEbayConversationContext,
+    runEbayMessageSync,
     fetchInboxPreview,
     importApprovedInboxPreview,
     runMailboxImport,

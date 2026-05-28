@@ -1109,7 +1109,7 @@ export async function buildEbayConversationContext(
         .maybeSingle(),
     ]);
     if (insightsResult.error) warnings.push(warning("buyer_history_rpc_failed", "Stored buyer insights RPC failed; returning partial context.", "warning"));
-    if (valueLineResult.error) warnings.push(warning("buyer_history_rpc_failed", "Stored buyer value line RPC failed; returning partial context.", "warning"));
+    if (valueLineResult.error) warnings.push(warning("buyer_value_line_rpc_failed", "Stored buyer value line RPC failed; returning partial context.", "warning"));
     if (buyerSyncResult.error || accountRunResult.error) warnings.push(warning("buyer_history_coverage_partial", "Buyer history sync coverage metadata could not be loaded.", "warning"));
     buyerHistorySummary = compactBuyerHistorySummary({
       insights: insightsResult.error ? null : insightsResult.data as Record<string, any> | null,

@@ -65,6 +65,18 @@ function serviceClient() {
   });
 }
 
+function authenticatedClient(accessToken: string) {
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim() || requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
+  return createClient(requiredEnv("SUPABASE_URL"), anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  });
+}
+
 function stringOrNull(value: unknown) {
   const text = String(value || "").trim();
   return text || null;
@@ -124,7 +136,8 @@ serve(async (req) => {
 
   const supabase = serviceClient();
   try {
-    await requireAdmin(req, supabase);
+    const accessToken = getBearerToken(req);
+    const operator = await requireAdmin(req, supabase);
     const input = await parseInput(req);
     const conversation = await resolveEbayConversation(supabase, {
       conversationId: input.conversationId,
@@ -137,7 +150,11 @@ serve(async (req) => {
       : await linkEbayConversationContext(supabase, conversation.id);
     const context = input.mode === "link_conversation"
       ? null
-      : await buildEbayConversationContext(supabase, conversation.id, supabase);
+      : await buildEbayConversationContext(
+        supabase,
+        conversation.id,
+        operator.actorType === "admin" ? authenticatedClient(accessToken) : supabase,
+      );
 
     return json(req, 200, {
       ok: true,

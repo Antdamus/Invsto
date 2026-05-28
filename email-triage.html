@@ -95,6 +95,55 @@
           </div>
         </section>
 
+        <section class="ebay-conversation-section" aria-label="eBay Conversations">
+          <div class="ebay-conversation-head">
+            <div>
+              <span class="eyebrow">Canonical Inbox</span>
+              <h2>eBay Conversations</h2>
+              <div class="section-sub">Commerce Message API conversations stored in Supabase.</div>
+            </div>
+            <div class="ebay-conversation-actions">
+              <button type="button" id="ebay-conversation-refresh" class="secondary-btn">
+                <i data-lucide="refresh-cw"></i>
+                Refresh
+              </button>
+              <button type="button" id="ebay-conversation-sync" class="primary-btn">
+                <i data-lucide="cloud-download"></i>
+                Sync latest eBay conversations
+              </button>
+            </div>
+          </div>
+
+          <div class="ebay-conversation-control-row">
+            <div id="ebay-conversation-status" class="workspace-status">Waiting for admin session.</div>
+            <div class="ebay-conversation-filter-tabs" aria-label="eBay conversation filters">
+              <button type="button" data-ebay-conversation-filter="all" class="is-active">All</button>
+              <button type="button" data-ebay-conversation-filter="unread">Unread</button>
+              <button type="button" data-ebay-conversation-filter="has_order">Has order</button>
+              <button type="button" data-ebay-conversation-filter="has_return">Has return</button>
+              <button type="button" data-ebay-conversation-filter="has_media">Has media</button>
+              <button type="button" data-ebay-conversation-filter="needs_context_review">Needs review</button>
+            </div>
+          </div>
+
+          <div id="ebay-conversation-sync-result" class="ebay-conversation-sync-result" aria-live="polite"></div>
+
+          <div class="ebay-conversation-shell">
+            <aside class="ebay-conversation-list-panel" aria-label="Canonical eBay conversations">
+              <div id="ebay-conversation-summary" class="ebay-conversation-summary"></div>
+              <div id="ebay-conversation-list" class="ebay-conversation-list"></div>
+            </aside>
+
+            <section class="ebay-conversation-detail-panel" aria-label="Selected eBay conversation">
+              <div id="ebay-conversation-detail" class="ebay-conversation-detail"></div>
+            </section>
+
+            <aside class="ebay-conversation-context-panel" aria-label="Selected eBay context">
+              <div id="ebay-conversation-context" class="ebay-conversation-context"></div>
+            </aside>
+          </div>
+        </section>
+
         <section id="admin-diagnostics-drawer" class="admin-diagnostics-drawer hidden" aria-label="Admin diagnostics">
           <div class="admin-diagnostics-actions">
             <button type="button" id="connect-outlook" class="primary-btn">
