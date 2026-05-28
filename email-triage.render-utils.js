@@ -5,9 +5,14 @@
   const DENSITY_STORAGE_KEY = "og-email-triage-density";
   const EBAY_CONVERSATION_DENSITY_STORAGE_KEY = "og-ebay-conversation-density";
   const PANEL_WIDTHS_STORAGE_KEY = "og-email-triage-panel-widths";
+  const EBAY_CONVERSATION_PANEL_WIDTHS_STORAGE_KEY = "og-ebay-conversation-panel-widths";
   const PANEL_WIDTH_LIMITS = {
     category: { min: 150, max: 340, fallback: 220 },
     detail: { min: 300, max: 680, fallback: 420 },
+  };
+  const EBAY_CONVERSATION_PANEL_WIDTH_LIMITS = {
+    list: { min: 260, max: 520, fallback: 340 },
+    context: { min: 280, max: 560, fallback: 420 },
   };
 
   function getStoredDensityMode() {
@@ -77,6 +82,37 @@
     const detailWidth = clampNumber(widths.detail, PANEL_WIDTH_LIMITS.detail.min, PANEL_WIDTH_LIMITS.detail.max);
     shell.style.setProperty("--category-panel-width", `${categoryWidth}px`);
     shell.style.setProperty("--detail-panel-width", `${detailWidth}px`);
+  }
+
+  function getStoredEbayConversationPanelWidths() {
+    try {
+      const parsed = JSON.parse(window.localStorage?.getItem(EBAY_CONVERSATION_PANEL_WIDTHS_STORAGE_KEY) || "{}");
+      return {
+        list: clampNumber(parsed.list, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.list.min, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.list.max) || EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.list.fallback,
+        context: clampNumber(parsed.context, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.context.min, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.context.max) || EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.context.fallback,
+      };
+    } catch (error) {
+      return {
+        list: EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.list.fallback,
+        context: EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.context.fallback,
+      };
+    }
+  }
+
+  function storeEbayConversationPanelWidths(widths) {
+    try {
+      window.localStorage?.setItem(EBAY_CONVERSATION_PANEL_WIDTHS_STORAGE_KEY, JSON.stringify(widths));
+    } catch (error) {
+      // Panel resizing still works for the current session if storage is unavailable.
+    }
+  }
+
+  function applyEbayConversationPanelWidths(shell, widths = getStoredEbayConversationPanelWidths()) {
+    if (!shell) return;
+    const listWidth = clampNumber(widths.list, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.list.min, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.list.max);
+    const contextWidth = clampNumber(widths.context, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.context.min, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.context.max);
+    shell.style.setProperty("--ebay-list-panel-width", `${listWidth}px`);
+    shell.style.setProperty("--ebay-context-panel-width", `${contextWidth}px`);
   }
 
   function escapeHtml(value) {
@@ -502,7 +538,9 @@
     DENSITY_STORAGE_KEY,
     EBAY_CONVERSATION_DENSITY_STORAGE_KEY,
     PANEL_WIDTHS_STORAGE_KEY,
+    EBAY_CONVERSATION_PANEL_WIDTHS_STORAGE_KEY,
     PANEL_WIDTH_LIMITS,
+    EBAY_CONVERSATION_PANEL_WIDTH_LIMITS,
     getStoredDensityMode,
     storeDensityMode,
     getStoredEbayConversationDensityMode,
@@ -511,6 +549,9 @@
     getStoredPanelWidths,
     storePanelWidths,
     applyPanelWidths,
+    getStoredEbayConversationPanelWidths,
+    storeEbayConversationPanelWidths,
+    applyEbayConversationPanelWidths,
     escapeHtml,
     formatDateTime,
     formatEmailAge,

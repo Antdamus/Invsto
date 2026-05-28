@@ -3031,6 +3031,8 @@
 .ebay-conversation-head,
 .ebay-conversation-control-row,
 .ebay-conversation-actions,
+.ebay-conversation-filter-strip,
+.ebay-conversation-active-filters,
 .ebay-conversation-sidebar-nav,
 .ebay-conversation-row-top,
 .ebay-conversation-row-meta,
@@ -3069,6 +3071,7 @@
 
 .ebay-conversation-actions .primary-btn,
 .ebay-conversation-actions .secondary-btn,
+.ebay-conversation-filter-strip .secondary-btn,
 .ebay-detail-head .secondary-btn,
 .ebay-context-head .secondary-btn {
   min-height: 34px;
@@ -3138,6 +3141,149 @@
 .ebay-conversation-search button:disabled {
   opacity: .38;
   cursor: default;
+}
+
+.ebay-conversation-filter-strip {
+  align-items: center;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: rgba(255,255,255,.028);
+  padding: 7px;
+}
+
+.ebay-conversation-filter-strip .secondary-btn.is-active {
+  border-color: rgba(114,184,255,.3);
+  background: rgba(114,184,255,.1);
+  color: #d7eaff;
+}
+
+.ebay-conversation-active-filters {
+  flex: 1 1 260px;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ebay-conversation-active-filters > span {
+  color: rgba(242,243,245,.5);
+  font-size: .72rem;
+  font-weight: 820;
+}
+
+.ebay-conversation-active-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-height: 26px;
+  min-width: 0;
+  border: 1px solid rgba(114,184,255,.2);
+  border-radius: 999px;
+  background: rgba(114,184,255,.08);
+  color: rgba(242,243,245,.84);
+  cursor: pointer;
+  font-size: .68rem;
+  font-weight: 850;
+  padding: 0 8px;
+}
+
+.ebay-conversation-active-filters button span {
+  color: rgba(242,243,245,.48);
+  text-transform: uppercase;
+}
+
+.ebay-conversation-active-filters button svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+.ebay-conversation-active-filters button:hover,
+.ebay-conversation-active-filters button:focus-visible {
+  border-color: rgba(214,178,94,.34);
+  background: rgba(214,178,94,.1);
+  outline: none;
+}
+
+.ebay-conversation-filter-panel {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: rgba(255,255,255,.026);
+  padding: 8px;
+}
+
+.ebay-conversation-filter-panel[hidden] {
+  display: none;
+}
+
+.ebay-filter-group {
+  min-width: 0;
+}
+
+.ebay-filter-group h4 {
+  margin: 0 0 6px;
+  color: rgba(242,243,245,.62);
+  font-size: .68rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.ebay-filter-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.ebay-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 999px;
+  background: rgba(255,255,255,.035);
+  color: rgba(242,243,245,.72);
+  cursor: pointer;
+  font-size: .68rem;
+  font-weight: 850;
+  margin: 0;
+  padding: 0 7px;
+  transition: border-color .18s var(--ease), background .18s var(--ease), color .18s var(--ease);
+}
+
+.ebay-filter-chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ebay-filter-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ebay-filter-chip em {
+  color: rgba(242,243,245,.46);
+  font-size: .64rem;
+  font-style: normal;
+}
+
+.ebay-filter-chip.is-empty {
+  opacity: .62;
+}
+
+.ebay-filter-chip.is-active,
+.ebay-filter-chip:hover,
+.ebay-filter-chip:focus-within {
+  border-color: rgba(114,184,255,.3);
+  background: rgba(114,184,255,.12);
+  color: #d7eaff;
 }
 
 .ebay-conversation-density-control {
@@ -3235,10 +3381,23 @@
 }
 
 .ebay-conversation-sidebar-nav button span {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ebay-conversation-sidebar-nav button b {
+  flex: 0 0 auto;
+  min-width: 18px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.08);
+  color: rgba(242,243,245,.62);
+  font-size: .62rem;
+  font-weight: 900;
+  line-height: 18px;
+  text-align: center;
 }
 
 .ebay-conversation-sidebar-nav button.is-active,
@@ -3246,6 +3405,13 @@
 .ebay-conversation-sidebar-nav button:focus-visible {
   border-color: rgba(114,184,255,.28);
   background: rgba(114,184,255,.11);
+  color: #d7eaff;
+}
+
+.ebay-conversation-sidebar-nav button.is-active b,
+.ebay-conversation-sidebar-nav button:hover b,
+.ebay-conversation-sidebar-nav button:focus-visible b {
+  background: rgba(114,184,255,.2);
   color: #d7eaff;
 }
 
@@ -3259,8 +3425,10 @@
 }
 
 .ebay-conversation-shell {
+  --ebay-list-panel-width: 340px;
+  --ebay-context-panel-width: 420px;
   display: grid;
-  grid-template-columns: minmax(280px, 340px) minmax(360px, 1fr) minmax(300px, 420px);
+  grid-template-columns: minmax(260px, var(--ebay-list-panel-width)) 7px minmax(360px, 1fr) 7px minmax(280px, var(--ebay-context-panel-width));
   min-height: 680px;
   overflow: hidden;
   border: 1px solid rgba(255,255,255,.08);
@@ -3277,6 +3445,54 @@
 .ebay-conversation-list-panel,
 .ebay-conversation-detail-panel {
   border-right: 1px solid rgba(255,255,255,.08);
+}
+
+.ebay-panel-resize-handle {
+  position: relative;
+  width: 7px;
+  min-width: 7px;
+  border: 0;
+  border-right: 1px solid rgba(255,255,255,.06);
+  border-left: 1px solid rgba(255,255,255,.04);
+  background: rgba(255,255,255,.018);
+  cursor: col-resize;
+  padding: 0;
+  transition: background .18s var(--ease), border-color .18s var(--ease);
+}
+
+.ebay-panel-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 36px;
+  border-radius: 999px;
+  background: rgba(242,243,245,.16);
+  transform: translate(-50%, -50%);
+}
+
+.ebay-panel-resize-handle:hover,
+.ebay-panel-resize-handle:focus-visible,
+.ebay-conversation-shell.is-resizing .ebay-panel-resize-handle {
+  background: rgba(114,184,255,.08);
+  border-color: rgba(114,184,255,.18);
+}
+
+.ebay-panel-resize-handle:hover::after,
+.ebay-panel-resize-handle:focus-visible::after,
+.ebay-conversation-shell.is-resizing .ebay-panel-resize-handle::after {
+  background: rgba(114,184,255,.55);
+}
+
+.ebay-panel-resize-handle:focus-visible {
+  outline: 2px solid rgba(114,184,255,.58);
+  outline-offset: -2px;
+}
+
+.is-resizing-ebay-panels {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .ebay-conversation-summary {
@@ -3352,13 +3568,8 @@
 }
 
 .ebay-conversation-row.is-compact {
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-  grid-template-areas:
-    "avatar top time"
-    "avatar title time"
-    "avatar preview badges";
-  column-gap: 8px;
-  row-gap: 2px;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 3px;
   min-height: 66px;
   padding: 7px 8px;
 }
@@ -3387,7 +3598,10 @@
 }
 
 .ebay-conversation-row.is-compact .ebay-conversation-row-top {
-  display: contents;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .ebay-conversation-party {
@@ -3396,7 +3610,8 @@
 }
 
 .ebay-conversation-row.is-compact .ebay-conversation-party {
-  display: contents;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .ebay-conversation-avatar {
@@ -3414,8 +3629,6 @@
 }
 
 .ebay-conversation-row.is-compact .ebay-conversation-avatar {
-  grid-area: avatar;
-  align-self: start;
   flex-basis: 28px;
   width: 28px;
   height: 28px;
@@ -3429,7 +3642,7 @@
 }
 
 .ebay-conversation-row.is-compact .ebay-conversation-party-copy {
-  grid-area: top;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -3466,26 +3679,26 @@
 }
 
 .ebay-conversation-row.is-compact .ebay-conversation-row-top time {
-  grid-area: time;
-  align-self: start;
+  flex: 0 0 auto;
   white-space: nowrap;
 }
 
 .ebay-conversation-row-title,
-.ebay-conversation-row-preview {
+.ebay-conversation-row-preview,
+.ebay-conversation-row-snippet {
   display: block;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .ebay-conversation-row.is-compact .ebay-conversation-row-title {
-  grid-area: title;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ebay-conversation-row-preview {
+.ebay-conversation-row-preview,
+.ebay-conversation-row-snippet {
   color: rgba(242,243,245,.72);
   line-height: 1.35;
   display: -webkit-box;
@@ -3494,8 +3707,14 @@
   overflow: hidden;
 }
 
+.ebay-conversation-row-snippet {
+  color: rgba(242,243,245,.5);
+  font-size: .7rem;
+  font-weight: 760;
+  -webkit-line-clamp: 1;
+}
+
 .ebay-conversation-row.is-compact .ebay-conversation-row-preview {
-  grid-area: preview;
   min-width: 0;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -3515,10 +3734,13 @@
 }
 
 .ebay-conversation-row.is-compact .ebay-conversation-badges {
-  grid-area: badges;
-  justify-content: flex-end;
+  justify-content: flex-start;
   align-self: center;
+  flex-wrap: nowrap;
   gap: 3px;
+  max-height: 20px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .ebay-conversation-row.is-compact .classification-badge {
@@ -3901,6 +4123,7 @@
   .ebay-conversation-head,
   .ebay-conversation-control-row,
   .ebay-conversation-actions,
+  .ebay-conversation-filter-strip,
   .ebay-detail-head,
   .ebay-context-head {
     align-items: stretch;
@@ -3909,6 +4132,7 @@
 
   .ebay-conversation-actions .primary-btn,
   .ebay-conversation-actions .secondary-btn,
+  .ebay-conversation-filter-strip .secondary-btn,
   .ebay-detail-head .secondary-btn,
   .ebay-context-head .secondary-btn {
     width: 100%;
@@ -3940,9 +4164,27 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .ebay-conversation-filter-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .ebay-conversation-active-filters {
+    align-items: stretch;
+    flex: 1 1 auto;
+  }
+
+  .ebay-conversation-active-filters button {
+    justify-content: space-between;
+    width: 100%;
+  }
+
   .ebay-conversation-shell {
     grid-template-columns: 1fr;
     min-height: 0;
+  }
+
+  .ebay-panel-resize-handle {
+    display: none;
   }
 
   .ebay-conversation-list-panel,
@@ -4092,8 +4334,16 @@
 }
 
 @media (min-width: 761px) and (max-width: 1180px) {
+  .ebay-conversation-filter-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .ebay-conversation-shell {
     grid-template-columns: minmax(260px, 330px) minmax(360px, 1fr);
+  }
+
+  .ebay-panel-resize-handle {
+    display: none;
   }
 
   .ebay-conversation-context-panel {
