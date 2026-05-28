@@ -23,11 +23,65 @@ export function initOverview(deps) {
   // ---------- state ----------
   let currentRows = [];
   let sortState = { key: "display_name", dir: "asc" };
+  let overviewFocus = "all";
   let pendingReviewCounts = new Map();
   let exceptionCounts = new Map();
   let isLoading = false;
 
   // ---------- helpers ----------
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function getInitials(name = "") {
+    const parts = String(name || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    return (parts[0]?.[0] || "W") + (parts[1]?.[0] || "");
+  }
+
+  function getPendingCount(row = {}) {
+    return pendingReviewCounts.get(row.employee_id) || 0;
+  }
+
+  function getExceptionCount(row = {}) {
+    return exceptionCounts.get(row.employee_id) || 0;
+  }
+
+  function applyOverviewFocus(rows = []) {
+    if (overviewFocus === "review") return rows.filter((row) => getPendingCount(row) > 0);
+    if (overviewFocus === "exceptions") return rows.filter((row) => getExceptionCount(row) > 0);
+    return rows;
+  }
+
+  function setText(id, value) {
+    const el = qs(id);
+    if (el) el.textContent = value;
+  }
+
+  function renderOverviewPulse(rows = []) {
+    const reviewCount = rows.filter((row) => getPendingCount(row) > 0).length;
+    const exceptionCount = rows.filter((row) => getExceptionCount(row) > 0).length;
+
+    setText("overviewAllCount", String(rows.length));
+    setText("overviewReviewCount", String(reviewCount));
+    setText("overviewExceptionCount", String(exceptionCount));
+    setText("overviewAllChip", String(rows.length));
+    setText("overviewReviewChip", String(reviewCount));
+    setText("overviewExceptionChip", String(exceptionCount));
+
+    document.querySelectorAll("[data-overview-focus]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.overviewFocus === overviewFocus);
+      button.setAttribute("aria-pressed", button.dataset.overviewFocus === overviewFocus ? "true" : "false");
+    });
+  }
+
   function sortRows(rows) {
     const a = rows.slice();
     const { key, dir } = sortState;
@@ -88,7 +142,7 @@ function renderTable(rows) {
   const data = sortRows(rows);
 
   if (!data.length) {
-    tb.innerHTML = `<tr><td colspan="3" class="muted">No results for this month/search.</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="4" class="muted">No results for this month/search.</td></tr>`;
     return;
   }
 
@@ -99,8 +153,8 @@ function renderTable(rows) {
     tr.dataset.displayName = r.display_name || "";
     tr.className = "summary-row";
 
-    const pendingN = pendingReviewCounts.get(r.employee_id) || 0;
-    const exN = exceptionCounts.get(r.employee_id) || 0;
+    const pendingN = getPendingCount(r);
+    const exN = getExceptionCount(r);
 
     const pendingFlag =
       pendingN > 0
@@ -114,10 +168,12 @@ function renderTable(rows) {
 
     tr.innerHTML = `
       <td class="worker-cell">
-        <span class="worker-name">${r.display_name || "—"}</span>${pendingFlag}${exFlag}
+        <span class="worker-avatar" aria-hidden="true">${escapeHtml(getInitials(r.display_name))}</span>
+        <span class="worker-name">${escapeHtml(r.display_name || "-")}</span>${pendingFlag}${exFlag}
       </td>
-      <td>${r.shifts_count ?? "—"}</td>
+      <td>${escapeHtml(r.shifts_count ?? "-")}</td>
       <td>${fmtHours(r.total_hours)}</td>
+      <td class="summary-action-cell"><button class="btn small ghost summary-open-btn" type="button">${pendingN ? "Review" : "Open"}</button></td>
     `;
 
     tb.appendChild(tr);
@@ -140,11 +196,11 @@ function renderSummaryCards(rows) {
   }
 
   for (const r of data) {
-    const pendingN = pendingReviewCounts.get(r.employee_id) || 0;
-    const exN = exceptionCounts.get(r.employee_id) || 0;
+    const pendingN = getPendingCount(r);
+    const exN = getExceptionCount(r);
 
     const parts = [];
-    parts.push(pendingN > 0 ? `Pending review: ${pendingN}` : `No pending review`);
+    parts.push(pendingN > 0 ? `Pending review: ${pendingN}` : "Ready");
     if (exN > 0) parts.push(`Exceptions: ${exN}`);
 
     const card = document.createElement("div");
@@ -156,15 +212,20 @@ function renderSummaryCards(rows) {
     card.innerHTML = `
       <div class="summary-card-top">
         <div>
-          <div class="summary-card-name">${r.display_name || "—"}</div>
-          <div class="summary-card-sub">${parts.join(" • ")}</div>
+          <div class="summary-card-name-row">
+            <span class="worker-avatar" aria-hidden="true">${escapeHtml(getInitials(r.display_name))}</span>
+            <div>
+              <div class="summary-card-name">${escapeHtml(r.display_name || "-")}</div>
+              <div class="summary-card-sub">${escapeHtml(parts.join(" / "))}</div>
+            </div>
+          </div>
         </div>
       </div>
 
       <div class="summary-card-metrics">
         <div class="summary-metric">
           <div class="lbl">Shifts</div>
-          <div class="val">${r.shifts_count ?? "—"}</div>
+          <div class="val">${escapeHtml(r.shifts_count ?? "-")}</div>
         </div>
         <div class="summary-metric">
           <div class="lbl">Total Hours</div>
@@ -181,7 +242,7 @@ function renderSummaryCards(rows) {
       </div>
 
       <div class="summary-card-actions">
-        <button class="btn" type="button">Open</button>
+        <button class="btn" type="button">${pendingN ? "Review shifts" : "Open details"}</button>
       </div>
     `;
 
@@ -223,17 +284,19 @@ async function loadSummary() {
         )
       : (rows || []);
 
-    currentRows = filtered;
+    renderOverviewPulse(filtered);
 
-    renderKPIs(filtered);
-    renderTable(filtered);
-    renderSummaryCards(filtered);
+    currentRows = applyOverviewFocus(filtered);
+
+    renderKPIs(currentRows);
+    renderTable(currentRows);
+    renderSummaryCards(currentRows);
   } catch (err) {
     console.error(err);
 
     if (qs("summaryTbody")) {
       qs("summaryTbody").innerHTML =
-        `<tr><td colspan="3" class="muted">Error loading data. Check console.</td></tr>`;
+        `<tr><td colspan="4" class="muted">Error loading data. Check console.</td></tr>`;
     }
     if (qs("summaryCards")) {
       qs("summaryCards").innerHTML =
@@ -268,6 +331,15 @@ async function loadSummary() {
     qs("thWorker")?.addEventListener("click", () => toggleSort("display_name"));
     qs("thShifts")?.addEventListener("click", () => toggleSort("shifts_count"));
     qs("thHours")?.addEventListener("click", () => toggleSort("total_hours"));
+  }
+
+  function wireOverviewFocus() {
+    document.querySelectorAll("[data-overview-focus]").forEach((button) => {
+      button.addEventListener("click", () => {
+        overviewFocus = button.dataset.overviewFocus || "all";
+        loadSummary();
+      });
+    });
   }
 
   // Desktop table row click
@@ -310,12 +382,12 @@ async function loadSummary() {
       const clockInMs = Number(card.dataset.clockInMs || 0);
       if (!clockInMs) continue;
 
-      // update "since … • HHh MMm"
+      // update "since HH:MM / HHh MMm"
       const timesEl = card.querySelector('.live-times');
       if (timesEl){
         const sinceStr = new Date(clockInMs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
         const durStr = fmtDurationHM(now - clockInMs);
-        timesEl.textContent = `since ${sinceStr} • ${durStr}`;
+        timesEl.textContent = `since ${sinceStr} / ${durStr}`;
       }
 
       // if on break, update pill to show current break duration
@@ -347,7 +419,7 @@ async function loadSummary() {
   // header stamp + anomaly count
   const flagged = rows.filter(r => r.has_anomaly).length;
   if (updated){
-    updated.textContent = `Updated ${new Date().toLocaleTimeString()}${flagged ? ` • ⚠︎ ${flagged} flagged` : ''}`;
+    updated.textContent = `Updated ${new Date().toLocaleTimeString()}${flagged ? ` / ${flagged} flagged` : ''}`;
   }
 
   list.innerHTML = '';
@@ -377,18 +449,23 @@ async function loadSummary() {
       : `<span class="pill work">Working</span>`;
 
     const anomHtml = r.has_anomaly && r.anomalies?.length
-      ? `<div class="live-anoms">${r.anomalies.map(a => `<span class="chip anom">⚠︎ ${a}</span>`).join(' ')}</div>`
+      ? `<div class="live-anoms">${r.anomalies.map(a => `<span class="chip anom">Flagged: ${escapeHtml(a)}</span>`).join(' ')}</div>`
       : '';
 
     div.innerHTML = `
-      <div class="live-name">${r.display_name}</div>
-      <div class="live-times">since ${sinceStr} • ${durStr}</div>
+      <div class="live-main">
+        <span class="worker-avatar live-avatar" aria-hidden="true">${escapeHtml(getInitials(r.display_name))}</span>
+        <div>
+          <div class="live-name">${escapeHtml(r.display_name || "Worker")}</div>
+          <div class="live-times">since ${sinceStr} / ${durStr}</div>
+        </div>
+      </div>
       <div class="live-status">${pill}</div>
       ${anomHtml}
       <div class="live-actions">
-        ${r.photo_in_url ? `<a href="${r.photo_in_url}" target="_blank" rel="noopener">Photo In</a>` : ''}
-        ${r.break_photo_url ? `<a href="${r.break_photo_url}" target="_blank" rel="noopener">Break Photo</a>` : ''}
-        <button class="btn small ghost">Details →</button>
+        ${r.photo_in_url ? `<a href="${escapeHtml(r.photo_in_url)}" target="_blank" rel="noopener">Photo In</a>` : ''}
+        ${r.break_photo_url ? `<a href="${escapeHtml(r.break_photo_url)}" target="_blank" rel="noopener">Break Photo</a>` : ''}
+        <button class="btn small ghost" type="button">Details</button>
       </div>
     `;
     list.appendChild(div);
@@ -415,11 +492,13 @@ function wireLiveList(){
   if (!list) return;
 
   list.addEventListener('click', (e) => {
+    if (e.target.closest('a')) return;
+
     const card = e.target.closest('.live-card');
     if (!card) return;
 
     const employeeId  = card.dataset.employeeId;
-    const displayName = card.dataset.displayName || '—';
+    const displayName = card.dataset.displayName || '-';
     const monthStart  = monthInputToStart();
 
     openWorkerDrawer({ employeeId, monthStart, displayName });
@@ -430,6 +509,7 @@ function wireLiveList(){
 // ---------- public ----------
 async function bootOverview() {
   wireFilters();
+  wireOverviewFocus();
   wireSorting();
   wireTableClicks();
   wireCardClicks();

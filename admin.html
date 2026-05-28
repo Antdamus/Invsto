@@ -61,6 +61,19 @@
 
       <!-- ===== Overview panel ===== -->
       <section id="panelOverview" class="panel" role="tabpanel" aria-labelledby="tabOverview">
+        <section class="overview-hero" aria-label="Time overview">
+          <div class="overview-hero-copy">
+            <span class="overview-eyebrow">Time Command Center</span>
+            <h1>Worker hours at a glance</h1>
+            <p>Live clock-ins, review flags, monthly totals, and worker drill-downs in one clean place.</p>
+          </div>
+          <div id="overviewPulse" class="overview-pulse" aria-live="polite">
+            <span><b id="overviewAllCount">0</b> workers</span>
+            <span><b id="overviewReviewCount">0</b> need review</span>
+            <span><b id="overviewExceptionCount">0</b> exceptions</span>
+          </div>
+        </section>
+
         <!-- Mobile quick bar (filters live in sheet) -->
         <div class="mobile-bar" role="region" aria-label="Quick actions">
           <button id="openFiltersBtn" class="btn ghost mobile-only" type="button">Filters</button>
@@ -82,10 +95,25 @@
           </label>
         </div>
 
+        <div class="overview-focus-row" aria-label="Worker hour filters">
+          <button class="overview-focus active" type="button" data-overview-focus="all">
+            All workers <span id="overviewAllChip">0</span>
+          </button>
+          <button class="overview-focus" type="button" data-overview-focus="review">
+            Needs review <span id="overviewReviewChip">0</span>
+          </button>
+          <button class="overview-focus" type="button" data-overview-focus="exceptions">
+            Exceptions <span id="overviewExceptionChip">0</span>
+          </button>
+        </div>
+
         <!-- LIVE NOW -->
         <section class="live" aria-label="Live now">
           <div class="live-header">
-            <h3 style="margin:0">Live now</h3>
+            <div>
+              <span class="overview-eyebrow">Live floor</span>
+              <h3>Live now</h3>
+            </div>
             <div id="liveUpdated" class="muted">—</div>
           </div>
           <div id="liveList" class="live-list">
@@ -138,10 +166,11 @@
                     Total Hours <span class="sort-indicator">↕</span>
                   </button>
                 </th>
+                <th scope="col" class="summary-action-heading">Review</th>
               </tr>
             </thead>
             <tbody id="summaryTbody">
-              <tr><td colspan="3" class="muted">No data yet.</td></tr>
+              <tr><td colspan="4" class="muted">No data yet.</td></tr>
             </tbody>
           </table>
         </div>
