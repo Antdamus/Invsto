@@ -523,6 +523,11 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/ebay-return-sync/index.ts"
 
+[functions.ebay-message-probe]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/ebay-message-probe/index.ts"
+
 [functions.microsoft-auth-callback]
 enabled = true
 verify_jwt = false
