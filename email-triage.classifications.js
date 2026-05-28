@@ -35,11 +35,62 @@
     { id: "human_review", label: "Human Review", categories: [] },
   ];
 
+  const EBAY_TOPIC_TAGS = [
+    "return",
+    "cancellation",
+    "shipping_issue",
+    "payment_issue",
+    "item_question",
+    "missing_item",
+    "wrong_item",
+    "not_as_described",
+    "refund_request",
+    "buyer_complaint",
+    "custom_order_question",
+    "general_question",
+    "platform_notice",
+    "feedback_issue",
+    "offer_question",
+    "order_status",
+    "delivery_timing",
+    "address_change",
+  ];
+  const EBAY_PRIORITIES = ["high", "normal", "low"];
+  const EBAY_RESPONSE_NEEDS = ["reply_today", "reply_later", "no_reply_needed"];
+  const EBAY_BUYER_FLAGS = [
+    "vip_buyer",
+    "high_value_buyer",
+    "repeat_buyer",
+    "new_buyer",
+    "high_retained_value_buyer",
+    "return_prone_buyer",
+    "high_return_risk_buyer",
+    "low_risk_buyer",
+  ];
+  const EBAY_RISK_FLAGS = [
+    "refund_risk",
+    "chargeback_risk",
+    "negative_feedback_risk",
+    "return_escalation_risk",
+    "cancellation_risk",
+    "buyer_unhappy",
+    "context_review_needed",
+    "low_confidence",
+    "unsupported_claim_risk",
+  ];
+  const EBAY_REVIEW_STATES = ["pending_review", "approved", "corrected", "dismissed"];
+
   window.EmailTriageClassifications = {
     CLASSIFICATION_CATEGORIES,
     REVIEW_STATES,
     OVERRIDE_PRIORITIES,
     OVERRIDE_URGENCIES,
     CATEGORY_GROUPS,
+    EBAY_TOPIC_TAGS,
+    EBAY_PRIORITIES,
+    EBAY_RESPONSE_NEEDS,
+    EBAY_BUYER_FLAGS,
+    EBAY_RISK_FLAGS,
+    EBAY_REVIEW_STATES,
   };
 })();

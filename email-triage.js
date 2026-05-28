@@ -20,6 +20,9 @@
     fetchEbayConversationMessages,
     fetchEbayConversationContext,
     runEbayMessageSync,
+    classifyEbayConversation,
+    classifyRecentEbayConversations,
+    saveEbayConversationClassificationOverride,
   } = window.EmailTriageApi;
   const { TRANSITIONS, createInitialState, createStore } = window.EmailTriageState;
   const {
@@ -85,6 +88,12 @@
     OVERRIDE_PRIORITIES,
     OVERRIDE_URGENCIES,
     CATEGORY_GROUPS,
+    EBAY_TOPIC_TAGS,
+    EBAY_PRIORITIES,
+    EBAY_RESPONSE_NEEDS,
+    EBAY_BUYER_FLAGS,
+    EBAY_RISK_FLAGS,
+    EBAY_REVIEW_STATES,
   } = window.EmailTriageClassifications;
 
   const DASHBOARD_COLLAPSED_STORAGE_KEY = "og-email-triage-dashboard-collapsed";
@@ -123,6 +132,7 @@
     operationalDashboard: document.getElementById("operational-dashboard"),
     ebayConversationRefresh: document.getElementById("ebay-conversation-refresh"),
     ebayConversationSync: document.getElementById("ebay-conversation-sync"),
+    ebayConversationClassifyRecent: document.getElementById("ebay-conversation-classify-recent"),
     ebayConversationStatus: document.getElementById("ebay-conversation-status"),
     ebayConversationFilterTabs: document.querySelectorAll("[data-ebay-conversation-filter]"),
     ebayConversationSearch: document.getElementById("ebay-conversation-search"),
@@ -2269,6 +2279,7 @@
 
   function ebayConversationSearchBlob(conversation) {
     const summary = ebayConversationSummary(conversation);
+    const classification = ebayConversationClassification(conversation);
     return normalizeEbaySearchText([
       summary.search_text,
       conversation?.ebay_conversation_id,
@@ -2285,6 +2296,12 @@
       summary.item_titles,
       summary.item_numbers,
       summary.listing_ids,
+      classification?.effective_priority,
+      classification?.effective_response_need,
+      classification?.effective_topic_tags,
+      classification?.effective_buyer_flags,
+      classification?.effective_risk_flags,
+      classification?.effective_summary,
     ].flat().filter(Boolean).join("\n"));
   }
 
@@ -2354,11 +2371,84 @@
     renderEbayConversationInbox(adminClassificationState);
   }
 
+  function ebayConversationClassification(conversation) {
+    const row = conversation?.classification && typeof conversation.classification === "object" ? conversation.classification : null;
+    if (!row?.id) return null;
+    const override = row.operator_override_payload && typeof row.operator_override_payload === "object" ? row.operator_override_payload : {};
+    const topicTags = safeArray(override.topic_tags || row.effective_topic_tags || row.topic_tags).map((item) => compactConversationText(item)).filter(Boolean);
+    const buyerFlags = safeArray(override.buyer_flags || row.effective_buyer_flags || row.buyer_flags).map((item) => compactConversationText(item)).filter(Boolean);
+    const riskFlags = safeArray(override.risk_flags || row.effective_risk_flags || row.risk_flags).map((item) => compactConversationText(item)).filter(Boolean);
+    return {
+      ...row,
+      effective_priority: compactConversationText(override.priority || row.effective_priority || row.priority, "normal"),
+      effective_response_need: compactConversationText(override.response_need || row.effective_response_need || row.response_need, "reply_later"),
+      effective_topic_tags: topicTags,
+      effective_buyer_flags: buyerFlags,
+      effective_risk_flags: riskFlags,
+      effective_summary: compactConversationText(override.summary || row.effective_summary || row.summary),
+      effective_reasoning_summary: compactConversationText(override.reasoning_summary || row.effective_reasoning_summary || row.reasoning_summary),
+      effective_recommended_action: compactConversationText(override.recommended_action || row.effective_recommended_action || row.recommended_action),
+      has_operator_override: Object.keys(override).length > 0 || row.has_operator_override === true,
+    };
+  }
+
+  function ebayClassificationIsStale(conversation, classification = ebayConversationClassification(conversation)) {
+    if (!conversation || !classification) return false;
+    if (conversation.latest_message_id && classification.latest_ebay_message_id && conversation.latest_message_id !== classification.latest_ebay_message_id) return true;
+    const classifiedAt = new Date(classification.created_at || 0).getTime();
+    const latestAt = new Date(conversation.latest_message_created_at || conversation.last_message_created_at || 0).getTime();
+    return Number.isFinite(classifiedAt) && Number.isFinite(latestAt) && latestAt > classifiedAt + 1000;
+  }
+
+  function ebayPriorityBadgeVariant(value) {
+    const priority = String(value || "").toLowerCase();
+    if (priority === "high") return "danger";
+    if (priority === "normal") return "default";
+    return "muted";
+  }
+
+  function ebayResponseBadgeVariant(value) {
+    const need = String(value || "").toLowerCase();
+    if (need === "reply_today") return "warning";
+    if (need === "reply_later") return "default";
+    return "muted";
+  }
+
+  function ebayTopicBadgeVariant(value) {
+    const tag = String(value || "").toLowerCase();
+    if (["return", "refund_request", "not_as_described", "missing_item", "wrong_item", "cancellation"].includes(tag)) return "warning";
+    if (["buyer_complaint", "payment_issue", "feedback_issue"].includes(tag)) return "danger";
+    if (tag === "platform_notice") return "muted";
+    return "category";
+  }
+
+  function strongestBuyerFlag(flags = []) {
+    const order = ["vip_buyer", "high_value_buyer", "repeat_buyer", "high_retained_value_buyer", "return_prone_buyer", "high_return_risk_buyer", "new_buyer", "low_risk_buyer"];
+    return order.find((flag) => flags.includes(flag)) || flags[0] || "";
+  }
+
+  function renderEbayClassificationListBadges(conversation, options = {}) {
+    const classification = ebayConversationClassification(conversation);
+    if (!classification) return "";
+    const compact = options.compact === true;
+    const topic = classification.effective_topic_tags[0];
+    const buyerFlag = strongestBuyerFlag(classification.effective_buyer_flags);
+    const badges = [
+      classification.effective_priority === "high" ? renderBadge("High", "danger") : (!compact && classification.effective_priority === "low" ? renderBadge("Low", "muted") : ""),
+      classification.effective_response_need === "reply_today" ? renderBadge("Reply today", "warning") : "",
+      topic ? renderBadge(humanizeValue(topic), ebayTopicBadgeVariant(topic)) : "",
+      buyerFlag && !compact ? renderBadge(humanizeValue(buyerFlag), buyerFlag === "vip_buyer" ? "success" : "category") : "",
+      ebayClassificationIsStale(conversation, classification) ? renderBadge("Stale", "warning") : "",
+    ].filter(Boolean).slice(0, compact ? 3 : 4);
+    return badges.join("");
+  }
+
   function renderEbayConversationBadges(conversation, options = {}) {
     const summary = ebayConversationSummary(conversation);
     const status = compactConversationText(conversation.conversation_status);
     const compact = options.compact === true;
     const badges = [
+      renderEbayClassificationListBadges(conversation, { compact }),
       Number(conversation.unread_count || 0) > 0 ? renderBadge(`${conversation.unread_count} unread`, "warning") : "",
       summary.has_order_link ? renderBadge("Order", "success") : "",
       summary.has_return_link ? renderBadge("Return", "warning") : "",
@@ -2511,6 +2601,146 @@
     `;
   }
 
+  function renderEbayClassificationPills(values = [], emptyLabel = "None") {
+    const rows = safeArray(values).map((item) => compactConversationText(item)).filter(Boolean);
+    if (!rows.length) return `<span class="classification-pill is-muted">${escapeHtml(emptyLabel)}</span>`;
+    return rows.map((value) => `<span class="classification-pill">${escapeHtml(humanizeValue(value))}</span>`).join("");
+  }
+
+  function renderEbayClassificationOptions(values, selectedValues, name) {
+    const selected = new Set(safeArray(selectedValues));
+    return values.map((value) => `
+      <label class="ebay-classification-chip-option">
+        <input type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(value)}"${selected.has(value) ? " checked" : ""} />
+        <span>${escapeHtml(humanizeValue(value))}</span>
+      </label>
+    `).join("");
+  }
+
+  function renderRequiredOptions(values, selectedValue) {
+    return values.map((value) => `<option value="${escapeHtml(value)}"${value === selectedValue ? " selected" : ""}>${escapeHtml(humanizeValue(value))}</option>`).join("");
+  }
+
+  function renderEbayClassificationEditor(conversation, classification) {
+    if (!classification) return "";
+    return `
+      <form class="ebay-classification-editor" data-ebay-classification-form data-conversation-id="${escapeHtml(conversation.id)}" data-classification-id="${escapeHtml(classification.id)}">
+        <div class="ebay-classification-editor-grid">
+          <label>
+            <span>Priority</span>
+            <select name="priority">${renderRequiredOptions(EBAY_PRIORITIES, classification.effective_priority)}</select>
+          </label>
+          <label>
+            <span>Response</span>
+            <select name="response_need">${renderRequiredOptions(EBAY_RESPONSE_NEEDS, classification.effective_response_need)}</select>
+          </label>
+          <label>
+            <span>Review</span>
+            <select name="review_state">${renderRequiredOptions(EBAY_REVIEW_STATES, classification.review_state === "pending_review" ? "corrected" : classification.review_state || "corrected")}</select>
+          </label>
+        </div>
+        <div class="ebay-classification-editor-block">
+          <strong>Topics</strong>
+          <div class="ebay-classification-chip-grid">${renderEbayClassificationOptions(EBAY_TOPIC_TAGS, classification.effective_topic_tags, "topic_tags")}</div>
+        </div>
+        <div class="ebay-classification-editor-block">
+          <strong>Buyer flags</strong>
+          <div class="ebay-classification-chip-grid">${renderEbayClassificationOptions(EBAY_BUYER_FLAGS, classification.effective_buyer_flags, "buyer_flags")}</div>
+        </div>
+        <div class="ebay-classification-editor-block">
+          <strong>Risk flags</strong>
+          <div class="ebay-classification-chip-grid">${renderEbayClassificationOptions(EBAY_RISK_FLAGS, classification.effective_risk_flags, "risk_flags")}</div>
+        </div>
+        <label class="ebay-classification-editor-note">
+          <span>Operator notes</span>
+          <textarea name="operator_notes" rows="2" placeholder="Optional note for override history">${escapeHtml(classification.operator_notes || "")}</textarea>
+        </label>
+        <div class="ebay-classification-editor-actions">
+          <button type="submit" class="primary-btn" ${adminClassificationState.ebayConversationClassificationSavingId === classification.id ? "disabled" : ""}>
+            <i data-lucide="${adminClassificationState.ebayConversationClassificationSavingId === classification.id ? "loader-circle" : "save"}"></i>
+            Save labels
+          </button>
+          <button type="button" class="secondary-btn" data-ebay-detail-action="cancel-classification-edit" data-ebay-conversation-id="${escapeHtml(conversation.id)}">
+            Cancel
+          </button>
+        </div>
+      </form>
+    `;
+  }
+
+  function renderEbayClassificationCard(conversation) {
+    const classification = ebayConversationClassification(conversation);
+    const isLoading = adminClassificationState.ebayConversationClassificationLoadingId === conversation.id;
+    const error = adminClassificationState.ebayConversationClassificationErrorsById?.[conversation.id];
+    const saveError = classification?.id ? adminClassificationState.ebayConversationClassificationSaveErrorsById?.[classification.id] : null;
+    const editing = classification?.id && adminClassificationState.ebayConversationClassificationEditingId === classification.id;
+    if (!classification) {
+      return `
+        <section class="ebay-classification-card">
+          <div class="context-card-head">
+            <h4>AI Classification</h4>
+            ${renderBadge("Unclassified", "muted")}
+          </div>
+          <p>Classify this canonical eBay conversation using the chat timeline and linked buyer/order context.</p>
+          ${error ? `<div class="classification-notice is-error">Classification failed: ${escapeHtml(error)}</div>` : ""}
+          <button type="button" class="secondary-btn" data-ebay-detail-action="classify-conversation" data-ebay-conversation-id="${escapeHtml(conversation.id)}" ${isLoading ? "disabled" : ""}>
+            <i data-lucide="${isLoading ? "loader-circle" : "sparkles"}"></i>
+            ${escapeHtml(isLoading ? "Classifying" : "Classify conversation")}
+          </button>
+        </section>
+      `;
+    }
+
+    const stale = ebayClassificationIsStale(conversation, classification);
+    return `
+      <section class="ebay-classification-card${stale ? " is-stale" : ""}">
+        <div class="context-card-head">
+          <h4>AI Classification</h4>
+          <span class="ebay-classification-head-badges">
+            ${renderBadge(humanizeValue(classification.effective_priority), ebayPriorityBadgeVariant(classification.effective_priority))}
+            ${renderBadge(humanizeValue(classification.effective_response_need), ebayResponseBadgeVariant(classification.effective_response_need))}
+            ${classification.has_operator_override ? renderBadge("Operator edited", "warning") : ""}
+          </span>
+        </div>
+        ${stale ? `<div class="classification-notice is-warning">Classification may be stale because a newer eBay message is stored.</div>` : ""}
+        ${error ? `<div class="classification-notice is-error">Classification failed: ${escapeHtml(error)}</div>` : ""}
+        ${saveError ? `<div class="classification-notice is-error">Override save failed: ${escapeHtml(saveError)}</div>` : ""}
+        <div class="ebay-classification-facts">
+          <div>
+            <dt>Topics</dt>
+            <dd>${renderEbayClassificationPills(classification.effective_topic_tags, "No topic")}</dd>
+          </div>
+          <div>
+            <dt>Buyer flags</dt>
+            <dd>${renderEbayClassificationPills(classification.effective_buyer_flags, "No buyer flags")}</dd>
+          </div>
+          <div>
+            <dt>Risk flags</dt>
+            <dd>${renderEbayClassificationPills(classification.effective_risk_flags, "No risk flags")}</dd>
+          </div>
+        </div>
+        <p>${escapeHtml(classification.effective_summary || "No summary stored.")}</p>
+        <div class="ebay-classification-reason">${escapeHtml(classification.effective_reasoning_summary || "No reason stored.")}</div>
+        <div class="selected-email-meta">
+          <span>Confidence ${escapeHtml(formatConfidence(classification.confidence))}</span>
+          <span>${escapeHtml(humanizeValue(classification.review_state || "pending_review"))}</span>
+          <span>${escapeHtml(formatContextDate(classification.created_at))}</span>
+        </div>
+        <div class="ebay-classification-actions">
+          <button type="button" class="secondary-btn" data-ebay-detail-action="classify-conversation" data-ebay-conversation-id="${escapeHtml(conversation.id)}" ${isLoading ? "disabled" : ""}>
+            <i data-lucide="${isLoading ? "loader-circle" : "refresh-cw"}"></i>
+            ${escapeHtml(isLoading ? "Classifying" : "Reclassify")}
+          </button>
+          <button type="button" class="secondary-btn" data-ebay-detail-action="edit-classification" data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-classification-id="${escapeHtml(classification.id)}">
+            <i data-lucide="sliders-horizontal"></i>
+            Edit labels
+          </button>
+        </div>
+        ${editing ? renderEbayClassificationEditor(conversation, classification) : ""}
+      </section>
+    `;
+  }
+
   function renderEbayConversationDetail(state) {
     if (!els.ebayConversationDetail) return;
     const conversation = selectedEbayConversationById(state.selectedEbayConversationId, state);
@@ -2542,6 +2772,7 @@
         </button>
       </div>
       ${error ? `<div class="classification-notice is-error">Could not load eBay messages: ${escapeHtml(error)}</div>` : ""}
+      ${renderEbayClassificationCard(conversation)}
       <div class="ebay-chat-timeline" aria-label="Clean eBay message timeline">
         ${isLoading && !messages.length ? `<div class="classification-empty">Loading clean eBay chat messages.</div>` : ""}
         ${messages.length ? messages.map(renderEbayMessageBubble).join("") : (!isLoading ? `<div class="classification-empty">No canonical eBay messages are stored for this conversation yet.</div>` : "")}
@@ -2634,6 +2865,21 @@
     if (!els.ebayConversationSyncResult) return;
     const result = state.ebayConversationSyncResult;
     const error = state.ebayConversationSyncError;
+    const classificationResult = state.ebayConversationClassificationResult;
+    if (state.ebayConversationClassificationBatchLoading) {
+      els.ebayConversationSyncResult.innerHTML = `<div class="classification-notice">Classifying recent eBay conversations. This only writes OG classification records.</div>`;
+      return;
+    }
+    if (classificationResult) {
+      els.ebayConversationSyncResult.innerHTML = `
+        <div class="classification-notice is-success">
+          Classification finished. Processed: ${escapeHtml(formatContextNumber(classificationResult.processed || 0))};
+          succeeded: ${escapeHtml(formatContextNumber(classificationResult.succeeded || 0))};
+          failed: ${escapeHtml(formatContextNumber(classificationResult.failed || 0))}.
+        </div>
+      `;
+      return;
+    }
     if (!result && !error && !state.ebayConversationSyncLoading) {
       els.ebayConversationSyncResult.innerHTML = "";
       return;
@@ -2674,9 +2920,9 @@
       }
     }
 
-    [els.ebayConversationRefresh, els.ebayConversationSync].forEach((button) => {
+    [els.ebayConversationRefresh, els.ebayConversationSync, els.ebayConversationClassifyRecent].forEach((button) => {
       if (!button) return;
-      const busy = state.ebayConversationLoading || state.ebayConversationSyncLoading;
+      const busy = state.ebayConversationLoading || state.ebayConversationSyncLoading || state.ebayConversationClassificationBatchLoading;
       button.disabled = busy;
       button.setAttribute("aria-busy", busy ? "true" : "false");
       button.classList.toggle("is-loading", busy);
@@ -2791,6 +3037,7 @@
     setEbayConversationState({
       ebayConversationLoading: true,
       ebayConversationError: null,
+      ebayConversationClassificationResult: null,
     });
 
     try {
@@ -2826,6 +3073,7 @@
       ebayConversationSyncLoading: true,
       ebayConversationSyncResult: null,
       ebayConversationSyncError: null,
+      ebayConversationClassificationResult: null,
     });
 
     try {
@@ -2843,6 +3091,139 @@
         ebayConversationSyncError: code,
       });
       console.error("[email-triage] eBay message sync failed:", error);
+    }
+  }
+
+  function mergeEbayConversationClassification(conversationId, classification) {
+    return safeArray(adminClassificationState.ebayConversations).map((conversation) => (
+      conversation.id === conversationId ? { ...conversation, classification } : conversation
+    ));
+  }
+
+  async function classifySelectedEbayConversation(context, conversationId) {
+    if (!conversationId) return;
+    setEbayConversationState({
+      ebayConversationClassificationLoadingId: conversationId,
+      ebayConversationClassificationResult: null,
+      ebayConversationClassificationErrorsById: {
+        ...adminClassificationState.ebayConversationClassificationErrorsById,
+        [conversationId]: null,
+      },
+    });
+
+    try {
+      const result = await classifyEbayConversation(context, conversationId);
+      const classification = result.classification || result.data?.classification || null;
+      setEbayConversationState({
+        ebayConversationClassificationLoadingId: null,
+        ebayConversations: classification
+          ? mergeEbayConversationClassification(conversationId, classification)
+          : adminClassificationState.ebayConversations,
+        ebayConversationClassificationErrorsById: {
+          ...adminClassificationState.ebayConversationClassificationErrorsById,
+          [conversationId]: null,
+        },
+      });
+    } catch (error) {
+      const code = error.code || error.message || "ebay_conversation_classification_failed";
+      setEbayConversationState({
+        ebayConversationClassificationLoadingId: null,
+        ebayConversationClassificationErrorsById: {
+          ...adminClassificationState.ebayConversationClassificationErrorsById,
+          [conversationId]: code,
+        },
+      });
+      console.error("[email-triage] eBay conversation classification failed:", error);
+    }
+  }
+
+  async function classifyRecentEbayConversationRows(context) {
+    setEbayConversationState({
+      ebayConversationClassificationBatchLoading: true,
+      ebayConversationClassificationResult: null,
+      ebayConversationSyncResult: null,
+      ebayConversationSyncError: null,
+    });
+
+    try {
+      const result = await classifyRecentEbayConversations(context, { limit: 10 });
+      const rows = safeArray(result.results || result.data?.results);
+      const byConversationId = new Map(rows.filter((row) => row.ok && row.classification).map((row) => [row.conversation_id, row.classification]));
+      const ebayConversations = safeArray(adminClassificationState.ebayConversations).map((conversation) => (
+        byConversationId.has(conversation.id) ? { ...conversation, classification: byConversationId.get(conversation.id) } : conversation
+      ));
+      setEbayConversationState({
+        ebayConversationClassificationBatchLoading: false,
+        ebayConversationClassificationResult: result,
+        ebayConversations,
+      });
+    } catch (error) {
+      const code = error.code || error.message || "ebay_conversation_batch_classification_failed";
+      setEbayConversationState({
+        ebayConversationClassificationBatchLoading: false,
+        ebayConversationClassificationResult: {
+          processed: 0,
+          succeeded: 0,
+          failed: 1,
+          error: code,
+        },
+      });
+      console.error("[email-triage] eBay recent conversation classification failed:", error);
+    }
+  }
+
+  async function saveEbayClassificationOverride(context, form) {
+    const conversationId = form.getAttribute("data-conversation-id");
+    const classificationId = form.getAttribute("data-classification-id");
+    if (!conversationId || !classificationId) return;
+    const formData = new FormData(form);
+    const overridePayload = {
+      priority: formData.get("priority") || "",
+      response_need: formData.get("response_need") || "",
+      topic_tags: formData.getAll("topic_tags"),
+      buyer_flags: formData.getAll("buyer_flags"),
+      risk_flags: formData.getAll("risk_flags"),
+    };
+    const reviewState = String(formData.get("review_state") || "corrected");
+    const operatorNotes = String(formData.get("operator_notes") || "");
+    setEbayConversationState({
+      ebayConversationClassificationSavingId: classificationId,
+      ebayConversationClassificationSaveErrorsById: {
+        ...adminClassificationState.ebayConversationClassificationSaveErrorsById,
+        [classificationId]: null,
+      },
+    });
+
+    try {
+      const result = await saveEbayConversationClassificationOverride(context, {
+        conversationId,
+        classificationId,
+        reviewState,
+        overridePayload,
+        operatorNotes,
+      });
+      const classification = result.classification || result.data?.classification || null;
+      setEbayConversationState({
+        ebayConversationClassificationSavingId: null,
+        ebayConversationClassificationEditingId: null,
+        ebayConversations: classification
+          ? mergeEbayConversationClassification(conversationId, classification)
+          : adminClassificationState.ebayConversations,
+        ebayConversationClassificationSaveErrorsById: {
+          ...adminClassificationState.ebayConversationClassificationSaveErrorsById,
+          [classificationId]: null,
+        },
+      });
+    } catch (error) {
+      const code = error.code || error.message || "ebay_classification_override_failed";
+      setEbayConversationState({
+        ebayConversationClassificationSavingId: null,
+        ebayConversationClassificationSaveErrorsById: {
+          ...adminClassificationState.ebayConversationClassificationSaveErrorsById,
+          [classificationId]: code,
+        },
+      });
+      console.error("[email-triage] eBay classification override failed:", error);
     }
   }
 
@@ -2866,6 +3247,7 @@
   function bindEbayConversationEvents(context) {
     els.ebayConversationRefresh?.addEventListener("click", () => loadEbayConversationList(context, { limit: 100 }));
     els.ebayConversationSync?.addEventListener("click", () => syncLatestEbayConversations(context));
+    els.ebayConversationClassifyRecent?.addEventListener("click", () => classifyRecentEbayConversationRows(context));
     els.ebayConversationFilterTabs?.forEach((button) => {
       button.addEventListener("click", () => {
         const ebayConversationFilter = button.getAttribute("data-ebay-conversation-filter") || "all";
@@ -2906,10 +3288,28 @@
       }
       if (action === "refresh-context") {
         loadEbayConversationContext(context, conversationId, { force: true });
+        return;
+      }
+      if (action === "classify-conversation") {
+        classifySelectedEbayConversation(context, conversationId);
+        return;
+      }
+      if (action === "edit-classification") {
+        setEbayConversationState({ ebayConversationClassificationEditingId: button.getAttribute("data-classification-id") });
+        return;
+      }
+      if (action === "cancel-classification-edit") {
+        setEbayConversationState({ ebayConversationClassificationEditingId: null });
       }
     };
     els.ebayConversationDetail?.addEventListener("click", handleDetailClick);
     els.ebayConversationContext?.addEventListener("click", handleDetailClick);
+    els.ebayConversationDetail?.addEventListener("submit", (event) => {
+      const form = event.target.closest("[data-ebay-classification-form]");
+      if (!form) return;
+      event.preventDefault();
+      saveEbayClassificationOverride(context, form);
+    });
   }
 
   function operationalEventById(id, state = triageStore.getState()) {

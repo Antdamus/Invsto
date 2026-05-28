@@ -79,6 +79,13 @@
       ebayConversationSyncLoading: false,
       ebayConversationSyncResult: null,
       ebayConversationSyncError: null,
+      ebayConversationClassificationLoadingId: null,
+      ebayConversationClassificationBatchLoading: false,
+      ebayConversationClassificationResult: null,
+      ebayConversationClassificationErrorsById: {},
+      ebayConversationClassificationEditingId: null,
+      ebayConversationClassificationSavingId: null,
+      ebayConversationClassificationSaveErrorsById: {},
       operationalDashboardCollapsed: Object.prototype.hasOwnProperty.call(overrides, "operationalDashboardCollapsed")
         ? overrides.operationalDashboardCollapsed === true
         : true,

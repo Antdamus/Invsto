@@ -9,7 +9,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="email-triage.css" />
+  <link rel="stylesheet" href="email-triage.css?v=5f6i" />
 
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
@@ -106,6 +106,10 @@
               <button type="button" id="ebay-conversation-refresh" class="secondary-btn">
                 <i data-lucide="refresh-cw"></i>
                 Refresh
+              </button>
+              <button type="button" id="ebay-conversation-classify-recent" class="secondary-btn">
+                <i data-lucide="sparkles"></i>
+                Classify inbox
               </button>
               <button type="button" id="ebay-conversation-sync" class="primary-btn">
                 <i data-lucide="cloud-download"></i>
@@ -559,14 +563,14 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
-  <script src="email-triage.api.js"></script>
-  <script src="email-triage.state.js"></script>
-  <script src="email-triage.render-utils.js"></script>
+  <script src="email-triage.api.js?v=5f6i"></script>
+  <script src="email-triage.state.js?v=5f6i"></script>
+  <script src="email-triage.render-utils.js?v=5f6i"></script>
   <script src="email-triage.inbox.js"></script>
-  <script src="email-triage.classifications.js"></script>
+  <script src="email-triage.classifications.js?v=5f6i"></script>
   <script src="email-triage.drafts.js"></script>
   <script src="email-triage.diagnostics.js"></script>
   <script src="email-triage.operations.js"></script>
-  <script src="email-triage.js"></script>
+  <script src="email-triage.js?v=5f6i"></script>
 </body>
 </html>

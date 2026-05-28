@@ -10,6 +10,7 @@
   const PROCESS_FUNCTION = "microsoft-email-process";
   const EBAY_CONVERSATION_CONTEXT_FUNCTION = "ebay-conversation-context";
   const EBAY_MESSAGE_SYNC_FUNCTION = "ebay-message-sync";
+  const EBAY_CONVERSATION_CLASSIFY_FUNCTION = "ebay-conversation-classify";
 
   const DEFAULT_LIMITS = {
     classificationLimit: 25,
@@ -34,6 +35,7 @@
     ebayConversationMessages: 15000,
     ebayConversationContext: 30000,
     ebayMessageSync: 90000,
+    ebayConversationClassify: 90000,
   };
 
   function waitForSupabaseReady(timeoutMs = 8000) {
@@ -1174,7 +1176,7 @@
     });
   }
 
-  function normalizeEbayConversationRow(row = {}, summary = {}) {
+  function normalizeEbayConversationRow(row = {}, summary = {}, classification = null) {
     return {
       id: row.id || null,
       seller_account_id: row.seller_account_id || null,
@@ -1205,6 +1207,7 @@
       updated_at: row.updated_at || null,
       created_at: row.created_at || null,
       summary,
+      classification,
       raw: row,
     };
   }
@@ -1418,7 +1421,7 @@
 
     const ids = (conversations || []).map((conversation) => conversation.id).filter(Boolean);
     const sellerAccountIds = uniqueEbayText((conversations || []).map((conversation) => conversation.seller_account_id), 500);
-    const [linksResult, messagesResult, sellersResult] = ids.length ? await Promise.all([
+    const [linksResult, messagesResult, sellersResult, classificationsResult] = ids.length ? await Promise.all([
       context.client
         .from("ebay_conversation_links")
         .select("conversation_id, link_type, link_key, status, confidence, ebay_order_id, ebay_order_line_id, ebay_return_case_id, reference_id, reference_type, buyer_username, matched_value, metadata")
@@ -1437,11 +1440,18 @@
         .select("id, seller_username")
         .in("id", sellerAccountIds)
         .limit(500) : Promise.resolve({ data: [], error: null }),
-    ]) : [{ data: [], error: null }, { data: [], error: null }, { data: [], error: null }];
+      context.client
+        .from("ebay_conversation_classifications")
+        .select("id, conversation_id, latest_message_id, latest_ebay_message_id, classification_status, priority, response_need, topic_tags, buyer_flags, risk_flags, confidence, summary, reasoning_summary, recommended_action, input_hash, context_hash, classifier_name, classifier_version, prompt_version, model_name, is_current, superseded_at, review_state, operator_override_payload, operator_notes, reviewed_by, reviewed_at, created_at, updated_at")
+        .in("conversation_id", ids)
+        .eq("is_current", true)
+        .limit(Math.min(limit, 250)),
+    ]) : [{ data: [], error: null }, { data: [], error: null }, { data: [], error: null }, { data: [], error: null }];
 
     throwSupabaseReadError(linksResult.error, "ebay_conversation_link_summary_failed");
     throwSupabaseReadError(messagesResult.error, "ebay_conversation_message_summary_failed");
     throwSupabaseReadError(sellersResult.error, "ebay_conversation_seller_summary_failed");
+    throwSupabaseReadError(classificationsResult.error, "ebay_conversation_classification_summary_failed");
 
     const linkedRows = await fetchEbayLinkedContextRows(context, linksResult.data || []);
     const summaries = buildEbayConversationSummaries(
@@ -1451,9 +1461,14 @@
       sellersResult.data || [],
       linkedRows,
     );
+    const classificationsByConversation = new Map((classificationsResult.data || []).map((classification) => [classification.conversation_id, classification]));
     return {
       ok: true,
-      conversations: (conversations || []).map((conversation) => normalizeEbayConversationRow(conversation, summaries.get(conversation.id) || {})),
+      conversations: (conversations || []).map((conversation) => normalizeEbayConversationRow(
+        conversation,
+        summaries.get(conversation.id) || {},
+        classificationsByConversation.get(conversation.id) || null,
+      )),
       loaded_at: new Date().toISOString(),
     };
   }
@@ -1512,6 +1527,45 @@
     return payload;
   }
 
+  async function classifyEbayConversation(context, conversationId, values = {}) {
+    const session = await currentSession(context, "eBay conversation classify");
+    return edgeFetchWithTimeout(EBAY_CONVERSATION_CLASSIFY_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: "classify_conversation",
+        conversationId,
+        force: values.force === true,
+      }),
+    }, TIMEOUTS.ebayConversationClassify);
+  }
+
+  async function classifyRecentEbayConversations(context, values = {}) {
+    const session = await currentSession(context, "eBay conversation classify recent");
+    return edgeFetchWithTimeout(EBAY_CONVERSATION_CLASSIFY_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: "classify_recent",
+        limit: Number(values.limit || 10),
+        force: values.force === true,
+      }),
+    }, TIMEOUTS.ebayConversationClassify);
+  }
+
+  async function saveEbayConversationClassificationOverride(context, values = {}) {
+    const session = await currentSession(context, "eBay conversation classification override");
+    return edgeFetchWithTimeout(EBAY_CONVERSATION_CLASSIFY_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: "review_override",
+        conversationId: values.conversationId,
+        classificationId: values.classificationId,
+        reviewState: values.reviewState || "corrected",
+        overridePayload: values.overridePayload || {},
+        operatorNotes: values.operatorNotes || "",
+      }),
+    }, TIMEOUTS.ebayConversationClassify);
+  }
+
   async function fetchOperationalDashboard(context) {
     const session = await currentSession(context, "Operational dashboard");
     const [mailboxResult, pipelineResult, liveSyncResult] = await Promise.allSettled([
@@ -1543,6 +1597,7 @@
       PROCESS_FUNCTION,
       EBAY_CONVERSATION_CONTEXT_FUNCTION,
       EBAY_MESSAGE_SYNC_FUNCTION,
+      EBAY_CONVERSATION_CLASSIFY_FUNCTION,
     },
     DEFAULT_LIMITS,
     TIMEOUTS,
@@ -1577,6 +1632,9 @@
     fetchEbayConversationMessages,
     fetchEbayConversationContext,
     runEbayMessageSync,
+    classifyEbayConversation,
+    classifyRecentEbayConversations,
+    saveEbayConversationClassificationOverride,
     fetchInboxPreview,
     importApprovedInboxPreview,
     runMailboxImport,
