@@ -19,6 +19,10 @@ const ADMIN_VIEW_EMAIL_RECEIVED_ORDER_COLUMN = "email_messages(received_at)";
 const OPENAI_TIMEOUT_MS = 30000;
 const MESSAGE_DETAIL_BODY_CHAR_LIMIT = 14000;
 const MESSAGE_DETAIL_THREAD_LIMIT = 50;
+const MESSAGE_DETAIL_LINK_LIMIT = 50;
+const MESSAGE_DETAIL_RETURN_LIMIT = 20;
+const MESSAGE_DETAIL_BUYER_RETURN_LIMIT = 5;
+const MESSAGE_DETAIL_BUYER_VALUE_LINE_LIMIT = 10;
 const MAX_DRAFT_BODY_CHARS = 5000;
 const MAX_DRAFT_SUBJECT_CHARS = 180;
 const REPAIR_BAD_CURRENT_DRAFTS_CONFIRMATION = "REPAIR_BAD_CURRENT_DRAFTS";
@@ -422,6 +426,18 @@ function serviceClient() {
   });
 }
 
+function authenticatedClient(accessToken: string) {
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim() || requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
+  return createClient(requiredEnv("SUPABASE_URL"), anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  });
+}
+
 function getBearerToken(req: Request) {
   const auth = req.headers.get("Authorization") || "";
   const match = auth.match(/^Bearer\s+(.+)$/i);
@@ -734,6 +750,541 @@ function messageBodyState(message: Record<string, any>, body: Record<string, any
 
 function detailWarning(code: string, message: string, severity: "info" | "warning" = "warning") {
   return { code, message, severity };
+}
+
+function contextWarning(code: string, message: string, severity: "info" | "warning" | "error" = "warning") {
+  return { code, message, severity };
+}
+
+function compactNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function compactInteger(value: unknown) {
+  const numberValue = compactNumber(value);
+  return numberValue === null ? null : Math.trunc(numberValue);
+}
+
+function compactContextValue(value: unknown, depth = 0): unknown {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") return shortText(value, 500);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return depth >= 3 ? [] : value.slice(0, 20).map((item) => compactContextValue(item, depth + 1));
+  if (typeof value !== "object" || depth >= 3) return null;
+  const output: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>).slice(0, 40)) {
+    if (/(raw|payload|token|secret|credential|body_html|body_text|attachment|blob|content)/i.test(key)) continue;
+    output[key] = compactContextValue(item, depth + 1);
+  }
+  return output;
+}
+
+function normalizeBuyerUsername(value: unknown) {
+  return shortText(value, 120).trim() || null;
+}
+
+function buyerKey(value: unknown) {
+  return normalizeBuyerUsername(value)?.toLowerCase() || null;
+}
+
+function compactMatchedContextLink(link: Record<string, any>) {
+  return {
+    id: link.id,
+    link_type: link.link_type || null,
+    status: link.status || null,
+    target: {
+      ebay_order_id: link.ebay_order_id || null,
+      ebay_order_line_id: link.ebay_order_line_id || null,
+      item_id: link.item_id || null,
+      sale_id: link.sale_id || null,
+    },
+    ebay_order_id: link.ebay_order_id || null,
+    ebay_order_line_id: link.ebay_order_line_id || null,
+    item_id: link.item_id || null,
+    sale_id: link.sale_id || null,
+    matched_value: shortText(link.matched_value, 160) || null,
+    match_method: shortText(link.match_method, 120) || null,
+    confidence: compactNumber(link.confidence),
+    evidence: linkEvidence(link),
+    metadata: compactContextValue(link.metadata || {}),
+    created_at: link.created_at || null,
+    updated_at: null,
+  };
+}
+
+function compactMatchedOrder(order: Record<string, any>) {
+  return {
+    id: order.id,
+    order_number: shortText(order.order_number, 120) || null,
+    buyer_username: normalizeBuyerUsername(order.buyer_username),
+    buyer_name: shortText(order.buyer_name, 160) || null,
+    buyer_email: normalizedEmail(order.buyer_email),
+    status: shortText(order.status, 80) || null,
+    sale_date: order.sale_date || null,
+    paid_on_date: order.paid_on_date || null,
+    ship_by_date: order.ship_by_date || null,
+    shipped_on_date: order.shipped_on_date || null,
+    total_price: compactNumber(order.total_price),
+    net_payout: compactNumber(order.net_payout),
+    tracking_number: shortText(order.tracking_number, 180) || null,
+    shipping_service: shortText(order.shipping_service, 180) || null,
+  };
+}
+
+function compactMatchedOrderLine(line: Record<string, any>, order: Record<string, any> | null) {
+  return {
+    id: line.id,
+    order_id: line.order_id || null,
+    order_number: shortText(order?.order_number, 120) || null,
+    item_number: shortText(line.item_number, 120) || null,
+    transaction_id: shortText(line.transaction_id, 120) || null,
+    custom_label: shortText(line.custom_label, 180) || null,
+    item_title: shortText(line.item_title, 240) || null,
+    quantity: compactInteger(line.quantity),
+    sold_for: compactNumber(line.sold_for),
+    total_price: compactNumber(line.total_price),
+    line_status: shortText(line.line_status, 80) || null,
+    internal_item_id: line.internal_item_id || null,
+    sale_id: line.sale_id || null,
+  };
+}
+
+function compactReturnItem(item: Record<string, any>) {
+  return {
+    id: item.id,
+    return_case_id: item.return_case_id || null,
+    order_id: item.order_id || null,
+    order_line_id: item.order_line_id || null,
+    internal_item_id: item.internal_item_id || null,
+    item_title: shortText(item.item_title, 240) || null,
+    item_number: shortText(item.item_number, 120) || null,
+    expected_quantity: compactInteger(item.expected_quantity),
+    received_quantity: compactInteger(item.received_quantity),
+    condition_received: shortText(item.condition_received, 80) || null,
+    disposition: shortText(item.disposition, 80) || null,
+    processed_at: item.processed_at || null,
+  };
+}
+
+function compactMatchedReturn(returnCase: Record<string, any>, items: Record<string, any>[]) {
+  return {
+    id: returnCase.id,
+    ebay_return_id: shortText(returnCase.ebay_return_id, 160) || null,
+    order_id: returnCase.order_id || null,
+    order_number: shortText(returnCase.order_number, 120) || null,
+    buyer_username: normalizeBuyerUsername(returnCase.buyer_username),
+    status: shortText(returnCase.status, 80) || null,
+    return_reason: shortText(returnCase.return_reason, 240) || null,
+    opened_at: returnCase.opened_at || null,
+    received_at: returnCase.received_at || null,
+    closed_at: returnCase.closed_at || null,
+    return_tracking_number: shortText(returnCase.return_tracking_number, 180) || null,
+    items: items.map(compactReturnItem),
+  };
+}
+
+function emptyMatchedContext(warnings: Array<Record<string, string>>) {
+  return {
+    links: [],
+    orders: [],
+    order_lines: [],
+    buyer: {
+      username: null,
+      name: null,
+      email: null,
+      matched_from: null,
+      confidence: "none",
+    },
+    returns: [],
+    buyer_history_summary: null,
+    buyer_value_line_breakdown: [],
+    warnings,
+  };
+}
+
+function collectBuyerHintsFromLink(link: Record<string, any>) {
+  const metadata = link.metadata && typeof link.metadata === "object" ? link.metadata : {};
+  const identifiers = metadata.extracted_identifiers && typeof metadata.extracted_identifiers === "object"
+    ? metadata.extracted_identifiers
+    : {};
+  return uniqueStrings([
+    metadata.buyer_username,
+    metadata.buyerUsername,
+    metadata.buyer,
+    ...(Array.isArray(identifiers.buyer_usernames) ? identifiers.buyer_usernames : []),
+    String(link.link_type || "") === "customer_identity" ? link.matched_value : null,
+  ], 10).map(normalizeBuyerUsername).filter(Boolean) as string[];
+}
+
+function chooseMatchedBuyer(values: {
+  links: Array<Record<string, any>>;
+  directOrders: Array<Record<string, any>>;
+  lineOrders: Array<Record<string, any>>;
+  returnCases: Array<Record<string, any>>;
+  warnings: Array<Record<string, string>>;
+}) {
+  const candidates: Array<{
+    username: string;
+    key: string;
+    matched_from: "order" | "order_line" | "return_case" | "deterministic_hint";
+    reliability: number;
+    name: string | null;
+    email: string | null;
+  }> = [];
+
+  const addCandidate = (
+    username: unknown,
+    matchedFrom: "order" | "order_line" | "return_case" | "deterministic_hint",
+    reliability: number,
+    name?: unknown,
+    email?: unknown,
+  ) => {
+    const normalized = normalizeBuyerUsername(username);
+    const key = buyerKey(normalized);
+    if (!normalized || !key) return;
+    candidates.push({
+      username: normalized,
+      key,
+      matched_from: matchedFrom,
+      reliability,
+      name: shortText(name, 160) || null,
+      email: normalizedEmail(email),
+    });
+  };
+
+  for (const order of values.directOrders) addCandidate(order.buyer_username, "order", 4, order.buyer_name, order.buyer_email);
+  for (const order of values.lineOrders) addCandidate(order.buyer_username, "order_line", 3, order.buyer_name, order.buyer_email);
+  for (const returnCase of values.returnCases) addCandidate(returnCase.buyer_username, "return_case", 2);
+  for (const link of values.links) {
+    for (const hint of collectBuyerHintsFromLink(link)) addCandidate(hint, "deterministic_hint", 1);
+  }
+
+  if (!candidates.length) {
+    return {
+      username: null,
+      name: null,
+      email: null,
+      matched_from: null,
+      confidence: "none",
+    };
+  }
+
+  const maxReliability = Math.max(...candidates.map((candidate) => candidate.reliability));
+  const strongest = candidates.filter((candidate) => candidate.reliability === maxReliability);
+  const strongestKeys = uniqueStrings(strongest.map((candidate) => candidate.key), 10);
+  const allKeys = uniqueStrings(candidates.map((candidate) => candidate.key), 10);
+  if (strongestKeys.length > 1) {
+    values.warnings.push(contextWarning("ambiguous_buyer_match", "Multiple equally reliable buyer usernames were found in stored deterministic context.", "warning"));
+    return {
+      username: null,
+      name: null,
+      email: null,
+      matched_from: null,
+      confidence: "none",
+    };
+  }
+  if (allKeys.length > 1) {
+    values.warnings.push(contextWarning("ambiguous_buyer_match", "Lower-confidence buyer hints disagree with the strongest stored buyer context.", "warning"));
+  }
+
+  const selected = strongest.find((candidate) => candidate.name || candidate.email) || strongest[0];
+  const confidence = selected.reliability >= 2 ? "confirmed" : "weak";
+  if (confidence === "weak") {
+    values.warnings.push(contextWarning("weak_buyer_match", "Buyer username came only from deterministic link metadata or evidence, so buyer history was not loaded.", "warning"));
+  }
+  return {
+    username: selected.username,
+    name: selected.name,
+    email: selected.email,
+    matched_from: selected.matched_from,
+    confidence,
+  };
+}
+
+function compactBuyerHistorySummary(values: {
+  insights: Record<string, any> | null;
+  buyerHistorySync: Record<string, any> | null;
+  accountHistoryRun: Record<string, any> | null;
+}) {
+  const summary = values.insights?.summary && typeof values.insights.summary === "object"
+    ? values.insights.summary as Record<string, any>
+    : {};
+  const buyerSync = values.buyerHistorySync;
+  const accountRun = values.accountHistoryRun;
+  const lastSuccessAt = buyerSync?.last_success_at || accountRun?.finished_at || null;
+  return {
+    source: "stored_ebay_context",
+    prior_order_count: compactInteger(summary.orderCount),
+    pending_order_count: compactInteger(summary.pendingOrderCount),
+    gross_value: compactNumber(summary.grossSalesBeforeReturns ?? summary.grossSales),
+    retained_value: compactNumber(summary.grossSales ?? summary.netPayout),
+    average_order_value: compactNumber(summary.avgOrderValue),
+    return_count: compactInteger(summary.returnCount),
+    open_return_count: compactInteger(summary.openReturnCount),
+    cancellation_count: compactInteger(summary.cancelledOrderCount),
+    first_prior_purchase_at: summary.firstPurchaseAt || null,
+    last_prior_purchase_at: summary.lastPurchaseAt || null,
+    coverage: {
+      covered_by_account_archive: accountRun ? accountRun.status === "completed" : null,
+      days_back: compactInteger(buyerSync?.days_back ?? accountRun?.days_back),
+      scanned_orders: compactInteger(buyerSync?.scanned_orders ?? accountRun?.scanned_orders),
+      matched_orders: compactInteger(buyerSync?.matched_orders ?? accountRun?.matched_orders),
+      last_success_at: lastSuccessAt,
+      status: buyerSync?.status || accountRun?.status || null,
+    },
+  };
+}
+
+function compactBuyerValueLineBreakdown(data: Record<string, any> | null) {
+  const rows = Array.isArray(data?.lineBreakdown) ? data.lineBreakdown : [];
+  return rows.slice(0, MESSAGE_DETAIL_BUYER_VALUE_LINE_LIMIT).map((row: Record<string, any>) => ({
+    line_id: row.lineId || null,
+    order_id: row.orderId || null,
+    order_number: shortText(row.orderNumber, 120) || null,
+    purchase_at: row.purchaseAt || null,
+    item_state: shortText(row.itemState, 80) || null,
+    title: shortText(row.title, 240) || null,
+    item_number: shortText(row.itemNumber, 120) || null,
+    transaction_id: shortText(row.transactionId, 120) || null,
+    custom_label: shortText(row.customLabel, 180) || null,
+    gross_value: compactNumber(row.lineTotal ?? row.orderTotal),
+    returned_value: compactNumber(row.lineReturnedAmount ?? row.orderReturnedAmount),
+    retained_value: compactNumber(row.lineRetainedAmount ?? row.orderRetainedAmount),
+    return_count: compactInteger(row.returnCount),
+    open_return_count: compactInteger(row.openReturnCount),
+  }));
+}
+
+async function buildStoredEbayMatchedContext(supabase: ServiceClient, messageId: string, rpcSupabase: ServiceClient = supabase) {
+  const warnings: Array<Record<string, string>> = [];
+  try {
+    const { data: linksData, error: linksError } = await supabase
+      .from("email_message_links")
+      .select("id, link_type, matched_value, match_method, confidence, status, ebay_order_id, ebay_order_line_id, item_id, sale_id, metadata, created_at")
+      .eq("message_id", messageId)
+      .in("status", ["suggested", "confirmed"])
+      .order("confidence", { ascending: false, nullsFirst: false })
+      .limit(MESSAGE_DETAIL_LINK_LIMIT);
+
+    if (linksError) {
+      return emptyMatchedContext([
+        contextWarning("missing_order_context", "Stored deterministic links could not be loaded for this message.", "error"),
+      ]);
+    }
+
+    const links = (linksData || []) as Array<Record<string, any>>;
+    if (!links.length) {
+      return emptyMatchedContext([
+        contextWarning("no_deterministic_links", "No active deterministic eBay/order links were found for this message.", "info"),
+      ]);
+    }
+
+    const directOrderIds = uniqueIds(links.map((link) => link.ebay_order_id));
+    const orderLineIds = uniqueIds(links.map((link) => link.ebay_order_line_id));
+    const returnCaseIdsFromMetadata = uniqueIds(links.map((link) => link.metadata?.return_case_id));
+
+    const linesResult = orderLineIds.length
+      ? await supabase
+        .from("ebay_order_lines")
+        .select("id, order_id, item_number, transaction_id, custom_label, item_title, quantity, sold_for, total_price, line_status, internal_item_id, sale_id")
+        .in("id", orderLineIds)
+        .limit(MESSAGE_DETAIL_LINK_LIMIT)
+      : { data: [], error: null };
+    if (linesResult.error) {
+      warnings.push(contextWarning("missing_order_context", "Linked eBay order lines could not be loaded.", "warning"));
+    }
+    const linkedLines = (linesResult.data || []) as Array<Record<string, any>>;
+    const lineOrderIds = uniqueIds(linkedLines.map((line) => line.order_id));
+    const allOrderIds = uniqueIds([...directOrderIds, ...lineOrderIds]);
+
+    const ordersResult = allOrderIds.length
+      ? await supabase
+        .from("ebay_orders")
+        .select("id, order_number, buyer_username, buyer_name, buyer_email, status, sale_date, paid_on_date, ship_by_date, shipped_on_date, total_price, net_payout, tracking_number, shipping_service")
+        .in("id", allOrderIds)
+        .limit(MESSAGE_DETAIL_LINK_LIMIT)
+      : { data: [], error: null };
+    if (ordersResult.error) {
+      warnings.push(contextWarning("missing_order_context", "Linked eBay orders could not be loaded.", "warning"));
+    }
+    const orders = (ordersResult.data || []) as Array<Record<string, any>>;
+    const orderById = new Map<string, Record<string, any>>();
+    for (const order of orders) orderById.set(String(order.id), order);
+
+    const missingOrderLinks = links.some((link) =>
+      (link.ebay_order_id && !orderById.has(String(link.ebay_order_id))) ||
+      (link.ebay_order_line_id && !linkedLines.some((line) => String(line.id) === String(link.ebay_order_line_id)))
+    );
+    const unresolvableOrderLinks = links.some((link) =>
+      (link.link_type === "ebay_order" && !link.ebay_order_id) ||
+      (link.link_type === "ebay_order_line" && !link.ebay_order_line_id)
+    );
+    if (missingOrderLinks || unresolvableOrderLinks) {
+      warnings.push(contextWarning("missing_order_context", "One or more deterministic order links did not resolve to stored compact order context.", "warning"));
+    }
+
+    const directOrders = orders.filter((order) => directOrderIds.includes(String(order.id)));
+    const lineOrders = orders.filter((order) => lineOrderIds.includes(String(order.id)));
+    const orderNumbers = uniqueStrings(orders.map((order) => order.order_number), MESSAGE_DETAIL_LINK_LIMIT);
+
+    const [returnByIdResult, returnsByOrderIdResult, returnsByOrderNumberResult] = await Promise.all([
+      returnCaseIdsFromMetadata.length
+        ? supabase
+          .from("ebay_return_cases")
+          .select("id, ebay_return_id, order_id, order_number, buyer_username, status, return_reason, opened_at, received_at, closed_at, return_tracking_number")
+          .in("id", returnCaseIdsFromMetadata)
+          .limit(MESSAGE_DETAIL_RETURN_LIMIT)
+        : Promise.resolve({ data: [], error: null }),
+      allOrderIds.length
+        ? supabase
+          .from("ebay_return_cases")
+          .select("id, ebay_return_id, order_id, order_number, buyer_username, status, return_reason, opened_at, received_at, closed_at, return_tracking_number")
+          .in("order_id", allOrderIds)
+          .limit(MESSAGE_DETAIL_RETURN_LIMIT)
+        : Promise.resolve({ data: [], error: null }),
+      orderNumbers.length
+        ? supabase
+          .from("ebay_return_cases")
+          .select("id, ebay_return_id, order_id, order_number, buyer_username, status, return_reason, opened_at, received_at, closed_at, return_tracking_number")
+          .in("order_number", orderNumbers)
+          .limit(MESSAGE_DETAIL_RETURN_LIMIT)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    for (const result of [returnByIdResult, returnsByOrderIdResult, returnsByOrderNumberResult]) {
+      if (result.error) warnings.push(contextWarning("return_context_partial", "Some stored return context could not be loaded.", "warning"));
+    }
+
+    const returnCaseById = new Map<string, Record<string, any>>();
+    for (const row of [
+      ...((returnByIdResult.data || []) as Array<Record<string, any>>),
+      ...((returnsByOrderIdResult.data || []) as Array<Record<string, any>>),
+      ...((returnsByOrderNumberResult.data || []) as Array<Record<string, any>>),
+    ]) {
+      returnCaseById.set(String(row.id), row);
+    }
+
+    let buyer = chooseMatchedBuyer({
+      links,
+      directOrders,
+      lineOrders,
+      returnCases: [...returnCaseById.values()],
+      warnings,
+    });
+
+    if (buyer.username && buyer.confidence !== "weak") {
+      const buyerReturnsResult = await supabase
+        .from("ebay_return_cases")
+        .select("id, ebay_return_id, order_id, order_number, buyer_username, status, return_reason, opened_at, received_at, closed_at, return_tracking_number")
+        .eq("buyer_username", buyer.username)
+        .order("opened_at", { ascending: false, nullsFirst: false })
+        .limit(MESSAGE_DETAIL_BUYER_RETURN_LIMIT);
+      if (buyerReturnsResult.error) {
+        warnings.push(contextWarning("return_context_partial", "Buyer-level return context could not be loaded.", "warning"));
+      } else {
+        for (const row of (buyerReturnsResult.data || []) as Array<Record<string, any>>) returnCaseById.set(String(row.id), row);
+      }
+    }
+
+    const returnCases = [...returnCaseById.values()]
+      .sort((a, b) => String(b.opened_at || "").localeCompare(String(a.opened_at || "")))
+      .slice(0, MESSAGE_DETAIL_RETURN_LIMIT);
+    const returnCaseIds = uniqueIds(returnCases.map((returnCase) => returnCase.id));
+    const returnItemsResult = returnCaseIds.length
+      ? await supabase
+        .from("ebay_return_items")
+        .select("id, return_case_id, order_id, order_line_id, internal_item_id, item_title, item_number, expected_quantity, received_quantity, condition_received, disposition, processed_at")
+        .in("return_case_id", returnCaseIds)
+        .limit(50)
+      : { data: [], error: null };
+    if (returnItemsResult.error) {
+      warnings.push(contextWarning("return_context_partial", "Stored return item context could not be loaded.", "warning"));
+    }
+    const returnItemsByCaseId = new Map<string, Array<Record<string, any>>>();
+    for (const item of (returnItemsResult.data || []) as Array<Record<string, any>>) {
+      const key = String(item.return_case_id || "");
+      if (!key) continue;
+      const existing = returnItemsByCaseId.get(key) || [];
+      existing.push(item);
+      returnItemsByCaseId.set(key, existing);
+    }
+
+    if (!buyer.username && returnCases.length) {
+      buyer = chooseMatchedBuyer({
+        links,
+        directOrders,
+        lineOrders,
+        returnCases,
+        warnings,
+      });
+    }
+
+    let buyerHistorySummary = null;
+    let buyerValueLineBreakdown: Array<Record<string, unknown>> = [];
+    if (buyer.username && buyer.confidence === "confirmed") {
+      const key = buyerKey(buyer.username);
+      const [insightsResult, returnValueResult, valueLineResult, buyerSyncResult, accountRunResult] = await Promise.all([
+        rpcSupabase.rpc("get_ebay_buyer_insights", { _buyer_username: buyer.username, _days_back: null }),
+        rpcSupabase.rpc("get_ebay_buyer_return_value_breakdown", { _buyer_username: buyer.username, _days_back: null }),
+        rpcSupabase.rpc("get_ebay_buyer_value_line_breakdown", { _buyer_username: buyer.username, _days_back: null }),
+        key
+          ? supabase
+            .from("ebay_buyer_history_syncs")
+            .select("buyer_key, buyer_username, status, days_back, scanned_orders, matched_orders, last_started_at, last_success_at, last_error, updated_at")
+            .eq("buyer_key", key)
+            .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        supabase
+          .from("ebay_account_history_sync_runs")
+          .select("id, status, days_back, scanned_orders, matched_orders, started_at, finished_at, error")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      if (insightsResult.error) warnings.push(contextWarning("buyer_history_rpc_failed", "Stored buyer insights RPC failed; returning partial matched context.", "warning"));
+      if (returnValueResult.error) warnings.push(contextWarning("buyer_history_rpc_failed", "Stored buyer return value RPC failed; returning partial matched context.", "warning"));
+      if (valueLineResult.error) warnings.push(contextWarning("buyer_history_rpc_failed", "Stored buyer value line RPC failed; returning partial matched context.", "warning"));
+      if (buyerSyncResult.error || accountRunResult.error) warnings.push(contextWarning("missing_buyer_history", "Buyer history coverage metadata could not be loaded.", "warning"));
+
+      const insights = insightsResult.error ? null : (insightsResult.data as Record<string, any> | null);
+      buyerHistorySummary = compactBuyerHistorySummary({
+        insights,
+        buyerHistorySync: buyerSyncResult.error ? null : buyerSyncResult.data as Record<string, any> | null,
+        accountHistoryRun: accountRunResult.error ? null : accountRunResult.data as Record<string, any> | null,
+      });
+      buyerValueLineBreakdown = valueLineResult.error
+        ? []
+        : compactBuyerValueLineBreakdown(valueLineResult.data as Record<string, any> | null);
+
+      if (!insights && !buyerHistorySummary.coverage.last_success_at) {
+        warnings.push(contextWarning("missing_buyer_history", "No stored buyer history summary was available for the confirmed buyer.", "info"));
+      }
+      const lastSuccessTime = Date.parse(String(buyerHistorySummary.coverage.last_success_at || ""));
+      if (Number.isFinite(lastSuccessTime) && Date.now() - lastSuccessTime > 14 * 24 * 60 * 60 * 1000) {
+        warnings.push(contextWarning("stale_buyer_history", "Stored buyer history coverage is older than 14 days.", "warning"));
+      }
+    } else if (buyer.username) {
+      warnings.push(contextWarning("missing_buyer_history", "Buyer history was skipped because the buyer match was not confirmed.", "info"));
+    }
+
+    return {
+      links: links.map(compactMatchedContextLink),
+      orders: orders.map(compactMatchedOrder),
+      order_lines: linkedLines.map((line) => compactMatchedOrderLine(line, orderById.get(String(line.order_id)) || null)),
+      buyer,
+      returns: returnCases.map((returnCase) => compactMatchedReturn(returnCase, returnItemsByCaseId.get(String(returnCase.id)) || [])),
+      buyer_history_summary: buyerHistorySummary,
+      buyer_value_line_breakdown: buyerValueLineBreakdown,
+      warnings,
+    };
+  } catch (error) {
+    console.error("[microsoft-email-classify] stored matched context failed", error);
+    return emptyMatchedContext([
+      contextWarning("missing_order_context", "Stored eBay context could not be built for this message.", "error"),
+    ]);
+  }
 }
 
 function messageSortTime(message: Record<string, any>) {
@@ -3586,7 +4137,7 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
   };
 }
 
-async function adminMessageDetail(supabase: ServiceClient, input: Input) {
+async function adminMessageDetail(supabase: ServiceClient, input: Input, rpcSupabase: ServiceClient = supabase) {
   if (!input.messageId) throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
 
   const messageSelect = "id, mailbox_id, provider, provider_message_id, provider_immutable_id, internet_message_id, conversation_id, conversation_index, subject, from_name, from_email, sender_name, sender_email, reply_to_emails, received_at, sent_at, created_date_time, last_modified_date_time, web_link, importance, inference_classification, is_read, is_draft, body_preview, body_content_type, has_attachments, sync_status";
@@ -3721,6 +4272,7 @@ async function adminMessageDetail(supabase: ServiceClient, input: Input) {
       Boolean(conversationId),
     )
   );
+  const matchedContext = await buildStoredEbayMatchedContext(supabase, String(message.id), rpcSupabase);
 
   return {
     ok: true,
@@ -3810,6 +4362,7 @@ async function adminMessageDetail(supabase: ServiceClient, input: Input) {
     conversation_messages: threadMessagesPayload,
     same_conversation_messages: threadMessagesPayload,
     thread_blocks: threadBlocks,
+    matched_context: matchedContext,
     warnings,
     classification: classification ? {
       id: classification.id,
@@ -5978,6 +6531,7 @@ serve(async (req) => {
   const counters = blankCounters();
   try {
     const supabase = serviceClient();
+    const accessToken = getBearerToken(req);
     const admin = await requireAdmin(req, supabase);
     const input = await parseInput(req);
 
@@ -5986,7 +6540,7 @@ serve(async (req) => {
     }
 
     if (input.mode === "message_detail") {
-      return json(req, 200, await adminMessageDetail(supabase, input));
+      return json(req, 200, await adminMessageDetail(supabase, input, authenticatedClient(accessToken)));
     }
 
     if (input.mode === "admin_context_view") {

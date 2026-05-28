@@ -16,11 +16,17 @@
     fetchMatchContext,
     requestMatchReviewAction,
     saveClassificationReview,
+    fetchEbayConversations,
+    fetchEbayConversationMessages,
+    fetchEbayConversationContext,
+    runEbayMessageSync,
   } = window.EmailTriageApi;
   const { TRANSITIONS, createInitialState, createStore } = window.EmailTriageState;
   const {
     getStoredDensityMode,
     storeDensityMode,
+    getStoredEbayConversationDensityMode,
+    storeEbayConversationDensityMode,
     clampNumber,
     getStoredPanelWidths,
     storePanelWidths,
@@ -115,6 +121,18 @@
     operationalDashboardRefresh: document.getElementById("refresh-operational-dashboard"),
     operationalDashboardStatus: document.getElementById("operational-dashboard-status"),
     operationalDashboard: document.getElementById("operational-dashboard"),
+    ebayConversationRefresh: document.getElementById("ebay-conversation-refresh"),
+    ebayConversationSync: document.getElementById("ebay-conversation-sync"),
+    ebayConversationStatus: document.getElementById("ebay-conversation-status"),
+    ebayConversationFilterTabs: document.querySelectorAll("[data-ebay-conversation-filter]"),
+    ebayConversationSearch: document.getElementById("ebay-conversation-search"),
+    ebayConversationSearchClear: document.getElementById("ebay-conversation-search-clear"),
+    ebayConversationDensityInputs: document.querySelectorAll("input[name='ebay-conversation-density']"),
+    ebayConversationSyncResult: document.getElementById("ebay-conversation-sync-result"),
+    ebayConversationSummary: document.getElementById("ebay-conversation-summary"),
+    ebayConversationList: document.getElementById("ebay-conversation-list"),
+    ebayConversationDetail: document.getElementById("ebay-conversation-detail"),
+    ebayConversationContext: document.getElementById("ebay-conversation-context"),
     classificationSort: document.getElementById("classification-sort"),
     classificationPageSize: document.getElementById("classification-page-size"),
     classificationPriorityFilter: document.getElementById("classification-priority-filter"),
@@ -199,6 +217,7 @@
   const triageStore = createStore(createInitialState({
     data: normalizeAdminViewPayload({}),
     densityMode: getStoredDensityMode(),
+    ebayConversationDensityMode: getStoredEbayConversationDensityMode(),
     categorySortMode: getStoredCategorySortMode(),
     customCategoryOrder: getStoredCustomCategoryOrder(),
     operationalDashboardCollapsed: getStoredDashboardCollapsed(),
@@ -295,6 +314,13 @@
       inboxLastOperationId: state.inboxLastOperationId,
       inboxLastRefreshedAt: state.inboxLastRefreshedAt,
       inboxPreviewControls: state.inboxPreviewControls,
+      ebayConversationLoading: state.ebayConversationLoading,
+      ebayConversationCount: state.ebayConversations?.length || 0,
+      ebayConversationSearchQuery: state.ebayConversationSearchQuery || "",
+      ebayConversationDensityMode: state.ebayConversationDensityMode || "compact",
+      selectedEbayConversationId: state.selectedEbayConversationId,
+      ebayConversationSyncLoading: state.ebayConversationSyncLoading,
+      ebayConversationSyncResult: state.ebayConversationSyncResult,
     };
   });
 
@@ -816,9 +842,9 @@
 
     if (detail && isExpanded) {
       return `
-        <details class="classification-detail-section email-body-section detail-disclosure core-disclosure" open>
+        <details class="classification-detail-section email-body-section detail-disclosure stored-body-disclosure" open>
           <summary>
-            <span>Email Body</span>
+            <span>Stored Body Text</span>
             <i data-lucide="chevron-down"></i>
           </summary>
           ${detail.body_truncated ? `
@@ -836,9 +862,9 @@
     }
 
     return `
-      <details class="classification-detail-section email-body-section detail-disclosure core-disclosure" open>
+      <details class="classification-detail-section email-body-section detail-disclosure stored-body-disclosure">
         <summary>
-          <span>Email Body</span>
+          <span>Stored Body Text</span>
           <i data-lucide="chevron-down"></i>
         </summary>
         <p>${escapeHtml(selected.message_body_preview || "No body preview available.")}</p>
@@ -849,6 +875,160 @@
         </button>
       </details>
     `;
+  }
+
+  function safeArray(value) {
+    return Array.isArray(value) ? value.filter((item) => item !== null && item !== undefined && item !== "") : [];
+  }
+
+  function safeText(value, fallback = "--") {
+    const text = String(value ?? "").trim();
+    return text || fallback;
+  }
+
+  function formatContextDate(value) {
+    return value ? formatDateTime(value) : "--";
+  }
+
+  function formatContextMoney(value) {
+    if (value === null || value === undefined || value === "") return "--";
+    const number = Number(value);
+    if (!Number.isFinite(number)) return String(value);
+    return number.toLocaleString(undefined, { style: "currency", currency: "USD" });
+  }
+
+  function formatContextNumber(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "--";
+    return number.toLocaleString();
+  }
+
+  function renderInfoChips(items = [], emptyText = "None") {
+    const chips = safeArray(items);
+    if (!chips.length) return `<span class="context-info-chip is-muted">${escapeHtml(emptyText)}</span>`;
+    return chips.map((item) => `<span class="context-info-chip">${escapeHtml(humanizeValue(item))}</span>`).join("");
+  }
+
+  function warningParts(warning) {
+    if (warning && typeof warning === "object") {
+      return {
+        code: warning.code || warning.type || "context_warning",
+        message: warning.message || warning.detail || warning.code || "Context warning",
+        severity: String(warning.severity || warning.level || "warning").toLowerCase(),
+      };
+    }
+    return {
+      code: String(warning || "context_warning"),
+      message: humanizeValue(warning || "Context warning"),
+      severity: "warning",
+    };
+  }
+
+  function renderWarningPanel(detailWarnings = [], contextWarnings = []) {
+    const warnings = [
+      ...safeArray(detailWarnings).map((warning) => ({ ...warningParts(warning), source: "Thread" })),
+      ...safeArray(contextWarnings).map((warning) => ({ ...warningParts(warning), source: "Context" })),
+    ];
+    if (!warnings.length) return "";
+
+    return `
+      <div class="context-warning-panel" aria-label="Context warnings">
+        <strong>Context Notes</strong>
+        <div class="context-warning-list">
+          ${warnings.map((warning) => `
+            <span class="context-warning-chip is-${escapeHtml(warning.severity === "error" ? "error" : warning.severity === "info" ? "info" : "warning")}">
+              <b>${escapeHtml(warning.source)}</b>
+              ${escapeHtml(warning.message || humanizeValue(warning.code))}
+            </span>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function threadRoleLabel(role) {
+    const value = String(role || "").toLowerCase();
+    if (value === "buyer") return "Buyer";
+    if (value === "operator" || value === "seller") return "OG / Seller";
+    if (value === "platform" || value === "ebay") return "eBay";
+    return "Unknown";
+  }
+
+  function threadRoleClass(role) {
+    const value = String(role || "").toLowerCase();
+    if (value === "buyer") return "buyer";
+    if (value === "operator" || value === "seller") return "seller";
+    if (value === "platform" || value === "ebay") return "ebay";
+    return "unknown";
+  }
+
+  function renderThreadText(text) {
+    const cleaned = safeText(text, "No stored body text for this thread block.");
+    const isLong = cleaned.length > 1200;
+    const excerpt = isLong ? `${cleaned.slice(0, 1200).trim()}...` : cleaned;
+    if (!isLong) return `<pre class="thread-card-text">${escapeHtml(cleaned)}</pre>`;
+    return `
+      <pre class="thread-card-text">${escapeHtml(excerpt)}</pre>
+      <details class="thread-card-more">
+        <summary>Show full stored text</summary>
+        <pre>${escapeHtml(cleaned)}</pre>
+      </details>
+    `;
+  }
+
+  function renderConversationSection(state, selected) {
+    const messageId = selected?.message_id || "";
+    const detail = messageId ? state.messageDetailsById[messageId] : null;
+    const error = messageId ? state.messageDetailErrorsById[messageId] : null;
+    const isLoading = state.messageDetailLoadingId === messageId;
+    const blocks = safeArray(detail?.thread_blocks);
+
+    if (!detail) {
+      return renderCoreDisclosure(
+        "Conversation",
+        renderBadge("Stored thread", "muted"),
+        `
+          <p class="conversation-empty">Load the selected message detail to view stored Outlook thread blocks.</p>
+          ${error ? `<div class="classification-notice is-error">Could not load conversation: ${escapeHtml(error)}</div>` : ""}
+          <button type="button" class="secondary-btn classification-body-action" data-message-detail-action="load" data-message-id="${escapeHtml(messageId)}" ${isLoading || !messageId ? "disabled" : ""}>
+            <i data-lucide="${isLoading ? "loader-circle" : "messages-square"}"></i>
+            ${escapeHtml(isLoading ? "Loading Conversation" : "View Full Email")}
+          </button>
+        `,
+        "thread-section",
+      );
+    }
+
+    return renderCoreDisclosure(
+      "Conversation",
+      renderBadge(`${blocks.length} ${blocks.length === 1 ? "block" : "blocks"}`, blocks.length ? "category" : "muted"),
+      `
+        ${blocks.length ? `
+          <div class="thread-card-list">
+            ${blocks.map((block) => {
+              const sender = [block.sender_name, block.sender_email ? `<${block.sender_email}>` : ""].filter(Boolean).join(" ");
+              const timestamp = block.received_at || block.sent_at;
+              return `
+                <article class="thread-card">
+                  <div class="thread-card-head">
+                    <div class="thread-card-sender">
+                      <strong>${escapeHtml(sender || "Sender unavailable")}</strong>
+                      <span>${escapeHtml(formatContextDate(timestamp))}</span>
+                    </div>
+                    <span class="thread-role-badge is-${escapeHtml(threadRoleClass(block.role))}">${escapeHtml(threadRoleLabel(block.role))}</span>
+                  </div>
+                  ${block.subject ? `<div class="thread-card-subject">${escapeHtml(block.subject)}</div>` : ""}
+                  ${safeArray(block.warnings).length ? `<div class="thread-card-warnings">${renderInfoChips(block.warnings, "No warnings")}</div>` : ""}
+                  ${renderThreadText(block.text)}
+                </article>
+              `;
+            }).join("")}
+          </div>
+        ` : `<div class="classification-empty matched-context-empty">No stored thread blocks were available for this message.</div>`}
+        ${renderWarningPanel(detail.warnings, [])}
+      `,
+      "thread-section",
+    );
   }
 
   function renderOperatorReviewSection(state, selected) {
@@ -1226,6 +1406,274 @@
     `;
   }
 
+  function contextConfidenceVariant(confidence) {
+    const value = String(confidence || "").toLowerCase();
+    if (value === "confirmed" || value === "strong") return "success";
+    if (value === "medium") return "category";
+    if (value === "suggested" || value === "weak") return "warning";
+    return "muted";
+  }
+
+  function renderContextFactGrid(items = []) {
+    return `
+      <dl class="context-fact-grid">
+        ${items.map((item) => `
+          <div${item.wide ? ' class="context-fact-wide"' : ""}>
+            <dt>${escapeHtml(item.label)}</dt>
+            <dd>${escapeHtml(safeText(item.value))}</dd>
+          </div>
+        `).join("")}
+      </dl>
+    `;
+  }
+
+  function renderBuyerSummaryCard(context) {
+    const buyer = context?.buyer && typeof context.buyer === "object" ? context.buyer : {};
+    const history = context?.buyer_history_summary && typeof context.buyer_history_summary === "object"
+      ? context.buyer_history_summary
+      : null;
+    const coverage = history?.coverage && typeof history.coverage === "object" ? history.coverage : {};
+    const confidence = String(buyer.confidence || "none").toLowerCase();
+    const weakIdentity = confidence === "weak" || confidence === "none";
+
+    return `
+      <section class="context-card buyer-summary-card">
+        <div class="context-card-head">
+          <h4>Buyer Summary</h4>
+          ${renderBadge(humanizeValue(confidence), contextConfidenceVariant(confidence))}
+        </div>
+        ${weakIdentity ? `
+          <div class="classification-notice is-warning">
+            Buyer identity is ${escapeHtml(humanizeValue(confidence))}. Treat this as operator-only context and avoid assuming it is the buyer in draft text.
+          </div>
+        ` : ""}
+        ${renderContextFactGrid([
+          { label: "Username", value: buyer.username || "No buyer identified" },
+          { label: "Name", value: buyer.name || "Unavailable" },
+          { label: "Email", value: buyer.email || "Unavailable" },
+          { label: "Matched From", value: buyer.matched_from ? humanizeValue(buyer.matched_from) : "Unavailable" },
+        ])}
+        <div class="buyer-metric-grid">
+          ${[
+            ["Prior Orders", formatContextNumber(history?.prior_order_count)],
+            ["Gross Value", formatContextMoney(history?.gross_value)],
+            ["Retained Value", formatContextMoney(history?.retained_value)],
+            ["Average Order", formatContextMoney(history?.average_order_value)],
+            ["Returns", formatContextNumber(history?.return_count)],
+            ["Open Returns", formatContextNumber(history?.open_return_count)],
+            ["Cancellations", formatContextNumber(history?.cancellation_count)],
+            ["Coverage", coverage.status ? humanizeValue(coverage.status) : "Unavailable"],
+          ].map(([label, value]) => `
+            <div>
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(value)}</strong>
+            </div>
+          `).join("")}
+        </div>
+        ${renderContextFactGrid([
+          { label: "First Prior Purchase", value: formatContextDate(history?.first_prior_purchase_at) },
+          { label: "Last Prior Purchase", value: formatContextDate(history?.last_prior_purchase_at) },
+          { label: "Archive Coverage", value: coverage.covered_by_account_archive === true ? "Covered by account archive" : coverage.covered_by_account_archive === false ? "Not covered by account archive" : "Unknown" },
+          { label: "Coverage Last Success", value: formatContextDate(coverage.last_success_at) },
+        ])}
+      </section>
+    `;
+  }
+
+  function renderOrderContextCard(orders = []) {
+    const rows = safeArray(orders);
+    return `
+      <section class="context-card">
+        <div class="context-card-head">
+          <h4>Matched Orders</h4>
+          ${renderBadge(`${rows.length} ${rows.length === 1 ? "order" : "orders"}`, rows.length ? "category" : "muted")}
+        </div>
+        ${rows.length ? `
+          <div class="context-row-list">
+            ${rows.map((order) => `
+              <div class="context-row order-row">
+                ${renderContextFactGrid([
+                  { label: "Order", value: order.order_number || "Unavailable" },
+                  { label: "Status", value: order.status || "Unknown" },
+                  { label: "Buyer", value: order.buyer_username || "Unknown" },
+                  { label: "Sale Date", value: formatContextDate(order.sale_date) },
+                  { label: "Paid", value: formatContextDate(order.paid_on_date) },
+                  { label: "Ship By", value: formatContextDate(order.ship_by_date) },
+                  { label: "Shipped", value: formatContextDate(order.shipped_on_date) },
+                  { label: "Total Price", value: formatContextMoney(order.total_price) },
+                  { label: "Net Payout", value: formatContextMoney(order.net_payout) },
+                  { label: "Tracking", value: order.tracking_number || "Unavailable" },
+                  { label: "Shipping Service", value: order.shipping_service || "Unavailable", wide: true },
+                ])}
+              </div>
+            `).join("")}
+          </div>
+        ` : `<div class="classification-empty matched-context-empty">No matched eBay order found.</div>`}
+      </section>
+    `;
+  }
+
+  function renderOrderLineContextCard(lines = []) {
+    const rows = safeArray(lines);
+    return `
+      <section class="context-card">
+        <div class="context-card-head">
+          <h4>Matched Items / Order Lines</h4>
+          ${renderBadge(`${rows.length} ${rows.length === 1 ? "line" : "lines"}`, rows.length ? "category" : "muted")}
+        </div>
+        ${rows.length ? `
+          <div class="context-row-list">
+            ${rows.map((line) => `
+              <div class="context-row item-row">
+                ${renderContextFactGrid([
+                  { label: "Item", value: line.item_title || "Untitled item", wide: true },
+                  { label: "Order", value: line.order_number || "Unavailable" },
+                  { label: "Item Number", value: line.item_number || "Unavailable" },
+                  { label: "Transaction ID", value: line.transaction_id || "Unavailable" },
+                  { label: "SKU / Custom Label", value: line.custom_label || "Unavailable" },
+                  { label: "Quantity", value: formatContextNumber(line.quantity) },
+                  { label: "Sold For", value: formatContextMoney(line.sold_for) },
+                  { label: "Total Price", value: formatContextMoney(line.total_price) },
+                  { label: "Line Status", value: line.line_status || "Unknown" },
+                ])}
+              </div>
+            `).join("")}
+          </div>
+        ` : `<div class="classification-empty matched-context-empty">No matched order line found.</div>`}
+      </section>
+    `;
+  }
+
+  function renderReturnContextCard(returns = []) {
+    const rows = safeArray(returns);
+    return `
+      <section class="context-card">
+        <div class="context-card-head">
+          <h4>Returns</h4>
+          ${renderBadge(`${rows.length} ${rows.length === 1 ? "return" : "returns"}`, rows.length ? "warning" : "muted")}
+        </div>
+        ${rows.length ? `
+          <div class="context-row-list">
+            ${rows.map((returnCase) => `
+              <div class="context-row return-row">
+                ${renderContextFactGrid([
+                  { label: "Return ID", value: returnCase.ebay_return_id || "Unavailable" },
+                  { label: "Order", value: returnCase.order_number || "Unavailable" },
+                  { label: "Status", value: returnCase.status || "Unknown" },
+                  { label: "Reason", value: returnCase.return_reason || "Unavailable", wide: true },
+                  { label: "Opened", value: formatContextDate(returnCase.opened_at) },
+                  { label: "Received", value: formatContextDate(returnCase.received_at) },
+                  { label: "Closed", value: formatContextDate(returnCase.closed_at) },
+                  { label: "Tracking", value: returnCase.return_tracking_number || "Unavailable" },
+                ])}
+                ${safeArray(returnCase.items).length ? `
+                  <div class="return-item-list">
+                    ${returnCase.items.map((item) => `
+                      <span>${escapeHtml(safeText(item.item_title || item.item_number, "Return item"))} · expected ${escapeHtml(formatContextNumber(item.expected_quantity))} · received ${escapeHtml(formatContextNumber(item.received_quantity))}</span>
+                    `).join("")}
+                  </div>
+                ` : ""}
+              </div>
+            `).join("")}
+          </div>
+        ` : `<div class="classification-empty matched-context-empty is-quiet">No related returns found.</div>`}
+      </section>
+    `;
+  }
+
+  function renderBuyerValueLinesCard(lines = []) {
+    const rows = safeArray(lines);
+    if (!rows.length) {
+      return `
+        <section class="context-card">
+          <div class="context-card-head">
+            <h4>Buyer History Snapshot</h4>
+            ${renderBadge("No lines", "muted")}
+          </div>
+          <div class="classification-empty matched-context-empty is-quiet">No recent buyer value lines were returned.</div>
+        </section>
+      `;
+    }
+
+    return `
+      <section class="context-card context-card-wide">
+        <div class="context-card-head">
+          <h4>Buyer History Snapshot</h4>
+          ${renderBadge(`${rows.length} ${rows.length === 1 ? "line" : "lines"}`, "category")}
+        </div>
+        <div class="buyer-value-table-wrap">
+          <table class="buyer-value-table">
+            <thead>
+              <tr>
+                <th>Purchase</th>
+                <th>Order</th>
+                <th>Item</th>
+                <th>State</th>
+                <th>Gross</th>
+                <th>Returned</th>
+                <th>Retained</th>
+                <th>Returns</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map((line) => `
+                <tr>
+                  <td>${escapeHtml(formatContextDate(line.purchase_at))}</td>
+                  <td>${escapeHtml(safeText(line.order_number))}</td>
+                  <td>${escapeHtml(safeText(line.title))}</td>
+                  <td>${escapeHtml(safeText(line.item_state))}</td>
+                  <td>${escapeHtml(formatContextMoney(line.gross_value))}</td>
+                  <td>${escapeHtml(formatContextMoney(line.returned_value))}</td>
+                  <td>${escapeHtml(formatContextMoney(line.retained_value))}</td>
+                  <td>${escapeHtml(formatContextNumber(line.return_count))} / ${escapeHtml(formatContextNumber(line.open_return_count))} open</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    `;
+  }
+
+  function renderStoredMatchedContextSection(state, selected) {
+    const messageId = selected?.message_id || "";
+    const detail = messageId ? state.messageDetailsById[messageId] : null;
+    const isLoading = state.messageDetailLoadingId === messageId;
+    const context = detail?.matched_context && typeof detail.matched_context === "object" ? detail.matched_context : null;
+
+    if (!detail) {
+      return renderCoreDisclosure(
+        "Buyer / Order Context",
+        renderBadge("Load detail", "muted"),
+        `
+          <p class="conversation-empty">Load the selected message detail to view stored eBay buyer, order, item, return, and history context.</p>
+          <button type="button" class="secondary-btn classification-body-action" data-message-detail-action="load" data-message-id="${escapeHtml(messageId)}" ${isLoading || !messageId ? "disabled" : ""}>
+            <i data-lucide="${isLoading ? "loader-circle" : "database"}"></i>
+            ${escapeHtml(isLoading ? "Loading Context" : "Load Context")}
+          </button>
+        `,
+        "stored-context-section",
+      );
+    }
+
+    const safeContext = context || {};
+    return renderCoreDisclosure(
+      "Buyer / Order Context",
+      renderBadge(context ? "Stored eBay context" : "Unavailable", context ? "category" : "muted"),
+      `
+        <div class="stored-context-grid">
+          ${renderBuyerSummaryCard(safeContext)}
+          ${renderOrderContextCard(safeContext.orders)}
+          ${renderOrderLineContextCard(safeContext.order_lines)}
+          ${renderReturnContextCard(safeContext.returns)}
+          ${renderBuyerValueLinesCard(safeContext.buyer_value_line_breakdown)}
+        </div>
+        ${renderWarningPanel(detail.warnings, safeContext.warnings)}
+      `,
+      "stored-context-section",
+    );
+  }
+
   function matchStatusVariant(status) {
     const value = String(status || "").toLowerCase();
     if (value === "confirmed") return "success";
@@ -1314,7 +1762,7 @@
     return `
       <details class="classification-detail-section matched-context-section detail-disclosure core-disclosure" open>
         <summary>
-          <span>Matched Order Context</span>
+          <span>Deterministic Link Review</span>
           ${payload ? renderBadge(`${matches.length} ${matches.length === 1 ? "match" : "matches"}`, matches.length ? "category" : "muted") : ""}
           <i data-lucide="chevron-down"></i>
         </summary>
@@ -1435,11 +1883,15 @@
         "ai-summary-section",
       )}
 
-      ${renderEmailBodySection(state, selected)}
+      ${renderConversationSection(state, selected)}
+
+      ${renderStoredMatchedContextSection(state, selected)}
 
       ${renderResponseDraftSection(state, selected)}
 
       ${renderMatchedContextSection(state, selected)}
+
+      ${renderEmailBodySection(state, selected)}
 
       ${renderAdvancedDisclosure(
         "AI Classification Details",
@@ -1728,6 +2180,736 @@
       });
       console.error("[email-triage] operational dashboard fetch failed:", error);
     }
+  }
+
+  function ebayConversationTime(conversation) {
+    return conversation?.latest_message_created_at ||
+      conversation?.last_message_created_at ||
+      conversation?.updated_at ||
+      conversation?.created_at ||
+      null;
+  }
+
+  function compactConversationText(value, fallback = "") {
+    const text = String(value ?? "").replace(/\s+/g, " ").trim();
+    return text || fallback;
+  }
+
+  function normalizeEbaySearchText(value) {
+    return compactConversationText(value)
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
+
+  function ebayBuyerIdentity(conversation) {
+    const identity = conversation?.buyer_identity && typeof conversation.buyer_identity === "object"
+      ? conversation.buyer_identity
+      : {};
+    const displayName = compactConversationText(
+      identity.display_name || identity.username,
+      conversation?.conversation_type === "FROM_EBAY" ? "eBay" : "Unknown buyer",
+    );
+    return {
+      username: compactConversationText(identity.username, displayName === "Unknown buyer" ? "" : displayName),
+      displayName,
+      source: compactConversationText(identity.source, displayName === "Unknown buyer" ? "none" : "other_party"),
+      confidence: compactConversationText(identity.confidence, "derived"),
+      name: compactConversationText(identity.name),
+      email: compactConversationText(identity.email),
+    };
+  }
+
+  function ebayIdentitySourceLabel(source) {
+    const labels = {
+      order: "Order buyer",
+      order_line: "Order-line buyer",
+      return_case: "Return buyer",
+      conversation_link: "Linked buyer",
+      other_party: "eBay contact",
+      message_inbound_sender: "Inbound sender",
+      message_outbound_recipient: "Outbound recipient",
+      message_participant: "Message participant",
+      platform: "From eBay",
+      none: "Unknown buyer",
+    };
+    return labels[source] || humanizeValue(source || "Derived buyer");
+  }
+
+  function ebayConversationInitials(conversation) {
+    const label = ebayBuyerIdentity(conversation).displayName;
+    if (label === "Unknown buyer") return "?";
+    const clean = label.replace(/[^a-z0-9]+/gi, " ").trim();
+    const parts = clean.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    return clean.slice(0, 2).toUpperCase() || "?";
+  }
+
+  function ebayConversationTitle(conversation) {
+    const summary = ebayConversationSummary(conversation);
+    return safeText(
+      summary.item_titles[0] ||
+        conversation?.conversation_title ||
+        (summary.listing_ids[0] ? `Listing ${summary.listing_ids[0]}` : "") ||
+        conversation?.ebay_conversation_id,
+      "Untitled conversation",
+    );
+  }
+
+  function ebayConversationParty(conversation) {
+    return ebayBuyerIdentity(conversation).displayName;
+  }
+
+  function ebayConversationSnippet(conversation) {
+    return compactConversationText(
+      conversation?.latest_message_preview || ebayConversationSummary(conversation).latest_message_preview,
+      "No latest message preview stored.",
+    );
+  }
+
+  function ebayConversationSearchBlob(conversation) {
+    const summary = ebayConversationSummary(conversation);
+    return normalizeEbaySearchText([
+      summary.search_text,
+      conversation?.ebay_conversation_id,
+      conversation?.conversation_title,
+      conversation?.other_party_username,
+      conversation?.reference_id,
+      conversation?.reference_type,
+      conversation?.latest_message_preview,
+      ebayConversationParty(conversation),
+      summary.buyer_usernames,
+      summary.participant_usernames,
+      summary.order_numbers,
+      summary.return_ids,
+      summary.item_titles,
+      summary.item_numbers,
+      summary.listing_ids,
+    ].flat().filter(Boolean).join("\n"));
+  }
+
+  function ebayConversationSummary(conversation) {
+    const summary = conversation?.summary && typeof conversation.summary === "object" ? conversation.summary : {};
+    return {
+      link_count: Number(summary.link_count || 0),
+      confirmed_link_count: Number(summary.confirmed_link_count || 0),
+      suggested_link_count: Number(summary.suggested_link_count || 0),
+      has_order_link: summary.has_order_link === true,
+      has_return_link: summary.has_return_link === true,
+      has_inventory_link: summary.has_inventory_link === true,
+      has_listing_reference: summary.has_listing_reference === true,
+      has_buyer_link: summary.has_buyer_link === true,
+      has_media: summary.has_media === true,
+      media_count: Number(summary.media_count || 0),
+      needs_context_review: summary.needs_context_review === true,
+      warnings: safeArray(summary.warnings),
+      seller_username: compactConversationText(summary.seller_username),
+      buyer_usernames: safeArray(summary.buyer_usernames).map((item) => compactConversationText(item)).filter(Boolean),
+      participant_usernames: safeArray(summary.participant_usernames).map((item) => compactConversationText(item)).filter(Boolean),
+      order_numbers: safeArray(summary.order_numbers).map((item) => compactConversationText(item)).filter(Boolean),
+      return_ids: safeArray(summary.return_ids).map((item) => compactConversationText(item)).filter(Boolean),
+      item_titles: safeArray(summary.item_titles).map((item) => compactConversationText(item)).filter(Boolean),
+      item_numbers: safeArray(summary.item_numbers).map((item) => compactConversationText(item)).filter(Boolean),
+      listing_ids: safeArray(summary.listing_ids).map((item) => compactConversationText(item)).filter(Boolean),
+      latest_message_preview: compactConversationText(summary.latest_message_preview),
+      search_text: String(summary.search_text || ""),
+    };
+  }
+
+  function filteredEbayConversations(state) {
+    const filter = state.ebayConversationFilter || "all";
+    const query = normalizeEbaySearchText(state.ebayConversationSearchQuery || "");
+    const terms = query.split(/\s+/).filter(Boolean);
+    return safeArray(state.ebayConversations).filter((conversation) => {
+      const summary = ebayConversationSummary(conversation);
+      const filterMatches = (() => {
+        if (filter === "unread") return Number(conversation.unread_count || 0) > 0;
+        if (filter === "has_order") return summary.has_order_link;
+        if (filter === "has_return") return summary.has_return_link;
+        if (filter === "has_media") return summary.has_media;
+        if (filter === "needs_context_review") return summary.needs_context_review;
+        return true;
+      })();
+      if (!filterMatches) return false;
+      if (!terms.length) return true;
+      const searchBlob = ebayConversationSearchBlob(conversation);
+      return terms.every((term) => searchBlob.includes(term));
+    });
+  }
+
+  function selectedEbayConversationById(conversationId, state = adminClassificationState) {
+    if (!conversationId) return null;
+    return safeArray(state.ebayConversations).find((conversation) => conversation.id === conversationId) || null;
+  }
+
+  function contextFromEbayPayload(payload) {
+    return payload?.context && typeof payload.context === "object"
+      ? payload.context
+      : payload?.data?.context && typeof payload.data.context === "object" ? payload.data.context : null;
+  }
+
+  function setEbayConversationState(next) {
+    triageStore.dispatch({ type: TRANSITIONS.SET_STATE, payload: next });
+    adminClassificationState = triageStore.getState();
+    renderEbayConversationInbox(adminClassificationState);
+  }
+
+  function renderEbayConversationBadges(conversation, options = {}) {
+    const summary = ebayConversationSummary(conversation);
+    const status = compactConversationText(conversation.conversation_status);
+    const compact = options.compact === true;
+    const badges = [
+      Number(conversation.unread_count || 0) > 0 ? renderBadge(`${conversation.unread_count} unread`, "warning") : "",
+      summary.has_order_link ? renderBadge("Order", "success") : "",
+      summary.has_return_link ? renderBadge("Return", "warning") : "",
+      summary.has_media ? renderBadge(`${summary.media_count || 1} media`, "category") : "",
+      summary.needs_context_review ? renderBadge(compact ? "Review" : "Context review", "warning") : "",
+      !compact && status ? renderBadge(humanizeValue(status), "muted") : "",
+      summary.warnings.length ? renderBadge("Warning", "danger") : "",
+    ].filter(Boolean);
+    return `<span class="ebay-conversation-badges">${badges.join("")}</span>`;
+  }
+
+  function ebayFilterLabel(filter) {
+    const labels = {
+      all: "All",
+      unread: "Unread",
+      has_order: "Has order",
+      has_return: "Has return",
+      has_media: "Has media",
+      needs_context_review: "Needs review",
+    };
+    return labels[filter] || "All";
+  }
+
+  function ebayConversationMetaItems(conversation, maxItems = 4) {
+    const summary = ebayConversationSummary(conversation);
+    const items = [
+      summary.order_numbers[0] ? `Order ${summary.order_numbers[0]}` : "",
+      summary.return_ids[0] ? `Return ${summary.return_ids[0]}` : "",
+      summary.listing_ids[0] ? `Listing ${summary.listing_ids[0]}` : "",
+      summary.item_numbers[0] ? `Item ${summary.item_numbers[0]}` : "",
+      conversation.ebay_conversation_id ? `Conversation ${conversation.ebay_conversation_id}` : "",
+    ].filter(Boolean);
+    return items.slice(0, maxItems);
+  }
+
+  function renderEbayConversationList(state) {
+    if (!els.ebayConversationList) return;
+    const rows = filteredEbayConversations(state);
+    const densityMode = state.ebayConversationDensityMode === "expanded" ? "expanded" : "compact";
+    const compact = densityMode === "compact";
+    els.ebayConversationList.classList.toggle("is-compact-density", compact);
+    els.ebayConversationList.classList.toggle("is-expanded-density", !compact);
+    if (!rows.length) {
+      const query = compactConversationText(state.ebayConversationSearchQuery);
+      els.ebayConversationList.innerHTML = `<div class="classification-empty">${query ? `No canonical eBay conversations match "${escapeHtml(query)}".` : "No canonical eBay conversations match this filter."}</div>`;
+      return;
+    }
+
+    els.ebayConversationList.innerHTML = rows.map((conversation) => {
+      const selected = conversation.id === state.selectedEbayConversationId;
+      const identity = ebayBuyerIdentity(conversation);
+      const summary = ebayConversationSummary(conversation);
+      const metaItems = ebayConversationMetaItems(conversation, 3);
+      const unread = Number(conversation.unread_count || 0) > 0;
+      return `
+        <button type="button" class="ebay-conversation-row is-${escapeHtml(densityMode)}${selected ? " is-selected" : ""}${unread ? " is-unread" : ""}" data-ebay-conversation-id="${escapeHtml(conversation.id)}">
+          <span class="ebay-conversation-row-top">
+            <span class="ebay-conversation-party">
+              <span class="ebay-conversation-avatar" aria-hidden="true">${escapeHtml(ebayConversationInitials(conversation))}</span>
+              <span class="ebay-conversation-party-copy">
+                <strong>${escapeHtml(identity.displayName)}</strong>
+                ${compact ? "" : `<small>${escapeHtml(ebayIdentitySourceLabel(identity.source))}</small>`}
+              </span>
+            </span>
+            <time>${escapeHtml(formatCompactEmailAge(ebayConversationTime(conversation)))}</time>
+          </span>
+          <span class="ebay-conversation-row-title">${escapeHtml(ebayConversationTitle(conversation))}</span>
+          <span class="ebay-conversation-row-preview">${escapeHtml(ebayConversationSnippet(conversation))}</span>
+          ${compact ? "" : `
+            <span class="ebay-conversation-row-meta">
+              ${metaItems.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+              ${summary.seller_username ? `<span>Seller ${escapeHtml(summary.seller_username)}</span>` : ""}
+            </span>
+          `}
+          ${renderEbayConversationBadges(conversation, { compact })}
+        </button>
+      `;
+    }).join("");
+  }
+
+  function renderEbayConversationSummary(state) {
+    if (!els.ebayConversationSummary) return;
+    const rows = safeArray(state.ebayConversations);
+    const filtered = filteredEbayConversations(state);
+    const unread = rows.filter((conversation) => Number(conversation.unread_count || 0) > 0).length;
+    const withOrder = rows.filter((conversation) => ebayConversationSummary(conversation).has_order_link).length;
+    const withReturn = rows.filter((conversation) => ebayConversationSummary(conversation).has_return_link).length;
+    const withMedia = rows.filter((conversation) => ebayConversationSummary(conversation).has_media).length;
+    const needsReview = rows.filter((conversation) => ebayConversationSummary(conversation).needs_context_review).length;
+    const query = compactConversationText(state.ebayConversationSearchQuery);
+    els.ebayConversationSummary.innerHTML = `
+      <div>
+        <strong>${escapeHtml(filtered.length)} shown</strong>
+        <span>${escapeHtml(rows.length)} loaded · ${escapeHtml(ebayFilterLabel(state.ebayConversationFilter || "all"))}</span>
+      </div>
+      <div>
+        <strong>${escapeHtml(unread)} unread</strong>
+        <span>${escapeHtml(needsReview)} need review</span>
+      </div>
+      <div>
+        <strong>${escapeHtml(withOrder)} orders</strong>
+        <span>${escapeHtml(withReturn)} returns</span>
+      </div>
+      <div>
+        <strong>${escapeHtml(withMedia)} media</strong>
+        <span>${query ? `Search: ${escapeHtml(query)}` : "No search"}</span>
+      </div>
+    `;
+  }
+
+  function ebayMessageRole(direction) {
+    const value = String(direction || "").toLowerCase();
+    if (value === "inbound") return "Buyer";
+    if (value === "outbound") return "OG / Seller";
+    if (value === "platform") return "eBay";
+    return "Unknown";
+  }
+
+  function renderEbayMessageBubble(message) {
+    const direction = String(message.direction || "unknown").toLowerCase();
+    const body = safeText(message.message_body || message.message_body_preview, "No message body stored.");
+    const sender = safeText(message.sender_username, "Sender unavailable");
+    const recipient = safeText(message.recipient_username, "Recipient unavailable");
+    const mediaCount = Number(message.media_count || 0);
+    return `
+      <article class="ebay-message-row is-${escapeHtml(["inbound", "outbound", "platform"].includes(direction) ? direction : "unknown")}">
+        <div class="ebay-message-bubble">
+          <div class="ebay-message-meta">
+            <strong>${escapeHtml(sender)}</strong>
+            <span>${escapeHtml(ebayMessageRole(direction))}</span>
+            <time>${escapeHtml(formatContextDate(message.created_at_ebay || message.created_at))}</time>
+          </div>
+          ${message.subject ? `<div class="ebay-message-subject">${escapeHtml(message.subject)}</div>` : ""}
+          <pre>${escapeHtml(body)}</pre>
+          <div class="ebay-message-foot">
+            <span>To ${escapeHtml(recipient)}</span>
+            ${message.has_media ? `<span><i data-lucide="paperclip"></i>${escapeHtml(mediaCount || 1)} media</span>` : ""}
+          </div>
+          <details class="ebay-message-debug">
+            <summary>Message details</summary>
+            ${renderContextFactGrid([
+              { label: "eBay Message ID", value: message.ebay_message_id || "Unavailable", wide: true },
+              { label: "Read Status", value: message.read_status || (message.is_read === true ? "Read" : message.is_read === false ? "Unread" : "Unknown") },
+              { label: "Message Status", value: message.message_status || "Unknown" },
+              { label: "Direction Confidence", value: message.direction_confidence || "Unknown" },
+            ])}
+          </details>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderEbayConversationDetail(state) {
+    if (!els.ebayConversationDetail) return;
+    const conversation = selectedEbayConversationById(state.selectedEbayConversationId, state);
+    if (!conversation) {
+      els.ebayConversationDetail.innerHTML = `<div class="classification-empty">Select an eBay conversation to view the clean chat timeline.</div>`;
+      return;
+    }
+
+    const messages = safeArray(state.ebayConversationMessagesById?.[conversation.id]);
+    const isLoading = state.ebayConversationMessagesLoadingId === conversation.id;
+    const error = state.ebayConversationMessageErrorsById?.[conversation.id];
+    const identity = ebayBuyerIdentity(conversation);
+    const metaItems = ebayConversationMetaItems(conversation, 5);
+
+    els.ebayConversationDetail.innerHTML = `
+      <div class="ebay-detail-head">
+        <div>
+          <span class="eyebrow">Selected eBay Chat</span>
+          <h3>${escapeHtml(ebayConversationParty(conversation))}</h3>
+          <div class="selected-email-meta">
+            <span>${escapeHtml(ebayIdentitySourceLabel(identity.source))}</span>
+            <span>${escapeHtml(ebayConversationTitle(conversation))}</span>
+            ${metaItems.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+          </div>
+        </div>
+        <button type="button" class="secondary-btn" data-ebay-detail-action="refresh-messages" data-ebay-conversation-id="${escapeHtml(conversation.id)}" ${isLoading ? "disabled" : ""}>
+          <i data-lucide="${isLoading ? "loader-circle" : "refresh-cw"}"></i>
+          ${escapeHtml(isLoading ? "Loading" : "Refresh Timeline")}
+        </button>
+      </div>
+      ${error ? `<div class="classification-notice is-error">Could not load eBay messages: ${escapeHtml(error)}</div>` : ""}
+      <div class="ebay-chat-timeline" aria-label="Clean eBay message timeline">
+        ${isLoading && !messages.length ? `<div class="classification-empty">Loading clean eBay chat messages.</div>` : ""}
+        ${messages.length ? messages.map(renderEbayMessageBubble).join("") : (!isLoading ? `<div class="classification-empty">No canonical eBay messages are stored for this conversation yet.</div>` : "")}
+      </div>
+    `;
+  }
+
+  function renderInventoryContextCard(inventory = []) {
+    const rows = safeArray(inventory);
+    return `
+      <section class="context-card">
+        <div class="context-card-head">
+          <h4>Inventory / Listing Context</h4>
+          ${renderBadge(`${rows.length} ${rows.length === 1 ? "link" : "links"}`, rows.length ? "category" : "muted")}
+        </div>
+        ${rows.length ? `
+          <div class="context-row-list">
+            ${rows.map((link) => `
+              <div class="context-row">
+                ${renderContextFactGrid([
+                  { label: "SKU", value: link.sku || "Unavailable" },
+                  { label: "Listing ID", value: link.listing_id || "Unavailable" },
+                  { label: "Offer ID", value: link.offer_id || "Unavailable" },
+                  { label: "Status", value: link.status || "Unknown" },
+                  { label: "Last Synced", value: formatContextDate(link.last_synced_at) },
+                  { label: "Updated", value: formatContextDate(link.updated_at) },
+                ])}
+              </div>
+            `).join("")}
+          </div>
+        ` : `<div class="classification-empty matched-context-empty is-quiet">No inventory or listing bridge context found.</div>`}
+      </section>
+    `;
+  }
+
+  function renderEbayConversationContextPanel(state) {
+    if (!els.ebayConversationContext) return;
+    const conversation = selectedEbayConversationById(state.selectedEbayConversationId, state);
+    if (!conversation) {
+      els.ebayConversationContext.innerHTML = `<div class="classification-empty">Select a conversation to view buyer, order, return, and listing context.</div>`;
+      return;
+    }
+
+    const payload = state.ebayConversationContextsById?.[conversation.id] || null;
+    const context = contextFromEbayPayload(payload);
+    const isLoading = state.ebayConversationContextLoadingId === conversation.id;
+    const error = state.ebayConversationContextErrorsById?.[conversation.id];
+    const linkConfidence = context?.link_confidence || {};
+
+    els.ebayConversationContext.innerHTML = `
+      <div class="ebay-context-head">
+        <div>
+          <span class="eyebrow">Business Context</span>
+          <h3>Buyer / Order Context</h3>
+        </div>
+        <button type="button" class="secondary-btn" data-ebay-detail-action="refresh-context" data-ebay-conversation-id="${escapeHtml(conversation.id)}" ${isLoading ? "disabled" : ""}>
+          <i data-lucide="${isLoading ? "loader-circle" : "refresh-cw"}"></i>
+          ${escapeHtml(isLoading ? "Loading" : "Refresh Context")}
+        </button>
+      </div>
+      ${error ? `<div class="classification-notice is-error">Could not load eBay context: ${escapeHtml(error)}</div>` : ""}
+      ${isLoading && !context ? `<div class="classification-empty">Loading linked buyer and order context.</div>` : ""}
+      ${context ? `
+        <section class="context-card ebay-link-confidence-card">
+          <div class="context-card-head">
+            <h4>Link Confidence</h4>
+            ${renderBadge(humanizeValue(linkConfidence.level || "none"), contextConfidenceVariant(linkConfidence.level))}
+          </div>
+          ${renderContextFactGrid([
+            { label: "Confirmed Links", value: formatContextNumber(linkConfidence.confirmed_links) },
+            { label: "Suggested Links", value: formatContextNumber(linkConfidence.suggested_links) },
+            { label: "Active Links", value: formatContextNumber(linkConfidence.total_active_links) },
+            { label: "Max Confidence", value: linkConfidence.max_confidence == null ? "--" : formatConfidence(linkConfidence.max_confidence) },
+          ])}
+        </section>
+        <div class="stored-context-grid ebay-context-grid">
+          ${renderBuyerSummaryCard(context)}
+          ${renderOrderContextCard(context.matched_orders)}
+          ${renderOrderLineContextCard(context.matched_order_lines)}
+          ${renderReturnContextCard(context.matched_returns)}
+          ${renderBuyerValueLinesCard(context.buyer_value_line_breakdown)}
+          ${renderInventoryContextCard(context.inventory_listing_context)}
+        </div>
+        ${renderWarningPanel([], context.warnings)}
+      ` : (!isLoading ? `<div class="classification-empty">No context payload is loaded for this conversation yet.</div>` : "")}
+    `;
+  }
+
+  function renderEbaySyncResult(state) {
+    if (!els.ebayConversationSyncResult) return;
+    const result = state.ebayConversationSyncResult;
+    const error = state.ebayConversationSyncError;
+    if (!result && !error && !state.ebayConversationSyncLoading) {
+      els.ebayConversationSyncResult.innerHTML = "";
+      return;
+    }
+    if (state.ebayConversationSyncLoading) {
+      els.ebayConversationSyncResult.innerHTML = `<div class="classification-notice">Syncing latest eBay conversations in read-only Commerce Message mode.</div>`;
+      return;
+    }
+    if (error) {
+      els.ebayConversationSyncResult.innerHTML = `<div class="classification-notice is-error">eBay sync failed: ${escapeHtml(error)}</div>`;
+      return;
+    }
+    const counters = result?.counters || {};
+    const warnings = safeArray(counters.warnings);
+    els.ebayConversationSyncResult.innerHTML = `
+      <div class="classification-notice is-success">
+        eBay sync finished. Conversations seen: ${escapeHtml(formatContextNumber(counters.conversationsSeen))};
+        messages inserted: ${escapeHtml(formatContextNumber(counters.messagesInserted))};
+        messages updated: ${escapeHtml(formatContextNumber(counters.messagesUpdated))};
+        warnings: ${escapeHtml(formatContextNumber(warnings.length || counters.errors || 0))}.
+      </div>
+      ${warnings.length ? renderWarningPanel([], warnings.slice(0, 6)) : ""}
+    `;
+  }
+
+  function renderEbayConversationInbox(state) {
+    if (!els.ebayConversationList || !els.ebayConversationDetail || !els.ebayConversationContext) return;
+
+    if (els.ebayConversationStatus) {
+      if (state.ebayConversationLoading) {
+        els.ebayConversationStatus.textContent = "Loading canonical eBay conversations.";
+      } else if (state.ebayConversationError) {
+        els.ebayConversationStatus.textContent = `eBay conversation load failed: ${state.ebayConversationError}`;
+      } else if (state.ebayConversationLastLoadedAt) {
+        els.ebayConversationStatus.textContent = `Loaded ${safeArray(state.ebayConversations).length} canonical eBay conversations at ${formatDateTime(state.ebayConversationLastLoadedAt)}.`;
+      } else {
+        els.ebayConversationStatus.textContent = "Canonical eBay inbox is ready to load.";
+      }
+    }
+
+    [els.ebayConversationRefresh, els.ebayConversationSync].forEach((button) => {
+      if (!button) return;
+      const busy = state.ebayConversationLoading || state.ebayConversationSyncLoading;
+      button.disabled = busy;
+      button.setAttribute("aria-busy", busy ? "true" : "false");
+      button.classList.toggle("is-loading", busy);
+    });
+
+    els.ebayConversationFilterTabs?.forEach((button) => {
+      button.classList.toggle("is-active", button.getAttribute("data-ebay-conversation-filter") === (state.ebayConversationFilter || "all"));
+    });
+
+    const searchQuery = state.ebayConversationSearchQuery || "";
+    if (els.ebayConversationSearch && document.activeElement !== els.ebayConversationSearch && els.ebayConversationSearch.value !== searchQuery) {
+      els.ebayConversationSearch.value = searchQuery;
+    }
+    if (els.ebayConversationSearchClear) {
+      els.ebayConversationSearchClear.disabled = !compactConversationText(searchQuery);
+    }
+    els.ebayConversationSearch?.closest(".ebay-conversation-search")?.classList.toggle("has-query", Boolean(compactConversationText(searchQuery)));
+    els.ebayConversationDensityInputs?.forEach((input) => {
+      input.checked = input.value === (state.ebayConversationDensityMode || "compact");
+    });
+
+    renderEbaySyncResult(state);
+    renderEbayConversationSummary(state);
+    renderEbayConversationList(state);
+    renderEbayConversationDetail(state);
+    renderEbayConversationContextPanel(state);
+    if (window.lucide?.createIcons) window.lucide.createIcons();
+  }
+
+  async function loadEbayConversationMessages(context, conversationId, options = {}) {
+    if (!conversationId) return;
+    if (!options.force && adminClassificationState.ebayConversationMessagesById?.[conversationId]) return;
+    setEbayConversationState({
+      ebayConversationMessagesLoadingId: conversationId,
+      ebayConversationMessageErrorsById: {
+        ...adminClassificationState.ebayConversationMessageErrorsById,
+        [conversationId]: null,
+      },
+    });
+
+    try {
+      const payload = await fetchEbayConversationMessages(context, conversationId);
+      setEbayConversationState({
+        ebayConversationMessagesLoadingId: null,
+        ebayConversationMessagesById: {
+          ...adminClassificationState.ebayConversationMessagesById,
+          [conversationId]: safeArray(payload.messages),
+        },
+        ebayConversationMessageErrorsById: {
+          ...adminClassificationState.ebayConversationMessageErrorsById,
+          [conversationId]: null,
+        },
+      });
+    } catch (error) {
+      const code = error.code || error.message || "ebay_conversation_messages_failed";
+      setEbayConversationState({
+        ebayConversationMessagesLoadingId: null,
+        ebayConversationMessageErrorsById: {
+          ...adminClassificationState.ebayConversationMessageErrorsById,
+          [conversationId]: code,
+        },
+      });
+      console.error("[email-triage] eBay conversation messages failed:", error);
+    }
+  }
+
+  async function loadEbayConversationContext(context, conversationId, options = {}) {
+    if (!conversationId) return;
+    if (!options.force && adminClassificationState.ebayConversationContextsById?.[conversationId]) return;
+    setEbayConversationState({
+      ebayConversationContextLoadingId: conversationId,
+      ebayConversationContextErrorsById: {
+        ...adminClassificationState.ebayConversationContextErrorsById,
+        [conversationId]: null,
+      },
+    });
+
+    try {
+      const payload = await fetchEbayConversationContext(context, conversationId);
+      setEbayConversationState({
+        ebayConversationContextLoadingId: null,
+        ebayConversationContextsById: {
+          ...adminClassificationState.ebayConversationContextsById,
+          [conversationId]: payload,
+        },
+        ebayConversationContextErrorsById: {
+          ...adminClassificationState.ebayConversationContextErrorsById,
+          [conversationId]: null,
+        },
+      });
+    } catch (error) {
+      const code = error.code || error.message || "ebay_conversation_context_failed";
+      setEbayConversationState({
+        ebayConversationContextLoadingId: null,
+        ebayConversationContextErrorsById: {
+          ...adminClassificationState.ebayConversationContextErrorsById,
+          [conversationId]: code,
+        },
+      });
+      console.error("[email-triage] eBay conversation context failed:", error);
+    }
+  }
+
+  async function selectEbayConversation(context, conversationId) {
+    if (!conversationId) return;
+    setEbayConversationState({ selectedEbayConversationId: conversationId });
+    loadEbayConversationMessages(context, conversationId);
+    loadEbayConversationContext(context, conversationId);
+  }
+
+  async function loadEbayConversationList(context, options = {}) {
+    setEbayConversationState({
+      ebayConversationLoading: true,
+      ebayConversationError: null,
+    });
+
+    try {
+      const payload = await fetchEbayConversations(context, { limit: options.limit || 100 });
+      const conversations = safeArray(payload.conversations);
+      const previousSelectedId = adminClassificationState.selectedEbayConversationId;
+      const visibleRows = filteredEbayConversations({ ...adminClassificationState, ebayConversations: conversations });
+      const selectedStillVisible = visibleRows.some((conversation) => conversation.id === previousSelectedId);
+      const selectedEbayConversationId = selectedStillVisible ? previousSelectedId : visibleRows[0]?.id || null;
+      setEbayConversationState({
+        ebayConversationLoading: false,
+        ebayConversationError: null,
+        ebayConversations: conversations,
+        selectedEbayConversationId,
+        ebayConversationLastLoadedAt: payload.loaded_at || new Date().toISOString(),
+      });
+      if (selectedEbayConversationId) {
+        loadEbayConversationMessages(context, selectedEbayConversationId);
+        loadEbayConversationContext(context, selectedEbayConversationId);
+      }
+    } catch (error) {
+      const code = error.code || error.message || "ebay_conversation_list_failed";
+      setEbayConversationState({
+        ebayConversationLoading: false,
+        ebayConversationError: code,
+      });
+      console.error("[email-triage] eBay conversation list failed:", error);
+    }
+  }
+
+  async function syncLatestEbayConversations(context) {
+    setEbayConversationState({
+      ebayConversationSyncLoading: true,
+      ebayConversationSyncResult: null,
+      ebayConversationSyncError: null,
+    });
+
+    try {
+      const result = await runEbayMessageSync(context);
+      setEbayConversationState({
+        ebayConversationSyncLoading: false,
+        ebayConversationSyncResult: result,
+        ebayConversationSyncError: null,
+      });
+      await loadEbayConversationList(context, { limit: 100 });
+    } catch (error) {
+      const code = error.code || error.message || "ebay_message_sync_failed";
+      setEbayConversationState({
+        ebayConversationSyncLoading: false,
+        ebayConversationSyncError: code,
+      });
+      console.error("[email-triage] eBay message sync failed:", error);
+    }
+  }
+
+  function applyEbayConversationListControls(context, updates = {}) {
+    const nextState = { ...adminClassificationState, ...updates };
+    const rows = filteredEbayConversations(nextState);
+    const currentSelectedId = adminClassificationState.selectedEbayConversationId;
+    const selectedEbayConversationId = rows.some((conversation) => conversation.id === currentSelectedId)
+      ? currentSelectedId
+      : rows[0]?.id || null;
+    setEbayConversationState({
+      ...updates,
+      selectedEbayConversationId,
+    });
+    if (selectedEbayConversationId && selectedEbayConversationId !== currentSelectedId) {
+      loadEbayConversationMessages(context, selectedEbayConversationId);
+      loadEbayConversationContext(context, selectedEbayConversationId);
+    }
+  }
+
+  function bindEbayConversationEvents(context) {
+    els.ebayConversationRefresh?.addEventListener("click", () => loadEbayConversationList(context, { limit: 100 }));
+    els.ebayConversationSync?.addEventListener("click", () => syncLatestEbayConversations(context));
+    els.ebayConversationFilterTabs?.forEach((button) => {
+      button.addEventListener("click", () => {
+        const ebayConversationFilter = button.getAttribute("data-ebay-conversation-filter") || "all";
+        applyEbayConversationListControls(context, { ebayConversationFilter });
+      });
+    });
+    els.ebayConversationSearch?.addEventListener("input", () => {
+      applyEbayConversationListControls(context, {
+        ebayConversationSearchQuery: els.ebayConversationSearch.value || "",
+      });
+    });
+    els.ebayConversationSearchClear?.addEventListener("click", () => {
+      if (els.ebayConversationSearch) els.ebayConversationSearch.value = "";
+      applyEbayConversationListControls(context, { ebayConversationSearchQuery: "" });
+      els.ebayConversationSearch?.focus();
+    });
+    els.ebayConversationDensityInputs?.forEach((input) => {
+      input.addEventListener("change", () => {
+        if (!input.checked) return;
+        const ebayConversationDensityMode = input.value === "expanded" ? "expanded" : "compact";
+        storeEbayConversationDensityMode(ebayConversationDensityMode);
+        setEbayConversationState({ ebayConversationDensityMode });
+      });
+    });
+    els.ebayConversationList?.addEventListener("click", (event) => {
+      const row = event.target.closest("[data-ebay-conversation-id]");
+      if (!row) return;
+      selectEbayConversation(context, row.getAttribute("data-ebay-conversation-id"));
+    });
+    const handleDetailClick = (event) => {
+      const button = event.target.closest("[data-ebay-detail-action]");
+      if (!button) return;
+      const conversationId = button.getAttribute("data-ebay-conversation-id");
+      const action = button.getAttribute("data-ebay-detail-action");
+      if (action === "refresh-messages") {
+        loadEbayConversationMessages(context, conversationId, { force: true });
+        return;
+      }
+      if (action === "refresh-context") {
+        loadEbayConversationContext(context, conversationId, { force: true });
+      }
+    };
+    els.ebayConversationDetail?.addEventListener("click", handleDetailClick);
+    els.ebayConversationContext?.addEventListener("click", handleDetailClick);
   }
 
   function operationalEventById(id, state = triageStore.getState()) {
@@ -2715,6 +3897,8 @@
       els.adminDiagnosticsToggle.setAttribute("aria-expanded", expanded ? "false" : "true");
       els.adminDiagnosticsDrawer?.classList.toggle("hidden", expanded);
     });
+    bindEbayConversationEvents(context);
+    renderEbayConversationInbox(adminClassificationState);
     bindPanelResizeEvents();
     bindInboxPreviewImport(context, triageStore, {
       onImportComplete: () => {
@@ -2765,6 +3949,7 @@
     bindClassificationInboxEvents(context);
 
     handleOutlookQueryNotice();
+    loadEbayConversationList(context);
     renderOperationalDashboardPanel(adminClassificationState);
     await loadAdminClassificationData(context);
     loadOperationalDashboard(context, { keepPrevious: false });

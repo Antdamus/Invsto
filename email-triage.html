@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#070708" />
-  <title>OG Jewelry - Email Triage</title>
+  <title>OG Jewelry - eBay Messaging</title>
 
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
@@ -18,7 +18,7 @@
     <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">
       <i data-lucide="menu"></i>
     </button>
-    <span class="mobile-title">Email Triage</span>
+    <span class="mobile-title">eBay Messaging</span>
   </div>
 
   <div class="mobile-menu" id="mobile-menu">
@@ -37,13 +37,13 @@
       <header class="header">
         <div class="header-inner">
           <div class="greeting">
-            <strong id="admin-greeting">Email Triage</strong>
-            <div class="sub">Outlook proof of connection</div>
+            <strong id="admin-greeting">eBay Messaging</strong>
+            <div class="sub">Canonical Commerce Message inbox</div>
           </div>
 
           <div class="header-pills" aria-label="Connection context">
-            <div class="pill">Scope: <b>Mail.Read</b></div>
-            <div class="pill">Mode: <b>Admin</b></div>
+            <div class="pill">Scope: <b>eBay Messages</b></div>
+            <div class="pill">Mode: <b>Read-only</b></div>
           </div>
         </div>
       </header>
@@ -53,7 +53,7 @@
           <div class="mailbox-toolbar-status">
             <span id="mailbox-connection-dot" class="mailbox-connection-dot" aria-hidden="true"></span>
             <div>
-              <div class="mailbox-toolbar-title">Email Triage <strong id="mailbox-toolbar-state">checking</strong></div>
+              <div class="mailbox-toolbar-title">Evidence Mailbox <strong id="mailbox-toolbar-state">checking</strong></div>
               <div class="mailbox-toolbar-meta">
                 <span id="mailbox-toolbar-email">Mailbox unavailable</span>
                 <span id="mailbox-toolbar-checked">Last checked: --</span>
@@ -92,6 +92,93 @@
           <div id="operational-dashboard-body" class="operational-dashboard-body" hidden>
             <div id="operational-dashboard-status" class="workspace-status operational-dashboard-inline-status">Waiting for admin session.</div>
             <div id="operational-dashboard" class="operational-dashboard" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <section class="ebay-conversation-section" aria-label="eBay Conversations">
+          <div class="ebay-conversation-head">
+            <div>
+              <span class="eyebrow">Canonical Inbox</span>
+              <h2>eBay Conversations</h2>
+              <div class="section-sub">Commerce Message API conversations stored in Supabase.</div>
+            </div>
+            <div class="ebay-conversation-actions">
+              <button type="button" id="ebay-conversation-refresh" class="secondary-btn">
+                <i data-lucide="refresh-cw"></i>
+                Refresh
+              </button>
+              <button type="button" id="ebay-conversation-sync" class="primary-btn">
+                <i data-lucide="cloud-download"></i>
+                Sync latest eBay conversations
+              </button>
+            </div>
+          </div>
+
+          <div class="ebay-conversation-control-row">
+            <div id="ebay-conversation-status" class="workspace-status">Waiting for admin session.</div>
+            <label class="ebay-conversation-search" for="ebay-conversation-search">
+              <i data-lucide="search"></i>
+              <input id="ebay-conversation-search" type="search" placeholder="Search buyer, message, listing, order" autocomplete="off" spellcheck="false" aria-label="Search eBay conversations" />
+              <button type="button" id="ebay-conversation-search-clear" aria-label="Clear eBay conversation search" disabled>
+                <i data-lucide="x"></i>
+              </button>
+            </label>
+            <fieldset class="ebay-conversation-density-control" aria-label="Conversation list density">
+              <legend>Density</legend>
+              <div class="ebay-conversation-density-options">
+                <label>
+                  <input type="radio" name="ebay-conversation-density" value="compact" checked />
+                  <span>Compact</span>
+                </label>
+                <label>
+                  <input type="radio" name="ebay-conversation-density" value="expanded" />
+                  <span>Expanded</span>
+                </label>
+              </div>
+            </fieldset>
+          </div>
+
+          <div id="ebay-conversation-sync-result" class="ebay-conversation-sync-result" aria-live="polite"></div>
+
+          <div class="ebay-conversation-shell">
+            <aside class="ebay-conversation-list-panel" aria-label="Canonical eBay conversations">
+              <div class="ebay-conversation-sidebar-nav" aria-label="eBay conversation filters">
+                <button type="button" data-ebay-conversation-filter="all" class="is-active">
+                  <i data-lucide="inbox"></i>
+                  <span>All</span>
+                </button>
+                <button type="button" data-ebay-conversation-filter="unread">
+                  <i data-lucide="circle-dot"></i>
+                  <span>Unread</span>
+                </button>
+                <button type="button" data-ebay-conversation-filter="has_order">
+                  <i data-lucide="receipt-text"></i>
+                  <span>Has order</span>
+                </button>
+                <button type="button" data-ebay-conversation-filter="has_return">
+                  <i data-lucide="undo-2"></i>
+                  <span>Has return</span>
+                </button>
+                <button type="button" data-ebay-conversation-filter="has_media">
+                  <i data-lucide="paperclip"></i>
+                  <span>Has media</span>
+                </button>
+                <button type="button" data-ebay-conversation-filter="needs_context_review">
+                  <i data-lucide="badge-alert"></i>
+                  <span>Needs review</span>
+                </button>
+              </div>
+              <div id="ebay-conversation-summary" class="ebay-conversation-summary"></div>
+              <div id="ebay-conversation-list" class="ebay-conversation-list"></div>
+            </aside>
+
+            <section class="ebay-conversation-detail-panel" aria-label="Selected eBay conversation">
+              <div id="ebay-conversation-detail" class="ebay-conversation-detail"></div>
+            </section>
+
+            <aside class="ebay-conversation-context-panel" aria-label="Selected eBay context">
+              <div id="ebay-conversation-context" class="ebay-conversation-context"></div>
+            </aside>
           </div>
         </section>
 
