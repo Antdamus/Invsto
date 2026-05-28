@@ -38,6 +38,9 @@ type ApiDiagnostic = {
   message?: string;
 };
 
+type MessageDirection = "inbound" | "outbound" | "platform" | "unknown";
+type DirectionConfidence = "strong" | "medium" | "weak" | "unknown";
+
 type ConversationSample = {
   conversationId: string;
   conversationType?: string;
@@ -49,7 +52,9 @@ type ConversationSample = {
   latestMessagePreview?: string;
   referenceId?: string;
   referenceType?: string;
+  createdDate?: string;
   rawKeys: string[];
+  latestMessageKeys: string[];
 };
 
 type ConversationSet = {
@@ -62,18 +67,71 @@ type ConversationSet = {
 
 type DetailSample = {
   conversationId: string;
+  conversationType: ConversationType;
+  conversationStatus?: string;
+  title?: string;
+  otherPartyUsername?: string;
+  referenceId?: string;
+  referenceType?: string;
   messageCount: number;
   messages: Array<{
     messageId?: string;
     senderUsername?: string;
     recipientUsername?: string;
+    direction?: MessageDirection;
+    directionConfidence?: DirectionConfidence;
+    directionReason?: string;
     createdDate?: string;
     subject?: string;
     bodyPreview?: string;
+    bodyLength?: number;
+    bodyShape?: {
+      hasHtmlTags: boolean;
+      hasHtmlEntities: boolean;
+      hasQuotedReplyMarkers: boolean;
+      hasLikelyEbayTemplateText: boolean;
+    };
     read?: boolean;
+    readStatus?: string;
+    messageStatus?: string;
     hasMedia?: boolean;
+    mediaCount?: number;
+    mediaSamples?: Array<{
+      mediaType?: string;
+      mediaName?: string;
+      mediaUrlPresent: boolean;
+      rawKeys: string[];
+    }>;
+    pageOffset?: number;
     rawKeys: string[];
   }>;
+  pagination: {
+    total?: number;
+    firstPageCount: number;
+    firstPageLimit: number;
+    secondPageFetched: boolean;
+    secondPageOffset?: number;
+    secondPageCount?: number;
+    duplicateMessageIdsAcrossFetchedPages: string[];
+    payloadPaginationKeys: string[];
+    secondPageApi?: ApiDiagnostic;
+  };
+  orderingAnalysis: {
+    comparableTimestampCount: number;
+    observedOrder: "ascending" | "descending" | "single_or_equal" | "mixed_or_unknown";
+    stableMessageIds: boolean;
+    duplicateMessageIds: string[];
+    duplicateBodyPreviews: string[];
+  };
+  participantAnalysis: {
+    usernames: string[];
+    otherPartyUsername?: string;
+    sellerUsernameCandidates: string[];
+    allMessagesHaveSenderRecipient: boolean;
+    directionHeuristic: string;
+  };
+  missingFields: string[];
+  suspiciousFields: string[];
   rawKeys: string[];
   api?: ApiDiagnostic;
 };
@@ -83,6 +141,7 @@ const SAFE_LIMIT_DEFAULT = 5;
 const SAFE_LIMIT_MAX = 10;
 const DETAIL_CONVERSATION_MAX = 3;
 const DETAIL_MESSAGE_LIMIT = 5;
+const DETAIL_SECOND_PAGE_LIMIT = 2;
 const BODY_PREVIEW_MAX = 180;
 const SUBJECT_PREVIEW_MAX = 120;
 const SUPPORTED_CONVERSATION_TYPES = ["FROM_MEMBERS", "FROM_EBAY"] as const;
@@ -216,6 +275,10 @@ function rawKeys(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value as JsonRecord).sort() : [];
 }
 
+function recordOrEmpty(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+}
+
 function text(value: unknown) {
   return String(value || "").trim();
 }
@@ -227,6 +290,42 @@ function numberOrUndefined(value: unknown) {
 
 function booleanOrUndefined(value: unknown) {
   return typeof value === "boolean" ? value : undefined;
+}
+
+function uniqueText(values: unknown[]) {
+  return [...new Set(values.map((value) => text(value)).filter(Boolean))];
+}
+
+function firstText(...values: unknown[]) {
+  return values.map((value) => text(value)).find(Boolean) || "";
+}
+
+function firstArray(...values: unknown[]) {
+  return values.find((value) => Array.isArray(value)) as unknown[] | undefined;
+}
+
+function containsHtmlTags(value: string) {
+  return /<\/?[a-z][\s\S]*>/i.test(value);
+}
+
+function bodyShape(value: unknown) {
+  const raw = text(value);
+  return {
+    hasHtmlTags: containsHtmlTags(raw),
+    hasHtmlEntities: /&(?:nbsp|amp|lt|gt|quot|#39);/i.test(raw),
+    hasQuotedReplyMarkers: /\b(original message|wrote:|from:|sent:|to:|subject:)\b/i.test(raw),
+    hasLikelyEbayTemplateText: /\b(eBay sent this message|learn more about|privacy notice|marketplace safety|unsubscribe|reply to this message)\b/i.test(raw),
+  };
+}
+
+function normalizedBodyKey(value: unknown) {
+  return preview(value, 120).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function duplicateValues(values: string[]) {
+  const counts = new Map<string, number>();
+  for (const value of values.filter(Boolean)) counts.set(value, (counts.get(value) || 0) + 1);
+  return [...counts.entries()].filter(([, count]) => count > 1).map(([value]) => value);
 }
 
 function decodeEntities(value: string) {
@@ -426,15 +525,40 @@ async function ebayGet(token: string, path: string): Promise<{ ok: true; payload
 
 function otherPartyUsername(conversation: JsonRecord) {
   return text(conversation.otherPartyUsername) ||
-    text((conversation.otherParty as JsonRecord | undefined)?.username) ||
-    text((conversation.participant as JsonRecord | undefined)?.username) ||
+    text(recordOrEmpty(conversation.otherParty).username) ||
+    text(recordOrEmpty(conversation.participant).username) ||
     undefined;
 }
 
 function latestMessage(conversation: JsonRecord) {
-  return conversation.latestMessage && typeof conversation.latestMessage === "object"
-    ? conversation.latestMessage as JsonRecord
-    : {};
+  return recordOrEmpty(conversation.latestMessage);
+}
+
+function referenceId(conversation: JsonRecord) {
+  const listingReference = recordOrEmpty(conversation.listingReference);
+  const reference = recordOrEmpty(conversation.reference);
+  return firstText(
+    conversation.referenceId,
+    conversation.listingId,
+    conversation.itemId,
+    listingReference.referenceId,
+    listingReference.listingId,
+    listingReference.itemId,
+    reference.referenceId,
+    reference.id,
+  ) || undefined;
+}
+
+function referenceType(conversation: JsonRecord) {
+  const listingReference = recordOrEmpty(conversation.listingReference);
+  const reference = recordOrEmpty(conversation.reference);
+  return firstText(
+    conversation.referenceType,
+    listingReference.referenceType,
+    listingReference.type,
+    reference.referenceType,
+    reference.type,
+  ) || undefined;
 }
 
 function toConversationSample(value: unknown): ConversationSample {
@@ -449,24 +573,85 @@ function toConversationSample(value: unknown): ConversationSample {
     unreadCount: numberOrUndefined(conversation.unreadCount),
     latestMessageCreatedDate: text(latest.createdDate) || text(conversation.createdDate) || undefined,
     latestMessagePreview: preview(latest.messageBody) || undefined,
-    referenceId: text(conversation.referenceId) || undefined,
-    referenceType: text(conversation.referenceType) || undefined,
+    referenceId: referenceId(conversation),
+    referenceType: referenceType(conversation),
+    createdDate: text(conversation.createdDate) || undefined,
     rawKeys: rawKeys(conversation),
+    latestMessageKeys: rawKeys(latest),
   };
 }
 
-function toMessageSample(value: unknown) {
-  const message = value && typeof value === "object" ? value as JsonRecord : {};
-  const media = Array.isArray(message.messageMedia) ? message.messageMedia : [];
+function mediaSamples(value: unknown) {
+  const media = firstArray(value) || [];
+  return media.slice(0, 3).map((entry) => {
+    const record = recordOrEmpty(entry);
+    return {
+      mediaType: firstText(record.mediaType, record.type, record.contentType) || undefined,
+      mediaName: preview(firstText(record.mediaName, record.name, record.fileName), SUBJECT_PREVIEW_MAX) || undefined,
+      mediaUrlPresent: Boolean(firstText(record.mediaUrl, record.url, record.href, record.downloadUrl)),
+      rawKeys: rawKeys(record),
+    };
+  });
+}
+
+function inferDirection(
+  senderUsername: string | undefined,
+  recipientUsername: string | undefined,
+  otherParty: string | undefined,
+  conversationType: ConversationType,
+): { direction: MessageDirection; confidence: DirectionConfidence; reason: string } {
+  if (conversationType === "FROM_EBAY") {
+    return { direction: "platform", confidence: "medium", reason: "Conversation type is FROM_EBAY." };
+  }
+  if (!senderUsername || !recipientUsername) {
+    return { direction: "unknown", confidence: "unknown", reason: "Sender or recipient username is missing." };
+  }
+  if (otherParty) {
+    if (senderUsername.toLowerCase() === otherParty.toLowerCase()) {
+      return { direction: "inbound", confidence: "strong", reason: "Sender matches otherPartyUsername." };
+    }
+    if (recipientUsername.toLowerCase() === otherParty.toLowerCase()) {
+      return { direction: "outbound", confidence: "strong", reason: "Recipient matches otherPartyUsername." };
+    }
+    return { direction: "unknown", confidence: "weak", reason: "Sender/recipient do not match otherPartyUsername." };
+  }
   return {
-    messageId: text(message.messageId) || undefined,
-    senderUsername: text(message.senderUsername) || undefined,
-    recipientUsername: text(message.recipientUsername) || undefined,
-    createdDate: text(message.createdDate) || undefined,
-    subject: preview(message.subject, SUBJECT_PREVIEW_MAX) || undefined,
-    bodyPreview: preview(message.messageBody) || undefined,
+    direction: "unknown",
+    confidence: "weak",
+    reason: "Sender and recipient are present, but seller/other-party identity is not known in this response.",
+  };
+}
+
+function toMessageSample(value: unknown, options: {
+  conversationType: ConversationType;
+  otherPartyUsername?: string;
+  pageOffset: number;
+}) {
+  const message = value && typeof value === "object" ? value as JsonRecord : {};
+  const body = firstText(message.messageBody, message.body, message.text);
+  const media = firstArray(message.messageMedia, message.media, message.attachments) || [];
+  const senderUsername = firstText(message.senderUsername, recordOrEmpty(message.sender).username) || undefined;
+  const recipientUsername = firstText(message.recipientUsername, recordOrEmpty(message.recipient).username) || undefined;
+  const direction = inferDirection(senderUsername, recipientUsername, options.otherPartyUsername, options.conversationType);
+  return {
+    messageId: firstText(message.messageId, message.id) || undefined,
+    senderUsername,
+    recipientUsername,
+    direction: direction.direction,
+    directionConfidence: direction.confidence,
+    directionReason: direction.reason,
+    createdDate: firstText(message.createdDate, message.creationDate, message.sentDate) || undefined,
+    subject: preview(firstText(message.subject, message.title), SUBJECT_PREVIEW_MAX) || undefined,
+    bodyPreview: preview(body) || undefined,
+    bodyLength: body.length || undefined,
+    bodyShape: bodyShape(body),
     read: booleanOrUndefined(message.readStatus),
+    readStatus: text(message.readStatus) || undefined,
+    messageStatus: firstText(message.messageStatus, message.status) || undefined,
     hasMedia: media.length > 0,
+    mediaCount: media.length,
+    mediaSamples: mediaSamples(media),
+    pageOffset: options.pageOffset,
     rawKeys: rawKeys(message),
   };
 }
@@ -491,11 +676,11 @@ function conversationPath(input: ProbeInput, conversationType: ConversationType)
   return `/commerce/message/v1/conversation?${params.toString()}`;
 }
 
-function conversationDetailPath(conversationId: string, conversationType: ConversationType, limit = DETAIL_MESSAGE_LIMIT) {
+function conversationDetailPath(conversationId: string, conversationType: ConversationType, limit = DETAIL_MESSAGE_LIMIT, offset = 0) {
   const params = new URLSearchParams({
     conversation_type: conversationType,
     limit: String(Math.min(Math.max(limit, 1), DETAIL_MESSAGE_LIMIT)),
-    offset: "0",
+    offset: String(Math.max(Math.trunc(offset), 0)),
   });
   return `/commerce/message/v1/conversation/${encodeURIComponent(conversationId)}?${params.toString()}`;
 }
@@ -521,23 +706,170 @@ async function fetchConversationSet(token: string, input: ProbeInput, conversati
   };
 }
 
-async function fetchDetail(token: string, conversationId: string, conversationType: ConversationType): Promise<DetailSample> {
+function observedMessageOrder(messages: DetailSample["messages"]) {
+  const timestamps = messages.map((message) => Date.parse(message.createdDate || "")).filter(Number.isFinite);
+  if (timestamps.length < 2) return "single_or_equal" as const;
+  const ascending = timestamps.every((value, index) => index === 0 || value >= timestamps[index - 1]);
+  const descending = timestamps.every((value, index) => index === 0 || value <= timestamps[index - 1]);
+  if (ascending && descending) return "single_or_equal" as const;
+  if (ascending) return "ascending" as const;
+  if (descending) return "descending" as const;
+  return "mixed_or_unknown" as const;
+}
+
+function detailOrderingAnalysis(messages: DetailSample["messages"]): DetailSample["orderingAnalysis"] {
+  const messageIds = messages.map((message) => message.messageId).filter((value): value is string => Boolean(value));
+  const bodyKeys = messages.map((message) => normalizedBodyKey(message.bodyPreview)).filter(Boolean);
+  return {
+    comparableTimestampCount: messages.filter((message) => Number.isFinite(Date.parse(message.createdDate || ""))).length,
+    observedOrder: observedMessageOrder(messages),
+    stableMessageIds: messageIds.length === messages.length && duplicateValues(messageIds).length === 0,
+    duplicateMessageIds: duplicateValues(messageIds),
+    duplicateBodyPreviews: duplicateValues(bodyKeys).slice(0, 5),
+  };
+}
+
+function detailParticipantAnalysis(
+  messages: DetailSample["messages"],
+  otherPartyUsername: string | undefined,
+  conversationType: ConversationType,
+): DetailSample["participantAnalysis"] {
+  const usernames = uniqueText([
+    ...messages.map((message) => message.senderUsername),
+    ...messages.map((message) => message.recipientUsername),
+  ]);
+  const sellerUsernameCandidates = otherPartyUsername
+    ? usernames.filter((username) => username.toLowerCase() !== otherPartyUsername.toLowerCase())
+    : [];
+  const allMessagesHaveSenderRecipient = messages.length > 0 &&
+    messages.every((message) => Boolean(message.senderUsername && message.recipientUsername));
+  let directionHeuristic = "Direction is unknown until seller/other-party identity is available.";
+  if (conversationType === "FROM_EBAY") {
+    directionHeuristic = "Treat FROM_EBAY messages as platform/system messages unless payload fields prove a member participant.";
+  } else if (otherPartyUsername && allMessagesHaveSenderRecipient) {
+    directionHeuristic = "Inbound when senderUsername equals otherPartyUsername; outbound when recipientUsername equals otherPartyUsername.";
+  } else if (allMessagesHaveSenderRecipient) {
+    directionHeuristic = "Sender/recipient usernames are present, so direction can be inferred after storing seller account username or joining to conversation otherPartyUsername.";
+  }
+  return {
+    usernames,
+    otherPartyUsername,
+    sellerUsernameCandidates,
+    allMessagesHaveSenderRecipient,
+    directionHeuristic,
+  };
+}
+
+function expectedMissingFields(detail: JsonRecord, messages: DetailSample["messages"]) {
+  const missing: string[] = [];
+  if (!text(detail.conversationId)) missing.push("conversationId");
+  if (!text(detail.conversationStatus)) missing.push("conversationStatus");
+  if (!text(detail.conversationType)) missing.push("conversationType");
+  if (!Array.isArray(detail.messages)) missing.push("messages[]");
+  if (messages.some((message) => !message.messageId)) missing.push("message.messageId");
+  if (messages.some((message) => !message.senderUsername)) missing.push("message.senderUsername");
+  if (messages.some((message) => !message.recipientUsername)) missing.push("message.recipientUsername");
+  if (messages.some((message) => !message.createdDate)) missing.push("message.createdDate");
+  if (messages.some((message) => !message.bodyPreview)) missing.push("message.messageBody");
+  return [...new Set(missing)];
+}
+
+function suspiciousDetailFields(messages: DetailSample["messages"], pagination: DetailSample["pagination"]) {
+  const suspicious: string[] = [];
+  if (messages.some((message) => message.bodyShape?.hasHtmlTags)) suspicious.push("At least one message body contains HTML tags.");
+  if (messages.some((message) => message.bodyShape?.hasQuotedReplyMarkers)) suspicious.push("At least one message body has quoted-reply markers.");
+  if (messages.some((message) => message.bodyShape?.hasLikelyEbayTemplateText)) suspicious.push("At least one message body looks like an eBay notification template.");
+  if (duplicateValues(messages.map((message) => message.messageId || "").filter(Boolean)).length) suspicious.push("Duplicate message IDs were observed.");
+  if (pagination.secondPageApi && !pagination.secondPageApi.ok) suspicious.push("Second-page pagination probe failed.");
+  return suspicious;
+}
+
+async function fetchDetail(
+  token: string,
+  conversationId: string,
+  conversationType: ConversationType,
+  header?: ConversationSample,
+): Promise<DetailSample> {
   const result = await ebayGet(token, conversationDetailPath(conversationId, conversationType));
   if (!result.ok) {
     return {
       conversationId,
+      conversationType,
       messageCount: 0,
       messages: [],
+      pagination: {
+        firstPageCount: 0,
+        firstPageLimit: DETAIL_MESSAGE_LIMIT,
+        secondPageFetched: false,
+        duplicateMessageIdsAcrossFetchedPages: [],
+        payloadPaginationKeys: [],
+      },
+      orderingAnalysis: detailOrderingAnalysis([]),
+      participantAnalysis: detailParticipantAnalysis([], header?.otherPartyUsername, conversationType),
+      missingFields: [],
+      suspiciousFields: [],
       rawKeys: [],
       api: result.api,
     };
   }
 
-  const messages = Array.isArray(result.payload.messages) ? result.payload.messages : [];
+  const firstPageMessages = Array.isArray(result.payload.messages) ? result.payload.messages : [];
+  const total = numberOrUndefined(result.payload.total);
+  const secondPageOffset = firstPageMessages.length;
+  let secondPageMessages: unknown[] = [];
+  let secondPageApi: ApiDiagnostic | undefined;
+  if (typeof total === "number" && total > firstPageMessages.length && firstPageMessages.length > 0) {
+    const secondResult = await ebayGet(
+      token,
+      conversationDetailPath(conversationId, conversationType, DETAIL_SECOND_PAGE_LIMIT, secondPageOffset),
+    );
+    if (secondResult.ok) {
+      secondPageMessages = Array.isArray(secondResult.payload.messages) ? secondResult.payload.messages : [];
+      secondPageApi = { ok: true, status: secondResult.status };
+    } else {
+      secondPageApi = secondResult.api;
+    }
+  }
+
+  const detailOtherPartyUsername = otherPartyUsername(result.payload) || header?.otherPartyUsername;
+  const messages = [
+    ...firstPageMessages.map((message) => toMessageSample(message, {
+      conversationType,
+      otherPartyUsername: detailOtherPartyUsername,
+      pageOffset: 0,
+    })),
+    ...secondPageMessages.map((message) => toMessageSample(message, {
+      conversationType,
+      otherPartyUsername: detailOtherPartyUsername,
+      pageOffset: secondPageOffset,
+    })),
+  ];
+  const pagination = {
+    total,
+    firstPageCount: firstPageMessages.length,
+    firstPageLimit: DETAIL_MESSAGE_LIMIT,
+    secondPageFetched: secondPageMessages.length > 0 || Boolean(secondPageApi),
+    secondPageOffset: secondPageApi ? secondPageOffset : undefined,
+    secondPageCount: secondPageApi ? secondPageMessages.length : undefined,
+    duplicateMessageIdsAcrossFetchedPages: duplicateValues(messages.map((message) => message.messageId || "").filter(Boolean)),
+    payloadPaginationKeys: rawKeys(result.payload).filter((key) => ["href", "limit", "next", "offset", "prev", "total"].includes(key)),
+    secondPageApi,
+  };
   return {
     conversationId,
-    messageCount: numberOrUndefined(result.payload.total) ?? messages.length,
-    messages: messages.slice(0, DETAIL_MESSAGE_LIMIT).map(toMessageSample),
+    conversationType,
+    conversationStatus: firstText(result.payload.conversationStatus, header?.conversationStatus) || undefined,
+    title: preview(firstText(result.payload.conversationTitle, result.payload.title, header?.title), SUBJECT_PREVIEW_MAX) || undefined,
+    otherPartyUsername: detailOtherPartyUsername,
+    referenceId: referenceId(result.payload) || header?.referenceId,
+    referenceType: referenceType(result.payload) || header?.referenceType,
+    messageCount: total ?? messages.length,
+    messages,
+    pagination,
+    orderingAnalysis: detailOrderingAnalysis(messages),
+    participantAnalysis: detailParticipantAnalysis(messages, detailOtherPartyUsername, conversationType),
+    missingFields: expectedMissingFields(result.payload, messages),
+    suspiciousFields: suspiciousDetailFields(messages, pagination),
     rawKeys: rawKeys(result.payload),
     api: { ok: true, status: result.status },
   };
@@ -554,14 +886,18 @@ function coverage(conversationSets: ConversationSet[], details: DetailSample[]) 
   return {
     hasConversationIds: samples.some((sample) => Boolean(sample.conversationId)) || details.some((detail) => Boolean(detail.conversationId)),
     hasUnreadCounts: samples.some((sample) => typeof sample.unreadCount === "number"),
-    hasOtherPartyUsernames: samples.some((sample) => Boolean(sample.otherPartyUsername)),
+    hasOtherPartyUsernames: samples.some((sample) => Boolean(sample.otherPartyUsername)) || details.some((detail) => Boolean(detail.otherPartyUsername)),
     hasLatestMessages: latestMessages.length > 0,
-    hasListingReferences: samples.some((sample) => Boolean(sample.referenceId || sample.referenceType)),
+    hasListingReferences: samples.some((sample) => Boolean(sample.referenceId || sample.referenceType)) ||
+      details.some((detail) => Boolean(detail.referenceId || detail.referenceType)),
     hasCleanMessageBodies: latestMessages.length > 0 || messages.some((message) => Boolean(message.bodyPreview)),
     hasSenderRecipientUsernames: messages.some((message) => Boolean(message.senderUsername && message.recipientUsername)),
     hasTimestamps: samples.some((sample) => Boolean(sample.latestMessageCreatedDate)) || messages.some((message) => Boolean(message.createdDate)),
-    hasReadStatus: messages.some((message) => typeof message.read === "boolean"),
+    hasReadStatus: messages.some((message) => typeof message.read === "boolean" || Boolean(message.readStatus)),
     hasMedia: messages.some((message) => message.hasMedia === true),
+    hasMessageMediaField: messages.some((message) => message.rawKeys.includes("messageMedia") || message.rawKeys.includes("media") || message.rawKeys.includes("attachments")),
+    hasConversationStatus: samples.some((sample) => Boolean(sample.conversationStatus)) || details.some((detail) => Boolean(detail.conversationStatus)),
+    hasPaginationTotals: conversationSets.some((set) => typeof set.total === "number") || details.some((detail) => typeof detail.pagination.total === "number"),
   };
 }
 
@@ -574,11 +910,252 @@ function correlationHints(conversationSets: ConversationSet[], details: DetailSa
       ...messages.map((message) => message.senderUsername),
       ...messages.map((message) => message.recipientUsername),
     ]).slice(0, 20),
-    possibleReferenceIds: unique(samples.map((sample) => sample.referenceId)).slice(0, 20),
+    possibleReferenceIds: unique([
+      ...samples.map((sample) => sample.referenceId),
+      ...details.map((detail) => detail.referenceId),
+    ]).slice(0, 20),
     possibleSubjects: unique([
       ...samples.map((sample) => sample.title),
       ...messages.map((message) => message.subject),
     ]).slice(0, 20),
+  };
+}
+
+function fieldDiscovery(conversationSets: ConversationSet[], details: DetailSample[]) {
+  const samples = conversationSets.flatMap((set) => set.samples);
+  const messages = details.flatMap((detail) => detail.messages);
+  return {
+    conversationListItemKeys: unique(samples.flatMap((sample) => sample.rawKeys)).sort(),
+    latestMessageKeys: unique(samples.flatMap((sample) => sample.latestMessageKeys)).sort(),
+    conversationDetailTopLevelKeys: unique(details.flatMap((detail) => detail.rawKeys)).sort(),
+    messageKeys: unique(messages.flatMap((message) => message.rawKeys)).sort(),
+    mediaKeys: unique(messages.flatMap((message) => message.mediaSamples || []).flatMap((sample) => sample.rawKeys)).sort(),
+    missingFieldsAcrossDetails: unique(details.flatMap((detail) => detail.missingFields)).sort(),
+    suspiciousFieldsAcrossDetails: unique(details.flatMap((detail) => detail.suspiciousFields)).sort(),
+  };
+}
+
+function payloadExamples(conversationSets: ConversationSet[], details: DetailSample[]) {
+  const samples = conversationSets.flatMap((set) => set.samples);
+  const messages = details.flatMap((detail) => detail.messages);
+  return {
+    conversationHeaders: samples.slice(0, 3).map((sample) => ({
+      conversationId: sample.conversationId,
+      conversationType: sample.conversationType,
+      conversationStatus: sample.conversationStatus,
+      otherPartyUsername: sample.otherPartyUsername,
+      unreadCount: sample.unreadCount,
+      latestMessageCreatedDate: sample.latestMessageCreatedDate,
+      latestMessagePreview: sample.latestMessagePreview,
+      referenceId: sample.referenceId,
+      referenceType: sample.referenceType,
+      rawKeys: sample.rawKeys,
+    })),
+    messages: messages.slice(0, 5).map((message) => ({
+      messageId: message.messageId,
+      senderUsername: message.senderUsername,
+      recipientUsername: message.recipientUsername,
+      direction: message.direction,
+      directionConfidence: message.directionConfidence,
+      createdDate: message.createdDate,
+      subject: message.subject,
+      bodyPreview: message.bodyPreview,
+      bodyShape: message.bodyShape,
+      read: message.read,
+      readStatus: message.readStatus,
+      messageStatus: message.messageStatus,
+      mediaCount: message.mediaCount,
+      rawKeys: message.rawKeys,
+    })),
+    media: messages.flatMap((message) => message.mediaSamples || []).slice(0, 5),
+  };
+}
+
+function messageOrderingAnalysis(details: DetailSample[]) {
+  return details.map((detail) => ({
+    conversationId: detail.conversationId,
+    conversationType: detail.conversationType,
+    messageCount: detail.messageCount,
+    fetchedMessageCount: detail.messages.length,
+    observedOrder: detail.orderingAnalysis.observedOrder,
+    comparableTimestampCount: detail.orderingAnalysis.comparableTimestampCount,
+    stableMessageIds: detail.orderingAnalysis.stableMessageIds,
+    duplicateMessageIds: detail.orderingAnalysis.duplicateMessageIds,
+    duplicateBodyPreviews: detail.orderingAnalysis.duplicateBodyPreviews,
+    pagination: detail.pagination,
+  }));
+}
+
+function correlationAnalysis(conversationSets: ConversationSet[], details: DetailSample[]) {
+  const cov = coverage(conversationSets, details);
+  const hints = correlationHints(conversationSets, details);
+  const messages = details.flatMap((detail) => detail.messages);
+  const textForExtraction = messages.map((message) => [message.subject, message.bodyPreview].filter(Boolean).join(" ")).join(" ");
+  const orderNumberCandidates = uniqueText(textForExtraction.match(/\b\d{2}-\d{5}-\d{5}\b/g) || []).slice(0, 10);
+  const itemIdCandidates = uniqueText(textForExtraction.match(/\b\d{12}\b/g) || []).slice(0, 10);
+  const returnSignalObserved = /\breturn|refund|case|defect|not as described|arrived damaged\b/i.test(textForExtraction);
+  return {
+    strongCorrelation: [
+      cov.hasListingReferences ? "listing/reference id from Commerce Message payload" : "",
+      cov.hasOtherPartyUsernames ? "otherPartyUsername / senderUsername / recipientUsername" : "",
+      orderNumberCandidates.length ? "explicit eBay order-number pattern in message text preview" : "",
+    ].filter(Boolean),
+    weakCorrelation: [
+      hints.possibleSubjects.length ? "conversation title or message subject text" : "",
+      itemIdCandidates.length ? "item/listing-like numeric candidates extracted from previews" : "",
+      returnSignalObserved ? "return/refund language in message preview" : "",
+    ].filter(Boolean),
+    directApiFields: {
+      listingReferenceObserved: cov.hasListingReferences,
+      usernameObserved: cov.hasOtherPartyUsernames || cov.hasSenderRecipientUsernames,
+      orderIdObserved: orderNumberCandidates.length > 0,
+      returnIdObserved: false,
+    },
+    extractedCandidates: {
+      orderNumbers: orderNumberCandidates,
+      itemIds: itemIdCandidates,
+      buyerUsernames: hints.possibleBuyerUsernames,
+      referenceIds: hints.possibleReferenceIds,
+    },
+    orderCorrelationFeasibility: cov.hasListingReferences && (cov.hasOtherPartyUsernames || cov.hasSenderRecipientUsernames)
+      ? "strong: join reference/listing id plus username to ebay_order_lines/ebay_orders and buyer history"
+      : "partial: needs deterministic extraction or buyer-history lookup from subject/body/usernames",
+    returnCorrelationFeasibility: returnSignalObserved && (cov.hasOtherPartyUsernames || cov.hasSenderRecipientUsernames)
+      ? "weak-to-moderate: use username/order/listing links, then join to ebay_return_cases; Commerce Message payload does not expose a return id in this probe"
+      : "weak: normal Commerce Message conversations should be linked to returns through orders/buyer context or Post-Order return sync, not trusted as direct return identity",
+    trustedDirectlyFromApi: [
+      "conversationId",
+      "messageId when present",
+      "senderUsername/recipientUsername when present",
+      "createdDate timestamps when present",
+      "conversationStatus/unreadCount/readStatus when present",
+      "listing reference when present",
+    ],
+    stillNeedsDeterministicExtraction: [
+      "order number when not provided as a structured field",
+      "return case id",
+      "SKU/inventory identity beyond listing reference",
+      "Outlook notification evidence links, if needed for fallback/audit",
+    ],
+  };
+}
+
+function canonicalConversationAssessment(conversationSets: ConversationSet[], details: DetailSample[]) {
+  const cov = coverage(conversationSets, details);
+  const messages = details.flatMap((detail) => detail.messages);
+  const detailDirections = messages.map((message) => message.direction);
+  const reliableDirections = messages.filter((message) =>
+    message.direction && message.direction !== "unknown" && message.directionConfidence !== "weak" && message.directionConfidence !== "unknown"
+  ).length;
+  const bodyLooksClean = messages.some((message) => Boolean(message.bodyPreview)) &&
+    !messages.some((message) => message.bodyShape?.hasLikelyEbayTemplateText);
+  const orderingStable = details.length > 0 && details.every((detail) =>
+    detail.orderingAnalysis.observedOrder !== "mixed_or_unknown" &&
+    detail.orderingAnalysis.stableMessageIds &&
+    detail.pagination.duplicateMessageIdsAcrossFetchedPages.length === 0
+  );
+  const orderCorrelation = cov.hasListingReferences && (cov.hasOtherPartyUsernames || cov.hasSenderRecipientUsernames);
+  return {
+    supportsCanonicalInbox: cov.hasConversationIds && cov.hasTimestamps && cov.hasConversationStatus,
+    supportsCleanChatTimeline: cov.hasSenderRecipientUsernames && cov.hasTimestamps && bodyLooksClean,
+    supportsReliableDirection: messages.length > 0 && reliableDirections === messages.length,
+    supportsUnreadState: cov.hasUnreadCounts || cov.hasReadStatus,
+    supportsMessageOrdering: orderingStable,
+    supportsMedia: cov.hasMedia || cov.hasMessageMediaField,
+    supportsOrderCorrelation: orderCorrelation,
+    supportsReturnCorrelation: false,
+    outlookStillRequiredForCanonicalChat: false,
+    caveats: [
+      !messages.length ? "No detail messages were fetched in this run; use includeDetails or conversationId for canonical timeline validation." : "",
+      detailDirections.includes("unknown") ? "Some message directions are unknown without otherPartyUsername or stored seller username." : "",
+      !cov.hasMedia ? "No actual media object was observed in the sampled messages; media field support may need a conversation with attachments." : "",
+      !orderCorrelation ? "Order correlation needs listing reference plus username, or deterministic extraction fallback." : "",
+      "Return correlation remains a Post-Order Return API concern unless a normal conversation can be linked to an order/return context.",
+    ].filter(Boolean),
+  };
+}
+
+function proposedCanonicalDataContract() {
+  return {
+    conversation: {
+      source: "eBay Commerce Message API getConversations/getConversation",
+      identity: ["ebay_conversation_id", "conversation_type"],
+      fields: [
+        "conversation_status",
+        "title",
+        "other_party_username",
+        "reference_id",
+        "reference_type",
+        "unread_count",
+        "latest_message_created_at",
+        "latest_message_preview",
+        "last_synced_at",
+        "raw_summary",
+      ],
+    },
+    conversation_message: {
+      source: "eBay Commerce Message API getConversation.messages[]",
+      identity: ["ebay_conversation_id", "ebay_message_id"],
+      fields: [
+        "sender_username",
+        "recipient_username",
+        "direction",
+        "direction_confidence",
+        "subject",
+        "message_body",
+        "body_shape",
+        "read_status",
+        "created_at_ebay",
+        "has_media",
+        "dedupe_hash",
+        "raw_message",
+      ],
+    },
+    message_direction: {
+      inbound: "senderUsername equals otherPartyUsername",
+      outbound: "recipientUsername equals otherPartyUsername",
+      platform: "conversation_type is FROM_EBAY or platform participant fields prove eBay-authored content",
+      unknown: "sender/recipient/other-party data is insufficient",
+    },
+    message_participant: {
+      fields: ["username", "role", "source_field", "first_seen_at", "last_seen_at"],
+      note: "Store seller account username separately so single-conversation probes can infer direction even without list context.",
+    },
+    listing_reference: {
+      fields: ["reference_id", "reference_type", "listing_id", "item_id"],
+      correlationUse: "Join to ebay_order_lines, ebay_inventory_links, and buyer history with username/time filters.",
+    },
+    conversation_status: {
+      fields: ["conversation_status", "read_status", "unread_count"],
+      note: "Do not map Outlook read state onto eBay read state.",
+    },
+    conversation_latest_activity: {
+      fields: ["latest_message_id", "latest_message_created_at", "latest_message_preview", "latest_sender_username"],
+      note: "Use eBay timestamps for inbox ordering and sync watermarks.",
+    },
+  };
+}
+
+function readinessAssessment(conversationSets: ConversationSet[], details: DetailSample[]) {
+  const assessment = canonicalConversationAssessment(conversationSets, details);
+  const canProceed = Boolean(
+    assessment.supportsCanonicalInbox &&
+    assessment.supportsCleanChatTimeline &&
+    assessment.supportsUnreadState &&
+    assessment.supportsMessageOrdering
+  );
+  return {
+    canProceedToCanonicalSchemaDesign: canProceed,
+    needsMoreApiInvestigationFirst: !canProceed,
+    recommendedNextStep: canProceed
+      ? "Step 5F.6E - design canonical eBay conversation schema and migrations from observed payload fields."
+      : "Run this probe against multi-message active conversations, known buyer usernames, and attachment/return-adjacent cases before final schema design.",
+    blockersOrOpenQuestions: [
+      !assessment.supportsReliableDirection ? "Confirm direction with otherPartyUsername or stored seller username across multi-message buyer/seller threads." : "",
+      !assessment.supportsMedia ? "Find at least one conversation with media to validate messageMedia shape." : "",
+      !assessment.supportsOrderCorrelation ? "Confirm listing reference and username correlation against existing ebay_order_lines/ebay_orders." : "",
+      "Return-case messages should still be validated through the Post-Order Return API path, not assumed from Commerce Message conversations.",
+    ].filter(Boolean),
   };
 }
 
@@ -612,6 +1189,7 @@ function warningsFor(input: ProbeInput, conversationSets: ConversationSet[], det
   const warnings: string[] = [
     "Probe is read-only; it calls only Commerce Message API GET endpoints.",
     `Body previews are capped at ${BODY_PREVIEW_MAX} characters and full message bodies are not returned.`,
+    `Conversation detail pagination probes fetch at most ${DETAIL_MESSAGE_LIMIT} first-page messages and ${DETAIL_SECOND_PAGE_LIMIT} second-page messages per conversation.`,
   ];
   if (!input.conversationType && !input.conversationId) {
     warnings.push("No conversationType was supplied, so the probe sampled both FROM_MEMBERS and FROM_EBAY.");
@@ -627,6 +1205,7 @@ function warningsFor(input: ProbeInput, conversationSets: ConversationSet[], det
   }
   for (const detail of details) {
     if (detail.api && !detail.api.ok) warnings.push(`Conversation detail failed for ${detail.conversationId}: ${detail.api.errorCategory || "unknown_api_error"}.`);
+    for (const suspicious of detail.suspiciousFields) warnings.push(`${detail.conversationId}: ${suspicious}`);
   }
   return warnings;
 }
@@ -642,6 +1221,7 @@ async function runProbe(input: ProbeInput) {
   };
 
   if (!tokenResult.token) {
+    const emptyDetails: DetailSample[] = [];
     return {
       ok: false,
       mode: "probe",
@@ -650,8 +1230,13 @@ async function runProbe(input: ProbeInput) {
       tokenRefresh: tokenResult.diagnostic,
       conversations: emptySet,
       conversationSets: [emptySet],
-      fieldCoverage: coverage([emptySet], []),
-      correlationHints: correlationHints([emptySet], []),
+      fieldCoverage: coverage([emptySet], emptyDetails),
+      fieldDiscovery: fieldDiscovery([emptySet], emptyDetails),
+      correlationHints: correlationHints([emptySet], emptyDetails),
+      correlationAnalysis: correlationAnalysis([emptySet], emptyDetails),
+      canonicalConversationAssessment: canonicalConversationAssessment([emptySet], emptyDetails),
+      proposedCanonicalDataContract: proposedCanonicalDataContract(),
+      readinessAssessment: readinessAssessment([emptySet], emptyDetails),
       warnings: ["Token refresh failed; no Commerce Message API calls were made."],
       nextRequiredAction: nextRequiredAction(tokenResult.diagnostic, []),
     };
@@ -685,10 +1270,10 @@ async function runProbe(input: ProbeInput) {
     if (!details.length) details.push(...failedAttempts);
   } else if (input.includeDetails) {
     const detailTargets = conversationSets
-      .flatMap((set) => set.samples.map((sample) => ({ conversationId: sample.conversationId, conversationType: set.conversationType })))
+      .flatMap((set) => set.samples.map((sample) => ({ conversationId: sample.conversationId, conversationType: set.conversationType, sample })))
       .slice(0, DETAIL_CONVERSATION_MAX);
     for (const target of detailTargets) {
-      details.push(await fetchDetail(token, target.conversationId, target.conversationType));
+      details.push(await fetchDetail(token, target.conversationId, target.conversationType, target.sample));
     }
   }
 
@@ -709,7 +1294,14 @@ async function runProbe(input: ProbeInput) {
     conversationSets,
     details: details.length ? details : undefined,
     fieldCoverage: coverage(conversationSets, details),
+    fieldDiscovery: fieldDiscovery(conversationSets, details),
+    payloadExamples: payloadExamples(conversationSets, details),
+    messageOrderingAnalysis: messageOrderingAnalysis(details),
     correlationHints: correlationHints(conversationSets, details),
+    correlationAnalysis: correlationAnalysis(conversationSets, details),
+    canonicalConversationAssessment: canonicalConversationAssessment(conversationSets, details),
+    proposedCanonicalDataContract: proposedCanonicalDataContract(),
+    readinessAssessment: readinessAssessment(conversationSets, details),
     warnings: warningsFor(input, conversationSets, details),
     nextRequiredAction: nextRequiredAction(tokenResult.diagnostic, apiDiagnostics),
   };
