@@ -1566,6 +1566,129 @@
     }, TIMEOUTS.ebayConversationClassify);
   }
 
+  function normalizeEbayConversationSavedView(row = {}) {
+    const payload = row.filter_payload && typeof row.filter_payload === "object" ? row.filter_payload : {};
+    return {
+      id: row.id || row.system_key || "",
+      name: row.name || "Untitled folder",
+      description: row.description || "",
+      filter_payload: payload,
+      system_key: row.system_key || "",
+      is_system_default: row.is_system_default === true,
+      is_active: row.is_active !== false,
+      sort_order: Number(row.sort_order || 100),
+      created_by: row.created_by || null,
+      updated_by: row.updated_by || null,
+      created_at: row.created_at || null,
+      updated_at: row.updated_at || null,
+      deleted_at: row.deleted_at || null,
+    };
+  }
+
+  async function fetchEbayConversationSavedViews(context) {
+    await currentSession(context, "eBay conversation saved views");
+    const { data, error } = await context.client
+      .from("ebay_conversation_saved_views")
+      .select("id, name, description, filter_payload, system_key, is_system_default, is_active, sort_order, created_by, updated_by, created_at, updated_at, deleted_at")
+      .eq("is_active", true)
+      .is("deleted_at", null)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true });
+    throwSupabaseReadError(error, "ebay_conversation_saved_views_failed");
+
+    return {
+      ok: true,
+      saved_views: (data || []).map(normalizeEbayConversationSavedView),
+      loaded_at: new Date().toISOString(),
+    };
+  }
+
+  async function createEbayConversationSavedView(context, values = {}) {
+    const session = await currentSession(context, "Create eBay conversation saved view");
+    const name = String(values.name || "").trim();
+    if (!name) {
+      const error = new Error("saved_view_name_required");
+      error.code = "saved_view_name_required";
+      throw error;
+    }
+
+    const { data, error } = await context.client
+      .from("ebay_conversation_saved_views")
+      .insert({
+        name,
+        description: String(values.description || "").trim() || null,
+        filter_payload: values.filterPayload || {},
+        is_system_default: false,
+        is_active: true,
+        sort_order: Number(values.sortOrder || 500),
+        created_by: session.user?.id || null,
+        updated_by: session.user?.id || null,
+      })
+      .select("id, name, description, filter_payload, system_key, is_system_default, is_active, sort_order, created_by, updated_by, created_at, updated_at, deleted_at")
+      .single();
+    throwSupabaseReadError(error, "ebay_conversation_saved_view_create_failed");
+
+    return {
+      ok: true,
+      saved_view: normalizeEbayConversationSavedView(data),
+    };
+  }
+
+  async function updateEbayConversationSavedView(context, viewId, values = {}) {
+    const session = await currentSession(context, "Update eBay conversation saved view");
+    if (!viewId) {
+      const error = new Error("saved_view_id_required");
+      error.code = "saved_view_id_required";
+      throw error;
+    }
+
+    const updates = {
+      updated_by: session.user?.id || null,
+    };
+    if (Object.prototype.hasOwnProperty.call(values, "name")) updates.name = String(values.name || "").trim();
+    if (Object.prototype.hasOwnProperty.call(values, "description")) updates.description = String(values.description || "").trim() || null;
+    if (Object.prototype.hasOwnProperty.call(values, "filterPayload")) updates.filter_payload = values.filterPayload || {};
+
+    const { data, error } = await context.client
+      .from("ebay_conversation_saved_views")
+      .update(updates)
+      .eq("id", viewId)
+      .select("id, name, description, filter_payload, system_key, is_system_default, is_active, sort_order, created_by, updated_by, created_at, updated_at, deleted_at")
+      .single();
+    throwSupabaseReadError(error, "ebay_conversation_saved_view_update_failed");
+
+    return {
+      ok: true,
+      saved_view: normalizeEbayConversationSavedView(data),
+    };
+  }
+
+  async function deleteEbayConversationSavedView(context, viewId) {
+    const session = await currentSession(context, "Delete eBay conversation saved view");
+    if (!viewId) {
+      const error = new Error("saved_view_id_required");
+      error.code = "saved_view_id_required";
+      throw error;
+    }
+
+    const { data, error } = await context.client
+      .from("ebay_conversation_saved_views")
+      .update({
+        is_active: false,
+        deleted_at: new Date().toISOString(),
+        updated_by: session.user?.id || null,
+      })
+      .eq("id", viewId)
+      .select("id, name, description, filter_payload, system_key, is_system_default, is_active, sort_order, created_by, updated_by, created_at, updated_at, deleted_at")
+      .single();
+    throwSupabaseReadError(error, "ebay_conversation_saved_view_delete_failed");
+
+    return {
+      ok: true,
+      saved_view: normalizeEbayConversationSavedView(data),
+    };
+  }
+
   async function fetchOperationalDashboard(context) {
     const session = await currentSession(context, "Operational dashboard");
     const [mailboxResult, pipelineResult, liveSyncResult] = await Promise.allSettled([
@@ -1635,6 +1758,10 @@
     classifyEbayConversation,
     classifyRecentEbayConversations,
     saveEbayConversationClassificationOverride,
+    fetchEbayConversationSavedViews,
+    createEbayConversationSavedView,
+    updateEbayConversationSavedView,
+    deleteEbayConversationSavedView,
     fetchInboxPreview,
     importApprovedInboxPreview,
     runMailboxImport,

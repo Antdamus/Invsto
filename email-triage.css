@@ -3089,6 +3089,7 @@
 }
 
 .ebay-conversation-search {
+  position: relative;
   display: grid;
   grid-template-columns: 18px minmax(220px, 380px) 30px;
   align-items: center;
@@ -3099,6 +3100,63 @@
   background: rgba(255,255,255,.045);
   color: rgba(242,243,245,.62);
   padding: 0 5px 0 10px;
+}
+
+.ebay-conversation-tag-suggestions {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid rgba(114,184,255,.22);
+  border-radius: 8px;
+  background: rgba(13,16,20,.98);
+  box-shadow: 0 18px 42px rgba(0,0,0,.34);
+  padding: 6px;
+}
+
+.ebay-conversation-tag-suggestions[hidden] {
+  display: none;
+}
+
+.ebay-conversation-tag-suggestions button,
+.ebay-conversation-tag-help button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-height: 26px;
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 7px;
+  background: rgba(255,255,255,.04);
+  color: rgba(242,243,245,.82);
+  cursor: pointer;
+  font-size: .68rem;
+  font-weight: 850;
+  padding: 0 7px;
+}
+
+.ebay-conversation-tag-suggestions button span,
+.ebay-conversation-tag-help button span {
+  color: rgba(242,243,245,.48);
+  font-size: .62rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.ebay-conversation-tag-suggestions button:hover,
+.ebay-conversation-tag-suggestions button:focus-visible,
+.ebay-conversation-tag-help button:hover,
+.ebay-conversation-tag-help button:focus-visible {
+  border-color: rgba(114,184,255,.28);
+  background: rgba(114,184,255,.11);
+  color: #d7eaff;
+  outline: none;
 }
 
 .ebay-conversation-search:focus-within {
@@ -3212,6 +3270,39 @@
   border-radius: 8px;
   background: rgba(255,255,255,.026);
   padding: 8px;
+}
+
+.ebay-conversation-tag-help {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  border: 1px solid rgba(114,184,255,.18);
+  border-radius: 8px;
+  background: rgba(114,184,255,.055);
+  padding: 8px;
+}
+
+.ebay-conversation-tag-help[hidden] {
+  display: none;
+}
+
+.ebay-conversation-tag-help section {
+  min-width: 0;
+}
+
+.ebay-conversation-tag-help h4 {
+  margin: 0 0 6px;
+  color: rgba(242,243,245,.62);
+  font-size: .68rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.ebay-conversation-tag-help section div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
 }
 
 .ebay-conversation-filter-panel[hidden] {
@@ -3351,13 +3442,53 @@
 
 .ebay-conversation-sidebar-nav {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 6px;
   border-bottom: 1px solid rgba(255,255,255,.08);
   padding: 8px;
 }
 
-.ebay-conversation-sidebar-nav button {
+.ebay-smart-folder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  color: rgba(242,243,245,.58);
+  font-size: .68rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  padding: 8px 8px 0;
+  text-transform: uppercase;
+}
+
+.ebay-smart-folder-head button {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 7px;
+  background: rgba(255,255,255,.035);
+  color: rgba(242,243,245,.62);
+  cursor: pointer;
+}
+
+.ebay-smart-folder-head button:hover,
+.ebay-smart-folder-head button:focus-visible {
+  border-color: rgba(114,184,255,.28);
+  background: rgba(114,184,255,.11);
+  color: #d7eaff;
+  outline: none;
+}
+
+.ebay-smart-folder-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(3, 28px);
+  gap: 4px;
+  min-width: 0;
+}
+
+.ebay-smart-folder-row > button:first-child {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
@@ -3374,13 +3505,13 @@
   transition: border-color .18s var(--ease), background .18s var(--ease), color .18s var(--ease);
 }
 
-.ebay-conversation-sidebar-nav button svg {
+.ebay-smart-folder-row > button:first-child svg {
   flex: 0 0 auto;
   width: 14px;
   height: 14px;
 }
 
-.ebay-conversation-sidebar-nav button span {
+.ebay-smart-folder-row > button:first-child span {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -3388,7 +3519,7 @@
   white-space: nowrap;
 }
 
-.ebay-conversation-sidebar-nav button b {
+.ebay-smart-folder-row > button:first-child b {
   flex: 0 0 auto;
   min-width: 18px;
   border-radius: 999px;
@@ -3400,19 +3531,53 @@
   text-align: center;
 }
 
-.ebay-conversation-sidebar-nav button.is-active,
-.ebay-conversation-sidebar-nav button:hover,
-.ebay-conversation-sidebar-nav button:focus-visible {
+.ebay-smart-folder-row.is-active > button:first-child,
+.ebay-smart-folder-row > button:first-child:hover,
+.ebay-smart-folder-row > button:first-child:focus-visible {
   border-color: rgba(114,184,255,.28);
   background: rgba(114,184,255,.11);
   color: #d7eaff;
 }
 
-.ebay-conversation-sidebar-nav button.is-active b,
-.ebay-conversation-sidebar-nav button:hover b,
-.ebay-conversation-sidebar-nav button:focus-visible b {
+.ebay-smart-folder-row.is-active > button:first-child b,
+.ebay-smart-folder-row > button:first-child:hover b,
+.ebay-smart-folder-row > button:first-child:focus-visible b {
   background: rgba(114,184,255,.2);
   color: #d7eaff;
+}
+
+.ebay-smart-folder-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  min-width: 28px;
+  min-height: 30px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: rgba(255,255,255,.025);
+  color: rgba(242,243,245,.5);
+  cursor: pointer;
+  padding: 0;
+}
+
+.ebay-smart-folder-icon-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.ebay-smart-folder-icon-btn:hover,
+.ebay-smart-folder-icon-btn:focus-visible {
+  border-color: rgba(114,184,255,.28);
+  background: rgba(114,184,255,.1);
+  color: #d7eaff;
+  outline: none;
+}
+
+.ebay-smart-folder-icon-btn.is-danger:hover,
+.ebay-smart-folder-icon-btn.is-danger:focus-visible {
+  border-color: rgba(246,109,109,.32);
+  background: rgba(246,109,109,.1);
+  color: #ffd4d4;
 }
 
 .ebay-conversation-sync-result {
@@ -4160,8 +4325,9 @@
     width: 100%;
   }
 
-  .ebay-conversation-sidebar-nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .ebay-conversation-sidebar-nav,
+  .ebay-conversation-tag-help {
+    grid-template-columns: 1fr;
   }
 
   .ebay-conversation-filter-panel {

@@ -9,7 +9,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="email-triage.css?v=5f6i1" />
+  <link rel="stylesheet" href="email-triage.css?v=5f6i2" />
 
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
@@ -122,10 +122,11 @@
             <div id="ebay-conversation-status" class="workspace-status">Waiting for admin session.</div>
             <label class="ebay-conversation-search" for="ebay-conversation-search">
               <i data-lucide="search"></i>
-              <input id="ebay-conversation-search" type="search" placeholder="Search buyer, message, listing, order, tag" autocomplete="off" spellcheck="false" aria-label="Search eBay conversations" />
+              <input id="ebay-conversation-search" type="search" placeholder="Search text or use tag:shipping_issue" autocomplete="off" spellcheck="false" aria-label="Search eBay conversations" />
               <button type="button" id="ebay-conversation-search-clear" aria-label="Clear eBay conversation search" disabled>
                 <i data-lucide="x"></i>
               </button>
+              <div id="ebay-conversation-tag-suggestions" class="ebay-conversation-tag-suggestions" hidden></div>
             </label>
             <fieldset class="ebay-conversation-density-control" aria-label="Conversation list density">
               <legend>Density</legend>
@@ -147,6 +148,14 @@
               <i data-lucide="filter"></i>
               <span id="ebay-conversation-filter-label">Classification filters</span>
             </button>
+            <button type="button" id="ebay-conversation-tag-help-toggle" class="secondary-btn" aria-expanded="false" aria-controls="ebay-conversation-tag-help">
+              <i data-lucide="tags"></i>
+              Available tags
+            </button>
+            <button type="button" id="ebay-conversation-save-view" class="secondary-btn">
+              <i data-lucide="folder-plus"></i>
+              Save folder
+            </button>
             <div id="ebay-conversation-active-filters" class="ebay-conversation-active-filters" aria-live="polite"></div>
             <button type="button" id="ebay-conversation-clear-filters" class="secondary-btn" disabled>
               <i data-lucide="rotate-ccw"></i>
@@ -154,78 +163,21 @@
             </button>
           </div>
 
+          <div id="ebay-conversation-tag-help" class="ebay-conversation-tag-help" hidden></div>
           <div id="ebay-conversation-filter-panel" class="ebay-conversation-filter-panel" aria-label="Available classification filters"></div>
 
           <div id="ebay-conversation-sync-result" class="ebay-conversation-sync-result" aria-live="polite"></div>
 
           <div id="ebay-conversation-shell" class="ebay-conversation-shell">
             <aside class="ebay-conversation-list-panel" aria-label="Canonical eBay conversations">
-              <div class="ebay-conversation-sidebar-nav" aria-label="eBay conversation filters">
-                <button type="button" data-ebay-conversation-filter="all" class="is-active">
-                  <i data-lucide="inbox"></i>
-                  <span>All</span>
-                  <b data-filter-count>0</b>
+              <div class="ebay-smart-folder-head">
+                <span>Smart Folders</span>
+                <button type="button" id="ebay-conversation-reload-views" aria-label="Reload smart folders">
+                  <i data-lucide="refresh-cw"></i>
                 </button>
-                <button type="button" data-ebay-conversation-filter="unread">
-                  <i data-lucide="circle-dot"></i>
-                  <span>Unread</span>
-                  <b data-filter-count>0</b>
-                </button>
-                <button type="button" data-ebay-conversation-filter="returns">
-                  <i data-lucide="undo-2"></i>
-                  <span>Returns</span>
-                  <b data-filter-count>0</b>
-                </button>
-                <button type="button" data-ebay-conversation-filter="shipping_issues">
-                  <i data-lucide="truck"></i>
-                  <span>Shipping</span>
-                  <b data-filter-count>0</b>
-                </button>
-                <button type="button" data-ebay-conversation-filter="needs_reply_today">
-                  <i data-lucide="alarm-clock"></i>
-                  <span>Reply today</span>
-                  <b data-filter-count>0</b>
-                </button>
-                <button type="button" data-ebay-conversation-filter="vip_buyers">
-                  <i data-lucide="star"></i>
-                  <span>VIP buyers</span>
-                  <b data-filter-count>0</b>
-                </button>
-                <button type="button" data-ebay-conversation-filter="high_value_buyers">
-                  <i data-lucide="gem"></i>
-                  <span>High value</span>
-                  <b data-filter-count>0</b>
-                </button>
-                <button type="button" data-ebay-conversation-filter="refund_risk">
-                  <i data-lucide="badge-alert"></i>
-                  <span>Refund risk</span>
-                  <b data-filter-count>0</b>
-                </button>
-                <button type="button" data-ebay-conversation-filter="review_queue">
-                  <i data-lucide="list-checks"></i>
-                  <span>Review queue</span>
-                  <b data-filter-count>0</b>
-                </button>
-                <button type="button" data-ebay-conversation-filter="has_order">
-                  <i data-lucide="receipt-text"></i>
-                  <span>Has order</span>
-                  <b data-filter-count>0</b>
-                </button>
-                <button type="button" data-ebay-conversation-filter="has_return">
-                  <i data-lucide="undo-2"></i>
-                  <span>Has return</span>
-                  <b data-filter-count>0</b>
-                </button>
-                <button type="button" data-ebay-conversation-filter="has_media">
-                  <i data-lucide="paperclip"></i>
-                  <span>Has media</span>
-                  <b data-filter-count>0</b>
-                </button>
-                <button type="button" data-ebay-conversation-filter="needs_context_review">
-                  <i data-lucide="badge-alert"></i>
-                  <span>Needs review</span>
-                  <b data-filter-count>0</b>
-                </button>
+              </div>
+              <div id="ebay-conversation-saved-views" class="ebay-conversation-sidebar-nav" aria-label="Smart folders">
+                <div class="classification-empty matched-context-empty is-quiet">Loading smart folders.</div>
               </div>
               <div id="ebay-conversation-summary" class="ebay-conversation-summary"></div>
               <div id="ebay-conversation-list" class="ebay-conversation-list"></div>
