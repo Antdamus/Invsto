@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { linkEbayConversationContext } from "../_shared/ebay-conversation-context.ts";
 
 type ServiceClient = ReturnType<typeof createClient>;
 type JsonRecord = Record<string, unknown>;
@@ -921,6 +922,14 @@ async function syncConversationType(options: {
       conversationRow,
       counters: options.counters,
     });
+    const linkResult = await linkEbayConversationContext(options.supabase, conversationRow.id);
+    if (linkResult.warnings.length) {
+      options.counters.warnings.push({
+        code: "conversation_context_link_warnings",
+        conversationId: ebayConversationId,
+        warnings: linkResult.warnings.slice(0, 10),
+      });
+    }
     await upsertConversationLinks(options.supabase, options.account, {
       id: conversationRow.id,
       reference_id: referenceId(conversation) || conversationRow.reference_id,
