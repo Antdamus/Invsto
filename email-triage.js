@@ -816,9 +816,9 @@
 
     if (detail && isExpanded) {
       return `
-        <details class="classification-detail-section email-body-section detail-disclosure core-disclosure" open>
+        <details class="classification-detail-section email-body-section detail-disclosure stored-body-disclosure" open>
           <summary>
-            <span>Email Body</span>
+            <span>Stored Body Text</span>
             <i data-lucide="chevron-down"></i>
           </summary>
           ${detail.body_truncated ? `
@@ -836,9 +836,9 @@
     }
 
     return `
-      <details class="classification-detail-section email-body-section detail-disclosure core-disclosure" open>
+      <details class="classification-detail-section email-body-section detail-disclosure stored-body-disclosure">
         <summary>
-          <span>Email Body</span>
+          <span>Stored Body Text</span>
           <i data-lucide="chevron-down"></i>
         </summary>
         <p>${escapeHtml(selected.message_body_preview || "No body preview available.")}</p>
@@ -849,6 +849,160 @@
         </button>
       </details>
     `;
+  }
+
+  function safeArray(value) {
+    return Array.isArray(value) ? value.filter((item) => item !== null && item !== undefined && item !== "") : [];
+  }
+
+  function safeText(value, fallback = "--") {
+    const text = String(value ?? "").trim();
+    return text || fallback;
+  }
+
+  function formatContextDate(value) {
+    return value ? formatDateTime(value) : "--";
+  }
+
+  function formatContextMoney(value) {
+    if (value === null || value === undefined || value === "") return "--";
+    const number = Number(value);
+    if (!Number.isFinite(number)) return String(value);
+    return number.toLocaleString(undefined, { style: "currency", currency: "USD" });
+  }
+
+  function formatContextNumber(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "--";
+    return number.toLocaleString();
+  }
+
+  function renderInfoChips(items = [], emptyText = "None") {
+    const chips = safeArray(items);
+    if (!chips.length) return `<span class="context-info-chip is-muted">${escapeHtml(emptyText)}</span>`;
+    return chips.map((item) => `<span class="context-info-chip">${escapeHtml(humanizeValue(item))}</span>`).join("");
+  }
+
+  function warningParts(warning) {
+    if (warning && typeof warning === "object") {
+      return {
+        code: warning.code || warning.type || "context_warning",
+        message: warning.message || warning.detail || warning.code || "Context warning",
+        severity: String(warning.severity || warning.level || "warning").toLowerCase(),
+      };
+    }
+    return {
+      code: String(warning || "context_warning"),
+      message: humanizeValue(warning || "Context warning"),
+      severity: "warning",
+    };
+  }
+
+  function renderWarningPanel(detailWarnings = [], contextWarnings = []) {
+    const warnings = [
+      ...safeArray(detailWarnings).map((warning) => ({ ...warningParts(warning), source: "Thread" })),
+      ...safeArray(contextWarnings).map((warning) => ({ ...warningParts(warning), source: "Context" })),
+    ];
+    if (!warnings.length) return "";
+
+    return `
+      <div class="context-warning-panel" aria-label="Context warnings">
+        <strong>Context Notes</strong>
+        <div class="context-warning-list">
+          ${warnings.map((warning) => `
+            <span class="context-warning-chip is-${escapeHtml(warning.severity === "error" ? "error" : warning.severity === "info" ? "info" : "warning")}">
+              <b>${escapeHtml(warning.source)}</b>
+              ${escapeHtml(warning.message || humanizeValue(warning.code))}
+            </span>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function threadRoleLabel(role) {
+    const value = String(role || "").toLowerCase();
+    if (value === "buyer") return "Buyer";
+    if (value === "operator" || value === "seller") return "OG / Seller";
+    if (value === "platform" || value === "ebay") return "eBay";
+    return "Unknown";
+  }
+
+  function threadRoleClass(role) {
+    const value = String(role || "").toLowerCase();
+    if (value === "buyer") return "buyer";
+    if (value === "operator" || value === "seller") return "seller";
+    if (value === "platform" || value === "ebay") return "ebay";
+    return "unknown";
+  }
+
+  function renderThreadText(text) {
+    const cleaned = safeText(text, "No stored body text for this thread block.");
+    const isLong = cleaned.length > 1200;
+    const excerpt = isLong ? `${cleaned.slice(0, 1200).trim()}...` : cleaned;
+    if (!isLong) return `<pre class="thread-card-text">${escapeHtml(cleaned)}</pre>`;
+    return `
+      <pre class="thread-card-text">${escapeHtml(excerpt)}</pre>
+      <details class="thread-card-more">
+        <summary>Show full stored text</summary>
+        <pre>${escapeHtml(cleaned)}</pre>
+      </details>
+    `;
+  }
+
+  function renderConversationSection(state, selected) {
+    const messageId = selected?.message_id || "";
+    const detail = messageId ? state.messageDetailsById[messageId] : null;
+    const error = messageId ? state.messageDetailErrorsById[messageId] : null;
+    const isLoading = state.messageDetailLoadingId === messageId;
+    const blocks = safeArray(detail?.thread_blocks);
+
+    if (!detail) {
+      return renderCoreDisclosure(
+        "Conversation",
+        renderBadge("Stored thread", "muted"),
+        `
+          <p class="conversation-empty">Load the selected message detail to view stored Outlook thread blocks.</p>
+          ${error ? `<div class="classification-notice is-error">Could not load conversation: ${escapeHtml(error)}</div>` : ""}
+          <button type="button" class="secondary-btn classification-body-action" data-message-detail-action="load" data-message-id="${escapeHtml(messageId)}" ${isLoading || !messageId ? "disabled" : ""}>
+            <i data-lucide="${isLoading ? "loader-circle" : "messages-square"}"></i>
+            ${escapeHtml(isLoading ? "Loading Conversation" : "View Full Email")}
+          </button>
+        `,
+        "thread-section",
+      );
+    }
+
+    return renderCoreDisclosure(
+      "Conversation",
+      renderBadge(`${blocks.length} ${blocks.length === 1 ? "block" : "blocks"}`, blocks.length ? "category" : "muted"),
+      `
+        ${blocks.length ? `
+          <div class="thread-card-list">
+            ${blocks.map((block) => {
+              const sender = [block.sender_name, block.sender_email ? `<${block.sender_email}>` : ""].filter(Boolean).join(" ");
+              const timestamp = block.received_at || block.sent_at;
+              return `
+                <article class="thread-card">
+                  <div class="thread-card-head">
+                    <div class="thread-card-sender">
+                      <strong>${escapeHtml(sender || "Sender unavailable")}</strong>
+                      <span>${escapeHtml(formatContextDate(timestamp))}</span>
+                    </div>
+                    <span class="thread-role-badge is-${escapeHtml(threadRoleClass(block.role))}">${escapeHtml(threadRoleLabel(block.role))}</span>
+                  </div>
+                  ${block.subject ? `<div class="thread-card-subject">${escapeHtml(block.subject)}</div>` : ""}
+                  ${safeArray(block.warnings).length ? `<div class="thread-card-warnings">${renderInfoChips(block.warnings, "No warnings")}</div>` : ""}
+                  ${renderThreadText(block.text)}
+                </article>
+              `;
+            }).join("")}
+          </div>
+        ` : `<div class="classification-empty matched-context-empty">No stored thread blocks were available for this message.</div>`}
+        ${renderWarningPanel(detail.warnings, [])}
+      `,
+      "thread-section",
+    );
   }
 
   function renderOperatorReviewSection(state, selected) {
@@ -1226,6 +1380,273 @@
     `;
   }
 
+  function contextConfidenceVariant(confidence) {
+    const value = String(confidence || "").toLowerCase();
+    if (value === "confirmed") return "success";
+    if (value === "suggested" || value === "weak") return "warning";
+    return "muted";
+  }
+
+  function renderContextFactGrid(items = []) {
+    return `
+      <dl class="context-fact-grid">
+        ${items.map((item) => `
+          <div${item.wide ? ' class="context-fact-wide"' : ""}>
+            <dt>${escapeHtml(item.label)}</dt>
+            <dd>${escapeHtml(safeText(item.value))}</dd>
+          </div>
+        `).join("")}
+      </dl>
+    `;
+  }
+
+  function renderBuyerSummaryCard(context) {
+    const buyer = context?.buyer && typeof context.buyer === "object" ? context.buyer : {};
+    const history = context?.buyer_history_summary && typeof context.buyer_history_summary === "object"
+      ? context.buyer_history_summary
+      : null;
+    const coverage = history?.coverage && typeof history.coverage === "object" ? history.coverage : {};
+    const confidence = String(buyer.confidence || "none").toLowerCase();
+    const weakIdentity = confidence === "weak" || confidence === "none";
+
+    return `
+      <section class="context-card buyer-summary-card">
+        <div class="context-card-head">
+          <h4>Buyer Summary</h4>
+          ${renderBadge(humanizeValue(confidence), contextConfidenceVariant(confidence))}
+        </div>
+        ${weakIdentity ? `
+          <div class="classification-notice is-warning">
+            Buyer identity is ${escapeHtml(humanizeValue(confidence))}. Treat this as operator-only context and avoid assuming it is the buyer in draft text.
+          </div>
+        ` : ""}
+        ${renderContextFactGrid([
+          { label: "Username", value: buyer.username || "No buyer identified" },
+          { label: "Name", value: buyer.name || "Unavailable" },
+          { label: "Email", value: buyer.email || "Unavailable" },
+          { label: "Matched From", value: buyer.matched_from ? humanizeValue(buyer.matched_from) : "Unavailable" },
+        ])}
+        <div class="buyer-metric-grid">
+          ${[
+            ["Prior Orders", formatContextNumber(history?.prior_order_count)],
+            ["Gross Value", formatContextMoney(history?.gross_value)],
+            ["Retained Value", formatContextMoney(history?.retained_value)],
+            ["Average Order", formatContextMoney(history?.average_order_value)],
+            ["Returns", formatContextNumber(history?.return_count)],
+            ["Open Returns", formatContextNumber(history?.open_return_count)],
+            ["Cancellations", formatContextNumber(history?.cancellation_count)],
+            ["Coverage", coverage.status ? humanizeValue(coverage.status) : "Unavailable"],
+          ].map(([label, value]) => `
+            <div>
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(value)}</strong>
+            </div>
+          `).join("")}
+        </div>
+        ${renderContextFactGrid([
+          { label: "First Prior Purchase", value: formatContextDate(history?.first_prior_purchase_at) },
+          { label: "Last Prior Purchase", value: formatContextDate(history?.last_prior_purchase_at) },
+          { label: "Archive Coverage", value: coverage.covered_by_account_archive === true ? "Covered by account archive" : coverage.covered_by_account_archive === false ? "Not covered by account archive" : "Unknown" },
+          { label: "Coverage Last Success", value: formatContextDate(coverage.last_success_at) },
+        ])}
+      </section>
+    `;
+  }
+
+  function renderOrderContextCard(orders = []) {
+    const rows = safeArray(orders);
+    return `
+      <section class="context-card">
+        <div class="context-card-head">
+          <h4>Matched Orders</h4>
+          ${renderBadge(`${rows.length} ${rows.length === 1 ? "order" : "orders"}`, rows.length ? "category" : "muted")}
+        </div>
+        ${rows.length ? `
+          <div class="context-row-list">
+            ${rows.map((order) => `
+              <div class="context-row order-row">
+                ${renderContextFactGrid([
+                  { label: "Order", value: order.order_number || "Unavailable" },
+                  { label: "Status", value: order.status || "Unknown" },
+                  { label: "Buyer", value: order.buyer_username || "Unknown" },
+                  { label: "Sale Date", value: formatContextDate(order.sale_date) },
+                  { label: "Paid", value: formatContextDate(order.paid_on_date) },
+                  { label: "Ship By", value: formatContextDate(order.ship_by_date) },
+                  { label: "Shipped", value: formatContextDate(order.shipped_on_date) },
+                  { label: "Total Price", value: formatContextMoney(order.total_price) },
+                  { label: "Net Payout", value: formatContextMoney(order.net_payout) },
+                  { label: "Tracking", value: order.tracking_number || "Unavailable" },
+                  { label: "Shipping Service", value: order.shipping_service || "Unavailable", wide: true },
+                ])}
+              </div>
+            `).join("")}
+          </div>
+        ` : `<div class="classification-empty matched-context-empty">No matched eBay order found.</div>`}
+      </section>
+    `;
+  }
+
+  function renderOrderLineContextCard(lines = []) {
+    const rows = safeArray(lines);
+    return `
+      <section class="context-card">
+        <div class="context-card-head">
+          <h4>Matched Items / Order Lines</h4>
+          ${renderBadge(`${rows.length} ${rows.length === 1 ? "line" : "lines"}`, rows.length ? "category" : "muted")}
+        </div>
+        ${rows.length ? `
+          <div class="context-row-list">
+            ${rows.map((line) => `
+              <div class="context-row item-row">
+                ${renderContextFactGrid([
+                  { label: "Item", value: line.item_title || "Untitled item", wide: true },
+                  { label: "Order", value: line.order_number || "Unavailable" },
+                  { label: "Item Number", value: line.item_number || "Unavailable" },
+                  { label: "Transaction ID", value: line.transaction_id || "Unavailable" },
+                  { label: "SKU / Custom Label", value: line.custom_label || "Unavailable" },
+                  { label: "Quantity", value: formatContextNumber(line.quantity) },
+                  { label: "Sold For", value: formatContextMoney(line.sold_for) },
+                  { label: "Total Price", value: formatContextMoney(line.total_price) },
+                  { label: "Line Status", value: line.line_status || "Unknown" },
+                ])}
+              </div>
+            `).join("")}
+          </div>
+        ` : `<div class="classification-empty matched-context-empty">No matched order line found.</div>`}
+      </section>
+    `;
+  }
+
+  function renderReturnContextCard(returns = []) {
+    const rows = safeArray(returns);
+    return `
+      <section class="context-card">
+        <div class="context-card-head">
+          <h4>Returns</h4>
+          ${renderBadge(`${rows.length} ${rows.length === 1 ? "return" : "returns"}`, rows.length ? "warning" : "muted")}
+        </div>
+        ${rows.length ? `
+          <div class="context-row-list">
+            ${rows.map((returnCase) => `
+              <div class="context-row return-row">
+                ${renderContextFactGrid([
+                  { label: "Return ID", value: returnCase.ebay_return_id || "Unavailable" },
+                  { label: "Order", value: returnCase.order_number || "Unavailable" },
+                  { label: "Status", value: returnCase.status || "Unknown" },
+                  { label: "Reason", value: returnCase.return_reason || "Unavailable", wide: true },
+                  { label: "Opened", value: formatContextDate(returnCase.opened_at) },
+                  { label: "Received", value: formatContextDate(returnCase.received_at) },
+                  { label: "Closed", value: formatContextDate(returnCase.closed_at) },
+                  { label: "Tracking", value: returnCase.return_tracking_number || "Unavailable" },
+                ])}
+                ${safeArray(returnCase.items).length ? `
+                  <div class="return-item-list">
+                    ${returnCase.items.map((item) => `
+                      <span>${escapeHtml(safeText(item.item_title || item.item_number, "Return item"))} · expected ${escapeHtml(formatContextNumber(item.expected_quantity))} · received ${escapeHtml(formatContextNumber(item.received_quantity))}</span>
+                    `).join("")}
+                  </div>
+                ` : ""}
+              </div>
+            `).join("")}
+          </div>
+        ` : `<div class="classification-empty matched-context-empty is-quiet">No related returns found.</div>`}
+      </section>
+    `;
+  }
+
+  function renderBuyerValueLinesCard(lines = []) {
+    const rows = safeArray(lines);
+    if (!rows.length) {
+      return `
+        <section class="context-card">
+          <div class="context-card-head">
+            <h4>Buyer History Snapshot</h4>
+            ${renderBadge("No lines", "muted")}
+          </div>
+          <div class="classification-empty matched-context-empty is-quiet">No recent buyer value lines were returned.</div>
+        </section>
+      `;
+    }
+
+    return `
+      <section class="context-card context-card-wide">
+        <div class="context-card-head">
+          <h4>Buyer History Snapshot</h4>
+          ${renderBadge(`${rows.length} ${rows.length === 1 ? "line" : "lines"}`, "category")}
+        </div>
+        <div class="buyer-value-table-wrap">
+          <table class="buyer-value-table">
+            <thead>
+              <tr>
+                <th>Purchase</th>
+                <th>Order</th>
+                <th>Item</th>
+                <th>State</th>
+                <th>Gross</th>
+                <th>Returned</th>
+                <th>Retained</th>
+                <th>Returns</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map((line) => `
+                <tr>
+                  <td>${escapeHtml(formatContextDate(line.purchase_at))}</td>
+                  <td>${escapeHtml(safeText(line.order_number))}</td>
+                  <td>${escapeHtml(safeText(line.title))}</td>
+                  <td>${escapeHtml(safeText(line.item_state))}</td>
+                  <td>${escapeHtml(formatContextMoney(line.gross_value))}</td>
+                  <td>${escapeHtml(formatContextMoney(line.returned_value))}</td>
+                  <td>${escapeHtml(formatContextMoney(line.retained_value))}</td>
+                  <td>${escapeHtml(formatContextNumber(line.return_count))} / ${escapeHtml(formatContextNumber(line.open_return_count))} open</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    `;
+  }
+
+  function renderStoredMatchedContextSection(state, selected) {
+    const messageId = selected?.message_id || "";
+    const detail = messageId ? state.messageDetailsById[messageId] : null;
+    const isLoading = state.messageDetailLoadingId === messageId;
+    const context = detail?.matched_context && typeof detail.matched_context === "object" ? detail.matched_context : null;
+
+    if (!detail) {
+      return renderCoreDisclosure(
+        "Buyer / Order Context",
+        renderBadge("Load detail", "muted"),
+        `
+          <p class="conversation-empty">Load the selected message detail to view stored eBay buyer, order, item, return, and history context.</p>
+          <button type="button" class="secondary-btn classification-body-action" data-message-detail-action="load" data-message-id="${escapeHtml(messageId)}" ${isLoading || !messageId ? "disabled" : ""}>
+            <i data-lucide="${isLoading ? "loader-circle" : "database"}"></i>
+            ${escapeHtml(isLoading ? "Loading Context" : "Load Context")}
+          </button>
+        `,
+        "stored-context-section",
+      );
+    }
+
+    const safeContext = context || {};
+    return renderCoreDisclosure(
+      "Buyer / Order Context",
+      renderBadge(context ? "Stored eBay context" : "Unavailable", context ? "category" : "muted"),
+      `
+        <div class="stored-context-grid">
+          ${renderBuyerSummaryCard(safeContext)}
+          ${renderOrderContextCard(safeContext.orders)}
+          ${renderOrderLineContextCard(safeContext.order_lines)}
+          ${renderReturnContextCard(safeContext.returns)}
+          ${renderBuyerValueLinesCard(safeContext.buyer_value_line_breakdown)}
+        </div>
+        ${renderWarningPanel(detail.warnings, safeContext.warnings)}
+      `,
+      "stored-context-section",
+    );
+  }
+
   function matchStatusVariant(status) {
     const value = String(status || "").toLowerCase();
     if (value === "confirmed") return "success";
@@ -1314,7 +1735,7 @@
     return `
       <details class="classification-detail-section matched-context-section detail-disclosure core-disclosure" open>
         <summary>
-          <span>Matched Order Context</span>
+          <span>Deterministic Link Review</span>
           ${payload ? renderBadge(`${matches.length} ${matches.length === 1 ? "match" : "matches"}`, matches.length ? "category" : "muted") : ""}
           <i data-lucide="chevron-down"></i>
         </summary>
@@ -1435,11 +1856,15 @@
         "ai-summary-section",
       )}
 
-      ${renderEmailBodySection(state, selected)}
+      ${renderConversationSection(state, selected)}
+
+      ${renderStoredMatchedContextSection(state, selected)}
 
       ${renderResponseDraftSection(state, selected)}
 
       ${renderMatchedContextSection(state, selected)}
+
+      ${renderEmailBodySection(state, selected)}
 
       ${renderAdvancedDisclosure(
         "AI Classification Details",
