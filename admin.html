@@ -215,10 +215,10 @@
       <div class="og-payroll-banner-left">
         <div class="og-banner-dot" aria-hidden="true"></div>
         <div class="og-payroll-banner-text">
-          <div class="og-payroll-banner-title">
-            <span id="prPendingCount">0</span> shifts need review
+          <div class="og-payroll-banner-title" id="prPendingTitle">
+            <span id="prPendingCount">0</span> payroll blockers
           </div>
-          <div class="og-payroll-banner-sub">Fix anomalies before finalizing payroll.</div>
+          <div class="og-payroll-banner-sub" id="prPendingSub">Fix blockers before building or finalizing payroll.</div>
         </div>
       </div>
       <button id="prPendingBtn" class="btn">Review now</button>
@@ -361,7 +361,7 @@
 
       <div class="og-sheet-footer">
         <button id="prDetailPayBtn" class="btn">Record payment</button>
-        <button id="prDetailPdfBtn" class="btn ghost">PDF</button>
+        <button id="prDetailPdfBtn" class="btn ghost">Statement</button>
       </div>
     </div>
   </div>
@@ -402,6 +402,27 @@
         </label>
 
         <button id="prPayConfirm" class="btn">Save payment</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Void Payment Sheet -->
+  <div id="prVoidPaySheet" class="og-sheet hidden" role="dialog" aria-modal="true" aria-label="Void payment">
+    <div class="og-sheet-hd">
+      <div>
+        <div class="og-sheet-title">Void payment</div>
+        <div id="prVoidPayMeta" class="og-sheet-sub">This keeps an audit record and recalculates the remaining due.</div>
+      </div>
+      <button class="btn ghost og-sheet-close" type="button" data-pr-close>âœ•</button>
+    </div>
+
+    <div class="og-sheet-body">
+      <div class="og-form">
+        <label class="og-field">
+          <span class="og-label">Reason (required)</span>
+          <textarea id="prVoidPayReason" class="og-textarea" rows="4" placeholder="Example: duplicate payment entry, wrong amount, wrong employee..."></textarea>
+        </label>
+        <button id="prVoidPayConfirm" class="btn danger">Void payment</button>
       </div>
     </div>
   </div>

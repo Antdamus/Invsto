@@ -441,6 +441,44 @@
   line-height: 1.35;
 }
 
+.og-payroll-payitem.is-void {
+  opacity: 0.58;
+  text-decoration: line-through;
+}
+
+.og-payroll-payitem.is-void .og-payroll-payitem-top span {
+  color: rgba(255, 150, 150, 0.95);
+}
+
+.og-payroll-payitem-void {
+  margin-top: 8px;
+  width: max-content;
+  border: 1px solid rgba(255, 166, 166, 0.26);
+  border-radius: 999px;
+  background: rgba(120, 36, 36, 0.22);
+  color: rgba(255, 210, 210, 0.94);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.og-payroll-payitem-void:hover {
+  border-color: rgba(255, 166, 166, 0.5);
+  background: rgba(140, 44, 44, 0.32);
+}
+
+#panelPayroll .btn.danger {
+  border-color: rgba(255, 132, 132, 0.35);
+  background: linear-gradient(135deg, rgba(140, 44, 44, 0.92), rgba(90, 24, 24, 0.92));
+  color: #ffe0e0;
+}
+
+#panelPayroll .btn.danger.ghost {
+  background: rgba(90, 24, 24, 0.18);
+}
+
 .og-payroll-hint {
   margin-top: 6px;
   font-size: 12px;

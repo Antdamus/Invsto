@@ -145,6 +145,7 @@
       "prActionSheet",
       "prDetailSheet",
       "prPaySheet",
+      "prVoidPaySheet",
     ];
     for (const id of required) {
       if (!document.getElementById(id)) {
@@ -163,9 +164,12 @@
   let currentLines = [];
   let currentPayments = [];
   let pendingReview = [];
+  let payrollReadiness = null;
+  let runsForPeriod = [];
 
   let detailEmpId = null;
   let payEmpId = null;
+  let voidPaymentId = null;
 
   // ----------------------------
   // Data loaders
@@ -197,7 +201,7 @@
     // ✅ include worker_type and the new fica columns (they live on payroll_run_lines)
     const { data, error } = await sb()
       .from("payroll_run_lines")
-      .select("*, employees(display_name, worker_type)")
+      .select("*, employees(display_name, worker_type, role)")
       .eq("payroll_run_id", runId)
       .order("gross_pay", { ascending: false });
 
@@ -223,6 +227,13 @@
 
     if (error) throw error;
     return data || [];
+  }
+
+  async function loadPayrollReadiness(periodId) {
+    if (!periodId) return null;
+    const { data, error } = await sb().rpc("payroll_period_readiness", { _period_id: periodId });
+    if (error) throw error;
+    return data || null;
   }
 
   // ----------------------------
@@ -294,6 +305,7 @@
     $("#prActionSheet")?.classList.add("hidden");
     $("#prDetailSheet")?.classList.add("hidden");
     $("#prPaySheet")?.classList.add("hidden");
+    $("#prVoidPaySheet")?.classList.add("hidden");
     $("#prOverlay")?.classList.add("hidden");
     $("#prPeriodSheet")?.classList.add("hidden");
     document.body.classList.remove("pr-sheet-open");
@@ -312,6 +324,7 @@
   function computePaidByEmployee(payments) {
     const map = new Map();
     for (const p of payments || []) {
+      if (String(p.status || "paid").toLowerCase() !== "paid") continue;
       const k = p.employee_id;
       map.set(k, (map.get(k) || 0) + Number(p.amount || 0));
     }
@@ -328,6 +341,8 @@
         paidBreak: 0,
         unpaidBreak: 0,
         roundedMin,
+        regularMin: Math.round(Number(l.regular_seconds || 0) / 60),
+        overtimeMin: Math.round(Number(l.overtime_seconds || 0) / 60),
         hoursRounded: roundedMin / 60,
       };
     }
@@ -336,17 +351,23 @@
     let paidBreakMin = 0;
     let unpaidBreakMin = 0;
     let roundedMin = 0;
+    let regularMin = 0;
+    let overtimeMin = 0;
 
     for (const d of breakdown) {
       const wh = Number(d.worked_hours || 0);
       const breakMin = Number(d.break_minutes || 0);
       const unpaidMin = Number(d.unpaid_break_minutes || 0);
       const paidRoundedHrs = Number(d.paid_hours_rounded || 0);
+      const regularHrs = Number(d.regular_hours || 0);
+      const overtimeHrs = Number(d.overtime_hours || 0);
 
       workedMin += Math.round(wh * 60);
       unpaidBreakMin += Math.round(unpaidMin);
       paidBreakMin += Math.max(0, Math.round(breakMin - unpaidMin));
       roundedMin += Math.round(paidRoundedHrs * 60);
+      regularMin += Math.round(regularHrs * 60);
+      overtimeMin += Math.round(overtimeHrs * 60);
     }
 
     const minutesWorked = Math.max(0, workedMin - unpaidBreakMin);
@@ -356,6 +377,8 @@
       paidBreak: paidBreakMin,
       unpaidBreak: unpaidBreakMin,
       roundedMin,
+      regularMin,
+      overtimeMin,
       hoursRounded: roundedMin / 60,
     };
   }
@@ -380,28 +403,126 @@
     $("#prKpiDue").textContent = fmtMoney(due);
   }
 
+  function readinessItems(readiness = payrollReadiness) {
+    if (!readiness) {
+      return pendingReview.length
+        ? [{ key: "pending_approval", label: "Pending review", count: pendingReview.length }]
+        : [];
+    }
+
+    const defs = [
+      ["open_shifts", "Open shifts"],
+      ["open_breaks", "Open breaks"],
+      ["pending_approval", "Pending approvals"],
+      ["unwaived_anomalies", "Unwaived anomalies"],
+      ["missing_rates", "Missing rates"],
+    ];
+
+    return defs
+      .map(([key, label]) => ({ key, label, count: Number(readiness[key] || 0) }))
+      .filter((item) => item.count > 0);
+  }
+
+  function readinessWarnings(readiness = payrollReadiness) {
+    const warnings = [];
+    if (!readiness) return warnings;
+
+    const drafts = Number(readiness.draft_runs || 0);
+    const sellers = Number(readiness.seller_excluded || 0);
+
+    if (drafts > 1) warnings.push(`${drafts} draft runs exist for this period`);
+    if (sellers > 0) warnings.push(`${sellers} seller time entr${sellers === 1 ? "y is" : "ies are"} excluded from hourly payroll`);
+    return warnings;
+  }
+
+  function readinessBlockCount() {
+    return readinessItems().reduce((sum, item) => sum + item.count, 0);
+  }
+
+  function readinessBlockerText() {
+    const items = readinessItems();
+    if (!items.length) return "";
+    return items.map((item) => `${item.label}: ${item.count}`).join(" • ");
+  }
+
+  function assertPayrollReady(actionLabel) {
+    const items = readinessItems();
+    if (!items.length) return true;
+
+    showAdminError(
+      "Payroll is not ready",
+      `${actionLabel} is blocked until these are fixed:\n\n${items.map((i) => `- ${i.label}: ${i.count}`).join("\n")}`
+    );
+    return false;
+  }
+
+  function setBtnState(id, disabled, title = "") {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.disabled = !!disabled;
+    if (title) el.title = title;
+    else el.removeAttribute("title");
+  }
+
+  function syncActionState() {
+    const blockers = readinessBlockCount();
+    const hasRun = !!currentRun;
+    const isDraft = currentRun?.status === "draft";
+    const isFinal = currentRun?.status === "final";
+    const periodLocked = currentPeriod?.status === "locked";
+    const finalExists = Number(payrollReadiness?.final_runs || 0) > 0 || isFinal;
+
+    const blockerTitle = blockers ? readinessBlockerText() : "";
+
+    setBtnState("prCreateDraft", finalExists, finalExists ? "This period already has a final payroll run" : "");
+    setBtnState("prSheetCreateDraft", finalExists, finalExists ? "This period already has a final payroll run" : "");
+
+    setBtnState("prBuildLines", !hasRun || !isDraft || blockers, blockers ? blockerTitle : (!isDraft ? "Only draft runs can be rebuilt" : ""));
+    setBtnState("prMobileBuild", !hasRun || !isDraft || blockers, blockers ? blockerTitle : (!isDraft ? "Only draft runs can be rebuilt" : ""));
+    setBtnState("prSheetBuild", !hasRun || !isDraft || blockers, blockers ? blockerTitle : (!isDraft ? "Only draft runs can be rebuilt" : ""));
+
+    setBtnState("prFinalizeRun", !hasRun || !isDraft || blockers, blockers ? blockerTitle : (!isDraft ? "Only draft runs can be finalized" : ""));
+    setBtnState("prMobileFinalize", !hasRun || !isDraft || blockers, blockers ? blockerTitle : (!isDraft ? "Only draft runs can be finalized" : ""));
+    setBtnState("prSheetFinalize", !hasRun || !isDraft || blockers, blockers ? blockerTitle : (!isDraft ? "Only draft runs can be finalized" : ""));
+
+    setBtnState("prLockPeriod", periodLocked || blockers, periodLocked ? "Pay period is already locked" : blockerTitle);
+    setBtnState("prSheetLock", periodLocked || blockers, periodLocked ? "Pay period is already locked" : blockerTitle);
+    setBtnState("prUnlockPeriod", !periodLocked || finalExists, finalExists ? "Final payroll runs keep the period locked" : "");
+    setBtnState("prSheetUnlock", !periodLocked || finalExists, finalExists ? "Final payroll runs keep the period locked" : "");
+  }
+
   function renderPendingBanner() {
     const wrap = $("#prPendingWrap");
     const countEl = $("#prPendingCount");
-    const finalizeDesktop = $("#prFinalizeRun");
-    const finalizeMobile = $("#prMobileFinalize");
+    const titleEl = $("#prPendingTitle");
+    const subEl = $("#prPendingSub");
 
     if (!wrap || !countEl) return;
 
-    const count = pendingReview.length;
+    const items = readinessItems();
+    const warnings = readinessWarnings();
+    const count = items.reduce((sum, item) => sum + item.count, 0);
 
-    if (!count) {
+    if (!count && !warnings.length) {
       wrap.classList.add("hidden");
-      if (finalizeDesktop) finalizeDesktop.disabled = false;
-      if (finalizeMobile) finalizeMobile.disabled = false;
+      syncActionState();
       return;
     }
 
     countEl.textContent = String(count);
+    if (titleEl) {
+      titleEl.innerHTML = count
+        ? `<span id="prPendingCount">${count}</span> payroll blocker${count === 1 ? "" : "s"}`
+        : "Payroll note";
+    }
+    if (subEl) {
+      const blockerText = items.map((item) => `${item.label}: ${item.count}`).join(" • ");
+      const warningText = warnings.join(" • ");
+      subEl.textContent = [blockerText, warningText].filter(Boolean).join(" • ");
+    }
     wrap.classList.remove("hidden");
 
-    if (finalizeDesktop) finalizeDesktop.disabled = true;
-    if (finalizeMobile) finalizeMobile.disabled = true;
+    syncActionState();
   }
 
   function tryGoToOverviewTab() {
@@ -429,7 +550,10 @@
     const cards = $("#prCards");
 
     const pendingCount = pendingReview.length;
-    const hint = pendingCount
+    const blockerText = readinessBlockerText();
+    const hint = blockerText
+      ? `<div class="og-payroll-hint">${escapeHtml(blockerText)}. Fix these before building payroll.</div>`
+      : pendingCount
       ? `<div class="og-payroll-hint">${pendingCount} shift${pendingCount === 1 ? "" : "s"} are pending review. Approve them in Overview, then rebuild.</div>`
       : "";
 
@@ -449,7 +573,7 @@
         <div class="og-payroll-empty">
           <div class="og-payroll-empty-title">No lines yet</div>
           <div class="og-payroll-empty-sub">Tap <b>Build</b> to generate payroll lines.</div>
-          ${pendingCount ? `<div class="og-payroll-empty-warn">${pendingCount} shift(s) still need review in Overview.</div>` : ""}
+          ${blockerText ? `<div class="og-payroll-empty-warn">${escapeHtml(blockerText)}</div>` : pendingCount ? `<div class="og-payroll-empty-warn">${pendingCount} shift(s) still need review in Overview.</div>` : ""}
         </div>
       `;
     }
@@ -476,6 +600,8 @@
         const gross = Number(l.gross_pay || 0);
         const due = Math.max(0, gross - paid);
         const t = extractTotalsFromDetails(l);
+        const overtimeNote = t.overtimeMin > 0 ? ` • OT ${(t.overtimeMin / 60).toFixed(2)} hrs` : "";
+        const canPayLine = canPay && due > 0.009;
 
         // small hint in subline for employees
         let sub2 = "";
@@ -488,7 +614,7 @@
           <tr class="og-pr-row">
             <td class="og-pr-cell">
               <div class="og-pr-name">${escapeHtml(name)}</div>
-              <div class="og-pr-sub">${Number(l.shift_count || 0)} shifts • ${t.hoursRounded.toFixed(2)} hrs${sub2}</div>
+              <div class="og-pr-sub">${Number(l.shift_count || 0)} shifts • ${t.hoursRounded.toFixed(2)} hrs${overtimeNote}${sub2}</div>
             </td>
             <td class="og-pr-cell num">${t.hoursRounded.toFixed(2)}</td>
             <td class="og-pr-cell num">${fmtMoney(gross)}</td>
@@ -505,15 +631,15 @@
                 data-emp="${escapeAttr(l.employee_id)}"
                 data-name="${escapeAttr(name)}"
                 data-due="${due}"
-                ${canPay ? "" : "disabled"}
-                title="${canPay ? "Record payment" : "Finalize run to record payments"}"
+                ${canPayLine ? "" : "disabled"}
+                title="${canPay ? (due > 0.009 ? "Record payment" : "Already paid") : "Finalize run to record payments"}"
               >Pay</button>
 
               <button class="btn ghost prPdfBtn"
                 type="button"
                 data-run="${escapeAttr(currentRun?.id || "")}"
                 data-emp="${escapeAttr(l.employee_id)}"
-              >PDF</button>
+              >Statement</button>
             </td>
           </tr>
         `;
@@ -538,6 +664,7 @@
         const due = Math.max(0, gross - paid);
         const t = extractTotalsFromDetails(l);
         const shifts = Number(l.shift_count || 0);
+        const canPayLine = canPay && due > 0.009;
 
         let netLine = "";
         if (isEmployeeLine(l)) {
@@ -555,6 +682,8 @@
             <div class="og-payroll-card-mini">
               <div><span>Shifts</span><b>${shifts}</b></div>
               <div><span>Hours</span><b>${t.hoursRounded.toFixed(2)}</b></div>
+              <div><span>Regular</span><b>${(t.regularMin / 60).toFixed(2)}</b></div>
+              <div><span>Overtime</span><b>${(t.overtimeMin / 60).toFixed(2)}</b></div>
               <div><span>Gross</span><b>${fmtMoney(gross)}</b></div>
               ${netLine}
               <div><span>Paid</span><b>${fmtMoney(paid)}</b></div>
@@ -566,13 +695,13 @@
                 data-emp="${escapeAttr(l.employee_id)}"
                 data-name="${escapeAttr(name)}"
                 data-due="${due}"
-                ${canPay ? "" : "disabled"}
-                title="${canPay ? "Record payment" : "Finalize run to record payments"}"
+                ${canPayLine ? "" : "disabled"}
+                title="${canPay ? (due > 0.009 ? "Record payment" : "Already paid") : "Finalize run to record payments"}"
               >Pay</button>
               <button class="btn ghost prPdfBtn" type="button"
                 data-run="${escapeAttr(currentRun?.id || "")}"
                 data-emp="${escapeAttr(l.employee_id)}"
-              >PDF</button>
+              >Statement</button>
             </div>
           </div>
         `;
@@ -595,15 +724,20 @@
         ${list
           .map((p) => {
             const dt = p.paid_at ? new Date(p.paid_at).toLocaleString() : "";
+            const status = String(p.status || "paid").toLowerCase();
+            const statusText = status === "void" ? "void" : (p.method || "other");
+            const reason = status === "void" && p.void_reason ? `Voided: ${p.void_reason}` : "";
+            const canVoid = status === "paid" && currentRun?.status === "final";
             return `
-              <div class="og-payroll-payitem">
+              <div class="og-payroll-payitem ${status === "void" ? "is-void" : ""}">
                 <div class="og-payroll-payitem-top">
                   <b>${fmtMoney(p.amount)}</b>
-                  <span>${escapeHtml(p.method || "other")}</span>
+                  <span>${escapeHtml(statusText)}</span>
                 </div>
                 <div class="og-payroll-payitem-sub">
-                  ${escapeHtml(dt)}${p.reference ? ` • ${escapeHtml(p.reference)}` : ""}${p.note ? ` • ${escapeHtml(p.note)}` : ""}
+                  ${escapeHtml(dt)}${p.reference ? ` • ${escapeHtml(p.reference)}` : ""}${p.note ? ` • ${escapeHtml(p.note)}` : ""}${reason ? ` • ${escapeHtml(reason)}` : ""}
                 </div>
+                ${canVoid ? `<button type="button" class="og-payroll-payitem-void prVoidPaymentBtn" data-payment="${escapeHtml(p.id)}">Void payment</button>` : ""}
               </div>
             `;
           })
@@ -695,6 +829,10 @@ if (isEmployeeLine(line)) {
           <div class="og-payroll-detail-k">Rounded</div>
           <div class="og-payroll-detail-v">${t.roundedMin} min (${t.hoursRounded.toFixed(2)} hrs)</div>
         </div>
+        <div class="og-payroll-detail-row">
+          <div class="og-payroll-detail-k">Regular / OT</div>
+          <div class="og-payroll-detail-v">${(t.regularMin / 60).toFixed(2)} / ${(t.overtimeMin / 60).toFixed(2)} hrs</div>
+        </div>
 
         <div class="og-payroll-detail-row">
           <div class="og-payroll-detail-k">Rate</div>
@@ -706,6 +844,10 @@ if (isEmployeeLine(line)) {
         <div class="og-payroll-detail-row">
           <div class="og-payroll-detail-k">Gross</div>
           <div class="og-payroll-detail-v"><b>${fmtMoney(gross)}</b></div>
+        </div>
+        <div class="og-payroll-detail-row">
+          <div class="og-payroll-detail-k">Regular / OT pay</div>
+          <div class="og-payroll-detail-v">${fmtMoney(line.regular_pay || 0)} / ${fmtMoney(line.overtime_pay || 0)}</div>
         </div>
 
         ${ficaBlock}
@@ -743,10 +885,12 @@ if (isEmployeeLine(line)) {
     if (body) body.innerHTML = buildDetailHtml(line, currentPayments);
 
     const canPay = !!currentRun && currentRun.status === "final";
+    const paidMap = computePaidByEmployee(currentPayments);
+    const due = Math.max(0, Number(line.gross_pay || 0) - Number(paidMap.get(line.employee_id) || 0));
     const payBtn = $("#prDetailPayBtn");
     if (payBtn) {
-      payBtn.disabled = !canPay;
-      payBtn.title = canPay ? "" : "Finalize run to record payments";
+      payBtn.disabled = !canPay || due <= 0.009;
+      payBtn.title = canPay ? (due > 0.009 ? "" : "Already paid") : "Finalize run to record payments";
     }
 
     openSheet("prDetailSheet");
@@ -774,6 +918,23 @@ if (isEmployeeLine(line)) {
     sheet.dataset.due = String(Number(due || 0));
 
     openSheet("prPaySheet");
+  }
+
+  function openVoidPaySheet(paymentId) {
+    const payment = (currentPayments || []).find((p) => p.id === paymentId);
+    if (!payment || String(payment.status || "paid").toLowerCase() !== "paid") return;
+
+    openSheet("prVoidPaySheet");
+    voidPaymentId = paymentId;
+
+    const meta = $("#prVoidPayMeta");
+    if (meta) {
+      const dt = payment.paid_at ? new Date(payment.paid_at).toLocaleString() : "unknown date";
+      meta.textContent = `${fmtMoney(payment.amount)} ${payment.method || "other"} payment from ${dt}. This keeps an audit record and recalculates due.`;
+    }
+
+    const reason = $("#prVoidPayReason");
+    if (reason) reason.value = "";
   }
 
   async function recordPayment(employeeId, amount, method, reference, note) {
@@ -804,7 +965,187 @@ if (isEmployeeLine(line)) {
     }
   }
 
+  async function voidPayment(paymentId, reason) {
+    if (!paymentId) return;
+    const cleanReason = String(reason || "").trim();
+    if (cleanReason.length < 3) {
+      toast("Void reason is required", "err");
+      return;
+    }
+
+    try {
+      const { error } = await sb().rpc("void_contractor_payment", {
+        _payment_id: paymentId,
+        _reason: cleanReason,
+      });
+      if (error) throw error;
+
+      toast("Payment voided", "ok");
+      voidPaymentId = null;
+      await refreshAll(currentPeriod.id);
+      if (detailEmpId) openDetailSheet(detailEmpId);
+    } catch (e) {
+      showAdminError("Void payment failed", safeErrMsg(e));
+      throw e;
+    }
+  }
+
+  function payrollStatementHtml(stmt) {
+    const employee = stmt?.employee || {};
+    const period = stmt?.pay_period || {};
+    const summary = stmt?.summary || {};
+    const fica = stmt?.fica || {};
+    const payments = Array.isArray(stmt?.payments) ? stmt.payments : [];
+    const flags = Array.isArray(stmt?.flags) ? stmt.flags : [];
+    const days = Array.isArray(stmt?.details?.day_breakdown) ? stmt.details.day_breakdown : [];
+
+    const name = employee.display_name || employee.email || employee.employee_id || "Payroll statement";
+    const rows = [
+      ["Period", `${period.start_date || ""} to ${period.end_date || ""}`],
+      ["Status", stmt?.run?.status || ""],
+      ["Shifts", summary.shift_count || 0],
+      ["Paid hours", Number(summary.hours_paid || 0).toFixed(2)],
+      ["Regular hours", (Number(summary.regular_minutes || 0) / 60).toFixed(2)],
+      ["Overtime hours", (Number(summary.overtime_minutes || 0) / 60).toFixed(2)],
+      ["Gross", fmtMoney(summary.gross_pay || 0)],
+      ["Regular pay", fmtMoney(summary.regular_pay || 0)],
+      ["Overtime pay", fmtMoney(summary.overtime_pay || 0)],
+      ["FICA", fmtMoney(fica.fica_employee_total || 0)],
+      ["Net before federal", fmtMoney(fica.net_pre_fed || summary.gross_pay || 0)],
+      ["Paid", fmtMoney(summary.paid_total || 0)],
+      ["Due", fmtMoney(summary.due_total || 0)],
+    ];
+
+    const paymentRows = payments.length
+      ? payments.map((p) => `
+          <tr>
+            <td>${escapeHtml(p.paid_at ? new Date(p.paid_at).toLocaleString() : "")}</td>
+            <td>${escapeHtml(p.status || "paid")}</td>
+            <td>${escapeHtml(p.method || "other")}</td>
+            <td>${escapeHtml(p.reference || "")}</td>
+            <td class="num">${fmtMoney(p.amount || 0)}</td>
+          </tr>
+        `).join("")
+      : `<tr><td colspan="5">No payments recorded.</td></tr>`;
+
+    const flagRows = flags.length
+      ? flags.map((f) => `<li>${escapeHtml(f.message || f.type || "Flag")}</li>`).join("")
+      : "<li>No statement flags.</li>";
+
+    const dayRows = days.length
+      ? days.map((d) => {
+          const stores = Array.isArray(d.stores) ? d.stores.map((s) => s.store_name).filter(Boolean).join(", ") : "";
+          return `
+            <tr>
+              <td>${escapeHtml(d.work_date || "")}</td>
+              <td>${escapeHtml(stores)}</td>
+              <td class="num">${Number(d.worked_hours || 0).toFixed(2)}</td>
+              <td class="num">${Number(d.unpaid_break_minutes || 0).toFixed(0)}</td>
+              <td class="num">${Number(d.regular_hours || 0).toFixed(2)}</td>
+              <td class="num">${Number(d.overtime_hours || 0).toFixed(2)}</td>
+              <td class="num">${fmtMoney(d.hourly_rate || 0)}</td>
+              <td class="num">${fmtMoney(d.gross_for_day || 0)}</td>
+            </tr>
+          `;
+        }).join("")
+      : `<tr><td colspan="8">No day breakdown available.</td></tr>`;
+
+    return `<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Payroll Statement - ${escapeHtml(name)}</title>
+          <style>
+            body { font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; color: #151515; background: #f5f2eb; }
+            .page { max-width: 880px; margin: 0 auto; padding: 32px; }
+            .top { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; border-bottom: 3px solid #1f1b16; padding-bottom: 18px; }
+            h1 { margin: 0; font-size: 30px; letter-spacing: 0; }
+            .muted { color: #6c655c; margin-top: 6px; }
+            .print { border: 0; border-radius: 10px; background: #1f1b16; color: white; padding: 10px 14px; font-weight: 800; cursor: pointer; }
+            .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 22px; }
+            .cell { background: white; border: 1px solid #ddd6ca; border-radius: 10px; padding: 12px; }
+            .k { color: #6c655c; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+            .v { font-size: 20px; font-weight: 850; margin-top: 4px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 22px; background: white; border: 1px solid #ddd6ca; }
+            th, td { padding: 10px 12px; border-bottom: 1px solid #ece5db; text-align: left; }
+            th { background: #1f1b16; color: white; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+            .num { text-align: right; font-variant-numeric: tabular-nums; }
+            .flags { margin-top: 22px; background: white; border: 1px solid #ddd6ca; border-radius: 10px; padding: 14px 18px; }
+            @media print { .print { display: none; } body { background: white; } .page { padding: 0; } }
+          </style>
+        </head>
+        <body>
+          <main class="page">
+            <div class="top">
+              <div>
+                <h1>${escapeHtml(name)}</h1>
+                <div class="muted">Payroll statement • ${escapeHtml(period.start_date || "")} to ${escapeHtml(period.end_date || "")}</div>
+              </div>
+              <button class="print" onclick="window.print()">Print / Save PDF</button>
+            </div>
+            <section class="grid">
+              ${rows.map(([k, v]) => `<div class="cell"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div></div>`).join("")}
+            </section>
+            <table>
+              <thead><tr><th>Date</th><th>Store</th><th class="num">Worked</th><th class="num">Unpaid break</th><th class="num">Reg</th><th class="num">OT</th><th class="num">Rate</th><th class="num">Gross</th></tr></thead>
+              <tbody>${dayRows}</tbody>
+            </table>
+            <table>
+              <thead><tr><th>Paid at</th><th>Status</th><th>Method</th><th>Reference</th><th class="num">Amount</th></tr></thead>
+              <tbody>${paymentRows}</tbody>
+            </table>
+            <section class="flags">
+              <div class="k">Audit flags</div>
+              <ul>${flagRows}</ul>
+            </section>
+          </main>
+        </body>
+      </html>`;
+  }
+
+  async function previewStatementForEmployee(runId, empId) {
+    let w = window.open("", "_blank");
+    if (w) {
+      w.document.title = "Generating payroll statement";
+      w.document.body.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
+      w.document.body.style.padding = "18px";
+      w.document.body.innerHTML = "Generating payroll statement...";
+    }
+
+    try {
+      const { data, error } = await sb().rpc("preview_payroll_statement", {
+        _run_id: runId,
+        _employee_id: empId,
+      });
+      if (error) throw error;
+
+      const html = payrollStatementHtml(data);
+      if (w && !w.closed) {
+        w.document.open();
+        w.document.write(html);
+        w.document.close();
+      } else {
+        const blob = new Blob([html], { type: "text/html" });
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank", "noopener");
+        setTimeout(() => URL.revokeObjectURL(url), 120000);
+      }
+    } catch (err) {
+      showAdminError("Statement preview failed", safeErrMsg(err));
+      if (w && !w.closed) {
+        w.document.body.innerHTML = `
+          <div style="font-family:system-ui;padding:18px;">
+            <div style="font-weight:900;">Statement failed</div>
+            <div style="margin-top:8px;opacity:.8;white-space:pre-wrap;">${escapeHtml(safeErrMsg(err))}</div>
+          </div>
+        `;
+      }
+    }
+  }
+
   async function previewPdfForEmployee(runId, empId) {
+    return previewStatementForEmployee(runId, empId);
+    /*
     let w = null;
 
     try {
@@ -892,6 +1233,9 @@ if (isEmployeeLine(line)) {
     }
   }
 
+    */
+  }
+
   // ----------------------------
   // Actions (RPC wrappers)
   // ----------------------------
@@ -905,6 +1249,10 @@ if (isEmployeeLine(line)) {
 
   async function createDraftRun() {
     if (!currentPeriod) return;
+    if (Number(payrollReadiness?.final_runs || 0) > 0) {
+      toast("This period already has a final payroll run", "err");
+      return;
+    }
     const roundingMode = uiRoundingMode();
 
     try {
@@ -929,6 +1277,11 @@ if (isEmployeeLine(line)) {
       toast("Create a run first", "err");
       return;
     }
+    if (currentRun.status !== "draft") {
+      toast("Only draft payroll runs can be rebuilt", "err");
+      return;
+    }
+    if (!assertPayrollReady("Build lines")) return;
 
     try {
       const { data, error } = await sb().rpc("build_payroll_run_lines", {
@@ -964,10 +1317,16 @@ if (isEmployeeLine(line)) {
   async function finalizeRun() {
     if (!currentRun) return;
 
-    if (pendingReview.length) {
-      toast(`Cannot finalize: ${pendingReview.length} shift(s) still pending review`, "err");
+    if (currentRun.status !== "draft") {
+      toast("Only draft payroll runs can be finalized", "err");
       return;
     }
+    if (!assertPayrollReady("Finalize payroll")) return;
+
+    const ok = confirm(
+      "Finalize this payroll run?\n\nThis will lock the pay period, rebuild the payroll lines from the audited shifts, calculate FICA estimates, and generate statements."
+    );
+    if (!ok) return;
 
     try {
       const { data, error } = await sb().rpc("finalize_payroll_run", {
@@ -995,6 +1354,7 @@ if (isEmployeeLine(line)) {
 
   async function lockPeriod() {
     if (!currentPeriod) return;
+    if (!assertPayrollReady("Lock period")) return;
 
     try {
       const { data, error } = await sb().rpc("payroll_lock_period", {
@@ -1238,7 +1598,11 @@ const headers = [
   "unpaid_break_minutes",
   "rounded_minutes",
   "hours_rounded",
+  "regular_hours",
+  "overtime_hours",
   "hourly_rate",
+  "regular_pay",
+  "overtime_pay",
   "gross_pay",
   "ytd_wages",
   "ss_employee",
@@ -1270,7 +1634,11 @@ const cols = [
   t.unpaidBreak,
   t.roundedMin,
   t.hoursRounded.toFixed(2),
+  (t.regularMin / 60).toFixed(2),
+  (t.overtimeMin / 60).toFixed(2),
   Number(l.hourly_rate || 0).toFixed(2),
+  Number(l.regular_pay || 0).toFixed(2),
+  Number(l.overtime_pay || 0).toFixed(2),
   gross.toFixed(2),
   Number(fica.ytd || 0).toFixed(2),
   Number(fica.ss || 0).toFixed(2),
@@ -1321,6 +1689,13 @@ const cols = [
     currentPeriod = p;
 
     try {
+      payrollReadiness = await loadPayrollReadiness(currentPeriod.id);
+    } catch (e) {
+      console.warn("Payroll readiness check failed:", safeErrMsg(e));
+      payrollReadiness = null;
+    }
+
+    try {
       pendingReview = await fetchPendingReviewForPeriod(currentPeriod);
     } catch (e) {
       console.warn("Pending review detector failed:", safeErrMsg(e));
@@ -1336,13 +1711,19 @@ const cols = [
       .limit(20);
 
     if (runs.error) throw runs.error;
-    currentRun = (runs.data || [])[0] || null;
+    runsForPeriod = runs.data || [];
+    currentRun =
+      runsForPeriod.find((r) => r.status === "final") ||
+      runsForPeriod.find((r) => r.status === "draft") ||
+      runsForPeriod[0] ||
+      null;
 
     if (!currentRun) {
       currentLines = [];
       currentPayments = [];
       renderPendingBanner();
       renderEmptyState([]);
+      syncActionState();
       return;
     }
 
@@ -1363,6 +1744,8 @@ try {
 
     if (!currentLines.length) renderEmptyState(currentPayments);
     else await renderLines(currentLines, currentPayments);
+    renderPendingBanner();
+    syncActionState();
   }
 
   // ----------------------------
@@ -1522,7 +1905,7 @@ document.getElementById("prPeriodCreateConfirm")?.addEventListener("click", () =
       const amountStr = String($("#prPayAmount")?.value || "").trim();
       const amount = Number(amountStr);
 
-      if (!Number.isFinite(amount) || amount < 0) {
+      if (!Number.isFinite(amount) || amount <= 0) {
         toast("Invalid amount", "err");
         return;
       }
@@ -1538,6 +1921,13 @@ document.getElementById("prPeriodCreateConfirm")?.addEventListener("click", () =
     });
 
     document.addEventListener("click", async (e) => {
+      const voidBtn = e.target.closest(".prVoidPaymentBtn");
+      if (voidBtn) {
+        const paymentId = voidBtn.dataset.payment;
+        openVoidPaySheet(paymentId);
+        return;
+      }
+
       const detailBtn = e.target.closest(".prDetailBtn");
       if (detailBtn) {
         const empId = detailBtn.dataset.emp;
@@ -1561,6 +1951,12 @@ document.getElementById("prPeriodCreateConfirm")?.addEventListener("click", () =
         if (runId && empId) await previewPdfForEmployee(runId, empId);
         return;
       }
+    });
+
+    $("#prVoidPayConfirm")?.addEventListener("click", async () => {
+      if (!voidPaymentId) return;
+      const reason = String($("#prVoidPayReason")?.value || "").trim();
+      try { await voidPayment(voidPaymentId, reason); } catch {}
     });
   }
 
