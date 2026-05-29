@@ -2469,7 +2469,19 @@ function globalScheduleTimeValue(ts){
 }
 
 function globalScheduleIdList(value){
-  return Array.isArray(value) ? value.filter(Boolean).map(String) : [];
+  if (Array.isArray(value)) return [...new Set(value.filter(Boolean).map(String))];
+  if (typeof value === 'string') {
+    const raw = value.trim();
+    if (!raw) return [];
+    const trimmed = raw.startsWith('{') && raw.endsWith('}') ? raw.slice(1, -1) : raw;
+    return [...new Set(trimmed.split(',').map((part) => part.trim().replace(/^"|"$/g, '')).filter(Boolean))];
+  }
+  return [];
+}
+
+function normalizeGlobalScheduleSource(value){
+  const source = String(value || '').toLowerCase();
+  return source === 'regular' ? 'recurring' : source;
 }
 
 function globalScheduleRouteIds(item, direction){
@@ -2521,6 +2533,71 @@ function setGlobalScheduleError(panel, message = ''){
   box.classList.toggle('hidden', !message);
 }
 
+function isMissingScheduleRpc(error, name){
+  const message = String(error?.message || '').toLowerCase();
+  return error?.code === 'PGRST202' || message.includes(String(name || '').toLowerCase()) || message.includes('could not find');
+}
+
+async function patchGlobalDayException(empId, workISO, draft){
+  if (draft.off){
+    const { error } = await supabaseClient
+      .from('timeclock_day_exceptions')
+      .delete()
+      .eq('employee_id', empId)
+      .eq('work_date', workISO);
+    if (error) throw error;
+    return;
+  }
+
+  const firstInStore = draft.anyIn ? null : (draft.inStores[0] || draft.storeId || null);
+  const firstOutStore = draft.anyOut ? null : (draft.outStores[0] || draft.storeId || null);
+  const { error } = await supabaseClient
+    .from('timeclock_day_exceptions')
+    .upsert({
+      employee_id: empId,
+      work_date: workISO,
+      allow_clock_in_any_store: !!draft.anyIn,
+      allow_clock_out_any_store: !!draft.anyOut,
+      clock_in_store_id: firstInStore,
+      clock_out_store_id: firstOutStore,
+      allowed_clock_in_store_ids: draft.anyIn ? [] : draft.inStores,
+      allowed_clock_out_store_ids: draft.anyOut ? [] : draft.outStores,
+      note: 'Admin global schedule route edit'
+    }, { onConflict: 'employee_id,work_date' });
+  if (error) throw error;
+}
+
+async function saveGlobalOverrideWithRoute(draft){
+  const routePayload = {
+    _employee_id: draft.empId,
+    _work_date: draft.workISO,
+    _off: !!draft.off,
+    _start_local: draft.off ? null : draft.start,
+    _end_local: draft.off ? null : draft.end,
+    _store_id: draft.off ? null : draft.storeId,
+    _note: draft.off ? 'Marked off from global schedule drawer' : 'Admin global schedule edit',
+    _allow_clock_in_any_store: draft.off ? false : draft.anyIn,
+    _allow_clock_out_any_store: draft.off ? false : draft.anyOut,
+    _allowed_clock_in_store_ids: draft.off || draft.anyIn ? [] : draft.inStores,
+    _allowed_clock_out_store_ids: draft.off || draft.anyOut ? [] : draft.outStores
+  };
+  const { error } = await supabaseClient.rpc('admin_set_override_with_route', routePayload);
+  if (!error) return;
+  if (!isMissingScheduleRpc(error, 'admin_set_override_with_route')) throw error;
+
+  const { error: legacyError } = await supabaseClient.rpc('admin_set_override', {
+    _employee_id: draft.empId,
+    _work_date: draft.workISO,
+    _off: !!draft.off,
+    _start_local: draft.off ? null : draft.start,
+    _end_local: draft.off ? null : draft.end,
+    _store_id: draft.off ? null : draft.storeId,
+    _note: draft.off ? 'Marked off from global schedule drawer' : 'Admin global schedule edit'
+  });
+  if (legacyError) throw legacyError;
+  await patchGlobalDayException(draft.empId, draft.workISO, draft);
+}
+
 function syncGlobalRouteAnyState(panel){
   if (!panel) return;
   for (const field of ['in', 'out']){
@@ -2540,7 +2617,7 @@ function renderGlobalScheduleEditor(item, workISO){
   const primaryStoreId = item?._schedule_store_id || schedule?.store_id || item?.store_id || '';
   const startValue = globalScheduleTimeValue(schedule?.start_ts || item?.clock_in);
   const endValue = globalScheduleTimeValue(schedule?.end_ts || item?.clock_out);
-  const source = String(schedule?.source || item?._schedule_source || '').toLowerCase();
+  const source = normalizeGlobalScheduleSource(schedule?.source || item?._schedule_source || '');
   const anyIn = !!(item?._allow_clock_in_any_store ?? schedule?.allow_clock_in_any_store);
   const anyOut = !!(item?._allow_clock_out_any_store ?? schedule?.allow_clock_out_any_store);
   const inIds = globalScheduleRouteIds(item, 'in');
@@ -2627,35 +2704,6 @@ function renderGlobalScheduleEditor(item, workISO){
   `;
 }
 
-async function patchGlobalDayException(empId, workISO, draft){
-  if (draft.off){
-    const { error } = await supabaseClient
-      .from('timeclock_day_exceptions')
-      .delete()
-      .eq('employee_id', empId)
-      .eq('work_date', workISO);
-    if (error) throw error;
-    return;
-  }
-
-  const firstInStore = draft.anyIn ? null : (draft.inStores[0] || draft.storeId || null);
-  const firstOutStore = draft.anyOut ? null : (draft.outStores[0] || draft.storeId || null);
-  const { error } = await supabaseClient
-    .from('timeclock_day_exceptions')
-    .upsert({
-      employee_id: empId,
-      work_date: workISO,
-      allow_clock_in_any_store: !!draft.anyIn,
-      allow_clock_out_any_store: !!draft.anyOut,
-      clock_in_store_id: firstInStore,
-      clock_out_store_id: firstOutStore,
-      allowed_clock_in_store_ids: draft.anyIn ? [] : draft.inStores,
-      allowed_clock_out_store_ids: draft.anyOut ? [] : draft.outStores,
-      note: 'Admin global schedule route edit'
-    }, { onConflict: 'employee_id,work_date' });
-  if (error) throw error;
-}
-
 function globalScheduleDraftFromPanel(panel, markOff = false){
   const empId = panel?.dataset?.employeeId || '';
   const workISO = panel?.dataset?.workDate || '';
@@ -2709,19 +2757,11 @@ async function saveGlobalScheduleEditor(panel, markOff = false){
   setGlobalScheduleError(panel, '');
 
   try{
+    let successMessage = 'Schedule updated';
+
     if (draft.off){
-      const { error } = await supabaseClient.rpc('admin_set_override', {
-        _employee_id: draft.empId,
-        _work_date: draft.workISO,
-        _off: true,
-        _start_local: null,
-        _end_local: null,
-        _store_id: null,
-        _note: 'Marked off from global schedule drawer'
-      });
-      if (error) throw error;
-      await patchGlobalDayException(draft.empId, draft.workISO, { off: true });
-      showToast('Worker marked off for this date', 'ok');
+      await saveGlobalOverrideWithRoute(draft);
+      successMessage = 'Worker marked off for this date';
     } else if (draft.scope === 'future') {
       const weekday = fromISO(draft.workISO).getDay();
       const { error } = await supabaseClient.rpc('admin_set_weekday_slot_with_route', {
@@ -2752,24 +2792,17 @@ async function saveGlobalScheduleEditor(panel, markOff = false){
         .eq('employee_id', draft.empId)
         .eq('work_date', draft.workISO);
       if (exceptionDeleteError) throw exceptionDeleteError;
-      showToast('Repeating schedule updated from this date forward', 'ok');
+      successMessage = 'Repeating schedule updated from this date forward';
     } else {
-      const { error } = await supabaseClient.rpc('admin_set_override', {
-        _employee_id: draft.empId,
-        _work_date: draft.workISO,
-        _off: false,
-        _start_local: draft.start,
-        _end_local: draft.end,
-        _store_id: draft.storeId,
-        _note: 'Admin global schedule edit'
-      });
-      if (error) throw error;
-      await patchGlobalDayException(draft.empId, draft.workISO, draft);
-      showToast('Schedule updated for this date', 'ok');
+      await saveGlobalOverrideWithRoute(draft);
+      successMessage = 'Schedule updated for this date';
     }
 
     if (typeof loadGlobalCalendar === 'function') await loadGlobalCalendar();
-    await refreshGlobalDayDrawer(draft.workISO, draft.empId);
+    await refreshOverviewSummary().catch(console.warn);
+    if (overviewApi?.loadLiveNow) await overviewApi.loadLiveNow().catch(console.warn);
+    closeDrawer();
+    showToast(successMessage, 'ok');
   } catch (err) {
     console.error(err);
     setGlobalScheduleError(panel, err?.message || 'Schedule update failed.');
@@ -2869,7 +2902,7 @@ async function openGlobalDayDrawer(workISO, scheduledRowsForDay){
           _employee_id: empId,
           _month_start: monthStartISO,
           _schedule_row: sched,
-          _schedule_source: sched.source || '',
+          _schedule_source: normalizeGlobalScheduleSource(sched.source),
           _schedule_store_id: sched.store_id || null,
           _allow_clock_in_any_store: !!sched.allow_clock_in_any_store,
           _allow_clock_out_any_store: !!sched.allow_clock_out_any_store,
@@ -2916,7 +2949,7 @@ async function openGlobalDayDrawer(workISO, scheduledRowsForDay){
         _employee_id: empId,
         _month_start: monthStartISO,
         _schedule_row: sched,
-        _schedule_source: sched.source || '',
+        _schedule_source: normalizeGlobalScheduleSource(sched.source),
         _schedule_store_id: sched.store_id || null,
         _allow_clock_in_any_store: !!sched.allow_clock_in_any_store,
         _allow_clock_out_any_store: !!sched.allow_clock_out_any_store,

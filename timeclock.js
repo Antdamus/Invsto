@@ -166,11 +166,18 @@ async function fetchTodayScheduleAndExceptions(){
 
   // Schedule (today)
   try{
-    const { data, error } = await supabaseClient.rpc('get_employee_schedule', {
+    let { data, error } = await supabaseClient.rpc('get_employee_schedule_with_routes', {
       _employee_id: currentEmployee.id,
       _start: todayISO,
       _end: todayISO
     });
+    if (error && (error.code === 'PGRST202' || /get_employee_schedule_with_routes|could not find/i.test(String(error.message || '')))) {
+      ({ data, error } = await supabaseClient.rpc('get_employee_schedule', {
+        _employee_id: currentEmployee.id,
+        _start: todayISO,
+        _end: todayISO
+      }));
+    }
     if (error) throw error;
     todayScheduleRow = (data && data.length) ? data[0] : null;
   }catch(e){
@@ -222,6 +229,24 @@ function pickNearestAllowedStoreWithinRadius(lat, lng, allowedIds = []){
   return { store: best, distance_m: bestD };
 }
 
+function routeIdList(value){
+  if (Array.isArray(value)) return [...new Set(value.filter(Boolean).map(String))];
+  if (typeof value === 'string'){
+    const raw = value.trim();
+    if (!raw) return [];
+    const trimmed = raw.startsWith('{') && raw.endsWith('}') ? raw.slice(1, -1) : raw;
+    return [...new Set(trimmed.split(',').map((part) => part.trim().replace(/^"|"$/g, '')).filter(Boolean))];
+  }
+  return [];
+}
+
+function routeStoreLabels(ids = []){
+  return routeIdList(ids)
+    .map((id) => storeById.get(id)?.name)
+    .filter(Boolean)
+    .join(', ');
+}
+
 async function getOpenShiftRow(){
   const { data, error } = await supabaseClient
     .from('time_entries')
@@ -267,6 +292,27 @@ async function resolveStoreForAction(kind, geo){
       const s = storeById.get(exc.clock_out_store_id) || null;
       return { store_id: exc.clock_out_store_id, store: s, hint: 'Clock-out exception: specific store', distance_m: null };
     }
+
+    const scheduleOutStores = routeIdList(todayScheduleRow?.allowed_clock_out_store_ids);
+    if (scheduleOutStores.length){
+      const picked = pickNearestAllowedStoreWithinRadius(geo.lat, geo.lng, scheduleOutStores);
+      return {
+        store_id: picked?.store?.id || null,
+        store: picked?.store || null,
+        hint: 'Clock-out route: selected schedule stores only',
+        distance_m: picked?.distance_m ?? null
+      };
+    }
+    if (todayScheduleRow?.allow_clock_out_any_store){
+      const picked = pickNearestStoreWithinRadius(geo.lat, geo.lng);
+      return {
+        store_id: picked?.store?.id || null,
+        store: picked?.store || null,
+        hint: 'Clock-out schedule: any active store allowed',
+        distance_m: picked?.distance_m ?? null
+      };
+    }
+
     const open = await getOpenShiftRow();
     const sid = open?.store_id || todayScheduleRow?.store_id || null;
     const s = sid ? (storeById.get(sid) || null) : null;
@@ -295,6 +341,26 @@ async function resolveStoreForAction(kind, geo){
   if (exc?.clock_in_store_id){
     const s = storeById.get(exc.clock_in_store_id) || null;
     return { store_id: exc.clock_in_store_id, store: s, hint: 'Clock-in exception: specific store', distance_m: null };
+  }
+
+  const scheduleInStores = routeIdList(todayScheduleRow?.allowed_clock_in_store_ids);
+  if (scheduleInStores.length){
+    const picked = pickNearestAllowedStoreWithinRadius(geo.lat, geo.lng, scheduleInStores);
+    return {
+      store_id: picked?.store?.id || null,
+      store: picked?.store || null,
+      hint: 'Clock-in route: selected schedule stores only',
+      distance_m: picked?.distance_m ?? null
+    };
+  }
+  if (todayScheduleRow?.allow_clock_in_any_store){
+    const picked = pickNearestStoreWithinRadius(geo.lat, geo.lng);
+    return {
+      store_id: picked?.store?.id || null,
+      store: picked?.store || null,
+      hint: 'Clock-in schedule: any active store allowed',
+      distance_m: picked?.distance_m ?? null
+    };
   }
 
   // Default: must be assigned by schedule
@@ -645,11 +711,8 @@ async function refreshShiftStatus(){
     btn.textContent = 'Clock Out';
 
     // Phase 4: show store for active shift
-    if (Array.isArray(todayExceptionRow?.allowed_clock_out_store_ids) && todayExceptionRow.allowed_clock_out_store_ids.length) {
-      const labels = todayExceptionRow.allowed_clock_out_store_ids
-        .map((id) => storeById.get(id)?.name)
-        .filter(Boolean)
-        .join(', ');
+    if (routeIdList(todayExceptionRow?.allowed_clock_out_store_ids).length) {
+      const labels = routeStoreLabels(todayExceptionRow.allowed_clock_out_store_ids);
       const s = open.store_id ? (storeById.get(open.store_id) || null) : null;
       renderStoreContextLine(s, labels ? `Clock-out allowed at: ${labels}` : 'Clock-out route: selected stores only');
     } else if (todayExceptionRow?.allow_clock_out_any_store) {
@@ -658,6 +721,13 @@ async function refreshShiftStatus(){
     } else if (todayExceptionRow?.clock_out_store_id) {
       const s = storeById.get(todayExceptionRow.clock_out_store_id) || null;
       renderStoreContextLine(s, s ? 'Clock-out route store' : 'Clock-out route store unknown');
+    } else if (routeIdList(todayScheduleRow?.allowed_clock_out_store_ids).length) {
+      const labels = routeStoreLabels(todayScheduleRow.allowed_clock_out_store_ids);
+      const s = open.store_id ? (storeById.get(open.store_id) || null) : null;
+      renderStoreContextLine(s, labels ? `Clock-out allowed at: ${labels}` : 'Clock-out route: selected schedule stores only');
+    } else if (todayScheduleRow?.allow_clock_out_any_store) {
+      const s = open.store_id ? (storeById.get(open.store_id) || null) : null;
+      renderStoreContextLine(s, 'Clock-out allowed at any active store for this schedule');
     } else {
       const s = open.store_id ? (storeById.get(open.store_id) || null) : (todayScheduleRow?.store_id ? (storeById.get(todayScheduleRow.store_id) || null) : null);
       renderStoreContextLine(s, s ? 'Active shift store' : 'Active shift (store unknown)');
@@ -668,8 +738,23 @@ async function refreshShiftStatus(){
     btn.textContent = 'Clock In';
 
     // Phase 4: fall back to schedule assignment for today
-    const assigned = todayScheduleRow?.store_id ? (storeById.get(todayScheduleRow.store_id) || null) : null;
-    renderStoreContextLine(assigned, assigned ? 'Assigned store (schedule)' : 'No store assigned today');
+    if (routeIdList(todayExceptionRow?.allowed_clock_in_store_ids).length) {
+      const labels = routeStoreLabels(todayExceptionRow.allowed_clock_in_store_ids);
+      renderStoreContextLine(null, labels ? `Clock-in allowed at: ${labels}` : 'Clock-in route: selected stores only');
+    } else if (todayExceptionRow?.allow_clock_in_any_store) {
+      renderStoreContextLine(null, 'Clock-in allowed at any active store today');
+    } else if (todayExceptionRow?.clock_in_store_id) {
+      const s = storeById.get(todayExceptionRow.clock_in_store_id) || null;
+      renderStoreContextLine(s, s ? 'Clock-in route store' : 'Clock-in route store unknown');
+    } else if (routeIdList(todayScheduleRow?.allowed_clock_in_store_ids).length) {
+      const labels = routeStoreLabels(todayScheduleRow.allowed_clock_in_store_ids);
+      renderStoreContextLine(null, labels ? `Clock-in allowed at: ${labels}` : 'Clock-in route: selected schedule stores only');
+    } else if (todayScheduleRow?.allow_clock_in_any_store) {
+      renderStoreContextLine(null, 'Clock-in allowed at any active store for this schedule');
+    } else {
+      const assigned = todayScheduleRow?.store_id ? (storeById.get(todayScheduleRow.store_id) || null) : null;
+      renderStoreContextLine(assigned, assigned ? 'Assigned store (schedule)' : 'No store assigned today');
+    }
   }
 }
 

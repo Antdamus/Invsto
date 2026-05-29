@@ -44,19 +44,162 @@ async function markAcceptedIfNeeded() {
 
 
 async function fetchGlobalScheduleRange(gridStart, gridEnd){
+  const startISO = toISODate(gridStart);
+  const endISO = toISODate(gridEnd);
   const args = {
-    _start: toISODate(gridStart),
-    _end: toISODate(gridEnd)
+    _start: startISO,
+    _end: endISO
   };
 
-  let data, error;
-  ({ data, error } = await supabaseClient.rpc('get_schedule_range_all_with_routes', args));
-  if (error) {
-    console.warn('get_schedule_range_all_with_routes unavailable, falling back:', error);
-    ({ data, error } = await supabaseClient.rpc('get_schedule_range_all', args));
-  }
+  const { data, error } = await supabaseClient.rpc('get_schedule_range_all_with_routes', args);
   if (error) throw error;
-  return data || [];
+  return (data || []).map(normalizeScheduleSource);
+}
+
+function scheduleIdArray(value){
+  if (Array.isArray(value)) return [...new Set(value.filter(Boolean).map(String))];
+  if (typeof value === 'string') {
+    const raw = value.trim();
+    if (!raw) return [];
+    const trimmed = raw.startsWith('{') && raw.endsWith('}') ? raw.slice(1, -1) : raw;
+    return [...new Set(trimmed.split(',').map((part) => part.trim().replace(/^"|"$/g, '')).filter(Boolean))];
+  }
+  return [];
+}
+
+function normalizeScheduleSource(row){
+  if (!row || typeof row !== 'object') return row;
+  const source = String(row.source || '').toLowerCase();
+  if (source === 'regular') return { ...row, source: 'recurring' };
+  return row;
+}
+
+function scheduleFeatureMissing(error, name = ''){
+  const message = String(error?.message || '').toLowerCase();
+  return error?.code === 'PGRST202' ||
+    error?.code === '42703' ||
+    error?.code === 'PGRST204' ||
+    message.includes(String(name || '').toLowerCase()) ||
+    message.includes('could not find') ||
+    message.includes('schema cache') ||
+    message.includes('does not exist');
+}
+
+function scheduleHasRouteIds(value){
+  return scheduleIdArray(value).length > 0;
+}
+
+function scheduleEffectiveCovers(row, iso){
+  const from = String(row?.effective_from || '').slice(0, 10);
+  const to = String(row?.effective_to || '').slice(0, 10);
+  return (!from || from <= iso) && (!to || to >= iso);
+}
+
+function scheduleExceptionRoute(exception, direction){
+  if (!exception) return null;
+  const anyKey = direction === 'out' ? 'allow_clock_out_any_store' : 'allow_clock_in_any_store';
+  const arrayKey = direction === 'out' ? 'allowed_clock_out_store_ids' : 'allowed_clock_in_store_ids';
+  const singleKey = direction === 'out' ? 'clock_out_store_id' : 'clock_in_store_id';
+  const ids = scheduleIdArray(exception[arrayKey]);
+  if (ids.length || exception[anyKey] === true || exception[singleKey]) {
+    return {
+      any: !!exception[anyKey],
+      ids: ids.length ? ids : [exception[singleKey]].filter(Boolean).map(String)
+    };
+  }
+  return null;
+}
+
+function scheduleRecurringRoute(schedule, direction, fallbackStoreId){
+  if (!schedule) return { any: false, ids: fallbackStoreId ? [String(fallbackStoreId)] : [] };
+  const anyKey = direction === 'out' ? 'allow_clock_out_any_store' : 'allow_clock_in_any_store';
+  const arrayKey = direction === 'out' ? 'allowed_clock_out_store_ids' : 'allowed_clock_in_store_ids';
+  const ids = scheduleIdArray(schedule[arrayKey]);
+  return {
+    any: !!schedule[anyKey],
+    ids: ids.length ? ids : (fallbackStoreId ? [String(fallbackStoreId)] : [])
+  };
+}
+
+async function enrichScheduleRowsWithRoutes(rows, startISO, endISO, fixedEmployeeId = null){
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return list;
+
+  const empIds = [...new Set(list.map((row) => row.employee_id || fixedEmployeeId).filter(Boolean).map(String))];
+  if (!empIds.length) return list;
+
+  try {
+    const [exceptionResult, recurringResult] = await Promise.all([
+      supabaseClient
+        .from('timeclock_day_exceptions')
+        .select('employee_id, work_date, allow_clock_in_any_store, clock_in_store_id, allow_clock_out_any_store, clock_out_store_id, allowed_clock_in_store_ids, allowed_clock_out_store_ids')
+        .in('employee_id', empIds)
+        .gte('work_date', startISO)
+        .lte('work_date', endISO),
+      supabaseClient
+        .from('work_schedules')
+        .select('employee_id, weekday, effective_from, effective_to, store_id, active, allow_clock_in_any_store, allow_clock_out_any_store, allowed_clock_in_store_ids, allowed_clock_out_store_ids')
+        .in('employee_id', empIds)
+        .eq('active', true)
+        .lte('effective_from', endISO)
+        .or(`effective_to.is.null,effective_to.gte.${startISO}`)
+    ]);
+
+    if (exceptionResult.error) throw exceptionResult.error;
+    if (recurringResult.error) throw recurringResult.error;
+
+    const exceptionByKey = new Map();
+    for (const exception of (exceptionResult.data || [])){
+      exceptionByKey.set(`${exception.employee_id}|${String(exception.work_date).slice(0, 10)}`, exception);
+    }
+
+    const schedulesByEmployee = new Map();
+    for (const schedule of (recurringResult.data || [])){
+      const key = String(schedule.employee_id);
+      const bucket = schedulesByEmployee.get(key) || [];
+      bucket.push(schedule);
+      schedulesByEmployee.set(key, bucket);
+    }
+
+    for (const bucket of schedulesByEmployee.values()){
+      bucket.sort((a, b) => String(b.effective_from || '').localeCompare(String(a.effective_from || '')));
+    }
+
+    return list.map((row) => {
+      const employeeId = String(row.employee_id || fixedEmployeeId || '');
+      const workISO = String(row.work_date || '').slice(0, 10);
+      if (!employeeId || !workISO) return row;
+
+      const exception = exceptionByKey.get(`${employeeId}|${workISO}`) || null;
+      const weekday = fromISO(workISO).getDay();
+      const recurring = (schedulesByEmployee.get(employeeId) || []).find((schedule) => {
+        if (Number(schedule.weekday) !== weekday) return false;
+        if (!scheduleEffectiveCovers(schedule, workISO)) return false;
+        if (row.store_id && schedule.store_id && String(schedule.store_id) !== String(row.store_id)) return false;
+        return true;
+      }) || null;
+
+      const existingIn = scheduleIdArray(row.allowed_clock_in_store_ids);
+      const existingOut = scheduleIdArray(row.allowed_clock_out_store_ids);
+      const exceptionIn = scheduleExceptionRoute(exception, 'in');
+      const exceptionOut = scheduleExceptionRoute(exception, 'out');
+      const recurringIn = scheduleRecurringRoute(recurring, 'in', row.store_id);
+      const recurringOut = scheduleRecurringRoute(recurring, 'out', row.store_id);
+      const inRoute = exceptionIn || (existingIn.length ? { any: !!row.allow_clock_in_any_store, ids: existingIn } : recurringIn);
+      const outRoute = exceptionOut || (existingOut.length ? { any: !!row.allow_clock_out_any_store, ids: existingOut } : recurringOut);
+
+      return {
+        ...row,
+        allow_clock_in_any_store: !!inRoute.any,
+        allow_clock_out_any_store: !!outRoute.any,
+        allowed_clock_in_store_ids: inRoute.any ? [] : inRoute.ids,
+        allowed_clock_out_store_ids: outRoute.any ? [] : outRoute.ids
+      };
+    });
+  } catch (err) {
+    console.warn('Schedule route enrichment unavailable:', err);
+    return list;
+  }
 }
 
 function renderGlobalCalendar(rows, gridStart, monthStart){
@@ -149,17 +292,12 @@ async function fetchResolvedWeek(empId, weekStart){
   const start = toISODate(weekStart);
   const end   = toISODate(addDays(weekStart, 6));
   const args = { _employee_id: empId, _start: start, _end: end };
-  let data, error;
-  ({ data, error } = await supabaseClient.rpc('get_employee_schedule_with_routes', args));
-  if (error) {
-    console.warn('get_employee_schedule_with_routes unavailable, falling back:', error);
-    ({ data, error } = await supabaseClient.rpc('get_employee_schedule', args));
-  }
+  const { data, error } = await supabaseClient.rpc('get_employee_schedule_with_routes', args);
   if (error) throw error;
   // Map by work_date (ISO) → { start_ts, end_ts, source, store_id }
   const byDate = new Map();
-  for (const r of (data||[])){
-    byDate.set(r.work_date, r);
+  for (const r of (data || [])){
+    byDate.set(String(r.work_date || '').slice(0, 10), normalizeScheduleSource(r));
   }
   return byDate;
 }
@@ -169,12 +307,21 @@ async function fetchWeekOverrides(employeeId, weekStart){
   const startISO = toISODate(weekStart);
   const endISO = toISODate(addDays(weekStart, 6));
 
-  const { data, error } = await supabaseClient
+  let { data, error } = await supabaseClient
     .from('work_schedule_overrides')
-    .select('work_date, off, start_local, end_local, store_id, note')
+    .select('work_date, off, start_local, end_local, store_id, note, allow_clock_in_any_store, allow_clock_out_any_store, allowed_clock_in_store_ids, allowed_clock_out_store_ids')
     .eq('employee_id', employeeId)
     .gte('work_date', startISO)
     .lte('work_date', endISO);
+
+  if (error && scheduleFeatureMissing(error)) {
+    ({ data, error } = await supabaseClient
+      .from('work_schedule_overrides')
+      .select('work_date, off, start_local, end_local, store_id, note')
+      .eq('employee_id', employeeId)
+      .gte('work_date', startISO)
+      .lte('work_date', endISO));
+  }
 
   if (error) throw error;
 
@@ -754,9 +901,7 @@ function sameScheduleIdSet(a = [], b = []){
 }
 
 function scheduleRouteIds(row, key, fallbackStoreId){
-  const ids = Array.isArray(row?.[key])
-    ? row[key].filter(Boolean).map(String)
-    : [];
+  const ids = scheduleIdArray(row?.[key]);
   if (ids.length) return ids;
   return fallbackStoreId ? [String(fallbackStoreId)] : [];
 }
@@ -881,8 +1026,10 @@ function getOverrideDraft(workISO){
   const anyOut = !!qs(`ovAnyOut-${workISO}`)?.checked;
   const inStore = anyIn ? null : (qs(`ovInStore-${workISO}`)?.value || null);
   const outStore = anyOut ? null : (qs(`ovOutStore-${workISO}`)?.value || null);
-  const allowedInStores = off ? [] : getCheckedScheduleStoreIds('schedFlowClockInStores');
-  const allowedOutStores = off ? [] : getCheckedScheduleStoreIds('schedFlowClockOutStores');
+  const checkedInStores = off ? [] : getCheckedScheduleStoreIds('schedFlowClockInStores');
+  const checkedOutStores = off ? [] : getCheckedScheduleStoreIds('schedFlowClockOutStores');
+  const allowedInStores = off || anyIn ? [] : (checkedInStores.length ? checkedInStores : [inStore || storeId].filter(Boolean));
+  const allowedOutStores = off || anyOut ? [] : (checkedOutStores.length ? checkedOutStores : [outStore || storeId].filter(Boolean));
   const employee = selectedScheduleEmployee();
   const dayDate = fromISO(workISO);
 
@@ -1407,54 +1554,22 @@ async function saveRecurring(weekday){
       if (result !== 'primary') return;
     }
 
-    let savedRecurring = null;
-    let routeError = null;
+    const { data: savedRecurring, error: routeError } = await supabaseClient.rpc('admin_set_weekday_slot_with_route', {
+      _employee_id: empId,
+      _weekday: weekday,
+      _start_local: draft.start,
+      _end_local: draft.end,
+      _effective_from: draft.effFrom,
+      _effective_to: null,
+      _store_id: draft.storeId,
+      _note: draft.note,
+      _allow_clock_in_any_store: false,
+      _allow_clock_out_any_store: false,
+      _allowed_clock_in_store_ids: draft.allowedInStores || [],
+      _allowed_clock_out_store_ids: draft.allowedOutStores || []
+    });
+    if (routeError) return alert('Save failed: ' + routeError.message);
 
-    {
-      const result = await supabaseClient.rpc('admin_set_weekday_slot_with_route', {
-        _employee_id: empId,
-        _weekday: weekday,
-        _start_local: draft.start,
-        _end_local: draft.end,
-        _effective_from: draft.effFrom,
-        _effective_to: null,
-        _store_id: draft.storeId,
-        _note: draft.note,
-        _allow_clock_in_any_store: false,
-        _allow_clock_out_any_store: false,
-        _allowed_clock_in_store_ids: draft.allowedInStores || [],
-        _allowed_clock_out_store_ids: draft.allowedOutStores || []
-      });
-      savedRecurring = result.data;
-      routeError = result.error;
-    }
-
-    if (routeError) {
-      const message = String(routeError.message || '').toLowerCase();
-      const missingRouteRpc = routeError.code === 'PGRST202' || message.includes('admin_set_weekday_slot_with_route') || message.includes('could not find');
-      if (!missingRouteRpc) return alert('Save failed: ' + routeError.message);
-
-      console.warn('admin_set_weekday_slot_with_route unavailable, saving primary-store schedule only:', routeError);
-      const { data, error } = await supabaseClient.rpc('admin_set_weekday_slot', {
-        _employee_id: empId,
-        _weekday: weekday,
-        _start_local: draft.start,
-        _end_local: draft.end,
-        _effective_from: draft.effFrom,
-        _effective_to: null,
-        _store_id: draft.storeId,
-        _note: draft.note
-      });
-
-      if (error) return alert('Save failed: ' + error.message);
-      savedRecurring = data;
-
-      if (overlapping.length) {
-        const savedRecurringId = Array.isArray(savedRecurring) ? savedRecurring[0]?.id : savedRecurring?.id;
-        if (!savedRecurringId) throw new Error('The new recurring schedule was saved, but the app could not confirm its row id to safely close the old schedule.');
-        await closeRecurringRowsFromDate(empId, weekday, draft.effFrom, [savedRecurringId]);
-      }
-    }
     await loadScheduleWeek();
     showScheduleSaveModal({
       variant: 'success',
@@ -1568,8 +1683,8 @@ async function saveOverride(workISO){
       if (!draft.start || !draft.end) return alert('Enter start and end time, or mark Off.');
       if (draft.end <= draft.start) return alert('End must be after start.');
       if (!draft.storeId) return alert('Pick a store for this override.');
-      if (!draft.allowedInStores.length) return alert('Pick at least one allowed clock-in store.');
-      if (!draft.allowedOutStores.length) return alert('Pick at least one allowed clock-out store.');
+      if (!draft.anyIn && !draft.allowedInStores.length) return alert('Pick at least one allowed clock-in store.');
+      if (!draft.anyOut && !draft.allowedOutStores.length) return alert('Pick at least one allowed clock-out store.');
     }
 
     const existingOverride = scheduleWeekState.overridesByDate.get(workISO) || null;
@@ -1612,56 +1727,56 @@ async function saveOverride(workISO){
 
     await markAcceptedIfNeeded();
 
-    // Base payload (existing RPC)
-    const base = {
+    const routePayload = {
       _employee_id: empId,
       _work_date: workISO,
       _off: draft.off,
       _start_local: draft.start,
       _end_local: draft.end,
       _store_id: draft.off ? null : draft.storeId,
-      _note: draft.off ? null : draft.note
+      _note: draft.off ? null : draft.note,
+      _allow_clock_in_any_store: draft.anyIn,
+      _allow_clock_out_any_store: draft.anyOut,
+      _allowed_clock_in_store_ids: draft.off || draft.anyIn ? [] : draft.allowedInStores,
+      _allowed_clock_out_store_ids: draft.off || draft.anyOut ? [] : draft.allowedOutStores
     };
+    const { error } = await supabaseClient.rpc('admin_set_override_with_route', routePayload);
+    if (error) {
+      if (!scheduleFeatureMissing(error, 'admin_set_override_with_route')) {
+        return alert('Override failed: ' + error.message);
+      }
 
-    // Try a v2 RPC first (if you created it in Supabase)
-    // If not available, fall back to old RPC + patch DB columns directly.
-    let usedV2 = false;
+      const { error: legacyError } = await supabaseClient.rpc('admin_set_override', {
+        _employee_id: empId,
+        _work_date: workISO,
+        _off: draft.off,
+        _start_local: draft.start,
+        _end_local: draft.end,
+        _store_id: draft.off ? null : draft.storeId,
+        _note: draft.off ? null : draft.note
+      });
+      if (legacyError) return alert('Override failed: ' + legacyError.message);
 
-// Only try v2 if you explicitly enabled it
-const TRY_V2 = false;
+      if (draft.off) {
+        const { error: exceptionDeleteError } = await supabaseClient
+          .from('timeclock_day_exceptions')
+          .delete()
+          .eq('employee_id', empId)
+          .eq('work_date', workISO);
+        if (exceptionDeleteError) return alert('Override saved, but route cleanup failed: ' + exceptionDeleteError.message);
+      } else {
+        await patchOverrideExceptionExtras(empId, workISO, {
+          allow_any_store_in: draft.anyIn,
+          allow_any_store_out: draft.anyOut,
+          clock_in_store_id: draft.inStore,
+          clock_out_store_id: draft.outStore,
+          allowed_clock_in_store_ids: draft.anyIn ? [] : draft.allowedInStores,
+          allowed_clock_out_store_ids: draft.anyOut ? [] : draft.allowedOutStores
+        });
+      }
+    }
 
-if (TRY_V2){
-  try {
-    const { error: v2Err } = await supabaseClient.rpc('admin_set_override_v2', {
-      ...base,
-      _allow_any_store_in: draft.anyIn,
-      _allow_any_store_out: draft.anyOut,
-      _clock_in_store_id: draft.inStore,
-      _clock_out_store_id: draft.outStore
-    });
-    if (!v2Err) usedV2 = true;
-  } catch (e){
-    // ignore
-  }
-}
-
-
-  if (!usedV2){
-    const { error } = await supabaseClient.rpc('admin_set_override', base);
-    if (error) return alert('Override failed: ' + error.message);
-
-    // Patch exception columns (if present)
-    await patchOverrideExceptionExtras(empId, workISO, {
-      allow_any_store_in: draft.anyIn,
-      allow_any_store_out: draft.anyOut,
-      clock_in_store_id: draft.inStore,
-      clock_out_store_id: draft.outStore,
-      allowed_clock_in_store_ids: draft.off ? [] : draft.allowedInStores,
-      allowed_clock_out_store_ids: draft.off ? [] : draft.allowedOutStores
-    });
-  }
-
-  await loadScheduleWeek();
+    await loadScheduleWeek();
     showScheduleSaveModal({
       variant: 'success',
       kicker: 'Schedule saved',
@@ -2035,9 +2150,10 @@ async function patchOverrideExceptionExtras(empId, workISO, extras){
       .from('timeclock_day_exceptions')
       .upsert(patch, { onConflict: 'employee_id,work_date' });
 
-    if (error) console.warn('patchOverrideExceptionExtras update error:', error);
+    if (error) throw error;
   } catch (e){
     console.warn('patchOverrideExceptionExtras failed:', e);
+    throw e;
   }
 }
 
