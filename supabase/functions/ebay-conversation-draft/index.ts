@@ -14,8 +14,10 @@ type Input = {
   conversationId: string | null;
   ebayConversationId: string | null;
   conversationType: string | null;
+  targetMessageId: string | null;
   draftId: string | null;
   draftText: string | null;
+  improvementInstructions: string | null;
   operatorNotes: string | null;
 };
 
@@ -38,7 +40,7 @@ type DraftOutput = {
 
 const GENERATOR_NAME = "ebay_conversation_response_drafter";
 const GENERATOR_VERSION = "v1";
-const PROMPT_VERSION_DEFAULT = "ebay-conversation-draft-v1";
+const PROMPT_VERSION_DEFAULT = "ebay-conversation-draft-v2-target-message";
 const OPENAI_TIMEOUT_MS = 45000;
 const MAX_DRAFT_TEXT_CHARS = 4000;
 const MAX_OPERATOR_TEXT_CHARS = 4000;
@@ -176,10 +178,12 @@ async function parseInput(req: Request): Promise<Input> {
     conversationId: stringOrNull(body?.conversationId || body?.conversation_id, 120),
     ebayConversationId: stringOrNull(body?.ebayConversationId || body?.ebay_conversation_id, 180),
     conversationType: stringOrNull(body?.conversationType || body?.conversation_type, 80),
+    targetMessageId: stringOrNull(body?.targetMessageId || body?.target_message_id, 120),
     draftId: stringOrNull(body?.draftId || body?.draft_id, 120),
     draftText: typeof body?.draftText === "string" || typeof body?.draft_text === "string"
       ? safeBodyText(body?.draftText || body?.draft_text, MAX_OPERATOR_TEXT_CHARS)
       : null,
+    improvementInstructions: stringOrNull(body?.improvementInstructions || body?.improvement_instructions, 1000),
     operatorNotes: stringOrNull(body?.operatorNotes || body?.operator_notes, 1000),
   };
 }
@@ -221,6 +225,53 @@ function latestMessage(messages: Array<Record<string, any>>) {
 
 function latestInboundMessage(messages: Array<Record<string, any>>) {
   return [...messages].reverse().find((message) => String(message.direction || "").toLowerCase() === "inbound") || null;
+}
+
+function previousDraftTargetMessageId(previousDraft: Record<string, any> | null) {
+  if (!previousDraft) return null;
+  const inputSnapshot = parseObject(previousDraft.input_snapshot);
+  const draftRequest = parseObject(inputSnapshot.draft_request);
+  const groundingSummary = parseObject(previousDraft.grounding_summary);
+  const targetMessage = parseObject(groundingSummary.target_message || inputSnapshot.target_message);
+  return text(previousDraft.target_message_id || draftRequest.target_message_id || targetMessage.id, 120) || null;
+}
+
+async function loadTargetMessage(
+  supabase: ServiceClient,
+  conversationId: string,
+  targetMessageId: string,
+) {
+  const { data, error } = await supabase
+    .from("ebay_conversation_messages")
+    .select("id, conversation_id, ebay_message_id, direction, sender_username, recipient_username, created_at_ebay, subject, message_body, message_body_preview, has_media, media_count, created_at")
+    .eq("id", targetMessageId)
+    .eq("conversation_id", conversationId)
+    .maybeSingle();
+  if (error) throw new DraftError("target_message_lookup_failed", { phase: "draft_input" });
+  return data as Record<string, any> | null;
+}
+
+async function resolveTargetMessage(
+  supabase: ServiceClient,
+  conversationId: string,
+  context: Record<string, any>,
+  input: Input,
+  previousDraft: Record<string, any> | null,
+) {
+  const messages = safeArray(context.messages) as Array<Record<string, any>>;
+  const requestedTargetId = input.targetMessageId || previousDraftTargetMessageId(previousDraft);
+  const target = requestedTargetId
+    ? messages.find((message) => String(message.id || "") === requestedTargetId) ||
+      await loadTargetMessage(supabase, conversationId, requestedTargetId)
+    : latestInboundMessage(messages);
+
+  if (!target?.id) {
+    throw new DraftError(requestedTargetId ? "target_message_not_found" : "target_message_required", { status: 400, phase: "draft_input" });
+  }
+  if (String(target.direction || "").toLowerCase() !== "inbound") {
+    throw new DraftError("target_message_must_be_inbound", { status: 400, phase: "draft_input" });
+  }
+  return target;
 }
 
 function effectiveClassification(row: Record<string, any> | null) {
@@ -310,7 +361,16 @@ function buildGrounding(context: Record<string, any>) {
     pushFact(facts, factId(["order", orderKey, "shipped_on_date"]), `Order ${orderKey} shipped date`, order.shipped_on_date);
     pushFact(facts, factId(["order", orderKey, "tracking_number"]), `Order ${orderKey} tracking number`, order.tracking_number);
     pushFact(facts, factId(["order", orderKey, "shipping_service"]), `Order ${orderKey} shipping service`, order.shipping_service);
-    if (!order.tracking_number) missing.add(`tracking number unavailable for order ${orderKey}`);
+    pushFact(facts, factId(["order", orderKey, "carrier"]), `Order ${orderKey} carrier`, order.carrier);
+    pushFact(facts, factId(["order", orderKey, "shipment_status"]), `Order ${orderKey} shipment status`, order.shipment_status);
+    pushFact(facts, factId(["order", orderKey, "label_status"]), `Order ${orderKey} label status`, order.label_status, false);
+    pushFact(facts, factId(["order", orderKey, "ebay_shipment_id"]), `Order ${orderKey} eBay shipment id`, order.ebay_shipment_id, false);
+    const safeLabelMetadata = parseObject(order.safe_label_metadata);
+    pushFact(facts, factId(["order", orderKey, "trackingNumber"]), `Order ${orderKey} label tracking number`, safeLabelMetadata.trackingNumber);
+    pushFact(facts, factId(["order", orderKey, "shippingBarcodeNumber"]), `Order ${orderKey} shipping barcode number`, safeLabelMetadata.shippingBarcodeNumber, false);
+    pushFact(facts, factId(["order", orderKey, "shipmentStatus"]), `Order ${orderKey} label shipment status`, safeLabelMetadata.shipmentStatus);
+    pushFact(facts, factId(["order", orderKey, "deliveryStatus"]), `Order ${orderKey} delivery status`, safeLabelMetadata.deliveryStatus);
+    if (!order.tracking_number && !safeLabelMetadata.trackingNumber) missing.add(`tracking number unavailable for order ${orderKey}`);
     if (!order.shipped_on_date) missing.add(`shipped date unavailable for order ${orderKey}`);
   }
 
@@ -351,10 +411,10 @@ function buildGrounding(context: Record<string, any>) {
 }
 
 function shippingQuestionLikely(input: Record<string, any>) {
-  const latestInbound = input.latest_inbound_message || {};
+  const targetMessage = input.target_message || input.latest_inbound_message || {};
   const haystack = stableStringify([
-    latestInbound.subject,
-    latestInbound.body,
+    targetMessage.subject,
+    targetMessage.body,
     input.classification?.topic_tags,
   ]).toLowerCase();
   return /\b(ship|shipped|shipping|tracking|track|where is|where's|delivery|delivered|arrive|order status)\b/.test(haystack);
@@ -399,8 +459,10 @@ function buildFallbackDraft(input: Record<string, any>, reason: string): DraftOu
 function buildDraftInput(
   context: Record<string, any>,
   classification: Record<string, any> | null,
+  targetMessage: Record<string, any>,
   mode: Mode,
   operatorDraftText: string | null,
+  improvementInstructions: string | null,
   previousDraft: Record<string, any> | null,
   version: string,
 ) {
@@ -408,6 +470,7 @@ function buildDraftInput(
   const grounding = buildGrounding(context);
   return {
     conversation: context.conversation || {},
+    target_message: compactMessageForDraft(targetMessage),
     latest_message: compactMessageForDraft(latestMessage(messages)),
     latest_inbound_message: compactMessageForDraft(latestInboundMessage(messages)),
     timeline: messages.slice(-60).map(compactMessageForDraft),
@@ -425,9 +488,11 @@ function buildDraftInput(
     },
     grounding,
     operator_draft: operatorDraftText || null,
+    operator_instructions: improvementInstructions || null,
     previous_draft: previousDraft
       ? {
         id: previousDraft.id || null,
+        target_message_id: previousDraft.target_message_id || previousDraftTargetMessageId(previousDraft),
         draft_status: previousDraft.draft_status || null,
         final_text: previousDraft.final_text || previousDraft.edited_text || previousDraft.draft_text || null,
         grounding_summary: previousDraft.grounding_summary || {},
@@ -439,6 +504,7 @@ function buildDraftInput(
       generator_name: GENERATOR_NAME,
       generator_version: GENERATOR_VERSION,
       prompt_version: version,
+      target_message_id: targetMessage.id || null,
       output_is_internal_suggestion: true,
       human_review_required: true,
       sends_allowed: false,
@@ -463,13 +529,14 @@ Draft style:
 - If facts are missing, write a general safe acknowledgement and say we will review/look into the details.
 
 Grounding rules:
-- Use only the supplied eBay conversation timeline, latest inbound buyer message, classification, and objective_context.
+- Center the reply on target_message. Treat the full timeline, classification, and objective_context as supporting context.
+- Use only the supplied eBay conversation timeline, target buyer message, latest inbound buyer message, classification, and objective_context.
 - grounding.facts contains fact ids that may be cited in facts_used. facts_used must contain only those exact ids.
 - Buyer-facing factual claims are allowed only when directly supported by objective_context and the relevant grounding fact.
 - It is okay to acknowledge what the buyer said as a concern, but do not convert buyer claims into verified facts.
 - Do not hallucinate tracking numbers, shipment status, refund status, return approval, replacement availability, exact delivery timing, or inventory availability.
 - Do not say an item shipped unless matched order context includes shipped_on_date or an explicitly shipped status.
-- Do not say a tracking number exists unless matched order/shipping context includes tracking_number.
+- Do not say a tracking number exists unless matched order/shipping context includes tracking_number or safe_label_metadata.trackingNumber.
 - Do not say a refund was issued, return was accepted, cancellation completed, or package will arrive on a date unless provided context directly supports that exact fact.
 
 Shipping/tracking:
@@ -480,9 +547,11 @@ Shipping/tracking:
 
 Improve mode:
 - If draft_request.mode is "improve", improve the operator_draft for clarity, tone, and organization.
+- Apply operator_instructions when provided, but only for wording, tone, organization, length, or readability.
 - Preserve the operator's meaning and caveats.
 - Do not add facts that are not in objective_context or grounding.facts.
 - Do not remove uncertainty where context is missing.
+- Do not add tracking, refunds, order status, delivery dates, replacement availability, promises, or commitments unless directly supported by objective_context and grounding.facts.
 
 Output JSON fields:
 - draft_text: buyer-facing draft only.
@@ -642,9 +711,18 @@ function validateDraftOutput(raw: unknown, input: Record<string, any>) {
   }
 
   const orderRows = safeArray(input.objective_context?.matched_orders) as Array<Record<string, any>>;
-  const hasTracking = orderRows.some((order) => text(order.tracking_number, 200));
+  const orderTrackingNumber = (order: Record<string, any>) => {
+    const metadata = parseObject(order.safe_label_metadata);
+    return text(order.tracking_number || metadata.trackingNumber, 200);
+  };
+  const orderShipmentStatus = (order: Record<string, any>) => {
+    const metadata = parseObject(order.safe_label_metadata);
+    return text(order.shipment_status || metadata.shipmentStatus || metadata.deliveryStatus, 200);
+  };
+  const hasTracking = orderRows.some((order) => orderTrackingNumber(order));
   const hasShippedDate = orderRows.some((order) => text(order.shipped_on_date, 120));
-  const knownTrackingNumbers = new Set(orderRows.map((order) => text(order.tracking_number, 200)).filter(Boolean));
+  const hasShipmentStatus = orderRows.some((order) => orderShipmentStatus(order));
+  const knownTrackingNumbers = new Set(orderRows.map(orderTrackingNumber).filter(Boolean));
   const trackingLike = draftText.match(/\b[A-Z0-9]{10,34}\b/g) || [];
   if (containsAny(combined, [/\btracking\s+(number|#)\s+(is|:)/i]) && !hasTracking) {
     errors.push("unsupported_tracking_number_claim");
@@ -655,7 +733,7 @@ function validateDraftOutput(raw: unknown, input: Record<string, any>) {
       errors.push(`unsupported_tracking_like_token:${token}`);
     }
   }
-  if (containsAny(combined, [/\b(shipped|has shipped|was shipped|is in transit|out for delivery|delivered|label created)\b/i]) && !hasShippedDate) {
+  if (containsAny(combined, [/\b(shipped|has shipped|was shipped|is in transit|out for delivery|delivered|label created)\b/i]) && !hasShippedDate && !hasShipmentStatus) {
     errors.push("unsupported_shipping_status_claim");
     safetyWarnings.add("shipment status wording was not supported by context");
   }
@@ -758,9 +836,14 @@ function staleStatus(row: Record<string, any>, latest: Record<string, any> | nul
 }
 
 function publicDraft(row: Record<string, any>, staleness: Record<string, unknown> | null = null) {
+  const grounding = parseObject(row.grounding_summary);
+  const inputSnapshot = parseObject(row.input_snapshot);
+  const targetMessage = parseObject(grounding.target_message || inputSnapshot.target_message);
   return {
     id: row.id,
     conversation_id: row.conversation_id,
+    target_message_id: row.target_message_id || targetMessage.id || null,
+    target_message: Object.keys(targetMessage).length ? targetMessage : null,
     latest_message_id: row.latest_message_id || null,
     classification_id: row.classification_id || null,
     draft_status: row.draft_status || "generated",
@@ -791,7 +874,7 @@ function publicDraft(row: Record<string, any>, staleness: Record<string, unknown
 async function loadDraftRows(supabase: ServiceClient, conversationId: string, limit = 20) {
   const { data, error } = await supabase
     .from("ebay_conversation_response_drafts")
-    .select("id, conversation_id, latest_message_id, classification_id, draft_status, draft_text, edited_text, final_text, source_mode, model_name, prompt_version, input_hash, context_hash, grounding_summary, safety_warnings, validation_status, validation_errors, operator_notes, confidence, draft_version, is_current, created_at, updated_at, discarded_at, superseded_at")
+    .select("id, conversation_id, target_message_id, latest_message_id, classification_id, draft_status, draft_text, edited_text, final_text, source_mode, model_name, prompt_version, input_hash, context_hash, grounding_summary, input_snapshot, safety_warnings, validation_status, validation_errors, operator_notes, confidence, draft_version, is_current, created_at, updated_at, discarded_at, superseded_at")
     .eq("conversation_id", conversationId)
     .order("is_current", { ascending: false })
     .order("draft_version", { ascending: false })
@@ -879,6 +962,7 @@ function groundingSummary(input: Record<string, any>, output: DraftOutput, valid
     missing_context: output.missing_context,
     safety_warnings: output.safety_warnings,
     validation,
+    target_message: input.target_message || null,
     latest_message: input.latest_message,
     latest_inbound_message: input.latest_inbound_message,
     link_confidence: input.objective_context?.link_confidence || {},
@@ -890,6 +974,7 @@ async function insertDraft(
   supabase: ServiceClient,
   options: {
     conversationId: string;
+    targetMessageId: string;
     latestMessageId: string | null;
     classificationId: string | null;
     sourceMode: string;
@@ -924,6 +1009,7 @@ async function insertDraft(
     .from("ebay_conversation_response_drafts")
     .insert({
       conversation_id: options.conversationId,
+      target_message_id: options.targetMessageId,
       latest_message_id: options.latestMessageId,
       classification_id: options.classificationId,
       draft_status: options.validationStatus === "error" ? "error" : "generated",
@@ -969,7 +1055,7 @@ async function generateDraft(
   });
   const previousDraft = input.draftId
     ? await loadDraftById(supabase, input.draftId)
-    : await loadCurrentDraft(supabase, conversation.id);
+    : input.mode === "generate" ? null : await loadCurrentDraft(supabase, conversation.id);
   const operatorDraft = input.mode === "improve"
     ? input.draftText || previousDraft?.final_text || previousDraft?.edited_text || previousDraft?.draft_text || null
     : null;
@@ -985,11 +1071,14 @@ async function generateDraft(
     buildEbayConversationContext(supabase, conversation.id, rpcSupabase),
     loadCurrentClassification(supabase, conversation.id),
   ]);
+  const targetMessage = await resolveTargetMessage(supabase, conversation.id, context as Record<string, any>, input, previousDraft);
   const draftInput = buildDraftInput(
     context as Record<string, any>,
     classification,
+    targetMessage,
     input.mode,
     operatorDraft,
+    input.improvementInstructions,
     previousDraft,
     promptVersionValue,
   );
@@ -1009,6 +1098,7 @@ async function generateDraft(
   const latest = draftInput.latest_message as Record<string, any> | null;
   const draft = await insertDraft(supabase, {
     conversationId: conversation.id,
+    targetMessageId: targetMessage.id,
     latestMessageId: latest?.id || null,
     classificationId: classification?.id || null,
     sourceMode,
@@ -1034,6 +1124,7 @@ async function generateDraft(
     ok: true,
     mode: input.mode,
     conversation_id: conversation.id,
+    target_message_id: targetMessage.id,
     draft,
     draft_id: draft.id,
     fallback_used: validation.fallbackUsed,

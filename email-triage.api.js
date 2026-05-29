@@ -1529,8 +1529,10 @@
       body: JSON.stringify({
         mode: values.mode,
         conversationId: values.conversationId,
+        targetMessageId: values.targetMessageId || undefined,
         draftId: values.draftId || undefined,
         draftText: values.draftText || undefined,
+        improvementInstructions: values.improvementInstructions || undefined,
         operatorNotes: values.operatorNotes || undefined,
       }),
     }, TIMEOUTS.ebayConversationDraft);

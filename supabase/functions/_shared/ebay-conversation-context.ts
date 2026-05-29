@@ -211,7 +211,7 @@ function linkMetadata(identifiers: ReturnType<typeof extractConversationIdentifi
 }
 
 function orderLineSelect() {
-  return "id, order_id, item_number, transaction_id, item_title, custom_label, quantity, sold_for, total_price, line_status, internal_item_id, sale_id, order:ebay_orders(id, order_number, buyer_username, buyer_name, buyer_email, status, sale_date, paid_on_date, ship_by_date, shipped_on_date, total_price, net_payout, tracking_number, shipping_service)";
+  return "id, order_id, item_number, transaction_id, item_title, custom_label, quantity, sold_for, total_price, line_status, internal_item_id, sale_id, order:ebay_orders(id, order_number, buyer_username, buyer_name, buyer_email, status, sale_date, paid_on_date, ship_by_date, shipped_on_date, total_price, net_payout, tracking_number, shipping_service, ebay_shipment_id, label_status, label_metadata)";
 }
 
 async function queryByChunks<T>(values: string[], load: (chunk: string[]) => Promise<T[]>) {
@@ -765,7 +765,27 @@ function compactLink(link: Record<string, any>) {
   };
 }
 
+function compactSafeLabelMetadata(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  return Object.fromEntries(
+    [
+      "trackingNumber",
+      "shippingBarcodeNumber",
+      "labelId",
+      "carrier",
+      "carrierCode",
+      "shippingCarrier",
+      "shipmentStatus",
+      "deliveryStatus",
+    ]
+      .map((key) => [key, shortText(source[key], 180) || null])
+      .filter(([, item]) => Boolean(item)),
+  ) as Record<string, string>;
+}
+
 function compactOrder(order: Record<string, any>) {
+  const safeLabelMetadata = compactSafeLabelMetadata(order.label_metadata);
   return {
     id: order.id,
     order_number: shortText(order.order_number, 120),
@@ -781,6 +801,11 @@ function compactOrder(order: Record<string, any>) {
     net_payout: numberOrNull(order.net_payout),
     tracking_number: shortText(order.tracking_number, 180),
     shipping_service: shortText(order.shipping_service, 180),
+    ebay_shipment_id: shortText(order.ebay_shipment_id, 180),
+    label_status: shortText(order.label_status, 80),
+    carrier: shortText(order.carrier || safeLabelMetadata.carrier || safeLabelMetadata.shippingCarrier || safeLabelMetadata.carrierCode, 120),
+    shipment_status: shortText(order.shipment_status || safeLabelMetadata.shipmentStatus || safeLabelMetadata.deliveryStatus, 120),
+    safe_label_metadata: safeLabelMetadata,
   };
 }
 
@@ -1012,7 +1037,7 @@ export async function buildEbayConversationContext(
   const ordersResult = allOrderIds.length
     ? await supabase
       .from("ebay_orders")
-      .select("id, order_number, buyer_username, buyer_name, buyer_email, status, sale_date, paid_on_date, ship_by_date, shipped_on_date, total_price, net_payout, tracking_number, shipping_service")
+      .select("id, order_number, buyer_username, buyer_name, buyer_email, status, sale_date, paid_on_date, ship_by_date, shipped_on_date, total_price, net_payout, tracking_number, shipping_service, ebay_shipment_id, label_status, label_metadata")
       .in("id", allOrderIds)
       .limit(MAX_LINKS)
     : { data: [], error: null };

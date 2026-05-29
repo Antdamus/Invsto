@@ -103,6 +103,12 @@
       ebayConversationDraftActionLoadingId: null,
       ebayConversationDraftActionErrorsById: {},
       ebayConversationDraftActionMessagesById: {},
+      ebayConversationClassificationCollapsed: Object.prototype.hasOwnProperty.call(overrides, "ebayConversationClassificationCollapsed")
+        ? overrides.ebayConversationClassificationCollapsed === true
+        : true,
+      ebayDraftMetadataCollapsed: Object.prototype.hasOwnProperty.call(overrides, "ebayDraftMetadataCollapsed")
+        ? overrides.ebayDraftMetadataCollapsed === true
+        : true,
       ebayConversationSyncLoading: false,
       ebayConversationSyncResult: null,
       ebayConversationSyncError: null,
