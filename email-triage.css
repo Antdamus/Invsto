@@ -3620,7 +3620,7 @@
   --ebay-folder-panel-width: 200px;
   --ebay-list-panel-width: 340px;
   --ebay-context-panel-width: 420px;
-  --ebay-workspace-columns: minmax(170px, var(--ebay-folder-panel-width)) minmax(260px, var(--ebay-list-panel-width)) 7px minmax(360px, 1fr) 7px minmax(280px, var(--ebay-context-panel-width));
+  --ebay-workspace-columns: minmax(170px, var(--ebay-folder-panel-width)) 7px minmax(260px, var(--ebay-list-panel-width)) 7px minmax(360px, 1fr) 7px minmax(280px, var(--ebay-context-panel-width));
   display: grid;
   grid-template-columns: var(--ebay-workspace-columns);
   min-height: 680px;
@@ -3657,6 +3657,7 @@
 }
 
 .ebay-conversation-shell.is-folders-collapsed .ebay-smart-folder-panel,
+.ebay-conversation-shell.is-folders-collapsed .ebay-folder-resize-handle,
 .ebay-conversation-shell.is-list-collapsed .ebay-conversation-list-panel,
 .ebay-conversation-shell.is-list-collapsed .ebay-list-resize-handle,
 .ebay-conversation-shell.is-context-collapsed .ebay-conversation-context-panel,

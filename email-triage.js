@@ -400,7 +400,7 @@
     const showList = normalized.list;
     const showContext = normalized.context;
     const columns = [];
-    if (showFolders) columns.push("minmax(170px, 210px)");
+    if (showFolders) columns.push("minmax(170px, var(--ebay-folder-panel-width))", "7px");
     if (showList) columns.push("minmax(260px, var(--ebay-list-panel-width))", "7px");
     columns.push(showFolders || showList || showContext ? "minmax(360px, 1fr)" : "minmax(0, 1fr)");
     if (showContext) columns.push("7px", "minmax(280px, var(--ebay-context-panel-width))");
@@ -485,7 +485,9 @@
         const move = (moveEvent) => {
           const delta = moveEvent.clientX - startX;
           const next = { ...startWidths };
-          if (panel === "list") {
+          if (panel === "folders") {
+            next.folders = clampNumber(startWidths.folders + delta, 170, Math.min(360, shellRect.width - 820));
+          } else if (panel === "list") {
             next.list = clampNumber(startWidths.list + delta, 260, Math.min(520, shellRect.width - 640));
           } else if (panel === "context") {
             next.context = clampNumber(startWidths.context - delta, 280, maxSideWidth);
@@ -501,6 +503,7 @@
           els.ebayConversationShell.classList.remove("is-resizing");
           const styles = window.getComputedStyle(els.ebayConversationShell);
           storeEbayConversationPanelWidths({
+            folders: parseFloat(styles.getPropertyValue("--ebay-folder-panel-width")) || startWidths.folders,
             list: parseFloat(styles.getPropertyValue("--ebay-list-panel-width")) || startWidths.list,
             context: parseFloat(styles.getPropertyValue("--ebay-context-panel-width")) || startWidths.context,
           });

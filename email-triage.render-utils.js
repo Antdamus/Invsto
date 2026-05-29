@@ -12,6 +12,7 @@
     detail: { min: 300, max: 680, fallback: 420 },
   };
   const EBAY_CONVERSATION_PANEL_WIDTH_LIMITS = {
+    folders: { min: 170, max: 360, fallback: 200 },
     list: { min: 260, max: 520, fallback: 340 },
     context: { min: 280, max: 560, fallback: 420 },
   };
@@ -89,11 +90,13 @@
     try {
       const parsed = JSON.parse(window.localStorage?.getItem(EBAY_CONVERSATION_PANEL_WIDTHS_STORAGE_KEY) || "{}");
       return {
+        folders: clampNumber(parsed.folders, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.folders.min, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.folders.max) || EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.folders.fallback,
         list: clampNumber(parsed.list, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.list.min, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.list.max) || EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.list.fallback,
         context: clampNumber(parsed.context, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.context.min, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.context.max) || EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.context.fallback,
       };
     } catch (error) {
       return {
+        folders: EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.folders.fallback,
         list: EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.list.fallback,
         context: EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.context.fallback,
       };
@@ -110,8 +113,10 @@
 
   function applyEbayConversationPanelWidths(shell, widths = getStoredEbayConversationPanelWidths()) {
     if (!shell) return;
+    const folderWidth = clampNumber(widths.folders, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.folders.min, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.folders.max);
     const listWidth = clampNumber(widths.list, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.list.min, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.list.max);
     const contextWidth = clampNumber(widths.context, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.context.min, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.context.max);
+    shell.style.setProperty("--ebay-folder-panel-width", `${folderWidth}px`);
     shell.style.setProperty("--ebay-list-panel-width", `${listWidth}px`);
     shell.style.setProperty("--ebay-context-panel-width", `${contextWidth}px`);
   }
