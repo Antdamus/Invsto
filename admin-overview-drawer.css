@@ -1086,6 +1086,182 @@
   background:rgba(231,190,106,.055);
 }
 
+.global-schedule-editor{
+  margin-top:14px;
+  padding:14px;
+  border:1px solid rgba(231,190,106,.18);
+  border-radius:16px;
+  background:
+    linear-gradient(135deg, rgba(231,190,106,.08), rgba(124,92,255,.055) 46%, rgba(255,255,255,.025)),
+    rgba(18,19,23,.72);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+.global-schedule-editor-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:12px;
+}
+
+.global-schedule-kicker{
+  color:#f1cd7e;
+  font-size:11px;
+  font-weight:900;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+}
+
+.global-schedule-title{
+  margin-top:3px;
+  color:rgba(255,255,255,.84);
+  font-weight:760;
+  line-height:1.25;
+}
+
+.global-schedule-source{
+  flex:0 0 auto;
+  padding:5px 9px;
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:999px;
+  color:rgba(255,255,255,.68);
+  background:rgba(255,255,255,.04);
+  font-size:12px;
+  font-weight:800;
+  text-transform:capitalize;
+}
+
+.global-schedule-form-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+}
+
+.global-schedule-form-grid label{
+  display:grid;
+  gap:6px;
+  min-width:0;
+  color:rgba(255,255,255,.58);
+  font-size:12px;
+  font-weight:800;
+}
+
+.global-schedule-form-grid input,
+.global-schedule-form-grid select{
+  width:100%;
+  min-height:42px;
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:12px;
+  background:rgba(10,11,14,.64);
+  color:rgba(255,255,255,.92);
+  padding:9px 10px;
+  outline:none;
+}
+
+.global-schedule-form-grid input:focus,
+.global-schedule-form-grid select:focus{
+  border-color:rgba(231,190,106,.44);
+  box-shadow:0 0 0 3px rgba(231,190,106,.10);
+}
+
+.global-route-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+  margin-top:12px;
+}
+
+.global-route-panel{
+  min-width:0;
+  padding:12px;
+  border:1px solid rgba(255,255,255,.09);
+  border-radius:14px;
+  background:rgba(0,0,0,.18);
+}
+
+.global-route-head{
+  display:grid;
+  gap:3px;
+  margin-bottom:9px;
+}
+
+.global-route-head strong{
+  color:rgba(255,255,255,.88);
+  font-size:13px;
+}
+
+.global-route-head span{
+  color:rgba(255,255,255,.52);
+  font-size:12px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.global-route-any{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  margin-bottom:9px;
+  color:rgba(255,255,255,.72);
+  font-size:12px;
+  font-weight:760;
+}
+
+.global-route-list{
+  display:flex;
+  flex-wrap:wrap;
+  gap:7px;
+}
+
+.global-route-list.is-disabled{
+  opacity:.48;
+}
+
+.global-route-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  max-width:100%;
+  padding:7px 9px;
+  border:1px solid rgba(231,190,106,.18);
+  border-radius:999px;
+  background:rgba(231,190,106,.07);
+  color:rgba(255,235,190,.92);
+  font-size:12px;
+  font-weight:820;
+}
+
+.global-route-chip span{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.global-route-empty{
+  color:rgba(255,255,255,.52);
+  font-size:12px;
+}
+
+.global-schedule-actions{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin-top:12px;
+}
+
+.global-schedule-error{
+  margin-top:10px;
+  padding:10px 12px;
+  border:1px solid rgba(255,107,107,.28);
+  border-radius:12px;
+  background:rgba(255,107,107,.10);
+  color:#ffd6d6;
+  font-weight:760;
+}
+
 @media (max-width: 760px){
   :root{
     --drawer-w:100vw;
@@ -1132,6 +1308,12 @@
   }
 
   #shiftAdminModal .form-row{
+    grid-template-columns:1fr;
+  }
+
+  .global-schedule-form-grid,
+  .global-route-grid,
+  .global-schedule-actions{
     grid-template-columns:1fr;
   }
 }

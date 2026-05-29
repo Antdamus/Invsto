@@ -44,10 +44,17 @@ async function markAcceptedIfNeeded() {
 
 
 async function fetchGlobalScheduleRange(gridStart, gridEnd){
-  const { data, error } = await supabaseClient.rpc('get_schedule_range_all', {
+  const args = {
     _start: toISODate(gridStart),
     _end: toISODate(gridEnd)
-  });
+  };
+
+  let data, error;
+  ({ data, error } = await supabaseClient.rpc('get_schedule_range_all_with_routes', args));
+  if (error) {
+    console.warn('get_schedule_range_all_with_routes unavailable, falling back:', error);
+    ({ data, error } = await supabaseClient.rpc('get_schedule_range_all', args));
+  }
   if (error) throw error;
   return data || [];
 }
@@ -141,9 +148,13 @@ async function loadGlobalCalendar(){
 async function fetchResolvedWeek(empId, weekStart){
   const start = toISODate(weekStart);
   const end   = toISODate(addDays(weekStart, 6));
-  const { data, error } = await supabaseClient.rpc('get_employee_schedule', {
-    _employee_id: empId, _start: start, _end: end
-  });
+  const args = { _employee_id: empId, _start: start, _end: end };
+  let data, error;
+  ({ data, error } = await supabaseClient.rpc('get_employee_schedule_with_routes', args));
+  if (error) {
+    console.warn('get_employee_schedule_with_routes unavailable, falling back:', error);
+    ({ data, error } = await supabaseClient.rpc('get_employee_schedule', args));
+  }
   if (error) throw error;
   // Map by work_date (ISO) → { start_ts, end_ts, source, store_id }
   const byDate = new Map();
@@ -363,10 +374,14 @@ function renderScheduleDayDetail(){
   const defaultRouteStoreId = storeId || resolved?.store_id || '';
   const clockInStores = Array.isArray(dayException?.allowed_clock_in_store_ids) && dayException.allowed_clock_in_store_ids.length
     ? dayException.allowed_clock_in_store_ids
-    : [dayException?.clock_in_store_id || defaultRouteStoreId].filter(Boolean);
+    : Array.isArray(resolved?.allowed_clock_in_store_ids) && resolved.allowed_clock_in_store_ids.length
+      ? resolved.allowed_clock_in_store_ids
+      : [dayException?.clock_in_store_id || defaultRouteStoreId].filter(Boolean);
   const clockOutStores = Array.isArray(dayException?.allowed_clock_out_store_ids) && dayException.allowed_clock_out_store_ids.length
     ? dayException.allowed_clock_out_store_ids
-    : [dayException?.clock_out_store_id || defaultRouteStoreId].filter(Boolean);
+    : Array.isArray(resolved?.allowed_clock_out_store_ids) && resolved.allowed_clock_out_store_ids.length
+      ? resolved.allowed_clock_out_store_ids
+      : [dayException?.clock_out_store_id || defaultRouteStoreId].filter(Boolean);
   const routeSummary = `${scheduleStoreNameList(clockInStores)} -> ${scheduleStoreNameList(clockOutStores)}`;
   const copyOptions = Array.from({ length: 7 }, (_, index) => {
     const sourceDay = addDays(schedWeekStart, index);
@@ -498,10 +513,14 @@ function getScheduleCopySource(dayIndex){
     storeId: sourceOverride?.store_id || sourceResolved.store_id || '',
     clockInStoreIds: Array.isArray(sourceException?.allowed_clock_in_store_ids) && sourceException.allowed_clock_in_store_ids.length
       ? sourceException.allowed_clock_in_store_ids
-      : [sourceException?.clock_in_store_id || sourceOverride?.store_id || sourceResolved.store_id].filter(Boolean),
+      : Array.isArray(sourceResolved?.allowed_clock_in_store_ids) && sourceResolved.allowed_clock_in_store_ids.length
+        ? sourceResolved.allowed_clock_in_store_ids
+        : [sourceException?.clock_in_store_id || sourceOverride?.store_id || sourceResolved.store_id].filter(Boolean),
     clockOutStoreIds: Array.isArray(sourceException?.allowed_clock_out_store_ids) && sourceException.allowed_clock_out_store_ids.length
       ? sourceException.allowed_clock_out_store_ids
-      : [sourceException?.clock_out_store_id || sourceOverride?.store_id || sourceResolved.store_id].filter(Boolean),
+      : Array.isArray(sourceResolved?.allowed_clock_out_store_ids) && sourceResolved.allowed_clock_out_store_ids.length
+        ? sourceResolved.allowed_clock_out_store_ids
+        : [sourceException?.clock_out_store_id || sourceOverride?.store_id || sourceResolved.store_id].filter(Boolean),
     assignmentType: scheduleAssignmentTypeFromNote(sourceOverride?.note) || scheduleFlowState.assignmentType,
   };
 }
@@ -734,9 +753,18 @@ function sameScheduleIdSet(a = [], b = []){
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function scheduleRouteIds(row, key, fallbackStoreId){
+  const ids = Array.isArray(row?.[key])
+    ? row[key].filter(Boolean).map(String)
+    : [];
+  if (ids.length) return ids;
+  return fallbackStoreId ? [String(fallbackStoreId)] : [];
+}
+
 function scheduleDraftSummary(draft){
   if (draft.off) return 'Off this week';
-  const route = draft.allowedInStores || draft.allowedOutStores
+  const hasRoute = (draft.allowedInStores || []).length || (draft.allowedOutStores || []).length;
+  const route = hasRoute
     ? ` · Clock route: ${scheduleStoreNameList(draft.allowedInStores)} -> ${scheduleStoreNameList(draft.allowedOutStores)}`
     : '';
   return `${draft.start}-${draft.end} · ${storeNameById(draft.storeId)} · ${scheduleTypeLabel(draft.assignmentType)}${route}`;
@@ -755,6 +783,9 @@ function getRecurringDraft(weekday){
   const start = normalizeScheduleTime(qs(`recStart-${weekday}`)?.value || '');
   const end = normalizeScheduleTime(qs(`recEnd-${weekday}`)?.value || '');
   const storeId = qs(`recStore-${weekday}`)?.value || '';
+  const useGuidedRoute = scheduleFlowState.selectedDayIndex === weekday;
+  const allowedInStores = useGuidedRoute ? getCheckedScheduleStoreIds('schedFlowClockInStores') : [];
+  const allowedOutStores = useGuidedRoute ? getCheckedScheduleStoreIds('schedFlowClockOutStores') : [];
   const effFrom = qs('schedEffFrom')?.value || toISODate(new Date());
   const employee = selectedScheduleEmployee();
   return {
@@ -763,6 +794,8 @@ function getRecurringDraft(weekday){
     start,
     end,
     storeId,
+    allowedInStores: allowedInStores.length ? allowedInStores : (storeId ? [storeId] : []),
+    allowedOutStores: allowedOutStores.length ? allowedOutStores : (storeId ? [storeId] : []),
     effFrom,
     note: scheduleTypeNote(),
     assignmentType: scheduleFlowState.assignmentType,
@@ -772,9 +805,12 @@ function getRecurringDraft(weekday){
 }
 
 function recurringRowSameAssignment(row, draft){
+  const fallbackStoreId = normalizeScheduleId(row?.store_id) || normalizeScheduleId(draft.storeId);
   return normalizeScheduleTime(row?.start_local) === draft.start &&
     normalizeScheduleTime(row?.end_local) === draft.end &&
     normalizeScheduleId(row?.store_id) === normalizeScheduleId(draft.storeId) &&
+    sameScheduleIdSet(scheduleRouteIds(row, 'allowed_clock_in_store_ids', fallbackStoreId), draft.allowedInStores || []) &&
+    sameScheduleIdSet(scheduleRouteIds(row, 'allowed_clock_out_store_ids', fallbackStoreId), draft.allowedOutStores || []) &&
     normalizeScheduleNote(row?.note) === normalizeScheduleNote(draft.note);
 }
 
@@ -787,7 +823,7 @@ function recurringRowCoversDate(row, iso){
 async function fetchOverlappingRecurringRows(empId, weekday, effFrom){
   const { data, error } = await supabaseClient
     .from('work_schedules')
-    .select('id, weekday, start_local, end_local, effective_from, effective_to, store_id, note, active')
+    .select('id, weekday, start_local, end_local, effective_from, effective_to, store_id, note, active, allow_clock_in_any_store, allow_clock_out_any_store, allowed_clock_in_store_ids, allowed_clock_out_store_ids')
     .eq('employee_id', empId)
     .eq('weekday', weekday)
     .eq('active', true)
@@ -1067,8 +1103,20 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
     const dayException = scheduleWeekState.dayExceptionsByDate.get(iso) || null;
     const ovAnyIn  = !!dayException?.allow_clock_in_any_store;
     const ovAnyOut = !!dayException?.allow_clock_out_any_store;
-    const ovInStore  = dayException?.clock_in_store_id ? String(dayException.clock_in_store_id) : (ovStore || resolved?.store_id || '');
-    const ovOutStore = dayException?.clock_out_store_id ? String(dayException.clock_out_store_id) : (ovStore || resolved?.store_id || '');
+    const resolvedInStores = Array.isArray(resolved?.allowed_clock_in_store_ids)
+      ? resolved.allowed_clock_in_store_ids.filter(Boolean).map(String)
+      : [];
+    const resolvedOutStores = Array.isArray(resolved?.allowed_clock_out_store_ids)
+      ? resolved.allowed_clock_out_store_ids.filter(Boolean).map(String)
+      : [];
+    const dayInStores = Array.isArray(dayException?.allowed_clock_in_store_ids)
+      ? dayException.allowed_clock_in_store_ids.filter(Boolean).map(String)
+      : [];
+    const dayOutStores = Array.isArray(dayException?.allowed_clock_out_store_ids)
+      ? dayException.allowed_clock_out_store_ids.filter(Boolean).map(String)
+      : [];
+    const ovInStore  = dayException?.clock_in_store_id ? String(dayException.clock_in_store_id) : (dayInStores[0] || resolvedInStores[0] || ovStore || resolved?.store_id || '');
+    const ovOutStore = dayException?.clock_out_store_id ? String(dayException.clock_out_store_id) : (dayOutStores[0] || resolvedOutStores[0] || ovStore || resolved?.store_id || '');
 
     const recDir = storeDirectionsHref(recStorePrefill);
     const ovDir  = storeDirectionsHref(ovStore);
@@ -1359,22 +1407,53 @@ async function saveRecurring(weekday){
       if (result !== 'primary') return;
     }
 
-    const { data: savedRecurring, error } = await supabaseClient.rpc('admin_set_weekday_slot', {
-      _employee_id: empId,
-      _weekday: weekday,
-      _start_local: draft.start,
-      _end_local: draft.end,
-      _effective_from: draft.effFrom,
-      _effective_to: null,
-      _store_id: draft.storeId,
-      _note: draft.note
-    });
+    let savedRecurring = null;
+    let routeError = null;
 
-    if (error) return alert('Save failed: ' + error.message);
-    if (overlapping.length) {
-      const savedRecurringId = Array.isArray(savedRecurring) ? savedRecurring[0]?.id : savedRecurring?.id;
-      if (!savedRecurringId) throw new Error('The new recurring schedule was saved, but the app could not confirm its row id to safely close the old schedule.');
-      await closeRecurringRowsFromDate(empId, weekday, draft.effFrom, [savedRecurringId]);
+    {
+      const result = await supabaseClient.rpc('admin_set_weekday_slot_with_route', {
+        _employee_id: empId,
+        _weekday: weekday,
+        _start_local: draft.start,
+        _end_local: draft.end,
+        _effective_from: draft.effFrom,
+        _effective_to: null,
+        _store_id: draft.storeId,
+        _note: draft.note,
+        _allow_clock_in_any_store: false,
+        _allow_clock_out_any_store: false,
+        _allowed_clock_in_store_ids: draft.allowedInStores || [],
+        _allowed_clock_out_store_ids: draft.allowedOutStores || []
+      });
+      savedRecurring = result.data;
+      routeError = result.error;
+    }
+
+    if (routeError) {
+      const message = String(routeError.message || '').toLowerCase();
+      const missingRouteRpc = routeError.code === 'PGRST202' || message.includes('admin_set_weekday_slot_with_route') || message.includes('could not find');
+      if (!missingRouteRpc) return alert('Save failed: ' + routeError.message);
+
+      console.warn('admin_set_weekday_slot_with_route unavailable, saving primary-store schedule only:', routeError);
+      const { data, error } = await supabaseClient.rpc('admin_set_weekday_slot', {
+        _employee_id: empId,
+        _weekday: weekday,
+        _start_local: draft.start,
+        _end_local: draft.end,
+        _effective_from: draft.effFrom,
+        _effective_to: null,
+        _store_id: draft.storeId,
+        _note: draft.note
+      });
+
+      if (error) return alert('Save failed: ' + error.message);
+      savedRecurring = data;
+
+      if (overlapping.length) {
+        const savedRecurringId = Array.isArray(savedRecurring) ? savedRecurring[0]?.id : savedRecurring?.id;
+        if (!savedRecurringId) throw new Error('The new recurring schedule was saved, but the app could not confirm its row id to safely close the old schedule.');
+        await closeRecurringRowsFromDate(empId, weekday, draft.effFrom, [savedRecurringId]);
+      }
     }
     await loadScheduleWeek();
     showScheduleSaveModal({

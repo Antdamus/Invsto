@@ -1956,6 +1956,22 @@ function wireDrawer(){
     list.addEventListener('click', async (e) => {
       const t = e.target;
 
+      const globalSaveBtn = t.closest('button[data-global-schedule-save]');
+      if (globalSaveBtn) {
+        const panel = globalSaveBtn.closest('[data-global-schedule-editor]');
+        await saveGlobalScheduleEditor(panel, false);
+        return;
+      }
+
+      const globalOffBtn = t.closest('button[data-global-schedule-off]');
+      if (globalOffBtn) {
+        const panel = globalOffBtn.closest('[data-global-schedule-editor]');
+        const ok = window.confirm('Mark this worker off for this date? This creates an audited schedule override.');
+        if (!ok) return;
+        await saveGlobalScheduleEditor(panel, true);
+        return;
+      }
+
 // If this click happened inside a global-day shift card,
 // switch drawer context + shift map to the correct employee before acting.
 const shiftCard = t.closest('.shift');
@@ -1975,7 +1991,7 @@ if (shiftCard?.dataset?.employeeId && shiftCard?.dataset?.monthStart) {
   }
 
   // Prevent actions on placeholders
-  if (shiftCard.dataset.placeholder === '1') {
+  if (shiftCard.dataset.placeholder === '1' && !t.closest('[data-global-schedule-editor]')) {
     e.preventDefault();
     return;
   }
@@ -2063,6 +2079,13 @@ return;
       if (unapproveBtn) {
         onUnapproveClick(unapproveBtn.getAttribute('data-unapprove-id'));
         return;
+      }
+    });
+
+    list.addEventListener('change', (e) => {
+      const target = e.target;
+      if (target?.matches?.('[data-global-any-in], [data-global-any-out]')) {
+        syncGlobalRouteAnyState(target.closest('[data-global-schedule-editor]'));
       }
     });
   }
@@ -2438,7 +2461,326 @@ function wireScheduleTab(){
   });
 }
 
+function globalScheduleTimeValue(ts){
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-CA', { hour:'2-digit', minute:'2-digit', hour12:false });
+}
+
+function globalScheduleIdList(value){
+  return Array.isArray(value) ? value.filter(Boolean).map(String) : [];
+}
+
+function globalScheduleRouteIds(item, direction){
+  const schedule = item?._schedule_row || {};
+  const key = direction === 'out' ? 'allowed_clock_out_store_ids' : 'allowed_clock_in_store_ids';
+  const directKey = direction === 'out' ? '_allowed_clock_out_store_ids' : '_allowed_clock_in_store_ids';
+  const ids = globalScheduleIdList(item?.[directKey]).length
+    ? globalScheduleIdList(item?.[directKey])
+    : globalScheduleIdList(schedule?.[key]);
+  if (ids.length) return ids;
+  const fallback = item?._schedule_store_id || schedule?.store_id || item?.store_id || '';
+  return fallback ? [String(fallback)] : [];
+}
+
+function globalScheduleRouteLabel(ids, anyStore = false){
+  if (anyStore) return 'Any active store';
+  const names = [...new Set((ids || []).filter(Boolean).map((id) => storeNameById(id)).filter(Boolean))];
+  return names.length ? names.join(', ') : 'No stores selected';
+}
+
+function renderGlobalScheduleStoreChecklist(field, selectedIds = [], disabled = false){
+  const selected = new Set((selectedIds || []).filter(Boolean).map(String));
+  const stores = (storesCache || []).filter((s) => s && s.active !== false);
+  if (!stores.length) return `<div class="global-route-empty">No active stores loaded.</div>`;
+
+  return stores.map((store) => {
+    const id = String(store.id || '');
+    const checked = selected.has(id) ? 'checked' : '';
+    const dis = disabled ? 'disabled' : '';
+    return `
+      <label class="global-route-chip">
+        <input type="checkbox" data-global-route-field="${field}" value="${escapeHtml(id)}" ${checked} ${dis}>
+        <span>${escapeHtml(store.name || 'Store')}</span>
+      </label>
+    `;
+  }).join('');
+}
+
+function getCheckedGlobalScheduleStoreIds(panel, field){
+  return Array.from(panel.querySelectorAll(`input[data-global-route-field="${field}"]:checked`))
+    .map((input) => input.value)
+    .filter(Boolean);
+}
+
+function setGlobalScheduleError(panel, message = ''){
+  const box = panel?.querySelector('[data-global-schedule-error]');
+  if (!box) return;
+  box.textContent = message || '';
+  box.classList.toggle('hidden', !message);
+}
+
+function syncGlobalRouteAnyState(panel){
+  if (!panel) return;
+  for (const field of ['in', 'out']){
+    const anyBox = panel.querySelector(`[data-global-any-${field}]`);
+    const disabled = !!anyBox?.checked;
+    panel.querySelectorAll(`input[data-global-route-field="${field}"]`).forEach((input) => {
+      input.disabled = disabled;
+    });
+    const group = panel.querySelector(`[data-global-route-group="${field}"]`);
+    if (group) group.classList.toggle('is-disabled', disabled);
+  }
+}
+
+function renderGlobalScheduleEditor(item, workISO){
+  const schedule = item?._schedule_row || {};
+  const empId = item?._employee_id || schedule?.employee_id || '';
+  const primaryStoreId = item?._schedule_store_id || schedule?.store_id || item?.store_id || '';
+  const startValue = globalScheduleTimeValue(schedule?.start_ts || item?.clock_in);
+  const endValue = globalScheduleTimeValue(schedule?.end_ts || item?.clock_out);
+  const source = String(schedule?.source || item?._schedule_source || '').toLowerCase();
+  const anyIn = !!(item?._allow_clock_in_any_store ?? schedule?.allow_clock_in_any_store);
+  const anyOut = !!(item?._allow_clock_out_any_store ?? schedule?.allow_clock_out_any_store);
+  const inIds = globalScheduleRouteIds(item, 'in');
+  const outIds = globalScheduleRouteIds(item, 'out');
+  const sourceText = source === 'override'
+    ? 'This date has a one-day schedule override.'
+    : source === 'seller_sale'
+      ? 'This visible slot comes from a seller sale booking.'
+      : 'This visible slot comes from the repeating weekly schedule.';
+
+  return `
+    <div class="global-schedule-editor"
+      data-global-schedule-editor
+      data-employee-id="${escapeHtml(empId)}"
+      data-work-date="${escapeHtml(workISO)}"
+      data-schedule-source="${escapeHtml(source)}">
+      <div class="global-schedule-editor-head">
+        <div>
+          <div class="global-schedule-kicker">Admin schedule controls</div>
+          <div class="global-schedule-title">${escapeHtml(sourceText)}</div>
+        </div>
+        <div class="global-schedule-source">${escapeHtml(source || 'schedule')}</div>
+      </div>
+
+      <div class="global-schedule-form-grid">
+        <label>
+          <span>Start</span>
+          <input type="time" data-global-start value="${escapeHtml(startValue)}">
+        </label>
+        <label>
+          <span>End</span>
+          <input type="time" data-global-end value="${escapeHtml(endValue)}">
+        </label>
+        <label>
+          <span>Primary store</span>
+          <select data-global-store>${storeOptionsHTML(primaryStoreId)}</select>
+        </label>
+        <label>
+          <span>Apply change</span>
+          <select data-global-scope>
+            <option value="this">This date only</option>
+            <option value="future">Weekly from this date forward</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="global-route-grid">
+        <section class="global-route-panel">
+          <div class="global-route-head">
+            <strong>Allowed clock-in stores</strong>
+            <span>${escapeHtml(globalScheduleRouteLabel(inIds, anyIn))}</span>
+          </div>
+          <label class="global-route-any">
+            <input type="checkbox" data-global-any-in ${anyIn ? 'checked' : ''}>
+            <span>Any active store</span>
+          </label>
+          <div class="global-route-list ${anyIn ? 'is-disabled' : ''}" data-global-route-group="in">
+            ${renderGlobalScheduleStoreChecklist('in', inIds, anyIn)}
+          </div>
+        </section>
+
+        <section class="global-route-panel">
+          <div class="global-route-head">
+            <strong>Allowed clock-out stores</strong>
+            <span>${escapeHtml(globalScheduleRouteLabel(outIds, anyOut))}</span>
+          </div>
+          <label class="global-route-any">
+            <input type="checkbox" data-global-any-out ${anyOut ? 'checked' : ''}>
+            <span>Any active store</span>
+          </label>
+          <div class="global-route-list ${anyOut ? 'is-disabled' : ''}" data-global-route-group="out">
+            ${renderGlobalScheduleStoreChecklist('out', outIds, anyOut)}
+          </div>
+        </section>
+      </div>
+
+      <div class="global-schedule-actions">
+        <button class="btn small primary-action" type="button" data-global-schedule-save>Save schedule</button>
+        <button class="btn small ghost" type="button" data-global-schedule-off>Mark off this date</button>
+      </div>
+
+      <div class="global-schedule-error hidden" data-global-schedule-error></div>
+    </div>
+  `;
+}
+
+async function patchGlobalDayException(empId, workISO, draft){
+  if (draft.off){
+    const { error } = await supabaseClient
+      .from('timeclock_day_exceptions')
+      .delete()
+      .eq('employee_id', empId)
+      .eq('work_date', workISO);
+    if (error) throw error;
+    return;
+  }
+
+  const firstInStore = draft.anyIn ? null : (draft.inStores[0] || draft.storeId || null);
+  const firstOutStore = draft.anyOut ? null : (draft.outStores[0] || draft.storeId || null);
+  const { error } = await supabaseClient
+    .from('timeclock_day_exceptions')
+    .upsert({
+      employee_id: empId,
+      work_date: workISO,
+      allow_clock_in_any_store: !!draft.anyIn,
+      allow_clock_out_any_store: !!draft.anyOut,
+      clock_in_store_id: firstInStore,
+      clock_out_store_id: firstOutStore,
+      allowed_clock_in_store_ids: draft.anyIn ? [] : draft.inStores,
+      allowed_clock_out_store_ids: draft.anyOut ? [] : draft.outStores,
+      note: 'Admin global schedule route edit'
+    }, { onConflict: 'employee_id,work_date' });
+  if (error) throw error;
+}
+
+function globalScheduleDraftFromPanel(panel, markOff = false){
+  const empId = panel?.dataset?.employeeId || '';
+  const workISO = panel?.dataset?.workDate || '';
+  const start = panel?.querySelector('[data-global-start]')?.value || '';
+  const end = panel?.querySelector('[data-global-end]')?.value || '';
+  const storeId = panel?.querySelector('[data-global-store]')?.value || '';
+  const scope = panel?.querySelector('[data-global-scope]')?.value || 'this';
+  const anyIn = !!panel?.querySelector('[data-global-any-in]')?.checked;
+  const anyOut = !!panel?.querySelector('[data-global-any-out]')?.checked;
+  const inStores = anyIn ? [] : getCheckedGlobalScheduleStoreIds(panel, 'in');
+  const outStores = anyOut ? [] : getCheckedGlobalScheduleStoreIds(panel, 'out');
+  return { empId, workISO, start, end, storeId, scope, anyIn, anyOut, inStores, outStores, off: markOff };
+}
+
+function validateGlobalScheduleDraft(draft){
+  if (!draft.empId || !draft.workISO) return 'Missing worker or date.';
+  if (draft.off) return '';
+  if (!draft.start || !draft.end) return 'Start and end time are required.';
+  if (draft.end <= draft.start) return 'End must be after start.';
+  if (!draft.storeId) return 'Pick a primary store.';
+  if (!draft.anyIn && !draft.inStores.length) return 'Pick at least one clock-in store, or choose any active store.';
+  if (!draft.anyOut && !draft.outStores.length) return 'Pick at least one clock-out store, or choose any active store.';
+  return '';
+}
+
+async function refreshGlobalDayDrawer(workISO, employeeId = null){
+  let rows = Array.isArray(window.__gcCache?.rows) ? window.__gcCache.rows : null;
+  if (!rows){
+    const gridStart = startOfMonthGrid(gcMonthStart || getMonthStart(fromISO(workISO)));
+    const gridEnd = addDays(gridStart, 41);
+    rows = await fetchGlobalScheduleRange(gridStart, gridEnd);
+  }
+  const q = (qs('gcSearch')?.value || '').trim().toLowerCase();
+  let dayRows = (rows || []).filter((r) => String(r.work_date || '').slice(0,10) === workISO);
+  if (q) dayRows = dayRows.filter((r) => String(r.display_name || '').toLowerCase().includes(q));
+  if (employeeId) dayRows = dayRows.filter((r) => String(r.employee_id || '') === String(employeeId));
+  await openGlobalDayDrawer(workISO, dayRows);
+}
+
+async function saveGlobalScheduleEditor(panel, markOff = false){
+  if (!panel) return;
+  const draft = globalScheduleDraftFromPanel(panel, markOff);
+  const validation = validateGlobalScheduleDraft(draft);
+  if (validation) {
+    setGlobalScheduleError(panel, validation);
+    return;
+  }
+
+  const buttons = Array.from(panel.querySelectorAll('button'));
+  buttons.forEach((button) => { button.disabled = true; });
+  setGlobalScheduleError(panel, '');
+
+  try{
+    if (draft.off){
+      const { error } = await supabaseClient.rpc('admin_set_override', {
+        _employee_id: draft.empId,
+        _work_date: draft.workISO,
+        _off: true,
+        _start_local: null,
+        _end_local: null,
+        _store_id: null,
+        _note: 'Marked off from global schedule drawer'
+      });
+      if (error) throw error;
+      await patchGlobalDayException(draft.empId, draft.workISO, { off: true });
+      showToast('Worker marked off for this date', 'ok');
+    } else if (draft.scope === 'future') {
+      const weekday = fromISO(draft.workISO).getDay();
+      const { error } = await supabaseClient.rpc('admin_set_weekday_slot_with_route', {
+        _employee_id: draft.empId,
+        _weekday: weekday,
+        _start_local: draft.start,
+        _end_local: draft.end,
+        _effective_from: draft.workISO,
+        _effective_to: null,
+        _store_id: draft.storeId,
+        _note: 'Admin global schedule edit',
+        _allow_clock_in_any_store: draft.anyIn,
+        _allow_clock_out_any_store: draft.anyOut,
+        _allowed_clock_in_store_ids: draft.anyIn ? [] : draft.inStores,
+        _allowed_clock_out_store_ids: draft.anyOut ? [] : draft.outStores
+      });
+      if (error) throw error;
+
+      const { error: overrideDeleteError } = await supabaseClient
+        .from('work_schedule_overrides')
+        .delete()
+        .eq('employee_id', draft.empId)
+        .eq('work_date', draft.workISO);
+      if (overrideDeleteError) throw overrideDeleteError;
+      const { error: exceptionDeleteError } = await supabaseClient
+        .from('timeclock_day_exceptions')
+        .delete()
+        .eq('employee_id', draft.empId)
+        .eq('work_date', draft.workISO);
+      if (exceptionDeleteError) throw exceptionDeleteError;
+      showToast('Repeating schedule updated from this date forward', 'ok');
+    } else {
+      const { error } = await supabaseClient.rpc('admin_set_override', {
+        _employee_id: draft.empId,
+        _work_date: draft.workISO,
+        _off: false,
+        _start_local: draft.start,
+        _end_local: draft.end,
+        _store_id: draft.storeId,
+        _note: 'Admin global schedule edit'
+      });
+      if (error) throw error;
+      await patchGlobalDayException(draft.empId, draft.workISO, draft);
+      showToast('Schedule updated for this date', 'ok');
+    }
+
+    if (typeof loadGlobalCalendar === 'function') await loadGlobalCalendar();
+    await refreshGlobalDayDrawer(draft.workISO, draft.empId);
+  } catch (err) {
+    console.error(err);
+    setGlobalScheduleError(panel, err?.message || 'Schedule update failed.');
+  } finally {
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
 async function openGlobalDayDrawer(workISO, scheduledRowsForDay){
+  await ensureStoresCache().catch(console.warn);
+
   // Title/subtitle (don’t use monthLabel here)
   qs('drawerTitle').textContent = 'Global schedule';
   qs('drawerSubtitle').textContent = workISO;
@@ -2525,7 +2867,14 @@ async function openGlobalDayDrawer(workISO, scheduledRowsForDay){
 
           _display_name: displayName,
           _employee_id: empId,
-          _month_start: monthStartISO
+          _month_start: monthStartISO,
+          _schedule_row: sched,
+          _schedule_source: sched.source || '',
+          _schedule_store_id: sched.store_id || null,
+          _allow_clock_in_any_store: !!sched.allow_clock_in_any_store,
+          _allow_clock_out_any_store: !!sched.allow_clock_out_any_store,
+          _allowed_clock_in_store_ids: globalScheduleIdList(sched.allowed_clock_in_store_ids),
+          _allowed_clock_out_store_ids: globalScheduleIdList(sched.allowed_clock_out_store_ids)
         });
       }
     } else {
@@ -2566,6 +2915,13 @@ async function openGlobalDayDrawer(workISO, scheduledRowsForDay){
         _display_name: displayName,
         _employee_id: empId,
         _month_start: monthStartISO,
+        _schedule_row: sched,
+        _schedule_source: sched.source || '',
+        _schedule_store_id: sched.store_id || null,
+        _allow_clock_in_any_store: !!sched.allow_clock_in_any_store,
+        _allow_clock_out_any_store: !!sched.allow_clock_out_any_store,
+        _allowed_clock_in_store_ids: globalScheduleIdList(sched.allowed_clock_in_store_ids),
+        _allowed_clock_out_store_ids: globalScheduleIdList(sched.allowed_clock_out_store_ids),
         _placeholder: true
       });
     }
@@ -2604,6 +2960,7 @@ async function openGlobalDayDrawer(workISO, scheduledRowsForDay){
 
     card.dataset.employeeId = item._employee_id || '';
     card.dataset.monthStart = item._month_start || '';
+    card.dataset.displayName = item._display_name || '';
     card.dataset.placeholder = item._placeholder ? '1' : '0';
 
     const nameRow = document.createElement('div');
@@ -2624,6 +2981,8 @@ async function openGlobalDayDrawer(workISO, scheduledRowsForDay){
       note.textContent = item.approval_note || 'Scheduled';
       card.appendChild(note);
     }
+
+    card.insertAdjacentHTML('beforeend', renderGlobalScheduleEditor(item, workISO));
   }
 }
 
