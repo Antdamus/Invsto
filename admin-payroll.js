@@ -129,6 +129,46 @@
   return { ...fb, fromDb: false, ytd: Number(line?.ytd_wages || 0), ssTaxableThisRun: Number(line?.ss_taxable_this_run || 0) };
 }
 
+  function hasNumber(v) {
+    return v !== null && v !== undefined && v !== "" && Number.isFinite(Number(v));
+  }
+
+  function taxFromLine(line) {
+    const gross = Number(line?.gross_pay || 0);
+    const fica = isEmployeeLine(line) ? ficaFromLine(line) : { ss: 0, med: 0, fica: 0, net: gross, ytd: 0 };
+    const federal = Number(line?.federal_income_tax || 0);
+    const state = Number(line?.state_income_tax || 0);
+    const local = Number(line?.local_income_tax || 0);
+    const employeeTax = hasNumber(line?.employee_tax_total)
+      ? Number(line.employee_tax_total)
+      : (isEmployeeLine(line) ? Number(fica.fica || 0) : 0);
+    const net = hasNumber(line?.net_pay)
+      ? Number(line.net_pay)
+      : (isEmployeeLine(line) ? Number(fica.net || gross) : gross);
+    const employerTax = Number(line?.employer_tax_total || 0);
+
+    return {
+      gross,
+      federal,
+      state,
+      local,
+      employeeTax,
+      net,
+      employerTax,
+      ssEmployer: Number(line?.ss_employer || 0),
+      medicareEmployer: Number(line?.medicare_employer || 0),
+      futa: Number(line?.futa_employer || 0),
+      suta: Number(line?.suta_employer || 0),
+      sutaState: line?.suta_state || line?.tax_details?.work_state || "",
+      stateStatus: line?.tax_details?.state_withholding?.status || "",
+      fica,
+    };
+  }
+
+  function payableAmount(line) {
+    return taxFromLine(line).net;
+  }
+
 
   // ----------------------------
   // Ensure required DOM exists
@@ -391,11 +431,15 @@
 
     for (const l of lines || []) {
       const g = Number(l.gross_pay || 0);
+      const payable = payableAmount(l);
       gross += g;
-      paid += Math.min(g, Number(paidMap.get(l.employee_id) || 0));
+      paid += Math.min(payable, Number(paidMap.get(l.employee_id) || 0));
     }
 
-    const due = gross - paid;
+    const due = (lines || []).reduce((sum, l) => {
+      const paidForLine = Math.min(payableAmount(l), Number(paidMap.get(l.employee_id) || 0));
+      return sum + Math.max(0, payableAmount(l) - paidForLine);
+    }, 0);
 
     $("#prKpiLines").textContent = String((lines || []).length);
     $("#prKpiGross").textContent = fmtMoney(gross);
@@ -598,7 +642,8 @@
         const name = l.employees?.display_name || l.display_name || l.employee_id;
         const paid = Number(paidMap.get(l.employee_id) || 0);
         const gross = Number(l.gross_pay || 0);
-        const due = Math.max(0, gross - paid);
+        const taxes = taxFromLine(l);
+        const due = Math.max(0, taxes.net - paid);
         const t = extractTotalsFromDetails(l);
         const overtimeNote = t.overtimeMin > 0 ? ` • OT ${(t.overtimeMin / 60).toFixed(2)} hrs` : "";
         const canPayLine = canPay && due > 0.009;
@@ -606,8 +651,7 @@
         // small hint in subline for employees
         let sub2 = "";
         if (isEmployeeLine(l)) {
-          const fica = ficaFromLine(l);
-          sub2 = ` • Net(pre-fed): ${fmtMoney(fica.net)}`;
+          sub2 = ` • Net pay: ${fmtMoney(taxes.net)}`;
         }
 
         return `
@@ -661,15 +705,15 @@
         const name = l.employees?.display_name || l.display_name || l.employee_id;
         const paid = Number(paidMap.get(l.employee_id) || 0);
         const gross = Number(l.gross_pay || 0);
-        const due = Math.max(0, gross - paid);
+        const taxes = taxFromLine(l);
+        const due = Math.max(0, taxes.net - paid);
         const t = extractTotalsFromDetails(l);
         const shifts = Number(l.shift_count || 0);
         const canPayLine = canPay && due > 0.009;
 
         let netLine = "";
         if (isEmployeeLine(l)) {
-          const fica = ficaFromLine(l);
-          netLine = `<div><span>Net (pre-fed)</span><b>${fmtMoney(fica.net)}</b></div>`;
+          netLine = `<div><span>Net pay</span><b>${fmtMoney(taxes.net)}</b></div>`;
         }
 
         return `
