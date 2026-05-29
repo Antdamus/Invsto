@@ -31,6 +31,8 @@ The app still needs structured tax data, employer-side liabilities, federal inco
 
 The current `store_locations` table has name, lat/lng, timezone, and policy fields, but not legal address/state/county/city. Tax compliance needs the actual work jurisdiction.
 
+Current operating assumption from management: active workers are currently working in Florida. The tax model must also support future work locations in Miami, FL; New Haven, CT; and New York, NY.
+
 Add or confirm:
 
 - Employer legal name, EIN, business address, payroll contact, and federal deposit schedule.
@@ -89,11 +91,11 @@ The system should generate accountant/payroll exports for:
 
 ## Implementation Phases
 
-1. **Compliance data model.** Add employer profile, work-location addresses, structured W-4/W-9/I-9 status, tax jurisdictions, and versioned tax constants.
-2. **Federal payroll engine.** Implement Pub. 15-T federal withholding, employee/employer FICA, Additional Medicare, FUTA, commission/supplemental wage handling, and net pay.
-3. **State/local engine.** Add state withholding and unemployment modules for the actual states where employees work or live.
-4. **Deposit and filing layer.** Add liability calendar, deposit schedule, confirmation tracking, Form 941/940/W-2/1099/state exports, and accountant review.
-5. **Admin UX.** Add payroll readiness blockers, employee tax profile drawer, tax liability dashboard, filing checklist, correction workflow, and printable/exportable pay statements.
+1. **Compliance data model.** Add employer profile, work-location addresses, structured W-4/W-9/I-9 status, tax jurisdictions, and versioned tax constants. Added in migration `20260529160000_payroll_tax_compliance_foundation.sql`.
+2. **Federal payroll engine.** Implement Pub. 15-T federal withholding, employee/employer FICA, Additional Medicare, FUTA, commission/supplemental wage handling, and net pay. Federal hourly payroll calculation foundation added for 2026 wages; accountant/payroll-provider validation still required.
+3. **State/local engine.** Florida reemployment tax support is added. Connecticut and New York/New York City are modeled and intentionally flagged until the exact DRS/NYS/NYC withholding engines are implemented.
+4. **Deposit and filing layer.** Add liability calendar, deposit schedule, confirmation tracking, Form 941/940/W-2/1099/state exports, and accountant review. Liability snapshots are added; filing exports still need to be built.
+5. **Admin UX.** Add payroll readiness blockers, employee tax profile drawer, tax liability dashboard, filing checklist, correction workflow, and printable/exportable pay statements. The payroll detail/CSV now show tax/net-pay fields; full tax-profile management screens still need to be added.
 
 ## Source Links
 
@@ -110,3 +112,11 @@ The system should generate accountant/payroll exports for:
 - SSA W-2 filing deadlines: https://www.ssa.gov/employer/filingDeadlines.htm
 - USCIS Form I-9 guidance: https://www.uscis.gov/i-9
 - Florida reemployment tax, if Florida is a work state: https://floridarevenue.com/taxes/taxesfees/Pages/reemployment.aspx
+- Florida reemployment tax rate information: https://floridarevenue.com/taxes/taxesfees/Pages/rt_rate.aspx
+- Connecticut withholding tax information: https://portal.ct.gov/drs/withholding-taxes/tax-information
+- Connecticut withholding forms/tables: https://portal.ct.gov/drs/drs-forms/current-year-forms/withholding-forms
+- Connecticut unemployment tax wage base/rates: https://portal.ct.gov/dol/knowledge-base/articles/unemployment-taxes/tax-rates-and-taxable-wage-base
+- New York withholding tax rate changes and 2026 tables: https://www.tax.ny.gov/bus/wt/rate.htm
+- New York withholding tax tables: https://www.tax.ny.gov/bus/wt/amount_deduct.htm
+- New York unemployment quarterly reporting and wage base: https://dol.ny.gov/node/91
+- New York unemployment contribution rates: https://dol.ny.gov/unemployment-insurance-rate-information

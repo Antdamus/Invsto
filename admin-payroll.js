@@ -460,6 +460,8 @@
       ["pending_approval", "Pending approvals"],
       ["unwaived_anomalies", "Unwaived anomalies"],
       ["missing_rates", "Missing rates"],
+      ["missing_work_location_tax_addresses", "Missing work-state setup"],
+      ["pending_state_withholding_engine", "State tax engine pending"],
     ];
 
     return defs
@@ -473,9 +475,18 @@
 
     const drafts = Number(readiness.draft_runs || 0);
     const sellers = Number(readiness.seller_excluded || 0);
+    const taxWarnings = readiness.tax_readiness?.warnings || {};
+    const missingW4 = Number(taxWarnings.missing_w4_uses_irs_default_single_no_adjustments || 0);
+    const missingStateRate = Number(taxWarnings.missing_state_account_uses_new_employer_estimate || 0);
+    const missingI9 = Number(taxWarnings.missing_i9_should_be_fixed_before_production || 0);
+    const missingTin = Number(taxWarnings.missing_tax_id_blocks_w2_filing || 0);
 
     if (drafts > 1) warnings.push(`${drafts} draft runs exist for this period`);
     if (sellers > 0) warnings.push(`${sellers} seller time entr${sellers === 1 ? "y is" : "ies are"} excluded from hourly payroll`);
+    if (missingW4 > 0) warnings.push(`${missingW4} employee${missingW4 === 1 ? "" : "s"} using IRS default W-4`);
+    if (missingStateRate > 0) warnings.push(`${missingStateRate} state account/rate estimate${missingStateRate === 1 ? "" : "s"}`);
+    if (missingI9 > 0) warnings.push(`${missingI9} I-9 record${missingI9 === 1 ? "" : "s"} missing`);
+    if (missingTin > 0) warnings.push(`${missingTin} tax ID record${missingTin === 1 ? "" : "s"} missing`);
     return warnings;
   }
 
@@ -796,7 +807,8 @@
 
     const paid = Number(paidMap.get(line.employee_id) || 0);
     const gross = Number(line.gross_pay || 0);
-    const due = Math.max(0, gross - paid);
+    const taxes = taxFromLine(line);
+    const due = Math.max(0, taxes.net - paid);
 
     const t = extractTotalsFromDetails(line);
     const rate = Number(line.hourly_rate || 0);
@@ -812,7 +824,17 @@
     `;
 
 if (isEmployeeLine(line)) {
-  const fica = ficaFromLine(line);
+  const fica = taxes.fica;
+  const stateLabel = taxes.sutaState ? ` (${escapeHtml(taxes.sutaState)})` : "";
+  const stateStatus = taxes.stateStatus === "calculation_pending"
+    ? `<div class="og-payroll-detail-row" style="opacity:.75;">
+        <div class="og-payroll-detail-k">State withholding${stateLabel}</div>
+        <div class="og-payroll-detail-v">Engine pending</div>
+      </div>`
+    : `<div class="og-payroll-detail-row">
+        <div class="og-payroll-detail-k">State withholding${stateLabel}</div>
+        <div class="og-payroll-detail-v">-${fmtMoney(taxes.state)}</div>
+      </div>`;
 
   ficaBlock = `
     <div class="og-payroll-detail-divider"></div>
@@ -835,13 +857,39 @@ if (isEmployeeLine(line)) {
       <div class="og-payroll-detail-v"><b>-${fmtMoney(fica.fica)}</b></div>
     </div>
     <div class="og-payroll-detail-row">
-      <div class="og-payroll-detail-k"><b>Net before federal</b></div>
-      <div class="og-payroll-detail-v"><b>${fmtMoney(fica.net)}</b></div>
+      <div class="og-payroll-detail-k">Federal withholding</div>
+      <div class="og-payroll-detail-v">-${fmtMoney(taxes.federal)}</div>
+    </div>
+    ${stateStatus}
+    <div class="og-payroll-detail-row">
+      <div class="og-payroll-detail-k">Local withholding</div>
+      <div class="og-payroll-detail-v">-${fmtMoney(taxes.local)}</div>
+    </div>
+    <div class="og-payroll-detail-row">
+      <div class="og-payroll-detail-k"><b>Employee tax total</b></div>
+      <div class="og-payroll-detail-v"><b>-${fmtMoney(taxes.employeeTax)}</b></div>
+    </div>
+    <div class="og-payroll-detail-row">
+      <div class="og-payroll-detail-k"><b>Net pay</b></div>
+      <div class="og-payroll-detail-v"><b>${fmtMoney(taxes.net)}</b></div>
     </div>
 
-    <div class="og-payroll-detail-row" style="opacity:.75;">
-      <div class="og-payroll-detail-k">Federal withholding</div>
-      <div class="og-payroll-detail-v">Handled by accountant (W-4)</div>
+    <div class="og-payroll-detail-divider"></div>
+    <div class="og-payroll-detail-row">
+      <div class="og-payroll-detail-k">Employer FICA</div>
+      <div class="og-payroll-detail-v">${fmtMoney(taxes.ssEmployer + taxes.medicareEmployer)}</div>
+    </div>
+    <div class="og-payroll-detail-row">
+      <div class="og-payroll-detail-k">FUTA reserve</div>
+      <div class="og-payroll-detail-v">${fmtMoney(taxes.futa)}</div>
+    </div>
+    <div class="og-payroll-detail-row">
+      <div class="og-payroll-detail-k">SUTA reserve${stateLabel}</div>
+      <div class="og-payroll-detail-v">${fmtMoney(taxes.suta)}</div>
+    </div>
+    <div class="og-payroll-detail-row">
+      <div class="og-payroll-detail-k"><b>Employer tax reserve</b></div>
+      <div class="og-payroll-detail-v"><b>${fmtMoney(taxes.employerTax)}</b></div>
     </div>
   `;
 }
@@ -930,7 +978,7 @@ if (isEmployeeLine(line)) {
 
     const canPay = !!currentRun && currentRun.status === "final";
     const paidMap = computePaidByEmployee(currentPayments);
-    const due = Math.max(0, Number(line.gross_pay || 0) - Number(paidMap.get(line.employee_id) || 0));
+    const due = Math.max(0, payableAmount(line) - Number(paidMap.get(line.employee_id) || 0));
     const payBtn = $("#prDetailPayBtn");
     if (payBtn) {
       payBtn.disabled = !canPay || due <= 0.009;
@@ -1039,6 +1087,7 @@ if (isEmployeeLine(line)) {
     const period = stmt?.pay_period || {};
     const summary = stmt?.summary || {};
     const fica = stmt?.fica || {};
+    const taxes = stmt?.taxes || {};
     const payments = Array.isArray(stmt?.payments) ? stmt.payments : [];
     const flags = Array.isArray(stmt?.flags) ? stmt.flags : [];
     const days = Array.isArray(stmt?.details?.day_breakdown) ? stmt.details.day_breakdown : [];
@@ -1054,8 +1103,13 @@ if (isEmployeeLine(line)) {
       ["Gross", fmtMoney(summary.gross_pay || 0)],
       ["Regular pay", fmtMoney(summary.regular_pay || 0)],
       ["Overtime pay", fmtMoney(summary.overtime_pay || 0)],
-      ["FICA", fmtMoney(fica.fica_employee_total || 0)],
-      ["Net before federal", fmtMoney(fica.net_pre_fed || summary.gross_pay || 0)],
+      ["Employee FICA", fmtMoney(fica.fica_employee_total || 0)],
+      ["Federal withholding", fmtMoney(taxes.federal_income_tax || 0)],
+      ["State withholding", fmtMoney(taxes.state_income_tax || 0)],
+      ["Local withholding", fmtMoney(taxes.local_income_tax || 0)],
+      ["Employee tax total", fmtMoney(taxes.employee_tax_total || fica.fica_employee_total || 0)],
+      ["Net pay", fmtMoney(taxes.net_pay || fica.net_pre_fed || summary.gross_pay || 0)],
+      ["Employer tax reserve", fmtMoney(taxes.employer_tax_total || 0)],
       ["Paid", fmtMoney(summary.paid_total || 0)],
       ["Due", fmtMoney(summary.due_total || 0)],
     ];
@@ -1368,7 +1422,7 @@ if (isEmployeeLine(line)) {
     if (!assertPayrollReady("Finalize payroll")) return;
 
     const ok = confirm(
-      "Finalize this payroll run?\n\nThis will lock the pay period, rebuild the payroll lines from the audited shifts, calculate FICA estimates, and generate statements."
+      "Finalize this payroll run?\n\nThis will lock the pay period, rebuild the payroll lines from audited shifts, calculate payroll taxes/reserves, and generate statements."
     );
     if (!ok) return;
 
@@ -1627,7 +1681,7 @@ async function createNextPayPeriod() {
 
 
   // ----------------------------
-  // Export CSV (unchanged, but you can add fica columns later if you want)
+  // Export CSV
   // ----------------------------
   function buildCsv(lines, payments) {
     const paidMap = computePaidByEmployee(payments);
@@ -1652,7 +1706,17 @@ const headers = [
   "ss_employee",
   "medicare_employee_total",
   "fica_employee_total",
-  "net_pre_fed",
+  "federal_income_tax",
+  "state_income_tax",
+  "local_income_tax",
+  "employee_tax_total",
+  "net_pay",
+  "ss_employer",
+  "medicare_employer",
+  "futa_employer",
+  "suta_state",
+  "suta_employer",
+  "employer_tax_total",
   "paid_amount",
   "due_amount",
 ];
@@ -1662,11 +1726,12 @@ const headers = [
       const name = l.employees?.display_name || l.display_name || "";
       const gross = Number(l.gross_pay || 0);
       const paid = Number(paidMap.get(l.employee_id) || 0);
-      const due = Math.max(0, gross - paid);
+      const taxes = taxFromLine(l);
+      const due = Math.max(0, taxes.net - paid);
       const t = extractTotalsFromDetails(l);
 
 const wt = (l.employees?.worker_type || l.worker_type || "").toLowerCase();
-const fica = isEmployeeLine(l) ? ficaFromLine(l) : { ss: 0, med: 0, fica: 0, net: gross, ytd: 0 };
+const fica = taxes.fica;
 
 const cols = [
   l.employee_id,
@@ -1688,7 +1753,17 @@ const cols = [
   Number(fica.ss || 0).toFixed(2),
   Number(fica.med || 0).toFixed(2),
   Number(fica.fica || 0).toFixed(2),
-  Number(fica.net || gross).toFixed(2),
+  Number(taxes.federal || 0).toFixed(2),
+  Number(taxes.state || 0).toFixed(2),
+  Number(taxes.local || 0).toFixed(2),
+  Number(taxes.employeeTax || 0).toFixed(2),
+  Number(taxes.net || gross).toFixed(2),
+  Number(taxes.ssEmployer || 0).toFixed(2),
+  Number(taxes.medicareEmployer || 0).toFixed(2),
+  Number(taxes.futa || 0).toFixed(2),
+  taxes.sutaState || "",
+  Number(taxes.suta || 0).toFixed(2),
+  Number(taxes.employerTax || 0).toFixed(2),
   paid.toFixed(2),
   due.toFixed(2),
 ];
@@ -1776,13 +1851,13 @@ const cols = [
 
     // ✅ Auto-heal: if lines exist but net_pre_fed is missing, compute/persist FICA once and reload
 try {
-  const needsFica = (currentLines || []).some((l) => isEmployeeLine(l) && l.net_pre_fed == null);
-  if (needsFica) {
+  const needsTax = (currentLines || []).some((l) => isEmployeeLine(l) && (l.net_pre_fed == null || l.net_pay == null));
+  if (needsTax) {
     await sb().rpc("apply_fica_deductions_to_run", { _run_id: currentRun.id });
     currentLines = await loadLines(currentRun.id); // reload after persist
   }
 } catch (e) {
-  console.warn("Auto FICA heal failed:", safeErrMsg(e));
+  console.warn("Auto payroll tax heal failed:", safeErrMsg(e));
 }
 
 
