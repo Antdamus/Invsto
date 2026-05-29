@@ -53,7 +53,7 @@ async function fetchGlobalScheduleRange(gridStart, gridEnd){
 
   const { data, error } = await supabaseClient.rpc('get_schedule_range_all_with_routes', args);
   if (error) throw error;
-  return (data || []).map(normalizeScheduleSource);
+  return dedupeScheduleRows((data || []).map(normalizeScheduleSource));
 }
 
 function scheduleIdArray(value){
@@ -72,6 +72,47 @@ function normalizeScheduleSource(row){
   const source = String(row.source || '').toLowerCase();
   if (source === 'regular') return { ...row, source: 'recurring' };
   return row;
+}
+
+function scheduleSourcePriority(source){
+  const normalized = String(source || '').toLowerCase();
+  if (normalized === 'override') return 4;
+  if (normalized === 'seller_sale') return 3;
+  if (normalized === 'recurring') return 2;
+  return 1;
+}
+
+function scheduleVisibleTimestampKey(value){
+  if (!value) return '';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : String(d.getTime());
+}
+
+function scheduleVisibleRowKey(row){
+  const workDate = String(row?.work_date || '').slice(0, 10);
+  const inStores = scheduleIdArray(row?.allowed_clock_in_store_ids).sort().join(',');
+  const outStores = scheduleIdArray(row?.allowed_clock_out_store_ids).sort().join(',');
+  return [
+    row?.employee_id || '',
+    workDate,
+    scheduleVisibleTimestampKey(row?.start_ts),
+    scheduleVisibleTimestampKey(row?.end_ts),
+    row?.store_id || '',
+    row?.allow_clock_in_any_store ? 'any-in' : inStores,
+    row?.allow_clock_out_any_store ? 'any-out' : outStores
+  ].join('|');
+}
+
+function dedupeScheduleRows(rows){
+  const byKey = new Map();
+  for (const row of rows || []){
+    const key = scheduleVisibleRowKey(row);
+    const current = byKey.get(key);
+    if (!current || scheduleSourcePriority(row?.source) > scheduleSourcePriority(current?.source)) {
+      byKey.set(key, row);
+    }
+  }
+  return [...byKey.values()];
 }
 
 function scheduleFeatureMissing(error, name = ''){
