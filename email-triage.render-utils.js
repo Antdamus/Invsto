@@ -6,6 +6,7 @@
   const EBAY_CONVERSATION_DENSITY_STORAGE_KEY = "og-ebay-conversation-density";
   const PANEL_WIDTHS_STORAGE_KEY = "og-email-triage-panel-widths";
   const EBAY_CONVERSATION_PANEL_WIDTHS_STORAGE_KEY = "og-ebay-conversation-panel-widths";
+  const EBAY_CONVERSATION_PANEL_VISIBILITY_STORAGE_KEY = "og-ebay-conversation-panel-visibility";
   const PANEL_WIDTH_LIMITS = {
     category: { min: 150, max: 340, fallback: 220 },
     detail: { min: 300, max: 680, fallback: 420 },
@@ -113,6 +114,36 @@
     const contextWidth = clampNumber(widths.context, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.context.min, EBAY_CONVERSATION_PANEL_WIDTH_LIMITS.context.max);
     shell.style.setProperty("--ebay-list-panel-width", `${listWidth}px`);
     shell.style.setProperty("--ebay-context-panel-width", `${contextWidth}px`);
+  }
+
+  function normalizeEbayConversationPanelVisibility(value = {}) {
+    const source = value && typeof value === "object" ? value : {};
+    return {
+      folders: source.folders !== false,
+      list: source.list !== false,
+      context: source.context !== false,
+    };
+  }
+
+  function getStoredEbayConversationPanelVisibility() {
+    try {
+      return normalizeEbayConversationPanelVisibility(
+        JSON.parse(window.localStorage?.getItem(EBAY_CONVERSATION_PANEL_VISIBILITY_STORAGE_KEY) || "{}"),
+      );
+    } catch (error) {
+      return normalizeEbayConversationPanelVisibility();
+    }
+  }
+
+  function storeEbayConversationPanelVisibility(visibility) {
+    try {
+      window.localStorage?.setItem(
+        EBAY_CONVERSATION_PANEL_VISIBILITY_STORAGE_KEY,
+        JSON.stringify(normalizeEbayConversationPanelVisibility(visibility)),
+      );
+    } catch (error) {
+      // Panel collapse still works for the current session if storage is unavailable.
+    }
   }
 
   function escapeHtml(value) {
@@ -539,6 +570,7 @@
     EBAY_CONVERSATION_DENSITY_STORAGE_KEY,
     PANEL_WIDTHS_STORAGE_KEY,
     EBAY_CONVERSATION_PANEL_WIDTHS_STORAGE_KEY,
+    EBAY_CONVERSATION_PANEL_VISIBILITY_STORAGE_KEY,
     PANEL_WIDTH_LIMITS,
     EBAY_CONVERSATION_PANEL_WIDTH_LIMITS,
     getStoredDensityMode,
@@ -552,6 +584,9 @@
     getStoredEbayConversationPanelWidths,
     storeEbayConversationPanelWidths,
     applyEbayConversationPanelWidths,
+    normalizeEbayConversationPanelVisibility,
+    getStoredEbayConversationPanelVisibility,
+    storeEbayConversationPanelVisibility,
     escapeHtml,
     formatDateTime,
     formatEmailAge,

@@ -9,7 +9,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="email-triage.css?v=5f6i2" />
+  <link rel="stylesheet" href="email-triage.css?v=5f6i3" />
 
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
@@ -156,6 +156,18 @@
               <i data-lucide="folder-plus"></i>
               Save folder
             </button>
+            <button type="button" class="secondary-btn panel-toggle-btn" data-ebay-panel-toggle="folders" aria-pressed="false">
+              <i data-lucide="panel-left-close"></i>
+              Folders
+            </button>
+            <button type="button" class="secondary-btn panel-toggle-btn" data-ebay-panel-toggle="list" aria-pressed="false">
+              <i data-lucide="list"></i>
+              List
+            </button>
+            <button type="button" class="secondary-btn panel-toggle-btn" data-ebay-panel-toggle="context" aria-pressed="false">
+              <i data-lucide="panel-right-close"></i>
+              Context
+            </button>
             <div id="ebay-conversation-active-filters" class="ebay-conversation-active-filters" aria-live="polite"></div>
             <button type="button" id="ebay-conversation-clear-filters" class="secondary-btn" disabled>
               <i data-lucide="rotate-ccw"></i>
@@ -169,16 +181,25 @@
           <div id="ebay-conversation-sync-result" class="ebay-conversation-sync-result" aria-live="polite"></div>
 
           <div id="ebay-conversation-shell" class="ebay-conversation-shell">
-            <aside class="ebay-conversation-list-panel" aria-label="Canonical eBay conversations">
+            <aside class="ebay-smart-folder-panel" aria-label="Smart folders">
               <div class="ebay-smart-folder-head">
                 <span>Smart Folders</span>
-                <button type="button" id="ebay-conversation-reload-views" aria-label="Reload smart folders">
-                  <i data-lucide="refresh-cw"></i>
-                </button>
+                <div class="ebay-smart-folder-head-actions">
+                  <button type="button" id="ebay-smart-folder-edit-toggle" aria-label="Edit smart folders" aria-pressed="false">
+                    <i data-lucide="pencil"></i>
+                    <span>Edit</span>
+                  </button>
+                  <button type="button" id="ebay-conversation-reload-views" aria-label="Reload smart folders">
+                    <i data-lucide="refresh-cw"></i>
+                  </button>
+                </div>
               </div>
               <div id="ebay-conversation-saved-views" class="ebay-conversation-sidebar-nav" aria-label="Smart folders">
                 <div class="classification-empty matched-context-empty is-quiet">Loading smart folders.</div>
               </div>
+            </aside>
+
+            <aside class="ebay-conversation-list-panel" aria-label="Canonical eBay conversations">
               <div id="ebay-conversation-summary" class="ebay-conversation-summary"></div>
               <div id="ebay-conversation-list" class="ebay-conversation-list"></div>
             </aside>
@@ -574,14 +595,14 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
-  <script src="email-triage.api.js?v=5f6i1"></script>
-  <script src="email-triage.state.js?v=5f6i1"></script>
-  <script src="email-triage.render-utils.js?v=5f6i1"></script>
+  <script src="email-triage.api.js?v=5f6i3"></script>
+  <script src="email-triage.state.js?v=5f6i3"></script>
+  <script src="email-triage.render-utils.js?v=5f6i3"></script>
   <script src="email-triage.inbox.js"></script>
-  <script src="email-triage.classifications.js?v=5f6i1"></script>
+  <script src="email-triage.classifications.js?v=5f6i3"></script>
   <script src="email-triage.drafts.js"></script>
   <script src="email-triage.diagnostics.js"></script>
   <script src="email-triage.operations.js"></script>
-  <script src="email-triage.js?v=5f6i1"></script>
+  <script src="email-triage.js?v=5f6i3"></script>
 </body>
 </html>

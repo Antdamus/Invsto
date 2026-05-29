@@ -80,6 +80,12 @@
       ebayConversationSavedViewSavingId: null,
       ebayConversationSavedViewActionError: null,
       selectedEbaySavedViewId: null,
+      ebayConversationSmartFoldersEditing: false,
+      ebayConversationPanelVisibility: overrides.ebayConversationPanelVisibility || {
+        folders: true,
+        list: true,
+        context: true,
+      },
       ebayConversationTagHelpOpen: false,
       ebayConversationFiltersExpanded: true,
       ebayConversationDensityMode: overrides.ebayConversationDensityMode || "compact",
