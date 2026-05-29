@@ -4415,6 +4415,89 @@
   color: #ffbac8;
 }
 
+.ebay-draft-approval-history {
+  border-top: 1px solid rgba(255,255,255,.08);
+  padding-top: 9px;
+}
+
+.ebay-draft-approval-history summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: rgba(242,243,245,.82);
+  cursor: pointer;
+  font-size: .74rem;
+  font-weight: 900;
+  list-style: none;
+  text-transform: uppercase;
+}
+
+.ebay-draft-approval-history summary::-webkit-details-marker {
+  display: none;
+}
+
+.ebay-draft-approval-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.ebay-draft-approval-grid div,
+.ebay-draft-approval-row {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: rgba(0,0,0,.13);
+  padding: 8px;
+}
+
+.ebay-draft-approval-grid span,
+.ebay-draft-approval-row span,
+.ebay-draft-approval-row time {
+  color: rgba(242,243,245,.52);
+  font-size: .66rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.ebay-draft-approval-grid strong,
+.ebay-draft-approval-row strong {
+  display: block;
+  color: rgba(242,243,245,.82);
+  font-size: .74rem;
+  font-weight: 800;
+  line-height: 1.35;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+
+.ebay-draft-approval-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.ebay-draft-approval-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto;
+  gap: 5px 8px;
+}
+
+.ebay-draft-approval-row strong {
+  margin-top: 0;
+}
+
+.ebay-draft-approval-row p {
+  grid-column: 1 / -1;
+  color: rgba(242,243,245,.72);
+  font-size: .74rem;
+  line-height: 1.4;
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
 .ebay-draft-grounding {
   border-top: 1px solid rgba(255,255,255,.08);
   padding-top: 9px;
@@ -4714,6 +4797,8 @@
   }
 
   .ebay-reply-target dl,
+  .ebay-draft-approval-grid,
+  .ebay-draft-approval-row,
   .ebay-draft-grounding-grid,
   .ebay-draft-metadata-grid {
     grid-template-columns: 1fr;
