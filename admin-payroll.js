@@ -206,6 +206,7 @@
   let pendingReview = [];
   let payrollReadiness = null;
   let runsForPeriod = [];
+  let floridaSetupCache = null;
 
   let detailEmpId = null;
   let payEmpId = null;
@@ -274,6 +275,26 @@
     const { data, error } = await sb().rpc("payroll_period_readiness", { _period_id: periodId });
     if (error) throw error;
     return data || null;
+  }
+
+  async function loadFloridaPayrollSetup() {
+    try {
+      const [{ data: profiles, error: pErr }, { data: accounts, error: aErr }] = await Promise.all([
+        sb().from("employer_profiles").select("*").eq("active", true).order("created_at", { ascending: false }).limit(1),
+        sb().from("employer_state_tax_accounts").select("*").eq("active", true).eq("state_code", "FL").order("effective_from", { ascending: false }).limit(1),
+      ]);
+      if (pErr) throw pErr;
+      if (aErr) throw aErr;
+      floridaSetupCache = {
+        profile: (profiles || [])[0] || null,
+        flAccount: (accounts || [])[0] || null,
+      };
+      return floridaSetupCache;
+    } catch (e) {
+      console.warn("Florida payroll setup load failed:", safeErrMsg(e));
+      floridaSetupCache = null;
+      return null;
+    }
   }
 
   // ----------------------------
@@ -346,6 +367,7 @@
     $("#prDetailSheet")?.classList.add("hidden");
     $("#prPaySheet")?.classList.add("hidden");
     $("#prVoidPaySheet")?.classList.add("hidden");
+    $("#prFloridaSetupSheet")?.classList.add("hidden");
     $("#prOverlay")?.classList.add("hidden");
     $("#prPeriodSheet")?.classList.add("hidden");
     document.body.classList.remove("pr-sheet-open");
@@ -462,6 +484,15 @@
       ["missing_rates", "Missing rates"],
       ["missing_work_location_tax_addresses", "Missing work-state setup"],
       ["pending_state_withholding_engine", "State tax engine pending"],
+      ["missing_employer_profile", "Missing employer profile"],
+      ["missing_employer_ein", "Missing employer EIN"],
+      ["missing_fl_reemployment_account", "Missing FL reemployment account"],
+      ["missing_store_tax_state", "Missing store tax state"],
+      ["non_florida_work_locations", "Non-Florida work locations"],
+      ["missing_employee_legal_addresses", "Missing employee addresses"],
+      ["missing_employee_tax_ids", "Missing employee tax IDs"],
+      ["missing_i9", "Missing I-9 records"],
+      ["missing_w4", "Missing W-4 elections"],
     ];
 
     return defs
@@ -480,13 +511,16 @@
     const missingStateRate = Number(taxWarnings.missing_state_account_uses_new_employer_estimate || 0);
     const missingI9 = Number(taxWarnings.missing_i9_should_be_fixed_before_production || 0);
     const missingTin = Number(taxWarnings.missing_tax_id_blocks_w2_filing || 0);
+    const flWarnings = readiness.florida_readiness?.warnings || {};
+    const eftpsMissing = Number(flWarnings.eftps_not_marked_enrolled || 0);
 
     if (drafts > 1) warnings.push(`${drafts} draft runs exist for this period`);
     if (sellers > 0) warnings.push(`${sellers} seller time entr${sellers === 1 ? "y is" : "ies are"} excluded from hourly payroll`);
-    if (missingW4 > 0) warnings.push(`${missingW4} employee${missingW4 === 1 ? "" : "s"} using IRS default W-4`);
-    if (missingStateRate > 0) warnings.push(`${missingStateRate} state account/rate estimate${missingStateRate === 1 ? "" : "s"}`);
-    if (missingI9 > 0) warnings.push(`${missingI9} I-9 record${missingI9 === 1 ? "" : "s"} missing`);
-    if (missingTin > 0) warnings.push(`${missingTin} tax ID record${missingTin === 1 ? "" : "s"} missing`);
+    if (missingW4 > 0 && !Number(readiness.missing_w4 || 0)) warnings.push(`${missingW4} employee${missingW4 === 1 ? "" : "s"} using IRS default W-4`);
+    if (missingStateRate > 0 && !Number(readiness.missing_fl_reemployment_account || 0)) warnings.push(`${missingStateRate} state account/rate estimate${missingStateRate === 1 ? "" : "s"}`);
+    if (missingI9 > 0 && !Number(readiness.missing_i9 || 0)) warnings.push(`${missingI9} I-9 record${missingI9 === 1 ? "" : "s"} missing`);
+    if (missingTin > 0 && !Number(readiness.missing_employee_tax_ids || 0)) warnings.push(`${missingTin} tax ID record${missingTin === 1 ? "" : "s"} missing`);
+    if (eftpsMissing > 0) warnings.push("EFTPS enrollment is not marked");
     return warnings;
   }
 
@@ -578,6 +612,101 @@
     wrap.classList.remove("hidden");
 
     syncActionState();
+  }
+
+  function flBlockerItems(fl) {
+    const labels = {
+      missing_employer_profile: "Employer profile",
+      missing_employer_ein: "Employer EIN",
+      missing_fl_reemployment_account: "FL reemployment account/rate",
+      missing_store_tax_state: "Store tax state",
+      non_florida_work_locations: "Non-FL work location",
+      missing_employee_legal_addresses: "Employee legal address",
+      missing_employee_tax_ids: "Employee SSN/TIN",
+      missing_i9: "I-9",
+      missing_w4: "W-4",
+    };
+    const blockers = fl?.blockers || {};
+    return Object.entries(labels)
+      .map(([key, label]) => ({ key, label, count: Number(blockers[key] || 0) }))
+      .filter((item) => item.count > 0);
+  }
+
+  function renderFloridaReadiness() {
+    const root = $("#prFloridaReadiness");
+    if (!root) return;
+
+    const fl = payrollReadiness?.florida_readiness;
+    if (!fl) {
+      root.classList.add("hidden");
+      root.innerHTML = "";
+      return;
+    }
+
+    const blockers = flBlockerItems(fl);
+    const ready = !!fl.ready;
+    const employer = fl.employer || {};
+    const employees = Array.isArray(fl.employees) ? fl.employees : [];
+    const notReadyEmployees = employees.filter((e) => !e.ready).slice(0, 8);
+    const sutaRate = Number(employer.fl_suta_rate || 0);
+    const sutaLabel = sutaRate ? `${(sutaRate * 100).toFixed(3)}%` : "Missing";
+
+    const blockerHtml = blockers.length
+      ? blockers.map((b) => `<span class="og-fl-chip">${escapeHtml(b.label)}: ${b.count}</span>`).join("")
+      : `<span class="og-fl-chip is-ok">Florida payroll profile is ready</span>`;
+
+    const employeeHtml = notReadyEmployees.length
+      ? `<div class="og-fl-workers">
+          ${notReadyEmployees.map((e) => {
+            const missing = [];
+            if (!e.has_legal_address) missing.push("address");
+            if (!e.has_tax_id) missing.push("SSN/TIN");
+            if (!e.has_i9) missing.push("I-9");
+            if (!e.has_w4) missing.push("W-4");
+            return `
+              <div class="og-fl-worker">
+                <div>
+                  <div class="og-fl-worker-name">${escapeHtml(e.display_name || e.employee_id)}</div>
+                  <div class="og-fl-worker-missing">Missing ${escapeHtml(missing.join(", "))}</div>
+                </div>
+                <div class="og-fl-worker-status">Needs profile</div>
+              </div>
+            `;
+          }).join("")}
+        </div>`
+      : `<div class="og-fl-workers">
+          <div class="og-fl-worker">
+            <div>
+              <div class="og-fl-worker-name">Employee tax profiles</div>
+              <div class="og-fl-worker-missing">All payable employees in this period have W-4, I-9, SSN/TIN, and legal address records.</div>
+            </div>
+            <div class="og-fl-worker-status is-ready">Ready</div>
+          </div>
+        </div>`;
+
+    root.innerHTML = `
+      <div class="og-fl-head">
+        <div>
+          <div class="og-fl-eyebrow">Florida W-2 payroll</div>
+          <div class="og-fl-title">${ready ? "Ready to finalize" : "Final payroll is blocked until this is clean"}</div>
+          <div class="og-fl-sub">Federal withholding, FICA, FUTA, and Florida reemployment tax are checked before final payroll.</div>
+        </div>
+        <div class="og-fl-pill ${ready ? "is-ready" : "is-blocked"}">${ready ? "Ready" : `${blockers.length} blocker${blockers.length === 1 ? "" : "s"}`}</div>
+      </div>
+      <div class="og-fl-grid">
+        <div class="og-fl-metric"><span>Employees</span><b>${Number(fl.payable_employees || 0)}</b></div>
+        <div class="og-fl-metric"><span>FL RT rate</span><b>${escapeHtml(sutaLabel)}</b></div>
+        <div class="og-fl-metric"><span>Wage base</span><b>${fmtMoney(employer.fl_suta_wage_base || 7000)}</b></div>
+        <div class="og-fl-metric"><span>EFTPS</span><b>${employer.eftps_enrolled ? "Ready" : "Check"}</b></div>
+      </div>
+      <div class="og-fl-blockers">${blockerHtml}</div>
+      ${employeeHtml}
+      <div class="og-fl-actions">
+        <button type="button" class="btn ghost" id="prFlInlineSetup">Florida Setup</button>
+        <button type="button" class="btn ghost" data-pr-taxdocs>Tax Docs</button>
+      </div>
+    `;
+    root.classList.remove("hidden");
   }
 
   function tryGoToOverviewTab() {
@@ -1027,6 +1156,115 @@ if (isEmployeeLine(line)) {
 
     const reason = $("#prVoidPayReason");
     if (reason) reason.value = "";
+  }
+
+  async function openFloridaSetupSheet() {
+    const setup = await loadFloridaPayrollSetup();
+    const fl = payrollReadiness?.florida_readiness?.employer || {};
+    const profile = setup?.profile || {};
+    const account = setup?.flAccount || {};
+
+    $("#prFlLegalName").value = profile.legal_name || fl.legal_name || "OG Jewelry";
+    $("#prFlEinLast4").value = profile.ein_last4 || fl.ein_last4 || "";
+    $("#prFlFederalDeposit").value = profile.federal_deposit_schedule || fl.federal_deposit_schedule || "monthly";
+    $("#prFlFederalReturn").value = profile.federal_return_type || "941";
+    $("#prFlRtLast4").value = account.unemployment_account_id_last4 || fl.fl_unemployment_account_id_last4 || "";
+    $("#prFlSutaRate").value = account.suta_rate ?? fl.fl_suta_rate ?? "0.027";
+    $("#prFlWageBase").value = account.suta_wage_base ?? fl.fl_suta_wage_base ?? "7000";
+    $("#prFlEftps").checked = Boolean(profile.eftps_enrolled ?? fl.eftps_enrolled ?? false);
+
+    openSheet("prFloridaSetupSheet");
+  }
+
+  async function saveFloridaSetup() {
+    const legalName = String($("#prFlLegalName")?.value || "").trim();
+    const einLast4 = String($("#prFlEinLast4")?.value || "").replace(/\D/g, "").slice(0, 4);
+    const federalDeposit = $("#prFlFederalDeposit")?.value || "monthly";
+    const federalReturn = $("#prFlFederalReturn")?.value || "941";
+    const rtLast4 = String($("#prFlRtLast4")?.value || "").replace(/\D/g, "").slice(0, 4);
+    const sutaRate = Number($("#prFlSutaRate")?.value || 0.027);
+    const wageBase = Number($("#prFlWageBase")?.value || 7000);
+    const eftps = Boolean($("#prFlEftps")?.checked);
+
+    if (!legalName) return toast("Employer legal name is required", "err");
+    if (einLast4.length !== 4) return toast("Enter the last 4 digits of the EIN", "err");
+    if (!Number.isFinite(sutaRate) || sutaRate <= 0 || sutaRate > 0.20) return toast("Enter the Florida reemployment rate as a decimal, like 0.027", "err");
+    if (!Number.isFinite(wageBase) || wageBase <= 0) return toast("Florida wage base is required", "err");
+
+    const setup = floridaSetupCache || await loadFloridaPayrollSetup();
+    let profile = setup?.profile || null;
+    let flAccount = setup?.flAccount || null;
+
+    const profilePayload = {
+      legal_name: legalName,
+      ein_last4: einLast4,
+      federal_deposit_schedule: federalDeposit,
+      federal_return_type: federalReturn,
+      eftps_enrolled: eftps,
+      active: true,
+      updated_at: new Date().toISOString(),
+    };
+
+    try {
+      if (profile?.id) {
+        const { data, error } = await sb()
+          .from("employer_profiles")
+          .update(profilePayload)
+          .eq("id", profile.id)
+          .select("*")
+          .single();
+        if (error) throw error;
+        profile = data;
+      } else {
+        const { data, error } = await sb()
+          .from("employer_profiles")
+          .insert(profilePayload)
+          .select("*")
+          .single();
+        if (error) throw error;
+        profile = data;
+      }
+
+      const accountPayload = {
+        employer_profile_id: profile.id,
+        state_code: "FL",
+        unemployment_account_id_last4: rtLast4 || null,
+        suta_rate: sutaRate,
+        suta_wage_base: wageBase,
+        unemployment_deposit_schedule: "quarterly",
+        source_label: "Admin Florida payroll setup",
+        source_url: "https://floridarevenue.com/taxes/taxesfees/Pages/rt_rate.aspx",
+        active: true,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (flAccount?.id) {
+        const { data, error } = await sb()
+          .from("employer_state_tax_accounts")
+          .update(accountPayload)
+          .eq("id", flAccount.id)
+          .select("*")
+          .single();
+        if (error) throw error;
+        flAccount = data;
+      } else {
+        const { data, error } = await sb()
+          .from("employer_state_tax_accounts")
+          .insert(accountPayload)
+          .select("*")
+          .single();
+        if (error) throw error;
+        flAccount = data;
+      }
+
+      floridaSetupCache = { profile, flAccount };
+      toast("Florida payroll setup saved", "ok");
+      closeAllSheets();
+      await refreshAll(currentPeriod.id);
+    } catch (e) {
+      showAdminError("Florida setup failed", safeErrMsg(e));
+      throw e;
+    }
   }
 
   async function recordPayment(employeeId, amount, method, reference, note) {
@@ -1799,6 +2037,43 @@ const cols = [
     toast("CSV exported", "ok");
   }
 
+  async function exportTaxLiabilitiesCsv() {
+    if (!currentRun) return toast("No run to export", "err");
+    const { data, error } = await sb()
+      .from("v_payroll_tax_liability_summary")
+      .select("*")
+      .eq("payroll_run_id", currentRun.id)
+      .order("agency_code", { ascending: true })
+      .order("tax_type", { ascending: true });
+    if (error) throw error;
+
+    const headers = [
+      "payroll_run_id",
+      "pay_period_id",
+      "agency_code",
+      "jurisdiction_code",
+      "tax_type",
+      "due_date",
+      "deposit_status",
+      "employee_amount",
+      "employer_amount",
+      "total_amount",
+      "taxable_wages",
+      "line_count",
+    ];
+    const rows = (data || []).map((r) => headers.map((h) => csvCell(r[h])).join(","));
+    const csv = [headers.join(","), ...rows].join("\n");
+    const fn = `payroll_tax_liabilities_${currentPeriod?.start_date || "period"}_${currentPeriod?.end_date || ""}_${currentRun.status}.csv`;
+    downloadText(fn, csv);
+    toast("Tax liabilities exported", "ok");
+
+    function csvCell(v) {
+      const s = String(v ?? "");
+      if (s.includes(",") || s.includes('"') || s.includes("\n")) return `"${s.replaceAll('"', '""')}"`;
+      return s;
+    }
+  }
+
   // ----------------------------
   // Refresh
   // ----------------------------
@@ -1821,6 +2096,7 @@ const cols = [
       pendingReview = [];
     }
     renderPendingBanner();
+    renderFloridaReadiness();
 
     const runs = await sb()
       .from("payroll_runs")
@@ -1841,6 +2117,7 @@ const cols = [
       currentLines = [];
       currentPayments = [];
       renderPendingBanner();
+      renderFloridaReadiness();
       renderEmptyState([]);
       syncActionState();
       return;
@@ -1864,6 +2141,7 @@ try {
     if (!currentLines.length) renderEmptyState(currentPayments);
     else await renderLines(currentLines, currentPayments);
     renderPendingBanner();
+    renderFloridaReadiness();
     syncActionState();
   }
 
@@ -1902,6 +2180,14 @@ try {
 
     $("#prExportCsv")?.addEventListener("click", async () => {
       try { await exportCsv(); } catch {}
+    });
+
+    $("#prExportTaxes")?.addEventListener("click", async () => {
+      try { await exportTaxLiabilitiesCsv(); } catch (e) { showAdminError("Tax export failed", safeErrMsg(e)); }
+    });
+
+    $("#prFloridaSetupBtn")?.addEventListener("click", async () => {
+      try { await openFloridaSetupSheet(); } catch {}
     });
 
     $("#prLockPeriod")?.addEventListener("click", async () => {
@@ -1952,6 +2238,16 @@ try {
       try { await exportCsv(); } catch {}
     });
 
+    $("#prSheetExportTaxes")?.addEventListener("click", async () => {
+      closeAllSheets();
+      try { await exportTaxLiabilitiesCsv(); } catch (e) { showAdminError("Tax export failed", safeErrMsg(e)); }
+    });
+
+    $("#prSheetFloridaSetup")?.addEventListener("click", async () => {
+      closeAllSheets();
+      try { await openFloridaSetupSheet(); } catch {}
+    });
+
     $("#prSheetLock")?.addEventListener("click", async () => {
       closeAllSheets();
       try { await lockPeriod(); } catch {}
@@ -1999,8 +2295,7 @@ document.getElementById("prPeriodCreateConfirm")?.addEventListener("click", () =
 
       const paidMap = computePaidByEmployee(currentPayments);
       const paid = Number(paidMap.get(line.employee_id) || 0);
-      const gross = Number(line.gross_pay || 0);
-      const due = Math.max(0, gross - paid);
+      const due = Math.max(0, payableAmount(line) - paid);
 
       openPaySheet(line.employee_id, name, due);
     });
@@ -2039,7 +2334,25 @@ document.getElementById("prPeriodCreateConfirm")?.addEventListener("click", () =
       } catch {}
     });
 
+    $("#prFlSaveSetup")?.addEventListener("click", async () => {
+      try { await saveFloridaSetup(); } catch {}
+    });
+
     document.addEventListener("click", async (e) => {
+      const inlineSetup = e.target.closest("#prFlInlineSetup");
+      if (inlineSetup) {
+        try { await openFloridaSetupSheet(); } catch {}
+        return;
+      }
+
+      const taxDocsBtn = e.target.closest("[data-pr-taxdocs]");
+      if (taxDocsBtn) {
+        closeAllSheets();
+        const tab = document.getElementById("tabTaxDocs");
+        if (tab) tab.click();
+        return;
+      }
+
       const voidBtn = e.target.closest(".prVoidPaymentBtn");
       if (voidBtn) {
         const paymentId = voidBtn.dataset.payment;

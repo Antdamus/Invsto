@@ -224,6 +224,8 @@
       <button id="prPendingBtn" class="btn">Review now</button>
     </div>
 
+    <div id="prFloridaReadiness" class="og-fl-readiness hidden" aria-live="polite"></div>
+
     <!-- KPI strip -->
     <div class="og-payroll-kpis">
       <div class="og-kpi">
@@ -255,6 +257,8 @@
       <div class="og-payroll-actions-split" aria-hidden="true"></div>
 
       <button id="prExportCsv" class="btn ghost">Export CSV</button>
+      <button id="prExportTaxes" class="btn ghost">Export Taxes</button>
+      <button id="prFloridaSetupBtn" class="btn ghost">Florida Setup</button>
       <button id="prLockPeriod" class="btn ghost">Lock</button>
       <button id="prUnlockPeriod" class="btn ghost">Unlock</button>
 
@@ -312,6 +316,8 @@
         <button id="prSheetFinalize" class="btn">Finalize</button>
 
         <button id="prSheetExport" class="btn ghost">Export CSV</button>
+        <button id="prSheetExportTaxes" class="btn ghost">Export Taxes</button>
+        <button id="prSheetFloridaSetup" class="btn ghost">Florida Setup</button>
         <button id="prSheetLock" class="btn ghost">Lock</button>
         <button id="prSheetUnlock" class="btn ghost">Unlock</button>
 
@@ -348,6 +354,70 @@
     </div>
   </div>
 </div>
+
+  <!-- Florida Payroll Setup Sheet -->
+  <div id="prFloridaSetupSheet" class="og-sheet hidden" role="dialog" aria-modal="true" aria-label="Florida payroll setup">
+    <div class="og-sheet-hd">
+      <div>
+        <div class="og-sheet-title">Florida payroll setup</div>
+        <div class="og-sheet-sub">Required before final payroll for Florida W-2 employees.</div>
+      </div>
+      <button class="btn ghost og-sheet-close" type="button" data-pr-close>Close</button>
+    </div>
+
+    <div class="og-sheet-body">
+      <div class="og-form">
+        <div class="og-fl-setup-grid">
+          <label class="og-field">
+            <span class="og-label">Legal employer name</span>
+            <input id="prFlLegalName" class="og-input" placeholder="OG Jewelry" />
+          </label>
+          <label class="og-field">
+            <span class="og-label">EIN last 4</span>
+            <input id="prFlEinLast4" class="og-input" inputmode="numeric" maxlength="4" placeholder="1234" />
+          </label>
+          <label class="og-field">
+            <span class="og-label">Federal deposit schedule</span>
+            <select id="prFlFederalDeposit" class="og-select">
+              <option value="monthly">Monthly</option>
+              <option value="semiweekly">Semiweekly</option>
+              <option value="next_day">Next-day rule</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </label>
+          <label class="og-field">
+            <span class="og-label">Federal return</span>
+            <select id="prFlFederalReturn" class="og-select">
+              <option value="941">Form 941</option>
+              <option value="944">Form 944</option>
+            </select>
+          </label>
+          <label class="og-field">
+            <span class="og-label">FL RT account last 4</span>
+            <input id="prFlRtLast4" class="og-input" inputmode="numeric" maxlength="4" placeholder="0000" />
+          </label>
+          <label class="og-field">
+            <span class="og-label">FL reemployment rate</span>
+            <input id="prFlSutaRate" class="og-input" inputmode="decimal" placeholder="0.027" />
+          </label>
+          <label class="og-field">
+            <span class="og-label">FL wage base</span>
+            <input id="prFlWageBase" class="og-input" inputmode="decimal" placeholder="7000" />
+          </label>
+          <label class="og-field og-check-field">
+            <input id="prFlEftps" type="checkbox" />
+            <span>EFTPS enrolled for federal tax deposits</span>
+          </label>
+        </div>
+
+        <div id="prFlSetupHint" class="og-fl-setup-hint">
+          Use the Florida Department of Revenue assigned reemployment rate if you already have one. If not, the new employer rate is 0.027.
+        </div>
+
+        <button id="prFlSaveSetup" class="btn">Save Florida setup</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Detail Sheet (per employee) -->
   <div id="prDetailSheet" class="og-sheet hidden" role="dialog" aria-modal="true" aria-label="Payroll line details">

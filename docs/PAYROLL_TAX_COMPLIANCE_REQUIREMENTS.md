@@ -95,7 +95,11 @@ The system should generate accountant/payroll exports for:
 2. **Federal payroll engine.** Implement Pub. 15-T federal withholding, employee/employer FICA, Additional Medicare, FUTA, commission/supplemental wage handling, and net pay. Federal hourly payroll calculation foundation added for 2026 wages; accountant/payroll-provider validation still required.
 3. **State/local engine.** Florida reemployment tax support is added. Connecticut and New York/New York City are modeled and intentionally flagged until the exact DRS/NYS/NYC withholding engines are implemented.
 4. **Deposit and filing layer.** Add liability calendar, deposit schedule, confirmation tracking, Form 941/940/W-2/1099/state exports, and accountant review. Liability snapshots are added; filing exports still need to be built.
-5. **Admin UX.** Add payroll readiness blockers, employee tax profile drawer, tax liability dashboard, filing checklist, correction workflow, and printable/exportable pay statements. The payroll detail/CSV now show tax/net-pay fields; full tax-profile management screens still need to be added.
+5. **Admin UX.** Add payroll readiness blockers, employee tax profile drawer, tax liability dashboard, filing checklist, correction workflow, and printable/exportable pay statements. The payroll detail/CSV now show tax/net-pay fields; Florida setup/readiness is now exposed in the payroll tab. Full filing exports still need accountant validation before the app is the legal source of record.
+
+## Florida Production Gate
+
+Migration `20260529173000_florida_payroll_readiness.sql` makes final payroll depend on a Florida-specific readiness check. Final payroll is blocked unless the period has only Florida work locations, an active employer profile with EIN, an active Florida reemployment account/rate, and every payable employee has a current legal address, SSN/TIN token, completed I-9 status, and active structured W-4 election.
 
 ## Source Links
 
