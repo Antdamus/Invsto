@@ -1,0 +1,1165 @@
+import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  buildEbayConversationContext,
+  EbayConversationContextError,
+  resolveEbayConversation,
+} from "../_shared/ebay-conversation-context.ts";
+
+type ServiceClient = ReturnType<typeof createClient>;
+type Mode = "view" | "generate" | "regenerate" | "improve" | "save_edit" | "discard";
+
+type Input = {
+  mode: Mode;
+  conversationId: string | null;
+  ebayConversationId: string | null;
+  conversationType: string | null;
+  draftId: string | null;
+  draftText: string | null;
+  operatorNotes: string | null;
+};
+
+type GroundingFact = {
+  id: string;
+  label: string;
+  buyer_facing: boolean;
+  value: string | number | boolean | null;
+};
+
+type DraftOutput = {
+  draft_text: string;
+  tone: string;
+  summary_of_intent: string;
+  facts_used: string[];
+  missing_context: string[];
+  safety_warnings: string[];
+  confidence: number;
+};
+
+const GENERATOR_NAME = "ebay_conversation_response_drafter";
+const GENERATOR_VERSION = "v1";
+const PROMPT_VERSION_DEFAULT = "ebay-conversation-draft-v1";
+const OPENAI_TIMEOUT_MS = 45000;
+const MAX_DRAFT_TEXT_CHARS = 4000;
+const MAX_OPERATOR_TEXT_CHARS = 4000;
+const TRANSIENT_OPENAI_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+
+class DraftError extends Error {
+  code: string;
+  status: number;
+  phase: string;
+  transient: boolean;
+  details: Record<string, unknown>;
+
+  constructor(code: string, options: {
+    status?: number;
+    phase?: string;
+    transient?: boolean;
+    message?: string;
+    details?: Record<string, unknown>;
+  } = {}) {
+    super(options.message || code);
+    this.name = "DraftError";
+    this.code = code;
+    this.status = options.status || 500;
+    this.phase = options.phase || "draft";
+    this.transient = options.transient === true;
+    this.details = options.details || {};
+  }
+}
+
+function corsHeaders(req: Request) {
+  const origin = req.headers.get("Origin") || "*";
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  };
+}
+
+function json(req: Request, status: number, body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...corsHeaders(req),
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+function requiredEnv(name: string) {
+  const value = Deno.env.get(name)?.trim();
+  if (!value) throw new DraftError("configuration_error", { phase: "configuration" });
+  return value;
+}
+
+function serviceClient() {
+  return createClient(requiredEnv("SUPABASE_URL"), requiredEnv("SUPABASE_SERVICE_ROLE_KEY"), {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+function authenticatedClient(accessToken: string) {
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim() || requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
+  return createClient(requiredEnv("SUPABASE_URL"), anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  });
+}
+
+function getBearerToken(req: Request) {
+  const auth = req.headers.get("Authorization") || "";
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  return match?.[1] || "";
+}
+
+async function requireAdmin(req: Request, supabase: ServiceClient) {
+  const accessToken = getBearerToken(req);
+  if (!accessToken) throw new DraftError("unauthorized", { status: 401, phase: "auth" });
+
+  if (accessToken === requiredEnv("SUPABASE_SERVICE_ROLE_KEY")) {
+    return { actorType: "service_role", userId: null, email: null, accessToken };
+  }
+
+  const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
+  const user = userData?.user;
+  if (userError || !user?.id) throw new DraftError("unauthorized", { status: 401, phase: "auth" });
+
+  const { data: employee, error: employeeError } = await supabase
+    .from("employees")
+    .select("role, active")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (employeeError) throw new DraftError("configuration_error", { phase: "employee_lookup" });
+  if (!employee || employee.active === false || String(employee.role || "").toLowerCase() !== "admin") {
+    throw new DraftError("admin_required", { status: 403, phase: "auth" });
+  }
+
+  return { actorType: "admin", userId: user.id, email: user.email || null, accessToken };
+}
+
+function text(value: unknown, maxLength = 1000) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function safeBodyText(value: unknown, maxLength = MAX_DRAFT_TEXT_CHARS) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function stringOrNull(value: unknown, maxLength = 240) {
+  const cleaned = text(value, maxLength);
+  return cleaned || null;
+}
+
+async function parseInput(req: Request): Promise<Input> {
+  const body = await req.json().catch(() => ({}));
+  const rawMode = stringOrNull(body?.mode, 80) || "view";
+  if (!["view", "generate", "regenerate", "improve", "save_edit", "discard"].includes(rawMode)) {
+    throw new DraftError("invalid_mode", { status: 400, phase: "input" });
+  }
+  return {
+    mode: rawMode as Mode,
+    conversationId: stringOrNull(body?.conversationId || body?.conversation_id, 120),
+    ebayConversationId: stringOrNull(body?.ebayConversationId || body?.ebay_conversation_id, 180),
+    conversationType: stringOrNull(body?.conversationType || body?.conversation_type, 80),
+    draftId: stringOrNull(body?.draftId || body?.draft_id, 120),
+    draftText: typeof body?.draftText === "string" || typeof body?.draft_text === "string"
+      ? safeBodyText(body?.draftText || body?.draft_text, MAX_OPERATOR_TEXT_CHARS)
+      : null,
+    operatorNotes: stringOrNull(body?.operatorNotes || body?.operator_notes, 1000),
+  };
+}
+
+function promptVersion() {
+  return Deno.env.get("EBAY_CONVERSATION_DRAFT_PROMPT_VERSION")?.trim() || PROMPT_VERSION_DEFAULT;
+}
+
+function modelName() {
+  return Deno.env.get("OPENAI_EBAY_CONVERSATION_DRAFT_MODEL")?.trim() ||
+    Deno.env.get("OPENAI_EMAIL_RESPONSE_DRAFT_MODEL")?.trim() ||
+    Deno.env.get("OPENAI_EMAIL_CLASSIFIER_MODEL")?.trim() ||
+    "gpt-4.1-mini";
+}
+
+async function sha256Hex(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
+  return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(",")}}`;
+}
+
+function parseObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function safeArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item) => item !== null && item !== undefined && item !== "") : [];
+}
+
+function latestMessage(messages: Array<Record<string, any>>) {
+  return messages[messages.length - 1] || null;
+}
+
+function latestInboundMessage(messages: Array<Record<string, any>>) {
+  return [...messages].reverse().find((message) => String(message.direction || "").toLowerCase() === "inbound") || null;
+}
+
+function effectiveClassification(row: Record<string, any> | null) {
+  if (!row?.id) return null;
+  const override = parseObject(row.operator_override_payload);
+  const topicTags = safeArray(override.topic_tags || row.topic_tags).map((item) => text(item, 80)).filter(Boolean);
+  const buyerFlags = safeArray(override.buyer_flags || row.buyer_flags).map((item) => text(item, 80)).filter(Boolean);
+  const riskFlags = safeArray(override.risk_flags || row.risk_flags).map((item) => text(item, 80)).filter(Boolean);
+  return {
+    id: row.id,
+    priority: text(override.priority || row.priority, 40) || "normal",
+    response_need: text(override.response_need || row.response_need, 60) || "reply_later",
+    topic_tags: topicTags,
+    buyer_flags: buyerFlags,
+    risk_flags: riskFlags,
+    confidence: row.confidence === null || row.confidence === undefined ? null : Number(row.confidence),
+    summary: text(override.summary || row.summary, 280),
+    reasoning_summary: text(override.reasoning_summary || row.reasoning_summary, 280),
+    recommended_action: text(override.recommended_action || row.recommended_action, 180),
+    review_state: row.review_state || "pending_review",
+    has_operator_override: Object.keys(override).length > 0,
+    latest_message_id: row.latest_message_id || null,
+    latest_ebay_message_id: row.latest_ebay_message_id || null,
+    input_hash: row.input_hash || null,
+    context_hash: row.context_hash || null,
+    created_at: row.created_at || null,
+  };
+}
+
+function compactMessageForDraft(message: Record<string, any> | null) {
+  if (!message) return null;
+  return {
+    id: message.id || null,
+    ebay_message_id: message.ebay_message_id || null,
+    direction: message.direction || null,
+    sender_username: message.sender_username || null,
+    recipient_username: message.recipient_username || null,
+    created_at_ebay: message.created_at_ebay || null,
+    subject: message.subject || null,
+    body: safeBodyText(message.message_body || message.message_body_preview, 2200),
+    has_media: message.has_media === true,
+    media_count: Number(message.media_count || 0),
+  };
+}
+
+function factId(parts: Array<string | null | undefined>) {
+  return parts.map((part) => text(part, 120).replace(/[^a-zA-Z0-9_.:-]+/g, "_")).filter(Boolean).join(":");
+}
+
+function pushFact(facts: GroundingFact[], id: string, label: string, value: unknown, buyerFacing = true) {
+  const normalized = typeof value === "number" || typeof value === "boolean" ? value : text(value, 500);
+  if (normalized === "" || normalized === null || normalized === undefined) return;
+  if (facts.some((fact) => fact.id === id)) return;
+  facts.push({ id, label, value: normalized, buyer_facing: buyerFacing });
+}
+
+function buildGrounding(context: Record<string, any>) {
+  const facts: GroundingFact[] = [];
+  const missing = new Set<string>();
+  const orders = safeArray(context.matched_orders) as Array<Record<string, any>>;
+  const orderLines = safeArray(context.matched_order_lines) as Array<Record<string, any>>;
+  const returns = safeArray(context.matched_returns) as Array<Record<string, any>>;
+  const inventory = safeArray(context.inventory_listing_context) as Array<Record<string, any>>;
+  const history = parseObject(context.buyer_history_summary);
+  const linkConfidence = parseObject(context.link_confidence);
+  const buyer = parseObject(context.buyer);
+
+  pushFact(facts, "link_confidence", "Link confidence", linkConfidence.level || "none", false);
+  pushFact(facts, "buyer:username", "Matched buyer username", buyer.username, false);
+  pushFact(facts, "buyer:confidence", "Buyer match confidence", buyer.confidence, false);
+
+  if (history.prior_order_count !== null && history.prior_order_count !== undefined) {
+    pushFact(facts, "buyer_history:prior_order_count", "Buyer prior order count", history.prior_order_count, false);
+  }
+  if (history.return_count !== null && history.return_count !== undefined) {
+    pushFact(facts, "buyer_history:return_count", "Buyer return count", history.return_count, false);
+  }
+
+  if (!orders.length) missing.add("matched order unavailable");
+  for (const order of orders.slice(0, 8)) {
+    const orderKey = text(order.order_number || order.id, 120) || "unknown_order";
+    pushFact(facts, factId(["order", orderKey, "order_number"]), `Matched order ${orderKey}`, order.order_number);
+    pushFact(facts, factId(["order", orderKey, "status"]), `Order ${orderKey} status`, order.status);
+    pushFact(facts, factId(["order", orderKey, "sale_date"]), `Order ${orderKey} sale date`, order.sale_date);
+    pushFact(facts, factId(["order", orderKey, "paid_on_date"]), `Order ${orderKey} paid date`, order.paid_on_date);
+    pushFact(facts, factId(["order", orderKey, "ship_by_date"]), `Order ${orderKey} ship-by date`, order.ship_by_date);
+    pushFact(facts, factId(["order", orderKey, "shipped_on_date"]), `Order ${orderKey} shipped date`, order.shipped_on_date);
+    pushFact(facts, factId(["order", orderKey, "tracking_number"]), `Order ${orderKey} tracking number`, order.tracking_number);
+    pushFact(facts, factId(["order", orderKey, "shipping_service"]), `Order ${orderKey} shipping service`, order.shipping_service);
+    if (!order.tracking_number) missing.add(`tracking number unavailable for order ${orderKey}`);
+    if (!order.shipped_on_date) missing.add(`shipped date unavailable for order ${orderKey}`);
+  }
+
+  if (!orderLines.length) missing.add("matched order line unavailable");
+  for (const line of orderLines.slice(0, 8)) {
+    const lineKey = text(line.order_number || line.item_number || line.id, 120) || "unknown_line";
+    pushFact(facts, factId(["order_line", lineKey, "item_title"]), `Order line ${lineKey} item title`, line.item_title);
+    pushFact(facts, factId(["order_line", lineKey, "item_number"]), `Order line ${lineKey} item number`, line.item_number);
+    pushFact(facts, factId(["order_line", lineKey, "line_status"]), `Order line ${lineKey} status`, line.line_status);
+    pushFact(facts, factId(["order_line", lineKey, "quantity"]), `Order line ${lineKey} quantity`, line.quantity);
+  }
+
+  if (!returns.length) missing.add("return context unavailable");
+  for (const returnCase of returns.slice(0, 6)) {
+    const returnKey = text(returnCase.ebay_return_id || returnCase.order_number || returnCase.id, 120) || "unknown_return";
+    pushFact(facts, factId(["return", returnKey, "id"]), `Return ${returnKey}`, returnCase.ebay_return_id);
+    pushFact(facts, factId(["return", returnKey, "status"]), `Return ${returnKey} status`, returnCase.status);
+    pushFact(facts, factId(["return", returnKey, "reason"]), `Return ${returnKey} reason`, returnCase.return_reason);
+    pushFact(facts, factId(["return", returnKey, "opened_at"]), `Return ${returnKey} opened date`, returnCase.opened_at);
+    pushFact(facts, factId(["return", returnKey, "closed_at"]), `Return ${returnKey} closed date`, returnCase.closed_at);
+    pushFact(facts, factId(["return", returnKey, "tracking"]), `Return ${returnKey} tracking`, returnCase.return_tracking_number);
+  }
+
+  for (const link of inventory.slice(0, 6)) {
+    const inventoryKey = text(link.listing_id || link.offer_id || link.sku || link.item_type_id, 120) || "unknown_listing";
+    pushFact(facts, factId(["inventory", inventoryKey, "listing_id"]), `Inventory listing ${inventoryKey}`, link.listing_id);
+    pushFact(facts, factId(["inventory", inventoryKey, "status"]), `Inventory listing ${inventoryKey} status`, link.status, false);
+  }
+
+  if (String(linkConfidence.level || "none") === "none" || String(linkConfidence.level || "none") === "weak") {
+    missing.add("strong link confidence unavailable");
+  }
+
+  return {
+    facts,
+    missing_context_options: [...missing].slice(0, 40),
+  };
+}
+
+function shippingQuestionLikely(input: Record<string, any>) {
+  const latestInbound = input.latest_inbound_message || {};
+  const haystack = stableStringify([
+    latestInbound.subject,
+    latestInbound.body,
+    input.classification?.topic_tags,
+  ]).toLowerCase();
+  return /\b(ship|shipped|shipping|tracking|track|where is|where's|delivery|delivered|arrive|order status)\b/.test(haystack);
+}
+
+function buildFallbackDraft(input: Record<string, any>, reason: string): DraftOutput {
+  const grounding = input.grounding || {};
+  const facts = safeArray(grounding.facts) as GroundingFact[];
+  const findFact = (suffix: string) => facts.find((fact) => fact.id.endsWith(suffix));
+  const shippedDate = findFact(":shipped_on_date");
+  const tracking = findFact(":tracking_number");
+  const factsUsed = new Set<string>();
+  const missing = new Set<string>(safeArray(grounding.missing_context_options).map((item) => text(item, 180)).filter(Boolean));
+
+  let draftText = "Thank you for reaching out. We will review the details connected to your message and follow up as soon as possible.";
+  if (shippingQuestionLikely(input)) {
+    if (tracking?.value) {
+      const shippedPart = shippedDate?.value ? ` The order information available to us shows the item was shipped on ${shippedDate.value}.` : "";
+      draftText = `Thank you for reaching out.${shippedPart} The tracking number available for the order is ${tracking.value}. We will review the details and follow up if anything else is needed.`;
+      if (shippedDate?.id && shippedDate.value) factsUsed.add(shippedDate.id);
+      factsUsed.add(tracking.id);
+    } else if (shippedDate?.value) {
+      draftText = `Thank you for reaching out. The order information available to us shows the item was shipped on ${shippedDate.value}. I do not currently see tracking information available here, but we can look into it and follow up.`;
+      factsUsed.add(shippedDate.id);
+      missing.add("tracking number unavailable");
+    } else {
+      draftText = "Thank you for reaching out. We will look into the order details and follow up as soon as possible.";
+    }
+  }
+
+  return {
+    draft_text: draftText,
+    tone: "professional_friendly",
+    summary_of_intent: "Provide a conservative buyer-facing acknowledgement while the operator verifies details.",
+    facts_used: [...factsUsed],
+    missing_context: [...missing].slice(0, 8),
+    safety_warnings: [`safe fallback used: ${reason}`],
+    confidence: 0.55,
+  };
+}
+
+function buildDraftInput(
+  context: Record<string, any>,
+  classification: Record<string, any> | null,
+  mode: Mode,
+  operatorDraftText: string | null,
+  previousDraft: Record<string, any> | null,
+  version: string,
+) {
+  const messages = safeArray(context.messages) as Array<Record<string, any>>;
+  const grounding = buildGrounding(context);
+  return {
+    conversation: context.conversation || {},
+    latest_message: compactMessageForDraft(latestMessage(messages)),
+    latest_inbound_message: compactMessageForDraft(latestInboundMessage(messages)),
+    timeline: messages.slice(-60).map(compactMessageForDraft),
+    classification: classification ? effectiveClassification(classification) : null,
+    objective_context: {
+      buyer: context.buyer || {},
+      matched_orders: safeArray(context.matched_orders),
+      matched_order_lines: safeArray(context.matched_order_lines),
+      matched_returns: safeArray(context.matched_returns),
+      buyer_history_summary: context.buyer_history_summary || null,
+      buyer_value_line_breakdown: safeArray(context.buyer_value_line_breakdown),
+      inventory_listing_context: safeArray(context.inventory_listing_context),
+      link_confidence: context.link_confidence || {},
+      context_warnings: safeArray(context.warnings),
+    },
+    grounding,
+    operator_draft: operatorDraftText || null,
+    previous_draft: previousDraft
+      ? {
+        id: previousDraft.id || null,
+        draft_status: previousDraft.draft_status || null,
+        final_text: previousDraft.final_text || previousDraft.edited_text || previousDraft.draft_text || null,
+        grounding_summary: previousDraft.grounding_summary || {},
+        created_at: previousDraft.created_at || null,
+      }
+      : null,
+    draft_request: {
+      mode,
+      generator_name: GENERATOR_NAME,
+      generator_version: GENERATOR_VERSION,
+      prompt_version: version,
+      output_is_internal_suggestion: true,
+      human_review_required: true,
+      sends_allowed: false,
+      ebay_mutations_allowed: false,
+      outlook_mutations_allowed: false,
+    },
+  };
+}
+
+function buildPrompt(version: string) {
+  return `
+You are an AI draft assistant for OG eBay Messaging Ops.
+Return strict JSON only. Do not include markdown wrappers, prose outside JSON, or chain-of-thought.
+Your output is an internal editable draft suggestion only. A human operator must review it. Never imply that a message was sent or should be sent automatically.
+
+Draft style:
+- Write a concise eBay seller reply, not an Outlook email.
+- Use a professional, friendly, calm tone.
+- Prefer one or two short paragraphs.
+- Do not add a subject line or email signature.
+- Do not mention internal systems, databases, Supabase, AI, classification, link confidence, or missing records to the buyer.
+- If facts are missing, write a general safe acknowledgement and say we will review/look into the details.
+
+Grounding rules:
+- Use only the supplied eBay conversation timeline, latest inbound buyer message, classification, and objective_context.
+- grounding.facts contains fact ids that may be cited in facts_used. facts_used must contain only those exact ids.
+- Buyer-facing factual claims are allowed only when directly supported by objective_context and the relevant grounding fact.
+- It is okay to acknowledge what the buyer said as a concern, but do not convert buyer claims into verified facts.
+- Do not hallucinate tracking numbers, shipment status, refund status, return approval, replacement availability, exact delivery timing, or inventory availability.
+- Do not say an item shipped unless matched order context includes shipped_on_date or an explicitly shipped status.
+- Do not say a tracking number exists unless matched order/shipping context includes tracking_number.
+- Do not say a refund was issued, return was accepted, cancellation completed, or package will arrive on a date unless provided context directly supports that exact fact.
+
+Shipping/tracking:
+- If the buyer asks where an order is or whether it shipped, inspect matched_orders first.
+- If shipped_on_date exists but tracking is missing, you may say the available order information shows shipment on that date and tracking is not currently visible/available here.
+- If tracking_number exists, you may include it exactly.
+- If no order/shipping context exists, use a general safe reply and do not mention specific shipment status.
+
+Improve mode:
+- If draft_request.mode is "improve", improve the operator_draft for clarity, tone, and organization.
+- Preserve the operator's meaning and caveats.
+- Do not add facts that are not in objective_context or grounding.facts.
+- Do not remove uncertainty where context is missing.
+
+Output JSON fields:
+- draft_text: buyer-facing draft only.
+- tone: short label such as professional_friendly.
+- summary_of_intent: internal one-sentence summary.
+- facts_used: grounding fact ids used for factual claims.
+- missing_context: short internal list of missing context that affected the draft.
+- safety_warnings: short internal list of caveats for the operator.
+- confidence: number from 0 to 1.
+
+Prompt version: ${version}.
+`.trim();
+}
+
+function jsonSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "draft_text",
+      "tone",
+      "summary_of_intent",
+      "facts_used",
+      "missing_context",
+      "safety_warnings",
+      "confidence",
+    ],
+    properties: {
+      draft_text: { type: "string", maxLength: MAX_DRAFT_TEXT_CHARS },
+      tone: { type: "string", maxLength: 80 },
+      summary_of_intent: { type: "string", maxLength: 300 },
+      facts_used: { type: "array", items: { type: "string", maxLength: 240 }, maxItems: 20 },
+      missing_context: { type: "array", items: { type: "string", maxLength: 240 }, maxItems: 20 },
+      safety_warnings: { type: "array", items: { type: "string", maxLength: 240 }, maxItems: 20 },
+      confidence: { type: "number", minimum: 0, maximum: 1 },
+    },
+  };
+}
+
+function extractOutputText(payload: any): string {
+  if (typeof payload?.output_text === "string") return payload.output_text;
+  const chunks = payload?.output
+    ?.flatMap((entry: any) => entry?.content || [])
+    ?.map((content: any) => content?.text || "")
+    ?.filter(Boolean);
+  return Array.isArray(chunks) ? chunks.join("\n").trim() : "";
+}
+
+async function callOpenAI(input: Record<string, unknown>, prompt: string, model: string) {
+  const apiKey = requiredEnv("OPENAI_API_KEY");
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        input: [
+          { role: "system", content: [{ type: "input_text", text: prompt }] },
+          { role: "user", content: [{ type: "input_text", text: stableStringify(input) }] },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "ebay_conversation_response_draft",
+            strict: true,
+            schema: jsonSchema(),
+          },
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      throw new DraftError("openai_request_failed", {
+        phase: "openai",
+        transient: TRANSIENT_OPENAI_STATUSES.has(response.status),
+        details: { status: response.status },
+      });
+    }
+
+    const payload = await response.json().catch(() => null);
+    const outputText = extractOutputText(payload);
+    if (!outputText) throw new DraftError("openai_empty_output", { phase: "openai_parse" });
+    return JSON.parse(outputText);
+  } catch (error) {
+    if (error instanceof DraftError) throw error;
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new DraftError("openai_timeout", { phase: "openai", transient: true });
+    }
+    if (error instanceof SyntaxError) {
+      throw new DraftError("openai_invalid_json", { phase: "openai_parse" });
+    }
+    throw new DraftError("openai_network_failure", { phase: "openai", transient: true });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function containsAny(textValue: string, patterns: RegExp[]) {
+  return patterns.some((pattern) => pattern.test(textValue));
+}
+
+function allowedOrderNumbers(input: Record<string, any>) {
+  return new Set((safeArray(input.objective_context?.matched_orders) as Array<Record<string, any>>)
+    .map((order) => text(order.order_number, 120))
+    .filter(Boolean));
+}
+
+function validateDraftOutput(raw: unknown, input: Record<string, any>) {
+  const errors: string[] = [];
+  const safetyWarnings = new Set<string>();
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {
+      ok: false,
+      value: buildFallbackDraft(input, "model output was not an object"),
+      validationErrors: ["output_not_object"],
+      safetyWarnings: ["model output was not an object"],
+      fallbackUsed: true,
+    };
+  }
+
+  const row = raw as Record<string, unknown>;
+  const draftText = safeBodyText(row.draft_text, MAX_DRAFT_TEXT_CHARS);
+  const tone = text(row.tone, 80) || "professional_friendly";
+  const summaryOfIntent = text(row.summary_of_intent, 300) || "Draft a safe operator-reviewed buyer reply.";
+  const factsUsed = safeArray(row.facts_used).map((item) => text(item, 240)).filter(Boolean).slice(0, 20);
+  const missingContext = safeArray(row.missing_context).map((item) => text(item, 240)).filter(Boolean).slice(0, 20);
+  const modelWarnings = safeArray(row.safety_warnings).map((item) => text(item, 240)).filter(Boolean).slice(0, 20);
+  const confidence = Math.min(Math.max(Number(row.confidence), 0), 1);
+
+  if (!draftText) errors.push("empty_draft_text");
+  if (String(row.draft_text || "").length > MAX_DRAFT_TEXT_CHARS) errors.push("draft_text_too_long");
+  if (!Number.isFinite(confidence)) errors.push("invalid_confidence");
+  for (const field of ["draft_text", "tone", "summary_of_intent", "facts_used", "missing_context", "safety_warnings", "confidence"]) {
+    if (!(field in row)) errors.push(`missing_${field}`);
+  }
+  if (!Array.isArray(row.facts_used)) errors.push("invalid_facts_used");
+  if (!Array.isArray(row.missing_context)) errors.push("invalid_missing_context");
+  if (!Array.isArray(row.safety_warnings)) errors.push("invalid_safety_warnings");
+
+  const allowedFactIds = new Set((safeArray(input.grounding?.facts) as GroundingFact[]).map((fact) => fact.id));
+  for (const fact of factsUsed) {
+    if (!allowedFactIds.has(fact)) errors.push(`unsupported_fact_used:${fact}`);
+  }
+
+  const combined = draftText.toLowerCase();
+  const orderNumbers = allowedOrderNumbers(input);
+  const mentionedOrders = draftText.match(/\b\d{2}-\d{5}-\d{5}\b/g) || [];
+  for (const orderNumber of mentionedOrders) {
+    if (!orderNumbers.has(orderNumber)) errors.push(`unsupported_order_number:${orderNumber}`);
+  }
+
+  const orderRows = safeArray(input.objective_context?.matched_orders) as Array<Record<string, any>>;
+  const hasTracking = orderRows.some((order) => text(order.tracking_number, 200));
+  const hasShippedDate = orderRows.some((order) => text(order.shipped_on_date, 120));
+  const knownTrackingNumbers = new Set(orderRows.map((order) => text(order.tracking_number, 200)).filter(Boolean));
+  const trackingLike = draftText.match(/\b[A-Z0-9]{10,34}\b/g) || [];
+  if (containsAny(combined, [/\btracking\s+(number|#)\s+(is|:)/i]) && !hasTracking) {
+    errors.push("unsupported_tracking_number_claim");
+    safetyWarnings.add("tracking number claim was not supported by context");
+  }
+  for (const token of trackingLike) {
+    if (/\d/.test(token) && !knownTrackingNumbers.has(token) && !orderNumbers.has(token)) {
+      errors.push(`unsupported_tracking_like_token:${token}`);
+    }
+  }
+  if (containsAny(combined, [/\b(shipped|has shipped|was shipped|is in transit|out for delivery|delivered|label created)\b/i]) && !hasShippedDate) {
+    errors.push("unsupported_shipping_status_claim");
+    safetyWarnings.add("shipment status wording was not supported by context");
+  }
+  if (containsAny(combined, [
+    /\b(refund(ed)?|refund has been|refund is|refund will be|issue a refund|process a refund)\b/i,
+    /\b(return (has been )?(accepted|approved)|return is approved)\b/i,
+    /\b(replacement|store credit|discount|compensation)\s+(is|will be|has been|can be)\b/i,
+    /\b(arrive tomorrow|arrives tomorrow|will arrive|delivered by|today|tomorrow)\b/i,
+  ])) {
+    errors.push("unsupported_commitment_or_timeline_claim");
+    safetyWarnings.add("draft included a refund, return, replacement, or timeline claim needing review");
+  }
+  if (containsAny(combined, [/\b(database|supabase|internal system|our system has no|records show no)\b/i])) {
+    errors.push("internal_system_language");
+    safetyWarnings.add("draft exposed internal system wording");
+  }
+  if (containsAny(combined, [
+    /\b(we|i|our team|og)\s+(are|were|am|was)\s+(at fault|liable|responsible|negligent|wrong)\b/i,
+    /\bthis was our mistake\b/i,
+  ])) {
+    errors.push("unsafe_fault_admission");
+    safetyWarnings.add("draft included a fault or liability admission");
+  }
+
+  const normalized: DraftOutput = {
+    draft_text: draftText,
+    tone,
+    summary_of_intent: summaryOfIntent,
+    facts_used: factsUsed,
+    missing_context: missingContext,
+    safety_warnings: [...new Set([...modelWarnings, ...safetyWarnings])].slice(0, 20),
+    confidence: Number.isFinite(confidence) ? confidence : 0,
+  };
+
+  if (errors.length) {
+    return {
+      ok: false,
+      value: buildFallbackDraft(input, errors[0] || "validation failed"),
+      validationErrors: [...new Set(errors)].slice(0, 40),
+      safetyWarnings: normalized.safety_warnings,
+      fallbackUsed: true,
+      original: normalized,
+    };
+  }
+
+  return {
+    ok: true,
+    value: normalized,
+    validationErrors: [],
+    safetyWarnings: normalized.safety_warnings,
+    fallbackUsed: false,
+  };
+}
+
+function currentMessageTime(message: Record<string, any> | null) {
+  return message?.created_at_ebay || message?.created_at || null;
+}
+
+async function loadCurrentLatestMessage(supabase: ServiceClient, conversationId: string) {
+  const { data, error } = await supabase
+    .from("ebay_conversation_messages")
+    .select("id, ebay_message_id, direction, created_at_ebay, created_at")
+    .eq("conversation_id", conversationId)
+    .order("created_at_ebay", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new DraftError("latest_message_lookup_failed", { phase: "draft_staleness" });
+  return data as Record<string, any> | null;
+}
+
+function staleStatus(row: Record<string, any>, latest: Record<string, any> | null) {
+  const checkedAt = new Date().toISOString();
+  const latestId = latest?.id || null;
+  const latestTime = currentMessageTime(latest);
+  const generatedAt = row.created_at || null;
+  const latestIsInbound = String(latest?.direction || "").toLowerCase() === "inbound";
+  const latestChanged = Boolean(row.latest_message_id && latestId && row.latest_message_id !== latestId);
+  const generatedTime = generatedAt ? Date.parse(generatedAt) : NaN;
+  const messageTime = latestTime ? Date.parse(latestTime) : NaN;
+  const newerMessage = Number.isFinite(generatedTime) && Number.isFinite(messageTime) && messageTime > generatedTime + 1000;
+  const isStale = latestChanged || newerMessage;
+  return {
+    status: isStale ? "stale" : "current",
+    is_stale: isStale,
+    reason_code: isStale
+      ? latestIsInbound ? "newer_inbound_message" : "latest_message_changed"
+      : "latest_message_matches_draft",
+    message: isStale
+      ? latestIsInbound
+        ? "This draft was generated before the latest buyer message. Regenerate recommended."
+        : "This draft was generated before the latest conversation message. Review or regenerate before using it."
+      : "Draft is current for the latest stored conversation message.",
+    generated_at: generatedAt,
+    checked_at: checkedAt,
+    draft_latest_message_id: row.latest_message_id || null,
+    current_latest_message_id: latestId,
+    current_latest_ebay_message_id: latest?.ebay_message_id || null,
+  };
+}
+
+function publicDraft(row: Record<string, any>, staleness: Record<string, unknown> | null = null) {
+  return {
+    id: row.id,
+    conversation_id: row.conversation_id,
+    latest_message_id: row.latest_message_id || null,
+    classification_id: row.classification_id || null,
+    draft_status: row.draft_status || "generated",
+    draft_text: row.draft_text || "",
+    edited_text: row.edited_text || "",
+    final_text: row.final_text || row.edited_text || row.draft_text || "",
+    source_mode: row.source_mode || "generate",
+    model_name: row.model_name || null,
+    prompt_version: row.prompt_version || null,
+    input_hash: row.input_hash || null,
+    context_hash: row.context_hash || null,
+    grounding_summary: row.grounding_summary || {},
+    safety_warnings: safeArray(row.safety_warnings),
+    validation_status: row.validation_status || "not_validated",
+    validation_errors: safeArray(row.validation_errors),
+    operator_notes: row.operator_notes || null,
+    confidence: row.confidence === null || row.confidence === undefined ? null : Number(row.confidence),
+    draft_version: Number(row.draft_version || 1),
+    is_current: row.is_current === true,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+    discarded_at: row.discarded_at || null,
+    superseded_at: row.superseded_at || null,
+    staleness,
+  };
+}
+
+async function loadDraftRows(supabase: ServiceClient, conversationId: string, limit = 20) {
+  const { data, error } = await supabase
+    .from("ebay_conversation_response_drafts")
+    .select("id, conversation_id, latest_message_id, classification_id, draft_status, draft_text, edited_text, final_text, source_mode, model_name, prompt_version, input_hash, context_hash, grounding_summary, safety_warnings, validation_status, validation_errors, operator_notes, confidence, draft_version, is_current, created_at, updated_at, discarded_at, superseded_at")
+    .eq("conversation_id", conversationId)
+    .order("is_current", { ascending: false })
+    .order("draft_version", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new DraftError("draft_view_failed", { phase: "draft_view" });
+  return (data || []) as Array<Record<string, any>>;
+}
+
+async function viewDrafts(supabase: ServiceClient, conversationId: string) {
+  const [rows, latest] = await Promise.all([
+    loadDraftRows(supabase, conversationId, 20),
+    loadCurrentLatestMessage(supabase, conversationId),
+  ]);
+  const drafts = rows.map((row) => publicDraft(row, staleStatus(row, latest)));
+  return {
+    ok: true,
+    mode: "view",
+    conversation_id: conversationId,
+    drafts,
+    current_draft: drafts.find((draft) => draft.is_current && !draft.discarded_at) || null,
+    draft_count: drafts.length,
+    safety: safetyEnvelope(),
+  };
+}
+
+async function loadCurrentClassification(supabase: ServiceClient, conversationId: string) {
+  const { data, error } = await supabase
+    .from("ebay_conversation_classifications")
+    .select("*")
+    .eq("conversation_id", conversationId)
+    .eq("is_current", true)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new DraftError("classification_lookup_failed", { phase: "draft_input" });
+  return data as Record<string, any> | null;
+}
+
+async function loadDraftById(supabase: ServiceClient, draftId: string) {
+  const { data, error } = await supabase
+    .from("ebay_conversation_response_drafts")
+    .select("*")
+    .eq("id", draftId)
+    .maybeSingle();
+  if (error) throw new DraftError("draft_lookup_failed", { phase: "draft_lookup" });
+  if (!data?.id) throw new DraftError("draft_not_found", { status: 404, phase: "draft_lookup" });
+  return data as Record<string, any>;
+}
+
+async function loadCurrentDraft(supabase: ServiceClient, conversationId: string) {
+  const { data, error } = await supabase
+    .from("ebay_conversation_response_drafts")
+    .select("*")
+    .eq("conversation_id", conversationId)
+    .eq("is_current", true)
+    .is("discarded_at", null)
+    .order("draft_version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new DraftError("current_draft_lookup_failed", { phase: "draft_lookup" });
+  return data as Record<string, any> | null;
+}
+
+async function nextDraftVersion(supabase: ServiceClient, conversationId: string) {
+  const { data, error } = await supabase
+    .from("ebay_conversation_response_drafts")
+    .select("draft_version")
+    .eq("conversation_id", conversationId)
+    .order("draft_version", { ascending: false })
+    .limit(1);
+  if (error) throw new DraftError("draft_version_lookup_failed", { phase: "draft_write" });
+  return Number(data?.[0]?.draft_version || 0) + 1;
+}
+
+function groundingSummary(input: Record<string, any>, output: DraftOutput, validation: Record<string, unknown>) {
+  const facts = safeArray(input.grounding?.facts) as GroundingFact[];
+  const factById = new Map(facts.map((fact) => [fact.id, fact]));
+  return {
+    generator_name: GENERATOR_NAME,
+    generator_version: GENERATOR_VERSION,
+    prompt_version: input.draft_request?.prompt_version || null,
+    facts_available: facts,
+    facts_used: output.facts_used.map((id) => factById.get(id) || { id, label: id, value: null }),
+    missing_context: output.missing_context,
+    safety_warnings: output.safety_warnings,
+    validation,
+    latest_message: input.latest_message,
+    latest_inbound_message: input.latest_inbound_message,
+    link_confidence: input.objective_context?.link_confidence || {},
+    context_warnings: input.objective_context?.context_warnings || [],
+  };
+}
+
+async function insertDraft(
+  supabase: ServiceClient,
+  options: {
+    conversationId: string;
+    latestMessageId: string | null;
+    classificationId: string | null;
+    sourceMode: string;
+    model: string;
+    promptVersionValue: string;
+    promptHash: string;
+    inputHash: string;
+    contextHash: string;
+    inputSnapshot: Record<string, any>;
+    output: DraftOutput;
+    validationStatus: "valid" | "warning" | "invalid" | "error";
+    validationErrors: string[];
+    aiOutput: Record<string, unknown>;
+    actorId: string | null;
+    operatorNotes: string | null;
+  },
+) {
+  const nowIso = new Date().toISOString();
+  const version = await nextDraftVersion(supabase, options.conversationId);
+  const { error: clearError } = await supabase
+    .from("ebay_conversation_response_drafts")
+    .update({ is_current: false, superseded_at: nowIso, draft_status: "superseded" })
+    .eq("conversation_id", options.conversationId)
+    .eq("is_current", true);
+  if (clearError) throw new DraftError("draft_supersede_failed", { phase: "draft_write" });
+
+  const validation = {
+    status: options.validationStatus,
+    errors: options.validationErrors,
+  };
+  const { data, error } = await supabase
+    .from("ebay_conversation_response_drafts")
+    .insert({
+      conversation_id: options.conversationId,
+      latest_message_id: options.latestMessageId,
+      classification_id: options.classificationId,
+      draft_status: options.validationStatus === "error" ? "error" : "generated",
+      draft_text: options.output.draft_text,
+      edited_text: null,
+      final_text: options.output.draft_text,
+      source_mode: options.sourceMode,
+      model_name: options.model,
+      prompt_version: options.promptVersionValue,
+      prompt_hash: options.promptHash,
+      input_hash: options.inputHash,
+      context_hash: options.contextHash,
+      grounding_summary: groundingSummary(options.inputSnapshot, options.output, validation),
+      safety_warnings: options.output.safety_warnings,
+      validation_status: options.validationStatus,
+      validation_errors: options.validationErrors,
+      ai_output: options.aiOutput,
+      input_snapshot: options.inputSnapshot,
+      operator_notes: options.operatorNotes,
+      confidence: options.output.confidence,
+      draft_version: version,
+      is_current: options.validationStatus === "valid" || options.validationStatus === "warning",
+      created_by: options.actorId,
+      updated_by: options.actorId,
+    })
+    .select("*")
+    .single();
+  if (error || !data?.id) throw new DraftError("draft_insert_failed", { phase: "draft_write", details: { message: error?.message } });
+  const latest = await loadCurrentLatestMessage(supabase, options.conversationId);
+  return publicDraft(data as Record<string, any>, staleStatus(data as Record<string, any>, latest));
+}
+
+async function generateDraft(
+  supabase: ServiceClient,
+  rpcSupabase: ServiceClient,
+  input: Input,
+  admin: { userId: string | null },
+) {
+  const conversation = await resolveEbayConversation(supabase, {
+    conversationId: input.conversationId,
+    ebayConversationId: input.ebayConversationId,
+    conversationType: input.conversationType,
+  });
+  const previousDraft = input.draftId
+    ? await loadDraftById(supabase, input.draftId)
+    : await loadCurrentDraft(supabase, conversation.id);
+  const operatorDraft = input.mode === "improve"
+    ? input.draftText || previousDraft?.final_text || previousDraft?.edited_text || previousDraft?.draft_text || null
+    : null;
+  if (input.mode === "improve" && !operatorDraft) {
+    throw new DraftError("draft_text_required", { status: 400, phase: "input" });
+  }
+
+  const promptVersionValue = promptVersion();
+  const prompt = buildPrompt(promptVersionValue);
+  const promptHash = await sha256Hex(stableStringify({ prompt, schema: jsonSchema(), generator_version: GENERATOR_VERSION }));
+  const model = modelName();
+  const [context, classification] = await Promise.all([
+    buildEbayConversationContext(supabase, conversation.id, rpcSupabase),
+    loadCurrentClassification(supabase, conversation.id),
+  ]);
+  const draftInput = buildDraftInput(
+    context as Record<string, any>,
+    classification,
+    input.mode,
+    operatorDraft,
+    previousDraft,
+    promptVersionValue,
+  );
+  const contextHash = await sha256Hex(stableStringify(context));
+  const inputHash = await sha256Hex(stableStringify({
+    generator_name: GENERATOR_NAME,
+    generator_version: GENERATOR_VERSION,
+    prompt_hash: promptHash,
+    input: draftInput,
+  }));
+
+  const rawOutput = await callOpenAI(draftInput, prompt, model);
+  const validation = validateDraftOutput(rawOutput, draftInput);
+  const output = validation.value;
+  const sourceMode = validation.fallbackUsed ? "system_fallback" : input.mode === "regenerate" ? "regenerate" : input.mode === "improve" ? "improve" : "generate";
+  const validationStatus = validation.ok ? "valid" : "warning";
+  const latest = draftInput.latest_message as Record<string, any> | null;
+  const draft = await insertDraft(supabase, {
+    conversationId: conversation.id,
+    latestMessageId: latest?.id || null,
+    classificationId: classification?.id || null,
+    sourceMode,
+    model,
+    promptVersionValue,
+    promptHash,
+    inputHash,
+    contextHash,
+    inputSnapshot: draftInput,
+    output,
+    validationStatus,
+    validationErrors: validation.validationErrors,
+    aiOutput: {
+      raw: parseObject(rawOutput),
+      normalized: validation.ok ? output : (validation as any).original || output,
+      fallback_used: validation.fallbackUsed,
+    },
+    actorId: admin.userId,
+    operatorNotes: input.operatorNotes,
+  });
+
+  return {
+    ok: true,
+    mode: input.mode,
+    conversation_id: conversation.id,
+    draft,
+    draft_id: draft.id,
+    fallback_used: validation.fallbackUsed,
+    validation_status: draft.validation_status,
+    validation_errors: draft.validation_errors,
+    safety: safetyEnvelope(),
+  };
+}
+
+async function saveEdit(
+  supabase: ServiceClient,
+  input: Input,
+  admin: { userId: string | null },
+) {
+  if (!input.draftText) throw new DraftError("draft_text_required", { status: 400, phase: "input" });
+  const draft = input.draftId
+    ? await loadDraftById(supabase, input.draftId)
+    : input.conversationId ? await loadCurrentDraft(supabase, input.conversationId) : null;
+  if (!draft?.id) throw new DraftError("draft_not_found", { status: 404, phase: "draft_lookup" });
+
+  const { data, error } = await supabase
+    .from("ebay_conversation_response_drafts")
+    .update({
+      draft_status: "saved",
+      edited_text: input.draftText,
+      final_text: input.draftText,
+      operator_notes: input.operatorNotes,
+      updated_by: admin.userId,
+    })
+    .eq("id", draft.id)
+    .select("*")
+    .single();
+  if (error || !data?.id) throw new DraftError("draft_save_failed", { phase: "draft_write" });
+  const latest = await loadCurrentLatestMessage(supabase, data.conversation_id);
+  return {
+    ok: true,
+    mode: "save_edit",
+    conversation_id: data.conversation_id,
+    draft: publicDraft(data as Record<string, any>, staleStatus(data as Record<string, any>, latest)),
+    safety: safetyEnvelope(),
+  };
+}
+
+async function discardDraft(
+  supabase: ServiceClient,
+  input: Input,
+  admin: { userId: string | null },
+) {
+  const draft = input.draftId
+    ? await loadDraftById(supabase, input.draftId)
+    : input.conversationId ? await loadCurrentDraft(supabase, input.conversationId) : null;
+  if (!draft?.id) throw new DraftError("draft_not_found", { status: 404, phase: "draft_lookup" });
+  const nowIso = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("ebay_conversation_response_drafts")
+    .update({
+      draft_status: "discarded",
+      is_current: false,
+      discarded_at: nowIso,
+      updated_by: admin.userId,
+    })
+    .eq("id", draft.id)
+    .select("*")
+    .single();
+  if (error || !data?.id) throw new DraftError("draft_discard_failed", { phase: "draft_write" });
+  const latest = await loadCurrentLatestMessage(supabase, data.conversation_id);
+  return {
+    ok: true,
+    mode: "discard",
+    conversation_id: data.conversation_id,
+    draft: publicDraft(data as Record<string, any>, staleStatus(data as Record<string, any>, latest)),
+    safety: safetyEnvelope(),
+  };
+}
+
+function safetyEnvelope() {
+  return {
+    sendsEnabled: false,
+    messagesSent: 0,
+    ebayMutationsPerformed: false,
+    outlookMutationsPerformed: false,
+    returnMutationsPerformed: false,
+  };
+}
+
+function errorPayload(error: unknown) {
+  const known = error instanceof DraftError || error instanceof EbayConversationContextError ? error : null;
+  return {
+    status: known?.status || 500,
+    body: {
+      ok: false,
+      error: known?.code || "unknown_error",
+      phase: known?.phase || "unknown",
+      message: error instanceof Error ? error.message : String(error || "Unknown error"),
+      safety: safetyEnvelope(),
+    },
+  };
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
+  if (req.method !== "POST") return json(req, 405, { ok: false, error: "method_not_allowed", safety: safetyEnvelope() });
+
+  const supabase = serviceClient();
+  try {
+    const admin = await requireAdmin(req, supabase);
+    const input = await parseInput(req);
+    const rpcSupabase = admin.actorType === "admin" ? authenticatedClient(admin.accessToken) : supabase;
+
+    if (input.mode === "view") {
+      const conversation = await resolveEbayConversation(supabase, {
+        conversationId: input.conversationId,
+        ebayConversationId: input.ebayConversationId,
+        conversationType: input.conversationType,
+      });
+      return json(req, 200, await viewDrafts(supabase, conversation.id));
+    }
+    if (input.mode === "save_edit") return json(req, 200, await saveEdit(supabase, input, admin));
+    if (input.mode === "discard") return json(req, 200, await discardDraft(supabase, input, admin));
+    if (["generate", "regenerate", "improve"].includes(input.mode)) {
+      return json(req, 200, await generateDraft(supabase, rpcSupabase, input, admin));
+    }
+
+    throw new DraftError("invalid_mode", { status: 400, phase: "input" });
+  } catch (error) {
+    const payload = errorPayload(error);
+    return json(req, payload.status, payload.body);
+  }
+});

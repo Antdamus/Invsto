@@ -19,6 +19,8 @@
     fetchEbayConversations,
     fetchEbayConversationMessages,
     fetchEbayConversationContext,
+    fetchEbayConversationDrafts,
+    requestEbayConversationDraftAction,
     runEbayMessageSync,
     classifyEbayConversation,
     classifyRecentEbayConversations,
@@ -382,6 +384,8 @@
       selectedEbayConversationId: state.selectedEbayConversationId,
       ebayConversationSyncLoading: state.ebayConversationSyncLoading,
       ebayConversationSyncResult: state.ebayConversationSyncResult,
+      ebayConversationDraftLoadingId: state.ebayConversationDraftLoadingId,
+      ebayConversationDraftActionLoadingId: state.ebayConversationDraftActionLoadingId,
     };
   });
 
@@ -3345,6 +3349,175 @@
     `;
   }
 
+  function ebayDraftPayload(conversationId, state = adminClassificationState) {
+    return state.ebayConversationDraftsById?.[conversationId] || null;
+  }
+
+  function currentEbayConversationDraft(conversationId, state = adminClassificationState) {
+    const payload = ebayDraftPayload(conversationId, state);
+    const drafts = safeArray(payload?.drafts);
+    return payload?.current_draft || drafts.find((draft) => draft.is_current === true && !draft.discarded_at) || null;
+  }
+
+  function ebayDraftDisplayText(draft) {
+    return safeText(draft?.final_text || draft?.edited_text || draft?.draft_text, "");
+  }
+
+  function ebayDraftSuccessMessage(mode) {
+    const labels = {
+      generate: "AI reply draft generated. Nothing was sent.",
+      regenerate: "AI reply draft regenerated. Nothing was sent.",
+      improve: "Draft improved and saved as the current suggestion. Nothing was sent.",
+      save_edit: "Draft edits saved. Nothing was sent.",
+      discard: "Draft discarded and preserved in history. Nothing was sent.",
+    };
+    return labels[mode] || "Draft action completed. Nothing was sent.";
+  }
+
+  function renderEbayDraftFactRows(items = [], emptyText = "No facts listed") {
+    const rows = safeArray(items);
+    if (!rows.length) return `<div class="classification-empty matched-context-empty is-quiet">${escapeHtml(emptyText)}</div>`;
+    return `
+      <div class="ebay-draft-grounding-list">
+        ${rows.slice(0, 10).map((item) => {
+          const row = item && typeof item === "object" ? item : { label: String(item || ""), value: "" };
+          const label = safeText(row.label || row.id, "Fact");
+          const value = row.value === null || row.value === undefined || row.value === "" ? "" : `: ${String(row.value)}`;
+          return `<span>${escapeHtml(label)}${escapeHtml(value)}</span>`;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  function renderEbayDraftGrounding(draft) {
+    const grounding = draft?.grounding_summary && typeof draft.grounding_summary === "object" ? draft.grounding_summary : {};
+    const factsUsed = safeArray(grounding.facts_used);
+    const missing = safeArray(grounding.missing_context || draft?.missing_context);
+    const safety = safeArray(grounding.safety_warnings || draft?.safety_warnings);
+    const validationErrors = safeArray(draft?.validation_errors);
+    const warnings = [...safety, ...validationErrors.map((item) => `Validation: ${item}`)];
+    return `
+      <details class="ebay-draft-grounding" open>
+        <summary>
+          <span>Grounding</span>
+          ${renderBadge(`${factsUsed.length} facts`, factsUsed.length ? "category" : "muted")}
+        </summary>
+        <div class="ebay-draft-grounding-grid">
+          <section>
+            <strong>Facts Used</strong>
+            ${renderEbayDraftFactRows(factsUsed, "No objective facts were used. Draft should stay general.")}
+          </section>
+          <section>
+            <strong>Missing Context</strong>
+            ${renderEbayDraftFactRows(missing, "No missing context flagged.")}
+          </section>
+          <section>
+            <strong>Safety Notes</strong>
+            ${renderEbayDraftFactRows(warnings, "No safety notes flagged.")}
+          </section>
+        </div>
+      </details>
+    `;
+  }
+
+  function renderEbayConversationDraftCard(conversation) {
+    const payload = ebayDraftPayload(conversation.id);
+    const draft = currentEbayConversationDraft(conversation.id);
+    const isLoading = adminClassificationState.ebayConversationDraftLoadingId === conversation.id;
+    const isActionLoading = adminClassificationState.ebayConversationDraftActionLoadingId === conversation.id;
+    const error = adminClassificationState.ebayConversationDraftErrorsById?.[conversation.id] ||
+      adminClassificationState.ebayConversationDraftActionErrorsById?.[conversation.id];
+    const message = adminClassificationState.ebayConversationDraftActionMessagesById?.[conversation.id];
+    const stale = draft ? stalenessState(draft) : null;
+    const draftText = ebayDraftDisplayText(draft);
+    const validationVariant = draft?.validation_status === "valid"
+      ? "success"
+      : draft?.validation_status === "warning" ? "warning" : draft ? "muted" : "muted";
+
+    if (isLoading && !payload) {
+      return `
+        <section class="ebay-draft-card">
+          <div class="context-card-head">
+            <h4>AI Reply Draft</h4>
+            ${renderBadge("Loading", "muted")}
+          </div>
+          <div class="classification-empty matched-context-empty is-quiet">Loading saved drafts.</div>
+        </section>
+      `;
+    }
+
+    if (!draft) {
+      return `
+        <section class="ebay-draft-card">
+          <div class="context-card-head">
+            <h4>AI Reply Draft</h4>
+            ${renderBadge("Draft only", "muted")}
+          </div>
+          ${error ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(error)}</div>` : ""}
+          ${message ? `<div class="classification-notice is-success">${escapeHtml(message)}</div>` : ""}
+          <p>No current reply draft is saved for this conversation.</p>
+          <div class="ebay-draft-actions">
+            <button type="button" class="primary-btn" data-ebay-draft-action="generate" data-ebay-conversation-id="${escapeHtml(conversation.id)}" ${isActionLoading ? "disabled" : ""}>
+              <i data-lucide="${isActionLoading ? "loader-circle" : "sparkles"}"></i>
+              ${escapeHtml(isActionLoading ? "Generating" : "Generate AI Reply")}
+            </button>
+          </div>
+        </section>
+      `;
+    }
+
+    return `
+      <section class="ebay-draft-card${stale?.isStale ? " is-stale" : ""}">
+        <div class="context-card-head">
+          <h4>AI Reply Draft</h4>
+          <span class="ebay-classification-head-badges">
+            ${renderBadge(humanizeValue(draft.draft_status || "generated"), "category")}
+            ${renderBadge(humanizeValue(draft.validation_status || "not_validated"), validationVariant)}
+            ${renderBadge("Not sent", "muted")}
+          </span>
+        </div>
+        ${stale?.isStale ? renderStaleDraftWarning(draft) : ""}
+        ${error ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(error)}</div>` : ""}
+        ${message ? `<div class="classification-notice is-success">${escapeHtml(message)}</div>` : ""}
+        <form class="ebay-draft-form" data-ebay-draft-form data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-draft-id="${escapeHtml(draft.id)}">
+          <label class="ebay-draft-field">
+            <span>Editable Draft</span>
+            <textarea name="draftText" rows="8" ${isActionLoading ? "disabled" : ""}>${escapeHtml(draftText)}</textarea>
+          </label>
+          <label class="ebay-draft-field ebay-draft-notes-field">
+            <span>Operator Notes</span>
+            <input name="operatorNotes" type="text" value="${escapeHtml(draft.operator_notes || "")}" placeholder="Optional internal note" ${isActionLoading ? "disabled" : ""} />
+          </label>
+          <div class="ebay-draft-actions">
+            <button type="button" class="primary-btn" data-ebay-draft-action="save_edit" ${isActionLoading ? "disabled" : ""}>
+              <i data-lucide="${isActionLoading ? "loader-circle" : "save"}"></i>
+              Save Draft
+            </button>
+            <button type="button" class="secondary-btn" data-ebay-draft-action="improve" ${isActionLoading ? "disabled" : ""}>
+              <i data-lucide="wand-sparkles"></i>
+              Improve My Draft
+            </button>
+            <button type="button" class="secondary-btn" data-ebay-draft-action="regenerate" ${isActionLoading ? "disabled" : ""}>
+              <i data-lucide="refresh-cw"></i>
+              Regenerate
+            </button>
+            <button type="button" class="secondary-btn is-danger" data-ebay-draft-action="discard" ${isActionLoading ? "disabled" : ""}>
+              <i data-lucide="trash-2"></i>
+              Discard Draft
+            </button>
+          </div>
+        </form>
+        <div class="selected-email-meta">
+          <span>${escapeHtml(draft.model_name || "Model unavailable")}</span>
+          <span>Version ${escapeHtml(draft.draft_version || 1)}</span>
+          <span>${escapeHtml(formatContextDate(draft.updated_at || draft.created_at))}</span>
+          <span>Confidence ${escapeHtml(draft.confidence == null ? "--" : formatConfidence(draft.confidence))}</span>
+        </div>
+        ${renderEbayDraftGrounding(draft)}
+      </section>
+    `;
+  }
+
   function renderEbayConversationDetail(state) {
     if (!els.ebayConversationDetail) return;
     const conversation = selectedEbayConversationById(state.selectedEbayConversationId, state);
@@ -3377,6 +3550,7 @@
       </div>
       ${error ? `<div class="classification-notice is-error">Could not load eBay messages: ${escapeHtml(error)}</div>` : ""}
       ${renderEbayClassificationCard(conversation)}
+      ${renderEbayConversationDraftCard(conversation)}
       <div class="ebay-chat-timeline" aria-label="Clean eBay message timeline">
         ${isLoading && !messages.length ? `<div class="classification-empty">Loading clean eBay chat messages.</div>` : ""}
         ${messages.length ? messages.map(renderEbayMessageBubble).join("") : (!isLoading ? `<div class="classification-empty">No canonical eBay messages are stored for this conversation yet.</div>` : "")}
@@ -3630,11 +3804,91 @@
     }
   }
 
+  async function loadEbayConversationDrafts(context, conversationId, options = {}) {
+    if (!conversationId) return;
+    if (!options.force && adminClassificationState.ebayConversationDraftsById?.[conversationId]) return;
+    setEbayConversationState({
+      ebayConversationDraftLoadingId: conversationId,
+      ebayConversationDraftErrorsById: {
+        ...adminClassificationState.ebayConversationDraftErrorsById,
+        [conversationId]: null,
+      },
+    });
+
+    try {
+      const payload = await fetchEbayConversationDrafts(context, conversationId);
+      setEbayConversationState({
+        ebayConversationDraftLoadingId: null,
+        ebayConversationDraftsById: {
+          ...adminClassificationState.ebayConversationDraftsById,
+          [conversationId]: payload,
+        },
+        ebayConversationDraftErrorsById: {
+          ...adminClassificationState.ebayConversationDraftErrorsById,
+          [conversationId]: null,
+        },
+      });
+    } catch (error) {
+      const code = error.code || error.message || "ebay_conversation_drafts_failed";
+      setEbayConversationState({
+        ebayConversationDraftLoadingId: null,
+        ebayConversationDraftErrorsById: {
+          ...adminClassificationState.ebayConversationDraftErrorsById,
+          [conversationId]: code,
+        },
+      });
+      console.error("[email-triage] eBay conversation drafts failed:", error);
+    }
+  }
+
+  async function runEbayConversationDraftAction(context, values = {}) {
+    const conversationId = values.conversationId;
+    if (!conversationId || !values.mode) return;
+    setEbayConversationState({
+      ebayConversationDraftActionLoadingId: conversationId,
+      ebayConversationDraftActionErrorsById: {
+        ...adminClassificationState.ebayConversationDraftActionErrorsById,
+        [conversationId]: null,
+      },
+      ebayConversationDraftActionMessagesById: {
+        ...adminClassificationState.ebayConversationDraftActionMessagesById,
+        [conversationId]: null,
+      },
+    });
+
+    try {
+      await requestEbayConversationDraftAction(context, values);
+      await loadEbayConversationDrafts(context, conversationId, { force: true });
+      setEbayConversationState({
+        ebayConversationDraftActionLoadingId: null,
+        ebayConversationDraftActionErrorsById: {
+          ...adminClassificationState.ebayConversationDraftActionErrorsById,
+          [conversationId]: null,
+        },
+        ebayConversationDraftActionMessagesById: {
+          ...adminClassificationState.ebayConversationDraftActionMessagesById,
+          [conversationId]: ebayDraftSuccessMessage(values.mode),
+        },
+      });
+    } catch (error) {
+      const code = error.code || error.message || "ebay_conversation_draft_action_failed";
+      setEbayConversationState({
+        ebayConversationDraftActionLoadingId: null,
+        ebayConversationDraftActionErrorsById: {
+          ...adminClassificationState.ebayConversationDraftActionErrorsById,
+          [conversationId]: code,
+        },
+      });
+      console.error("[email-triage] eBay conversation draft action failed:", error);
+    }
+  }
+
   async function selectEbayConversation(context, conversationId) {
     if (!conversationId) return;
     setEbayConversationState({ selectedEbayConversationId: conversationId });
     loadEbayConversationMessages(context, conversationId);
     loadEbayConversationContext(context, conversationId);
+    loadEbayConversationDrafts(context, conversationId);
   }
 
   async function loadEbayConversationList(context, options = {}) {
@@ -3661,6 +3915,7 @@
       if (selectedEbayConversationId) {
         loadEbayConversationMessages(context, selectedEbayConversationId);
         loadEbayConversationContext(context, selectedEbayConversationId);
+        loadEbayConversationDrafts(context, selectedEbayConversationId, { force: true });
       }
     } catch (error) {
       const code = error.code || error.message || "ebay_conversation_list_failed";
@@ -4006,6 +4261,7 @@
     if (selectedEbayConversationId && selectedEbayConversationId !== currentSelectedId) {
       loadEbayConversationMessages(context, selectedEbayConversationId);
       loadEbayConversationContext(context, selectedEbayConversationId);
+      loadEbayConversationDrafts(context, selectedEbayConversationId);
     }
   }
 
@@ -4188,12 +4444,31 @@
       selectEbayConversation(context, row.getAttribute("data-ebay-conversation-id"));
     });
     const handleDetailClick = (event) => {
+      const draftButton = event.target.closest("[data-ebay-draft-action]");
+      if (draftButton) {
+        const form = draftButton.closest("[data-ebay-draft-form]");
+        const action = draftButton.getAttribute("data-ebay-draft-action");
+        const conversationId = draftButton.getAttribute("data-ebay-conversation-id") ||
+          form?.getAttribute("data-ebay-conversation-id") ||
+          adminClassificationState.selectedEbayConversationId;
+        const draftId = form?.getAttribute("data-draft-id") || draftButton.getAttribute("data-draft-id") || "";
+        const formData = form ? new FormData(form) : null;
+        runEbayConversationDraftAction(context, {
+          mode: action,
+          conversationId,
+          draftId,
+          draftText: formData ? String(formData.get("draftText") || "") : "",
+          operatorNotes: formData ? String(formData.get("operatorNotes") || "") : "",
+        });
+        return;
+      }
       const button = event.target.closest("[data-ebay-detail-action]");
       if (!button) return;
       const conversationId = button.getAttribute("data-ebay-conversation-id");
       const action = button.getAttribute("data-ebay-detail-action");
       if (action === "refresh-messages") {
         loadEbayConversationMessages(context, conversationId, { force: true });
+        loadEbayConversationDrafts(context, conversationId, { force: true });
         return;
       }
       if (action === "refresh-context") {
@@ -4215,6 +4490,10 @@
     els.ebayConversationDetail?.addEventListener("click", handleDetailClick);
     els.ebayConversationContext?.addEventListener("click", handleDetailClick);
     els.ebayConversationDetail?.addEventListener("submit", (event) => {
+      if (event.target.closest("[data-ebay-draft-form]")) {
+        event.preventDefault();
+        return;
+      }
       const form = event.target.closest("[data-ebay-classification-form]");
       if (!form) return;
       event.preventDefault();

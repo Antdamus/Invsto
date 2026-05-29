@@ -11,6 +11,7 @@
   const EBAY_CONVERSATION_CONTEXT_FUNCTION = "ebay-conversation-context";
   const EBAY_MESSAGE_SYNC_FUNCTION = "ebay-message-sync";
   const EBAY_CONVERSATION_CLASSIFY_FUNCTION = "ebay-conversation-classify";
+  const EBAY_CONVERSATION_DRAFT_FUNCTION = "ebay-conversation-draft";
 
   const DEFAULT_LIMITS = {
     classificationLimit: 25,
@@ -36,6 +37,7 @@
     ebayConversationContext: 30000,
     ebayMessageSync: 90000,
     ebayConversationClassify: 90000,
+    ebayConversationDraft: 60000,
   };
 
   function waitForSupabaseReady(timeoutMs = 8000) {
@@ -1509,6 +1511,31 @@
     }, TIMEOUTS.ebayConversationContext);
   }
 
+  async function fetchEbayConversationDrafts(context, conversationId) {
+    const session = await currentSession(context, "eBay conversation drafts");
+    return edgeFetchWithTimeout(EBAY_CONVERSATION_DRAFT_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: "view",
+        conversationId,
+      }),
+    }, TIMEOUTS.ebayConversationDraft);
+  }
+
+  async function requestEbayConversationDraftAction(context, values = {}) {
+    const session = await currentSession(context, "eBay conversation draft action");
+    return edgeFetchWithTimeout(EBAY_CONVERSATION_DRAFT_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: values.mode,
+        conversationId: values.conversationId,
+        draftId: values.draftId || undefined,
+        draftText: values.draftText || undefined,
+        operatorNotes: values.operatorNotes || undefined,
+      }),
+    }, TIMEOUTS.ebayConversationDraft);
+  }
+
   async function runEbayMessageSync(context, values = {}) {
     const session = await currentSession(context, "eBay message sync");
     const payload = await edgeFetchWithTimeout(EBAY_MESSAGE_SYNC_FUNCTION, session, {
@@ -1721,6 +1748,7 @@
       EBAY_CONVERSATION_CONTEXT_FUNCTION,
       EBAY_MESSAGE_SYNC_FUNCTION,
       EBAY_CONVERSATION_CLASSIFY_FUNCTION,
+      EBAY_CONVERSATION_DRAFT_FUNCTION,
     },
     DEFAULT_LIMITS,
     TIMEOUTS,
@@ -1754,6 +1782,8 @@
     fetchEbayConversations,
     fetchEbayConversationMessages,
     fetchEbayConversationContext,
+    fetchEbayConversationDrafts,
+    requestEbayConversationDraftAction,
     runEbayMessageSync,
     classifyEbayConversation,
     classifyRecentEbayConversations,
