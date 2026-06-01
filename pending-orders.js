@@ -58,6 +58,8 @@ const state = {
   ebayLabelBusy: false,
   ebayReportBusy: false,
   ebayOrderSyncBusy: false,
+  ebayReconciliationBusy: false,
+  ebayReconciliationPreview: [],
   orderTaskAssignees: [],
   selectedOrderTasks: [],
   selectedOrderTaskEvents: new Map(),
@@ -1463,16 +1465,170 @@ async function postEbayOrderSyncPayload(payload) {
 }
 
 function getEbayOrderSyncDaysBack() {
-  const value = Number($("ebay-order-sync-days-back")?.value || 14);
-  if (!Number.isFinite(value)) return 14;
-  return Math.min(180, Math.max(1, Math.round(value)));
+  const value = Number($("ebay-order-sync-days-back")?.value || 90);
+  if (!Number.isFinite(value)) return 90;
+  return Math.min(90, Math.max(1, Math.round(value)));
+}
+
+function getEbayOrderSyncLimit() {
+  const value = Number($("ebay-order-sync-limit")?.value || 500);
+  if (!Number.isFinite(value)) return 500;
+  return Math.min(1000, Math.max(50, Math.round(value)));
 }
 
 function setEbayOrderSyncBusy(busy) {
   state.ebayOrderSyncBusy = busy;
   $("ebay-order-sync-check")?.toggleAttribute("disabled", busy);
   $("ebay-order-sync-run")?.toggleAttribute("disabled", busy);
+  $("ebay-order-sync-limit")?.toggleAttribute("disabled", busy);
+  $("ebay-order-sync-days-back")?.toggleAttribute("disabled", busy);
   $("import-ebay-orders")?.toggleAttribute("disabled", busy);
+}
+
+function setEbayReconciliationStatus(message = "", type = "info") {
+  const el = $("ebay-reconciliation-status");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle("is-error", type === "error");
+  el.classList.toggle("is-success", type === "success");
+}
+
+function hasActionableReconciliationRows(rows = state.ebayReconciliationPreview) {
+  return rows.some((row) => ["fulfilled_no_inventory", "cancelled"].includes(row.recommended_action));
+}
+
+function setEbayReconciliationBusy(busy) {
+  state.ebayReconciliationBusy = busy;
+  $("preview-ebay-reconciliation")?.toggleAttribute("disabled", busy);
+  $("apply-ebay-reconciliation")?.toggleAttribute("disabled", busy || !hasActionableReconciliationRows());
+  $("ebay-reconciliation-password")?.toggleAttribute("disabled", busy);
+  $("ebay-reconciliation-note")?.toggleAttribute("disabled", busy);
+}
+
+function getReconciliationActionLabel(action) {
+  if (action === "fulfilled_no_inventory") return "Close as fulfilled";
+  if (action === "cancelled") return "Close as cancelled";
+  return "Manual review";
+}
+
+function getReconciliationActionTone(action) {
+  if (action === "fulfilled_no_inventory") return "is-fulfilled";
+  if (action === "cancelled") return "is-cancelled";
+  return "is-review";
+}
+
+function summarizeReconciliationRows(rows = []) {
+  const total = rows.length;
+  const fulfilled = rows.filter((row) => row.recommended_action === "fulfilled_no_inventory").length;
+  const cancelled = rows.filter((row) => row.recommended_action === "cancelled").length;
+  const manual = rows.filter((row) => row.recommended_action === "manual_review").length;
+  return `${total.toLocaleString()} order${total === 1 ? "" : "s"}: ${fulfilled.toLocaleString()} fulfill, ${cancelled.toLocaleString()} cancel${manual ? `, ${manual.toLocaleString()} manual review` : ""}.`;
+}
+
+function getReconciliationOrderDateLabel(row) {
+  if (row.sale_date) return `Sale ${formatDate(row.sale_date)}`;
+  if (row.paid_on_date) return `Paid ${formatDate(row.paid_on_date)}`;
+  if (row.imported_at) return `Imported ${formatDate(row.imported_at)}`;
+  return "No order date";
+}
+
+function renderEbayReconciliationResults(rows = [], { applied = false } = {}) {
+  const list = $("ebay-reconciliation-results");
+  if (!list) return;
+  list.replaceChildren();
+
+  if (!rows.length) {
+    list.innerHTML = `<div class="empty-state">No pending eBay reconciliation items found.</div>`;
+    $("apply-ebay-reconciliation")?.toggleAttribute("disabled", true);
+    return;
+  }
+
+  rows.forEach((row) => {
+    const card = document.createElement("article");
+    const action = row.recommended_action || "manual_review";
+    card.className = `reconciliation-result ${getReconciliationActionTone(action)}`;
+    card.innerHTML = `
+      <div>
+        <strong>${escapeHtml(row.order_number || "Unknown order")}</strong>
+        <span>${escapeHtml(row.buyer_username || "No buyer")}</span>
+        <small>${escapeHtml(getReconciliationOrderDateLabel(row))}</small>
+      </div>
+      <div class="reconciliation-status-stack">
+        <small>${escapeHtml(row.ebay_payment_status || "payment ?")} / ${escapeHtml(row.ebay_fulfillment_status || "fulfillment ?")}</small>
+        <small>Cancel: ${escapeHtml(row.ebay_cancel_status || "unknown")}</small>
+      </div>
+      <div class="reconciliation-result-action">
+        <b>${escapeHtml(getReconciliationActionLabel(action))}</b>
+        <span>${Number(row.line_count || row.updated_lines || 0).toLocaleString()} line${Number(row.line_count || row.updated_lines || 0) === 1 ? "" : "s"}</span>
+        ${applied ? `<em>${Number(row.updated_lines || 0).toLocaleString()} updated</em>` : ""}
+        ${row.skipped_reason && row.skipped_reason !== "dry_run" ? `<em>${escapeHtml(row.skipped_reason)}</em>` : ""}
+      </div>
+    `;
+    list.appendChild(card);
+  });
+
+  $("apply-ebay-reconciliation")?.toggleAttribute("disabled", applied || !hasActionableReconciliationRows(rows));
+}
+
+async function runEbayReconciliation({ dryRun = true } = {}) {
+  if (!isAdminUser() || state.ebayReconciliationBusy) return;
+
+  const password = String($("ebay-reconciliation-password")?.value || "").trim();
+  const note = String($("ebay-reconciliation-note")?.value || "").trim();
+  const apply = !dryRun;
+
+  if (apply && !state.ebayReconciliationPreview.length) {
+    setEbayReconciliationStatus("Run preview before applying reconciliation.", "error");
+    return;
+  }
+  if (apply && !password) {
+    setEbayReconciliationStatus("Password is required before applying reconciliation.", "error");
+    $("ebay-reconciliation-password")?.focus();
+    return;
+  }
+
+  try {
+    setEbayReconciliationBusy(true);
+    setEbayReconciliationStatus(apply ? "Verifying password and applying audited reconciliation..." : "Loading reconciliation preview...");
+
+    if (apply) {
+      const valid = await verifyCurrentUserPassword(password);
+      if (!valid) throw new Error("Incorrect password. Please try again.");
+    }
+
+    const { data, error } = await supabase.rpc("admin_reconcile_ebay_pending_review_orders", {
+      _order_numbers: null,
+      _dry_run: dryRun,
+      _signed_by_email: state.user?.email || "",
+      _note: note || null,
+    });
+    if (error) throw error;
+
+    const rows = Array.isArray(data) ? data : [];
+    if (dryRun) {
+      state.ebayReconciliationPreview = rows;
+      renderEbayReconciliationResults(rows);
+      setEbayReconciliationStatus(rows.length ? `Preview ready. ${summarizeReconciliationRows(rows)}` : "No reconciliation items found.", rows.length ? "success" : "info");
+      return;
+    }
+
+    state.ebayReconciliationPreview = [];
+    $("ebay-reconciliation-password").value = "";
+    renderEbayReconciliationResults(rows, { applied: true });
+    const updatedLines = rows.reduce((sum, row) => sum + Number(row.updated_lines || 0), 0);
+    setEbayReconciliationStatus(`Applied reconciliation. ${updatedLines.toLocaleString()} line${updatedLines === 1 ? "" : "s"} closed with audit.`, "success");
+    await loadOrders();
+    postEbayPendingQueueChanged({
+      action: "admin_ebay_reconciliation",
+      orderNumbers: rows.map((row) => row.order_number).filter(Boolean),
+      lineCount: updatedLines,
+    });
+  } catch (error) {
+    console.error("eBay reconciliation failed:", error);
+    setEbayReconciliationStatus(error.message || "Could not run eBay reconciliation.", "error");
+  } finally {
+    setEbayReconciliationBusy(false);
+  }
 }
 
 function summarizeEbayOrderSyncResult(result, dryRun) {
@@ -1491,7 +1647,10 @@ function summarizeEbayOrderSyncResult(result, dryRun) {
     const skippedMismatchCheck = result.localPendingMismatchCheckSkipped
       ? " Local missing-order check was skipped because the eBay fetch reached its limit."
       : "";
-    return `Found ${Number(result.ordersSeen || 0).toLocaleString()} eBay order(s); ${Number(result.ordersImportable || 0).toLocaleString()} can be imported or updated.${mismatchText}${skippedMismatchCheck}${warnings}`;
+    const reconciliationText = result.localPendingMismatchChecked
+      ? ` Complete reconciliation compared ${Number(result.localOpenOrderCount || 0).toLocaleString()} local open order(s).`
+      : "";
+    return `Found ${Number(result.ordersSeen || 0).toLocaleString()} eBay order(s); ${Number(result.ordersImportable || 0).toLocaleString()} can be imported or updated.${reconciliationText}${mismatchText}${skippedMismatchCheck}${warnings}`;
   }
 
   const warnings = Array.isArray(result.warnings) && result.warnings.length
@@ -1504,7 +1663,10 @@ function summarizeEbayOrderSyncResult(result, dryRun) {
   const skippedMismatchCheck = result.localPendingMismatchCheckSkipped
     ? " Local missing-order check was skipped because the eBay fetch reached its limit."
     : "";
-  return `Synced ${Number(result.ordersImported || 0).toLocaleString()} order(s), ${Number(result.linesImported || 0).toLocaleString()} line(s), and reserved ${Number(result.linesReserved || 0).toLocaleString()} line(s).${mismatchText}${skippedMismatchCheck}${warnings}`;
+  const reconciliationText = result.localPendingMismatchChecked
+    ? ` Complete reconciliation compared ${Number(result.localOpenOrderCount || 0).toLocaleString()} local open order(s).`
+    : "";
+  return `Synced ${Number(result.ordersImported || 0).toLocaleString()} order(s), ${Number(result.linesImported || 0).toLocaleString()} line(s), and reserved ${Number(result.linesReserved || 0).toLocaleString()} line(s).${reconciliationText}${mismatchText}${skippedMismatchCheck}${warnings}`;
 }
 
 function formatEbayOrderSyncError(error) {
@@ -1538,12 +1700,13 @@ async function runEbayOrderApiSync(dryRun = true) {
   const payload = {
     dryRun,
     reserve: !dryRun,
-    limit: 100,
+    limit: getEbayOrderSyncLimit(),
+    localMismatchLimit: getEbayOrderSyncLimit(),
     daysBack: getEbayOrderSyncDaysBack(),
   };
 
   setEbayOrderSyncBusy(true);
-  setImportStatus(dryRun ? "Checking eBay awaiting shipments..." : "Syncing eBay orders and reserving stock...");
+  setImportStatus(dryRun ? "Checking eBay awaiting shipments and reconciling local orders..." : "Syncing eBay orders, reconciling local orders, and reserving stock...");
 
   try {
     const result = await postEbayOrderSyncPayload(payload);
@@ -1829,6 +1992,9 @@ function applyEbayLaunchOrderSelection() {
 function renderSummaryStrip() {
   const openLines = state.orders.filter(isOpenOrderLine);
   const openGroups = groupLinesByBuyer(openLines);
+  const openOrderCount = new Set(openLines
+    .map((line) => normalizeEbayOrderNumber(line.order?.order_number) || line.order?.order_number)
+    .filter(Boolean)).size;
   const urgencyCounts = {
     overdue: { groups: 0, lines: 0 },
     today: { groups: 0, lines: 0 },
@@ -1842,8 +2008,8 @@ function renderSummaryStrip() {
     urgencyCounts[bucket].lines += group.lines.filter(isOpenOrderLine).length;
   });
 
-  $("summary-pending").textContent = `${openGroups.length.toLocaleString()} group${openGroups.length === 1 ? "" : "s"}`;
-  $("summary-pending-lines").textContent = `${openLines.length.toLocaleString()} item line${openLines.length === 1 ? "" : "s"}`;
+  $("summary-pending").textContent = `${openOrderCount.toLocaleString()} order${openOrderCount === 1 ? "" : "s"}`;
+  $("summary-pending-lines").textContent = `${openLines.length.toLocaleString()} item line${openLines.length === 1 ? "" : "s"} - ${openGroups.length.toLocaleString()} buyer group${openGroups.length === 1 ? "" : "s"}`;
   $("summary-overdue-orders").textContent = `${urgencyCounts.overdue.groups.toLocaleString()} group${urgencyCounts.overdue.groups === 1 ? "" : "s"}`;
   $("summary-overdue-lines").textContent = `${urgencyCounts.overdue.lines.toLocaleString()} item line${urgencyCounts.overdue.lines === 1 ? "" : "s"}`;
   $("summary-today-orders").textContent = `${urgencyCounts.today.groups.toLocaleString()} group${urgencyCounts.today.groups === 1 ? "" : "s"}`;
@@ -7797,6 +7963,8 @@ function setupListeners() {
   window.addEventListener("resize", syncMobileOrderDetailMode);
   $("ebay-order-sync-check")?.addEventListener("click", () => runEbayOrderApiSync(true));
   $("ebay-order-sync-run")?.addEventListener("click", () => runEbayOrderApiSync(false));
+  $("preview-ebay-reconciliation")?.addEventListener("click", () => runEbayReconciliation({ dryRun: true }));
+  $("apply-ebay-reconciliation")?.addEventListener("click", () => runEbayReconciliation({ dryRun: false }));
   $("import-ebay-orders")?.addEventListener("click", importEbayOrdersFromCsv);
   $("ebay-orders-file")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0];

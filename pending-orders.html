@@ -210,7 +210,11 @@
         <div class="import-actions ebay-order-sync-actions">
           <label class="days-back-field">
             Days
-            <input id="ebay-order-sync-days-back" type="number" min="1" max="180" step="1" value="14" />
+            <input id="ebay-order-sync-days-back" type="number" min="1" max="90" step="1" value="90" />
+          </label>
+          <label class="days-back-field">
+            Limit
+            <input id="ebay-order-sync-limit" type="number" min="50" max="1000" step="50" value="500" />
           </label>
           <button id="ebay-order-sync-check" type="button" class="secondary-btn">
             <i data-lucide="search-check"></i>
@@ -222,6 +226,39 @@
           </button>
         </div>
         <p id="import-status" class="import-status"></p>
+        <section class="ebay-reconciliation-panel" aria-label="eBay reconciliation">
+          <div class="reconciliation-head">
+            <div>
+              <span class="eyebrow">eBay Reconciliation</span>
+              <h3>Review orders eBay no longer shows as awaiting shipment</h3>
+              <p>Preview the flagged orders, then close fulfilled/refunded records through the audited order closeout path.</p>
+            </div>
+            <div class="reconciliation-actions">
+              <button id="preview-ebay-reconciliation" type="button" class="secondary-btn">
+                <i data-lucide="list-checks"></i>
+                Preview
+              </button>
+              <button id="apply-ebay-reconciliation" type="button" class="primary-btn" disabled>
+                <i data-lucide="shield-check"></i>
+                Apply
+              </button>
+            </div>
+          </div>
+          <div class="reconciliation-apply-row">
+            <label>
+              Password
+              <input id="ebay-reconciliation-password" type="password" autocomplete="current-password" placeholder="Required to apply" />
+            </label>
+            <label>
+              Audit note
+              <input id="ebay-reconciliation-note" type="text" placeholder="Optional custom note" />
+            </label>
+          </div>
+          <p id="ebay-reconciliation-status" class="import-status"></p>
+          <div id="ebay-reconciliation-results" class="reconciliation-results">
+            <div class="empty-state">Run preview after a full eBay check to see reconciliation actions.</div>
+          </div>
+        </section>
         <details class="legacy-import-details">
           <summary>CSV report fallback</summary>
           <div class="legacy-import-actions">

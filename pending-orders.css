@@ -660,6 +660,134 @@ h1 {
   color: var(--green);
 }
 
+.ebay-reconciliation-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(227, 189, 119, 0.16);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(227, 189, 119, 0.08), rgba(255, 255, 255, 0.025));
+}
+
+.reconciliation-head {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.reconciliation-head h3 {
+  margin: 4px 0;
+  color: var(--text);
+}
+
+.reconciliation-head p {
+  margin: 0;
+  max-width: 720px;
+}
+
+.reconciliation-actions,
+.reconciliation-apply-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.reconciliation-apply-row label {
+  flex: 1 1 240px;
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.reconciliation-apply-row input {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.reconciliation-results {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.reconciliation-result {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(180px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.reconciliation-result strong,
+.reconciliation-result span,
+.reconciliation-result small,
+.reconciliation-result b,
+.reconciliation-result em {
+  display: block;
+  min-width: 0;
+}
+
+.reconciliation-result strong {
+  color: var(--text);
+}
+
+.reconciliation-result span,
+.reconciliation-result small {
+  color: var(--muted);
+}
+
+.reconciliation-status-stack {
+  display: grid;
+  gap: 4px;
+}
+
+.reconciliation-result-action {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  text-align: right;
+}
+
+.reconciliation-result-action b {
+  color: var(--gold-strong);
+}
+
+.reconciliation-result-action em {
+  color: var(--green);
+  font-style: normal;
+  font-size: 0.78rem;
+}
+
+.reconciliation-result.is-fulfilled {
+  border-color: rgba(125, 240, 178, 0.18);
+}
+
+.reconciliation-result.is-cancelled {
+  border-color: rgba(255, 123, 123, 0.22);
+}
+
+.reconciliation-result.is-review {
+  border-color: rgba(245, 197, 92, 0.24);
+}
+
 .legacy-import-details {
   grid-column: 1 / -1;
   color: var(--muted);
@@ -2380,8 +2508,26 @@ body.modal-open {
   .bag-lookup-head,
   .bag-match-head,
   .live-lot-head,
-  .buyer-card-head {
+  .buyer-card-head,
+  .reconciliation-head {
     flex-direction: column;
+  }
+
+  .reconciliation-actions,
+  .reconciliation-actions > *,
+  .reconciliation-apply-row,
+  .reconciliation-apply-row > * {
+    width: 100%;
+  }
+
+  .reconciliation-result {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .reconciliation-result-action {
+    justify-items: start;
+    text-align: left;
   }
 
   .buyer-card-alerts {

@@ -43,7 +43,7 @@ const EBAY_ORDER_SCOPE = (Deno.env.get("EBAY_ORDER_SCOPE") ??
 
 const EBAY_API_BASE = EBAY_ENV === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
 const DEFAULT_DAYS_BACK = 14;
-const MAX_ORDER_LIMIT = 200;
+const MAX_ORDER_LIMIT = 1000;
 const PAGE_LIMIT = 50;
 
 const corsHeaders = {
@@ -541,20 +541,22 @@ async function updateOrderSyncMismatchFlags(
     const rawPayload = order.raw_payload && typeof order.raw_payload === "object" ? order.raw_payload : {};
     const nextPayload = {
       ...rawPayload,
-      pending_order_sync_mismatch: mismatch
-        ? {
-          runId,
-          detectedAt: now,
-          reason: mismatch.reason,
-          message: mismatch.message,
-          ebayPaymentStatus: mismatch.ebayPaymentStatus,
-          ebayFulfillmentStatus: mismatch.ebayFulfillmentStatus,
-          ebayCancelStatus: mismatch.ebayCancelStatus,
-          fetchError: mismatch.fetchError || null,
-        }
-        : null,
       last_ebay_order_sync_seen_at: mismatch ? rawPayload.last_ebay_order_sync_seen_at || null : now,
     };
+    if (mismatch) {
+      nextPayload.pending_order_sync_mismatch = {
+        runId,
+        detectedAt: now,
+        reason: mismatch.reason,
+        message: mismatch.message,
+        ebayPaymentStatus: mismatch.ebayPaymentStatus,
+        ebayFulfillmentStatus: mismatch.ebayFulfillmentStatus,
+        ebayCancelStatus: mismatch.ebayCancelStatus,
+        fetchError: mismatch.fetchError || null,
+      };
+    } else {
+      delete nextPayload.pending_order_sync_mismatch;
+    }
 
     const { error: updateError } = await supabase
       .from("ebay_orders")
@@ -601,7 +603,7 @@ Deno.serve(async (req) => {
       : Math.min(Math.max(Math.trunc(Number(body.limit || 50)), 1), MAX_ORDER_LIMIT);
     const fetchedCompleteOrderWindow = orderIdsRequested.length > 0 || rawOrders.length < requestedOrderLimit;
     const checkLocalMismatches = body.checkLocalMismatches !== false;
-    const localMismatchLimit = Math.min(Math.max(Math.trunc(Number(body.localMismatchLimit || 100)), 0), 200);
+    const localMismatchLimit = Math.min(Math.max(Math.trunc(Number(body.localMismatchLimit || MAX_ORDER_LIMIT)), 0), MAX_ORDER_LIMIT);
     const rawOrderNumbers = new Set(rawOrders.map(extractOrderNumber).filter(Boolean));
     const notAwaitingOrderNumbers = unique(rawOrders.filter((order) => !isAwaitingShipmentOrder(order)).map(extractOrderNumber).filter(Boolean));
     const candidateOrders = rawOrders.filter(isAwaitingShipmentOrder);
@@ -698,12 +700,15 @@ Deno.serve(async (req) => {
         runId,
         dryRun: true,
         ordersSeen: rawOrders.length,
+        ebayAwaitingOrderCount: candidateOrders.length,
         ordersImportable: importable.length,
         skippedClosed,
         skippedUnpaid,
         skippedNotAwaitingShipment,
         localPendingMismatches,
         localPendingMismatchCandidates,
+        localOpenOrderCount: localOpenOrders.length,
+        requestedOrderLimit,
         localPendingMismatchChecked: checkLocalMismatches && fetchedCompleteOrderWindow,
         localPendingMismatchCheckSkipped: checkLocalMismatches && !fetchedCompleteOrderWindow,
         preview,
@@ -845,6 +850,7 @@ Deno.serve(async (req) => {
       runId,
       dryRun: false,
       ordersSeen: rawOrders.length,
+      ebayAwaitingOrderCount: candidateOrders.length,
       ordersImported: freshOrders.length,
       linesImported: upsertedLines.length,
       linesReserved: reserved,
@@ -853,6 +859,8 @@ Deno.serve(async (req) => {
       skippedNotAwaitingShipment,
       localPendingMismatches,
       localPendingMismatchCandidates,
+      localOpenOrderCount: localOpenOrders.length,
+      requestedOrderLimit,
       localPendingMismatchChecked: checkLocalMismatches && fetchedCompleteOrderWindow,
       localPendingMismatchCheckSkipped: checkLocalMismatches && !fetchedCompleteOrderWindow,
       warnings,
