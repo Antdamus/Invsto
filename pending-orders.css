@@ -2895,6 +2895,7 @@ body.pending-order-detail-open .mobile-detail-close {
 }
 
 .buyer-line-created,
+.buyer-line-identity,
 .buyer-line-due {
   display: inline-flex;
   align-items: center;
@@ -2917,6 +2918,12 @@ body.pending-order-detail-open .mobile-detail-close {
   border-color: rgba(227, 189, 119, 0.22);
   background: rgba(227, 189, 119, 0.08);
   color: var(--gold);
+}
+
+.buyer-line-identity {
+  border-color: rgba(139, 190, 255, 0.22);
+  background: rgba(139, 190, 255, 0.08);
+  color: #cfe2ff;
 }
 
 .buyer-line-due svg {

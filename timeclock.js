@@ -1,5 +1,5 @@
 // timeclock.js — session-required version with Breaks + Camera
-let supabaseClient;
+let supabaseCliient;
 let currentUser = null;
 let currentEmployee = null;
 let camBreakId = null;    // <-- add this

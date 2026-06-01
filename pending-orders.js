@@ -1097,6 +1097,56 @@ function buildCompletedHistoryConflict(entry, existingOrder) {
   };
 }
 
+function normalizePendingLineTitle(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function getPendingLineQuantity(value) {
+  return Math.max(1, Math.trunc(Number(value || 1)) || 1);
+}
+
+function getPendingLineExactKey(line) {
+  return [
+    line?.order_id || "",
+    String(line?.item_number || "").trim(),
+    String(line?.transaction_id || "").trim(),
+  ].join("|");
+}
+
+function getPendingLineFallbackKey(line) {
+  return [
+    line?.order_id || "",
+    String(line?.item_number || "").trim(),
+    normalizePendingLineTitle(line?.item_title),
+    getPendingLineQuantity(line?.quantity),
+  ].join("|");
+}
+
+function rememberPendingLineIdentity(index, line) {
+  if (!line?.order_id) return;
+  const exactKey = getPendingLineExactKey(line);
+  const fallbackKey = getPendingLineFallbackKey(line);
+  if (!index.exact.has(exactKey)) index.exact.set(exactKey, line);
+  if (!index.fallback.has(fallbackKey)) index.fallback.set(fallbackKey, line);
+}
+
+async function loadExistingPendingLineIdentityIndex(orderIds) {
+  const index = { exact: new Map(), fallback: new Map() };
+  const uniqueOrderIds = [...new Set(orderIds.filter(Boolean))];
+  for (let cursor = 0; cursor < uniqueOrderIds.length; cursor += 100) {
+    const chunk = uniqueOrderIds.slice(cursor, cursor + 100);
+    const { data, error } = await supabase
+      .from("ebay_order_lines")
+      .select("id, order_id, item_number, transaction_id, item_title, quantity, line_status, created_at")
+      .in("order_id", chunk)
+      .order("created_at", { ascending: true });
+
+    if (error) throw error;
+    (data || []).forEach((line) => rememberPendingLineIdentity(index, line));
+  }
+  return index;
+}
+
 function normalizeEbayOrderNumber(value) {
   const text = String(value || "").trim();
   const match = text.match(/\b\d{2}-\d{5}-\d{5}\b/);
@@ -1244,11 +1294,31 @@ async function importEbayPendingOrdersReport(text, metadata = {}) {
     return entry.lines.map((line) => ({ ...line, order_id: orderId }));
   }).filter((line) => line.order_id);
 
-  let insertedLineCount = 0;
+  let duplicateLinesSkipped = 0;
+  const importableLineRows = [];
   if (lineRows.length) {
+    const existingLineIdentity = await loadExistingPendingLineIdentityIndex(lineRows.map((line) => line.order_id));
+    lineRows.forEach((line) => {
+      const exactKey = getPendingLineExactKey(line);
+      const fallbackKey = getPendingLineFallbackKey(line);
+      if (existingLineIdentity.exact.has(exactKey) || existingLineIdentity.fallback.has(fallbackKey)) {
+        duplicateLinesSkipped += 1;
+        return;
+      }
+      importableLineRows.push(line);
+      rememberPendingLineIdentity(existingLineIdentity, line);
+    });
+  }
+
+  if (duplicateLinesSkipped) {
+    warnings.push(`${duplicateLinesSkipped} report line(s) matched an existing pending eBay line by order, item, title, and quantity and were not re-imported.`);
+  }
+
+  let insertedLineCount = 0;
+  if (importableLineRows.length) {
     const { data: insertedLines, error: lineError } = await supabase
       .from("ebay_order_lines")
-      .upsert(lineRows, {
+      .upsert(importableLineRows, {
         onConflict: "order_id,item_number,transaction_id",
         ignoreDuplicates: true,
       })
@@ -1278,6 +1348,7 @@ async function importEbayPendingOrdersReport(text, metadata = {}) {
     ordersInReport: payload.length,
     linesInReport: reportLineCount,
     linesCheckedForImport: lineRows.length,
+    duplicateLinesSkipped,
     completedHistoryConflicts,
     completedHistoryConflictCount: completedHistoryConflicts.length,
     newOrdersAdded: insertedOrders.length,
@@ -2220,7 +2291,9 @@ function renderOrders() {
       const orderLineTotal = orderLineTotals.get(orderLineKey) || 1;
       const orderLinePosition = (orderLinePositions.get(orderLineKey) || 0) + 1;
       orderLinePositions.set(orderLineKey, orderLinePosition);
-      const orderLineSequence = orderLineTotal > 1 ? `Order ${orderLinePosition} of ${orderLineTotal}` : "";
+      const orderLineSequence = orderLineTotal > 1 ? `Line ${orderLinePosition} of ${orderLineTotal} in this order` : "";
+      const transactionLabel = line.transaction_id ? `Txn ${line.transaction_id}` : "No transaction ID";
+      const lineSource = String(line.raw_payload?.source || "").toLowerCase().includes("api") ? "eBay API" : "Report";
       const lineDueLabel = lineUrgency
         ? `${lineUrgency.label} · ${formatDate(order.ship_by_date)}`
         : order.ship_by_date
@@ -2246,6 +2319,7 @@ function renderOrders() {
             <small>${escapeHtml(order.order_number || "No order number")} - ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
             <span class="buyer-line-meta-row">
               <span class="buyer-line-created">${escapeHtml(lineCreatedLabel)}</span>
+              <span class="buyer-line-identity">${escapeHtml(transactionLabel)} - ${escapeHtml(lineSource)}</span>
               <span class="buyer-line-due is-${escapeHtml(lineDueTone)}">
                 ${lineUrgency ? `<i data-lucide="${lineUrgency.icon}"></i>` : ""}
                 ${escapeHtml(visibleLineDueLabel)}
