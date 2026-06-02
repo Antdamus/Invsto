@@ -4289,6 +4289,11 @@
   background: rgba(255,205,86,.07);
 }
 
+.ebay-draft-card.is-sent {
+  border-color: rgba(37,211,102,.28);
+  background: rgba(37,211,102,.07);
+}
+
 .ebay-reply-composer {
   margin-top: 12px;
   margin-bottom: 0;
@@ -4415,12 +4420,14 @@
   color: #ffbac8;
 }
 
-.ebay-draft-approval-history {
+.ebay-draft-approval-history,
+.ebay-draft-send-history {
   border-top: 1px solid rgba(255,255,255,.08);
   padding-top: 9px;
 }
 
-.ebay-draft-approval-history summary {
+.ebay-draft-approval-history summary,
+.ebay-draft-send-history summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4433,7 +4440,8 @@
   text-transform: uppercase;
 }
 
-.ebay-draft-approval-history summary::-webkit-details-marker {
+.ebay-draft-approval-history summary::-webkit-details-marker,
+.ebay-draft-send-history summary::-webkit-details-marker {
   display: none;
 }
 

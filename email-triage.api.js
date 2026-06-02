@@ -232,6 +232,9 @@
       const code = payload.error || payload.error_description || payload.detail || `request_failed_${response.status}`;
       const error = new Error(code);
       error.code = code;
+      error.detail = payload.message || payload.detail || "";
+      error.details = payload.details && typeof payload.details === "object" ? payload.details : {};
+      error.providerResponse = error.details.provider_response || payload.provider_response || null;
       error.envelope = toSafeErrorEnvelope(error, code);
       throw error;
     }
@@ -1143,7 +1146,7 @@
         .limit(1000),
       client
         .from("ebay_message_send_attempts")
-        .select("id, conversation_id, target_message_id, draft_id, approval_id, attempt_status, provider, error_message, sent_at, created_at")
+        .select("id, conversation_id, target_message_id, draft_id, approval_id, attempt_status, provider, provider_message_id, error_message, sent_at, created_at")
         .order("created_at", { ascending: false })
         .limit(100),
       client
@@ -1165,10 +1168,16 @@
     const attempts = Array.isArray(attemptsResult.data) ? attemptsResult.data : [];
     const events = (Array.isArray(eventsResult.data) ? eventsResult.data : []).map(normalizeEbayActivityEvent);
     const latestApproval = latestApprovalByDraft(approvals);
-    const currentDrafts = drafts.filter((draft) => draft.is_current === true && !draft.discarded_at && draft.draft_status !== "discarded");
+    const currentDrafts = drafts.filter((draft) =>
+      draft.is_current === true &&
+      !draft.discarded_at &&
+      !["discarded", "sent"].includes(String(draft.draft_status || ""))
+    );
+    const sentDrafts = drafts.filter((draft) => String(draft.draft_status || "") === "sent");
     const approvedDrafts = currentDrafts.filter((draft) => latestApproval.get(String(draft.id || ""))?.approval_status === "approved");
     const awaitingApproval = currentDrafts.filter((draft) => latestApproval.get(String(draft.id || ""))?.approval_status !== "approved");
     const todayDrafts = drafts.filter((draft) => String(draft.created_at || "") >= todayIso);
+    const succeededAttempts = attempts.filter((attempt) => attempt.attempt_status === "succeeded");
     const topicIncludes = (row, value) => Array.isArray(row.topic_tags) && row.topic_tags.includes(value);
     const buyerIncludes = (row, value) => Array.isArray(row.buyer_flags) && row.buyer_flags.includes(value);
     const riskIncludes = (row, value) => Array.isArray(row.risk_flags) && row.risk_flags.includes(value);
@@ -1187,9 +1196,11 @@
         drafts_generated: todayDrafts.length,
         drafts_awaiting_approval: awaitingApproval.length,
         approved_drafts: approvedDrafts.length,
+        sent_drafts: sentDrafts.length,
         send_attempts_created: attempts.length,
         send_attempts_failed: attempts.filter((attempt) => attempt.attempt_status === "failed").length,
-        send_attempts_succeeded: attempts.filter((attempt) => attempt.attempt_status === "succeeded").length,
+        send_attempts_succeeded: succeededAttempts.length,
+        duplicate_sends_prevented: attempts.filter((attempt) => attempt.attempt_status === "duplicate").length,
       },
       approval_queue: {
         current_drafts: currentDrafts.length,
@@ -1198,8 +1209,9 @@
         approval_events: approvals.length,
       },
       send_safety: {
-        sends_enabled: false,
-        ebay_mutation_performed: false,
+        sends_enabled: true,
+        controlled_human_send_only: true,
+        ebay_mutation_performed: succeededAttempts.length > 0,
         outlook_mutation_performed: false,
         automatic_responses_sent: 0,
         duplicate_success_guard: "one_success_per_idempotency_key",
@@ -1729,6 +1741,7 @@
         improvementInstructions: values.improvementInstructions || undefined,
         operatorNotes: values.operatorNotes || undefined,
         approvalNotes: values.approvalNotes || values.operatorNotes || undefined,
+        sendConfirmed: values.sendConfirmed === true || undefined,
       }),
     }, TIMEOUTS.ebayConversationDraft);
   }

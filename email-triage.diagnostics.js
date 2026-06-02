@@ -158,11 +158,12 @@
       draft_improved: "AI improved an existing eBay reply draft.",
       draft_edited: "An operator edited the saved eBay draft.",
       draft_discarded: "An operator discarded the eBay draft.",
-      draft_approved: "An operator approved the draft as ready for future controlled send.",
+      draft_approved: "An operator approved the draft as ready for controlled send.",
       approval_removed: "An operator removed draft approval.",
-      send_attempt_created: "A future send attempt row was created.",
+      send_attempt_created: "A controlled send attempt row was created.",
       send_attempt_failed: "A send attempt failed.",
       send_attempt_succeeded: "A send attempt succeeded.",
+      duplicate_send_prevented: "A duplicate send was blocked before another provider call.",
       smart_folder_created: "An eBay smart folder was created.",
       smart_folder_updated: "An eBay smart folder was updated.",
     };
@@ -251,6 +252,10 @@
       send_attempt_succeeded: [
         payload.provider ? utils.humanizeValue(payload.provider) : "",
         payload.provider_message_id ? `provider ${utils.compactId(payload.provider_message_id)}` : "",
+      ],
+      duplicate_send_prevented: [
+        payload.provider ? utils.humanizeValue(payload.provider) : "",
+        payload.duplicate_of_attempt_id ? `duplicate of ${utils.compactId(payload.duplicate_of_attempt_id)}` : "",
       ],
     };
     const genericMetrics = [
@@ -520,14 +525,14 @@
     const safety = ebay.send_safety || {};
     const approvalQueue = ebay.approval_queue || {};
     const events = Array.isArray(ebay.recent_operational_events) ? ebay.recent_operational_events : [];
-    const blocked = ebay.ok === false || Number(metrics.send_attempts_failed || 0) > 0 || safety.ebay_mutation_performed === true || safety.automatic_responses_sent > 0;
+    const blocked = ebay.ok === false || Number(metrics.send_attempts_failed || 0) > 0 || safety.automatic_responses_sent > 0;
 
     return `
       <div class="operational-dashboard-status">
         <span>${state.operationalDashboardLoading ? "Refreshing eBay operations" : `eBay operations refreshed ${utils.formatDateTime(state.operationalDashboardUpdatedAt || ebay.generated_at || snapshot.generated_at)}`}</span>
         ${state.operationalDashboardError ? dashboardBadge(`Error: ${state.operationalDashboardError}`, "danger", utils) : ""}
         ${ebay.ok === false ? dashboardBadge(ebay.error || "eBay dashboard partial", "warning", utils) : ""}
-        ${dashboardBadge(blocked ? "Attention needed" : "No-send visibility mode", blocked ? "warning" : "success", utils)}
+        ${dashboardBadge(blocked ? "Attention needed" : "Controlled send enabled", blocked ? "warning" : "success", utils)}
       </div>
 
       <div class="operational-dashboard-grid">
@@ -546,6 +551,7 @@
               { label: "Refund risk", value: metrics.refund_risk },
               { label: "VIP buyers", value: metrics.vip_buyers },
               { label: "Drafts generated today", value: metrics.drafts_generated },
+              { label: "Sent drafts", value: metrics.sent_drafts },
             ], utils)}
           </div>
         </section>
@@ -568,14 +574,15 @@
         <section class="operational-panel">
           <div class="operational-panel-head">
             <strong>Send Safety</strong>
-            ${dashboardBadge("No send control", "success", utils)}
+            ${dashboardBadge("Human confirmed", "success", utils)}
           </div>
           <div class="operational-metric-grid">
             ${renderKeyValueGrid([
-              { label: "Sends enabled", html: dashboardBadge(safety.sends_enabled ? "true" : "false", safety.sends_enabled ? "danger" : "success", utils) },
+              { label: "Controlled sends", html: dashboardBadge(safety.sends_enabled ? "enabled" : "disabled", safety.sends_enabled ? "success" : "muted", utils) },
               { label: "Send attempts", value: metrics.send_attempts_created },
               { label: "Failed attempts", value: metrics.send_attempts_failed },
               { label: "Succeeded attempts", value: metrics.send_attempts_succeeded },
+              { label: "Duplicates blocked", value: metrics.duplicate_sends_prevented },
             ], utils)}
           </div>
           ${renderOperationalNote(`Duplicate guard: ${utils.humanizeValue(safety.duplicate_success_guard || "one_success_per_idempotency_key")}.`, utils)}
@@ -607,10 +614,10 @@
             ${dashboardBadge("Audit only", "success", utils)}
           </div>
           <div class="operational-safety-strip">
-            ${dashboardBadge(`eBay mutation: ${safety.ebay_mutation_performed ? "true" : "false"}`, safety.ebay_mutation_performed ? "danger" : "success", utils)}
+            ${dashboardBadge(`eBay provider send: ${safety.ebay_mutation_performed ? "yes" : "no"}`, safety.ebay_mutation_performed ? "success" : "muted", utils)}
             ${dashboardBadge(`Outlook mutation: ${safety.outlook_mutation_performed ? "true" : "false"}`, safety.outlook_mutation_performed ? "danger" : "success", utils)}
             ${dashboardBadge(`Auto-send: ${safety.automatic_responses_sent || 0}`, safety.automatic_responses_sent ? "danger" : "success", utils)}
-            ${dashboardBadge(`Sends enabled: ${safety.sends_enabled ? "true" : "false"}`, safety.sends_enabled ? "danger" : "success", utils)}
+            ${dashboardBadge(`Human-only send: ${safety.controlled_human_send_only ? "true" : "false"}`, safety.controlled_human_send_only ? "success" : "warning", utils)}
           </div>
         </section>
       </div>

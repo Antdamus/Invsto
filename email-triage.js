@@ -3453,7 +3453,7 @@
     `;
   }
 
-  function ebayDraftSuccessMessage(mode) {
+  function ebayDraftSuccessMessage(mode, payload = {}) {
     const labels = {
       generate: "AI reply draft generated. Nothing was sent.",
       regenerate: "AI reply draft regenerated. Nothing was sent.",
@@ -3462,8 +3462,19 @@
       discard: "Draft discarded and preserved in history. Nothing was sent.",
       approve: "Draft approved as ready for controlled send. Nothing was sent.",
       unapprove: "Draft approval removed. Nothing was sent.",
+      send: payload.duplicate_prevented ? (payload.message || "Duplicate send prevented. Nothing was sent twice.") : "Sent.",
     };
     return labels[mode] || "Draft action completed. Nothing was sent.";
+  }
+
+  function ebayDraftActionErrorMessage(error, mode) {
+    const code = error?.code || error?.message || "ebay_conversation_draft_action_failed";
+    if (mode !== "send") return code;
+    const detail = error?.detail ? ` ${error.detail}` : "";
+    const provider = error?.providerResponse && typeof error.providerResponse === "object"
+      ? ` Provider status: ${error.providerResponse.status || "unknown"}.`
+      : "";
+    return `Failed to send: ${code}.${detail}${provider} Retry guidance: verify the eBay conversation and send-attempt audit before trying again.`;
   }
 
   function renderEbayDraftFactRows(items = [], emptyText = "No facts listed") {
@@ -3535,6 +3546,64 @@
     `;
   }
 
+  function ebayDraftSendStatusNotice(draft) {
+    const sendState = draft?.send_state || {};
+    const latest = safeArray(sendState.history)[0] || null;
+    if (sendState.is_sent === true) {
+      const providerId = sendState.provider_message_id ? ` Provider ${compactId(sendState.provider_message_id)}.` : "";
+      return `<div class="classification-notice is-success"><strong>Sent.</strong> ${escapeHtml(`Message sent to eBay${providerId}`)}</div>`;
+    }
+    if (latest?.attempt_status === "failed") {
+      const response = latest.provider_response && typeof latest.provider_response === "object" ? latest.provider_response : {};
+      const status = response.status ? ` Provider status ${response.status}.` : "";
+      return `<div class="classification-notice is-error"><strong>Failed to send.</strong> ${escapeHtml(`${latest.error_message || "Provider send failed."}${status} Retry guidance: verify the eBay conversation and send-attempt audit before trying again.`)}</div>`;
+    }
+    if (latest?.attempt_status === "duplicate") {
+      return `<div class="classification-notice is-warning"><strong>Duplicate send prevented.</strong> ${escapeHtml(latest.error_message || "This approved draft already has a send attempt in progress or completed.")}</div>`;
+    }
+    if (latest?.attempt_status === "sending") {
+      return `<div class="classification-notice"><strong>Sending.</strong> The send attempt is in progress in the audit ledger.</div>`;
+    }
+    return "";
+  }
+
+  function renderEbayDraftSendHistory(draft) {
+    const sendState = draft?.send_state || {};
+    const attempts = safeArray(sendState.history);
+    if (!attempts.length) return "";
+    const latest = attempts[0] || {};
+    return `
+      <details class="ebay-draft-send-history">
+        <summary>
+          <span>Send Audit</span>
+          <span class="ebay-classification-head-badges">
+            ${renderBadge(humanizeValue(sendState.status || "not_sent"), sendState.is_sent ? "success" : latest.attempt_status === "failed" ? "danger" : latest.attempt_status === "duplicate" ? "warning" : "muted")}
+            <i data-lucide="chevron-down"></i>
+          </span>
+        </summary>
+        <div class="ebay-draft-approval-grid">
+          <div><span>Latest Attempt</span><strong>${escapeHtml(latest.id ? compactId(latest.id) : "--")}</strong></div>
+          <div><span>Provider Message</span><strong>${escapeHtml(sendState.provider_message_id ? compactId(sendState.provider_message_id) : "--")}</strong></div>
+          <div><span>Sent At</span><strong>${escapeHtml(sendState.sent_at ? formatContextDate(sendState.sent_at) : "--")}</strong></div>
+        </div>
+        <div class="ebay-draft-approval-list">
+          ${attempts.slice(0, 8).map((attempt) => {
+            const providerResponse = attempt.provider_response && typeof attempt.provider_response === "object" ? attempt.provider_response : {};
+            const providerStatus = providerResponse.status ? `Provider ${providerResponse.status}` : "";
+            return `
+              <div class="ebay-draft-approval-row">
+                <strong>${escapeHtml(humanizeValue(attempt.attempt_status || "send_attempt"))}</strong>
+                <span>${escapeHtml([providerStatus, attempt.provider_message_id ? `message ${compactId(attempt.provider_message_id)}` : ""].filter(Boolean).join(" · ") || humanizeValue(attempt.provider || "provider"))}</span>
+                <time>${escapeHtml(formatContextDate(attempt.created_at || attempt.sent_at))}</time>
+                ${attempt.error_message ? `<p>${escapeHtml(attempt.error_message)}</p>` : ""}
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </details>
+    `;
+  }
+
   function renderEbayDraftGrounding(draft) {
     const grounding = draft?.grounding_summary && typeof draft.grounding_summary === "object" ? draft.grounding_summary : {};
     const factsUsed = safeArray(grounding.facts_used);
@@ -3571,6 +3640,34 @@
     `;
   }
 
+  function ebayDraftSendBlockReason(draft, stale, approved, readyToSend, draftText) {
+    const sendState = draft?.send_state || {};
+    if (draft?.draft_status === "sent" || sendState.is_sent === true) return "Sent";
+    if (!approved) return "Approve Draft First";
+    if (stale?.isStale) return stale.message || "Draft is stale";
+    if (!readyToSend) return "Send Blocked";
+    if (!draft?.target_message_id) return "Target message required";
+    if (!draftText) return "Draft text required";
+    if (draftText.length > 2000) return "Draft exceeds eBay limit";
+    return "";
+  }
+
+  function confirmEbayDraftSend(conversation, draft, messages = []) {
+    const target = ebayDraftTargetMessage(draft, messages);
+    const preview = ebayDraftDisplayText(draft).slice(0, 700);
+    const lines = [
+      "Send this message to buyer?",
+      "",
+      `Conversation: ${ebayConversationTitle(conversation)}`,
+      `Buyer: ${ebayConversationParty(conversation)}`,
+      `Target Message: ${target ? ebayMessageIdentifier(target) : "Unavailable"}`,
+      "",
+      "Draft Preview:",
+      preview || "No draft text.",
+    ];
+    return window.confirm(lines.join("\n"));
+  }
+
   function renderEbayConversationDraftCard(conversation, messages = []) {
     const payload = ebayDraftPayload(conversation.id);
     const draft = currentEbayConversationDraft(conversation.id);
@@ -3582,8 +3679,11 @@
     const stale = draft ? stalenessState(draft) : null;
     const draftText = ebayDraftDisplayText(draft);
     const approval = draft?.approval || {};
+    const sendState = draft?.send_state || {};
     const approved = approval.is_approved === true;
     const readyToSend = approval.ready_to_send === true;
+    const isSent = draft?.draft_status === "sent" || sendState.is_sent === true;
+    const sendBlockReason = draft ? ebayDraftSendBlockReason(draft, stale, approved, readyToSend, draftText) : "";
     const validationVariant = draft?.validation_status === "valid"
       ? "success"
       : draft?.validation_status === "warning" ? "warning" : draft ? "muted" : "muted";
@@ -3626,62 +3726,81 @@
     }
 
     return `
-      <section class="ebay-draft-card ebay-reply-composer${stale?.isStale ? " is-stale" : ""}">
+      <section class="ebay-draft-card ebay-reply-composer${stale?.isStale ? " is-stale" : ""}${isSent ? " is-sent" : ""}">
         <div class="context-card-head">
           <h4>Reply Composer</h4>
           <span class="ebay-classification-head-badges">
             ${renderBadge(humanizeValue(draft.draft_status || "generated"), "category")}
             ${renderBadge(humanizeValue(draft.validation_status || "not_validated"), validationVariant)}
             ${approved ? renderBadge("Approved", "success") : renderBadge("Awaiting approval", "warning")}
-            ${readyToSend ? renderBadge("Ready to send", "success") : ""}
-            ${renderBadge("Not sent", "muted")}
+            ${readyToSend && !isSent ? renderBadge("Ready to send", "success") : ""}
+            ${renderBadge(isSent ? "Sent" : "Not sent", isSent ? "success" : "muted")}
           </span>
         </div>
-        ${stale?.isStale ? renderStaleDraftWarning(draft) : ""}
+        ${stale?.isStale && !isSent ? renderStaleDraftWarning(draft) : ""}
         ${error ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(error)}</div>` : ""}
         ${message ? `<div class="classification-notice is-success">${escapeHtml(message)}</div>` : ""}
+        ${ebayDraftSendStatusNotice(draft)}
         ${renderEbayDraftTargetSummary(draft, messages)}
         <form class="ebay-draft-form" data-ebay-draft-form data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-draft-id="${escapeHtml(draft.id)}" data-ebay-target-message-id="${escapeHtml(draft.target_message_id || "")}">
           <label class="ebay-draft-field">
             <span>Editable Draft</span>
-            <textarea name="draftText" rows="8" ${isActionLoading ? "disabled" : ""}>${escapeHtml(draftText)}</textarea>
+            <textarea name="draftText" rows="8" ${isActionLoading || isSent ? "disabled" : ""}>${escapeHtml(draftText)}</textarea>
           </label>
           <label class="ebay-draft-field ebay-draft-notes-field">
             <span>Operator Notes</span>
-            <input name="operatorNotes" type="text" value="${escapeHtml(draft.operator_notes || "")}" placeholder="Optional internal note" ${isActionLoading ? "disabled" : ""} />
+            <input name="operatorNotes" type="text" value="${escapeHtml(draft.operator_notes || "")}" placeholder="Optional internal note" ${isActionLoading || isSent ? "disabled" : ""} />
           </label>
           <label class="ebay-draft-field ebay-draft-instructions-field">
             <span>Draft Instructions</span>
-            <input name="improvementInstructions" type="text" maxlength="1000" placeholder="Make it more professional." ${isActionLoading ? "disabled" : ""} />
+            <input name="improvementInstructions" type="text" maxlength="1000" placeholder="Make it more professional." ${isActionLoading || isSent ? "disabled" : ""} />
           </label>
           <div class="ebay-draft-actions">
-            <button type="button" class="primary-btn" data-ebay-draft-action="save_edit" ${isActionLoading ? "disabled" : ""}>
-              <i data-lucide="${isActionLoading ? "loader-circle" : "save"}"></i>
-              Save Draft
-            </button>
-            ${approved ? `
-              <button type="button" class="secondary-btn" data-ebay-draft-action="unapprove" ${isActionLoading ? "disabled" : ""}>
-                <i data-lucide="shield-x"></i>
-                Unapprove Draft
+            ${isSent ? `
+              <button type="button" class="primary-btn" disabled>
+                <i data-lucide="check-circle-2"></i>
+                Sent
               </button>
             ` : `
-              <button type="button" class="secondary-btn" data-ebay-draft-action="approve" ${isActionLoading ? "disabled" : ""}>
-                <i data-lucide="shield-check"></i>
-                Approve Draft
+              <button type="button" class="primary-btn" data-ebay-draft-action="save_edit" ${isActionLoading ? "disabled" : ""}>
+                <i data-lucide="${isActionLoading ? "loader-circle" : "save"}"></i>
+                Save Draft
+              </button>
+              ${approved ? `
+                <button type="button" class="secondary-btn" data-ebay-draft-action="unapprove" ${isActionLoading ? "disabled" : ""}>
+                  <i data-lucide="shield-x"></i>
+                  Unapprove Draft
+                </button>
+              ` : `
+                <button type="button" class="secondary-btn" data-ebay-draft-action="approve" ${isActionLoading ? "disabled" : ""}>
+                  <i data-lucide="shield-check"></i>
+                  Approve Draft
+                </button>
+              `}
+              ${approved && !sendBlockReason ? `
+                <button type="button" class="primary-btn" data-ebay-draft-action="send" ${isActionLoading ? "disabled" : ""}>
+                  <i data-lucide="${isActionLoading ? "loader-circle" : "send"}"></i>
+                  ${escapeHtml(isActionLoading ? "Sending" : "Send Draft")}
+                </button>
+              ` : `
+                <button type="button" class="secondary-btn" disabled title="${escapeHtml(sendBlockReason || "Approve Draft First")}">
+                  <i data-lucide="lock"></i>
+                  ${escapeHtml(sendBlockReason || "Approve Draft First")}
+                </button>
+              `}
+              <button type="button" class="secondary-btn" data-ebay-draft-action="improve" ${isActionLoading ? "disabled" : ""}>
+                <i data-lucide="wand-sparkles"></i>
+                Improve My Draft
+              </button>
+              <button type="button" class="secondary-btn" data-ebay-draft-action="regenerate" ${isActionLoading ? "disabled" : ""}>
+                <i data-lucide="refresh-cw"></i>
+                Regenerate
+              </button>
+              <button type="button" class="secondary-btn is-danger" data-ebay-draft-action="discard" ${isActionLoading ? "disabled" : ""}>
+                <i data-lucide="trash-2"></i>
+                Discard Draft
               </button>
             `}
-            <button type="button" class="secondary-btn" data-ebay-draft-action="improve" ${isActionLoading ? "disabled" : ""}>
-              <i data-lucide="wand-sparkles"></i>
-              Improve My Draft
-            </button>
-            <button type="button" class="secondary-btn" data-ebay-draft-action="regenerate" ${isActionLoading ? "disabled" : ""}>
-              <i data-lucide="refresh-cw"></i>
-              Regenerate
-            </button>
-            <button type="button" class="secondary-btn is-danger" data-ebay-draft-action="discard" ${isActionLoading ? "disabled" : ""}>
-              <i data-lucide="trash-2"></i>
-              Discard Draft
-            </button>
           </div>
         </form>
         <div class="selected-email-meta">
@@ -3693,6 +3812,7 @@
           ${approved ? `<span>Approved ${escapeHtml(formatContextDate(approval.approved_at))}</span>` : ""}
         </div>
         ${renderEbayDraftApprovalHistory(draft)}
+        ${renderEbayDraftSendHistory(draft)}
         ${renderEbayDraftGrounding(draft)}
       </section>
     `;
@@ -4037,8 +4157,11 @@
     });
 
     try {
-      await requestEbayConversationDraftAction(context, values);
+      const payload = await requestEbayConversationDraftAction(context, values);
       await loadEbayConversationDrafts(context, conversationId, { force: true });
+      if (values.mode === "send") {
+        loadOperationalDashboard(context, { keepPrevious: true });
+      }
       setEbayConversationState({
         ebayConversationDraftActionLoadingId: null,
         ebayConversationDraftActionErrorsById: {
@@ -4047,11 +4170,17 @@
         },
         ebayConversationDraftActionMessagesById: {
           ...adminClassificationState.ebayConversationDraftActionMessagesById,
-          [conversationId]: ebayDraftSuccessMessage(values.mode),
+          [conversationId]: ebayDraftSuccessMessage(values.mode, payload),
         },
       });
     } catch (error) {
-      const code = error.code || error.message || "ebay_conversation_draft_action_failed";
+      const code = ebayDraftActionErrorMessage(error, values.mode);
+      if (values.mode === "send") {
+        await loadEbayConversationDrafts(context, conversationId, { force: true }).catch((loadError) => {
+          console.error("[email-triage] eBay conversation drafts reload after send failure failed:", loadError);
+        });
+        loadOperationalDashboard(context, { keepPrevious: true });
+      }
       setEbayConversationState({
         ebayConversationDraftActionLoadingId: null,
         ebayConversationDraftActionErrorsById: {
@@ -4636,6 +4765,12 @@
           form?.getAttribute("data-ebay-target-message-id") ||
           "";
         const formData = form ? new FormData(form) : null;
+        if (action === "send") {
+          const conversation = selectedEbayConversationById(conversationId, adminClassificationState);
+          const draft = currentEbayConversationDraft(conversationId);
+          const messages = safeArray(adminClassificationState.ebayConversationMessagesById?.[conversationId]);
+          if (!conversation || !draft || !confirmEbayDraftSend(conversation, draft, messages)) return;
+        }
         runEbayConversationDraftAction(context, {
           mode: action,
           conversationId,
@@ -4645,6 +4780,7 @@
           improvementInstructions: formData ? String(formData.get("improvementInstructions") || "") : "",
           operatorNotes: formData ? String(formData.get("operatorNotes") || "") : "",
           approvalNotes: formData ? String(formData.get("operatorNotes") || "") : "",
+          sendConfirmed: action === "send",
         });
         return;
       }
