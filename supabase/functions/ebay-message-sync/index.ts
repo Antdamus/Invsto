@@ -1065,7 +1065,6 @@ serve(async (req) => {
       readOnly: true,
       sendsEnabled: false,
       ebayMutationsPerformed: false,
-      outlookMutationsPerformed: false,
     };
     await completeRun(supabase, runId, counters, metadata);
 
@@ -1079,7 +1078,6 @@ serve(async (req) => {
       safety: {
         readOnly: true,
         ebayMutationsPerformed: false,
-        outlookMutationsPerformed: false,
         sendsEnabled: false,
         messagesSent: 0,
       },
@@ -1102,7 +1100,6 @@ serve(async (req) => {
       safety: {
         readOnly: true,
         ebayMutationsPerformed: false,
-        outlookMutationsPerformed: false,
         sendsEnabled: false,
         messagesSent: 0,
       },

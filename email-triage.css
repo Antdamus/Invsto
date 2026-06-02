@@ -5,7 +5,6 @@
   padding-top: 8px;
 }
 
-.mailbox-toolbar,
 .admin-diagnostics-drawer,
 .triage-disclosure,
 .email-triage-hero,
@@ -23,71 +22,6 @@
   display: none;
 }
 
-.mailbox-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 12px;
-}
-
-.mailbox-toolbar-status {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-}
-
-.mailbox-connection-dot {
-  width: 10px;
-  height: 10px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: rgba(242,243,245,.34);
-  box-shadow: 0 0 0 4px rgba(242,243,245,.05);
-}
-
-.mailbox-connection-dot.is-connected {
-  background: #55efc4;
-  box-shadow: 0 0 0 4px rgba(85,239,196,.1);
-}
-
-.mailbox-connection-dot.is-attention {
-  background: #ffd978;
-  box-shadow: 0 0 0 4px rgba(255,217,120,.1);
-}
-
-.mailbox-toolbar-title {
-  color: rgba(242,243,245,.74);
-  font-size: .86rem;
-  font-weight: 800;
-}
-
-.mailbox-toolbar-title strong {
-  margin-left: 6px;
-  color: rgba(242,243,245,.96);
-  font-size: .78rem;
-  text-transform: uppercase;
-}
-
-.mailbox-toolbar-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  margin-top: 2px;
-  color: rgba(242,243,245,.56);
-  font-size: .76rem;
-  font-weight: 800;
-}
-
-.mailbox-toolbar-meta span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.mailbox-toolbar .primary-btn,
-.mailbox-toolbar .secondary-btn,
-.mailbox-toolbar .danger-btn,
 .workspace-actions .secondary-btn,
 .panel-toggle-btn {
   min-height: 36px;
@@ -2664,7 +2598,6 @@
 }
 
 .inbox-preview-section > section,
-.inbox-mailbox-import-section > section,
 .inbox-rematch-section > section {
   display: grid;
   gap: 12px;
@@ -2680,13 +2613,11 @@
   gap: 8px;
 }
 
-.inbox-mailbox-import-panel,
 .inbox-rematch-panel {
   display: grid;
   gap: 8px;
 }
 
-.inbox-mailbox-import-controls,
 .inbox-rematch-controls {
   display: flex;
   flex-wrap: wrap;
@@ -2704,7 +2635,6 @@
 }
 
 .inbox-preview-toolbar label,
-.inbox-mailbox-import-controls label,
 .inbox-rematch-controls label {
   display: flex;
   flex: 0 0 150px;
@@ -2713,7 +2643,6 @@
 }
 
 .inbox-preview-toolbar label span,
-.inbox-mailbox-import-controls label span,
 .inbox-rematch-controls label span,
 .inbox-skipped-reasons span {
   color: rgba(242,243,245,.58);
@@ -2723,7 +2652,6 @@
 }
 
 .inbox-preview-toolbar select,
-.inbox-mailbox-import-controls select,
 .inbox-rematch-controls select {
   min-height: 34px;
   border: 1px solid rgba(255,255,255,.12);
@@ -4850,11 +4778,6 @@
     grid-template-columns: 1fr;
   }
 
-  .mailbox-toolbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
   .email-triage-hero {
     align-items: stretch;
     flex-direction: column;
@@ -4881,14 +4804,12 @@
   .inbox-preview-toolbar,
   .inbox-preview-actions,
   .inbox-import-actions,
-  .inbox-mailbox-import-controls,
   .inbox-rematch-controls {
     align-items: stretch;
     flex-direction: column;
   }
 
   .inbox-preview-toolbar label,
-  .inbox-mailbox-import-controls label,
   .inbox-rematch-controls label,
   .inbox-bucket-tabs,
   .inbox-import-result dl,

@@ -1035,7 +1035,7 @@ function correlationAnalysis(conversationSets: ConversationSet[], details: Detai
       "order number when not provided as a structured field",
       "return case id",
       "SKU/inventory identity beyond listing reference",
-      "Outlook notification evidence links, if needed for fallback/audit",
+      "supplemental marketplace notification links, if needed for audit",
     ],
   };
 }
@@ -1064,7 +1064,7 @@ function canonicalConversationAssessment(conversationSets: ConversationSet[], de
     supportsMedia: cov.hasMedia || cov.hasMessageMediaField,
     supportsOrderCorrelation: orderCorrelation,
     supportsReturnCorrelation: false,
-    outlookStillRequiredForCanonicalChat: false,
+    externalEmailRequiredForCanonicalChat: false,
     caveats: [
       !messages.length ? "No detail messages were fetched in this run; use includeDetails or conversationId for canonical timeline validation." : "",
       detailDirections.includes("unknown") ? "Some message directions are unknown without otherPartyUsername or stored seller username." : "",
@@ -1127,7 +1127,7 @@ function proposedCanonicalDataContract() {
     },
     conversation_status: {
       fields: ["conversation_status", "read_status", "unread_count"],
-      note: "Do not map Outlook read state onto eBay read state.",
+      note: "Use only native eBay read state for eBay conversations.",
     },
     conversation_latest_activity: {
       fields: ["latest_message_id", "latest_message_created_at", "latest_message_preview", "latest_sender_username"],

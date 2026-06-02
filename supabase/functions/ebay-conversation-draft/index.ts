@@ -764,7 +764,6 @@ function buildDraftInput(
       manual_send_bypass: manualSendBypass,
       sends_allowed: false,
       ebay_mutations_allowed: false,
-      outlook_mutations_allowed: false,
     },
   };
 }
@@ -776,9 +775,9 @@ Return strict JSON only. Do not include markdown wrappers, prose outside JSON, o
 Your output is an internal editable draft suggestion only. A human operator must review it. Never imply that a message was sent or should be sent automatically.
 
 Draft style:
-- Write a concise eBay seller reply, not an Outlook email.
+- Write a concise eBay seller reply for the native eBay message thread.
 - Use a professional, friendly, calm tone.
-- Prefer one or two short paragraphs.
+- Prefer one or two short response blocks.
 - Do not add a subject line or email signature.
 - Do not mention internal systems, databases, Supabase, AI, classification, link confidence, or missing records to the buyer.
 - If facts are missing, write a general safe acknowledgement and say we will review/look into the details.
@@ -1453,7 +1452,6 @@ async function createManualDraft(
       manual_send_bypass: true,
       sends_allowed: false,
       ebay_mutations_allowed: false,
-      outlook_mutations_allowed: false,
     },
   };
   const promptHash = await sha256Hex(stableStringify({
@@ -2375,7 +2373,6 @@ function safetyEnvelope(options: { sendsEnabled?: boolean; messagesSent?: number
     sendsEnabled: options.sendsEnabled === true,
     messagesSent: Number(options.messagesSent || 0),
     ebayMutationsPerformed: options.ebayMutationsPerformed === true,
-    outlookMutationsPerformed: false,
     returnMutationsPerformed: false,
     automaticResponsesSent: 0,
     humanInitiatedOnly: true,

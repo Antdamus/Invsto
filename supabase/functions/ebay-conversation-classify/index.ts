@@ -396,7 +396,6 @@ function buildClassifierInput(context: Record<string, any>, version: string) {
     safety: {
       classify_only: true,
       ebay_mutations_allowed: false,
-      outlook_classification_allowed: false,
       sends_allowed: false,
     },
   };
@@ -405,7 +404,7 @@ function buildClassifierInput(context: Record<string, any>, version: string) {
 function buildPrompt(version: string) {
   return `
 You are a conversation-level AI classifier for OG eBay Messaging Ops.
-Classify only canonical eBay conversation data. Do not classify Outlook emails.
+Classify only canonical eBay conversation data.
 Return strict JSON only. Do not include markdown, prose, or chain-of-thought.
 
 Allowed topic_tags: ${TOPIC_TAGS.join(", ")}.
@@ -1106,7 +1105,6 @@ async function classifyRecent(
 function safetyEnvelope() {
   return {
     ebayMutationsPerformed: false,
-    outlookMutationsPerformed: false,
     sendsEnabled: false,
     messagesSent: 0,
     classificationOnly: true,

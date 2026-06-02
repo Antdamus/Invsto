@@ -2,20 +2,8 @@
   "use strict";
 
   const {
-    functions: { START_FUNCTION, MESSAGES_FUNCTION, STATUS_FUNCTION, DISCONNECT_FUNCTION },
     requireAdmin,
-    edgeFetch,
-    normalizeAdminViewPayload,
-    isAdminViewEmpty,
-    fetchAdminClassificationView,
     fetchOperationalDashboard,
-    fetchMessageDetail,
-    fetchDraftView,
-    requestResponseDraft,
-    requestDraftReviewAction,
-    fetchMatchContext,
-    requestMatchReviewAction,
-    saveClassificationReview,
     fetchEbayConversations,
     fetchEbayConversationMessages,
     fetchEbayConversationContext,
@@ -50,7 +38,6 @@
     formatDateTime,
     formatEmailAge,
     formatCompactEmailAge,
-    safeErrorMessage,
     humanizeValue,
     formatConfidence,
     compactId,
@@ -91,9 +78,7 @@
     renderWorkflowMetaText,
     filterToggleLabel,
   } = window.EmailTriageRenderUtils;
-  const { renderMessageRows, bindInboxPreviewImport } = window.EmailTriageInbox;
-  const { renderAdminSummary, renderOperationalDashboard } = window.EmailTriageDiagnostics;
-  const { successMessageForAction } = window.EmailTriageDrafts;
+  const { renderOperationalDashboard } = window.EmailTriageDiagnostics;
   const {
     CLASSIFICATION_CATEGORIES,
     REVIEW_STATES,
@@ -222,15 +207,6 @@
   const ebayDraftActionMessageTimers = new Map();
 
   const els = {
-    connect: document.getElementById("connect-outlook"),
-    refresh: document.getElementById("refresh-messages"),
-    disconnect: document.getElementById("disconnect-outlook"),
-    adminDiagnosticsToggle: document.getElementById("admin-diagnostics-toggle"),
-    adminDiagnosticsDrawer: document.getElementById("admin-diagnostics-drawer"),
-    mailboxConnectionDot: document.getElementById("mailbox-connection-dot"),
-    mailboxToolbarState: document.getElementById("mailbox-toolbar-state"),
-    mailboxToolbarEmail: document.getElementById("mailbox-toolbar-email"),
-    mailboxToolbarChecked: document.getElementById("mailbox-toolbar-checked"),
     refreshClassificationAdmin: document.getElementById("refresh-classification-admin"),
     toggleCategoryPanel: document.getElementById("toggle-category-panel"),
     toggleDetailPanel: document.getElementById("toggle-detail-panel"),
@@ -376,6 +352,26 @@
     }
   }
 
+  function normalizeAdminViewPayload() {
+    return {
+      classifications: [],
+      replay_operations: [],
+      failed_jobs: [],
+      page: {},
+      queue_summary: {},
+      classification_counts: {},
+      validation_diagnostics: {},
+    };
+  }
+
+  function isAdminViewEmpty(data = normalizeAdminViewPayload()) {
+    return !data.classifications.length
+      && !data.replay_operations.length
+      && !data.failed_jobs.length
+      && Object.values(data.queue_summary).every((value) => Number(value || 0) === 0)
+      && Object.values(data.validation_diagnostics).every((value) => Number(value || 0) === 0);
+  }
+
   const triageStore = createStore(createInitialState({
     data: normalizeAdminViewPayload({}),
     densityMode: getStoredDensityMode(),
@@ -423,14 +419,13 @@
       totalPages: Math.max(Number(page.total_pages || counts.total_pages || 1) || 1, 1),
       filteredRows: Number(page.filtered_rows || counts.filtered_current_valid || counts.total_current_valid || 0) || 0,
       visibleRows: Number(page.visible_rows || counts.visible_rows || data.classifications?.length || 0) || 0,
-      totalMailboxRows: Number(page.total_mailbox_rows || counts.total_mailbox_rows || 0) || 0,
       totalClassifiedRows: Number(page.total_classified_rows || counts.total_current_valid || 0) || 0,
       hasNextPage: page.has_more === true || counts.has_next_page === true,
       hasPreviousPage: page.has_previous_page === true || counts.has_previous_page === true,
     };
   }
 
-  function mailboxQueryFromState(state, overrides = {}) {
+  function classificationQueryFromState(state, overrides = {}) {
     const pagination = state.pagination || {};
     const pageSize = Number(overrides.pageSize || pagination.pageSize || pagination.limit || 25);
     return {
@@ -636,79 +631,6 @@
       els.statusPanel.classList.toggle("is-error", state === "error");
     }
   }
-
-  function setMailboxSummary(values = {}) {
-    const state = values.state || "checking";
-    const email = values.email || "Mailbox unavailable";
-    const lastChecked = values.lastChecked ? formatDateTime(values.lastChecked) : "--";
-    if (els.mailboxToolbarState) els.mailboxToolbarState.textContent = state;
-    if (els.mailboxToolbarEmail) els.mailboxToolbarEmail.textContent = email;
-    if (els.mailboxToolbarChecked) els.mailboxToolbarChecked.textContent = `Last checked: ${lastChecked}`;
-    if (els.mailboxConnectionDot) {
-      els.mailboxConnectionDot.classList.toggle("is-connected", values.status === "connected");
-      els.mailboxConnectionDot.classList.toggle("is-attention", values.status === "attention");
-    }
-  }
-
-  function setStatusMeta(items = []) {
-    if (!els.statusMeta) return;
-    if (!items.length) {
-      els.statusMeta.classList.add("hidden");
-      els.statusMeta.innerHTML = "";
-      return;
-    }
-
-    els.statusMeta.innerHTML = items.map((item) => `
-      <div>
-        <dt>${escapeHtml(item.label)}</dt>
-        <dd>${escapeHtml(item.value || "--")}</dd>
-      </div>
-    `).join("");
-    els.statusMeta.classList.remove("hidden");
-  }
-
-  function setLoading(isLoading) {
-    [els.connect, els.refresh, els.disconnect].forEach((button) => {
-      if (!button) return;
-      button.disabled = isLoading;
-      button.setAttribute("aria-busy", isLoading ? "true" : "false");
-      button.classList.toggle("is-loading", isLoading);
-    });
-  }
-
-  function setButtonMode(mode) {
-    if (mode === "connected") {
-      els.refresh?.classList.remove("hidden", "secondary-btn");
-      els.refresh?.classList.add("primary-btn");
-      els.disconnect?.classList.remove("hidden");
-      if (els.connect) {
-        els.connect.classList.remove("hidden", "primary-btn");
-        els.connect.classList.add("secondary-btn");
-        els.connect.innerHTML = `<i data-lucide="mail-plus"></i> Reconnect Outlook`;
-      }
-    } else if (mode === "attention") {
-      els.refresh?.classList.remove("hidden", "primary-btn");
-      els.refresh?.classList.add("secondary-btn");
-      els.disconnect?.classList.remove("hidden");
-      if (els.connect) {
-        els.connect.classList.remove("hidden", "secondary-btn");
-        els.connect.classList.add("primary-btn");
-        els.connect.innerHTML = `<i data-lucide="mail-plus"></i> Reconnect Outlook`;
-      }
-    } else {
-      els.refresh?.classList.add("hidden");
-      els.disconnect?.classList.add("hidden");
-      if (els.connect) {
-        els.connect.classList.remove("hidden", "secondary-btn");
-        els.connect.classList.add("primary-btn");
-        els.connect.innerHTML = `<i data-lucide="mail-plus"></i> Connect Outlook Mailbox`;
-      }
-    }
-
-    if (window.lucide?.createIcons) window.lucide.createIcons();
-  }
-
-
 
   function categoryMatchesGroup(classification, groupId) {
     const id = canonicalGroupId(groupId);
@@ -980,7 +902,7 @@
     const groups = buildCategorySidebarGroups(data, state.categorySortMode, activeCustomOrder);
     const showingExactTotals = exactCategoryTotalsAvailable(data, state.activeFilters);
     const countNote = showingExactTotals
-      ? "Counts are exact totals for the current mailbox query."
+      ? "Counts are exact totals for the current query."
       : "Counts are loaded-view rows for the active filters.";
     const countTitle = showingExactTotals
       ? "Exact current valid classifications"
@@ -1025,7 +947,7 @@
     if (!rows.length) {
       const emptyText = data.classifications.length
         ? "No classifications are on this page."
-        : "No durable mailbox rows match the current query.";
+        : "No durable rows match the current query.";
       els.classificationList.innerHTML = `<div class="classification-empty">${escapeHtml(emptyText)}</div>`;
       return;
     }
@@ -1240,7 +1162,7 @@
         "Conversation",
         renderBadge("Stored thread", "muted"),
         `
-          <p class="conversation-empty">Load the selected message detail to view stored Outlook thread blocks.</p>
+          <p class="conversation-empty">Load the selected message detail to view stored thread blocks.</p>
           ${error ? `<div class="classification-notice is-error">Could not load conversation: ${escapeHtml(error)}</div>` : ""}
           <button type="button" class="secondary-btn classification-body-action" data-message-detail-action="load" data-message-id="${escapeHtml(messageId)}" ${isLoading || !messageId ? "disabled" : ""}>
             <i data-lucide="${isLoading ? "loader-circle" : "messages-square"}"></i>
@@ -1551,7 +1473,7 @@
           <i data-lucide="chevron-down"></i>
         </summary>
         <div class="classification-notice is-warning draft-safety-notice">
-          Draft requires human review. Approved does not send email. Rejected does not delete draft. No Outlook mutation.
+          Draft requires human review. Approved does not send. Rejected does not delete draft.
         </div>
         ${error ? `<div class="classification-notice is-error">Could not load draft view: ${escapeHtml(error)}</div>` : ""}
         ${actionError ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(actionError)}</div>` : ""}
@@ -2247,22 +2169,21 @@
     const loaded = Number(counts.loaded_current_valid ?? data.classifications?.length ?? 0);
     const total = Number(counts.total_current_valid ?? 0);
     const filtered = Number(counts.filtered_current_valid ?? total);
-    const totalMailbox = Number(counts.total_mailbox_rows || 0);
     if (!loaded && !total && emptyResults) {
       return "Fetch succeeded. No current valid classifications returned yet.";
     }
     if (filtered !== total && total > 0) {
-      return `Showing ${loaded} visible rows from ${filtered} filtered classifications. Mailbox has ${totalMailbox} imported rows.`;
+      return `Showing ${loaded} visible rows from ${filtered} filtered classifications.`;
     }
     if (Number.isFinite(total) && total > 0) {
-      return `Showing ${loaded} visible rows from ${total} current valid classifications. Mailbox has ${totalMailbox} imported rows.`;
+      return `Showing ${loaded} visible rows from ${total} current valid classifications.`;
     }
     return emptyResults ? "Fetch succeeded. No loaded current valid rows returned yet." : "Fetch succeeded. Browse loaded current valid rows below.";
   }
 
-  function renderMailboxPageControls(state, data) {
+  function renderClassificationPageControls(state, data) {
     const page = pageInfoFromData(data);
-    const prepareProgress = state.inboxPrepareResult?.progress || state.inboxMailboxImportResult?.preparation_progress || {};
+    const prepareProgress = state.inboxPrepareResult?.progress || {};
     const preparedRows = Number(prepareProgress.processed_total || 0);
     if (els.classificationPageSummary) {
       const activeParts = [
@@ -2273,8 +2194,8 @@
       ].filter(Boolean);
       els.classificationPageSummary.innerHTML = `
         <div>
-          <strong>Mailbox</strong>
-          <span>${escapeHtml(page.totalMailboxRows)} imported · ${escapeHtml(preparedRows)} prepared · ${escapeHtml(page.totalClassifiedRows)} classified · ${escapeHtml(page.filteredRows)} filtered · ${escapeHtml(page.visibleRows)} visible</span>
+          <strong>Classifications</strong>
+          <span>${escapeHtml(preparedRows)} prepared · ${escapeHtml(page.totalClassifiedRows)} classified · ${escapeHtml(page.filteredRows)} filtered · ${escapeHtml(page.visibleRows)} visible</span>
         </div>
         <div>
           <strong>Page</strong>
@@ -2367,7 +2288,7 @@
     }
 
     renderCategorySidebar(state, data);
-    renderMailboxPageControls(state, data);
+    renderClassificationPageControls(state, data);
     renderClassificationList(state, data);
     renderClassificationDetail(state, data);
   }
@@ -5733,7 +5654,7 @@
 
   async function loadAdminClassificationData(context, options = {}) {
     const currentState = triageStore.getState();
-    const mailboxQuery = mailboxQueryFromState(currentState, options.mailboxQuery || {});
+    const classificationQuery = classificationQueryFromState(currentState, options.classificationQuery || {});
     setAdminClassificationState({
       status: "loading",
       loading: true,
@@ -5744,7 +5665,7 @@
     });
 
     try {
-      const data = await fetchAdminClassificationView(context, { mailboxQuery });
+      const data = await fetchAdminClassificationView(context, { classificationQuery });
       const empty = isAdminViewEmpty(data);
       const page = pageInfoFromData(data);
       const selectedClassificationId = currentState.selectedClassificationId || data.classifications?.[0]?.id || null;
@@ -5768,15 +5689,14 @@
           has_previous_page: page.hasPreviousPage,
           total_pages: page.totalPages,
           filtered_rows: page.filteredRows,
-          total_mailbox_rows: page.totalMailboxRows,
           total_classified_rows: page.totalClassifiedRows,
           filters: {
-            category: mailboxQuery.category,
-            priority: mailboxQuery.priority,
-            status: mailboxQuery.status,
-            activeFilters: mailboxQuery.filters,
+            category: classificationQuery.category,
+            priority: classificationQuery.priority,
+            status: classificationQuery.status,
+            activeFilters: classificationQuery.filters,
           },
-          sort: mailboxQuery.sort,
+          sort: classificationQuery.sort,
         },
         updatedAt: new Date().toISOString(),
       });
@@ -5797,9 +5717,9 @@
     }
   }
 
-  async function updateMailboxQueryAndLoad(context, overrides = {}) {
+  async function updateClassificationQueryAndLoad(context, overrides = {}) {
     const current = triageStore.getState();
-    const query = mailboxQueryFromState(current, overrides);
+    const query = classificationQueryFromState(current, overrides);
     setAdminClassificationState({
       selectedCategory: query.category,
       sortMode: query.sort,
@@ -5814,7 +5734,7 @@
         offset: (query.page - 1) * query.pageSize,
       },
     });
-    await loadAdminClassificationData(context, { mailboxQuery: query });
+    await loadAdminClassificationData(context, { classificationQuery: query });
     const selected = selectedClassificationById(triageStore.getState().selectedClassificationId);
     if (selected) {
       loadDraftView(context, selected);
@@ -6179,197 +6099,6 @@
     }
   }
 
-  async function loadMailboxStatus(context) {
-    return edgeFetch(STATUS_FUNCTION, context.session, { method: "GET" });
-  }
-
-  function renderConnectionStatus(connection) {
-    const status = String(connection?.status || "").toLowerCase();
-    const email = connection?.mailbox_email || "Unknown mailbox";
-    const displayName = connection?.display_name || "Not provided";
-    const lastChecked = connection?.last_successful_check_at || connection?.updated_at || "";
-    const lastError = connection?.last_error_code || "none";
-
-    setMailboxSummary({
-      state: status === "error" || status === "reconnect_required" ? "needs attention" : "connected",
-      status: status === "error" || status === "reconnect_required" ? "attention" : "connected",
-      email,
-      lastChecked,
-    });
-
-    setStatusMeta([
-      { label: "Connected mailbox", value: email },
-      { label: "Display name", value: displayName },
-      { label: "Status", value: status || "connected" },
-      { label: "Last checked", value: formatDateTime(lastChecked) },
-      { label: "Last error", value: lastError },
-    ]);
-
-    if (status === "error" || status === "reconnect_required") {
-      setButtonMode("attention");
-      setStatus(
-        "Mailbox needs attention",
-        "Outlook connection needs attention",
-        safeErrorMessage(connection?.last_error_code || status),
-        "error",
-      );
-      return false;
-    }
-
-    setButtonMode("connected");
-    setStatus(
-      "Connected",
-      `Outlook mailbox connected: ${email}`,
-      "Latest messages will load automatically from the persisted mailbox connection.",
-      "success",
-    );
-    return true;
-  }
-
-  function renderDisconnectedStatus() {
-    setButtonMode("disconnected");
-    setMailboxSummary({
-      state: "not connected",
-      status: "disconnected",
-      email: "Connect Outlook mailbox",
-      lastChecked: "",
-    });
-    setStatusMeta([]);
-    els.messagesSection?.classList.add("hidden");
-    renderMessages([]);
-    setStatus("Not connected", "Outlook connection required", "Connect the OG mailbox to display the latest 10 messages.");
-  }
-
-  function renderMessages(messages = []) {
-    if (!els.messagesBody) return;
-
-    if (!messages.length) {
-      els.messagesBody.innerHTML = `<tr><td colspan="4">No Outlook messages returned.</td></tr>`;
-    } else {
-      els.messagesBody.innerHTML = renderMessageRows(messages);
-    }
-
-    if (els.countPill) {
-      const count = messages.length;
-      els.countPill.textContent = `${count} ${count === 1 ? "message" : "messages"}`;
-    }
-  }
-
-  async function loadMessages(context) {
-    setLoading(true);
-    setMailboxSummary({
-      state: "checking",
-      status: "attention",
-      email: els.mailboxToolbarEmail?.textContent || "Mailbox unavailable",
-      lastChecked: new Date().toISOString(),
-    });
-    setStatus("Checking", "Reading latest Outlook emails", "Calling Microsoft Graph through the Supabase Edge Function.");
-
-    try {
-      const payload = await edgeFetch(MESSAGES_FUNCTION, context.session, { method: "POST", body: "{}" });
-      const messages = Array.isArray(payload.messages) ? payload.messages : [];
-      renderMessages(messages);
-      els.messagesSection?.classList.remove("hidden");
-      setButtonMode("connected");
-      setMailboxSummary({
-        state: "connected",
-        status: "connected",
-        email: els.mailboxToolbarEmail?.textContent || "Connected mailbox",
-        lastChecked: new Date().toISOString(),
-      });
-      setStatus("Connected", "Outlook mailbox connected", `Loaded ${messages.length} sanitized message previews.`, "success");
-    } catch (error) {
-      const code = error.code || error.message;
-      renderMessages([]);
-      els.messagesSection?.classList.add("hidden");
-      setButtonMode(code === "mailbox_not_connected" ? "disconnected" : "attention");
-      setMailboxSummary({
-        state: code === "mailbox_not_connected" ? "not connected" : "needs attention",
-        status: code === "mailbox_not_connected" ? "disconnected" : "attention",
-        email: els.mailboxToolbarEmail?.textContent || "Mailbox unavailable",
-        lastChecked: new Date().toISOString(),
-      });
-      setStatus("Mailbox needs attention", "Could not load Outlook emails", safeErrorMessage(code), "error");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function connectOutlook(context) {
-    setLoading(true);
-    setMailboxSummary({
-      state: "connecting",
-      status: "attention",
-      email: els.mailboxToolbarEmail?.textContent || "Microsoft sign-in",
-      lastChecked: new Date().toISOString(),
-    });
-    setStatus("Redirecting", "Opening Microsoft login", "You will return here after Microsoft authorizes mailbox read access.");
-
-    try {
-      const payload = await edgeFetch(START_FUNCTION, context.session, {
-        method: "POST",
-        body: JSON.stringify({ returnTo: window.location.href.split("?")[0] }),
-      });
-
-      if (!payload.authorizationUrl) throw new Error("Microsoft authorization URL was not returned.");
-      window.location.href = payload.authorizationUrl;
-    } catch (error) {
-      setStatus("Error", "Could not start Microsoft login", error.message || "Try again after checking Edge Function configuration.", "error");
-      setLoading(false);
-    }
-  }
-
-  async function disconnectOutlook(context) {
-    const confirmed = window.confirm("Disconnect Outlook for email triage? This removes the stored server-side refresh token and stops automatic mailbox loading.");
-    if (!confirmed) return;
-
-    setLoading(true);
-    setMailboxSummary({
-      state: "disconnecting",
-      status: "attention",
-      email: els.mailboxToolbarEmail?.textContent || "Connected mailbox",
-      lastChecked: new Date().toISOString(),
-    });
-    setStatus("Disconnecting", "Disconnecting Outlook mailbox", "Removing the persisted mailbox secret from the server.");
-
-    try {
-      await edgeFetch(DISCONNECT_FUNCTION, context.session, {
-        method: "POST",
-        body: "{}",
-      });
-      renderDisconnectedStatus();
-      setStatus(
-        "Disconnected",
-        "Outlook mailbox disconnected",
-        "Connect Outlook Mailbox is available when you are ready to reconnect.",
-      );
-    } catch (error) {
-      const code = error.code || error.message;
-      if (code === "mailbox_not_connected") {
-        renderDisconnectedStatus();
-        return;
-      }
-      setButtonMode("attention");
-      setStatus("Mailbox needs attention", "Could not disconnect Outlook", safeErrorMessage(code), "error");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function handleOutlookQueryNotice() {
-    const params = new URLSearchParams(window.location.search);
-    const outlook = params.get("outlook");
-    if (!outlook) return;
-
-    const cleanUrl = window.location.pathname;
-    window.history.replaceState({}, document.title, cleanUrl);
-
-    if (outlook === "error") {
-      const reason = params.get("reason") || "reconnect_required";
-      setStatus("Mailbox needs attention", "Microsoft login did not finish", safeErrorMessage(reason), "error");
-    }
-  }
-
   function bindClassificationInboxEvents(context) {
     els.classificationCategoryList?.addEventListener("click", (event) => {
       const orderActionButton = event.target.closest("[data-category-order-action]");
@@ -6435,7 +6164,7 @@
       if (!button) return;
 
       const selectedCategory = canonicalGroupId(button.getAttribute("data-category-id") || "all");
-      updateMailboxQueryAndLoad(context, { category: selectedCategory, page: 1 });
+      updateClassificationQueryAndLoad(context, { category: selectedCategory, page: 1 });
     });
 
     els.classificationList?.addEventListener("click", (event) => {
@@ -6588,30 +6317,30 @@
 
     els.classificationSort?.addEventListener("change", (event) => {
       const sortMode = event.target.value || "newest";
-      updateMailboxQueryAndLoad(context, { sort: sortMode, page: 1 });
+      updateClassificationQueryAndLoad(context, { sort: sortMode, page: 1 });
     });
 
     els.classificationPageSize?.addEventListener("change", (event) => {
-      updateMailboxQueryAndLoad(context, { pageSize: Number(event.target.value || 25), page: 1 });
+      updateClassificationQueryAndLoad(context, { pageSize: Number(event.target.value || 25), page: 1 });
     });
 
     els.classificationPriorityFilter?.addEventListener("change", (event) => {
-      updateMailboxQueryAndLoad(context, { priority: event.target.value || "all", page: 1 });
+      updateClassificationQueryAndLoad(context, { priority: event.target.value || "all", page: 1 });
     });
 
     els.classificationStatusFilter?.addEventListener("change", (event) => {
-      updateMailboxQueryAndLoad(context, { status: event.target.value || "all", page: 1 });
+      updateClassificationQueryAndLoad(context, { status: event.target.value || "all", page: 1 });
     });
 
     els.classificationPrevPage?.addEventListener("click", () => {
       const currentPage = Number(adminClassificationState.pagination?.page || 1);
       if (currentPage <= 1) return;
-      updateMailboxQueryAndLoad(context, { page: currentPage - 1 });
+      updateClassificationQueryAndLoad(context, { page: currentPage - 1 });
     });
 
     els.classificationNextPage?.addEventListener("click", () => {
       const currentPage = Number(adminClassificationState.pagination?.page || 1);
-      updateMailboxQueryAndLoad(context, { page: currentPage + 1 });
+      updateClassificationQueryAndLoad(context, { page: currentPage + 1 });
     });
 
     els.classificationCategorySort?.addEventListener("change", (event) => {
@@ -6652,7 +6381,7 @@
           .filter((item) => item.checked)
           .map((item) => item.getAttribute("data-classification-filter"))
           .filter(Boolean);
-        updateMailboxQueryAndLoad(context, { filters: activeFilters, page: 1 });
+        updateClassificationQueryAndLoad(context, { filters: activeFilters, page: 1 });
       });
     });
   }
@@ -6661,46 +6390,10 @@
     const context = await requireAdmin({ greetingEl: els.greeting });
     if (!context) return;
 
-    els.connect?.addEventListener("click", () => connectOutlook(context));
-    els.refresh?.addEventListener("click", () => loadMessages(context));
-    els.disconnect?.addEventListener("click", () => disconnectOutlook(context));
-    els.adminDiagnosticsToggle?.addEventListener("click", () => {
-      const expanded = els.adminDiagnosticsToggle.getAttribute("aria-expanded") === "true";
-      els.adminDiagnosticsToggle.setAttribute("aria-expanded", expanded ? "false" : "true");
-      els.adminDiagnosticsDrawer?.classList.toggle("hidden", expanded);
-    });
     bindEbayConversationEvents(context);
     renderEbayConversationInbox(adminClassificationState);
     bindPanelResizeEvents();
     bindEbayPanelResizeEvents();
-    bindInboxPreviewImport(context, triageStore, {
-      onImportComplete: () => {
-        loadAdminClassificationData(context);
-        loadOperationalDashboard(context);
-      },
-      onMailboxImportComplete: () => {
-        loadOperationalDashboard(context);
-      },
-      onPrepareComplete: () => {
-        loadAdminClassificationData(context);
-        loadOperationalDashboard(context);
-        loadSelectedMatchContext(context, { force: true });
-        loadSelectedDraftView(context, { force: true });
-      },
-      onLiveRefreshComplete: () => {
-        loadAdminClassificationData(context);
-        loadOperationalDashboard(context);
-        loadSelectedMatchContext(context, { force: true });
-        loadSelectedDraftView(context, { force: true });
-      },
-      onRematchComplete: () => {
-        loadAdminClassificationData(context);
-        loadOperationalDashboard(context);
-        loadSelectedMatchContext(context, { force: true });
-        loadSelectedDraftView(context, { force: true });
-      },
-    });
-    els.refreshClassificationAdmin?.addEventListener("click", () => loadAdminClassificationData(context));
     els.operationalDashboardRefresh?.addEventListener("click", () => loadOperationalDashboard(context));
     els.operationalDashboardToggle?.addEventListener("click", () => {
       const operationalDashboardCollapsed = !adminClassificationState.operationalDashboardCollapsed;
@@ -6709,57 +6402,10 @@
     });
     els.operationalDashboard?.addEventListener("click", handleOperationalDashboardClick);
     els.operationalDashboard?.addEventListener("keydown", handleOperationalDashboardKeydown);
-    els.toggleCategoryPanel?.addEventListener("click", () => {
-      setAdminClassificationState({
-        categoryPanelCollapsed: !adminClassificationState.categoryPanelCollapsed,
-      });
-    });
-    els.toggleDetailPanel?.addEventListener("click", () => {
-      setAdminClassificationState({
-        detailPanelCollapsed: !adminClassificationState.detailPanelCollapsed,
-      });
-    });
-    bindClassificationInboxEvents(context);
-
-    handleOutlookQueryNotice();
     loadEbayConversationSavedViews(context);
     loadEbayConversationList(context);
     renderOperationalDashboardPanel(adminClassificationState);
-    await loadAdminClassificationData(context);
     loadOperationalDashboard(context, { keepPrevious: false });
-    loadSelectedDraftView(context);
-    loadSelectedMatchContext(context);
-
-    setLoading(true);
-    setMailboxSummary({
-      state: "checking",
-      status: "attention",
-      email: "Mailbox unavailable",
-      lastChecked: new Date().toISOString(),
-    });
-    setStatus("Checking", "Checking persisted Outlook connection", "Loading mailbox status from the Supabase Edge Function.");
-    try {
-      const payload = await loadMailboxStatus(context);
-      if (payload.connected && payload.connection) {
-        const canAutoLoad = renderConnectionStatus(payload.connection);
-        setLoading(false);
-        if (canAutoLoad) await loadMessages(context);
-      } else {
-        renderDisconnectedStatus();
-        setLoading(false);
-      }
-    } catch (error) {
-      setButtonMode("attention");
-      setStatusMeta([]);
-      setMailboxSummary({
-        state: "needs attention",
-        status: "attention",
-        email: "Mailbox status unavailable",
-        lastChecked: new Date().toISOString(),
-      });
-      setStatus("Mailbox needs attention", "Could not load mailbox status", safeErrorMessage(error.code || error.message), "error");
-      setLoading(false);
-    }
 
     if (window.lucide?.createIcons) window.lucide.createIcons();
   }

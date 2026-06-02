@@ -15,7 +15,6 @@
     return [
       { label: "Visible Rows", value: counts.visible_rows ?? counts.loaded_current_valid ?? data.classifications?.length },
       { label: "Filtered Rows", value: counts.filtered_current_valid ?? counts.total_current_valid ?? data.validation_diagnostics?.valid_classifications },
-      { label: "Mailbox Rows", value: counts.total_mailbox_rows ?? 0 },
       { label: "Classified Rows", value: counts.total_current_valid ?? data.validation_diagnostics?.valid_classifications },
       { label: "Open Review", value: data.validation_diagnostics?.pending_human_review },
       { label: "Invalid History", value: data.validation_diagnostics?.invalid_classifications },
@@ -177,10 +176,6 @@
       event.replay_source ? `Replay source: ${event.replay_source}` : "",
       ebayDescriptions[eventType],
       eventType === "rematch_existing" ? "Deterministic link rematch completed for an explicit scope." : "",
-      eventType === "sync_import_approved" ? "Approved Outlook messages were imported into the local mailbox." : "",
-      eventType === "run_live_refresh" ? "Bounded preview, import, processing, and classification pass." : "",
-      eventType === "classify_imported" ? "Imported messages were considered for classification." : "",
-      eventType === "process_imported" ? "Imported messages were considered for processing and matching." : "",
       "Operational event recorded.",
     ]);
     const rematchChanges = numberMetric(payload, ["changed_link_count"]) || Number(counters.links_created || 0) + Number(counters.links_updated || 0);
@@ -196,12 +191,6 @@
         metricText(numberMetric(payload, ["imported_count"]) || counters.imported_count, "imported"),
         metricText(numberMetric(payload, ["already_imported_count", "skipped_already_imported_count"]) || counters.already_imported_count, "already"),
         metricText(numberMetric(payload, ["failed_count"]) || counters.failed_count, "failed"),
-      ],
-      mailbox_import: [
-        metricText(numberMetric(payload.progress || payload, ["target_count"]) || numberMetric(payload, ["target_count"]), "target"),
-        metricText(numberMetric(payload.progress || payload, ["imported_total", "imported_count"]) || counters.imported_count, "imported"),
-        metricText(numberMetric(payload.progress || payload, ["already_imported_total", "already_imported_count"]) || counters.already_imported_count, "already"),
-        metricText(numberMetric(payload.progress || payload, ["failed_total", "failed_count"]) || counters.failed_count, "failed"),
       ],
       classify_imported: [
         metricText(numberMetric(payload, ["candidate_count"]), "candidates"),
@@ -284,15 +273,13 @@
 
   function renderSafetySummary(payload = {}, utils = window.EmailTriageRenderUtils) {
     const safety = payload.safety && typeof payload.safety === "object" ? payload.safety : payload;
-    const outlookMutation = safety.outlook_mutation_performed === true;
     const ebayMutation = safety.ebay_mutation_performed === true;
     const sends = Number(safety.automatic_responses_sent || safety.emails_sent || 0);
     const parts = [
-      outlookMutation ? "Outlook mutation: true" : "no Outlook mutation",
       ebayMutation ? "eBay mutation: true" : "no eBay mutation",
       sends ? `${sends} sends` : "no sends",
     ];
-    return `${outlookMutation || ebayMutation || sends ? "Safety" : "Safe"}: ${parts.join(" · ")}`;
+    return `${ebayMutation || sends ? "Safety" : "Safe"}: ${parts.join(" · ")}`;
   }
 
   function renderMetricCard(label, value, note = "", utils = window.EmailTriageRenderUtils) {
@@ -372,7 +359,7 @@
       ];
     }
 
-    if (eventType === "sync_import_approved" || eventType === "mailbox_import") {
+    if (eventType === "sync_import_approved") {
       return [
         ["Target", metricValue([progress, payload], ["target_count", "limit"])],
         ["Imported", metricValue([progress, batch, payload, imported, counters], ["imported_total", "imported_count"])],
@@ -427,8 +414,6 @@
     const summary = summarizeOperationalEvent(event, utils);
     const safety = payload.safety && typeof payload.safety === "object" ? payload.safety : event.safety || {};
     const safetyFlags = [
-      ["Outlook fetch", metricValue([safety, payload], ["outlook_fetch_performed"])],
-      ["Outlook mutation", metricValue([safety, payload], ["outlook_mutation_performed"])],
       ["eBay mutation", metricValue([safety, payload], ["ebay_mutation_performed"])],
       ["Classification", metricValue([safety, payload], ["classification_triggered"])],
       ["Drafts created", metricValue([safety, payload], ["drafts_created"])],
@@ -645,7 +630,6 @@
           </div>
           <div class="operational-safety-strip">
             ${dashboardBadge(`eBay provider send: ${safety.ebay_mutation_performed ? "yes" : "no"}`, safety.ebay_mutation_performed ? "success" : "muted", utils)}
-            ${dashboardBadge(`Outlook mutation: ${safety.outlook_mutation_performed ? "true" : "false"}`, safety.outlook_mutation_performed ? "danger" : "success", utils)}
             ${dashboardBadge(`Auto-send: ${safety.automatic_responses_sent || 0}`, safety.automatic_responses_sent ? "danger" : "success", utils)}
             ${dashboardBadge(`Human-only send: ${safety.controlled_human_send_only ? "true" : "false"}`, safety.controlled_human_send_only ? "success" : "warning", utils)}
           </div>
@@ -663,177 +647,7 @@
     if (!snapshot) {
       return `<div class="workspace-status operational-dashboard-status">Refresh dashboard to load operational visibility.</div>`;
     }
-    if (snapshot.ebay) {
-      return renderEbayOperationalDashboard(state, snapshot, utils);
-    }
-
-    const mailbox = snapshot.mailbox || {};
-    const queue = snapshot.queue || {};
-    const failures = snapshot.failures || {};
-    const safety = snapshot.safety || {};
-    const gaps = snapshot.pipeline_gaps || {};
-    const visibility = snapshot.pipeline_visibility || {};
-    const connected = mailbox.connected && String(mailbox.status || "").toLowerCase() !== "disconnected";
-    const visibleGapCount = Number(visibility.imported_without_processing_count || 0)
-      + Number(visibility.processed_without_classification_count || 0)
-      + Number(visibility.unclassified_imported_total || 0)
-      + Number(visibility.processing_failed_jobs || 0)
-      + Number(visibility.classification_failed_jobs || 0)
-      + Number(visibility.classification_skipped_jobs || 0);
-    const gapCount = visibleGapCount || Number(gaps.imported_without_processing || 0) + Number(gaps.processed_without_classification || 0);
-    const blocked = queue.saturated || gapCount > 0 || safety.outlook_mutation_performed || safety.automatic_responses_sent > 0 || safety.polling_started || safety.scheduler_started || safety.realtime_listener_started;
-    const visibilityLimited = visibility.is_limited === true;
-    const visibilityScopeLabel = visibilityLimited
-      ? `sampled ${visibility.sampled_imported_count || 0} of ${visibility.active_imported_total || 0}`
-      : "table-derived";
-
-    return `
-      <div class="operational-dashboard-status">
-        <span>${state.operationalDashboardLoading ? "Refreshing dashboard" : `Dashboard refreshed ${utils.formatDateTime(state.operationalDashboardUpdatedAt || snapshot.generated_at)}`}</span>
-        ${state.operationalDashboardError ? dashboardBadge(`Error: ${state.operationalDashboardError}`, "danger", utils) : ""}
-        ${dashboardBadge(blocked ? "Attention needed" : "Safe visibility mode", blocked ? "warning" : "success", utils)}
-      </div>
-
-      <div class="operational-dashboard-grid">
-        <section class="operational-panel">
-          <div class="operational-panel-head">
-            <strong>Mailbox Status</strong>
-            ${dashboardBadge(connected ? "Connected" : "Disconnected", connected ? "success" : "warning", utils)}
-          </div>
-          <div class="operational-metric-grid">
-            ${renderKeyValueGrid([
-              { label: "Mailbox", value: mailbox.mailbox_email || "Unavailable" },
-              { label: "Identity", value: mailbox.display_name || "Not provided" },
-              { label: "Last checked", value: mailbox.last_checked_at ? utils.formatDateTime(mailbox.last_checked_at) : "--" },
-              { label: "Live sync enabled", html: dashboardBadge(mailbox.live_sync_enabled ? "true" : "false", mailbox.live_sync_enabled ? "success" : "muted", utils) },
-            ], utils)}
-          </div>
-        </section>
-
-        <section class="operational-panel">
-          <div class="operational-panel-head">
-            <strong>Queue Health</strong>
-            ${dashboardBadge(queue.saturated ? "Saturated" : "Within bounds", queue.saturated ? "danger" : "success", utils)}
-          </div>
-          <div class="operational-metric-grid">
-            ${renderKeyValueGrid([
-              { label: "Queued jobs", value: queue.queued },
-              { label: "Running jobs", value: queue.running },
-              { label: "Failed jobs", value: queue.failed },
-              { label: "Oldest queued age", value: queue.oldest_queued_age_seconds == null ? "Not reported" : formatAgeSeconds(queue.oldest_queued_age_seconds, utils) },
-            ], utils)}
-          </div>
-        </section>
-
-        <section class="operational-panel operational-panel-wide">
-          <div class="operational-panel-head">
-            <strong>Operational Activity</strong>
-            ${snapshot.activity?.latest_live_refresh?.id ? dashboardBadge(`Live ${utils.compactId(snapshot.activity.latest_live_refresh.id)}`, "muted", utils) : dashboardBadge("No live id", "muted", utils)}
-          </div>
-          <div class="operational-activity-list">
-            ${renderActivityRows(snapshot, utils)}
-          </div>
-        </section>
-
-        <section class="operational-panel">
-          <div class="operational-panel-head">
-            <strong>Replay Visibility</strong>
-            ${dashboardBadge(snapshot.replay?.replay_safe ? "Replay-safe" : "No replay flag", snapshot.replay?.replay_safe ? "success" : "muted", utils)}
-          </div>
-          <div class="operational-metric-grid">
-            ${renderKeyValueGrid([
-              { label: "Import operations", value: snapshot.replay?.import_operations },
-              { label: "Classify operations", value: snapshot.replay?.classify_operations },
-              { label: "Process operations", value: snapshot.replay?.process_operations },
-              { label: "Live refresh operations", value: snapshot.replay?.live_refresh_operations },
-              { label: "Rematch operations", value: snapshot.replay?.rematch_operations },
-            ], utils)}
-          </div>
-        </section>
-
-        <section class="operational-panel operational-panel-wide">
-          <div class="operational-panel-head">
-            <strong>Pipeline Visibility</strong>
-            ${dashboardBadge(gapCount ? "Partial states visible" : "No visible gaps", gapCount ? "warning" : "success", utils)}
-          </div>
-          <div class="operational-metric-grid">
-            ${renderKeyValueGrid([
-              { label: "Imported rows (active)", value: visibility.active_imported_total },
-              { label: "Fully processed rows", value: visibility.fully_processed_imported_count },
-              { label: "Current valid AI classified", value: visibility.current_valid_classified_imported_total },
-              { label: "Unclassified imported rows", value: visibility.unclassified_imported_total },
-              { label: "Imported, not fully processed", value: visibility.imported_without_processing_count },
-              { label: "Processed, not classified", value: visibility.processed_without_classification_count },
-              { label: "Processing failed jobs", value: visibility.processing_failed_jobs },
-              { label: "Classification failed/skipped jobs", value: Number(visibility.classification_failed_jobs || 0) + Number(visibility.classification_skipped_jobs || 0) },
-            ], utils)}
-          </div>
-          ${renderOperationalNote(`${visibilityScopeLabel}. Imports can be complete while processing and classification are still pending; this card does not enqueue work. Live refresh classification can be capped, so remaining rows may stay unclassified.`, utils)}
-        </section>
-
-        <section class="operational-panel">
-          <div class="operational-panel-head">
-            <strong>Event-Derived Gaps</strong>
-            ${dashboardBadge("Limited by event history", "muted", utils)}
-          </div>
-          <div class="operational-metric-grid">
-            ${renderKeyValueGrid([
-              { label: "Approved imports seen in events", value: gaps.approved_imported_total },
-              { label: "Active event imports", value: gaps.active_imported_total },
-              { label: "Event imports fully processed", value: gaps.fully_processed_imported_total },
-              { label: "Event imports classified", value: gaps.current_classified_imported_total },
-              { label: "Event imports not processed", value: gaps.imported_without_processing },
-              { label: "Event processed not classified", value: gaps.processed_without_classification },
-            ], utils)}
-          </div>
-          ${renderOperationalNote("Event-derived counts can miss imported rows when audit event inserts fail or fall outside the dashboard lookup window.", utils)}
-        </section>
-
-        <section class="operational-panel">
-          <div class="operational-panel-head">
-            <strong>Failure Visibility</strong>
-            ${dashboardBadge(failures.failed_jobs_total || failures.failed_classifications_total ? "Failures present" : "No failures", failures.failed_jobs_total || failures.failed_classifications_total ? "danger" : "success", utils)}
-          </div>
-          <div class="operational-metric-grid">
-            ${renderKeyValueGrid([
-              { label: "Failed processing jobs", value: failures.failed_jobs_total },
-              { label: "Failed classifications", value: failures.failed_classifications_total },
-              { label: "Permanent classify failures", value: failures.permanently_failed_classifications },
-              { label: "Blocked/safe state", html: dashboardBadge(blocked ? "attention" : "safe", blocked ? "warning" : "success", utils) },
-            ], utils)}
-          </div>
-          <div class="operational-reason-list">
-            ${renderFailureReasons(failures.failed_reasons, utils)}
-          </div>
-        </section>
-
-        <section class="operational-panel operational-panel-wide">
-          <div class="operational-panel-head">
-            <strong>Recent Operational Events</strong>
-            ${dashboardBadge(`${snapshot.recent_operational_events.length} visible`, "muted", utils)}
-          </div>
-          <div class="operational-event-list">
-            ${renderOperationalEventRows(snapshot.recent_operational_events, utils)}
-          </div>
-        </section>
-
-        <section class="operational-panel operational-panel-wide">
-          <div class="operational-panel-head">
-            <strong>Safety Flags</strong>
-            ${dashboardBadge("Visibility only", "success", utils)}
-          </div>
-          <div class="operational-safety-strip">
-            ${dashboardBadge(`Outlook mutation: ${safety.outlook_mutation_performed ? "true" : "false"}`, safety.outlook_mutation_performed ? "danger" : "success", utils)}
-            ${dashboardBadge(`Auto-send: ${safety.automatic_responses_sent || 0}`, safety.automatic_responses_sent ? "danger" : "success", utils)}
-            ${dashboardBadge(`Drafts created: ${safety.drafts_created || 0}`, safety.drafts_created ? "warning" : "success", utils)}
-            ${dashboardBadge(`Scheduler: ${safety.scheduler_started ? "true" : "false"}`, safety.scheduler_started ? "danger" : "success", utils)}
-            ${dashboardBadge(`Polling: ${safety.polling_started ? "true" : "false"}`, safety.polling_started ? "danger" : "success", utils)}
-            ${dashboardBadge(`Realtime: ${safety.realtime_listener_started ? "true" : "false"}`, safety.realtime_listener_started ? "danger" : "success", utils)}
-          </div>
-        </section>
-      </div>
-      ${renderOperationalEventDetailDrawer(state, snapshot, utils)}
-    `;
+    return renderEbayOperationalDashboard(state, snapshot, utils);
   }
 
   window.EmailTriageDiagnostics = {

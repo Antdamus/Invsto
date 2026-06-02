@@ -543,42 +543,7 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/ebay-conversation-classify/index.ts"
 
-[functions.microsoft-auth-callback]
-enabled = true
-verify_jwt = false
-entrypoint = "./functions/microsoft-auth-callback/index.ts"
-
-[functions.microsoft-mailbox-status]
+[functions.ebay-conversation-draft]
 enabled = true
 verify_jwt = true
-entrypoint = "./functions/microsoft-mailbox-status/index.ts"
-
-[functions.microsoft-mailbox-disconnect]
-enabled = true
-verify_jwt = true
-entrypoint = "./functions/microsoft-mailbox-disconnect/index.ts"
-
-[functions.microsoft-email-bootstrap]
-enabled = true
-verify_jwt = true
-entrypoint = "./functions/microsoft-email-bootstrap/index.ts"
-
-[functions.microsoft-email-sync]
-enabled = true
-verify_jwt = true
-entrypoint = "./functions/microsoft-email-sync/index.ts"
-
-[functions.microsoft-email-process]
-enabled = true
-verify_jwt = true
-entrypoint = "./functions/microsoft-email-process/index.ts"
-
-[functions.microsoft-email-classify]
-enabled = true
-verify_jwt = true
-entrypoint = "./functions/microsoft-email-classify/index.ts"
-
-[functions.microsoft-email-ops]
-enabled = true
-verify_jwt = true
-entrypoint = "./functions/microsoft-email-ops/index.ts"
+entrypoint = "./functions/ebay-conversation-draft/index.ts"

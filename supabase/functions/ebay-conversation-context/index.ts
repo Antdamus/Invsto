@@ -165,7 +165,6 @@ serve(async (req) => {
       context,
       safety: {
         ebayMutationsPerformed: false,
-        outlookMutationsPerformed: false,
         sendsEnabled: false,
         messagesSent: 0,
       },
@@ -179,7 +178,6 @@ serve(async (req) => {
       message: error instanceof Error ? error.message : String(error || "Unknown error"),
       safety: {
         ebayMutationsPerformed: false,
-        outlookMutationsPerformed: false,
         sendsEnabled: false,
         messagesSent: 0,
       },

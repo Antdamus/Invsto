@@ -203,26 +203,14 @@
 
   function safeErrorMessage(code) {
     const messages = {
-      mailbox_not_connected: "No persisted Outlook mailbox is connected yet.",
-      token_refresh_failed: "Microsoft could not refresh mailbox access. Reconnect Outlook to restore message loading.",
-      reconnect_required: "Outlook access needs to be renewed. Reconnect Outlook to continue.",
-      graph_messages_failed: "Microsoft Graph could not return the latest messages. Try Refresh, then reconnect if it continues.",
-      multiple_active_connections: "More than one active mailbox connection was found. Ask an admin to clean up the connection records.",
-      admin_required: "Only active admins can manage the Outlook mailbox connection.",
-      configuration_error: "The mailbox Edge Function is missing required server configuration.",
-      unauthorized: "Your admin session expired. Sign in again before loading mailbox status.",
+      admin_required: "Only active admins can manage this workspace.",
+      configuration_error: "A required server configuration value is missing.",
+      unauthorized: "Your admin session expired. Sign in again before continuing.",
       invalid_session: "Your admin session expired. Sign in again before loading messages.",
-      missing_authorization: "Your admin session was not sent to the mailbox function.",
-      forbidden: "Only active admins can disconnect the Outlook mailbox.",
-      disconnect_failed: "Outlook could not be disconnected. Try again, then check the Edge Function logs if it continues.",
-      status_lookup_failed: "Mailbox status could not be loaded. Try refreshing the page.",
-      connection_lookup_failed: "Mailbox connection records could not be checked. Try refreshing the page.",
-      missing_connection_secret: "The mailbox connection is missing its server-side secret. Reconnect Outlook to restore access.",
-      refresh_token_decrypt_failed: "Stored mailbox access could not be read. Reconnect Outlook to restore access.",
-      outlook_connection_expired: "The temporary Outlook proof expired. Reconnect Outlook to continue.",
-      outlook_connection_user_mismatch: "The temporary Outlook proof belongs to another admin session.",
+      missing_authorization: "Your admin session was not sent to the requested function.",
+      forbidden: "Only active admins can perform this action.",
     };
-    return messages[code] || "Mailbox status needs attention. Try Refresh, then reconnect if it continues.";
+    return messages[code] || "The request needs attention. Refresh the page and try again.";
   }
 
   function humanizeValue(value) {
