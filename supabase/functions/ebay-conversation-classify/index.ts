@@ -51,6 +51,7 @@ const TOPIC_TAGS = [
 
 const PRIORITIES = ["high", "normal", "low"] as const;
 const RESPONSE_NEEDS = ["reply_today", "reply_later", "no_reply_needed"] as const;
+const CONVERSATION_SOURCES = ["member_message", "platform_notification"] as const;
 const BUYER_FLAGS = [
   "vip_buyer",
   "high_value_buyer",
@@ -386,6 +387,7 @@ function buildClassifierInput(context: Record<string, any>, version: string) {
       classifier_version: CLASSIFIER_VERSION,
       prompt_version: version,
       allowed_topic_tags: TOPIC_TAGS,
+      allowed_conversation_sources: CONVERSATION_SOURCES,
       allowed_priorities: PRIORITIES,
       allowed_response_needs: RESPONSE_NEEDS,
       allowed_buyer_flags: BUYER_FLAGS,
@@ -546,6 +548,11 @@ function keywordRiskFlags(input: Record<string, any>) {
   return [...flags];
 }
 
+function deriveConversationSource(input: Record<string, any>) {
+  const type = String(input.conversation?.conversation_type || "").toUpperCase();
+  return type === "FROM_EBAY" ? "platform_notification" : "member_message";
+}
+
 function normalizeClassificationOutput(raw: unknown, input: Record<string, any>) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new ClassifierError("invalid_model_output", { status: 502, phase: "output_validation" });
@@ -586,6 +593,7 @@ function normalizeClassificationOutput(raw: unknown, input: Record<string, any>)
   }
 
   return {
+    conversation_source: deriveConversationSource(input),
     topic_tags: topics,
     priority,
     response_need: responseNeed,
@@ -602,7 +610,9 @@ function normalizeClassificationOutput(raw: unknown, input: Record<string, any>)
 
 function effectiveState(row: Record<string, any>) {
   const override = parseObject(row.operator_override_payload);
+  const source = String(override.conversation_source || row.conversation_source || "member_message");
   return {
+    conversation_source: CONVERSATION_SOURCES.includes(source as typeof CONVERSATION_SOURCES[number]) ? source : "member_message",
     priority: String(override.priority || row.priority || "normal"),
     response_need: String(override.response_need || row.response_need || "reply_later"),
     topic_tags: uniqueAllowed(override.topic_tags || row.topic_tags || [], TOPIC_TAGS, 8),
@@ -620,6 +630,7 @@ function publicClassification(row: Record<string, any> | null) {
   const override = parseObject(row.operator_override_payload);
   return {
     ...row,
+    effective_conversation_source: effective.conversation_source,
     effective_priority: effective.priority,
     effective_response_need: effective.response_need,
     effective_topic_tags: effective.topic_tags,
@@ -713,6 +724,7 @@ async function persistClassification(
       latest_message_id: latest.id || null,
       latest_ebay_message_id: latest.ebay_message_id || null,
       source: "ai",
+      conversation_source: options.normalized.conversation_source,
       classification_status: "classified",
       priority: options.normalized.priority,
       response_need: options.normalized.response_need,
@@ -822,12 +834,14 @@ function sanitizeOverridePayload(value: Record<string, unknown>) {
   const payload: Record<string, unknown> = {};
   const priority = text(value.priority, 40);
   const responseNeed = text(value.response_need || value.responseNeed, 60);
+  const conversationSource = text(value.conversation_source || value.conversationSource, 80);
   const summary = text(value.summary, 280);
   const reasoningSummary = text(value.reasoning_summary || value.reasoningSummary, 280);
   const recommendedAction = text(value.recommended_action || value.recommendedAction, 180);
 
   if (PRIORITIES.includes(priority as typeof PRIORITIES[number])) payload.priority = priority;
   if (RESPONSE_NEEDS.includes(responseNeed as typeof RESPONSE_NEEDS[number])) payload.response_need = responseNeed;
+  if (CONVERSATION_SOURCES.includes(conversationSource as typeof CONVERSATION_SOURCES[number])) payload.conversation_source = conversationSource;
   if ("topic_tags" in value || "topicTags" in value) payload.topic_tags = uniqueAllowed(value.topic_tags || value.topicTags, TOPIC_TAGS, 8);
   if ("buyer_flags" in value || "buyerFlags" in value) payload.buyer_flags = uniqueAllowed(value.buyer_flags || value.buyerFlags, BUYER_FLAGS, BUYER_FLAGS.length);
   if ("risk_flags" in value || "riskFlags" in value) payload.risk_flags = uniqueAllowed(value.risk_flags || value.riskFlags, RISK_FLAGS, RISK_FLAGS.length);
@@ -1026,11 +1040,12 @@ async function taxonomyAudit(supabase: ServiceClient, input: Input) {
     },
     proposed_beta_taxonomy: {
       topic_tags: TOPIC_TAGS,
+      conversation_source: CONVERSATION_SOURCES,
       priority: PRIORITIES,
       response_need: RESPONSE_NEEDS,
       buyer_flags: BUYER_FLAGS,
       risk_flags: RISK_FLAGS,
-      visible_in_list: ["priority", "response_need", "top_topic", "strongest_buyer_flag"],
+      visible_in_list: ["conversation_source", "priority", "response_need", "top_topic", "strongest_buyer_flag"],
       stored_for_detail: ["all_topic_tags", "all_buyer_flags", "risk_flags", "summary", "reasoning_summary", "recommended_action", "override_history"],
     },
     samples,

@@ -103,6 +103,7 @@
     EBAY_TOPIC_TAGS,
     EBAY_PRIORITIES,
     EBAY_RESPONSE_NEEDS,
+    EBAY_CONVERSATION_SOURCE_TYPES,
     EBAY_BUYER_FLAGS,
     EBAY_RISK_FLAGS,
     EBAY_REVIEW_STATES,
@@ -114,6 +115,7 @@
   const EBAY_CLASSIFICATION_COLLAPSED_STORAGE_KEY = "og-email-triage-ebay-classification-collapsed";
   const EBAY_DRAFT_METADATA_COLLAPSED_STORAGE_KEY = "og-email-triage-ebay-draft-metadata-collapsed";
   const EBAY_FILTER_GROUPS = [
+    { key: "sourceTypes", label: "Source", values: EBAY_CONVERSATION_SOURCE_TYPES },
     { key: "topics", label: "Topics", values: EBAY_TOPIC_TAGS },
     { key: "buyerFlags", label: "Buyer flags", values: EBAY_BUYER_FLAGS },
     { key: "riskFlags", label: "Risk flags", values: EBAY_RISK_FLAGS },
@@ -122,6 +124,8 @@
   ];
   const EBAY_SAVED_VIEW_ICONS = {
     all: "inbox",
+    members: "message-circle",
+    ebay_notifications: "bell",
     unread: "circle-dot",
     returns: "undo-2",
     shipping_issues: "truck",
@@ -2528,7 +2532,35 @@
     return normalizeEbaySearchText(snippet) === normalizeEbaySearchText(summary) ? "" : snippet;
   }
 
+  function ebayNotificationListText(value) {
+    return compactConversationText(
+      String(value || "")
+        .replace(/<\s*br\s*\/?>/gi, "\n")
+        .replace(/<\/\s*(p|div|tr|li|h[1-6])\s*>/gi, "\n")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\b(view|respond|learn more|details)\b\s*(?:\||$)/gi, " ")
+        .replace(/\s+/g, " "),
+      "",
+    );
+  }
+
+  function ebayNotificationKindFromConversation(conversation) {
+    const classification = ebayConversationClassification(conversation);
+    const textValue = [
+      conversation?.conversation_title,
+      conversation?.latest_message_preview,
+      classification?.effective_summary,
+      classification?.effective_topic_tags,
+    ].flat().filter(Boolean).join(" ");
+    return EBAY_NOTIFICATION_KIND_RULES.find((rule) => rule.pattern.test(textValue)) || {
+      label: "eBay Notification",
+      icon: "bell",
+    };
+  }
+
   function ebayNotificationPreviewLabel(conversation) {
+    const kind = ebayNotificationKindFromConversation(conversation);
+    if (kind?.label) return kind.label;
     const classification = ebayConversationClassification(conversation);
     const blob = normalizeEbaySearchText([
       conversation?.conversation_title,
@@ -2549,11 +2581,13 @@
     const aiSummary = compactConversationText(classification?.effective_summary);
     const isPlatform = ebayConversationIsPlatform(conversation);
     if (isPlatform) {
+      const notificationText = ebayNotificationListText(snippet || conversation?.conversation_title);
+      const notificationTitle = ebayNotificationPreviewLabel(conversation);
       return {
-        previewLabel: "Notification",
-        preview: compactConversationText(snippet, ebayConversationTitle(conversation)),
-        summaryLabel: ebayNotificationPreviewLabel(conversation),
-        summary: aiSummary || compactConversationText(snippet, "No notification summary stored."),
+        previewLabel: "Notice",
+        preview: notificationTitle,
+        summaryLabel: "Summary",
+        summary: aiSummary || notificationText || "No notification summary stored.",
       };
     }
     return {
@@ -2583,6 +2617,7 @@
       summary.item_titles,
       summary.item_numbers,
       summary.listing_ids,
+      ebayConversationSource(conversation),
       classification?.effective_summary,
     ].flat().filter(Boolean).join("\n"));
   }
@@ -2596,6 +2631,7 @@
   function ebayClassificationTagValues(classification) {
     if (!classification) return [];
     return [
+      classification.effective_conversation_source,
       classification.effective_priority,
       classification.effective_response_need,
       classification.effective_topic_tags,
@@ -2609,6 +2645,7 @@
       terms: [],
       structured: {
         tags: [],
+        sourceTypes: [],
         topics: [],
         buyerFlags: [],
         riskFlags: [],
@@ -2631,6 +2668,7 @@
         if (!value) continue;
         const token = `${key}:${value}`;
         if (key === "tag") parsed.structured.tags.push(value);
+        else if (key === "source") parsed.structured.sourceTypes.push(value);
         else if (key === "topic") parsed.structured.topics.push(value);
         else if (key === "buyer") parsed.structured.buyerFlags.push(value);
         else if (key === "risk") parsed.structured.riskFlags.push(value);
@@ -2660,8 +2698,17 @@
     const tags = ebayClassificationTagValues(classification);
     const tagSet = new Set(tags);
     const hasAll = (values, allowed) => safeArray(values).every((value) => allowed.includes(value));
-    if (!classification && Object.values(structured).some((values) => safeArray(values).length)) return false;
+    const needsStoredClassification = [
+      structured.tags,
+      structured.topics,
+      structured.buyerFlags,
+      structured.riskFlags,
+      structured.priorities,
+      structured.responseNeeds,
+    ].some((values) => safeArray(values).length);
+    if (!classification && needsStoredClassification) return false;
     return hasAll(structured.tags, tags)
+      && hasAll(structured.sourceTypes, [ebayConversationSource(conversation)])
       && hasAll(structured.topics, classification?.effective_topic_tags || [])
       && hasAll(structured.buyerFlags, classification?.effective_buyer_flags || [])
       && hasAll(structured.riskFlags, classification?.effective_risk_flags || [])
@@ -2699,6 +2746,7 @@
 
   function ebayConversationDefaultClassificationFilters() {
     return {
+      sourceTypes: [],
       topics: [],
       buyerFlags: [],
       riskFlags: [],
@@ -2716,6 +2764,7 @@
         .filter((item, index, rows) => item && allowedSet.has(item) && rows.indexOf(item) === index);
     };
     return {
+      sourceTypes: normalize("sourceTypes", EBAY_CONVERSATION_SOURCE_TYPES),
       topics: normalize("topics", EBAY_TOPIC_TAGS),
       buyerFlags: normalize("buyerFlags", EBAY_BUYER_FLAGS),
       riskFlags: normalize("riskFlags", EBAY_RISK_FLAGS),
@@ -2745,6 +2794,8 @@
   function defaultEbayConversationSavedViews() {
     const rows = [
       ["all", "All", 10],
+      ["members", "Members", 15],
+      ["ebay_notifications", "eBay Notifications", 16],
       ["unread", "Unread", 20],
       ["returns", "Returns", 30],
       ["shipping_issues", "Shipping", 40],
@@ -2796,12 +2847,13 @@
     const selected = safeEbayClassificationFilters(filters);
     if (!countEbayClassificationFilters(selected)) return true;
     const classification = ebayConversationClassification(conversation);
-    if (!classification) return false;
-    return ebayClassificationHasAll(classification.effective_topic_tags, selected.topics)
-      && ebayClassificationHasAll(classification.effective_buyer_flags, selected.buyerFlags)
-      && ebayClassificationHasAll(classification.effective_risk_flags, selected.riskFlags)
-      && ebayClassificationHasAll([classification.effective_priority], selected.priorities)
-      && ebayClassificationHasAll([classification.effective_response_need], selected.responseNeeds);
+    if (!classification && selected.topics.length + selected.buyerFlags.length + selected.riskFlags.length + selected.priorities.length + selected.responseNeeds.length) return false;
+    return ebayClassificationHasAll([ebayConversationSource(conversation)], selected.sourceTypes)
+      && ebayClassificationHasAll(classification?.effective_topic_tags || [], selected.topics)
+      && ebayClassificationHasAll(classification?.effective_buyer_flags || [], selected.buyerFlags)
+      && ebayClassificationHasAll(classification?.effective_risk_flags || [], selected.riskFlags)
+      && ebayClassificationHasAll(classification?.effective_priority ? [classification.effective_priority] : [], selected.priorities)
+      && ebayClassificationHasAll(classification?.effective_response_need ? [classification.effective_response_need] : [], selected.responseNeeds);
   }
 
   function ebayConversationHasTopic(conversation, values = []) {
@@ -2822,6 +2874,8 @@
   function ebaySavedViewMatches(conversation, filter = "all") {
     const summary = ebayConversationSummary(conversation);
     const classification = ebayConversationClassification(conversation);
+    if (filter === "members") return ebayConversationSource(conversation) === "member_message";
+    if (filter === "ebay_notifications") return ebayConversationSource(conversation) === "platform_notification";
     if (filter === "unread") return Number(conversation.unread_count || 0) > 0;
     if (filter === "returns") return summary.has_return_link || ebayConversationHasTopic(conversation, ["return", "refund_request", "wrong_item", "not_as_described"]);
     if (filter === "shipping_issues") return ebayConversationHasTopic(conversation, ["shipping_issue", "missing_item", "order_status", "delivery_timing"]);
@@ -2881,6 +2935,7 @@
     const riskFlags = safeArray(override.risk_flags || row.effective_risk_flags || row.risk_flags).map((item) => compactConversationText(item)).filter(Boolean);
     return {
       ...row,
+      effective_conversation_source: ebayConversationSource(conversation),
       effective_priority: compactConversationText(override.priority || row.effective_priority || row.priority, "normal"),
       effective_response_need: compactConversationText(override.response_need || row.effective_response_need || row.response_need, "reply_later"),
       effective_topic_tags: topicTags,
@@ -2964,6 +3019,8 @@
   function ebayFilterLabel(filter) {
     const labels = {
       all: "All",
+      members: "Members",
+      ebay_notifications: "eBay Notifications",
       unread: "Unread",
       returns: "Returns",
       shipping_issues: "Shipping Issues",
@@ -3053,6 +3110,7 @@
 
   function countEbayFilterOption(rows, groupKey, value) {
     return rows.filter((conversation) => {
+      if (groupKey === "sourceTypes") return ebayConversationSource(conversation) === value;
       const classification = ebayConversationClassification(conversation);
       if (!classification) return false;
       if (groupKey === "topics") return classification.effective_topic_tags.includes(value);
@@ -3104,6 +3162,7 @@
     const typedValue = normalizeEbayStructuredTokenValue(tokenMatch?.[2] || "");
     const rows = [
       ...EBAY_TOPIC_TAGS.map((value) => ({ key: "topic", broadKey: "tag", group: "Topics", value })),
+      ...EBAY_CONVERSATION_SOURCE_TYPES.map((value) => ({ key: "source", broadKey: "tag", group: "Source", value })),
       ...EBAY_BUYER_FLAGS.map((value) => ({ key: "buyer", broadKey: "tag", group: "Buyer flags", value })),
       ...EBAY_RISK_FLAGS.map((value) => ({ key: "risk", broadKey: "tag", group: "Risk flags", value })),
       ...EBAY_PRIORITIES.map((value) => ({ key: "priority", broadKey: "tag", group: "Priority", value })),
@@ -3131,7 +3190,7 @@
   function renderEbaySearchSuggestions(state) {
     if (!els.ebayConversationTagSuggestions) return;
     const query = String(state.ebayConversationSearchQuery || "");
-    const shouldShow = document.activeElement === els.ebayConversationSearch && /(?:^|\s)(tag|topic|buyer|risk|priority|response):/i.test(query);
+    const shouldShow = document.activeElement === els.ebayConversationSearch && /(?:^|\s)(tag|source|topic|buyer|risk|priority|response):/i.test(query);
     if (!shouldShow) {
       els.ebayConversationTagSuggestions.hidden = true;
       els.ebayConversationTagSuggestions.innerHTML = "";
@@ -3159,6 +3218,7 @@
       ${EBAY_FILTER_GROUPS.map((group) => {
         const prefix = group.key === "topics"
           ? "topic"
+          : group.key === "sourceTypes" ? "source"
           : group.key === "buyerFlags" ? "buyer" : group.key === "riskFlags" ? "risk" : group.key === "priorities" ? "priority" : "response";
         return `
           <section>
@@ -3259,9 +3319,9 @@
             </span>
             <time>${escapeHtml(formatCompactEmailAge(ebayConversationTime(conversation)))}</time>
           </span>
-          <span class="ebay-conversation-row-title">${escapeHtml(ebayConversationTitle(conversation))}</span>
-          <span class="ebay-conversation-row-preview"><b>${escapeHtml(previewLines.previewLabel)}</b>${escapeHtml(previewLines.preview)}</span>
           <span class="ebay-conversation-row-ai-summary"><b>${escapeHtml(previewLines.summaryLabel)}</b>${escapeHtml(previewLines.summary)}</span>
+          ${compact ? "" : `<span class="ebay-conversation-row-title">${escapeHtml(ebayConversationTitle(conversation))}</span>`}
+          <span class="ebay-conversation-row-preview"><b>${escapeHtml(previewLines.previewLabel)}</b>${escapeHtml(previewLines.preview)}</span>
           ${compact ? "" : `
             <span class="ebay-conversation-row-meta">
               ${metaItems.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
@@ -3312,6 +3372,21 @@
     return type === "FROM_EBAY" ||
       identity.source === "platform" ||
       normalizeEbaySearchText(identity.displayName) === "ebay";
+  }
+
+  function normalizeEbayConversationSourceType(value) {
+    const source = compactConversationText(value);
+    return EBAY_CONVERSATION_SOURCE_TYPES.includes(source) ? source : "";
+  }
+
+  function ebayConversationSource(conversation) {
+    const row = conversation?.classification && typeof conversation.classification === "object" ? conversation.classification : {};
+    const override = row.operator_override_payload && typeof row.operator_override_payload === "object" ? row.operator_override_payload : {};
+    return normalizeEbayConversationSourceType(
+      override.conversation_source ||
+        row.effective_conversation_source ||
+        row.conversation_source,
+    ) || (ebayConversationIsPlatform(conversation) ? "platform_notification" : "member_message");
   }
 
   function ebayMessageDirection(message) {
@@ -3687,7 +3762,10 @@
     const recipient = safeText(message.recipient_username, "Recipient unavailable");
     const mediaCount = Number(message.media_count || 0);
     const draft = currentEbayConversationDraft(conversation?.id);
-    const isDraftTarget = draft?.target_message_id && draft.target_message_id === message.id;
+    const isDraftTarget = draft?.target_message_id &&
+      draft.target_message_id === message.id &&
+      !ebayDraftIsSent(draft) &&
+      !ebayDraftCanSendWithoutApproval(draft);
     const isActionLoading = adminClassificationState.ebayConversationDraftActionLoadingId === conversation?.id;
     const canGenerate = direction === "inbound" && conversation?.id && message.id;
     return `
@@ -3760,6 +3838,10 @@
           <label>
             <span>Response</span>
             <select name="response_need">${renderRequiredOptions(EBAY_RESPONSE_NEEDS, classification.effective_response_need)}</select>
+          </label>
+          <label>
+            <span>Source</span>
+            <select name="conversation_source">${renderRequiredOptions(EBAY_CONVERSATION_SOURCE_TYPES, classification.effective_conversation_source)}</select>
           </label>
           <label>
             <span>Review</span>
@@ -4032,6 +4114,17 @@
     return humanizeValue(source || "Draft");
   }
 
+  function ebayDraftIsSent(draft) {
+    const sendState = draft?.send_state || {};
+    return draft?.draft_status === "sent" || sendState.is_sent === true;
+  }
+
+  function ebayDraftCanSendWithoutApproval(draft) {
+    if (!draft?.id || ebayDraftIsSent(draft)) return false;
+    if (String(draft.source_mode || "").toLowerCase() === "operator_edit") return true;
+    return draft.manual_send_bypass === true || draft.grounding_summary?.draft_request?.manual_send_bypass === true;
+  }
+
   function renderEbayDraftTargetSummary(draft, messages = []) {
     const target = ebayDraftTargetMessage(draft, messages);
     if (!target) {
@@ -4278,59 +4371,37 @@
 
   function renderEbayManualComposer(conversation, messages = [], options = {}) {
     const target = options.target || latestInboundEbayMessage(messages);
+    const draft = options.draft || null;
     const isActionLoading = adminClassificationState.ebayConversationDraftActionLoadingId === conversation.id;
     const error = adminClassificationState.ebayConversationDraftErrorsById?.[conversation.id] ||
       adminClassificationState.ebayConversationDraftActionErrorsById?.[conversation.id];
     const message = adminClassificationState.ebayConversationDraftActionMessagesById?.[conversation.id];
     const targetId = target?.id || "";
+    const draftText = ebayDraftDisplayText(draft);
     const canAct = Boolean(targetId) && !isActionLoading;
     return `
       <section class="ebay-draft-card ebay-reply-composer is-manual">
         <div class="context-card-head">
-          <h4>Reply Composer</h4>
+          <h4>Message</h4>
           <span class="ebay-classification-head-badges">
-            ${renderBadge("Manual ready", "success")}
-            ${renderBadge("Not approved", "muted")}
+            ${renderBadge("Normal chat", "success")}
           </span>
         </div>
         ${error ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(error)}</div>` : ""}
         ${message ? `<div class="classification-notice is-success">${escapeHtml(message)}</div>` : ""}
-        ${target ? renderEbayDraftTargetSummary({ target_message_id: target.id, target_message: target }, messages) : `
-          <div class="ebay-reply-target is-empty">
-            <span>Replying to</span>
-            <strong>No buyer message selected</strong>
-            <p>A buyer message is required before this reply can be saved, approved, or sent.</p>
-          </div>
-        `}
-        <form class="ebay-draft-form" data-ebay-draft-form data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-draft-id="" data-ebay-target-message-id="${escapeHtml(targetId)}">
+        <form class="ebay-draft-form" data-ebay-draft-form data-ebay-composer-mode="normal" data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-draft-id="${escapeHtml(draft?.id || "")}" data-ebay-target-message-id="${escapeHtml(targetId)}">
           <label class="ebay-draft-field">
             <span>Message</span>
-            <textarea name="draftText" rows="5" placeholder="Type a reply to the buyer..." ${isActionLoading ? "disabled" : ""}></textarea>
-          </label>
-          <label class="ebay-draft-field ebay-draft-notes-field">
-            <span>Operator Notes</span>
-            <input name="operatorNotes" type="text" value="" placeholder="Optional internal note" ${isActionLoading ? "disabled" : ""} />
-          </label>
-          <label class="ebay-draft-field ebay-draft-instructions-field">
-            <span>AI Instructions</span>
-            <input name="improvementInstructions" type="text" maxlength="1000" placeholder="Optional tone or wording guidance" ${isActionLoading ? "disabled" : ""} />
+            <textarea name="draftText" rows="4" placeholder="Type a message to the buyer..." ${isActionLoading ? "disabled" : ""}>${escapeHtml(draftText)}</textarea>
           </label>
           <div class="ebay-draft-actions">
-            <button type="button" class="primary-btn" data-ebay-draft-action="save_edit" ${canAct ? "" : "disabled"}>
-              <i data-lucide="${isActionLoading ? "loader-circle" : "save"}"></i>
-              Save Draft
-            </button>
-            <button type="button" class="secondary-btn" data-ebay-draft-action="approve" ${canAct ? "" : "disabled"}>
-              <i data-lucide="shield-check"></i>
-              Approve Draft
-            </button>
             <button type="button" class="secondary-btn" data-ebay-draft-action="improve" ${canAct ? "" : "disabled"}>
               <i data-lucide="wand-sparkles"></i>
               Improve Text
             </button>
-            <button type="button" class="secondary-btn" data-ebay-draft-action="generate" data-ebay-target-message-id="${escapeHtml(targetId)}" ${canAct ? "" : "disabled"}>
-              <i data-lucide="sparkles"></i>
-              Generate AI Reply
+            <button type="button" class="primary-btn" data-ebay-draft-action="send" ${canAct ? "" : "disabled"}>
+              <i data-lucide="${isActionLoading ? "loader-circle" : "send"}"></i>
+              ${escapeHtml(isActionLoading ? "Sending" : "Send")}
             </button>
           </div>
         </form>
@@ -4367,7 +4438,8 @@
     const sendState = draft?.send_state || {};
     const approved = approval.is_approved === true;
     const readyToSend = approval.ready_to_send === true;
-    const isSent = draft?.draft_status === "sent" || sendState.is_sent === true;
+    const isSent = ebayDraftIsSent(draft);
+    const manualSend = ebayDraftCanSendWithoutApproval(draft);
     const sendBlockReason = draft ? ebayDraftSendBlockReason(draft, stale, approved, readyToSend, draftText) : "";
     const validationVariant = draft?.validation_status === "valid"
       ? "success"
@@ -4393,10 +4465,14 @@
       return `${renderEbaySentDraftReceipt(draft)}${renderEbayManualComposer(conversation, messages)}`;
     }
 
+    if (manualSend) {
+      return renderEbayManualComposer(conversation, messages, { draft });
+    }
+
     return `
       <section class="ebay-draft-card ebay-reply-composer${stale?.isStale ? " is-stale" : ""}">
         <div class="context-card-head">
-          <h4>Reply Composer</h4>
+          <h4>AI Reply</h4>
           <span class="ebay-classification-head-badges">
             ${renderBadge(ebayDraftSourceLabel(draft), draft.source_mode === "operator_edit" ? "success" : "category")}
             ${renderBadge(humanizeValue(draft.draft_status || "generated"), "muted")}
@@ -4409,7 +4485,7 @@
         ${error ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(error)}</div>` : ""}
         ${message ? `<div class="classification-notice is-success">${escapeHtml(message)}</div>` : ""}
         ${renderEbayDraftTargetSummary(draft, messages)}
-        <form class="ebay-draft-form" data-ebay-draft-form data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-draft-id="${escapeHtml(draft.id)}" data-ebay-target-message-id="${escapeHtml(draft.target_message_id || "")}">
+        <form class="ebay-draft-form" data-ebay-draft-form data-ebay-composer-mode="ai_reply" data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-draft-id="${escapeHtml(draft.id)}" data-ebay-target-message-id="${escapeHtml(draft.target_message_id || "")}">
           <label class="ebay-draft-field">
             <span>Message</span>
             <textarea name="draftText" rows="6" placeholder="Type a reply to the buyer..." ${isActionLoading ? "disabled" : ""}>${escapeHtml(draftText)}</textarea>
@@ -4423,10 +4499,6 @@
             <input name="improvementInstructions" type="text" maxlength="1000" placeholder="Optional tone or wording guidance" ${isActionLoading ? "disabled" : ""} />
           </label>
           <div class="ebay-draft-actions">
-            <button type="button" class="primary-btn" data-ebay-draft-action="save_edit" ${isActionLoading ? "disabled" : ""}>
-              <i data-lucide="${isActionLoading ? "loader-circle" : "save"}"></i>
-              Save Draft
-            </button>
             ${approved ? `
               <button type="button" class="secondary-btn" data-ebay-draft-action="unapprove" ${isActionLoading ? "disabled" : ""}>
                 <i data-lucide="shield-x"></i>
@@ -4451,11 +4523,11 @@
             `}
             <button type="button" class="secondary-btn" data-ebay-draft-action="improve" ${isActionLoading ? "disabled" : ""}>
               <i data-lucide="wand-sparkles"></i>
-              Improve Text
+              Improve Draft
             </button>
             <button type="button" class="secondary-btn" data-ebay-draft-action="regenerate" ${isActionLoading ? "disabled" : ""}>
               <i data-lucide="refresh-cw"></i>
-              Regenerate
+              Generate AI Reply
             </button>
             <button type="button" class="secondary-btn is-danger" data-ebay-draft-action="discard" ${isActionLoading ? "disabled" : ""}>
               <i data-lucide="trash-2"></i>
@@ -5259,6 +5331,7 @@
     const overridePayload = {
       priority: formData.get("priority") || "",
       response_need: formData.get("response_need") || "",
+      conversation_source: formData.get("conversation_source") || "",
       topic_tags: formData.getAll("topic_tags"),
       buyer_flags: formData.getAll("buyer_flags"),
       risk_flags: formData.getAll("risk_flags"),
@@ -5363,8 +5436,8 @@
     const value = String(input.value || "");
     const beforeCursor = value.slice(0, input.selectionStart || value.length);
     const afterCursor = value.slice(input.selectionEnd || value.length);
-    const replacedBefore = /(?:^|\s)(tag|topic|buyer|risk|priority|response):[^\s]*$/i.test(beforeCursor)
-      ? beforeCursor.replace(/(?:^|\s)(tag|topic|buyer|risk|priority|response):[^\s]*$/i, (match) => `${match.startsWith(" ") ? " " : ""}${token}`)
+    const replacedBefore = /(?:^|\s)(tag|source|topic|buyer|risk|priority|response):[^\s]*$/i.test(beforeCursor)
+      ? beforeCursor.replace(/(?:^|\s)(tag|source|topic|buyer|risk|priority|response):[^\s]*$/i, (match) => `${match.startsWith(" ") ? " " : ""}${token}`)
       : `${beforeCursor}${beforeCursor && !beforeCursor.endsWith(" ") ? " " : ""}${token}`;
     const nextValue = `${replacedBefore} ${afterCursor.trimStart()}`.trimStart();
     input.value = nextValue;
@@ -5523,11 +5596,14 @@
           form?.getAttribute("data-ebay-target-message-id") ||
           "";
         const formData = form ? new FormData(form) : null;
+        const composerMode = form?.getAttribute("data-ebay-composer-mode") || "";
         if (action === "send") {
           const conversation = selectedEbayConversationById(conversationId, adminClassificationState);
           const draft = currentEbayConversationDraft(conversationId);
           const messages = safeArray(adminClassificationState.ebayConversationMessagesById?.[conversationId]);
-          if (!conversation || !draft || !confirmEbayDraftSend(conversation, draft, messages)) return;
+          const manualSend = composerMode === "normal" || !draft || ebayDraftCanSendWithoutApproval(draft);
+          if (!conversation) return;
+          if (!manualSend && (!draft || !confirmEbayDraftSend(conversation, draft, messages))) return;
         }
         runEbayConversationDraftAction(context, {
           mode: action,
@@ -5538,6 +5614,7 @@
           improvementInstructions: formData ? String(formData.get("improvementInstructions") || "") : "",
           operatorNotes: formData ? String(formData.get("operatorNotes") || "") : "",
           approvalNotes: formData ? String(formData.get("operatorNotes") || "") : "",
+          manualComposer: composerMode === "normal",
           sendConfirmed: action === "send",
         });
         return;

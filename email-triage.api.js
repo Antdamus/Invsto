@@ -1739,7 +1739,7 @@
         .limit(500) : Promise.resolve({ data: [], error: null }),
       context.client
         .from("ebay_conversation_classifications")
-        .select("id, conversation_id, latest_message_id, latest_ebay_message_id, classification_status, priority, response_need, topic_tags, buyer_flags, risk_flags, confidence, summary, reasoning_summary, recommended_action, input_hash, context_hash, classifier_name, classifier_version, prompt_version, model_name, is_current, superseded_at, review_state, operator_override_payload, operator_notes, reviewed_by, reviewed_at, created_at, updated_at")
+        .select("id, conversation_id, latest_message_id, latest_ebay_message_id, conversation_source, classification_status, priority, response_need, topic_tags, buyer_flags, risk_flags, confidence, summary, reasoning_summary, recommended_action, input_hash, context_hash, classifier_name, classifier_version, prompt_version, model_name, is_current, superseded_at, review_state, operator_override_payload, operator_notes, reviewed_by, reviewed_at, created_at, updated_at")
         .in("conversation_id", ids)
         .eq("is_current", true)
         .limit(Math.min(limit, 250)),
@@ -1830,6 +1830,7 @@
         improvementInstructions: values.improvementInstructions || undefined,
         operatorNotes: values.operatorNotes || undefined,
         approvalNotes: values.approvalNotes || values.operatorNotes || undefined,
+        manualComposer: values.manualComposer === true || undefined,
         sendConfirmed: values.sendConfirmed === true || undefined,
       }),
     }, TIMEOUTS.ebayConversationDraft);

@@ -68,6 +68,7 @@
       ebayConversationFilter: "all",
       ebayConversationSearchQuery: "",
       ebayConversationClassificationFilters: {
+        sourceTypes: [],
         topics: [],
         buyerFlags: [],
         riskFlags: [],

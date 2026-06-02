@@ -3788,9 +3788,9 @@
 
 .ebay-conversation-row.is-compact {
   grid-template-columns: minmax(0, 1fr);
-  row-gap: 3px;
-  min-height: 92px;
-  padding: 7px 8px;
+  row-gap: 5px;
+  min-height: 112px;
+  padding: 8px 9px;
 }
 
 .ebay-conversation-row:hover,
@@ -3955,13 +3955,13 @@
 
 .ebay-conversation-row.is-compact .ebay-conversation-row-preview {
   min-width: 0;
-  -webkit-line-clamp: 1;
-  line-height: 1.2;
+  -webkit-line-clamp: 2;
+  line-height: 1.28;
 }
 
 .ebay-conversation-row.is-compact .ebay-conversation-row-ai-summary {
-  -webkit-line-clamp: 1;
-  line-height: 1.2;
+  -webkit-line-clamp: 2;
+  line-height: 1.28;
 }
 
 .ebay-conversation-row-meta span {
@@ -3976,11 +3976,10 @@
 .ebay-conversation-row.is-compact .ebay-conversation-badges {
   justify-content: flex-start;
   align-self: center;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 3px;
-  max-height: 20px;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .ebay-conversation-row.is-compact .classification-badge {
@@ -4390,7 +4389,7 @@
 
 .ebay-classification-editor-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
