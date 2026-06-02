@@ -1086,6 +1086,88 @@
     };
   }
 
+  function ebayDashboardText(value, maxLength = 4000) {
+    return String(value || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .trim()
+      .slice(0, maxLength);
+  }
+
+  function ebayDashboardDraftText(draft = {}) {
+    return ebayDashboardText(draft.final_text || draft.edited_text || draft.draft_text || "", 4000);
+  }
+
+  function mapDashboardRowsById(rows = []) {
+    return rows.reduce((map, row) => {
+      if (row?.id) map.set(String(row.id), row);
+      return map;
+    }, new Map());
+  }
+
+  function enrichEbayActivityEvent(event = {}, maps = {}) {
+    const attempt = event.send_attempt_id ? maps.attemptsById.get(String(event.send_attempt_id)) : null;
+    const draftId = event.draft_id || attempt?.draft_id || null;
+    const approvalId = event.approval_id || attempt?.approval_id || null;
+    const draft = draftId ? maps.draftsById.get(String(draftId)) : null;
+    const approval = approvalId ? maps.approvalsById.get(String(approvalId)) : null;
+    const sentText = ebayDashboardDraftText(draft || {});
+    const providerResponse = attempt?.provider_response && typeof attempt.provider_response === "object" ? attempt.provider_response : {};
+    const attemptMetadata = attempt?.metadata && typeof attempt.metadata === "object" ? attempt.metadata : {};
+    const approvalMetadata = approval?.metadata && typeof approval.metadata === "object" ? approval.metadata : {};
+    const payload = {
+      ...event.payload,
+      safety: {
+        ...(event.payload?.safety && typeof event.payload.safety === "object" ? event.payload.safety : {}),
+        ebay_mutation_performed: attempt?.attempt_status === "succeeded",
+        outlook_mutation_performed: false,
+        automatic_responses_sent: 0,
+      },
+      draft_id: draftId || event.draft_id || null,
+      approval_id: approvalId || event.approval_id || null,
+      target_message_id: event.target_message_id || attempt?.target_message_id || approval?.target_message_id || draft?.target_message_id || null,
+      send_attempt_id: event.send_attempt_id || attempt?.id || null,
+      operator: event.actor_email || event.actor_user_id || approval?.approved_by_email || attempt?.created_by || null,
+      sent_text: sentText || null,
+      provider_message_id: attempt?.provider_message_id || event.payload?.provider_message_id || null,
+      provider_response: Object.keys(providerResponse).length ? providerResponse : null,
+      idempotency_key: attempt?.idempotency_key || approval?.idempotency_key || event.payload?.idempotency_key || null,
+      send_attempt: attempt ? { ...attempt, provider_response: providerResponse, metadata: attemptMetadata } : null,
+      approval: approval ? { ...approval, metadata: approvalMetadata } : null,
+      draft: draft ? {
+        id: draft.id || null,
+        conversation_id: draft.conversation_id || null,
+        target_message_id: draft.target_message_id || null,
+        draft_status: draft.draft_status || null,
+        validation_status: draft.validation_status || null,
+        source_mode: draft.source_mode || null,
+        model_name: draft.model_name || null,
+        prompt_version: draft.prompt_version || null,
+        draft_version: draft.draft_version || null,
+        operator_notes: draft.operator_notes || null,
+        sent_text: sentText || null,
+        created_by: draft.created_by || null,
+        updated_by: draft.updated_by || null,
+        created_at: draft.created_at || null,
+        updated_at: draft.updated_at || null,
+      } : null,
+      raw_payload: {
+        activity_metadata: event.metadata || {},
+        send_attempt: attempt || null,
+        approval: approval || null,
+        draft: draft ? { ...draft, sent_text: sentText || null } : null,
+      },
+    };
+
+    return {
+      ...event,
+      payload,
+      send_attempt: attempt || null,
+      approval: approval || null,
+      draft: draft || null,
+    };
+  }
+
   function buildEbayTimeline(events = []) {
     return events.slice(0, 20).map((event) => ({
       id: event.id,
@@ -1136,17 +1218,17 @@
         .limit(1000),
       client
         .from("ebay_conversation_response_drafts")
-        .select("id, conversation_id, target_message_id, draft_status, validation_status, is_current, created_at, updated_at, discarded_at")
+        .select("id, conversation_id, target_message_id, draft_status, draft_text, edited_text, final_text, source_mode, model_name, prompt_version, validation_status, operator_notes, draft_version, is_current, created_by, updated_by, created_at, updated_at, discarded_at")
         .order("created_at", { ascending: false })
         .limit(1000),
       client
         .from("ebay_message_approvals")
-        .select("id, conversation_id, target_message_id, draft_id, approval_status, approved_by_email, approved_at, removed_at, created_at")
+        .select("id, conversation_id, target_message_id, draft_id, approval_status, approved_by, approved_by_email, approved_at, approval_notes, removed_by, removed_by_email, removed_at, removal_notes, previous_approval_id, idempotency_key, metadata, created_at")
         .order("created_at", { ascending: false })
         .limit(1000),
       client
         .from("ebay_message_send_attempts")
-        .select("id, conversation_id, target_message_id, draft_id, approval_id, attempt_status, provider, provider_message_id, error_message, sent_at, created_at")
+        .select("id, conversation_id, target_message_id, draft_id, approval_id, approved_by, approved_at, approval_notes, attempt_status, provider, provider_message_id, provider_correlation_id, idempotency_key, attempt_sequence, duplicate_of_attempt_id, error_message, provider_response, metadata, sent_at, created_by, created_at, updated_at")
         .order("created_at", { ascending: false })
         .limit(100),
       client
@@ -1166,7 +1248,14 @@
     const drafts = Array.isArray(draftsResult.data) ? draftsResult.data : [];
     const approvals = Array.isArray(approvalsResult.data) ? approvalsResult.data : [];
     const attempts = Array.isArray(attemptsResult.data) ? attemptsResult.data : [];
-    const events = (Array.isArray(eventsResult.data) ? eventsResult.data : []).map(normalizeEbayActivityEvent);
+    const dashboardMaps = {
+      attemptsById: mapDashboardRowsById(attempts),
+      draftsById: mapDashboardRowsById(drafts),
+      approvalsById: mapDashboardRowsById(approvals),
+    };
+    const events = (Array.isArray(eventsResult.data) ? eventsResult.data : [])
+      .map(normalizeEbayActivityEvent)
+      .map((event) => enrichEbayActivityEvent(event, dashboardMaps));
     const latestApproval = latestApprovalByDraft(approvals);
     const currentDrafts = drafts.filter((draft) =>
       draft.is_current === true &&
@@ -1748,18 +1837,26 @@
 
   async function runEbayMessageSync(context, values = {}) {
     const session = await currentSession(context, "eBay message sync");
+    const body = {
+      mode: "sync",
+      runType: "manual",
+      conversationTypes: values.conversationTypes || ["FROM_MEMBERS", "FROM_EBAY"],
+      conversationPageLimit: Number(values.conversationPageLimit || 25),
+      messagePageLimit: Number(values.messagePageLimit || 25),
+      maxConversationPages: Number(values.maxConversationPages || 1),
+      maxDetailPagesPerConversation: Number(values.maxDetailPagesPerConversation || 20),
+      readOnly: true,
+    };
+    if (values.conversationId) body.conversationId = values.conversationId;
+    if (values.conversationType && !values.conversationTypes) body.conversationTypes = [values.conversationType];
+    if (values.startTime) body.startTime = values.startTime;
+    if (values.endTime) body.endTime = values.endTime;
+    if (values.otherPartyUsername) body.otherPartyUsername = values.otherPartyUsername;
+    if (values.referenceId) body.referenceId = values.referenceId;
+
     const payload = await edgeFetchWithTimeout(EBAY_MESSAGE_SYNC_FUNCTION, session, {
       method: "POST",
-      body: JSON.stringify({
-        mode: "sync",
-        runType: "manual",
-        conversationTypes: values.conversationTypes || ["FROM_MEMBERS", "FROM_EBAY"],
-        conversationPageLimit: Number(values.conversationPageLimit || 25),
-        messagePageLimit: Number(values.messagePageLimit || 25),
-        maxConversationPages: Number(values.maxConversationPages || 1),
-        maxDetailPagesPerConversation: Number(values.maxDetailPagesPerConversation || 20),
-        readOnly: true,
-      }),
+      body: JSON.stringify(body),
     }, TIMEOUTS.ebayMessageSync);
     return payload;
   }

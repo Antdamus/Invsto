@@ -135,7 +135,7 @@
     has_media: "paperclip",
     needs_context_review: "badge-alert",
   };
-  const EBAY_SEND_SUCCESS_MESSAGE = "Message Sent ✓";
+  const EBAY_SEND_SUCCESS_MESSAGE = "✓ Sent";
   const EBAY_SEND_SUCCESS_VISIBLE_MS = 5500;
   const EBAY_NOTIFICATION_BLOCK_TAGS = new Set([
     "address",
@@ -2528,6 +2528,42 @@
     return normalizeEbaySearchText(snippet) === normalizeEbaySearchText(summary) ? "" : snippet;
   }
 
+  function ebayNotificationPreviewLabel(conversation) {
+    const classification = ebayConversationClassification(conversation);
+    const blob = normalizeEbaySearchText([
+      conversation?.conversation_title,
+      conversation?.latest_message_preview,
+      classification?.effective_summary,
+      classification?.effective_topic_tags,
+    ].flat().filter(Boolean).join(" "));
+    if (/\bcancel|cancellation\b/.test(blob)) return "Cancellation summary";
+    if (/\brefund|reimburs|credit\b/.test(blob)) return "Refund summary";
+    if (/\bcase|request_closed|customer_service\b/.test(blob)) return "Case summary";
+    if (/\breturn|returned\b/.test(blob)) return "Return summary";
+    return "Notification summary";
+  }
+
+  function ebayConversationPreviewLines(conversation) {
+    const classification = ebayConversationClassification(conversation);
+    const snippet = ebayConversationSnippet(conversation);
+    const aiSummary = compactConversationText(classification?.effective_summary);
+    const isPlatform = ebayConversationIsPlatform(conversation);
+    if (isPlatform) {
+      return {
+        previewLabel: "Notification",
+        preview: compactConversationText(snippet, ebayConversationTitle(conversation)),
+        summaryLabel: ebayNotificationPreviewLabel(conversation),
+        summary: aiSummary || compactConversationText(snippet, "No notification summary stored."),
+      };
+    }
+    return {
+      previewLabel: "Preview",
+      preview: compactConversationText(snippet, "No latest message preview stored."),
+      summaryLabel: "AI",
+      summary: aiSummary || "No AI summary stored.",
+    };
+  }
+
   function ebayConversationSearchBlob(conversation) {
     const summary = ebayConversationSummary(conversation);
     const classification = ebayConversationClassification(conversation);
@@ -3209,11 +3245,10 @@
       const identity = ebayBuyerIdentity(conversation);
       const summary = ebayConversationSummary(conversation);
       const metaItems = ebayConversationMetaItems(conversation, 3);
-      const rowSummary = ebayConversationRowSummary(conversation);
-      const latestSnippet = ebayConversationLatestSnippetLine(conversation);
+      const previewLines = ebayConversationPreviewLines(conversation);
       const unread = Number(conversation.unread_count || 0) > 0;
       return `
-        <button type="button" class="ebay-conversation-row is-${escapeHtml(densityMode)}${selected ? " is-selected" : ""}${unread ? " is-unread" : ""}" data-ebay-conversation-id="${escapeHtml(conversation.id)}">
+        <button type="button" class="ebay-conversation-row is-${escapeHtml(densityMode)}${ebayConversationIsPlatform(conversation) ? " is-platform-conversation" : ""}${selected ? " is-selected" : ""}${unread ? " is-unread" : ""}" data-ebay-conversation-id="${escapeHtml(conversation.id)}">
           <span class="ebay-conversation-row-top">
             <span class="ebay-conversation-party">
               <span class="ebay-conversation-avatar" aria-hidden="true">${escapeHtml(ebayConversationInitials(conversation))}</span>
@@ -3225,8 +3260,8 @@
             <time>${escapeHtml(formatCompactEmailAge(ebayConversationTime(conversation)))}</time>
           </span>
           <span class="ebay-conversation-row-title">${escapeHtml(ebayConversationTitle(conversation))}</span>
-          <span class="ebay-conversation-row-preview">${escapeHtml(rowSummary)}</span>
-          ${compact || !latestSnippet ? "" : `<span class="ebay-conversation-row-snippet">${escapeHtml(latestSnippet)}</span>`}
+          <span class="ebay-conversation-row-preview"><b>${escapeHtml(previewLines.previewLabel)}</b>${escapeHtml(previewLines.preview)}</span>
+          <span class="ebay-conversation-row-ai-summary"><b>${escapeHtml(previewLines.summaryLabel)}</b>${escapeHtml(previewLines.summary)}</span>
           ${compact ? "" : `
             <span class="ebay-conversation-row-meta">
               ${metaItems.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
@@ -3870,6 +3905,13 @@
     return safeArray(messages).find((message) => String(message?.id || "") === id) || null;
   }
 
+  function latestInboundEbayMessage(messages = []) {
+    return safeArray(messages)
+      .slice()
+      .reverse()
+      .find((message) => ebayMessageDirection(message) === "inbound") || null;
+  }
+
   function ebayMessageBodySignature(message) {
     return normalizeEbaySearchText(ebayMessageText(message)).slice(0, 500);
   }
@@ -3980,6 +4022,16 @@
       (draft.target_message && typeof draft.target_message === "object" ? draft.target_message : null);
   }
 
+  function ebayDraftSourceLabel(draft) {
+    const source = String(draft?.source_mode || "").toLowerCase();
+    if (source === "operator_edit") return "Manual";
+    if (source === "generate") return "AI draft";
+    if (source === "regenerate") return "AI regenerate";
+    if (source === "improve") return "AI improved";
+    if (source === "system_fallback") return "Safe fallback";
+    return humanizeValue(source || "Draft");
+  }
+
   function renderEbayDraftTargetSummary(draft, messages = []) {
     const target = ebayDraftTargetMessage(draft, messages);
     if (!target) {
@@ -4010,7 +4062,7 @@
       generate: "AI reply draft generated. Nothing was sent.",
       regenerate: "AI reply draft regenerated. Nothing was sent.",
       improve: "Draft improved and saved as the current suggestion. Nothing was sent.",
-      save_edit: "Draft edits saved. Nothing was sent.",
+      save_edit: payload.created_manual_draft ? "Manual reply saved. Nothing was sent." : "Draft edits saved. Nothing was sent.",
       discard: "Draft discarded and preserved in history. Nothing was sent.",
       approve: "Draft approved as ready for controlled send. Nothing was sent.",
       unapprove: "Draft approval removed. Nothing was sent.",
@@ -4224,6 +4276,83 @@
     return window.confirm(lines.join("\n"));
   }
 
+  function renderEbayManualComposer(conversation, messages = [], options = {}) {
+    const target = options.target || latestInboundEbayMessage(messages);
+    const isActionLoading = adminClassificationState.ebayConversationDraftActionLoadingId === conversation.id;
+    const error = adminClassificationState.ebayConversationDraftErrorsById?.[conversation.id] ||
+      adminClassificationState.ebayConversationDraftActionErrorsById?.[conversation.id];
+    const message = adminClassificationState.ebayConversationDraftActionMessagesById?.[conversation.id];
+    const targetId = target?.id || "";
+    const canAct = Boolean(targetId) && !isActionLoading;
+    return `
+      <section class="ebay-draft-card ebay-reply-composer is-manual">
+        <div class="context-card-head">
+          <h4>Reply Composer</h4>
+          <span class="ebay-classification-head-badges">
+            ${renderBadge("Manual ready", "success")}
+            ${renderBadge("Not approved", "muted")}
+          </span>
+        </div>
+        ${error ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(error)}</div>` : ""}
+        ${message ? `<div class="classification-notice is-success">${escapeHtml(message)}</div>` : ""}
+        ${target ? renderEbayDraftTargetSummary({ target_message_id: target.id, target_message: target }, messages) : `
+          <div class="ebay-reply-target is-empty">
+            <span>Replying to</span>
+            <strong>No buyer message selected</strong>
+            <p>A buyer message is required before this reply can be saved, approved, or sent.</p>
+          </div>
+        `}
+        <form class="ebay-draft-form" data-ebay-draft-form data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-draft-id="" data-ebay-target-message-id="${escapeHtml(targetId)}">
+          <label class="ebay-draft-field">
+            <span>Message</span>
+            <textarea name="draftText" rows="5" placeholder="Type a reply to the buyer..." ${isActionLoading ? "disabled" : ""}></textarea>
+          </label>
+          <label class="ebay-draft-field ebay-draft-notes-field">
+            <span>Operator Notes</span>
+            <input name="operatorNotes" type="text" value="" placeholder="Optional internal note" ${isActionLoading ? "disabled" : ""} />
+          </label>
+          <label class="ebay-draft-field ebay-draft-instructions-field">
+            <span>AI Instructions</span>
+            <input name="improvementInstructions" type="text" maxlength="1000" placeholder="Optional tone or wording guidance" ${isActionLoading ? "disabled" : ""} />
+          </label>
+          <div class="ebay-draft-actions">
+            <button type="button" class="primary-btn" data-ebay-draft-action="save_edit" ${canAct ? "" : "disabled"}>
+              <i data-lucide="${isActionLoading ? "loader-circle" : "save"}"></i>
+              Save Draft
+            </button>
+            <button type="button" class="secondary-btn" data-ebay-draft-action="approve" ${canAct ? "" : "disabled"}>
+              <i data-lucide="shield-check"></i>
+              Approve Draft
+            </button>
+            <button type="button" class="secondary-btn" data-ebay-draft-action="improve" ${canAct ? "" : "disabled"}>
+              <i data-lucide="wand-sparkles"></i>
+              Improve Text
+            </button>
+            <button type="button" class="secondary-btn" data-ebay-draft-action="generate" data-ebay-target-message-id="${escapeHtml(targetId)}" ${canAct ? "" : "disabled"}>
+              <i data-lucide="sparkles"></i>
+              Generate AI Reply
+            </button>
+          </div>
+        </form>
+      </section>
+    `;
+  }
+
+  function renderEbaySentDraftReceipt(draft) {
+    const sendState = draft?.send_state || {};
+    const latest = safeArray(sendState.history)[0] || {};
+    const sentAt = sendState.sent_at || latest.sent_at || draft?.updated_at || draft?.created_at;
+    return `
+      <section class="ebay-draft-card ebay-reply-composer is-sent is-sent-compact">
+        <div class="ebay-sent-compact">
+          <span><i data-lucide="check-circle-2"></i>${escapeHtml(EBAY_SEND_SUCCESS_MESSAGE)}</span>
+          <time>${escapeHtml(sentAt ? formatContextDate(sentAt) : "Send recorded")}</time>
+          ${sendState.provider_message_id ? `<b>Provider ${escapeHtml(compactId(sendState.provider_message_id))}</b>` : ""}
+        </div>
+      </section>
+    `;
+  }
+
   function renderEbayConversationDraftCard(conversation, messages = []) {
     const payload = ebayDraftPayload(conversation.id);
     const draft = currentEbayConversationDraft(conversation.id);
@@ -4257,119 +4386,90 @@
     }
 
     if (!draft) {
-      return `
-        <section class="ebay-draft-card ebay-reply-composer">
-          <div class="context-card-head">
-            <h4>Reply Composer</h4>
-            <span class="ebay-classification-head-badges">
-              ${renderBadge("Draft only", "muted")}
-              ${renderBadge("Not sent", "muted")}
-            </span>
-          </div>
-          ${error ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(error)}</div>` : ""}
-          ${message ? `<div class="classification-notice is-success">${escapeHtml(message)}</div>` : ""}
-          <div class="ebay-reply-target is-empty">
-            <span>Replying to</span>
-            <strong>No buyer message selected</strong>
-            <p>Waiting for a buyer-message target.</p>
-          </div>
-          <label class="ebay-draft-field">
-            <span>Editable Draft</span>
-            <textarea name="draftText" rows="6" disabled></textarea>
-          </label>
-        </section>
-      `;
+      return renderEbayManualComposer(conversation, messages);
+    }
+
+    if (isSent) {
+      return `${renderEbaySentDraftReceipt(draft)}${renderEbayManualComposer(conversation, messages)}`;
     }
 
     return `
-      <section class="ebay-draft-card ebay-reply-composer${stale?.isStale ? " is-stale" : ""}${isSent ? " is-sent" : ""}">
+      <section class="ebay-draft-card ebay-reply-composer${stale?.isStale ? " is-stale" : ""}">
         <div class="context-card-head">
           <h4>Reply Composer</h4>
           <span class="ebay-classification-head-badges">
-            ${renderBadge(humanizeValue(draft.draft_status || "generated"), "category")}
+            ${renderBadge(ebayDraftSourceLabel(draft), draft.source_mode === "operator_edit" ? "success" : "category")}
+            ${renderBadge(humanizeValue(draft.draft_status || "generated"), "muted")}
             ${renderBadge(humanizeValue(draft.validation_status || "not_validated"), validationVariant)}
             ${approved ? renderBadge("Approved", "success") : renderBadge("Awaiting approval", "warning")}
             ${readyToSend && !isSent ? renderBadge("Ready to send", "success") : ""}
-            ${renderBadge(isSent ? "Sent" : "Not sent", isSent ? "success" : "muted")}
           </span>
         </div>
-        ${stale?.isStale && !isSent ? renderStaleDraftWarning(draft) : ""}
+        ${stale?.isStale ? renderStaleDraftWarning(draft) : ""}
         ${error ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(error)}</div>` : ""}
-        ${message && !isSent ? `<div class="classification-notice is-success">${escapeHtml(message)}</div>` : ""}
-        ${ebayDraftSendStatusNotice(draft)}
+        ${message ? `<div class="classification-notice is-success">${escapeHtml(message)}</div>` : ""}
         ${renderEbayDraftTargetSummary(draft, messages)}
         <form class="ebay-draft-form" data-ebay-draft-form data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-draft-id="${escapeHtml(draft.id)}" data-ebay-target-message-id="${escapeHtml(draft.target_message_id || "")}">
           <label class="ebay-draft-field">
-            <span>Editable Draft</span>
-            <textarea name="draftText" rows="8" ${isActionLoading || isSent ? "disabled" : ""}>${escapeHtml(draftText)}</textarea>
+            <span>Message</span>
+            <textarea name="draftText" rows="6" placeholder="Type a reply to the buyer..." ${isActionLoading ? "disabled" : ""}>${escapeHtml(draftText)}</textarea>
           </label>
           <label class="ebay-draft-field ebay-draft-notes-field">
             <span>Operator Notes</span>
-            <input name="operatorNotes" type="text" value="${escapeHtml(draft.operator_notes || "")}" placeholder="Optional internal note" ${isActionLoading || isSent ? "disabled" : ""} />
+            <input name="operatorNotes" type="text" value="${escapeHtml(draft.operator_notes || "")}" placeholder="Optional internal note" ${isActionLoading ? "disabled" : ""} />
           </label>
           <label class="ebay-draft-field ebay-draft-instructions-field">
-            <span>Draft Instructions</span>
-            <input name="improvementInstructions" type="text" maxlength="1000" placeholder="Make it more professional." ${isActionLoading || isSent ? "disabled" : ""} />
+            <span>AI Instructions</span>
+            <input name="improvementInstructions" type="text" maxlength="1000" placeholder="Optional tone or wording guidance" ${isActionLoading ? "disabled" : ""} />
           </label>
           <div class="ebay-draft-actions">
-            ${isSent ? `
-              <button type="button" class="primary-btn" disabled>
-                <i data-lucide="check-circle-2"></i>
-                Sent
+            <button type="button" class="primary-btn" data-ebay-draft-action="save_edit" ${isActionLoading ? "disabled" : ""}>
+              <i data-lucide="${isActionLoading ? "loader-circle" : "save"}"></i>
+              Save Draft
+            </button>
+            ${approved ? `
+              <button type="button" class="secondary-btn" data-ebay-draft-action="unapprove" ${isActionLoading ? "disabled" : ""}>
+                <i data-lucide="shield-x"></i>
+                Unapprove Draft
               </button>
             ` : `
-              <button type="button" class="primary-btn" data-ebay-draft-action="save_edit" ${isActionLoading ? "disabled" : ""}>
-                <i data-lucide="${isActionLoading ? "loader-circle" : "save"}"></i>
-                Save Draft
-              </button>
-              ${approved ? `
-                <button type="button" class="secondary-btn" data-ebay-draft-action="unapprove" ${isActionLoading ? "disabled" : ""}>
-                  <i data-lucide="shield-x"></i>
-                  Unapprove Draft
-                </button>
-              ` : `
-                <button type="button" class="secondary-btn" data-ebay-draft-action="approve" ${isActionLoading ? "disabled" : ""}>
-                  <i data-lucide="shield-check"></i>
-                  Approve Draft
-                </button>
-              `}
-              ${approved && !sendBlockReason ? `
-                <button type="button" class="primary-btn" data-ebay-draft-action="send" ${isActionLoading ? "disabled" : ""}>
-                  <i data-lucide="${isActionLoading ? "loader-circle" : "send"}"></i>
-                  ${escapeHtml(isActionLoading ? "Sending" : "Send Draft")}
-                </button>
-              ` : `
-                <button type="button" class="secondary-btn" disabled title="${escapeHtml(sendBlockReason || "Approve Draft First")}">
-                  <i data-lucide="lock"></i>
-                  ${escapeHtml(sendBlockReason || "Approve Draft First")}
-                </button>
-              `}
-              <button type="button" class="secondary-btn" data-ebay-draft-action="improve" ${isActionLoading ? "disabled" : ""}>
-                <i data-lucide="wand-sparkles"></i>
-                Improve My Draft
-              </button>
-              <button type="button" class="secondary-btn" data-ebay-draft-action="regenerate" ${isActionLoading ? "disabled" : ""}>
-                <i data-lucide="refresh-cw"></i>
-                Regenerate
-              </button>
-              <button type="button" class="secondary-btn is-danger" data-ebay-draft-action="discard" ${isActionLoading ? "disabled" : ""}>
-                <i data-lucide="trash-2"></i>
-                Discard Draft
+              <button type="button" class="secondary-btn" data-ebay-draft-action="approve" ${isActionLoading ? "disabled" : ""}>
+                <i data-lucide="shield-check"></i>
+                Approve Draft
               </button>
             `}
+            ${approved && !sendBlockReason ? `
+              <button type="button" class="primary-btn" data-ebay-draft-action="send" ${isActionLoading ? "disabled" : ""}>
+                <i data-lucide="${isActionLoading ? "loader-circle" : "send"}"></i>
+                ${escapeHtml(isActionLoading ? "Sending" : "Send")}
+              </button>
+            ` : `
+              <button type="button" class="secondary-btn" disabled title="${escapeHtml(sendBlockReason || "Approve Draft First")}">
+                <i data-lucide="lock"></i>
+                ${escapeHtml(sendBlockReason || "Approve Draft First")}
+              </button>
+            `}
+            <button type="button" class="secondary-btn" data-ebay-draft-action="improve" ${isActionLoading ? "disabled" : ""}>
+              <i data-lucide="wand-sparkles"></i>
+              Improve Text
+            </button>
+            <button type="button" class="secondary-btn" data-ebay-draft-action="regenerate" ${isActionLoading ? "disabled" : ""}>
+              <i data-lucide="refresh-cw"></i>
+              Regenerate
+            </button>
+            <button type="button" class="secondary-btn is-danger" data-ebay-draft-action="discard" ${isActionLoading ? "disabled" : ""}>
+              <i data-lucide="trash-2"></i>
+              Discard Draft
+            </button>
           </div>
         </form>
-        <div class="selected-email-meta">
+        <div class="selected-email-meta ebay-draft-compact-state">
           <span>${escapeHtml(draft.model_name || "Model unavailable")}</span>
           <span>Version ${escapeHtml(draft.draft_version || 1)}</span>
           <span>${escapeHtml(formatContextDate(draft.updated_at || draft.created_at))}</span>
-          <span>Confidence ${escapeHtml(draft.confidence == null ? "--" : formatConfidence(draft.confidence))}</span>
           <span>Target ${escapeHtml(draft.target_message_id ? compactId(draft.target_message_id) : "Unavailable")}</span>
           ${approved ? `<span>Approved ${escapeHtml(formatContextDate(approval.approved_at))}</span>` : ""}
         </div>
-        ${renderEbayDraftApprovalHistory(draft)}
-        ${renderEbayDraftSendHistory(draft)}
-        ${renderEbayDraftGrounding(draft)}
       </section>
     `;
   }
@@ -4622,6 +4722,89 @@
         },
       });
       console.error("[email-triage] eBay conversation messages failed:", error);
+    }
+  }
+
+  function ebayConversationTypeForSync(conversation) {
+    const type = String(conversation?.conversation_type || conversation?.raw?.conversation_type || "").toUpperCase();
+    return ["FROM_MEMBERS", "FROM_EBAY"].includes(type) ? type : "";
+  }
+
+  async function refreshEbayConversationTimeline(context, conversationId) {
+    const conversation = selectedEbayConversationById(conversationId, adminClassificationState);
+    if (!conversation?.id) return;
+    const ebayConversationId = compactConversationText(conversation.ebay_conversation_id);
+    if (!ebayConversationId) {
+      setEbayConversationState({
+        ebayConversationMessageErrorsById: {
+          ...adminClassificationState.ebayConversationMessageErrorsById,
+          [conversation.id]: "ebay_conversation_id_required",
+        },
+      });
+      return;
+    }
+
+    setEbayConversationState({
+      ebayConversationMessagesLoadingId: conversation.id,
+      ebayConversationSyncResult: null,
+      ebayConversationSyncError: null,
+      ebayConversationMessageErrorsById: {
+        ...adminClassificationState.ebayConversationMessageErrorsById,
+        [conversation.id]: null,
+      },
+    });
+
+    try {
+      const conversationType = ebayConversationTypeForSync(conversation);
+      const syncPayload = await runEbayMessageSync(context, {
+        conversationId: ebayConversationId,
+        conversationTypes: conversationType ? [conversationType] : ["FROM_MEMBERS", "FROM_EBAY"],
+        conversationPageLimit: 1,
+        messagePageLimit: 50,
+        maxConversationPages: 1,
+        maxDetailPagesPerConversation: 20,
+      });
+      const [messagesPayload, draftsPayload, listPayload] = await Promise.all([
+        fetchEbayConversationMessages(context, conversation.id),
+        fetchEbayConversationDrafts(context, conversation.id),
+        fetchEbayConversations(context, { limit: 100 }),
+      ]);
+      const conversations = safeArray(listPayload.conversations);
+      const selectedStillLoaded = conversations.some((row) => row.id === conversation.id);
+      setEbayConversationState({
+        ebayConversationMessagesLoadingId: null,
+        ebayConversations: conversations.length ? conversations : adminClassificationState.ebayConversations,
+        selectedEbayConversationId: selectedStillLoaded ? conversation.id : adminClassificationState.selectedEbayConversationId,
+        ebayConversationLastLoadedAt: listPayload.loaded_at || new Date().toISOString(),
+        ebayConversationMessagesById: {
+          ...adminClassificationState.ebayConversationMessagesById,
+          [conversation.id]: safeArray(messagesPayload.messages),
+        },
+        ebayConversationDraftsById: {
+          ...adminClassificationState.ebayConversationDraftsById,
+          [conversation.id]: draftsPayload,
+        },
+        ebayConversationMessageErrorsById: {
+          ...adminClassificationState.ebayConversationMessageErrorsById,
+          [conversation.id]: null,
+        },
+        ebayConversationSyncResult: {
+          ...syncPayload,
+          targeted_conversation_id: conversation.id,
+          targeted_ebay_conversation_id: ebayConversationId,
+        },
+      });
+    } catch (error) {
+      const code = error.code || error.message || "ebay_conversation_timeline_refresh_failed";
+      setEbayConversationState({
+        ebayConversationMessagesLoadingId: null,
+        ebayConversationMessageErrorsById: {
+          ...adminClassificationState.ebayConversationMessageErrorsById,
+          [conversation.id]: code,
+        },
+        ebayConversationSyncError: code,
+      });
+      console.error("[email-triage] eBay targeted timeline refresh failed:", error);
     }
   }
 
@@ -5364,8 +5547,7 @@
       const conversationId = button.getAttribute("data-ebay-conversation-id");
       const action = button.getAttribute("data-ebay-detail-action");
       if (action === "refresh-messages") {
-        loadEbayConversationMessages(context, conversationId, { force: true });
-        loadEbayConversationDrafts(context, conversationId, { force: true });
+        refreshEbayConversationTimeline(context, conversationId);
         return;
       }
       if (action === "refresh-context") {

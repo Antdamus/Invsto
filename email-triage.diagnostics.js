@@ -63,6 +63,10 @@
   }
 
   function operationTitle(event = {}, utils = window.EmailTriageRenderUtils) {
+    const eventType = String(event.event_type || "");
+    if (eventType === "send_attempt_succeeded") return "Send Attempt Succeeded";
+    if (eventType === "send_attempt_failed") return "Send Attempt Failed";
+    if (eventType === "duplicate_send_prevented") return "Duplicate Send Prevented";
     return utils.humanizeValue(event.event_type || "No event");
   }
 
@@ -322,6 +326,32 @@
     const preview = payload.preview && typeof payload.preview === "object" ? payload.preview : {};
     const imported = payload.import && typeof payload.import === "object" ? payload.import : {};
     const eventType = String(event.event_type || "");
+
+    if (eventType.includes("send_attempt") || eventType === "duplicate_send_prevented") {
+      const attempt = payload.send_attempt && typeof payload.send_attempt === "object" ? payload.send_attempt : {};
+      const approval = payload.approval && typeof payload.approval === "object" ? payload.approval : {};
+      const draft = payload.draft && typeof payload.draft === "object" ? payload.draft : {};
+      const providerResponse = payload.provider_response && typeof payload.provider_response === "object" ? payload.provider_response : {};
+      return [
+        ["Send Attempt ID", metricValue([attempt, payload], ["id", "send_attempt_id"])],
+        ["Draft ID", metricValue([draft, attempt, payload], ["id", "draft_id"])],
+        ["Approval ID", metricValue([approval, attempt, payload], ["id", "approval_id"])],
+        ["Target Message ID", metricValue([attempt, approval, draft, payload], ["target_message_id"])],
+        ["Operator", metricValue([payload, event, approval, attempt], ["operator", "actor_email", "initiated_by", "approved_by_email", "created_by"])],
+        ["Sent Text", metricValue([payload, draft], ["sent_text"])],
+        ["Provider Message ID", metricValue([attempt, payload], ["provider_message_id"])],
+        ["Provider", metricValue([attempt, payload], ["provider"])],
+        ["Provider Status", metricValue([providerResponse, attempt, payload], ["status", "attempt_status"])],
+        ["Provider Response", Object.keys(providerResponse).length ? JSON.stringify(providerResponse) : null],
+        ["Provider Correlation ID", metricValue([attempt, payload], ["provider_correlation_id"])],
+        ["Idempotency Key", metricValue([attempt, approval, payload], ["idempotency_key"])],
+        ["Attempt Sequence", metricValue([attempt, payload], ["attempt_sequence"])],
+        ["Created At", metricValue([attempt, event], ["created_at"])],
+        ["Sent At", metricValue([attempt, payload], ["sent_at"])],
+        ["Updated At", metricValue([attempt], ["updated_at"])],
+        ["Error", metricValue([attempt, payload], ["error_message"])],
+      ];
+    }
 
     if (eventType === "rematch_existing") {
       return [

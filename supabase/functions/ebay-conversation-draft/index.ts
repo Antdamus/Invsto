@@ -43,6 +43,7 @@ type DraftOutput = {
 const GENERATOR_NAME = "ebay_conversation_response_drafter";
 const GENERATOR_VERSION = "v1";
 const PROMPT_VERSION_DEFAULT = "ebay-conversation-draft-v2-target-message";
+const MANUAL_PROMPT_VERSION = "manual-composer-v1";
 const DEFAULT_MESSAGE_SCOPE = "https://api.ebay.com/oauth/api_scope/commerce.message";
 const OPENAI_TIMEOUT_MS = 45000;
 const MAX_DRAFT_TEXT_CHARS = 4000;
@@ -469,6 +470,20 @@ async function loadTargetMessage(
     .eq("conversation_id", conversationId)
     .maybeSingle();
   if (error) throw new DraftError("target_message_lookup_failed", { phase: "draft_input" });
+  return data as Record<string, any> | null;
+}
+
+async function loadLatestInboundMessage(supabase: ServiceClient, conversationId: string) {
+  const { data, error } = await supabase
+    .from("ebay_conversation_messages")
+    .select("id, conversation_id, ebay_message_id, direction, sender_username, recipient_username, created_at_ebay, subject, message_body, message_body_preview, has_media, media_count, created_at")
+    .eq("conversation_id", conversationId)
+    .eq("direction", "inbound")
+    .order("created_at_ebay", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new DraftError("latest_inbound_message_lookup_failed", { phase: "draft_input" });
   return data as Record<string, any> | null;
 }
 
@@ -1271,6 +1286,7 @@ async function insertDraft(
     aiOutput: Record<string, unknown>;
     actorId: string | null;
     operatorNotes: string | null;
+    draftStatus?: "generated" | "saved";
   },
 ) {
   const nowIso = new Date().toISOString();
@@ -1309,7 +1325,7 @@ async function insertDraft(
       target_message_id: options.targetMessageId,
       latest_message_id: options.latestMessageId,
       classification_id: options.classificationId,
-      draft_status: options.validationStatus === "error" ? "error" : "generated",
+      draft_status: options.validationStatus === "error" ? "error" : options.draftStatus || "generated",
       draft_text: options.output.draft_text,
       edited_text: null,
       final_text: options.output.draft_text,
@@ -1337,6 +1353,128 @@ async function insertDraft(
   if (error || !data?.id) throw new DraftError("draft_insert_failed", { phase: "draft_write", details: { message: error?.message } });
   const latest = await loadCurrentLatestMessage(supabase, options.conversationId);
   return publicDraft(data as Record<string, any>, staleStatus(data as Record<string, any>, latest));
+}
+
+async function resolveManualDraftTarget(
+  supabase: ServiceClient,
+  conversationId: string,
+  input: Input,
+) {
+  const target = input.targetMessageId
+    ? await loadTargetMessage(supabase, conversationId, input.targetMessageId)
+    : await loadLatestInboundMessage(supabase, conversationId);
+
+  if (!target?.id) {
+    throw new DraftError(input.targetMessageId ? "target_message_not_found" : "target_message_required", {
+      status: 400,
+      phase: "draft_input",
+    });
+  }
+  if (String(target.direction || "").toLowerCase() !== "inbound") {
+    throw new DraftError("target_message_must_be_inbound", { status: 400, phase: "draft_input" });
+  }
+  return target;
+}
+
+async function createManualDraft(
+  supabase: ServiceClient,
+  input: Input,
+  admin: { userId: string | null },
+) {
+  if (!input.draftText) throw new DraftError("draft_text_required", { status: 400, phase: "input" });
+  const conversation = await resolveEbayConversation(supabase, {
+    conversationId: input.conversationId,
+    ebayConversationId: input.ebayConversationId,
+    conversationType: input.conversationType,
+  });
+  const [targetMessage, latestMessage, classification] = await Promise.all([
+    resolveManualDraftTarget(supabase, conversation.id, input),
+    loadCurrentLatestMessage(supabase, conversation.id),
+    loadCurrentClassification(supabase, conversation.id),
+  ]);
+  const validationErrors = input.draftText.length > EBAY_MAX_MESSAGE_TEXT_CHARS
+    ? ["draft_text_too_long_for_ebay"]
+    : [];
+  const output: DraftOutput = {
+    draft_text: input.draftText,
+    tone: "operator_written",
+    summary_of_intent: "Operator-written buyer reply.",
+    facts_used: [],
+    missing_context: [],
+    safety_warnings: validationErrors.length ? ["Draft exceeds the eBay message character limit."] : [],
+    confidence: 1,
+  };
+  const inputSnapshot = {
+    conversation: {
+      id: conversation.id,
+      ebay_conversation_id: conversation.ebay_conversation_id || null,
+      conversation_type: conversation.conversation_type || null,
+      other_party_username: conversation.other_party_username || null,
+    },
+    target_message: compactMessageForDraft(targetMessage),
+    latest_message: compactMessageForDraft(latestMessage),
+    latest_inbound_message: compactMessageForDraft(targetMessage),
+    classification: classification ? effectiveClassification(classification) : null,
+    grounding: {
+      facts: [],
+      missing_context_options: [],
+    },
+    operator_draft: input.draftText,
+    operator_instructions: null,
+    previous_draft: null,
+    draft_request: {
+      mode: "save_edit",
+      generator_name: "operator_manual_composer",
+      generator_version: "v1",
+      prompt_version: MANUAL_PROMPT_VERSION,
+      target_message_id: targetMessage.id,
+      output_is_internal_suggestion: false,
+      human_review_required: true,
+      sends_allowed: false,
+      ebay_mutations_allowed: false,
+      outlook_mutations_allowed: false,
+    },
+  };
+  const promptHash = await sha256Hex(stableStringify({
+    prompt: "operator_manual_composer",
+    version: MANUAL_PROMPT_VERSION,
+  }));
+  const inputHash = await sha256Hex(stableStringify({
+    generator_name: "operator_manual_composer",
+    generator_version: "v1",
+    prompt_hash: promptHash,
+    input: inputSnapshot,
+  }));
+  const contextHash = await sha256Hex(stableStringify({
+    conversation_id: conversation.id,
+    target_message_id: targetMessage.id,
+    latest_message_id: latestMessage?.id || null,
+    classification_id: classification?.id || null,
+  }));
+
+  return await insertDraft(supabase, {
+    conversationId: conversation.id,
+    targetMessageId: targetMessage.id,
+    latestMessageId: latestMessage?.id || null,
+    classificationId: classification?.id || null,
+    sourceMode: "operator_edit",
+    model: "operator_manual",
+    promptVersionValue: MANUAL_PROMPT_VERSION,
+    promptHash,
+    inputHash,
+    contextHash,
+    inputSnapshot,
+    output,
+    validationStatus: validationErrors.length ? "warning" : "valid",
+    validationErrors,
+    aiOutput: {
+      manual_composer: true,
+      generated_by_ai: false,
+    },
+    actorId: admin.userId,
+    operatorNotes: input.operatorNotes,
+    draftStatus: "saved",
+  });
 }
 
 async function generateDraft(
@@ -1523,6 +1661,9 @@ async function approveDraft(
   let draft = input.draftId
     ? await loadDraftById(supabase, input.draftId)
     : input.conversationId ? await loadCurrentDraft(supabase, input.conversationId) : null;
+  if (!input.draftId && (!draft?.id || String(draft.draft_status || "").toLowerCase() === "sent")) {
+    draft = await createManualDraft(supabase, input, admin);
+  }
   if (!draft?.id) throw new DraftError("draft_not_found", { status: 404, phase: "draft_lookup" });
   assertDraftNotSent(draft, "approval");
   if (draft.discarded_at || draft.is_current !== true) {
@@ -1623,6 +1764,18 @@ async function saveEdit(
   const draft = input.draftId
     ? await loadDraftById(supabase, input.draftId)
     : input.conversationId ? await loadCurrentDraft(supabase, input.conversationId) : null;
+  if (!input.draftId && (!draft?.id || String(draft.draft_status || "").toLowerCase() === "sent")) {
+    const created = await createManualDraft(supabase, input, admin);
+    return {
+      ok: true,
+      mode: "save_edit",
+      conversation_id: created.conversation_id,
+      draft: created,
+      draft_id: created.id,
+      created_manual_draft: true,
+      safety: safetyEnvelope(),
+    };
+  }
   if (!draft?.id) throw new DraftError("draft_not_found", { status: 404, phase: "draft_lookup" });
   assertDraftNotSent(draft, "draft_write");
 
