@@ -263,6 +263,7 @@
 
   function normalizeEbayActivityEvent(row = {}) {
     const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    const safetyMetadata = metadata.safety && typeof metadata.safety === "object" ? metadata.safety : {};
     const actor = row.actor_email || row.actor_user_id || null;
     return {
       id: row.id || null,
@@ -293,8 +294,9 @@
         saved_view_id: row.saved_view_id || null,
         sync_run_id: row.sync_run_id || null,
         safety: {
+          ...safetyMetadata,
           ebay_mutation_performed: false,
-          automatic_responses_sent: 0,
+          automatic_responses_sent: Number(safetyMetadata.automatic_responses_sent || 0),
         },
       },
       metadata,

@@ -141,9 +141,11 @@
 
   function eventStatusVariant(event = {}) {
     const counters = event.counters && typeof event.counters === "object" ? event.counters : {};
-    const failed = String(event.status || "").toLowerCase().includes("fail") || Number(counters.failed_count || 0) > 0 || Number(eventPayload(event).failed || 0) > 0;
+    const status = String(event.status || "").toLowerCase();
+    const failed = status.includes("fail") || Number(counters.failed_count || 0) > 0 || Number(eventPayload(event).failed || 0) > 0;
     if (failed) return "danger";
-    if (String(event.status || "").toLowerCase().includes("complete")) return "success";
+    if (status.includes("warn")) return "warning";
+    if (status.includes("complete") || status.includes("success")) return "success";
     return "muted";
   }
 
@@ -214,7 +216,12 @@
         payload.unread_count !== undefined ? metricText(payload.unread_count, "unread") : "",
         payload.latest_message_id ? `latest ${utils.compactId(payload.latest_message_id)}` : "",
       ],
-      conversation_classified: [
+      conversation_classified: payload.classification_run || payload.processed_count !== undefined ? [
+        metricText(metricValue([payload], ["processed_count"]) ?? payload.classification_run?.processed, "processed"),
+        metricText(metricValue([payload], ["succeeded_count"]) ?? payload.classification_run?.succeeded, "succeeded"),
+        metricText(metricValue([payload], ["failed_count"]) ?? payload.classification_run?.failed, "failed"),
+        metricText(metricValue([payload], ["skipped_count"]) ?? payload.classification_run?.skipped, "skipped"),
+      ] : [
         payload.priority ? utils.humanizeValue(payload.priority) : "",
         payload.response_need ? utils.humanizeValue(payload.response_need) : "",
         Array.isArray(payload.topic_tags) ? metricText(payload.topic_tags.length, "topics") : "",
@@ -314,6 +321,24 @@
     const imported = payload.import && typeof payload.import === "object" ? payload.import : {};
     const eventType = String(event.event_type || "");
 
+    if (eventType === "conversation_classified" && (payload.classification_run || payload.processed_count !== undefined)) {
+      const run = payload.classification_run && typeof payload.classification_run === "object" ? payload.classification_run : payload;
+      return [
+        ["Processed", metricValue([payload, run, counters], ["processed_count", "processed"])],
+        ["Attempted", metricValue([payload, run, counters], ["attempted_count", "attempted"])],
+        ["Succeeded", metricValue([payload, run, counters], ["succeeded_count", "succeeded"])],
+        ["Failed", metricValue([payload, run, counters], ["failed_count", "failed"])],
+        ["Skipped", metricValue([payload, run, counters], ["skipped_count", "skipped"])],
+        ["Requested", metricValue([payload, run], ["requested_count", "requested"])],
+        ["Classification Version", metricValue([payload, run], ["classification_version"])],
+        ["Prompt Version", metricValue([payload, run], ["prompt_version"])],
+        ["Model", metricValue([payload, run], ["model_name"])],
+        ["Duration", metricValue([payload, run], ["duration_ms"]) !== null ? `${metricValue([payload, run], ["duration_ms"])} ms` : null],
+        ["Mode", metricValue([run, payload], ["run_mode"])],
+        ["Conversation IDs", Array.isArray(run.conversation_ids) ? run.conversation_ids.slice(0, 24).join(", ") : null],
+      ];
+    }
+
     if (eventType.includes("send_attempt") || eventType === "duplicate_send_prevented") {
       const attempt = payload.send_attempt && typeof payload.send_attempt === "object" ? payload.send_attempt : {};
       const approval = payload.approval && typeof payload.approval === "object" ? payload.approval : {};
@@ -406,6 +431,42 @@
     ]));
   }
 
+  function renderClassificationRunDetails(event = {}, utils = window.EmailTriageRenderUtils) {
+    const payload = eventPayload(event);
+    const run = payload.classification_run && typeof payload.classification_run === "object" ? payload.classification_run : payload;
+    const failures = Array.isArray(run.failures) ? run.failures : Array.isArray(payload.failures) ? payload.failures : [];
+    const skipped = Array.isArray(run.skipped_results) ? run.skipped_results : Array.isArray(payload.skipped) ? payload.skipped : [];
+    if (!failures.length && !skipped.length) return "";
+    return `
+      <div class="operational-detail-classification-run">
+        ${failures.length ? `
+          <section>
+            <h4>Classification Failures</h4>
+            ${failures.slice(0, 12).map((row) => `
+              <div>
+                <span>${utils.escapeHtml(row.conversation_id || row.ebay_conversation_id || "Unknown conversation")}</span>
+                <strong>${utils.escapeHtml(row.error || "failed")}</strong>
+                <em>${utils.escapeHtml(row.reason || "No reason recorded")}</em>
+              </div>
+            `).join("")}
+          </section>
+        ` : ""}
+        ${skipped.length ? `
+          <section>
+            <h4>Skipped Conversations</h4>
+            ${skipped.slice(0, 12).map((row) => `
+              <div>
+                <span>${utils.escapeHtml(row.conversation_id || row.ebay_conversation_id || "Unknown conversation")}</span>
+                <strong>${utils.escapeHtml(utils.humanizeValue(row.reason || "skipped"))}</strong>
+                <em>${utils.escapeHtml(row.classification_id ? `Classification ${row.classification_id}` : "No classification id recorded")}</em>
+              </div>
+            `).join("")}
+          </section>
+        ` : ""}
+      </div>
+    `;
+  }
+
   function renderOperationalEventDetail(event = null, utils = window.EmailTriageRenderUtils) {
     if (!event) {
       return `<div class="classification-empty operational-empty">Select an operational event to inspect details.</div>`;
@@ -443,6 +504,7 @@
       <div class="operational-detail-metric-grid">
         ${detailMetricItems(event).map(([label, value]) => renderMetricCard(label, value, "", utils)).join("")}
       </div>
+      ${renderClassificationRunDetails(event, utils)}
       <div class="operational-detail-safety">
         <strong>${utils.escapeHtml(renderSafetySummary({ ...payload, safety }, utils))}</strong>
         <div>

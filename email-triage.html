@@ -9,7 +9,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="email-triage.css?v=5f6q" />
+  <link rel="stylesheet" href="email-triage.css?v=5f6r" />
 
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
@@ -86,7 +86,11 @@
               </button>
               <button type="button" id="ebay-conversation-classify-recent" class="secondary-btn">
                 <i data-lucide="sparkles"></i>
-                Classify inbox
+                Classify unclassified
+              </button>
+              <button type="button" id="ebay-conversation-reclassify-all" class="secondary-btn">
+                <i data-lucide="refresh-cw"></i>
+                Reclassify inbox
               </button>
               <button type="button" id="ebay-conversation-sync" class="primary-btn">
                 <i data-lucide="cloud-download"></i>
@@ -121,7 +125,7 @@
           </div>
 
           <div class="ebay-conversation-filter-strip">
-            <button type="button" id="ebay-conversation-filter-toggle" class="secondary-btn" aria-expanded="true" aria-controls="ebay-conversation-filter-panel">
+            <button type="button" id="ebay-conversation-filter-toggle" class="secondary-btn" aria-expanded="false" aria-controls="ebay-conversation-filter-panel">
               <i data-lucide="filter"></i>
               <span id="ebay-conversation-filter-label">Classification filters</span>
             </button>
@@ -153,7 +157,7 @@
           </div>
 
           <div id="ebay-conversation-tag-help" class="ebay-conversation-tag-help" hidden></div>
-          <div id="ebay-conversation-filter-panel" class="ebay-conversation-filter-panel" aria-label="Available classification filters"></div>
+          <div id="ebay-conversation-filter-panel" class="ebay-conversation-filter-panel" aria-label="Available classification filters" hidden></div>
 
           <div id="ebay-conversation-sync-result" class="ebay-conversation-sync-result" aria-live="polite"></div>
 
@@ -204,12 +208,12 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
-  <script src="email-triage.api.js?v=5f6q"></script>
-  <script src="email-triage.state.js?v=5f6q"></script>
-  <script src="email-triage.render-utils.js?v=5f6q"></script>
-  <script src="email-triage.classifications.js?v=5f6q"></script>
-  <script src="email-triage.diagnostics.js?v=5f6q"></script>
+  <script src="email-triage.api.js?v=5f6r"></script>
+  <script src="email-triage.state.js?v=5f6r"></script>
+  <script src="email-triage.render-utils.js?v=5f6r"></script>
+  <script src="email-triage.classifications.js?v=5f6r"></script>
+  <script src="email-triage.diagnostics.js?v=5f6r"></script>
   <script src="email-triage.operations.js"></script>
-  <script src="email-triage.js?v=5f6q"></script>
+  <script src="email-triage.js?v=5f6r"></script>
 </body>
 </html>

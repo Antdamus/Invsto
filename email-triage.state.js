@@ -45,7 +45,9 @@
       activeFilters: [],
       priorityFilter: "all",
       statusFilter: "all",
-      filtersExpanded: false,
+      filtersExpanded: Object.prototype.hasOwnProperty.call(overrides, "filtersExpanded")
+        ? overrides.filtersExpanded === true
+        : false,
       sortMode: "newest",
       pagination: { ...DEFAULT_PAGE },
       queueStatus: {},
@@ -87,7 +89,9 @@
         context: true,
       },
       ebayConversationTagHelpOpen: false,
-      ebayConversationFiltersExpanded: true,
+      ebayConversationFiltersExpanded: Object.prototype.hasOwnProperty.call(overrides, "ebayConversationFiltersExpanded")
+        ? overrides.ebayConversationFiltersExpanded === true
+        : false,
       ebayConversationDensityMode: overrides.ebayConversationDensityMode || "compact",
       selectedEbayConversationId: null,
       ebayConversationLastLoadedAt: null,
