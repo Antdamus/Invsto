@@ -92,6 +92,7 @@
       selectedEbayConversationId: null,
       ebayConversationLastLoadedAt: null,
       ebayConversationMessagesById: {},
+      ebayConversationOptimisticMessagesById: {},
       ebayConversationMessagesLoadingId: null,
       ebayConversationMessageErrorsById: {},
       ebayConversationContextsById: {},

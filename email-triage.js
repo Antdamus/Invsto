@@ -135,6 +135,87 @@
     has_media: "paperclip",
     needs_context_review: "badge-alert",
   };
+  const EBAY_SEND_SUCCESS_MESSAGE = "Message Sent ✓";
+  const EBAY_SEND_SUCCESS_VISIBLE_MS = 5500;
+  const EBAY_NOTIFICATION_BLOCK_TAGS = new Set([
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "center",
+    "dd",
+    "div",
+    "dl",
+    "dt",
+    "figcaption",
+    "figure",
+    "footer",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "hr",
+    "li",
+    "main",
+    "nav",
+    "ol",
+    "p",
+    "section",
+    "table",
+    "tbody",
+    "td",
+    "tfoot",
+    "th",
+    "thead",
+    "tr",
+    "ul",
+  ]);
+  const EBAY_NOTIFICATION_ALLOWED_TAGS = new Set([
+    ...EBAY_NOTIFICATION_BLOCK_TAGS,
+    "a",
+    "b",
+    "br",
+    "em",
+    "i",
+    "small",
+    "span",
+    "strong",
+    "sub",
+    "sup",
+    "u",
+  ]);
+  const EBAY_NOTIFICATION_DROP_TAGS = new Set([
+    "base",
+    "button",
+    "canvas",
+    "embed",
+    "form",
+    "head",
+    "iframe",
+    "input",
+    "link",
+    "meta",
+    "noscript",
+    "object",
+    "script",
+    "select",
+    "style",
+    "svg",
+    "textarea",
+    "video",
+  ]);
+  const EBAY_NOTIFICATION_KIND_RULES = [
+    { label: "Refund Decision", icon: "badge-dollar-sign", pattern: /\b(refund|reimburs|credit issued|money back)\b/i },
+    { label: "Case Review", icon: "file-check-2", pattern: /\b(case|customer service review|request closed|case closed)\b/i },
+    { label: "Order Cancellation", icon: "ban", pattern: /\b(cancel|cancellation)\b/i },
+    { label: "Payment Dispute", icon: "credit-card", pattern: /\b(dispute|chargeback|payment dispute)\b/i },
+    { label: "Payout Notice", icon: "receipt", pattern: /\b(payout|deposit|funds available)\b/i },
+    { label: "Return Update", icon: "undo-2", pattern: /\b(return|returned item)\b/i },
+  ];
+  const ebayDraftActionMessageTimers = new Map();
 
   const els = {
     connect: document.getElementById("connect-outlook"),
@@ -3190,6 +3271,371 @@
     `;
   }
 
+  function ebayConversationIsPlatform(conversation) {
+    const type = String(conversation?.conversation_type || conversation?.raw?.conversation_type || "").toUpperCase();
+    const identity = ebayBuyerIdentity(conversation);
+    return type === "FROM_EBAY" ||
+      identity.source === "platform" ||
+      normalizeEbaySearchText(identity.displayName) === "ebay";
+  }
+
+  function ebayMessageDirection(message) {
+    const direction = String(message?.direction || "unknown").toLowerCase();
+    return ["inbound", "outbound", "platform", "unknown"].includes(direction) ? direction : "unknown";
+  }
+
+  function ebayMessageLooksLikeHtml(value) {
+    const text = String(value || "");
+    return /<!doctype\s+html|<html[\s>]|<body[\s>]|<\/?[a-z][\s\S]*>/i.test(text);
+  }
+
+  function ebayMessageSenderIsEbay(message) {
+    return normalizeEbaySearchText([
+      message?.sender_username,
+      message?.recipient_username,
+      message?.subject,
+    ].filter(Boolean).join(" ")) === "ebay" ||
+      /\bebay\b/i.test(String(message?.sender_username || message?.subject || ""));
+  }
+
+  function ebayMessageIsNotification(message, conversation) {
+    const direction = ebayMessageDirection(message);
+    if (direction === "platform") return true;
+    if (ebayConversationIsPlatform(conversation)) return true;
+    return ebayMessageLooksLikeHtml(ebayMessageText(message)) && ebayMessageSenderIsEbay(message);
+  }
+
+  function parseEbayNotificationHtml(html) {
+    if (!ebayMessageLooksLikeHtml(html) || !window.DOMParser) return null;
+    try {
+      return new window.DOMParser().parseFromString(String(html || ""), "text/html");
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function safeEbayNotificationUrl(value) {
+    let text = String(value || "").trim();
+    if (!text) return "";
+    if (text.startsWith("//")) text = `https:${text}`;
+    if (/^www\./i.test(text)) text = `https://${text}`;
+    try {
+      const url = text.startsWith("/") ? new URL(text, "https://www.ebay.com") : new URL(text);
+      if (!["http:", "https:"].includes(url.protocol)) return "";
+      return url.href;
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function sanitizeEbayNotificationNode(node) {
+    if (!node) return "";
+    if (node.nodeType === 3) return escapeHtml(node.textContent || "");
+    if (node.nodeType !== 1) return "";
+
+    const tag = String(node.nodeName || "").toLowerCase();
+    if (EBAY_NOTIFICATION_DROP_TAGS.has(tag)) return "";
+    if (tag === "br") return "<br />";
+    if (tag === "img") return "";
+    if (tag === "hr") return "<hr />";
+
+    const content = Array.from(node.childNodes || []).map(sanitizeEbayNotificationNode).join("");
+    if (tag === "a") {
+      const href = safeEbayNotificationUrl(node.getAttribute("href"));
+      if (!href) return content;
+      return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${content || escapeHtml(href)}</a>`;
+    }
+
+    if (!EBAY_NOTIFICATION_ALLOWED_TAGS.has(tag)) return content;
+    const hasContent = compactConversationText(content.replace(/<[^>]+>/g, "")) || /<br|<hr|<table|<ul|<ol/i.test(content);
+    if (!hasContent) return "";
+    return `<${tag}>${content}</${tag}>`;
+  }
+
+  function renderPlainNotificationText(text) {
+    const fallbackText = ebayMessageLooksLikeHtml(text)
+      ? String(text || "")
+        .replace(/<\s*br\s*\/?>/gi, "\n")
+        .replace(/<\/\s*(p|div|tr|li|h[1-6])\s*>/gi, "\n")
+        .replace(/<[^>]+>/g, " ")
+      : String(text || "");
+    const rows = fallbackText
+      .split(/\n{2,}|\r?\n/)
+      .map((line) => compactConversationText(line))
+      .filter(Boolean)
+      .slice(0, 30);
+    if (!rows.length) return `<p>No notification body stored.</p>`;
+    return rows.map((line) => `<p>${escapeHtml(line)}</p>`).join("");
+  }
+
+  function sanitizedEbayNotificationBody(rawBody, doc) {
+    if (!doc?.body) return renderPlainNotificationText(rawBody);
+    const body = Array.from(doc.body.childNodes || []).map(sanitizeEbayNotificationNode).join("").trim();
+    return body || renderPlainNotificationText(doc.body.textContent || rawBody);
+  }
+
+  function ebayNotificationTextFromNode(node) {
+    if (!node) return "";
+    if (node.nodeType === 3) return node.textContent || "";
+    if (node.nodeType !== 1) return "";
+
+    const tag = String(node.nodeName || "").toLowerCase();
+    if (EBAY_NOTIFICATION_DROP_TAGS.has(tag)) return "";
+    if (tag === "br" || tag === "hr") return "\n";
+    const text = Array.from(node.childNodes || []).map(ebayNotificationTextFromNode).join("");
+    if (EBAY_NOTIFICATION_BLOCK_TAGS.has(tag)) return `\n${text}\n`;
+    return text;
+  }
+
+  function ebayNotificationPlainText(rawBody, doc) {
+    const text = doc?.body
+      ? Array.from(doc.body.childNodes || []).map(ebayNotificationTextFromNode).join("\n")
+      : String(rawBody || "");
+    return text
+      .replace(/\u00a0/g, " ")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  function ebayNotificationActionLabel(label, href) {
+    const text = compactConversationText(label);
+    const blob = `${text} ${href}`.toLowerCase();
+    if (/cancel/.test(blob)) return "See cancel details";
+    if (/\bcase\b|customer-service|resolution/.test(blob)) return "See case details";
+    if (/dispute|chargeback/.test(blob)) return "See dispute details";
+    if (/return/.test(blob)) return "See return details";
+    if (/refund/.test(blob)) return "See refund details";
+    if (/order|purchase/.test(blob)) return "Open order";
+    if (/item|itm|listing/.test(blob)) return "Open item";
+    if (text && !/^(click here|view|details|see details)$/i.test(text)) return text.slice(0, 80);
+    try {
+      return new URL(href).hostname.replace(/^www\./, "");
+    } catch (error) {
+      return "Open eBay link";
+    }
+  }
+
+  function extractEbayNotificationLinks(rawBody, doc) {
+    const links = [];
+    const seen = new Set();
+    const addLink = (hrefValue, labelValue) => {
+      const href = safeEbayNotificationUrl(hrefValue);
+      if (!href || seen.has(href)) return;
+      seen.add(href);
+      links.push({
+        href,
+        label: ebayNotificationActionLabel(labelValue, href),
+      });
+    };
+
+    if (doc?.body) {
+      Array.from(doc.body.querySelectorAll("a[href]")).forEach((link) => {
+        addLink(link.getAttribute("href"), link.textContent || link.getAttribute("aria-label") || "");
+      });
+    } else {
+      String(rawBody || "").replace(/href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_match, href, label) => {
+        addLink(href, String(label || "").replace(/<[^>]+>/g, " "));
+        return "";
+      });
+    }
+
+    return links.slice(0, 12);
+  }
+
+  function imageCandidateScore(candidate) {
+    const blob = `${candidate.url} ${candidate.alt || ""}`.toLowerCase();
+    let score = 0;
+    if (/i\.ebayimg\.com|thumbs\d*\.ebaystatic\.com/.test(blob)) score += 8;
+    if (/item|listing|photo|image|product/.test(blob)) score += 4;
+    if (Number(candidate.width || 0) >= 80 || Number(candidate.height || 0) >= 80) score += 3;
+    if (/logo|spacer|pixel|tracking|transparent|icon/.test(blob)) score -= 8;
+    return score;
+  }
+
+  function extractUrlFromMediaRecord(record, depth = 0) {
+    if (!record || depth > 3) return "";
+    if (typeof record === "string") return safeEbayNotificationUrl(record);
+    if (Array.isArray(record)) {
+      for (const item of record) {
+        const url = extractUrlFromMediaRecord(item, depth + 1);
+        if (url) return url;
+      }
+      return "";
+    }
+    if (typeof record !== "object") return "";
+    const keys = ["url", "src", "href", "mediaUrl", "media_url", "imageUrl", "image_url", "thumbnailUrl", "thumbnail_url"];
+    for (const key of keys) {
+      const url = safeEbayNotificationUrl(record[key]);
+      if (url) return url;
+    }
+    for (const value of Object.values(record)) {
+      const url = extractUrlFromMediaRecord(value, depth + 1);
+      if (url) return url;
+    }
+    return "";
+  }
+
+  function extractEbayNotificationImage(message, doc) {
+    const candidates = [];
+    const messageMedia = Array.isArray(message?.message_media)
+      ? message.message_media
+      : message?.message_media ? [message.message_media] : [];
+    messageMedia.forEach((item) => {
+      const url = extractUrlFromMediaRecord(item);
+      if (url) candidates.push({ url, alt: "eBay item image", score: 10 });
+    });
+
+    if (doc?.body) {
+      Array.from(doc.body.querySelectorAll("img[src]")).forEach((image) => {
+        const url = safeEbayNotificationUrl(image.getAttribute("src"));
+        if (!url) return;
+        const candidate = {
+          url,
+          alt: compactConversationText(image.getAttribute("alt") || image.getAttribute("title") || "eBay notification image"),
+          width: Number(image.getAttribute("width") || 0),
+          height: Number(image.getAttribute("height") || 0),
+        };
+        candidates.push({ ...candidate, score: imageCandidateScore(candidate) });
+      });
+    }
+
+    return candidates
+      .filter((candidate, index, rows) => rows.findIndex((row) => row.url === candidate.url) === index)
+      .sort((left, right) => Number(right.score || 0) - Number(left.score || 0))[0] || null;
+  }
+
+  function addEbayNotificationFact(facts, seen, label, value) {
+    const cleanValue = compactConversationText(value);
+    if (!cleanValue) return;
+    const key = `${label}:${cleanValue}`.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    facts.push({ label, value: cleanValue });
+  }
+
+  function extractEbayNotificationFacts(message, conversation, plainText) {
+    const facts = [];
+    const seen = new Set();
+    const summary = ebayConversationSummary(conversation);
+    addEbayNotificationFact(facts, seen, "Order", summary.order_numbers[0]);
+    addEbayNotificationFact(facts, seen, "Return", summary.return_ids[0]);
+    addEbayNotificationFact(facts, seen, "Item", summary.item_numbers[0] || summary.listing_ids[0]);
+    addEbayNotificationFact(facts, seen, "Buyer", summary.buyer_usernames[0] || conversation?.other_party_username);
+
+    const text = String(plainText || "");
+    const patterns = [
+      ["Order", /\bOrder(?:\s+(?:number|ID))?\s*[:#]?\s*([A-Z0-9-]{5,})/i],
+      ["Case", /\bCase(?:\s+(?:number|ID))?\s*[:#]?\s*([A-Z0-9-]{4,})/i],
+      ["Return", /\bReturn(?:\s+(?:request|ID|number))?\s*[:#]?\s*([A-Z0-9-]{4,})/i],
+      ["Cancellation", /\bCancellation(?:\s+(?:ID|number))?\s*[:#]?\s*([A-Z0-9-]{4,})/i],
+      ["Dispute", /\b(?:Payment\s+)?Dispute(?:\s+(?:ID|number))?\s*[:#]?\s*([A-Z0-9-]{4,})/i],
+      ["Item", /\bItem(?:\s+(?:ID|number))?\s*[:#]?\s*([A-Z0-9-]{5,})/i],
+      ["Refund", /\b(?:Refund amount|Amount refunded|Total refund)\s*[:#]?\s*(\$?[0-9][0-9,]*(?:\.[0-9]{2})?)/i],
+      ["Buyer", /\bBuyer\s*[:#]?\s*([A-Za-z0-9_.-]{3,})/i],
+    ];
+    patterns.forEach(([label, pattern]) => {
+      const match = text.match(pattern);
+      if (match?.[1]) addEbayNotificationFact(facts, seen, label, match[1]);
+    });
+
+    return facts.slice(0, 8);
+  }
+
+  function ebayNotificationKind(subject, plainText) {
+    const blob = `${subject} ${plainText}`.slice(0, 4000);
+    return EBAY_NOTIFICATION_KIND_RULES.find((rule) => rule.pattern.test(blob)) || {
+      label: "eBay Notification",
+      icon: "bell",
+    };
+  }
+
+  function buildEbayNotification(message, conversation) {
+    const rawBody = ebayMessageText(message);
+    const doc = parseEbayNotificationHtml(rawBody);
+    const plainText = ebayNotificationPlainText(rawBody, doc);
+    const subject = compactConversationText(message?.subject);
+    const heading = compactConversationText(
+      doc?.querySelector("h1, h2, h3, title, strong")?.textContent,
+    );
+    const kind = ebayNotificationKind(subject || heading, plainText);
+    const title = subject || heading || kind.label;
+    return {
+      kind,
+      title,
+      plainText,
+      bodyHtml: sanitizedEbayNotificationBody(rawBody, doc),
+      links: extractEbayNotificationLinks(rawBody, doc),
+      image: extractEbayNotificationImage(message, doc),
+      facts: extractEbayNotificationFacts(message, conversation, plainText),
+    };
+  }
+
+  function renderEbayNotificationFacts(facts = []) {
+    const rows = safeArray(facts);
+    if (!rows.length) return "";
+    return `<div class="ebay-notification-facts">${renderContextFactGrid(rows)}</div>`;
+  }
+
+  function renderEbayNotificationActions(links = []) {
+    const rows = safeArray(links);
+    if (!rows.length) return "";
+    return `
+      <div class="ebay-notification-actions" aria-label="eBay notification links">
+        ${rows.map((link) => `
+          <a href="${escapeHtml(link.href)}" target="_blank" rel="noopener noreferrer">
+            <i data-lucide="external-link"></i>
+            ${escapeHtml(link.label)}
+          </a>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  function renderEbayNotificationCard(message, conversation) {
+    const notification = buildEbayNotification(message, conversation);
+    const sender = safeText(message.sender_username, "eBay");
+    const recipient = safeText(message.recipient_username, "OG / Seller");
+    return `
+      <article class="ebay-message-row is-platform is-notification">
+        <section class="ebay-notification-card">
+          <div class="ebay-notification-topline">
+            <span>eBay Notification</span>
+            <time>${escapeHtml(formatContextDate(ebayMessageCreatedAt(message)))}</time>
+          </div>
+          <div class="ebay-notification-head">
+            <span class="ebay-notification-icon" aria-hidden="true"><i data-lucide="${escapeHtml(notification.kind.icon)}"></i></span>
+            <div>
+              <span class="eyebrow">${escapeHtml(notification.kind.label)}</span>
+              <h4>${escapeHtml(notification.title)}</h4>
+            </div>
+          </div>
+          ${notification.image ? `
+            <figure class="ebay-notification-media">
+              <img src="${escapeHtml(notification.image.url)}" alt="${escapeHtml(notification.image.alt || "eBay notification image")}" loading="lazy" />
+            </figure>
+          ` : ""}
+          ${renderEbayNotificationFacts(notification.facts)}
+          <div class="ebay-notification-body">${notification.bodyHtml}</div>
+          ${renderEbayNotificationActions(notification.links)}
+          <div class="ebay-message-foot">
+            <span>From ${escapeHtml(sender)}</span>
+            <span>To ${escapeHtml(recipient)}</span>
+          </div>
+          <details class="ebay-message-debug">
+            <summary>Message details</summary>
+            ${renderContextFactGrid([
+              { label: "eBay Message ID", value: message.ebay_message_id || "Unavailable", wide: true },
+              { label: "Read Status", value: message.read_status || (message.is_read === true ? "Read" : message.is_read === false ? "Unread" : "Unknown") },
+              { label: "Message Status", value: message.message_status || "Unknown" },
+              { label: "Direction Confidence", value: message.direction_confidence || "Unknown" },
+            ])}
+          </details>
+        </section>
+      </article>
+    `;
+  }
+
   function ebayMessageRole(direction) {
     const value = String(direction || "").toLowerCase();
     if (value === "inbound") return "Buyer";
@@ -3199,7 +3645,8 @@
   }
 
   function renderEbayMessageBubble(message, conversation) {
-    const direction = String(message.direction || "unknown").toLowerCase();
+    if (ebayMessageIsNotification(message, conversation)) return renderEbayNotificationCard(message, conversation);
+    const direction = ebayMessageDirection(message);
     const body = ebayMessageText(message);
     const sender = safeText(message.sender_username, "Sender unavailable");
     const recipient = safeText(message.recipient_username, "Recipient unavailable");
@@ -3209,7 +3656,7 @@
     const isActionLoading = adminClassificationState.ebayConversationDraftActionLoadingId === conversation?.id;
     const canGenerate = direction === "inbound" && conversation?.id && message.id;
     return `
-      <article class="ebay-message-row is-${escapeHtml(["inbound", "outbound", "platform"].includes(direction) ? direction : "unknown")}">
+      <article class="ebay-message-row is-${escapeHtml(direction)}${message.optimistic_send ? " is-optimistic-send" : ""}">
         <div class="ebay-message-bubble">
           <div class="ebay-message-meta">
             <strong>${escapeHtml(sender)}</strong>
@@ -3221,6 +3668,7 @@
           <div class="ebay-message-foot">
             <span>To ${escapeHtml(recipient)}</span>
             ${message.has_media ? `<span><i data-lucide="paperclip"></i>${escapeHtml(mediaCount || 1)} media</span>` : ""}
+            ${message.optimistic_send ? `<span class="ebay-message-draft-target"><i data-lucide="check-circle-2"></i>Sent via eBay</span>` : ""}
             ${isDraftTarget ? `<span class="ebay-message-draft-target"><i data-lucide="reply"></i>Composer target</span>` : ""}
           </div>
           ${canGenerate ? `
@@ -3422,6 +3870,110 @@
     return safeArray(messages).find((message) => String(message?.id || "") === id) || null;
   }
 
+  function ebayMessageBodySignature(message) {
+    return normalizeEbaySearchText(ebayMessageText(message)).slice(0, 500);
+  }
+
+  function ebayMessageTimeMs(message) {
+    const time = Date.parse(ebayMessageCreatedAt(message) || "");
+    return Number.isFinite(time) ? time : 0;
+  }
+
+  function ebayCanonicalMatchesOptimisticMessage(canonical, optimistic) {
+    if (!canonical || !optimistic) return false;
+    const canonicalProviderId = String(canonical.ebay_message_id || "");
+    const optimisticProviderId = String(optimistic.provider_message_id || optimistic.ebay_message_id || "");
+    if (canonicalProviderId && optimisticProviderId && canonicalProviderId === optimisticProviderId) return true;
+    if (ebayMessageDirection(canonical) !== "outbound") return false;
+    if (ebayMessageBodySignature(canonical) !== ebayMessageBodySignature(optimistic)) return false;
+    const delta = Math.abs(ebayMessageTimeMs(canonical) - ebayMessageTimeMs(optimistic));
+    return delta > 0 && delta < 10 * 60 * 1000;
+  }
+
+  function ebayConversationTimelineMessages(messages = [], conversation, state = adminClassificationState) {
+    const canonicalMessages = safeArray(messages);
+    const optimisticMessages = safeArray(state.ebayConversationOptimisticMessagesById?.[conversation?.id]);
+    const visibleOptimistic = optimisticMessages.filter((optimistic) => (
+      !canonicalMessages.some((canonical) => ebayCanonicalMatchesOptimisticMessage(canonical, optimistic))
+    ));
+    return [...canonicalMessages, ...visibleOptimistic].sort((left, right) => {
+      const leftTime = ebayMessageTimeMs(left);
+      const rightTime = ebayMessageTimeMs(right);
+      if (leftTime !== rightTime) return leftTime - rightTime;
+      return String(left.id || "").localeCompare(String(right.id || ""));
+    });
+  }
+
+  function buildOptimisticSentEbayMessage(conversation, draft, payload = {}) {
+    if (!conversation?.id || !draft?.id) return null;
+    const sendAttempt = payload.send_attempt && typeof payload.send_attempt === "object" ? payload.send_attempt : {};
+    const sendState = draft.send_state && typeof draft.send_state === "object" ? draft.send_state : {};
+    const providerMessageId = payload.provider_message_id || sendAttempt.provider_message_id || sendState.provider_message_id || "";
+    const sentAt = payload.sent_at || sendAttempt.sent_at || sendState.sent_at || new Date().toISOString();
+    const attemptId = sendAttempt.id || sendState.latest_attempt_id || "";
+    const summary = ebayConversationSummary(conversation);
+    const sellerUsername = summary.seller_username || "OG / Seller";
+    const recipient = ebayBuyerIdentity(conversation).username || conversation.other_party_username || "Buyer";
+    const draftText = ebayDraftDisplayText(draft);
+    if (!draftText) return null;
+
+    return {
+      id: `optimistic-send-${attemptId || draft.id}`,
+      conversation_id: conversation.id,
+      ebay_message_id: providerMessageId || `send-${attemptId || draft.id}`,
+      provider_message_id: providerMessageId || null,
+      send_attempt_id: attemptId || null,
+      sender_username: sellerUsername,
+      recipient_username: recipient,
+      direction: "outbound",
+      direction_confidence: "strong",
+      subject: draft.subject || "",
+      message_body: draftText,
+      message_body_preview: compactConversationText(draftText).slice(0, 240),
+      read_status: "Sent",
+      is_read: true,
+      message_status: "sent",
+      created_at_ebay: sentAt,
+      created_at: sentAt,
+      has_media: false,
+      media_count: 0,
+      message_media: [],
+      optimistic_send: true,
+    };
+  }
+
+  function optimisticEbayMessagesMapWith(conversationId, message) {
+    const existingMap = adminClassificationState.ebayConversationOptimisticMessagesById || {};
+    const existingRows = safeArray(existingMap[conversationId]);
+    if (!message?.id) return existingMap;
+    return {
+      ...existingMap,
+      [conversationId]: [
+        ...existingRows.filter((row) => String(row.id || "") !== String(message.id)),
+        message,
+      ].slice(-5),
+    };
+  }
+
+  function clearEbayDraftActionMessageLater(conversationId, message) {
+    if (!conversationId || !message) return;
+    if (ebayDraftActionMessageTimers.has(conversationId)) {
+      window.clearTimeout(ebayDraftActionMessageTimers.get(conversationId));
+    }
+    const timer = window.setTimeout(() => {
+      ebayDraftActionMessageTimers.delete(conversationId);
+      const current = adminClassificationState.ebayConversationDraftActionMessagesById?.[conversationId];
+      if (current !== message) return;
+      setEbayConversationState({
+        ebayConversationDraftActionMessagesById: {
+          ...adminClassificationState.ebayConversationDraftActionMessagesById,
+          [conversationId]: null,
+        },
+      });
+    }, EBAY_SEND_SUCCESS_VISIBLE_MS);
+    ebayDraftActionMessageTimers.set(conversationId, timer);
+  }
+
   function ebayDraftTargetMessage(draft, messages = []) {
     if (!draft) return null;
     return ebayMessageById(messages, draft.target_message_id) ||
@@ -3462,7 +4014,7 @@
       discard: "Draft discarded and preserved in history. Nothing was sent.",
       approve: "Draft approved as ready for controlled send. Nothing was sent.",
       unapprove: "Draft approval removed. Nothing was sent.",
-      send: payload.duplicate_prevented ? (payload.message || "Duplicate send prevented. Nothing was sent twice.") : "Sent.",
+      send: payload.duplicate_prevented ? (payload.message || "Duplicate send prevented. Nothing was sent twice.") : EBAY_SEND_SUCCESS_MESSAGE,
     };
     return labels[mode] || "Draft action completed. Nothing was sent.";
   }
@@ -3550,8 +4102,12 @@
     const sendState = draft?.send_state || {};
     const latest = safeArray(sendState.history)[0] || null;
     if (sendState.is_sent === true) {
-      const providerId = sendState.provider_message_id ? ` Provider ${compactId(sendState.provider_message_id)}.` : "";
-      return `<div class="classification-notice is-success"><strong>Sent.</strong> ${escapeHtml(`Message sent to eBay${providerId}`)}</div>`;
+      return `
+        <div class="classification-notice is-success ebay-send-status-notice">
+          <i data-lucide="check-circle-2"></i>
+          <strong>${escapeHtml(EBAY_SEND_SUCCESS_MESSAGE)}</strong>
+        </div>
+      `;
     }
     if (latest?.attempt_status === "failed") {
       const response = latest.provider_response && typeof latest.provider_response === "object" ? latest.provider_response : {};
@@ -3739,7 +4295,7 @@
         </div>
         ${stale?.isStale && !isSent ? renderStaleDraftWarning(draft) : ""}
         ${error ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(error)}</div>` : ""}
-        ${message ? `<div class="classification-notice is-success">${escapeHtml(message)}</div>` : ""}
+        ${message && !isSent ? `<div class="classification-notice is-success">${escapeHtml(message)}</div>` : ""}
         ${ebayDraftSendStatusNotice(draft)}
         ${renderEbayDraftTargetSummary(draft, messages)}
         <form class="ebay-draft-form" data-ebay-draft-form data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-draft-id="${escapeHtml(draft.id)}" data-ebay-target-message-id="${escapeHtml(draft.target_message_id || "")}">
@@ -3826,17 +4382,19 @@
       return;
     }
 
-    const messages = safeArray(state.ebayConversationMessagesById?.[conversation.id]);
+    const storedMessages = safeArray(state.ebayConversationMessagesById?.[conversation.id]);
+    const messages = ebayConversationTimelineMessages(storedMessages, conversation, state);
     const isLoading = state.ebayConversationMessagesLoadingId === conversation.id;
     const error = state.ebayConversationMessageErrorsById?.[conversation.id];
     const identity = ebayBuyerIdentity(conversation);
     const metaItems = ebayConversationMetaItems(conversation, 5);
+    const isPlatformConversation = ebayConversationIsPlatform(conversation);
 
     els.ebayConversationDetail.innerHTML = `
       <div class="ebay-detail-head">
         <div>
-          <span class="eyebrow">Selected eBay Chat</span>
-          <h3>${escapeHtml(ebayConversationParty(conversation))}</h3>
+          <span class="eyebrow">${escapeHtml(isPlatformConversation ? "Selected eBay Notification" : "Selected eBay Chat")}</span>
+          <h3>${escapeHtml(isPlatformConversation ? ebayConversationTitle(conversation) : ebayConversationParty(conversation))}</h3>
           <div class="selected-email-meta">
             <span>${escapeHtml(ebayIdentitySourceLabel(identity.source))}</span>
             <span>${escapeHtml(ebayConversationTitle(conversation))}</span>
@@ -3850,11 +4408,11 @@
       </div>
       ${error ? `<div class="classification-notice is-error">Could not load eBay messages: ${escapeHtml(error)}</div>` : ""}
       ${renderEbayClassificationCard(conversation)}
-      <div class="ebay-chat-timeline" aria-label="Clean eBay message timeline">
-        ${isLoading && !messages.length ? `<div class="classification-empty">Loading clean eBay chat messages.</div>` : ""}
-        ${messages.length ? messages.map((message) => renderEbayMessageBubble(message, conversation)).join("") : (!isLoading ? `<div class="classification-empty">No canonical eBay messages are stored for this conversation yet.</div>` : "")}
+      <div class="ebay-chat-timeline${isPlatformConversation ? " is-notification-timeline" : ""}" aria-label="${escapeHtml(isPlatformConversation ? "Clean eBay notification timeline" : "Clean eBay message timeline")}">
+        ${isLoading && !messages.length ? `<div class="classification-empty">Loading clean eBay ${escapeHtml(isPlatformConversation ? "notifications" : "chat messages")}.</div>` : ""}
+        ${messages.length ? messages.map((message) => renderEbayMessageBubble(message, conversation)).join("") : (!isLoading ? `<div class="classification-empty">No canonical eBay ${escapeHtml(isPlatformConversation ? "notifications" : "messages")} are stored for this conversation yet.</div>` : "")}
       </div>
-      ${renderEbayConversationDraftCard(conversation, messages)}
+      ${isPlatformConversation ? "" : renderEbayConversationDraftCard(conversation, messages)}
     `;
   }
 
@@ -4157,11 +4715,27 @@
     });
 
     try {
+      const isSend = values.mode === "send";
       const payload = await requestEbayConversationDraftAction(context, values);
+      if (isSend) {
+        await loadEbayConversationMessages(context, conversationId, { force: true }).catch((loadError) => {
+          console.error("[email-triage] eBay conversation messages reload after send failed:", loadError);
+        });
+      }
       await loadEbayConversationDrafts(context, conversationId, { force: true });
-      if (values.mode === "send") {
+      if (isSend) {
+        const conversation = selectedEbayConversationById(conversationId, adminClassificationState);
+        const draft = currentEbayConversationDraft(conversationId) ||
+          (payload.current_draft && typeof payload.current_draft === "object" ? payload.current_draft : null);
+        const optimisticMessage = payload.duplicate_prevented ? null : buildOptimisticSentEbayMessage(conversation, draft, payload);
+        if (optimisticMessage) {
+          setEbayConversationState({
+            ebayConversationOptimisticMessagesById: optimisticEbayMessagesMapWith(conversationId, optimisticMessage),
+          });
+        }
         loadOperationalDashboard(context, { keepPrevious: true });
       }
+      const successMessage = ebayDraftSuccessMessage(values.mode, payload);
       setEbayConversationState({
         ebayConversationDraftActionLoadingId: null,
         ebayConversationDraftActionErrorsById: {
@@ -4170,9 +4744,10 @@
         },
         ebayConversationDraftActionMessagesById: {
           ...adminClassificationState.ebayConversationDraftActionMessagesById,
-          [conversationId]: ebayDraftSuccessMessage(values.mode, payload),
+          [conversationId]: successMessage,
         },
       });
+      if (isSend && !payload.duplicate_prevented) clearEbayDraftActionMessageLater(conversationId, successMessage);
     } catch (error) {
       const code = ebayDraftActionErrorMessage(error, values.mode);
       if (values.mode === "send") {

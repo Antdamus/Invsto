@@ -4004,6 +4004,10 @@
   justify-content: center;
 }
 
+.ebay-message-row.is-notification {
+  justify-content: stretch;
+}
+
 .ebay-message-bubble {
   width: min(76%, 640px);
   min-width: 0;
@@ -4026,6 +4030,11 @@
 .ebay-message-row.is-platform .ebay-message-bubble {
   border-color: rgba(177,139,255,.24);
   background: rgba(177,139,255,.09);
+}
+
+.ebay-message-row.is-optimistic-send .ebay-message-bubble {
+  border-color: rgba(37,211,102,.32);
+  background: rgba(37,211,102,.08);
 }
 
 .ebay-message-meta {
@@ -4104,6 +4113,154 @@
 
 .ebay-message-debug .context-fact-grid {
   margin-top: 8px;
+}
+
+.ebay-notification-card {
+  display: grid;
+  gap: 10px;
+  width: min(100%, 780px);
+  min-width: 0;
+  margin-inline: auto;
+  border: 1px solid rgba(114,184,255,.2);
+  border-left: 3px solid rgba(214,178,94,.72);
+  border-radius: 8px;
+  background: rgba(255,255,255,.045);
+  padding: 12px;
+}
+
+.ebay-notification-topline,
+.ebay-notification-head,
+.ebay-notification-actions,
+.ebay-send-status-notice {
+  display: flex;
+  align-items: center;
+}
+
+.ebay-notification-topline {
+  justify-content: space-between;
+  gap: 8px;
+  color: rgba(242,243,245,.56);
+  font-size: .68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.ebay-notification-head {
+  gap: 10px;
+  min-width: 0;
+}
+
+.ebay-notification-head h4 {
+  color: rgba(242,243,245,.96);
+  font-size: .98rem;
+  font-weight: 900;
+  line-height: 1.25;
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.ebay-notification-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(214,178,94,.28);
+  border-radius: 8px;
+  background: rgba(214,178,94,.12);
+  color: var(--gold-2);
+}
+
+.ebay-notification-media {
+  width: min(240px, 100%);
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 8px;
+  background: rgba(0,0,0,.18);
+}
+
+.ebay-notification-media img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.ebay-notification-facts .context-fact-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.ebay-notification-body {
+  min-width: 0;
+  color: rgba(242,243,245,.86);
+  font-size: .84rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ebay-notification-body :is(h1, h2, h3, h4, h5, h6) {
+  color: rgba(242,243,245,.96);
+  font-size: .92rem;
+  line-height: 1.28;
+  margin: 10px 0 6px;
+}
+
+.ebay-notification-body p,
+.ebay-notification-body ul,
+.ebay-notification-body ol,
+.ebay-notification-body table {
+  margin: 8px 0 0;
+}
+
+.ebay-notification-body ul,
+.ebay-notification-body ol {
+  padding-left: 18px;
+}
+
+.ebay-notification-body table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.ebay-notification-body th,
+.ebay-notification-body td {
+  border: 1px solid rgba(255,255,255,.08);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ebay-notification-body a {
+  color: #9fd0ff;
+  font-weight: 850;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.ebay-notification-actions {
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.ebay-notification-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  border: 1px solid rgba(114,184,255,.24);
+  border-radius: 8px;
+  background: rgba(114,184,255,.1);
+  color: rgba(242,243,245,.92);
+  font-size: .74rem;
+  font-weight: 900;
+  padding: 0 10px;
+  text-decoration: none;
 }
 
 .ebay-classification-card {
@@ -4292,6 +4449,18 @@
 .ebay-draft-card.is-sent {
   border-color: rgba(37,211,102,.28);
   background: rgba(37,211,102,.07);
+}
+
+.ebay-send-status-notice {
+  width: fit-content;
+  gap: 7px;
+  min-height: 32px;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.ebay-send-status-notice strong {
+  color: rgba(242,243,245,.95);
 }
 
 .ebay-reply-composer {
@@ -4792,6 +4961,33 @@
 
   .ebay-message-bubble {
     width: min(100%, 640px);
+  }
+
+  .ebay-notification-card {
+    width: 100%;
+  }
+
+  .ebay-notification-topline,
+  .ebay-notification-head {
+    align-items: flex-start;
+  }
+
+  .ebay-notification-topline {
+    flex-direction: column;
+  }
+
+  .ebay-notification-facts .context-fact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ebay-notification-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ebay-notification-actions a {
+    justify-content: center;
+    width: 100%;
   }
 
   .ebay-draft-actions {
