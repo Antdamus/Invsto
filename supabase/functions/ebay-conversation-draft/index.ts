@@ -7,7 +7,7 @@ import {
 } from "../_shared/ebay-conversation-context.ts";
 
 type ServiceClient = ReturnType<typeof createClient>;
-type Mode = "view" | "generate" | "regenerate" | "improve" | "save_edit" | "discard";
+type Mode = "view" | "generate" | "regenerate" | "improve" | "save_edit" | "discard" | "approve" | "unapprove";
 
 type Input = {
   mode: Mode;
@@ -19,6 +19,7 @@ type Input = {
   draftText: string | null;
   improvementInstructions: string | null;
   operatorNotes: string | null;
+  approvalNotes: string | null;
 };
 
 type GroundingFact = {
@@ -170,7 +171,7 @@ function stringOrNull(value: unknown, maxLength = 240) {
 async function parseInput(req: Request): Promise<Input> {
   const body = await req.json().catch(() => ({}));
   const rawMode = stringOrNull(body?.mode, 80) || "view";
-  if (!["view", "generate", "regenerate", "improve", "save_edit", "discard"].includes(rawMode)) {
+  if (!["view", "generate", "regenerate", "improve", "save_edit", "discard", "approve", "unapprove"].includes(rawMode)) {
     throw new DraftError("invalid_mode", { status: 400, phase: "input" });
   }
   return {
@@ -185,6 +186,7 @@ async function parseInput(req: Request): Promise<Input> {
       : null,
     improvementInstructions: stringOrNull(body?.improvementInstructions || body?.improvement_instructions, 1000),
     operatorNotes: stringOrNull(body?.operatorNotes || body?.operator_notes, 1000),
+    approvalNotes: stringOrNull(body?.approvalNotes || body?.approval_notes || body?.operatorNotes || body?.operator_notes, 1000),
   };
 }
 
@@ -234,6 +236,67 @@ function previousDraftTargetMessageId(previousDraft: Record<string, any> | null)
   const groundingSummary = parseObject(previousDraft.grounding_summary);
   const targetMessage = parseObject(groundingSummary.target_message || inputSnapshot.target_message);
   return text(previousDraft.target_message_id || draftRequest.target_message_id || targetMessage.id, 120) || null;
+}
+
+function publicApproval(row: Record<string, any>) {
+  return {
+    id: row.id,
+    conversation_id: row.conversation_id || null,
+    target_message_id: row.target_message_id || null,
+    draft_id: row.draft_id || null,
+    approval_status: row.approval_status || "approval_removed",
+    approved_by: row.approved_by || null,
+    approved_by_email: row.approved_by_email || null,
+    approved_at: row.approved_at || null,
+    approval_notes: row.approval_notes || null,
+    removed_by: row.removed_by || null,
+    removed_by_email: row.removed_by_email || null,
+    removed_at: row.removed_at || null,
+    removal_notes: row.removal_notes || null,
+    previous_approval_id: row.previous_approval_id || null,
+    idempotency_key: row.idempotency_key || null,
+    created_at: row.created_at || null,
+  };
+}
+
+function latestApprovalEvent(approvals: Array<Record<string, any>> = []) {
+  return approvals
+    .slice()
+    .sort((left, right) => String(right.created_at || "").localeCompare(String(left.created_at || "")))[0] || null;
+}
+
+function publicApprovalState(
+  approvals: Array<Record<string, any>> = [],
+  staleness: Record<string, unknown> | null = null,
+  draft: Record<string, any> | null = null,
+) {
+  const history = approvals
+    .slice()
+    .sort((left, right) => String(right.created_at || "").localeCompare(String(left.created_at || "")))
+    .map(publicApproval);
+  const latest = history[0] || null;
+  const isApproved = latest?.approval_status === "approved";
+  const isCurrent = draft?.is_current === true && !draft?.discarded_at;
+  const validationStatus = String(draft?.validation_status || "");
+  const validationReady = validationStatus === "valid" || validationStatus === "warning";
+  const isStale = staleness?.is_stale === true || staleness?.isStale === true;
+
+  return {
+    status: isApproved ? "approved" : latest ? "approval_removed" : "not_approved",
+    is_approved: isApproved,
+    ready_to_send: isApproved && isCurrent && validationReady && !isStale,
+    latest_approval_id: isApproved ? latest.id : null,
+    approved_by: isApproved ? latest.approved_by : null,
+    approved_by_email: isApproved ? latest.approved_by_email : null,
+    approved_at: isApproved ? latest.approved_at : null,
+    approval_notes: isApproved ? latest.approval_notes : null,
+    idempotency_key: isApproved ? latest.idempotency_key : null,
+    removed_by: !isApproved && latest ? latest.removed_by : null,
+    removed_by_email: !isApproved && latest ? latest.removed_by_email : null,
+    removed_at: !isApproved && latest ? latest.removed_at : null,
+    removal_notes: !isApproved && latest ? latest.removal_notes : null,
+    history,
+  };
 }
 
 async function loadTargetMessage(
@@ -835,7 +898,11 @@ function staleStatus(row: Record<string, any>, latest: Record<string, any> | nul
   };
 }
 
-function publicDraft(row: Record<string, any>, staleness: Record<string, unknown> | null = null) {
+function publicDraft(
+  row: Record<string, any>,
+  staleness: Record<string, unknown> | null = null,
+  approvals: Array<Record<string, any>> = [],
+) {
   const grounding = parseObject(row.grounding_summary);
   const inputSnapshot = parseObject(row.input_snapshot);
   const targetMessage = parseObject(grounding.target_message || inputSnapshot.target_message);
@@ -868,6 +935,7 @@ function publicDraft(row: Record<string, any>, staleness: Record<string, unknown
     discarded_at: row.discarded_at || null,
     superseded_at: row.superseded_at || null,
     staleness,
+    approval: publicApprovalState(approvals, staleness, row),
   };
 }
 
@@ -884,12 +952,36 @@ async function loadDraftRows(supabase: ServiceClient, conversationId: string, li
   return (data || []) as Array<Record<string, any>>;
 }
 
+async function loadApprovalRows(supabase: ServiceClient, draftIds: string[]) {
+  const ids = Array.from(new Set(draftIds.filter(Boolean)));
+  if (!ids.length) return [] as Array<Record<string, any>>;
+  const { data, error } = await supabase
+    .from("ebay_message_approvals")
+    .select("id, conversation_id, target_message_id, draft_id, approval_status, approved_by, approved_by_email, approved_at, approval_notes, removed_by, removed_by_email, removed_at, removal_notes, previous_approval_id, idempotency_key, created_at")
+    .in("draft_id", ids)
+    .order("created_at", { ascending: false });
+  if (error) throw new DraftError("approval_lookup_failed", { phase: "approval_lookup", details: { message: error.message } });
+  return (data || []) as Array<Record<string, any>>;
+}
+
+function approvalsByDraftId(approvals: Array<Record<string, any>> = []) {
+  return approvals.reduce((map, approval) => {
+    const draftId = String(approval.draft_id || "");
+    if (!draftId) return map;
+    if (!map.has(draftId)) map.set(draftId, []);
+    map.get(draftId)?.push(approval);
+    return map;
+  }, new Map<string, Array<Record<string, any>>>());
+}
+
 async function viewDrafts(supabase: ServiceClient, conversationId: string) {
   const [rows, latest] = await Promise.all([
     loadDraftRows(supabase, conversationId, 20),
     loadCurrentLatestMessage(supabase, conversationId),
   ]);
-  const drafts = rows.map((row) => publicDraft(row, staleStatus(row, latest)));
+  const approvals = await loadApprovalRows(supabase, rows.map((row) => row.id));
+  const approvalMap = approvalsByDraftId(approvals);
+  const drafts = rows.map((row) => publicDraft(row, staleStatus(row, latest), approvalMap.get(String(row.id)) || []));
   return {
     ok: true,
     mode: "view",
@@ -1134,10 +1226,184 @@ async function generateDraft(
   };
 }
 
+function currentDraftText(draft: Record<string, any>) {
+  return safeBodyText(draft.final_text || draft.edited_text || draft.draft_text || "", MAX_OPERATOR_TEXT_CHARS);
+}
+
+function approvalTargetMessageId(draft: Record<string, any>) {
+  return text(draft.target_message_id || previousDraftTargetMessageId(draft), 120) || null;
+}
+
+async function latestApprovalForDraft(supabase: ServiceClient, draftId: string) {
+  const rows = await loadApprovalRows(supabase, [draftId]);
+  return latestApprovalEvent(rows);
+}
+
+async function insertApprovalRemoval(
+  supabase: ServiceClient,
+  draft: Record<string, any>,
+  admin: { userId: string | null; email: string | null },
+  note: string | null,
+  previousApproval: Record<string, any> | null = null,
+) {
+  const latestApproval = previousApproval || await latestApprovalForDraft(supabase, draft.id);
+  if (latestApproval?.approval_status !== "approved") return null;
+
+  const targetMessageId = approvalTargetMessageId(draft);
+  const nowIso = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("ebay_message_approvals")
+    .insert({
+      conversation_id: draft.conversation_id,
+      target_message_id: targetMessageId,
+      draft_id: draft.id,
+      approval_status: "approval_removed",
+      removed_by: admin.userId,
+      removed_by_email: admin.email,
+      removed_at: nowIso,
+      removal_notes: note,
+      previous_approval_id: latestApproval.id,
+      metadata: {
+        reason: "approval_removed",
+        previous_approval_id: latestApproval.id,
+      },
+    })
+    .select("*")
+    .single();
+  if (error || !data?.id) throw new DraftError("approval_remove_failed", { phase: "approval_write", details: { message: error?.message } });
+  return data as Record<string, any>;
+}
+
+async function saveDraftTextIfChanged(
+  supabase: ServiceClient,
+  draft: Record<string, any>,
+  draftText: string | null,
+  admin: { userId: string | null; email: string | null },
+  operatorNotes: string | null,
+) {
+  const nextText = draftText ? safeBodyText(draftText, MAX_OPERATOR_TEXT_CHARS) : currentDraftText(draft);
+  const existingText = currentDraftText(draft);
+  if (!nextText || nextText === existingText) return draft;
+
+  const { data, error } = await supabase
+    .from("ebay_conversation_response_drafts")
+    .update({
+      draft_status: "saved",
+      edited_text: nextText,
+      final_text: nextText,
+      operator_notes: operatorNotes,
+      updated_by: admin.userId,
+    })
+    .eq("id", draft.id)
+    .select("*")
+    .single();
+  if (error || !data?.id) throw new DraftError("draft_save_failed", { phase: "draft_write" });
+
+  await insertApprovalRemoval(supabase, data as Record<string, any>, admin, "Draft text changed after approval.");
+  return data as Record<string, any>;
+}
+
+async function approveDraft(
+  supabase: ServiceClient,
+  input: Input,
+  admin: { userId: string | null; email: string | null },
+) {
+  let draft = input.draftId
+    ? await loadDraftById(supabase, input.draftId)
+    : input.conversationId ? await loadCurrentDraft(supabase, input.conversationId) : null;
+  if (!draft?.id) throw new DraftError("draft_not_found", { status: 404, phase: "draft_lookup" });
+  if (draft.discarded_at || draft.is_current !== true) {
+    throw new DraftError("draft_not_current", { status: 409, phase: "approval" });
+  }
+
+  draft = await saveDraftTextIfChanged(supabase, draft, input.draftText, admin, input.operatorNotes);
+
+  const latest = await loadCurrentLatestMessage(supabase, draft.conversation_id);
+  const staleness = staleStatus(draft, latest);
+  if (staleness.is_stale === true) {
+    throw new DraftError("draft_stale_approval_blocked", { status: 409, phase: "approval", message: String(staleness.message || "Draft is stale.") });
+  }
+
+  const targetMessageId = approvalTargetMessageId(draft);
+  if (!targetMessageId) throw new DraftError("target_message_required", { status: 400, phase: "approval" });
+
+  const latestApproval = await latestApprovalForDraft(supabase, draft.id);
+  if (latestApproval?.approval_status === "approved") {
+    const result = await viewDrafts(supabase, draft.conversation_id);
+    return { ...result, mode: "approve", draft_id: draft.id, approval_id: latestApproval.id, already_approved: true };
+  }
+
+  const approvalId = crypto.randomUUID();
+  const idempotencyKey = await sha256Hex(stableStringify({
+    scope: "ebay_message_send",
+    version: "v1",
+    provider: "ebay_commerce_message",
+    conversation_id: draft.conversation_id,
+    target_message_id: targetMessageId,
+    draft_id: draft.id,
+    approval_id: approvalId,
+  }));
+  const nowIso = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("ebay_message_approvals")
+    .insert({
+      id: approvalId,
+      conversation_id: draft.conversation_id,
+      target_message_id: targetMessageId,
+      draft_id: draft.id,
+      approval_status: "approved",
+      approved_by: admin.userId,
+      approved_by_email: admin.email,
+      approved_at: nowIso,
+      approval_notes: input.approvalNotes,
+      idempotency_key: idempotencyKey,
+      metadata: {
+        provider: "ebay_commerce_message",
+        draft_version: draft.draft_version,
+        validation_status: draft.validation_status,
+        source_mode: draft.source_mode,
+      },
+    })
+    .select("*")
+    .single();
+  if (error || !data?.id) throw new DraftError("approval_insert_failed", { phase: "approval_write", details: { message: error?.message } });
+
+  const result = await viewDrafts(supabase, draft.conversation_id);
+  return { ...result, mode: "approve", draft_id: draft.id, approval_id: data.id };
+}
+
+async function unapproveDraft(
+  supabase: ServiceClient,
+  input: Input,
+  admin: { userId: string | null; email: string | null },
+) {
+  const draft = input.draftId
+    ? await loadDraftById(supabase, input.draftId)
+    : input.conversationId ? await loadCurrentDraft(supabase, input.conversationId) : null;
+  if (!draft?.id) throw new DraftError("draft_not_found", { status: 404, phase: "draft_lookup" });
+
+  const latestApproval = await latestApprovalForDraft(supabase, draft.id);
+  const removal = await insertApprovalRemoval(
+    supabase,
+    draft,
+    admin,
+    input.approvalNotes || input.operatorNotes || "Approval removed by operator.",
+    latestApproval,
+  );
+  const result = await viewDrafts(supabase, draft.conversation_id);
+  return {
+    ...result,
+    mode: "unapprove",
+    draft_id: draft.id,
+    approval_removed_id: removal?.id || null,
+    already_unapproved: !removal,
+  };
+}
+
 async function saveEdit(
   supabase: ServiceClient,
   input: Input,
-  admin: { userId: string | null },
+  admin: { userId: string | null; email: string | null },
 ) {
   if (!input.draftText) throw new DraftError("draft_text_required", { status: 400, phase: "input" });
   const draft = input.draftId
@@ -1158,6 +1424,7 @@ async function saveEdit(
     .select("*")
     .single();
   if (error || !data?.id) throw new DraftError("draft_save_failed", { phase: "draft_write" });
+  await insertApprovalRemoval(supabase, data as Record<string, any>, admin, "Draft edited after approval.");
   const latest = await loadCurrentLatestMessage(supabase, data.conversation_id);
   return {
     ok: true,
@@ -1171,7 +1438,7 @@ async function saveEdit(
 async function discardDraft(
   supabase: ServiceClient,
   input: Input,
-  admin: { userId: string | null },
+  admin: { userId: string | null; email: string | null },
 ) {
   const draft = input.draftId
     ? await loadDraftById(supabase, input.draftId)
@@ -1190,6 +1457,7 @@ async function discardDraft(
     .select("*")
     .single();
   if (error || !data?.id) throw new DraftError("draft_discard_failed", { phase: "draft_write" });
+  await insertApprovalRemoval(supabase, data as Record<string, any>, admin, "Draft discarded after approval.");
   const latest = await loadCurrentLatestMessage(supabase, data.conversation_id);
   return {
     ok: true,
@@ -1244,6 +1512,8 @@ serve(async (req) => {
     }
     if (input.mode === "save_edit") return json(req, 200, await saveEdit(supabase, input, admin));
     if (input.mode === "discard") return json(req, 200, await discardDraft(supabase, input, admin));
+    if (input.mode === "approve") return json(req, 200, await approveDraft(supabase, input, admin));
+    if (input.mode === "unapprove") return json(req, 200, await unapproveDraft(supabase, input, admin));
     if (["generate", "regenerate", "improve"].includes(input.mode)) {
       return json(req, 200, await generateDraft(supabase, rpcSupabase, input, admin));
     }

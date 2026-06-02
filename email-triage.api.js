@@ -779,6 +779,7 @@
     const pipelineEnvelope = normalizeEnvelope(payload.pipeline, "pipeline_diagnostics");
     const liveSyncEnvelope = normalizeEnvelope(payload.liveSync, "live_sync_status");
     const mailboxEnvelope = normalizeEnvelope(payload.mailbox, "mailbox_status");
+    const ebay = payload.ebay && typeof payload.ebay === "object" ? payload.ebay : null;
     const pipeline = pipelineEnvelope.data || {};
     const liveSync = liveSyncEnvelope.data || {};
     const mailbox = payload.mailbox && typeof payload.mailbox === "object" ? payload.mailbox : {};
@@ -800,9 +801,10 @@
     }) || null;
 
     return {
-      ok: pipelineEnvelope.ok !== false && liveSyncEnvelope.ok !== false && mailboxEnvelope.ok !== false && mailbox.ok !== false,
+      ok: pipelineEnvelope.ok !== false && liveSyncEnvelope.ok !== false && mailboxEnvelope.ok !== false && mailbox.ok !== false && (!ebay || ebay.ok !== false),
       mode: "operational_dashboard",
       generated_at: new Date().toISOString(),
+      ebay,
       mailbox: {
         status: connection.status || connection.mailbox_status || "unknown",
         connected: Boolean(connection.mailbox_email || connection.status || connection.mailbox_status),
@@ -1014,6 +1016,198 @@
     readError.code = error.code || fallbackCode;
     readError.detail = error.message || "";
     throw readError;
+  }
+
+  function startOfLocalDayIso() {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    return date.toISOString();
+  }
+
+  async function countSupabaseRows(query, fallbackCode) {
+    const { count, error } = await query;
+    throwSupabaseReadError(error, fallbackCode);
+    return Number(count || 0);
+  }
+
+  function latestApprovalByDraft(approvals = []) {
+    return approvals.reduce((map, approval) => {
+      const draftId = String(approval?.draft_id || "");
+      if (!draftId) return map;
+      const previous = map.get(draftId);
+      if (!previous || String(approval.created_at || "") > String(previous.created_at || "")) {
+        map.set(draftId, approval);
+      }
+      return map;
+    }, new Map());
+  }
+
+  function normalizeEbayActivityEvent(row = {}) {
+    const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    const actor = row.actor_email || row.actor_user_id || null;
+    return {
+      id: row.id || null,
+      event_type: row.event_type || "recorded",
+      status: row.status || "recorded",
+      created_at: row.created_at || null,
+      initiated_by: actor,
+      actor_user_id: row.actor_user_id || null,
+      actor_email: row.actor_email || null,
+      conversation_id: row.conversation_id || null,
+      target_message_id: row.target_message_id || null,
+      draft_id: row.draft_id || null,
+      approval_id: row.approval_id || null,
+      send_attempt_id: row.send_attempt_id || null,
+      classification_id: row.classification_id || null,
+      saved_view_id: row.saved_view_id || null,
+      sync_run_id: row.sync_run_id || null,
+      title: row.title || null,
+      reason: row.detail || row.title || null,
+      payload: {
+        ...metadata,
+        conversation_id: row.conversation_id || null,
+        target_message_id: row.target_message_id || null,
+        draft_id: row.draft_id || null,
+        approval_id: row.approval_id || null,
+        send_attempt_id: row.send_attempt_id || null,
+        classification_id: row.classification_id || null,
+        saved_view_id: row.saved_view_id || null,
+        sync_run_id: row.sync_run_id || null,
+        safety: {
+          ebay_mutation_performed: false,
+          outlook_mutation_performed: false,
+          automatic_responses_sent: 0,
+        },
+      },
+      metadata,
+    };
+  }
+
+  function buildEbayTimeline(events = []) {
+    return events.slice(0, 20).map((event) => ({
+      id: event.id,
+      event_type: event.event_type,
+      title: event.title || event.event_type,
+      detail: event.reason || "",
+      actor: event.actor_email || event.initiated_by || null,
+      created_at: event.created_at,
+      conversation_id: event.conversation_id || null,
+      draft_id: event.draft_id || null,
+      status: event.status || "recorded",
+    }));
+  }
+
+  async function fetchEbayOperationsDashboard(context) {
+    await currentSession(context, "eBay operations dashboard");
+    const todayIso = startOfLocalDayIso();
+    const client = context.client;
+
+    const [
+      conversationsToday,
+      unreadConversations,
+      classificationsResult,
+      draftsResult,
+      approvalsResult,
+      attemptsResult,
+      eventsResult,
+    ] = await Promise.all([
+      countSupabaseRows(
+        client
+          .from("ebay_conversations")
+          .select("id", { count: "exact", head: true })
+          .gte("first_seen_at", todayIso),
+        "ebay_conversations_today_count_failed",
+      ),
+      countSupabaseRows(
+        client
+          .from("ebay_conversations")
+          .select("id", { count: "exact", head: true })
+          .gt("unread_count", 0),
+        "ebay_unread_conversation_count_failed",
+      ),
+      client
+        .from("ebay_conversation_classifications")
+        .select("id, conversation_id, priority, response_need, topic_tags, buyer_flags, risk_flags, created_at")
+        .eq("is_current", true)
+        .order("created_at", { ascending: false })
+        .limit(1000),
+      client
+        .from("ebay_conversation_response_drafts")
+        .select("id, conversation_id, target_message_id, draft_status, validation_status, is_current, created_at, updated_at, discarded_at")
+        .order("created_at", { ascending: false })
+        .limit(1000),
+      client
+        .from("ebay_message_approvals")
+        .select("id, conversation_id, target_message_id, draft_id, approval_status, approved_by_email, approved_at, removed_at, created_at")
+        .order("created_at", { ascending: false })
+        .limit(1000),
+      client
+        .from("ebay_message_send_attempts")
+        .select("id, conversation_id, target_message_id, draft_id, approval_id, attempt_status, provider, error_message, sent_at, created_at")
+        .order("created_at", { ascending: false })
+        .limit(100),
+      client
+        .from("ebay_message_activity_events")
+        .select("id, event_type, status, actor_user_id, actor_email, conversation_id, target_message_id, draft_id, approval_id, send_attempt_id, classification_id, saved_view_id, sync_run_id, title, detail, metadata, created_at")
+        .order("created_at", { ascending: false })
+        .limit(60),
+    ]);
+
+    throwSupabaseReadError(classificationsResult.error, "ebay_classification_dashboard_failed");
+    throwSupabaseReadError(draftsResult.error, "ebay_draft_dashboard_failed");
+    throwSupabaseReadError(approvalsResult.error, "ebay_approval_dashboard_failed");
+    throwSupabaseReadError(attemptsResult.error, "ebay_send_attempt_dashboard_failed");
+    throwSupabaseReadError(eventsResult.error, "ebay_activity_dashboard_failed");
+
+    const classifications = Array.isArray(classificationsResult.data) ? classificationsResult.data : [];
+    const drafts = Array.isArray(draftsResult.data) ? draftsResult.data : [];
+    const approvals = Array.isArray(approvalsResult.data) ? approvalsResult.data : [];
+    const attempts = Array.isArray(attemptsResult.data) ? attemptsResult.data : [];
+    const events = (Array.isArray(eventsResult.data) ? eventsResult.data : []).map(normalizeEbayActivityEvent);
+    const latestApproval = latestApprovalByDraft(approvals);
+    const currentDrafts = drafts.filter((draft) => draft.is_current === true && !draft.discarded_at && draft.draft_status !== "discarded");
+    const approvedDrafts = currentDrafts.filter((draft) => latestApproval.get(String(draft.id || ""))?.approval_status === "approved");
+    const awaitingApproval = currentDrafts.filter((draft) => latestApproval.get(String(draft.id || ""))?.approval_status !== "approved");
+    const todayDrafts = drafts.filter((draft) => String(draft.created_at || "") >= todayIso);
+    const topicIncludes = (row, value) => Array.isArray(row.topic_tags) && row.topic_tags.includes(value);
+    const buyerIncludes = (row, value) => Array.isArray(row.buyer_flags) && row.buyer_flags.includes(value);
+    const riskIncludes = (row, value) => Array.isArray(row.risk_flags) && row.risk_flags.includes(value);
+
+    return {
+      ok: true,
+      generated_at: new Date().toISOString(),
+      metrics: {
+        conversations_today: conversationsToday,
+        unread_conversations: unreadConversations,
+        needs_reply: classifications.filter((row) => ["reply_today", "reply_later"].includes(row.response_need)).length,
+        high_priority: classifications.filter((row) => row.priority === "high").length,
+        returns: classifications.filter((row) => topicIncludes(row, "return")).length,
+        refund_risk: classifications.filter((row) => riskIncludes(row, "refund_risk") || topicIncludes(row, "refund_request")).length,
+        vip_buyers: classifications.filter((row) => buyerIncludes(row, "vip_buyer")).length,
+        drafts_generated: todayDrafts.length,
+        drafts_awaiting_approval: awaitingApproval.length,
+        approved_drafts: approvedDrafts.length,
+        send_attempts_created: attempts.length,
+        send_attempts_failed: attempts.filter((attempt) => attempt.attempt_status === "failed").length,
+        send_attempts_succeeded: attempts.filter((attempt) => attempt.attempt_status === "succeeded").length,
+      },
+      approval_queue: {
+        current_drafts: currentDrafts.length,
+        awaiting_approval: awaitingApproval.length,
+        approved_ready: approvedDrafts.length,
+        approval_events: approvals.length,
+      },
+      send_safety: {
+        sends_enabled: false,
+        ebay_mutation_performed: false,
+        outlook_mutation_performed: false,
+        automatic_responses_sent: 0,
+        duplicate_success_guard: "one_success_per_idempotency_key",
+      },
+      timeline: buildEbayTimeline(events),
+      recent_operational_events: events,
+      recent_send_attempts: attempts,
+    };
   }
 
   function compactEbayText(value, maxLength = 1000) {
@@ -1534,6 +1728,7 @@
         draftText: values.draftText || undefined,
         improvementInstructions: values.improvementInstructions || undefined,
         operatorNotes: values.operatorNotes || undefined,
+        approvalNotes: values.approvalNotes || values.operatorNotes || undefined,
       }),
     }, TIMEOUTS.ebayConversationDraft);
   }
@@ -1720,7 +1915,7 @@
 
   async function fetchOperationalDashboard(context) {
     const session = await currentSession(context, "Operational dashboard");
-    const [mailboxResult, pipelineResult, liveSyncResult] = await Promise.allSettled([
+    const [mailboxResult, pipelineResult, liveSyncResult, ebayResult] = await Promise.allSettled([
       edgeFetchWithTimeout(STATUS_FUNCTION, session, { method: "GET" }, TIMEOUTS.operationalDashboard),
       edgeFetchWithTimeout(SYNC_FUNCTION, session, {
         method: "POST",
@@ -1730,12 +1925,23 @@
         method: "POST",
         body: JSON.stringify({ mode: "live_sync_status" }),
       }, TIMEOUTS.operationalDashboard),
+      fetchEbayOperationsDashboard(context),
     ]);
     const mailbox = mailboxResult.status === "fulfilled" ? mailboxResult.value : mailboxResult.reason?.envelope || toSafeErrorEnvelope(mailboxResult.reason, "mailbox_status_failed");
     const pipeline = pipelineResult.status === "fulfilled" ? pipelineResult.value : pipelineResult.reason?.envelope || toSafeErrorEnvelope(pipelineResult.reason, "pipeline_diagnostics_failed");
     const liveSync = liveSyncResult.status === "fulfilled" ? liveSyncResult.value : liveSyncResult.reason?.envelope || toSafeErrorEnvelope(liveSyncResult.reason, "live_sync_status_failed");
+    const ebay = ebayResult.status === "fulfilled"
+      ? ebayResult.value
+      : {
+        ok: false,
+        error: ebayResult.reason?.code || ebayResult.reason?.message || "ebay_operations_dashboard_failed",
+        generated_at: new Date().toISOString(),
+        metrics: {},
+        timeline: [],
+        recent_operational_events: [],
+      };
 
-    return normalizeOperationalDashboardPayload({ mailbox, pipeline, liveSync });
+    return normalizeOperationalDashboardPayload({ mailbox, pipeline, liveSync, ebay });
   }
 
   window.EmailTriageApi = {

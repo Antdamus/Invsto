@@ -3460,6 +3460,8 @@
       improve: "Draft improved and saved as the current suggestion. Nothing was sent.",
       save_edit: "Draft edits saved. Nothing was sent.",
       discard: "Draft discarded and preserved in history. Nothing was sent.",
+      approve: "Draft approved as ready for controlled send. Nothing was sent.",
+      unapprove: "Draft approval removed. Nothing was sent.",
     };
     return labels[mode] || "Draft action completed. Nothing was sent.";
   }
@@ -3481,15 +3483,55 @@
 
   function renderEbayDraftMetadataGrid(draft) {
     const stale = draft ? stalenessState(draft) : null;
+    const approval = draft?.approval || {};
     return `
       <dl class="ebay-draft-metadata-grid">
         <div><dt>Status</dt><dd>${escapeHtml(humanizeValue(draft?.draft_status || "generated"))}</dd></div>
+        <div><dt>Approval</dt><dd>${escapeHtml(humanizeValue(approval.status || "not_approved"))}</dd></div>
         <div><dt>Validation</dt><dd>${escapeHtml(humanizeValue(draft?.validation_status || "not_validated"))}</dd></div>
         <div><dt>Confidence</dt><dd>${escapeHtml(draft?.confidence == null ? "--" : formatConfidence(draft.confidence))}</dd></div>
         <div><dt>Stale Status</dt><dd>${escapeHtml(stale?.message || "Draft staleness unavailable.")}</dd></div>
         <div><dt>Target Message</dt><dd>${escapeHtml(draft?.target_message_id || "Unavailable")}</dd></div>
         <div><dt>Version</dt><dd>${escapeHtml(draft?.draft_version || 1)}</dd></div>
       </dl>
+    `;
+  }
+
+  function approvalActorLabel(approval = {}) {
+    return approval.approved_by_email || approval.removed_by_email || approval.approved_by || approval.removed_by || "Unknown operator";
+  }
+
+  function renderEbayDraftApprovalHistory(draft) {
+    const approval = draft?.approval || {};
+    const history = safeArray(approval.history);
+    const approved = approval.is_approved === true;
+    const ready = approval.ready_to_send === true;
+    return `
+      <details class="ebay-draft-approval-history">
+        <summary>
+          <span>Approval Audit</span>
+          <span class="ebay-classification-head-badges">
+            ${renderBadge(approved ? "Approved" : "Not approved", approved ? "success" : "muted")}
+            ${ready ? renderBadge("Ready to send", "success") : ""}
+            <i data-lucide="chevron-down"></i>
+          </span>
+        </summary>
+        <div class="ebay-draft-approval-grid">
+          <div><span>Approved By</span><strong>${escapeHtml(approval.approved_by_email || approval.approved_by || "--")}</strong></div>
+          <div><span>Approved At</span><strong>${escapeHtml(approval.approved_at ? formatContextDate(approval.approved_at) : "--")}</strong></div>
+          <div><span>Send Key</span><strong>${escapeHtml(approval.idempotency_key ? compactId(approval.idempotency_key) : "--")}</strong></div>
+        </div>
+        <div class="ebay-draft-approval-list">
+          ${history.length ? history.slice(0, 8).map((event) => `
+            <div class="ebay-draft-approval-row">
+              <strong>${escapeHtml(humanizeValue(event.approval_status || "approval_event"))}</strong>
+              <span>${escapeHtml(approvalActorLabel(event))}</span>
+              <time>${escapeHtml(formatContextDate(event.created_at || event.approved_at || event.removed_at))}</time>
+              ${event.approval_notes || event.removal_notes ? `<p>${escapeHtml(event.approval_notes || event.removal_notes)}</p>` : ""}
+            </div>
+          `).join("") : `<div class="classification-empty matched-context-empty is-quiet">No approval events yet.</div>`}
+        </div>
+      </details>
     `;
   }
 
@@ -3539,6 +3581,9 @@
     const message = adminClassificationState.ebayConversationDraftActionMessagesById?.[conversation.id];
     const stale = draft ? stalenessState(draft) : null;
     const draftText = ebayDraftDisplayText(draft);
+    const approval = draft?.approval || {};
+    const approved = approval.is_approved === true;
+    const readyToSend = approval.ready_to_send === true;
     const validationVariant = draft?.validation_status === "valid"
       ? "success"
       : draft?.validation_status === "warning" ? "warning" : draft ? "muted" : "muted";
@@ -3587,6 +3632,8 @@
           <span class="ebay-classification-head-badges">
             ${renderBadge(humanizeValue(draft.draft_status || "generated"), "category")}
             ${renderBadge(humanizeValue(draft.validation_status || "not_validated"), validationVariant)}
+            ${approved ? renderBadge("Approved", "success") : renderBadge("Awaiting approval", "warning")}
+            ${readyToSend ? renderBadge("Ready to send", "success") : ""}
             ${renderBadge("Not sent", "muted")}
           </span>
         </div>
@@ -3612,6 +3659,17 @@
               <i data-lucide="${isActionLoading ? "loader-circle" : "save"}"></i>
               Save Draft
             </button>
+            ${approved ? `
+              <button type="button" class="secondary-btn" data-ebay-draft-action="unapprove" ${isActionLoading ? "disabled" : ""}>
+                <i data-lucide="shield-x"></i>
+                Unapprove Draft
+              </button>
+            ` : `
+              <button type="button" class="secondary-btn" data-ebay-draft-action="approve" ${isActionLoading ? "disabled" : ""}>
+                <i data-lucide="shield-check"></i>
+                Approve Draft
+              </button>
+            `}
             <button type="button" class="secondary-btn" data-ebay-draft-action="improve" ${isActionLoading ? "disabled" : ""}>
               <i data-lucide="wand-sparkles"></i>
               Improve My Draft
@@ -3632,7 +3690,9 @@
           <span>${escapeHtml(formatContextDate(draft.updated_at || draft.created_at))}</span>
           <span>Confidence ${escapeHtml(draft.confidence == null ? "--" : formatConfidence(draft.confidence))}</span>
           <span>Target ${escapeHtml(draft.target_message_id ? compactId(draft.target_message_id) : "Unavailable")}</span>
+          ${approved ? `<span>Approved ${escapeHtml(formatContextDate(approval.approved_at))}</span>` : ""}
         </div>
+        ${renderEbayDraftApprovalHistory(draft)}
         ${renderEbayDraftGrounding(draft)}
       </section>
     `;
@@ -4584,6 +4644,7 @@
           draftText: formData ? String(formData.get("draftText") || "") : "",
           improvementInstructions: formData ? String(formData.get("improvementInstructions") || "") : "",
           operatorNotes: formData ? String(formData.get("operatorNotes") || "") : "",
+          approvalNotes: formData ? String(formData.get("operatorNotes") || "") : "",
         });
         return;
       }
@@ -4644,8 +4705,10 @@
   }
 
   function operationalEventById(id, state = triageStore.getState()) {
-    const events = Array.isArray(state.operationalDashboardSnapshot?.recent_operational_events)
-      ? state.operationalDashboardSnapshot.recent_operational_events
+    const events = Array.isArray(state.operationalDashboardSnapshot?.ebay?.recent_operational_events)
+      ? state.operationalDashboardSnapshot.ebay.recent_operational_events
+      : Array.isArray(state.operationalDashboardSnapshot?.recent_operational_events)
+        ? state.operationalDashboardSnapshot.recent_operational_events
       : [];
     return events.find((event) => String(event.id || "") === String(id || "")) || null;
   }

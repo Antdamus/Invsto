@@ -68,10 +68,11 @@
 
   function operationMeta(event = {}, utils = window.EmailTriageRenderUtils) {
     if (!event) return "--";
+    const actor = event.initiated_by || event.actor_email || event.actor_user_id || "";
     const pieces = [
       event.id ? `id ${utils.compactId(event.id)}` : "",
       event.created_at ? utils.formatDateTime(event.created_at) : "",
-      event.initiated_by ? `by ${event.initiated_by}` : "",
+      actor ? `by ${actor}` : "",
     ].filter(Boolean);
     return pieces.join(" · ") || "--";
   }
@@ -117,7 +118,9 @@
   }
 
   function eventPayload(event = {}) {
-    return event.payload && typeof event.payload === "object" ? event.payload : {};
+    if (event.payload && typeof event.payload === "object") return event.payload;
+    if (event.metadata && typeof event.metadata === "object") return event.metadata;
+    return {};
   }
 
   function numberMetric(source = {}, keys = []) {
@@ -147,10 +150,27 @@
     const eventType = String(event.event_type || "");
     const title = operationTitle(event, utils);
     const status = event.status || payload.status || "recorded";
+    const ebayDescriptions = {
+      conversation_synced: "Canonical eBay conversation data was refreshed into Supabase.",
+      conversation_classified: "AI classification was stored for an eBay conversation.",
+      classification_changed: "An operator changed the stored eBay classification.",
+      draft_generated: "AI generated an eBay reply draft.",
+      draft_improved: "AI improved an existing eBay reply draft.",
+      draft_edited: "An operator edited the saved eBay draft.",
+      draft_discarded: "An operator discarded the eBay draft.",
+      draft_approved: "An operator approved the draft as ready for future controlled send.",
+      approval_removed: "An operator removed draft approval.",
+      send_attempt_created: "A future send attempt row was created.",
+      send_attempt_failed: "A send attempt failed.",
+      send_attempt_succeeded: "A send attempt succeeded.",
+      smart_folder_created: "An eBay smart folder was created.",
+      smart_folder_updated: "An eBay smart folder was updated.",
+    };
     const description = firstValue([
       event.reason,
       payload.reason,
       event.replay_source ? `Replay source: ${event.replay_source}` : "",
+      ebayDescriptions[eventType],
       eventType === "rematch_existing" ? "Deterministic link rematch completed for an explicit scope." : "",
       eventType === "sync_import_approved" ? "Approved Outlook messages were imported into the local mailbox." : "",
       eventType === "run_live_refresh" ? "Bounded preview, import, processing, and classification pass." : "",
@@ -195,6 +215,42 @@
         metricText(numberMetric(payload.import || {}, ["imported_count"]) || counters.imported_count, "imported"),
         metricText(numberMetric(payload.processing || {}, ["processed_count"]) || counters.processed_count, "processed"),
         metricText(numberMetric(payload.classification || {}, ["classified_count"]) || counters.classified_count, "classified"),
+      ],
+      conversation_synced: [
+        payload.unread_count !== undefined ? metricText(payload.unread_count, "unread") : "",
+        payload.latest_message_id ? `latest ${utils.compactId(payload.latest_message_id)}` : "",
+      ],
+      conversation_classified: [
+        payload.priority ? utils.humanizeValue(payload.priority) : "",
+        payload.response_need ? utils.humanizeValue(payload.response_need) : "",
+        Array.isArray(payload.topic_tags) ? metricText(payload.topic_tags.length, "topics") : "",
+      ],
+      draft_generated: [
+        payload.draft_version ? `v${payload.draft_version}` : "",
+        payload.validation_status ? utils.humanizeValue(payload.validation_status) : "",
+      ],
+      draft_improved: [
+        payload.draft_version ? `v${payload.draft_version}` : "",
+        payload.validation_status ? utils.humanizeValue(payload.validation_status) : "",
+      ],
+      draft_approved: [
+        payload.idempotency_key ? "idempotency ready" : "",
+        payload.approval_status ? utils.humanizeValue(payload.approval_status) : "",
+      ],
+      approval_removed: [
+        payload.previous_approval_id ? `prev ${utils.compactId(payload.previous_approval_id)}` : "",
+      ],
+      send_attempt_created: [
+        payload.provider ? utils.humanizeValue(payload.provider) : "",
+        payload.attempt_sequence ? `attempt ${payload.attempt_sequence}` : "",
+      ],
+      send_attempt_failed: [
+        payload.provider ? utils.humanizeValue(payload.provider) : "",
+        payload.attempt_sequence ? `attempt ${payload.attempt_sequence}` : "",
+      ],
+      send_attempt_succeeded: [
+        payload.provider ? utils.humanizeValue(payload.provider) : "",
+        payload.provider_message_id ? `provider ${utils.compactId(payload.provider_message_id)}` : "",
       ],
     };
     const genericMetrics = [
@@ -361,7 +417,7 @@
       <div class="operational-detail-meta">
         ${renderMetricCard("Event id", event.id || "Not recorded for this event", "", utils)}
         ${renderMetricCard("Timestamp", event.created_at ? utils.formatDateTime(event.created_at) : null, "", utils)}
-        ${renderMetricCard("Actor", event.initiated_by || "Not recorded for this event", "", utils)}
+        ${renderMetricCard("Actor", event.initiated_by || event.actor_email || event.actor_user_id || "Not recorded for this event", "", utils)}
         ${renderMetricCard("Status", summary.status, "", utils)}
       </div>
       <div class="operational-detail-metric-grid">
@@ -444,6 +500,124 @@
     return `<div class="classification-empty operational-empty">${utils.escapeHtml(text)}</div>`;
   }
 
+  function renderEbayTimelineRows(timeline = [], utils = window.EmailTriageRenderUtils) {
+    if (!timeline.length) {
+      return `<div class="classification-empty operational-empty">No eBay activity has been recorded yet.</div>`;
+    }
+
+    return timeline.slice(0, 14).map((item) => `
+      <div class="operational-row">
+        <span>${utils.escapeHtml(item.created_at ? utils.formatDateTime(item.created_at) : "--")}</span>
+        <strong>${utils.escapeHtml(item.title || utils.humanizeValue(item.event_type || "activity"))}</strong>
+        <em>${utils.escapeHtml(item.detail || item.actor || item.conversation_id || "--")}</em>
+      </div>
+    `).join("");
+  }
+
+  function renderEbayOperationalDashboard(state = {}, snapshot = {}, utils = window.EmailTriageRenderUtils) {
+    const ebay = snapshot.ebay || {};
+    const metrics = ebay.metrics || {};
+    const safety = ebay.send_safety || {};
+    const approvalQueue = ebay.approval_queue || {};
+    const events = Array.isArray(ebay.recent_operational_events) ? ebay.recent_operational_events : [];
+    const blocked = ebay.ok === false || Number(metrics.send_attempts_failed || 0) > 0 || safety.ebay_mutation_performed === true || safety.automatic_responses_sent > 0;
+
+    return `
+      <div class="operational-dashboard-status">
+        <span>${state.operationalDashboardLoading ? "Refreshing eBay operations" : `eBay operations refreshed ${utils.formatDateTime(state.operationalDashboardUpdatedAt || ebay.generated_at || snapshot.generated_at)}`}</span>
+        ${state.operationalDashboardError ? dashboardBadge(`Error: ${state.operationalDashboardError}`, "danger", utils) : ""}
+        ${ebay.ok === false ? dashboardBadge(ebay.error || "eBay dashboard partial", "warning", utils) : ""}
+        ${dashboardBadge(blocked ? "Attention needed" : "No-send visibility mode", blocked ? "warning" : "success", utils)}
+      </div>
+
+      <div class="operational-dashboard-grid">
+        <section class="operational-panel operational-panel-wide">
+          <div class="operational-panel-head">
+            <strong>eBay Message Metrics</strong>
+            ${dashboardBadge("Canonical", "success", utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Conversations today", value: metrics.conversations_today },
+              { label: "Unread conversations", value: metrics.unread_conversations },
+              { label: "Needs reply", value: metrics.needs_reply },
+              { label: "High priority", value: metrics.high_priority },
+              { label: "Returns", value: metrics.returns },
+              { label: "Refund risk", value: metrics.refund_risk },
+              { label: "VIP buyers", value: metrics.vip_buyers },
+              { label: "Drafts generated today", value: metrics.drafts_generated },
+            ], utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel">
+          <div class="operational-panel-head">
+            <strong>Approval Queue</strong>
+            ${dashboardBadge(`${approvalQueue.approved_ready || 0} approved`, Number(approvalQueue.approved_ready || 0) ? "success" : "muted", utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Current drafts", value: approvalQueue.current_drafts },
+              { label: "Awaiting approval", value: metrics.drafts_awaiting_approval },
+              { label: "Approved drafts", value: metrics.approved_drafts },
+              { label: "Approval events", value: approvalQueue.approval_events },
+            ], utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel">
+          <div class="operational-panel-head">
+            <strong>Send Safety</strong>
+            ${dashboardBadge("No send control", "success", utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Sends enabled", html: dashboardBadge(safety.sends_enabled ? "true" : "false", safety.sends_enabled ? "danger" : "success", utils) },
+              { label: "Send attempts", value: metrics.send_attempts_created },
+              { label: "Failed attempts", value: metrics.send_attempts_failed },
+              { label: "Succeeded attempts", value: metrics.send_attempts_succeeded },
+            ], utils)}
+          </div>
+          ${renderOperationalNote(`Duplicate guard: ${utils.humanizeValue(safety.duplicate_success_guard || "one_success_per_idempotency_key")}.`, utils)}
+        </section>
+
+        <section class="operational-panel operational-panel-wide">
+          <div class="operational-panel-head">
+            <strong>Activity Timeline</strong>
+            ${dashboardBadge(`${(ebay.timeline || []).length} visible`, "muted", utils)}
+          </div>
+          <div class="operational-activity-list">
+            ${renderEbayTimelineRows(ebay.timeline || [], utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel operational-panel-wide">
+          <div class="operational-panel-head">
+            <strong>Recent eBay Activity</strong>
+            ${dashboardBadge(`${events.length} events`, "muted", utils)}
+          </div>
+          <div class="operational-event-list">
+            ${renderOperationalEventRows(events, utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel operational-panel-wide">
+          <div class="operational-panel-head">
+            <strong>Safety Flags</strong>
+            ${dashboardBadge("Audit only", "success", utils)}
+          </div>
+          <div class="operational-safety-strip">
+            ${dashboardBadge(`eBay mutation: ${safety.ebay_mutation_performed ? "true" : "false"}`, safety.ebay_mutation_performed ? "danger" : "success", utils)}
+            ${dashboardBadge(`Outlook mutation: ${safety.outlook_mutation_performed ? "true" : "false"}`, safety.outlook_mutation_performed ? "danger" : "success", utils)}
+            ${dashboardBadge(`Auto-send: ${safety.automatic_responses_sent || 0}`, safety.automatic_responses_sent ? "danger" : "success", utils)}
+            ${dashboardBadge(`Sends enabled: ${safety.sends_enabled ? "true" : "false"}`, safety.sends_enabled ? "danger" : "success", utils)}
+          </div>
+        </section>
+      </div>
+      ${renderOperationalEventDetailDrawer(state, { recent_operational_events: events }, utils)}
+    `;
+  }
+
   function renderOperationalDashboard(state = {}, utils = window.EmailTriageRenderUtils) {
     const snapshot = state.operationalDashboardSnapshot;
     if (state.operationalDashboardLoading && !snapshot) {
@@ -451,6 +625,9 @@
     }
     if (!snapshot) {
       return `<div class="workspace-status operational-dashboard-status">Refresh dashboard to load operational visibility.</div>`;
+    }
+    if (snapshot.ebay) {
+      return renderEbayOperationalDashboard(state, snapshot, utils);
     }
 
     const mailbox = snapshot.mailbox || {};
