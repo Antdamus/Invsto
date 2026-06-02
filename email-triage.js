@@ -4394,6 +4394,14 @@
             <span>Message</span>
             <textarea name="draftText" rows="4" placeholder="Type a message to the buyer..." ${isActionLoading ? "disabled" : ""}>${escapeHtml(draftText)}</textarea>
           </label>
+          <label class="ebay-draft-field ebay-draft-notes-field">
+            <span>Operator Notes</span>
+            <input name="operatorNotes" type="text" value="${escapeHtml(draft?.operator_notes || "")}" placeholder="Optional internal note" ${isActionLoading ? "disabled" : ""} />
+          </label>
+          <label class="ebay-draft-field ebay-draft-instructions-field">
+            <span>AI Instructions</span>
+            <input name="improvementInstructions" type="text" maxlength="1000" placeholder="Optional tone or wording guidance" ${isActionLoading ? "disabled" : ""} />
+          </label>
           <div class="ebay-draft-actions">
             <button type="button" class="secondary-btn" data-ebay-draft-action="improve" ${canAct ? "" : "disabled"}>
               <i data-lucide="wand-sparkles"></i>
