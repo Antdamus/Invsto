@@ -14,8 +14,7 @@ type LinkType =
   | "ebay_order"
   | "ebay_order_line"
   | "ebay_return_case"
-  | "inventory_listing"
-  | "outlook_email";
+  | "inventory_listing";
 
 type LinkCandidate = {
   conversation_id: string;
@@ -25,7 +24,6 @@ type LinkCandidate = {
   ebay_order_id?: string | null;
   ebay_order_line_id?: string | null;
   ebay_return_case_id?: string | null;
-  email_message_id?: string | null;
   reference_id?: string | null;
   reference_type?: string | null;
   buyer_username?: string | null;
@@ -288,7 +286,6 @@ async function upsertConversationLink(supabase: EbayConversationContextClient, c
         ebay_order_id: candidate.ebay_order_id || null,
         ebay_order_line_id: candidate.ebay_order_line_id || null,
         ebay_return_case_id: candidate.ebay_return_case_id || null,
-        email_message_id: candidate.email_message_id || null,
         reference_id: candidate.reference_id || null,
         reference_type: candidate.reference_type || null,
         buyer_username: candidate.buyer_username || null,
@@ -752,7 +749,6 @@ function compactLink(link: Record<string, any>) {
     ebay_order_id: link.ebay_order_id || null,
     ebay_order_line_id: link.ebay_order_line_id || null,
     ebay_return_case_id: link.ebay_return_case_id || null,
-    email_message_id: link.email_message_id || null,
     reference_id: shortText(link.reference_id, 180),
     reference_type: shortText(link.reference_type, 80),
     buyer_username: shortText(link.buyer_username, 120),
@@ -1007,7 +1003,7 @@ export async function buildEbayConversationContext(
   const messages = await loadMessages(supabase, conversation.id);
   const { data: linksData, error: linksError } = await supabase
     .from("ebay_conversation_links")
-    .select("id, link_type, link_key, ebay_order_id, ebay_order_line_id, ebay_return_case_id, email_message_id, reference_id, reference_type, buyer_username, matched_value, match_method, confidence, status, metadata, created_at, updated_at")
+    .select("id, link_type, link_key, ebay_order_id, ebay_order_line_id, ebay_return_case_id, reference_id, reference_type, buyer_username, matched_value, match_method, confidence, status, metadata, created_at, updated_at")
     .eq("conversation_id", conversation.id)
     .in("status", ["confirmed", "suggested"])
     .order("confidence", { ascending: false, nullsFirst: false })
@@ -1162,7 +1158,6 @@ export async function buildEbayConversationContext(
     link_confidence: summarizeLinkConfidence(links),
     safety: {
       ebay_mutations_performed: false,
-      outlook_mutations_performed: false,
       sends_enabled: false,
       messages_sent: 0,
     },

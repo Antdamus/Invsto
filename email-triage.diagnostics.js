@@ -15,7 +15,6 @@
     return [
       { label: "Visible Rows", value: counts.visible_rows ?? counts.loaded_current_valid ?? data.classifications?.length },
       { label: "Filtered Rows", value: counts.filtered_current_valid ?? counts.total_current_valid ?? data.validation_diagnostics?.valid_classifications },
-      { label: "Mailbox Rows", value: counts.total_mailbox_rows ?? 0 },
       { label: "Classified Rows", value: counts.total_current_valid ?? data.validation_diagnostics?.valid_classifications },
       { label: "Open Review", value: data.validation_diagnostics?.pending_human_review },
       { label: "Invalid History", value: data.validation_diagnostics?.invalid_classifications },
@@ -63,6 +62,20 @@
   }
 
   function operationTitle(event = {}, utils = window.EmailTriageRenderUtils) {
+    const eventType = String(event.event_type || "");
+    const payload = eventPayload(event);
+    if (eventType === "conversation_classified" && payload.classification_run) {
+      return event.title || "Classification Run Completed";
+    }
+    if (eventType === "message_sync_completed") return event.title || "Sync Latest Completed";
+    if (eventType === "message_sync_failed") return event.title || "Sync Latest Failed";
+    if (eventType === "message_backfill_started") return "Backfill Started";
+    if (eventType === "message_backfill_progress") return "Backfill Progress";
+    if (eventType === "message_backfill_completed") return "Backfill Completed";
+    if (eventType === "message_backfill_failed") return "Backfill Failed";
+    if (eventType === "send_attempt_succeeded") return "Send Attempt Succeeded";
+    if (eventType === "send_attempt_failed") return "Send Attempt Failed";
+    if (eventType === "duplicate_send_prevented") return "Duplicate Send Prevented";
     return utils.humanizeValue(event.event_type || "No event");
   }
 
@@ -138,9 +151,11 @@
 
   function eventStatusVariant(event = {}) {
     const counters = event.counters && typeof event.counters === "object" ? event.counters : {};
-    const failed = String(event.status || "").toLowerCase().includes("fail") || Number(counters.failed_count || 0) > 0 || Number(eventPayload(event).failed || 0) > 0;
+    const status = String(event.status || "").toLowerCase();
+    const failed = status.includes("fail") || Number(counters.failed_count || 0) > 0 || Number(eventPayload(event).failed || 0) > 0;
     if (failed) return "danger";
-    if (String(event.status || "").toLowerCase().includes("complete")) return "success";
+    if (status.includes("warn")) return "warning";
+    if (status.includes("complete") || status.includes("success")) return "success";
     return "muted";
   }
 
@@ -158,13 +173,20 @@
       draft_improved: "AI improved an existing eBay reply draft.",
       draft_edited: "An operator edited the saved eBay draft.",
       draft_discarded: "An operator discarded the eBay draft.",
-      draft_approved: "An operator approved the draft as ready for future controlled send.",
+      draft_approved: "An operator approved the draft as ready for controlled send.",
       approval_removed: "An operator removed draft approval.",
-      send_attempt_created: "A future send attempt row was created.",
+      send_attempt_created: "A controlled send attempt row was created.",
       send_attempt_failed: "A send attempt failed.",
       send_attempt_succeeded: "A send attempt succeeded.",
+      duplicate_send_prevented: "A duplicate send was blocked before another provider call.",
       smart_folder_created: "An eBay smart folder was created.",
       smart_folder_updated: "An eBay smart folder was updated.",
+      message_sync_completed: "Recent eBay inbox sync completed as one aggregate operation.",
+      message_sync_failed: "Recent eBay inbox sync failed as one aggregate operation.",
+      message_backfill_started: "Historical eBay message archive import started.",
+      message_backfill_progress: "Historical eBay message archive import chunk completed and paused at a safe checkpoint.",
+      message_backfill_completed: "Historical eBay message archive import completed.",
+      message_backfill_failed: "Historical eBay message archive import failed.",
     };
     const description = firstValue([
       event.reason,
@@ -172,10 +194,6 @@
       event.replay_source ? `Replay source: ${event.replay_source}` : "",
       ebayDescriptions[eventType],
       eventType === "rematch_existing" ? "Deterministic link rematch completed for an explicit scope." : "",
-      eventType === "sync_import_approved" ? "Approved Outlook messages were imported into the local mailbox." : "",
-      eventType === "run_live_refresh" ? "Bounded preview, import, processing, and classification pass." : "",
-      eventType === "classify_imported" ? "Imported messages were considered for classification." : "",
-      eventType === "process_imported" ? "Imported messages were considered for processing and matching." : "",
       "Operational event recorded.",
     ]);
     const rematchChanges = numberMetric(payload, ["changed_link_count"]) || Number(counters.links_created || 0) + Number(counters.links_updated || 0);
@@ -191,12 +209,6 @@
         metricText(numberMetric(payload, ["imported_count"]) || counters.imported_count, "imported"),
         metricText(numberMetric(payload, ["already_imported_count", "skipped_already_imported_count"]) || counters.already_imported_count, "already"),
         metricText(numberMetric(payload, ["failed_count"]) || counters.failed_count, "failed"),
-      ],
-      mailbox_import: [
-        metricText(numberMetric(payload.progress || payload, ["target_count"]) || numberMetric(payload, ["target_count"]), "target"),
-        metricText(numberMetric(payload.progress || payload, ["imported_total", "imported_count"]) || counters.imported_count, "imported"),
-        metricText(numberMetric(payload.progress || payload, ["already_imported_total", "already_imported_count"]) || counters.already_imported_count, "already"),
-        metricText(numberMetric(payload.progress || payload, ["failed_total", "failed_count"]) || counters.failed_count, "failed"),
       ],
       classify_imported: [
         metricText(numberMetric(payload, ["candidate_count"]), "candidates"),
@@ -220,10 +232,50 @@
         payload.unread_count !== undefined ? metricText(payload.unread_count, "unread") : "",
         payload.latest_message_id ? `latest ${utils.compactId(payload.latest_message_id)}` : "",
       ],
-      conversation_classified: [
+      message_sync_completed: [
+        metricText(metricValue([payload], ["conversations_seen", "processed_count"]) || 0, "seen"),
+        metricText(metricValue([payload], ["conversations_inserted"]) || 0, "inserted"),
+        metricText(metricValue([payload], ["conversations_updated"]) || 0, "updated"),
+        metricText(metricValue([payload], ["conversations_unchanged"]) || 0, "unchanged"),
+      ],
+      message_sync_failed: [
+        metricText(metricValue([payload], ["conversations_seen", "processed_count"]) || 0, "seen"),
+        metricText(metricValue([payload], ["conversations_inserted"]) || 0, "inserted"),
+        metricText(metricValue([payload], ["conversations_updated"]) || 0, "updated"),
+        metricText(metricValue([payload], ["failed_count"]) || 1, "failed"),
+      ],
+      conversation_classified: payload.classification_run || payload.processed_count !== undefined ? [
+        metricText(metricValue([payload], ["processed_count"]) ?? payload.classification_run?.processed, "processed"),
+        metricText(metricValue([payload], ["succeeded_count"]) ?? payload.classification_run?.succeeded, "succeeded"),
+        metricText(metricValue([payload], ["failed_count"]) ?? payload.classification_run?.failed, "failed"),
+        metricText(metricValue([payload], ["skipped_count"]) ?? payload.classification_run?.skipped, "skipped"),
+      ] : [
         payload.priority ? utils.humanizeValue(payload.priority) : "",
         payload.response_need ? utils.humanizeValue(payload.response_need) : "",
         Array.isArray(payload.topic_tags) ? metricText(payload.topic_tags.length, "topics") : "",
+      ],
+      message_backfill_started: [
+        metricText(metricValue([payload], ["processed_count"]) || 0, "processed"),
+        payload.classification_mode ? utils.humanizeValue(payload.classification_mode) : "",
+        Array.isArray(payload.conversation_types) ? payload.conversation_types.join(", ") : "",
+      ],
+      message_backfill_progress: [
+        metricText(metricValue([payload], ["processed_count", "conversations_processed"]) || 0, "processed"),
+        metricText(metricValue([payload], ["messages_processed"]) || 0, "messages"),
+        metricText(metricValue([payload.progress || {}], ["pages_remaining"]) || 0, "pages remaining"),
+        payload.classification_mode ? utils.humanizeValue(payload.classification_mode) : "",
+      ],
+      message_backfill_completed: [
+        metricText(metricValue([payload], ["processed_count", "conversations_processed"]) || 0, "processed"),
+        metricText(metricValue([payload], ["succeeded_count", "conversations_succeeded"]) || 0, "succeeded"),
+        metricText(metricValue([payload], ["failed_count"]) || 0, "failed"),
+        metricText(metricValue([payload], ["messages_processed"]) || 0, "messages"),
+      ],
+      message_backfill_failed: [
+        metricText(metricValue([payload], ["processed_count", "conversations_processed"]) || 0, "processed"),
+        metricText(metricValue([payload], ["succeeded_count", "conversations_succeeded"]) || 0, "succeeded"),
+        metricText(metricValue([payload], ["failed_count"]) || 1, "failed"),
+        payload.error_code ? utils.humanizeValue(payload.error_code) : "",
       ],
       draft_generated: [
         payload.draft_version ? `v${payload.draft_version}` : "",
@@ -252,6 +304,10 @@
         payload.provider ? utils.humanizeValue(payload.provider) : "",
         payload.provider_message_id ? `provider ${utils.compactId(payload.provider_message_id)}` : "",
       ],
+      duplicate_send_prevented: [
+        payload.provider ? utils.humanizeValue(payload.provider) : "",
+        payload.duplicate_of_attempt_id ? `duplicate of ${utils.compactId(payload.duplicate_of_attempt_id)}` : "",
+      ],
     };
     const genericMetrics = [
       counters.imported_count ? metricText(counters.imported_count, "imported") : "",
@@ -275,15 +331,13 @@
 
   function renderSafetySummary(payload = {}, utils = window.EmailTriageRenderUtils) {
     const safety = payload.safety && typeof payload.safety === "object" ? payload.safety : payload;
-    const outlookMutation = safety.outlook_mutation_performed === true;
     const ebayMutation = safety.ebay_mutation_performed === true;
     const sends = Number(safety.automatic_responses_sent || safety.emails_sent || 0);
     const parts = [
-      outlookMutation ? "Outlook mutation: true" : "no Outlook mutation",
       ebayMutation ? "eBay mutation: true" : "no eBay mutation",
       sends ? `${sends} sends` : "no sends",
     ];
-    return `${outlookMutation || ebayMutation || sends ? "Safety" : "Safe"}: ${parts.join(" · ")}`;
+    return `${ebayMutation || sends ? "Safety" : "Safe"}: ${parts.join(" · ")}`;
   }
 
   function renderMetricCard(label, value, note = "", utils = window.EmailTriageRenderUtils) {
@@ -318,6 +372,96 @@
     const imported = payload.import && typeof payload.import === "object" ? payload.import : {};
     const eventType = String(event.event_type || "");
 
+    if (eventType === "conversation_classified" && (payload.classification_run || payload.processed_count !== undefined)) {
+      const run = payload.classification_run && typeof payload.classification_run === "object" ? payload.classification_run : payload;
+      return [
+        ["Processed", metricValue([payload, run, counters], ["processed_count", "processed"])],
+        ["Attempted", metricValue([payload, run, counters], ["attempted_count", "attempted"])],
+        ["Succeeded", metricValue([payload, run, counters], ["succeeded_count", "succeeded"])],
+        ["Failed", metricValue([payload, run, counters], ["failed_count", "failed"])],
+        ["Skipped", metricValue([payload, run, counters], ["skipped_count", "skipped"])],
+        ["Requested", metricValue([payload, run], ["requested_count", "requested"])],
+        ["Classification Version", metricValue([payload, run], ["classification_version"])],
+        ["Prompt Version", metricValue([payload, run], ["prompt_version"])],
+        ["Model", metricValue([payload, run], ["model_name"])],
+        ["Duration", metricValue([payload, run], ["duration_ms"]) !== null ? `${metricValue([payload, run], ["duration_ms"])} ms` : null],
+        ["Mode", metricValue([run, payload], ["run_mode"])],
+        ["Conversation IDs", Array.isArray(run.conversation_ids) ? run.conversation_ids.slice(0, 24).join(", ") : null],
+      ];
+    }
+
+    if (eventType.startsWith("message_backfill_")) {
+      const run = payload.backfill_run && typeof payload.backfill_run === "object" ? payload.backfill_run : payload;
+      return [
+        ["Processed", metricValue([payload, run, counters], ["processed_count", "conversations_processed"])],
+        ["Succeeded", metricValue([payload, run, counters], ["succeeded_count", "conversations_succeeded"])],
+        ["Failed", metricValue([payload, run, counters], ["failed_count"])],
+        ["Skipped", metricValue([payload, run, counters], ["skipped_count"])],
+        ["Pages", metricValue([payload, run, counters], ["pages_processed"])],
+        ["Pages Remaining", metricValue([payload.progress || {}, run.progress || {}], ["pages_remaining"])],
+        ["Estimated Total Pages", metricValue([payload.progress || {}, run.progress || {}], ["estimated_total_pages"])],
+        ["Messages", metricValue([payload, run, counters], ["messages_processed"])],
+        ["Classification Mode", metricValue([payload, run], ["classification_mode"])],
+        ["Classified", metricValue([payload, run], ["classification_succeeded"])],
+        ["Classification Failed", metricValue([payload, run], ["classification_failed"])],
+        ["Classification Skipped", metricValue([payload, run], ["classification_skipped"])],
+        ["Duration", metricValue([payload, run], ["duration_ms"]) !== null ? `${metricValue([payload, run], ["duration_ms"])} ms` : null],
+        ["Error", metricValue([payload, run], ["error_code", "last_error_code"])],
+      ];
+    }
+
+    if (eventType.startsWith("message_sync_")) {
+      const run = payload.sync_run && typeof payload.sync_run === "object" ? payload.sync_run : payload;
+      return [
+        ["Conversations Seen", metricValue([payload, run, counters], ["conversations_seen", "processed_count"])],
+        ["Conversations Inserted", metricValue([payload, run, counters], ["conversations_inserted"])],
+        ["Conversations Updated", metricValue([payload, run, counters], ["conversations_updated"])],
+        ["Conversations Unchanged", metricValue([payload, run, counters], ["conversations_unchanged"])],
+        ["Succeeded", metricValue([payload, run, counters], ["succeeded_count", "conversations_succeeded"])],
+        ["Failed", metricValue([payload, run, counters], ["failed_count"])],
+        ["Skipped", metricValue([payload, run, counters], ["skipped_count", "conversations_skipped"])],
+        ["Pages", metricValue([payload, run, counters], ["pages_processed"])],
+        ["Messages Seen", metricValue([payload, run, counters], ["messages_seen", "messages_processed"])],
+        ["Messages Inserted", metricValue([payload, run, counters], ["messages_inserted"])],
+        ["Messages Updated", metricValue([payload, run, counters], ["messages_updated"])],
+        ["Canonical Total After Sync", metricValue([payload, run, counters], ["canonical_total_conversations", "canonicalTotalConversations"])],
+        ["Warnings", metricValue([payload, run, counters], ["warnings_count"])],
+        ["Duration", metricValue([payload, run], ["duration_ms"]) !== null ? `${metricValue([payload, run], ["duration_ms"])} ms` : null],
+        ["Checkpoint Scope", metricValue([payload, run], ["checkpoint_scope"])],
+        ["Conversation IDs", Array.isArray(run.conversation_ids) ? run.conversation_ids.slice(0, 50).join(", ") : null],
+        ["eBay Endpoint", metricValue([payload.ebay_api, run.ebay_api], ["endpoint"])],
+        ["eBay Params", payload.ebay_api?.parameters ? JSON.stringify(payload.ebay_api.parameters) : (run.ebay_api?.parameters ? JSON.stringify(run.ebay_api.parameters) : null)],
+        ["HTTP Status", metricValue([payload.ebay_api, run.ebay_api], ["http_status"])],
+        ["Error", metricValue([payload, run], ["error_code", "last_error_code"])],
+      ];
+    }
+
+    if (eventType.includes("send_attempt") || eventType === "duplicate_send_prevented") {
+      const attempt = payload.send_attempt && typeof payload.send_attempt === "object" ? payload.send_attempt : {};
+      const approval = payload.approval && typeof payload.approval === "object" ? payload.approval : {};
+      const draft = payload.draft && typeof payload.draft === "object" ? payload.draft : {};
+      const providerResponse = payload.provider_response && typeof payload.provider_response === "object" ? payload.provider_response : {};
+      return [
+        ["Send Attempt ID", metricValue([attempt, payload], ["id", "send_attempt_id"])],
+        ["Draft ID", metricValue([draft, attempt, payload], ["id", "draft_id"])],
+        ["Approval ID", metricValue([approval, attempt, payload], ["id", "approval_id"])],
+        ["Target Message ID", metricValue([attempt, approval, draft, payload], ["target_message_id"])],
+        ["Operator", metricValue([payload, event, approval, attempt], ["operator", "actor_email", "initiated_by", "approved_by_email", "created_by"])],
+        ["Sent Text", metricValue([payload, draft], ["sent_text"])],
+        ["Provider Message ID", metricValue([attempt, payload], ["provider_message_id"])],
+        ["Provider", metricValue([attempt, payload], ["provider"])],
+        ["Provider Status", metricValue([providerResponse, attempt, payload], ["status", "attempt_status"])],
+        ["Provider Response", Object.keys(providerResponse).length ? JSON.stringify(providerResponse) : null],
+        ["Provider Correlation ID", metricValue([attempt, payload], ["provider_correlation_id"])],
+        ["Idempotency Key", metricValue([attempt, approval, payload], ["idempotency_key"])],
+        ["Attempt Sequence", metricValue([attempt, payload], ["attempt_sequence"])],
+        ["Created At", metricValue([attempt, event], ["created_at"])],
+        ["Sent At", metricValue([attempt, payload], ["sent_at"])],
+        ["Updated At", metricValue([attempt], ["updated_at"])],
+        ["Error", metricValue([attempt, payload], ["error_message"])],
+      ];
+    }
+
     if (eventType === "rematch_existing") {
       return [
         ["Scanned", metricValue([payload, counters], ["scanned", "previewed_count"])],
@@ -337,7 +481,7 @@
       ];
     }
 
-    if (eventType === "sync_import_approved" || eventType === "mailbox_import") {
+    if (eventType === "sync_import_approved") {
       return [
         ["Target", metricValue([progress, payload], ["target_count", "limit"])],
         ["Imported", metricValue([progress, batch, payload, imported, counters], ["imported_total", "imported_count"])],
@@ -384,6 +528,54 @@
     ]));
   }
 
+  function renderClassificationRunDetails(event = {}, utils = window.EmailTriageRenderUtils) {
+    const payload = eventPayload(event);
+    const run = payload.classification_run && typeof payload.classification_run === "object" ? payload.classification_run : payload;
+    const conversationIds = Array.isArray(run.conversation_ids) ? run.conversation_ids : [];
+    const failures = Array.isArray(run.failures) ? run.failures : Array.isArray(payload.failures) ? payload.failures : [];
+    const skipped = Array.isArray(run.skipped_results) ? run.skipped_results : Array.isArray(payload.skipped) ? payload.skipped : [];
+    if (!payload.classification_run && payload.processed_count === undefined) return "";
+    return `
+      <div class="operational-detail-classification-run">
+        <section>
+          <h4>Conversation IDs</h4>
+          ${conversationIds.length ? `
+            ${conversationIds.slice(0, 50).map((id) => `
+              <div>
+                <span>${utils.escapeHtml(id)}</span>
+                <strong>${utils.escapeHtml(utils.compactId(id))}</strong>
+              </div>
+            `).join("")}
+          ` : `<div class="classification-empty operational-empty">No conversation ids recorded.</div>`}
+        </section>
+        <section>
+          <h4>Failures</h4>
+          ${failures.length ? `
+            ${failures.slice(0, 12).map((row) => `
+              <div>
+                <span>${utils.escapeHtml(row.conversation_id || row.ebay_conversation_id || "Unknown conversation")}</span>
+                <strong>${utils.escapeHtml(row.error || "failed")}</strong>
+                <em>${utils.escapeHtml(row.reason || "No reason recorded")}</em>
+              </div>
+            `).join("")}
+          ` : `<div class="classification-empty operational-empty">No failures recorded.</div>`}
+        </section>
+        <section>
+          <h4>Skipped Reasons</h4>
+          ${skipped.length ? `
+            ${skipped.slice(0, 12).map((row) => `
+              <div>
+                <span>${utils.escapeHtml(row.conversation_id || row.ebay_conversation_id || "Unknown conversation")}</span>
+                <strong>${utils.escapeHtml(utils.humanizeValue(row.reason || "skipped"))}</strong>
+                <em>${utils.escapeHtml(row.classification_id ? `Classification ${row.classification_id}` : "No classification id recorded")}</em>
+              </div>
+            `).join("")}
+          ` : `<div class="classification-empty operational-empty">No skipped conversations recorded.</div>`}
+        </section>
+      </div>
+    `;
+  }
+
   function renderOperationalEventDetail(event = null, utils = window.EmailTriageRenderUtils) {
     if (!event) {
       return `<div class="classification-empty operational-empty">Select an operational event to inspect details.</div>`;
@@ -392,8 +584,6 @@
     const summary = summarizeOperationalEvent(event, utils);
     const safety = payload.safety && typeof payload.safety === "object" ? payload.safety : event.safety || {};
     const safetyFlags = [
-      ["Outlook fetch", metricValue([safety, payload], ["outlook_fetch_performed"])],
-      ["Outlook mutation", metricValue([safety, payload], ["outlook_mutation_performed"])],
       ["eBay mutation", metricValue([safety, payload], ["ebay_mutation_performed"])],
       ["Classification", metricValue([safety, payload], ["classification_triggered"])],
       ["Drafts created", metricValue([safety, payload], ["drafts_created"])],
@@ -423,6 +613,7 @@
       <div class="operational-detail-metric-grid">
         ${detailMetricItems(event).map(([label, value]) => renderMetricCard(label, value, "", utils)).join("")}
       </div>
+      ${renderClassificationRunDetails(event, utils)}
       <div class="operational-detail-safety">
         <strong>${utils.escapeHtml(renderSafetySummary({ ...payload, safety }, utils))}</strong>
         <div>
@@ -514,20 +705,58 @@
     `).join("");
   }
 
+  function renderBackfillCheckpointRows(checkpoints = [], utils = window.EmailTriageRenderUtils) {
+    if (!checkpoints.length) {
+      return `<div class="classification-empty operational-empty">No historical backfill checkpoint has been recorded yet.</div>`;
+    }
+
+    return checkpoints.slice(0, 4).map((checkpoint) => {
+      const total = Number(checkpoint.total_available || 0);
+      const page = Number(checkpoint.pages_processed || 0);
+      const providedEstimate = Number(checkpoint.estimated_total_pages || 0);
+      const estimatedPages = providedEstimate || (
+        total && Number(checkpoint.metadata?.last_page_processed || checkpoint.last_page_processed || 0) >= 0
+          ? Math.ceil(total / Math.max(1, Number(checkpoint.metadata?.page_limit || 25)))
+          : null
+      );
+      const remaining = checkpoint.pages_remaining === null || checkpoint.pages_remaining === undefined
+        ? (estimatedPages ? Math.max(estimatedPages - page, 0) : null)
+        : Number(checkpoint.pages_remaining);
+      const status = String(checkpoint.status || "idle");
+      const statusVariant = status === "succeeded" ? "success" : status === "failed" ? "danger" : status === "running" ? "warning" : status === "paused" || status === "idle" ? "muted" : "muted";
+      const statusLabel = status === "idle" ? "paused" : status;
+      const pageText = estimatedPages ? `${page} / ${estimatedPages}` : String(page || "--");
+      const remainingText = remaining === null || !Number.isFinite(remaining) ? "" : ` · ${remaining} remaining`;
+      return `
+        <div class="operational-row">
+          <span>${utils.escapeHtml(checkpoint.conversation_type || "Conversation type")}</span>
+          <strong>${utils.escapeHtml(`Pages ${pageText}`)}</strong>
+          <em>${utils.escapeHtml(`${checkpoint.conversations_processed || 0} conversations · ${checkpoint.messages_processed || 0} messages${remainingText} · updated ${utils.formatDateTime(checkpoint.updated_at)}`)}</em>
+          ${dashboardBadge(utils.humanizeValue(statusLabel), statusVariant, utils)}
+        </div>
+      `;
+    }).join("");
+  }
+
   function renderEbayOperationalDashboard(state = {}, snapshot = {}, utils = window.EmailTriageRenderUtils) {
     const ebay = snapshot.ebay || {};
     const metrics = ebay.metrics || {};
     const safety = ebay.send_safety || {};
     const approvalQueue = ebay.approval_queue || {};
+    const backfill = ebay.backfill || {};
+    const checkpoints = Array.isArray(backfill.checkpoints) ? backfill.checkpoints : [];
+    const activeBackfills = Array.isArray(backfill.active) ? backfill.active : [];
+    const backfillStatus = String(backfill.status || "not_started");
+    const backfillStatusVariant = backfillStatus === "completed" ? "success" : backfillStatus === "failed" ? "danger" : backfillStatus === "running" ? "warning" : "muted";
     const events = Array.isArray(ebay.recent_operational_events) ? ebay.recent_operational_events : [];
-    const blocked = ebay.ok === false || Number(metrics.send_attempts_failed || 0) > 0 || safety.ebay_mutation_performed === true || safety.automatic_responses_sent > 0;
+    const blocked = ebay.ok === false || Number(metrics.send_attempts_failed || 0) > 0 || safety.automatic_responses_sent > 0;
 
     return `
       <div class="operational-dashboard-status">
         <span>${state.operationalDashboardLoading ? "Refreshing eBay operations" : `eBay operations refreshed ${utils.formatDateTime(state.operationalDashboardUpdatedAt || ebay.generated_at || snapshot.generated_at)}`}</span>
         ${state.operationalDashboardError ? dashboardBadge(`Error: ${state.operationalDashboardError}`, "danger", utils) : ""}
         ${ebay.ok === false ? dashboardBadge(ebay.error || "eBay dashboard partial", "warning", utils) : ""}
-        ${dashboardBadge(blocked ? "Attention needed" : "No-send visibility mode", blocked ? "warning" : "success", utils)}
+        ${dashboardBadge(blocked ? "Attention needed" : "Controlled send enabled", blocked ? "warning" : "success", utils)}
       </div>
 
       <div class="operational-dashboard-grid">
@@ -538,6 +767,7 @@
           </div>
           <div class="operational-metric-grid">
             ${renderKeyValueGrid([
+              { label: "Total canonical", value: metrics.canonical_conversations },
               { label: "Conversations today", value: metrics.conversations_today },
               { label: "Unread conversations", value: metrics.unread_conversations },
               { label: "Needs reply", value: metrics.needs_reply },
@@ -546,6 +776,25 @@
               { label: "Refund risk", value: metrics.refund_risk },
               { label: "VIP buyers", value: metrics.vip_buyers },
               { label: "Drafts generated today", value: metrics.drafts_generated },
+              { label: "Sent drafts", value: metrics.sent_drafts },
+            ], utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel operational-panel-wide">
+          <div class="operational-panel-head">
+            <strong>Latest Sync</strong>
+            ${dashboardBadge("Recent only", "muted", utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Seen", value: metrics.latest_sync_conversations_seen },
+              { label: "Inserted", value: metrics.latest_sync_conversations_inserted },
+              { label: "Updated", value: metrics.latest_sync_conversations_updated },
+              { label: "Unchanged", value: metrics.latest_sync_conversations_unchanged },
+              { label: "Messages inserted", value: metrics.latest_sync_messages_inserted },
+              { label: "Messages updated", value: metrics.latest_sync_messages_updated },
+              { label: "Canonical after sync", value: metrics.latest_sync_canonical_total_after ?? metrics.canonical_conversations },
             ], utils)}
           </div>
         </section>
@@ -568,17 +817,39 @@
         <section class="operational-panel">
           <div class="operational-panel-head">
             <strong>Send Safety</strong>
-            ${dashboardBadge("No send control", "success", utils)}
+            ${dashboardBadge("Human confirmed", "success", utils)}
           </div>
           <div class="operational-metric-grid">
             ${renderKeyValueGrid([
-              { label: "Sends enabled", html: dashboardBadge(safety.sends_enabled ? "true" : "false", safety.sends_enabled ? "danger" : "success", utils) },
+              { label: "Controlled sends", html: dashboardBadge(safety.sends_enabled ? "enabled" : "disabled", safety.sends_enabled ? "success" : "muted", utils) },
               { label: "Send attempts", value: metrics.send_attempts_created },
               { label: "Failed attempts", value: metrics.send_attempts_failed },
               { label: "Succeeded attempts", value: metrics.send_attempts_succeeded },
+              { label: "Duplicates blocked", value: metrics.duplicate_sends_prevented },
             ], utils)}
           </div>
           ${renderOperationalNote(`Duplicate guard: ${utils.humanizeValue(safety.duplicate_success_guard || "one_success_per_idempotency_key")}.`, utils)}
+        </section>
+
+        <section class="operational-panel operational-panel-wide">
+          <div class="operational-panel-head">
+            <strong>Historical Backfill</strong>
+            ${dashboardBadge(activeBackfills.length ? `${activeBackfills.length} running` : utils.humanizeValue(backfillStatus), activeBackfills.length ? "warning" : backfillStatusVariant, utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Status", value: utils.humanizeValue(backfillStatus) },
+              { label: "Pages", value: metrics.backfill_pages },
+              { label: "Estimated total pages", value: metrics.backfill_pages_total_estimate ?? "--" },
+              { label: "Pages remaining", value: metrics.backfill_pages_remaining ?? "--" },
+              { label: "Conversations", value: metrics.backfill_conversations },
+              { label: "Messages", value: metrics.backfill_messages },
+              { label: "Last full backfill", value: backfill.latest_completed?.last_full_backfill_at ? utils.formatDateTime(backfill.latest_completed.last_full_backfill_at) : "--" },
+            ], utils)}
+          </div>
+          <div class="operational-activity-list">
+            ${renderBackfillCheckpointRows(checkpoints, utils)}
+          </div>
         </section>
 
         <section class="operational-panel operational-panel-wide">
@@ -607,10 +878,9 @@
             ${dashboardBadge("Audit only", "success", utils)}
           </div>
           <div class="operational-safety-strip">
-            ${dashboardBadge(`eBay mutation: ${safety.ebay_mutation_performed ? "true" : "false"}`, safety.ebay_mutation_performed ? "danger" : "success", utils)}
-            ${dashboardBadge(`Outlook mutation: ${safety.outlook_mutation_performed ? "true" : "false"}`, safety.outlook_mutation_performed ? "danger" : "success", utils)}
+            ${dashboardBadge(`eBay provider send: ${safety.ebay_mutation_performed ? "yes" : "no"}`, safety.ebay_mutation_performed ? "success" : "muted", utils)}
             ${dashboardBadge(`Auto-send: ${safety.automatic_responses_sent || 0}`, safety.automatic_responses_sent ? "danger" : "success", utils)}
-            ${dashboardBadge(`Sends enabled: ${safety.sends_enabled ? "true" : "false"}`, safety.sends_enabled ? "danger" : "success", utils)}
+            ${dashboardBadge(`Human-only send: ${safety.controlled_human_send_only ? "true" : "false"}`, safety.controlled_human_send_only ? "success" : "warning", utils)}
           </div>
         </section>
       </div>
@@ -626,177 +896,7 @@
     if (!snapshot) {
       return `<div class="workspace-status operational-dashboard-status">Refresh dashboard to load operational visibility.</div>`;
     }
-    if (snapshot.ebay) {
-      return renderEbayOperationalDashboard(state, snapshot, utils);
-    }
-
-    const mailbox = snapshot.mailbox || {};
-    const queue = snapshot.queue || {};
-    const failures = snapshot.failures || {};
-    const safety = snapshot.safety || {};
-    const gaps = snapshot.pipeline_gaps || {};
-    const visibility = snapshot.pipeline_visibility || {};
-    const connected = mailbox.connected && String(mailbox.status || "").toLowerCase() !== "disconnected";
-    const visibleGapCount = Number(visibility.imported_without_processing_count || 0)
-      + Number(visibility.processed_without_classification_count || 0)
-      + Number(visibility.unclassified_imported_total || 0)
-      + Number(visibility.processing_failed_jobs || 0)
-      + Number(visibility.classification_failed_jobs || 0)
-      + Number(visibility.classification_skipped_jobs || 0);
-    const gapCount = visibleGapCount || Number(gaps.imported_without_processing || 0) + Number(gaps.processed_without_classification || 0);
-    const blocked = queue.saturated || gapCount > 0 || safety.outlook_mutation_performed || safety.automatic_responses_sent > 0 || safety.polling_started || safety.scheduler_started || safety.realtime_listener_started;
-    const visibilityLimited = visibility.is_limited === true;
-    const visibilityScopeLabel = visibilityLimited
-      ? `sampled ${visibility.sampled_imported_count || 0} of ${visibility.active_imported_total || 0}`
-      : "table-derived";
-
-    return `
-      <div class="operational-dashboard-status">
-        <span>${state.operationalDashboardLoading ? "Refreshing dashboard" : `Dashboard refreshed ${utils.formatDateTime(state.operationalDashboardUpdatedAt || snapshot.generated_at)}`}</span>
-        ${state.operationalDashboardError ? dashboardBadge(`Error: ${state.operationalDashboardError}`, "danger", utils) : ""}
-        ${dashboardBadge(blocked ? "Attention needed" : "Safe visibility mode", blocked ? "warning" : "success", utils)}
-      </div>
-
-      <div class="operational-dashboard-grid">
-        <section class="operational-panel">
-          <div class="operational-panel-head">
-            <strong>Mailbox Status</strong>
-            ${dashboardBadge(connected ? "Connected" : "Disconnected", connected ? "success" : "warning", utils)}
-          </div>
-          <div class="operational-metric-grid">
-            ${renderKeyValueGrid([
-              { label: "Mailbox", value: mailbox.mailbox_email || "Unavailable" },
-              { label: "Identity", value: mailbox.display_name || "Not provided" },
-              { label: "Last checked", value: mailbox.last_checked_at ? utils.formatDateTime(mailbox.last_checked_at) : "--" },
-              { label: "Live sync enabled", html: dashboardBadge(mailbox.live_sync_enabled ? "true" : "false", mailbox.live_sync_enabled ? "success" : "muted", utils) },
-            ], utils)}
-          </div>
-        </section>
-
-        <section class="operational-panel">
-          <div class="operational-panel-head">
-            <strong>Queue Health</strong>
-            ${dashboardBadge(queue.saturated ? "Saturated" : "Within bounds", queue.saturated ? "danger" : "success", utils)}
-          </div>
-          <div class="operational-metric-grid">
-            ${renderKeyValueGrid([
-              { label: "Queued jobs", value: queue.queued },
-              { label: "Running jobs", value: queue.running },
-              { label: "Failed jobs", value: queue.failed },
-              { label: "Oldest queued age", value: queue.oldest_queued_age_seconds == null ? "Not reported" : formatAgeSeconds(queue.oldest_queued_age_seconds, utils) },
-            ], utils)}
-          </div>
-        </section>
-
-        <section class="operational-panel operational-panel-wide">
-          <div class="operational-panel-head">
-            <strong>Operational Activity</strong>
-            ${snapshot.activity?.latest_live_refresh?.id ? dashboardBadge(`Live ${utils.compactId(snapshot.activity.latest_live_refresh.id)}`, "muted", utils) : dashboardBadge("No live id", "muted", utils)}
-          </div>
-          <div class="operational-activity-list">
-            ${renderActivityRows(snapshot, utils)}
-          </div>
-        </section>
-
-        <section class="operational-panel">
-          <div class="operational-panel-head">
-            <strong>Replay Visibility</strong>
-            ${dashboardBadge(snapshot.replay?.replay_safe ? "Replay-safe" : "No replay flag", snapshot.replay?.replay_safe ? "success" : "muted", utils)}
-          </div>
-          <div class="operational-metric-grid">
-            ${renderKeyValueGrid([
-              { label: "Import operations", value: snapshot.replay?.import_operations },
-              { label: "Classify operations", value: snapshot.replay?.classify_operations },
-              { label: "Process operations", value: snapshot.replay?.process_operations },
-              { label: "Live refresh operations", value: snapshot.replay?.live_refresh_operations },
-              { label: "Rematch operations", value: snapshot.replay?.rematch_operations },
-            ], utils)}
-          </div>
-        </section>
-
-        <section class="operational-panel operational-panel-wide">
-          <div class="operational-panel-head">
-            <strong>Pipeline Visibility</strong>
-            ${dashboardBadge(gapCount ? "Partial states visible" : "No visible gaps", gapCount ? "warning" : "success", utils)}
-          </div>
-          <div class="operational-metric-grid">
-            ${renderKeyValueGrid([
-              { label: "Imported rows (active)", value: visibility.active_imported_total },
-              { label: "Fully processed rows", value: visibility.fully_processed_imported_count },
-              { label: "Current valid AI classified", value: visibility.current_valid_classified_imported_total },
-              { label: "Unclassified imported rows", value: visibility.unclassified_imported_total },
-              { label: "Imported, not fully processed", value: visibility.imported_without_processing_count },
-              { label: "Processed, not classified", value: visibility.processed_without_classification_count },
-              { label: "Processing failed jobs", value: visibility.processing_failed_jobs },
-              { label: "Classification failed/skipped jobs", value: Number(visibility.classification_failed_jobs || 0) + Number(visibility.classification_skipped_jobs || 0) },
-            ], utils)}
-          </div>
-          ${renderOperationalNote(`${visibilityScopeLabel}. Imports can be complete while processing and classification are still pending; this card does not enqueue work. Live refresh classification can be capped, so remaining rows may stay unclassified.`, utils)}
-        </section>
-
-        <section class="operational-panel">
-          <div class="operational-panel-head">
-            <strong>Event-Derived Gaps</strong>
-            ${dashboardBadge("Limited by event history", "muted", utils)}
-          </div>
-          <div class="operational-metric-grid">
-            ${renderKeyValueGrid([
-              { label: "Approved imports seen in events", value: gaps.approved_imported_total },
-              { label: "Active event imports", value: gaps.active_imported_total },
-              { label: "Event imports fully processed", value: gaps.fully_processed_imported_total },
-              { label: "Event imports classified", value: gaps.current_classified_imported_total },
-              { label: "Event imports not processed", value: gaps.imported_without_processing },
-              { label: "Event processed not classified", value: gaps.processed_without_classification },
-            ], utils)}
-          </div>
-          ${renderOperationalNote("Event-derived counts can miss imported rows when audit event inserts fail or fall outside the dashboard lookup window.", utils)}
-        </section>
-
-        <section class="operational-panel">
-          <div class="operational-panel-head">
-            <strong>Failure Visibility</strong>
-            ${dashboardBadge(failures.failed_jobs_total || failures.failed_classifications_total ? "Failures present" : "No failures", failures.failed_jobs_total || failures.failed_classifications_total ? "danger" : "success", utils)}
-          </div>
-          <div class="operational-metric-grid">
-            ${renderKeyValueGrid([
-              { label: "Failed processing jobs", value: failures.failed_jobs_total },
-              { label: "Failed classifications", value: failures.failed_classifications_total },
-              { label: "Permanent classify failures", value: failures.permanently_failed_classifications },
-              { label: "Blocked/safe state", html: dashboardBadge(blocked ? "attention" : "safe", blocked ? "warning" : "success", utils) },
-            ], utils)}
-          </div>
-          <div class="operational-reason-list">
-            ${renderFailureReasons(failures.failed_reasons, utils)}
-          </div>
-        </section>
-
-        <section class="operational-panel operational-panel-wide">
-          <div class="operational-panel-head">
-            <strong>Recent Operational Events</strong>
-            ${dashboardBadge(`${snapshot.recent_operational_events.length} visible`, "muted", utils)}
-          </div>
-          <div class="operational-event-list">
-            ${renderOperationalEventRows(snapshot.recent_operational_events, utils)}
-          </div>
-        </section>
-
-        <section class="operational-panel operational-panel-wide">
-          <div class="operational-panel-head">
-            <strong>Safety Flags</strong>
-            ${dashboardBadge("Visibility only", "success", utils)}
-          </div>
-          <div class="operational-safety-strip">
-            ${dashboardBadge(`Outlook mutation: ${safety.outlook_mutation_performed ? "true" : "false"}`, safety.outlook_mutation_performed ? "danger" : "success", utils)}
-            ${dashboardBadge(`Auto-send: ${safety.automatic_responses_sent || 0}`, safety.automatic_responses_sent ? "danger" : "success", utils)}
-            ${dashboardBadge(`Drafts created: ${safety.drafts_created || 0}`, safety.drafts_created ? "warning" : "success", utils)}
-            ${dashboardBadge(`Scheduler: ${safety.scheduler_started ? "true" : "false"}`, safety.scheduler_started ? "danger" : "success", utils)}
-            ${dashboardBadge(`Polling: ${safety.polling_started ? "true" : "false"}`, safety.polling_started ? "danger" : "success", utils)}
-            ${dashboardBadge(`Realtime: ${safety.realtime_listener_started ? "true" : "false"}`, safety.realtime_listener_started ? "danger" : "success", utils)}
-          </div>
-        </section>
-      </div>
-      ${renderOperationalEventDetailDrawer(state, snapshot, utils)}
-    `;
+    return renderEbayOperationalDashboard(state, snapshot, utils);
   }
 
   window.EmailTriageDiagnostics = {

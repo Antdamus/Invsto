@@ -7,7 +7,7 @@ import {
 } from "../_shared/ebay-conversation-context.ts";
 
 type ServiceClient = ReturnType<typeof createClient>;
-type Mode = "view" | "generate" | "regenerate" | "improve" | "save_edit" | "discard" | "approve" | "unapprove";
+type Mode = "view" | "generate" | "regenerate" | "improve" | "save_edit" | "discard" | "approve" | "unapprove" | "send";
 
 type Input = {
   mode: Mode;
@@ -20,6 +20,8 @@ type Input = {
   improvementInstructions: string | null;
   operatorNotes: string | null;
   approvalNotes: string | null;
+  manualComposer: boolean;
+  sendConfirmed: boolean;
 };
 
 type GroundingFact = {
@@ -42,10 +44,14 @@ type DraftOutput = {
 const GENERATOR_NAME = "ebay_conversation_response_drafter";
 const GENERATOR_VERSION = "v1";
 const PROMPT_VERSION_DEFAULT = "ebay-conversation-draft-v2-target-message";
+const MANUAL_PROMPT_VERSION = "manual-composer-v1";
+const DEFAULT_MESSAGE_SCOPE = "https://api.ebay.com/oauth/api_scope/commerce.message";
 const OPENAI_TIMEOUT_MS = 45000;
 const MAX_DRAFT_TEXT_CHARS = 4000;
 const MAX_OPERATOR_TEXT_CHARS = 4000;
+const EBAY_MAX_MESSAGE_TEXT_CHARS = 2000;
 const TRANSIENT_OPENAI_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+const ACTIVE_SEND_STATUSES = new Set(["created", "ready_to_send", "sending"]);
 
 class DraftError extends Error {
   code: string;
@@ -97,6 +103,14 @@ function requiredEnv(name: string) {
   const value = Deno.env.get(name)?.trim();
   if (!value) throw new DraftError("configuration_error", { phase: "configuration" });
   return value;
+}
+
+function optionalEnv(...names: string[]) {
+  for (const name of names) {
+    const value = Deno.env.get(name)?.trim();
+    if (value) return value;
+  }
+  return "";
 }
 
 function serviceClient() {
@@ -171,7 +185,7 @@ function stringOrNull(value: unknown, maxLength = 240) {
 async function parseInput(req: Request): Promise<Input> {
   const body = await req.json().catch(() => ({}));
   const rawMode = stringOrNull(body?.mode, 80) || "view";
-  if (!["view", "generate", "regenerate", "improve", "save_edit", "discard", "approve", "unapprove"].includes(rawMode)) {
+  if (!["view", "generate", "regenerate", "improve", "save_edit", "discard", "approve", "unapprove", "send"].includes(rawMode)) {
     throw new DraftError("invalid_mode", { status: 400, phase: "input" });
   }
   return {
@@ -187,6 +201,8 @@ async function parseInput(req: Request): Promise<Input> {
     improvementInstructions: stringOrNull(body?.improvementInstructions || body?.improvement_instructions, 1000),
     operatorNotes: stringOrNull(body?.operatorNotes || body?.operator_notes, 1000),
     approvalNotes: stringOrNull(body?.approvalNotes || body?.approval_notes || body?.operatorNotes || body?.operator_notes, 1000),
+    manualComposer: body?.manualComposer === true || body?.manual_composer === true,
+    sendConfirmed: body?.sendConfirmed === true || body?.send_confirmed === true,
   };
 }
 
@@ -211,6 +227,102 @@ function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
   const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
   return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(",")}}`;
+}
+
+async function parseResponse(res: Response): Promise<Record<string, unknown>> {
+  const bodyText = await res.text();
+  if (!bodyText) return {};
+  try {
+    return JSON.parse(bodyText) as Record<string, unknown>;
+  } catch {
+    return { raw: bodyText.slice(0, 1000) };
+  }
+}
+
+function safeMessage(payload: unknown) {
+  if (!payload || typeof payload !== "object") return text(payload, 500) || "No response body.";
+  const record = payload as Record<string, any>;
+  const parts = [
+    record.message,
+    record.longMessage,
+    record.error,
+    record.error_description,
+    record.detail,
+    Array.isArray(record.errors) ? record.errors.map((item) => safeMessage(item)).join(" ") : "",
+  ].map((item) => text(item, 500)).filter(Boolean);
+  return parts.join(" ") || JSON.stringify(payload).slice(0, 1000);
+}
+
+function ebayEnvironment() {
+  const value = (Deno.env.get("EBAY_ENV") || "production").trim().toLowerCase();
+  if (value === "sandbox") return "sandbox";
+  if (value === "production") return "production";
+  return "unknown";
+}
+
+function ebayApiBase() {
+  return ebayEnvironment() === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
+}
+
+async function refreshEbayToken(): Promise<string> {
+  const clientId = optionalEnv("EBAY_CLIENT_ID", "EBAY_APP_ID");
+  const clientSecret = optionalEnv("EBAY_CLIENT_SECRET", "EBAY_CERT_ID");
+  const refreshToken = optionalEnv("EBAY_REFRESH_TOKEN");
+  const scope = (Deno.env.get("EBAY_MESSAGE_SCOPE") || DEFAULT_MESSAGE_SCOPE).trim() || DEFAULT_MESSAGE_SCOPE;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new DraftError("missing_ebay_oauth_secret", { status: 500, phase: "oauth" });
+  }
+
+  const res = await fetch(`${ebayApiBase()}/identity/v1/oauth2/token`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      scope,
+    }),
+  });
+
+  const payload = await parseResponse(res);
+  if (!res.ok) {
+    throw new DraftError("ebay_oauth_refresh_failed", {
+      status: 502,
+      phase: "oauth",
+      message: safeMessage(payload),
+      details: { provider_response: { status: res.status, payload } },
+    });
+  }
+
+  const token = text(payload.access_token, 4000);
+  if (!token) throw new DraftError("ebay_oauth_missing_access_token", { status: 502, phase: "oauth" });
+  return token;
+}
+
+async function ebayPost(token: string, path: string, body: Record<string, unknown>) {
+  const res = await fetch(`${ebayApiBase()}${path}`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Accept": "application/json",
+      "Accept-Language": "en-US",
+      "Content-Language": "en-US",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = await parseResponse(res);
+  return {
+    ok: res.ok,
+    status: res.status,
+    payload,
+    headers: {
+      correlation_id: res.headers.get("x-ebay-c-request-id") || res.headers.get("x-ebay-request-id") || null,
+    },
+  };
 }
 
 function parseObject(value: unknown) {
@@ -280,11 +392,12 @@ function publicApprovalState(
   const validationStatus = String(draft?.validation_status || "");
   const validationReady = validationStatus === "valid" || validationStatus === "warning";
   const isStale = staleness?.is_stale === true || staleness?.isStale === true;
+  const isSent = String(draft?.draft_status || "").toLowerCase() === "sent";
 
   return {
     status: isApproved ? "approved" : latest ? "approval_removed" : "not_approved",
     is_approved: isApproved,
-    ready_to_send: isApproved && isCurrent && validationReady && !isStale,
+    ready_to_send: isApproved && isCurrent && validationReady && !isStale && !isSent,
     latest_approval_id: isApproved ? latest.id : null,
     approved_by: isApproved ? latest.approved_by : null,
     approved_by_email: isApproved ? latest.approved_by_email : null,
@@ -299,6 +412,67 @@ function publicApprovalState(
   };
 }
 
+function publicSendAttempt(row: Record<string, any>) {
+  return {
+    id: row.id || null,
+    conversation_id: row.conversation_id || null,
+    target_message_id: row.target_message_id || null,
+    draft_id: row.draft_id || null,
+    approval_id: row.approval_id || null,
+    attempt_status: row.attempt_status || "created",
+    provider: row.provider || "ebay_commerce_message",
+    provider_message_id: row.provider_message_id || null,
+    provider_correlation_id: row.provider_correlation_id || null,
+    idempotency_key: row.idempotency_key || null,
+    attempt_sequence: Number(row.attempt_sequence || 1),
+    duplicate_of_attempt_id: row.duplicate_of_attempt_id || null,
+    error_message: row.error_message || null,
+    provider_response: parseObject(row.provider_response),
+    metadata: parseObject(row.metadata),
+    sent_at: row.sent_at || null,
+    created_by: row.created_by || null,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+  };
+}
+
+function publicSendState(attempts: Array<Record<string, any>> = []) {
+  const history = attempts
+    .slice()
+    .sort((left, right) =>
+      Number(right.attempt_sequence || 0) - Number(left.attempt_sequence || 0) ||
+      String(right.created_at || "").localeCompare(String(left.created_at || ""))
+    )
+    .map(publicSendAttempt);
+  const succeeded = history.find((attempt) => attempt.attempt_status === "succeeded") || null;
+  const latest = history[0] || null;
+  const status = succeeded ? "sent" : latest?.attempt_status || "not_sent";
+  return {
+    status,
+    is_sent: Boolean(succeeded),
+    latest_attempt_id: latest?.id || null,
+    latest_attempt_status: latest?.attempt_status || null,
+    latest_error_message: latest?.error_message || null,
+    provider_message_id: succeeded?.provider_message_id || null,
+    provider_correlation_id: succeeded?.provider_correlation_id || latest?.provider_correlation_id || null,
+    sent_at: succeeded?.sent_at || null,
+    history,
+  };
+}
+
+function draftHasManualSendBypass(draft: Record<string, any> | null) {
+  if (!draft?.id) return false;
+  if (String(draft.source_mode || "").toLowerCase() === "operator_edit") return true;
+  const inputSnapshot = parseObject(draft.input_snapshot);
+  const draftRequest = parseObject(inputSnapshot.draft_request);
+  const previousDraft = parseObject(inputSnapshot.previous_draft);
+  return draftRequest.manual_send_bypass === true || previousDraft.manual_send_bypass === true;
+}
+
+function draftAllowsManualSend(draft: Record<string, any> | null) {
+  return draftHasManualSendBypass(draft) && String(draft?.draft_status || "").toLowerCase() !== "sent";
+}
+
 async function loadTargetMessage(
   supabase: ServiceClient,
   conversationId: string,
@@ -311,6 +485,20 @@ async function loadTargetMessage(
     .eq("conversation_id", conversationId)
     .maybeSingle();
   if (error) throw new DraftError("target_message_lookup_failed", { phase: "draft_input" });
+  return data as Record<string, any> | null;
+}
+
+async function loadLatestInboundMessage(supabase: ServiceClient, conversationId: string) {
+  const { data, error } = await supabase
+    .from("ebay_conversation_messages")
+    .select("id, conversation_id, ebay_message_id, direction, sender_username, recipient_username, created_at_ebay, subject, message_body, message_body_preview, has_media, media_count, created_at")
+    .eq("conversation_id", conversationId)
+    .eq("direction", "inbound")
+    .order("created_at_ebay", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new DraftError("latest_inbound_message_lookup_failed", { phase: "draft_input" });
   return data as Record<string, any> | null;
 }
 
@@ -527,6 +715,7 @@ function buildDraftInput(
   operatorDraftText: string | null,
   improvementInstructions: string | null,
   previousDraft: Record<string, any> | null,
+  manualSendBypass: boolean,
   version: string,
 ) {
   const messages = safeArray(context.messages) as Array<Record<string, any>>;
@@ -557,6 +746,8 @@ function buildDraftInput(
         id: previousDraft.id || null,
         target_message_id: previousDraft.target_message_id || previousDraftTargetMessageId(previousDraft),
         draft_status: previousDraft.draft_status || null,
+        source_mode: previousDraft.source_mode || null,
+        manual_send_bypass: draftAllowsManualSend(previousDraft),
         final_text: previousDraft.final_text || previousDraft.edited_text || previousDraft.draft_text || null,
         grounding_summary: previousDraft.grounding_summary || {},
         created_at: previousDraft.created_at || null,
@@ -569,10 +760,10 @@ function buildDraftInput(
       prompt_version: version,
       target_message_id: targetMessage.id || null,
       output_is_internal_suggestion: true,
-      human_review_required: true,
+      human_review_required: !manualSendBypass,
+      manual_send_bypass: manualSendBypass,
       sends_allowed: false,
       ebay_mutations_allowed: false,
-      outlook_mutations_allowed: false,
     },
   };
 }
@@ -584,9 +775,9 @@ Return strict JSON only. Do not include markdown wrappers, prose outside JSON, o
 Your output is an internal editable draft suggestion only. A human operator must review it. Never imply that a message was sent or should be sent automatically.
 
 Draft style:
-- Write a concise eBay seller reply, not an Outlook email.
+- Write a concise eBay seller reply for the native eBay message thread.
 - Use a professional, friendly, calm tone.
-- Prefer one or two short paragraphs.
+- Prefer one or two short response blocks.
 - Do not add a subject line or email signature.
 - Do not mention internal systems, databases, Supabase, AI, classification, link confidence, or missing records to the buyer.
 - If facts are missing, write a general safe acknowledgement and say we will review/look into the details.
@@ -902,6 +1093,7 @@ function publicDraft(
   row: Record<string, any>,
   staleness: Record<string, unknown> | null = null,
   approvals: Array<Record<string, any>> = [],
+  sendAttempts: Array<Record<string, any>> = [],
 ) {
   const grounding = parseObject(row.grounding_summary);
   const inputSnapshot = parseObject(row.input_snapshot);
@@ -935,7 +1127,9 @@ function publicDraft(
     discarded_at: row.discarded_at || null,
     superseded_at: row.superseded_at || null,
     staleness,
+    manual_send_bypass: draftHasManualSendBypass(row),
     approval: publicApprovalState(approvals, staleness, row),
+    send_state: publicSendState(sendAttempts),
   };
 }
 
@@ -964,6 +1158,18 @@ async function loadApprovalRows(supabase: ServiceClient, draftIds: string[]) {
   return (data || []) as Array<Record<string, any>>;
 }
 
+async function loadSendAttemptRows(supabase: ServiceClient, draftIds: string[]) {
+  const ids = Array.from(new Set(draftIds.filter(Boolean)));
+  if (!ids.length) return [] as Array<Record<string, any>>;
+  const { data, error } = await supabase
+    .from("ebay_message_send_attempts")
+    .select("id, conversation_id, target_message_id, draft_id, approval_id, attempt_status, provider, provider_message_id, provider_correlation_id, idempotency_key, attempt_sequence, duplicate_of_attempt_id, error_message, provider_response, metadata, sent_at, created_by, created_at, updated_at")
+    .in("draft_id", ids)
+    .order("created_at", { ascending: false });
+  if (error) throw new DraftError("send_attempt_lookup_failed", { phase: "send_attempt_lookup", details: { message: error.message } });
+  return (data || []) as Array<Record<string, any>>;
+}
+
 function approvalsByDraftId(approvals: Array<Record<string, any>> = []) {
   return approvals.reduce((map, approval) => {
     const draftId = String(approval.draft_id || "");
@@ -974,20 +1180,37 @@ function approvalsByDraftId(approvals: Array<Record<string, any>> = []) {
   }, new Map<string, Array<Record<string, any>>>());
 }
 
+function sendAttemptsByDraftId(attempts: Array<Record<string, any>> = []) {
+  return attempts.reduce((map, attempt) => {
+    const draftId = String(attempt.draft_id || "");
+    if (!draftId) return map;
+    if (!map.has(draftId)) map.set(draftId, []);
+    map.get(draftId)?.push(attempt);
+    return map;
+  }, new Map<string, Array<Record<string, any>>>());
+}
+
 async function viewDrafts(supabase: ServiceClient, conversationId: string) {
   const [rows, latest] = await Promise.all([
     loadDraftRows(supabase, conversationId, 20),
     loadCurrentLatestMessage(supabase, conversationId),
   ]);
-  const approvals = await loadApprovalRows(supabase, rows.map((row) => row.id));
+  const draftIds = rows.map((row) => row.id);
+  const [approvals, sendAttempts] = await Promise.all([
+    loadApprovalRows(supabase, draftIds),
+    loadSendAttemptRows(supabase, draftIds),
+  ]);
   const approvalMap = approvalsByDraftId(approvals);
-  const drafts = rows.map((row) => publicDraft(row, staleStatus(row, latest), approvalMap.get(String(row.id)) || []));
+  const sendAttemptMap = sendAttemptsByDraftId(sendAttempts);
+  const drafts = rows.map((row) =>
+    publicDraft(row, staleStatus(row, latest), approvalMap.get(String(row.id)) || [], sendAttemptMap.get(String(row.id)) || [])
+  );
   return {
     ok: true,
     mode: "view",
     conversation_id: conversationId,
     drafts,
-    current_draft: drafts.find((draft) => draft.is_current && !draft.discarded_at) || null,
+    current_draft: drafts.find((draft) => draft.is_current && !draft.discarded_at) || drafts.find((draft) => draft.draft_status === "sent") || null,
     draft_count: drafts.length,
     safety: safetyEnvelope(),
   };
@@ -1082,16 +1305,33 @@ async function insertDraft(
     aiOutput: Record<string, unknown>;
     actorId: string | null;
     operatorNotes: string | null;
+    draftStatus?: "generated" | "saved";
   },
 ) {
   const nowIso = new Date().toISOString();
   const version = await nextDraftVersion(supabase, options.conversationId);
   const { error: clearError } = await supabase
     .from("ebay_conversation_response_drafts")
-    .update({ is_current: false, superseded_at: nowIso, draft_status: "superseded" })
+    .update({
+      is_current: false,
+      superseded_at: nowIso,
+      draft_status: "superseded",
+    })
     .eq("conversation_id", options.conversationId)
-    .eq("is_current", true);
+    .eq("is_current", true)
+    .neq("draft_status", "sent");
   if (clearError) throw new DraftError("draft_supersede_failed", { phase: "draft_write" });
+
+  const { error: sentClearError } = await supabase
+    .from("ebay_conversation_response_drafts")
+    .update({
+      is_current: false,
+      superseded_at: nowIso,
+    })
+    .eq("conversation_id", options.conversationId)
+    .eq("is_current", true)
+    .eq("draft_status", "sent");
+  if (sentClearError) throw new DraftError("draft_supersede_failed", { phase: "draft_write" });
 
   const validation = {
     status: options.validationStatus,
@@ -1104,7 +1344,7 @@ async function insertDraft(
       target_message_id: options.targetMessageId,
       latest_message_id: options.latestMessageId,
       classification_id: options.classificationId,
-      draft_status: options.validationStatus === "error" ? "error" : "generated",
+      draft_status: options.validationStatus === "error" ? "error" : options.draftStatus || "generated",
       draft_text: options.output.draft_text,
       edited_text: null,
       final_text: options.output.draft_text,
@@ -1132,6 +1372,128 @@ async function insertDraft(
   if (error || !data?.id) throw new DraftError("draft_insert_failed", { phase: "draft_write", details: { message: error?.message } });
   const latest = await loadCurrentLatestMessage(supabase, options.conversationId);
   return publicDraft(data as Record<string, any>, staleStatus(data as Record<string, any>, latest));
+}
+
+async function resolveManualDraftTarget(
+  supabase: ServiceClient,
+  conversationId: string,
+  input: Input,
+) {
+  const target = input.targetMessageId
+    ? await loadTargetMessage(supabase, conversationId, input.targetMessageId)
+    : await loadLatestInboundMessage(supabase, conversationId);
+
+  if (!target?.id) {
+    throw new DraftError(input.targetMessageId ? "target_message_not_found" : "target_message_required", {
+      status: 400,
+      phase: "draft_input",
+    });
+  }
+  if (String(target.direction || "").toLowerCase() !== "inbound") {
+    throw new DraftError("target_message_must_be_inbound", { status: 400, phase: "draft_input" });
+  }
+  return target;
+}
+
+async function createManualDraft(
+  supabase: ServiceClient,
+  input: Input,
+  admin: { userId: string | null },
+) {
+  if (!input.draftText) throw new DraftError("draft_text_required", { status: 400, phase: "input" });
+  const conversation = await resolveEbayConversation(supabase, {
+    conversationId: input.conversationId,
+    ebayConversationId: input.ebayConversationId,
+    conversationType: input.conversationType,
+  });
+  const [targetMessage, latestMessage, classification] = await Promise.all([
+    resolveManualDraftTarget(supabase, conversation.id, input),
+    loadCurrentLatestMessage(supabase, conversation.id),
+    loadCurrentClassification(supabase, conversation.id),
+  ]);
+  const validationErrors = input.draftText.length > EBAY_MAX_MESSAGE_TEXT_CHARS
+    ? ["draft_text_too_long_for_ebay"]
+    : [];
+  const output: DraftOutput = {
+    draft_text: input.draftText,
+    tone: "operator_written",
+    summary_of_intent: "Operator-written buyer reply.",
+    facts_used: [],
+    missing_context: [],
+    safety_warnings: validationErrors.length ? ["Draft exceeds the eBay message character limit."] : [],
+    confidence: 1,
+  };
+  const inputSnapshot = {
+    conversation: {
+      id: conversation.id,
+      ebay_conversation_id: conversation.ebay_conversation_id || null,
+      conversation_type: conversation.conversation_type || null,
+      other_party_username: conversation.other_party_username || null,
+    },
+    target_message: compactMessageForDraft(targetMessage),
+    latest_message: compactMessageForDraft(latestMessage),
+    latest_inbound_message: compactMessageForDraft(targetMessage),
+    classification: classification ? effectiveClassification(classification) : null,
+    grounding: {
+      facts: [],
+      missing_context_options: [],
+    },
+    operator_draft: input.draftText,
+    operator_instructions: null,
+    previous_draft: null,
+    draft_request: {
+      mode: "save_edit",
+      generator_name: "operator_manual_composer",
+      generator_version: "v1",
+      prompt_version: MANUAL_PROMPT_VERSION,
+      target_message_id: targetMessage.id,
+      output_is_internal_suggestion: false,
+      human_review_required: false,
+      manual_send_bypass: true,
+      sends_allowed: false,
+      ebay_mutations_allowed: false,
+    },
+  };
+  const promptHash = await sha256Hex(stableStringify({
+    prompt: "operator_manual_composer",
+    version: MANUAL_PROMPT_VERSION,
+  }));
+  const inputHash = await sha256Hex(stableStringify({
+    generator_name: "operator_manual_composer",
+    generator_version: "v1",
+    prompt_hash: promptHash,
+    input: inputSnapshot,
+  }));
+  const contextHash = await sha256Hex(stableStringify({
+    conversation_id: conversation.id,
+    target_message_id: targetMessage.id,
+    latest_message_id: latestMessage?.id || null,
+    classification_id: classification?.id || null,
+  }));
+
+  return await insertDraft(supabase, {
+    conversationId: conversation.id,
+    targetMessageId: targetMessage.id,
+    latestMessageId: latestMessage?.id || null,
+    classificationId: classification?.id || null,
+    sourceMode: "operator_edit",
+    model: "operator_manual",
+    promptVersionValue: MANUAL_PROMPT_VERSION,
+    promptHash,
+    inputHash,
+    contextHash,
+    inputSnapshot,
+    output,
+    validationStatus: validationErrors.length ? "warning" : "valid",
+    validationErrors,
+    aiOutput: {
+      manual_composer: true,
+      generated_by_ai: false,
+    },
+    actorId: admin.userId,
+    operatorNotes: input.operatorNotes,
+    draftStatus: "saved",
+  });
 }
 
 async function generateDraft(
@@ -1164,6 +1526,7 @@ async function generateDraft(
     loadCurrentClassification(supabase, conversation.id),
   ]);
   const targetMessage = await resolveTargetMessage(supabase, conversation.id, context as Record<string, any>, input, previousDraft);
+  const manualImprove = input.mode === "improve" && (input.manualComposer || draftAllowsManualSend(previousDraft));
   const draftInput = buildDraftInput(
     context as Record<string, any>,
     classification,
@@ -1172,6 +1535,7 @@ async function generateDraft(
     operatorDraft,
     input.improvementInstructions,
     previousDraft,
+    manualImprove,
     promptVersionValue,
   );
   const contextHash = await sha256Hex(stableStringify(context));
@@ -1185,7 +1549,9 @@ async function generateDraft(
   const rawOutput = await callOpenAI(draftInput, prompt, model);
   const validation = validateDraftOutput(rawOutput, draftInput);
   const output = validation.value;
-  const sourceMode = validation.fallbackUsed ? "system_fallback" : input.mode === "regenerate" ? "regenerate" : input.mode === "improve" ? "improve" : "generate";
+  const sourceMode = manualImprove
+    ? "operator_edit"
+    : validation.fallbackUsed ? "system_fallback" : input.mode === "regenerate" ? "regenerate" : input.mode === "improve" ? "improve" : "generate";
   const validationStatus = validation.ok ? "valid" : "warning";
   const latest = draftInput.latest_message as Record<string, any> | null;
   const draft = await insertDraft(supabase, {
@@ -1232,6 +1598,12 @@ function currentDraftText(draft: Record<string, any>) {
 
 function approvalTargetMessageId(draft: Record<string, any>) {
   return text(draft.target_message_id || previousDraftTargetMessageId(draft), 120) || null;
+}
+
+function assertDraftNotSent(draft: Record<string, any>, phase = "draft") {
+  if (String(draft.draft_status || "").toLowerCase() === "sent") {
+    throw new DraftError("draft_already_sent", { status: 409, phase });
+  }
 }
 
 async function latestApprovalForDraft(supabase: ServiceClient, draftId: string) {
@@ -1284,6 +1656,7 @@ async function saveDraftTextIfChanged(
   const nextText = draftText ? safeBodyText(draftText, MAX_OPERATOR_TEXT_CHARS) : currentDraftText(draft);
   const existingText = currentDraftText(draft);
   if (!nextText || nextText === existingText) return draft;
+  assertDraftNotSent(draft, "draft_write");
 
   const { data, error } = await supabase
     .from("ebay_conversation_response_drafts")
@@ -1311,7 +1684,11 @@ async function approveDraft(
   let draft = input.draftId
     ? await loadDraftById(supabase, input.draftId)
     : input.conversationId ? await loadCurrentDraft(supabase, input.conversationId) : null;
+  if (!input.draftId && (!draft?.id || String(draft.draft_status || "").toLowerCase() === "sent")) {
+    draft = await createManualDraft(supabase, input, admin);
+  }
   if (!draft?.id) throw new DraftError("draft_not_found", { status: 404, phase: "draft_lookup" });
+  assertDraftNotSent(draft, "approval");
   if (draft.discarded_at || draft.is_current !== true) {
     throw new DraftError("draft_not_current", { status: 409, phase: "approval" });
   }
@@ -1380,7 +1757,9 @@ async function unapproveDraft(
   const draft = input.draftId
     ? await loadDraftById(supabase, input.draftId)
     : input.conversationId ? await loadCurrentDraft(supabase, input.conversationId) : null;
+
   if (!draft?.id) throw new DraftError("draft_not_found", { status: 404, phase: "draft_lookup" });
+  assertDraftNotSent(draft, "approval");
 
   const latestApproval = await latestApprovalForDraft(supabase, draft.id);
   const removal = await insertApprovalRemoval(
@@ -1406,10 +1785,23 @@ async function saveEdit(
   admin: { userId: string | null; email: string | null },
 ) {
   if (!input.draftText) throw new DraftError("draft_text_required", { status: 400, phase: "input" });
-  const draft = input.draftId
+  let draft = input.draftId
     ? await loadDraftById(supabase, input.draftId)
     : input.conversationId ? await loadCurrentDraft(supabase, input.conversationId) : null;
+  if (!input.draftId && (!draft?.id || String(draft.draft_status || "").toLowerCase() === "sent")) {
+    const created = await createManualDraft(supabase, input, admin);
+    return {
+      ok: true,
+      mode: "save_edit",
+      conversation_id: created.conversation_id,
+      draft: created,
+      draft_id: created.id,
+      created_manual_draft: true,
+      safety: safetyEnvelope(),
+    };
+  }
   if (!draft?.id) throw new DraftError("draft_not_found", { status: 404, phase: "draft_lookup" });
+  assertDraftNotSent(draft, "draft_write");
 
   const { data, error } = await supabase
     .from("ebay_conversation_response_drafts")
@@ -1443,7 +1835,9 @@ async function discardDraft(
   const draft = input.draftId
     ? await loadDraftById(supabase, input.draftId)
     : input.conversationId ? await loadCurrentDraft(supabase, input.conversationId) : null;
+
   if (!draft?.id) throw new DraftError("draft_not_found", { status: 404, phase: "draft_lookup" });
+  assertDraftNotSent(draft, "draft_write");
   const nowIso = new Date().toISOString();
   const { data, error } = await supabase
     .from("ebay_conversation_response_drafts")
@@ -1468,13 +1862,520 @@ async function discardDraft(
   };
 }
 
-function safetyEnvelope() {
+async function loadSendAttemptsForKey(supabase: ServiceClient, idempotencyKey: string) {
+  const { data, error } = await supabase
+    .from("ebay_message_send_attempts")
+    .select("id, conversation_id, target_message_id, draft_id, approval_id, attempt_status, provider, provider_message_id, provider_correlation_id, idempotency_key, attempt_sequence, duplicate_of_attempt_id, error_message, provider_response, metadata, sent_at, created_by, created_at, updated_at")
+    .eq("idempotency_key", idempotencyKey)
+    .order("attempt_sequence", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw new DraftError("send_attempt_lookup_failed", { phase: "send_attempt_lookup", details: { message: error.message } });
+  return (data || []) as Array<Record<string, any>>;
+}
+
+function nextAttemptSequence(attempts: Array<Record<string, any>>) {
+  return attempts.reduce((max, attempt) => Math.max(max, Number(attempt.attempt_sequence || 0)), 0) + 1;
+}
+
+function existingDuplicateSource(attempts: Array<Record<string, any>>) {
+  const succeeded = attempts.find((attempt) => attempt.attempt_status === "succeeded");
+  if (succeeded) {
+    return {
+      attempt: succeeded,
+      reason: "Duplicate send prevented: this draft was already sent.",
+    };
+  }
+
+  const active = attempts.find((attempt) => ACTIVE_SEND_STATUSES.has(String(attempt.attempt_status || "")));
+  if (active) {
+    return {
+      attempt: active,
+      reason: "Duplicate send prevented: a send attempt is already in progress.",
+    };
+  }
+
+  const unknownFailure = attempts.find((attempt) =>
+    attempt.attempt_status === "failed" && parseObject(attempt.metadata).provider_delivery_unknown === true
+  );
+  if (unknownFailure) {
+    return {
+      attempt: unknownFailure,
+      reason: "Duplicate send prevented: the previous attempt has an unknown eBay delivery state. Verify in eBay before retrying.",
+    };
+  }
+
+  return null;
+}
+
+async function insertSendAttemptWithNextSequence(
+  supabase: ServiceClient,
+  values: Record<string, unknown>,
+) {
+  const idempotencyKey = String(values.idempotency_key || "");
+  if (!idempotencyKey) throw new DraftError("send_idempotency_key_required", { phase: "send_attempt_write" });
+
+  let lastError: any = null;
+  for (let index = 0; index < 4; index += 1) {
+    const attempts = await loadSendAttemptsForKey(supabase, idempotencyKey);
+    const { data, error } = await supabase
+      .from("ebay_message_send_attempts")
+      .insert({
+        ...values,
+        attempt_sequence: nextAttemptSequence(attempts),
+      })
+      .select("*")
+      .single();
+    if (!error && data?.id) return data as Record<string, any>;
+    lastError = error;
+    if (error?.code !== "23505") break;
+  }
+
+  throw new DraftError("send_attempt_insert_failed", {
+    phase: "send_attempt_write",
+    details: { message: lastError?.message || "Unable to create send attempt." },
+  });
+}
+
+async function insertInitialSendAttempt(
+  supabase: ServiceClient,
+  values: Record<string, unknown>,
+) {
+  const idempotencyKey = String(values.idempotency_key || "");
+  if (!idempotencyKey) throw new DraftError("send_idempotency_key_required", { phase: "send_attempt_write" });
+  const attempts = await loadSendAttemptsForKey(supabase, idempotencyKey);
+  const { data, error } = await supabase
+    .from("ebay_message_send_attempts")
+    .insert({
+      ...values,
+      attempt_sequence: nextAttemptSequence(attempts),
+    })
+    .select("*")
+    .single();
+  if (!error && data?.id) return data as Record<string, any>;
+  if (error?.code === "23505") return null;
+  throw new DraftError("send_attempt_insert_failed", {
+    phase: "send_attempt_write",
+    details: { message: error?.message || "Unable to create send attempt." },
+  });
+}
+
+async function insertDuplicateSendAttempt(
+  supabase: ServiceClient,
+  draft: Record<string, any>,
+  approval: Record<string, any>,
+  admin: { userId: string | null; email: string | null },
+  duplicateOf: Record<string, any>,
+  reason: string,
+) {
+  return await insertSendAttemptWithNextSequence(supabase, {
+    conversation_id: draft.conversation_id,
+    target_message_id: approval.target_message_id || approvalTargetMessageId(draft),
+    draft_id: draft.id,
+    approval_id: approval.id,
+    approved_by: approval.approved_by || null,
+    approved_at: approval.approved_at || null,
+    approval_notes: approval.approval_notes || null,
+    attempt_status: "duplicate",
+    provider: "ebay_commerce_message",
+    idempotency_key: approval.idempotency_key,
+    duplicate_of_attempt_id: duplicateOf.id || null,
+    error_message: reason,
+    provider_response: parseObject(duplicateOf.provider_response),
+    metadata: {
+      duplicate_prevented: true,
+      duplicate_reason: reason,
+      duplicate_of_attempt_status: duplicateOf.attempt_status || null,
+      duplicate_of_attempt_id: duplicateOf.id || null,
+    },
+    created_by: admin.userId,
+  });
+}
+
+async function updateSendAttempt(
+  supabase: ServiceClient,
+  attemptId: string,
+  patch: Record<string, unknown>,
+) {
+  const { data, error } = await supabase
+    .from("ebay_message_send_attempts")
+    .update(patch)
+    .eq("id", attemptId)
+    .select("*")
+    .single();
+  if (error || !data?.id) {
+    throw new DraftError("send_attempt_update_failed", {
+      phase: "send_attempt_write",
+      details: { message: error?.message || "Unable to update send attempt." },
+    });
+  }
+  return data as Record<string, any>;
+}
+
+function providerMessageId(payload: Record<string, unknown>) {
+  return text(payload.messageId || payload.message_id || payload.id, 240) || null;
+}
+
+function providerCorrelationId(result: Record<string, any>) {
+  return text(result.headers?.correlation_id || result.payload?.correlationId || result.payload?.correlation_id, 240) || null;
+}
+
+function ebaySendRequestBody(conversation: Record<string, any>, messageText: string) {
   return {
-    sendsEnabled: false,
-    messagesSent: 0,
-    ebayMutationsPerformed: false,
-    outlookMutationsPerformed: false,
+    conversationId: conversation.ebay_conversation_id,
+    messageText,
+    emailCopyToSender: false,
+  };
+}
+
+async function manualSendIdempotencyKey(draft: Record<string, any>, targetMessageId: string) {
+  return await sha256Hex(stableStringify({
+    scope: "ebay_message_send",
+    version: "v1",
+    provider: "ebay_commerce_message",
+    approval_mode: "manual_operator_message",
+    conversation_id: draft.conversation_id,
+    target_message_id: targetMessageId,
+    draft_id: draft.id,
+  }));
+}
+
+async function markDraftSent(
+  supabase: ServiceClient,
+  draft: Record<string, any>,
+  admin: { userId: string | null },
+) {
+  const { data, error } = await supabase
+    .from("ebay_conversation_response_drafts")
+    .update({
+      draft_status: "sent",
+      updated_by: admin.userId,
+    })
+    .eq("id", draft.id)
+    .select("*")
+    .single();
+  if (error || !data?.id) throw new DraftError("draft_sent_mark_failed", { phase: "draft_write", details: { message: error?.message } });
+  return data as Record<string, any>;
+}
+
+async function sendDraft(
+  supabase: ServiceClient,
+  input: Input,
+  admin: { userId: string | null; email: string | null },
+) {
+  if (input.sendConfirmed !== true) {
+    throw new DraftError("send_confirmation_required", { status: 400, phase: "send_confirmation" });
+  }
+
+  let draft = input.draftId
+    ? await loadDraftById(supabase, input.draftId)
+    : input.conversationId ? await loadCurrentDraft(supabase, input.conversationId) : null;
+
+  if (!input.draftId && (!draft?.id || String(draft.draft_status || "").toLowerCase() === "sent") && input.draftText) {
+    draft = await createManualDraft(supabase, input, admin);
+  }
+
+  if (!draft?.id) throw new DraftError("draft_not_found", { status: 404, phase: "draft_lookup" });
+  if (draft.discarded_at || draft.is_current !== true) {
+    throw new DraftError("draft_not_current", { status: 409, phase: "send_validation" });
+  }
+  if (String(draft.draft_status || "").toLowerCase() === "sent") {
+    const latestApproval = await latestApprovalForDraft(supabase, draft.id);
+    if (latestApproval?.approval_status === "approved" && latestApproval.idempotency_key) {
+      const attempts = await loadSendAttemptsForKey(supabase, latestApproval.idempotency_key);
+      const duplicate = existingDuplicateSource(attempts);
+      if (duplicate) {
+        const duplicateAttempt = await insertDuplicateSendAttempt(supabase, draft, latestApproval, admin, duplicate.attempt, duplicate.reason);
+        const result = await viewDrafts(supabase, draft.conversation_id);
+        return {
+          ...result,
+          mode: "send",
+          duplicate_prevented: true,
+          send_attempt: publicSendAttempt(duplicateAttempt),
+          duplicate_of_attempt_id: duplicate.attempt.id || null,
+          message: duplicate.reason,
+          safety: safetyEnvelope({ sendsEnabled: true }),
+        };
+      }
+    }
+    if (draftHasManualSendBypass(draft)) {
+      const targetMessageId = approvalTargetMessageId(draft);
+      if (targetMessageId) {
+        const manualApproval = {
+          id: null,
+          target_message_id: targetMessageId,
+          approved_by: null,
+          approved_at: null,
+          approval_notes: null,
+          idempotency_key: await manualSendIdempotencyKey(draft, targetMessageId),
+        };
+        const attempts = await loadSendAttemptsForKey(supabase, manualApproval.idempotency_key);
+        const duplicate = existingDuplicateSource(attempts);
+        if (duplicate) {
+          const duplicateAttempt = await insertDuplicateSendAttempt(supabase, draft, manualApproval, admin, duplicate.attempt, duplicate.reason);
+          const result = await viewDrafts(supabase, draft.conversation_id);
+          return {
+            ...result,
+            mode: "send",
+            duplicate_prevented: true,
+            send_attempt: publicSendAttempt(duplicateAttempt),
+            duplicate_of_attempt_id: duplicate.attempt.id || null,
+            message: duplicate.reason,
+            safety: safetyEnvelope({ sendsEnabled: true }),
+          };
+        }
+      }
+    }
+    throw new DraftError("draft_already_sent", { status: 409, phase: "send_validation" });
+  }
+
+  if (draftAllowsManualSend(draft)) {
+    draft = await saveDraftTextIfChanged(supabase, draft, input.draftText, admin, input.operatorNotes);
+  }
+
+  const latest = await loadCurrentLatestMessage(supabase, draft.conversation_id);
+  const staleness = staleStatus(draft, latest);
+  if (staleness.is_stale === true) {
+    throw new DraftError("draft_stale_send_blocked", { status: 409, phase: "send_validation", message: String(staleness.message || "Draft is stale.") });
+  }
+
+  const validationStatus = String(draft.validation_status || "");
+  if (!["valid", "warning"].includes(validationStatus)) {
+    throw new DraftError("draft_validation_send_blocked", { status: 409, phase: "send_validation" });
+  }
+
+  const manualSend = draftAllowsManualSend(draft);
+  const approval = manualSend ? null : await latestApprovalForDraft(supabase, draft.id);
+  if (!manualSend && (approval?.approval_status !== "approved" || !approval.idempotency_key)) {
+    throw new DraftError("draft_approval_required", { status: 409, phase: "send_validation" });
+  }
+
+  const targetMessageId = approval?.target_message_id || approvalTargetMessageId(draft);
+  if (!targetMessageId) throw new DraftError("target_message_required", { status: 400, phase: "send_validation" });
+  const targetMessage = await loadTargetMessage(supabase, draft.conversation_id, targetMessageId);
+  if (!targetMessage?.id) throw new DraftError("target_message_not_found", { status: 404, phase: "send_validation" });
+  if (String(targetMessage.direction || "").toLowerCase() !== "inbound") {
+    throw new DraftError("target_message_must_be_inbound", { status: 409, phase: "send_validation" });
+  }
+
+  const conversation = await resolveEbayConversation(supabase, { conversationId: draft.conversation_id });
+  const ebayConversationId = text(conversation.ebay_conversation_id, 240);
+  if (!ebayConversationId) throw new DraftError("ebay_conversation_id_required", { status: 409, phase: "send_validation" });
+
+  const messageText = currentDraftText(draft);
+  if (!messageText) throw new DraftError("draft_text_required", { status: 400, phase: "send_validation" });
+  if (messageText.length > EBAY_MAX_MESSAGE_TEXT_CHARS) {
+    throw new DraftError("draft_text_too_long_for_ebay", {
+      status: 400,
+      phase: "send_validation",
+      message: `eBay Message API allows ${EBAY_MAX_MESSAGE_TEXT_CHARS} characters. Current draft has ${messageText.length}.`,
+    });
+  }
+
+  const idempotencyKey = manualSend ? await manualSendIdempotencyKey(draft, targetMessageId) : String(approval?.idempotency_key || "");
+  const existingAttempts = await loadSendAttemptsForKey(supabase, idempotencyKey);
+  const duplicate = existingDuplicateSource(existingAttempts);
+  if (duplicate) {
+    const duplicateAttempt = await insertDuplicateSendAttempt(supabase, draft, {
+      id: approval?.id || null,
+      target_message_id: targetMessageId,
+      approved_by: approval?.approved_by || null,
+      approved_at: approval?.approved_at || null,
+      approval_notes: approval?.approval_notes || null,
+      idempotency_key: idempotencyKey,
+    }, admin, duplicate.attempt, duplicate.reason);
+    const result = await viewDrafts(supabase, draft.conversation_id);
+    return {
+      ...result,
+      mode: "send",
+      duplicate_prevented: true,
+      send_attempt: publicSendAttempt(duplicateAttempt),
+      duplicate_of_attempt_id: duplicate.attempt.id || null,
+      message: duplicate.reason,
+      safety: safetyEnvelope({ sendsEnabled: true }),
+    };
+  }
+
+  const requestBody = ebaySendRequestBody(conversation, messageText);
+  const messageTextSha = await sha256Hex(messageText);
+  const initialAttempt = await insertInitialSendAttempt(supabase, {
+    conversation_id: draft.conversation_id,
+    target_message_id: targetMessage.id,
+    draft_id: draft.id,
+    approval_id: approval?.id || null,
+    approved_by: approval?.approved_by || null,
+    approved_at: approval?.approved_at || null,
+    approval_notes: approval?.approval_notes || null,
+    attempt_status: "sending",
+    provider: "ebay_commerce_message",
+    idempotency_key: idempotencyKey,
+    provider_response: {},
+    metadata: {
+      provider_path: "/commerce/message/v1/send_message",
+      request_body: {
+        conversationId: ebayConversationId,
+        messageTextSha256: messageTextSha,
+        messageTextLength: messageText.length,
+        emailCopyToSender: false,
+      },
+      target_ebay_message_id: targetMessage.ebay_message_id || null,
+      operator_confirmed_send: true,
+      approval_required: !manualSend,
+      manual_send_bypass: manualSend,
+      provider_call_started: false,
+      provider_delivery_unknown: false,
+    },
+    created_by: admin.userId,
+  });
+
+  if (!initialAttempt) {
+    const attemptsAfterRace = await loadSendAttemptsForKey(supabase, idempotencyKey);
+    const duplicateAfterRace = existingDuplicateSource(attemptsAfterRace);
+    if (duplicateAfterRace) {
+      const duplicateAttempt = await insertDuplicateSendAttempt(supabase, draft, {
+        id: approval?.id || null,
+        target_message_id: targetMessageId,
+        approved_by: approval?.approved_by || null,
+        approved_at: approval?.approved_at || null,
+        approval_notes: approval?.approval_notes || null,
+        idempotency_key: idempotencyKey,
+      }, admin, duplicateAfterRace.attempt, duplicateAfterRace.reason);
+      const result = await viewDrafts(supabase, draft.conversation_id);
+      return {
+        ...result,
+        mode: "send",
+        duplicate_prevented: true,
+        send_attempt: publicSendAttempt(duplicateAttempt),
+        duplicate_of_attempt_id: duplicateAfterRace.attempt.id || null,
+        message: duplicateAfterRace.reason,
+        safety: safetyEnvelope({ sendsEnabled: true }),
+      };
+    }
+    throw new DraftError("send_attempt_race_detected", { status: 409, phase: "send_attempt_write" });
+  }
+
+  let attempt = initialAttempt;
+
+  let token = "";
+  try {
+    token = await refreshEbayToken();
+  } catch (error) {
+    const providerResponse = error instanceof DraftError ? parseObject(error.details.provider_response) : {};
+    await updateSendAttempt(supabase, attempt.id, {
+      attempt_status: "failed",
+      error_message: error instanceof Error ? error.message : "eBay OAuth failed.",
+      provider_response: providerResponse,
+      metadata: {
+        ...parseObject(attempt.metadata),
+        provider_call_started: false,
+        provider_delivery_unknown: false,
+        failure_phase: "oauth",
+      },
+    });
+    throw error;
+  }
+
+  let providerResult: { ok: boolean; status: number; payload: Record<string, unknown>; headers: Record<string, unknown> };
+  try {
+    attempt = await updateSendAttempt(supabase, attempt.id, {
+      metadata: {
+        ...parseObject(attempt.metadata),
+        provider_call_started: true,
+      },
+    });
+    providerResult = await ebayPost(token, "/commerce/message/v1/send_message", requestBody);
+  } catch (error) {
+    const providerResponse = {
+      status: null,
+      payload: { message: error instanceof Error ? error.message : String(error || "Unknown provider error.") },
+      request: parseObject(attempt.metadata).request_body || {},
+    };
+    await updateSendAttempt(supabase, attempt.id, {
+      attempt_status: "failed",
+      error_message: "eBay send failed after the provider call started. Verify the conversation in eBay before retrying.",
+      provider_response: providerResponse,
+      metadata: {
+        ...parseObject(attempt.metadata),
+        provider_call_started: true,
+        provider_delivery_unknown: true,
+        failure_phase: "provider_send",
+      },
+    });
+    throw new DraftError("ebay_provider_send_unknown", {
+      status: 502,
+      phase: "provider_send",
+      message: "eBay send failed after the provider call started. Verify the conversation in eBay before retrying.",
+      details: { provider_response: providerResponse },
+    });
+  }
+
+  const providerResponse = {
+    status: providerResult.status,
+    payload: providerResult.payload,
+    headers: providerResult.headers,
+    request: parseObject(attempt.metadata).request_body || {},
+  };
+
+  if (!providerResult.ok) {
+    const errorMessage = `eBay send failed (${providerResult.status}): ${safeMessage(providerResult.payload)}`;
+    await updateSendAttempt(supabase, attempt.id, {
+      attempt_status: "failed",
+      provider_correlation_id: providerCorrelationId(providerResult),
+      error_message: errorMessage,
+      provider_response: providerResponse,
+      metadata: {
+        ...parseObject(attempt.metadata),
+        provider_call_started: true,
+        provider_delivery_unknown: false,
+        failure_phase: "provider_send",
+      },
+    });
+    throw new DraftError("ebay_provider_send_failed", {
+      status: 502,
+      phase: "provider_send",
+      message: errorMessage,
+      details: { provider_response: providerResponse },
+    });
+  }
+
+  const nowIso = new Date().toISOString();
+  const providerId = providerMessageId(providerResult.payload);
+  const providerCorrelation = providerCorrelationId(providerResult);
+  attempt = await updateSendAttempt(supabase, attempt.id, {
+    attempt_status: "succeeded",
+    provider_message_id: providerId,
+    provider_correlation_id: providerCorrelation,
+    provider_response: providerResponse,
+    sent_at: nowIso,
+    metadata: {
+      ...parseObject(attempt.metadata),
+      provider_call_started: true,
+      provider_delivery_unknown: false,
+      provider_status: "created",
+    },
+  });
+  await markDraftSent(supabase, draft, admin);
+
+  const result = await viewDrafts(supabase, draft.conversation_id);
+  return {
+    ...result,
+    mode: "send",
+    draft_id: draft.id,
+    approval_id: approval?.id || null,
+    send_attempt: publicSendAttempt(attempt),
+    provider_message_id: providerId,
+    sent_at: nowIso,
+    safety: safetyEnvelope({ sendsEnabled: true, messagesSent: 1, ebayMutationsPerformed: true }),
+  };
+}
+
+function safetyEnvelope(options: { sendsEnabled?: boolean; messagesSent?: number; ebayMutationsPerformed?: boolean } = {}) {
+  return {
+    sendsEnabled: options.sendsEnabled === true,
+    messagesSent: Number(options.messagesSent || 0),
+    ebayMutationsPerformed: options.ebayMutationsPerformed === true,
     returnMutationsPerformed: false,
+    automaticResponsesSent: 0,
+    humanInitiatedOnly: true,
   };
 }
 
@@ -1487,6 +2388,7 @@ function errorPayload(error: unknown) {
       error: known?.code || "unknown_error",
       phase: known?.phase || "unknown",
       message: error instanceof Error ? error.message : String(error || "Unknown error"),
+      details: error instanceof DraftError ? error.details : {},
       safety: safetyEnvelope(),
     },
   };
@@ -1514,6 +2416,7 @@ serve(async (req) => {
     if (input.mode === "discard") return json(req, 200, await discardDraft(supabase, input, admin));
     if (input.mode === "approve") return json(req, 200, await approveDraft(supabase, input, admin));
     if (input.mode === "unapprove") return json(req, 200, await unapproveDraft(supabase, input, admin));
+    if (input.mode === "send") return json(req, 200, await sendDraft(supabase, input, admin));
     if (["generate", "regenerate", "improve"].includes(input.mode)) {
       return json(req, 200, await generateDraft(supabase, rpcSupabase, input, admin));
     }

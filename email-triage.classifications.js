@@ -57,6 +57,7 @@
   ];
   const EBAY_PRIORITIES = ["high", "normal", "low"];
   const EBAY_RESPONSE_NEEDS = ["reply_today", "reply_later", "no_reply_needed"];
+  const EBAY_CONVERSATION_SOURCE_TYPES = ["member_message", "platform_notification"];
   const EBAY_BUYER_FLAGS = [
     "vip_buyer",
     "high_value_buyer",
@@ -89,6 +90,7 @@
     EBAY_TOPIC_TAGS,
     EBAY_PRIORITIES,
     EBAY_RESPONSE_NEEDS,
+    EBAY_CONVERSATION_SOURCE_TYPES,
     EBAY_BUYER_FLAGS,
     EBAY_RISK_FLAGS,
     EBAY_REVIEW_STATES,
