@@ -72,6 +72,10 @@ const state = {
   orderTaskAssignmentsByLineId: new Map(),
   orderVideoReceipts: new Map(),
   videoReceiptEvidenceByLineId: new Map(),
+  manualVideoReceiptLineId: "",
+  manualVideoReceiptPhoto: null,
+  manualVideoReceiptPreviewUrl: "",
+  manualVideoReceiptBusy: false,
   queueVideoReceiptTasks: [],
   queueVideoReceiptTaskEvents: new Map(),
   queueVideoReceiptLoadedOrderIds: new Set(),
@@ -320,6 +324,7 @@ function closeModal(id) {
     || !$("no-inventory-photo-viewer-modal")?.classList.contains("hidden")
     || !$("ebay-completed-conflicts-modal")?.classList.contains("hidden")
     || !$("order-task-modal")?.classList.contains("hidden")
+    || !$("manual-video-receipt-modal")?.classList.contains("hidden")
     || !$("admin-order-closeout-modal")?.classList.contains("hidden")
   ) return;
   document.body.classList.remove("modal-open");
@@ -2500,7 +2505,10 @@ function renderOrders() {
             <button type="button" class="secondary-btn buyer-line-action-btn task-action-btn" data-line-assign-task="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>Assign Task</button>
             <button type="button" class="secondary-btn buyer-line-action-btn danger-btn" data-line-cancel="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Cancel</button>
           </span>
-          ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Open video receipt</a>` : ""}
+          <span class="buyer-line-receipt-actions">
+            ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Open video receipt</a>` : ""}
+            <button type="button" class="buyer-line-manual-receipt" data-line-manual-video-receipt="${escapeHtml(line.id)}">Add video receipt manually</button>
+          </span>
           <span class="queue-video-receipt-evidence" data-queue-video-evidence="${escapeHtml(line.id)}">
             <span class="queue-video-receipt-empty">Loading saved video receipt screenshot...</span>
           </span>
@@ -2524,6 +2532,11 @@ function renderOrders() {
       button.querySelector("[data-line-cancel]")?.addEventListener("click", () => {
         selectOrderLine(line.id, { openDetail: false });
         openWorkerCancelOrderModal({ lineIds: [line.id], openEbayCancel: true });
+      });
+      button.querySelector("[data-line-manual-video-receipt]")?.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openManualVideoReceiptModal(line.id);
       });
       lineList.appendChild(button);
     });
@@ -2617,6 +2630,7 @@ function returnToOrdersAfterMobileModalClose(options = {}) {
       "worker-no-inventory-modal",
       "worker-cancel-order-modal",
       "order-task-modal",
+      "manual-video-receipt-modal",
       "admin-order-closeout-modal",
       "no-inventory-photo-viewer-modal",
     ];
@@ -6909,6 +6923,7 @@ function clearSelection() {
   closeModal("worker-no-inventory-modal");
   closeModal("worker-cancel-order-modal");
   closeModal("order-task-modal");
+  closeManualVideoReceiptModal();
   closeModal("admin-order-closeout-modal");
   document.body.classList.remove("pending-order-detail-open");
   document.body.classList.remove("pending-mobile-sheet-open");
@@ -7551,6 +7566,206 @@ function returnToPendingQueueAfterVideoReceiptCapture(line = {}) {
   }, 80);
 }
 
+function getManualVideoReceiptLine() {
+  if (!state.manualVideoReceiptLineId) return null;
+  return state.orders.find((entry) => entry.id === state.manualVideoReceiptLineId) || null;
+}
+
+function setManualVideoReceiptError(message = "", type = "error") {
+  const el = $("manual-video-receipt-error");
+  if (!el) return;
+  el.textContent = message || "";
+  el.classList.toggle("is-error", type === "error");
+  el.classList.toggle("is-success", type === "success");
+}
+
+function clearManualVideoReceiptPhoto() {
+  if (state.manualVideoReceiptPreviewUrl?.startsWith("blob:")) {
+    URL.revokeObjectURL(state.manualVideoReceiptPreviewUrl);
+  }
+  state.manualVideoReceiptPhoto = null;
+  state.manualVideoReceiptPreviewUrl = "";
+  const preview = $("manual-video-receipt-preview");
+  if (preview) {
+    preview.src = "";
+    preview.classList.add("hidden");
+  }
+  $("manual-video-receipt-empty")?.classList.remove("hidden");
+  $("save-manual-video-receipt")?.toggleAttribute("disabled", true);
+}
+
+function setManualVideoReceiptPhoto(blob, metadata = {}) {
+  if (!(blob instanceof Blob) || !/^image\//i.test(blob.type || "")) {
+    setManualVideoReceiptError("Paste or choose an image file for the video receipt.");
+    return;
+  }
+  if (state.manualVideoReceiptPreviewUrl?.startsWith("blob:")) {
+    URL.revokeObjectURL(state.manualVideoReceiptPreviewUrl);
+  }
+  const previewUrl = URL.createObjectURL(blob);
+  state.manualVideoReceiptPhoto = {
+    blob,
+    name: metadata.name || "manual-video-receipt.png",
+    type: blob.type || metadata.type || "image/png",
+    size: blob.size || 0,
+  };
+  state.manualVideoReceiptPreviewUrl = previewUrl;
+  const preview = $("manual-video-receipt-preview");
+  if (preview) {
+    preview.src = previewUrl;
+    preview.classList.remove("hidden");
+  }
+  $("manual-video-receipt-empty")?.classList.add("hidden");
+  $("save-manual-video-receipt")?.toggleAttribute("disabled", false);
+  setManualVideoReceiptError("");
+}
+
+function handleManualVideoReceiptPaste(event) {
+  const items = [...(event.clipboardData?.items || [])];
+  const imageItem = items.find((item) => /^image\//i.test(item.type || ""));
+  if (!imageItem) return;
+  const file = imageItem.getAsFile();
+  if (!file) return;
+  event.preventDefault();
+  event.stopPropagation();
+  setManualVideoReceiptPhoto(file, { name: file.name || "pasted-video-receipt.png", type: file.type });
+}
+
+function handleManualVideoReceiptFile(event) {
+  const file = [...(event.target?.files || [])].find((entry) => /^image\//i.test(entry.type || ""));
+  if (!file) {
+    setManualVideoReceiptError("Choose an image file for the video receipt.");
+    return;
+  }
+  setManualVideoReceiptPhoto(file, { name: file.name, type: file.type });
+  if (event.target) event.target.value = "";
+}
+
+function closeManualVideoReceiptModal() {
+  clearManualVideoReceiptPhoto();
+  state.manualVideoReceiptLineId = "";
+  state.manualVideoReceiptBusy = false;
+  setManualVideoReceiptError("");
+  closeModal("manual-video-receipt-modal");
+  returnToOrdersAfterMobileModalClose({ suppressMobileReturn: true });
+}
+
+function openManualVideoReceiptModal(lineId) {
+  const line = state.orders.find((entry) => entry.id === lineId);
+  if (!line?.id || !line.order_id) {
+    setStatus("Select a pending eBay order line before adding a manual video receipt.", "error");
+    return;
+  }
+  state.manualVideoReceiptLineId = line.id;
+  clearManualVideoReceiptPhoto();
+  setManualVideoReceiptError("");
+  const order = getOrderFromLine(line);
+  $("manual-video-receipt-note").value = "Video receipt screenshot added manually because the automatic capture was not available.";
+  $("manual-video-receipt-context").innerHTML = `
+    <strong>${escapeHtml(order.order_number || "eBay order")} - ${escapeHtml(order.buyer_username || "unknown buyer")}</strong>
+    <span>${escapeHtml(line.item_title || "Untitled item")}</span>
+    <small>${escapeHtml(line.item_number || "No item number")} - Qty ${Number(line.quantity || 1).toLocaleString()}</small>
+  `;
+  openModal("manual-video-receipt-modal");
+  setTimeout(() => $("manual-video-receipt-dropzone")?.focus(), 80);
+}
+
+async function saveManualVideoReceipt() {
+  const line = getManualVideoReceiptLine();
+  const photo = state.manualVideoReceiptPhoto;
+  if (!line?.id || !line.order_id) return setManualVideoReceiptError("This order line is no longer visible. Refresh pending orders and try again.");
+  if (!photo?.blob) return setManualVideoReceiptError("Paste or choose a screenshot before saving.");
+
+  const note = String($("manual-video-receipt-note")?.value || "").trim();
+  if (!note) return setManualVideoReceiptError("Write an audit note before saving the manual receipt.");
+  if (state.manualVideoReceiptBusy) return;
+
+  const button = $("save-manual-video-receipt");
+  state.manualVideoReceiptBusy = true;
+  button?.toggleAttribute("disabled", true);
+  setManualVideoReceiptError("Saving manual video receipt...", "info");
+
+  try {
+    const order = getOrderFromLine(line);
+    const dateFolder = new Date().toISOString().slice(0, 10);
+    const orderSegment = safeStorageSegment(order.order_number || line.order_id, "order");
+    const itemSegment = safeStorageSegment(line.item_number || line.id, "item");
+    const extension = getNoInventoryEvidenceFileExtension({ path: photo.name, mime_type: photo.type }, photo.blob);
+    const destinationPath = [
+      "video-receipts",
+      "manual",
+      dateFolder,
+      orderSegment,
+      `${Date.now()}-${crypto.randomUUID()}-${itemSegment}.${extension}`,
+    ].join("/");
+
+    const { error: uploadError } = await supabase.storage
+      .from(NO_INVENTORY_EVIDENCE_BUCKET)
+      .upload(destinationPath, photo.blob, {
+        contentType: photo.type || photo.blob.type || "image/png",
+        upsert: false,
+      });
+    if (uploadError) throw new Error(uploadError.message || "Could not upload the manual video receipt screenshot.");
+
+    const nowIso = new Date().toISOString();
+    const actor = getVideoReceiptAuditActor();
+    const savedPhoto = {
+      bucket: NO_INVENTORY_EVIDENCE_BUCKET,
+      path: destinationPath,
+      source_bucket: null,
+      source_path: "manual-paste",
+      capture_job_id: null,
+      sort_order: 0,
+      label: `Manual video receipt - ${line.item_number || "item"}`,
+      mime_type: photo.type || photo.blob.type || "image/png",
+      size_bytes: photo.blob.size || photo.size || 0,
+      created_at: nowIso,
+      signed_by_email: actor,
+      metadata: {
+        source: "manual-video-receipt",
+        manual: true,
+        capturedAt: nowIso,
+        orderNumber: order.order_number || "",
+        itemNumber: line.item_number || "",
+      },
+    };
+
+    const question = [
+      `Video receipt screenshot captured manually for eBay item ${line.item_number || "item"}.`,
+      note,
+    ].filter(Boolean).join("\n");
+
+    const { error: taskError } = await supabase.rpc("create_ebay_order_coordination_task", {
+      _order_id: line.order_id,
+      _order_line_ids: [line.id],
+      _assigned_to_user_id: null,
+      _priority: "normal",
+      _question: question,
+      _due_at: order.ship_by_date || null,
+      _photo_attachments: [savedPhoto],
+      _signed_by_email: state.user?.email || state.employee?.display_name || "",
+    });
+    if (taskError) throw new Error(taskError.message || "Could not attach the manual receipt to the order audit trail.");
+
+    await rememberVideoReceiptPhotoForQueue(line, savedPhoto, savedPhoto.metadata, { capturedAt: nowIso });
+    state.queueVideoReceiptLoadedOrderIds.delete(line.order_id);
+    if (state.selectedLine?.id === line.id || state.selectedLine?.order_id === line.order_id) {
+      await loadSelectedOrderTasks();
+      await renderSelectedVideoReceiptEvidence();
+    }
+
+    closeManualVideoReceiptModal();
+    renderOrders();
+    setStatus("Manual video receipt saved to the order audit trail.", "success");
+  } catch (error) {
+    console.error("Could not save manual video receipt:", error);
+    setManualVideoReceiptError(error?.message || "Could not save the manual video receipt.");
+  } finally {
+    state.manualVideoReceiptBusy = false;
+    button?.toggleAttribute("disabled", !state.manualVideoReceiptPhoto);
+  }
+}
+
 async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
   const metadata = payload.metadata || {};
   const screenshot = payload.screenshot || {};
@@ -8037,6 +8252,17 @@ function setupListeners() {
   $("order-task-photo-file")?.addEventListener("change", handleOrderTaskPhotoFiles);
   $("select-all-order-task-photos")?.addEventListener("click", () => setAllOrderTaskPhotosSelected(true));
   $("deselect-all-order-task-photos")?.addEventListener("click", () => setAllOrderTaskPhotosSelected(false));
+  $("close-manual-video-receipt")?.addEventListener("click", closeManualVideoReceiptModal);
+  $("cancel-manual-video-receipt")?.addEventListener("click", closeManualVideoReceiptModal);
+  $("save-manual-video-receipt")?.addEventListener("click", saveManualVideoReceipt);
+  $("manual-video-receipt-file")?.addEventListener("change", handleManualVideoReceiptFile);
+  $("manual-video-receipt-dropzone")?.addEventListener("paste", handleManualVideoReceiptPaste);
+  $("manual-video-receipt-modal")?.addEventListener("paste", handleManualVideoReceiptPaste);
+  $("clear-manual-video-receipt-photo")?.addEventListener("click", () => {
+    clearManualVideoReceiptPhoto();
+    setManualVideoReceiptError("");
+    setTimeout(() => $("manual-video-receipt-dropzone")?.focus(), 50);
+  });
   $("confirm-item-choice")?.addEventListener("click", confirmItemCandidate);
   $("cancel-item-confirm")?.addEventListener("click", closeItemConfirmModal);
   $("close-item-confirm")?.addEventListener("click", closeItemConfirmModal);
@@ -8148,6 +8374,10 @@ function setupListeners() {
     if (event.target.id === "order-task-modal") closeOrderTaskModal();
   });
 
+  $("manual-video-receipt-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "manual-video-receipt-modal") closeManualVideoReceiptModal();
+  });
+
   $("no-inventory-photo-viewer-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "no-inventory-photo-viewer-modal") closeNoInventoryEvidencePhotoViewer();
   });
@@ -8218,6 +8448,17 @@ function setupListeners() {
       } else if (event.key === "Escape") {
         event.preventDefault();
         closeOrderTaskModal();
+      }
+      return;
+    }
+
+    if (!$("manual-video-receipt-modal")?.classList.contains("hidden")) {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        saveManualVideoReceipt();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeManualVideoReceiptModal();
       }
       return;
     }

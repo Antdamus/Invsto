@@ -770,6 +770,39 @@
     </div>
   </div>
 
+  <div id="manual-video-receipt-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="manual-video-receipt-title">
+    <div class="packing-modal-card bundle-review-card no-inventory-card manual-video-receipt-card">
+      <button id="close-manual-video-receipt" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Manual Video Receipt</span>
+      <h2 id="manual-video-receipt-title">Add video receipt manually</h2>
+      <p id="manual-video-receipt-subtitle">Paste a screenshot or choose an image file. It will save in the order audit trail.</p>
+      <div id="manual-video-receipt-context" class="order-task-context"></div>
+      <div id="manual-video-receipt-dropzone" class="manual-video-receipt-dropzone" tabindex="0" role="button" aria-label="Paste video receipt screenshot here">
+        <div id="manual-video-receipt-empty">
+          <strong>Paste screenshot here</strong>
+          <span>Copy the video receipt image, click this box, then press Ctrl+V.</span>
+        </div>
+        <img id="manual-video-receipt-preview" class="hidden" alt="Manual video receipt preview" />
+      </div>
+      <div class="manual-video-receipt-actions">
+        <label class="secondary-btn folder-photo-picker">
+          Choose Image
+          <input id="manual-video-receipt-file" type="file" accept="image/*" />
+        </label>
+        <button id="clear-manual-video-receipt-photo" type="button" class="secondary-btn">Clear Photo</button>
+      </div>
+      <label class="modal-field">
+        Audit Note
+        <textarea id="manual-video-receipt-note" rows="3" placeholder="Explain why this receipt was added manually."></textarea>
+      </label>
+      <p id="manual-video-receipt-error" class="fulfill-status is-error"></p>
+      <div class="modal-actions">
+        <button id="cancel-manual-video-receipt" type="button" class="secondary-btn">Cancel</button>
+        <button id="save-manual-video-receipt" type="button" class="primary-btn">Save Receipt</button>
+      </div>
+    </div>
+  </div>
+
   <div id="admin-order-closeout-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="admin-order-closeout-title">
     <div class="packing-modal-card bundle-review-card">
       <button id="close-admin-order-closeout" class="modal-close-btn" type="button" aria-label="Close">x</button>
