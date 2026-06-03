@@ -4834,9 +4834,15 @@
     const warnings = safeArray(counters.warnings);
     const isBackfill = result?.runType === "backfill";
     const classificationMode = result?.classificationMode || "none";
+    const progress = result?.backfillProgress && typeof result.backfillProgress === "object" ? result.backfillProgress : null;
+    const progressStatus = String(progress?.status || "");
+    const backfillComplete = progress?.completed === true || progressStatus === "completed";
+    const estimatedPages = progress?.estimated_total_pages ?? null;
+    const pagesProcessed = progress?.pages_processed ?? counters.pagesFetched ?? 0;
+    const pagesRemaining = progress?.pages_remaining ?? null;
     els.ebayConversationSyncResult.innerHTML = `
       <div class="classification-notice is-success">
-        ${escapeHtml(isBackfill ? "Historical backfill finished" : "eBay sync finished")}.
+        ${escapeHtml(isBackfill ? (backfillComplete ? "Historical backfill complete" : "Backfill chunk finished; click again to continue") : "eBay sync finished")}.
         Conversations seen: ${escapeHtml(formatContextNumber(counters.conversationsSeen))};
         succeeded: ${escapeHtml(formatContextNumber(counters.conversationsSucceeded || counters.conversationsSeen || 0))};
         skipped: ${escapeHtml(formatContextNumber(counters.conversationsSkipped || 0))};
@@ -4847,6 +4853,15 @@
         classification: ${escapeHtml(humanizeValue(classificationMode))};
         warnings: ${escapeHtml(formatContextNumber(warnings.length || counters.errors || 0))}.
       </div>
+      ${isBackfill && progress ? `
+        <div class="inbox-skipped-reasons">
+          <b>Status <em>${escapeHtml(humanizeValue(progressStatus || "paused"))}</em></b>
+          <b>Pages <em>${escapeHtml(`${formatContextNumber(pagesProcessed)}${estimatedPages === null || estimatedPages === undefined ? "" : ` / ${formatContextNumber(estimatedPages)}`}`)}</em></b>
+          <b>Remaining <em>${escapeHtml(pagesRemaining === null || pagesRemaining === undefined ? "--" : formatContextNumber(pagesRemaining))}</em></b>
+          <b>Conversations imported <em>${escapeHtml(formatContextNumber(progress.conversations_imported || 0))}</em></b>
+          <b>Messages imported <em>${escapeHtml(formatContextNumber(progress.messages_imported || 0))}</em></b>
+        </div>
+      ` : ""}
       ${warnings.length ? renderWarningPanel([], warnings.slice(0, 6)) : ""}
     `;
   }
@@ -5407,8 +5422,9 @@
       const result = await runEbayMessageSync(context, {
         runType,
         classificationMode,
-        conversationPageLimit: runType === "backfill" ? 50 : 25,
+        conversationPageLimit: 25,
         messagePageLimit: runType === "backfill" ? 50 : 25,
+        maxConversationPages: 1,
         maxDetailPagesPerConversation: runType === "backfill" ? 50 : 20,
         resumeFromCheckpoint: runType === "backfill",
         rateLimitPauseMs: runType === "backfill" ? 100 : 0,

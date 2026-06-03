@@ -399,6 +399,61 @@
     }));
   }
 
+  function checkpointPageLimit(row = {}) {
+    const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    return Math.max(1, Number(metadata.page_limit || 25));
+  }
+
+  function checkpointEstimatedPages(row = {}) {
+    const total = Number(row.total_available || 0);
+    if (!Number.isFinite(total) || total <= 0) return null;
+    return Math.ceil(total / checkpointPageLimit(row));
+  }
+
+  function normalizedBackfillCheckpointStatus(row = {}) {
+    const status = String(row.status || "idle");
+    if (status !== "running") return status;
+    const updatedAt = Date.parse(row.updated_at || row.created_at || "");
+    if (!Number.isFinite(updatedAt)) return status;
+    return Date.now() - updatedAt > 8 * 60 * 1000 ? "paused" : status;
+  }
+
+  function summarizeBackfillCheckpoints(checkpoints = []) {
+    const rows = checkpoints.map((row) => {
+      const estimated = checkpointEstimatedPages(row);
+      const pages = Number(row.pages_processed || 0);
+      const normalizedStatus = normalizedBackfillCheckpointStatus(row);
+      return {
+        ...row,
+        raw_status: row.status || null,
+        status: normalizedStatus,
+        stale_running: row.status === "running" && normalizedStatus === "paused",
+        estimated_total_pages: estimated,
+        pages_remaining: estimated === null ? null : Math.max(estimated - pages, 0),
+      };
+    });
+    const hasUnknownEstimate = rows.some((row) => row.estimated_total_pages === null);
+    const statuses = rows.map((row) => String(row.status || "idle"));
+    const status = statuses.some((value) => value === "running")
+      ? "running"
+      : statuses.some((value) => value === "failed")
+      ? "failed"
+      : rows.length && statuses.every((value) => value === "succeeded")
+      ? "completed"
+      : rows.length
+      ? "paused"
+      : "not_started";
+    return {
+      status,
+      checkpoints: rows,
+      pages_processed: rows.reduce((total, row) => total + Number(row.pages_processed || 0), 0),
+      estimated_total_pages: hasUnknownEstimate ? null : rows.reduce((total, row) => total + Number(row.estimated_total_pages || 0), 0),
+      pages_remaining: hasUnknownEstimate ? null : rows.reduce((total, row) => total + Number(row.pages_remaining || 0), 0),
+      conversations_imported: rows.reduce((total, row) => total + Number(row.conversations_processed || 0), 0),
+      messages_imported: rows.reduce((total, row) => total + Number(row.messages_processed || 0), 0),
+    };
+  }
+
   async function fetchEbayOperationsDashboard(context) {
     await currentSession(context, "eBay operations dashboard");
     const todayIso = startOfLocalDayIso();
@@ -474,6 +529,7 @@
     const approvals = Array.isArray(approvalsResult.data) ? approvalsResult.data : [];
     const attempts = Array.isArray(attemptsResult.data) ? attemptsResult.data : [];
     const checkpoints = Array.isArray(checkpointsResult.data) ? checkpointsResult.data : [];
+    const backfillProgress = summarizeBackfillCheckpoints(checkpoints);
     const dashboardMaps = {
       attemptsById: mapDashboardRowsById(attempts),
       draftsById: mapDashboardRowsById(drafts),
@@ -516,14 +572,19 @@
         send_attempts_failed: attempts.filter((attempt) => attempt.attempt_status === "failed").length,
         send_attempts_succeeded: succeededAttempts.length,
         duplicate_sends_prevented: attempts.filter((attempt) => attempt.attempt_status === "duplicate").length,
-        backfill_pages: checkpoints.reduce((total, row) => total + Number(row.pages_processed || 0), 0),
-        backfill_conversations: checkpoints.reduce((total, row) => total + Number(row.conversations_processed || 0), 0),
-        backfill_messages: checkpoints.reduce((total, row) => total + Number(row.messages_processed || 0), 0),
+        backfill_pages: backfillProgress.pages_processed,
+        backfill_pages_total_estimate: backfillProgress.estimated_total_pages,
+        backfill_pages_remaining: backfillProgress.pages_remaining,
+        backfill_conversations: backfillProgress.conversations_imported,
+        backfill_messages: backfillProgress.messages_imported,
       },
       backfill: {
-        checkpoints,
-        active: checkpoints.filter((row) => row.status === "running"),
+        ...backfillProgress,
+        checkpoints: backfillProgress.checkpoints,
+        active: backfillProgress.checkpoints.filter((row) => row.status === "running"),
+        paused: backfillProgress.checkpoints.filter((row) => ["paused", "idle"].includes(String(row.status || ""))),
         latest_completed: checkpoints.find((row) => row.status === "succeeded") || null,
+        latest_paused: backfillProgress.checkpoints.find((row) => ["paused", "idle"].includes(String(row.status || ""))) || null,
         latest_failed: checkpoints.find((row) => row.status === "failed") || null,
       },
       approval_queue: {
@@ -1100,7 +1161,7 @@
       messagePageLimit: ebayMessagePageLimit(values.messagePageLimit, 25),
       maxConversationPages: Object.prototype.hasOwnProperty.call(values, "maxConversationPages")
         ? values.maxConversationPages
-        : Number(values.runType === "backfill" ? 0 : 1),
+        : 1,
       maxDetailPagesPerConversation: Number(values.maxDetailPagesPerConversation || 20),
       classificationMode: values.classificationMode || "none",
       resumeFromCheckpoint: values.resumeFromCheckpoint === true || undefined,
@@ -1108,7 +1169,10 @@
       rateLimitPauseMs: Object.prototype.hasOwnProperty.call(values, "rateLimitPauseMs") ? Number(values.rateLimitPauseMs || 0) : undefined,
       readOnly: true,
     };
-    if (body.runType === "backfill" && body.maxConversationPages === 0) delete body.maxConversationPages;
+    if (values.chunkPages && !Object.prototype.hasOwnProperty.call(values, "maxConversationPages")) {
+      body.maxConversationPages = Number(values.chunkPages);
+    }
+    if (body.runType === "backfill" && body.maxConversationPages === 0) body.maxConversationPages = 1;
     if (values.conversationId) body.conversationId = values.conversationId;
     if (values.conversationType && !values.conversationTypes) body.conversationTypes = [values.conversationType];
     if (values.startTime) body.startTime = values.startTime;

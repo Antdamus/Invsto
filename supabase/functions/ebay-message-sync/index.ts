@@ -8,6 +8,7 @@ type ConversationType = "FROM_MEMBERS" | "FROM_EBAY";
 type MessageDirection = "inbound" | "outbound" | "platform" | "unknown";
 type DirectionConfidence = "strong" | "medium" | "weak" | "unknown";
 type ClassificationMode = "none" | "classify_new" | "reclassify_all";
+type CheckpointStatus = "idle" | "running" | "paused" | "succeeded" | "failed" | "cancelled";
 
 type Operator = {
   actorType: "service_role" | "admin";
@@ -68,6 +69,23 @@ type Counters = {
   totalsByConversationType: Record<string, number | null>;
 };
 
+type CheckpointStart = {
+  resumeOffset: number;
+  lastConversationTimestamp: string | null;
+  messagesProcessed: number;
+  alreadyComplete: boolean;
+};
+
+type ConversationTypeSyncResult = {
+  conversationType: ConversationType;
+  exhausted: boolean;
+  paused: boolean;
+  skippedAlreadyComplete: boolean;
+  pagesProcessed: number;
+  nextOffset: number | null;
+  totalAvailable: number | null;
+};
+
 const DEFAULT_MESSAGE_SCOPE = "https://api.ebay.com/oauth/api_scope/commerce.message";
 const SUPPORTED_CONVERSATION_TYPES = ["FROM_MEMBERS", "FROM_EBAY"] as const;
 const DEFAULT_CONVERSATION_LIMIT = 25;
@@ -75,7 +93,8 @@ const DEFAULT_MESSAGE_LIMIT = 25;
 const MAX_PAGE_LIMIT = 50;
 const DEFAULT_MAX_CONVERSATION_PAGES = 1;
 const MAX_CONVERSATION_PAGES = 20;
-const MAX_BACKFILL_CONVERSATION_PAGES = 100000;
+const DEFAULT_BACKFILL_CHUNK_PAGES = 1;
+const MAX_BACKFILL_CHUNK_PAGES = 5;
 const DEFAULT_MAX_DETAIL_PAGES = 20;
 const MAX_DETAIL_PAGES = 50;
 const BODY_PREVIEW_MAX = 240;
@@ -186,13 +205,6 @@ function boundedInteger(value: unknown, fallback: number, min: number, max: numb
   return Math.min(Math.max(Math.trunc(numeric), min), max);
 }
 
-function boundedOptionalInteger(value: unknown, fallback: number | null, min: number, max: number) {
-  if (value === null || value === undefined || value === "") return fallback;
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return fallback;
-  return Math.min(Math.max(Math.trunc(numeric), min), max);
-}
-
 function booleanValue(value: unknown, fallback = false) {
   if (typeof value === "boolean") return value;
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -260,7 +272,7 @@ async function parseInput(req: Request): Promise<SyncInput> {
   const maxConversationPages = conversationId
     ? 0
     : isBackfill
-    ? boundedOptionalInteger(getValue("maxConversationPages"), null, 1, MAX_BACKFILL_CONVERSATION_PAGES)
+    ? boundedInteger(getValue("maxConversationPages") ?? getValue("chunkPages"), DEFAULT_BACKFILL_CHUNK_PAGES, 1, MAX_BACKFILL_CHUNK_PAGES)
     : boundedInteger(getValue("maxConversationPages"), DEFAULT_MAX_CONVERSATION_PAGES, 1, MAX_CONVERSATION_PAGES);
   const classificationMode = classificationModeFrom(getValue("classificationMode") ?? getValue("backfillClassificationMode"));
 
@@ -1079,7 +1091,7 @@ async function beginCheckpoint(options: {
   runId: string;
   input: SyncInput;
   conversationType: ConversationType;
-}) {
+}): Promise<CheckpointStart> {
   const { data: existing, error: lookupError } = await options.supabase
     .from("ebay_message_sync_checkpoints")
     .select("id, status, next_offset, pages_processed, conversations_processed, messages_processed, last_conversation_timestamp, metadata")
@@ -1089,9 +1101,32 @@ async function beginCheckpoint(options: {
     .maybeSingle();
   if (lookupError) throw new SyncError("sync_checkpoint_lookup_failed", { phase: "database", message: lookupError.message });
 
+  const existingStatus = String(existing?.status || "") as CheckpointStatus;
+  const existingMetadata = recordOrEmpty(existing?.metadata);
+  const resetForClassificationModeChange = Boolean(existing?.id) &&
+    options.input.runType === "backfill" &&
+    options.input.classificationMode !== "none" &&
+    text(existingMetadata.classification_mode) !== options.input.classificationMode &&
+    options.input.startOffset === 0 &&
+    !options.input.resetCheckpoint;
+  const resetCheckpoint = options.input.resetCheckpoint || resetForClassificationModeChange;
+  const alreadyComplete = options.input.runType === "backfill" &&
+    options.input.resumeFromCheckpoint &&
+    !resetCheckpoint &&
+    options.input.startOffset === 0 &&
+    existingStatus === "succeeded";
+  if (alreadyComplete) {
+    return {
+      resumeOffset: 0,
+      lastConversationTimestamp: isoOrNull(existing?.last_conversation_timestamp) || null,
+      messagesProcessed: Number(existing?.messages_processed || 0),
+      alreadyComplete: true,
+    };
+  }
+
   const resumeOffset = options.input.startOffset > 0
     ? options.input.startOffset
-    : options.input.resetCheckpoint
+    : resetCheckpoint
     ? 0
     : options.input.resumeFromCheckpoint
     ? Number(existing?.next_offset || 0)
@@ -1108,9 +1143,9 @@ async function beginCheckpoint(options: {
       current_run_id: options.runId,
       last_run_id: options.runId,
       next_offset: resumeOffset,
-      pages_processed: options.input.resetCheckpoint ? 0 : Number(existing?.pages_processed || 0),
-      conversations_processed: options.input.resetCheckpoint ? 0 : Number(existing?.conversations_processed || 0),
-      messages_processed: options.input.resetCheckpoint ? 0 : Number(existing?.messages_processed || 0),
+      pages_processed: resetCheckpoint ? 0 : Number(existing?.pages_processed || 0),
+      conversations_processed: resetCheckpoint ? 0 : Number(existing?.conversations_processed || 0),
+      messages_processed: resetCheckpoint ? 0 : Number(existing?.messages_processed || 0),
       last_error_code: null,
       last_error_message: null,
       metadata: {
@@ -1118,7 +1153,8 @@ async function beginCheckpoint(options: {
         run_id: options.runId,
         started_at: new Date().toISOString(),
         resume_offset: resumeOffset,
-        reset_checkpoint: options.input.resetCheckpoint,
+        reset_checkpoint: resetCheckpoint,
+        reset_reason: resetForClassificationModeChange ? "classification_mode_switch" : null,
         max_conversation_pages: options.input.maxConversationPages,
         page_limit: options.input.conversationPageLimit,
         message_page_limit: options.input.messagePageLimit,
@@ -1130,6 +1166,8 @@ async function beginCheckpoint(options: {
   return {
     resumeOffset,
     lastConversationTimestamp: isoOrNull(existing?.last_conversation_timestamp) || null,
+    messagesProcessed: resetCheckpoint ? 0 : Number(existing?.messages_processed || 0),
+    alreadyComplete: false,
   };
 }
 
@@ -1150,7 +1188,7 @@ async function updateCheckpointProgress(options: {
   currentRunComplete?: boolean;
   counters: Counters;
 }) {
-  const status = options.exhausted ? "succeeded" : options.currentRunComplete ? "idle" : "running";
+  const status = options.exhausted ? "succeeded" : options.currentRunComplete ? "paused" : "running";
   const update: JsonRecord = {
     status,
     current_run_id: options.exhausted || options.currentRunComplete ? null : options.runId,
@@ -1201,6 +1239,79 @@ async function updateCheckpointProgress(options: {
     .eq("checkpoint_scope", options.input.checkpointScope)
     .eq("conversation_type", options.conversationType);
   if (error) throw new SyncError("sync_checkpoint_progress_failed", { phase: "database", message: error.message });
+}
+
+async function loadBackfillCheckpoints(supabase: ServiceClient, accountId: string, input: SyncInput): Promise<JsonRecord[]> {
+  if (input.runType !== "backfill") return [];
+  const { data, error } = await supabase
+    .from("ebay_message_sync_checkpoints")
+    .select("id, seller_account_id, checkpoint_scope, conversation_type, status, current_run_id, last_run_id, last_full_backfill_at, last_successful_sync_at, last_conversation_timestamp, last_page_processed, next_offset, total_available, pages_processed, conversations_processed, messages_processed, last_error_code, last_error_message, metadata, updated_at, created_at")
+    .eq("seller_account_id", accountId)
+    .eq("checkpoint_scope", input.checkpointScope)
+    .in("conversation_type", input.conversationTypes);
+  if (error) throw new SyncError("sync_checkpoint_progress_lookup_failed", { phase: "database", message: error.message });
+  return (data || []) as JsonRecord[];
+}
+
+function checkpointPageLimit(checkpoint: JsonRecord, input: SyncInput) {
+  const metadata = recordOrEmpty(checkpoint.metadata);
+  return Math.max(1, Number(metadata.page_limit || input.conversationPageLimit || DEFAULT_CONVERSATION_LIMIT));
+}
+
+function summarizeBackfillProgress(input: SyncInput, checkpoints: JsonRecord[], typeResults: ConversationTypeSyncResult[] = []): JsonRecord {
+  const rows = input.conversationTypes.map((conversationType) => {
+    const checkpoint = (checkpoints.find((row) => text(row.conversation_type) === conversationType) || {}) as JsonRecord;
+    const pageLimit = checkpointPageLimit(checkpoint, input);
+    const totalAvailable = numberOrNull(checkpoint.total_available);
+    const estimatedPages = typeof totalAvailable === "number" ? Math.ceil(totalAvailable / pageLimit) : null;
+    const pagesProcessed = Number(checkpoint.pages_processed || 0);
+    return {
+      conversation_type: conversationType,
+      status: text(checkpoint.status) || "idle",
+      pages_processed: pagesProcessed,
+      estimated_total_pages: estimatedPages,
+      pages_remaining: typeof estimatedPages === "number" ? Math.max(estimatedPages - pagesProcessed, 0) : null,
+      conversations_imported: Number(checkpoint.conversations_processed || 0),
+      messages_imported: Number(checkpoint.messages_processed || 0),
+      next_offset: Number(checkpoint.next_offset || 0),
+      total_available: totalAvailable,
+      page_limit: pageLimit,
+      last_page_processed: numberOrNull(checkpoint.last_page_processed),
+      updated_at: checkpoint.updated_at || null,
+      last_error_code: checkpoint.last_error_code || null,
+    };
+  });
+
+  const hasUnknownEstimate = rows.some((row) => row.estimated_total_pages === null);
+  const pagesProcessed = rows.reduce((total, row) => total + Number(row.pages_processed || 0), 0);
+  const estimatedTotalPages = hasUnknownEstimate ? null : rows.reduce((total, row) => total + Number(row.estimated_total_pages || 0), 0);
+  const pagesRemaining = hasUnknownEstimate ? null : rows.reduce((total, row) => total + Number(row.pages_remaining || 0), 0);
+  const statuses = rows.map((row) => text(row.status));
+  const completed = rows.length > 0 && statuses.every((status) => status === "succeeded");
+  const status = statuses.some((entry) => entry === "running")
+    ? "running"
+    : statuses.some((entry) => entry === "failed")
+    ? "failed"
+    : completed
+    ? "completed"
+    : rows.length
+    ? "paused"
+    : "not_started";
+
+  return {
+    status,
+    completed,
+    chunked: true,
+    chunk_pages_per_type: input.maxConversationPages,
+    page_limit: input.conversationPageLimit,
+    pages_processed: pagesProcessed,
+    estimated_total_pages: estimatedTotalPages,
+    pages_remaining: pagesRemaining,
+    conversations_imported: rows.reduce((total, row) => total + Number(row.conversations_imported || 0), 0),
+    messages_imported: rows.reduce((total, row) => total + Number(row.messages_imported || 0), 0),
+    checkpoints: rows,
+    type_results: typeResults,
+  };
 }
 
 async function failRunningCheckpoints(
@@ -1397,7 +1508,7 @@ async function syncConversationType(options: {
   input: SyncInput;
   conversationType: ConversationType;
   counters: Counters;
-}) {
+}): Promise<ConversationTypeSyncResult> {
   if (options.input.conversationId) {
     const detail = await ebayGet(
       options.token,
@@ -1419,12 +1530,31 @@ async function syncConversationType(options: {
       conversationIds: result.rowIds,
       counters: options.counters,
     });
-    return;
+    return {
+      conversationType: options.conversationType,
+      exhausted: true,
+      paused: false,
+      skippedAlreadyComplete: false,
+      pagesProcessed: 0,
+      nextOffset: null,
+      totalAvailable: null,
+    };
   }
 
   const checkpoint = ["backfill", "incremental"].includes(options.input.runType)
     ? await beginCheckpoint(options)
-    : { resumeOffset: options.input.startOffset, lastConversationTimestamp: null };
+    : { resumeOffset: options.input.startOffset, lastConversationTimestamp: null, messagesProcessed: 0, alreadyComplete: false };
+  if (checkpoint.alreadyComplete) {
+    return {
+      conversationType: options.conversationType,
+      exhausted: true,
+      paused: false,
+      skippedAlreadyComplete: true,
+      pagesProcessed: 0,
+      nextOffset: 0,
+      totalAvailable: null,
+    };
+  }
   let offset = options.input.runType === "backfill"
     ? checkpoint.resumeOffset
     : options.input.startOffset;
@@ -1436,7 +1566,9 @@ async function syncConversationType(options: {
     : options.input;
   let conversationsProcessed = 0;
   const messagesProcessedAtStart = options.counters.messagesSeen;
+  const messagesProcessedCheckpointBase = checkpoint.messagesProcessed;
   let latestTimestamp: string | null = null;
+  let lastResult: ConversationTypeSyncResult | null = null;
 
   for (let page = 0; options.input.maxConversationPages === null || page < options.input.maxConversationPages; page += 1) {
     const pageIndex = Math.floor(offset / options.input.conversationPageLimit);
@@ -1473,6 +1605,15 @@ async function syncConversationType(options: {
       (typeof total === "number" && offset + options.input.conversationPageLimit >= total);
     const hitPageCap = options.input.maxConversationPages !== null && page + 1 >= options.input.maxConversationPages && !exhausted;
     const nextOffset = exhausted ? 0 : offset + options.input.conversationPageLimit;
+    lastResult = {
+      conversationType: options.conversationType,
+      exhausted,
+      paused: hitPageCap,
+      skippedAlreadyComplete: false,
+      pagesProcessed: pageIndex + 1,
+      nextOffset,
+      totalAvailable: total,
+    };
 
     if (["backfill", "incremental"].includes(options.input.runType)) {
       await updateCheckpointProgress({
@@ -1482,7 +1623,7 @@ async function syncConversationType(options: {
         totalAvailable: total,
         pagesProcessed,
         conversationsProcessed,
-        messagesProcessed: options.counters.messagesSeen - messagesProcessedAtStart,
+        messagesProcessed: messagesProcessedCheckpointBase + (options.counters.messagesSeen - messagesProcessedAtStart),
         lastConversationTimestamp: latestTimestamp,
         exhausted,
         currentRunComplete: hitPageCap,
@@ -1504,6 +1645,16 @@ async function syncConversationType(options: {
     offset = nextOffset;
     await sleep(options.input.rateLimitPauseMs);
   }
+
+  return lastResult || {
+    conversationType: options.conversationType,
+    exhausted: false,
+    paused: false,
+    skippedAlreadyComplete: false,
+    pagesProcessed: 0,
+    nextOffset: offset,
+    totalAvailable: null,
+  };
 }
 
 function backfillEventSummary(input: SyncInput, counters: Counters, startedMs: number, extra: JsonRecord = {}) {
@@ -1548,7 +1699,7 @@ async function recordBackfillActivityEvent(options: {
   runId: string;
   counters: Counters;
   startedMs: number;
-  eventType: "message_backfill_started" | "message_backfill_completed" | "message_backfill_failed";
+  eventType: "message_backfill_started" | "message_backfill_progress" | "message_backfill_completed" | "message_backfill_failed";
   status: "pending" | "succeeded" | "failed" | "warning";
   title: string;
   detail: string;
@@ -1788,26 +1939,12 @@ serve(async (req) => {
       totalsByConversationType: {},
     };
 
-    if (input.runType === "backfill") {
-      await recordBackfillActivityEvent({
-        supabase,
-        input,
-        operator,
-        runId,
-        counters,
-        startedMs,
-        eventType: "message_backfill_started",
-        status: "pending",
-        title: "Backfill Started",
-        detail: `Historical eBay message backfill started for ${input.conversationTypes.join(", ")}.`,
-      });
-    }
-
     const token = await refreshEbayToken();
     let successfulConversationTypeSyncs = 0;
+    const typeResults: ConversationTypeSyncResult[] = [];
     for (const conversationType of input.conversationTypes) {
       try {
-        await syncConversationType({
+        const typeResult = await syncConversationType({
           supabase,
           token,
           account,
@@ -1816,6 +1953,7 @@ serve(async (req) => {
           conversationType,
           counters,
         });
+        typeResults.push(typeResult);
         successfulConversationTypeSyncs += 1;
       } catch (error) {
         if (input.conversationId && input.conversationTypes.length > 1 && error instanceof SyncError && error.code === "ebay_api_get_failed") {
@@ -1843,12 +1981,19 @@ serve(async (req) => {
       .update({ last_message_sync_at: new Date().toISOString() })
       .eq("id", account.id);
 
+    const backfillCheckpoints = input.runType === "backfill"
+      ? await loadBackfillCheckpoints(supabase, account.id, input)
+      : [];
+    const backfillProgress = input.runType === "backfill"
+      ? summarizeBackfillProgress(input, backfillCheckpoints, typeResults)
+      : null;
     const metadata = syncRunProgressMetadata(input, counters, {
       conversationTypes: input.conversationTypes,
       conversationId: input.conversationId,
       startOffset: input.startOffset,
       environment: ebayEnvironment(),
       paginationStrategy: "Offsets advance by the exact fixed page limit used for the request.",
+      backfillProgress,
       readOnly: true,
       sendsEnabled: false,
       ebayMutationsPerformed: false,
@@ -1857,6 +2002,7 @@ serve(async (req) => {
 
     if (input.runType === "backfill") {
       const failed = counters.pagesFailed + counters.classificationFailed + counters.errors;
+      const completed = backfillProgress?.completed === true;
       await recordBackfillActivityEvent({
         supabase,
         input,
@@ -1864,10 +2010,16 @@ serve(async (req) => {
         runId,
         counters,
         startedMs,
-        eventType: "message_backfill_completed",
+        eventType: completed ? "message_backfill_completed" : "message_backfill_progress",
         status: failed > 0 ? "warning" : "succeeded",
-        title: "Backfill Completed",
-        detail: `Historical eBay message backfill completed. Processed ${counters.conversationsSeen} conversations and ${counters.messagesSeen} messages.`,
+        title: completed ? "Backfill Completed" : "Backfill Progress",
+        detail: completed
+          ? `Historical eBay message backfill completed. Processed ${counters.conversationsSeen} conversations and ${counters.messagesSeen} messages in the final chunk.`
+          : `Historical eBay message backfill chunk completed. Processed ${counters.conversationsSeen} conversations and ${counters.messagesSeen} messages; resume from checkpoint for the next chunk.`,
+        extra: {
+          progress: backfillProgress || {},
+          chunked: true,
+        },
       });
     } else if (shouldRecordAggregateSyncEvent(input)) {
       const failed = counters.pagesFailed + counters.classificationFailed + counters.errors;
@@ -1892,6 +2044,7 @@ serve(async (req) => {
       sellerAccountId: account.id,
       sellerUsernameConfigured: Boolean(account.seller_username),
       counters,
+      backfillProgress,
       durationMs: Math.max(Date.now() - startedMs, 0),
       safety: {
         readOnly: true,
@@ -1908,12 +2061,22 @@ serve(async (req) => {
     });
   } catch (error) {
     await failRunningCheckpoints(supabase, runId, error, counters);
+    let failedBackfillProgress: JsonRecord | null = null;
+    if (input?.runType === "backfill" && account) {
+      try {
+        const checkpoints = await loadBackfillCheckpoints(supabase, account.id, input);
+        failedBackfillProgress = summarizeBackfillProgress(input, checkpoints);
+      } catch (checkpointError) {
+        console.warn("[ebay-message-sync] failed to load checkpoint progress after failure", checkpointError);
+      }
+    }
     const failureMetadata = input && counters
       ? syncRunProgressMetadata(input, counters, {
         conversationTypes: input.conversationTypes,
         conversationId: input.conversationId,
         startOffset: input.startOffset,
         environment: ebayEnvironment(),
+        backfillProgress: failedBackfillProgress,
         readOnly: true,
         sendsEnabled: false,
         ebayMutationsPerformed: false,
@@ -1937,6 +2100,8 @@ serve(async (req) => {
         extra: {
           ...failure,
           failed_count: failedCountFallback,
+          progress: failedBackfillProgress || {},
+          chunked: true,
           error_code: failure.error_code,
           error_phase: failure.error_phase,
         },
@@ -1969,6 +2134,7 @@ serve(async (req) => {
       phase: error instanceof SyncError ? error.phase : "unknown",
       message: error instanceof Error ? error.message : String(error || "Unknown error"),
       diagnostic: failureDetails(error),
+      backfillProgress: failedBackfillProgress,
       safety: {
         readOnly: true,
         ebayMutationsPerformed: false,

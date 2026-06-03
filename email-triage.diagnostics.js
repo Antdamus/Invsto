@@ -70,6 +70,7 @@
     if (eventType === "message_sync_completed") return event.title || "Sync Latest Completed";
     if (eventType === "message_sync_failed") return event.title || "Sync Latest Failed";
     if (eventType === "message_backfill_started") return "Backfill Started";
+    if (eventType === "message_backfill_progress") return "Backfill Progress";
     if (eventType === "message_backfill_completed") return "Backfill Completed";
     if (eventType === "message_backfill_failed") return "Backfill Failed";
     if (eventType === "send_attempt_succeeded") return "Send Attempt Succeeded";
@@ -183,6 +184,7 @@
       message_sync_completed: "Recent eBay inbox sync completed as one aggregate operation.",
       message_sync_failed: "Recent eBay inbox sync failed as one aggregate operation.",
       message_backfill_started: "Historical eBay message archive import started.",
+      message_backfill_progress: "Historical eBay message archive import chunk completed and paused at a safe checkpoint.",
       message_backfill_completed: "Historical eBay message archive import completed.",
       message_backfill_failed: "Historical eBay message archive import failed.",
     };
@@ -256,6 +258,12 @@
         metricText(metricValue([payload], ["processed_count"]) || 0, "processed"),
         payload.classification_mode ? utils.humanizeValue(payload.classification_mode) : "",
         Array.isArray(payload.conversation_types) ? payload.conversation_types.join(", ") : "",
+      ],
+      message_backfill_progress: [
+        metricText(metricValue([payload], ["processed_count", "conversations_processed"]) || 0, "processed"),
+        metricText(metricValue([payload], ["messages_processed"]) || 0, "messages"),
+        metricText(metricValue([payload.progress || {}], ["pages_remaining"]) || 0, "pages remaining"),
+        payload.classification_mode ? utils.humanizeValue(payload.classification_mode) : "",
       ],
       message_backfill_completed: [
         metricText(metricValue([payload], ["processed_count", "conversations_processed"]) || 0, "processed"),
@@ -390,6 +398,8 @@
         ["Failed", metricValue([payload, run, counters], ["failed_count"])],
         ["Skipped", metricValue([payload, run, counters], ["skipped_count"])],
         ["Pages", metricValue([payload, run, counters], ["pages_processed"])],
+        ["Pages Remaining", metricValue([payload.progress || {}, run.progress || {}], ["pages_remaining"])],
+        ["Estimated Total Pages", metricValue([payload.progress || {}, run.progress || {}], ["estimated_total_pages"])],
         ["Messages", metricValue([payload, run, counters], ["messages_processed"])],
         ["Classification Mode", metricValue([payload, run], ["classification_mode"])],
         ["Classified", metricValue([payload, run], ["classification_succeeded"])],
@@ -699,18 +709,26 @@
     return checkpoints.slice(0, 4).map((checkpoint) => {
       const total = Number(checkpoint.total_available || 0);
       const page = Number(checkpoint.pages_processed || 0);
-      const estimatedPages = total && Number(checkpoint.metadata?.last_page_processed || checkpoint.last_page_processed || 0) >= 0
-        ? Math.ceil(total / Math.max(1, Number(checkpoint.metadata?.page_limit || 100)))
-        : null;
+      const providedEstimate = Number(checkpoint.estimated_total_pages || 0);
+      const estimatedPages = providedEstimate || (
+        total && Number(checkpoint.metadata?.last_page_processed || checkpoint.last_page_processed || 0) >= 0
+          ? Math.ceil(total / Math.max(1, Number(checkpoint.metadata?.page_limit || 25)))
+          : null
+      );
+      const remaining = checkpoint.pages_remaining === null || checkpoint.pages_remaining === undefined
+        ? (estimatedPages ? Math.max(estimatedPages - page, 0) : null)
+        : Number(checkpoint.pages_remaining);
       const status = String(checkpoint.status || "idle");
-      const statusVariant = status === "succeeded" ? "success" : status === "failed" ? "danger" : status === "running" ? "warning" : "muted";
+      const statusVariant = status === "succeeded" ? "success" : status === "failed" ? "danger" : status === "running" ? "warning" : status === "paused" || status === "idle" ? "muted" : "muted";
+      const statusLabel = status === "idle" ? "paused" : status;
       const pageText = estimatedPages ? `${page} / ${estimatedPages}` : String(page || "--");
+      const remainingText = remaining === null || !Number.isFinite(remaining) ? "" : ` · ${remaining} remaining`;
       return `
         <div class="operational-row">
           <span>${utils.escapeHtml(checkpoint.conversation_type || "Conversation type")}</span>
           <strong>${utils.escapeHtml(`Pages ${pageText}`)}</strong>
-          <em>${utils.escapeHtml(`${checkpoint.conversations_processed || 0} conversations · ${checkpoint.messages_processed || 0} messages · updated ${utils.formatDateTime(checkpoint.updated_at)}`)}</em>
-          ${dashboardBadge(utils.humanizeValue(status), statusVariant, utils)}
+          <em>${utils.escapeHtml(`${checkpoint.conversations_processed || 0} conversations · ${checkpoint.messages_processed || 0} messages${remainingText} · updated ${utils.formatDateTime(checkpoint.updated_at)}`)}</em>
+          ${dashboardBadge(utils.humanizeValue(statusLabel), statusVariant, utils)}
         </div>
       `;
     }).join("");
@@ -724,6 +742,8 @@
     const backfill = ebay.backfill || {};
     const checkpoints = Array.isArray(backfill.checkpoints) ? backfill.checkpoints : [];
     const activeBackfills = Array.isArray(backfill.active) ? backfill.active : [];
+    const backfillStatus = String(backfill.status || "not_started");
+    const backfillStatusVariant = backfillStatus === "completed" ? "success" : backfillStatus === "failed" ? "danger" : backfillStatus === "running" ? "warning" : "muted";
     const events = Array.isArray(ebay.recent_operational_events) ? ebay.recent_operational_events : [];
     const blocked = ebay.ok === false || Number(metrics.send_attempts_failed || 0) > 0 || safety.automatic_responses_sent > 0;
 
@@ -791,11 +811,14 @@
         <section class="operational-panel operational-panel-wide">
           <div class="operational-panel-head">
             <strong>Historical Backfill</strong>
-            ${dashboardBadge(activeBackfills.length ? `${activeBackfills.length} running` : "Manual only", activeBackfills.length ? "warning" : "muted", utils)}
+            ${dashboardBadge(activeBackfills.length ? `${activeBackfills.length} running` : utils.humanizeValue(backfillStatus), activeBackfills.length ? "warning" : backfillStatusVariant, utils)}
           </div>
           <div class="operational-metric-grid">
             ${renderKeyValueGrid([
+              { label: "Status", value: utils.humanizeValue(backfillStatus) },
               { label: "Pages", value: metrics.backfill_pages },
+              { label: "Estimated total pages", value: metrics.backfill_pages_total_estimate ?? "--" },
+              { label: "Pages remaining", value: metrics.backfill_pages_remaining ?? "--" },
               { label: "Conversations", value: metrics.backfill_conversations },
               { label: "Messages", value: metrics.backfill_messages },
               { label: "Last full backfill", value: backfill.latest_completed?.last_full_backfill_at ? utils.formatDateTime(backfill.latest_completed.last_full_backfill_at) : "--" },
