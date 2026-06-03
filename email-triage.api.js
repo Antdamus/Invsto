@@ -460,6 +460,7 @@
     const client = context.client;
 
     const [
+      canonicalConversations,
       conversationsToday,
       unreadConversations,
       classificationsResult,
@@ -469,6 +470,12 @@
       eventsResult,
       checkpointsResult,
     ] = await Promise.all([
+      countSupabaseRows(
+        client
+          .from("ebay_conversations")
+          .select("id", { count: "exact", head: true }),
+        "ebay_canonical_conversation_count_failed",
+      ),
       countSupabaseRows(
         client
           .from("ebay_conversations")
@@ -538,6 +545,10 @@
     const events = (Array.isArray(eventsResult.data) ? eventsResult.data : [])
       .map(normalizeEbayActivityEvent)
       .map((event) => enrichEbayActivityEvent(event, dashboardMaps));
+    const latestSyncEvent = events.find((event) => event.event_type === "message_sync_completed" || event.event_type === "message_sync_failed") || null;
+    const latestSyncPayload = latestSyncEvent?.payload?.sync_run && typeof latestSyncEvent.payload.sync_run === "object"
+      ? latestSyncEvent.payload.sync_run
+      : latestSyncEvent?.payload || {};
     const latestApproval = latestApprovalByDraft(approvals);
     const currentDrafts = drafts.filter((draft) =>
       draft.is_current === true &&
@@ -557,6 +568,7 @@
       ok: true,
       generated_at: new Date().toISOString(),
       metrics: {
+        canonical_conversations: canonicalConversations,
         conversations_today: conversationsToday,
         unread_conversations: unreadConversations,
         needs_reply: classifications.filter((row) => ["reply_today", "reply_later"].includes(row.response_need)).length,
@@ -577,6 +589,17 @@
         backfill_pages_remaining: backfillProgress.pages_remaining,
         backfill_conversations: backfillProgress.conversations_imported,
         backfill_messages: backfillProgress.messages_imported,
+        latest_sync_conversations_seen: Number(latestSyncPayload.conversations_seen || latestSyncPayload.processed_count || 0),
+        latest_sync_conversations_inserted: Number(latestSyncPayload.conversations_inserted || 0),
+        latest_sync_conversations_updated: Number(latestSyncPayload.conversations_updated || 0),
+        latest_sync_conversations_unchanged: Number(latestSyncPayload.conversations_unchanged || 0),
+        latest_sync_messages_inserted: Number(latestSyncPayload.messages_inserted || 0),
+        latest_sync_messages_updated: Number(latestSyncPayload.messages_updated || 0),
+        latest_sync_canonical_total_after: Number(latestSyncPayload.canonical_total_conversations || canonicalConversations),
+      },
+      latest_sync: {
+        event: latestSyncEvent,
+        payload: latestSyncPayload,
       },
       backfill: {
         ...backfillProgress,
@@ -1166,6 +1189,8 @@
       classificationMode: values.classificationMode || "none",
       resumeFromCheckpoint: values.resumeFromCheckpoint === true || undefined,
       resetCheckpoint: values.resetCheckpoint === true || undefined,
+      checkpointScope: values.checkpointScope || undefined,
+      latestSyncLookbackDays: values.latestSyncLookbackDays ? Number(values.latestSyncLookbackDays) : undefined,
       rateLimitPauseMs: Object.prototype.hasOwnProperty.call(values, "rateLimitPauseMs") ? Number(values.rateLimitPauseMs || 0) : undefined,
       readOnly: true,
     };

@@ -4840,15 +4840,22 @@
     const estimatedPages = progress?.estimated_total_pages ?? null;
     const pagesProcessed = progress?.pages_processed ?? counters.pagesFetched ?? 0;
     const pagesRemaining = progress?.pages_remaining ?? null;
+    const completionLabel = isBackfill
+      ? (backfillComplete ? "Historical archive backfill complete" : "Archive backfill chunk finished; click again to continue")
+      : "Latest eBay inbox sync finished";
+    const canonicalTotal = result?.canonicalTotalConversations ?? result?.canonical_total_conversations ?? null;
     els.ebayConversationSyncResult.innerHTML = `
       <div class="classification-notice is-success">
-        ${escapeHtml(isBackfill ? (backfillComplete ? "Historical backfill complete" : "Backfill chunk finished; click again to continue") : "eBay sync finished")}.
+        ${escapeHtml(completionLabel)}.
         Conversations seen: ${escapeHtml(formatContextNumber(counters.conversationsSeen))};
-        succeeded: ${escapeHtml(formatContextNumber(counters.conversationsSucceeded || counters.conversationsSeen || 0))};
+        inserted: ${escapeHtml(formatContextNumber(counters.conversationsInserted || 0))};
+        updated: ${escapeHtml(formatContextNumber(counters.conversationsUpdated || 0))};
+        unchanged: ${escapeHtml(formatContextNumber(counters.conversationsUnchanged || 0))};
         skipped: ${escapeHtml(formatContextNumber(counters.conversationsSkipped || 0))};
         messages seen: ${escapeHtml(formatContextNumber(counters.messagesSeen || 0))};
         messages inserted: ${escapeHtml(formatContextNumber(counters.messagesInserted))};
         messages updated: ${escapeHtml(formatContextNumber(counters.messagesUpdated))};
+        canonical total: ${escapeHtml(canonicalTotal === null || canonicalTotal === undefined ? "--" : formatContextNumber(canonicalTotal))};
         pages: ${escapeHtml(formatContextNumber(counters.pagesFetched || 0))};
         classification: ${escapeHtml(humanizeValue(classificationMode))};
         warnings: ${escapeHtml(formatContextNumber(warnings.length || counters.errors || 0))}.
@@ -5402,8 +5409,10 @@
 
   async function syncLatestEbayConversations(context) {
     return runEbayConversationImport(context, {
-      runType: "manual",
+      runType: "incremental",
       classificationMode: "none",
+      checkpointScope: "commerce_message_latest_sync",
+      latestSyncLookbackDays: 14,
       reloadLimit: 100,
     });
   }
@@ -5427,6 +5436,8 @@
         maxConversationPages: 1,
         maxDetailPagesPerConversation: runType === "backfill" ? 50 : 20,
         resumeFromCheckpoint: runType === "backfill",
+        checkpointScope: options.checkpointScope || (runType === "backfill" ? "commerce_message_archive" : undefined),
+        latestSyncLookbackDays: options.latestSyncLookbackDays,
         rateLimitPauseMs: runType === "backfill" ? 100 : 0,
       });
       setEbayConversationState({

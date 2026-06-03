@@ -234,15 +234,15 @@
       ],
       message_sync_completed: [
         metricText(metricValue([payload], ["conversations_seen", "processed_count"]) || 0, "seen"),
-        metricText(metricValue([payload], ["succeeded_count", "conversations_succeeded"]) || 0, "succeeded"),
-        metricText(metricValue([payload], ["skipped_count", "conversations_skipped"]) || 0, "skipped"),
-        metricText(metricValue([payload], ["messages_seen", "messages_processed"]) || 0, "messages"),
+        metricText(metricValue([payload], ["conversations_inserted"]) || 0, "inserted"),
+        metricText(metricValue([payload], ["conversations_updated"]) || 0, "updated"),
+        metricText(metricValue([payload], ["conversations_unchanged"]) || 0, "unchanged"),
       ],
       message_sync_failed: [
         metricText(metricValue([payload], ["conversations_seen", "processed_count"]) || 0, "seen"),
-        metricText(metricValue([payload], ["succeeded_count", "conversations_succeeded"]) || 0, "succeeded"),
+        metricText(metricValue([payload], ["conversations_inserted"]) || 0, "inserted"),
+        metricText(metricValue([payload], ["conversations_updated"]) || 0, "updated"),
         metricText(metricValue([payload], ["failed_count"]) || 1, "failed"),
-        payload.error_code ? utils.humanizeValue(payload.error_code) : "",
       ],
       conversation_classified: payload.classification_run || payload.processed_count !== undefined ? [
         metricText(metricValue([payload], ["processed_count"]) ?? payload.classification_run?.processed, "processed"),
@@ -414,6 +414,9 @@
       const run = payload.sync_run && typeof payload.sync_run === "object" ? payload.sync_run : payload;
       return [
         ["Conversations Seen", metricValue([payload, run, counters], ["conversations_seen", "processed_count"])],
+        ["Conversations Inserted", metricValue([payload, run, counters], ["conversations_inserted"])],
+        ["Conversations Updated", metricValue([payload, run, counters], ["conversations_updated"])],
+        ["Conversations Unchanged", metricValue([payload, run, counters], ["conversations_unchanged"])],
         ["Succeeded", metricValue([payload, run, counters], ["succeeded_count", "conversations_succeeded"])],
         ["Failed", metricValue([payload, run, counters], ["failed_count"])],
         ["Skipped", metricValue([payload, run, counters], ["skipped_count", "conversations_skipped"])],
@@ -421,6 +424,7 @@
         ["Messages Seen", metricValue([payload, run, counters], ["messages_seen", "messages_processed"])],
         ["Messages Inserted", metricValue([payload, run, counters], ["messages_inserted"])],
         ["Messages Updated", metricValue([payload, run, counters], ["messages_updated"])],
+        ["Canonical Total After Sync", metricValue([payload, run, counters], ["canonical_total_conversations", "canonicalTotalConversations"])],
         ["Warnings", metricValue([payload, run, counters], ["warnings_count"])],
         ["Duration", metricValue([payload, run], ["duration_ms"]) !== null ? `${metricValue([payload, run], ["duration_ms"])} ms` : null],
         ["Checkpoint Scope", metricValue([payload, run], ["checkpoint_scope"])],
@@ -763,6 +767,7 @@
           </div>
           <div class="operational-metric-grid">
             ${renderKeyValueGrid([
+              { label: "Total canonical", value: metrics.canonical_conversations },
               { label: "Conversations today", value: metrics.conversations_today },
               { label: "Unread conversations", value: metrics.unread_conversations },
               { label: "Needs reply", value: metrics.needs_reply },
@@ -772,6 +777,24 @@
               { label: "VIP buyers", value: metrics.vip_buyers },
               { label: "Drafts generated today", value: metrics.drafts_generated },
               { label: "Sent drafts", value: metrics.sent_drafts },
+            ], utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel operational-panel-wide">
+          <div class="operational-panel-head">
+            <strong>Latest Sync</strong>
+            ${dashboardBadge("Recent only", "muted", utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Seen", value: metrics.latest_sync_conversations_seen },
+              { label: "Inserted", value: metrics.latest_sync_conversations_inserted },
+              { label: "Updated", value: metrics.latest_sync_conversations_updated },
+              { label: "Unchanged", value: metrics.latest_sync_conversations_unchanged },
+              { label: "Messages inserted", value: metrics.latest_sync_messages_inserted },
+              { label: "Messages updated", value: metrics.latest_sync_messages_updated },
+              { label: "Canonical after sync", value: metrics.latest_sync_canonical_total_after ?? metrics.canonical_conversations },
             ], utils)}
           </div>
         </section>
