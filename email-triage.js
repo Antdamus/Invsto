@@ -6,6 +6,7 @@
     fetchOperationalDashboard,
     fetchEbayConversations,
     fetchEbayConversationMessages,
+    markEbayConversationRead,
     fetchEbayConversationContext,
     fetchEbayConversationDrafts,
     requestEbayConversationDraftAction,
@@ -99,7 +100,7 @@
   const CUSTOM_CATEGORY_ORDER_STORAGE_KEY = "og-email-triage-custom-category-order";
   const CLASSIFICATION_FILTERS_EXPANDED_STORAGE_KEY = "og-email-triage-classification-filters-expanded";
   const EBAY_CONVERSATION_FILTERS_EXPANDED_STORAGE_KEY = "og-email-triage-ebay-conversation-filters-expanded";
-  const EBAY_CLASSIFICATION_COLLAPSED_STORAGE_KEY = "og-email-triage-ebay-classification-collapsed";
+  const EBAY_CLASSIFICATION_EXPANDED_STORAGE_KEY = "og-email-triage-ebay-classification-expanded";
   const EBAY_DRAFT_METADATA_COLLAPSED_STORAGE_KEY = "og-email-triage-ebay-draft-metadata-collapsed";
   const EBAY_FILTER_GROUPS = [
     { key: "sourceTypes", label: "System source", values: EBAY_CONVERSATION_SOURCE_TYPES },
@@ -385,7 +386,7 @@
     categorySortMode: getStoredCategorySortMode(),
     customCategoryOrder: getStoredCustomCategoryOrder(),
     operationalDashboardCollapsed: getStoredDashboardCollapsed(),
-    ebayConversationClassificationCollapsed: getStoredBooleanPreference(EBAY_CLASSIFICATION_COLLAPSED_STORAGE_KEY, true),
+    ebayConversationClassificationCollapsed: !getStoredBooleanPreference(EBAY_CLASSIFICATION_EXPANDED_STORAGE_KEY, false),
     ebayDraftMetadataCollapsed: getStoredBooleanPreference(EBAY_DRAFT_METADATA_COLLAPSED_STORAGE_KEY, true),
   }));
   let adminClassificationState = triageStore.getState();
@@ -2898,6 +2899,45 @@
     return safeArray(state.ebayConversations).find((conversation) => conversation.id === conversationId) || null;
   }
 
+  function ebayMessagesMarkedRead(messages = []) {
+    return safeArray(messages).map((message) => ({
+      ...message,
+      read_status: "Read",
+      is_read: true,
+    }));
+  }
+
+  function normalizeEbayMessagesForReadState(conversationId, messages = [], state = adminClassificationState) {
+    const conversation = selectedEbayConversationById(conversationId, state);
+    if (Number(conversation?.unread_count || 0) > 0) return safeArray(messages);
+    return ebayMessagesMarkedRead(messages);
+  }
+
+  function ebayConversationStateMarkedRead(conversationId, state = adminClassificationState) {
+    if (!conversationId) return {};
+    const conversations = safeArray(state.ebayConversations);
+    const nextConversations = conversations.map((conversation) => {
+      if (conversation.id !== conversationId) return conversation;
+      return {
+        ...conversation,
+        unread_count: 0,
+        raw: conversation.raw && typeof conversation.raw === "object"
+          ? { ...conversation.raw, unread_count: 0 }
+          : conversation.raw,
+      };
+    });
+    const existingMessages = state.ebayConversationMessagesById?.[conversationId];
+    return {
+      ebayConversations: nextConversations,
+      ebayConversationMessagesById: existingMessages
+        ? {
+          ...state.ebayConversationMessagesById,
+          [conversationId]: ebayMessagesMarkedRead(existingMessages),
+        }
+        : state.ebayConversationMessagesById,
+    };
+  }
+
   function contextFromEbayPayload(payload) {
     return payload?.context && typeof payload.context === "object"
       ? payload.context
@@ -3051,7 +3091,7 @@
             <i data-lucide="trash-2"></i>
           </button>
         ` : ""}
-        <div class="ebay-smart-folder-rules">${escapeHtml(rules)}</div>
+        ${editing ? `<div class="ebay-smart-folder-rules">${escapeHtml(rules)}</div>` : ""}
       </div>
     `;
   }
@@ -3227,11 +3267,6 @@
       els.ebayConversationFilterPanel.innerHTML = EBAY_FILTER_GROUPS.map((group) => renderEbayFilterGroup(group, state)).join("");
     }
     if (els.ebayConversationActiveFilters) {
-      const ruleChips = selectedSavedView ? ebaySavedViewRuleRows(selectedSavedView).map((rule) => `
-        <span class="ebay-active-rule">
-          <b>${escapeHtml(rule.label)}</b>${escapeHtml(rule.value)}
-        </span>
-      `) : [];
       const chips = [
         selectedSavedView ? `<button type="button" data-ebay-clear-view><span>Folder</span>${escapeHtml(selectedSavedView.name)}<i data-lucide="x"></i></button>` : "",
         hasNonDefaultView && !selectedSavedView ? `<button type="button" data-ebay-clear-view><span>View</span>${escapeHtml(ebayFilterLabel(savedView))}<i data-lucide="x"></i></button>` : "",
@@ -3242,8 +3277,8 @@
           </button>
         `),
       ].filter(Boolean);
-      els.ebayConversationActiveFilters.innerHTML = ruleChips.length || chips.length
-        ? [...ruleChips, ...chips].join("")
+      els.ebayConversationActiveFilters.innerHTML = chips.length
+        ? chips.join("")
         : `<span>No classification filters active</span>`;
     }
     if (els.ebayConversationClearFilters) {
@@ -4869,7 +4904,7 @@
         ebayConversationMessagesLoadingId: null,
         ebayConversationMessagesById: {
           ...adminClassificationState.ebayConversationMessagesById,
-          [conversationId]: safeArray(payload.messages),
+          [conversationId]: normalizeEbayMessagesForReadState(conversationId, payload.messages),
         },
         ebayConversationMessageErrorsById: {
           ...adminClassificationState.ebayConversationMessageErrorsById,
@@ -4942,7 +4977,7 @@
         ebayConversationLastLoadedAt: listPayload.loaded_at || new Date().toISOString(),
         ebayConversationMessagesById: {
           ...adminClassificationState.ebayConversationMessagesById,
-          [conversation.id]: safeArray(messagesPayload.messages),
+          [conversation.id]: normalizeEbayMessagesForReadState(conversation.id, messagesPayload.messages),
         },
         ebayConversationDraftsById: {
           ...adminClassificationState.ebayConversationDraftsById,
@@ -5046,6 +5081,25 @@
     }
   }
 
+  async function markEbayConversationReadLocally(context, conversationId) {
+    if (!conversationId) return;
+    const conversation = selectedEbayConversationById(conversationId, adminClassificationState);
+    if (Number(conversation?.unread_count || 0) <= 0) return;
+    setEbayConversationState(ebayConversationStateMarkedRead(conversationId));
+    try {
+      await markEbayConversationRead(context, conversationId);
+    } catch (error) {
+      const code = error.code || error.message || "ebay_conversation_mark_read_failed";
+      setEbayConversationState({
+        ebayConversationMessageErrorsById: {
+          ...adminClassificationState.ebayConversationMessageErrorsById,
+          [conversationId]: code,
+        },
+      });
+      console.error("[email-triage] eBay conversation mark read failed:", error);
+    }
+  }
+
   async function runEbayConversationDraftAction(context, values = {}) {
     const conversationId = values.conversationId;
     if (!conversationId || !values.mode) return;
@@ -5117,6 +5171,7 @@
   async function selectEbayConversation(context, conversationId) {
     if (!conversationId) return;
     setEbayConversationState({ selectedEbayConversationId: conversationId });
+    markEbayConversationReadLocally(context, conversationId);
     loadEbayConversationMessages(context, conversationId);
     loadEbayConversationContext(context, conversationId);
     loadEbayConversationDrafts(context, conversationId);
@@ -5751,7 +5806,7 @@
       if (preference === "classification") {
         const collapsed = details.open !== true;
         if (collapsed === adminClassificationState.ebayConversationClassificationCollapsed) return;
-        storeBooleanPreference(EBAY_CLASSIFICATION_COLLAPSED_STORAGE_KEY, collapsed);
+        storeBooleanPreference(EBAY_CLASSIFICATION_EXPANDED_STORAGE_KEY, !collapsed);
         setEbayConversationState({ ebayConversationClassificationCollapsed: collapsed });
       }
       if (preference === "draft-metadata") {

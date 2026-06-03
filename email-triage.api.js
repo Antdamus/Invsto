@@ -1010,6 +1010,25 @@
     };
   }
 
+  async function markEbayConversationRead(context, conversationId) {
+    await currentSession(context, "Mark eBay conversation read");
+    if (!conversationId) {
+      const error = new Error("conversation_id_required");
+      error.code = "conversation_id_required";
+      throw error;
+    }
+
+    const { data, error } = await context.client.rpc("mark_ebay_conversation_read", {
+      _conversation_id: conversationId,
+    });
+    throwSupabaseReadError(error, "ebay_conversation_mark_read_failed");
+    return data || {
+      ok: true,
+      conversation_id: conversationId,
+      unread_count: 0,
+    };
+  }
+
   async function fetchEbayConversationContext(context, conversationId) {
     const session = await currentSession(context, "eBay conversation context");
     return edgeFetchWithTimeout(EBAY_CONVERSATION_CONTEXT_FUNCTION, session, {
@@ -1278,6 +1297,7 @@
     normalizeOperationalDashboardPayload,
     fetchEbayConversations,
     fetchEbayConversationMessages,
+    markEbayConversationRead,
     fetchEbayConversationContext,
     fetchEbayConversationDrafts,
     requestEbayConversationDraftAction,

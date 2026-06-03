@@ -63,6 +63,10 @@
 
   function operationTitle(event = {}, utils = window.EmailTriageRenderUtils) {
     const eventType = String(event.event_type || "");
+    const payload = eventPayload(event);
+    if (eventType === "conversation_classified" && payload.classification_run) {
+      return event.title || "Classification Run Completed";
+    }
     if (eventType === "send_attempt_succeeded") return "Send Attempt Succeeded";
     if (eventType === "send_attempt_failed") return "Send Attempt Failed";
     if (eventType === "duplicate_send_prevented") return "Duplicate Send Prevented";
@@ -434,14 +438,26 @@
   function renderClassificationRunDetails(event = {}, utils = window.EmailTriageRenderUtils) {
     const payload = eventPayload(event);
     const run = payload.classification_run && typeof payload.classification_run === "object" ? payload.classification_run : payload;
+    const conversationIds = Array.isArray(run.conversation_ids) ? run.conversation_ids : [];
     const failures = Array.isArray(run.failures) ? run.failures : Array.isArray(payload.failures) ? payload.failures : [];
     const skipped = Array.isArray(run.skipped_results) ? run.skipped_results : Array.isArray(payload.skipped) ? payload.skipped : [];
-    if (!failures.length && !skipped.length) return "";
+    if (!payload.classification_run && payload.processed_count === undefined) return "";
     return `
       <div class="operational-detail-classification-run">
-        ${failures.length ? `
-          <section>
-            <h4>Classification Failures</h4>
+        <section>
+          <h4>Conversation IDs</h4>
+          ${conversationIds.length ? `
+            ${conversationIds.slice(0, 50).map((id) => `
+              <div>
+                <span>${utils.escapeHtml(id)}</span>
+                <strong>${utils.escapeHtml(utils.compactId(id))}</strong>
+              </div>
+            `).join("")}
+          ` : `<div class="classification-empty operational-empty">No conversation ids recorded.</div>`}
+        </section>
+        <section>
+          <h4>Failures</h4>
+          ${failures.length ? `
             ${failures.slice(0, 12).map((row) => `
               <div>
                 <span>${utils.escapeHtml(row.conversation_id || row.ebay_conversation_id || "Unknown conversation")}</span>
@@ -449,11 +465,11 @@
                 <em>${utils.escapeHtml(row.reason || "No reason recorded")}</em>
               </div>
             `).join("")}
-          </section>
-        ` : ""}
-        ${skipped.length ? `
-          <section>
-            <h4>Skipped Conversations</h4>
+          ` : `<div class="classification-empty operational-empty">No failures recorded.</div>`}
+        </section>
+        <section>
+          <h4>Skipped Reasons</h4>
+          ${skipped.length ? `
             ${skipped.slice(0, 12).map((row) => `
               <div>
                 <span>${utils.escapeHtml(row.conversation_id || row.ebay_conversation_id || "Unknown conversation")}</span>
@@ -461,8 +477,8 @@
                 <em>${utils.escapeHtml(row.classification_id ? `Classification ${row.classification_id}` : "No classification id recorded")}</em>
               </div>
             `).join("")}
-          </section>
-        ` : ""}
+          ` : `<div class="classification-empty operational-empty">No skipped conversations recorded.</div>`}
+        </section>
       </div>
     `;
   }

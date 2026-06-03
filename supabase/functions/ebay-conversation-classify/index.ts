@@ -20,6 +20,7 @@ type Input = {
   operatorNotes: string | null;
   limit: number;
   force: boolean;
+  suppressActivityEvent?: boolean;
 };
 
 const CLASSIFIER_NAME = "ebay_conversation_classifier";
@@ -724,6 +725,7 @@ async function persistClassification(
     model: string;
     prompt: string;
     adminUserId: string | null;
+    suppressActivityEvent?: boolean;
   },
 ) {
   const latest = options.input.latest_message || {};
@@ -765,6 +767,7 @@ async function persistClassification(
       validation_metadata: {
         derived_buyer_signals: options.input.buyer_financial_context?.derived_buyer_signals || null,
         context_version: options.context.context_version || null,
+        suppress_activity_event: options.suppressActivityEvent === true,
       },
       is_current: true,
       review_state: "pending_review",
@@ -783,6 +786,7 @@ async function classifyConversation(
   rpcSupabase: ServiceClient,
   input: Input,
   admin: { userId: string | null },
+  options: { suppressActivityEvent?: boolean } = {},
 ) {
   const conversation = await resolveEbayConversation(supabase, {
     conversationId: input.conversationId,
@@ -835,6 +839,7 @@ async function classifyConversation(
     model,
     prompt: version,
     adminUserId: admin.userId,
+    suppressActivityEvent: options.suppressActivityEvent === true,
   });
 
   return {
@@ -1079,8 +1084,9 @@ async function recordClassificationRunActivity(
   const failed = Number(summary.failed || 0);
   const succeeded = Number(summary.succeeded || 0);
   const status = failed > 0 ? (succeeded > 0 ? "warning" : "failed") : "succeeded";
-  const title = summary.force === true ? "Reclassify entire inbox" : "Classify unclassified conversations";
-  const detail = `${summary.succeeded} succeeded, ${summary.failed} failed, ${summary.skipped} skipped.`;
+  const modeLabel = summary.force === true ? "Reclassify Inbox" : "Classify Unclassified";
+  const title = "Classification Run Completed";
+  const detail = `${modeLabel}. Processed: ${summary.processed}; succeeded: ${summary.succeeded}; failed: ${summary.failed}; skipped: ${summary.skipped}; duration: ${summary.duration_ms} ms; version: ${summary.classification_version}.`;
   const { error } = await supabase.rpc("record_ebay_message_activity_event", {
     _event_type: "conversation_classified",
     _status: status,
@@ -1176,7 +1182,7 @@ async function classifyRecent(
         mode: "classify_conversation",
         conversationId: conversation.id,
         ebayConversationId: null,
-      }, admin);
+      }, admin, { suppressActivityEvent: true });
       results.push({
         conversation_id: conversation.id,
         ebay_conversation_id: conversation.ebay_conversation_id,
