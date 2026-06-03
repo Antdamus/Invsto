@@ -5407,8 +5407,8 @@
       const result = await runEbayMessageSync(context, {
         runType,
         classificationMode,
-        conversationPageLimit: runType === "backfill" ? 100 : 25,
-        messagePageLimit: runType === "backfill" ? 100 : 25,
+        conversationPageLimit: runType === "backfill" ? 50 : 25,
+        messagePageLimit: runType === "backfill" ? 50 : 25,
         maxDetailPagesPerConversation: runType === "backfill" ? 50 : 20,
         resumeFromCheckpoint: runType === "backfill",
         rateLimitPauseMs: runType === "backfill" ? 100 : 0,

@@ -1091,12 +1091,13 @@
 
   async function runEbayMessageSync(context, values = {}) {
     const session = await currentSession(context, "eBay message sync");
+    const ebayMessagePageLimit = (value, fallback) => Math.min(Math.max(Number(value || fallback), 1), 50);
     const body = {
       mode: "sync",
       runType: values.runType || "manual",
       conversationTypes: values.conversationTypes || ["FROM_MEMBERS", "FROM_EBAY"],
-      conversationPageLimit: Number(values.conversationPageLimit || 25),
-      messagePageLimit: Number(values.messagePageLimit || 25),
+      conversationPageLimit: ebayMessagePageLimit(values.conversationPageLimit, 25),
+      messagePageLimit: ebayMessagePageLimit(values.messagePageLimit, 25),
       maxConversationPages: Object.prototype.hasOwnProperty.call(values, "maxConversationPages")
         ? values.maxConversationPages
         : Number(values.runType === "backfill" ? 0 : 1),

@@ -67,6 +67,8 @@
     if (eventType === "conversation_classified" && payload.classification_run) {
       return event.title || "Classification Run Completed";
     }
+    if (eventType === "message_sync_completed") return event.title || "Sync Latest Completed";
+    if (eventType === "message_sync_failed") return event.title || "Sync Latest Failed";
     if (eventType === "message_backfill_started") return "Backfill Started";
     if (eventType === "message_backfill_completed") return "Backfill Completed";
     if (eventType === "message_backfill_failed") return "Backfill Failed";
@@ -178,6 +180,8 @@
       duplicate_send_prevented: "A duplicate send was blocked before another provider call.",
       smart_folder_created: "An eBay smart folder was created.",
       smart_folder_updated: "An eBay smart folder was updated.",
+      message_sync_completed: "Recent eBay inbox sync completed as one aggregate operation.",
+      message_sync_failed: "Recent eBay inbox sync failed as one aggregate operation.",
       message_backfill_started: "Historical eBay message archive import started.",
       message_backfill_completed: "Historical eBay message archive import completed.",
       message_backfill_failed: "Historical eBay message archive import failed.",
@@ -225,6 +229,18 @@
       conversation_synced: [
         payload.unread_count !== undefined ? metricText(payload.unread_count, "unread") : "",
         payload.latest_message_id ? `latest ${utils.compactId(payload.latest_message_id)}` : "",
+      ],
+      message_sync_completed: [
+        metricText(metricValue([payload], ["conversations_seen", "processed_count"]) || 0, "seen"),
+        metricText(metricValue([payload], ["succeeded_count", "conversations_succeeded"]) || 0, "succeeded"),
+        metricText(metricValue([payload], ["skipped_count", "conversations_skipped"]) || 0, "skipped"),
+        metricText(metricValue([payload], ["messages_seen", "messages_processed"]) || 0, "messages"),
+      ],
+      message_sync_failed: [
+        metricText(metricValue([payload], ["conversations_seen", "processed_count"]) || 0, "seen"),
+        metricText(metricValue([payload], ["succeeded_count", "conversations_succeeded"]) || 0, "succeeded"),
+        metricText(metricValue([payload], ["failed_count"]) || 1, "failed"),
+        payload.error_code ? utils.humanizeValue(payload.error_code) : "",
       ],
       conversation_classified: payload.classification_run || payload.processed_count !== undefined ? [
         metricText(metricValue([payload], ["processed_count"]) ?? payload.classification_run?.processed, "processed"),
@@ -380,6 +396,28 @@
         ["Classification Failed", metricValue([payload, run], ["classification_failed"])],
         ["Classification Skipped", metricValue([payload, run], ["classification_skipped"])],
         ["Duration", metricValue([payload, run], ["duration_ms"]) !== null ? `${metricValue([payload, run], ["duration_ms"])} ms` : null],
+        ["Error", metricValue([payload, run], ["error_code", "last_error_code"])],
+      ];
+    }
+
+    if (eventType.startsWith("message_sync_")) {
+      const run = payload.sync_run && typeof payload.sync_run === "object" ? payload.sync_run : payload;
+      return [
+        ["Conversations Seen", metricValue([payload, run, counters], ["conversations_seen", "processed_count"])],
+        ["Succeeded", metricValue([payload, run, counters], ["succeeded_count", "conversations_succeeded"])],
+        ["Failed", metricValue([payload, run, counters], ["failed_count"])],
+        ["Skipped", metricValue([payload, run, counters], ["skipped_count", "conversations_skipped"])],
+        ["Pages", metricValue([payload, run, counters], ["pages_processed"])],
+        ["Messages Seen", metricValue([payload, run, counters], ["messages_seen", "messages_processed"])],
+        ["Messages Inserted", metricValue([payload, run, counters], ["messages_inserted"])],
+        ["Messages Updated", metricValue([payload, run, counters], ["messages_updated"])],
+        ["Warnings", metricValue([payload, run, counters], ["warnings_count"])],
+        ["Duration", metricValue([payload, run], ["duration_ms"]) !== null ? `${metricValue([payload, run], ["duration_ms"])} ms` : null],
+        ["Checkpoint Scope", metricValue([payload, run], ["checkpoint_scope"])],
+        ["Conversation IDs", Array.isArray(run.conversation_ids) ? run.conversation_ids.slice(0, 50).join(", ") : null],
+        ["eBay Endpoint", metricValue([payload.ebay_api, run.ebay_api], ["endpoint"])],
+        ["eBay Params", payload.ebay_api?.parameters ? JSON.stringify(payload.ebay_api.parameters) : (run.ebay_api?.parameters ? JSON.stringify(run.ebay_api.parameters) : null)],
+        ["HTTP Status", metricValue([payload.ebay_api, run.ebay_api], ["http_status"])],
         ["Error", metricValue([payload, run], ["error_code", "last_error_code"])],
       ];
     }
