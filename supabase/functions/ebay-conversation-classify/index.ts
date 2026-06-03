@@ -244,6 +244,7 @@ async function parseInput(req: Request): Promise<Input> {
     operatorNotes: stringOrNull(body?.operatorNotes || body?.operator_notes, 1000),
     limit: clampLimit(body?.limit, rawMode === "taxonomy_audit" ? 100 : 10, rawMode === "taxonomy_audit" ? 250 : 100),
     force: booleanValue(body?.force),
+    suppressActivityEvent: booleanValue(body?.suppressActivityEvent ?? body?.suppress_activity_event),
   };
 }
 
@@ -1297,7 +1298,9 @@ serve(async (req) => {
     if (input.mode === "taxonomy_audit") return json(req, 200, await taxonomyAudit(supabase, input));
     if (input.mode === "review_override") return json(req, 200, await reviewOverride(supabase, input, admin));
     if (input.mode === "classify_recent") return json(req, 200, await classifyRecent(supabase, rpcSupabase, input, admin));
-    return json(req, 200, await classifyConversation(supabase, rpcSupabase, input, admin));
+    return json(req, 200, await classifyConversation(supabase, rpcSupabase, input, admin, {
+      suppressActivityEvent: input.suppressActivityEvent === true,
+    }));
   } catch (error) {
     const known = error instanceof ClassifierError || error instanceof EbayConversationContextError ? error : null;
     return json(req, known?.status || 500, {

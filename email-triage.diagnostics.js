@@ -67,6 +67,9 @@
     if (eventType === "conversation_classified" && payload.classification_run) {
       return event.title || "Classification Run Completed";
     }
+    if (eventType === "message_backfill_started") return "Backfill Started";
+    if (eventType === "message_backfill_completed") return "Backfill Completed";
+    if (eventType === "message_backfill_failed") return "Backfill Failed";
     if (eventType === "send_attempt_succeeded") return "Send Attempt Succeeded";
     if (eventType === "send_attempt_failed") return "Send Attempt Failed";
     if (eventType === "duplicate_send_prevented") return "Duplicate Send Prevented";
@@ -175,6 +178,9 @@
       duplicate_send_prevented: "A duplicate send was blocked before another provider call.",
       smart_folder_created: "An eBay smart folder was created.",
       smart_folder_updated: "An eBay smart folder was updated.",
+      message_backfill_started: "Historical eBay message archive import started.",
+      message_backfill_completed: "Historical eBay message archive import completed.",
+      message_backfill_failed: "Historical eBay message archive import failed.",
     };
     const description = firstValue([
       event.reason,
@@ -229,6 +235,23 @@
         payload.priority ? utils.humanizeValue(payload.priority) : "",
         payload.response_need ? utils.humanizeValue(payload.response_need) : "",
         Array.isArray(payload.topic_tags) ? metricText(payload.topic_tags.length, "topics") : "",
+      ],
+      message_backfill_started: [
+        metricText(metricValue([payload], ["processed_count"]) || 0, "processed"),
+        payload.classification_mode ? utils.humanizeValue(payload.classification_mode) : "",
+        Array.isArray(payload.conversation_types) ? payload.conversation_types.join(", ") : "",
+      ],
+      message_backfill_completed: [
+        metricText(metricValue([payload], ["processed_count", "conversations_processed"]) || 0, "processed"),
+        metricText(metricValue([payload], ["succeeded_count", "conversations_succeeded"]) || 0, "succeeded"),
+        metricText(metricValue([payload], ["failed_count"]) || 0, "failed"),
+        metricText(metricValue([payload], ["messages_processed"]) || 0, "messages"),
+      ],
+      message_backfill_failed: [
+        metricText(metricValue([payload], ["processed_count", "conversations_processed"]) || 0, "processed"),
+        metricText(metricValue([payload], ["succeeded_count", "conversations_succeeded"]) || 0, "succeeded"),
+        metricText(metricValue([payload], ["failed_count"]) || 1, "failed"),
+        payload.error_code ? utils.humanizeValue(payload.error_code) : "",
       ],
       draft_generated: [
         payload.draft_version ? `v${payload.draft_version}` : "",
@@ -340,6 +363,24 @@
         ["Duration", metricValue([payload, run], ["duration_ms"]) !== null ? `${metricValue([payload, run], ["duration_ms"])} ms` : null],
         ["Mode", metricValue([run, payload], ["run_mode"])],
         ["Conversation IDs", Array.isArray(run.conversation_ids) ? run.conversation_ids.slice(0, 24).join(", ") : null],
+      ];
+    }
+
+    if (eventType.startsWith("message_backfill_")) {
+      const run = payload.backfill_run && typeof payload.backfill_run === "object" ? payload.backfill_run : payload;
+      return [
+        ["Processed", metricValue([payload, run, counters], ["processed_count", "conversations_processed"])],
+        ["Succeeded", metricValue([payload, run, counters], ["succeeded_count", "conversations_succeeded"])],
+        ["Failed", metricValue([payload, run, counters], ["failed_count"])],
+        ["Skipped", metricValue([payload, run, counters], ["skipped_count"])],
+        ["Pages", metricValue([payload, run, counters], ["pages_processed"])],
+        ["Messages", metricValue([payload, run, counters], ["messages_processed"])],
+        ["Classification Mode", metricValue([payload, run], ["classification_mode"])],
+        ["Classified", metricValue([payload, run], ["classification_succeeded"])],
+        ["Classification Failed", metricValue([payload, run], ["classification_failed"])],
+        ["Classification Skipped", metricValue([payload, run], ["classification_skipped"])],
+        ["Duration", metricValue([payload, run], ["duration_ms"]) !== null ? `${metricValue([payload, run], ["duration_ms"])} ms` : null],
+        ["Error", metricValue([payload, run], ["error_code", "last_error_code"])],
       ];
     }
 
@@ -612,11 +653,39 @@
     `).join("");
   }
 
+  function renderBackfillCheckpointRows(checkpoints = [], utils = window.EmailTriageRenderUtils) {
+    if (!checkpoints.length) {
+      return `<div class="classification-empty operational-empty">No historical backfill checkpoint has been recorded yet.</div>`;
+    }
+
+    return checkpoints.slice(0, 4).map((checkpoint) => {
+      const total = Number(checkpoint.total_available || 0);
+      const page = Number(checkpoint.pages_processed || 0);
+      const estimatedPages = total && Number(checkpoint.metadata?.last_page_processed || checkpoint.last_page_processed || 0) >= 0
+        ? Math.ceil(total / Math.max(1, Number(checkpoint.metadata?.page_limit || 100)))
+        : null;
+      const status = String(checkpoint.status || "idle");
+      const statusVariant = status === "succeeded" ? "success" : status === "failed" ? "danger" : status === "running" ? "warning" : "muted";
+      const pageText = estimatedPages ? `${page} / ${estimatedPages}` : String(page || "--");
+      return `
+        <div class="operational-row">
+          <span>${utils.escapeHtml(checkpoint.conversation_type || "Conversation type")}</span>
+          <strong>${utils.escapeHtml(`Pages ${pageText}`)}</strong>
+          <em>${utils.escapeHtml(`${checkpoint.conversations_processed || 0} conversations · ${checkpoint.messages_processed || 0} messages · updated ${utils.formatDateTime(checkpoint.updated_at)}`)}</em>
+          ${dashboardBadge(utils.humanizeValue(status), statusVariant, utils)}
+        </div>
+      `;
+    }).join("");
+  }
+
   function renderEbayOperationalDashboard(state = {}, snapshot = {}, utils = window.EmailTriageRenderUtils) {
     const ebay = snapshot.ebay || {};
     const metrics = ebay.metrics || {};
     const safety = ebay.send_safety || {};
     const approvalQueue = ebay.approval_queue || {};
+    const backfill = ebay.backfill || {};
+    const checkpoints = Array.isArray(backfill.checkpoints) ? backfill.checkpoints : [];
+    const activeBackfills = Array.isArray(backfill.active) ? backfill.active : [];
     const events = Array.isArray(ebay.recent_operational_events) ? ebay.recent_operational_events : [];
     const blocked = ebay.ok === false || Number(metrics.send_attempts_failed || 0) > 0 || safety.automatic_responses_sent > 0;
 
@@ -679,6 +748,24 @@
             ], utils)}
           </div>
           ${renderOperationalNote(`Duplicate guard: ${utils.humanizeValue(safety.duplicate_success_guard || "one_success_per_idempotency_key")}.`, utils)}
+        </section>
+
+        <section class="operational-panel operational-panel-wide">
+          <div class="operational-panel-head">
+            <strong>Historical Backfill</strong>
+            ${dashboardBadge(activeBackfills.length ? `${activeBackfills.length} running` : "Manual only", activeBackfills.length ? "warning" : "muted", utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Pages", value: metrics.backfill_pages },
+              { label: "Conversations", value: metrics.backfill_conversations },
+              { label: "Messages", value: metrics.backfill_messages },
+              { label: "Last full backfill", value: backfill.latest_completed?.last_full_backfill_at ? utils.formatDateTime(backfill.latest_completed.last_full_backfill_at) : "--" },
+            ], utils)}
+          </div>
+          <div class="operational-activity-list">
+            ${renderBackfillCheckpointRows(checkpoints, utils)}
+          </div>
         </section>
 
         <section class="operational-panel operational-panel-wide">

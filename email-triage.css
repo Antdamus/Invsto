@@ -3048,6 +3048,17 @@
   font-size: .76rem;
 }
 
+.ebay-conversation-actions .secondary-btn.is-danger {
+  border-color: rgba(255,112,112,.24);
+  color: #ffd6d6;
+}
+
+.ebay-conversation-actions .secondary-btn.is-danger:hover,
+.ebay-conversation-actions .secondary-btn.is-danger:focus-visible {
+  border-color: rgba(255,112,112,.42);
+  background: rgba(255,112,112,.12);
+}
+
 .ebay-conversation-filter-strip .panel-toggle-btn[aria-pressed="true"] {
   border-color: rgba(114,184,255,.3);
   background: rgba(114,184,255,.1);

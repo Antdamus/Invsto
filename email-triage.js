@@ -232,6 +232,9 @@
     operationalDashboard: document.getElementById("operational-dashboard"),
     ebayConversationRefresh: document.getElementById("ebay-conversation-refresh"),
     ebayConversationSync: document.getElementById("ebay-conversation-sync"),
+    ebayConversationBackfill: document.getElementById("ebay-conversation-backfill"),
+    ebayConversationBackfillClassifyNew: document.getElementById("ebay-conversation-backfill-classify-new"),
+    ebayConversationBackfillReclassifyAll: document.getElementById("ebay-conversation-backfill-reclassify-all"),
     ebayConversationClassifyRecent: document.getElementById("ebay-conversation-classify-recent"),
     ebayConversationReclassifyAll: document.getElementById("ebay-conversation-reclassify-all"),
     ebayConversationStatus: document.getElementById("ebay-conversation-status"),
@@ -4820,7 +4823,7 @@
       return;
     }
     if (state.ebayConversationSyncLoading) {
-      els.ebayConversationSyncResult.innerHTML = `<div class="classification-notice">Syncing latest eBay conversations in read-only Commerce Message mode.</div>`;
+      els.ebayConversationSyncResult.innerHTML = `<div class="classification-notice">Running eBay message import in read-only Commerce Message mode.</div>`;
       return;
     }
     if (error) {
@@ -4829,11 +4832,19 @@
     }
     const counters = result?.counters || {};
     const warnings = safeArray(counters.warnings);
+    const isBackfill = result?.runType === "backfill";
+    const classificationMode = result?.classificationMode || "none";
     els.ebayConversationSyncResult.innerHTML = `
       <div class="classification-notice is-success">
-        eBay sync finished. Conversations seen: ${escapeHtml(formatContextNumber(counters.conversationsSeen))};
+        ${escapeHtml(isBackfill ? "Historical backfill finished" : "eBay sync finished")}.
+        Conversations seen: ${escapeHtml(formatContextNumber(counters.conversationsSeen))};
+        succeeded: ${escapeHtml(formatContextNumber(counters.conversationsSucceeded || counters.conversationsSeen || 0))};
+        skipped: ${escapeHtml(formatContextNumber(counters.conversationsSkipped || 0))};
+        messages seen: ${escapeHtml(formatContextNumber(counters.messagesSeen || 0))};
         messages inserted: ${escapeHtml(formatContextNumber(counters.messagesInserted))};
         messages updated: ${escapeHtml(formatContextNumber(counters.messagesUpdated))};
+        pages: ${escapeHtml(formatContextNumber(counters.pagesFetched || 0))};
+        classification: ${escapeHtml(humanizeValue(classificationMode))};
         warnings: ${escapeHtml(formatContextNumber(warnings.length || counters.errors || 0))}.
       </div>
       ${warnings.length ? renderWarningPanel([], warnings.slice(0, 6)) : ""}
@@ -4855,7 +4866,15 @@
       }
     }
 
-    [els.ebayConversationRefresh, els.ebayConversationSync, els.ebayConversationClassifyRecent, els.ebayConversationReclassifyAll].forEach((button) => {
+    [
+      els.ebayConversationRefresh,
+      els.ebayConversationSync,
+      els.ebayConversationBackfill,
+      els.ebayConversationBackfillClassifyNew,
+      els.ebayConversationBackfillReclassifyAll,
+      els.ebayConversationClassifyRecent,
+      els.ebayConversationReclassifyAll,
+    ].forEach((button) => {
       if (!button) return;
       const busy = state.ebayConversationLoading || state.ebayConversationSyncLoading || state.ebayConversationClassificationBatchLoading;
       button.disabled = busy;
@@ -5367,6 +5386,16 @@
   }
 
   async function syncLatestEbayConversations(context) {
+    return runEbayConversationImport(context, {
+      runType: "manual",
+      classificationMode: "none",
+      reloadLimit: 100,
+    });
+  }
+
+  async function runEbayConversationImport(context, options = {}) {
+    const runType = options.runType || "manual";
+    const classificationMode = options.classificationMode || "none";
     setEbayConversationState({
       ebayConversationSyncLoading: true,
       ebayConversationSyncResult: null,
@@ -5375,13 +5404,22 @@
     });
 
     try {
-      const result = await runEbayMessageSync(context);
+      const result = await runEbayMessageSync(context, {
+        runType,
+        classificationMode,
+        conversationPageLimit: runType === "backfill" ? 100 : 25,
+        messagePageLimit: runType === "backfill" ? 100 : 25,
+        maxDetailPagesPerConversation: runType === "backfill" ? 50 : 20,
+        resumeFromCheckpoint: runType === "backfill",
+        rateLimitPauseMs: runType === "backfill" ? 100 : 0,
+      });
       setEbayConversationState({
         ebayConversationSyncLoading: false,
         ebayConversationSyncResult: result,
         ebayConversationSyncError: null,
       });
-      await loadEbayConversationList(context, { limit: 100 });
+      await loadEbayConversationList(context, { limit: options.reloadLimit || 100 });
+      loadOperationalDashboard(context, { keepPrevious: true });
     } catch (error) {
       const code = error.code || error.message || "ebay_message_sync_failed";
       setEbayConversationState({
@@ -5390,6 +5428,18 @@
       });
       console.error("[email-triage] eBay message sync failed:", error);
     }
+  }
+
+  async function backfillEbayConversations(context, classificationMode = "none") {
+    if (classificationMode === "reclassify_all") {
+      const ok = window.confirm("Backfill the full historical archive and reclassify every imported conversation? This can take a while and will replace current AI labels.");
+      if (!ok) return;
+    }
+    return runEbayConversationImport(context, {
+      runType: "backfill",
+      classificationMode,
+      reloadLimit: 250,
+    });
   }
 
   function mergeEbayConversationClassification(conversationId, classification) {
@@ -5613,6 +5663,9 @@
   function bindEbayConversationEvents(context) {
     els.ebayConversationRefresh?.addEventListener("click", () => loadEbayConversationList(context, { limit: 100 }));
     els.ebayConversationSync?.addEventListener("click", () => syncLatestEbayConversations(context));
+    els.ebayConversationBackfill?.addEventListener("click", () => backfillEbayConversations(context, "none"));
+    els.ebayConversationBackfillClassifyNew?.addEventListener("click", () => backfillEbayConversations(context, "classify_new"));
+    els.ebayConversationBackfillReclassifyAll?.addEventListener("click", () => backfillEbayConversations(context, "reclassify_all"));
     els.ebayConversationClassifyRecent?.addEventListener("click", () => classifyRecentEbayConversationRows(context, { force: false }));
     els.ebayConversationReclassifyAll?.addEventListener("click", () => classifyRecentEbayConversationRows(context, { force: true }));
     els.ebayConversationSavedViews?.addEventListener("click", (event) => {

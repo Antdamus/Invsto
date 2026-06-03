@@ -16,6 +16,7 @@
     ebayConversationMessages: 15000,
     ebayConversationContext: 30000,
     ebayMessageSync: 90000,
+    ebayMessageBackfill: 300000,
     ebayConversationClassify: 90000,
     ebayConversationDraft: 60000,
   };
@@ -411,6 +412,7 @@
       approvalsResult,
       attemptsResult,
       eventsResult,
+      checkpointsResult,
     ] = await Promise.all([
       countSupabaseRows(
         client
@@ -452,6 +454,12 @@
         .select("id, event_type, status, actor_user_id, actor_email, conversation_id, target_message_id, draft_id, approval_id, send_attempt_id, classification_id, saved_view_id, sync_run_id, title, detail, metadata, created_at")
         .order("created_at", { ascending: false })
         .limit(60),
+      client
+        .from("ebay_message_sync_checkpoints")
+        .select("id, seller_account_id, checkpoint_scope, conversation_type, status, current_run_id, last_run_id, last_full_backfill_at, last_successful_sync_at, last_conversation_timestamp, last_page_processed, next_offset, total_available, pages_processed, conversations_processed, messages_processed, last_error_code, last_error_message, metadata, updated_at, created_at")
+        .eq("checkpoint_scope", "commerce_message_archive")
+        .order("updated_at", { ascending: false })
+        .limit(10),
     ]);
 
     throwSupabaseReadError(classificationsResult.error, "ebay_classification_dashboard_failed");
@@ -459,11 +467,13 @@
     throwSupabaseReadError(approvalsResult.error, "ebay_approval_dashboard_failed");
     throwSupabaseReadError(attemptsResult.error, "ebay_send_attempt_dashboard_failed");
     throwSupabaseReadError(eventsResult.error, "ebay_activity_dashboard_failed");
+    throwSupabaseReadError(checkpointsResult.error, "ebay_backfill_checkpoint_dashboard_failed");
 
     const classifications = Array.isArray(classificationsResult.data) ? classificationsResult.data : [];
     const drafts = Array.isArray(draftsResult.data) ? draftsResult.data : [];
     const approvals = Array.isArray(approvalsResult.data) ? approvalsResult.data : [];
     const attempts = Array.isArray(attemptsResult.data) ? attemptsResult.data : [];
+    const checkpoints = Array.isArray(checkpointsResult.data) ? checkpointsResult.data : [];
     const dashboardMaps = {
       attemptsById: mapDashboardRowsById(attempts),
       draftsById: mapDashboardRowsById(drafts),
@@ -506,6 +516,15 @@
         send_attempts_failed: attempts.filter((attempt) => attempt.attempt_status === "failed").length,
         send_attempts_succeeded: succeededAttempts.length,
         duplicate_sends_prevented: attempts.filter((attempt) => attempt.attempt_status === "duplicate").length,
+        backfill_pages: checkpoints.reduce((total, row) => total + Number(row.pages_processed || 0), 0),
+        backfill_conversations: checkpoints.reduce((total, row) => total + Number(row.conversations_processed || 0), 0),
+        backfill_messages: checkpoints.reduce((total, row) => total + Number(row.messages_processed || 0), 0),
+      },
+      backfill: {
+        checkpoints,
+        active: checkpoints.filter((row) => row.status === "running"),
+        latest_completed: checkpoints.find((row) => row.status === "succeeded") || null,
+        latest_failed: checkpoints.find((row) => row.status === "failed") || null,
       },
       approval_queue: {
         current_drafts: currentDrafts.length,
@@ -1074,14 +1093,21 @@
     const session = await currentSession(context, "eBay message sync");
     const body = {
       mode: "sync",
-      runType: "manual",
+      runType: values.runType || "manual",
       conversationTypes: values.conversationTypes || ["FROM_MEMBERS", "FROM_EBAY"],
       conversationPageLimit: Number(values.conversationPageLimit || 25),
       messagePageLimit: Number(values.messagePageLimit || 25),
-      maxConversationPages: Number(values.maxConversationPages || 1),
+      maxConversationPages: Object.prototype.hasOwnProperty.call(values, "maxConversationPages")
+        ? values.maxConversationPages
+        : Number(values.runType === "backfill" ? 0 : 1),
       maxDetailPagesPerConversation: Number(values.maxDetailPagesPerConversation || 20),
+      classificationMode: values.classificationMode || "none",
+      resumeFromCheckpoint: values.resumeFromCheckpoint === true || undefined,
+      resetCheckpoint: values.resetCheckpoint === true || undefined,
+      rateLimitPauseMs: Object.prototype.hasOwnProperty.call(values, "rateLimitPauseMs") ? Number(values.rateLimitPauseMs || 0) : undefined,
       readOnly: true,
     };
+    if (body.runType === "backfill" && body.maxConversationPages === 0) delete body.maxConversationPages;
     if (values.conversationId) body.conversationId = values.conversationId;
     if (values.conversationType && !values.conversationTypes) body.conversationTypes = [values.conversationType];
     if (values.startTime) body.startTime = values.startTime;
@@ -1092,7 +1118,7 @@
     const payload = await edgeFetchWithTimeout(EBAY_MESSAGE_SYNC_FUNCTION, session, {
       method: "POST",
       body: JSON.stringify(body),
-    }, TIMEOUTS.ebayMessageSync);
+    }, body.runType === "backfill" ? TIMEOUTS.ebayMessageBackfill : TIMEOUTS.ebayMessageSync);
     return payload;
   }
 
