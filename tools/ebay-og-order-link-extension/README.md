@@ -78,6 +78,27 @@ Required extension permissions now include:
 
 On eBay Seller Hub pages titled `Manage orders awaiting shipment`, the extension looks for the real visible `Download report` button, the `Results:` grid summary, and eBay's `orders-download-report` module signal. It adds a floating `Send Awaiting Orders Report to OG` button.
 
+## eBay Live video receipt controls
+
+On eBay Live replay receipt pages, the extension looks for eBay's replay video element:
+
+```html
+<video data-testid="replay-video">
+```
+
+It adds an `OG video controls` bar with play/pause, 5 second seek, 10 second seek, a scrubber, `Card` for nudging eBay's replay item card to refresh, `Winner` for copying the loaded winner username and opening that buyer in OG Pending Orders, and `Copy shot` for copying the visible replay page to the clipboard as a PNG. The screenshot hides the OG overlay before capture so the copied image shows the eBay replay page, including the auction card and username details visible on screen.
+
+The `Keys` button opens the controller hotkey settings. Hotkeys are saved locally in the browser. Defaults:
+
+- `Space`: play/pause
+- `A`: rewind 5 seconds
+- `D`: advance 5 seconds
+- `J`: rewind 10 seconds
+- `L`: advance 10 seconds
+- `R`: refresh the visible eBay replay item card
+- `W`: copy the visible winner username and open that buyer in OG
+- `C`: copy visible replay screenshot to clipboard
+
 When clicked, it:
 
 1. Loads a report capture probe that watches report-ish `fetch`, XHR, object URL, and anchor downloads.

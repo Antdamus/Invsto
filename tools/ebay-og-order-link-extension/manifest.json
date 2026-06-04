@@ -8,6 +8,7 @@
     "activeTab",
     "tabs",
     "downloads",
+    "clipboardWrite",
     "unlimitedStorage"
   ],
   "host_permissions": [

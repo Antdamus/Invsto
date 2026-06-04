@@ -48,6 +48,7 @@ const state = {
   handledEbayReportTransferIds: new Set(),
   handledVideoReceiptPhotoTransferIds: new Set(),
   handledEbayCancelProofTransferIds: new Set(),
+  handledEbayFocusBuyerRequestIds: new Set(),
   queuedEbayLabelTransfers: [],
   queuedEbayReportTransfers: [],
   queuedVideoReceiptPhotoTransfers: [],
@@ -1181,6 +1182,20 @@ function getRequestedEbayAllOrderNumbers() {
     .filter((value) => EBAY_ORDER_NUMBER_PATTERN.test(value)))];
 }
 
+function normalizeEbayBuyerUsername(value) {
+  return String(value || "").trim().replace(/^@+/, "");
+}
+
+function getRequestedEbayBuyerUsername() {
+  const params = new URLSearchParams(window.location.search);
+  return normalizeEbayBuyerUsername(
+    params.get("buyerUsername")
+    || params.get("buyer")
+    || params.get("ebayBuyer")
+    || ""
+  );
+}
+
 function getRequestedPositiveIntegerParam(name) {
   const value = Number(new URLSearchParams(window.location.search).get(name) || 0);
   return Number.isFinite(value) && value > 0 ? value : 0;
@@ -1994,6 +2009,81 @@ function applyEbayLaunchOrderSelection() {
   }
 }
 
+function scrollPendingBuyerSearchResultIntoView(buyerKey = "") {
+  window.setTimeout(() => {
+    const cards = [...document.querySelectorAll(".buyer-order-card")];
+    const card = cards.find((entry) => entry.dataset.buyerKey === buyerKey) || cards[0];
+    const target = card || $("orders-list") || $("order-search");
+    target?.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (!card) return;
+    card.classList.add("is-video-winner-focus");
+    window.setTimeout(() => card.classList.remove("is-video-winner-focus"), 1600);
+  }, 80);
+}
+
+function focusEbayBuyerFromVideoReceipt(payload = {}) {
+  const buyerUsername = normalizeEbayBuyerUsername(payload.buyerUsername || payload.username || "");
+  if (!buyerUsername) {
+    return { ok: false, error: "No eBay buyer username was provided." };
+  }
+
+  const buyerKey = buyerUsername.toLowerCase();
+  clearEbayLaunchFilter({ apply: false });
+  clearOrderCreatedDateFilter({ apply: false });
+  clearLiveLotSelection({ render: false });
+  clearSelection();
+
+  const exactMatches = state.orders.filter((line) => getBuyerKey(line) === buyerKey);
+  const searchInput = $("order-search");
+  if (searchInput) {
+    searchInput.value = buyerUsername;
+    searchInput.focus({ preventScroll: true });
+    searchInput.select();
+  }
+  applyOrderFilters();
+  scrollPendingBuyerSearchResultIntoView(buyerKey);
+
+  if (exactMatches.length) {
+    setStatus(`Filtered pending orders to eBay winner ${buyerUsername}.`, "info");
+    return {
+      ok: true,
+      buyerUsername,
+      matched: true,
+      lineCount: exactMatches.length,
+      orderNumbers: [...new Set(exactMatches.map((line) => line.order?.order_number).filter(Boolean))],
+    };
+  }
+
+  setStatus(`No exact pending buyer match for ${buyerUsername}. Search was filled so you can review manually.`, "error");
+  return {
+    ok: true,
+    buyerUsername,
+    matched: false,
+    lineCount: 0,
+  };
+}
+
+function applyRequestedEbayBuyerSelection() {
+  const buyerUsername = getRequestedEbayBuyerUsername();
+  if (!buyerUsername) return false;
+  focusEbayBuyerFromVideoReceipt({
+    buyerUsername,
+    source: "url",
+    pageUrl: window.location.href,
+  });
+  return true;
+}
+
+function getEbayFocusBuyerRequestKey(payload = {}) {
+  const buyerUsername = normalizeEbayBuyerUsername(payload.buyerUsername || payload.username || "");
+  return [
+    buyerUsername.toLowerCase(),
+    payload.requestedAt || "",
+    payload.capturedAt || "",
+    payload.pageUrl || "",
+  ].filter(Boolean).join("|");
+}
+
 function renderSummaryStrip() {
   const openLines = state.orders.filter(isOpenOrderLine);
   const openGroups = groupLinesByBuyer(openLines);
@@ -2354,6 +2444,8 @@ function renderOrders() {
     const hasSelectedAdminLines = group.lines.some((line) => state.adminSelectedLineIds.has(line.id));
     const syncMismatch = group.lines.map(getOrderSyncMismatch).find(Boolean);
     card.className = `buyer-order-card ${urgencyClass} ${groupIndex % 2 ? "is-alt-group" : ""} ${hasSelectedAdminLines ? "has-admin-selected-lines" : ""} ${syncMismatch ? "has-sync-mismatch" : ""} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""}`;
+    card.dataset.buyerKey = group.key;
+    card.dataset.buyerUsername = group.buyer;
     card.innerHTML = `
       <div class="buyer-card-head">
         <div>
@@ -8155,6 +8247,25 @@ function setupEbayLabelReceiver() {
     }
     if (event.data?.type === "OG_EBAY_CANCEL_PROOF_TRANSFER") {
       handleEbayCancelProofTransfer(event.data.payload);
+      return;
+    }
+    if (event.data?.type === "OG_EBAY_FOCUS_BUYER") {
+      const payload = event.data.payload || {};
+      const requestKey = getEbayFocusBuyerRequestKey(payload);
+      if (requestKey && state.handledEbayFocusBuyerRequestIds.has(requestKey)) return;
+      if (requestKey) {
+        state.handledEbayFocusBuyerRequestIds.add(requestKey);
+        window.setTimeout(() => state.handledEbayFocusBuyerRequestIds.delete(requestKey), 120000);
+      }
+      const result = focusEbayBuyerFromVideoReceipt(payload);
+      window.postMessage({
+        type: "OG_EBAY_FOCUS_BUYER_STATUS",
+        payload: {
+          ...result,
+          requestedAt: payload.requestedAt || null,
+        },
+      }, window.location.origin);
+      return;
     }
   });
 }
@@ -8529,7 +8640,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   clearOrderCreatedDateFilter({ apply: false });
   await loadOrders();
   const openedTask = await openRequestedOrderTask();
-  if (!openedTask) applyEbayLaunchOrderSelection();
+  if (!openedTask) {
+    const requestedOrders = getRequestedEbayOrderNumbers();
+    if (requestedOrders.length) applyEbayLaunchOrderSelection();
+    else applyRequestedEbayBuyerSelection();
+  }
   markEbayTransferReceiverReady();
   if (window.lucide) window.lucide.createIcons();
 });

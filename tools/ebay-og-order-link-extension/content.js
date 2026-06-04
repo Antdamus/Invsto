@@ -19,6 +19,9 @@
   const VIDEO_RECEIPT_ITEM_ID = "og-ebay-open-video-receipt-from-item";
   const VIDEO_RECEIPT_DETAILS_ID = "og-ebay-open-video-receipt";
   const VIDEO_RECEIPT_CAPTURE_ID = "og-ebay-capture-video-receipt-frame";
+  const VIDEO_RECEIPT_CONTROLLER_ID = "og-ebay-video-receipt-controller";
+  const VIDEO_RECEIPT_CONTROLLER_COLLAPSED_KEY = "ogEbayVideoReceiptControllerCollapsed";
+  const VIDEO_RECEIPT_HOTKEYS_KEY = "ogEbayVideoReceiptHotkeysV1";
   const CANCEL_CONFIRM_CAPTURE_ID = "og-ebay-capture-cancel-confirmation";
   const VIDEO_RECEIPT_BUTTON_CLASS = "og-ebay-video-receipt";
   const VIDEO_RECEIPT_AUTO_PARAM = "ogOpenVideoReceipt";
@@ -38,6 +41,26 @@
   const REPORT_PROBE_READY_TIMEOUT_MS = 5000;
   const RETURN_DETAIL_PHOTO_CAPTURE_TIMEOUT_MS = 9000;
   const RETURN_DETAIL_BATCH_CONCURRENCY = 5;
+  const DEFAULT_VIDEO_RECEIPT_HOTKEYS = {
+    toggle: "Space",
+    rewind5: "A",
+    forward5: "D",
+    rewind10: "J",
+    forward10: "L",
+    refreshCard: "R",
+    focusWinner: "W",
+    copyScreenshot: "C",
+  };
+  const VIDEO_RECEIPT_HOTKEY_ACTIONS = [
+    { action: "toggle", label: "Play / pause" },
+    { action: "rewind5", label: "Back 5 seconds" },
+    { action: "forward5", label: "Forward 5 seconds" },
+    { action: "rewind10", label: "Back 10 seconds" },
+    { action: "forward10", label: "Forward 10 seconds" },
+    { action: "refreshCard", label: "Refresh item card" },
+    { action: "focusWinner", label: "Open winner in OG" },
+    { action: "copyScreenshot", label: "Copy screenshot" },
+  ];
   let currentBoxReminderKey = "";
   let dismissedBoxReminderKey = "";
   let shownBoxReminderKey = "";
@@ -70,6 +93,11 @@
   let ogBulkLabelLastIntentOrderNumber = "";
   let ogBulkLabelLastDebugSignature = "";
   const ogBulkLabelHandledRows = new WeakSet();
+  const ogVideoControllerBoundVideos = new WeakSet();
+  let ogVideoControllerHotkeysAttached = false;
+  let ogVideoControllerUpdateTimer = null;
+  let ogVideoControllerNoticeTimer = null;
+  let ogVideoHotkeyCaptureAction = "";
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -4437,6 +4465,310 @@
         bottom: 128px;
       }
 
+      #${VIDEO_RECEIPT_CONTROLLER_ID} {
+        position: fixed;
+        top: 18px;
+        left: 50%;
+        z-index: 2147483646;
+        box-sizing: border-box;
+        width: min(620px, calc(100vw - 28px));
+        border: 1px solid rgba(231, 189, 115, .58);
+        border-radius: 18px;
+        background: rgba(15, 16, 20, .92);
+        color: #f8fafc;
+        box-shadow: 0 18px 44px rgba(0, 0, 0, .34);
+        font-family: Arial, sans-serif;
+        padding: 12px;
+        transform: translateX(-50%);
+        backdrop-filter: blur(14px);
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID},
+      #${VIDEO_RECEIPT_CONTROLLER_ID} * {
+        box-sizing: border-box;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID}[data-ready="false"] {
+        border-color: rgba(180, 35, 24, .58);
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID}[data-collapsed="true"] {
+        width: auto;
+        max-width: calc(100vw - 28px);
+        padding: 10px 12px;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID}[data-collapsed="true"] .og-ebay-video-controller-body,
+      #${VIDEO_RECEIPT_CONTROLLER_ID}[data-collapsed="true"] [data-og-video-status],
+      #${VIDEO_RECEIPT_CONTROLLER_ID}[data-collapsed="true"] [data-og-video-notice],
+      #${VIDEO_RECEIPT_CONTROLLER_ID}[data-collapsed="true"] [data-og-video-settings] {
+        display: none;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-controller-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} strong {
+        flex: 0 0 auto;
+        color: #fde7b0;
+        font: 900 13px/1.1 Arial, sans-serif;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-status] {
+        flex: 1 1 auto;
+        min-width: 0;
+        color: rgba(248, 250, 252, .82);
+        font: 800 12px/1.2 Arial, sans-serif;
+        overflow: hidden;
+        text-align: center;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-notice] {
+        flex: 0 0 auto;
+        min-width: 52px;
+        border: 1px solid rgba(17, 107, 54, .58);
+        border-radius: 999px;
+        background: rgba(216, 248, 226, .12);
+        color: #9ff0bc;
+        font: 900 12px/1 Arial, sans-serif;
+        padding: 5px 8px;
+        text-align: center;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-notice]:empty {
+        display: none;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-controller-body {
+        display: grid;
+        gap: 9px;
+        margin-top: 10px;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-controller-buttons {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
+        gap: 8px;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} button {
+        appearance: none;
+        border: 1px solid rgba(255, 255, 255, .18);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, .10);
+        color: #f8fafc;
+        cursor: pointer;
+        font: 900 12px/1 Arial, sans-serif;
+        min-height: 36px;
+        padding: 9px 10px;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} button:hover {
+        background: rgba(255, 255, 255, .16);
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} button:disabled {
+        cursor: wait;
+        opacity: .52;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-action="toggle"] {
+        border-color: rgba(231, 189, 115, .78);
+        background: #e7bd73;
+        color: #17120b;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-action="toggle"]:hover {
+        background: #f0cc8a;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-action="copyScreenshot"] {
+        border-color: rgba(159, 240, 188, .56);
+        background: rgba(17, 107, 54, .42);
+        color: #e8fff0;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-action="copyScreenshot"]:hover {
+        background: rgba(17, 107, 54, .58);
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-action="refreshCard"] {
+        border-color: rgba(125, 170, 255, .52);
+        background: rgba(37, 99, 235, .34);
+        color: #edf5ff;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-action="refreshCard"]:hover {
+        background: rgba(37, 99, 235, .50);
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-action="focusWinner"] {
+        border-color: rgba(253, 231, 176, .58);
+        background: rgba(155, 100, 24, .42);
+        color: #fde7b0;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-action="focusWinner"]:hover {
+        background: rgba(155, 100, 24, .58);
+      }
+
+      .og-ebay-player-card-found {
+        outline: 4px solid rgba(231, 189, 115, .86) !important;
+        outline-offset: 6px !important;
+        box-shadow: 0 0 0 10px rgba(231, 189, 115, .22), 0 20px 50px rgba(0, 0, 0, .36) !important;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-collapse] {
+        flex: 0 0 auto;
+        min-height: 30px;
+        padding: 7px 10px;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-settings] {
+        flex: 0 0 auto;
+        min-height: 30px;
+        padding: 7px 10px;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-scrub] {
+        width: 100%;
+        accent-color: #e7bd73;
+        cursor: pointer;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-scrub]:disabled {
+        cursor: wait;
+        opacity: .52;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-controller-keys {
+        color: rgba(248, 250, 252, .72);
+        font: 800 11px/1.25 Arial, sans-serif;
+        text-align: center;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-controller-settings {
+        border: 1px solid rgba(255, 255, 255, .14);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, .07);
+        padding: 10px;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-controller-settings[hidden] {
+        display: none !important;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-settings-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-settings-title strong {
+        color: #fde7b0;
+        font: 900 12px/1 Arial, sans-serif;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-settings-title span {
+        color: rgba(248, 250, 252, .68);
+        font: 800 11px/1.2 Arial, sans-serif;
+        text-align: right;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-hotkey-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-hotkey-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-width: 0;
+        border: 1px solid rgba(255, 255, 255, .10);
+        border-radius: 12px;
+        background: rgba(0, 0, 0, .16);
+        padding: 8px;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-hotkey-row span {
+        min-width: 0;
+        color: rgba(248, 250, 252, .82);
+        font: 800 11px/1.2 Arial, sans-serif;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-hotkey-row button {
+        flex: 0 0 auto;
+        min-width: 82px;
+        min-height: 30px;
+        padding: 7px 9px;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-hotkey-row button[data-capturing="true"] {
+        border-color: rgba(231, 189, 115, .82);
+        background: rgba(231, 189, 115, .24);
+        color: #fde7b0;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-settings-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 8px;
+      }
+
+      #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-settings-actions button {
+        min-height: 30px;
+        padding: 7px 10px;
+      }
+
+      @media (max-width: 560px) {
+        #${VIDEO_RECEIPT_CONTROLLER_ID} {
+          top: 10px;
+          width: calc(100vw - 20px);
+          padding: 10px;
+        }
+
+        #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-controller-header {
+          gap: 7px;
+        }
+
+        #${VIDEO_RECEIPT_CONTROLLER_ID} strong {
+          font-size: 12px;
+        }
+
+        #${VIDEO_RECEIPT_CONTROLLER_ID} [data-og-video-status] {
+          font-size: 11px;
+        }
+
+        #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-controller-buttons {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 6px;
+        }
+
+        #${VIDEO_RECEIPT_CONTROLLER_ID} button {
+          min-height: 34px;
+          padding: 8px 6px;
+        }
+
+        #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-controller-keys {
+          display: none;
+        }
+
+        #${VIDEO_RECEIPT_CONTROLLER_ID} .og-ebay-video-hotkey-list {
+          grid-template-columns: 1fr;
+        }
+      }
+
       #${CANCEL_CONFIRM_CAPTURE_ID} {
         position: fixed;
         right: 18px;
@@ -5143,6 +5475,851 @@
     };
   }
 
+  function getStoredVideoControllerCollapsed() {
+    try {
+      return window.localStorage.getItem(VIDEO_RECEIPT_CONTROLLER_COLLAPSED_KEY) === "1";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function setStoredVideoControllerCollapsed(collapsed) {
+    try {
+      window.localStorage.setItem(VIDEO_RECEIPT_CONTROLLER_COLLAPSED_KEY, collapsed ? "1" : "0");
+    } catch (_) {}
+  }
+
+  function escapeHtml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function getDefaultEbayVideoHotkeys() {
+    return { ...DEFAULT_VIDEO_RECEIPT_HOTKEYS };
+  }
+
+  function getStoredEbayVideoHotkeys() {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(VIDEO_RECEIPT_HOTKEYS_KEY) || "{}");
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function canonicalVideoShortcutKey(value) {
+    const raw = String(value || "").trim();
+    const lower = raw.toLowerCase();
+    if (!raw || lower === "unidentified") return "";
+    if (lower === " " || lower === "space" || lower === "spacebar") return "Space";
+    if (lower === "esc") return "Escape";
+    if (lower === "left" || lower === "arrowleft") return "ArrowLeft";
+    if (lower === "right" || lower === "arrowright") return "ArrowRight";
+    if (lower === "up" || lower === "arrowup") return "ArrowUp";
+    if (lower === "down" || lower === "arrowdown") return "ArrowDown";
+    if (lower === "pageup") return "PageUp";
+    if (lower === "pagedown") return "PageDown";
+    if (raw.length === 1) return raw.toUpperCase();
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+  }
+
+  function normalizeVideoShortcut(value) {
+    const parts = String(value || "")
+      .split("+")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (!parts.length) return "";
+    const key = canonicalVideoShortcutKey(parts.pop());
+    if (!key || ["Shift", "Control", "Alt", "Meta"].includes(key)) return "";
+    const modifiers = [];
+    parts.forEach((part) => {
+      const normalized = canonicalVideoShortcutKey(part);
+      if (normalized === "Shift" && !modifiers.includes("Shift")) modifiers.push("Shift");
+    });
+    return [...modifiers, key].join("+");
+  }
+
+  function eventToVideoShortcut(event) {
+    const key = canonicalVideoShortcutKey(event.key || event.code);
+    if (!key || ["Shift", "Control", "Alt", "Meta"].includes(key)) return "";
+    const parts = [];
+    if (event.shiftKey) parts.push("Shift");
+    parts.push(key);
+    return parts.join("+");
+  }
+
+  function getEbayVideoHotkeys() {
+    const defaults = getDefaultEbayVideoHotkeys();
+    const stored = getStoredEbayVideoHotkeys();
+    const hotkeys = {};
+    VIDEO_RECEIPT_HOTKEY_ACTIONS.forEach(({ action }) => {
+      const storedHasAction = Object.prototype.hasOwnProperty.call(stored, action);
+      hotkeys[action] = normalizeVideoShortcut(storedHasAction ? stored[action] : defaults[action]);
+    });
+    return hotkeys;
+  }
+
+  function saveEbayVideoHotkeys(hotkeys) {
+    try {
+      window.localStorage.setItem(VIDEO_RECEIPT_HOTKEYS_KEY, JSON.stringify(hotkeys || {}));
+    } catch (_) {}
+  }
+
+  function saveEbayVideoHotkey(action, shortcut) {
+    const normalized = normalizeVideoShortcut(shortcut);
+    if (!normalized) return false;
+    const hotkeys = getEbayVideoHotkeys();
+    Object.keys(hotkeys).forEach((key) => {
+      if (key !== action && hotkeys[key] === normalized) hotkeys[key] = "";
+    });
+    hotkeys[action] = normalized;
+    saveEbayVideoHotkeys(hotkeys);
+    return true;
+  }
+
+  function resetEbayVideoHotkeys() {
+    saveEbayVideoHotkeys(getDefaultEbayVideoHotkeys());
+  }
+
+  function getEbayVideoActionForShortcut(shortcut) {
+    const normalized = normalizeVideoShortcut(shortcut);
+    if (!normalized) return "";
+    const hotkeys = getEbayVideoHotkeys();
+    return VIDEO_RECEIPT_HOTKEY_ACTIONS.find(({ action }) => hotkeys[action] === normalized)?.action || "";
+  }
+
+  function renderEbayVideoHotkeySettings(controller = document.getElementById(VIDEO_RECEIPT_CONTROLLER_ID)) {
+    if (!controller) return;
+    const hotkeys = getEbayVideoHotkeys();
+    const panel = controller.querySelector("[data-og-video-settings-panel]");
+    if (panel) {
+      panel.innerHTML = `
+        <div class="og-ebay-video-settings-title">
+          <strong>Hotkeys</strong>
+          <span>${ogVideoHotkeyCaptureAction ? "Press the new key now" : "Click a key to change it"}</span>
+        </div>
+        <div class="og-ebay-video-hotkey-list">
+          ${VIDEO_RECEIPT_HOTKEY_ACTIONS.map(({ action, label }) => `
+            <div class="og-ebay-video-hotkey-row">
+              <span>${escapeHtml(label)}</span>
+              <button
+                type="button"
+                data-og-video-hotkey-action="${escapeHtml(action)}"
+                data-capturing="${ogVideoHotkeyCaptureAction === action ? "true" : "false"}"
+              >${escapeHtml(ogVideoHotkeyCaptureAction === action ? "Press a key" : (hotkeys[action] || "Unset"))}</button>
+            </div>
+          `).join("")}
+        </div>
+        <div class="og-ebay-video-settings-actions">
+          <button type="button" data-og-video-hotkey-reset>Reset defaults</button>
+        </div>
+      `;
+    }
+
+    controller.querySelectorAll("[data-og-video-action]").forEach((button) => {
+      const action = button.dataset.ogVideoAction || "";
+      const hotkey = hotkeys[action] || "";
+      if (hotkey) button.title = `${button.textContent.trim()} (${hotkey})`;
+    });
+    const copyButton = controller.querySelector('[data-og-video-action="copyScreenshot"]');
+    if (copyButton) copyButton.title = `Copy visible replay screenshot to clipboard (${hotkeys.copyScreenshot || "unset"})`;
+    const keys = controller.querySelector(".og-ebay-video-controller-keys");
+    if (keys) {
+      keys.textContent = VIDEO_RECEIPT_HOTKEY_ACTIONS
+        .map(({ action, label }) => `${label}: ${hotkeys[action] || "unset"}`)
+        .join(" | ");
+    }
+  }
+
+  function getVideoDuration(video) {
+    const duration = Number(video?.duration || 0);
+    return Number.isFinite(duration) && duration > 0 ? duration : 0;
+  }
+
+  function formatVideoTime(seconds) {
+    const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const remainingSeconds = totalSeconds % 60;
+    const pad = (value) => String(value).padStart(2, "0");
+    return hours
+      ? `${hours}:${pad(minutes)}:${pad(remainingSeconds)}`
+      : `${minutes}:${pad(remainingSeconds)}`;
+  }
+
+  function findEbayLiveReplayVideo() {
+    const videos = [];
+    const addVideos = (nodes) => {
+      [...(nodes || [])].forEach((node) => {
+        if (node && !videos.includes(node)) videos.push(node);
+      });
+    };
+
+    addVideos(document.querySelectorAll('video[data-testid="replay-video"]'));
+    addVideos(document.querySelectorAll('video[class*="replayVideo"]'));
+    addVideos(document.querySelectorAll("video"));
+    document.querySelectorAll("iframe").forEach((iframe) => {
+      try {
+        const doc = iframe.contentDocument;
+        addVideos(doc?.querySelectorAll?.('video[data-testid="replay-video"]'));
+        addVideos(doc?.querySelectorAll?.('video[class*="replayVideo"]'));
+        addVideos(doc?.querySelectorAll?.("video"));
+      } catch (_) {}
+    });
+
+    const playableVideos = videos.filter((video) => typeof video.currentTime === "number");
+    const visibleVideos = playableVideos.filter(isElementVisible);
+    return (visibleVideos.length ? visibleVideos : playableVideos)
+      .sort((a, b) => {
+        const aRect = a.getBoundingClientRect();
+        const bRect = b.getBoundingClientRect();
+        return (bRect.width * bRect.height) - (aRect.width * aRect.height);
+      })[0] || null;
+  }
+
+  function bindEbayLiveVideo(video) {
+    if (!video || ogVideoControllerBoundVideos.has(video)) return;
+    ogVideoControllerBoundVideos.add(video);
+    ["play", "pause", "timeupdate", "loadedmetadata", "durationchange", "seeked", "ended"].forEach((eventName) => {
+      video.addEventListener(eventName, updateEbayVideoController);
+    });
+  }
+
+  function setEbayVideoControllerCollapsed(controller, collapsed) {
+    if (!controller) return;
+    controller.dataset.collapsed = collapsed ? "true" : "false";
+    const toggle = controller.querySelector("[data-og-video-collapse]");
+    if (toggle) {
+      toggle.textContent = collapsed ? "Show" : "Hide";
+      toggle.title = collapsed ? "Show video controls" : "Hide video controls";
+    }
+    setStoredVideoControllerCollapsed(collapsed);
+  }
+
+  function setEbayVideoControllerNotice(message) {
+    const controller = document.getElementById(VIDEO_RECEIPT_CONTROLLER_ID);
+    const notice = controller?.querySelector("[data-og-video-notice]");
+    if (!notice) return;
+    window.clearTimeout(ogVideoControllerNoticeTimer);
+    notice.textContent = message || "";
+    controller.dataset.hasNotice = message ? "true" : "false";
+    if (message) {
+      ogVideoControllerNoticeTimer = window.setTimeout(() => {
+        notice.textContent = "";
+        controller.dataset.hasNotice = "false";
+      }, 1200);
+    }
+  }
+
+  function updateEbayVideoController() {
+    const controller = document.getElementById(VIDEO_RECEIPT_CONTROLLER_ID);
+    if (!controller) return;
+
+    const video = findEbayLiveReplayVideo();
+    const controls = controller.querySelectorAll("[data-og-video-action], [data-og-video-scrub]");
+    const status = controller.querySelector("[data-og-video-status]");
+    const playButton = controller.querySelector('[data-og-video-action="toggle"]');
+    const scrub = controller.querySelector("[data-og-video-scrub]");
+
+    if (!video) {
+      controller.dataset.ready = "false";
+      controls.forEach((control) => {
+        control.disabled = true;
+      });
+      if (status) status.textContent = "Waiting for eBay video";
+      if (playButton) playButton.textContent = "Play";
+      if (scrub) scrub.value = "0";
+      return;
+    }
+
+    bindEbayLiveVideo(video);
+    controller.dataset.ready = "true";
+    controls.forEach((control) => {
+      control.disabled = false;
+    });
+
+    const duration = getVideoDuration(video);
+    const currentTime = Math.max(0, Number(video.currentTime || 0));
+    if (status) {
+      status.textContent = duration
+        ? `${formatVideoTime(currentTime)} / ${formatVideoTime(duration)}`
+        : `${formatVideoTime(currentTime)} / loading`;
+    }
+    if (playButton) {
+      playButton.textContent = video.paused || video.ended ? "Play" : "Pause";
+      playButton.setAttribute("aria-pressed", video.paused || video.ended ? "false" : "true");
+    }
+    if (scrub) {
+      scrub.disabled = !duration;
+      if (duration && controller.dataset.scrubbing !== "true") {
+        scrub.value = String(Math.round((currentTime / duration) * 1000));
+      }
+    }
+  }
+
+  function seekEbayLiveVideoBy(seconds) {
+    const video = findEbayLiveReplayVideo();
+    if (!video) {
+      setEbayVideoControllerNotice("Still waiting for the video");
+      return false;
+    }
+    const duration = getVideoDuration(video);
+    const currentTime = Math.max(0, Number(video.currentTime || 0));
+    const target = duration
+      ? Math.min(duration, Math.max(0, currentTime + seconds))
+      : Math.max(0, currentTime + seconds);
+    video.currentTime = target;
+    setEbayVideoControllerNotice(`${seconds > 0 ? "+" : ""}${seconds}s`);
+    updateEbayVideoController();
+    return true;
+  }
+
+  function toggleEbayLiveVideoPlayback() {
+    const video = findEbayLiveReplayVideo();
+    if (!video) {
+      setEbayVideoControllerNotice("Still waiting for the video");
+      return false;
+    }
+    if (video.paused || video.ended) {
+      const playResult = video.play();
+      if (playResult?.catch) {
+        playResult.catch((error) => {
+          console.warn("[OG eBay Receipt] Could not play replay video:", error);
+          setEbayVideoControllerNotice("Click the video once, then try again");
+        });
+      }
+    } else {
+      video.pause();
+    }
+    window.setTimeout(updateEbayVideoController, 0);
+    return true;
+  }
+
+  function getElementViewportArea(element) {
+    if (!element?.getBoundingClientRect) return 0;
+    const rect = element.getBoundingClientRect();
+    const view = element.ownerDocument?.defaultView || window;
+    const visibleWidth = Math.max(0, Math.min(rect.right, view.innerWidth || window.innerWidth) - Math.max(rect.left, 0));
+    const visibleHeight = Math.max(0, Math.min(rect.bottom, view.innerHeight || window.innerHeight) - Math.max(rect.top, 0));
+    return visibleWidth * visibleHeight;
+  }
+
+  function getEbayLiveSearchRoots(root = document, roots = [], seen = new Set()) {
+    if (!root || seen.has(root)) return roots;
+    seen.add(root);
+    roots.push(root);
+
+    try {
+      root.querySelectorAll?.("iframe, frame").forEach((frame) => {
+        try {
+          getEbayLiveSearchRoots(frame.contentDocument || frame.contentWindow?.document, roots, seen);
+        } catch (_) {}
+      });
+    } catch (_) {}
+
+    try {
+      root.querySelectorAll?.("*").forEach((element) => {
+        if (element.shadowRoot) getEbayLiveSearchRoots(element.shadowRoot, roots, seen);
+      });
+    } catch (_) {}
+
+    return roots;
+  }
+
+  function queryEbayLiveElements(selector) {
+    const elements = [];
+    getEbayLiveSearchRoots().forEach((root) => {
+      try {
+        root.querySelectorAll?.(selector).forEach((element) => elements.push(element));
+      } catch (_) {}
+    });
+    return unique(elements);
+  }
+
+  function findEbayLivePlayerCard() {
+    return queryEbayLiveElements('[data-testid="player-card"]')
+      .sort((a, b) => getElementViewportArea(b) - getElementViewportArea(a))[0] || null;
+  }
+
+  function isUsableEbayWinnerUsername(value) {
+    const text = String(value || "").trim().replace(/^@+/, "");
+    if (!text) return false;
+    if (/^(loading|winner|buyer|sold|sold out|unknown|--|-|\.{2,})$/i.test(text)) return false;
+    return /[a-z0-9]/i.test(text);
+  }
+
+  function getEbayLiveWinnerUsername() {
+    const candidates = queryEbayLiveElements('[data-testid="player-card"] [data-testid="player-card-winner-name"]');
+    queryEbayLiveElements('[data-testid="player-card-winner-name"]').forEach((element) => {
+      if (!candidates.includes(element)) candidates.push(element);
+    });
+
+    candidates.sort((a, b) => {
+      const aCard = a.closest('[data-testid="player-card"]') || a;
+      const bCard = b.closest('[data-testid="player-card"]') || b;
+      return getElementViewportArea(bCard) - getElementViewportArea(aCard);
+    });
+
+    for (const element of candidates) {
+      const text = cleanText(element.textContent || element.innerText || element.getAttribute?.("aria-label") || "");
+      if (isUsableEbayWinnerUsername(text)) return text.replace(/^@+/, "");
+    }
+    return "";
+  }
+
+  function getEbayLiveWinnerDebug() {
+    return {
+      roots: getEbayLiveSearchRoots().length,
+      cards: queryEbayLiveElements('[data-testid="player-card"]').length,
+      winners: queryEbayLiveElements('[data-testid="player-card-winner-name"]').map((element) => (
+        cleanText(element.textContent || element.innerText || element.getAttribute?.("aria-label") || "")
+      )),
+    };
+  }
+
+  async function waitForEbayLiveWinnerUsername(timeoutMs = 6500) {
+    const startedAt = Date.now();
+    let lastRefreshAt = 0;
+    while (Date.now() - startedAt < timeoutMs) {
+      const username = getEbayLiveWinnerUsername();
+      if (username) return username;
+      if (Date.now() - lastRefreshAt > 1300) {
+        lastRefreshAt = Date.now();
+        await refreshEbayLivePlayerCard({ quiet: true, requireWinner: true });
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 220));
+    }
+    return getEbayLiveWinnerUsername();
+  }
+
+  function flashEbayLivePlayerCard(card) {
+    if (!card) return;
+    card.classList.add("og-ebay-player-card-found");
+    window.setTimeout(() => card.classList.remove("og-ebay-player-card-found"), 1200);
+  }
+
+  function waitForEbayLivePlayerCard(timeoutMs = 1400) {
+    const existing = findEbayLivePlayerCard();
+    if (existing) return Promise.resolve(existing);
+    return new Promise((resolve) => {
+      const startedAt = Date.now();
+      const timer = window.setInterval(() => {
+        const card = findEbayLivePlayerCard();
+        if (card || Date.now() - startedAt >= timeoutMs) {
+          window.clearInterval(timer);
+          resolve(card || null);
+        }
+      }, 120);
+    });
+  }
+
+  async function refreshEbayLivePlayerCard(options = {}) {
+    const quiet = Boolean(options.quiet);
+    const requireWinner = Boolean(options.requireWinner);
+    const existing = findEbayLivePlayerCard();
+    if (existing && requireWinner && getEbayLiveWinnerUsername()) {
+      flashEbayLivePlayerCard(existing);
+      if (!quiet) setEbayVideoControllerNotice("Card visible");
+      return true;
+    }
+
+    const video = findEbayLiveReplayVideo();
+    if (!video) {
+      if (!quiet) setEbayVideoControllerNotice("Video not ready");
+      return false;
+    }
+
+    const originalTime = Math.max(0, Number(video.currentTime || 0));
+    const duration = getVideoDuration(video);
+    const wasPaused = video.paused || video.ended;
+    const offsets = originalTime > 2 ? [-1.15, 0.55] : [0.55, 1.15];
+
+    const setVideoTimeAndDispatch = async (time) => {
+      video.currentTime = time;
+      video.dispatchEvent(new Event("seeking"));
+      video.dispatchEvent(new Event("timeupdate"));
+      video.dispatchEvent(new Event("seeked"));
+      await new Promise((resolve) => window.setTimeout(resolve, 90));
+    };
+
+    try {
+      window.dispatchEvent(new Event("resize"));
+      for (const offset of offsets) {
+        const nudgedTime = duration
+          ? Math.min(duration, Math.max(0, originalTime + offset))
+          : Math.max(0, originalTime + offset);
+        await setVideoTimeAndDispatch(nudgedTime);
+      }
+      await setVideoTimeAndDispatch(originalTime);
+      if (wasPaused) video.pause();
+      const card = await waitForEbayLivePlayerCard(1600);
+      if (card) {
+        flashEbayLivePlayerCard(card);
+        const winner = getEbayLiveWinnerUsername();
+        if (!quiet) setEbayVideoControllerNotice(winner ? `Card: ${winner}` : "Card refreshed");
+        return true;
+      }
+      if (!quiet) setEbayVideoControllerNotice("No card yet");
+      return false;
+    } catch (error) {
+      console.warn("[OG eBay Receipt] Could not refresh replay item card:", error);
+      if (!quiet) setEbayVideoControllerNotice("Card refresh failed");
+      return false;
+    }
+  }
+
+  function waitForNextPaint() {
+    return new Promise((resolve) => {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+    });
+  }
+
+  async function dataUrlToBlob(dataUrl) {
+    const response = await fetch(dataUrl);
+    return response.blob();
+  }
+
+  async function copyEbayVideoReceiptScreenshotToClipboard() {
+    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+      setEbayVideoControllerNotice("Image clipboard is not available");
+      return false;
+    }
+
+    if (!findEbayLivePlayerCard()) {
+      await refreshEbayLivePlayerCard({ quiet: true });
+    }
+
+    const hiddenElements = [
+      document.getElementById(VIDEO_RECEIPT_CONTROLLER_ID),
+      document.getElementById(VIDEO_RECEIPT_CAPTURE_ID),
+    ].filter(Boolean);
+    const priorVisibility = hiddenElements.map((element) => [element, element.style.visibility]);
+
+    try {
+      hiddenElements.forEach((element) => {
+        element.style.visibility = "hidden";
+      });
+      await waitForNextPaint();
+      const metadata = getVideoReceiptPageMetadata();
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_CAPTURE_VISIBLE_TAB_SCREENSHOT",
+        payload: {
+          metadata: {
+            ...metadata,
+            source: "ebay-video-receipt-clipboard",
+          },
+          pageUrl: window.location.href,
+          pageTitle: document.title || "",
+          viewport: {
+            width: window.innerWidth,
+            height: window.innerHeight,
+            devicePixelRatio: window.devicePixelRatio || 1,
+          },
+        },
+      });
+      if (!response?.ok || !response.dataUrl) throw new Error(response?.error || "Chrome did not return a screenshot.");
+      const blob = await dataUrlToBlob(response.dataUrl);
+      await navigator.clipboard.write([
+        new ClipboardItem({ [blob.type || "image/png"]: blob }),
+      ]);
+      setEbayVideoControllerNotice("Screenshot copied");
+      return true;
+    } catch (error) {
+      console.warn("[OG eBay Receipt] Could not copy replay screenshot:", error);
+      setEbayVideoControllerNotice("Copy failed");
+      return false;
+    } finally {
+      priorVisibility.forEach(([element, visibility]) => {
+        element.style.visibility = visibility;
+      });
+    }
+  }
+
+  async function writeTextToClipboard(text) {
+    const value = String(text || "");
+    if (!value) return false;
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(value);
+        return true;
+      } catch (_) {}
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "readonly");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch (_) {
+      copied = false;
+    } finally {
+      textarea.remove();
+    }
+    return copied;
+  }
+
+  async function focusEbayWinnerInOgPendingOrders() {
+    setEbayVideoControllerNotice("Finding winner...");
+    const username = await waitForEbayLiveWinnerUsername();
+    if (!username) {
+      const debug = getEbayLiveWinnerDebug();
+      const firstWinner = debug.winners.find(Boolean) || "";
+      setEbayVideoControllerNotice(
+        firstWinner ? `Winner unreadable: ${firstWinner}` : `No winner field (${debug.cards} card${debug.cards === 1 ? "" : "s"})`
+      );
+      return false;
+    }
+
+    try {
+      await writeTextToClipboard(username);
+    } catch (error) {
+      console.warn("[OG eBay Receipt] Could not copy winner username:", error);
+    }
+
+    try {
+      const metadata = getVideoReceiptPageMetadata();
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_FOCUS_PENDING_BUYER",
+        payload: {
+          ...metadata,
+          buyerUsername: username,
+          username,
+          source: "ebay-video-receipt-player-card",
+          pageUrl: window.location.href,
+          pageTitle: document.title || "",
+          capturedAt: new Date().toISOString(),
+        },
+      });
+      if (!response?.ok) throw new Error(response?.error || "OG did not open the buyer.");
+      setEbayVideoControllerNotice(`Opened ${username}`);
+      return true;
+    } catch (error) {
+      console.warn("[OG eBay Receipt] Could not focus OG buyer:", error);
+      setEbayVideoControllerNotice(`Copied ${username}`);
+      return false;
+    }
+  }
+
+  function runEbayVideoControllerAction(action) {
+    if (action === "toggle") return toggleEbayLiveVideoPlayback();
+    if (action === "rewind5") return seekEbayLiveVideoBy(-5);
+    if (action === "forward5") return seekEbayLiveVideoBy(5);
+    if (action === "rewind10") return seekEbayLiveVideoBy(-10);
+    if (action === "forward10") return seekEbayLiveVideoBy(10);
+    if (action === "refreshCard") return refreshEbayLivePlayerCard();
+    if (action === "focusWinner") return focusEbayWinnerInOgPendingOrders();
+    if (action === "copyScreenshot") return copyEbayVideoReceiptScreenshotToClipboard();
+    return false;
+  }
+
+  function handleEbayVideoControllerClick(event) {
+    const collapseButton = event.target?.closest?.("[data-og-video-collapse]");
+    if (collapseButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      const controller = document.getElementById(VIDEO_RECEIPT_CONTROLLER_ID);
+      setEbayVideoControllerCollapsed(controller, controller?.dataset.collapsed !== "true");
+      return;
+    }
+
+    const settingsButton = event.target?.closest?.("[data-og-video-settings]");
+    if (settingsButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      const controller = document.getElementById(VIDEO_RECEIPT_CONTROLLER_ID);
+      const panel = controller?.querySelector("[data-og-video-settings-panel]");
+      if (panel) {
+        panel.hidden = !panel.hidden;
+        ogVideoHotkeyCaptureAction = "";
+        renderEbayVideoHotkeySettings(controller);
+      }
+      return;
+    }
+
+    const hotkeyButton = event.target?.closest?.("[data-og-video-hotkey-action]");
+    if (hotkeyButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      ogVideoHotkeyCaptureAction = hotkeyButton.dataset.ogVideoHotkeyAction || "";
+      renderEbayVideoHotkeySettings();
+      setEbayVideoControllerNotice("Press new key");
+      return;
+    }
+
+    const resetButton = event.target?.closest?.("[data-og-video-hotkey-reset]");
+    if (resetButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      ogVideoHotkeyCaptureAction = "";
+      resetEbayVideoHotkeys();
+      renderEbayVideoHotkeySettings();
+      setEbayVideoControllerNotice("Defaults restored");
+      return;
+    }
+
+    const actionButton = event.target?.closest?.("[data-og-video-action]");
+    if (!actionButton) return;
+    event.preventDefault();
+    event.stopPropagation();
+    runEbayVideoControllerAction(actionButton.dataset.ogVideoAction || "");
+  }
+
+  function handleEbayVideoControllerInput(event) {
+    if (!event.target?.matches?.("[data-og-video-scrub]")) return;
+    const controller = document.getElementById(VIDEO_RECEIPT_CONTROLLER_ID);
+    const video = findEbayLiveReplayVideo();
+    const duration = getVideoDuration(video);
+    if (!controller || !video || !duration) return;
+    controller.dataset.scrubbing = "true";
+    video.currentTime = (Number(event.target.value || 0) / 1000) * duration;
+    updateEbayVideoController();
+  }
+
+  function handleEbayVideoControllerChange(event) {
+    if (!event.target?.matches?.("[data-og-video-scrub]")) return;
+    const controller = document.getElementById(VIDEO_RECEIPT_CONTROLLER_ID);
+    if (controller) delete controller.dataset.scrubbing;
+    updateEbayVideoController();
+  }
+
+  function createEbayVideoController() {
+    const controller = document.createElement("aside");
+    controller.id = VIDEO_RECEIPT_CONTROLLER_ID;
+    controller.setAttribute("role", "region");
+    controller.setAttribute("aria-label", "OG eBay video receipt controls");
+    controller.dataset.ready = "false";
+    controller.innerHTML = `
+      <div class="og-ebay-video-controller-header">
+        <strong>OG video controls</strong>
+        <span data-og-video-status>Waiting for eBay video</span>
+        <span data-og-video-notice></span>
+        <button type="button" data-og-video-settings title="Change video controller hotkeys">Keys</button>
+        <button type="button" data-og-video-collapse title="Hide video controls">Hide</button>
+      </div>
+      <div class="og-ebay-video-controller-body">
+        <div class="og-ebay-video-controller-buttons">
+          <button type="button" data-og-video-action="rewind10" title="J or Shift+Left">-10s</button>
+          <button type="button" data-og-video-action="rewind5" title="A or Left">-5s</button>
+          <button type="button" data-og-video-action="toggle" title="Space or K">Play</button>
+          <button type="button" data-og-video-action="forward5" title="D or Right">+5s</button>
+          <button type="button" data-og-video-action="forward10" title="L or Shift+Right">+10s</button>
+          <button type="button" data-og-video-action="refreshCard" title="Refresh eBay item card">Card</button>
+          <button type="button" data-og-video-action="focusWinner" title="Copy winner and open buyer in OG">Winner</button>
+          <button type="button" data-og-video-action="copyScreenshot" title="Copy replay screenshot to clipboard">Copy shot</button>
+        </div>
+        <input type="range" min="0" max="1000" step="1" value="0" data-og-video-scrub aria-label="Video position">
+        <div class="og-ebay-video-controller-keys">
+          Loading hotkeys...
+        </div>
+        <div class="og-ebay-video-controller-settings" data-og-video-settings-panel hidden></div>
+      </div>
+    `;
+    controller.addEventListener("click", handleEbayVideoControllerClick);
+    controller.addEventListener("input", handleEbayVideoControllerInput);
+    controller.addEventListener("change", handleEbayVideoControllerChange);
+    document.body.appendChild(controller);
+    setEbayVideoControllerCollapsed(controller, getStoredVideoControllerCollapsed());
+    renderEbayVideoHotkeySettings(controller);
+    return controller;
+  }
+
+  function shouldIgnoreEbayVideoHotkey(event) {
+    if (event.ctrlKey || event.metaKey || event.altKey) return true;
+    const target = event.target;
+    if (!target?.closest) return false;
+    return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+  }
+
+  function handleEbayVideoHotkey(event) {
+    if (!isEbayLiveVideoReceiptPage()) return;
+
+    if (ogVideoHotkeyCaptureAction) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      if (event.key === "Escape") {
+        ogVideoHotkeyCaptureAction = "";
+        renderEbayVideoHotkeySettings();
+        setEbayVideoControllerNotice("Canceled");
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        setEbayVideoControllerNotice("Use a plain key");
+        return;
+      }
+      const shortcut = eventToVideoShortcut(event);
+      if (!shortcut) {
+        setEbayVideoControllerNotice("Try another key");
+        return;
+      }
+      if (saveEbayVideoHotkey(ogVideoHotkeyCaptureAction, shortcut)) {
+        ogVideoHotkeyCaptureAction = "";
+        renderEbayVideoHotkeySettings();
+        setEbayVideoControllerNotice(`${shortcut} saved`);
+      }
+      return;
+    }
+
+    if (shouldIgnoreEbayVideoHotkey(event)) return;
+    const action = getEbayVideoActionForShortcut(eventToVideoShortcut(event));
+    if (!action) return;
+    if (action === "toggle" && event.repeat) return;
+    runEbayVideoControllerAction(action);
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+  }
+
+  function ensureEbayVideoHotkeys() {
+    if (ogVideoControllerHotkeysAttached) return;
+    ogVideoControllerHotkeysAttached = true;
+    document.addEventListener("keydown", handleEbayVideoHotkey, true);
+  }
+
+  function stopEbayVideoControllerUpdates() {
+    if (!ogVideoControllerUpdateTimer) return;
+    window.clearInterval(ogVideoControllerUpdateTimer);
+    ogVideoControllerUpdateTimer = null;
+  }
+
+  function injectEbayLiveVideoController() {
+    if (!isEbayLiveVideoReceiptPage()) {
+      document.getElementById(VIDEO_RECEIPT_CONTROLLER_ID)?.remove();
+      stopEbayVideoControllerUpdates();
+      return;
+    }
+
+    ensureEbayVideoHotkeys();
+    const controller = document.getElementById(VIDEO_RECEIPT_CONTROLLER_ID) || createEbayVideoController();
+    const video = findEbayLiveReplayVideo();
+    if (video) bindEbayLiveVideo(video);
+    if (!ogVideoControllerUpdateTimer) {
+      ogVideoControllerUpdateTimer = window.setInterval(updateEbayVideoController, 500);
+    }
+    window.OG_EBAY_VIDEO_RECEIPT_CONTROLLER = {
+      getVideo: findEbayLiveReplayVideo,
+      getCard: findEbayLivePlayerCard,
+      getWinner: getEbayLiveWinnerUsername,
+      getWinnerDebug: getEbayLiveWinnerDebug,
+      seekBy: seekEbayLiveVideoBy,
+      togglePlay: toggleEbayLiveVideoPlayback,
+      show: () => setEbayVideoControllerCollapsed(controller, false),
+      hide: () => setEbayVideoControllerCollapsed(controller, true),
+    };
+    updateEbayVideoController();
+  }
+
   function getVisibleVideoRect() {
     const element = [...document.querySelectorAll("video, iframe")]
       .filter(isElementVisible)
@@ -5232,6 +6409,7 @@
     injectItemVideoReceiptShortcut();
     injectOrderDetailsVideoReceiptShortcut();
     injectVideoReceiptCaptureButton();
+    injectEbayLiveVideoController();
   }
 
   function injectFloatingButton() {

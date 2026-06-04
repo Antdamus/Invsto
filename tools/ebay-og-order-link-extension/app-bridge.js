@@ -21,7 +21,7 @@
       type,
       payload,
     };
-    const maxAttempts = ["OG_EBAY_LABEL_TRANSFER", "OG_EBAY_AWAITING_REPORT_TRANSFER", "OG_EBAY_RETURN_TRANSFER", "OG_EBAY_RETURN_MESSAGE_LOG", "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER", "OG_EBAY_CANCEL_PROOF_TRANSFER"].includes(type) ? 60 : 10;
+    const maxAttempts = ["OG_EBAY_LABEL_TRANSFER", "OG_EBAY_AWAITING_REPORT_TRANSFER", "OG_EBAY_RETURN_TRANSFER", "OG_EBAY_RETURN_MESSAGE_LOG", "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER", "OG_EBAY_CANCEL_PROOF_TRANSFER", "OG_EBAY_FOCUS_BUYER"].includes(type) ? 60 : 10;
     window.postMessage(message, window.location.origin);
     let attempts = 0;
     const timer = window.setInterval(() => {
@@ -205,6 +205,12 @@
 
     if (message?.type === "OG_EBAY_CANCEL_PROOF_TRANSFER") {
       postToOgApp(message.payload, "OG_EBAY_CANCEL_PROOF_TRANSFER");
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    if (message?.type === "OG_EBAY_FOCUS_BUYER") {
+      postToOgApp(message.payload, "OG_EBAY_FOCUS_BUYER");
       sendResponse({ ok: true });
       return true;
     }

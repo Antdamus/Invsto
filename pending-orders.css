@@ -969,6 +969,13 @@ textarea:focus {
   background: rgba(227, 189, 119, 0.1);
 }
 
+.buyer-order-card.is-video-winner-focus {
+  border-color: rgba(126, 240, 176, 0.62);
+  box-shadow:
+    0 0 0 1px rgba(126, 240, 176, 0.22),
+    0 0 34px rgba(126, 240, 176, 0.13);
+}
+
 .order-card-top {
   display: flex;
   justify-content: space-between;

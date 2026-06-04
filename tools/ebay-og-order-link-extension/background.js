@@ -900,6 +900,21 @@
     return url;
   }
 
+  function buildBuyerFocusPageUrl(appUrl, payload = {}, pageName = "pending-orders.html") {
+    const url = new URL(appUrl.toString());
+    if (pageName) {
+      url.pathname = url.pathname.replace(/[^/]*$/, pageName);
+    }
+    const buyerUsername = String(payload.buyerUsername || payload.username || "").trim();
+    url.searchParams.set("source", "ebay");
+    if (buyerUsername) {
+      url.searchParams.set("buyerUsername", buyerUsername);
+      url.searchParams.set("buyer", buyerUsername);
+    }
+    if (payload.itemNumber) url.searchParams.set("itemNumber", payload.itemNumber);
+    return url;
+  }
+
   function isPendingOrdersState(state = {}) {
     return state.pageType === "pending-orders";
   }
@@ -951,6 +966,53 @@
     await chrome.tabs.sendMessage(tab.id, { type: "OG_EBAY_LABEL_TRANSFER", payload });
     await focusTab(tab.id);
     return appAckPromise;
+  }
+
+  async function focusBuyerInPendingOrders(payload = {}) {
+    const appUrl = await getAppUrl();
+    if (!appUrl) throw new Error("Set the OG Pending Orders URL in the extension options first.");
+    const buyerUsername = String(payload.buyerUsername || payload.username || "").trim();
+    if (!buyerUsername) throw new Error("No eBay winner username was found yet.");
+
+    const tabs = await findAppTabs(appUrl);
+    const pendingTab = tabs.find((tab) => {
+      const tabUrl = normalizeUrl(tab?.url);
+      return tabUrl?.origin === appUrl.origin && /\/pending-orders\.html$/i.test(tabUrl.pathname);
+    });
+
+    if (pendingTab?.id) {
+      const response = await sendMessageToTabWithRetry(pendingTab.id, {
+        type: "OG_EBAY_FOCUS_BUYER",
+        payload: {
+          ...payload,
+          buyerUsername,
+          requestedAt: new Date().toISOString(),
+        },
+      }, {
+        attempts: 6,
+        initialDelayMs: 0,
+        retryDelayMs: 350,
+      }).catch((error) => ({ ok: false, error: error.message || String(error) }));
+      await focusTab(pendingTab.id);
+      return {
+        ok: response?.ok !== false,
+        buyerUsername,
+        opened: false,
+        delivered: Boolean(response?.ok),
+        response,
+        tabId: pendingTab.id,
+      };
+    }
+
+    const url = buildBuyerFocusPageUrl(appUrl, payload);
+    const tab = await openTransferUrl(url);
+    return {
+      ok: Boolean(tab?.id),
+      buyerUsername,
+      opened: Boolean(tab?.id),
+      delivered: false,
+      tabId: tab?.id || null,
+    };
   }
 
   async function openTransferUrl(url, existingTab = null) {
@@ -1384,6 +1446,27 @@
     });
   }
 
+  async function captureVisibleTabScreenshot(payload = {}, sender = null) {
+    const tab = sender?.tab;
+    if (!tab?.windowId) throw new Error("The current tab was not available for screenshot capture.");
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+    if (!dataUrl) throw new Error("Chrome did not return a screenshot.");
+    const base64 = String(dataUrl).split(",")[1] || "";
+    if (!base64) throw new Error("The screenshot payload was empty.");
+    return {
+      dataUrl,
+      mimeType: "image/png",
+      base64,
+      metadata: {
+        ...(payload.metadata || {}),
+        pageUrl: payload.pageUrl || tab.url || "",
+        pageTitle: payload.pageTitle || tab.title || "",
+        capturedAt: new Date().toISOString(),
+      },
+      viewport: payload.viewport || null,
+    };
+  }
+
   async function captureCancelConfirmationFrame(payload = {}, sender = null) {
     const tab = sender?.tab;
     if (!tab?.windowId) throw new Error("The eBay cancellation confirmation tab was not available for screenshot capture.");
@@ -1773,6 +1856,20 @@
 
     if (message.type === "OG_EBAY_CAPTURE_VIDEO_RECEIPT_FRAME") {
       captureVideoReceiptFrame(message.payload || {}, _sender)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_CAPTURE_VISIBLE_TAB_SCREENSHOT") {
+      captureVisibleTabScreenshot(message.payload || {}, _sender)
+        .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_FOCUS_PENDING_BUYER") {
+      focusBuyerInPendingOrders(message.payload || {})
         .then(sendResponse)
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;
