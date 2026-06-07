@@ -565,10 +565,21 @@
     };
   }
 
+  async function reconcileEbayClassificationRuns(client) {
+    if (!client?.rpc) return;
+    const { error } = await client.rpc("reconcile_ebay_conversation_classification_runs", {
+      _stale_after_seconds: 90,
+    });
+    if (error) {
+      console.warn("[email-triage] eBay classification run reconciliation skipped:", error.message || error);
+    }
+  }
+
   async function fetchEbayOperationsDashboard(context) {
     await currentSession(context, "eBay operations dashboard");
     const todayIso = startOfLocalDayIso();
     const client = context.client;
+    await reconcileEbayClassificationRuns(client);
 
     const [
       canonicalConversations,

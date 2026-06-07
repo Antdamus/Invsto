@@ -13,6 +13,7 @@ import {
   loadEmailTriageEnv,
   recentActivityEvents,
   recentClassificationRuns,
+  recentSendAttempts,
   recentSyncRuns,
   redact,
   repoRoot,
@@ -32,6 +33,12 @@ const reportDir = resolveHarnessPath(
   env.EMAIL_TRIAGE_REPORT_DIR,
   "tests/email-triage/reports",
 );
+const CLASSIFICATION_TERMINAL_STATUSES = ["succeeded", "partial_success", "failed"];
+const CLASSIFICATION_TERMINAL_TITLES = {
+  succeeded: "Classification Run Completed",
+  partial_success: "Classification Run Partial Success",
+  failed: "Classification Run Failed",
+};
 
 function numberOrNull(value) {
   const numeric = Number(value);
@@ -569,47 +576,83 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
       await expect(page.locator("#ebay-conversation-sync-result")).toContainText(/Reclassify recent 100|durable state|finished|timed out/i, { timeout: 90000 });
       await page.locator("#refresh-operational-dashboard").click();
       await expect(page.locator("#operational-dashboard-status")).toContainText(/refreshed|failed/i, { timeout: 60000 });
-      const runs = await recentClassificationRuns(client, { since: reclassifyStartedAt, limit: 10 });
-      const run = latestRun(runs, (row) => row.run_mode === "reclassify_recent_100");
+      let runs = [];
+      let run = null;
+      await expect.poll(async () => {
+        await page.evaluate(async () => {
+          const { error } = await window.supabase.rpc("reconcile_ebay_conversation_classification_runs", {
+            _stale_after_seconds: 90,
+          });
+          if (error) throw new Error(error.message || "classification_run_reconciliation_failed");
+        });
+        runs = await recentClassificationRuns(client, { since: reclassifyStartedAt, limit: 10 });
+        run = latestRun(runs, (row) => row.run_mode === "reclassify_recent_100");
+        return run?.status || "missing";
+      }, {
+        timeout: 240000,
+        intervals: [2000, 5000, 10000],
+        message: "Reclassify Recent 100 durable run should terminalize.",
+      }).toMatch(/^(succeeded|partial_success|failed)$/);
       expect(run, "Reclassify Recent 100 durable run should exist.").toBeTruthy();
       expect(Number(run.requested_limit || 0)).toBeLessThanOrEqual(100);
-      expect(["succeeded", "partial_success", "failed", "running"]).toContain(run.status);
+      expect(CLASSIFICATION_TERMINAL_STATUSES).toContain(run.status);
+      expect(run.completed_at, "Terminal reclassify run should populate completed_at.").toBeTruthy();
+      expect(Number(run.duration_ms || 0), "Terminal reclassify run should populate duration_ms.").toBeGreaterThanOrEqual(0);
       expect(Number(run.processed_count || 0)).toBe(Number(run.classified_count || 0) + Number(run.failed_count || 0) + Number(run.skipped_count || 0));
-      const events = await recentActivityEvents(client, { since: reclassifyStartedAt, limit: 50 });
-      const startedEvent = events.find((event) =>
+      const openReclassifyRuns = runs.filter((row) =>
+        row.run_mode === "reclassify_recent_100" &&
+        ["pending", "running"].includes(row.status)
+      );
+      expect(openReclassifyRuns, "No stale pending/running reclassify run should remain from this validation window.").toHaveLength(0);
+      const events = await recentActivityEvents(client, { since: reclassifyStartedAt, limit: 100 });
+      const startedEvents = events.filter((event) =>
         event.event_type === "conversation_classified" &&
         event.title === "Classification Batch Started" &&
         eventRunId(event) === run.id
       );
-      const completedEvent = events.find((event) =>
+      const terminalEvents = events.filter((event) =>
         event.event_type === "conversation_classified" &&
-        event.title === "Classification Run Completed" &&
+        Object.values(CLASSIFICATION_TERMINAL_TITLES).includes(event.title) &&
         eventRunId(event) === run.id
       );
-      expect(startedEvent, "Reclassify started event should be durable.").toBeTruthy();
-      if (["succeeded", "partial_success", "failed"].includes(run.status)) {
-        expect(completedEvent, "Terminal reclassify run should have a completed event.").toBeTruthy();
-      }
+      expect(startedEvents, "Reclassify started event should be durable and singular.").toHaveLength(1);
+      expect(terminalEvents, "Terminal reclassify run should have exactly one terminal event.").toHaveLength(1);
+      const terminalEvent = terminalEvents[0];
+      expect(terminalEvent.title).toBe(CLASSIFICATION_TERMINAL_TITLES[run.status]);
+      expect(terminalEvent.status).toBe(run.status);
+      expect(terminalEvent.metadata?.classification_run?.completed_at || terminalEvent.metadata?.completed_at).toBeTruthy();
+      expect(terminalEvent.metadata?.safety?.ebay_mutation_performed).toBe(false);
+      expect(Number(terminalEvent.metadata?.safety?.automatic_responses_sent || 0)).toBe(0);
       const runClassifications = await classificationsForRun(client, run.id);
-      if (run.status !== "running") {
-        expect(runClassifications.length).toBe(Number(run.classified_count || 0));
-      }
+      expect(runClassifications.length).toBe(Number(run.classified_count || 0));
+      await page.locator("#refresh-operational-dashboard").click();
+      await expect(page.locator("#operational-dashboard-status")).toContainText(/refreshed|failed/i, { timeout: 60000 });
+      const dashboardText = await page.locator("#operational-dashboard").innerText();
+      const normalizedDashboardText = dashboardText.toLowerCase();
+      expect(dashboardText).toContain("Latest Classification Batch");
+      expect(normalizedDashboardText).toContain("terminal status");
+      expect(normalizedDashboardText).toContain("duration");
+      expect(normalizedDashboardText).toContain(run.status.replace("_", " "));
+      const sendAttempts = await recentSendAttempts(client, { since: reclassifyStartedAt, limit: 20 });
+      expect(sendAttempts, "Reclassify Recent 100 should not create send attempts.").toHaveLength(0);
       report.add("Reclassify recent 100", "passed", {
         request: exchange.request,
         response: summarizeClassificationPayload(exchange.response),
         browserResponseTimedOut: exchange.timedOutWaitingForBrowserResponse === true,
         durableRun: run,
-        startedEvent: startedEvent ? {
-          id: startedEvent.id,
-          status: startedEvent.status,
-          title: startedEvent.title,
+        startedEvent: startedEvents[0] ? {
+          id: startedEvents[0].id,
+          status: startedEvents[0].status,
+          title: startedEvents[0].title,
         } : null,
-        completedEvent: completedEvent ? {
-          id: completedEvent.id,
-          status: completedEvent.status,
-          title: completedEvent.title,
+        terminalEvent: terminalEvent ? {
+          id: terminalEvent.id,
+          status: terminalEvent.status,
+          title: terminalEvent.title,
         } : null,
         classificationsForRun: runClassifications.length,
+        dashboardTerminalStatusMatched: normalizedDashboardText.includes(run.status.replace("_", " ")),
+        sendAttemptsCreated: sendAttempts.length,
       });
     } else {
       report.add("Reclassify recent 100", "skipped", {

@@ -250,6 +250,16 @@ export async function classificationsForRun(client, runId) {
   });
 }
 
+export async function recentSendAttempts(client, options = {}) {
+  const params = {
+    select: "id,conversation_id,draft_id,approval_id,attempt_status,provider,idempotency_key,created_at",
+    order: "created_at.desc",
+    limit: String(options.limit || 50),
+  };
+  if (options.since) params.created_at = `gte.${options.since}`;
+  return client.select("ebay_message_send_attempts", params);
+}
+
 export async function backfillCheckpoints(client) {
   return client.select("ebay_message_sync_checkpoints", {
     select: "id,checkpoint_scope,conversation_type,status,current_run_id,last_run_id,last_successful_sync_at,next_offset,total_available,pages_processed,conversations_processed,messages_processed,last_error_code,updated_at",

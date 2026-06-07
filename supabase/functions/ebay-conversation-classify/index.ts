@@ -1346,6 +1346,14 @@ function classificationRunTerminalStatus(results: Array<Record<string, any>>) {
   return "succeeded";
 }
 
+function isTerminalClassificationRunStatus(status: unknown): status is "succeeded" | "partial_success" | "failed" {
+  return ["succeeded", "partial_success", "failed"].includes(String(status || ""));
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function estimatedRemainingUnclassified(input: Input, before: number | null, succeeded: number) {
   if (input.force) return before;
   if (!Number.isFinite(Number(before))) return null;
@@ -1477,13 +1485,61 @@ async function updateClassificationRun(
   supabase: ServiceClient,
   runId: string,
   payload: Record<string, any>,
+  options: { onlyOpen?: boolean } = {},
 ) {
-  const { error } = await supabase
+  let query = supabase
     .from("ebay_conversation_classification_runs")
     .update(payload)
     .eq("id", runId);
+  if (options.onlyOpen === true || !isTerminalClassificationRunStatus(payload.status)) {
+    query = query.in("status", ["pending", "running"]);
+  }
+  const { data, error } = await query
+    .select("id, status, completed_at")
+    .maybeSingle();
   if (error) {
     console.warn("[ebay-conversation-classify] classification run update failed", error.message);
+    return null;
+  }
+  if (!data?.id) {
+    console.warn("[ebay-conversation-classify] classification run update skipped because the run is already terminal or missing", runId);
+    return null;
+  }
+  return data as Record<string, any>;
+}
+
+async function updateClassificationRunRequired(
+  supabase: ServiceClient,
+  runId: string,
+  payload: Record<string, any>,
+  options: { onlyOpen?: boolean } = {},
+) {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const row = await updateClassificationRun(supabase, runId, payload, options);
+      if (row?.id) return row;
+    } catch (error) {
+      lastError = error;
+    }
+    await wait(250 * (attempt + 1));
+  }
+  throw new ClassifierError("classification_run_update_failed", {
+    phase: "classification_run",
+    details: {
+      run_id: runId,
+      status: payload.status || null,
+      error: lastError instanceof Error ? lastError.message : null,
+    },
+  });
+}
+
+async function reconcileStaleClassificationRuns(supabase: ServiceClient) {
+  const { error } = await supabase.rpc("reconcile_ebay_conversation_classification_runs", {
+    _stale_after_seconds: 90,
+  });
+  if (error) {
+    console.warn("[ebay-conversation-classify] stale classification run reconciliation skipped", error.message);
   }
 }
 
@@ -1496,20 +1552,35 @@ async function classifyRecent(
   const startedMs = Date.now();
   const version = promptVersion();
   const model = modelName();
+  await reconcileStaleClassificationRuns(supabase);
   const unclassifiedBefore = await countUnclassifiedConversations(supabase, rpcSupabase);
   const runId = await createClassificationRun(supabase, input, admin, {
     unclassifiedBefore,
     version,
     model,
   });
+  let terminalized = false;
+  let targetCount = 0;
+  let queueSource: string | null = null;
+  let results: Array<Record<string, any>> = [];
+  async function persistRunUpdate(payload: Record<string, any>) {
+    if (isTerminalClassificationRunStatus(payload.status)) {
+      await updateClassificationRunRequired(supabase, runId, payload);
+      terminalized = true;
+      return;
+    }
+    await updateClassificationRun(supabase, runId, payload);
+  }
 
   try {
   const candidateQueue = input.force
     ? { conversations: await recentConversationCandidates(supabase, input.limit), queueSource: "recent" }
     : await canonicalUnclassifiedConversationCandidates(supabase, rpcSupabase, input.limit);
   const conversations = candidateQueue.conversations;
+  targetCount = conversations.length;
+  queueSource = candidateQueue.queueSource;
   const ids = conversations.map((conversation: Record<string, any>) => conversation.id).filter(Boolean);
-  await updateClassificationRun(supabase, runId, classificationRunUpdatePayload({
+  await persistRunUpdate(classificationRunUpdatePayload({
     input,
     runId,
     status: conversations.length ? "running" : "succeeded",
@@ -1537,7 +1608,7 @@ async function classifyRecent(
     classificationByConversation.set(String(classification.conversation_id || ""), classification as Record<string, any>);
   }
 
-  const results = [];
+  results = [];
   for (const conversation of conversations) {
     const current = classificationByConversation.get(String(conversation.id || "")) || null;
     const candidateReason = classificationCandidateReason(conversation as Record<string, any>, current);
@@ -1550,7 +1621,7 @@ async function classifyRecent(
         skip_reason: candidateReason,
         classification_id: current?.id || null,
       });
-      await updateClassificationRun(supabase, runId, classificationRunUpdatePayload({
+      await persistRunUpdate(classificationRunUpdatePayload({
         input,
         runId,
         status: results.length >= conversations.length ? classificationRunTerminalStatus(results) : "running",
@@ -1597,7 +1668,7 @@ async function classifyRecent(
         phase: error instanceof ClassifierError ? error.phase : "unknown",
       });
     }
-    await updateClassificationRun(supabase, runId, classificationRunUpdatePayload({
+    await persistRunUpdate(classificationRunUpdatePayload({
       input,
       runId,
       status: results.length >= conversations.length ? classificationRunTerminalStatus(results) : "running",
@@ -1691,28 +1762,40 @@ async function classifyRecent(
   return response;
   } catch (error) {
     const known = error instanceof ClassifierError || error instanceof EbayConversationContextError ? error : null;
-    await updateClassificationRun(supabase, runId, classificationRunUpdatePayload({
-      input,
-      runId,
-      status: "failed",
-      results: [{
-        conversation_id: null,
-        ebay_conversation_id: null,
-        ok: false,
-        error: known?.code || "unknown_error",
-        phase: known?.phase || "unknown",
-      }],
-      requested: input.limit,
-      targetCount: 0,
-      unclassifiedBefore,
-      remainingUnclassified: unclassifiedBefore,
-      startedMs,
-      version,
-      model,
-      canonicalQueue: input.force ? "recent" : "unclassified",
-      errorCode: known?.code || "unknown_error",
-      errorPhase: known?.phase || "unknown",
-    }));
+    if (!terminalized) {
+      const terminalResults = [...results];
+      if (terminalResults.length < targetCount || terminalResults.length === 0) {
+        terminalResults.push({
+          conversation_id: null,
+          ebay_conversation_id: null,
+          ok: false,
+          error: known?.code || "unknown_error",
+          phase: known?.phase || "unknown",
+        });
+      }
+      const succeeded = terminalResults.filter((result) => result.ok && result.skipped !== true).length;
+      try {
+        await updateClassificationRunRequired(supabase, runId, classificationRunUpdatePayload({
+          input,
+          runId,
+          status: classificationRunTerminalStatus(terminalResults),
+          results: terminalResults,
+          requested: input.limit,
+          targetCount,
+          unclassifiedBefore,
+          remainingUnclassified: estimatedRemainingUnclassified(input, unclassifiedBefore, succeeded),
+          startedMs,
+          version,
+          model,
+          queueSource,
+          canonicalQueue: input.force ? "recent" : "unclassified",
+          errorCode: known?.code || "unknown_error",
+          errorPhase: known?.phase || "unknown",
+        }), { onlyOpen: true });
+      } catch (terminalError) {
+        console.error("[ebay-conversation-classify] failed to terminalize classification run after error", terminalError);
+      }
+    }
     throw error;
   }
 }

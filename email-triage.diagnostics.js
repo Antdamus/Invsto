@@ -786,6 +786,10 @@
       ? "running"
       : latestClassificationRun.status || "not_started";
     const classificationStatusVariant = eventStatusVariant({ status: classificationStatus });
+    const classificationTerminalStatus = ["succeeded", "partial_success", "failed"].includes(String(latestClassificationRun.status || ""))
+      ? String(latestClassificationRun.status)
+      : "";
+    const classificationDurationMs = latestClassificationRun.payload?.duration_ms ?? latestClassificationRun.duration_ms;
     const events = Array.isArray(ebay.recent_operational_events) ? ebay.recent_operational_events : [];
     const blocked = ebay.ok === false || Number(metrics.send_attempts_failed || 0) > 0 || safety.automatic_responses_sent > 0;
 
@@ -851,10 +855,12 @@
           <div class="operational-metric-grid">
             ${renderKeyValueGrid([
               { label: "Lifecycle status", html: dashboardBadge(utils.humanizeValue(classificationStatus), classificationStatusVariant, utils) },
-              { label: "Run id", value: latestClassificationRun.id ? utils.compactId(latestClassificationRun.id) : "--" },
+              { label: "Terminal Status", html: classificationTerminalStatus ? dashboardBadge(utils.humanizeValue(classificationTerminalStatus), eventStatusVariant({ status: classificationTerminalStatus }), utils) : "--" },
+              { label: "Run ID", value: latestClassificationRun.id ? utils.compactId(latestClassificationRun.id) : "--" },
               { label: "Mode", value: latestClassificationRun.payload?.run_mode ? utils.humanizeValue(latestClassificationRun.payload.run_mode) : "--" },
               { label: "Started", value: latestClassificationRun.started_at ? utils.formatDateTime(latestClassificationRun.started_at) : "--" },
               { label: "Completed", value: latestClassificationRun.completed_at ? utils.formatDateTime(latestClassificationRun.completed_at) : "--" },
+              { label: "Duration", value: Number.isFinite(Number(classificationDurationMs)) ? `${Number(classificationDurationMs)} ms` : "--" },
               { label: "Requested limit", value: latestClassificationRun.payload?.requested_limit ?? latestClassificationRun.requested_limit ?? "--" },
               { label: "Processed", value: metrics.latest_classification_processed },
               { label: "Classified", value: metrics.latest_classification_classified },
