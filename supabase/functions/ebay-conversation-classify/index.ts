@@ -23,6 +23,15 @@ type Input = {
   suppressActivityEvent?: boolean;
 };
 
+type ConversationCandidate = {
+  id: string;
+  ebay_conversation_id: string | null;
+  latest_message_id: string | null;
+  latest_message_created_at: string | null;
+  last_message_created_at: string | null;
+  queue_source?: string;
+};
+
 const CLASSIFIER_NAME = "ebay_conversation_classifier";
 const CLASSIFIER_VERSION = "v1";
 const PROMPT_VERSION_DEFAULT = "ebay-conversation-classifier-v1";
@@ -1077,7 +1086,27 @@ async function taxonomyAudit(supabase: ServiceClient, input: Input) {
   };
 }
 
-async function countUnclassifiedConversations(supabase: ServiceClient) {
+async function countUnclassifiedConversations(supabase: ServiceClient, rpcSupabase: ServiceClient = supabase) {
+  try {
+    const { data, error } = await rpcSupabase.rpc("get_ebay_canonical_mailbox_v2", {
+      _page_size: 1,
+      _offset: 0,
+      _system_filter: "unclassified",
+      _search_terms: [],
+      _structured_filters: {},
+      _classification_filters: {},
+    });
+    if (error) throw error;
+    const count = Number((data as Record<string, unknown> | null)?.matching_total);
+    if (Number.isFinite(count)) return count;
+    throw new Error("missing_unclassified_matching_total");
+  } catch (error) {
+    console.warn("[ebay-conversation-classify] unclassified count lookup failed", error instanceof Error ? error.message : String(error));
+    return countUnclassifiedConversationsDirect(supabase);
+  }
+}
+
+async function countUnclassifiedConversationsDirect(supabase: ServiceClient) {
   try {
     const [conversationsResult, classificationsResult] = await Promise.all([
       supabase
@@ -1092,9 +1121,139 @@ async function countUnclassifiedConversations(supabase: ServiceClient) {
     if (classificationsResult.error) throw classificationsResult.error;
     return Math.max(Number(conversationsResult.count || 0) - Number(classificationsResult.count || 0), 0);
   } catch (error) {
-    console.warn("[ebay-conversation-classify] unclassified count lookup failed", error instanceof Error ? error.message : String(error));
+    console.warn("[ebay-conversation-classify] direct unclassified count lookup failed", error instanceof Error ? error.message : String(error));
     return null;
   }
+}
+
+async function currentClassificationConversationIds(supabase: ServiceClient, conversationIds: string[]) {
+  const ids = [...new Set(conversationIds.map((id) => text(id, 120)).filter(Boolean))];
+  const classified = new Set<string>();
+  for (let index = 0; index < ids.length; index += 500) {
+    const chunk = ids.slice(index, index + 500);
+    const { data, error } = await supabase
+      .from("ebay_conversation_classifications")
+      .select("conversation_id")
+      .in("conversation_id", chunk)
+      .eq("is_current", true)
+      .limit(chunk.length);
+    if (error) throw error;
+    for (const row of data || []) {
+      const id = text((row as Record<string, any>).conversation_id, 120);
+      if (id) classified.add(id);
+    }
+  }
+  return classified;
+}
+
+async function orderedConversationCandidatePage(
+  supabase: ServiceClient,
+  offset: number,
+  limit: number,
+): Promise<ConversationCandidate[]> {
+  const { data, error } = await supabase
+    .from("ebay_conversations")
+    .select("id, ebay_conversation_id, latest_message_id, latest_message_created_at, last_message_created_at, updated_at")
+    .order("latest_message_created_at", { ascending: false, nullsFirst: false })
+    .order("updated_at", { ascending: false, nullsFirst: false })
+    .order("id", { ascending: false })
+    .range(offset, offset + limit - 1);
+  if (error) throw error;
+  return (data || []).map((row: Record<string, any>) => ({
+    id: text(row.id, 120),
+    ebay_conversation_id: stringOrNull(row.ebay_conversation_id, 180),
+    latest_message_id: stringOrNull(row.latest_message_id, 180),
+    latest_message_created_at: stringOrNull(row.latest_message_created_at, 80),
+    last_message_created_at: stringOrNull(row.last_message_created_at, 80),
+    queue_source: "direct:unclassified",
+  })).filter((row: ConversationCandidate) => Boolean(row.id));
+}
+
+function normalizeMailboxConversationCandidate(row: Record<string, any>): ConversationCandidate | null {
+  const id = text(row.id, 120);
+  if (!id) return null;
+  return {
+    id,
+    ebay_conversation_id: stringOrNull(row.ebay_conversation_id, 180),
+    latest_message_id: stringOrNull(row.latest_message_id, 180),
+    latest_message_created_at: stringOrNull(row.latest_message_created_at, 80),
+    last_message_created_at: stringOrNull(row.last_message_created_at, 80),
+    queue_source: "get_ebay_canonical_mailbox_v2:unclassified",
+  };
+}
+
+async function unclassifiedConversationCandidatesFromMailboxRpc(
+  supabase: ServiceClient,
+  limit: number,
+): Promise<ConversationCandidate[]> {
+  const { data, error } = await supabase.rpc("get_ebay_canonical_mailbox_v2", {
+    _page_size: limit,
+    _offset: 0,
+    _system_filter: "unclassified",
+    _search_terms: [],
+    _structured_filters: {},
+    _classification_filters: {},
+  });
+  if (error) throw error;
+  const rows = Array.isArray((data as Record<string, unknown> | null)?.conversations)
+    ? ((data as Record<string, unknown>).conversations as Record<string, any>[])
+    : [];
+  return rows.map(normalizeMailboxConversationCandidate).filter((row): row is ConversationCandidate => Boolean(row?.id));
+}
+
+async function unclassifiedConversationCandidatesDirect(
+  supabase: ServiceClient,
+  limit: number,
+): Promise<ConversationCandidate[]> {
+  const candidates: ConversationCandidate[] = [];
+  const pageSize = 500;
+  let offset = 0;
+  while (candidates.length < limit) {
+    const page = await orderedConversationCandidatePage(supabase, offset, pageSize);
+    if (!page.length) break;
+    const classified = await currentClassificationConversationIds(supabase, page.map((row) => row.id));
+    for (const row of page) {
+      if (!classified.has(row.id)) candidates.push(row);
+      if (candidates.length >= limit) break;
+    }
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+  return candidates;
+}
+
+async function canonicalUnclassifiedConversationCandidates(
+  supabase: ServiceClient,
+  rpcSupabase: ServiceClient,
+  limit: number,
+): Promise<{ conversations: ConversationCandidate[]; queueSource: string }> {
+  try {
+    const conversations = await unclassifiedConversationCandidatesFromMailboxRpc(rpcSupabase, limit);
+    return { conversations, queueSource: "get_ebay_canonical_mailbox_v2:unclassified" };
+  } catch (error) {
+    console.warn("[ebay-conversation-classify] canonical mailbox unclassified queue lookup failed; using direct canonical predicate", error instanceof Error ? error.message : String(error));
+    return {
+      conversations: await unclassifiedConversationCandidatesDirect(supabase, limit),
+      queueSource: "direct:unclassified",
+    };
+  }
+}
+
+async function recentConversationCandidates(supabase: ServiceClient, limit: number): Promise<ConversationCandidate[]> {
+  const { data, error } = await supabase
+    .from("ebay_conversations")
+    .select("id, ebay_conversation_id, latest_message_id, latest_message_created_at, last_message_created_at")
+    .order("last_message_created_at", { ascending: false, nullsFirst: false })
+    .limit(limit);
+  if (error) throw new ClassifierError("recent_conversation_lookup_failed", { phase: "classify_recent" });
+  return (data || []).map((row: Record<string, any>) => ({
+    id: text(row.id, 120),
+    ebay_conversation_id: stringOrNull(row.ebay_conversation_id, 180),
+    latest_message_id: stringOrNull(row.latest_message_id, 180),
+    latest_message_created_at: stringOrNull(row.latest_message_created_at, 80),
+    last_message_created_at: stringOrNull(row.last_message_created_at, 80),
+    queue_source: "recent",
+  })).filter((row: ConversationCandidate) => Boolean(row.id));
 }
 
 async function recordClassificationRunActivity(
@@ -1148,6 +1307,8 @@ async function recordClassificationRunActivity(
       duration_ms: summary.duration_ms,
       failures: summary.failures,
       skipped: summary.skipped_results,
+      queue_source: summary.queue_source || null,
+      canonical_queue: summary.canonical_queue || null,
       safety: {
         ebay_mutation_performed: false,
         automatic_responses_sent: 0,
@@ -1168,15 +1329,11 @@ async function classifyRecent(
   const startedMs = Date.now();
   const version = promptVersion();
   const model = modelName();
-  const unclassifiedBefore = await countUnclassifiedConversations(supabase);
-  const { data, error } = await supabase
-    .from("ebay_conversations")
-    .select("id, ebay_conversation_id, latest_message_id, latest_message_created_at, last_message_created_at")
-    .order("last_message_created_at", { ascending: false, nullsFirst: false })
-    .limit(input.limit);
-  if (error) throw new ClassifierError("recent_conversation_lookup_failed", { phase: "classify_recent" });
-
-  const conversations = data || [];
+  const unclassifiedBefore = await countUnclassifiedConversations(supabase, rpcSupabase);
+  const candidateQueue = input.force
+    ? { conversations: await recentConversationCandidates(supabase, input.limit), queueSource: "recent" }
+    : await canonicalUnclassifiedConversationCandidates(supabase, rpcSupabase, input.limit);
+  const conversations = candidateQueue.conversations;
   const ids = conversations.map((conversation: Record<string, any>) => conversation.id).filter(Boolean);
   const classificationsResult = ids.length ? await supabase
     .from("ebay_conversation_classifications")
@@ -1255,7 +1412,7 @@ async function classifyRecent(
       reason: result.skip_reason || "skipped",
       classification_id: result.classification_id || null,
     }));
-  const unclassifiedAfter = await countUnclassifiedConversations(supabase);
+  const unclassifiedAfter = await countUnclassifiedConversations(supabase, rpcSupabase);
   const response = {
     ok: true,
     mode: "classify_recent",
@@ -1287,6 +1444,8 @@ async function classifyRecent(
     skipped_results: skippedResults,
     results,
     safety: safetyEnvelope(),
+    queue_source: candidateQueue.queueSource,
+    canonical_queue: input.force ? "recent" : "unclassified",
   };
   await recordClassificationRunActivity(supabase, admin, {
     force: response.force,
@@ -1316,6 +1475,8 @@ async function classifyRecent(
     failures: response.failures,
     skipped_results: response.skipped_results,
     started_at: startedAt,
+    queue_source: response.queue_source,
+    canonical_queue: response.canonical_queue,
   }).catch((eventError) => {
     console.warn("[ebay-conversation-classify] classification run activity event failed", eventError instanceof Error ? eventError.message : String(eventError));
   });
