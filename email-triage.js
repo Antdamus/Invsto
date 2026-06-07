@@ -2923,6 +2923,30 @@
       : {};
   }
 
+  const EBAY_CANONICAL_SMART_FOLDER_COUNT_KEYS = Object.freeze({
+    all: "all",
+    members: "members",
+    ebay_notifications: "ebay_notifications",
+    unread: "unread",
+    returns: "returns",
+    shipping: "shipping",
+    shipping_issues: "shipping",
+    needs_reply_today: "needs_reply_today",
+    vip_buyers: "vip_buyers",
+    high_value_buyers: "high_value_buyers",
+    refund_risk: "refund_risk",
+    review_queue: "review_queue",
+    has_order: "has_order",
+    has_return: "has_return",
+    has_media: "has_media",
+    needs_context_review: "needs_context_review",
+  });
+
+  function ebayCanonicalSmartFolderCountKey(systemFilter = "all") {
+    const key = compactConversationText(systemFilter, "all");
+    return EBAY_CANONICAL_SMART_FOLDER_COUNT_KEYS[key] || "";
+  }
+
   function ebayMailboxFetchValuesFromState(state = adminClassificationState, options = {}) {
     const search = parseEbayStructuredSearch(state.ebayConversationSearchQuery || "");
     return {
@@ -3153,11 +3177,13 @@
     const nextState = ebaySavedViewStateFromPayload(savedView?.filter_payload, state);
     if (ebayMailboxUsesServerFilters(state)) {
       const payload = ebaySavedViewFilterPayload(savedView?.filter_payload);
-      const systemKey = savedView?.system_key || payload.system_filter || "all";
+      const systemKey = compactConversationText(savedView?.system_key || payload.system_filter || "all", "all");
+      const canonicalCountKey = ebayCanonicalSmartFolderCountKey(systemKey);
       const hasCustomRules = compactConversationText(payload.search_query) || countEbayClassificationFilters(payload.classification_filters) > 0;
       const counts = ebayMailboxSmartCounts(state);
-      if (!hasCustomRules && Object.prototype.hasOwnProperty.call(counts, systemKey)) {
-        return ebayMailboxCountValue(counts[systemKey], 0);
+      const isSystemSmartFolder = savedView?.is_system_default === true || Boolean(savedView?.system_key);
+      if (canonicalCountKey && (isSystemSmartFolder || !hasCustomRules) && Object.prototype.hasOwnProperty.call(counts, canonicalCountKey)) {
+        return ebayMailboxCountValue(counts[canonicalCountKey], 0);
       }
     }
     return filteredEbayConversations({ ...nextState, ebayMailboxMode: "legacy" }).length;
