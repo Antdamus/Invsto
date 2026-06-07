@@ -60,6 +60,51 @@ function chooseSearchTerm(conversation = {}) {
     .find((value) => value.length >= 3) || "";
 }
 
+const SMART_FOLDER_LABELS = {
+  all: "All",
+  members: "Members",
+  ebay_notifications: "eBay Notifications",
+  unread: "Unread",
+  unclassified: "Unclassified",
+  returns: "Returns",
+  shipping: "Shipping",
+  shipping_issues: "Shipping",
+  needs_reply_today: "Reply today",
+  vip_buyers: "VIP buyers",
+  high_value_buyers: "High value",
+  refund_risk: "Refund risk",
+  review_queue: "Review queue",
+  has_order: "Has order",
+  has_return: "Has return",
+  has_media: "Has media",
+  needs_context_review: "Needs review",
+};
+
+function regexEscape(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function smartFolderButton(page, systemKey) {
+  const label = SMART_FOLDER_LABELS[systemKey] || systemKey;
+  return page
+    .locator("#ebay-conversation-saved-views")
+    .getByRole("button", { name: new RegExp(`^${regexEscape(label)}\\b`, "i") });
+}
+
+function chooseSmartFolderKey(counts = {}) {
+  const preferred = [
+    "unclassified",
+    "returns",
+    "members",
+    "ebay_notifications",
+    "shipping_issues",
+    "needs_reply_today",
+    "has_order",
+    "has_media",
+  ];
+  return preferred.find((key) => Number(counts?.[key] || 0) > 0) || "all";
+}
+
 function stepReport() {
   const steps = [];
   return {
@@ -122,6 +167,36 @@ async function storageStateExists() {
   } catch {
     return false;
   }
+}
+
+async function adminSessionState(page) {
+  return page.evaluate(async () => {
+    const client = window.supabase;
+    if (!client?.auth?.getSession) return "supabase_not_ready";
+    const { data: sessionData, error: sessionError } = await client.auth.getSession();
+    if (sessionError) return `session_error:${sessionError.message || "unknown"}`;
+    const session = sessionData?.session;
+    if (!session?.user?.id) return "no_session";
+
+    const { data: employee, error: employeeError } = await client
+      .from("employees")
+      .select("role, active")
+      .eq("user_id", session.user.id)
+      .maybeSingle();
+    if (employeeError) return `employee_error:${employeeError.message || "unknown"}`;
+    if (!employee || employee.active === false) return "inactive_or_missing_employee";
+
+    const role = String(employee.role || "").toLowerCase();
+    return role === "admin" ? "admin" : `role:${role || "unknown"}`;
+  });
+}
+
+async function waitForAdminSession(page) {
+  await expect.poll(async () => adminSessionState(page), {
+    timeout: 45000,
+    intervals: [500, 1000, 2000],
+    message: "Supabase Auth should hold an active admin session after login.",
+  }).toBe("admin");
 }
 
 async function waitForMailboxReady(page) {
@@ -203,9 +278,9 @@ test("authenticate admin @setup", async ({ page }) => {
   await page.locator("#email").fill(email);
   await page.locator("#password").fill(password);
   await page.locator("#login-submit").click();
-  await page.waitForURL(/dashboard\.html|seller-dashboard\.html|worker-dashboard\.html|email-triage\.html/, { timeout: 30000 });
+  await waitForAdminSession(page);
   await page.goto("/email-triage.html");
-  await expect(page.locator("#admin-greeting")).toContainText("eBay Messaging", { timeout: 30000 });
+  await expect(page.locator("#ebay-conversation-status")).toBeVisible({ timeout: 30000 });
   await waitForMailboxReady(page);
   await fs.mkdir(path.dirname(storageStatePath), { recursive: true });
   await page.context().storageState({ path: storageStatePath });
@@ -249,7 +324,7 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
 
   try {
     await page.goto("/email-triage.html");
-    await expect(page.locator("#admin-greeting")).toContainText("eBay Messaging", { timeout: 30000 });
+    await expect(page.locator("#ebay-conversation-status")).toBeVisible({ timeout: 30000 });
     await waitForMailboxReady(page);
     report.add("Open local app as authenticated admin", "passed", {
       url: page.url(),
@@ -293,21 +368,32 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
           loaded_count: expectedSearch.loaded_count,
         });
         await page.locator("#ebay-conversation-search-clear").click();
+        await expect.poll(async () => {
+          const text = await page.locator("#ebay-conversation-summary").innerText();
+          return extractMetric(text, "Matching");
+        }, { timeout: 30000 }).toBe(Number(mailbox.matching_total));
       }
 
-      const folderKey = Number(mailbox.smart_folder_counts?.unclassified || 0) > 0 ? "unclassified" : "all";
+      const folderKey = chooseSmartFolderKey(mailbox.smart_folder_counts);
       const expectedFolder = await canonicalMailbox(client, { pageSize: 100, systemFilter: folderKey });
-      await page.locator(`[data-ebay-saved-view-select="${folderKey}"]`).click();
+      await smartFolderButton(page, folderKey).click();
       await expect.poll(async () => {
         const text = await page.locator("#ebay-conversation-summary").innerText();
         return extractMetric(text, "Matching");
       }, { timeout: 30000 }).toBe(Number(expectedFolder.matching_total));
       report.add("Smart folder behavior matches canonical RPC", "passed", {
         folderKey,
+        folderLabel: SMART_FOLDER_LABELS[folderKey] || folderKey,
         matching_total: expectedFolder.matching_total,
         loaded_count: expectedFolder.loaded_count,
       });
-      if (folderKey !== "all") await page.locator('[data-ebay-saved-view-select="all"]').click();
+      if (folderKey !== "all") {
+        await smartFolderButton(page, "all").click();
+        await expect.poll(async () => {
+          const text = await page.locator("#ebay-conversation-summary").innerText();
+          return extractMetric(text, "Matching");
+        }, { timeout: 30000 }).toBe(Number(mailbox.matching_total));
+      }
     } else {
       report.add("Search/filter/smart folder behavior", "skipped", {
         reason: "No canonical conversations are available.",
@@ -560,4 +646,3 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
     console.log(`Email triage regression report: ${path.relative(repoRoot, reportPath)}`);
   }
 });
-
