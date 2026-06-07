@@ -1129,6 +1129,29 @@ async function countCanonicalConversations(supabase: ServiceClient, accountId: s
   return Number(count || 0);
 }
 
+async function countUnclassifiedConversations(supabase: ServiceClient, accountId: string) {
+  try {
+    const { data: conversations, error: conversationError } = await supabase
+      .from("ebay_conversations")
+      .select("id")
+      .eq("seller_account_id", accountId)
+      .limit(10000);
+    if (conversationError) throw conversationError;
+    const ids = (conversations || []).map((row: any) => text(row.id)).filter(Boolean);
+    if (!ids.length) return 0;
+    const { count, error: classificationError } = await supabase
+      .from("ebay_conversation_classifications")
+      .select("conversation_id", { count: "exact", head: true })
+      .in("conversation_id", ids)
+      .eq("is_current", true);
+    if (classificationError) throw classificationError;
+    return Math.max(ids.length - Number(count || 0), 0);
+  } catch (error) {
+    console.warn("[ebay-message-sync] unclassified count lookup failed", error instanceof Error ? error.message : String(error));
+    return null;
+  }
+}
+
 async function beginCheckpoint(options: {
   supabase: ServiceClient;
   account: EbayAccount;
@@ -1736,6 +1759,7 @@ function backfillEventSummary(input: SyncInput, counters: Counters, startedMs: n
     classification_succeeded: counters.classificationSucceeded,
     classification_failed: counters.classificationFailed,
     classification_skipped: counters.classificationSkipped,
+    classified_count: counters.classificationSucceeded,
     processed_count: counters.conversationsSeen,
     succeeded_count: counters.conversationsSucceeded,
     failed_count: failed,
@@ -1833,6 +1857,7 @@ function syncEventSummary(input: SyncInput, counters: Counters, startedMs: numbe
     classification_succeeded: counters.classificationSucceeded,
     classification_failed: counters.classificationFailed,
     classification_skipped: counters.classificationSkipped,
+    classified_count: counters.classificationSucceeded,
     processed_count: counters.conversationsSeen,
     succeeded_count: counters.conversationsSucceeded,
     failed_count: failed,
@@ -1960,6 +1985,7 @@ serve(async (req) => {
   let input: SyncInput | null = null;
   let operator: Operator | null = null;
   let account: EbayAccount | null = null;
+  let unclassifiedBefore: number | null = null;
   const startedMs = Date.now();
   const supabase = serviceClient();
 
@@ -1967,6 +1993,7 @@ serve(async (req) => {
     operator = await requireAdmin(req, supabase);
     input = await parseInput(req);
     account = await upsertSellerAccount(supabase);
+    unclassifiedBefore = await countUnclassifiedConversations(supabase, account.id);
     runId = await createRun(supabase, input, account, operator);
     counters = {
       pagesFetched: 0,
@@ -2044,6 +2071,7 @@ serve(async (req) => {
       ? summarizeBackfillProgress(input, backfillCheckpoints, typeResults)
       : null;
     const canonicalTotalConversations = await countCanonicalConversations(supabase, account.id);
+    const unclassifiedAfter = await countUnclassifiedConversations(supabase, account.id);
     const metadata = syncRunProgressMetadata(input, counters, {
       conversationTypes: input.conversationTypes,
       conversationId: input.conversationId,
@@ -2052,6 +2080,8 @@ serve(async (req) => {
       paginationStrategy: "Offsets advance by the exact fixed page limit used for the request.",
       backfillProgress,
       canonicalTotalConversations,
+      unclassifiedBefore,
+      unclassifiedAfter,
       readOnly: true,
       sendsEnabled: false,
       ebayMutationsPerformed: false,
@@ -2078,6 +2108,9 @@ serve(async (req) => {
           progress: backfillProgress || {},
           chunked: true,
           canonical_total_conversations: canonicalTotalConversations,
+          unclassified_before: unclassifiedBefore,
+          unclassified_after: unclassifiedAfter,
+          remaining_unclassified: unclassifiedAfter,
         },
       });
     } else if (shouldRecordAggregateSyncEvent(input)) {
@@ -2093,6 +2126,9 @@ serve(async (req) => {
         status: failed > 0 ? "warning" : "succeeded",
         extra: {
           canonical_total_conversations: canonicalTotalConversations,
+          unclassified_before: unclassifiedBefore,
+          unclassified_after: unclassifiedAfter,
+          remaining_unclassified: unclassifiedAfter,
         },
       });
     }
@@ -2108,6 +2144,9 @@ serve(async (req) => {
       counters,
       backfillProgress,
       canonicalTotalConversations,
+      unclassifiedBefore,
+      unclassifiedAfter,
+      remainingUnclassified: unclassifiedAfter,
       durationMs: Math.max(Date.now() - startedMs, 0),
       safety: {
         readOnly: true,
@@ -2133,6 +2172,9 @@ serve(async (req) => {
         console.warn("[ebay-message-sync] failed to load checkpoint progress after failure", checkpointError);
       }
     }
+    const failedUnclassifiedAfter = account
+      ? await countUnclassifiedConversations(supabase, account.id)
+      : null;
     const failureMetadata = input && counters
       ? syncRunProgressMetadata(input, counters, {
         conversationTypes: input.conversationTypes,
@@ -2140,6 +2182,8 @@ serve(async (req) => {
         startOffset: input.startOffset,
         environment: ebayEnvironment(),
         backfillProgress: failedBackfillProgress,
+        unclassifiedBefore,
+        unclassifiedAfter: failedUnclassifiedAfter,
         readOnly: true,
         sendsEnabled: false,
         ebayMutationsPerformed: false,
@@ -2165,6 +2209,9 @@ serve(async (req) => {
           failed_count: failedCountFallback,
           progress: failedBackfillProgress || {},
           chunked: true,
+          unclassified_before: unclassifiedBefore,
+          unclassified_after: failedUnclassifiedAfter,
+          remaining_unclassified: failedUnclassifiedAfter,
           error_code: failure.error_code,
           error_phase: failure.error_phase,
         },
@@ -2184,6 +2231,9 @@ serve(async (req) => {
         extra: {
           ...failure,
           failed_count: failedCountFallback,
+          unclassified_before: unclassifiedBefore,
+          unclassified_after: failedUnclassifiedAfter,
+          remaining_unclassified: failedUnclassifiedAfter,
           error_code: failure.error_code,
           error_phase: failure.error_phase,
         },

@@ -245,10 +245,11 @@
         metricText(metricValue([payload], ["failed_count"]) || 1, "failed"),
       ],
       conversation_classified: payload.classification_run || payload.processed_count !== undefined ? [
-        metricText(metricValue([payload], ["processed_count"]) ?? payload.classification_run?.processed, "processed"),
-        metricText(metricValue([payload], ["succeeded_count"]) ?? payload.classification_run?.succeeded, "succeeded"),
+        metricText(metricValue([payload], ["candidates_examined", "processed_count"]) ?? payload.classification_run?.processed, "examined"),
+        metricText(metricValue([payload], ["actually_classified", "classified_count", "succeeded_count"]) ?? payload.classification_run?.succeeded, "classified"),
         metricText(metricValue([payload], ["failed_count"]) ?? payload.classification_run?.failed, "failed"),
         metricText(metricValue([payload], ["skipped_count"]) ?? payload.classification_run?.skipped, "skipped"),
+        metricText(metricValue([payload], ["remaining_unclassified", "unclassified_after"]) ?? payload.classification_run?.unclassified_after, "remaining"),
       ] : [
         payload.priority ? utils.humanizeValue(payload.priority) : "",
         payload.response_need ? utils.humanizeValue(payload.response_need) : "",
@@ -375,11 +376,14 @@
     if (eventType === "conversation_classified" && (payload.classification_run || payload.processed_count !== undefined)) {
       const run = payload.classification_run && typeof payload.classification_run === "object" ? payload.classification_run : payload;
       return [
-        ["Processed", metricValue([payload, run, counters], ["processed_count", "processed"])],
+        ["Candidates Examined", metricValue([payload, run, counters], ["candidates_examined", "processed_count", "processed"])],
         ["Attempted", metricValue([payload, run, counters], ["attempted_count", "attempted"])],
-        ["Succeeded", metricValue([payload, run, counters], ["succeeded_count", "succeeded"])],
+        ["Actually Classified", metricValue([payload, run, counters], ["actually_classified", "classified_count", "succeeded_count", "succeeded"])],
         ["Failed", metricValue([payload, run, counters], ["failed_count", "failed"])],
         ["Skipped", metricValue([payload, run, counters], ["skipped_count", "skipped"])],
+        ["Unclassified Before", metricValue([payload, run, counters], ["unclassified_before"])],
+        ["Unclassified After", metricValue([payload, run, counters], ["unclassified_after"])],
+        ["Remaining Unclassified", metricValue([payload, run, counters], ["remaining_unclassified", "unclassified_after"])],
         ["Requested", metricValue([payload, run], ["requested_count", "requested"])],
         ["Classification Version", metricValue([payload, run], ["classification_version"])],
         ["Prompt Version", metricValue([payload, run], ["prompt_version"])],
@@ -405,6 +409,9 @@
         ["Classified", metricValue([payload, run], ["classification_succeeded"])],
         ["Classification Failed", metricValue([payload, run], ["classification_failed"])],
         ["Classification Skipped", metricValue([payload, run], ["classification_skipped"])],
+        ["Unclassified Before", metricValue([payload, run, counters], ["unclassified_before"])],
+        ["Unclassified After", metricValue([payload, run, counters], ["unclassified_after"])],
+        ["Remaining Unclassified", metricValue([payload, run, counters], ["remaining_unclassified", "unclassified_after"])],
         ["Duration", metricValue([payload, run], ["duration_ms"]) !== null ? `${metricValue([payload, run], ["duration_ms"])} ms` : null],
         ["Error", metricValue([payload, run], ["error_code", "last_error_code"])],
       ];
@@ -425,6 +432,9 @@
         ["Messages Inserted", metricValue([payload, run, counters], ["messages_inserted"])],
         ["Messages Updated", metricValue([payload, run, counters], ["messages_updated"])],
         ["Canonical Total After Sync", metricValue([payload, run, counters], ["canonical_total_conversations", "canonicalTotalConversations"])],
+        ["Unclassified Before", metricValue([payload, run, counters], ["unclassified_before"])],
+        ["Unclassified After", metricValue([payload, run, counters], ["unclassified_after"])],
+        ["Remaining Unclassified", metricValue([payload, run, counters], ["remaining_unclassified", "unclassified_after"])],
         ["Warnings", metricValue([payload, run, counters], ["warnings_count"])],
         ["Duration", metricValue([payload, run], ["duration_ms"]) !== null ? `${metricValue([payload, run], ["duration_ms"])} ms` : null],
         ["Checkpoint Scope", metricValue([payload, run], ["checkpoint_scope"])],
@@ -770,6 +780,7 @@
               { label: "Total canonical", value: metrics.canonical_conversations },
               { label: "Conversations today", value: metrics.conversations_today },
               { label: "Unread conversations", value: metrics.unread_conversations },
+              { label: "Unclassified", value: metrics.unclassified_conversations },
               { label: "Needs reply", value: metrics.needs_reply },
               { label: "High priority", value: metrics.high_priority },
               { label: "Returns", value: metrics.returns },

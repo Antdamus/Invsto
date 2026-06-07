@@ -465,6 +465,7 @@
       canonicalConversations,
       conversationsToday,
       unreadConversations,
+      currentClassifications,
       classificationsResult,
       draftsResult,
       approvalsResult,
@@ -491,6 +492,13 @@
           .select("id", { count: "exact", head: true })
           .gt("unread_count", 0),
         "ebay_unread_conversation_count_failed",
+      ),
+      countSupabaseRows(
+        client
+          .from("ebay_conversation_classifications")
+          .select("conversation_id", { count: "exact", head: true })
+          .eq("is_current", true),
+        "ebay_current_classification_count_failed",
       ),
       client
         .from("ebay_conversation_classifications")
@@ -573,6 +581,7 @@
         canonical_conversations: canonicalConversations,
         conversations_today: conversationsToday,
         unread_conversations: unreadConversations,
+        unclassified_conversations: Math.max(Number(canonicalConversations || 0) - Number(currentClassifications || 0), 0),
         needs_reply: classifications.filter((row) => ["reply_today", "reply_later"].includes(row.response_need)).length,
         high_priority: classifications.filter((row) => row.priority === "high").length,
         returns: classifications.filter((row) => topicIncludes(row, "return")).length,
@@ -960,6 +969,7 @@
       members: rows.filter((conversation) => ebayLegacyConversationSource(conversation) === "member_message").length,
       ebay_notifications: rows.filter((conversation) => ebayLegacyConversationSource(conversation) === "platform_notification").length,
       unread: rows.filter((conversation) => Number(conversation.unread_count || 0) > 0).length,
+      unclassified: rows.filter((conversation) => !ebayLegacyClassification(conversation).id).length,
       returns: rows.filter((conversation) => ebayLegacySummary(conversation).has_return_link === true || ebayLegacyHasAny(ebayLegacyClassification(conversation).topic_tags, ["return"])).length,
       shipping: rows.filter((conversation) => ebayLegacyHasAny(ebayLegacyClassification(conversation).topic_tags, ["shipping_issue", "missing_item", "order_status", "delivery_timing"])).length,
       shipping_issues: rows.filter((conversation) => ebayLegacyHasAny(ebayLegacyClassification(conversation).topic_tags, ["shipping_issue", "missing_item", "order_status", "delivery_timing"])).length,

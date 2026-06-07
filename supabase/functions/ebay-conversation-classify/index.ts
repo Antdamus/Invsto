@@ -1077,6 +1077,26 @@ async function taxonomyAudit(supabase: ServiceClient, input: Input) {
   };
 }
 
+async function countUnclassifiedConversations(supabase: ServiceClient) {
+  try {
+    const [conversationsResult, classificationsResult] = await Promise.all([
+      supabase
+        .from("ebay_conversations")
+        .select("id", { count: "exact", head: true }),
+      supabase
+        .from("ebay_conversation_classifications")
+        .select("conversation_id", { count: "exact", head: true })
+        .eq("is_current", true),
+    ]);
+    if (conversationsResult.error) throw conversationsResult.error;
+    if (classificationsResult.error) throw classificationsResult.error;
+    return Math.max(Number(conversationsResult.count || 0) - Number(classificationsResult.count || 0), 0);
+  } catch (error) {
+    console.warn("[ebay-conversation-classify] unclassified count lookup failed", error instanceof Error ? error.message : String(error));
+    return null;
+  }
+}
+
 async function recordClassificationRunActivity(
   supabase: ServiceClient,
   admin: { userId: string | null },
@@ -1087,7 +1107,10 @@ async function recordClassificationRunActivity(
   const status = failed > 0 ? (succeeded > 0 ? "warning" : "failed") : "succeeded";
   const modeLabel = summary.force === true ? "Reclassify Inbox" : "Classify Unclassified";
   const title = "Classification Run Completed";
-  const detail = `${modeLabel}. Processed: ${summary.processed}; succeeded: ${summary.succeeded}; failed: ${summary.failed}; skipped: ${summary.skipped}; duration: ${summary.duration_ms} ms; version: ${summary.classification_version}.`;
+  const remainingText = summary.unclassified_after === null || summary.unclassified_after === undefined
+    ? "unknown"
+    : String(summary.unclassified_after);
+  const detail = `${modeLabel}. Candidates examined: ${summary.processed}; actually classified: ${summary.succeeded}; skipped already classified: ${summary.skipped}; failed: ${summary.failed}; remaining unclassified: ${remainingText}; duration: ${summary.duration_ms} ms; version: ${summary.classification_version}.`;
   const { error } = await supabase.rpc("record_ebay_message_activity_event", {
     _event_type: "conversation_classified",
     _status: status,
@@ -1108,10 +1131,16 @@ async function recordClassificationRunActivity(
       classification_run: summary,
       processed_count: summary.processed,
       succeeded_count: summary.succeeded,
+      classified_count: summary.succeeded,
       failed_count: summary.failed,
       skipped_count: summary.skipped,
       attempted_count: summary.attempted,
+      candidates_examined: summary.processed,
+      actually_classified: summary.succeeded,
       requested_count: summary.requested,
+      remaining_unclassified: summary.unclassified_after,
+      unclassified_before: summary.unclassified_before,
+      unclassified_after: summary.unclassified_after,
       conversation_ids: summary.conversation_ids,
       classification_version: summary.classification_version,
       prompt_version: summary.prompt_version,
@@ -1139,6 +1168,7 @@ async function classifyRecent(
   const startedMs = Date.now();
   const version = promptVersion();
   const model = modelName();
+  const unclassifiedBefore = await countUnclassifiedConversations(supabase);
   const { data, error } = await supabase
     .from("ebay_conversations")
     .select("id, ebay_conversation_id, latest_message_id, latest_message_created_at, last_message_created_at")
@@ -1225,6 +1255,7 @@ async function classifyRecent(
       reason: result.skip_reason || "skipped",
       classification_id: result.classification_id || null,
     }));
+  const unclassifiedAfter = await countUnclassifiedConversations(supabase);
   const response = {
     ok: true,
     mode: "classify_recent",
@@ -1234,8 +1265,16 @@ async function classifyRecent(
     processed: results.length,
     attempted: results.length - skipped,
     succeeded,
+    classified_count: succeeded,
+    actually_classified: succeeded,
     failed,
+    failed_count: failed,
     skipped,
+    skipped_count: skipped,
+    candidates_examined: results.length,
+    unclassified_before: unclassifiedBefore,
+    unclassified_after: unclassifiedAfter,
+    remaining_unclassified: unclassifiedAfter,
     classification_version: CLASSIFIER_VERSION,
     prompt_version: version,
     model_name: model,
@@ -1256,8 +1295,16 @@ async function classifyRecent(
     processed: response.processed,
     attempted: response.attempted,
     succeeded: response.succeeded,
+    classified_count: response.classified_count,
+    actually_classified: response.actually_classified,
     failed: response.failed,
+    failed_count: response.failed_count,
     skipped: response.skipped,
+    skipped_count: response.skipped_count,
+    candidates_examined: response.candidates_examined,
+    unclassified_before: response.unclassified_before,
+    unclassified_after: response.unclassified_after,
+    remaining_unclassified: response.remaining_unclassified,
     classification_version: response.classification_version,
     prompt_version: response.prompt_version,
     model_name: response.model_name,
