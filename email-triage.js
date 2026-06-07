@@ -102,6 +102,7 @@
   const EBAY_CONVERSATION_FILTERS_EXPANDED_STORAGE_KEY = "og-email-triage-ebay-conversation-filters-expanded";
   const EBAY_CLASSIFICATION_EXPANDED_STORAGE_KEY = "og-email-triage-ebay-classification-expanded";
   const EBAY_DRAFT_METADATA_COLLAPSED_STORAGE_KEY = "og-email-triage-ebay-draft-metadata-collapsed";
+  const EBAY_RECLASSIFY_RECENT_LIMIT = 20;
   const EBAY_FILTER_GROUPS = [
     { key: "sourceTypes", label: "System source", values: EBAY_CONVERSATION_SOURCE_TYPES },
     { key: "topics", label: "Topics", values: EBAY_TOPIC_TAGS },
@@ -4953,9 +4954,9 @@
       return;
     }
     if (classificationResult) {
-      const modeLabel = classificationResult.force === true ? "Reclassify recent 100 conversations" : "Classify unclassified conversations";
+      const modeLabel = classificationResult.force === true ? `Reclassify recent ${EBAY_RECLASSIFY_RECENT_LIMIT} conversations` : "Classify unclassified conversations";
       const rows = safeArray(classificationResult.results || classificationResult.data?.results);
-      const requested = classificationMetricValue(classificationResult, ["requested"], classificationResult.force === true ? 100 : rows.length);
+      const requested = classificationMetricValue(classificationResult, ["requested"], classificationResult.force === true ? EBAY_RECLASSIFY_RECENT_LIMIT : rows.length);
       const examined = classificationMetricValue(classificationResult, ["candidates_examined", "processed"], rows.length);
       const classified = classificationMetricValue(classificationResult, ["actually_classified", "classified_count", "succeeded"], 0);
       const failed = classificationMetricValue(classificationResult, ["failed_count", "failed"], 0);
@@ -6067,7 +6068,7 @@
   async function classifyRecentEbayConversationRows(context, options = {}) {
     const force = options.force === true;
     const loadedCount = safeArray(adminClassificationState.ebayConversations).length;
-    const limit = Math.min(Math.max(loadedCount || 100, 1), 100);
+    const limit = force ? EBAY_RECLASSIFY_RECENT_LIMIT : Math.min(Math.max(loadedCount || 100, 1), 100);
     const startedAt = new Date().toISOString();
     const unclassifiedBefore = ebayUnclassifiedSmartCount(adminClassificationState);
     setEbayConversationState({

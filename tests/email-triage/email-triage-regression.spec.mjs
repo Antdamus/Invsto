@@ -40,6 +40,8 @@ const CLASSIFICATION_TERMINAL_TITLES = {
   partial_success: "Classification Run Partial Success",
   failed: "Classification Run Failed",
 };
+const RECLASSIFY_RECENT_RUN_MODE = "reclassify_recent_20";
+const RECLASSIFY_RECENT_LIMIT = 20;
 
 function numberOrNull(value) {
   const numeric = Number(value);
@@ -660,10 +662,11 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
         "ebay-conversation-classify",
         (body) => body?.mode === "classify_recent" && body?.force === true,
         () => page.locator("#ebay-conversation-reclassify-all").click(),
-        180000,
+        240000,
       );
+      expect(exchange.timedOutWaitingForBrowserResponse, "Reclassify recent 20 should return inside the operator workflow without reconciliation rescue.").not.toBe(true);
       assertClassificationSafety(exchange);
-      await expect(page.locator("#ebay-conversation-sync-result")).toContainText(/Reclassify recent 100|durable state|finished|timed out/i, { timeout: 90000 });
+      await expect(page.locator("#ebay-conversation-sync-result")).toContainText(/Reclassify recent 20|finished/i, { timeout: 90000 });
       await page.locator("#refresh-operational-dashboard").click();
       await expect(page.locator("#operational-dashboard-status")).toContainText(/refreshed|failed/i, { timeout: 60000 });
       let runs = [];
@@ -676,21 +679,21 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
           if (error) throw new Error(error.message || "classification_run_reconciliation_failed");
         });
         runs = await recentClassificationRuns(client, { since: reclassifyStartedAt, limit: 10 });
-        run = latestRun(runs, (row) => row.run_mode === "reclassify_recent_100");
+        run = latestRun(runs, (row) => row.run_mode === RECLASSIFY_RECENT_RUN_MODE);
         return run?.status || "missing";
       }, {
         timeout: 240000,
         intervals: [2000, 5000, 10000],
-        message: "Reclassify Recent 100 durable run should terminalize.",
+        message: "Reclassify Recent 20 durable run should terminalize.",
       }).toMatch(/^(succeeded|partial_success|failed)$/);
-      expect(run, "Reclassify Recent 100 durable run should exist.").toBeTruthy();
-      expect(Number(run.requested_limit || 0)).toBeLessThanOrEqual(100);
+      expect(run, "Reclassify Recent 20 durable run should exist.").toBeTruthy();
+      expect(Number(run.requested_limit || 0)).toBeLessThanOrEqual(RECLASSIFY_RECENT_LIMIT);
       expect(CLASSIFICATION_TERMINAL_STATUSES).toContain(run.status);
       expect(run.completed_at, "Terminal reclassify run should populate completed_at.").toBeTruthy();
       expect(Number(run.duration_ms || 0), "Terminal reclassify run should populate duration_ms.").toBeGreaterThanOrEqual(0);
       expect(Number(run.processed_count || 0)).toBe(Number(run.classified_count || 0) + Number(run.failed_count || 0) + Number(run.skipped_count || 0));
       const openReclassifyRuns = runs.filter((row) =>
-        row.run_mode === "reclassify_recent_100" &&
+        row.run_mode === RECLASSIFY_RECENT_RUN_MODE &&
         ["pending", "running"].includes(row.status)
       );
       expect(openReclassifyRuns, "No stale pending/running reclassify run should remain from this validation window.").toHaveLength(0);
@@ -724,8 +727,8 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
       expect(normalizedDashboardText).toContain("duration");
       expect(normalizedDashboardText).toContain(run.status.replace("_", " "));
       const sendAttempts = await recentSendAttempts(client, { since: reclassifyStartedAt, limit: 20 });
-      expect(sendAttempts, "Reclassify Recent 100 should not create send attempts.").toHaveLength(0);
-      report.add("Reclassify recent 100", "passed", {
+      expect(sendAttempts, "Reclassify Recent 20 should not create send attempts.").toHaveLength(0);
+      report.add("Reclassify recent 20", "passed", {
         request: exchange.request,
         response: summarizeClassificationPayload(exchange.response),
         browserResponseTimedOut: exchange.timedOutWaitingForBrowserResponse === true,
@@ -745,7 +748,7 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
         sendAttemptsCreated: sendAttempts.length,
       });
     } else {
-      report.add("Reclassify recent 100", "skipped", {
+      report.add("Reclassify recent 20", "skipped", {
         reason: "Set EMAIL_TRIAGE_RUN_RECLASSIFY_RECENT=true to run this bounded classification write check.",
       });
     }

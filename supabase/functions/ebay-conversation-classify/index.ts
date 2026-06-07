@@ -36,6 +36,8 @@ const CLASSIFIER_NAME = "ebay_conversation_classifier";
 const CLASSIFIER_VERSION = "v1";
 const PROMPT_VERSION_DEFAULT = "ebay-conversation-classifier-v1";
 const OPENAI_TIMEOUT_MS = 45000;
+const RECLASSIFY_RECENT_LIMIT = 20;
+const RECLASSIFY_RECENT_RUNTIME_BUDGET_MS = 240000;
 const TRANSIENT_OPENAI_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
 const TOPIC_TAGS = [
@@ -242,6 +244,9 @@ async function parseInput(req: Request): Promise<Input> {
   if (!["taxonomy_audit", "classify_conversation", "classify_recent", "review_override"].includes(rawMode)) {
     throw new ClassifierError("invalid_mode", { status: 400, phase: "input" });
   }
+  const force = booleanValue(body?.force);
+  const fallbackLimit = rawMode === "taxonomy_audit" ? 100 : rawMode === "classify_recent" && force ? RECLASSIFY_RECENT_LIMIT : 10;
+  const maxLimit = rawMode === "taxonomy_audit" ? 250 : rawMode === "classify_recent" && force ? RECLASSIFY_RECENT_LIMIT : 100;
   return {
     mode: rawMode as Mode,
     conversationId: stringOrNull(body?.conversationId || body?.conversation_id, 120),
@@ -251,8 +256,8 @@ async function parseInput(req: Request): Promise<Input> {
     reviewState: stringOrNull(body?.reviewState || body?.review_state, 80),
     overridePayload: parseObject(body?.overridePayload || body?.override_payload),
     operatorNotes: stringOrNull(body?.operatorNotes || body?.operator_notes, 1000),
-    limit: clampLimit(body?.limit, rawMode === "taxonomy_audit" ? 100 : 10, rawMode === "taxonomy_audit" ? 250 : 100),
-    force: booleanValue(body?.force),
+    limit: clampLimit(body?.limit, fallbackLimit, maxLimit),
+    force,
     suppressActivityEvent: booleanValue(body?.suppressActivityEvent ?? body?.suppress_activity_event),
   };
 }
@@ -1274,7 +1279,7 @@ async function recordClassificationRunActivity(
     : failed > 0
     ? (succeeded > 0 ? "warning" : "failed")
     : "succeeded";
-  const modeLabel = summary.force === true ? "Reclassify Recent 100" : "Classify Unclassified";
+  const modeLabel = summary.force === true ? `Reclassify Recent ${RECLASSIFY_RECENT_LIMIT}` : "Classify Unclassified";
   const title = lifecycleStatus === "started"
     ? "Classification Batch Started"
     : lifecycleStatus === "failed"
@@ -1338,11 +1343,16 @@ async function recordClassificationRunActivity(
   if (error) console.warn("[ebay-conversation-classify] classification run activity event failed", error.message);
 }
 
-function classificationRunTerminalStatus(results: Array<Record<string, any>>) {
+function classificationRunMode(input: Input) {
+  return input.force ? "reclassify_recent_20" : "classify_unclassified_conversations";
+}
+
+function classificationRunTerminalStatus(results: Array<Record<string, any>>, targetCount = results.length) {
   const succeeded = results.filter((result) => result.ok && result.skipped !== true).length;
   const failed = results.filter((result) => !result.ok).length;
   const skipped = results.filter((result) => result.skipped === true).length;
   if (failed > 0) return succeeded > 0 || skipped > 0 ? "partial_success" : "failed";
+  if (targetCount > 0 && results.length < targetCount) return succeeded > 0 || skipped > 0 ? "partial_success" : "failed";
   return "succeeded";
 }
 
@@ -1394,6 +1404,8 @@ function classificationRunUpdatePayload(options: {
   canonicalQueue?: string | null;
   errorCode?: string | null;
   errorPhase?: string | null;
+  runtimeBudgetMs?: number | null;
+  runtimeBudgetExhausted?: boolean;
 }) {
   const succeededResults = options.results.filter((result) => result.ok && result.skipped !== true);
   const failedResults = options.results.filter((result) => !result.ok);
@@ -1427,10 +1439,13 @@ function classificationRunUpdatePayload(options: {
     skipped_results: skipped,
     metadata: {
       run_id: options.runId,
-      run_mode: options.input.force ? "reclassify_recent_100" : "classify_unclassified_conversations",
+      run_mode: classificationRunMode(options.input),
       force: options.input.force,
       requested: options.requested,
       target_count: options.targetCount,
+      remaining_candidate_count: Math.max(options.targetCount - options.results.length, 0),
+      runtime_budget_ms: options.runtimeBudgetMs || null,
+      runtime_budget_exhausted: options.runtimeBudgetExhausted === true,
       queue_source: options.queueSource || null,
       canonical_queue: options.canonicalQueue || null,
       error_code: options.errorCode || null,
@@ -1453,7 +1468,7 @@ async function createClassificationRun(
   const { data, error } = await supabase
     .from("ebay_conversation_classification_runs")
     .insert({
-      run_mode: input.force ? "reclassify_recent_100" : "classify_unclassified_conversations",
+      run_mode: classificationRunMode(input),
       status: "pending",
       started_by: admin.userId,
       requested_limit: input.limit,
@@ -1563,6 +1578,8 @@ async function classifyRecent(
   let targetCount = 0;
   let queueSource: string | null = null;
   let results: Array<Record<string, any>> = [];
+  const runtimeBudgetMs = input.force ? RECLASSIFY_RECENT_RUNTIME_BUDGET_MS : null;
+  let runtimeBudgetExhausted = false;
   async function persistRunUpdate(payload: Record<string, any>) {
     if (isTerminalClassificationRunStatus(payload.status)) {
       await updateClassificationRunRequired(supabase, runId, payload);
@@ -1573,54 +1590,107 @@ async function classifyRecent(
   }
 
   try {
-  const candidateQueue = input.force
-    ? { conversations: await recentConversationCandidates(supabase, input.limit), queueSource: "recent" }
-    : await canonicalUnclassifiedConversationCandidates(supabase, rpcSupabase, input.limit);
-  const conversations = candidateQueue.conversations;
-  targetCount = conversations.length;
-  queueSource = candidateQueue.queueSource;
-  const ids = conversations.map((conversation: Record<string, any>) => conversation.id).filter(Boolean);
-  await persistRunUpdate(classificationRunUpdatePayload({
-    input,
-    runId,
-    status: conversations.length ? "running" : "succeeded",
-    results: [],
-    requested: input.limit,
-    targetCount: conversations.length,
-    unclassifiedBefore,
-    remainingUnclassified: conversations.length ? unclassifiedBefore : unclassifiedBefore,
-    startedMs,
-    version,
-    model,
-    queueSource: candidateQueue.queueSource,
-    canonicalQueue: input.force ? "recent" : "unclassified",
-  }));
-  const classificationsResult = ids.length ? await supabase
-    .from("ebay_conversation_classifications")
-    .select("id, conversation_id, classification_status, latest_ebay_message_id, classifier_version, prompt_version, input_hash, created_at, updated_at")
-    .in("conversation_id", ids)
-    .eq("is_current", true)
-    .limit(ids.length) : { data: [], error: null };
-  if (classificationsResult.error) throw new ClassifierError("recent_classification_lookup_failed", { phase: "classify_recent_lookup" });
+    const candidateQueue = input.force
+      ? { conversations: await recentConversationCandidates(supabase, input.limit), queueSource: "recent" }
+      : await canonicalUnclassifiedConversationCandidates(supabase, rpcSupabase, input.limit);
+    const conversations = candidateQueue.conversations;
+    targetCount = conversations.length;
+    queueSource = candidateQueue.queueSource;
+    const ids = conversations.map((conversation: Record<string, any>) => conversation.id).filter(Boolean);
+    await persistRunUpdate(classificationRunUpdatePayload({
+      input,
+      runId,
+      status: conversations.length ? "running" : "succeeded",
+      results: [],
+      requested: input.limit,
+      targetCount: conversations.length,
+      unclassifiedBefore,
+      remainingUnclassified: conversations.length ? unclassifiedBefore : unclassifiedBefore,
+      startedMs,
+      version,
+      model,
+      queueSource: candidateQueue.queueSource,
+      canonicalQueue: input.force ? "recent" : "unclassified",
+      runtimeBudgetMs,
+    }));
+    const classificationsResult = ids.length ? await supabase
+      .from("ebay_conversation_classifications")
+      .select("id, conversation_id, classification_status, latest_ebay_message_id, classifier_version, prompt_version, input_hash, created_at, updated_at")
+      .in("conversation_id", ids)
+      .eq("is_current", true)
+      .limit(ids.length) : { data: [], error: null };
+    if (classificationsResult.error) throw new ClassifierError("recent_classification_lookup_failed", { phase: "classify_recent_lookup" });
 
-  const classificationByConversation = new Map<string, Record<string, any>>();
-  for (const classification of classificationsResult.data || []) {
-    classificationByConversation.set(String(classification.conversation_id || ""), classification as Record<string, any>);
-  }
+    const classificationByConversation = new Map<string, Record<string, any>>();
+    for (const classification of classificationsResult.data || []) {
+      classificationByConversation.set(String(classification.conversation_id || ""), classification as Record<string, any>);
+    }
 
-  results = [];
-  for (const conversation of conversations) {
-    const current = classificationByConversation.get(String(conversation.id || "")) || null;
-    const candidateReason = classificationCandidateReason(conversation as Record<string, any>, current);
-    if (!input.force && candidateReason === "current_classification_fresh") {
-      results.push({
-        conversation_id: conversation.id,
-        ebay_conversation_id: conversation.ebay_conversation_id,
-        ok: true,
-        skipped: true,
-        skip_reason: candidateReason,
-        classification_id: current?.id || null,
-      });
+    results = [];
+    for (const conversation of conversations) {
+      if (runtimeBudgetMs !== null && results.length > 0 && Date.now() - startedMs >= runtimeBudgetMs) {
+        runtimeBudgetExhausted = true;
+        break;
+      }
+      const current = classificationByConversation.get(String(conversation.id || "")) || null;
+      const candidateReason = classificationCandidateReason(conversation as Record<string, any>, current);
+      if (!input.force && candidateReason === "current_classification_fresh") {
+        results.push({
+          conversation_id: conversation.id,
+          ebay_conversation_id: conversation.ebay_conversation_id,
+          ok: true,
+          skipped: true,
+          skip_reason: candidateReason,
+          classification_id: current?.id || null,
+        });
+        await persistRunUpdate(classificationRunUpdatePayload({
+          input,
+          runId,
+          status: results.length >= conversations.length ? classificationRunTerminalStatus(results) : "running",
+          results,
+          requested: input.limit,
+          targetCount: conversations.length,
+          unclassifiedBefore,
+          remainingUnclassified: results.length >= conversations.length
+            ? estimatedRemainingUnclassified(input, unclassifiedBefore, results.filter((result) => result.ok && result.skipped !== true).length)
+            : unclassifiedBefore,
+          startedMs,
+          version,
+          model,
+          queueSource: candidateQueue.queueSource,
+          canonicalQueue: input.force ? "recent" : "unclassified",
+          runtimeBudgetMs,
+        }));
+        continue;
+      }
+
+      try {
+        const result = await classifyConversation(supabase, rpcSupabase, {
+          ...input,
+          mode: "classify_conversation",
+          conversationId: conversation.id,
+          ebayConversationId: null,
+        }, admin, { suppressActivityEvent: true, classificationRunId: runId });
+        results.push({
+          conversation_id: conversation.id,
+          ebay_conversation_id: conversation.ebay_conversation_id,
+          ok: true,
+          skipped: false,
+          candidate_reason: input.force ? "force_reclassification" : candidateReason,
+          reused: result.reused,
+          classification: result.classification,
+        });
+      } catch (error) {
+        results.push({
+          conversation_id: conversation.id,
+          ebay_conversation_id: conversation.ebay_conversation_id,
+          ok: false,
+          skipped: false,
+          candidate_reason: input.force ? "force_reclassification" : candidateReason,
+          error: error instanceof ClassifierError ? error.code : "unknown_error",
+          phase: error instanceof ClassifierError ? error.phase : "unknown",
+        });
+      }
       await persistRunUpdate(classificationRunUpdatePayload({
         input,
         runId,
@@ -1637,129 +1707,90 @@ async function classifyRecent(
         model,
         queueSource: candidateQueue.queueSource,
         canonicalQueue: input.force ? "recent" : "unclassified",
+        runtimeBudgetMs,
       }));
-      continue;
     }
 
-    try {
-      const result = await classifyConversation(supabase, rpcSupabase, {
-        ...input,
-        mode: "classify_conversation",
-        conversationId: conversation.id,
-        ebayConversationId: null,
-      }, admin, { suppressActivityEvent: true, classificationRunId: runId });
-      results.push({
-        conversation_id: conversation.id,
-        ebay_conversation_id: conversation.ebay_conversation_id,
-        ok: true,
-        skipped: false,
-        candidate_reason: input.force ? "force_reclassification" : candidateReason,
-        reused: result.reused,
-        classification: result.classification,
-      });
-    } catch (error) {
-      results.push({
-        conversation_id: conversation.id,
-        ebay_conversation_id: conversation.ebay_conversation_id,
-        ok: false,
-        skipped: false,
-        candidate_reason: input.force ? "force_reclassification" : candidateReason,
-        error: error instanceof ClassifierError ? error.code : "unknown_error",
-        phase: error instanceof ClassifierError ? error.phase : "unknown",
-      });
-    }
-    await persistRunUpdate(classificationRunUpdatePayload({
+    const succeeded = results.filter((result) => result.ok && result.skipped !== true).length;
+    const failed = results.filter((result) => !result.ok).length;
+    const skipped = results.filter((result) => result.skipped === true).length;
+    const failures = results
+      .filter((result) => !result.ok)
+      .map((result) => ({
+        conversation_id: result.conversation_id,
+        ebay_conversation_id: result.ebay_conversation_id || null,
+        error: result.error || "unknown_error",
+        reason: result.phase || "unknown",
+      }));
+    const skippedResults = results
+      .filter((result) => result.skipped === true)
+      .map((result) => ({
+        conversation_id: result.conversation_id,
+        ebay_conversation_id: result.ebay_conversation_id || null,
+        reason: result.skip_reason || "skipped",
+        classification_id: result.classification_id || null,
+      }));
+    const unclassifiedAfter = await countUnclassifiedConversations(supabase, rpcSupabase);
+    const status = classificationRunTerminalStatus(results, conversations.length);
+    const response = {
+      ok: true,
+      mode: "classify_recent",
+      run_id: runId,
+      runId,
+      status,
+      force: input.force,
+      run_mode: classificationRunMode(input),
+      requested: input.limit,
+      target_count: conversations.length,
+      processed: results.length,
+      attempted: results.length - skipped,
+      succeeded,
+      classified_count: succeeded,
+      actually_classified: succeeded,
+      failed,
+      failed_count: failed,
+      skipped,
+      skipped_count: skipped,
+      candidates_examined: results.length,
+      unclassified_before: unclassifiedBefore,
+      unclassified_after: unclassifiedAfter,
+      remaining_unclassified: unclassifiedAfter,
+      classification_version: CLASSIFIER_VERSION,
+      prompt_version: version,
+      model_name: model,
+      duration_ms: Date.now() - startedMs,
+      conversation_ids: results.map((result) => result.conversation_id),
+      succeeded_conversation_ids: results.filter((result) => result.ok && result.skipped !== true).map((result) => result.conversation_id),
+      failed_conversation_ids: failures.map((result) => result.conversation_id),
+      skipped_conversation_ids: skippedResults.map((result) => result.conversation_id),
+      failures,
+      skipped_results: skippedResults,
+      runtime_budget_ms: runtimeBudgetMs,
+      runtime_budget_exhausted: runtimeBudgetExhausted,
+      remaining_candidate_count: Math.max(conversations.length - results.length, 0),
+      results,
+      safety: safetyEnvelope(),
+      queue_source: candidateQueue.queueSource,
+      canonical_queue: input.force ? "recent" : "unclassified",
+    };
+    await updateClassificationRunRequired(supabase, runId, classificationRunUpdatePayload({
       input,
       runId,
-      status: results.length >= conversations.length ? classificationRunTerminalStatus(results) : "running",
+      status: response.status as "succeeded" | "partial_success" | "failed",
       results,
       requested: input.limit,
       targetCount: conversations.length,
       unclassifiedBefore,
-      remainingUnclassified: results.length >= conversations.length
-        ? estimatedRemainingUnclassified(input, unclassifiedBefore, results.filter((result) => result.ok && result.skipped !== true).length)
-        : unclassifiedBefore,
+      remainingUnclassified: unclassifiedAfter,
       startedMs,
       version,
       model,
-      queueSource: candidateQueue.queueSource,
-      canonicalQueue: input.force ? "recent" : "unclassified",
+      queueSource: response.queue_source,
+      canonicalQueue: response.canonical_queue,
+      runtimeBudgetMs,
+      runtimeBudgetExhausted,
     }));
-  }
-
-  const succeeded = results.filter((result) => result.ok && result.skipped !== true).length;
-  const failed = results.filter((result) => !result.ok).length;
-  const skipped = results.filter((result) => result.skipped === true).length;
-  const failures = results
-    .filter((result) => !result.ok)
-    .map((result) => ({
-      conversation_id: result.conversation_id,
-      ebay_conversation_id: result.ebay_conversation_id || null,
-      error: result.error || "unknown_error",
-      reason: result.phase || "unknown",
-    }));
-  const skippedResults = results
-    .filter((result) => result.skipped === true)
-    .map((result) => ({
-      conversation_id: result.conversation_id,
-      ebay_conversation_id: result.ebay_conversation_id || null,
-      reason: result.skip_reason || "skipped",
-      classification_id: result.classification_id || null,
-    }));
-  const unclassifiedAfter = await countUnclassifiedConversations(supabase, rpcSupabase);
-  const response = {
-    ok: true,
-    mode: "classify_recent",
-    run_id: runId,
-    runId,
-    status: classificationRunTerminalStatus(results),
-    force: input.force,
-    run_mode: input.force ? "reclassify_recent_100" : "classify_unclassified_conversations",
-    requested: input.limit,
-    processed: results.length,
-    attempted: results.length - skipped,
-    succeeded,
-    classified_count: succeeded,
-    actually_classified: succeeded,
-    failed,
-    failed_count: failed,
-    skipped,
-    skipped_count: skipped,
-    candidates_examined: results.length,
-    unclassified_before: unclassifiedBefore,
-    unclassified_after: unclassifiedAfter,
-    remaining_unclassified: unclassifiedAfter,
-    classification_version: CLASSIFIER_VERSION,
-    prompt_version: version,
-    model_name: model,
-    duration_ms: Date.now() - startedMs,
-    conversation_ids: results.map((result) => result.conversation_id),
-    succeeded_conversation_ids: results.filter((result) => result.ok && result.skipped !== true).map((result) => result.conversation_id),
-    failed_conversation_ids: failures.map((result) => result.conversation_id),
-    skipped_conversation_ids: skippedResults.map((result) => result.conversation_id),
-    failures,
-    skipped_results: skippedResults,
-    results,
-    safety: safetyEnvelope(),
-    queue_source: candidateQueue.queueSource,
-    canonical_queue: input.force ? "recent" : "unclassified",
-  };
-  await updateClassificationRun(supabase, runId, classificationRunUpdatePayload({
-    input,
-    runId,
-    status: response.status as "succeeded" | "partial_success" | "failed",
-    results,
-    requested: input.limit,
-    targetCount: conversations.length,
-    unclassifiedBefore,
-    remainingUnclassified: unclassifiedAfter,
-    startedMs,
-    version,
-    model,
-    queueSource: response.queue_source,
-    canonicalQueue: response.canonical_queue,
-  }));
-  return response;
+    return response;
   } catch (error) {
     const known = error instanceof ClassifierError || error instanceof EbayConversationContextError ? error : null;
     if (!terminalized) {

@@ -434,6 +434,12 @@
     }, new Map());
   }
 
+  function classificationRunIdFromActivityEvent(event = {}) {
+    const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
+    const run = payload.classification_run && typeof payload.classification_run === "object" ? payload.classification_run : {};
+    return payload.run_id || run.run_id || run.id || null;
+  }
+
   function enrichEbayActivityEvent(event = {}, maps = {}) {
     const attempt = event.send_attempt_id ? maps.attemptsById.get(String(event.send_attempt_id)) : null;
     const draftId = event.draft_id || attempt?.draft_id || null;
@@ -444,8 +450,22 @@
     const providerResponse = attempt?.provider_response && typeof attempt.provider_response === "object" ? attempt.provider_response : {};
     const attemptMetadata = attempt?.metadata && typeof attempt.metadata === "object" ? attempt.metadata : {};
     const approvalMetadata = approval?.metadata && typeof approval.metadata === "object" ? approval.metadata : {};
+    const classificationRunId = classificationRunIdFromActivityEvent(event);
+    const currentClassificationRun = classificationRunId ? maps.classificationRunsById?.get(String(classificationRunId)) : null;
+    const currentClassificationRunPayload = currentClassificationRun?.payload && typeof currentClassificationRun.payload === "object"
+      ? currentClassificationRun.payload
+      : null;
+    const shouldEnrichStartedClassificationRun = event.event_type === "conversation_classified"
+      && event.payload?.lifecycle_status === "started"
+      && currentClassificationRunPayload
+      && ["pending", "running"].includes(String(currentClassificationRunPayload.status || ""));
+    const classificationRunPayload = shouldEnrichStartedClassificationRun
+      ? currentClassificationRunPayload
+      : event.payload?.classification_run;
     const payload = {
       ...event.payload,
+      ...(shouldEnrichStartedClassificationRun ? currentClassificationRunPayload : {}),
+      classification_run: classificationRunPayload,
       safety: {
         ...(event.payload?.safety && typeof event.payload.safety === "object" ? event.payload.safety : {}),
         ebay_mutation_performed: attempt?.attempt_status === "succeeded",
@@ -489,6 +509,7 @@
 
     return {
       ...event,
+      status: shouldEnrichStartedClassificationRun ? currentClassificationRunPayload.status : event.status,
       payload,
       send_attempt: attempt || null,
       approval: approval || null,
@@ -687,6 +708,7 @@
       attemptsById: mapDashboardRowsById(attempts),
       draftsById: mapDashboardRowsById(drafts),
       approvalsById: mapDashboardRowsById(approvals),
+      classificationRunsById: mapDashboardRowsById(classificationRuns),
     };
     const events = (Array.isArray(eventsResult.data) ? eventsResult.data : [])
       .map(normalizeEbayActivityEvent)

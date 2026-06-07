@@ -58,7 +58,7 @@ EMAIL_TRIAGE_RUN_REFRESH_TIMELINE=true \
 npm run test:email-triage
 ```
 
-Run bounded classification checks:
+Run bounded classification checks, including the Reclassify recent 20 maintenance workflow:
 
 ```sh
 EMAIL_TRIAGE_RUN_CLASSIFY_UNCLASSIFIED=true \

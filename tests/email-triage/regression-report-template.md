@@ -56,7 +56,7 @@ Evidence:
 {}
 ```
 
-### PASSED - Reclassify recent 100
+### PASSED - Reclassify recent 20
 
 Evidence:
 
@@ -109,4 +109,3 @@ Evidence:
 - Confirm no unexpected operational side effects outside Supabase read-model/audit tables.
 - Confirm any changed classification counts are acceptable for the production queue.
 - Confirm eBay account state in Seller Hub if a provider-side incident is suspected.
-
