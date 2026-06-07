@@ -1,5 +1,11 @@
 {
+  "scripts": {
+    "test:email-triage": "playwright test --config tests/email-triage/playwright.config.mjs",
+    "test:email-triage:setup": "playwright test --config tests/email-triage/playwright.config.mjs --project=setup",
+    "serve:email-triage": "python3 -m http.server 4173"
+  },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "supabase": "^2.72.8"
   }
 }

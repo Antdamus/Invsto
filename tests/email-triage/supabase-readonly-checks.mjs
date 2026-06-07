@@ -1,0 +1,312 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const harnessDir = path.dirname(fileURLToPath(import.meta.url));
+export const repoRoot = path.resolve(harnessDir, "../..");
+
+function parseEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return {};
+  const out = {};
+  const text = fs.readFileSync(filePath, "utf8");
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!match) continue;
+    const key = match[1];
+    let value = match[2].trim();
+    if (
+      (value.startsWith("\"") && value.endsWith("\"")) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    out[key] = value.replace(/\\n/g, "\n");
+  }
+  return out;
+}
+
+export function loadEmailTriageEnv() {
+  const files = [
+    path.join(repoRoot, ".env.local"),
+    path.join(repoRoot, ".env.codex"),
+    path.join(harnessDir, ".env.local"),
+    path.join(harnessDir, ".env.codex"),
+  ];
+  const fileEnv = files.reduce((merged, filePath) => ({
+    ...merged,
+    ...parseEnvFile(filePath),
+  }), {});
+  return {
+    ...fileEnv,
+    ...process.env,
+  };
+}
+
+export function resolveHarnessPath(value, fallback) {
+  const raw = value || fallback;
+  if (!raw) return "";
+  return path.isAbsolute(raw) ? raw : path.join(repoRoot, raw);
+}
+
+export function envFlag(env, name, fallback = false) {
+  const value = String(env[name] ?? "").trim().toLowerCase();
+  if (!value) return fallback;
+  return ["1", "true", "yes", "y", "on"].includes(value);
+}
+
+export function safeJsonParse(text, fallback = null) {
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+}
+
+export function redact(value) {
+  if (Array.isArray(value)) return value.slice(0, 25).map(redact);
+  if (!value || typeof value !== "object") return value;
+  const out = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (/authorization|password|secret|service.*role|token|apikey|api_key/i.test(key)) {
+      out[key] = "[redacted]";
+    } else if (/message_body|raw_detail_metadata|raw_message_metadata/i.test(key)) {
+      out[key] = "[omitted]";
+    } else {
+      out[key] = redact(entry);
+    }
+  }
+  return out;
+}
+
+export async function getAdminSessionFromPage(page) {
+  const session = await page.evaluate(async () => {
+    const result = await window.supabase?.auth?.getSession?.();
+    const active = result?.data?.session;
+    return active ? {
+      accessToken: active.access_token,
+      expiresAt: active.expires_at,
+      user: {
+        id: active.user?.id || null,
+        email: active.user?.email || null,
+      },
+    } : null;
+  });
+  if (!session?.accessToken) {
+    throw new Error("No Supabase admin browser session is available.");
+  }
+  return session;
+}
+
+export async function getSupabaseConfigFromPage(page, env = loadEmailTriageEnv()) {
+  const fromPage = await page.evaluate(() => ({
+    supabaseUrl: window.SUPABASE_URL || "",
+    anonKey: window.SUPABASE_ANON_KEY || "",
+  }));
+  const supabaseUrl = env.SUPABASE_URL || env.EMAIL_TRIAGE_SUPABASE_URL || fromPage.supabaseUrl;
+  const anonKey = env.SUPABASE_ANON_KEY || env.EMAIL_TRIAGE_SUPABASE_ANON_KEY || fromPage.anonKey;
+  if (!supabaseUrl) throw new Error("Missing Supabase URL.");
+  if (!anonKey && !envFlag(env, "EMAIL_TRIAGE_USE_SERVICE_ROLE")) {
+    throw new Error("Missing Supabase anon key for authenticated read-only checks.");
+  }
+  return { supabaseUrl, anonKey };
+}
+
+export function createReadonlyClient(options = {}) {
+  const {
+    supabaseUrl,
+    anonKey,
+    accessToken,
+    serviceRoleKey,
+    useServiceRole = false,
+  } = options;
+
+  if (!supabaseUrl) throw new Error("Supabase URL is required.");
+  if (useServiceRole && !serviceRoleKey) {
+    throw new Error("EMAIL_TRIAGE_USE_SERVICE_ROLE=true requires SUPABASE_SERVICE_ROLE_KEY.");
+  }
+  if (!useServiceRole && !accessToken) {
+    throw new Error("Authenticated read-only checks require a browser session access token.");
+  }
+
+  const credential = useServiceRole ? serviceRoleKey : accessToken;
+  const apiKey = useServiceRole ? serviceRoleKey : anonKey;
+  const baseUrl = supabaseUrl.replace(/\/+$/, "");
+
+  async function request(method, pathname, { body, searchParams } = {}) {
+    const url = new URL(`${baseUrl}${pathname}`);
+    if (searchParams) {
+      for (const [key, value] of Object.entries(searchParams)) {
+        if (value === undefined || value === null || value === "") continue;
+        url.searchParams.set(key, String(value));
+      }
+    }
+
+    const response = await fetch(url, {
+      method,
+      headers: {
+        apikey: apiKey,
+        Authorization: `Bearer ${credential}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await response.text();
+    const payload = safeJsonParse(text, text);
+    if (!response.ok) {
+      const error = new Error(`Supabase REST ${method} ${pathname} failed with ${response.status}`);
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
+    }
+    return payload;
+  }
+
+  return {
+    usingServiceRole: useServiceRole,
+    rpc(name, body) {
+      return request("POST", `/rest/v1/rpc/${name}`, { body });
+    },
+    select(table, searchParams) {
+      return request("GET", `/rest/v1/${table}`, { searchParams });
+    },
+  };
+}
+
+export async function canonicalMailbox(client, options = {}) {
+  return client.rpc("get_ebay_canonical_mailbox_v2", {
+    _page_size: Number(options.pageSize || 100),
+    _offset: Number(options.offset || 0),
+    _system_filter: options.systemFilter || "all",
+    _search_terms: Array.isArray(options.searchTerms) ? options.searchTerms : [],
+    _structured_filters: options.structuredFilters || {},
+    _classification_filters: options.classificationFilters || {},
+  });
+}
+
+export async function conversationMessages(client, conversationId) {
+  if (!conversationId) return [];
+  return client.select("ebay_conversation_messages", {
+    select: [
+      "id",
+      "conversation_id",
+      "ebay_message_id",
+      "sender_username",
+      "recipient_username",
+      "direction",
+      "subject",
+      "message_body_preview",
+      "read_status",
+      "is_read",
+      "created_at_ebay",
+      "created_at",
+    ].join(","),
+    conversation_id: `eq.${conversationId}`,
+    order: "created_at_ebay.asc.nullslast,created_at.asc",
+    limit: "200",
+  });
+}
+
+export async function recentActivityEvents(client, options = {}) {
+  const params = {
+    select: "id,event_type,status,title,detail,conversation_id,sync_run_id,classification_id,metadata,created_at",
+    order: "created_at.desc",
+    limit: String(options.limit || 30),
+  };
+  if (options.since) params.created_at = `gte.${options.since}`;
+  return client.select("ebay_message_activity_events", params);
+}
+
+export async function recentSyncRuns(client, options = {}) {
+  const params = {
+    select: "id,run_type,status,conversation_page_limit,message_page_limit,pages_fetched,conversations_seen,messages_seen,messages_inserted,messages_updated,metadata,started_at,completed_at",
+    order: "started_at.desc",
+    limit: String(options.limit || 10),
+  };
+  if (options.since) params.started_at = `gte.${options.since}`;
+  return client.select("ebay_message_sync_runs", params);
+}
+
+export async function backfillCheckpoints(client) {
+  return client.select("ebay_message_sync_checkpoints", {
+    select: "id,checkpoint_scope,conversation_type,status,current_run_id,last_run_id,last_successful_sync_at,next_offset,total_available,pages_processed,conversations_processed,messages_processed,last_error_code,updated_at",
+    order: "updated_at.desc",
+    limit: "20",
+  });
+}
+
+export function summarizeSyncPayload(payload = {}) {
+  const counters = payload?.counters || {};
+  return redact({
+    ok: payload?.ok,
+    error: payload?.error,
+    phase: payload?.phase,
+    mode: payload?.mode,
+    runType: payload?.runType,
+    classificationMode: payload?.classificationMode,
+    runId: payload?.runId,
+    canonicalTotalConversations: payload?.canonicalTotalConversations,
+    unclassifiedBefore: payload?.unclassifiedBefore,
+    unclassifiedAfter: payload?.unclassifiedAfter,
+    remainingUnclassified: payload?.remainingUnclassified,
+    counters: {
+      pagesFetched: counters.pagesFetched,
+      conversationsSeen: counters.conversationsSeen,
+      conversationsInserted: counters.conversationsInserted,
+      conversationsUpdated: counters.conversationsUpdated,
+      conversationsUnchanged: counters.conversationsUnchanged,
+      conversationsSkipped: counters.conversationsSkipped,
+      messagesSeen: counters.messagesSeen,
+      messagesInserted: counters.messagesInserted,
+      messagesUpdated: counters.messagesUpdated,
+      messagesRechecked: counters.messagesRechecked,
+      classificationProcessed: counters.classificationProcessed,
+      classificationSucceeded: counters.classificationSucceeded,
+      classificationFailed: counters.classificationFailed,
+      classificationSkipped: counters.classificationSkipped,
+      errors: counters.errors,
+      warningsCount: Array.isArray(counters.warnings) ? counters.warnings.length : undefined,
+    },
+    backfillProgress: payload?.backfillProgress,
+    safety: payload?.safety,
+  });
+}
+
+export function summarizeClassificationPayload(payload = {}) {
+  return redact({
+    ok: payload?.ok,
+    error: payload?.error,
+    phase: payload?.phase,
+    mode: payload?.mode,
+    force: payload?.force,
+    run_mode: payload?.run_mode,
+    requested: payload?.requested,
+    processed: payload?.processed,
+    attempted: payload?.attempted,
+    succeeded: payload?.succeeded,
+    failed: payload?.failed,
+    skipped: payload?.skipped,
+    candidates_examined: payload?.candidates_examined,
+    unclassified_before: payload?.unclassified_before,
+    unclassified_after: payload?.unclassified_after,
+    remaining_unclassified: payload?.remaining_unclassified,
+    queue_source: payload?.queue_source,
+    canonical_queue: payload?.canonical_queue,
+    safety: payload?.safety,
+  });
+}
+
+export function summarizeMessages(rows = []) {
+  const messages = Array.isArray(rows) ? rows : [];
+  return {
+    count: messages.length,
+    firstCreatedAt: messages[0]?.created_at_ebay || messages[0]?.created_at || null,
+    lastCreatedAt: messages.at(-1)?.created_at_ebay || messages.at(-1)?.created_at || null,
+    firstMessageId: messages[0]?.ebay_message_id || null,
+    lastMessageId: messages.at(-1)?.ebay_message_id || null,
+  };
+}
+

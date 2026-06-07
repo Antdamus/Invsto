@@ -4,3 +4,9 @@
 .env
 .env.*
 !.env.example
+tests/email-triage/.auth/
+tests/email-triage/reports/
+tests/email-triage/test-results/
+tests/email-triage/playwright-report/
+test-results/
+playwright-report/
