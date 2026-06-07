@@ -6,7 +6,7 @@
   const EBAY_CONVERSATION_CLASSIFY_FUNCTION = "ebay-conversation-classify";
   const EBAY_CONVERSATION_DRAFT_FUNCTION = "ebay-conversation-draft";
   const EBAY_CANONICAL_MAILBOX_RPC = "get_ebay_canonical_mailbox_v2";
-  const EBAY_MAILBOX_RPC_FALLBACK_WARNING = "Mailbox RPC unavailable. Using legacy mailbox mode.";
+  const EBAY_MAILBOX_RPC_FALLBACK_WARNING = "Degraded mailbox mode: canonical RPC is unavailable. Counts, search, and filters are limited to loaded legacy rows.";
 
   const DEFAULT_LIMITS = {
     conversationLimit: 100,
@@ -306,6 +306,44 @@
     };
   }
 
+  function normalizeEbaySyncRun(row = {}) {
+    const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    const counters = metadata.counters && typeof metadata.counters === "object" ? metadata.counters : {};
+    return {
+      id: row.id || null,
+      seller_account_id: row.seller_account_id || null,
+      run_type: row.run_type || "manual",
+      status: row.status || "running",
+      conversation_type: row.conversation_type || null,
+      started_at: row.started_at || null,
+      completed_at: row.completed_at || null,
+      last_error_code: row.last_error_code || null,
+      last_error_message: row.last_error_message || null,
+      metadata,
+      payload: {
+        ...metadata,
+        sync_run_id: row.id || null,
+        run_type: row.run_type || "manual",
+        status: row.status || "running",
+        conversations_seen: Number(row.conversations_seen || 0),
+        conversations_inserted: Number(row.conversations_inserted || 0),
+        conversations_updated: Number(row.conversations_updated || 0),
+        messages_seen: Number(row.messages_seen || 0),
+        messages_inserted: Number(row.messages_inserted || 0),
+        messages_updated: Number(row.messages_updated || 0),
+        messages_rechecked: Number(metadata.messages_rechecked ?? counters.messages_rechecked ?? 0),
+        pages_processed: Number(row.pages_fetched || 0),
+        detail_pages_processed: Number(row.detail_pages_fetched || 0),
+        warnings_count: Array.isArray(row.warnings) ? row.warnings.length : Number(metadata.warnings_count || 0),
+        failed_count: Number(row.errors || 0),
+        started_at: row.started_at || null,
+        completed_at: row.completed_at || null,
+        last_error_code: row.last_error_code || null,
+        last_error_message: row.last_error_message || null,
+      },
+    };
+  }
+
   function ebayDashboardText(value, maxLength = 4000) {
     return String(value || "")
       .replace(/\r\n/g, "\n")
@@ -472,6 +510,7 @@
       attemptsResult,
       eventsResult,
       checkpointsResult,
+      syncRunsResult,
     ] = await Promise.all([
       countSupabaseRows(
         client
@@ -532,6 +571,11 @@
         .eq("checkpoint_scope", "commerce_message_archive")
         .order("updated_at", { ascending: false })
         .limit(10),
+      client
+        .from("ebay_message_sync_runs")
+        .select("id, seller_account_id, run_type, status, conversation_type, conversation_page_limit, message_page_limit, max_conversation_pages, max_detail_pages_per_conversation, pages_fetched, detail_pages_fetched, conversations_seen, conversations_inserted, conversations_updated, messages_seen, messages_inserted, messages_updated, media_seen, errors, warnings, last_error_code, last_error_message, metadata, started_at, completed_at")
+        .order("started_at", { ascending: false })
+        .limit(12),
     ]);
 
     throwSupabaseReadError(classificationsResult.error, "ebay_classification_dashboard_failed");
@@ -540,12 +584,14 @@
     throwSupabaseReadError(attemptsResult.error, "ebay_send_attempt_dashboard_failed");
     throwSupabaseReadError(eventsResult.error, "ebay_activity_dashboard_failed");
     throwSupabaseReadError(checkpointsResult.error, "ebay_backfill_checkpoint_dashboard_failed");
+    throwSupabaseReadError(syncRunsResult.error, "ebay_sync_run_dashboard_failed");
 
     const classifications = Array.isArray(classificationsResult.data) ? classificationsResult.data : [];
     const drafts = Array.isArray(draftsResult.data) ? draftsResult.data : [];
     const approvals = Array.isArray(approvalsResult.data) ? approvalsResult.data : [];
     const attempts = Array.isArray(attemptsResult.data) ? attemptsResult.data : [];
     const checkpoints = Array.isArray(checkpointsResult.data) ? checkpointsResult.data : [];
+    const syncRuns = (Array.isArray(syncRunsResult.data) ? syncRunsResult.data : []).map(normalizeEbaySyncRun);
     const backfillProgress = summarizeBackfillCheckpoints(checkpoints);
     const dashboardMaps = {
       attemptsById: mapDashboardRowsById(attempts),
@@ -559,6 +605,12 @@
     const latestSyncPayload = latestSyncEvent?.payload?.sync_run && typeof latestSyncEvent.payload.sync_run === "object"
       ? latestSyncEvent.payload.sync_run
       : latestSyncEvent?.payload || {};
+    const latestSyncRun = syncRuns.find((run) => String(run.run_type || "") !== "backfill") || null;
+    const latestSyncMetricPayload = Object.keys(latestSyncPayload).length ? latestSyncPayload : latestSyncRun?.payload || {};
+    const latestMessageRechecked = Number(
+      latestSyncMetricPayload.messages_rechecked ??
+      Math.max(Number(latestSyncMetricPayload.messages_seen || 0) - Number(latestSyncMetricPayload.messages_inserted || 0), 0)
+    );
     const latestApproval = latestApprovalByDraft(approvals);
     const currentDrafts = drafts.filter((draft) =>
       draft.is_current === true &&
@@ -600,20 +652,26 @@
         backfill_pages_remaining: backfillProgress.pages_remaining,
         backfill_conversations: backfillProgress.conversations_imported,
         backfill_messages: backfillProgress.messages_imported,
-        latest_sync_conversations_seen: Number(latestSyncPayload.conversations_seen || latestSyncPayload.processed_count || 0),
-        latest_sync_conversations_inserted: Number(latestSyncPayload.conversations_inserted || 0),
-        latest_sync_conversations_updated: Number(latestSyncPayload.conversations_updated || 0),
-        latest_sync_conversations_unchanged: Number(latestSyncPayload.conversations_unchanged || 0),
-        latest_sync_messages_inserted: Number(latestSyncPayload.messages_inserted || 0),
-        latest_sync_messages_updated: Number(latestSyncPayload.messages_updated || 0),
-        latest_sync_canonical_total_after: Number(latestSyncPayload.canonical_total_conversations || canonicalConversations),
+        latest_sync_conversations_seen: Number(latestSyncMetricPayload.conversations_seen || latestSyncMetricPayload.processed_count || 0),
+        latest_sync_conversations_inserted: Number(latestSyncMetricPayload.conversations_inserted || 0),
+        latest_sync_conversations_updated: Number(latestSyncMetricPayload.conversations_updated || 0),
+        latest_sync_conversations_unchanged: Number(latestSyncMetricPayload.conversations_unchanged || 0),
+        latest_sync_messages_scanned: Number(latestSyncMetricPayload.messages_seen || latestSyncMetricPayload.messages_processed || 0),
+        latest_sync_messages_rechecked: latestMessageRechecked,
+        latest_sync_messages_inserted: Number(latestSyncMetricPayload.messages_inserted || 0),
+        latest_sync_messages_changed: Number(latestSyncMetricPayload.messages_updated || 0),
+        latest_sync_messages_updated: Number(latestSyncMetricPayload.messages_updated || 0),
+        latest_sync_canonical_total_after: Number(latestSyncMetricPayload.canonical_total_conversations || canonicalConversations),
       },
       latest_sync: {
         event: latestSyncEvent,
-        payload: latestSyncPayload,
+        run: latestSyncRun,
+        active_runs: syncRuns.filter((run) => String(run.run_type || "") !== "backfill" && String(run.status || "") === "running"),
+        payload: latestSyncMetricPayload,
       },
       backfill: {
         ...backfillProgress,
+        runs: syncRuns.filter((run) => String(run.run_type || "") === "backfill"),
         checkpoints: backfillProgress.checkpoints,
         active: backfillProgress.checkpoints.filter((row) => row.status === "running"),
         paused: backfillProgress.checkpoints.filter((row) => ["paused", "idle"].includes(String(row.status || ""))),

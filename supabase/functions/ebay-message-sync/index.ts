@@ -61,6 +61,7 @@ type Counters = {
   messagesSeen: number;
   messagesInserted: number;
   messagesUpdated: number;
+  messagesRechecked: number;
   mediaSeen: number;
   classificationProcessed: number;
   classificationSucceeded: number;
@@ -69,6 +70,23 @@ type Counters = {
   errors: number;
   warnings: JsonRecord[];
   totalsByConversationType: Record<string, number | null>;
+};
+
+type ExistingMessage = {
+  ebay_message_id: string;
+  sender_username: string | null;
+  recipient_username: string | null;
+  direction: string | null;
+  direction_confidence: string | null;
+  subject: string | null;
+  message_body_sha256: string | null;
+  message_body_preview: string | null;
+  message_status: string | null;
+  created_at_ebay: string | null;
+  has_media: boolean | null;
+  media_count: number | null;
+  read_status: string | null;
+  is_read: boolean | null;
 };
 
 type CheckpointStart = {
@@ -827,10 +845,10 @@ async function existingMessagesById(
   ebayConversationId: string,
   messageIds: string[],
 ) {
-  if (!messageIds.length) return new Map<string, { ebay_message_id: string; read_status: string | null; is_read: boolean | null }>();
+  if (!messageIds.length) return new Map<string, ExistingMessage>();
   const { data, error } = await supabase
     .from("ebay_conversation_messages")
-    .select("ebay_message_id, read_status, is_read")
+    .select("ebay_message_id, sender_username, recipient_username, direction, direction_confidence, subject, message_body_sha256, message_body_preview, message_status, created_at_ebay, has_media, media_count, read_status, is_read")
     .eq("seller_account_id", accountId)
     .eq("conversation_type", conversationType)
     .eq("ebay_conversation_id", ebayConversationId)
@@ -839,10 +857,40 @@ async function existingMessagesById(
   return new Map((data || [])
     .map((row: any) => [text(row.ebay_message_id), {
       ebay_message_id: text(row.ebay_message_id),
+      sender_username: row.sender_username ?? null,
+      recipient_username: row.recipient_username ?? null,
+      direction: row.direction ?? null,
+      direction_confidence: row.direction_confidence ?? null,
+      subject: row.subject ?? null,
+      message_body_sha256: row.message_body_sha256 ?? null,
+      message_body_preview: row.message_body_preview ?? null,
+      message_status: row.message_status ?? null,
+      created_at_ebay: isoOrNull(row.created_at_ebay),
+      has_media: typeof row.has_media === "boolean" ? row.has_media : null,
+      media_count: numberOrNull(row.media_count),
       read_status: row.read_status ?? null,
       is_read: typeof row.is_read === "boolean" ? row.is_read : null,
     }] as const)
     .filter(([id]) => Boolean(id)));
+}
+
+function nullableComparable(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  return value;
+}
+
+function messageRowChanged(existing: ExistingMessage, next: JsonRecord) {
+  return nullableComparable(existing.sender_username) !== nullableComparable(next.sender_username) ||
+    nullableComparable(existing.recipient_username) !== nullableComparable(next.recipient_username) ||
+    nullableComparable(existing.direction) !== nullableComparable(next.direction) ||
+    nullableComparable(existing.direction_confidence) !== nullableComparable(next.direction_confidence) ||
+    nullableComparable(existing.subject) !== nullableComparable(next.subject) ||
+    nullableComparable(existing.message_body_sha256) !== nullableComparable(next.message_body_sha256) ||
+    nullableComparable(existing.message_body_preview) !== nullableComparable(next.message_body_preview) ||
+    nullableComparable(existing.message_status) !== nullableComparable(next.message_status) ||
+    nullableComparable(existing.created_at_ebay) !== nullableComparable(next.created_at_ebay) ||
+    nullableComparable(existing.has_media) !== nullableComparable(next.has_media) ||
+    nullableComparable(existing.media_count) !== nullableComparable(next.media_count);
 }
 
 async function upsertMessages(options: {
@@ -886,12 +934,12 @@ async function upsertMessages(options: {
     const existingMessage = existing.get(ebayMessageId) || null;
     const apiReadStatus = text(message.readStatus) || null;
     const apiIsRead = readStatusToBoolean(message.readStatus);
-
-    if (existingMessage) options.counters.messagesUpdated += 1;
-    else options.counters.messagesInserted += 1;
-    options.counters.mediaSeen += media.length;
-
-    rows.push({
+    const subject = firstText(message.subject, message.title) || null;
+    const bodyHash = await sha256Hex(body);
+    const bodyPreview = preview(body) || null;
+    const messageStatus = firstText(message.messageStatus, message.status) || null;
+    const createdAtEbay = isoOrNull(message.createdDate) || isoOrNull(message.creationDate) || isoOrNull(message.sentDate);
+    const row: JsonRecord = {
       conversation_id: options.conversationRowId,
       seller_account_id: options.account.id,
       ebay_conversation_id: options.ebayConversationId,
@@ -902,21 +950,31 @@ async function upsertMessages(options: {
       direction: direction.direction,
       direction_confidence: direction.confidence,
       direction_reason: direction.reason,
-      subject: firstText(message.subject, message.title) || null,
+      subject,
       message_body: body || null,
-      message_body_sha256: await sha256Hex(body),
-      message_body_preview: preview(body) || null,
+      message_body_sha256: bodyHash,
+      message_body_preview: bodyPreview,
       read_status: existingMessage ? existingMessage.read_status : apiReadStatus,
       is_read: existingMessage ? existingMessage.is_read : apiIsRead,
-      message_status: firstText(message.messageStatus, message.status) || null,
-      created_at_ebay: isoOrNull(message.createdDate) || isoOrNull(message.creationDate) || isoOrNull(message.sentDate),
+      message_status: messageStatus,
+      created_at_ebay: createdAtEbay,
       message_media: media,
       has_media: media.length > 0,
       media_count: media.length,
       raw_message_metadata: stripLargeFields(message),
       last_sync_run_id: options.runId,
       last_seen_at: new Date().toISOString(),
-    });
+    };
+
+    if (existingMessage) {
+      options.counters.messagesRechecked += 1;
+      if (messageRowChanged(existingMessage, row)) options.counters.messagesUpdated += 1;
+    } else {
+      options.counters.messagesInserted += 1;
+    }
+    options.counters.mediaSeen += media.length;
+
+    rows.push(row);
   }
 
   if (!rows.length) return [];
@@ -1082,6 +1140,8 @@ function syncRunProgressMetadata(input: SyncInput, counters: Counters, extra: Js
     conversationsSucceeded: counters.conversationsSucceeded,
     conversationsSkipped: counters.conversationsSkipped,
     conversationsUnchanged: counters.conversationsUnchanged,
+    messagesRechecked: counters.messagesRechecked,
+    messages_rechecked: counters.messagesRechecked,
     classificationProcessed: counters.classificationProcessed,
     classificationSucceeded: counters.classificationSucceeded,
     classificationFailed: counters.classificationFailed,
@@ -1287,6 +1347,7 @@ async function updateCheckpointProgress(options: {
         conversations_seen: options.counters.conversationsSeen,
         messages_seen: options.counters.messagesSeen,
         messages_inserted: options.counters.messagesInserted,
+        messages_rechecked: options.counters.messagesRechecked,
         messages_updated: options.counters.messagesUpdated,
       },
       updated_at: new Date().toISOString(),
@@ -1754,6 +1815,7 @@ function backfillEventSummary(input: SyncInput, counters: Counters, startedMs: n
     conversations_skipped: counters.conversationsSkipped,
     messages_processed: counters.messagesSeen,
     messages_inserted: counters.messagesInserted,
+    messages_rechecked: counters.messagesRechecked,
     messages_updated: counters.messagesUpdated,
     classification_processed: counters.classificationProcessed,
     classification_succeeded: counters.classificationSucceeded,
@@ -1820,8 +1882,9 @@ function shouldRecordAggregateSyncEvent(input: SyncInput) {
 }
 
 function syncOperationLabel(input: SyncInput) {
-  if (input.runType === "manual") return "Sync Latest";
-  if (input.runType === "incremental") return input.checkpointScope === DEFAULT_LATEST_SYNC_CHECKPOINT_SCOPE ? "Sync Latest" : "Incremental Sync";
+  if (input.conversationId) return "Refresh Timeline";
+  if (input.runType === "manual") return "Manual Message Sync";
+  if (input.runType === "incremental") return input.checkpointScope === DEFAULT_LATEST_SYNC_CHECKPOINT_SCOPE ? "Sync Recent Mailbox" : "Incremental Sync";
   if (input.runType === "scheduled") return "Scheduled Sync";
   if (input.runType === "replay") return "Sync Replay";
   return "Message Sync";
@@ -1852,6 +1915,7 @@ function syncEventSummary(input: SyncInput, counters: Counters, startedMs: numbe
     messages_seen: counters.messagesSeen,
     messages_processed: counters.messagesSeen,
     messages_inserted: counters.messagesInserted,
+    messages_rechecked: counters.messagesRechecked,
     messages_updated: counters.messagesUpdated,
     classification_processed: counters.classificationProcessed,
     classification_succeeded: counters.classificationSucceeded,
@@ -1865,6 +1929,11 @@ function syncEventSummary(input: SyncInput, counters: Counters, startedMs: numbe
     totals_by_conversation_type: counters.totalsByConversationType,
     warnings_count: counters.warnings.length,
     warnings: counters.warnings.slice(0, 25),
+    scope_description: input.conversationId
+      ? "Selected conversation deep refresh."
+      : input.runType === "incremental" && input.checkpointScope === DEFAULT_LATEST_SYNC_CHECKPOINT_SCOPE
+      ? "Recent incremental mailbox scan with limited latest-page scope."
+      : "Bounded eBay message sync operation.",
     ...extra,
   };
 }
@@ -1884,8 +1953,8 @@ async function recordSyncActivityEvent(options: {
   const completed = options.eventType === "message_sync_completed";
   const title = `${syncOperationLabel(options.input)} ${completed ? "Completed" : "Failed"}`;
   const detail = completed
-    ? `${syncOperationLabel(options.input)} completed. Saw ${options.counters.conversationsSeen} conversations and ${options.counters.messagesSeen} messages.`
-    : `${syncOperationLabel(options.input)} failed. Saw ${options.counters.conversationsSeen} conversations and ${options.counters.messagesSeen} messages before failure.`;
+    ? `${syncOperationLabel(options.input)} completed. Saw ${options.counters.conversationsSeen} conversations and scanned ${options.counters.messagesSeen} messages. Existing messages rechecked: ${options.counters.messagesRechecked}; messages changed: ${options.counters.messagesUpdated}.`
+    : `${syncOperationLabel(options.input)} failed. Saw ${options.counters.conversationsSeen} conversations and scanned ${options.counters.messagesSeen} messages before failure.`;
   const { error } = await options.supabase.rpc("record_ebay_message_activity_event", {
     _event_type: options.eventType,
     _status: options.status,
@@ -2010,6 +2079,7 @@ serve(async (req) => {
       messagesSeen: 0,
       messagesInserted: 0,
       messagesUpdated: 0,
+      messagesRechecked: 0,
       mediaSeen: 0,
       classificationProcessed: 0,
       classificationSucceeded: 0,
@@ -2021,6 +2091,25 @@ serve(async (req) => {
         : [{ code: "seller_username_not_configured", message: "Set EBAY_SELLER_USERNAME for strongest direction derivation." }],
       totalsByConversationType: {},
     };
+    if (input.runType === "backfill") {
+      await recordBackfillActivityEvent({
+        supabase,
+        input,
+        operator,
+        runId,
+        counters,
+        startedMs,
+        eventType: "message_backfill_started",
+        status: "pending",
+        title: "Backfill Started",
+        detail: "Historical eBay message backfill chunk started. Running state is also recorded on archive checkpoints.",
+        extra: {
+          lifecycle_status: "started",
+          chunked: true,
+          unclassified_before: unclassifiedBefore,
+        },
+      });
+    }
 
     const token = await refreshEbayToken();
     let successfulConversationTypeSyncs = 0;

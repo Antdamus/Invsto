@@ -3740,6 +3740,16 @@
   padding: 8px;
 }
 
+.ebay-conversation-summary .ebay-conversation-summary-warning {
+  grid-column: 1 / -1;
+  border-color: rgba(255,217,120,.28);
+  background: rgba(255,217,120,.08);
+}
+
+.ebay-conversation-summary .ebay-conversation-summary-warning strong {
+  color: #ffe6a4;
+}
+
 .ebay-conversation-summary strong,
 .ebay-conversation-summary span {
   display: block;

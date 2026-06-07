@@ -3505,8 +3505,15 @@
     const returns = ebayMailboxCountValue(smartCounts.returns, rows.filter((conversation) => ebaySavedViewMatches(conversation, "returns")).length);
     const query = compactConversationText(state.ebayConversationSearchQuery);
     const activeFilterCount = countEbayClassificationFilters(state.ebayConversationClassificationFilters);
-    const modeLabel = state.ebayMailboxMode === "legacy" ? "Legacy mode" : `RPC ${page.rpc_version || "v2"}`;
+    const degraded = state.ebayMailboxMode === "legacy" || Boolean(state.ebayMailboxWarning);
+    const modeLabel = degraded ? "Degraded legacy fallback" : `RPC ${page.rpc_version || "v2"}`;
     els.ebayConversationSummary.innerHTML = `
+      ${degraded ? `
+        <div class="ebay-conversation-summary-warning">
+          <strong>Degraded mode</strong>
+          <span>Counts, search, and filters are limited to loaded legacy rows.</span>
+        </div>
+      ` : ""}
       <div>
         <strong>Canonical: ${escapeHtml(formatContextNumber(canonicalTotal))}</strong>
         <span>Matching: ${escapeHtml(formatContextNumber(matchingTotal))}</span>
@@ -4823,9 +4830,9 @@
             ${metaItems.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
           </div>
         </div>
-        <button type="button" class="secondary-btn" data-ebay-detail-action="refresh-messages" data-ebay-conversation-id="${escapeHtml(conversation.id)}" ${isLoading ? "disabled" : ""}>
+        <button type="button" class="secondary-btn" data-ebay-detail-action="refresh-messages" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="Deep refresh only this selected conversation and reload its timeline." ${isLoading ? "disabled" : ""}>
           <i data-lucide="${isLoading ? "loader-circle" : "refresh-cw"}"></i>
-          ${escapeHtml(isLoading ? "Loading" : "Refresh Timeline")}
+          ${escapeHtml(isLoading ? "Refreshing selected conversation" : "Refresh Timeline")}
         </button>
       </div>
       ${error ? `<div class="classification-notice is-error">Could not load eBay messages: ${escapeHtml(error)}</div>` : ""}
@@ -4942,12 +4949,13 @@
       return;
     }
     if (state.ebayConversationClassificationBatchLoading) {
-      els.ebayConversationSyncResult.innerHTML = `<div class="classification-notice">Classifying eBay conversations. This only writes OG classification records.</div>`;
+      els.ebayConversationSyncResult.innerHTML = `<div class="classification-notice">Classification batch is running. This writes OG classification records only and targets the current bounded queue.</div>`;
       return;
     }
     if (classificationResult) {
-      const modeLabel = classificationResult.force === true ? "Reclassify entire inbox" : "Classify unclassified conversations";
+      const modeLabel = classificationResult.force === true ? "Reclassify recent 100 conversations" : "Classify unclassified conversations";
       const rows = safeArray(classificationResult.results || classificationResult.data?.results);
+      const requested = classificationMetricValue(classificationResult, ["requested"], classificationResult.force === true ? 100 : rows.length);
       const examined = classificationMetricValue(classificationResult, ["candidates_examined", "processed"], rows.length);
       const classified = classificationMetricValue(classificationResult, ["actually_classified", "classified_count", "succeeded"], 0);
       const failed = classificationMetricValue(classificationResult, ["failed_count", "failed"], 0);
@@ -4969,6 +4977,7 @@
       els.ebayConversationSyncResult.innerHTML = `
         <div class="classification-notice ${escapeHtml(noticeClass)}">
           <strong>${escapeHtml(timedOut ? "Classification request timed out; durable state refreshed." : `${modeLabel} finished.`)}</strong>
+          ${classificationResult.force === true ? `Bounded scope requested: ${escapeHtml(formatContextNumber(requested))};` : ""}
           Candidates examined: ${escapeHtml(formatContextNumber(examined))};
           actually classified: ${escapeHtml(formatContextNumber(classified))};
           skipped already classified: ${escapeHtml(formatContextNumber(skippedCount))};
@@ -4997,7 +5006,13 @@
       return;
     }
     if (state.ebayConversationSyncLoading) {
-      els.ebayConversationSyncResult.innerHTML = `<div class="classification-notice">Running eBay message import in read-only Commerce Message mode.</div>`;
+      const operation = state.ebayConversationSyncOperation || {};
+      const runningText = operation.target === "timeline_refresh"
+        ? "Running selected-conversation deep refresh. This updates only the open conversation timeline."
+        : operation.runType === "backfill"
+        ? "Running historical archive backfill chunk. This imports a bounded archive chunk and records durable checkpoint progress."
+        : "Running recent mailbox scan. This is an incremental, limited latest-scope sync, not a full archive refresh.";
+      els.ebayConversationSyncResult.innerHTML = `<div class="classification-notice">${escapeHtml(runningText)}</div>`;
       return;
     }
     if (error) {
@@ -5016,6 +5031,7 @@
     const counters = result?.counters || {};
     const warnings = safeArray(counters.warnings);
     const isBackfill = result?.runType === "backfill";
+    const isTargetedRefresh = Boolean(result?.targeted_conversation_id || result?.targeted_ebay_conversation_id);
     const classificationMode = result?.classificationMode || "none";
     const progress = result?.backfillProgress && typeof result.backfillProgress === "object" ? result.backfillProgress : null;
     const progressStatus = String(progress?.status || "");
@@ -5023,10 +5039,21 @@
     const estimatedPages = progress?.estimated_total_pages ?? null;
     const pagesProcessed = progress?.pages_processed ?? counters.pagesFetched ?? 0;
     const pagesRemaining = progress?.pages_remaining ?? null;
-    const completionLabel = isBackfill
+    const completionLabel = isTargetedRefresh
+      ? "Selected conversation refresh finished; timeline and drafts were reloaded for this conversation"
+      : isBackfill
       ? (backfillComplete ? "Historical archive backfill complete" : "Archive backfill chunk finished; click again to continue")
-      : "Latest eBay inbox sync finished";
+      : "Recent mailbox scan finished; incremental sync covered a limited latest scope";
     const canonicalTotal = result?.canonicalTotalConversations ?? result?.canonical_total_conversations ?? null;
+    const messagesSeen = Number(counters.messagesSeen || counters.messages_processed || 0);
+    const messagesInserted = Number(counters.messagesInserted ?? counters.messages_inserted ?? 0);
+    const messagesChanged = Number(counters.messagesUpdated ?? counters.messages_updated ?? 0);
+    const messagesRechecked = Number(
+      counters.messagesRechecked ??
+      counters.messages_rechecked ??
+      result?.messages_rechecked ??
+      Math.max(messagesSeen - messagesInserted, 0)
+    );
     els.ebayConversationSyncResult.innerHTML = `
       <div class="classification-notice is-success">
         ${escapeHtml(completionLabel)}.
@@ -5035,9 +5062,10 @@
         updated: ${escapeHtml(formatContextNumber(counters.conversationsUpdated || 0))};
         unchanged: ${escapeHtml(formatContextNumber(counters.conversationsUnchanged || 0))};
         skipped: ${escapeHtml(formatContextNumber(counters.conversationsSkipped || 0))};
-        messages seen: ${escapeHtml(formatContextNumber(counters.messagesSeen || 0))};
-        messages inserted: ${escapeHtml(formatContextNumber(counters.messagesInserted))};
-        messages updated: ${escapeHtml(formatContextNumber(counters.messagesUpdated))};
+        messages scanned: ${escapeHtml(formatContextNumber(messagesSeen))};
+        existing messages rechecked: ${escapeHtml(formatContextNumber(messagesRechecked))};
+        messages inserted: ${escapeHtml(formatContextNumber(messagesInserted))};
+        messages changed: ${escapeHtml(formatContextNumber(messagesChanged))};
         canonical total: ${escapeHtml(canonicalTotal === null || canonicalTotal === undefined ? "--" : formatContextNumber(canonicalTotal))};
         pages: ${escapeHtml(formatContextNumber(counters.pagesFetched || 0))};
         classification: ${escapeHtml(humanizeValue(classificationMode))};
@@ -5063,7 +5091,7 @@
       if (state.ebayConversationLoading) {
         els.ebayConversationStatus.textContent = "Loading canonical eBay conversations.";
       } else if (state.ebayMailboxWarning) {
-        els.ebayConversationStatus.textContent = `${state.ebayMailboxWarning} Loaded ${safeArray(state.ebayConversations).length} conversations at ${formatDateTime(state.ebayConversationLastLoadedAt)}.`;
+        els.ebayConversationStatus.textContent = `DEGRADED MODE: ${state.ebayMailboxWarning} Loaded ${safeArray(state.ebayConversations).length} conversations at ${formatDateTime(state.ebayConversationLastLoadedAt)}.`;
       } else if (state.ebayConversationError) {
         els.ebayConversationStatus.textContent = `eBay conversation load failed: ${state.ebayConversationError}`;
       } else if (state.ebayConversationLastLoadedAt) {
@@ -5187,6 +5215,12 @@
 
     setEbayConversationState({
       ebayConversationMessagesLoadingId: conversation.id,
+      ebayConversationSyncLoading: true,
+      ebayConversationSyncOperation: {
+        runType: "manual",
+        classificationMode: "none",
+        target: "timeline_refresh",
+      },
       ebayConversationSyncResult: null,
       ebayConversationSyncError: null,
       ebayConversationMessageErrorsById: {
@@ -5216,6 +5250,8 @@
       const selectedStillLoaded = conversations.some((row) => row.id === conversation.id);
       setEbayConversationState({
         ebayConversationMessagesLoadingId: null,
+        ebayConversationSyncLoading: false,
+        ebayConversationSyncOperation: null,
         ebayConversations: conversations.length ? conversations : adminClassificationState.ebayConversations,
         selectedEbayConversationId: selectedStillLoaded ? conversation.id : adminClassificationState.selectedEbayConversationId,
         ebayConversationLastLoadedAt: listPayload.loaded_at || new Date().toISOString(),
@@ -5242,6 +5278,8 @@
       const code = error.code || error.message || "ebay_conversation_timeline_refresh_failed";
       setEbayConversationState({
         ebayConversationMessagesLoadingId: null,
+        ebayConversationSyncLoading: false,
+        ebayConversationSyncOperation: null,
         ebayConversationMessageErrorsById: {
           ...adminClassificationState.ebayConversationMessageErrorsById,
           [conversation.id]: code,
@@ -5668,6 +5706,11 @@
     const classificationMode = options.classificationMode || "none";
     setEbayConversationState({
       ebayConversationSyncLoading: true,
+      ebayConversationSyncOperation: {
+        runType,
+        classificationMode,
+        target: options.target || "mailbox_sync",
+      },
       ebayConversationSyncResult: null,
       ebayConversationSyncError: null,
       ebayConversationClassificationResult: null,
@@ -5688,6 +5731,7 @@
       });
       setEbayConversationState({
         ebayConversationSyncLoading: false,
+        ebayConversationSyncOperation: null,
         ebayConversationSyncResult: result,
         ebayConversationSyncError: null,
       });
@@ -5698,6 +5742,7 @@
       if (code === "request_timeout") {
         setEbayConversationState({
           ebayConversationSyncLoading: false,
+          ebayConversationSyncOperation: null,
           ebayConversationSyncError: null,
           ebayConversationSyncResult: {
             ok: true,
@@ -5713,6 +5758,7 @@
       }
       setEbayConversationState({
         ebayConversationSyncLoading: false,
+        ebayConversationSyncOperation: null,
         ebayConversationSyncError: code,
       });
       console.error("[email-triage] eBay message sync failed:", error);
@@ -5721,7 +5767,7 @@
 
   async function backfillEbayConversations(context, classificationMode = "none") {
     if (classificationMode === "reclassify_all") {
-      const ok = window.confirm("Backfill the full historical archive and reclassify every imported conversation? This can take a while and will replace current AI labels.");
+      const ok = window.confirm("Backfill the historical archive in chunks and reclassify conversations imported in each chunk? Click again to continue until archive checkpoints complete.");
       if (!ok) return;
     }
     return runEbayConversationImport(context, {

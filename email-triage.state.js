@@ -130,6 +130,7 @@
         ? overrides.ebayDraftMetadataCollapsed === true
         : true,
       ebayConversationSyncLoading: false,
+      ebayConversationSyncOperation: null,
       ebayConversationSyncResult: null,
       ebayConversationSyncError: null,
       ebayConversationClassificationLoadingId: null,

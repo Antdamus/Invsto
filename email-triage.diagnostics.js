@@ -67,8 +67,8 @@
     if (eventType === "conversation_classified" && payload.classification_run) {
       return event.title || "Classification Run Completed";
     }
-    if (eventType === "message_sync_completed") return event.title || "Sync Latest Completed";
-    if (eventType === "message_sync_failed") return event.title || "Sync Latest Failed";
+    if (eventType === "message_sync_completed") return event.title || "Sync Recent Mailbox Completed";
+    if (eventType === "message_sync_failed") return event.title || "Sync Recent Mailbox Failed";
     if (eventType === "message_backfill_started") return "Backfill Started";
     if (eventType === "message_backfill_progress") return "Backfill Progress";
     if (eventType === "message_backfill_completed") return "Backfill Completed";
@@ -154,6 +154,7 @@
     const status = String(event.status || "").toLowerCase();
     const failed = status.includes("fail") || Number(counters.failed_count || 0) > 0 || Number(eventPayload(event).failed || 0) > 0;
     if (failed) return "danger";
+    if (status.includes("running") || status.includes("pending")) return "warning";
     if (status.includes("warn")) return "warning";
     if (status.includes("complete") || status.includes("success")) return "success";
     return "muted";
@@ -181,8 +182,8 @@
       duplicate_send_prevented: "A duplicate send was blocked before another provider call.",
       smart_folder_created: "An eBay smart folder was created.",
       smart_folder_updated: "An eBay smart folder was updated.",
-      message_sync_completed: "Recent eBay inbox sync completed as one aggregate operation.",
-      message_sync_failed: "Recent eBay inbox sync failed as one aggregate operation.",
+      message_sync_completed: "Recent incremental mailbox scan completed as one aggregate operation.",
+      message_sync_failed: "Recent incremental mailbox scan failed as one aggregate operation.",
       message_backfill_started: "Historical eBay message archive import started.",
       message_backfill_progress: "Historical eBay message archive import chunk completed and paused at a safe checkpoint.",
       message_backfill_completed: "Historical eBay message archive import completed.",
@@ -235,13 +236,14 @@
       message_sync_completed: [
         metricText(metricValue([payload], ["conversations_seen", "processed_count"]) || 0, "seen"),
         metricText(metricValue([payload], ["conversations_inserted"]) || 0, "inserted"),
-        metricText(metricValue([payload], ["conversations_updated"]) || 0, "updated"),
+        metricText(metricValue([payload], ["conversations_updated"]) || 0, "changed"),
         metricText(metricValue([payload], ["conversations_unchanged"]) || 0, "unchanged"),
+        metricText(metricValue([payload], ["messages_rechecked"]) || 0, "messages rechecked"),
       ],
       message_sync_failed: [
         metricText(metricValue([payload], ["conversations_seen", "processed_count"]) || 0, "seen"),
         metricText(metricValue([payload], ["conversations_inserted"]) || 0, "inserted"),
-        metricText(metricValue([payload], ["conversations_updated"]) || 0, "updated"),
+        metricText(metricValue([payload], ["conversations_updated"]) || 0, "changed"),
         metricText(metricValue([payload], ["failed_count"]) || 1, "failed"),
       ],
       conversation_classified: payload.classification_run || payload.processed_count !== undefined ? [
@@ -422,15 +424,16 @@
       return [
         ["Conversations Seen", metricValue([payload, run, counters], ["conversations_seen", "processed_count"])],
         ["Conversations Inserted", metricValue([payload, run, counters], ["conversations_inserted"])],
-        ["Conversations Updated", metricValue([payload, run, counters], ["conversations_updated"])],
+        ["Conversations Changed", metricValue([payload, run, counters], ["conversations_updated"])],
         ["Conversations Unchanged", metricValue([payload, run, counters], ["conversations_unchanged"])],
         ["Succeeded", metricValue([payload, run, counters], ["succeeded_count", "conversations_succeeded"])],
         ["Failed", metricValue([payload, run, counters], ["failed_count"])],
         ["Skipped", metricValue([payload, run, counters], ["skipped_count", "conversations_skipped"])],
         ["Pages", metricValue([payload, run, counters], ["pages_processed"])],
-        ["Messages Seen", metricValue([payload, run, counters], ["messages_seen", "messages_processed"])],
+        ["Messages Scanned", metricValue([payload, run, counters], ["messages_seen", "messages_processed"])],
+        ["Existing Messages Rechecked", metricValue([payload, run, counters], ["messages_rechecked"])],
         ["Messages Inserted", metricValue([payload, run, counters], ["messages_inserted"])],
-        ["Messages Updated", metricValue([payload, run, counters], ["messages_updated"])],
+        ["Messages Changed", metricValue([payload, run, counters], ["messages_updated"])],
         ["Canonical Total After Sync", metricValue([payload, run, counters], ["canonical_total_conversations", "canonicalTotalConversations"])],
         ["Unclassified Before", metricValue([payload, run, counters], ["unclassified_before"])],
         ["Unclassified After", metricValue([payload, run, counters], ["unclassified_after"])],
@@ -753,9 +756,22 @@
     const metrics = ebay.metrics || {};
     const safety = ebay.send_safety || {};
     const approvalQueue = ebay.approval_queue || {};
+    const latestSync = ebay.latest_sync || {};
+    const latestSyncRun = latestSync.run || {};
+    const activeSyncRuns = Array.isArray(latestSync.active_runs) ? latestSync.active_runs : [];
     const backfill = ebay.backfill || {};
     const checkpoints = Array.isArray(backfill.checkpoints) ? backfill.checkpoints : [];
     const activeBackfills = Array.isArray(backfill.active) ? backfill.active : [];
+    const latestSyncStatus = activeSyncRuns.length
+      ? "running"
+      : latestSyncRun.status || latestSync.event?.status || "not_started";
+    const latestSyncStatusVariant = latestSyncStatus === "succeeded" || latestSyncStatus === "completed"
+      ? "success"
+      : latestSyncStatus === "failed"
+      ? "danger"
+      : latestSyncStatus === "running" || latestSyncStatus === "pending"
+      ? "warning"
+      : "muted";
     const backfillStatus = String(backfill.status || "not_started");
     const backfillStatusVariant = backfillStatus === "completed" ? "success" : backfillStatus === "failed" ? "danger" : backfillStatus === "running" ? "warning" : "muted";
     const events = Array.isArray(ebay.recent_operational_events) ? ebay.recent_operational_events : [];
@@ -795,16 +811,21 @@
         <section class="operational-panel operational-panel-wide">
           <div class="operational-panel-head">
             <strong>Latest Sync</strong>
-            ${dashboardBadge("Recent only", "muted", utils)}
+            ${dashboardBadge(activeSyncRuns.length ? "Running" : "Recent incremental", activeSyncRuns.length ? "warning" : "muted", utils)}
           </div>
           <div class="operational-metric-grid">
             ${renderKeyValueGrid([
-              { label: "Seen", value: metrics.latest_sync_conversations_seen },
+              { label: "Lifecycle status", html: dashboardBadge(utils.humanizeValue(latestSyncStatus), latestSyncStatusVariant, utils) },
+              { label: "Started", value: latestSyncRun.started_at ? utils.formatDateTime(latestSyncRun.started_at) : "--" },
+              { label: "Completed", value: latestSyncRun.completed_at ? utils.formatDateTime(latestSyncRun.completed_at) : "--" },
+              { label: "Conversations scanned", value: metrics.latest_sync_conversations_seen },
               { label: "Inserted", value: metrics.latest_sync_conversations_inserted },
-              { label: "Updated", value: metrics.latest_sync_conversations_updated },
+              { label: "Changed", value: metrics.latest_sync_conversations_updated },
               { label: "Unchanged", value: metrics.latest_sync_conversations_unchanged },
+              { label: "Messages scanned", value: metrics.latest_sync_messages_scanned },
+              { label: "Messages rechecked", value: metrics.latest_sync_messages_rechecked },
               { label: "Messages inserted", value: metrics.latest_sync_messages_inserted },
-              { label: "Messages updated", value: metrics.latest_sync_messages_updated },
+              { label: "Messages changed", value: metrics.latest_sync_messages_changed ?? metrics.latest_sync_messages_updated },
               { label: "Canonical after sync", value: metrics.latest_sync_canonical_total_after ?? metrics.canonical_conversations },
             ], utils)}
           </div>

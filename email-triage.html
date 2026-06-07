@@ -4,12 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#070708" />
+  <meta name="email-triage-asset-version" content="5f6s1-20260607" />
   <title>OG Jewelry - eBay Messaging</title>
 
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="email-triage.css?v=5f6a2" />
+  <link rel="stylesheet" href="dashboard.css?v=5f6s1-20260607" />
+  <link rel="stylesheet" href="email-triage.css?v=5f6s1-20260607" />
 
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
@@ -88,9 +89,9 @@
                 <i data-lucide="sparkles"></i>
                 Classify unclassified
               </button>
-              <button type="button" id="ebay-conversation-reclassify-all" class="secondary-btn">
+              <button type="button" id="ebay-conversation-reclassify-all" class="secondary-btn" title="Reclassify the recent bounded mailbox set, up to 100 conversations.">
                 <i data-lucide="refresh-cw"></i>
-                Reclassify inbox
+                Reclassify recent 100
               </button>
               <button type="button" id="ebay-conversation-backfill" class="secondary-btn" title="Import the next historical eBay archive chunk without classification. Click again to resume until complete.">
                 <i data-lucide="archive-restore"></i>
@@ -104,9 +105,9 @@
                 <i data-lucide="refresh-cw"></i>
                 Backfill + reclassify all
               </button>
-              <button type="button" id="ebay-conversation-sync" class="primary-btn" title="Fast recent inbox refresh for newest eBay conversations and messages.">
+              <button type="button" id="ebay-conversation-sync" class="primary-btn" title="Recent incremental mailbox scan. Limited to latest Commerce Message pages; not a full archive refresh.">
                 <i data-lucide="cloud-download"></i>
-                Sync latest eBay conversations
+                Sync recent mailbox
               </button>
             </div>
           </div>
@@ -224,14 +225,14 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
-  <script src="initSupabase.js"></script>
-  <script src="admin-nav.js"></script>
-  <script src="email-triage.api.js?v=5f6a2b"></script>
-  <script src="email-triage.state.js?v=5f6a2"></script>
-  <script src="email-triage.render-utils.js?v=5f6r"></script>
-  <script src="email-triage.classifications.js?v=5f6r"></script>
-  <script src="email-triage.diagnostics.js?v=5f6a2b"></script>
-  <script src="email-triage.operations.js"></script>
-  <script src="email-triage.js?v=5f6a2b"></script>
+  <script src="initSupabase.js?v=5f6s1-20260607"></script>
+  <script src="admin-nav.js?v=5f6s1-20260607"></script>
+  <script src="email-triage.api.js?v=5f6s1-20260607"></script>
+  <script src="email-triage.state.js?v=5f6s1-20260607"></script>
+  <script src="email-triage.render-utils.js?v=5f6s1-20260607"></script>
+  <script src="email-triage.classifications.js?v=5f6s1-20260607"></script>
+  <script src="email-triage.diagnostics.js?v=5f6s1-20260607"></script>
+  <script src="email-triage.operations.js?v=5f6s1-20260607"></script>
+  <script src="email-triage.js?v=5f6s1-20260607"></script>
 </body>
 </html>

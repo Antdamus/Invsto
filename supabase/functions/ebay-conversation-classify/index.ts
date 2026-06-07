@@ -1263,13 +1263,28 @@ async function recordClassificationRunActivity(
 ) {
   const failed = Number(summary.failed || 0);
   const succeeded = Number(summary.succeeded || 0);
-  const status = failed > 0 ? (succeeded > 0 ? "warning" : "failed") : "succeeded";
-  const modeLabel = summary.force === true ? "Reclassify Inbox" : "Classify Unclassified";
-  const title = "Classification Run Completed";
+  const lifecycleStatus = text(summary.lifecycle_status || "", 80);
+  const status = lifecycleStatus === "started"
+    ? "pending"
+    : lifecycleStatus === "failed"
+    ? "failed"
+    : failed > 0
+    ? (succeeded > 0 ? "warning" : "failed")
+    : "succeeded";
+  const modeLabel = summary.force === true ? "Reclassify Recent 100" : "Classify Unclassified";
+  const title = lifecycleStatus === "started"
+    ? "Classification Batch Started"
+    : lifecycleStatus === "failed"
+    ? "Classification Batch Failed"
+    : "Classification Run Completed";
   const remainingText = summary.unclassified_after === null || summary.unclassified_after === undefined
     ? "unknown"
     : String(summary.unclassified_after);
-  const detail = `${modeLabel}. Candidates examined: ${summary.processed}; actually classified: ${summary.succeeded}; skipped already classified: ${summary.skipped}; failed: ${summary.failed}; remaining unclassified: ${remainingText}; duration: ${summary.duration_ms} ms; version: ${summary.classification_version}.`;
+  const detail = lifecycleStatus === "started"
+    ? `${modeLabel} started. Requested bounded limit: ${summary.requested}; current unclassified before run: ${remainingText}.`
+    : lifecycleStatus === "failed"
+    ? `${modeLabel} failed before completion. Error: ${summary.error_code || "unknown_error"}; candidates examined: ${summary.processed || 0}.`
+    : `${modeLabel}. Candidates examined: ${summary.processed}; actually classified: ${summary.succeeded}; skipped already classified: ${summary.skipped}; failed: ${summary.failed}; remaining unclassified: ${remainingText}; duration: ${summary.duration_ms} ms; version: ${summary.classification_version}.`;
   const { error } = await supabase.rpc("record_ebay_message_activity_event", {
     _event_type: "conversation_classified",
     _status: status,
@@ -1283,11 +1298,12 @@ async function recordClassificationRunActivity(
     _classification_id: null,
     _saved_view_id: null,
     _sync_run_id: null,
-    _idempotency_key: `conversation_classification_run:${summary.started_at}:${summary.force === true ? "force" : "default"}`,
+    _idempotency_key: `conversation_classification_run:${summary.started_at}:${summary.force === true ? "force" : "default"}:${lifecycleStatus || "completed"}`,
     _title: title,
     _detail: detail,
     _metadata: {
       classification_run: summary,
+      lifecycle_status: lifecycleStatus || "completed",
       processed_count: summary.processed,
       succeeded_count: summary.succeeded,
       classified_count: summary.succeeded,
@@ -1330,6 +1346,33 @@ async function classifyRecent(
   const version = promptVersion();
   const model = modelName();
   const unclassifiedBefore = await countUnclassifiedConversations(supabase, rpcSupabase);
+  await recordClassificationRunActivity(supabase, admin, {
+    lifecycle_status: "started",
+    force: input.force,
+    run_mode: input.force ? "reclassify_recent_100" : "classify_unclassified_conversations",
+    requested: input.limit,
+    processed: 0,
+    attempted: 0,
+    succeeded: 0,
+    failed: 0,
+    skipped: 0,
+    unclassified_before: unclassifiedBefore,
+    unclassified_after: unclassifiedBefore,
+    remaining_unclassified: unclassifiedBefore,
+    classification_version: CLASSIFIER_VERSION,
+    prompt_version: version,
+    model_name: model,
+    duration_ms: 0,
+    conversation_ids: [],
+    failures: [],
+    skipped_results: [],
+    started_at: startedAt,
+    canonical_queue: input.force ? "recent" : "unclassified",
+  }).catch((eventError) => {
+    console.warn("[ebay-conversation-classify] classification start activity event failed", eventError instanceof Error ? eventError.message : String(eventError));
+  });
+
+  try {
   const candidateQueue = input.force
     ? { conversations: await recentConversationCandidates(supabase, input.limit), queueSource: "recent" }
     : await canonicalUnclassifiedConversationCandidates(supabase, rpcSupabase, input.limit);
@@ -1417,7 +1460,7 @@ async function classifyRecent(
     ok: true,
     mode: "classify_recent",
     force: input.force,
-    run_mode: input.force ? "reclassify_entire_inbox" : "classify_unclassified_conversations",
+    run_mode: input.force ? "reclassify_recent_100" : "classify_unclassified_conversations",
     requested: input.limit,
     processed: results.length,
     attempted: results.length - skipped,
@@ -1481,6 +1524,43 @@ async function classifyRecent(
     console.warn("[ebay-conversation-classify] classification run activity event failed", eventError instanceof Error ? eventError.message : String(eventError));
   });
   return response;
+  } catch (error) {
+    const known = error instanceof ClassifierError || error instanceof EbayConversationContextError ? error : null;
+    await recordClassificationRunActivity(supabase, admin, {
+      lifecycle_status: "failed",
+      force: input.force,
+      run_mode: input.force ? "reclassify_recent_100" : "classify_unclassified_conversations",
+      requested: input.limit,
+      processed: 0,
+      attempted: 0,
+      succeeded: 0,
+      failed: 1,
+      failed_count: 1,
+      skipped: 0,
+      unclassified_before: unclassifiedBefore,
+      unclassified_after: unclassifiedBefore,
+      remaining_unclassified: unclassifiedBefore,
+      classification_version: CLASSIFIER_VERSION,
+      prompt_version: version,
+      model_name: model,
+      duration_ms: Date.now() - startedMs,
+      conversation_ids: [],
+      failures: [{
+        conversation_id: null,
+        ebay_conversation_id: null,
+        error: known?.code || "unknown_error",
+        reason: known?.phase || "unknown",
+      }],
+      skipped_results: [],
+      started_at: startedAt,
+      canonical_queue: input.force ? "recent" : "unclassified",
+      error_code: known?.code || "unknown_error",
+      error_phase: known?.phase || "unknown",
+    }).catch((eventError) => {
+      console.warn("[ebay-conversation-classify] classification failed activity event failed", eventError instanceof Error ? eventError.message : String(eventError));
+    });
+    throw error;
+  }
 }
 
 function safetyEnvelope() {
