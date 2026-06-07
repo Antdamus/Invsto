@@ -210,6 +210,29 @@ export async function conversationMessages(client, conversationId) {
   });
 }
 
+export async function conversationByEbayId(client, ebayConversationId, conversationType = "FROM_MEMBERS") {
+  const id = String(ebayConversationId || "").trim();
+  if (!id) return null;
+  const rows = await client.select("ebay_conversations", {
+    select: [
+      "id",
+      "ebay_conversation_id",
+      "conversation_type",
+      "other_party_username",
+      "latest_message_id",
+      "latest_message_created_at",
+      "latest_message_preview",
+      "message_count",
+      "last_detail_synced_at",
+      "updated_at",
+    ].join(","),
+    ebay_conversation_id: `eq.${id}`,
+    conversation_type: `eq.${conversationType}`,
+    limit: "1",
+  });
+  return rows?.[0] || null;
+}
+
 export async function recentActivityEvents(client, options = {}) {
   const params = {
     select: "id,event_type,status,title,detail,conversation_id,sync_run_id,classification_id,metadata,created_at",
@@ -290,10 +313,19 @@ export function summarizeSyncPayload(payload = {}) {
       conversationsUpdated: counters.conversationsUpdated,
       conversationsUnchanged: counters.conversationsUnchanged,
       conversationsSkipped: counters.conversationsSkipped,
+      conversationIds: counters.conversationIds,
       messagesSeen: counters.messagesSeen,
       messagesInserted: counters.messagesInserted,
       messagesUpdated: counters.messagesUpdated,
       messagesRechecked: counters.messagesRechecked,
+      canonicalDetailSweepCandidates: counters.canonicalDetailSweepCandidates,
+      canonicalDetailSweepRefreshed: counters.canonicalDetailSweepRefreshed,
+      canonicalDetailSweepSkipped: counters.canonicalDetailSweepSkipped,
+      canonicalDetailSweepFailed: counters.canonicalDetailSweepFailed,
+      canonicalDetailSweepMessagesInserted: counters.canonicalDetailSweepMessagesInserted,
+      canonicalDetailSweepMessagesUpdated: counters.canonicalDetailSweepMessagesUpdated,
+      canonicalDetailSweepMessagesRechecked: counters.canonicalDetailSweepMessagesRechecked,
+      canonicalDetailSweepConversationIds: counters.canonicalDetailSweepConversationIds,
       classificationProcessed: counters.classificationProcessed,
       classificationSucceeded: counters.classificationSucceeded,
       classificationFailed: counters.classificationFailed,

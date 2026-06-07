@@ -5,6 +5,7 @@ import {
   backfillCheckpoints,
   canonicalMailbox,
   classificationsForRun,
+  conversationByEbayId,
   conversationMessages,
   createReadonlyClient,
   envFlag,
@@ -48,6 +49,33 @@ function numberOrNull(value) {
 function formatNumber(value) {
   const numeric = numberOrNull(value);
   return numeric === null ? "--" : numeric.toLocaleString("en-US");
+}
+
+function summarizeConversationState(row = null) {
+  if (!row) return null;
+  return {
+    id: row.id || null,
+    ebay_conversation_id: row.ebay_conversation_id || null,
+    conversation_type: row.conversation_type || null,
+    other_party_username: row.other_party_username || null,
+    latest_message_id: row.latest_message_id || null,
+    latest_message_created_at: row.latest_message_created_at || null,
+    latest_message_preview: row.latest_message_preview || null,
+    message_count: numberOrNull(row.message_count),
+    last_detail_synced_at: row.last_detail_synced_at || null,
+  };
+}
+
+function conversationStateAdvanced(before = null, after = null) {
+  if (!before || !after) return false;
+  const beforeCount = numberOrNull(before.message_count);
+  const afterCount = numberOrNull(after.message_count);
+  return (
+    (after.latest_message_id || null) !== (before.latest_message_id || null) ||
+    (after.latest_message_created_at || null) !== (before.latest_message_created_at || null) ||
+    (after.latest_message_preview || null) !== (before.latest_message_preview || null) ||
+    (beforeCount !== null && afterCount !== null && afterCount > beforeCount)
+  );
 }
 
 function extractMetric(text, label) {
@@ -179,25 +207,33 @@ async function storageStateExists() {
 }
 
 async function adminSessionState(page) {
-  return page.evaluate(async () => {
-    const client = window.supabase;
-    if (!client?.auth?.getSession) return "supabase_not_ready";
-    const { data: sessionData, error: sessionError } = await client.auth.getSession();
-    if (sessionError) return `session_error:${sessionError.message || "unknown"}`;
-    const session = sessionData?.session;
-    if (!session?.user?.id) return "no_session";
+  try {
+    return await page.evaluate(async () => {
+      const client = window.supabase;
+      if (!client?.auth?.getSession) return "supabase_not_ready";
+      const { data: sessionData, error: sessionError } = await client.auth.getSession();
+      if (sessionError) return `session_error:${sessionError.message || "unknown"}`;
+      const session = sessionData?.session;
+      if (!session?.user?.id) return "no_session";
 
-    const { data: employee, error: employeeError } = await client
-      .from("employees")
-      .select("role, active")
-      .eq("user_id", session.user.id)
-      .maybeSingle();
-    if (employeeError) return `employee_error:${employeeError.message || "unknown"}`;
-    if (!employee || employee.active === false) return "inactive_or_missing_employee";
+      const { data: employee, error: employeeError } = await client
+        .from("employees")
+        .select("role, active")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+      if (employeeError) return `employee_error:${employeeError.message || "unknown"}`;
+      if (!employee || employee.active === false) return "inactive_or_missing_employee";
 
-    const role = String(employee.role || "").toLowerCase();
-    return role === "admin" ? "admin" : `role:${role || "unknown"}`;
-  });
+      const role = String(employee.role || "").toLowerCase();
+      return role === "admin" ? "admin" : `role:${role || "unknown"}`;
+    });
+  } catch (error) {
+    const message = error?.message || String(error || "");
+    if (/Execution context was destroyed|Cannot find context|navigation/i.test(message)) {
+      return "navigation_in_progress";
+    }
+    throw error;
+  }
 }
 
 async function waitForAdminSession(page) {
@@ -481,6 +517,16 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
     const liveStartedAt = new Date().toISOString();
 
     if (envFlag(env, "EMAIL_TRIAGE_RUN_SYNC_RECENT")) {
+      const targetEbayConversationId = String(env.EMAIL_TRIAGE_SYNC_RECENT_TARGET_EBAY_CONVERSATION_ID || "").trim();
+      const targetConversationType = String(env.EMAIL_TRIAGE_SYNC_RECENT_TARGET_CONVERSATION_TYPE || "FROM_MEMBERS").trim();
+      const expectTargetUpdate = envFlag(env, "EMAIL_TRIAGE_EXPECT_SYNC_RECENT_TARGET_UPDATE");
+      const expectTargetSweep = envFlag(env, "EMAIL_TRIAGE_EXPECT_SYNC_RECENT_TARGET_SWEEP");
+      const targetBefore = targetEbayConversationId
+        ? await conversationByEbayId(client, targetEbayConversationId, targetConversationType)
+        : null;
+      const targetMessagesBefore = targetBefore
+        ? await conversationMessages(client, targetBefore.id)
+        : [];
       const exchange = await waitForFunctionResponse(
         page,
         "ebay-message-sync",
@@ -490,9 +536,53 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
       );
       assertSyncSafety(exchange);
       await assertSyncBannerMatches(page, exchange);
+      const counters = exchange.response?.counters || {};
+      expect(counters).toHaveProperty("canonicalDetailSweepCandidates");
+      expect(counters).toHaveProperty("canonicalDetailSweepRefreshed");
+      expect(counters).toHaveProperty("canonicalDetailSweepConversationIds");
+
+      let targetAfter = null;
+      let targetMessagesAfter = [];
+      let targetSwept = false;
+      let targetProcessedByProviderList = false;
+      if (targetEbayConversationId) {
+        expect(targetBefore, `Expected target eBay conversation ${targetEbayConversationId} to already exist in canonical storage.`).toBeTruthy();
+        targetAfter = await conversationByEbayId(client, targetEbayConversationId, targetConversationType);
+        targetMessagesAfter = targetAfter ? await conversationMessages(client, targetAfter.id) : [];
+        targetSwept = Array.isArray(counters.canonicalDetailSweepConversationIds) &&
+          counters.canonicalDetailSweepConversationIds.includes(targetEbayConversationId);
+        targetProcessedByProviderList = Array.isArray(counters.conversationIds) &&
+          counters.conversationIds.includes(targetEbayConversationId);
+        if (expectTargetSweep) {
+          expect(targetSwept, `Expected Sync Recent canonical detail sweep to refresh ${targetEbayConversationId}.`).toBe(true);
+        } else {
+          expect(
+            targetSwept || targetProcessedByProviderList,
+            `Expected Sync Recent to process ${targetEbayConversationId} via provider list or canonical detail sweep.`,
+          ).toBe(true);
+        }
+        expect(targetAfter?.last_detail_synced_at || null).not.toEqual(targetBefore?.last_detail_synced_at || null);
+        if (expectTargetUpdate) {
+          expect(conversationStateAdvanced(targetBefore, targetAfter)).toBe(true);
+          expect(summarizeMessages(targetMessagesAfter)).not.toEqual(summarizeMessages(targetMessagesBefore));
+        }
+      }
       report.add("Sync recent mailbox", "passed", {
         request: exchange.request,
         response: summarizeSyncPayload(exchange.response),
+        targetConversation: targetEbayConversationId
+          ? {
+            ebayConversationId: targetEbayConversationId,
+            conversationType: targetConversationType,
+            expectedContentUpdate: expectTargetUpdate,
+            sweptByCanonicalDetailSweep: targetSwept,
+            processedByProviderList: targetProcessedByProviderList,
+            before: summarizeConversationState(targetBefore),
+            after: summarizeConversationState(targetAfter),
+            messagesBefore: summarizeMessages(targetMessagesBefore),
+            messagesAfter: summarizeMessages(targetMessagesAfter),
+          }
+          : null,
       });
     } else {
       report.add("Sync recent mailbox", "skipped", {
