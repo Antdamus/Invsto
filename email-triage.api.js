@@ -332,6 +332,11 @@
         messages_inserted: Number(row.messages_inserted || 0),
         messages_updated: Number(row.messages_updated || 0),
         messages_rechecked: Number(metadata.messages_rechecked ?? counters.messages_rechecked ?? 0),
+        classification_processed: Number(metadata.classificationProcessed ?? metadata.classification_processed ?? 0),
+        classification_succeeded: Number(metadata.classificationSucceeded ?? metadata.classification_succeeded ?? 0),
+        classification_failed: Number(metadata.classificationFailed ?? metadata.classification_failed ?? 0),
+        classification_skipped: Number(metadata.classificationSkipped ?? metadata.classification_skipped ?? 0),
+        classified_count: Number(metadata.classified_count ?? metadata.classificationSucceeded ?? metadata.classification_succeeded ?? 0),
         pages_processed: Number(row.pages_fetched || 0),
         detail_pages_processed: Number(row.detail_pages_fetched || 0),
         warnings_count: Array.isArray(row.warnings) ? row.warnings.length : Number(metadata.warnings_count || 0),
@@ -341,6 +346,72 @@
         last_error_code: row.last_error_code || null,
         last_error_message: row.last_error_message || null,
       },
+    };
+  }
+
+  function normalizeEbayClassificationRun(row = {}) {
+    const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    const payload = {
+      ...metadata,
+      run_id: row.id || null,
+      runId: row.id || null,
+      status: row.status || "pending",
+      run_mode: row.run_mode || "",
+      force: row.force === true,
+      started_at: row.started_at || null,
+      completed_at: row.completed_at || null,
+      requested_limit: Number(row.requested_limit || 0),
+      requested: Number(row.requested_limit || 0),
+      target_count: Number(row.target_count || 0),
+      processed_count: Number(row.processed_count || 0),
+      processed: Number(row.processed_count || 0),
+      attempted_count: Number(row.attempted_count || 0),
+      attempted: Number(row.attempted_count || 0),
+      classified_count: Number(row.classified_count || 0),
+      actually_classified: Number(row.classified_count || 0),
+      succeeded_count: Number(row.classified_count || 0),
+      succeeded: Number(row.classified_count || 0),
+      failed_count: Number(row.failed_count || 0),
+      failed: Number(row.failed_count || 0),
+      skipped_count: Number(row.skipped_count || 0),
+      skipped: Number(row.skipped_count || 0),
+      remaining_unclassified: row.remaining_unclassified === null || row.remaining_unclassified === undefined ? null : Number(row.remaining_unclassified),
+      unclassified_before: row.unclassified_before === null || row.unclassified_before === undefined ? null : Number(row.unclassified_before),
+      unclassified_after: row.remaining_unclassified === null || row.remaining_unclassified === undefined ? null : Number(row.remaining_unclassified),
+      classification_version: row.classification_version || null,
+      prompt_version: row.prompt_version || null,
+      model_name: row.model_name || null,
+      duration_ms: Number(row.duration_ms || 0),
+      conversation_ids: Array.isArray(row.conversation_ids) ? row.conversation_ids : [],
+      succeeded_conversation_ids: Array.isArray(row.succeeded_conversation_ids) ? row.succeeded_conversation_ids : [],
+      failed_conversation_ids: Array.isArray(row.failed_conversation_ids) ? row.failed_conversation_ids : [],
+      skipped_conversation_ids: Array.isArray(row.skipped_conversation_ids) ? row.skipped_conversation_ids : [],
+      failures: Array.isArray(row.failures) ? row.failures : [],
+      skipped_results: Array.isArray(row.skipped_results) ? row.skipped_results : [],
+      queue_source: row.queue_source || null,
+      canonical_queue: row.canonical_queue || null,
+      safety: {
+        ebay_mutation_performed: false,
+        automatic_responses_sent: 0,
+        classification_triggered: Number(row.attempted_count || 0) > 0,
+      },
+    };
+    return {
+      id: row.id || null,
+      run_id: row.id || null,
+      run_mode: row.run_mode || "",
+      status: row.status || "pending",
+      started_at: row.started_at || null,
+      completed_at: row.completed_at || null,
+      requested_limit: Number(row.requested_limit || 0),
+      processed_count: Number(row.processed_count || 0),
+      classified_count: Number(row.classified_count || 0),
+      failed_count: Number(row.failed_count || 0),
+      skipped_count: Number(row.skipped_count || 0),
+      remaining_unclassified: payload.remaining_unclassified,
+      force: row.force === true,
+      metadata,
+      payload,
     };
   }
 
@@ -511,6 +582,7 @@
       eventsResult,
       checkpointsResult,
       syncRunsResult,
+      classificationRunsResult,
     ] = await Promise.all([
       countSupabaseRows(
         client
@@ -576,6 +648,11 @@
         .select("id, seller_account_id, run_type, status, conversation_type, conversation_page_limit, message_page_limit, max_conversation_pages, max_detail_pages_per_conversation, pages_fetched, detail_pages_fetched, conversations_seen, conversations_inserted, conversations_updated, messages_seen, messages_inserted, messages_updated, media_seen, errors, warnings, last_error_code, last_error_message, metadata, started_at, completed_at")
         .order("started_at", { ascending: false })
         .limit(12),
+      client
+        .from("ebay_conversation_classification_runs")
+        .select("id, run_mode, status, started_by, started_at, completed_at, requested_limit, target_count, processed_count, attempted_count, classified_count, failed_count, skipped_count, remaining_unclassified, unclassified_before, force, queue_source, canonical_queue, classification_version, prompt_version, model_name, duration_ms, conversation_ids, succeeded_conversation_ids, failed_conversation_ids, skipped_conversation_ids, failures, skipped_results, metadata, created_at, updated_at")
+        .order("started_at", { ascending: false })
+        .limit(12),
     ]);
 
     throwSupabaseReadError(classificationsResult.error, "ebay_classification_dashboard_failed");
@@ -585,6 +662,7 @@
     throwSupabaseReadError(eventsResult.error, "ebay_activity_dashboard_failed");
     throwSupabaseReadError(checkpointsResult.error, "ebay_backfill_checkpoint_dashboard_failed");
     throwSupabaseReadError(syncRunsResult.error, "ebay_sync_run_dashboard_failed");
+    throwSupabaseReadError(classificationRunsResult.error, "ebay_classification_run_dashboard_failed");
 
     const classifications = Array.isArray(classificationsResult.data) ? classificationsResult.data : [];
     const drafts = Array.isArray(draftsResult.data) ? draftsResult.data : [];
@@ -592,6 +670,7 @@
     const attempts = Array.isArray(attemptsResult.data) ? attemptsResult.data : [];
     const checkpoints = Array.isArray(checkpointsResult.data) ? checkpointsResult.data : [];
     const syncRuns = (Array.isArray(syncRunsResult.data) ? syncRunsResult.data : []).map(normalizeEbaySyncRun);
+    const classificationRuns = (Array.isArray(classificationRunsResult.data) ? classificationRunsResult.data : []).map(normalizeEbayClassificationRun);
     const backfillProgress = summarizeBackfillCheckpoints(checkpoints);
     const dashboardMaps = {
       attemptsById: mapDashboardRowsById(attempts),
@@ -607,6 +686,7 @@
       : latestSyncEvent?.payload || {};
     const latestSyncRun = syncRuns.find((run) => String(run.run_type || "") !== "backfill") || null;
     const latestSyncMetricPayload = Object.keys(latestSyncPayload).length ? latestSyncPayload : latestSyncRun?.payload || {};
+    const latestClassificationRun = classificationRuns[0] || null;
     const latestMessageRechecked = Number(
       latestSyncMetricPayload.messages_rechecked ??
       Math.max(Number(latestSyncMetricPayload.messages_seen || 0) - Number(latestSyncMetricPayload.messages_inserted || 0), 0)
@@ -662,6 +742,11 @@
         latest_sync_messages_changed: Number(latestSyncMetricPayload.messages_updated || 0),
         latest_sync_messages_updated: Number(latestSyncMetricPayload.messages_updated || 0),
         latest_sync_canonical_total_after: Number(latestSyncMetricPayload.canonical_total_conversations || canonicalConversations),
+        latest_classification_processed: Number(latestClassificationRun?.processed_count || 0),
+        latest_classification_classified: Number(latestClassificationRun?.classified_count || 0),
+        latest_classification_failed: Number(latestClassificationRun?.failed_count || 0),
+        latest_classification_skipped: Number(latestClassificationRun?.skipped_count || 0),
+        latest_classification_remaining_unclassified: latestClassificationRun?.remaining_unclassified ?? Math.max(Number(canonicalConversations || 0) - Number(currentClassifications || 0), 0),
       },
       latest_sync: {
         event: latestSyncEvent,
@@ -679,6 +764,13 @@
         latest_paused: backfillProgress.checkpoints.find((row) => ["paused", "idle"].includes(String(row.status || ""))) || null,
         latest_failed: checkpoints.find((row) => row.status === "failed") || null,
       },
+      classification_runs: {
+        latest: latestClassificationRun,
+        runs: classificationRuns,
+        active: classificationRuns.filter((run) => ["pending", "running"].includes(String(run.status || ""))),
+        latest_completed: classificationRuns.find((run) => ["succeeded", "partial_success", "failed"].includes(String(run.status || ""))) || null,
+      },
+      sync_runs: syncRuns,
       approval_queue: {
         current_drafts: currentDrafts.length,
         awaiting_approval: awaitingApproval.length,

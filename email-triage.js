@@ -4984,7 +4984,7 @@
           failed: ${escapeHtml(formatContextNumber(failed))};
           remaining unclassified: ${escapeHtml(formatContextNumber(remainingUnclassified))}.
         </div>
-        ${timedOut ? `<div class="classification-notice">Checked latest classification rows, mailbox counts, and operational events before showing this summary.</div>` : ""}
+        ${timedOut ? `<div class="classification-notice">Checked durable classification run state, mailbox counts, and operational events before showing this summary.</div>` : ""}
         ${Object.keys(skippedReasons).length ? `
           <div class="inbox-skipped-reasons">
             ${Object.entries(skippedReasons).map(([reason, count]) => `<b>${escapeHtml(humanizeValue(reason))} <em>${escapeHtml(count)}</em></b>`).join("")}
@@ -5019,7 +5019,7 @@
       els.ebayConversationSyncResult.innerHTML = `<div class="classification-notice is-error">eBay sync failed: ${escapeHtml(error)}</div>`;
       return;
     }
-    if (result?.requestTimedOut === true) {
+    if (result?.requestTimedOut === true && result?.durable_run_found !== true) {
       els.ebayConversationSyncResult.innerHTML = `
         <div class="classification-notice is-warning">
           <strong>eBay operation request timed out.</strong>
@@ -5048,15 +5048,26 @@
     const messagesSeen = Number(counters.messagesSeen || counters.messages_processed || 0);
     const messagesInserted = Number(counters.messagesInserted ?? counters.messages_inserted ?? 0);
     const messagesChanged = Number(counters.messagesUpdated ?? counters.messages_updated ?? 0);
+    const classificationSucceeded = Number(counters.classificationSucceeded ?? counters.classification_succeeded ?? result?.classification_succeeded ?? 0);
+    const classificationFailed = Number(counters.classificationFailed ?? counters.classification_failed ?? result?.classification_failed ?? 0);
+    const classificationSkipped = Number(counters.classificationSkipped ?? counters.classification_skipped ?? result?.classification_skipped ?? 0);
     const messagesRechecked = Number(
       counters.messagesRechecked ??
       counters.messages_rechecked ??
       result?.messages_rechecked ??
       Math.max(messagesSeen - messagesInserted, 0)
     );
+    const recovered = result?.requestTimedOut === true && result?.durable_run_found === true;
+    const lifecycleStatus = String(result?.status || "").toLowerCase();
+    const noticeClass = lifecycleStatus === "failed"
+      ? "is-error"
+      : lifecycleStatus === "partial_success" || classificationFailed > 0 || warnings.length || Number(counters.errors || 0) > 0
+      ? "is-warning"
+      : "is-success";
     els.ebayConversationSyncResult.innerHTML = `
-      <div class="classification-notice is-success">
-        ${escapeHtml(completionLabel)}.
+      <div class="classification-notice ${escapeHtml(noticeClass)}">
+        ${escapeHtml(recovered ? `${completionLabel}; durable run state recovered after browser timeout` : completionLabel)}.
+        Run id: ${escapeHtml(result?.runId ? compactId(result.runId) : "--")};
         Conversations seen: ${escapeHtml(formatContextNumber(counters.conversationsSeen))};
         inserted: ${escapeHtml(formatContextNumber(counters.conversationsInserted || 0))};
         updated: ${escapeHtml(formatContextNumber(counters.conversationsUpdated || 0))};
@@ -5069,8 +5080,13 @@
         canonical total: ${escapeHtml(canonicalTotal === null || canonicalTotal === undefined ? "--" : formatContextNumber(canonicalTotal))};
         pages: ${escapeHtml(formatContextNumber(counters.pagesFetched || 0))};
         classification: ${escapeHtml(humanizeValue(classificationMode))};
+        classified: ${escapeHtml(formatContextNumber(classificationSucceeded))};
+        classification failed: ${escapeHtml(formatContextNumber(classificationFailed))};
+        classification skipped: ${escapeHtml(formatContextNumber(classificationSkipped))};
+        remaining unclassified: ${escapeHtml(result?.remainingUnclassified === null || result?.remainingUnclassified === undefined ? "--" : formatContextNumber(result.remainingUnclassified))};
         warnings: ${escapeHtml(formatContextNumber(warnings.length || counters.errors || 0))}.
       </div>
+      ${recovered ? `<div class="classification-notice">Checked durable sync run state, latest activity event, mailbox counts, and checkpoint counters before showing this summary.</div>` : ""}
       ${isBackfill && progress ? `
         <div class="inbox-skipped-reasons">
           <b>Status <em>${escapeHtml(humanizeValue(progressStatus || "paused"))}</em></b>
@@ -5701,9 +5717,81 @@
     });
   }
 
+  function ebayDashboardSyncRuns(snapshot = {}) {
+    const ebay = snapshot?.ebay && typeof snapshot.ebay === "object" ? snapshot.ebay : {};
+    return safeArray(ebay.sync_runs);
+  }
+
+  function latestDurableSyncRun(snapshot, options = {}) {
+    const startedAtMs = new Date(options.startedAt || 0).getTime();
+    const minStartedAtMs = Number.isFinite(startedAtMs) ? startedAtMs - 5000 : 0;
+    return ebayDashboardSyncRuns(snapshot).find((run) => {
+      if (options.runType && String(run.run_type || "") !== String(options.runType)) return false;
+      const payload = run.payload && typeof run.payload === "object" ? run.payload : {};
+      const metadata = run.metadata && typeof run.metadata === "object" ? run.metadata : {};
+      const mode = payload.classification_mode || payload.classificationMode || metadata.classificationMode || metadata.classification_mode || "none";
+      if (options.classificationMode && String(mode || "none") !== String(options.classificationMode || "none")) return false;
+      const runMs = new Date(run.started_at || payload.started_at || 0).getTime();
+      return Number.isFinite(runMs) ? runMs >= minStartedAtMs : true;
+    }) || null;
+  }
+
+  function syncResultFromDurableRun(run, snapshot = {}, options = {}) {
+    if (!run) return null;
+    const payload = run.payload && typeof run.payload === "object" ? run.payload : {};
+    const metadata = run.metadata && typeof run.metadata === "object" ? run.metadata : {};
+    const backfillProgress = payload.backfillProgress || payload.backfill_progress || metadata.backfillProgress || metadata.backfill_progress || snapshot?.ebay?.backfill || null;
+    return {
+      ok: true,
+      requestTimedOut: options.timedOut === true,
+      reconciled: true,
+      durable_run_found: true,
+      runType: run.run_type || options.runType || "manual",
+      classificationMode: payload.classification_mode || payload.classificationMode || metadata.classificationMode || metadata.classification_mode || options.classificationMode || "none",
+      runId: run.id || run.run_id || payload.sync_run_id || null,
+      status: run.status || payload.status || null,
+      counters: {
+        pagesFetched: Number(payload.pages_processed || 0),
+        detailPagesFetched: Number(payload.detail_pages_processed || 0),
+        conversationsSeen: Number(payload.conversations_seen || 0),
+        conversationsInserted: Number(payload.conversations_inserted || 0),
+        conversationsUpdated: Number(payload.conversations_updated || 0),
+        conversationsUnchanged: Number(payload.conversations_unchanged || 0),
+        conversationsSkipped: Number(payload.conversations_skipped || 0),
+        messagesSeen: Number(payload.messages_seen || payload.messages_processed || 0),
+        messagesInserted: Number(payload.messages_inserted || 0),
+        messagesUpdated: Number(payload.messages_updated || 0),
+        messagesRechecked: Number(payload.messages_rechecked || 0),
+        classificationProcessed: Number(payload.classification_processed || 0),
+        classificationSucceeded: Number(payload.classification_succeeded || payload.classified_count || 0),
+        classificationFailed: Number(payload.classification_failed || 0),
+        classificationSkipped: Number(payload.classification_skipped || 0),
+        warnings: safeArray(run.warnings || payload.warnings),
+        errors: Number(payload.failed_count || 0),
+      },
+      backfillProgress,
+      canonicalTotalConversations: payload.canonical_total_conversations ?? metadata.canonicalTotalConversations ?? snapshot?.ebay?.metrics?.canonical_conversations ?? null,
+      unclassifiedBefore: payload.unclassified_before ?? metadata.unclassifiedBefore ?? null,
+      unclassifiedAfter: payload.unclassified_after ?? metadata.unclassifiedAfter ?? null,
+      remainingUnclassified: payload.remaining_unclassified ?? payload.unclassified_after ?? metadata.unclassifiedAfter ?? null,
+    };
+  }
+
+  async function refreshSyncDurableState(context, options = {}) {
+    if (options.delayMs) await waitForEbayReconciliation(options.delayMs);
+    await loadEbayConversationList(context, { limit: options.reloadLimit || 100 });
+    const snapshot = await loadOperationalDashboard(context, { keepPrevious: true });
+    const durableRun = latestDurableSyncRun(snapshot, options);
+    return syncResultFromDurableRun(durableRun, snapshot, {
+      ...options,
+      timedOut: true,
+    });
+  }
+
   async function runEbayConversationImport(context, options = {}) {
     const runType = options.runType || "manual";
     const classificationMode = options.classificationMode || "none";
+    const startedAt = new Date().toISOString();
     setEbayConversationState({
       ebayConversationSyncLoading: true,
       ebayConversationSyncOperation: {
@@ -5740,11 +5828,18 @@
     } catch (error) {
       const code = error.code || error.message || "ebay_message_sync_failed";
       if (code === "request_timeout") {
+        const durableResult = await refreshSyncDurableState(context, {
+          startedAt,
+          runType,
+          classificationMode,
+          reloadLimit: options.reloadLimit || 100,
+          delayMs: 1500,
+        });
         setEbayConversationState({
           ebayConversationSyncLoading: false,
           ebayConversationSyncOperation: null,
           ebayConversationSyncError: null,
-          ebayConversationSyncResult: {
+          ebayConversationSyncResult: durableResult || {
             ok: true,
             requestTimedOut: true,
             reconciled: true,
@@ -5752,8 +5847,6 @@
             classificationMode,
           },
         });
-        await loadEbayConversationList(context, { limit: options.reloadLimit || 100 });
-        loadOperationalDashboard(context, { keepPrevious: true });
         return;
       }
       setEbayConversationState({
@@ -5803,9 +5896,25 @@
     return {};
   }
 
+  function ebayDashboardClassificationRuns(snapshot = {}) {
+    const ebay = snapshot?.ebay && typeof snapshot.ebay === "object" ? snapshot.ebay : {};
+    const classificationRuns = ebay.classification_runs && typeof ebay.classification_runs === "object"
+      ? ebay.classification_runs
+      : {};
+    return safeArray(classificationRuns.runs);
+  }
+
   function latestDurableClassificationRun(snapshot, options = {}) {
     const startedAtMs = new Date(options.startedAt || 0).getTime();
     const minStartedAtMs = Number.isFinite(startedAtMs) ? startedAtMs - 5000 : 0;
+    const durableRun = ebayDashboardClassificationRuns(snapshot).find((run) => {
+      if (run.force !== undefined && Boolean(run.force) !== Boolean(options.force)) return false;
+      const payload = run.payload && typeof run.payload === "object" ? run.payload : run;
+      if (payload.force !== undefined && Boolean(payload.force) !== Boolean(options.force)) return false;
+      const eventMs = new Date(run.started_at || payload.started_at || 0).getTime();
+      return Number.isFinite(eventMs) ? eventMs >= minStartedAtMs : true;
+    });
+    if (durableRun) return durableRun;
     return ebayDashboardEvents(snapshot).find((event) => {
       if (event.event_type !== "conversation_classified") return false;
       const payload = ebayActivityPayload(event);
@@ -5838,6 +5947,27 @@
 
   function classificationResultFromDurableEvent(event, options = {}) {
     if (!event) return null;
+    if (event.run_mode || event.payload?.run_mode) {
+      const run = event.payload && typeof event.payload === "object" ? event.payload : event;
+      return classificationResultWithVisibility({
+        ...run,
+        run_id: event.run_id || event.id || run.run_id || null,
+        runId: event.run_id || event.id || run.runId || null,
+        processed: run.processed_count ?? run.processed,
+        succeeded: run.succeeded_count ?? run.classified_count ?? run.succeeded,
+        failed: run.failed_count ?? run.failed,
+        skipped: run.skipped_count ?? run.skipped,
+        attempted: run.attempted_count ?? run.attempted,
+        failures: run.failures || [],
+        skipped_results: run.skipped_results || [],
+      }, {
+        ...options,
+        timedOut: true,
+        reconciled: true,
+        durableEventFound: true,
+        unclassifiedAfter: options.unclassifiedAfter ?? run.remaining_unclassified ?? run.unclassified_after,
+      });
+    }
     const payload = ebayActivityPayload(event);
     const run = payload.classification_run && typeof payload.classification_run === "object" ? payload.classification_run : payload;
     return classificationResultWithVisibility({
@@ -5860,12 +5990,20 @@
 
   async function refreshClassificationDurableState(context, options = {}) {
     if (options.delayMs) await waitForEbayReconciliation(options.delayMs);
-    await loadEbayConversationList(context, {
-      limit: options.reloadLimit || 100,
-      preserveSelectionId: options.preserveSelectionId || adminClassificationState.selectedEbayConversationId,
-      preserveClassificationResult: true,
-    });
-    const snapshot = await loadOperationalDashboard(context, { keepPrevious: true });
+    const attempts = Math.max(Number(options.maxAttempts || 1), 1);
+    let snapshot = null;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      await loadEbayConversationList(context, {
+        limit: options.reloadLimit || 100,
+        preserveSelectionId: options.preserveSelectionId || adminClassificationState.selectedEbayConversationId,
+        preserveClassificationResult: true,
+      });
+      snapshot = await loadOperationalDashboard(context, { keepPrevious: true });
+      const run = latestDurableClassificationRun(snapshot, options);
+      const status = String(run?.status || run?.payload?.status || "").toLowerCase();
+      if (!run || ["succeeded", "partial_success", "failed"].includes(status) || attempt + 1 >= attempts) break;
+      await waitForEbayReconciliation(options.intervalMs || 2500);
+    }
     return {
       snapshot,
       unclassifiedAfter: ebayUnclassifiedSmartCount(adminClassificationState),
@@ -5966,6 +6104,10 @@
         const refreshed = await refreshClassificationDurableState(context, {
           preserveSelectionId: adminClassificationState.selectedEbayConversationId,
           delayMs: 1500,
+          startedAt,
+          force,
+          maxAttempts: 8,
+          intervalMs: 2500,
         });
         const durableEvent = latestDurableClassificationRun(refreshed.snapshot, { startedAt, force });
         const durableResult = classificationResultFromDurableEvent(durableEvent, {

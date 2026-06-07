@@ -222,12 +222,32 @@ export async function recentActivityEvents(client, options = {}) {
 
 export async function recentSyncRuns(client, options = {}) {
   const params = {
-    select: "id,run_type,status,conversation_page_limit,message_page_limit,pages_fetched,conversations_seen,messages_seen,messages_inserted,messages_updated,metadata,started_at,completed_at",
+    select: "id,run_type,status,conversation_page_limit,message_page_limit,pages_fetched,conversations_seen,conversations_inserted,conversations_updated,messages_seen,messages_inserted,messages_updated,metadata,started_at,completed_at",
     order: "started_at.desc",
     limit: String(options.limit || 10),
   };
   if (options.since) params.started_at = `gte.${options.since}`;
   return client.select("ebay_message_sync_runs", params);
+}
+
+export async function recentClassificationRuns(client, options = {}) {
+  const params = {
+    select: "id,run_mode,status,started_at,completed_at,requested_limit,target_count,processed_count,attempted_count,classified_count,failed_count,skipped_count,remaining_unclassified,unclassified_before,force,queue_source,canonical_queue,classification_version,prompt_version,model_name,duration_ms,conversation_ids,succeeded_conversation_ids,failed_conversation_ids,skipped_conversation_ids,failures,skipped_results,metadata",
+    order: "started_at.desc",
+    limit: String(options.limit || 10),
+  };
+  if (options.since) params.started_at = `gte.${options.since}`;
+  return client.select("ebay_conversation_classification_runs", params);
+}
+
+export async function classificationsForRun(client, runId) {
+  if (!runId) return [];
+  return client.select("ebay_conversation_classifications", {
+    select: "id,conversation_id,is_current,classification_status,validation_metadata,created_at",
+    "validation_metadata->>classification_run_id": `eq.${runId}`,
+    order: "created_at.desc",
+    limit: "250",
+  });
 }
 
 export async function backfillCheckpoints(client) {
@@ -248,6 +268,7 @@ export function summarizeSyncPayload(payload = {}) {
     runType: payload?.runType,
     classificationMode: payload?.classificationMode,
     runId: payload?.runId,
+    status: payload?.status,
     canonicalTotalConversations: payload?.canonicalTotalConversations,
     unclassifiedBefore: payload?.unclassifiedBefore,
     unclassifiedAfter: payload?.unclassifiedAfter,
@@ -281,6 +302,8 @@ export function summarizeClassificationPayload(payload = {}) {
     error: payload?.error,
     phase: payload?.phase,
     mode: payload?.mode,
+    run_id: payload?.run_id || payload?.runId,
+    status: payload?.status,
     force: payload?.force,
     run_mode: payload?.run_mode,
     requested: payload?.requested,
@@ -309,4 +332,3 @@ export function summarizeMessages(rows = []) {
     lastMessageId: messages.at(-1)?.ebay_message_id || null,
   };
 }
-

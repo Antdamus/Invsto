@@ -152,6 +152,7 @@
   function eventStatusVariant(event = {}) {
     const counters = event.counters && typeof event.counters === "object" ? event.counters : {};
     const status = String(event.status || "").toLowerCase();
+    if (status.includes("partial")) return "warning";
     const failed = status.includes("fail") || Number(counters.failed_count || 0) > 0 || Number(eventPayload(event).failed || 0) > 0;
     if (failed) return "danger";
     if (status.includes("running") || status.includes("pending")) return "warning";
@@ -185,8 +186,12 @@
       message_sync_completed: "Recent incremental mailbox scan completed as one aggregate operation.",
       message_sync_failed: "Recent incremental mailbox scan failed as one aggregate operation.",
       message_backfill_started: "Historical eBay message archive import started.",
-      message_backfill_progress: "Historical eBay message archive import chunk completed and paused at a safe checkpoint.",
-      message_backfill_completed: "Historical eBay message archive import completed.",
+      message_backfill_progress: String(status || "").toLowerCase().includes("partial")
+        ? "Historical eBay message archive chunk completed with partial success; inspect classification counts below."
+        : "Historical eBay message archive import chunk completed and paused at a safe checkpoint.",
+      message_backfill_completed: String(status || "").toLowerCase().includes("partial")
+        ? "Historical eBay message archive completed with partial success; inspect classification counts below."
+        : "Historical eBay message archive import completed.",
       message_backfill_failed: "Historical eBay message archive import failed.",
     };
     const description = firstValue([
@@ -759,6 +764,9 @@
     const latestSync = ebay.latest_sync || {};
     const latestSyncRun = latestSync.run || {};
     const activeSyncRuns = Array.isArray(latestSync.active_runs) ? latestSync.active_runs : [];
+    const classificationRuns = ebay.classification_runs || {};
+    const latestClassificationRun = classificationRuns.latest || {};
+    const activeClassificationRuns = Array.isArray(classificationRuns.active) ? classificationRuns.active : [];
     const backfill = ebay.backfill || {};
     const checkpoints = Array.isArray(backfill.checkpoints) ? backfill.checkpoints : [];
     const activeBackfills = Array.isArray(backfill.active) ? backfill.active : [];
@@ -774,6 +782,10 @@
       : "muted";
     const backfillStatus = String(backfill.status || "not_started");
     const backfillStatusVariant = backfillStatus === "completed" ? "success" : backfillStatus === "failed" ? "danger" : backfillStatus === "running" ? "warning" : "muted";
+    const classificationStatus = activeClassificationRuns.length
+      ? "running"
+      : latestClassificationRun.status || "not_started";
+    const classificationStatusVariant = eventStatusVariant({ status: classificationStatus });
     const events = Array.isArray(ebay.recent_operational_events) ? ebay.recent_operational_events : [];
     const blocked = ebay.ok === false || Number(metrics.send_attempts_failed || 0) > 0 || safety.automatic_responses_sent > 0;
 
@@ -827,6 +839,28 @@
               { label: "Messages inserted", value: metrics.latest_sync_messages_inserted },
               { label: "Messages changed", value: metrics.latest_sync_messages_changed ?? metrics.latest_sync_messages_updated },
               { label: "Canonical after sync", value: metrics.latest_sync_canonical_total_after ?? metrics.canonical_conversations },
+            ], utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel operational-panel-wide">
+          <div class="operational-panel-head">
+            <strong>Latest Classification Batch</strong>
+            ${dashboardBadge(activeClassificationRuns.length ? "Running" : utils.humanizeValue(classificationStatus), activeClassificationRuns.length ? "warning" : classificationStatusVariant, utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Lifecycle status", html: dashboardBadge(utils.humanizeValue(classificationStatus), classificationStatusVariant, utils) },
+              { label: "Run id", value: latestClassificationRun.id ? utils.compactId(latestClassificationRun.id) : "--" },
+              { label: "Mode", value: latestClassificationRun.payload?.run_mode ? utils.humanizeValue(latestClassificationRun.payload.run_mode) : "--" },
+              { label: "Started", value: latestClassificationRun.started_at ? utils.formatDateTime(latestClassificationRun.started_at) : "--" },
+              { label: "Completed", value: latestClassificationRun.completed_at ? utils.formatDateTime(latestClassificationRun.completed_at) : "--" },
+              { label: "Requested limit", value: latestClassificationRun.payload?.requested_limit ?? latestClassificationRun.requested_limit ?? "--" },
+              { label: "Processed", value: metrics.latest_classification_processed },
+              { label: "Classified", value: metrics.latest_classification_classified },
+              { label: "Failed", value: metrics.latest_classification_failed },
+              { label: "Skipped", value: metrics.latest_classification_skipped },
+              { label: "Remaining unclassified", value: metrics.latest_classification_remaining_unclassified ?? "--" },
             ], utils)}
           </div>
         </section>

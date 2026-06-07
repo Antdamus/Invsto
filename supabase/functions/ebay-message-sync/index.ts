@@ -1840,7 +1840,7 @@ async function recordBackfillActivityEvent(options: {
   counters: Counters;
   startedMs: number;
   eventType: "message_backfill_started" | "message_backfill_progress" | "message_backfill_completed" | "message_backfill_failed";
-  status: "pending" | "succeeded" | "failed" | "warning";
+  status: "pending" | "running" | "succeeded" | "partial_success" | "failed" | "warning";
   title: string;
   detail: string;
   extra?: JsonRecord;
@@ -1946,7 +1946,7 @@ async function recordSyncActivityEvent(options: {
   counters: Counters;
   startedMs: number;
   eventType: "message_sync_completed" | "message_sync_failed";
-  status: "succeeded" | "failed" | "warning";
+  status: "succeeded" | "partial_success" | "failed" | "warning";
   extra?: JsonRecord;
 }) {
   const summary = syncEventSummary(options.input, options.counters, options.startedMs, options.extra || {});
@@ -2180,6 +2180,7 @@ serve(async (req) => {
     if (input.runType === "backfill") {
       const failed = counters.pagesFailed + counters.classificationFailed + counters.errors;
       const completed = backfillProgress?.completed === true;
+      const eventStatus = failed > 0 ? "partial_success" : "succeeded";
       await recordBackfillActivityEvent({
         supabase,
         input,
@@ -2188,9 +2189,13 @@ serve(async (req) => {
         counters,
         startedMs,
         eventType: completed ? "message_backfill_completed" : "message_backfill_progress",
-        status: failed > 0 ? "warning" : "succeeded",
-        title: completed ? "Backfill Completed" : "Backfill Progress",
-        detail: completed
+        status: eventStatus,
+        title: failed > 0
+          ? (completed ? "Backfill Completed With Partial Success" : "Backfill Chunk Partial Success")
+          : (completed ? "Backfill Completed" : "Backfill Progress"),
+        detail: failed > 0
+          ? `Historical eBay message backfill chunk completed with partial success. Imported ${counters.conversationsInserted} conversations and ${counters.messagesInserted} messages; classified ${counters.classificationSucceeded}; failed classification ${counters.classificationFailed}; remaining unclassified: ${unclassifiedAfter ?? "unknown"}.`
+          : completed
           ? `Historical eBay message backfill completed. Processed ${counters.conversationsSeen} conversations and ${counters.messagesSeen} messages in the final chunk.`
           : `Historical eBay message backfill chunk completed. Processed ${counters.conversationsSeen} conversations and ${counters.messagesSeen} messages; resume from checkpoint for the next chunk.`,
         extra: {
@@ -2212,7 +2217,7 @@ serve(async (req) => {
         counters,
         startedMs,
         eventType: "message_sync_completed",
-        status: failed > 0 ? "warning" : "succeeded",
+        status: failed > 0 ? "partial_success" : "succeeded",
         extra: {
           canonical_total_conversations: canonicalTotalConversations,
           unclassified_before: unclassifiedBefore,

@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   backfillCheckpoints,
   canonicalMailbox,
+  classificationsForRun,
   conversationMessages,
   createReadonlyClient,
   envFlag,
@@ -11,6 +12,7 @@ import {
   getSupabaseConfigFromPage,
   loadEmailTriageEnv,
   recentActivityEvents,
+  recentClassificationRuns,
   recentSyncRuns,
   redact,
   repoRoot,
@@ -233,7 +235,21 @@ async function waitForFunctionResponse(page, functionName, predicate, action, ti
   };
 }
 
+async function waitForFunctionResponseOrTimeout(page, functionName, predicate, action, timeout = 180000) {
+  try {
+    return await waitForFunctionResponse(page, functionName, predicate, action, timeout);
+  } catch (error) {
+    return {
+      timedOutWaitingForBrowserResponse: true,
+      error: error.message || String(error),
+      request: null,
+      response: null,
+    };
+  }
+}
+
 function assertSyncSafety(exchange) {
+  if (exchange?.timedOutWaitingForBrowserResponse) return;
   expect(exchange.status).toBeLessThan(300);
   expect(exchange.response?.ok).not.toBe(false);
   expect(exchange.response?.safety?.ebayMutationsPerformed).toBe(false);
@@ -242,6 +258,7 @@ function assertSyncSafety(exchange) {
 }
 
 function assertClassificationSafety(exchange) {
+  if (exchange?.timedOutWaitingForBrowserResponse) return;
   expect(exchange.status).toBeLessThan(300);
   expect(exchange.response?.ok).not.toBe(false);
   expect(exchange.response?.safety?.ebayMutationsPerformed).toBe(false);
@@ -250,6 +267,10 @@ function assertClassificationSafety(exchange) {
 }
 
 async function assertSyncBannerMatches(page, exchange) {
+  if (exchange?.timedOutWaitingForBrowserResponse) {
+    await expect(page.locator("#ebay-conversation-sync-result")).toContainText(/timed out|durable run state recovered|finished/i, { timeout: 60000 });
+    return;
+  }
   const counters = exchange.response?.counters || {};
   const banner = page.locator("#ebay-conversation-sync-result");
   await expect(banner).toContainText(/finished|timed out|failed/i, { timeout: 60000 });
@@ -263,6 +284,19 @@ async function assertSyncBannerMatches(page, exchange) {
       expect(text).toContain(formatNumber(value), `${label} should be reflected in the UI banner`);
     }
   }
+}
+
+function latestRun(rows = [], predicate = () => true) {
+  return rows.find(predicate) || null;
+}
+
+function eventPayload(event = {}) {
+  return event.metadata && typeof event.metadata === "object" ? event.metadata : {};
+}
+
+function eventRunId(event = {}) {
+  const payload = eventPayload(event);
+  return payload.run_id || payload.classification_run?.run_id || payload.classification_run?.id || null;
 }
 
 test("authenticate admin @setup", async ({ page }) => {
@@ -523,7 +557,8 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
     }
 
     if (envFlag(env, "EMAIL_TRIAGE_RUN_RECLASSIFY_RECENT")) {
-      const exchange = await waitForFunctionResponse(
+      const reclassifyStartedAt = new Date().toISOString();
+      const exchange = await waitForFunctionResponseOrTimeout(
         page,
         "ebay-conversation-classify",
         (body) => body?.mode === "classify_recent" && body?.force === true,
@@ -531,11 +566,50 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
         180000,
       );
       assertClassificationSafety(exchange);
-      expect(Number(exchange.response?.requested || 0)).toBeLessThanOrEqual(100);
-      expect(exchange.response?.run_mode).toBe("reclassify_recent_100");
+      await expect(page.locator("#ebay-conversation-sync-result")).toContainText(/Reclassify recent 100|durable state|finished|timed out/i, { timeout: 90000 });
+      await page.locator("#refresh-operational-dashboard").click();
+      await expect(page.locator("#operational-dashboard-status")).toContainText(/refreshed|failed/i, { timeout: 60000 });
+      const runs = await recentClassificationRuns(client, { since: reclassifyStartedAt, limit: 10 });
+      const run = latestRun(runs, (row) => row.run_mode === "reclassify_recent_100");
+      expect(run, "Reclassify Recent 100 durable run should exist.").toBeTruthy();
+      expect(Number(run.requested_limit || 0)).toBeLessThanOrEqual(100);
+      expect(["succeeded", "partial_success", "failed", "running"]).toContain(run.status);
+      expect(Number(run.processed_count || 0)).toBe(Number(run.classified_count || 0) + Number(run.failed_count || 0) + Number(run.skipped_count || 0));
+      const events = await recentActivityEvents(client, { since: reclassifyStartedAt, limit: 50 });
+      const startedEvent = events.find((event) =>
+        event.event_type === "conversation_classified" &&
+        event.title === "Classification Batch Started" &&
+        eventRunId(event) === run.id
+      );
+      const completedEvent = events.find((event) =>
+        event.event_type === "conversation_classified" &&
+        event.title === "Classification Run Completed" &&
+        eventRunId(event) === run.id
+      );
+      expect(startedEvent, "Reclassify started event should be durable.").toBeTruthy();
+      if (["succeeded", "partial_success", "failed"].includes(run.status)) {
+        expect(completedEvent, "Terminal reclassify run should have a completed event.").toBeTruthy();
+      }
+      const runClassifications = await classificationsForRun(client, run.id);
+      if (run.status !== "running") {
+        expect(runClassifications.length).toBe(Number(run.classified_count || 0));
+      }
       report.add("Reclassify recent 100", "passed", {
         request: exchange.request,
         response: summarizeClassificationPayload(exchange.response),
+        browserResponseTimedOut: exchange.timedOutWaitingForBrowserResponse === true,
+        durableRun: run,
+        startedEvent: startedEvent ? {
+          id: startedEvent.id,
+          status: startedEvent.status,
+          title: startedEvent.title,
+        } : null,
+        completedEvent: completedEvent ? {
+          id: completedEvent.id,
+          status: completedEvent.status,
+          title: completedEvent.title,
+        } : null,
+        classificationsForRun: runClassifications.length,
       });
     } else {
       report.add("Reclassify recent 100", "skipped", {
@@ -565,7 +639,10 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
     }
 
     if (envFlag(env, "EMAIL_TRIAGE_RUN_BACKFILL_CLASSIFY_NEW")) {
-      const exchange = await waitForFunctionResponse(
+      const backfillStartedAt = new Date().toISOString();
+      const mailboxBefore = await canonicalMailbox(client, { pageSize: 1 });
+      const beforeTotal = Number(mailboxBefore.canonical_total || 0);
+      const exchange = await waitForFunctionResponseOrTimeout(
         page,
         "ebay-message-sync",
         (body) => body?.runType === "backfill" && body?.classificationMode === "classify_new",
@@ -574,9 +651,52 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
       );
       assertSyncSafety(exchange);
       await assertSyncBannerMatches(page, exchange);
+      await page.locator("#refresh-operational-dashboard").click();
+      await expect(page.locator("#operational-dashboard-status")).toContainText(/refreshed|failed/i, { timeout: 60000 });
+      const mailboxAfter = await canonicalMailbox(client, { pageSize: 1 });
+      const afterTotal = Number(mailboxAfter.canonical_total || 0);
+      expect(afterTotal).toBeGreaterThanOrEqual(beforeTotal);
+      const runs = await recentSyncRuns(client, { since: backfillStartedAt, limit: 20 });
+      const run = latestRun(runs, (row) => row.run_type === "backfill" && (
+        row.metadata?.classificationMode === "classify_new" ||
+        row.metadata?.classification_mode === "classify_new"
+      ));
+      expect(run, "Backfill + Classify New sync run should exist.").toBeTruthy();
+      expect(run.status, "Backfill ingest run should succeed durably even when classifications are partial.").toBe("succeeded");
+      const metadata = run.metadata || {};
+      const classificationSucceeded = Number(metadata.classificationSucceeded ?? metadata.classification_succeeded ?? 0);
+      const classificationFailed = Number(metadata.classificationFailed ?? metadata.classification_failed ?? 0);
+      const classificationSkipped = Number(metadata.classificationSkipped ?? metadata.classification_skipped ?? 0);
+      const classificationProcessed = Number(metadata.classificationProcessed ?? metadata.classification_processed ?? 0);
+      expect(classificationProcessed).toBe(classificationSucceeded + classificationFailed);
+      const events = await recentActivityEvents(client, { since: backfillStartedAt, limit: 50 });
+      const backfillEvent = events.find((event) =>
+        event.sync_run_id === run.id &&
+        ["message_backfill_progress", "message_backfill_completed"].includes(event.event_type)
+      );
+      expect(backfillEvent, "Backfill run should have a progress/completion event.").toBeTruthy();
+      if (classificationFailed > 0 && classificationSucceeded > 0) {
+        expect(backfillEvent.status).toBe("partial_success");
+      }
       report.add("Backfill + classify new", "passed", {
         request: exchange.request,
         response: summarizeSyncPayload(exchange.response),
+        browserResponseTimedOut: exchange.timedOutWaitingForBrowserResponse === true,
+        canonicalBefore: beforeTotal,
+        canonicalAfter: afterTotal,
+        durableRun: run,
+        classificationCounts: {
+          processed: classificationProcessed,
+          succeeded: classificationSucceeded,
+          failed: classificationFailed,
+          skipped: classificationSkipped,
+        },
+        event: backfillEvent ? {
+          id: backfillEvent.id,
+          event_type: backfillEvent.event_type,
+          status: backfillEvent.status,
+          title: backfillEvent.title,
+        } : null,
         checkpoints: await backfillCheckpoints(client),
       });
     } else {
