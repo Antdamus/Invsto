@@ -543,6 +543,11 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/ebay-message-notification/index.ts"
 
+[functions.ebay-notification-admin]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/ebay-notification-admin/index.ts"
+
 [functions.ebay-conversation-context]
 enabled = true
 verify_jwt = true
