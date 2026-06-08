@@ -42,6 +42,12 @@ async function sha256Hex(value: string): Promise<string> {
     .join("");
 }
 
+function challengeEndpointUrl(requestUrl: string) {
+  if (ENDPOINT_URL) return ENDPOINT_URL;
+  const url = new URL(requestUrl);
+  return `${url.origin}${url.pathname}`;
+}
+
 function text(value: unknown) {
   return String(value || "").trim();
 }
@@ -261,29 +267,44 @@ async function insertNotification(options: {
   processingStatus: string;
 }) {
   if (!options.supabase) return null;
+  const row = {
+    notification_id: options.fields.notificationId,
+    topic: options.fields.topic,
+    event_date: options.fields.eventDate,
+    publish_date: options.fields.publishDate,
+    publish_attempt_count: options.fields.publishAttemptCount,
+    ebay_conversation_id: options.fields.ebayConversationId,
+    conversation_type: ["FROM_MEMBERS", "FROM_EBAY"].includes(String(options.fields.conversationType || "").toUpperCase())
+      ? String(options.fields.conversationType || "").toUpperCase()
+      : null,
+    ebay_message_id: options.fields.ebayMessageId,
+    read_status: options.fields.readStatus,
+    signature_verified: options.signatureVerified,
+    signature_verification_error: options.signatureError,
+    processing_status: options.processingStatus,
+    raw_headers: options.rawHeaders,
+    raw_payload: options.rawPayload,
+  };
+
   const { data, error } = await options.supabase
     .from("ebay_message_notifications")
-    .upsert({
-      notification_id: options.fields.notificationId,
-      topic: options.fields.topic,
-      event_date: options.fields.eventDate,
-      publish_date: options.fields.publishDate,
-      publish_attempt_count: options.fields.publishAttemptCount,
-      ebay_conversation_id: options.fields.ebayConversationId,
-      conversation_type: ["FROM_MEMBERS", "FROM_EBAY"].includes(String(options.fields.conversationType || "").toUpperCase())
-        ? String(options.fields.conversationType || "").toUpperCase()
-        : null,
-      ebay_message_id: options.fields.ebayMessageId,
-      read_status: options.fields.readStatus,
-      signature_verified: options.signatureVerified,
-      signature_verification_error: options.signatureError,
-      processing_status: options.processingStatus,
-      raw_headers: options.rawHeaders,
-      raw_payload: options.rawPayload,
-    }, { onConflict: "notification_id" })
+    .insert(row)
     .select("id")
     .maybeSingle();
-  if (error) console.warn("[ebay-message-notification] notification insert failed", error.message);
+  if (!error) return data?.id || null;
+
+  if (error.code === "23505" && options.fields.notificationId) {
+    const { data: updated, error: updateError } = await options.supabase
+      .from("ebay_message_notifications")
+      .update(row)
+      .eq("notification_id", options.fields.notificationId)
+      .select("id")
+      .maybeSingle();
+    if (updateError) console.warn("[ebay-message-notification] notification retry update failed", updateError.message);
+    return updated?.id || null;
+  }
+
+  console.warn("[ebay-message-notification] notification insert failed", error.message);
   return data?.id || null;
 }
 
@@ -383,8 +404,8 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const challengeCode = url.searchParams.get("challenge_code") || "";
     if (!challengeCode) return json(400, { error: "missing_challenge_code" });
-    if (!VERIFICATION_TOKEN || !ENDPOINT_URL) return json(500, { error: "missing_endpoint_verification_config" });
-    return json(200, { challengeResponse: await sha256Hex(`${challengeCode}${VERIFICATION_TOKEN}${ENDPOINT_URL}`) });
+    if (!VERIFICATION_TOKEN) return json(500, { error: "missing_endpoint_verification_token" });
+    return json(200, { challengeResponse: await sha256Hex(`${challengeCode}${VERIFICATION_TOKEN}${challengeEndpointUrl(req.url)}`) });
   }
 
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
