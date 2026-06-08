@@ -399,11 +399,31 @@ export function summarizeClassificationPayload(payload = {}) {
 
 export function summarizeMessages(rows = []) {
   const messages = Array.isArray(rows) ? rows : [];
+  const readStateKey = (message = {}) => {
+    const rawReadStatus = message.read_status == null
+      ? "null"
+      : String(message.read_status).trim().toLowerCase();
+    const rawIsRead = typeof message.is_read === "boolean"
+      ? String(message.is_read)
+      : "null";
+    return `${rawReadStatus}:${rawIsRead}`;
+  };
+  const readStateCounts = messages.reduce((counts, message) => {
+    const key = readStateKey(message);
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
   return {
     count: messages.length,
     firstCreatedAt: messages[0]?.created_at_ebay || messages[0]?.created_at || null,
     lastCreatedAt: messages.at(-1)?.created_at_ebay || messages.at(-1)?.created_at || null,
     firstMessageId: messages[0]?.ebay_message_id || null,
     lastMessageId: messages.at(-1)?.ebay_message_id || null,
+    firstReadState: messages[0] ? readStateKey(messages[0]) : null,
+    lastReadState: messages.at(-1) ? readStateKey(messages.at(-1)) : null,
+    readStateCounts,
+    readStateSignature: messages
+      .slice(-20)
+      .map((message) => `${message.ebay_message_id || message.id || "unknown"}:${readStateKey(message)}`),
   };
 }
