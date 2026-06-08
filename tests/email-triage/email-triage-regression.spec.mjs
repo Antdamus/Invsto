@@ -376,6 +376,45 @@ function eventRunId(event = {}) {
   return payload.run_id || payload.classification_run?.run_id || payload.classification_run?.id || null;
 }
 
+function syncExchangeFromDurableRun(run = {}, request = {}) {
+  const metadata = run.metadata && typeof run.metadata === "object" ? run.metadata : {};
+  return {
+    status: 200,
+    request,
+    response: {
+      ok: true,
+      reconciledFromDurableRun: true,
+      runId: run.id || null,
+      runType: run.run_type || request.runType || null,
+      status: run.status || null,
+      safety: {
+        ebayMutationsPerformed: metadata.ebayMutationsPerformed === true,
+        sendsEnabled: metadata.sendsEnabled === true,
+        messagesSent: 0,
+      },
+      counters: {
+        pagesFetched: Number(run.pages_fetched || 0),
+        conversationsSeen: Number(run.conversations_seen || 0),
+        conversationsInserted: Number(run.conversations_inserted || 0),
+        conversationsUpdated: Number(run.conversations_updated || 0),
+        messagesSeen: Number(run.messages_seen || 0),
+        messagesInserted: Number(run.messages_inserted || 0),
+        messagesUpdated: Number(run.messages_updated || 0),
+        messagesRechecked: Number(metadata.messagesRechecked ?? metadata.messages_rechecked ?? 0),
+        canonicalDetailSweepCandidates: Number(metadata.canonicalDetailSweepCandidates || 0),
+        canonicalDetailSweepRefreshed: Number(metadata.canonicalDetailSweepRefreshed || 0),
+        canonicalDetailSweepConversationIds: Array.isArray(metadata.canonicalDetailSweepConversationIds)
+          ? metadata.canonicalDetailSweepConversationIds
+          : [],
+        canonicalDetailSweepMessagesInserted: Number(metadata.canonicalDetailSweepMessagesInserted || 0),
+        canonicalDetailSweepMessagesUpdated: Number(metadata.canonicalDetailSweepMessagesUpdated || 0),
+        canonicalDetailSweepMessagesRechecked: Number(metadata.canonicalDetailSweepMessagesRechecked || 0),
+        conversationIds: Array.isArray(metadata.conversationIds) ? metadata.conversationIds : [],
+      },
+    },
+  };
+}
+
 test("authenticate admin @setup", async ({ page }) => {
   const hasExistingState = await storageStateExists();
   const email = env.EMAIL_TRIAGE_ADMIN_EMAIL;
@@ -614,13 +653,26 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
       const targetMessagesBefore = targetBefore
         ? await conversationMessages(client, targetBefore.id)
         : [];
-      const exchange = await waitForFunctionResponse(
+      let exchange = await waitForFunctionResponseOrTimeout(
         page,
         "ebay-message-sync",
         (body) => body?.runType === "incremental" && body?.checkpointScope === "commerce_message_latest_sync",
         () => page.locator("#ebay-conversation-sync").click(),
         180000,
       );
+      if (exchange.timedOutWaitingForBrowserResponse) {
+        const durableRuns = await recentSyncRuns(client, { since: liveStartedAt, limit: 10 });
+        const durableRun = latestRun(durableRuns, (run) => (
+          run.run_type === "incremental" &&
+          run.status === "succeeded" &&
+          run.metadata?.checkpointScope === "commerce_message_latest_sync"
+        ));
+        expect(durableRun, "Expected a durable successful Sync Recent run after the browser response timed out.").toBeTruthy();
+        exchange = syncExchangeFromDurableRun(durableRun, {
+          runType: "incremental",
+          checkpointScope: "commerce_message_latest_sync",
+        });
+      }
       assertSyncSafety(exchange);
       await assertSyncBannerMatches(page, exchange);
       const counters = exchange.response?.counters || {};

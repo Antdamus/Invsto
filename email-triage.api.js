@@ -1101,11 +1101,14 @@
   function ebayRpcConversationSummary(row = {}) {
     const source = ebayMailboxObject(row.summary);
     const links = ebayMailboxArray(source.links);
+    const sourceBuyerUsernames = ebayMailboxArray(source.buyer_usernames);
+    const sourceParticipantUsernames = ebayMailboxArray(source.participant_usernames);
+    const sourceMessageBuyerUsername = compactEbayText(source.message_buyer_username, 120);
     const summary = {
       ...source,
       seller_username: compactEbayText(source.seller_username || row.seller_username, 120),
-      buyer_usernames: [],
-      participant_usernames: uniqueEbayText([row.other_party_username], 20),
+      buyer_usernames: uniqueEbayText(sourceBuyerUsernames, 20),
+      participant_usernames: uniqueEbayText([row.other_party_username, sourceParticipantUsernames].flat(), 20),
       order_numbers: [],
       return_ids: [],
       item_titles: [],
@@ -1128,7 +1131,15 @@
       }
     });
 
+    const buyerUsernameCountBeforeMessageFallback = summary.buyer_usernames.length;
+    pushUniqueEbayValue(summary.buyer_usernames, sourceMessageBuyerUsername);
     if (!summary.buyer_usernames.length) pushUniqueEbayValue(summary.buyer_usernames, row.other_party_username);
+    if (!summary.buyer_usernames.length && row.conversation_type !== "FROM_EBAY") {
+      pushUniqueEbayValue(summary.buyer_usernames, summary.participant_usernames[0]);
+    }
+    const sourceFromMessage = sourceMessageBuyerUsername &&
+      summary.buyer_usernames.some((value) => ebayKey(value) === ebayKey(sourceMessageBuyerUsername)) &&
+      buyerUsernameCountBeforeMessageFallback === 0;
     summary.buyer_identity = row.conversation_type === "FROM_EBAY"
       ? {
         username: "eBay",
@@ -1141,7 +1152,7 @@
       : {
         username: summary.buyer_usernames[0] || row.other_party_username || "",
         display_name: summary.buyer_usernames[0] || row.other_party_username || "Unknown buyer",
-        source: summary.buyer_usernames.length ? "linked_context" : row.other_party_username ? "other_party" : "none",
+        source: sourceFromMessage ? "message_inbound_sender" : summary.buyer_usernames.length ? "linked_context" : row.other_party_username ? "other_party" : "none",
         confidence: summary.buyer_usernames.length ? "derived" : row.other_party_username ? "api" : "none",
         name: "",
         email: "",

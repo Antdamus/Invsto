@@ -2393,6 +2393,95 @@
       .replace(/[\u0300-\u036f]/g, "");
   }
 
+  function pushUniqueConversationText(target, value, maxItems = 20) {
+    const text = compactConversationText(value);
+    if (!text || target.length >= maxItems) return;
+    const key = normalizeEbaySearchText(text);
+    if (!target.some((item) => normalizeEbaySearchText(item) === key)) target.push(text);
+  }
+
+  function ebayConversationSellerKeys(conversation) {
+    const summary = conversation?.summary && typeof conversation.summary === "object" ? conversation.summary : {};
+    return new Set(safeArray([
+      summary.seller_username,
+      conversation?.seller_username,
+      conversation?.raw?.seller_username,
+    ]).map((value) => normalizeEbaySearchText(value)).filter(Boolean));
+  }
+
+  function ebayUsableParticipantUsername(username, conversation, options = {}) {
+    const text = compactConversationText(username);
+    if (!text) return "";
+    const key = normalizeEbaySearchText(text);
+    if (!key) return "";
+    if (ebayConversationSellerKeys(conversation).has(key)) return "";
+    if (options.allowPlatform !== true && key === "ebay") return "";
+    return text;
+  }
+
+  function ebayMessageIdentityCandidates(messages = [], conversation = {}) {
+    const candidates = [];
+    safeArray(messages).forEach((message) => {
+      const direction = String(message?.direction || "").toLowerCase();
+      const preferred = direction === "outbound" ? message?.recipient_username : message?.sender_username;
+      const fallback = direction === "outbound" ? message?.sender_username : message?.recipient_username;
+      pushUniqueConversationText(candidates, ebayUsableParticipantUsername(preferred, conversation));
+      pushUniqueConversationText(candidates, ebayUsableParticipantUsername(fallback, conversation));
+    });
+    return candidates;
+  }
+
+  function enrichEbayConversationIdentityFromMessages(conversation, messages = []) {
+    if (!conversation?.id || conversation.conversation_type === "FROM_EBAY") return conversation;
+    const identity = ebayBuyerIdentity(conversation);
+    if (identity.source !== "none" && identity.displayName !== "Unknown buyer") return conversation;
+    const candidates = ebayMessageIdentityCandidates(messages, conversation);
+    const username = candidates[0];
+    if (!username) return conversation;
+    const summary = conversation.summary && typeof conversation.summary === "object" ? conversation.summary : {};
+    const buyerUsernames = safeArray(summary.buyer_usernames).map((item) => compactConversationText(item)).filter(Boolean);
+    const participantUsernames = safeArray(summary.participant_usernames).map((item) => compactConversationText(item)).filter(Boolean);
+    candidates.forEach((candidate) => {
+      pushUniqueConversationText(participantUsernames, candidate);
+    });
+    pushUniqueConversationText(buyerUsernames, username);
+    return {
+      ...conversation,
+      buyer_identity: {
+        username,
+        display_name: username,
+        source: "message_inbound_sender",
+        confidence: "inferred",
+        name: "",
+        email: "",
+      },
+      summary: {
+        ...summary,
+        buyer_usernames: buyerUsernames,
+        participant_usernames: participantUsernames,
+      },
+      raw: conversation.raw && typeof conversation.raw === "object"
+        ? {
+          ...conversation.raw,
+          buyer_identity: {
+            username,
+            display_name: username,
+            source: "message_inbound_sender",
+            confidence: "inferred",
+            name: "",
+            email: "",
+          },
+        }
+        : conversation.raw,
+    };
+  }
+
+  function enrichEbayConversationsIdentityFromMessages(conversations = [], conversationId, messages = []) {
+    return safeArray(conversations).map((conversation) => (
+      conversation?.id === conversationId ? enrichEbayConversationIdentityFromMessages(conversation, messages) : conversation
+    ));
+  }
+
   function ebayBuyerIdentity(conversation) {
     const identity = conversation?.buyer_identity && typeof conversation.buyer_identity === "object"
       ? conversation.buyer_identity
@@ -5247,11 +5336,17 @@
 
     try {
       const payload = await fetchEbayConversationMessages(context, conversationId);
+      const normalizedMessages = normalizeEbayMessagesForReadState(conversationId, payload.messages);
       setEbayConversationState({
         ebayConversationMessagesLoadingId: null,
+        ebayConversations: enrichEbayConversationsIdentityFromMessages(
+          adminClassificationState.ebayConversations,
+          conversationId,
+          normalizedMessages,
+        ),
         ebayConversationMessagesById: {
           ...adminClassificationState.ebayConversationMessagesById,
-          [conversationId]: normalizeEbayMessagesForReadState(conversationId, payload.messages),
+          [conversationId]: normalizedMessages,
         },
         ebayConversationMessageErrorsById: {
           ...adminClassificationState.ebayConversationMessageErrorsById,
