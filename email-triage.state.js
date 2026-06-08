@@ -133,6 +133,7 @@
       ebayConversationSyncOperation: null,
       ebayConversationSyncResult: null,
       ebayConversationSyncError: null,
+      ebayConversationReadSyncLoadingId: null,
       ebayConversationClassificationLoadingId: null,
       ebayConversationClassificationBatchLoading: false,
       ebayConversationClassificationResult: null,

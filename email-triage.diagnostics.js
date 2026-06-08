@@ -69,6 +69,9 @@
     }
     if (eventType === "message_sync_completed") return event.title || "Sync Recent Mailbox Completed";
     if (eventType === "message_sync_failed") return event.title || "Sync Recent Mailbox Failed";
+    if (eventType === "read_state_synced") return event.title || "Provider Read State Synced";
+    if (eventType === "read_state_sync_failed") return event.title || "Provider Read State Sync Failed";
+    if (eventType === "provider_notification_received") return event.title || "Provider Notification Received";
     if (eventType === "message_backfill_started") return "Backfill Started";
     if (eventType === "message_backfill_progress") return "Backfill Progress";
     if (eventType === "message_backfill_completed") return "Backfill Completed";
@@ -185,6 +188,9 @@
       smart_folder_updated: "An eBay smart folder was updated.",
       message_sync_completed: "Recent incremental mailbox scan completed as one aggregate operation.",
       message_sync_failed: "Recent incremental mailbox scan failed as one aggregate operation.",
+      read_state_synced: "eBay read/unread state was updated from an explicit OG action.",
+      read_state_sync_failed: "An explicit OG read/unread provider update failed and remains pending.",
+      provider_notification_received: "An eBay notification was received and the changed conversation was targeted for refresh.",
       message_backfill_started: "Historical eBay message archive import started.",
       message_backfill_progress: String(status || "").toLowerCase().includes("partial")
         ? "Historical eBay message archive chunk completed with partial success; inspect classification counts below."
@@ -244,6 +250,19 @@
         metricText(metricValue([payload], ["conversations_updated"]) || 0, "changed"),
         metricText(metricValue([payload], ["conversations_unchanged"]) || 0, "unchanged"),
         metricText(metricValue([payload], ["messages_rechecked"]) || 0, "messages rechecked"),
+      ],
+      read_state_synced: [
+        payload.read_state ? utils.humanizeValue(payload.read_state) : "",
+        payload.ebay_conversation_id ? `provider ${utils.compactId(payload.ebay_conversation_id)}` : "",
+      ],
+      read_state_sync_failed: [
+        payload.read_state ? utils.humanizeValue(payload.read_state) : "",
+        payload.ebay_conversation_id ? `provider ${utils.compactId(payload.ebay_conversation_id)}` : "",
+      ],
+      provider_notification_received: [
+        payload.topic || "",
+        payload.ebay_conversation_id ? `conversation ${utils.compactId(payload.ebay_conversation_id)}` : "",
+        payload.signature_verified === true ? "signature verified" : "",
       ],
       message_sync_failed: [
         metricText(metricValue([payload], ["conversations_seen", "processed_count"]) || 0, "seen"),
@@ -806,12 +825,17 @@
           <div class="operational-panel-head">
             <strong>eBay Message Metrics</strong>
             ${dashboardBadge("Canonical", "success", utils)}
+            ${metrics.read_state_schema_available === false ? dashboardBadge("Read schema pending", "warning", utils) : ""}
           </div>
           <div class="operational-metric-grid">
             ${renderKeyValueGrid([
               { label: "Total canonical", value: metrics.canonical_conversations },
               { label: "Conversations today", value: metrics.conversations_today },
               { label: "Unread conversations", value: metrics.unread_conversations },
+              { label: "Provider unread", value: metrics.provider_unread_conversations },
+              { label: "OG unread", value: metrics.local_unread_conversations },
+              { label: "Read sync pending", value: metrics.pending_provider_read_sync },
+              { label: "Read sync failed", value: metrics.failed_provider_read_sync },
               { label: "Unclassified", value: metrics.unclassified_conversations },
               { label: "Needs reply", value: metrics.needs_reply },
               { label: "High priority", value: metrics.high_priority },
@@ -842,6 +866,8 @@
               { label: "Messages rechecked", value: metrics.latest_sync_messages_rechecked },
               { label: "Messages inserted", value: metrics.latest_sync_messages_inserted },
               { label: "Messages changed", value: metrics.latest_sync_messages_changed ?? metrics.latest_sync_messages_updated },
+              { label: "Provider read changes", value: metrics.latest_sync_provider_read_state_changes },
+              { label: "Pending read sync", value: metrics.latest_sync_pending_read_sync_conversations },
               { label: "Canonical after sync", value: metrics.latest_sync_canonical_total_after ?? metrics.canonical_conversations },
             ], utils)}
           </div>

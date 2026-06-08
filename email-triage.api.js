@@ -3,6 +3,7 @@
 
   const EBAY_CONVERSATION_CONTEXT_FUNCTION = "ebay-conversation-context";
   const EBAY_MESSAGE_SYNC_FUNCTION = "ebay-message-sync";
+  const EBAY_MESSAGE_READ_SYNC_FUNCTION = "ebay-message-read-sync";
   const EBAY_CONVERSATION_CLASSIFY_FUNCTION = "ebay-conversation-classify";
   const EBAY_CONVERSATION_DRAFT_FUNCTION = "ebay-conversation-draft";
   const EBAY_CANONICAL_MAILBOX_RPC = "get_ebay_canonical_mailbox_v2";
@@ -18,6 +19,7 @@
     ebayConversationMessages: 15000,
     ebayConversationContext: 30000,
     ebayMessageSync: 90000,
+    ebayMessageReadSync: 30000,
     ebayMessageBackfill: 300000,
     ebayConversationClassify: 90000,
     ebayConversationDraft: 60000,
@@ -250,6 +252,15 @@
     const { count, error } = await query;
     throwSupabaseReadError(error, fallbackCode);
     return Number(count || 0);
+  }
+
+  async function optionalCountSupabaseRows(query, warningCode) {
+    try {
+      return await countSupabaseRows(query, warningCode);
+    } catch (error) {
+      console.warn(`[email-triage] Optional dashboard count skipped: ${warningCode}`, error);
+      return null;
+    }
   }
 
   function latestApprovalByDraft(approvals = []) {
@@ -606,6 +617,10 @@
       canonicalConversations,
       conversationsToday,
       unreadConversations,
+      providerUnreadConversations,
+      localUnreadConversations,
+      pendingProviderReadSync,
+      failedProviderReadSync,
       currentClassifications,
       classificationsResult,
       draftsResult,
@@ -635,6 +650,34 @@
           .select("id", { count: "exact", head: true })
           .gt("unread_count", 0),
         "ebay_unread_conversation_count_failed",
+      ),
+      optionalCountSupabaseRows(
+        client
+          .from("ebay_conversations")
+          .select("id", { count: "exact", head: true })
+          .eq("provider_read_state", "unread"),
+        "ebay_provider_unread_conversation_count_failed",
+      ),
+      optionalCountSupabaseRows(
+        client
+          .from("ebay_conversations")
+          .select("id", { count: "exact", head: true })
+          .eq("local_read_state", "unread"),
+        "ebay_local_unread_conversation_count_failed",
+      ),
+      optionalCountSupabaseRows(
+        client
+          .from("ebay_conversations")
+          .select("id", { count: "exact", head: true })
+          .eq("pending_provider_update", true),
+        "ebay_pending_provider_read_sync_count_failed",
+      ),
+      optionalCountSupabaseRows(
+        client
+          .from("ebay_conversations")
+          .select("id", { count: "exact", head: true })
+          .eq("read_sync_status", "provider_update_failed"),
+        "ebay_failed_provider_read_sync_count_failed",
       ),
       countSupabaseRows(
         client
@@ -746,6 +789,16 @@
         canonical_conversations: canonicalConversations,
         conversations_today: conversationsToday,
         unread_conversations: unreadConversations,
+        provider_unread_conversations: providerUnreadConversations,
+        local_unread_conversations: localUnreadConversations,
+        pending_provider_read_sync: pendingProviderReadSync,
+        failed_provider_read_sync: failedProviderReadSync,
+        read_state_schema_available: [
+          providerUnreadConversations,
+          localUnreadConversations,
+          pendingProviderReadSync,
+          failedProviderReadSync,
+        ].every((value) => value !== null && value !== undefined),
         unclassified_conversations: Math.max(Number(canonicalConversations || 0) - Number(currentClassifications || 0), 0),
         needs_reply: classifications.filter((row) => ["reply_today", "reply_later"].includes(row.response_need)).length,
         high_priority: classifications.filter((row) => row.priority === "high").length,
@@ -774,6 +827,8 @@
         latest_sync_messages_inserted: Number(latestSyncMetricPayload.messages_inserted || 0),
         latest_sync_messages_changed: Number(latestSyncMetricPayload.messages_updated || 0),
         latest_sync_messages_updated: Number(latestSyncMetricPayload.messages_updated || 0),
+        latest_sync_provider_read_state_changes: Number(latestSyncMetricPayload.provider_read_state_changes || 0),
+        latest_sync_pending_read_sync_conversations: Number(latestSyncMetricPayload.pending_read_sync_conversations || 0),
         latest_sync_canonical_total_after: Number(latestSyncMetricPayload.canonical_total_conversations || canonicalConversations),
         latest_classification_processed: Number(latestClassificationRun?.processed_count || 0),
         latest_classification_classified: Number(latestClassificationRun?.classified_count || 0),
@@ -1005,6 +1060,14 @@
       reference_id: row.reference_id || "",
       reference_type: row.reference_type || "",
       unread_count: Number(row.unread_count || 0),
+      provider_read_state: row.provider_read_state || "",
+      local_read_state: row.local_read_state || "",
+      pending_provider_update: row.pending_provider_update === true,
+      last_provider_seen_at: row.last_provider_seen_at || null,
+      last_local_read_at: row.last_local_read_at || null,
+      last_read_sync_at: row.last_read_sync_at || null,
+      read_sync_status: row.read_sync_status || "",
+      read_sync_error: row.read_sync_error || "",
       latest_message_id: row.latest_message_id || "",
       latest_message_created_at: row.latest_message_created_at || row.last_message_created_at || null,
       latest_message_preview: row.latest_message_preview || summary.latest_message_preview || "",
@@ -1400,7 +1463,7 @@
     const offset = Math.max(Number(values.offset || 0) || 0, 0);
     const { data: conversations, error, count } = await context.client
       .from("ebay_conversations")
-      .select("id, seller_account_id, ebay_conversation_id, conversation_type, conversation_status, conversation_title, other_party_username, reference_id, reference_type, unread_count, latest_message_id, latest_message_created_at, latest_message_preview, first_message_created_at, last_message_created_at, message_count, last_synced_at, last_detail_synced_at, updated_at, created_at", { count: "exact" })
+      .select("id, seller_account_id, ebay_conversation_id, conversation_type, conversation_status, conversation_title, other_party_username, reference_id, reference_type, unread_count, provider_read_state, local_read_state, pending_provider_update, last_provider_seen_at, last_local_read_at, last_read_sync_at, read_sync_status, read_sync_error, latest_message_id, latest_message_created_at, latest_message_preview, first_message_created_at, last_message_created_at, message_count, last_synced_at, last_detail_synced_at, updated_at, created_at", { count: "exact" })
       .order("latest_message_created_at", { ascending: false, nullsFirst: false })
       .order("updated_at", { ascending: false })
       .range(offset, offset + limit - 1);
@@ -1566,6 +1629,25 @@
       conversation_id: conversationId,
       unread_count: 0,
     };
+  }
+
+  async function syncEbayProviderReadState(context, conversationId, readState = "read", options = {}) {
+    const session = await currentSession(context, "Sync eBay provider read state");
+    if (!conversationId) {
+      const error = new Error("conversation_id_required");
+      error.code = "conversation_id_required";
+      throw error;
+    }
+    const normalizedReadState = String(readState || "").trim().toLowerCase() === "unread" ? "unread" : "read";
+    return edgeFetchWithTimeout(EBAY_MESSAGE_READ_SYNC_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: "set_read_state",
+        conversationId,
+        readState: normalizedReadState,
+        dryRun: options.dryRun === true || undefined,
+      }),
+    }, TIMEOUTS.ebayMessageReadSync);
   }
 
   async function fetchEbayConversationContext(context, conversationId) {
@@ -1831,6 +1913,7 @@
     functions: {
       EBAY_CONVERSATION_CONTEXT_FUNCTION,
       EBAY_MESSAGE_SYNC_FUNCTION,
+      EBAY_MESSAGE_READ_SYNC_FUNCTION,
       EBAY_CONVERSATION_CLASSIFY_FUNCTION,
       EBAY_CONVERSATION_DRAFT_FUNCTION,
     },
@@ -1850,6 +1933,7 @@
     fetchEbayConversations,
     fetchEbayConversationMessages,
     markEbayConversationRead,
+    syncEbayProviderReadState,
     fetchEbayConversationContext,
     fetchEbayConversationDrafts,
     requestEbayConversationDraftAction,

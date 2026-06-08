@@ -223,6 +223,15 @@ export async function conversationByEbayId(client, ebayConversationId, conversat
       "latest_message_created_at",
       "latest_message_preview",
       "message_count",
+      "unread_count",
+      "provider_read_state",
+      "local_read_state",
+      "pending_provider_update",
+      "last_provider_seen_at",
+      "last_local_read_at",
+      "last_read_sync_at",
+      "read_sync_status",
+      "read_sync_error",
       "last_detail_synced_at",
       "updated_at",
     ].join(","),
@@ -231,6 +240,28 @@ export async function conversationByEbayId(client, ebayConversationId, conversat
     limit: "1",
   });
   return rows?.[0] || null;
+}
+
+export async function readStateRows(client, options = {}) {
+  return client.select("ebay_conversations", {
+    select: [
+      "id",
+      "ebay_conversation_id",
+      "conversation_type",
+      "unread_count",
+      "provider_read_state",
+      "local_read_state",
+      "pending_provider_update",
+      "last_provider_seen_at",
+      "last_local_read_at",
+      "last_read_sync_at",
+      "read_sync_status",
+      "read_sync_error",
+      "updated_at",
+    ].join(","),
+    order: "updated_at.desc",
+    limit: String(options.limit || 1000),
+  });
 }
 
 export async function recentActivityEvents(client, options = {}) {
@@ -318,6 +349,8 @@ export function summarizeSyncPayload(payload = {}) {
       messagesInserted: counters.messagesInserted,
       messagesUpdated: counters.messagesUpdated,
       messagesRechecked: counters.messagesRechecked,
+      providerReadStateChanges: counters.providerReadStateChanges,
+      pendingReadSyncConversations: counters.pendingReadSyncConversations,
       canonicalDetailSweepCandidates: counters.canonicalDetailSweepCandidates,
       canonicalDetailSweepRefreshed: counters.canonicalDetailSweepRefreshed,
       canonicalDetailSweepSkipped: counters.canonicalDetailSweepSkipped,

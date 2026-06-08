@@ -2999,6 +2999,7 @@
 .ebay-conversation-head,
 .ebay-conversation-control-row,
 .ebay-conversation-actions,
+.ebay-detail-actions,
 .ebay-conversation-filter-strip,
 .ebay-conversation-active-filters,
 .ebay-conversation-sidebar-nav,
@@ -3037,8 +3038,13 @@
   justify-content: flex-end;
 }
 
+.ebay-detail-actions {
+  justify-content: flex-end;
+}
+
 .ebay-conversation-actions .primary-btn,
 .ebay-conversation-actions .secondary-btn,
+.ebay-detail-actions .secondary-btn,
 .ebay-conversation-filter-strip .secondary-btn,
 .ebay-detail-head .secondary-btn,
 .ebay-context-head .secondary-btn {
@@ -5004,6 +5010,7 @@
   .ebay-conversation-head,
   .ebay-conversation-control-row,
   .ebay-conversation-actions,
+  .ebay-detail-actions,
   .ebay-conversation-filter-strip,
   .ebay-detail-head,
   .ebay-context-head {
@@ -5013,6 +5020,7 @@
 
   .ebay-conversation-actions .primary-btn,
   .ebay-conversation-actions .secondary-btn,
+  .ebay-detail-actions .secondary-btn,
   .ebay-conversation-filter-strip .secondary-btn,
   .ebay-detail-head .secondary-btn,
   .ebay-context-head .secondary-btn {

@@ -63,6 +63,8 @@ type Counters = {
   messagesInserted: number;
   messagesUpdated: number;
   messagesRechecked: number;
+  providerReadStateChanges: number;
+  pendingReadSyncConversations: number;
   mediaSeen: number;
   canonicalDetailSweepCandidates: number;
   canonicalDetailSweepRefreshed: number;
@@ -98,6 +100,18 @@ type ExistingMessage = {
   is_read: boolean | null;
 };
 
+type ExistingConversation = {
+  id: string;
+  ebay_conversation_id: string;
+  unread_count: number;
+  latest_message_id: string | null;
+  provider_read_state: string | null;
+  local_read_state: string | null;
+  pending_provider_update: boolean;
+  read_sync_status: string | null;
+  read_sync_error: string | null;
+};
+
 type CanonicalRecentConversation = {
   id: string;
   ebay_conversation_id: string;
@@ -117,6 +131,15 @@ type ConversationLatestSnapshot = {
   latest_message_preview: string | null;
   message_count: number | null;
   last_detail_synced_at: string | null;
+};
+
+type ConversationUpsertResult = {
+  id: string;
+  reference_id: string | null;
+  reference_type: string | null;
+  other_party_username: string | null;
+  read_state_changed: boolean;
+  pending_provider_update: boolean;
 };
 
 type CheckpointStart = {
@@ -407,6 +430,35 @@ function readStatusToBoolean(value: unknown) {
   if (["read", "true", "1"].includes(normalized)) return true;
   if (["unread", "false", "0"].includes(normalized)) return false;
   return null;
+}
+
+function readStateFromBoolean(value: boolean | null) {
+  if (value === true) return "read";
+  if (value === false) return "unread";
+  return "unknown";
+}
+
+function providerReadStateFromPayload(payload: JsonRecord) {
+  const unreadCount = numberOrNull(payload.unreadCount ?? payload.unread_count);
+  if (unreadCount !== null) return unreadCount > 0 ? "unread" : "read";
+
+  const latest = latestMessage(payload);
+  const readBoolean = readStatusToBoolean(
+    payload.read ?? payload.readStatus ?? payload.isRead ?? latest.read ?? latest.readStatus ?? latest.isRead,
+  );
+  return readStateFromBoolean(readBoolean);
+}
+
+function providerUnreadCountFromPayload(payload: JsonRecord, providerReadState: string, fallback = 0) {
+  const unreadCount = numberOrNull(payload.unreadCount ?? payload.unread_count);
+  if (unreadCount !== null) return Math.max(unreadCount, 0);
+  if (providerReadState === "read") return 0;
+  if (providerReadState === "unread") return Math.max(Number(fallback || 0), 1);
+  return Math.max(Number(fallback || 0), 0);
+}
+
+function localStateFromUnreadCount(value: unknown) {
+  return Number(value || 0) > 0 ? "unread" : "read";
 }
 
 function isoOrNull(value: unknown) {
@@ -780,10 +832,10 @@ async function createRun(supabase: ServiceClient, input: SyncInput, account: Eba
 }
 
 async function existingConversationsById(supabase: ServiceClient, accountId: string, conversationType: ConversationType, ids: string[]) {
-  if (!ids.length) return new Map<string, { id: string; ebay_conversation_id: string; unread_count: number; latest_message_id: string | null }>();
+  if (!ids.length) return new Map<string, ExistingConversation>();
   const { data, error } = await supabase
     .from("ebay_conversations")
-    .select("id, ebay_conversation_id, unread_count, latest_message_id")
+    .select("id, ebay_conversation_id, unread_count, latest_message_id, provider_read_state, local_read_state, pending_provider_update, read_sync_status, read_sync_error")
     .eq("seller_account_id", accountId)
     .eq("conversation_type", conversationType)
     .in("ebay_conversation_id", ids);
@@ -794,6 +846,11 @@ async function existingConversationsById(supabase: ServiceClient, accountId: str
       ebay_conversation_id: text(row.ebay_conversation_id),
       unread_count: Number(row.unread_count || 0),
       latest_message_id: text(row.latest_message_id) || null,
+      provider_read_state: text(row.provider_read_state) || null,
+      local_read_state: text(row.local_read_state) || null,
+      pending_provider_update: row.pending_provider_update === true,
+      read_sync_status: text(row.read_sync_status) || null,
+      read_sync_error: text(row.read_sync_error) || null,
     }] as const)
     .filter(([id]) => Boolean(id)));
 }
@@ -804,12 +861,45 @@ async function upsertConversation(
   runId: string,
   conversationType: ConversationType,
   payload: JsonRecord,
-  existing: { unread_count: number } | null = null,
+  existing: ExistingConversation | null = null,
 ) {
   const ebayConversationId = firstText(payload.conversationId, payload.id);
   if (!ebayConversationId) throw new SyncError("conversation_missing_id", { phase: "payload" });
 
   const latest = latestMessage(payload);
+  const now = new Date().toISOString();
+  const apiProviderReadState = providerReadStateFromPayload(payload);
+  const previousProviderReadState = existing?.provider_read_state || "unknown";
+  const previousLocalReadState = existing?.local_read_state || localStateFromUnreadCount(existing?.unread_count);
+  const providerReadState = apiProviderReadState !== "unknown" ? apiProviderReadState : previousProviderReadState;
+  const providerUnreadCount = providerUnreadCountFromPayload(payload, providerReadState, existing?.unread_count || 0);
+  const pendingWasSet = existing?.pending_provider_update === true;
+  const providerMatchesPendingLocal = pendingWasSet &&
+    previousLocalReadState !== "unknown" &&
+    providerReadState === previousLocalReadState;
+  const pendingProviderUpdate = apiProviderReadState === "unknown"
+    ? pendingWasSet
+    : pendingWasSet && !providerMatchesPendingLocal;
+  const localReadState = pendingProviderUpdate
+    ? previousLocalReadState
+    : providerReadState !== "unknown"
+    ? providerReadState
+    : previousLocalReadState;
+  const unreadCount = pendingProviderUpdate
+    ? (localReadState === "read" ? 0 : Math.max(existing?.unread_count || providerUnreadCount || 0, 1))
+    : providerUnreadCount;
+  const readSyncStatus = apiProviderReadState === "unknown"
+    ? (existing?.read_sync_status || "unknown")
+    : pendingProviderUpdate
+    ? "pending_provider_update"
+    : "synced";
+  const readStateChanged = existing
+    ? previousProviderReadState !== providerReadState ||
+      previousLocalReadState !== localReadState ||
+      Number(existing.unread_count || 0) !== Number(unreadCount || 0) ||
+      pendingWasSet !== pendingProviderUpdate
+    : false;
+
   const row = {
     seller_account_id: account.id,
     ebay_conversation_id: ebayConversationId,
@@ -819,15 +909,26 @@ async function upsertConversation(
     other_party_username: otherPartyUsername(payload),
     reference_id: referenceId(payload),
     reference_type: referenceType(payload),
-    unread_count: existing ? Math.max(Number(existing.unread_count || 0), 0) : numberOrNull(payload.unreadCount) ?? 0,
+    unread_count: unreadCount,
+    provider_read_state: providerReadState,
+    local_read_state: localReadState,
+    pending_provider_update: pendingProviderUpdate,
+    last_provider_seen_at: now,
+    last_read_sync_at: pendingProviderUpdate ? undefined : now,
+    read_sync_status: readSyncStatus,
+    read_sync_error: pendingProviderUpdate ? existing?.read_sync_error || null : null,
     latest_message_id: firstText(latest.messageId, latest.id) || null,
     latest_message_created_at: isoOrNull(latest.createdDate) || isoOrNull(payload.createdDate),
     latest_message_preview: preview(firstText(latest.messageBody, latest.body, latest.text)) || null,
-    last_synced_at: new Date().toISOString(),
+    last_synced_at: now,
     last_sync_run_id: runId,
-    last_seen_at: new Date().toISOString(),
+    last_seen_at: now,
     raw_summary: stripLargeFields(payload),
   };
+
+  Object.keys(row).forEach((key) => {
+    if ((row as JsonRecord)[key] === undefined) delete (row as JsonRecord)[key];
+  });
 
   const { data, error } = await supabase
     .from("ebay_conversations")
@@ -836,7 +937,11 @@ async function upsertConversation(
     .single();
 
   if (error || !data?.id) throw new SyncError("conversation_upsert_failed", { phase: "database", message: error?.message });
-  return data as { id: string; reference_id: string | null; reference_type: string | null; other_party_username: string | null };
+  return {
+    ...(data as { id: string; reference_id: string | null; reference_type: string | null; other_party_username: string | null }),
+    read_state_changed: readStateChanged,
+    pending_provider_update: pendingProviderUpdate,
+  } as ConversationUpsertResult;
 }
 
 async function upsertConversationLinks(
@@ -933,7 +1038,9 @@ function messageRowChanged(existing: ExistingMessage, next: JsonRecord) {
     nullableComparable(existing.message_status) !== nullableComparable(next.message_status) ||
     nullableComparable(existing.created_at_ebay) !== nullableComparable(next.created_at_ebay) ||
     nullableComparable(existing.has_media) !== nullableComparable(next.has_media) ||
-    nullableComparable(existing.media_count) !== nullableComparable(next.media_count);
+    nullableComparable(existing.media_count) !== nullableComparable(next.media_count) ||
+    nullableComparable(existing.read_status) !== nullableComparable(next.read_status) ||
+    nullableComparable(existing.is_read) !== nullableComparable(next.is_read);
 }
 
 async function upsertMessages(options: {
@@ -997,8 +1104,8 @@ async function upsertMessages(options: {
       message_body: body || null,
       message_body_sha256: bodyHash,
       message_body_preview: bodyPreview,
-      read_status: existingMessage ? existingMessage.read_status : apiReadStatus,
-      is_read: existingMessage ? existingMessage.is_read : apiIsRead,
+      read_status: apiReadStatus ?? existingMessage?.read_status ?? null,
+      is_read: apiIsRead ?? existingMessage?.is_read ?? null,
       message_status: messageStatus,
       created_at_ebay: createdAtEbay,
       message_media: media,
@@ -1400,6 +1507,10 @@ function syncRunProgressMetadata(input: SyncInput, counters: Counters, extra: Js
     conversationsUnchanged: counters.conversationsUnchanged,
     messagesRechecked: counters.messagesRechecked,
     messages_rechecked: counters.messagesRechecked,
+    providerReadStateChanges: counters.providerReadStateChanges,
+    provider_read_state_changes: counters.providerReadStateChanges,
+    pendingReadSyncConversations: counters.pendingReadSyncConversations,
+    pending_read_sync_conversations: counters.pendingReadSyncConversations,
     classificationProcessed: counters.classificationProcessed,
     classificationSucceeded: counters.classificationSucceeded,
     classificationFailed: counters.classificationFailed,
@@ -1607,6 +1718,8 @@ async function updateCheckpointProgress(options: {
         messages_inserted: options.counters.messagesInserted,
         messages_rechecked: options.counters.messagesRechecked,
         messages_updated: options.counters.messagesUpdated,
+        provider_read_state_changes: options.counters.providerReadStateChanges,
+        pending_read_sync_conversations: options.counters.pendingReadSyncConversations,
       },
       updated_at: new Date().toISOString(),
     },
@@ -1776,6 +1889,8 @@ async function processConversationPage(options: {
       conversation,
       existingConversation,
     );
+    if (conversationRow.read_state_changed) options.counters.providerReadStateChanges += 1;
+    if (conversationRow.pending_provider_update) options.counters.pendingReadSyncConversations += 1;
     options.counters.conversationsSucceeded += 1;
     rowIds.push(conversationRow.id);
     latestTimestamp = newestTimestamp(latestTimestamp, latestConversationTimestamp(conversation));
@@ -1798,7 +1913,7 @@ async function processConversationPage(options: {
     if (existingConversation) {
       const hasNewMessages = options.counters.messagesInserted > messagesInsertedBefore;
       const latestChanged = Boolean(apiLatestMessageId && apiLatestMessageId !== existingConversation.latest_message_id);
-      if (hasNewMessages || latestChanged) options.counters.conversationsUpdated += 1;
+      if (hasNewMessages || latestChanged || conversationRow.read_state_changed) options.counters.conversationsUpdated += 1;
       else options.counters.conversationsUnchanged += 1;
     }
     const linkResult = await linkEbayConversationContext(options.supabase, conversationRow.id);
@@ -2089,6 +2204,8 @@ function backfillEventSummary(input: SyncInput, counters: Counters, startedMs: n
     messages_inserted: counters.messagesInserted,
     messages_rechecked: counters.messagesRechecked,
     messages_updated: counters.messagesUpdated,
+    provider_read_state_changes: counters.providerReadStateChanges,
+    pending_read_sync_conversations: counters.pendingReadSyncConversations,
     classification_processed: counters.classificationProcessed,
     classification_succeeded: counters.classificationSucceeded,
     classification_failed: counters.classificationFailed,
@@ -2198,6 +2315,8 @@ function syncEventSummary(input: SyncInput, counters: Counters, startedMs: numbe
     messages_inserted: counters.messagesInserted,
     messages_rechecked: counters.messagesRechecked,
     messages_updated: counters.messagesUpdated,
+    provider_read_state_changes: counters.providerReadStateChanges,
+    pending_read_sync_conversations: counters.pendingReadSyncConversations,
     classification_processed: counters.classificationProcessed,
     classification_succeeded: counters.classificationSucceeded,
     classification_failed: counters.classificationFailed,
@@ -2361,6 +2480,8 @@ serve(async (req) => {
       messagesInserted: 0,
       messagesUpdated: 0,
       messagesRechecked: 0,
+      providerReadStateChanges: 0,
+      pendingReadSyncConversations: 0,
       mediaSeen: 0,
       canonicalDetailSweepCandidates: 0,
       canonicalDetailSweepRefreshed: 0,

@@ -7,6 +7,7 @@
     fetchEbayConversations,
     fetchEbayConversationMessages,
     markEbayConversationRead,
+    syncEbayProviderReadState,
     fetchEbayConversationContext,
     fetchEbayConversationDrafts,
     requestEbayConversationDraftAction,
@@ -3039,11 +3040,22 @@
     const conversations = safeArray(state.ebayConversations);
     const nextConversations = conversations.map((conversation) => {
       if (conversation.id !== conversationId) return conversation;
+      const providerReadState = ebayConversationProviderReadState(conversation);
+      const pendingProviderUpdate = providerReadState !== "read";
       return {
         ...conversation,
         unread_count: 0,
+        local_read_state: "read",
+        pending_provider_update: pendingProviderUpdate,
+        read_sync_status: pendingProviderUpdate ? "pending_provider_update" : "synced",
         raw: conversation.raw && typeof conversation.raw === "object"
-          ? { ...conversation.raw, unread_count: 0 }
+          ? {
+            ...conversation.raw,
+            unread_count: 0,
+            local_read_state: "read",
+            pending_provider_update: pendingProviderUpdate,
+            read_sync_status: pendingProviderUpdate ? "pending_provider_update" : "synced",
+          }
           : conversation.raw,
       };
     });
@@ -3146,6 +3158,8 @@
     const badges = [
       renderEbayClassificationListBadges(conversation, { compact }),
       Number(conversation.unread_count || 0) > 0 ? renderBadge("Unread", "warning") : "",
+      conversation.pending_provider_update === true ? renderBadge("Read sync pending", "warning") : "",
+      String(conversation.read_sync_status || "").toLowerCase() === "provider_update_failed" ? renderBadge("Read sync failed", "danger") : "",
     ].filter(Boolean);
     return `<span class="ebay-conversation-badges">${badges.join("")}</span>`;
   }
@@ -3995,7 +4009,28 @@
   }
 
   function ebayConversationReadState(conversation) {
+    const localState = String(conversation?.local_read_state || conversation?.raw?.local_read_state || "").toLowerCase();
+    if (localState === "read" || localState === "unread") return localState;
     return Number(conversation?.unread_count || 0) > 0 ? "unread" : "read";
+  }
+
+  function ebayConversationProviderReadState(conversation) {
+    const providerState = String(conversation?.provider_read_state || conversation?.raw?.provider_read_state || "").toLowerCase();
+    if (providerState === "read" || providerState === "unread") return providerState;
+    return "unknown";
+  }
+
+  function renderEbayReadSyncBadges(conversation) {
+    const providerState = ebayConversationProviderReadState(conversation);
+    const localState = ebayConversationReadState(conversation);
+    const pending = conversation?.pending_provider_update === true || conversation?.raw?.pending_provider_update === true;
+    const failed = String(conversation?.read_sync_status || conversation?.raw?.read_sync_status || "").toLowerCase() === "provider_update_failed";
+    const badges = [
+      providerState !== "unknown" ? renderBadge(`eBay ${humanizeValue(providerState)}`, providerState === "unread" ? "warning" : "muted") : renderBadge("eBay read unknown", "muted"),
+      renderBadge(`OG ${humanizeValue(localState)}`, localState === "unread" ? "warning" : "muted"),
+      failed ? renderBadge("Read sync failed", "danger") : pending ? renderBadge("Read sync pending", "warning") : renderBadge("Read sync aligned", "success"),
+    ];
+    return `<span class="ebay-conversation-badges">${badges.join("")}</span>`;
   }
 
   function ebayConversationIsActive(conversation) {
@@ -4819,6 +4854,7 @@
     const identity = ebayBuyerIdentity(conversation);
     const metaItems = ebayConversationMetaItems(conversation, 5);
     const isPlatformConversation = ebayConversationIsPlatform(conversation);
+    const readSyncLoading = state.ebayConversationReadSyncLoadingId === conversation.id;
 
     els.ebayConversationDetail.innerHTML = `
       <div class="ebay-detail-head">
@@ -4830,11 +4866,22 @@
             <span>${escapeHtml(ebayConversationTitle(conversation))}</span>
             ${metaItems.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
           </div>
+          ${renderEbayReadSyncBadges(conversation)}
         </div>
-        <button type="button" class="secondary-btn" data-ebay-detail-action="refresh-messages" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="Deep refresh only this selected conversation and reload its timeline." ${isLoading ? "disabled" : ""}>
-          <i data-lucide="${isLoading ? "loader-circle" : "refresh-cw"}"></i>
-          ${escapeHtml(isLoading ? "Refreshing selected conversation" : "Refresh Timeline")}
-        </button>
+        <div class="ebay-detail-actions">
+          <button type="button" class="secondary-btn" data-ebay-detail-action="sync-provider-read" data-ebay-read-state="read" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="Set this conversation read in eBay and reconcile OG after provider confirmation." ${readSyncLoading ? "disabled" : ""}>
+            <i data-lucide="${readSyncLoading ? "loader-circle" : "mail-check"}"></i>
+            ${escapeHtml(readSyncLoading ? "Syncing eBay read" : "Sync Read to eBay")}
+          </button>
+          <button type="button" class="secondary-btn" data-ebay-detail-action="sync-provider-read" data-ebay-read-state="unread" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="Set this conversation unread in eBay and reconcile OG after provider confirmation." ${readSyncLoading ? "disabled" : ""}>
+            <i data-lucide="${readSyncLoading ? "loader-circle" : "mail-open"}"></i>
+            ${escapeHtml(readSyncLoading ? "Syncing eBay unread" : "Sync Unread to eBay")}
+          </button>
+          <button type="button" class="secondary-btn" data-ebay-detail-action="refresh-messages" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="Deep refresh only this selected conversation and reload its timeline." ${isLoading ? "disabled" : ""}>
+            <i data-lucide="${isLoading ? "loader-circle" : "refresh-cw"}"></i>
+            ${escapeHtml(isLoading ? "Refreshing selected conversation" : "Refresh Timeline")}
+          </button>
+        </div>
       </div>
       ${error ? `<div class="classification-notice is-error">Could not load eBay messages: ${escapeHtml(error)}</div>` : ""}
       ${renderEbayClassificationCard(conversation)}
@@ -5025,6 +5072,19 @@
         <div class="classification-notice is-warning">
           <strong>eBay operation request timed out.</strong>
           Refreshed mailbox counts and operational dashboard state from the database.
+        </div>
+      `;
+      return;
+    }
+    if (result?.mode === "provider_read_state_sync") {
+      const safety = result.safety && typeof result.safety === "object" ? result.safety : {};
+      const readState = result.providerReadState || result.read_state || "read";
+      els.ebayConversationSyncResult.innerHTML = `
+        <div class="classification-notice is-success">
+          <strong>${escapeHtml(`eBay provider read state synced to ${humanizeValue(readState)}.`)}</strong>
+          Conversation: ${escapeHtml(result.ebayConversationId ? compactId(result.ebayConversationId) : "--")};
+          eBay mutation: ${escapeHtml(safety.ebayMutationsPerformed === true ? "true" : "false")};
+          sends: ${escapeHtml(formatContextNumber(safety.messagesSent || 0))}.
         </div>
       `;
       return;
@@ -5397,6 +5457,48 @@
         },
       });
       console.error("[email-triage] eBay conversation mark read failed:", error);
+    }
+  }
+
+  async function syncSelectedEbayProviderReadState(context, conversationId, readState = "read") {
+    if (!conversationId) return;
+    const normalizedReadState = String(readState || "").toLowerCase() === "unread" ? "unread" : "read";
+    setEbayConversationState({
+      ebayConversationReadSyncLoadingId: conversationId,
+      ebayConversationSyncError: null,
+      ebayConversationSyncResult: null,
+    });
+
+    try {
+      const payload = await syncEbayProviderReadState(context, conversationId, normalizedReadState);
+      setEbayConversationState({
+        ebayConversationReadSyncLoadingId: null,
+        ebayConversationSyncResult: {
+          ...payload,
+          mode: "provider_read_state_sync",
+          read_state: normalizedReadState,
+        },
+        ebayConversationSyncError: null,
+      });
+      await loadEbayConversationList(context, {
+        preserveSelectionId: conversationId,
+        forceSelectionReload: true,
+        preserveClassificationResult: true,
+      });
+      await loadEbayConversationMessages(context, conversationId);
+      loadOperationalDashboard(context, { keepPrevious: true });
+    } catch (error) {
+      const code = error.code || error.message || "ebay_provider_read_sync_failed";
+      setEbayConversationState({
+        ebayConversationReadSyncLoadingId: null,
+        ebayConversationSyncError: code,
+        ebayConversationMessageErrorsById: {
+          ...adminClassificationState.ebayConversationMessageErrorsById,
+          [conversationId]: code,
+        },
+      });
+      loadOperationalDashboard(context, { keepPrevious: true });
+      console.error("[email-triage] eBay provider read sync failed:", error);
     }
   }
 
@@ -6467,6 +6569,10 @@
       const action = button.getAttribute("data-ebay-detail-action");
       if (action === "refresh-messages") {
         refreshEbayConversationTimeline(context, conversationId);
+        return;
+      }
+      if (action === "sync-provider-read") {
+        syncSelectedEbayProviderReadState(context, conversationId, button.getAttribute("data-ebay-read-state") || "read");
         return;
       }
       if (action === "refresh-context") {

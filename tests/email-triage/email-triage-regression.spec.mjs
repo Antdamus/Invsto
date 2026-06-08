@@ -16,6 +16,7 @@ import {
   recentClassificationRuns,
   recentSendAttempts,
   recentSyncRuns,
+  readStateRows,
   redact,
   repoRoot,
   resolveHarnessPath,
@@ -64,6 +65,15 @@ function summarizeConversationState(row = null) {
     latest_message_created_at: row.latest_message_created_at || null,
     latest_message_preview: row.latest_message_preview || null,
     message_count: numberOrNull(row.message_count),
+    unread_count: numberOrNull(row.unread_count),
+    provider_read_state: row.provider_read_state || null,
+    local_read_state: row.local_read_state || null,
+    pending_provider_update: row.pending_provider_update === true,
+    last_provider_seen_at: row.last_provider_seen_at || null,
+    last_local_read_at: row.last_local_read_at || null,
+    last_read_sync_at: row.last_read_sync_at || null,
+    read_sync_status: row.read_sync_status || null,
+    read_sync_error: row.read_sync_error || null,
     last_detail_synced_at: row.last_detail_synced_at || null,
   };
 }
@@ -311,6 +321,28 @@ function assertClassificationSafety(exchange) {
   expect(Number(exchange.response?.safety?.messagesSent || 0)).toBe(0);
 }
 
+function assertProviderReadSyncSafety(exchange) {
+  if (exchange?.timedOutWaitingForBrowserResponse) return;
+  expect(exchange.status).toBeLessThan(300);
+  expect(exchange.response?.ok).not.toBe(false);
+  expect(exchange.response?.safety?.ebayMutationsPerformed).toBe(true);
+  expect(exchange.response?.safety?.sendsEnabled).toBe(false);
+  expect(Number(exchange.response?.safety?.messagesSent || 0)).toBe(0);
+}
+
+function summarizeReadStateRows(rows = []) {
+  const values = Array.isArray(rows) ? rows : [];
+  return {
+    sampled: values.length,
+    providerUnread: values.filter((row) => row.provider_read_state === "unread").length,
+    localUnread: values.filter((row) => row.local_read_state === "unread").length,
+    legacyUnread: values.filter((row) => Number(row.unread_count || 0) > 0).length,
+    pendingProviderUpdate: values.filter((row) => row.pending_provider_update === true).length,
+    failedProviderUpdate: values.filter((row) => row.read_sync_status === "provider_update_failed").length,
+    unknownProviderState: values.filter((row) => !["read", "unread"].includes(String(row.provider_read_state || ""))).length,
+  };
+}
+
 async function assertSyncBannerMatches(page, exchange) {
   if (exchange?.timedOutWaitingForBrowserResponse) {
     await expect(page.locator("#ebay-conversation-sync-result")).toContainText(/timed out|durable run state recovered|finished/i, { timeout: 60000 });
@@ -397,6 +429,17 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
       url: request.url(),
       method: request.method(),
       body: safeJsonParse(request.postData(), request.postData() || ""),
+    });
+    await route.abort();
+  });
+
+  await page.route("**/commerce/message/v1/update_conversation", async (route) => {
+    const request = route.request();
+    fullReport.blockedSendAttempts.push({
+      url: request.url(),
+      method: request.method(),
+      body: safeJsonParse(request.postData(), request.postData() || ""),
+      reason: "Unexpected browser-side provider read mutation; expected only the guarded Edge Function to call eBay.",
     });
     await route.abort();
   });
@@ -516,6 +559,48 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
       })),
     });
 
+    let readRows = [];
+    let readStateRowsError = null;
+    try {
+      readRows = await readStateRows(client, { limit: 1000 });
+    } catch (error) {
+      readStateRowsError = error.message || String(error);
+    }
+    const readStateSummary = summarizeReadStateRows(readRows);
+    const dashboardTextForReadState = await page.locator("#operational-dashboard").innerText();
+    const normalizedReadDashboardText = dashboardTextForReadState.toLowerCase();
+    expect(normalizedReadDashboardText).toContain("provider unread");
+    expect(normalizedReadDashboardText).toContain("og unread");
+    expect(normalizedReadDashboardText).toContain("read sync pending");
+    expect(normalizedReadDashboardText).toContain("read sync failed");
+    if (selectedConversationId) {
+      const detailText = await page.locator("#ebay-conversation-detail").innerText();
+      expect(detailText).toContain("eBay");
+      expect(detailText).toContain("OG");
+      expect(detailText).toContain("Sync Read to eBay");
+      expect(detailText).toContain("Sync Unread to eBay");
+    }
+    const mailboxRowsWithProviderState = Array.isArray(mailbox.conversations)
+      ? mailbox.conversations.filter((row) => Object.prototype.hasOwnProperty.call(row, "provider_read_state"))
+      : [];
+    const readStateSchemaAvailable = !readStateRowsError &&
+      Array.isArray(mailbox.conversations) &&
+      mailboxRowsWithProviderState.length === mailbox.conversations.length;
+    if (readStateRowsError) {
+      expect(normalizedReadDashboardText).toContain("read schema pending");
+    } else {
+      expect(readStateSchemaAvailable).toBe(true);
+    }
+    report.add("Read/unread state displays truthfully", readStateSchemaAvailable ? "passed" : "skipped", {
+      reason: readStateSchemaAvailable ? undefined : "Provider read-state migration has not been applied to this Supabase project yet.",
+      dashboardLabelsFound: true,
+      selectedConversationId,
+      mailboxRpcVersion: mailbox.rpc_version,
+      mailboxConversationsWithProviderState: mailboxRowsWithProviderState.length,
+      readStateRowsError,
+      sampledReadState: readStateSummary,
+    });
+
     const liveStartedAt = new Date().toISOString();
 
     if (envFlag(env, "EMAIL_TRIAGE_RUN_SYNC_RECENT")) {
@@ -622,6 +707,46 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
       report.add("Refresh Timeline", "skipped", {
         reason: selectedConversationId
           ? "Set EMAIL_TRIAGE_RUN_REFRESH_TIMELINE=true to run this live write-to-Supabase check."
+          : "No selected conversation row is available.",
+      });
+    }
+
+    if (envFlag(env, "EMAIL_TRIAGE_RUN_PROVIDER_READ_SYNC") && selectedConversationId) {
+      if (env.EMAIL_TRIAGE_CONFIRM_PROVIDER_READ_SYNC !== "I_UNDERSTAND_THIS_MUTATES_EBAY_READ_STATE") {
+        report.add("Provider read-state update", "skipped", {
+          reason: "Set EMAIL_TRIAGE_CONFIRM_PROVIDER_READ_SYNC=I_UNDERSTAND_THIS_MUTATES_EBAY_READ_STATE to intentionally mutate eBay read/unread state.",
+        });
+      } else {
+        const requestedReadState = String(env.EMAIL_TRIAGE_PROVIDER_READ_SYNC_STATE || "read").toLowerCase() === "unread" ? "unread" : "read";
+        const beforeRows = await readStateRows(client, { limit: 1000 });
+        const before = beforeRows.find((row) => row.id === selectedConversationId) || null;
+        const exchange = await waitForFunctionResponse(
+          page,
+          "ebay-message-read-sync",
+          (body) => body?.mode === "set_read_state" && body?.conversationId === selectedConversationId,
+          () => page.locator(`[data-ebay-detail-action="sync-provider-read"][data-ebay-read-state="${requestedReadState}"]`).click(),
+          120000,
+        );
+        assertProviderReadSyncSafety(exchange);
+        await expect(page.locator("#ebay-conversation-sync-result")).toContainText(/provider read state synced|eBay mutation: true/i, { timeout: 60000 });
+        const afterRows = await readStateRows(client, { limit: 1000 });
+        const after = afterRows.find((row) => row.id === selectedConversationId) || null;
+        expect(after?.provider_read_state).toBe(requestedReadState);
+        expect(after?.local_read_state).toBe(requestedReadState);
+        expect(after?.pending_provider_update).toBe(false);
+        expect(after?.read_sync_status).toBe("synced");
+        report.add("Provider read-state update", "passed", {
+          request: exchange.request,
+          response: redact(exchange.response),
+          requestedReadState,
+          before: summarizeConversationState(before),
+          after: summarizeConversationState(after),
+        });
+      }
+    } else {
+      report.add("Provider read-state update", "skipped", {
+        reason: selectedConversationId
+          ? "Set EMAIL_TRIAGE_RUN_PROVIDER_READ_SYNC=true plus confirmation env to intentionally mutate eBay read/unread state."
           : "No selected conversation row is available.",
       });
     }
