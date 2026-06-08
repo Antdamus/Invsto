@@ -2,13 +2,24 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 type JsonRecord = Record<string, unknown>;
 type ServiceClient = ReturnType<typeof createClient>;
+type PublicKeyCacheEntry = { key: CryptoKey | null; spkiBytes: Uint8Array; expiresAt: number };
+type P256Point = { x: bigint; y: bigint } | null;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")?.trim() || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim() || "";
 const VERIFICATION_TOKEN = Deno.env.get("EBAY_MESSAGE_NOTIFICATION_VERIFICATION_TOKEN")?.trim() || "";
 const ENDPOINT_URL = Deno.env.get("EBAY_MESSAGE_NOTIFICATION_ENDPOINT_URL")?.trim() || "";
 const DEFAULT_NOTIFICATION_SCOPE = "https://api.ebay.com/oauth/api_scope";
-const publicKeyCache = new Map<string, { key: CryptoKey; expiresAt: number }>();
+const publicKeyCache = new Map<string, PublicKeyCacheEntry>();
+
+const P256_P = BigInt("0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff");
+const P256_A = P256_P - 3n;
+const P256_B = BigInt("0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b");
+const P256_N = BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
+const P256_G: P256Point = {
+  x: BigInt("0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296"),
+  y: BigInt("0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5"),
+};
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -128,6 +139,117 @@ function derEcdsaToRaw(signature: Uint8Array, size = 32) {
   return out;
 }
 
+function mod(value: bigint, modulus: bigint) {
+  const result = value % modulus;
+  return result >= 0n ? result : result + modulus;
+}
+
+function modInverse(value: bigint, modulus: bigint) {
+  let a = mod(value, modulus);
+  let b = modulus;
+  let x = 0n;
+  let y = 1n;
+  let lastX = 1n;
+  let lastY = 0n;
+
+  while (b !== 0n) {
+    const quotient = a / b;
+    [a, b] = [b, a % b];
+    [lastX, x] = [x, lastX - quotient * x];
+    [lastY, y] = [y, lastY - quotient * y];
+  }
+
+  if (a !== 1n) throw new Error("p256_inverse_missing");
+  return mod(lastX, modulus);
+}
+
+function bytesToBigInt(bytes: Uint8Array) {
+  let result = 0n;
+  for (const byte of bytes) result = (result << 8n) + BigInt(byte);
+  return result;
+}
+
+function pointFromSpkiBytes(spkiBytes: Uint8Array): P256Point {
+  let offset = -1;
+  for (let i = 0; i <= spkiBytes.length - 68; i += 1) {
+    if (spkiBytes[i] !== 0x03) continue;
+    if (spkiBytes[i + 1] === 0x42 && spkiBytes[i + 2] === 0x00 && spkiBytes[i + 3] === 0x04) {
+      offset = i + 3;
+      break;
+    }
+    if (
+      spkiBytes[i + 1] === 0x81 &&
+      spkiBytes[i + 2] === 0x42 &&
+      spkiBytes[i + 3] === 0x00 &&
+      spkiBytes[i + 4] === 0x04
+    ) {
+      offset = i + 4;
+      break;
+    }
+  }
+
+  if (offset < 0 || offset + 65 > spkiBytes.length) throw new Error("p256_public_key_point_missing");
+  const x = bytesToBigInt(spkiBytes.slice(offset + 1, offset + 33));
+  const y = bytesToBigInt(spkiBytes.slice(offset + 33, offset + 65));
+  if (mod((y * y) - (x * x * x) - (P256_A * x) - P256_B, P256_P) !== 0n) {
+    throw new Error("p256_public_key_point_invalid");
+  }
+  return { x, y };
+}
+
+function pointAdd(left: P256Point, right: P256Point): P256Point {
+  if (!left) return right;
+  if (!right) return left;
+
+  if (left.x === right.x) {
+    if (mod(left.y + right.y, P256_P) === 0n) return null;
+    const numerator = mod((3n * left.x * left.x) + P256_A, P256_P);
+    const denominator = modInverse(2n * left.y, P256_P);
+    const lambda = mod(numerator * denominator, P256_P);
+    const x = mod((lambda * lambda) - (2n * left.x), P256_P);
+    const y = mod(lambda * (left.x - x) - left.y, P256_P);
+    return { x, y };
+  }
+
+  const lambda = mod((right.y - left.y) * modInverse(right.x - left.x, P256_P), P256_P);
+  const x = mod((lambda * lambda) - left.x - right.x, P256_P);
+  const y = mod(lambda * (left.x - x) - left.y, P256_P);
+  return { x, y };
+}
+
+function scalarMultiply(scalar: bigint, point: P256Point): P256Point {
+  let result: P256Point = null;
+  let addend = point;
+  let value = scalar;
+
+  while (value > 0n) {
+    if (value & 1n) result = pointAdd(result, addend);
+    addend = pointAdd(addend, addend);
+    value >>= 1n;
+  }
+
+  return result;
+}
+
+async function verifyEcdsaSha1P256Fallback(spkiBytes: Uint8Array, signature: Uint8Array, rawBody: string) {
+  if (signature.length !== 64) throw new Error("p256_signature_length_invalid");
+  const r = bytesToBigInt(signature.slice(0, 32));
+  const s = bytesToBigInt(signature.slice(32, 64));
+  if (r <= 0n || r >= P256_N || s <= 0n || s >= P256_N) return false;
+
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-1", new TextEncoder().encode(rawBody)));
+  const z = bytesToBigInt(digest);
+  const w = modInverse(s, P256_N);
+  const u1 = mod(z * w, P256_N);
+  const u2 = mod(r * w, P256_N);
+  const point = pointAdd(
+    scalarMultiply(u1, P256_G),
+    scalarMultiply(u2, pointFromSpkiBytes(spkiBytes)),
+  );
+
+  return Boolean(point && mod(point.x, P256_N) === r);
+}
+
 async function parseResponse(res: Response) {
   const bodyText = await res.text();
   if (!bodyText) return {};
@@ -181,7 +303,7 @@ async function refreshClientCredentialsToken() {
 
 async function publicKeyForKid(kid: string) {
   const cached = publicKeyCache.get(kid);
-  if (cached && cached.expiresAt > Date.now()) return cached.key;
+  if (cached && cached.expiresAt > Date.now()) return cached;
 
   const token = await refreshClientCredentialsToken();
   const res = await fetch(`${ebayApiBase()}/commerce/notification/v1/public_key/${encodeURIComponent(kid)}`, {
@@ -194,16 +316,24 @@ async function publicKeyForKid(kid: string) {
   if (!res.ok) throw new Error(`ebay_public_key_fetch_failed:${res.status}`);
   const pem = text((payload as JsonRecord).key);
   if (!pem) throw new Error("ebay_public_key_missing_key");
+  const spkiBytes = pemToSpkiBytes(pem);
 
-  const key = await crypto.subtle.importKey(
-    "spki",
-    pemToSpkiBytes(pem),
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["verify"],
-  );
-  publicKeyCache.set(kid, { key, expiresAt: Date.now() + 60 * 60 * 1000 });
-  return key;
+  let key: CryptoKey | null = null;
+  try {
+    key = await crypto.subtle.importKey(
+      "spki",
+      spkiBytes,
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["verify"],
+    );
+  } catch (error) {
+    console.warn("[ebay-message-notification] public key import fallback will be used", error instanceof Error ? error.message : error);
+  }
+
+  const entry = { key, spkiBytes, expiresAt: Date.now() + 60 * 60 * 1000 };
+  publicKeyCache.set(kid, entry);
+  return entry;
 }
 
 async function verifyEbaySignature(signatureHeader: string | null, rawBody: string) {
@@ -216,12 +346,22 @@ async function verifyEbaySignature(signatureHeader: string | null, rawBody: stri
 
     const publicKey = await publicKeyForKid(kid);
     const signature = derEcdsaToRaw(base64Bytes(signatureValue));
-    const verified = await crypto.subtle.verify(
-      { name: "ECDSA", hash: "SHA-1" },
-      publicKey,
-      signature,
-      new TextEncoder().encode(rawBody),
-    );
+    let verified = false;
+    if (publicKey.key) {
+      try {
+        verified = await crypto.subtle.verify(
+          { name: "ECDSA", hash: "SHA-1" },
+          publicKey.key,
+          signature,
+          new TextEncoder().encode(rawBody),
+        );
+      } catch (error) {
+        console.warn("[ebay-message-notification] native ECDSA SHA1 verify fallback will be used", error instanceof Error ? error.message : error);
+      }
+    }
+    if (!verified) {
+      verified = await verifyEcdsaSha1P256Fallback(publicKey.spkiBytes, signature, rawBody);
+    }
     return { verified, error: verified ? null : "signature_verification_failed", kid };
   } catch (error) {
     return {

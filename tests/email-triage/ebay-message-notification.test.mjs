@@ -156,3 +156,11 @@ test("receiver ledger path does not use partial-index-hostile upsert", async () 
   assert.match(source, /\.insert\(row\)/);
   assert.match(source, /error\.code === "23505"/);
 });
+
+test("receiver includes Deno-compatible ECDSA SHA-1 fallback for eBay signatures", async () => {
+  const source = await fs.readFile(receiverPath, "utf8");
+  assert.match(source, /verifyEcdsaSha1P256Fallback/);
+  assert.match(source, /native ECDSA SHA1 verify fallback will be used/);
+  assert.match(source, /crypto\.subtle\.digest\("SHA-1"/);
+  assert.match(source, /pointFromSpkiBytes/);
+});
