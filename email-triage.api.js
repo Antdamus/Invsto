@@ -803,7 +803,7 @@
         needs_reply: classifications.filter((row) => ["reply_today", "reply_later"].includes(row.response_need)).length,
         high_priority: classifications.filter((row) => row.priority === "high").length,
         returns: classifications.filter((row) => topicIncludes(row, "return")).length,
-        refund_risk: classifications.filter((row) => riskIncludes(row, "refund_risk") || topicIncludes(row, "refund_request")).length,
+        refund_risk: classifications.filter((row) => riskIncludes(row, "refund_risk")).length,
         vip_buyers: classifications.filter((row) => buyerIncludes(row, "vip_buyer")).length,
         drafts_generated: todayDrafts.length,
         drafts_awaiting_approval: awaitingApproval.length,
@@ -1232,8 +1232,8 @@
       shipping_issues: rows.filter((conversation) => ebayLegacyHasAny(ebayLegacyClassification(conversation).topic_tags, ["shipping_issue", "missing_item", "order_status", "delivery_timing"])).length,
       needs_reply_today: rows.filter((conversation) => ebayLegacyClassification(conversation).response_need === "reply_today").length,
       vip_buyers: rows.filter((conversation) => ebayLegacyHasAny(ebayLegacyClassification(conversation).buyer_flags, ["vip_buyer"])).length,
-      high_value_buyers: rows.filter((conversation) => ebayLegacyHasAny(ebayLegacyClassification(conversation).buyer_flags, ["high_value_buyer", "high_retained_value_buyer"])).length,
-      refund_risk: rows.filter((conversation) => ebayLegacyHasAny(ebayLegacyClassification(conversation).risk_flags, ["refund_risk", "chargeback_risk", "unsupported_claim_risk"])).length,
+      high_value_buyers: rows.filter((conversation) => ebayLegacyHasAny(ebayLegacyClassification(conversation).buyer_flags, ["high_value_buyer"])).length,
+      refund_risk: rows.filter((conversation) => ebayLegacyHasAny(ebayLegacyClassification(conversation).risk_flags, ["refund_risk"])).length,
       review_queue: rows.filter((conversation) => {
         const summary = ebayLegacySummary(conversation);
         const classification = ebayLegacyClassification(conversation);

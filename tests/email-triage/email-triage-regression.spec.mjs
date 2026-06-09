@@ -141,6 +141,87 @@ function smartFolderButton(page, systemKey) {
     .getByRole("button", { name: new RegExp(`^${regexEscape(label)}\\b`, "i") });
 }
 
+function customSmartFolderButton(page, name) {
+  return page
+    .locator("#ebay-conversation-saved-views")
+    .getByRole("button", { name: new RegExp(`^${regexEscape(name)}\\b`, "i") });
+}
+
+const NATIVE_LABEL_FOLDER_EXPECTATIONS = {
+  vip_buyers: { groupKey: "buyerFlags", value: "vip_buyer", label: "VIP Buyer" },
+  high_value_buyers: { groupKey: "buyerFlags", value: "high_value_buyer", label: "High Value Buyer" },
+  refund_risk: { groupKey: "riskFlags", value: "refund_risk", label: "Refund Risk" },
+};
+
+function folderCountTextToNumber(value) {
+  const cleaned = String(value || "").replace(/[^0-9]/g, "");
+  return cleaned ? Number(cleaned) : 0;
+}
+
+async function waitForMatchingTotal(page, expected) {
+  await expect.poll(async () => {
+    const text = await page.locator("#ebay-conversation-summary").innerText();
+    return extractMetric(text, "Matching");
+  }, { timeout: 30000 }).toBe(Number(expected));
+}
+
+async function expandClassificationFilters(page) {
+  const panel = page.locator("#ebay-conversation-filter-panel");
+  if (await panel.evaluate((node) => node.hidden).catch(() => true)) {
+    await page.locator("#ebay-conversation-filter-toggle").click();
+  }
+  await expect(panel).toBeVisible();
+}
+
+function classificationFilterInput(page, groupKey, value) {
+  return page.locator(`#ebay-conversation-filter-panel input[data-ebay-filter-group="${groupKey}"][value="${value}"]`);
+}
+
+function classificationFilterChip(page, groupKey, value) {
+  return page.locator(`#ebay-conversation-filter-panel label.ebay-filter-chip:has(input[data-ebay-filter-group="${groupKey}"][value="${value}"])`);
+}
+
+async function setClassificationFilter(page, groupKey, value, active = true) {
+  const input = classificationFilterInput(page, groupKey, value);
+  if ((await input.isChecked()) !== active) {
+    await classificationFilterChip(page, groupKey, value).click();
+  }
+  if (active) await expect(input).toBeChecked();
+  else await expect(input).not.toBeChecked();
+}
+
+async function setSystemFilter(page, systemFilter) {
+  const button = page.locator(`#ebay-conversation-filter-panel [data-ebay-system-filter="${systemFilter}"]`);
+  await button.click();
+  await expect(button).toHaveClass(/is-active/);
+}
+
+async function expectSystemFilterActive(page, systemFilter, active = true) {
+  const button = page.locator(`#ebay-conversation-filter-panel [data-ebay-system-filter="${systemFilter}"]`);
+  if (active) await expect(button).toHaveClass(/is-active/);
+  else await expect(button).not.toHaveClass(/is-active/);
+}
+
+async function createSmartFolderThroughUi(page, { name, filters = [], systemFilter = null }) {
+  await page.getByRole("button", { name: /^Create folder$/i }).click();
+  const panel = page.locator("#ebay-conversation-filter-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText("CREATE SMART FOLDER");
+  const clearFilters = page.locator("#ebay-conversation-clear-filters");
+  if (!(await clearFilters.isDisabled())) {
+    await clearFilters.click();
+    await expect(panel).toContainText("CREATE SMART FOLDER");
+  }
+  await panel.locator("[data-ebay-smart-folder-create-name]").fill(name);
+  if (systemFilter) await setSystemFilter(page, systemFilter);
+  for (const filter of filters) {
+    await setClassificationFilter(page, filter.groupKey, filter.value, true);
+  }
+  await panel.locator("[data-ebay-smart-folder-create-save]").click();
+  await expect(customSmartFolderButton(page, name)).toBeVisible({ timeout: 30000 });
+  await expect(panel).not.toContainText("CREATE SMART FOLDER");
+}
+
 function chooseSmartFolderKey(counts = {}) {
   const preferred = [
     "unclassified",
@@ -596,6 +677,100 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
       });
     }
 
+    await expandClassificationFilters(page);
+    const nativeFolderEvidence = [];
+    for (const [folderKey, expectation] of Object.entries(NATIVE_LABEL_FOLDER_EXPECTATIONS)) {
+      const expectedByLabel = await canonicalMailbox(client, {
+        pageSize: 100,
+        classificationFilters: {
+          [expectation.groupKey]: [expectation.value],
+        },
+      });
+      const expectedCount = Number(expectedByLabel.matching_total || 0);
+      await expect.poll(async () => {
+        return folderCountTextToNumber(await smartFolderButton(page, folderKey).locator("b").innerText());
+      }, {
+        timeout: 30000,
+        message: `${SMART_FOLDER_LABELS[folderKey]} count should equal ${expectation.label} label count.`,
+      }).toBe(expectedCount);
+      await smartFolderButton(page, folderKey).click();
+      await waitForMatchingTotal(page, expectedCount);
+      await expandClassificationFilters(page);
+      await expect(classificationFilterInput(page, expectation.groupKey, expectation.value)).toBeChecked();
+      nativeFolderEvidence.push({
+        folderKey,
+        folderLabel: SMART_FOLDER_LABELS[folderKey],
+        requiredLabel: expectation.label,
+        expectedCount,
+        rpcMatchingTotal: expectedByLabel.matching_total,
+      });
+    }
+    await smartFolderButton(page, "all").click();
+    await waitForMatchingTotal(page, mailbox.matching_total);
+    report.add("Native smart folders highlight exact labels and count consistently", "passed", {
+      folders: nativeFolderEvidence,
+    });
+
+    const folderStamp = String(Date.now()).slice(-10);
+    const aiFolderName = `P2E ${folderStamp} AI`;
+    const systemFolderName = `P2E ${folderStamp} System`;
+    const comboFolderName = `P2E ${folderStamp} Combo`;
+    await createSmartFolderThroughUi(page, {
+      name: aiFolderName,
+      filters: [{ groupKey: "buyerFlags", value: "vip_buyer" }],
+    });
+    await createSmartFolderThroughUi(page, {
+      name: systemFolderName,
+      systemFilter: "has_media",
+    });
+    await createSmartFolderThroughUi(page, {
+      name: comboFolderName,
+      systemFilter: "members",
+      filters: [{ groupKey: "buyerFlags", value: "vip_buyer" }],
+    });
+    await page.reload();
+    await waitForMailboxReady(page);
+    await expandClassificationFilters(page);
+    await customSmartFolderButton(page, aiFolderName).click();
+    await expandClassificationFilters(page);
+    await expect(classificationFilterInput(page, "buyerFlags", "vip_buyer")).toBeChecked();
+    await customSmartFolderButton(page, systemFolderName).click();
+    await expandClassificationFilters(page);
+    await expectSystemFilterActive(page, "has_media", true);
+    await customSmartFolderButton(page, comboFolderName).click();
+    await expandClassificationFilters(page);
+    await expectSystemFilterActive(page, "members", true);
+    await expect(classificationFilterInput(page, "buyerFlags", "vip_buyer")).toBeChecked();
+    report.add("Custom smart folder create flow persists AI/system labels after reload", "passed", {
+      aiFolderName,
+      systemFolderName,
+      comboFolderName,
+    });
+
+    await page.locator("#ebay-smart-folder-edit-toggle").click();
+    await customSmartFolderButton(page, comboFolderName).click();
+    const filterPanel = page.locator("#ebay-conversation-filter-panel");
+    await expect(filterPanel).toContainText("SMART FOLDER EDIT MODE");
+    await expect(filterPanel).toContainText(`Editing: ${comboFolderName}`);
+    await setClassificationFilter(page, "buyerFlags", "vip_buyer", false);
+    await filterPanel.locator("[data-ebay-smart-folder-edit-reset]").click();
+    await expect(classificationFilterInput(page, "buyerFlags", "vip_buyer")).toBeChecked();
+    await setClassificationFilter(page, "buyerFlags", "vip_buyer", false);
+    await filterPanel.locator("[data-ebay-smart-folder-edit-save]").click();
+    await expect(filterPanel).not.toContainText("SMART FOLDER EDIT MODE", { timeout: 30000 });
+    await page.reload();
+    await waitForMailboxReady(page);
+    await expandClassificationFilters(page);
+    await customSmartFolderButton(page, comboFolderName).click();
+    await expandClassificationFilters(page);
+    await expectSystemFilterActive(page, "members", true);
+    await expect(classificationFilterInput(page, "buyerFlags", "vip_buyer")).not.toBeChecked();
+    report.add("Custom smart folder edit draft reset/save persists after reload", "passed", {
+      editedFolderName: comboFolderName,
+      removedLabel: "VIP Buyer",
+      retainedSystemLabel: "Members",
+    });
+
     const selectedRow = page.locator(".ebay-conversation-row.is-selected[data-ebay-conversation-id]").first();
     const selectedConversationId = await selectedRow.getAttribute("data-ebay-conversation-id").catch(() => null);
     let messagesBefore = [];
@@ -649,9 +824,10 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
     expect(normalizedReadDashboardText).toContain("read sync failed");
     if (selectedConversationId) {
       const detailText = await page.locator("#ebay-conversation-detail").innerText();
-      expect(detailText).toContain("eBay");
-      expect(detailText).toContain("OG");
-      expect(detailText).toContain("Read Sync");
+      const normalizedDetailText = detailText.toLowerCase();
+      expect(normalizedDetailText).toContain("ebay");
+      expect(normalizedDetailText).toContain("og");
+      expect(normalizedDetailText).toContain("read sync");
       await page.locator(".ebay-read-sync-actions > summary").click();
       const expandedDetailText = await page.locator("#ebay-conversation-detail").innerText();
       expect(expandedDetailText).toContain("Retry Sync Read");
