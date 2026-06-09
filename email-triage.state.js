@@ -96,6 +96,8 @@
       ebayConversationSavedViewsError: null,
       ebayConversationSavedViewSavingId: null,
       ebayConversationSavedViewActionError: null,
+      ebayConversationSavedViewCounts: {},
+      ebayConversationSavedViewCountsLoading: false,
       selectedEbaySavedViewId: null,
       ebayConversationSmartFoldersEditing: false,
       ebayConversationSmartFolderEditDraft: null,
@@ -126,7 +128,7 @@
       ebayConversationDraftActionMessagesById: {},
       ebayConversationClassificationCollapsed: Object.prototype.hasOwnProperty.call(overrides, "ebayConversationClassificationCollapsed")
         ? overrides.ebayConversationClassificationCollapsed === true
-        : true,
+        : false,
       ebayDraftMetadataCollapsed: Object.prototype.hasOwnProperty.call(overrides, "ebayDraftMetadataCollapsed")
         ? overrides.ebayDraftMetadataCollapsed === true
         : true,

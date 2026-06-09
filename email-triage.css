@@ -3563,6 +3563,33 @@ button.ebay-filter-chip {
   grid-template-columns: minmax(0, 1fr) repeat(3, 28px);
 }
 
+.ebay-smart-folder-row.is-editing.is-draft {
+  grid-template-columns: minmax(0, 1fr) repeat(5, 28px);
+}
+
+.ebay-smart-folder-edit-banner {
+  display: grid;
+  gap: 2px;
+  border: 1px solid rgba(214,178,94,.24);
+  border-radius: 8px;
+  background: rgba(214,178,94,.1);
+  color: rgba(242,243,245,.86);
+  padding: 8px;
+}
+
+.ebay-smart-folder-edit-banner strong {
+  color: #f1d18a;
+  font-size: .68rem;
+  font-weight: 950;
+  letter-spacing: 0;
+}
+
+.ebay-smart-folder-edit-banner span {
+  color: rgba(242,243,245,.58);
+  font-size: .64rem;
+  font-weight: 820;
+}
+
 .ebay-smart-folder-row > button:first-child {
   display: inline-flex;
   align-items: center;
@@ -4169,6 +4196,70 @@ button.ebay-filter-chip {
   color: rgba(242,243,245,.9);
   font: .84rem/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   margin: 8px 0 0;
+}
+
+.ebay-message-media {
+  display: grid;
+  gap: 8px;
+  margin-top: 9px;
+  min-width: 0;
+}
+
+.ebay-message-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(94px, 1fr));
+  gap: 8px;
+}
+
+.ebay-message-media-thumb {
+  display: block;
+  min-width: 0;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 8px;
+  background: rgba(0,0,0,.18);
+}
+
+.ebay-message-media-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ebay-message-attachment-list {
+  display: grid;
+  gap: 6px;
+}
+
+.ebay-message-attachment-list a {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px;
+  background: rgba(0,0,0,.16);
+  color: rgba(242,243,245,.82);
+  font-size: .72rem;
+  font-weight: 850;
+  min-height: 30px;
+  padding: 0 8px;
+  text-decoration: none;
+}
+
+.ebay-message-attachment-list a svg {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+}
+
+.ebay-message-attachment-list a span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ebay-message-foot {
