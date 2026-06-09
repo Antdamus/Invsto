@@ -8,6 +8,7 @@ import {
   conversationByEbayId,
   conversationMessages,
   createReadonlyClient,
+  directUnclassifiedCount,
   envFlag,
   getAdminSessionFromPage,
   getSupabaseConfigFromPage,
@@ -303,6 +304,19 @@ async function waitForFunctionResponseOrTimeout(page, functionName, predicate, a
   }
 }
 
+async function openEbayMaintenanceActions(page) {
+  const menu = page.locator(".ebay-conversation-actions > .ebay-maintenance-actions").first();
+  await expect(menu, "Advanced maintenance menu should be present for admin-only actions.").toBeVisible();
+  const isOpen = await menu.evaluate((node) => node.open === true);
+  if (!isOpen) {
+    await menu.locator("> summary").click();
+  }
+  await expect.poll(async () => menu.evaluate((node) => node.open === true), {
+    timeout: 5000,
+    message: "Advanced maintenance menu should open before clicking maintenance actions.",
+  }).toBe(true);
+}
+
 function assertSyncSafety(exchange) {
   if (exchange?.timedOutWaitingForBrowserResponse) return;
   expect(exchange.status).toBeLessThan(300);
@@ -513,6 +527,27 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
       uiSummary: summaryText,
     });
 
+    const directUnclassified = await directUnclassifiedCount(client);
+    const unclassifiedMailbox = await canonicalMailbox(client, { pageSize: 100, systemFilter: "unclassified" });
+    const smartUnclassified = Number(mailbox.smart_folder_counts?.unclassified);
+    const uiUnclassified = extractMetric(summaryText, "Unclassified");
+    expect(Number.isFinite(smartUnclassified)).toBe(true);
+    expect(smartUnclassified).toBe(directUnclassified.count);
+    expect(Number(unclassifiedMailbox.matching_total)).toBe(directUnclassified.count);
+    expect(uiUnclassified).toBe(directUnclassified.count);
+    const classifiedRowsInUnclassifiedQueue = Array.isArray(unclassifiedMailbox.conversations)
+      ? unclassifiedMailbox.conversations.filter((row) => row.classification?.id)
+      : [];
+    expect(classifiedRowsInUnclassifiedQueue, "Unclassified queue must not return rows with current classifications.").toHaveLength(0);
+    report.add("Unclassified count and queue reconcile", "passed", {
+      directCount: directUnclassified.count,
+      directSource: directUnclassified.source,
+      smartFolderCount: smartUnclassified,
+      rpcMatchingTotal: unclassifiedMailbox.matching_total,
+      uiUnclassified,
+      queuedRows: Array.isArray(unclassifiedMailbox.conversations) ? unclassifiedMailbox.conversations.length : 0,
+    });
+
     const firstConversation = Array.isArray(mailbox.conversations) ? mailbox.conversations[0] : null;
     if (firstConversation) {
       const searchTerm = chooseSearchTerm(firstConversation);
@@ -616,8 +651,11 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
       const detailText = await page.locator("#ebay-conversation-detail").innerText();
       expect(detailText).toContain("eBay");
       expect(detailText).toContain("OG");
-      expect(detailText).toContain("Sync Read to eBay");
-      expect(detailText).toContain("Sync Unread to eBay");
+      expect(detailText).toContain("Read Sync");
+      await page.locator(".ebay-read-sync-actions > summary").click();
+      const expandedDetailText = await page.locator("#ebay-conversation-detail").innerText();
+      expect(expandedDetailText).toContain("Retry Sync Read");
+      expect(expandedDetailText).toContain("Sync Unread");
     }
     const mailboxRowsWithProviderState = Array.isArray(mailbox.conversations)
       ? mailbox.conversations.filter((row) => Object.prototype.hasOwnProperty.call(row, "provider_read_state"))
@@ -813,11 +851,11 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
         180000,
       );
       assertClassificationSafety(exchange);
-      await expect(page.locator("#ebay-conversation-sync-result")).toContainText(/Classify unclassified|finished|timed out/i, { timeout: 60000 });
+      await expect(page.locator("#ebay-conversation-sync-result")).toContainText(/Classify new|finished|timed out/i, { timeout: 60000 });
       const after = await canonicalMailbox(client, { pageSize: 1 });
       const beforeCount = Number(before.smart_folder_counts?.unclassified || 0);
       const afterCount = Number(after.smart_folder_counts?.unclassified || 0);
-      report.add("Classify unclassified", "passed", {
+      report.add("Classify New", "passed", {
         request: exchange.request,
         response: summarizeClassificationPayload(exchange.response),
         unclassifiedBefore: beforeCount,
@@ -827,7 +865,7 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
           : "Unclassified count did not decrease; this is acceptable when no eligible unclassified rows exist, rows were skipped, or classifications did not change the canonical queue.",
       });
     } else {
-      report.add("Classify unclassified", "skipped", {
+      report.add("Classify New", "skipped", {
         reason: "Set EMAIL_TRIAGE_RUN_CLASSIFY_UNCLASSIFIED=true to run this classification write check.",
       });
     }
@@ -838,7 +876,10 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
         page,
         "ebay-conversation-classify",
         (body) => body?.mode === "classify_recent" && body?.force === true,
-        () => page.locator("#ebay-conversation-reclassify-all").click(),
+        async () => {
+          await openEbayMaintenanceActions(page);
+          await page.locator("#ebay-conversation-reclassify-all").click();
+        },
         240000,
       );
       expect(exchange.timedOutWaitingForBrowserResponse, "Reclassify recent 20 should return inside the operator workflow without reconciliation rescue.").not.toBe(true);
@@ -935,7 +976,10 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
         page,
         "ebay-message-sync",
         (body) => body?.runType === "backfill" && body?.classificationMode === "none",
-        () => page.locator("#ebay-conversation-backfill").click(),
+        async () => {
+          await openEbayMaintenanceActions(page);
+          await page.locator("#ebay-conversation-backfill").click();
+        },
         300000,
       );
       assertSyncSafety(exchange);
@@ -959,7 +1003,10 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
         page,
         "ebay-message-sync",
         (body) => body?.runType === "backfill" && body?.classificationMode === "classify_new",
-        () => page.locator("#ebay-conversation-backfill-classify-new").click(),
+        async () => {
+          await openEbayMaintenanceActions(page);
+          await page.locator("#ebay-conversation-backfill-classify-new").click();
+        },
         300000,
       );
       assertSyncSafety(exchange);
@@ -1029,7 +1076,10 @@ test("email triage authenticated regression harness", async ({ page }, testInfo)
           page,
           "ebay-message-sync",
           (body) => body?.runType === "backfill" && body?.classificationMode === "reclassify_all",
-          () => page.locator("#ebay-conversation-backfill-reclassify-all").click(),
+          async () => {
+            await openEbayMaintenanceActions(page);
+            await page.locator("#ebay-conversation-backfill-reclassify-all").click();
+          },
           300000,
         );
         assertSyncSafety(exchange);

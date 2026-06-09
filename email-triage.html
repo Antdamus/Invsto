@@ -9,8 +9,8 @@
 
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="dashboard.css?v=5f6s4e-20260607" />
-  <link rel="stylesheet" href="email-triage.css?v=5f6s4e-20260607" />
+  <link rel="stylesheet" href="dashboard.css?v=5f6p2b-20260608" />
+  <link rel="stylesheet" href="email-triage.css?v=5f6p2b-20260608" />
 
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
@@ -87,28 +87,36 @@
               </button>
               <button type="button" id="ebay-conversation-classify-recent" class="secondary-btn">
                 <i data-lucide="sparkles"></i>
-                Classify unclassified
-              </button>
-              <button type="button" id="ebay-conversation-reclassify-all" class="secondary-btn" title="Reclassify the recent bounded maintenance set, up to 20 conversations.">
-                <i data-lucide="refresh-cw"></i>
-                Reclassify recent 20
-              </button>
-              <button type="button" id="ebay-conversation-backfill" class="secondary-btn" title="Import the next historical eBay archive chunk without classification. Click again to resume until complete.">
-                <i data-lucide="archive-restore"></i>
-                Backfill archive
-              </button>
-              <button type="button" id="ebay-conversation-backfill-classify-new" class="secondary-btn" title="Import the next archive chunk and classify only conversations that have never been classified.">
-                <i data-lucide="sparkles"></i>
-                Backfill + classify new
-              </button>
-              <button type="button" id="ebay-conversation-backfill-reclassify-all" class="secondary-btn is-danger" title="Start or continue a chunked full-archive reclassification pass.">
-                <i data-lucide="refresh-cw"></i>
-                Backfill + reclassify all
+                Classify new
               </button>
               <button type="button" id="ebay-conversation-sync" class="primary-btn" title="Recent incremental mailbox scan. Limited to latest Commerce Message pages; not a full archive refresh.">
                 <i data-lucide="cloud-download"></i>
                 Sync recent mailbox
               </button>
+              <details class="ebay-maintenance-actions">
+                <summary class="secondary-btn">
+                  <i data-lucide="settings"></i>
+                  Advanced
+                </summary>
+                <div class="ebay-maintenance-action-menu">
+                  <button type="button" id="ebay-conversation-reclassify-all" class="secondary-btn" title="Reclassify the recent bounded maintenance set, up to 20 conversations.">
+                    <i data-lucide="refresh-cw"></i>
+                    Reclassify recent 20
+                  </button>
+                  <button type="button" id="ebay-conversation-backfill" class="secondary-btn" title="Import the next historical eBay archive chunk without classification. Click again to resume until complete.">
+                    <i data-lucide="archive-restore"></i>
+                    Backfill archive
+                  </button>
+                  <button type="button" id="ebay-conversation-backfill-classify-new" class="secondary-btn" title="Import the next archive chunk and classify only conversations that have never been classified.">
+                    <i data-lucide="sparkles"></i>
+                    Backfill + classify new
+                  </button>
+                  <button type="button" id="ebay-conversation-backfill-reclassify-all" class="secondary-btn is-danger" title="Start or continue a chunked full-archive reclassification pass.">
+                    <i data-lucide="refresh-cw"></i>
+                    Backfill + reclassify all
+                  </button>
+                </div>
+              </details>
             </div>
           </div>
 
@@ -225,14 +233,14 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
-  <script src="initSupabase.js?v=5f6s4e-20260607"></script>
-  <script src="admin-nav.js?v=5f6s4e-20260607"></script>
-  <script src="email-triage.api.js?v=5f6s4e-20260607"></script>
-  <script src="email-triage.state.js?v=5f6s4e-20260607"></script>
-  <script src="email-triage.render-utils.js?v=5f6s4e-20260607"></script>
-  <script src="email-triage.classifications.js?v=5f6s4e-20260607"></script>
-  <script src="email-triage.diagnostics.js?v=5f6s4e-20260607"></script>
-  <script src="email-triage.operations.js?v=5f6s4e-20260607"></script>
-  <script src="email-triage.js?v=5f6s4e-20260607"></script>
+  <script src="initSupabase.js?v=5f6p2b-20260608"></script>
+  <script src="admin-nav.js?v=5f6p2b-20260608"></script>
+  <script src="email-triage.api.js?v=5f6p2b-20260608"></script>
+  <script src="email-triage.state.js?v=5f6p2b-20260608"></script>
+  <script src="email-triage.render-utils.js?v=5f6p2b-20260608"></script>
+  <script src="email-triage.classifications.js?v=5f6p2b-20260608"></script>
+  <script src="email-triage.diagnostics.js?v=5f6p2b-20260608"></script>
+  <script src="email-triage.operations.js?v=5f6p2b-20260608"></script>
+  <script src="email-triage.js?v=5f6p2b-20260608"></script>
 </body>
 </html>

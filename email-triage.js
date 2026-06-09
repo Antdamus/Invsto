@@ -8,6 +8,7 @@
     fetchEbayConversationMessages,
     markEbayConversationRead,
     syncEbayProviderReadState,
+    processPendingEbayProviderReadState,
     fetchEbayConversationContext,
     fetchEbayConversationDrafts,
     requestEbayConversationDraftAction,
@@ -105,13 +106,15 @@
   const EBAY_DRAFT_METADATA_COLLAPSED_STORAGE_KEY = "og-email-triage-ebay-draft-metadata-collapsed";
   const EBAY_RECLASSIFY_RECENT_LIMIT = 20;
   const EBAY_FILTER_GROUPS = [
-    { key: "sourceTypes", label: "System source", values: EBAY_CONVERSATION_SOURCE_TYPES },
     { key: "topics", label: "Topics", values: EBAY_TOPIC_TAGS },
     { key: "buyerFlags", label: "Buyer flags", values: EBAY_BUYER_FLAGS },
     { key: "riskFlags", label: "Risk flags", values: EBAY_RISK_FLAGS },
     { key: "priorities", label: "Priority", values: EBAY_PRIORITIES },
     { key: "responseNeeds", label: "Response", values: EBAY_RESPONSE_NEEDS },
   ];
+  const EBAY_STATE_FILTERS = ["all", "unread", "unclassified", "needs_reply_today", "review_queue"];
+  const EBAY_SYSTEM_FILTERS = ["members", "ebay_notifications", "returns", "shipping_issues", "has_order", "has_return", "has_media", "needs_context_review"];
+  const EBAY_SOURCE_FILTER_GROUP = { key: "sourceTypes", label: "Source", values: EBAY_CONVERSATION_SOURCE_TYPES };
   const EBAY_SAVED_VIEW_ICONS = {
     all: "inbox",
     members: "message-circle",
@@ -1617,6 +1620,7 @@
 
   function renderBuyerSummaryCard(context) {
     const buyer = context?.buyer && typeof context.buyer === "object" ? context.buyer : {};
+    const resolution = context?.context_resolution && typeof context.context_resolution === "object" ? context.context_resolution : {};
     const history = context?.buyer_history_summary && typeof context.buyer_history_summary === "object"
       ? context.buyer_history_summary
       : null;
@@ -1640,6 +1644,7 @@
           { label: "Name", value: buyer.name || "Unavailable" },
           { label: "Email", value: buyer.email || "Unavailable" },
           { label: "Matched From", value: buyer.matched_from ? humanizeValue(buyer.matched_from) : "Unavailable" },
+          { label: "Context Status", value: resolution.buyer_context_status ? humanizeValue(resolution.buyer_context_status) : "Unavailable" },
         ])}
         <div class="buyer-metric-grid">
           ${[
@@ -1663,6 +1668,33 @@
           { label: "Last Prior Purchase", value: formatContextDate(history?.last_prior_purchase_at) },
           { label: "Archive Coverage", value: coverage.covered_by_account_archive === true ? "Covered by account archive" : coverage.covered_by_account_archive === false ? "Not covered by account archive" : "Unknown" },
           { label: "Coverage Last Success", value: formatContextDate(coverage.last_success_at) },
+        ])}
+      </section>
+    `;
+  }
+
+  function renderContextResolutionCard(context) {
+    const resolution = context?.context_resolution && typeof context.context_resolution === "object" ? context.context_resolution : {};
+    const refreshRecommended = resolution.provider_detail_refresh_recommended === true;
+    const activeLinkTypes = safeArray(resolution.active_link_types).map((item) => humanizeValue(item)).filter(Boolean);
+    return `
+      <section class="context-card">
+        <div class="context-card-head">
+          <h4>Context Status</h4>
+          ${renderBadge(refreshRecommended ? "Provider Refresh Recommended" : humanizeValue(resolution.order_context_status || "Context Checked"), refreshRecommended ? "warning" : "category")}
+        </div>
+        ${refreshRecommended ? `
+          <div class="classification-notice is-warning">
+            Buyer context is available, but no exact order/listing reference is stored yet. Use Refresh Timeline to fetch provider detail and re-run context linking.
+          </div>
+        ` : ""}
+        ${renderContextFactGrid([
+          { label: "Buyer", value: resolution.buyer_found ? "Buyer found" : "Buyer not found" },
+          { label: "Buyer Context", value: resolution.buyer_context_status ? humanizeValue(resolution.buyer_context_status) : "Unknown" },
+          { label: "Order Context", value: resolution.order_context_status ? humanizeValue(resolution.order_context_status) : "Unknown" },
+          { label: "Provider Detail", value: resolution.provider_detail_refresh_status ? humanizeValue(resolution.provider_detail_refresh_status) : "Unknown" },
+          { label: "Deterministic Reference", value: resolution.deterministic_reference_found ? "Found" : "Not stored" },
+          { label: "Active Link Types", value: activeLinkTypes.length ? activeLinkTypes.join(", ") : "None", wide: true },
         ])}
       </section>
     `;
@@ -2817,6 +2849,40 @@
     });
   }
 
+  function ebaySmartFolderDraftFromView(view = {}) {
+    if (!view?.id) return null;
+    return {
+      id: view.id,
+      name: view.name || "Untitled folder",
+      filter_payload: ebaySavedViewFilterPayload(view.filter_payload),
+      started_at: new Date().toISOString(),
+    };
+  }
+
+  function ebaySmartFolderDraftWithUpdates(draft, updates = {}, state = adminClassificationState) {
+    if (!draft?.id) return null;
+    const payload = ebaySavedViewFilterPayload(draft.filter_payload);
+    return {
+      ...draft,
+      filter_payload: ebaySavedViewFilterPayload({
+        system_filter: Object.prototype.hasOwnProperty.call(updates, "ebayConversationFilter")
+          ? updates.ebayConversationFilter
+          : payload.system_filter,
+        search_query: Object.prototype.hasOwnProperty.call(updates, "ebayConversationSearchQuery")
+          ? updates.ebayConversationSearchQuery
+          : payload.search_query,
+        classification_filters: Object.prototype.hasOwnProperty.call(updates, "ebayConversationClassificationFilters")
+          ? updates.ebayConversationClassificationFilters
+          : payload.classification_filters || state.ebayConversationClassificationFilters,
+      }),
+    };
+  }
+
+  function ebayActiveSmartFolderEditDraft(state = adminClassificationState) {
+    const draft = state.ebayConversationSmartFolderEditDraft;
+    return draft?.id ? draft : null;
+  }
+
   function ebaySavedViewSystemRuleRows(systemFilter = "all") {
     const rules = {
       all: [{ label: "Scope", value: "All conversations" }],
@@ -2824,13 +2890,13 @@
       ebay_notifications: [{ label: "Source", value: "Platform Notification" }],
       unread: [{ label: "Unread State", value: "Unread" }],
       unclassified: [{ label: "Classification", value: "No current classification" }],
-      returns: [{ label: "Topic", value: "Return" }],
-      shipping_issues: [{ label: "Topic", value: "Shipping Issue, Missing Item, Order Status, or Delivery Timing" }],
+      returns: [{ label: "System Rule", value: "Has Return OR AI Topic: Return" }],
+      shipping_issues: [{ label: "OR Rule", value: "Shipping Issue OR Missing Item OR Order Status OR Delivery Timing" }],
       needs_reply_today: [{ label: "Response Status", value: "Reply Today" }],
       vip_buyers: [{ label: "Buyer Flag", value: "VIP Buyer" }],
-      high_value_buyers: [{ label: "Buyer Flag", value: "High Value Buyer or High Retained Value Buyer" }],
-      refund_risk: [{ label: "Risk Flag", value: "Refund Risk, Chargeback Risk, or Unsupported Claim Risk" }],
-      review_queue: [{ label: "Review", value: "Unclassified, stale, needs review, or low confidence" }],
+      high_value_buyers: [{ label: "OR Rule", value: "High Value Buyer OR High Retained Value Buyer" }],
+      refund_risk: [{ label: "OR Rule", value: "Refund Risk OR Chargeback Risk OR Unsupported Claim Risk" }],
+      review_queue: [{ label: "State Rule", value: "Unclassified OR stale OR needs review OR low confidence" }],
       has_order: [{ label: "System Label", value: "Has Order" }],
       has_return: [{ label: "System Label", value: "Has Return" }],
       has_media: [{ label: "System Label", value: "Has Media" }],
@@ -2964,7 +3030,7 @@
     if (filter === "ebay_notifications") return ebayConversationSource(conversation) === "platform_notification";
     if (filter === "unread") return Number(conversation.unread_count || 0) > 0;
     if (filter === "unclassified") return !classification;
-    if (filter === "returns") return ebayConversationHasTopic(conversation, ["return"]);
+    if (filter === "returns") return summary.has_return_link || ebayConversationHasTopic(conversation, ["return"]);
     if (filter === "shipping_issues") return ebayConversationHasTopic(conversation, ["shipping_issue", "missing_item", "order_status", "delivery_timing"]);
     if (filter === "needs_reply_today") return classification?.effective_response_need === "reply_today";
     if (filter === "vip_buyers") return ebayConversationHasBuyerFlag(conversation, ["vip_buyer"]);
@@ -3302,15 +3368,18 @@
   }
 
   function renderEbaySavedViewButton(view, state) {
-    const payload = ebaySavedViewFilterPayload(view.filter_payload);
+    const activeDraft = ebayActiveSmartFolderEditDraft(state);
+    const draftForView = activeDraft?.id === view.id ? activeDraft : null;
+    const payload = ebaySavedViewFilterPayload(draftForView?.filter_payload || view.filter_payload);
+    const renderView = draftForView ? { ...view, filter_payload: payload } : view;
     const icon = EBAY_SAVED_VIEW_ICONS[view.system_key || payload.system_filter] || "folder";
-    const count = ebaySavedViewCount(state, view);
-    const active = view.id && view.id === state.selectedEbaySavedViewId;
+    const count = ebaySavedViewCount(state, renderView);
+    const active = view.id && (view.id === state.selectedEbaySavedViewId || view.id === activeDraft?.id);
     const canManage = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(view.id || ""));
     const editing = state.ebayConversationSmartFoldersEditing === true;
-    const rules = ebaySavedViewRuleSummary(view);
+    const rules = ebaySavedViewRuleSummary(renderView);
     return `
-      <div class="ebay-smart-folder-row${active ? " is-active" : ""}${canManage && editing ? " is-editing" : ""}" data-ebay-saved-view-row="${escapeHtml(view.id)}">
+      <div class="ebay-smart-folder-row${active ? " is-active" : ""}${draftForView ? " is-draft" : ""}${canManage && editing ? " is-editing" : ""}" data-ebay-saved-view-row="${escapeHtml(view.id)}">
         <button type="button" data-ebay-saved-view-select="${escapeHtml(view.id)}" title="${escapeHtml(`${view.name}: ${rules}`)}">
           <i data-lucide="${escapeHtml(icon)}"></i>
           <span>${escapeHtml(view.name)}</span>
@@ -3323,6 +3392,11 @@
           <button type="button" class="ebay-smart-folder-icon-btn" data-ebay-saved-view-update="${escapeHtml(view.id)}" aria-label="Update ${escapeHtml(view.name)} filters">
             <i data-lucide="save"></i>
           </button>
+          ${draftForView ? `
+            <button type="button" class="ebay-smart-folder-icon-btn" data-ebay-saved-view-cancel-edit="${escapeHtml(view.id)}" aria-label="Cancel ${escapeHtml(view.name)} edits">
+              <i data-lucide="x"></i>
+            </button>
+          ` : ""}
           <button type="button" class="ebay-smart-folder-icon-btn is-danger" data-ebay-saved-view-delete="${escapeHtml(view.id)}" aria-label="Delete ${escapeHtml(view.name)}">
             <i data-lucide="trash-2"></i>
           </button>
@@ -3378,7 +3452,7 @@
 
   function ebayFilterActiveChips(filters = {}) {
     const normalized = safeEbayClassificationFilters(filters);
-    return EBAY_FILTER_GROUPS.flatMap((group) => normalized[group.key].map((value) => ({
+    return [EBAY_SOURCE_FILTER_GROUP, ...EBAY_FILTER_GROUPS].flatMap((group) => normalized[group.key].map((value) => ({
       groupKey: group.key,
       groupLabel: group.label,
       value,
@@ -3401,6 +3475,30 @@
                 <span>${escapeHtml(humanizeValue(value))}</span>
                 <em>${escapeHtml(count)}</em>
               </label>
+            `;
+          }).join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderEbaySystemFilterButtons(title, filters, state) {
+    const selected = state.ebayConversationFilter || "all";
+    const counts = ebayMailboxSmartCounts(state);
+    return `
+      <section class="ebay-filter-group">
+        <h4>${escapeHtml(title)}</h4>
+        <div class="ebay-filter-chip-grid">
+          ${filters.map((filter) => {
+            const countKey = ebayCanonicalSmartFolderCountKey(filter);
+            const count = countKey && Object.prototype.hasOwnProperty.call(counts, countKey)
+              ? ebayMailboxCountValue(counts[countKey], 0)
+              : filteredEbayConversations({ ...state, ebayConversationFilter: filter, ebayMailboxMode: "legacy" }).length;
+            return `
+              <button type="button" class="ebay-filter-chip is-button${selected === filter ? " is-active" : ""}" data-ebay-system-filter="${escapeHtml(filter)}" aria-pressed="${selected === filter ? "true" : "false"}">
+                <span>${escapeHtml(ebayFilterLabel(filter))}</span>
+                <em>${escapeHtml(count)}</em>
+              </button>
             `;
           }).join("")}
         </div>
@@ -3469,7 +3567,7 @@
       return;
     }
     els.ebayConversationTagHelp.innerHTML = `
-      ${EBAY_FILTER_GROUPS.map((group) => {
+      ${[EBAY_SOURCE_FILTER_GROUP, ...EBAY_FILTER_GROUPS].map((group) => {
         const prefix = group.key === "topics"
           ? "topic"
           : group.key === "sourceTypes" ? "source"
@@ -3503,7 +3601,15 @@
     }
     if (els.ebayConversationFilterPanel) {
       els.ebayConversationFilterPanel.hidden = state.ebayConversationFiltersExpanded !== true;
-      els.ebayConversationFilterPanel.innerHTML = EBAY_FILTER_GROUPS.map((group) => renderEbayFilterGroup(group, state)).join("");
+      els.ebayConversationFilterPanel.innerHTML = `
+        ${renderEbaySystemFilterButtons("State", EBAY_STATE_FILTERS, state)}
+        ${renderEbaySystemFilterButtons("System / Deterministic", EBAY_SYSTEM_FILTERS, state)}
+        ${renderEbayFilterGroup(EBAY_SOURCE_FILTER_GROUP, state)}
+        <section class="ebay-filter-group ebay-ai-filter-group">
+          <h4>AI Labels</h4>
+          ${EBAY_FILTER_GROUPS.map((group) => renderEbayFilterGroup(group, state)).join("")}
+        </section>
+      `;
     }
     if (els.ebayConversationActiveFilters) {
       const chips = [
@@ -4958,18 +5064,26 @@
           ${renderEbayReadSyncBadges(conversation)}
         </div>
         <div class="ebay-detail-actions">
-          <button type="button" class="secondary-btn" data-ebay-detail-action="sync-provider-read" data-ebay-read-state="read" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="Set this conversation read in eBay and reconcile OG after provider confirmation." ${readSyncLoading ? "disabled" : ""}>
-            <i data-lucide="${readSyncLoading ? "loader-circle" : "mail-check"}"></i>
-            ${escapeHtml(readSyncLoading ? "Syncing eBay read" : "Sync Read to eBay")}
-          </button>
-          <button type="button" class="secondary-btn" data-ebay-detail-action="sync-provider-read" data-ebay-read-state="unread" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="Set this conversation unread in eBay and reconcile OG after provider confirmation." ${readSyncLoading ? "disabled" : ""}>
-            <i data-lucide="${readSyncLoading ? "loader-circle" : "mail-open"}"></i>
-            ${escapeHtml(readSyncLoading ? "Syncing eBay unread" : "Sync Unread to eBay")}
-          </button>
           <button type="button" class="secondary-btn" data-ebay-detail-action="refresh-messages" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="Deep refresh only this selected conversation and reload its timeline." ${isLoading ? "disabled" : ""}>
             <i data-lucide="${isLoading ? "loader-circle" : "refresh-cw"}"></i>
             ${escapeHtml(isLoading ? "Refreshing selected conversation" : "Refresh Timeline")}
           </button>
+          <details class="ebay-maintenance-actions ebay-read-sync-actions">
+            <summary class="secondary-btn">
+              <i data-lucide="mail-check"></i>
+              Read Sync
+            </summary>
+            <div class="ebay-maintenance-action-menu">
+              <button type="button" class="secondary-btn" data-ebay-detail-action="sync-provider-read" data-ebay-read-state="read" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="Set this conversation read in eBay and reconcile OG after provider confirmation." ${readSyncLoading ? "disabled" : ""}>
+                <i data-lucide="${readSyncLoading ? "loader-circle" : "mail-check"}"></i>
+                ${escapeHtml(readSyncLoading ? "Syncing eBay read" : "Retry Sync Read")}
+              </button>
+              <button type="button" class="secondary-btn" data-ebay-detail-action="sync-provider-read" data-ebay-read-state="unread" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="Set this conversation unread in eBay and reconcile OG after provider confirmation." ${readSyncLoading ? "disabled" : ""}>
+                <i data-lucide="${readSyncLoading ? "loader-circle" : "mail-open"}"></i>
+                ${escapeHtml(readSyncLoading ? "Syncing eBay unread" : "Sync Unread")}
+              </button>
+            </div>
+          </details>
         </div>
       </div>
       ${error ? `<div class="classification-notice is-error">Could not load eBay messages: ${escapeHtml(error)}</div>` : ""}
@@ -5051,6 +5165,7 @@
           ])}
         </section>
         <div class="stored-context-grid ebay-context-grid">
+          ${renderContextResolutionCard(context)}
           ${renderBuyerSummaryCard(context)}
           ${renderOrderContextCard(context.matched_orders)}
           ${renderOrderLineContextCard(context.matched_order_lines)}
@@ -5090,7 +5205,7 @@
       return;
     }
     if (classificationResult) {
-      const modeLabel = classificationResult.force === true ? `Reclassify recent ${EBAY_RECLASSIFY_RECENT_LIMIT} conversations` : "Classify unclassified conversations";
+      const modeLabel = classificationResult.force === true ? `Reclassify recent ${EBAY_RECLASSIFY_RECENT_LIMIT} conversations` : "Classify new conversations";
       const rows = safeArray(classificationResult.results || classificationResult.data?.results);
       const requested = classificationMetricValue(classificationResult, ["requested"], classificationResult.force === true ? EBAY_RECLASSIFY_RECENT_LIMIT : rows.length);
       const examined = classificationMetricValue(classificationResult, ["candidates_examined", "processed"], rows.length);
@@ -5174,6 +5289,19 @@
           Conversation: ${escapeHtml(result.ebayConversationId ? compactId(result.ebayConversationId) : "--")};
           eBay mutation: ${escapeHtml(safety.ebayMutationsPerformed === true ? "true" : "false")};
           sends: ${escapeHtml(formatContextNumber(safety.messagesSent || 0))}.
+        </div>
+      `;
+      return;
+    }
+    if (result?.mode === "provider_read_state_queue_sync") {
+      const safety = result.safety && typeof result.safety === "object" ? result.safety : {};
+      els.ebayConversationSyncResult.innerHTML = `
+        <div class="classification-notice ${Number(result.failed || 0) > 0 ? "is-warning" : "is-success"}">
+          <strong>Queued read-state sync processed.</strong>
+          processed: ${escapeHtml(formatContextNumber(result.processed || 0))};
+          succeeded: ${escapeHtml(formatContextNumber(result.succeeded || 0))};
+          failed: ${escapeHtml(formatContextNumber(result.failed || 0))};
+          eBay mutation: ${escapeHtml(safety.ebayMutationsPerformed === true ? "true" : "false")}.
         </div>
       `;
       return;
@@ -5412,9 +5540,10 @@
         maxDetailPagesPerConversation: 20,
       });
       const listRequest = ebayMailboxFetchValuesFromState(adminClassificationState, { limit: 100, offset: 0 });
-      const [messagesPayload, draftsPayload, listPayload] = await Promise.all([
+      const [messagesPayload, draftsPayload, contextPayload, listPayload] = await Promise.all([
         fetchEbayConversationMessages(context, conversation.id),
         fetchEbayConversationDrafts(context, conversation.id),
+        fetchEbayConversationContext(context, conversation.id),
         fetchEbayConversations(context, listRequest),
       ]);
       const conversations = safeArray(listPayload.conversations);
@@ -5435,6 +5564,14 @@
         ebayConversationDraftsById: {
           ...adminClassificationState.ebayConversationDraftsById,
           [conversation.id]: draftsPayload,
+        },
+        ebayConversationContextsById: {
+          ...adminClassificationState.ebayConversationContextsById,
+          [conversation.id]: contextPayload,
+        },
+        ebayConversationContextErrorsById: {
+          ...adminClassificationState.ebayConversationContextErrorsById,
+          [conversation.id]: null,
         },
         ebayConversationMessageErrorsById: {
           ...adminClassificationState.ebayConversationMessageErrorsById,
@@ -5540,9 +5677,13 @@
     if (!conversationId) return;
     const conversation = selectedEbayConversationById(conversationId, adminClassificationState);
     if (Number(conversation?.unread_count || 0) <= 0) return;
+    const shouldProcessProviderRead = ebayConversationProviderReadState(conversation) !== "read";
     setEbayConversationState(ebayConversationStateMarkedRead(conversationId));
     try {
       await markEbayConversationRead(context, conversationId);
+      if (shouldProcessProviderRead) {
+        processPendingEbayReadQueue(context, conversationId);
+      }
     } catch (error) {
       const code = error.code || error.message || "ebay_conversation_mark_read_failed";
       setEbayConversationState({
@@ -5552,6 +5693,41 @@
         },
       });
       console.error("[email-triage] eBay conversation mark read failed:", error);
+    }
+  }
+
+  async function processPendingEbayReadQueue(context, focusConversationId = null) {
+    setEbayConversationState({
+      ebayConversationReadSyncLoadingId: focusConversationId,
+      ebayConversationSyncError: null,
+    });
+
+    try {
+      const payload = await processPendingEbayProviderReadState(context, { limit: 10 });
+      setEbayConversationState({
+        ebayConversationReadSyncLoadingId: null,
+        ebayConversationSyncResult: {
+          ...payload,
+          mode: "provider_read_state_queue_sync",
+          read_state: "read",
+        },
+        ebayConversationSyncError: null,
+      });
+      await loadEbayConversationList(context, {
+        preserveSelectionId: focusConversationId,
+        forceSelectionReload: true,
+        preserveClassificationResult: true,
+      });
+      if (focusConversationId) await loadEbayConversationMessages(context, focusConversationId);
+      loadOperationalDashboard(context, { keepPrevious: true });
+    } catch (error) {
+      const code = error.code || error.message || "ebay_provider_read_queue_sync_failed";
+      setEbayConversationState({
+        ebayConversationReadSyncLoadingId: null,
+        ebayConversationSyncError: code,
+      });
+      loadOperationalDashboard(context, { keepPrevious: true });
+      console.error("[email-triage] eBay provider read queue sync failed:", error);
     }
   }
 
@@ -5846,10 +6022,46 @@
     }
   }
 
+  function startSmartFolderEditDraft(context, viewId) {
+    const view = ebaySavedViewsForState(adminClassificationState).find((item) => item.id === viewId);
+    if (!view) return;
+    const draft = ebaySmartFolderDraftFromView(view);
+    const payload = ebaySavedViewFilterPayload(draft.filter_payload);
+    if (els.ebayConversationSearch) els.ebayConversationSearch.value = payload.search_query || "";
+    applyEbayConversationListControls(context, {
+      ebayConversationFilter: payload.system_filter || "all",
+      ebayConversationSearchQuery: payload.search_query || "",
+      ebayConversationClassificationFilters: payload.classification_filters,
+      selectedEbaySavedViewId: view.id,
+      ebayConversationSmartFolderEditDraft: draft,
+      preserveSavedView: true,
+    });
+  }
+
+  function cancelSmartFolderEditDraft(context, viewId) {
+    const activeDraft = ebayActiveSmartFolderEditDraft(adminClassificationState);
+    if (!activeDraft || activeDraft.id !== viewId) return;
+    const view = ebaySavedViewsForState(adminClassificationState).find((item) => item.id === viewId);
+    const payload = ebaySavedViewFilterPayload(view?.filter_payload);
+    if (els.ebayConversationSearch) els.ebayConversationSearch.value = payload.search_query || "";
+    applyEbayConversationListControls(context, {
+      ebayConversationFilter: payload.system_filter || "all",
+      ebayConversationSearchQuery: payload.search_query || "",
+      ebayConversationClassificationFilters: payload.classification_filters,
+      selectedEbaySavedViewId: view?.id || null,
+      ebayConversationSmartFolderEditDraft: null,
+      preserveSavedView: true,
+    });
+  }
+
   async function updateSmartFolderFilters(context, viewId) {
     const view = ebaySavedViewsForState(adminClassificationState).find((item) => item.id === viewId);
     if (!view) return;
-    const ok = window.confirm(`Update "${view.name}" to the current search and filters?`);
+    const activeDraft = ebayActiveSmartFolderEditDraft(adminClassificationState);
+    const filterPayload = activeDraft?.id === viewId
+      ? ebaySavedViewFilterPayload(activeDraft.filter_payload)
+      : ebayCurrentSavedViewPayload(adminClassificationState);
+    const ok = window.confirm(`Save "${view.name}" with the active folder rules?`);
     if (!ok) return;
     setEbayConversationState({
       ebayConversationSavedViewSavingId: viewId,
@@ -5858,7 +6070,7 @@
 
     try {
       const result = await updateEbayConversationSavedView(context, viewId, {
-        filterPayload: ebayCurrentSavedViewPayload(adminClassificationState),
+        filterPayload,
       });
       const savedView = result.saved_view || result.data?.saved_view;
       setEbayConversationState({
@@ -5866,7 +6078,9 @@
         ebayConversationSavedViewActionError: null,
         ebayConversationSavedViews: replaceEbayConversationSavedView(savedView),
         selectedEbaySavedViewId: savedView?.id || adminClassificationState.selectedEbaySavedViewId,
+        ebayConversationSmartFolderEditDraft: null,
       });
+      if (savedView?.id) applyEbaySavedView(context, savedView.id);
     } catch (error) {
       const code = error.code || error.message || "ebay_conversation_saved_view_update_failed";
       setEbayConversationState({
@@ -5894,6 +6108,7 @@
         ebayConversationSavedViewActionError: null,
         ebayConversationSavedViews: safeArray(adminClassificationState.ebayConversationSavedViews).filter((item) => item.id !== viewId),
         selectedEbaySavedViewId: adminClassificationState.selectedEbaySavedViewId === viewId ? null : adminClassificationState.selectedEbaySavedViewId,
+        ebayConversationSmartFolderEditDraft: ebayActiveSmartFolderEditDraft(adminClassificationState)?.id === viewId ? null : adminClassificationState.ebayConversationSmartFolderEditDraft,
       });
     } catch (error) {
       const code = error.code || error.message || "ebay_conversation_saved_view_delete_failed";
@@ -6409,12 +6624,19 @@
   }
 
   function applyEbayConversationListControls(context, updates = {}) {
+    const activeDraft = ebayActiveSmartFolderEditDraft(adminClassificationState);
+    const draftChanging = activeDraft && Object.keys(updates).some((key) => (
+      ["ebayConversationFilter", "ebayConversationSearchQuery", "ebayConversationClassificationFilters"].includes(key)
+    ));
     const shouldClearSavedView = updates.preserveSavedView !== true && Object.keys(updates).some((key) => (
       ["ebayConversationFilter", "ebayConversationSearchQuery", "ebayConversationClassificationFilters"].includes(key)
     ));
     const cleanUpdates = { ...updates };
     delete cleanUpdates.preserveSavedView;
-    if (shouldClearSavedView && !Object.prototype.hasOwnProperty.call(cleanUpdates, "selectedEbaySavedViewId")) {
+    if (draftChanging && !Object.prototype.hasOwnProperty.call(cleanUpdates, "ebayConversationSmartFolderEditDraft")) {
+      cleanUpdates.ebayConversationSmartFolderEditDraft = ebaySmartFolderDraftWithUpdates(activeDraft, cleanUpdates);
+      cleanUpdates.selectedEbaySavedViewId = activeDraft.id;
+    } else if (shouldClearSavedView && !Object.prototype.hasOwnProperty.call(cleanUpdates, "selectedEbaySavedViewId")) {
       cleanUpdates.selectedEbaySavedViewId = null;
     }
     const searchChanged = Object.prototype.hasOwnProperty.call(cleanUpdates, "ebayConversationSearchQuery");
@@ -6438,7 +6660,7 @@
   }
 
   function updateEbayConversationClassificationFilter(context, groupKey, value, active) {
-    const group = EBAY_FILTER_GROUPS.find((item) => item.key === groupKey);
+    const group = [EBAY_SOURCE_FILTER_GROUP, ...EBAY_FILTER_GROUPS].find((item) => item.key === groupKey);
     if (!group || !group.values.includes(value)) return;
     const filters = safeEbayClassificationFilters(adminClassificationState.ebayConversationClassificationFilters);
     const set = new Set(filters[groupKey]);
@@ -6503,7 +6725,13 @@
     els.ebayConversationSavedViews?.addEventListener("click", (event) => {
       const select = event.target.closest("[data-ebay-saved-view-select]");
       if (select) {
-        applyEbaySavedView(context, select.getAttribute("data-ebay-saved-view-select"));
+        const viewId = select.getAttribute("data-ebay-saved-view-select");
+        const canManage = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(viewId || ""));
+        if (adminClassificationState.ebayConversationSmartFoldersEditing === true && canManage) {
+          startSmartFolderEditDraft(context, viewId);
+        } else {
+          applyEbaySavedView(context, viewId);
+        }
         return;
       }
       const rename = event.target.closest("[data-ebay-saved-view-rename]");
@@ -6516,6 +6744,11 @@
         updateSmartFolderFilters(context, update.getAttribute("data-ebay-saved-view-update"));
         return;
       }
+      const cancelEdit = event.target.closest("[data-ebay-saved-view-cancel-edit]");
+      if (cancelEdit) {
+        cancelSmartFolderEditDraft(context, cancelEdit.getAttribute("data-ebay-saved-view-cancel-edit"));
+        return;
+      }
       const deleteButton = event.target.closest("[data-ebay-saved-view-delete]");
       if (deleteButton) {
         deleteSmartFolder(context, deleteButton.getAttribute("data-ebay-saved-view-delete"));
@@ -6523,8 +6756,10 @@
     });
     els.ebayConversationReloadViews?.addEventListener("click", () => loadEbayConversationSavedViews(context));
     els.ebaySmartFolderEditToggle?.addEventListener("click", () => {
+      const nextEditing = adminClassificationState.ebayConversationSmartFoldersEditing !== true;
       setEbayConversationState({
-        ebayConversationSmartFoldersEditing: adminClassificationState.ebayConversationSmartFoldersEditing !== true,
+        ebayConversationSmartFoldersEditing: nextEditing,
+        ebayConversationSmartFolderEditDraft: nextEditing ? adminClassificationState.ebayConversationSmartFolderEditDraft : null,
       });
     });
     els.ebayConversationSaveView?.addEventListener("click", () => createSmartFolderFromCurrentFilters(context));
@@ -6587,6 +6822,13 @@
         input.value,
         input.checked,
       );
+    });
+    els.ebayConversationFilterPanel?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-ebay-system-filter]");
+      if (!button) return;
+      applyEbayConversationListControls(context, {
+        ebayConversationFilter: button.getAttribute("data-ebay-system-filter") || "all",
+      });
     });
     els.ebayConversationActiveFilters?.addEventListener("click", (event) => {
       const clearView = event.target.closest("[data-ebay-clear-view]");

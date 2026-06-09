@@ -98,6 +98,7 @@
       ebayConversationSavedViewActionError: null,
       selectedEbaySavedViewId: null,
       ebayConversationSmartFoldersEditing: false,
+      ebayConversationSmartFolderEditDraft: null,
       ebayConversationPanelVisibility: overrides.ebayConversationPanelVisibility || {
         folders: true,
         list: true,

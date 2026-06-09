@@ -1096,6 +1096,16 @@ async function taxonomyAudit(supabase: ServiceClient, input: Input) {
 
 async function countUnclassifiedConversations(supabase: ServiceClient, rpcSupabase: ServiceClient = supabase) {
   try {
+    const { data, error } = await rpcSupabase.rpc("count_ebay_unclassified_conversations");
+    if (error) throw error;
+    const count = Number(data);
+    if (Number.isFinite(count)) return count;
+    throw new Error("missing_dedicated_unclassified_count");
+  } catch (error) {
+    console.warn("[ebay-conversation-classify] dedicated unclassified count lookup failed", error instanceof Error ? error.message : String(error));
+  }
+
+  try {
     const { data, error } = await rpcSupabase.rpc("get_ebay_canonical_mailbox_v2", {
       _page_size: 1,
       _offset: 0,
@@ -1105,7 +1115,11 @@ async function countUnclassifiedConversations(supabase: ServiceClient, rpcSupaba
       _classification_filters: {},
     });
     if (error) throw error;
-    const count = Number((data as Record<string, unknown> | null)?.matching_total);
+    const payload = data as Record<string, unknown> | null;
+    const count = Number(payload?.matching_total);
+    const smartCount = Number((payload?.smart_folder_counts as Record<string, unknown> | undefined)?.unclassified);
+    if (!Number.isFinite(smartCount)) throw new Error("missing_unclassified_smart_folder_count");
+    if (Number.isFinite(count) && count !== smartCount) throw new Error("unclassified_matching_total_smart_count_mismatch");
     if (Number.isFinite(count)) return count;
     throw new Error("missing_unclassified_matching_total");
   } catch (error) {
@@ -1190,6 +1204,23 @@ function normalizeMailboxConversationCandidate(row: Record<string, any>): Conver
   };
 }
 
+function normalizeDedicatedUnclassifiedQueueCandidate(row: Record<string, any>): ConversationCandidate | null {
+  const candidate = normalizeMailboxConversationCandidate(row);
+  return candidate ? { ...candidate, queue_source: "count_ebay_unclassified_conversation_queue" } : null;
+}
+
+async function unclassifiedConversationCandidatesFromDedicatedRpc(
+  supabase: ServiceClient,
+  limit: number,
+): Promise<ConversationCandidate[]> {
+  const { data, error } = await supabase.rpc("get_ebay_unclassified_conversation_queue", {
+    _limit: limit,
+  });
+  if (error) throw error;
+  const rows = Array.isArray(data) ? data as Record<string, any>[] : [];
+  return rows.map(normalizeDedicatedUnclassifiedQueueCandidate).filter((row): row is ConversationCandidate => Boolean(row?.id));
+}
+
 async function unclassifiedConversationCandidatesFromMailboxRpc(
   supabase: ServiceClient,
   limit: number,
@@ -1206,7 +1237,12 @@ async function unclassifiedConversationCandidatesFromMailboxRpc(
   const rows = Array.isArray((data as Record<string, unknown> | null)?.conversations)
     ? ((data as Record<string, unknown>).conversations as Record<string, any>[])
     : [];
-  return rows.map(normalizeMailboxConversationCandidate).filter((row): row is ConversationCandidate => Boolean(row?.id));
+  const conversations = rows.map(normalizeMailboxConversationCandidate).filter((row): row is ConversationCandidate => Boolean(row?.id));
+  const classified = await currentClassificationConversationIds(supabase, conversations.map((row) => row.id));
+  if (classified.size > 0) {
+    throw new Error(`mailbox_unclassified_queue_returned_classified_rows:${classified.size}`);
+  }
+  return conversations;
 }
 
 async function unclassifiedConversationCandidatesDirect(
@@ -1235,6 +1271,13 @@ async function canonicalUnclassifiedConversationCandidates(
   rpcSupabase: ServiceClient,
   limit: number,
 ): Promise<{ conversations: ConversationCandidate[]; queueSource: string }> {
+  try {
+    const conversations = await unclassifiedConversationCandidatesFromDedicatedRpc(rpcSupabase, limit);
+    return { conversations, queueSource: "get_ebay_unclassified_conversation_queue" };
+  } catch (error) {
+    console.warn("[ebay-conversation-classify] dedicated unclassified queue lookup failed; trying canonical mailbox", error instanceof Error ? error.message : String(error));
+  }
+
   try {
     const conversations = await unclassifiedConversationCandidatesFromMailboxRpc(rpcSupabase, limit);
     return { conversations, queueSource: "get_ebay_canonical_mailbox_v2:unclassified" };

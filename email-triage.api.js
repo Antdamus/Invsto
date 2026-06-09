@@ -1661,12 +1661,24 @@
     }, TIMEOUTS.ebayMessageReadSync);
   }
 
+  async function processPendingEbayProviderReadState(context, options = {}) {
+    const session = await currentSession(context, "Process pending eBay provider read state");
+    return edgeFetchWithTimeout(EBAY_MESSAGE_READ_SYNC_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: "process_pending_read",
+        limit: Math.min(Math.max(Number(options.limit || 10) || 10, 1), 25),
+        dryRun: options.dryRun === true || undefined,
+      }),
+    }, TIMEOUTS.ebayMessageReadSync);
+  }
+
   async function fetchEbayConversationContext(context, conversationId) {
     const session = await currentSession(context, "eBay conversation context");
     return edgeFetchWithTimeout(EBAY_CONVERSATION_CONTEXT_FUNCTION, session, {
       method: "POST",
       body: JSON.stringify({
-        mode: "context",
+        mode: "link_and_context",
         conversationId,
       }),
     }, TIMEOUTS.ebayConversationContext);
@@ -1945,6 +1957,7 @@
     fetchEbayConversationMessages,
     markEbayConversationRead,
     syncEbayProviderReadState,
+    processPendingEbayProviderReadState,
     fetchEbayConversationContext,
     fetchEbayConversationDrafts,
     requestEbayConversationDraftAction,

@@ -10,9 +10,10 @@ type Operator = {
 };
 
 type ReadSyncInput = {
-  mode: "set_read_state";
-  conversationId: string;
+  mode: "set_read_state" | "process_pending_read";
+  conversationId: string | null;
   read: boolean;
+  limit: number;
   dryRun: boolean;
 };
 
@@ -122,7 +123,17 @@ async function requireAdmin(req: Request, supabase: ServiceClient): Promise<Oper
 async function parseInput(req: Request): Promise<ReadSyncInput> {
   const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
   const mode = String(body?.mode || "set_read_state").trim();
-  if (mode !== "set_read_state") throw new ReadSyncError("invalid_mode", { status: 400, phase: "input" });
+  if (!["set_read_state", "process_pending_read"].includes(mode)) throw new ReadSyncError("invalid_mode", { status: 400, phase: "input" });
+
+  if (mode === "process_pending_read") {
+    return {
+      mode: "process_pending_read",
+      conversationId: null,
+      read: true,
+      limit: Math.min(Math.max(Number(body?.limit || 10) || 10, 1), 25),
+      dryRun: body?.dryRun === true || body?.dry_run === true,
+    };
+  }
 
   const conversationId = String(body?.conversationId || body?.conversation_id || "").trim();
   if (!conversationId) throw new ReadSyncError("conversation_id_required", { status: 400, phase: "input" });
@@ -143,6 +154,7 @@ async function parseInput(req: Request): Promise<ReadSyncInput> {
     mode: "set_read_state",
     conversationId,
     read,
+    limit: 1,
     dryRun: body?.dryRun === true || body?.dry_run === true,
   };
 }
@@ -229,6 +241,21 @@ async function loadConversation(supabase: ServiceClient, conversationId: string)
   if (error) throw new ReadSyncError("conversation_lookup_failed", { status: 500, phase: "database", message: error.message });
   if (!data?.id) throw new ReadSyncError("conversation_not_found", { status: 404, phase: "database" });
   return data as ConversationRow;
+}
+
+async function loadPendingReadConversations(supabase: ServiceClient, limit: number): Promise<ConversationRow[]> {
+  const { data, error } = await supabase
+    .from("ebay_conversations")
+    .select("id, seller_account_id, ebay_conversation_id, conversation_type, unread_count, provider_read_state, local_read_state, pending_provider_update")
+    .eq("pending_provider_update", true)
+    .eq("local_read_state", "read")
+    .neq("provider_read_state", "read")
+    .order("last_local_read_at", { ascending: true, nullsFirst: false })
+    .order("updated_at", { ascending: true })
+    .limit(limit);
+
+  if (error) throw new ReadSyncError("pending_read_queue_lookup_failed", { status: 500, phase: "database", message: error.message });
+  return (data || []) as ConversationRow[];
 }
 
 async function updateProviderReadState(token: string, conversation: ConversationRow, read: boolean) {
@@ -365,6 +392,102 @@ serve(async (req) => {
   try {
     operator = await requireAdmin(req, supabase);
     input = await parseInput(req);
+
+    if (input.mode === "process_pending_read") {
+      const pending = await loadPendingReadConversations(supabase, input.limit);
+      if (input.dryRun) {
+        return json(req, 200, {
+          ok: true,
+          mode: "process_pending_read",
+          dryRun: true,
+          queued: pending.length,
+          conversations: pending.map((row) => ({
+            conversationId: row.id,
+            ebayConversationId: row.ebay_conversation_id,
+            conversationType: row.conversation_type,
+            providerReadState: row.provider_read_state,
+            localReadState: row.local_read_state,
+          })),
+          safety: {
+            readOnly: true,
+            ebayMutationsPerformed: false,
+            sendsEnabled: false,
+            messagesSent: 0,
+          },
+        });
+      }
+
+      if (!pending.length) {
+        return json(req, 200, {
+          ok: true,
+          mode: "process_pending_read",
+          processed: 0,
+          succeeded: 0,
+          failed: 0,
+          safety: {
+            readOnly: false,
+            ebayMutationsPerformed: false,
+            sendsEnabled: false,
+            messagesSent: 0,
+          },
+        });
+      }
+
+      const token = await refreshEbayToken();
+      const results = [];
+      for (const row of pending) {
+        try {
+          const providerResponse = await updateProviderReadState(token, row, true);
+          await persistSuccess(supabase, row, true);
+          await recordReadActivity({
+            supabase,
+            operator,
+            conversation: row,
+            eventType: "read_state_synced",
+            status: "succeeded",
+            read: true,
+            detail: "Queued OG read state was automatically synced to eBay.",
+            metadata: { provider_response: providerResponse, queue_mode: "process_pending_read" },
+          });
+          results.push({ conversationId: row.id, ok: true, providerResponse });
+        } catch (error) {
+          await persistFailure(supabase, row.id, true, error);
+          await recordReadActivity({
+            supabase,
+            operator,
+            conversation: row,
+            eventType: "read_state_sync_failed",
+            status: "failed",
+            read: true,
+            detail: error instanceof Error ? error.message.slice(0, 500) : String(error || "Provider read sync failed.").slice(0, 500),
+            metadata: error instanceof ReadSyncError ? { ...error.details, queue_mode: "process_pending_read" } : { queue_mode: "process_pending_read" },
+          });
+          results.push({
+            conversationId: row.id,
+            ok: false,
+            error: error instanceof ReadSyncError ? error.code : "unknown_error",
+            message: error instanceof Error ? error.message : String(error || "Provider read sync failed."),
+          });
+        }
+      }
+
+      return json(req, 200, {
+        ok: results.every((row) => row.ok),
+        mode: "process_pending_read",
+        processed: results.length,
+        succeeded: results.filter((row) => row.ok).length,
+        failed: results.filter((row) => !row.ok).length,
+        results,
+        safety: {
+          readOnly: false,
+          ebayMutationsPerformed: results.some((row) => row.ok),
+          sendsEnabled: false,
+          messagesSent: 0,
+        },
+      });
+    }
+
+    if (!input.conversationId) throw new ReadSyncError("conversation_id_required", { status: 400, phase: "input" });
     conversation = await loadConversation(supabase, input.conversationId);
 
     if (input.dryRun) {
@@ -417,7 +540,7 @@ serve(async (req) => {
       },
     });
   } catch (error) {
-    if (input?.conversationId) await persistFailure(supabase, input.conversationId, input.read, error);
+    if (input?.mode === "set_read_state" && input?.conversationId) await persistFailure(supabase, input.conversationId, input.read, error);
     if (operator && conversation && input) {
       await recordReadActivity({
         supabase,
@@ -433,7 +556,7 @@ serve(async (req) => {
     const status = error instanceof ReadSyncError ? error.status : 500;
     return json(req, status, {
       ok: false,
-      mode: "set_read_state",
+      mode: input?.mode || "set_read_state",
       error: error instanceof ReadSyncError ? error.code : "unknown_error",
       phase: error instanceof ReadSyncError ? error.phase : "unknown",
       message: error instanceof Error ? error.message : String(error || "Unknown error"),

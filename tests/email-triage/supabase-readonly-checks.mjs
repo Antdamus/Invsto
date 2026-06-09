@@ -294,6 +294,37 @@ export async function recentClassificationRuns(client, options = {}) {
   return client.select("ebay_conversation_classification_runs", params);
 }
 
+export async function directUnclassifiedCount(client) {
+  try {
+    const count = await client.rpc("count_ebay_unclassified_conversations", {});
+    const numeric = Number(count);
+    if (Number.isFinite(numeric)) return {
+      count: numeric,
+      source: "count_ebay_unclassified_conversations",
+    };
+  } catch {
+    // Older deployments may not have the dedicated RPC yet; fall through to
+    // table reads so the regression report still exposes count drift.
+  }
+
+  const [conversations, classifications] = await Promise.all([
+    client.select("ebay_conversations", {
+      select: "id",
+      limit: "5000",
+    }),
+    client.select("ebay_conversation_classifications", {
+      select: "conversation_id",
+      is_current: "eq.true",
+      limit: "10000",
+    }),
+  ]);
+  const classified = new Set((classifications || []).map((row) => String(row.conversation_id || "")).filter(Boolean));
+  return {
+    count: (conversations || []).filter((row) => !classified.has(String(row.id || ""))).length,
+    source: "direct_table_anti_join",
+  };
+}
+
 export async function classificationsForRun(client, runId) {
   if (!runId) return [];
   return client.select("ebay_conversation_classifications", {

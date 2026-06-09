@@ -3038,6 +3038,38 @@
   justify-content: flex-end;
 }
 
+.ebay-maintenance-actions {
+  position: relative;
+}
+
+.ebay-maintenance-actions > summary {
+  list-style: none;
+}
+
+.ebay-maintenance-actions > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ebay-maintenance-action-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  gap: 6px;
+  min-width: 230px;
+  padding: 8px;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 8px;
+  background: rgba(22,25,31,.98);
+  box-shadow: 0 18px 40px rgba(0,0,0,.32);
+}
+
+.ebay-maintenance-action-menu .secondary-btn {
+  justify-content: flex-start;
+  width: 100%;
+}
+
 .ebay-detail-actions {
   justify-content: flex-end;
 }
@@ -3359,6 +3391,10 @@
   transition: border-color .18s var(--ease), background .18s var(--ease), color .18s var(--ease);
 }
 
+button.ebay-filter-chip {
+  appearance: none;
+}
+
 .ebay-filter-chip input {
   position: absolute;
   opacity: 0;
@@ -3388,6 +3424,11 @@
   border-color: rgba(114,184,255,.3);
   background: rgba(114,184,255,.12);
   color: #d7eaff;
+}
+
+.ebay-filter-chip:focus-visible {
+  outline: 2px solid rgba(114,184,255,.5);
+  outline-offset: 2px;
 }
 
 .ebay-conversation-density-control {
