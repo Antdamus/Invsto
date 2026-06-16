@@ -36,6 +36,7 @@ type SyncInput = {
   checkpointScope: string;
   rateLimitPauseMs: number;
   latestSyncLookbackDays: number;
+  recentDetailSweepLimit: number;
   suppressConversationActivityEvents: boolean;
 };
 
@@ -61,7 +62,18 @@ type Counters = {
   messagesSeen: number;
   messagesInserted: number;
   messagesUpdated: number;
+  messagesRechecked: number;
+  providerReadStateChanges: number;
+  pendingReadSyncConversations: number;
   mediaSeen: number;
+  canonicalDetailSweepCandidates: number;
+  canonicalDetailSweepRefreshed: number;
+  canonicalDetailSweepSkipped: number;
+  canonicalDetailSweepFailed: number;
+  canonicalDetailSweepMessagesInserted: number;
+  canonicalDetailSweepMessagesUpdated: number;
+  canonicalDetailSweepMessagesRechecked: number;
+  canonicalDetailSweepConversationIds: string[];
   classificationProcessed: number;
   classificationSucceeded: number;
   classificationFailed: number;
@@ -69,6 +81,65 @@ type Counters = {
   errors: number;
   warnings: JsonRecord[];
   totalsByConversationType: Record<string, number | null>;
+};
+
+type ExistingMessage = {
+  ebay_message_id: string;
+  sender_username: string | null;
+  recipient_username: string | null;
+  direction: string | null;
+  direction_confidence: string | null;
+  subject: string | null;
+  message_body_sha256: string | null;
+  message_body_preview: string | null;
+  message_status: string | null;
+  created_at_ebay: string | null;
+  has_media: boolean | null;
+  media_count: number | null;
+  read_status: string | null;
+  is_read: boolean | null;
+};
+
+type ExistingConversation = {
+  id: string;
+  ebay_conversation_id: string;
+  unread_count: number;
+  latest_message_id: string | null;
+  provider_read_state: string | null;
+  local_read_state: string | null;
+  pending_provider_update: boolean;
+  read_sync_status: string | null;
+  read_sync_error: string | null;
+};
+
+type CanonicalRecentConversation = {
+  id: string;
+  ebay_conversation_id: string;
+  conversation_type: ConversationType;
+  other_party_username: string | null;
+  latest_message_id: string | null;
+  latest_message_created_at: string | null;
+  latest_message_preview: string | null;
+  message_count: number | null;
+  last_detail_synced_at: string | null;
+  updated_at: string | null;
+};
+
+type ConversationLatestSnapshot = {
+  latest_message_id: string | null;
+  latest_message_created_at: string | null;
+  latest_message_preview: string | null;
+  message_count: number | null;
+  last_detail_synced_at: string | null;
+};
+
+type ConversationUpsertResult = {
+  id: string;
+  reference_id: string | null;
+  reference_type: string | null;
+  other_party_username: string | null;
+  read_state_changed: boolean;
+  pending_provider_update: boolean;
 };
 
 type CheckpointStart = {
@@ -104,6 +175,8 @@ const DEFAULT_BACKFILL_CHECKPOINT_SCOPE = "commerce_message_archive";
 const DEFAULT_LATEST_SYNC_CHECKPOINT_SCOPE = "commerce_message_latest_sync";
 const DEFAULT_LATEST_SYNC_LOOKBACK_DAYS = 14;
 const MAX_LATEST_SYNC_LOOKBACK_DAYS = 90;
+const DEFAULT_RECENT_DETAIL_SWEEP_LIMIT = 100;
+const MAX_RECENT_DETAIL_SWEEP_LIMIT = 100;
 const DEFAULT_BACKFILL_RATE_LIMIT_PAUSE_MS = 100;
 const MAX_RATE_LIMIT_PAUSE_MS = 5000;
 const EBAY_GET_MAX_ATTEMPTS = 4;
@@ -208,6 +281,10 @@ function boundedInteger(value: unknown, fallback: number, min: number, max: numb
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.min(Math.max(Math.trunc(numeric), min), max);
+}
+
+function optionalInputValue(value: unknown) {
+  return value === null || value === undefined || value === "" ? undefined : value;
 }
 
 function booleanValue(value: unknown, fallback = false) {
@@ -316,6 +393,12 @@ async function parseInput(req: Request): Promise<SyncInput> {
       1,
       MAX_LATEST_SYNC_LOOKBACK_DAYS,
     ),
+    recentDetailSweepLimit: boundedInteger(
+      optionalInputValue(getValue("recentDetailSweepLimit")),
+      runType === "incremental" ? DEFAULT_RECENT_DETAIL_SWEEP_LIMIT : 0,
+      0,
+      MAX_RECENT_DETAIL_SWEEP_LIMIT,
+    ),
     suppressConversationActivityEvents: booleanValue(getValue("suppressConversationActivityEvents"), isBatchOperation),
   };
 }
@@ -347,6 +430,35 @@ function readStatusToBoolean(value: unknown) {
   if (["read", "true", "1"].includes(normalized)) return true;
   if (["unread", "false", "0"].includes(normalized)) return false;
   return null;
+}
+
+function readStateFromBoolean(value: boolean | null) {
+  if (value === true) return "read";
+  if (value === false) return "unread";
+  return "unknown";
+}
+
+function providerReadStateFromPayload(payload: JsonRecord) {
+  const unreadCount = numberOrNull(payload.unreadCount ?? payload.unread_count);
+  if (unreadCount !== null) return unreadCount > 0 ? "unread" : "read";
+
+  const latest = latestMessage(payload);
+  const readBoolean = readStatusToBoolean(
+    payload.read ?? payload.readStatus ?? payload.isRead ?? latest.read ?? latest.readStatus ?? latest.isRead,
+  );
+  return readStateFromBoolean(readBoolean);
+}
+
+function providerUnreadCountFromPayload(payload: JsonRecord, providerReadState: string, fallback = 0) {
+  const unreadCount = numberOrNull(payload.unreadCount ?? payload.unread_count);
+  if (unreadCount !== null) return Math.max(unreadCount, 0);
+  if (providerReadState === "read") return 0;
+  if (providerReadState === "unread") return Math.max(Number(fallback || 0), 1);
+  return Math.max(Number(fallback || 0), 0);
+}
+
+function localStateFromUnreadCount(value: unknown) {
+  return Number(value || 0) > 0 ? "unread" : "read";
 }
 
 function isoOrNull(value: unknown) {
@@ -706,6 +818,7 @@ async function createRun(supabase: ServiceClient, input: SyncInput, account: Eba
         maxConversationPages: input.maxConversationPages,
         rateLimitPauseMs: input.rateLimitPauseMs,
         latestSyncLookbackDays: input.latestSyncLookbackDays,
+        recentDetailSweepLimit: input.recentDetailSweepLimit,
         suppress_conversation_activity_events: input.suppressConversationActivityEvents,
         readOnly: true,
         sendsEnabled: false,
@@ -719,10 +832,10 @@ async function createRun(supabase: ServiceClient, input: SyncInput, account: Eba
 }
 
 async function existingConversationsById(supabase: ServiceClient, accountId: string, conversationType: ConversationType, ids: string[]) {
-  if (!ids.length) return new Map<string, { id: string; ebay_conversation_id: string; unread_count: number; latest_message_id: string | null }>();
+  if (!ids.length) return new Map<string, ExistingConversation>();
   const { data, error } = await supabase
     .from("ebay_conversations")
-    .select("id, ebay_conversation_id, unread_count, latest_message_id")
+    .select("id, ebay_conversation_id, unread_count, latest_message_id, provider_read_state, local_read_state, pending_provider_update, read_sync_status, read_sync_error")
     .eq("seller_account_id", accountId)
     .eq("conversation_type", conversationType)
     .in("ebay_conversation_id", ids);
@@ -733,6 +846,11 @@ async function existingConversationsById(supabase: ServiceClient, accountId: str
       ebay_conversation_id: text(row.ebay_conversation_id),
       unread_count: Number(row.unread_count || 0),
       latest_message_id: text(row.latest_message_id) || null,
+      provider_read_state: text(row.provider_read_state) || null,
+      local_read_state: text(row.local_read_state) || null,
+      pending_provider_update: row.pending_provider_update === true,
+      read_sync_status: text(row.read_sync_status) || null,
+      read_sync_error: text(row.read_sync_error) || null,
     }] as const)
     .filter(([id]) => Boolean(id)));
 }
@@ -743,12 +861,45 @@ async function upsertConversation(
   runId: string,
   conversationType: ConversationType,
   payload: JsonRecord,
-  existing: { unread_count: number } | null = null,
+  existing: ExistingConversation | null = null,
 ) {
   const ebayConversationId = firstText(payload.conversationId, payload.id);
   if (!ebayConversationId) throw new SyncError("conversation_missing_id", { phase: "payload" });
 
   const latest = latestMessage(payload);
+  const now = new Date().toISOString();
+  const apiProviderReadState = providerReadStateFromPayload(payload);
+  const previousProviderReadState = existing?.provider_read_state || "unknown";
+  const previousLocalReadState = existing?.local_read_state || localStateFromUnreadCount(existing?.unread_count);
+  const providerReadState = apiProviderReadState !== "unknown" ? apiProviderReadState : previousProviderReadState;
+  const providerUnreadCount = providerUnreadCountFromPayload(payload, providerReadState, existing?.unread_count || 0);
+  const pendingWasSet = existing?.pending_provider_update === true;
+  const providerMatchesPendingLocal = pendingWasSet &&
+    previousLocalReadState !== "unknown" &&
+    providerReadState === previousLocalReadState;
+  const pendingProviderUpdate = apiProviderReadState === "unknown"
+    ? pendingWasSet
+    : pendingWasSet && !providerMatchesPendingLocal;
+  const localReadState = pendingProviderUpdate
+    ? previousLocalReadState
+    : providerReadState !== "unknown"
+    ? providerReadState
+    : previousLocalReadState;
+  const unreadCount = pendingProviderUpdate
+    ? (localReadState === "read" ? 0 : Math.max(existing?.unread_count || providerUnreadCount || 0, 1))
+    : providerUnreadCount;
+  const readSyncStatus = apiProviderReadState === "unknown"
+    ? (existing?.read_sync_status || "unknown")
+    : pendingProviderUpdate
+    ? "pending_provider_update"
+    : "synced";
+  const readStateChanged = existing
+    ? previousProviderReadState !== providerReadState ||
+      previousLocalReadState !== localReadState ||
+      Number(existing.unread_count || 0) !== Number(unreadCount || 0) ||
+      pendingWasSet !== pendingProviderUpdate
+    : false;
+
   const row = {
     seller_account_id: account.id,
     ebay_conversation_id: ebayConversationId,
@@ -758,15 +909,26 @@ async function upsertConversation(
     other_party_username: otherPartyUsername(payload),
     reference_id: referenceId(payload),
     reference_type: referenceType(payload),
-    unread_count: existing ? Math.max(Number(existing.unread_count || 0), 0) : numberOrNull(payload.unreadCount) ?? 0,
+    unread_count: unreadCount,
+    provider_read_state: providerReadState,
+    local_read_state: localReadState,
+    pending_provider_update: pendingProviderUpdate,
+    last_provider_seen_at: now,
+    last_read_sync_at: pendingProviderUpdate ? undefined : now,
+    read_sync_status: readSyncStatus,
+    read_sync_error: pendingProviderUpdate ? existing?.read_sync_error || null : null,
     latest_message_id: firstText(latest.messageId, latest.id) || null,
     latest_message_created_at: isoOrNull(latest.createdDate) || isoOrNull(payload.createdDate),
     latest_message_preview: preview(firstText(latest.messageBody, latest.body, latest.text)) || null,
-    last_synced_at: new Date().toISOString(),
+    last_synced_at: now,
     last_sync_run_id: runId,
-    last_seen_at: new Date().toISOString(),
+    last_seen_at: now,
     raw_summary: stripLargeFields(payload),
   };
+
+  Object.keys(row).forEach((key) => {
+    if ((row as JsonRecord)[key] === undefined) delete (row as JsonRecord)[key];
+  });
 
   const { data, error } = await supabase
     .from("ebay_conversations")
@@ -775,7 +937,11 @@ async function upsertConversation(
     .single();
 
   if (error || !data?.id) throw new SyncError("conversation_upsert_failed", { phase: "database", message: error?.message });
-  return data as { id: string; reference_id: string | null; reference_type: string | null; other_party_username: string | null };
+  return {
+    ...(data as { id: string; reference_id: string | null; reference_type: string | null; other_party_username: string | null }),
+    read_state_changed: readStateChanged,
+    pending_provider_update: pendingProviderUpdate,
+  } as ConversationUpsertResult;
 }
 
 async function upsertConversationLinks(
@@ -827,10 +993,10 @@ async function existingMessagesById(
   ebayConversationId: string,
   messageIds: string[],
 ) {
-  if (!messageIds.length) return new Map<string, { ebay_message_id: string; read_status: string | null; is_read: boolean | null }>();
+  if (!messageIds.length) return new Map<string, ExistingMessage>();
   const { data, error } = await supabase
     .from("ebay_conversation_messages")
-    .select("ebay_message_id, read_status, is_read")
+    .select("ebay_message_id, sender_username, recipient_username, direction, direction_confidence, subject, message_body_sha256, message_body_preview, message_status, created_at_ebay, has_media, media_count, read_status, is_read")
     .eq("seller_account_id", accountId)
     .eq("conversation_type", conversationType)
     .eq("ebay_conversation_id", ebayConversationId)
@@ -839,10 +1005,42 @@ async function existingMessagesById(
   return new Map((data || [])
     .map((row: any) => [text(row.ebay_message_id), {
       ebay_message_id: text(row.ebay_message_id),
+      sender_username: row.sender_username ?? null,
+      recipient_username: row.recipient_username ?? null,
+      direction: row.direction ?? null,
+      direction_confidence: row.direction_confidence ?? null,
+      subject: row.subject ?? null,
+      message_body_sha256: row.message_body_sha256 ?? null,
+      message_body_preview: row.message_body_preview ?? null,
+      message_status: row.message_status ?? null,
+      created_at_ebay: isoOrNull(row.created_at_ebay),
+      has_media: typeof row.has_media === "boolean" ? row.has_media : null,
+      media_count: numberOrNull(row.media_count),
       read_status: row.read_status ?? null,
       is_read: typeof row.is_read === "boolean" ? row.is_read : null,
     }] as const)
     .filter(([id]) => Boolean(id)));
+}
+
+function nullableComparable(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  return value;
+}
+
+function messageRowChanged(existing: ExistingMessage, next: JsonRecord) {
+  return nullableComparable(existing.sender_username) !== nullableComparable(next.sender_username) ||
+    nullableComparable(existing.recipient_username) !== nullableComparable(next.recipient_username) ||
+    nullableComparable(existing.direction) !== nullableComparable(next.direction) ||
+    nullableComparable(existing.direction_confidence) !== nullableComparable(next.direction_confidence) ||
+    nullableComparable(existing.subject) !== nullableComparable(next.subject) ||
+    nullableComparable(existing.message_body_sha256) !== nullableComparable(next.message_body_sha256) ||
+    nullableComparable(existing.message_body_preview) !== nullableComparable(next.message_body_preview) ||
+    nullableComparable(existing.message_status) !== nullableComparable(next.message_status) ||
+    nullableComparable(existing.created_at_ebay) !== nullableComparable(next.created_at_ebay) ||
+    nullableComparable(existing.has_media) !== nullableComparable(next.has_media) ||
+    nullableComparable(existing.media_count) !== nullableComparable(next.media_count) ||
+    nullableComparable(existing.read_status) !== nullableComparable(next.read_status) ||
+    nullableComparable(existing.is_read) !== nullableComparable(next.is_read);
 }
 
 async function upsertMessages(options: {
@@ -886,12 +1084,12 @@ async function upsertMessages(options: {
     const existingMessage = existing.get(ebayMessageId) || null;
     const apiReadStatus = text(message.readStatus) || null;
     const apiIsRead = readStatusToBoolean(message.readStatus);
-
-    if (existingMessage) options.counters.messagesUpdated += 1;
-    else options.counters.messagesInserted += 1;
-    options.counters.mediaSeen += media.length;
-
-    rows.push({
+    const subject = firstText(message.subject, message.title) || null;
+    const bodyHash = await sha256Hex(body);
+    const bodyPreview = preview(body) || null;
+    const messageStatus = firstText(message.messageStatus, message.status) || null;
+    const createdAtEbay = isoOrNull(message.createdDate) || isoOrNull(message.creationDate) || isoOrNull(message.sentDate);
+    const row: JsonRecord = {
       conversation_id: options.conversationRowId,
       seller_account_id: options.account.id,
       ebay_conversation_id: options.ebayConversationId,
@@ -902,21 +1100,31 @@ async function upsertMessages(options: {
       direction: direction.direction,
       direction_confidence: direction.confidence,
       direction_reason: direction.reason,
-      subject: firstText(message.subject, message.title) || null,
+      subject,
       message_body: body || null,
-      message_body_sha256: await sha256Hex(body),
-      message_body_preview: preview(body) || null,
-      read_status: existingMessage ? existingMessage.read_status : apiReadStatus,
-      is_read: existingMessage ? existingMessage.is_read : apiIsRead,
-      message_status: firstText(message.messageStatus, message.status) || null,
-      created_at_ebay: isoOrNull(message.createdDate) || isoOrNull(message.creationDate) || isoOrNull(message.sentDate),
+      message_body_sha256: bodyHash,
+      message_body_preview: bodyPreview,
+      read_status: apiReadStatus ?? existingMessage?.read_status ?? null,
+      is_read: apiIsRead ?? existingMessage?.is_read ?? null,
+      message_status: messageStatus,
+      created_at_ebay: createdAtEbay,
       message_media: media,
       has_media: media.length > 0,
       media_count: media.length,
       raw_message_metadata: stripLargeFields(message),
       last_sync_run_id: options.runId,
       last_seen_at: new Date().toISOString(),
-    });
+    };
+
+    if (existingMessage) {
+      options.counters.messagesRechecked += 1;
+      if (messageRowChanged(existingMessage, row)) options.counters.messagesUpdated += 1;
+    } else {
+      options.counters.messagesInserted += 1;
+    }
+    options.counters.mediaSeen += media.length;
+
+    rows.push(row);
   }
 
   if (!rows.length) return [];
@@ -1035,6 +1243,212 @@ async function syncConversationDetail(options: {
   }
 }
 
+function shouldRunRecentDetailSweep(input: SyncInput, conversationType: ConversationType) {
+  return input.runType === "incremental" &&
+    input.checkpointScope === DEFAULT_LATEST_SYNC_CHECKPOINT_SCOPE &&
+    conversationType === "FROM_MEMBERS" &&
+    !input.conversationId &&
+    !input.startTime &&
+    !input.endTime &&
+    !input.otherPartyUsername &&
+    !input.referenceId &&
+    input.recentDetailSweepLimit > 0;
+}
+
+function pushLimited(values: string[], value: string, limit = 250) {
+  if (!value || values.includes(value) || values.length >= limit) return;
+  values.push(value);
+}
+
+function normalizeLatestSnapshot(row: any): ConversationLatestSnapshot {
+  return {
+    latest_message_id: text(row?.latest_message_id) || null,
+    latest_message_created_at: isoOrNull(row?.latest_message_created_at),
+    latest_message_preview: text(row?.latest_message_preview) || null,
+    message_count: numberOrNull(row?.message_count),
+    last_detail_synced_at: isoOrNull(row?.last_detail_synced_at),
+  };
+}
+
+function snapshotContentChanged(before: ConversationLatestSnapshot, after: ConversationLatestSnapshot) {
+  return before.latest_message_id !== after.latest_message_id ||
+    before.latest_message_created_at !== after.latest_message_created_at ||
+    before.latest_message_preview !== after.latest_message_preview ||
+    before.message_count !== after.message_count;
+}
+
+async function loadConversationLatestSnapshot(supabase: ServiceClient, conversationRowId: string) {
+  const { data, error } = await supabase
+    .from("ebay_conversations")
+    .select("latest_message_id, latest_message_created_at, latest_message_preview, message_count, last_detail_synced_at")
+    .eq("id", conversationRowId)
+    .maybeSingle();
+  if (error) throw new SyncError("conversation_latest_snapshot_failed", { phase: "database", message: error.message });
+  return normalizeLatestSnapshot(data || {});
+}
+
+async function loadCanonicalRecentDetailSweepCandidates(options: {
+  supabase: ServiceClient;
+  account: EbayAccount;
+  conversationType: ConversationType;
+  input: SyncInput;
+  providerProcessedIds: Set<string>;
+}) {
+  const limit = options.input.recentDetailSweepLimit;
+  if (limit <= 0) return { candidates: [] as CanonicalRecentConversation[], skippedProviderProcessed: 0 };
+
+  const fetchLimit = Math.min(
+    MAX_RECENT_DETAIL_SWEEP_LIMIT * 2,
+    Math.max(limit * 2, limit + options.providerProcessedIds.size),
+  );
+  const { data, error } = await options.supabase
+    .from("ebay_conversations")
+    .select([
+      "id",
+      "ebay_conversation_id",
+      "conversation_type",
+      "other_party_username",
+      "latest_message_id",
+      "latest_message_created_at",
+      "latest_message_preview",
+      "message_count",
+      "last_detail_synced_at",
+      "updated_at",
+    ].join(","))
+    .eq("seller_account_id", options.account.id)
+    .eq("conversation_type", options.conversationType)
+    .not("ebay_conversation_id", "is", null)
+    .order("latest_message_created_at", { ascending: false, nullsFirst: false })
+    .order("updated_at", { ascending: false, nullsFirst: false })
+    .limit(fetchLimit);
+  if (error) throw new SyncError("canonical_recent_detail_candidates_failed", { phase: "database", message: error.message });
+
+  const rows = (data || []) as any[];
+  const normalized = rows.map((row): CanonicalRecentConversation => ({
+    id: text(row.id),
+    ebay_conversation_id: text(row.ebay_conversation_id),
+    conversation_type: text(row.conversation_type) as ConversationType,
+    other_party_username: text(row.other_party_username) || null,
+    latest_message_id: text(row.latest_message_id) || null,
+    latest_message_created_at: isoOrNull(row.latest_message_created_at),
+    latest_message_preview: text(row.latest_message_preview) || null,
+    message_count: numberOrNull(row.message_count),
+    last_detail_synced_at: isoOrNull(row.last_detail_synced_at),
+    updated_at: isoOrNull(row.updated_at),
+  }));
+  const skippedProviderProcessed = normalized
+    .filter((row) => row.id && row.ebay_conversation_id && options.providerProcessedIds.has(row.ebay_conversation_id))
+    .length;
+  const candidates = normalized
+    .filter((row) => row.id && row.ebay_conversation_id && !options.providerProcessedIds.has(row.ebay_conversation_id));
+
+  return {
+    candidates: candidates.slice(0, limit),
+    skippedProviderProcessed,
+  };
+}
+
+async function refreshCanonicalRecentConversationDetail(options: {
+  supabase: ServiceClient;
+  token: string;
+  account: EbayAccount;
+  runId: string;
+  input: SyncInput;
+  conversationType: ConversationType;
+  conversation: CanonicalRecentConversation;
+  counters: Counters;
+}) {
+  const beforeSnapshot = normalizeLatestSnapshot(options.conversation);
+  const messagesInsertedBefore = options.counters.messagesInserted;
+  const messagesUpdatedBefore = options.counters.messagesUpdated;
+  const messagesRecheckedBefore = options.counters.messagesRechecked;
+
+  options.counters.conversationsSeen += 1;
+  await syncConversationDetail({
+    supabase: options.supabase,
+    token: options.token,
+    account: options.account,
+    runId: options.runId,
+    input: options.input,
+    conversationType: options.conversationType,
+    conversationPayload: {
+      conversationId: options.conversation.ebay_conversation_id,
+      otherPartyUsername: options.conversation.other_party_username,
+    },
+    conversationRow: {
+      id: options.conversation.id,
+      other_party_username: options.conversation.other_party_username,
+    },
+    counters: options.counters,
+  });
+
+  const linkResult = await linkEbayConversationContext(options.supabase, options.conversation.id);
+  if (linkResult.warnings.length) {
+    options.counters.warnings.push({
+      code: "canonical_detail_sweep_context_link_warnings",
+      conversationId: options.conversation.ebay_conversation_id,
+      warnings: linkResult.warnings.slice(0, 10),
+    });
+  }
+
+  const afterSnapshot = await loadConversationLatestSnapshot(options.supabase, options.conversation.id);
+  const insertedDelta = options.counters.messagesInserted - messagesInsertedBefore;
+  const updatedDelta = options.counters.messagesUpdated - messagesUpdatedBefore;
+  const recheckedDelta = options.counters.messagesRechecked - messagesRecheckedBefore;
+  options.counters.canonicalDetailSweepMessagesInserted += insertedDelta;
+  options.counters.canonicalDetailSweepMessagesUpdated += updatedDelta;
+  options.counters.canonicalDetailSweepMessagesRechecked += recheckedDelta;
+  options.counters.canonicalDetailSweepRefreshed += 1;
+  options.counters.conversationsSucceeded += 1;
+  pushLimited(options.counters.canonicalDetailSweepConversationIds, options.conversation.ebay_conversation_id);
+
+  if (insertedDelta > 0 || updatedDelta > 0 || snapshotContentChanged(beforeSnapshot, afterSnapshot)) {
+    options.counters.conversationsUpdated += 1;
+  } else {
+    options.counters.conversationsUnchanged += 1;
+  }
+}
+
+async function runCanonicalRecentDetailSweep(options: {
+  supabase: ServiceClient;
+  token: string;
+  account: EbayAccount;
+  runId: string;
+  input: SyncInput;
+  conversationType: ConversationType;
+  counters: Counters;
+}) {
+  if (!shouldRunRecentDetailSweep(options.input, options.conversationType)) return;
+
+  const providerProcessedIds = new Set(options.counters.conversationIds);
+  const { candidates, skippedProviderProcessed } = await loadCanonicalRecentDetailSweepCandidates({
+    supabase: options.supabase,
+    account: options.account,
+    conversationType: options.conversationType,
+    input: options.input,
+    providerProcessedIds,
+  });
+  options.counters.canonicalDetailSweepCandidates += candidates.length;
+  options.counters.canonicalDetailSweepSkipped += skippedProviderProcessed;
+
+  for (const conversation of candidates) {
+    try {
+      await refreshCanonicalRecentConversationDetail({
+        ...options,
+        conversation,
+      });
+    } catch (error) {
+      options.counters.canonicalDetailSweepFailed += 1;
+      options.counters.warnings.push({
+        code: "canonical_detail_sweep_failed",
+        conversationId: conversation.ebay_conversation_id,
+        message: error instanceof Error ? error.message.slice(0, 500) : String(error || "Unknown error").slice(0, 500),
+      });
+    }
+    await sleep(options.input.rateLimitPauseMs);
+  }
+}
+
 function latestConversationTimestamp(conversation: JsonRecord) {
   const latest = latestMessage(conversation);
   return isoOrNull(latest.createdDate) ||
@@ -1076,12 +1490,27 @@ function syncRunProgressMetadata(input: SyncInput, counters: Counters, extra: Js
     maxConversationPages: input.maxConversationPages,
     rateLimitPauseMs: input.rateLimitPauseMs,
     latestSyncLookbackDays: input.latestSyncLookbackDays,
+    recentDetailSweepLimit: input.recentDetailSweepLimit,
     conversationIds: counters.conversationIds,
+    canonicalDetailSweepCandidates: counters.canonicalDetailSweepCandidates,
+    canonicalDetailSweepRefreshed: counters.canonicalDetailSweepRefreshed,
+    canonicalDetailSweepSkipped: counters.canonicalDetailSweepSkipped,
+    canonicalDetailSweepFailed: counters.canonicalDetailSweepFailed,
+    canonicalDetailSweepMessagesInserted: counters.canonicalDetailSweepMessagesInserted,
+    canonicalDetailSweepMessagesUpdated: counters.canonicalDetailSweepMessagesUpdated,
+    canonicalDetailSweepMessagesRechecked: counters.canonicalDetailSweepMessagesRechecked,
+    canonicalDetailSweepConversationIds: counters.canonicalDetailSweepConversationIds,
     pagesSucceeded: counters.pagesSucceeded,
     pagesFailed: counters.pagesFailed,
     conversationsSucceeded: counters.conversationsSucceeded,
     conversationsSkipped: counters.conversationsSkipped,
     conversationsUnchanged: counters.conversationsUnchanged,
+    messagesRechecked: counters.messagesRechecked,
+    messages_rechecked: counters.messagesRechecked,
+    providerReadStateChanges: counters.providerReadStateChanges,
+    provider_read_state_changes: counters.providerReadStateChanges,
+    pendingReadSyncConversations: counters.pendingReadSyncConversations,
+    pending_read_sync_conversations: counters.pendingReadSyncConversations,
     classificationProcessed: counters.classificationProcessed,
     classificationSucceeded: counters.classificationSucceeded,
     classificationFailed: counters.classificationFailed,
@@ -1127,6 +1556,29 @@ async function countCanonicalConversations(supabase: ServiceClient, accountId: s
     .eq("seller_account_id", accountId);
   if (error) throw new SyncError("canonical_conversation_count_failed", { phase: "database", message: error.message });
   return Number(count || 0);
+}
+
+async function countUnclassifiedConversations(supabase: ServiceClient, accountId: string) {
+  try {
+    const { data: conversations, error: conversationError } = await supabase
+      .from("ebay_conversations")
+      .select("id")
+      .eq("seller_account_id", accountId)
+      .limit(10000);
+    if (conversationError) throw conversationError;
+    const ids = (conversations || []).map((row: any) => text(row.id)).filter(Boolean);
+    if (!ids.length) return 0;
+    const { count, error: classificationError } = await supabase
+      .from("ebay_conversation_classifications")
+      .select("conversation_id", { count: "exact", head: true })
+      .in("conversation_id", ids)
+      .eq("is_current", true);
+    if (classificationError) throw classificationError;
+    return Math.max(ids.length - Number(count || 0), 0);
+  } catch (error) {
+    console.warn("[ebay-message-sync] unclassified count lookup failed", error instanceof Error ? error.message : String(error));
+    return null;
+  }
 }
 
 async function beginCheckpoint(options: {
@@ -1264,7 +1716,10 @@ async function updateCheckpointProgress(options: {
         conversations_seen: options.counters.conversationsSeen,
         messages_seen: options.counters.messagesSeen,
         messages_inserted: options.counters.messagesInserted,
+        messages_rechecked: options.counters.messagesRechecked,
         messages_updated: options.counters.messagesUpdated,
+        provider_read_state_changes: options.counters.providerReadStateChanges,
+        pending_read_sync_conversations: options.counters.pendingReadSyncConversations,
       },
       updated_at: new Date().toISOString(),
     },
@@ -1434,6 +1889,8 @@ async function processConversationPage(options: {
       conversation,
       existingConversation,
     );
+    if (conversationRow.read_state_changed) options.counters.providerReadStateChanges += 1;
+    if (conversationRow.pending_provider_update) options.counters.pendingReadSyncConversations += 1;
     options.counters.conversationsSucceeded += 1;
     rowIds.push(conversationRow.id);
     latestTimestamp = newestTimestamp(latestTimestamp, latestConversationTimestamp(conversation));
@@ -1456,7 +1913,7 @@ async function processConversationPage(options: {
     if (existingConversation) {
       const hasNewMessages = options.counters.messagesInserted > messagesInsertedBefore;
       const latestChanged = Boolean(apiLatestMessageId && apiLatestMessageId !== existingConversation.latest_message_id);
-      if (hasNewMessages || latestChanged) options.counters.conversationsUpdated += 1;
+      if (hasNewMessages || latestChanged || conversationRow.read_state_changed) options.counters.conversationsUpdated += 1;
       else options.counters.conversationsUnchanged += 1;
     }
     const linkResult = await linkEbayConversationContext(options.supabase, conversationRow.id);
@@ -1699,6 +2156,20 @@ async function syncConversationType(options: {
     await sleep(options.input.rateLimitPauseMs);
   }
 
+  const ranRecentDetailSweep = shouldRunRecentDetailSweep(options.input, options.conversationType);
+  if (ranRecentDetailSweep) {
+    await runCanonicalRecentDetailSweep(options);
+    await updateRunProgress(
+      options.supabase,
+      options.runId,
+      options.counters,
+      syncRunProgressMetadata(options.input, options.counters, {
+        currentConversationType: options.conversationType,
+        canonicalDetailSweepComplete: true,
+      }),
+    );
+  }
+
   return lastResult || {
     conversationType: options.conversationType,
     exhausted: false,
@@ -1731,11 +2202,15 @@ function backfillEventSummary(input: SyncInput, counters: Counters, startedMs: n
     conversations_skipped: counters.conversationsSkipped,
     messages_processed: counters.messagesSeen,
     messages_inserted: counters.messagesInserted,
+    messages_rechecked: counters.messagesRechecked,
     messages_updated: counters.messagesUpdated,
+    provider_read_state_changes: counters.providerReadStateChanges,
+    pending_read_sync_conversations: counters.pendingReadSyncConversations,
     classification_processed: counters.classificationProcessed,
     classification_succeeded: counters.classificationSucceeded,
     classification_failed: counters.classificationFailed,
     classification_skipped: counters.classificationSkipped,
+    classified_count: counters.classificationSucceeded,
     processed_count: counters.conversationsSeen,
     succeeded_count: counters.conversationsSucceeded,
     failed_count: failed,
@@ -1754,7 +2229,7 @@ async function recordBackfillActivityEvent(options: {
   counters: Counters;
   startedMs: number;
   eventType: "message_backfill_started" | "message_backfill_progress" | "message_backfill_completed" | "message_backfill_failed";
-  status: "pending" | "succeeded" | "failed" | "warning";
+  status: "pending" | "running" | "succeeded" | "partial_success" | "failed" | "warning";
   title: string;
   detail: string;
   extra?: JsonRecord;
@@ -1796,8 +2271,9 @@ function shouldRecordAggregateSyncEvent(input: SyncInput) {
 }
 
 function syncOperationLabel(input: SyncInput) {
-  if (input.runType === "manual") return "Sync Latest";
-  if (input.runType === "incremental") return input.checkpointScope === DEFAULT_LATEST_SYNC_CHECKPOINT_SCOPE ? "Sync Latest" : "Incremental Sync";
+  if (input.conversationId) return "Refresh Timeline";
+  if (input.runType === "manual") return "Manual Message Sync";
+  if (input.runType === "incremental") return input.checkpointScope === DEFAULT_LATEST_SYNC_CHECKPOINT_SCOPE ? "Sync Recent Mailbox" : "Incremental Sync";
   if (input.runType === "scheduled") return "Scheduled Sync";
   if (input.runType === "replay") return "Sync Replay";
   return "Message Sync";
@@ -1812,6 +2288,7 @@ function syncEventSummary(input: SyncInput, counters: Counters, startedMs: numbe
     classification_mode: input.classificationMode,
     checkpoint_scope: input.checkpointScope,
     conversation_types: input.conversationTypes,
+    recent_detail_sweep_limit: input.recentDetailSweepLimit,
     conversation_ids: counters.conversationIds,
     duration_ms: Math.max(Date.now() - startedMs, 0),
     pages_processed: counters.pagesFetched,
@@ -1825,14 +2302,26 @@ function syncEventSummary(input: SyncInput, counters: Counters, startedMs: numbe
     conversations_updated: counters.conversationsUpdated,
     conversations_unchanged: counters.conversationsUnchanged,
     conversations_skipped: counters.conversationsSkipped,
+    canonical_detail_sweep_candidates: counters.canonicalDetailSweepCandidates,
+    canonical_detail_sweep_refreshed: counters.canonicalDetailSweepRefreshed,
+    canonical_detail_sweep_skipped: counters.canonicalDetailSweepSkipped,
+    canonical_detail_sweep_failed: counters.canonicalDetailSweepFailed,
+    canonical_detail_sweep_messages_inserted: counters.canonicalDetailSweepMessagesInserted,
+    canonical_detail_sweep_messages_updated: counters.canonicalDetailSweepMessagesUpdated,
+    canonical_detail_sweep_messages_rechecked: counters.canonicalDetailSweepMessagesRechecked,
+    canonical_detail_sweep_conversation_ids: counters.canonicalDetailSweepConversationIds,
     messages_seen: counters.messagesSeen,
     messages_processed: counters.messagesSeen,
     messages_inserted: counters.messagesInserted,
+    messages_rechecked: counters.messagesRechecked,
     messages_updated: counters.messagesUpdated,
+    provider_read_state_changes: counters.providerReadStateChanges,
+    pending_read_sync_conversations: counters.pendingReadSyncConversations,
     classification_processed: counters.classificationProcessed,
     classification_succeeded: counters.classificationSucceeded,
     classification_failed: counters.classificationFailed,
     classification_skipped: counters.classificationSkipped,
+    classified_count: counters.classificationSucceeded,
     processed_count: counters.conversationsSeen,
     succeeded_count: counters.conversationsSucceeded,
     failed_count: failed,
@@ -1840,6 +2329,11 @@ function syncEventSummary(input: SyncInput, counters: Counters, startedMs: numbe
     totals_by_conversation_type: counters.totalsByConversationType,
     warnings_count: counters.warnings.length,
     warnings: counters.warnings.slice(0, 25),
+    scope_description: input.conversationId
+      ? "Selected conversation deep refresh."
+      : input.runType === "incremental" && input.checkpointScope === DEFAULT_LATEST_SYNC_CHECKPOINT_SCOPE
+      ? "Recent incremental mailbox scan with provider latest-page scope plus bounded canonical detail sweep."
+      : "Bounded eBay message sync operation.",
     ...extra,
   };
 }
@@ -1852,15 +2346,15 @@ async function recordSyncActivityEvent(options: {
   counters: Counters;
   startedMs: number;
   eventType: "message_sync_completed" | "message_sync_failed";
-  status: "succeeded" | "failed" | "warning";
+  status: "succeeded" | "partial_success" | "failed" | "warning";
   extra?: JsonRecord;
 }) {
   const summary = syncEventSummary(options.input, options.counters, options.startedMs, options.extra || {});
   const completed = options.eventType === "message_sync_completed";
   const title = `${syncOperationLabel(options.input)} ${completed ? "Completed" : "Failed"}`;
   const detail = completed
-    ? `${syncOperationLabel(options.input)} completed. Saw ${options.counters.conversationsSeen} conversations and ${options.counters.messagesSeen} messages.`
-    : `${syncOperationLabel(options.input)} failed. Saw ${options.counters.conversationsSeen} conversations and ${options.counters.messagesSeen} messages before failure.`;
+    ? `${syncOperationLabel(options.input)} completed. Saw ${options.counters.conversationsSeen} conversations and scanned ${options.counters.messagesSeen} messages. Existing messages rechecked: ${options.counters.messagesRechecked}; messages changed: ${options.counters.messagesUpdated}; canonical detail sweep refreshed: ${options.counters.canonicalDetailSweepRefreshed}.`
+    : `${syncOperationLabel(options.input)} failed. Saw ${options.counters.conversationsSeen} conversations and scanned ${options.counters.messagesSeen} messages before failure.`;
   const { error } = await options.supabase.rpc("record_ebay_message_activity_event", {
     _event_type: options.eventType,
     _status: options.status,
@@ -1960,6 +2454,7 @@ serve(async (req) => {
   let input: SyncInput | null = null;
   let operator: Operator | null = null;
   let account: EbayAccount | null = null;
+  let unclassifiedBefore: number | null = null;
   const startedMs = Date.now();
   const supabase = serviceClient();
 
@@ -1967,6 +2462,7 @@ serve(async (req) => {
     operator = await requireAdmin(req, supabase);
     input = await parseInput(req);
     account = await upsertSellerAccount(supabase);
+    unclassifiedBefore = await countUnclassifiedConversations(supabase, account.id);
     runId = await createRun(supabase, input, account, operator);
     counters = {
       pagesFetched: 0,
@@ -1983,7 +2479,18 @@ serve(async (req) => {
       messagesSeen: 0,
       messagesInserted: 0,
       messagesUpdated: 0,
+      messagesRechecked: 0,
+      providerReadStateChanges: 0,
+      pendingReadSyncConversations: 0,
       mediaSeen: 0,
+      canonicalDetailSweepCandidates: 0,
+      canonicalDetailSweepRefreshed: 0,
+      canonicalDetailSweepSkipped: 0,
+      canonicalDetailSweepFailed: 0,
+      canonicalDetailSweepMessagesInserted: 0,
+      canonicalDetailSweepMessagesUpdated: 0,
+      canonicalDetailSweepMessagesRechecked: 0,
+      canonicalDetailSweepConversationIds: [],
       classificationProcessed: 0,
       classificationSucceeded: 0,
       classificationFailed: 0,
@@ -1994,6 +2501,25 @@ serve(async (req) => {
         : [{ code: "seller_username_not_configured", message: "Set EBAY_SELLER_USERNAME for strongest direction derivation." }],
       totalsByConversationType: {},
     };
+    if (input.runType === "backfill") {
+      await recordBackfillActivityEvent({
+        supabase,
+        input,
+        operator,
+        runId,
+        counters,
+        startedMs,
+        eventType: "message_backfill_started",
+        status: "pending",
+        title: "Backfill Started",
+        detail: "Historical eBay message backfill chunk started. Running state is also recorded on archive checkpoints.",
+        extra: {
+          lifecycle_status: "started",
+          chunked: true,
+          unclassified_before: unclassifiedBefore,
+        },
+      });
+    }
 
     const token = await refreshEbayToken();
     let successfulConversationTypeSyncs = 0;
@@ -2044,6 +2570,7 @@ serve(async (req) => {
       ? summarizeBackfillProgress(input, backfillCheckpoints, typeResults)
       : null;
     const canonicalTotalConversations = await countCanonicalConversations(supabase, account.id);
+    const unclassifiedAfter = await countUnclassifiedConversations(supabase, account.id);
     const metadata = syncRunProgressMetadata(input, counters, {
       conversationTypes: input.conversationTypes,
       conversationId: input.conversationId,
@@ -2052,6 +2579,8 @@ serve(async (req) => {
       paginationStrategy: "Offsets advance by the exact fixed page limit used for the request.",
       backfillProgress,
       canonicalTotalConversations,
+      unclassifiedBefore,
+      unclassifiedAfter,
       readOnly: true,
       sendsEnabled: false,
       ebayMutationsPerformed: false,
@@ -2061,6 +2590,7 @@ serve(async (req) => {
     if (input.runType === "backfill") {
       const failed = counters.pagesFailed + counters.classificationFailed + counters.errors;
       const completed = backfillProgress?.completed === true;
+      const eventStatus = failed > 0 ? "partial_success" : "succeeded";
       await recordBackfillActivityEvent({
         supabase,
         input,
@@ -2069,15 +2599,22 @@ serve(async (req) => {
         counters,
         startedMs,
         eventType: completed ? "message_backfill_completed" : "message_backfill_progress",
-        status: failed > 0 ? "warning" : "succeeded",
-        title: completed ? "Backfill Completed" : "Backfill Progress",
-        detail: completed
+        status: eventStatus,
+        title: failed > 0
+          ? (completed ? "Backfill Completed With Partial Success" : "Backfill Chunk Partial Success")
+          : (completed ? "Backfill Completed" : "Backfill Progress"),
+        detail: failed > 0
+          ? `Historical eBay message backfill chunk completed with partial success. Imported ${counters.conversationsInserted} conversations and ${counters.messagesInserted} messages; classified ${counters.classificationSucceeded}; failed classification ${counters.classificationFailed}; remaining unclassified: ${unclassifiedAfter ?? "unknown"}.`
+          : completed
           ? `Historical eBay message backfill completed. Processed ${counters.conversationsSeen} conversations and ${counters.messagesSeen} messages in the final chunk.`
           : `Historical eBay message backfill chunk completed. Processed ${counters.conversationsSeen} conversations and ${counters.messagesSeen} messages; resume from checkpoint for the next chunk.`,
         extra: {
           progress: backfillProgress || {},
           chunked: true,
           canonical_total_conversations: canonicalTotalConversations,
+          unclassified_before: unclassifiedBefore,
+          unclassified_after: unclassifiedAfter,
+          remaining_unclassified: unclassifiedAfter,
         },
       });
     } else if (shouldRecordAggregateSyncEvent(input)) {
@@ -2090,9 +2627,12 @@ serve(async (req) => {
         counters,
         startedMs,
         eventType: "message_sync_completed",
-        status: failed > 0 ? "warning" : "succeeded",
+        status: failed > 0 ? "partial_success" : "succeeded",
         extra: {
           canonical_total_conversations: canonicalTotalConversations,
+          unclassified_before: unclassifiedBefore,
+          unclassified_after: unclassifiedAfter,
+          remaining_unclassified: unclassifiedAfter,
         },
       });
     }
@@ -2108,6 +2648,9 @@ serve(async (req) => {
       counters,
       backfillProgress,
       canonicalTotalConversations,
+      unclassifiedBefore,
+      unclassifiedAfter,
+      remainingUnclassified: unclassifiedAfter,
       durationMs: Math.max(Date.now() - startedMs, 0),
       safety: {
         readOnly: true,
@@ -2118,6 +2661,7 @@ serve(async (req) => {
       pagination: {
         conversationPageLimit: input.conversationPageLimit,
         messagePageLimit: input.messagePageLimit,
+        recentDetailSweepLimit: input.recentDetailSweepLimit,
         startOffset: input.startOffset,
         offsetRule: "startOffset and every continuation offset must be a multiple of the page limit used for that endpoint.",
       },
@@ -2133,6 +2677,9 @@ serve(async (req) => {
         console.warn("[ebay-message-sync] failed to load checkpoint progress after failure", checkpointError);
       }
     }
+    const failedUnclassifiedAfter = account
+      ? await countUnclassifiedConversations(supabase, account.id)
+      : null;
     const failureMetadata = input && counters
       ? syncRunProgressMetadata(input, counters, {
         conversationTypes: input.conversationTypes,
@@ -2140,6 +2687,8 @@ serve(async (req) => {
         startOffset: input.startOffset,
         environment: ebayEnvironment(),
         backfillProgress: failedBackfillProgress,
+        unclassifiedBefore,
+        unclassifiedAfter: failedUnclassifiedAfter,
         readOnly: true,
         sendsEnabled: false,
         ebayMutationsPerformed: false,
@@ -2165,6 +2714,9 @@ serve(async (req) => {
           failed_count: failedCountFallback,
           progress: failedBackfillProgress || {},
           chunked: true,
+          unclassified_before: unclassifiedBefore,
+          unclassified_after: failedUnclassifiedAfter,
+          remaining_unclassified: failedUnclassifiedAfter,
           error_code: failure.error_code,
           error_phase: failure.error_phase,
         },
@@ -2184,6 +2736,9 @@ serve(async (req) => {
         extra: {
           ...failure,
           failed_count: failedCountFallback,
+          unclassified_before: unclassifiedBefore,
+          unclassified_after: failedUnclassifiedAfter,
+          remaining_unclassified: failedUnclassifiedAfter,
           error_code: failure.error_code,
           error_phase: failure.error_phase,
         },

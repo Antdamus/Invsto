@@ -1,5 +1,13 @@
 {
+  "scripts": {
+    "test:ebay-notification": "node --test tests/email-triage/ebay-message-notification.test.mjs tests/email-triage/ebay-notification-admin.test.mjs",
+    "test:ebay-notification:live": "node tests/email-triage/ebay-message-notification-live-probe.mjs",
+    "test:email-triage": "playwright test --config tests/email-triage/playwright.config.mjs",
+    "test:email-triage:setup": "playwright test --config tests/email-triage/playwright.config.mjs --project=setup",
+    "serve:email-triage": "python3 -m http.server 4173"
+  },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "supabase": "^2.72.8"
   }
 }

@@ -67,8 +67,11 @@
     if (eventType === "conversation_classified" && payload.classification_run) {
       return event.title || "Classification Run Completed";
     }
-    if (eventType === "message_sync_completed") return event.title || "Sync Latest Completed";
-    if (eventType === "message_sync_failed") return event.title || "Sync Latest Failed";
+    if (eventType === "message_sync_completed") return event.title || "Sync Recent Mailbox Completed";
+    if (eventType === "message_sync_failed") return event.title || "Sync Recent Mailbox Failed";
+    if (eventType === "read_state_synced") return event.title || "Provider Read State Synced";
+    if (eventType === "read_state_sync_failed") return event.title || "Provider Read State Sync Failed";
+    if (eventType === "provider_notification_received") return event.title || "Provider Notification Received";
     if (eventType === "message_backfill_started") return "Backfill Started";
     if (eventType === "message_backfill_progress") return "Backfill Progress";
     if (eventType === "message_backfill_completed") return "Backfill Completed";
@@ -152,8 +155,10 @@
   function eventStatusVariant(event = {}) {
     const counters = event.counters && typeof event.counters === "object" ? event.counters : {};
     const status = String(event.status || "").toLowerCase();
+    if (status.includes("partial")) return "warning";
     const failed = status.includes("fail") || Number(counters.failed_count || 0) > 0 || Number(eventPayload(event).failed || 0) > 0;
     if (failed) return "danger";
+    if (status.includes("running") || status.includes("pending")) return "warning";
     if (status.includes("warn")) return "warning";
     if (status.includes("complete") || status.includes("success")) return "success";
     return "muted";
@@ -181,11 +186,18 @@
       duplicate_send_prevented: "A duplicate send was blocked before another provider call.",
       smart_folder_created: "An eBay smart folder was created.",
       smart_folder_updated: "An eBay smart folder was updated.",
-      message_sync_completed: "Recent eBay inbox sync completed as one aggregate operation.",
-      message_sync_failed: "Recent eBay inbox sync failed as one aggregate operation.",
+      message_sync_completed: "Recent incremental mailbox scan completed as one aggregate operation.",
+      message_sync_failed: "Recent incremental mailbox scan failed as one aggregate operation.",
+      read_state_synced: "eBay read/unread state was updated from an explicit OG action.",
+      read_state_sync_failed: "An explicit OG read/unread provider update failed and remains pending.",
+      provider_notification_received: "An eBay notification was received and the changed conversation was targeted for refresh.",
       message_backfill_started: "Historical eBay message archive import started.",
-      message_backfill_progress: "Historical eBay message archive import chunk completed and paused at a safe checkpoint.",
-      message_backfill_completed: "Historical eBay message archive import completed.",
+      message_backfill_progress: String(status || "").toLowerCase().includes("partial")
+        ? "Historical eBay message archive chunk completed with partial success; inspect classification counts below."
+        : "Historical eBay message archive import chunk completed and paused at a safe checkpoint.",
+      message_backfill_completed: String(status || "").toLowerCase().includes("partial")
+        ? "Historical eBay message archive completed with partial success; inspect classification counts below."
+        : "Historical eBay message archive import completed.",
       message_backfill_failed: "Historical eBay message archive import failed.",
     };
     const description = firstValue([
@@ -235,20 +247,35 @@
       message_sync_completed: [
         metricText(metricValue([payload], ["conversations_seen", "processed_count"]) || 0, "seen"),
         metricText(metricValue([payload], ["conversations_inserted"]) || 0, "inserted"),
-        metricText(metricValue([payload], ["conversations_updated"]) || 0, "updated"),
+        metricText(metricValue([payload], ["conversations_updated"]) || 0, "changed"),
         metricText(metricValue([payload], ["conversations_unchanged"]) || 0, "unchanged"),
+        metricText(metricValue([payload], ["messages_rechecked"]) || 0, "messages rechecked"),
+      ],
+      read_state_synced: [
+        payload.read_state ? utils.humanizeValue(payload.read_state) : "",
+        payload.ebay_conversation_id ? `provider ${utils.compactId(payload.ebay_conversation_id)}` : "",
+      ],
+      read_state_sync_failed: [
+        payload.read_state ? utils.humanizeValue(payload.read_state) : "",
+        payload.ebay_conversation_id ? `provider ${utils.compactId(payload.ebay_conversation_id)}` : "",
+      ],
+      provider_notification_received: [
+        payload.topic || "",
+        payload.ebay_conversation_id ? `conversation ${utils.compactId(payload.ebay_conversation_id)}` : "",
+        payload.signature_verified === true ? "signature verified" : "",
       ],
       message_sync_failed: [
         metricText(metricValue([payload], ["conversations_seen", "processed_count"]) || 0, "seen"),
         metricText(metricValue([payload], ["conversations_inserted"]) || 0, "inserted"),
-        metricText(metricValue([payload], ["conversations_updated"]) || 0, "updated"),
+        metricText(metricValue([payload], ["conversations_updated"]) || 0, "changed"),
         metricText(metricValue([payload], ["failed_count"]) || 1, "failed"),
       ],
       conversation_classified: payload.classification_run || payload.processed_count !== undefined ? [
-        metricText(metricValue([payload], ["processed_count"]) ?? payload.classification_run?.processed, "processed"),
-        metricText(metricValue([payload], ["succeeded_count"]) ?? payload.classification_run?.succeeded, "succeeded"),
+        metricText(metricValue([payload], ["candidates_examined", "processed_count"]) ?? payload.classification_run?.processed, "examined"),
+        metricText(metricValue([payload], ["actually_classified", "classified_count", "succeeded_count"]) ?? payload.classification_run?.succeeded, "classified"),
         metricText(metricValue([payload], ["failed_count"]) ?? payload.classification_run?.failed, "failed"),
         metricText(metricValue([payload], ["skipped_count"]) ?? payload.classification_run?.skipped, "skipped"),
+        metricText(metricValue([payload], ["remaining_unclassified", "unclassified_after"]) ?? payload.classification_run?.unclassified_after, "remaining"),
       ] : [
         payload.priority ? utils.humanizeValue(payload.priority) : "",
         payload.response_need ? utils.humanizeValue(payload.response_need) : "",
@@ -375,11 +402,14 @@
     if (eventType === "conversation_classified" && (payload.classification_run || payload.processed_count !== undefined)) {
       const run = payload.classification_run && typeof payload.classification_run === "object" ? payload.classification_run : payload;
       return [
-        ["Processed", metricValue([payload, run, counters], ["processed_count", "processed"])],
+        ["Candidates Examined", metricValue([payload, run, counters], ["candidates_examined", "processed_count", "processed"])],
         ["Attempted", metricValue([payload, run, counters], ["attempted_count", "attempted"])],
-        ["Succeeded", metricValue([payload, run, counters], ["succeeded_count", "succeeded"])],
+        ["Actually Classified", metricValue([payload, run, counters], ["actually_classified", "classified_count", "succeeded_count", "succeeded"])],
         ["Failed", metricValue([payload, run, counters], ["failed_count", "failed"])],
         ["Skipped", metricValue([payload, run, counters], ["skipped_count", "skipped"])],
+        ["Unclassified Before", metricValue([payload, run, counters], ["unclassified_before"])],
+        ["Unclassified After", metricValue([payload, run, counters], ["unclassified_after"])],
+        ["Remaining Unclassified", metricValue([payload, run, counters], ["remaining_unclassified", "unclassified_after"])],
         ["Requested", metricValue([payload, run], ["requested_count", "requested"])],
         ["Classification Version", metricValue([payload, run], ["classification_version"])],
         ["Prompt Version", metricValue([payload, run], ["prompt_version"])],
@@ -405,6 +435,9 @@
         ["Classified", metricValue([payload, run], ["classification_succeeded"])],
         ["Classification Failed", metricValue([payload, run], ["classification_failed"])],
         ["Classification Skipped", metricValue([payload, run], ["classification_skipped"])],
+        ["Unclassified Before", metricValue([payload, run, counters], ["unclassified_before"])],
+        ["Unclassified After", metricValue([payload, run, counters], ["unclassified_after"])],
+        ["Remaining Unclassified", metricValue([payload, run, counters], ["remaining_unclassified", "unclassified_after"])],
         ["Duration", metricValue([payload, run], ["duration_ms"]) !== null ? `${metricValue([payload, run], ["duration_ms"])} ms` : null],
         ["Error", metricValue([payload, run], ["error_code", "last_error_code"])],
       ];
@@ -415,16 +448,20 @@
       return [
         ["Conversations Seen", metricValue([payload, run, counters], ["conversations_seen", "processed_count"])],
         ["Conversations Inserted", metricValue([payload, run, counters], ["conversations_inserted"])],
-        ["Conversations Updated", metricValue([payload, run, counters], ["conversations_updated"])],
+        ["Conversations Changed", metricValue([payload, run, counters], ["conversations_updated"])],
         ["Conversations Unchanged", metricValue([payload, run, counters], ["conversations_unchanged"])],
         ["Succeeded", metricValue([payload, run, counters], ["succeeded_count", "conversations_succeeded"])],
         ["Failed", metricValue([payload, run, counters], ["failed_count"])],
         ["Skipped", metricValue([payload, run, counters], ["skipped_count", "conversations_skipped"])],
         ["Pages", metricValue([payload, run, counters], ["pages_processed"])],
-        ["Messages Seen", metricValue([payload, run, counters], ["messages_seen", "messages_processed"])],
+        ["Messages Scanned", metricValue([payload, run, counters], ["messages_seen", "messages_processed"])],
+        ["Existing Messages Rechecked", metricValue([payload, run, counters], ["messages_rechecked"])],
         ["Messages Inserted", metricValue([payload, run, counters], ["messages_inserted"])],
-        ["Messages Updated", metricValue([payload, run, counters], ["messages_updated"])],
+        ["Messages Changed", metricValue([payload, run, counters], ["messages_updated"])],
         ["Canonical Total After Sync", metricValue([payload, run, counters], ["canonical_total_conversations", "canonicalTotalConversations"])],
+        ["Unclassified Before", metricValue([payload, run, counters], ["unclassified_before"])],
+        ["Unclassified After", metricValue([payload, run, counters], ["unclassified_after"])],
+        ["Remaining Unclassified", metricValue([payload, run, counters], ["remaining_unclassified", "unclassified_after"])],
         ["Warnings", metricValue([payload, run, counters], ["warnings_count"])],
         ["Duration", metricValue([payload, run], ["duration_ms"]) !== null ? `${metricValue([payload, run], ["duration_ms"])} ms` : null],
         ["Checkpoint Scope", metricValue([payload, run], ["checkpoint_scope"])],
@@ -743,11 +780,35 @@
     const metrics = ebay.metrics || {};
     const safety = ebay.send_safety || {};
     const approvalQueue = ebay.approval_queue || {};
+    const latestSync = ebay.latest_sync || {};
+    const latestSyncRun = latestSync.run || {};
+    const activeSyncRuns = Array.isArray(latestSync.active_runs) ? latestSync.active_runs : [];
+    const classificationRuns = ebay.classification_runs || {};
+    const latestClassificationRun = classificationRuns.latest || {};
+    const activeClassificationRuns = Array.isArray(classificationRuns.active) ? classificationRuns.active : [];
     const backfill = ebay.backfill || {};
     const checkpoints = Array.isArray(backfill.checkpoints) ? backfill.checkpoints : [];
     const activeBackfills = Array.isArray(backfill.active) ? backfill.active : [];
+    const latestSyncStatus = activeSyncRuns.length
+      ? "running"
+      : latestSyncRun.status || latestSync.event?.status || "not_started";
+    const latestSyncStatusVariant = latestSyncStatus === "succeeded" || latestSyncStatus === "completed"
+      ? "success"
+      : latestSyncStatus === "failed"
+      ? "danger"
+      : latestSyncStatus === "running" || latestSyncStatus === "pending"
+      ? "warning"
+      : "muted";
     const backfillStatus = String(backfill.status || "not_started");
     const backfillStatusVariant = backfillStatus === "completed" ? "success" : backfillStatus === "failed" ? "danger" : backfillStatus === "running" ? "warning" : "muted";
+    const classificationStatus = activeClassificationRuns.length
+      ? "running"
+      : latestClassificationRun.status || "not_started";
+    const classificationStatusVariant = eventStatusVariant({ status: classificationStatus });
+    const classificationTerminalStatus = ["succeeded", "partial_success", "failed"].includes(String(latestClassificationRun.status || ""))
+      ? String(latestClassificationRun.status)
+      : "";
+    const classificationDurationMs = latestClassificationRun.payload?.duration_ms ?? latestClassificationRun.duration_ms;
     const events = Array.isArray(ebay.recent_operational_events) ? ebay.recent_operational_events : [];
     const blocked = ebay.ok === false || Number(metrics.send_attempts_failed || 0) > 0 || safety.automatic_responses_sent > 0;
 
@@ -764,12 +825,18 @@
           <div class="operational-panel-head">
             <strong>eBay Message Metrics</strong>
             ${dashboardBadge("Canonical", "success", utils)}
+            ${metrics.read_state_schema_available === false ? dashboardBadge("Read schema pending", "warning", utils) : ""}
           </div>
           <div class="operational-metric-grid">
             ${renderKeyValueGrid([
               { label: "Total canonical", value: metrics.canonical_conversations },
               { label: "Conversations today", value: metrics.conversations_today },
               { label: "Unread conversations", value: metrics.unread_conversations },
+              { label: "Provider unread", value: metrics.provider_unread_conversations },
+              { label: "OG unread", value: metrics.local_unread_conversations },
+              { label: "Read sync pending", value: metrics.pending_provider_read_sync },
+              { label: "Read sync failed", value: metrics.failed_provider_read_sync },
+              { label: "Unclassified", value: metrics.unclassified_conversations },
               { label: "Needs reply", value: metrics.needs_reply },
               { label: "High priority", value: metrics.high_priority },
               { label: "Returns", value: metrics.returns },
@@ -784,17 +851,48 @@
         <section class="operational-panel operational-panel-wide">
           <div class="operational-panel-head">
             <strong>Latest Sync</strong>
-            ${dashboardBadge("Recent only", "muted", utils)}
+            ${dashboardBadge(activeSyncRuns.length ? "Running" : "Recent incremental", activeSyncRuns.length ? "warning" : "muted", utils)}
           </div>
           <div class="operational-metric-grid">
             ${renderKeyValueGrid([
-              { label: "Seen", value: metrics.latest_sync_conversations_seen },
+              { label: "Lifecycle status", html: dashboardBadge(utils.humanizeValue(latestSyncStatus), latestSyncStatusVariant, utils) },
+              { label: "Started", value: latestSyncRun.started_at ? utils.formatDateTime(latestSyncRun.started_at) : "--" },
+              { label: "Completed", value: latestSyncRun.completed_at ? utils.formatDateTime(latestSyncRun.completed_at) : "--" },
+              { label: "Conversations scanned", value: metrics.latest_sync_conversations_seen },
               { label: "Inserted", value: metrics.latest_sync_conversations_inserted },
-              { label: "Updated", value: metrics.latest_sync_conversations_updated },
+              { label: "Changed", value: metrics.latest_sync_conversations_updated },
               { label: "Unchanged", value: metrics.latest_sync_conversations_unchanged },
+              { label: "Messages scanned", value: metrics.latest_sync_messages_scanned },
+              { label: "Messages rechecked", value: metrics.latest_sync_messages_rechecked },
               { label: "Messages inserted", value: metrics.latest_sync_messages_inserted },
-              { label: "Messages updated", value: metrics.latest_sync_messages_updated },
+              { label: "Messages changed", value: metrics.latest_sync_messages_changed ?? metrics.latest_sync_messages_updated },
+              { label: "Provider read changes", value: metrics.latest_sync_provider_read_state_changes },
+              { label: "Pending read sync", value: metrics.latest_sync_pending_read_sync_conversations },
               { label: "Canonical after sync", value: metrics.latest_sync_canonical_total_after ?? metrics.canonical_conversations },
+            ], utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel operational-panel-wide">
+          <div class="operational-panel-head">
+            <strong>Latest Classification Batch</strong>
+            ${dashboardBadge(activeClassificationRuns.length ? "Running" : utils.humanizeValue(classificationStatus), activeClassificationRuns.length ? "warning" : classificationStatusVariant, utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Lifecycle status", html: dashboardBadge(utils.humanizeValue(classificationStatus), classificationStatusVariant, utils) },
+              { label: "Terminal Status", html: classificationTerminalStatus ? dashboardBadge(utils.humanizeValue(classificationTerminalStatus), eventStatusVariant({ status: classificationTerminalStatus }), utils) : "--" },
+              { label: "Run ID", value: latestClassificationRun.id ? utils.compactId(latestClassificationRun.id) : "--" },
+              { label: "Mode", value: latestClassificationRun.payload?.run_mode ? utils.humanizeValue(latestClassificationRun.payload.run_mode) : "--" },
+              { label: "Started", value: latestClassificationRun.started_at ? utils.formatDateTime(latestClassificationRun.started_at) : "--" },
+              { label: "Completed", value: latestClassificationRun.completed_at ? utils.formatDateTime(latestClassificationRun.completed_at) : "--" },
+              { label: "Duration", value: Number.isFinite(Number(classificationDurationMs)) ? `${Number(classificationDurationMs)} ms` : "--" },
+              { label: "Requested limit", value: latestClassificationRun.payload?.requested_limit ?? latestClassificationRun.requested_limit ?? "--" },
+              { label: "Processed", value: metrics.latest_classification_processed },
+              { label: "Classified", value: metrics.latest_classification_classified },
+              { label: "Failed", value: metrics.latest_classification_failed },
+              { label: "Skipped", value: metrics.latest_classification_skipped },
+              { label: "Remaining unclassified", value: metrics.latest_classification_remaining_unclassified ?? "--" },
             ], utils)}
           </div>
         </section>

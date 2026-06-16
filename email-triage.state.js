@@ -64,8 +64,23 @@
       selectedOperationalEventDetail: null,
       operationalEventDetailOpen: false,
       ebayConversationLoading: false,
+      ebayConversationLoadingMore: false,
       ebayConversationError: null,
       ebayConversations: [],
+      ebayMailboxMode: "rpc",
+      ebayMailboxWarning: null,
+      ebayMailboxPagination: {
+        canonical_total: null,
+        matching_total: null,
+        loaded_count: 0,
+        page_size: 100,
+        offset: 0,
+        next_offset: null,
+        has_more: false,
+        rpc_version: null,
+      },
+      ebayMailboxSmartFolderCounts: {},
+      ebayMailboxFilterOptionCounts: {},
       ebayConversationFilter: "all",
       ebayConversationSearchQuery: "",
       ebayConversationClassificationFilters: {
@@ -81,8 +96,12 @@
       ebayConversationSavedViewsError: null,
       ebayConversationSavedViewSavingId: null,
       ebayConversationSavedViewActionError: null,
+      ebayConversationSavedViewCounts: {},
+      ebayConversationSavedViewCountsLoading: false,
       selectedEbaySavedViewId: null,
       ebayConversationSmartFoldersEditing: false,
+      ebayConversationSmartFolderEditDraft: null,
+      ebayConversationSmartFolderCreateDraft: null,
       ebayConversationPanelVisibility: overrides.ebayConversationPanelVisibility || {
         folders: true,
         list: true,
@@ -110,13 +129,15 @@
       ebayConversationDraftActionMessagesById: {},
       ebayConversationClassificationCollapsed: Object.prototype.hasOwnProperty.call(overrides, "ebayConversationClassificationCollapsed")
         ? overrides.ebayConversationClassificationCollapsed === true
-        : true,
+        : false,
       ebayDraftMetadataCollapsed: Object.prototype.hasOwnProperty.call(overrides, "ebayDraftMetadataCollapsed")
         ? overrides.ebayDraftMetadataCollapsed === true
         : true,
       ebayConversationSyncLoading: false,
+      ebayConversationSyncOperation: null,
       ebayConversationSyncResult: null,
       ebayConversationSyncError: null,
+      ebayConversationReadSyncLoadingId: null,
       ebayConversationClassificationLoadingId: null,
       ebayConversationClassificationBatchLoading: false,
       ebayConversationClassificationResult: null,

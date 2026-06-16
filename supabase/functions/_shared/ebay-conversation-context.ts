@@ -341,6 +341,48 @@ function pushDirectConversationCandidates(
   }
 }
 
+function pushParticipantBuyerCandidates(
+  candidates: LinkCandidate[],
+  conversation: Record<string, any>,
+  identifiers: ReturnType<typeof extractConversationIdentifiers>,
+) {
+  const existingBuyerKeys = new Set(
+    candidates
+      .filter((candidate) => candidate.link_type === "buyer_username")
+      .map((candidate) => buyerKey(candidate.buyer_username || candidate.matched_value))
+      .filter(Boolean) as string[],
+  );
+  const participantBuyers = unique(identifiers.buyerUsernames, 10)
+    .map((value) => text(value, 120))
+    .filter((value) => {
+      const key = buyerKey(value);
+      return key && key !== "ebay" && !existingBuyerKeys.has(key);
+    });
+  const isMemberConversation = String(conversation.conversation_type || "") === "FROM_MEMBERS";
+
+  for (const username of participantBuyers) {
+    const key = buyerKey(username);
+    if (!key) continue;
+    existingBuyerKeys.add(key);
+    candidates.push({
+      conversation_id: conversation.id,
+      seller_account_id: conversation.seller_account_id,
+      link_type: "buyer_username",
+      link_key: `username:${key}`,
+      buyer_username: username,
+      matched_value: username,
+      match_method: "message_participant",
+      confidence: isMemberConversation ? 0.88 : 0.62,
+      status: isMemberConversation ? "confirmed" : "suggested",
+      metadata: linkMetadata(identifiers, "message_participant", {
+        source: "ebay_conversation_messages.sender_or_recipient",
+        exact_order_linked: false,
+        provider_detail_refresh_recommended: !conversation.reference_id,
+      }),
+    });
+  }
+}
+
 function lineCandidateFrom(
   conversation: Record<string, any>,
   identifiers: ReturnType<typeof extractConversationIdentifiers>,
@@ -459,6 +501,7 @@ async function buildLinkCandidates(
   const candidates: LinkCandidate[] = [];
   const targetTime = conversationTime(conversation);
   pushDirectConversationCandidates(candidates, conversation, identifiers);
+  pushParticipantBuyerCandidates(candidates, conversation, identifiers);
 
   if (identifiers.orderNumbers.length) {
     const orders = await queryByChunks<Record<string, any>>(identifiers.orderNumbers, async (chunk) => {
@@ -896,7 +939,18 @@ function chooseBuyer(values: {
   for (const order of values.orders) addCandidate(order.buyer_username, "order", 4, order.buyer_name, order.buyer_email);
   for (const order of values.lineOrders) addCandidate(order.buyer_username, "order_line", 3, order.buyer_name, order.buyer_email);
   for (const returnCase of values.returns) addCandidate(returnCase.buyer_username, "return_case", 2);
-  for (const link of values.links) addCandidate(link.buyer_username || (link.link_type === "buyer_username" ? link.matched_value : null), "conversation_link", 1);
+  for (const link of values.links) {
+    const confidence = Number(link.confidence || 0);
+    const matchMethod = text(link.match_method, 120);
+    const reliability = link.link_type === "buyer_username" && (matchMethod === "message_participant" || confidence >= 0.8)
+      ? 3
+      : 1;
+    addCandidate(
+      link.buyer_username || (link.link_type === "buyer_username" ? link.matched_value : null),
+      matchMethod === "message_participant" ? "message_participant" : "conversation_link",
+      reliability,
+    );
+  }
 
   if (!candidates.length) return { username: null, name: null, email: null, matched_from: null, confidence: "none" };
   const maxReliability = Math.max(...candidates.map((candidate) => candidate.reliability));
@@ -929,6 +983,37 @@ function summarizeLinkConfidence(links: Array<Record<string, any>>) {
     confirmed_links: confirmed,
     suggested_links: suggested,
     total_active_links: active.length,
+  };
+}
+
+function contextResolution(values: {
+  conversation: Record<string, any>;
+  buyer: Record<string, unknown>;
+  links: Array<Record<string, any>>;
+  orders: Array<Record<string, any>>;
+  lines: Array<Record<string, any>>;
+  returns: Array<Record<string, any>>;
+}) {
+  const hasBuyer = Boolean(text(values.buyer?.username));
+  const hasOrder = values.orders.length > 0 || values.lines.length > 0;
+  const hasReturn = values.returns.length > 0;
+  const hasReference = Boolean(text(values.conversation.reference_id));
+  const linkTypes = new Set(values.links.map((link) => text(link.link_type)).filter(Boolean));
+  const providerDetailRefreshRecommended = Boolean(values.conversation.ebay_conversation_id) &&
+    !hasReference &&
+    !hasOrder &&
+    !hasReturn;
+
+  return {
+    buyer_found: hasBuyer,
+    buyer_context_status: hasBuyer
+      ? hasOrder ? "order_linked" : "buyer_found_no_exact_order"
+      : "buyer_not_found",
+    order_context_status: hasOrder ? "order_linked" : "no_exact_order_link",
+    provider_detail_refresh_status: providerDetailRefreshRecommended ? "recommended" : "not_needed",
+    provider_detail_refresh_recommended: providerDetailRefreshRecommended,
+    deterministic_reference_found: hasReference,
+    active_link_types: [...linkTypes],
   };
 }
 
@@ -1108,6 +1193,14 @@ export async function buildEbayConversationContext(
 
   const lineOrders = lines.map((line) => orderById.get(String(line.order_id))).filter(Boolean) as Array<Record<string, any>>;
   const buyer = chooseBuyer({ conversation, links, orders, lineOrders, returns, warnings });
+  const resolution = contextResolution({ conversation, buyer, links, orders, lines, returns });
+  if (resolution.provider_detail_refresh_recommended) {
+    warnings.push(warning(
+      "provider_detail_refresh_recommended",
+      "Buyer was derived from message participants, but no exact order/listing reference is stored yet. Run a targeted provider detail refresh.",
+      "info",
+    ));
+  }
   let buyerHistorySummary = null;
   let buyerValueLineBreakdown: Array<Record<string, unknown>> = [];
   if (buyer.username && buyer.confidence === "confirmed") {
@@ -1151,6 +1244,7 @@ export async function buildEbayConversationContext(
     matched_orders: orders.map(compactOrder),
     matched_order_lines: lines.map((line) => compactOrderLine(line, orderById.get(String(line.order_id)) || null)),
     matched_returns: returns.map((returnCase) => compactReturnCase(returnCase, returnItemsByCase.get(String(returnCase.id)) || [])),
+    context_resolution: resolution,
     buyer_history_summary: buyerHistorySummary,
     buyer_value_line_breakdown: buyerValueLineBreakdown,
     inventory_listing_context: [...inventoryLinks.values()].map(compactInventoryLink),
