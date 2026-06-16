@@ -661,15 +661,15 @@
   }
 
   async function persistAddItemDraft(elements) {
-    if (state.isApplyingDraft || state.draftUnavailable || !window.supabase) return;
+    if (state.isApplyingDraft || state.draftUnavailable || !window.supabase) return false;
 
     const user = await getCurrentDraftUser();
-    if (!user?.id) return;
+    if (!user?.id) return false;
 
     const payload = collectAddItemDraftPayload(elements);
     if (!addItemDraftHasContent(payload)) {
       await clearAddItemDraft();
-      return;
+      return false;
     }
 
     const { error } = await window.supabase
@@ -684,15 +684,16 @@
         { onConflict: "user_id,draft_key" }
       );
 
-    if (!error) return;
+    if (!error) return true;
 
     if (isDraftTableUnavailableError(error)) {
       state.draftUnavailable = true;
       console.warn("Add Item cloud drafts are not installed yet. Run the add_item_drafts migration.", error);
-      return;
+      return false;
     }
 
     console.warn("Could not save Add Item draft:", error);
+    return false;
   }
 
   function scheduleAddItemDraftSave(elements) {
@@ -713,10 +714,10 @@
       window.clearTimeout(state.draftSaveTimer);
       state.draftSaveTimer = null;
     }
-    if (state.draftUnavailable || !window.supabase) return;
+    if (state.draftUnavailable || !window.supabase) return false;
 
     const user = await getCurrentDraftUser();
-    if (!user?.id) return;
+    if (!user?.id) return false;
 
     const { error } = await window.supabase
       .from(ADD_ITEM_DRAFT_TABLE)
@@ -724,12 +725,13 @@
       .eq("user_id", user.id)
       .eq("draft_key", ADD_ITEM_DRAFT_KEY);
 
-    if (!error) return;
+    if (!error) return true;
     if (isDraftTableUnavailableError(error)) {
       state.draftUnavailable = true;
-      return;
+      return false;
     }
     console.warn("Could not clear Add Item draft:", error);
+    return false;
   }
 
   async function hydrateDraftImages(images) {
@@ -2020,7 +2022,7 @@
 
     state.hasLoadedImagesOnce = true;
     setButtonBusy(elements.refreshImagesButton, "Refreshing...", "Reload Recent Photos", true);
-    setInlineStatus(elements.imageStatus, "Loading recent station photos and their processed versions...", "is-waiting");
+    setInlineStatus(elements.imageStatus, "Loading recent station and document upload photos...", "is-waiting");
 
     try {
       const reloadLimit = getRecentPhotoReloadLimit(elements);
@@ -2028,6 +2030,7 @@
       let stationCaptureImages = [];
       let processedImages = [];
       let fallbackCaptureImages = [];
+      let inventoryUploadImages = [];
 
       try {
         stationCaptureImages = await loadRecentStationCaptureImages(elements, reloadLimit);
@@ -2078,8 +2081,31 @@
         }
       }
 
+      try {
+        const uploadResponse = await window.supabase.functions.invoke(INVENTORY_UPLOAD_LIST_FUNCTION_NAME, {
+          body: {
+            bucket: INVENTORY_UPLOAD_BUCKET,
+            limit: reloadLimit,
+          },
+        });
+        if (uploadResponse.error) {
+          throw new Error(uploadResponse.error.message || "Unable to load recent document uploads.");
+        }
+        const bucket = uploadResponse.data?.bucket || INVENTORY_UPLOAD_BUCKET;
+        inventoryUploadImages = (Array.isArray(uploadResponse.data?.images) ? uploadResponse.data.images : [])
+          .filter((image) => !String(image?.path || "").includes("/normalized-sources/"))
+          .map((image, index) => normalizeImageRow({
+            ...image,
+            storageBucket: bucket,
+            sourceType: "recent-document-upload",
+          }, index));
+      } catch (uploadError) {
+        backendErrors.push(uploadError);
+        console.warn("Could not load recent document uploads:", uploadError);
+      }
+
       const seenImages = new Set();
-      const normalizedImages = [...stationCaptureImages, ...processedImages, ...fallbackCaptureImages]
+      const normalizedImages = [...stationCaptureImages, ...processedImages, ...fallbackCaptureImages, ...inventoryUploadImages]
         .filter((image) => image.path && image.previewUrl)
         .filter((image) => {
           const key = `${image.storageBucket}:${image.path}`;
@@ -2091,11 +2117,14 @@
 
       releaseImagePreviewUrls(state.recentUploadedImages);
       state.recentUploadedImages = normalizedImages;
+      const defaultSelectedPaths = options.selectLatestOnly
+        ? [getLatestUploadedImage(normalizedImages)?.path].filter(Boolean)
+        : normalizedImages.map((image) => image.path).filter(Boolean);
       state.saveSelectedUploadedImagePaths = preserveSelection
         ? normalizedImages
           .map((image) => image.path)
           .filter((path) => previousSaveSelections.has(path))
-        : normalizedImages.map((image) => image.path).filter(Boolean);
+        : defaultSelectedPaths;
 
       const nextAIPath = normalizedImages.some((image) => image.path === previousAIPath)
         ? previousAIPath
@@ -2127,9 +2156,10 @@
         const station = getSelectedCaptureStation();
         const stationText = station?.name ? ` from ${station.name}` : "";
         const processedText = processedImages.length ? `, including ${processedImages.length} processed version(s)` : "";
+        const uploadText = inventoryUploadImages.length ? ` and ${inventoryUploadImages.length} document upload(s)` : "";
         setInlineStatus(
           elements.imageStatus,
-          `Loaded ${normalizedImages.length} recent image(s)${stationText}${processedText}. Older reloaded images were not auto-processed.`,
+          `Loaded ${normalizedImages.length} recent image(s)${stationText}${processedText}${uploadText}. Older reloaded images were not auto-processed.`,
           "is-success"
         );
       } else {
@@ -2744,7 +2774,7 @@
       }
       updateSaveSelectionSummary(elements);
       renderUploadedImages(elements);
-      void persistAddItemDraft(elements);
+      await persistAddItemDraft(elements);
       setInlineStatus(
         elements.bgStatus,
         `Processed image uploaded with a ${background} background. Review it in the preview and capture set.`,
@@ -3185,7 +3215,7 @@
       updateSaveSelectionSummary(elements);
       renderUploadedImages(elements);
       scheduleAddItemDraftSave(elements);
-      void persistAddItemDraft(elements);
+      await persistAddItemDraft(elements);
       setInlineStatus(elements.bgStatus, "Cropped final image uploaded and selected.", "is-success");
       closeImageEditor(elements);
     } catch (error) {
@@ -3260,12 +3290,14 @@
         preferredPath: uploadedImage.path,
         maxCount: 1,
       });
+      const draftSaved = await persistAddItemDraft(elements);
       setInlineStatus(
         elements.imageStatus,
-        "Document image uploaded. A black-background version is being prepared automatically.",
-        "is-success"
+        draftSaved
+          ? "Document image uploaded and saved to your account. It should reopen from another device after refresh."
+          : "Document image uploaded, but the account draft did not confirm. Try Reload Recent Photos on the other device.",
+        draftSaved ? "is-success" : "is-waiting"
       );
-      void persistAddItemDraft(elements);
     } catch (error) {
       console.error("Document image upload failed:", error);
       setInlineStatus(
@@ -3825,6 +3857,12 @@
     const restoredDraft = await loadAddItemDraft(elements);
     if (!restoredDraft) {
       resetAssistedWorkflow(elements, { skipDraftSave: true });
+      await loadRecentInventoryUploadImages(elements, {
+        refreshNotice: true,
+        preserveSelection: false,
+        autoProcess: false,
+        selectLatestOnly: true,
+      });
     }
     setActiveWorkflow(elements, restoredDraft?.activeWorkflow || "assisted", { skipDraftSave: true });
   }
