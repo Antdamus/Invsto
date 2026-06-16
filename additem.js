@@ -1186,6 +1186,8 @@ let uploadedImages = [];
           const isNew = optionEl.dataset.new === "true";
 
           hiddenInput.value = value;
+          hiddenInput.dispatchEvent(new Event("input", { bubbles: true }));
+          hiddenInput.dispatchEvent(new Event("change", { bubbles: true }));
           toggleBtn.innerText = value;
 
           onClick(value, isNew, optionEl);

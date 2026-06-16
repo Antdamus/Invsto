@@ -8,6 +8,10 @@
   const CAPTURE_JOB_TABLE = "capture_jobs";
   const CAPTURE_PHOTO_TABLE = "capture_job_photos";
   const CAPTURE_STATION_TABLE = "capture_stations";
+  const ADD_ITEM_DRAFT_TABLE = "add_item_drafts";
+  const ADD_ITEM_DRAFT_KEY = "default";
+  const ADD_ITEM_DRAFT_DEBOUNCE_MS = 900;
+  const ADD_ITEM_DRAFT_MAX_IMAGES = 40;
   const CAPTURE_POLL_INTERVAL_MS = 1500;
   const CAPTURE_POLL_TIMEOUT_MS = 300000;
   const CAPTURE_PHOTO_SETTLE_MS = 4500;
@@ -93,6 +97,9 @@
     autoBlackProcessedSourcePaths: new Set(),
     backgroundCutoutCache: new Map(),
     hasLoadedImagesOnce: false,
+    isApplyingDraft: false,
+    draftSaveTimer: null,
+    draftUnavailable: false,
     activeCaptureJobId: "",
     captureStations: [],
     selectedCaptureStationId: "",
@@ -521,6 +528,378 @@
     };
   }
 
+  function serializeDraftImage(image) {
+    if (!image?.path) return null;
+
+    return {
+      path: image.path,
+      name: image.name,
+      createdAt: image.createdAt,
+      updatedAt: image.updatedAt,
+      storageBucket: image.storageBucket || INVENTORY_UPLOAD_BUCKET,
+      sourceType: image.sourceType,
+      sortOrder: image.sortOrder,
+      isPrimary: Boolean(image.isPrimary),
+      captureJobId: image.captureJobId,
+      mimeType: image.mimeType,
+    };
+  }
+
+  function getInputValueById(id) {
+    return asTrimmedString(document.getElementById(id)?.value);
+  }
+
+  function setInputValueById(id, value, options = {}) {
+    const input = document.getElementById(id);
+    if (!input || value === undefined || value === null) return;
+
+    if (input.type === "checkbox") {
+      input.checked = Boolean(value);
+    } else {
+      input.value = String(value);
+    }
+
+    if (options.dispatch !== false) {
+      input.dispatchEvent(new Event(input.type === "checkbox" ? "change" : "input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+
+  function collectAddItemDraftPayload(elements) {
+    const images = state.recentUploadedImages
+      .map(serializeDraftImage)
+      .filter(Boolean)
+      .slice(0, ADD_ITEM_DRAFT_MAX_IMAGES);
+    const imagePaths = new Set(images.map((image) => image.path));
+
+    return {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      activeWorkflow: state.activeWorkflow,
+      selectedCaptureStationId: state.selectedCaptureStationId,
+      aiSelectedUploadedImagePath: imagePaths.has(state.aiSelectedUploadedImagePath)
+        ? state.aiSelectedUploadedImagePath
+        : "",
+      saveSelectedUploadedImagePaths: state.saveSelectedUploadedImagePaths
+        .filter((path) => imagePaths.has(path))
+        .slice(0, ADD_ITEM_DRAFT_MAX_IMAGES),
+      recentUploadedImages: images,
+      assistedFields: {
+        material: asTrimmedString(elements.materialSelect?.value),
+        purity: asTrimmedString(elements.puritySelect?.value),
+        stoneType: asTrimmedString(elements.stoneTypeInput?.value),
+        length: asTrimmedString(elements.lengthInput?.value),
+        notes: asTrimmedString(elements.notesInput?.value),
+        manualWeight: asTrimmedString(elements.manualWeightInput?.value),
+        stableWeight: Number.isFinite(state.stableWeight) ? state.stableWeight : null,
+        generatedTitle: asTrimmedString(elements.generatedTitleInput?.value),
+        generatedDescription: asTrimmedString(elements.generatedDescriptionInput?.value),
+      },
+      mainFields: {
+        title: asTrimmedString(elements.mainTitleInput?.value),
+        description: asTrimmedString(elements.mainDescriptionInput?.value),
+        weight: asTrimmedString(elements.mainWeightInput?.value),
+        category: getCurrentCategory(elements),
+        qrType: asTrimmedString(elements.qrTypeSelect?.value),
+        ebaySyncEnabled: Boolean(document.getElementById("ebay-sync-enabled")?.checked),
+        ebayCategoryId: getInputValueById("ebay-category-id"),
+        pricePerWeight: getInputValueById("price-per-weight"),
+        cost: getInputValueById("cost"),
+        salePrice: getInputValueById("sale-price"),
+        distributorName: getInputValueById("distributor-name"),
+        distributorPhone: getInputValueById("distributor-phone"),
+        distributorNotes: getInputValueById("distributor-notes"),
+      },
+    };
+  }
+
+  function addItemDraftHasContent(payload) {
+    if (!payload || typeof payload !== "object") return false;
+    if (Array.isArray(payload.recentUploadedImages) && payload.recentUploadedImages.length > 0) return true;
+
+    const assisted = payload.assistedFields || {};
+    const main = payload.mainFields || {};
+    return [
+      assisted.stoneType,
+      assisted.length,
+      assisted.notes,
+      assisted.manualWeight,
+      assisted.stableWeight,
+      assisted.generatedTitle,
+      assisted.generatedDescription,
+      main.title,
+      main.description,
+      main.weight,
+      main.category,
+      main.pricePerWeight,
+      main.cost,
+      main.salePrice,
+      main.distributorName,
+      main.distributorPhone,
+      main.distributorNotes,
+    ].some((value) => asTrimmedString(value));
+  }
+
+  function isDraftTableUnavailableError(error) {
+    const message = String(error?.message || error?.details || "").toLowerCase();
+    return error?.code === "42P01"
+      || error?.code === "PGRST205"
+      || message.includes("add_item_drafts")
+      || message.includes("schema cache");
+  }
+
+  async function getCurrentDraftUser() {
+    if (!window.supabase?.auth?.getUser) return null;
+
+    const { data, error } = await window.supabase.auth.getUser();
+    if (error) {
+      console.warn("Could not read current user for Add Item draft:", error);
+      return null;
+    }
+
+    return data?.user || null;
+  }
+
+  async function persistAddItemDraft(elements) {
+    if (state.isApplyingDraft || state.draftUnavailable || !window.supabase) return;
+
+    const user = await getCurrentDraftUser();
+    if (!user?.id) return;
+
+    const payload = collectAddItemDraftPayload(elements);
+    if (!addItemDraftHasContent(payload)) {
+      await clearAddItemDraft();
+      return;
+    }
+
+    const { error } = await window.supabase
+      .from(ADD_ITEM_DRAFT_TABLE)
+      .upsert(
+        {
+          user_id: user.id,
+          draft_key: ADD_ITEM_DRAFT_KEY,
+          payload,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,draft_key" }
+      );
+
+    if (!error) return;
+
+    if (isDraftTableUnavailableError(error)) {
+      state.draftUnavailable = true;
+      console.warn("Add Item cloud drafts are not installed yet. Run the add_item_drafts migration.", error);
+      return;
+    }
+
+    console.warn("Could not save Add Item draft:", error);
+  }
+
+  function scheduleAddItemDraftSave(elements) {
+    if (state.isApplyingDraft || state.draftUnavailable || !window.supabase) return;
+
+    if (state.draftSaveTimer) {
+      window.clearTimeout(state.draftSaveTimer);
+    }
+
+    state.draftSaveTimer = window.setTimeout(() => {
+      state.draftSaveTimer = null;
+      persistAddItemDraft(elements);
+    }, ADD_ITEM_DRAFT_DEBOUNCE_MS);
+  }
+
+  async function clearAddItemDraft() {
+    if (state.draftSaveTimer) {
+      window.clearTimeout(state.draftSaveTimer);
+      state.draftSaveTimer = null;
+    }
+    if (state.draftUnavailable || !window.supabase) return;
+
+    const user = await getCurrentDraftUser();
+    if (!user?.id) return;
+
+    const { error } = await window.supabase
+      .from(ADD_ITEM_DRAFT_TABLE)
+      .delete()
+      .eq("user_id", user.id)
+      .eq("draft_key", ADD_ITEM_DRAFT_KEY);
+
+    if (!error) return;
+    if (isDraftTableUnavailableError(error)) {
+      state.draftUnavailable = true;
+      return;
+    }
+    console.warn("Could not clear Add Item draft:", error);
+  }
+
+  async function hydrateDraftImages(images) {
+    const normalizedImages = (Array.isArray(images) ? images : [])
+      .map((image, index) => normalizeImageRow(image, index))
+      .filter((image) => image.path && image.storageBucket);
+
+    if (!normalizedImages.length) return [];
+
+    const photoRows = normalizedImages.map((image) => ({
+      storage_bucket: image.storageBucket,
+      storage_path: image.path,
+      mime_type: image.mimeType,
+      label: image.name,
+      created_at: image.createdAt,
+      sort_order: image.sortOrder,
+      is_primary: image.isPrimary,
+      capture_job_id: image.captureJobId,
+    }));
+    const { fullUrlByKey, thumbnailUrlByKey } = await createCapturePhotoSignedUrlMaps(photoRows);
+
+    return normalizedImages
+      .map((image) => {
+        const key = `${image.storageBucket}:${image.path}`;
+        const previewUrl = fullUrlByKey.get(key) || image.previewUrl || "";
+        const thumbnailUrl = thumbnailUrlByKey.get(key) || previewUrl || image.thumbnailUrl || "";
+        return {
+          ...image,
+          previewUrl,
+          thumbnailUrl,
+        };
+      })
+      .sort(compareNewestFirst);
+  }
+
+  function applyAddItemDraftFields(elements, payload) {
+    const assisted = payload?.assistedFields || {};
+    const main = payload?.mainFields || {};
+
+    if (assisted.material && elements.materialSelect) {
+      elements.materialSelect.value = assisted.material;
+      updatePurityOptions(elements, assisted.material, assisted.purity || "");
+    } else if (assisted.purity && elements.puritySelect) {
+      elements.puritySelect.value = assisted.purity;
+    }
+
+    if (elements.stoneTypeInput && assisted.stoneType !== undefined) {
+      elements.stoneTypeInput.value = assisted.stoneType || "";
+    }
+    if (elements.lengthInput && assisted.length !== undefined) {
+      elements.lengthInput.value = assisted.length || "";
+    }
+    if (elements.notesInput && assisted.notes !== undefined) {
+      elements.notesInput.value = assisted.notes || "";
+    }
+    if (elements.manualWeightInput && assisted.manualWeight !== undefined) {
+      elements.manualWeightInput.value = assisted.manualWeight || "";
+    }
+    if (elements.generatedTitleInput && assisted.generatedTitle !== undefined) {
+      elements.generatedTitleInput.value = assisted.generatedTitle || "";
+    }
+    if (elements.generatedDescriptionInput && assisted.generatedDescription !== undefined) {
+      elements.generatedDescriptionInput.value = assisted.generatedDescription || "";
+    }
+
+    const stableWeight = Number(assisted.stableWeight);
+    const mainWeight = parseWeightInput(main.weight);
+    state.stableWeight = Number.isFinite(stableWeight) && stableWeight > 0
+      ? stableWeight
+      : (Number.isFinite(mainWeight) ? mainWeight : null);
+    if (elements.weightDisplay) {
+      elements.weightDisplay.textContent = Number.isFinite(state.stableWeight)
+        ? formatWeight(state.stableWeight)
+        : "--";
+    }
+
+    if (elements.mainTitleInput && main.title !== undefined) elements.mainTitleInput.value = main.title || "";
+    if (elements.mainDescriptionInput && main.description !== undefined) elements.mainDescriptionInput.value = main.description || "";
+    if (elements.mainWeightInput && main.weight !== undefined) elements.mainWeightInput.value = main.weight || "";
+    if (elements.mainCategoryInput && main.category !== undefined) {
+      elements.mainCategoryInput.value = main.category || "";
+      if (elements.categoryToggle && main.category) {
+        elements.categoryToggle.textContent = main.category;
+      }
+    }
+    if (elements.qrTypeSelect && main.qrType !== undefined) elements.qrTypeSelect.value = main.qrType || "";
+
+    setInputValueById("ebay-sync-enabled", main.ebaySyncEnabled, { dispatch: false });
+    setInputValueById("ebay-category-id", main.ebayCategoryId, { dispatch: false });
+    setInputValueById("price-per-weight", main.pricePerWeight, { dispatch: false });
+    setInputValueById("cost", main.cost, { dispatch: false });
+    setInputValueById("sale-price", main.salePrice, { dispatch: false });
+    setInputValueById("distributor-name", main.distributorName, { dispatch: false });
+    setInputValueById("distributor-phone", main.distributorPhone, { dispatch: false });
+    setInputValueById("distributor-notes", main.distributorNotes, { dispatch: false });
+  }
+
+  async function loadAddItemDraft(elements) {
+    if (state.draftUnavailable || !window.supabase) return null;
+
+    const user = await getCurrentDraftUser();
+    if (!user?.id) return null;
+
+    const { data, error } = await window.supabase
+      .from(ADD_ITEM_DRAFT_TABLE)
+      .select("payload, updated_at")
+      .eq("user_id", user.id)
+      .eq("draft_key", ADD_ITEM_DRAFT_KEY)
+      .maybeSingle();
+
+    if (error) {
+      if (isDraftTableUnavailableError(error)) {
+        state.draftUnavailable = true;
+        console.warn("Add Item cloud drafts are not installed yet. Run the add_item_drafts migration.", error);
+        return null;
+      }
+      console.warn("Could not load Add Item draft:", error);
+      return null;
+    }
+
+    const payload = data?.payload;
+    if (!payload || typeof payload !== "object" || !addItemDraftHasContent(payload)) return null;
+
+    state.isApplyingDraft = true;
+    try {
+      applyAddItemDraftFields(elements, payload);
+
+      const hydratedImages = await hydrateDraftImages(payload.recentUploadedImages);
+      const imagePaths = new Set(hydratedImages.map((image) => image.path));
+
+      releaseImagePreviewUrls(state.recentUploadedImages);
+      state.recentUploadedImages = hydratedImages;
+      state.hasLoadedImagesOnce = hydratedImages.length > 0;
+      state.saveSelectedUploadedImagePaths = (Array.isArray(payload.saveSelectedUploadedImagePaths)
+        ? payload.saveSelectedUploadedImagePaths
+        : []
+      ).filter((path) => imagePaths.has(path));
+
+      const fallbackSavePath = getLatestUploadedImage(hydratedImages)?.path || "";
+      if (!state.saveSelectedUploadedImagePaths.length && fallbackSavePath) {
+        state.saveSelectedUploadedImagePaths = [fallbackSavePath];
+      }
+
+      const nextAIPath = imagePaths.has(payload.aiSelectedUploadedImagePath)
+        ? payload.aiSelectedUploadedImagePath
+        : fallbackSavePath;
+
+      if (payload.selectedCaptureStationId) {
+        setSelectedCaptureStation(elements, payload.selectedCaptureStationId);
+      }
+
+      setAISelectedImage(elements, nextAIPath, { silent: true, skipDraftSave: true });
+      updateSaveSelectionSummary(elements);
+      renderUploadedImages(elements);
+      document.dispatchEvent(new Event("add-item-assisted:metadata-change"));
+
+      if (hydratedImages.length) {
+        setInlineStatus(
+          elements.imageStatus,
+          `Restored ${hydratedImages.length} saved draft image${hydratedImages.length === 1 ? "" : "s"} from your account.`,
+          "is-success"
+        );
+      }
+    } finally {
+      state.isApplyingDraft = false;
+    }
+
+    return payload;
+  }
+
   function getLatestUploadedImage(images) {
     return Array.isArray(images) && images.length > 0 ? [...images].sort(compareNewestFirst)[0] : null;
   }
@@ -653,6 +1032,8 @@
       elements,
       options.refreshMessage || "Weight updated. Generate again to use the latest assisted measurement."
     );
+
+    scheduleAddItemDraftSave(elements);
 
     return true;
   }
@@ -1534,6 +1915,10 @@
         "AI image changed. Generate again if you want copy based on the new AI image."
       );
     }
+
+    if (!options.skipDraftSave) {
+      scheduleAddItemDraftSave(elements);
+    }
   }
 
   function toggleSaveSelectedImage(elements, imagePath) {
@@ -1556,6 +1941,7 @@
 
     updateSaveSelectionSummary(elements);
     renderUploadedImages(elements);
+    scheduleAddItemDraftSave(elements);
   }
 
   function renderUploadedImages(elements) {
@@ -2358,6 +2744,7 @@
       }
       updateSaveSelectionSummary(elements);
       renderUploadedImages(elements);
+      void persistAddItemDraft(elements);
       setInlineStatus(
         elements.bgStatus,
         `Processed image uploaded with a ${background} background. Review it in the preview and capture set.`,
@@ -2797,6 +3184,8 @@
       state.saveSelectedUploadedImagePaths = [croppedImage.path];
       updateSaveSelectionSummary(elements);
       renderUploadedImages(elements);
+      scheduleAddItemDraftSave(elements);
+      void persistAddItemDraft(elements);
       setInlineStatus(elements.bgStatus, "Cropped final image uploaded and selected.", "is-success");
       closeImageEditor(elements);
     } catch (error) {
@@ -2876,6 +3265,7 @@
         "Document image uploaded. A black-background version is being prepared automatically.",
         "is-success"
       );
+      void persistAddItemDraft(elements);
     } catch (error) {
       console.error("Document image upload failed:", error);
       setInlineStatus(
@@ -3031,6 +3421,7 @@
 
       elements.generatedTitleInput.value = generatedTitle;
       elements.generatedDescriptionInput.value = generatedDescription;
+      scheduleAddItemDraftSave(elements);
 
       if (response?.mode === "openai") {
         setInlineStatus(
@@ -3089,7 +3480,7 @@
     );
   }
 
-  function resetAssistedWorkflow(elements) {
+  function resetAssistedWorkflow(elements, options = {}) {
     state.stableWeight = null;
     state.isReadingWeight = false;
     state.isGeneratingCopy = false;
@@ -3107,7 +3498,7 @@
     if (elements.captureState) elements.captureState.textContent = "Idle";
 
     const latestImage = getLatestUploadedImage(state.recentUploadedImages);
-    setAISelectedImage(elements, latestImage?.path || "", { silent: true });
+    setAISelectedImage(elements, latestImage?.path || "", { silent: true, skipDraftSave: true });
     updateSaveSelectionSummary(elements);
     renderUploadedImages(elements);
     setInlineStatus(
@@ -3122,9 +3513,15 @@
       "Ready when you have an AI image selected and a weight.",
       null
     );
+
+    if (options.clearDraft) {
+      clearAddItemDraft().catch((error) => {
+        console.warn("Could not clear Add Item cloud draft after save:", error);
+      });
+    }
   }
 
-  function setActiveWorkflow(elements, workflowName) {
+  function setActiveWorkflow(elements, workflowName, options = {}) {
     state.activeWorkflow = workflowName;
 
     const isManual = workflowName === "manual";
@@ -3150,6 +3547,10 @@
 
     if (isAssisted) {
       preloadBackgroundRemoval(elements);
+    }
+
+    if (!options.skipDraftSave) {
+      scheduleAddItemDraftSave(elements);
     }
   }
 
@@ -3188,6 +3589,7 @@
         elements,
         "Material changed. Generate again to refresh the AI copy."
       );
+      scheduleAddItemDraftSave(elements);
     });
 
     elements.puritySelect?.addEventListener("change", () => {
@@ -3196,6 +3598,7 @@
         elements,
         "Purity changed. Generate again to refresh the AI copy."
       );
+      scheduleAddItemDraftSave(elements);
     });
 
     const persistCurrentStoneType = () => {
@@ -3210,6 +3613,7 @@
         elements,
         "Stone type changed. Generate again to refresh the AI copy."
       );
+      scheduleAddItemDraftSave(elements);
     });
     elements.stoneTypeInput?.addEventListener("change", persistCurrentStoneType);
     elements.stoneTypeInput?.addEventListener("blur", persistCurrentStoneType);
@@ -3226,6 +3630,7 @@
         elements,
         "Length changed. Generate again to refresh the AI copy."
       );
+      scheduleAddItemDraftSave(elements);
     });
     elements.lengthInput?.addEventListener("change", persistCurrentLength);
     elements.lengthInput?.addEventListener("blur", persistCurrentLength);
@@ -3235,6 +3640,7 @@
         elements,
         "Assisted notes changed. Generate again to refresh the AI copy."
       );
+      scheduleAddItemDraftSave(elements);
     });
 
     elements.manualWeightInput?.addEventListener("keydown", (event) => {
@@ -3250,17 +3656,45 @@
       elements.captureState.textContent = station
         ? `Ready to route capture jobs to ${station.name || station.id}.`
         : "Choose a capture station before requesting a photo.";
+      scheduleAddItemDraftSave(elements);
     });
 
     elements.mainWeightInput?.addEventListener("input", () => {
       if (!state.isReadingWeight) {
         const currentWeight = parseWeightInput(elements.mainWeightInput.value);
         state.stableWeight = Number.isFinite(currentWeight) ? currentWeight : null;
-        elements.weightDisplay.textContent = formatWeight(state.stableWeight);
+        elements.weightDisplay.textContent = Number.isFinite(state.stableWeight)
+          ? formatWeight(state.stableWeight)
+          : "--";
         if (elements.manualWeightInput && Number.isFinite(currentWeight)) {
           elements.manualWeightInput.value = currentWeight.toFixed(2);
         }
       }
+      scheduleAddItemDraftSave(elements);
+    });
+
+    elements.manualWeightInput?.addEventListener("input", () => scheduleAddItemDraftSave(elements));
+    elements.generatedTitleInput?.addEventListener("input", () => scheduleAddItemDraftSave(elements));
+    elements.generatedDescriptionInput?.addEventListener("input", () => scheduleAddItemDraftSave(elements));
+    elements.mainTitleInput?.addEventListener("input", () => scheduleAddItemDraftSave(elements));
+    elements.mainDescriptionInput?.addEventListener("input", () => scheduleAddItemDraftSave(elements));
+    elements.mainCategoryInput?.addEventListener("input", () => scheduleAddItemDraftSave(elements));
+    elements.mainCategoryInput?.addEventListener("change", () => scheduleAddItemDraftSave(elements));
+    elements.qrTypeSelect?.addEventListener("change", () => scheduleAddItemDraftSave(elements));
+
+    [
+      "ebay-sync-enabled",
+      "ebay-category-id",
+      "price-per-weight",
+      "cost",
+      "sale-price",
+      "distributor-name",
+      "distributor-phone",
+      "distributor-notes",
+    ].forEach((id) => {
+      const input = document.getElementById(id);
+      input?.addEventListener("input", () => scheduleAddItemDraftSave(elements));
+      input?.addEventListener("change", () => scheduleAddItemDraftSave(elements));
     });
   }
 
@@ -3279,6 +3713,7 @@
         recentOnly: true,
       }),
       loadActiveCaptureStations: () => loadActiveCaptureStations(elements, { silent: false }),
+      clearSavedDraft: () => clearAddItemDraft(),
     };
   }
 
@@ -3379,7 +3814,7 @@
     elements.applyCopyButton?.addEventListener("click", () => handleApplyGeneratedCopy(elements));
 
     document.addEventListener("add-item-form:reset", () => {
-      resetAssistedWorkflow(elements);
+      resetAssistedWorkflow(elements, { clearDraft: true });
     });
 
     window.addEventListener("beforeunload", () => {
@@ -3387,8 +3822,11 @@
     });
 
     exposeModule(elements);
-    resetAssistedWorkflow(elements);
-    setActiveWorkflow(elements, "assisted");
+    const restoredDraft = await loadAddItemDraft(elements);
+    if (!restoredDraft) {
+      resetAssistedWorkflow(elements, { skipDraftSave: true });
+    }
+    setActiveWorkflow(elements, restoredDraft?.activeWorkflow || "assisted", { skipDraftSave: true });
   }
 
   document.addEventListener("DOMContentLoaded", init);
