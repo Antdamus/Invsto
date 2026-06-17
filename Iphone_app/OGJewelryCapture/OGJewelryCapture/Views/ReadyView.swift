@@ -29,7 +29,7 @@ struct ReadyView: View {
 
     var body: some View {
         List {
-            if !viewModel.isShowingPersistentResult && !viewModel.isReviewingCapturedPhoto && !viewModel.hasActiveJob {
+            if !viewModel.isShowingPersistentResult && !viewModel.isReviewingCapturedPhoto && !viewModel.hasActiveCaptureSession {
                 Section {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(viewModel.station.name)
@@ -50,7 +50,7 @@ struct ReadyView: View {
                 }
             }
 
-            if !viewModel.isShowingPersistentResult && !viewModel.isReviewingCapturedPhoto && !viewModel.hasActiveJob {
+            if !viewModel.isShowingPersistentResult && !viewModel.isReviewingCapturedPhoto && !viewModel.hasActiveCaptureSession {
                 Section("Listener") {
                     LabeledContent("Station", value: viewModel.station.name)
                     LabeledContent("Employee", value: viewModel.employee.displayName)
@@ -161,11 +161,21 @@ struct ReadyView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+
+                    Button("Test Camera") {
+                        viewModel.startTestCameraMode()
+                    }
+                    .buttonStyle(OGActionButtonStyle(role: .secondary))
+                    .disabled(!viewModel.canStartTestCameraMode)
+
+                    Text("Local test only. No upload, no Supabase job signal, and photos are discarded when closed.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 .listRowBackground(OGVisualStyle.panel)
             }
 
-            if viewModel.hasActiveJob && !viewModel.isShowingPersistentResult {
+            if viewModel.hasActiveCaptureSession && !viewModel.isShowingPersistentResult {
                 Section {
                     activeCaptureStation
                         .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
@@ -328,11 +338,11 @@ struct ReadyView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Job \(viewModel.activeJobReference)")
+                    Text(viewModel.isTestCameraActive ? "Test Camera" : "Job \(viewModel.activeCaptureReference)")
                         .font(.system(.title3, design: .serif).weight(.bold))
                         .foregroundStyle(OGVisualStyle.textPrimary)
 
-                    Text(viewModel.station.name)
+                    Text(viewModel.isTestCameraActive ? "Local only - no upload" : viewModel.station.name)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(OGVisualStyle.textSecondary)
                 }
@@ -349,12 +359,15 @@ struct ReadyView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
+                    if viewModel.isTestCameraActive {
+                        activeCapturePill("Local test only", systemImage: "camera.viewfinder")
+                    }
                     activeCapturePill(viewModel.captureMode.label, systemImage: "camera.aperture")
                     activeCapturePill(activeQualityLabel, systemImage: "photo")
                     activeCapturePill(viewModel.captureState.label, systemImage: "circle.dotted")
                 }
 
-                Text("\(viewModel.cameraModeStatus.activeCameraLabel) · \(viewModel.autoListenStatus.label)")
+                Text(activeCaptureHeaderDetail)
                     .font(.caption)
                     .foregroundStyle(OGVisualStyle.textSecondary)
                     .lineLimit(2)
@@ -803,36 +816,57 @@ struct ReadyView: View {
 
     private var activeJobFooterActions: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Button("Finish Job") {
-                    viewModel.finishJob()
-                }
-                .buttonStyle(OGActionButtonStyle(role: .primary))
-                .disabled(!canFinishJobFromActiveSurface)
-
-                Button("Cancel Job", role: .destructive) {
-                    isShowingCancelConfirmation = true
+            if viewModel.isTestCameraActive {
+                Button("Close Test") {
+                    viewModel.closeTestCameraMode()
+                    previewedPhotoID = nil
+                    selectedThumbnailPhotoID = nil
                 }
                 .buttonStyle(OGActionButtonStyle(role: .destructive))
-                .disabled(!viewModel.canCancelActiveJob)
-            }
 
-            if let finishJobMessage = viewModel.finishJobMessage {
-                Text(finishJobMessage)
+                Text(viewModel.finishJobMessage ?? "Close Test deletes the local test photos and returns this station to normal listening.")
                     .font(.footnote)
                     .foregroundStyle(OGVisualStyle.textSecondary)
-            } else if !canFinishJobFromActiveSurface {
-                Text(finishDisabledReason)
-                    .font(.footnote)
-                    .foregroundStyle(OGVisualStyle.textSecondary)
-            }
+            } else {
+                HStack(spacing: 10) {
+                    Button("Finish Job") {
+                        viewModel.finishJob()
+                    }
+                    .buttonStyle(OGActionButtonStyle(role: .primary))
+                    .disabled(!canFinishJobFromActiveSurface)
 
-            if let cancelJobAvailabilityMessage = viewModel.cancelJobAvailabilityMessage {
-                Text(cancelJobAvailabilityMessage)
-                    .font(.footnote)
-                    .foregroundStyle(OGVisualStyle.textSecondary)
+                    Button("Cancel Job", role: .destructive) {
+                        isShowingCancelConfirmation = true
+                    }
+                    .buttonStyle(OGActionButtonStyle(role: .destructive))
+                    .disabled(!viewModel.canCancelActiveJob)
+                }
+
+                if let finishJobMessage = viewModel.finishJobMessage {
+                    Text(finishJobMessage)
+                        .font(.footnote)
+                        .foregroundStyle(OGVisualStyle.textSecondary)
+                } else if !canFinishJobFromActiveSurface {
+                    Text(finishDisabledReason)
+                        .font(.footnote)
+                        .foregroundStyle(OGVisualStyle.textSecondary)
+                }
+
+                if let cancelJobAvailabilityMessage = viewModel.cancelJobAvailabilityMessage {
+                    Text(cancelJobAvailabilityMessage)
+                        .font(.footnote)
+                        .foregroundStyle(OGVisualStyle.textSecondary)
+                }
             }
         }
+    }
+
+    private var activeCaptureHeaderDetail: String {
+        if viewModel.isTestCameraActive {
+            return "\(viewModel.cameraModeStatus.activeCameraLabel) · Local only - photos discarded when closed · \(viewModel.autoListenStatus.label)"
+        }
+
+        return "\(viewModel.cameraModeStatus.activeCameraLabel) · \(viewModel.autoListenStatus.label)"
     }
 
     private var activeQualityLabel: String {
@@ -862,7 +896,20 @@ struct ReadyView: View {
     }
 
     private var activeMediaHint: String? {
-        switch viewModel.captureState {
+        if viewModel.isTestCameraActive {
+            switch viewModel.captureState {
+            case .captureRequested, .waitingForManualCapture:
+                return previewInteractionHint
+            case .reviewingCapture:
+                return "Review this local test capture before keeping or discarding it."
+            case .sessionReady:
+                return "The last kept test photo is shown here. Add another photo or close the test."
+            case .uploadingFinalSet, .idle, .listening, .capturing, .completed, .failed:
+                return nil
+            }
+        }
+
+        return switch viewModel.captureState {
         case .captureRequested, .waitingForManualCapture:
             previewInteractionHint
         case .reviewingCapture:
@@ -877,7 +924,22 @@ struct ReadyView: View {
     }
 
     private var actionHelpText: String? {
-        switch viewModel.captureState {
+        if viewModel.isTestCameraActive {
+            switch viewModel.captureState {
+            case .captureRequested:
+                return "Auto capture is local only. Auto Listen is paused while Test Camera is open."
+            case .waitingForManualCapture:
+                return "Tap Capture Photo when framing and focus look right. Nothing will upload."
+            case .reviewingCapture:
+                return "Keep stores this test photo locally. Discard clears only this new capture."
+            case .sessionReady:
+                return "Test photos stay on this device temporarily and are deleted by Close Test."
+            case .uploadingFinalSet, .idle, .listening, .capturing, .completed, .failed:
+                return nil
+            }
+        }
+
+        return switch viewModel.captureState {
         case .captureRequested:
             "Cancel Job remains available while auto capture is waiting."
         case .waitingForManualCapture:

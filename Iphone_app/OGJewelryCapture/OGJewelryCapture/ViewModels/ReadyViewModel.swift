@@ -4,6 +4,37 @@ import Foundation
 
 @MainActor
 final class ReadyViewModel: ObservableObject {
+    struct CaptureContext: Equatable, Identifiable {
+        enum Kind: Equatable {
+            case realJob
+            case testCamera
+        }
+
+        let id: UUID
+        let kind: Kind
+
+        static func realJob(_ job: CaptureJob) -> CaptureContext {
+            CaptureContext(id: job.id, kind: .realJob)
+        }
+
+        static func testCamera(id: UUID = UUID()) -> CaptureContext {
+            CaptureContext(id: id, kind: .testCamera)
+        }
+
+        var isTestCamera: Bool {
+            kind == .testCamera
+        }
+
+        var shortReference: String {
+            switch kind {
+            case .realJob:
+                String(id.uuidString.prefix(8)).uppercased()
+            case .testCamera:
+                "LOCAL TEST"
+            }
+        }
+    }
+
     enum CaptureMode: String, CaseIterable, Identifiable {
         case auto
         case manual
@@ -23,12 +54,12 @@ final class ReadyViewModel: ObservableObject {
     enum CaptureState: Equatable {
         case idle
         case listening
-        case captureRequested(CaptureJob)
-        case waitingForManualCapture(CaptureJob)
-        case capturing(CaptureJob)
-        case reviewingCapture(CaptureJob, LocalCaptureResult)
-        case sessionReady(CaptureJob, LocalCaptureSession)
-        case uploadingFinalSet(CaptureJob, LocalCaptureSession)
+        case captureRequested(CaptureContext)
+        case waitingForManualCapture(CaptureContext)
+        case capturing(CaptureContext)
+        case reviewingCapture(CaptureContext, LocalCaptureResult)
+        case sessionReady(CaptureContext, LocalCaptureSession)
+        case uploadingFinalSet(CaptureContext, LocalCaptureSession)
         case completed(CaptureUploadResult)
         case failed(jobID: UUID?, message: String)
 
@@ -134,6 +165,7 @@ final class ReadyViewModel: ObservableObject {
     @Published private(set) var sparkleTorchStrength: SparkleTorchStrength
     @Published private(set) var photoLibraryImportMessage: String?
     @Published private(set) var isImportingPhotos = false
+    @Published private(set) var isTestCameraActive = false
 
     let employee: AuthenticatedEmployee
     let station: CaptureStation
@@ -146,6 +178,7 @@ final class ReadyViewModel: ObservableObject {
     private let userDefaults: UserDefaults
 
     private var pendingJob: CaptureJob?
+    private var testCaptureContext: CaptureContext?
     private var pendingAutoCaptureTask: Task<Void, Never>?
     private var pendingTorchApplyTask: Task<Void, Never>?
     private var sparkleTorchTask: Task<Void, Never>?
@@ -237,7 +270,7 @@ final class ReadyViewModel: ObservableObject {
     }
 
     var isResolutionSelectionLocked: Bool {
-        activeJobID != nil
+        activeSession != nil
     }
 
     var sessionPhotoCount: Int {
@@ -249,8 +282,13 @@ final class ReadyViewModel: ObservableObject {
     }
 
     var canFinishJob: Bool {
+        guard !isTestCameraActive else { return false }
         guard let activeSession else { return false }
         return activeSession.keptPhotoCount > 0 && !activeSession.isUploadingFinalSet && !isImportingPhotos
+    }
+
+    var canStartTestCameraMode: Bool {
+        !hasActiveCaptureSession && !isShowingPersistentResult
     }
 
     func start() async {
@@ -427,6 +465,22 @@ final class ReadyViewModel: ObservableObject {
         await claimNewestPendingJobForCapture(reportErrorToListener: true)
     }
 
+    func startTestCameraMode() {
+        guard !hasActiveCaptureSession else { return }
+
+        Task { [weak self] in
+            await self?.beginTestCameraMode()
+        }
+    }
+
+    func closeTestCameraMode() {
+        guard isTestCameraActive else { return }
+
+        Task { [weak self] in
+            await self?.performCloseTestCameraMode()
+        }
+    }
+
     private func pollPendingJobForAutoListen() async {
         guard isAutoListenEnabled else {
             autoListenStatus = .off
@@ -498,6 +552,7 @@ final class ReadyViewModel: ObservableObject {
 
     func cancelActiveJob() {
         guard let job = pendingJob else { return }
+        guard !isTestCameraActive else { return }
         guard !isUploadingFinalSet else { return }
 
         Task { [weak self] in
@@ -506,7 +561,7 @@ final class ReadyViewModel: ObservableObject {
     }
 
     func keepCapturedPhoto() {
-        guard case let .reviewingCapture(job, result) = captureState else { return }
+        guard case let .reviewingCapture(context, result) = captureState else { return }
 
         do {
             let updatedSession = try appendKeptPhoto(result)
@@ -516,21 +571,14 @@ final class ReadyViewModel: ObservableObject {
             latestLocalResult = nil
             latestUploadResult = nil
             finishJobMessage = nil
-            captureState = .sessionReady(job, updatedSession)
+            captureState = .sessionReady(context, updatedSession)
         } catch {
-            Task { [weak self] in
-                await self?.failJob(
-                    jobID: job.id,
-                    code: "local_session_store_failed",
-                    message: error.localizedDescription,
-                    clearLocalSession: true
-                )
-            }
+            handleLocalCaptureStorageFailure(context: context, message: error.localizedDescription)
         }
     }
 
     func discardCapturedPhoto() {
-        guard case let .reviewingCapture(job, _) = captureState else { return }
+        guard case let .reviewingCapture(context, _) = captureState else { return }
 
         Task { [weak self] in
             await self?.turnTorchOffForInactiveCapture()
@@ -538,15 +586,15 @@ final class ReadyViewModel: ObservableObject {
         latestLocalResult = nil
         latestUploadResult = nil
         finishJobMessage = nil
-        transitionToCapture(for: job)
+        transitionToCapture(for: context)
     }
 
     func addAnotherPhoto() {
-        guard let job = pendingJob else { return }
+        guard let context = activeCaptureContext else { return }
         guard canAddMoreSessionPhotos else { return }
         guard case .sessionReady = captureState else { return }
 
-        transitionToCapture(for: job)
+        transitionToCapture(for: context)
     }
 
     func prepareForPhotoLibraryImport() {
@@ -561,10 +609,10 @@ final class ReadyViewModel: ObservableObject {
     }
 
     func resumeCaptureAfterEmptyPhotoLibraryImportIfNeeded() {
-        guard case let .captureRequested(job) = captureState else { return }
+        guard case let .captureRequested(context) = captureState else { return }
         guard !isImportingPhotos else { return }
 
-        transitionToCapture(for: job)
+        transitionToCapture(for: context)
     }
 
     func importPhotoLibraryImageData(_ imageDataItems: [Data?], selectedCount: Int) async {
@@ -641,15 +689,16 @@ final class ReadyViewModel: ObservableObject {
         }
         photoLibraryImportMessage = messages.isEmpty ? nil : messages.joined(separator: " ")
 
+        let context = CaptureContext.realJob(job)
         if !updatedSession.keptPhotos.isEmpty {
-            captureState = .sessionReady(job, updatedSession)
+            captureState = .sessionReady(context, updatedSession)
         } else if case .captureRequested = captureState {
-            transitionToCapture(for: job)
+            transitionToCapture(for: context)
         }
     }
 
     func deleteKeptPhoto(_ photo: LocalSessionPhoto) {
-        guard let job = pendingJob else { return }
+        guard let context = activeCaptureContext else { return }
         guard let session = activeSession else { return }
         guard session.jobID == photo.jobID else { return }
 
@@ -668,16 +717,21 @@ final class ReadyViewModel: ObservableObject {
         finishJobMessage = nil
 
         if updatedSession.keptPhotos.isEmpty {
-            transitionToCapture(for: job)
+            transitionToCapture(for: context)
         } else {
             Task { [weak self] in
                 await self?.turnTorchOffForInactiveCapture()
             }
-            captureState = .sessionReady(job, updatedSession)
+            captureState = .sessionReady(context, updatedSession)
         }
     }
 
     func finishJob() {
+        guard !isTestCameraActive else {
+            finishJobMessage = "Test Camera is local only. Use Close Test to discard local test photos."
+            return
+        }
+
         guard let job = pendingJob else {
             finishJobMessage = "No active capture job is available to finish right now."
             return
@@ -713,6 +767,83 @@ final class ReadyViewModel: ObservableObject {
         await claimNewestPendingJobForCapture(reportErrorToListener: true)
     }
 
+    private func beginTestCameraMode() async {
+        guard !hasActiveCaptureSession else { return }
+
+        pendingAutoCaptureTask?.cancel()
+        await turnTorchOffForInactiveCapture()
+
+        let context = CaptureContext.testCamera()
+        isTestCameraActive = true
+        testCaptureContext = context
+        if isAutoListenEnabled {
+            autoListenStatus = .paused
+        }
+        pendingJob = nil
+        activeJobID = nil
+        activeSession = LocalCaptureSession(
+            jobID: context.id,
+            finalUploadTargetJobID: nil,
+            resolutionMode: captureResolutionMode,
+            keptPhotos: [],
+            isUploadingFinalSet: false
+        )
+        latestLocalResult = nil
+        latestUploadResult = nil
+        finishJobMessage = "Test Camera is local only. Photos are discarded when closed."
+        photoLibraryImportMessage = nil
+
+        cameraAvailability = await cameraService.prepareIfNeeded()
+        await cameraService.updateCaptureResolutionMode(captureResolutionMode)
+        cameraModeStatus = await cameraService.currentCameraModeStatus()
+        await refreshZoomState(resetToDefault: true)
+        await refreshTorchState()
+
+        switch cameraAvailability {
+        case .ready, .simulatorFallback:
+            transitionToCapture(for: context)
+        case let .unavailable(message):
+            finishJobMessage = "Camera unavailable for local test: \(message)"
+            if let activeSession {
+                captureState = .sessionReady(context, activeSession)
+            }
+        case .unknown:
+            finishJobMessage = "Camera availability is still unknown for local test."
+            if let activeSession {
+                captureState = .sessionReady(context, activeSession)
+            }
+        }
+    }
+
+    private func performCloseTestCameraMode() async {
+        pendingAutoCaptureTask?.cancel()
+        await turnTorchOffForInactiveCapture()
+
+        if let session = activeSession {
+            photoStore.clearSession(jobID: session.jobID)
+        } else if let testCaptureContext {
+            photoStore.clearSession(jobID: testCaptureContext.id)
+        }
+
+        latestLocalResult = nil
+        latestUploadResult = nil
+        activeSession = nil
+        testCaptureContext = nil
+        isTestCameraActive = false
+        finishJobMessage = nil
+        photoLibraryImportMessage = nil
+        isImportingPhotos = false
+        captureState = .listening
+
+        cameraAvailability = await cameraService.prepareIfNeeded()
+        await cameraService.updateCaptureResolutionMode(captureResolutionMode)
+        cameraModeStatus = await cameraService.currentCameraModeStatus()
+        await refreshZoomState(resetToDefault: true)
+        await refreshTorchState()
+        updateAutoListenPolling()
+        await refreshPendingJob()
+    }
+
     private func claimNewestPendingJobForCapture(reportErrorToListener: Bool) async {
         guard !isClaimingNewestJob else { return }
         guard canAcceptIncomingJobs else { return }
@@ -744,6 +875,8 @@ final class ReadyViewModel: ObservableObject {
         activeJobID = job.id
         handledJobIDs.insert(job.id)
         pendingJob = job
+        testCaptureContext = nil
+        isTestCameraActive = false
         activeSession = LocalCaptureSession(
             jobID: job.id,
             finalUploadTargetJobID: nil,
@@ -761,7 +894,7 @@ final class ReadyViewModel: ObservableObject {
 
         switch cameraAvailability {
         case .ready, .simulatorFallback:
-            transitionToCapture(for: job)
+            transitionToCapture(for: .realJob(job))
         case let .unavailable(message):
             let failureAccepted = await failJob(
                 jobID: job.id,
@@ -787,7 +920,7 @@ final class ReadyViewModel: ObservableObject {
         }
     }
 
-    private func scheduleAutoCapture(for job: CaptureJob) {
+    private func scheduleAutoCapture(for context: CaptureContext) {
         pendingAutoCaptureTask?.cancel()
         pendingAutoCaptureTask = Task { [weak self] in
             guard let self else { return }
@@ -801,15 +934,15 @@ final class ReadyViewModel: ObservableObject {
             }
 
             guard !Task.isCancelled else { return }
-            await performCapture(for: job)
+            await performCapture(for: context)
         }
     }
 
-    private func performCapture(for job: CaptureJob) async {
+    private func performCapture(for context: CaptureContext) async {
         pendingAutoCaptureTask = nil
         finishJobMessage = nil
         await freezeSparkleTorchForCapture()
-        captureState = .capturing(job)
+        captureState = .capturing(context)
 
         switch cameraAvailability {
         case .unknown:
@@ -819,32 +952,39 @@ final class ReadyViewModel: ObservableObject {
         }
 
         do {
-            let result = try await cameraService.capturePhoto(for: job.id)
+            let result = try await cameraService.capturePhoto(for: context.id)
             await turnTorchOffForInactiveCapture()
             latestLocalResult = result
             latestUploadResult = nil
-            captureState = .reviewingCapture(job, result)
+            captureState = .reviewingCapture(context, result)
         } catch {
             await turnTorchOffForInactiveCapture()
-            let failureAccepted = await failJob(
-                jobID: job.id,
-                code: "capture_failed",
-                message: error.localizedDescription,
-                clearLocalSession: true
-            )
-            if failureAccepted {
-                activeJobID = nil
-                pendingJob = nil
+            if context.isTestCamera {
+                finishJobMessage = "Test capture failed: \(error.localizedDescription)"
+                if let activeSession {
+                    captureState = .sessionReady(context, activeSession)
+                }
+            } else {
+                let failureAccepted = await failJob(
+                    jobID: context.id,
+                    code: "capture_failed",
+                    message: error.localizedDescription,
+                    clearLocalSession: true
+                )
+                if failureAccepted {
+                    activeJobID = nil
+                    pendingJob = nil
+                }
             }
         }
     }
 
     private func triggerCaptureNow() {
-        guard let job = captureReadyJob else { return }
+        guard let context = captureReadyContext else { return }
 
         pendingAutoCaptureTask?.cancel()
         pendingAutoCaptureTask = Task { [weak self] in
-            await self?.performCapture(for: job)
+            await self?.performCapture(for: context)
         }
     }
 
@@ -915,7 +1055,7 @@ final class ReadyViewModel: ObservableObject {
         )
     }
 
-    private func transitionToCapture(for job: CaptureJob) {
+    private func transitionToCapture(for context: CaptureContext) {
         latestLocalResult = nil
         latestUploadResult = nil
         stopSparkleTorch(resetToggle: true)
@@ -928,15 +1068,15 @@ final class ReadyViewModel: ObservableObject {
                 await prepareTorchForLivePreview()
                 await cameraService.enableContinuousPreviewAutoFocus()
             }
-            captureState = .captureRequested(job)
-            scheduleAutoCapture(for: job)
+            captureState = .captureRequested(context)
+            scheduleAutoCapture(for: context)
         case .manual:
             pendingAutoCaptureTask?.cancel()
             Task {
                 await prepareTorchForLivePreview()
                 await cameraService.enableContinuousPreviewAutoFocus()
             }
-            captureState = .waitingForManualCapture(job)
+            captureState = .waitingForManualCapture(context)
         }
     }
 
@@ -956,7 +1096,7 @@ final class ReadyViewModel: ObservableObject {
         latestLocalResult = nil
         latestUploadResult = nil
         finishJobMessage = "Resolving the final upload target for \(uploadingSession.keptPhotoCount) kept photo\(uploadingSession.keptPhotoCount == 1 ? "" : "s")."
-        captureState = .uploadingFinalSet(job, uploadingSession)
+        captureState = .uploadingFinalSet(.realJob(job), uploadingSession)
 
         do {
             let finalTargetJob: CaptureJob
@@ -1079,7 +1219,7 @@ final class ReadyViewModel: ObservableObject {
             activeSession = recoveredSession
             latestUploadResult = nil
             finishJobMessage = "Finish Job failed: \(error.localizedDescription) Retry is available and the kept photo session was preserved."
-            captureState = .sessionReady(job, recoveredSession)
+            captureState = .sessionReady(.realJob(job), recoveredSession)
         }
     }
 
@@ -1126,6 +1266,35 @@ final class ReadyViewModel: ObservableObject {
 
         photoStore.clearSession(jobID: jobID)
         activeSession = nil
+    }
+
+    private func handleLocalCaptureStorageFailure(context: CaptureContext, message: String) {
+        if context.isTestCamera {
+            clearLocalSession(jobID: context.id)
+            latestLocalResult = nil
+            latestUploadResult = nil
+            finishJobMessage = "Test photo could not be kept: \(message)"
+            activeSession = LocalCaptureSession(
+                jobID: context.id,
+                finalUploadTargetJobID: nil,
+                resolutionMode: captureResolutionMode,
+                keptPhotos: [],
+                isUploadingFinalSet: false
+            )
+            if let activeSession {
+                captureState = .sessionReady(context, activeSession)
+            }
+            return
+        }
+
+        Task { [weak self] in
+            await self?.failJob(
+                jobID: context.id,
+                code: "local_session_store_failed",
+                message: message,
+                clearLocalSession: true
+            )
+        }
     }
 
     @discardableResult
@@ -1175,19 +1344,19 @@ final class ReadyViewModel: ObservableObject {
             if restoredSession.keptPhotos.isEmpty {
                 switch cameraAvailability {
                 case .ready, .simulatorFallback:
-                    transitionToCapture(for: job)
+                    transitionToCapture(for: .realJob(job))
                 case .unavailable, .unknown:
                     captureState = .listening
                 }
             } else {
-                captureState = .sessionReady(job, restoredSession)
+                captureState = .sessionReady(.realJob(job), restoredSession)
             }
             return
         }
 
         switch cameraAvailability {
         case .ready, .simulatorFallback:
-            transitionToCapture(for: job)
+            transitionToCapture(for: .realJob(job))
         case .unavailable, .unknown:
             captureState = .listening
         }
@@ -1202,11 +1371,11 @@ final class ReadyViewModel: ObservableObject {
     }
 
     private func reconfigurePendingCaptureIfNeeded() {
-        guard let job = pendingJob else { return }
+        guard let context = activeCaptureContext else { return }
 
         switch captureState {
         case .captureRequested, .waitingForManualCapture:
-            transitionToCapture(for: job)
+            transitionToCapture(for: context)
         case .idle, .listening, .capturing, .reviewingCapture, .sessionReady, .uploadingFinalSet, .completed, .failed:
             break
         }
@@ -1458,8 +1627,16 @@ final class ReadyViewModel: ObservableObject {
         pendingJob != nil
     }
 
+    var hasActiveCaptureSession: Bool {
+        hasActiveJob || isTestCameraActive
+    }
+
     var activeJobReference: String {
         pendingJob?.shortReference ?? "None"
+    }
+
+    var activeCaptureReference: String {
+        activeCaptureContext?.shortReference ?? "None"
     }
 
     var isUploadingFinalSet: Bool {
@@ -1472,19 +1649,25 @@ final class ReadyViewModel: ObservableObject {
 
     var canCancelActiveJob: Bool {
         guard hasActiveJob else { return false }
+        guard !isTestCameraActive else { return false }
         return !isUploadingFinalSet
     }
 
     var canChangeStation: Bool {
-        !hasActiveJob
+        !hasActiveCaptureSession
     }
 
     var canLogOut: Bool {
-        !hasActiveJob
+        !hasActiveCaptureSession
     }
 
     var activeJobExitSafetyMessage: String? {
-        guard hasActiveJob else { return nil }
+        guard hasActiveCaptureSession else { return nil }
+
+        if isTestCameraActive {
+            return "Change Station and Log Out are disabled during Test Camera. Close Test first to clear local test photos."
+        }
+
         return "Change Station and Log Out are disabled while a job is active. Cancel or finish the job first."
     }
 
@@ -1499,7 +1682,7 @@ final class ReadyViewModel: ObservableObject {
     }
 
     var canTriggerHardwareShutterCapture: Bool {
-        captureReadyJob != nil
+        captureReadyContext != nil
     }
 
     var canImportPhotos: Bool {
@@ -1553,6 +1736,8 @@ final class ReadyViewModel: ObservableObject {
     }
 
     private var canAcceptIncomingJobs: Bool {
+        guard !isTestCameraActive else { return false }
+
         switch captureState {
         case .idle, .listening:
             return activeJobID == nil
@@ -1561,13 +1746,29 @@ final class ReadyViewModel: ObservableObject {
         }
     }
 
-    private var captureReadyJob: CaptureJob? {
-        guard let pendingJob else { return nil }
-
+    private var activeCaptureContext: CaptureContext? {
         switch captureState {
-        case let .captureRequested(job), let .waitingForManualCapture(job):
-            guard job.id == pendingJob.id else { return nil }
-            return job
+        case let .captureRequested(context),
+             let .waitingForManualCapture(context),
+             let .capturing(context),
+             let .reviewingCapture(context, _),
+             let .sessionReady(context, _),
+             let .uploadingFinalSet(context, _):
+            return context
+        case .idle, .listening, .completed, .failed:
+            return testCaptureContext
+        }
+    }
+
+    private var captureReadyContext: CaptureContext? {
+        switch captureState {
+        case let .captureRequested(context), let .waitingForManualCapture(context):
+            if context.isTestCamera {
+                guard testCaptureContext?.id == context.id else { return nil }
+            } else {
+                guard pendingJob?.id == context.id else { return nil }
+            }
+            return context
         case .idle, .listening, .capturing, .reviewingCapture, .sessionReady, .uploadingFinalSet, .completed, .failed:
             return nil
         }
