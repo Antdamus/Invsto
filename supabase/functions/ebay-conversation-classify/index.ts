@@ -234,6 +234,28 @@ function uniqueAllowed(values: unknown, allowed: readonly string[], maxItems = 8
   return [...set].slice(0, maxItems);
 }
 
+function normalizeTopicTag(value: unknown) {
+  const tag = text(value, 80)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+  if (tag.length < 2) return "";
+  if (!/^[a-z0-9][a-z0-9_]*[a-z0-9]$/.test(tag)) return "";
+  return tag;
+}
+
+function uniqueTopicTags(values: unknown, maxItems = 8, options: { allowCustom?: boolean } = {}) {
+  const raw = Array.isArray(values) ? values : [];
+  const set = new Set<string>();
+  for (const item of raw) {
+    const value = normalizeTopicTag(item);
+    if (!value) continue;
+    if (TOPIC_TAGS.includes(value as typeof TOPIC_TAGS[number]) || options.allowCustom === true) set.add(value);
+  }
+  return [...set].slice(0, maxItems);
+}
+
 function parseObject(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -574,7 +596,7 @@ function normalizeClassificationOutput(raw: unknown, input: Record<string, any>)
   }
   const row = raw as Record<string, unknown>;
   const derived = input.buyer_financial_context?.derived_buyer_signals || {};
-  const topicTags = uniqueAllowed(row.topic_tags, TOPIC_TAGS, 6);
+  const topicTags = uniqueTopicTags(row.topic_tags, 6);
   const buyerFlags = new Set([
     ...uniqueAllowed(row.buyer_flags, BUYER_FLAGS, BUYER_FLAGS.length),
     ...uniqueAllowed(derived.buyer_flags || [], BUYER_FLAGS, BUYER_FLAGS.length),
@@ -626,11 +648,14 @@ function normalizeClassificationOutput(raw: unknown, input: Record<string, any>)
 function effectiveState(row: Record<string, any>) {
   const override = parseObject(row.operator_override_payload);
   const source = String(override.conversation_source || row.conversation_source || "member_message");
+  const hasOverrideTopics = Array.isArray(override.topic_tags);
   return {
     conversation_source: CONVERSATION_SOURCES.includes(source as typeof CONVERSATION_SOURCES[number]) ? source : "member_message",
     priority: String(override.priority || row.priority || "normal"),
     response_need: String(override.response_need || row.response_need || "reply_later"),
-    topic_tags: uniqueAllowed(override.topic_tags || row.topic_tags || [], TOPIC_TAGS, 8),
+    topic_tags: hasOverrideTopics
+      ? uniqueTopicTags(override.topic_tags, 8, { allowCustom: true })
+      : uniqueTopicTags(row.topic_tags || [], 8),
     buyer_flags: uniqueAllowed(override.buyer_flags || row.buyer_flags || [], BUYER_FLAGS, BUYER_FLAGS.length),
     risk_flags: uniqueAllowed(override.risk_flags || row.risk_flags || [], RISK_FLAGS, RISK_FLAGS.length),
     summary: text(override.summary || row.summary, 280),
@@ -883,7 +908,7 @@ function sanitizeOverridePayload(value: Record<string, unknown>) {
   if (PRIORITIES.includes(priority as typeof PRIORITIES[number])) payload.priority = priority;
   if (RESPONSE_NEEDS.includes(responseNeed as typeof RESPONSE_NEEDS[number])) payload.response_need = responseNeed;
   if (CONVERSATION_SOURCES.includes(conversationSource as typeof CONVERSATION_SOURCES[number])) payload.conversation_source = conversationSource;
-  if ("topic_tags" in value || "topicTags" in value) payload.topic_tags = uniqueAllowed(value.topic_tags || value.topicTags, TOPIC_TAGS, 8);
+  if ("topic_tags" in value || "topicTags" in value) payload.topic_tags = uniqueTopicTags(value.topic_tags || value.topicTags, 8, { allowCustom: true });
   if ("buyer_flags" in value || "buyerFlags" in value) payload.buyer_flags = uniqueAllowed(value.buyer_flags || value.buyerFlags, BUYER_FLAGS, BUYER_FLAGS.length);
   if ("risk_flags" in value || "riskFlags" in value) payload.risk_flags = uniqueAllowed(value.risk_flags || value.riskFlags, RISK_FLAGS, RISK_FLAGS.length);
   if (summary) payload.summary = summary;

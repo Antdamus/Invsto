@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#070708" />
-  <meta name="email-triage-asset-version" content="5f6p4b-20260617" />
+  <meta name="email-triage-asset-version" content="5f6p5d-20260617" />
   <title>OG Jewelry - eBay Messaging</title>
 
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css?v=5f6p2b-20260608" />
-  <link rel="stylesheet" href="email-triage.css?v=5f6p4b-20260617" />
+  <link rel="stylesheet" href="email-triage.css?v=5f6p5d-20260617" />
 
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
@@ -73,7 +73,7 @@
           </div>
         </section>
 
-        <section class="ebay-conversation-section" aria-label="eBay Conversations">
+        <section class="ebay-conversation-section" data-mobile-view="inbox" aria-label="eBay Conversations">
           <div class="ebay-conversation-head">
             <div>
               <span class="eyebrow">Canonical Inbox</span>
@@ -182,7 +182,22 @@
 
           <div id="ebay-conversation-sync-result" class="ebay-conversation-sync-result" aria-live="polite"></div>
 
-          <div id="ebay-conversation-shell" class="ebay-conversation-shell">
+          <nav class="ebay-mobile-workspace-switcher" aria-label="eBay mobile workspace">
+            <button type="button" class="is-active" data-ebay-mobile-view="inbox" aria-pressed="true">
+              <i data-lucide="inbox"></i>
+              <span>Inbox</span>
+            </button>
+            <button type="button" data-ebay-mobile-view="message" aria-pressed="false">
+              <i data-lucide="message-square-text"></i>
+              <span>Message</span>
+            </button>
+            <button type="button" data-ebay-mobile-view="context" aria-pressed="false">
+              <i data-lucide="panel-right"></i>
+              <span>Context</span>
+            </button>
+          </nav>
+
+          <div id="ebay-conversation-shell" class="ebay-conversation-shell" data-mobile-view="inbox">
             <aside class="ebay-smart-folder-panel" aria-label="Smart folders">
               <div class="ebay-smart-folder-head">
                 <span>Smart Folders</span>
@@ -205,7 +220,9 @@
 
             <aside class="ebay-conversation-list-panel" aria-label="Canonical eBay conversations">
               <div id="ebay-conversation-summary" class="ebay-conversation-summary"></div>
-              <div id="ebay-conversation-list" class="ebay-conversation-list"></div>
+              <div id="ebay-conversation-list" class="ebay-conversation-list">
+                <div class="classification-empty matched-context-empty is-quiet">Loading conversations.</div>
+              </div>
               <div class="ebay-conversation-pagination">
                 <button type="button" id="ebay-conversation-load-more" class="secondary-btn" hidden>
                   <i data-lucide="chevrons-down"></i>
@@ -217,13 +234,17 @@
             <button type="button" class="ebay-panel-resize-handle ebay-list-resize-handle" data-ebay-panel-resize="list" aria-label="Resize conversation list panel"></button>
 
             <section class="ebay-conversation-detail-panel" aria-label="Selected eBay conversation">
-              <div id="ebay-conversation-detail" class="ebay-conversation-detail"></div>
+              <div id="ebay-conversation-detail" class="ebay-conversation-detail">
+                <div class="classification-empty matched-context-empty is-quiet">Choose a conversation from Inbox to read, reply, or create a task.</div>
+              </div>
             </section>
 
             <button type="button" class="ebay-panel-resize-handle ebay-context-resize-handle" data-ebay-panel-resize="context" aria-label="Resize business context panel"></button>
 
             <aside class="ebay-conversation-context-panel" aria-label="Selected eBay context">
-              <div id="ebay-conversation-context" class="ebay-conversation-context"></div>
+              <div id="ebay-conversation-context" class="ebay-conversation-context">
+                <div class="classification-empty matched-context-empty is-quiet">Choose a conversation from Inbox to view buyer, order, return, and receipt context.</div>
+              </div>
             </aside>
           </div>
         </section>
@@ -241,6 +262,6 @@
   <script src="email-triage.classifications.js?v=5f6p2b-20260608"></script>
   <script src="email-triage.diagnostics.js?v=5f6p2b-20260608"></script>
   <script src="email-triage.operations.js?v=5f6p2b-20260608"></script>
-  <script src="email-triage.js?v=5f6p4b-20260617"></script>
+  <script src="email-triage.js?v=5f6p5d-20260617"></script>
 </body>
 </html>
