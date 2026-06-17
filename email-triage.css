@@ -5272,7 +5272,8 @@ button.ebay-filter-chip {
 
 .ebay-task-owner-field select,
 .ebay-task-modal-grid select,
-.ebay-refund-amount-field input {
+.ebay-refund-amount-field input,
+.ebay-task-due-picker input {
   min-height: 44px;
   font-size: .9rem;
   font-weight: 900;
@@ -5295,6 +5296,60 @@ button.ebay-filter-chip {
 .ebay-refund-amount-field.is-active input {
   border-color: rgba(241,214,155,.38);
   background: rgba(241,214,155,.08);
+}
+
+.ebay-task-due-field {
+  grid-column: span 2;
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 8px;
+  background: rgba(0,0,0,.13);
+  margin: 0;
+  padding: 8px;
+}
+
+.ebay-task-due-field legend {
+  color: rgba(242,243,245,.58);
+  font-size: .68rem;
+  font-weight: 950;
+  letter-spacing: .04em;
+  padding: 0 4px;
+  text-transform: uppercase;
+}
+
+.ebay-task-due-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(118px, .85fr);
+  gap: 8px;
+}
+
+.ebay-task-due-picker label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ebay-task-due-picker span {
+  color: rgba(242,243,245,.56);
+  font-size: .66rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.ebay-task-due-picker input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 8px;
+  background: rgba(8,8,10,.72);
+  color: rgba(242,243,245,.92);
+  padding: 0 10px;
+  outline: 0;
+}
+
+.ebay-task-due-picker input:focus {
+  border-color: rgba(214,178,94,.45);
+  box-shadow: 0 0 0 3px rgba(214,178,94,.08);
 }
 
 .ebay-task-modal-actions {
@@ -5723,6 +5778,14 @@ button.ebay-filter-chip {
   }
 
   .ebay-task-modal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ebay-task-due-field {
+    grid-column: auto;
+  }
+
+  .ebay-task-due-picker {
     grid-template-columns: 1fr;
   }
 

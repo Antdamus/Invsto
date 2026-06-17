@@ -3464,6 +3464,32 @@
     return Number.isNaN(date.getTime()) ? null : date.toISOString();
   }
 
+  function splitLocalDateTimeValue(value) {
+    const text = String(value || "").trim();
+    if (!text) return { date: "", time: "" };
+    const localMatch = text.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+    if (localMatch) return { date: localMatch[1], time: localMatch[2] };
+    const parsed = new Date(text);
+    if (Number.isNaN(parsed.getTime())) return { date: "", time: "" };
+    parsed.setMinutes(parsed.getMinutes() - parsed.getTimezoneOffset());
+    const local = parsed.toISOString().slice(0, 16);
+    return { date: local.slice(0, 10), time: local.slice(11, 16) };
+  }
+
+  function combineTaskDueDateTime(dateValue, timeValue) {
+    const date = String(dateValue || "").trim();
+    const time = String(timeValue || "").trim();
+    if (!date && !time) return "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
+    return `${date}T${time}`;
+  }
+
+  function todayDateInputValue() {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    return now.toISOString().slice(0, 10);
+  }
+
   function ebayMessageTaskSourceSummary(conversation, message) {
     const direction = ebayMessageDirection(message);
     const buyer = ebayConversationParty(conversation);
@@ -3603,6 +3629,11 @@
     const source = message ? ebayMessageTaskSourceSummary(conversation, message) : null;
     const selectedTag = String(modal.taskTag || "");
     const isRefundTask = selectedTag === "refunds";
+    const savedDueParts = splitLocalDateTimeValue(modal.dueAt || "");
+    const dueParts = {
+      date: modal.dueDate || savedDueParts.date,
+      time: modal.dueTime || savedDueParts.time,
+    };
     return `
       <div class="ebay-task-modal" role="dialog" aria-modal="true" aria-labelledby="ebay-task-modal-title">
         <form class="ebay-task-modal-card" data-ebay-message-task-form data-ebay-conversation-id="${escapeHtml(modal.conversationId)}" data-ebay-message-id="${escapeHtml(modal.messageId)}">
@@ -3662,10 +3693,19 @@
                 ${["low", "normal", "high", "urgent"].map((priority) => `<option value="${priority}"${priority === (modal.priority || "normal") ? " selected" : ""}>${escapeHtml(humanizeValue(priority))}</option>`).join("")}
               </select>
             </label>
-            <label class="ebay-draft-field">
-              <span>Due date</span>
-              <input name="dueAt" type="datetime-local" value="${escapeHtml(modal.dueAt || "")}" />
-            </label>
+            <fieldset class="ebay-task-due-field">
+              <legend>Due date & time</legend>
+              <div class="ebay-task-due-picker">
+                <label>
+                  <span>Date</span>
+                  <input name="dueDate" type="date" value="${escapeHtml(dueParts.date || "")}" />
+                </label>
+                <label>
+                  <span>Time</span>
+                  <input name="dueTime" type="time" value="${escapeHtml(dueParts.time || "")}" step="300" />
+                </label>
+              </div>
+            </fieldset>
           </div>
           <div class="ebay-task-modal-actions">
             <button type="button" class="secondary-btn" data-ebay-message-task-action="close" ${saving ? "disabled" : ""}>Cancel</button>
@@ -3692,6 +3732,21 @@
     }
   }
 
+  function syncEbayTaskDueDefaults(form, changedName = "") {
+    const dateInput = form?.querySelector("input[name='dueDate']");
+    const timeInput = form?.querySelector("input[name='dueTime']");
+    if (!dateInput || !timeInput) return;
+    if (changedName === "dueDate" && dateInput.value && !timeInput.value) {
+      timeInput.value = "17:00";
+    }
+    if (changedName === "dueDate" && !dateInput.value) {
+      timeInput.value = "";
+    }
+    if (changedName === "dueTime" && timeInput.value && !dateInput.value) {
+      dateInput.value = todayDateInputValue();
+    }
+  }
+
   async function submitEbayConversationMessageTask(context, form) {
     const conversationId = form?.getAttribute("data-ebay-conversation-id") || "";
     const messageId = form?.getAttribute("data-ebay-message-id") || "";
@@ -3700,7 +3755,9 @@
     const description = String(formData.get("taskDescription") || "").trim();
     const assignedToUserId = String(formData.get("assignedToUserId") || "");
     const priority = String(formData.get("priority") || "normal");
-    const dueAt = String(formData.get("dueAt") || "");
+    const dueDate = String(formData.get("dueDate") || "").trim();
+    const dueTime = String(formData.get("dueTime") || "").trim();
+    const dueAt = combineTaskDueDateTime(dueDate, dueTime);
     const taskTag = String(formData.get("taskTag") || "").trim();
     const refundAmountRaw = String(formData.get("refundAmount") || "").trim();
     const refundAmount = taskTag === "refunds" ? parseRefundAmount(refundAmountRaw) : null;
@@ -3713,6 +3770,8 @@
       assignedToUserId,
       priority,
       dueAt,
+      dueDate,
+      dueTime,
       taskTag,
       refundAmount: refundAmountRaw,
     };
@@ -3720,6 +3779,13 @@
       setEbayConversationState({
         ebayConversationTaskModal: modalDraft,
         ebayConversationTaskError: "Add a title and instructions before creating the task.",
+      });
+      return;
+    }
+    if (dueAt === null) {
+      setEbayConversationState({
+        ebayConversationTaskModal: modalDraft,
+        ebayConversationTaskError: "Select both a due date and a due time, or leave both blank.",
       });
       return;
     }
@@ -8176,6 +8242,9 @@
     els.ebayConversationDetail?.addEventListener("change", (event) => {
       const taskForm = event.target.closest("[data-ebay-message-task-form]");
       if (taskForm && event.target.name === "taskTag") syncEbayTaskRefundField(taskForm);
+      if (taskForm && (event.target.name === "dueDate" || event.target.name === "dueTime")) {
+        syncEbayTaskDueDefaults(taskForm, event.target.name);
+      }
     });
     els.ebayConversationDetail?.addEventListener("submit", (event) => {
       const taskForm = event.target.closest("[data-ebay-message-task-form]");
