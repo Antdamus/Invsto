@@ -3411,8 +3411,18 @@
     };
   }
 
+  function ebayMailboxHasActiveClientFilters(state = adminClassificationState) {
+    const filter = state.ebayConversationFilter || "all";
+    const search = parseEbayStructuredSearch(state.ebayConversationSearchQuery || "");
+    const classificationFilters = safeEbayClassificationFilters(state.ebayConversationClassificationFilters);
+    return filter !== "all"
+      || search.terms.length > 0
+      || Object.values(search.structured).some((values) => safeArray(values).length > 0)
+      || Object.values(classificationFilters).some((values) => safeArray(values).length > 0);
+  }
+
   function filteredEbayConversations(state) {
-    if (ebayMailboxUsesServerFilters(state)) return safeArray(state.ebayConversations);
+    if (ebayMailboxUsesServerFilters(state) && !ebayMailboxHasActiveClientFilters(state)) return safeArray(state.ebayConversations);
     const filter = state.ebayConversationFilter || "all";
     const search = parseEbayStructuredSearch(state.ebayConversationSearchQuery || "");
     return safeArray(state.ebayConversations).filter((conversation) => {

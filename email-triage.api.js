@@ -1272,6 +1272,207 @@
     return groups;
   }
 
+  function ebayApiOverridePayload(classification = {}) {
+    return classification?.operator_override_payload && typeof classification.operator_override_payload === "object"
+      ? classification.operator_override_payload
+      : {};
+  }
+
+  function ebayApiEffectiveClassification(classification = {}) {
+    const override = ebayApiOverridePayload(classification);
+    const effectiveArray = (key) => Array.isArray(override[key])
+      ? ebayMailboxArray(override[key]).map((value) => compactEbayText(value).toLowerCase()).filter(Boolean)
+      : ebayMailboxArray(classification[key]).map((value) => compactEbayText(value).toLowerCase()).filter(Boolean);
+    return {
+      priority: compactEbayText(override.priority || classification.priority || "normal").toLowerCase(),
+      response_need: compactEbayText(override.response_need || classification.response_need || "reply_later").toLowerCase(),
+      topic_tags: effectiveArray("topic_tags"),
+      buyer_flags: effectiveArray("buyer_flags"),
+      risk_flags: effectiveArray("risk_flags"),
+    };
+  }
+
+  function ebayApiConversationTagValues(conversation = {}) {
+    const classification = ebayApiEffectiveClassification(ebayLegacyClassification(conversation));
+    return [
+      ebayLegacyConversationSource(conversation),
+      classification.priority,
+      classification.response_need,
+      classification.topic_tags,
+      classification.buyer_flags,
+      classification.risk_flags,
+    ].flat().map((value) => compactEbayText(value).toLowerCase()).filter(Boolean);
+  }
+
+  function ebayApiStructuredFilters(values = {}) {
+    return ebayMailboxObject(values.structuredFilters || values.structured_filters);
+  }
+
+  function ebayApiClassificationFilters(values = {}) {
+    return ebayMailboxObject(values.classificationFilters || values.classification_filters);
+  }
+
+  function ebayApiStructuredTagValues(values = {}) {
+    return ebayMailboxArray(ebayApiStructuredFilters(values).tags)
+      .map((value) => compactEbayText(value).toLowerCase())
+      .filter(Boolean);
+  }
+
+  function ebayApiHasClientFilteredCriteria(values = {}) {
+    return ebayApiStructuredTagValues(values).length > 0;
+  }
+
+  function ebayApiIncludesAll(values = [], required = []) {
+    const set = new Set(ebayMailboxArray(values).map((value) => compactEbayText(value).toLowerCase()).filter(Boolean));
+    return ebayMailboxArray(required).every((value) => set.has(compactEbayText(value).toLowerCase()));
+  }
+
+  function ebayApiConversationSearchBlob(conversation = {}) {
+    const summary = ebayLegacySummary(conversation);
+    const classification = ebayApiEffectiveClassification(ebayLegacyClassification(conversation));
+    return [
+      summary.search_text,
+      conversation.ebay_conversation_id,
+      conversation.conversation_title,
+      conversation.other_party_username,
+      conversation.reference_id,
+      conversation.reference_type,
+      conversation.latest_message_preview,
+      summary.buyer_usernames,
+      summary.participant_usernames,
+      summary.order_numbers,
+      summary.return_ids,
+      summary.item_titles,
+      summary.item_numbers,
+      summary.listing_ids,
+      ebayLegacyConversationSource(conversation),
+      classification.priority,
+      classification.response_need,
+      classification.topic_tags,
+      classification.buyer_flags,
+      classification.risk_flags,
+      classification.summary,
+      classification.reasoning_summary,
+      classification.recommended_action,
+    ].flat().filter(Boolean).join("\n").toLowerCase();
+  }
+
+  function ebayApiConversationMatchesSystemFilter(conversation = {}, systemFilter = "all") {
+    const filter = compactEbayText(systemFilter || "all").toLowerCase();
+    const summary = ebayLegacySummary(conversation);
+    const classification = ebayApiEffectiveClassification(ebayLegacyClassification(conversation));
+    if (filter === "all") return true;
+    if (filter === "members") return ebayLegacyConversationSource(conversation) === "member_message";
+    if (filter === "ebay_notifications") return ebayLegacyConversationSource(conversation) === "platform_notification";
+    if (filter === "unread") return Number(conversation.unread_count || 0) > 0;
+    if (filter === "unclassified") return !ebayLegacyClassification(conversation).id;
+    if (filter === "returns") return summary.has_return_link === true || ebayApiIncludesAll(classification.topic_tags, ["return"]);
+    if (filter === "shipping" || filter === "shipping_issues") return ebayLegacyHasAny(classification.topic_tags, ["shipping_issue", "missing_item", "order_status", "delivery_timing"]);
+    if (filter === "needs_reply_today") return classification.response_need === "reply_today";
+    if (filter === "vip_buyers") return ebayApiIncludesAll(classification.buyer_flags, ["vip_buyer"]);
+    if (filter === "high_value_buyers") return ebayApiIncludesAll(classification.buyer_flags, ["high_value_buyer"]);
+    if (filter === "refund_risk") return ebayApiIncludesAll(classification.risk_flags, ["refund_risk"]);
+    if (filter === "review_queue") return !ebayLegacyClassification(conversation).id
+      || summary.needs_context_review === true
+      || ebayLegacyHasAny(classification.risk_flags, ["context_review_needed", "low_confidence"]);
+    if (filter === "has_order") return summary.has_order_link === true;
+    if (filter === "has_return") return summary.has_return_link === true;
+    if (filter === "has_media") return summary.has_media === true;
+    if (filter === "needs_context_review") return summary.needs_context_review === true;
+    return true;
+  }
+
+  function ebayApiConversationMatchesClientCriteria(conversation = {}, values = {}) {
+    const structured = ebayApiStructuredFilters(values);
+    const classificationFilters = ebayApiClassificationFilters(values);
+    const classification = ebayApiEffectiveClassification(ebayLegacyClassification(conversation));
+    const tags = ebayApiConversationTagValues(conversation);
+    const searchTerms = ebayMailboxArray(values.searchTerms || values.search_terms)
+      .map((value) => compactEbayText(value).toLowerCase())
+      .filter(Boolean);
+
+    if (!ebayApiConversationMatchesSystemFilter(conversation, values.systemFilter || values.system_filter || "all")) return false;
+    if (!ebayApiIncludesAll(tags, ebayMailboxArray(structured.tags))) return false;
+    if (!ebayApiIncludesAll([ebayLegacyConversationSource(conversation)], ebayMailboxArray(structured.sourceTypes))) return false;
+    if (!ebayApiIncludesAll(classification.topic_tags, ebayMailboxArray(structured.topics))) return false;
+    if (!ebayApiIncludesAll(classification.buyer_flags, ebayMailboxArray(structured.buyerFlags))) return false;
+    if (!ebayApiIncludesAll(classification.risk_flags, ebayMailboxArray(structured.riskFlags))) return false;
+    if (!ebayApiIncludesAll(tags, ebayMailboxArray(structured.priorities))) return false;
+    if (!ebayApiIncludesAll(tags, ebayMailboxArray(structured.responseNeeds))) return false;
+    if (!ebayApiIncludesAll([ebayLegacyConversationSource(conversation)], ebayMailboxArray(classificationFilters.sourceTypes))) return false;
+    if (!ebayApiIncludesAll(classification.topic_tags, ebayMailboxArray(classificationFilters.topics))) return false;
+    if (!ebayApiIncludesAll(classification.buyer_flags, ebayMailboxArray(classificationFilters.buyerFlags))) return false;
+    if (!ebayApiIncludesAll(classification.risk_flags, ebayMailboxArray(classificationFilters.riskFlags))) return false;
+    if (!ebayApiIncludesAll(tags, ebayMailboxArray(classificationFilters.priorities))) return false;
+    if (!ebayApiIncludesAll(tags, ebayMailboxArray(classificationFilters.responseNeeds))) return false;
+    if (searchTerms.length) {
+      const blob = ebayApiConversationSearchBlob(conversation);
+      if (!searchTerms.every((term) => blob.includes(term))) return false;
+    }
+    return true;
+  }
+
+  async function fetchAllLegacyEbayConversations(context, values = {}) {
+    const conversations = [];
+    let offset = 0;
+    let lastPayload = null;
+    for (let page = 0; page < 30; page += 1) {
+      const payload = await fetchLegacyEbayConversations(context, {
+        ...values,
+        limit: 250,
+        offset,
+        warning: null,
+      });
+      const pageRows = ebayMailboxArray(payload.conversations);
+      conversations.push(...pageRows);
+      lastPayload = payload;
+      if (payload.has_more !== true || !pageRows.length) break;
+      const nextOffset = Number(payload.next_offset);
+      offset = Number.isFinite(nextOffset) && nextOffset > offset ? nextOffset : offset + pageRows.length;
+    }
+    return {
+      ...(lastPayload || {}),
+      conversations,
+      loaded_count: conversations.length,
+      has_more: false,
+      next_offset: null,
+    };
+  }
+
+  async function fetchClientFilteredEbayConversations(context, values = {}, reason = "client_tag_filter") {
+    const allPayload = await fetchAllLegacyEbayConversations(context, values);
+    const allRows = ebayMailboxArray(allPayload.conversations);
+    const matchingRows = allRows.filter((conversation) => ebayApiConversationMatchesClientCriteria(conversation, values));
+    return {
+      ...allPayload,
+      ok: true,
+      mailbox_mode: "client_filtered",
+      rpc_version: allPayload.rpc_version || reason,
+      matching_total: matchingRows.length,
+      loaded_count: matchingRows.length,
+      page_size: Math.max(matchingRows.length, 1),
+      offset: 0,
+      next_offset: null,
+      has_more: false,
+      system_filter: values.systemFilter || values.system_filter || "all",
+      search_terms: ebayMailboxArray(values.searchTerms || values.search_terms),
+      structured_filters: ebayApiStructuredFilters(values),
+      classification_filters: ebayApiClassificationFilters(values),
+      smart_folder_counts: ebayLegacySmartFolderCounts(allRows),
+      filter_option_counts: ebayLegacyFilterOptionCounts(allRows),
+      conversations: matchingRows,
+      warning: null,
+      loaded_at: new Date().toISOString(),
+    };
+  }
+
+  function ebayRpcPayloadNeedsClientFilteredFallback(payload = {}, values = {}) {
+    if (!ebayApiHasClientFilteredCriteria(values)) return false;
+    const rows = ebayMailboxArray(payload.conversations);
+    if (!rows.length) return false;
+    return rows.some((conversation) => !ebayApiConversationMatchesClientCriteria(conversation, values));
+  }
+
   function buildEbayConversationSummaries(conversations = [], links = [], messages = [], sellerAccounts = [], linkedRows = {}) {
     const summaries = new Map();
     const sellerById = mapEbayRowsById(sellerAccounts);
@@ -1582,9 +1783,17 @@
     }
 
     try {
-      return await fetchEbayCanonicalMailboxRpc(context, values);
+      const payload = await fetchEbayCanonicalMailboxRpc(context, values);
+      if (ebayRpcPayloadNeedsClientFilteredFallback(payload, values)) {
+        console.warn("[email-triage] Canonical mailbox RPC returned rows outside the active tag filter; applying client filtered mailbox sweep.");
+        return await fetchClientFilteredEbayConversations(context, values, "rpc_filter_guard");
+      }
+      return payload;
     } catch (error) {
       console.warn("[email-triage] Canonical mailbox RPC failed; falling back to legacy mailbox mode:", error);
+      if (ebayApiHasClientFilteredCriteria(values)) {
+        return await fetchClientFilteredEbayConversations(context, values, "rpc_error_filter_guard");
+      }
       const fallback = await fetchLegacyEbayConversations(context, {
         ...values,
         warning: EBAY_MAILBOX_RPC_FALLBACK_WARNING,

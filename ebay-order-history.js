@@ -118,6 +118,7 @@ const ORDER_HISTORY_LINE_SELECT = `
     ebay_collected_charges,
     total_price,
     net_payout,
+    tracking_number,
     ebay_shipment_id,
     label_status,
     label_storage_bucket,
@@ -238,7 +239,7 @@ function normalizeLine(row) {
   return {
     ...row,
     order,
-    searchText: [
+    searchText: buildHistorySearchText([
       row.item_title,
       row.item_number,
       row.transaction_id,
@@ -259,9 +260,10 @@ function normalizeLine(row) {
       order.paid_on_date,
       order.ship_by_date,
       order.status,
+      order.tracking_number,
       apiSourceLabel,
       labelSearchText,
-    ].filter(Boolean).join(" ").toLowerCase(),
+    ]),
   };
 }
 
@@ -342,6 +344,38 @@ function normalizeTrackingNumber(value) {
   return /^\d{20,30}$/.test(digits) ? digits : "";
 }
 
+function getHistorySearchNeedles(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return [];
+  const compact = raw.replace(/[\s-]+/g, "");
+  const digits = raw.replace(/\D/g, "");
+  return unique([
+    raw,
+    compact && compact !== raw ? compact : "",
+    digits.length >= 6 && digits !== raw && digits !== compact ? digits : "",
+  ]);
+}
+
+function buildHistorySearchText(values = []) {
+  const chunks = (Array.isArray(values) ? values : [values])
+    .flatMap(flattenLabelMetadataValues)
+    .filter(Boolean)
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  return unique(chunks.flatMap(getHistorySearchNeedles)).join(" ");
+}
+
+function historySearchTextIncludes(haystack, term) {
+  const text = String(haystack || "").toLowerCase();
+  const needles = getHistorySearchNeedles(term);
+  return !needles.length || needles.some((needle) => text.includes(needle));
+}
+
+function historySearchLooksLikeLabelScan(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.length >= 12;
+}
+
 function getTrackingNumbersFromText(text) {
   const body = String(text || "");
   return unique([
@@ -372,10 +406,10 @@ function getLabelMetadataSearchText(...metadataObjects) {
     "lookupKeys",
     "labelRows",
   ];
-  return metadataObjects.flatMap((metadata) => {
+  return buildHistorySearchText(metadataObjects.flatMap((metadata) => {
     if (!metadata || typeof metadata !== "object") return [];
     return keys.flatMap((key) => flattenLabelMetadataValues(metadata[key]));
-  }).filter(Boolean).join(" ");
+  }));
 }
 
 function getLabelEventSearchTextForLine(line) {
@@ -386,7 +420,7 @@ function getLabelEventSearchTextForLine(line) {
     const key = event.id || `${event.label_file_path}:${event.created_at}`;
     if (!events.has(key)) events.set(key, event);
   });
-  return [...events.values()]
+  return buildHistorySearchText([...events.values()]
     .filter((event) =>
       (lineId && (event.order_line_ids || []).includes(lineId))
       || (orderNumber && (event.order_numbers || []).map(normalizeEbayOrderNumber).includes(orderNumber))
@@ -399,9 +433,7 @@ function getLabelEventSearchTextForLine(line) {
       getLabelMetadataSearchText(event.label_metadata),
       ...(event.order_numbers || []),
     ])
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+    .filter(Boolean));
 }
 
 function normalizeLabelMetadata(metadata = {}, additions = {}) {
@@ -907,7 +939,7 @@ function getReturnSearchTextForLine(line) {
   const items = getReturnItemsForLine(lineId);
   const events = getReturnEventsForLineIds([lineId]);
   const cases = getReturnCasesForLineIds([lineId]);
-  return [
+  return buildHistorySearchText([
     ...items.flatMap((item) => [
       item.condition_received,
       item.disposition,
@@ -929,7 +961,7 @@ function getReturnSearchTextForLine(line) {
       event.signed_by_email,
       ...(event.evidence_photos || []).map((photo) => `${photo.bucket}/${photo.path}`),
     ]),
-  ].filter(Boolean).join(" ").toLowerCase();
+  ]);
 }
 
 async function signEventEvidencePhoto(photo, options = {}) {
@@ -1249,12 +1281,104 @@ async function fetchClosedOrderHistoryLines(fromIso, toIso) {
   return { data: rows, error: null, capped: true };
 }
 
+function getHistoryLabelLookupCandidates(searchTerm) {
+  return unique(getHistorySearchNeedles(searchTerm)
+    .map((value) => String(value || "").replace(/[^a-z0-9]/gi, ""))
+    .filter((value) => value.length >= 8))
+    .slice(0, 8);
+}
+
+async function fetchOrderIdsByLabelMetadataSearch(searchTerm) {
+  if (!historySearchLooksLikeLabelScan(searchTerm)) return [];
+  const candidates = getHistoryLabelLookupCandidates(searchTerm);
+  if (!candidates.length) return [];
+  const orderIds = new Set();
+
+  const collect = async (query) => {
+    const { data, error } = await query.limit(250);
+    if (error) {
+      console.warn("Label metadata order lookup skipped one filter:", error);
+      return;
+    }
+    (data || []).forEach((order) => {
+      if (order?.id) orderIds.add(order.id);
+    });
+  };
+
+  for (const candidate of candidates) {
+    await collect(supabase.from("ebay_orders").select("id").eq("tracking_number", candidate));
+    await collect(supabase.from("ebay_orders").select("id").eq("label_metadata->>trackingNumber", candidate));
+    await collect(supabase.from("ebay_orders").select("id").eq("label_metadata->>shippingBarcodeNumber", candidate));
+    await collect(supabase.from("ebay_orders").select("id").contains("label_metadata", { trackingNumbers: [candidate] }));
+    await collect(supabase.from("ebay_orders").select("id").contains("label_metadata", { shippingBarcodeNumbers: [candidate] }));
+    await collect(supabase.from("ebay_orders").select("id").contains("label_metadata", { lookupKeys: [candidate] }));
+  }
+
+  return [...orderIds];
+}
+
+async function fetchOrderIdsByOrderNumberSearch(searchTerm) {
+  const raw = String(searchTerm || "").trim();
+  const compactDigits = raw.replace(/\D/g, "");
+  if (!raw || compactDigits.length < 6) return [];
+  const orderIds = new Set();
+  const patterns = unique([
+    raw.replace(/[%_]/g, ""),
+    compactDigits,
+  ].filter((value) => value.length >= 6).map((value) => `%${value}%`));
+
+  const collect = async (query) => {
+    const { data, error } = await query.limit(250);
+    if (error) {
+      console.warn("Order number lookup skipped one filter:", error);
+      return;
+    }
+    (data || []).forEach((order) => {
+      if (order?.id) orderIds.add(order.id);
+    });
+  };
+
+  for (const pattern of patterns) {
+    await collect(supabase.from("ebay_orders").select("id").ilike("order_number", pattern));
+    await collect(supabase.from("ebay_orders").select("id").ilike("sales_record_number", pattern));
+  }
+
+  return [...orderIds];
+}
+
+async function fetchOrderIdsByReturnTrackingSearch(searchTerm) {
+  if (!historySearchLooksLikeLabelScan(searchTerm)) return [];
+  const candidates = getHistoryLabelLookupCandidates(searchTerm);
+  if (!candidates.length) return [];
+  const orderIds = new Set();
+
+  const collect = async (query) => {
+    const { data, error } = await query.limit(250);
+    if (error) {
+      console.warn("Return tracking lookup skipped one filter:", error);
+      return;
+    }
+    (data || []).forEach((returnCase) => {
+      if (returnCase?.order_id) orderIds.add(returnCase.order_id);
+    });
+  };
+
+  for (const candidate of candidates) {
+    await collect(supabase.from("ebay_return_cases").select("order_id").eq("return_tracking_number", candidate));
+  }
+
+  return [...orderIds];
+}
+
 async function fetchBuyerAllDateOrderHistoryLines(searchTerm) {
   const buyerTerm = String(searchTerm || "").trim();
   if (!buyerTerm) return { data: [], error: null, capped: false };
 
   const buyerPattern = `%${buyerTerm.replace(/[%]/g, "")}%`;
   const orders = [];
+  const labelOrderIds = await fetchOrderIdsByLabelMetadataSearch(searchTerm);
+  const orderNumberIds = await fetchOrderIdsByOrderNumberSearch(searchTerm);
+  const returnTrackingOrderIds = await fetchOrderIdsByReturnTrackingSearch(searchTerm);
   for (let start = 0; start < ORDER_HISTORY_MAX_BUYER_ORDERS; start += ORDER_HISTORY_PAGE_SIZE) {
     const end = Math.min(start + ORDER_HISTORY_PAGE_SIZE - 1, ORDER_HISTORY_MAX_BUYER_ORDERS - 1);
     const { data, error } = await supabase
@@ -1270,7 +1394,12 @@ async function fetchBuyerAllDateOrderHistoryLines(searchTerm) {
     if (page.length < ORDER_HISTORY_PAGE_SIZE) break;
   }
 
-  const orderIds = [...new Set(orders.map((order) => order.id).filter(Boolean))];
+  const orderIds = [...new Set([
+    ...orders.map((order) => order.id),
+    ...labelOrderIds,
+    ...orderNumberIds,
+    ...returnTrackingOrderIds,
+  ].filter(Boolean))];
   if (!orderIds.length) return { data: [], error: null, capped: false };
 
   const rows = [];
@@ -1349,11 +1478,13 @@ async function loadOrderHistory() {
   const { fromIso, toIso } = getDateRange();
   const buyerAllDates = Boolean($("history-buyer-all-dates")?.checked);
   const searchTerm = String($("history-search")?.value || "").trim();
-  if (buyerAllDates && searchTerm && list) {
-    list.innerHTML = `<div class="history-empty">Searching all stored history for buyer "${escapeHtml(searchTerm)}"...</div>`;
+  const searchAllDates = Boolean(searchTerm && (buyerAllDates || historySearchLooksLikeLabelScan(searchTerm)));
+  if (searchAllDates && searchTerm && list) {
+    const searchKind = historySearchLooksLikeLabelScan(searchTerm) ? "label/tracking scan" : "buyer";
+    list.innerHTML = `<div class="history-empty">Searching all stored history for ${escapeHtml(searchKind)} "${escapeHtml(searchTerm)}"...</div>`;
   }
 
-  const linesQuery = buyerAllDates && searchTerm
+  const linesQuery = searchAllDates
     ? fetchBuyerAllDateOrderHistoryLines(searchTerm)
     : fetchClosedOrderHistoryLines(fromIso, toIso);
 
@@ -1574,7 +1705,7 @@ function renderWorkerOptions() {
 }
 
 function applyFilters() {
-  const term = String($("history-search")?.value || "").trim().toLowerCase();
+  const term = String($("history-search")?.value || "").trim();
   const worker = $("history-worker")?.value || "";
   const status = $("history-status")?.value || "all";
 
@@ -1587,9 +1718,11 @@ function applyFilters() {
     if (worker && line.fulfilled_by_email !== worker) return false;
     if (
       term
-      && !line.searchText.includes(term)
-      && !getLabelEventSearchTextForLine(line).includes(term)
-      && !getReturnSearchTextForLine(line).includes(term)
+      && !historySearchTextIncludes([
+        line.searchText,
+        getLabelEventSearchTextForLine(line),
+        getReturnSearchTextForLine(line),
+      ].join(" "), term)
     ) return false;
     return true;
   });
@@ -3561,7 +3694,7 @@ async function deleteHistoryVideoReceiptCapture(button) {
 }
 
 function getFilteredEvents() {
-  const term = String($("history-search")?.value || "").trim().toLowerCase();
+  const term = String($("history-search")?.value || "").trim();
   const worker = $("history-worker")?.value || "";
   const status = $("history-status")?.value || "all";
   const lineById = getLineByIdMap(state.lines);
@@ -3588,7 +3721,7 @@ function getFilteredEvents() {
 
     if (term) {
       const snapshots = Array.isArray(event.payload?.line_snapshots) ? event.payload.line_snapshots : [];
-      const haystack = [
+      const haystack = buildHistorySearchText([
         event.action,
         event.notes,
         event.signed_by_email,
@@ -3626,8 +3759,8 @@ function getFilteredEvents() {
           photo.path,
           photo.metadata?.videoReceiptUrl,
         ]),
-      ].filter(Boolean).join(" ").toLowerCase();
-      if (!haystack.includes(term)) return false;
+      ]);
+      if (!historySearchTextIncludes(haystack, term)) return false;
     }
     return true;
   });
@@ -7702,7 +7835,8 @@ function setupListeners() {
     $(id)?.addEventListener("change", applyFilters);
   });
   $("history-search")?.addEventListener("input", () => {
-    if ($("history-buyer-all-dates")?.checked) {
+    const value = $("history-search")?.value || "";
+    if ($("history-buyer-all-dates")?.checked || historySearchLooksLikeLabelScan(value)) {
       window.clearTimeout(historyBuyerAllDatesSearchTimer);
       historyBuyerAllDatesSearchTimer = window.setTimeout(loadOrderHistory, 450);
       return;
@@ -7710,7 +7844,8 @@ function setupListeners() {
     applyFilters();
   });
   $("history-search")?.addEventListener("change", () => {
-    if ($("history-buyer-all-dates")?.checked) {
+    const value = $("history-search")?.value || "";
+    if ($("history-buyer-all-dates")?.checked || historySearchLooksLikeLabelScan(value)) {
       loadOrderHistory();
       return;
     }
