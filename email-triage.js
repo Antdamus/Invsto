@@ -243,6 +243,7 @@
     { label: "Return Update", icon: "undo-2", pattern: /\b(return|returned item)\b/i },
   ];
   const ebayDraftActionMessageTimers = new Map();
+  const ebayComposerDraftCache = new Map();
   let ebayConversationReloadTimer = null;
 
   const els = {
@@ -3415,6 +3416,46 @@
     renderEbayConversationInbox(adminClassificationState);
   }
 
+  function ebayComposerCacheKey(conversationId, mode = "normal") {
+    return `${String(conversationId || "")}:${String(mode || "normal")}`;
+  }
+
+  function ebayComposerFormValues(form) {
+    const formData = form ? new FormData(form) : null;
+    return {
+      draftText: formData ? String(formData.get("draftText") || "") : "",
+      improvementInstructions: formData ? String(formData.get("improvementInstructions") || "") : "",
+      operatorNotes: formData ? String(formData.get("operatorNotes") || "") : "",
+    };
+  }
+
+  function rememberEbayComposerDraft(form) {
+    if (!form) return null;
+    const conversationId = form.getAttribute("data-ebay-conversation-id") || "";
+    if (!conversationId) return null;
+    const mode = form.getAttribute("data-ebay-composer-mode") || "normal";
+    const values = ebayComposerFormValues(form);
+    ebayComposerDraftCache.set(ebayComposerCacheKey(conversationId, mode), values);
+    return values;
+  }
+
+  function cachedEbayComposerDraft(conversationId, mode = "normal") {
+    return ebayComposerDraftCache.get(ebayComposerCacheKey(conversationId, mode)) || null;
+  }
+
+  function clearEbayComposerDraftCache(conversationId) {
+    if (!conversationId) return;
+    for (const key of [...ebayComposerDraftCache.keys()]) {
+      if (key.startsWith(`${String(conversationId)}:`)) ebayComposerDraftCache.delete(key);
+    }
+  }
+
+  function ebayComposerValue(cachedDraft, key, fallback = "") {
+    return cachedDraft && Object.prototype.hasOwnProperty.call(cachedDraft, key)
+      ? cachedDraft[key]
+      : fallback;
+  }
+
   function ebayConversationClassification(conversation) {
     const row = conversation?.classification && typeof conversation.classification === "object" ? conversation.classification : null;
     if (!row?.id) return null;
@@ -5302,6 +5343,17 @@
     return window.confirm(lines.join("\n"));
   }
 
+  function renderEbayComposerContextBadges(conversation) {
+    const classification = ebayConversationClassification(conversation);
+    const flags = safeArray(classification?.effective_buyer_flags);
+    const badges = [];
+    if (flags.includes("vip_buyer")) badges.push(renderBadge("VIP Buyer", "success"));
+    if (flags.includes("high_value_buyer")) badges.push(renderBadge("High Value Buyer", "category"));
+    if (flags.includes("repeat_buyer")) badges.push(renderBadge("Repeat Buyer", "category"));
+    if (!badges.length) badges.push(renderBadge("Normal chat", "success"));
+    return badges.slice(0, 3).join("");
+  }
+
   function renderEbayManualComposer(conversation, messages = [], options = {}) {
     const target = options.target || latestInboundEbayMessage(messages);
     const draft = options.draft || null;
@@ -5310,14 +5362,17 @@
       adminClassificationState.ebayConversationDraftActionErrorsById?.[conversation.id];
     const message = adminClassificationState.ebayConversationDraftActionMessagesById?.[conversation.id];
     const targetId = target?.id || "";
-    const draftText = ebayDraftDisplayText(draft);
+    const cachedDraft = cachedEbayComposerDraft(conversation.id, "normal");
+    const draftText = ebayComposerValue(cachedDraft, "draftText", ebayDraftDisplayText(draft));
+    const operatorNotes = ebayComposerValue(cachedDraft, "operatorNotes", draft?.operator_notes || "");
+    const improvementInstructions = ebayComposerValue(cachedDraft, "improvementInstructions", "");
     const canAct = Boolean(targetId) && !isActionLoading;
     return `
       <section class="ebay-draft-card ebay-reply-composer is-manual">
         <div class="context-card-head">
           <h4>Message</h4>
           <span class="ebay-classification-head-badges">
-            ${renderBadge("Normal chat", "success")}
+            ${renderEbayComposerContextBadges(conversation)}
           </span>
         </div>
         ${error ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(error)}</div>` : ""}
@@ -5329,11 +5384,11 @@
           </label>
           <label class="ebay-draft-field ebay-draft-notes-field">
             <span>Operator Notes</span>
-            <input name="operatorNotes" type="text" value="${escapeHtml(draft?.operator_notes || "")}" placeholder="Optional internal note" ${isActionLoading ? "disabled" : ""} />
+            <input name="operatorNotes" type="text" value="${escapeHtml(operatorNotes)}" placeholder="Optional internal note" ${isActionLoading ? "disabled" : ""} />
           </label>
           <label class="ebay-draft-field ebay-draft-instructions-field">
             <span>AI Instructions</span>
-            <input name="improvementInstructions" type="text" maxlength="1000" placeholder="Optional tone or wording guidance" ${isActionLoading ? "disabled" : ""} />
+            <input name="improvementInstructions" type="text" maxlength="1000" value="${escapeHtml(improvementInstructions)}" placeholder="Optional tone or wording guidance" ${isActionLoading ? "disabled" : ""} />
           </label>
           <div class="ebay-draft-actions">
             <button type="button" class="secondary-btn" data-ebay-draft-action="improve" ${canAct ? "" : "disabled"}>
@@ -5374,7 +5429,10 @@
       adminClassificationState.ebayConversationDraftActionErrorsById?.[conversation.id];
     const message = adminClassificationState.ebayConversationDraftActionMessagesById?.[conversation.id];
     const stale = draft ? stalenessState(draft) : null;
-    const draftText = ebayDraftDisplayText(draft);
+    const cachedDraft = cachedEbayComposerDraft(conversation.id, "ai_reply");
+    const draftText = ebayComposerValue(cachedDraft, "draftText", ebayDraftDisplayText(draft));
+    const operatorNotes = ebayComposerValue(cachedDraft, "operatorNotes", draft?.operator_notes || "");
+    const improvementInstructions = ebayComposerValue(cachedDraft, "improvementInstructions", "");
     const approval = draft?.approval || {};
     const sendState = draft?.send_state || {};
     const approved = approval.is_approved === true;
@@ -5433,11 +5491,11 @@
           </label>
           <label class="ebay-draft-field ebay-draft-notes-field">
             <span>Operator Notes</span>
-            <input name="operatorNotes" type="text" value="${escapeHtml(draft.operator_notes || "")}" placeholder="Optional internal note" ${isActionLoading ? "disabled" : ""} />
+            <input name="operatorNotes" type="text" value="${escapeHtml(operatorNotes)}" placeholder="Optional internal note" ${isActionLoading ? "disabled" : ""} />
           </label>
           <label class="ebay-draft-field ebay-draft-instructions-field">
             <span>AI Instructions</span>
-            <input name="improvementInstructions" type="text" maxlength="1000" placeholder="Optional tone or wording guidance" ${isActionLoading ? "disabled" : ""} />
+            <input name="improvementInstructions" type="text" maxlength="1000" value="${escapeHtml(improvementInstructions)}" placeholder="Optional tone or wording guidance" ${isActionLoading ? "disabled" : ""} />
           </label>
           <div class="ebay-draft-actions">
             ${approved ? `
@@ -6244,6 +6302,7 @@
     try {
       const isSend = values.mode === "send";
       const payload = await requestEbayConversationDraftAction(context, values);
+      clearEbayComposerDraftCache(conversationId);
       if (isSend) {
         await loadEbayConversationMessages(context, conversationId, { force: true }).catch((loadError) => {
           console.error("[email-triage] eBay conversation messages reload after send failed:", loadError);
@@ -7491,8 +7550,23 @@
         const targetMessageId = draftButton.getAttribute("data-ebay-target-message-id") ||
           form?.getAttribute("data-ebay-target-message-id") ||
           "";
-        const formData = form ? new FormData(form) : null;
         const composerMode = form?.getAttribute("data-ebay-composer-mode") || "";
+        const formValues = form ? (rememberEbayComposerDraft(form) || ebayComposerFormValues(form)) : ebayComposerFormValues(null);
+        if (action === "improve" && !formValues.draftText.trim()) {
+          setEbayConversationState({
+            ebayConversationDraftActionErrorsById: {
+              ...adminClassificationState.ebayConversationDraftActionErrorsById,
+              [conversationId]: "Type a message before using Improve Text.",
+            },
+            ebayConversationDraftActionMessagesById: {
+              ...adminClassificationState.ebayConversationDraftActionMessagesById,
+              [conversationId]: null,
+            },
+          });
+          const textarea = form?.querySelector("textarea[name='draftText']");
+          if (textarea) textarea.focus();
+          return;
+        }
         if (action === "send") {
           const conversation = selectedEbayConversationById(conversationId, adminClassificationState);
           const draft = currentEbayConversationDraft(conversationId);
@@ -7506,10 +7580,10 @@
           conversationId,
           targetMessageId,
           draftId,
-          draftText: formData ? String(formData.get("draftText") || "") : "",
-          improvementInstructions: formData ? String(formData.get("improvementInstructions") || "") : "",
-          operatorNotes: formData ? String(formData.get("operatorNotes") || "") : "",
-          approvalNotes: formData ? String(formData.get("operatorNotes") || "") : "",
+          draftText: formValues.draftText,
+          improvementInstructions: formValues.improvementInstructions,
+          operatorNotes: formValues.operatorNotes,
+          approvalNotes: formValues.operatorNotes,
           manualComposer: composerMode === "normal",
           sendConfirmed: action === "send",
         });
@@ -7562,6 +7636,10 @@
         setEbayConversationState({ ebayDraftMetadataCollapsed: collapsed });
       }
     }, true);
+    els.ebayConversationDetail?.addEventListener("input", (event) => {
+      const form = event.target.closest("[data-ebay-draft-form]");
+      if (form) rememberEbayComposerDraft(form);
+    });
     els.ebayConversationDetail?.addEventListener("submit", (event) => {
       if (event.target.closest("[data-ebay-draft-form]")) {
         event.preventDefault();

@@ -600,6 +600,15 @@ function buildGrounding(context: Record<string, any>) {
   if (history.return_count !== null && history.return_count !== undefined) {
     pushFact(facts, "buyer_history:return_count", "Buyer return count", history.return_count, false);
   }
+  if (history.gross_value !== null && history.gross_value !== undefined) {
+    pushFact(facts, "buyer_history:gross_value", "Buyer gross purchase value", history.gross_value, false);
+  }
+  if (history.retained_value !== null && history.retained_value !== undefined) {
+    pushFact(facts, "buyer_history:retained_value", "Buyer retained purchase value", history.retained_value, false);
+  }
+  if (history.average_order_value !== null && history.average_order_value !== undefined) {
+    pushFact(facts, "buyer_history:average_order_value", "Buyer average order value", history.average_order_value, false);
+  }
 
   if (!orders.length) missing.add("matched order unavailable");
   for (const order of orders.slice(0, 8)) {
@@ -679,6 +688,19 @@ function buildFallbackDraft(input: Record<string, any>, reason: string): DraftOu
   const tracking = findFact(":tracking_number");
   const factsUsed = new Set<string>();
   const missing = new Set<string>(safeArray(grounding.missing_context_options).map((item) => text(item, 180)).filter(Boolean));
+  const operatorDraft = safeBodyText(input.operator_draft, MAX_DRAFT_TEXT_CHARS);
+
+  if (input.draft_request?.mode === "improve" && operatorDraft) {
+    return {
+      draft_text: operatorDraft,
+      tone: "operator_written_needs_review",
+      summary_of_intent: "Preserve the operator-written buyer reply because the automatic improvement was blocked by validation.",
+      facts_used: [],
+      missing_context: [...missing].slice(0, 8),
+      safety_warnings: [`improve fallback used: ${reason}; kept operator draft instead of replacing it with a generic response`],
+      confidence: 0.45,
+    };
+  }
 
   let draftText = "Thank you for reaching out. We will review the details connected to your message and follow up as soon as possible.";
   if (shippingQuestionLikely(input)) {
@@ -781,6 +803,8 @@ Draft style:
 - Do not add a subject line or email signature.
 - Do not mention internal systems, databases, Supabase, AI, classification, link confidence, or missing records to the buyer.
 - If facts are missing, write a general safe acknowledgement and say we will review/look into the details.
+- If objective_context shows a repeat, high-value, or VIP buyer, use that only to make the tone warmer, more careful, and more relationship-aware.
+- Do not mention lifetime spend, retained value, VIP status, buyer flags, or internal buyer segmentation to the buyer unless the operator explicitly wrote that language and it is safe.
 
 Grounding rules:
 - Center the reply on target_message. Treat the full timeline, classification, and objective_context as supporting context.
@@ -800,7 +824,9 @@ Shipping/tracking:
 - If no order/shipping context exists, use a general safe reply and do not mention specific shipment status.
 
 Improve mode:
-- If draft_request.mode is "improve", improve the operator_draft for clarity, tone, and organization.
+- If draft_request.mode is "improve", the operator_draft is the primary source. Rewrite that exact message for clarity, tone, organization, and professionalism.
+- Do not replace the operator_draft with a generic acknowledgement unless the operator_draft itself is unsafe or empty.
+- Keep the operator's specific intent, requested action, concessions, caveats, and factual uncertainty.
 - Apply operator_instructions when provided, but only for wording, tone, organization, length, or readability.
 - Preserve the operator's meaning and caveats.
 - Do not add facts that are not in objective_context or grounding.facts.
