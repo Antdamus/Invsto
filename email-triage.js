@@ -4513,6 +4513,134 @@
     els.ebayConversationTagSuggestions.innerHTML = rows.length ? rows.map((row) => renderEbayTagButton(row, { forceTag })).join("") : "";
   }
 
+  function ebayCanonicalStructuredToken(token) {
+    const parsed = parseEbayStructuredSearch(token);
+    return parsed.structuredTokens[0] || "";
+  }
+
+  function ebayTagValueCount(state, value) {
+    const target = compactConversationText(value);
+    if (!target) return 0;
+    return safeArray(state.ebayConversations).filter((conversation) => {
+      const classification = ebayConversationClassification(conversation);
+      return ebayClassificationTagValues(classification).includes(target);
+    }).length;
+  }
+
+  function ebayCustomTopicTagValues(state) {
+    const knownTopics = new Set(EBAY_TOPIC_TAGS);
+    const knownTags = new Set([
+      ...EBAY_TOPIC_TAGS,
+      ...EBAY_CONVERSATION_SOURCE_TYPES,
+      ...EBAY_BUYER_FLAGS,
+      ...EBAY_RISK_FLAGS,
+      ...EBAY_PRIORITIES,
+      ...EBAY_RESPONSE_NEEDS,
+    ]);
+    const counts = new Map();
+    const add = (value, increment = 1) => {
+      const tag = normalizeEbayOperatorTopicTag(value);
+      if (!tag || knownTopics.has(tag)) return;
+      counts.set(tag, (counts.get(tag) || 0) + increment);
+    };
+
+    safeArray(state.ebayConversations).forEach((conversation) => {
+      const classification = ebayConversationClassification(conversation);
+      safeArray(classification?.effective_topic_tags).forEach((value) => add(value));
+    });
+
+    const parsed = parseEbayStructuredSearch(state.ebayConversationSearchQuery || "");
+    safeArray(parsed.structured.topics).forEach((value) => add(value, 0));
+    safeArray(parsed.structured.tags).forEach((value) => {
+      if (!knownTags.has(value)) add(value, 0);
+    });
+
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || humanizeValue(a[0]).localeCompare(humanizeValue(b[0])))
+      .map(([value]) => value);
+  }
+
+  function ebayTagPickerGroups(state) {
+    const customTags = ebayCustomTopicTagValues(state);
+    return [
+      customTags.length ? {
+        key: "custom",
+        label: "Custom Tags",
+        tokenKey: "tag",
+        groupKey: "custom",
+        values: customTags,
+        featured: true,
+      } : null,
+      { key: "topics", label: "Topics", tokenKey: "topic", groupKey: "topics", values: EBAY_TOPIC_TAGS },
+      { key: "buyerFlags", label: "Buyer Flags", tokenKey: "buyer", groupKey: "buyerFlags", values: EBAY_BUYER_FLAGS },
+      { key: "riskFlags", label: "Risk Flags", tokenKey: "risk", groupKey: "riskFlags", values: EBAY_RISK_FLAGS },
+      { key: "priorities", label: "Priority", tokenKey: "priority", groupKey: "priorities", values: EBAY_PRIORITIES },
+      { key: "responseNeeds", label: "Response", tokenKey: "response", groupKey: "responseNeeds", values: EBAY_RESPONSE_NEEDS },
+      { key: "sourceTypes", label: "Source", tokenKey: "source", groupKey: "sourceTypes", values: EBAY_CONVERSATION_SOURCE_TYPES },
+    ].filter(Boolean);
+  }
+
+  function ebayTagPickerCount(state, group, value) {
+    if (group.groupKey === "custom") return ebayTagValueCount(state, value);
+    return countEbayFilterOption(safeArray(state.ebayConversations), group.groupKey, value);
+  }
+
+  function ebayTagPickerMatchesSearch(group, value, searchNeedle) {
+    if (!searchNeedle) return true;
+    const haystack = [
+      group.label,
+      group.tokenKey,
+      value,
+      humanizeValue(value),
+      `${group.tokenKey}:${value}`,
+    ].join(" ").toLowerCase();
+    return haystack.includes(searchNeedle);
+  }
+
+  function renderEbayTagPickerActiveTokens(state) {
+    const tokens = [...new Set(parseEbayStructuredSearch(state.ebayConversationSearchQuery || "").structuredTokens)];
+    if (!tokens.length) {
+      return `<div class="ebay-tag-picker-empty-selection">No tag filters selected</div>`;
+    }
+    return tokens.map((token) => `
+      <button type="button" class="ebay-tag-picker-selected-chip" data-ebay-tag-filter-token="${escapeHtml(token)}" aria-label="Remove filter ${escapeHtml(token)}">
+        <span>${escapeHtml(token.split(":")[0])}</span>
+        ${escapeHtml(humanizeValue(token.split(":").slice(1).join(":")))}
+        <b aria-hidden="true">x</b>
+      </button>
+    `).join("");
+  }
+
+  function renderEbayTagPickerGroup(group, state, activeTokens, searchNeedle) {
+    const options = group.values
+      .map((value) => compactConversationText(value))
+      .filter((value, index, rows) => value && rows.indexOf(value) === index)
+      .filter((value) => ebayTagPickerMatchesSearch(group, value, searchNeedle));
+    if (!options.length) return "";
+    return `
+      <section class="ebay-tag-picker-group${group.featured ? " is-featured" : ""}">
+        <div class="ebay-tag-picker-group-head">
+          <h4>${escapeHtml(group.label)}</h4>
+          <span>${escapeHtml(options.length)} tags</span>
+        </div>
+        <div class="ebay-tag-picker-grid">
+          ${options.map((value) => {
+            const token = `${group.tokenKey}:${value}`;
+            const active = activeTokens.has(token);
+            const count = ebayTagPickerCount(state, group, value);
+            return `
+              <button type="button" class="ebay-tag-picker-option${active ? " is-active" : ""}" data-ebay-tag-filter-token="${escapeHtml(token)}" aria-pressed="${active ? "true" : "false"}">
+                <span>${escapeHtml(humanizeValue(value))}</span>
+                <small>${escapeHtml(token)}</small>
+                ${count ? `<em>${escapeHtml(count)}</em>` : ""}
+              </button>
+            `;
+          }).join("")}
+        </div>
+      </section>
+    `;
+  }
+
   function renderEbayTagHelp(state) {
     if (!els.ebayConversationTagHelp) return;
     const open = state.ebayConversationTagHelpOpen === true;
@@ -4525,19 +4653,36 @@
       els.ebayConversationTagHelp.innerHTML = "";
       return;
     }
+    const search = String(state.ebayConversationTagHelpSearch || "");
+    const searchNeedle = search.trim().toLowerCase();
+    const activeTokens = new Set(parseEbayStructuredSearch(state.ebayConversationSearchQuery || "").structuredTokens);
+    const groups = ebayTagPickerGroups(state)
+      .map((group) => renderEbayTagPickerGroup(group, state, activeTokens, searchNeedle))
+      .filter(Boolean)
+      .join("");
     els.ebayConversationTagHelp.innerHTML = `
-      ${[EBAY_SOURCE_FILTER_GROUP, ...EBAY_FILTER_GROUPS].map((group) => {
-        const prefix = group.key === "topics"
-          ? "topic"
-          : group.key === "sourceTypes" ? "source"
-          : group.key === "buyerFlags" ? "buyer" : group.key === "riskFlags" ? "risk" : group.key === "priorities" ? "priority" : "response";
-        return `
-          <section>
-            <h4>${escapeHtml(group.label)}</h4>
-            <div>${group.values.map((value) => renderEbayTagButton({ key: prefix, group: group.label, value })).join("")}</div>
-          </section>
-        `;
-      }).join("")}
+      <div class="ebay-tag-picker-backdrop" data-ebay-tag-picker-close></div>
+      <section class="ebay-tag-picker-modal" role="dialog" aria-modal="true" aria-labelledby="ebay-tag-picker-title" data-ebay-tag-picker-modal>
+        <header class="ebay-tag-picker-head">
+          <div>
+            <span class="eyebrow">Available Tags</span>
+            <h3 id="ebay-tag-picker-title">Tag filter picker</h3>
+          </div>
+          <button type="button" class="secondary-btn ebay-tag-picker-close" data-ebay-tag-picker-close aria-label="Close tag picker">
+            <i data-lucide="x"></i>
+          </button>
+        </header>
+        <label class="ebay-tag-picker-search">
+          <i data-lucide="search"></i>
+          <input type="text" data-ebay-tag-picker-search value="${escapeHtml(search)}" placeholder="Search tags..." autocomplete="off" />
+        </label>
+        <div class="ebay-tag-picker-selected" aria-label="Selected tag filters">
+          ${renderEbayTagPickerActiveTokens(state)}
+        </div>
+        <div class="ebay-tag-picker-body">
+          ${groups || `<div class="classification-empty matched-context-empty is-quiet">No tags match that search.</div>`}
+        </div>
+      </section>
     `;
   }
 
@@ -8250,6 +8395,40 @@
     input.focus();
   }
 
+  function toggleEbaySearchToken(context, rawToken) {
+    const token = ebayCanonicalStructuredToken(rawToken);
+    if (!token || !els.ebayConversationSearch) return;
+    const input = els.ebayConversationSearch;
+    const value = String(input.value || adminClassificationState.ebayConversationSearchQuery || "");
+    const parts = value.match(/([a-z]+):"([^"]+)"|([a-z]+):([^\s]+)|"([^"]+)"|(\S+)/gi) || [];
+    let removed = false;
+    const nextParts = parts.filter((part) => {
+      const partToken = ebayCanonicalStructuredToken(part);
+      if (partToken && partToken === token) {
+        removed = true;
+        return false;
+      }
+      return true;
+    });
+    if (!removed) nextParts.push(token);
+    const nextValue = nextParts.join(" ").trim();
+    input.value = nextValue;
+    applyEbayConversationListControls(context, { ebayConversationSearchQuery: nextValue });
+  }
+
+  function focusEbayTagPickerSearch(options = {}) {
+    window.requestAnimationFrame(() => {
+      const input = els.ebayConversationTagHelp?.querySelector("[data-ebay-tag-picker-search]");
+      if (!input) return;
+      input.focus();
+      if (options.select === true) input.select();
+      else {
+        const end = String(input.value || "").length;
+        input.setSelectionRange(end, end);
+      }
+    });
+  }
+
   function applyEbaySavedView(context, viewId) {
     const view = ebaySavedViewsForState(adminClassificationState).find((item) => item.id === viewId);
     if (!view) return;
@@ -8332,12 +8511,35 @@
     });
     bindEbayMobileWorkspaceEvents();
     els.ebayConversationTagHelpToggle?.addEventListener("click", () => {
-      setEbayConversationState({ ebayConversationTagHelpOpen: adminClassificationState.ebayConversationTagHelpOpen !== true });
+      const nextOpen = adminClassificationState.ebayConversationTagHelpOpen !== true;
+      setEbayConversationState({ ebayConversationTagHelpOpen: nextOpen });
+      if (nextOpen) focusEbayTagPickerSearch({ select: true });
     });
     els.ebayConversationTagHelp?.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-ebay-search-token]");
-      if (!button) return;
-      insertEbaySearchToken(context, button.getAttribute("data-ebay-search-token"));
+      const close = event.target.closest("[data-ebay-tag-picker-close]");
+      if (close) {
+        setEbayConversationState({ ebayConversationTagHelpOpen: false });
+        return;
+      }
+      const tokenButton = event.target.closest("[data-ebay-tag-filter-token]");
+      if (tokenButton) {
+        toggleEbaySearchToken(context, tokenButton.getAttribute("data-ebay-tag-filter-token"));
+      }
+    });
+    els.ebayConversationTagHelp?.addEventListener("input", (event) => {
+      const input = event.target.closest("[data-ebay-tag-picker-search]");
+      if (!input) return;
+      setEbayConversationState({
+        ebayConversationTagHelpOpen: true,
+        ebayConversationTagHelpSearch: input.value || "",
+      });
+      focusEbayTagPickerSearch();
+    });
+    els.ebayConversationTagHelp?.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setEbayConversationState({ ebayConversationTagHelpOpen: false });
+      els.ebayConversationTagHelpToggle?.focus();
     });
     els.ebayConversationTagSuggestions?.addEventListener("mousedown", (event) => {
       event.preventDefault();
