@@ -6,6 +6,7 @@ struct ReadyView: View {
     @StateObject private var viewModel: ReadyViewModel
     @State private var isShowingCancelConfirmation = false
     @State private var isShowingPhotoLibraryPicker = false
+    @State private var isShowingSystemCamera = false
     @State private var selectedPhotoLibraryItems = [PhotosPickerItem]()
     @State private var previewedPhotoID: LocalSessionPhoto.ID?
     @State private var selectedThumbnailPhotoID: LocalSessionPhoto.ID?
@@ -286,6 +287,25 @@ struct ReadyView: View {
         }
         .fullScreenCover(isPresented: photoPreviewPresentationBinding) {
             keptPhotoPreviewCover
+        }
+        .fullScreenCover(isPresented: $isShowingSystemCamera) {
+            SystemCameraCaptureView(
+                onCapture: { imageData in
+                    isShowingSystemCamera = false
+                    Task {
+                        await viewModel.addSystemCameraImageData(imageData)
+                    }
+                },
+                onCancel: {
+                    isShowingSystemCamera = false
+                    viewModel.resumeCaptureAfterSystemCameraCancelIfNeeded()
+                },
+                onFailure: { message in
+                    isShowingSystemCamera = false
+                    viewModel.handleSystemCameraFailure(message)
+                }
+            )
+            .ignoresSafeArea()
         }
         .photosPicker(
             isPresented: $isShowingPhotoLibraryPicker,
@@ -607,12 +627,26 @@ struct ReadyView: View {
                 EmptyView()
             }
 
+            if viewModel.canUseSystemCamera {
+                Button("Use System Camera") {
+                    viewModel.prepareForSystemCameraCapture()
+                    isShowingSystemCamera = true
+                }
+                .buttonStyle(OGActionButtonStyle(role: .secondary))
+            }
+
             if viewModel.canImportPhotos {
                 Button("Import From Photos") {
                     viewModel.prepareForPhotoLibraryImport()
                     isShowingPhotoLibraryPicker = true
                 }
                 .buttonStyle(OGActionButtonStyle(role: .secondary))
+            }
+
+            if let systemCameraMessage = viewModel.systemCameraMessage {
+                Text(systemCameraMessage)
+                    .font(.footnote)
+                    .foregroundStyle(OGVisualStyle.textSecondary)
             }
 
             if let photoLibraryImportMessage = viewModel.photoLibraryImportMessage {

@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import Foundation
+import UIKit
 
 @MainActor
 final class ReadyViewModel: ObservableObject {
@@ -164,7 +165,9 @@ final class ReadyViewModel: ObservableObject {
     @Published private(set) var isSparkleTorchEnabled = false
     @Published private(set) var sparkleTorchStrength: SparkleTorchStrength
     @Published private(set) var photoLibraryImportMessage: String?
+    @Published private(set) var systemCameraMessage: String?
     @Published private(set) var isImportingPhotos = false
+    @Published private(set) var isAddingSystemCameraPhoto = false
     @Published private(set) var isTestCameraActive = false
 
     let employee: AuthenticatedEmployee
@@ -333,6 +336,7 @@ final class ReadyViewModel: ObservableObject {
         zoomFactor = CameraZoomState.unavailable.factor
         zoomRange = CameraZoomState.unavailable.range
         cameraModeStatus = .unknown
+        systemCameraMessage = nil
         hasStarted = false
     }
 
@@ -537,6 +541,7 @@ final class ReadyViewModel: ObservableObject {
         latestLocalResult = nil
         latestUploadResult = nil
         finishJobMessage = nil
+        systemCameraMessage = nil
         captureState = .listening
 
         Task { [weak self] in
@@ -571,6 +576,7 @@ final class ReadyViewModel: ObservableObject {
             latestLocalResult = nil
             latestUploadResult = nil
             finishJobMessage = nil
+            systemCameraMessage = nil
             captureState = .sessionReady(context, updatedSession)
         } catch {
             handleLocalCaptureStorageFailure(context: context, message: error.localizedDescription)
@@ -586,6 +592,7 @@ final class ReadyViewModel: ObservableObject {
         latestLocalResult = nil
         latestUploadResult = nil
         finishJobMessage = nil
+        systemCameraMessage = nil
         transitionToCapture(for: context)
     }
 
@@ -602,6 +609,7 @@ final class ReadyViewModel: ObservableObject {
 
         pendingAutoCaptureTask?.cancel()
         photoLibraryImportMessage = nil
+        systemCameraMessage = nil
 
         Task { [weak self] in
             await self?.turnTorchOffForInactiveCapture()
@@ -676,6 +684,7 @@ final class ReadyViewModel: ObservableObject {
         latestLocalResult = nil
         latestUploadResult = nil
         isImportingPhotos = false
+        systemCameraMessage = nil
 
         var messages = [String]()
         if !importedPhotos.isEmpty {
@@ -694,6 +703,93 @@ final class ReadyViewModel: ObservableObject {
             captureState = .sessionReady(context, updatedSession)
         } else if case .captureRequested = captureState {
             transitionToCapture(for: context)
+        }
+    }
+
+    func prepareForSystemCameraCapture() {
+        guard canUseSystemCamera else { return }
+
+        pendingAutoCaptureTask?.cancel()
+        photoLibraryImportMessage = nil
+        systemCameraMessage = "System Camera is open. Captured photos return here and stay local until Finish Job."
+
+        Task { [weak self] in
+            await self?.turnTorchOffForInactiveCapture()
+        }
+    }
+
+    func resumeCaptureAfterSystemCameraCancelIfNeeded() {
+        guard !isAddingSystemCameraPhoto else { return }
+
+        systemCameraMessage = nil
+
+        guard case let .captureRequested(context) = captureState else { return }
+        transitionToCapture(for: context)
+    }
+
+    func handleSystemCameraFailure(_ message: String) {
+        let failureMessage = "System Camera failed: \(message)"
+
+        if case let .captureRequested(context) = captureState {
+            transitionToCapture(for: context)
+        }
+
+        systemCameraMessage = failureMessage
+    }
+
+    func addSystemCameraImageData(_ imageData: Data) async {
+        guard !imageData.isEmpty else {
+            systemCameraMessage = "System Camera returned an empty image."
+            resumeCaptureAfterSystemCameraCancelIfNeeded()
+            return
+        }
+
+        guard canUseSystemCamera else { return }
+        guard let context = activeCaptureContext else { return }
+        guard let currentSession = activeSession else { return }
+        guard currentSession.jobID == context.id else { return }
+
+        pendingAutoCaptureTask?.cancel()
+        await turnTorchOffForInactiveCapture()
+
+        isAddingSystemCameraPhoto = true
+        systemCameraMessage = "Adding System Camera photo..."
+        defer {
+            isAddingSystemCameraPhoto = false
+        }
+
+        do {
+            let importedPhoto = try LocalCapturePhotoStore.ImportedPhotoData(imageData: imageData)
+            let storedPhoto = try photoStore.persistImportedPhoto(
+                importedPhoto,
+                jobID: currentSession.jobID,
+                sortOrder: currentSession.keptPhotos.count,
+                isPrimary: currentSession.keptPhotos.isEmpty
+            )
+
+            let updatedSession = sessionWithReindexedPhotos(
+                jobID: currentSession.jobID,
+                finalUploadTargetJobID: currentSession.finalUploadTargetJobID,
+                resolutionMode: currentSession.resolutionMode,
+                keptPhotos: currentSession.keptPhotos + [storedPhoto],
+                isUploadingFinalSet: false
+            )
+
+            activeSession = updatedSession
+            latestLocalResult = nil
+            latestUploadResult = nil
+            finishJobMessage = context.isTestCamera ? "Test Camera is local only. Photos are discarded when closed." : nil
+            photoLibraryImportMessage = nil
+            systemCameraMessage = "Added 1 photo from System Camera."
+            captureState = .sessionReady(context, updatedSession)
+        } catch {
+            let failureMessage = "System Camera photo could not be kept: \(error.localizedDescription)"
+
+            if case .captureRequested = captureState {
+                transitionToCapture(for: context)
+            }
+
+            systemCameraMessage = failureMessage
         }
     }
 
@@ -792,6 +888,7 @@ final class ReadyViewModel: ObservableObject {
         latestUploadResult = nil
         finishJobMessage = "Test Camera is local only. Photos are discarded when closed."
         photoLibraryImportMessage = nil
+        systemCameraMessage = nil
 
         cameraAvailability = await cameraService.prepareIfNeeded()
         await cameraService.updateCaptureResolutionMode(captureResolutionMode)
@@ -832,6 +929,7 @@ final class ReadyViewModel: ObservableObject {
         isTestCameraActive = false
         finishJobMessage = nil
         photoLibraryImportMessage = nil
+        systemCameraMessage = nil
         isImportingPhotos = false
         captureState = .listening
 
@@ -885,6 +983,7 @@ final class ReadyViewModel: ObservableObject {
             isUploadingFinalSet: false
         )
         finishJobMessage = nil
+        systemCameraMessage = nil
 
         cameraAvailability = await cameraService.prepareIfNeeded()
         await cameraService.updateCaptureResolutionMode(captureResolutionMode)
@@ -1061,6 +1160,7 @@ final class ReadyViewModel: ObservableObject {
         stopSparkleTorch(resetToggle: true)
         isTorchEnabled = false
         photoLibraryImportMessage = nil
+        systemCameraMessage = nil
 
         switch captureMode {
         case .auto:
@@ -1688,6 +1788,20 @@ final class ReadyViewModel: ObservableObject {
     var canImportPhotos: Bool {
         guard hasActiveJob, !isImportingPhotos else { return false }
         guard (activeSession?.keptPhotoCount ?? 0) < LocalCaptureSession.softMaxPhotoCount else { return false }
+
+        switch captureState {
+        case .captureRequested, .waitingForManualCapture, .sessionReady:
+            return true
+        case .idle, .listening, .capturing, .reviewingCapture, .uploadingFinalSet, .completed, .failed:
+            return false
+        }
+    }
+
+    var canUseSystemCamera: Bool {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else { return false }
+        guard !isImportingPhotos, !isAddingSystemCameraPhoto else { return false }
+        guard let activeSession, activeSession.canAddMorePhotos else { return false }
+        guard !activeSession.isUploadingFinalSet else { return false }
 
         switch captureState {
         case .captureRequested, .waitingForManualCapture, .sessionReady:
