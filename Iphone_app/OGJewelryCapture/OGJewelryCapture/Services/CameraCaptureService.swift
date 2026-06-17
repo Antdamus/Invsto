@@ -83,6 +83,7 @@ enum CaptureResolutionMode: String, CaseIterable, Identifiable {
     case standard
     case highResolution
     case closeUpMacro
+    case fullItem
 
     var id: String { rawValue }
 
@@ -94,6 +95,8 @@ enum CaptureResolutionMode: String, CaseIterable, Identifiable {
             "High Resolution"
         case .closeUpMacro:
             "Close-Up / Macro"
+        case .fullItem:
+            "Full Item"
         }
     }
 }
@@ -133,6 +136,8 @@ final class CameraCaptureService: NSObject {
     private var torchState: CameraTorchState = .unknown
 
     private let preferredMaximumZoomFactor: CGFloat = 3.0
+    private let preCaptureStabilizationTimeout: TimeInterval = 0.9
+    private let preCaptureStabilizationPollIntervalNanoseconds: UInt64 = 75_000_000
 
     func prepareIfNeeded() async -> CameraAvailability {
         if case .ready = availability {
@@ -191,7 +196,7 @@ final class CameraCaptureService: NSObject {
             cameraModeStatus = CameraModeStatus(
                 requestedMode: mode,
                 activeCameraLabel: "Simulator fallback",
-                isUsingCloseUpCamera: mode == .closeUpMacro,
+                isUsingCloseUpCamera: false,
                 isUsingStandardFallback: false,
                 message: nil
             )
@@ -218,7 +223,7 @@ final class CameraCaptureService: NSObject {
             return CameraModeStatus(
                 requestedMode: captureResolutionMode,
                 activeCameraLabel: "Simulator fallback",
-                isUsingCloseUpCamera: captureResolutionMode == .closeUpMacro,
+                isUsingCloseUpCamera: false,
                 isUsingStandardFallback: false,
                 message: nil
             )
@@ -496,7 +501,9 @@ final class CameraCaptureService: NSObject {
     }
 
     private func captureFromDevice(jobID: UUID) async throws -> LocalCaptureResult {
-        try await withCheckedThrowingContinuation { continuation in
+        await stabilizeForStillCapture(timeout: preCaptureStabilizationTimeout)
+
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<LocalCaptureResult, Error>) in
             sessionQueue.async {
                 guard !self.isCapturingPhoto else {
                     continuation.resume(throwing: CameraCaptureServiceError.captureInProgress)
@@ -530,6 +537,44 @@ final class CameraCaptureService: NSObject {
 
                 self.activeProcessor = processor
                 self.photoOutput.capturePhoto(with: settings, delegate: processor)
+            }
+        }
+    }
+
+    private func stabilizeForStillCapture(timeout: TimeInterval) async {
+        guard availability != .simulatorFallback, timeout > 0 else { return }
+
+        let deadline = Date().addingTimeInterval(timeout)
+
+        while !Task.isCancelled {
+            let isAdjusting = await isFocusOrExposureAdjusting()
+            guard isAdjusting else { return }
+            guard Date() < deadline else { return }
+
+            let remainingNanoseconds = max(0, deadline.timeIntervalSinceNow) * 1_000_000_000
+            let sleepNanoseconds = min(
+                preCaptureStabilizationPollIntervalNanoseconds,
+                UInt64(remainingNanoseconds)
+            )
+            guard sleepNanoseconds > 0 else { return }
+
+            do {
+                try await Task.sleep(nanoseconds: sleepNanoseconds)
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func isFocusOrExposureAdjusting() async -> Bool {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async {
+                guard let device = self.activeDevice else {
+                    continuation.resume(returning: false)
+                    return
+                }
+
+                continuation.resume(returning: device.isAdjustingFocus || device.isAdjustingExposure)
             }
         }
     }
@@ -725,7 +770,7 @@ final class CameraCaptureService: NSObject {
         switch mode {
         case .standard:
             return minimumDimensions(in: supportedDimensions)
-        case .highResolution, .closeUpMacro:
+        case .highResolution, .closeUpMacro, .fullItem:
             return maximumDimensions(in: supportedDimensions)
         }
     }
@@ -756,6 +801,24 @@ final class CameraCaptureService: NSObject {
             }
 
             return CameraSelection(device: wide, path: .wideFallback)
+        case .fullItem:
+            if let triple = firstBackCamera(of: .builtInTripleCamera) {
+                return CameraSelection(device: triple, path: .triple)
+            }
+
+            if let dualWide = firstBackCamera(of: .builtInDualWideCamera) {
+                return CameraSelection(device: dualWide, path: .dualWide)
+            }
+
+            if let wide = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) {
+                return CameraSelection(device: wide, path: .wide)
+            }
+
+            if let ultraWide = firstBackCamera(of: .builtInUltraWideCamera) {
+                return CameraSelection(device: ultraWide, path: .ultraWide)
+            }
+
+            throw CameraCaptureServiceError.cameraUnavailable
         }
     }
 
@@ -798,7 +861,7 @@ private extension CaptureResolutionMode {
         switch self {
         case .standard:
             false
-        case .highResolution, .closeUpMacro:
+        case .highResolution, .closeUpMacro, .fullItem:
             true
         }
     }
@@ -856,6 +919,12 @@ private struct CameraSelection {
             message = "Close-Up / Macro is using the Ultra Wide camera."
         case (.closeUpMacro, .dualWide), (.closeUpMacro, .triple):
             message = "Close-Up / Macro is using a multi-camera close-up path."
+        case (.fullItem, .triple), (.fullItem, .dualWide):
+            message = "Full Item is using a multi-camera path for longer pieces."
+        case (.fullItem, .wide), (.fullItem, .wideFallback):
+            message = "Full Item is using the Wide camera for full-object framing."
+        case (.fullItem, .ultraWide):
+            message = "Full Item fell back to the Ultra Wide camera on this device."
         default:
             message = nil
         }
@@ -863,7 +932,7 @@ private struct CameraSelection {
         return CameraModeStatus(
             requestedMode: mode,
             activeCameraLabel: path.label,
-            isUsingCloseUpCamera: path.isCloseUpCamera,
+            isUsingCloseUpCamera: mode == .closeUpMacro && path.isCloseUpCamera,
             isUsingStandardFallback: path.isStandardFallback,
             message: message
         )

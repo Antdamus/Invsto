@@ -146,6 +146,14 @@ struct ReadyView: View {
                         Text("High Resolution requests the largest processed still-photo dimensions supported by the active camera format on this device.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                    } else if viewModel.captureResolutionMode == .closeUpMacro {
+                        Text("Macro is best for tiny close-up details.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else if viewModel.captureResolutionMode == .fullItem {
+                        Text("Full Item is better for longer pieces and full-object sharpness.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
 
                     if let cameraModeMessage = viewModel.cameraModeStatus.message {
