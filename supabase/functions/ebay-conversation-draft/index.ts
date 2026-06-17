@@ -742,14 +742,20 @@ function buildDraftInput(
 ) {
   const messages = safeArray(context.messages) as Array<Record<string, any>>;
   const grounding = buildGrounding(context);
-  return {
-    conversation: context.conversation || {},
-    target_message: compactMessageForDraft(targetMessage),
-    latest_message: compactMessageForDraft(latestMessage(messages)),
-    latest_inbound_message: compactMessageForDraft(latestInboundMessage(messages)),
-    timeline: messages.slice(-60).map(compactMessageForDraft),
-    classification: classification ? effectiveClassification(classification) : null,
-    objective_context: {
+  const manualRewriteOnly = mode === "improve" && manualSendBypass && Boolean(safeBodyText(operatorDraftText, MAX_DRAFT_TEXT_CHARS));
+  const objectiveContext = manualRewriteOnly
+    ? {
+      buyer: context.buyer || {},
+      matched_orders: [],
+      matched_order_lines: [],
+      matched_returns: [],
+      buyer_history_summary: context.buyer_history_summary || null,
+      buyer_value_line_breakdown: safeArray(context.buyer_value_line_breakdown),
+      inventory_listing_context: [],
+      link_confidence: context.link_confidence || {},
+      context_warnings: [],
+    }
+    : {
       buyer: context.buyer || {},
       matched_orders: safeArray(context.matched_orders),
       matched_order_lines: safeArray(context.matched_order_lines),
@@ -759,7 +765,15 @@ function buildDraftInput(
       inventory_listing_context: safeArray(context.inventory_listing_context),
       link_confidence: context.link_confidence || {},
       context_warnings: safeArray(context.warnings),
-    },
+    };
+  return {
+    conversation: context.conversation || {},
+    target_message: manualRewriteOnly ? null : compactMessageForDraft(targetMessage),
+    latest_message: manualRewriteOnly ? null : compactMessageForDraft(latestMessage(messages)),
+    latest_inbound_message: manualRewriteOnly ? null : compactMessageForDraft(latestInboundMessage(messages)),
+    timeline: manualRewriteOnly ? [] : messages.slice(-60).map(compactMessageForDraft),
+    classification: classification ? effectiveClassification(classification) : null,
+    objective_context: objectiveContext,
     grounding,
     operator_draft: operatorDraftText || null,
     operator_instructions: improvementInstructions || null,
@@ -790,6 +804,150 @@ function buildDraftInput(
   };
 }
 
+function buildManualRewriteInput(
+  context: Record<string, any>,
+  targetMessage: Record<string, any>,
+  operatorDraftText: string | null,
+  improvementInstructions: string | null,
+  previousDraft: Record<string, any> | null,
+  version: string,
+) {
+  const messages = safeArray(context.messages) as Array<Record<string, any>>;
+  const buyer = parseObject(context.buyer);
+  const history = parseObject(context.buyer_history_summary);
+  const conversation = parseObject(context.conversation);
+  const latest = latestMessage(messages);
+  const latestInbound = latestInboundMessage(messages) || targetMessage || null;
+  const nowMs = Date.now();
+  const delayHours = (value: unknown) => {
+    const timestamp = Date.parse(String(value || ""));
+    if (!Number.isFinite(timestamp)) return null;
+    const hours = (nowMs - timestamp) / 36e5;
+    return Number.isFinite(hours) && hours >= 0 ? Number(hours.toFixed(2)) : null;
+  };
+  const latestMessageAt = currentMessageTime(latest);
+  const latestInboundAt = currentMessageTime(latestInbound);
+  const targetMessageAt = currentMessageTime(targetMessage);
+  const hoursSinceLatestMessage = delayHours(latestMessageAt);
+  const hoursSinceLatestInbound = delayHours(latestInboundAt);
+  const delayContext = {
+    now: new Date(nowMs).toISOString(),
+    latest_message_at: latestMessageAt || null,
+    latest_inbound_message_at: latestInboundAt || null,
+    target_message_at: targetMessageAt || null,
+    hours_since_latest_message: hoursSinceLatestMessage,
+    hours_since_latest_inbound_message: hoursSinceLatestInbound,
+    significant_delay: typeof hoursSinceLatestInbound === "number" ? hoursSinceLatestInbound >= 24 : false,
+    significant_delay_threshold_hours: 24,
+  };
+  const fullName = text(buyer.name, 180) || null;
+  const buyerToneContext = {
+    username: buyer.username || null,
+    full_name: fullName,
+    first_name: fullName ? fullName.split(/\s+/)[0] || null : null,
+    confidence: buyer.confidence || null,
+    prior_order_count: history.prior_order_count ?? null,
+    cash_spent_gross_value: history.gross_value ?? null,
+    cash_spent_retained_value: history.retained_value ?? null,
+    cash_spent_best_value: history.retained_value ?? history.gross_value ?? null,
+    average_order_value: history.average_order_value ?? null,
+    return_count: history.return_count ?? null,
+    last_prior_purchase_at: history.last_prior_purchase_at || null,
+    first_prior_purchase_at: history.first_prior_purchase_at || null,
+  };
+  return {
+    manual_rewrite_only: true,
+    operator_draft: safeBodyText(operatorDraftText, MAX_DRAFT_TEXT_CHARS),
+    operator_instructions: improvementInstructions || null,
+    buyer_tone_context: buyerToneContext,
+    response_delay_context: delayContext,
+    conversation: {
+      id: conversation.id || null,
+      ebay_conversation_id: conversation.ebay_conversation_id || null,
+      other_party_username: conversation.other_party_username || buyer.username || null,
+    },
+    target_message: null,
+    latest_message: null,
+    latest_inbound_message: null,
+    timeline: [],
+    classification: null,
+    objective_context: {
+      buyer_tone_context: buyerToneContext,
+      response_delay_context: delayContext,
+    },
+    grounding: {
+      facts: [],
+      missing_context_options: [],
+    },
+    previous_draft: previousDraft
+      ? {
+        id: previousDraft.id || null,
+        source_mode: previousDraft.source_mode || null,
+        manual_send_bypass: draftAllowsManualSend(previousDraft),
+        final_text: previousDraft.final_text || previousDraft.edited_text || previousDraft.draft_text || null,
+        created_at: previousDraft.created_at || null,
+      }
+      : null,
+    draft_request: {
+      mode: "improve",
+      generator_name: GENERATOR_NAME,
+      generator_version: GENERATOR_VERSION,
+      prompt_version: version,
+      target_message_id: targetMessage.id || null,
+      output_is_internal_suggestion: true,
+      human_review_required: false,
+      manual_send_bypass: true,
+      manual_rewrite_only: true,
+      sends_allowed: false,
+      ebay_mutations_allowed: false,
+    },
+  };
+}
+
+function buildManualRewritePrompt(version: string) {
+  return `
+You are a copy editor for OG eBay Messaging Ops.
+Return strict JSON only. Do not include markdown wrappers, prose outside JSON, or chain-of-thought.
+
+Task:
+- Rewrite only operator_draft.
+- Do not answer the buyer from scratch.
+- Do not infer case facts.
+- Do not use any conversation, classification, order, return, inventory, replacement, refund-process, or grounding details to change the substance.
+- buyer_tone_context is only for name selection, warmth, care level, and VIP-level polish. It may include the buyer's full name and cash-spend/value metrics so you can calibrate the response.
+- response_delay_context is only for tone and delay handling. It may include how many hours have passed since the latest buyer message.
+- Never mention VIP status, spend amounts, buyer flags, internal segmentation, or internal delay calculations to the buyer.
+
+Hard preservation rules:
+- Preserve every operator-written factual claim, named person, offer, concession, refund term, payment form, amount, condition, caveat, and commitment.
+- Preserve references to OG if operator_draft mentions OG.
+- Preserve offers involving refunds, cash, two-dollar bills, future purchases, replacements, discounts, compensation, timing, and apologies.
+- Correct spelling and grammar without changing meaning. For example, "2 dollars bills" may become "two-dollar bills", but must not become a generic "refund process".
+- If operator_draft says "I spoke to OG and he wants to give you a refund in two-dollar bills on your next purchase if you are ok with it", the output must preserve that exact substance.
+- Do not add "currently there is no replacement available" unless operator_draft says that.
+- Do not add "we are reviewing the refund process" unless operator_draft says that.
+
+Style:
+- Professional, warm, concise eBay seller reply.
+- One short paragraph is preferred.
+- Use the buyer's full name or first name when it is naturally available from operator_draft or buyer_tone_context.
+- If response_delay_context.significant_delay is true, you may add a brief apology for the delay if it fits naturally and does not change the operator's offer or commitments.
+- Keep uncertainty/permission language such as "if you are okay with it".
+- No subject line and no signature.
+
+Output JSON fields:
+- draft_text: buyer-facing rewritten version only.
+- tone: short label such as professional_friendly.
+- summary_of_intent: internal one-sentence summary.
+- facts_used: empty array unless a fact id is explicitly supplied in grounding.facts.
+- missing_context: short internal list if any.
+- safety_warnings: short internal list if any.
+- confidence: number from 0 to 1.
+
+Prompt version: ${version}.
+`.trim();
+}
+
 function buildPrompt(version: string) {
   return `
 You are an AI draft assistant for OG eBay Messaging Ops.
@@ -806,7 +964,15 @@ Draft style:
 - If objective_context shows a repeat, high-value, or VIP buyer, use that only to make the tone warmer, more careful, and more relationship-aware.
 - Do not mention lifetime spend, retained value, VIP status, buyer flags, or internal buyer segmentation to the buyer unless the operator explicitly wrote that language and it is safe.
 
+Manual handwritten improve rules:
+- If draft_request.mode is "improve" and draft_request.manual_send_bypass is true, operator_draft is the authoritative source of truth.
+- For manual handwritten improve, act as a copy editor only: fix grammar, spelling, punctuation, clarity, tone, flow, and professionalism.
+- For manual handwritten improve, do not use target_message, timeline, classification, matched orders, returns, or objective_context to change, add, remove, soften, or correct the substance of operator_draft.
+- Preserve all operator-written names, people, offers, concessions, refund terms, payment form, amounts, conditions, caveats, and commitments. For example, if operator_draft says they spoke to OG and OG offered a refund in two-dollar bills on the next purchase, preserve that meaning.
+- For manual handwritten improve, objective_context may only influence warmth and care level for repeat, high-value, or VIP buyers.
+
 Grounding rules:
+- These grounding rules apply to generate, regenerate, and non-manual improve. They do not override the manual handwritten improve rules above.
 - Center the reply on target_message. Treat the full timeline, classification, and objective_context as supporting context.
 - Use only the supplied eBay conversation timeline, target buyer message, latest inbound buyer message, classification, and objective_context.
 - grounding.facts contains fact ids that may be cited in facts_used. facts_used must contain only those exact ids.
@@ -829,9 +995,9 @@ Improve mode:
 - Keep the operator's specific intent, requested action, concessions, caveats, and factual uncertainty.
 - Apply operator_instructions when provided, but only for wording, tone, organization, length, or readability.
 - Preserve the operator's meaning and caveats.
-- Do not add facts that are not in objective_context or grounding.facts.
-- Do not remove uncertainty where context is missing.
-- Do not add tracking, refunds, order status, delivery dates, replacement availability, promises, or commitments unless directly supported by objective_context and grounding.facts.
+- For non-manual improve, do not add facts that are not in objective_context or grounding.facts.
+- For non-manual improve, do not remove uncertainty where context is missing.
+- For non-manual improve, do not add tracking, refunds, order status, delivery dates, replacement availability, promises, or commitments unless directly supported by objective_context and grounding.facts.
 
 Output JSON fields:
 - draft_text: buyer-facing draft only.
@@ -949,6 +1115,10 @@ function allowedOrderNumbers(input: Record<string, any>) {
 function validateDraftOutput(raw: unknown, input: Record<string, any>) {
   const errors: string[] = [];
   const safetyWarnings = new Set<string>();
+  const isImproveMode = input.draft_request?.mode === "improve";
+  const operatorCombined = safeBodyText(input.operator_draft, MAX_DRAFT_TEXT_CHARS).toLowerCase();
+  const isManualImprove = isImproveMode && input.draft_request?.manual_send_bypass === true && Boolean(operatorCombined);
+  const operatorAlreadySaid = (patterns: RegExp[]) => isImproveMode && Boolean(operatorCombined) && containsAny(operatorCombined, patterns);
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return {
       ok: false,
@@ -963,7 +1133,7 @@ function validateDraftOutput(raw: unknown, input: Record<string, any>) {
   const draftText = safeBodyText(row.draft_text, MAX_DRAFT_TEXT_CHARS);
   const tone = text(row.tone, 80) || "professional_friendly";
   const summaryOfIntent = text(row.summary_of_intent, 300) || "Draft a safe operator-reviewed buyer reply.";
-  const factsUsed = safeArray(row.facts_used).map((item) => text(item, 240)).filter(Boolean).slice(0, 20);
+  let factsUsed = safeArray(row.facts_used).map((item) => text(item, 240)).filter(Boolean).slice(0, 20);
   const missingContext = safeArray(row.missing_context).map((item) => text(item, 240)).filter(Boolean).slice(0, 20);
   const modelWarnings = safeArray(row.safety_warnings).map((item) => text(item, 240)).filter(Boolean).slice(0, 20);
   const confidence = Math.min(Math.max(Number(row.confidence), 0), 1);
@@ -979,8 +1149,42 @@ function validateDraftOutput(raw: unknown, input: Record<string, any>) {
   if (!Array.isArray(row.safety_warnings)) errors.push("invalid_safety_warnings");
 
   const allowedFactIds = new Set((safeArray(input.grounding?.facts) as GroundingFact[]).map((fact) => fact.id));
-  for (const fact of factsUsed) {
-    if (!allowedFactIds.has(fact)) errors.push(`unsupported_fact_used:${fact}`);
+  if (isManualImprove) {
+    factsUsed = factsUsed.filter((fact) => allowedFactIds.has(fact));
+  } else {
+    for (const fact of factsUsed) {
+      if (!allowedFactIds.has(fact)) errors.push(`unsupported_fact_used:${fact}`);
+    }
+  }
+
+  const normalized: DraftOutput = {
+    draft_text: draftText,
+    tone,
+    summary_of_intent: summaryOfIntent,
+    facts_used: factsUsed,
+    missing_context: missingContext,
+    safety_warnings: [...new Set([...modelWarnings, ...safetyWarnings])].slice(0, 20),
+    confidence: Number.isFinite(confidence) ? confidence : 0,
+  };
+
+  if (isManualImprove) {
+    if (errors.length) {
+      return {
+        ok: false,
+        value: buildFallbackDraft(input, errors[0] || "manual improve structural validation failed"),
+        validationErrors: [...new Set(errors)].slice(0, 40),
+        safetyWarnings: normalized.safety_warnings,
+        fallbackUsed: true,
+        original: normalized,
+      };
+    }
+    return {
+      ok: true,
+      value: normalized,
+      validationErrors: [],
+      safetyWarnings: normalized.safety_warnings,
+      fallbackUsed: false,
+    };
   }
 
   const combined = draftText.toLowerCase();
@@ -1004,27 +1208,48 @@ function validateDraftOutput(raw: unknown, input: Record<string, any>) {
   const hasShipmentStatus = orderRows.some((order) => orderShipmentStatus(order));
   const knownTrackingNumbers = new Set(orderRows.map(orderTrackingNumber).filter(Boolean));
   const trackingLike = draftText.match(/\b[A-Z0-9]{10,34}\b/g) || [];
-  if (containsAny(combined, [/\btracking\s+(number|#)\s+(is|:)/i]) && !hasTracking) {
+  const trackingClaimPatterns = [/\btracking\s+(number|#)\s+(is|:)/i];
+  if (containsAny(combined, trackingClaimPatterns) && !hasTracking && !operatorAlreadySaid(trackingClaimPatterns)) {
     errors.push("unsupported_tracking_number_claim");
     safetyWarnings.add("tracking number claim was not supported by context");
   }
   for (const token of trackingLike) {
-    if (/\d/.test(token) && !knownTrackingNumbers.has(token) && !orderNumbers.has(token)) {
+    if (/\d/.test(token) && !knownTrackingNumbers.has(token) && !orderNumbers.has(token) && !(isImproveMode && operatorCombined.includes(token.toLowerCase()))) {
       errors.push(`unsupported_tracking_like_token:${token}`);
     }
   }
-  if (containsAny(combined, [/\b(shipped|has shipped|was shipped|is in transit|out for delivery|delivered|label created)\b/i]) && !hasShippedDate && !hasShipmentStatus) {
+  const shippingStatusPatterns = [/\b(shipped|has shipped|was shipped|is in transit|out for delivery|delivered|label created)\b/i];
+  if (containsAny(combined, shippingStatusPatterns) && !hasShippedDate && !hasShipmentStatus && !operatorAlreadySaid(shippingStatusPatterns)) {
     errors.push("unsupported_shipping_status_claim");
     safetyWarnings.add("shipment status wording was not supported by context");
   }
-  if (containsAny(combined, [
-    /\b(refund(ed)?|refund has been|refund is|refund will be|issue a refund|process a refund)\b/i,
-    /\b(return (has been )?(accepted|approved)|return is approved)\b/i,
-    /\b(replacement|store credit|discount|compensation)\s+(is|will be|has been|can be)\b/i,
-    /\b(arrive tomorrow|arrives tomorrow|will arrive|delivered by|today|tomorrow)\b/i,
-  ])) {
-    errors.push("unsupported_commitment_or_timeline_claim");
-    safetyWarnings.add("draft included a refund, return, replacement, or timeline claim needing review");
+  const commitmentGroups = [
+    {
+      code: "unsupported_refund_claim",
+      warning: "draft included refund wording needing review",
+      patterns: [/\b(refund(ed)?|refund has been|refund is|refund will be|issue a refund|process a refund)\b/i],
+    },
+    {
+      code: "unsupported_return_claim",
+      warning: "draft included return approval wording needing review",
+      patterns: [/\b(return (has been )?(accepted|approved)|return is approved)\b/i],
+    },
+    {
+      code: "unsupported_replacement_or_credit_claim",
+      warning: "draft included replacement, store credit, discount, or compensation wording needing review",
+      patterns: [/\b(replacement|store credit|discount|compensation)\s+(is|will be|has been|can be)\b/i],
+    },
+    {
+      code: "unsupported_delivery_timeline_claim",
+      warning: "draft included delivery or timing wording needing review",
+      patterns: [/\b(arrive tomorrow|arrives tomorrow|will arrive|delivered by|today|tomorrow)\b/i],
+    },
+  ];
+  for (const group of commitmentGroups) {
+    if (containsAny(combined, group.patterns) && !operatorAlreadySaid(group.patterns)) {
+      errors.push(group.code);
+      safetyWarnings.add(group.warning);
+    }
   }
   if (containsAny(combined, [/\b(database|supabase|internal system|our system has no|records show no)\b/i])) {
     errors.push("internal_system_language");
@@ -1037,16 +1262,6 @@ function validateDraftOutput(raw: unknown, input: Record<string, any>) {
     errors.push("unsafe_fault_admission");
     safetyWarnings.add("draft included a fault or liability admission");
   }
-
-  const normalized: DraftOutput = {
-    draft_text: draftText,
-    tone,
-    summary_of_intent: summaryOfIntent,
-    facts_used: factsUsed,
-    missing_context: missingContext,
-    safety_warnings: [...new Set([...modelWarnings, ...safetyWarnings])].slice(0, 20),
-    confidence: Number.isFinite(confidence) ? confidence : 0,
-  };
 
   if (errors.length) {
     return {
@@ -1543,9 +1758,6 @@ async function generateDraft(
     throw new DraftError("draft_text_required", { status: 400, phase: "input" });
   }
 
-  const promptVersionValue = promptVersion();
-  const prompt = buildPrompt(promptVersionValue);
-  const promptHash = await sha256Hex(stableStringify({ prompt, schema: jsonSchema(), generator_version: GENERATOR_VERSION }));
   const model = modelName();
   const [context, classification] = await Promise.all([
     buildEbayConversationContext(supabase, conversation.id, rpcSupabase),
@@ -1553,17 +1765,29 @@ async function generateDraft(
   ]);
   const targetMessage = await resolveTargetMessage(supabase, conversation.id, context as Record<string, any>, input, previousDraft);
   const manualImprove = input.mode === "improve" && (input.manualComposer || draftAllowsManualSend(previousDraft));
-  const draftInput = buildDraftInput(
-    context as Record<string, any>,
-    classification,
-    targetMessage,
-    input.mode,
-    operatorDraft,
-    input.improvementInstructions,
-    previousDraft,
-    manualImprove,
-    promptVersionValue,
-  );
+  const promptVersionValue = manualImprove ? `${promptVersion()}-manual-rewrite-v2` : promptVersion();
+  const prompt = manualImprove ? buildManualRewritePrompt(promptVersionValue) : buildPrompt(promptVersionValue);
+  const promptHash = await sha256Hex(stableStringify({ prompt, schema: jsonSchema(), generator_version: GENERATOR_VERSION }));
+  const draftInput = manualImprove
+    ? buildManualRewriteInput(
+      context as Record<string, any>,
+      targetMessage,
+      operatorDraft,
+      input.improvementInstructions,
+      previousDraft,
+      promptVersionValue,
+    )
+    : buildDraftInput(
+      context as Record<string, any>,
+      classification,
+      targetMessage,
+      input.mode,
+      operatorDraft,
+      input.improvementInstructions,
+      previousDraft,
+      false,
+      promptVersionValue,
+    );
   const contextHash = await sha256Hex(stableStringify(context));
   const inputHash = await sha256Hex(stableStringify({
     generator_name: GENERATOR_NAME,

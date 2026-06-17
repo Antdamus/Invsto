@@ -1598,6 +1598,78 @@
     }
   }
 
+  async function fetchEbayConversationById(context, conversationId) {
+    await currentSession(context, "eBay conversation");
+    if (!conversationId) {
+      const error = new Error("conversation_id_required");
+      error.code = "conversation_id_required";
+      throw error;
+    }
+
+    const { data: conversation, error } = await context.client
+      .from("ebay_conversations")
+      .select("id, seller_account_id, ebay_conversation_id, conversation_type, conversation_status, conversation_title, other_party_username, reference_id, reference_type, unread_count, provider_read_state, local_read_state, pending_provider_update, last_provider_seen_at, last_local_read_at, last_read_sync_at, read_sync_status, read_sync_error, latest_message_id, latest_message_created_at, latest_message_preview, first_message_created_at, last_message_created_at, message_count, last_synced_at, last_detail_synced_at, updated_at, created_at")
+      .eq("id", conversationId)
+      .maybeSingle();
+    throwSupabaseReadError(error, "ebay_conversation_fetch_failed");
+    if (!conversation) {
+      return {
+        ok: false,
+        conversation: null,
+      };
+    }
+
+    const [linksResult, messagesResult, sellersResult, classificationsResult] = await Promise.all([
+      context.client
+        .from("ebay_conversation_links")
+        .select("conversation_id, link_type, link_key, status, confidence, ebay_order_id, ebay_order_line_id, ebay_return_case_id, reference_id, reference_type, buyer_username, matched_value, metadata")
+        .eq("conversation_id", conversation.id)
+        .in("status", ["confirmed", "suggested"])
+        .limit(2000),
+      context.client
+        .from("ebay_conversation_messages")
+        .select("conversation_id, ebay_message_id, sender_username, recipient_username, direction, subject, message_body, message_body_preview, has_media, media_count, created_at_ebay, created_at")
+        .eq("conversation_id", conversation.id)
+        .order("created_at_ebay", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false })
+        .limit(200),
+      context.client
+        .from("ebay_seller_accounts")
+        .select("id, seller_username")
+        .eq("id", conversation.seller_account_id)
+        .limit(1),
+      context.client
+        .from("ebay_conversation_classifications")
+        .select("id, conversation_id, latest_message_id, latest_ebay_message_id, conversation_source, classification_status, priority, response_need, topic_tags, buyer_flags, risk_flags, confidence, summary, reasoning_summary, recommended_action, input_hash, context_hash, classifier_name, classifier_version, prompt_version, model_name, is_current, superseded_at, review_state, operator_override_payload, operator_notes, reviewed_by, reviewed_at, created_at, updated_at")
+        .eq("conversation_id", conversation.id)
+        .eq("is_current", true)
+        .maybeSingle(),
+    ]);
+
+    throwSupabaseReadError(linksResult.error, "ebay_conversation_link_summary_failed");
+    throwSupabaseReadError(messagesResult.error, "ebay_conversation_message_summary_failed");
+    throwSupabaseReadError(sellersResult.error, "ebay_conversation_seller_summary_failed");
+    throwSupabaseReadError(classificationsResult.error, "ebay_conversation_classification_summary_failed");
+
+    const linkedRows = await fetchEbayLinkedContextRows(context, linksResult.data || []);
+    const summaries = buildEbayConversationSummaries(
+      [conversation],
+      linksResult.data || [],
+      messagesResult.data || [],
+      sellersResult.data || [],
+      linkedRows,
+    );
+
+    return {
+      ok: true,
+      conversation: normalizeEbayConversationRow(
+        conversation,
+        summaries.get(conversation.id) || {},
+        classificationsResult.data || null,
+      ),
+    };
+  }
+
   async function fetchEbayConversationMessages(context, conversationId) {
     await currentSession(context, "eBay conversation messages");
     if (!conversationId) {
@@ -1620,6 +1692,37 @@
       conversation_id: conversationId,
       messages: data || [],
       loaded_at: new Date().toISOString(),
+    };
+  }
+
+  async function fetchTeamTaskAssignees(context) {
+    await currentSession(context, "Team task assignees");
+    const { data, error } = await context.client.rpc("list_team_task_assignees");
+    throwSupabaseReadError(error, "team_task_assignees_failed");
+    return {
+      ok: true,
+      assignees: Array.isArray(data) ? data : [],
+    };
+  }
+
+  async function createEbayConversationMessageTask(context, values = {}) {
+    const session = await currentSession(context, "Create eBay conversation message task");
+    const { data, error } = await context.client.rpc("create_ebay_conversation_message_task", {
+      _conversation_id: values.conversationId || null,
+      _message_id: values.messageId || null,
+      _title: String(values.title || "").trim(),
+      _description: String(values.description || "").trim() || null,
+      _assigned_to_user_id: values.assignedToUserId || null,
+      _priority: values.priority || "normal",
+      _due_at: values.dueAt || null,
+      _task_tag: values.taskTag || null,
+      _refund_amount: values.refundAmount || null,
+      _signed_by_email: session.user?.email || values.signedByEmail || null,
+    });
+    throwSupabaseReadError(error, "ebay_conversation_message_task_create_failed");
+    return {
+      ok: true,
+      task: data || null,
     };
   }
 
@@ -1954,7 +2057,10 @@
     edgeFetchWithTimeout,
     normalizeOperationalDashboardPayload,
     fetchEbayConversations,
+    fetchEbayConversationById,
     fetchEbayConversationMessages,
+    fetchTeamTaskAssignees,
+    createEbayConversationMessageTask,
     markEbayConversationRead,
     syncEbayProviderReadState,
     processPendingEbayProviderReadState,

@@ -134,6 +134,12 @@ function formatMoney(value) {
   });
 }
 
+function formatTaskTag(value = "") {
+  const label = String(value || "").trim().replace(/[_-]+/g, " ");
+  if (!label) return "";
+  return label.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function normalizeLookup(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -616,10 +622,14 @@ async function loadReturnTaskRecords() {
 }
 
 function normalizeTeamTask(task = {}) {
+  const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
+  const isEbayMessageTask = metadata.source === "ebay_conversation_message";
+  const taskTag = String(metadata.task_tag || "").trim().toLowerCase();
   return {
     ...task,
     source: "team",
-    sourceLabel: "",
+    metadata,
+    sourceLabel: isEbayMessageTask ? (taskTag === "refunds" ? "Refund" : "eBay Message") : "",
     actionHref: `team-tasks.html?taskId=${encodeURIComponent(task.id || "")}`,
   };
 }
@@ -1418,9 +1428,67 @@ function renderReturnTaskContext(task = {}) {
   `;
 }
 
+function getEbayConversationTaskContext(task = {}) {
+  const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
+  if (metadata.source !== "ebay_conversation_message") return null;
+  const params = new URLSearchParams();
+  if (metadata.conversation_id) params.set("ebayConversationDbId", metadata.conversation_id);
+  if (metadata.message_id) params.set("ebayMessageDbId", metadata.message_id);
+  if (metadata.ebay_conversation_id) params.set("ebayConversationId", metadata.ebay_conversation_id);
+  if (metadata.buyer_username) params.set("ebayBuyer", metadata.buyer_username);
+  return {
+    conversationId: metadata.conversation_id || "",
+    messageId: metadata.message_id || "",
+    ebayConversationId: metadata.ebay_conversation_id || "",
+    ebayMessageId: metadata.ebay_message_id || "",
+    buyer: metadata.buyer_username || "",
+    sender: metadata.sender_username || "",
+    recipient: metadata.recipient_username || "",
+    direction: metadata.message_direction || "",
+    createdAt: metadata.message_created_at || "",
+    subject: metadata.message_subject || "",
+    preview: metadata.message_preview || "",
+    title: metadata.conversation_title || "",
+    taskTag: metadata.task_tag || "",
+    refundAmount: metadata.refund_amount || "",
+    href: params.toString() ? `email-triage.html?${params.toString()}` : metadata.conversation_link || "email-triage.html",
+  };
+}
+
+function renderEbayConversationTeamTaskContext(task = {}) {
+  const context = getEbayConversationTaskContext(task);
+  if (!context) return "";
+  return `
+    <section class="team-task-context ebay-message-task-context">
+      <div class="team-task-context-head">
+        <span class="eyebrow">eBay Conversation Context</span>
+        <strong>${escapeHtml(context.buyer || context.title || "Customer message")}</strong>
+      </div>
+      <div class="team-task-facts">
+        ${context.buyer ? `<span><small>Buyer</small><b>${escapeHtml(context.buyer)}</b></span>` : ""}
+        ${context.direction ? `<span><small>Message</small><b>${escapeHtml(context.direction)}</b></span>` : ""}
+        ${context.sender ? `<span><small>From</small><b>${escapeHtml(context.sender)}</b></span>` : ""}
+        ${context.recipient ? `<span><small>To</small><b>${escapeHtml(context.recipient)}</b></span>` : ""}
+        ${context.createdAt ? `<span><small>Sent</small><b>${escapeHtml(formatDate(context.createdAt))}</b></span>` : ""}
+        ${context.ebayConversationId ? `<span><small>Conversation</small><b>${escapeHtml(context.ebayConversationId)}</b></span>` : ""}
+        ${context.taskTag ? `<span class="team-task-refund-fact"><small>Tag</small><b>${escapeHtml(formatTaskTag(context.taskTag))}</b></span>` : ""}
+        ${context.refundAmount ? `<span class="team-task-refund-fact"><small>Refund amount</small><b>${escapeHtml(formatMoney(context.refundAmount) || context.refundAmount)}</b></span>` : ""}
+      </div>
+      ${context.subject ? `<p class="team-task-important"><strong>Subject</strong><span>${escapeHtml(context.subject)}</span></p>` : ""}
+      ${context.preview ? `<p class="team-task-important"><strong>Source message</strong><span>${escapeHtml(context.preview)}</span></p>` : ""}
+      <div class="team-task-context-links">
+        <a href="${escapeHtml(context.href)}">
+          Open eBay Conversation
+        </a>
+      </div>
+    </section>
+  `;
+}
+
 function renderTaskContext(task = {}) {
   if (task.source === "order") return renderOrderTaskContext(task);
   if (task.source === "return") return renderReturnTaskContext(task);
+  if (task.source === "team") return renderEbayConversationTeamTaskContext(task);
   return "";
 }
 
@@ -1465,6 +1533,8 @@ function renderTasks() {
           ${task.source !== "team" && task.sourceLabel ? `<span class="team-task-source">${escapeHtml(task.sourceLabel)}</span>` : ""}
           <span>${escapeHtml(task.task_type || "general")}</span>
           <span>${escapeHtml(task.priority || "normal")}</span>
+          ${task.source === "team" && task.sourceLabel ? `<span class="team-task-source">${escapeHtml(task.sourceLabel)}</span>` : ""}
+          ${task.source === "team" && task.metadata?.refund_amount ? `<span class="team-task-source">Refund ${escapeHtml(formatMoney(task.metadata.refund_amount) || task.metadata.refund_amount)}</span>` : ""}
           <span>Assigned: ${escapeHtml(getTaskAssigneeLabel(task))}</span>
           <span>Due ${escapeHtml(formatDate(task.due_at))}</span>
           ${task.order_number ? `<span>Order ${escapeHtml(task.order_number)}</span>` : ""}

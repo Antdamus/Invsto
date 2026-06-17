@@ -127,6 +127,12 @@
       ebayConversationDraftActionLoadingId: null,
       ebayConversationDraftActionErrorsById: {},
       ebayConversationDraftActionMessagesById: {},
+      ebayConversationTaskModal: null,
+      ebayConversationTaskAssignees: [],
+      ebayConversationTaskAssigneesLoading: false,
+      ebayConversationTaskSaving: false,
+      ebayConversationTaskError: null,
+      ebayConversationTaskMessage: null,
       ebayConversationClassificationCollapsed: Object.prototype.hasOwnProperty.call(overrides, "ebayConversationClassificationCollapsed")
         ? overrides.ebayConversationClassificationCollapsed === true
         : false,

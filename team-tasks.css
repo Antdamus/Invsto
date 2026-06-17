@@ -499,6 +499,13 @@ body {
   background: rgba(241, 214, 155, 0.045);
 }
 
+.ebay-message-task-context {
+  border-color: rgba(114, 184, 255, 0.2);
+  background:
+    radial-gradient(circle at top left, rgba(114, 184, 255, 0.1), transparent 32%),
+    rgba(114, 184, 255, 0.045);
+}
+
 .order-workflow-list {
   display: grid;
   gap: 10px;
@@ -592,6 +599,21 @@ body {
   display: block;
   color: var(--task-text);
   font-weight: 900;
+}
+
+.team-task-facts .team-task-refund-fact {
+  border-color: rgba(241, 214, 155, 0.32);
+  background:
+    radial-gradient(circle at top left, rgba(241, 214, 155, 0.16), transparent 42%),
+    rgba(241, 214, 155, 0.07);
+}
+
+.team-task-facts .team-task-refund-fact small {
+  color: rgba(241, 214, 155, 0.78);
+}
+
+.team-task-facts .team-task-refund-fact b {
+  color: var(--task-gold);
 }
 
 .team-task-lines {

@@ -5,7 +5,10 @@
     requireAdmin,
     fetchOperationalDashboard,
     fetchEbayConversations,
+    fetchEbayConversationById,
     fetchEbayConversationMessages,
+    fetchTeamTaskAssignees,
+    createEbayConversationMessageTask,
     markEbayConversationRead,
     syncEbayProviderReadState,
     processPendingEbayProviderReadState,
@@ -427,7 +430,7 @@
     categorySortMode: getStoredCategorySortMode(),
     customCategoryOrder: getStoredCustomCategoryOrder(),
     operationalDashboardCollapsed: getStoredDashboardCollapsed(),
-    ebayConversationClassificationCollapsed: !getStoredBooleanPreference(EBAY_CLASSIFICATION_EXPANDED_STORAGE_KEY, true),
+    ebayConversationClassificationCollapsed: !getStoredBooleanPreference(EBAY_CLASSIFICATION_EXPANDED_STORAGE_KEY, false),
     ebayDraftMetadataCollapsed: getStoredBooleanPreference(EBAY_DRAFT_METADATA_COLLAPSED_STORAGE_KEY, true),
   }));
   let adminClassificationState = triageStore.getState();
@@ -3416,6 +3419,351 @@
     renderEbayConversationInbox(adminClassificationState);
   }
 
+  function ebayConversationDeepLinkRequest() {
+    const params = new URLSearchParams(window.location.search || "");
+    const conversationDbId = compactConversationText(
+      params.get("ebayConversationDbId") || params.get("conversationDbId") || "",
+    );
+    const messageDbId = compactConversationText(
+      params.get("ebayMessageDbId") || params.get("messageDbId") || "",
+    );
+    const ebayConversationId = compactConversationText(params.get("ebayConversationId") || "");
+    const buyer = compactConversationText(params.get("ebayBuyer") || params.get("buyer") || "");
+    return {
+      conversationDbId,
+      messageDbId,
+      ebayConversationId,
+      buyer,
+      searchQuery: buyer || ebayConversationId,
+    };
+  }
+
+  function applyEbayConversationDeepLinkState() {
+    const request = ebayConversationDeepLinkRequest();
+    if (!request.conversationDbId && !request.searchQuery) return;
+    setEbayConversationState({
+      selectedEbayConversationId: request.conversationDbId || adminClassificationState.selectedEbayConversationId,
+      ebayConversationSearchQuery: request.searchQuery || adminClassificationState.ebayConversationSearchQuery,
+      ebayConversationFilter: "all",
+      selectedEbaySavedViewId: null,
+    });
+  }
+
+  function scrollRequestedEbayMessageIntoView(conversationId) {
+    const request = ebayConversationDeepLinkRequest();
+    if (!request.messageDbId || (request.conversationDbId && request.conversationDbId !== conversationId)) return;
+    window.setTimeout(() => {
+      const target = document.getElementById(`ebay-message-${request.messageDbId}`);
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+  }
+
+  function localDateTimeToIso(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+
+  function ebayMessageTaskSourceSummary(conversation, message) {
+    const direction = ebayMessageDirection(message);
+    const buyer = ebayConversationParty(conversation);
+    const sender = safeText(message.sender_username, "Sender unavailable");
+    const recipient = safeText(message.recipient_username, "Recipient unavailable");
+    const sentAt = formatContextDate(ebayMessageCreatedAt(message));
+    const subject = compactConversationText(message.subject);
+    const body = compactConversationText(ebayMessageText(message)).slice(0, 360);
+    return {
+      buyer,
+      direction,
+      sender,
+      recipient,
+      sentAt,
+      subject,
+      body,
+    };
+  }
+
+  function ebayMessageTaskTitle(conversation, message) {
+    const buyer = ebayConversationParty(conversation);
+    const direction = ebayMessageDirection(message);
+    const subject = compactConversationText(message.subject);
+    if (subject) return `Follow up: ${buyer} - ${subject}`.slice(0, 120);
+    return `${direction === "outbound" ? "Check sent reply" : "Follow up"}: ${buyer}`.slice(0, 120);
+  }
+
+  function ebayConversationMessageById(conversationId, messageId) {
+    return safeArray(adminClassificationState.ebayConversationMessagesById?.[conversationId])
+      .find((message) => message.id === messageId) || null;
+  }
+
+  async function loadEbayConversationTaskAssignees(context) {
+    if (adminClassificationState.ebayConversationTaskAssigneesLoading) return;
+    if (safeArray(adminClassificationState.ebayConversationTaskAssignees).length) return;
+    setEbayConversationState({
+      ebayConversationTaskAssigneesLoading: true,
+      ebayConversationTaskError: null,
+    });
+    try {
+      const payload = await fetchTeamTaskAssignees(context);
+      setEbayConversationState({
+        ebayConversationTaskAssignees: safeArray(payload.assignees),
+        ebayConversationTaskAssigneesLoading: false,
+      });
+    } catch (error) {
+      setEbayConversationState({
+        ebayConversationTaskAssigneesLoading: false,
+        ebayConversationTaskError: error.code || error.message || "team_task_assignees_failed",
+      });
+      console.error("[email-triage] team task assignees failed:", error);
+    }
+  }
+
+  function openEbayConversationMessageTaskModal(context, conversationId, messageId) {
+    const conversation = selectedEbayConversationById(conversationId, adminClassificationState);
+    const message = ebayConversationMessageById(conversationId, messageId);
+    if (!conversation || !message) {
+      setEbayConversationState({ ebayConversationTaskError: "Could not find that message in the loaded timeline." });
+      return;
+    }
+    setEbayConversationState({
+      ebayConversationTaskModal: {
+        conversationId,
+        messageId,
+        title: ebayMessageTaskTitle(conversation, message),
+        description: "",
+        assignedToUserId: "",
+        priority: "normal",
+        dueAt: "",
+        taskTag: "",
+        refundAmount: "",
+      },
+      ebayConversationTaskError: null,
+      ebayConversationTaskMessage: null,
+    });
+    loadEbayConversationTaskAssignees(context);
+  }
+
+  function closeEbayConversationTaskModal() {
+    setEbayConversationState({
+      ebayConversationTaskModal: null,
+      ebayConversationTaskError: null,
+      ebayConversationTaskSaving: false,
+    });
+  }
+
+  function renderEbayTaskAssigneeOptions(state, selectedUserId = "") {
+    const assignees = safeArray(state.ebayConversationTaskAssignees);
+    if (state.ebayConversationTaskAssigneesLoading) return `<option value="">Loading assignees...</option>`;
+    return [
+      `<option value=""${selectedUserId ? "" : " selected"}>Unassigned for now</option>`,
+      ...assignees.map((assignee) => {
+        const label = assignee.display_name && assignee.email
+          ? `${assignee.display_name} - ${assignee.email}`
+          : assignee.display_name || assignee.email || "Team member";
+        const role = assignee.role ? ` (${assignee.role})` : "";
+        const userId = assignee.user_id || "";
+        return `<option value="${escapeHtml(userId)}"${userId === selectedUserId ? " selected" : ""}>${escapeHtml(label + role)}</option>`;
+      }),
+    ].join("");
+  }
+
+  function renderEbayTaskTagOptions(selectedTag = "") {
+    const options = [
+      { value: "", label: "No tag" },
+      { value: "refunds", label: "Refunds" },
+    ];
+    return options.map((option) => (
+      `<option value="${escapeHtml(option.value)}"${option.value === selectedTag ? " selected" : ""}>${escapeHtml(option.label)}</option>`
+    )).join("");
+  }
+
+  function parseRefundAmount(value) {
+    const normalized = String(value || "").replace(/[$,\s]/g, "");
+    if (!normalized) return null;
+    const amount = Number(normalized);
+    if (!Number.isFinite(amount)) return null;
+    return Math.round(amount * 100) / 100;
+  }
+
+  function renderEbayConversationTaskNotice(state) {
+    if (state.ebayConversationTaskMessage) {
+      return `<div class="classification-notice is-success">${escapeHtml(state.ebayConversationTaskMessage)}</div>`;
+    }
+    if (state.ebayConversationTaskError && !state.ebayConversationTaskModal) {
+      return `<div class="classification-notice is-error">${escapeHtml(state.ebayConversationTaskError)}</div>`;
+    }
+    return "";
+  }
+
+  function renderEbayConversationTaskModal(state, conversation, messages = []) {
+    const modal = state.ebayConversationTaskModal;
+    if (!modal || modal.conversationId !== conversation?.id) return "";
+    const message = messages.find((entry) => entry.id === modal.messageId);
+    const saving = state.ebayConversationTaskSaving === true;
+    const source = message ? ebayMessageTaskSourceSummary(conversation, message) : null;
+    const selectedTag = String(modal.taskTag || "");
+    const isRefundTask = selectedTag === "refunds";
+    return `
+      <div class="ebay-task-modal" role="dialog" aria-modal="true" aria-labelledby="ebay-task-modal-title">
+        <form class="ebay-task-modal-card" data-ebay-message-task-form data-ebay-conversation-id="${escapeHtml(modal.conversationId)}" data-ebay-message-id="${escapeHtml(modal.messageId)}">
+          <div class="ebay-task-modal-head">
+            <div>
+              <span class="eyebrow">Customer Service Task</span>
+              <h3 id="ebay-task-modal-title">Create task from message</h3>
+              <p>${escapeHtml(ebayConversationParty(conversation))}${message ? ` - ${escapeHtml(formatContextDate(ebayMessageCreatedAt(message)))}` : ""}</p>
+            </div>
+            <button type="button" class="secondary-btn" data-ebay-message-task-action="close" aria-label="Close task creator">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+          ${state.ebayConversationTaskError ? `<div class="classification-notice is-error">${escapeHtml(state.ebayConversationTaskError)}</div>` : ""}
+          ${source ? `
+            <div class="ebay-task-source-summary">
+              <div>
+                <span class="eyebrow">Linked message</span>
+                <strong>${escapeHtml(source.buyer)} - ${escapeHtml(humanizeValue(source.direction))}</strong>
+                <small>${escapeHtml(source.sender)} to ${escapeHtml(source.recipient)} - ${escapeHtml(source.sentAt)}</small>
+              </div>
+              ${source.subject ? `<p><b>Subject</b> ${escapeHtml(source.subject)}</p>` : ""}
+              ${source.body ? `<p>${escapeHtml(source.body)}</p>` : ""}
+            </div>
+          ` : ""}
+          <label class="ebay-draft-field">
+            <span>Task title</span>
+            <input name="taskTitle" type="text" value="${escapeHtml(modal.title || "")}" required />
+          </label>
+          <label class="ebay-draft-field">
+            <span>What needs to be done</span>
+            <textarea name="taskDescription" required placeholder="Write the actual work instructions here. The full eBay conversation stays linked from the task manager.">${escapeHtml(modal.description || "")}</textarea>
+          </label>
+          <div class="ebay-task-assignment-panel">
+            <label class="ebay-draft-field ebay-task-owner-field">
+              <span>Assign owner</span>
+              <select name="assignedToUserId">
+                ${renderEbayTaskAssigneeOptions(state, modal.assignedToUserId || "")}
+              </select>
+            </label>
+            <p>${state.ebayConversationTaskAssigneesLoading ? "Loading the team list..." : "Choose the person responsible for completing this task. Leave unassigned only if it needs manager routing later."}</p>
+          </div>
+          <div class="ebay-task-modal-grid">
+            <label class="ebay-draft-field">
+              <span>Task tag</span>
+              <select name="taskTag">
+                ${renderEbayTaskTagOptions(selectedTag)}
+              </select>
+            </label>
+            <label class="ebay-draft-field ebay-refund-amount-field ${isRefundTask ? "is-active" : ""}" data-ebay-refund-amount-field>
+              <span>Refund amount</span>
+              <input name="refundAmount" type="text" inputmode="decimal" placeholder="$0.00" value="${escapeHtml(modal.refundAmount || "")}" ${isRefundTask ? "required" : "disabled"} />
+            </label>
+            <label class="ebay-draft-field">
+              <span>Priority</span>
+              <select name="priority">
+                ${["low", "normal", "high", "urgent"].map((priority) => `<option value="${priority}"${priority === (modal.priority || "normal") ? " selected" : ""}>${escapeHtml(humanizeValue(priority))}</option>`).join("")}
+              </select>
+            </label>
+            <label class="ebay-draft-field">
+              <span>Due date</span>
+              <input name="dueAt" type="datetime-local" value="${escapeHtml(modal.dueAt || "")}" />
+            </label>
+          </div>
+          <div class="ebay-task-modal-actions">
+            <button type="button" class="secondary-btn" data-ebay-message-task-action="close" ${saving ? "disabled" : ""}>Cancel</button>
+            <button type="submit" class="primary-btn" ${saving ? "disabled" : ""}>
+              <i data-lucide="${saving ? "loader-circle" : "check-circle-2"}"></i>
+              ${escapeHtml(saving ? "Creating task" : "Create Task")}
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+  }
+
+  function syncEbayTaskRefundField(form) {
+    const field = form?.querySelector("[data-ebay-refund-amount-field]");
+    const input = field?.querySelector("input[name='refundAmount']");
+    const tag = form?.querySelector("select[name='taskTag']")?.value || "";
+    const isRefundTask = tag === "refunds";
+    field?.classList.toggle("is-active", isRefundTask);
+    if (input) {
+      input.disabled = !isRefundTask;
+      input.required = isRefundTask;
+      if (!isRefundTask) input.value = "";
+    }
+  }
+
+  async function submitEbayConversationMessageTask(context, form) {
+    const conversationId = form?.getAttribute("data-ebay-conversation-id") || "";
+    const messageId = form?.getAttribute("data-ebay-message-id") || "";
+    const formData = new FormData(form);
+    const title = String(formData.get("taskTitle") || "").trim();
+    const description = String(formData.get("taskDescription") || "").trim();
+    const assignedToUserId = String(formData.get("assignedToUserId") || "");
+    const priority = String(formData.get("priority") || "normal");
+    const dueAt = String(formData.get("dueAt") || "");
+    const taskTag = String(formData.get("taskTag") || "").trim();
+    const refundAmountRaw = String(formData.get("refundAmount") || "").trim();
+    const refundAmount = taskTag === "refunds" ? parseRefundAmount(refundAmountRaw) : null;
+    const modalDraft = {
+      ...(adminClassificationState.ebayConversationTaskModal || {}),
+      conversationId,
+      messageId,
+      title,
+      description,
+      assignedToUserId,
+      priority,
+      dueAt,
+      taskTag,
+      refundAmount: refundAmountRaw,
+    };
+    if (!title || !description) {
+      setEbayConversationState({
+        ebayConversationTaskModal: modalDraft,
+        ebayConversationTaskError: "Add a title and instructions before creating the task.",
+      });
+      return;
+    }
+    if (taskTag === "refunds" && (!Number.isFinite(refundAmount) || refundAmount <= 0)) {
+      setEbayConversationState({
+        ebayConversationTaskModal: modalDraft,
+        ebayConversationTaskError: "Refund tasks need a valid refund amount.",
+      });
+      return;
+    }
+    setEbayConversationState({
+      ebayConversationTaskModal: modalDraft,
+      ebayConversationTaskSaving: true,
+      ebayConversationTaskError: null,
+      ebayConversationTaskMessage: null,
+    });
+    try {
+      const payload = await createEbayConversationMessageTask(context, {
+        conversationId,
+        messageId,
+        title,
+        description,
+        assignedToUserId: assignedToUserId || null,
+        priority,
+        dueAt: localDateTimeToIso(dueAt),
+        taskTag: taskTag || null,
+        refundAmount,
+      });
+      const taskId = payload.task?.id || "";
+      setEbayConversationState({
+        ebayConversationTaskSaving: false,
+        ebayConversationTaskModal: null,
+        ebayConversationTaskError: null,
+        ebayConversationTaskMessage: taskId ? `Task created and linked to this message. Task ${compactId(taskId)} is in the team queue.` : "Task created and linked to this message.",
+      });
+    } catch (error) {
+      setEbayConversationState({
+        ebayConversationTaskSaving: false,
+        ebayConversationTaskError: error.code || error.message || "Could not create that task.",
+      });
+      console.error("[email-triage] eBay message task create failed:", error);
+    }
+  }
+
   function ebayComposerCacheKey(conversationId, mode = "normal") {
     return `${String(conversationId || "")}:${String(mode || "normal")}`;
   }
@@ -4583,8 +4931,11 @@
       !ebayDraftCanSendWithoutApproval(draft);
     const isActionLoading = adminClassificationState.ebayConversationDraftActionLoadingId === conversation?.id;
     const canGenerate = direction === "inbound" && conversation?.id && message.id;
+    const canCreateTask = Boolean(conversation?.id && message.id && !message.optimistic_send);
+    const requestedMessageId = ebayConversationDeepLinkRequest().messageDbId;
+    const isDeepLinkedMessage = requestedMessageId && requestedMessageId === message.id;
     return `
-      <article class="ebay-message-row is-${escapeHtml(direction)}${message.optimistic_send ? " is-optimistic-send" : ""}">
+      <article id="ebay-message-${escapeHtml(message.id || "")}" class="ebay-message-row is-${escapeHtml(direction)}${message.optimistic_send ? " is-optimistic-send" : ""}${isDeepLinkedMessage ? " is-deep-linked-message" : ""}">
         <div class="ebay-message-bubble">
           <div class="ebay-message-meta">
             <strong>${escapeHtml(sender)}</strong>
@@ -4600,12 +4951,20 @@
             ${message.optimistic_send ? `<span class="ebay-message-draft-target"><i data-lucide="check-circle-2"></i>Sent via eBay</span>` : ""}
             ${isDraftTarget ? `<span class="ebay-message-draft-target"><i data-lucide="reply"></i>Composer target</span>` : ""}
           </div>
-          ${canGenerate ? `
+          ${canGenerate || canCreateTask ? `
             <div class="ebay-message-actions">
-              <button type="button" class="secondary-btn" data-ebay-draft-action="generate" data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-ebay-target-message-id="${escapeHtml(message.id)}" ${isActionLoading ? "disabled" : ""}>
-                <i data-lucide="${isActionLoading ? "loader-circle" : "wand-sparkles"}"></i>
-                ${escapeHtml(isActionLoading ? "Generating" : "Generate AI Reply")}
-              </button>
+              ${canGenerate ? `
+                <button type="button" class="secondary-btn" data-ebay-draft-action="generate" data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-ebay-target-message-id="${escapeHtml(message.id)}" ${isActionLoading ? "disabled" : ""}>
+                  <i data-lucide="${isActionLoading ? "loader-circle" : "wand-sparkles"}"></i>
+                  ${escapeHtml(isActionLoading ? "Generating" : "Generate AI Reply")}
+                </button>
+              ` : ""}
+              ${canCreateTask ? `
+                <button type="button" class="secondary-btn" data-ebay-message-task-action="create" data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-ebay-message-id="${escapeHtml(message.id)}">
+                  <i data-lucide="clipboard-plus"></i>
+                  Create Task
+                </button>
+              ` : ""}
             </div>
           ` : ""}
           <details class="ebay-message-debug">
@@ -4668,6 +5027,150 @@
       failed ? renderBadge("Read sync failed", "danger") : pending ? renderBadge("Read sync pending", "warning") : renderBadge("Read sync aligned", "success"),
     ];
     return `<span class="ebay-conversation-badges">${badges.join("")}</span>`;
+  }
+
+  function sumNumericContextValue(rows = [], key = "") {
+    let found = false;
+    const total = safeArray(rows).reduce((sum, row) => {
+      const value = Number(row?.[key]);
+      if (!Number.isFinite(value)) return sum;
+      found = true;
+      return sum + value;
+    }, 0);
+    return found ? total : null;
+  }
+
+  function uniqueCompactValues(values = []) {
+    return [...new Set(safeArray(values).map((value) => compactConversationText(value)).filter(Boolean))];
+  }
+
+  function buildEbayOrderDetailsUrl(orderNumber = "") {
+    const cleanNumber = compactConversationText(orderNumber);
+    if (!cleanNumber) return "";
+    const params = new URLSearchParams();
+    params.set("orderid", cleanNumber);
+    return `https://www.ebay.com/mesh/ord/details?${params.toString()}`;
+  }
+
+  function buildPendingOrdersContextUrl(facts = {}) {
+    const params = new URLSearchParams();
+    if (facts.orderNumbers?.length) {
+      params.set("orderIds", facts.orderNumbers.slice(0, 12).join(","));
+    } else if (facts.buyer) {
+      params.set("buyerUsername", facts.buyer);
+    }
+    return params.toString() ? `pending-orders.html?${params.toString()}` : "pending-orders.html";
+  }
+
+  function ebayConversationContextFacts(state, conversation) {
+    const payload = state.ebayConversationContextsById?.[conversation?.id] || null;
+    const context = contextFromEbayPayload(payload);
+    const orders = safeArray(context?.matched_orders);
+    const lines = safeArray(context?.matched_order_lines);
+    const returns = safeArray(context?.matched_returns);
+    const orderNumbers = uniqueCompactValues([
+      ...orders.map((order) => order.order_number),
+      ...lines.map((line) => line.order_number),
+    ]);
+    const buyer = compactConversationText(
+      context?.buyer?.username ||
+      orders[0]?.buyer_username ||
+      conversation?.other_party_username ||
+      ebayConversationParty(conversation),
+    );
+    const orderTotal = sumNumericContextValue(orders, "total_price");
+    const lineTotal = sumNumericContextValue(lines, "total_price");
+    const netPayout = sumNumericContextValue(orders, "net_payout");
+    const firstLine = lines.find((line) => compactConversationText(line.item_title)) || null;
+    return {
+      context,
+      orders,
+      lines,
+      returns,
+      orderNumbers,
+      buyer,
+      orderTotal: orderTotal ?? lineTotal,
+      netPayout,
+      firstItemTitle: compactConversationText(firstLine?.item_title),
+      pendingHref: buildPendingOrdersContextUrl({ orderNumbers, buyer }),
+      ebayOrderHref: orderNumbers.length === 1 ? buildEbayOrderDetailsUrl(orderNumbers[0]) : "",
+    };
+  }
+
+  function renderEbayConversationCompactMeta(conversation, identity, maxItems = 3) {
+    const metaItems = ebayConversationMetaItems(conversation, maxItems);
+    const rows = [
+      ebayIdentitySourceLabel(identity.source),
+      ...metaItems,
+    ].filter(Boolean);
+    return `
+      <div class="selected-email-meta ebay-detail-compact-meta">
+        ${rows.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+      </div>
+    `;
+  }
+
+  function renderEbayConversationOrderContextStrip(state, conversation) {
+    const isLoading = state.ebayConversationContextLoadingId === conversation?.id;
+    const error = state.ebayConversationContextErrorsById?.[conversation?.id];
+    const facts = ebayConversationContextFacts(state, conversation);
+    const hasContext = Boolean(facts.context);
+    const hasOrderContext = facts.orderNumbers.length || facts.orders.length || facts.lines.length;
+    if (!hasContext && !isLoading && !error && !hasOrderContext) return "";
+    if (error && !hasContext) {
+      return `<div class="ebay-order-context-strip is-warning"><span><i data-lucide="alert-triangle"></i>Order context unavailable</span><button type="button" class="secondary-btn" data-ebay-detail-action="refresh-context" data-ebay-conversation-id="${escapeHtml(conversation.id)}">Retry</button></div>`;
+    }
+    if (isLoading && !hasContext) {
+      return `<div class="ebay-order-context-strip is-muted"><span><i data-lucide="loader-circle"></i>Loading order context</span></div>`;
+    }
+    if (!hasOrderContext) {
+      return `
+        <div class="ebay-order-context-strip is-muted">
+          <span><i data-lucide="search"></i>No linked order yet</span>
+          <a class="ebay-order-context-link" href="${escapeHtml(facts.pendingHref)}">Open pending queue</a>
+        </div>
+      `;
+    }
+    const orderLabel = facts.orderNumbers.length > 1
+      ? `${facts.orderNumbers.length} orders`
+      : facts.orderNumbers[0] || "Order";
+    const itemLabel = facts.firstItemTitle
+      ? (facts.firstItemTitle.length > 58 ? `${facts.firstItemTitle.slice(0, 55)}...` : facts.firstItemTitle)
+      : facts.lines.length ? `${facts.lines.length} item ${facts.lines.length === 1 ? "line" : "lines"}` : "";
+    return `
+      <div class="ebay-order-context-strip">
+        <span class="ebay-order-context-title"><i data-lucide="receipt-text"></i>Order context</span>
+        <span><small>Order</small><strong>${escapeHtml(orderLabel)}</strong></span>
+        <span><small>Value</small><strong>${escapeHtml(formatContextMoney(facts.orderTotal))}</strong></span>
+        ${facts.netPayout !== null ? `<span><small>Store net</small><strong>${escapeHtml(formatContextMoney(facts.netPayout))}</strong></span>` : ""}
+        ${itemLabel ? `<span class="ebay-order-context-item"><small>Item</small><strong>${escapeHtml(itemLabel)}</strong></span>` : ""}
+        <span class="ebay-order-context-actions">
+          <a class="ebay-order-context-link is-primary" href="${escapeHtml(facts.pendingHref)}" title="Open the pending order where video receipt screenshots and receipt links live">
+            <i data-lucide="video"></i>
+            Receipt
+          </a>
+          ${facts.ebayOrderHref ? `<a class="ebay-order-context-link" href="${escapeHtml(facts.ebayOrderHref)}" target="_blank" rel="noopener">eBay order</a>` : ""}
+        </span>
+      </div>
+    `;
+  }
+
+  function renderEbayConversationOrderContextDetails(state, conversation) {
+    const facts = ebayConversationContextFacts(state, conversation);
+    if (!facts.context || (!facts.orders.length && !facts.lines.length && !facts.returns.length)) return "";
+    return `
+      <details class="ebay-order-context-details">
+        <summary>
+          <span><i data-lucide="package-search"></i>Order / receipt details</span>
+          <i data-lucide="chevron-down"></i>
+        </summary>
+        <div class="ebay-order-context-detail-grid">
+          ${renderOrderContextCard(facts.orders)}
+          ${renderOrderLineContextCard(facts.lines)}
+          ${renderReturnContextCard(facts.returns)}
+        </div>
+      </details>
+    `;
   }
 
   function ebayConversationIsActive(conversation) {
@@ -4872,9 +5375,9 @@
     const openAttribute = adminClassificationState.ebayConversationClassificationCollapsed === true && !editing ? "" : " open";
     if (!classification) {
       return `
-        <details class="ebay-classification-card" data-ebay-detail-preference="classification"${openAttribute}>
+        <details class="ebay-classification-card ebay-detail-inspector" data-ebay-detail-preference="classification"${openAttribute}>
           <summary class="context-card-head">
-            <h4>Conversation Labels</h4>
+            <h4>Details / Labels</h4>
             <span class="ebay-classification-head-badges">
               ${renderBadge("Unclassified", "muted")}
               <i data-lucide="chevron-down"></i>
@@ -4893,9 +5396,9 @@
 
     const stale = ebayClassificationIsStale(conversation, classification);
     return `
-      <details class="ebay-classification-card${stale ? " is-stale" : ""}" data-ebay-detail-preference="classification"${openAttribute}>
+      <details class="ebay-classification-card ebay-detail-inspector${stale ? " is-stale" : ""}" data-ebay-detail-preference="classification"${openAttribute}>
         <summary class="context-card-head">
-          <h4>Conversation Labels</h4>
+          <h4>Details / Labels</h4>
           <span class="ebay-classification-head-badges">
             ${renderBadge(humanizeValue(classification.effective_priority), ebayPriorityBadgeVariant(classification.effective_priority))}
             ${renderBadge(humanizeValue(classification.effective_response_need), ebayResponseBadgeVariant(classification.effective_response_need))}
@@ -5125,6 +5628,9 @@
   }
 
   function ebayDraftSuccessMessage(mode, payload = {}) {
+    if (mode === "improve" && payload.fallback_used === true) {
+      return "AI improvement was blocked by validation, so the original operator text was preserved. Nothing was sent.";
+    }
     const labels = {
       generate: "AI reply draft generated. Nothing was sent.",
       regenerate: "AI reply draft regenerated. Nothing was sent.",
@@ -5558,7 +6064,6 @@
     const isLoading = state.ebayConversationMessagesLoadingId === conversation.id;
     const error = state.ebayConversationMessageErrorsById?.[conversation.id];
     const identity = ebayBuyerIdentity(conversation);
-    const metaItems = ebayConversationMetaItems(conversation, 5);
     const isPlatformConversation = ebayConversationIsPlatform(conversation);
     const readSyncLoading = state.ebayConversationReadSyncLoadingId === conversation.id;
 
@@ -5567,12 +6072,7 @@
         <div>
           <span class="eyebrow">${escapeHtml(isPlatformConversation ? "Selected eBay Notification" : "Selected eBay Chat")}</span>
           <h3>${escapeHtml(isPlatformConversation ? ebayConversationTitle(conversation) : ebayConversationParty(conversation))}</h3>
-          <div class="selected-email-meta">
-            <span>${escapeHtml(ebayIdentitySourceLabel(identity.source))}</span>
-            <span>${escapeHtml(ebayConversationTitle(conversation))}</span>
-            ${metaItems.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
-          </div>
-          ${renderEbayReadSyncBadges(conversation)}
+          ${renderEbayConversationCompactMeta(conversation, identity, 3)}
         </div>
         <div class="ebay-detail-actions">
           <button type="button" class="secondary-btn" data-ebay-detail-action="refresh-messages" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="Deep refresh only this selected conversation and reload its timeline." ${isLoading ? "disabled" : ""}>
@@ -5598,12 +6098,16 @@
         </div>
       </div>
       ${error ? `<div class="classification-notice is-error">Could not load eBay messages: ${escapeHtml(error)}</div>` : ""}
+      ${renderEbayConversationTaskNotice(state)}
+      ${renderEbayConversationOrderContextStrip(state, conversation)}
       ${renderEbayClassificationCard(conversation)}
+      ${renderEbayConversationOrderContextDetails(state, conversation)}
       <div class="ebay-chat-timeline${isPlatformConversation ? " is-notification-timeline" : ""}" aria-label="${escapeHtml(isPlatformConversation ? "Clean eBay notification timeline" : "Clean eBay message timeline")}">
         ${isLoading && !messages.length ? `<div class="classification-empty">Loading clean eBay ${escapeHtml(isPlatformConversation ? "notifications" : "chat messages")}.</div>` : ""}
         ${messages.length ? messages.map((message) => renderEbayMessageBubble(message, conversation)).join("") : (!isLoading ? `<div class="classification-empty">No canonical eBay ${escapeHtml(isPlatformConversation ? "notifications" : "messages")} are stored for this conversation yet.</div>` : "")}
       </div>
       ${isPlatformConversation ? "" : renderEbayConversationDraftCard(conversation, messages)}
+      ${renderEbayConversationTaskModal(state, conversation, messages)}
     `;
   }
 
@@ -5992,6 +6496,7 @@
           [conversationId]: null,
         },
       });
+      scrollRequestedEbayMessageIntoView(conversationId);
     } catch (error) {
       const code = error.code || error.message || "ebay_conversation_messages_failed";
       setEbayConversationState({
@@ -6391,11 +6896,22 @@
       });
       const payload = await fetchEbayConversations(context, request);
       const pageConversations = safeArray(payload.conversations);
-      const conversations = append
+      let conversations = append
         ? mergeEbayConversationPages(currentState.ebayConversations, pageConversations)
         : pageConversations;
+      const deepLink = ebayConversationDeepLinkRequest();
+      if (!append && deepLink.conversationDbId && !conversations.some((conversation) => conversation.id === deepLink.conversationDbId)) {
+        try {
+          const directPayload = await fetchEbayConversationById(context, deepLink.conversationDbId);
+          if (directPayload.conversation?.id) {
+            conversations = mergeEbayConversationPages([directPayload.conversation], conversations);
+          }
+        } catch (directError) {
+          console.warn("[email-triage] Deep-linked eBay conversation fetch failed:", directError);
+        }
+      }
       const mailboxState = ebayMailboxStateFromPayload(payload, conversations);
-      const previousSelectedId = options.preserveSelectionId || currentState.selectedEbayConversationId;
+      const previousSelectedId = options.preserveSelectionId || currentState.selectedEbayConversationId || (!append ? deepLink.conversationDbId : null);
       const visibleRows = filteredEbayConversations({
         ...adminClassificationState,
         ...mailboxState,
@@ -7539,6 +8055,23 @@
       selectEbayConversation(context, row.getAttribute("data-ebay-conversation-id"));
     });
     const handleDetailClick = (event) => {
+      const messageTaskButton = event.target.closest("[data-ebay-message-task-action]");
+      if (messageTaskButton) {
+        const action = messageTaskButton.getAttribute("data-ebay-message-task-action");
+        if (action === "create") {
+          openEbayConversationMessageTaskModal(
+            context,
+            messageTaskButton.getAttribute("data-ebay-conversation-id"),
+            messageTaskButton.getAttribute("data-ebay-message-id"),
+          );
+          return;
+        }
+        if (action === "close") {
+          closeEbayConversationTaskModal();
+          return;
+        }
+      }
+
       const draftButton = event.target.closest("[data-ebay-draft-action]");
       if (draftButton) {
         const form = draftButton.closest("[data-ebay-draft-form]");
@@ -7640,7 +8173,17 @@
       const form = event.target.closest("[data-ebay-draft-form]");
       if (form) rememberEbayComposerDraft(form);
     });
+    els.ebayConversationDetail?.addEventListener("change", (event) => {
+      const taskForm = event.target.closest("[data-ebay-message-task-form]");
+      if (taskForm && event.target.name === "taskTag") syncEbayTaskRefundField(taskForm);
+    });
     els.ebayConversationDetail?.addEventListener("submit", (event) => {
+      const taskForm = event.target.closest("[data-ebay-message-task-form]");
+      if (taskForm) {
+        event.preventDefault();
+        submitEbayConversationMessageTask(context, taskForm);
+        return;
+      }
       if (event.target.closest("[data-ebay-draft-form]")) {
         event.preventDefault();
         return;
@@ -8442,6 +8985,7 @@
     if (!context) return;
 
     bindEbayConversationEvents(context);
+    applyEbayConversationDeepLinkState();
     renderEbayConversationInbox(adminClassificationState);
     bindPanelResizeEvents();
     bindEbayPanelResizeEvents();
