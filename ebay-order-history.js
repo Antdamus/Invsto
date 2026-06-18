@@ -19,6 +19,7 @@ const state = {
   relatedLabelEvents: [],
   relatedReturnEvents: [],
   filteredLines: [],
+  historyLineSearchIndex: new Map(),
   historySearchRelatedLineIds: new Set(),
   adminCloseoutLineIds: new Set(),
   selectedRevertLineIds: [],
@@ -49,11 +50,13 @@ const state = {
   labelBackfillBusy: false,
   accountHistorySyncBusy: false,
   historySearchUserEdited: false,
+  historyLoadedTargetedSearch: false,
+  historyLoadedAllDatesSearch: false,
   busy: false,
 };
 
 let evidencePhotoViewerReturnFocus = null;
-let historyBuyerAllDatesSearchTimer = null;
+let historyTargetedSearchTimer = null;
 const evidencePhotoViewerState = {
   zoom: 1,
   panX: 0,
@@ -198,6 +201,15 @@ function toDateInputValue(date = new Date()) {
   const copy = new Date(date);
   copy.setMinutes(copy.getMinutes() - copy.getTimezoneOffset());
   return copy.toISOString().slice(0, 10);
+}
+
+function getMondayOfCurrentWeek(date = new Date()) {
+  const copy = new Date(date);
+  const day = copy.getDay();
+  const daysSinceMonday = (day + 6) % 7;
+  copy.setDate(copy.getDate() - daysSinceMonday);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
 }
 
 function getDateRange() {
@@ -1196,7 +1208,8 @@ async function logout(event) {
 function setupDefaultDates() {
   const todayDate = new Date();
   const today = toDateInputValue(todayDate);
-  if ($("history-from") && !$("history-from").value) $("history-from").value = today;
+  const weekStart = toDateInputValue(getMondayOfCurrentWeek(todayDate));
+  if ($("history-from") && !$("history-from").value) $("history-from").value = weekStart;
   if ($("history-to") && !$("history-to").value) $("history-to").value = today;
   resetHistorySearchInput({ apply: false });
 }
@@ -1392,18 +1405,26 @@ async function fetchOrderIdsByOrderNumbers(orderNumbers = []) {
   return [...new Set(orderIds)];
 }
 
-async function fetchOrderHistoryLinesByIds(lineIds = []) {
+function applyOrderHistoryDateRange(query, options = {}) {
+  let nextQuery = query;
+  if (options.fromIso) nextQuery = nextQuery.gte("fulfilled_at", options.fromIso);
+  if (options.toIso) nextQuery = nextQuery.lte("fulfilled_at", options.toIso);
+  return nextQuery;
+}
+
+async function fetchOrderHistoryLinesByIds(lineIds = [], options = {}) {
   const cleanLineIds = [...new Set(lineIds.filter(Boolean))];
   if (!cleanLineIds.length) return { data: [], error: null };
   const rows = [];
 
   for (const chunk of chunkArray(cleanLineIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("ebay_order_lines")
       .select(ORDER_HISTORY_LINE_SELECT)
       .in("line_status", ["fulfilled", "cancelled", "skipped"])
-      .in("id", chunk)
-      .limit(ORDER_HISTORY_PAGE_SIZE);
+      .in("id", chunk);
+    query = applyOrderHistoryDateRange(query, options);
+    const { data, error } = await query.limit(ORDER_HISTORY_PAGE_SIZE);
 
     if (error) return { data: rows, error };
     rows.push(...(data || []));
@@ -1412,17 +1433,19 @@ async function fetchOrderHistoryLinesByIds(lineIds = []) {
   return { data: uniqueById(rows), error: null };
 }
 
-async function fetchOrderHistoryLinesByOrderIds(orderIds = []) {
+async function fetchOrderHistoryLinesByOrderIds(orderIds = [], options = {}) {
   const cleanOrderIds = [...new Set(orderIds.filter(Boolean))];
   if (!cleanOrderIds.length) return { data: [], error: null };
   const rows = [];
 
   for (const chunk of chunkArray(cleanOrderIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("ebay_order_lines")
       .select(ORDER_HISTORY_LINE_SELECT)
       .in("line_status", ["fulfilled", "cancelled", "skipped"])
-      .in("order_id", chunk)
+      .in("order_id", chunk);
+    query = applyOrderHistoryDateRange(query, options);
+    const { data, error } = await query
       .order("fulfilled_at", { ascending: false, nullsFirst: false })
       .limit(ORDER_HISTORY_PAGE_SIZE);
 
@@ -1471,11 +1494,12 @@ function getEventCoveredOrderNumbers(event = {}) {
   ]);
 }
 
-async function expandOrderHistoryRowsByRelatedEvents(rows = [], searchTerm = "") {
+async function expandOrderHistoryRowsByRelatedEvents(rows = [], searchTerm = "", options = {}) {
   const baseRows = uniqueById(rows);
   const baseLineIds = baseRows.map((line) => line.id).filter(Boolean);
   const baseOrderIds = baseRows.map((line) => line.order_id).filter(Boolean);
-  if (!baseLineIds.length && !baseOrderIds.length) {
+  const shouldSearchTrackingEvents = historySearchLooksLikeLabelScan(searchTerm);
+  if (!baseLineIds.length && !baseOrderIds.length && !shouldSearchTrackingEvents) {
     return { rows: baseRows, relatedLineIds: [] };
   }
 
@@ -1489,7 +1513,9 @@ async function expandOrderHistoryRowsByRelatedEvents(rows = [], searchTerm = "")
     baseOrderIds.length
       ? fetchOverlappingRows("ebay_order_label_events", "order_ids", baseOrderIds)
       : Promise.resolve({ data: [], error: null }),
-    fetchLabelEventsByTrackingSearch(searchTerm),
+    shouldSearchTrackingEvents
+      ? fetchLabelEventsByTrackingSearch(searchTerm)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   [adminEventsResult, labelLineEventsResult, labelOrderEventsResult, labelTrackerEventsResult].forEach((result) => {
@@ -1524,8 +1550,8 @@ async function expandOrderHistoryRowsByRelatedEvents(rows = [], searchTerm = "")
   const missingOrderIds = [...relatedOrderIds].filter((orderId) => orderId && !baseOrderIds.includes(orderId));
 
   const [linesByIdResult, linesByOrderResult] = await Promise.all([
-    fetchOrderHistoryLinesByIds(missingLineIds),
-    fetchOrderHistoryLinesByOrderIds(missingOrderIds),
+    fetchOrderHistoryLinesByIds(missingLineIds, options),
+    fetchOrderHistoryLinesByOrderIds(missingOrderIds, options),
   ]);
 
   if (linesByIdResult.error) console.warn("Could not load related order history lines by id:", linesByIdResult.error);
@@ -1547,50 +1573,146 @@ async function expandOrderHistoryRowsByRelatedEvents(rows = [], searchTerm = "")
   };
 }
 
-async function fetchBuyerAllDateOrderHistoryLines(searchTerm) {
-  const buyerTerm = String(searchTerm || "").trim();
-  if (!buyerTerm) return { data: [], error: null, capped: false };
+async function fetchTargetedRangeOrderHistoryLines(searchTerm, fromIso, toIso) {
+  const cleanTerm = String(searchTerm || "").trim();
+  const rangeOptions = { fromIso, toIso };
+  if (!cleanTerm) return { data: [], error: null, capped: false, relatedLineIds: [] };
 
-  const buyerPattern = `%${buyerTerm.replace(/[%]/g, "")}%`;
-  const orders = [];
-  const labelOrderIds = await fetchOrderIdsByLabelMetadataSearch(searchTerm);
-  const orderNumberIds = await fetchOrderIdsByOrderNumberSearch(searchTerm);
-  const returnTrackingOrderIds = await fetchOrderIdsByReturnTrackingSearch(searchTerm);
-  for (let start = 0; start < ORDER_HISTORY_MAX_BUYER_ORDERS; start += ORDER_HISTORY_PAGE_SIZE) {
-    const end = Math.min(start + ORDER_HISTORY_PAGE_SIZE - 1, ORDER_HISTORY_MAX_BUYER_ORDERS - 1);
-    const { data, error } = await supabase
-      .from("ebay_orders")
-      .select("id")
-      .ilike("buyer_username", buyerPattern)
-      .order("sale_date", { ascending: false, nullsFirst: false })
-      .range(start, end);
+  const [
+    labelOrderIds,
+    orderNumberIds,
+    returnTrackingOrderIds,
+    labelTrackerEventsResult,
+  ] = await Promise.all([
+    fetchOrderIdsByLabelMetadataSearch(cleanTerm),
+    fetchOrderIdsByOrderNumberSearch(cleanTerm),
+    fetchOrderIdsByReturnTrackingSearch(cleanTerm),
+    fetchLabelEventsByTrackingSearch(cleanTerm),
+  ]);
 
-    if (error) return { data: [], error };
-    const page = data || [];
-    orders.push(...page);
-    if (page.length < ORDER_HISTORY_PAGE_SIZE) break;
+  if (labelTrackerEventsResult.error) {
+    console.warn("Could not search label events by tracking number:", labelTrackerEventsResult.error);
   }
 
+  const labelTrackerEvents = labelTrackerEventsResult.data || [];
+  const eventLineIds = [];
+  const eventOrderIds = [];
+  const eventOrderNumbers = [];
+  labelTrackerEvents.forEach((event) => {
+    eventLineIds.push(...(event.order_line_ids || []));
+    eventOrderIds.push(...(event.order_ids || []));
+    eventOrderNumbers.push(...getEventCoveredOrderNumbers(event));
+  });
+
+  const eventOrderNumberIds = await fetchOrderIdsByOrderNumbers(eventOrderNumbers);
+  const orderIds = [...new Set([
+    ...labelOrderIds,
+    ...orderNumberIds,
+    ...returnTrackingOrderIds,
+    ...eventOrderIds,
+    ...eventOrderNumberIds,
+  ].filter(Boolean))];
+
+  const [rowsByOrderResult, rowsByIdResult] = await Promise.all([
+    fetchOrderHistoryLinesByOrderIds(orderIds, rangeOptions),
+    fetchOrderHistoryLinesByIds(eventLineIds, rangeOptions),
+  ]);
+
+  if (rowsByOrderResult.error) return { data: rowsByOrderResult.data || [], error: rowsByOrderResult.error };
+  if (rowsByIdResult.error) return { data: rowsByIdResult.data || [], error: rowsByIdResult.error };
+
+  const rows = uniqueById([
+    ...(rowsByOrderResult.data || []),
+    ...(rowsByIdResult.data || []),
+  ]);
+  const expanded = await expandOrderHistoryRowsByRelatedEvents(rows, cleanTerm, rangeOptions);
+  const expandedRows = uniqueById(expanded.rows || rows);
+  expandedRows.sort((a, b) => new Date(b.fulfilled_at || 0) - new Date(a.fulfilled_at || 0));
+
+  return {
+    data: expandedRows.slice(0, ORDER_HISTORY_MAX_LINES),
+    error: null,
+    capped: expandedRows.length >= ORDER_HISTORY_MAX_LINES,
+    relatedLineIds: expanded.relatedLineIds || [],
+  };
+}
+
+async function fetchAllDateOrderHistoryLines(searchTerm) {
+  const buyerTerm = String(searchTerm || "").trim();
+  if (!buyerTerm) return { data: [], error: null, capped: false, relatedLineIds: [] };
+
+  const searchLooksLikeTracking = historySearchLooksLikeLabelScan(buyerTerm);
+  const buyerPattern = `%${buyerTerm.replace(/[%]/g, "")}%`;
+  const orders = [];
+  const [
+    labelOrderIds,
+    orderNumberIds,
+    returnTrackingOrderIds,
+    labelTrackerEventsResult,
+  ] = await Promise.all([
+    fetchOrderIdsByLabelMetadataSearch(buyerTerm),
+    fetchOrderIdsByOrderNumberSearch(buyerTerm),
+    fetchOrderIdsByReturnTrackingSearch(buyerTerm),
+    fetchLabelEventsByTrackingSearch(buyerTerm),
+  ]);
+
+  if (labelTrackerEventsResult.error) {
+    console.warn("Could not search label events by tracking number:", labelTrackerEventsResult.error);
+  }
+
+  if (!searchLooksLikeTracking) {
+    for (let start = 0; start < ORDER_HISTORY_MAX_BUYER_ORDERS; start += ORDER_HISTORY_PAGE_SIZE) {
+      const end = Math.min(start + ORDER_HISTORY_PAGE_SIZE - 1, ORDER_HISTORY_MAX_BUYER_ORDERS - 1);
+      const { data, error } = await supabase
+        .from("ebay_orders")
+        .select("id")
+        .ilike("buyer_username", buyerPattern)
+        .order("sale_date", { ascending: false, nullsFirst: false })
+        .range(start, end);
+
+      if (error) return { data: [], error };
+      const page = data || [];
+      orders.push(...page);
+      if (page.length < ORDER_HISTORY_PAGE_SIZE) break;
+    }
+  }
+
+  const labelTrackerEvents = labelTrackerEventsResult.data || [];
+  const eventLineIds = [];
+  const eventOrderIds = [];
+  const eventOrderNumbers = [];
+  labelTrackerEvents.forEach((event) => {
+    eventLineIds.push(...(event.order_line_ids || []));
+    eventOrderIds.push(...(event.order_ids || []));
+    eventOrderNumbers.push(...getEventCoveredOrderNumbers(event));
+  });
+
+  const eventOrderNumberIds = await fetchOrderIdsByOrderNumbers(eventOrderNumbers);
   const orderIds = [...new Set([
     ...orders.map((order) => order.id),
     ...labelOrderIds,
     ...orderNumberIds,
     ...returnTrackingOrderIds,
+    ...eventOrderIds,
+    ...eventOrderNumberIds,
   ].filter(Boolean))];
-  if (!orderIds.length) return { data: [], error: null, capped: false };
+  if (!orderIds.length && !eventLineIds.length) return { data: [], error: null, capped: false, relatedLineIds: [] };
 
   const rows = [];
   for (const chunk of chunkArray(orderIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
     const { data, error } = await fetchOrderHistoryLinesByOrderIds(chunk);
-
     if (error) return { data: rows, error };
     rows.push(...(data || []));
     if (rows.length >= ORDER_HISTORY_MAX_LINES) break;
   }
+  const rowsByIdResult = await fetchOrderHistoryLinesByIds(eventLineIds);
+  if (rowsByIdResult.error) return { data: rows, error: rowsByIdResult.error };
+  rows.push(...(rowsByIdResult.data || []));
 
-  const expanded = await expandOrderHistoryRowsByRelatedEvents(rows, searchTerm);
-  const expandedRows = expanded.rows || rows;
+  const expanded = await expandOrderHistoryRowsByRelatedEvents(rows, buyerTerm);
+  const expandedRows = uniqueById(expanded.rows || rows);
   expandedRows.sort((a, b) => new Date(b.fulfilled_at || 0) - new Date(a.fulfilled_at || 0));
+
   return {
     data: expandedRows.slice(0, ORDER_HISTORY_MAX_LINES),
     error: null,
@@ -1650,16 +1772,20 @@ async function loadOrderHistory() {
   if (eventList) eventList.innerHTML = `<div class="history-empty">Loading proof events...</div>`;
 
   const { fromIso, toIso } = getDateRange();
-  const buyerAllDates = Boolean($("history-buyer-all-dates")?.checked);
   const searchTerm = String($("history-search")?.value || "").trim();
-  const searchAllDates = Boolean(searchTerm && (buyerAllDates || historySearchLooksLikeLabelScan(searchTerm)));
-  if (searchAllDates && searchTerm && list) {
-    const searchKind = historySearchLooksLikeLabelScan(searchTerm) ? "label/tracking scan" : "buyer";
-    list.innerHTML = `<div class="history-empty">Searching all stored history for ${escapeHtml(searchKind)} "${escapeHtml(searchTerm)}"...</div>`;
+  const buyerAllDates = Boolean($("history-buyer-all-dates")?.checked);
+  const searchAllDates = Boolean(searchTerm && buyerAllDates);
+  const targetedRangeSearch = Boolean(searchTerm && !searchAllDates && historySearchLooksLikeLabelScan(searchTerm));
+  if ((searchAllDates || targetedRangeSearch) && list) {
+    const scope = searchAllDates ? "all stored history" : "selected date range";
+    const searchKind = historySearchLooksLikeLabelScan(searchTerm) ? "label/tracking scan" : "buyer/order search";
+    list.innerHTML = `<div class="history-empty">Searching ${escapeHtml(scope)} for ${escapeHtml(searchKind)} "${escapeHtml(searchTerm)}"...</div>`;
   }
 
   const linesQuery = searchAllDates
-    ? fetchBuyerAllDateOrderHistoryLines(searchTerm)
+    ? fetchAllDateOrderHistoryLines(searchTerm)
+    : targetedRangeSearch
+    ? fetchTargetedRangeOrderHistoryLines(searchTerm, fromIso, toIso)
     : fetchClosedOrderHistoryLines(fromIso, toIso);
 
   const adminEventsQuery = supabase
@@ -1710,8 +1836,10 @@ async function loadOrderHistory() {
 
   if (linesResult.capped) {
     console.warn(
-      buyerAllDates && searchTerm
-        ? `Order History loaded the first ${ORDER_HISTORY_MAX_LINES} closed lines for buyer search "${searchTerm}". Use a more exact username if you need fewer rows.`
+      searchAllDates
+        ? `Order History loaded the first ${ORDER_HISTORY_MAX_LINES} closed lines for all-date search "${searchTerm}". Use a more exact buyer, order, or tracking value if you need fewer rows.`
+        : targetedRangeSearch
+        ? `Order History loaded the first ${ORDER_HISTORY_MAX_LINES} matching closed lines for label/tracking scan "${searchTerm}" in this date range. Narrow the dates if you need fewer rows.`
         : `Order History loaded the first ${ORDER_HISTORY_MAX_LINES} closed lines for this date range. Narrow the dates if you need older rows.`
     );
   }
@@ -1812,7 +1940,10 @@ async function loadOrderHistory() {
       .flatMap((event) => Array.isArray(event.order_line_ids) ? event.order_line_ids : [])
   );
   state.lines = closedLines;
+  state.historyLoadedTargetedSearch = targetedRangeSearch;
+  state.historyLoadedAllDatesSearch = searchAllDates;
   state.historyLoaded = true;
+  rebuildHistoryLineSearchIndex();
   renderWorkerOptions();
   applyHistoryBuyerLaunchSearch();
   applyFilters();
@@ -1879,6 +2010,44 @@ function renderWorkerOptions() {
   if ([...workers].includes(current)) select.value = current;
 }
 
+function getHistoryLineSearchHaystack(line) {
+  if (!line) return "";
+  return [
+    line.searchText,
+    getLabelEventSearchTextForLine(line),
+    getReturnSearchTextForLine(line),
+  ].join(" ");
+}
+
+function rebuildHistoryLineSearchIndex() {
+  state.historyLineSearchIndex = new Map(
+    state.lines.map((line) => [line.id, getHistoryLineSearchHaystack(line)])
+  );
+}
+
+function getIndexedHistoryLineSearchHaystack(line) {
+  if (!line?.id) return getHistoryLineSearchHaystack(line);
+  return state.historyLineSearchIndex.get(line.id) || getHistoryLineSearchHaystack(line);
+}
+
+function loadedHistoryHasLocalSearchMatch(term) {
+  const cleanTerm = String(term || "").trim();
+  if (!cleanTerm) return true;
+  return state.lines.some((line) => historySearchTextIncludes(getIndexedHistoryLineSearchHaystack(line), cleanTerm));
+}
+
+function shouldReloadHistoryForSearchInput(value) {
+  const cleanTerm = String(value || "").trim();
+  const buyerAllDates = Boolean($("history-buyer-all-dates")?.checked);
+  if (!cleanTerm) return state.historyLoadedTargetedSearch || state.historyLoadedAllDatesSearch;
+  if (buyerAllDates) return true;
+  if (!historySearchLooksLikeLabelScan(cleanTerm)) {
+    return state.historyLoadedTargetedSearch || state.historyLoadedAllDatesSearch;
+  }
+  if (!state.historyLoaded || !state.lines.length) return true;
+  return !loadedHistoryHasLocalSearchMatch(cleanTerm);
+}
+
 function applyFilters() {
   const term = String($("history-search")?.value || "").trim();
   const worker = $("history-worker")?.value || "";
@@ -1897,11 +2066,7 @@ function applyFilters() {
     if (
       term
       && !relatedSearchLineIds.has(line.id)
-      && !historySearchTextIncludes([
-        line.searchText,
-        getLabelEventSearchTextForLine(line),
-        getReturnSearchTextForLine(line),
-      ].join(" "), term)
+      && !historySearchTextIncludes(getIndexedHistoryLineSearchHaystack(line), term)
     ) return false;
     return true;
   });
@@ -4940,6 +5105,7 @@ function mergeHistoryLines(rows = []) {
     if (line.id) byId.set(line.id, line);
   });
   state.lines = [...byId.values()];
+  rebuildHistoryLineSearchIndex();
 }
 
 async function fetchReturnTransferLines(info = {}) {
@@ -6292,6 +6458,7 @@ async function attachHistoryLabelToOrder(transferPayload) {
     if (line.ebay_orders && !Array.isArray(line.ebay_orders)) line.ebay_orders = line.order;
     line.searchText = normalizeLine(line).searchText;
   });
+  rebuildHistoryLineSearchIndex();
 
   if (transferPayload.transferId && window.chrome?.runtime?.sendMessage) {
     clearExtensionPendingHistoryLabel(transferPayload.transferId);
@@ -7885,6 +8052,7 @@ function mergeBackfilledTrackingIntoLoadedState(group, patch) {
     if (line.ebay_orders && !Array.isArray(line.ebay_orders)) line.ebay_orders = updatedOrder;
     line.searchText = normalizeLine(line).searchText;
   });
+  rebuildHistoryLineSearchIndex();
 }
 
 function handleOpenHistoryExtraLabelButtonClick(eventId) {
@@ -8015,23 +8183,27 @@ function setupListeners() {
   });
   $("history-search")?.addEventListener("input", () => {
     const value = $("history-search")?.value || "";
-    if ($("history-buyer-all-dates")?.checked || historySearchLooksLikeLabelScan(value)) {
-      window.clearTimeout(historyBuyerAllDatesSearchTimer);
-      historyBuyerAllDatesSearchTimer = window.setTimeout(loadOrderHistory, 450);
+    window.clearTimeout(historyTargetedSearchTimer);
+    if (shouldReloadHistoryForSearchInput(value)) {
+      const delay = state.historyLoadedTargetedSearch || state.historyLoadedAllDatesSearch ? 250 : 450;
+      historyTargetedSearchTimer = window.setTimeout(loadOrderHistory, delay);
       return;
     }
     applyFilters();
   });
   $("history-search")?.addEventListener("change", () => {
     const value = $("history-search")?.value || "";
-    if ($("history-buyer-all-dates")?.checked || historySearchLooksLikeLabelScan(value)) {
+    window.clearTimeout(historyTargetedSearchTimer);
+    if (shouldReloadHistoryForSearchInput(value)) {
       loadOrderHistory();
       return;
     }
     applyFilters();
   });
   $("history-buyer-all-dates")?.addEventListener("change", () => {
-    if (String($("history-search")?.value || "").trim()) {
+    window.clearTimeout(historyTargetedSearchTimer);
+    const value = String($("history-search")?.value || "").trim();
+    if (value || state.historyLoadedAllDatesSearch) {
       loadOrderHistory();
       return;
     }
