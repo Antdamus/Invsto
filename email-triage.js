@@ -118,7 +118,7 @@
     { key: "priorities", label: "Priority", values: EBAY_PRIORITIES },
     { key: "responseNeeds", label: "Response", values: EBAY_RESPONSE_NEEDS },
   ];
-  const EBAY_STATE_FILTERS = ["all", "unread", "unclassified", "needs_reply_today", "review_queue"];
+  const EBAY_STATE_FILTERS = ["all", "last_24_hours", "pending_tasks", "unread", "unclassified", "needs_reply_today", "review_queue"];
   const EBAY_SYSTEM_FILTERS = ["members", "ebay_notifications", "returns", "shipping_issues", "has_order", "has_return", "has_media", "needs_context_review"];
   const EBAY_SOURCE_FILTER_GROUP = { key: "sourceTypes", label: "Source", values: EBAY_CONVERSATION_SOURCE_TYPES };
   const EBAY_SAVED_VIEW_ICONS = {
@@ -134,6 +134,8 @@
     high_value_buyers: "gem",
     refund_risk: "badge-alert",
     review_queue: "list-checks",
+    pending_tasks: "clipboard-check",
+    last_24_hours: "clock-3",
     has_order: "receipt-text",
     has_return: "undo-2",
     has_media: "paperclip",
@@ -151,6 +153,8 @@
     high_value_buyers: { id: "ai:high_value_buyer", label: "High Value Buyer", category: "ai" },
     refund_risk: { id: "ai:refund_risk", label: "Refund Risk", category: "ai" },
     review_queue: { id: "state:review_queue", label: "Review Queue", category: "state" },
+    pending_tasks: { id: "state:pending_tasks", label: "Pending Tasks", category: "state" },
+    last_24_hours: { id: "state:last_24_hours", label: "Last 24 Hours", category: "state" },
     has_order: { id: "system:has_order", label: "Has Order", category: "system" },
     has_return: { id: "system:has_return", label: "Has Return", category: "system" },
     has_media: { id: "system:has_media", label: "Has Media", category: "system" },
@@ -167,6 +171,8 @@
     "state:read",
     "state:pending_read_sync",
     "state:read_sync_failed",
+    "state:pending_tasks",
+    "state:last_24_hours",
   ]);
   const EBAY_SEND_SUCCESS_MESSAGE = "✓ Sent";
   const EBAY_SEND_SUCCESS_VISIBLE_MS = 5500;
@@ -3185,6 +3191,8 @@
       ["high_value_buyers", "High value", 70],
       ["refund_risk", "Refund risk", 80],
       ["review_queue", "Review queue", 90],
+      ["pending_tasks", "Pending tasks", 95],
+      ["last_24_hours", "Last 24 hours", 96],
       ["has_order", "Has order", 100],
       ["has_return", "Has return", 110],
       ["has_media", "Has media", 120],
@@ -3252,9 +3260,37 @@
     return ebayClassificationHasAny(classification?.effective_risk_flags || [], values);
   }
 
+  function ebayConversationLatestActivityMs(conversation = {}) {
+    const timestamps = [
+      conversation.latest_message_created_at,
+      conversation.last_message_created_at,
+      conversation.updated_at,
+      conversation.created_at,
+    ];
+    for (const value of timestamps) {
+      const time = new Date(value || 0).getTime();
+      if (Number.isFinite(time) && time > 0) return time;
+    }
+    return 0;
+  }
+
+  function ebayConversationIsLast24Hours(conversation = {}) {
+    const activityMs = ebayConversationLatestActivityMs(conversation);
+    return activityMs > 0 && activityMs >= Date.now() - (24 * 60 * 60 * 1000);
+  }
+
+  function ebayConversationHasPendingTasks(conversation = {}, state = adminClassificationState) {
+    const summaryCount = Number(conversation?.summary?.pending_task_count);
+    if (Number.isFinite(summaryCount) && summaryCount > 0) return true;
+    if (!conversation?.id) return false;
+    return ebayConversationTaskSummary(state, conversation.id).pendingCount > 0;
+  }
+
   function ebaySavedViewMatches(conversation, filter = "all") {
     const summary = ebayConversationSummary(conversation);
     const classification = ebayConversationClassification(conversation);
+    if (filter === "last_24_hours") return ebayConversationIsLast24Hours(conversation);
+    if (filter === "pending_tasks") return ebayConversationHasPendingTasks(conversation);
     if (filter === "members") return ebayConversationSource(conversation) === "member_message";
     if (filter === "ebay_notifications") return ebayConversationSource(conversation) === "platform_notification";
     if (filter === "unread") return Number(conversation.unread_count || 0) > 0;
@@ -3343,6 +3379,8 @@
     high_value_buyers: "high_value_buyers",
     refund_risk: "refund_risk",
     review_queue: "review_queue",
+    pending_tasks: "pending_tasks",
+    last_24_hours: "last_24_hours",
     has_order: "has_order",
     has_return: "has_return",
     has_media: "has_media",
@@ -4527,6 +4565,8 @@
       high_value_buyers: "High Value Buyers",
       refund_risk: "Refund Risk",
       review_queue: "Review Queue",
+      pending_tasks: "Pending Tasks",
+      last_24_hours: "Last 24 Hours",
       has_order: "Has order",
       has_return: "Has return",
       has_media: "Has media",
@@ -5998,6 +6038,8 @@
     if (String(conversation?.read_sync_status || "").toLowerCase() === "provider_update_failed") addConversationLabel(stateLabels, "Read Sync Failed");
     if (classification?.effective_response_need === "reply_today") addConversationLabel(stateLabels, "Needs Reply Today");
     if (ebaySavedViewMatches(conversation, "review_queue")) addConversationLabel(stateLabels, "Review Queue");
+    if (ebaySavedViewMatches(conversation, "pending_tasks")) addConversationLabel(stateLabels, "Pending Tasks");
+    if (ebaySavedViewMatches(conversation, "last_24_hours")) addConversationLabel(stateLabels, "Last 24 Hours");
     if (stale) addConversationLabel(stateLabels, "Needs Reclassification");
     return [
       { label: "State", values: stateLabels.length ? stateLabels : ["No state labels"] },

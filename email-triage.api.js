@@ -1220,6 +1220,31 @@
     return selected.some((value) => set.has(value));
   }
 
+  function ebayConversationLatestActivityMs(conversation = {}) {
+    const timestamps = [
+      conversation.latest_message_created_at,
+      conversation.last_message_created_at,
+      conversation.updated_at,
+      conversation.created_at,
+    ];
+    for (const value of timestamps) {
+      const time = new Date(value || 0).getTime();
+      if (Number.isFinite(time) && time > 0) return time;
+    }
+    return 0;
+  }
+
+  function ebayConversationIsLast24Hours(conversation = {}) {
+    const activityMs = ebayConversationLatestActivityMs(conversation);
+    return activityMs > 0 && activityMs >= Date.now() - (24 * 60 * 60 * 1000);
+  }
+
+  function ebayLegacyPendingTaskCount(conversation = {}) {
+    const summary = ebayLegacySummary(conversation);
+    const count = Number(summary.pending_task_count || conversation.pending_task_count || 0);
+    return Number.isFinite(count) ? count : 0;
+  }
+
   function ebayLegacySmartFolderCounts(conversations = []) {
     const rows = ebayMailboxArray(conversations);
     return {
@@ -1240,6 +1265,8 @@
         const classification = ebayLegacyClassification(conversation);
         return !classification.id || summary.needs_context_review === true || ebayLegacyHasAny(classification.risk_flags, ["context_review_needed", "low_confidence"]);
       }).length,
+      pending_tasks: rows.filter((conversation) => ebayLegacyPendingTaskCount(conversation) > 0).length,
+      last_24_hours: rows.filter((conversation) => ebayConversationIsLast24Hours(conversation)).length,
       has_order: rows.filter((conversation) => ebayLegacySummary(conversation).has_order_link === true).length,
       has_return: rows.filter((conversation) => ebayLegacySummary(conversation).has_return_link === true).length,
       has_media: rows.filter((conversation) => ebayLegacySummary(conversation).has_media === true).length,
@@ -1376,6 +1403,8 @@
     if (filter === "review_queue") return !ebayLegacyClassification(conversation).id
       || summary.needs_context_review === true
       || ebayLegacyHasAny(classification.risk_flags, ["context_review_needed", "low_confidence"]);
+    if (filter === "pending_tasks") return ebayLegacyPendingTaskCount(conversation) > 0;
+    if (filter === "last_24_hours") return ebayConversationIsLast24Hours(conversation);
     if (filter === "has_order") return summary.has_order_link === true;
     if (filter === "has_return") return summary.has_return_link === true;
     if (filter === "has_media") return summary.has_media === true;
