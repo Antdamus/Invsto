@@ -29,6 +29,7 @@
     { href: "store-transfers.html", label: "Store Transfers", mark: "ST" },
     { href: "live-sales.html", label: "Live Sales", mark: "LS" },
     { href: "pending-orders.html", label: "Pending Orders", mark: "PO" },
+    { href: "email-triage.html", label: "Email Triage", mark: "ET", requiresEmailTriageAccess: true },
     { href: "team-tasks.html", label: "Tasks", mark: "TS" },
     { href: "ebay-order-history.html", label: "Order History", mark: "OH" },
     { href: "ebay-returns.html", label: "Returns", mark: "R" },
@@ -36,10 +37,18 @@
     { href: "dashboard.html", label: "Admin Dashboard", mark: "AD" },
   ];
 
+  function getWorkerNavItems() {
+    const canAccessEmailTriage = window.__ogEmailTriageAccess === true;
+    return WORKER_NAV_ITEMS.filter((item) => {
+      if (!item.requiresEmailTriageAccess) return true;
+      return canAccessEmailTriage;
+    });
+  }
+
   function getNavConfig(role) {
     return role === "admin"
       ? { bodyClass: "admin-role-nav", title: "OG Admin", items: ADMIN_NAV_ITEMS }
-      : { bodyClass: "worker-role-nav", title: "OG Worker", items: WORKER_NAV_ITEMS };
+      : { bodyClass: "worker-role-nav", title: "OG Worker", items: getWorkerNavItems() };
   }
 
   function currentPageName() {
@@ -93,16 +102,44 @@
 
     const { data, error } = await client
       .from("employees")
-      .select("id, user_id, display_name, role, active")
+      .select("id, user_id, display_name, role, active, email_triage_access")
       .eq("user_id", user.id)
       .maybeSingle();
 
     if (error) {
-      console.warn("Navigation role lookup failed:", error);
-      return null;
+      console.warn("Navigation role lookup with Email Triage access failed; retrying base employee lookup:", error);
+      const { data: fallbackData, error: fallbackError } = await client
+        .from("employees")
+        .select("id, user_id, display_name, role, active")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (fallbackError) {
+        console.warn("Navigation role lookup failed:", fallbackError);
+        return null;
+      }
+
+      return fallbackData || null;
     }
 
     return data || null;
+  }
+
+  async function checkEmailTriageAccess(employee) {
+    const role = String(employee?.role || "").toLowerCase();
+    if (role === "admin" || employee?.email_triage_access === true) return true;
+
+    const client = await waitForSupabaseReady();
+    if (!client?.rpc) return false;
+
+    try {
+      const { data, error } = await client.rpc("can_access_email_triage");
+      if (error) throw error;
+      return data === true;
+    } catch (error) {
+      console.warn("Navigation Email Triage access lookup failed:", error);
+      return false;
+    }
   }
 
   function navLinkMarkup(item, activePage) {
@@ -275,6 +312,7 @@
     const employee = await getCurrentEmployee();
     const role = String(employee?.role || "").toLowerCase();
     if (employee?.active === false || !role) return;
+    window.__ogEmailTriageAccess = await checkEmailTriageAccess(employee);
     renderRoleNavigation(role === "admin" ? "admin" : "worker");
   }
 
