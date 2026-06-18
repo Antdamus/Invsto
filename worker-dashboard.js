@@ -840,6 +840,14 @@ function setupNavigation() {
   }
 }
 
+function syncEmailTriageAccessLinks(employee) {
+  const role = String(employee?.role || "").toLowerCase();
+  const canAccess = role === "admin" || employee?.email_triage_access === true;
+  document.querySelectorAll("[data-email-triage-access-link]").forEach((link) => {
+    link.hidden = !canAccess;
+  });
+}
+
 /** ---------- Data loaders ---------- */
 async function getSessionOrRedirect() {
   const { data: { session }, error } = await window.supabase.auth.getSession();
@@ -855,7 +863,7 @@ async function getSessionOrRedirect() {
 async function loadEmployeeByUserId(userId) {
   const { data, error } = await window.supabase
     .from("employees")
-    .select("id, display_name, role, active, created_at, worker_type, agreement_version_required")
+    .select("id, display_name, role, active, created_at, worker_type, agreement_version_required, email_triage_access")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -1170,6 +1178,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     state.employee = employee;
+    syncEmailTriageAccessLinks(employee);
     await enforceContractorAgreementGate(window.supabase);
     await loadWorkerUrgentOrders();
     await loadWorkerStoreTransferAlerts();

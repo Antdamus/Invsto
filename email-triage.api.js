@@ -59,18 +59,19 @@
 
     const { data: employee, error: employeeError } = await client
       .from("employees")
-      .select("role, active, display_name")
+      .select("role, active, display_name, email_triage_access")
       .eq("user_id", session.user.id)
       .maybeSingle();
 
     if (employeeError || !employee || employee.active === false) {
-      console.error("Email triage admin guard failed:", employeeError);
+      console.error("Email triage access guard failed:", employeeError);
       window.location.href = "index.html?next=" + encodeURIComponent("email-triage.html");
       return null;
     }
 
     const role = String(employee.role || "").toLowerCase();
-    if (role !== "admin") {
+    const canAccess = role === "admin" || employee.email_triage_access === true;
+    if (!canAccess) {
       window.location.href = "worker-dashboard.html";
       return null;
     }

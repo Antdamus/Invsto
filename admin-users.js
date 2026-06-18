@@ -203,6 +203,22 @@ async function saveUserNotificationPreferences({
   return true;
 }
 
+async function saveUserAppAccess({ userId, emailTriageAccess }) {
+  if (!userId) return true;
+
+  const { error } = await supabase.rpc("admin_set_employee_email_triage_access", {
+    _user_id: userId,
+    _enabled: !!emailTriageAccess
+  });
+
+  if (error) {
+    console.error("App access save failed", error);
+    throw new Error(error.message || "App access save failed.");
+  }
+
+  return true;
+}
+
 function normalizePhoneE164(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -367,6 +383,9 @@ if (!taxStatusLoaded) {
 
     const role = row.role || "—";
     chips.push(chip(`Role: ${role}`, "accent", "🧑‍💼"));
+    if (String(role).toLowerCase() === "admin" || row.email_triage_access === true) {
+      chips.push(chip("Email Triage", "accent", "MAIL"));
+    }
 
 
     const hasAddr = lastAddrMap.get(getEmpId(row)) === true;
@@ -586,6 +605,20 @@ if (!taxStatusLoaded) {
               </label>
             </div>
           </section>
+
+          <!-- App Access -->
+          <section class="ud-section">
+            <div class="ud-section-title">App Access</div>
+            <div class="ud-grid">
+              <label class="ud-field ud-active ud-span2">
+                <span>Email Triage</span>
+                <div class="ud-switch">
+                  <input id="udEmailTriageAccess" type="checkbox" />
+                  <span class="muted">Show Email Triage on this worker's dashboard and allow entry.</span>
+                </div>
+              </label>
+            </div>
+          </section>
 <!-- Watchlist (who this user watches) -->
 <section class="ud-section" id="udWatchSection">
   <div class="ud-section-title">Watchlist</div>
@@ -793,6 +826,14 @@ if (!taxStatusLoaded) {
               urgentSendBoth: !!qs("#udUrgentBoth")?.checked,
               emailOverride: (qs("#udEmailOverride")?.value || "").trim()
             });
+            msg.textContent = "Saving app access...";
+            await saveUserAppAccess({
+              userId: activeUserId,
+              emailTriageAccess: !!qs("#udEmailTriageAccess")?.checked
+            });
+            if (typeof window.loadUsers === "function") {
+              await window.loadUsers();
+            }
           }
           msg.textContent = "Saved.";
 
@@ -863,7 +904,8 @@ function readDrawerState() {
     canEmail: !!qs("#udCanEmail")?.checked,
     taskChannel: qs("#udTaskChannel")?.value || "auto",
     urgentBoth: !!qs("#udUrgentBoth")?.checked,
-    emailOverride: qs("#udEmailOverride")?.value || ""
+    emailOverride: qs("#udEmailOverride")?.value || "",
+    emailTriageAccess: !!qs("#udEmailTriageAccess")?.checked
   };
 }
 
@@ -901,7 +943,8 @@ function setDirtyFromCurrent() {
     cur.canEmail !== drawerSnapshot.canEmail ||
     cur.taskChannel !== drawerSnapshot.taskChannel ||
     cur.urgentBoth !== drawerSnapshot.urgentBoth ||
-    cur.emailOverride !== drawerSnapshot.emailOverride;
+    cur.emailOverride !== drawerSnapshot.emailOverride ||
+    cur.emailTriageAccess !== drawerSnapshot.emailTriageAccess;
 
   setDirty(changed);
 }
@@ -1406,6 +1449,7 @@ const [phoneState, notificationState] = await Promise.all([
     qs("#udType").value = row.worker_type || row.type || "employee";
     qs("#udHourly").value = row.hourly_rate ?? row.hourly ?? "";
     qs("#udActive").checked = !!row.active;
+    qs("#udEmailTriageAccess").checked = row.email_triage_access === true;
 
     drawer.setAttribute("data-employee-id", activeEmployeeId);
     // Phase 2: address section
