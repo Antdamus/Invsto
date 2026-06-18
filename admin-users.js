@@ -162,7 +162,7 @@ function scheduleTaxStatusRefresh(rows) {
 
 async function saveUserPhone({ userId, phone, canSms }) {
   const normalizedPhone = normalizePhoneE164(phone);
-  if (!normalizedPhone) return true;
+  if (!userId) return true;
 
   const { error } = await supabase.rpc("admin_upsert_user_phone", {
     _user_id: userId,
@@ -173,6 +173,31 @@ async function saveUserPhone({ userId, phone, canSms }) {
   if (error) {
     console.error("Phone save failed", error);
     throw new Error(error.message || "Phone save failed.");
+  }
+
+  return true;
+}
+
+async function saveUserNotificationPreferences({
+  userId,
+  canEmail,
+  preferredTaskChannel,
+  urgentSendBoth,
+  emailOverride
+}) {
+  if (!userId) return true;
+
+  const { error } = await supabase.rpc("admin_upsert_user_notification_preferences", {
+    _user_id: userId,
+    _can_email: canEmail,
+    _preferred_task_channel: preferredTaskChannel || "auto",
+    _urgent_send_both: urgentSendBoth,
+    _email_override: emailOverride || null
+  });
+
+  if (error) {
+    console.error("Notification preferences save failed", error);
+    throw new Error(error.message || "Notification preferences save failed.");
   }
 
   return true;
@@ -490,6 +515,38 @@ if (!taxStatusLoaded) {
         <span class="muted">Yes</span>
       </div>
     </label>
+
+    <label class="ud-field ud-active">
+      <span>Allow email</span>
+      <div class="ud-switch">
+        <input id="udCanEmail" type="checkbox" />
+        <span class="muted">Yes</span>
+      </div>
+    </label>
+
+    <label class="ud-field">
+      <span>Task alerts</span>
+      <select id="udTaskChannel">
+        <option value="auto">Auto fallback</option>
+        <option value="sms">SMS first</option>
+        <option value="email">Email first</option>
+        <option value="both">SMS + email</option>
+        <option value="dashboard">Dashboard only</option>
+      </select>
+    </label>
+
+    <label class="ud-field ud-span2">
+      <span>Notification email override</span>
+      <input id="udEmailOverride" type="email" autocomplete="off" placeholder="Use worker email unless filled" />
+    </label>
+
+    <label class="ud-field ud-active ud-span2">
+      <span>Urgent task alerts</span>
+      <div class="ud-switch">
+        <input id="udUrgentBoth" type="checkbox" />
+        <span class="muted">Send SMS and email when urgent</span>
+      </div>
+    </label>
   </div>
 </section>
 
@@ -722,13 +779,22 @@ if (!taxStatusLoaded) {
           await window.saveUserRow(drawerEl, { quiet: true });
           msg.textContent = "Saved ✅";
           
-if (activeUserId) {
-  await saveUserPhone({
-    userId: activeUserId,
-    phone: normalizedPhone,
-    canSms: !!qs("#udCanSms")?.checked
-  });
-}
+          msg.textContent = "Saving notification preferences...";
+          if (activeUserId) {
+            await saveUserPhone({
+              userId: activeUserId,
+              phone: normalizedPhone,
+              canSms: !!qs("#udCanSms")?.checked
+            });
+            await saveUserNotificationPreferences({
+              userId: activeUserId,
+              canEmail: !!qs("#udCanEmail")?.checked,
+              preferredTaskChannel: qs("#udTaskChannel")?.value || "auto",
+              urgentSendBoth: !!qs("#udUrgentBoth")?.checked,
+              emailOverride: (qs("#udEmailOverride")?.value || "").trim()
+            });
+          }
+          msg.textContent = "Saved.";
 
           // reset dirty-state snapshot to current
           drawerSnapshot = readDrawerState();
@@ -793,7 +859,11 @@ function readDrawerState() {
     hourly: qs("#udHourly")?.value || "",
     active: !!qs("#udActive")?.checked,
     phone: qs("#udPhone")?.value || "",
-    canSms: !!qs("#udCanSms")?.checked
+    canSms: !!qs("#udCanSms")?.checked,
+    canEmail: !!qs("#udCanEmail")?.checked,
+    taskChannel: qs("#udTaskChannel")?.value || "auto",
+    urgentBoth: !!qs("#udUrgentBoth")?.checked,
+    emailOverride: qs("#udEmailOverride")?.value || ""
   };
 }
 
@@ -827,7 +897,11 @@ function setDirtyFromCurrent() {
     cur.hourly !== drawerSnapshot.hourly ||
     cur.active !== drawerSnapshot.active ||
     cur.phone !== drawerSnapshot.phone ||
-    cur.canSms !== drawerSnapshot.canSms;
+    cur.canSms !== drawerSnapshot.canSms ||
+    cur.canEmail !== drawerSnapshot.canEmail ||
+    cur.taskChannel !== drawerSnapshot.taskChannel ||
+    cur.urgentBoth !== drawerSnapshot.urgentBoth ||
+    cur.emailOverride !== drawerSnapshot.emailOverride;
 
   setDirty(changed);
 }
@@ -1269,6 +1343,31 @@ async function loadUserPhone(userId) {
   };
 }
 
+async function loadUserNotificationPreferences(userId) {
+  const supabase = window.supabase;
+  if (!supabase || !userId) {
+    return { canEmail: true, preferredTaskChannel: "auto", urgentSendBoth: false, emailOverride: "" };
+  }
+
+  const { data, error } = await supabase
+    .from("user_notification_preferences")
+    .select("can_email, preferred_task_channel, urgent_send_both, email_override")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to load notification preferences", error);
+    return { canEmail: true, preferredTaskChannel: "auto", urgentSendBoth: false, emailOverride: "" };
+  }
+
+  return {
+    canEmail: data?.can_email !== false,
+    preferredTaskChannel: data?.preferred_task_channel || "auto",
+    urgentSendBoth: data?.urgent_send_both === true,
+    emailOverride: data?.email_override || ""
+  };
+}
+
 
 
 async function openUserDrawer(row) {
@@ -1278,11 +1377,18 @@ async function openUserDrawer(row) {
   activeEmployeeId = getEmpId(row);         // employees.id
 activeUserId = String(row.user_id || ""); // auth.users.id
 
-const phoneState = await loadUserPhone(activeUserId);
+const [phoneState, notificationState] = await Promise.all([
+  loadUserPhone(activeUserId),
+  loadUserNotificationPreferences(activeUserId)
+]);
 
 
     qs("#udPhone").value = phoneState.phone;
     qs("#udCanSms").checked = phoneState.canSms;
+    qs("#udCanEmail").checked = notificationState.canEmail;
+    qs("#udTaskChannel").value = notificationState.preferredTaskChannel;
+    qs("#udUrgentBoth").checked = notificationState.urgentSendBoth;
+    qs("#udEmailOverride").value = notificationState.emailOverride;
 
 
     const backdrop = qs("#userDrawerBackdrop");

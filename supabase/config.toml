@@ -562,3 +562,8 @@ entrypoint = "./functions/ebay-conversation-classify/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/ebay-conversation-draft/index.ts"
+
+[functions.send-task-email-notifications]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/send-task-email-notifications/index.ts"
