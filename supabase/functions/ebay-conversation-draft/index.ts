@@ -151,16 +151,18 @@ async function requireAdmin(req: Request, supabase: ServiceClient) {
 
   const { data: employee, error: employeeError } = await supabase
     .from("employees")
-    .select("role, active")
+    .select("role, active, email_triage_access")
     .eq("user_id", user.id)
     .maybeSingle();
 
   if (employeeError) throw new DraftError("configuration_error", { phase: "employee_lookup" });
-  if (!employee || employee.active === false || String(employee.role || "").toLowerCase() !== "admin") {
-    throw new DraftError("admin_required", { status: 403, phase: "auth" });
+  const role = String(employee?.role || "").toLowerCase();
+  const canUseEmailTriage = employee?.active !== false && (role === "admin" || employee?.email_triage_access === true);
+  if (!employee || !canUseEmailTriage) {
+    throw new DraftError("email_triage_access_required", { status: 403, phase: "auth" });
   }
 
-  return { actorType: "admin", userId: user.id, email: user.email || null, accessToken };
+  return { actorType: role === "admin" ? "admin" : "email_triage", userId: user.id, email: user.email || null, accessToken };
 }
 
 function text(value: unknown, maxLength = 1000) {
@@ -2652,7 +2654,7 @@ serve(async (req) => {
   try {
     const admin = await requireAdmin(req, supabase);
     const input = await parseInput(req);
-    const rpcSupabase = admin.actorType === "admin" ? authenticatedClient(admin.accessToken) : supabase;
+    const rpcSupabase = admin.actorType !== "service_role" ? authenticatedClient(admin.accessToken) : supabase;
 
     if (input.mode === "view") {
       const conversation = await resolveEbayConversation(supabase, {

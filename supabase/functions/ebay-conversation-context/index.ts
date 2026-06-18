@@ -102,16 +102,18 @@ async function requireAdmin(req: Request, supabase: ServiceClient) {
 
   const { data: employee, error: employeeError } = await supabase
     .from("employees")
-    .select("role, active")
+    .select("role, active, email_triage_access")
     .eq("user_id", user.id)
     .maybeSingle();
 
   if (employeeError) throw new FunctionError("configuration_error", { phase: "employee_lookup" });
-  if (!employee || employee.active === false || String(employee.role || "").toLowerCase() !== "admin") {
-    throw new FunctionError("admin_required", { status: 403, phase: "auth" });
+  const role = String(employee?.role || "").toLowerCase();
+  const canUseEmailTriage = employee?.active !== false && (role === "admin" || employee?.email_triage_access === true);
+  if (!employee || !canUseEmailTriage) {
+    throw new FunctionError("email_triage_access_required", { status: 403, phase: "auth" });
   }
 
-  return { actorType: "admin", userId: user.id, email: user.email || null };
+  return { actorType: role === "admin" ? "admin" : "email_triage", userId: user.id, email: user.email || null };
 }
 
 async function parseInput(req: Request): Promise<Input> {
@@ -153,7 +155,7 @@ serve(async (req) => {
       : await buildEbayConversationContext(
         supabase,
         conversation.id,
-        operator.actorType === "admin" ? authenticatedClient(accessToken) : supabase,
+        operator.actorType !== "service_role" ? authenticatedClient(accessToken) : supabase,
       );
 
     return json(req, 200, {

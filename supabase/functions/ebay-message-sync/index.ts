@@ -11,7 +11,7 @@ type ClassificationMode = "none" | "classify_new" | "reclassify_all";
 type CheckpointStatus = "idle" | "running" | "paused" | "succeeded" | "failed" | "cancelled";
 
 type Operator = {
-  actorType: "service_role" | "admin";
+  actorType: "service_role" | "admin" | "email_triage";
   userId: string | null;
   email: string | null;
 };
@@ -260,16 +260,18 @@ async function requireAdmin(req: Request, supabase: ServiceClient): Promise<Oper
 
   const { data: employee, error: employeeError } = await supabase
     .from("employees")
-    .select("role, active")
+    .select("role, active, email_triage_access")
     .eq("user_id", user.id)
     .maybeSingle();
 
   if (employeeError) throw new SyncError("configuration_error", { status: 500, phase: "employee_lookup" });
-  if (!employee || employee.active === false || String(employee.role || "").toLowerCase() !== "admin") {
-    throw new SyncError("admin_required", { status: 403, phase: "auth" });
+  const role = String(employee?.role || "").toLowerCase();
+  const canUseEmailTriage = employee?.active !== false && (role === "admin" || employee?.email_triage_access === true);
+  if (!employee || !canUseEmailTriage) {
+    throw new SyncError("email_triage_access_required", { status: 403, phase: "auth" });
   }
 
-  return { actorType: "admin", userId: user.id, email: user.email || null };
+  return { actorType: role === "admin" ? "admin" : "email_triage", userId: user.id, email: user.email || null };
 }
 
 function stringOrNull(value: unknown) {
@@ -798,7 +800,7 @@ async function createRun(supabase: ServiceClient, input: SyncInput, account: Eba
       status: "running",
       conversation_type: input.conversationTypes.length === 1 ? input.conversationTypes[0] : null,
       started_by: operator.userId,
-      trigger_source: operator.actorType === "service_role" ? "service_role" : "admin_edge_function",
+      trigger_source: operator.actorType === "service_role" ? "service_role" : "email_triage_edge_function",
       requested_start_time: isoOrNull(input.startTime),
       requested_end_time: isoOrNull(input.endTime),
       requested_reference_id: input.referenceId,
