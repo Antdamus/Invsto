@@ -843,9 +843,27 @@ function setupNavigation() {
 function syncEmailTriageAccessLinks(employee) {
   const role = String(employee?.role || "").toLowerCase();
   const canAccess = role === "admin" || employee?.email_triage_access === true;
+  setEmailTriageAccessLinks(canAccess);
+}
+
+function setEmailTriageAccessLinks(canAccess) {
   document.querySelectorAll("[data-email-triage-access-link]").forEach((link) => {
-    link.hidden = !canAccess;
+    link.hidden = canAccess !== true;
   });
+}
+
+async function checkEmailTriageAccess(employee) {
+  const role = String(employee?.role || "").toLowerCase();
+  if (role === "admin" || employee?.email_triage_access === true) return true;
+
+  try {
+    const { data, error } = await window.supabase.rpc("can_access_email_triage");
+    if (error) throw error;
+    return data === true;
+  } catch (error) {
+    console.warn("Email Triage access check failed:", error);
+    return false;
+  }
 }
 
 /** ---------- Data loaders ---------- */
@@ -1178,7 +1196,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     state.employee = employee;
-    syncEmailTriageAccessLinks(employee);
+    setEmailTriageAccessLinks(await checkEmailTriageAccess(employee));
     await enforceContractorAgreementGate(window.supabase);
     await loadWorkerUrgentOrders();
     await loadWorkerStoreTransferAlerts();

@@ -160,6 +160,26 @@ function canManageSellers() {
   return ["admin", "manager"].includes(String(state.employee?.role || "").toLowerCase());
 }
 
+function setEmailTriageAccessLinks(canAccess) {
+  document.querySelectorAll("[data-email-triage-access-link]").forEach((link) => {
+    link.hidden = canAccess !== true;
+  });
+}
+
+async function checkEmailTriageAccess(employee) {
+  const role = String(employee?.role || "").toLowerCase();
+  if (role === "admin" || employee?.email_triage_access === true) return true;
+
+  try {
+    const { data, error } = await window.supabase.rpc("can_access_email_triage");
+    if (error) throw error;
+    return data === true;
+  } catch (error) {
+    console.warn("Email Triage access check failed:", error);
+    return false;
+  }
+}
+
 function isSameDateKey(value, key) {
   if (!value) return false;
   const date = new Date(value);
@@ -209,7 +229,7 @@ async function loadCurrentUser() {
 
   const { data: employee, error } = await window.supabase
     .from("employees")
-    .select("id, user_id, display_name, email, role, active")
+    .select("id, user_id, display_name, email, role, active, email_triage_access")
     .eq("user_id", state.user.id)
     .maybeSingle();
 
@@ -226,6 +246,7 @@ async function loadCurrentUser() {
   }
 
   state.employee = employee;
+  setEmailTriageAccessLinks(await checkEmailTriageAccess(employee));
   const greeting = $("seller-greeting");
   if (greeting) greeting.textContent = employee.display_name ? `${employee.display_name}'s Schedule` : "Schedule";
   return true;
