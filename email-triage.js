@@ -9,6 +9,7 @@
     fetchEbayConversationMessages,
     fetchTeamTaskAssignees,
     createEbayConversationMessageTask,
+    fetchEbayConversationTaskStatuses,
     markEbayConversationRead,
     syncEbayProviderReadState,
     processPendingEbayProviderReadState,
@@ -109,6 +110,7 @@
   const EBAY_DRAFT_METADATA_COLLAPSED_STORAGE_KEY = "og-email-triage-ebay-draft-metadata-collapsed";
   const EBAY_MOBILE_WORKSPACE_VIEW_STORAGE_KEY = "og-email-triage-ebay-mobile-workspace-view";
   const EBAY_RECLASSIFY_RECENT_LIMIT = 20;
+  const EBAY_MESSAGE_TASK_CLOSED_STATUSES = new Set(["resolved", "cancelled"]);
   const EBAY_FILTER_GROUPS = [
     { key: "topics", label: "Topics", values: EBAY_TOPIC_TAGS },
     { key: "buyerFlags", label: "Buyer flags", values: EBAY_BUYER_FLAGS },
@@ -3667,6 +3669,146 @@
     }
   }
 
+  function normalizeEbayConversationTaskEvent(event = {}) {
+    return {
+      id: compactConversationText(event.id),
+      action: compactConversationText(event.action, "commented"),
+      old_status: compactConversationText(event.old_status),
+      new_status: compactConversationText(event.new_status),
+      old_assigned_to_user_id: compactConversationText(event.old_assigned_to_user_id),
+      new_assigned_to_user_id: compactConversationText(event.new_assigned_to_user_id),
+      old_assigned_to_email: compactConversationText(event.old_assigned_to_email),
+      old_assigned_to_display_name: compactConversationText(event.old_assigned_to_display_name),
+      new_assigned_to_email: compactConversationText(event.new_assigned_to_email),
+      new_assigned_to_display_name: compactConversationText(event.new_assigned_to_display_name),
+      notes: compactConversationText(event.notes),
+      signed_by_email: compactConversationText(event.signed_by_email),
+      signed_by_display_name: compactConversationText(event.signed_by_display_name),
+      created_at: event.created_at || null,
+      payload: event.payload && typeof event.payload === "object" ? event.payload : {},
+    };
+  }
+
+  function normalizeEbayConversationTaskStatus(row = {}) {
+    return {
+      conversation_id: compactConversationText(row.conversation_id),
+      task_id: compactConversationText(row.task_id || row.id),
+      message_id: compactConversationText(row.message_id),
+      title: compactConversationText(row.title, "Customer service task"),
+      description: compactConversationText(row.description),
+      status: compactConversationText(row.status, "open"),
+      priority: compactConversationText(row.priority, "normal"),
+      assigned_to_user_id: compactConversationText(row.assigned_to_user_id),
+      assigned_to_email: compactConversationText(row.assigned_to_email),
+      assigned_to_role: compactConversationText(row.assigned_to_role),
+      assigned_to_display_name: compactConversationText(row.assigned_to_display_name),
+      assigned_by_email: compactConversationText(row.assigned_by_email),
+      created_by_email: compactConversationText(row.created_by_email),
+      created_at: row.created_at || null,
+      updated_at: row.updated_at || null,
+      due_at: row.due_at || null,
+      resolved_at: row.resolved_at || null,
+      latest_note: compactConversationText(row.latest_note),
+      task_tag: compactConversationText(row.task_tag),
+      refund_amount: row.refund_amount,
+      conversation_link: compactConversationText(row.conversation_link),
+      message_preview: compactConversationText(row.message_preview),
+      events: safeArray(row.events).map(normalizeEbayConversationTaskEvent),
+    };
+  }
+
+  function ebayTaskIsClosed(task) {
+    return EBAY_MESSAGE_TASK_CLOSED_STATUSES.has(compactConversationText(task?.status).toLowerCase());
+  }
+
+  function sortEbayConversationTasks(left, right) {
+    const leftClosed = ebayTaskIsClosed(left) ? 1 : 0;
+    const rightClosed = ebayTaskIsClosed(right) ? 1 : 0;
+    if (leftClosed !== rightClosed) return leftClosed - rightClosed;
+    return new Date(right.created_at || 0).getTime() - new Date(left.created_at || 0).getTime();
+  }
+
+  function groupEbayConversationTaskStatuses(rows = []) {
+    return safeArray(rows).reduce((grouped, row) => {
+      const task = normalizeEbayConversationTaskStatus(row);
+      if (!task.conversation_id || !task.task_id) return grouped;
+      grouped[task.conversation_id] = grouped[task.conversation_id] || [];
+      grouped[task.conversation_id].push(task);
+      grouped[task.conversation_id].sort(sortEbayConversationTasks);
+      return grouped;
+    }, {});
+  }
+
+  function ebayConversationTaskRows(state, conversationId) {
+    return safeArray(state.ebayConversationTaskSummariesById?.[conversationId]).sort(sortEbayConversationTasks);
+  }
+
+  function ebayConversationTaskSummary(state, conversationId) {
+    const tasks = ebayConversationTaskRows(state, conversationId);
+    const pending = tasks.filter((task) => !ebayTaskIsClosed(task));
+    const completed = tasks.filter((task) => compactConversationText(task.status).toLowerCase() === "resolved");
+    const cancelled = tasks.filter((task) => compactConversationText(task.status).toLowerCase() === "cancelled");
+    return {
+      tasks,
+      total: tasks.length,
+      pendingCount: pending.length,
+      completedCount: completed.length,
+      cancelledCount: cancelled.length,
+      latestTask: pending[0] || completed[0] || cancelled[0] || null,
+      state: pending.length ? "pending" : tasks.length ? "complete" : "none",
+    };
+  }
+
+  async function loadEbayConversationTaskStatuses(context, conversationIds = [], options = {}) {
+    const ids = Array.from(new Set(safeArray(conversationIds).map((id) => compactConversationText(id)).filter(Boolean)));
+    if (!ids.length) return;
+    if (typeof fetchEbayConversationTaskStatuses !== "function") return;
+    if (options.silent !== true) {
+      setEbayConversationState({
+        ebayConversationTaskSummariesLoading: true,
+        ebayConversationTaskSummariesError: null,
+      });
+    }
+    try {
+      const payload = await fetchEbayConversationTaskStatuses(context, ids);
+      const grouped = groupEbayConversationTaskStatuses(payload.tasks);
+      const next = { ...(adminClassificationState.ebayConversationTaskSummariesById || {}) };
+      ids.forEach((id) => {
+        next[id] = safeArray(grouped[id]);
+      });
+      setEbayConversationState({
+        ebayConversationTaskSummariesById: next,
+        ebayConversationTaskSummariesLoading: false,
+        ebayConversationTaskSummariesError: null,
+      });
+    } catch (error) {
+      setEbayConversationState({
+        ebayConversationTaskSummariesLoading: false,
+        ebayConversationTaskSummariesError: error.code || error.message || "ebay_conversation_task_status_failed",
+      });
+      console.error("[email-triage] eBay conversation task statuses failed:", error);
+    }
+  }
+
+  function openEbayConversationTaskAuditModal(context, conversationId) {
+    const normalizedId = compactConversationText(conversationId);
+    if (!normalizedId) return;
+    setEbayConversationState({
+      ebayConversationTaskAuditModal: { conversationId: normalizedId },
+      ebayConversationTaskSummariesError: null,
+    });
+    if (!Object.prototype.hasOwnProperty.call(adminClassificationState.ebayConversationTaskSummariesById || {}, normalizedId)) {
+      loadEbayConversationTaskStatuses(context, [normalizedId], { silent: true });
+    }
+  }
+
+  function closeEbayConversationTaskAuditModal() {
+    setEbayConversationState({
+      ebayConversationTaskAuditModal: null,
+      ebayConversationTaskSummariesError: null,
+    });
+  }
+
   function openEbayConversationMessageTaskModal(context, conversationId, messageId) {
     const conversation = selectedEbayConversationById(conversationId, adminClassificationState);
     const message = ebayConversationMessageById(conversationId, messageId);
@@ -3742,6 +3884,160 @@
       return `<div class="classification-notice is-error">${escapeHtml(state.ebayConversationTaskError)}</div>`;
     }
     return "";
+  }
+
+  function ebayTaskAssigneeLabel(task) {
+    return compactConversationText(task.assigned_to_display_name || task.assigned_to_email || task.assigned_to_role, "Unassigned");
+  }
+
+  function ebayTaskActorLabel(event) {
+    return compactConversationText(event.signed_by_display_name || event.signed_by_email, "System");
+  }
+
+  function renderEbayConversationTaskStatusBadge(conversation, state) {
+    const summary = ebayConversationTaskSummary(state, conversation?.id);
+    if (!summary.total) return "";
+    const pending = summary.pendingCount > 0;
+    const count = pending ? summary.pendingCount : summary.completedCount || summary.total;
+    const icon = pending ? "clipboard-list" : "badge-check";
+    const label = pending ? "Task pending" : "Tasks complete";
+    const title = [
+      `${summary.pendingCount} pending`,
+      `${summary.completedCount} complete`,
+      summary.cancelledCount ? `${summary.cancelledCount} cancelled` : "",
+    ].filter(Boolean).join(" - ");
+    return `
+      <span
+        class="ebay-conversation-task-status is-${pending ? "pending" : "complete"}"
+        role="button"
+        tabindex="0"
+        title="${escapeHtml(title)}"
+        aria-label="${escapeHtml(`${label}: ${title}`)}"
+        data-ebay-conversation-task-status="${escapeHtml(conversation.id)}"
+      >
+        <i data-lucide="${escapeHtml(icon)}"></i>
+        <span>${escapeHtml(label)}</span>
+        <b>${escapeHtml(count)}</b>
+      </span>
+    `;
+  }
+
+  function ebayTaskEventLabel(event) {
+    const action = compactConversationText(event.action, "updated");
+    if (action === "created") return "Task created";
+    if (action === "assigned") return "Assignment changed";
+    if (action === "status_changed") return "Status changed";
+    if (action === "resolved") return "Task resolved";
+    if (action === "cancelled") return "Task cancelled";
+    if (action === "commented") return "Update added";
+    return humanizeValue(action);
+  }
+
+  function renderEbayTaskAuditEvent(event) {
+    const statusText = [event.old_status, event.new_status].filter(Boolean).map(humanizeValue).join(" -> ");
+    const assignmentText = [event.old_assigned_to_display_name || event.old_assigned_to_email, event.new_assigned_to_display_name || event.new_assigned_to_email]
+      .filter(Boolean)
+      .join(" -> ");
+    return `
+      <div class="ebay-task-audit-event">
+        <span class="ebay-task-audit-dot" aria-hidden="true"></span>
+        <div>
+          <strong>${escapeHtml(ebayTaskEventLabel(event))}</strong>
+          <small>${escapeHtml(formatContextDate(event.created_at))} by ${escapeHtml(ebayTaskActorLabel(event))}</small>
+          ${statusText ? `<p><b>Status</b> ${escapeHtml(statusText)}</p>` : ""}
+          ${assignmentText ? `<p><b>Assignment</b> ${escapeHtml(assignmentText)}</p>` : ""}
+          ${event.notes ? `<p>${escapeHtml(event.notes)}</p>` : ""}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderEbayTaskAuditCard(task) {
+    const status = compactConversationText(task.status, "open");
+    const isClosed = ebayTaskIsClosed(task);
+    const latestEvent = task.events[0] || null;
+    const facts = [
+      { label: "Assigned to", value: ebayTaskAssigneeLabel(task) },
+      { label: "Created", value: `${formatContextDate(task.created_at)}${task.created_by_email ? ` by ${task.created_by_email}` : ""}` },
+      { label: "Due", value: task.due_at ? formatContextDate(task.due_at) : "No due date" },
+      { label: "Last update", value: latestEvent ? `${formatContextDate(latestEvent.created_at)} by ${ebayTaskActorLabel(latestEvent)}` : formatContextDate(task.updated_at) },
+    ];
+    return `
+      <article class="ebay-task-audit-card is-${isClosed ? "closed" : "pending"}">
+        <div class="ebay-task-audit-card-head">
+          <div>
+            <span class="eyebrow">${escapeHtml(task.task_tag ? humanizeValue(task.task_tag) : "Customer service task")}</span>
+            <h4>${escapeHtml(task.title)}</h4>
+            ${task.description ? `<p>${escapeHtml(task.description)}</p>` : ""}
+          </div>
+          <span class="ebay-task-status-pill is-${escapeHtml(isClosed ? "closed" : "pending")}">${escapeHtml(humanizeValue(status))}</span>
+        </div>
+        <div class="ebay-task-audit-facts">
+          ${facts.map((fact) => `
+            <span>
+              <small>${escapeHtml(fact.label)}</small>
+              <b>${escapeHtml(fact.value)}</b>
+            </span>
+          `).join("")}
+          ${task.refund_amount ? `
+            <span>
+              <small>Refund amount</small>
+              <b>${escapeHtml(formatContextMoney(task.refund_amount))}</b>
+            </span>
+          ` : ""}
+        </div>
+        ${task.latest_note ? `<p class="ebay-task-audit-note">${escapeHtml(task.latest_note)}</p>` : ""}
+        ${task.message_preview ? `<blockquote>${escapeHtml(task.message_preview)}</blockquote>` : ""}
+        <div class="ebay-task-audit-actions">
+          <a class="secondary-btn" href="team-tasks.html?taskId=${encodeURIComponent(task.task_id)}">
+            <i data-lucide="external-link"></i>
+            Open Task
+          </a>
+          ${task.conversation_link ? `
+            <a class="secondary-btn" href="${escapeHtml(task.conversation_link)}">
+              <i data-lucide="messages-square"></i>
+              Open Conversation
+            </a>
+          ` : ""}
+        </div>
+        <div class="ebay-task-audit-timeline" aria-label="Task updates">
+          ${task.events.length ? task.events.map(renderEbayTaskAuditEvent).join("") : `<div class="classification-empty matched-context-empty is-quiet">No event history recorded for this task yet.</div>`}
+        </div>
+      </article>
+    `;
+  }
+
+  function renderEbayConversationTaskAuditModal(state) {
+    const modal = state.ebayConversationTaskAuditModal;
+    if (!modal?.conversationId) return "";
+    const conversation = selectedEbayConversationById(modal.conversationId, state);
+    const summary = ebayConversationTaskSummary(state, modal.conversationId);
+    const loading = state.ebayConversationTaskSummariesLoading === true && !summary.total;
+    return `
+      <div class="ebay-task-modal ebay-task-audit-modal" role="dialog" aria-modal="true" aria-labelledby="ebay-task-audit-title" data-ebay-task-audit-close>
+        <div class="ebay-task-modal-card ebay-task-audit-modal-card" data-ebay-task-audit-card>
+          <div class="ebay-task-modal-head">
+            <div>
+              <span class="eyebrow">Task Audit</span>
+              <h3 id="ebay-task-audit-title">${escapeHtml(conversation ? ebayConversationParty(conversation) : "Linked conversation")}</h3>
+              <p>${escapeHtml(summary.pendingCount ? `${summary.pendingCount} pending task${summary.pendingCount === 1 ? "" : "s"}` : `${summary.completedCount || summary.total} completed task${(summary.completedCount || summary.total) === 1 ? "" : "s"}`)}${summary.cancelledCount ? ` - ${escapeHtml(summary.cancelledCount)} cancelled` : ""}</p>
+            </div>
+            <button type="button" class="secondary-btn" data-ebay-task-audit-close aria-label="Close task audit">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+          ${state.ebayConversationTaskSummariesError ? `<div class="classification-notice is-error">${escapeHtml(state.ebayConversationTaskSummariesError)}</div>` : ""}
+          <div class="ebay-task-audit-summary">
+            <span><small>Pending</small><b>${escapeHtml(summary.pendingCount)}</b></span>
+            <span><small>Complete</small><b>${escapeHtml(summary.completedCount)}</b></span>
+            <span><small>Cancelled</small><b>${escapeHtml(summary.cancelledCount)}</b></span>
+            <span><small>Total</small><b>${escapeHtml(summary.total)}</b></span>
+          </div>
+          ${loading ? `<div class="classification-empty matched-context-empty is-quiet">Loading linked task history.</div>` : ""}
+          ${summary.tasks.length ? `<div class="ebay-task-audit-list">${summary.tasks.map(renderEbayTaskAuditCard).join("")}</div>` : (!loading ? `<div class="classification-empty matched-context-empty is-quiet">No linked tasks were found for this conversation.</div>` : "")}
+        </div>
+      </div>
+    `;
   }
 
   function renderEbayConversationTaskModal(state, conversation, messages = []) {
@@ -3944,6 +4240,7 @@
         ebayConversationTaskError: null,
         ebayConversationTaskMessage: taskId ? `Task created and linked to this message. Task ${compactId(taskId)} is in the team queue.` : "Task created and linked to this message.",
       });
+      loadEbayConversationTaskStatuses(context, [conversationId], { silent: true });
     } catch (error) {
       setEbayConversationState({
         ebayConversationTaskSaving: false,
@@ -4870,7 +5167,10 @@
                 ${compact ? "" : `<small>${escapeHtml(ebayIdentitySourceLabel(identity.source))}</small>`}
               </span>
             </span>
-            <time>${escapeHtml(formatCompactEmailAge(ebayConversationTime(conversation)))}</time>
+            <span class="ebay-conversation-row-tools">
+              <time>${escapeHtml(formatCompactEmailAge(ebayConversationTime(conversation)))}</time>
+              ${renderEbayConversationTaskStatusBadge(conversation, state)}
+            </span>
           </span>
           <span class="ebay-conversation-row-ai-summary"><b>${escapeHtml(previewLines.summaryLabel)}</b>${escapeHtml(previewLines.summary)}</span>
           ${compact ? "" : `<span class="ebay-conversation-row-title">${escapeHtml(ebayConversationTitle(conversation))}</span>`}
@@ -4884,7 +5184,7 @@
           ${renderEbayConversationBadges(conversation, { compact })}
         </button>
       `;
-    }).join("");
+    }).join("") + renderEbayConversationTaskAuditModal(state);
   }
 
   function renderEbayConversationSummary(state) {
@@ -7418,6 +7718,7 @@
         loadEbayConversationContext(context, selectedEbayConversationId);
         loadEbayConversationDrafts(context, selectedEbayConversationId, { force: true });
       }
+      loadEbayConversationTaskStatuses(context, conversations.map((conversation) => conversation.id), { silent: true });
       if (!append) loadEbaySavedViewExactCounts(context);
     } catch (error) {
       const code = error.code || error.message || "ebay_conversation_list_failed";
@@ -8663,14 +8964,42 @@
       });
     });
     els.ebayConversationList?.addEventListener("click", (event) => {
+      const auditClose = event.target.closest("[data-ebay-task-audit-close]");
+      if (auditClose && !event.target.closest("[data-ebay-task-audit-card]")) {
+        closeEbayConversationTaskAuditModal();
+        return;
+      }
+      if (event.target.closest("button[data-ebay-task-audit-close]")) {
+        closeEbayConversationTaskAuditModal();
+        return;
+      }
+      const taskStatusButton = event.target.closest("[data-ebay-conversation-task-status]");
+      if (taskStatusButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        openEbayConversationTaskAuditModal(context, taskStatusButton.getAttribute("data-ebay-conversation-task-status"));
+        return;
+      }
       const row = event.target.closest("[data-ebay-conversation-id]");
       if (!row) return;
       selectEbayConversation(context, row.getAttribute("data-ebay-conversation-id"));
       if (isEbayMobileWorkspace()) setEbayMobileWorkspaceView("message");
     });
+    els.ebayConversationList?.addEventListener("keydown", (event) => {
+      const taskStatusButton = event.target.closest("[data-ebay-conversation-task-status]");
+      if (!taskStatusButton || (event.key !== "Enter" && event.key !== " ")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openEbayConversationTaskAuditModal(context, taskStatusButton.getAttribute("data-ebay-conversation-task-status"));
+    });
     els.ebayConversationDetail?.addEventListener("scroll", updateEbayChatJumpButton, { passive: true });
     window.addEventListener("scroll", updateEbayChatJumpButton, { passive: true });
     window.addEventListener("resize", updateEbayChatJumpButton);
+    window.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !adminClassificationState.ebayConversationTaskAuditModal) return;
+      event.preventDefault();
+      closeEbayConversationTaskAuditModal();
+    });
     const handleDetailClick = (event) => {
       const messageTaskButton = event.target.closest("[data-ebay-message-task-action]");
       if (messageTaskButton) {

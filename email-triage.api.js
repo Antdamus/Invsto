@@ -1935,6 +1935,28 @@
     };
   }
 
+  async function fetchEbayConversationTaskStatuses(context, conversationIds = []) {
+    await currentSession(context, "eBay conversation task statuses");
+    const ids = Array.from(new Set((Array.isArray(conversationIds) ? conversationIds : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)));
+    if (!ids.length) {
+      return {
+        ok: true,
+        tasks: [],
+      };
+    }
+
+    const { data, error } = await context.client.rpc("list_ebay_conversation_message_task_status", {
+      _conversation_ids: ids,
+    });
+    throwSupabaseReadError(error, "ebay_conversation_task_status_failed");
+    return {
+      ok: true,
+      tasks: Array.isArray(data) ? data : [],
+    };
+  }
+
   async function markEbayConversationRead(context, conversationId) {
     await currentSession(context, "Mark eBay conversation read");
     if (!conversationId) {
@@ -2270,6 +2292,7 @@
     fetchEbayConversationMessages,
     fetchTeamTaskAssignees,
     createEbayConversationMessageTask,
+    fetchEbayConversationTaskStatuses,
     markEbayConversationRead,
     syncEbayProviderReadState,
     processPendingEbayProviderReadState,

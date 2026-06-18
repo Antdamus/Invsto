@@ -133,6 +133,10 @@
       ebayConversationTaskSaving: false,
       ebayConversationTaskError: null,
       ebayConversationTaskMessage: null,
+      ebayConversationTaskSummariesById: {},
+      ebayConversationTaskSummariesLoading: false,
+      ebayConversationTaskSummariesError: null,
+      ebayConversationTaskAuditModal: null,
       ebayConversationClassificationCollapsed: Object.prototype.hasOwnProperty.call(overrides, "ebayConversationClassificationCollapsed")
         ? overrides.ebayConversationClassificationCollapsed === true
         : false,
