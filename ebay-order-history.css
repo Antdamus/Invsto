@@ -198,6 +198,38 @@ textarea {
   font-weight: 800;
 }
 
+.history-title-check-field {
+  align-self: stretch;
+}
+
+.history-title-check-result {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 7px 11px;
+  border: 1px solid var(--history-line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--history-muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.history-title-check-result.is-present {
+  border-color: rgba(121, 227, 164, 0.45);
+  background: rgba(61, 171, 111, 0.18);
+  color: #9ff0c0;
+}
+
+.history-title-check-result.is-missing {
+  border-color: rgba(227, 189, 119, 0.45);
+  background: rgba(227, 189, 119, 0.14);
+  color: var(--history-gold);
+}
+
 .history-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

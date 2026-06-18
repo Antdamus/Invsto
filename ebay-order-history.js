@@ -52,11 +52,15 @@ const state = {
   historySearchUserEdited: false,
   historyLoadedTargetedSearch: false,
   historyLoadedAllDatesSearch: false,
+  historySearchReadyForNextScan: false,
+  historySearchReadyValue: "",
+  lastBarcodeLookupMissLog: "",
   busy: false,
 };
 
 let evidencePhotoViewerReturnFocus = null;
 let historyTargetedSearchTimer = null;
+let historyNextScanReadyTimer = null;
 const evidencePhotoViewerState = {
   zoom: 1,
   panX: 0,
@@ -78,6 +82,10 @@ const RETURN_THUMBNAIL_TRANSFORM = { width: 260, height: 260, resize: "contain",
 const RETURN_EXTERNAL_NAV_RESTORE_KEY = "ogReturnExternalNavigationRestore";
 const TRACKING_NUMBER_PATTERN = /\b\d{20,30}\b/g;
 const FORMATTED_TRACKING_NUMBER_PATTERN = /\b\d{2,4}(?:[\s-]+\d{2,4}){4,8}\b/g;
+const BARCODE_GROUP_SEPARATOR = String.fromCharCode(29);
+const BARCODE_SUFFIX_MIN_LENGTH = 12;
+const BARCODE_SUFFIX_MAX_CANDIDATE_LENGTH = 40;
+const BARCODE_LOOKUP_CANDIDATE_LIMIT = 80;
 const ORDER_HISTORY_PAGE_SIZE = 500;
 const ORDER_HISTORY_MAX_LINES = 5000;
 const ORDER_HISTORY_MAX_BUYER_ORDERS = 2500;
@@ -357,6 +365,70 @@ function normalizeTrackingNumber(value) {
   return /^\d{20,30}$/.test(digits) ? digits : "";
 }
 
+function normalizeBarcodeSeparators(value) {
+  return String(value || "")
+    .replace(/\u241d/g, BARCODE_GROUP_SEPARATOR)
+    .replace(/\u00e2\u0090\u009d/g, BARCODE_GROUP_SEPARATOR);
+}
+
+function stripBarcodeScannerPrefix(value) {
+  return String(value || "").trim().replace(/^\][A-Za-z0-9]{2}/, "");
+}
+
+function normalizeBarcode(value) {
+  return stripBarcodeScannerPrefix(normalizeBarcodeSeparators(value))
+    .split(BARCODE_GROUP_SEPARATOR)
+    .join("")
+    .replace(/[\s-]/g, "");
+}
+
+function extractCandidateAfterBarcodeSeparator(rawValue) {
+  const raw = stripBarcodeScannerPrefix(normalizeBarcodeSeparators(rawValue));
+  if (!raw.includes(BARCODE_GROUP_SEPARATOR)) return null;
+  const parts = raw.split(BARCODE_GROUP_SEPARATOR);
+  return normalizeBarcode(parts[parts.length - 1]);
+}
+
+function getBarcodeLookupCandidates(value) {
+  const candidates = [];
+  const separatorCandidate = extractCandidateAfterBarcodeSeparator(value);
+  const normalizedScan = normalizeBarcode(value).replace(/[^a-z0-9]/gi, "");
+
+  if (separatorCandidate && separatorCandidate.length >= BARCODE_SUFFIX_MIN_LENGTH) {
+    candidates.push(separatorCandidate);
+  }
+
+  if (normalizedScan.length >= BARCODE_SUFFIX_MIN_LENGTH) {
+    const maxLength = Math.min(normalizedScan.length, BARCODE_SUFFIX_MAX_CANDIDATE_LENGTH);
+    for (let length = maxLength; length >= BARCODE_SUFFIX_MIN_LENGTH; length -= 1) {
+      candidates.push(normalizedScan.slice(-length));
+    }
+  }
+
+  return unique(candidates).slice(0, BARCODE_LOOKUP_CANDIDATE_LIMIT);
+}
+
+function getBarcodeLookupDebug(rawValue) {
+  return {
+    rawScan: String(rawValue || ""),
+    normalizedScan: normalizeBarcode(rawValue),
+    separatorCandidate: extractCandidateAfterBarcodeSeparator(rawValue),
+    suffixCandidates: getBarcodeLookupCandidates(rawValue).slice(0, 12),
+  };
+}
+
+function logBarcodeLookupMiss(rawValue, context = "order-history") {
+  const rawScan = String(rawValue || "").trim();
+  if (!rawScan) return;
+  const key = `${context}:${rawScan}`;
+  if (state.lastBarcodeLookupMissLog === key) return;
+  state.lastBarcodeLookupMissLog = key;
+  console.info("No order found for scanned barcode", {
+    context,
+    ...getBarcodeLookupDebug(rawScan),
+  });
+}
+
 function getHistorySearchNeedles(value) {
   const raw = String(value || "").trim().toLowerCase();
   if (!raw) return [];
@@ -381,11 +453,15 @@ function buildHistorySearchText(values = []) {
 function historySearchTextIncludes(haystack, term) {
   const text = String(haystack || "").toLowerCase();
   const needles = getHistorySearchNeedles(term);
-  return !needles.length || needles.some((needle) => text.includes(needle));
+  if (!needles.length || needles.some((needle) => text.includes(needle))) return true;
+  if (!historySearchLooksLikeLabelScan(term)) return false;
+  return getBarcodeLookupCandidates(term)
+    .map((candidate) => candidate.toLowerCase())
+    .some((candidate) => text.includes(candidate));
 }
 
 function historySearchLooksLikeLabelScan(value) {
-  const digits = String(value || "").replace(/\D/g, "");
+  const digits = normalizeBarcode(value).replace(/\D/g, "");
   return digits.length >= 12;
 }
 
@@ -1296,10 +1372,13 @@ async function fetchClosedOrderHistoryLines(fromIso, toIso) {
 }
 
 function getHistoryLabelLookupCandidates(searchTerm) {
-  return unique(getHistorySearchNeedles(searchTerm)
+  return unique([
+    ...getBarcodeLookupCandidates(searchTerm),
+    ...getHistorySearchNeedles(searchTerm)
     .map((value) => String(value || "").replace(/[^a-z0-9]/gi, ""))
-    .filter((value) => value.length >= 8))
-    .slice(0, 8);
+    .filter((value) => value.length >= 8),
+  ])
+    .slice(0, BARCODE_LOOKUP_CANDIDATE_LIMIT);
 }
 
 async function fetchOrderIdsByLabelMetadataSearch(searchTerm) {
@@ -2036,6 +2115,42 @@ function loadedHistoryHasLocalSearchMatch(term) {
   return state.lines.some((line) => historySearchTextIncludes(getIndexedHistoryLineSearchHaystack(line), cleanTerm));
 }
 
+function getLocalSearchExpandedLineIds(term) {
+  const cleanTerm = String(term || "").trim();
+  if (!cleanTerm || !historySearchLooksLikeLabelScan(cleanTerm) || !state.lines.length) return new Set();
+
+  const directMatches = state.lines.filter((line) => historySearchTextIncludes(getIndexedHistoryLineSearchHaystack(line), cleanTerm));
+  const directlyMatchedLineIds = new Set(directMatches.map((line) => line.id).filter(Boolean));
+  if (!directlyMatchedLineIds.size) return new Set();
+
+  const expandedLineIds = new Set(directlyMatchedLineIds);
+  const matchedOrderIds = new Set(directMatches.map((line) => line.order_id || line.order?.id).filter(Boolean));
+  const matchedOrderNumbers = new Set(directMatches.map((line) => normalizeEbayOrderNumber(line.order?.order_number)).filter(Boolean));
+  getRelatedEventsForLineIds([...directlyMatchedLineIds]).forEach((event) => {
+    getEventLineIds(event).forEach((lineId) => {
+      if (lineId) expandedLineIds.add(lineId);
+    });
+    (event.order_ids || []).forEach((orderId) => {
+      if (orderId) matchedOrderIds.add(orderId);
+    });
+    getEventOrderNumbers(event).forEach((orderNumber) => {
+      const normalized = normalizeEbayOrderNumber(orderNumber);
+      if (normalized) matchedOrderNumbers.add(normalized);
+    });
+  });
+  state.lines.forEach((line) => {
+    const lineOrderId = line.order_id || line.order?.id;
+    const lineOrderNumber = normalizeEbayOrderNumber(line.order?.order_number);
+    if (
+      (lineOrderId && matchedOrderIds.has(lineOrderId))
+      || (lineOrderNumber && matchedOrderNumbers.has(lineOrderNumber))
+    ) {
+      if (line.id) expandedLineIds.add(line.id);
+    }
+  });
+  return expandedLineIds;
+}
+
 function shouldReloadHistoryForSearchInput(value) {
   const cleanTerm = String(value || "").trim();
   const buyerAllDates = Boolean($("history-buyer-all-dates")?.checked);
@@ -2048,6 +2163,91 @@ function shouldReloadHistoryForSearchInput(value) {
   return !loadedHistoryHasLocalSearchMatch(cleanTerm);
 }
 
+function clearHistoryNextScanReady(options = {}) {
+  window.clearTimeout(historyNextScanReadyTimer);
+  historyNextScanReadyTimer = null;
+  state.historySearchReadyForNextScan = false;
+  state.historySearchReadyValue = "";
+  if (options.clearSelection) {
+    const search = $("history-search");
+    if (search && document.activeElement === search) {
+      const end = search.value.length;
+      search.setSelectionRange(end, end);
+    }
+  }
+}
+
+function scheduleHistoryNextScanReady(term) {
+  window.clearTimeout(historyNextScanReadyTimer);
+  state.historySearchReadyForNextScan = false;
+  state.historySearchReadyValue = "";
+
+  const cleanTerm = String(term || "").trim();
+  if (!cleanTerm || !historySearchLooksLikeLabelScan(cleanTerm) || !state.filteredLines.length) return;
+
+  historyNextScanReadyTimer = window.setTimeout(() => {
+    const search = $("history-search");
+    if (!search || document.activeElement !== search) return;
+    if (String(search.value || "").trim() !== cleanTerm) return;
+    if (!state.filteredLines.length) return;
+
+    state.historySearchReadyForNextScan = true;
+    state.historySearchReadyValue = search.value;
+    search.select();
+  }, 220);
+}
+
+function prepareHistorySearchForReplacementInput(event = null) {
+  const search = $("history-search");
+  if (!search || !state.historySearchReadyForNextScan) return;
+  if (document.activeElement !== search) return;
+  if (String(search.value || "") !== String(state.historySearchReadyValue || "")) {
+    clearHistoryNextScanReady();
+    return;
+  }
+  if (event?.ctrlKey || event?.metaKey || event?.altKey) return;
+  if (event?.type === "keydown") {
+    const key = event.key || "";
+    const allowedControlKeys = new Set(["Backspace", "Delete"]);
+    if (key.length !== 1 && !allowedControlKeys.has(key)) return;
+  }
+
+  search.value = "";
+  clearHistoryNextScanReady();
+}
+
+function lineTitleMatchesCheck(line, term) {
+  return historySearchTextIncludes(buildHistorySearchText([line?.item_title]), term);
+}
+
+function truncateTitleCheckPreview(value = "") {
+  const text = String(value || "").trim();
+  return text.length > 72 ? `${text.slice(0, 69).trimEnd()}...` : text;
+}
+
+function renderHistoryTitleCheck(lines = state.filteredLines) {
+  const result = $("history-title-check-result");
+  if (!result) return;
+
+  const term = String($("history-title-check")?.value || "").trim();
+  result.classList.remove("is-present", "is-missing");
+  if (!term) {
+    result.textContent = "Type a title word to check matched lines";
+    return;
+  }
+
+  const matchedLines = (lines || []).filter((line) => lineTitleMatchesCheck(line, term));
+  if (matchedLines.length) {
+    const firstTitle = truncateTitleCheckPreview(matchedLines[0]?.item_title || "matched title");
+    result.classList.add("is-present");
+    result.textContent = `Present in ${matchedLines.length.toLocaleString()} of ${(lines || []).length.toLocaleString()} matched title${matchedLines.length === 1 ? "" : "s"} - ${firstTitle}`;
+    return;
+  }
+
+  result.classList.add("is-missing");
+  result.textContent = `Not present in ${(lines || []).length.toLocaleString()} matched title${(lines || []).length === 1 ? "" : "s"}`;
+}
+
 function applyFilters() {
   const term = String($("history-search")?.value || "").trim();
   const worker = $("history-worker")?.value || "";
@@ -2055,6 +2255,7 @@ function applyFilters() {
   const relatedSearchLineIds = state.historySearchRelatedLineIds instanceof Set
     ? state.historySearchRelatedLineIds
     : new Set();
+  const localExpandedSearchLineIds = getLocalSearchExpandedLineIds(term);
 
   state.filteredLines = state.lines.filter((line) => {
     if (status === "reverted") return false;
@@ -2066,15 +2267,18 @@ function applyFilters() {
     if (
       term
       && !relatedSearchLineIds.has(line.id)
+      && !localExpandedSearchLineIds.has(line.id)
       && !historySearchTextIncludes(getIndexedHistoryLineSearchHaystack(line), term)
     ) return false;
     return true;
   });
 
   const visibleGroups = getVisibleHistoryGroups();
+  renderHistoryTitleCheck(state.filteredLines);
   renderSummary(visibleGroups);
   renderHistoryList(visibleGroups);
   renderEventList();
+  scheduleHistoryNextScanReady(term);
 }
 
 function getReturnTaskStatusLabel(status = "") {
@@ -3780,6 +3984,12 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
   $("history-count").textContent = `${groups.length} group${groups.length === 1 ? "" : "s"}`;
 
   if (!groups.length) {
+    const term = String($("history-search")?.value || "").trim();
+    if (historySearchLooksLikeLabelScan(term)) {
+      logBarcodeLookupMiss(term, "order-history-render");
+      list.innerHTML = `<div class="history-empty">No order found for scanned barcode "${escapeHtml(term)}".</div>`;
+      return;
+    }
     list.innerHTML = `<div class="history-empty">No closed orders match this view.</div>`;
     return;
   }
@@ -8181,9 +8391,13 @@ function setupListeners() {
     $(id)?.addEventListener("input", applyFilters);
     $(id)?.addEventListener("change", applyFilters);
   });
+  $("history-search")?.addEventListener("beforeinput", prepareHistorySearchForReplacementInput);
+  $("history-search")?.addEventListener("keydown", prepareHistorySearchForReplacementInput);
+  $("history-search")?.addEventListener("blur", () => clearHistoryNextScanReady());
   $("history-search")?.addEventListener("input", () => {
     const value = $("history-search")?.value || "";
     window.clearTimeout(historyTargetedSearchTimer);
+    clearHistoryNextScanReady();
     if (shouldReloadHistoryForSearchInput(value)) {
       const delay = state.historyLoadedTargetedSearch || state.historyLoadedAllDatesSearch ? 250 : 450;
       historyTargetedSearchTimer = window.setTimeout(loadOrderHistory, delay);
@@ -8194,6 +8408,7 @@ function setupListeners() {
   $("history-search")?.addEventListener("change", () => {
     const value = $("history-search")?.value || "";
     window.clearTimeout(historyTargetedSearchTimer);
+    clearHistoryNextScanReady();
     if (shouldReloadHistoryForSearchInput(value)) {
       loadOrderHistory();
       return;
@@ -8209,6 +8424,8 @@ function setupListeners() {
     }
     applyFilters();
   });
+  $("history-title-check")?.addEventListener("input", () => renderHistoryTitleCheck(state.filteredLines));
+  $("history-title-check")?.addEventListener("change", () => renderHistoryTitleCheck(state.filteredLines));
   ["return-task-status-filter", "return-task-assignee-filter", "return-task-search"].forEach((id) => {
     $(id)?.addEventListener("input", renderReturnQueue);
     $(id)?.addEventListener("change", renderReturnQueue);
