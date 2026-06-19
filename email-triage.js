@@ -255,6 +255,7 @@
     { label: "Return Update", icon: "undo-2", pattern: /\b(return|returned item)\b/i },
   ];
   const ebayDraftActionMessageTimers = new Map();
+  const ebaySentTimelineRefreshTimers = new Map();
   const ebayComposerDraftCache = new Map();
   let ebayConversationReloadTimer = null;
   let ebayMobileWorkspaceView = getStoredEbayMobileWorkspaceView();
@@ -6306,16 +6307,59 @@
     if (ebayMessageDirection(canonical) !== "outbound") return false;
     if (ebayMessageBodySignature(canonical) !== ebayMessageBodySignature(optimistic)) return false;
     const delta = Math.abs(ebayMessageTimeMs(canonical) - ebayMessageTimeMs(optimistic));
-    return delta > 0 && delta < 10 * 60 * 1000;
+    return delta < 10 * 60 * 1000;
+  }
+
+  function ebayMessageIsLocalSendPlaceholder(message) {
+    const status = String(message?.message_status || "").toLowerCase();
+    const messageId = String(message?.ebay_message_id || "");
+    return message?.optimistic_send === true ||
+      status === "sent_locally_pending_provider_sync" ||
+      messageId.startsWith("local-send-");
+  }
+
+  function ebayOutboundMessagesEquivalent(left, right) {
+    if (!left || !right) return false;
+    if (left === right) return true;
+    if (ebayMessageDirection(left) !== "outbound" || ebayMessageDirection(right) !== "outbound") return false;
+    if (ebayMessageBodySignature(left) !== ebayMessageBodySignature(right)) return false;
+    const leftTime = ebayMessageTimeMs(left);
+    const rightTime = ebayMessageTimeMs(right);
+    if (!leftTime || !rightTime) return true;
+    return Math.abs(leftTime - rightTime) < 10 * 60 * 1000;
+  }
+
+  function collapseEbayLocalSentPlaceholders(messages = []) {
+    const sorted = safeArray(messages).slice().sort((left, right) => {
+      const leftTime = ebayMessageTimeMs(left);
+      const rightTime = ebayMessageTimeMs(right);
+      if (leftTime !== rightTime) return leftTime - rightTime;
+      return String(left.id || "").localeCompare(String(right.id || ""));
+    });
+    return sorted.reduce((rows, message) => {
+      const isPlaceholder = ebayMessageIsLocalSendPlaceholder(message);
+      const duplicateIndex = rows.findIndex((existing) => (
+        (isPlaceholder || ebayMessageIsLocalSendPlaceholder(existing)) &&
+        ebayOutboundMessagesEquivalent(existing, message)
+      ));
+      if (duplicateIndex < 0) {
+        rows.push(message);
+        return rows;
+      }
+      if (ebayMessageIsLocalSendPlaceholder(rows[duplicateIndex]) && !isPlaceholder) {
+        rows[duplicateIndex] = message;
+      }
+      return rows;
+    }, []);
   }
 
   function ebayConversationTimelineMessages(messages = [], conversation, state = adminClassificationState) {
-    const canonicalMessages = safeArray(messages);
+    const canonicalMessages = collapseEbayLocalSentPlaceholders(messages);
     const optimisticMessages = safeArray(state.ebayConversationOptimisticMessagesById?.[conversation?.id]);
     const visibleOptimistic = optimisticMessages.filter((optimistic) => (
       !canonicalMessages.some((canonical) => ebayCanonicalMatchesOptimisticMessage(canonical, optimistic))
     ));
-    return [...canonicalMessages, ...visibleOptimistic].sort((left, right) => {
+    return collapseEbayLocalSentPlaceholders([...canonicalMessages, ...visibleOptimistic]).sort((left, right) => {
       const leftTime = ebayMessageTimeMs(left);
       const rightTime = ebayMessageTimeMs(right);
       if (leftTime !== rightTime) return leftTime - rightTime;
@@ -6372,6 +6416,34 @@
         message,
       ].slice(-5),
     };
+  }
+
+  function ebayConversationMessagesMapWith(conversationId, message) {
+    const existingMap = adminClassificationState.ebayConversationMessagesById || {};
+    const existingRows = safeArray(existingMap[conversationId]);
+    if (!message?.id) return existingMap;
+    return {
+      ...existingMap,
+      [conversationId]: collapseEbayLocalSentPlaceholders([
+        ...existingRows.filter((row) => String(row.id || "") !== String(message.id)),
+        message,
+      ]),
+    };
+  }
+
+  function scheduleEbaySentTimelineRefresh(context, conversationId) {
+    if (!conversationId || !context) return;
+    if (ebaySentTimelineRefreshTimers.has(conversationId)) {
+      window.clearTimeout(ebaySentTimelineRefreshTimers.get(conversationId));
+    }
+    const timer = window.setTimeout(() => {
+      ebaySentTimelineRefreshTimers.delete(conversationId);
+      refreshEbayConversationTimeline(context, conversationId).catch((error) => {
+        console.warn("[email-triage] Background eBay timeline refresh after send failed:", error);
+        loadEbayConversationMessages(context, conversationId, { force: true }).catch(() => null);
+      });
+    }, 3500);
+    ebaySentTimelineRefreshTimers.set(conversationId, timer);
   }
 
   function clearEbayDraftActionMessageLater(conversationId, message) {
@@ -7306,7 +7378,9 @@
 
     try {
       const payload = await fetchEbayConversationMessages(context, conversationId);
-      const normalizedMessages = normalizeEbayMessagesForReadState(conversationId, payload.messages);
+      const normalizedMessages = collapseEbayLocalSentPlaceholders(
+        normalizeEbayMessagesForReadState(conversationId, payload.messages),
+      );
       setEbayConversationState({
         ebayConversationMessagesLoadingId: null,
         ebayConversations: enrichEbayConversationsIdentityFromMessages(
@@ -7402,7 +7476,9 @@
         ...mailboxState,
         ebayConversationMessagesById: {
           ...adminClassificationState.ebayConversationMessagesById,
-          [conversation.id]: normalizeEbayMessagesForReadState(conversation.id, messagesPayload.messages),
+          [conversation.id]: collapseEbayLocalSentPlaceholders(
+            normalizeEbayMessagesForReadState(conversation.id, messagesPayload.messages),
+          ),
         },
         ebayConversationDraftsById: {
           ...adminClassificationState.ebayConversationDraftsById,
@@ -7645,12 +7721,21 @@
         const conversation = selectedEbayConversationById(conversationId, adminClassificationState);
         const draft = currentEbayConversationDraft(conversationId) ||
           (payload.current_draft && typeof payload.current_draft === "object" ? payload.current_draft : null);
+        const localOutboundMessage = payload.local_outbound_message && typeof payload.local_outbound_message === "object"
+          ? payload.local_outbound_message
+          : null;
+        if (localOutboundMessage?.id) {
+          setEbayConversationState({
+            ebayConversationMessagesById: ebayConversationMessagesMapWith(conversationId, localOutboundMessage),
+          });
+        }
         const optimisticMessage = payload.duplicate_prevented ? null : buildOptimisticSentEbayMessage(conversation, draft, payload);
-        if (optimisticMessage) {
+        if (optimisticMessage && !localOutboundMessage?.id) {
           setEbayConversationState({
             ebayConversationOptimisticMessagesById: optimisticEbayMessagesMapWith(conversationId, optimisticMessage),
           });
         }
+        if (!payload.duplicate_prevented) scheduleEbaySentTimelineRefresh(context, conversationId);
         loadOperationalDashboard(context, { keepPrevious: true });
       }
       const successMessage = ebayDraftSuccessMessage(values.mode, payload);

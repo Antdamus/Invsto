@@ -179,6 +179,10 @@ function safeBodyText(value: unknown, maxLength = MAX_DRAFT_TEXT_CHARS) {
     .slice(0, maxLength);
 }
 
+function bodyPreview(value: unknown, maxLength = 240) {
+  return text(value, maxLength);
+}
+
 function stringOrNull(value: unknown, maxLength = 240) {
   const cleaned = text(value, maxLength);
   return cleaned || null;
@@ -2263,6 +2267,91 @@ async function updateSendAttempt(
   return data as Record<string, any>;
 }
 
+async function persistLocalOutboundMessage(
+  supabase: ServiceClient,
+  options: {
+    conversation: Record<string, any>;
+    targetMessage: Record<string, any>;
+    draft: Record<string, any>;
+    attempt: Record<string, any>;
+    messageText: string;
+    providerId: string | null;
+    sentAt: string;
+    admin: { userId: string | null; email: string | null };
+    providerCorrelation: string | null;
+  },
+) {
+  const { conversation, targetMessage, draft, attempt, messageText, providerId, sentAt, admin, providerCorrelation } = options;
+  const ebayMessageId = providerId || `local-send-${attempt.id}`;
+  const messageStatus = providerId ? "sent" : "sent_locally_pending_provider_sync";
+  const senderUsername = text(targetMessage.recipient_username || conversation.seller_username || "", 240) || null;
+  const recipientUsername = text(targetMessage.sender_username || conversation.other_party_username || "", 240) || null;
+  const preview = bodyPreview(messageText);
+  const row = {
+    conversation_id: conversation.id,
+    seller_account_id: conversation.seller_account_id,
+    ebay_conversation_id: conversation.ebay_conversation_id,
+    conversation_type: conversation.conversation_type,
+    ebay_message_id: ebayMessageId,
+    sender_username: senderUsername,
+    recipient_username: recipientUsername,
+    direction: "outbound",
+    direction_confidence: "strong",
+    direction_reason: "local_send_success",
+    subject: targetMessage.subject || draft.subject || null,
+    message_body: messageText,
+    message_body_sha256: await sha256Hex(messageText),
+    message_body_preview: preview || null,
+    read_status: "Sent",
+    is_read: true,
+    message_status: messageStatus,
+    created_at_ebay: sentAt,
+    message_media: [],
+    has_media: false,
+    media_count: 0,
+    raw_message_metadata: {
+      source: "og_local_send",
+      local_send_attempt_id: attempt.id || null,
+      draft_id: draft.id || null,
+      target_message_id: targetMessage.id || null,
+      target_ebay_message_id: targetMessage.ebay_message_id || null,
+      provider_message_id: providerId,
+      provider_correlation_id: providerCorrelation,
+      sent_by: admin.userId || null,
+      sent_by_email: admin.email || null,
+      provider_sync_pending: !providerId,
+    },
+    last_seen_at: sentAt,
+  };
+
+  const { data, error } = await supabase
+    .from("ebay_conversation_messages")
+    .upsert(row, { onConflict: "seller_account_id,conversation_type,ebay_conversation_id,ebay_message_id" })
+    .select("id, conversation_id, ebay_message_id, sender_username, recipient_username, direction, direction_confidence, subject, message_body, message_body_preview, read_status, is_read, message_status, created_at_ebay, has_media, media_count, message_media, created_at")
+    .single();
+
+  if (error || !data?.id) {
+    throw new DraftError("local_outbound_message_persist_failed", {
+      phase: "message_persist",
+      details: { message: error?.message || "Unable to persist local outbound message." },
+    });
+  }
+
+  await supabase
+    .from("ebay_conversations")
+    .update({
+      latest_message_id: ebayMessageId,
+      latest_message_created_at: sentAt,
+      latest_message_preview: preview || null,
+      unread_count: 0,
+      local_read_state: "read",
+      updated_at: sentAt,
+    })
+    .eq("id", conversation.id);
+
+  return data as Record<string, any>;
+}
+
 function providerMessageId(payload: Record<string, unknown>) {
   return text(payload.messageId || payload.message_id || payload.id, 240) || null;
 }
@@ -2605,6 +2694,32 @@ async function sendDraft(
       provider_status: "created",
     },
   });
+
+  let localOutboundMessage: Record<string, any> | null = null;
+  let localOutboundMessageError: string | null = null;
+  try {
+    localOutboundMessage = await persistLocalOutboundMessage(supabase, {
+      conversation,
+      targetMessage,
+      draft,
+      attempt,
+      messageText,
+      providerId,
+      sentAt: nowIso,
+      admin,
+      providerCorrelation,
+    });
+  } catch (persistError) {
+    localOutboundMessageError = persistError instanceof Error ? persistError.message : "local_outbound_message_persist_failed";
+    await updateSendAttempt(supabase, attempt.id, {
+      metadata: {
+        ...parseObject(attempt.metadata),
+        local_outbound_message_persist_failed: true,
+        local_outbound_message_error: localOutboundMessageError,
+      },
+    }).catch(() => null);
+  }
+
   await markDraftSent(supabase, draft, admin);
 
   const result = await viewDrafts(supabase, draft.conversation_id);
@@ -2616,6 +2731,8 @@ async function sendDraft(
     send_attempt: publicSendAttempt(attempt),
     provider_message_id: providerId,
     sent_at: nowIso,
+    local_outbound_message: localOutboundMessage,
+    local_outbound_message_error: localOutboundMessageError,
     safety: safetyEnvelope({ sendsEnabled: true, messagesSent: 1, ebayMutationsPerformed: true }),
   };
 }
