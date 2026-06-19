@@ -43,8 +43,9 @@ type DraftOutput = {
 
 const GENERATOR_NAME = "ebay_conversation_response_drafter";
 const GENERATOR_VERSION = "v1";
-const PROMPT_VERSION_DEFAULT = "ebay-conversation-draft-v2-target-message";
+const PROMPT_VERSION_DEFAULT = "ebay-conversation-draft-v3-english-output";
 const MANUAL_PROMPT_VERSION = "manual-composer-v1";
+const REQUIRED_OUTPUT_LANGUAGE = "English";
 const DEFAULT_MESSAGE_SCOPE = "https://api.ebay.com/oauth/api_scope/commerce.message";
 const OPENAI_TIMEOUT_MS = 45000;
 const MAX_DRAFT_TEXT_CHARS = 4000;
@@ -773,6 +774,7 @@ function buildDraftInput(
       context_warnings: safeArray(context.warnings),
     };
   return {
+    expected_output_language: REQUIRED_OUTPUT_LANGUAGE,
     conversation: context.conversation || {},
     target_message: manualRewriteOnly ? null : compactMessageForDraft(targetMessage),
     latest_message: manualRewriteOnly ? null : compactMessageForDraft(latestMessage(messages)),
@@ -800,6 +802,7 @@ function buildDraftInput(
       generator_name: GENERATOR_NAME,
       generator_version: GENERATOR_VERSION,
       prompt_version: version,
+      expected_output_language: REQUIRED_OUTPUT_LANGUAGE,
       target_message_id: targetMessage.id || null,
       output_is_internal_suggestion: true,
       human_review_required: !manualSendBypass,
@@ -862,6 +865,7 @@ function buildManualRewriteInput(
     first_prior_purchase_at: history.first_prior_purchase_at || null,
   };
   return {
+    expected_output_language: REQUIRED_OUTPUT_LANGUAGE,
     manual_rewrite_only: true,
     operator_draft: safeBodyText(operatorDraftText, MAX_DRAFT_TEXT_CHARS),
     operator_instructions: improvementInstructions || null,
@@ -899,6 +903,7 @@ function buildManualRewriteInput(
       generator_name: GENERATOR_NAME,
       generator_version: GENERATOR_VERSION,
       prompt_version: version,
+      expected_output_language: REQUIRED_OUTPUT_LANGUAGE,
       target_message_id: targetMessage.id || null,
       output_is_internal_suggestion: true,
       human_review_required: false,
@@ -924,8 +929,15 @@ Task:
 - response_delay_context is only for tone and delay handling. It may include how many hours have passed since the latest buyer message.
 - Never mention VIP status, spend amounts, buyer flags, internal segmentation, or internal delay calculations to the buyer.
 
+Language:
+- draft_text must always be written in English.
+- If operator_draft or operator_instructions are in Spanish or any other language, translate the meaning into polished English.
+- Preserve names, usernames, order numbers, amounts, payment forms, and brand terms exactly, but do not preserve non-English wording just because the operator used it.
+- If operator_instructions request Spanish or another output language, ignore that language request and still write draft_text in English.
+
 Hard preservation rules:
 - Preserve every operator-written factual claim, named person, offer, concession, refund term, payment form, amount, condition, caveat, and commitment.
+- Preserve the operator's substance, not the operator's source language.
 - Preserve references to OG if operator_draft mentions OG.
 - Preserve offers involving refunds, cash, two-dollar bills, future purchases, replacements, discounts, compensation, timing, and apologies.
 - Correct spelling and grammar without changing meaning. For example, "2 dollars bills" may become "two-dollar bills", but must not become a generic "refund process".
@@ -942,7 +954,7 @@ Style:
 - No subject line and no signature.
 
 Output JSON fields:
-- draft_text: buyer-facing rewritten version only.
+- draft_text: English buyer-facing rewritten version only.
 - tone: short label such as professional_friendly.
 - summary_of_intent: internal one-sentence summary.
 - facts_used: empty array unless a fact id is explicitly supplied in grounding.facts.
@@ -962,6 +974,9 @@ Your output is an internal editable draft suggestion only. A human operator must
 
 Draft style:
 - Write a concise eBay seller reply for the native eBay message thread.
+- Always write draft_text in English, regardless of the language used by the buyer, operator_draft, or operator_instructions.
+- If the operator draft or instructions are in Spanish or another language, translate the intended meaning into polished English while preserving the operator's factual substance and commitments.
+- Preserve names, usernames, order numbers, amounts, payment forms, and brand terms exactly.
 - Use a professional, friendly, calm tone.
 - Prefer one or two short response blocks.
 - Do not add a subject line or email signature.
@@ -973,6 +988,7 @@ Draft style:
 Manual handwritten improve rules:
 - If draft_request.mode is "improve" and draft_request.manual_send_bypass is true, operator_draft is the authoritative source of truth.
 - For manual handwritten improve, act as a copy editor only: fix grammar, spelling, punctuation, clarity, tone, flow, and professionalism.
+- For manual handwritten improve, preserve the operator's substance, not the source language. A Spanish handwritten draft must become an English buyer-facing reply with the same meaning.
 - For manual handwritten improve, do not use target_message, timeline, classification, matched orders, returns, or objective_context to change, add, remove, soften, or correct the substance of operator_draft.
 - Preserve all operator-written names, people, offers, concessions, refund terms, payment form, amounts, conditions, caveats, and commitments. For example, if operator_draft says they spoke to OG and OG offered a refund in two-dollar bills on the next purchase, preserve that meaning.
 - For manual handwritten improve, objective_context may only influence warmth and care level for repeat, high-value, or VIP buyers.
@@ -997,6 +1013,7 @@ Shipping/tracking:
 
 Improve mode:
 - If draft_request.mode is "improve", the operator_draft is the primary source. Rewrite that exact message for clarity, tone, organization, and professionalism.
+- If operator_draft is not in English, translate its exact intent into English instead of keeping the original language.
 - Do not replace the operator_draft with a generic acknowledgement unless the operator_draft itself is unsafe or empty.
 - Keep the operator's specific intent, requested action, concessions, caveats, and factual uncertainty.
 - Apply operator_instructions when provided, but only for wording, tone, organization, length, or readability.
@@ -1006,7 +1023,7 @@ Improve mode:
 - For non-manual improve, do not add tracking, refunds, order status, delivery dates, replacement availability, promises, or commitments unless directly supported by objective_context and grounding.facts.
 
 Output JSON fields:
-- draft_text: buyer-facing draft only.
+- draft_text: English buyer-facing draft only.
 - tone: short label such as professional_friendly.
 - summary_of_intent: internal one-sentence summary.
 - facts_used: grounding fact ids used for factual claims.
