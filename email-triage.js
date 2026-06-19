@@ -105,7 +105,6 @@
   const CATEGORY_SORT_STORAGE_KEY = "og-email-triage-category-sort";
   const CUSTOM_CATEGORY_ORDER_STORAGE_KEY = "og-email-triage-custom-category-order";
   const CLASSIFICATION_FILTERS_EXPANDED_STORAGE_KEY = "og-email-triage-classification-filters-expanded";
-  const EBAY_CONVERSATION_FILTERS_EXPANDED_STORAGE_KEY = "og-email-triage-ebay-conversation-filters-expanded";
   const EBAY_CLASSIFICATION_EXPANDED_STORAGE_KEY = "og-email-triage-ebay-conversation-labels-expanded";
   const EBAY_DRAFT_METADATA_COLLAPSED_STORAGE_KEY = "og-email-triage-ebay-draft-metadata-collapsed";
   const EBAY_MOBILE_WORKSPACE_VIEW_STORAGE_KEY = "og-email-triage-ebay-mobile-workspace-view";
@@ -462,7 +461,7 @@
     ebayConversationDensityMode: getStoredEbayConversationDensityMode(),
     ebayConversationPanelVisibility: getStoredEbayConversationPanelVisibility(),
     filtersExpanded: getStoredBooleanPreference(CLASSIFICATION_FILTERS_EXPANDED_STORAGE_KEY, false),
-    ebayConversationFiltersExpanded: getStoredBooleanPreference(EBAY_CONVERSATION_FILTERS_EXPANDED_STORAGE_KEY, false),
+    ebayConversationFiltersExpanded: false,
     categorySortMode: getStoredCategorySortMode(),
     customCategoryOrder: getStoredCustomCategoryOrder(),
     operationalDashboardCollapsed: getStoredDashboardCollapsed(),
@@ -4769,19 +4768,38 @@
     })));
   }
 
-  function renderEbayFilterGroup(group, state) {
+  function ebayFilterOptionSearchText(group, value, label) {
+    return [
+      group.label,
+      group.key,
+      value,
+      label || humanizeValue(value),
+    ].join(" ").toLowerCase();
+  }
+
+  function renderEbayFilterGroup(group, state, options = {}) {
     const rows = safeArray(state.ebayConversations);
     const selected = new Set(safeEbayClassificationFilters(state.ebayConversationClassificationFilters)[group.key]);
+    const selectedCount = selected.size;
+    const sectionClass = [
+      "ebay-filter-group",
+      options.featured ? "is-featured" : "",
+      options.nested ? "is-nested" : "",
+    ].filter(Boolean).join(" ");
     return `
-      <section class="ebay-filter-group">
-        <h4>${escapeHtml(group.label)}</h4>
+      <section class="${sectionClass}" data-ebay-filter-group-card>
+        <div class="ebay-filter-group-head">
+          <h4>${escapeHtml(group.label)}</h4>
+          <span>${selectedCount ? `${escapeHtml(selectedCount)} selected` : `${escapeHtml(group.values.length)} options`}</span>
+        </div>
         <div class="ebay-filter-chip-grid">
           ${group.values.map((value) => {
             const count = countEbayFilterOption(rows, group.key, value);
+            const label = humanizeValue(value);
             return `
-              <label class="ebay-filter-chip${selected.has(value) ? " is-active" : ""}${count ? "" : " is-empty"}">
+              <label class="ebay-filter-chip${selected.has(value) ? " is-active" : ""}${count ? "" : " is-empty"}" data-ebay-filter-option data-filter-search="${escapeHtml(ebayFilterOptionSearchText(group, value, label))}">
                 <input type="checkbox" data-ebay-filter-group="${escapeHtml(group.key)}" value="${escapeHtml(value)}"${selected.has(value) ? " checked" : ""} />
-                <span>${escapeHtml(humanizeValue(value))}</span>
+                <span>${escapeHtml(label)}</span>
                 <em>${escapeHtml(count)}</em>
               </label>
             `;
@@ -4794,18 +4812,23 @@
   function renderEbaySystemFilterButtons(title, filters, state) {
     const selected = state.ebayConversationFilter || "all";
     const counts = ebayMailboxSmartCounts(state);
+    const activeLabel = filters.includes(selected) ? ebayFilterLabel(selected) : "";
     return `
-      <section class="ebay-filter-group">
-        <h4>${escapeHtml(title)}</h4>
+      <section class="ebay-filter-group is-system" data-ebay-filter-group-card>
+        <div class="ebay-filter-group-head">
+          <h4>${escapeHtml(title)}</h4>
+          <span>${activeLabel ? `${escapeHtml(activeLabel)} active` : `${escapeHtml(filters.length)} views`}</span>
+        </div>
         <div class="ebay-filter-chip-grid">
           ${filters.map((filter) => {
             const countKey = ebayCanonicalSmartFolderCountKey(filter);
             const count = countKey && Object.prototype.hasOwnProperty.call(counts, countKey)
               ? ebayMailboxCountValue(counts[countKey], 0)
               : filteredEbayConversations({ ...state, ebayConversationFilter: filter, ebayMailboxMode: "legacy" }).length;
+            const label = ebayFilterLabel(filter);
             return `
-              <button type="button" class="ebay-filter-chip is-button${selected === filter ? " is-active" : ""}" data-ebay-system-filter="${escapeHtml(filter)}" aria-pressed="${selected === filter ? "true" : "false"}">
-                <span>${escapeHtml(ebayFilterLabel(filter))}</span>
+              <button type="button" class="ebay-filter-chip is-button${selected === filter ? " is-active" : ""}" data-ebay-system-filter="${escapeHtml(filter)}" data-ebay-filter-option data-filter-search="${escapeHtml(`${title} ${filter} ${label}`.toLowerCase())}" aria-pressed="${selected === filter ? "true" : "false"}">
+                <span>${escapeHtml(label)}</span>
                 <em>${escapeHtml(count)}</em>
               </button>
             `;
@@ -5100,6 +5123,31 @@
     return "";
   }
 
+  function renderEbayFilterModalActiveSummary({ activeChips, selectedSavedView, savedView, query, search }) {
+    const chips = [
+      selectedSavedView ? `<button type="button" data-ebay-clear-view><span>Folder</span>${escapeHtml(selectedSavedView.name)}<i data-lucide="x"></i></button>` : "",
+      savedView !== "all" && !selectedSavedView ? `<button type="button" data-ebay-clear-view><span>View</span>${escapeHtml(ebayFilterLabel(savedView))}<i data-lucide="x"></i></button>` : "",
+      query ? `<button type="button" data-ebay-clear-search><span>${search.structuredTokens.length ? "Structured search" : "Search"}</span>${escapeHtml(query)}<i data-lucide="x"></i></button>` : "",
+      ...activeChips.map((chip) => `
+        <button type="button" data-ebay-remove-filter-group="${escapeHtml(chip.groupKey)}" data-ebay-remove-filter-value="${escapeHtml(chip.value)}">
+          <span>${escapeHtml(chip.groupLabel)}</span>${escapeHtml(chip.label)}<i data-lucide="x"></i>
+        </button>
+      `),
+    ].filter(Boolean);
+    if (!chips.length) {
+      return `
+        <div class="ebay-filter-modal-active is-empty">
+          <span>No filters selected yet</span>
+        </div>
+      `;
+    }
+    return `
+      <div class="ebay-filter-modal-active" aria-label="Selected filters">
+        ${chips.join("")}
+      </div>
+    `;
+  }
+
   function renderEbayClassificationFilterPanel(state) {
     const activeChips = ebayFilterActiveChips(state.ebayConversationClassificationFilters);
     const activeFilterCount = activeChips.length;
@@ -5111,28 +5159,72 @@
     const editDraft = ebayActiveSmartFolderEditDraft(state);
     const search = parseEbayStructuredSearch(query);
     const hasActiveControls = activeFilterCount > 0 || query || hasNonDefaultView || Boolean(state.selectedEbaySavedViewId);
+    const activeControlCount = activeFilterCount + (query ? 1 : 0) + ((selectedSavedView || hasNonDefaultView) ? 1 : 0);
 
     if (els.ebayConversationFilterToggle) {
       els.ebayConversationFilterToggle.setAttribute("aria-expanded", state.ebayConversationFiltersExpanded ? "true" : "false");
+      els.ebayConversationFilterToggle.setAttribute("aria-haspopup", "dialog");
       els.ebayConversationFilterToggle.classList.toggle("is-active", state.ebayConversationFiltersExpanded === true);
     }
     if (els.ebayConversationFilterLabel) {
-      els.ebayConversationFilterLabel.textContent = activeFilterCount ? `Classification filters (${activeFilterCount})` : "Classification filters";
+      els.ebayConversationFilterLabel.textContent = activeControlCount ? `Filters (${activeControlCount})` : "Filters";
     }
     if (els.ebayConversationFilterPanel) {
       els.ebayConversationFilterPanel.hidden = state.ebayConversationFiltersExpanded !== true;
+      els.ebayConversationFilterPanel.classList.toggle("is-modal-open", state.ebayConversationFiltersExpanded === true);
       els.ebayConversationFilterPanel.classList.toggle("is-smart-folder-create-mode", Boolean(createDraft));
       els.ebayConversationFilterPanel.classList.toggle("is-smart-folder-edit-mode", Boolean(editDraft));
-      els.ebayConversationFilterPanel.innerHTML = `
-        ${renderEbaySmartFolderFilterModeBanner(state)}
-        ${renderEbaySystemFilterButtons("State", EBAY_STATE_FILTERS, state)}
-        ${renderEbaySystemFilterButtons("System / Deterministic", EBAY_SYSTEM_FILTERS, state)}
-        ${renderEbayFilterGroup(EBAY_SOURCE_FILTER_GROUP, state)}
-        <section class="ebay-filter-group ebay-ai-filter-group">
-          <h4>AI Labels</h4>
-          ${EBAY_FILTER_GROUPS.map((group) => renderEbayFilterGroup(group, state)).join("")}
+      els.ebayConversationFilterPanel.innerHTML = state.ebayConversationFiltersExpanded === true ? `
+        <div class="ebay-filter-modal-backdrop" data-ebay-filter-modal-close></div>
+        <section class="ebay-filter-modal" role="dialog" aria-modal="true" aria-labelledby="ebay-filter-modal-title" data-ebay-filter-modal>
+          <header class="ebay-filter-modal-head">
+            <div>
+              <span class="eyebrow">Conversation Filters</span>
+              <h3 id="ebay-filter-modal-title">Find the exact chats you need</h3>
+            </div>
+            <button type="button" class="secondary-btn ebay-filter-modal-close" data-ebay-filter-modal-close aria-label="Close filters">
+              <i data-lucide="x"></i>
+            </button>
+          </header>
+          <div class="ebay-filter-modal-stats" aria-label="Filter summary">
+            <span><b>${escapeHtml(filteredEbayConversations(state).length)}</b> matching</span>
+            <span><b>${escapeHtml(activeControlCount)}</b> selected</span>
+            <span><b>${escapeHtml(ebayFilterLabel(savedView))}</b> view</span>
+          </div>
+          <label class="ebay-filter-modal-search">
+            <i data-lucide="search"></i>
+            <input type="text" data-ebay-filter-modal-search placeholder="Search filters, topics, buyer flags..." autocomplete="off" />
+          </label>
+          ${renderEbayFilterModalActiveSummary({ activeChips, selectedSavedView, savedView, query, search })}
+          ${renderEbaySmartFolderFilterModeBanner(state)}
+          <div class="ebay-filter-modal-empty" data-ebay-filter-empty hidden>No filters match that search.</div>
+          <div class="ebay-filter-modal-body">
+            <section class="ebay-filter-modal-column is-quick">
+              ${renderEbaySystemFilterButtons("State", EBAY_STATE_FILTERS, state)}
+              ${renderEbaySystemFilterButtons("System / Deterministic", EBAY_SYSTEM_FILTERS, state)}
+              ${renderEbayFilterGroup(EBAY_SOURCE_FILTER_GROUP, state, { featured: true })}
+            </section>
+            <section class="ebay-filter-modal-column ebay-ai-filter-group" data-ebay-filter-ai-section>
+              <div class="ebay-filter-modal-section-head">
+                <span class="eyebrow">AI Labels</span>
+                <strong>Topics, risk, priority, and response</strong>
+              </div>
+              <div class="ebay-filter-ai-grid">
+                ${EBAY_FILTER_GROUPS.map((group) => renderEbayFilterGroup(group, state, { nested: true })).join("")}
+              </div>
+            </section>
+          </div>
+          <footer class="ebay-filter-modal-footer">
+            <button type="button" class="secondary-btn" data-ebay-filter-modal-clear ${hasActiveControls ? "" : "disabled"}>
+              <i data-lucide="rotate-ccw"></i>
+              Clear all
+            </button>
+            <button type="button" class="primary-btn" data-ebay-filter-modal-close>
+              Done
+            </button>
+          </footer>
         </section>
-      `;
+      ` : "";
     }
     if (els.ebayConversationActiveFilters) {
       const chips = [
@@ -8066,7 +8158,6 @@
 
   function startSmartFolderCreateDraft(context) {
     const draft = ebaySmartFolderCreateDraftFromState(adminClassificationState);
-    storeBooleanPreference(EBAY_CONVERSATION_FILTERS_EXPANDED_STORAGE_KEY, true);
     setEbayConversationState({
       ebayConversationFiltersExpanded: true,
       ebayConversationSmartFolderCreateDraft: draft,
@@ -8989,6 +9080,47 @@
     });
   }
 
+  function focusEbayFilterModalSearch(options = {}) {
+    window.requestAnimationFrame(() => {
+      const input = els.ebayConversationFilterPanel?.querySelector("[data-ebay-filter-modal-search]");
+      if (!input) return;
+      input.focus();
+      if (options.select === true) input.select();
+    });
+  }
+
+  function closeEbayConversationFilterModal(options = {}) {
+    if (adminClassificationState.ebayConversationFiltersExpanded !== true) return;
+    setEbayConversationState({ ebayConversationFiltersExpanded: false });
+    if (options.focusToggle !== false) {
+      window.requestAnimationFrame(() => els.ebayConversationFilterToggle?.focus());
+    }
+  }
+
+  function filterEbayClassificationModalOptions(value) {
+    const panel = els.ebayConversationFilterPanel;
+    if (!panel) return;
+    const needle = String(value || "").trim().toLowerCase();
+    const options = [...panel.querySelectorAll("[data-ebay-filter-option]")];
+    let visibleCount = 0;
+    options.forEach((option) => {
+      const haystack = String(option.getAttribute("data-filter-search") || option.textContent || "").toLowerCase();
+      const visible = !needle || haystack.includes(needle);
+      option.hidden = !visible;
+      if (visible) visibleCount += 1;
+    });
+    panel.querySelectorAll("[data-ebay-filter-group-card]").forEach((card) => {
+      const hasVisibleOption = Boolean(card.querySelector("[data-ebay-filter-option]:not([hidden])"));
+      card.hidden = Boolean(needle) && !hasVisibleOption;
+    });
+    const aiSection = panel.querySelector("[data-ebay-filter-ai-section]");
+    if (aiSection) {
+      aiSection.hidden = Boolean(needle) && !aiSection.querySelector("[data-ebay-filter-option]:not([hidden])");
+    }
+    const empty = panel.querySelector("[data-ebay-filter-empty]");
+    if (empty) empty.hidden = !needle || visibleCount > 0;
+  }
+
   function applyEbaySavedView(context, viewId) {
     const view = ebaySavedViewsForState(adminClassificationState).find((item) => item.id === viewId);
     if (!view) return;
@@ -9125,10 +9257,10 @@
     });
     els.ebayConversationFilterToggle?.addEventListener("click", () => {
       const expanded = adminClassificationState.ebayConversationFiltersExpanded !== true;
-      storeBooleanPreference(EBAY_CONVERSATION_FILTERS_EXPANDED_STORAGE_KEY, expanded);
       setEbayConversationState({
         ebayConversationFiltersExpanded: expanded,
       });
+      if (expanded) focusEbayFilterModalSearch({ select: true });
     });
     els.ebayConversationClearFilters?.addEventListener("click", () => {
       clearEbayConversationFilters(context);
@@ -9144,10 +9276,55 @@
       );
     });
     els.ebayConversationFilterPanel?.addEventListener("input", (event) => {
+      const modalSearch = event.target.closest("[data-ebay-filter-modal-search]");
+      if (modalSearch) {
+        filterEbayClassificationModalOptions(modalSearch.value);
+        return;
+      }
       const createName = event.target.closest("[data-ebay-smart-folder-create-name]");
       if (createName) updateSmartFolderCreateDraftName(createName.value);
     });
+    els.ebayConversationFilterPanel?.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeEbayConversationFilterModal();
+    });
     els.ebayConversationFilterPanel?.addEventListener("click", (event) => {
+      const close = event.target.closest("[data-ebay-filter-modal-close]");
+      if (close) {
+        closeEbayConversationFilterModal();
+        return;
+      }
+      const clearModalFilters = event.target.closest("[data-ebay-filter-modal-clear]");
+      if (clearModalFilters) {
+        clearEbayConversationFilters(context);
+        return;
+      }
+      const clearView = event.target.closest("[data-ebay-clear-view]");
+      if (clearView) {
+        applyEbayConversationListControls(context, {
+          ebayConversationFilter: "all",
+          ebayConversationClassificationFilters: ebayConversationDefaultClassificationFilters(),
+          selectedEbaySavedViewId: null,
+        });
+        return;
+      }
+      const clearSearch = event.target.closest("[data-ebay-clear-search]");
+      if (clearSearch) {
+        if (els.ebayConversationSearch) els.ebayConversationSearch.value = "";
+        applyEbayConversationListControls(context, { ebayConversationSearchQuery: "" });
+        return;
+      }
+      const remove = event.target.closest("[data-ebay-remove-filter-group]");
+      if (remove) {
+        updateEbayConversationClassificationFilter(
+          context,
+          remove.getAttribute("data-ebay-remove-filter-group"),
+          remove.getAttribute("data-ebay-remove-filter-value"),
+          false,
+        );
+        return;
+      }
       const createSave = event.target.closest("[data-ebay-smart-folder-create-save]");
       if (createSave) {
         saveSmartFolderCreateDraft(context);
