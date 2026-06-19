@@ -256,8 +256,10 @@
   ];
   const ebayDraftActionMessageTimers = new Map();
   const ebaySentTimelineRefreshTimers = new Map();
+  const ebayRealtimeMessageReloadTimers = new Map();
   const ebayComposerDraftCache = new Map();
   let ebayConversationReloadTimer = null;
+  let ebayConversationRealtimeChannel = null;
   let ebayMobileWorkspaceView = getStoredEbayMobileWorkspaceView();
   let ebayMobileWorkspaceEventsBound = false;
 
@@ -6431,6 +6433,20 @@
     };
   }
 
+  function scheduleEbayRealtimeMessageReload(context, conversationId, delay = 700) {
+    if (!context || !conversationId) return;
+    if (ebayRealtimeMessageReloadTimers.has(conversationId)) {
+      window.clearTimeout(ebayRealtimeMessageReloadTimers.get(conversationId));
+    }
+    const timer = window.setTimeout(() => {
+      ebayRealtimeMessageReloadTimers.delete(conversationId);
+      loadEbayConversationMessages(context, conversationId, { force: true }).catch((error) => {
+        console.warn("[email-triage] Realtime eBay message reload failed:", error);
+      });
+    }, Math.max(Number(delay || 0), 0));
+    ebayRealtimeMessageReloadTimers.set(conversationId, timer);
+  }
+
   function scheduleEbaySentTimelineRefresh(context, conversationId) {
     if (!conversationId || !context) return;
     if (ebaySentTimelineRefreshTimers.has(conversationId)) {
@@ -6444,6 +6460,112 @@
       });
     }, 3500);
     ebaySentTimelineRefreshTimers.set(conversationId, timer);
+  }
+
+  function mergeRealtimeEbayMessage(context, row = {}) {
+    const conversationId = compactConversationText(row.conversation_id);
+    if (!conversationId || !row.id) return;
+    const normalized = collapseEbayLocalSentPlaceholders(
+      normalizeEbayMessagesForReadState(conversationId, [row]),
+    )[0] || row;
+    const hasLoadedTimeline = Object.prototype.hasOwnProperty.call(
+      adminClassificationState.ebayConversationMessagesById || {},
+      conversationId,
+    );
+    const selected = adminClassificationState.selectedEbayConversationId === conversationId;
+    if (hasLoadedTimeline || selected) {
+      const nextMessagesById = ebayConversationMessagesMapWith(conversationId, normalized);
+      const nextMessages = safeArray(nextMessagesById[conversationId]);
+      setEbayConversationState({
+        ebayConversationMessagesById: nextMessagesById,
+        ebayConversations: enrichEbayConversationsIdentityFromMessages(
+          adminClassificationState.ebayConversations,
+          conversationId,
+          nextMessages,
+        ),
+      });
+      scheduleEbayRealtimeMessageReload(context, conversationId, selected ? 500 : 900);
+    }
+    scheduleEbayConversationListReload(context, {
+      delay: 550,
+      forceSelectionReload: selected,
+    });
+  }
+
+  function handleEbayRealtimeConversationChange(context, row = {}) {
+    const conversationId = compactConversationText(row.id);
+    if (!conversationId) return;
+    const selected = adminClassificationState.selectedEbayConversationId === conversationId;
+    if (selected) {
+      scheduleEbayRealtimeMessageReload(context, conversationId, 450);
+      loadEbayConversationContext(context, conversationId, { force: true }).catch(() => null);
+    }
+    scheduleEbayConversationListReload(context, {
+      delay: 550,
+      forceSelectionReload: selected,
+    });
+  }
+
+  function handleEbayRealtimeTaskChange(context, row = {}) {
+    const metadata = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    const conversationId = compactConversationText(metadata.conversation_id);
+    const selected = adminClassificationState.selectedEbayConversationId === conversationId;
+    const loadedIds = safeArray(adminClassificationState.ebayConversations).map((conversation) => conversation.id);
+    if (conversationId) {
+      loadEbayConversationTaskStatuses(context, [conversationId], { silent: true }).catch(() => null);
+    } else if (loadedIds.length) {
+      loadEbayConversationTaskStatuses(context, loadedIds, { silent: true }).catch(() => null);
+    }
+    scheduleEbayConversationListReload(context, {
+      delay: 650,
+      forceSelectionReload: selected,
+    });
+  }
+
+  function setupEbayConversationRealtime(context) {
+    if (!context?.client?.channel) return;
+    if (ebayConversationRealtimeChannel) {
+      context.client.removeChannel?.(ebayConversationRealtimeChannel);
+      ebayConversationRealtimeChannel = null;
+    }
+    ebayConversationRealtimeChannel = context.client
+      .channel(`email-triage-live-${context.session?.user?.id || "staff"}`)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "ebay_conversation_messages",
+      }, (payload) => {
+        const row = payload.new || payload.old || {};
+        mergeRealtimeEbayMessage(context, row);
+      })
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "ebay_conversations",
+      }, (payload) => {
+        handleEbayRealtimeConversationChange(context, payload.new || payload.old || {});
+      })
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "team_tasks",
+      }, (payload) => {
+        const row = payload.new || payload.old || {};
+        const metadata = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+        if (metadata.source !== "ebay_conversation_message") return;
+        handleEbayRealtimeTaskChange(context, row);
+      })
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn("[email-triage] eBay realtime channel status:", status);
+        }
+      });
+  }
+
+  function cleanupEbayConversationRealtime(context) {
+    if (!ebayConversationRealtimeChannel || !context?.client?.removeChannel) return;
+    context.client.removeChannel(ebayConversationRealtimeChannel);
+    ebayConversationRealtimeChannel = null;
   }
 
   function clearEbayDraftActionMessageLater(conversationId, message) {
@@ -10121,6 +10243,8 @@
     if (!context) return;
 
     bindEbayConversationEvents(context);
+    setupEbayConversationRealtime(context);
+    window.addEventListener("beforeunload", () => cleanupEbayConversationRealtime(context), { once: true });
     applyEbayConversationDeepLinkState();
     renderEbayConversationInbox(adminClassificationState);
     bindPanelResizeEvents();
