@@ -69,7 +69,6 @@ const state = {
   orderTaskPhotos: [],
   orderTaskPhotoUploadKeys: new Set(),
   orderTaskCaptureBusy: false,
-  orderTaskSignedUrls: new Map(),
   orderTaskAssignmentsByLineId: new Map(),
   orderVideoReceipts: new Map(),
   videoReceiptEvidenceByLineId: new Map(),
@@ -101,8 +100,14 @@ const NO_INVENTORY_CAPTURE_POLL_TIMEOUT_MS = 60 * 60 * 1000;
 const NO_INVENTORY_CAPTURE_POLL_INTERVAL_MS = 1_500;
 const NO_INVENTORY_CAPTURE_PHOTO_SETTLE_MS = 3_000;
 const NO_INVENTORY_EVIDENCE_SIGNED_URL_TTL_SECONDS = 60 * 60;
+const NO_INVENTORY_PREVIEW_TRANSFORM = { width: 1800, height: 1800, resize: "contain", quality: 82 };
 const NO_INVENTORY_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "contain", quality: 55 };
 const NO_INVENTORY_EVIDENCE_BUCKET = "order-evidence-photos";
+const EVIDENCE_DERIVATIVE_MIME_TYPE = "image/jpeg";
+const EVIDENCE_PREVIEW_MAX_DIMENSION = 1800;
+const EVIDENCE_PREVIEW_QUALITY = 0.86;
+const EVIDENCE_THUMBNAIL_MAX_DIMENSION = 420;
+const EVIDENCE_THUMBNAIL_QUALITY = 0.74;
 const EBAY_LABEL_BUCKET = "ebay-labels";
 const EBAY_SINGLE_LABEL_BASE_URL = "https://www.ebay.com/ship/single/";
 const EBAY_BULK_LABEL_BASE_URL = "https://www.ebay.com/ship/bulk";
@@ -3262,17 +3267,34 @@ function getVideoReceiptEvidencePhotosForLine(line = {}) {
 }
 
 async function ensureEvidencePhotoPreviewUrls(photo = {}) {
-  if (photo.previewUrl) return photo;
-  const bucket = photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET;
-  const path = photo.path || "";
-  if (!path) return photo;
+  if (photo.previewUrl && photo.thumbnailUrl) return photo;
+  const bucket = photo.bucket || photo.storage_bucket || NO_INVENTORY_EVIDENCE_BUCKET;
+  const path = photo.path || photo.storage_path || "";
+  if (!path && !photo.preview_path && !photo.thumbnail_path && !photo.variants) return photo;
+  const previewRef = getEvidencePhotoVariantRef(photo, "preview") || (path ? {
+    bucket,
+    path,
+    transform: NO_INVENTORY_PREVIEW_TRANSFORM,
+  } : null);
+  const thumbnailRef = getEvidencePhotoVariantRef(photo, "thumbnail")
+    || getEvidencePhotoVariantRef(photo, "thumb")
+    || (path ? {
+      bucket,
+      path,
+      transform: NO_INVENTORY_THUMBNAIL_TRANSFORM,
+    } : null);
   const [previewUrl, thumbnailUrl] = await Promise.all([
-    createNoInventorySignedImageUrl(bucket, path),
-    createNoInventorySignedImageUrl(bucket, path, { transform: NO_INVENTORY_THUMBNAIL_TRANSFORM }),
+    photo.previewUrl || (previewRef
+      ? createNoInventorySignedImageUrl(previewRef.bucket, previewRef.path, previewRef.transform ? { transform: previewRef.transform } : {})
+      : Promise.resolve("")),
+    photo.thumbnailUrl || (thumbnailRef
+      ? createNoInventorySignedImageUrl(thumbnailRef.bucket, thumbnailRef.path, thumbnailRef.transform ? { transform: thumbnailRef.transform } : {})
+      : Promise.resolve("")),
   ]);
   return {
     ...photo,
     bucket,
+    path,
     previewUrl,
     thumbnailUrl: thumbnailUrl || previewUrl,
   };
@@ -3979,6 +4001,10 @@ function renderOrderTaskPanel(options = {}) {
           label: buttonEl.dataset.label || "",
           signedBy: buttonEl.dataset.signedBy || "",
           createdAt: buttonEl.dataset.createdAt || "",
+          previewBucket: buttonEl.dataset.previewBucket || "",
+          previewPath: buttonEl.dataset.previewPath || "",
+          thumbnailBucket: buttonEl.dataset.thumbnailBucket || "",
+          thumbnailPath: buttonEl.dataset.thumbnailPath || "",
           returnFocusId: "open-order-task-modal",
         }
       );
@@ -3997,20 +4023,28 @@ function renderOrderTaskPanel(options = {}) {
 function renderOrderTaskEvent(event = {}) {
   const photos = Array.isArray(event.photo_attachments) ? event.photo_attachments : [];
   const photoHtml = photos.length
-    ? `<div class="order-task-photo-strip">${photos.map((photo, index) => `
+    ? `<div class="order-task-photo-strip">${photos.map((photo, index) => {
+      const bucket = photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET;
+      const previewRef = getEvidencePhotoVariantRef(photo, "preview") || {};
+      const thumbnailRef = getEvidencePhotoVariantRef(photo, "thumbnail") || {};
+      return `
         <span class="order-task-photo-entry">
           <button
             type="button"
             class="${isVideoReceiptEvidencePhoto(photo) ? "order-task-video-receipt-thumb" : ""}"
             data-order-task-photo="1"
-            data-bucket="${escapeHtml(photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET)}"
+            data-bucket="${escapeHtml(bucket)}"
             data-path="${escapeHtml(photo.path || "")}"
+            data-preview-bucket="${escapeHtml(previewRef.bucket || "")}"
+            data-preview-path="${escapeHtml(previewRef.path || "")}"
+            data-thumbnail-bucket="${escapeHtml(thumbnailRef.bucket || "")}"
+            data-thumbnail-path="${escapeHtml(thumbnailRef.path || "")}"
             data-label="${escapeHtml(photo.label || `Photo ${index + 1}`)}"
             data-signed-by="${escapeHtml(photo.signed_by_email || event.signed_by_email || "")}"
             data-created-at="${escapeHtml(photo.created_at || event.created_at || "")}"
           >
             ${isVideoReceiptEvidencePhoto(photo)
-              ? `<span class="order-task-video-receipt-thumb-image" data-order-task-thumb-image="${escapeHtml(photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET)}:${escapeHtml(photo.path || "")}"></span>
+              ? `<span class="order-task-video-receipt-thumb-image" data-order-task-thumb-image="${escapeHtml(thumbnailRef.bucket || bucket)}:${escapeHtml(thumbnailRef.path || photo.path || "")}"></span>
                  <span>${escapeHtml(photo.label || `Video receipt ${index + 1}`)}</span>
                  <small>${escapeHtml(`Captured by ${photo.signed_by_email || event.signed_by_email || "logged-in user"}${photo.created_at || event.created_at ? ` on ${formatDate(photo.created_at || event.created_at)}` : ""}`)}</small>`
               : escapeHtml(photo.label || `Photo ${index + 1}`)}
@@ -4021,13 +4055,16 @@ function renderOrderTaskEvent(event = {}) {
               class="order-task-photo-delete"
               data-delete-video-receipt-capture="1"
               data-event-id="${escapeHtml(event.id || "")}"
-              data-bucket="${escapeHtml(photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET)}"
+              data-bucket="${escapeHtml(bucket)}"
               data-path="${escapeHtml(photo.path || "")}"
+              data-preview-path="${escapeHtml(previewRef.path || "")}"
+              data-thumbnail-path="${escapeHtml(thumbnailRef.path || "")}"
               data-label="${escapeHtml(photo.label || `Video receipt ${index + 1}`)}"
             >Delete</button>
           ` : ""}
         </span>
-      `).join("")}</div>`
+      `;
+    }).join("")}</div>`
     : "";
 
   return `
@@ -4047,6 +4084,11 @@ async function deleteVideoReceiptCapture(buttonEl) {
   const eventId = buttonEl?.dataset?.eventId || "";
   const bucket = buttonEl?.dataset?.bucket || NO_INVENTORY_EVIDENCE_BUCKET;
   const path = buttonEl?.dataset?.path || "";
+  const storagePaths = [...new Set([
+    path,
+    buttonEl?.dataset?.previewPath || "",
+    buttonEl?.dataset?.thumbnailPath || "",
+  ].filter(Boolean))];
   const label = buttonEl?.dataset?.label || "this video receipt capture";
   if (!eventId || !path) {
     setStatus("This video receipt capture is missing delete details.", "error");
@@ -4072,11 +4114,10 @@ async function deleteVideoReceiptCapture(buttonEl) {
       throw new Error("Supabase did not remove that capture. The stored path may not match the task photo.");
     }
 
-    const { error: storageError } = await supabase.storage.from(bucket).remove([path]);
+    const { error: storageError } = await supabase.storage.from(bucket).remove(storagePaths);
     if (storageError) {
       console.warn("Video receipt capture was removed from coordination, but storage cleanup failed:", storageError);
     }
-    state.orderTaskSignedUrls.delete(`${bucket}/${path}`);
     await loadSelectedOrderTasks();
     if (state.selectedLine?.id) await renderSelectedVideoReceiptEvidence();
     if (state.workerNoInventoryLineIds.size) renderWorkerNoInventoryList();
@@ -4099,31 +4140,22 @@ async function deleteVideoReceiptCapture(buttonEl) {
 async function openOrderTaskPhoto(bucket, path, options = {}) {
   if (!path) return setStatus("That task photo is missing a storage path.", "error");
   const storageBucket = bucket || NO_INVENTORY_EVIDENCE_BUCKET;
-  const key = `${storageBucket}/${path}`;
-  let url = state.orderTaskSignedUrls.get(key);
-  if (!url) {
-    const { data, error } = await supabase.storage
-      .from(storageBucket)
-      .createSignedUrl(path, NO_INVENTORY_EVIDENCE_SIGNED_URL_TTL_SECONDS);
-    if (error || !data?.signedUrl) {
-      console.warn("Could not sign order task photo:", error);
-      return setStatus("Could not open that task photo.", "error");
-    }
-    url = data.signedUrl;
-    state.orderTaskSignedUrls.set(key, url);
-  }
-  openEvidencePhotoObjectViewer({
+  const photo = await ensureEvidencePhotoPreviewUrls({
     bucket: storageBucket,
     path,
-    previewUrl: url,
-    thumbnailUrl: url,
+    preview_bucket: options.previewBucket || storageBucket,
+    preview_path: options.previewPath || "",
+    thumbnail_bucket: options.thumbnailBucket || storageBucket,
+    thumbnail_path: options.thumbnailPath || "",
     label: options.label || "Order task photo",
     signed_by_email: options.signedBy || "",
     created_at: options.createdAt || "",
     auditText: options.signedBy || options.createdAt
       ? `Captured by ${options.signedBy || "logged-in user"}${options.createdAt ? ` on ${formatDate(options.createdAt)}` : ""}`
       : "",
-  }, options.returnFocusId || "open-order-task-modal");
+  });
+  if (!photo?.previewUrl) return setStatus("Could not open that task photo.", "error");
+  openEvidencePhotoObjectViewer(photo, options.returnFocusId || "open-order-task-modal");
 }
 
 async function hydrateOrderTaskVideoReceiptThumbnails() {
@@ -4132,7 +4164,12 @@ async function hydrateOrderTaskVideoReceiptThumbnails() {
     const [bucket, ...pathParts] = String(placeholder.dataset.orderTaskThumbImage || "").split(":");
     const path = pathParts.join(":");
     if (!bucket || !path || placeholder.dataset.loaded === "true") return;
-    const url = await createNoInventorySignedImageUrl(bucket, path, { transform: NO_INVENTORY_THUMBNAIL_TRANSFORM });
+    const isStoredDerivative = /\/derivatives\/.+-(thumb|preview)\.jpe?g$/i.test(path);
+    const url = await createNoInventorySignedImageUrl(
+      bucket,
+      path,
+      isStoredDerivative ? {} : { transform: NO_INVENTORY_THUMBNAIL_TRANSFORM }
+    );
     if (!url) return;
     placeholder.innerHTML = `<img src="${escapeHtml(url)}" alt="Video receipt screenshot" />`;
     placeholder.dataset.loaded = "true";
@@ -4294,9 +4331,11 @@ async function persistOrderTaskPhotos(lineIds = []) {
 
     if (error) throw new Error(error.message || `Could not save task photo ${index + 1}.`);
 
+    const derivativeData = await createAndUploadEvidenceDerivatives(blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath);
     savedPhotos.push({
       bucket: NO_INVENTORY_EVIDENCE_BUCKET,
       path: destinationPath,
+      ...derivativeData,
       source_bucket: photo.bucket || null,
       source_path: photo.path || null,
       capture_job_id: photo.capture_job_id || null,
@@ -5711,6 +5750,173 @@ async function createNoInventorySignedImageUrl(bucket, path, options = {}) {
   return createNoInventorySignedImageUrl(bucket, path);
 }
 
+function getEvidencePhotoVariantRef(photo = {}, variant = "preview") {
+  const normalizedVariant = variant === "thumb" ? "thumbnail" : variant;
+  const variants = photo.variants || photo.derivatives || {};
+  const variantObject = variants?.[variant] || variants?.[normalizedVariant] || (normalizedVariant === "thumbnail" ? variants?.thumb : null);
+  const directPath = variantObject?.path || variantObject?.storage_path || "";
+  if (directPath) {
+    return {
+      bucket: variantObject.bucket || variantObject.storage_bucket || photo.bucket || photo.storage_bucket || NO_INVENTORY_EVIDENCE_BUCKET,
+      path: directPath,
+    };
+  }
+
+  const pathKeys = normalizedVariant === "preview"
+    ? ["preview_path", "previewPath"]
+    : ["thumbnail_path", "thumbnailPath", "thumb_path", "thumbPath"];
+  const bucketKeys = normalizedVariant === "preview"
+    ? ["preview_bucket", "previewBucket"]
+    : ["thumbnail_bucket", "thumbnailBucket", "thumb_bucket", "thumbBucket"];
+  const path = pathKeys.map((key) => photo[key]).find(Boolean);
+  if (!path) return null;
+  const variantBucket = bucketKeys.map((key) => photo[key]).find(Boolean);
+  return {
+    bucket: variantBucket || photo.bucket || photo.storage_bucket || NO_INVENTORY_EVIDENCE_BUCKET,
+    path,
+  };
+}
+
+function getEvidenceDerivativeBasePath(originalPath = "") {
+  const path = String(originalPath || "").trim();
+  if (!path) return "";
+  const slashIndex = path.lastIndexOf("/");
+  const folder = slashIndex >= 0 ? path.slice(0, slashIndex) : "";
+  const filename = slashIndex >= 0 ? path.slice(slashIndex + 1) : path;
+  const baseName = safeNoInventoryEvidenceSegment(filename.replace(/\.[a-z0-9]{2,5}$/i, ""), "evidence");
+  return folder ? `${folder}/derivatives/${baseName}` : `derivatives/${baseName}`;
+}
+
+async function loadImageResourceForDerivative(blob) {
+  if (typeof window !== "undefined" && typeof window.createImageBitmap === "function") {
+    const bitmap = await window.createImageBitmap(blob);
+    return {
+      image: bitmap,
+      width: bitmap.width,
+      height: bitmap.height,
+      cleanup: () => bitmap.close?.(),
+    };
+  }
+
+  if (typeof Image === "undefined" || typeof URL === "undefined") {
+    throw new Error("This browser cannot resize evidence photos.");
+  }
+
+  const objectUrl = URL.createObjectURL(blob);
+  const image = await new Promise((resolve, reject) => {
+    const nextImage = new Image();
+    nextImage.onload = () => resolve(nextImage);
+    nextImage.onerror = () => reject(new Error("Could not load evidence photo for resizing."));
+    nextImage.src = objectUrl;
+  });
+  return {
+    image,
+    width: image.naturalWidth || image.width,
+    height: image.naturalHeight || image.height,
+    cleanup: () => URL.revokeObjectURL(objectUrl),
+  };
+}
+
+async function createEvidenceDerivativeBlob(blob, maxDimension, quality) {
+  if (!blob || !/^image\//i.test(blob.type || "")) return null;
+  const resource = await loadImageResourceForDerivative(blob);
+  try {
+    const longestSide = Math.max(resource.width || 0, resource.height || 0);
+    if (!longestSide) return null;
+    const scale = Math.min(1, Number(maxDimension || longestSide) / longestSide);
+    const width = Math.max(1, Math.round((resource.width || 1) * scale));
+    const height = Math.max(1, Math.round((resource.height || 1) * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) return null;
+    context.fillStyle = "#111";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(resource.image, 0, 0, width, height);
+    const derivativeBlob = await new Promise((resolve) => {
+      canvas.toBlob(resolve, EVIDENCE_DERIVATIVE_MIME_TYPE, quality);
+    });
+    if (!derivativeBlob) return null;
+    return {
+      blob: derivativeBlob,
+      width,
+      height,
+      mime_type: derivativeBlob.type || EVIDENCE_DERIVATIVE_MIME_TYPE,
+      size_bytes: derivativeBlob.size || 0,
+    };
+  } finally {
+    resource.cleanup?.();
+  }
+}
+
+async function uploadEvidenceDerivative(bucket, originalPath, sourceBlob, variant, options = {}) {
+  try {
+    const derivative = await createEvidenceDerivativeBlob(sourceBlob, options.maxDimension, options.quality);
+    if (!derivative?.blob) return null;
+    const basePath = getEvidenceDerivativeBasePath(originalPath);
+    if (!basePath) return null;
+    const suffix = variant === "thumbnail" ? "thumb" : "preview";
+    const derivativePath = `${basePath}-${suffix}.jpg`;
+    const { error } = await supabase.storage
+      .from(bucket)
+      .upload(derivativePath, derivative.blob, {
+        contentType: derivative.mime_type || EVIDENCE_DERIVATIVE_MIME_TYPE,
+        upsert: false,
+      });
+    if (error) {
+      console.warn(`Could not upload ${variant} evidence derivative:`, error);
+      return null;
+    }
+    return {
+      bucket,
+      path: derivativePath,
+      mime_type: derivative.mime_type || EVIDENCE_DERIVATIVE_MIME_TYPE,
+      size_bytes: derivative.size_bytes || derivative.blob.size || 0,
+      width: derivative.width,
+      height: derivative.height,
+      generated_at: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.warn(`Could not create ${variant} evidence derivative:`, error);
+    return null;
+  }
+}
+
+async function createAndUploadEvidenceDerivatives(sourceBlob, bucket, originalPath) {
+  if (!sourceBlob || !bucket || !originalPath || !/^image\//i.test(sourceBlob.type || "")) return {};
+  const variants = {
+    original: {
+      bucket,
+      path: originalPath,
+      mime_type: sourceBlob.type || null,
+      size_bytes: sourceBlob.size || 0,
+    },
+  };
+
+  const preview = await uploadEvidenceDerivative(bucket, originalPath, sourceBlob, "preview", {
+    maxDimension: EVIDENCE_PREVIEW_MAX_DIMENSION,
+    quality: EVIDENCE_PREVIEW_QUALITY,
+  });
+  const thumbnail = await uploadEvidenceDerivative(bucket, originalPath, sourceBlob, "thumbnail", {
+    maxDimension: EVIDENCE_THUMBNAIL_MAX_DIMENSION,
+    quality: EVIDENCE_THUMBNAIL_QUALITY,
+  });
+
+  const derivativeData = { variants };
+  if (preview?.path) {
+    variants.preview = preview;
+    derivativeData.preview_bucket = preview.bucket;
+    derivativeData.preview_path = preview.path;
+  }
+  if (thumbnail?.path) {
+    variants.thumbnail = thumbnail;
+    derivativeData.thumbnail_bucket = thumbnail.bucket;
+    derivativeData.thumbnail_path = thumbnail.path;
+  }
+  return derivativeData;
+}
+
 async function noInventoryCaptureRowsToEvidencePhotos(rows) {
   const photos = [];
   for (let index = 0; index < (rows || []).length; index += 1) {
@@ -5719,7 +5925,7 @@ async function noInventoryCaptureRowsToEvidencePhotos(rows) {
     const path = String(row?.storage_path || "").trim();
     if (!bucket || !path) continue;
     const [previewUrl, thumbnailUrl] = await Promise.all([
-      createNoInventorySignedImageUrl(bucket, path),
+      createNoInventorySignedImageUrl(bucket, path, { transform: NO_INVENTORY_PREVIEW_TRANSFORM }),
       createNoInventorySignedImageUrl(bucket, path, { transform: NO_INVENTORY_THUMBNAIL_TRANSFORM }),
     ]);
     if (!previewUrl) continue;
@@ -5852,9 +6058,11 @@ async function persistNoInventoryEvidencePhotos(selectedLineIds = []) {
       throw new Error(error.message || `Could not save evidence photo ${index + 1}.`);
     }
 
+    const derivativeData = await createAndUploadEvidenceDerivatives(blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath);
     savedPhotos.push({
       bucket: NO_INVENTORY_EVIDENCE_BUCKET,
       path: destinationPath,
+      ...derivativeData,
       source_bucket: photo.bucket,
       source_path: photo.path,
       capture_job_id: photo.capture_job_id || null,
@@ -6208,9 +6416,11 @@ async function persistWorkerCancelEvidencePhotos(selectedLineIds = []) {
 
     if (error) throw new Error(error.message || `Could not save cancellation photo ${index + 1}.`);
 
+    const derivativeData = await createAndUploadEvidenceDerivatives(blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath);
     savedPhotos.push({
       bucket: NO_INVENTORY_EVIDENCE_BUCKET,
       path: destinationPath,
+      ...derivativeData,
       source_bucket: photo.bucket || null,
       source_path: photo.path || null,
       capture_job_id: photo.capture_job_id || null,
@@ -8004,23 +8214,16 @@ async function addVideoReceiptPhotoToNoInventoryEvidence(line = {}, savedPhoto =
   if (!savedPhoto.bucket || !savedPhoto.path) return null;
   const capturedAt = screenshot.capturedAt || metadata.capturedAt || savedPhoto.created_at || new Date().toISOString();
   const actor = savedPhoto.signed_by_email || getVideoReceiptAuditActor();
-  const [previewUrl, thumbnailUrl] = await Promise.all([
-    createNoInventorySignedImageUrl(savedPhoto.bucket, savedPhoto.path),
-    createNoInventorySignedImageUrl(savedPhoto.bucket, savedPhoto.path, { transform: NO_INVENTORY_THUMBNAIL_TRANSFORM }),
-  ]);
-  if (!previewUrl) return null;
-
-  const photo = {
+  const photo = await ensureEvidencePhotoPreviewUrls({
     ...savedPhoto,
     id: savedPhoto.id || `${savedPhoto.bucket}:${savedPhoto.path}`,
-    previewUrl,
-    thumbnailUrl: thumbnailUrl || previewUrl,
     label: savedPhoto.label || `Video receipt - ${line.item_number || metadata.itemNumber || "item"}`,
     signed_by_email: actor,
     auditText: `Captured by ${actor} on ${formatDate(capturedAt)}`,
     videoReceiptUrl: metadata.videoReceiptUrl || metadata.pageUrl || "",
     created_at: capturedAt,
-  };
+  });
+  if (!photo?.previewUrl) return null;
   if (line.id) state.videoReceiptEvidenceByLineId.set(line.id, photo);
   const key = getNoInventoryEvidencePhotoKey(photo);
   const existingIndex = state.noInventoryEvidencePhotos.findIndex((entry) => getNoInventoryEvidencePhotoKey(entry) === key);
@@ -8233,9 +8436,11 @@ async function saveManualVideoReceipt() {
 
     const nowIso = new Date().toISOString();
     const actor = getVideoReceiptAuditActor();
+    const derivativeData = await createAndUploadEvidenceDerivatives(photo.blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath);
     const savedPhoto = {
       bucket: NO_INVENTORY_EVIDENCE_BUCKET,
       path: destinationPath,
+      ...derivativeData,
       source_bucket: null,
       source_path: "manual-paste",
       capture_job_id: null,
@@ -8319,9 +8524,11 @@ async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
     });
   if (uploadError) throw new Error(uploadError.message || "Could not save the video receipt screenshot.");
 
+  const derivativeData = await createAndUploadEvidenceDerivatives(blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath);
   const savedPhoto = {
     bucket: NO_INVENTORY_EVIDENCE_BUCKET,
     path: destinationPath,
+    ...derivativeData,
     source_bucket: null,
     source_path: metadata.videoReceiptUrl || metadata.pageUrl || null,
     capture_job_id: null,
