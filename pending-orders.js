@@ -396,6 +396,13 @@ function getLineCustomerName(line) {
   return getOrderCustomerName(line?.order || getOrderFromLine(line));
 }
 
+function getLineSourceLabel(line = {}) {
+  const source = String(line.raw_payload?.source || "").toLowerCase();
+  if (source.includes("api")) return "eBay API";
+  if (source.includes("report") || source.includes("csv")) return "Report";
+  return "eBay";
+}
+
 function getGroupCustomerSummary(group = {}) {
   const names = [...(group.customerNames || [])].filter(Boolean);
   if (!names.length) return "";
@@ -1841,12 +1848,9 @@ function buildOrderLineQueueQuery(status, admin) {
         ebay_collected_tax,
         total_price,
         net_payout,` : "";
-  const lineAuditFields = admin ? `
-      raw_payload,` : "";
-  const orderAuditFields = admin ? `
-        raw_payload,` : "";
-  const orderLabelMetadataFields = admin ? `,
-        label_metadata` : "";
+  const lineAuditFields = "";
+  const orderAuditFields = "";
+  const orderLabelMetadataFields = "";
 
   let query = supabase
     .from("ebay_order_lines")
@@ -2716,7 +2720,7 @@ function renderOrders() {
       orderLinePositions.set(orderLineKey, orderLinePosition);
       const orderLineSequence = orderLineTotal > 1 ? `Line ${orderLinePosition} of ${orderLineTotal} in this order` : "";
       const transactionLabel = line.transaction_id ? `Txn ${line.transaction_id}` : "No transaction ID";
-      const lineSource = String(line.raw_payload?.source || "").toLowerCase().includes("api") ? "eBay API" : "Report";
+      const lineSource = getLineSourceLabel(line);
       const lineDueLabel = lineUrgency
         ? `${lineUrgency.label} · ${formatDate(order.ship_by_date)}`
         : order.ship_by_date
