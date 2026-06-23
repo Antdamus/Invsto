@@ -80,6 +80,8 @@ const state = {
   queueVideoReceiptTasks: [],
   queueVideoReceiptTaskEvents: new Map(),
   queueVideoReceiptLoadedOrderIds: new Set(),
+  queueVideoReceiptHydrateTimer: null,
+  queueVideoReceiptHydrateRunId: 0,
   evidencePhotoViewerZoom: 1,
   evidencePhotoViewerPanX: 0,
   evidencePhotoViewerPanY: 0,
@@ -102,6 +104,8 @@ const EBAY_LABEL_BUCKET = "ebay-labels";
 const EBAY_SINGLE_LABEL_BASE_URL = "https://www.ebay.com/ship/single/";
 const EBAY_BULK_LABEL_BASE_URL = "https://www.ebay.com/ship/bulk";
 const ORDER_QUEUE_PAGE_SIZE = 1000;
+const QUEUE_VIDEO_RECEIPT_PREVIEW_LIMIT = 80;
+const QUEUE_VIDEO_RECEIPT_PREVIEW_DELAY_MS = 150;
 const EBAY_ORDER_NUMBER_PATTERN = /^\d{2}-\d{5}-\d{5}$/;
 const CLOSED_EBAY_IMPORT_STATUSES = new Set(["fulfilled", "cancelled", "archived"]);
 const PENDING_ORDERS_FULL_ACCESS_FOR_ACTIVE_STAFF = true;
@@ -1945,16 +1949,34 @@ async function loadOrders() {
     return;
   }
 
-  await hydrateOrderVideoReceipts(data);
   state.queueVideoReceiptTasks = [];
   state.queueVideoReceiptTaskEvents = new Map();
   state.queueVideoReceiptLoadedOrderIds.clear();
+  state.orderVideoReceipts.clear();
+  state.orderTaskAssignmentsByLineId.clear();
   state.orders = data.map(normalizeLine);
-  await hydrateOrderTaskAssignments(state.orders);
   if (state.selectedLiveLot) {
     setLiveLotOrderMatches(calculateLiveLotOrderMatches(state.selectedLiveLot, state.selectedLiveLotItems));
   }
   applyOrderFilters();
+  hydratePendingOrderExtrasInBackground(state.orders);
+}
+
+function hydratePendingOrderExtrasInBackground(lines = []) {
+  const snapshot = [...lines];
+  Promise.allSettled([
+    hydrateOrderVideoReceipts(snapshot),
+    hydrateOrderTaskAssignments(snapshot),
+  ]).then((results) => {
+    results.forEach((result) => {
+      if (result.status === "rejected") {
+        console.warn("Could not hydrate pending order background data:", result.reason);
+      }
+    });
+    if (state.orders !== lines) return;
+    renderOrders();
+    renderSelectedOrderTaskAssignment();
+  });
 }
 
 function clearOrderSearch({ apply = true } = {}) {
@@ -2715,7 +2737,7 @@ function renderOrders() {
   });
 
   if (window.lucide) window.lucide.createIcons();
-  hydrateQueueVideoReceiptEvidenceThumbnails(groups.flatMap((group) => group.lines));
+  scheduleQueueVideoReceiptEvidenceHydration(groups.flatMap((group) => group.lines));
 }
 
 function selectOrderLine(lineId, options = {}) {
@@ -3583,7 +3605,42 @@ async function ensureQueueVideoReceiptTasksLoaded(lines = []) {
   }
 }
 
-async function hydrateQueueVideoReceiptEvidenceThumbnails(lines = []) {
+function scheduleQueueVideoReceiptEvidenceHydration(lines = []) {
+  if (state.queueVideoReceiptHydrateTimer) {
+    clearTimeout(state.queueVideoReceiptHydrateTimer);
+    state.queueVideoReceiptHydrateTimer = null;
+  }
+
+  const containers = [...document.querySelectorAll("[data-queue-video-evidence]")];
+  if (!containers.length) return;
+
+  const runId = state.queueVideoReceiptHydrateRunId + 1;
+  state.queueVideoReceiptHydrateRunId = runId;
+  const lineById = new Map((lines || []).filter((line) => line?.id).map((line) => [line.id, line]));
+  const visibleLineIds = new Set();
+
+  containers.forEach((container, index) => {
+    if (index < QUEUE_VIDEO_RECEIPT_PREVIEW_LIMIT) {
+      visibleLineIds.add(container.dataset.queueVideoEvidence);
+      container.innerHTML = `<span class="queue-video-receipt-empty">Loading saved video receipt screenshot...</span>`;
+    } else {
+      container.innerHTML = `<span class="queue-video-receipt-empty">Screenshot preview deferred. Filter this buyer to load it.</span>`;
+    }
+  });
+
+  const linesToHydrate = [...visibleLineIds].map((lineId) => lineById.get(lineId)).filter(Boolean);
+  if (!linesToHydrate.length) return;
+
+  state.queueVideoReceiptHydrateTimer = window.setTimeout(() => {
+    state.queueVideoReceiptHydrateTimer = null;
+    hydrateQueueVideoReceiptEvidenceThumbnails(linesToHydrate, { runId }).catch((error) => {
+      console.warn("Could not load video receipt screenshots for the queue:", error);
+    });
+  }, QUEUE_VIDEO_RECEIPT_PREVIEW_DELAY_MS);
+}
+
+async function hydrateQueueVideoReceiptEvidenceThumbnails(lines = [], options = {}) {
+  const runId = options.runId || state.queueVideoReceiptHydrateRunId;
   const containers = [...document.querySelectorAll("[data-queue-video-evidence]")];
   if (!containers.length) return;
 
@@ -3595,6 +3652,7 @@ async function hydrateQueueVideoReceiptEvidenceThumbnails(lines = []) {
   }
 
   await Promise.all(containers.map(async (container) => {
+    if (runId !== state.queueVideoReceiptHydrateRunId) return;
     const line = (lines || []).find((entry) => entry.id === container.dataset.queueVideoEvidence);
     if (!line?.id) return;
     const photos = getVideoReceiptEvidencePhotosForLine(line);
@@ -3603,6 +3661,7 @@ async function hydrateQueueVideoReceiptEvidenceThumbnails(lines = []) {
       return;
     }
     const hydrated = await Promise.all(photos.map((photo) => ensureEvidencePhotoPreviewUrls(photo).catch(() => photo)));
+    if (runId !== state.queueVideoReceiptHydrateRunId) return;
     container.innerHTML = hydrated.map((photo, index) => {
       const actor = photo.signed_by_email || getVideoReceiptAuditActor();
       const capturedAt = photo.created_at || photo.metadata?.capturedAt || "";
