@@ -82,6 +82,8 @@ const state = {
   queueVideoReceiptLoadedOrderIds: new Set(),
   queueVideoReceiptHydrateTimer: null,
   queueVideoReceiptHydrateRunId: 0,
+  orderRenderFrame: 0,
+  orderRenderRunId: 0,
   evidencePhotoViewerZoom: 1,
   evidencePhotoViewerPanX: 0,
   evidencePhotoViewerPanY: 0,
@@ -106,12 +108,33 @@ const EBAY_BULK_LABEL_BASE_URL = "https://www.ebay.com/ship/bulk";
 const ORDER_QUEUE_PAGE_SIZE = 1000;
 const QUEUE_VIDEO_RECEIPT_PREVIEW_LIMIT = 80;
 const QUEUE_VIDEO_RECEIPT_PREVIEW_DELAY_MS = 150;
+const ORDER_RENDER_INITIAL_GROUPS = 32;
+const ORDER_RENDER_CHUNK_GROUPS = 24;
 const EBAY_ORDER_NUMBER_PATTERN = /^\d{2}-\d{5}-\d{5}$/;
 const CLOSED_EBAY_IMPORT_STATUSES = new Set(["fulfilled", "cancelled", "archived"]);
 const PENDING_ORDERS_FULL_ACCESS_FOR_ACTIVE_STAFF = true;
 
 function $(id) {
   return document.getElementById(id);
+}
+
+function nowMs() {
+  return window.performance?.now ? window.performance.now() : Date.now();
+}
+
+function shouldLogPendingOrderPerf() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.has("debugPending") || window.localStorage?.getItem("og.pendingOrdersDebug") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function logPendingOrderPerf(label, startedAt, details = {}) {
+  if (!shouldLogPendingOrderPerf()) return;
+  const elapsedMs = Math.round((nowMs() - startedAt) * 10) / 10;
+  console.info(`[pending-orders] ${label}: ${elapsedMs}ms`, details);
 }
 
 function waitForSupabaseReady() {
@@ -1879,14 +1902,24 @@ function buildOrderLineQueueQuery(status, admin) {
 }
 
 async function fetchOrderLineQueue(status, admin) {
+  const startedAt = nowMs();
   const rows = [];
   for (let from = 0; ; from += ORDER_QUEUE_PAGE_SIZE) {
     const to = from + ORDER_QUEUE_PAGE_SIZE - 1;
+    const pageStartedAt = nowMs();
     const { data, error } = await buildOrderLineQueueQuery(status, admin).range(from, to);
     if (error) throw error;
     rows.push(...(data || []));
+    logPendingOrderPerf("fetchOrderLineQueue page", pageStartedAt, {
+      admin,
+      from,
+      rows: data?.length || 0,
+      status,
+      to,
+    });
     if (!data || data.length < ORDER_QUEUE_PAGE_SIZE) break;
   }
+  logPendingOrderPerf("fetchOrderLineQueue total", startedAt, { admin, rows: rows.length, status });
   return rows;
 }
 
@@ -1940,14 +1973,18 @@ async function hydrateOrderVideoReceipts(lines = []) {
 }
 
 async function loadOrders() {
+  const startedAt = nowMs();
   const status = $("order-status-filter")?.value || "pending";
   const list = $("orders-list");
   if (list) list.innerHTML = `<div class="empty-state">Loading pending orders...</div>`;
+  renderPendingOrderSummaryLoading();
   const admin = isAdminUser();
 
   let data;
   try {
+    const queryStartedAt = nowMs();
     data = await fetchOrderLineQueue(status, admin);
+    logPendingOrderPerf("loadOrders query", queryStartedAt, { admin, rows: data.length, status });
   } catch (error) {
     console.error("Failed to load pending eBay orders:", error);
     if (list) list.innerHTML = `<div class="empty-state">Could not load eBay orders. Make sure the pending-order migration has been pushed.</div>`;
@@ -1959,15 +1996,26 @@ async function loadOrders() {
   state.queueVideoReceiptLoadedOrderIds.clear();
   state.orderVideoReceipts.clear();
   state.orderTaskAssignmentsByLineId.clear();
+  const normalizeStartedAt = nowMs();
   state.orders = data.map(normalizeLine);
+  logPendingOrderPerf("loadOrders normalize", normalizeStartedAt, { rows: state.orders.length });
   if (state.selectedLiveLot) {
     setLiveLotOrderMatches(calculateLiveLotOrderMatches(state.selectedLiveLot, state.selectedLiveLotItems));
   }
+  const filterStartedAt = nowMs();
   applyOrderFilters();
+  logPendingOrderPerf("loadOrders apply filters", filterStartedAt, { filteredRows: state.filteredOrders.length });
   hydratePendingOrderExtrasInBackground(state.orders);
+  logPendingOrderPerf("loadOrders initial total", startedAt, {
+    admin,
+    filteredRows: state.filteredOrders.length,
+    rows: state.orders.length,
+    status,
+  });
 }
 
 function hydratePendingOrderExtrasInBackground(lines = []) {
+  const startedAt = nowMs();
   const snapshot = [...lines];
   Promise.allSettled([
     hydrateOrderVideoReceipts(snapshot),
@@ -1981,6 +2029,7 @@ function hydratePendingOrderExtrasInBackground(lines = []) {
     if (state.orders !== lines) return;
     renderOrders();
     renderSelectedOrderTaskAssignment();
+    logPendingOrderPerf("hydratePendingOrderExtrasInBackground", startedAt, { rows: lines.length });
   });
 }
 
@@ -2032,10 +2081,10 @@ function applyOrderFilters() {
   filtered = expandSearchMatchesToBuyerBundles(filtered, term);
 
   state.filteredOrders = filtered;
-  renderOrders();
   renderSummaryStrip();
   renderAdminOrderActions();
   renderLiveLotOrderMatches();
+  renderOrders();
 }
 
 function clearEbayLaunchFilter({ apply = true } = {}) {
@@ -2165,6 +2214,18 @@ function getEbayFocusBuyerRequestKey(payload = {}) {
     payload.capturedAt || "",
     payload.pageUrl || "",
   ].filter(Boolean).join("|");
+}
+
+function renderPendingOrderSummaryLoading() {
+  $("summary-pending").textContent = "Loading";
+  $("summary-pending-lines").textContent = "Checking eBay queue...";
+  $("summary-overdue-orders").textContent = "Loading";
+  $("summary-overdue-lines").textContent = "Checking due dates...";
+  $("summary-today-orders").textContent = "Loading";
+  $("summary-today-lines").textContent = "Checking due dates...";
+  $("summary-tomorrow-orders").textContent = "Loading";
+  $("summary-tomorrow-lines").textContent = "Checking due dates...";
+  $("order-count-pill").textContent = "Loading orders";
 }
 
 function renderSummaryStrip() {
@@ -2502,17 +2563,25 @@ function renderBuyerBundlePanel() {
 }
 
 function renderOrders() {
+  const startedAt = nowMs();
   const list = $("orders-list");
   if (!list) return;
+  if (state.orderRenderFrame) {
+    window.cancelAnimationFrame(state.orderRenderFrame);
+    state.orderRenderFrame = 0;
+  }
+  const renderRunId = state.orderRenderRunId + 1;
+  state.orderRenderRunId = renderRunId;
 
   const groups = groupLinesByBuyer(state.filteredOrders);
   if (!groups.length) {
     list.innerHTML = `<div class="empty-state">No orders match this view.</div>`;
+    logPendingOrderPerf("renderOrders empty", startedAt, { rows: state.filteredOrders.length });
     return;
   }
 
   list.innerHTML = "";
-  groups.forEach((group, groupIndex) => {
+  const appendGroup = (group, groupIndex) => {
     const urgency = group.pendingCount ? getOrderUrgency(group.nextShipBy) : null;
     const urgencyClass = urgency?.level === "today" ? "is-due-today" : urgency ? `is-${urgency.level}` : "";
     const assignedTask = getAssignedOrderTaskForGroup(group);
@@ -2739,10 +2808,44 @@ function renderOrders() {
     });
 
     list.appendChild(card);
-  });
+  };
 
-  if (window.lucide) window.lucide.createIcons();
-  scheduleQueueVideoReceiptEvidenceHydration(groups.flatMap((group) => group.lines));
+  let renderedGroups = 0;
+  const renderChunk = (chunkSize) => {
+    if (renderRunId !== state.orderRenderRunId) return;
+    const chunkStartedAt = nowMs();
+    const startIndex = renderedGroups;
+    const endIndex = Math.min(renderedGroups + chunkSize, groups.length);
+    let renderedLineCount = 0;
+
+    for (let index = startIndex; index < endIndex; index += 1) {
+      renderedLineCount += groups[index]?.lines?.length || 0;
+      appendGroup(groups[index], index);
+    }
+
+    renderedGroups = endIndex;
+    if (window.lucide) window.lucide.createIcons();
+    logPendingOrderPerf(startIndex === 0 ? "renderOrders first chunk" : "renderOrders chunk", chunkStartedAt, {
+      groupEnd: endIndex,
+      groups: groups.length,
+      lineCount: renderedLineCount,
+      rows: state.filteredOrders.length,
+    });
+
+    if (renderedGroups < groups.length) {
+      state.orderRenderFrame = window.requestAnimationFrame(() => renderChunk(ORDER_RENDER_CHUNK_GROUPS));
+      return;
+    }
+
+    state.orderRenderFrame = 0;
+    scheduleQueueVideoReceiptEvidenceHydration(groups.flatMap((group) => group.lines));
+    logPendingOrderPerf("renderOrders complete", startedAt, {
+      groups: groups.length,
+      rows: state.filteredOrders.length,
+    });
+  };
+
+  renderChunk(ORDER_RENDER_INITIAL_GROUPS);
 }
 
 function selectOrderLine(lineId, options = {}) {
