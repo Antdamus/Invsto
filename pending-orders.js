@@ -1818,6 +1818,12 @@ function buildOrderLineQueueQuery(status, admin) {
         ebay_collected_tax,
         total_price,
         net_payout,` : "";
+  const lineAuditFields = admin ? `
+      raw_payload,` : "";
+  const orderAuditFields = admin ? `
+        raw_payload,` : "";
+  const orderLabelMetadataFields = admin ? `,
+        label_metadata` : "";
 
   let query = supabase
     .from("ebay_order_lines")
@@ -1838,7 +1844,7 @@ function buildOrderLineQueueQuery(status, admin) {
       assigned_seller_employee_id,
       assigned_seller_snapshot,
       notes,
-      raw_payload,
+      ${lineAuditFields}
       ebay_orders!inner(
         id,
         order_number,
@@ -1851,12 +1857,11 @@ function buildOrderLineQueueQuery(status, admin) {
         ship_by_date,
         ${moneyOrderFields}
         status,
-        raw_payload,
+        ${orderAuditFields}
         label_status,
         label_storage_bucket,
         label_file_path,
-        label_uploaded_at,
-        label_metadata
+        label_uploaded_at${orderLabelMetadataFields}
       )
     `)
     .order("created_at", { ascending: false })
@@ -2770,6 +2775,9 @@ function selectOrderLine(lineId, options = {}) {
   renderBuyerBundlePanel();
   renderOrderTaskPanel();
   loadSelectedOrderTasks();
+  hydrateSelectedOrderDetails(line.id).catch((error) => {
+    console.warn("Could not hydrate selected pending order details:", error);
+  });
   resetFulfillmentInputs();
   renderSelectionSummary();
   renderItemResults([]);
@@ -7418,6 +7426,42 @@ async function loadEbayOrdersForLabels(orderNumbers = []) {
 
   if (error) throw new Error(error.message || "Could not look up the eBay orders for this label.");
   return data || [];
+}
+
+async function hydrateSelectedOrderDetails(lineId) {
+  const line = state.orders.find((entry) => entry.id === lineId);
+  if (!line?.order?.id || line.orderDetailsHydrated) return;
+  if (line.order?.label_metadata && line.order?.raw_payload) {
+    line.orderDetailsHydrated = true;
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("ebay_orders")
+    .select(`
+      id,
+      raw_payload,
+      label_status,
+      label_storage_bucket,
+      label_file_path,
+      label_uploaded_at,
+      label_metadata
+    `)
+    .eq("id", line.order.id)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data || state.selectedLine?.id !== lineId) return;
+
+  line.order = {
+    ...line.order,
+    ...data,
+  };
+  line.orderDetailsHydrated = true;
+  const normalized = normalizeLine(line);
+  Object.assign(line, normalized);
+  state.selectedLine = line;
+  renderSelectedOrder();
 }
 
 async function attachEbayLabelToOrder(transferPayload) {
