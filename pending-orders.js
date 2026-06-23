@@ -1905,7 +1905,90 @@ function buildOrderLineQueueQuery(status, admin) {
   return query;
 }
 
-async function fetchOrderLineQueue(status, admin) {
+function normalizePendingOrderQueueRpcRow(row = {}) {
+  return {
+    id: row.id,
+    order_id: row.order_id,
+    item_number: row.item_number,
+    transaction_id: row.transaction_id,
+    item_title: row.item_title,
+    custom_label: row.custom_label,
+    quantity: row.quantity,
+    sold_for: row.sold_for,
+    shipping_and_handling: row.shipping_and_handling,
+    total_price: row.total_price,
+    net_payout: row.net_payout,
+    line_status: row.line_status,
+    created_at: row.created_at,
+    internal_item_id: row.internal_item_id,
+    fulfilled_quantity: row.fulfilled_quantity,
+    fulfilled_at: row.fulfilled_at,
+    assigned_seller_employee_id: row.assigned_seller_employee_id,
+    assigned_seller_snapshot: row.assigned_seller_snapshot || {},
+    notes: row.notes,
+    ebay_orders: {
+      id: row.order_record_id || row.order_id,
+      order_number: row.order_number,
+      sales_record_number: row.sales_record_number,
+      buyer_username: row.buyer_username,
+      buyer_name: row.buyer_name,
+      sale_date: row.sale_date,
+      paid_on_date: row.paid_on_date,
+      imported_at: row.imported_at,
+      ship_by_date: row.ship_by_date,
+      payment_method: row.payment_method,
+      shipping_and_handling: row.order_shipping_and_handling,
+      ebay_collected_tax: row.ebay_collected_tax,
+      total_price: row.order_total_price,
+      net_payout: row.order_net_payout,
+      status: row.order_status,
+      label_status: row.label_status,
+      label_storage_bucket: row.label_storage_bucket,
+      label_file_path: row.label_file_path,
+      label_uploaded_at: row.label_uploaded_at,
+    },
+  };
+}
+
+function isMissingPendingOrderQueueRpcError(error) {
+  const text = [
+    error?.code,
+    error?.message,
+    error?.details,
+    error?.hint,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return text.includes("pgrst202")
+    || text.includes("list_pending_ebay_order_queue")
+    && (text.includes("schema cache") || text.includes("does not exist") || text.includes("not found"));
+}
+
+async function fetchOrderLineQueueViaRpc(status, admin) {
+  const startedAt = nowMs();
+  const rows = [];
+  for (let from = 0; ; from += ORDER_QUEUE_PAGE_SIZE) {
+    const pageStartedAt = nowMs();
+    const { data, error } = await supabase.rpc("list_pending_ebay_order_queue", {
+      _status: status,
+      _include_admin_fields: Boolean(admin),
+      _limit: ORDER_QUEUE_PAGE_SIZE,
+      _offset: from,
+    });
+    if (error) throw error;
+    const pageRows = (data || []).map(normalizePendingOrderQueueRpcRow);
+    rows.push(...pageRows);
+    logPendingOrderPerf("fetchOrderLineQueue rpc page", pageStartedAt, {
+      admin,
+      from,
+      rows: pageRows.length,
+      status,
+    });
+    if (!data || data.length < ORDER_QUEUE_PAGE_SIZE) break;
+  }
+  logPendingOrderPerf("fetchOrderLineQueue rpc total", startedAt, { admin, rows: rows.length, status });
+  return rows;
+}
+
+async function fetchOrderLineQueueViaPostgrest(status, admin) {
   const startedAt = nowMs();
   const rows = [];
   for (let from = 0; ; from += ORDER_QUEUE_PAGE_SIZE) {
@@ -1914,7 +1997,7 @@ async function fetchOrderLineQueue(status, admin) {
     const { data, error } = await buildOrderLineQueueQuery(status, admin).range(from, to);
     if (error) throw error;
     rows.push(...(data || []));
-    logPendingOrderPerf("fetchOrderLineQueue page", pageStartedAt, {
+    logPendingOrderPerf("fetchOrderLineQueue fallback page", pageStartedAt, {
       admin,
       from,
       rows: data?.length || 0,
@@ -1923,8 +2006,18 @@ async function fetchOrderLineQueue(status, admin) {
     });
     if (!data || data.length < ORDER_QUEUE_PAGE_SIZE) break;
   }
-  logPendingOrderPerf("fetchOrderLineQueue total", startedAt, { admin, rows: rows.length, status });
+  logPendingOrderPerf("fetchOrderLineQueue fallback total", startedAt, { admin, rows: rows.length, status });
   return rows;
+}
+
+async function fetchOrderLineQueue(status, admin) {
+  try {
+    return await fetchOrderLineQueueViaRpc(status, admin);
+  } catch (error) {
+    if (!isMissingPendingOrderQueueRpcError(error)) throw error;
+    console.warn("Fast pending eBay order queue RPC is not available yet; falling back to nested query.", error);
+    return fetchOrderLineQueueViaPostgrest(status, admin);
+  }
 }
 
 async function hydrateOrderVideoReceipts(lines = []) {
@@ -7538,32 +7631,45 @@ async function loadEbayOrdersForLabels(orderNumbers = []) {
 async function hydrateSelectedOrderDetails(lineId) {
   const line = state.orders.find((entry) => entry.id === lineId);
   if (!line?.order?.id || line.orderDetailsHydrated) return;
-  if (line.order?.label_metadata && line.order?.raw_payload) {
+  if (line.raw_payload && line.order?.label_metadata && line.order?.raw_payload) {
     line.orderDetailsHydrated = true;
     return;
   }
 
-  const { data, error } = await supabase
-    .from("ebay_orders")
-    .select(`
-      id,
-      raw_payload,
-      label_status,
-      label_storage_bucket,
-      label_file_path,
-      label_uploaded_at,
-      label_metadata
-    `)
-    .eq("id", line.order.id)
-    .maybeSingle();
+  const [orderResult, lineResult] = await Promise.all([
+    supabase
+      .from("ebay_orders")
+      .select(`
+        id,
+        raw_payload,
+        label_status,
+        label_storage_bucket,
+        label_file_path,
+        label_uploaded_at,
+        label_metadata
+      `)
+      .eq("id", line.order.id)
+      .maybeSingle(),
+    supabase
+      .from("ebay_order_lines")
+      .select("id, raw_payload")
+      .eq("id", line.id)
+      .maybeSingle(),
+  ]);
 
-  if (error) throw error;
-  if (!data || state.selectedLine?.id !== lineId) return;
+  if (orderResult.error) throw orderResult.error;
+  if (lineResult.error) throw lineResult.error;
+  if (state.selectedLine?.id !== lineId) return;
 
-  line.order = {
-    ...line.order,
-    ...data,
-  };
+  if (lineResult.data?.raw_payload) {
+    line.raw_payload = lineResult.data.raw_payload;
+  }
+  if (orderResult.data) {
+    line.order = {
+      ...line.order,
+      ...orderResult.data,
+    };
+  }
   line.orderDetailsHydrated = true;
   const normalized = normalizeLine(line);
   Object.assign(line, normalized);
