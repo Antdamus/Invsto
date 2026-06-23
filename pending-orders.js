@@ -355,6 +355,60 @@ function getBuyerLabel(line) {
   return String(line?.order?.buyer_username || "").trim() || "No buyer username";
 }
 
+function getOrderCustomerName(order = {}) {
+  const candidates = [
+    order?.buyer_name,
+    order?.raw_payload?.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo?.fullName,
+    order?.raw_payload?.buyer?.buyerRegistrationAddress?.fullName,
+    order?.raw_payload?.buyer_name,
+  ];
+  return String(candidates.find((value) => String(value || "").trim()) || "").trim();
+}
+
+function getLineCustomerName(line) {
+  return getOrderCustomerName(line?.order || getOrderFromLine(line));
+}
+
+function getGroupCustomerSummary(group = {}) {
+  const names = [...(group.customerNames || [])].filter(Boolean);
+  if (!names.length) return "";
+  if (names.length === 1) return names[0];
+  return `${names[0]} + ${names.length - 1} more`;
+}
+
+async function copyTextToClipboard(value, label = "Value") {
+  const text = String(value || "").trim();
+  if (!text) {
+    setStatus(`No ${label.toLowerCase()} available to copy.`, "error");
+    return false;
+  }
+
+  try {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.top = "-1000px";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      if (!copied) throw new Error("Browser clipboard fallback failed.");
+    }
+
+    setStatus(`${label} ${text} copied to clipboard.`, "success");
+    return true;
+  } catch (error) {
+    console.error("Clipboard copy failed:", error);
+    setStatus(`Could not copy ${label.toLowerCase()}.`, "error");
+    return false;
+  }
+}
+
 function getCheckoutStoreStorageKey() {
   return `og-pending-orders-checkout-store:${state.user?.id || "anonymous"}`;
 }
@@ -646,6 +700,7 @@ function normalizeLine(line) {
       order.order_number,
       order.sales_record_number,
       order.buyer_username,
+      order.buyer_name,
       formatDate(orderCreatedAt),
       line.item_number,
       line.transaction_id,
@@ -1785,6 +1840,7 @@ function buildOrderLineQueueQuery(status, admin) {
         order_number,
         sales_record_number,
         buyer_username,
+        buyer_name,
         sale_date,
         paid_on_date,
         imported_at,
@@ -2124,6 +2180,7 @@ function groupLinesByBuyer(lines) {
       groups.set(key, {
         key,
         buyer: getBuyerLabel(line),
+        customerNames: new Set(),
         lines: [],
         orderNumbers: new Set(),
         pendingCount: 0,
@@ -2136,6 +2193,8 @@ function groupLinesByBuyer(lines) {
 
     const group = groups.get(key);
     group.lines.push(line);
+    const customerName = getLineCustomerName(line);
+    if (customerName) group.customerNames.add(customerName);
     if (line.order?.order_number) group.orderNumbers.add(line.order.order_number);
     if (isOpenOrderLine(line)) group.pendingCount += 1;
     group.totalQuantity += Number(line.quantity || 0);
@@ -2431,6 +2490,10 @@ function renderOrders() {
     const urgencyClass = urgency?.level === "today" ? "is-due-today" : urgency ? `is-${urgency.level}` : "";
     const assignedTask = getAssignedOrderTaskForGroup(group);
     const assignmentLabel = getGroupAssignmentLabel(group);
+    const groupCustomerName = getGroupCustomerSummary(group);
+    const customerMarkup = groupCustomerName
+      ? `<span class="buyer-card-customer"><span>Customer</span><strong>${escapeHtml(groupCustomerName)}</strong></span>`
+      : `<span class="buyer-card-customer is-missing"><span>Customer</span><strong>Name not saved</strong></span>`;
     const urgencyMarkup = urgency ? `
       <span class="urgency-pill urgency-${urgency.level}">
         <i data-lucide="${urgency.icon}"></i>
@@ -2461,6 +2524,7 @@ function renderOrders() {
             data-current-order-numbers="${escapeHtml([...group.orderNumbers].join(","))}"
             data-current-items="${buyerInsightCurrentItemsAttribute(group.lines)}"
           >${escapeHtml(group.buyer)}</button>
+          ${customerMarkup}
           <small>${group.orderNumbers.size} order(s) - ${group.lines.length} line(s) - Qty ${group.totalQuantity}</small>
         </div>
         <div class="buyer-card-alerts">
@@ -2563,6 +2627,11 @@ function renderOrders() {
           ? `Due ${formatDate(order.ship_by_date)}`
           : "No ship-by date";
       const lineCreatedLabel = `${getOrderCreatedLabel(line)} ${formatDate(line.orderCreatedAt || getOrderCreatedAt(line))}`;
+      const lineCustomerName = getOrderCustomerName(order);
+      const orderNumber = String(order.order_number || "").trim();
+      const orderNumberMarkup = orderNumber
+        ? `<button type="button" class="buyer-line-order-copy" data-copy-order-number="${escapeHtml(orderNumber)}" title="Copy order number"><span>Order</span><strong>${escapeHtml(orderNumber)}</strong></button>`
+        : `<span class="buyer-line-order-copy is-missing"><span>Order</span><strong>No order number</strong></span>`;
       const isAdminSelected = state.adminSelectedLineIds.has(line.id);
       const visibleLineDueLabel = lineUrgency
         ? `${lineUrgency.label} - ${formatDate(order.ship_by_date)}`
@@ -2579,7 +2648,11 @@ function renderOrders() {
         <span class="buyer-line-main">
           <span class="buyer-line-copy">
             <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
-            <small>${escapeHtml(order.order_number || "No order number")} - ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
+            <span class="buyer-line-order-details">
+              ${orderNumberMarkup}
+              <small class="buyer-line-item-meta">Item ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
+            </span>
+            ${lineCustomerName ? `<small class="buyer-line-customer">Customer ${escapeHtml(lineCustomerName)}</small>` : ""}
             <span class="buyer-line-meta-row">
               <span class="buyer-line-created">${escapeHtml(lineCreatedLabel)}</span>
               <span class="buyer-line-identity">${escapeHtml(transactionLabel)} - ${escapeHtml(lineSource)}</span>
@@ -2611,6 +2684,11 @@ function renderOrders() {
       lineCheckbox?.addEventListener("click", (event) => event.stopPropagation());
       lineCheckbox?.addEventListener("change", (event) => setAdminLineSelection(line.id, event.target.checked));
       button.querySelectorAll("a").forEach((link) => link.addEventListener("click", (event) => openVideoReceiptLink(event, receiptLink)));
+      button.querySelector("[data-copy-order-number]")?.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await copyTextToClipboard(event.currentTarget.dataset.copyOrderNumber, "Order number");
+      });
       button.querySelectorAll(".buyer-line-action-btn").forEach((actionButton) => {
         actionButton.addEventListener("click", (event) => event.stopPropagation());
       });
@@ -2823,8 +2901,23 @@ function renderSelectedOrder() {
   const line = state.selectedLine;
   if (!line) return;
   const order = line.order || {};
-  $("selected-order-title").textContent = order.order_number || "eBay order";
-  $("selected-order-subtitle").textContent = `${line.item_title || "Untitled item"} - Buyer: ${order.buyer_username || "unknown"} - ${getOrderCreatedLabel(line)} ${formatDate(line.orderCreatedAt || getOrderCreatedAt(line))} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${formatDate(order.ship_by_date)}`;
+  const selectedOrderNumber = String(order.order_number || "").trim();
+  const selectedOrderTitle = $("selected-order-title");
+  if (selectedOrderTitle) {
+    selectedOrderTitle.innerHTML = selectedOrderNumber
+      ? `<button type="button" class="selected-order-copy" data-copy-order-number="${escapeHtml(selectedOrderNumber)}"><span>Order number</span><strong>${escapeHtml(selectedOrderNumber)}</strong></button>`
+      : "eBay order";
+    selectedOrderTitle.querySelector("[data-copy-order-number]")?.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      await copyTextToClipboard(event.currentTarget.dataset.copyOrderNumber, "Order number");
+    });
+  }
+  const customerName = getOrderCustomerName(order);
+  const buyerClause = customerName
+    ? `Buyer: ${order.buyer_username || "unknown"} - Customer: ${customerName}`
+    : `Buyer: ${order.buyer_username || "unknown"}`;
+  $("selected-order-subtitle").textContent = `${line.item_title || "Untitled item"} - ${buyerClause} - ${getOrderCreatedLabel(line)} ${formatDate(line.orderCreatedAt || getOrderCreatedAt(line))} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${formatDate(order.ship_by_date)}`;
   $("selected-order-status").textContent = line.line_status || "pending";
   renderSelectedOrderTaskAssignment();
   $("cancel-pending-order")?.toggleAttribute("disabled", !isOpenOrderLine(line));
@@ -7229,6 +7322,7 @@ async function loadEbayOrderForLabel(orderNumber) {
       id,
       order_number,
       buyer_username,
+      buyer_name,
       status,
       label_status,
       label_storage_bucket,
@@ -7253,6 +7347,7 @@ async function loadEbayOrdersForLabels(orderNumbers = []) {
       id,
       order_number,
       buyer_username,
+      buyer_name,
       status,
       label_status,
       label_storage_bucket,
