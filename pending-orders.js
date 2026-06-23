@@ -89,6 +89,7 @@ const state = {
   evidencePhotoViewerPanY: 0,
   evidencePhotoViewerPanning: false,
   evidencePhotoViewerPanStart: null,
+  evidencePhotoViewerLoadToken: 0,
   launchOrderTaskId: "",
   busy: false,
 };
@@ -5937,19 +5938,37 @@ function openEvidencePhotoObjectViewer(photo, returnFocusId = "request-no-invent
 
   const image = $("no-inventory-photo-viewer-image");
   const caption = $("no-inventory-photo-viewer-caption");
+  const loadToken = state.evidencePhotoViewerLoadToken + 1;
+  state.evidencePhotoViewerLoadToken = loadToken;
+  const quickUrl = photo.thumbnailUrl || photo.previewUrl;
+  const fullUrl = photo.previewUrl;
   state.evidencePhotoViewerZoom = 1;
   state.evidencePhotoViewerPanX = 0;
   state.evidencePhotoViewerPanY = 0;
   state.evidencePhotoViewerPanning = false;
   state.evidencePhotoViewerPanStart = null;
   if (image) {
-    image.src = photo.previewUrl;
+    image.classList.toggle("is-loading-full", Boolean(photo.thumbnailUrl && photo.thumbnailUrl !== photo.previewUrl));
+    image.src = quickUrl;
     image.alt = photo.label || "Evidence photo";
     applyEvidencePhotoViewerTransform();
+    if (photo.thumbnailUrl && fullUrl && fullUrl !== quickUrl) {
+      const fullImage = new Image();
+      fullImage.onload = () => {
+        if (state.evidencePhotoViewerLoadToken !== loadToken) return;
+        image.src = fullUrl;
+        image.classList.remove("is-loading-full");
+      };
+      fullImage.onerror = () => {
+        if (state.evidencePhotoViewerLoadToken !== loadToken) return;
+        image.classList.remove("is-loading-full");
+      };
+      fullImage.src = fullUrl;
+    }
   }
   if (caption) {
     caption.textContent = [
-      photo.label || `Evidence photo ${index + 1}`,
+      photo.label || "Evidence photo",
       photo.auditText || "",
       photo.bucket && photo.path ? `${photo.bucket}/${photo.path}` : "",
     ].filter(Boolean).join(" - ");
@@ -5961,8 +5980,10 @@ function openEvidencePhotoObjectViewer(photo, returnFocusId = "request-no-invent
 
 function closeNoInventoryEvidencePhotoViewer() {
   const image = $("no-inventory-photo-viewer-image");
+  state.evidencePhotoViewerLoadToken += 1;
   if (image) {
     image.removeAttribute("src");
+    image.classList.remove("is-loading-full");
     image.style.transform = "";
   }
   state.evidencePhotoViewerZoom = 1;

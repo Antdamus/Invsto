@@ -2396,6 +2396,10 @@ body.modal-open {
   user-select: none;
 }
 
+.evidence-photo-viewer-frame img.is-loading-full {
+  filter: saturate(0.9) contrast(0.96);
+}
+
 .evidence-photo-viewer-frame img:active {
   cursor: grabbing;
 }
