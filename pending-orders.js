@@ -11,6 +11,7 @@ const state = {
   stockRows: [],
   selectedStockRow: null,
   activeBuyerKey: "",
+  expandedBuyerKeys: new Set(),
   stagedFulfillments: new Map(),
   adminSelectedLineIds: new Set(),
   adminCloseoutAction: "",
@@ -2269,6 +2270,7 @@ function focusEbayBuyerFromVideoReceipt(payload = {}) {
   clearOrderCreatedDateFilter({ apply: false });
   clearLiveLotSelection({ render: false });
   clearSelection();
+  setBuyerGroupExpanded(buyerKey, true, { render: false });
 
   const exactMatches = state.orders.filter((line) => getBuyerKey(line) === buyerKey);
   const searchInput = $("order-search");
@@ -2689,9 +2691,17 @@ function renderOrders() {
   const appendGroup = (group, groupIndex) => {
     const urgency = group.pendingCount ? getOrderUrgency(group.nextShipBy) : null;
     const urgencyClass = urgency?.level === "today" ? "is-due-today" : urgency ? `is-${urgency.level}` : "";
+    const isExpanded = isBuyerGroupExpanded(group);
+    const assignedTasks = getAssignedOrderTasksForGroup(group);
     const assignedTask = getAssignedOrderTaskForGroup(group);
     const assignmentLabel = getGroupAssignmentLabel(group);
     const groupCustomerName = getGroupCustomerSummary(group);
+    const orderCountLabel = `${group.orderNumbers.size.toLocaleString()} order${group.orderNumbers.size === 1 ? "" : "s"}`;
+    const lineCountLabel = `${group.lines.length.toLocaleString()} line${group.lines.length === 1 ? "" : "s"}`;
+    const quantityLabel = `Qty ${Number(group.totalQuantity || 0).toLocaleString()}`;
+    const taskCountLabel = assignedTasks.length
+      ? `${assignedTasks.length.toLocaleString()} task${assignedTasks.length === 1 ? "" : "s"}`
+      : "No task";
     const customerMarkup = groupCustomerName
       ? `<span class="buyer-card-customer"><span>Customer</span><strong>${escapeHtml(groupCustomerName)}</strong></span>`
       : `<span class="buyer-card-customer is-missing"><span>Customer</span><strong>Name not saved</strong></span>`;
@@ -2702,31 +2712,33 @@ function renderOrders() {
       </span>
     ` : "";
     const taskControlMarkup = assignedTask
-      ? `<button type="button" class="buyer-card-task-btn task-action-btn is-assigned buyer-card-assigned-pill" data-view-order-task="${escapeHtml(assignedTask.id)}" title="View task assigned to ${escapeHtml(assignmentLabel)}"><span>Task assigned</span><strong>${escapeHtml(assignmentLabel)}</strong></button>`
-      : `<button type="button" class="buyer-card-task-btn task-action-btn" data-buyer-task-key="${escapeHtml(group.key)}">Assign Task</button>`;
+      ? `<button type="button" class="buyer-card-task-btn task-action-btn is-assigned buyer-card-assigned-pill" data-view-order-task="${escapeHtml(assignedTask.id)}" title="View task assigned to ${escapeHtml(assignmentLabel)}"><span>${escapeHtml(taskCountLabel)}</span><strong>${escapeHtml(assignmentLabel)}</strong></button>`
+      : `<button type="button" class="buyer-card-task-btn task-action-btn is-clear" data-buyer-task-key="${escapeHtml(group.key)}"><span>No task</span><strong>Assign</strong></button>`;
     const card = document.createElement("article");
     const hasSelectedAdminLines = group.lines.some((line) => state.adminSelectedLineIds.has(line.id));
     const syncMismatch = group.lines.map(getOrderSyncMismatch).find(Boolean);
-    card.className = `buyer-order-card ${urgencyClass} ${groupIndex % 2 ? "is-alt-group" : ""} ${hasSelectedAdminLines ? "has-admin-selected-lines" : ""} ${syncMismatch ? "has-sync-mismatch" : ""} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""}`;
+    card.className = `buyer-order-card ${urgencyClass} ${groupIndex % 2 ? "is-alt-group" : ""} ${hasSelectedAdminLines ? "has-admin-selected-lines" : ""} ${syncMismatch ? "has-sync-mismatch" : ""} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""} ${isExpanded ? "is-expanded" : "is-collapsed"}`;
     card.dataset.buyerKey = group.key;
     card.dataset.buyerUsername = group.buyer;
     card.innerHTML = `
       <div class="buyer-card-head">
-        <div>
+        <div class="buyer-card-primary">
           <span class="buyer-kicker">Buyer username</span>
-          <button
-            type="button"
-            class="buyer-insight-link buyer-card-buyer-name"
-            data-buyer-insights="${escapeHtml(group.buyer)}"
-            data-buyer-context="pending-orders"
-            data-current-order-total="${escapeHtml(group.totalValue)}"
-            data-current-order-count="${escapeHtml(group.orderNumbers.size)}"
-            data-current-line-count="${escapeHtml(group.lines.length)}"
-            data-current-order-numbers="${escapeHtml([...group.orderNumbers].join(","))}"
-            data-current-items="${buyerInsightCurrentItemsAttribute(group.lines)}"
-          >${escapeHtml(group.buyer)}</button>
+          <div class="buyer-card-title-row">
+            <button
+              type="button"
+              class="buyer-insight-link buyer-card-buyer-name"
+              data-buyer-insights="${escapeHtml(group.buyer)}"
+              data-buyer-context="pending-orders"
+              data-current-order-total="${escapeHtml(group.totalValue)}"
+              data-current-order-count="${escapeHtml(group.orderNumbers.size)}"
+              data-current-line-count="${escapeHtml(group.lines.length)}"
+              data-current-order-numbers="${escapeHtml([...group.orderNumbers].join(","))}"
+              data-current-items="${buyerInsightCurrentItemsAttribute(group.lines)}"
+            >${escapeHtml(group.buyer)}</button>
+            <span class="buyer-card-compact-count">${escapeHtml(orderCountLabel)} - ${escapeHtml(lineCountLabel)} - ${escapeHtml(quantityLabel)}</span>
+          </div>
           ${customerMarkup}
-          <small>${group.orderNumbers.size} order(s) - ${group.lines.length} line(s) - Qty ${group.totalQuantity}</small>
         </div>
         <div class="buyer-card-alerts">
           ${urgencyMarkup}
@@ -2737,29 +2749,44 @@ function renderOrders() {
             </span>
           ` : ""}
           <span class="buyer-card-value">${formatMoney(group.totalValue)}</span>
-          <button type="button" class="buyer-card-complete-btn primary-btn" data-buyer-complete-key="${escapeHtml(group.key)}" ${group.lines.some(isOpenOrderLine) ? "" : "disabled"}>Complete From Inventory</button>
           ${taskControlMarkup}
-          <button type="button" class="buyer-card-no-inventory-btn secondary-btn caution-btn" data-buyer-no-inventory-key="${escapeHtml(group.key)}" ${getNoInventoryLineIdsForGroupAction(group).length ? "" : "disabled"}>Complete Without Inventory</button>
           <span class="status-badge">${group.pendingCount} pending</span>
+          <button type="button" class="buyer-card-expand-btn" data-buyer-expand-key="${escapeHtml(group.key)}" aria-expanded="${isExpanded ? "true" : "false"}">
+            <i data-lucide="${isExpanded ? "chevron-up" : "chevron-down"}"></i>
+            <span>${isExpanded ? "Hide" : "Open"}</span>
+          </button>
         </div>
       </div>
       <div class="buyer-card-meta">
         <span>Earliest sale ${escapeHtml(formatDate(group.earliestPendingOrderCreatedAt))}</span>
         <span>Ship by ${escapeHtml(formatDate(group.nextShipBy))}</span>
-        <span>Order value ${formatMoney(group.totalValue)}</span>
+        <span>${escapeHtml(taskCountLabel)}</span>
       </div>
-      ${isAdminUser() ? `
-        <div class="buyer-card-admin-row">
-          <button type="button" class="secondary-btn buyer-card-label-btn" data-buyer-label-key="${escapeHtml(group.key)}">Get Labels</button>
-          <label class="admin-group-select">
-            <input type="checkbox" data-admin-group-select="${escapeHtml(group.key)}" />
-            Select pending lines
-          </label>
+      ${isExpanded ? `
+        <div class="buyer-card-expanded">
+          <div class="buyer-card-expanded-actions">
+            <button type="button" class="buyer-card-complete-btn primary-btn" data-buyer-complete-key="${escapeHtml(group.key)}" ${group.lines.some(isOpenOrderLine) ? "" : "disabled"}>Complete From Inventory</button>
+            <button type="button" class="buyer-card-no-inventory-btn secondary-btn caution-btn" data-buyer-no-inventory-key="${escapeHtml(group.key)}" ${getNoInventoryLineIdsForGroupAction(group).length ? "" : "disabled"}>Complete Without Inventory</button>
+          </div>
+          ${isAdminUser() ? `
+            <div class="buyer-card-admin-row">
+              <button type="button" class="secondary-btn buyer-card-label-btn" data-buyer-label-key="${escapeHtml(group.key)}">Get Labels</button>
+              <label class="admin-group-select">
+                <input type="checkbox" data-admin-group-select="${escapeHtml(group.key)}" />
+                Select pending lines
+              </label>
+            </div>
+          ` : ""}
+          <div class="buyer-line-list"></div>
         </div>
-      ` : ""}
-      <div class="buyer-line-list"></div>
+      ` : `
+        <div class="buyer-card-collapsed-hint">
+          <span>Open to inspect ${escapeHtml(lineCountLabel)} for labels, video receipts, photos, and line actions.</span>
+        </div>
+      `}
     `;
 
+    const expandButton = card.querySelector("[data-buyer-expand-key]");
     const lineList = card.querySelector(".buyer-line-list");
     const buyerLabelButton = card.querySelector("[data-buyer-label-key]");
     const groupCheckbox = card.querySelector("[data-admin-group-select]");
@@ -2767,6 +2794,15 @@ function renderOrders() {
     const taskButton = card.querySelector("[data-buyer-task-key]");
     const viewTaskButton = card.querySelector("[data-view-order-task]");
     const noInventoryButton = card.querySelector("[data-buyer-no-inventory-key]");
+    expandButton?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleBuyerGroupExpanded(group.key);
+    });
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("button,a,input,label,select,textarea,.buyer-card-expanded,.buyer-line-list")) return;
+      if (!event.target.closest(".buyer-card-head,.buyer-card-meta,.buyer-card-collapsed-hint")) return;
+      toggleBuyerGroupExpanded(group.key);
+    });
     if (groupCheckbox) {
       const selectable = group.lines.filter(isAdminCloseoutSelectable);
       const selected = selectable.filter((line) => state.adminSelectedLineIds.has(line.id));
@@ -2806,6 +2842,11 @@ function renderOrders() {
       event.stopPropagation();
       openBuyerGroupNoInventoryModal(group);
     });
+
+    if (!lineList) {
+      list.appendChild(card);
+      return;
+    }
 
     const orderLineTotals = new Map();
     group.lines.forEach((line) => {
@@ -2851,6 +2892,7 @@ function renderOrders() {
         : lineDueLabel;
       const button = document.createElement("div");
       button.className = `buyer-line-btn ${isAdminUser() ? "has-admin-select" : ""} ${isAdminSelected ? "is-admin-selected" : ""} ${state.selectedLine?.id === line.id ? "is-selected" : ""}`;
+      button.dataset.lineId = line.id;
       const adminSelect = isAdminUser() ? `
         <label class="admin-order-select" title="Select pending line">
           <input type="checkbox" data-admin-line-select="${escapeHtml(line.id)}" ${state.adminSelectedLineIds.has(line.id) ? "checked" : ""} ${isAdminCloseoutSelectable(line) ? "" : "disabled"} />
@@ -2939,7 +2981,7 @@ function renderOrders() {
     let renderedLineCount = 0;
 
     for (let index = startIndex; index < endIndex; index += 1) {
-      renderedLineCount += groups[index]?.lines?.length || 0;
+      renderedLineCount += isBuyerGroupExpanded(groups[index]) ? groups[index]?.lines?.length || 0 : 0;
       appendGroup(groups[index], index);
     }
 
@@ -2958,7 +3000,7 @@ function renderOrders() {
     }
 
     state.orderRenderFrame = 0;
-    scheduleQueueVideoReceiptEvidenceHydration(groups.flatMap((group) => group.lines));
+    scheduleQueueVideoReceiptEvidenceHydration(groups.filter((group) => isBuyerGroupExpanded(group)).flatMap((group) => group.lines));
     logPendingOrderPerf("renderOrders complete", startedAt, {
       groups: groups.length,
       rows: state.filteredOrders.length,
@@ -2983,6 +3025,7 @@ function selectOrderLine(lineId, options = {}) {
 
   state.selectedLine = line;
   state.activeBuyerKey = nextBuyerKey;
+  setBuyerGroupExpanded(nextBuyerKey, true, { render: false });
   state.selectedItem = null;
   state.stockRows = [];
   state.selectedStockRow = null;
@@ -3533,6 +3576,16 @@ function getAssignedOrderTaskForGroup(group = {}) {
   return tasks.sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))[0] || null;
 }
 
+function getAssignedOrderTasksForGroup(group = {}) {
+  const tasksById = new Map();
+  (group.lines || []).forEach((line) => {
+    const task = state.orderTaskAssignmentsByLineId.get(line.id);
+    if (task?.id) tasksById.set(task.id, task);
+  });
+  return [...tasksById.values()]
+    .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+}
+
 function getGroupAssignmentLabel(group = {}) {
   const tasks = (group.lines || [])
     .map((line) => state.orderTaskAssignmentsByLineId.get(line.id))
@@ -3541,6 +3594,34 @@ function getGroupAssignmentLabel(group = {}) {
   const names = [...new Set(tasks.map(getOrderTaskAssigneeName).filter(Boolean))];
   if (names.length === 1) return names[0];
   return `${names.length} people`;
+}
+
+function getBuyerExpansionKey(groupOrKey = "") {
+  return String(typeof groupOrKey === "string" ? groupOrKey : groupOrKey?.key || "").trim();
+}
+
+function isBuyerGroupExpanded(groupOrKey = "") {
+  const key = getBuyerExpansionKey(groupOrKey);
+  if (!key) return false;
+  if (state.expandedBuyerKeys.has(key)) return true;
+  return Boolean(state.selectedLine && getBuyerKey(state.selectedLine) === key);
+}
+
+function setBuyerGroupExpanded(groupOrKey = "", expanded = true, { render = true } = {}) {
+  const key = getBuyerExpansionKey(groupOrKey);
+  if (!key) return;
+  if (expanded) {
+    state.expandedBuyerKeys.add(key);
+  } else {
+    state.expandedBuyerKeys.delete(key);
+  }
+  if (render) renderOrders();
+}
+
+function toggleBuyerGroupExpanded(groupOrKey = "") {
+  const key = getBuyerExpansionKey(groupOrKey);
+  if (!key) return;
+  setBuyerGroupExpanded(key, !state.expandedBuyerKeys.has(key));
 }
 
 function isClearedVideoReceiptCaptureTask(task = {}, events = []) {
@@ -8502,6 +8583,7 @@ function returnToPendingQueueAfterVideoReceiptCapture(line = {}) {
   $("selected-order-empty")?.classList.remove("hidden");
   state.selectedLine = null;
   state.activeBuyerKey = "";
+  setBuyerGroupExpanded(getBuyerKey(line), true, { render: false });
   renderOrders();
   window.setTimeout(() => {
     const card = line?.id

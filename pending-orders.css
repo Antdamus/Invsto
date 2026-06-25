@@ -3095,6 +3095,25 @@ body.pending-order-detail-open .mobile-detail-close {
     linear-gradient(90deg, var(--queue-tint), transparent 18%),
     var(--queue-surface);
   box-shadow: inset 5px 0 0 var(--queue-accent);
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    transform 0.16s ease;
+}
+
+.buyer-order-card.is-collapsed {
+  gap: 9px;
+  padding: 14px 16px;
+}
+
+.buyer-order-card.is-collapsed:hover {
+  border-color: rgba(227, 189, 119, 0.34);
+  transform: translateY(-1px);
+}
+
+.buyer-order-card.is-expanded {
+  cursor: default;
 }
 
 .buyer-order-card.is-alt-group {
@@ -3142,6 +3161,49 @@ body.pending-order-detail-open .mobile-detail-close {
   gap: 12px;
 }
 
+.buyer-card-primary {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.buyer-card-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-width: 0;
+}
+
+.buyer-card-buyer-name {
+  max-width: min(560px, 100%);
+  overflow-wrap: anywhere;
+}
+
+.buyer-card-compact-count,
+.buyer-card-collapsed-hint {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.buyer-card-compact-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.buyer-card-collapsed-hint {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding-top: 2px;
+}
+
 .buyer-card-alerts {
   display: flex;
   flex-wrap: wrap;
@@ -3150,8 +3212,23 @@ body.pending-order-detail-open .mobile-detail-close {
   gap: 8px;
 }
 
+.buyer-card-expanded {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.buyer-card-expanded-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .buyer-card-complete-btn,
-.buyer-card-task-btn {
+.buyer-card-task-btn,
+.buyer-card-expand-btn {
   min-height: 36px;
   padding: 0 14px;
 }
@@ -3177,11 +3254,66 @@ body.pending-order-detail-open .mobile-detail-close {
 }
 
 .buyer-card-task-btn,
-.buyer-line-action-btn {
+.buyer-line-action-btn,
+.buyer-card-expand-btn {
   border-color: rgba(255, 255, 255, 0.16) !important;
   background: rgba(255, 255, 255, 0.055) !important;
   color: var(--text) !important;
   box-shadow: none !important;
+}
+
+.buyer-card-task-btn {
+  display: inline-grid;
+  align-content: center;
+  gap: 1px;
+  line-height: 1.05;
+  text-align: left;
+}
+
+.buyer-card-task-btn span {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.buyer-card-task-btn strong {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.buyer-card-task-btn.is-assigned {
+  border-color: rgba(125, 240, 178, 0.34) !important;
+  background: rgba(125, 240, 178, 0.1) !important;
+  color: var(--green) !important;
+}
+
+.buyer-card-task-btn.is-assigned strong {
+  color: #bfffd8;
+}
+
+.buyer-card-task-btn.is-clear {
+  border-color: rgba(255, 255, 255, 0.13) !important;
+}
+
+.buyer-card-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.buyer-card-expand-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 .buyer-line-action-btn.danger-btn {
@@ -3602,13 +3734,76 @@ body.pending-order-detail-open .mobile-detail-close {
     grid-template-columns: 1fr;
   }
 
+  .buyer-order-card {
+    gap: 10px;
+    padding: 12px;
+    border-radius: 15px;
+    box-shadow: inset 4px 0 0 var(--queue-accent);
+  }
+
+  .buyer-order-card.is-collapsed {
+    padding: 12px;
+  }
+
   .buyer-card-head {
     grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .buyer-card-primary {
+    gap: 6px;
+  }
+
+  .buyer-card-title-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .buyer-card-buyer-name {
+    font-size: 1.1rem;
   }
 
   .buyer-card-alerts,
   .buyer-card-admin-row {
     justify-content: flex-start;
+  }
+
+  .buyer-card-alerts {
+    gap: 7px;
+  }
+
+  .buyer-card-meta {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 5px;
+    font-size: 0.8rem;
+  }
+
+  .buyer-card-customer {
+    width: 100%;
+  }
+
+  .buyer-card-compact-count,
+  .buyer-card-collapsed-hint {
+    font-size: 0.74rem;
+  }
+
+  .buyer-card-expanded-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .buyer-card-complete-btn,
+  .buyer-card-no-inventory-btn,
+  .buyer-card-task-btn,
+  .buyer-card-expand-btn {
+    min-height: 38px;
+  }
+
+  .buyer-card-expanded-actions .buyer-card-complete-btn,
+  .buyer-card-expanded-actions .buyer-card-no-inventory-btn {
+    width: 100%;
   }
 
   .admin-order-select {
