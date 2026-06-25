@@ -21,6 +21,7 @@ const state = {
   notifications: [],
   notificationChannel: null,
   notificationsOpen: false,
+  expandedTaskKeys: new Set(),
   photoViewerReturnFocus: null,
   photoViewerZoom: 1,
   photoViewerOffsetX: 0,
@@ -221,6 +222,13 @@ function getUnifiedTaskKey(task = {}) {
   return `${task.source || "team"}:${task.id || ""}`;
 }
 
+function getSafeDomId(value = "") {
+  return String(value || "")
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "task";
+}
+
 function getEmbeddedOne(value) {
   return Array.isArray(value) ? value[0] || {} : value || {};
 }
@@ -414,6 +422,10 @@ async function loadTasks() {
   }
 
   state.tasks = sortTasksForCurrentView(state.tasks);
+  if (requested) {
+    const requestedVisibleTask = state.tasks.find((task) => task.id === requested);
+    if (requestedVisibleTask) state.expandedTaskKeys.add(getUnifiedTaskKey(requestedVisibleTask));
+  }
   await loadEventsForTasks();
   await hydrateEventPhotoUrls();
   renderTasks();
@@ -1492,6 +1504,124 @@ function renderTaskContext(task = {}) {
   return "";
 }
 
+function getTaskSourceLabel(task = {}) {
+  if (task.sourceLabel) return task.sourceLabel;
+  if (task.source === "order") return "Pending order";
+  if (task.source === "return") return "Return";
+  return "Team";
+}
+
+function getTaskCardPreview(task = {}, canceled = false) {
+  return canceled
+    ? task.metadata?.history_removed_note || task.latest_note || "Canceled by admin."
+    : task.latest_note || task.description || task.question || "No note yet.";
+}
+
+function getTaskMoneyLabel(task = {}) {
+  if (task.source === "team" && task.metadata?.refund_amount) {
+    return formatMoney(task.metadata.refund_amount) || task.metadata.refund_amount;
+  }
+  if (task.source === "order") {
+    const totals = getTaskLineMoneyTotals(Array.isArray(task.lineDetails) ? task.lineDetails : [], task.order || {});
+    return formatMoney(totals.total);
+  }
+  return "";
+}
+
+function renderTaskCard(task = {}, options = {}) {
+  const events = state.eventsByTask.get(getUnifiedTaskKey(task)) || [];
+  const canceled = Boolean(options.canceled);
+  const urgent = ["urgent", "high"].includes(String(task.priority || "").toLowerCase())
+    || ["blocked", "deferred"].includes(String(task.status || "").toLowerCase());
+  const resolved = HISTORY_TASK_STATUSES.includes(String(task.status || "").toLowerCase());
+  const taskKey = getUnifiedTaskKey(task);
+  const expanded = state.expandedTaskKeys.has(taskKey);
+  const detailsId = `task-details-${getSafeDomId(taskKey)}`;
+  const statusLabel = canceled ? "Canceled" : getTaskStatusLabel(task.status);
+  const sourceLabel = getTaskSourceLabel(task);
+  const assigneeLabel = getTaskAssigneeLabel(task);
+  const moneyLabel = getTaskMoneyLabel(task);
+  const eventCountLabel = `${events.length} update${events.length === 1 ? "" : "s"}`;
+  const preview = getTaskCardPreview(task, canceled);
+  const contextLine = [
+    task.buyer_username ? `Buyer ${task.buyer_username}` : "",
+    task.order_number ? `Order ${task.order_number}` : "",
+    task.source === "team" && task.metadata?.task_tag ? formatTaskTag(task.metadata.task_tag) : "",
+  ].filter(Boolean).join(" - ");
+
+  return `
+    <article class="team-task-card ${urgent ? "is-urgent" : ""} ${resolved ? "is-resolved" : ""} ${expanded ? "is-expanded" : "is-collapsed"}" data-team-task-card="${escapeHtml(task.id)}" data-team-task-card-key="${escapeHtml(taskKey)}">
+      <button type="button" class="team-task-card-summary" data-team-task-toggle="${escapeHtml(taskKey)}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="${escapeHtml(detailsId)}">
+        <span class="team-task-source-dot">${escapeHtml(sourceLabel.slice(0, 2).toUpperCase())}</span>
+        <span class="team-task-summary-main">
+          <span class="team-task-summary-title-row">
+            <strong>${escapeHtml(task.title || "Team task")}</strong>
+            <span class="team-task-chip team-task-status-chip">${escapeHtml(statusLabel)}</span>
+          </span>
+          <span class="team-task-summary-preview">${escapeHtml(preview)}</span>
+          ${contextLine ? `<span class="team-task-summary-context">${escapeHtml(contextLine)}</span>` : ""}
+        </span>
+        <span class="team-task-summary-facts">
+          <span>${escapeHtml(sourceLabel)}</span>
+          <span>${escapeHtml(formatTaskTag(task.task_type || "general"))}</span>
+          <span class="team-task-priority-chip">${escapeHtml(formatTaskTag(task.priority || "normal"))}</span>
+          ${moneyLabel ? `<span>${escapeHtml(moneyLabel)}</span>` : ""}
+          <span>Due ${escapeHtml(formatDate(task.due_at))}</span>
+          <span>${escapeHtml(assigneeLabel)}</span>
+          <span>${escapeHtml(eventCountLabel)}</span>
+          ${canceled ? `<span>Removed ${escapeHtml(formatDate(task.metadata?.history_removed_at))}</span>` : ""}
+        </span>
+        <span class="team-task-expand-pill">
+          ${expanded ? "Close" : "Open"}
+        </span>
+      </button>
+      <div id="${escapeHtml(detailsId)}" class="team-task-card-details ${expanded ? "" : "hidden"}">
+        <div class="team-task-meta">
+          ${task.source !== "team" && task.sourceLabel ? `<span class="team-task-source">${escapeHtml(task.sourceLabel)}</span>` : ""}
+          <span>${escapeHtml(formatTaskTag(task.task_type || "general"))}</span>
+          <span>${escapeHtml(formatTaskTag(task.priority || "normal"))}</span>
+          ${task.source === "team" && task.sourceLabel ? `<span class="team-task-source">${escapeHtml(task.sourceLabel)}</span>` : ""}
+          ${task.source === "team" && task.metadata?.refund_amount ? `<span class="team-task-source">Refund ${escapeHtml(formatMoney(task.metadata.refund_amount) || task.metadata.refund_amount)}</span>` : ""}
+          <span>Assigned: ${escapeHtml(assigneeLabel)}</span>
+          <span>Due ${escapeHtml(formatDate(task.due_at))}</span>
+          ${task.order_number ? `<span>Order ${escapeHtml(task.order_number)}</span>` : ""}
+          ${task.buyer_username ? `<span>${escapeHtml(task.buyer_username)}</span>` : ""}
+          ${task.source === "team" ? `<span>Created by ${escapeHtml(task.created_by_email || "logged-in user")}</span>` : ""}
+          ${canceled ? `<span>Removed ${escapeHtml(formatDate(task.metadata?.history_removed_at))}</span>` : ""}
+        </div>
+        ${renderTaskContext(task)}
+        ${renderAdminReassignRequestNotice(task)}
+        <div class="team-task-events">
+          ${events.length ? events.map(renderTaskEvent).join("") : `<div class="empty-state">No task trail yet.</div>`}
+        </div>
+        ${canceled ? `
+          <div class="team-task-actions">
+            <button type="button" class="secondary-btn" data-task-history-action="reopen" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Reopen Task</button>
+          </div>
+        ` : renderTaskActions(task, resolved)}
+      </div>
+    </article>
+  `;
+}
+
+function attachTaskCardInteractions(root = document) {
+  root.querySelectorAll("[data-team-task-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.teamTaskToggle || "";
+      if (!key) return;
+      if (state.expandedTaskKeys.has(key)) {
+        state.expandedTaskKeys.delete(key);
+      } else {
+        state.expandedTaskKeys.add(key);
+      }
+      renderTasks();
+      requestAnimationFrame(() => {
+        document.querySelector(`[data-team-task-card-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "nearest" });
+      });
+    });
+  });
+}
+
 function renderTasks() {
   const list = $("team-task-list");
   const count = $("team-task-count");
@@ -1515,43 +1645,9 @@ function renderTasks() {
     return;
   }
 
-  list.innerHTML = state.tasks.map((task) => {
-    const events = state.eventsByTask.get(getUnifiedTaskKey(task)) || [];
-    const urgent = ["urgent", "high"].includes(String(task.priority || "").toLowerCase())
-      || ["blocked", "deferred"].includes(String(task.status || "").toLowerCase());
-    const resolved = HISTORY_TASK_STATUSES.includes(String(task.status || "").toLowerCase());
-    return `
-      <article class="team-task-card ${urgent ? "is-urgent" : ""} ${resolved ? "is-resolved" : ""}" data-team-task-card="${escapeHtml(task.id)}">
-        <div class="team-task-card-head">
-          <div>
-            <strong>${escapeHtml(task.title || "Team task")}</strong>
-            <span>${escapeHtml(isCanceledTaskScope() ? task.metadata?.history_removed_note || task.latest_note || "Canceled by admin." : task.latest_note || task.description || "No note")}</span>
-          </div>
-          <span class="team-task-chip">${escapeHtml(isCanceledTaskScope() ? "Canceled" : getTaskStatusLabel(task.status))}</span>
-        </div>
-        <div class="team-task-meta">
-          ${task.source !== "team" && task.sourceLabel ? `<span class="team-task-source">${escapeHtml(task.sourceLabel)}</span>` : ""}
-          <span>${escapeHtml(task.task_type || "general")}</span>
-          <span>${escapeHtml(task.priority || "normal")}</span>
-          ${task.source === "team" && task.sourceLabel ? `<span class="team-task-source">${escapeHtml(task.sourceLabel)}</span>` : ""}
-          ${task.source === "team" && task.metadata?.refund_amount ? `<span class="team-task-source">Refund ${escapeHtml(formatMoney(task.metadata.refund_amount) || task.metadata.refund_amount)}</span>` : ""}
-          <span>Assigned: ${escapeHtml(getTaskAssigneeLabel(task))}</span>
-          <span>Due ${escapeHtml(formatDate(task.due_at))}</span>
-          ${task.order_number ? `<span>Order ${escapeHtml(task.order_number)}</span>` : ""}
-          ${task.buyer_username ? `<span>${escapeHtml(task.buyer_username)}</span>` : ""}
-          ${task.source === "team" ? `<span>Created by ${escapeHtml(task.created_by_email || "logged-in user")}</span>` : ""}
-          ${isCanceledTaskScope() ? `<span>Removed ${escapeHtml(formatDate(task.metadata?.history_removed_at))}</span>` : ""}
-        </div>
-        ${renderTaskContext(task)}
-        ${renderAdminReassignRequestNotice(task)}
-        <div class="team-task-events">
-          ${events.length ? events.map(renderTaskEvent).join("") : `<div class="empty-state">No task trail yet.</div>`}
-        </div>
-        ${renderTaskActions(task, resolved)}
-      </article>
-    `;
-  }).join("");
+  list.innerHTML = state.tasks.map((task) => renderTaskCard(task, { canceled: isCanceledTaskScope() })).join("");
 
+  attachTaskCardInteractions(list);
   list.querySelectorAll("[data-team-task-progress]").forEach((button) => {
     button.addEventListener("click", () => openTaskModal({ taskId: button.dataset.teamTaskProgress, progress: true }));
   });
@@ -1609,36 +1705,9 @@ function renderRemovedHistoryTasks() {
     return;
   }
 
-  list.innerHTML = tasks.map((task) => {
-    const events = state.eventsByTask.get(getUnifiedTaskKey(task)) || [];
-    const removedNote = task.metadata?.history_removed_note || "Removed from active history by admin.";
-    return `
-      <article class="team-task-card is-urgent is-resolved" data-team-task-card="${escapeHtml(task.id)}">
-        <div class="team-task-card-head">
-          <div>
-            <strong>${escapeHtml(task.title || "Canceled task")}</strong>
-            <span>${escapeHtml(removedNote)}</span>
-          </div>
-          <span class="team-task-chip">Canceled</span>
-        </div>
-        <div class="team-task-meta">
-          <span class="team-task-source">${escapeHtml(task.sourceLabel || "Task")}</span>
-          <span>Assigned: ${escapeHtml(getTaskAssigneeLabel(task))}</span>
-          <span>Removed ${escapeHtml(formatDate(task.metadata?.history_removed_at))}</span>
-          ${task.order_number ? `<span>Order ${escapeHtml(task.order_number)}</span>` : ""}
-          ${task.buyer_username ? `<span>${escapeHtml(task.buyer_username)}</span>` : ""}
-        </div>
-        ${renderTaskContext(task)}
-        <div class="team-task-events">
-          ${events.length ? events.map(renderTaskEvent).join("") : `<div class="empty-state">No task trail yet.</div>`}
-        </div>
-        <div class="team-task-actions">
-          <button type="button" class="secondary-btn" data-task-history-action="reopen" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Reopen Task</button>
-        </div>
-      </article>
-    `;
-  }).join("");
+  list.innerHTML = tasks.map((task) => renderTaskCard(task, { canceled: true })).join("");
 
+  attachTaskCardInteractions(list);
   list.querySelectorAll("[data-team-task-photo]").forEach((button) => {
     button.addEventListener("click", () => {
       if (button.dataset.url) {
