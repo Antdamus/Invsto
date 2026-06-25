@@ -120,6 +120,7 @@ const ORDER_HISTORY_LINE_SELECT = `
     order_number,
     sales_record_number,
     buyer_username,
+    buyer_name,
     sale_date,
     paid_on_date,
     ship_by_date,
@@ -276,6 +277,7 @@ function normalizeLine(row) {
       row.notes,
       order.order_number,
       order.buyer_username,
+      order.buyer_name,
       order.sales_record_number,
       order.sale_date,
       order.paid_on_date,
@@ -1740,19 +1742,29 @@ async function fetchAllDateOrderHistoryLines(searchTerm) {
   }
 
   if (!searchLooksLikeTracking) {
-    for (let start = 0; start < ORDER_HISTORY_MAX_BUYER_ORDERS; start += ORDER_HISTORY_PAGE_SIZE) {
-      const end = Math.min(start + ORDER_HISTORY_PAGE_SIZE - 1, ORDER_HISTORY_MAX_BUYER_ORDERS - 1);
-      const { data, error } = await supabase
-        .from("ebay_orders")
-        .select("id")
-        .ilike("buyer_username", buyerPattern)
-        .order("sale_date", { ascending: false, nullsFirst: false })
-        .range(start, end);
+    const seenBuyerOrderIds = new Set();
+    const buyerSearchColumns = ["buyer_username", "buyer_name"];
+    for (const buyerColumn of buyerSearchColumns) {
+      for (let start = 0; start < ORDER_HISTORY_MAX_BUYER_ORDERS; start += ORDER_HISTORY_PAGE_SIZE) {
+        const end = Math.min(start + ORDER_HISTORY_PAGE_SIZE - 1, ORDER_HISTORY_MAX_BUYER_ORDERS - 1);
+        const { data, error } = await supabase
+          .from("ebay_orders")
+          .select("id")
+          .ilike(buyerColumn, buyerPattern)
+          .order("sale_date", { ascending: false, nullsFirst: false })
+          .range(start, end);
 
-      if (error) return { data: [], error };
-      const page = data || [];
-      orders.push(...page);
-      if (page.length < ORDER_HISTORY_PAGE_SIZE) break;
+        if (error) return { data: [], error };
+        const page = data || [];
+        page.forEach((order) => {
+          if (!order?.id || seenBuyerOrderIds.has(order.id)) return;
+          seenBuyerOrderIds.add(order.id);
+          orders.push(order);
+        });
+        if (page.length < ORDER_HISTORY_PAGE_SIZE) break;
+        if (orders.length >= ORDER_HISTORY_MAX_BUYER_ORDERS) break;
+      }
+      if (orders.length >= ORDER_HISTORY_MAX_BUYER_ORDERS) break;
     }
   }
 
@@ -4289,6 +4301,7 @@ function getFilteredEvents() {
         ...eventLines.flatMap((line) => [
           line.searchText,
           line.order?.buyer_username,
+          line.order?.buyer_name,
           line.order?.order_number,
           line.order?.sales_record_number,
           line.item_title,
@@ -4298,6 +4311,7 @@ function getFilteredEvents() {
         ]),
         ...snapshots.flatMap((snapshot) => [
           snapshot.buyer_username,
+          snapshot.buyer_name,
           snapshot.order_number,
           snapshot.item_title,
           snapshot.item_number,
