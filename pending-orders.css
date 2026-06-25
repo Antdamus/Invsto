@@ -104,7 +104,7 @@ textarea {
 }
 
 .pending-main {
-  padding: 28px;
+  padding: 18px 22px;
   min-width: 0;
 }
 
@@ -112,8 +112,8 @@ textarea {
   display: flex;
   justify-content: space-between;
   gap: 18px;
-  align-items: flex-start;
-  margin-bottom: 18px;
+  align-items: center;
+  margin-bottom: 10px;
 }
 
 .eyebrow {
@@ -140,8 +140,8 @@ h2 {
 }
 
 h1 {
-  margin-bottom: 8px;
-  font-size: clamp(2rem, 4vw, 3.4rem);
+  margin-bottom: 3px;
+  font-size: clamp(1.65rem, 2.8vw, 2.7rem);
 }
 
 .pending-header p,
@@ -151,6 +151,12 @@ h1 {
 .order-detail-card p {
   color: var(--muted);
   line-height: 1.5;
+}
+
+.pending-header p {
+  margin-bottom: 0;
+  font-size: 0.9rem;
+  line-height: 1.25;
 }
 
 .header-actions,
@@ -256,11 +262,25 @@ button.task-action-btn.is-assigned:hover,
   height: 17px;
 }
 
+.pending-header .secondary-btn,
+.pending-header .primary-btn {
+  min-height: 40px;
+  padding: 0 13px;
+}
+
+.checkout-store-panel .eyebrow,
+.bag-lookup-panel .eyebrow,
+.import-details .eyebrow {
+  margin-bottom: 2px;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+}
+
 .summary-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .summary-strip div,
@@ -281,8 +301,8 @@ button.task-action-btn.is-assigned:hover,
 }
 
 .summary-strip div {
-  padding: 16px;
-  border-radius: 18px;
+  padding: 10px 12px;
+  border-radius: 14px;
 }
 
 .summary-strip span,
@@ -358,16 +378,16 @@ button.task-action-btn.is-assigned:hover,
 
 .summary-strip strong {
   display: block;
-  margin-top: 6px;
-  font-size: clamp(1.15rem, 2vw, 1.55rem);
+  margin-top: 3px;
+  font-size: clamp(1rem, 1.45vw, 1.25rem);
   overflow-wrap: anywhere;
 }
 
 .summary-strip small {
   display: block;
-  margin-top: 5px;
+  margin-top: 2px;
   color: var(--muted);
-  font-size: 0.86rem;
+  font-size: 0.76rem;
   font-weight: 800;
 }
 
@@ -402,14 +422,72 @@ button.task-action-btn.is-assigned:hover,
   border-radius: 20px;
 }
 
+.import-details {
+  display: block;
+  margin-bottom: 10px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 16px;
+}
+
+.import-panel-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.import-panel-summary::-webkit-details-marker {
+  display: none;
+}
+
+.import-panel-summary h2 {
+  margin-bottom: 0;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.1;
+}
+
+.import-panel-summary p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.import-panel-summary-action {
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+.import-details[open] .import-panel-summary-action svg {
+  transform: rotate(180deg);
+}
+
+.import-panel-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 0 12px 12px;
+}
+
+.import-panel-body .ebay-reconciliation-panel,
+.import-panel-body .legacy-import-details {
+  grid-column: 1 / -1;
+}
+
 .admin-order-actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
+  gap: 12px;
   align-items: center;
-  margin-bottom: 18px;
-  padding: 18px;
-  border-radius: 20px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
   border: 1px solid rgba(227, 189, 119, 0.18);
   background:
     linear-gradient(180deg, rgba(227, 189, 119, 0.07), rgba(255, 255, 255, 0.025)),
@@ -418,17 +496,21 @@ button.task-action-btn.is-assigned:hover,
 }
 
 .admin-order-actions h2 {
-  margin-bottom: 4px;
+  margin-bottom: 2px;
+  font-family: inherit;
+  font-size: 1rem;
 }
 
 .admin-order-actions p {
   margin-bottom: 0;
   color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.25;
 }
 
 .admin-order-actions-controls {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -459,19 +541,30 @@ button.task-action-btn.is-assigned:hover,
 
 .checkout-store-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
-  gap: 16px;
-  align-items: end;
-  margin-bottom: 18px;
-  padding: 18px;
-  border-radius: 20px;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 360px);
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+}
+
+.admin-order-actions-controls .secondary-btn,
+.admin-order-actions-controls .primary-btn,
+.admin-order-actions-controls .count-pill {
+  min-height: 36px;
+  padding: 0 12px;
 }
 
 .checkout-store-panel h2 {
-  margin-bottom: 4px;
+  margin-bottom: 0;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.1;
 }
 
 .checkout-store-panel p {
+  display: none;
   margin-bottom: 0;
   color: var(--muted);
   line-height: 1.5;
@@ -479,17 +572,20 @@ button.task-action-btn.is-assigned:hover,
 
 .checkout-store-panel label {
   display: grid;
-  gap: 8px;
+  gap: 5px;
   color: var(--muted);
+  font-size: 0.74rem;
   font-weight: 900;
 }
 
 .bag-lookup-panel {
   display: grid;
-  gap: 16px;
-  margin-bottom: 18px;
-  padding: 18px;
-  border-radius: 24px;
+  grid-template-columns: minmax(190px, 0.45fr) minmax(320px, 1fr);
+  gap: 10px 14px;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
   overflow: hidden;
 }
 
@@ -497,16 +593,23 @@ button.task-action-btn.is-assigned:hover,
 .bag-match-head {
   display: flex;
   justify-content: space-between;
-  gap: 14px;
-  align-items: flex-start;
+  gap: 10px;
+  align-items: center;
 }
 
 .bag-lookup-head h2,
 .bag-match-head h3 {
-  margin-bottom: 4px;
+  margin-bottom: 0;
+}
+
+.bag-lookup-head h2 {
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.1;
 }
 
 .bag-lookup-head p {
+  display: none;
   margin-bottom: 0;
   color: var(--muted);
   line-height: 1.5;
@@ -515,15 +618,34 @@ button.task-action-btn.is-assigned:hover,
 .bag-lookup-scan {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) auto auto;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
+}
+
+.checkout-store-panel select,
+.bag-lookup-scan input {
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 13px;
+}
+
+.bag-lookup-scan .primary-btn,
+.bag-lookup-scan .secondary-btn,
+.import-panel-summary-action {
+  min-height: 40px;
+  padding: 0 13px;
 }
 
 .bag-lookup-grid {
   display: grid;
+  grid-column: 1 / -1;
   grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
-  gap: 14px;
+  gap: 10px;
   align-items: start;
+}
+
+.bag-lookup-panel:not(.has-live-lot) .bag-lookup-grid {
+  display: none;
 }
 
 .bag-match-panel {
@@ -624,10 +746,18 @@ button.task-action-btn.is-assigned:hover,
 
 .import-actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+.import-actions .primary-btn,
+.import-actions .secondary-btn,
+.reconciliation-actions .primary-btn,
+.reconciliation-actions .secondary-btn {
+  min-height: 38px;
+  padding: 0 13px;
 }
 
 .ebay-order-sync-actions {
@@ -646,7 +776,7 @@ button.task-action-btn.is-assigned:hover,
 
 .days-back-field input {
   width: 92px;
-  min-height: 46px;
+  min-height: 38px;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 0 14px;
@@ -662,8 +792,8 @@ button.task-action-btn.is-assigned:hover,
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 46px;
-  padding: 0 16px;
+  min-height: 38px;
+  padding: 0 13px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.05);
@@ -703,35 +833,38 @@ button.task-action-btn.is-assigned:hover,
 .ebay-reconciliation-panel {
   grid-column: 1 / -1;
   display: grid;
-  gap: 14px;
-  padding: 16px;
+  gap: 10px;
+  padding: 12px;
   border: 1px solid rgba(227, 189, 119, 0.16);
-  border-radius: 18px;
+  border-radius: 16px;
   background: linear-gradient(135deg, rgba(227, 189, 119, 0.08), rgba(255, 255, 255, 0.025));
 }
 
 .reconciliation-head {
   display: flex;
-  gap: 16px;
+  gap: 10px;
   align-items: flex-start;
   justify-content: space-between;
 }
 
 .reconciliation-head h3 {
-  margin: 4px 0;
+  margin: 2px 0;
   color: var(--text);
+  font-size: 0.96rem;
 }
 
 .reconciliation-head p {
   margin: 0;
   max-width: 720px;
+  font-size: 0.82rem;
+  line-height: 1.25;
 }
 
 .reconciliation-actions,
 .reconciliation-apply-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .reconciliation-apply-row label {
@@ -746,10 +879,10 @@ button.task-action-btn.is-assigned:hover,
 }
 
 .reconciliation-apply-row input {
-  min-height: 44px;
+  min-height: 38px;
   border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 0 14px;
+  border-radius: 13px;
+  padding: 8px 11px;
   background: rgba(255, 255, 255, 0.05);
   color: var(--text);
   font: inherit;
@@ -768,9 +901,9 @@ button.task-action-btn.is-assigned:hover,
 .reconciliation-result {
   display: grid;
   grid-template-columns: minmax(180px, 1.1fr) minmax(180px, 1fr) auto;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
-  padding: 12px;
+  padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 14px;
   background: rgba(0, 0, 0, 0.2);
@@ -913,7 +1046,7 @@ button.task-action-btn.is-assigned:hover,
 }
 
 .filter-row {
-  margin: 14px 0;
+  margin: 8px 0 10px;
   align-items: center;
   flex-wrap: wrap;
 }
@@ -924,6 +1057,13 @@ button.task-action-btn.is-assigned:hover,
 
 .filter-row select {
   flex: 1 1 160px;
+}
+
+.orders-panel .filter-row input,
+.orders-panel .filter-row select {
+  min-height: 40px;
+  padding: 8px 11px;
+  border-radius: 13px;
 }
 
 input,
@@ -2663,6 +2803,8 @@ body.modal-open {
   .import-panel,
   .admin-order-actions,
   .checkout-store-panel,
+  .bag-lookup-panel,
+  .import-panel-body,
   .bag-lookup-grid {
     grid-template-columns: 1fr;
   }
@@ -2735,8 +2877,8 @@ body.modal-open {
   .filter-row input,
   .filter-row select {
     flex: 0 0 auto;
-    min-height: 44px;
-    padding: 10px 12px;
+    min-height: 40px;
+    padding: 8px 11px;
     border-radius: 12px;
     font-size: 0.95rem;
   }
@@ -2764,7 +2906,15 @@ body.modal-open {
   .checkout-store-panel,
   .bag-lookup-panel {
     border-radius: 18px;
-    padding: 14px;
+    padding: 10px;
+  }
+
+  .orders-panel {
+    border-radius: 16px;
+  }
+
+  .import-details {
+    padding: 0;
   }
 
   .money-grid,
@@ -2959,6 +3109,7 @@ body.modal-open {
 .orders-panel {
   position: static;
   max-height: none;
+  padding: 14px;
 }
 
 .fulfillment-panel {
@@ -3103,8 +3254,10 @@ body.pending-order-detail-open .mobile-detail-close {
 }
 
 .buyer-order-card.is-collapsed {
-  gap: 9px;
-  padding: 14px 16px;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 13px;
+  box-shadow: inset 4px 0 0 var(--queue-accent);
 }
 
 .buyer-order-card.is-collapsed:hover {
@@ -3114,6 +3267,109 @@ body.pending-order-detail-open .mobile-detail-close {
 
 .buyer-order-card.is-expanded {
   cursor: default;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-head {
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 10px;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-primary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 10px;
+}
+
+.buyer-order-card.is-collapsed .buyer-kicker,
+.buyer-order-card.is-collapsed .buyer-card-collapsed-hint {
+  display: none;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-title-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-buyer-name {
+  max-width: 240px;
+  font-size: 0.96rem;
+  line-height: 1.05;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-compact-count {
+  min-height: 25px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-customer {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: auto;
+  max-width: 260px;
+  margin: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-customer span {
+  font-size: 0.56rem;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-customer strong {
+  font-size: 0.78rem;
+  line-height: 1.05;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-meta {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  font-size: 0.72rem;
+  line-height: 1.1;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-meta span:first-child,
+.buyer-order-card.is-collapsed .buyer-card-meta span:last-child {
+  display: none;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-alerts {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-value,
+.buyer-order-card.is-collapsed .status-badge,
+.buyer-order-card.is-collapsed .urgency-pill,
+.buyer-order-card.is-collapsed .sync-mismatch-pill,
+.buyer-order-card.is-collapsed .buyer-card-task-btn,
+.buyer-order-card.is-collapsed .buyer-card-expand-btn {
+  min-height: 30px;
+  padding: 4px 9px;
+  font-size: 0.72rem;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-task-btn {
+  min-width: 86px;
+  gap: 0;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-task-btn span {
+  font-size: 0.55rem;
+}
+
+.buyer-order-card.is-collapsed .buyer-card-task-btn strong {
+  font-size: 0.68rem;
 }
 
 .buyer-order-card.is-alt-group {
@@ -3742,7 +3998,47 @@ body.pending-order-detail-open .mobile-detail-close {
   }
 
   .buyer-order-card.is-collapsed {
-    padding: 12px;
+    padding: 8px 10px;
+  }
+
+  .buyer-order-card.is-collapsed .buyer-card-head {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .buyer-order-card.is-collapsed .buyer-card-primary {
+    gap: 4px 8px;
+  }
+
+  .buyer-order-card.is-collapsed .buyer-card-title-row {
+    align-items: center;
+    flex-direction: row;
+    gap: 6px;
+  }
+
+  .buyer-order-card.is-collapsed .buyer-card-buyer-name {
+    max-width: min(210px, 100%);
+    font-size: 1rem;
+  }
+
+  .buyer-order-card.is-collapsed .buyer-card-customer {
+    max-width: 100%;
+  }
+
+  .buyer-order-card.is-collapsed .buyer-card-alerts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    width: 100%;
+  }
+
+  .buyer-order-card.is-collapsed .buyer-card-alerts > * {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .buyer-order-card.is-collapsed .buyer-card-meta {
+    font-size: 0.7rem;
   }
 
   .buyer-card-head {

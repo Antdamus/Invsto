@@ -201,7 +201,19 @@
         </div>
       </section>
 
-      <section id="order-import-panel" class="import-panel hidden" aria-label="Import eBay orders">
+      <details id="order-import-panel" class="import-panel import-details hidden" aria-label="Import eBay orders">
+        <summary class="import-panel-summary">
+          <div>
+            <span class="eyebrow">eBay Orders</span>
+            <h2>Sync & Reconciliation Tools</h2>
+            <p>Open only when you need to sync awaiting shipments, reconcile eBay, or import a CSV fallback.</p>
+          </div>
+          <span class="secondary-btn import-panel-summary-action">
+            <i data-lucide="chevron-down"></i>
+            Tools
+          </span>
+        </summary>
+        <div class="import-panel-body">
         <div>
           <span class="eyebrow">eBay Orders</span>
           <h2>Sync Awaiting Shipments</h2>
@@ -270,7 +282,8 @@
             <button id="import-ebay-orders" type="button" class="secondary-btn">Import CSV</button>
           </div>
         </details>
-      </section>
+        </div>
+      </details>
 
       <section id="admin-order-actions-panel" class="admin-order-actions hidden" aria-label="Admin order closeout actions">
         <div>

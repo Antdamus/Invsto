@@ -2596,10 +2596,16 @@ function pruneAdminSelection() {
 
 function renderAdminOrderActions() {
   const panel = $("admin-order-actions-panel");
-  if (!panel || !isAdminUser()) return;
+  if (!panel) return;
+  if (!isAdminUser()) {
+    panel.classList.add("hidden");
+    return;
+  }
 
   pruneAdminSelection();
   const count = state.adminSelectedLineIds.size;
+  panel.classList.toggle("hidden", count === 0);
+  panel.classList.toggle("has-selection", count > 0);
   const countEl = $("admin-order-selected-count");
   if (countEl) countEl.textContent = `${count} selected`;
 
@@ -5514,7 +5520,16 @@ function setLiveLotOrderMatches(matches = []) {
   state.liveLotMatchedLineIds = new Set(matches.map((match) => match.line.id));
 }
 
+function syncBagLookupPanelState() {
+  const panel = document.querySelector(".bag-lookup-panel");
+  if (!panel) return;
+  const hasLiveLot = Boolean(state.selectedLiveLot);
+  panel.classList.toggle("has-live-lot", hasLiveLot);
+  panel.classList.toggle("has-live-lot-matches", hasLiveLot && Boolean(state.liveLotOrderMatches?.length));
+}
+
 function renderLiveLotOrderMatches() {
+  syncBagLookupPanelState();
   const list = $("live-lot-order-matches");
   const count = $("bag-match-count");
   if (!list) return;
@@ -5722,6 +5737,7 @@ function renderLiveLotPanelInto(panel, { global = false } = {}) {
 function renderLiveLotPanel() {
   renderLiveLotPanelInto($("live-lot-panel"));
   renderLiveLotPanelInto($("bag-lookup-live-lot-panel"), { global: true });
+  syncBagLookupPanelState();
 }
 
 async function bumpInventoryVersion(changedIds = []) {
