@@ -770,6 +770,21 @@
     </div>
   </div>
 
+  <div id="order-task-details-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="order-task-details-title">
+    <div class="packing-modal-card assigned-task-details-card">
+      <button id="close-order-task-details-modal" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Assigned Task</span>
+      <h2 id="order-task-details-title">Task details</h2>
+      <p>Review who owns this order task, what needs to happen, and the audit trail.</p>
+      <div id="order-task-details-body" class="assigned-task-details-body">
+        <div class="empty-state">Loading task details...</div>
+      </div>
+      <div class="modal-actions">
+        <button id="done-order-task-details-modal" type="button" class="primary-btn">Done</button>
+      </div>
+    </div>
+  </div>
+
   <div id="manual-video-receipt-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="manual-video-receipt-title">
     <div class="packing-modal-card bundle-review-card no-inventory-card manual-video-receipt-card">
       <button id="close-manual-video-receipt" class="modal-close-btn" type="button" aria-label="Close">x</button>

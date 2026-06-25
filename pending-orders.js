@@ -65,6 +65,7 @@ const state = {
   selectedOrderTasks: [],
   selectedOrderTaskEvents: new Map(),
   activeOrderTaskId: "",
+  activeOrderTaskDetailsId: "",
   orderTaskMode: "create",
   orderTaskPhotos: [],
   orderTaskPhotoUploadKeys: new Set(),
@@ -358,6 +359,7 @@ function closeModal(id) {
     || !$("no-inventory-photo-viewer-modal")?.classList.contains("hidden")
     || !$("ebay-completed-conflicts-modal")?.classList.contains("hidden")
     || !$("order-task-modal")?.classList.contains("hidden")
+    || !$("order-task-details-modal")?.classList.contains("hidden")
     || !$("manual-video-receipt-modal")?.classList.contains("hidden")
     || !$("admin-order-closeout-modal")?.classList.contains("hidden")
   ) return;
@@ -2700,7 +2702,7 @@ function renderOrders() {
       </span>
     ` : "";
     const taskControlMarkup = assignedTask
-      ? `<div class="buyer-card-task-btn task-action-btn is-assigned buyer-card-assigned-pill" title="Task assigned to ${escapeHtml(assignmentLabel)}"><span>Assigned:</span><strong>${escapeHtml(assignmentLabel)}</strong></div>`
+      ? `<button type="button" class="buyer-card-task-btn task-action-btn is-assigned buyer-card-assigned-pill" data-view-order-task="${escapeHtml(assignedTask.id)}" title="View task assigned to ${escapeHtml(assignmentLabel)}"><span>Task assigned</span><strong>${escapeHtml(assignmentLabel)}</strong></button>`
       : `<button type="button" class="buyer-card-task-btn task-action-btn" data-buyer-task-key="${escapeHtml(group.key)}">Assign Task</button>`;
     const card = document.createElement("article");
     const hasSelectedAdminLines = group.lines.some((line) => state.adminSelectedLineIds.has(line.id));
@@ -2736,7 +2738,7 @@ function renderOrders() {
           ` : ""}
           <span class="buyer-card-value">${formatMoney(group.totalValue)}</span>
           <button type="button" class="buyer-card-complete-btn primary-btn" data-buyer-complete-key="${escapeHtml(group.key)}" ${group.lines.some(isOpenOrderLine) ? "" : "disabled"}>Complete From Inventory</button>
-          <button type="button" class="buyer-card-task-btn task-action-btn" data-buyer-task-key="${escapeHtml(group.key)}">Assign Task</button>
+          ${taskControlMarkup}
           <button type="button" class="buyer-card-no-inventory-btn secondary-btn caution-btn" data-buyer-no-inventory-key="${escapeHtml(group.key)}" ${getNoInventoryLineIdsForGroupAction(group).length ? "" : "disabled"}>Complete Without Inventory</button>
           <span class="status-badge">${group.pendingCount} pending</span>
         </div>
@@ -2763,6 +2765,7 @@ function renderOrders() {
     const groupCheckbox = card.querySelector("[data-admin-group-select]");
     const completeButton = card.querySelector("[data-buyer-complete-key]");
     const taskButton = card.querySelector("[data-buyer-task-key]");
+    const viewTaskButton = card.querySelector("[data-view-order-task]");
     const noInventoryButton = card.querySelector("[data-buyer-no-inventory-key]");
     if (groupCheckbox) {
       const selectable = group.lines.filter(isAdminCloseoutSelectable);
@@ -2792,6 +2795,12 @@ function renderOrders() {
       if (!nextLine) return;
       selectOrderLine(nextLine.id, { openDetail: false });
       setTimeout(() => openOrderTaskModal(), 80);
+    });
+    viewTaskButton?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const taskId = event.currentTarget.dataset.viewOrderTask;
+      const line = group.lines.find((entry) => state.orderTaskAssignmentsByLineId.get(entry.id)?.id === taskId) || group.lines[0];
+      openAssignedOrderTaskDetailsModal(taskId, { lineId: line?.id || "" });
     });
     noInventoryButton?.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -2827,6 +2836,11 @@ function renderOrders() {
           : "No ship-by date";
       const lineCreatedLabel = `${getOrderCreatedLabel(line)} ${formatDate(line.orderCreatedAt || getOrderCreatedAt(line))}`;
       const lineCustomerName = getOrderCustomerName(order);
+      const assignedLineTask = state.orderTaskAssignmentsByLineId.get(line.id);
+      const assignedLineTaskAssignee = assignedLineTask ? getOrderTaskAssigneeName(assignedLineTask) : "";
+      const lineTaskActionMarkup = assignedLineTask
+        ? `<button type="button" class="secondary-btn buyer-line-action-btn task-action-btn is-assigned" data-line-view-task="${escapeHtml(line.id)}" data-view-order-task="${escapeHtml(assignedLineTask.id)}" title="View task assigned to ${escapeHtml(assignedLineTaskAssignee)}"><span>Task assigned</span><strong>${escapeHtml(assignedLineTaskAssignee)}</strong></button>`
+        : `<button type="button" class="secondary-btn buyer-line-action-btn task-action-btn" data-line-assign-task="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>Assign Task</button>`;
       const orderNumber = String(order.order_number || "").trim();
       const orderNumberMarkup = orderNumber
         ? `<button type="button" class="buyer-line-order-copy" data-copy-order-number="${escapeHtml(orderNumber)}" title="Copy order number"><span>Order</span><strong>${escapeHtml(orderNumber)}</strong></button>`
@@ -2866,7 +2880,7 @@ function renderOrders() {
           </span>
           <span class="buyer-line-actions">
             <button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) ? "" : "disabled"}>Get Label</button>
-            <button type="button" class="secondary-btn buyer-line-action-btn task-action-btn" data-line-assign-task="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>Assign Task</button>
+            ${lineTaskActionMarkup}
             <button type="button" class="secondary-btn buyer-line-action-btn danger-btn" data-line-cancel="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Cancel</button>
           </span>
           <span class="buyer-line-receipt-actions">
@@ -2897,6 +2911,9 @@ function renderOrders() {
       button.querySelector("[data-line-assign-task]")?.addEventListener("click", () => {
         selectOrderLine(line.id, { openDetail: false });
         setTimeout(() => openOrderTaskModal(), 80);
+      });
+      button.querySelector("[data-line-view-task]")?.addEventListener("click", (event) => {
+        openAssignedOrderTaskDetailsModal(event.currentTarget.dataset.viewOrderTask, { lineId: line.id });
       });
       button.querySelector("[data-line-cancel]")?.addEventListener("click", () => {
         selectOrderLine(line.id, { openDetail: false });
@@ -3585,13 +3602,24 @@ function renderSelectedOrderTaskAssignment() {
   const assignedTask = getAssignedOrderTaskForLine(line);
   const isAssigned = Boolean(assignedTask);
   button.classList.toggle("is-assigned", isAssigned);
-  button.toggleAttribute("disabled", !line?.order_id || isAssigned);
+  button.toggleAttribute("disabled", !line?.order_id);
+  if (isAssigned) button.dataset.viewOrderTask = assignedTask.id;
+  else delete button.dataset.viewOrderTask;
   button.innerHTML = isAssigned
     ? `<span>Assigned:</span><strong>${escapeHtml(getOrderTaskAssigneeName(assignedTask))}</strong>`
     : "Assign Task";
   button.title = isAssigned
-    ? `Task assigned to ${getOrderTaskAssigneeName(assignedTask)}`
+    ? `View task assigned to ${getOrderTaskAssigneeName(assignedTask)}`
     : "Assign task";
+}
+
+function handleSelectedOrderTaskButtonClick() {
+  const assignedTask = getAssignedOrderTaskForLine(state.selectedLine);
+  if (assignedTask?.id) {
+    openAssignedOrderTaskDetailsModal(assignedTask.id, { lineId: state.selectedLine?.id || "" });
+    return;
+  }
+  openOrderTaskModal();
 }
 
 function getOrderTaskPhotoKey(photo) {
@@ -4078,6 +4106,195 @@ function renderOrderTaskEvent(event = {}) {
       ${photoHtml}
     </article>
   `;
+}
+
+function closeOrderTaskDetailsModal() {
+  state.activeOrderTaskDetailsId = "";
+  closeModal("order-task-details-modal");
+}
+
+function findOrderTaskInMemory(taskId = "") {
+  if (!taskId) return null;
+  return [
+    ...state.selectedOrderTasks,
+    ...state.queueVideoReceiptTasks,
+    ...state.orderTaskAssignmentsByLineId.values(),
+  ].find((task) => task?.id === taskId) || null;
+}
+
+function getOrderTaskEventsFromMemory(taskId = "") {
+  if (!taskId) return [];
+  return [
+    ...(state.selectedOrderTaskEvents.get(taskId) || []),
+    ...(state.queueVideoReceiptTaskEvents.get(taskId) || []),
+  ].sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+}
+
+function getOrderTaskDetailLines(task = {}, preferredLineId = "") {
+  const taskLineIds = new Set(Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : []);
+  if (preferredLineId) taskLineIds.add(preferredLineId);
+  return state.orders.filter((line) => (
+    (line.id && taskLineIds.has(line.id))
+    || (!taskLineIds.size && task.order_id && line.order_id === task.order_id)
+  ));
+}
+
+function renderAssignedOrderTaskDetailEvent(event = {}) {
+  const photos = Array.isArray(event.photo_attachments) ? event.photo_attachments : [];
+  const photoHtml = photos.length
+    ? `<div class="order-task-photo-strip">${photos.map((photo, index) => {
+      const bucket = photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET;
+      const previewRef = getEvidencePhotoVariantRef(photo, "preview") || {};
+      const thumbnailRef = getEvidencePhotoVariantRef(photo, "thumbnail") || {};
+      return `
+        <button
+          type="button"
+          class="assigned-task-photo-btn ${isVideoReceiptEvidencePhoto(photo) ? "order-task-video-receipt-thumb" : ""}"
+          data-assigned-task-photo="1"
+          data-bucket="${escapeHtml(bucket)}"
+          data-path="${escapeHtml(photo.path || "")}"
+          data-preview-bucket="${escapeHtml(previewRef.bucket || "")}"
+          data-preview-path="${escapeHtml(previewRef.path || "")}"
+          data-thumbnail-bucket="${escapeHtml(thumbnailRef.bucket || "")}"
+          data-thumbnail-path="${escapeHtml(thumbnailRef.path || "")}"
+          data-label="${escapeHtml(photo.label || `Task photo ${index + 1}`)}"
+          data-signed-by="${escapeHtml(photo.signed_by_email || event.signed_by_email || "")}"
+          data-created-at="${escapeHtml(photo.created_at || event.created_at || "")}"
+        >
+          ${isVideoReceiptEvidencePhoto(photo)
+            ? `<span class="order-task-video-receipt-thumb-image" data-order-task-thumb-image="${escapeHtml(thumbnailRef.bucket || bucket)}:${escapeHtml(thumbnailRef.path || photo.path || "")}"></span>
+               <span>${escapeHtml(photo.label || `Video receipt ${index + 1}`)}</span>
+               <small>${escapeHtml(`Captured by ${photo.signed_by_email || event.signed_by_email || "logged-in user"}${photo.created_at || event.created_at ? ` on ${formatDate(photo.created_at || event.created_at)}` : ""}`)}</small>`
+            : escapeHtml(photo.label || `Photo ${index + 1}`)}
+        </button>
+      `;
+    }).join("")}</div>`
+    : "";
+
+  return `
+    <article class="order-task-event">
+      <div class="order-task-event-head">
+        <strong>${escapeHtml(String(event.action || "commented").replace(/_/g, " "))}</strong>
+        <span>${escapeHtml(formatDate(event.created_at))}</span>
+      </div>
+      ${event.notes ? `<p>${escapeHtml(event.notes)}</p>` : ""}
+      <small>Signed by ${escapeHtml(event.signed_by_email || "logged-in user")} - ${escapeHtml(getOrderTaskStatusLabel(event.new_status || event.old_status || ""))}</small>
+      ${photoHtml}
+    </article>
+  `;
+}
+
+function renderOrderTaskDetailsModal(task = {}, events = [], options = {}) {
+  const body = $("order-task-details-body");
+  if (!body) return;
+  const lines = getOrderTaskDetailLines(task, options.lineId || "");
+  const order = lines[0]?.order || {};
+  const assignee = getOrderTaskAssigneeName(task);
+  const isUrgent = ["urgent", "high"].includes(String(task.priority || "").toLowerCase());
+  const isResolved = !isActiveOrderTask(task);
+  const lineHtml = lines.length
+    ? lines.slice(0, 8).map((line) => `
+      <article class="assigned-task-line">
+        <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+        <span>${escapeHtml(line.order?.order_number || order.order_number || "No order number")} - Item ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</span>
+      </article>
+    `).join("")
+    : `<div class="empty-state">No matching order line is currently loaded for this task.</div>`;
+  const extraLineCount = Math.max(0, lines.length - 8);
+  const eventHtml = events.length
+    ? events.map(renderAssignedOrderTaskDetailEvent).join("")
+    : `<div class="empty-state">No task updates have been recorded yet.</div>`;
+
+  body.innerHTML = `
+    <section class="assigned-task-hero ${isUrgent ? "is-urgent" : ""} ${isResolved ? "is-resolved" : ""}">
+      <div>
+        <span class="eyebrow">Task Assignment</span>
+        <h3>${escapeHtml(task.title || "Order task")}</h3>
+        <p>${escapeHtml(task.question || task.latest_note || "No task note was saved.")}</p>
+      </div>
+      <span class="order-task-chip">${escapeHtml(getOrderTaskStatusLabel(task.status))}</span>
+    </section>
+    <div class="assigned-task-facts">
+      <span><strong>Assigned to</strong>${escapeHtml(assignee)}</span>
+      <span><strong>Priority</strong>${escapeHtml(task.priority || "normal")}</span>
+      <span><strong>Due</strong>${escapeHtml(task.due_at ? formatDate(task.due_at) : "No due date")}</span>
+      <span><strong>Created</strong>${escapeHtml(formatDate(task.created_at))}</span>
+      <span><strong>Last update</strong>${escapeHtml(formatDate(task.updated_at || task.created_at))}</span>
+      <span><strong>Order</strong>${escapeHtml(order.order_number || task.order_number || "Loaded task")}</span>
+    </div>
+    <section class="assigned-task-section">
+      <h3>Order Lines</h3>
+      <div class="assigned-task-lines">
+        ${lineHtml}
+        ${extraLineCount ? `<div class="assigned-task-line is-more">+ ${extraLineCount} more linked line${extraLineCount === 1 ? "" : "s"}</div>` : ""}
+      </div>
+    </section>
+    <section class="assigned-task-section">
+      <h3>Audit Trail</h3>
+      <div class="order-task-events">${eventHtml}</div>
+    </section>
+  `;
+
+  body.querySelectorAll("[data-assigned-task-photo]").forEach((buttonEl) => {
+    buttonEl.addEventListener("click", () => {
+      openOrderTaskPhoto(
+        buttonEl.dataset.bucket,
+        buttonEl.dataset.path,
+        {
+          label: buttonEl.dataset.label || "",
+          signedBy: buttonEl.dataset.signedBy || "",
+          createdAt: buttonEl.dataset.createdAt || "",
+          previewBucket: buttonEl.dataset.previewBucket || "",
+          previewPath: buttonEl.dataset.previewPath || "",
+          thumbnailBucket: buttonEl.dataset.thumbnailBucket || "",
+          thumbnailPath: buttonEl.dataset.thumbnailPath || "",
+          returnFocusId: "order-task-details-modal",
+        }
+      );
+    });
+  });
+  hydrateOrderTaskVideoReceiptThumbnails();
+}
+
+async function openAssignedOrderTaskDetailsModal(taskId, options = {}) {
+  if (!taskId) {
+    setStatus("That order does not have a task assignment attached.", "error");
+    return;
+  }
+
+  state.activeOrderTaskDetailsId = taskId;
+  const body = $("order-task-details-body");
+  if (body) body.innerHTML = `<div class="empty-state">Loading task details...</div>`;
+  openModal("order-task-details-modal");
+
+  try {
+    const cachedTask = findOrderTaskInMemory(taskId);
+    const cachedEvents = getOrderTaskEventsFromMemory(taskId);
+    if (cachedTask) renderOrderTaskDetailsModal(cachedTask, cachedEvents, options);
+
+    const [{ data: task, error }, { data: events, error: eventError }] = await Promise.all([
+      supabase
+        .from("ebay_order_tasks")
+        .select("*")
+        .eq("id", taskId)
+        .maybeSingle(),
+      supabase
+        .from("ebay_order_task_events")
+        .select("*")
+        .eq("task_id", taskId)
+        .order("created_at", { ascending: true }),
+    ]);
+    if (error) throw error;
+    if (eventError) throw eventError;
+    if (state.activeOrderTaskDetailsId !== taskId) return;
+    if (!task) throw new Error("This task could not be found.");
+
+    renderOrderTaskDetailsModal(task, events || [], options);
+  } catch (error) {
+    console.error("Could not load task details:", error);
+    if (state.activeOrderTaskDetailsId !== taskId) return;
+    if (body) body.innerHTML = `<div class="empty-state">${escapeHtml(error?.message || "Could not load task details.")}</div>`;
+  }
 }
 
 async function deleteVideoReceiptCapture(buttonEl) {
@@ -7606,6 +7823,7 @@ function clearSelection() {
   closeModal("worker-no-inventory-modal");
   closeModal("worker-cancel-order-modal");
   closeModal("order-task-modal");
+  closeOrderTaskDetailsModal();
   closeManualVideoReceiptModal();
   closeModal("admin-order-closeout-modal");
   document.body.classList.remove("pending-order-detail-open");
@@ -8985,11 +9203,13 @@ function setupListeners() {
   $("preview-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
   $("preview-worker-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
   $("open-ebay-label-page")?.addEventListener("click", openSelectedEbayLabelPage);
-  $("assign-order-task")?.addEventListener("click", () => openOrderTaskModal());
+  $("assign-order-task")?.addEventListener("click", handleSelectedOrderTaskButtonClick);
   $("open-order-task-modal")?.addEventListener("click", () => openOrderTaskModal());
   $("submit-order-task")?.addEventListener("click", submitOrderTask);
   $("cancel-order-task")?.addEventListener("click", closeOrderTaskModal);
   $("close-order-task-modal")?.addEventListener("click", closeOrderTaskModal);
+  $("close-order-task-details-modal")?.addEventListener("click", closeOrderTaskDetailsModal);
+  $("done-order-task-details-modal")?.addEventListener("click", closeOrderTaskDetailsModal);
   $("order-task-capture-station")?.addEventListener("change", (event) => {
     setSelectedNoInventoryCaptureStation(event.target.value);
   });
@@ -9124,6 +9344,10 @@ function setupListeners() {
     if (event.target.id === "order-task-modal") closeOrderTaskModal();
   });
 
+  $("order-task-details-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "order-task-details-modal") closeOrderTaskDetailsModal();
+  });
+
   $("manual-video-receipt-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "manual-video-receipt-modal") closeManualVideoReceiptModal();
   });
@@ -9198,6 +9422,14 @@ function setupListeners() {
       } else if (event.key === "Escape") {
         event.preventDefault();
         closeOrderTaskModal();
+      }
+      return;
+    }
+
+    if (!$("order-task-details-modal")?.classList.contains("hidden")) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeOrderTaskDetailsModal();
       }
       return;
     }
