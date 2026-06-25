@@ -5,6 +5,9 @@ const state = {
   tasks: [],
   removedTasks: [],
   eventsByTask: new Map(),
+  taskReadStates: new Map(),
+  taskReadStateSyncAvailable: true,
+  taskReadFilter: "all",
   activeTaskId: "",
   activeTaskSource: "",
   mode: "create",
@@ -42,6 +45,7 @@ const CAPTURE_POLL_INTERVAL_MS = 1_500;
 const CAPTURE_PHOTO_SETTLE_MS = 3_000;
 const CAPTURE_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "contain", quality: 55 };
 const EBAY_RETURN_EVIDENCE_BUCKET = "ebay-return-evidence";
+const TASK_READ_STATE_STORAGE_KEY = "og.teamTaskReadStates.v1";
 const ACTIVE_TASK_STATUSES = [
   "open",
   "assigned",
@@ -222,11 +226,190 @@ function getUnifiedTaskKey(task = {}) {
   return `${task.source || "team"}:${task.id || ""}`;
 }
 
+function getTaskReadStateKey(source = "", taskId = "") {
+  return `${source || "team"}:${taskId || ""}`;
+}
+
 function getSafeDomId(value = "") {
   return String(value || "")
     .replace(/[^a-z0-9_-]+/gi, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80) || "task";
+}
+
+function getTaskByUnifiedKey(key = "") {
+  const allTasks = [...state.tasks, ...state.removedTasks, ...getAllWorkflowChildTasks()];
+  return allTasks.find((task) => getUnifiedTaskKey(task) === key) || null;
+}
+
+function parseTimestamp(value) {
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function getIsoOrNull(value) {
+  return value ? new Date(value).toISOString() : null;
+}
+
+function getLatestTaskEventTime(task = {}) {
+  const events = state.eventsByTask.get(getUnifiedTaskKey(task)) || [];
+  return events.reduce((latest, event) => Math.max(latest, parseTimestamp(event.created_at)), 0);
+}
+
+function getTaskActivityInfo(task = {}) {
+  const taskUpdated = Math.max(parseTimestamp(task.updated_at), parseTimestamp(task.created_at));
+  const eventUpdated = getLatestTaskEventTime(task);
+  return {
+    taskUpdatedAt: taskUpdated,
+    eventUpdatedAt: eventUpdated,
+    latestAt: Math.max(taskUpdated, eventUpdated),
+  };
+}
+
+function getTaskUnreadNotifications(task = {}) {
+  return state.notifications.filter((entry) => (
+    !entry.read_at
+    && entry.source === task.source
+    && entry.task_id === task.id
+  ));
+}
+
+function loadLocalTaskReadStates() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TASK_READ_STATE_STORAGE_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalTaskReadState(row = {}) {
+  if (!state.user?.id || !row.source || !row.task_id) return;
+  const all = loadLocalTaskReadStates();
+  const userMap = all[state.user.id] && typeof all[state.user.id] === "object" ? all[state.user.id] : {};
+  userMap[getTaskReadStateKey(row.source, row.task_id)] = row;
+  all[state.user.id] = userMap;
+  try {
+    localStorage.setItem(TASK_READ_STATE_STORAGE_KEY, JSON.stringify(all));
+  } catch (error) {
+    console.warn("Could not save local task read state:", error);
+  }
+}
+
+function loadLocalTaskReadStatesForTasks(tasks = []) {
+  const all = loadLocalTaskReadStates();
+  const userMap = state.user?.id && all[state.user.id] && typeof all[state.user.id] === "object" ? all[state.user.id] : {};
+  tasks.forEach((task) => {
+    const key = getUnifiedTaskKey(task);
+    if (userMap[key]) state.taskReadStates.set(key, userMap[key]);
+  });
+}
+
+async function loadTaskReadStates() {
+  state.taskReadStates = new Map();
+  const allTasks = [...state.tasks, ...state.removedTasks, ...getAllWorkflowChildTasks()].filter((task) => task?.id && task?.source);
+  if (!state.user?.id || !allTasks.length) return;
+
+  loadLocalTaskReadStatesForTasks(allTasks);
+  if (!state.taskReadStateSyncAvailable) return;
+
+  const ids = unique(allTasks.map((task) => task.id));
+  if (!ids.length) return;
+
+  try {
+    const { data, error } = await supabase
+      .from("task_read_states")
+      .select("user_id, source, task_id, last_seen_at, last_seen_task_updated_at, last_seen_event_at, updated_at")
+      .eq("user_id", state.user.id)
+      .in("task_id", ids)
+      .limit(1000);
+    if (error) throw error;
+    (data || []).forEach((row) => {
+      state.taskReadStates.set(getTaskReadStateKey(row.source, row.task_id), row);
+    });
+  } catch (error) {
+    state.taskReadStateSyncAvailable = false;
+    console.warn("Task read-state sync is unavailable; using this browser as fallback.", error);
+  }
+}
+
+function getTaskReadInfo(task = {}) {
+  const key = getUnifiedTaskKey(task);
+  const readState = state.taskReadStates.get(key);
+  const unreadNotifications = getTaskUnreadNotifications(task);
+  const activity = getTaskActivityInfo(task);
+  const lastSeen = parseTimestamp(readState?.last_seen_at);
+
+  if (unreadNotifications.length) {
+    return { status: "updated", label: "New update", className: "has-unseen-updates" };
+  }
+  if (!readState) {
+    return { status: "unread", label: "Unread", className: "is-unread" };
+  }
+  if (activity.latestAt && lastSeen && activity.latestAt > lastSeen + 1000) {
+    return { status: "updated", label: "Updated", className: "has-unseen-updates" };
+  }
+  return { status: "read", label: "Read", className: "is-read" };
+}
+
+function getTaskReadCounts(tasks = []) {
+  return tasks.reduce((counts, task) => {
+    const status = getTaskReadInfo(task).status;
+    counts.all += 1;
+    if (status === "read") counts.read += 1;
+    else counts.unread += 1;
+    if (status === "updated") counts.updated += 1;
+    return counts;
+  }, { all: 0, unread: 0, updated: 0, read: 0 });
+}
+
+function getTasksForReadFilter(tasks = []) {
+  if (state.taskReadFilter === "read") return tasks.filter((task) => getTaskReadInfo(task).status === "read");
+  if (state.taskReadFilter === "unread") return tasks.filter((task) => getTaskReadInfo(task).status !== "read");
+  return tasks;
+}
+
+function renderTaskReadFilterChrome(tasks = []) {
+  const counts = getTaskReadCounts(tasks);
+  document.querySelectorAll("[data-task-read-filter]").forEach((button) => {
+    const filter = button.dataset.taskReadFilter || "all";
+    const label = filter === "read" ? `Read ${counts.read}` : filter === "unread" ? `New ${counts.unread}` : `All ${counts.all}`;
+    button.textContent = label;
+    button.classList.toggle("is-active", state.taskReadFilter === filter);
+  });
+}
+
+async function markTaskSeen(task = {}) {
+  if (!task?.id || !task?.source || !state.user?.id) return;
+  const activity = getTaskActivityInfo(task);
+  const row = {
+    user_id: state.user.id,
+    source: task.source,
+    task_id: task.id,
+    last_seen_at: new Date().toISOString(),
+    last_seen_task_updated_at: getIsoOrNull(activity.taskUpdatedAt),
+    last_seen_event_at: getIsoOrNull(activity.eventUpdatedAt),
+    updated_at: new Date().toISOString(),
+  };
+  state.taskReadStates.set(getUnifiedTaskKey(task), row);
+  saveLocalTaskReadState(row);
+
+  const unreadIds = getTaskUnreadNotifications(task).map((entry) => entry.id);
+  if (unreadIds.length) await markTaskNotificationsRead(unreadIds);
+
+  if (!state.taskReadStateSyncAvailable) return;
+  try {
+    const { error } = await supabase.rpc("mark_task_seen", {
+      _source: task.source,
+      _task_id: task.id,
+      _last_seen_task_updated_at: row.last_seen_task_updated_at,
+      _last_seen_event_at: row.last_seen_event_at,
+    });
+    if (error) throw error;
+  } catch (error) {
+    state.taskReadStateSyncAvailable = false;
+    console.warn("Could not persist task read state; using this browser as fallback.", error);
+  }
 }
 
 function getEmbeddedOne(value) {
@@ -428,11 +611,16 @@ async function loadTasks() {
   }
   await loadEventsForTasks();
   await hydrateEventPhotoUrls();
+  await loadTaskReadStates();
   renderTasks();
 
   if (requested) {
     const card = document.querySelector(`[data-team-task-card="${CSS.escape(requested)}"]`);
     card?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const task = state.tasks.find((entry) => entry.id === requested);
+    if (task) {
+      markTaskSeen(task).then(() => renderTasks()).catch(() => renderTasks());
+    }
   }
 }
 
@@ -532,6 +720,7 @@ async function markTaskNotificationsRead(ids = null) {
     selectedIds.includes(entry.id) ? { ...entry, read_at: entry.read_at || readAt } : entry
   ));
   renderTaskNotifications();
+  if ($("team-task-list") && state.tasks.length) renderTasks();
 }
 
 function setTaskNotificationPanelOpen(open) {
@@ -554,6 +743,7 @@ function setupTaskNotificationRealtime() {
       const notification = payload.new || {};
       state.notifications = [notification, ...state.notifications.filter((entry) => entry.id !== notification.id)].slice(0, 30);
       renderTaskNotifications();
+      if ($("team-task-list") && state.tasks.length) renderTasks();
       if (!state.notificationsOpen && notification.title) setStatus(notification.title, "success");
     })
     .subscribe();
@@ -1536,6 +1726,7 @@ function renderTaskCard(task = {}, options = {}) {
   const resolved = HISTORY_TASK_STATUSES.includes(String(task.status || "").toLowerCase());
   const taskKey = getUnifiedTaskKey(task);
   const expanded = state.expandedTaskKeys.has(taskKey);
+  const readInfo = getTaskReadInfo(task);
   const detailsId = `task-details-${getSafeDomId(taskKey)}`;
   const statusLabel = canceled ? "Canceled" : getTaskStatusLabel(task.status);
   const sourceLabel = getTaskSourceLabel(task);
@@ -1550,13 +1741,14 @@ function renderTaskCard(task = {}, options = {}) {
   ].filter(Boolean).join(" - ");
 
   return `
-    <article class="team-task-card ${urgent ? "is-urgent" : ""} ${resolved ? "is-resolved" : ""} ${expanded ? "is-expanded" : "is-collapsed"}" data-team-task-card="${escapeHtml(task.id)}" data-team-task-card-key="${escapeHtml(taskKey)}">
+    <article class="team-task-card ${urgent ? "is-urgent" : ""} ${resolved ? "is-resolved" : ""} ${expanded ? "is-expanded" : "is-collapsed"} ${escapeHtml(readInfo.className)}" data-team-task-card="${escapeHtml(task.id)}" data-team-task-card-key="${escapeHtml(taskKey)}">
       <button type="button" class="team-task-card-summary" data-team-task-toggle="${escapeHtml(taskKey)}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="${escapeHtml(detailsId)}">
         <span class="team-task-source-dot">${escapeHtml(sourceLabel.slice(0, 2).toUpperCase())}</span>
         <span class="team-task-summary-main">
           <span class="team-task-summary-title-row">
             <strong>${escapeHtml(task.title || "Team task")}</strong>
             <span class="team-task-chip team-task-status-chip">${escapeHtml(statusLabel)}</span>
+            <span class="team-task-read-chip">${escapeHtml(readInfo.label)}</span>
           </span>
           <span class="team-task-summary-preview">${escapeHtml(preview)}</span>
           ${contextLine ? `<span class="team-task-summary-context">${escapeHtml(contextLine)}</span>` : ""}
@@ -1609,10 +1801,13 @@ function attachTaskCardInteractions(root = document) {
     button.addEventListener("click", () => {
       const key = button.dataset.teamTaskToggle || "";
       if (!key) return;
-      if (state.expandedTaskKeys.has(key)) {
+      const opening = !state.expandedTaskKeys.has(key);
+      if (!opening) {
         state.expandedTaskKeys.delete(key);
       } else {
         state.expandedTaskKeys.add(key);
+        const task = getTaskByUnifiedKey(key);
+        if (task) markTaskSeen(task);
       }
       renderTasks();
       requestAnimationFrame(() => {
@@ -1635,6 +1830,7 @@ function renderTasks() {
   if (count) count.textContent = `${state.tasks.length} task${state.tasks.length === 1 ? "" : "s"}`;
 
   if (!state.tasks.length) {
+    renderTaskReadFilterChrome([]);
     list.innerHTML = `<div class="empty-state">${
       isCanceledTaskScope()
         ? "No canceled tasks."
@@ -1645,7 +1841,20 @@ function renderTasks() {
     return;
   }
 
-  list.innerHTML = state.tasks.map((task) => renderTaskCard(task, { canceled: isCanceledTaskScope() })).join("");
+  const visibleTasks = getTasksForReadFilter(state.tasks);
+  renderTaskReadFilterChrome(state.tasks);
+  if (count) {
+    count.textContent = state.taskReadFilter === "all"
+      ? `${state.tasks.length} task${state.tasks.length === 1 ? "" : "s"}`
+      : `${visibleTasks.length} of ${state.tasks.length} tasks`;
+  }
+
+  if (!visibleTasks.length) {
+    list.innerHTML = `<div class="empty-state">No ${state.taskReadFilter === "read" ? "read" : "new or updated"} tasks in this view.</div>`;
+    return;
+  }
+
+  list.innerHTML = visibleTasks.map((task) => renderTaskCard(task, { canceled: isCanceledTaskScope() })).join("");
 
   attachTaskCardInteractions(list);
   list.querySelectorAll("[data-team-task-progress]").forEach((button) => {
@@ -3203,6 +3412,14 @@ function setupListeners() {
       if (state.taskView === "active" && isCanceledTaskScope()) state.taskScope = "mine";
       updateTaskScopeChrome();
       await loadTasks();
+    });
+  });
+  document.querySelectorAll("[data-task-read-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.taskReadFilter = ["all", "unread", "read"].includes(button.dataset.taskReadFilter)
+        ? button.dataset.taskReadFilter
+        : "all";
+      renderTasks();
     });
   });
   $("team-task-scope")?.addEventListener("change", async (event) => {

@@ -260,6 +260,15 @@ body {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.team-task-read-filter {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(241, 214, 155, 0.16);
+  border-radius: 999px;
+  background: rgba(241, 214, 155, 0.045);
+}
+
 .team-task-view-btn {
   min-height: 30px;
   border: 0;
@@ -271,9 +280,26 @@ body {
   cursor: pointer;
 }
 
+.team-task-read-filter-btn {
+  min-height: 30px;
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: transparent;
+  color: var(--task-muted);
+  font-size: 0.78rem;
+  font-weight: 950;
+  cursor: pointer;
+}
+
 .team-task-view-btn.is-active {
   background: rgba(157, 242, 189, 0.12);
   color: var(--task-green);
+}
+
+.team-task-read-filter-btn.is-active {
+  background: rgba(241, 214, 155, 0.15);
+  color: var(--task-gold);
 }
 
 .team-task-scope,
@@ -348,6 +374,22 @@ body {
   position: relative;
 }
 
+.team-task-card.is-unread {
+  border-color: rgba(241, 214, 155, 0.28);
+}
+
+.team-task-card.has-unseen-updates {
+  border-color: rgba(157, 242, 189, 0.34);
+  background:
+    linear-gradient(90deg, rgba(157, 242, 189, 0.075), transparent 35%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025)),
+    var(--task-panel);
+}
+
+.team-task-card.is-read {
+  opacity: 0.86;
+}
+
 .team-task-card.is-collapsed {
   padding: 6px;
 }
@@ -415,6 +457,33 @@ body {
 
 .team-task-status-chip {
   flex: 0 0 auto;
+}
+
+.team-task-read-chip {
+  flex: 0 0 auto;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(241, 214, 155, 0.24);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--task-gold);
+  background: rgba(241, 214, 155, 0.08);
+  font-size: 0.66rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.team-task-card.has-unseen-updates .team-task-read-chip {
+  border-color: rgba(157, 242, 189, 0.36);
+  color: var(--task-green);
+  background: rgba(157, 242, 189, 0.12);
+}
+
+.team-task-card.is-read .team-task-read-chip {
+  border-color: rgba(255, 255, 255, 0.11);
+  color: var(--task-muted);
+  background: rgba(255, 255, 255, 0.035);
 }
 
 .team-task-summary-preview,
@@ -1156,7 +1225,12 @@ body.modal-open {
     width: 100%;
   }
 
-  .team-task-view-btn {
+  .team-task-read-filter {
+    width: 100%;
+  }
+
+  .team-task-view-btn,
+  .team-task-read-filter-btn {
     flex: 1 1 0;
   }
 
