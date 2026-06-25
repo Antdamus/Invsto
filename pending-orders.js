@@ -1843,11 +1843,11 @@ async function runEbayOrderApiSync(dryRun = true) {
 }
 
 function buildOrderLineQueueQuery(status, admin) {
-  const moneyLineFields = admin ? `
+  const moneyLineFields = `
       sold_for,
       shipping_and_handling,
       total_price,
-      net_payout,` : "";
+      ${admin ? "net_payout," : ""}`;
   const moneyOrderFields = admin ? `
         payment_method,
         shipping_and_handling,
@@ -2734,7 +2734,7 @@ function renderOrders() {
               eBay review
             </span>
           ` : ""}
-          ${isAdminUser() ? `<span class="buyer-card-value">${formatMoney(group.totalValue)}</span>` : ""}
+          <span class="buyer-card-value">${formatMoney(group.totalValue)}</span>
           <button type="button" class="buyer-card-complete-btn primary-btn" data-buyer-complete-key="${escapeHtml(group.key)}" ${group.lines.some(isOpenOrderLine) ? "" : "disabled"}>Complete From Inventory</button>
           <button type="button" class="buyer-card-task-btn task-action-btn" data-buyer-task-key="${escapeHtml(group.key)}">Assign Task</button>
           <button type="button" class="buyer-card-no-inventory-btn secondary-btn caution-btn" data-buyer-no-inventory-key="${escapeHtml(group.key)}" ${getNoInventoryLineIdsForGroupAction(group).length ? "" : "disabled"}>Complete Without Inventory</button>
@@ -2744,7 +2744,7 @@ function renderOrders() {
       <div class="buyer-card-meta">
         <span>Earliest sale ${escapeHtml(formatDate(group.earliestPendingOrderCreatedAt))}</span>
         <span>Ship by ${escapeHtml(formatDate(group.nextShipBy))}</span>
-        ${isAdminUser() ? `<span>Order value ${formatMoney(group.totalValue)}</span>` : `<span>Ready to pack</span>`}
+        <span>Order value ${formatMoney(group.totalValue)}</span>
       </div>
       ${isAdminUser() ? `
         <div class="buyer-card-admin-row">
@@ -2862,7 +2862,7 @@ function renderOrders() {
               ${orderLineSequence ? `<span class="buyer-line-sequence">${escapeHtml(orderLineSequence)}</span>` : ""}
               ${lineSyncMismatch ? `<span class="buyer-line-sync-warning" title="${escapeHtml(lineSyncMismatch.message || "Verify this order in eBay before acting.")}">Verify in eBay</span>` : ""}
             </span>
-            ${isAdminUser() ? `<small class="buyer-line-price">Line total ${formatMoney(line.total_price || line.sold_for || 0)}</small>` : ""}
+            <small class="buyer-line-price">Line total ${formatMoney(line.total_price || line.sold_for || 0)}</small>
           </span>
           <span class="buyer-line-actions">
             <button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) ? "" : "disabled"}>Get Label</button>
@@ -5257,7 +5257,7 @@ function renderLiveLotOrderMatches() {
       <span class="match-meta">
         ${urgency ? `<b class="urgency-pill urgency-${urgency.level}"><i data-lucide="${urgency.icon}"></i>${escapeHtml(urgency.label)}</b>` : ""}
         <b>Qty ${Number(getRemainingLineQuantity(line) || line.quantity || 1).toLocaleString()}</b>
-        ${isAdminUser() ? `<b>${formatMoney(line.total_price || line.sold_for || 0)}</b>` : ""}
+        <b>${formatMoney(line.total_price || line.sold_for || 0)}</b>
       </span>
     `;
     button.addEventListener("click", () => {
