@@ -590,15 +590,15 @@ function setupOrderSortOptions() {
   const options = [
     ["created_asc", "Sale date oldest first"],
     ["created_desc", "Sale date newest first"],
+    ["urgency_asc", "Urgency highest first"],
+    ["urgency_desc", "Urgency lowest first"],
     ["due_asc", "Due date soonest"],
+    ["due_desc", "Due date latest"],
+    ["total_desc", "Order total high to low"],
+    ["total_asc", "Order total low to high"],
     ["buyer_asc", "Username A to Z"],
     ["buyer_desc", "Username Z to A"],
   ];
-
-  if (isAdminUser()) {
-    options.push(["total_desc", "Order total high to low"]);
-    options.push(["total_asc", "Order total low to high"]);
-  }
 
   select.innerHTML = options
     .map(([value, label]) => `<option value="${value}">${label}</option>`)
@@ -2451,14 +2451,19 @@ function sortBuyerGroups(groups) {
   const byDue = (a, b) => getShipTimestamp(a.nextShipBy) - getShipTimestamp(b.nextShipBy);
   const byCreated = (a, b) => getOrderCreatedTimestamp(a.earliestPendingOrderCreatedAt) - getOrderCreatedTimestamp(b.earliestPendingOrderCreatedAt);
   const byTotal = (a, b) => Number(a.totalValue || 0) - Number(b.totalValue || 0);
+  const byUrgency = (a, b) => getEbayPriorityRank(a.nextShipBy) - getEbayPriorityRank(b.nextShipBy);
 
   return groups.sort((a, b) => {
     if (sort === "created_asc") return byCreated(a, b) || byDue(a, b) || byBuyer(a, b);
     if (sort === "created_desc") return byCreated(b, a) || byDue(a, b) || byBuyer(a, b);
+    if (sort === "urgency_asc") return byUrgency(a, b) || byDue(a, b) || byTotal(b, a) || byBuyer(a, b);
+    if (sort === "urgency_desc") return byUrgency(b, a) || byDue(b, a) || byTotal(b, a) || byBuyer(a, b);
+    if (sort === "due_asc") return byDue(a, b) || byCreated(a, b) || byBuyer(a, b);
+    if (sort === "due_desc") return byDue(b, a) || byCreated(a, b) || byBuyer(a, b);
     if (sort === "buyer_asc") return byBuyer(a, b) || byDue(a, b);
     if (sort === "buyer_desc") return byBuyer(b, a) || byDue(a, b);
-    if (sort === "total_desc" && isAdminUser()) return byTotal(b, a) || byDue(a, b) || byBuyer(a, b);
-    if (sort === "total_asc" && isAdminUser()) return byTotal(a, b) || byDue(a, b) || byBuyer(a, b);
+    if (sort === "total_desc") return byTotal(b, a) || byDue(a, b) || byBuyer(a, b);
+    if (sort === "total_asc") return byTotal(a, b) || byDue(a, b) || byBuyer(a, b);
     return byDue(a, b) || byBuyer(a, b);
   });
 }
