@@ -355,6 +355,11 @@ button.task-action-btn.is-assigned:hover,
   opacity: 0.72;
 }
 
+.buyer-line-receipt.is-opening {
+  cursor: progress;
+  opacity: 0.78;
+}
+
 .buyer-line-receipt {
   display: inline-flex;
   align-items: center;
@@ -3778,15 +3783,34 @@ body.pending-order-detail-open .mobile-detail-close {
   align-items: center;
   gap: 7px;
   padding: 6px 11px;
-  border: 1px solid rgba(255, 139, 139, 0.46);
+  border: 1px solid rgba(245, 197, 92, 0.42);
   border-radius: 999px;
-  background: rgba(255, 86, 86, 0.12);
-  color: #ffd6d6;
+  background: rgba(245, 197, 92, 0.12);
+  color: #ffe7aa;
   font-size: 0.72rem;
   font-weight: 950;
   letter-spacing: 0.06em;
   line-height: 1;
   text-transform: uppercase;
+}
+
+.sync-mismatch-pill.is-cancelled {
+  border-color: rgba(255, 139, 139, 0.46);
+  background: rgba(255, 86, 86, 0.12);
+  color: #ffd6d6;
+}
+
+.sync-mismatch-pill.is-fulfilled {
+  border-color: rgba(125, 240, 178, 0.34);
+  background: rgba(48, 197, 112, 0.12);
+  color: #a8f5c8;
+}
+
+.sync-mismatch-pill.is-payment,
+.sync-mismatch-pill.is-review {
+  border-color: rgba(245, 197, 92, 0.42);
+  background: rgba(245, 197, 92, 0.12);
+  color: #ffe7aa;
 }
 
 .sync-mismatch-pill svg {
@@ -4089,15 +4113,33 @@ body.pending-order-detail-open .mobile-detail-close {
 .buyer-line-sync-warning {
   display: inline-flex;
   align-items: center;
+  gap: 5px;
   min-height: 26px;
   padding: 4px 9px;
-  border: 1px solid rgba(255, 139, 139, 0.36);
+  border: 1px solid rgba(245, 197, 92, 0.36);
   border-radius: 999px;
-  background: rgba(255, 86, 86, 0.11);
-  color: #ffd6d6;
+  background: rgba(245, 197, 92, 0.1);
+  color: #ffe7aa;
   font-size: 0.72rem;
   font-weight: 950;
   line-height: 1.1;
+}
+
+.buyer-line-sync-warning.is-cancelled {
+  border-color: rgba(255, 139, 139, 0.36);
+  background: rgba(255, 86, 86, 0.11);
+  color: #ffd6d6;
+}
+
+.buyer-line-sync-warning.is-fulfilled {
+  border-color: rgba(125, 240, 178, 0.28);
+  background: rgba(48, 197, 112, 0.1);
+  color: #a8f5c8;
+}
+
+.buyer-line-sync-warning svg {
+  width: 13px;
+  height: 13px;
 }
 
 .buyer-line-actions {

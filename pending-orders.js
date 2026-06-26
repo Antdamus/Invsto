@@ -379,8 +379,114 @@ function getOrderFromLine(line) {
 
 function getOrderSyncMismatch(line) {
   const order = getOrderFromLine(line);
-  const mismatch = order?.raw_payload?.pending_order_sync_mismatch || line?.raw_payload?.pending_order_sync_mismatch || null;
+  const apiStatus = order?.ebay_api_status || line?.ebay_api_status || null;
+  const mismatch = order?.raw_payload?.pending_order_sync_mismatch
+    || line?.raw_payload?.pending_order_sync_mismatch
+    || (apiStatus?.review_reason || apiStatus?.review_message
+      ? {
+          reason: apiStatus.review_reason || "",
+          message: apiStatus.review_message || "",
+          ebayPaymentStatus: apiStatus.payment_status || "",
+          ebayFulfillmentStatus: apiStatus.fulfillment_status || "",
+          ebayCancelStatus: apiStatus.cancel_status || "",
+          detectedAt: apiStatus.review_detected_at || apiStatus.checked_at || "",
+        }
+      : null);
   return mismatch && typeof mismatch === "object" ? mismatch : null;
+}
+
+function normalizeEbayApiStatusText(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function getLineEbayApiStatus(line) {
+  const order = getOrderFromLine(line);
+  const mismatch = getOrderSyncMismatch(line);
+  const orderApiStatus = order?.ebay_api_status || {};
+  const lineApiStatus = line?.ebay_api_status || {};
+  return {
+    paymentStatus: normalizeEbayApiStatusText(
+      mismatch?.ebayPaymentStatus
+      || orderApiStatus.payment_status
+      || lineApiStatus.payment_status
+      || order?.raw_payload?.orderPaymentStatus
+      || line?.raw_payload?.orderPaymentStatus
+    ),
+    fulfillmentStatus: normalizeEbayApiStatusText(
+      mismatch?.ebayFulfillmentStatus
+      || orderApiStatus.fulfillment_status
+      || lineApiStatus.fulfillment_status
+      || order?.raw_payload?.orderFulfillmentStatus
+      || line?.raw_payload?.orderFulfillmentStatus
+    ),
+    cancelStatus: normalizeEbayApiStatusText(
+      mismatch?.ebayCancelStatus
+      || orderApiStatus.cancel_status
+      || lineApiStatus.cancel_status
+      || order?.raw_payload?.orderCancelStatus
+      || line?.raw_payload?.orderCancelStatus
+    ),
+    reviewReason: String(mismatch?.reason || orderApiStatus.review_reason || lineApiStatus.review_reason || "").trim(),
+    reviewMessage: String(mismatch?.message || orderApiStatus.review_message || lineApiStatus.review_message || "").trim(),
+    checkedAt: String(orderApiStatus.checked_at || lineApiStatus.checked_at || mismatch?.detectedAt || "").trim(),
+  };
+}
+
+function isNormalEbayCancelStatus(status) {
+  return !status || ["NONE_REQUESTED", "NOT_REQUESTED", "NO_CANCEL", "NOT_CANCELLED"].includes(status);
+}
+
+function isNormalEbayPaymentStatus(status) {
+  return !status || ["PAID", "FULLY_PAID"].includes(status);
+}
+
+function buildEbayApiStatusTitle(status, fallback = "Verify this order in eBay before acting.") {
+  const parts = [
+    status.reviewMessage,
+    status.paymentStatus ? `Payment: ${status.paymentStatus}` : "",
+    status.fulfillmentStatus ? `Fulfillment: ${status.fulfillmentStatus}` : "",
+    status.cancelStatus ? `Cancel: ${status.cancelStatus}` : "",
+    status.checkedAt ? `Checked: ${formatDate(status.checkedAt)}` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(" | ") : fallback;
+}
+
+function getEbayApiStatusBadge(line) {
+  const status = getLineEbayApiStatus(line);
+  const hasReview = Boolean(status.reviewReason || status.reviewMessage);
+  const title = buildEbayApiStatusTitle(status);
+
+  if (status.paymentStatus.includes("REFUND")) {
+    return { label: "Refund", tone: "is-cancelled", icon: "rotate-ccw", severity: 50, title };
+  }
+
+  if (!isNormalEbayCancelStatus(status.cancelStatus)) {
+    const label = status.cancelStatus.includes("PENDING") || status.cancelStatus.includes("REQUEST")
+      ? "Cancel pending"
+      : "Cancelled";
+    return { label, tone: "is-cancelled", icon: "ban", severity: 50, title };
+  }
+
+  if (status.paymentStatus && !isNormalEbayPaymentStatus(status.paymentStatus)) {
+    return { label: "Payment issue", tone: "is-payment", icon: "circle-dollar-sign", severity: 45, title };
+  }
+
+  if (status.fulfillmentStatus === "FULFILLED") {
+    return { label: "Fulfilled", tone: "is-fulfilled", icon: "package-check", severity: 40, title };
+  }
+
+  if (hasReview) {
+    return { label: "Check eBay", tone: "is-review", icon: "shield-alert", severity: 35, title };
+  }
+
+  return null;
+}
+
+function getGroupEbayApiStatus(lines = []) {
+  return lines
+    .map(getEbayApiStatusBadge)
+    .filter(Boolean)
+    .sort((a, b) => b.severity - a.severity)[0] || null;
 }
 
 function getRemainingLineQuantity(line) {
@@ -739,6 +845,18 @@ function normalizeLine(line) {
   const labelSearchText = getLabelMetadataSearchText(line.label_metadata, order.label_metadata);
   const videoReceiptUrl = getOrderVideoReceiptUrl({ ...line, order });
   const orderCreatedAt = getOrderCreatedAt({ ...line, order });
+  const ebayApiStatusText = [
+    line.ebay_api_status?.payment_status,
+    line.ebay_api_status?.fulfillment_status,
+    line.ebay_api_status?.cancel_status,
+    line.ebay_api_status?.review_reason,
+    line.ebay_api_status?.review_message,
+    order.ebay_api_status?.payment_status,
+    order.ebay_api_status?.fulfillment_status,
+    order.ebay_api_status?.cancel_status,
+    order.ebay_api_status?.review_reason,
+    order.ebay_api_status?.review_message,
+  ].filter(Boolean).join(" ");
   return {
     ...line,
     order,
@@ -756,6 +874,7 @@ function normalizeLine(line) {
       line.custom_label,
       videoReceiptUrl,
       labelSearchText,
+      ebayApiStatusText,
     ].filter(Boolean).join(" ").toLowerCase(),
   };
 }
@@ -963,18 +1082,31 @@ function setVideoReceiptOpenStatus(message = "", type = "info") {
   setStatus(message, type);
 }
 
+function getVideoReceiptOpenFailureMessage(result = {}, receiptLink = {}) {
+  const raw = String(result?.error || result?.message || "").trim();
+  const orderText = receiptLink.orderNumber ? ` for order ${receiptLink.orderNumber}` : "";
+  const itemText = receiptLink.itemNumber ? ` / item ${receiptLink.itemNumber}` : "";
+  if (/could not match a video receipt|no ebay live video receipt|video receipt.*not.*found|no video receipt/i.test(raw)) {
+    return `No eBay Live video receipt was found${orderText}${itemText}. If eBay does not expose one, add the receipt manually.`;
+  }
+  return raw || "Could not open the eBay video receipt. Make sure the OG eBay extension is enabled and you are signed in to eBay.";
+}
+
 async function openVideoReceiptLink(event, receiptLink = {}) {
-  if (!receiptLink.url && !receiptLink.orderNumber) return;
+  if (!receiptLink.url && !receiptLink.orderNumber) {
+    setVideoReceiptOpenStatus("This line does not have enough eBay information to find a video receipt.", "error");
+    return { ok: false, error: "missing_receipt_context" };
+  }
   event?.preventDefault?.();
   event?.stopPropagation?.();
   if (receiptLink.direct && receiptLink.url) {
     window.open(receiptLink.url, "_blank", "noopener,noreferrer");
     setVideoReceiptOpenStatus("Opening eBay video receipt...", "info");
-    return;
+    return { ok: true, direct: true };
   }
   if (!receiptLink.orderNumber) {
     setVideoReceiptOpenStatus("This order does not have an eBay order number to resolve the video receipt.", "error");
-    return;
+    return { ok: false, error: "missing_order_number" };
   }
   setVideoReceiptOpenStatus("Opening eBay video receipt through the extension...", "info");
   const result = await requestExtensionVideoReceiptOpen({
@@ -986,10 +1118,11 @@ async function openVideoReceiptLink(event, receiptLink = {}) {
     itemUrl: receiptLink.itemUrl,
   });
   if (!result?.ok) {
-    setVideoReceiptOpenStatus(result?.error || "Could not open the eBay video receipt. Make sure the OG eBay extension is enabled and you are signed in to eBay.", "error");
+    setVideoReceiptOpenStatus(getVideoReceiptOpenFailureMessage(result, receiptLink), "error");
   } else {
     setVideoReceiptOpenStatus("eBay video receipt opened.", "success");
   }
+  return result;
 }
 
 function parseCsv(text) {
@@ -1940,6 +2073,28 @@ function buildOrderLineQueueQuery(status, admin) {
 }
 
 function normalizePendingOrderQueueRpcRow(row = {}) {
+  const ebayApiStatus = {
+    payment_status: row.ebay_payment_status || "",
+    fulfillment_status: row.ebay_fulfillment_status || "",
+    cancel_status: row.ebay_cancel_status || "",
+    review_reason: row.ebay_sync_review_reason || "",
+    review_message: row.ebay_sync_review_message || "",
+    review_detected_at: row.ebay_sync_review_detected_at || "",
+    checked_at: row.ebay_status_checked_at || "",
+  };
+  const hasEbaySyncReview = Boolean(ebayApiStatus.review_reason || ebayApiStatus.review_message);
+  const syncReviewPayload = hasEbaySyncReview
+    ? {
+        pending_order_sync_mismatch: {
+          reason: ebayApiStatus.review_reason,
+          message: ebayApiStatus.review_message,
+          ebayPaymentStatus: ebayApiStatus.payment_status,
+          ebayFulfillmentStatus: ebayApiStatus.fulfillment_status,
+          ebayCancelStatus: ebayApiStatus.cancel_status,
+          detectedAt: ebayApiStatus.review_detected_at || ebayApiStatus.checked_at,
+        },
+      }
+    : {};
   return {
     id: row.id,
     order_id: row.order_id,
@@ -1960,6 +2115,8 @@ function normalizePendingOrderQueueRpcRow(row = {}) {
     assigned_seller_employee_id: row.assigned_seller_employee_id,
     assigned_seller_snapshot: row.assigned_seller_snapshot || {},
     notes: row.notes,
+    ebay_api_status: ebayApiStatus,
+    raw_payload: syncReviewPayload,
     video_receipt_photo_count: Number(row.video_receipt_photo_count || 0),
     line_note_count: Number(row.line_note_count || 0),
     latest_line_note: row.latest_line_note || "",
@@ -1983,6 +2140,8 @@ function normalizePendingOrderQueueRpcRow(row = {}) {
       label_storage_bucket: row.label_storage_bucket,
       label_file_path: row.label_file_path,
       label_uploaded_at: row.label_uploaded_at,
+      ebay_api_status: ebayApiStatus,
+      raw_payload: syncReviewPayload,
     },
   };
 }
@@ -2819,8 +2978,8 @@ function renderOrders() {
       : `<button type="button" class="buyer-card-task-btn task-action-btn is-clear" data-buyer-task-key="${escapeHtml(group.key)}"><span>No task</span><strong>Assign</strong></button>`;
     const card = document.createElement("article");
     const hasSelectedAdminLines = group.lines.some((line) => state.adminSelectedLineIds.has(line.id));
-    const syncMismatch = group.lines.map(getOrderSyncMismatch).find(Boolean);
-    card.className = `buyer-order-card ${urgencyClass} ${groupIndex % 2 ? "is-alt-group" : ""} ${hasSelectedAdminLines ? "has-admin-selected-lines" : ""} ${syncMismatch ? "has-sync-mismatch" : ""} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""} ${isExpanded ? "is-expanded" : "is-collapsed"}`;
+    const ebayApiStatus = getGroupEbayApiStatus(group.lines);
+    card.className = `buyer-order-card ${urgencyClass} ${groupIndex % 2 ? "is-alt-group" : ""} ${hasSelectedAdminLines ? "has-admin-selected-lines" : ""} ${ebayApiStatus ? "has-sync-mismatch" : ""} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""} ${isExpanded ? "is-expanded" : "is-collapsed"}`;
     card.dataset.buyerKey = group.key;
     card.dataset.buyerUsername = group.buyer;
     card.innerHTML = `
@@ -2845,10 +3004,10 @@ function renderOrders() {
         </div>
         <div class="buyer-card-alerts">
           ${urgencyMarkup}
-          ${syncMismatch ? `
-            <span class="sync-mismatch-pill" title="${escapeHtml(syncMismatch.message || "Verify this order in eBay before acting.")}">
-              <i data-lucide="shield-alert"></i>
-              eBay review
+          ${ebayApiStatus ? `
+            <span class="sync-mismatch-pill ${escapeHtml(ebayApiStatus.tone)}" title="${escapeHtml(ebayApiStatus.title)}">
+              <i data-lucide="${escapeHtml(ebayApiStatus.icon)}"></i>
+              ${escapeHtml(ebayApiStatus.label)}
             </span>
           ` : ""}
           <span class="buyer-card-value">${formatMoney(group.totalValue)}</span>
@@ -2963,7 +3122,7 @@ function renderOrders() {
       const order = line.order || {};
       const receiptLink = getOrderVideoReceiptLink(line);
       const canActOnLine = isOpenOrderLine(line);
-      const lineSyncMismatch = getOrderSyncMismatch(line);
+      const lineEbayApiStatus = getEbayApiStatusBadge(line);
       const lineUrgency = canActOnLine ? getOrderUrgency(order.ship_by_date) : null;
       const lineDueTone = lineUrgency?.level || "neutral";
       const orderLineKey = normalizeEbayOrderNumber(order.order_number) || order.order_number || order.id || line.order_id || line.id;
@@ -3027,7 +3186,7 @@ function renderOrders() {
                 ${escapeHtml(visibleLineDueLabel)}
               </span>
               ${orderLineSequence ? `<span class="buyer-line-sequence">${escapeHtml(orderLineSequence)}</span>` : ""}
-              ${lineSyncMismatch ? `<span class="buyer-line-sync-warning" title="${escapeHtml(lineSyncMismatch.message || "Verify this order in eBay before acting.")}">Verify in eBay</span>` : ""}
+              ${lineEbayApiStatus ? `<span class="buyer-line-sync-warning ${escapeHtml(lineEbayApiStatus.tone)}" title="${escapeHtml(lineEbayApiStatus.title)}"><i data-lucide="${escapeHtml(lineEbayApiStatus.icon)}"></i>${escapeHtml(lineEbayApiStatus.label)}</span>` : ""}
             </span>
             <small class="buyer-line-price">Line total ${formatMoney(line.total_price || line.sold_for || 0)}</small>
           </span>
@@ -3052,7 +3211,19 @@ function renderOrders() {
       const lineCheckbox = button.querySelector("[data-admin-line-select]");
       lineCheckbox?.addEventListener("click", (event) => event.stopPropagation());
       lineCheckbox?.addEventListener("change", (event) => setAdminLineSelection(line.id, event.target.checked));
-      button.querySelectorAll("a").forEach((link) => link.addEventListener("click", (event) => openVideoReceiptLink(event, receiptLink)));
+      button.querySelectorAll(".buyer-line-receipt").forEach((link) => {
+        link.addEventListener("click", async (event) => {
+          const originalText = link.textContent;
+          link.classList.add("is-opening");
+          link.textContent = "Opening...";
+          try {
+            await openVideoReceiptLink(event, receiptLink);
+          } finally {
+            link.classList.remove("is-opening");
+            link.textContent = originalText || "Open video receipt";
+          }
+        });
+      });
       button.querySelector("[data-copy-order-number]")?.addEventListener("click", async (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -3358,7 +3529,18 @@ function renderSelectedVideoReceipt(line = state.selectedLine) {
       <a href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Video receipt</a>
     `
     : "";
-  panel.querySelector("a")?.addEventListener("click", (event) => openVideoReceiptLink(event, receiptLink));
+  panel.querySelector("a")?.addEventListener("click", async (event) => {
+    const link = event.currentTarget;
+    const originalText = link.textContent;
+    link.classList.add("is-opening");
+    link.textContent = "Opening...";
+    try {
+      await openVideoReceiptLink(event, receiptLink);
+    } finally {
+      link.classList.remove("is-opening");
+      link.textContent = originalText || "Video receipt";
+    }
+  });
 }
 
 function isVideoReceiptEvidencePhoto(photo = {}) {

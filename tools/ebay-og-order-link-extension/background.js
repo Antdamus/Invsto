@@ -702,7 +702,7 @@
     const html = await response.text();
     const receiptUrl = resolveVideoReceiptUrlInText(html, payload, detailsUrl.toString());
     if (!receiptUrl) {
-      throw new Error("I could not match a video receipt URL to this item on the eBay order details page.");
+      throw new Error("No eBay Live video receipt was found for this order or item.");
     }
     const tab = await chrome.tabs.create({ url: receiptUrl, active: true });
     return { ok: true, openedUrl: receiptUrl, tabId: tab.id || null, direct: false };
