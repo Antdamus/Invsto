@@ -16,6 +16,7 @@ const state = {
   historyOrderTaskAssignees: [],
   activeHistoryOrderTaskGroup: null,
   activeHistoryOrderTaskGroupKey: "",
+  historyOrderTaskPreviewUrls: [],
   activeHistoryExtraPhotoGroup: null,
   activeHistoryExtraPhotoGroupKey: "",
   historyExtraPhotoPreviewUrls: [],
@@ -4200,6 +4201,92 @@ function renderHistoryOrderTaskContext() {
   `;
 }
 
+function cleanupHistoryOrderTaskPhotoPreviews() {
+  (state.historyOrderTaskPreviewUrls || []).forEach((url) => {
+    try {
+      URL.revokeObjectURL(url);
+    } catch (_) {}
+  });
+  state.historyOrderTaskPreviewUrls = [];
+}
+
+function getHistoryOrderTaskPhotoFiles() {
+  return [...($("history-order-task-photo-file")?.files || [])].filter((file) =>
+    file && file.size > 0 && /^image\//i.test(file.type || "")
+  );
+}
+
+function renderHistoryOrderTaskPhotoList() {
+  cleanupHistoryOrderTaskPhotoPreviews();
+  const list = $("history-order-task-photo-list");
+  const files = getHistoryOrderTaskPhotoFiles();
+  if (!list) return;
+  if (!files.length) {
+    list.innerHTML = `<div class="history-extra-photo-empty">No task photos selected yet.</div>`;
+    return;
+  }
+  list.innerHTML = files.map((file, index) => {
+    const previewUrl = URL.createObjectURL(file);
+    state.historyOrderTaskPreviewUrls.push(previewUrl);
+    return `
+      <article class="history-extra-photo-card">
+        <img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(file.name || `Task photo ${index + 1}`)}" />
+        <div>
+          <strong>${escapeHtml(file.name || `Task photo ${index + 1}`)}</strong>
+          <span>${escapeHtml(file.type || "image")} ${formatFileSize(file.size) ? `- ${escapeHtml(formatFileSize(file.size))}` : ""}</span>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+async function uploadHistoryOrderTaskPhotos(files, option = {}) {
+  if (!files.length) return [];
+  const order = option.order || {};
+  const orderNumber = normalizeEbayOrderNumber(order.order_number) || "closed-order";
+  const cleanOrder = safeStorageSegment(orderNumber, "closed-order");
+  const cleanRun = safeStorageSegment(window.crypto?.randomUUID ? window.crypto.randomUUID() : String(Date.now()), "upload");
+  const uploaded = [];
+
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
+    const extension = String(file.name || "").split(".").pop()?.toLowerCase()?.replace(/[^a-z0-9]/g, "") || "jpg";
+    const path = [
+      "order-history-task-photos",
+      cleanOrder,
+      `${Date.now()}-${cleanRun}-${index + 1}.${extension}`,
+    ].join("/");
+    const { error } = await supabase.storage
+      .from(EXTRA_LABEL_EVIDENCE_BUCKET)
+      .upload(path, file, {
+        contentType: file.type || "image/jpeg",
+        upsert: false,
+      });
+    if (error) throw new Error(error.message || `Could not upload task photo ${index + 1}.`);
+    uploaded.push({
+      bucket: EXTRA_LABEL_EVIDENCE_BUCKET,
+      path,
+      label: file.name || `Closed order task photo ${index + 1}`,
+      original_name: file.name || "",
+      mime_type: file.type || "image/jpeg",
+      size_bytes: file.size || 0,
+      uploaded_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      signed_by_email: state.user?.email || state.employee?.display_name || "",
+      order_number: orderNumber,
+      item_numbers: option.lines.map((line) => line.item_number).filter(Boolean),
+      metadata: {
+        source: "order_history_task_photo",
+        orderNumber,
+        buyerUsername: order.buyer_username || "",
+        buyerName: order.buyer_name || "",
+      },
+    });
+  }
+
+  return uploaded;
+}
+
 function getHistoryGroupSummaryBadges({ group, primaryStatus, statusClass, hasAttachedLabel, hasReturns, groupPhotos, receiptCount, taskSummary }) {
   const badges = [
     `<span class="history-status ${escapeHtml(statusClass)}">${escapeHtml(primaryStatus)}</span>`,
@@ -4790,7 +4877,11 @@ async function openHistoryOrderTaskModal(group = {}, groupKey = "") {
   $("history-order-task-note").value = "";
   $("history-order-task-priority").value = "normal";
   $("history-order-task-due-at").value = "";
+  const photoInput = $("history-order-task-photo-file");
+  if (photoInput) photoInput.value = "";
+  cleanupHistoryOrderTaskPhotoPreviews();
   renderHistoryOrderTaskOrderSelect(group);
+  renderHistoryOrderTaskPhotoList();
 
   await loadHistoryOrderTaskAssignees();
   const assignee = $("history-order-task-assignee");
@@ -4811,6 +4902,7 @@ function closeHistoryOrderTaskModal() {
   state.activeHistoryOrderTaskGroupKey = "";
   setHistoryOrderTaskError("");
   setHistoryOrderTaskStatus("");
+  cleanupHistoryOrderTaskPhotoPreviews();
   closeModal("history-order-task-modal");
 }
 
@@ -4834,6 +4926,13 @@ async function submitHistoryOrderTask() {
 
   try {
     const dueAt = localDateTimeToIso($("history-order-task-due-at")?.value || "");
+    const files = getHistoryOrderTaskPhotoFiles();
+    let taskPhotos = [];
+    if (files.length) {
+      setHistoryOrderTaskStatus("Uploading task photos...", "info");
+      taskPhotos = await uploadHistoryOrderTaskPhotos(files, option);
+    }
+    setHistoryOrderTaskStatus("Saving closed-order task...", "info");
     const { error } = await supabase.rpc("create_ebay_order_history_task", {
       _order_id: option.id,
       _order_line_ids: option.lines.map((line) => line.id).filter(Boolean),
@@ -4841,7 +4940,7 @@ async function submitHistoryOrderTask() {
       _priority: $("history-order-task-priority")?.value || "normal",
       _question: note,
       _due_at: dueAt,
-      _photo_attachments: [],
+      _photo_attachments: taskPhotos,
       _signed_by_email: state.user?.email || state.employee?.display_name || "",
     });
     if (error) throw error;
@@ -9215,6 +9314,7 @@ function setupListeners() {
   $("cancel-history-order-task")?.addEventListener("click", closeHistoryOrderTaskModal);
   $("create-history-order-task")?.addEventListener("click", submitHistoryOrderTask);
   $("history-order-task-order")?.addEventListener("change", renderHistoryOrderTaskContext);
+  $("history-order-task-photo-file")?.addEventListener("change", renderHistoryOrderTaskPhotoList);
   $("history-order-task-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "history-order-task-modal") closeHistoryOrderTaskModal();
   });

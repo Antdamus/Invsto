@@ -6394,6 +6394,95 @@ button.ebay-filter-chip {
   box-shadow: 0 0 0 3px rgba(214,178,94,.08);
 }
 
+.ebay-task-photo-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(157,242,189,.2);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at top left, rgba(157,242,189,.1), transparent 42%),
+    rgba(157,242,189,.035);
+  padding: 11px;
+}
+
+.ebay-task-photo-panel > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.ebay-task-photo-panel strong {
+  color: rgba(242,243,245,.94);
+  font-size: .88rem;
+  font-weight: 950;
+}
+
+.ebay-task-photo-panel p {
+  margin: 0;
+  color: rgba(242,243,245,.62);
+  font-size: .74rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.ebay-task-photo-picker {
+  width: fit-content;
+  min-height: 38px;
+  gap: 8px;
+}
+
+.ebay-task-photo-picker input {
+  display: none;
+}
+
+.ebay-task-photo-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+  gap: 8px;
+}
+
+.ebay-task-photo-card,
+.ebay-task-photo-empty {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 9px;
+  background: rgba(0,0,0,.2);
+  padding: 8px;
+}
+
+.ebay-task-photo-card {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+}
+
+.ebay-task-photo-card img {
+  width: 54px;
+  height: 54px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: rgba(0,0,0,.32);
+}
+
+.ebay-task-photo-card span,
+.ebay-task-photo-card strong,
+.ebay-task-photo-card small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ebay-task-photo-card strong {
+  font-size: .77rem;
+}
+
+.ebay-task-photo-card small,
+.ebay-task-photo-empty {
+  color: rgba(242,243,245,.56);
+  font-size: .68rem;
+  font-weight: 850;
+}
+
 .ebay-task-modal-actions {
   display: flex;
   flex-wrap: wrap;
@@ -7081,6 +7170,15 @@ button.ebay-filter-chip {
   }
 
   .ebay-task-due-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .ebay-task-photo-picker {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .ebay-task-photo-list {
     grid-template-columns: 1fr;
   }
 

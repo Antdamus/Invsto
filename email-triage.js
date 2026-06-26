@@ -110,6 +110,7 @@
   const EBAY_MOBILE_WORKSPACE_VIEW_STORAGE_KEY = "og-email-triage-ebay-mobile-workspace-view";
   const EBAY_RECLASSIFY_RECENT_LIMIT = 20;
   const EBAY_MESSAGE_TASK_CLOSED_STATUSES = new Set(["resolved", "cancelled"]);
+  const EBAY_MESSAGE_TASK_BUCKET = "team-task-evidence";
   const EBAY_FILTER_GROUPS = [
     { key: "topics", label: "Topics", values: EBAY_TOPIC_TAGS },
     { key: "buyerFlags", label: "Buyer flags", values: EBAY_BUYER_FLAGS },
@@ -3674,6 +3675,121 @@
     };
   }
 
+  function formatEbayTaskFileSize(bytes) {
+    const size = Number(bytes || 0);
+    if (!Number.isFinite(size) || size <= 0) return "";
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(size < 10240 ? 1 : 0)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  }
+
+  function safeEbayTaskPathSegment(value, fallback = "task") {
+    const cleaned = String(value || "")
+      .trim()
+      .replace(/\.[a-z0-9]{2,5}$/i, "")
+      .replace(/[^a-z0-9._-]+/gi, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 72);
+    return cleaned || fallback;
+  }
+
+  function getEbayMessageTaskPhotoFiles(form) {
+    return [...(form?.querySelector("[data-ebay-message-task-photos]")?.files || [])]
+      .filter((file) => file && file.size > 0 && /^image\//i.test(file.type || ""));
+  }
+
+  function getEbayMessageTaskPhotoExtension(file) {
+    const source = `${file?.name || ""} ${file?.type || ""}`.toLowerCase();
+    if (source.includes("png")) return "png";
+    if (source.includes("webp")) return "webp";
+    if (source.includes("heic")) return "heic";
+    if (source.includes("heif")) return "heif";
+    return "jpg";
+  }
+
+  function renderEbayMessageTaskPhotoList(form) {
+    const list = form?.querySelector("[data-ebay-message-task-photo-list]");
+    if (!list) return;
+    const files = getEbayMessageTaskPhotoFiles(form);
+    const oldUrls = String(list.dataset.previewUrls || "")
+      .split("|")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    oldUrls.forEach((url) => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch (_) {}
+    });
+    if (!files.length) {
+      list.dataset.previewUrls = "";
+      list.innerHTML = `<div class="ebay-task-photo-empty">No task photos selected.</div>`;
+      return;
+    }
+    const previewUrls = [];
+    list.innerHTML = files.map((file, index) => {
+      const previewUrl = URL.createObjectURL(file);
+      previewUrls.push(previewUrl);
+      return `
+        <article class="ebay-task-photo-card">
+          <img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(file.name || `Task photo ${index + 1}`)}" />
+          <span>
+            <strong>${escapeHtml(file.name || `Task photo ${index + 1}`)}</strong>
+            <small>${escapeHtml([file.type || "image", formatEbayTaskFileSize(file.size)].filter(Boolean).join(" - "))}</small>
+          </span>
+        </article>
+      `;
+    }).join("");
+    list.dataset.previewUrls = previewUrls.join("|");
+  }
+
+  async function uploadEbayMessageTaskPhotos(context, files = [], values = {}) {
+    if (!files.length) return [];
+    const dateFolder = new Date().toISOString().slice(0, 10);
+    const conversationSegment = safeEbayTaskPathSegment(values.conversationId || "conversation", "conversation");
+    const titleSegment = safeEbayTaskPathSegment(values.title || "email-task", "email-task");
+    const uploaded = [];
+
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const extension = getEbayMessageTaskPhotoExtension(file);
+      const originalName = safeEbayTaskPathSegment(file.name || `photo-${index + 1}`, `photo-${index + 1}`);
+      const randomId = window.crypto?.randomUUID
+        ? window.crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const path = [
+        "ebay-message-tasks",
+        dateFolder,
+        conversationSegment,
+        `${Date.now()}-${randomId}-${titleSegment}-${originalName}.${extension}`,
+      ].join("/");
+      const { error } = await context.client.storage
+        .from(EBAY_MESSAGE_TASK_BUCKET)
+        .upload(path, file, {
+          contentType: file.type || "image/jpeg",
+          upsert: false,
+        });
+      if (error) throw new Error(error.message || `Could not upload message task photo ${index + 1}.`);
+      uploaded.push({
+        bucket: EBAY_MESSAGE_TASK_BUCKET,
+        path,
+        label: file.name || `Message task photo ${index + 1}`,
+        original_name: file.name || "",
+        mime_type: file.type || "image/jpeg",
+        size_bytes: file.size || 0,
+        created_at: new Date().toISOString(),
+        metadata: {
+          source: "ebay_conversation_message_task",
+          conversation_id: values.conversationId || "",
+          message_id: values.messageId || "",
+          title: values.title || "",
+        },
+      });
+    }
+
+    return uploaded;
+  }
+
   function ebayMessageTaskTitle(conversation, message) {
     const buyer = ebayConversationParty(conversation);
     const direction = ebayMessageDirection(message);
@@ -3849,6 +3965,21 @@
     });
   }
 
+  function cleanupEbayMessageTaskPhotoPreviews() {
+    document.querySelectorAll("[data-ebay-message-task-photo-list]").forEach((list) => {
+      String(list.dataset.previewUrls || "")
+        .split("|")
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .forEach((url) => {
+          try {
+            URL.revokeObjectURL(url);
+          } catch (_) {}
+        });
+      list.dataset.previewUrls = "";
+    });
+  }
+
   function openEbayConversationMessageTaskModal(context, conversationId, messageId) {
     const conversation = selectedEbayConversationById(conversationId, adminClassificationState);
     const message = ebayConversationMessageById(conversationId, messageId);
@@ -3875,6 +4006,7 @@
   }
 
   function closeEbayConversationTaskModal() {
+    cleanupEbayMessageTaskPhotoPreviews();
     setEbayConversationState({
       ebayConversationTaskModal: null,
       ebayConversationTaskError: null,
@@ -4166,6 +4298,21 @@
               </div>
             </fieldset>
           </div>
+          <section class="ebay-task-photo-panel" aria-label="Task photo attachments">
+            <div>
+              <span class="eyebrow">Optional Photos</span>
+              <strong>Attach evidence</strong>
+              <p>Add photos from this device or take a new photo before creating the task. The evidence will stay linked to the task updates.</p>
+            </div>
+            <label class="secondary-btn ebay-task-photo-picker">
+              <i data-lucide="image-plus"></i>
+              Add Photos
+              <input name="taskPhotos" type="file" accept="image/*" capture="environment" multiple data-ebay-message-task-photos />
+            </label>
+            <div class="ebay-task-photo-list" data-ebay-message-task-photo-list>
+              <div class="ebay-task-photo-empty">No task photos selected.</div>
+            </div>
+          </section>
           <div class="ebay-task-modal-actions">
             <button type="button" class="secondary-btn" data-ebay-message-task-action="close" ${saving ? "disabled" : ""}>Cancel</button>
             <button type="submit" class="primary-btn" ${saving ? "disabled" : ""}>
@@ -4220,6 +4367,7 @@
     const taskTag = String(formData.get("taskTag") || "").trim();
     const refundAmountRaw = String(formData.get("refundAmount") || "").trim();
     const refundAmount = taskTag === "refunds" ? parseRefundAmount(refundAmountRaw) : null;
+    const photoFiles = getEbayMessageTaskPhotoFiles(form);
     const modalDraft = {
       ...(adminClassificationState.ebayConversationTaskModal || {}),
       conversationId,
@@ -4255,6 +4403,7 @@
       });
       return;
     }
+    cleanupEbayMessageTaskPhotoPreviews();
     setEbayConversationState({
       ebayConversationTaskModal: modalDraft,
       ebayConversationTaskSaving: true,
@@ -4272,6 +4421,11 @@
         dueAt: localDateTimeToIso(dueAt),
         taskTag: taskTag || null,
         refundAmount,
+        photoAttachments: await uploadEbayMessageTaskPhotos(context, photoFiles, {
+          conversationId,
+          messageId,
+          title,
+        }),
       });
       const taskId = payload.task?.id || "";
       setEbayConversationState({
@@ -9591,6 +9745,10 @@
     });
     els.ebayConversationDetail?.addEventListener("change", (event) => {
       const taskForm = event.target.closest("[data-ebay-message-task-form]");
+      if (taskForm && event.target.matches("[data-ebay-message-task-photos]")) {
+        renderEbayMessageTaskPhotoList(taskForm);
+        return;
+      }
       if (taskForm && event.target.name === "taskTag") syncEbayTaskRefundField(taskForm);
       if (taskForm && (event.target.name === "dueDate" || event.target.name === "dueTime")) {
         syncEbayTaskDueDefaults(taskForm, event.target.name);

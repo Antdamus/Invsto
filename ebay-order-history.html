@@ -496,6 +496,19 @@
         <textarea id="history-order-task-note" rows="4" placeholder="Write exactly what needs to be checked, fixed, refunded, shipped, or reviewed."></textarea>
       </label>
 
+      <section class="history-task-photo-panel" aria-label="Closed order task photos">
+        <div>
+          <span class="eyebrow">Optional Photos</span>
+          <h3>Attach task proof</h3>
+          <p>Add photos from this device or take a new phone photo before creating the task. They will stay attached to the task audit trail.</p>
+        </div>
+        <label class="modal-field history-task-photo-picker">
+          Photos
+          <input id="history-order-task-photo-file" type="file" accept="image/*" capture="environment" multiple />
+        </label>
+        <div id="history-order-task-photo-list" class="history-extra-photo-list"></div>
+      </section>
+
       <p id="history-order-task-error" class="history-error"></p>
       <div class="history-modal-actions">
         <button id="cancel-history-order-task" type="button" class="secondary-btn">Cancel</button>

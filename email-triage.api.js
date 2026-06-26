@@ -1956,6 +1956,7 @@
       _due_at: values.dueAt || null,
       _task_tag: values.taskTag || null,
       _refund_amount: values.refundAmount || null,
+      _photo_attachments: Array.isArray(values.photoAttachments) ? values.photoAttachments : [],
       _signed_by_email: session.user?.email || values.signedByEmail || null,
     });
     throwSupabaseReadError(error, "ebay_conversation_message_task_create_failed");
