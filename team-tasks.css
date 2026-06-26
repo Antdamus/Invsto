@@ -260,13 +260,16 @@ body {
   background: rgba(255, 255, 255, 0.04);
 }
 
-.team-task-read-filter {
+.team-task-read-filter,
+.team-task-owner-filter,
+.team-task-source-filter {
   display: inline-flex;
   gap: 4px;
   padding: 4px;
   border: 1px solid rgba(241, 214, 155, 0.16);
   border-radius: 999px;
   background: rgba(241, 214, 155, 0.045);
+  flex-wrap: wrap;
 }
 
 .team-task-view-btn {
@@ -280,7 +283,8 @@ body {
   cursor: pointer;
 }
 
-.team-task-read-filter-btn {
+.team-task-read-filter-btn,
+.team-task-filter-btn {
   min-height: 30px;
   border: 0;
   border-radius: 999px;
@@ -297,7 +301,8 @@ body {
   color: var(--task-green);
 }
 
-.team-task-read-filter-btn.is-active {
+.team-task-read-filter-btn.is-active,
+.team-task-filter-btn.is-active {
   background: rgba(241, 214, 155, 0.15);
   color: var(--task-gold);
 }
@@ -384,6 +389,19 @@ body {
     linear-gradient(90deg, rgba(157, 242, 189, 0.075), transparent 35%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025)),
     var(--task-panel);
+}
+
+.team-task-card.is-overdue {
+  border-color: rgba(255, 157, 157, 0.5);
+  box-shadow:
+    inset 4px 0 0 rgba(255, 112, 112, 0.86),
+    0 14px 34px rgba(255, 86, 86, 0.08);
+}
+
+.team-task-card.is-overdue .team-task-card-summary {
+  background:
+    linear-gradient(90deg, rgba(255, 112, 112, 0.12), rgba(241, 214, 155, 0.035)),
+    rgba(255, 255, 255, 0.025);
 }
 
 .team-task-card.is-read {
@@ -534,6 +552,23 @@ body {
   color: var(--task-gold);
 }
 
+.team-task-summary-facts .team-task-overdue-pill,
+.team-task-overdue-status-chip,
+.team-task-overdue-inline {
+  border-color: rgba(255, 157, 157, 0.48);
+  color: #ffd4d4;
+  background: rgba(255, 112, 112, 0.13);
+}
+
+.team-task-summary-facts .team-task-overdue-pill {
+  max-width: 300px;
+  font-weight: 950;
+  line-height: 1.12;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .team-task-expand-pill {
   min-height: 30px;
   min-width: 64px;
@@ -555,6 +590,315 @@ body {
   padding: 4px 2px 2px;
 }
 
+.team-task-brief,
+.team-task-update-trail {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(241, 214, 155, 0.2);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at top left, rgba(241, 214, 155, 0.1), transparent 32%),
+    rgba(255, 255, 255, 0.035);
+}
+
+.team-task-brief.is-ebay-message-task {
+  border-color: rgba(241, 214, 155, 0.26);
+  background:
+    linear-gradient(90deg, rgba(241, 214, 155, 0.08), rgba(114, 184, 255, 0.035)),
+    rgba(255, 255, 255, 0.035);
+}
+
+.team-task-brief.is-pending-order-task {
+  border-color: rgba(255, 157, 157, 0.24);
+  background:
+    linear-gradient(90deg, rgba(255, 157, 157, 0.08), rgba(241, 214, 155, 0.035)),
+    rgba(255, 255, 255, 0.035);
+}
+
+.team-task-brief.is-pending-order-task.is-overdue {
+  border-color: rgba(255, 157, 157, 0.42);
+  box-shadow: inset 4px 0 0 rgba(255, 112, 112, 0.72);
+}
+
+.team-task-order-brief {
+  gap: 12px;
+}
+
+.team-task-brief-head,
+.team-task-update-trail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.team-task-brief-head > div,
+.team-task-update-trail-head > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.team-task-brief-head strong,
+.team-task-update-trail-head strong {
+  color: var(--task-text);
+  font-size: 1rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.team-task-update-trail-head > span {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: var(--task-muted);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.75rem;
+  font-weight: 950;
+}
+
+.team-task-instruction-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr);
+  gap: 8px;
+}
+
+.team-task-instruction,
+.team-task-next-step,
+.team-task-latest-update,
+.team-task-overdue-alert,
+.team-task-message-focus {
+  margin: 0;
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--task-line);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.team-task-instruction.is-current {
+  border-color: rgba(157, 242, 189, 0.22);
+  background: rgba(157, 242, 189, 0.055);
+}
+
+.team-task-overdue-alert {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-color: rgba(255, 157, 157, 0.42);
+  background:
+    linear-gradient(90deg, rgba(255, 112, 112, 0.14), rgba(255, 112, 112, 0.045)),
+    rgba(0, 0, 0, 0.16);
+}
+
+.team-task-overdue-alert strong {
+  color: #ffd4d4;
+  font-size: 0.86rem;
+  font-weight: 950;
+}
+
+.team-task-overdue-alert span {
+  color: var(--task-text);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.team-task-instruction small,
+.team-task-next-step strong,
+.team-task-latest-update strong,
+.team-task-message-focus small {
+  color: var(--task-gold);
+  font-size: 0.76rem;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.team-task-instruction p,
+.team-task-next-step span,
+.team-task-latest-update span,
+.team-task-message-focus span {
+  margin: 0;
+  color: var(--task-text);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.team-task-brief-facts,
+.team-task-ebay-snapshot {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+}
+
+.team-task-brief-facts span,
+.team-task-ebay-snapshot span {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--task-line);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.team-task-brief-facts small,
+.team-task-ebay-snapshot small {
+  display: block;
+  color: var(--task-muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.team-task-brief-facts b,
+.team-task-ebay-snapshot b {
+  display: block;
+  color: var(--task-text);
+  font-size: 0.88rem;
+  font-weight: 950;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-task-next-step {
+  border-color: rgba(114, 184, 255, 0.22);
+  background: rgba(114, 184, 255, 0.055);
+}
+
+.team-task-latest-update {
+  border-color: rgba(241, 214, 155, 0.22);
+  background: rgba(241, 214, 155, 0.05);
+}
+
+.team-task-order-instruction {
+  border-color: rgba(241, 214, 155, 0.28);
+  background:
+    linear-gradient(90deg, rgba(241, 214, 155, 0.08), rgba(157, 242, 189, 0.04)),
+    rgba(0, 0, 0, 0.18);
+}
+
+.team-task-order-instruction p {
+  font-size: 0.96rem;
+  font-weight: 850;
+}
+
+.team-task-order-facts {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.team-task-order-facts span {
+  border-color: rgba(241, 214, 155, 0.18);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.team-task-order-facts span.is-overdue-fact {
+  border-color: rgba(255, 157, 157, 0.46);
+  background: rgba(255, 112, 112, 0.1);
+}
+
+.team-task-order-facts span.is-overdue-fact small,
+.team-task-order-facts span.is-overdue-fact b {
+  color: #ffd4d4;
+}
+
+.team-task-evidence-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(157, 242, 189, 0.18);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at top left, rgba(157, 242, 189, 0.1), transparent 34%),
+    rgba(0, 0, 0, 0.16);
+}
+
+.team-task-evidence-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.team-task-evidence-head > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.team-task-evidence-head strong {
+  color: var(--task-text);
+}
+
+.team-task-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.team-task-evidence-thumb {
+  min-width: 0;
+  min-height: 74px;
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px;
+  border: 1px solid rgba(241, 214, 155, 0.28);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--task-text);
+  cursor: zoom-in;
+  text-align: left;
+}
+
+.team-task-evidence-thumb img,
+.team-task-evidence-placeholder {
+  width: 68px;
+  height: 56px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.team-task-evidence-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--task-muted);
+  font-size: 0.72rem;
+  font-weight: 950;
+}
+
+.team-task-evidence-thumb span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.team-task-evidence-thumb b {
+  color: var(--task-text);
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.team-task-evidence-thumb small,
+.team-task-evidence-empty {
+  color: var(--task-muted);
+  font-size: 0.74rem;
+  font-weight: 850;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.team-task-evidence-empty {
+  margin: 0;
+}
+
 .team-task-card-head,
 .team-task-event-head {
   min-width: 0;
@@ -562,7 +906,21 @@ body {
 
 .team-task-card-head > div,
 .team-task-event-head > div {
+  display: grid;
+  gap: 2px;
   min-width: 0;
+}
+
+.team-task-event-head {
+  align-items: flex-start;
+}
+
+.team-task-event-head small {
+  color: var(--task-gold);
+  font-size: 0.72rem;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .team-task-card.is-urgent {
@@ -570,6 +928,22 @@ body {
   background:
     linear-gradient(180deg, rgba(255, 157, 157, 0.09), rgba(255, 157, 157, 0.025)),
     var(--task-panel);
+}
+
+.team-task-card.is-overdue,
+.team-task-card.is-overdue.is-urgent {
+  border-color: rgba(255, 157, 157, 0.5);
+}
+
+.team-task-card.is-overdue.is-read {
+  opacity: 1;
+}
+
+.order-workflow-item.is-overdue {
+  border-color: rgba(255, 157, 157, 0.38);
+  background:
+    linear-gradient(90deg, rgba(255, 112, 112, 0.1), transparent 38%),
+    rgba(255, 255, 255, 0.035);
 }
 
 .team-task-card.is-resolved {
@@ -616,6 +990,25 @@ body {
   max-width: 100%;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.team-task-event-signature {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.team-task-event-signature span {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--task-muted);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 0.72rem;
+  font-weight: 900;
 }
 
 .team-task-meta,
@@ -721,6 +1114,68 @@ body {
   background: rgba(241, 214, 155, 0.045);
 }
 
+.order-workflow-panel.is-compact {
+  padding: 8px 10px;
+}
+
+.order-workflow-panel.is-compact .team-task-context-head {
+  align-items: center;
+}
+
+.order-task-context-details {
+  border-color: rgba(157, 242, 189, 0.14);
+  background:
+    linear-gradient(90deg, rgba(157, 242, 189, 0.045), rgba(114, 184, 255, 0.025)),
+    rgba(0, 0, 0, 0.14);
+}
+
+.order-task-context-details summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--task-muted);
+  font-weight: 950;
+}
+
+.order-task-context-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.order-task-context-details summary::after {
+  content: "Open";
+  flex: 0 0 auto;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: var(--task-text);
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 0.72rem;
+}
+
+.order-task-context-details[open] summary::after {
+  content: "Close";
+}
+
+.order-task-context-details summary > span:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.order-task-context-details summary strong {
+  color: var(--task-text);
+}
+
+.order-task-context-details .team-task-lines {
+  margin-top: 9px;
+}
+
 .ebay-message-task-context {
   border-color: rgba(114, 184, 255, 0.2);
   background:
@@ -792,6 +1247,26 @@ body {
   color: var(--task-text);
 }
 
+.team-task-context-head > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.team-task-context-open-link {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(157, 242, 189, 0.28);
+  border-radius: 999px;
+  padding: 6px 11px;
+  color: var(--task-green);
+  background: rgba(157, 242, 189, 0.06);
+  text-decoration: none;
+  font-weight: 950;
+}
+
 .team-task-facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -836,6 +1311,41 @@ body {
 
 .team-task-facts .team-task-refund-fact b {
   color: var(--task-gold);
+}
+
+.team-task-ebay-snapshot .team-task-refund-fact {
+  border-color: rgba(241, 214, 155, 0.32);
+  background:
+    radial-gradient(circle at top left, rgba(241, 214, 155, 0.16), transparent 42%),
+    rgba(241, 214, 155, 0.07);
+}
+
+.team-task-ebay-snapshot .team-task-refund-fact small {
+  color: rgba(241, 214, 155, 0.78);
+}
+
+.team-task-ebay-snapshot .team-task-refund-fact b {
+  color: var(--task-gold);
+}
+
+.team-task-message-focus.is-source-message {
+  border-color: rgba(241, 214, 155, 0.22);
+  background: rgba(241, 214, 155, 0.055);
+}
+
+.team-task-context-details {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 8px;
+}
+
+.team-task-context-details summary {
+  cursor: pointer;
+  color: var(--task-muted);
+  font-weight: 950;
+}
+
+.team-task-context-details .team-task-facts {
+  margin-top: 8px;
 }
 
 .team-task-lines {
@@ -1229,8 +1739,15 @@ body.modal-open {
     width: 100%;
   }
 
+  .team-task-owner-filter,
+  .team-task-source-filter {
+    width: 100%;
+    border-radius: 16px;
+  }
+
   .team-task-view-btn,
-  .team-task-read-filter-btn {
+  .team-task-read-filter-btn,
+  .team-task-filter-btn {
     flex: 1 1 0;
   }
 
@@ -1251,6 +1768,37 @@ body.modal-open {
 
   .team-task-summary-facts span {
     max-width: min(100%, 220px);
+  }
+
+  .team-task-summary-facts .team-task-overdue-pill {
+    max-width: 100%;
+  }
+
+  .team-task-instruction-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .team-task-brief-facts,
+  .team-task-ebay-snapshot {
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  }
+
+  .team-task-evidence-grid {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+
+  .order-task-context-details summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .order-task-context-details summary::after {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .team-task-context-open-link {
+    width: 100%;
   }
 
   .team-task-expand-pill {
@@ -1328,6 +1876,45 @@ body.modal-open {
 
   .team-task-meta {
     gap: 5px;
+  }
+
+  .team-task-brief,
+  .team-task-update-trail {
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  .team-task-overdue-alert {
+    grid-template-columns: 1fr;
+  }
+
+  .team-task-brief-facts,
+  .team-task-ebay-snapshot {
+    grid-template-columns: 1fr;
+  }
+
+  .team-task-evidence-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .team-task-evidence-thumb {
+    min-height: 68px;
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .team-task-evidence-thumb img,
+  .team-task-evidence-placeholder {
+    width: 58px;
+    height: 50px;
+  }
+
+  .team-task-brief-facts b,
+  .team-task-ebay-snapshot b {
+    white-space: normal;
+  }
+
+  .team-task-event-signature span {
+    width: 100%;
   }
 
   .team-task-context,

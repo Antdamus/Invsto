@@ -8,7 +8,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="team-tasks.css?v=compact-20260625" />
+  <link rel="stylesheet" href="team-tasks.css?v=task-filters-20260625" />
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body data-page="team-tasks">
@@ -86,6 +86,18 @@
                 <button type="button" class="team-task-read-filter-btn is-active" data-task-read-filter="all">All 0</button>
                 <button type="button" class="team-task-read-filter-btn" data-task-read-filter="unread">New 0</button>
                 <button type="button" class="team-task-read-filter-btn" data-task-read-filter="read">Read 0</button>
+              </div>
+              <div class="team-task-owner-filter" role="tablist" aria-label="Task relationship">
+                <button type="button" class="team-task-filter-btn is-active" data-task-owner-filter="all">All loaded 0</button>
+                <button type="button" class="team-task-filter-btn" data-task-owner-filter="assigned">Assigned to me 0</button>
+                <button type="button" class="team-task-filter-btn" data-task-owner-filter="created">Created by me 0</button>
+              </div>
+              <div class="team-task-source-filter" role="tablist" aria-label="Task source">
+                <button type="button" class="team-task-filter-btn is-active" data-task-source-filter="all">All sources 0</button>
+                <button type="button" class="team-task-filter-btn" data-task-source-filter="independent">Independent 0</button>
+                <button type="button" class="team-task-filter-btn" data-task-source-filter="order">Pending orders 0</button>
+                <button type="button" class="team-task-filter-btn" data-task-source-filter="ebay_triage">eBay triage 0</button>
+                <button type="button" class="team-task-filter-btn" data-task-source-filter="return">Returns 0</button>
               </div>
               <label id="team-task-scope-control" class="team-task-scope hidden">
                 View
@@ -241,6 +253,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
-  <script src="team-tasks.js?v=compact-20260625"></script>
+  <script src="team-tasks.js?v=task-filters-20260625"></script>
 </body>
 </html>

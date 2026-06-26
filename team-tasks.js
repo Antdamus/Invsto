@@ -8,6 +8,8 @@ const state = {
   taskReadStates: new Map(),
   taskReadStateSyncAvailable: true,
   taskReadFilter: "all",
+  taskOwnerFilter: "all",
+  taskSourceFilter: "all",
   activeTaskId: "",
   activeTaskSource: "",
   mode: "create",
@@ -115,6 +117,39 @@ function formatDate(value) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function getTaskDueValue(task = {}) {
+  if (task.due_at) return task.due_at;
+  return task.source === "order" ? task.ship_by_date || "" : "";
+}
+
+function getTaskDueLabel(task = {}) {
+  return formatDate(getTaskDueValue(task));
+}
+
+function getTaskLateAgeLabel(task = {}) {
+  const dueValue = getTaskDueValue(task);
+  if (!dueValue) return "";
+  const dueTime = new Date(dueValue).getTime();
+  if (!Number.isFinite(dueTime)) return "";
+  const lateMs = Date.now() - dueTime;
+  if (lateMs <= 0) return "";
+  const minutes = Math.floor(lateMs / 60000);
+  if (minutes < 60) return `${Math.max(1, minutes)}m late`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h late`;
+  return `${Math.floor(hours / 24)}d late`;
+}
+
+function isTaskLate(task = {}, options = {}) {
+  if (options.canceled) return false;
+  const status = String(task.status || "").toLowerCase();
+  if (HISTORY_TASK_STATUSES.includes(status) || HISTORY_RETURN_TASK_STATUSES.includes(status)) return false;
+  const dueValue = getTaskDueValue(task);
+  if (!dueValue) return false;
+  const dueTime = new Date(dueValue).getTime();
+  return Number.isFinite(dueTime) && dueTime < Date.now();
 }
 
 function toDateTimeLocalValue(value) {
@@ -377,6 +412,108 @@ function renderTaskReadFilterChrome(tasks = []) {
     button.textContent = label;
     button.classList.toggle("is-active", state.taskReadFilter === filter);
   });
+}
+
+function userEmailMatches(value = "") {
+  const target = normalizeLookup(value);
+  if (!target) return false;
+  return [
+    state.user?.email,
+    state.employee?.email,
+  ].some((email) => normalizeLookup(email) === target);
+}
+
+function isTaskAssignedToCurrentUser(task = {}) {
+  return Boolean(
+    (task.assigned_to_user_id && task.assigned_to_user_id === state.user?.id)
+    || userEmailMatches(task.assigned_to_email)
+  );
+}
+
+function isTaskCreatedByCurrentUser(task = {}) {
+  return Boolean(
+    (task.created_by && task.created_by === state.user?.id)
+    || (task.assigned_by && task.assigned_by === state.user?.id)
+    || userEmailMatches(task.created_by_email)
+    || userEmailMatches(task.assigned_by_email)
+  );
+}
+
+function getTaskSourceFilterValue(task = {}) {
+  if (task.source === "order") return "order";
+  if (task.source === "return") return "return";
+  if (task.source === "team" && task.metadata?.source === "ebay_conversation_message") return "ebay_triage";
+  if (task.source === "team") return "independent";
+  return "other";
+}
+
+function getTaskOwnerCounts(tasks = []) {
+  return tasks.reduce((counts, task) => {
+    counts.all += 1;
+    if (isTaskAssignedToCurrentUser(task)) counts.assigned += 1;
+    if (isTaskCreatedByCurrentUser(task)) counts.created += 1;
+    return counts;
+  }, { all: 0, assigned: 0, created: 0 });
+}
+
+function getTaskSourceCounts(tasks = []) {
+  return tasks.reduce((counts, task) => {
+    counts.all += 1;
+    const source = getTaskSourceFilterValue(task);
+    counts[source] = (counts[source] || 0) + 1;
+    return counts;
+  }, { all: 0, independent: 0, order: 0, ebay_triage: 0, return: 0, other: 0 });
+}
+
+function getTasksForOwnerFilter(tasks = []) {
+  if (state.taskOwnerFilter === "assigned") return tasks.filter(isTaskAssignedToCurrentUser);
+  if (state.taskOwnerFilter === "created") return tasks.filter(isTaskCreatedByCurrentUser);
+  return tasks;
+}
+
+function getTasksForSourceFilter(tasks = []) {
+  if (!state.taskSourceFilter || state.taskSourceFilter === "all") return tasks;
+  return tasks.filter((task) => getTaskSourceFilterValue(task) === state.taskSourceFilter);
+}
+
+function getVisibleTasksForCurrentFilters(tasks = []) {
+  return getTasksForSourceFilter(getTasksForOwnerFilter(getTasksForReadFilter(tasks)));
+}
+
+function renderTaskOwnerFilterChrome(tasks = []) {
+  const counts = getTaskOwnerCounts(tasks);
+  document.querySelectorAll("[data-task-owner-filter]").forEach((button) => {
+    const filter = button.dataset.taskOwnerFilter || "all";
+    const labels = {
+      all: `All loaded ${counts.all}`,
+      assigned: `Assigned to me ${counts.assigned}`,
+      created: `Created by me ${counts.created}`,
+    };
+    button.textContent = labels[filter] || formatTaskTag(filter);
+    button.classList.toggle("is-active", state.taskOwnerFilter === filter);
+  });
+}
+
+function renderTaskSourceFilterChrome(tasks = []) {
+  const counts = getTaskSourceCounts(tasks);
+  document.querySelectorAll("[data-task-source-filter]").forEach((button) => {
+    const filter = button.dataset.taskSourceFilter || "all";
+    const labels = {
+      all: `All sources ${counts.all}`,
+      independent: `Independent ${counts.independent}`,
+      order: `Pending orders ${counts.order}`,
+      ebay_triage: `eBay triage ${counts.ebay_triage}`,
+      return: `Returns ${counts.return}`,
+    };
+    button.textContent = labels[filter] || formatTaskTag(filter);
+    button.classList.toggle("is-active", state.taskSourceFilter === filter);
+  });
+}
+
+function renderTaskFilterChrome(tasks = []) {
+  renderTaskReadFilterChrome(tasks);
+  renderTaskOwnerFilterChrome(tasks);
+  renderTaskSourceFilterChrome(tasks);
 }
 
 async function markTaskSeen(task = {}) {
@@ -787,7 +924,7 @@ async function loadOrderTaskRecords() {
       : ACTIVE_TASK_STATUSES.filter((status) => status !== "completed_by_employee");
   let query = supabase
     .from("ebay_order_tasks")
-    .select("id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, updated_at, completed_at, resolved_at, latest_note, latest_photo_count, created_by_email, metadata, ebay_orders(order_number, buyer_username, sale_date, paid_on_date, ship_by_date, status, total_price, net_payout, label_metadata)")
+    .select("id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, created_at, updated_at, completed_at, resolved_at, latest_note, latest_photo_count, created_by, created_by_email, metadata, ebay_orders(order_number, buyer_username, sale_date, paid_on_date, ship_by_date, status, total_price, net_payout, label_metadata)")
     .in("status", statuses)
     .order(isHistoricalTaskView() ? "updated_at" : "created_at", { ascending: !isHistoricalTaskView() })
     .limit(80);
@@ -812,7 +949,7 @@ async function loadReturnTaskRecords() {
   const statuses = isHistoricalTaskView() ? HISTORY_RETURN_TASK_STATUSES : ACTIVE_RETURN_TASK_STATUSES;
   let query = supabase
     .from("ebay_return_tasks")
-    .select("id, return_case_id, order_id, order_line_ids, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, resolved_at, created_at, updated_at, metadata, ebay_return_cases(id, order_id, order_number, ebay_return_id, buyer_username, return_reason, status, opened_at, notes, raw_payload)")
+    .select("id, return_case_id, order_id, order_line_ids, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, resolved_at, created_at, updated_at, created_by, created_by_email, metadata, ebay_return_cases(id, order_id, order_number, ebay_return_id, buyer_username, return_reason, status, opened_at, notes, raw_payload)")
     .in("status", statuses)
     .order("created_at", { ascending: !isHistoricalTaskView() })
     .limit(80);
@@ -1041,6 +1178,33 @@ function getTaskEvidencePhotoPath(photo = {}) {
   return photo.path || photo.storage_path || "";
 }
 
+function getTaskEvidencePhotoVariantRef(photo = {}, variant = "preview") {
+  const normalizedVariant = variant === "thumb" ? "thumbnail" : variant;
+  const variants = photo.variants || photo.derivatives || {};
+  const variantObject = variants?.[variant] || variants?.[normalizedVariant] || (normalizedVariant === "thumbnail" ? variants?.thumb : null);
+  const directPath = variantObject?.path || variantObject?.storage_path || "";
+  if (directPath) {
+    return {
+      bucket: variantObject.bucket || variantObject.storage_bucket || photo.bucket || photo.storage_bucket || ORDER_EVIDENCE_BUCKET,
+      path: directPath,
+    };
+  }
+
+  const pathKeys = normalizedVariant === "preview"
+    ? ["preview_path", "previewPath"]
+    : ["thumbnail_path", "thumbnailPath", "thumb_path", "thumbPath"];
+  const bucketKeys = normalizedVariant === "preview"
+    ? ["preview_bucket", "previewBucket"]
+    : ["thumbnail_bucket", "thumbnailBucket", "thumb_bucket", "thumbBucket"];
+  const path = pathKeys.map((key) => photo[key]).find(Boolean);
+  if (!path) return null;
+  const bucket = bucketKeys.map((key) => photo[key]).find(Boolean);
+  return {
+    bucket: bucket || photo.bucket || photo.storage_bucket || ORDER_EVIDENCE_BUCKET,
+    path,
+  };
+}
+
 function getTaskEventEvidencePhotos(event = {}) {
   return [
     ...(Array.isArray(event.evidence_photos) ? event.evidence_photos : []),
@@ -1227,8 +1391,18 @@ async function hydrateOrderVideoReceiptEvidence(tasks = []) {
     if (!photos.length) return;
 
     await Promise.all(photos.map(async (photo) => {
-      photo.previewUrl = photo.signedUrl || await createTaskSignedImageUrl(photo.bucket, photo.path);
-      photo.thumbnailUrl = await createTaskSignedImageThumbnailUrl(photo.bucket, photo.path);
+      const previewRef = getTaskEvidencePhotoVariantRef(photo, "preview") || { bucket: photo.bucket, path: photo.path };
+      const thumbnailRef = getTaskEvidencePhotoVariantRef(photo, "thumbnail");
+      photo.previewUrl = photo.signedUrl || await createTaskSignedImageUrl(previewRef.bucket, previewRef.path);
+      photo.thumbnailUrl = thumbnailRef
+        ? await createTaskSignedImageUrl(thumbnailRef.bucket, thumbnailRef.path)
+        : await createTaskSignedImageThumbnailUrl(photo.bucket, photo.path);
+      photo.previewBucket = previewRef.bucket;
+      photo.previewPath = previewRef.path;
+      if (thumbnailRef) {
+        photo.thumbnailBucket = thumbnailRef.bucket;
+        photo.thumbnailPath = thumbnailRef.path;
+      }
     }));
 
     lines.forEach((line) => {
@@ -1272,7 +1446,7 @@ async function hydrateOrderWorkflowChildren(tasks = []) {
   const childStatuses = unique([...ACTIVE_TASK_STATUSES, ...HISTORY_TASK_STATUSES]);
   const { data, error } = await supabase
     .from("ebay_order_tasks")
-    .select("id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, updated_at, completed_at, resolved_at, latest_note, latest_photo_count, created_by_email, metadata, ebay_orders(order_number, buyer_username, sale_date, paid_on_date, ship_by_date, status, total_price, net_payout, label_metadata)")
+    .select("id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, created_at, updated_at, completed_at, resolved_at, latest_note, latest_photo_count, created_by, created_by_email, metadata, ebay_orders(order_number, buyer_username, sale_date, paid_on_date, ship_by_date, status, total_price, net_payout, label_metadata)")
     .in("parent_task_id", parentIds)
     .in("status", childStatuses)
     .order("created_at", { ascending: true })
@@ -1388,6 +1562,133 @@ function getTaskVideoReceiptAuditText(photo = {}) {
   return `Captured by ${actor}${capturedAt ? ` on ${formatDate(capturedAt)}` : ""}`;
 }
 
+function getPendingOrderCustomerName(task = {}) {
+  const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
+  const labelMetadata = task.order?.label_metadata && typeof task.order.label_metadata === "object"
+    ? task.order.label_metadata
+    : {};
+  const candidates = [
+    task.customer_name,
+    task.buyer_name,
+    metadata.customer_name,
+    metadata.customerName,
+    metadata.buyer_full_name,
+    metadata.buyerFullName,
+    metadata.recipient_name,
+    metadata.recipientName,
+    labelMetadata.customer_name,
+    labelMetadata.customerName,
+    labelMetadata.buyer_full_name,
+    labelMetadata.buyerFullName,
+    labelMetadata.ship_to?.name,
+    labelMetadata.ship_to?.fullName,
+    labelMetadata.shipTo?.name,
+    labelMetadata.shipTo?.fullName,
+    labelMetadata.shipping_address?.name,
+    labelMetadata.shippingAddress?.name,
+    labelMetadata.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo?.fullName,
+    labelMetadata.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo?.contactAddress?.name,
+  ];
+  return String(candidates.find((value) => String(value || "").trim()) || "").trim();
+}
+
+function getPendingOrderLineSummary(task = {}) {
+  const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
+  const quantity = lines.reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+  if (!lines.length) return "";
+  return `${lines.length} line${lines.length === 1 ? "" : "s"} / Qty ${quantity || lines.length}`;
+}
+
+function getTaskEventEvidencePhotosForBrief(events = []) {
+  const photos = [];
+  events.forEach((event) => {
+    (Array.isArray(event.photo_attachments) ? event.photo_attachments : []).forEach((photo, index) => {
+      const bucket = photo.bucket || photo.storage_bucket || TEAM_TASK_BUCKET;
+      const path = photo.path || photo.storage_path || "";
+      const url = photo.signedUrl || photo.url || "";
+      const label = photo.label || `Task photo ${index + 1}`;
+      if (!bucket && !url) return;
+      photos.push({
+        bucket,
+        path,
+        url: photo.previewUrl || url,
+        thumbnailUrl: photo.thumbnailUrl || url,
+        label,
+        kind: "Task photo",
+        caption: event.created_at ? `Added ${formatDate(event.created_at)}` : "Task evidence",
+      });
+    });
+  });
+  return photos;
+}
+
+function getTaskVideoReceiptPhotosForBrief(task = {}) {
+  const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
+  const photos = [];
+  lines.forEach((line) => {
+    const linePhotos = state.orderVideoReceiptPhotosByLineId.get(line.id) || [];
+    linePhotos.forEach((photo, index) => {
+      const label = photo.label || `Video receipt - ${line.item_number || index + 1}`;
+      photos.push({
+        bucket: photo.bucket || ORDER_EVIDENCE_BUCKET,
+        path: photo.path || "",
+        url: photo.previewUrl || photo.thumbnailUrl || "",
+        thumbnailUrl: photo.thumbnailUrl || photo.previewUrl || "",
+        label,
+        kind: "Video receipt",
+        caption: getTaskVideoReceiptAuditText(photo),
+      });
+    });
+  });
+  return photos;
+}
+
+function renderPendingOrderEvidencePanel(task = {}, events = []) {
+  const allPhotos = [
+    ...getTaskVideoReceiptPhotosForBrief(task),
+    ...getTaskEventEvidencePhotosForBrief(events),
+  ];
+  const seen = new Set();
+  const photos = allPhotos.filter((photo) => {
+    const key = `${photo.bucket || ""}:${photo.path || ""}:${photo.url || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return Boolean(photo.bucket || photo.url);
+  });
+  const shown = photos.slice(0, 8);
+  const extraCount = Math.max(0, photos.length - shown.length);
+  return `
+    <section class="team-task-evidence-panel">
+      <div class="team-task-evidence-head">
+        <div>
+          <span class="eyebrow">Evidence</span>
+          <strong>${photos.length ? `${photos.length} photo${photos.length === 1 ? "" : "s"} attached` : "No photos attached yet"}</strong>
+        </div>
+        ${extraCount ? `<span class="team-task-chip">+${escapeHtml(extraCount)} more</span>` : ""}
+      </div>
+      ${shown.length ? `
+        <div class="team-task-evidence-grid">
+          ${shown.map((photo) => `
+            <button
+              type="button"
+              class="team-task-evidence-thumb"
+              data-team-task-photo="1"
+              data-bucket="${escapeHtml(photo.bucket || TEAM_TASK_BUCKET)}"
+              data-path="${escapeHtml(photo.path || "")}"
+              data-url="${escapeHtml(photo.url || "")}"
+              data-label="${escapeHtml(photo.label || "Task evidence photo")}"
+              aria-label="Open ${escapeHtml(photo.label || "Task evidence photo")}"
+            >
+              ${photo.thumbnailUrl || photo.url ? `<img src="${escapeHtml(photo.thumbnailUrl || photo.url)}" alt="${escapeHtml(photo.label || "Task evidence photo")}" loading="lazy" />` : `<span class="team-task-evidence-placeholder">Photo</span>`}
+              <span><b>${escapeHtml(photo.kind || "Evidence")}</b><small>${escapeHtml(photo.caption || photo.label || "")}</small></span>
+            </button>
+          `).join("")}
+        </div>
+      ` : `<p class="team-task-evidence-empty">No task photos or video receipt screenshots are attached yet.</p>`}
+    </section>
+  `;
+}
+
 function renderTaskLineVideoReceiptPhotos(line = {}) {
   const photos = state.orderVideoReceiptPhotosByLineId.get(line.id) || [];
   if (!photos.length) return "";
@@ -1467,76 +1768,72 @@ function renderOrderWorkflowPanel(task = {}) {
   const shippingTasks = children.filter((child) => child.task_type === ORDER_SHIPPING_TYPE);
   const rows = [...subtasks, ...shippingTasks];
   const canApprove = canOrderTaskApproveForShipping(task);
+  if (!rows.length) {
+    return `
+      <section class="team-task-context order-workflow-panel is-compact">
+        <div class="team-task-context-head">
+          <span class="eyebrow">Workflow</span>
+          <strong>No subtasks required yet</strong>
+        </div>
+      </section>
+    `;
+  }
   return `
     <section class="team-task-context order-workflow-panel">
       <div class="team-task-context-head">
         <span class="eyebrow">Admin Workflow</span>
         <strong>${subtasks.length ? `${subtasks.filter((subtask) => ["completed_by_employee", "approved_by_admin"].includes(subtask.status)).length} of ${subtasks.length} subtasks complete` : "No subtasks required yet"}</strong>
       </div>
-      ${rows.length ? `
-        <div class="order-workflow-list">
-          ${rows.map((child) => {
-            const events = state.eventsByTask.get(getUnifiedTaskKey(child)) || [];
-            return `
-              <article class="order-workflow-item">
-                <div class="order-workflow-item-head">
-                  <div>
-                    <strong>${escapeHtml(child.title || "Order workflow task")}</strong>
-                    <p>${escapeHtml(child.latest_note || child.description || child.question || "No note yet.")}</p>
-                  </div>
-                  <span class="team-task-chip">${escapeHtml(getTaskStatusLabel(child.status))}</span>
+      <div class="order-workflow-list">
+        ${rows.map((child) => {
+          const events = state.eventsByTask.get(getUnifiedTaskKey(child)) || [];
+          const childLate = isTaskLate(child);
+          const childLateAge = getTaskLateAgeLabel(child);
+          return `
+            <article class="order-workflow-item ${childLate ? "is-overdue" : ""}">
+              <div class="order-workflow-item-head">
+                <div>
+                  <strong>${escapeHtml(child.title || "Order workflow task")}</strong>
+                  <p>${escapeHtml(child.latest_note || child.description || child.question || "No note yet.")}</p>
                 </div>
-                <div class="team-task-meta">
-                  <span class="team-task-source">${escapeHtml(child.sourceLabel)}</span>
-                  <span>Assigned: ${escapeHtml(getTaskAssigneeLabel(child))}</span>
-                  <span>Due ${escapeHtml(formatDate(child.due_at))}</span>
+                <span class="team-task-chip ${childLate ? "team-task-overdue-status-chip" : ""}">${escapeHtml(childLate ? "Overdue" : getTaskStatusLabel(child.status))}</span>
+              </div>
+              <div class="team-task-meta">
+                <span class="team-task-source">${escapeHtml(child.sourceLabel)}</span>
+                <span>Assigned: ${escapeHtml(getTaskAssigneeLabel(child))}</span>
+                <span class="${childLate ? "team-task-overdue-inline" : ""}">${escapeHtml(childLate ? `Late ${childLateAge || ""}`.trim() : `Due ${getTaskDueLabel(child)}`)}${childLate ? ` - Due ${escapeHtml(getTaskDueLabel(child))}` : ""}</span>
+              </div>
+              ${events.length ? `
+                <div class="order-workflow-mini-events">
+                  ${events.slice(-3).map(renderTaskEvent).join("")}
                 </div>
-                ${events.length ? `
-                  <div class="order-workflow-mini-events">
-                    ${events.slice(-3).map(renderTaskEvent).join("")}
-                  </div>
-                ` : ""}
-                ${renderOrderTaskActions(child, HISTORY_TASK_STATUSES.includes(child.status), { compact: true })}
-              </article>
-            `;
-          }).join("")}
-        </div>
-      ` : `<div class="empty-state">No subtasks have been created for this pending order.</div>`}
+              ` : ""}
+              ${renderOrderTaskActions(child, HISTORY_TASK_STATUSES.includes(child.status), { compact: true })}
+            </article>
+          `;
+        }).join("")}
+      </div>
       ${!canApprove && subtasks.length ? `<p class="team-task-photo-note">Shipping approval unlocks after every required subtask is completed.</p>` : ""}
     </section>
   `;
 }
 
 function renderOrderTaskContext(task = {}) {
-  const order = task.order || {};
   const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
-  const totals = getTaskLineMoneyTotals(lines, order);
-  const orderValue = formatMoney(totals.total);
-  const soldTotal = formatMoney(totals.sold);
-  const shipping = formatMoney(totals.shipping);
-  const payout = formatMoney(totals.payout);
-  const quantity = lines.reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+  const lineSummary = getPendingOrderLineSummary(task);
   return `
-    <section class="team-task-context">
-      <div class="team-task-context-head">
-        <span class="eyebrow">Order Context</span>
-        <strong>${escapeHtml(task.order_number || "Pending order")}${task.buyer_username ? ` - ${escapeHtml(task.buyer_username)}` : ""}</strong>
-      </div>
-      <div class="team-task-facts">
-        ${task.order_number ? `<span><small>eBay order</small><b>${escapeHtml(task.order_number)}</b></span>` : ""}
-        ${task.buyer_username ? `<span><small>Buyer</small><b>${escapeHtml(task.buyer_username)}</b></span>` : ""}
-        ${lines.length ? `<span><small>Lines / Qty</small><b>${escapeHtml(`${lines.length} line${lines.length === 1 ? "" : "s"} / Qty ${quantity || lines.length}`)}</b></span>` : ""}
-        ${task.ship_by_date ? `<span><small>Ship by</small><b>${escapeHtml(formatDate(task.ship_by_date))}</b></span>` : ""}
-        ${order.sale_date ? `<span><small>Sold</small><b>${escapeHtml(formatDate(order.sale_date))}</b></span>` : ""}
-        ${soldTotal ? `<span><small>Sold for</small><b>${escapeHtml(soldTotal)}</b></span>` : ""}
-        ${shipping ? `<span><small>Shipping</small><b>${escapeHtml(shipping)}</b></span>` : ""}
-        ${orderValue ? `<span><small>Order value</small><b>${escapeHtml(orderValue)}</b></span>` : ""}
-        ${payout ? `<span><small>Payout</small><b>${escapeHtml(payout)}</b></span>` : ""}
-        <span><small>Task status</small><b>${escapeHtml(getTaskStatusLabel(task.status))}</b></span>
-        <span><small>Assigned to</small><b>${escapeHtml(getTaskAssigneeLabel(task))}</b></span>
-      </div>
-      ${renderTaskLines(task)}
-    </section>
+    ${lines.length ? `
+      <details class="team-task-context order-task-context-details">
+        <summary>
+          <span>
+            <span class="eyebrow">Inspect order lines</span>
+            <strong>${escapeHtml(lineSummary || "Order line details")}</strong>
+          </span>
+          <span>Labels, video receipts, prices, and transactions</span>
+        </summary>
+        ${renderTaskLines(task)}
+      </details>
+    ` : ""}
     ${renderOrderWorkflowPanel(task)}
   `;
 }
@@ -1660,29 +1957,38 @@ function getEbayConversationTaskContext(task = {}) {
 function renderEbayConversationTeamTaskContext(task = {}) {
   const context = getEbayConversationTaskContext(task);
   if (!context) return "";
+  const details = [
+    context.direction ? ["Message", formatTaskTag(context.direction)] : null,
+    context.sender ? ["From", context.sender] : null,
+    context.recipient ? ["To", context.recipient] : null,
+    context.createdAt ? ["Sent", formatDate(context.createdAt)] : null,
+    context.ebayConversationId ? ["Conversation", context.ebayConversationId] : null,
+  ].filter(Boolean);
   return `
     <section class="team-task-context ebay-message-task-context">
       <div class="team-task-context-head">
-        <span class="eyebrow">eBay Conversation Context</span>
-        <strong>${escapeHtml(context.buyer || context.title || "Customer message")}</strong>
+        <div>
+          <span class="eyebrow">Customer Context</span>
+          <strong>${escapeHtml(context.buyer || context.title || "Customer message")}</strong>
+        </div>
+        <a class="team-task-context-open-link" href="${escapeHtml(context.href)}">Open eBay Conversation</a>
       </div>
-      <div class="team-task-facts">
+      <div class="team-task-ebay-snapshot">
         ${context.buyer ? `<span><small>Buyer</small><b>${escapeHtml(context.buyer)}</b></span>` : ""}
-        ${context.direction ? `<span><small>Message</small><b>${escapeHtml(context.direction)}</b></span>` : ""}
-        ${context.sender ? `<span><small>From</small><b>${escapeHtml(context.sender)}</b></span>` : ""}
-        ${context.recipient ? `<span><small>To</small><b>${escapeHtml(context.recipient)}</b></span>` : ""}
-        ${context.createdAt ? `<span><small>Sent</small><b>${escapeHtml(formatDate(context.createdAt))}</b></span>` : ""}
-        ${context.ebayConversationId ? `<span><small>Conversation</small><b>${escapeHtml(context.ebayConversationId)}</b></span>` : ""}
         ${context.taskTag ? `<span class="team-task-refund-fact"><small>Tag</small><b>${escapeHtml(formatTaskTag(context.taskTag))}</b></span>` : ""}
         ${context.refundAmount ? `<span class="team-task-refund-fact"><small>Refund amount</small><b>${escapeHtml(formatMoney(context.refundAmount) || context.refundAmount)}</b></span>` : ""}
+        ${context.createdAt ? `<span><small>Customer wrote</small><b>${escapeHtml(formatDate(context.createdAt))}</b></span>` : ""}
       </div>
-      ${context.subject ? `<p class="team-task-important"><strong>Subject</strong><span>${escapeHtml(context.subject)}</span></p>` : ""}
-      ${context.preview ? `<p class="team-task-important"><strong>Source message</strong><span>${escapeHtml(context.preview)}</span></p>` : ""}
-      <div class="team-task-context-links">
-        <a href="${escapeHtml(context.href)}">
-          Open eBay Conversation
-        </a>
-      </div>
+      ${context.subject ? `<p class="team-task-message-focus"><small>Subject</small><span>${escapeHtml(context.subject)}</span></p>` : ""}
+      ${context.preview ? `<p class="team-task-message-focus is-source-message"><small>Source message</small><span>${escapeHtml(context.preview)}</span></p>` : ""}
+      ${details.length ? `
+        <details class="team-task-context-details">
+          <summary>Conversation details</summary>
+          <div class="team-task-facts">
+            ${details.map(([label, value]) => `<span><small>${escapeHtml(label)}</small><b>${escapeHtml(value)}</b></span>`).join("")}
+          </div>
+        </details>
+      ` : ""}
     </section>
   `;
 }
@@ -1718,10 +2024,187 @@ function getTaskMoneyLabel(task = {}) {
   return "";
 }
 
+function getTaskOriginalInstruction(task = {}) {
+  return task.description || task.question || task.metadata?.task_description || task.metadata?.task_note || "";
+}
+
+function getLatestTaskEvent(events = []) {
+  return [...events].reverse().find((event) => event?.notes || event?.new_status || event?.action) || null;
+}
+
+function getCurrentTaskInstruction(task = {}, events = []) {
+  const latest = getLatestTaskEvent(events);
+  return latest?.notes || task.latest_note || getTaskOriginalInstruction(task) || task.title || "No instruction entered yet.";
+}
+
+function getTaskNextStepLabel(task = {}) {
+  const status = String(task.status || "").toLowerCase();
+  const labels = {
+    open: "Review the assignment and post the next update.",
+    assigned: "Work the assignment, then update or complete it.",
+    in_progress: "Continue the work and add progress when something changes.",
+    deferred: "Wait for the requested condition, then update before closing.",
+    blocked: "Needs help before this can move forward.",
+    waiting_on_admin: "Admin decision or approval is needed.",
+    waiting_on_worker: "Assigned worker needs to respond or complete the next step.",
+    resolved: "Completed. Keep the trail for reference.",
+    cancelled: "Canceled. No active work needed.",
+  };
+  return labels[status] || "Use the current instruction, then save an update or mark completed.";
+}
+
+function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
+  const originalInstruction = getTaskOriginalInstruction(task);
+  const latestEvent = getLatestTaskEvent(events);
+  const latestUpdate = String(latestEvent?.notes || "").trim();
+  const currentInstruction = originalInstruction || task.latest_note || task.title || "No assignment entered yet.";
+  const hasLatestUpdate = latestUpdate && latestUpdate !== currentInstruction;
+  const hasDifferentOriginal = originalInstruction && originalInstruction !== currentInstruction;
+  const customerName = getPendingOrderCustomerName(task);
+  const moneyLabel = getTaskMoneyLabel(task);
+  const order = task.order || {};
+  const lineSummary = getPendingOrderLineSummary(task);
+  const late = isTaskLate(task, { canceled });
+  const lateAge = getTaskLateAgeLabel(task);
+  const dueLabel = getTaskDueLabel(task);
+  const visibleFacts = [
+    task.buyer_username ? { label: "Buyer username", value: task.buyer_username } : null,
+    customerName ? { label: "Customer", value: customerName } : null,
+    task.order_number ? { label: "Order", value: task.order_number } : null,
+    moneyLabel ? { label: "Amount", value: moneyLabel } : null,
+    dueLabel !== "not set" ? { label: late ? "Late due date" : "Due", value: late && lateAge ? `${dueLabel} (${lateAge})` : dueLabel, className: late ? "is-overdue-fact" : "" } : null,
+    { label: "Assigned to", value: getTaskAssigneeLabel(task) },
+  ].filter(Boolean);
+  const advancedFacts = [
+    ["Source", getTaskSourceLabel(task)],
+    ["Status", canceled ? "Canceled" : getTaskStatusLabel(task.status)],
+    ["Priority", formatTaskTag(task.priority || "normal")],
+    ["Category", formatTaskTag(task.task_type || "general")],
+    lineSummary ? ["Lines / Qty", lineSummary] : null,
+    task.ship_by_date ? ["Ship by", formatDate(task.ship_by_date)] : null,
+    order.sale_date ? ["Sold", formatDate(order.sale_date)] : null,
+    task.created_by_email ? ["Created by", task.created_by_email] : null,
+    latestEvent ? ["Last update", `${formatTaskTag(latestEvent.action || "update")} - ${formatDate(latestEvent.created_at)}`] : null,
+  ].filter(Boolean);
+
+  return `
+    <section class="team-task-brief team-task-order-brief is-pending-order-task ${late ? "is-overdue" : ""}">
+      <div class="team-task-brief-head">
+        <div>
+          <span class="eyebrow">Assignment</span>
+          <strong>${escapeHtml(task.title || task.order_number || "Pending order task")}</strong>
+        </div>
+        <span class="team-task-chip team-task-status-chip ${late ? "team-task-overdue-status-chip" : ""}">${escapeHtml(late ? "Overdue" : canceled ? "Canceled" : getTaskStatusLabel(task.status))}</span>
+      </div>
+      ${late ? `
+        <p class="team-task-overdue-alert">
+          <strong>Order deadline is late</strong>
+          <span>${escapeHtml(`Due ${dueLabel}${lateAge ? ` - ${lateAge}` : ""}`)}</span>
+        </p>
+      ` : ""}
+      <article class="team-task-instruction is-current team-task-order-instruction">
+        <small>What needs to be done</small>
+        <p>${escapeHtml(currentInstruction)}</p>
+      </article>
+      ${hasLatestUpdate ? `
+        <p class="team-task-latest-update"><strong>Latest update</strong><span>${escapeHtml(latestUpdate)}</span></p>
+      ` : ""}
+      <div class="team-task-brief-facts team-task-order-facts">
+        ${visibleFacts.map((fact) => `<span class="${escapeHtml(fact.className || "")}"><small>${escapeHtml(fact.label)}</small><b>${escapeHtml(fact.value)}</b></span>`).join("")}
+      </div>
+      ${renderPendingOrderEvidencePanel(task, events)}
+      <p class="team-task-next-step"><strong>Next step</strong><span>${escapeHtml(getTaskNextStepLabel(task))}</span></p>
+      ${advancedFacts.length || hasDifferentOriginal ? `
+        <details class="team-task-context-details team-task-brief-details">
+          <summary>More audit details</summary>
+          ${hasDifferentOriginal ? `
+            <article class="team-task-instruction">
+              <small>Original assignment</small>
+              <p>${escapeHtml(originalInstruction)}</p>
+            </article>
+          ` : ""}
+          ${advancedFacts.length ? `
+            <div class="team-task-facts">
+              ${advancedFacts.map(([label, value]) => `<span><small>${escapeHtml(label)}</small><b>${escapeHtml(value)}</b></span>`).join("")}
+            </div>
+          ` : ""}
+        </details>
+      ` : ""}
+    </section>
+  `;
+}
+
+function renderTeamTaskBrief(task = {}, events = [], canceled = false) {
+  if (task.source === "order") return renderPendingOrderTaskBrief(task, events, canceled);
+
+  const originalInstruction = getTaskOriginalInstruction(task);
+  const currentInstruction = getCurrentTaskInstruction(task, events);
+  const latestEvent = getLatestTaskEvent(events);
+  const hasDifferentOriginal = originalInstruction && originalInstruction !== currentInstruction;
+  const sourceLabel = getTaskSourceLabel(task);
+  const moneyLabel = getTaskMoneyLabel(task);
+  return `
+    <section class="team-task-brief ${task.source === "team" ? "is-ebay-message-task" : ""} ${task.source === "order" ? "is-pending-order-task" : ""}">
+      <div class="team-task-brief-head">
+        <div>
+          <span class="eyebrow">Task Brief</span>
+          <strong>${escapeHtml(task.title || "Team task")}</strong>
+        </div>
+        <span class="team-task-chip team-task-status-chip">${escapeHtml(canceled ? "Canceled" : getTaskStatusLabel(task.status))}</span>
+      </div>
+      <div class="team-task-instruction-grid">
+        <article class="team-task-instruction is-current">
+          <small>Current instruction</small>
+          <p>${escapeHtml(currentInstruction)}</p>
+        </article>
+        ${hasDifferentOriginal ? `
+          <article class="team-task-instruction">
+            <small>Original assignment</small>
+            <p>${escapeHtml(originalInstruction)}</p>
+          </article>
+        ` : ""}
+      </div>
+      <div class="team-task-brief-facts">
+        <span><small>Source</small><b>${escapeHtml(sourceLabel)}</b></span>
+        <span><small>Assigned to</small><b>${escapeHtml(getTaskAssigneeLabel(task))}</b></span>
+        <span><small>Due</small><b>${escapeHtml(formatDate(task.due_at))}</b></span>
+        <span><small>Priority</small><b>${escapeHtml(formatTaskTag(task.priority || "normal"))}</b></span>
+        <span><small>Category</small><b>${escapeHtml(formatTaskTag(task.task_type || "general"))}</b></span>
+        ${task.order_number ? `<span><small>Order</small><b>${escapeHtml(task.order_number)}</b></span>` : ""}
+        ${task.buyer_username ? `<span><small>Buyer</small><b>${escapeHtml(task.buyer_username)}</b></span>` : ""}
+        ${moneyLabel ? `<span><small>Value</small><b>${escapeHtml(moneyLabel)}</b></span>` : ""}
+        ${task.created_by_email ? `<span><small>Created by</small><b>${escapeHtml(task.created_by_email)}</b></span>` : ""}
+        ${latestEvent ? `<span><small>Last update</small><b>${escapeHtml(`${formatTaskTag(latestEvent.action || "update")} - ${formatDate(latestEvent.created_at)}`)}</b></span>` : ""}
+      </div>
+      <p class="team-task-next-step"><strong>Next step</strong><span>${escapeHtml(getTaskNextStepLabel(task))}</span></p>
+    </section>
+  `;
+}
+
+function renderTaskUpdateTrail(task = {}, events = []) {
+  const orderedEvents = [...events].reverse();
+  return `
+    <section class="team-task-update-trail">
+      <div class="team-task-update-trail-head">
+        <div>
+          <span class="eyebrow">Updates & Audit Trail</span>
+          <strong>${events.length ? `${events.length} saved update${events.length === 1 ? "" : "s"}` : "No updates yet"}</strong>
+        </div>
+        <span>${escapeHtml(getTaskStatusLabel(task.status))}</span>
+      </div>
+      <div class="team-task-events">
+        ${orderedEvents.length ? orderedEvents.map(renderTaskEvent).join("") : `<div class="empty-state">No task trail yet.</div>`}
+      </div>
+    </section>
+  `;
+}
+
 function renderTaskCard(task = {}, options = {}) {
   const events = state.eventsByTask.get(getUnifiedTaskKey(task)) || [];
   const canceled = Boolean(options.canceled);
-  const urgent = ["urgent", "high"].includes(String(task.priority || "").toLowerCase())
+  const late = isTaskLate(task, { canceled });
+  const urgent = late
+    || ["urgent", "high"].includes(String(task.priority || "").toLowerCase())
     || ["blocked", "deferred"].includes(String(task.status || "").toLowerCase());
   const resolved = HISTORY_TASK_STATUSES.includes(String(task.status || "").toLowerCase());
   const taskKey = getUnifiedTaskKey(task);
@@ -1733,15 +2216,37 @@ function renderTaskCard(task = {}, options = {}) {
   const assigneeLabel = getTaskAssigneeLabel(task);
   const moneyLabel = getTaskMoneyLabel(task);
   const eventCountLabel = `${events.length} update${events.length === 1 ? "" : "s"}`;
+  const lateAge = getTaskLateAgeLabel(task);
+  const dueLabel = getTaskDueLabel(task);
   const preview = getTaskCardPreview(task, canceled);
   const contextLine = [
     task.buyer_username ? `Buyer ${task.buyer_username}` : "",
     task.order_number ? `Order ${task.order_number}` : "",
     task.source === "team" && task.metadata?.task_tag ? formatTaskTag(task.metadata.task_tag) : "",
   ].filter(Boolean).join(" - ");
+  const actionHtml = canceled ? `
+    <div class="team-task-actions">
+      <button type="button" class="secondary-btn" data-task-history-action="reopen" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Reopen Task</button>
+    </div>
+  ` : renderTaskActions(task, resolved);
+  const detailsHtml = task.source === "order"
+    ? `
+        ${renderTeamTaskBrief(task, events, canceled)}
+        ${renderAdminReassignRequestNotice(task)}
+        ${actionHtml}
+        ${renderTaskContext(task)}
+        ${renderTaskUpdateTrail(task, events)}
+      `
+    : `
+        ${renderTeamTaskBrief(task, events, canceled)}
+        ${renderTaskContext(task)}
+        ${renderAdminReassignRequestNotice(task)}
+        ${actionHtml}
+        ${renderTaskUpdateTrail(task, events)}
+      `;
 
   return `
-    <article class="team-task-card ${urgent ? "is-urgent" : ""} ${resolved ? "is-resolved" : ""} ${expanded ? "is-expanded" : "is-collapsed"} ${escapeHtml(readInfo.className)}" data-team-task-card="${escapeHtml(task.id)}" data-team-task-card-key="${escapeHtml(taskKey)}">
+    <article class="team-task-card ${urgent ? "is-urgent" : ""} ${late ? "is-overdue" : ""} ${resolved ? "is-resolved" : ""} ${expanded ? "is-expanded" : "is-collapsed"} ${escapeHtml(readInfo.className)}" data-team-task-card="${escapeHtml(task.id)}" data-team-task-card-key="${escapeHtml(taskKey)}">
       <button type="button" class="team-task-card-summary" data-team-task-toggle="${escapeHtml(taskKey)}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="${escapeHtml(detailsId)}">
         <span class="team-task-source-dot">${escapeHtml(sourceLabel.slice(0, 2).toUpperCase())}</span>
         <span class="team-task-summary-main">
@@ -1758,7 +2263,7 @@ function renderTaskCard(task = {}, options = {}) {
           <span>${escapeHtml(formatTaskTag(task.task_type || "general"))}</span>
           <span class="team-task-priority-chip">${escapeHtml(formatTaskTag(task.priority || "normal"))}</span>
           ${moneyLabel ? `<span>${escapeHtml(moneyLabel)}</span>` : ""}
-          <span>Due ${escapeHtml(formatDate(task.due_at))}</span>
+          <span class="${late ? "team-task-overdue-pill" : ""}">${escapeHtml(late ? `Overdue ${lateAge || ""}`.trim() : `Due ${dueLabel}`)}${late ? ` - Due ${escapeHtml(dueLabel)}` : ""}</span>
           <span>${escapeHtml(assigneeLabel)}</span>
           <span>${escapeHtml(eventCountLabel)}</span>
           ${canceled ? `<span>Removed ${escapeHtml(formatDate(task.metadata?.history_removed_at))}</span>` : ""}
@@ -1768,29 +2273,7 @@ function renderTaskCard(task = {}, options = {}) {
         </span>
       </button>
       <div id="${escapeHtml(detailsId)}" class="team-task-card-details ${expanded ? "" : "hidden"}">
-        <div class="team-task-meta">
-          ${task.source !== "team" && task.sourceLabel ? `<span class="team-task-source">${escapeHtml(task.sourceLabel)}</span>` : ""}
-          <span>${escapeHtml(formatTaskTag(task.task_type || "general"))}</span>
-          <span>${escapeHtml(formatTaskTag(task.priority || "normal"))}</span>
-          ${task.source === "team" && task.sourceLabel ? `<span class="team-task-source">${escapeHtml(task.sourceLabel)}</span>` : ""}
-          ${task.source === "team" && task.metadata?.refund_amount ? `<span class="team-task-source">Refund ${escapeHtml(formatMoney(task.metadata.refund_amount) || task.metadata.refund_amount)}</span>` : ""}
-          <span>Assigned: ${escapeHtml(assigneeLabel)}</span>
-          <span>Due ${escapeHtml(formatDate(task.due_at))}</span>
-          ${task.order_number ? `<span>Order ${escapeHtml(task.order_number)}</span>` : ""}
-          ${task.buyer_username ? `<span>${escapeHtml(task.buyer_username)}</span>` : ""}
-          ${task.source === "team" ? `<span>Created by ${escapeHtml(task.created_by_email || "logged-in user")}</span>` : ""}
-          ${canceled ? `<span>Removed ${escapeHtml(formatDate(task.metadata?.history_removed_at))}</span>` : ""}
-        </div>
-        ${renderTaskContext(task)}
-        ${renderAdminReassignRequestNotice(task)}
-        <div class="team-task-events">
-          ${events.length ? events.map(renderTaskEvent).join("") : `<div class="empty-state">No task trail yet.</div>`}
-        </div>
-        ${canceled ? `
-          <div class="team-task-actions">
-            <button type="button" class="secondary-btn" data-task-history-action="reopen" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Reopen Task</button>
-          </div>
-        ` : renderTaskActions(task, resolved)}
+        ${detailsHtml}
       </div>
     </article>
   `;
@@ -1830,7 +2313,7 @@ function renderTasks() {
   if (count) count.textContent = `${state.tasks.length} task${state.tasks.length === 1 ? "" : "s"}`;
 
   if (!state.tasks.length) {
-    renderTaskReadFilterChrome([]);
+    renderTaskFilterChrome([]);
     list.innerHTML = `<div class="empty-state">${
       isCanceledTaskScope()
         ? "No canceled tasks."
@@ -1841,16 +2324,20 @@ function renderTasks() {
     return;
   }
 
-  const visibleTasks = getTasksForReadFilter(state.tasks);
-  renderTaskReadFilterChrome(state.tasks);
+  const visibleTasks = getVisibleTasksForCurrentFilters(state.tasks);
+  renderTaskFilterChrome(state.tasks);
   if (count) {
-    count.textContent = state.taskReadFilter === "all"
+    count.textContent = (
+      state.taskReadFilter === "all"
+      && state.taskOwnerFilter === "all"
+      && state.taskSourceFilter === "all"
+    )
       ? `${state.tasks.length} task${state.tasks.length === 1 ? "" : "s"}`
       : `${visibleTasks.length} of ${state.tasks.length} tasks`;
   }
 
   if (!visibleTasks.length) {
-    list.innerHTML = `<div class="empty-state">No ${state.taskReadFilter === "read" ? "read" : "new or updated"} tasks in this view.</div>`;
+    list.innerHTML = `<div class="empty-state">No tasks match the selected filters.</div>`;
     return;
   }
 
@@ -2048,6 +2535,9 @@ function renderOrderTaskActions(task = {}, resolved = false, options = {}) {
 
 function renderTaskEvent(event = {}) {
   const photos = Array.isArray(event.photo_attachments) ? event.photo_attachments : [];
+  const actionLabel = formatTaskTag(event.action || "commented") || "Commented";
+  const statusLabel = getTaskStatusLabel(event.new_status || event.old_status || "");
+  const actorLabel = event.signed_by_email || "logged-in user";
   const photoHtml = photos.length
     ? `<div class="team-task-event-photos">${photos.map((photo, index) => {
         const label = photo.label || `Photo ${index + 1}`;
@@ -2075,11 +2565,17 @@ function renderTaskEvent(event = {}) {
   return `
     <article class="team-task-event">
       <div class="team-task-event-head">
-        <strong>${escapeHtml(String(event.action || "commented").replace(/_/g, " "))}</strong>
+        <div>
+          <small>${escapeHtml(actionLabel)}</small>
+          <strong>${escapeHtml(statusLabel || "Task update")}</strong>
+        </div>
         <span>${escapeHtml(formatDate(event.created_at))}</span>
       </div>
       ${event.notes ? `<p>${escapeHtml(event.notes)}</p>` : ""}
-      <small>Signed by ${escapeHtml(event.signed_by_email || "logged-in user")} - ${escapeHtml(getTaskStatusLabel(event.new_status || event.old_status || ""))}</small>
+      <div class="team-task-event-signature">
+        <span>Signed by ${escapeHtml(actorLabel)}</span>
+        ${event.old_status && event.new_status && event.old_status !== event.new_status ? `<span>${escapeHtml(getTaskStatusLabel(event.old_status))} to ${escapeHtml(getTaskStatusLabel(event.new_status))}</span>` : ""}
+      </div>
       ${photoHtml}
     </article>
   `;
@@ -3418,6 +3914,22 @@ function setupListeners() {
     button.addEventListener("click", () => {
       state.taskReadFilter = ["all", "unread", "read"].includes(button.dataset.taskReadFilter)
         ? button.dataset.taskReadFilter
+        : "all";
+      renderTasks();
+    });
+  });
+  document.querySelectorAll("[data-task-owner-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.taskOwnerFilter = ["all", "assigned", "created"].includes(button.dataset.taskOwnerFilter)
+        ? button.dataset.taskOwnerFilter
+        : "all";
+      renderTasks();
+    });
+  });
+  document.querySelectorAll("[data-task-source-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.taskSourceFilter = ["all", "independent", "order", "ebay_triage", "return"].includes(button.dataset.taskSourceFilter)
+        ? button.dataset.taskSourceFilter
         : "all";
       renderTasks();
     });
