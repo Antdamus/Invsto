@@ -69,6 +69,7 @@ const ACTIVE_TASK_STATUSES = [
 const HISTORY_TASK_STATUSES = ["resolved", "cancelled", "approved_by_admin", "approved_for_shipping", "shipped_completed", "closed"];
 const ACTIVE_RETURN_TASK_STATUSES = ["open", "assigned", "in_progress", "blocked", "deferred"];
 const HISTORY_RETURN_TASK_STATUSES = ["resolved", "cancelled"];
+const ACCEPTANCE_PENDING_TASK_STATUSES = new Set(["completed_by_employee", "pending_admin_review", "ready_for_admin_approval"]);
 const ORDER_PARENT_TASK_TYPES = new Set(["coordination", "admin_review", "pending_admin_review", "worker_follow_up", "special_order"]);
 const ORDER_SUBTASK_TYPE = "pending_subtask";
 const ORDER_SHIPPING_TYPE = "pending_shipping";
@@ -532,6 +533,32 @@ function isTaskCreatedByCurrentUser(task = {}) {
   );
 }
 
+function isTaskPendingAcceptance(task = {}) {
+  if (isTaskHistoryView()) return false;
+  return ACCEPTANCE_PENDING_TASK_STATUSES.has(String(task.status || "").toLowerCase());
+}
+
+function isTaskAcceptanceVisibleToViewer(task = {}) {
+  if (!isTaskPendingAcceptance(task)) return false;
+  return Boolean(
+    isAdminUser()
+    || isTaskAssignedToCurrentUser(task)
+    || isTaskCreatedByCurrentUser(task)
+  );
+}
+
+function canReviewTaskAcceptance(task = {}) {
+  if (!isTaskPendingAcceptance(task)) return false;
+  return Boolean(
+    isAdminUser()
+    || isTaskCreatedByCurrentUser(task)
+  );
+}
+
+function getDefaultActiveTasks(tasks = []) {
+  return tasks.filter((task) => !isTaskPendingAcceptance(task));
+}
+
 function getTaskSourceFilterValue(task = {}) {
   if (task.source === "order" && task.metadata?.source === "order_history") return "order_history";
   if (task.source === "order") return "order";
@@ -543,11 +570,15 @@ function getTaskSourceFilterValue(task = {}) {
 
 function getTaskOwnerCounts(tasks = []) {
   return tasks.reduce((counts, task) => {
+    if (isTaskPendingAcceptance(task)) {
+      if (isTaskAcceptanceVisibleToViewer(task)) counts.acceptance += 1;
+      return counts;
+    }
     counts.all += 1;
     if (isTaskAssignedToCurrentUser(task)) counts.assigned += 1;
     if (isTaskCreatedByCurrentUser(task)) counts.created += 1;
     return counts;
-  }, { all: 0, assigned: 0, created: 0 });
+  }, { all: 0, assigned: 0, created: 0, acceptance: 0 });
 }
 
 function getTaskSourceCounts(tasks = []) {
@@ -560,9 +591,11 @@ function getTaskSourceCounts(tasks = []) {
 }
 
 function getTasksForOwnerFilter(tasks = []) {
-  if (state.taskOwnerFilter === "assigned") return tasks.filter(isTaskAssignedToCurrentUser);
-  if (state.taskOwnerFilter === "created") return tasks.filter(isTaskCreatedByCurrentUser);
-  return tasks;
+  if (state.taskOwnerFilter === "acceptance") return tasks.filter(isTaskAcceptanceVisibleToViewer);
+  const activeTasks = getDefaultActiveTasks(tasks);
+  if (state.taskOwnerFilter === "assigned") return activeTasks.filter(isTaskAssignedToCurrentUser);
+  if (state.taskOwnerFilter === "created") return activeTasks.filter(isTaskCreatedByCurrentUser);
+  return activeTasks;
 }
 
 function getTasksForSourceFilter(tasks = []) {
@@ -581,9 +614,10 @@ function renderTaskOwnerFilterChrome(tasks = []) {
   document.querySelectorAll("[data-task-owner-filter]").forEach((button) => {
     const filter = button.dataset.taskOwnerFilter || "all";
     const labels = {
-      all: `All loaded ${counts.all}`,
+      all: `Active work ${counts.all}`,
       assigned: `${isViewingWorkerTasks() ? `Assigned to ${viewerLabel}` : "Assigned to me"} ${counts.assigned}`,
       created: `${isViewingWorkerTasks() ? `Created by ${viewerLabel}` : "Created by me"} ${counts.created}`,
+      acceptance: `Needs acceptance ${counts.acceptance}`,
     };
     button.textContent = labels[filter] || formatTaskTag(filter);
     button.classList.toggle("is-active", state.taskOwnerFilter === filter);
@@ -610,7 +644,7 @@ function renderTaskSourceFilterChrome(tasks = []) {
 function renderTaskFilterChrome(tasks = []) {
   renderTaskReadFilterChrome(tasks);
   renderTaskOwnerFilterChrome(tasks);
-  renderTaskSourceFilterChrome(tasks);
+  renderTaskSourceFilterChrome(getTasksForOwnerFilter(getTasksForReadFilter(tasks)));
 }
 
 async function markTaskSeen(task = {}) {
@@ -810,13 +844,13 @@ function configureModalAdminFields({
 function configureStatusOptionsForProgress(selectId, progressMode = false) {
   const select = $(selectId);
   if (!select) return;
-  ["resolved", "cancelled"].forEach((value) => {
+  ["resolved", "cancelled", "completed_by_employee", "sent_back_for_rework"].forEach((value) => {
     const option = [...select.options].find((entry) => entry.value === value);
     if (!option) return;
     option.hidden = progressMode;
     option.disabled = progressMode;
   });
-  if (progressMode && ["resolved", "cancelled"].includes(select.value)) {
+  if (progressMode && ["resolved", "cancelled", "completed_by_employee", "sent_back_for_rework"].includes(select.value)) {
     select.value = "deferred";
   }
 }
@@ -1070,11 +1104,7 @@ async function loadTeamTaskRecords() {
 
 async function loadOrderTaskRecords() {
   const viewedWorkerUserId = getViewedWorkerUserId();
-  const statuses = isHistoricalTaskView()
-    ? HISTORY_TASK_STATUSES
-    : isAdminUser() && !isViewingWorkerTasks()
-      ? ACTIVE_TASK_STATUSES
-      : ACTIVE_TASK_STATUSES.filter((status) => status !== "completed_by_employee");
+  const statuses = isHistoricalTaskView() ? HISTORY_TASK_STATUSES : ACTIVE_TASK_STATUSES;
   let query = supabase
     .from("ebay_order_tasks")
     .select("id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, created_at, updated_at, completed_at, resolved_at, latest_note, latest_photo_count, created_by, created_by_email, metadata, ebay_orders(order_number, buyer_username, sale_date, paid_on_date, ship_by_date, status, total_price, net_payout, label_metadata)")
@@ -1086,7 +1116,7 @@ async function loadOrderTaskRecords() {
   } else if (!isTeamWideTaskScope() && !isCanceledTaskScope()) {
     query = isAdminUser() && !isHistoricalTaskView()
       ? query.or(`assigned_to_user_id.eq.${state.user?.id},status.eq.waiting_on_admin,and(assigned_by.eq.${state.user?.id},assigned_to_user_id.not.is.null)`)
-      : query.eq("assigned_to_user_id", state.user?.id);
+      : query.or(`assigned_to_user_id.eq.${state.user?.id},created_by.eq.${state.user?.id},assigned_by.eq.${state.user?.id}`);
   }
 
   const { data, error } = await query;
@@ -2486,10 +2516,12 @@ function renderTasks() {
 
   if (title) {
     title.textContent = isViewingWorkerTasks()
-      ? `${getViewedWorkerLabel()} - ${isTaskHistoryView() ? "Task History" : "Active Tasks"}`
+      ? `${getViewedWorkerLabel()} - ${isTaskHistoryView() ? "Task History" : state.taskOwnerFilter === "acceptance" ? "Needs Acceptance" : "Active Tasks"}`
       : isTaskHistoryView()
         ? (isCanceledTaskScope() ? "Canceled Tasks" : isTeamWideTaskScope() ? "Everyone's Task History" : "My Task History")
-        : (isTeamWideTaskScope() ? "Everyone's Active Tasks" : "My Assigned Tasks");
+        : state.taskOwnerFilter === "acceptance"
+          ? "Tasks Needing Acceptance"
+          : (isTeamWideTaskScope() ? "Everyone's Active Tasks" : "My Assigned Tasks");
   }
   if (count) count.textContent = `${state.tasks.length} task${state.tasks.length === 1 ? "" : "s"}`;
 
@@ -2513,7 +2545,7 @@ function renderTasks() {
       && state.taskOwnerFilter === "all"
       && state.taskSourceFilter === "all"
     )
-      ? `${state.tasks.length} task${state.tasks.length === 1 ? "" : "s"}`
+      ? `${visibleTasks.length} active task${visibleTasks.length === 1 ? "" : "s"}`
       : `${visibleTasks.length} of ${state.tasks.length} tasks`;
   }
 
@@ -2530,6 +2562,12 @@ function renderTasks() {
   });
   list.querySelectorAll("[data-team-task-resolve]").forEach((button) => {
     button.addEventListener("click", () => openTaskModal({ taskId: button.dataset.teamTaskResolve, resolve: true }));
+  });
+  list.querySelectorAll("[data-team-task-accept]").forEach((button) => {
+    button.addEventListener("click", () => openTaskModal({ taskId: button.dataset.teamTaskAccept, accept: true }));
+  });
+  list.querySelectorAll("[data-team-task-sendback]").forEach((button) => {
+    button.addEventListener("click", () => openTaskModal({ taskId: button.dataset.teamTaskSendback, sendBack: true }));
   });
   list.querySelectorAll("[data-team-task-reassign-request]").forEach((button) => {
     button.addEventListener("click", () => openTaskModal({ taskId: button.dataset.teamTaskReassignRequest, reassignRequest: true }));
@@ -2617,6 +2655,18 @@ function renderTaskActions(task = {}, resolved = false) {
       <div class="team-task-actions">
         <a class="secondary-btn" href="${escapeHtml(task.actionHref || "#")}">${escapeHtml(label)}</a>
       </div>
+      ${renderAdminHistoryActions(task)}
+    `;
+  }
+
+  if (isTaskPendingAcceptance(task)) {
+    const reviewer = canReviewTaskAcceptance(task);
+    return `
+      <div class="team-task-actions">
+        ${reviewer ? `<button type="button" class="secondary-btn" data-team-task-sendback="${escapeHtml(task.id)}">Send Back</button>` : `<span class="team-task-waiting-pill">Waiting for acceptance</span>`}
+        ${reviewer ? `<button type="button" class="primary-btn" data-team-task-accept="${escapeHtml(task.id)}">Accept / Close</button>` : ""}
+      </div>
+      ${renderAdminAssignmentActions(task)}
       ${renderAdminHistoryActions(task)}
     `;
   }
@@ -3656,6 +3706,10 @@ async function openTaskModal(options = {}) {
   state.mode = task
     ? options.reassignRequest
       ? "reassign_request"
+      : options.accept
+        ? "accept"
+        : options.sendBack
+          ? "send_back"
       : options.resolve
         ? "resolve"
         : options.progress
@@ -3668,13 +3722,17 @@ async function openTaskModal(options = {}) {
   setPhotoStatus("");
 
   $("team-task-modal-title").textContent = task
-    ? options.reassignRequest ? "Request reassignment" : options.resolve ? "Complete task" : options.progress ? "Progress / delay update" : "Reply to team task"
+    ? options.reassignRequest ? "Request reassignment" : options.accept ? "Accept completed task" : options.sendBack ? "Send task back" : options.resolve ? "Complete task" : options.progress ? "Progress / delay update" : "Reply to team task"
     : "Create team task";
   $("team-task-modal-subtitle").textContent = task
     ? options.reassignRequest
       ? "Send a note to the admin asking them to move this task. The assignment will stay unchanged until an admin reviews it."
+      : options.accept
+        ? "Confirm the worker's completion note and close this task in the audit trail."
+      : options.sendBack
+        ? "Explain what still needs to be fixed so the assigned worker can continue."
       : options.resolve
-        ? "Add the final completion note and any proof before closing this task."
+        ? "Add the final completion note and any proof before sending this task for acceptance."
         : options.progress
       ? "Explain what happened, what is blocking completion, and when this should be checked again."
       : "Add the next note, reassign the work, or mark it completed."
@@ -3682,7 +3740,11 @@ async function openTaskModal(options = {}) {
   $("team-task-title-field")?.classList.toggle("hidden", Boolean(task));
   $("submit-team-task").textContent = task
     ? options.resolve
-      ? "Mark Completed"
+      ? "Send for Acceptance"
+      : options.accept
+        ? "Accept / Close"
+      : options.sendBack
+        ? "Send Back"
       : options.reassignRequest
         ? "Request Reassign"
         : options.progress
@@ -3694,6 +3756,10 @@ async function openTaskModal(options = {}) {
   $("team-task-note").value = "";
   $("team-task-note").placeholder = options.reassignRequest
     ? "Why should this be reassigned? Add anything the admin should know."
+    : options.accept
+      ? "Acceptance note for the audit trail."
+    : options.sendBack
+      ? "What needs to be fixed before this can be accepted?"
     : options.resolve
       ? "Final completion note."
       : options.progress
@@ -3702,16 +3768,26 @@ async function openTaskModal(options = {}) {
   $("team-task-type").value = task?.task_type || "general";
   $("team-task-priority").value = task?.priority || "normal";
   $("team-task-due-at").value = toDateTimeLocalValue(task?.due_at || "");
-  $("team-task-status-input").value = options.resolve ? "resolved" : options.reassignRequest ? "waiting_on_admin" : options.progress ? "deferred" : "";
+  $("team-task-status-input").value = options.accept
+    ? "resolved"
+    : options.sendBack
+      ? "sent_back_for_rework"
+    : options.resolve
+      ? "completed_by_employee"
+    : options.reassignRequest
+      ? "waiting_on_admin"
+    : options.progress
+      ? "deferred"
+      : "";
   configureStatusOptionsForProgress("team-task-status-input", Boolean(options.progress));
   renderAssigneeSelect();
   $("team-task-assignee").value = task?.assigned_to_user_id || "";
   configureModalAdminFields({
-    assignee: !task || (isAdminUser() && !options.progress && !options.resolve),
-    category: !task || (isAdminUser() && !options.progress && !options.resolve && !options.reassignRequest),
-    priority: !task || (isAdminUser() && !options.progress && !options.resolve && !options.reassignRequest),
-    due: !task || options.progress || (isAdminUser() && !options.resolve && !options.reassignRequest),
-    status: Boolean(task) && (options.progress || isAdminUser()) && !options.resolve && !options.reassignRequest,
+    assignee: !task || (isAdminUser() && !options.progress && !options.resolve && !options.accept && !options.sendBack),
+    category: !task || (isAdminUser() && !options.progress && !options.resolve && !options.reassignRequest && !options.accept && !options.sendBack),
+    priority: !task || (isAdminUser() && !options.progress && !options.resolve && !options.reassignRequest && !options.accept && !options.sendBack),
+    due: !task || options.progress || options.sendBack || (isAdminUser() && !options.resolve && !options.reassignRequest && !options.accept),
+    status: Boolean(task) && (options.progress || isAdminUser()) && !options.resolve && !options.reassignRequest && !options.accept && !options.sendBack,
   });
 
   openModal();
@@ -3992,7 +4068,7 @@ async function submitTask() {
   const title = String($("team-task-title-input")?.value || "").trim();
   const note = String($("team-task-note")?.value || "").trim();
   if (state.mode === "create" && !title) return setModalError("Write a task title first.");
-  if (!note && ["reply", "progress", "resolve", "reassign_request"].includes(state.mode)) return setModalError("Write a note before saving the update.");
+  if (!note && ["reply", "progress", "resolve", "accept", "send_back", "reassign_request"].includes(state.mode)) return setModalError("Write a note before saving the update.");
 
   const submit = $("submit-team-task");
   submit?.toggleAttribute("disabled", true);
@@ -4019,7 +4095,7 @@ async function submitTask() {
       });
       if (error) throw error;
       setStatus("Team task updated.", "success");
-    } else if (["progress", "resolve", "reassign_request"].includes(state.mode) && state.activeTaskId) {
+    } else if (["progress", "resolve", "accept", "send_back", "reassign_request"].includes(state.mode) && state.activeTaskId) {
       const { error } = await supabase.rpc("respond_team_task", {
         _task_id: state.activeTaskId,
         _note: note,
@@ -4028,10 +4104,21 @@ async function submitTask() {
         _priority: null,
         _photo_attachments: photos,
         _signed_by_email: signedByEmail,
-        _due_at: state.mode === "progress" ? localDateTimeToIso($("team-task-due-at")?.value || "") : null,
+        _due_at: ["progress", "send_back"].includes(state.mode) ? localDateTimeToIso($("team-task-due-at")?.value || "") : null,
       });
       if (error) throw error;
-      setStatus(state.mode === "progress" ? "Task progress saved." : state.mode === "resolve" ? "Team task completed." : "Reassignment request sent.", "success");
+      setStatus(
+        state.mode === "progress"
+          ? "Task progress saved."
+          : state.mode === "resolve"
+            ? "Task sent for acceptance."
+          : state.mode === "accept"
+            ? "Task accepted and closed."
+          : state.mode === "send_back"
+            ? "Task sent back for rework."
+            : "Reassignment request sent.",
+        "success"
+      );
     } else {
       const { error } = await supabase.rpc("create_team_task", {
         _title: title,
@@ -4087,6 +4174,7 @@ function setupListeners() {
     button.addEventListener("click", async () => {
       state.taskView = button.dataset.taskView === "history" ? "history" : "active";
       if (state.taskView === "active" && isCanceledTaskScope()) state.taskScope = "mine";
+      if (state.taskView === "history" && state.taskOwnerFilter === "acceptance") state.taskOwnerFilter = "all";
       updateTaskScopeChrome();
       await loadTasks();
     });
@@ -4101,7 +4189,7 @@ function setupListeners() {
   });
   document.querySelectorAll("[data-task-owner-filter]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.taskOwnerFilter = ["all", "assigned", "created"].includes(button.dataset.taskOwnerFilter)
+      state.taskOwnerFilter = ["all", "assigned", "created", "acceptance"].includes(button.dataset.taskOwnerFilter)
         ? button.dataset.taskOwnerFilter
         : "all";
       renderTasks();

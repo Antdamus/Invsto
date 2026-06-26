@@ -307,6 +307,28 @@ body {
   color: var(--task-gold);
 }
 
+.team-task-acceptance-filter-btn {
+  color: var(--task-green);
+}
+
+.team-task-acceptance-filter-btn.is-active {
+  background: rgba(157, 242, 189, 0.14);
+  color: var(--task-green);
+}
+
+.team-task-waiting-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  border: 1px solid rgba(241, 214, 155, 0.22);
+  border-radius: 999px;
+  padding: 7px 12px;
+  color: var(--task-muted);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.82rem;
+  font-weight: 950;
+}
+
 .team-task-scope,
 .team-task-sort,
 .team-task-worker-view {

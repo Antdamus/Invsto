@@ -88,9 +88,10 @@
                 <button type="button" class="team-task-read-filter-btn" data-task-read-filter="read">Read 0</button>
               </div>
               <div class="team-task-owner-filter" role="tablist" aria-label="Task relationship">
-                <button type="button" class="team-task-filter-btn is-active" data-task-owner-filter="all">All loaded 0</button>
+                <button type="button" class="team-task-filter-btn is-active" data-task-owner-filter="all">Active work 0</button>
                 <button type="button" class="team-task-filter-btn" data-task-owner-filter="assigned">Assigned to me 0</button>
                 <button type="button" class="team-task-filter-btn" data-task-owner-filter="created">Created by me 0</button>
+                <button type="button" class="team-task-filter-btn team-task-acceptance-filter-btn" data-task-owner-filter="acceptance">Needs acceptance 0</button>
               </div>
               <div class="team-task-source-filter" role="tablist" aria-label="Task source">
                 <button type="button" class="team-task-filter-btn is-active" data-task-source-filter="all">All sources 0</button>
@@ -205,6 +206,8 @@
             <option value="blocked">Blocked / needs help</option>
             <option value="waiting_on_admin">Waiting on admin</option>
             <option value="waiting_on_worker">Waiting on worker</option>
+            <option value="completed_by_employee">Completed, needs acceptance</option>
+            <option value="sent_back_for_rework">Sent back for rework</option>
             <option value="resolved">Resolved</option>
             <option value="cancelled">Cancel task</option>
           </select>
