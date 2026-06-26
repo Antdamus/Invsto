@@ -2030,8 +2030,12 @@ async function fetchOrderLineQueue(status, admin) {
   try {
     return await fetchOrderLineQueueViaRpc(status, admin);
   } catch (error) {
-    if (!isMissingPendingOrderQueueRpcError(error)) throw error;
-    console.warn("Fast pending eBay order queue RPC is not available yet; falling back to nested query.", error);
+    console.warn(
+      isMissingPendingOrderQueueRpcError(error)
+        ? "Fast pending eBay order queue RPC is not available yet; falling back to nested query."
+        : "Fast pending eBay order queue RPC failed; falling back to nested query.",
+      error
+    );
     return fetchOrderLineQueueViaPostgrest(status, admin);
   }
 }
