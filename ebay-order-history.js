@@ -16,6 +16,9 @@ const state = {
   historyOrderTaskAssignees: [],
   activeHistoryOrderTaskGroup: null,
   activeHistoryOrderTaskGroupKey: "",
+  activeHistoryExtraPhotoGroup: null,
+  activeHistoryExtraPhotoGroupKey: "",
+  historyExtraPhotoPreviewUrls: [],
   returnTaskLaunchApplied: false,
   relatedAdminEvents: [],
   relatedRevertEvents: [],
@@ -892,6 +895,7 @@ function getEventEvidencePhotos(event) {
       path: getEvidencePhotoPath(photo),
       signed_by_email: photo?.signed_by_email || event?.signed_by_email || event?.created_by_email || "",
       created_at: photo?.created_at || event?.created_at || "",
+      event,
     }))
     .filter((photo) => photo?.bucket && photo?.path);
 }
@@ -913,6 +917,24 @@ function isVideoReceiptEvidencePhoto(photo = {}) {
     photo.metadata?.source,
   ].filter(Boolean).join(" ");
   return /video[-_\s]?receipt|ebaylive\/events/i.test(text);
+}
+
+function isHistoryExtraOrderProofPhoto(photo = {}) {
+  const event = photo.event || {};
+  const text = [
+    photo.label,
+    photo.path,
+    photo.metadata?.source,
+    photo.metadata?.proof_type,
+    event.action,
+    event.payload?.source,
+    event.payload?.proof_type,
+  ].filter(Boolean).join(" ");
+  return /order_history_extra_photo|history_extra_photo|extra_order_proof/i.test(text);
+}
+
+function getHistoryExtraOrderProofPhotos(group = {}) {
+  return getHistoryGroupEvidencePhotos(group).filter(isHistoryExtraOrderProofPhoto);
 }
 
 function getEvidencePhotoAuditText(photo = {}) {
@@ -1057,6 +1079,29 @@ function getReturnSearchTextForLine(line) {
       ...(event.evidence_photos || []).map((photo) => `${photo.bucket}/${photo.path}`),
     ]),
   ]);
+}
+
+function getOrderTaskEventSearchTextForLine(line) {
+  const lineId = line?.id || "";
+  if (!lineId) return "";
+  const events = getHistoryTaskEventsForLineIds([lineId]);
+  return buildHistorySearchText(events.flatMap((event) => [
+    event.action,
+    event.notes,
+    event.signed_by_email,
+    event.task_title,
+    event.task_question,
+    event.task_latest_note,
+    event.payload?.source,
+    event.payload?.proof_type,
+    ...(getEventEvidencePhotos(event) || []).flatMap((photo) => [
+      photo.label,
+      photo.original_name,
+      photo.metadata?.source,
+      photo.metadata?.proof_type,
+      `${photo.bucket}/${photo.path}`,
+    ]),
+  ]));
 }
 
 async function signEventEvidencePhoto(photo, options = {}) {
@@ -2116,6 +2161,7 @@ function getHistoryLineSearchHaystack(line) {
     line.searchText,
     getLabelEventSearchTextForLine(line),
     getReturnSearchTextForLine(line),
+    getOrderTaskEventSearchTextForLine(line),
   ].join(" ");
 }
 
@@ -3494,6 +3540,7 @@ function getEventLabel(event) {
   if (event.category === "revert") return "Reverted";
   if (event.category === "label") return event.action === "replaced" ? "Shipping label replaced" : "Shipping label attached";
   if (event.category === "task") {
+    if (isHistoryExtraPhotoTaskEvent(event)) return "Extra order proof photo";
     return getEventEvidencePhotos(event).some(isVideoReceiptEvidencePhoto)
       ? "Video receipt screenshot"
       : "Order coordination";
@@ -3751,12 +3798,19 @@ function compareText(a, b) {
 
 function getVisibleHistoryGroups() {
   const labelFilter = $("history-label-filter")?.value || "all";
+  const proofFilter = $("history-proof-filter")?.value || "all";
   const sort = $("history-sort")?.value || "date_desc";
   const groups = buildHistoryGroups(state.filteredLines)
     .filter((group) => {
       const hasLabel = historyGroupHasAttachedLabel(group);
       if (labelFilter === "missing") return !hasLabel;
       if (labelFilter === "attached") return hasLabel;
+      return true;
+    })
+    .filter((group) => {
+      const extraProofCount = getHistoryExtraOrderProofPhotos(group).length;
+      if (proofFilter === "extra_photos") return extraProofCount > 0;
+      if (proofFilter === "missing_extra_photos") return extraProofCount === 0;
       return true;
     });
 
@@ -4040,9 +4094,15 @@ function getHistoryTaskEventsForLineIds(lineIds = []) {
   ));
 }
 
+function isHistoryExtraPhotoTaskEvent(event = {}) {
+  return event.action === "history_extra_photo"
+    || event.payload?.source === "order_history_extra_photo"
+    || event.task_metadata?.source === "order_history_extra_photo";
+}
+
 function getHistoryTaskSummaryForLineIds(lineIds = []) {
   const taskMap = new Map();
-  getHistoryTaskEventsForLineIds(lineIds).forEach((event) => {
+  getHistoryTaskEventsForLineIds(lineIds).filter((event) => !isHistoryExtraPhotoTaskEvent(event)).forEach((event) => {
     const taskId = event.task_id || event.id || "";
     if (!taskId) return;
     const status = event.task_status || event.new_status || "";
@@ -4151,6 +4211,8 @@ function getHistoryGroupSummaryBadges({ group, primaryStatus, statusClass, hasAt
   } else if (taskSummary?.totalCount) {
     badges.push(`<span class="history-task-pill">${taskSummary.totalCount} task${taskSummary.totalCount === 1 ? "" : "s"}</span>`);
   }
+  const extraProofCount = getHistoryExtraOrderProofPhotos(group).length;
+  if (extraProofCount) badges.push(`<span class="history-proof-pill is-extra">${extraProofCount} extra proof</span>`);
   if (groupPhotos.length) badges.push(`<span class="history-proof-pill">${groupPhotos.length} photo${groupPhotos.length === 1 ? "" : "s"}</span>`);
   if (receiptCount) badges.push(`<span class="history-proof-pill is-video">${receiptCount} receipt${receiptCount === 1 ? "" : "s"}</span>`);
   if ((group.lines || []).length > 1) badges.push(`<span class="history-proof-pill">${group.lines.length} lines</span>`);
@@ -4318,6 +4380,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
           <div class="history-order-badge-row">${summaryBadges}</div>
           <div class="history-order-summary-buttons">
             <button type="button" class="secondary-btn history-task-btn" data-history-order-task="${escapeHtml(groupKey)}">Add Task</button>
+            <button type="button" class="secondary-btn history-extra-photo-btn" data-history-extra-photo="${escapeHtml(groupKey)}">Add Photo</button>
             ${isAdminUser() ? `<button type="button" class="secondary-btn revert-order-btn" data-revert-lines="${escapeHtml(lineIds.join(","))}">Revert Order</button>` : ""}
             <button type="button" class="secondary-btn history-group-toggle" data-history-group-toggle="${escapeHtml(groupKey)}" aria-expanded="${isExpanded ? "true" : "false"}">${isExpanded ? "Close" : "Open"}</button>
           </div>
@@ -4352,6 +4415,11 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
       event.preventDefault();
       event.stopPropagation();
       openHistoryOrderTaskModal(group, groupKey);
+    });
+    card.querySelector("[data-history-extra-photo]")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openHistoryExtraPhotoModal(group, groupKey);
     });
     card.querySelectorAll("[data-history-label-group]").forEach((button) => {
       button.addEventListener("click", () => handleHistoryLabelButtonClick(button.dataset.historyLabelGroup));
@@ -4787,6 +4855,242 @@ async function submitHistoryOrderTask() {
     console.error("Could not create closed-order task:", error);
     setHistoryOrderTaskError(error?.message || "Could not create this task.");
     setHistoryOrderTaskStatus("", "info");
+  } finally {
+    button?.toggleAttribute("disabled", false);
+    if (button) button.textContent = originalText;
+  }
+}
+
+function setHistoryExtraPhotoError(message = "") {
+  const el = $("history-extra-photo-error");
+  if (el) el.textContent = message || "";
+}
+
+function setHistoryExtraPhotoStatus(message = "", type = "info") {
+  const el = $("history-extra-photo-status");
+  if (!el) return;
+  el.textContent = message || "";
+  el.classList.toggle("is-error", type === "error");
+  el.classList.toggle("is-success", type === "success");
+  el.classList.toggle("hidden", !message);
+}
+
+function cleanupHistoryExtraPhotoPreviews() {
+  (state.historyExtraPhotoPreviewUrls || []).forEach((url) => {
+    try {
+      URL.revokeObjectURL(url);
+    } catch (_) {}
+  });
+  state.historyExtraPhotoPreviewUrls = [];
+}
+
+function getHistoryExtraPhotoFiles() {
+  return [...($("history-extra-photo-file")?.files || [])].filter((file) => file && file.size > 0);
+}
+
+function getSelectedHistoryExtraPhotoOption() {
+  const group = state.activeHistoryExtraPhotoGroup;
+  const orderId = $("history-extra-photo-order")?.value || "";
+  const options = getHistoryOrderTaskOptionsForGroup(group);
+  return options.find((option) => option.id === orderId) || options[0] || null;
+}
+
+function renderHistoryExtraPhotoOrderSelect(group = {}) {
+  const select = $("history-extra-photo-order");
+  const field = $("history-extra-photo-order-field");
+  if (!select) return;
+  const options = getHistoryOrderTaskOptionsForGroup(group);
+  select.replaceChildren();
+  options.forEach((option) => {
+    const order = option.order || {};
+    const label = [
+      order.order_number || "Closed eBay order",
+      order.buyer_username || "",
+      order.buyer_name || "",
+      formatMoney(option.gross),
+      `${option.lines.length} line${option.lines.length === 1 ? "" : "s"}`,
+    ].filter(Boolean).join(" - ");
+    select.appendChild(new Option(label, option.id));
+  });
+  if (field) field.classList.toggle("hidden", options.length <= 1);
+  if (options[0]) select.value = options[0].id;
+  renderHistoryExtraPhotoContext();
+}
+
+function renderHistoryExtraPhotoContext() {
+  const context = $("history-extra-photo-context");
+  if (!context) return;
+  const option = getSelectedHistoryExtraPhotoOption();
+  if (!option) {
+    context.innerHTML = `<div class="history-order-task-empty">No closed order was found for this group.</div>`;
+    return;
+  }
+  const order = option.order || {};
+  const existingPhotoCount = getHistoryExtraOrderProofPhotos({
+    lines: option.lines,
+    events: getHistoryTaskEventsForLineIds(option.lines.map((line) => line.id).filter(Boolean)),
+  }).length;
+  context.innerHTML = `
+    <div class="history-order-task-context-card">
+      <span class="eyebrow">Closed Order</span>
+      <strong>${escapeHtml(order.order_number || "eBay order")} - ${escapeHtml(order.buyer_username || "unknown buyer")}</strong>
+      <span>${escapeHtml(order.buyer_name || "No customer name")} - ${option.lines.length} line${option.lines.length === 1 ? "" : "s"} - ${escapeHtml(formatMoney(option.gross))}</span>
+      ${order.ship_by_date ? `<span>Ship by ${escapeHtml(formatDateTime(order.ship_by_date))}</span>` : ""}
+    </div>
+    <div class="history-order-task-context-card ${existingPhotoCount ? "is-active" : ""}">
+      <span class="eyebrow">Post-close proof</span>
+      <strong>${existingPhotoCount ? `${existingPhotoCount} extra photo${existingPhotoCount === 1 ? "" : "s"}` : "No extra photos yet"}</strong>
+      <span>This saves evidence only. It does not reopen or change the closed order.</span>
+    </div>
+  `;
+}
+
+function renderHistoryExtraPhotoFileList() {
+  cleanupHistoryExtraPhotoPreviews();
+  const list = $("history-extra-photo-list");
+  const files = getHistoryExtraPhotoFiles();
+  const saveButton = $("save-history-extra-photo");
+  if (saveButton) saveButton.disabled = !files.length;
+  if (!list) return;
+  if (!files.length) {
+    list.innerHTML = `<div class="history-extra-photo-empty">No photo selected yet.</div>`;
+    return;
+  }
+  list.innerHTML = files.map((file, index) => {
+    const previewUrl = URL.createObjectURL(file);
+    state.historyExtraPhotoPreviewUrls.push(previewUrl);
+    return `
+      <article class="history-extra-photo-card">
+        <img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(file.name || `Selected photo ${index + 1}`)}" />
+        <div>
+          <strong>${escapeHtml(file.name || `Photo ${index + 1}`)}</strong>
+          <span>${escapeHtml(file.type || "image")} ${formatFileSize(file.size) ? `- ${escapeHtml(formatFileSize(file.size))}` : ""}</span>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+async function uploadHistoryExtraOrderProofPhotos(files, option = {}, reason = "") {
+  const order = option.order || {};
+  const orderNumber = normalizeEbayOrderNumber(order.order_number) || "closed-order";
+  const cleanOrder = safeStorageSegment(orderNumber, "closed-order");
+  const cleanRun = safeStorageSegment(window.crypto?.randomUUID ? window.crypto.randomUUID() : String(Date.now()), "upload");
+  const uploaded = [];
+
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
+    const extension = String(file.name || "").split(".").pop()?.toLowerCase()?.replace(/[^a-z0-9]/g, "") || "jpg";
+    const path = [
+      "order-history-extra-photos",
+      cleanOrder,
+      `${Date.now()}-${cleanRun}-${index + 1}.${extension}`,
+    ].join("/");
+    const { error } = await supabase.storage
+      .from(EXTRA_LABEL_EVIDENCE_BUCKET)
+      .upload(path, file, {
+        contentType: file.type || "image/jpeg",
+        upsert: false,
+      });
+    if (error) throw new Error(error.message || "Could not upload the order history proof photo.");
+    uploaded.push({
+      bucket: EXTRA_LABEL_EVIDENCE_BUCKET,
+      path,
+      label: `Extra order proof photo ${index + 1}`,
+      original_name: file.name || "",
+      mime_type: file.type || "image/jpeg",
+      size_bytes: file.size || 0,
+      uploaded_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      signed_by_email: state.user?.email || state.employee?.display_name || "",
+      order_number: orderNumber,
+      item_numbers: option.lines.map((line) => line.item_number).filter(Boolean),
+      metadata: {
+        source: "order_history_extra_photo",
+        proof_type: reason || "extra_order_proof",
+        orderNumber,
+        buyerUsername: order.buyer_username || "",
+        buyerName: order.buyer_name || "",
+      },
+    });
+  }
+
+  return uploaded;
+}
+
+function openHistoryExtraPhotoModal(group = {}, groupKey = "") {
+  const options = getHistoryOrderTaskOptionsForGroup(group);
+  if (!options.length) {
+    console.warn("Could not open extra photo modal because this history group has no order id.", group);
+    return;
+  }
+
+  state.activeHistoryExtraPhotoGroup = group;
+  state.activeHistoryExtraPhotoGroupKey = groupKey;
+  cleanupHistoryExtraPhotoPreviews();
+  setHistoryExtraPhotoError("");
+  setHistoryExtraPhotoStatus("Add a post-close proof photo to this order history record. This is audited and will not reopen the order.", "info");
+  if ($("history-extra-photo-note")) $("history-extra-photo-note").value = "";
+  if ($("history-extra-photo-reason")) $("history-extra-photo-reason").value = "correction_photo";
+  const fileInput = $("history-extra-photo-file");
+  if (fileInput) fileInput.value = "";
+  renderHistoryExtraPhotoOrderSelect(group);
+  renderHistoryExtraPhotoFileList();
+  openModal("history-extra-photo-modal");
+  setTimeout(() => $("history-extra-photo-file")?.focus(), 80);
+}
+
+function closeHistoryExtraPhotoModal() {
+  state.activeHistoryExtraPhotoGroup = null;
+  state.activeHistoryExtraPhotoGroupKey = "";
+  setHistoryExtraPhotoError("");
+  setHistoryExtraPhotoStatus("");
+  cleanupHistoryExtraPhotoPreviews();
+  closeModal("history-extra-photo-modal");
+}
+
+async function submitHistoryExtraPhoto() {
+  const option = getSelectedHistoryExtraPhotoOption();
+  if (!option?.id) return setHistoryExtraPhotoError("Choose a closed order for this photo.");
+
+  const files = getHistoryExtraPhotoFiles();
+  if (!files.length) {
+    setHistoryExtraPhotoError("Take or choose at least one photo first.");
+    $("history-extra-photo-file")?.focus();
+    return;
+  }
+
+  const reason = $("history-extra-photo-reason")?.value || "correction_photo";
+  const note = String($("history-extra-photo-note")?.value || "").trim();
+  const button = $("save-history-extra-photo");
+  const originalText = button?.textContent || "Save Photo";
+  button?.toggleAttribute("disabled", true);
+  if (button) button.textContent = "Saving...";
+  setHistoryExtraPhotoError("");
+  setHistoryExtraPhotoStatus("Uploading proof photo...", "info");
+
+  try {
+    const evidencePhotos = await uploadHistoryExtraOrderProofPhotos(files, option, reason);
+    setHistoryExtraPhotoStatus("Recording order-history audit event...", "info");
+    const { error } = await supabase.rpc("add_ebay_order_history_extra_photos", {
+      _order_id: option.id,
+      _order_line_ids: option.lines.map((line) => line.id).filter(Boolean),
+      _photo_attachments: evidencePhotos,
+      _note: note || null,
+      _proof_type: reason,
+      _signed_by_email: state.user?.email || state.employee?.display_name || "",
+    });
+    if (error) throw error;
+
+    const groupKey = state.activeHistoryExtraPhotoGroupKey;
+    if (groupKey) state.expandedHistoryGroupIds.add(groupKey);
+    setHistoryExtraPhotoStatus("Photo saved.", "success");
+    closeHistoryExtraPhotoModal();
+    await loadOrderHistory();
+  } catch (error) {
+    console.error("Could not save order history extra photo:", error);
+    setHistoryExtraPhotoError(error?.message || "Could not save this photo.");
+    setHistoryExtraPhotoStatus("", "info");
   } finally {
     button?.toggleAttribute("disabled", false);
     if (button) button.textContent = originalText;
@@ -8824,7 +9128,7 @@ function setupListeners() {
   ["history-from", "history-to"].forEach((id) => {
     $(id)?.addEventListener("change", loadOrderHistory);
   });
-  ["history-worker", "history-status", "history-label-filter", "history-sort"].forEach((id) => {
+  ["history-worker", "history-status", "history-label-filter", "history-proof-filter", "history-sort"].forEach((id) => {
     $(id)?.addEventListener("input", applyFilters);
     $(id)?.addEventListener("change", applyFilters);
   });
@@ -8914,6 +9218,14 @@ function setupListeners() {
   $("history-order-task-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "history-order-task-modal") closeHistoryOrderTaskModal();
   });
+  $("close-history-extra-photo-modal")?.addEventListener("click", closeHistoryExtraPhotoModal);
+  $("cancel-history-extra-photo")?.addEventListener("click", closeHistoryExtraPhotoModal);
+  $("save-history-extra-photo")?.addEventListener("click", submitHistoryExtraPhoto);
+  $("history-extra-photo-order")?.addEventListener("change", renderHistoryExtraPhotoContext);
+  $("history-extra-photo-file")?.addEventListener("change", renderHistoryExtraPhotoFileList);
+  $("history-extra-photo-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "history-extra-photo-modal") closeHistoryExtraPhotoModal();
+  });
   $("evidence-photo-viewer-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "evidence-photo-viewer-modal") closeEvidencePhotoViewer();
   });
@@ -8982,6 +9294,16 @@ function setupListeners() {
       } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
         submitHistoryOrderTask();
+      }
+      return;
+    }
+    if (isModalOpen("history-extra-photo-modal")) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeHistoryExtraPhotoModal();
+      } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        submitHistoryExtraPhoto();
       }
       return;
     }

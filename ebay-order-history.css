@@ -806,6 +806,12 @@ textarea {
   color: #cfe5ff;
 }
 
+.history-proof-pill.is-extra {
+  border-color: rgba(125, 240, 178, 0.28);
+  background: rgba(125, 240, 178, 0.08);
+  color: var(--history-green);
+}
+
 .history-order-summary-facts {
   display: flex;
   gap: 6px;
@@ -851,6 +857,16 @@ textarea {
   padding: 7px 13px;
   border-color: rgba(125, 240, 178, 0.26);
   color: var(--history-green);
+}
+
+.history-extra-photo-btn {
+  min-height: 36px;
+  padding: 7px 13px;
+  border-color: rgba(155, 213, 255, 0.24);
+  background:
+    linear-gradient(135deg, rgba(155, 213, 255, 0.09), transparent 60%),
+    rgba(255, 255, 255, 0.035);
+  color: #cfe5ff;
 }
 
 .history-order-detail {
@@ -1723,6 +1739,10 @@ textarea {
   width: min(820px, 100%);
 }
 
+.history-extra-photo-modal-card {
+  width: min(860px, 100%);
+}
+
 .history-order-task-context {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1767,6 +1787,64 @@ textarea {
   grid-template-columns: minmax(0, 1.2fr) minmax(120px, 0.6fr) minmax(170px, 0.8fr);
   gap: 12px;
   margin: 12px 0;
+}
+
+.history-extra-photo-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.75fr) minmax(0, 1.25fr);
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.history-extra-photo-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.history-extra-photo-card,
+.history-extra-photo-empty {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(155, 213, 255, 0.07), transparent 58%),
+    rgba(0, 0, 0, 0.22);
+}
+
+.history-extra-photo-card {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.history-extra-photo-card img {
+  width: 58px;
+  height: 58px;
+  border-radius: 14px;
+  object-fit: cover;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.history-extra-photo-card strong,
+.history-extra-photo-card span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.history-extra-photo-card strong {
+  color: var(--history-text);
+  font-size: 0.88rem;
+}
+
+.history-extra-photo-card span,
+.history-extra-photo-empty {
+  color: var(--history-muted);
+  font-size: 0.8rem;
+  font-weight: 800;
 }
 
 .revert-order-list {
@@ -2178,7 +2256,8 @@ body.modal-open {
   }
 
   .history-order-task-context,
-  .history-order-task-grid {
+  .history-order-task-grid,
+  .history-extra-photo-grid {
     grid-template-columns: 1fr;
   }
 
