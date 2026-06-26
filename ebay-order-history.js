@@ -920,6 +920,25 @@ function isVideoReceiptEvidencePhoto(photo = {}) {
   return /video[-_\s]?receipt|ebaylive\/events/i.test(text);
 }
 
+function isPendingOrderLineNoteTaskEvent(event = {}) {
+  return event.payload?.source === "pending_order_line_note"
+    || event.task_metadata?.source === "pending_order_line_note";
+}
+
+function isPendingOrderLineNotePhoto(photo = {}) {
+  const event = photo.event || {};
+  const text = [
+    photo.label,
+    photo.path,
+    photo.source_path,
+    photo.metadata?.source,
+    event.action,
+    event.payload?.source,
+    event.task_metadata?.source,
+  ].filter(Boolean).join(" ");
+  return /pending_order_line_note|manual-line-note|line-notes/i.test(text);
+}
+
 function isHistoryExtraOrderProofPhoto(photo = {}) {
   const event = photo.event || {};
   const text = [
@@ -3542,6 +3561,7 @@ function getEventLabel(event) {
   if (event.category === "label") return event.action === "replaced" ? "Shipping label replaced" : "Shipping label attached";
   if (event.category === "task") {
     if (isHistoryExtraPhotoTaskEvent(event)) return "Extra order proof photo";
+    if (isPendingOrderLineNoteTaskEvent(event)) return "Order line note";
     return getEventEvidencePhotos(event).some(isVideoReceiptEvidencePhoto)
       ? "Video receipt screenshot"
       : "Order coordination";
@@ -3582,7 +3602,10 @@ function getHistoryGroupEvidencePhotos(group) {
   return [
     ...(group.events || []).flatMap(getEventEvidencePhotos),
     ...(group.lines || []).flatMap(getLineCancellationEvidencePhotos),
-  ].filter((photo) => !isVideoReceiptEvidencePhoto(photo)).filter((photo) => {
+  ]
+    .filter((photo) => !isVideoReceiptEvidencePhoto(photo))
+    .filter((photo) => !isPendingOrderLineNotePhoto(photo))
+    .filter((photo) => {
     const key = `${photo.bucket}:${photo.path}`;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -3954,6 +3977,69 @@ function renderHistoryLineVideoReceiptPhotos(line = {}, events = []) {
   `;
 }
 
+function getHistoryLineNoteEvents(line = {}, events = []) {
+  const lineId = line?.id || "";
+  if (!lineId) return [];
+  const byId = new Map();
+  (events || []).forEach((event) => {
+    if (!isPendingOrderLineNoteTaskEvent(event)) return;
+    if (!getEventLineIds(event).includes(lineId)) return;
+    const key = event.id || `${event.task_id || "task"}:${event.created_at || ""}`;
+    if (!byId.has(key)) byId.set(key, event);
+  });
+  return [...byId.values()].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+}
+
+function renderHistoryLineNoteEvents(line = {}, events = []) {
+  const noteEvents = getHistoryLineNoteEvents(line, events);
+  if (!noteEvents.length) return "";
+
+  return `
+    <div class="history-line-note-strip">
+      <div class="history-line-note-head">
+        <span>Item notes</span>
+        <strong>${noteEvents.length.toLocaleString()} saved</strong>
+      </div>
+      <div class="history-line-note-list">
+        ${noteEvents.map((event) => {
+          const photos = getEventEvidencePhotos(event).filter(isPendingOrderLineNotePhoto);
+          return `
+            <article class="history-line-note-card">
+              <div>
+                <strong>${escapeHtml(getDisplayHistoryNote(event.notes) || "No note text recorded.")}</strong>
+                <small>${escapeHtml(event.signed_by_email || event.created_by_email || "Unknown user")} - ${escapeHtml(formatDateTime(event.created_at))}</small>
+              </div>
+              ${photos.length ? `
+                <div class="history-video-receipt-grid history-line-note-photo-grid">
+                  ${photos.map((photo, index) => {
+                    const label = photo.label || `Item note photo ${index + 1}`;
+                    const meta = getEvidencePhotoViewerMeta(photo);
+                    return `
+                      <button
+                        type="button"
+                        class="history-video-receipt-thumb history-line-note-photo"
+                        data-history-video-receipt-photo="1"
+                        data-bucket="${escapeHtml(photo.bucket)}"
+                        data-path="${escapeHtml(photo.path)}"
+                        data-label="${escapeHtml(label)}"
+                        data-meta="${escapeHtml(meta)}"
+                      >
+                        <span class="history-video-receipt-image" data-history-video-receipt-image>Loading...</span>
+                        <span>${escapeHtml(label)}</span>
+                        <small>${escapeHtml(getEvidencePhotoAuditText(photo))}</small>
+                      </button>
+                    `;
+                  }).join("")}
+                </div>
+              ` : ""}
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function getReturnVideoReceiptEventsForLine(line = {}) {
   const lineId = line?.id || "";
   if (!lineId) return [];
@@ -4103,7 +4189,10 @@ function isHistoryExtraPhotoTaskEvent(event = {}) {
 
 function getHistoryTaskSummaryForLineIds(lineIds = []) {
   const taskMap = new Map();
-  getHistoryTaskEventsForLineIds(lineIds).filter((event) => !isHistoryExtraPhotoTaskEvent(event)).forEach((event) => {
+  getHistoryTaskEventsForLineIds(lineIds)
+    .filter((event) => !isHistoryExtraPhotoTaskEvent(event))
+    .filter((event) => !isPendingOrderLineNoteTaskEvent(event))
+    .forEach((event) => {
     const taskId = event.task_id || event.id || "";
     if (!taskId) return;
     const status = event.task_status || event.new_status || "";
@@ -4405,6 +4494,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
                 </div>
                 ${getEbayHistoryApiSourceLabel(line) ? `<span class="history-api-source-pill is-line">${escapeHtml(getEbayHistoryApiSourceLabel(line))}</span>` : ""}
                 ${renderHistoryLineVideoReceiptPhotos(line, group.events)}
+                ${renderHistoryLineNoteEvents(line, group.events)}
               </div>
               <div class="history-line-actions">
                 <span class="history-status ${getLineStatusClass(line)}">${escapeHtml(getLineStatusLabel(line))}</span>

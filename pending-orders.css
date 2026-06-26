@@ -578,6 +578,45 @@ button.task-action-btn.is-assigned:hover,
   font-weight: 900;
 }
 
+.buyer-line-note-btn,
+.buyer-line-note-count,
+.buyer-line-note-preview {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.buyer-line-note-btn {
+  border: 1px solid rgba(155, 213, 255, 0.3);
+  background: rgba(155, 213, 255, 0.08);
+  color: #bfe4ff;
+  cursor: pointer;
+}
+
+.buyer-line-note-count {
+  border: 1px solid rgba(227, 189, 119, 0.32);
+  background: rgba(227, 189, 119, 0.08);
+  color: var(--gold-strong);
+}
+
+.buyer-line-note-preview {
+  flex: 1 1 220px;
+  min-width: 140px;
+  max-width: 520px;
+  border: 1px solid rgba(125, 197, 255, 0.22);
+  background: rgba(125, 197, 255, 0.07);
+  color: rgba(231, 242, 255, 0.86);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bag-lookup-panel {
   display: grid;
   grid-template-columns: minmax(190px, 0.45fr) minmax(320px, 1fr);
@@ -1296,6 +1335,41 @@ textarea:focus {
   font-size: 0.88rem;
 }
 
+.buyer-card-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(243, 237, 226, 0.78);
+  font-size: 0.76rem;
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.buyer-card-receipt-pill {
+  border-color: rgba(155, 213, 255, 0.22);
+  background: rgba(93, 155, 255, 0.08);
+  color: #cfe3ff;
+}
+
+.buyer-card-receipt-pill.is-missing {
+  border-color: rgba(239, 109, 109, 0.4);
+  background: rgba(239, 109, 109, 0.1);
+  color: #ffc8c8;
+}
+
+.buyer-card-receipt-pill.is-complete {
+  border-color: rgba(119, 236, 169, 0.33);
+  background: rgba(119, 236, 169, 0.1);
+  color: #aff6cf;
+}
+
 .buyer-line-list {
   display: grid;
   gap: 8px;
@@ -1755,6 +1829,10 @@ textarea:focus {
   width: min(820px, 100%);
 }
 
+.line-note-card {
+  width: min(820px, 100%);
+}
+
 .manual-video-receipt-dropzone {
   display: grid;
   place-items: center;
@@ -1801,6 +1879,89 @@ textarea:focus {
   justify-content: flex-end;
   flex-wrap: wrap;
   margin-top: 12px;
+}
+
+.line-note-dropzone {
+  display: grid;
+  gap: 12px;
+  min-height: 150px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px dashed rgba(155, 213, 255, 0.38);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(155, 213, 255, 0.08), rgba(227, 189, 119, 0.05)),
+    rgba(0, 0, 0, 0.22);
+  color: var(--muted);
+  outline: none;
+}
+
+.line-note-dropzone:focus {
+  border-color: rgba(125, 240, 178, 0.62);
+  box-shadow: 0 0 0 3px rgba(125, 240, 178, 0.12);
+}
+
+#line-note-photo-empty {
+  display: grid;
+  gap: 5px;
+  place-items: center;
+  min-height: 92px;
+  text-align: center;
+}
+
+#line-note-photo-empty strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.line-note-photo-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.line-note-photo-chip {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.line-note-photo-chip img {
+  width: 58px;
+  height: 48px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #050505;
+}
+
+.line-note-photo-chip strong,
+.line-note-photo-chip small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.line-note-photo-chip small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.line-note-photo-chip button {
+  min-width: 32px;
+  min-height: 32px;
+  border: 1px solid rgba(255, 122, 122, 0.38);
+  border-radius: 999px;
+  background: rgba(255, 122, 122, 0.09);
+  color: #ffd2d2;
+  font-weight: 950;
+  cursor: pointer;
 }
 
 .ebay-label-details {
@@ -3331,16 +3492,22 @@ body.pending-order-detail-open .mobile-detail-close {
 
 .buyer-order-card.is-collapsed .buyer-card-meta {
   display: flex;
+  flex-wrap: nowrap;
   gap: 8px;
   margin: 0;
   padding: 0;
   font-size: 0.72rem;
   line-height: 1.1;
+  overflow: hidden;
 }
 
-.buyer-order-card.is-collapsed .buyer-card-meta span:first-child,
-.buyer-order-card.is-collapsed .buyer-card-meta span:last-child {
-  display: none;
+.buyer-order-card.is-collapsed .buyer-card-meta-pill {
+  min-height: 22px;
+  max-width: 178px;
+  padding: 2px 7px;
+  font-size: 0.66rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .buyer-order-card.is-collapsed .buyer-card-alerts {
@@ -4039,6 +4206,18 @@ body.pending-order-detail-open .mobile-detail-close {
 
   .buyer-order-card.is-collapsed .buyer-card-meta {
     font-size: 0.7rem;
+    gap: 5px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .buyer-order-card.is-collapsed .buyer-card-meta::-webkit-scrollbar {
+    display: none;
+  }
+
+  .buyer-order-card.is-collapsed .buyer-card-meta-pill {
+    flex: 0 0 auto;
+    max-width: 160px;
   }
 
   .buyer-card-head {

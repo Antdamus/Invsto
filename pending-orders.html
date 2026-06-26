@@ -836,6 +836,39 @@
     </div>
   </div>
 
+  <div id="line-note-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="line-note-title">
+    <div class="packing-modal-card bundle-review-card no-inventory-card line-note-card">
+      <button id="close-line-note" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Item Note</span>
+      <h2 id="line-note-title">Add item note</h2>
+      <p>Save a visible audit note for this exact order line. Add photos when the note needs proof.</p>
+      <div id="line-note-context" class="order-task-context"></div>
+      <label class="modal-field">
+        Note
+        <textarea id="line-note-text" rows="4" placeholder="Write what everyone should know about this item or packing decision."></textarea>
+      </label>
+      <section id="line-note-dropzone" class="line-note-dropzone" tabindex="0" aria-label="Paste item note photos here">
+        <div id="line-note-photo-empty">
+          <strong>Optional photos</strong>
+          <span>Paste images here, take a photo, or choose files from this device.</span>
+        </div>
+        <div id="line-note-photo-list" class="line-note-photo-list"></div>
+      </section>
+      <div class="manual-video-receipt-actions">
+        <label class="secondary-btn folder-photo-picker">
+          Add Photos
+          <input id="line-note-photo-file" type="file" accept="image/*" multiple />
+        </label>
+        <button id="clear-line-note-photos" type="button" class="secondary-btn">Clear Photos</button>
+      </div>
+      <p id="line-note-error" class="fulfill-status is-error"></p>
+      <div class="modal-actions">
+        <button id="cancel-line-note" type="button" class="secondary-btn">Cancel</button>
+        <button id="save-line-note" type="button" class="primary-btn">Save Note</button>
+      </div>
+    </div>
+  </div>
+
   <div id="admin-order-closeout-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="admin-order-closeout-title">
     <div class="packing-modal-card bundle-review-card">
       <button id="close-admin-order-closeout" class="modal-close-btn" type="button" aria-label="Close">x</button>

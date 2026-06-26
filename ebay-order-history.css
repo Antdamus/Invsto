@@ -1567,6 +1567,80 @@ textarea {
   cursor: pointer;
 }
 
+.history-line-note-strip {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(125, 197, 255, 0.2);
+  border-radius: 12px;
+  background: rgba(125, 197, 255, 0.055);
+}
+
+.history-line-note-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.history-line-note-head span {
+  color: #cde7ff;
+  font-size: 0.76rem;
+  font-weight: 950;
+}
+
+.history-line-note-head strong {
+  color: var(--history-muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.history-line-note-list {
+  display: grid;
+  gap: 8px;
+}
+
+.history-line-note-card {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.history-line-note-card strong {
+  display: block;
+  color: var(--history-text);
+  font-size: 0.86rem;
+  font-weight: 850;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
+.history-line-note-card small {
+  display: block;
+  margin-top: 4px;
+  color: var(--history-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.history-line-note-photo-grid {
+  gap: 8px;
+}
+
+.history-line-note-photo {
+  border-color: rgba(125, 197, 255, 0.25);
+  background: rgba(125, 197, 255, 0.07);
+}
+
+.history-line-note-photo > span:not(.history-video-receipt-image) {
+  color: #cde7ff;
+}
+
 .return-video-receipt-panel {
   display: grid;
   gap: 10px;

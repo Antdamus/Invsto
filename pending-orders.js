@@ -78,6 +78,9 @@ const state = {
   manualVideoReceiptPhoto: null,
   manualVideoReceiptPreviewUrl: "",
   manualVideoReceiptBusy: false,
+  lineNoteLineId: "",
+  lineNotePhotos: [],
+  lineNoteBusy: false,
   queueVideoReceiptTasks: [],
   queueVideoReceiptTaskEvents: new Map(),
   queueVideoReceiptLoadedOrderIds: new Set(),
@@ -362,6 +365,7 @@ function closeModal(id) {
     || !$("order-task-modal")?.classList.contains("hidden")
     || !$("order-task-details-modal")?.classList.contains("hidden")
     || !$("manual-video-receipt-modal")?.classList.contains("hidden")
+    || !$("line-note-modal")?.classList.contains("hidden")
     || !$("admin-order-closeout-modal")?.classList.contains("hidden")
   ) return;
   document.body.classList.remove("modal-open");
@@ -1935,6 +1939,9 @@ function normalizePendingOrderQueueRpcRow(row = {}) {
     assigned_seller_employee_id: row.assigned_seller_employee_id,
     assigned_seller_snapshot: row.assigned_seller_snapshot || {},
     notes: row.notes,
+    video_receipt_photo_count: Number(row.video_receipt_photo_count || 0),
+    line_note_count: Number(row.line_note_count || 0),
+    latest_line_note: row.latest_line_note || "",
     ebay_orders: {
       id: row.order_record_id || row.order_id,
       order_number: row.order_number,
@@ -2427,6 +2434,33 @@ function groupLinesByBuyer(lines) {
   return sortBuyerGroups([...groups.values()]);
 }
 
+function getLineVideoReceiptPhotoCount(line = {}) {
+  const savedCount = Number(line.video_receipt_photo_count || 0);
+  if (!line?.id) return savedCount;
+  const liveCount = getVideoReceiptEvidencePhotosForLine(line).length;
+  return Math.max(savedCount, liveCount);
+}
+
+function getLineNoteCount(line = {}) {
+  return Math.max(0, Number(line.line_note_count || 0));
+}
+
+function getGroupVideoReceiptCoverage(group = {}) {
+  const lines = Array.isArray(group.lines) ? group.lines : [];
+  const total = lines.length;
+  const withScreenshots = lines.filter((line) => getLineVideoReceiptPhotoCount(line) > 0).length;
+  return {
+    total,
+    withScreenshots,
+    missing: Math.max(0, total - withScreenshots),
+  };
+}
+
+function getCompactQueueDate(value) {
+  if (!value) return "No date";
+  return formatDate(value).replace(/^Sale date\s+/i, "").replace(/^Paid date\s+/i, "");
+}
+
 function buildBuyerInsightCurrentItems(lines = []) {
   return (lines || []).map((line) => ({
     title: line.item_title || "Untitled eBay item",
@@ -2713,6 +2747,13 @@ function renderOrders() {
     const taskCountLabel = assignedTasks.length
       ? `${assignedTasks.length.toLocaleString()} task${assignedTasks.length === 1 ? "" : "s"}`
       : "No task";
+    const receiptCoverage = getGroupVideoReceiptCoverage(group);
+    const receiptCoverageLabel = receiptCoverage.total
+      ? `Shots ${receiptCoverage.withScreenshots}/${receiptCoverage.total}${receiptCoverage.missing ? ` - Miss ${receiptCoverage.missing}` : ""}`
+      : "Shots 0/0";
+    const receiptCoverageTitle = receiptCoverage.missing
+      ? `${receiptCoverage.missing} item line${receiptCoverage.missing === 1 ? "" : "s"} missing video receipt screenshots`
+      : "All visible item lines have video receipt screenshots";
     const customerMarkup = groupCustomerName
       ? `<span class="buyer-card-customer"><span>Customer</span><strong>${escapeHtml(groupCustomerName)}</strong></span>`
       : `<span class="buyer-card-customer is-missing"><span>Customer</span><strong>Name not saved</strong></span>`;
@@ -2769,9 +2810,9 @@ function renderOrders() {
         </div>
       </div>
       <div class="buyer-card-meta">
-        <span>Earliest sale ${escapeHtml(formatDate(group.earliestPendingOrderCreatedAt))}</span>
-        <span>Ship by ${escapeHtml(formatDate(group.nextShipBy))}</span>
-        <span>${escapeHtml(taskCountLabel)}</span>
+        <span class="buyer-card-meta-pill">Placed ${escapeHtml(getCompactQueueDate(group.earliestPendingOrderCreatedAt))}</span>
+        <span class="buyer-card-meta-pill">Ship ${escapeHtml(getCompactQueueDate(group.nextShipBy))}</span>
+        <span class="buyer-card-meta-pill buyer-card-receipt-pill ${receiptCoverage.missing ? "is-missing" : "is-complete"}" title="${escapeHtml(receiptCoverageTitle)}">${escapeHtml(receiptCoverageLabel)}</span>
       </div>
       ${isExpanded ? `
         <div class="buyer-card-expanded">
@@ -2893,6 +2934,14 @@ function renderOrders() {
       const lineTaskActionMarkup = assignedLineTask
         ? `<button type="button" class="secondary-btn buyer-line-action-btn task-action-btn is-assigned" data-line-view-task="${escapeHtml(line.id)}" data-view-order-task="${escapeHtml(assignedLineTask.id)}" title="View task assigned to ${escapeHtml(assignedLineTaskAssignee)}"><span>Task assigned</span><strong>${escapeHtml(assignedLineTaskAssignee)}</strong></button>`
         : `<button type="button" class="secondary-btn buyer-line-action-btn task-action-btn" data-line-assign-task="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>Assign Task</button>`;
+      const lineNoteCount = getLineNoteCount(line);
+      const lineNoteCountMarkup = lineNoteCount
+        ? `<span class="buyer-line-note-count" title="${lineNoteCount.toLocaleString()} audited item note${lineNoteCount === 1 ? "" : "s"}">${lineNoteCount.toLocaleString()} note${lineNoteCount === 1 ? "" : "s"}</span>`
+        : "";
+      const lineNotePreview = String(line.latest_line_note || "").trim();
+      const lineNotePreviewMarkup = lineNotePreview
+        ? `<span class="buyer-line-note-preview" title="${escapeHtml(lineNotePreview)}">Note: ${escapeHtml(lineNotePreview)}</span>`
+        : "";
       const orderNumber = String(order.order_number || "").trim();
       const orderNumberMarkup = orderNumber
         ? `<button type="button" class="buyer-line-order-copy" data-copy-order-number="${escapeHtml(orderNumber)}" title="Copy order number"><span>Order</span><strong>${escapeHtml(orderNumber)}</strong></button>`
@@ -2939,6 +2988,9 @@ function renderOrders() {
           <span class="buyer-line-receipt-actions">
             ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Open video receipt</a>` : ""}
             <button type="button" class="buyer-line-manual-receipt" data-line-manual-video-receipt="${escapeHtml(line.id)}">Add video receipt manually</button>
+            <button type="button" class="buyer-line-note-btn" data-line-add-note="${escapeHtml(line.id)}">Add note</button>
+            ${lineNoteCountMarkup}
+            ${lineNotePreviewMarkup}
           </span>
           <span class="queue-video-receipt-evidence" data-queue-video-evidence="${escapeHtml(line.id)}">
             <span class="queue-video-receipt-empty">Loading saved video receipt screenshot...</span>
@@ -2976,6 +3028,11 @@ function renderOrders() {
         event.preventDefault();
         event.stopPropagation();
         openManualVideoReceiptModal(line.id);
+      });
+      button.querySelector("[data-line-add-note]")?.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openLineNoteModal(line.id);
       });
       lineList.appendChild(button);
     });
@@ -3108,6 +3165,7 @@ function returnToOrdersAfterMobileModalClose(options = {}) {
       "worker-cancel-order-modal",
       "order-task-modal",
       "manual-video-receipt-modal",
+      "line-note-modal",
       "admin-order-closeout-modal",
       "no-inventory-photo-viewer-modal",
     ];
@@ -3525,6 +3583,7 @@ function isActiveOrderTask(task = {}) {
 
 function isHiddenOrderCoordinationTask(task = {}, events = []) {
   const status = String(task.status || "").toLowerCase();
+  if (task?.metadata?.hidden_from_task_board) return true;
   if (task?.metadata?.history_removed_at) return true;
   if (["cancelled", "canceled"].includes(status)) return true;
   return isClearedVideoReceiptCaptureTask(task, events);
@@ -8816,6 +8875,225 @@ async function saveManualVideoReceipt() {
   }
 }
 
+function getLineNoteLine() {
+  if (!state.lineNoteLineId) return null;
+  return state.orders.find((entry) => entry.id === state.lineNoteLineId) || null;
+}
+
+function setLineNoteError(message = "", type = "error") {
+  const el = $("line-note-error");
+  if (!el) return;
+  el.textContent = message || "";
+  el.classList.toggle("is-error", type === "error");
+  el.classList.toggle("is-success", type === "success");
+}
+
+function clearLineNotePhotos() {
+  state.lineNotePhotos.forEach((photo) => {
+    if (photo.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(photo.previewUrl);
+  });
+  state.lineNotePhotos = [];
+  renderLineNotePhotoList();
+}
+
+function removeLineNotePhoto(localId) {
+  const current = state.lineNotePhotos.find((photo) => photo.localId === localId);
+  if (current?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(current.previewUrl);
+  state.lineNotePhotos = state.lineNotePhotos.filter((photo) => photo.localId !== localId);
+  renderLineNotePhotoList();
+}
+
+function addLineNotePhoto(blob, metadata = {}) {
+  if (!(blob instanceof Blob) || !/^image\//i.test(blob.type || "")) {
+    setLineNoteError("Choose or paste image files only.");
+    return;
+  }
+  const previewUrl = URL.createObjectURL(blob);
+  state.lineNotePhotos.push({
+    localId: `local:${crypto.randomUUID()}`,
+    file: blob,
+    name: metadata.name || "line-note-photo.png",
+    type: blob.type || metadata.type || "image/png",
+    size: blob.size || 0,
+    previewUrl,
+  });
+  setLineNoteError("");
+  renderLineNotePhotoList();
+}
+
+function renderLineNotePhotoList() {
+  const list = $("line-note-photo-list");
+  const empty = $("line-note-photo-empty");
+  if (!list) return;
+  empty?.classList.toggle("hidden", state.lineNotePhotos.length > 0);
+  list.innerHTML = state.lineNotePhotos.map((photo) => `
+    <article class="line-note-photo-chip" data-line-note-photo="${escapeHtml(photo.localId)}">
+      <img src="${escapeHtml(photo.previewUrl)}" alt="Line note evidence preview" />
+      <span>
+        <strong>${escapeHtml(photo.name || "Evidence photo")}</strong>
+        <small>${escapeHtml(formatFileSize(photo.size || 0))}</small>
+      </span>
+      <button type="button" aria-label="Remove photo" data-remove-line-note-photo="${escapeHtml(photo.localId)}">x</button>
+    </article>
+  `).join("");
+  list.querySelectorAll("[data-remove-line-note-photo]").forEach((button) => {
+    button.addEventListener("click", () => removeLineNotePhoto(button.dataset.removeLineNotePhoto));
+  });
+}
+
+function handleLineNoteFiles(event) {
+  const files = [...(event.target?.files || [])].filter((file) => /^image\//i.test(file.type || ""));
+  if (!files.length) {
+    setLineNoteError("Choose one or more image files for the note.");
+    return;
+  }
+  files.forEach((file) => addLineNotePhoto(file, { name: file.name, type: file.type }));
+  if (event.target) event.target.value = "";
+}
+
+function handleLineNotePaste(event) {
+  const items = [...(event.clipboardData?.items || [])];
+  const imageItems = items.filter((item) => /^image\//i.test(item.type || ""));
+  if (!imageItems.length) return;
+  event.preventDefault();
+  event.stopPropagation();
+  imageItems.forEach((item, index) => {
+    const file = item.getAsFile();
+    if (file) addLineNotePhoto(file, { name: file.name || `pasted-line-note-${index + 1}.png`, type: file.type });
+  });
+}
+
+function closeLineNoteModal() {
+  clearLineNotePhotos();
+  state.lineNoteLineId = "";
+  state.lineNoteBusy = false;
+  setLineNoteError("");
+  const note = $("line-note-text");
+  if (note) note.value = "";
+  closeModal("line-note-modal");
+  returnToOrdersAfterMobileModalClose({ suppressMobileReturn: true });
+}
+
+function openLineNoteModal(lineId) {
+  const line = state.orders.find((entry) => entry.id === lineId);
+  if (!line?.id || !line.order_id) {
+    setStatus("Select a pending eBay order line before adding a note.", "error");
+    return;
+  }
+  state.lineNoteLineId = line.id;
+  clearLineNotePhotos();
+  setLineNoteError("");
+  const note = $("line-note-text");
+  if (note) note.value = "";
+  const order = getOrderFromLine(line);
+  $("line-note-context").innerHTML = `
+    <strong>${escapeHtml(order.order_number || "eBay order")} - ${escapeHtml(order.buyer_username || "unknown buyer")}</strong>
+    <span>${escapeHtml(line.item_title || "Untitled item")}</span>
+    <small>${escapeHtml(line.item_number || "No item number")} - Qty ${Number(line.quantity || 1).toLocaleString()} - ${escapeHtml(formatMoney(line.total_price || line.sold_for || 0))}</small>
+  `;
+  renderLineNotePhotoList();
+  openModal("line-note-modal");
+  setTimeout(() => $("line-note-text")?.focus(), 80);
+}
+
+async function uploadLineNotePhoto(line = {}, photo = {}, index = 0, note = "") {
+  const file = photo.file;
+  if (!file) return null;
+  const order = getOrderFromLine(line);
+  const dateFolder = new Date().toISOString().slice(0, 10);
+  const orderSegment = safeStorageSegment(order.order_number || line.order_id, "order");
+  const itemSegment = safeStorageSegment(line.item_number || line.id, "item");
+  const extension = getNoInventoryEvidenceFileExtension({ path: photo.name, mime_type: photo.type }, file);
+  const destinationPath = [
+    "line-notes",
+    dateFolder,
+    orderSegment,
+    `${Date.now()}-${crypto.randomUUID()}-${itemSegment}-${index + 1}.${extension}`,
+  ].join("/");
+
+  const { error: uploadError } = await supabase.storage
+    .from(NO_INVENTORY_EVIDENCE_BUCKET)
+    .upload(destinationPath, file, {
+      contentType: photo.type || file.type || "image/png",
+      upsert: false,
+    });
+  if (uploadError) throw new Error(uploadError.message || "Could not upload an item note photo.");
+
+  const nowIso = new Date().toISOString();
+  const actor = getVideoReceiptAuditActor();
+  const derivativeData = await createAndUploadEvidenceDerivatives(file, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath);
+  return {
+    bucket: NO_INVENTORY_EVIDENCE_BUCKET,
+    path: destinationPath,
+    ...derivativeData,
+    source_bucket: null,
+    source_path: "manual-line-note",
+    capture_job_id: null,
+    sort_order: index,
+    label: `Item note photo - ${line.item_number || "item"}`,
+    mime_type: photo.type || file.type || "image/png",
+    size_bytes: file.size || photo.size || 0,
+    created_at: nowIso,
+    signed_by_email: actor,
+    metadata: {
+      source: "pending_order_line_note",
+      manual: true,
+      capturedAt: nowIso,
+      orderNumber: order.order_number || "",
+      buyerUsername: order.buyer_username || "",
+      itemNumber: line.item_number || "",
+      notePreview: note.slice(0, 180),
+    },
+  };
+}
+
+async function saveLineNote() {
+  const line = getLineNoteLine();
+  if (!line?.id || !line.order_id) return setLineNoteError("This order line is no longer visible. Refresh pending orders and try again.");
+  const note = String($("line-note-text")?.value || "").trim();
+  if (!note) return setLineNoteError("Write a note before saving.");
+  if (state.lineNoteBusy) return;
+
+  const button = $("save-line-note");
+  state.lineNoteBusy = true;
+  button?.toggleAttribute("disabled", true);
+  setLineNoteError("Saving item note...", "info");
+
+  try {
+    const uploadedPhotos = [];
+    for (let index = 0; index < state.lineNotePhotos.length; index += 1) {
+      const uploaded = await uploadLineNotePhoto(line, state.lineNotePhotos[index], index, note);
+      if (uploaded) uploadedPhotos.push(uploaded);
+    }
+
+    const { error } = await supabase.rpc("add_pending_order_line_note", {
+      _order_line_id: line.id,
+      _note: note,
+      _photo_attachments: uploadedPhotos,
+      _signed_by_email: state.user?.email || state.employee?.display_name || "",
+    });
+    if (error) throw new Error(error.message || "Could not save the item note.");
+
+    line.line_note_count = getLineNoteCount(line) + 1;
+    line.latest_line_note = note;
+    if (state.selectedLine?.id === line.id) {
+      state.selectedLine.line_note_count = line.line_note_count;
+      state.selectedLine.latest_line_note = note;
+      await loadSelectedOrderTasks();
+    }
+
+    closeLineNoteModal();
+    renderOrders();
+    setStatus("Item note saved to the order audit trail.", "success");
+  } catch (error) {
+    console.error("Could not save line note:", error);
+    setLineNoteError(error?.message || "Could not save the item note.");
+  } finally {
+    state.lineNoteBusy = false;
+    button?.toggleAttribute("disabled", false);
+  }
+}
+
 async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
   const metadata = payload.metadata || {};
   const screenshot = payload.screenshot || {};
@@ -9336,6 +9614,17 @@ function setupListeners() {
     setManualVideoReceiptError("");
     setTimeout(() => $("manual-video-receipt-dropzone")?.focus(), 50);
   });
+  $("close-line-note")?.addEventListener("click", closeLineNoteModal);
+  $("cancel-line-note")?.addEventListener("click", closeLineNoteModal);
+  $("save-line-note")?.addEventListener("click", saveLineNote);
+  $("line-note-photo-file")?.addEventListener("change", handleLineNoteFiles);
+  $("line-note-dropzone")?.addEventListener("paste", handleLineNotePaste);
+  $("line-note-modal")?.addEventListener("paste", handleLineNotePaste);
+  $("clear-line-note-photos")?.addEventListener("click", () => {
+    clearLineNotePhotos();
+    setLineNoteError("");
+    setTimeout(() => $("line-note-dropzone")?.focus(), 50);
+  });
   $("confirm-item-choice")?.addEventListener("click", confirmItemCandidate);
   $("cancel-item-confirm")?.addEventListener("click", closeItemConfirmModal);
   $("close-item-confirm")?.addEventListener("click", closeItemConfirmModal);
@@ -9455,6 +9744,10 @@ function setupListeners() {
     if (event.target.id === "manual-video-receipt-modal") closeManualVideoReceiptModal();
   });
 
+  $("line-note-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "line-note-modal") closeLineNoteModal();
+  });
+
   $("no-inventory-photo-viewer-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "no-inventory-photo-viewer-modal") closeNoInventoryEvidencePhotoViewer();
   });
@@ -9544,6 +9837,17 @@ function setupListeners() {
       } else if (event.key === "Escape") {
         event.preventDefault();
         closeManualVideoReceiptModal();
+      }
+      return;
+    }
+
+    if (!$("line-note-modal")?.classList.contains("hidden")) {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        saveLineNote();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeLineNoteModal();
       }
       return;
     }
