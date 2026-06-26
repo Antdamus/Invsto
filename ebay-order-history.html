@@ -446,6 +446,56 @@
     </div>
   </div>
 
+  <div id="history-order-task-modal" class="history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="history-order-task-title">
+    <div class="history-modal-card history-order-task-modal-card">
+      <button id="close-history-order-task-modal" type="button" class="modal-close-btn" aria-label="Close">x</button>
+      <span class="eyebrow">Closed Order Task</span>
+      <h2 id="history-order-task-title">Create task from order history</h2>
+      <p>Assign follow-up work from a closed eBay order while keeping the order, lines, and audit source attached.</p>
+
+      <div id="history-order-task-status" class="history-label-status"></div>
+      <div id="history-order-task-context" class="history-order-task-context"></div>
+
+      <label id="history-order-task-order-field" class="modal-field">
+        Closed order
+        <select id="history-order-task-order"></select>
+      </label>
+
+      <div class="history-order-task-grid">
+        <label class="modal-field">
+          Assign to
+          <select id="history-order-task-assignee">
+            <option value="">Leave unassigned</option>
+          </select>
+        </label>
+        <label class="modal-field">
+          Priority
+          <select id="history-order-task-priority">
+            <option value="normal">Normal</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+        <label class="modal-field">
+          Due date
+          <input id="history-order-task-due-at" type="datetime-local" />
+        </label>
+      </div>
+
+      <label class="modal-field">
+        Instruction
+        <textarea id="history-order-task-note" rows="4" placeholder="Write exactly what needs to be checked, fixed, refunded, shipped, or reviewed."></textarea>
+      </label>
+
+      <p id="history-order-task-error" class="history-error"></p>
+      <div class="history-modal-actions">
+        <button id="cancel-history-order-task" type="button" class="secondary-btn">Cancel</button>
+        <button id="create-history-order-task" type="button" class="primary-btn">Create Task</button>
+      </div>
+    </div>
+  </div>
+
   <div id="evidence-photo-viewer-modal" class="history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="evidence-photo-viewer-title">
     <div class="history-modal-card evidence-viewer-card">
       <button id="close-evidence-photo-viewer" type="button" class="modal-close-btn" aria-label="Close">x</button>

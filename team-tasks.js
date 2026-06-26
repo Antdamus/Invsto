@@ -533,6 +533,7 @@ function isTaskCreatedByCurrentUser(task = {}) {
 }
 
 function getTaskSourceFilterValue(task = {}) {
+  if (task.source === "order" && task.metadata?.source === "order_history") return "order_history";
   if (task.source === "order") return "order";
   if (task.source === "return") return "return";
   if (task.source === "team" && task.metadata?.source === "ebay_conversation_message") return "ebay_triage";
@@ -555,7 +556,7 @@ function getTaskSourceCounts(tasks = []) {
     const source = getTaskSourceFilterValue(task);
     counts[source] = (counts[source] || 0) + 1;
     return counts;
-  }, { all: 0, independent: 0, order: 0, ebay_triage: 0, return: 0, other: 0 });
+  }, { all: 0, independent: 0, order: 0, order_history: 0, ebay_triage: 0, return: 0, other: 0 });
 }
 
 function getTasksForOwnerFilter(tasks = []) {
@@ -597,6 +598,7 @@ function renderTaskSourceFilterChrome(tasks = []) {
       all: `All sources ${counts.all}`,
       independent: `Independent ${counts.independent}`,
       order: `Pending orders ${counts.order}`,
+      order_history: `Order history ${counts.order_history}`,
       ebay_triage: `eBay triage ${counts.ebay_triage}`,
       return: `Returns ${counts.return}`,
     };
@@ -1133,27 +1135,34 @@ function normalizeTeamTask(task = {}) {
 
 function normalizeOrderTask(task = {}) {
   const order = getEmbeddedOne(task.ebay_orders);
+  const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
   const orderNumber = task.order_number || order.order_number || "";
   const buyer = task.buyer_username || order.buyer_username || "";
+  const isOrderHistoryTask = metadata.source === "order_history";
   const sourceLabel = task.task_type === ORDER_SUBTASK_TYPE
     ? "Subtask"
     : task.task_type === ORDER_SHIPPING_TYPE
       ? "Shipping Task"
       : task.task_type === ORDER_PACKAGING_TYPE
         ? "Packaging Task"
-      : "Pending Order";
+      : isOrderHistoryTask
+        ? "Order History"
+        : "Pending Order";
   return {
     ...task,
     source: "order",
+    metadata,
     sourceLabel,
-    title: task.title || `Pending order ${orderNumber || ""}`.trim(),
+    title: task.title || `${isOrderHistoryTask ? "Closed order" : "Pending order"} ${orderNumber || ""}`.trim(),
     description: task.question || task.latest_note || "",
     latest_note: task.latest_note || task.question || "",
     order,
     order_number: orderNumber,
     buyer_username: buyer,
     ship_by_date: task.ship_by_date || order.ship_by_date || "",
-    actionHref: `pending-orders.html?orderTaskId=${encodeURIComponent(task.id || "")}#order-task-panel`,
+    actionHref: isOrderHistoryTask
+      ? `ebay-order-history.html?historySearch=${encodeURIComponent(orderNumber || buyer || "")}&allDates=1`
+      : `pending-orders.html?orderTaskId=${encodeURIComponent(task.id || "")}#order-task-panel`,
   };
 }
 
@@ -4100,7 +4109,7 @@ function setupListeners() {
   });
   document.querySelectorAll("[data-task-source-filter]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.taskSourceFilter = ["all", "independent", "order", "ebay_triage", "return"].includes(button.dataset.taskSourceFilter)
+      state.taskSourceFilter = ["all", "independent", "order", "order_history", "ebay_triage", "return"].includes(button.dataset.taskSourceFilter)
         ? button.dataset.taskSourceFilter
         : "all";
       renderTasks();

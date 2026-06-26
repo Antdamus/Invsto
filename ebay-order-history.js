@@ -13,6 +13,9 @@ const state = {
   returnTaskOrderEvents: [],
   relatedOrderTaskEvents: [],
   returnAssignees: [],
+  historyOrderTaskAssignees: [],
+  activeHistoryOrderTaskGroup: null,
+  activeHistoryOrderTaskGroupKey: "",
   returnTaskLaunchApplied: false,
   relatedAdminEvents: [],
   relatedRevertEvents: [],
@@ -54,6 +57,7 @@ const state = {
   historyLoadedAllDatesSearch: false,
   historySearchReadyForNextScan: false,
   historySearchReadyValue: "",
+  expandedHistoryGroupIds: new Set(),
   lastBarcodeLookupMissLog: "",
   busy: false,
 };
@@ -2049,7 +2053,7 @@ async function loadOrderTaskEventsForLines(lineIds = []) {
   if (!cleanLineIds.length) return [];
 
   const { data: tasks, error } = await fetchOverlappingRows("ebay_order_tasks", "order_line_ids", cleanLineIds, {
-    select: "id, order_id, order_line_ids, title, question, status, priority, created_by_email, created_at",
+    select: "id, order_id, order_line_ids, title, question, status, priority, assigned_to_user_id, assigned_to_email, due_at, latest_note, created_by_email, created_at, updated_at, metadata",
   });
   if (error) throw error;
 
@@ -2079,6 +2083,11 @@ async function loadOrderTaskEventsForLines(lineIds = []) {
       task_question: task.question || "",
       task_status: task.status || "",
       task_priority: task.priority || "",
+      task_assigned_to_user_id: task.assigned_to_user_id || "",
+      task_assigned_to_email: task.assigned_to_email || "",
+      task_due_at: task.due_at || "",
+      task_latest_note: task.latest_note || "",
+      task_metadata: task.metadata && typeof task.metadata === "object" ? task.metadata : {},
       task_created_by_email: task.created_by_email || "",
       created_by_email: event.signed_by_email || task.created_by_email || "",
     };
@@ -3142,6 +3151,12 @@ function toDateTimeLocalValue(value) {
   return date.toISOString().slice(0, 16);
 }
 
+function localDateTimeToIso(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 function getReturnTaskById(taskId) {
   return state.returnTasks.find((task) => task.id === taskId) || null;
 }
@@ -3969,6 +3984,179 @@ function renderReturnTaskVideoReceiptPanel(task = {}) {
   return `<div class="return-task-video-receipts">${panels.join("")}</div>`;
 }
 
+function getHistoryGroupKey(group = {}, groupIndex = 0) {
+  const orderNumbers = getOrderNumbersFromOrders(getUniqueOrdersFromLines(group.lines || []));
+  const stableKey = [
+    group.id || "",
+    group.kind || "group",
+    group.buyer || "",
+    orderNumbers.join("|"),
+  ].filter(Boolean).join("::");
+  return stableKey || `history-group-${groupIndex}`;
+}
+
+function getHistoryGroupQuantity(group = {}) {
+  return (group.lines || []).reduce((sum, line) => (
+    sum + Number(line.fulfilled_quantity || line.quantity || 1)
+  ), 0);
+}
+
+function getHistoryGroupCustomerNames(group = {}) {
+  return unique((group.lines || [])
+    .map((line) => line.order?.buyer_name)
+    .filter(Boolean));
+}
+
+function getHistoryGroupReceiptCount(group = {}) {
+  return (group.lines || []).reduce((sum, line) => (
+    sum + getHistoryLineVideoReceiptPhotos(line, group.events || []).length
+  ), 0);
+}
+
+function isActiveHistoryOrderTaskStatus(status) {
+  return !["resolved", "cancelled", "closed", "approved_for_shipping", "assigned_for_shipping", "shipped_completed"].includes(String(status || "").toLowerCase());
+}
+
+function getHistoryOrderTaskStatusLabel(status) {
+  const value = String(status || "").toLowerCase();
+  const labels = {
+    open: "Open",
+    assigned: "Assigned",
+    in_progress: "In progress",
+    waiting_on_admin: "Waiting on admin",
+    waiting_on_worker: "Waiting on worker",
+    resolved: "Resolved",
+    cancelled: "Cancelled",
+    closed: "Closed",
+  };
+  return labels[value] || (value ? value.replace(/_/g, " ") : "Open");
+}
+
+function getHistoryTaskEventsForLineIds(lineIds = []) {
+  const wanted = new Set(lineIds.filter(Boolean));
+  if (!wanted.size) return [];
+  return state.relatedOrderTaskEvents.filter((event) => (
+    (event.order_line_ids || []).some((lineId) => wanted.has(lineId))
+  ));
+}
+
+function getHistoryTaskSummaryForLineIds(lineIds = []) {
+  const taskMap = new Map();
+  getHistoryTaskEventsForLineIds(lineIds).forEach((event) => {
+    const taskId = event.task_id || event.id || "";
+    if (!taskId) return;
+    const status = event.task_status || event.new_status || "";
+    const current = taskMap.get(taskId) || {
+      id: taskId,
+      status,
+      title: event.task_title || "",
+      question: event.task_question || "",
+      assignee: event.task_assigned_to_email || "",
+      dueAt: event.task_due_at || "",
+      latestAt: "",
+      latestEvent: null,
+    };
+    const currentTime = current.latestAt ? new Date(current.latestAt).getTime() : 0;
+    const eventTime = event.created_at ? new Date(event.created_at).getTime() : 0;
+    if (!current.latestAt || eventTime >= currentTime) {
+      current.status = status || current.status;
+      current.title = event.task_title || current.title;
+      current.question = event.task_question || current.question;
+      current.assignee = event.task_assigned_to_email || current.assignee;
+      current.dueAt = event.task_due_at || current.dueAt;
+      current.latestAt = event.created_at || current.latestAt;
+      current.latestEvent = event;
+    }
+    taskMap.set(taskId, current);
+  });
+
+  const tasks = [...taskMap.values()].sort((a, b) => (
+    new Date(b.latestAt || 0) - new Date(a.latestAt || 0)
+  ));
+  const activeTasks = tasks.filter((task) => isActiveHistoryOrderTaskStatus(task.status));
+  return {
+    tasks,
+    activeTasks,
+    totalCount: tasks.length,
+    activeCount: activeTasks.length,
+    latestTask: tasks[0] || null,
+  };
+}
+
+function getHistoryGroupTaskSummary(group = {}) {
+  return getHistoryTaskSummaryForLineIds((group.lines || []).map((line) => line.id).filter(Boolean));
+}
+
+function getHistoryOrderTaskOptionsForGroup(group = {}) {
+  const byOrder = new Map();
+  (group.lines || []).forEach((line) => {
+    const order = line.order || {};
+    const orderId = line.order_id || order.id || "";
+    if (!orderId) return;
+    const existing = byOrder.get(orderId) || {
+      id: orderId,
+      order,
+      lines: [],
+      gross: 0,
+    };
+    existing.lines.push(line);
+    existing.gross += getLineGross(line);
+    existing.order = { ...existing.order, ...order, id: orderId };
+    byOrder.set(orderId, existing);
+  });
+  return [...byOrder.values()];
+}
+
+function getSelectedHistoryOrderTaskOption() {
+  const group = state.activeHistoryOrderTaskGroup;
+  const orderId = $("history-order-task-order")?.value || "";
+  const options = getHistoryOrderTaskOptionsForGroup(group);
+  return options.find((option) => option.id === orderId) || options[0] || null;
+}
+
+function renderHistoryOrderTaskContext() {
+  const context = $("history-order-task-context");
+  if (!context) return;
+  const option = getSelectedHistoryOrderTaskOption();
+  if (!option) {
+    context.innerHTML = `<div class="history-order-task-empty">No closed order was found for this group.</div>`;
+    return;
+  }
+  const order = option.order || {};
+  const lineCount = option.lines.length;
+  const taskSummary = getHistoryTaskSummaryForLineIds(option.lines.map((line) => line.id).filter(Boolean));
+  context.innerHTML = `
+    <div class="history-order-task-context-card">
+      <span class="eyebrow">Closed Order</span>
+      <strong>${escapeHtml(order.order_number || "eBay order")} - ${escapeHtml(order.buyer_username || "unknown buyer")}</strong>
+      <span>${escapeHtml(order.buyer_name || "No customer name")} - ${lineCount} line${lineCount === 1 ? "" : "s"} - ${escapeHtml(formatMoney(option.gross))}</span>
+      ${order.ship_by_date ? `<span>Ship by ${escapeHtml(formatDateTime(order.ship_by_date))}</span>` : ""}
+    </div>
+    <div class="history-order-task-context-card ${taskSummary.activeCount ? "is-active" : ""}">
+      <span class="eyebrow">Existing Tasks</span>
+      <strong>${taskSummary.activeCount ? `${taskSummary.activeCount} active` : "No active tasks"}</strong>
+      <span>${taskSummary.totalCount ? `${taskSummary.totalCount} total task${taskSummary.totalCount === 1 ? "" : "s"} linked to these line(s)` : "This will create the first task for this closed order."}</span>
+    </div>
+  `;
+}
+
+function getHistoryGroupSummaryBadges({ group, primaryStatus, statusClass, hasAttachedLabel, hasReturns, groupPhotos, receiptCount, taskSummary }) {
+  const badges = [
+    `<span class="history-status ${escapeHtml(statusClass)}">${escapeHtml(primaryStatus)}</span>`,
+  ];
+  if (hasAttachedLabel) badges.push(`<span class="history-label-pill is-compact">Label</span>`);
+  if (hasReturns) badges.push(`<span class="history-return-pill is-compact">Return</span>`);
+  if (taskSummary?.activeCount) {
+    badges.push(`<span class="history-task-pill is-active">${taskSummary.activeCount} active task${taskSummary.activeCount === 1 ? "" : "s"}</span>`);
+  } else if (taskSummary?.totalCount) {
+    badges.push(`<span class="history-task-pill">${taskSummary.totalCount} task${taskSummary.totalCount === 1 ? "" : "s"}</span>`);
+  }
+  if (groupPhotos.length) badges.push(`<span class="history-proof-pill">${groupPhotos.length} photo${groupPhotos.length === 1 ? "" : "s"}</span>`);
+  if (receiptCount) badges.push(`<span class="history-proof-pill is-video">${receiptCount} receipt${receiptCount === 1 ? "" : "s"}</span>`);
+  if ((group.lines || []).length > 1) badges.push(`<span class="history-proof-pill">${group.lines.length} lines</span>`);
+  return badges.join("");
+}
+
 function bindReturnVideoReceiptLinks(root = document) {
   root.querySelectorAll("[data-return-video-receipt-link]").forEach((link) => {
     if (link.dataset.bound === "true") return;
@@ -4017,18 +4205,90 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
     const groupOrders = getUniqueOrdersFromLines(group.lines);
     const hasAttachedLabel = groupOrders.some((order) => order.label_file_path);
     const hasReturns = getReturnCasesForLineIds(lineIds).length > 0;
+    const groupKey = getHistoryGroupKey(group, groupIndex);
+    const isExpanded = state.expandedHistoryGroupIds.has(groupKey);
+    const groupQty = getHistoryGroupQuantity(group);
+    const customerNames = getHistoryGroupCustomerNames(group);
+    const customerText = customerNames.length ? customerNames.slice(0, 2).join(", ") : "";
+    const orderNumbers = groupOrders.map((order) => order.order_number).filter(Boolean);
+    const receiptCount = getHistoryGroupReceiptCount(group);
+    const taskSummary = getHistoryGroupTaskSummary(group);
+    const summaryBadges = getHistoryGroupSummaryBadges({
+      group,
+      primaryStatus,
+      statusClass,
+      hasAttachedLabel,
+      hasReturns,
+      groupPhotos,
+      receiptCount,
+      taskSummary,
+    });
     const groupApiSourceLabel = unique(group.lines.map(getEbayHistoryApiSourceLabel).filter(Boolean))[0] || "";
     const completedByText = groupApiSourceLabel && !workers.length
       ? `Source: ${groupApiSourceLabel}`
       : `Completed by: ${workers.join(", ") || "Unknown"}`;
+    const detailHtml = isExpanded ? `
+      <div class="history-order-detail">
+        ${renderGroupLabelControl(group, groupOrders)}
+        ${renderGroupReturnControl(group)}
+        ${groupPhotos.length ? `
+          <div class="history-evidence-strip">
+            <div>
+              <span class="eyebrow">Evidence</span>
+              <strong>${groupPhotos.length} photo${groupPhotos.length === 1 ? "" : "s"} attached</strong>
+            </div>
+            <div class="event-photo-grid compact" data-group-evidence-index="${groupIndex}"></div>
+          </div>
+        ` : ""}
+        <div class="history-lines">
+          ${group.lines.map((line) => `
+            <div class="history-line-row">
+              <div>
+                <div class="history-line-title-row">
+                  <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+                  <b>${escapeHtml(formatMoney(getLineGross(line)))}</b>
+                </div>
+                <small>${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.fulfilled_quantity || line.quantity || 1).toLocaleString()} - ${escapeHtml(getDisplayHistoryNote(line.notes) || "No notes")}</small>
+                <div class="history-worker-row">
+                  <span>${escapeHtml(getLineStatusLabel(line))}</span>
+                  <span>${escapeHtml(isEbayApiHistoryLine(line) ? getEbayHistoryApiSourceLabel(line) : line.fulfilled_by_email || "Unknown worker")}</span>
+                  <span>${escapeHtml(getHistoryLineTimelineText(line))}</span>
+                </div>
+                ${getEbayHistoryApiSourceLabel(line) ? `<span class="history-api-source-pill is-line">${escapeHtml(getEbayHistoryApiSourceLabel(line))}</span>` : ""}
+                ${renderHistoryLineVideoReceiptPhotos(line, group.events)}
+              </div>
+              <div class="history-line-actions">
+                <span class="history-status ${getLineStatusClass(line)}">${escapeHtml(getLineStatusLabel(line))}</span>
+                ${isAdminUser() ? `<button type="button" class="secondary-btn revert-line-btn" data-revert-line="${escapeHtml(line.id)}">Revert Line</button>` : ""}
+              </div>
+            </div>
+          `).join("")}
+        </div>
+        ${auditEvents.length ? `
+          <details class="history-audit-details">
+            <summary>${isAdminUser() ? "Audit trail" : "Packing proof"} for this group</summary>
+            <div class="history-audit-timeline">
+              ${auditEvents.map((event) => `
+                <article>
+                  <strong>${escapeHtml(getEventLabel(event))}</strong>
+                  <span>${escapeHtml(formatDateTime(event.created_at))} - ${escapeHtml(event.signed_by_email || "Unknown user")}</span>
+                  <p>${escapeHtml(getDisplayHistoryNote(event.notes) || "No note recorded.")}</p>
+                </article>
+              `).join("")}
+            </div>
+          </details>
+        ` : ""}
+      </div>
+    ` : "";
 
     const card = document.createElement("article");
-    card.className = "history-order-card";
+    card.className = `history-order-card ${isExpanded ? "is-expanded" : "is-collapsed"}`;
+    card.dataset.historyGroupKey = groupKey;
     card.innerHTML = `
-      <div class="history-order-top">
-        <div>
-          <span class="eyebrow">${group.kind === "event" ? "Grouped Completion" : "Buyer Group"}</span>
-          <h3>
+      <div class="history-order-summary" data-history-group-summary>
+        <div class="history-order-identity">
+          <div class="history-order-title-row">
+            <span class="eyebrow">${group.kind === "event" ? "Grouped Completion" : "Buyer Group"}</span>
             <button
               type="button"
               class="buyer-insight-link history-buyer-insight-link"
@@ -4037,87 +4297,61 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
               data-current-order-total="${escapeHtml(group.gross)}"
               data-current-order-count="${escapeHtml(groupOrders.length || 1)}"
               data-current-line-count="${escapeHtml(group.lines.length)}"
-              data-current-order-numbers="${escapeHtml(groupOrders.map((order) => order.order_number).filter(Boolean).join(","))}"
+              data-current-order-numbers="${escapeHtml(orderNumbers.join(","))}"
               data-current-items="${buyerInsightCurrentItemsAttribute(group.lines)}"
             >${escapeHtml(group.buyer)}</button>
-          </h3>
-          <div class="history-card-meta">
-            <span>${group.lines.length} line(s)</span>
+            <span class="history-order-count-pill">${groupOrders.length || 1} order${(groupOrders.length || 1) === 1 ? "" : "s"} - ${group.lines.length} line${group.lines.length === 1 ? "" : "s"} - Qty ${groupQty.toLocaleString()}</span>
+          </div>
+          <div class="history-order-summary-facts">
+            ${customerText ? `<span>Customer ${escapeHtml(customerText)}</span>` : ""}
             <span>${escapeHtml(getHistoryGroupTimelineText(group))}</span>
-            <span class="history-status ${statusClass}">${escapeHtml(primaryStatus)}</span>
-          </div>
-          <div class="history-worker-row">
-            <span>${escapeHtml(group.subtitle || "No order details")}</span>
-          </div>
-          <div class="history-worker-row">
+            ${orderNumbers.length ? `<span>Order ${escapeHtml(orderNumbers.slice(0, 2).join(", "))}${orderNumbers.length > 2 ? ` +${orderNumbers.length - 2}` : ""}</span>` : ""}
             <span>${escapeHtml(completedByText)}</span>
+            ${groupApiSourceLabel ? `<span>${escapeHtml(groupApiSourceLabel)}</span>` : ""}
           </div>
-          ${hasAttachedLabel ? `<span class="history-label-pill">Label attached</span>` : ""}
-          ${hasReturns ? `<span class="history-return-pill">Return recorded</span>` : ""}
-          ${groupApiSourceLabel ? `<span class="history-api-source-pill">${escapeHtml(groupApiSourceLabel)}</span>` : ""}
         </div>
-        <div>
+        <div class="history-order-summary-actions">
           <div class="history-money-row">
             <span>Gross ${escapeHtml(formatMoney(group.gross))}</span>
             <span>Payout ${escapeHtml(formatMoney(group.payout))}</span>
           </div>
-          ${isAdminUser() ? `<button type="button" class="secondary-btn revert-order-btn" data-revert-lines="${escapeHtml(lineIds.join(","))}">Revert Order</button>` : ""}
+          <div class="history-order-badge-row">${summaryBadges}</div>
+          <div class="history-order-summary-buttons">
+            <button type="button" class="secondary-btn history-task-btn" data-history-order-task="${escapeHtml(groupKey)}">Add Task</button>
+            ${isAdminUser() ? `<button type="button" class="secondary-btn revert-order-btn" data-revert-lines="${escapeHtml(lineIds.join(","))}">Revert Order</button>` : ""}
+            <button type="button" class="secondary-btn history-group-toggle" data-history-group-toggle="${escapeHtml(groupKey)}" aria-expanded="${isExpanded ? "true" : "false"}">${isExpanded ? "Close" : "Open"}</button>
+          </div>
         </div>
       </div>
-      ${renderGroupLabelControl(group, groupOrders)}
-      ${renderGroupReturnControl(group)}
-      ${groupPhotos.length ? `
-        <div class="history-evidence-strip">
-          <div>
-            <span class="eyebrow">Evidence</span>
-            <strong>${groupPhotos.length} photo${groupPhotos.length === 1 ? "" : "s"} attached</strong>
-          </div>
-          <div class="event-photo-grid compact" data-group-evidence-index="${groupIndex}"></div>
-        </div>
-      ` : ""}
-      <div class="history-lines">
-        ${group.lines.map((line) => `
-          <div class="history-line-row">
-            <div>
-              <div class="history-line-title-row">
-                <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
-                <b>${escapeHtml(formatMoney(getLineGross(line)))}</b>
-              </div>
-              <small>${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.fulfilled_quantity || line.quantity || 1).toLocaleString()} - ${escapeHtml(getDisplayHistoryNote(line.notes) || "No notes")}</small>
-              <div class="history-worker-row">
-                <span>${escapeHtml(getLineStatusLabel(line))}</span>
-                <span>${escapeHtml(isEbayApiHistoryLine(line) ? getEbayHistoryApiSourceLabel(line) : line.fulfilled_by_email || "Unknown worker")}</span>
-                <span>${escapeHtml(getHistoryLineTimelineText(line))}</span>
-              </div>
-              ${getEbayHistoryApiSourceLabel(line) ? `<span class="history-api-source-pill is-line">${escapeHtml(getEbayHistoryApiSourceLabel(line))}</span>` : ""}
-              ${renderHistoryLineVideoReceiptPhotos(line, group.events)}
-            </div>
-            <div class="history-line-actions">
-              <span class="history-status ${getLineStatusClass(line)}">${escapeHtml(getLineStatusLabel(line))}</span>
-              ${isAdminUser() ? `<button type="button" class="secondary-btn revert-line-btn" data-revert-line="${escapeHtml(line.id)}">Revert Line</button>` : ""}
-            </div>
-          </div>
-        `).join("")}
-      </div>
-      ${auditEvents.length ? `
-        <details class="history-audit-details">
-          <summary>${isAdminUser() ? "Audit trail" : "Packing proof"} for this group</summary>
-          <div class="history-audit-timeline">
-            ${auditEvents.map((event) => `
-              <article>
-                <strong>${escapeHtml(getEventLabel(event))}</strong>
-                <span>${escapeHtml(formatDateTime(event.created_at))} - ${escapeHtml(event.signed_by_email || "Unknown user")}</span>
-                <p>${escapeHtml(getDisplayHistoryNote(event.notes) || "No note recorded.")}</p>
-              </article>
-            `).join("")}
-          </div>
-        </details>
-      ` : ""}
+      ${detailHtml}
     `;
 
+    const toggleGroup = () => {
+      if (state.expandedHistoryGroupIds.has(groupKey)) {
+        state.expandedHistoryGroupIds.delete(groupKey);
+      } else {
+        state.expandedHistoryGroupIds.add(groupKey);
+      }
+      renderHistoryList(groups);
+      requestAnimationFrame(() => {
+        const nextCard = [...list.querySelectorAll("[data-history-group-key]")]
+          .find((node) => node.dataset.historyGroupKey === groupKey);
+        nextCard?.scrollIntoView({ block: "nearest" });
+      });
+    };
+    card.querySelector("[data-history-group-toggle]")?.addEventListener("click", toggleGroup);
+    card.querySelector("[data-history-group-summary]")?.addEventListener("click", (event) => {
+      if (event.target.closest("button, a, input, select, textarea, summary, details")) return;
+      toggleGroup();
+    });
     card.querySelector("[data-revert-lines]")?.addEventListener("click", (event) => {
       const ids = event.currentTarget.dataset.revertLines.split(",").filter(Boolean);
       openRevertModal(ids);
+    });
+    card.querySelector("[data-history-order-task]")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openHistoryOrderTaskModal(group, groupKey);
     });
     card.querySelectorAll("[data-history-label-group]").forEach((button) => {
       button.addEventListener("click", () => handleHistoryLabelButtonClick(button.dataset.historyLabelGroup));
@@ -4385,6 +4619,178 @@ function renderEventList() {
   hydrateEventEvidencePhotos(events).catch((error) => {
     console.warn("Could not load event evidence photos:", error);
   });
+}
+
+function setHistoryOrderTaskError(message = "") {
+  const el = $("history-order-task-error");
+  if (el) el.textContent = message || "";
+}
+
+function setHistoryOrderTaskStatus(message = "", type = "info") {
+  const el = $("history-order-task-status");
+  if (!el) return;
+  el.textContent = message || "";
+  el.classList.toggle("is-error", type === "error");
+  el.classList.toggle("is-success", type === "success");
+  el.classList.toggle("hidden", !message);
+}
+
+function renderHistoryOrderTaskAssigneeSelect() {
+  const select = $("history-order-task-assignee");
+  if (!select) return;
+  const currentValue = select.value || "";
+  select.replaceChildren(new Option("Leave unassigned", ""));
+  state.historyOrderTaskAssignees.forEach((employee) => {
+    const label = `${employee.display_name || employee.email || "Team member"} - ${employee.role || "employee"}`;
+    select.appendChild(new Option(label, employee.user_id || ""));
+  });
+  select.value = state.historyOrderTaskAssignees.some((employee) => employee.user_id === currentValue)
+    ? currentValue
+    : "";
+}
+
+async function loadHistoryOrderTaskAssignees() {
+  if (state.historyOrderTaskAssignees.length) {
+    renderHistoryOrderTaskAssigneeSelect();
+    return state.historyOrderTaskAssignees;
+  }
+
+  try {
+    const { data, error } = await supabase.rpc("list_ebay_order_task_assignees");
+    if (error) throw error;
+    state.historyOrderTaskAssignees = Array.isArray(data) ? data : [];
+  } catch (rpcError) {
+    console.warn("Could not load order history task assignees through RPC:", rpcError);
+    try {
+      const { data, error } = await supabase
+        .from("employees")
+        .select("id, user_id, display_name, email, role")
+        .eq("active", true)
+        .order("display_name", { ascending: true });
+      if (error) throw error;
+      state.historyOrderTaskAssignees = Array.isArray(data) ? data : [];
+    } catch (fallbackError) {
+      console.warn("Could not load employee assignee list:", fallbackError);
+      state.historyOrderTaskAssignees = state.employee
+        ? [{
+          id: state.employee.id,
+          user_id: state.user?.id || "",
+          display_name: state.employee.display_name || state.user?.email || "Current user",
+          email: state.user?.email || "",
+          role: state.employee.role || "employee",
+        }]
+        : [];
+    }
+  }
+
+  renderHistoryOrderTaskAssigneeSelect();
+  return state.historyOrderTaskAssignees;
+}
+
+function renderHistoryOrderTaskOrderSelect(group = {}) {
+  const select = $("history-order-task-order");
+  const field = $("history-order-task-order-field");
+  if (!select) return;
+  const options = getHistoryOrderTaskOptionsForGroup(group);
+  select.replaceChildren();
+  options.forEach((option) => {
+    const order = option.order || {};
+    const label = [
+      order.order_number || "Closed eBay order",
+      order.buyer_username || "",
+      formatMoney(option.gross),
+      `${option.lines.length} line${option.lines.length === 1 ? "" : "s"}`,
+    ].filter(Boolean).join(" - ");
+    select.appendChild(new Option(label, option.id));
+  });
+  if (field) field.classList.toggle("hidden", options.length <= 1);
+  if (options[0]) select.value = options[0].id;
+  renderHistoryOrderTaskContext();
+}
+
+async function openHistoryOrderTaskModal(group = {}, groupKey = "") {
+  const options = getHistoryOrderTaskOptionsForGroup(group);
+  if (!options.length) {
+    console.warn("Could not open closed-order task modal because this history group has no order id.", group);
+    return;
+  }
+
+  state.activeHistoryOrderTaskGroup = group;
+  state.activeHistoryOrderTaskGroupKey = groupKey;
+  setHistoryOrderTaskError("");
+  setHistoryOrderTaskStatus("Create a task tied to this closed order. The task will keep the order history source in the audit trail.", "info");
+  $("history-order-task-note").value = "";
+  $("history-order-task-priority").value = "normal";
+  $("history-order-task-due-at").value = "";
+  renderHistoryOrderTaskOrderSelect(group);
+
+  await loadHistoryOrderTaskAssignees();
+  const assignee = $("history-order-task-assignee");
+  if (assignee) {
+    const currentUserAssignee = state.historyOrderTaskAssignees.find((employee) => employee.user_id === state.user?.id);
+    const defaultAdmin = state.historyOrderTaskAssignees.find((employee) => String(employee.role || "").toLowerCase() === "admin");
+    assignee.value = isAdminUser()
+      ? currentUserAssignee?.user_id || ""
+      : defaultAdmin?.user_id || currentUserAssignee?.user_id || "";
+  }
+
+  openModal("history-order-task-modal");
+  setTimeout(() => $("history-order-task-note")?.focus(), 80);
+}
+
+function closeHistoryOrderTaskModal() {
+  state.activeHistoryOrderTaskGroup = null;
+  state.activeHistoryOrderTaskGroupKey = "";
+  setHistoryOrderTaskError("");
+  setHistoryOrderTaskStatus("");
+  closeModal("history-order-task-modal");
+}
+
+async function submitHistoryOrderTask() {
+  const option = getSelectedHistoryOrderTaskOption();
+  if (!option?.id) return setHistoryOrderTaskError("Choose a closed order for this task.");
+
+  const note = String($("history-order-task-note")?.value || "").trim();
+  if (!note) {
+    setHistoryOrderTaskError("Write what needs to be done before creating this task.");
+    $("history-order-task-note")?.focus();
+    return;
+  }
+
+  const button = $("create-history-order-task");
+  const originalText = button?.textContent || "Create Task";
+  button?.toggleAttribute("disabled", true);
+  if (button) button.textContent = "Creating...";
+  setHistoryOrderTaskError("");
+  setHistoryOrderTaskStatus("Saving closed-order task...", "info");
+
+  try {
+    const dueAt = localDateTimeToIso($("history-order-task-due-at")?.value || "");
+    const { error } = await supabase.rpc("create_ebay_order_history_task", {
+      _order_id: option.id,
+      _order_line_ids: option.lines.map((line) => line.id).filter(Boolean),
+      _assigned_to_user_id: $("history-order-task-assignee")?.value || null,
+      _priority: $("history-order-task-priority")?.value || "normal",
+      _question: note,
+      _due_at: dueAt,
+      _photo_attachments: [],
+      _signed_by_email: state.user?.email || state.employee?.display_name || "",
+    });
+    if (error) throw error;
+
+    const groupKey = state.activeHistoryOrderTaskGroupKey;
+    if (groupKey) state.expandedHistoryGroupIds.add(groupKey);
+    setHistoryOrderTaskStatus("Task created.", "success");
+    closeHistoryOrderTaskModal();
+    await loadOrderHistory();
+  } catch (error) {
+    console.error("Could not create closed-order task:", error);
+    setHistoryOrderTaskError(error?.message || "Could not create this task.");
+    setHistoryOrderTaskStatus("", "info");
+  } finally {
+    button?.toggleAttribute("disabled", false);
+    if (button) button.textContent = originalText;
+  }
 }
 
 function openModal(id) {
@@ -6373,6 +6779,23 @@ function applyHistoryBuyerLaunchSearch() {
   search.value = buyer;
   state.historySearchUserEdited = true;
   state.historyBuyerSearchApplied = true;
+}
+
+function applyInitialHistorySearchParams() {
+  if (isReturnsWorkbenchPage()) return;
+  const params = new URLSearchParams(window.location.search);
+  const searchValue = String(params.get("historySearch") || params.get("orderHistorySearch") || "").trim();
+  if (!searchValue) return;
+  const search = $("history-search");
+  if (search) {
+    search.value = searchValue;
+    state.historySearchUserEdited = true;
+  }
+  const allDates = String(params.get("allDates") || params.get("historyAllDates") || "").toLowerCase();
+  if (["1", "true", "yes"].includes(allDates)) {
+    const allDatesToggle = $("history-buyer-all-dates");
+    if (allDatesToggle) allDatesToggle.checked = true;
+  }
 }
 
 async function getHistoryLabelSignedUrl(order) {
@@ -8484,6 +8907,13 @@ function setupListeners() {
   $("history-label-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "history-label-modal") closeHistoryLabelModal();
   });
+  $("close-history-order-task-modal")?.addEventListener("click", closeHistoryOrderTaskModal);
+  $("cancel-history-order-task")?.addEventListener("click", closeHistoryOrderTaskModal);
+  $("create-history-order-task")?.addEventListener("click", submitHistoryOrderTask);
+  $("history-order-task-order")?.addEventListener("change", renderHistoryOrderTaskContext);
+  $("history-order-task-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "history-order-task-modal") closeHistoryOrderTaskModal();
+  });
   $("evidence-photo-viewer-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "evidence-photo-viewer-modal") closeEvidencePhotoViewer();
   });
@@ -8545,6 +8975,16 @@ function setupListeners() {
       }
       return;
     }
+    if (isModalOpen("history-order-task-modal")) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeHistoryOrderTaskModal();
+      } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        submitHistoryOrderTask();
+      }
+      return;
+    }
     if (isModalOpen("return-intake-modal")) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -8573,6 +9013,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (!ok) return;
   setupDashboardShell();
   setupDefaultDates();
+  applyInitialHistorySearchParams();
   setupHistoryLabelReceiver();
   setupListeners();
   if (isReturnsWorkbenchPage()) {
