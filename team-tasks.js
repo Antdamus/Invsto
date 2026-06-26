@@ -20,6 +20,7 @@ const state = {
   selectedCaptureStationId: "",
   captureBusy: false,
   taskScope: "mine",
+  viewedWorkerUserId: "",
   taskView: "active",
   taskHistorySort: "recent",
   childTasksByParent: new Map(),
@@ -240,6 +241,47 @@ function isCanceledTaskScope() {
   return isAdminUser() && state.taskScope === "canceled";
 }
 
+function getViewedWorkerUserId() {
+  return isAdminUser() ? String(state.viewedWorkerUserId || "").trim() : "";
+}
+
+function isViewingWorkerTasks() {
+  return Boolean(getViewedWorkerUserId());
+}
+
+function getViewedWorker() {
+  const viewedWorkerUserId = getViewedWorkerUserId();
+  if (!viewedWorkerUserId) return null;
+  return state.assignees.find((employee) => employee.user_id === viewedWorkerUserId) || null;
+}
+
+function getAssigneeOptionLabel(employee = {}) {
+  return `${employee.display_name || employee.email || "Team member"} - ${employee.role || "employee"}`;
+}
+
+function getViewedWorkerLabel() {
+  const worker = getViewedWorker();
+  if (!worker) return "Selected worker";
+  return worker.display_name || worker.email || "Selected worker";
+}
+
+function getTaskViewerUserId() {
+  return getViewedWorkerUserId() || state.user?.id || "";
+}
+
+function getTaskViewerEmails() {
+  const worker = getViewedWorker();
+  if (worker?.email) return [worker.email];
+  return [state.user?.email, state.employee?.email].filter(Boolean);
+}
+
+function getTaskViewerShortLabel() {
+  const worker = getViewedWorker();
+  if (!worker) return "me";
+  const name = worker.display_name || worker.email || "worker";
+  return name.split(/\s+/)[0] || "worker";
+}
+
 function isTaskHistoryView() {
   return state.taskView === "history";
 }
@@ -249,15 +291,30 @@ function isHistoricalTaskView() {
 }
 
 function updateTaskScopeChrome() {
-  if (!isAdminUser()) state.taskScope = "mine";
-  if (isCanceledTaskScope()) state.taskView = "history";
+  if (!isAdminUser()) {
+    state.taskScope = "mine";
+    state.viewedWorkerUserId = "";
+  }
+  if (isCanceledTaskScope()) {
+    state.taskView = "history";
+    state.viewedWorkerUserId = "";
+  }
 
   const scopeControl = $("team-task-scope-control");
   const scopeSelect = $("team-task-scope");
+  const workerControl = $("team-task-worker-view-control");
+  const workerSelect = $("team-task-worker-view");
   scopeControl?.classList.toggle("hidden", !isAdminUser());
   if (scopeSelect) {
     scopeSelect.value = isCanceledTaskScope() ? "canceled" : isTeamWideTaskScope() ? "all" : "mine";
     scopeSelect.disabled = !isAdminUser();
+  }
+  const showWorkerControl = isAdminUser() && !isCanceledTaskScope();
+  workerControl?.classList.toggle("hidden", !showWorkerControl);
+  workerControl?.classList.toggle("is-active", isViewingWorkerTasks());
+  if (workerSelect) {
+    workerSelect.disabled = !showWorkerControl;
+    workerSelect.value = getViewedWorkerUserId();
   }
   $("team-task-active-sort-control")?.classList.toggle("hidden", isHistoricalTaskView());
   $("team-task-history-sort-control")?.classList.toggle("hidden", !isHistoricalTaskView());
@@ -268,7 +325,9 @@ function updateTaskScopeChrome() {
 
   const mode = $("team-task-mode");
   if (mode) {
-    mode.textContent = isCanceledTaskScope()
+    mode.textContent = isViewingWorkerTasks()
+      ? `${getViewedWorkerLabel()} ${isTaskHistoryView() ? "History" : "Tasks"}`
+      : isCanceledTaskScope()
       ? "Canceled Tasks"
       : `${isTeamWideTaskScope() ? "Everyone's" : "My"} ${isTaskHistoryView() ? "History" : "Tasks"}`;
   }
@@ -449,19 +508,27 @@ function userEmailMatches(value = "") {
   ].some((email) => normalizeLookup(email) === target);
 }
 
+function userEmailMatchesTaskViewer(value = "") {
+  const target = normalizeLookup(value);
+  if (!target) return false;
+  return getTaskViewerEmails().some((email) => normalizeLookup(email) === target);
+}
+
 function isTaskAssignedToCurrentUser(task = {}) {
+  const viewerUserId = getTaskViewerUserId();
   return Boolean(
-    (task.assigned_to_user_id && task.assigned_to_user_id === state.user?.id)
-    || userEmailMatches(task.assigned_to_email)
+    (task.assigned_to_user_id && viewerUserId && task.assigned_to_user_id === viewerUserId)
+    || userEmailMatchesTaskViewer(task.assigned_to_email)
   );
 }
 
 function isTaskCreatedByCurrentUser(task = {}) {
+  const viewerUserId = getTaskViewerUserId();
   return Boolean(
-    (task.created_by && task.created_by === state.user?.id)
-    || (task.assigned_by && task.assigned_by === state.user?.id)
-    || userEmailMatches(task.created_by_email)
-    || userEmailMatches(task.assigned_by_email)
+    (task.created_by && viewerUserId && task.created_by === viewerUserId)
+    || (task.assigned_by && viewerUserId && task.assigned_by === viewerUserId)
+    || userEmailMatchesTaskViewer(task.created_by_email)
+    || userEmailMatchesTaskViewer(task.assigned_by_email)
   );
 }
 
@@ -509,12 +576,13 @@ function getVisibleTasksForCurrentFilters(tasks = []) {
 
 function renderTaskOwnerFilterChrome(tasks = []) {
   const counts = getTaskOwnerCounts(tasks);
+  const viewerLabel = getTaskViewerShortLabel();
   document.querySelectorAll("[data-task-owner-filter]").forEach((button) => {
     const filter = button.dataset.taskOwnerFilter || "all";
     const labels = {
       all: `All loaded ${counts.all}`,
-      assigned: `Assigned to me ${counts.assigned}`,
-      created: `Created by me ${counts.created}`,
+      assigned: `${isViewingWorkerTasks() ? `Assigned to ${viewerLabel}` : "Assigned to me"} ${counts.assigned}`,
+      created: `${isViewingWorkerTasks() ? `Created by ${viewerLabel}` : "Created by me"} ${counts.created}`,
     };
     button.textContent = labels[filter] || formatTaskTag(filter);
     button.classList.toggle("is-active", state.taskOwnerFilter === filter);
@@ -687,6 +755,7 @@ async function loadCurrentUser() {
 
   state.employee = employee;
   state.taskScope = "mine";
+  state.viewedWorkerUserId = "";
   updateTaskScopeChrome();
   const greeting = $("team-task-greeting");
   if (greeting) greeting.textContent = `Tasks${employee.display_name ? ` - ${employee.display_name}` : ""}`;
@@ -699,10 +768,22 @@ function renderAssigneeSelect() {
   const current = select.value || "";
   select.replaceChildren(new Option("Leave unassigned", ""));
   state.assignees.forEach((employee) => {
-    const label = `${employee.display_name || employee.email || "Team member"} - ${employee.role || "employee"}`;
-    select.appendChild(new Option(label, employee.user_id || ""));
+    select.appendChild(new Option(getAssigneeOptionLabel(employee), employee.user_id || ""));
   });
   select.value = state.assignees.some((employee) => employee.user_id === current) ? current : "";
+}
+
+function renderWorkerViewSelect() {
+  const select = $("team-task-worker-view");
+  if (!select) return;
+  const current = state.viewedWorkerUserId || select.value || "";
+  select.replaceChildren(new Option("Use View scope", ""));
+  state.assignees.forEach((employee) => {
+    select.appendChild(new Option(getAssigneeOptionLabel(employee), employee.user_id || ""));
+  });
+  const validCurrent = state.assignees.some((employee) => employee.user_id === current);
+  state.viewedWorkerUserId = isAdminUser() && validCurrent ? current : "";
+  select.value = state.viewedWorkerUserId;
 }
 
 function setModalFieldVisible(inputId, visible) {
@@ -753,6 +834,8 @@ async function loadAssignees() {
   if (error) throw error;
   state.assignees = Array.isArray(data) ? data : [];
   renderAssigneeSelect();
+  renderWorkerViewSelect();
+  updateTaskScopeChrome();
 }
 
 async function loadTasks() {
@@ -938,6 +1021,7 @@ function setupTaskNotificationRealtime() {
 }
 
 async function loadTeamTaskRecords() {
+  const viewedWorkerUserId = getViewedWorkerUserId();
   if (isHistoricalTaskView()) {
     let query = supabase
       .from("team_tasks")
@@ -945,8 +1029,23 @@ async function loadTeamTaskRecords() {
       .in("status", HISTORY_TASK_STATUSES)
       .order("updated_at", { ascending: false })
       .limit(80);
-    if (!isTeamWideTaskScope() && !isCanceledTaskScope()) query = query.eq("assigned_to_user_id", state.user?.id);
+    if (viewedWorkerUserId) {
+      query = query.eq("assigned_to_user_id", viewedWorkerUserId);
+    } else if (!isTeamWideTaskScope() && !isCanceledTaskScope()) {
+      query = query.eq("assigned_to_user_id", state.user?.id);
+    }
     const { data, error } = await query;
+    if (error) throw error;
+    return (data || []).map(normalizeTeamTask);
+  }
+  if (viewedWorkerUserId) {
+    const { data, error } = await supabase
+      .from("team_tasks")
+      .select("*")
+      .in("status", ACTIVE_TASK_STATUSES)
+      .eq("assigned_to_user_id", viewedWorkerUserId)
+      .order("created_at", { ascending: true })
+      .limit(80);
     if (error) throw error;
     return (data || []).map(normalizeTeamTask);
   }
@@ -968,9 +1067,10 @@ async function loadTeamTaskRecords() {
 }
 
 async function loadOrderTaskRecords() {
+  const viewedWorkerUserId = getViewedWorkerUserId();
   const statuses = isHistoricalTaskView()
     ? HISTORY_TASK_STATUSES
-    : isAdminUser()
+    : isAdminUser() && !isViewingWorkerTasks()
       ? ACTIVE_TASK_STATUSES
       : ACTIVE_TASK_STATUSES.filter((status) => status !== "completed_by_employee");
   let query = supabase
@@ -979,7 +1079,9 @@ async function loadOrderTaskRecords() {
     .in("status", statuses)
     .order(isHistoricalTaskView() ? "updated_at" : "created_at", { ascending: !isHistoricalTaskView() })
     .limit(80);
-  if (!isTeamWideTaskScope() && !isCanceledTaskScope()) {
+  if (viewedWorkerUserId) {
+    query = query.eq("assigned_to_user_id", viewedWorkerUserId);
+  } else if (!isTeamWideTaskScope() && !isCanceledTaskScope()) {
     query = isAdminUser() && !isHistoricalTaskView()
       ? query.or(`assigned_to_user_id.eq.${state.user?.id},status.eq.waiting_on_admin,and(assigned_by.eq.${state.user?.id},assigned_to_user_id.not.is.null)`)
       : query.eq("assigned_to_user_id", state.user?.id);
@@ -997,6 +1099,7 @@ async function loadOrderTaskRecords() {
 }
 
 async function loadReturnTaskRecords() {
+  const viewedWorkerUserId = getViewedWorkerUserId();
   const statuses = isHistoricalTaskView() ? HISTORY_RETURN_TASK_STATUSES : ACTIVE_RETURN_TASK_STATUSES;
   let query = supabase
     .from("ebay_return_tasks")
@@ -1004,7 +1107,11 @@ async function loadReturnTaskRecords() {
     .in("status", statuses)
     .order("created_at", { ascending: !isHistoricalTaskView() })
     .limit(80);
-  if (!isTeamWideTaskScope() && !isCanceledTaskScope()) query = query.eq("assigned_to_user_id", state.user?.id);
+  if (viewedWorkerUserId) {
+    query = query.eq("assigned_to_user_id", viewedWorkerUserId);
+  } else if (!isTeamWideTaskScope() && !isCanceledTaskScope()) {
+    query = query.eq("assigned_to_user_id", state.user?.id);
+  }
 
   const { data, error } = await query;
   if (error) throw error;
@@ -2368,9 +2475,13 @@ function renderTasks() {
   if (!list) return;
   renderRemovedHistoryTasks();
 
-  if (title) title.textContent = isTaskHistoryView()
-    ? (isCanceledTaskScope() ? "Canceled Tasks" : isTeamWideTaskScope() ? "Everyone's Task History" : "My Task History")
-    : (isTeamWideTaskScope() ? "Everyone's Active Tasks" : "My Assigned Tasks");
+  if (title) {
+    title.textContent = isViewingWorkerTasks()
+      ? `${getViewedWorkerLabel()} - ${isTaskHistoryView() ? "Task History" : "Active Tasks"}`
+      : isTaskHistoryView()
+        ? (isCanceledTaskScope() ? "Canceled Tasks" : isTeamWideTaskScope() ? "Everyone's Task History" : "My Task History")
+        : (isTeamWideTaskScope() ? "Everyone's Active Tasks" : "My Assigned Tasks");
+  }
   if (count) count.textContent = `${state.tasks.length} task${state.tasks.length === 1 ? "" : "s"}`;
 
   if (!state.tasks.length) {
@@ -3997,7 +4108,19 @@ function setupListeners() {
   });
   $("team-task-scope")?.addEventListener("change", async (event) => {
     state.taskScope = ["all", "canceled"].includes(event.target.value) && isAdminUser() ? event.target.value : "mine";
+    state.viewedWorkerUserId = "";
     if (isCanceledTaskScope()) state.taskView = "history";
+    updateTaskScopeChrome();
+    await loadTasks();
+  });
+  $("team-task-worker-view")?.addEventListener("change", async (event) => {
+    state.viewedWorkerUserId = isAdminUser() ? event.target.value || "" : "";
+    if (state.viewedWorkerUserId) {
+      state.taskScope = "all";
+      state.taskOwnerFilter = "all";
+      state.taskReadFilter = "all";
+      state.taskSourceFilter = "all";
+    }
     updateTaskScopeChrome();
     await loadTasks();
   });

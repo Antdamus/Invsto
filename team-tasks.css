@@ -308,7 +308,8 @@ body {
 }
 
 .team-task-scope,
-.team-task-sort {
+.team-task-sort,
+.team-task-worker-view {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -318,7 +319,8 @@ body {
 }
 
 .team-task-scope select,
-.team-task-sort select {
+.team-task-sort select,
+.team-task-worker-view select {
   min-height: 34px;
   border: 1px solid var(--task-line);
   border-radius: 999px;
@@ -330,9 +332,22 @@ body {
 }
 
 .team-task-scope select option,
-.team-task-sort select option {
+.team-task-sort select option,
+.team-task-worker-view select option {
   background: #151312;
   color: var(--task-text);
+}
+
+.team-task-worker-view.is-active {
+  color: var(--task-green);
+}
+
+.team-task-worker-view.is-active select {
+  border-color: rgba(157, 242, 189, 0.42);
+  background:
+    linear-gradient(135deg, rgba(157, 242, 189, 0.14), rgba(241, 214, 155, 0.06)),
+    #151312;
+  color: var(--task-green);
 }
 
 .team-task-list,
@@ -1739,7 +1754,9 @@ body.modal-open {
   .team-task-sort,
   .team-task-sort select,
   .team-task-scope,
-  .team-task-scope select {
+  .team-task-scope select,
+  .team-task-worker-view,
+  .team-task-worker-view select {
     width: 100%;
   }
 
