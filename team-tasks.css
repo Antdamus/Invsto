@@ -1735,7 +1735,11 @@ body.modal-open {
     width: 100%;
   }
 
-  .team-task-read-filter {
+  .team-task-read-filter,
+  .team-task-sort,
+  .team-task-sort select,
+  .team-task-scope,
+  .team-task-scope select {
     width: 100%;
   }
 

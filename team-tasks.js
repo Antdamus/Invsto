@@ -10,6 +10,7 @@ const state = {
   taskReadFilter: "all",
   taskOwnerFilter: "all",
   taskSourceFilter: "all",
+  taskSort: "recent",
   activeTaskId: "",
   activeTaskSource: "",
   mode: "create",
@@ -152,6 +153,28 @@ function isTaskLate(task = {}, options = {}) {
   return Number.isFinite(dueTime) && dueTime < Date.now();
 }
 
+function startOfLocalDayTimestamp(value = new Date()) {
+  const date = value instanceof Date ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return Number.NaN;
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function getTaskUrgencyRank(task = {}) {
+  const dueValue = getTaskDueValue(task);
+  if (!dueValue) return 4;
+  const dueDay = startOfLocalDayTimestamp(dueValue);
+  if (!Number.isFinite(dueDay)) return 4;
+  const today = startOfLocalDayTimestamp();
+  const tomorrowDate = new Date();
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = startOfLocalDayTimestamp(tomorrowDate);
+  if (dueDay < today) return 0;
+  if (dueDay === today) return 1;
+  if (dueDay === tomorrow) return 2;
+  return 3;
+}
+
 function toDateTimeLocalValue(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -236,7 +259,10 @@ function updateTaskScopeChrome() {
     scopeSelect.value = isCanceledTaskScope() ? "canceled" : isTeamWideTaskScope() ? "all" : "mine";
     scopeSelect.disabled = !isAdminUser();
   }
+  $("team-task-active-sort-control")?.classList.toggle("hidden", isHistoricalTaskView());
   $("team-task-history-sort-control")?.classList.toggle("hidden", !isHistoricalTaskView());
+  const activeSort = $("team-task-active-sort");
+  if (activeSort) activeSort.value = state.taskSort || "recent";
   const historySort = $("team-task-history-sort");
   if (historySort) historySort.value = state.taskHistorySort || "recent";
 
@@ -477,7 +503,8 @@ function getTasksForSourceFilter(tasks = []) {
 }
 
 function getVisibleTasksForCurrentFilters(tasks = []) {
-  return getTasksForSourceFilter(getTasksForOwnerFilter(getTasksForReadFilter(tasks)));
+  const filtered = getTasksForSourceFilter(getTasksForOwnerFilter(getTasksForReadFilter(tasks)));
+  return isTaskHistoryView() ? sortHistoryTasks(filtered) : sortUnifiedTasks(filtered);
 }
 
 function renderTaskOwnerFilterChrome(tasks = []) {
@@ -564,16 +591,40 @@ function getTaskActiveTime(task = {}) {
   return new Date(task.updated_at || task.created_at || task.due_at || 0).getTime() || 0;
 }
 
-function sortUnifiedTasks(tasks = []) {
+function compareFiniteNumber(aValue, bValue, direction = "asc") {
+  const aHasValue = Number.isFinite(aValue);
+  const bHasValue = Number.isFinite(bValue);
+  if (aHasValue && !bHasValue) return -1;
+  if (!aHasValue && bHasValue) return 1;
+  if (!aHasValue && !bHasValue) return 0;
+  return direction === "desc" ? bValue - aValue : aValue - bValue;
+}
+
+function getTaskDueSortTime(task = {}) {
+  const dueValue = getTaskDueValue(task);
+  if (!dueValue) return Number.NaN;
+  const time = new Date(dueValue).getTime();
+  return Number.isFinite(time) ? time : Number.NaN;
+}
+
+function sortUnifiedTasks(tasks = [], requestedSort = state.taskSort || "recent") {
   return [...tasks].sort((a, b) => {
-    const activityDelta = getTaskActiveTime(b) - getTaskActiveTime(a);
-    if (activityDelta) return activityDelta;
-    const aDue = a.due_at ? new Date(a.due_at).getTime() : Number.POSITIVE_INFINITY;
-    const bDue = b.due_at ? new Date(b.due_at).getTime() : Number.POSITIVE_INFINITY;
-    if (aDue !== bDue) return aDue - bDue;
-    const priorityDelta = priorityRank(a.priority) - priorityRank(b.priority);
-    if (priorityDelta) return priorityDelta;
-    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    const byRecent = () => getTaskActiveTime(b) - getTaskActiveTime(a);
+    const byDueAsc = () => compareFiniteNumber(getTaskDueSortTime(a), getTaskDueSortTime(b), "asc");
+    const byDueDesc = () => compareFiniteNumber(getTaskDueSortTime(a), getTaskDueSortTime(b), "desc");
+    const byMoneyDesc = () => compareFiniteNumber(getTaskMoneyValue(a), getTaskMoneyValue(b), "desc");
+    const byMoneyAsc = () => compareFiniteNumber(getTaskMoneyValue(a), getTaskMoneyValue(b), "asc");
+    const byUrgency = () => getTaskUrgencyRank(a) - getTaskUrgencyRank(b);
+    const byPriority = () => priorityRank(a.priority) - priorityRank(b.priority);
+    const byCreatedDesc = () => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+
+    if (requestedSort === "order_urgency") return byUrgency() || byDueAsc() || byMoneyDesc() || byPriority() || byRecent() || byCreatedDesc();
+    if (requestedSort === "due_asc") return byDueAsc() || byUrgency() || byPriority() || byRecent() || byCreatedDesc();
+    if (requestedSort === "due_desc") return byDueDesc() || byPriority() || byRecent() || byCreatedDesc();
+    if (requestedSort === "amount_desc") return byMoneyDesc() || byUrgency() || byDueAsc() || byRecent() || byCreatedDesc();
+    if (requestedSort === "amount_asc") return byMoneyAsc() || byUrgency() || byDueAsc() || byRecent() || byCreatedDesc();
+
+    return byRecent() || byDueAsc() || byPriority() || byCreatedDesc();
   });
 }
 
@@ -2022,6 +2073,16 @@ function getTaskMoneyLabel(task = {}) {
     return formatMoney(totals.total);
   }
   return "";
+}
+
+function getTaskMoneyValue(task = {}) {
+  if (task.source === "order") {
+    const totals = getTaskLineMoneyTotals(Array.isArray(task.lineDetails) ? task.lineDetails : [], task.order || {});
+    return Number.isFinite(totals.total) && totals.total > 0 ? totals.total : Number.NaN;
+  }
+  const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
+  const value = Number(metadata.refund_amount || metadata.order_value || metadata.orderValue || 0);
+  return Number.isFinite(value) && value > 0 ? value : Number.NaN;
 }
 
 function getTaskOriginalInstruction(task = {}) {
@@ -3939,6 +4000,10 @@ function setupListeners() {
     if (isCanceledTaskScope()) state.taskView = "history";
     updateTaskScopeChrome();
     await loadTasks();
+  });
+  $("team-task-active-sort")?.addEventListener("change", (event) => {
+    state.taskSort = event.target.value || "recent";
+    renderTasks();
   });
   $("team-task-history-sort")?.addEventListener("change", (event) => {
     state.taskHistorySort = event.target.value || "recent";
