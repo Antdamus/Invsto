@@ -12,6 +12,7 @@ const state = {
   selectedStockRow: null,
   activeBuyerKey: "",
   expandedBuyerKeys: new Set(),
+  collapsedBuyerKeys: new Set(),
   stagedFulfillments: new Map(),
   adminSelectedLineIds: new Set(),
   adminCloseoutAction: "",
@@ -938,7 +939,7 @@ function requestExtensionVideoReceiptOpen(payload = {}) {
       window.removeEventListener("message", onMessage);
       resolve(result || null);
     };
-    const timer = window.setTimeout(() => finish({ ok: false, error: "The eBay extension did not answer." }), 4000);
+    const timer = window.setTimeout(() => finish({ ok: false, error: "The eBay extension did not answer." }), 20000);
     const onMessage = (event) => {
       if (event.source !== window || event.origin !== window.location.origin) return;
       if (event.data?.type !== "OG_EBAY_VIDEO_RECEIPT_OPEN_RESPONSE") return;
@@ -954,10 +955,28 @@ function requestExtensionVideoReceiptOpen(payload = {}) {
   });
 }
 
+function setVideoReceiptOpenStatus(message = "", type = "info") {
+  if (!$("worker-no-inventory-modal")?.classList.contains("hidden")) {
+    setNoInventoryPhotoStatus(message, type);
+    return;
+  }
+  setStatus(message, type);
+}
+
 async function openVideoReceiptLink(event, receiptLink = {}) {
-  if (receiptLink.direct || !receiptLink.orderNumber) return;
-  event.preventDefault();
-  event.stopPropagation();
+  if (!receiptLink.url && !receiptLink.orderNumber) return;
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  if (receiptLink.direct && receiptLink.url) {
+    window.open(receiptLink.url, "_blank", "noopener,noreferrer");
+    setVideoReceiptOpenStatus("Opening eBay video receipt...", "info");
+    return;
+  }
+  if (!receiptLink.orderNumber) {
+    setVideoReceiptOpenStatus("This order does not have an eBay order number to resolve the video receipt.", "error");
+    return;
+  }
+  setVideoReceiptOpenStatus("Opening eBay video receipt through the extension...", "info");
   const result = await requestExtensionVideoReceiptOpen({
     orderNumber: receiptLink.orderNumber,
     orderDetailsUrl: receiptLink.orderDetailsUrl,
@@ -967,7 +986,9 @@ async function openVideoReceiptLink(event, receiptLink = {}) {
     itemUrl: receiptLink.itemUrl,
   });
   if (!result?.ok) {
-    setStatus(result?.error || "Could not open the eBay video receipt. Make sure the OG eBay extension is enabled and you are signed in to eBay.", "error");
+    setVideoReceiptOpenStatus(result?.error || "Could not open the eBay video receipt. Make sure the OG eBay extension is enabled and you are signed in to eBay.", "error");
+  } else {
+    setVideoReceiptOpenStatus("eBay video receipt opened.", "success");
   }
 }
 
@@ -2137,6 +2158,7 @@ function hydratePendingOrderExtrasInBackground(lines = []) {
   Promise.allSettled([
     hydrateOrderVideoReceipts(snapshot),
     hydrateOrderTaskAssignments(snapshot),
+    hydrateQueueVideoReceiptCoverage(snapshot),
   ]).then((results) => {
     results.forEach((result) => {
       if (result.status === "rejected") {
@@ -2148,6 +2170,12 @@ function hydratePendingOrderExtrasInBackground(lines = []) {
     renderSelectedOrderTaskAssignment();
     logPendingOrderPerf("hydratePendingOrderExtrasInBackground", startedAt, { rows: lines.length });
   });
+}
+
+async function hydrateQueueVideoReceiptCoverage(lines = []) {
+  const startedAt = nowMs();
+  await ensureQueueVideoReceiptTasksLoaded(lines);
+  logPendingOrderPerf("hydrateQueueVideoReceiptCoverage", startedAt, { rows: lines.length });
 }
 
 function clearOrderSearch({ apply = true } = {}) {
@@ -2453,10 +2481,15 @@ function getGroupVideoReceiptCoverage(group = {}) {
   const lines = Array.isArray(group.lines) ? group.lines : [];
   const total = lines.length;
   const withScreenshots = lines.filter((line) => getLineVideoReceiptPhotoCount(line) > 0).length;
+  const orderIds = [...new Set(lines.map((line) => line?.order_id).filter(Boolean))];
+  const loaded = lines.every((line) => Number(line.video_receipt_photo_count || 0) > 0)
+    || !orderIds.length
+    || orderIds.every((orderId) => state.queueVideoReceiptLoadedOrderIds.has(orderId));
   return {
     total,
     withScreenshots,
     missing: Math.max(0, total - withScreenshots),
+    loaded,
   };
 }
 
@@ -2509,6 +2542,11 @@ function sortBuyerGroups(groups) {
 function getBuyerLines(key = state.activeBuyerKey) {
   if (!key) return [];
   return state.orders.filter((line) => getBuyerKey(line) === key);
+}
+
+function getOrderLines(orderId = "") {
+  if (!orderId) return [];
+  return state.orders.filter((line) => line.order_id === orderId);
 }
 
 function getNextPackableLine(key = state.activeBuyerKey, excludeId = "") {
@@ -2752,10 +2790,19 @@ function renderOrders() {
       ? `${assignedTasks.length.toLocaleString()} task${assignedTasks.length === 1 ? "" : "s"}`
       : "No task";
     const receiptCoverage = getGroupVideoReceiptCoverage(group);
-    const receiptCoverageLabel = receiptCoverage.total
+    const receiptCoverageLabel = !receiptCoverage.loaded
+      ? "Shots checking"
+      : receiptCoverage.total
       ? `Shots ${receiptCoverage.withScreenshots}/${receiptCoverage.total}${receiptCoverage.missing ? ` - Miss ${receiptCoverage.missing}` : ""}`
       : "Shots 0/0";
-    const receiptCoverageTitle = receiptCoverage.missing
+    const receiptCoverageClass = !receiptCoverage.loaded
+      ? "is-checking"
+      : receiptCoverage.missing
+        ? "is-missing"
+        : "is-complete";
+    const receiptCoverageTitle = !receiptCoverage.loaded
+      ? "Checking video receipt screenshot coverage"
+      : receiptCoverage.missing
       ? `${receiptCoverage.missing} item line${receiptCoverage.missing === 1 ? "" : "s"} missing video receipt screenshots`
       : "All visible item lines have video receipt screenshots";
     const customerMarkup = groupCustomerName
@@ -2816,7 +2863,7 @@ function renderOrders() {
       <div class="buyer-card-meta">
         <span class="buyer-card-meta-pill">Placed ${escapeHtml(getCompactQueueDate(group.earliestPendingOrderCreatedAt))}</span>
         <span class="buyer-card-meta-pill">Ship ${escapeHtml(getCompactQueueDate(group.nextShipBy))}</span>
-        <span class="buyer-card-meta-pill buyer-card-receipt-pill ${receiptCoverage.missing ? "is-missing" : "is-complete"}" title="${escapeHtml(receiptCoverageTitle)}">${escapeHtml(receiptCoverageLabel)}</span>
+        <span class="buyer-card-meta-pill buyer-card-receipt-pill ${receiptCoverageClass}" title="${escapeHtml(receiptCoverageTitle)}">${escapeHtml(receiptCoverageLabel)}</span>
       </div>
       ${isExpanded ? `
         <div class="buyer-card-expanded">
@@ -3352,6 +3399,9 @@ function videoReceiptPhotoMatchesLine(photo = {}, task = {}, line = {}) {
 
   const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids : [];
   if (taskLineIds.length) return taskLineIds.includes(line.id);
+  if (task.order_id && line.order_id && task.order_id === line.order_id) {
+    return getOrderLines(line.order_id).length <= 1;
+  }
   return false;
 }
 
@@ -3677,6 +3727,7 @@ function getBuyerExpansionKey(groupOrKey = "") {
 function isBuyerGroupExpanded(groupOrKey = "") {
   const key = getBuyerExpansionKey(groupOrKey);
   if (!key) return false;
+  if (state.collapsedBuyerKeys.has(key)) return false;
   if (state.expandedBuyerKeys.has(key)) return true;
   return Boolean(state.selectedLine && getBuyerKey(state.selectedLine) === key);
 }
@@ -3685,9 +3736,11 @@ function setBuyerGroupExpanded(groupOrKey = "", expanded = true, { render = true
   const key = getBuyerExpansionKey(groupOrKey);
   if (!key) return;
   if (expanded) {
+    state.collapsedBuyerKeys.delete(key);
     state.expandedBuyerKeys.add(key);
   } else {
     state.expandedBuyerKeys.delete(key);
+    state.collapsedBuyerKeys.add(key);
   }
   if (render) renderOrders();
 }
@@ -3695,7 +3748,7 @@ function setBuyerGroupExpanded(groupOrKey = "", expanded = true, { render = true
 function toggleBuyerGroupExpanded(groupOrKey = "") {
   const key = getBuyerExpansionKey(groupOrKey);
   if (!key) return;
-  setBuyerGroupExpanded(key, !state.expandedBuyerKeys.has(key));
+  setBuyerGroupExpanded(key, !isBuyerGroupExpanded(key));
 }
 
 function isClearedVideoReceiptCaptureTask(task = {}, events = []) {
@@ -3923,56 +3976,13 @@ async function loadSelectedOrderTasks() {
 }
 
 async function ensureNoInventoryVideoReceiptTasksLoaded() {
-  const orderIds = [...new Set(state.workerNoInventoryCandidates.map((line) => line.order_id).filter(Boolean))];
-  if (!orderIds.length) return;
-
-  const loadedOrderIds = new Set(state.selectedOrderTasks.map((task) => task.order_id).filter(Boolean));
-  const missingOrderIds = orderIds.filter((orderId) => !loadedOrderIds.has(orderId));
-  if (!missingOrderIds.length) return;
-
-  const { data: tasks, error } = await supabase
-    .from("ebay_order_tasks")
-    .select("*")
-    .in("order_id", missingOrderIds)
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-
-  const incomingTasks = tasks || [];
-  if (!incomingTasks.length) return;
-  const existingTaskIds = new Set(state.selectedOrderTasks.map((task) => task.id));
-  incomingTasks.forEach((task) => {
-    if (!existingTaskIds.has(task.id)) {
-      state.selectedOrderTasks.push(task);
-      existingTaskIds.add(task.id);
-    }
-  });
-
-  const taskIds = incomingTasks.map((task) => task.id).filter(Boolean);
-  if (!taskIds.length) return;
-
-  const { data: events, error: eventError } = await supabase
-    .from("ebay_order_task_events")
-    .select("*")
-    .in("task_id", taskIds)
-    .order("created_at", { ascending: true });
-  if (eventError) throw eventError;
-
-  (events || []).forEach((event) => {
-    const list = state.selectedOrderTaskEvents.get(event.task_id) || [];
-    if (!list.some((entry) => entry.id === event.id)) {
-      list.push(event);
-      list.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-    }
-    state.selectedOrderTaskEvents.set(event.task_id, list);
-  });
+  await ensureQueueVideoReceiptTasksLoaded(state.workerNoInventoryCandidates);
 }
 
 async function ensureQueueVideoReceiptTasksLoaded(lines = []) {
   const orderIds = [...new Set((lines || []).map((line) => line?.order_id).filter(Boolean))];
   const missingOrderIds = orderIds.filter((orderId) => !state.queueVideoReceiptLoadedOrderIds.has(orderId));
   if (!missingOrderIds.length) return;
-
-  missingOrderIds.forEach((orderId) => state.queueVideoReceiptLoadedOrderIds.add(orderId));
 
   const incomingTasks = [];
   for (let index = 0; index < missingOrderIds.length; index += 100) {
@@ -3985,6 +3995,8 @@ async function ensureQueueVideoReceiptTasksLoaded(lines = []) {
     if (error) throw error;
     incomingTasks.push(...(data || []));
   }
+
+  missingOrderIds.forEach((orderId) => state.queueVideoReceiptLoadedOrderIds.add(orderId));
 
   if (!incomingTasks.length) return;
 
@@ -7024,14 +7036,14 @@ function renderWorkerNoInventoryList() {
             <span>${escapeHtml(order.order_number || "No order")} - ${escapeHtml(order.buyer_username || "No buyer")}</span>
           </div>
           <small>Qty ${Number(getRemainingLineQuantity(line) || line?.quantity || 1).toLocaleString()} - ${escapeHtml(storeName)} - no stock row will be removed</small>
-          ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt no-inventory-video-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Video receipt</a>` : ""}
+          ${receiptLink.url || receiptLink.orderNumber ? `<button type="button" class="buyer-line-receipt no-inventory-video-receipt" title="${escapeHtml(receiptLink.title)}">View video receipt</button>` : ""}
           <div class="no-inventory-video-receipt-evidence" data-no-inventory-video-evidence="${escapeHtml(line.id)}">
           ${receiptEvidence?.thumbnailUrl || receiptEvidence?.previewUrl ? `
             <button type="button" class="video-receipt-evidence-thumb" data-video-receipt-evidence-line="${escapeHtml(line.id)}" title="Open video receipt screenshot">
               <img src="${escapeHtml(receiptEvidence.thumbnailUrl || receiptEvidence.previewUrl)}" alt="${escapeHtml(receiptEvidence.label || "Video receipt screenshot")}" />
               <span>${escapeHtml(receiptEvidence.auditText || "Video receipt screenshot")}</span>
             </button>
-          ` : ""}
+          ` : `<span class="queue-video-receipt-empty">Checking saved video receipt screenshot...</span>`}
           </div>
         </div>
       </article>
@@ -7050,12 +7062,20 @@ function renderWorkerNoInventoryList() {
       setWorkerNoInventoryLineSelection(lineId, !state.workerNoInventoryLineIds.has(lineId));
     });
   });
-  list.querySelectorAll(".no-inventory-video-receipt").forEach((link) => {
-    link.addEventListener("click", (event) => {
+  list.querySelectorAll(".no-inventory-video-receipt").forEach((button) => {
+    button.addEventListener("click", async (event) => {
       event.stopPropagation();
       const card = event.currentTarget.closest("[data-no-inventory-card]");
       const line = state.workerNoInventoryCandidates.find((entry) => entry.id === card?.dataset.noInventoryCard);
-      openVideoReceiptLink(event, getOrderVideoReceiptLink(line || {}));
+      button.disabled = true;
+      const originalText = button.textContent;
+      button.textContent = "Opening...";
+      try {
+        await openVideoReceiptLink(event, getOrderVideoReceiptLink(line || {}));
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText || "View video receipt";
+      }
     });
   });
   list.querySelectorAll("[data-video-receipt-evidence-line]").forEach((button) => {
@@ -7080,7 +7100,7 @@ async function hydrateNoInventoryVideoReceiptEvidenceThumbnails() {
     if (!line?.id) return;
     const photos = getVideoReceiptEvidencePhotosForLine(line);
     if (!photos.length) {
-      container.innerHTML = "";
+      container.innerHTML = `<span class="queue-video-receipt-empty">No saved video receipt screenshot yet.</span>`;
       return;
     }
     const hydrated = await Promise.all(photos.map((photo) => ensureEvidencePhotoPreviewUrls(photo).catch(() => photo)));

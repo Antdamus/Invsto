@@ -336,13 +336,29 @@ button.task-action-btn.is-assigned:hover,
   text-decoration: none;
 }
 
+.buyer-line-receipt {
+  border: 1px solid rgba(227, 189, 119, 0.36);
+  border-radius: 999px;
+  background: rgba(227, 189, 119, 0.09);
+  cursor: pointer;
+  padding: 6px 10px;
+}
+
 .selected-video-receipt a:hover,
 .buyer-line-receipt:hover {
-  text-decoration: underline;
+  border-color: rgba(227, 189, 119, 0.68);
+  background: rgba(227, 189, 119, 0.15);
+}
+
+.buyer-line-receipt:disabled {
+  cursor: progress;
+  opacity: 0.72;
 }
 
 .buyer-line-receipt {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: fit-content;
   margin-top: 6px;
 }
@@ -1368,6 +1384,12 @@ textarea:focus {
   border-color: rgba(119, 236, 169, 0.33);
   background: rgba(119, 236, 169, 0.1);
   color: #aff6cf;
+}
+
+.buyer-card-receipt-pill.is-checking {
+  border-color: rgba(155, 213, 255, 0.26);
+  background: rgba(93, 155, 255, 0.08);
+  color: #cfe3ff;
 }
 
 .buyer-line-list {
