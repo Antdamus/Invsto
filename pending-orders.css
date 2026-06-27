@@ -3800,8 +3800,45 @@ body.pending-order-detail-open .mobile-detail-close {
   color: #bfffd8;
 }
 
+.buyer-card-task-btn.is-approval,
+.buyer-line-action-btn.is-approval {
+  border-color: rgba(239, 215, 177, 0.46) !important;
+  background: rgba(239, 215, 177, 0.12) !important;
+  color: var(--gold-strong) !important;
+}
+
+.buyer-card-task-btn.is-approval strong,
+.buyer-line-action-btn.is-approval strong {
+  color: #ffe7aa;
+}
+
 .buyer-card-task-btn.is-clear {
   border-color: rgba(255, 255, 255, 0.13) !important;
+}
+
+.buyer-card-approval-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgba(239, 215, 177, 0.45);
+  border-radius: 999px;
+  background: rgba(239, 215, 177, 0.12);
+  color: var(--gold-strong);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.buyer-card-approval-btn:hover:not(:disabled),
+.buyer-card-approval-btn.is-pending {
+  border-color: rgba(125, 240, 178, 0.48);
+  background: rgba(125, 240, 178, 0.12);
+  color: #bfffd8;
+}
+
+.buyer-card-approval-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .buyer-card-expand-btn {

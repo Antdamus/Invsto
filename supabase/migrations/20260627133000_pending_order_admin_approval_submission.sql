@@ -1,0 +1,240 @@
+-- Queue pending eBay orders for final admin approval before they leave the facility.
+-- This reuses ebay_order_tasks so the approval, send-back, and shipping sign-off
+-- remain in the existing audited task trail.
+
+create index if not exists ebay_order_tasks_pending_approval_idx
+  on public.ebay_order_tasks(order_id, status, updated_at desc)
+  where task_type = 'pending_admin_review'
+    and (metadata->>'workflow_type') = 'pending_order_approval';
+
+create or replace function public.submit_pending_order_for_admin_approval(
+  _order_id uuid,
+  _order_line_ids uuid[] default '{}'::uuid[],
+  _note text default null,
+  _priority text default 'high',
+  _due_at timestamptz default null,
+  _photo_attachments jsonb default '[]'::jsonb,
+  _signed_by_email text default null
+)
+returns public.ebay_order_tasks
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_order public.ebay_orders;
+  v_existing public.ebay_order_tasks;
+  v_task public.ebay_order_tasks;
+  v_note text := nullif(btrim(coalesce(_note, '')), '');
+  v_priority text := nullif(btrim(coalesce(_priority, '')), '');
+  v_signed_email text := nullif(btrim(coalesce(_signed_by_email, '')), '');
+  v_line_ids uuid[] := '{}'::uuid[];
+  v_photo_attachments jsonb := case
+    when jsonb_typeof(coalesce(_photo_attachments, '[]'::jsonb)) = 'array'
+      then coalesce(_photo_attachments, '[]'::jsonb)
+    else '[]'::jsonb
+  end;
+  v_old_status text;
+begin
+  if not public.can_manage_inventory() then
+    raise exception 'Only active staff can submit pending orders for admin approval' using errcode = '42501';
+  end if;
+
+  if v_note is null then
+    raise exception 'Add a note for the admin approval request' using errcode = '22023';
+  end if;
+
+  if v_priority is null then
+    v_priority := 'high';
+  end if;
+
+  if v_priority not in ('low', 'normal', 'high', 'urgent') then
+    raise exception 'Invalid order task priority: %', v_priority using errcode = '22023';
+  end if;
+
+  select *
+    into v_order
+  from public.ebay_orders
+  where id = _order_id
+  for update;
+
+  if not found then
+    raise exception 'Pending eBay order not found' using errcode = 'P0002';
+  end if;
+
+  if coalesce(array_length(_order_line_ids, 1), 0) > 0 then
+    select coalesce(array_agg(l.id order by l.created_at), '{}'::uuid[])
+      into v_line_ids
+    from public.ebay_order_lines l
+    where l.order_id = v_order.id
+      and l.id = any(_order_line_ids);
+  else
+    select coalesce(array_agg(l.id order by l.created_at), '{}'::uuid[])
+      into v_line_ids
+    from public.ebay_order_lines l
+    where l.order_id = v_order.id
+      and l.line_status = 'pending';
+  end if;
+
+  if coalesce(array_length(v_line_ids, 1), 0) = 0 then
+    raise exception 'No pending order lines were found for approval' using errcode = '22023';
+  end if;
+
+  select *
+    into v_existing
+  from public.ebay_order_tasks
+  where order_id = v_order.id
+    and parent_task_id is null
+    and task_type = 'pending_admin_review'
+    and coalesce(metadata->>'workflow_type', '') = 'pending_order_approval'
+    and status not in (
+      'approved_for_shipping',
+      'assigned_for_shipping',
+      'shipped_completed',
+      'closed',
+      'cancelled',
+      'resolved',
+      'approved_by_admin'
+    )
+  order by updated_at desc
+  limit 1
+  for update;
+
+  if found then
+    v_old_status := v_existing.status;
+
+    update public.ebay_order_tasks
+    set order_line_ids = v_line_ids,
+        status = 'ready_for_admin_approval',
+        priority = v_priority,
+        due_at = coalesce(_due_at, v_order.ship_by_date, due_at),
+        latest_note = v_note,
+        latest_photo_count = jsonb_array_length(v_photo_attachments),
+        assigned_to_user_id = null,
+        assigned_to_employee_id = null,
+        assigned_to_email = null,
+        assigned_to_role = null,
+        assigned_by = auth.uid(),
+        assigned_by_email = v_signed_email,
+        metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object(
+          'source', 'pending_orders',
+          'workflow_type', 'pending_order_approval',
+          'approval_kind', 'ready_for_shipping',
+          'order_number', v_order.order_number,
+          'buyer_username', v_order.buyer_username,
+          'buyer_name', v_order.buyer_name,
+          'order_status', v_order.status,
+          'submitted_by_email', v_signed_email,
+          'submitted_at', now()
+        )
+    where id = v_existing.id
+    returning * into v_task;
+
+    insert into public.ebay_order_task_events (
+      task_id,
+      order_id,
+      action,
+      old_status,
+      new_status,
+      notes,
+      photo_attachments,
+      signed_by,
+      signed_by_email,
+      payload
+    )
+    values (
+      v_task.id,
+      v_task.order_id,
+      'status_changed',
+      v_old_status,
+      v_task.status,
+      v_note,
+      v_photo_attachments,
+      auth.uid(),
+      v_signed_email,
+      jsonb_build_object(
+        'workflow_type', 'pending_order_approval',
+        'line_ids', v_line_ids,
+        'order_number', v_order.order_number
+      )
+    );
+  else
+    insert into public.ebay_order_tasks (
+      order_id,
+      order_line_ids,
+      task_type,
+      title,
+      question,
+      status,
+      priority,
+      assigned_by,
+      assigned_by_email,
+      due_at,
+      latest_note,
+      latest_photo_count,
+      created_by,
+      created_by_email,
+      metadata
+    )
+    values (
+      v_order.id,
+      v_line_ids,
+      'pending_admin_review',
+      concat('Approval needed - Order ', coalesce(v_order.order_number, 'eBay order'), ' - ', coalesce(v_order.buyer_username, 'unknown buyer')),
+      v_note,
+      'ready_for_admin_approval',
+      v_priority,
+      auth.uid(),
+      v_signed_email,
+      coalesce(_due_at, v_order.ship_by_date),
+      v_note,
+      jsonb_array_length(v_photo_attachments),
+      auth.uid(),
+      v_signed_email,
+      jsonb_build_object(
+        'source', 'pending_orders',
+        'workflow_type', 'pending_order_approval',
+        'approval_kind', 'ready_for_shipping',
+        'order_number', v_order.order_number,
+        'buyer_username', v_order.buyer_username,
+        'buyer_name', v_order.buyer_name,
+        'order_status', v_order.status,
+        'submitted_by_email', v_signed_email,
+        'submitted_at', now()
+      )
+    )
+    returning * into v_task;
+
+    insert into public.ebay_order_task_events (
+      task_id,
+      order_id,
+      action,
+      new_status,
+      notes,
+      photo_attachments,
+      signed_by,
+      signed_by_email,
+      payload
+    )
+    values (
+      v_task.id,
+      v_task.order_id,
+      'created',
+      v_task.status,
+      v_note,
+      v_photo_attachments,
+      auth.uid(),
+      v_signed_email,
+      jsonb_build_object(
+        'workflow_type', 'pending_order_approval',
+        'line_ids', v_line_ids,
+        'order_number', v_order.order_number
+      )
+    );
+  end if;
+
+  return v_task;
+end;
+$$;
+
+grant execute on function public.submit_pending_order_for_admin_approval(uuid, uuid[], text, text, timestamptz, jsonb, text) to authenticated;

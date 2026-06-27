@@ -707,6 +707,7 @@ function isTaskCreatedByCurrentUser(task = {}) {
 
 function isTaskPendingAcceptance(task = {}) {
   if (isTaskHistoryView()) return false;
+  if (isOrderPendingApprovalTask(task)) return false;
   return ACCEPTANCE_PENDING_TASK_STATUSES.has(String(task.status || "").toLowerCase());
 }
 
@@ -728,7 +729,7 @@ function canReviewTaskAcceptance(task = {}) {
 }
 
 function getDefaultActiveTasks(tasks = []) {
-  return tasks.filter((task) => !isTaskPendingAcceptance(task));
+  return tasks.filter((task) => !isTaskPendingAcceptance(task) && !isOrderPendingApprovalTask(task));
 }
 
 function getTaskSourceFilterValue(task = {}) {
@@ -742,6 +743,10 @@ function getTaskSourceFilterValue(task = {}) {
 
 function getTaskOwnerCounts(tasks = []) {
   return tasks.reduce((counts, task) => {
+    if (isOrderPendingApprovalTask(task) && isAdminUser()) {
+      counts.orderApproval += 1;
+      return counts;
+    }
     if (isTaskPendingAcceptance(task)) {
       if (isTaskAcceptanceVisibleToViewer(task)) counts.acceptance += 1;
       return counts;
@@ -750,7 +755,7 @@ function getTaskOwnerCounts(tasks = []) {
     if (isTaskAssignedToCurrentUser(task)) counts.assigned += 1;
     if (isTaskCreatedByCurrentUser(task)) counts.created += 1;
     return counts;
-  }, { all: 0, assigned: 0, created: 0, acceptance: 0 });
+  }, { all: 0, assigned: 0, created: 0, acceptance: 0, orderApproval: 0 });
 }
 
 function getTaskSourceCounts(tasks = []) {
@@ -763,6 +768,7 @@ function getTaskSourceCounts(tasks = []) {
 }
 
 function getTasksForOwnerFilter(tasks = []) {
+  if (state.taskOwnerFilter === "order_approval") return tasks.filter((task) => isOrderPendingApprovalTask(task) && isAdminUser());
   if (state.taskOwnerFilter === "acceptance") return tasks.filter(isTaskAcceptanceVisibleToViewer);
   const activeTasks = getDefaultActiveTasks(tasks);
   if (state.taskOwnerFilter === "assigned") return activeTasks.filter(isTaskAssignedToCurrentUser);
@@ -785,10 +791,15 @@ function renderTaskOwnerFilterChrome(tasks = []) {
   const viewerLabel = getTaskViewerShortLabel();
   document.querySelectorAll("[data-task-owner-filter]").forEach((button) => {
     const filter = button.dataset.taskOwnerFilter || "all";
+    if (filter === "order_approval") {
+      button.hidden = !isAdminUser();
+      if (!isAdminUser() && state.taskOwnerFilter === "order_approval") state.taskOwnerFilter = "all";
+    }
     const labels = {
       all: `Active work ${counts.all}`,
       assigned: `${isViewingWorkerTasks() ? `Assigned to ${viewerLabel}` : "Assigned to me"} ${counts.assigned}`,
       created: `${isViewingWorkerTasks() ? `Created by ${viewerLabel}` : "Created by me"} ${counts.created}`,
+      order_approval: `Orders pending approval ${counts.orderApproval}`,
       acceptance: `Needs acceptance ${counts.acceptance}`,
     };
     button.textContent = labels[filter] || formatTaskTag(filter);
@@ -1287,7 +1298,7 @@ async function loadOrderTaskRecords() {
     query = query.eq("assigned_to_user_id", viewedWorkerUserId);
   } else if (!isTeamWideTaskScope() && !isCanceledTaskScope()) {
     query = isAdminUser() && !isHistoricalTaskView()
-      ? query.or(`assigned_to_user_id.eq.${state.user?.id},status.eq.waiting_on_admin,and(assigned_by.eq.${state.user?.id},assigned_to_user_id.not.is.null)`)
+      ? query.or(`assigned_to_user_id.eq.${state.user?.id},status.eq.waiting_on_admin,status.eq.ready_for_admin_approval,and(assigned_by.eq.${state.user?.id},assigned_to_user_id.not.is.null)`)
       : query.or(`assigned_to_user_id.eq.${state.user?.id},created_by.eq.${state.user?.id},assigned_by.eq.${state.user?.id}`);
   }
 
@@ -1341,15 +1352,18 @@ function normalizeOrderTask(task = {}) {
   const orderNumber = task.order_number || order.order_number || "";
   const buyer = task.buyer_username || order.buyer_username || "";
   const isOrderHistoryTask = metadata.source === "order_history";
-  const sourceLabel = task.task_type === ORDER_SUBTASK_TYPE
-    ? "Subtask"
-    : task.task_type === ORDER_SHIPPING_TYPE
-      ? "Shipping Task"
-      : task.task_type === ORDER_PACKAGING_TYPE
-        ? "Packaging Task"
-      : isOrderHistoryTask
-        ? "Order History"
-        : "Pending Order";
+  let sourceLabel = "Pending Order";
+  if (task.task_type === ORDER_SUBTASK_TYPE) {
+    sourceLabel = "Subtask";
+  } else if (task.task_type === ORDER_SHIPPING_TYPE) {
+    sourceLabel = "Shipping Task";
+  } else if (task.task_type === ORDER_PACKAGING_TYPE) {
+    sourceLabel = "Packaging Task";
+  } else if (task.task_type === "pending_admin_review" && metadata.workflow_type === "pending_order_approval") {
+    sourceLabel = "Approval Queue";
+  } else if (isOrderHistoryTask) {
+    sourceLabel = "Order History";
+  }
   return {
     ...task,
     source: "order",
@@ -1799,6 +1813,14 @@ async function hydrateOrderVideoReceiptEvidence(tasks = []) {
 
 function isOrderParentTask(task = {}) {
   return task.source === "order" && !task.parent_task_id && ORDER_PARENT_TASK_TYPES.has(task.task_type || "coordination");
+}
+
+function isOrderPendingApprovalTask(task = {}) {
+  const status = String(task.status || "").toLowerCase();
+  const workflowType = String(task.metadata?.workflow_type || "").toLowerCase();
+  return isOrderParentTask(task)
+    && status === "ready_for_admin_approval"
+    && (task.task_type === "pending_admin_review" || workflowType === "pending_order_approval");
 }
 
 function getOrderWorkflowChildren(parentTask = {}) {
@@ -3214,6 +3236,7 @@ function renderOrderTaskActions(task = {}, resolved = false, options = {}) {
   const isSubtask = task.task_type === ORDER_SUBTASK_TYPE;
   const isShipping = task.task_type === ORDER_SHIPPING_TYPE;
   const isPackaging = task.task_type === ORDER_PACKAGING_TYPE;
+  const isApprovalParent = isOrderPendingApprovalTask(task);
   const assigneeCanUpdate = task.assigned_to_user_id === state.user?.id || isAdminUser();
   const workerOwnsTask = !isAdminUser() && task.assigned_to_user_id === state.user?.id;
   const canApproveShipping = isParent && isAdminUser() && canOrderTaskApproveForShipping(task)
@@ -3229,6 +3252,9 @@ function renderOrderTaskActions(task = {}, resolved = false, options = {}) {
 
   if (isParent && isAdminUser() && !isTaskHistoryView()) {
     buttons.push(`<button type="button" class="secondary-btn" data-order-workflow-action="add-subtask" data-task-id="${escapeHtml(task.id)}">Add Subtask</button>`);
+    if (isApprovalParent) {
+      buttons.push(`<button type="button" class="secondary-btn danger-btn" data-order-workflow-action="send-back-order" data-task-id="${escapeHtml(task.id)}">Send Back</button>`);
+    }
     buttons.push(`<button type="button" class="primary-btn" data-order-workflow-action="assign-shipping" data-task-id="${escapeHtml(task.id)}" ${canApproveShipping ? "" : "disabled"}>Approve / Assign Shipping</button>`);
   }
 
@@ -3931,7 +3957,7 @@ function configureOrderWorkflowModal(task, options = {}) {
   const isSubtaskCreate = mode === "order-subtask-create";
   const isShippingAssign = mode === "order-shipping-assign";
   const isShippingReadyPackaging = mode === "order-shipping-ready-packaging";
-  const isSendBack = mode === "order-subtask-sendback";
+  const isSendBack = mode === "order-subtask-sendback" || mode === "order-task-sendback";
   const isComplete = mode === "order-subtask-complete" || mode === "order-shipping-complete" || mode === "order-task-complete";
   const isReassignRequest = mode === "order-reassign-request";
   const canManageFields = isAdminUser();
@@ -3944,6 +3970,7 @@ function configureOrderWorkflowModal(task, options = {}) {
     "order-subtask-complete": "Complete subtask",
     "order-subtask-approve": "Approve subtask",
     "order-subtask-sendback": "Send subtask back",
+    "order-task-sendback": "Send order back",
     "order-reassign-request": "Request reassignment",
     "order-shipping-assign": "Approve and assign shipping",
     "order-shipping-ready-packaging": "Mark ready for packaging",
@@ -3957,6 +3984,7 @@ function configureOrderWorkflowModal(task, options = {}) {
     "order-subtask-complete": "Add the final sign-off note and any proof before sending this back to the admin.",
     "order-subtask-approve": "Confirm this subtask is complete and acceptable for shipment approval.",
     "order-subtask-sendback": "Explain exactly what needs to be corrected before this can be approved.",
+    "order-task-sendback": "Explain exactly what is missing before this order can leave the facility.",
     "order-reassign-request": "Tell the admin why this task should be reassigned. The task owner will not change until an admin approves it.",
     "order-shipping-assign": "Confirm the pending order is ready and assign the shipping task to an employee.",
     "order-shipping-ready-packaging": "Add the ready-for-packaging audit photo, then choose who will package and ship this order.",
@@ -4037,6 +4065,7 @@ function handleOrderWorkflowAction(action = "", taskId = "") {
   if (action === "reassign-request") return configureOrderWorkflowModal(task, { mode: "order-reassign-request" });
   if (action === "approve-subtask") return configureOrderWorkflowModal(task, { mode: "order-subtask-approve" });
   if (action === "send-back-subtask") return configureOrderWorkflowModal(task, { mode: "order-subtask-sendback" });
+  if (action === "send-back-order") return configureOrderWorkflowModal(task, { mode: "order-task-sendback" });
   if (action === "assign-shipping") return configureOrderWorkflowModal(task, { mode: "order-shipping-assign" });
   if (action === "shipping-ready-packaging") return configureOrderWorkflowModal(task, { mode: "order-shipping-ready-packaging" });
   if (action === "shipping-complete") return configureOrderWorkflowModal(task, { mode: "order-shipping-complete" });
@@ -4367,9 +4396,10 @@ async function submitOrderWorkflowTask() {
   if (mode === "order-subtask-create" && !title) return setModalError("Write a subtask title first.");
   if (mode === "order-subtask-create" && !note) return setModalError("Write the subtask instructions first.");
   if (["order-subtask-create", "order-shipping-assign", "order-shipping-ready-packaging"].includes(mode) && !assigneeId) return setModalError("Choose the employee who should package this shipment.");
+  if (mode === "order-task-sendback" && !assigneeId) return setModalError("Choose who should correct this order.");
   if (mode === "order-reassign-request" && !assigneeId) return setModalError("Choose who you want this task reassigned to.");
   if (mode === "order-reassign-request" && assigneeId === task.assigned_to_user_id) return setModalError("Choose a different employee for the reassignment request.");
-  if (["order-task-complete", "order-subtask-complete", "order-subtask-sendback", "order-shipping-ready-packaging", "order-shipping-complete", "order-reassign-request"].includes(mode) && !note) {
+  if (["order-task-complete", "order-subtask-complete", "order-subtask-sendback", "order-task-sendback", "order-shipping-ready-packaging", "order-shipping-complete", "order-reassign-request"].includes(mode) && !note) {
     return setModalError("Write the required note before saving.");
   }
   if (["order-shipping-ready-packaging", "order-shipping-complete"].includes(mode) && !state.photos.length) {
@@ -4381,6 +4411,7 @@ async function submitOrderWorkflowTask() {
   if (mode === "order-shipping-assign" && !window.confirm("Approve this pending order for shipment and assign the shipping task?")) return;
   if (mode === "order-task-complete" && !window.confirm("Mark this task completed and send it back to admin review?")) return;
   if (mode === "order-subtask-sendback" && !window.confirm("Send this subtask back for rework?")) return;
+  if (mode === "order-task-sendback" && !window.confirm("Send this order back for correction?")) return;
   if (mode === "order-shipping-ready-packaging" && !window.confirm(
     assigneeId === state.user?.id
       ? "Mark this ready for packaging and keep it assigned to you?"
@@ -4479,6 +4510,17 @@ async function submitOrderWorkflowTask() {
       });
       if (error) throw error;
       setStatus("Subtask sent back for rework.", "success");
+    } else if (mode === "order-task-sendback") {
+      await saveOrderWorkflowUpdate({
+        task,
+        status: "sent_back_for_rework",
+        note,
+        assignedToUserId: assigneeId,
+        priority,
+        dueAt,
+        photos,
+        successMessage: "Order sent back for correction.",
+      });
     } else if (mode === "order-shipping-assign") {
       const { error } = await supabase.rpc("assign_ebay_order_shipping_task", {
         _parent_task_id: task.id,
@@ -4673,7 +4715,7 @@ function setupListeners() {
     button.addEventListener("click", async () => {
       state.taskView = button.dataset.taskView === "history" ? "history" : "active";
       if (state.taskView === "active" && isCanceledTaskScope()) state.taskScope = "mine";
-      if (state.taskView === "history" && state.taskOwnerFilter === "acceptance") state.taskOwnerFilter = "all";
+      if (state.taskView === "history" && ["acceptance", "order_approval"].includes(state.taskOwnerFilter)) state.taskOwnerFilter = "all";
       updateTaskScopeChrome();
       await loadTasks();
     });
@@ -4688,7 +4730,7 @@ function setupListeners() {
   });
   document.querySelectorAll("[data-task-owner-filter]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.taskOwnerFilter = ["all", "assigned", "created", "acceptance"].includes(button.dataset.taskOwnerFilter)
+      state.taskOwnerFilter = ["all", "assigned", "created", "acceptance", "order_approval"].includes(button.dataset.taskOwnerFilter)
         ? button.dataset.taskOwnerFilter
         : "all";
       renderTasks();

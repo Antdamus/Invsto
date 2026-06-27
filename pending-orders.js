@@ -69,10 +69,13 @@ const state = {
   activeOrderTaskId: "",
   activeOrderTaskDetailsId: "",
   orderTaskMode: "create",
+  pendingApprovalOrderIds: [],
+  pendingApprovalLineIds: [],
   orderTaskPhotos: [],
   orderTaskPhotoUploadKeys: new Set(),
   orderTaskCaptureBusy: false,
   orderTaskAssignmentsByLineId: new Map(),
+  orderApprovalTasksByLineId: new Map(),
   orderVideoReceipts: new Map(),
   videoReceiptEvidenceByLineId: new Map(),
   manualVideoReceiptLineId: "",
@@ -3045,7 +3048,8 @@ function renderOrders() {
     const urgencyClass = urgency?.level === "today" ? "is-due-today" : urgency ? `is-${urgency.level}` : "";
     const isExpanded = isBuyerGroupExpanded(group);
     const assignedTasks = getAssignedOrderTasksForGroup(group);
-    const assignedTask = getAssignedOrderTaskForGroup(group);
+    const approvalTask = getPendingOrderApprovalTaskForGroup(group);
+    const assignedTask = approvalTask || getAssignedOrderTaskForGroup(group);
     const assignmentLabel = getGroupAssignmentLabel(group);
     const groupCustomerName = getGroupCustomerSummary(group);
     const orderCountLabel = `${group.orderNumbers.size.toLocaleString()} order${group.orderNumbers.size === 1 ? "" : "s"}`;
@@ -3080,8 +3084,11 @@ function renderOrders() {
       </span>
     ` : "";
     const taskControlMarkup = assignedTask
-      ? `<button type="button" class="buyer-card-task-btn task-action-btn is-assigned buyer-card-assigned-pill" data-view-order-task="${escapeHtml(assignedTask.id)}" title="View task assigned to ${escapeHtml(assignmentLabel)}"><span>${escapeHtml(taskCountLabel)}</span><strong>${escapeHtml(assignmentLabel)}</strong></button>`
+      ? `<button type="button" class="buyer-card-task-btn task-action-btn ${approvalTask ? "is-approval" : "is-assigned"} buyer-card-assigned-pill" data-view-order-task="${escapeHtml(assignedTask.id)}" title="View ${approvalTask ? "admin approval request" : `task assigned to ${escapeHtml(assignmentLabel)}`}"><span>${escapeHtml(approvalTask ? "Pending approval" : taskCountLabel)}</span><strong>${escapeHtml(approvalTask ? "Admin review" : assignmentLabel)}</strong></button>`
       : `<button type="button" class="buyer-card-task-btn task-action-btn is-clear" data-buyer-task-key="${escapeHtml(group.key)}"><span>No task</span><strong>Assign</strong></button>`;
+    const approvalActionMarkup = approvalTask
+      ? `<button type="button" class="buyer-card-approval-btn is-pending" data-buyer-approval-task-id="${escapeHtml(approvalTask.id)}">Pending Admin Approval</button>`
+      : `<button type="button" class="buyer-card-approval-btn" data-buyer-approval-key="${escapeHtml(group.key)}" ${getPendingOrderApprovalLinesForGroup(group).length ? "" : "disabled"}>Send for Approval</button>`;
     const card = document.createElement("article");
     const hasSelectedAdminLines = group.lines.some((line) => state.adminSelectedLineIds.has(line.id));
     const ebayApiStatus = getGroupEbayApiStatus(group.lines);
@@ -3135,6 +3142,7 @@ function renderOrders() {
           <div class="buyer-card-expanded-actions">
             <button type="button" class="buyer-card-complete-btn primary-btn" data-buyer-complete-key="${escapeHtml(group.key)}" ${group.lines.some(isOpenOrderLine) ? "" : "disabled"}>Complete From Inventory</button>
             <button type="button" class="buyer-card-no-inventory-btn secondary-btn caution-btn" data-buyer-no-inventory-key="${escapeHtml(group.key)}" ${getNoInventoryLineIdsForGroupAction(group).length ? "" : "disabled"}>Complete Without Inventory</button>
+            ${approvalActionMarkup}
           </div>
           ${isAdminUser() ? `
             <div class="buyer-card-admin-row">
@@ -3161,6 +3169,8 @@ function renderOrders() {
     const completeButton = card.querySelector("[data-buyer-complete-key]");
     const taskButton = card.querySelector("[data-buyer-task-key]");
     const viewTaskButton = card.querySelector("[data-view-order-task]");
+    const approvalButton = card.querySelector("[data-buyer-approval-key]");
+    const approvalTaskButton = card.querySelector("[data-buyer-approval-task-id]");
     const noInventoryButton = card.querySelector("[data-buyer-no-inventory-key]");
     expandButton?.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -3203,7 +3213,17 @@ function renderOrders() {
     viewTaskButton?.addEventListener("click", (event) => {
       event.stopPropagation();
       const taskId = event.currentTarget.dataset.viewOrderTask;
-      const line = group.lines.find((entry) => state.orderTaskAssignmentsByLineId.get(entry.id)?.id === taskId) || group.lines[0];
+      const line = group.lines.find((entry) => getVisibleOrderTaskForLine(entry)?.id === taskId) || group.lines[0];
+      openAssignedOrderTaskDetailsModal(taskId, { lineId: line?.id || "" });
+    });
+    approvalButton?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openPendingOrderApprovalModal(group);
+    });
+    approvalTaskButton?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const taskId = event.currentTarget.dataset.buyerApprovalTaskId;
+      const line = group.lines.find((entry) => getVisibleOrderTaskForLine(entry)?.id === taskId) || group.lines[0];
       openAssignedOrderTaskDetailsModal(taskId, { lineId: line?.id || "" });
     });
     noInventoryButton?.addEventListener("click", (event) => {
@@ -3245,10 +3265,10 @@ function renderOrders() {
           : "No ship-by date";
       const lineCreatedLabel = `${getOrderCreatedLabel(line)} ${formatDate(line.orderCreatedAt || getOrderCreatedAt(line))}`;
       const lineCustomerName = getOrderCustomerName(order);
-      const assignedLineTask = state.orderTaskAssignmentsByLineId.get(line.id);
+      const assignedLineTask = getVisibleOrderTaskForLine(line);
       const assignedLineTaskAssignee = assignedLineTask ? getOrderTaskAssigneeName(assignedLineTask) : "";
       const lineTaskActionMarkup = assignedLineTask
-        ? `<button type="button" class="secondary-btn buyer-line-action-btn task-action-btn is-assigned" data-line-view-task="${escapeHtml(line.id)}" data-view-order-task="${escapeHtml(assignedLineTask.id)}" title="View task assigned to ${escapeHtml(assignedLineTaskAssignee)}"><span>Task assigned</span><strong>${escapeHtml(assignedLineTaskAssignee)}</strong></button>`
+        ? `<button type="button" class="secondary-btn buyer-line-action-btn task-action-btn ${isPendingOrderApprovalTask(assignedLineTask) ? "is-approval" : "is-assigned"}" data-line-view-task="${escapeHtml(line.id)}" data-view-order-task="${escapeHtml(assignedLineTask.id)}" title="View ${isPendingOrderApprovalTask(assignedLineTask) ? "admin approval request" : `task assigned to ${escapeHtml(assignedLineTaskAssignee)}`}"><span>${isPendingOrderApprovalTask(assignedLineTask) ? "Pending approval" : "Task assigned"}</span><strong>${escapeHtml(assignedLineTaskAssignee)}</strong></button>`
         : `<button type="button" class="secondary-btn buyer-line-action-btn task-action-btn" data-line-assign-task="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>Assign Task</button>`;
       const lineNoteCount = getLineNoteCount(line);
       const lineNoteCountMarkup = lineNoteCount
@@ -3887,6 +3907,13 @@ function getOrderTaskStatusLabel(status = "") {
     blocked: "Blocked",
     waiting_on_admin: "Waiting on admin",
     waiting_on_worker: "Waiting on worker",
+    ready_for_admin_approval: "Pending admin approval",
+    sent_back_for_rework: "Sent back for correction",
+    approved_for_shipping: "Approved for shipping",
+    assigned_for_shipping: "Shipping assigned",
+    shipped_completed: "Shipped",
+    completed_by_employee: "Completed by worker",
+    approved_by_admin: "Approved by admin",
     resolved: "Resolved",
     cancelled: "Cancelled",
   };
@@ -3915,6 +3942,14 @@ function isActiveOrderTask(task = {}) {
   ].includes(String(task.status || "").toLowerCase());
 }
 
+function isPendingOrderApprovalTask(task = {}) {
+  const status = String(task.status || "").toLowerCase();
+  const taskType = String(task.task_type || "").toLowerCase();
+  const workflowType = String(task.metadata?.workflow_type || "").toLowerCase();
+  return status === "ready_for_admin_approval"
+    && (taskType === "pending_admin_review" || workflowType === "pending_order_approval");
+}
+
 function isHiddenOrderCoordinationTask(task = {}, events = []) {
   const status = String(task.status || "").toLowerCase();
   if (task?.metadata?.hidden_from_task_board) return true;
@@ -3927,22 +3962,28 @@ function isVisibleActiveAssignedOrderCoordinationTask(task = {}, events = []) {
   if (isHiddenOrderCoordinationTask(task, events)) return false;
   if (isVideoReceiptCaptureOrderTask(task)) return true;
   if (!isActiveOrderTask(task)) return false;
+  if (isPendingOrderApprovalTask(task)) return true;
   return Boolean(task.assigned_to_user_id || task.assigned_to_email);
 }
 
 function rememberOrderTaskAssignment(task = {}) {
-  if (!isActiveOrderTask(task) || isVideoReceiptCaptureOrderTask(task) || !(task.assigned_to_user_id || task.assigned_to_email)) return;
+  if (!isActiveOrderTask(task) || isVideoReceiptCaptureOrderTask(task)) return;
+  if (!isPendingOrderApprovalTask(task) && !(task.assigned_to_user_id || task.assigned_to_email)) return;
   const lineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
+  const targetMap = isPendingOrderApprovalTask(task)
+    ? state.orderApprovalTasksByLineId
+    : state.orderTaskAssignmentsByLineId;
   lineIds.forEach((lineId) => {
-    const current = state.orderTaskAssignmentsByLineId.get(lineId);
+    const current = targetMap.get(lineId);
     const currentTime = new Date(current?.updated_at || current?.created_at || 0).getTime();
     const nextTime = new Date(task.updated_at || task.created_at || 0).getTime();
-    if (!current || nextTime >= currentTime) state.orderTaskAssignmentsByLineId.set(lineId, task);
+    if (!current || nextTime >= currentTime) targetMap.set(lineId, task);
   });
 }
 
 async function hydrateOrderTaskAssignments(lines = []) {
   state.orderTaskAssignmentsByLineId.clear();
+  state.orderApprovalTasksByLineId.clear();
   const orderIds = [...new Set(lines.map((line) => line.order_id).filter(Boolean))];
   if (!orderIds.length) return;
   const lineIdsByOrderId = new Map();
@@ -3956,7 +3997,7 @@ async function hydrateOrderTaskAssignments(lines = []) {
   try {
     const { data, error } = await supabase
       .from("ebay_order_tasks")
-      .select("id, order_id, order_line_ids, title, question, status, assigned_to_email, assigned_to_user_id, updated_at, created_at, metadata")
+      .select("id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by_email, due_at, latest_note, latest_photo_count, updated_at, created_at, metadata")
       .in("order_id", orderIds)
       .order("updated_at", { ascending: false });
     if (error) throw error;
@@ -3998,6 +4039,55 @@ function getGroupAssignmentLabel(group = {}) {
   const names = [...new Set(tasks.map(getOrderTaskAssigneeName).filter(Boolean))];
   if (names.length === 1) return names[0];
   return `${names.length} people`;
+}
+
+function getPendingOrderApprovalTaskForGroup(group = {}) {
+  const tasksById = new Map();
+  (group.lines || []).forEach((line) => {
+    const task = state.orderApprovalTasksByLineId.get(line.id);
+    if (task?.id) tasksById.set(task.id, task);
+  });
+  return [...tasksById.values()]
+    .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))[0] || null;
+}
+
+function getPendingOrderApprovalLinesForGroup(group = {}) {
+  return (group.lines || []).filter((line) => isOpenOrderLine(line) && line.order_id);
+}
+
+function getVisibleOrderTaskForLine(line = {}) {
+  return state.orderApprovalTasksByLineId.get(line.id) || state.orderTaskAssignmentsByLineId.get(line.id) || null;
+}
+
+function getOrderTaskLineIdsForApproval() {
+  const ids = Array.isArray(state.pendingApprovalLineIds) ? state.pendingApprovalLineIds.filter(Boolean) : [];
+  return ids.length ? [...new Set(ids)] : getOrderTaskLineIdsForSelectedOrder();
+}
+
+function getApprovalOrderGroupsFromLineIds(lineIds = []) {
+  const wanted = new Set(lineIds.filter(Boolean));
+  const groups = new Map();
+  state.orders.forEach((line) => {
+    if (!line?.id || !line.order_id || !wanted.has(line.id)) return;
+    const entry = groups.get(line.order_id) || {
+      orderId: line.order_id,
+      order: line.order || {},
+      lineIds: [],
+    };
+    entry.lineIds.push(line.id);
+    groups.set(line.order_id, entry);
+  });
+  return [...groups.values()].map((entry) => ({
+    ...entry,
+    lineIds: [...new Set(entry.lineIds)],
+  }));
+}
+
+function getEarliestShipByForLines(lines = []) {
+  return lines
+    .map((line) => line?.order?.ship_by_date)
+    .filter(Boolean)
+    .sort((a, b) => new Date(a) - new Date(b))[0] || "";
 }
 
 function getBuyerExpansionKey(groupOrKey = "") {
@@ -4046,10 +4136,12 @@ function isClearedVideoReceiptCaptureTask(task = {}, events = []) {
 }
 
 function getOrderTaskAssigneeLabel(task = {}) {
+  if (isPendingOrderApprovalTask(task)) return "Admin approval";
   return task.assigned_to_email || "Unassigned";
 }
 
 function getOrderTaskAssigneeName(task = {}) {
+  if (isPendingOrderApprovalTask(task)) return "Admin approval";
   const assignee = state.orderTaskAssignees.find((employee) => (
     employee.user_id && employee.user_id === task.assigned_to_user_id
   ));
@@ -4079,7 +4171,7 @@ function getAssignedOrderTaskForLine(line = state.selectedLine) {
     .filter((task) => isActiveOrderTask(task))
     .filter((task) => !isVideoReceiptCaptureOrderTask(task))
     .filter((task) => orderTaskMatchesLine(task, line))
-    .filter((task) => task.assigned_to_user_id || task.assigned_to_email)
+    .filter((task) => isPendingOrderApprovalTask(task) || task.assigned_to_user_id || task.assigned_to_email)
     .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))[0] || null;
 }
 
@@ -4108,6 +4200,24 @@ function handleSelectedOrderTaskButtonClick() {
     return;
   }
   openOrderTaskModal();
+}
+
+function openPendingOrderApprovalModal(group = {}) {
+  const lines = getPendingOrderApprovalLinesForGroup(group);
+  if (!lines.length) {
+    setStatus("No pending lines are available to send for admin approval.", "error");
+    return;
+  }
+
+  const firstLine = lines[0];
+  state.pendingApprovalLineIds = lines.map((line) => line.id).filter(Boolean);
+  state.pendingApprovalOrderIds = [...new Set(lines.map((line) => line.order_id).filter(Boolean))];
+  selectOrderLine(firstLine.id, { openDetail: false });
+  setTimeout(() => openOrderTaskModal({
+    approval: true,
+    orderIds: state.pendingApprovalOrderIds,
+    lineIds: state.pendingApprovalLineIds,
+  }), 80);
 }
 
 function getOrderTaskPhotoKey(photo) {
@@ -4583,6 +4693,7 @@ function findOrderTaskInMemory(taskId = "") {
     ...state.selectedOrderTasks,
     ...state.queueVideoReceiptTasks,
     ...state.orderTaskAssignmentsByLineId.values(),
+    ...state.orderApprovalTasksByLineId.values(),
   ].find((task) => task?.id === taskId) || null;
 }
 
@@ -5091,7 +5202,7 @@ async function requestOrderTaskPhoto() {
         stationId: station.id,
         stationName: station.name || "",
         jobId: job.id,
-        orderLineIds: getOrderTaskLineIdsForSelectedOrder(),
+        orderLineIds: state.orderTaskMode === "approval" ? getOrderTaskLineIdsForApproval() : getOrderTaskLineIdsForSelectedOrder(),
         taskId: state.orderTaskMode === "reply" ? state.activeOrderTaskId : "",
       },
     }));
@@ -5141,6 +5252,8 @@ function closeOrderTaskModal(options = {}) {
   setOrderTaskPhotoStatus("");
   state.activeOrderTaskId = "";
   state.orderTaskMode = "create";
+  state.pendingApprovalOrderIds = [];
+  state.pendingApprovalLineIds = [];
   closeModal("order-task-modal");
   returnToOrdersAfterMobileModalClose(options);
   setTimeout(() => $("open-order-task-modal")?.focus(), 80);
@@ -5153,46 +5266,67 @@ async function openOrderTaskModal(options = {}) {
     return;
   }
 
+  const isApprovalMode = Boolean(options.approval);
   const taskId = options.taskId || "";
   const task = taskId ? state.selectedOrderTasks.find((entry) => entry.id === taskId) || findOrderTaskInMemory(taskId) : null;
   state.activeOrderTaskId = task?.id || "";
-  state.orderTaskMode = task ? options.progress ? "progress" : "reply" : "create";
+  state.orderTaskMode = isApprovalMode ? "approval" : task ? options.progress ? "progress" : "reply" : "create";
+  state.pendingApprovalOrderIds = isApprovalMode ? [...new Set(options.orderIds || state.pendingApprovalOrderIds || [])] : [];
+  state.pendingApprovalLineIds = isApprovalMode ? [...new Set(options.lineIds || state.pendingApprovalLineIds || [])] : [];
   resetOrderTaskPhotos();
   setOrderTaskError("");
   setOrderTaskPhotoStatus("");
 
-  $("order-task-modal-title").textContent = task
+  const approvalLines = isApprovalMode
+    ? state.orders.filter((entry) => state.pendingApprovalLineIds.includes(entry.id))
+    : [];
+  const approvalOrderCount = new Set(approvalLines.map((entry) => entry.order_id).filter(Boolean)).size || state.pendingApprovalOrderIds.length || 1;
+  const approvalLineCount = approvalLines.length || state.pendingApprovalLineIds.length || 1;
+
+  $("order-task-modal-title").textContent = isApprovalMode
+    ? "Send for admin approval"
+    : task
     ? options.progress ? "Progress / delay update" : "Reply to order task"
     : "Create order task";
-  $("order-task-modal-subtitle").textContent = task
+  $("order-task-modal-subtitle").textContent = isApprovalMode
+    ? "Mark this pending order as ready for final verification before it leaves the facility."
+    : task
     ? options.progress
       ? "Explain what happened, what is blocking completion, and when this should be checked again."
       : "Add an audited update. The current assignee will see it in their task queue; admins can reassign when needed."
     : "Send a question, instruction, or special handling request to an admin or worker.";
-  $("submit-order-task").textContent = task ? options.progress ? "Save Progress" : "Send Update" : "Send Task";
-  $("order-task-status-field")?.classList.toggle("hidden", !task);
+  $("submit-order-task").textContent = isApprovalMode ? "Send for Approval" : task ? options.progress ? "Save Progress" : "Send Update" : "Send Task";
+  $("order-task-status-field")?.classList.toggle("hidden", !task || isApprovalMode);
   $("order-task-note").value = "";
-  $("order-task-note").placeholder = options.progress
+  $("order-task-note").placeholder = isApprovalMode
+    ? "What did you verify? Add anything the admin should inspect before approving shipment."
+    : options.progress
     ? "Why could this not be completed today? What are we waiting for, and what should happen next?"
     : "Write exactly what needs review, a decision, or special coordination.";
-  $("order-task-priority").value = task?.priority || "normal";
+  $("order-task-priority").value = task?.priority || (isApprovalMode ? "high" : "normal");
   $("order-task-status").value = task ? options.progress ? "deferred" : "" : "";
   configureOrderTaskStatusOptionsForProgress(Boolean(options.progress));
-  $("order-task-due-at").value = toDateTimeLocalValue(task?.due_at || (!task ? line.order?.ship_by_date : ""));
-  setOrderTaskFieldVisible("order-task-assignee", !options.progress && (!task || isRealAdminUser()));
+  $("order-task-due-at").value = toDateTimeLocalValue(task?.due_at || (isApprovalMode ? getEarliestShipByForLines(approvalLines) : !task ? line.order?.ship_by_date : ""));
+  setOrderTaskFieldVisible("order-task-assignee", !isApprovalMode && !options.progress && (!task || isRealAdminUser()));
   setOrderTaskFieldVisible("order-task-priority", !options.progress);
   setOrderTaskFieldVisible("order-task-due-at", true);
-  $("order-task-context").innerHTML = `
-    <strong>${escapeHtml(line.order?.order_number || "eBay order")} - ${escapeHtml(line.order?.buyer_username || "unknown buyer")}</strong>
-    <span>${escapeHtml(line.item_title || "Untitled item")}</span>
-    ${task ? `<span>Current: ${escapeHtml(getOrderTaskStatusLabel(task.status))} / assigned to ${escapeHtml(getOrderTaskAssigneeLabel(task))}</span>` : ""}
-  `;
+  $("order-task-context").innerHTML = isApprovalMode
+    ? `
+      <strong>${approvalOrderCount.toLocaleString()} order${approvalOrderCount === 1 ? "" : "s"} - ${escapeHtml(line.order?.buyer_username || "unknown buyer")}</strong>
+      <span>${approvalLineCount.toLocaleString()} pending line${approvalLineCount === 1 ? "" : "s"} will be queued for admin approval.</span>
+      <span>Admin must approve or send it back before shipment.</span>
+    `
+    : `
+      <strong>${escapeHtml(line.order?.order_number || "eBay order")} - ${escapeHtml(line.order?.buyer_username || "unknown buyer")}</strong>
+      <span>${escapeHtml(line.item_title || "Untitled item")}</span>
+      ${task ? `<span>Current: ${escapeHtml(getOrderTaskStatusLabel(task.status))} / assigned to ${escapeHtml(getOrderTaskAssigneeLabel(task))}</span>` : ""}
+    `;
 
   await loadOrderTaskAssignees();
   const assignee = $("order-task-assignee");
   if (assignee) {
     const defaultAdmin = state.orderTaskAssignees.find((employee) => String(employee.role || "").toLowerCase() === "admin");
-    assignee.value = task?.assigned_to_user_id || (!task && !isAdminUser() ? defaultAdmin?.user_id || "" : "");
+    assignee.value = isApprovalMode ? "" : task?.assigned_to_user_id || (!task && !isAdminUser() ? defaultAdmin?.user_id || "" : "");
   }
 
   openModal("order-task-modal");
@@ -5215,17 +5349,34 @@ async function submitOrderTask() {
   setOrderTaskPhotoStatus("Saving task...", "info");
 
   try {
-    const lineIds = getOrderTaskLineIdsForSelectedOrder();
+    const isApprovalMode = state.orderTaskMode === "approval";
+    const lineIds = isApprovalMode ? getOrderTaskLineIdsForApproval() : getOrderTaskLineIdsForSelectedOrder();
     const photos = await persistOrderTaskPhotos(lineIds);
     const isProgressUpdate = state.orderTaskMode === "progress";
     const isExistingTaskUpdate = state.orderTaskMode === "reply" || state.orderTaskMode === "progress";
     const assigneeUserId = isProgressUpdate || (isExistingTaskUpdate && !isRealAdminUser())
       ? null
       : $("order-task-assignee")?.value || null;
-    const priority = isProgressUpdate ? null : $("order-task-priority")?.value || "normal";
+    const priority = isProgressUpdate ? null : $("order-task-priority")?.value || (isApprovalMode ? "high" : "normal");
     const signedByEmail = state.user?.email || state.employee?.display_name || "";
 
-    if ((state.orderTaskMode === "reply" || state.orderTaskMode === "progress") && state.activeOrderTaskId) {
+    if (isApprovalMode) {
+      const approvalGroups = getApprovalOrderGroupsFromLineIds(lineIds);
+      if (!approvalGroups.length) throw new Error("No pending order lines were available for approval.");
+      for (const approvalGroup of approvalGroups) {
+        const { error } = await supabase.rpc("submit_pending_order_for_admin_approval", {
+          _order_id: approvalGroup.orderId,
+          _order_line_ids: approvalGroup.lineIds,
+          _note: note,
+          _priority: priority,
+          _due_at: localDateTimeToIso($("order-task-due-at")?.value || "") || approvalGroup.order?.ship_by_date || null,
+          _photo_attachments: photos,
+          _signed_by_email: signedByEmail,
+        });
+        if (error) throw error;
+      }
+      setStatus(`${approvalGroups.length.toLocaleString()} order${approvalGroups.length === 1 ? "" : "s"} sent for admin approval.`, "success");
+    } else if ((state.orderTaskMode === "reply" || state.orderTaskMode === "progress") && state.activeOrderTaskId) {
       const { error } = await supabase.rpc("respond_ebay_order_coordination_task", {
         _task_id: state.activeOrderTaskId,
         _note: note,

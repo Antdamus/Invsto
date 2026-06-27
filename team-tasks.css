@@ -158,6 +158,12 @@ body {
   background: rgba(241, 214, 155, 0.1);
 }
 
+.team-task-order-approval-filter-btn.is-active {
+  border-color: rgba(125, 240, 178, 0.48);
+  background: rgba(125, 240, 178, 0.12);
+  color: #bfffd8;
+}
+
 .team-task-notification-item strong,
 .team-task-notification-item span,
 .team-task-notification-item small {
