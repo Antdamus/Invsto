@@ -74,6 +74,15 @@ const ORDER_PARENT_TASK_TYPES = new Set(["coordination", "admin_review", "pendin
 const ORDER_SUBTASK_TYPE = "pending_subtask";
 const ORDER_SHIPPING_TYPE = "pending_shipping";
 const ORDER_PACKAGING_TYPE = "pending_packaging";
+const TASK_ASSIGNMENT_EVENT_ACTIONS = new Set([
+  "assigned",
+  "task_assigned",
+  "subtask_assigned",
+  "shipment_assigned",
+  "packaging_assigned",
+  "return_task_assigned",
+  "assigned_for_shipping",
+]);
 const TASK_LINE_SELECT = `
   id,
   order_id,
@@ -728,8 +737,42 @@ function canReviewTaskAcceptance(task = {}) {
   );
 }
 
+function eventSignedByTaskAssignee(task = {}, event = {}) {
+  const assigneeUserId = task.assigned_to_user_id || "";
+  const assigneeEmail = normalizeLookup(task.assigned_to_email || "");
+  const eventUserId = event.signed_by || "";
+  const eventEmail = normalizeLookup(event.signed_by_email || "");
+  return Boolean(
+    (assigneeUserId && eventUserId && assigneeUserId === eventUserId)
+    || (assigneeEmail && eventEmail && assigneeEmail === eventEmail)
+  );
+}
+
+function getLatestTaskReplyEvent(task = {}) {
+  const events = state.eventsByTask.get(getUnifiedTaskKey(task)) || [];
+  return [...events].reverse().find((event) => (
+    String(event.action || "").toLowerCase() !== "created"
+    && (event.notes || event.new_status || event.photo_attachments?.length)
+  )) || null;
+}
+
+function isTaskRespondedAwaitingReply(task = {}) {
+  if (isTaskHistoryView()) return false;
+  if (isTaskPendingAcceptance(task) || isOrderPendingApprovalTask(task)) return false;
+  const status = String(task.status || "").toLowerCase();
+  if (HISTORY_TASK_STATUSES.includes(status) || HISTORY_RETURN_TASK_STATUSES.includes(status)) return false;
+  if (!task.assigned_to_user_id && !task.assigned_to_email) return false;
+  const latestEvent = getLatestTaskReplyEvent(task);
+  if (!latestEvent) return false;
+  return eventSignedByTaskAssignee(task, latestEvent);
+}
+
 function getDefaultActiveTasks(tasks = []) {
-  return tasks.filter((task) => !isTaskPendingAcceptance(task) && !isOrderPendingApprovalTask(task));
+  return tasks.filter((task) => (
+    !isTaskPendingAcceptance(task)
+    && !isOrderPendingApprovalTask(task)
+    && !isTaskRespondedAwaitingReply(task)
+  ));
 }
 
 function getTaskSourceFilterValue(task = {}) {
@@ -751,11 +794,15 @@ function getTaskOwnerCounts(tasks = []) {
       if (isTaskAcceptanceVisibleToViewer(task)) counts.acceptance += 1;
       return counts;
     }
+    if (isTaskRespondedAwaitingReply(task)) {
+      counts.responded += 1;
+      return counts;
+    }
     counts.all += 1;
     if (isTaskAssignedToCurrentUser(task)) counts.assigned += 1;
     if (isTaskCreatedByCurrentUser(task)) counts.created += 1;
     return counts;
-  }, { all: 0, assigned: 0, created: 0, acceptance: 0, orderApproval: 0 });
+  }, { all: 0, assigned: 0, created: 0, responded: 0, acceptance: 0, orderApproval: 0 });
 }
 
 function getTaskSourceCounts(tasks = []) {
@@ -770,6 +817,7 @@ function getTaskSourceCounts(tasks = []) {
 function getTasksForOwnerFilter(tasks = []) {
   if (state.taskOwnerFilter === "order_approval") return tasks.filter((task) => isOrderPendingApprovalTask(task) && isAdminUser());
   if (state.taskOwnerFilter === "acceptance") return tasks.filter(isTaskAcceptanceVisibleToViewer);
+  if (state.taskOwnerFilter === "responded") return tasks.filter(isTaskRespondedAwaitingReply);
   const activeTasks = getDefaultActiveTasks(tasks);
   if (state.taskOwnerFilter === "assigned") return activeTasks.filter(isTaskAssignedToCurrentUser);
   if (state.taskOwnerFilter === "created") return activeTasks.filter(isTaskCreatedByCurrentUser);
@@ -799,6 +847,7 @@ function renderTaskOwnerFilterChrome(tasks = []) {
       all: `Active work ${counts.all}`,
       assigned: `${isViewingWorkerTasks() ? `Assigned to ${viewerLabel}` : "Assigned to me"} ${counts.assigned}`,
       created: `${isViewingWorkerTasks() ? `Created by ${viewerLabel}` : "Created by me"} ${counts.created}`,
+      responded: `Responded / awaiting reply ${counts.responded}`,
       order_approval: `Orders pending approval ${counts.orderApproval}`,
       acceptance: `Needs acceptance ${counts.acceptance}`,
     };
@@ -878,6 +927,59 @@ function getTaskActiveTime(task = {}) {
   return new Date(task.updated_at || task.created_at || task.due_at || 0).getTime() || 0;
 }
 
+function getObjectTimestamp(...values) {
+  for (const value of values) {
+    const time = parseTimestamp(value);
+    if (time) return time;
+  }
+  return 0;
+}
+
+function getTaskMetadataAssignedTime(task = {}) {
+  const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
+  return getObjectTimestamp(
+    task.assigned_at,
+    task.assignedAt,
+    task.assignment_created_at,
+    task.assignmentCreatedAt,
+    task.packaging_assigned_at,
+    metadata.assigned_at,
+    metadata.assignedAt,
+    metadata.assignment_created_at,
+    metadata.assignmentCreatedAt,
+    metadata.packaging_assigned_at,
+  );
+}
+
+function isAssignmentEvent(event = {}) {
+  const action = String(event.action || "").toLowerCase();
+  const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
+  const assignmentAction = String(payload.assignment_action || "").toLowerCase();
+  const newAssignee = event.new_assigned_to_user_id || payload.new_assigned_to_user_id || payload.assigned_to_user_id;
+
+  if (assignmentAction === "cancel_assignment") return false;
+  if (action === "created") return Boolean(newAssignee);
+  if (TASK_ASSIGNMENT_EVENT_ACTIONS.has(action) || assignmentAction === "reassign") return Boolean(newAssignee);
+  return Boolean(newAssignee && event.old_assigned_to_user_id && event.old_assigned_to_user_id !== newAssignee);
+}
+
+function getTaskAssignedSortTime(task = {}) {
+  const events = state.eventsByTask.get(getUnifiedTaskKey(task)) || [];
+  const latestEventTime = events.reduce((latest, event) => {
+    if (!isAssignmentEvent(event)) return latest;
+    return Math.max(latest, parseTimestamp(event.created_at));
+  }, 0);
+  if (latestEventTime) return latestEventTime;
+
+  const metadataTime = getTaskMetadataAssignedTime(task);
+  if (metadataTime) return metadataTime;
+
+  if (task.assigned_to_user_id || task.assigned_to_email) {
+    return parseTimestamp(task.created_at) || Number.NaN;
+  }
+  return Number.NaN;
+}
+
 function compareFiniteNumber(aValue, bValue, direction = "asc") {
   const aHasValue = Number.isFinite(aValue);
   const bHasValue = Number.isFinite(bValue);
@@ -904,7 +1006,11 @@ function sortUnifiedTasks(tasks = [], requestedSort = state.taskSort || "recent"
     const byUrgency = () => getTaskUrgencyRank(a) - getTaskUrgencyRank(b);
     const byPriority = () => priorityRank(a.priority) - priorityRank(b.priority);
     const byCreatedDesc = () => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    const byAssignedDesc = () => compareFiniteNumber(getTaskAssignedSortTime(a), getTaskAssignedSortTime(b), "desc");
+    const byAssignedAsc = () => compareFiniteNumber(getTaskAssignedSortTime(a), getTaskAssignedSortTime(b), "asc");
 
+    if (requestedSort === "assigned_desc") return byAssignedDesc() || byRecent() || byDueAsc() || byPriority() || byCreatedDesc();
+    if (requestedSort === "assigned_asc") return byAssignedAsc() || byDueAsc() || byPriority() || byRecent() || byCreatedDesc();
     if (requestedSort === "order_urgency") return byUrgency() || byDueAsc() || byMoneyDesc() || byPriority() || byRecent() || byCreatedDesc();
     if (requestedSort === "due_asc") return byDueAsc() || byUrgency() || byPriority() || byRecent() || byCreatedDesc();
     if (requestedSort === "due_desc") return byDueDesc() || byPriority() || byRecent() || byCreatedDesc();
@@ -936,6 +1042,14 @@ function compareTaskText(a, b) {
 function sortHistoryTasks(tasks = []) {
   const sort = state.taskHistorySort || "recent";
   return [...tasks].sort((a, b) => {
+    if (sort === "assigned_desc") {
+      return compareFiniteNumber(getTaskAssignedSortTime(a), getTaskAssignedSortTime(b), "desc")
+        || getTaskHistoryTime(b) - getTaskHistoryTime(a);
+    }
+    if (sort === "assigned_asc") {
+      return compareFiniteNumber(getTaskAssignedSortTime(a), getTaskAssignedSortTime(b), "asc")
+        || getTaskHistoryTime(b) - getTaskHistoryTime(a);
+    }
     if (sort === "oldest") return getTaskHistoryTime(a) - getTaskHistoryTime(b);
     if (sort === "user") {
       return compareTaskText(getTaskAssigneeLabel(a), getTaskAssigneeLabel(b))
@@ -3025,11 +3139,13 @@ function renderTasks() {
 
   if (title) {
     title.textContent = isViewingWorkerTasks()
-      ? `${getViewedWorkerLabel()} - ${isTaskHistoryView() ? "Task History" : state.taskOwnerFilter === "acceptance" ? "Needs Acceptance" : "Active Tasks"}`
+      ? `${getViewedWorkerLabel()} - ${isTaskHistoryView() ? "Task History" : state.taskOwnerFilter === "acceptance" ? "Needs Acceptance" : state.taskOwnerFilter === "responded" ? "Responded / Awaiting Reply" : "Active Tasks"}`
       : isTaskHistoryView()
         ? (isCanceledTaskScope() ? "Canceled Tasks" : isTeamWideTaskScope() ? "Everyone's Task History" : "My Task History")
         : state.taskOwnerFilter === "acceptance"
           ? "Tasks Needing Acceptance"
+          : state.taskOwnerFilter === "responded"
+            ? "Responded / Awaiting Reply"
           : (isTeamWideTaskScope() ? "Everyone's Active Tasks" : "My Assigned Tasks");
   }
   if (count) count.textContent = `${state.tasks.length} task${state.tasks.length === 1 ? "" : "s"}`;
@@ -4715,7 +4831,7 @@ function setupListeners() {
     button.addEventListener("click", async () => {
       state.taskView = button.dataset.taskView === "history" ? "history" : "active";
       if (state.taskView === "active" && isCanceledTaskScope()) state.taskScope = "mine";
-      if (state.taskView === "history" && ["acceptance", "order_approval"].includes(state.taskOwnerFilter)) state.taskOwnerFilter = "all";
+      if (state.taskView === "history" && ["acceptance", "order_approval", "responded"].includes(state.taskOwnerFilter)) state.taskOwnerFilter = "all";
       updateTaskScopeChrome();
       await loadTasks();
     });
@@ -4730,7 +4846,7 @@ function setupListeners() {
   });
   document.querySelectorAll("[data-task-owner-filter]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.taskOwnerFilter = ["all", "assigned", "created", "acceptance", "order_approval"].includes(button.dataset.taskOwnerFilter)
+      state.taskOwnerFilter = ["all", "assigned", "created", "responded", "acceptance", "order_approval"].includes(button.dataset.taskOwnerFilter)
         ? button.dataset.taskOwnerFilter
         : "all";
       renderTasks();

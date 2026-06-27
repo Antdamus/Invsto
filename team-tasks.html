@@ -91,6 +91,7 @@
                 <button type="button" class="team-task-filter-btn is-active" data-task-owner-filter="all">Active work 0</button>
                 <button type="button" class="team-task-filter-btn" data-task-owner-filter="assigned">Assigned to me 0</button>
                 <button type="button" class="team-task-filter-btn" data-task-owner-filter="created">Created by me 0</button>
+                <button type="button" class="team-task-filter-btn" data-task-owner-filter="responded">Responded / awaiting reply 0</button>
                 <button type="button" class="team-task-filter-btn team-task-order-approval-filter-btn" data-task-owner-filter="order_approval">Orders pending approval 0</button>
                 <button type="button" class="team-task-filter-btn team-task-acceptance-filter-btn" data-task-owner-filter="acceptance">Needs acceptance 0</button>
               </div>
@@ -120,6 +121,8 @@
                 Sort
                 <select id="team-task-active-sort">
                   <option value="recent">Recent updates</option>
+                  <option value="assigned_desc">Assigned newest first</option>
+                  <option value="assigned_asc">Assigned oldest first</option>
                   <option value="order_urgency">Order urgency highest</option>
                   <option value="due_asc">Due date soonest</option>
                   <option value="due_desc">Due date latest</option>
@@ -131,6 +134,8 @@
                 Sort
                 <select id="team-task-history-sort">
                   <option value="recent">Most recent</option>
+                  <option value="assigned_desc">Assigned newest first</option>
+                  <option value="assigned_asc">Assigned oldest first</option>
                   <option value="user">By user</option>
                   <option value="oldest">Oldest</option>
                   <option value="az">A to Z</option>
