@@ -154,52 +154,54 @@
         </div>
       </section>
 
-      <section class="checkout-store-panel" aria-label="Checkout store">
-        <div>
-          <span class="eyebrow">Packing Store</span>
-          <h2>Checkout Location</h2>
-          <p>Select where this checkout is happening. Only tray stock checked into this store will be available for packing.</p>
-        </div>
-        <label>
-          Store
-          <select id="checkout-store-select" aria-label="Checkout store">
-            <option value="">Select checkout store</option>
-          </select>
-        </label>
-      </section>
-
-      <section class="bag-lookup-panel" aria-label="Live auction bag lookup">
-        <div class="bag-lookup-head">
+      <div class="fulfillment-utility-strip">
+        <section class="checkout-store-panel" aria-label="Checkout store">
           <div>
-            <span class="eyebrow">Auction Bag Lookup</span>
-            <h2>Scan Bag Before Packing</h2>
-            <p>Scan the auction number or live bag ID first. The bag contents load here, and the order queue narrows to the strongest eBay order matches.</p>
+            <span class="eyebrow">Packing Store</span>
+            <h2>Checkout Location</h2>
+            <p>Select where this checkout is happening. Only tray stock checked into this store will be available for packing.</p>
           </div>
-          <span id="bag-lookup-status" class="count-pill">No bag loaded</span>
-        </div>
-        <div class="bag-lookup-scan">
-          <input id="global-live-lot-scan" type="search" placeholder="Scan auction number or LIVE bag ID" autocomplete="off" />
-          <button id="global-find-live-lot" type="button" class="primary-btn">Inspect Bag</button>
-          <button id="global-clear-live-lot" type="button" class="secondary-btn">Clear Bag</button>
-        </div>
-        <div class="bag-lookup-grid">
-          <div id="bag-lookup-live-lot-panel" class="live-lot-panel is-global">
-            No live auction bag loaded.
+          <label>
+            Store
+            <select id="checkout-store-select" aria-label="Checkout store">
+              <option value="">Select checkout store</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="bag-lookup-panel" aria-label="Live auction bag lookup">
+          <div class="bag-lookup-head">
+            <div>
+              <span class="eyebrow">Auction Bag Lookup</span>
+              <h2>Scan Bag Before Packing</h2>
+              <p>Scan the auction number or live bag ID first. The bag contents load here, and the order queue narrows to the strongest eBay order matches.</p>
+            </div>
+            <span id="bag-lookup-status" class="count-pill">No bag loaded</span>
           </div>
-          <aside class="bag-match-panel">
-            <div class="bag-match-head">
-              <div>
-                <span class="eyebrow">Suggested Orders</span>
-                <h3>Possible Matches</h3>
+          <div class="bag-lookup-scan">
+            <input id="global-live-lot-scan" type="search" placeholder="Scan auction number or LIVE bag ID" autocomplete="off" />
+            <button id="global-find-live-lot" type="button" class="primary-btn">Inspect Bag</button>
+            <button id="global-clear-live-lot" type="button" class="secondary-btn">Clear Bag</button>
+          </div>
+          <div class="bag-lookup-grid">
+            <div id="bag-lookup-live-lot-panel" class="live-lot-panel is-global">
+              No live auction bag loaded.
+            </div>
+            <aside class="bag-match-panel">
+              <div class="bag-match-head">
+                <div>
+                  <span class="eyebrow">Suggested Orders</span>
+                  <h3>Possible Matches</h3>
+                </div>
+                <span id="bag-match-count" class="count-pill">0</span>
               </div>
-              <span id="bag-match-count" class="count-pill">0</span>
-            </div>
-            <div id="live-lot-order-matches" class="bag-match-list">
-              <div class="empty-state">Scan a bag to see likely eBay orders.</div>
-            </div>
-          </aside>
-        </div>
-      </section>
+              <div id="live-lot-order-matches" class="bag-match-list">
+                <div class="empty-state">Scan a bag to see likely eBay orders.</div>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </div>
 
       <details id="order-import-panel" class="import-panel import-details hidden" aria-label="Import eBay orders">
         <summary class="import-panel-summary">

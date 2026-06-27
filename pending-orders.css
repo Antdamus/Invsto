@@ -280,7 +280,7 @@ button.task-action-btn.is-assigned:hover,
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .summary-strip div,
@@ -301,7 +301,7 @@ button.task-action-btn.is-assigned:hover,
 }
 
 .summary-strip div {
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-radius: 14px;
 }
 
@@ -399,14 +399,14 @@ button.task-action-btn.is-assigned:hover,
 
 .summary-strip strong {
   display: block;
-  margin-top: 3px;
-  font-size: clamp(1rem, 1.45vw, 1.25rem);
+  margin-top: 2px;
+  font-size: clamp(0.98rem, 1.25vw, 1.16rem);
   overflow-wrap: anywhere;
 }
 
 .summary-strip small {
   display: block;
-  margin-top: 2px;
+  margin-top: 1px;
   color: var(--muted);
   font-size: 0.76rem;
   font-weight: 800;
@@ -445,18 +445,18 @@ button.task-action-btn.is-assigned:hover,
 
 .import-details {
   display: block;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   padding: 0;
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: 14px;
 }
 
 .import-panel-summary {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
-  padding: 10px 12px;
+  padding: 8px 10px;
   cursor: pointer;
   list-style: none;
 }
@@ -468,11 +468,12 @@ button.task-action-btn.is-assigned:hover,
 .import-panel-summary h2 {
   margin-bottom: 0;
   font-family: inherit;
-  font-size: 1rem;
+  font-size: 0.96rem;
   line-height: 1.1;
 }
 
 .import-panel-summary p {
+  display: none;
   margin: 3px 0 0;
   color: var(--muted);
   font-size: 0.82rem;
@@ -491,9 +492,9 @@ button.task-action-btn.is-assigned:hover,
 .import-panel-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
-  padding: 0 12px 12px;
+  padding: 0 10px 10px;
 }
 
 .import-panel-body .ebay-reconciliation-panel,
@@ -560,14 +561,23 @@ button.task-action-btn.is-assigned:hover,
   cursor: pointer;
 }
 
+.fulfillment-utility-strip {
+  display: grid;
+  grid-template-columns: minmax(270px, 0.6fr) minmax(420px, 1.4fr);
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
 .checkout-store-panel {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 360px);
-  gap: 12px;
+  grid-template-columns: minmax(118px, 0.72fr) minmax(170px, 1fr);
+  gap: 8px;
   align-items: center;
-  margin-bottom: 10px;
-  padding: 10px 12px;
-  border-radius: 16px;
+  min-height: 64px;
+  margin-bottom: 0;
+  padding: 8px 10px;
+  border-radius: 14px;
 }
 
 .admin-order-actions-controls .secondary-btn,
@@ -580,7 +590,7 @@ button.task-action-btn.is-assigned:hover,
 .checkout-store-panel h2 {
   margin-bottom: 0;
   font-family: inherit;
-  font-size: 1rem;
+  font-size: 0.94rem;
   line-height: 1.1;
 }
 
@@ -593,9 +603,9 @@ button.task-action-btn.is-assigned:hover,
 
 .checkout-store-panel label {
   display: grid;
-  gap: 5px;
+  gap: 3px;
   color: var(--muted);
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   font-weight: 900;
 }
 
@@ -641,11 +651,12 @@ button.task-action-btn.is-assigned:hover,
 .bag-lookup-panel {
   display: grid;
   grid-template-columns: minmax(190px, 0.45fr) minmax(320px, 1fr);
-  gap: 10px 14px;
+  gap: 8px 10px;
   align-items: center;
-  margin-bottom: 10px;
-  padding: 10px 12px;
-  border-radius: 16px;
+  min-height: 64px;
+  margin-bottom: 0;
+  padding: 8px 10px;
+  border-radius: 14px;
   overflow: hidden;
 }
 
@@ -664,7 +675,7 @@ button.task-action-btn.is-assigned:hover,
 
 .bag-lookup-head h2 {
   font-family: inherit;
-  font-size: 1rem;
+  font-size: 0.94rem;
   line-height: 1.1;
 }
 
@@ -684,16 +695,16 @@ button.task-action-btn.is-assigned:hover,
 
 .checkout-store-panel select,
 .bag-lookup-scan input {
-  min-height: 40px;
-  padding: 8px 12px;
-  border-radius: 13px;
+  min-height: 36px;
+  padding: 7px 10px;
+  border-radius: 12px;
 }
 
 .bag-lookup-scan .primary-btn,
 .bag-lookup-scan .secondary-btn,
 .import-panel-summary-action {
-  min-height: 40px;
-  padding: 0 13px;
+  min-height: 36px;
+  padding: 0 11px;
 }
 
 .bag-lookup-grid {
@@ -2988,6 +2999,7 @@ body.modal-open {
 
   .workspace-grid,
   .summary-strip,
+  .fulfillment-utility-strip,
   .import-panel,
   .admin-order-actions,
   .checkout-store-panel,
@@ -2998,7 +3010,15 @@ body.modal-open {
   }
 
   .bag-lookup-scan {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .checkout-store-panel {
+    grid-template-columns: minmax(0, 0.75fr) minmax(180px, 1.25fr);
   }
 
   .import-actions {
@@ -3093,8 +3113,8 @@ body.modal-open {
   .admin-order-actions,
   .checkout-store-panel,
   .bag-lookup-panel {
-    border-radius: 18px;
-    padding: 10px;
+    border-radius: 14px;
+    padding: 8px;
   }
 
   .orders-panel {
@@ -3118,6 +3138,41 @@ body.modal-open {
   .buyer-card-head,
   .reconciliation-head {
     flex-direction: column;
+  }
+
+  .fulfillment-utility-strip {
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .checkout-store-panel {
+    grid-template-columns: minmax(0, 0.75fr) minmax(150px, 1.25fr);
+    min-height: 58px;
+  }
+
+  .bag-lookup-panel {
+    min-height: 58px;
+  }
+
+  .bag-lookup-head {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .bag-lookup-head h2,
+  .checkout-store-panel h2,
+  .import-panel-summary h2 {
+    font-size: 0.9rem;
+  }
+
+  .bag-lookup-scan {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 6px;
+  }
+
+  .bag-lookup-scan .primary-btn,
+  .bag-lookup-scan .secondary-btn {
+    padding: 0 9px;
   }
 
   .reconciliation-actions,
@@ -4010,6 +4065,74 @@ body.pending-order-detail-open .mobile-detail-close {
 .selected-order-copy:focus-visible strong {
   color: var(--gold-strong);
   text-decoration-color: rgba(255, 226, 160, 0.8);
+}
+
+.order-number-action-menu {
+  position: fixed;
+  z-index: 7600;
+  display: grid;
+  gap: 6px;
+  width: min(260px, calc(100vw - 20px));
+  padding: 8px;
+  border: 1px solid rgba(227, 189, 119, 0.28);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(227, 189, 119, 0.18), transparent 42%),
+    linear-gradient(180deg, rgba(38, 36, 39, 0.98), rgba(21, 20, 22, 0.98));
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.42);
+  color: var(--text);
+}
+
+.order-number-action-menu-title {
+  display: grid;
+  gap: 2px;
+  padding: 5px 8px 6px;
+}
+
+.order-number-action-menu-title span {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.order-number-action-menu-title strong {
+  color: var(--gold-strong);
+  font-size: 0.9rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.order-number-action-menu button {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 900;
+  text-align: left;
+}
+
+.order-number-action-menu button:hover,
+.order-number-action-menu button:focus-visible {
+  border-color: rgba(227, 189, 119, 0.42);
+  background: rgba(227, 189, 119, 0.12);
+}
+
+.order-number-action-menu svg {
+  width: 17px;
+  height: 17px;
+  color: var(--gold-strong);
 }
 
 .buyer-line-customer {

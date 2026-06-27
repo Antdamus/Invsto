@@ -563,6 +563,112 @@ async function copyTextToClipboard(value, label = "Value") {
   }
 }
 
+function removeOrderNumberActionMenu() {
+  document.querySelectorAll(".order-number-action-menu").forEach((menu) => menu.remove());
+}
+
+function openEbayOrderDetailsPage(orderNumber = "") {
+  const url = buildEbayOrderDetailsUrl(orderNumber);
+  if (!url) {
+    setStatus("No eBay order number available to open.", "error");
+    return false;
+  }
+  window.open(url, "_blank", "noopener");
+  setStatus(`Opening eBay order ${orderNumber}.`, "success");
+  return true;
+}
+
+function positionOrderNumberActionMenu(menu, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const margin = 10;
+  const menuRect = menu.getBoundingClientRect();
+  let left = rect.left;
+  let top = rect.bottom + 8;
+
+  if (left + menuRect.width > window.innerWidth - margin) {
+    left = window.innerWidth - menuRect.width - margin;
+  }
+  if (left < margin) left = margin;
+  if (top + menuRect.height > window.innerHeight - margin) {
+    top = rect.top - menuRect.height - 8;
+  }
+  if (top < margin) top = margin;
+
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
+}
+
+function showOrderNumberActionMenu(anchor, orderNumber = "") {
+  const cleanNumber = normalizeEbayOrderNumber(orderNumber);
+  if (!anchor || !cleanNumber) return;
+
+  const existing = document.querySelector(".order-number-action-menu");
+  if (existing?.dataset.orderNumber === cleanNumber && existing.dataset.anchorId === anchor.dataset.orderActionAnchorId) {
+    removeOrderNumberActionMenu();
+    return;
+  }
+
+  removeOrderNumberActionMenu();
+  if (!anchor.dataset.orderActionAnchorId) {
+    anchor.dataset.orderActionAnchorId = `order-action-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  const menu = document.createElement("div");
+  menu.className = "order-number-action-menu";
+  menu.dataset.orderNumber = cleanNumber;
+  menu.dataset.anchorId = anchor.dataset.orderActionAnchorId;
+  menu.innerHTML = `
+    <div class="order-number-action-menu-title">
+      <span>eBay Order</span>
+      <strong>${escapeHtml(cleanNumber)}</strong>
+    </div>
+    <button type="button" data-order-action-copy>
+      <i data-lucide="copy"></i>
+      Copy number
+    </button>
+    <button type="button" data-order-action-open>
+      <i data-lucide="external-link"></i>
+      Open in eBay
+    </button>
+  `;
+
+  document.body.appendChild(menu);
+  window.lucide?.createIcons?.();
+  positionOrderNumberActionMenu(menu, anchor);
+
+  const closeSoon = () => window.setTimeout(removeOrderNumberActionMenu, 80);
+  menu.querySelector("[data-order-action-copy]")?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    await copyTextToClipboard(cleanNumber, "Order number");
+    closeSoon();
+  });
+  menu.querySelector("[data-order-action-open]")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openEbayOrderDetailsPage(cleanNumber);
+    closeSoon();
+  });
+}
+
+function handleOrderNumberActionClick(event) {
+  const button = event.currentTarget;
+  event.preventDefault();
+  event.stopPropagation();
+  showOrderNumberActionMenu(button, button.dataset.orderNumber || button.dataset.copyOrderNumber || "");
+}
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest(".order-number-action-menu,[data-order-number-action]")) return;
+  removeOrderNumberActionMenu();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") removeOrderNumberActionMenu();
+});
+
+window.addEventListener("resize", removeOrderNumberActionMenu);
+
 function getCheckoutStoreStorageKey() {
   return `og-pending-orders-checkout-store:${state.user?.id || "anonymous"}`;
 }
@@ -3154,7 +3260,7 @@ function renderOrders() {
         : "";
       const orderNumber = String(order.order_number || "").trim();
       const orderNumberMarkup = orderNumber
-        ? `<button type="button" class="buyer-line-order-copy" data-copy-order-number="${escapeHtml(orderNumber)}" title="Copy order number"><span>Order</span><strong>${escapeHtml(orderNumber)}</strong></button>`
+        ? `<button type="button" class="buyer-line-order-copy" data-order-number-action data-order-number="${escapeHtml(orderNumber)}" title="Copy or open this eBay order"><span>Order</span><strong>${escapeHtml(orderNumber)}</strong></button>`
         : `<span class="buyer-line-order-copy is-missing"><span>Order</span><strong>No order number</strong></span>`;
       const isAdminSelected = state.adminSelectedLineIds.has(line.id);
       const visibleLineDueLabel = lineUrgency
@@ -3224,11 +3330,7 @@ function renderOrders() {
           }
         });
       });
-      button.querySelector("[data-copy-order-number]")?.addEventListener("click", async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        await copyTextToClipboard(event.currentTarget.dataset.copyOrderNumber, "Order number");
-      });
+      button.querySelector("[data-order-number-action]")?.addEventListener("click", handleOrderNumberActionClick);
       button.querySelectorAll(".buyer-line-action-btn").forEach((actionButton) => {
         actionButton.addEventListener("click", (event) => event.stopPropagation());
       });
@@ -3492,13 +3594,9 @@ function renderSelectedOrder() {
   const selectedOrderTitle = $("selected-order-title");
   if (selectedOrderTitle) {
     selectedOrderTitle.innerHTML = selectedOrderNumber
-      ? `<button type="button" class="selected-order-copy" data-copy-order-number="${escapeHtml(selectedOrderNumber)}"><span>Order number</span><strong>${escapeHtml(selectedOrderNumber)}</strong></button>`
+      ? `<button type="button" class="selected-order-copy" data-order-number-action data-order-number="${escapeHtml(selectedOrderNumber)}" title="Copy or open this eBay order"><span>Order number</span><strong>${escapeHtml(selectedOrderNumber)}</strong></button>`
       : "eBay order";
-    selectedOrderTitle.querySelector("[data-copy-order-number]")?.addEventListener("click", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      await copyTextToClipboard(event.currentTarget.dataset.copyOrderNumber, "Order number");
-    });
+    selectedOrderTitle.querySelector("[data-order-number-action]")?.addEventListener("click", handleOrderNumberActionClick);
   }
   const customerName = getOrderCustomerName(order);
   const buyerClause = customerName
