@@ -26,6 +26,7 @@ body {
     var(--bg);
   color: var(--text);
   font-family: "Manrope", system-ui, sans-serif;
+  user-select: text;
 }
 
 .pending-content {
@@ -42,6 +43,50 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+.copy-text {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 2px 7px;
+  border: 1px solid rgba(227, 189, 119, 0.24);
+  border-radius: 7px;
+  background: rgba(227, 189, 119, 0.08);
+  color: inherit;
+  cursor: copy;
+  font: inherit;
+  font-weight: 900;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  text-align: left;
+  user-select: text;
+  white-space: normal;
+}
+
+.copy-text:hover,
+.copy-text:focus-visible {
+  border-color: rgba(227, 189, 119, 0.48);
+  background: rgba(227, 189, 119, 0.15);
+  outline: none;
+}
+
+.copy-text::after {
+  content: "Copy";
+  flex: 0 0 auto;
+  margin-left: 7px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
+  user-select: none;
 }
 
 .pending-shell {
@@ -879,6 +924,13 @@ h1 {
   min-width: 0;
 }
 
+#selected-order-subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .detail-actions .secondary-btn {
   width: 100%;
 }
@@ -1086,6 +1138,23 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+.buyer-card-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 3px;
+  min-width: 0;
+}
+
+.buyer-card-buyer-copy {
+  font-size: 1rem;
+}
+
+.buyer-card-history-btn {
+  min-height: 28px;
+}
+
 .buyer-kicker {
   display: block;
   color: var(--gold-strong);
@@ -1106,6 +1175,10 @@ textarea:focus {
   gap: 10px;
   margin-top: 10px;
   font-size: 0.88rem;
+}
+
+.buyer-card-meta .copy-text {
+  color: var(--text);
 }
 
 .buyer-line-list {
@@ -3118,6 +3191,41 @@ body.pending-order-detail-open .mobile-detail-close {
 
 .buyer-line-copy {
   grid-column: 1;
+}
+
+.buyer-line-title-copy {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.96rem;
+  line-height: 1.25;
+}
+
+.buyer-line-title-copy::after {
+  margin-left: 8px;
+}
+
+.buyer-line-copy small {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.inline-copy-chip {
+  min-height: 24px;
+  padding: 3px 8px;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.copy-address-chip {
+  border-color: rgba(139, 190, 255, 0.24);
+  background: rgba(139, 190, 255, 0.08);
+  color: #d7e8ff;
 }
 
 .buyer-line-meta-row {

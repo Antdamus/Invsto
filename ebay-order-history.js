@@ -78,7 +78,7 @@ const RETURN_CAPTURE_POLL_TIMEOUT_MS = 60 * 60 * 1000;
 const RETURN_CAPTURE_POLL_INTERVAL_MS = 1500;
 const RETURN_CAPTURE_PHOTO_SETTLE_MS = 3000;
 const RETURN_EVIDENCE_SIGNED_URL_TTL_SECONDS = 60 * 60;
-const RETURN_THUMBNAIL_TRANSFORM = { width: 260, height: 260, resize: "contain", quality: 60 };
+const RETURN_THUMBNAIL_TRANSFORM = { width: 900, height: 900, resize: "contain", quality: 92 };
 const RETURN_EXTERNAL_NAV_RESTORE_KEY = "ogReturnExternalNavigationRestore";
 const TRACKING_NUMBER_PATTERN = /\b\d{20,30}\b/g;
 const FORMATTED_TRACKING_NUMBER_PATTERN = /\b\d{2,4}(?:[\s-]+\d{2,4}){4,8}\b/g;
@@ -169,6 +169,77 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function getCopyableValueAttribute(value) {
+  return escapeHtml(encodeURIComponent(String(value || "")));
+}
+
+function getCopyableLabelAttribute(value) {
+  return escapeHtml(String(value || "text"));
+}
+
+function copyableTextMarkup(value, label, className = "", displayValue = value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return `
+    <button
+      type="button"
+      class="history-copy-text ${className}"
+      data-copy-text="${getCopyableValueAttribute(text)}"
+      data-copy-label="${getCopyableLabelAttribute(label)}"
+      title="Click to copy ${getCopyableLabelAttribute(label)}"
+    >${escapeHtml(displayValue || text)}</button>
+  `;
+}
+
+async function copyTextToClipboard(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return true;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  return copied;
+}
+
+function setCopyStatus(message = "", type = "info") {
+  if (isReturnsWorkbenchPage()) {
+    setReturnTaskSaveStatus(message, type);
+    return;
+  }
+  const count = $("history-count");
+  if (count && message) count.textContent = message;
+}
+
+function handleCopyTextClick(event) {
+  const target = event.target.closest("[data-copy-text]");
+  if (!target) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  const text = decodeURIComponent(target.dataset.copyText || "");
+  const label = target.dataset.copyLabel || "text";
+  copyTextToClipboard(text)
+    .then((copied) => setCopyStatus(copied ? `Copied ${label} to clipboard.` : `Could not copy ${label}.`, copied ? "success" : "error"))
+    .catch((error) => {
+      console.warn("Clipboard copy failed:", error);
+      setCopyStatus(`Could not copy ${label}.`, "error");
+    });
+  return true;
+}
+
+function isTextEditingShortcut(event) {
+  const key = String(event.key || "").toLowerCase();
+  return (event.ctrlKey || event.metaKey) && ["a", "c", "v", "x"].includes(key);
 }
 
 function formatMoney(value) {
@@ -1059,7 +1130,7 @@ async function signEventEvidencePhoto(photo, options = {}) {
     const storage = supabase.storage.from(photo.bucket);
     const { data, error } = thumbnail
       ? await storage.createSignedUrl(photo.path, 600, {
-        transform: { width: 260, height: 260, resize: "contain", quality: 60 },
+        transform: { width: 900, height: 900, resize: "contain", quality: 92 },
       })
       : await storage.createSignedUrl(photo.path, 600);
     if (!error && data?.signedUrl) return data.signedUrl;
@@ -1079,6 +1150,8 @@ function applyEvidencePhotoViewerTransform() {
   if (!image) return;
   image.style.transform = `translate(${evidencePhotoViewerState.panX}px, ${evidencePhotoViewerState.panY}px) scale(${evidencePhotoViewerState.zoom})`;
   frame?.classList.toggle("is-pannable", evidencePhotoViewerState.zoom > 1);
+  const zoomValue = $("evidence-photo-zoom-value");
+  if (zoomValue) zoomValue.textContent = `${Math.round(evidencePhotoViewerState.zoom * 100)}%`;
 }
 
 function resetEvidencePhotoViewerTransform() {
@@ -1092,7 +1165,7 @@ function resetEvidencePhotoViewerTransform() {
 }
 
 function setEvidencePhotoViewerZoom(nextZoom) {
-  const clamped = Math.max(1, Math.min(5, Number(nextZoom) || 1));
+  const clamped = Math.max(1, Math.min(8, Number(nextZoom) || 1));
   evidencePhotoViewerState.zoom = clamped;
   if (clamped === 1) {
     evidencePhotoViewerState.panX = 0;
@@ -2024,7 +2097,7 @@ async function loadOrderHistory() {
   state.historyLoaded = true;
   rebuildHistoryLineSearchIndex();
   renderWorkerOptions();
-  applyHistoryBuyerLaunchSearch();
+  applyHistoryLaunchSearch();
   applyFilters();
   applyHistoryLabelLaunchSelection();
   drainQueuedHistoryLabelTransfers();
@@ -2553,6 +2626,25 @@ function getReturnComplaintDetails(task = {}) {
   };
 }
 
+function getHighQualityReturnImageUrl(url = "") {
+  const raw = String(url || "").trim();
+  if (!raw || raw.startsWith("blob:")) return raw;
+  try {
+    const parsed = new URL(raw, window.location.href);
+    parsed.pathname = parsed.pathname
+      .replace(/\/s-l\d+(?=\.|\/|$)/i, "/s-l1600")
+      .replace(/\/\$_\d+(?=\.|\/|$)/i, "/$_57");
+    ["width", "height", "w", "h"].forEach((name) => {
+      if (parsed.searchParams.has(name)) parsed.searchParams.set(name, "1600");
+    });
+    return parsed.toString();
+  } catch (_) {
+    return raw
+      .replace(/\/s-l\d+(?=\.|\/|$|\?)/i, "/s-l1600")
+      .replace(/\/\$_\d+(?=\.|\/|$|\?)/i, "/$_57");
+  }
+}
+
 function getReturnComplaintImageRecordsFromPayload(metadata = {}) {
   const detail = metadata.returnDetails || {};
   return [
@@ -2567,7 +2659,7 @@ async function hydrateReturnComplaintImageUrls(tasks = []) {
     const records = getReturnComplaintImageRecordsFromPayload(getReturnTaskPayload(task));
     const urls = await Promise.all(records.map(async (record) => {
       if (record.url && !String(record.url).startsWith("blob:")) {
-        return record.url;
+        return getHighQualityReturnImageUrl(record.url);
       }
       const bucket = record.bucket || record.storage_bucket;
       const path = record.path || record.storage_path;
@@ -2976,17 +3068,27 @@ function renderReturnComplaintDetails(task = {}) {
       <div class="return-complaint-grid">
         ${detail.requestAmount ? `<span><small>Request amount</small><b>${escapeHtml(detail.requestAmount)}</b></span>` : ""}
         ${detail.onHoldAmount ? `<span><small>On hold</small><b>${escapeHtml(detail.onHoldAmount)}</b></span>` : ""}
-        ${detail.trackingNumber ? `<span><small>Return tracking</small><b>${escapeHtml(detail.trackingNumber)}</b></span>` : ""}
+        ${detail.trackingNumber ? `<span><small>Return tracking</small><b>${copyableTextMarkup(detail.trackingNumber, "return tracking", "history-inline-copy")}</b></span>` : ""}
         ${detail.datePurchased ? `<span><small>Date purchased</small><b>${escapeHtml(detail.datePurchased)}</b></span>` : ""}
         ${photoCount ? `<span><small>Buyer photos</small><b>${escapeHtml(`${photoCount} captured reference${photoCount === 1 ? "" : "s"}`)}</b></span>` : ""}
       </div>
       ${detail.imageUrls.length ? `
         <div class="return-complaint-images">
-          ${detail.imageUrls.slice(0, 8).map((url) => `
-            <a href="${escapeHtml(url)}" target="_blank" rel="noopener">
-              <img src="${escapeHtml(url)}" alt="eBay return complaint image" loading="lazy" />
-            </a>
-          `).join("")}
+          ${detail.imageUrls.slice(0, 8).map((url, index) => {
+            const fullUrl = getHighQualityReturnImageUrl(url);
+            return `
+              <button
+                type="button"
+                data-return-complaint-photo="${escapeHtml(fullUrl)}"
+                data-return-complaint-photo-label="${escapeHtml(`Buyer return photo ${index + 1}`)}"
+                data-return-complaint-photo-meta="${escapeHtml(returnCase.ebay_return_id || returnCase.order_number || "eBay return complaint")}"
+                title="Open buyer return photo"
+              >
+                <img src="${escapeHtml(fullUrl)}" alt="eBay return complaint image ${index + 1}" loading="lazy" decoding="async" />
+                <span>Photo ${escapeHtml(String(index + 1))}</span>
+              </button>
+            `;
+          }).join("")}
         </div>
       ` : ""}
       ${!detail.imageUrls.length && (detail.returnFileIds.length || detail.blobUrls.length) ? `
@@ -3045,15 +3147,16 @@ function renderReturnQueue() {
               <span>Assigned: ${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
             </div>
             <div class="return-task-meta">
-              <span>Return ${escapeHtml(returnCase.ebay_return_id || returnCase.id || "-")}</span>
-              <span>Order ${escapeHtml(orderLabel)}</span>
+              <span>Return ${copyableTextMarkup(returnCase.ebay_return_id || returnCase.id || "-", "return id", "history-inline-copy")}</span>
+              <span>Order ${copyableTextMarkup(orderLabel, "order number", "history-inline-copy")}</span>
               <span>${returnCase.buyer_username ? `
+                ${copyableTextMarkup(returnCase.buyer_username, "buyer id", "history-inline-copy")}
                 <button
                   type="button"
                   class="buyer-insight-link compact"
                   data-buyer-insights="${escapeHtml(returnCase.buyer_username)}"
                   data-buyer-context="returns"
-                >${escapeHtml(returnCase.buyer_username)}</button>
+                >History</button>
               ` : "No buyer"}</span>
             </div>
             <div class="return-task-facts">
@@ -3282,6 +3385,15 @@ async function updateReturnTaskProgress(taskId) {
 function bindReturnQueueActions() {
   document.querySelectorAll("[data-return-external-link]").forEach((link) => {
     link.addEventListener("click", () => rememberReturnExternalNavigation(link));
+  });
+  document.querySelectorAll("[data-return-complaint-photo]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openEvidencePhotoViewer(
+        button.dataset.returnComplaintPhoto,
+        button.dataset.returnComplaintPhotoLabel || "Buyer return photo",
+        button.dataset.returnComplaintPhotoMeta || ""
+      );
+    });
   });
   document.querySelectorAll("[data-return-task-open]").forEach((button) => {
     button.addEventListener("click", () => openReturnTaskIntake(button.dataset.returnTaskOpen));
@@ -4017,6 +4129,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
         <div>
           <span class="eyebrow">${group.kind === "event" ? "Grouped Completion" : "Buyer Group"}</span>
           <h3>
+            ${copyableTextMarkup(group.buyer, "buyer id", "history-buyer-copy")}
             <button
               type="button"
               class="buyer-insight-link history-buyer-insight-link"
@@ -4027,10 +4140,11 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
               data-current-line-count="${escapeHtml(group.lines.length)}"
               data-current-order-numbers="${escapeHtml(groupOrders.map((order) => order.order_number).filter(Boolean).join(","))}"
               data-current-items="${buyerInsightCurrentItemsAttribute(group.lines)}"
-            >${escapeHtml(group.buyer)}</button>
+            >History</button>
           </h3>
           <div class="history-card-meta">
             <span>${group.lines.length} line(s)</span>
+            ${groupOrders.map((order) => copyableTextMarkup(order.order_number, "order number", "history-inline-copy")).join("")}
             <span>${escapeHtml(getHistoryGroupTimelineText(group))}</span>
             <span class="history-status ${statusClass}">${escapeHtml(primaryStatus)}</span>
           </div>
@@ -4068,10 +4182,13 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
           <div class="history-line-row">
             <div>
               <div class="history-line-title-row">
-                <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+                ${copyableTextMarkup(line.item_title || "Untitled eBay item", "item name", "history-line-title-copy")}
                 <b>${escapeHtml(formatMoney(getLineGross(line)))}</b>
               </div>
-              <small>${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.fulfilled_quantity || line.quantity || 1).toLocaleString()} - ${escapeHtml(getDisplayHistoryNote(line.notes) || "No notes")}</small>
+              <small>
+                ${copyableTextMarkup(line.item_number || "No item #", "item number", "history-inline-copy")}
+                <span>Qty ${Number(line.fulfilled_quantity || line.quantity || 1).toLocaleString()} - ${escapeHtml(getDisplayHistoryNote(line.notes) || "No notes")}</span>
+              </small>
               <div class="history-worker-row">
                 <span>${escapeHtml(getLineStatusLabel(line))}</span>
                 <span>${escapeHtml(isEbayApiHistoryLine(line) ? getEbayHistoryApiSourceLabel(line) : line.fulfilled_by_email || "Unknown worker")}</span>
@@ -6350,15 +6467,32 @@ function maybeRestoreReturnQueueAfterExternalNavigation() {
   }
 }
 
-function applyHistoryBuyerLaunchSearch() {
+function getHistoryLaunchSearchValue(params) {
+  const directValue = [
+    params.get("search"),
+    params.get("orderNumber"),
+    params.get("order"),
+    params.get("itemNumber"),
+    params.get("buyerUsername"),
+    params.get("buyer"),
+  ].map((value) => String(value || "").trim()).find(Boolean);
+  if (directValue) return directValue;
+  const orderIds = String(params.get("orderIds") || "").split(",").map((value) => value.trim()).filter(Boolean);
+  return orderIds[0] || "";
+}
+
+function applyHistoryLaunchSearch() {
   const params = new URLSearchParams(window.location.search);
-  const buyer = String(params.get("buyer") || "").trim();
-  if (!buyer || state.historyBuyerSearchApplied) return;
+  const launchValue = getHistoryLaunchSearchValue(params);
+  if (!launchValue || state.historyLaunchSearchApplied) return;
   const search = $("history-search");
   if (!search) return;
-  search.value = buyer;
+  search.value = launchValue;
+  search.defaultValue = launchValue;
+  const allDates = ["1", "true", "yes"].includes(String(params.get("allDates") || "").toLowerCase());
+  if (allDates && $("history-buyer-all-dates")) $("history-buyer-all-dates").checked = true;
   state.historySearchUserEdited = true;
-  state.historyBuyerSearchApplied = true;
+  state.historyLaunchSearchApplied = true;
 }
 
 async function getHistoryLabelSignedUrl(order) {
@@ -8433,6 +8567,12 @@ function setupListeners() {
   window.addEventListener("pageshow", () => {
     if (isReturnsWorkbenchPage()) maybeRestoreReturnQueueAfterExternalNavigation();
   });
+  document.addEventListener("click", handleCopyTextClick);
+  document.addEventListener("keydown", (event) => {
+    const copyTarget = event.target.closest("[data-copy-text]");
+    if (!copyTarget || (event.key !== "Enter" && event.key !== " ")) return;
+    handleCopyTextClick(event);
+  });
 
   $("close-revert-modal")?.addEventListener("click", closeRevertModal);
   $("cancel-revert")?.addEventListener("click", closeRevertModal);
@@ -8494,6 +8634,8 @@ function setupListeners() {
     }
   });
   document.addEventListener("keydown", (event) => {
+    if (isTextEditingShortcut(event)) return;
+
     if (isModalOpen("evidence-photo-viewer-modal")) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -8559,6 +8701,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (!ok) return;
   setupDashboardShell();
   setupDefaultDates();
+  applyHistoryLaunchSearch();
   setupHistoryLabelReceiver();
   setupListeners();
   if (isReturnsWorkbenchPage()) {

@@ -36,52 +36,67 @@
   ];
 
   const EBAY_TOPIC_TAGS = [
-    "return",
-    "cancellation",
-    "shipping_issue",
+    "return_request",
+    "cancellation_request",
+    "shipping_status_tracking",
+    "shipping_problem",
     "payment_issue",
     "item_question",
+    "condition_authenticity_question",
     "missing_item",
-    "wrong_item",
+    "wrong_item_received",
     "not_as_described",
+    "damage_claim",
     "refund_request",
     "buyer_complaint",
+    "feedback_issue",
     "custom_order_question",
     "general_question",
     "platform_notice",
-    "feedback_issue",
-    "offer_question",
-    "order_status",
-    "delivery_timing",
-    "address_change",
   ];
   const EBAY_PRIORITIES = ["high", "normal", "low"];
-  const EBAY_RESPONSE_NEEDS = ["reply_today", "reply_later", "no_reply_needed"];
+  const EBAY_RESPONSE_NEEDS = [
+    "needs_reply",
+    "reply_today",
+    "needs_refund_decision",
+    "needs_return_approval",
+    "needs_shipping_follow_up",
+    "needs_inventory_check",
+    "needs_photos_evidence",
+    "send_template_reply",
+    "escalate_to_manager",
+    "waiting_on_buyer",
+    "waiting_on_carrier",
+    "waiting_on_ebay",
+    "resolved_closed",
+  ];
   const EBAY_CONVERSATION_SOURCE_TYPES = ["member_message", "platform_notification"];
   const EBAY_BUYER_FLAGS = [
     "vip_buyer",
-    "high_value_buyer",
+    "high_order_value",
     "repeat_buyer",
     "new_buyer",
-    "high_retained_value_buyer",
     "return_prone_buyer",
-    "high_return_risk_buyer",
     "low_risk_buyer",
   ];
   const EBAY_RISK_FLAGS = [
-    "refund_risk",
-    "chargeback_risk",
     "negative_feedback_risk",
-    "return_escalation_risk",
-    "cancellation_risk",
-    "buyer_unhappy",
+    "case_dispute_risk",
+    "fraud_abuse_risk",
+    "high_dollar_risk",
+    "deadline_sensitive",
+    "angry_buyer",
+    "manager_review",
+    "high_return_risk",
     "context_review_needed",
     "low_confidence",
-    "unsupported_claim_risk",
+    "stale_context",
   ];
   const EBAY_REVIEW_STATES = ["pending_review", "approved", "corrected", "dismissed"];
+  const EMAIL_TRIAGE_TAXONOMY_VERSION = "taxonomy-20260625";
 
   window.EmailTriageClassifications = {
+    EMAIL_TRIAGE_TAXONOMY_VERSION,
     CLASSIFICATION_CATEGORIES,
     REVIEW_STATES,
     OVERRIDE_PRIORITIES,

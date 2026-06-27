@@ -23,6 +23,7 @@
     ebayMessageBackfill: 300000,
     ebayConversationClassify: 90000,
     ebayConversationDraft: 60000,
+    ebayMessageTranslate: 45000,
   };
 
   function waitForSupabaseReady(timeoutMs = 8000) {
@@ -779,9 +780,9 @@
     const awaitingApproval = currentDrafts.filter((draft) => latestApproval.get(String(draft.id || ""))?.approval_status !== "approved");
     const todayDrafts = drafts.filter((draft) => String(draft.created_at || "") >= todayIso);
     const succeededAttempts = attempts.filter((attempt) => attempt.attempt_status === "succeeded");
-    const topicIncludes = (row, value) => Array.isArray(row.topic_tags) && row.topic_tags.includes(value);
-    const buyerIncludes = (row, value) => Array.isArray(row.buyer_flags) && row.buyer_flags.includes(value);
-    const riskIncludes = (row, value) => Array.isArray(row.risk_flags) && row.risk_flags.includes(value);
+    const topicIncludes = (row, value) => ebayApiHasAnyCanonical(row.topic_tags, [value], "topics");
+    const buyerIncludes = (row, value) => ebayApiHasAnyCanonical(row.buyer_flags, [value], "buyerFlags");
+    const riskIncludes = (row, value) => ebayApiHasAnyCanonical(row.risk_flags, [value], "riskFlags");
 
     return {
       ok: true,
@@ -801,10 +802,10 @@
           failedProviderReadSync,
         ].every((value) => value !== null && value !== undefined),
         unclassified_conversations: Math.max(Number(canonicalConversations || 0) - Number(currentClassifications || 0), 0),
-        needs_reply: classifications.filter((row) => ["reply_today", "reply_later"].includes(row.response_need)).length,
+        needs_reply: classifications.filter((row) => ["reply_today", "needs_reply", "reply_later"].includes(row.response_need)).length,
         high_priority: classifications.filter((row) => row.priority === "high").length,
-        returns: classifications.filter((row) => topicIncludes(row, "return")).length,
-        refund_risk: classifications.filter((row) => riskIncludes(row, "refund_risk")).length,
+        returns: classifications.filter((row) => topicIncludes(row, "return_request")).length,
+        refund_risk: classifications.filter((row) => riskIncludes(row, "high_return_risk")).length,
         vip_buyers: classifications.filter((row) => buyerIncludes(row, "vip_buyer")).length,
         drafts_generated: todayDrafts.length,
         drafts_awaiting_approval: awaitingApproval.length,
@@ -1220,6 +1221,46 @@
     return selected.some((value) => set.has(value));
   }
 
+  const EBAY_API_LABEL_ALIASES = Object.freeze({
+    topics: {
+      return: "return_request",
+      cancellation: "cancellation_request",
+      shipping_issue: "shipping_problem",
+      order_status: "shipping_status_tracking",
+      delivery_timing: "shipping_status_tracking",
+      wrong_item: "wrong_item_received",
+      offer_question: "custom_order_question",
+      address_change: "shipping_problem",
+    },
+    buyerFlags: {
+      high_value_buyer: "high_order_value",
+      high_retained_value_buyer: "vip_buyer",
+    },
+    riskFlags: {
+      refund_risk: "high_return_risk",
+      chargeback_risk: "case_dispute_risk",
+      return_escalation_risk: "high_return_risk",
+      cancellation_risk: "case_dispute_risk",
+      buyer_unhappy: "angry_buyer",
+      unsupported_claim_risk: "case_dispute_risk",
+      high_return_risk_buyer: "high_return_risk",
+    },
+    responseNeeds: {
+      reply_later: "needs_reply",
+      no_reply_needed: "resolved_closed",
+    },
+  });
+
+  function ebayApiCanonicalLabel(groupKey, value) {
+    const clean = compactEbayText(value).toLowerCase();
+    return EBAY_API_LABEL_ALIASES[groupKey]?.[clean] || clean;
+  }
+
+  function ebayApiHasAnyCanonical(values = [], selected = [], groupKey = "") {
+    const set = new Set(ebayMailboxArray(values).map((value) => ebayApiCanonicalLabel(groupKey, value)).filter(Boolean));
+    return ebayMailboxArray(selected).some((value) => set.has(ebayApiCanonicalLabel(groupKey, value)));
+  }
+
   function ebayConversationLatestActivityMs(conversation = {}) {
     const timestamps = [
       conversation.latest_message_created_at,
@@ -1253,13 +1294,13 @@
       ebay_notifications: rows.filter((conversation) => ebayLegacyConversationSource(conversation) === "platform_notification").length,
       unread: rows.filter((conversation) => Number(conversation.unread_count || 0) > 0).length,
       unclassified: rows.filter((conversation) => !ebayLegacyClassification(conversation).id).length,
-      returns: rows.filter((conversation) => ebayLegacySummary(conversation).has_return_link === true || ebayLegacyHasAny(ebayLegacyClassification(conversation).topic_tags, ["return"])).length,
-      shipping: rows.filter((conversation) => ebayLegacyHasAny(ebayLegacyClassification(conversation).topic_tags, ["shipping_issue", "missing_item", "order_status", "delivery_timing"])).length,
-      shipping_issues: rows.filter((conversation) => ebayLegacyHasAny(ebayLegacyClassification(conversation).topic_tags, ["shipping_issue", "missing_item", "order_status", "delivery_timing"])).length,
+      returns: rows.filter((conversation) => ebayLegacySummary(conversation).has_return_link === true || ebayApiHasAnyCanonical(ebayLegacyClassification(conversation).topic_tags, ["return_request"], "topics")).length,
+      shipping: rows.filter((conversation) => ebayApiHasAnyCanonical(ebayLegacyClassification(conversation).topic_tags, ["shipping_problem", "shipping_status_tracking", "missing_item"], "topics")).length,
+      shipping_issues: rows.filter((conversation) => ebayApiHasAnyCanonical(ebayLegacyClassification(conversation).topic_tags, ["shipping_problem", "shipping_status_tracking", "missing_item"], "topics")).length,
       needs_reply_today: rows.filter((conversation) => ebayLegacyClassification(conversation).response_need === "reply_today").length,
       vip_buyers: rows.filter((conversation) => ebayLegacyHasAny(ebayLegacyClassification(conversation).buyer_flags, ["vip_buyer"])).length,
-      high_value_buyers: rows.filter((conversation) => ebayLegacyHasAny(ebayLegacyClassification(conversation).buyer_flags, ["high_value_buyer"])).length,
-      refund_risk: rows.filter((conversation) => ebayLegacyHasAny(ebayLegacyClassification(conversation).risk_flags, ["refund_risk"])).length,
+      high_value_buyers: rows.filter((conversation) => ebayApiHasAnyCanonical(ebayLegacyClassification(conversation).buyer_flags, ["high_order_value"], "buyerFlags")).length,
+      refund_risk: rows.filter((conversation) => ebayApiHasAnyCanonical(ebayLegacyClassification(conversation).risk_flags, ["high_return_risk"], "riskFlags")).length,
       review_queue: rows.filter((conversation) => {
         const summary = ebayLegacySummary(conversation);
         const classification = ebayLegacyClassification(conversation);
@@ -1308,15 +1349,16 @@
 
   function ebayApiEffectiveClassification(classification = {}) {
     const override = ebayApiOverridePayload(classification);
-    const effectiveArray = (key) => Array.isArray(override[key])
-      ? ebayMailboxArray(override[key]).map((value) => compactEbayText(value).toLowerCase()).filter(Boolean)
-      : ebayMailboxArray(classification[key]).map((value) => compactEbayText(value).toLowerCase()).filter(Boolean);
+    const effectiveArray = (key, groupKey) => Array.isArray(override[key])
+      ? ebayMailboxArray(override[key]).map((value) => ebayApiCanonicalLabel(groupKey, value)).filter(Boolean)
+      : ebayMailboxArray(classification[key]).map((value) => ebayApiCanonicalLabel(groupKey, value)).filter(Boolean);
+    const rawResponseNeed = compactEbayText(override.response_need || classification.response_need || "needs_reply").toLowerCase();
     return {
       priority: compactEbayText(override.priority || classification.priority || "normal").toLowerCase(),
-      response_need: compactEbayText(override.response_need || classification.response_need || "reply_later").toLowerCase(),
-      topic_tags: effectiveArray("topic_tags"),
-      buyer_flags: effectiveArray("buyer_flags"),
-      risk_flags: effectiveArray("risk_flags"),
+      response_need: ebayApiCanonicalLabel("responseNeeds", rawResponseNeed),
+      topic_tags: effectiveArray("topic_tags", "topics"),
+      buyer_flags: effectiveArray("buyer_flags", "buyerFlags"),
+      risk_flags: effectiveArray("risk_flags", "riskFlags"),
     };
   }
 
@@ -1394,12 +1436,12 @@
     if (filter === "ebay_notifications") return ebayLegacyConversationSource(conversation) === "platform_notification";
     if (filter === "unread") return Number(conversation.unread_count || 0) > 0;
     if (filter === "unclassified") return !ebayLegacyClassification(conversation).id;
-    if (filter === "returns") return summary.has_return_link === true || ebayApiIncludesAll(classification.topic_tags, ["return"]);
-    if (filter === "shipping" || filter === "shipping_issues") return ebayLegacyHasAny(classification.topic_tags, ["shipping_issue", "missing_item", "order_status", "delivery_timing"]);
+    if (filter === "returns") return summary.has_return_link === true || ebayApiIncludesAll(classification.topic_tags, ["return_request"]);
+    if (filter === "shipping" || filter === "shipping_issues") return ebayApiHasAnyCanonical(classification.topic_tags, ["shipping_problem", "shipping_status_tracking", "missing_item"], "topics");
     if (filter === "needs_reply_today") return classification.response_need === "reply_today";
     if (filter === "vip_buyers") return ebayApiIncludesAll(classification.buyer_flags, ["vip_buyer"]);
-    if (filter === "high_value_buyers") return ebayApiIncludesAll(classification.buyer_flags, ["high_value_buyer"]);
-    if (filter === "refund_risk") return ebayApiIncludesAll(classification.risk_flags, ["refund_risk"]);
+    if (filter === "high_value_buyers") return ebayApiIncludesAll(classification.buyer_flags, ["high_order_value"]);
+    if (filter === "refund_risk") return ebayApiIncludesAll(classification.risk_flags, ["high_return_risk"]);
     if (filter === "review_queue") return !ebayLegacyClassification(conversation).id
       || summary.needs_context_review === true
       || ebayLegacyHasAny(classification.risk_flags, ["context_review_needed", "low_confidence"]);
@@ -1424,17 +1466,17 @@
     if (!ebayApiConversationMatchesSystemFilter(conversation, values.systemFilter || values.system_filter || "all")) return false;
     if (!ebayApiIncludesAll(tags, ebayMailboxArray(structured.tags))) return false;
     if (!ebayApiIncludesAll([ebayLegacyConversationSource(conversation)], ebayMailboxArray(structured.sourceTypes))) return false;
-    if (!ebayApiIncludesAll(classification.topic_tags, ebayMailboxArray(structured.topics))) return false;
-    if (!ebayApiIncludesAll(classification.buyer_flags, ebayMailboxArray(structured.buyerFlags))) return false;
-    if (!ebayApiIncludesAll(classification.risk_flags, ebayMailboxArray(structured.riskFlags))) return false;
+    if (!ebayApiIncludesAll(classification.topic_tags, ebayMailboxArray(structured.topics).map((value) => ebayApiCanonicalLabel("topics", value)))) return false;
+    if (!ebayApiIncludesAll(classification.buyer_flags, ebayMailboxArray(structured.buyerFlags).map((value) => ebayApiCanonicalLabel("buyerFlags", value)))) return false;
+    if (!ebayApiIncludesAll(classification.risk_flags, ebayMailboxArray(structured.riskFlags).map((value) => ebayApiCanonicalLabel("riskFlags", value)))) return false;
     if (!ebayApiIncludesAll(tags, ebayMailboxArray(structured.priorities))) return false;
-    if (!ebayApiIncludesAll(tags, ebayMailboxArray(structured.responseNeeds))) return false;
+    if (!ebayApiIncludesAll(tags, ebayMailboxArray(structured.responseNeeds).map((value) => ebayApiCanonicalLabel("responseNeeds", value)))) return false;
     if (!ebayApiIncludesAll([ebayLegacyConversationSource(conversation)], ebayMailboxArray(classificationFilters.sourceTypes))) return false;
-    if (!ebayApiIncludesAll(classification.topic_tags, ebayMailboxArray(classificationFilters.topics))) return false;
-    if (!ebayApiIncludesAll(classification.buyer_flags, ebayMailboxArray(classificationFilters.buyerFlags))) return false;
-    if (!ebayApiIncludesAll(classification.risk_flags, ebayMailboxArray(classificationFilters.riskFlags))) return false;
+    if (!ebayApiIncludesAll(classification.topic_tags, ebayMailboxArray(classificationFilters.topics).map((value) => ebayApiCanonicalLabel("topics", value)))) return false;
+    if (!ebayApiIncludesAll(classification.buyer_flags, ebayMailboxArray(classificationFilters.buyerFlags).map((value) => ebayApiCanonicalLabel("buyerFlags", value)))) return false;
+    if (!ebayApiIncludesAll(classification.risk_flags, ebayMailboxArray(classificationFilters.riskFlags).map((value) => ebayApiCanonicalLabel("riskFlags", value)))) return false;
     if (!ebayApiIncludesAll(tags, ebayMailboxArray(classificationFilters.priorities))) return false;
-    if (!ebayApiIncludesAll(tags, ebayMailboxArray(classificationFilters.responseNeeds))) return false;
+    if (!ebayApiIncludesAll(tags, ebayMailboxArray(classificationFilters.responseNeeds).map((value) => ebayApiCanonicalLabel("responseNeeds", value)))) return false;
     if (searchTerms.length) {
       const blob = ebayApiConversationSearchBlob(conversation);
       if (!searchTerms.every((term) => blob.includes(term))) return false;
@@ -1722,7 +1764,7 @@
         .limit(2000),
       context.client
         .from("ebay_conversation_messages")
-        .select("conversation_id, ebay_message_id, sender_username, recipient_username, direction, subject, message_body, message_body_preview, has_media, media_count, created_at_ebay, created_at")
+        .select("conversation_id, ebay_message_id, sender_username, recipient_username, direction, subject, message_body, message_body_preview, has_media, media_count, raw_message_metadata, created_at_ebay, created_at")
         .in("conversation_id", ids)
         .order("created_at_ebay", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false })
@@ -1867,7 +1909,7 @@
         .limit(2000),
       context.client
         .from("ebay_conversation_messages")
-        .select("conversation_id, ebay_message_id, sender_username, recipient_username, direction, subject, message_body, message_body_preview, has_media, media_count, created_at_ebay, created_at")
+        .select("conversation_id, ebay_message_id, sender_username, recipient_username, direction, subject, message_body, message_body_preview, has_media, media_count, raw_message_metadata, created_at_ebay, created_at")
         .eq("conversation_id", conversation.id)
         .order("created_at_ebay", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false })
@@ -1919,7 +1961,7 @@
 
     const { data, error } = await context.client
       .from("ebay_conversation_messages")
-      .select("id, conversation_id, ebay_message_id, sender_username, recipient_username, direction, direction_confidence, subject, message_body, message_body_preview, read_status, is_read, message_status, created_at_ebay, has_media, media_count, message_media, created_at")
+      .select("id, conversation_id, ebay_message_id, sender_username, recipient_username, direction, direction_confidence, subject, message_body, message_body_preview, read_status, is_read, message_status, created_at_ebay, has_media, media_count, message_media, raw_message_metadata, created_at")
       .eq("conversation_id", conversationId)
       .order("created_at_ebay", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true })
@@ -2076,6 +2118,19 @@
         sendConfirmed: values.sendConfirmed === true || undefined,
       }),
     }, TIMEOUTS.ebayConversationDraft);
+  }
+
+  async function requestEbayMessageTranslation(context, values = {}) {
+    const session = await currentSession(context, "eBay message translation");
+    return edgeFetchWithTimeout(EBAY_CONVERSATION_DRAFT_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: "translate_message",
+        conversationId: values.conversationId || undefined,
+        targetMessageId: values.messageId || undefined,
+        text: typeof values.text === "string" ? values.text : "",
+      }),
+    }, TIMEOUTS.ebayMessageTranslate);
   }
 
   async function runEbayMessageSync(context, values = {}) {
@@ -2329,6 +2384,7 @@
     fetchEbayConversationContext,
     fetchEbayConversationDrafts,
     requestEbayConversationDraftAction,
+    requestEbayMessageTranslation,
     runEbayMessageSync,
     classifyEbayConversation,
     classifyRecentEbayConversations,

@@ -7,7 +7,7 @@ import {
 } from "../_shared/ebay-conversation-context.ts";
 
 type ServiceClient = ReturnType<typeof createClient>;
-type Mode = "view" | "generate" | "regenerate" | "improve" | "save_edit" | "discard" | "approve" | "unapprove" | "send";
+type Mode = "view" | "generate" | "regenerate" | "improve" | "save_edit" | "discard" | "approve" | "unapprove" | "send" | "translate_message";
 
 type Input = {
   mode: Mode;
@@ -22,6 +22,7 @@ type Input = {
   approvalNotes: string | null;
   manualComposer: boolean;
   sendConfirmed: boolean;
+  messageText: string | null;
 };
 
 type GroundingFact = {
@@ -192,7 +193,7 @@ function stringOrNull(value: unknown, maxLength = 240) {
 async function parseInput(req: Request): Promise<Input> {
   const body = await req.json().catch(() => ({}));
   const rawMode = stringOrNull(body?.mode, 80) || "view";
-  if (!["view", "generate", "regenerate", "improve", "save_edit", "discard", "approve", "unapprove", "send"].includes(rawMode)) {
+  if (!["view", "generate", "regenerate", "improve", "save_edit", "discard", "approve", "unapprove", "send", "translate_message"].includes(rawMode)) {
     throw new DraftError("invalid_mode", { status: 400, phase: "input" });
   }
   return {
@@ -210,6 +211,9 @@ async function parseInput(req: Request): Promise<Input> {
     approvalNotes: stringOrNull(body?.approvalNotes || body?.approval_notes || body?.operatorNotes || body?.operator_notes, 1000),
     manualComposer: body?.manualComposer === true || body?.manual_composer === true,
     sendConfirmed: body?.sendConfirmed === true || body?.send_confirmed === true,
+    messageText: typeof body?.text === "string" || typeof body?.messageText === "string" || typeof body?.message_text === "string"
+      ? safeBodyText(body?.text || body?.messageText || body?.message_text, MAX_OPERATOR_TEXT_CHARS)
+      : null,
   };
 }
 
@@ -420,6 +424,7 @@ function publicApprovalState(
 }
 
 function publicSendAttempt(row: Record<string, any>) {
+  const metadata = parseObject(row.metadata);
   return {
     id: row.id || null,
     conversation_id: row.conversation_id || null,
@@ -435,9 +440,10 @@ function publicSendAttempt(row: Record<string, any>) {
     duplicate_of_attempt_id: row.duplicate_of_attempt_id || null,
     error_message: row.error_message || null,
     provider_response: parseObject(row.provider_response),
-    metadata: parseObject(row.metadata),
+    metadata,
     sent_at: row.sent_at || null,
     created_by: row.created_by || null,
+    created_by_email: metadata.sent_by_email || metadata.operator_email || null,
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
   };
@@ -1060,6 +1066,20 @@ function jsonSchema() {
   };
 }
 
+function translationJsonSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["source_language", "already_spanish", "translated_text", "summary"],
+    properties: {
+      source_language: { type: "string", maxLength: 40 },
+      already_spanish: { type: "boolean" },
+      translated_text: { type: "string", maxLength: MAX_OPERATOR_TEXT_CHARS },
+      summary: { type: "string", maxLength: 160 },
+    },
+  };
+}
+
 function extractOutputText(payload: any): string {
   if (typeof payload?.output_text === "string") return payload.output_text;
   const chunks = payload?.output
@@ -1094,6 +1114,71 @@ async function callOpenAI(input: Record<string, unknown>, prompt: string, model:
             name: "ebay_conversation_response_draft",
             strict: true,
             schema: jsonSchema(),
+          },
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      throw new DraftError("openai_request_failed", {
+        phase: "openai",
+        transient: TRANSIENT_OPENAI_STATUSES.has(response.status),
+        details: { status: response.status },
+      });
+    }
+
+    const payload = await response.json().catch(() => null);
+    const outputText = extractOutputText(payload);
+    if (!outputText) throw new DraftError("openai_empty_output", { phase: "openai_parse" });
+    return JSON.parse(outputText);
+  } catch (error) {
+    if (error instanceof DraftError) throw error;
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new DraftError("openai_timeout", { phase: "openai", transient: true });
+    }
+    if (error instanceof SyntaxError) {
+      throw new DraftError("openai_invalid_json", { phase: "openai_parse" });
+    }
+    throw new DraftError("openai_network_failure", { phase: "openai", transient: true });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function callOpenAITranslation(messageText: string) {
+  const apiKey = requiredEnv("OPENAI_API_KEY");
+  const model = modelName();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
+  const prompt = [
+    "You translate eBay buyer/seller message text for an internal operations team.",
+    "If the source text is English, translate it into natural Spanish.",
+    "If the source text is already Spanish, return it unchanged and set already_spanish true.",
+    "If the source text is another language, translate it into Spanish and identify the source language.",
+    "Preserve names, order numbers, item numbers, tracking numbers, money amounts, dates, and URLs exactly.",
+    "Do not add advice, promises, facts, or commentary.",
+  ].join("\n");
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        input: [
+          { role: "system", content: [{ type: "input_text", text: prompt }] },
+          { role: "user", content: [{ type: "input_text", text: messageText }] },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "ebay_message_translation",
+            strict: true,
+            schema: translationJsonSchema(),
           },
         },
       }),
@@ -2344,7 +2429,7 @@ async function persistLocalOutboundMessage(
   const { data, error } = await supabase
     .from("ebay_conversation_messages")
     .upsert(row, { onConflict: "seller_account_id,conversation_type,ebay_conversation_id,ebay_message_id" })
-    .select("id, conversation_id, ebay_message_id, sender_username, recipient_username, direction, direction_confidence, subject, message_body, message_body_preview, read_status, is_read, message_status, created_at_ebay, has_media, media_count, message_media, created_at")
+    .select("id, conversation_id, ebay_message_id, sender_username, recipient_username, direction, direction_confidence, subject, message_body, message_body_preview, read_status, is_read, message_status, created_at_ebay, has_media, media_count, message_media, raw_message_metadata, created_at")
     .single();
 
   if (error || !data?.id) {
@@ -2576,6 +2661,8 @@ async function sendDraft(
         emailCopyToSender: false,
       },
       target_ebay_message_id: targetMessage.ebay_message_id || null,
+      sent_by: admin.userId || null,
+      sent_by_email: admin.email || null,
       operator_confirmed_send: true,
       approval_required: !manualSend,
       manual_send_bypass: manualSend,
@@ -2754,6 +2841,30 @@ async function sendDraft(
   };
 }
 
+async function translateMessage(input: Input, admin: { userId: string | null }) {
+  const messageText = safeBodyText(input.messageText || "", MAX_OPERATOR_TEXT_CHARS);
+  if (!messageText) throw new DraftError("message_text_required", { status: 400, phase: "input" });
+  const result = await callOpenAITranslation(messageText);
+  return {
+    ok: true,
+    mode: "translate_message",
+    generated_at: new Date().toISOString(),
+    data: {
+      conversation_id: input.conversationId,
+      message_id: input.targetMessageId,
+      source_language: String(result.source_language || "Unknown"),
+      already_spanish: result.already_spanish === true,
+      translated_text: String(result.translated_text || ""),
+      summary: String(result.summary || ""),
+    },
+    safety: {
+      translated_by_ai: true,
+      stored: false,
+      requested_by: admin.userId,
+    },
+  };
+}
+
 function safetyEnvelope(options: { sendsEnabled?: boolean; messagesSent?: number; ebayMutationsPerformed?: boolean } = {}) {
   return {
     sendsEnabled: options.sendsEnabled === true,
@@ -2803,6 +2914,7 @@ serve(async (req) => {
     if (input.mode === "approve") return json(req, 200, await approveDraft(supabase, input, admin));
     if (input.mode === "unapprove") return json(req, 200, await unapproveDraft(supabase, input, admin));
     if (input.mode === "send") return json(req, 200, await sendDraft(supabase, input, admin));
+    if (input.mode === "translate_message") return json(req, 200, await translateMessage(input, admin));
     if (["generate", "regenerate", "improve"].includes(input.mode)) {
       return json(req, 200, await generateDraft(supabase, rpcSupabase, input, admin));
     }

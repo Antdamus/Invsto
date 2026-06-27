@@ -33,59 +33,102 @@ type ConversationCandidate = {
 };
 
 const CLASSIFIER_NAME = "ebay_conversation_classifier";
-const CLASSIFIER_VERSION = "v1";
-const PROMPT_VERSION_DEFAULT = "ebay-conversation-classifier-v1";
+const CLASSIFIER_VERSION = "v2";
+const PROMPT_VERSION_DEFAULT = "ebay-conversation-classifier-v2";
 const OPENAI_TIMEOUT_MS = 45000;
 const RECLASSIFY_RECENT_LIMIT = 20;
 const RECLASSIFY_RECENT_RUNTIME_BUDGET_MS = 240000;
 const TRANSIENT_OPENAI_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
 const TOPIC_TAGS = [
-  "return",
-  "cancellation",
-  "shipping_issue",
+  "return_request",
+  "cancellation_request",
+  "shipping_status_tracking",
+  "shipping_problem",
   "payment_issue",
   "item_question",
+  "condition_authenticity_question",
   "missing_item",
-  "wrong_item",
+  "wrong_item_received",
   "not_as_described",
+  "damage_claim",
   "refund_request",
   "buyer_complaint",
+  "feedback_issue",
   "custom_order_question",
   "general_question",
   "platform_notice",
-  "feedback_issue",
-  "offer_question",
-  "order_status",
-  "delivery_timing",
-  "address_change",
 ] as const;
 
 const PRIORITIES = ["high", "normal", "low"] as const;
-const RESPONSE_NEEDS = ["reply_today", "reply_later", "no_reply_needed"] as const;
+const RESPONSE_NEEDS = [
+  "needs_reply",
+  "reply_today",
+  "needs_refund_decision",
+  "needs_return_approval",
+  "needs_shipping_follow_up",
+  "needs_inventory_check",
+  "needs_photos_evidence",
+  "send_template_reply",
+  "escalate_to_manager",
+  "waiting_on_buyer",
+  "waiting_on_carrier",
+  "waiting_on_ebay",
+  "resolved_closed",
+] as const;
 const CONVERSATION_SOURCES = ["member_message", "platform_notification"] as const;
 const BUYER_FLAGS = [
   "vip_buyer",
-  "high_value_buyer",
+  "high_order_value",
   "repeat_buyer",
   "new_buyer",
-  "high_retained_value_buyer",
   "return_prone_buyer",
-  "high_return_risk_buyer",
   "low_risk_buyer",
 ] as const;
 const RISK_FLAGS = [
-  "refund_risk",
-  "chargeback_risk",
   "negative_feedback_risk",
-  "return_escalation_risk",
-  "cancellation_risk",
-  "buyer_unhappy",
+  "case_dispute_risk",
+  "fraud_abuse_risk",
+  "high_dollar_risk",
+  "deadline_sensitive",
+  "angry_buyer",
+  "manager_review",
+  "high_return_risk",
   "context_review_needed",
   "low_confidence",
-  "unsupported_claim_risk",
+  "stale_context",
 ] as const;
 const REVIEW_STATES = ["pending_review", "approved", "corrected", "dismissed"] as const;
+
+const TOPIC_TAG_ALIASES: Record<string, string> = {
+  return: "return_request",
+  cancellation: "cancellation_request",
+  shipping_issue: "shipping_problem",
+  order_status: "shipping_status_tracking",
+  delivery_timing: "shipping_status_tracking",
+  wrong_item: "wrong_item_received",
+  item_details: "item_question",
+  listing_question: "item_question",
+  offer_question: "custom_order_question",
+  address_change: "shipping_problem",
+};
+const BUYER_FLAG_ALIASES: Record<string, string> = {
+  high_value_buyer: "high_order_value",
+  high_retained_value_buyer: "vip_buyer",
+};
+const RISK_FLAG_ALIASES: Record<string, string> = {
+  chargeback_risk: "case_dispute_risk",
+  return_escalation_risk: "high_return_risk",
+  cancellation_risk: "case_dispute_risk",
+  buyer_unhappy: "angry_buyer",
+  unsupported_claim_risk: "case_dispute_risk",
+  refund_risk: "high_return_risk",
+  high_return_risk_buyer: "high_return_risk",
+};
+const RESPONSE_NEED_ALIASES: Record<string, string> = {
+  reply_later: "needs_reply",
+  no_reply_needed: "resolved_closed",
+};
 
 class ClassifierError extends Error {
   code: string;
@@ -226,11 +269,12 @@ function clampLimit(value: unknown, fallback = 10, max = 25) {
   return Math.min(Math.max(Math.trunc(numeric), 1), max);
 }
 
-function uniqueAllowed(values: unknown, allowed: readonly string[], maxItems = 8) {
+function uniqueAllowed(values: unknown, allowed: readonly string[], maxItems = 8, aliases: Record<string, string> = {}) {
   const raw = Array.isArray(values) ? values : [];
   const set = new Set<string>();
   for (const item of raw) {
-    const value = text(item, 80);
+    const rawValue = text(item, 80);
+    const value = aliases[rawValue] || rawValue;
     if (allowed.includes(value)) set.add(value);
   }
   return [...set].slice(0, maxItems);
@@ -244,7 +288,7 @@ function normalizeTopicTag(value: unknown) {
     .slice(0, 48);
   if (tag.length < 2) return "";
   if (!/^[a-z0-9][a-z0-9_]*[a-z0-9]$/.test(tag)) return "";
-  return tag;
+  return TOPIC_TAG_ALIASES[tag] || tag;
 }
 
 function uniqueTopicTags(values: unknown, maxItems = 8, options: { allowCustom?: boolean } = {}) {
@@ -340,8 +384,39 @@ function buyerSignalMetrics(context: Record<string, any>) {
   };
 }
 
+function currentOrderValueMetrics(context: Record<string, any>) {
+  const candidates = [
+    ...(Array.isArray(context.matched_orders) ? context.matched_orders : []),
+    ...(Array.isArray(context.matched_order_lines) ? context.matched_order_lines : []),
+  ];
+  const valueKeys = new Set([
+    "total_price",
+    "order_total",
+    "line_total",
+    "sold_for",
+    "item_price",
+    "subtotal",
+    "net_payout",
+  ]);
+  let maxValue = 0;
+  for (const row of candidates) {
+    if (!row || typeof row !== "object") continue;
+    for (const [key, rawValue] of Object.entries(row)) {
+      const normalizedKey = key.toLowerCase();
+      if (!valueKeys.has(normalizedKey)) continue;
+      const numeric = numberOrNull(rawValue);
+      if (numeric !== null) maxValue = Math.max(maxValue, numeric);
+    }
+  }
+  return {
+    current_order_value: maxValue,
+    high_order_value: maxValue >= 500,
+  };
+}
+
 function deriveBuyerSignals(context: Record<string, any>) {
   const metrics = buyerSignalMetrics(context);
+  const orderValue = currentOrderValueMetrics(context);
   const hasBuyerHistory = Boolean(context.buyer_history_summary && typeof context.buyer_history_summary === "object");
   const buyerFlags = new Set<string>();
   const riskFlags = new Set<string>();
@@ -349,13 +424,11 @@ function deriveBuyerSignals(context: Record<string, any>) {
   if (hasBuyerHistory) {
     if (metrics.prior_order_count <= 1) buyerFlags.add("new_buyer");
     if (metrics.prior_order_count >= 2) buyerFlags.add("repeat_buyer");
-    if (metrics.gross_value >= 1000 || metrics.average_order_value >= 500) buyerFlags.add("high_value_buyer");
-    if (metrics.retained_value >= 1000) buyerFlags.add("high_retained_value_buyer");
     if (metrics.retained_value >= 2500 || (metrics.prior_order_count >= 5 && metrics.retained_value >= 1000)) buyerFlags.add("vip_buyer");
     if (metrics.return_count >= 2 || (metrics.return_rate !== null && metrics.return_rate >= 0.35)) buyerFlags.add("return_prone_buyer");
-    if (metrics.open_return_count > 0 || (metrics.return_rate !== null && metrics.return_rate >= 0.5)) buyerFlags.add("high_return_risk_buyer");
     if (metrics.prior_order_count >= 2 && metrics.return_count === 0 && metrics.cancellation_count === 0) buyerFlags.add("low_risk_buyer");
   }
+  if (orderValue.high_order_value) buyerFlags.add("high_order_value");
 
   const linkConfidence = parseObject(context.link_confidence);
   const warnings = Array.isArray(context.warnings) ? context.warnings : [];
@@ -367,7 +440,7 @@ function deriveBuyerSignals(context: Record<string, any>) {
   return {
     buyer_flags: [...buyerFlags].filter((flag) => BUYER_FLAGS.includes(flag as typeof BUYER_FLAGS[number])),
     risk_flags: [...riskFlags].filter((flag) => RISK_FLAGS.includes(flag as typeof RISK_FLAGS[number])),
-    metrics: { ...metrics, buyer_history_available: hasBuyerHistory },
+    metrics: { ...metrics, ...orderValue, buyer_history_available: hasBuyerHistory },
   };
 }
 
@@ -455,10 +528,15 @@ Allowed risk_flags: ${RISK_FLAGS.join(", ")}.
 
 Use the clean eBay timeline, latest inbound buyer message, linked buyer/order/return/listing context, and buyer financial context.
 Keep the taxonomy simple. Multiple topic tags are allowed when genuinely useful.
+Treat topic_tags, buyer_flags, risk_flags, and response_need as separate operational dimensions. They are not mutually exclusive.
 Use priority "high" only when the operator should see the conversation as important: return/refund dispute, angry buyer, missing/wrong/not-as-described item, chargeback/payment dispute, negative feedback risk, urgent delivery/address issue, or high business exposure.
-Use response_need "reply_today" when a buyer-facing reply should happen today. Use "reply_later" for routine non-urgent buyer questions. Use "no_reply_needed" for platform notices, seller/outbound-only threads, or informational conversations.
-Use buyer_flags only when supported by supplied financial/history metadata. Favor conservative labels; do not label a buyer risky without return/cancellation/open-return evidence.
-Use risk_flags conservatively. "chargeback_risk" requires explicit dispute/chargeback/bank/card threat language. "unsupported_claim_risk" means the claim needs evidence review, not that the buyer is fraudulent.
+Use "shipping_status_tracking" for routine where-is-it/when-will-it-arrive/tracking questions. Use "shipping_problem" only when something is wrong: late, lost, wrong address, carrier exception, or delivered-but-not-received.
+Use "general_question" only when no more specific topic applies.
+Use response_need as the next action. "reply_today" means Needs Reply Today; "needs_reply" means a routine reply is needed; "resolved_closed" means no further action is needed.
+Use "needs_photos_evidence" for damage, not-as-described, missing item, wrong item, authenticity, or any claim needing documentation.
+Use buyer_flags only when supported by supplied buyer/order metadata. "vip_buyer" is historical value, trusted repeat behavior, or manual VIP status. "high_order_value" is the current linked order value only, not lifetime value. "return_prone_buyer" is historical return/refund behavior.
+Use risk_flags conservatively. "high_return_risk" is for this specific message/order likely becoming a return; it is not a buyer-history flag. "high_dollar_risk" requires meaningful current-order exposure plus an issue, return/refund, dispute, fraud, or escalation concern.
+Use "manager_review" for high-dollar issues, angry or escalating buyers, fraud/abuse concern, case/dispute risk, VIP buyer issues, or ambiguous cases needing human judgment.
 Do not say a refund is approved, an item shipped, a return accepted, or inventory is available unless supplied context directly supports it.
 summary and reasoning_summary must be short operator-facing text. reasoning_summary is a concise reason, not hidden reasoning.
 
@@ -581,10 +659,46 @@ async function callOpenAI(input: Record<string, unknown>, prompt: string, model:
 function keywordRiskFlags(input: Record<string, any>) {
   const haystack = stableStringify(input).toLowerCase();
   const flags = new Set<string>();
-  if (/\b(chargeback|charge back|bank dispute|card dispute|payment dispute)\b/.test(haystack)) flags.add("chargeback_risk");
+  if (/\b(chargeback|charge back|bank dispute|card dispute|payment dispute|open a case|opened a case|ebay case|dispute)\b/.test(haystack)) flags.add("case_dispute_risk");
   if (/\b(negative feedback|bad feedback|leave feedback|review)\b/.test(haystack)) flags.add("negative_feedback_risk");
-  if (/\b(angry|upset|unacceptable|terrible|scam|fraud|complaint)\b/.test(haystack)) flags.add("buyer_unhappy");
+  if (/\b(angry|upset|unacceptable|terrible|complaint|ridiculous|furious)\b/.test(haystack)) flags.add("angry_buyer");
+  if (/\b(scam|fraud|fake claim|abuse|extortion|threaten)\b/.test(haystack)) flags.add("fraud_abuse_risk");
+  if (/\b(deadline|today|urgent|asap|by tomorrow|before the weekend)\b/.test(haystack)) flags.add("deadline_sensitive");
   return [...flags];
+}
+
+function keywordTopicTags(input: Record<string, any>) {
+  const haystack = stableStringify(input).toLowerCase();
+  const tags = new Set<string>();
+  if (/\b(return|send it back|returned item)\b/.test(haystack)) tags.add("return_request");
+  if (/\b(cancel|cancellation)\b/.test(haystack)) tags.add("cancellation_request");
+  if (/\b(where is|where's|tracking|track(ing)? number|when will it arrive|delivery status|shipping status)\b/.test(haystack)) tags.add("shipping_status_tracking");
+  if (/\b(delivered but|marked delivered|never arrived|not received|lost package|late delivery|delivery exception|wrong address|carrier problem)\b/.test(haystack)) tags.add("shipping_problem");
+  if (/\b(payment|paid|paying|card|paypal|chargeback|payment dispute)\b/.test(haystack)) tags.add("payment_issue");
+  if (/\b(fake|authentic|authenticity|condition|real|genuine)\b/.test(haystack)) tags.add("condition_authenticity_question");
+  if (/\b(missing item|missing from|not in the box|empty box)\b/.test(haystack)) tags.add("missing_item");
+  if (/\b(wrong item|different item|not what i ordered)\b/.test(haystack)) tags.add("wrong_item_received");
+  if (/\b(not as described|doesn't match|does not match|description was wrong)\b/.test(haystack)) tags.add("not_as_described");
+  if (/\b(damaged|broken|cracked|arrived damaged|shattered)\b/.test(haystack)) tags.add("damage_claim");
+  if (/\b(refund|money back|reimburse|credit)\b/.test(haystack)) tags.add("refund_request");
+  if (/\b(complaint|unhappy|upset|unacceptable|terrible)\b/.test(haystack)) tags.add("buyer_complaint");
+  if (/\b(feedback|review|rating)\b/.test(haystack)) tags.add("feedback_issue");
+  if (/\b(custom order|customize|personalized|special order)\b/.test(haystack)) tags.add("custom_order_question");
+  if (/\b(question|can you tell me|do you know|item detail|measurements?|size|color)\b/.test(haystack)) tags.add("item_question");
+  return [...tags].filter((tag) => TOPIC_TAGS.includes(tag as typeof TOPIC_TAGS[number]));
+}
+
+function keywordResponseNeeds(topics: string[], riskFlags: Set<string>) {
+  const needs = new Set<string>();
+  if (topics.includes("damage_claim") || topics.includes("not_as_described") || topics.includes("missing_item") || topics.includes("wrong_item_received") || topics.includes("condition_authenticity_question")) {
+    needs.add("needs_photos_evidence");
+  }
+  if (topics.includes("return_request")) needs.add("needs_return_approval");
+  if (topics.includes("refund_request")) needs.add("needs_refund_decision");
+  if (topics.includes("shipping_problem") || topics.includes("shipping_status_tracking")) needs.add("needs_shipping_follow_up");
+  if (topics.includes("item_question") || topics.includes("condition_authenticity_question")) needs.add("needs_inventory_check");
+  if (riskFlags.has("manager_review")) needs.add("escalate_to_manager");
+  return [...needs].filter((need) => RESPONSE_NEEDS.includes(need as typeof RESPONSE_NEEDS[number]));
 }
 
 function deriveConversationSource(input: Record<string, any>) {
@@ -598,38 +712,67 @@ function normalizeClassificationOutput(raw: unknown, input: Record<string, any>)
   }
   const row = raw as Record<string, unknown>;
   const derived = input.buyer_financial_context?.derived_buyer_signals || {};
-  const topicTags = uniqueTopicTags(row.topic_tags, 6);
+  const topicTags = uniqueTopicTags(row.topic_tags, 8);
   const buyerFlags = new Set([
-    ...uniqueAllowed(row.buyer_flags, BUYER_FLAGS, BUYER_FLAGS.length),
-    ...uniqueAllowed(derived.buyer_flags || [], BUYER_FLAGS, BUYER_FLAGS.length),
+    ...uniqueAllowed(row.buyer_flags, BUYER_FLAGS, BUYER_FLAGS.length, BUYER_FLAG_ALIASES),
+    ...uniqueAllowed(derived.buyer_flags || [], BUYER_FLAGS, BUYER_FLAGS.length, BUYER_FLAG_ALIASES),
   ]);
   const riskFlags = new Set([
-    ...uniqueAllowed(row.risk_flags, RISK_FLAGS, RISK_FLAGS.length),
-    ...uniqueAllowed(derived.risk_flags || [], RISK_FLAGS, RISK_FLAGS.length),
+    ...uniqueAllowed(row.risk_flags, RISK_FLAGS, RISK_FLAGS.length, RISK_FLAG_ALIASES),
+    ...uniqueAllowed(derived.risk_flags || [], RISK_FLAGS, RISK_FLAGS.length, RISK_FLAG_ALIASES),
     ...keywordRiskFlags(input),
   ]);
-  const topics = topicTags.length ? topicTags : [String(input.conversation?.conversation_type || "") === "FROM_EBAY" ? "platform_notice" : "general_question"];
+  const keywordTopics = keywordTopicTags(input);
+  const topics = [...new Set([...topicTags, ...keywordTopics])].filter((tag) => tag !== "general_question");
+  if (!topics.length) topics.push(String(input.conversation?.conversation_type || "") === "FROM_EBAY" ? "platform_notice" : "general_question");
 
-  if (topics.some((tag) => ["return", "refund_request", "not_as_described", "missing_item", "wrong_item"].includes(tag))) riskFlags.add("refund_risk");
-  if (topics.includes("cancellation")) riskFlags.add("cancellation_risk");
-  if (topics.includes("buyer_complaint")) riskFlags.add("buyer_unhappy");
+  if (topics.some((tag) => ["return_request", "refund_request", "not_as_described", "missing_item", "wrong_item_received", "damage_claim"].includes(tag))) riskFlags.add("high_return_risk");
+  if (topics.some((tag) => ["condition_authenticity_question", "not_as_described"].includes(tag))) riskFlags.add("case_dispute_risk");
+  if (topics.includes("buyer_complaint")) riskFlags.add("angry_buyer");
+  const issueTopics = new Set([
+    "return_request",
+    "refund_request",
+    "shipping_problem",
+    "missing_item",
+    "wrong_item_received",
+    "not_as_described",
+    "damage_claim",
+    "buyer_complaint",
+    "feedback_issue",
+  ]);
+  if (buyerFlags.has("high_order_value") && (topics.some((tag) => issueTopics.has(tag)) || riskFlags.has("case_dispute_risk") || riskFlags.has("fraud_abuse_risk"))) {
+    riskFlags.add("high_dollar_risk");
+  }
+  if (
+    riskFlags.has("high_dollar_risk") ||
+    riskFlags.has("angry_buyer") ||
+    riskFlags.has("fraud_abuse_risk") ||
+    riskFlags.has("case_dispute_risk") ||
+    (buyerFlags.has("vip_buyer") && topics.some((tag) => issueTopics.has(tag)))
+  ) {
+    riskFlags.add("manager_review");
+  }
 
   const confidence = Math.min(Math.max(Number(row.confidence), 0), 1);
   if (!Number.isFinite(confidence)) throw new ClassifierError("invalid_model_confidence", { status: 502, phase: "output_validation" });
   if (confidence < 0.7) riskFlags.add("low_confidence");
 
   let priority = String(row.priority || "normal");
-  let responseNeed = String(row.response_need || "reply_later");
+  let responseNeed = String(row.response_need || "needs_reply");
+  responseNeed = RESPONSE_NEED_ALIASES[responseNeed] || responseNeed;
   if (!PRIORITIES.includes(priority as typeof PRIORITIES[number])) priority = "normal";
-  if (!RESPONSE_NEEDS.includes(responseNeed as typeof RESPONSE_NEEDS[number])) responseNeed = "reply_later";
-  if (riskFlags.has("chargeback_risk")) {
+  if (!RESPONSE_NEEDS.includes(responseNeed as typeof RESPONSE_NEEDS[number])) responseNeed = "needs_reply";
+  const keywordNeeds = keywordResponseNeeds(topics, riskFlags);
+  if (keywordNeeds.length && (responseNeed === "resolved_closed" || responseNeed === "needs_reply")) responseNeed = keywordNeeds[0];
+  if (riskFlags.has("case_dispute_risk") || riskFlags.has("fraud_abuse_risk") || riskFlags.has("angry_buyer") || riskFlags.has("manager_review")) {
     priority = "high";
     responseNeed = "reply_today";
   }
-  if (priority === "low" && riskFlags.has("refund_risk")) priority = "normal";
-  if (responseNeed === "no_reply_needed" && topics.some((tag) => ["return", "refund_request", "buyer_complaint", "payment_issue"].includes(tag))) {
+  if (priority === "low" && riskFlags.has("high_return_risk")) priority = "normal";
+  if (responseNeed === "resolved_closed" && topics.some((tag) => ["return_request", "refund_request", "buyer_complaint", "payment_issue"].includes(tag))) {
     responseNeed = "reply_today";
   }
+  if (responseNeed === "reply_today" && keywordNeeds.includes("needs_photos_evidence")) riskFlags.add("manager_review");
 
   return {
     conversation_source: deriveConversationSource(input),
@@ -642,7 +785,7 @@ function normalizeClassificationOutput(raw: unknown, input: Record<string, any>)
     summary: text(row.summary, 280) || "Conversation needs operator review.",
     reasoning_summary: text(row.reasoning_summary, 280) || "Classified from the eBay conversation and linked context.",
     recommended_action: text(row.recommended_action, 180) || (
-      responseNeed === "reply_today" ? "Review and answer today." : responseNeed === "reply_later" ? "Review when queue allows." : "No reply needed unless new buyer activity appears."
+      responseNeed === "reply_today" ? "Review and answer today." : responseNeed === "resolved_closed" ? "No reply needed unless new buyer activity appears." : "Review when queue allows."
     ),
   };
 }
@@ -651,15 +794,17 @@ function effectiveState(row: Record<string, any>) {
   const override = parseObject(row.operator_override_payload);
   const source = String(override.conversation_source || row.conversation_source || "member_message");
   const hasOverrideTopics = Array.isArray(override.topic_tags);
+  const rawResponseNeed = String(override.response_need || row.response_need || "needs_reply");
+  const responseNeed = RESPONSE_NEED_ALIASES[rawResponseNeed] || rawResponseNeed;
   return {
     conversation_source: CONVERSATION_SOURCES.includes(source as typeof CONVERSATION_SOURCES[number]) ? source : "member_message",
     priority: String(override.priority || row.priority || "normal"),
-    response_need: String(override.response_need || row.response_need || "reply_later"),
+    response_need: RESPONSE_NEEDS.includes(responseNeed as typeof RESPONSE_NEEDS[number]) ? responseNeed : "needs_reply",
     topic_tags: hasOverrideTopics
       ? uniqueTopicTags(override.topic_tags, 8, { allowCustom: true })
       : uniqueTopicTags(row.topic_tags || [], 8),
-    buyer_flags: uniqueAllowed(override.buyer_flags || row.buyer_flags || [], BUYER_FLAGS, BUYER_FLAGS.length),
-    risk_flags: uniqueAllowed(override.risk_flags || row.risk_flags || [], RISK_FLAGS, RISK_FLAGS.length),
+    buyer_flags: uniqueAllowed(override.buyer_flags || row.buyer_flags || [], BUYER_FLAGS, BUYER_FLAGS.length, BUYER_FLAG_ALIASES),
+    risk_flags: uniqueAllowed(override.risk_flags || row.risk_flags || [], RISK_FLAGS, RISK_FLAGS.length, RISK_FLAG_ALIASES),
     summary: text(override.summary || row.summary, 280),
     reasoning_summary: text(override.reasoning_summary || row.reasoning_summary, 280),
     recommended_action: text(override.recommended_action || row.recommended_action, 180),
@@ -902,17 +1047,18 @@ function sanitizeOverridePayload(value: Record<string, unknown>) {
   const payload: Record<string, unknown> = {};
   const priority = text(value.priority, 40);
   const responseNeed = text(value.response_need || value.responseNeed, 60);
+  const normalizedResponseNeed = RESPONSE_NEED_ALIASES[responseNeed] || responseNeed;
   const conversationSource = text(value.conversation_source || value.conversationSource, 80);
   const summary = text(value.summary, 280);
   const reasoningSummary = text(value.reasoning_summary || value.reasoningSummary, 280);
   const recommendedAction = text(value.recommended_action || value.recommendedAction, 180);
 
   if (PRIORITIES.includes(priority as typeof PRIORITIES[number])) payload.priority = priority;
-  if (RESPONSE_NEEDS.includes(responseNeed as typeof RESPONSE_NEEDS[number])) payload.response_need = responseNeed;
+  if (RESPONSE_NEEDS.includes(normalizedResponseNeed as typeof RESPONSE_NEEDS[number])) payload.response_need = normalizedResponseNeed;
   if (CONVERSATION_SOURCES.includes(conversationSource as typeof CONVERSATION_SOURCES[number])) payload.conversation_source = conversationSource;
   if ("topic_tags" in value || "topicTags" in value) payload.topic_tags = uniqueTopicTags(value.topic_tags || value.topicTags, 8, { allowCustom: true });
-  if ("buyer_flags" in value || "buyerFlags" in value) payload.buyer_flags = uniqueAllowed(value.buyer_flags || value.buyerFlags, BUYER_FLAGS, BUYER_FLAGS.length);
-  if ("risk_flags" in value || "riskFlags" in value) payload.risk_flags = uniqueAllowed(value.risk_flags || value.riskFlags, RISK_FLAGS, RISK_FLAGS.length);
+  if ("buyer_flags" in value || "buyerFlags" in value) payload.buyer_flags = uniqueAllowed(value.buyer_flags || value.buyerFlags, BUYER_FLAGS, BUYER_FLAGS.length, BUYER_FLAG_ALIASES);
+  if ("risk_flags" in value || "riskFlags" in value) payload.risk_flags = uniqueAllowed(value.risk_flags || value.riskFlags, RISK_FLAGS, RISK_FLAGS.length, RISK_FLAG_ALIASES);
   if (summary) payload.summary = summary;
   if (reasoningSummary) payload.reasoning_summary = reasoningSummary;
   if (recommendedAction) payload.recommended_action = recommendedAction;
@@ -999,18 +1145,21 @@ function topicHits(textValue: string) {
   const body = textValue.toLowerCase();
   const hits = new Set<string>();
   const rules: Array<[string, RegExp]> = [
-    ["return", /\b(return|returned|returning|rma)\b/],
-    ["cancellation", /\b(cancel|cancellation|cancelled|canceled)\b/],
-    ["shipping_issue", /\b(ship|shipping|tracking|delivery|delivered|late|lost|address)\b/],
+    ["return_request", /\b(return|returned|returning|rma)\b/],
+    ["cancellation_request", /\b(cancel|cancellation|cancelled|canceled)\b/],
+    ["shipping_status_tracking", /\b(where is|tracking|when will it arrive|shipping status|delivery status)\b/],
+    ["shipping_problem", /\b(delivered but|late|lost|wrong address|delivery exception|not received|never arrived)\b/],
     ["payment_issue", /\b(payment|paid|invoice|charge|card|bank)\b/],
     ["item_question", /\b(question|available|size|condition|authentic|measure|photo|picture)\b/],
+    ["condition_authenticity_question", /\b(condition|authentic|authenticity|fake|genuine|real)\b/],
     ["missing_item", /\b(missing|not received|never received|empty box)\b/],
-    ["wrong_item", /\b(wrong item|different item|not what i ordered)\b/],
-    ["not_as_described", /\b(not as described|damaged|broken|fake|defect|defective)\b/],
+    ["wrong_item_received", /\b(wrong item|different item|not what i ordered)\b/],
+    ["not_as_described", /\b(not as described|defect|defective)\b/],
+    ["damage_claim", /\b(damaged|broken|cracked|shattered)\b/],
     ["refund_request", /\b(refund|money back|partial)\b/],
     ["buyer_complaint", /\b(upset|angry|complaint|unacceptable|terrible)\b/],
     ["feedback_issue", /\b(feedback|review|rating)\b/],
-    ["offer_question", /\b(offer|counteroffer|price|discount)\b/],
+    ["custom_order_question", /\b(custom|personalized|special order|offer|counteroffer|price|discount)\b/],
   ];
   for (const [tag, regex] of rules) {
     if (regex.test(body)) hits.add(tag);

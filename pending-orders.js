@@ -355,6 +355,130 @@ function getBuyerLabel(line) {
   return String(line?.order?.buyer_username || "").trim() || "No buyer username";
 }
 
+function getCopyableValueAttribute(value) {
+  return escapeHtml(encodeURIComponent(String(value || "")));
+}
+
+function getCopyableLabelAttribute(value) {
+  return escapeHtml(String(value || "text"));
+}
+
+function copyableTextMarkup(value, label, className = "", displayValue = value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return `
+    <button
+      type="button"
+      class="copy-text ${className}"
+      data-copy-text="${getCopyableValueAttribute(text)}"
+      data-copy-label="${getCopyableLabelAttribute(label)}"
+      title="Click to copy ${getCopyableLabelAttribute(label)}"
+    >${escapeHtml(displayValue || text)}</button>
+  `;
+}
+
+function getFirstTextValue(...values) {
+  return values
+    .map((value) => String(value || "").trim())
+    .find(Boolean) || "";
+}
+
+function formatStructuredAddress(source = {}) {
+  const line1 = getFirstTextValue(source.addressLine1, source.address1, source.line1, source.street1, source.street);
+  const line2 = getFirstTextValue(source.addressLine2, source.address2, source.line2, source.street2);
+  const city = getFirstTextValue(source.city, source.cityName);
+  const state = getFirstTextValue(source.stateOrProvince, source.state, source.province, source.region);
+  const postal = getFirstTextValue(source.postalCode, source.postal_code, source.zip, source.zipCode);
+  const country = getFirstTextValue(source.countryCode, source.country, source.countryName);
+  const cityLine = [city, state, postal].filter(Boolean).join(", ").replace(/, ([^,]*)$/, " $1");
+  return [line1, line2, cityLine, country].filter(Boolean).join("\n");
+}
+
+function formatCsvShippingAddress(row = {}) {
+  const name = getFirstTextValue(row["Ship To Name"], row["Buyer Name"], row["Buyer Full Name"]);
+  const line1 = getFirstTextValue(row["Ship To Address 1"], row["Ship To Address1"], row["Street 1"], row["Address 1"]);
+  const line2 = getFirstTextValue(row["Ship To Address 2"], row["Ship To Address2"], row["Street 2"], row["Address 2"]);
+  const city = getFirstTextValue(row["Ship To City"], row["City"]);
+  const state = getFirstTextValue(row["Ship To State"], row["Ship To Province"], row["State"]);
+  const postal = getFirstTextValue(row["Ship To Zip"], row["Ship To Postal Code"], row["Postal Code"], row["Zip"]);
+  const country = getFirstTextValue(row["Ship To Country"], row["Country"]);
+  const cityLine = [city, state, postal].filter(Boolean).join(", ").replace(/, ([^,]*)$/, " $1");
+  return [name, line1, line2, cityLine, country].filter(Boolean).join("\n");
+}
+
+function getOrderShippingAddress(order = {}) {
+  const raw = order.raw_payload || {};
+  const apiOrder = raw.order || raw;
+  const shipTo = apiOrder.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo
+    || raw.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo
+    || apiOrder.shipTo
+    || raw.shipTo
+    || apiOrder.buyer?.buyerRegistrationAddress
+    || raw.buyer?.buyerRegistrationAddress
+    || {};
+  const contactAddress = shipTo.contactAddress || shipTo.shippingAddress || shipTo.address || shipTo;
+  const structured = formatStructuredAddress(contactAddress);
+  const name = getFirstTextValue(shipTo.fullName, shipTo.name, order.buyer_name);
+  const apiAddress = [name, structured].filter(Boolean).join("\n").trim();
+  if (apiAddress) return apiAddress;
+  return formatCsvShippingAddress(raw.first_row || raw);
+}
+
+function getOrderShippingAddressDisplay(order = {}) {
+  const address = getOrderShippingAddress(order);
+  return address ? address.split(/\n+/).filter(Boolean).slice(0, 2).join(" - ") : "";
+}
+
+function getGroupShippingAddress(group = {}) {
+  for (const line of group.lines || []) {
+    const address = getOrderShippingAddress(line.order || {});
+    if (address) return address;
+  }
+  return "";
+}
+
+async function copyTextToClipboard(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return true;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  return copied;
+}
+
+function handleCopyTextClick(event) {
+  const target = event.target.closest("[data-copy-text]");
+  if (!target) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  const text = decodeURIComponent(target.dataset.copyText || "");
+  const label = target.dataset.copyLabel || "text";
+  copyTextToClipboard(text)
+    .then((copied) => {
+      setStatus(copied ? `Copied ${label} to clipboard.` : `Could not copy ${label}.`, copied ? "success" : "error");
+    })
+    .catch((error) => {
+      console.warn("Clipboard copy failed:", error);
+      setStatus(`Could not copy ${label}.`, "error");
+    });
+  return true;
+}
+
+function isTextEditingShortcut(event) {
+  const key = String(event.key || "").toLowerCase();
+  return (event.ctrlKey || event.metaKey) && ["a", "c", "v", "x"].includes(key);
+}
+
 function getCheckoutStoreStorageKey() {
   return `og-pending-orders-checkout-store:${state.user?.id || "anonymous"}`;
 }
@@ -2431,6 +2555,8 @@ function renderOrders() {
     const urgencyClass = urgency?.level === "today" ? "is-due-today" : urgency ? `is-${urgency.level}` : "";
     const assignedTask = getAssignedOrderTaskForGroup(group);
     const assignmentLabel = getGroupAssignmentLabel(group);
+    const groupAddress = getGroupShippingAddress(group);
+    const groupAddressDisplay = groupAddress.split(/\n+/).filter(Boolean).slice(0, 2).join(" - ");
     const urgencyMarkup = urgency ? `
       <span class="urgency-pill urgency-${urgency.level}">
         <i data-lucide="${urgency.icon}"></i>
@@ -2450,17 +2576,20 @@ function renderOrders() {
       <div class="buyer-card-head">
         <div>
           <span class="buyer-kicker">Buyer username</span>
-          <button
-            type="button"
-            class="buyer-insight-link buyer-card-buyer-name"
-            data-buyer-insights="${escapeHtml(group.buyer)}"
-            data-buyer-context="pending-orders"
-            data-current-order-total="${escapeHtml(group.totalValue)}"
-            data-current-order-count="${escapeHtml(group.orderNumbers.size)}"
-            data-current-line-count="${escapeHtml(group.lines.length)}"
-            data-current-order-numbers="${escapeHtml([...group.orderNumbers].join(","))}"
-            data-current-items="${buyerInsightCurrentItemsAttribute(group.lines)}"
-          >${escapeHtml(group.buyer)}</button>
+          <span class="buyer-card-title-row">
+            ${copyableTextMarkup(group.buyer, "buyer id", "buyer-card-buyer-copy")}
+            <button
+              type="button"
+              class="buyer-insight-link compact buyer-card-history-btn"
+              data-buyer-insights="${escapeHtml(group.buyer)}"
+              data-buyer-context="pending-orders"
+              data-current-order-total="${escapeHtml(group.totalValue)}"
+              data-current-order-count="${escapeHtml(group.orderNumbers.size)}"
+              data-current-line-count="${escapeHtml(group.lines.length)}"
+              data-current-order-numbers="${escapeHtml([...group.orderNumbers].join(","))}"
+              data-current-items="${buyerInsightCurrentItemsAttribute(group.lines)}"
+            >History</button>
+          </span>
           <small>${group.orderNumbers.size} order(s) - ${group.lines.length} line(s) - Qty ${group.totalQuantity}</small>
         </div>
         <div class="buyer-card-alerts">
@@ -2481,6 +2610,7 @@ function renderOrders() {
       <div class="buyer-card-meta">
         <span>Earliest sale ${escapeHtml(formatDate(group.earliestPendingOrderCreatedAt))}</span>
         <span>Ship by ${escapeHtml(formatDate(group.nextShipBy))}</span>
+        ${groupAddress ? copyableTextMarkup(groupAddress, "shipping address", "copy-address-chip", groupAddressDisplay || "Shipping address") : ""}
         ${isAdminUser() ? `<span>Order value ${formatMoney(group.totalValue)}</span>` : `<span>Ready to pack</span>`}
       </div>
       ${isAdminUser() ? `
@@ -2557,6 +2687,8 @@ function renderOrders() {
       const orderLineSequence = orderLineTotal > 1 ? `Line ${orderLinePosition} of ${orderLineTotal} in this order` : "";
       const transactionLabel = line.transaction_id ? `Txn ${line.transaction_id}` : "No transaction ID";
       const lineSource = String(line.raw_payload?.source || "").toLowerCase().includes("api") ? "eBay API" : "Report";
+      const shippingAddress = getOrderShippingAddress(order);
+      const shippingAddressDisplay = getOrderShippingAddressDisplay(order);
       const lineDueLabel = lineUrgency
         ? `${lineUrgency.label} · ${formatDate(order.ship_by_date)}`
         : order.ship_by_date
@@ -2569,6 +2701,7 @@ function renderOrders() {
         : lineDueLabel;
       const button = document.createElement("div");
       button.className = `buyer-line-btn ${isAdminUser() ? "has-admin-select" : ""} ${isAdminSelected ? "is-admin-selected" : ""} ${state.selectedLine?.id === line.id ? "is-selected" : ""}`;
+      button.dataset.lineId = line.id;
       const adminSelect = isAdminUser() ? `
         <label class="admin-order-select" title="Select pending line">
           <input type="checkbox" data-admin-line-select="${escapeHtml(line.id)}" ${state.adminSelectedLineIds.has(line.id) ? "checked" : ""} ${isAdminCloseoutSelectable(line) ? "" : "disabled"} />
@@ -2578,8 +2711,11 @@ function renderOrders() {
         ${adminSelect}
         <span class="buyer-line-main">
           <span class="buyer-line-copy">
-            <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
-            <small>${escapeHtml(order.order_number || "No order number")} - ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
+            ${copyableTextMarkup(line.item_title || "Untitled eBay item", "item name", "buyer-line-title-copy")}
+            <small>
+              ${copyableTextMarkup(order.order_number || "No order number", "order number", "inline-copy-chip")}
+              <span>${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</span>
+            </small>
             <span class="buyer-line-meta-row">
               <span class="buyer-line-created">${escapeHtml(lineCreatedLabel)}</span>
               <span class="buyer-line-identity">${escapeHtml(transactionLabel)} - ${escapeHtml(lineSource)}</span>
@@ -2587,6 +2723,7 @@ function renderOrders() {
                 ${lineUrgency ? `<i data-lucide="${lineUrgency.icon}"></i>` : ""}
                 ${escapeHtml(visibleLineDueLabel)}
               </span>
+              ${shippingAddress ? copyableTextMarkup(shippingAddress, "shipping address", "inline-copy-chip copy-address-chip", shippingAddressDisplay || "Shipping address") : ""}
               ${orderLineSequence ? `<span class="buyer-line-sequence">${escapeHtml(orderLineSequence)}</span>` : ""}
               ${lineSyncMismatch ? `<span class="buyer-line-sync-warning" title="${escapeHtml(lineSyncMismatch.message || "Verify this order in eBay before acting.")}">Verify in eBay</span>` : ""}
             </span>
@@ -2823,8 +2960,16 @@ function renderSelectedOrder() {
   const line = state.selectedLine;
   if (!line) return;
   const order = line.order || {};
+  const shippingAddress = getOrderShippingAddress(order);
+  const shippingAddressDisplay = getOrderShippingAddressDisplay(order);
   $("selected-order-title").textContent = order.order_number || "eBay order";
-  $("selected-order-subtitle").textContent = `${line.item_title || "Untitled item"} - Buyer: ${order.buyer_username || "unknown"} - ${getOrderCreatedLabel(line)} ${formatDate(line.orderCreatedAt || getOrderCreatedAt(line))} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${formatDate(order.ship_by_date)}`;
+  $("selected-order-subtitle").innerHTML = `
+    ${copyableTextMarkup(line.item_title || "Untitled item", "item name", "inline-copy-chip")}
+    <span>Buyer:</span>
+    ${copyableTextMarkup(order.buyer_username || "unknown", "buyer id", "inline-copy-chip")}
+    ${shippingAddress ? copyableTextMarkup(shippingAddress, "shipping address", "inline-copy-chip copy-address-chip", shippingAddressDisplay || "Shipping address") : ""}
+    <span>${escapeHtml(getOrderCreatedLabel(line))} ${escapeHtml(formatDate(line.orderCreatedAt || getOrderCreatedAt(line)))} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${escapeHtml(formatDate(order.ship_by_date))}</span>
+  `;
   $("selected-order-status").textContent = line.line_status || "pending";
   renderSelectedOrderTaskAssignment();
   $("cancel-pending-order")?.toggleAttribute("disabled", !isOpenOrderLine(line));
@@ -8309,6 +8454,23 @@ function setupListeners() {
     state.orderSort = event.target.value;
     applyOrderFilters();
   });
+  $("orders-list")?.addEventListener("click", (event) => {
+    if (handleCopyTextClick(event)) return;
+    const lineRow = event.target.closest(".buyer-line-btn[data-line-id]");
+    if (!lineRow || event.target.closest("button, a, input, label, select, textarea")) return;
+    selectOrderLine(lineRow.dataset.lineId);
+  });
+  $("orders-list")?.addEventListener("keydown", (event) => {
+    const copyTarget = event.target.closest("[data-copy-text]");
+    if (!copyTarget || (event.key !== "Enter" && event.key !== " ")) return;
+    handleCopyTextClick(event);
+  });
+  $("fulfillment-workflow")?.addEventListener("click", handleCopyTextClick);
+  $("fulfillment-workflow")?.addEventListener("keydown", (event) => {
+    const copyTarget = event.target.closest("[data-copy-text]");
+    if (!copyTarget || (event.key !== "Enter" && event.key !== " ")) return;
+    handleCopyTextClick(event);
+  });
   $("checkout-store-select")?.addEventListener("change", handleCheckoutStoreChange);
   $("admin-clear-order-selection")?.addEventListener("click", clearAdminOrderSelection);
   $("admin-open-ebay-labels")?.addEventListener("click", openAdminSelectedEbayLabelPages);
@@ -8525,6 +8687,8 @@ function setupListeners() {
   });
 
   document.addEventListener("keydown", (event) => {
+    if (isTextEditingShortcut(event)) return;
+
     if (!$("no-inventory-photo-viewer-modal")?.classList.contains("hidden")) {
       if (event.key === "Enter" || event.key === "Escape") {
         event.preventDefault();
