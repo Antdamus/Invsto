@@ -125,7 +125,7 @@
     const source = value && typeof value === "object" ? value : {};
     return {
       folders: source.folders !== false,
-      list: source.list !== false,
+      list: true,
       context: source.context !== false,
     };
   }
@@ -193,12 +193,14 @@
     if (minutes < 1) return "now";
     if (minutes < 60) return `${minutes}m`;
     const hours = Math.floor(minutes / 60);
-    if (hours < 48) return `${hours}h`;
-    const days = Math.floor(hours / 24);
-    if (days < 30) return `${days}d`;
-    const months = Math.floor(days / 30);
-    if (months < 12) return `${months}mo`;
-    return `${Math.floor(months / 12)}y`;
+    if (hours < 24) return `${hours}h`;
+    const now = new Date();
+    const includeYear = date.getFullYear() !== now.getFullYear();
+    return date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      ...(includeYear ? { year: "numeric" } : {}),
+    });
   }
 
   function safeErrorMessage(code) {
@@ -214,7 +216,45 @@
   }
 
   function humanizeValue(value) {
-    return String(value || "")
+    const clean = String(value || "").trim();
+    const labels = {
+      return_request: "Return Request",
+      cancellation_request: "Cancellation Request",
+      shipping_status_tracking: "Shipping Status / Tracking",
+      shipping_problem: "Shipping Problem",
+      condition_authenticity_question: "Condition / Authenticity Question",
+      wrong_item_received: "Wrong Item Received",
+      damage_claim: "Damage Claim",
+      high_order_value: "High Order Value",
+      negative_feedback_risk: "Negative Feedback Risk",
+      case_dispute_risk: "Case / Dispute Risk",
+      fraud_abuse_risk: "Fraud / Abuse Risk",
+      high_dollar_risk: "High Dollar Risk",
+      high_return_risk: "High Return Risk",
+      manager_review: "Manager Review",
+      needs_reply: "Needs Reply",
+      reply_today: "Needs Reply Today",
+      needs_refund_decision: "Needs Refund Decision",
+      needs_return_approval: "Needs Return Approval",
+      needs_shipping_follow_up: "Needs Shipping Follow-Up",
+      needs_inventory_check: "Needs Inventory Check",
+      needs_photos_evidence: "Needs Photos / Evidence",
+      send_template_reply: "Send Template Reply",
+      escalate_to_manager: "Escalate to Manager",
+      waiting_on_buyer: "Waiting on Buyer",
+      waiting_on_carrier: "Waiting on Carrier",
+      waiting_on_ebay: "Waiting on eBay",
+      resolved_closed: "Resolved / Closed",
+      high_value_buyer: "High Order Value",
+      high_retained_value_buyer: "VIP Buyer",
+      high_return_risk_buyer: "High Return Risk",
+      shipping_issue: "Shipping Problem",
+      order_status: "Shipping Status / Tracking",
+      delivery_timing: "Shipping Status / Tracking",
+      wrong_item: "Wrong Item Received",
+    };
+    if (labels[clean]) return labels[clean];
+    return clean
       .replace(/_/g, " ")
       .replace(/\b\w/g, (letter) => letter.toUpperCase())
       .trim();
