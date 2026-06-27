@@ -4222,7 +4222,7 @@ async function openTaskModal(options = {}) {
 
   $("team-task-modal-title").textContent = task
     ? options.reassignRequest ? "Request reassignment" : options.accept ? "Accept completed task" : options.sendBack ? "Send task back" : options.resolve ? "Complete task" : options.progress ? "Progress / delay update" : "Reply to team task"
-    : "Create team task";
+    : "Create independent task";
   $("team-task-modal-subtitle").textContent = task
     ? options.reassignRequest
       ? "Send a note to the admin asking them to move this task. The assignment will stay unchanged until an admin reviews it."

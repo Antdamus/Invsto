@@ -4401,6 +4401,10 @@ function renderOrderTaskPanel(options = {}) {
   if (!list) return;
 
   button?.toggleAttribute("disabled", !state.selectedLine);
+  if (button) {
+    button.textContent = "Assign Task to This Order";
+    button.title = "Create a coordination task for the selected order.";
+  }
 
   if (!state.selectedLine) {
     list.innerHTML = `<div class="empty-state">Select an order to see coordination tasks.</div>`;
@@ -4419,6 +4423,12 @@ function renderOrderTaskPanel(options = {}) {
     return isVisibleActiveAssignedOrderCoordinationTask(task, events);
   });
   const activeCount = visibleOrderTasks.filter(isActiveOrderTask).length;
+  if (button) {
+    button.textContent = visibleOrderTasks.length ? "Add Another Task" : "Assign Task to This Order";
+    button.title = visibleOrderTasks.length
+      ? "Create a separate coordination task for this same order."
+      : "Create a coordination task for the selected order.";
+  }
   if (summary) {
     summary.textContent = activeCount
       ? `${activeCount} active coordination task${activeCount === 1 ? "" : "s"} for this order.`
@@ -4557,6 +4567,13 @@ function renderOrderTaskEvent(event = {}) {
 
 function closeOrderTaskDetailsModal() {
   state.activeOrderTaskDetailsId = "";
+  ["add-order-task-update-from-details", "create-order-task-from-details"].forEach((id) => {
+    const button = $(id);
+    if (!button) return;
+    button.classList.add("hidden");
+    delete button.dataset.taskId;
+    delete button.dataset.lineId;
+  });
   closeModal("order-task-details-modal");
 }
 
@@ -4636,6 +4653,7 @@ function renderOrderTaskDetailsModal(task = {}, events = [], options = {}) {
   if (!body) return;
   const lines = getOrderTaskDetailLines(task, options.lineId || "");
   const order = lines[0]?.order || {};
+  const detailLineId = options.lineId || lines[0]?.id || "";
   const assignee = getOrderTaskAssigneeName(task);
   const isUrgent = ["urgent", "high"].includes(String(task.priority || "").toLowerCase());
   const isResolved = !isActiveOrderTask(task);
@@ -4682,6 +4700,22 @@ function renderOrderTaskDetailsModal(task = {}, events = [], options = {}) {
     </section>
   `;
 
+  const updateButton = $("add-order-task-update-from-details");
+  if (updateButton) {
+    updateButton.classList.toggle("hidden", !task.id);
+    updateButton.dataset.taskId = task.id || "";
+    updateButton.dataset.lineId = detailLineId || "";
+    updateButton.textContent = isResolved ? "Add Audit Note" : "Add Update";
+    updateButton.title = "Add an audited update to this existing task.";
+  }
+  const createButton = $("create-order-task-from-details");
+  if (createButton) {
+    createButton.classList.toggle("hidden", !detailLineId);
+    createButton.dataset.taskId = task.id || "";
+    createButton.dataset.lineId = detailLineId || "";
+    createButton.title = "Create a separate new task for this same order.";
+  }
+
   body.querySelectorAll("[data-assigned-task-photo]").forEach((buttonEl) => {
     buttonEl.addEventListener("click", () => {
       openOrderTaskPhoto(
@@ -4701,6 +4735,23 @@ function renderOrderTaskDetailsModal(task = {}, events = [], options = {}) {
     });
   });
   hydrateOrderTaskVideoReceiptThumbnails();
+}
+
+async function openOrderTaskModalFromDetails({ taskId = "", lineId = "", createNew = false } = {}) {
+  const task = taskId ? findOrderTaskInMemory(taskId) : null;
+  const line = (lineId ? state.orders.find((entry) => entry.id === lineId) : null)
+    || (task ? getOrderTaskDetailLines(task, lineId)[0] : null);
+  if (!line?.id) {
+    setStatus("Could not find the order line for this task. Refresh pending orders and try again.", "error");
+    return;
+  }
+
+  if (state.selectedLine?.id !== line.id) {
+    selectOrderLine(line.id, { openDetail: false });
+  }
+  await loadSelectedOrderTasks();
+  closeOrderTaskDetailsModal();
+  openOrderTaskModal(createNew ? {} : { taskId });
 }
 
 async function openAssignedOrderTaskDetailsModal(taskId, options = {}) {
@@ -5103,7 +5154,7 @@ async function openOrderTaskModal(options = {}) {
   }
 
   const taskId = options.taskId || "";
-  const task = taskId ? state.selectedOrderTasks.find((entry) => entry.id === taskId) : null;
+  const task = taskId ? state.selectedOrderTasks.find((entry) => entry.id === taskId) || findOrderTaskInMemory(taskId) : null;
   state.activeOrderTaskId = task?.id || "";
   state.orderTaskMode = task ? options.progress ? "progress" : "reply" : "create";
   resetOrderTaskPhotos();
@@ -5116,7 +5167,7 @@ async function openOrderTaskModal(options = {}) {
   $("order-task-modal-subtitle").textContent = task
     ? options.progress
       ? "Explain what happened, what is blocking completion, and when this should be checked again."
-      : "Add the next instruction, assign it to the next person, or resolve it."
+      : "Add an audited update. The current assignee will see it in their task queue; admins can reassign when needed."
     : "Send a question, instruction, or special handling request to an admin or worker.";
   $("submit-order-task").textContent = task ? options.progress ? "Save Progress" : "Send Update" : "Send Task";
   $("order-task-status-field")?.classList.toggle("hidden", !task);
@@ -5128,7 +5179,7 @@ async function openOrderTaskModal(options = {}) {
   $("order-task-status").value = task ? options.progress ? "deferred" : "" : "";
   configureOrderTaskStatusOptionsForProgress(Boolean(options.progress));
   $("order-task-due-at").value = toDateTimeLocalValue(task?.due_at || (!task ? line.order?.ship_by_date : ""));
-  setOrderTaskFieldVisible("order-task-assignee", !options.progress);
+  setOrderTaskFieldVisible("order-task-assignee", !options.progress && (!task || isRealAdminUser()));
   setOrderTaskFieldVisible("order-task-priority", !options.progress);
   setOrderTaskFieldVisible("order-task-due-at", true);
   $("order-task-context").innerHTML = `
@@ -5167,7 +5218,10 @@ async function submitOrderTask() {
     const lineIds = getOrderTaskLineIdsForSelectedOrder();
     const photos = await persistOrderTaskPhotos(lineIds);
     const isProgressUpdate = state.orderTaskMode === "progress";
-    const assigneeUserId = isProgressUpdate ? null : $("order-task-assignee")?.value || null;
+    const isExistingTaskUpdate = state.orderTaskMode === "reply" || state.orderTaskMode === "progress";
+    const assigneeUserId = isProgressUpdate || (isExistingTaskUpdate && !isRealAdminUser())
+      ? null
+      : $("order-task-assignee")?.value || null;
     const priority = isProgressUpdate ? null : $("order-task-priority")?.value || "normal";
     const signedByEmail = state.user?.email || state.employee?.display_name || "";
 
@@ -9895,6 +9949,25 @@ function setupListeners() {
   $("close-order-task-modal")?.addEventListener("click", closeOrderTaskModal);
   $("close-order-task-details-modal")?.addEventListener("click", closeOrderTaskDetailsModal);
   $("done-order-task-details-modal")?.addEventListener("click", closeOrderTaskDetailsModal);
+  $("add-order-task-update-from-details")?.addEventListener("click", (event) => {
+    openOrderTaskModalFromDetails({
+      taskId: event.currentTarget.dataset.taskId || "",
+      lineId: event.currentTarget.dataset.lineId || "",
+    }).catch((error) => {
+      console.error("Could not open task update modal:", error);
+      setStatus(error?.message || "Could not open the task update form.", "error");
+    });
+  });
+  $("create-order-task-from-details")?.addEventListener("click", (event) => {
+    openOrderTaskModalFromDetails({
+      taskId: event.currentTarget.dataset.taskId || "",
+      lineId: event.currentTarget.dataset.lineId || "",
+      createNew: true,
+    }).catch((error) => {
+      console.error("Could not open new order task modal:", error);
+      setStatus(error?.message || "Could not open the new task form.", "error");
+    });
+  });
   $("order-task-capture-station")?.addEventListener("change", (event) => {
     setSelectedNoInventoryCaptureStation(event.target.value);
   });
