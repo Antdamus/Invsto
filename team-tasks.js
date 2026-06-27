@@ -83,10 +83,30 @@ const TASK_LINE_SELECT = `
   custom_label,
   quantity,
   sold_for,
+  shipping_and_handling,
   total_price,
   net_payout,
   line_status,
+  fulfilled_quantity,
+  fulfilled_at,
   notes,
+  raw_payload
+`;
+const ORDER_TASK_ORDER_SELECT = `
+  order_number,
+  buyer_username,
+  buyer_name,
+  sale_date,
+  paid_on_date,
+  ship_by_date,
+  status,
+  total_price,
+  net_payout,
+  shipping_and_handling,
+  ebay_collected_tax,
+  label_status,
+  label_uploaded_at,
+  label_metadata,
   raw_payload
 `;
 
@@ -209,6 +229,125 @@ function normalizeLookup(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function buildEbayOrderDetailsUrl(orderNumber = "") {
+  const clean = String(orderNumber || "").trim();
+  if (!clean) return "";
+  const url = new URL("https://www.ebay.com/mesh/ord/details");
+  url.searchParams.set("orderid", clean);
+  return url.toString();
+}
+
+function normalizeEbayOrderNumber(orderNumber = "") {
+  return String(orderNumber || "").trim();
+}
+
+function removeTaskOrderNumberActionMenu() {
+  document.querySelectorAll(".task-order-number-action-menu").forEach((menu) => menu.remove());
+}
+
+function openEbayOrderDetailsPage(orderNumber = "") {
+  const cleanNumber = normalizeEbayOrderNumber(orderNumber);
+  const url = buildEbayOrderDetailsUrl(cleanNumber);
+  if (!url) {
+    setStatus("No eBay order number available to open.", "error");
+    return false;
+  }
+  window.open(url, "_blank", "noopener");
+  setStatus(`Opening eBay order ${cleanNumber}.`, "success");
+  return true;
+}
+
+function positionTaskOrderNumberActionMenu(menu, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const margin = 10;
+  const menuRect = menu.getBoundingClientRect();
+  let left = rect.left;
+  let top = rect.bottom + 8;
+
+  if (left + menuRect.width > window.innerWidth - margin) {
+    left = window.innerWidth - menuRect.width - margin;
+  }
+  if (left < margin) left = margin;
+  if (top + menuRect.height > window.innerHeight - margin) {
+    top = rect.top - menuRect.height - 8;
+  }
+  if (top < margin) top = margin;
+
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
+}
+
+function showTaskOrderNumberActionMenu(anchor, orderNumber = "") {
+  const cleanNumber = normalizeEbayOrderNumber(orderNumber);
+  if (!anchor || !cleanNumber) return;
+
+  const existing = document.querySelector(".task-order-number-action-menu");
+  if (existing?.dataset.orderNumber === cleanNumber && existing.dataset.anchorId === anchor.dataset.taskOrderActionAnchorId) {
+    removeTaskOrderNumberActionMenu();
+    return;
+  }
+
+  removeTaskOrderNumberActionMenu();
+  if (!anchor.dataset.taskOrderActionAnchorId) {
+    anchor.dataset.taskOrderActionAnchorId = `task-order-action-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  const menu = document.createElement("div");
+  menu.className = "task-order-number-action-menu";
+  menu.dataset.orderNumber = cleanNumber;
+  menu.dataset.anchorId = anchor.dataset.taskOrderActionAnchorId;
+  menu.innerHTML = `
+    <div class="task-order-number-action-menu-title">
+      <span>eBay Order</span>
+      <strong>${escapeHtml(cleanNumber)}</strong>
+    </div>
+    <button type="button" data-task-order-action-copy>
+      <i data-lucide="copy"></i>
+      Copy number
+    </button>
+    <button type="button" data-task-order-action-open>
+      <i data-lucide="external-link"></i>
+      Open in eBay
+    </button>
+  `;
+
+  document.body.appendChild(menu);
+  window.lucide?.createIcons?.();
+  positionTaskOrderNumberActionMenu(menu, anchor);
+
+  const closeSoon = () => window.setTimeout(removeTaskOrderNumberActionMenu, 80);
+  menu.querySelector("[data-task-order-action-copy]")?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    await copyTextToClipboard(cleanNumber, "Order number");
+    closeSoon();
+  });
+  menu.querySelector("[data-task-order-action-open]")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openEbayOrderDetailsPage(cleanNumber);
+    closeSoon();
+  });
+}
+
+function handleTaskOrderNumberActionClick(event) {
+  const button = event.currentTarget;
+  event.preventDefault();
+  event.stopPropagation();
+  showTaskOrderNumberActionMenu(button, button.dataset.taskOrderNumber || "");
+}
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest(".task-order-number-action-menu,[data-task-order-number-action]")) return;
+  removeTaskOrderNumberActionMenu();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") removeTaskOrderNumberActionMenu();
+});
+
+window.addEventListener("resize", removeTaskOrderNumberActionMenu);
+
 function setStatus(message = "", type = "info") {
   const el = $("team-task-status");
   if (!el) return;
@@ -228,6 +367,39 @@ function setPhotoStatus(message = "", type = "info") {
   el.textContent = message;
   el.classList.toggle("is-error", type === "error");
   el.classList.toggle("is-success", type === "success");
+}
+
+async function copyTextToClipboard(value, label = "Value") {
+  const text = String(value || "").trim();
+  if (!text) {
+    setStatus(`No ${label.toLowerCase()} available to copy.`, "error");
+    return false;
+  }
+
+  try {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.top = "-1000px";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      if (!copied) throw new Error("Browser clipboard fallback failed.");
+    }
+
+    setStatus(`${label} ${text} copied to clipboard.`, "success");
+    return true;
+  } catch (error) {
+    console.error("Clipboard copy failed:", error);
+    setStatus(`Could not copy ${label.toLowerCase()}.`, "error");
+    return false;
+  }
 }
 
 function isAdminUser() {
@@ -1107,7 +1279,7 @@ async function loadOrderTaskRecords() {
   const statuses = isHistoricalTaskView() ? HISTORY_TASK_STATUSES : ACTIVE_TASK_STATUSES;
   let query = supabase
     .from("ebay_order_tasks")
-    .select("id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, created_at, updated_at, completed_at, resolved_at, latest_note, latest_photo_count, created_by, created_by_email, metadata, ebay_orders(order_number, buyer_username, sale_date, paid_on_date, ship_by_date, status, total_price, net_payout, label_metadata)")
+    .select(`id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, created_at, updated_at, completed_at, resolved_at, latest_note, latest_photo_count, created_by, created_by_email, metadata, ebay_orders(${ORDER_TASK_ORDER_SELECT})`)
     .in("status", statuses)
     .order(isHistoricalTaskView() ? "updated_at" : "created_at", { ascending: !isHistoricalTaskView() })
     .limit(80);
@@ -1189,6 +1361,8 @@ function normalizeOrderTask(task = {}) {
     order,
     order_number: orderNumber,
     buyer_username: buyer,
+    buyer_name: task.buyer_name || order.buyer_name || "",
+    order_status: task.order_status || order.status || "",
     ship_by_date: task.ship_by_date || order.ship_by_date || "",
     actionHref: isOrderHistoryTask
       ? `ebay-order-history.html?historySearch=${encodeURIComponent(orderNumber || buyer || "")}&allDates=1`
@@ -1643,7 +1817,7 @@ async function hydrateOrderWorkflowChildren(tasks = []) {
   const childStatuses = unique([...ACTIVE_TASK_STATUSES, ...HISTORY_TASK_STATUSES]);
   const { data, error } = await supabase
     .from("ebay_order_tasks")
-    .select("id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, created_at, updated_at, completed_at, resolved_at, latest_note, latest_photo_count, created_by, created_by_email, metadata, ebay_orders(order_number, buyer_username, sale_date, paid_on_date, ship_by_date, status, total_price, net_payout, label_metadata)")
+    .select(`id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, created_at, updated_at, completed_at, resolved_at, latest_note, latest_photo_count, created_by, created_by_email, metadata, ebay_orders(${ORDER_TASK_ORDER_SELECT})`)
     .in("parent_task_id", parentIds)
     .in("status", childStatuses)
     .order("created_at", { ascending: true })
@@ -1796,6 +1970,296 @@ function getPendingOrderLineSummary(task = {}) {
   return `${lines.length} line${lines.length === 1 ? "" : "s"} / Qty ${quantity || lines.length}`;
 }
 
+function normalizeEbayApiStatusText(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function getPendingOrderTaskSyncMismatch(task = {}) {
+  const order = task.order || {};
+  const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
+  const candidates = [
+    order?.raw_payload?.pending_order_sync_mismatch,
+    task?.metadata?.pending_order_sync_mismatch,
+    ...lines.map((line) => line?.raw_payload?.pending_order_sync_mismatch),
+  ];
+  const mismatch = candidates.find((value) => value && typeof value === "object");
+  return mismatch || null;
+}
+
+function getFirstTrimmedValue(values = []) {
+  return String(values.find((value) => String(value || "").trim()) || "").trim();
+}
+
+function getPendingOrderTaskApiStatus(task = {}) {
+  const order = task.order || {};
+  const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
+  const firstLine = lines.find(Boolean) || {};
+  const mismatch = getPendingOrderTaskSyncMismatch(task);
+  const orderApiStatus = order.ebay_api_status || task.metadata?.ebay_api_status || {};
+  const lineApiStatus = firstLine.ebay_api_status || {};
+  const orderRaw = order.raw_payload || {};
+  const lineRaw = firstLine.raw_payload || {};
+  return {
+    paymentStatus: normalizeEbayApiStatusText(getFirstTrimmedValue([
+      mismatch?.ebayPaymentStatus,
+      orderApiStatus.payment_status,
+      lineApiStatus.payment_status,
+      orderRaw.orderPaymentStatus,
+      lineRaw.orderPaymentStatus,
+      orderRaw.order?.orderPaymentStatus,
+      orderRaw.order?.paymentSummary?.payments?.[0]?.paymentStatus,
+    ])),
+    fulfillmentStatus: normalizeEbayApiStatusText(getFirstTrimmedValue([
+      mismatch?.ebayFulfillmentStatus,
+      orderApiStatus.fulfillment_status,
+      lineApiStatus.fulfillment_status,
+      orderRaw.orderFulfillmentStatus,
+      lineRaw.orderFulfillmentStatus,
+      orderRaw.order?.orderFulfillmentStatus,
+      orderRaw.order?.orderFulfillmentState,
+    ])),
+    cancelStatus: normalizeEbayApiStatusText(getFirstTrimmedValue([
+      mismatch?.ebayCancelStatus,
+      orderApiStatus.cancel_status,
+      lineApiStatus.cancel_status,
+      orderRaw.orderCancelStatus,
+      lineRaw.orderCancelStatus,
+      orderRaw.order?.cancelStatus?.cancelState,
+      orderRaw.order?.cancelStatus?.cancelStatus,
+    ])),
+    reviewReason: getFirstTrimmedValue([
+      mismatch?.reason,
+      orderApiStatus.review_reason,
+      lineApiStatus.review_reason,
+    ]),
+    reviewMessage: getFirstTrimmedValue([
+      mismatch?.message,
+      orderApiStatus.review_message,
+      lineApiStatus.review_message,
+    ]),
+    checkedAt: getFirstTrimmedValue([
+      orderApiStatus.checked_at,
+      lineApiStatus.checked_at,
+      mismatch?.detectedAt,
+      orderRaw.last_ebay_order_sync_seen_at,
+      orderRaw.buyer_history_synced_at,
+      orderRaw.account_history_synced_at,
+    ]),
+  };
+}
+
+function isNormalEbayCancelStatus(status) {
+  return !status || ["NONE_REQUESTED", "NOT_REQUESTED", "NO_CANCEL", "NOT_CANCELLED"].includes(status);
+}
+
+function isNormalEbayPaymentStatus(status) {
+  return !status || ["PAID", "FULLY_PAID"].includes(status);
+}
+
+function formatCompactStatus(value = "") {
+  const label = formatTaskTag(String(value || "").toLowerCase());
+  return label || "";
+}
+
+function getPendingOrderStatusTone(status = "") {
+  const normalized = String(status || "").toLowerCase();
+  if (!normalized) return "is-muted";
+  if (/cancel|refund|issue|problem|failed|void/.test(normalized)) return "is-danger";
+  if (/fulfilled|completed|paid|uploaded|ready|closed|approved/.test(normalized)) return "is-good";
+  if (/pending|review|hold|manual|awaiting/.test(normalized)) return "is-warning";
+  return "is-muted";
+}
+
+function getPendingOrderStatusPills(task = {}) {
+  const order = task.order || {};
+  const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
+  const api = getPendingOrderTaskApiStatus(task);
+  const lineStatuses = unique(lines.map((line) => line.line_status)).map(formatCompactStatus).filter(Boolean);
+  const pills = [
+    order.status ? { label: `Order ${formatCompactStatus(order.status)}`, tone: getPendingOrderStatusTone(order.status) } : null,
+    order.label_status ? { label: `Label ${formatCompactStatus(order.label_status)}`, tone: getPendingOrderStatusTone(order.label_status) } : null,
+    api.paymentStatus ? { label: `Payment ${formatCompactStatus(api.paymentStatus)}`, tone: isNormalEbayPaymentStatus(api.paymentStatus) ? "is-good" : "is-danger" } : null,
+    api.fulfillmentStatus ? { label: `eBay ${formatCompactStatus(api.fulfillmentStatus)}`, tone: api.fulfillmentStatus === "FULFILLED" ? "is-warning" : "is-muted" } : null,
+    api.cancelStatus && !isNormalEbayCancelStatus(api.cancelStatus) ? { label: `Cancel ${formatCompactStatus(api.cancelStatus)}`, tone: "is-danger" } : null,
+    api.reviewReason || api.reviewMessage ? { label: "Needs eBay review", tone: "is-warning" } : null,
+    lineStatuses.length ? { label: `Lines ${lineStatuses.join(", ")}`, tone: getPendingOrderStatusTone(lineStatuses.join(" ")) } : null,
+  ].filter(Boolean);
+  return { pills, api };
+}
+
+function getPendingOrderStatusMessage(task = {}) {
+  const { api } = getPendingOrderStatusPills(task);
+  if (api.reviewMessage) return api.reviewMessage;
+  if (api.reviewReason) return formatCompactStatus(api.reviewReason);
+  if (api.paymentStatus?.includes("REFUND")) return "eBay shows a refund signal. Confirm the order in eBay before shipping.";
+  if (!isNormalEbayCancelStatus(api.cancelStatus)) return "eBay shows a cancellation signal. Confirm the order in eBay before shipping.";
+  if (api.fulfillmentStatus === "FULFILLED") return "eBay already shows this order as fulfilled. Check before doing duplicate work.";
+  return "";
+}
+
+function getPendingOrderEbayCondition(task = {}) {
+  const order = task.order || {};
+  const { api } = getPendingOrderStatusPills(task);
+  const cancelLabel = formatCompactStatus(api.cancelStatus);
+  const fulfillmentLabel = formatCompactStatus(api.fulfillmentStatus);
+  const paymentLabel = formatCompactStatus(api.paymentStatus);
+  const orderLabel = formatCompactStatus(order.status);
+
+  if (!isNormalEbayCancelStatus(api.cancelStatus)) {
+    return {
+      label: `eBay cancel ${cancelLabel || "flagged"}`,
+      shortLabel: `Cancel ${cancelLabel || "flagged"}`,
+      tone: "is-danger",
+      message: getPendingOrderStatusMessage(task),
+    };
+  }
+  if (api.paymentStatus?.includes("REFUND")) {
+    return {
+      label: `eBay ${paymentLabel || "refund signal"}`,
+      shortLabel: paymentLabel || "Refund signal",
+      tone: "is-danger",
+      message: getPendingOrderStatusMessage(task),
+    };
+  }
+  if (api.reviewReason || api.reviewMessage) {
+    return {
+      label: "Needs eBay review",
+      shortLabel: "eBay review",
+      tone: "is-warning",
+      message: getPendingOrderStatusMessage(task),
+    };
+  }
+  if (api.fulfillmentStatus === "FULFILLED") {
+    return {
+      label: "eBay already fulfilled",
+      shortLabel: "eBay fulfilled",
+      tone: "is-warning",
+      message: getPendingOrderStatusMessage(task),
+    };
+  }
+  if (api.paymentStatus && isNormalEbayPaymentStatus(api.paymentStatus)) {
+    return {
+      label: `eBay payment ${paymentLabel || "paid"}`,
+      shortLabel: paymentLabel || "Paid",
+      tone: "is-good",
+      message: "",
+    };
+  }
+  if (api.fulfillmentStatus) {
+    return {
+      label: `eBay ${fulfillmentLabel}`,
+      shortLabel: fulfillmentLabel,
+      tone: getPendingOrderStatusTone(api.fulfillmentStatus),
+      message: "",
+    };
+  }
+  if (order.status) {
+    return {
+      label: `Local order ${orderLabel}`,
+      shortLabel: orderLabel,
+      tone: getPendingOrderStatusTone(order.status),
+      message: "",
+    };
+  }
+  return {
+    label: "eBay status not loaded",
+    shortLabel: "eBay unknown",
+    tone: "is-muted",
+    message: "Open eBay before working this task if the order status is unclear.",
+  };
+}
+
+function renderTaskOrderSummaryStatusChip(task = {}) {
+  if (task.source !== "order") return "";
+  const condition = getPendingOrderEbayCondition(task);
+  return `<span class="team-task-summary-ebay-status ${escapeHtml(condition.tone)}" title="${escapeHtml(condition.label)}">${escapeHtml(condition.shortLabel || condition.label)}</span>`;
+}
+
+function renderTaskOrderNumberAction(orderNumber = "", label = "Order") {
+  const cleanNumber = normalizeEbayOrderNumber(orderNumber);
+  if (!cleanNumber) return "";
+  return `
+    <button type="button" class="team-task-order-number-action" data-task-order-number-action data-task-order-number="${escapeHtml(cleanNumber)}" title="Copy or open this eBay order">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(cleanNumber)}</strong>
+    </button>
+  `;
+}
+
+function getTaskOrderMiniStatus(task = {}) {
+  if (task.source !== "order") return "";
+  const condition = getPendingOrderEbayCondition(task);
+  const customerName = getPendingOrderCustomerName(task);
+  return [
+    condition.shortLabel || condition.label,
+    task.order_number ? `Order ${task.order_number}` : "",
+    task.buyer_username ? `Buyer ${task.buyer_username}` : "",
+    customerName ? `Customer ${customerName}` : "",
+  ].filter(Boolean).join(" - ");
+}
+
+function renderPendingOrderStatusSnapshot(task = {}) {
+  const order = task.order || {};
+  const lineSummary = getPendingOrderLineSummary(task);
+  const customerName = getPendingOrderCustomerName(task);
+  const orderNumber = task.order_number || order.order_number || "";
+  const orderHref = buildEbayOrderDetailsUrl(orderNumber);
+  const { pills } = getPendingOrderStatusPills(task);
+  const condition = getPendingOrderEbayCondition(task);
+  const statusMessage = condition.message || getPendingOrderStatusMessage(task);
+  const moneyLabel = getTaskMoneyLabel(task);
+  const quickFacts = [
+    order.sale_date ? ["Placed", formatDate(order.sale_date)] : null,
+    task.ship_by_date || order.ship_by_date ? ["Ship by", formatDate(task.ship_by_date || order.ship_by_date)] : null,
+    moneyLabel ? ["Order value", moneyLabel] : null,
+    lineSummary ? ["Items", lineSummary] : null,
+  ].filter(Boolean);
+  const facts = [
+    order.paid_on_date ? ["Paid", formatDate(order.paid_on_date)] : null,
+    order.label_uploaded_at ? ["Label saved", formatDate(order.label_uploaded_at)] : null,
+    customerName ? ["Customer", customerName] : null,
+    condition.label ? ["eBay condition", condition.label] : null,
+  ].filter(Boolean);
+
+  return `
+    <section class="team-task-order-snapshot">
+      <div class="team-task-order-snapshot-head">
+        <div class="team-task-order-title">
+          <span class="eyebrow">eBay Order Check</span>
+          <div class="team-task-order-title-row">
+            ${renderTaskOrderNumberAction(orderNumber)}
+            ${!orderNumber ? `<strong>Pending order</strong>` : ""}
+            ${task.buyer_username ? `<span class="team-task-order-buyer">${escapeHtml(task.buyer_username)}</span>` : ""}
+          </div>
+        </div>
+        <div class="team-task-order-actions">
+          ${orderHref ? `<a class="secondary-btn team-task-context-open-link" href="${escapeHtml(orderHref)}" target="_blank" rel="noopener">Open eBay</a>` : ""}
+        </div>
+      </div>
+      <div class="team-task-order-check-row">
+        <span class="team-task-order-primary-status ${escapeHtml(condition.tone)}">${escapeHtml(condition.label)}</span>
+        ${quickFacts.map(([label, value]) => `<span><small>${escapeHtml(label)}</small><b>${escapeHtml(value)}</b></span>`).join("")}
+      </div>
+      ${statusMessage ? `<p class="team-task-order-status-message ${condition.tone === "is-danger" ? "is-danger" : ""}">${escapeHtml(statusMessage)}</p>` : ""}
+      ${(pills.length || facts.length) ? `
+        <details class="team-task-context-details team-task-order-status-details">
+          <summary>Order details and eBay fields</summary>
+          ${pills.length ? `
+            <div class="team-task-order-status-pills">
+              ${pills.map((pill) => `<span class="team-task-order-status-pill ${escapeHtml(pill.tone)}">${escapeHtml(pill.label)}</span>`).join("")}
+            </div>
+          ` : `<p class="team-task-order-status-empty">No eBay status warning loaded for this task.</p>`}
+          ${facts.length ? `
+            <div class="team-task-order-status-facts">
+              ${facts.map(([label, value]) => `<span><small>${escapeHtml(label)}</small><b>${escapeHtml(value)}</b></span>`).join("")}
+            </div>
+          ` : ""}
+        </details>
+      ` : `<p class="team-task-order-status-empty">No eBay status warning loaded for this task.</p>`}
+    </section>
+  `;
+}
+
 function getTaskEventEvidencePhotosForBrief(events = []) {
   const photos = [];
   events.forEach((event) => {
@@ -1939,8 +2403,10 @@ function renderTaskLines(task = {}) {
             <div class="team-task-line-facts">
               <span><small>Qty</small><b>${escapeHtml(line.quantity || 1)}</b></span>
               ${line.sold_for ? `<span><small>Sold for</small><b>${escapeHtml(formatMoney(line.sold_for))}</b></span>` : ""}
+              ${line.shipping_and_handling ? `<span><small>Shipping</small><b>${escapeHtml(formatMoney(line.shipping_and_handling))}</b></span>` : ""}
               ${line.total_price ? `<span><small>Line total</small><b>${escapeHtml(formatMoney(line.total_price))}</b></span>` : ""}
               ${line.net_payout ? `<span><small>Payout</small><b>${escapeHtml(formatMoney(line.net_payout))}</b></span>` : ""}
+              ${line.fulfilled_quantity ? `<span><small>Fulfilled</small><b>${escapeHtml(`${line.fulfilled_quantity}${line.fulfilled_at ? ` on ${formatDate(line.fulfilled_at)}` : ""}`)}</b></span>` : ""}
               ${line.transaction_id ? `<span><small>Transaction</small><b>${escapeHtml(line.transaction_id)}</b></span>` : ""}
               ${line.custom_label ? `<span><small>Custom label</small><b>${escapeHtml(line.custom_label)}</b></span>` : ""}
             </div>
@@ -2319,6 +2785,7 @@ function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
       <div class="team-task-brief-facts team-task-order-facts">
         ${visibleFacts.map((fact) => `<span class="${escapeHtml(fact.className || "")}"><small>${escapeHtml(fact.label)}</small><b>${escapeHtml(fact.value)}</b></span>`).join("")}
       </div>
+      ${renderPendingOrderStatusSnapshot(task)}
       ${renderPendingOrderEvidencePanel(task, events)}
       <p class="team-task-next-step"><strong>Next step</strong><span>${escapeHtml(getTaskNextStepLabel(task))}</span></p>
       ${advancedFacts.length || hasDifferentOriginal ? `
@@ -2388,8 +2855,28 @@ function renderTeamTaskBrief(task = {}, events = [], canceled = false) {
   `;
 }
 
-function renderTaskUpdateTrail(task = {}, events = []) {
+function renderTaskUpdateTrail(task = {}, events = [], options = {}) {
   const orderedEvents = [...events].reverse();
+  const latest = orderedEvents[0];
+  const trailBody = `
+    <div class="team-task-events">
+      ${orderedEvents.length ? orderedEvents.map(renderTaskEvent).join("") : `<div class="empty-state">No task trail yet.</div>`}
+    </div>
+  `;
+  if (options.collapsed) {
+    return `
+      <details class="team-task-update-trail is-collapsible">
+        <summary>
+          <span>
+            <span class="eyebrow">Updates & Audit Trail</span>
+            <strong>${events.length ? `${events.length} saved update${events.length === 1 ? "" : "s"}` : "No updates yet"}</strong>
+          </span>
+          <em>${escapeHtml(latest ? `${formatTaskTag(latest.action || "update")} - ${formatDate(latest.created_at)}` : getTaskStatusLabel(task.status))}</em>
+        </summary>
+        ${trailBody}
+      </details>
+    `;
+  }
   return `
     <section class="team-task-update-trail">
       <div class="team-task-update-trail-head">
@@ -2399,9 +2886,7 @@ function renderTaskUpdateTrail(task = {}, events = []) {
         </div>
         <span>${escapeHtml(getTaskStatusLabel(task.status))}</span>
       </div>
-      <div class="team-task-events">
-        ${orderedEvents.length ? orderedEvents.map(renderTaskEvent).join("") : `<div class="empty-state">No task trail yet.</div>`}
-      </div>
+      ${trailBody}
     </section>
   `;
 }
@@ -2431,6 +2916,7 @@ function renderTaskCard(task = {}, options = {}) {
     task.order_number ? `Order ${task.order_number}` : "",
     task.source === "team" && task.metadata?.task_tag ? formatTaskTag(task.metadata.task_tag) : "",
   ].filter(Boolean).join(" - ");
+  const orderMiniStatus = getTaskOrderMiniStatus(task);
   const actionHtml = canceled ? `
     <div class="team-task-actions">
       <button type="button" class="secondary-btn" data-task-history-action="reopen" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Reopen Task</button>
@@ -2442,7 +2928,7 @@ function renderTaskCard(task = {}, options = {}) {
         ${renderAdminReassignRequestNotice(task)}
         ${actionHtml}
         ${renderTaskContext(task)}
-        ${renderTaskUpdateTrail(task, events)}
+        ${renderTaskUpdateTrail(task, events, { collapsed: true })}
       `
     : `
         ${renderTeamTaskBrief(task, events, canceled)}
@@ -2463,10 +2949,11 @@ function renderTaskCard(task = {}, options = {}) {
             <span class="team-task-read-chip">${escapeHtml(readInfo.label)}</span>
           </span>
           <span class="team-task-summary-preview">${escapeHtml(preview)}</span>
-          ${contextLine ? `<span class="team-task-summary-context">${escapeHtml(contextLine)}</span>` : ""}
+          ${orderMiniStatus || contextLine ? `<span class="team-task-summary-context">${escapeHtml(orderMiniStatus || contextLine)}</span>` : ""}
         </span>
         <span class="team-task-summary-facts">
           <span>${escapeHtml(sourceLabel)}</span>
+          ${renderTaskOrderSummaryStatusChip(task)}
           <span>${escapeHtml(formatTaskTag(task.task_type || "general"))}</span>
           <span class="team-task-priority-chip">${escapeHtml(formatTaskTag(task.priority || "normal"))}</span>
           ${moneyLabel ? `<span>${escapeHtml(moneyLabel)}</span>` : ""}
@@ -2587,6 +3074,12 @@ function renderTasks() {
       openTaskPhoto(button.dataset.bucket, button.dataset.path);
     });
   });
+  list.querySelectorAll("[data-task-copy-order-number]").forEach((button) => {
+    button.addEventListener("click", () => copyTextToClipboard(button.dataset.taskCopyOrderNumber, "Order number"));
+  });
+  list.querySelectorAll("[data-task-order-number-action]").forEach((button) => {
+    button.addEventListener("click", handleTaskOrderNumberActionClick);
+  });
   list.querySelectorAll("[data-order-workflow-action]").forEach((button) => {
     button.addEventListener("click", () => handleOrderWorkflowAction(button.dataset.orderWorkflowAction, button.dataset.taskId));
   });
@@ -2637,6 +3130,12 @@ function renderRemovedHistoryTasks() {
       }
       openTaskPhoto(button.dataset.bucket, button.dataset.path);
     });
+  });
+  list.querySelectorAll("[data-task-copy-order-number]").forEach((button) => {
+    button.addEventListener("click", () => copyTextToClipboard(button.dataset.taskCopyOrderNumber, "Order number"));
+  });
+  list.querySelectorAll("[data-task-order-number-action]").forEach((button) => {
+    button.addEventListener("click", handleTaskOrderNumberActionClick);
   });
   list.querySelectorAll("[data-task-history-action]").forEach((button) => {
     button.addEventListener("click", () => handleAdminHistoryAction({
