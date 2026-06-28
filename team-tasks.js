@@ -25,6 +25,7 @@ const state = {
   taskHistorySort: "recent",
   childTasksByParent: new Map(),
   orderVideoReceiptPhotosByLineId: new Map(),
+  lineReviewDecisions: new Map(),
   notifications: [],
   notificationChannel: null,
   notificationsOpen: false,
@@ -1197,6 +1198,12 @@ function getTaskAssigneeLabel(task = {}) {
       : state.employee?.display_name || state.user?.email || "You";
   }
   return "Unassigned";
+}
+
+function getTaskAssignerLabel(task = {}) {
+  const assigner = state.assignees.find((employee) => employee.user_id === task.assigned_by);
+  if (assigner) return assigner.display_name || assigner.email || "Team member";
+  return task.assigned_by_email || task.created_by_email || task.metadata?.submitted_by_email || "Not recorded";
 }
 
 async function loadAssignees() {
@@ -2481,17 +2488,7 @@ function getTaskVideoReceiptPhotosForBrief(task = {}) {
 }
 
 function renderPendingOrderEvidencePanel(task = {}, events = []) {
-  const allPhotos = [
-    ...getTaskVideoReceiptPhotosForBrief(task),
-    ...getTaskEventEvidencePhotosForBrief(events),
-  ];
-  const seen = new Set();
-  const photos = allPhotos.filter((photo) => {
-    const key = `${photo.bucket || ""}:${photo.path || ""}:${photo.url || ""}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return Boolean(photo.bucket || photo.url);
-  });
+  const photos = getPendingOrderBriefEvidencePhotos(task, events);
   const shown = photos.slice(0, 8);
   const extraCount = Math.max(0, photos.length - shown.length);
   return `
@@ -2505,25 +2502,410 @@ function renderPendingOrderEvidencePanel(task = {}, events = []) {
       </div>
       ${shown.length ? `
         <div class="team-task-evidence-grid">
-          ${shown.map((photo) => `
-            <button
-              type="button"
-              class="team-task-evidence-thumb"
-              data-team-task-photo="1"
-              data-bucket="${escapeHtml(photo.bucket || TEAM_TASK_BUCKET)}"
-              data-path="${escapeHtml(photo.path || "")}"
-              data-url="${escapeHtml(photo.url || "")}"
-              data-label="${escapeHtml(photo.label || "Task evidence photo")}"
-              aria-label="Open ${escapeHtml(photo.label || "Task evidence photo")}"
-            >
-              ${photo.thumbnailUrl || photo.url ? `<img src="${escapeHtml(photo.thumbnailUrl || photo.url)}" alt="${escapeHtml(photo.label || "Task evidence photo")}" loading="lazy" />` : `<span class="team-task-evidence-placeholder">Photo</span>`}
-              <span><b>${escapeHtml(photo.kind || "Evidence")}</b><small>${escapeHtml(photo.caption || photo.label || "")}</small></span>
-            </button>
-          `).join("")}
+          ${shown.map((photo) => renderPendingOrderEvidencePhotoButton(photo, "team-task-evidence-thumb")).join("")}
         </div>
       ` : `<p class="team-task-evidence-empty">No task photos or video receipt screenshots are attached yet.</p>`}
     </section>
   `;
+}
+
+function getPendingOrderBriefEvidencePhotos(task = {}, events = []) {
+  const allPhotos = [
+    ...getTaskVideoReceiptPhotosForBrief(task),
+    ...getTaskEventEvidencePhotosForBrief(events),
+  ];
+  const seen = new Set();
+  return allPhotos.filter((photo) => {
+    const key = `${photo.bucket || ""}:${photo.path || ""}:${photo.url || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return Boolean(photo.bucket || photo.url);
+  });
+}
+
+function renderPendingOrderEvidencePhotoButton(photo = {}, className = "team-task-evidence-thumb") {
+  const label = photo.label || "Task evidence photo";
+  const imageUrl = photo.thumbnailUrl || photo.url || "";
+  return `
+    <button
+      type="button"
+      class="${escapeHtml(className)}"
+      data-team-task-photo="1"
+      data-bucket="${escapeHtml(photo.bucket || TEAM_TASK_BUCKET)}"
+      data-path="${escapeHtml(photo.path || "")}"
+      data-url="${escapeHtml(photo.url || "")}"
+      data-label="${escapeHtml(label)}"
+      aria-label="Open ${escapeHtml(label)}"
+    >
+      ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(label)}" loading="lazy" />` : `<span class="team-task-evidence-placeholder">Photo</span>`}
+      <span><b>${escapeHtml(photo.kind || "Evidence")}</b><small>${escapeHtml(photo.caption || label)}</small></span>
+    </button>
+  `;
+}
+
+function renderPendingOrderEvidenceStrip(task = {}, events = []) {
+  const photos = getPendingOrderBriefEvidencePhotos(task, events);
+  const shown = photos.slice(0, 3);
+  const extraCount = Math.max(0, photos.length - shown.length);
+  return `
+    <aside class="team-task-evidence-strip">
+      <div class="team-task-evidence-strip-head">
+        <span class="eyebrow">Photos</span>
+        <strong>${photos.length ? `${photos.length} attached` : "None yet"}</strong>
+      </div>
+      ${shown.length ? `
+        <div class="team-task-evidence-strip-thumbs">
+          ${shown.map((photo) => renderPendingOrderEvidencePhotoButton(photo, "team-task-evidence-strip-thumb")).join("")}
+          ${extraCount ? `<span class="team-task-evidence-extra">+${escapeHtml(extraCount)}</span>` : ""}
+        </div>
+      ` : `<p class="team-task-evidence-empty">No photo or receipt attached.</p>`}
+    </aside>
+  `;
+}
+
+function renderPendingOrderCompactStatus(task = {}) {
+  const condition = getPendingOrderEbayCondition(task);
+  const statusMessage = condition.message || getPendingOrderStatusMessage(task);
+  return `
+    <div class="team-task-order-compact-status">
+      <span class="team-task-order-primary-status ${escapeHtml(condition.tone)}">${escapeHtml(condition.shortLabel || condition.label)}</span>
+      ${statusMessage ? `<em class="${condition.tone === "is-danger" ? "is-danger" : ""}">${escapeHtml(statusMessage)}</em>` : ""}
+    </div>
+  `;
+}
+
+function getTaskLineReceiptPhotos(line = {}) {
+  return state.orderVideoReceiptPhotosByLineId.get(line.id) || [];
+}
+
+function normalizeLineReviewDecision(value = "") {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (["approved", "approve", "ok", "accepted", "pass", "passed"].includes(normalized)) return "approved";
+  if (["needs_work", "needs_rework", "rework", "fix", "needs_fix", "rejected", "send_back"].includes(normalized)) return "needs_work";
+  return "";
+}
+
+function getLineReviewArrayFromPayload(payload = {}) {
+  if (!payload || typeof payload !== "object") return [];
+  const candidates = [
+    payload.line_reviews,
+    payload.lineReviews,
+    payload.item_reviews,
+    payload.itemReviews,
+    payload.approval_line_reviews,
+    payload.approvalLineReviews,
+    payload.latest_line_reviews,
+    payload.latestLineReviews,
+  ];
+  return candidates.find((value) => Array.isArray(value)) || [];
+}
+
+function getLineReviewKey(review = {}) {
+  return String(review.line_id || review.order_line_id || review.id || review.lineId || review.orderLineId || "").trim();
+}
+
+function buildLineReviewMapFromReviews(reviews = []) {
+  const map = new Map();
+  reviews.forEach((review) => {
+    const key = getLineReviewKey(review);
+    const decision = normalizeLineReviewDecision(review.decision || review.status || review.result);
+    if (!key || !decision) return;
+    map.set(key, {
+      ...review,
+      decision,
+      note: String(review.note || review.notes || review.reason || "").trim(),
+      reviewed_by_email: review.reviewed_by_email || review.reviewedByEmail || review.signed_by_email || "",
+      reviewed_at: review.reviewed_at || review.reviewedAt || "",
+    });
+  });
+  return map;
+}
+
+function getLatestPendingOrderLineReviewMap(task = {}, events = []) {
+  const payloads = [
+    ...(Array.isArray(events) ? [...events].reverse().map((event) => event.payload) : []),
+    task.metadata,
+  ].filter((payload) => payload && typeof payload === "object");
+
+  for (const payload of payloads) {
+    const reviews = getLineReviewArrayFromPayload(payload);
+    if (!reviews.length) continue;
+    const map = buildLineReviewMapFromReviews(reviews);
+    if (map.size) return map;
+  }
+  return new Map();
+}
+
+function getLineReviewForLine(line = {}, reviewMap = new Map()) {
+  const keys = [line.id, line.order_line_id, line.line_id]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  return keys.map((key) => reviewMap.get(key)).find(Boolean) || null;
+}
+
+function renderLineReviewBadge(review = null) {
+  if (!review?.decision) return "";
+  const approved = review.decision === "approved";
+  const actor = review.reviewed_by_email ? ` by ${review.reviewed_by_email}` : "";
+  return `
+    <span class="team-task-line-review-badge ${approved ? "is-approved" : "needs-work"}">
+      ${escapeHtml(approved ? `Approved${actor}` : `Needs work${actor}`)}
+    </span>
+  `;
+}
+
+function renderPendingOrderApprovalLinePhoto(line = {}, task = {}, index = 0) {
+  const photos = getTaskLineReceiptPhotos(line);
+  const photo = photos[0];
+  const extraCount = Math.max(0, photos.length - 1);
+  const videoReceiptUrl = getTaskLineVideoReceiptUrl(line, task);
+  const label = photo?.label || `Video receipt - ${line.item_number || index + 1}`;
+  const imageUrl = photo?.thumbnailUrl || photo?.previewUrl || photo?.url || "";
+  if (photo) {
+    return `
+      <button
+        type="button"
+        class="team-task-approval-line-photo"
+        data-team-task-photo="1"
+        data-bucket="${escapeHtml(photo.bucket || ORDER_EVIDENCE_BUCKET)}"
+        data-path="${escapeHtml(photo.path || "")}"
+        data-url="${escapeHtml(photo.previewUrl || photo.thumbnailUrl || photo.url || "")}"
+        data-label="${escapeHtml(label)}"
+        aria-label="Open ${escapeHtml(label)}"
+      >
+        ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(label)}" loading="lazy" />` : `<span class="team-task-approval-line-photo-fallback">Receipt</span>`}
+        ${extraCount ? `<em>+${escapeHtml(extraCount)}</em>` : ""}
+      </button>
+    `;
+  }
+  return `
+    <div class="team-task-approval-line-photo is-missing" aria-label="No saved video receipt screenshot">
+      <span>No photo</span>
+      ${videoReceiptUrl ? `<a href="${escapeHtml(videoReceiptUrl)}" target="_blank" rel="noopener">Open receipt</a>` : ""}
+    </div>
+  `;
+}
+
+function renderPendingOrderApprovalLines(task = {}, events = []) {
+  const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
+  if (!lines.length) {
+    return `
+      <section class="team-task-approval-lines">
+        <div class="team-task-approval-lines-head">
+          <span class="eyebrow">Items to approve</span>
+          <strong>No item lines loaded</strong>
+        </div>
+      </section>
+    `;
+  }
+  const shown = lines.slice(0, 10);
+  const hiddenCount = Math.max(0, lines.length - shown.length);
+  const reviewMap = getLatestPendingOrderLineReviewMap(task, events);
+  return `
+    <section class="team-task-approval-lines">
+      <div class="team-task-approval-lines-head">
+        <span class="eyebrow">Items to approve</span>
+        <strong>${escapeHtml(getPendingOrderLineSummary(task) || `${lines.length} line${lines.length === 1 ? "" : "s"}`)}</strong>
+      </div>
+      <div class="team-task-approval-line-list">
+        ${shown.map((line, index) => {
+          const photos = getTaskLineReceiptPhotos(line);
+          const amount = formatMoney(line.total_price || line.sold_for || "");
+          const title = line.item_number ? `${line.item_number} - ${line.item_title || "Untitled item"}` : line.item_title || "Untitled item";
+          const lineReview = getLineReviewForLine(line, reviewMap);
+          const chips = [
+            line.quantity ? `Qty ${line.quantity}` : "Qty 1",
+            amount || "",
+            line.line_status ? formatTaskTag(line.line_status) : "",
+            photos.length ? `Receipt photo ${photos.length}` : "Missing receipt photo",
+          ].filter(Boolean);
+          return `
+            <article class="team-task-approval-line ${photos.length ? "has-photo" : "is-missing-photo"}">
+              ${renderPendingOrderApprovalLinePhoto(line, task, index)}
+              <div class="team-task-approval-line-main">
+                <strong>${escapeHtml(title)}</strong>
+                <div class="team-task-approval-line-meta">
+                  ${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}
+                  ${renderLineReviewBadge(lineReview)}
+                </div>
+                ${lineReview?.note ? `<p class="team-task-line-review-note">${escapeHtml(lineReview.note)}</p>` : ""}
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+      ${hiddenCount ? `<small class="team-task-more">+${escapeHtml(hiddenCount)} more line${hiddenCount === 1 ? "" : "s"} in the order detail drawer</small>` : ""}
+    </section>
+  `;
+}
+
+function shouldShowOrderLineReviewPanel(task = {}, mode = "") {
+  return isOrderPendingApprovalTask(task) && ["order-task-sendback", "order-shipping-assign"].includes(mode);
+}
+
+function getDefaultLineReviewDecision(mode = "") {
+  return mode === "order-task-sendback" ? "needs_work" : "approved";
+}
+
+function renderOrderLineReviewChoice(line = {}, task = {}, mode = "", index = 0, review = null) {
+  const lineId = String(line.id || "").trim();
+  const currentDecision = normalizeLineReviewDecision(review?.decision) || getDefaultLineReviewDecision(mode);
+  const note = String(review?.note || "").trim();
+  const photos = getTaskLineReceiptPhotos(line);
+  const amount = formatMoney(line.total_price || line.sold_for || "");
+  const title = line.item_number ? `${line.item_number} - ${line.item_title || "Untitled item"}` : line.item_title || "Untitled item";
+  const inputName = `team-task-line-review-${lineId || index}`;
+  return `
+    <article class="team-task-line-review-row ${currentDecision === "needs_work" ? "needs-work" : "is-approved"}" data-line-review-row="1" data-line-id="${escapeHtml(lineId)}">
+      ${renderPendingOrderApprovalLinePhoto(line, task, index)}
+      <div class="team-task-line-review-body">
+        <div class="team-task-line-review-title">
+          <strong>${escapeHtml(title)}</strong>
+          <span>${escapeHtml([line.quantity ? `Qty ${line.quantity}` : "Qty 1", amount].filter(Boolean).join(" / "))}</span>
+        </div>
+        <div class="team-task-line-review-controls" role="radiogroup" aria-label="Review ${escapeHtml(title)}">
+          <label class="team-task-line-review-pill is-approved">
+            <input type="radio" name="${escapeHtml(inputName)}" value="approved" ${currentDecision === "approved" ? "checked" : ""} />
+            Approved
+          </label>
+          <label class="team-task-line-review-pill needs-work">
+            <input type="radio" name="${escapeHtml(inputName)}" value="needs_work" ${currentDecision === "needs_work" ? "checked" : ""} />
+            Needs work
+          </label>
+          <span>${escapeHtml(photos.length ? `${photos.length} receipt photo${photos.length === 1 ? "" : "s"}` : "No receipt photo")}</span>
+        </div>
+        <textarea data-line-review-note="1" rows="2" placeholder="Required when this item needs work. Example: missing video receipt, wrong item, needs extra photo.">${escapeHtml(note)}</textarea>
+      </div>
+    </article>
+  `;
+}
+
+function refreshLineReviewRowState(row) {
+  const decision = normalizeLineReviewDecision(row?.querySelector("input[type='radio']:checked")?.value || "");
+  row?.classList.toggle("needs-work", decision === "needs_work");
+  row?.classList.toggle("is-approved", decision === "approved");
+}
+
+function setupLineReviewPanelListeners(panel) {
+  panel.querySelectorAll("[data-line-review-row]").forEach((row) => {
+    refreshLineReviewRowState(row);
+    row.querySelectorAll("input[type='radio']").forEach((input) => {
+      input.addEventListener("change", () => refreshLineReviewRowState(row));
+    });
+  });
+}
+
+function resetLineReviewPanel() {
+  state.lineReviewDecisions = new Map();
+  const panel = $("team-task-line-review-panel");
+  if (!panel) return;
+  panel.classList.add("hidden");
+  panel.innerHTML = "";
+  delete panel.dataset.mode;
+}
+
+function configureOrderLineReviewPanel(task = {}, mode = "") {
+  const panel = $("team-task-line-review-panel");
+  resetLineReviewPanel();
+  if (!panel || !shouldShowOrderLineReviewPanel(task, mode)) return;
+
+  const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
+  const events = state.eventsByTask.get(getUnifiedTaskKey(task)) || [];
+  const reviewMap = getLatestPendingOrderLineReviewMap(task, events);
+  const summary = getPendingOrderLineSummary(task) || `${lines.length} line${lines.length === 1 ? "" : "s"}`;
+  panel.dataset.mode = mode;
+  panel.classList.remove("hidden");
+  panel.innerHTML = `
+    <div class="team-task-line-review-head">
+      <div>
+        <span class="eyebrow">Item Decisions</span>
+        <h3>${escapeHtml(mode === "order-task-sendback" ? "Choose what needs more work" : "Confirm every item is approved")}</h3>
+      </div>
+      <strong>${escapeHtml(summary)}</strong>
+    </div>
+    <p>${escapeHtml(mode === "order-task-sendback"
+      ? "Mark only the item lines that need correction. Approved lines stay documented so the worker can focus on the problem items."
+      : "Every item must be approved before shipping can be assigned. Use Send Back if any line still needs work."
+    )}</p>
+    <div class="team-task-line-review-list">
+      ${lines.length
+        ? lines.map((line, index) => renderOrderLineReviewChoice(line, task, mode, index, getLineReviewForLine(line, reviewMap))).join("")
+        : `<div class="empty-state">No order lines loaded for this approval.</div>`}
+    </div>
+  `;
+  setupLineReviewPanelListeners(panel);
+}
+
+function collectOrderLineReviewDecisions(task = {}, mode = "") {
+  const panel = $("team-task-line-review-panel");
+  if (!panel || panel.classList.contains("hidden")) return { reviews: [], summary: null, error: "" };
+  const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
+  const rows = [...panel.querySelectorAll("[data-line-review-row]")];
+  if (!rows.length) {
+    return { reviews: [], summary: null, error: "No item lines are loaded for this approval. Refresh the task and try again." };
+  }
+  const reviews = rows.map((row, index) => {
+    const lineId = String(row.dataset.lineId || "").trim();
+    const line = lines.find((entry) => String(entry.id || "") === lineId) || lines[index] || {};
+    const decision = normalizeLineReviewDecision(row.querySelector("input[type='radio']:checked")?.value || "");
+    const note = String(row.querySelector("[data-line-review-note]")?.value || "").trim();
+    return {
+      line_id: lineId || line.id || null,
+      order_line_id: lineId || line.id || null,
+      order_number: task.order_number || task.order?.order_number || "",
+      item_number: line.item_number || "",
+      transaction_id: line.transaction_id || "",
+      item_title: line.item_title || "",
+      quantity: Number(line.quantity || 1),
+      line_total: line.total_price || line.sold_for || "",
+      decision,
+      note,
+    };
+  }).filter((review) => review.line_id || review.item_number || review.item_title);
+
+  const missingDecision = reviews.find((review) => !review.decision);
+  if (missingDecision) return { reviews, summary: null, error: "Choose Approved or Needs work for every item line." };
+
+  const needsWorkWithoutNote = reviews.find((review) => review.decision === "needs_work" && !review.note);
+  if (needsWorkWithoutNote) {
+    return { reviews, summary: null, error: "Add a specific note for every item marked Needs work." };
+  }
+
+  const needsWorkCount = reviews.filter((review) => review.decision === "needs_work").length;
+  if (mode === "order-task-sendback" && !needsWorkCount) {
+    return { reviews, summary: null, error: "Mark at least one item as Needs work before sending the order back." };
+  }
+  if (mode === "order-shipping-assign" && needsWorkCount) {
+    return { reviews, summary: null, error: "Use Send Back when any item still needs work." };
+  }
+
+  const summary = {
+    total_count: reviews.length,
+    approved_count: reviews.filter((review) => review.decision === "approved").length,
+    needs_work_count: needsWorkCount,
+  };
+  return { reviews, summary, error: "" };
+}
+
+function buildOrderLineReviewPayload(task = {}, mode = "", lineReview = {}, signedByEmail = "") {
+  if (!lineReview?.reviews?.length) return {};
+  const reviewedAt = new Date().toISOString();
+  const reviews = lineReview.reviews.map((review) => ({
+    ...review,
+    reviewed_at: reviewedAt,
+    reviewed_by_email: signedByEmail,
+  }));
+  return {
+    source: "pending_order_line_review",
+    workflow_type: "pending_order_approval",
+    review_action: mode === "order-task-sendback" ? "send_back_for_rework" : "approve_for_shipping",
+    order_number: task.order_number || task.order?.order_number || "",
+    buyer_username: task.buyer_username || task.order?.buyer_username || "",
+    line_reviews: reviews,
+    line_review_summary: lineReview.summary,
+    reviewed_at: reviewedAt,
+    reviewed_by_email: signedByEmail,
+  };
 }
 
 function renderTaskLineVideoReceiptPhotos(line = {}) {
@@ -2906,7 +3288,7 @@ function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
   const originalInstruction = getTaskOriginalInstruction(task);
   const latestEvent = getLatestTaskEvent(events);
   const latestUpdate = String(latestEvent?.notes || "").trim();
-  const currentInstruction = originalInstruction || task.latest_note || task.title || "No assignment entered yet.";
+  const currentInstruction = originalInstruction || task.latest_note || "No assignment note entered.";
   const hasLatestUpdate = latestUpdate && latestUpdate !== currentInstruction;
   const hasDifferentOriginal = originalInstruction && originalInstruction !== currentInstruction;
   const customerName = getPendingOrderCustomerName(task);
@@ -2916,70 +3298,74 @@ function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
   const late = isTaskLate(task, { canceled });
   const lateAge = getTaskLateAgeLabel(task);
   const dueLabel = getTaskDueLabel(task);
-  const visibleFacts = [
-    task.buyer_username ? { label: "Buyer username", value: task.buyer_username } : null,
-    customerName ? { label: "Customer", value: customerName } : null,
-    task.order_number ? { label: "Order", value: task.order_number } : null,
-    moneyLabel ? { label: "Amount", value: moneyLabel } : null,
-    dueLabel !== "not set" ? { label: late ? "Late due date" : "Due", value: late && lateAge ? `${dueLabel} (${lateAge})` : dueLabel, className: late ? "is-overdue-fact" : "" } : null,
-    { label: "Assigned to", value: getTaskAssigneeLabel(task) },
-  ].filter(Boolean);
+  const orderNumber = task.order_number || order.order_number || "";
+  const placedLabel = order.sale_date ? formatDate(order.sale_date) : "Not loaded";
+  const shipByValue = task.ship_by_date || order.ship_by_date || task.due_at;
+  const shipByLabel = shipByValue ? formatDate(shipByValue) : "Not set";
+  const assignedByLabel = getTaskAssignerLabel(task);
   const advancedFacts = [
     ["Source", getTaskSourceLabel(task)],
     ["Status", canceled ? "Canceled" : getTaskStatusLabel(task.status)],
     ["Priority", formatTaskTag(task.priority || "normal")],
     ["Category", formatTaskTag(task.task_type || "general")],
     lineSummary ? ["Lines / Qty", lineSummary] : null,
-    task.ship_by_date ? ["Ship by", formatDate(task.ship_by_date)] : null,
-    order.sale_date ? ["Sold", formatDate(order.sale_date)] : null,
+    task.due_at ? ["Task due", formatDate(task.due_at)] : null,
+    task.ship_by_date || order.ship_by_date ? ["Ship by", formatDate(task.ship_by_date || order.ship_by_date)] : null,
+    order.sale_date ? ["Placed", formatDate(order.sale_date)] : null,
+    task.assigned_to_email ? ["Assigned to", task.assigned_to_email] : null,
     task.created_by_email ? ["Created by", task.created_by_email] : null,
     latestEvent ? ["Last update", `${formatTaskTag(latestEvent.action || "update")} - ${formatDate(latestEvent.created_at)}`] : null,
   ].filter(Boolean);
 
   return `
     <section class="team-task-brief team-task-order-brief is-pending-order-task ${late ? "is-overdue" : ""}">
-      <div class="team-task-brief-head">
-        <div>
-          <span class="eyebrow">Assignment</span>
-          <strong>${escapeHtml(task.title || task.order_number || "Pending order task")}</strong>
-        </div>
-        <span class="team-task-chip team-task-status-chip ${late ? "team-task-overdue-status-chip" : ""}">${escapeHtml(late ? "Overdue" : canceled ? "Canceled" : getTaskStatusLabel(task.status))}</span>
-      </div>
       ${late ? `
         <p class="team-task-overdue-alert">
           <strong>Order deadline is late</strong>
           <span>${escapeHtml(`Due ${dueLabel}${lateAge ? ` - ${lateAge}` : ""}`)}</span>
         </p>
       ` : ""}
-      <article class="team-task-instruction is-current team-task-order-instruction">
-        <small>What needs to be done</small>
-        <p>${escapeHtml(currentInstruction)}</p>
-      </article>
-      ${hasLatestUpdate ? `
-        <p class="team-task-latest-update"><strong>Latest update</strong><span>${escapeHtml(latestUpdate)}</span></p>
-      ` : ""}
-      <div class="team-task-brief-facts team-task-order-facts">
-        ${visibleFacts.map((fact) => `<span class="${escapeHtml(fact.className || "")}"><small>${escapeHtml(fact.label)}</small><b>${escapeHtml(fact.value)}</b></span>`).join("")}
-      </div>
-      ${renderPendingOrderStatusSnapshot(task)}
-      ${renderPendingOrderEvidencePanel(task, events)}
-      <p class="team-task-next-step"><strong>Next step</strong><span>${escapeHtml(getTaskNextStepLabel(task))}</span></p>
-      ${advancedFacts.length || hasDifferentOriginal ? `
-        <details class="team-task-context-details team-task-brief-details">
-          <summary>More audit details</summary>
-          ${hasDifferentOriginal ? `
-            <article class="team-task-instruction">
-              <small>Original assignment</small>
-              <p>${escapeHtml(originalInstruction)}</p>
-            </article>
-          ` : ""}
-          ${advancedFacts.length ? `
-            <div class="team-task-facts">
-              ${advancedFacts.map(([label, value]) => `<span><small>${escapeHtml(label)}</small><b>${escapeHtml(value)}</b></span>`).join("")}
+      <div class="team-task-order-work-card">
+        <div class="team-task-order-work-main">
+          <div class="team-task-order-work-toolbar">
+            <div class="team-task-order-inline-meta">
+              ${renderTaskOrderNumberAction(orderNumber)}
+              ${customerName ? `<span><small>Customer</small><b>${escapeHtml(customerName)}</b></span>` : ""}
+              ${task.buyer_username ? `<span><small>Buyer</small><b>${escapeHtml(task.buyer_username)}</b></span>` : ""}
+              <span><small>Placed</small><b>${escapeHtml(placedLabel)}</b></span>
+              <span class="${late ? "is-overdue-fact" : ""}"><small>${escapeHtml(late ? "Late due" : "Due")}</small><b>${escapeHtml(shipByLabel)}</b></span>
+              <span><small>Assigned by</small><b>${escapeHtml(assignedByLabel)}</b></span>
+              ${moneyLabel ? `<span><small>Amount</small><b>${escapeHtml(moneyLabel)}</b></span>` : ""}
             </div>
+            ${renderPendingOrderCompactStatus(task)}
+          </div>
+          <article class="team-task-instruction is-current team-task-order-instruction">
+            <small>What needs to be done</small>
+            <p>${escapeHtml(currentInstruction)}</p>
+          </article>
+          ${renderPendingOrderApprovalLines(task, events)}
+          ${hasLatestUpdate ? `
+            <p class="team-task-latest-update"><strong>Latest update</strong><span>${escapeHtml(latestUpdate)}</span></p>
           ` : ""}
-        </details>
-      ` : ""}
+        </div>
+      </div>
+      <details class="team-task-context-details team-task-brief-details team-task-order-audit-details">
+        <summary>Extra eBay status, photos, and audit details</summary>
+        ${renderPendingOrderStatusSnapshot(task)}
+        ${renderPendingOrderEvidencePanel(task, events)}
+        <p class="team-task-next-step"><strong>Next step</strong><span>${escapeHtml(getTaskNextStepLabel(task))}</span></p>
+        ${hasDifferentOriginal ? `
+          <article class="team-task-instruction">
+            <small>Original assignment</small>
+            <p>${escapeHtml(originalInstruction)}</p>
+          </article>
+        ` : ""}
+        ${advancedFacts.length ? `
+          <div class="team-task-facts">
+            ${advancedFacts.map(([label, value]) => `<span><small>${escapeHtml(label)}</small><b>${escapeHtml(value)}</b></span>`).join("")}
+          </div>
+        ` : ""}
+      </details>
     </section>
   `;
 }
@@ -3451,11 +3837,52 @@ function renderOrderTaskActions(task = {}, resolved = false, options = {}) {
   return `<div class="team-task-actions">${buttons.join("")}</div>${renderAdminAssignmentActions(task)}${renderAdminHistoryActions(task)}`;
 }
 
+function renderTaskEventLineReviews(event = {}) {
+  const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
+  const reviews = getLineReviewArrayFromPayload(payload);
+  if (!reviews.length) return "";
+  const summary = payload.line_review_summary || payload.lineReviewSummary || {};
+  const approvedCount = Number(summary.approved_count ?? summary.approvedCount ?? 0);
+  const needsWorkCount = Number(summary.needs_work_count ?? summary.needsWorkCount ?? 0);
+  const totalCount = Number(summary.total_count ?? summary.totalCount ?? reviews.length);
+  return `
+    <div class="team-task-event-line-reviews">
+      <div class="team-task-event-line-reviews-head">
+        <strong>Item decisions</strong>
+        <span>${escapeHtml(`${approvedCount} approved / ${needsWorkCount} needs work / ${totalCount} total`)}</span>
+      </div>
+      <div class="team-task-event-line-review-list">
+        ${reviews.map((review) => {
+          const decision = normalizeLineReviewDecision(review.decision || review.status || review.result);
+          const title = review.item_number
+            ? `${review.item_number} - ${review.item_title || "Untitled item"}`
+            : review.item_title || "Untitled item";
+          const meta = [
+            review.quantity ? `Qty ${review.quantity}` : "",
+            review.line_total ? formatMoney(review.line_total) : "",
+          ].filter(Boolean).join(" / ");
+          return `
+            <article class="team-task-event-line-review ${decision === "approved" ? "is-approved" : "needs-work"}">
+              <div>
+                <strong>${escapeHtml(title)}</strong>
+                ${meta ? `<span>${escapeHtml(meta)}</span>` : ""}
+              </div>
+              <b>${escapeHtml(decision === "approved" ? "Approved" : "Needs work")}</b>
+              ${review.note ? `<p>${escapeHtml(review.note)}</p>` : ""}
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderTaskEvent(event = {}) {
   const photos = Array.isArray(event.photo_attachments) ? event.photo_attachments : [];
   const actionLabel = formatTaskTag(event.action || "commented") || "Commented";
   const statusLabel = getTaskStatusLabel(event.new_status || event.old_status || "");
   const actorLabel = event.signed_by_email || "logged-in user";
+  const lineReviewHtml = renderTaskEventLineReviews(event);
   const photoHtml = photos.length
     ? `<div class="team-task-event-photos">${photos.map((photo, index) => {
         const label = photo.label || `Photo ${index + 1}`;
@@ -3490,6 +3917,7 @@ function renderTaskEvent(event = {}) {
         <span>${escapeHtml(formatDate(event.created_at))}</span>
       </div>
       ${event.notes ? `<p>${escapeHtml(event.notes)}</p>` : ""}
+      ${lineReviewHtml}
       <div class="team-task-event-signature">
         <span>Signed by ${escapeHtml(actorLabel)}</span>
         ${event.old_status && event.new_status && event.old_status !== event.new_status ? `<span>${escapeHtml(getTaskStatusLabel(event.old_status))} to ${escapeHtml(getTaskStatusLabel(event.new_status))}</span>` : ""}
@@ -4023,6 +4451,7 @@ function closeModal() {
   state.activeTaskId = "";
   state.activeTaskSource = "";
   resetPhotos();
+  resetLineReviewPanel();
   setModalError("");
   setPhotoStatus("");
 }
@@ -4217,6 +4646,7 @@ function configureOrderWorkflowModal(task, options = {}) {
     due: (canManageFields && !isCancelApproval) || isShippingReadyPackaging,
     status: false,
   });
+  configureOrderLineReviewPanel(task, mode);
 
   openModal();
   setTimeout(() => (isSubtaskCreate ? $("team-task-title-input") : $("team-task-note"))?.focus(), 80);
@@ -4514,12 +4944,14 @@ async function saveOrderWorkflowUpdate({
   priority = null,
   dueAt = null,
   photos = [],
+  payload = null,
   successMessage = "Pending order task updated.",
   reload = true,
 } = {}) {
   if (!task?.id) throw new Error("Missing pending order task.");
   const signedByEmail = state.user?.email || state.employee?.email || state.employee?.display_name || "";
-  const { error } = await supabase.rpc("respond_ebay_order_coordination_task", {
+  const hasPayload = payload && typeof payload === "object" && Object.keys(payload).length > 0;
+  const rpcArgs = {
     _task_id: task.id,
     _note: note || null,
     _assigned_to_user_id: assignedToUserId || null,
@@ -4528,7 +4960,13 @@ async function saveOrderWorkflowUpdate({
     _photo_attachments: photos,
     _signed_by_email: signedByEmail,
     _due_at: dueAt || null,
-  });
+  };
+  if (hasPayload) rpcArgs._payload = payload;
+
+  const { error } = await supabase.rpc(
+    hasPayload ? "respond_ebay_order_coordination_task_with_payload" : "respond_ebay_order_coordination_task",
+    rpcArgs
+  );
   if (error) throw error;
   setStatus(successMessage, "success");
   if (reload) await loadTasks();
@@ -4588,6 +5026,9 @@ async function submitOrderWorkflowTask() {
       ? "Add photo proof of the packaged item and shipping label before marking shipped."
       : "Add an audit photo before marking this ready for packaging.");
   }
+  const needsLineReview = shouldShowOrderLineReviewPanel(task, mode);
+  const lineReview = needsLineReview ? collectOrderLineReviewDecisions(task, mode) : { reviews: [], summary: null, error: "" };
+  if (lineReview.error) return setModalError(lineReview.error);
 
   if (mode === "order-shipping-assign" && !window.confirm("Approve this pending order for shipment and assign the shipping task?")) return;
   if (mode === "order-task-complete" && !window.confirm("Mark this task completed and send it back to admin review?")) return;
@@ -4609,6 +5050,7 @@ async function submitOrderWorkflowTask() {
   try {
     const photos = await uploadPhotos(title || task.title || "pending-order-task");
     const signedByEmail = state.user?.email || state.employee?.email || state.employee?.display_name || "";
+    const lineReviewPayload = needsLineReview ? buildOrderLineReviewPayload(task, mode, lineReview, signedByEmail) : null;
 
     if (mode === "order-subtask-create") {
       const { error } = await supabase.rpc("create_ebay_order_subtask", {
@@ -4701,6 +5143,7 @@ async function submitOrderWorkflowTask() {
         priority,
         dueAt,
         photos,
+        payload: lineReviewPayload,
         successMessage: "Order sent back for correction.",
       });
     } else if (mode === "order-task-cancel-approval") {
@@ -4712,6 +5155,16 @@ async function submitOrderWorkflowTask() {
         successMessage: "Approval request cancelled.",
       });
     } else if (mode === "order-shipping-assign") {
+      if (lineReviewPayload) {
+        await saveOrderWorkflowUpdate({
+          task,
+          note: note || "All submitted item lines approved for shipment.",
+          photos,
+          payload: lineReviewPayload,
+          reload: false,
+          successMessage: "Line review saved.",
+        });
+      }
       const { error } = await supabase.rpc("assign_ebay_order_shipping_task", {
         _parent_task_id: task.id,
         _assigned_to_user_id: assigneeId,

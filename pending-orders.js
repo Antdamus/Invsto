@@ -4242,16 +4242,31 @@ function setOrderTaskError(message = "") {
   if (el) el.textContent = message || "";
 }
 
-function renderOrderTaskAssigneeSelect() {
+function isAdminOrderTaskAssignee(employee = {}) {
+  return String(employee.role || "").toLowerCase() === "admin";
+}
+
+function getOrderTaskAdminAssignees() {
+  return state.orderTaskAssignees.filter(isAdminOrderTaskAssignee);
+}
+
+function setOrderTaskAssigneeLabel(text = "Assign To") {
+  const label = $("order-task-assignee-label");
+  if (label) label.textContent = text;
+}
+
+function renderOrderTaskAssigneeSelect(options = {}) {
   const select = $("order-task-assignee");
   if (!select) return;
+  const adminOnly = Boolean(options.adminOnly);
+  const employees = adminOnly ? getOrderTaskAdminAssignees() : state.orderTaskAssignees;
   const currentValue = select.value || "";
-  select.replaceChildren(new Option("Leave unassigned", ""));
-  state.orderTaskAssignees.forEach((employee) => {
+  select.replaceChildren(new Option(adminOnly ? "Choose admin reviewer..." : "Leave unassigned", ""));
+  employees.forEach((employee) => {
     const label = `${employee.display_name || employee.email || "Team member"} - ${employee.role || "employee"}`;
     select.appendChild(new Option(label, employee.user_id || ""));
   });
-  select.value = state.orderTaskAssignees.some((employee) => employee.user_id === currentValue)
+  select.value = employees.some((employee) => employee.user_id === currentValue)
     ? currentValue
     : "";
 }
@@ -4275,9 +4290,9 @@ function configureOrderTaskStatusOptionsForProgress(progressMode = false) {
   }
 }
 
-async function loadOrderTaskAssignees() {
+async function loadOrderTaskAssignees(options = {}) {
   if (state.orderTaskAssignees.length) {
-    renderOrderTaskAssigneeSelect();
+    renderOrderTaskAssigneeSelect(options);
     return state.orderTaskAssignees;
   }
 
@@ -4309,7 +4324,7 @@ async function loadOrderTaskAssignees() {
     }
   }
 
-  renderOrderTaskAssigneeSelect();
+  renderOrderTaskAssigneeSelect(options);
   return state.orderTaskAssignees;
 }
 
@@ -5307,14 +5322,15 @@ async function openOrderTaskModal(options = {}) {
   $("order-task-status").value = task ? options.progress ? "deferred" : "" : "";
   configureOrderTaskStatusOptionsForProgress(Boolean(options.progress));
   $("order-task-due-at").value = toDateTimeLocalValue(task?.due_at || (isApprovalMode ? getEarliestShipByForLines(approvalLines) : !task ? line.order?.ship_by_date : ""));
-  setOrderTaskFieldVisible("order-task-assignee", !isApprovalMode && !options.progress && (!task || isRealAdminUser()));
+  setOrderTaskFieldVisible("order-task-assignee", !options.progress && (isApprovalMode || !task || isRealAdminUser()));
   setOrderTaskFieldVisible("order-task-priority", !options.progress);
   setOrderTaskFieldVisible("order-task-due-at", true);
+  setOrderTaskAssigneeLabel(isApprovalMode ? "Admin reviewer" : "Assign To");
   $("order-task-context").innerHTML = isApprovalMode
     ? `
       <strong>${approvalOrderCount.toLocaleString()} order${approvalOrderCount === 1 ? "" : "s"} - ${escapeHtml(line.order?.buyer_username || "unknown buyer")}</strong>
       <span>${approvalLineCount.toLocaleString()} pending line${approvalLineCount === 1 ? "" : "s"} will be queued for admin approval.</span>
-      <span>Admin must approve or send it back before shipment.</span>
+      <span>Choose the admin responsible for approving or sending it back before shipment.</span>
     `
     : `
       <strong>${escapeHtml(line.order?.order_number || "eBay order")} - ${escapeHtml(line.order?.buyer_username || "unknown buyer")}</strong>
@@ -5322,11 +5338,13 @@ async function openOrderTaskModal(options = {}) {
       ${task ? `<span>Current: ${escapeHtml(getOrderTaskStatusLabel(task.status))} / assigned to ${escapeHtml(getOrderTaskAssigneeLabel(task))}</span>` : ""}
     `;
 
-  await loadOrderTaskAssignees();
+  await loadOrderTaskAssignees({ adminOnly: isApprovalMode });
   const assignee = $("order-task-assignee");
   if (assignee) {
-    const defaultAdmin = state.orderTaskAssignees.find((employee) => String(employee.role || "").toLowerCase() === "admin");
-    assignee.value = isApprovalMode ? "" : task?.assigned_to_user_id || (!task && !isAdminUser() ? defaultAdmin?.user_id || "" : "");
+    const adminAssignees = getOrderTaskAdminAssignees();
+    const currentAdmin = adminAssignees.find((employee) => employee.user_id === state.user?.id);
+    const defaultAdmin = currentAdmin || adminAssignees[0];
+    assignee.value = isApprovalMode ? defaultAdmin?.user_id || "" : task?.assigned_to_user_id || (!task && !isAdminUser() ? defaultAdmin?.user_id || "" : "");
   }
 
   openModal("order-task-modal");
@@ -5351,14 +5369,24 @@ async function submitOrderTask() {
   try {
     const isApprovalMode = state.orderTaskMode === "approval";
     const lineIds = isApprovalMode ? getOrderTaskLineIdsForApproval() : getOrderTaskLineIdsForSelectedOrder();
-    const photos = await persistOrderTaskPhotos(lineIds);
     const isProgressUpdate = state.orderTaskMode === "progress";
     const isExistingTaskUpdate = state.orderTaskMode === "reply" || state.orderTaskMode === "progress";
     const assigneeUserId = isProgressUpdate || (isExistingTaskUpdate && !isRealAdminUser())
       ? null
       : $("order-task-assignee")?.value || null;
+    const assigneeLabel = $("order-task-assignee")?.selectedOptions?.[0]?.textContent || "";
     const priority = isProgressUpdate ? null : $("order-task-priority")?.value || (isApprovalMode ? "high" : "normal");
     const signedByEmail = state.user?.email || state.employee?.display_name || "";
+
+    if (isApprovalMode) {
+      if (!assigneeUserId) {
+        setOrderTaskPhotoStatus("");
+        setOrderTaskError("Choose the admin who should review this order before sending it for approval.");
+        return;
+      }
+    }
+
+    const photos = await persistOrderTaskPhotos(lineIds);
 
     if (isApprovalMode) {
       const approvalGroups = getApprovalOrderGroupsFromLineIds(lineIds);
@@ -5372,10 +5400,11 @@ async function submitOrderTask() {
           _due_at: localDateTimeToIso($("order-task-due-at")?.value || "") || approvalGroup.order?.ship_by_date || null,
           _photo_attachments: photos,
           _signed_by_email: signedByEmail,
+          _assigned_to_user_id: assigneeUserId,
         });
         if (error) throw error;
       }
-      setStatus(`${approvalGroups.length.toLocaleString()} order${approvalGroups.length === 1 ? "" : "s"} sent for admin approval.`, "success");
+      setStatus(`${approvalGroups.length.toLocaleString()} order${approvalGroups.length === 1 ? "" : "s"} sent to ${assigneeLabel || "admin"} for approval.`, "success");
     } else if ((state.orderTaskMode === "reply" || state.orderTaskMode === "progress") && state.activeOrderTaskId) {
       const { error } = await supabase.rpc("respond_ebay_order_coordination_task", {
         _task_id: state.activeOrderTaskId,
