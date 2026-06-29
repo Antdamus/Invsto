@@ -3863,6 +3863,11 @@ body.pending-order-detail-open .mobile-detail-close {
   color: #ffd6d6 !important;
 }
 
+.buyer-line-action-btn.refund-btn {
+  border-color: rgba(116, 211, 255, 0.34) !important;
+  color: #cceeff !important;
+}
+
 .buyer-card-value,
 .status-badge,
 .urgency-pill,

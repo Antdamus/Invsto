@@ -42,6 +42,7 @@ const state = {
   noInventoryCaptureBusy: false,
   workerCancelCandidates: [],
   workerCancelLineIds: new Set(),
+  workerCancelMode: "cancelled",
   workerCancelEvidencePhotos: [],
   workerCancelEvidencePhotoUploadKeys: new Set(),
   workerCancelCaptureBusy: false,
@@ -3319,6 +3320,7 @@ function renderOrders() {
           <span class="buyer-line-actions">
             <button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) ? "" : "disabled"}>Get Label</button>
             ${lineTaskActionMarkup}
+            <button type="button" class="secondary-btn buyer-line-action-btn refund-btn" data-line-refund="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Refunded</button>
             <button type="button" class="secondary-btn buyer-line-action-btn danger-btn" data-line-cancel="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Cancel</button>
           </span>
           <span class="buyer-line-receipt-actions">
@@ -3367,6 +3369,10 @@ function renderOrders() {
       button.querySelector("[data-line-cancel]")?.addEventListener("click", () => {
         selectOrderLine(line.id, { openDetail: false });
         openWorkerCancelOrderModal({ lineIds: [line.id], openEbayCancel: true });
+      });
+      button.querySelector("[data-line-refund]")?.addEventListener("click", () => {
+        selectOrderLine(line.id, { openDetail: false });
+        openWorkerCancelOrderModal({ lineIds: [line.id], mode: "refunded" });
       });
       button.querySelector("[data-line-manual-video-receipt]")?.addEventListener("click", (event) => {
         event.preventDefault();
@@ -7192,10 +7198,11 @@ function updateWorkerCancelEvidencePhotoSelectionSummary() {
 function renderWorkerCancelEvidencePhotos() {
   const grid = $("worker-cancel-photo-grid");
   if (!grid) return;
+  const isRefund = state.workerCancelMode === "refunded";
   const toolbar = document.querySelector(".worker-cancel-photo-toolbar");
   toolbar?.classList.toggle("hidden", !state.workerCancelEvidencePhotos.length);
   if (!state.workerCancelEvidencePhotos.length) {
-    grid.innerHTML = `<div class="empty-state">No cancellation photos added.</div>`;
+    grid.innerHTML = `<div class="empty-state">No ${isRefund ? "refund" : "cancellation"} photos added.</div>`;
     updateWorkerCancelEvidencePhotoSelectionSummary();
     return;
   }
@@ -7213,9 +7220,9 @@ function renderWorkerCancelEvidencePhotos() {
           />
           <span>Upload</span>
         </label>
-        <button type="button" data-worker-cancel-photo-index="${index}" title="Open cancellation photo">
-          <img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `Cancellation photo ${index + 1}`)}" />
-          <span>${escapeHtml(photo.label || `Cancellation photo ${index + 1}`)}</span>
+        <button type="button" data-worker-cancel-photo-index="${index}" title="Open ${isRefund ? "refund" : "cancellation"} photo">
+          <img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `${isRefund ? "Refund" : "Cancellation"} photo ${index + 1}`)}" />
+          <span>${escapeHtml(photo.label || `${isRefund ? "Refund" : "Cancellation"} photo ${index + 1}`)}</span>
         </button>
       </article>
     `;
@@ -7249,22 +7256,24 @@ function setAllWorkerCancelEvidencePhotosSelected(selected) {
 function openWorkerCancelEvidencePhotoViewer(index) {
   const photo = state.workerCancelEvidencePhotos[index];
   if (!photo?.previewUrl) return;
+  const isRefund = state.workerCancelMode === "refunded";
   const image = $("no-inventory-photo-viewer-image");
   const caption = $("no-inventory-photo-viewer-caption");
   state.evidencePhotoViewerZoom = 1;
   if (image) {
     image.src = photo.previewUrl;
-    image.alt = photo.label || `Cancellation photo ${index + 1}`;
+    image.alt = photo.label || `${isRefund ? "Refund" : "Cancellation"} photo ${index + 1}`;
     image.style.transform = "scale(1)";
   }
   if (caption) {
-    caption.textContent = `${photo.label || `Cancellation photo ${index + 1}`} - ${photo.bucket ? `${photo.bucket}/${photo.path}` : photo.path || "local file"}`;
+    caption.textContent = `${photo.label || `${isRefund ? "Refund" : "Cancellation"} photo ${index + 1}`} - ${photo.bucket ? `${photo.bucket}/${photo.path}` : photo.path || "local file"}`;
   }
   openModal("no-inventory-photo-viewer-modal");
   setTimeout(() => $("dismiss-no-inventory-photo-viewer")?.focus(), 80);
 }
 
 function handleWorkerCancelEvidenceFiles(event) {
+  const isRefund = state.workerCancelMode === "refunded";
   const files = [...(event.target?.files || [])].filter((file) => /^image\//i.test(file.type || ""));
   if (!files.length) {
     setWorkerCancelPhotoStatus("Choose image files to attach.", "error");
@@ -7288,7 +7297,7 @@ function handleWorkerCancelEvidenceFiles(event) {
     state.workerCancelEvidencePhotoUploadKeys.add(localId);
   });
   renderWorkerCancelEvidencePhotos();
-  setWorkerCancelPhotoStatus(`${files.length} folder photo${files.length === 1 ? "" : "s"} added and selected.`, "info");
+  setWorkerCancelPhotoStatus(`${files.length} ${isRefund ? "refund" : "cancellation"} photo${files.length === 1 ? "" : "s"} added and selected.`, "info");
   if (event.target) event.target.value = "";
 }
 
@@ -7298,6 +7307,9 @@ async function persistWorkerCancelEvidencePhotos(selectedLineIds = []) {
 
   const dateFolder = new Date().toISOString().slice(0, 10);
   const orderLabel = getNoInventoryEvidenceSourceLabel();
+  const isRefund = state.workerCancelMode === "refunded";
+  const evidenceFolder = isRefund ? "pending-order-refunds" : "pending-order-cancellations";
+  const evidenceLabel = isRefund ? "refund" : "cancel";
   const selectedSuffix = selectedLineIds.length === 1
     ? safeNoInventoryEvidenceSegment(selectedLineIds[0], "line")
     : `${selectedLineIds.length}-lines`;
@@ -7307,9 +7319,9 @@ async function persistWorkerCancelEvidencePhotos(selectedLineIds = []) {
     const photo = selectedPhotos[index];
     const blob = await getEvidencePhotoBlob(photo, index);
     const extension = getNoInventoryEvidenceFileExtension(photo, blob);
-    const originalName = safeNoInventoryEvidenceSegment(String(photo.path || photo.label || "").split("/").pop(), `cancel-photo-${index + 1}`);
+    const originalName = safeNoInventoryEvidenceSegment(String(photo.path || photo.label || "").split("/").pop(), `${evidenceLabel}-photo-${index + 1}`);
     const destinationPath = [
-      "pending-order-cancellations",
+      evidenceFolder,
       dateFolder,
       orderLabel,
       `${Date.now()}-${crypto.randomUUID()}-${selectedSuffix}-${originalName}.${extension}`,
@@ -7322,7 +7334,7 @@ async function persistWorkerCancelEvidencePhotos(selectedLineIds = []) {
         upsert: false,
       });
 
-    if (error) throw new Error(error.message || `Could not save cancellation photo ${index + 1}.`);
+    if (error) throw new Error(error.message || `Could not save ${isRefund ? "refund" : "cancellation"} photo ${index + 1}.`);
 
     const derivativeData = await createAndUploadEvidenceDerivatives(blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath);
     savedPhotos.push({
@@ -7333,7 +7345,7 @@ async function persistWorkerCancelEvidencePhotos(selectedLineIds = []) {
       source_path: photo.path || null,
       capture_job_id: photo.capture_job_id || null,
       sort_order: index,
-      label: photo.label || `Cancellation photo ${index + 1}`,
+      label: photo.label || `${isRefund ? "Refund" : "Cancellation"} photo ${index + 1}`,
       mime_type: blob.type || photo.mime_type || null,
       size_bytes: blob.size || photo.size_bytes || 0,
       created_at: new Date().toISOString(),
@@ -7345,6 +7357,7 @@ async function persistWorkerCancelEvidencePhotos(selectedLineIds = []) {
 
 async function requestWorkerCancelEvidencePhoto() {
   if (state.workerCancelCaptureBusy) return;
+  const isRefund = state.workerCancelMode === "refunded";
   try {
     state.workerCancelCaptureBusy = true;
     $("request-worker-cancel-photo")?.toggleAttribute("disabled", true);
@@ -7355,7 +7368,7 @@ async function requestWorkerCancelEvidencePhoto() {
 
     const station = getSelectedNoInventoryCaptureStation();
     if (!station) {
-      setWorkerCancelPhotoStatus("Choose a camera station before taking cancellation photos.", "error");
+      setWorkerCancelPhotoStatus(`Choose a camera station before taking ${isRefund ? "refund" : "cancellation"} photos.`, "error");
       $("worker-cancel-capture-station")?.focus();
       return;
     }
@@ -7365,7 +7378,7 @@ async function requestWorkerCancelEvidencePhoto() {
 
     window.dispatchEvent(new CustomEvent("assisted:iphone-capture-requested", {
       detail: {
-        source: "pending-order-cancelled",
+        source: isRefund ? "pending-order-refunded" : "pending-order-cancelled",
         stationId: station.id,
         stationName: station.name || "",
         jobId: job.id,
@@ -7386,7 +7399,7 @@ async function requestWorkerCancelEvidencePhoto() {
         storage_bucket: completedJob.storage_bucket,
         storage_path: completedJob.storage_path,
         mime_type: completedJob.mime_type || "image/jpeg",
-        label: "Cancellation photo",
+        label: `${isRefund ? "Refund" : "Cancellation"} photo`,
         created_at: completedJob.capture_completed_at || completedJob.upload_completed_at || new Date().toISOString(),
       }];
     }
@@ -7402,10 +7415,10 @@ async function requestWorkerCancelEvidencePhoto() {
       }
     });
     renderWorkerCancelEvidencePhotos();
-    setWorkerCancelPhotoStatus(`${photos.length} cancellation photo${photos.length === 1 ? "" : "s"} added and selected.`, "info");
+    setWorkerCancelPhotoStatus(`${photos.length} ${isRefund ? "refund" : "cancellation"} photo${photos.length === 1 ? "" : "s"} added and selected.`, "info");
   } catch (error) {
-    console.error("Cancellation evidence photo capture failed:", error);
-    setWorkerCancelPhotoStatus(error?.message || "Could not take cancellation photo.", "error");
+    console.error(`${isRefund ? "Refund" : "Cancellation"} evidence photo capture failed:`, error);
+    setWorkerCancelPhotoStatus(error?.message || `Could not take ${isRefund ? "refund" : "cancellation"} photo.`, "error");
   } finally {
     state.workerCancelCaptureBusy = false;
     $("request-worker-cancel-photo")?.toggleAttribute("disabled", false);
@@ -7825,8 +7838,9 @@ function setAllWorkerCancelOrderLines(checked) {
 function renderWorkerCancelOrderList() {
   const list = $("worker-cancel-order-list");
   if (!list) return;
+  const isRefund = state.workerCancelMode === "refunded";
   if (!state.workerCancelCandidates.length) {
-    list.innerHTML = `<div class="empty-state">No open lines are available to cancel for this order.</div>`;
+    list.innerHTML = `<div class="empty-state">No open lines are available to mark ${isRefund ? "refunded" : "canceled"} for this order.</div>`;
     updateWorkerCancelOrderSelectionSummary();
     return;
   }
@@ -7836,7 +7850,7 @@ function renderWorkerCancelOrderList() {
     const selected = state.workerCancelLineIds.has(line.id);
     return `
       <article class="bundle-review-item no-inventory-line ${selected ? "is-selected" : ""}" data-worker-cancel-card="${escapeHtml(line.id)}">
-        <label class="no-inventory-check" aria-label="Select canceled line">
+        <label class="no-inventory-check" aria-label="Select ${isRefund ? "refunded" : "canceled"} line">
           <input type="checkbox" data-worker-cancel-line="${escapeHtml(line.id)}" ${selected ? "checked" : ""} />
         </label>
         <div class="bundle-review-copy">
@@ -7909,11 +7923,13 @@ function closeWorkerCancelOrderModal(options = {}) {
   });
   state.workerCancelCandidates = [];
   state.workerCancelLineIds = new Set();
+  state.workerCancelMode = "cancelled";
   state.workerCancelEvidencePhotos = [];
   state.workerCancelEvidencePhotoUploadKeys.clear();
   $("worker-cancel-order-note").value = "";
   $("worker-cancel-order-password").value = "";
   $("worker-cancel-order-error").textContent = "";
+  $("open-ebay-cancel-flow")?.classList.remove("hidden");
   setWorkerCancelPhotoStatus("");
   renderWorkerCancelEvidencePhotos();
   $("worker-cancel-order-modal")?.classList.remove("is-proof-attached");
@@ -7923,6 +7939,7 @@ function closeWorkerCancelOrderModal(options = {}) {
 
 function openWorkerCancelOrderModal(options = {}) {
   const line = state.selectedLine;
+  const isRefund = options.mode === "refunded";
   if (!line) {
     setStatus("Select an eBay order first.", "error");
     return;
@@ -7934,7 +7951,7 @@ function openWorkerCancelOrderModal(options = {}) {
 
   const candidates = getCancelableOrderLines(line);
   if (!candidates.length) {
-    setStatus("No open lines are available to cancel for this order.", "error");
+    setStatus(`No open lines are available to mark ${isRefund ? "refunded" : "canceled"} for this order.`, "error");
     return;
   }
 
@@ -7945,23 +7962,39 @@ function openWorkerCancelOrderModal(options = {}) {
   const initialLineIds = requestedLineIds.length ? requestedLineIds : candidates.map((entry) => entry.id);
   state.workerCancelCandidates = candidates;
   state.workerCancelLineIds = new Set(initialLineIds);
+  state.workerCancelMode = isRefund ? "refunded" : "cancelled";
   state.workerCancelEvidencePhotos.forEach((photo) => {
     if (photo?.localId && photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
   });
   state.workerCancelEvidencePhotos = [];
   state.workerCancelEvidencePhotoUploadKeys.clear();
-  $("worker-cancel-order-title").textContent = `Mark ${order.order_number || "this order"} canceled?`;
+  $("worker-cancel-order-eyebrow").textContent = isRefund ? "Refund verified" : "Canceled on eBay";
+  $("worker-cancel-order-title").textContent = isRefund
+    ? `Mark ${order.order_number || "this order"} refunded?`
+    : `Mark ${order.order_number || "this order"} canceled?`;
   $("worker-cancel-order-subtitle").textContent =
-    `This closes ${initialLineIds.length} selected open line(s) for ${order.buyer_username || "this buyer"} as canceled. It will be signed by your logged-in account and recorded in Order History.`;
+    isRefund
+      ? `This closes ${initialLineIds.length} selected open line(s) for ${order.buyer_username || "this buyer"} as refunded. No inventory will be removed, and the signed audit trail will stay in Order History.`
+      : `This closes ${initialLineIds.length} selected open line(s) for ${order.buyer_username || "this buyer"} as canceled. It will be signed by your logged-in account and recorded in Order History.`;
   $("worker-cancel-order-note").value = "";
+  $("worker-cancel-order-note").placeholder = isRefund
+    ? "Example: Refund verified in eBay; do not ship."
+    : "Example: Buyer canceled on eBay / order refunded.";
   $("worker-cancel-order-password").value = "";
+  $("worker-cancel-order-password").placeholder = isRefund ? "Sign this refund verification" : "Sign this cancellation";
   $("worker-cancel-order-error").textContent = "";
+  $("worker-cancel-evidence-title").textContent = isRefund ? "Refund Evidence" : "Cancellation Evidence";
+  $("worker-cancel-evidence-copy").textContent = isRefund
+    ? "Attach proof when the refund needs extra context. These photos are saved with the signed audit trail."
+    : "Attach photos when the cancellation needs proof or extra context. These photos are saved with the signed audit trail.";
+  $("confirm-worker-cancel-order").textContent = isRefund ? "Sign and Mark Refunded" : "Sign and Mark Canceled";
+  $("open-ebay-cancel-flow")?.classList.toggle("hidden", isRefund);
   setWorkerCancelPhotoStatus("");
   renderWorkerCancelOrderList();
   renderWorkerCancelEvidencePhotos();
   openModal("worker-cancel-order-modal");
   setTimeout(() => $("worker-cancel-order-note")?.focus(), 80);
-  if (options.openEbayCancel) {
+  if (options.openEbayCancel && !isRefund) {
     openEbayCancelFlowForWorkerModal({ silent: true });
     setWorkerCancelPhotoStatus("eBay cancellation opened. After eBay confirms it, use the OG proof button on the eBay confirmation page.", "info");
   }
@@ -7986,6 +8019,7 @@ function isRpcSchemaCacheMiss(error, functionName) {
 
 function buildCancellationEvidenceFallbackNote(note, savedEvidencePhotos = []) {
   if (!savedEvidencePhotos.length) return note;
+  const isRefund = state.workerCancelMode === "refunded";
   const evidenceLines = savedEvidencePhotos
     .map((photo, index) => {
       const bucket = photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET;
@@ -7997,7 +8031,7 @@ function buildCancellationEvidenceFallbackNote(note, savedEvidencePhotos = []) {
   return [
     note,
     "",
-    "Cancellation proof saved in OG evidence storage:",
+    `${isRefund ? "Refund" : "Cancellation"} proof saved in OG evidence storage:`,
     ...evidenceLines,
   ].join("\n");
 }
@@ -8006,13 +8040,14 @@ async function confirmWorkerCancelOrder() {
   if (state.busy) return;
   const errorEl = $("worker-cancel-order-error");
   const confirmButton = $("confirm-worker-cancel-order");
+  const isRefund = state.workerCancelMode === "refunded";
   const note = String($("worker-cancel-order-note")?.value || "").trim();
   const password = String($("worker-cancel-order-password")?.value || "").trim();
   const validCandidateIds = new Set(state.workerCancelCandidates.map((line) => line.id));
   const selectedLineIds = [...state.workerCancelLineIds].filter((lineId) => validCandidateIds.has(lineId));
 
   if (!selectedLineIds.length) {
-    if (errorEl) errorEl.textContent = "Select at least one pending order line to cancel.";
+    if (errorEl) errorEl.textContent = `Select at least one pending order line to mark ${isRefund ? "refunded" : "canceled"}.`;
     return;
   }
   if (!note) {
@@ -8042,9 +8077,9 @@ async function confirmWorkerCancelOrder() {
     const selectedPhotoCount = getSelectedWorkerCancelEvidencePhotos().length;
     setWorkerCancelPhotoStatus(
       selectedPhotoCount
-        ? "Saving selected cancellation photos into the order evidence repository..."
+        ? `Saving selected ${isRefund ? "refund" : "cancellation"} photos into the order evidence repository...`
         : state.workerCancelEvidencePhotos.length
-          ? "No cancellation photos selected for upload; signing cancellation without photo proof."
+          ? `No ${isRefund ? "refund" : "cancellation"} photos selected for upload; signing ${isRefund ? "refund verification" : "cancellation"} without photo proof.`
           : "",
       "info"
     );
@@ -8057,9 +8092,12 @@ async function confirmWorkerCancelOrder() {
       _checkout_store_id: state.checkoutStoreId || null,
       _evidence_photos: savedEvidencePhotos,
     };
-    let { data, error } = await supabase.rpc("cancel_ebay_order_lines", cancellationPayload);
-    const canRetryLegacyCancel =
-      isRpcSchemaCacheMiss(error, "cancel_ebay_order_lines");
+    const rpcName = isRefund ? "refund_ebay_order_lines" : "cancel_ebay_order_lines";
+    let { data, error } = await supabase.rpc(rpcName, cancellationPayload);
+    if (isRefund && isRpcSchemaCacheMiss(error, rpcName)) {
+      throw new Error("Refund closeout is not deployed yet. Push the new Supabase migration, then try again.");
+    }
+    const canRetryLegacyCancel = !isRefund && isRpcSchemaCacheMiss(error, "cancel_ebay_order_lines");
 
     if (canRetryLegacyCancel) {
       const legacyPayload = { ...cancellationPayload };
@@ -8082,10 +8120,10 @@ async function confirmWorkerCancelOrder() {
 
     selectedLineIds.forEach((lineId) => state.stagedFulfillments.delete(lineId));
     closeWorkerCancelOrderModal({ suppressMobileReturn: true });
-    setStatus(`${data?.[0]?.updated_lines || selectedLineIds.length} line(s) marked canceled. The signed audit trail was recorded.`, "info");
+    setStatus(`${data?.[0]?.updated_lines || selectedLineIds.length} line(s) marked ${isRefund ? "refunded" : "canceled"}. The signed audit trail was recorded.`, "info");
     await loadOrders();
     postEbayPendingQueueChanged({
-      action: "worker_cancelled_order",
+      action: isRefund ? "worker_refunded_order" : "worker_cancelled_order",
       orderNumbers: cancelledOrderNumbers,
       lineCount: selectedLineIds.length,
       updatedLines: data?.[0]?.updated_lines || selectedLineIds.length,
@@ -8098,8 +8136,8 @@ async function confirmWorkerCancelOrder() {
     }
     clearSelection();
   } catch (error) {
-    console.error("Worker order cancellation failed:", error);
-    if (errorEl) errorEl.textContent = error.message || "Could not mark this order canceled.";
+    console.error(`Worker order ${isRefund ? "refund" : "cancellation"} closeout failed:`, error);
+    if (errorEl) errorEl.textContent = error.message || `Could not mark this order ${isRefund ? "refunded" : "canceled"}.`;
   } finally {
     state.busy = false;
     if (confirmButton) confirmButton.disabled = false;

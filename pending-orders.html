@@ -641,7 +641,7 @@
   <div id="worker-cancel-order-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="worker-cancel-order-title">
     <div class="packing-modal-card bundle-review-card no-inventory-card">
       <button id="close-worker-cancel-order" class="modal-close-btn" type="button" aria-label="Close">x</button>
-      <span class="eyebrow">Canceled on eBay</span>
+      <span id="worker-cancel-order-eyebrow" class="eyebrow">Canceled on eBay</span>
       <h2 id="worker-cancel-order-title">Mark order canceled?</h2>
       <p id="worker-cancel-order-subtitle">This removes the selected pending order line(s) from the packing queue without removing stock.</p>
       <div class="no-inventory-toolbar">
@@ -656,8 +656,8 @@
       <section class="no-inventory-evidence" aria-label="Canceled order evidence photos">
         <div>
           <span class="eyebrow">Optional Photos</span>
-          <h3>Cancellation Evidence</h3>
-          <p>Attach photos when the cancellation needs proof or extra context. These photos are saved with the signed audit trail.</p>
+          <h3 id="worker-cancel-evidence-title">Cancellation Evidence</h3>
+          <p id="worker-cancel-evidence-copy">Attach photos when the cancellation needs proof or extra context. These photos are saved with the signed audit trail.</p>
         </div>
         <div class="no-inventory-camera-row">
           <label>

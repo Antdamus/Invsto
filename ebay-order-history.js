@@ -801,6 +801,16 @@ function isAdminCloseoutLine(line) {
     || (line.line_status === "fulfilled" && !line.stock_transaction_id && !isEbayApiHistoryLine(line));
 }
 
+function isRefundCloseoutEvent(event = {}) {
+  const payload = event.payload || {};
+  return event.action === "cancelled"
+    && (
+      payload.closeout_reason === "refunded"
+      || payload.source === "worker_ebay_order_refunded"
+      || payload.refund_verified === true
+    );
+}
+
 function isAdminUser() {
   return String(state.employee?.role || "").toLowerCase() === "admin";
 }
@@ -3574,6 +3584,7 @@ function getEventLabel(event) {
     return "Return received";
   }
   if (event.action === "fulfilled_no_inventory") return "No-inventory completion";
+  if (isRefundCloseoutEvent(event)) return "Refunded";
   if (event.action === "cancelled") return "Canceled";
   return event.action || "Event";
 }
@@ -3581,6 +3592,7 @@ function getEventLabel(event) {
 function getHistoryGroupStatus(group) {
   if (getReturnCasesForLineIds((group.lines || []).map((line) => line.id)).length) return "Returned";
   if (group.events.some((event) => event.category === "revert")) return "Has reversal";
+  if (group.events.some(isRefundCloseoutEvent)) return "Refunded";
   if (group.lines.some((line) => line.line_status === "cancelled")) return "Canceled";
   if ((group.lines || []).length && group.lines.every(isEbayApiHistoryLine)) return "Archived sale";
   if (group.events.some((event) => event.action === "fulfilled_no_inventory") || group.lines.some(isAdminCloseoutLine)) {
@@ -3592,7 +3604,7 @@ function getHistoryGroupStatus(group) {
 function getHistoryGroupStatusClass(group) {
   const label = getHistoryGroupStatus(group);
   if (label === "Returned") return "is-returned";
-  if (label === "Canceled") return "is-cancelled";
+  if (label === "Canceled" || label === "Refunded") return "is-cancelled";
   if (label === "No-inventory completion" || label === "Has reversal") return "is-admin";
   return "";
 }
@@ -4834,6 +4846,8 @@ function renderEventList() {
           ? getEventLabel(event)
           : event.action === "fulfilled_no_inventory"
           ? "Packed without inventory removal"
+          : isRefundCloseoutEvent(event)
+          ? "Refund verified"
           : isAdminUser() ? "Canceled by admin" : "Canceled";
     const units = event.payload?.restored_units ? ` - restored ${Number(event.payload.restored_units).toLocaleString()} unit(s)` : "";
     const gps = getEventGpsLabel(event);
