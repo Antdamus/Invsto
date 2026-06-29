@@ -2068,8 +2068,24 @@ async function hydrateEventPhotoUrls() {
   await Promise.all(photos.map(async (photo) => {
     const bucket = photo.bucket || photo.storage_bucket || TEAM_TASK_BUCKET;
     const path = photo.path || photo.storage_path || "";
-    if (!bucket || !path || photo.signedUrl) return;
-    photo.signedUrl = await createTaskSignedImageUrl(bucket, path);
+    if (!bucket || !path) return;
+    const previewRef = getTaskEvidencePhotoVariantRef(photo, "preview") || { bucket, path };
+    const thumbnailRef = getTaskEvidencePhotoVariantRef(photo, "thumbnail");
+    if (!photo.previewUrl) {
+      photo.previewUrl = photo.url || photo.signedUrl || await createTaskSignedImageUrl(previewRef.bucket, previewRef.path);
+    }
+    if (!photo.thumbnailUrl) {
+      photo.thumbnailUrl = thumbnailRef
+        ? await createTaskSignedImageUrl(thumbnailRef.bucket, thumbnailRef.path)
+        : await createTaskSignedImageThumbnailUrl(bucket, path);
+    }
+    photo.previewBucket = previewRef.bucket;
+    photo.previewPath = previewRef.path;
+    if (thumbnailRef) {
+      photo.thumbnailBucket = thumbnailRef.bucket;
+      photo.thumbnailPath = thumbnailRef.path;
+    }
+    photo.signedUrl = photo.previewUrl;
   }));
 }
 
@@ -2447,8 +2463,8 @@ function getTaskEventEvidencePhotosForBrief(events = []) {
   const photos = [];
   events.forEach((event) => {
     (Array.isArray(event.photo_attachments) ? event.photo_attachments : []).forEach((photo, index) => {
-      const bucket = photo.bucket || photo.storage_bucket || TEAM_TASK_BUCKET;
-      const path = photo.path || photo.storage_path || "";
+      const bucket = photo.previewBucket || photo.bucket || photo.storage_bucket || TEAM_TASK_BUCKET;
+      const path = photo.previewPath || photo.path || photo.storage_path || "";
       const url = photo.signedUrl || photo.url || "";
       const label = photo.label || `Task photo ${index + 1}`;
       if (!bucket && !url) return;
@@ -2474,8 +2490,8 @@ function getTaskVideoReceiptPhotosForBrief(task = {}) {
     linePhotos.forEach((photo, index) => {
       const label = photo.label || `Video receipt - ${line.item_number || index + 1}`;
       photos.push({
-        bucket: photo.bucket || ORDER_EVIDENCE_BUCKET,
-        path: photo.path || "",
+        bucket: photo.previewBucket || photo.bucket || ORDER_EVIDENCE_BUCKET,
+        path: photo.previewPath || photo.path || "",
         url: photo.previewUrl || photo.thumbnailUrl || "",
         thumbnailUrl: photo.thumbnailUrl || photo.previewUrl || "",
         label,
@@ -2643,6 +2659,32 @@ function getLineReviewForLine(line = {}, reviewMap = new Map()) {
   return keys.map((key) => reviewMap.get(key)).find(Boolean) || null;
 }
 
+function getLineReviewIdentity(line = {}, index = 0) {
+  return String(line.id || line.order_line_id || line.line_id || `line-${index}`).trim();
+}
+
+function getLineReviewStateKey(task = {}, line = {}, index = 0) {
+  return `${task.id || task.order_id || "task"}:${getLineReviewIdentity(line, index)}`;
+}
+
+function getLineReviewDraft(task = {}, line = {}, index = 0, review = null, fallbackDecision = "") {
+  const draft = state.lineReviewDecisions.get(getLineReviewStateKey(task, line, index)) || {};
+  const decision = normalizeLineReviewDecision(draft.decision)
+    || normalizeLineReviewDecision(review?.decision)
+    || normalizeLineReviewDecision(fallbackDecision);
+  const note = Object.prototype.hasOwnProperty.call(draft, "note")
+    ? String(draft.note || "").trim()
+    : String(review?.note || "").trim();
+  return { decision, note };
+}
+
+function rememberLineReviewDraft(row) {
+  if (!row?.dataset?.lineReviewStateKey) return;
+  const decision = normalizeLineReviewDecision(row.dataset.lineReviewDecision || "");
+  const note = String(row.querySelector("[data-line-review-inline-note]")?.value || "").trim();
+  state.lineReviewDecisions.set(row.dataset.lineReviewStateKey, { decision, note });
+}
+
 function renderLineReviewBadge(review = null) {
   if (!review?.decision) return "";
   const approved = review.decision === "approved";
@@ -2660,20 +2702,23 @@ function renderPendingOrderApprovalLinePhoto(line = {}, task = {}, index = 0) {
   const extraCount = Math.max(0, photos.length - 1);
   const videoReceiptUrl = getTaskLineVideoReceiptUrl(line, task);
   const label = photo?.label || `Video receipt - ${line.item_number || index + 1}`;
-  const imageUrl = photo?.thumbnailUrl || photo?.previewUrl || photo?.url || "";
+  const previewUrl = photo?.previewUrl || photo?.url || photo?.signedUrl || "";
+  const thumbnailUrl = photo?.thumbnailUrl || previewUrl;
+  const previewBucket = photo?.previewBucket || photo?.bucket || ORDER_EVIDENCE_BUCKET;
+  const previewPath = photo?.previewPath || photo?.path || "";
   if (photo) {
     return `
       <button
         type="button"
         class="team-task-approval-line-photo"
         data-team-task-photo="1"
-        data-bucket="${escapeHtml(photo.bucket || ORDER_EVIDENCE_BUCKET)}"
-        data-path="${escapeHtml(photo.path || "")}"
-        data-url="${escapeHtml(photo.previewUrl || photo.thumbnailUrl || photo.url || "")}"
+        data-bucket="${escapeHtml(previewBucket)}"
+        data-path="${escapeHtml(previewPath)}"
+        data-url="${escapeHtml(previewUrl)}"
         data-label="${escapeHtml(label)}"
         aria-label="Open ${escapeHtml(label)}"
       >
-        ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(label)}" loading="lazy" />` : `<span class="team-task-approval-line-photo-fallback">Receipt</span>`}
+        ${thumbnailUrl ? `<img src="${escapeHtml(thumbnailUrl)}" alt="${escapeHtml(label)}" loading="lazy" />` : `<span class="team-task-approval-line-photo-fallback">Receipt</span>`}
         ${extraCount ? `<em>+${escapeHtml(extraCount)}</em>` : ""}
       </button>
     `;
@@ -2682,6 +2727,48 @@ function renderPendingOrderApprovalLinePhoto(line = {}, task = {}, index = 0) {
     <div class="team-task-approval-line-photo is-missing" aria-label="No saved video receipt screenshot">
       <span>No photo</span>
       ${videoReceiptUrl ? `<a href="${escapeHtml(videoReceiptUrl)}" target="_blank" rel="noopener">Open receipt</a>` : ""}
+    </div>
+  `;
+}
+
+function shouldShowInlineOrderLineReviewControls(task = {}) {
+  return isOrderPendingApprovalTask(task) && canUseAdminTaskControls() && !isTaskHistoryView();
+}
+
+function renderInlineOrderLineReviewControls(task = {}, line = {}, index = 0, review = null) {
+  if (!shouldShowInlineOrderLineReviewControls(task)) return "";
+  const { decision, note } = getLineReviewDraft(task, line, index, review, "");
+  const lineId = getLineReviewIdentity(line, index);
+  const stateKey = getLineReviewStateKey(task, line, index);
+  const noteVisible = decision === "needs_work" || Boolean(note);
+  return `
+    <div
+      class="team-task-line-review-inline ${decision === "needs_work" ? "needs-work" : decision === "approved" ? "is-approved" : ""}"
+      data-inline-line-review-row="1"
+      data-line-review-state-key="${escapeHtml(stateKey)}"
+      data-line-id="${escapeHtml(lineId)}"
+      data-line-review-decision="${escapeHtml(decision)}"
+    >
+      <div class="team-task-line-review-inline-buttons" role="radiogroup" aria-label="Item approval decision">
+        <button
+          type="button"
+          class="team-task-line-review-inline-btn is-approved ${decision === "approved" ? "is-selected" : ""}"
+          data-line-review-inline-decision="approved"
+          aria-pressed="${decision === "approved" ? "true" : "false"}"
+        >Approve</button>
+        <button
+          type="button"
+          class="team-task-line-review-inline-btn needs-work ${decision === "needs_work" ? "is-selected" : ""}"
+          data-line-review-inline-decision="needs_work"
+          aria-pressed="${decision === "needs_work" ? "true" : "false"}"
+        >Needs work</button>
+      </div>
+      <textarea
+        class="team-task-line-review-inline-note ${noteVisible ? "is-visible" : ""}"
+        data-line-review-inline-note="1"
+        rows="1"
+        placeholder="What does this specific item still need?"
+      >${escapeHtml(note)}</textarea>
     </div>
   `;
 }
@@ -2729,6 +2816,7 @@ function renderPendingOrderApprovalLines(task = {}, events = []) {
                   ${renderLineReviewBadge(lineReview)}
                 </div>
                 ${lineReview?.note ? `<p class="team-task-line-review-note">${escapeHtml(lineReview.note)}</p>` : ""}
+                ${renderInlineOrderLineReviewControls(task, line, index, lineReview)}
               </div>
             </article>
           `;
@@ -2748,9 +2836,8 @@ function getDefaultLineReviewDecision(mode = "") {
 }
 
 function renderOrderLineReviewChoice(line = {}, task = {}, mode = "", index = 0, review = null) {
-  const lineId = String(line.id || "").trim();
-  const currentDecision = normalizeLineReviewDecision(review?.decision) || getDefaultLineReviewDecision(mode);
-  const note = String(review?.note || "").trim();
+  const lineId = getLineReviewIdentity(line, index);
+  const { decision: currentDecision, note } = getLineReviewDraft(task, line, index, review, getDefaultLineReviewDecision(mode));
   const photos = getTaskLineReceiptPhotos(line);
   const amount = formatMoney(line.total_price || line.sold_for || "");
   const title = line.item_number ? `${line.item_number} - ${line.item_title || "Untitled item"}` : line.item_title || "Untitled item";
@@ -2795,8 +2882,46 @@ function setupLineReviewPanelListeners(panel) {
   });
 }
 
+function refreshInlineLineReviewRowState(row) {
+  const decision = normalizeLineReviewDecision(row?.dataset?.lineReviewDecision || "");
+  row?.classList.toggle("needs-work", decision === "needs_work");
+  row?.classList.toggle("is-approved", decision === "approved");
+  row?.querySelectorAll("[data-line-review-inline-decision]").forEach((button) => {
+    const selected = normalizeLineReviewDecision(button.dataset.lineReviewInlineDecision || "") === decision;
+    button.classList.toggle("is-selected", selected);
+    button.setAttribute("aria-pressed", selected ? "true" : "false");
+  });
+  const note = row?.querySelector("[data-line-review-inline-note]");
+  if (note) note.classList.toggle("is-visible", decision === "needs_work" || Boolean(note.value.trim()));
+}
+
+function setupInlineLineReviewControls(root) {
+  root.querySelectorAll("[data-inline-line-review-row]").forEach((row) => {
+    refreshInlineLineReviewRowState(row);
+  });
+  root.querySelectorAll("[data-line-review-inline-decision]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const row = button.closest("[data-inline-line-review-row]");
+      if (!row) return;
+      row.dataset.lineReviewDecision = normalizeLineReviewDecision(button.dataset.lineReviewInlineDecision || "");
+      refreshInlineLineReviewRowState(row);
+      rememberLineReviewDraft(row);
+      if (row.dataset.lineReviewDecision === "needs_work") {
+        row.querySelector("[data-line-review-inline-note]")?.focus();
+      }
+    });
+  });
+  root.querySelectorAll("[data-line-review-inline-note]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const row = input.closest("[data-inline-line-review-row]");
+      if (!row) return;
+      refreshInlineLineReviewRowState(row);
+      rememberLineReviewDraft(row);
+    });
+  });
+}
+
 function resetLineReviewPanel() {
-  state.lineReviewDecisions = new Map();
   const panel = $("team-task-line-review-panel");
   if (!panel) return;
   panel.classList.add("hidden");
@@ -2915,18 +3040,22 @@ function renderTaskLineVideoReceiptPhotos(line = {}) {
     <div class="team-task-video-receipt-photos" aria-label="Video receipt screenshots">
       ${photos.map((photo, index) => {
         const label = photo.label || `Video receipt - ${line.item_number || index + 1}`;
+        const previewUrl = photo.previewUrl || photo.thumbnailUrl || "";
+        const thumbnailUrl = photo.thumbnailUrl || previewUrl;
+        const previewBucket = photo.previewBucket || photo.bucket || ORDER_EVIDENCE_BUCKET;
+        const previewPath = photo.previewPath || photo.path || "";
         return `
           <button
             type="button"
             class="team-task-video-receipt-thumb"
             data-team-task-photo="1"
-            data-bucket="${escapeHtml(photo.bucket || ORDER_EVIDENCE_BUCKET)}"
-            data-path="${escapeHtml(photo.path || "")}"
-            data-url="${escapeHtml(photo.previewUrl || photo.thumbnailUrl || "")}"
+            data-bucket="${escapeHtml(previewBucket)}"
+            data-path="${escapeHtml(previewPath)}"
+            data-url="${escapeHtml(previewUrl)}"
             data-label="${escapeHtml(label)}"
             aria-label="Open ${escapeHtml(label)}"
           >
-            ${photo.thumbnailUrl || photo.previewUrl ? `<img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl)}" alt="${escapeHtml(label)}" loading="lazy" />` : ""}
+            ${thumbnailUrl ? `<img src="${escapeHtml(thumbnailUrl)}" alt="${escapeHtml(label)}" loading="lazy" />` : ""}
             <span>${escapeHtml(getTaskVideoReceiptAuditText(photo))}</span>
           </button>
         `;
@@ -3608,6 +3737,7 @@ function renderTasks() {
   list.innerHTML = visibleTasks.map((task) => renderTaskCard(task, { canceled: isCanceledTaskScope() })).join("");
 
   attachTaskCardInteractions(list);
+  setupInlineLineReviewControls(list);
   list.querySelectorAll("[data-team-task-progress]").forEach((button) => {
     button.addEventListener("click", () => openTaskModal({ taskId: button.dataset.teamTaskProgress, progress: true }));
   });
@@ -3680,6 +3810,7 @@ function renderRemovedHistoryTasks() {
   list.innerHTML = tasks.map((task) => renderTaskCard(task, { canceled: true })).join("");
 
   attachTaskCardInteractions(list);
+  setupInlineLineReviewControls(list);
   list.querySelectorAll("[data-team-task-photo]").forEach((button) => {
     button.addEventListener("click", () => {
       if (button.dataset.url) {
@@ -4780,6 +4911,7 @@ async function saveAdminAssignmentAction({
     });
     if (error) throw error;
     setStatus(successMessage, "success");
+    state.lineReviewDecisions = new Map();
     closeModal();
     await loadTasks();
   } catch (error) {
@@ -5197,6 +5329,7 @@ async function submitOrderWorkflowTask() {
       });
     }
 
+    state.lineReviewDecisions = new Map();
     closeModal();
     await loadTasks();
   } catch (error) {

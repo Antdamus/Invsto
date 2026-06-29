@@ -1162,6 +1162,67 @@ body {
   font-weight: 850;
 }
 
+.team-task-line-review-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.team-task-line-review-inline-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.team-task-line-review-inline-btn {
+  min-height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: var(--task-muted);
+  background: rgba(255, 255, 255, 0.045);
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.team-task-line-review-inline-btn.is-approved.is-selected {
+  border-color: rgba(157, 242, 189, 0.45);
+  color: var(--task-green);
+  background: rgba(157, 242, 189, 0.11);
+}
+
+.team-task-line-review-inline-btn.needs-work.is-selected {
+  border-color: rgba(255, 157, 157, 0.52);
+  color: #ffd4d4;
+  background: rgba(255, 112, 112, 0.15);
+}
+
+.team-task-line-review-inline-note {
+  display: none;
+  flex: 1 1 220px;
+  min-width: min(100%, 220px);
+  min-height: 32px;
+  max-height: 76px;
+  border: 1px solid rgba(255, 157, 157, 0.32);
+  border-radius: 10px;
+  padding: 6px 8px;
+  color: var(--task-text);
+  background: rgba(0, 0, 0, 0.22);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 820;
+  resize: vertical;
+}
+
+.team-task-line-review-inline-note.is-visible {
+  display: block;
+}
+
 .team-task-line-review-panel {
   display: grid;
   gap: 10px;
@@ -3057,6 +3118,22 @@ body.modal-open {
 
   .team-task-line-review-controls {
     align-items: stretch;
+  }
+
+  .team-task-line-review-inline {
+    align-items: stretch;
+  }
+
+  .team-task-line-review-inline-buttons {
+    width: 100%;
+  }
+
+  .team-task-line-review-inline-btn {
+    flex: 1 1 0;
+  }
+
+  .team-task-line-review-inline-note {
+    flex-basis: 100%;
   }
 
   .team-task-line-review-pill {
