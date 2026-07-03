@@ -85,6 +85,10 @@ const state = {
   manualVideoReceiptPhoto: null,
   manualVideoReceiptPreviewUrl: "",
   manualVideoReceiptBusy: false,
+  savedEvidenceVideoLineId: "",
+  savedEvidenceVideoScope: "line",
+  savedEvidenceVideos: [],
+  savedEvidenceVideoLoadToken: 0,
   lineNoteLineId: "",
   lineNotePhotos: [],
   lineNoteBusy: false,
@@ -3493,6 +3497,7 @@ function renderOrders() {
           <div class="buyer-card-expanded-actions">
             <button type="button" class="buyer-card-complete-btn primary-btn" data-buyer-complete-key="${escapeHtml(group.key)}" ${group.lines.some(isOpenOrderLine) ? "" : "disabled"}>Complete From Inventory</button>
             <button type="button" class="secondary-btn buyer-card-order-video-btn task-video-action-btn" data-buyer-order-video-key="${escapeHtml(group.key)}" ${group.lines.some((line) => line.order_id) ? "" : "disabled"}>Add order video</button>
+            <button type="button" class="secondary-btn buyer-card-order-video-btn task-video-action-btn" data-buyer-view-order-videos-key="${escapeHtml(group.key)}" ${group.lines.some((line) => line.order_id) ? "" : "disabled"}>View order videos</button>
             <button type="button" class="buyer-card-no-inventory-btn secondary-btn caution-btn" data-buyer-no-inventory-key="${escapeHtml(group.key)}" ${getNoInventoryLineIdsForGroupAction(group).length ? "" : "disabled"}>Complete Without Inventory</button>
             ${approvalActionMarkup}
           </div>
@@ -3525,6 +3530,7 @@ function renderOrders() {
     const approvalTaskButton = card.querySelector("[data-buyer-approval-task-id]");
     const noInventoryButton = card.querySelector("[data-buyer-no-inventory-key]");
     const orderVideoButton = card.querySelector("[data-buyer-order-video-key]");
+    const viewOrderVideosButton = card.querySelector("[data-buyer-view-order-videos-key]");
     expandButton?.addEventListener("click", (event) => {
       event.stopPropagation();
       toggleBuyerGroupExpanded(group.key);
@@ -3562,6 +3568,13 @@ function renderOrders() {
       if (!nextLine) return;
       selectOrderLine(nextLine.id, { openDetail: false });
       setTimeout(() => openManualVideoReceiptModal(nextLine.id, { scope: "order" }), 80);
+    });
+    viewOrderVideosButton?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const nextLine = group.lines.find((line) => isOpenOrderLine(line) && line.order_id) || group.lines.find((line) => line.order_id);
+      if (!nextLine) return;
+      selectOrderLine(nextLine.id, { openDetail: false });
+      setTimeout(() => openSavedEvidenceVideosModal(nextLine.id, { scope: "order" }), 80);
     });
     taskButton?.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -3632,7 +3645,10 @@ function renderOrders() {
       const lineTaskActionMarkup = assignedLineTask
         ? `<button type="button" class="secondary-btn buyer-line-action-btn task-action-btn ${isPendingOrderApprovalTask(assignedLineTask) ? "is-approval" : "is-assigned"}" data-line-view-task="${escapeHtml(line.id)}" data-view-order-task="${escapeHtml(assignedLineTask.id)}" title="View ${isPendingOrderApprovalTask(assignedLineTask) ? "admin approval request" : `task assigned to ${escapeHtml(assignedLineTaskAssignee)}`}"><span>${isPendingOrderApprovalTask(assignedLineTask) ? "Pending approval" : "Task assigned"}</span><strong>${escapeHtml(assignedLineTaskAssignee)}</strong></button>`
         : `<button type="button" class="secondary-btn buyer-line-action-btn task-action-btn" data-line-assign-task="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>Assign Task</button>`;
-      const lineTaskVideoMarkup = `<button type="button" class="secondary-btn buyer-line-action-btn task-video-action-btn" data-line-add-video="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>Add item video</button>`;
+      const lineTaskVideoMarkup = `
+        <button type="button" class="secondary-btn buyer-line-action-btn task-video-action-btn" data-line-add-video="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>Add item video</button>
+        <button type="button" class="secondary-btn buyer-line-action-btn task-video-action-btn" data-line-view-videos="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>View saved videos</button>
+      `;
       const lineNoteCount = getLineNoteCount(line);
       const lineNoteCountMarkup = lineNoteCount
         ? `<span class="buyer-line-note-count" title="${lineNoteCount.toLocaleString()} audited item note${lineNoteCount === 1 ? "" : "s"}">${lineNoteCount.toLocaleString()} note${lineNoteCount === 1 ? "" : "s"}</span>`
@@ -3694,9 +3710,6 @@ function renderOrders() {
             ${lineNoteCountMarkup}
             ${lineNotePreviewMarkup}
           </span>
-          <span class="queue-video-receipt-evidence" data-queue-video-evidence="${escapeHtml(line.id)}">
-            <span class="queue-video-receipt-empty">Loading saved video receipt screenshot...</span>
-          </span>
         </span>
         <b>${escapeHtml(line.line_status || "pending")}</b>
       `;
@@ -3730,6 +3743,10 @@ function renderOrders() {
       button.querySelector("[data-line-add-video]")?.addEventListener("click", () => {
         selectOrderLine(line.id, { openDetail: false });
         setTimeout(() => openManualVideoReceiptModal(line.id, { scope: "line" }), 80);
+      });
+      button.querySelector("[data-line-view-videos]")?.addEventListener("click", () => {
+        selectOrderLine(line.id, { openDetail: false });
+        setTimeout(() => openSavedEvidenceVideosModal(line.id, { scope: "line" }), 80);
       });
       button.querySelector("[data-line-view-task]")?.addEventListener("click", (event) => {
         openAssignedOrderTaskDetailsModal(event.currentTarget.dataset.viewOrderTask, { lineId: line.id });
@@ -3781,7 +3798,6 @@ function renderOrders() {
     }
 
     state.orderRenderFrame = 0;
-    scheduleQueueVideoReceiptEvidenceHydration(groups.filter((group) => isBuyerGroupExpanded(group)).flatMap((group) => group.lines));
     logPendingOrderPerf("renderOrders complete", startedAt, {
       groups: groups.length,
       rows: state.filteredOrders.length,
@@ -4116,6 +4132,111 @@ function getVideoReceiptEvidencePhotosForLine(line = {}) {
     seen.add(key);
     return Boolean(photo.path || photo.previewUrl);
   });
+}
+
+function getSavedEvidenceVideoScopeLines(line = {}, scope = "line") {
+  if (!line?.id) return [];
+  if (scope === "order" && line.order_id) {
+    return state.orders.filter((entry) => entry.order_id === line.order_id);
+  }
+  return [line];
+}
+
+function getAttachmentLineIds(photo = {}, event = {}, task = {}) {
+  const ids = [
+    ...(Array.isArray(photo.order_line_ids) ? photo.order_line_ids : []),
+    ...(Array.isArray(photo.orderLineIds) ? photo.orderLineIds : []),
+    ...(Array.isArray(photo.metadata?.order_line_ids) ? photo.metadata.order_line_ids : []),
+    ...(Array.isArray(photo.metadata?.orderLineIds) ? photo.metadata.orderLineIds : []),
+    ...(Array.isArray(event.payload?.order_line_ids) ? event.payload.order_line_ids : []),
+    event.payload?.order_line_id,
+    ...(Array.isArray(task.order_line_ids) ? task.order_line_ids : []),
+  ].filter(Boolean);
+  return [...new Set(ids.map(String))];
+}
+
+function getAttachmentItemNumbers(photo = {}, event = {}, task = {}) {
+  const values = [
+    photo.itemNumber,
+    photo.item_number,
+    photo.metadata?.itemNumber,
+    photo.metadata?.item_number,
+    event.payload?.itemNumber,
+    event.payload?.item_number,
+    task.metadata?.item_number,
+  ].filter(Boolean);
+  return [...new Set(values.map(normalizeVideoReceiptItemNumber).filter(Boolean))];
+}
+
+function getAttachmentScope(photo = {}) {
+  return String(photo.attachment_scope || photo.attachmentScope || photo.metadata?.scope || "").trim().toLowerCase();
+}
+
+function getSavedEvidenceVideoKey(photo = {}) {
+  return getNoInventoryEvidencePhotoKey(photo) || [
+    photo.label,
+    photo.created_at,
+    photo.metadata?.capturedAt,
+  ].filter(Boolean).join(":");
+}
+
+function savedEvidenceVideoMatchesLine(photo = {}, event = {}, task = {}, line = {}) {
+  if (!line?.id) return false;
+  const lineIds = getAttachmentLineIds(photo, event, task);
+  if (lineIds.length) return lineIds.includes(String(line.id));
+  const itemNumbers = getAttachmentItemNumbers(photo, event, task);
+  if (itemNumbers.length) {
+    const lineItemNumber = normalizeVideoReceiptItemNumber(line.item_number);
+    return Boolean(lineItemNumber && itemNumbers.includes(lineItemNumber));
+  }
+  return Boolean(line.order_id && task.order_id === line.order_id);
+}
+
+function getSavedEvidenceVideosForLines(lines = [], scope = "line") {
+  const targetLines = (lines || []).filter((line) => line?.id);
+  if (!targetLines.length) return [];
+  const targetOrderIds = new Set(targetLines.map((line) => line.order_id).filter(Boolean).map(String));
+  const targetLineIds = new Set(targetLines.map((line) => line.id).filter(Boolean).map(String));
+  const targetItemNumbers = new Set(targetLines.map((line) => normalizeVideoReceiptItemNumber(line.item_number)).filter(Boolean));
+  const taskSources = [
+    ...state.selectedOrderTasks.map((task) => ({ task, events: state.selectedOrderTaskEvents.get(task.id) || [] })),
+    ...state.queueVideoReceiptTasks.map((task) => ({ task, events: state.queueVideoReceiptTaskEvents.get(task.id) || [] })),
+  ];
+  const seenAttachments = new Set();
+  const videos = [];
+
+  taskSources.forEach(({ task, events }) => {
+    if (!task?.id || !targetOrderIds.has(String(task.order_id || ""))) return;
+    events.forEach((event) => {
+      (Array.isArray(event.photo_attachments) ? event.photo_attachments : []).forEach((photo) => {
+        if (!isEvidenceVideo(photo)) return;
+        const attachmentScope = getAttachmentScope(photo);
+        const lineIds = getAttachmentLineIds(photo, event, task);
+        const itemNumbers = getAttachmentItemNumbers(photo, event, task);
+        const isOrderVideo = attachmentScope === "order";
+        const matchesScope = scope === "order"
+          ? isOrderVideo
+          : !isOrderVideo && (
+            lineIds.some((id) => targetLineIds.has(String(id)))
+            || itemNumbers.some((itemNumber) => targetItemNumbers.has(itemNumber))
+            || targetLines.some((line) => savedEvidenceVideoMatchesLine(photo, event, task, line))
+          );
+        if (!matchesScope) return;
+        const enriched = {
+          ...photo,
+          signed_by_email: photo.signed_by_email || event.signed_by_email || task.created_by_email || "",
+          created_at: photo.created_at || event.created_at || task.created_at || "",
+          auditText: photo.auditText || event.notes || task.latest_note || "",
+        };
+        const key = getSavedEvidenceVideoKey(enriched);
+        if (!key || seenAttachments.has(key)) return;
+        seenAttachments.add(key);
+        videos.push(enriched);
+      });
+    });
+  });
+
+  return videos.sort((a, b) => new Date(b.created_at || b.metadata?.capturedAt || 0) - new Date(a.created_at || a.metadata?.capturedAt || 0));
 }
 
 function getEvidenceFileExtension(value = "") {
@@ -9855,6 +9976,123 @@ function closeManualVideoReceiptModal() {
   returnToOrdersAfterMobileModalClose({ suppressMobileReturn: true });
 }
 
+function getSavedEvidenceVideoLine() {
+  if (!state.savedEvidenceVideoLineId) return null;
+  return state.orders.find((entry) => entry.id === state.savedEvidenceVideoLineId) || null;
+}
+
+function setSavedEvidenceVideosError(message = "", type = "error") {
+  const el = $("saved-evidence-videos-error");
+  if (!el) return;
+  el.textContent = message || "";
+  el.classList.toggle("is-error", type === "error");
+  el.classList.toggle("is-success", type === "success");
+}
+
+function closeSavedEvidenceVideosModal() {
+  state.savedEvidenceVideoLineId = "";
+  state.savedEvidenceVideoScope = "line";
+  state.savedEvidenceVideos = [];
+  state.savedEvidenceVideoLoadToken += 1;
+  setSavedEvidenceVideosError("");
+  closeModal("saved-evidence-videos-modal");
+  returnToOrdersAfterMobileModalClose({ suppressMobileReturn: true });
+}
+
+function renderSavedEvidenceVideosList() {
+  const list = $("saved-evidence-videos-list");
+  if (!list) return;
+  const scope = state.savedEvidenceVideoScope === "order" ? "order" : "line";
+  const emptyLabel = scope === "order" ? "No saved videos for this full order yet." : "No saved videos for this item line yet.";
+  if (!state.savedEvidenceVideos.length) {
+    list.innerHTML = `<div class="empty-state">${escapeHtml(emptyLabel)}</div>`;
+    return;
+  }
+
+  list.innerHTML = state.savedEvidenceVideos.map((video, index) => {
+    const createdAt = video.created_at || video.metadata?.capturedAt || "";
+    const actor = video.signed_by_email || getVideoReceiptAuditActor();
+    const sizeText = formatFileSize(video.size_bytes || video.size || 0);
+    const label = video.label || (scope === "order" ? "Order evidence video" : "Item evidence video");
+    const note = video.auditText || video.metadata?.notePreview || "";
+    return `
+      <button type="button" class="saved-evidence-video-card" data-saved-evidence-video-index="${index}">
+        <span class="saved-evidence-video-icon">Play</span>
+        <span class="saved-evidence-video-copy">
+          <strong>${escapeHtml(label)}</strong>
+          <small>${escapeHtml([createdAt ? formatDate(createdAt) : "", sizeText, actor].filter(Boolean).join(" - "))}</small>
+          ${note ? `<em>${escapeHtml(note)}</em>` : ""}
+        </span>
+      </button>
+    `;
+  }).join("");
+
+  list.querySelectorAll("[data-saved-evidence-video-index]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const video = state.savedEvidenceVideos[Number(button.dataset.savedEvidenceVideoIndex || 0)];
+      if (!video?.previewUrl) {
+        setSavedEvidenceVideosError("Could not open this saved video. Refresh and try again.");
+        return;
+      }
+      openEvidencePhotoObjectViewer({
+        ...video,
+        auditText: video.auditText || "Saved evidence video.",
+      }, "saved-evidence-videos-modal");
+    });
+  });
+}
+
+async function loadSavedEvidenceVideosForModal() {
+  const line = getSavedEvidenceVideoLine();
+  const scope = state.savedEvidenceVideoScope === "order" ? "order" : "line";
+  const loadToken = state.savedEvidenceVideoLoadToken + 1;
+  state.savedEvidenceVideoLoadToken = loadToken;
+  const list = $("saved-evidence-videos-list");
+  if (list) list.innerHTML = `<div class="empty-state">Loading saved videos...</div>`;
+  setSavedEvidenceVideosError("");
+
+  try {
+    const targetLines = getSavedEvidenceVideoScopeLines(line, scope);
+    await ensureQueueVideoReceiptTasksLoaded(targetLines);
+    const videos = getSavedEvidenceVideosForLines(targetLines, scope);
+    const hydrated = await Promise.all(videos.map((video) => ensureEvidencePhotoPreviewUrls(video).catch(() => video)));
+    if (loadToken !== state.savedEvidenceVideoLoadToken) return;
+    state.savedEvidenceVideos = hydrated;
+    renderSavedEvidenceVideosList();
+  } catch (error) {
+    console.warn("Could not load saved evidence videos:", error);
+    if (loadToken !== state.savedEvidenceVideoLoadToken) return;
+    state.savedEvidenceVideos = [];
+    renderSavedEvidenceVideosList();
+    setSavedEvidenceVideosError(error?.message || "Could not load saved videos.");
+  }
+}
+
+function openSavedEvidenceVideosModal(lineId, options = {}) {
+  const line = state.orders.find((entry) => entry.id === lineId);
+  if (!line?.id || !line.order_id) {
+    setStatus("Select a pending eBay order line before viewing saved videos.", "error");
+    return;
+  }
+  const scope = options.scope === "order" ? "order" : "line";
+  const targetLines = getSavedEvidenceVideoScopeLines(line, scope);
+  const order = getOrderFromLine(line);
+  state.savedEvidenceVideoLineId = line.id;
+  state.savedEvidenceVideoScope = scope;
+  state.savedEvidenceVideos = [];
+  $("saved-evidence-videos-title").textContent = scope === "order" ? "Saved videos for this order" : "Saved videos for this item";
+  $("saved-evidence-videos-subtitle").textContent = scope === "order"
+    ? "Full-order videos are loaded only in this window."
+    : "Item-line videos are loaded only in this window.";
+  $("saved-evidence-videos-context").innerHTML = `
+    <strong>${escapeHtml(order.order_number || "eBay order")} - ${escapeHtml(order.buyer_username || "unknown buyer")}</strong>
+    <span>${scope === "order" ? `${targetLines.length.toLocaleString()} item line${targetLines.length === 1 ? "" : "s"}` : escapeHtml(line.item_title || "Untitled item")}</span>
+    <small>${scope === "order" ? "Showing full-order videos only" : `${escapeHtml(line.item_number || "No item number")} - item videos only`}</small>
+  `;
+  openModal("saved-evidence-videos-modal");
+  loadSavedEvidenceVideosForModal();
+}
+
 function openManualVideoReceiptModal(lineId, options = {}) {
   const line = state.orders.find((entry) => entry.id === lineId);
   if (!line?.id || !line.order_id) {
@@ -9990,15 +10228,12 @@ async function saveManualVideoReceipt() {
       await renderSelectedVideoReceiptEvidence();
     }
 
-    const verificationPhoto = await ensureEvidencePhotoPreviewUrls(savedPhoto).catch(() => savedPhoto);
+    const savedScope = isWholeOrder ? "order" : "line";
     closeManualVideoReceiptModal();
     renderOrders();
     setStatus(`${mediaType === "video" ? "Video" : "Photo"} evidence saved to the ${isWholeOrder ? "order" : "item line"} audit trail.`, "success");
-    if (verificationPhoto?.previewUrl) {
-      setTimeout(() => openEvidencePhotoObjectViewer({
-        ...verificationPhoto,
-        auditText: "Just added. Verify this is the correct file.",
-      }, "open-order-task-modal"), 120);
+    if (mediaType === "video") {
+      setTimeout(() => openSavedEvidenceVideosModal(line.id, { scope: savedScope }), 120);
     }
   } catch (error) {
     console.error("Could not save order evidence:", error);
@@ -10897,6 +11132,12 @@ function setupListeners() {
     if (event.target.id === "manual-video-receipt-modal") closeManualVideoReceiptModal();
   });
 
+  $("saved-evidence-videos-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "saved-evidence-videos-modal") closeSavedEvidenceVideosModal();
+  });
+  $("close-saved-evidence-videos")?.addEventListener("click", closeSavedEvidenceVideosModal);
+  $("dismiss-saved-evidence-videos")?.addEventListener("click", closeSavedEvidenceVideosModal);
+
   $("line-note-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "line-note-modal") closeLineNoteModal();
   });
@@ -10941,6 +11182,14 @@ function setupListeners() {
       if (event.key === "Enter" || event.key === "Escape") {
         event.preventDefault();
         closeNoInventoryEvidencePhotoViewer();
+      }
+      return;
+    }
+
+    if (!$("saved-evidence-videos-modal")?.classList.contains("hidden")) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSavedEvidenceVideosModal();
       }
       return;
     }

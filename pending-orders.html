@@ -850,6 +850,23 @@
     </div>
   </div>
 
+  <div id="saved-evidence-videos-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="saved-evidence-videos-title">
+    <div class="packing-modal-card bundle-review-card no-inventory-card saved-evidence-videos-card">
+      <button id="close-saved-evidence-videos" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Saved Videos</span>
+      <h2 id="saved-evidence-videos-title">Saved order videos</h2>
+      <p id="saved-evidence-videos-subtitle">Videos load here only when this window is opened.</p>
+      <div id="saved-evidence-videos-context" class="order-task-context"></div>
+      <div id="saved-evidence-videos-list" class="saved-evidence-videos-list">
+        <div class="empty-state">Loading saved videos...</div>
+      </div>
+      <p id="saved-evidence-videos-error" class="fulfill-status is-error"></p>
+      <div class="modal-actions">
+        <button id="dismiss-saved-evidence-videos" type="button" class="primary-btn">Done</button>
+      </div>
+    </div>
+  </div>
+
   <div id="line-note-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="line-note-title">
     <div class="packing-modal-card bundle-review-card no-inventory-card line-note-card">
       <button id="close-line-note" class="modal-close-btn" type="button" aria-label="Close">x</button>
