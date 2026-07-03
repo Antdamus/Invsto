@@ -5045,6 +5045,43 @@ function getSelectedHistoryOrderTaskOption() {
   return options.find((option) => option.id === orderId) || options[0] || null;
 }
 
+function getHistoryOrderTaskScopeValue() {
+  const value = String($("history-order-task-scope")?.value || "order").trim().toLowerCase();
+  return value === "line" ? "line" : "order";
+}
+
+function getHistoryOrderTaskScopedLines(option = getSelectedHistoryOrderTaskOption()) {
+  const lines = Array.isArray(option?.lines) ? option.lines : [];
+  if (getHistoryOrderTaskScopeValue() !== "line") return lines;
+  const lineId = $("history-order-task-line")?.value || "";
+  return lines.filter((line) => line.id === lineId) || [];
+}
+
+function renderHistoryOrderTaskLineSelect(option = getSelectedHistoryOrderTaskOption()) {
+  const scope = getHistoryOrderTaskScopeValue();
+  const field = $("history-order-task-line-field");
+  const select = $("history-order-task-line");
+  if (!field || !select) return;
+  const lines = Array.isArray(option?.lines) ? option.lines : [];
+  const currentValue = select.value || "";
+  field.classList.toggle("hidden", scope !== "line");
+  select.replaceChildren();
+  lines.forEach((line, index) => {
+    const label = [
+      line.item_number || `Line ${index + 1}`,
+      line.item_title || "Untitled item",
+      `Qty ${Number(line.quantity || 1).toLocaleString()}`,
+      formatMoney(getLineGross(line)),
+    ].filter(Boolean).join(" - ");
+    select.appendChild(new Option(label, line.id || ""));
+  });
+  if ([...select.options].some((entry) => entry.value === currentValue)) {
+    select.value = currentValue;
+  } else if (lines[0]) {
+    select.value = lines[0].id || "";
+  }
+}
+
 function renderHistoryOrderTaskContext() {
   const context = $("history-order-task-context");
   if (!context) return;
@@ -5053,14 +5090,19 @@ function renderHistoryOrderTaskContext() {
     context.innerHTML = `<div class="history-order-task-empty">No closed order was found for this group.</div>`;
     return;
   }
+  renderHistoryOrderTaskLineSelect(option);
   const order = option.order || {};
-  const lineCount = option.lines.length;
-  const taskSummary = getHistoryTaskSummaryForLineIds(option.lines.map((line) => line.id).filter(Boolean));
+  const scopedLines = getHistoryOrderTaskScopedLines(option);
+  const lineCount = scopedLines.length || option.lines.length;
+  const scopedLineIds = scopedLines.map((line) => line.id).filter(Boolean);
+  const scopedGross = scopedLines.length ? scopedLines.reduce((sum, line) => sum + getLineGross(line), 0) : option.gross;
+  const taskSummary = getHistoryTaskSummaryForLineIds(scopedLineIds);
+  const scopeLabel = getHistoryOrderTaskScopeValue() === "line" ? "Specific Item Line" : "Whole Order";
   context.innerHTML = `
     <div class="history-order-task-context-card">
-      <span class="eyebrow">Closed Order</span>
+      <span class="eyebrow">${escapeHtml(scopeLabel)}</span>
       <strong>${escapeHtml(order.order_number || "eBay order")} - ${escapeHtml(order.buyer_username || "unknown buyer")}</strong>
-      <span>${escapeHtml(order.buyer_name || "No customer name")} - ${lineCount} line${lineCount === 1 ? "" : "s"} - ${escapeHtml(formatMoney(option.gross))}</span>
+      <span>${escapeHtml(order.buyer_name || "No customer name")} - ${lineCount} line${lineCount === 1 ? "" : "s"} - ${escapeHtml(formatMoney(scopedGross))}</span>
       ${order.ship_by_date ? `<span>Ship by ${escapeHtml(formatDateTime(order.ship_by_date))}</span>` : ""}
     </div>
     <div class="history-order-task-context-card ${taskSummary.activeCount ? "is-active" : ""}">
@@ -5138,12 +5180,14 @@ function renderHistoryOrderTaskPhotoList() {
   }).join("");
 }
 
-async function uploadHistoryOrderTaskPhotos(files, option = {}) {
+async function uploadHistoryOrderTaskPhotos(files, option = {}, scopedLines = option.lines || []) {
   if (!files.length) return [];
   const order = option.order || {};
   const orderNumber = normalizeEbayOrderNumber(order.order_number) || "closed-order";
   const cleanOrder = safeStorageSegment(orderNumber, "closed-order");
   const cleanRun = safeStorageSegment(window.crypto?.randomUUID ? window.crypto.randomUUID() : String(Date.now()), "upload");
+  const cleanLineIds = [...new Set((scopedLines || []).map((line) => line.id).filter(Boolean))];
+  const scope = getHistoryOrderTaskScopeValue();
   const uploaded = [];
 
   for (let index = 0; index < files.length; index += 1) {
@@ -5174,9 +5218,12 @@ async function uploadHistoryOrderTaskPhotos(files, option = {}) {
       created_at: new Date().toISOString(),
       signed_by_email: state.user?.email || state.employee?.display_name || "",
       order_number: orderNumber,
-      item_numbers: option.lines.map((line) => line.item_number).filter(Boolean),
+      item_numbers: (scopedLines || []).map((line) => line.item_number).filter(Boolean),
+      order_line_ids: cleanLineIds,
+      attachment_scope: scope,
       metadata: {
         source: "order_history_task_photo",
+        scope,
         orderNumber,
         buyerUsername: order.buyer_username || "",
         buyerName: order.buyer_name || "",
@@ -5787,6 +5834,8 @@ function renderHistoryOrderTaskOrderSelect(group = {}) {
   });
   if (field) field.classList.toggle("hidden", options.length <= 1);
   if (options[0]) select.value = options[0].id;
+  if ($("history-order-task-scope")) $("history-order-task-scope").value = "order";
+  renderHistoryOrderTaskLineSelect(options[0] || null);
   renderHistoryOrderTaskContext();
 }
 
@@ -5853,16 +5902,22 @@ async function submitHistoryOrderTask() {
 
   try {
     const dueAt = localDateTimeToIso($("history-order-task-due-at")?.value || "");
+    const scopedLines = getHistoryOrderTaskScopedLines(option);
+    const lineIds = scopedLines.map((line) => line.id).filter(Boolean);
+    if (!lineIds.length) {
+      setHistoryOrderTaskError("Choose at least one item line for this task.");
+      return;
+    }
     const files = getHistoryOrderTaskPhotoFiles();
     let taskPhotos = [];
     if (files.length) {
       setHistoryOrderTaskStatus("Uploading task evidence...", "info");
-      taskPhotos = await uploadHistoryOrderTaskPhotos(files, option);
+      taskPhotos = await uploadHistoryOrderTaskPhotos(files, option, scopedLines);
     }
     setHistoryOrderTaskStatus("Saving closed-order task...", "info");
     const { error } = await supabase.rpc("create_ebay_order_history_task", {
       _order_id: option.id,
-      _order_line_ids: option.lines.map((line) => line.id).filter(Boolean),
+      _order_line_ids: lineIds,
       _assigned_to_user_id: $("history-order-task-assignee")?.value || null,
       _priority: $("history-order-task-priority")?.value || "normal",
       _question: note,
@@ -10315,6 +10370,8 @@ function setupListeners() {
   $("cancel-history-order-task")?.addEventListener("click", closeHistoryOrderTaskModal);
   $("create-history-order-task")?.addEventListener("click", submitHistoryOrderTask);
   $("history-order-task-order")?.addEventListener("change", renderHistoryOrderTaskContext);
+  $("history-order-task-scope")?.addEventListener("change", renderHistoryOrderTaskContext);
+  $("history-order-task-line")?.addEventListener("change", renderHistoryOrderTaskContext);
   $("history-order-task-photo-file")?.addEventListener("change", renderHistoryOrderTaskPhotoList);
   $("history-order-task-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "history-order-task-modal") closeHistoryOrderTaskModal();

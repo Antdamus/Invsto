@@ -4315,6 +4315,31 @@ function getOrderTaskLineIdsForSelectedOrder() {
   return ids.length ? [...new Set(ids)] : [line.id].filter(Boolean);
 }
 
+function getOrderTaskLineIdsForSelectedItemLine() {
+  return state.selectedLine?.id ? [state.selectedLine.id] : [];
+}
+
+function getOrderTaskScopeValue() {
+  const value = String($("order-task-scope")?.value || "order").trim().toLowerCase();
+  return value === "line" ? "line" : "order";
+}
+
+function getOrderTaskLineIdsForCurrentScope() {
+  return getOrderTaskScopeValue() === "line"
+    ? getOrderTaskLineIdsForSelectedItemLine()
+    : getOrderTaskLineIdsForSelectedOrder();
+}
+
+function getOrderTaskLineIdsForActiveModal() {
+  if (state.orderTaskMode === "approval") return getOrderTaskLineIdsForApproval();
+  if ((state.orderTaskMode === "reply" || state.orderTaskMode === "progress") && state.activeOrderTaskId) {
+    const task = findOrderTaskInMemory(state.activeOrderTaskId);
+    const taskLineIds = Array.isArray(task?.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
+    return taskLineIds.length ? [...new Set(taskLineIds)] : getOrderTaskLineIdsForSelectedOrder();
+  }
+  return getOrderTaskLineIdsForCurrentScope();
+}
+
 function isActiveOrderTask(task = {}) {
   if (task?.metadata?.history_removed_at) return false;
   return ![
@@ -4584,7 +4609,7 @@ function handleSelectedOrderTaskButtonClick() {
     openAssignedOrderTaskDetailsModal(assignedTask.id, { lineId: state.selectedLine?.id || "" });
     return;
   }
-  openOrderTaskModal();
+  openOrderTaskModal({ scope: "line" });
 }
 
 function openPendingOrderApprovalModal(group = {}) {
@@ -5530,7 +5555,7 @@ function handleOrderTaskPhotoFiles(event) {
   if (event.target) event.target.value = "";
 }
 
-async function persistOrderTaskPhotos(lineIds = []) {
+async function persistOrderTaskPhotos(lineIds = [], options = {}) {
   const selectedPhotos = getSelectedOrderTaskPhotos();
   if (!selectedPhotos.length) return [];
 
@@ -5579,6 +5604,8 @@ async function persistOrderTaskPhotos(lineIds = []) {
       media_type: mediaType,
       size_bytes: blob.size || photo.size_bytes || 0,
       created_at: new Date().toISOString(),
+      order_line_ids: [...new Set(lineIds.filter(Boolean))],
+      attachment_scope: options.scope || (lineIds.length === 1 ? "line" : "order"),
     });
   }
 
@@ -5611,7 +5638,7 @@ async function requestOrderTaskPhoto() {
         stationId: station.id,
         stationName: station.name || "",
         jobId: job.id,
-        orderLineIds: state.orderTaskMode === "approval" ? getOrderTaskLineIdsForApproval() : getOrderTaskLineIdsForSelectedOrder(),
+        orderLineIds: getOrderTaskLineIdsForActiveModal(),
         taskId: state.orderTaskMode === "reply" ? state.activeOrderTaskId : "",
       },
     }));
@@ -5706,6 +5733,9 @@ async function openOrderTaskModal(options = {}) {
     : "Send a question, instruction, or special handling request to an admin or worker.";
   $("submit-order-task").textContent = isApprovalMode ? "Send for Approval" : task ? options.progress ? "Save Progress" : "Send Update" : "Send Task";
   $("order-task-status-field")?.classList.toggle("hidden", !task || isApprovalMode);
+  $("order-task-scope-field")?.classList.toggle("hidden", Boolean(task) || isApprovalMode);
+  const scopeSelect = $("order-task-scope");
+  if (scopeSelect) scopeSelect.value = options.scope === "line" ? "line" : "order";
   $("order-task-note").value = "";
   $("order-task-note").placeholder = isApprovalMode
     ? "What did you verify? Add anything the admin should inspect before approving shipment."
@@ -5762,7 +5792,8 @@ async function submitOrderTask() {
 
   try {
     const isApprovalMode = state.orderTaskMode === "approval";
-    const lineIds = isApprovalMode ? getOrderTaskLineIdsForApproval() : getOrderTaskLineIdsForSelectedOrder();
+    const scope = getOrderTaskScopeValue();
+    const lineIds = getOrderTaskLineIdsForActiveModal();
     const isProgressUpdate = state.orderTaskMode === "progress";
     const isExistingTaskUpdate = state.orderTaskMode === "reply" || state.orderTaskMode === "progress";
     const assigneeUserId = isProgressUpdate || (isExistingTaskUpdate && !isRealAdminUser())
@@ -5780,7 +5811,7 @@ async function submitOrderTask() {
       }
     }
 
-    const photos = await persistOrderTaskPhotos(lineIds);
+    const photos = await persistOrderTaskPhotos(lineIds, { scope: isApprovalMode ? "approval" : scope });
 
     if (isApprovalMode) {
       const approvalGroups = getApprovalOrderGroupsFromLineIds(lineIds);
@@ -10587,7 +10618,7 @@ function setupListeners() {
   $("preview-worker-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
   $("open-ebay-label-page")?.addEventListener("click", openSelectedEbayLabelPage);
   $("assign-order-task")?.addEventListener("click", handleSelectedOrderTaskButtonClick);
-  $("open-order-task-modal")?.addEventListener("click", () => openOrderTaskModal());
+  $("open-order-task-modal")?.addEventListener("click", () => openOrderTaskModal({ scope: "order" }));
   $("submit-order-task")?.addEventListener("click", submitOrderTask);
   $("cancel-order-task")?.addEventListener("click", closeOrderTaskModal);
   $("close-order-task-modal")?.addEventListener("click", closeOrderTaskModal);
