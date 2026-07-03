@@ -632,6 +632,19 @@ function saveLocalTaskReadState(row = {}) {
   }
 }
 
+function removeLocalTaskReadState(source = "", taskId = "") {
+  if (isTaskViewAsWorkerMode() || !state.user?.id || !source || !taskId) return;
+  const all = loadLocalTaskReadStates();
+  const userMap = all[state.user.id] && typeof all[state.user.id] === "object" ? all[state.user.id] : {};
+  delete userMap[getTaskReadStateKey(source, taskId)];
+  all[state.user.id] = userMap;
+  try {
+    localStorage.setItem(TASK_READ_STATE_STORAGE_KEY, JSON.stringify(all));
+  } catch (error) {
+    console.warn("Could not remove local task read state:", error);
+  }
+}
+
 function loadLocalTaskReadStatesForTasks(tasks = []) {
   if (isTaskViewAsWorkerMode()) return;
   const all = loadLocalTaskReadStates();
@@ -946,6 +959,28 @@ async function markTaskSeen(task = {}) {
   } catch (error) {
     state.taskReadStateSyncAvailable = false;
     console.warn("Could not persist task read state; using this browser as fallback.", error);
+  }
+}
+
+async function markTaskUnread(task = {}) {
+  if (isTaskViewAsWorkerMode()) return;
+  if (!task?.id || !task?.source || !state.user?.id) return;
+
+  state.taskReadStates.delete(getUnifiedTaskKey(task));
+  removeLocalTaskReadState(task.source, task.id);
+
+  if (!state.taskReadStateSyncAvailable) return;
+  try {
+    const { error } = await supabase
+      .from("task_read_states")
+      .delete()
+      .eq("user_id", state.user.id)
+      .eq("source", task.source)
+      .eq("task_id", task.id);
+    if (error) throw error;
+  } catch (error) {
+    state.taskReadStateSyncAvailable = false;
+    console.warn("Could not persist task unread state; using this browser as fallback.", error);
   }
 }
 
@@ -3814,6 +3849,23 @@ function renderTaskCard(task = {}, options = {}) {
     task.source === "team" && task.metadata?.task_tag ? formatTaskTag(task.metadata.task_tag) : "",
   ].filter(Boolean).join(" - ");
   const orderMiniStatus = getTaskOrderMiniStatus(task);
+  const readActionHtml = readInfo.status === "read" ? `
+              <span
+                role="button"
+                tabindex="0"
+                class="team-task-mark-read-chip is-unread-action"
+                data-team-task-mark-unread="${escapeHtml(taskKey)}"
+                title="Mark this task unread"
+              >Mark unread</span>
+            ` : `
+              <span
+                role="button"
+                tabindex="0"
+                class="team-task-mark-read-chip"
+                data-team-task-mark-read="${escapeHtml(taskKey)}"
+                title="Mark this task read"
+              >Mark read</span>
+            `;
   const actionHtml = canceled ? `
     <div class="team-task-actions">
       <button type="button" class="secondary-btn" data-task-history-action="reopen" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Reopen Task</button>
@@ -3844,17 +3896,7 @@ function renderTaskCard(task = {}, options = {}) {
             <strong>${escapeHtml(task.title || "Team task")}</strong>
             <span class="team-task-chip team-task-status-chip">${escapeHtml(statusLabel)}</span>
             <span class="team-task-read-chip">${escapeHtml(readInfo.label)}</span>
-            ${readInfo.status === "read" ? `
-              <span class="team-task-read-action-spacer" aria-hidden="true"></span>
-            ` : `
-              <span
-                role="button"
-                tabindex="0"
-                class="team-task-mark-read-chip"
-                data-team-task-mark-read="${escapeHtml(taskKey)}"
-                title="Mark this task read"
-              >Mark read</span>
-            `}
+            ${readActionHtml}
           </span>
           <span class="team-task-summary-preview">${escapeHtml(preview)}</span>
           ${orderMiniStatus || contextLine ? `<span class="team-task-summary-context">${escapeHtml(orderMiniStatus || contextLine)}</span>` : ""}
@@ -3917,6 +3959,27 @@ function attachTaskCardInteractions(root = document) {
     button.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       handleMarkRead(event);
+    });
+  });
+  root.querySelectorAll("[data-team-task-mark-unread]").forEach((button) => {
+    const handleMarkUnread = async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const key = button.dataset.teamTaskMarkUnread || "";
+      const task = getTaskByUnifiedKey(key);
+      if (!task) return;
+      button.textContent = "Saving...";
+      button.setAttribute("aria-disabled", "true");
+      try {
+        await markTaskUnread(task);
+      } finally {
+        renderTasks();
+      }
+    };
+    button.addEventListener("click", handleMarkUnread);
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      handleMarkUnread(event);
     });
   });
 }

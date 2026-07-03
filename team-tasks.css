@@ -702,6 +702,18 @@ body {
   outline: none;
 }
 
+.team-task-mark-read-chip.is-unread-action {
+  border-color: rgba(241, 214, 155, 0.3);
+  color: var(--task-gold);
+  background: rgba(241, 214, 155, 0.08);
+}
+
+.team-task-mark-read-chip.is-unread-action:hover,
+.team-task-mark-read-chip.is-unread-action:focus-visible {
+  border-color: rgba(241, 214, 155, 0.52);
+  background: rgba(241, 214, 155, 0.14);
+}
+
 .team-task-summary-preview,
 .team-task-summary-context {
   min-width: 0;
