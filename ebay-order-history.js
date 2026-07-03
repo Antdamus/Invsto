@@ -843,11 +843,19 @@ function getFinanceStatusRank(status = "") {
 function getFinanceStatusBadge(line = {}) {
   const payload = getFinancePayload(line);
   const status = normalizeFinanceStatus(payload?.status || payload?.transactionStatus || payload?.transaction_status);
-  const label = payload?.statusLabel || payload?.status_label || getFinanceStatusLabel(status);
+  const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
+  const checkedWithNoTransactions = payload?.source === "ebay_finances_api"
+    && status === "unknown"
+    && transactions.length === 0;
+  const label = checkedWithNoTransactions
+    ? "No payout data"
+    : payload?.statusLabel || payload?.status_label || getFinanceStatusLabel(status);
   const payoutIds = Array.isArray(payload?.payoutIds) ? payload.payoutIds : [payload?.payoutId].filter(Boolean);
   const transactionIds = Array.isArray(payload?.transactionIds) ? payload.transactionIds : [payload?.transactionId].filter(Boolean);
   const parts = [
-    `${label}: ${getFinanceStatusDescription(status)}`,
+    checkedWithNoTransactions
+      ? "Checked eBay Finances: eBay returned no transaction data for this order."
+      : `${label}: ${getFinanceStatusDescription(status)}`,
     payload?.memo,
     payoutIds.length ? `Payout ${payoutIds.slice(0, 2).join(", ")}` : "",
     transactionIds.length ? `Transaction ${transactionIds.slice(0, 2).join(", ")}` : "",
@@ -9219,6 +9227,16 @@ async function postEbayReturnSyncPayload(payload) {
 
 function buildReturnApiSyncSummary(response = {}) {
   const results = Array.isArray(response.results) ? response.results : [];
+  const financeStats = response.financeStats || {};
+  const financeChecked = Number(financeStats.financeOrdersChecked || 0);
+  const financeFound = Number(financeStats.financeOrdersWithTransactions || 0);
+  const financeWarnings = Array.isArray(response.financeWarnings) ? response.financeWarnings : [];
+  const financeSummaryText = financeChecked
+    ? ` Payout lookup checked ${financeChecked.toLocaleString()} order${financeChecked === 1 ? "" : "s"} and found transaction data for ${financeFound.toLocaleString()}.`
+    : "";
+  const financeWarningText = financeWarnings.length
+    ? ` Finance warning: ${financeWarnings[0]?.message || financeWarnings[0]?.reason || "lookup failed"}.`
+    : "";
   const skippedAlreadyProcessed = results.filter((entry) => entry?.taskSkipped).length;
   const failedReturns = results
     .filter((entry) => entry?.error)
@@ -9252,7 +9270,7 @@ function buildReturnApiSyncSummary(response = {}) {
     staleCasesHeldOpen: Number(response.staleCasesHeldOpen || 0),
     staleCasesRemaining: Number(response.staleCasesRemaining || 0),
     financeStats: response.financeStats || null,
-    financeWarnings: Array.isArray(response.financeWarnings) ? response.financeWarnings : [],
+    financeWarnings,
     importedReturns: results.filter((entry) => entry?.matched === true),
     unmatchedReturns,
     failedReturns,
@@ -9261,12 +9279,12 @@ function buildReturnApiSyncSummary(response = {}) {
       : response.cleanupClosed
         ? (response.cleanupOnly
           ? (response.dryRun
-          ? `Cleaner dry check complete. ${Number(response.staleCasesClosed || 0).toLocaleString()} return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"} would close, ${Number(response.staleCasesHeldOpen || 0).toLocaleString()} would stay open, and ${Number(response.staleCasesRemaining || 0).toLocaleString()} remain for another pass.`
-          : `Cleaner complete. Closed ${Number(response.staleCasesClosed || 0).toLocaleString()} stale return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"}, kept ${Number(response.staleCasesHeldOpen || 0).toLocaleString()} open for local action, and ${Number(response.staleCasesRemaining || 0).toLocaleString()} remain for another pass.`)
-          : `eBay return sync complete. Created ${Number(response.tasksCreated || 0).toLocaleString()} task${Number(response.tasksCreated || 0) === 1 ? "" : "s"}, refreshed ${Number(response.tasksUpdated || 0).toLocaleString()}, closed ${Number(response.staleCasesClosed || 0).toLocaleString()} stale return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"}, kept ${Number(response.staleCasesHeldOpen || 0).toLocaleString()} open, and ${Number(response.staleCasesRemaining || 0).toLocaleString()} remain for cleaner passes.`)
+          ? `Cleaner dry check complete. ${Number(response.staleCasesClosed || 0).toLocaleString()} return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"} would close, ${Number(response.staleCasesHeldOpen || 0).toLocaleString()} would stay open, and ${Number(response.staleCasesRemaining || 0).toLocaleString()} remain for another pass.${financeSummaryText}${financeWarningText}`
+          : `Cleaner complete. Closed ${Number(response.staleCasesClosed || 0).toLocaleString()} stale return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"}, kept ${Number(response.staleCasesHeldOpen || 0).toLocaleString()} open for local action, and ${Number(response.staleCasesRemaining || 0).toLocaleString()} remain for another pass.${financeSummaryText}${financeWarningText}`)
+          : `eBay return sync complete. Created ${Number(response.tasksCreated || 0).toLocaleString()} task${Number(response.tasksCreated || 0) === 1 ? "" : "s"}, refreshed ${Number(response.tasksUpdated || 0).toLocaleString()}, closed ${Number(response.staleCasesClosed || 0).toLocaleString()} stale return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"}, kept ${Number(response.staleCasesHeldOpen || 0).toLocaleString()} open, and ${Number(response.staleCasesRemaining || 0).toLocaleString()} remain for cleaner passes.${financeSummaryText}${financeWarningText}`)
       : response.dryRun
-        ? `Dry check complete. ${Number(response.matched || 0).toLocaleString()} return${Number(response.matched || 0) === 1 ? "" : "s"} match OG orders, ${Number(response.unmatched || 0).toLocaleString()} need review.`
-        : `eBay return sync complete. Created ${Number(response.tasksCreated || 0).toLocaleString()} task${Number(response.tasksCreated || 0) === 1 ? "" : "s"}, refreshed ${Number(response.tasksUpdated || 0).toLocaleString()}, imported ${Number(response.messagesImported || 0).toLocaleString()} message${Number(response.messagesImported || 0) === 1 ? "" : "s"}.`,
+        ? `Dry check complete. ${Number(response.matched || 0).toLocaleString()} return${Number(response.matched || 0) === 1 ? "" : "s"} match OG orders, ${Number(response.unmatched || 0).toLocaleString()} need review.${financeSummaryText}${financeWarningText}`
+        : `eBay return sync complete. Created ${Number(response.tasksCreated || 0).toLocaleString()} task${Number(response.tasksCreated || 0) === 1 ? "" : "s"}, refreshed ${Number(response.tasksUpdated || 0).toLocaleString()}, imported ${Number(response.messagesImported || 0).toLocaleString()} message${Number(response.messagesImported || 0) === 1 ? "" : "s"}.${financeSummaryText}${financeWarningText}`,
   };
 }
 

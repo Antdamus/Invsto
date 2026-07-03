@@ -50,6 +50,7 @@ const CAPTURE_POLL_INTERVAL_MS = 1_500;
 const CAPTURE_PHOTO_SETTLE_MS = 3_000;
 const CAPTURE_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "contain", quality: 55 };
 const EBAY_RETURN_EVIDENCE_BUCKET = "ebay-return-evidence";
+const TASK_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"]);
 const TASK_VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "ogg"]);
 const TASK_READ_STATE_STORAGE_KEY = "og.teamTaskReadStates.v1";
 const ACTIVE_TASK_STATUSES = [
@@ -1743,6 +1744,13 @@ function getTaskAttachmentMediaType(attachment = {}) {
   return TASK_VIDEO_EXTENSIONS.has(extension) ? "video" : "image";
 }
 
+function isAcceptedTaskEvidenceFile(file = {}) {
+  const mimeType = String(file.type || file.mime_type || "").toLowerCase();
+  if (/^(image|video)\//.test(mimeType)) return true;
+  const extension = String(file.name || file.path || "").toLowerCase().match(/\.([a-z0-9]{2,5})(?:$|[?#\s])/i)?.[1] || "";
+  return TASK_IMAGE_EXTENSIONS.has(extension) || TASK_VIDEO_EXTENSIONS.has(extension);
+}
+
 function isTaskVideoAttachment(attachment = {}) {
   return getTaskAttachmentMediaType(attachment) === "video";
 }
@@ -2506,10 +2514,11 @@ function getTaskEventEvidencePhotosForBrief(events = []) {
   const photos = [];
   events.forEach((event) => {
     (Array.isArray(event.photo_attachments) ? event.photo_attachments : []).forEach((photo, index) => {
+      const mediaType = getTaskAttachmentMediaType(photo);
       const bucket = photo.previewBucket || photo.bucket || photo.storage_bucket || TEAM_TASK_BUCKET;
       const path = photo.previewPath || photo.path || photo.storage_path || "";
       const url = photo.signedUrl || photo.url || "";
-      const label = photo.label || `Task photo ${index + 1}`;
+      const label = photo.label || `${mediaType === "video" ? "Task video" : "Task photo"} ${index + 1}`;
       if (!bucket && !url) return;
       photos.push({
         bucket,
@@ -2517,8 +2526,9 @@ function getTaskEventEvidencePhotosForBrief(events = []) {
         url: photo.previewUrl || url,
         thumbnailUrl: photo.thumbnailUrl || url,
         label,
-        kind: "Task photo",
+        kind: getTaskAttachmentKindLabel(photo),
         caption: event.created_at ? `Added ${formatDate(event.created_at)}` : "Task evidence",
+        media_type: mediaType,
       });
     });
   });
@@ -2540,6 +2550,7 @@ function getTaskVideoReceiptPhotosForBrief(task = {}) {
         label,
         kind: "Video receipt",
         caption: getTaskVideoReceiptAuditText(photo),
+        media_type: getTaskAttachmentMediaType(photo),
       });
     });
   });
@@ -2555,7 +2566,7 @@ function renderPendingOrderEvidencePanel(task = {}, events = []) {
       <div class="team-task-evidence-head">
         <div>
           <span class="eyebrow">Evidence</span>
-          <strong>${photos.length ? `${photos.length} photo${photos.length === 1 ? "" : "s"} attached` : "No photos attached yet"}</strong>
+          <strong>${photos.length ? `${photos.length} evidence file${photos.length === 1 ? "" : "s"} attached` : "No evidence attached yet"}</strong>
         </div>
         ${extraCount ? `<span class="team-task-chip">+${escapeHtml(extraCount)} more</span>` : ""}
       </div>
@@ -2563,7 +2574,7 @@ function renderPendingOrderEvidencePanel(task = {}, events = []) {
         <div class="team-task-evidence-grid">
           ${shown.map((photo) => renderPendingOrderEvidencePhotoButton(photo, "team-task-evidence-thumb")).join("")}
         </div>
-      ` : `<p class="team-task-evidence-empty">No task photos or video receipt screenshots are attached yet.</p>`}
+      ` : `<p class="team-task-evidence-empty">No task evidence or video receipt screenshots are attached yet.</p>`}
     </section>
   `;
 }
@@ -2585,6 +2596,7 @@ function getPendingOrderBriefEvidencePhotos(task = {}, events = []) {
 function renderPendingOrderEvidencePhotoButton(photo = {}, className = "team-task-evidence-thumb") {
   const label = photo.label || "Task evidence photo";
   const imageUrl = photo.thumbnailUrl || photo.url || "";
+  const mediaType = getTaskAttachmentMediaType(photo);
   return `
     <button
       type="button"
@@ -2594,9 +2606,10 @@ function renderPendingOrderEvidencePhotoButton(photo = {}, className = "team-tas
       data-path="${escapeHtml(photo.path || "")}"
       data-url="${escapeHtml(photo.url || "")}"
       data-label="${escapeHtml(label)}"
+      data-media-type="${escapeHtml(mediaType)}"
       aria-label="Open ${escapeHtml(label)}"
     >
-      ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(label)}" loading="lazy" />` : `<span class="team-task-evidence-placeholder">Photo</span>`}
+      ${renderTaskEvidencePreview(photo, imageUrl, label)}
       <span><b>${escapeHtml(photo.kind || "Evidence")}</b><small>${escapeHtml(photo.caption || label)}</small></span>
     </button>
   `;
@@ -2609,7 +2622,7 @@ function renderPendingOrderEvidenceStrip(task = {}, events = []) {
   return `
     <aside class="team-task-evidence-strip">
       <div class="team-task-evidence-strip-head">
-        <span class="eyebrow">Photos</span>
+        <span class="eyebrow">Evidence</span>
         <strong>${photos.length ? `${photos.length} attached` : "None yet"}</strong>
       </div>
       ${shown.length ? `
@@ -3728,6 +3741,28 @@ function attachTaskCardInteractions(root = document) {
   });
 }
 
+function openTaskEvidenceFromButton(button) {
+  if (!button) return;
+  const mediaType = button.dataset.mediaType || getTaskAttachmentMediaType({
+    mime_type: button.dataset.mimeType,
+    path: button.dataset.path,
+    label: button.dataset.label,
+  });
+  const label = button.dataset.label || (mediaType === "video" ? "Task evidence video" : "Task evidence photo");
+  if (button.dataset.url) {
+    openTaskPhotoViewer({
+      url: button.dataset.url,
+      label,
+      bucket: button.dataset.bucket || TEAM_TASK_BUCKET,
+      path: button.dataset.path || "",
+      mediaType,
+      trigger: button,
+    });
+    return;
+  }
+  openTaskPhoto(button.dataset.bucket, button.dataset.path, { mediaType, label, trigger: button });
+}
+
 function renderTasks() {
   const list = $("team-task-list");
   const count = $("team-task-count");
@@ -3797,19 +3832,7 @@ function renderTasks() {
     button.addEventListener("click", () => openTaskModal({ taskId: button.dataset.teamTaskReassignRequest, reassignRequest: true }));
   });
   list.querySelectorAll("[data-team-task-photo]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (button.dataset.url) {
-        openTaskPhotoViewer({
-          url: button.dataset.url,
-          label: button.dataset.label || "Task evidence photo",
-          bucket: button.dataset.bucket || TEAM_TASK_BUCKET,
-          path: button.dataset.path || "",
-          trigger: button,
-        });
-        return;
-      }
-      openTaskPhoto(button.dataset.bucket, button.dataset.path);
-    });
+    button.addEventListener("click", () => openTaskEvidenceFromButton(button));
   });
   list.querySelectorAll("[data-task-copy-order-number]").forEach((button) => {
     button.addEventListener("click", () => copyTextToClipboard(button.dataset.taskCopyOrderNumber, "Order number"));
@@ -3855,19 +3878,7 @@ function renderRemovedHistoryTasks() {
   attachTaskCardInteractions(list);
   setupInlineLineReviewControls(list);
   list.querySelectorAll("[data-team-task-photo]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (button.dataset.url) {
-        openTaskPhotoViewer({
-          url: button.dataset.url,
-          label: button.dataset.label || "Task evidence photo",
-          bucket: button.dataset.bucket || TEAM_TASK_BUCKET,
-          path: button.dataset.path || "",
-          trigger: button,
-        });
-        return;
-      }
-      openTaskPhoto(button.dataset.bucket, button.dataset.path);
-    });
+    button.addEventListener("click", () => openTaskEvidenceFromButton(button));
   });
   list.querySelectorAll("[data-task-copy-order-number]").forEach((button) => {
     button.addEventListener("click", () => copyTextToClipboard(button.dataset.taskCopyOrderNumber, "Order number"));
@@ -4293,6 +4304,7 @@ function setupTaskPhotoViewerGestures() {
   });
   frame.addEventListener("wheel", (event) => {
     if ($("team-task-photo-viewer-modal")?.classList.contains("hidden")) return;
+    if (image.classList.contains("hidden")) return;
     event.preventDefault();
     zoomTaskPhotoViewer(event.deltaY < 0 ? 0.15 : -0.15);
   }, { passive: false });
@@ -4310,35 +4322,39 @@ function renderPhotos() {
   const grid = $("team-task-photo-grid");
   if (!grid) return;
   if (!state.photos.length) {
-    grid.innerHTML = `<div class="empty-state">No task photos added.</div>`;
+    grid.innerHTML = `<div class="empty-state">No task evidence added.</div>`;
     return;
   }
 
   grid.innerHTML = state.photos.map((photo) => `
     <article class="team-task-photo-card">
-      <img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl)}" alt="${escapeHtml(photo.label)}" />
+      ${isTaskVideoAttachment(photo)
+        ? `<video src="${escapeHtml(photo.previewUrl)}" controls playsinline preload="metadata"></video>`
+        : `<img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl)}" alt="${escapeHtml(photo.label)}" />`}
       <span>${escapeHtml(photo.label)}</span>
     </article>
   `).join("");
 }
 
 function handlePhotoFiles(event) {
-  const files = [...(event.target?.files || [])].filter((file) => /^image\//i.test(file.type || ""));
+  const files = [...(event.target?.files || [])].filter(isAcceptedTaskEvidenceFile);
   if (!files.length) {
-    setPhotoStatus("Choose image files to attach.", "error");
+    setPhotoStatus("Choose image or video files to attach.", "error");
     return;
   }
 
   files.forEach((file, index) => {
+    const mediaType = getTaskAttachmentMediaType(file);
     state.photos.push({
       file,
       previewUrl: URL.createObjectURL(file),
-      label: file.name || `Task photo ${index + 1}`,
-      mime_type: file.type || "image/jpeg",
+      label: file.name || `Task ${mediaType === "video" ? "video" : "photo"} ${index + 1}`,
+      mime_type: file.type || (mediaType === "video" ? "video/mp4" : "image/jpeg"),
+      media_type: mediaType,
     });
   });
   renderPhotos();
-  setPhotoStatus(`${files.length} photo${files.length === 1 ? "" : "s"} added.`, "success");
+  setPhotoStatus(`${files.length} evidence file${files.length === 1 ? "" : "s"} added.`, "success");
   if (event.target) event.target.value = "";
 }
 
@@ -4355,6 +4371,12 @@ function safePathSegment(value, fallback = "task") {
 
 function getPhotoExtension(file) {
   const source = `${file?.name || ""} ${file?.path || ""} ${file?.type || ""} ${file?.mime_type || ""}`.toLowerCase();
+  const explicitExtension = (source.match(/\.([a-z0-9]{2,5})(?:$|[?#\s])/i)?.[1] || "").toLowerCase();
+  if (TASK_VIDEO_EXTENSIONS.has(explicitExtension)) return explicitExtension;
+  if (source.includes("quicktime") || source.includes("mov")) return "mov";
+  if (source.includes("webm")) return "webm";
+  if (source.includes("mp4") || source.includes("mpeg-4")) return "mp4";
+  if (source.includes("ogg")) return "ogg";
   if (source.includes("png")) return "png";
   if (source.includes("webp")) return "webp";
   if (source.includes("heic")) return "heic";
@@ -4378,8 +4400,9 @@ async function uploadPhotos(title) {
   for (let index = 0; index < state.photos.length; index += 1) {
     const photo = state.photos[index];
     const blob = await getTaskPhotoBlob(photo, index);
+    const mediaType = getTaskAttachmentMediaType({ ...photo, mime_type: blob.type || photo.file?.type || photo.mime_type });
     const extension = getPhotoExtension(photo.file || photo);
-    const originalName = safePathSegment(photo.label, `photo-${index + 1}`);
+    const originalName = safePathSegment(photo.label, `${mediaType}-${index + 1}`);
     const path = [
       "team-tasks",
       dateFolder,
@@ -4390,20 +4413,21 @@ async function uploadPhotos(title) {
     const { error } = await supabase.storage
       .from(TEAM_TASK_BUCKET)
       .upload(path, blob, {
-        contentType: blob.type || photo.file?.type || photo.mime_type || "image/jpeg",
+        contentType: blob.type || photo.file?.type || photo.mime_type || (mediaType === "video" ? "video/mp4" : "image/jpeg"),
         upsert: false,
       });
 
-    if (error) throw new Error(error.message || `Could not upload task photo ${index + 1}.`);
+    if (error) throw new Error(error.message || `Could not upload task evidence ${index + 1}.`);
 
     saved.push({
       bucket: TEAM_TASK_BUCKET,
       path,
-      label: photo.label || `Task photo ${index + 1}`,
+      label: photo.label || `Task ${mediaType === "video" ? "video" : "photo"} ${index + 1}`,
       source_bucket: photo.bucket || null,
       source_path: photo.path || null,
       capture_job_id: photo.capture_job_id || null,
       mime_type: blob.type || photo.file?.type || photo.mime_type || null,
+      media_type: mediaType,
       size_bytes: blob.size || photo.file?.size || 0,
       created_at: new Date().toISOString(),
     });
@@ -4616,6 +4640,7 @@ async function captureRowsToTaskPhotos(rows) {
       sort_order: row.sort_order ?? index,
       label: row.label || `Task photo ${index + 1}`,
       mime_type: row.mime_type || "image/jpeg",
+      media_type: "image",
       created_at: row.created_at || new Date().toISOString(),
     });
   }
@@ -5287,8 +5312,8 @@ async function submitOrderWorkflowTask() {
   }
   if (["order-shipping-ready-packaging", "order-shipping-complete"].includes(mode) && !state.photos.length) {
     return setModalError(mode === "order-shipping-complete"
-      ? "Add photo proof of the packaged item and shipping label before marking shipped."
-      : "Add an audit photo before marking this ready for packaging.");
+      ? "Add photo or video proof of the packaged item and shipping label before marking shipped."
+      : "Add an audit photo or video before marking this ready for packaging.");
   }
   const needsLineReview = shouldShowOrderLineReviewPanel(task, mode);
   const lineReview = needsLineReview ? collectOrderLineReviewDecisions(task, mode) : { reviews: [], summary: null, error: "" };

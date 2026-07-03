@@ -551,11 +551,19 @@ function getFinanceStatusRank(status = "") {
 function getFinanceStatusBadge(line = {}) {
   const payload = getFinancePayload(line);
   const status = normalizeFinanceStatus(payload?.status || payload?.transactionStatus || payload?.transaction_status);
-  const label = payload?.statusLabel || payload?.status_label || getFinanceStatusLabel(status);
+  const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
+  const checkedWithNoTransactions = payload?.source === "ebay_finances_api"
+    && status === "unknown"
+    && transactions.length === 0;
+  const label = checkedWithNoTransactions
+    ? "No payout data"
+    : payload?.statusLabel || payload?.status_label || getFinanceStatusLabel(status);
   const payoutIds = Array.isArray(payload?.payoutIds) ? payload.payoutIds : [payload?.payoutId].filter(Boolean);
   const transactionIds = Array.isArray(payload?.transactionIds) ? payload.transactionIds : [payload?.transactionId].filter(Boolean);
   const parts = [
-    `${label}: ${getFinanceStatusDescription(status)}`,
+    checkedWithNoTransactions
+      ? "Checked eBay Finances: eBay returned no transaction data for this order."
+      : `${label}: ${getFinanceStatusDescription(status)}`,
     payload?.memo,
     payoutIds.length ? `Payout ${payoutIds.slice(0, 2).join(", ")}` : "",
     transactionIds.length ? `Transaction ${transactionIds.slice(0, 2).join(", ")}` : "",
