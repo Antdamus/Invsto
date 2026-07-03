@@ -403,6 +403,21 @@ function normalizeEbayApiStatusText(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+function getRawPayloadValue(source, ...paths) {
+  const root = source?.raw_payload || {};
+  for (const path of paths) {
+    const parts = Array.isArray(path) ? path : String(path || "").split(".");
+    let current = root;
+    for (const part of parts) {
+      if (!part && part !== 0) continue;
+      current = current && typeof current === "object" ? current[part] : undefined;
+      if (current === undefined || current === null) break;
+    }
+    if (current !== undefined && current !== null && String(current).trim() !== "") return current;
+  }
+  return "";
+}
+
 function getLineEbayApiStatus(line) {
   const order = getOrderFromLine(line);
   const mismatch = getOrderSyncMismatch(line);
@@ -413,22 +428,22 @@ function getLineEbayApiStatus(line) {
       mismatch?.ebayPaymentStatus
       || orderApiStatus.payment_status
       || lineApiStatus.payment_status
-      || order?.raw_payload?.orderPaymentStatus
-      || line?.raw_payload?.orderPaymentStatus
+      || getRawPayloadValue(order, "orderPaymentStatus", "order.orderPaymentStatus", ["order", "paymentSummary", "payments", 0, "paymentStatus"])
+      || getRawPayloadValue(line, "orderPaymentStatus")
     ),
     fulfillmentStatus: normalizeEbayApiStatusText(
       mismatch?.ebayFulfillmentStatus
       || orderApiStatus.fulfillment_status
       || lineApiStatus.fulfillment_status
-      || order?.raw_payload?.orderFulfillmentStatus
-      || line?.raw_payload?.orderFulfillmentStatus
+      || getRawPayloadValue(order, "orderFulfillmentStatus", "order.orderFulfillmentStatus", "order.orderFulfillmentState")
+      || getRawPayloadValue(line, "orderFulfillmentStatus")
     ),
     cancelStatus: normalizeEbayApiStatusText(
       mismatch?.ebayCancelStatus
       || orderApiStatus.cancel_status
       || lineApiStatus.cancel_status
-      || order?.raw_payload?.orderCancelStatus
-      || line?.raw_payload?.orderCancelStatus
+      || getRawPayloadValue(order, "orderCancelStatus", "order.cancelStatus.cancelState", "order.cancelStatus.cancelStatus")
+      || getRawPayloadValue(line, "orderCancelStatus")
     ),
     reviewReason: String(mismatch?.reason || orderApiStatus.review_reason || lineApiStatus.review_reason || "").trim(),
     reviewMessage: String(mismatch?.message || orderApiStatus.review_message || lineApiStatus.review_message || "").trim(),
@@ -2239,6 +2254,7 @@ function buildOrderLineQueueQuery(status, admin) {
       ${moneyLineFields}
       line_status,
       created_at,
+      raw_payload,
       internal_item_id,
       fulfilled_quantity,
       fulfilled_at,
@@ -2258,6 +2274,7 @@ function buildOrderLineQueueQuery(status, admin) {
         ship_by_date,
         ${moneyOrderFields}
         status,
+        raw_payload,
         ${orderAuditFields}
         label_status,
         label_storage_bucket,
