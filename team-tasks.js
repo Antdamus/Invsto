@@ -50,6 +50,7 @@ const CAPTURE_POLL_INTERVAL_MS = 1_500;
 const CAPTURE_PHOTO_SETTLE_MS = 3_000;
 const CAPTURE_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "contain", quality: 55 };
 const EBAY_RETURN_EVIDENCE_BUCKET = "ebay-return-evidence";
+const TASK_VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "ogg"]);
 const TASK_READ_STATE_STORAGE_KEY = "og.teamTaskReadStates.v1";
 const ACTIVE_TASK_STATUSES = [
   "open",
@@ -1724,6 +1725,44 @@ function getTaskEvidencePhotoPath(photo = {}) {
   return photo.path || photo.storage_path || "";
 }
 
+function getTaskAttachmentMediaType(attachment = {}) {
+  const explicitType = String(attachment.media_type || attachment.mediaType || "").trim().toLowerCase();
+  if (explicitType === "video" || explicitType === "image") return explicitType;
+  const mimeType = String(attachment.mime_type || attachment.mimeType || attachment.type || attachment.file?.type || "").trim().toLowerCase();
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("image/")) return "image";
+  const source = [
+    attachment.label,
+    attachment.name,
+    attachment.path,
+    attachment.storage_path,
+    attachment.previewPath,
+    attachment.source_path,
+  ].filter(Boolean).join(" ").toLowerCase();
+  const extension = (source.match(/\.([a-z0-9]{2,5})(?:$|[?#\s])/i)?.[1] || "").toLowerCase();
+  return TASK_VIDEO_EXTENSIONS.has(extension) ? "video" : "image";
+}
+
+function isTaskVideoAttachment(attachment = {}) {
+  return getTaskAttachmentMediaType(attachment) === "video";
+}
+
+function getTaskAttachmentKindLabel(attachment = {}) {
+  return isTaskVideoAttachment(attachment) ? "Task video" : "Task photo";
+}
+
+function renderTaskEvidencePreview(attachment = {}, url = "", label = "") {
+  const safeLabel = escapeHtml(label || attachment.label || "Task evidence");
+  if (isTaskVideoAttachment(attachment)) {
+    return url
+      ? `<video src="${escapeHtml(url)}" aria-label="${safeLabel}" muted playsinline preload="metadata"></video>`
+      : `<span class="team-task-video-placeholder">Video</span>`;
+  }
+  return url
+    ? `<img src="${escapeHtml(url)}" alt="${safeLabel}" loading="lazy" />`
+    : `<span>${safeLabel}</span>`;
+}
+
 function getTaskEvidencePhotoVariantRef(photo = {}, variant = "preview") {
   const normalizedVariant = variant === "thumb" ? "thumbnail" : variant;
   const variants = photo.variants || photo.derivatives || {};
@@ -2069,16 +2108,20 @@ async function hydrateEventPhotoUrls() {
     const bucket = photo.bucket || photo.storage_bucket || TEAM_TASK_BUCKET;
     const path = photo.path || photo.storage_path || "";
     if (!bucket || !path) return;
+    const isVideo = isTaskVideoAttachment(photo);
     const previewRef = getTaskEvidencePhotoVariantRef(photo, "preview") || { bucket, path };
-    const thumbnailRef = getTaskEvidencePhotoVariantRef(photo, "thumbnail");
+    const thumbnailRef = isVideo ? null : getTaskEvidencePhotoVariantRef(photo, "thumbnail");
     if (!photo.previewUrl) {
       photo.previewUrl = photo.url || photo.signedUrl || await createTaskSignedImageUrl(previewRef.bucket, previewRef.path);
     }
     if (!photo.thumbnailUrl) {
-      photo.thumbnailUrl = thumbnailRef
+      photo.thumbnailUrl = isVideo
+        ? photo.previewUrl
+        : thumbnailRef
         ? await createTaskSignedImageUrl(thumbnailRef.bucket, thumbnailRef.path)
         : await createTaskSignedImageThumbnailUrl(bucket, path);
     }
+    photo.media_type = getTaskAttachmentMediaType(photo);
     photo.previewBucket = previewRef.bucket;
     photo.previewPath = previewRef.path;
     if (thumbnailRef) {
@@ -4067,7 +4110,8 @@ function renderTaskEvent(event = {}) {
   const lineReviewHtml = renderTaskEventLineReviews(event);
   const photoHtml = photos.length
     ? `<div class="team-task-event-photos">${photos.map((photo, index) => {
-        const label = photo.label || `Photo ${index + 1}`;
+        const mediaType = getTaskAttachmentMediaType(photo);
+        const label = photo.label || `${mediaType === "video" ? "Video" : "Photo"} ${index + 1}`;
         const url = photo.signedUrl || photo.url || "";
         const bucket = photo.bucket || photo.storage_bucket || TEAM_TASK_BUCKET;
         const path = photo.path || photo.storage_path || "";
@@ -4080,9 +4124,10 @@ function renderTaskEvent(event = {}) {
           data-path="${escapeHtml(path)}"
           data-url="${escapeHtml(url)}"
           data-label="${escapeHtml(label)}"
+          data-media-type="${escapeHtml(mediaType)}"
           aria-label="Open ${escapeHtml(label)}"
         >
-          ${url ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(label)}" loading="lazy" />` : `<span>${escapeHtml(label)}</span>`}
+          ${renderTaskEvidencePreview(photo, url, label)}
           <small>${escapeHtml(label)}</small>
         </button>
       `;
@@ -4111,7 +4156,7 @@ function renderTaskEvent(event = {}) {
 
 function applyTaskPhotoViewerTransform() {
   const image = $("team-task-photo-viewer-image");
-  if (!image) return;
+  if (!image || image.classList.contains("hidden")) return;
   image.style.transform = `translate(${state.photoViewerOffsetX}px, ${state.photoViewerOffsetY}px) scale(${state.photoViewerZoom})`;
   image.style.cursor = state.photoViewerZoom > 1 ? state.photoViewerDragging ? "grabbing" : "grab" : "zoom-in";
 }
@@ -4135,18 +4180,36 @@ function zoomTaskPhotoViewer(delta = 0) {
   applyTaskPhotoViewerTransform();
 }
 
-function openTaskPhotoViewer({ url = "", label = "", bucket = "", path = "", trigger = null } = {}) {
+function openTaskPhotoViewer({ url = "", label = "", bucket = "", path = "", trigger = null, mediaType = "image" } = {}) {
   const modal = $("team-task-photo-viewer-modal");
   const image = $("team-task-photo-viewer-image");
+  const video = $("team-task-photo-viewer-video");
   const title = $("team-task-photo-viewer-title");
   const caption = $("team-task-photo-viewer-caption");
   if (!modal || !image) return false;
 
   state.photoViewerReturnFocus = trigger || document.activeElement;
-  image.src = url;
-  image.alt = label || "Task evidence photo";
+  const isVideo = mediaType === "video" || isTaskVideoAttachment({ media_type: mediaType, path, label });
+  if (isVideo && video) {
+    image.classList.add("hidden");
+    image.removeAttribute("src");
+    video.classList.remove("hidden");
+    video.src = url;
+    video.setAttribute("aria-label", label || "Task evidence video");
+  } else {
+    video?.classList.add("hidden");
+    if (video) {
+      video.pause?.();
+      video.removeAttribute("src");
+      video.load?.();
+    }
+    image.classList.remove("hidden");
+    image.src = url;
+    image.alt = label || "Task evidence photo";
+  }
   resetTaskPhotoViewerTransform();
-  if (title) title.textContent = label || "Task evidence photo";
+  $("team-task-photo-viewer-tools")?.classList.toggle("hidden", isVideo);
+  if (title) title.textContent = label || (isVideo ? "Task evidence video" : "Task evidence photo");
   if (caption) caption.textContent = [bucket, path].filter(Boolean).join(" / ");
   modal.classList.remove("hidden");
   document.body.classList.add("modal-open");
@@ -4157,12 +4220,21 @@ function openTaskPhotoViewer({ url = "", label = "", bucket = "", path = "", tri
 function closeTaskPhotoViewer() {
   const modal = $("team-task-photo-viewer-modal");
   const image = $("team-task-photo-viewer-image");
+  const video = $("team-task-photo-viewer-video");
   modal?.classList.add("hidden");
   if (image) {
     image.removeAttribute("src");
     image.style.transform = "";
     image.style.cursor = "";
+    image.classList.remove("hidden");
   }
+  if (video) {
+    video.pause?.();
+    video.removeAttribute("src");
+    video.load?.();
+    video.classList.add("hidden");
+  }
+  $("team-task-photo-viewer-tools")?.classList.remove("hidden");
   resetTaskPhotoViewerTransform();
   if ($("team-task-modal")?.classList.contains("hidden")) {
     document.body.classList.remove("modal-open");
@@ -5523,8 +5595,8 @@ async function submitTask() {
   }
 }
 
-async function openTaskPhoto(bucket, path) {
-  if (!path) return setStatus("That photo is missing a storage path.", "error");
+async function openTaskPhoto(bucket, path, options = {}) {
+  if (!path) return setStatus("That evidence file is missing a storage path.", "error");
   const storageBucket = bucket || TEAM_TASK_BUCKET;
   const key = `${storageBucket}/${path}`;
   let url = state.signedUrls.get(key);
@@ -5532,11 +5604,18 @@ async function openTaskPhoto(bucket, path) {
     const { data, error } = await supabase.storage
       .from(storageBucket)
       .createSignedUrl(path, TEAM_TASK_SIGNED_URL_TTL_SECONDS);
-    if (error || !data?.signedUrl) return setStatus("Could not open that task photo.", "error");
+    if (error || !data?.signedUrl) return setStatus("Could not open that task evidence.", "error");
     url = data.signedUrl;
     state.signedUrls.set(key, url);
   }
-  openTaskPhotoViewer({ url, label: path.split("/").pop() || "Task evidence photo", bucket: storageBucket, path });
+  openTaskPhotoViewer({
+    url,
+    label: options.label || path.split("/").pop() || "Task evidence",
+    bucket: storageBucket,
+    path,
+    mediaType: options.mediaType || getTaskAttachmentMediaType({ path }),
+    trigger: options.trigger || null,
+  });
 }
 
 function setupListeners() {

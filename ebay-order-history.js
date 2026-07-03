@@ -824,6 +824,14 @@ function getFinanceStatusLabel(status = "") {
   return "Payout unknown";
 }
 
+function getFinanceStatusDescription(status = "") {
+  if (status === "on_hold") return "eBay is holding these funds. Treat this as money at risk until the hold, return, or dispute is cleared.";
+  if (status === "paid_out") return "eBay has attached this transaction to a payout. This is the closest API signal that the money was paid out.";
+  if (status === "available") return "eBay says the funds are available for payout, but they are not tied to a payout ID yet.";
+  if (status === "processing") return "eBay is still processing the funds before they become available or paid out.";
+  return "No eBay Finances status is saved for this line yet. Run the eBay sync/backfill or check the sync warning.";
+}
+
 function getFinanceStatusRank(status = "") {
   if (status === "on_hold") return 50;
   if (status === "processing") return 40;
@@ -839,7 +847,7 @@ function getFinanceStatusBadge(line = {}) {
   const payoutIds = Array.isArray(payload?.payoutIds) ? payload.payoutIds : [payload?.payoutId].filter(Boolean);
   const transactionIds = Array.isArray(payload?.transactionIds) ? payload.transactionIds : [payload?.transactionId].filter(Boolean);
   const parts = [
-    label,
+    `${label}: ${getFinanceStatusDescription(status)}`,
     payload?.memo,
     payoutIds.length ? `Payout ${payoutIds.slice(0, 2).join(", ")}` : "",
     transactionIds.length ? `Transaction ${transactionIds.slice(0, 2).join(", ")}` : "",
@@ -8812,6 +8820,9 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
   const missing = Math.max(0, requested - processed - failed);
   const failedReturns = Array.isArray(summary.failedReturns) ? summary.failedReturns : [];
   const unmatchedReturns = Array.isArray(summary.unmatchedReturns) ? summary.unmatchedReturns : [];
+  const financeStats = summary.financeStats || {};
+  const financeChecked = Number(financeStats.financeOrdersChecked || 0);
+  const financeFound = Number(financeStats.financeOrdersWithTransactions || 0);
 
   panel.classList.remove("hidden");
   panel.classList.toggle("is-error", Boolean(failed || missing));
@@ -8835,6 +8846,7 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
       <span><small>Not accounted for</small><b>${missing.toLocaleString()}</b></span>
       ${messagesImported ? `<span><small>Messages imported</small><b>${messagesImported.toLocaleString()}</b></span>` : ""}
       ${filesSeen ? `<span><small>eBay files/photos</small><b>${filesSeen.toLocaleString()}</b></span>` : ""}
+      ${financeChecked ? `<span><small>Payout checked</small><b>${financeFound.toLocaleString()} / ${financeChecked.toLocaleString()}</b></span>` : ""}
     </div>
     ${summary.message ? `<p class="return-import-message">${escapeHtml(summary.message)}</p>` : ""}
     ${unmatchedReturns.length ? `
@@ -8901,13 +8913,20 @@ async function postEbayBuyerHistorySyncPayload(payload) {
 }
 
 function formatAccountHistorySyncSummary(response = {}) {
+  const financeStats = response.financeStats || {};
+  const financeText = financeStats.financeOrdersChecked
+    ? `, finance ${Number(financeStats.financeOrdersWithTransactions || 0).toLocaleString()}/${Number(financeStats.financeOrdersChecked || 0).toLocaleString()}`
+    : "";
+  const financeWarnings = Array.isArray(response.financeWarnings) && response.financeWarnings.length
+    ? `, finance warning: ${response.financeWarnings[0]?.message || response.financeWarnings[0]?.reason || "lookup failed"}`
+    : "";
   return [
     `${Number(response.scannedOrders || 0).toLocaleString()} scanned`,
     `${Number(response.matchedOrders || 0).toLocaleString()} eligible orders`,
     `${Number(response.buyersSeen || 0).toLocaleString()} buyers`,
     `${Number(response.lineCount || response.linesUpserted || 0).toLocaleString()} lines`,
     `${Number(response.skippedNewOpenOrders || 0).toLocaleString()} active pending skipped`,
-  ].join(" - ");
+  ].join(" - ") + financeText + financeWarnings;
 }
 
 const EBAY_ORDER_ARCHIVE_DAYS = 720;
@@ -8983,6 +9002,16 @@ function mergeAccountHistorySyncTotals(total = {}, next = {}) {
     skippedNewOpenOrders: Number(total.skippedNewOpenOrders || 0) + Number(next.skippedNewOpenOrders || 0),
     fulfilledLines: Number(total.fulfilledLines || 0) + Number(next.fulfilledLines || 0),
     cancelledLines: Number(total.cancelledLines || 0) + Number(next.cancelledLines || 0),
+    financeStats: {
+      financeSyncEnabled: total.financeStats?.financeSyncEnabled || next.financeStats?.financeSyncEnabled || false,
+      financeOrdersChecked: Number(total.financeStats?.financeOrdersChecked || 0) + Number(next.financeStats?.financeOrdersChecked || 0),
+      financeOrdersWithTransactions: Number(total.financeStats?.financeOrdersWithTransactions || 0) + Number(next.financeStats?.financeOrdersWithTransactions || 0),
+      financeOrdersWithoutTransactions: Number(total.financeStats?.financeOrdersWithoutTransactions || 0) + Number(next.financeStats?.financeOrdersWithoutTransactions || 0),
+    },
+    financeWarnings: [
+      ...(Array.isArray(total.financeWarnings) ? total.financeWarnings : []),
+      ...(Array.isArray(next.financeWarnings) ? next.financeWarnings : []),
+    ],
   };
 }
 
@@ -8990,9 +9019,10 @@ async function runAccountHistorySyncChunks(chunks, dryRun, completedRanges = [])
   let totals = {};
   const label = dryRun ? "Checking" : "Importing";
   let skippedCompleted = 0;
+  const syncFinance = !dryRun;
   for (let index = 0; index < chunks.length; index += 1) {
     const chunk = chunks[index];
-    if (!dryRun && isArchiveChunkCovered(chunk, completedRanges)) {
+    if (!dryRun && !syncFinance && isArchiveChunkCovered(chunk, completedRanges)) {
       skippedCompleted += 1;
       setAccountHistorySyncStatus(
         `Skipping already imported eBay archive window ${index + 1} of ${chunks.length} (${formatDateOnly(chunk.from)} to ${formatDateOnly(chunk.to)}).`,
@@ -9013,6 +9043,7 @@ async function runAccountHistorySyncChunks(chunks, dryRun, completedRanges = [])
       daysBack: EBAY_ORDER_ARCHIVE_DAYS,
       windowDays: 14,
       maxScannedOrders: 2500,
+      syncFinance,
     });
     if (!response.ok) {
       throw new Error(response.error || `eBay archive ${dryRun ? "check" : "import"} failed for window ${index + 1}.`);
@@ -9044,6 +9075,16 @@ function mergeReturnApiSyncTotals(total = {}, next = {}) {
       ...(Array.isArray(total.warnings) ? total.warnings : []),
       ...(Array.isArray(next.warnings) ? next.warnings : []),
     ],
+    financeStats: {
+      financeSyncEnabled: total.financeStats?.financeSyncEnabled || next.financeStats?.financeSyncEnabled || false,
+      financeOrdersChecked: Number(total.financeStats?.financeOrdersChecked || 0) + Number(next.financeStats?.financeOrdersChecked || 0),
+      financeOrdersWithTransactions: Number(total.financeStats?.financeOrdersWithTransactions || 0) + Number(next.financeStats?.financeOrdersWithTransactions || 0),
+      financeOrdersWithoutTransactions: Number(total.financeStats?.financeOrdersWithoutTransactions || 0) + Number(next.financeStats?.financeOrdersWithoutTransactions || 0),
+    },
+    financeWarnings: [
+      ...(Array.isArray(total.financeWarnings) ? total.financeWarnings : []),
+      ...(Array.isArray(next.financeWarnings) ? next.financeWarnings : []),
+    ],
     results: [
       ...(Array.isArray(total.results) ? total.results : []),
       ...(Array.isArray(next.results) ? next.results : []),
@@ -9052,6 +9093,13 @@ function mergeReturnApiSyncTotals(total = {}, next = {}) {
 }
 
 function formatReturnArchiveSyncSummary(response = {}) {
+  const financeStats = response.financeStats || {};
+  const financeText = financeStats.financeOrdersChecked
+    ? ` - finance ${Number(financeStats.financeOrdersWithTransactions || 0).toLocaleString()}/${Number(financeStats.financeOrdersChecked || 0).toLocaleString()}`
+    : "";
+  const financeWarnings = Array.isArray(response.financeWarnings) && response.financeWarnings.length
+    ? ` - finance warning: ${response.financeWarnings[0]?.message || response.financeWarnings[0]?.reason || "lookup failed"}`
+    : "";
   return [
     `${Number(response.total || 0).toLocaleString()} returns checked`,
     `${Number(response.tasksCreated || 0).toLocaleString()} tasks created`,
@@ -9059,7 +9107,7 @@ function formatReturnArchiveSyncSummary(response = {}) {
     `${Number(response.messagesImported || 0).toLocaleString()} messages`,
     `${Number(response.filesSeen || 0).toLocaleString()} files seen`,
     `${Number(response.errors || 0).toLocaleString()} errors`,
-  ].join(" - ");
+  ].join(" - ") + financeText + financeWarnings;
 }
 
 async function runReturnArchiveSyncChunks(chunks) {
@@ -9108,7 +9156,7 @@ async function runEbayAccountHistoryArchiveSync() {
 
     const drySummary = formatAccountHistorySyncSummary(dryRun);
     const confirmed = window.confirm(
-      `2-year eBay archive check complete:\n\n${drySummary}\n\nAlready imported windows found: ${completedRanges.length.toLocaleString()}.\n\nImport the missing closed/cancelled/fulfilled records into OG history now? Active pending orders that are not already in OG will stay out of the packing queue.`
+      `2-year eBay archive check complete:\n\n${drySummary}\n\nAlready imported windows found: ${completedRanges.length.toLocaleString()}.\n\nRefresh the archive now and backfill eBay finance payout/hold status? Active pending orders that are not already in OG will stay out of the packing queue.`
     );
     if (!confirmed) {
       setAccountHistorySyncStatus(`Archive check only: ${drySummary}`, "success");
@@ -9203,6 +9251,8 @@ function buildReturnApiSyncSummary(response = {}) {
     staleTasksResolved: Number(response.staleTasksResolved || 0),
     staleCasesHeldOpen: Number(response.staleCasesHeldOpen || 0),
     staleCasesRemaining: Number(response.staleCasesRemaining || 0),
+    financeStats: response.financeStats || null,
+    financeWarnings: Array.isArray(response.financeWarnings) ? response.financeWarnings : [],
     importedReturns: results.filter((entry) => entry?.matched === true),
     unmatchedReturns,
     failedReturns,

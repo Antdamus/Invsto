@@ -532,6 +532,14 @@ function getFinanceStatusLabel(status = "") {
   return "Payout unknown";
 }
 
+function getFinanceStatusDescription(status = "") {
+  if (status === "on_hold") return "eBay is holding these funds. Treat this as money at risk until the hold, return, or dispute is cleared.";
+  if (status === "paid_out") return "eBay has attached this transaction to a payout. This is the closest API signal that the money was paid out.";
+  if (status === "available") return "eBay says the funds are available for payout, but they are not tied to a payout ID yet.";
+  if (status === "processing") return "eBay is still processing the funds before they become available or paid out.";
+  return "No eBay Finances status is saved for this line yet. Run the eBay sync/backfill or check the sync warning.";
+}
+
 function getFinanceStatusRank(status = "") {
   if (status === "on_hold") return 50;
   if (status === "processing") return 40;
@@ -547,7 +555,7 @@ function getFinanceStatusBadge(line = {}) {
   const payoutIds = Array.isArray(payload?.payoutIds) ? payload.payoutIds : [payload?.payoutId].filter(Boolean);
   const transactionIds = Array.isArray(payload?.transactionIds) ? payload.transactionIds : [payload?.transactionId].filter(Boolean);
   const parts = [
-    label,
+    `${label}: ${getFinanceStatusDescription(status)}`,
     payload?.memo,
     payoutIds.length ? `Payout ${payoutIds.slice(0, 2).join(", ")}` : "",
     transactionIds.length ? `Transaction ${transactionIds.slice(0, 2).join(", ")}` : "",
@@ -2205,13 +2213,14 @@ function summarizeEbayOrderSyncResult(result, dryRun) {
     return formatEbayOrderSyncError(result?.error || result) || "Could not sync eBay orders.";
   }
 
+  const financeText = summarizeEbayFinanceSyncStatus(result);
   if (dryRun) {
     const warnings = Array.isArray(result.warnings) && result.warnings.length
       ? ` ${result.warnings.length} warning(s).`
       : "";
     const mismatches = Number(result.localPendingMismatches?.length || 0);
     const mismatchText = mismatches
-      ? ` ${mismatches.toLocaleString()} local pending order(s) need eBay review.`
+      ? ` ${mismatches.toLocaleString()} local pending order(s) need eBay review because eBay no longer reports them as paid awaiting shipment.`
       : "";
     const skippedMismatchCheck = result.localPendingMismatchCheckSkipped
       ? " Local missing-order check was skipped because the eBay fetch reached its limit."
@@ -2219,7 +2228,7 @@ function summarizeEbayOrderSyncResult(result, dryRun) {
     const reconciliationText = result.localPendingMismatchChecked
       ? ` Complete reconciliation compared ${Number(result.localOpenOrderCount || 0).toLocaleString()} local open order(s).`
       : "";
-    return `Found ${Number(result.ordersSeen || 0).toLocaleString()} eBay order(s); ${Number(result.ordersImportable || 0).toLocaleString()} can be imported or updated.${reconciliationText}${mismatchText}${skippedMismatchCheck}${warnings}`;
+    return `Found ${Number(result.ordersSeen || 0).toLocaleString()} eBay order(s); ${Number(result.ordersImportable || 0).toLocaleString()} can be imported or updated.${financeText}${reconciliationText}${mismatchText}${skippedMismatchCheck}${warnings}`;
   }
 
   const warnings = Array.isArray(result.warnings) && result.warnings.length
@@ -2227,7 +2236,7 @@ function summarizeEbayOrderSyncResult(result, dryRun) {
     : "";
   const mismatches = Number(result.localPendingMismatches?.length || 0);
   const mismatchText = mismatches
-    ? ` ${mismatches.toLocaleString()} local pending order(s) were flagged for eBay review.`
+    ? ` ${mismatches.toLocaleString()} local pending order(s) were flagged for eBay review because eBay no longer reports them as paid awaiting shipment.`
     : "";
   const skippedMismatchCheck = result.localPendingMismatchCheckSkipped
     ? " Local missing-order check was skipped because the eBay fetch reached its limit."
@@ -2235,7 +2244,23 @@ function summarizeEbayOrderSyncResult(result, dryRun) {
   const reconciliationText = result.localPendingMismatchChecked
     ? ` Complete reconciliation compared ${Number(result.localOpenOrderCount || 0).toLocaleString()} local open order(s).`
     : "";
-  return `Synced ${Number(result.ordersImported || 0).toLocaleString()} order(s), ${Number(result.linesImported || 0).toLocaleString()} line(s), and reserved ${Number(result.linesReserved || 0).toLocaleString()} line(s).${reconciliationText}${mismatchText}${skippedMismatchCheck}${warnings}`;
+  return `Synced ${Number(result.ordersImported || 0).toLocaleString()} order(s), ${Number(result.linesImported || 0).toLocaleString()} line(s), and reserved ${Number(result.linesReserved || 0).toLocaleString()} line(s).${financeText}${reconciliationText}${mismatchText}${skippedMismatchCheck}${warnings}`;
+}
+
+function summarizeEbayFinanceSyncStatus(result = {}) {
+  const stats = result.financeStats || {};
+  const warnings = Array.isArray(result.warnings)
+    ? result.warnings.filter((entry) => entry?.reason === "ebay_finance_lookup_failed")
+    : [];
+  if (stats.financeSyncEnabled === false) return " Finance sync was not requested.";
+  if (!stats.financeOrdersChecked && !warnings.length) return "";
+  const checked = Number(stats.financeOrdersChecked || 0);
+  const withTransactions = Number(stats.financeOrdersWithTransactions || 0);
+  const withoutTransactions = Number(stats.financeOrdersWithoutTransactions || 0);
+  const warningText = warnings.length
+    ? ` Finance warning: ${formatEbayOrderSyncError(warnings[0])}.`
+    : "";
+  return ` Finance checked ${checked.toLocaleString()} order${checked === 1 ? "" : "s"}: ${withTransactions.toLocaleString()} with transaction data, ${withoutTransactions.toLocaleString()} with none returned.${warningText}`;
 }
 
 function formatEbayOrderSyncError(error) {
@@ -2269,6 +2294,7 @@ async function runEbayOrderApiSync(dryRun = true) {
   const payload = {
     dryRun,
     reserve: !dryRun,
+    syncFinance: true,
     limit: getEbayOrderSyncLimit(),
     localMismatchLimit: getEbayOrderSyncLimit(),
     daysBack: getEbayOrderSyncDaysBack(),

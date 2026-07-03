@@ -17,6 +17,7 @@ const EBAY_ORDER_SCOPE = unique([
 ].map(toText).filter(Boolean)).join(" ");
 
 const EBAY_API_BASE = EBAY_ENV === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
+const EBAY_FINANCES_API_BASE = EBAY_ENV === "sandbox" ? "https://apiz.sandbox.ebay.com" : "https://apiz.ebay.com";
 // eBay says "2 years" but rejects requests right on the exact boundary.
 // Keep a small buffer so chunked archive scans stay inside the accepted range.
 const MAX_DAYS_BACK = 720;
@@ -263,6 +264,31 @@ async function ebayRequest(token: string, path: string): Promise<any> {
   return payload;
 }
 
+async function ebayFinanceRequest(token: string, path: string): Promise<any> {
+  const res = await fetch(`${EBAY_FINANCES_API_BASE}${path}`, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Accept": "application/json",
+      "Accept-Language": "en-US",
+      "Content-Language": "en-US",
+      "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+    },
+  });
+
+  const text = await res.text();
+  let payload: any = {};
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { raw: text };
+    }
+  }
+  if (!res.ok) throw new Error(`eBay Finances GET ${path} failed (${res.status}): ${text.slice(0, 1000)}`);
+  return payload;
+}
+
 function normalizeFinanceTransactionStatus(value: unknown): string {
   const status = toText(value).toUpperCase();
   if (status.includes("HOLD")) return "on_hold";
@@ -349,7 +375,7 @@ async function fetchFinanceTransactionsForOrder(token: string, orderNumber: stri
       limit: String(limit),
       offset: String(offset),
     });
-    const payload = await ebayRequest(token, `/sell/finances/v1/transaction?${params.toString()}`);
+    const payload = await ebayFinanceRequest(token, `/sell/finances/v1/transaction?${params.toString()}`);
     const page = Array.isArray(payload?.transactions) ? payload.transactions : [];
     transactions.push(...page);
     if (!payload?.next || page.length < limit) break;
@@ -361,8 +387,20 @@ async function fetchFinanceTransactionsForOrder(token: string, orderNumber: stri
 async function loadFinanceTransactionsByOrder(token: string, orderNumbers: string[], syncFinance: boolean) {
   const byOrder = new Map<string, any[]>();
   const warnings: JsonRecord[] = [];
-  if (!syncFinance) return { byOrder, warnings };
-  for (const orderNumber of unique(orderNumbers.map(toText).filter(Boolean))) {
+  const checkedOrderNumbers = syncFinance ? unique(orderNumbers.map(toText).filter(Boolean)) : [];
+  if (!syncFinance) {
+    return {
+      byOrder,
+      warnings,
+      stats: {
+        financeSyncEnabled: false,
+        financeOrdersChecked: 0,
+        financeOrdersWithTransactions: 0,
+        financeOrdersWithoutTransactions: 0,
+      },
+    };
+  }
+  for (const orderNumber of checkedOrderNumbers) {
     try {
       byOrder.set(orderNumber, await fetchFinanceTransactionsForOrder(token, orderNumber));
     } catch (error) {
@@ -373,7 +411,17 @@ async function loadFinanceTransactionsByOrder(token: string, orderNumbers: strin
       });
     }
   }
-  return { byOrder, warnings };
+  const withTransactions = [...byOrder.values()].filter((transactions) => transactions.length > 0).length;
+  return {
+    byOrder,
+    warnings,
+    stats: {
+      financeSyncEnabled: true,
+      financeOrdersChecked: checkedOrderNumbers.length,
+      financeOrdersWithTransactions: withTransactions,
+      financeOrdersWithoutTransactions: Math.max(0, checkedOrderNumbers.length - withTransactions - warnings.length),
+    },
+  };
 }
 
 function toDateOrNull(value: unknown): Date | null {
@@ -729,7 +777,11 @@ Deno.serve(async (req) => {
     const matchedOrders = orders.length;
     const orderNumbers = unique(orders.map(extractOrderNumber).filter(Boolean));
     const syncFinance = body.syncFinance === true || (!scanAllBuyers && body.syncFinance !== false);
-    const { byOrder: financeByOrderNumber, warnings: financeWarnings } = await loadFinanceTransactionsByOrder(
+    const {
+      byOrder: financeByOrderNumber,
+      warnings: financeWarnings,
+      stats: financeStats,
+    } = await loadFinanceTransactionsByOrder(
       token,
       orderNumbers,
       syncFinance,
@@ -774,6 +826,7 @@ Deno.serve(async (req) => {
         existingOrders: prepared.filter((entry) => existingOrders.has(entry.order.order_number)).length,
         newOrders: prepared.filter((entry) => !existingOrders.has(entry.order.order_number)).length,
         skippedNewOpenOrders,
+        financeStats,
         financeWarnings,
         lineCount: prepared.reduce((sum, entry) => sum + entry.lines.length, 0),
       });
@@ -857,6 +910,7 @@ Deno.serve(async (req) => {
             requestedFrom: fromDate.toISOString(),
             requestedTo: toDate.toISOString(),
             chunkKey,
+            financeStats,
             financeWarnings,
             fulfilledLines: entries.reduce((sum, entry) => sum + entry.lines.filter((line: any) => String(line.line_status).toLowerCase() === "fulfilled").length, 0),
             cancelledLines: entries.reduce((sum, entry) => sum + entry.lines.filter((line: any) => String(line.line_status).toLowerCase() === "cancelled").length, 0),
@@ -878,6 +932,7 @@ Deno.serve(async (req) => {
           requestedFrom: fromDate.toISOString(),
           requestedTo: toDate.toISOString(),
           chunkKey,
+          financeStats,
           financeWarnings,
           fulfilledLines,
           cancelledLines,
@@ -898,6 +953,7 @@ Deno.serve(async (req) => {
         last_error: null,
         raw_payload: {
           source: "ebay_buyer_history_sync",
+          financeStats,
           financeWarnings,
           fulfilledLines,
           cancelledLines,
@@ -921,6 +977,7 @@ Deno.serve(async (req) => {
       ordersUpserted: upsertedOrders.length,
       linesUpserted: upsertedLines.length,
       skippedNewOpenOrders,
+      financeStats,
       financeWarnings,
       fulfilledLines,
       cancelledLines,

@@ -46,6 +46,7 @@ const EBAY_ORDER_SCOPE = unique([
 ].map(toText).filter(Boolean)).join(" ");
 
 const EBAY_API_BASE = EBAY_ENV === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
+const EBAY_FINANCES_API_BASE = EBAY_ENV === "sandbox" ? "https://apiz.sandbox.ebay.com" : "https://apiz.ebay.com";
 const DEFAULT_DAYS_BACK = 14;
 const MAX_ORDER_LIMIT = 1000;
 const PAGE_LIMIT = 50;
@@ -185,6 +186,33 @@ async function ebayRequest(token: string, path: string): Promise<any> {
   return payload;
 }
 
+async function ebayFinanceRequest(token: string, path: string): Promise<any> {
+  const res = await fetch(`${EBAY_FINANCES_API_BASE}${path}`, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Accept": "application/json",
+      "Accept-Language": "en-US",
+      "Content-Language": "en-US",
+      "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+    },
+  });
+
+  const text = await res.text();
+  let payload: any = {};
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { raw: text };
+    }
+  }
+  if (!res.ok) {
+    throw new Error(`eBay Finances GET ${path} failed (${res.status}): ${text.slice(0, 1000)}`);
+  }
+  return payload;
+}
+
 function getNestedText(...values: unknown[]): string {
   for (const value of values) {
     const text = toText(value);
@@ -314,7 +342,7 @@ async function fetchFinanceTransactionsForOrder(token: string, orderNumber: stri
       limit: String(limit),
       offset: String(offset),
     });
-    const payload = await ebayRequest(token, `/sell/finances/v1/transaction?${params.toString()}`);
+    const payload = await ebayFinanceRequest(token, `/sell/finances/v1/transaction?${params.toString()}`);
     const page = Array.isArray(payload?.transactions) ? payload.transactions : [];
     transactions.push(...page);
     if (!payload?.next || page.length < limit) break;
@@ -326,8 +354,20 @@ async function fetchFinanceTransactionsForOrder(token: string, orderNumber: stri
 async function loadFinanceTransactionsByOrder(token: string, orderNumbers: string[], syncFinance: boolean) {
   const byOrder = new Map<string, any[]>();
   const warnings: JsonRecord[] = [];
-  if (!syncFinance) return { byOrder, warnings };
-  for (const orderNumber of unique(orderNumbers.map(toText).filter(Boolean))) {
+  const checkedOrderNumbers = syncFinance ? unique(orderNumbers.map(toText).filter(Boolean)) : [];
+  if (!syncFinance) {
+    return {
+      byOrder,
+      warnings,
+      stats: {
+        financeSyncEnabled: false,
+        financeOrdersChecked: 0,
+        financeOrdersWithTransactions: 0,
+        financeOrdersWithoutTransactions: 0,
+      },
+    };
+  }
+  for (const orderNumber of checkedOrderNumbers) {
     try {
       byOrder.set(orderNumber, await fetchFinanceTransactionsForOrder(token, orderNumber));
     } catch (error) {
@@ -338,7 +378,17 @@ async function loadFinanceTransactionsByOrder(token: string, orderNumbers: strin
       });
     }
   }
-  return { byOrder, warnings };
+  const withTransactions = [...byOrder.values()].filter((transactions) => transactions.length > 0).length;
+  return {
+    byOrder,
+    warnings,
+    stats: {
+      financeSyncEnabled: true,
+      financeOrdersChecked: checkedOrderNumbers.length,
+      financeOrdersWithTransactions: withTransactions,
+      financeOrdersWithoutTransactions: Math.max(0, checkedOrderNumbers.length - withTransactions - warnings.length),
+    },
+  };
 }
 
 function isPaidOrder(order: any): boolean {
@@ -548,6 +598,75 @@ async function updateExistingOrderFinancePayloads(
       })
       .eq("id", existing.id);
     if (error) throw error;
+  }
+}
+
+async function updateLocalOrderFinancePayloads(
+  supabase: any,
+  financeByOrderNumber: Map<string, any[]>,
+) {
+  const orderNumbers = [...financeByOrderNumber.keys()].filter(Boolean);
+  if (!orderNumbers.length) return;
+
+  const now = new Date().toISOString();
+  for (let index = 0; index < orderNumbers.length; index += 100) {
+    const chunk = orderNumbers.slice(index, index + 100);
+    const { data: orders, error } = await supabase
+      .from("ebay_orders")
+      .select("id,order_number,raw_payload")
+      .in("order_number", chunk);
+    if (error) throw error;
+
+    const orderIds = (orders || []).map((order: any) => order.id).filter(Boolean);
+    const { data: lines, error: lineError } = orderIds.length
+      ? await supabase
+        .from("ebay_order_lines")
+        .select("id,order_id,transaction_id,raw_payload")
+        .in("order_id", orderIds)
+      : { data: [], error: null };
+    if (lineError) throw lineError;
+
+    const linesByOrderId = new Map<string, any[]>();
+    (lines || []).forEach((line: any) => {
+      if (!linesByOrderId.has(line.order_id)) linesByOrderId.set(line.order_id, []);
+      linesByOrderId.get(line.order_id)?.push(line);
+    });
+
+    for (const order of orders || []) {
+      const transactions = financeByOrderNumber.get(order.order_number) || [];
+      if (!transactions.length) continue;
+      const orderFinance = summarizeFinanceTransactions(transactions, order.order_number);
+      if (!orderFinance) continue;
+      const orderRawPayload = order.raw_payload && typeof order.raw_payload === "object" ? order.raw_payload : {};
+      const { error: orderUpdateError } = await supabase
+        .from("ebay_orders")
+        .update({
+          raw_payload: {
+            ...orderRawPayload,
+            ebayFinance: orderFinance,
+            last_ebay_finance_sync_at: now,
+          },
+          updated_at: now,
+        })
+        .eq("id", order.id);
+      if (orderUpdateError) throw orderUpdateError;
+
+      for (const line of linesByOrderId.get(order.id) || []) {
+        const lineFinance = summarizeFinanceTransactions(transactions, order.order_number, line.transaction_id);
+        if (!lineFinance) continue;
+        const lineRawPayload = line.raw_payload && typeof line.raw_payload === "object" ? line.raw_payload : {};
+        const { error: lineUpdateError } = await supabase
+          .from("ebay_order_lines")
+          .update({
+            raw_payload: {
+              ...lineRawPayload,
+              ebayFinance: lineFinance,
+            },
+          })
+          .eq("id", line.id);
+        if (lineUpdateError) throw lineUpdateError;
+      }
+    }
   }
 }
 
@@ -821,9 +940,17 @@ Deno.serve(async (req) => {
     ));
     const itemBySku = await loadItemMapBySku(supabase, allSkus);
     const syncFinance = body.syncFinance !== false;
-    const { byOrder: financeByOrderNumber, warnings: financeWarnings } = await loadFinanceTransactionsByOrder(
+    const financeOrderNumbers = unique([
+      ...candidateOrders.map(extractOrderNumber),
+      ...localPendingMismatches.map((entry) => entry.orderNumber),
+    ].map(toText).filter(Boolean));
+    const {
+      byOrder: financeByOrderNumber,
+      warnings: financeWarnings,
+      stats: financeStats,
+    } = await loadFinanceTransactionsByOrder(
       token,
-      candidateOrders.map(extractOrderNumber).filter(Boolean),
+      financeOrderNumbers,
       syncFinance,
     );
     const prepared = candidateOrders
@@ -887,10 +1014,13 @@ Deno.serve(async (req) => {
         requestedOrderLimit,
         localPendingMismatchChecked: checkLocalMismatches && fetchedCompleteOrderWindow,
         localPendingMismatchCheckSkipped: checkLocalMismatches && !fetchedCompleteOrderWindow,
+        financeStats,
         warnings: financeWarnings,
         preview,
       });
     }
+
+    await updateLocalOrderFinancePayloads(supabase, financeByOrderNumber);
 
     const freshOrders = importable.filter((entry) => !existingOrders.has(entry.order.order_number));
     let insertedOrders: any[] = [];
@@ -1043,6 +1173,7 @@ Deno.serve(async (req) => {
       requestedOrderLimit,
       localPendingMismatchChecked: checkLocalMismatches && fetchedCompleteOrderWindow,
       localPendingMismatchCheckSkipped: checkLocalMismatches && !fetchedCompleteOrderWindow,
+      financeStats,
       warnings,
       reservations: reservationResults,
     });
