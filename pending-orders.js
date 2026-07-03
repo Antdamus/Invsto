@@ -119,6 +119,8 @@ const EVIDENCE_PREVIEW_QUALITY = 0.86;
 const EVIDENCE_THUMBNAIL_MAX_DIMENSION = 420;
 const EVIDENCE_THUMBNAIL_QUALITY = 0.74;
 const EBAY_LABEL_BUCKET = "ebay-labels";
+const EVIDENCE_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"]);
+const EVIDENCE_VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "ogg"]);
 const EBAY_SINGLE_LABEL_BASE_URL = "https://www.ebay.com/ship/single/";
 const EBAY_BULK_LABEL_BASE_URL = "https://www.ebay.com/ship/bulk";
 const ORDER_QUEUE_PAGE_SIZE = 1000;
@@ -510,8 +512,9 @@ function getFinancePayload(source = {}) {
     order?.raw_payload?.ebayFinance,
     order?.ebay_finance,
     order?.finance,
-  ];
-  return candidates.find((entry) => entry && typeof entry === "object") || null;
+  ].filter((entry) => entry && typeof entry === "object");
+  return candidates
+    .sort((left, right) => getFinancePayloadRank(right) - getFinancePayloadRank(left))[0] || null;
 }
 
 function normalizeFinanceStatus(value = "") {
@@ -522,6 +525,13 @@ function normalizeFinanceStatus(value = "") {
   if (text.includes("available")) return "available";
   if (text.includes("payout") || text.includes("paid")) return "paid_out";
   return text;
+}
+
+function getFinancePayloadRank(payload = {}) {
+  const status = normalizeFinanceStatus(payload?.status || payload?.transactionStatus || payload?.transaction_status);
+  const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
+  if (payload?.source === "ebay_finances_api" && status === "unknown" && transactions.length === 0) return 1;
+  return getFinanceStatusRank(status);
 }
 
 function getFinanceStatusLabel(status = "") {
@@ -4063,17 +4073,43 @@ function getVideoReceiptEvidencePhotosForLine(line = {}) {
   });
 }
 
+function getEvidenceFileExtension(value = "") {
+  return (String(value || "").toLowerCase().match(/\.([a-z0-9]{2,5})(?:$|[?#\s])/i)?.[1] || "").toLowerCase();
+}
+
+function getEvidenceMediaType(photo = {}) {
+  const explicitType = String(photo.media_type || photo.mediaType || "").trim().toLowerCase();
+  if (explicitType === "video" || explicitType === "image") return explicitType;
+  const mimeType = String(photo.mime_type || photo.mimeType || photo.type || photo.file?.type || "").trim().toLowerCase();
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("image/")) return "image";
+  const extension = getEvidenceFileExtension([photo.path, photo.storage_path, photo.label, photo.name].filter(Boolean).join(" "));
+  return EVIDENCE_VIDEO_EXTENSIONS.has(extension) ? "video" : "image";
+}
+
+function isEvidenceVideo(photo = {}) {
+  return getEvidenceMediaType(photo) === "video";
+}
+
+function isAcceptedEvidenceFile(file = {}) {
+  const mimeType = String(file.type || file.mime_type || "").toLowerCase();
+  if (/^(image|video)\//.test(mimeType)) return true;
+  const extension = getEvidenceFileExtension(file.name || file.path || "");
+  return EVIDENCE_IMAGE_EXTENSIONS.has(extension) || EVIDENCE_VIDEO_EXTENSIONS.has(extension);
+}
+
 async function ensureEvidencePhotoPreviewUrls(photo = {}) {
   if (photo.previewUrl && photo.thumbnailUrl) return photo;
   const bucket = photo.bucket || photo.storage_bucket || NO_INVENTORY_EVIDENCE_BUCKET;
   const path = photo.path || photo.storage_path || "";
   if (!path && !photo.preview_path && !photo.thumbnail_path && !photo.variants) return photo;
+  const isVideo = isEvidenceVideo(photo);
   const previewRef = getEvidencePhotoVariantRef(photo, "preview") || (path ? {
     bucket,
     path,
-    transform: NO_INVENTORY_PREVIEW_TRANSFORM,
+    transform: isVideo ? null : NO_INVENTORY_PREVIEW_TRANSFORM,
   } : null);
-  const thumbnailRef = getEvidencePhotoVariantRef(photo, "thumbnail")
+  const thumbnailRef = isVideo ? null : getEvidencePhotoVariantRef(photo, "thumbnail")
     || getEvidencePhotoVariantRef(photo, "thumb")
     || (path ? {
       bucket,
@@ -4092,6 +4128,7 @@ async function ensureEvidencePhotoPreviewUrls(photo = {}) {
     ...photo,
     bucket,
     path,
+    media_type: getEvidenceMediaType(photo),
     previewUrl,
     thumbnailUrl: thumbnailUrl || previewUrl,
   };
@@ -4929,6 +4966,7 @@ function renderOrderTaskPanel(options = {}) {
           previewPath: buttonEl.dataset.previewPath || "",
           thumbnailBucket: buttonEl.dataset.thumbnailBucket || "",
           thumbnailPath: buttonEl.dataset.thumbnailPath || "",
+          mediaType: buttonEl.dataset.mediaType || "",
           returnFocusId: "open-order-task-modal",
         }
       );
@@ -4966,6 +5004,7 @@ function renderOrderTaskEvent(event = {}) {
             data-label="${escapeHtml(photo.label || `Photo ${index + 1}`)}"
             data-signed-by="${escapeHtml(photo.signed_by_email || event.signed_by_email || "")}"
             data-created-at="${escapeHtml(photo.created_at || event.created_at || "")}"
+            data-media-type="${escapeHtml(getEvidenceMediaType(photo))}"
           >
             ${isVideoReceiptEvidencePhoto(photo)
               ? `<span class="order-task-video-receipt-thumb-image" data-order-task-thumb-image="${escapeHtml(thumbnailRef.bucket || bucket)}:${escapeHtml(thumbnailRef.path || photo.path || "")}"></span>
@@ -5169,6 +5208,7 @@ function renderOrderTaskDetailsModal(task = {}, events = [], options = {}) {
           previewPath: buttonEl.dataset.previewPath || "",
           thumbnailBucket: buttonEl.dataset.thumbnailBucket || "",
           thumbnailPath: buttonEl.dataset.thumbnailPath || "",
+          mediaType: buttonEl.dataset.mediaType || "",
           returnFocusId: "order-task-details-modal",
         }
       );
@@ -5293,7 +5333,7 @@ async function deleteVideoReceiptCapture(buttonEl) {
 }
 
 async function openOrderTaskPhoto(bucket, path, options = {}) {
-  if (!path) return setStatus("That task photo is missing a storage path.", "error");
+  if (!path) return setStatus("That task evidence is missing a storage path.", "error");
   const storageBucket = bucket || NO_INVENTORY_EVIDENCE_BUCKET;
   const photo = await ensureEvidencePhotoPreviewUrls({
     bucket: storageBucket,
@@ -5303,13 +5343,14 @@ async function openOrderTaskPhoto(bucket, path, options = {}) {
     thumbnail_bucket: options.thumbnailBucket || storageBucket,
     thumbnail_path: options.thumbnailPath || "",
     label: options.label || "Order task photo",
+    media_type: options.mediaType || getEvidenceMediaType({ path, label: options.label }),
     signed_by_email: options.signedBy || "",
     created_at: options.createdAt || "",
     auditText: options.signedBy || options.createdAt
       ? `Captured by ${options.signedBy || "logged-in user"}${options.createdAt ? ` on ${formatDate(options.createdAt)}` : ""}`
       : "",
   });
-  if (!photo?.previewUrl) return setStatus("Could not open that task photo.", "error");
+  if (!photo?.previewUrl) return setStatus("Could not open that task evidence.", "error");
   openEvidencePhotoObjectViewer(photo, options.returnFocusId || "open-order-task-modal");
 }
 
@@ -5349,7 +5390,7 @@ function renderOrderTaskPhotos() {
   toolbar?.classList.toggle("hidden", !state.orderTaskPhotos.length);
 
   if (!state.orderTaskPhotos.length) {
-    grid.innerHTML = `<div class="empty-state">No task photos added.</div>`;
+    grid.innerHTML = `<div class="empty-state">No task evidence added.</div>`;
     updateOrderTaskPhotoSelectionSummary();
     return;
   }
@@ -5368,8 +5409,10 @@ function renderOrderTaskPhotos() {
           <span>Upload</span>
         </label>
         <button type="button" data-order-task-photo-index="${index}" title="Open task photo">
-          <img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `Task photo ${index + 1}`)}" />
-          <span>${escapeHtml(photo.label || `Task photo ${index + 1}`)}</span>
+          ${isEvidenceVideo(photo)
+            ? `<video src="${escapeHtml(photo.previewUrl || "")}" muted playsinline preload="metadata"></video>`
+            : `<img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `Task photo ${index + 1}`)}" />`}
+          <span>${escapeHtml(photo.label || `Task evidence ${index + 1}`)}</span>
         </button>
       </article>
     `;
@@ -5396,7 +5439,7 @@ function updateOrderTaskPhotoSelectionSummary() {
   const total = state.orderTaskPhotos.length;
   const selected = getSelectedOrderTaskPhotos().length;
   summary.textContent = total
-    ? `${selected} of ${total} photo${total === 1 ? "" : "s"} selected for upload.`
+    ? `${selected} of ${total} evidence file${total === 1 ? "" : "s"} selected for upload.`
     : "";
 }
 
@@ -5413,36 +5456,34 @@ function setAllOrderTaskPhotosSelected(selected) {
 function openOrderTaskLocalPhotoViewer(index) {
   const photo = state.orderTaskPhotos[index];
   if (!photo?.previewUrl) return;
-  const image = $("no-inventory-photo-viewer-image");
-  const caption = $("no-inventory-photo-viewer-caption");
-  if (image) {
-    image.src = photo.previewUrl;
-    image.alt = photo.label || `Task photo ${index + 1}`;
-  }
-  if (caption) {
-    caption.textContent = `${photo.label || `Task photo ${index + 1}`} - ${photo.bucket ? `${photo.bucket}/${photo.path}` : photo.path || "local file"}`;
-  }
-  openModal("no-inventory-photo-viewer-modal");
-  setTimeout(() => $("dismiss-no-inventory-photo-viewer")?.focus(), 80);
+  openEvidencePhotoObjectViewer({
+    ...photo,
+    previewUrl: photo.previewUrl,
+    thumbnailUrl: photo.thumbnailUrl || photo.previewUrl,
+    media_type: getEvidenceMediaType(photo),
+    auditText: photo.bucket ? `${photo.bucket}/${photo.path}` : photo.path || "local file",
+  }, "order-task-photo-file");
 }
 
 function handleOrderTaskPhotoFiles(event) {
-  const files = [...(event.target?.files || [])].filter((file) => /^image\//i.test(file.type || ""));
+  const files = [...(event.target?.files || [])].filter(isAcceptedEvidenceFile);
   if (!files.length) {
-    setOrderTaskPhotoStatus("Choose image files to attach.", "error");
+    setOrderTaskPhotoStatus("Choose image or video files to attach.", "error");
     return;
   }
   files.forEach((file, index) => {
     const localId = `local:${crypto.randomUUID()}`;
+    const mediaType = getEvidenceMediaType(file);
     const photo = {
       localId,
       file,
       bucket: "",
-      path: file.name || `task-photo-${index + 1}`,
+      path: file.name || `task-${mediaType}-${index + 1}`,
       previewUrl: URL.createObjectURL(file),
       thumbnailUrl: "",
-      label: file.name || `Task photo ${index + 1}`,
-      mime_type: file.type || "image/jpeg",
+      label: file.name || `Task ${mediaType === "video" ? "video" : "photo"} ${index + 1}`,
+      mime_type: file.type || (mediaType === "video" ? "video/mp4" : "image/jpeg"),
+      media_type: mediaType,
       created_at: new Date().toISOString(),
     };
     photo.thumbnailUrl = photo.previewUrl;
@@ -5450,7 +5491,7 @@ function handleOrderTaskPhotoFiles(event) {
     state.orderTaskPhotoUploadKeys.add(localId);
   });
   renderOrderTaskPhotos();
-  setOrderTaskPhotoStatus(`${files.length} task photo${files.length === 1 ? "" : "s"} added and selected.`, "info");
+  setOrderTaskPhotoStatus(`${files.length} task evidence file${files.length === 1 ? "" : "s"} added and selected.`, "info");
   if (event.target) event.target.value = "";
 }
 
@@ -5468,8 +5509,9 @@ async function persistOrderTaskPhotos(lineIds = []) {
   for (let index = 0; index < selectedPhotos.length; index += 1) {
     const photo = selectedPhotos[index];
     const blob = await getEvidencePhotoBlob(photo, index);
+    const mediaType = getEvidenceMediaType({ ...photo, mime_type: blob.type || photo.mime_type });
     const extension = getNoInventoryEvidenceFileExtension(photo, blob);
-    const originalName = safeNoInventoryEvidenceSegment(String(photo.path || photo.label || "").split("/").pop(), `task-photo-${index + 1}`);
+    const originalName = safeNoInventoryEvidenceSegment(String(photo.path || photo.label || "").split("/").pop(), `task-${mediaType}-${index + 1}`);
     const destinationPath = [
       "pending-order-tasks",
       dateFolder,
@@ -5480,13 +5522,15 @@ async function persistOrderTaskPhotos(lineIds = []) {
     const { error } = await supabase.storage
       .from(NO_INVENTORY_EVIDENCE_BUCKET)
       .upload(destinationPath, blob, {
-        contentType: blob.type || photo.mime_type || "image/jpeg",
+        contentType: blob.type || photo.mime_type || (mediaType === "video" ? "video/mp4" : "image/jpeg"),
         upsert: false,
       });
 
-    if (error) throw new Error(error.message || `Could not save task photo ${index + 1}.`);
+    if (error) throw new Error(error.message || `Could not save task evidence ${index + 1}.`);
 
-    const derivativeData = await createAndUploadEvidenceDerivatives(blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath);
+    const derivativeData = mediaType === "video"
+      ? {}
+      : await createAndUploadEvidenceDerivatives(blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath);
     savedPhotos.push({
       bucket: NO_INVENTORY_EVIDENCE_BUCKET,
       path: destinationPath,
@@ -5495,8 +5539,9 @@ async function persistOrderTaskPhotos(lineIds = []) {
       source_path: photo.path || null,
       capture_job_id: photo.capture_job_id || null,
       sort_order: index,
-      label: photo.label || `Task photo ${index + 1}`,
+      label: photo.label || `Task ${mediaType === "video" ? "video" : "photo"} ${index + 1}`,
       mime_type: blob.type || photo.mime_type || null,
+      media_type: mediaType,
       size_bytes: blob.size || photo.size_bytes || 0,
       created_at: new Date().toISOString(),
     });
@@ -7221,6 +7266,12 @@ function safeNoInventoryEvidenceSegment(value, fallback = "evidence") {
 
 function getNoInventoryEvidenceFileExtension(photo, blob) {
   const source = `${photo?.path || ""} ${photo?.mime_type || ""} ${blob?.type || ""}`.toLowerCase();
+  const explicitExtension = getEvidenceFileExtension(photo?.path || photo?.label || "");
+  if (EVIDENCE_VIDEO_EXTENSIONS.has(explicitExtension)) return explicitExtension;
+  if (source.includes("quicktime") || source.includes("mov")) return "mov";
+  if (source.includes("mp4") || source.includes("mpeg-4")) return "mp4";
+  if (source.includes("webm")) return "webm";
+  if (source.includes("ogg")) return "ogg";
   if (source.includes("png")) return "png";
   if (source.includes("webp")) return "webp";
   if (source.includes("heic")) return "heic";
@@ -7367,9 +7418,12 @@ function openEvidencePhotoObjectViewer(photo, returnFocusId = "request-no-invent
   if (!photo?.previewUrl) return;
 
   const image = $("no-inventory-photo-viewer-image");
+  const video = $("no-inventory-photo-viewer-video");
+  const tools = document.querySelector("#no-inventory-photo-viewer-modal .evidence-photo-viewer-tools");
   const caption = $("no-inventory-photo-viewer-caption");
   const loadToken = state.evidencePhotoViewerLoadToken + 1;
   state.evidencePhotoViewerLoadToken = loadToken;
+  const isVideo = isEvidenceVideo(photo);
   const quickUrl = photo.thumbnailUrl || photo.previewUrl;
   const fullUrl = photo.previewUrl;
   state.evidencePhotoViewerZoom = 1;
@@ -7377,7 +7431,26 @@ function openEvidencePhotoObjectViewer(photo, returnFocusId = "request-no-invent
   state.evidencePhotoViewerPanY = 0;
   state.evidencePhotoViewerPanning = false;
   state.evidencePhotoViewerPanStart = null;
+  if (video) {
+    if (isVideo) {
+      video.src = fullUrl;
+      video.classList.remove("hidden");
+      video.setAttribute("aria-label", photo.label || "Evidence video");
+    } else {
+      video.pause?.();
+      video.removeAttribute("src");
+      video.load?.();
+      video.classList.add("hidden");
+    }
+  }
+  tools?.classList.toggle("hidden", isVideo);
   if (image) {
+    image.classList.toggle("hidden", isVideo);
+    image.style.transform = "";
+    if (isVideo) {
+      image.removeAttribute("src");
+      image.classList.remove("is-loading-full");
+    } else {
     image.classList.toggle("is-loading-full", Boolean(photo.thumbnailUrl && photo.thumbnailUrl !== photo.previewUrl));
     image.src = quickUrl;
     image.alt = photo.label || "Evidence photo";
@@ -7395,10 +7468,11 @@ function openEvidencePhotoObjectViewer(photo, returnFocusId = "request-no-invent
       };
       fullImage.src = fullUrl;
     }
+    }
   }
   if (caption) {
     caption.textContent = [
-      photo.label || "Evidence photo",
+      photo.label || (isVideo ? "Evidence video" : "Evidence photo"),
       photo.auditText || "",
       photo.bucket && photo.path ? `${photo.bucket}/${photo.path}` : "",
     ].filter(Boolean).join(" - ");
@@ -7410,12 +7484,21 @@ function openEvidencePhotoObjectViewer(photo, returnFocusId = "request-no-invent
 
 function closeNoInventoryEvidencePhotoViewer() {
   const image = $("no-inventory-photo-viewer-image");
+  const video = $("no-inventory-photo-viewer-video");
   state.evidencePhotoViewerLoadToken += 1;
   if (image) {
     image.removeAttribute("src");
     image.classList.remove("is-loading-full");
+    image.classList.remove("hidden");
     image.style.transform = "";
   }
+  if (video) {
+    video.pause?.();
+    video.removeAttribute("src");
+    video.load?.();
+    video.classList.add("hidden");
+  }
+  document.querySelector("#no-inventory-photo-viewer-modal .evidence-photo-viewer-tools")?.classList.remove("hidden");
   state.evidencePhotoViewerZoom = 1;
   state.evidencePhotoViewerPanX = 0;
   state.evidencePhotoViewerPanY = 0;
@@ -7442,7 +7525,7 @@ function adjustEvidencePhotoViewerZoom(delta) {
 
 function applyEvidencePhotoViewerTransform() {
   const image = $("no-inventory-photo-viewer-image");
-  if (!image) return;
+  if (!image || image.classList.contains("hidden")) return;
   image.style.transform = `translate(${state.evidencePhotoViewerPanX || 0}px, ${state.evidencePhotoViewerPanY || 0}px) scale(${state.evidencePhotoViewerZoom || 1})`;
 }
 
@@ -7458,7 +7541,7 @@ function resetEvidencePhotoViewerTransform() {
 function startEvidencePhotoPan(event) {
   if ((state.evidencePhotoViewerZoom || 1) <= 1) return;
   const image = $("no-inventory-photo-viewer-image");
-  if (!image?.src) return;
+  if (!image?.src || image.classList.contains("hidden")) return;
   state.evidencePhotoViewerPanning = true;
   state.evidencePhotoViewerPanStart = {
     pointerId: event.pointerId,

@@ -1177,7 +1177,12 @@ async function updateLocalOrderFinancePayloads(
 
       for (const line of linesByOrderId.get(order.id) || []) {
         const lineFinance = summarizeFinanceTransactions(transactions, order.order_number, line.transaction_id)
-          || buildNoFinanceTransactionsPayload(order.order_number, line.transaction_id);
+          || (transactions.length ? {
+            ...orderFinance,
+            lineItemId: line.transaction_id || null,
+            lineItemMatch: "order_level_fallback",
+            memo: orderFinance.memo || "Using order-level eBay finance status because eBay did not expose a matching line item id.",
+          } : buildNoFinanceTransactionsPayload(order.order_number, line.transaction_id));
         const lineRawPayload = line.raw_payload && typeof line.raw_payload === "object" ? line.raw_payload : {};
         const { error: lineUpdateError } = await supabase
           .from("ebay_order_lines")

@@ -802,8 +802,9 @@ function getFinancePayload(source = {}) {
     order?.raw_payload?.ebayFinance,
     order?.ebay_finance,
     order?.finance,
-  ];
-  return candidates.find((entry) => entry && typeof entry === "object") || null;
+  ].filter((entry) => entry && typeof entry === "object");
+  return candidates
+    .sort((left, right) => getFinancePayloadRank(right) - getFinancePayloadRank(left))[0] || null;
 }
 
 function normalizeFinanceStatus(value = "") {
@@ -814,6 +815,13 @@ function normalizeFinanceStatus(value = "") {
   if (text.includes("available")) return "available";
   if (text.includes("payout") || text.includes("paid")) return "paid_out";
   return text;
+}
+
+function getFinancePayloadRank(payload = {}) {
+  const status = normalizeFinanceStatus(payload?.status || payload?.transactionStatus || payload?.transaction_status);
+  const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
+  if (payload?.source === "ebay_finances_api" && status === "unknown" && transactions.length === 0) return 1;
+  return getFinanceStatusRank(status);
 }
 
 function getFinanceStatusLabel(status = "") {
