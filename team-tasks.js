@@ -1267,10 +1267,6 @@ async function loadTasks() {
   if (requested) {
     const card = document.querySelector(`[data-team-task-card="${CSS.escape(requested)}"]`);
     card?.scrollIntoView({ behavior: "smooth", block: "center" });
-    const task = state.tasks.find((entry) => entry.id === requested);
-    if (task) {
-      markTaskSeen(task).then(() => renderTasks()).catch(() => renderTasks());
-    }
   }
 }
 
@@ -2320,17 +2316,133 @@ function getPendingOrderStatusTone(status = "") {
   return "is-muted";
 }
 
+function getTaskFinancePayload(source = {}) {
+  const order = source?.order || {};
+  const candidates = [
+    source?.raw_payload?.ebayFinance,
+    source?.ebay_finance,
+    source?.finance,
+    order?.raw_payload?.ebayFinance,
+    order?.ebay_finance,
+    order?.finance,
+  ].filter((entry) => entry && typeof entry === "object");
+  return candidates
+    .sort((left, right) => getTaskFinancePayloadRank(right) - getTaskFinancePayloadRank(left))[0] || null;
+}
+
+function normalizeTaskFinanceStatus(value = "") {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return "";
+  if (text.includes("hold")) return "on_hold";
+  if (text.includes("process")) return "processing";
+  if (text.includes("available")) return "available";
+  if (text.includes("payout") || text.includes("paid")) return "paid_out";
+  return text;
+}
+
+function getTaskFinanceStatusRank(status = "") {
+  if (status === "on_hold") return 50;
+  if (status === "processing") return 40;
+  if (status === "available") return 30;
+  if (status === "paid_out") return 20;
+  return 10;
+}
+
+function getTaskFinanceActivityKind(payload = {}) {
+  const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
+  const text = [
+    payload?.memo,
+    ...transactions.flatMap((transaction) => [
+      transaction?.transactionType,
+      transaction?.transactionId,
+      transaction?.memo,
+      transaction?.bookingEntry,
+    ]),
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (/(dispute|claim|chargeback|case)/i.test(text)) return "dispute";
+  if (/(refund|return)/i.test(text)) return "refund";
+  if (/\bdebit\b/i.test(text) && !/\bsale\b/i.test(text)) return "adjustment";
+  return "";
+}
+
+function getTaskFinancePayloadRank(payload = {}) {
+  const status = normalizeTaskFinanceStatus(payload?.status || payload?.transactionStatus || payload?.transaction_status);
+  const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
+  const activityKind = getTaskFinanceActivityKind(payload);
+  if (activityKind) return 100 + getTaskFinanceStatusRank(status);
+  if (payload?.source === "ebay_finances_api" && status === "unknown" && transactions.length === 0) return 1;
+  return getTaskFinanceStatusRank(status);
+}
+
+function getTaskFinanceStatusLabel(status = "") {
+  if (status === "on_hold") return "On hold";
+  if (status === "paid_out") return "Paid out";
+  if (status === "available") return "Available";
+  if (status === "processing") return "Processing";
+  return "Payout unknown";
+}
+
+function getTaskFinanceStatusTone(status = "", activityKind = "") {
+  if (activityKind === "dispute") return "is-danger";
+  if (activityKind === "refund" || activityKind === "adjustment") return "is-warning";
+  if (status === "on_hold") return "is-danger";
+  if (status === "paid_out") return "is-good";
+  if (status === "available" || status === "processing") return "is-warning";
+  return "is-muted";
+}
+
+function getTaskFinanceBadgeFromPayload(payload = {}) {
+  if (!payload || typeof payload !== "object") return null;
+  const status = normalizeTaskFinanceStatus(payload?.status || payload?.transactionStatus || payload?.transaction_status);
+  const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
+  const activityKind = getTaskFinanceActivityKind(payload);
+  const statusLabel = payload?.statusLabel || payload?.status_label || getTaskFinanceStatusLabel(status);
+  const checkedWithNoTransactions = payload?.source === "ebay_finances_api"
+    && status === "unknown"
+    && transactions.length === 0;
+  const activityLabel = activityKind === "dispute" ? "Dispute" : activityKind === "refund" ? "Refund" : activityKind === "adjustment" ? "Adjustment" : "";
+  return {
+    label: checkedWithNoTransactions
+      ? "No payout data"
+      : activityLabel
+        ? `${activityLabel} / ${statusLabel}`
+        : statusLabel,
+    tone: getTaskFinanceStatusTone(status, activityKind),
+    title: [
+      checkedWithNoTransactions ? "eBay Finances checked this order but returned no transaction data." : "",
+      activityLabel ? `${activityLabel} finance activity is attached to this order.` : "",
+      statusLabel ? `Finance status: ${statusLabel}` : "",
+      payload.memo,
+      payload.syncedAt ? `Checked ${formatDate(payload.syncedAt)}` : "",
+    ].filter(Boolean).join(" "),
+    rank: activityKind ? 100 + getTaskFinanceStatusRank(status) : getTaskFinanceStatusRank(status),
+  };
+}
+
+function getPendingOrderTaskFinanceBadge(task = {}) {
+  const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
+  const candidates = [
+    getTaskFinancePayload({ order: task.order || {} }),
+    ...lines.map((line) => getTaskFinancePayload({ ...line, order: task.order || {} })),
+  ].filter(Boolean);
+  const payload = candidates
+    .sort((left, right) => getTaskFinancePayloadRank(right) - getTaskFinancePayloadRank(left))[0] || null;
+  return getTaskFinanceBadgeFromPayload(payload);
+}
+
 function getPendingOrderStatusPills(task = {}) {
   const order = task.order || {};
   const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
   const api = getPendingOrderTaskApiStatus(task);
   const lineStatuses = unique(lines.map((line) => line.line_status)).map(formatCompactStatus).filter(Boolean);
+  const financeBadge = getPendingOrderTaskFinanceBadge(task);
   const pills = [
     order.status ? { label: `Order ${formatCompactStatus(order.status)}`, tone: getPendingOrderStatusTone(order.status) } : null,
     order.label_status ? { label: `Label ${formatCompactStatus(order.label_status)}`, tone: getPendingOrderStatusTone(order.label_status) } : null,
     api.paymentStatus ? { label: `Payment ${formatCompactStatus(api.paymentStatus)}`, tone: isNormalEbayPaymentStatus(api.paymentStatus) ? "is-good" : "is-danger" } : null,
     api.fulfillmentStatus ? { label: `eBay ${formatCompactStatus(api.fulfillmentStatus)}`, tone: api.fulfillmentStatus === "FULFILLED" ? "is-warning" : "is-muted" } : null,
     api.cancelStatus && !isNormalEbayCancelStatus(api.cancelStatus) ? { label: `Cancel ${formatCompactStatus(api.cancelStatus)}`, tone: "is-danger" } : null,
+    financeBadge ? { label: financeBadge.label, tone: financeBadge.tone, title: financeBadge.title, rank: financeBadge.rank } : null,
     api.reviewReason || api.reviewMessage ? { label: "Needs eBay review", tone: "is-warning" } : null,
     lineStatuses.length ? { label: `Lines ${lineStatuses.join(", ")}`, tone: getPendingOrderStatusTone(lineStatuses.join(" ")) } : null,
   ].filter(Boolean);
@@ -2419,10 +2531,42 @@ function getPendingOrderEbayCondition(task = {}) {
   };
 }
 
-function renderTaskOrderSummaryStatusChip(task = {}) {
-  if (task.source !== "order") return "";
+function getPendingOrderSummaryStatusChips(task = {}) {
+  if (task.source !== "order") return [];
+  const { api } = getPendingOrderStatusPills(task);
+  const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
+  const financeBadge = getPendingOrderTaskFinanceBadge(task);
   const condition = getPendingOrderEbayCondition(task);
-  return `<span class="team-task-summary-ebay-status ${escapeHtml(condition.tone)}" title="${escapeHtml(condition.label)}">${escapeHtml(condition.shortLabel || condition.label)}</span>`;
+  const lineStatuses = unique(lines.map((line) => String(line.line_status || "").trim()).filter(Boolean));
+  const lineStatusText = lineStatuses.map(formatCompactStatus).filter(Boolean).join(", ");
+  const chips = [
+    lineStatusText ? { label: `Lines ${lineStatusText}`, tone: getPendingOrderStatusTone(lineStatusText), title: "Local OG line status for the order lines linked to this task." } : null,
+    !isNormalEbayCancelStatus(api.cancelStatus) ? { label: `Cancel ${formatCompactStatus(api.cancelStatus) || "flagged"}`, tone: "is-danger", title: "eBay cancellation status for this order." } : null,
+    api.paymentStatus ? { label: `Payment ${formatCompactStatus(api.paymentStatus)}`, tone: isNormalEbayPaymentStatus(api.paymentStatus) ? "is-good" : "is-danger", title: "eBay payment status for this order." } : null,
+    api.fulfillmentStatus ? { label: `eBay ${formatCompactStatus(api.fulfillmentStatus)}`, tone: api.fulfillmentStatus === "FULFILLED" ? "is-warning" : getPendingOrderStatusTone(api.fulfillmentStatus), title: "eBay fulfillment status for this order." } : null,
+    financeBadge ? { label: financeBadge.label, tone: financeBadge.tone, title: financeBadge.title, rank: financeBadge.rank } : null,
+    api.reviewReason || api.reviewMessage ? { label: "eBay review", tone: "is-warning", title: api.reviewMessage || api.reviewReason } : null,
+  ].filter(Boolean);
+
+  if (!chips.length && condition.label) {
+    chips.push({ label: condition.shortLabel || condition.label, tone: condition.tone, title: condition.message || condition.label });
+  }
+
+  const seen = new Set();
+  return chips.filter((chip) => {
+    const key = `${chip.label}:${chip.tone}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function renderTaskOrderSummaryStatusChip(task = {}) {
+  const chips = getPendingOrderSummaryStatusChips(task);
+  if (!chips.length) return "";
+  return chips.map((chip) => (
+    `<span class="team-task-summary-ebay-status ${escapeHtml(chip.tone)}" title="${escapeHtml(chip.title || chip.label)}">${escapeHtml(chip.label)}</span>`
+  )).join("");
 }
 
 function renderTaskOrderNumberAction(orderNumber = "", label = "Order") {
@@ -2439,9 +2583,10 @@ function renderTaskOrderNumberAction(orderNumber = "", label = "Order") {
 function getTaskOrderMiniStatus(task = {}) {
   if (task.source !== "order") return "";
   const condition = getPendingOrderEbayCondition(task);
+  const chipLabels = getPendingOrderSummaryStatusChips(task).map((chip) => chip.label).slice(0, 3);
   const customerName = getPendingOrderCustomerName(task);
   return [
-    condition.shortLabel || condition.label,
+    chipLabels.length ? chipLabels.join(" / ") : condition.shortLabel || condition.label,
     task.order_number ? `Order ${task.order_number}` : "",
     task.buyer_username ? `Buyer ${task.buyer_username}` : "",
     customerName ? `Customer ${customerName}` : "",
@@ -2496,7 +2641,7 @@ function renderPendingOrderStatusSnapshot(task = {}) {
           <summary>Order details and eBay fields</summary>
           ${pills.length ? `
             <div class="team-task-order-status-pills">
-              ${pills.map((pill) => `<span class="team-task-order-status-pill ${escapeHtml(pill.tone)}">${escapeHtml(pill.label)}</span>`).join("")}
+              ${pills.map((pill) => `<span class="team-task-order-status-pill ${escapeHtml(pill.tone)}" title="${escapeHtml(pill.title || pill.label)}">${escapeHtml(pill.label)}</span>`).join("")}
             </div>
           ` : `<p class="team-task-order-status-empty">No eBay status warning loaded for this task.</p>`}
           ${facts.length ? `
@@ -2638,9 +2783,14 @@ function renderPendingOrderEvidenceStrip(task = {}, events = []) {
 function renderPendingOrderCompactStatus(task = {}) {
   const condition = getPendingOrderEbayCondition(task);
   const statusMessage = condition.message || getPendingOrderStatusMessage(task);
+  const chips = getPendingOrderSummaryStatusChips(task);
   return `
     <div class="team-task-order-compact-status">
-      <span class="team-task-order-primary-status ${escapeHtml(condition.tone)}">${escapeHtml(condition.shortLabel || condition.label)}</span>
+      <div class="team-task-order-compact-chip-row">
+        ${chips.length
+          ? chips.map((chip) => `<span class="team-task-order-primary-status ${escapeHtml(chip.tone)}" title="${escapeHtml(chip.title || chip.label)}">${escapeHtml(chip.label)}</span>`).join("")
+          : `<span class="team-task-order-primary-status ${escapeHtml(condition.tone)}">${escapeHtml(condition.shortLabel || condition.label)}</span>`}
+      </div>
       ${statusMessage ? `<em class="${condition.tone === "is-danger" ? "is-danger" : ""}">${escapeHtml(statusMessage)}</em>` : ""}
     </div>
   `;
@@ -3694,6 +3844,17 @@ function renderTaskCard(task = {}, options = {}) {
             <strong>${escapeHtml(task.title || "Team task")}</strong>
             <span class="team-task-chip team-task-status-chip">${escapeHtml(statusLabel)}</span>
             <span class="team-task-read-chip">${escapeHtml(readInfo.label)}</span>
+            ${readInfo.status === "read" ? `
+              <span class="team-task-read-action-spacer" aria-hidden="true"></span>
+            ` : `
+              <span
+                role="button"
+                tabindex="0"
+                class="team-task-mark-read-chip"
+                data-team-task-mark-read="${escapeHtml(taskKey)}"
+                title="Mark this task read"
+              >Mark read</span>
+            `}
           </span>
           <span class="team-task-summary-preview">${escapeHtml(preview)}</span>
           ${orderMiniStatus || contextLine ? `<span class="team-task-summary-context">${escapeHtml(orderMiniStatus || contextLine)}</span>` : ""}
@@ -3730,13 +3891,32 @@ function attachTaskCardInteractions(root = document) {
         state.expandedTaskKeys.delete(key);
       } else {
         state.expandedTaskKeys.add(key);
-        const task = getTaskByUnifiedKey(key);
-        if (task) markTaskSeen(task);
       }
       renderTasks();
       requestAnimationFrame(() => {
         document.querySelector(`[data-team-task-card-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "nearest" });
       });
+    });
+  });
+  root.querySelectorAll("[data-team-task-mark-read]").forEach((button) => {
+    const handleMarkRead = async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const key = button.dataset.teamTaskMarkRead || "";
+      const task = getTaskByUnifiedKey(key);
+      if (!task) return;
+      button.textContent = "Saving...";
+      button.setAttribute("aria-disabled", "true");
+      try {
+        await markTaskSeen(task);
+      } finally {
+        renderTasks();
+      }
+    };
+    button.addEventListener("click", handleMarkRead);
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      handleMarkRead(event);
     });
   });
 }

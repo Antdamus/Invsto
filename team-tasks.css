@@ -679,6 +679,29 @@ body {
   background: rgba(255, 255, 255, 0.035);
 }
 
+.team-task-mark-read-chip {
+  flex: 0 0 auto;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(157, 242, 189, 0.34);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--task-green);
+  background: rgba(157, 242, 189, 0.1);
+  font-size: 0.66rem;
+  font-weight: 950;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.team-task-mark-read-chip:hover,
+.team-task-mark-read-chip:focus-visible {
+  border-color: rgba(157, 242, 189, 0.58);
+  background: rgba(157, 242, 189, 0.16);
+  outline: none;
+}
+
 .team-task-summary-preview,
 .team-task-summary-context {
   min-width: 0;
@@ -985,6 +1008,13 @@ body {
   align-items: center;
   gap: 7px;
   flex-wrap: wrap;
+}
+
+.team-task-order-compact-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
 }
 
 .team-task-order-compact-status .team-task-order-primary-status {
