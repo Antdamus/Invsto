@@ -1039,6 +1039,11 @@ function getReturnItemsForLine(lineId) {
     .filter((item) => item.order_line_id === lineId);
 }
 
+function isActiveReturnCase(returnCase = {}) {
+  const status = String(returnCase.status || "").toLowerCase();
+  return !["closed", "cancelled", "canceled", "resolved"].includes(status);
+}
+
 function getReturnCasesForLineIds(lineIds = []) {
   const wanted = new Set(lineIds.filter(Boolean));
   if (!wanted.size) return [];
@@ -1046,6 +1051,62 @@ function getReturnCasesForLineIds(lineIds = []) {
     (Array.isArray(entry.ebay_return_items) ? entry.ebay_return_items : [])
       .some((item) => wanted.has(item.order_line_id))
   );
+}
+
+function getReturnCasesForOrderIds(orderIds = []) {
+  const wanted = new Set(orderIds.filter(Boolean));
+  if (!wanted.size) return [];
+  return state.returnCases.filter((entry) => wanted.has(entry.order_id));
+}
+
+function sortReturnCasesNewestFirst(cases = []) {
+  return [...cases].sort((a, b) =>
+    new Date(b.opened_at || b.received_at || b.updated_at || b.created_at || 0)
+      - new Date(a.opened_at || a.received_at || a.updated_at || a.created_at || 0)
+  );
+}
+
+function uniqueReturnCases(cases = []) {
+  const byKey = new Map();
+  cases.filter(Boolean).forEach((entry) => {
+    const key = entry.id || entry.ebay_return_id || `${entry.order_id || ""}:${entry.opened_at || ""}:${entry.status || ""}`;
+    if (!key || byKey.has(key)) return;
+    byKey.set(key, entry);
+  });
+  return sortReturnCasesNewestFirst([...byKey.values()]);
+}
+
+function getReturnCasesForLine(line = {}) {
+  return uniqueReturnCases([
+    ...getReturnCasesForLineIds(line?.id ? [line.id] : []),
+    ...getReturnCasesForOrderIds(line?.order_id ? [line.order_id] : []),
+  ]);
+}
+
+function getReturnCasesForGroup(group = {}) {
+  const lines = group.lines || [];
+  const lineIds = lines.map((line) => line.id).filter(Boolean);
+  const orderIds = lines.map((line) => line.order_id || line.order?.id).filter(Boolean);
+  return uniqueReturnCases([
+    ...getReturnCasesForLineIds(lineIds),
+    ...getReturnCasesForOrderIds(orderIds),
+  ]);
+}
+
+function getReturnCasePayload(returnCase = {}) {
+  return returnCase.raw_payload && typeof returnCase.raw_payload === "object" ? returnCase.raw_payload : {};
+}
+
+function getReturnCaseDetailsUrl(returnCase = {}) {
+  const payload = getReturnCasePayload(returnCase);
+  return String(
+    payload.detailsUrl
+      || payload.pageUrl
+      || payload.returnDetails?.detailsUrl
+      || payload.returnDetails?.orderDetailsUrl
+      || payload.orderDetailsUrl
+      || ""
+  ).trim();
 }
 
 function getReturnEventsForLineIds(lineIds = []) {
@@ -1085,7 +1146,7 @@ function getReturnSearchTextForLine(line) {
   const lineId = line?.id || "";
   const items = getReturnItemsForLine(lineId);
   const events = getReturnEventsForLineIds([lineId]);
-  const cases = getReturnCasesForLineIds([lineId]);
+  const cases = getReturnCasesForLine(line);
   return buildHistorySearchText([
     ...items.flatMap((item) => [
       item.condition_received,
@@ -1315,19 +1376,19 @@ async function checkHistoryAuth() {
   state.employee = employee;
   const greeting = $("history-greeting");
   if (greeting) {
-    const pageTitle = isReturnsWorkbenchPage() ? "eBay Returns" : "eBay Order History";
+    const pageTitle = isReturnsWorkbenchPage() ? "eBay Post-Order Issues" : "eBay Order History";
     greeting.textContent = `${pageTitle}${employee.display_name ? ` - ${employee.display_name}` : ""}`;
   }
   const subtitle = $("history-subtitle");
   if (subtitle) {
     subtitle.textContent = isReturnsWorkbenchPage()
-      ? "Return queue, assignments, unmatched refunds, and intake photos."
+      ? "Requests, returns, disputes, assignments, unmatched refunds, and intake photos."
       : isAdminUser()
         ? "Admin shipping monitor - completed, canceled, and reverted orders"
         : "Search completed orders and open packing proof photos.";
   }
   const mode = $("history-mode-label");
-  if (mode) mode.textContent = isReturnsWorkbenchPage() ? "Returns" : isAdminUser() ? "Admin" : "Proof";
+  if (mode) mode.textContent = isReturnsWorkbenchPage() ? "Requests" : isAdminUser() ? "Admin" : "Proof";
   if (!isAdminUser()) {
     document.body.classList.add("history-worker-proof-mode");
     $("history-status")?.querySelector('option[value="reverted"]')?.remove();
@@ -2359,7 +2420,7 @@ function applyFilters() {
     if (status === "fulfilled" && line.line_status !== "fulfilled") return false;
     if (status === "cancelled" && line.line_status !== "cancelled") return false;
     if (status === "admin_closeout" && !isAdminCloseoutLine(line)) return false;
-    if (status === "returns" && !getReturnItemsForLine(line.id).length) return false;
+    if (status === "returns" && !getReturnCasesForLine(line).length) return false;
     if (worker && line.fulfilled_by_email !== worker) return false;
     if (
       term
@@ -3590,7 +3651,9 @@ function getEventLabel(event) {
 }
 
 function getHistoryGroupStatus(group) {
-  if (getReturnCasesForLineIds((group.lines || []).map((line) => line.id)).length) return "Returned";
+  const returnCases = getReturnCasesForGroup(group);
+  if (returnCases.some(isActiveReturnCase)) return "Post-order issue";
+  if (returnCases.length) return "Returned";
   if (group.events.some((event) => event.category === "revert")) return "Has reversal";
   if (group.events.some(isRefundCloseoutEvent)) return "Refunded";
   if (group.lines.some((line) => line.line_status === "cancelled")) return "Canceled";
@@ -3603,7 +3666,7 @@ function getHistoryGroupStatus(group) {
 
 function getHistoryGroupStatusClass(group) {
   const label = getHistoryGroupStatus(group);
-  if (label === "Returned") return "is-returned";
+  if (label === "Returned" || label === "Post-order issue") return "is-returned";
   if (label === "Canceled" || label === "Refunded") return "is-cancelled";
   if (label === "No-inventory completion" || label === "Has reversal") return "is-admin";
   return "";
@@ -3906,29 +3969,30 @@ function renderGroupLabelControl(group, orders = []) {
 function renderGroupReturnControl(group) {
   const lineIds = (group?.lines || []).map((line) => line.id).filter(Boolean);
   if (!lineIds.length) return "";
-  const returnCases = getReturnCasesForLineIds(lineIds);
-  const latestCase = returnCases
-    .slice()
-    .sort((a, b) => new Date(b.opened_at || b.received_at || 0) - new Date(a.opened_at || a.received_at || 0))[0];
+  const returnCases = getReturnCasesForGroup(group);
+  const latestCase = returnCases[0];
+  const activeCount = returnCases.filter(isActiveReturnCase).length;
   const returnItems = returnCases.flatMap((entry) => Array.isArray(entry.ebay_return_items) ? entry.ebay_return_items : []);
   const restockedUnits = returnItems
     .filter((item) => item.disposition === "restock")
     .reduce((sum, item) => sum + Number(item.received_quantity || 0), 0);
   const problemCount = returnItems.filter((item) => ["admin_review", "wrong_item", "damaged", "missing"].includes(item.disposition)).length;
   const encodedLineIds = escapeHtml(lineIds.join(","));
+  const detailsUrl = latestCase ? getReturnCaseDetailsUrl(latestCase) : "";
   const summary = latestCase
-    ? `${returnCases.length} return case${returnCases.length === 1 ? "" : "s"} - ${getReturnStatusLabel(latestCase.status)}${restockedUnits ? ` - ${restockedUnits} unit${restockedUnits === 1 ? "" : "s"} restocked` : ""}${problemCount ? ` - ${problemCount} flagged` : ""}`
-    : "No return recorded for this grouped completion.";
+    ? `${returnCases.length} eBay request${returnCases.length === 1 ? "" : "s"} - ${activeCount ? `${activeCount} active - ` : ""}${getReturnStatusLabel(latestCase.status)}${restockedUnits ? ` - ${restockedUnits} unit${restockedUnits === 1 ? "" : "s"} restocked` : ""}${problemCount ? ` - ${problemCount} flagged` : ""}`
+    : "No eBay return, request, or dispute recorded for this grouped completion.";
 
   return `
     <div class="history-order-return-strip">
-      <div class="history-order-return-control">
+      <div class="history-order-return-control ${activeCount ? "has-active-return-case" : ""}">
         <div>
-          <span class="eyebrow">Returns</span>
-          <strong>${escapeHtml(latestCase ? getReturnStatusLabel(latestCase.status) : "Return intake")}</strong>
+          <span class="eyebrow">eBay Requests / Returns / Disputes</span>
+          <strong>${escapeHtml(latestCase ? (activeCount ? "Active post-order issue" : getReturnStatusLabel(latestCase.status)) : "Return intake")}</strong>
           <small>${escapeHtml(summary)}</small>
         </div>
         <div>
+          ${detailsUrl ? `<a class="secondary-btn" href="${escapeHtml(detailsUrl)}" target="_blank" rel="noopener">Open eBay</a>` : ""}
           <button type="button" class="secondary-btn history-return-btn" data-return-lines="${encodedLineIds}">${latestCase ? "Add Return Update" : "Start Return"}</button>
         </div>
       </div>
@@ -4388,12 +4452,16 @@ async function uploadHistoryOrderTaskPhotos(files, option = {}) {
   return uploaded;
 }
 
-function getHistoryGroupSummaryBadges({ group, primaryStatus, statusClass, hasAttachedLabel, hasReturns, groupPhotos, receiptCount, taskSummary }) {
+function getHistoryGroupSummaryBadges({ group, primaryStatus, statusClass, hasAttachedLabel, hasReturns, hasActiveReturnCase, groupPhotos, receiptCount, taskSummary }) {
   const badges = [
     `<span class="history-status ${escapeHtml(statusClass)}">${escapeHtml(primaryStatus)}</span>`,
   ];
   if (hasAttachedLabel) badges.push(`<span class="history-label-pill is-compact">Label</span>`);
-  if (hasReturns) badges.push(`<span class="history-return-pill is-compact">Return</span>`);
+  if (hasActiveReturnCase) {
+    badges.push(`<span class="history-return-pill is-compact is-active">Active issue</span>`);
+  } else if (hasReturns) {
+    badges.push(`<span class="history-return-pill is-compact">Return</span>`);
+  }
   if (taskSummary?.activeCount) {
     badges.push(`<span class="history-task-pill is-active">${taskSummary.activeCount} active task${taskSummary.activeCount === 1 ? "" : "s"}</span>`);
   } else if (taskSummary?.totalCount) {
@@ -4454,7 +4522,9 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
     const auditEvents = group.events.slice(0, 6);
     const groupOrders = getUniqueOrdersFromLines(group.lines);
     const hasAttachedLabel = groupOrders.some((order) => order.label_file_path);
-    const hasReturns = getReturnCasesForLineIds(lineIds).length > 0;
+    const returnCases = getReturnCasesForGroup(group);
+    const hasReturns = returnCases.length > 0;
+    const hasActiveReturnCase = returnCases.some(isActiveReturnCase);
     const groupKey = getHistoryGroupKey(group, groupIndex);
     const isExpanded = state.expandedHistoryGroupIds.has(groupKey);
     const groupQty = getHistoryGroupQuantity(group);
@@ -4469,6 +4539,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
       statusClass,
       hasAttachedLabel,
       hasReturns,
+      hasActiveReturnCase,
       groupPhotos,
       receiptCount,
       taskSummary,

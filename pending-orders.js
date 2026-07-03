@@ -509,6 +509,7 @@ function normalizePostOrderIssueType(value) {
 }
 
 function getLinePostOrderIssue(line) {
+  if (!isOpenOrderLine(line)) return null;
   const issue = line?.post_order_issue || null;
   const count = Number(issue?.count || 0);
   if (!issue || count <= 0) return null;
@@ -528,7 +529,7 @@ function getLinePostOrderIssue(line) {
 function buildPostOrderIssueTitle(issue, fallback = "Open this eBay request before shipping.") {
   const payload = issue?.payload || {};
   const parts = [
-    issue?.scope === "order" ? "Order-level request" : "Line-level request",
+    issue?.scope === "order" ? "Post-order request" : "Line-level request",
     payload.ebayReturnId ? `Return ID: ${payload.ebayReturnId}` : "",
     payload.escalationCaseId ? `Case ID: ${payload.escalationCaseId}` : "",
     issue?.status ? `Status: ${issue.status}` : "",

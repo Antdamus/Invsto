@@ -1151,6 +1151,12 @@ textarea {
   margin-left: 0;
 }
 
+.history-return-pill.is-active {
+  border-color: rgba(255, 204, 102, 0.34);
+  color: #ffd27a;
+  background: rgba(255, 204, 102, 0.1);
+}
+
 .history-order-return-strip {
   display: grid;
   gap: 8px;
@@ -1166,6 +1172,18 @@ textarea {
   border: 1px solid rgba(155, 213, 255, 0.18);
   border-radius: 14px;
   background: rgba(155, 213, 255, 0.055);
+}
+
+.history-order-return-control.has-active-return-case {
+  border-color: rgba(255, 204, 102, 0.28);
+  background: rgba(255, 204, 102, 0.075);
+}
+
+.history-order-return-control > div:last-child {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .history-order-return-control strong,

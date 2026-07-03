@@ -64,12 +64,12 @@
       <header class="header">
         <div class="header-inner">
           <div class="greeting">
-            <strong id="history-greeting">eBay Returns</strong>
-            <div id="history-subtitle" class="sub">Return queue, assignments, unmatched refunds, and intake photos.</div>
+            <strong id="history-greeting">eBay Post-Order Issues</strong>
+            <div id="history-subtitle" class="sub">Requests, returns, disputes, assignments, unmatched refunds, and intake photos.</div>
           </div>
           <div class="header-pills" aria-label="Page context">
             <div class="pill">Scope: <b>eBay</b></div>
-            <div class="pill">Mode: <b id="history-mode-label">Returns</b></div>
+            <div class="pill">Mode: <b id="history-mode-label">Requests</b></div>
             <div class="pill" id="history-date-pill">Date: <b>-</b></div>
           </div>
         </div>
@@ -78,9 +78,9 @@
       <main class="content order-history-content">
         <section class="order-history-hero">
           <div>
-            <span class="eyebrow">Returns Workbench</span>
-            <h1>Returns and Refund Reviews</h1>
-            <p>Import visible eBay returns, assign questions, intake returned items with photos, and review old refunds that do not match OG order history.</p>
+            <span class="eyebrow">Post-Order Workbench</span>
+            <h1>eBay Requests, Returns, and Disputes</h1>
+            <p>Import visible eBay requests, assign questions, intake returned items with photos, and review old refunds that do not match OG order history.</p>
           </div>
           <div class="history-actions">
             <button id="refresh-return-queue" type="button" class="secondary-btn">
@@ -89,15 +89,15 @@
             </button>
             <button id="check-ebay-return-api-sync" type="button" class="secondary-btn" data-admin-only="true">
               <i data-lucide="search-check"></i>
-              Check eBay Returns
+              Check eBay Issues
             </button>
             <button id="run-ebay-return-api-sync" type="button" class="primary-btn" data-admin-only="true">
               <i data-lucide="cloud-download"></i>
-              Sync eBay Returns
+              Sync eBay Issues
             </button>
             <button id="clean-ebay-return-api-sync" type="button" class="secondary-btn" data-admin-only="true">
               <i data-lucide="archive-check"></i>
-              Clean Closed Returns
+              Clean Closed Issues
             </button>
             <a href="ebay-order-history.html" class="secondary-btn">
               <i data-lucide="history"></i>
@@ -117,8 +117,8 @@
         <section id="return-import-summary" class="history-board return-import-summary hidden" aria-live="polite">
           <div class="history-board-head">
             <div>
-              <span class="eyebrow">Return Import Audit</span>
-              <h2>Last eBay Return Sync</h2>
+              <span class="eyebrow">Issue Import Audit</span>
+              <h2>Last eBay Issue Sync</h2>
             </div>
             <span id="return-import-count" class="history-count">0 imported</span>
           </div>
@@ -128,8 +128,8 @@
         <section id="return-work-queue" class="history-board return-work-queue">
           <div class="history-board-head">
             <div>
-              <span class="eyebrow">Return Work Queue</span>
-              <h2>Pending Returns</h2>
+              <span class="eyebrow">Post-Order Work Queue</span>
+              <h2>Open Requests, Returns, and Disputes</h2>
             </div>
             <div class="return-queue-actions">
               <span id="return-task-save-status" class="return-task-save-status" aria-live="polite"></span>
@@ -159,8 +159,8 @@
               </select>
             </label>
             <label>
-              Search returns
-              <input id="return-task-search" type="search" placeholder="Buyer, return ID, order, item, question..." />
+              Search issues
+              <input id="return-task-search" type="search" placeholder="Buyer, return ID, order number, item, question..." />
             </label>
           </div>
           <div id="return-task-list" class="return-task-list">
