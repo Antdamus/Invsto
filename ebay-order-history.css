@@ -2471,7 +2471,8 @@ textarea {
   cursor: zoom-in;
 }
 
-.return-photo-card img {
+.return-photo-card img,
+.return-photo-card video {
   width: 100%;
   aspect-ratio: 1;
   object-fit: cover;

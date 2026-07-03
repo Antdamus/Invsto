@@ -6217,7 +6217,7 @@ async function confirmRevert() {
 function setReturnIntakeStatus(message = "", type = "info") {
   const el = $("return-intake-status");
   if (!el) return;
-  el.textContent = message || "Select returned lines, attach evidence photos, and choose the disposition.";
+  el.textContent = message || "Select returned lines, attach evidence media, and choose the disposition.";
   el.classList.toggle("is-error", type === "error");
   el.classList.toggle("is-success", type === "success");
 }
@@ -6317,12 +6317,12 @@ async function searchReturnDestinationLocation() {
 }
 
 function renderReturnEvidencePhotoList() {
-  const files = [...($("return-evidence-photo")?.files || [])];
+  const files = [...($("return-evidence-photo")?.files || [])].filter(isAcceptedHistoryEvidenceFile);
   const list = $("return-evidence-photo-list");
   if (!list) return;
   list.innerHTML = files.length
     ? files.map((file) => `<span>${escapeHtml(file.name)}${file.size ? ` - ${escapeHtml(formatFileSize(file.size))}` : ""}</span>`).join("")
-    : `<span>Fallback files optional when phone photos are attached</span>`;
+    : `<span>Fallback files optional when phone evidence is attached</span>`;
 }
 
 function delayReturnCapture(ms) {
@@ -6533,9 +6533,14 @@ async function returnCaptureRowsToEvidencePhotos(rows) {
     const bucket = String(row?.storage_bucket || "").trim();
     const path = String(row?.storage_path || "").trim();
     if (!bucket || !path) continue;
+    const mediaType = getHistoryEvidenceMediaType({
+      path,
+      label: row?.label || "",
+      mime_type: row?.mime_type || "",
+    });
     const [previewUrl, thumbnailUrl] = await Promise.all([
       createReturnSignedImageUrl(bucket, path),
-      createReturnSignedImageUrl(bucket, path, { transform: RETURN_THUMBNAIL_TRANSFORM }),
+      mediaType === "video" ? Promise.resolve("") : createReturnSignedImageUrl(bucket, path, { transform: RETURN_THUMBNAIL_TRANSFORM }),
     ]);
     if (!previewUrl) continue;
     photos.push({
@@ -6546,8 +6551,9 @@ async function returnCaptureRowsToEvidencePhotos(rows) {
       thumbnailUrl: thumbnailUrl || previewUrl,
       capture_job_id: row.capture_job_id || "",
       sort_order: row.sort_order ?? index,
-      label: row.label || `Return photo ${index + 1}`,
-      mime_type: row.mime_type || "image/jpeg",
+      label: row.label || `Return evidence ${index + 1}`,
+      mime_type: row.mime_type || (mediaType === "video" ? "video/mp4" : "image/jpeg"),
+      media_type: mediaType,
       size_bytes: row.file_size_bytes || 0,
       created_at: row.created_at || new Date().toISOString(),
     });
@@ -6655,6 +6661,7 @@ async function uploadReturnEvidenceFiles(files, orderNumbers = [], offset = 0) {
 
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index];
+    const mediaType = getHistoryEvidenceMediaType(file);
     const extension = getReturnEvidenceFileExtension(file, file);
     const path = [
       "returns",
@@ -6664,16 +6671,17 @@ async function uploadReturnEvidenceFiles(files, orderNumbers = [], offset = 0) {
     const { error } = await supabase.storage
       .from(EBAY_RETURN_EVIDENCE_BUCKET)
       .upload(path, file, {
-        contentType: file.type || "image/jpeg",
+        contentType: file.type || (mediaType === "video" ? "video/mp4" : "image/jpeg"),
         upsert: false,
       });
-    if (error) throw new Error(error.message || `Could not upload return evidence photo ${index + 1}.`);
+    if (error) throw new Error(error.message || `Could not upload return evidence ${index + 1}.`);
     uploaded.push({
       bucket: EBAY_RETURN_EVIDENCE_BUCKET,
       path,
       label: `Return evidence ${offset + index + 1}`,
       original_name: file.name || "",
-      mime_type: file.type || "image/jpeg",
+      mime_type: file.type || (mediaType === "video" ? "video/mp4" : "image/jpeg"),
+      media_type: mediaType,
       size_bytes: file.size || 0,
       uploaded_at: new Date().toISOString(),
     });
@@ -6694,7 +6702,7 @@ function renderReturnEvidencePhotos() {
   const toolbar = document.querySelector(".return-photo-toolbar");
   toolbar?.classList.toggle("hidden", !state.returnEvidencePhotos.length);
   if (!state.returnEvidencePhotos.length) {
-    grid.innerHTML = `<div class="history-empty">No return photos added.</div>`;
+    grid.innerHTML = `<div class="history-empty">No return evidence added.</div>`;
     updateReturnEvidencePhotoSelectionSummary();
     return;
   }
@@ -6713,8 +6721,10 @@ function renderReturnEvidencePhotos() {
           <span>Upload</span>
         </label>
         <button type="button" data-return-photo-index="${index}" title="Open return photo">
-          <img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `Return photo ${index + 1}`)}" />
-          <span>${escapeHtml(photo.label || `Return photo ${index + 1}`)}</span>
+          ${isHistoryEvidenceVideo(photo)
+            ? `<video src="${escapeHtml(photo.previewUrl || "")}" muted playsinline preload="metadata"></video>`
+            : `<img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `Return photo ${index + 1}`)}" />`}
+          <span>${escapeHtml(photo.label || `Return evidence ${index + 1}`)}</span>
         </button>
       </article>
     `;
@@ -6739,7 +6749,7 @@ function updateReturnEvidencePhotoSelectionSummary() {
   const total = state.returnEvidencePhotos.length;
   const selected = getSelectedReturnEvidencePhotos().length;
   summary.textContent = total
-    ? `${selected} of ${total} photo${total === 1 ? "" : "s"} selected for this return.`
+    ? `${selected} of ${total} evidence file${total === 1 ? "" : "s"} selected for this return.`
     : "";
 }
 
@@ -6748,8 +6758,9 @@ function openReturnEvidencePhotoViewer(index) {
   if (!photo?.previewUrl) return;
   openEvidencePhotoViewer(
     photo.previewUrl,
-    photo.label || `Return photo ${index + 1}`,
-    `${photo.bucket}/${photo.path}`
+    photo.label || `Return evidence ${index + 1}`,
+    `${photo.bucket}/${photo.path}`,
+    getHistoryEvidenceMediaType(photo)
   );
 }
 
@@ -7688,7 +7699,7 @@ async function confirmReturnIntake() {
   if (state.busy) return;
   const selectedLines = getReturnModalLines().filter((line) => state.returnSelectedLineIds.has(line.id));
   const errorEl = $("return-error");
-  const files = [...($("return-evidence-photo")?.files || [])];
+  const files = [...($("return-evidence-photo")?.files || [])].filter(isAcceptedHistoryEvidenceFile);
   const selectedPhotos = getSelectedReturnEvidencePhotos();
 
   if (!selectedLines.length) {
@@ -7696,7 +7707,7 @@ async function confirmReturnIntake() {
     return;
   }
   if (!files.length && !selectedPhotos.length) {
-    if (errorEl) errorEl.textContent = "Attach at least one return evidence photo.";
+    if (errorEl) errorEl.textContent = "Attach at least one return evidence photo or video.";
     return;
   }
 
@@ -7723,7 +7734,7 @@ async function confirmReturnIntake() {
     state.busy = true;
     $("confirm-return-intake").disabled = true;
     if (errorEl) errorEl.textContent = "";
-    setReturnIntakeStatus("Uploading return evidence photos...");
+    setReturnIntakeStatus("Uploading return evidence...");
 
     const orderNumbers = [...new Set(selectedLines.map((line) => line.order?.order_number).filter(Boolean))];
     const evidencePhotos = await persistReturnEvidencePhotos(files, orderNumbers);
