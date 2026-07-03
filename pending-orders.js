@@ -7507,11 +7507,22 @@ function openEvidencePhotoObjectViewer(photo, returnFocusId = "request-no-invent
   const video = $("no-inventory-photo-viewer-video");
   const tools = document.querySelector("#no-inventory-photo-viewer-modal .evidence-photo-viewer-tools");
   const caption = $("no-inventory-photo-viewer-caption");
+  const eyebrow = document.querySelector("#no-inventory-photo-viewer-modal .eyebrow");
+  const title = $("no-inventory-photo-viewer-title");
+  const openLink = $("no-inventory-photo-viewer-open-link");
   const loadToken = state.evidencePhotoViewerLoadToken + 1;
   state.evidencePhotoViewerLoadToken = loadToken;
   const isVideo = isEvidenceVideo(photo);
   const quickUrl = photo.thumbnailUrl || photo.previewUrl;
   const fullUrl = photo.previewUrl;
+  if (eyebrow) eyebrow.textContent = isVideo ? "Evidence Video" : "Evidence Photo";
+  if (title) title.textContent = isVideo ? "Verify video" : "Inspect photo";
+  if (openLink) {
+    openLink.href = fullUrl || "#";
+    openLink.download = photo.original_name || photo.label || (isVideo ? "evidence-video" : "evidence-photo");
+    openLink.textContent = isVideo ? "Open / Download Video" : "Open / Download Photo";
+    openLink.classList.toggle("hidden", !fullUrl);
+  }
   state.evidencePhotoViewerZoom = 1;
   state.evidencePhotoViewerPanX = 0;
   state.evidencePhotoViewerPanY = 0;
@@ -7522,6 +7533,11 @@ function openEvidencePhotoObjectViewer(photo, returnFocusId = "request-no-invent
       video.src = fullUrl;
       video.classList.remove("hidden");
       video.setAttribute("aria-label", photo.label || "Evidence video");
+      video.onerror = () => {
+        if (caption) {
+          caption.textContent = `${photo.label || "Evidence video"} - This browser may not play this video inline. Use Open / Download Video to verify it.`;
+        }
+      };
     } else {
       video.pause?.();
       video.removeAttribute("src");
@@ -7580,11 +7596,18 @@ function closeNoInventoryEvidencePhotoViewer() {
   }
   if (video) {
     video.pause?.();
+    video.onerror = null;
     video.removeAttribute("src");
     video.load?.();
     video.classList.add("hidden");
   }
   document.querySelector("#no-inventory-photo-viewer-modal .evidence-photo-viewer-tools")?.classList.remove("hidden");
+  const openLink = $("no-inventory-photo-viewer-open-link");
+  if (openLink) {
+    openLink.href = "#";
+    openLink.removeAttribute("download");
+    openLink.classList.add("hidden");
+  }
   state.evidencePhotoViewerZoom = 1;
   state.evidencePhotoViewerPanX = 0;
   state.evidencePhotoViewerPanY = 0;
@@ -9967,9 +9990,16 @@ async function saveManualVideoReceipt() {
       await renderSelectedVideoReceiptEvidence();
     }
 
+    const verificationPhoto = await ensureEvidencePhotoPreviewUrls(savedPhoto).catch(() => savedPhoto);
     closeManualVideoReceiptModal();
     renderOrders();
     setStatus(`${mediaType === "video" ? "Video" : "Photo"} evidence saved to the ${isWholeOrder ? "order" : "item line"} audit trail.`, "success");
+    if (verificationPhoto?.previewUrl) {
+      setTimeout(() => openEvidencePhotoObjectViewer({
+        ...verificationPhoto,
+        auditText: "Just added. Verify this is the correct file.",
+      }, "open-order-task-modal"), 120);
+    }
   } catch (error) {
     console.error("Could not save order evidence:", error);
     setManualVideoReceiptError(error?.message || "Could not save the order evidence.");
