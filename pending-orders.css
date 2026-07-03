@@ -3600,6 +3600,7 @@ body.pending-order-detail-open .mobile-detail-close {
 .buyer-order-card.is-collapsed .buyer-card-value,
 .buyer-order-card.is-collapsed .status-badge,
 .buyer-order-card.is-collapsed .urgency-pill,
+.buyer-order-card.is-collapsed .post-order-issue-pill,
 .buyer-order-card.is-collapsed .sync-mismatch-pill,
 .buyer-order-card.is-collapsed .buyer-card-task-btn,
 .buyer-order-card.is-collapsed .buyer-card-expand-btn {
@@ -3636,6 +3637,11 @@ body.pending-order-detail-open .mobile-detail-close {
 .buyer-order-card.has-sync-mismatch {
   outline: 1px solid rgba(255, 139, 139, 0.34);
   outline-offset: -4px;
+}
+
+.buyer-order-card.has-post-order-issue {
+  outline: 2px solid rgba(255, 105, 105, 0.42);
+  outline-offset: -5px;
 }
 
 .buyer-order-card.is-overdue {
@@ -3871,8 +3877,43 @@ body.pending-order-detail-open .mobile-detail-close {
 .buyer-card-value,
 .status-badge,
 .urgency-pill,
+.post-order-issue-pill,
 .sync-mismatch-pill {
   min-height: 32px;
+}
+
+.post-order-issue-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 11px;
+  border: 1px solid rgba(255, 105, 105, 0.5);
+  border-radius: 999px;
+  background: rgba(255, 86, 86, 0.15);
+  color: #ffd3d3;
+  font-size: 0.72rem;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.post-order-issue-pill.is-dispute {
+  border-color: rgba(255, 105, 105, 0.62);
+  background: rgba(255, 64, 64, 0.2);
+  color: #ffe0e0;
+}
+
+.post-order-issue-pill.is-request {
+  border-color: rgba(255, 174, 102, 0.52);
+  background: rgba(255, 142, 64, 0.15);
+  color: #ffe2c4;
+}
+
+.post-order-issue-pill svg {
+  width: 14px;
+  height: 14px;
 }
 
 .sync-mismatch-pill {
@@ -4288,6 +4329,39 @@ body.pending-order-detail-open .mobile-detail-close {
   font-size: 0.72rem;
   font-weight: 950;
   line-height: 1.1;
+}
+
+.buyer-line-post-order-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 4px 9px;
+  border: 1px solid rgba(255, 105, 105, 0.44);
+  border-radius: 999px;
+  background: rgba(255, 86, 86, 0.13);
+  color: #ffd6d6;
+  font-size: 0.72rem;
+  font-weight: 950;
+  line-height: 1.1;
+  text-decoration: none;
+}
+
+.buyer-line-post-order-warning.is-request {
+  border-color: rgba(255, 174, 102, 0.44);
+  background: rgba(255, 142, 64, 0.12);
+  color: #ffe2c4;
+}
+
+.buyer-line-post-order-warning.is-dispute {
+  border-color: rgba(255, 105, 105, 0.54);
+  background: rgba(255, 64, 64, 0.17);
+  color: #ffe0e0;
+}
+
+.buyer-line-post-order-warning svg {
+  width: 13px;
+  height: 13px;
 }
 
 .buyer-line-sync-warning.is-cancelled {

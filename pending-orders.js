@@ -486,11 +486,99 @@ function getEbayApiStatusBadge(line) {
   return null;
 }
 
+function normalizePostOrderIssueType(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (text.includes("dispute") || text.includes("case")) return "dispute";
+  if (text.includes("return")) return "return_request";
+  return text || "";
+}
+
+function getLinePostOrderIssue(line) {
+  const issue = line?.post_order_issue || null;
+  const count = Number(issue?.count || 0);
+  if (!issue || count <= 0) return null;
+  return {
+    count,
+    type: normalizePostOrderIssueType(issue.type),
+    label: String(issue.label || "").trim() || "Request",
+    status: String(issue.status || "").trim(),
+    reason: String(issue.reason || "").trim(),
+    latestAt: issue.latest_at || "",
+    scope: String(issue.scope || "").trim() || "line",
+    url: String(issue.url || issue.payload?.detailsUrl || "").trim(),
+    payload: issue.payload || {},
+  };
+}
+
+function buildPostOrderIssueTitle(issue, fallback = "Open this eBay request before shipping.") {
+  const payload = issue?.payload || {};
+  const parts = [
+    issue?.scope === "order" ? "Order-level request" : "Line-level request",
+    payload.ebayReturnId ? `Return ID: ${payload.ebayReturnId}` : "",
+    payload.escalationCaseId ? `Case ID: ${payload.escalationCaseId}` : "",
+    issue?.status ? `Status: ${issue.status}` : "",
+    issue?.reason ? `Reason: ${issue.reason}` : "",
+    issue?.latestAt ? `Opened: ${formatDate(issue.latestAt)}` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(" | ") : fallback;
+}
+
+function getPostOrderIssueBadge(line) {
+  const issue = getLinePostOrderIssue(line);
+  if (!issue) return null;
+  const isDispute = issue.type === "dispute";
+  const label = issue.scope === "order"
+    ? (isDispute ? "Order dispute" : "Order request")
+    : (isDispute ? "Line dispute" : "Line request");
+  return {
+    label: issue.count > 1 ? `${label} x${issue.count}` : label,
+    tone: isDispute ? "is-dispute" : "is-request",
+    icon: isDispute ? "shield-alert" : "undo-2",
+    severity: isDispute ? 85 : 75,
+    title: buildPostOrderIssueTitle(issue),
+    url: issue.url,
+    issue,
+  };
+}
+
+function renderIssueBadgeMarkup(badge, className) {
+  if (!badge) return "";
+  const tag = badge.url ? "a" : "span";
+  const href = badge.url ? ` href="${escapeHtml(badge.url)}" target="_blank" rel="noopener"` : "";
+  return `
+    <${tag} class="${escapeHtml(className)} ${escapeHtml(badge.tone)}" title="${escapeHtml(badge.title)}"${href}>
+      <i data-lucide="${escapeHtml(badge.icon)}"></i>
+      ${escapeHtml(badge.label)}
+    </${tag}>
+  `;
+}
+
 function getGroupEbayApiStatus(lines = []) {
   return lines
     .map(getEbayApiStatusBadge)
     .filter(Boolean)
     .sort((a, b) => b.severity - a.severity)[0] || null;
+}
+
+function getGroupPostOrderIssueStatus(lines = []) {
+  const badges = lines
+    .map(getPostOrderIssueBadge)
+    .filter(Boolean)
+    .sort((a, b) => b.severity - a.severity);
+  if (!badges.length) return null;
+  const affectedLineCount = badges.length;
+  const totalIssueCount = badges.reduce((sum, badge) => sum + Number(badge.issue?.count || 1), 0);
+  const top = badges[0];
+  const hasDispute = badges.some((badge) => badge.issue?.type === "dispute");
+  const labelBase = hasDispute ? "Dispute/request" : "Requests";
+  return {
+    ...top,
+    label: totalIssueCount > 1 ? `${labelBase} x${totalIssueCount}` : labelBase,
+    tone: hasDispute ? "is-dispute" : "is-request",
+    icon: hasDispute ? "shield-alert" : "undo-2",
+    severity: hasDispute ? 90 : 80,
+    title: `${affectedLineCount.toLocaleString()} affected line${affectedLineCount === 1 ? "" : "s"} in this buyer group. ${top.title}`,
+  };
 }
 
 function getRemainingLineQuantity(line) {
@@ -955,6 +1043,14 @@ function normalizeLine(line) {
   const labelSearchText = getLabelMetadataSearchText(line.label_metadata, order.label_metadata);
   const videoReceiptUrl = getOrderVideoReceiptUrl({ ...line, order });
   const orderCreatedAt = getOrderCreatedAt({ ...line, order });
+  const postOrderIssue = getLinePostOrderIssue(line);
+  const postOrderIssueText = postOrderIssue ? [
+    postOrderIssue.label,
+    postOrderIssue.status,
+    postOrderIssue.reason,
+    postOrderIssue.payload?.ebayReturnId,
+    postOrderIssue.payload?.escalationCaseId,
+  ].filter(Boolean).join(" ") : "";
   const ebayApiStatusText = [
     line.ebay_api_status?.payment_status,
     line.ebay_api_status?.fulfillment_status,
@@ -985,6 +1081,7 @@ function normalizeLine(line) {
       videoReceiptUrl,
       labelSearchText,
       ebayApiStatusText,
+      postOrderIssueText,
     ].filter(Boolean).join(" ").toLowerCase(),
   };
 }
@@ -2205,6 +2302,17 @@ function normalizePendingOrderQueueRpcRow(row = {}) {
         },
       }
     : {};
+  const postOrderIssue = {
+    count: Number(row.post_order_issue_count || 0),
+    type: row.post_order_issue_type || "",
+    label: row.post_order_issue_label || "",
+    status: row.post_order_issue_status || "",
+    reason: row.post_order_issue_reason || "",
+    latest_at: row.post_order_issue_latest_at || "",
+    scope: row.post_order_issue_scope || "",
+    url: row.post_order_issue_url || "",
+    payload: row.post_order_issue_payload || {},
+  };
   return {
     id: row.id,
     order_id: row.order_id,
@@ -2226,6 +2334,7 @@ function normalizePendingOrderQueueRpcRow(row = {}) {
     assigned_seller_snapshot: row.assigned_seller_snapshot || {},
     notes: row.notes,
     ebay_api_status: ebayApiStatus,
+    post_order_issue: postOrderIssue,
     raw_payload: syncReviewPayload,
     video_receipt_photo_count: Number(row.video_receipt_photo_count || 0),
     line_note_count: Number(row.line_note_count || 0),
@@ -2251,6 +2360,7 @@ function normalizePendingOrderQueueRpcRow(row = {}) {
       label_file_path: row.label_file_path,
       label_uploaded_at: row.label_uploaded_at,
       ebay_api_status: ebayApiStatus,
+      post_order_issue: postOrderIssue,
       raw_payload: syncReviewPayload,
     },
   };
@@ -3092,8 +3202,9 @@ function renderOrders() {
       : `<button type="button" class="buyer-card-approval-btn" data-buyer-approval-key="${escapeHtml(group.key)}" ${getPendingOrderApprovalLinesForGroup(group).length ? "" : "disabled"}>Send for Approval</button>`;
     const card = document.createElement("article");
     const hasSelectedAdminLines = group.lines.some((line) => state.adminSelectedLineIds.has(line.id));
+    const postOrderIssueStatus = getGroupPostOrderIssueStatus(group.lines);
     const ebayApiStatus = getGroupEbayApiStatus(group.lines);
-    card.className = `buyer-order-card ${urgencyClass} ${groupIndex % 2 ? "is-alt-group" : ""} ${hasSelectedAdminLines ? "has-admin-selected-lines" : ""} ${ebayApiStatus ? "has-sync-mismatch" : ""} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""} ${isExpanded ? "is-expanded" : "is-collapsed"}`;
+    card.className = `buyer-order-card ${urgencyClass} ${groupIndex % 2 ? "is-alt-group" : ""} ${hasSelectedAdminLines ? "has-admin-selected-lines" : ""} ${postOrderIssueStatus ? "has-post-order-issue" : ""} ${ebayApiStatus ? "has-sync-mismatch" : ""} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""} ${isExpanded ? "is-expanded" : "is-collapsed"}`;
     card.dataset.buyerKey = group.key;
     card.dataset.buyerUsername = group.buyer;
     card.innerHTML = `
@@ -3118,6 +3229,7 @@ function renderOrders() {
         </div>
         <div class="buyer-card-alerts">
           ${urgencyMarkup}
+          ${renderIssueBadgeMarkup(postOrderIssueStatus, "post-order-issue-pill")}
           ${ebayApiStatus ? `
             <span class="sync-mismatch-pill ${escapeHtml(ebayApiStatus.tone)}" title="${escapeHtml(ebayApiStatus.title)}">
               <i data-lucide="${escapeHtml(ebayApiStatus.icon)}"></i>
@@ -3249,6 +3361,7 @@ function renderOrders() {
       const order = line.order || {};
       const receiptLink = getOrderVideoReceiptLink(line);
       const canActOnLine = isOpenOrderLine(line);
+      const linePostOrderIssueStatus = getPostOrderIssueBadge(line);
       const lineEbayApiStatus = getEbayApiStatusBadge(line);
       const lineUrgency = canActOnLine ? getOrderUrgency(order.ship_by_date) : null;
       const lineDueTone = lineUrgency?.level || "neutral";
@@ -3313,6 +3426,7 @@ function renderOrders() {
                 ${escapeHtml(visibleLineDueLabel)}
               </span>
               ${orderLineSequence ? `<span class="buyer-line-sequence">${escapeHtml(orderLineSequence)}</span>` : ""}
+              ${renderIssueBadgeMarkup(linePostOrderIssueStatus, "buyer-line-post-order-warning")}
               ${lineEbayApiStatus ? `<span class="buyer-line-sync-warning ${escapeHtml(lineEbayApiStatus.tone)}" title="${escapeHtml(lineEbayApiStatus.title)}"><i data-lucide="${escapeHtml(lineEbayApiStatus.icon)}"></i>${escapeHtml(lineEbayApiStatus.label)}</span>` : ""}
             </span>
             <small class="buyer-line-price">Line total ${formatMoney(line.total_price || line.sold_for || 0)}</small>

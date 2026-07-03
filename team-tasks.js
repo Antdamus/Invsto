@@ -3922,6 +3922,36 @@ function renderOrderTaskActions(task = {}, resolved = false, options = {}) {
 
   if (resolved && !isParent) return renderAdminHistoryActions(task);
 
+  if (isApprovalParent && !compact && !isTaskHistoryView()) {
+    const primaryButtons = [];
+    const moreButtons = [];
+    const parentCanReceiveWorkerUpdate = workerOwnsTask
+      && !["completed_by_employee", "approved_for_shipping", "assigned_for_shipping", "shipped_completed", "closed", "cancelled"].includes(task.status);
+
+    if (task.actionHref) {
+      primaryButtons.push(`<a class="secondary-btn" href="${escapeHtml(task.actionHref)}">Review order</a>`);
+    }
+
+    if (parentCanReceiveWorkerUpdate) {
+      primaryButtons.push(`<button type="button" class="secondary-btn" data-order-workflow-action="task-progress" data-task-id="${escapeHtml(task.id)}"${actionAttrs}>Add Update</button>`);
+      moreButtons.push(`<button type="button" class="secondary-btn" data-order-workflow-action="reassign-request" data-task-id="${escapeHtml(task.id)}"${actionAttrs}>Request Reassign</button>`);
+    }
+
+    if (canUseAdminTaskControls()) {
+      primaryButtons.push(`<button type="button" class="secondary-btn danger-btn" data-order-workflow-action="send-back-order" data-task-id="${escapeHtml(task.id)}">Send Back</button>`);
+      primaryButtons.push(`<button type="button" class="primary-btn" data-order-workflow-action="assign-shipping" data-task-id="${escapeHtml(task.id)}" ${canApproveShipping ? "" : "disabled"}>Approve / Assign Shipping</button>`);
+      moreButtons.push(`<button type="button" class="secondary-btn" data-order-workflow-action="add-subtask" data-task-id="${escapeHtml(task.id)}">Add Subtask</button>`);
+      moreButtons.push(`<button type="button" class="secondary-btn danger-btn" data-order-workflow-action="cancel-approval" data-task-id="${escapeHtml(task.id)}">Cancel Approval</button>`);
+      moreButtons.push(...getAdminAssignmentActionButtons(task));
+    }
+
+    const actionHtml = renderTaskActionGroup(primaryButtons, moreButtons, {
+      className: "team-task-approval-actions",
+      moreLabel: "More",
+    });
+    return `${actionHtml}${renderAdminHistoryActions(task)}`;
+  }
+
   const buttons = [];
   if (!compact && task.actionHref) {
     const orderLinkLabel = isShippingTaskReadyForFulfillment(task) ? "Fulfill Shipment" : "Open Pending Order";
@@ -3966,6 +3996,27 @@ function renderOrderTaskActions(task = {}, resolved = false, options = {}) {
 
   if (!buttons.length) return `${renderAdminAssignmentActions(task)}${renderAdminHistoryActions(task)}`;
   return `<div class="team-task-actions">${buttons.join("")}</div>${renderAdminAssignmentActions(task)}${renderAdminHistoryActions(task)}`;
+}
+
+function renderTaskActionGroup(primaryButtons = [], overflowButtons = [], options = {}) {
+  const primary = primaryButtons.filter(Boolean);
+  const overflow = overflowButtons.filter(Boolean);
+  if (!primary.length && !overflow.length) return "";
+  const className = options.className ? ` ${options.className}` : "";
+  const moreLabel = options.moreLabel || "More";
+  return `
+    <div class="team-task-actions${className}">
+      ${primary.join("")}
+      ${overflow.length ? `
+        <details class="team-task-action-menu">
+          <summary>${escapeHtml(moreLabel)}</summary>
+          <div class="team-task-action-menu-body">
+            ${overflow.join("")}
+          </div>
+        </details>
+      ` : ""}
+    </div>
+  `;
 }
 
 function renderTaskEventLineReviews(event = {}) {
@@ -4653,18 +4704,27 @@ function renderAdminReassignRequestNotice(task = {}) {
   `;
 }
 
-function renderAdminAssignmentActions(task = {}) {
-  if (!canUseAdminTaskControls() || isTaskHistoryView()) return "";
+function getAdminAssignmentActionButtons(task = {}) {
+  if (!canUseAdminTaskControls() || isTaskHistoryView()) return [];
   const canReassign = Boolean(task.assigned_to_user_id);
   const canDecline = hasReassignRequest(task);
   const canCancel = Boolean(task.assigned_to_user_id);
-  if (!canReassign && !canDecline && !canCancel) return "";
+  if (!canReassign && !canDecline && !canCancel) return [];
+
+  return [
+    canReassign ? `<button type="button" class="secondary-btn" data-task-assignment-action="reassign" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Reassign Task</button>` : "",
+    canDecline ? `<button type="button" class="secondary-btn" data-task-assignment-action="decline_reassign" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Decline Reassign</button>` : "",
+    canCancel ? `<button type="button" class="secondary-btn danger-btn" data-task-assignment-action="cancel_assignment" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Cancel Assignment</button>` : "",
+  ].filter(Boolean);
+}
+
+function renderAdminAssignmentActions(task = {}) {
+  const buttons = getAdminAssignmentActionButtons(task);
+  if (!buttons.length) return "";
 
   return `
     <div class="team-task-actions">
-      ${canReassign ? `<button type="button" class="secondary-btn" data-task-assignment-action="reassign" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Reassign Task</button>` : ""}
-      ${canDecline ? `<button type="button" class="secondary-btn" data-task-assignment-action="decline_reassign" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Decline Reassign</button>` : ""}
-      ${canCancel ? `<button type="button" class="secondary-btn danger-btn" data-task-assignment-action="cancel_assignment" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Cancel Assignment</button>` : ""}
+      ${buttons.join("")}
     </div>
   `;
 }

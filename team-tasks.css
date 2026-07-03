@@ -97,6 +97,64 @@ body {
   padding: 6px 11px;
 }
 
+.team-task-approval-actions {
+  align-items: center;
+  padding: 2px 0;
+}
+
+.team-task-action-menu {
+  position: relative;
+}
+
+.team-task-action-menu summary {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--task-line);
+  border-radius: 999px;
+  padding: 6px 14px;
+  color: var(--task-text);
+  background: rgba(255, 255, 255, 0.045);
+  font-weight: 950;
+  cursor: pointer;
+  user-select: none;
+}
+
+.team-task-action-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.team-task-action-menu[open] summary {
+  border-color: rgba(241, 214, 155, 0.38);
+  color: var(--task-gold);
+  background: rgba(241, 214, 155, 0.08);
+}
+
+.team-task-action-menu-body {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+  min-width: 220px;
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid rgba(241, 214, 155, 0.22);
+  border-radius: 13px;
+  background:
+    radial-gradient(circle at top right, rgba(241, 214, 155, 0.12), transparent 36%),
+    rgba(21, 20, 20, 0.98);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.36);
+}
+
+.team-task-action-menu-body .primary-btn,
+.team-task-action-menu-body .secondary-btn {
+  width: 100%;
+  min-height: 34px;
+  justify-content: center;
+}
+
 .team-task-notifications {
   position: relative;
 }
@@ -2993,8 +3051,21 @@ body.modal-open {
 
   .team-task-actions > .primary-btn,
   .team-task-actions > .secondary-btn,
-  .team-task-actions > a {
+  .team-task-actions > a,
+  .team-task-actions > .team-task-action-menu {
     flex: 1 1 150px;
+  }
+
+  .team-task-action-menu summary {
+    width: 100%;
+  }
+
+  .team-task-action-menu-body {
+    position: static;
+    margin-top: 8px;
+    min-width: 0;
+    width: 100%;
+    box-shadow: none;
   }
 
   .team-task-board-tools {
