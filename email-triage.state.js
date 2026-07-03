@@ -98,6 +98,7 @@
       ebayConversationSavedViewActionError: null,
       ebayConversationSavedViewCounts: {},
       ebayConversationSavedViewCountsLoading: false,
+      ebayConversationUserReadStates: overrides.ebayConversationUserReadStates || {},
       selectedEbaySavedViewId: null,
       ebayConversationSmartFoldersEditing: false,
       ebayConversationSmartFolderEditDraft: null,

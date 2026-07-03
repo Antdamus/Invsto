@@ -1230,6 +1230,12 @@ body {
   font-weight: 900;
 }
 
+.team-task-approval-line-meta .team-task-line-video-open {
+  min-height: 23px;
+  padding: 3px 8px;
+  font-size: 0.66rem;
+}
+
 .team-task-line-review-badge {
   min-height: 23px;
   display: inline-flex;
@@ -2776,6 +2782,85 @@ body {
   color: var(--task-gold);
   font-weight: 900;
   text-decoration: none;
+}
+
+.team-task-line-receipt-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(241, 214, 155, 0.22);
+  border-radius: 8px;
+  background: rgba(241, 214, 155, 0.055);
+}
+
+.team-task-line-receipt-panel-head,
+.team-task-line-receipt-row,
+.team-task-line-receipt-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.team-task-line-receipt-panel-head {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.team-task-line-receipt-panel-head strong {
+  color: var(--task-text);
+}
+
+.team-task-line-receipt-list {
+  display: grid;
+  gap: 8px;
+}
+
+.team-task-line-receipt-row {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.team-task-line-receipt-main {
+  display: grid;
+  gap: 4px;
+  min-width: min(280px, 100%);
+}
+
+.team-task-line-receipt-main strong {
+  color: var(--task-text);
+  font-size: 0.88rem;
+}
+
+.team-task-line-receipt-main small,
+.team-task-line-receipt-actions span {
+  color: var(--task-muted);
+  font-weight: 800;
+}
+
+.team-task-line-receipt-actions {
+  flex-wrap: wrap;
+}
+
+.team-task-line-video-open {
+  min-height: 30px;
+  border: 1px solid rgba(241, 214, 155, 0.4);
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: var(--task-gold);
+  background: rgba(241, 214, 155, 0.1);
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.team-task-line-video-open:hover,
+.team-task-line-video-open:focus-visible {
+  border-color: rgba(241, 214, 155, 0.65);
+  background: rgba(241, 214, 155, 0.16);
+  outline: none;
 }
 
 .team-task-video-receipt-photos {

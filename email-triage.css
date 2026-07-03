@@ -4849,6 +4849,42 @@ button.ebay-filter-chip {
   min-width: 0;
 }
 
+.ebay-conversation-read-action {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: rgba(242,243,245,.78);
+  background: rgba(255,255,255,.045);
+  font-size: .66rem;
+  font-weight: 950;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ebay-conversation-read-action.is-read-action {
+  border-color: rgba(157,242,189,.34);
+  color: #9df2bd;
+  background: rgba(157,242,189,.1);
+}
+
+.ebay-conversation-read-action.is-unread-action {
+  border-color: rgba(241,214,155,.28);
+  color: #f1d69b;
+  background: rgba(241,214,155,.08);
+}
+
+.ebay-conversation-read-action:hover,
+.ebay-conversation-read-action:focus-visible {
+  border-color: rgba(114,184,255,.42);
+  background: rgba(114,184,255,.12);
+  outline: none;
+}
+
 .ebay-conversation-avatar {
   display: inline-grid;
   place-items: center;

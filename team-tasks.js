@@ -1536,6 +1536,8 @@ function normalizeTeamTask(task = {}) {
     source: "team",
     metadata,
     sourceLabel: isEbayMessageTask ? (taskTag === "refunds" ? "Refund" : "eBay Message") : "",
+    order_number: task.order_number || metadata.order_number || metadata.orderNumber || "",
+    buyer_username: task.buyer_username || metadata.buyer_username || metadata.buyerUsername || "",
     actionHref: `team-tasks.html?taskId=${encodeURIComponent(task.id || "")}`,
   };
 }
@@ -1602,7 +1604,18 @@ function normalizeReturnTask(task = {}) {
 }
 
 function getTaskLineIds(task = {}) {
-  return Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
+  const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
+  return unique([
+    ...(Array.isArray(task.order_line_ids) ? task.order_line_ids : []),
+    ...(Array.isArray(metadata.order_line_ids) ? metadata.order_line_ids : []),
+    ...(Array.isArray(metadata.orderLineIds) ? metadata.orderLineIds : []),
+    ...(Array.isArray(metadata.line_ids) ? metadata.line_ids : []),
+    ...(Array.isArray(metadata.lineIds) ? metadata.lineIds : []),
+    metadata.order_line_id,
+    metadata.orderLineId,
+    metadata.line_id,
+    metadata.lineId,
+  ].filter(Boolean).map(String));
 }
 
 function getReturnTaskPayload(task = {}) {
@@ -1654,6 +1667,8 @@ async function hydrateTaskLines(tasks = []) {
   tasks.forEach((task) => {
     getTaskLineIds(task).forEach((id) => lineIds.add(id));
     if ((task.source === "order" || task.source === "return") && task.order_id) orderIds.add(task.order_id);
+    if (task.metadata?.order_id) orderIds.add(task.metadata.order_id);
+    if (task.metadata?.orderId) orderIds.add(task.metadata.orderId);
   });
 
   const rowsById = new Map();
@@ -1944,6 +1959,98 @@ function getTaskLineVideoReceiptUrl(line = {}, task = {}) {
       extractFirstEbayLiveUrlFromText(photo.event?.notes),
     ]),
   ].map((url) => normalizeVideoReceiptUrlForTaskLine(url, line)).find(Boolean) || "";
+}
+
+function buildTaskLineVideoReceiptPayload(line = {}, task = {}) {
+  const orderNumber = task.order_number || task.order?.order_number || task.metadata?.order_number || task.metadata?.orderNumber || "";
+  const directUrl = getTaskLineVideoReceiptUrl(line, task);
+  return {
+    url: directUrl,
+    orderNumber,
+    orderDetailsUrl: orderNumber ? buildEbayOrderDetailsUrl(orderNumber) : "",
+    itemNumber: line.item_number || "",
+    transactionId: line.transaction_id || "",
+    itemTitle: line.item_title || "",
+    itemUrl: line.item_number ? `https://www.ebay.com/itm/${encodeURIComponent(line.item_number)}` : "",
+    direct: Boolean(directUrl),
+  };
+}
+
+function requestTaskExtensionVideoReceiptOpen(payload = {}) {
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      window.removeEventListener("message", onMessage);
+      resolve(result || null);
+    };
+    const timer = window.setTimeout(() => finish({ ok: false, error: "The eBay extension did not answer." }), 20000);
+    const onMessage = (event) => {
+      if (event.source !== window || event.origin !== window.location.origin) return;
+      if (event.data?.type !== "OG_EBAY_VIDEO_RECEIPT_OPEN_RESPONSE") return;
+      if (event.data?.requestId !== requestId) return;
+      finish(event.data.payload || null);
+    };
+    window.addEventListener("message", onMessage);
+    window.postMessage({
+      type: "OG_EBAY_VIDEO_RECEIPT_OPEN_REQUEST",
+      requestId,
+      payload,
+    }, window.location.origin);
+  });
+}
+
+function getTaskVideoReceiptOpenFailureMessage(result = {}, payload = {}) {
+  const raw = String(result?.error || result?.message || "").trim();
+  const orderText = payload.orderNumber ? ` for order ${payload.orderNumber}` : "";
+  const itemText = payload.itemNumber ? ` / item ${payload.itemNumber}` : "";
+  if (/could not match a video receipt|no ebay live video receipt|video receipt.*not.*found|no video receipt/i.test(raw)) {
+    return `No eBay Live video receipt was found${orderText}${itemText}.`;
+  }
+  return raw || "Could not open the eBay video receipt. Make sure the OG eBay extension is enabled and you are signed in to eBay.";
+}
+
+async function openTaskLineVideoReceipt(button) {
+  if (!button) return;
+  const payload = {
+    url: button.dataset.videoReceiptUrl || "",
+    orderNumber: button.dataset.orderNumber || "",
+    orderDetailsUrl: button.dataset.orderDetailsUrl || "",
+    itemNumber: button.dataset.itemNumber || "",
+    transactionId: button.dataset.transactionId || "",
+    itemTitle: button.dataset.itemTitle || "",
+    itemUrl: button.dataset.itemUrl || "",
+    direct: button.dataset.direct === "1",
+  };
+  if (!payload.url && !payload.orderNumber) {
+    setStatus("This task line does not have enough eBay information to find a video receipt.", "error");
+    return;
+  }
+  const originalText = button.textContent;
+  button.textContent = "Opening...";
+  button.disabled = true;
+  try {
+    if (payload.direct && payload.url) {
+      window.open(payload.url, "_blank", "noopener,noreferrer");
+      setStatus("Opening eBay video receipt.", "info");
+      return;
+    }
+    setStatus("Opening eBay video receipt through the extension.", "info");
+    const result = await requestTaskExtensionVideoReceiptOpen(payload);
+    if (!result?.ok) {
+      setStatus(getTaskVideoReceiptOpenFailureMessage(result, payload), "error");
+      return;
+    }
+    setStatus("eBay video receipt opened.", "success");
+  } catch (error) {
+    setStatus(error?.message || "Could not open the video receipt.", "error");
+  } finally {
+    button.textContent = originalText || "Open video receipt";
+    button.disabled = false;
+  }
 }
 
 async function hydrateOrderVideoReceiptEvidence(tasks = []) {
@@ -3047,6 +3154,7 @@ function renderPendingOrderApprovalLines(task = {}, events = []) {
             line.line_status ? formatTaskTag(line.line_status) : "",
             photos.length ? `Receipt photo ${photos.length}` : "Missing receipt photo",
           ].filter(Boolean);
+          const receiptButton = renderTaskLineVideoReceiptOpenButton(line, task);
           return `
             <article class="team-task-approval-line ${photos.length ? "has-photo" : "is-missing-photo"}">
               ${renderPendingOrderApprovalLinePhoto(line, task, index)}
@@ -3054,6 +3162,7 @@ function renderPendingOrderApprovalLines(task = {}, events = []) {
                 <strong>${escapeHtml(title)}</strong>
                 <div class="team-task-approval-line-meta">
                   ${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}
+                  ${receiptButton}
                   ${renderLineReviewBadge(lineReview)}
                 </div>
                 ${lineReview?.note ? `<p class="team-task-line-review-note">${escapeHtml(lineReview.note)}</p>` : ""}
@@ -3302,6 +3411,71 @@ function renderTaskLineVideoReceiptPhotos(line = {}) {
         `;
       }).join("")}
     </div>
+  `;
+}
+
+function renderTaskLineVideoReceiptOpenButton(line = {}, task = {}) {
+  const payload = buildTaskLineVideoReceiptPayload(line, task);
+  if (!payload.url && !payload.orderNumber) return "";
+  return `
+    <button
+      type="button"
+      class="team-task-line-video-open"
+      data-task-video-receipt-open="1"
+      data-video-receipt-url="${escapeHtml(payload.url)}"
+      data-order-number="${escapeHtml(payload.orderNumber)}"
+      data-order-details-url="${escapeHtml(payload.orderDetailsUrl)}"
+      data-item-number="${escapeHtml(payload.itemNumber)}"
+      data-transaction-id="${escapeHtml(payload.transactionId)}"
+      data-item-title="${escapeHtml(payload.itemTitle)}"
+      data-item-url="${escapeHtml(payload.itemUrl)}"
+      data-direct="${payload.direct ? "1" : "0"}"
+      title="${escapeHtml(payload.direct ? "Open the saved eBay Live video receipt" : "Ask the eBay extension to find and open this receipt")}"
+    >Open video receipt</button>
+  `;
+}
+
+function renderTaskLineReceiptQuickPanel(task = {}) {
+  const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
+  if (!lines.length) return "";
+  const shown = lines.slice(0, 4);
+  const hiddenCount = Math.max(0, lines.length - shown.length);
+  return `
+    <section class="team-task-line-receipt-panel">
+      <div class="team-task-line-receipt-panel-head">
+        <div>
+          <span class="eyebrow">Item line receipts</span>
+          <strong>${escapeHtml(getPendingOrderLineSummary(task) || `${lines.length} linked item line${lines.length === 1 ? "" : "s"}`)}</strong>
+        </div>
+        ${hiddenCount ? `<span class="team-task-chip">+${escapeHtml(hiddenCount)} more</span>` : ""}
+      </div>
+      <div class="team-task-line-receipt-list">
+        ${shown.map((line, index) => {
+          const photos = getTaskLineReceiptPhotos(line);
+          const title = line.item_number
+            ? `${line.item_number} - ${line.item_title || "Untitled item"}`
+            : line.item_title || `Item line ${index + 1}`;
+          const meta = [
+            task.order_number || task.order?.order_number ? `Order ${task.order_number || task.order?.order_number}` : "",
+            line.transaction_id ? `Txn ${line.transaction_id}` : "",
+            line.quantity ? `Qty ${line.quantity}` : "",
+          ].filter(Boolean).join(" - ");
+          return `
+            <article class="team-task-line-receipt-row ${photos.length ? "has-receipt" : "is-missing-receipt"}">
+              <div class="team-task-line-receipt-main">
+                <strong>${escapeHtml(title)}</strong>
+                ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
+                <div class="team-task-line-receipt-actions">
+                  ${renderTaskLineVideoReceiptOpenButton(line, task)}
+                  <span>${escapeHtml(photos.length ? `${photos.length} saved screenshot${photos.length === 1 ? "" : "s"}` : "No saved screenshot yet")}</span>
+                </div>
+              </div>
+              ${renderTaskLineVideoReceiptPhotos(line)}
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </section>
   `;
 }
 
@@ -3783,6 +3957,7 @@ function renderTeamTaskBrief(task = {}, events = [], canceled = false) {
         ${latestEvent ? `<span><small>Last update</small><b>${escapeHtml(`${formatTaskTag(latestEvent.action || "update")} - ${formatDate(latestEvent.created_at)}`)}</b></span>` : ""}
       </div>
       <p class="team-task-next-step"><strong>Next step</strong><span>${escapeHtml(getTaskNextStepLabel(task))}</span></p>
+      ${task.source === "team" ? renderTaskLineReceiptQuickPanel(task) : ""}
     </section>
   `;
 }
@@ -4077,6 +4252,13 @@ function renderTasks() {
   list.querySelectorAll("[data-team-task-photo]").forEach((button) => {
     button.addEventListener("click", () => openTaskEvidenceFromButton(button));
   });
+  list.querySelectorAll("[data-task-video-receipt-open]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openTaskLineVideoReceipt(button);
+    });
+  });
   list.querySelectorAll("[data-task-copy-order-number]").forEach((button) => {
     button.addEventListener("click", () => copyTextToClipboard(button.dataset.taskCopyOrderNumber, "Order number"));
   });
@@ -4122,6 +4304,13 @@ function renderRemovedHistoryTasks() {
   setupInlineLineReviewControls(list);
   list.querySelectorAll("[data-team-task-photo]").forEach((button) => {
     button.addEventListener("click", () => openTaskEvidenceFromButton(button));
+  });
+  list.querySelectorAll("[data-task-video-receipt-open]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openTaskLineVideoReceipt(button);
+    });
   });
   list.querySelectorAll("[data-task-copy-order-number]").forEach((button) => {
     button.addEventListener("click", () => copyTextToClipboard(button.dataset.taskCopyOrderNumber, "Order number"));

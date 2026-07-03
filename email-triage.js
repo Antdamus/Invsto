@@ -176,6 +176,7 @@
   const EBAY_CLASSIFICATION_EXPANDED_STORAGE_KEY = "og-email-triage-ebay-conversation-labels-expanded";
   const EBAY_DRAFT_METADATA_COLLAPSED_STORAGE_KEY = "og-email-triage-ebay-draft-metadata-collapsed";
   const EBAY_MOBILE_WORKSPACE_VIEW_STORAGE_KEY = "og-email-triage-ebay-mobile-workspace-view";
+  const EBAY_USER_READ_STATE_STORAGE_KEY = "og-email-triage-ebay-user-read-states-v1";
   const EBAY_RECLASSIFY_RECENT_LIMIT = 20;
   const EBAY_MESSAGE_TASK_CLOSED_STATUSES = new Set(["resolved", "cancelled"]);
   const EBAY_LABEL_ALIASES = Object.freeze({
@@ -3565,6 +3566,103 @@
     return activityMs > 0 && activityMs >= Date.now() - (24 * 60 * 60 * 1000);
   }
 
+  function ebayConversationViewerId(context = null) {
+    return compactConversationText(
+      context?.session?.user?.id
+      || adminClassificationState.emailTriageViewerUserId
+      || window.currentUser?.id
+      || "browser",
+    );
+  }
+
+  function ebayConversationReadStorageUserKey(context = null) {
+    return ebayConversationViewerId(context) || "browser";
+  }
+
+  function loadStoredEbayConversationUserReadStates(context = null) {
+    const userKey = ebayConversationReadStorageUserKey(context);
+    try {
+      const all = JSON.parse(localStorage.getItem(EBAY_USER_READ_STATE_STORAGE_KEY) || "{}");
+      const userMap = all && typeof all === "object" && all[userKey] && typeof all[userKey] === "object"
+        ? all[userKey]
+        : {};
+      return userMap;
+    } catch {
+      return {};
+    }
+  }
+
+  function storeEbayConversationUserReadStates(context = null, userMap = {}) {
+    const userKey = ebayConversationReadStorageUserKey(context);
+    try {
+      const all = JSON.parse(localStorage.getItem(EBAY_USER_READ_STATE_STORAGE_KEY) || "{}");
+      const next = all && typeof all === "object" ? all : {};
+      next[userKey] = userMap && typeof userMap === "object" ? userMap : {};
+      localStorage.setItem(EBAY_USER_READ_STATE_STORAGE_KEY, JSON.stringify(next));
+    } catch (error) {
+      console.warn("[email-triage] Could not store personal eBay read states:", error);
+    }
+  }
+
+  function getEbayConversationUserReadRecord(conversation = {}, state = adminClassificationState) {
+    if (!conversation?.id) return null;
+    const map = state.ebayConversationUserReadStates && typeof state.ebayConversationUserReadStates === "object"
+      ? state.ebayConversationUserReadStates
+      : {};
+    return map[conversation.id] || null;
+  }
+
+  function ebayConversationHasProviderUnreadSignal(conversation = {}) {
+    if (Number(conversation?.unread_count || 0) > 0) return true;
+    const localState = String(conversation?.local_read_state || conversation?.raw?.local_read_state || "").toLowerCase();
+    if (localState === "unread") return true;
+    return ebayConversationProviderReadState(conversation) === "unread";
+  }
+
+  function ebayConversationUserReadRecordIsCurrent(conversation = {}, record = {}) {
+    if (!record || record.state !== "read") return false;
+    const latestMessageId = compactConversationText(conversation.latest_message_id || conversation.raw?.latest_message_id || "");
+    const recordedMessageId = compactConversationText(record.latest_message_id || "");
+    if (latestMessageId && recordedMessageId && latestMessageId !== recordedMessageId) return false;
+    const latestAt = ebayConversationLatestActivityMs(conversation);
+    const readAt = new Date(record.read_at || 0).getTime();
+    if (latestAt && Number.isFinite(readAt) && readAt > 0 && latestAt > readAt + 1000) return false;
+    return true;
+  }
+
+  function ebayConversationIsUnreadForViewer(conversation = {}, state = adminClassificationState) {
+    const record = getEbayConversationUserReadRecord(conversation, state);
+    if (record?.state === "unread") return true;
+    if (ebayConversationUserReadRecordIsCurrent(conversation, record)) return false;
+    return ebayConversationHasProviderUnreadSignal(conversation);
+  }
+
+  function ebayConversationStateWithPersonalRead(conversationId, readState = "read", context = null, state = adminClassificationState) {
+    if (!conversationId) return {};
+    const conversation = selectedEbayConversationById(conversationId, state);
+    const current = state.ebayConversationUserReadStates && typeof state.ebayConversationUserReadStates === "object"
+      ? state.ebayConversationUserReadStates
+      : {};
+    const next = { ...current };
+    if (readState === "unread") {
+      next[conversationId] = {
+        state: "unread",
+        unread_at: new Date().toISOString(),
+        latest_message_id: compactConversationText(conversation?.latest_message_id || conversation?.raw?.latest_message_id || ""),
+        latest_message_created_at: conversation?.latest_message_created_at || conversation?.last_message_created_at || null,
+      };
+    } else {
+      next[conversationId] = {
+        state: "read",
+        read_at: new Date().toISOString(),
+        latest_message_id: compactConversationText(conversation?.latest_message_id || conversation?.raw?.latest_message_id || ""),
+        latest_message_created_at: conversation?.latest_message_created_at || conversation?.last_message_created_at || null,
+      };
+    }
+    storeEbayConversationUserReadStates(context, next);
+    return { ebayConversationUserReadStates: next };
+  }
+
   function ebayConversationHasPendingTasks(conversation = {}, state = adminClassificationState) {
     const summaryCount = Number(conversation?.summary?.pending_task_count);
     if (Number.isFinite(summaryCount) && summaryCount > 0) return true;
@@ -3579,7 +3677,7 @@
     if (filter === "pending_tasks") return ebayConversationHasPendingTasks(conversation);
     if (filter === "members") return ebayConversationSource(conversation) === "member_message";
     if (filter === "ebay_notifications") return ebayConversationSource(conversation) === "platform_notification";
-    if (filter === "unread") return Number(conversation.unread_count || 0) > 0;
+    if (filter === "unread") return ebayConversationIsUnreadForViewer(conversation);
     if (filter === "unclassified") return !classification;
     if (filter === "returns") return summary.has_return_link || ebayConversationHasTopic(conversation, ["return_request", "return"]);
     if (filter === "shipping_issues") return ebayConversationHasTopic(conversation, ["shipping_problem", "shipping_status_tracking", "missing_item", "shipping_issue", "order_status", "delivery_timing"]);
@@ -4841,9 +4939,10 @@
 
   function renderEbayConversationBadges(conversation, options = {}) {
     const compact = options.compact === true;
+    const unread = ebayConversationIsUnreadForViewer(conversation);
     const badges = [
       renderEbayClassificationListBadges(conversation, { compact }),
-      Number(conversation.unread_count || 0) > 0 ? renderBadge("Unread", "warning") : "",
+      unread ? renderBadge("Unread", "warning") : renderBadge("Read", "muted"),
       conversation.pending_provider_update === true ? renderBadge("Read sync pending", "warning") : "",
       String(conversation.read_sync_status || "").toLowerCase() === "provider_update_failed" ? renderBadge("Read sync failed", "danger") : "",
     ].filter(Boolean);
@@ -5697,7 +5796,9 @@
       const previewLines = ebayConversationPreviewLines(conversation);
       const primaryPreview = compactConversationText(previewLines.summary) || compactConversationText(previewLines.preview);
       const primaryPreviewLabel = compactConversationText(previewLines.summary) ? previewLines.summaryLabel : previewLines.previewLabel;
-      const unread = Number(conversation.unread_count || 0) > 0;
+      const unread = ebayConversationIsUnreadForViewer(conversation, state);
+      const readActionLabel = unread ? "Read" : "Unread";
+      const readActionState = unread ? "read" : "unread";
       return `
         <button type="button" class="ebay-conversation-row is-${escapeHtml(densityMode)}${ebayConversationIsPlatform(conversation) ? " is-platform-conversation" : ""}${selected ? " is-selected" : ""}${unread ? " is-unread" : ""}" data-ebay-conversation-id="${escapeHtml(conversation.id)}">
           <span class="ebay-conversation-row-top">
@@ -5710,6 +5811,14 @@
             </span>
             <span class="ebay-conversation-row-tools">
               <time>${escapeHtml(formatCompactEmailAge(ebayConversationTime(conversation)))}</time>
+              <span
+                role="button"
+                tabindex="0"
+                class="ebay-conversation-read-action ${unread ? "is-read-action" : "is-unread-action"}"
+                data-ebay-conversation-read-action="${escapeHtml(readActionState)}"
+                data-ebay-conversation-read-id="${escapeHtml(conversation.id)}"
+                title="${escapeHtml(unread ? "Clear this conversation from your unread feed" : "Move this conversation back to unread for you")}"
+              >${escapeHtml(readActionLabel)}</span>
               ${renderEbayConversationTaskStatusBadge(conversation, state)}
             </span>
           </span>
@@ -5738,7 +5847,7 @@
     const matchingTotal = page.matching_total ?? filtered.length;
     const members = ebayMailboxCountValue(smartCounts.members, rows.filter((conversation) => ebaySavedViewMatches(conversation, "members")).length);
     const notifications = ebayMailboxCountValue(smartCounts.ebay_notifications, rows.filter((conversation) => ebaySavedViewMatches(conversation, "ebay_notifications")).length);
-    const unread = ebayMailboxCountValue(smartCounts.unread, rows.filter((conversation) => Number(conversation.unread_count || 0) > 0).length);
+    const unread = rows.filter((conversation) => ebayConversationIsUnreadForViewer(conversation, state)).length;
     const unclassified = ebayMailboxCountValue(smartCounts.unclassified, rows.filter((conversation) => ebaySavedViewMatches(conversation, "unclassified")).length);
     const returns = ebayMailboxCountValue(smartCounts.returns, rows.filter((conversation) => ebaySavedViewMatches(conversation, "returns")).length);
     const query = compactConversationText(state.ebayConversationSearchQuery);
@@ -7931,6 +8040,7 @@
     const identity = ebayBuyerIdentity(conversation);
     const isPlatformConversation = ebayConversationIsPlatform(conversation);
     const readSyncLoading = state.ebayConversationReadSyncLoadingId === conversation.id;
+    const unreadForViewer = ebayConversationIsUnreadForViewer(conversation, state);
     const facts = ebayConversationContextFacts(state, conversation);
     const classification = ebayConversationClassification(conversation);
     const orderLabel = facts.orderNumbers.length > 1 ? `${facts.orderNumbers.length} orders` : facts.orderNumbers[0] || "";
@@ -7966,6 +8076,10 @@
           <button type="button" class="secondary-btn" data-ebay-detail-action="refresh-messages" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="Deep refresh only this selected conversation and reload its timeline." ${isLoading ? "disabled" : ""}>
             <i data-lucide="${isLoading ? "loader-circle" : "refresh-cw"}"></i>
             ${escapeHtml(isLoading ? "Refreshing selected conversation" : "Refresh Timeline")}
+          </button>
+          <button type="button" class="secondary-btn" data-ebay-detail-action="personal-read-state" data-ebay-read-state="${escapeHtml(unreadForViewer ? "read" : "unread")}" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="${escapeHtml(unreadForViewer ? "Clear this conversation from your unread feed" : "Move this conversation back to unread for you")}">
+            <i data-lucide="${unreadForViewer ? "mail-check" : "mail-open"}"></i>
+            ${escapeHtml(unreadForViewer ? "Mark Read" : "Mark Unread")}
           </button>
           <details class="ebay-maintenance-actions ebay-read-sync-actions">
             <summary class="secondary-btn">
@@ -8848,7 +8962,6 @@
   async function selectEbayConversation(context, conversationId) {
     if (!conversationId) return;
     setEbayConversationState({ selectedEbayConversationId: conversationId });
-    markEbayConversationReadLocally(context, conversationId);
     loadEbayConversationMessages(context, conversationId);
     loadEbayConversationContext(context, conversationId);
     loadEbayConversationDrafts(context, conversationId);
@@ -10278,6 +10391,15 @@
         openEbayConversationTaskAuditModal(context, taskStatusButton.getAttribute("data-ebay-conversation-task-status"));
         return;
       }
+      const readAction = event.target.closest("[data-ebay-conversation-read-action]");
+      if (readAction) {
+        event.preventDefault();
+        event.stopPropagation();
+        const conversationId = readAction.getAttribute("data-ebay-conversation-read-id") || "";
+        const readState = readAction.getAttribute("data-ebay-conversation-read-action") || "read";
+        setEbayConversationState(ebayConversationStateWithPersonalRead(conversationId, readState, context));
+        return;
+      }
       const row = event.target.closest("[data-ebay-conversation-id]");
       if (!row) return;
       rememberEbayMobileInboxScrollPosition(row);
@@ -10285,6 +10407,15 @@
       if (isEbayMobileWorkspace()) setEbayMobileWorkspaceView("message");
     });
     els.ebayConversationList?.addEventListener("keydown", (event) => {
+      const readAction = event.target.closest("[data-ebay-conversation-read-action]");
+      if (readAction && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        event.stopPropagation();
+        const conversationId = readAction.getAttribute("data-ebay-conversation-read-id") || "";
+        const readState = readAction.getAttribute("data-ebay-conversation-read-action") || "read";
+        setEbayConversationState(ebayConversationStateWithPersonalRead(conversationId, readState, context));
+        return;
+      }
       const taskStatusButton = event.target.closest("[data-ebay-conversation-task-status]");
       if (!taskStatusButton || (event.key !== "Enter" && event.key !== " ")) return;
       event.preventDefault();
@@ -10420,6 +10551,14 @@
       }
       if (action === "sync-provider-read") {
         syncSelectedEbayProviderReadState(context, conversationId, button.getAttribute("data-ebay-read-state") || "read");
+        return;
+      }
+      if (action === "personal-read-state") {
+        setEbayConversationState(ebayConversationStateWithPersonalRead(
+          conversationId,
+          button.getAttribute("data-ebay-read-state") || "read",
+          context,
+        ));
         return;
       }
       if (action === "refresh-context") {
@@ -11308,6 +11447,10 @@
 
     const context = await requireAdmin({ greetingEl: els.greeting });
     if (!context) return;
+    setEbayConversationState({
+      emailTriageViewerUserId: ebayConversationViewerId(context),
+      ebayConversationUserReadStates: loadStoredEbayConversationUserReadStates(context),
+    });
 
     bindEbayConversationEvents(context);
     setupEbayConversationRealtime(context);
