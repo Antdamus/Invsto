@@ -9,6 +9,11 @@ const state = {
   returnEvents: [],
   returnTasks: [],
   returnMessages: [],
+  returnTaskSearchIndex: new Map(),
+  expandedReturnTaskIds: new Set(),
+  returnTaskHydratingIds: new Set(),
+  returnMessageLoadedTaskIds: new Set(),
+  returnMessageLoadingTaskIds: new Set(),
   returnTaskLines: new Map(),
   returnTaskOrderEvents: [],
   relatedOrderTaskEvents: [],
@@ -2532,8 +2537,72 @@ function getReturnTaskSearchText(task = {}) {
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
+function getReturnTaskIssueKind(task = {}) {
+  const metadata = getReturnTaskPayload(task);
+  const returnCase = getReturnTaskCase(task);
+  const displayInfo = getReturnTaskDisplayInfo(task);
+  const text = [
+    task.task_type,
+    displayInfo.taskType,
+    task.title,
+    task.question,
+    returnCase.case_type,
+    returnCase.status,
+    returnCase.return_reason,
+    metadata.caseType,
+    metadata.returnStatus,
+    metadata.returnState,
+    metadata.returnAction,
+    metadata.returnLifecycleStage,
+    metadata.sellerActionDue,
+    metadata.buyerActionDue,
+    metadata.escalationCaseId,
+    metadata.ebaySummary?.escalationInfo?.caseId,
+    metadata.returnDetails?.buyerComment,
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (/(dispute|escalat|appeal|claim)/i.test(text)) return "dispute";
+  const stage = getReturnTaskLifecycleStage(task);
+  if (["delivered", "shipped", "ready_to_ship"].includes(stage) || displayInfo.taskType === "return_intake") return "return";
+  return "request";
+}
+
+function getReturnTaskIssueLabel(task = {}) {
+  const labels = {
+    request: "Request",
+    return: "Return",
+    dispute: "Dispute",
+  };
+  return labels[getReturnTaskIssueKind(task)] || "Issue";
+}
+
+function getIndexedReturnTaskSearchText(task = {}) {
+  const key = task.id || JSON.stringify([task.title, task.updated_at, task.created_at]);
+  const signature = [
+    task.updated_at || "",
+    task.status || "",
+    task.assigned_to_user_id || "",
+    getReturnTaskLines(task).length,
+    state.returnMessages.length,
+  ].join("|");
+  const cached = state.returnTaskSearchIndex.get(key);
+  if (cached?.signature === signature) return cached.searchText;
+  const searchText = getReturnTaskSearchText(task);
+  const issueKind = getReturnTaskIssueKind(task);
+  state.returnTaskSearchIndex.set(key, { signature, searchText, issueKind });
+  return searchText;
+}
+
+function getIndexedReturnTaskIssueKind(task = {}) {
+  const key = task.id || JSON.stringify([task.title, task.updated_at, task.created_at]);
+  const cached = state.returnTaskSearchIndex.get(key);
+  if (cached?.issueKind) return cached.issueKind;
+  getIndexedReturnTaskSearchText(task);
+  return state.returnTaskSearchIndex.get(key)?.issueKind || getReturnTaskIssueKind(task);
+}
+
 function getFilteredReturnTasks() {
   const statusFilter = $("return-task-status-filter")?.value || "pending";
+  const issueFilter = $("return-task-issue-filter")?.value || "all";
   const assigneeFilter = $("return-task-assignee-filter")?.value || "";
   const term = String($("return-task-search")?.value || "").trim().toLowerCase();
   const pendingStatuses = new Set(["open", "assigned", "in_progress", "blocked", "deferred"]);
@@ -2541,9 +2610,10 @@ function getFilteredReturnTasks() {
     if (statusFilter === "pending" && !pendingStatuses.has(task.status)) return false;
     if (statusFilter === "mine" && task.assigned_to_user_id !== state.user?.id) return false;
     if (!["pending", "mine", "all"].includes(statusFilter) && task.status !== statusFilter) return false;
+    if (issueFilter !== "all" && getIndexedReturnTaskIssueKind(task) !== issueFilter) return false;
     if (assigneeFilter === "unassigned" && task.assigned_to_user_id) return false;
     if (assigneeFilter && assigneeFilter !== "unassigned" && task.assigned_to_user_id !== assigneeFilter) return false;
-    if (term && !getReturnTaskSearchText(task).includes(term)) return false;
+    if (term && !getIndexedReturnTaskSearchText(task).includes(term)) return false;
     return true;
   });
 }
@@ -2646,9 +2716,11 @@ async function loadReturnQueue() {
       if (launchTask) tasks = [launchTask, ...tasks.filter((task) => task.id !== launchTask.id)];
     }
     state.returnTasks = tasks;
-    await hydrateReturnComplaintImageUrls(state.returnTasks);
+    state.returnTaskSearchIndex = new Map();
+    state.returnMessages = [];
+    state.returnMessageLoadedTaskIds = new Set();
+    state.returnMessageLoadingTaskIds = new Set();
     await loadReturnTaskLines(state.returnTasks);
-    await loadReturnMessagesForTasks(state.returnTasks);
     renderReturnQueue();
     applyReturnTaskLaunchSelection();
   } catch (error) {
@@ -2763,6 +2835,79 @@ async function loadReturnMessagesForTasks(tasks = []) {
   } catch (error) {
     state.returnMessages = [];
     console.warn("Could not load eBay return message logs:", error);
+  }
+}
+
+function getReturnMessageCacheKey(message = {}) {
+  return message.id || [
+    message.return_case_id || "",
+    normalizeReturnLookup(message.ebay_return_id || ""),
+    normalizeReturnLookup(message.order_number || ""),
+    message.direction || "",
+    normalizeReturnMessageText(message.message_body || ""),
+  ].join("|");
+}
+
+async function loadReturnMessagesForTask(task = {}) {
+  const taskId = task.id || "";
+  if (!taskId || state.returnMessageLoadedTaskIds.has(taskId) || state.returnMessageLoadingTaskIds.has(taskId)) return;
+  const returnCase = getReturnTaskCase(task);
+  const metadata = getReturnTaskPayload(task);
+  const returnId = returnCase.ebay_return_id || metadata.returnId || metadata.ebayReturnId || "";
+  const orderNumber = returnCase.order_number || metadata.orderNumber || metadata.order_number || "";
+  const queries = [];
+  if (returnCase.id) {
+    queries.push(supabase.from("ebay_return_messages").select("*").eq("return_case_id", returnCase.id).order("logged_at", { ascending: false }).limit(100));
+  }
+  if (returnId) {
+    queries.push(supabase.from("ebay_return_messages").select("*").eq("ebay_return_id", returnId).order("logged_at", { ascending: false }).limit(100));
+  }
+  if (orderNumber) {
+    queries.push(supabase.from("ebay_return_messages").select("*").eq("order_number", orderNumber).order("logged_at", { ascending: false }).limit(100));
+  }
+  if (!queries.length) {
+    state.returnMessageLoadedTaskIds.add(taskId);
+    return;
+  }
+
+  state.returnMessageLoadingTaskIds.add(taskId);
+  try {
+    const results = await Promise.all(queries);
+    const rows = [];
+    results.forEach((result) => {
+      if (result.error) throw result.error;
+      rows.push(...(result.data || []));
+    });
+    const byKey = new Map();
+    [...state.returnMessages, ...rows].forEach((message) => {
+      const key = getReturnMessageCacheKey(message);
+      if (key && !byKey.has(key)) byKey.set(key, message);
+    });
+    state.returnMessages = [...byKey.values()];
+    state.returnMessageLoadedTaskIds.add(taskId);
+    state.returnTaskSearchIndex.delete(taskId);
+  } catch (error) {
+    console.warn("Could not load eBay return messages for task:", error);
+  } finally {
+    state.returnMessageLoadingTaskIds.delete(taskId);
+  }
+}
+
+async function hydrateReturnTaskDetails(taskId = "") {
+  const task = getReturnTaskById(taskId);
+  if (!task || state.returnTaskHydratingIds.has(taskId)) return;
+  state.returnTaskHydratingIds.add(taskId);
+  renderReturnQueue();
+  try {
+    await Promise.all([
+      task.complaintImageUrlsHydrated ? Promise.resolve() : hydrateReturnComplaintImageUrls([task]).then(() => {
+        task.complaintImageUrlsHydrated = true;
+      }),
+      loadReturnMessagesForTask(task),
+    ]);
+  } finally {
+    state.returnTaskHydratingIds.delete(taskId);
+    renderReturnQueue();
   }
 }
 
@@ -3156,122 +3301,157 @@ function renderReturnComplaintDetails(task = {}) {
   `;
 }
 
+function renderReturnTaskSummary(task = {}) {
+  const returnCase = getReturnTaskCase(task);
+  const metadata = getReturnTaskPayload(task);
+  const displayInfo = getReturnTaskDisplayInfo(task);
+  const dueInfo = getReturnTaskDueInfo(task);
+  const requestedLabel = getReturnTaskRequestedLabel(task);
+  const issueKind = getIndexedReturnTaskIssueKind(task);
+  const orderLabel = returnCase.order_number || (
+    returnCase.case_type === "unmatched_legacy" ? "Legacy / no OG match" : "-"
+  );
+  const buyer = returnCase.buyer_username || metadata.buyerUsername || metadata.buyer_username || "No buyer";
+  const reason = returnCase.return_reason || metadata.returnReason || metadata.return_reason || "No reason captured";
+  const expanded = state.expandedReturnTaskIds.has(task.id);
+  const loading = state.returnTaskHydratingIds.has(task.id) || state.returnMessageLoadingTaskIds.has(task.id);
+  return `
+    <div
+      class="return-task-summary"
+      role="button"
+      tabindex="0"
+      aria-expanded="${expanded ? "true" : "false"}"
+      data-return-task-toggle="${escapeHtml(task.id || "")}"
+    >
+      <div class="return-task-summary-primary">
+        <span class="return-task-kind is-${escapeHtml(issueKind)}">${escapeHtml(getReturnTaskIssueLabel(task))}</span>
+        <div>
+          <h3>${escapeHtml(displayInfo.title)}</h3>
+          <p>${escapeHtml(displayInfo.question)}</p>
+        </div>
+      </div>
+      <div class="return-task-summary-meta">
+        <span>${escapeHtml(getReturnTaskStatusLabel(task.status))}</span>
+        <span>${escapeHtml(getReturnTaskPriorityLabel(task.priority))}</span>
+        <span>Order ${escapeHtml(orderLabel)}</span>
+        <span>Return ${escapeHtml(returnCase.ebay_return_id || returnCase.id || "-")}</span>
+        <span>${escapeHtml(buyer)}</span>
+        <span>Due ${escapeHtml(dueInfo.label)}</span>
+        <span>Requested ${escapeHtml(requestedLabel || "-")}</span>
+        <span>Assigned ${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
+      </div>
+      <div class="return-task-summary-foot">
+        <small>${escapeHtml(getReturnTaskLineSummary(task))}</small>
+        <small>${escapeHtml(reason)}</small>
+        <b>${loading ? "Loading..." : expanded ? "Collapse" : "Expand"}</b>
+      </div>
+    </div>
+  `;
+}
+
+function renderReturnTaskAdminControls(task = {}) {
+  if (!isAdminUser()) return "";
+  return `
+    <div class="return-task-admin">
+      <label>
+        Assign to
+        <select data-return-task-assignee="${escapeHtml(task.id)}">
+          ${renderReturnAssigneeOptions(task.assigned_to_user_id || "")}
+        </select>
+      </label>
+      <label>
+        Priority
+        <select data-return-task-priority="${escapeHtml(task.id)}">
+          ${["low", "normal", "high", "urgent"].map((value) => `<option value="${value}" ${task.priority === value ? "selected" : ""}>${escapeHtml(getReturnTaskPriorityLabel(value))}</option>`).join("")}
+        </select>
+      </label>
+      <label>
+        Due
+        <input type="datetime-local" data-return-task-due="${escapeHtml(task.id)}" value="${escapeHtml(task.due_at ? toDateTimeLocalValue(task.due_at) : "")}" />
+      </label>
+      <label class="wide">
+        Assignment note
+        <input type="text" data-return-task-note="${escapeHtml(task.id)}" placeholder="Optional note for assignment changes" />
+      </label>
+      <button type="button" class="secondary-btn" data-return-task-assign="${escapeHtml(task.id)}">Save Assignment</button>
+      <label class="wide question">
+        New question / instruction
+        <textarea rows="2" data-return-task-question="${escapeHtml(task.id)}" placeholder="Question or instruction for this return"></textarea>
+      </label>
+      <button type="button" class="secondary-btn" data-return-task-create-question="${escapeHtml(task.id)}">Assign Question</button>
+    </div>
+  `;
+}
+
+function renderReturnTaskDetails(task = {}) {
+  if (!state.expandedReturnTaskIds.has(task.id)) return "";
+  const returnCase = getReturnTaskCase(task);
+  const pending = !["resolved", "cancelled"].includes(task.status);
+  const canWorkTask = isAdminUser() || task.assigned_to_user_id === state.user?.id || task.created_by === state.user?.id;
+  const lineIds = getReturnTaskLineIds(task);
+  const dueInfo = getReturnTaskDueInfo(task);
+  const requestedLabel = getReturnTaskRequestedLabel(task);
+  const complaintDetail = getReturnComplaintDetails(task);
+  const displayInfo = getReturnTaskDisplayInfo(task);
+  const taskExternalLinkAttrs = [
+    `data-return-external-link="${escapeHtml(task.id || "")}"`,
+    `data-return-external-return-id="${escapeHtml(returnCase.ebay_return_id || "")}"`,
+    `data-return-external-order-number="${escapeHtml(returnCase.order_number || "")}"`,
+    `data-return-external-buyer="${escapeHtml(returnCase.buyer_username || "")}"`,
+    `data-return-external-item-number="${escapeHtml((getReturnTaskPayload(task).itemNumber || getReturnTaskPayload(task).item_number || ""))}"`,
+  ].join(" ");
+  return `
+    <div class="return-task-expanded">
+      <div class="return-task-main">
+        <div>
+          <div class="return-task-facts">
+            <span>
+              <small>eBay deadline</small>
+              <b>${escapeHtml(dueInfo.label)}</b>
+              <em>${escapeHtml(dueInfo.sourceText || "No eBay action text captured")}</em>
+            </span>
+            <span>
+              <small>Requested</small>
+              <b>${escapeHtml(requestedLabel || "-")}</b>
+              <em>${escapeHtml(returnCase.return_reason || getReturnTaskPayload(task).returnReason || "No reason captured")}</em>
+            </span>
+          </div>
+          ${state.returnTaskHydratingIds.has(task.id) ? `<div class="return-task-loading">Loading eBay complaint photos and messages...</div>` : ""}
+          ${renderReturnTaskVideoReceiptPanel(task)}
+          ${renderReturnComplaintDetails(task)}
+          ${renderReturnMessageLog(task)}
+        </div>
+        <div class="return-task-buttons">
+          ${displayInfo.taskType === "return_intake" && lineIds.length ? `<button type="button" class="secondary-btn" data-return-task-open="${escapeHtml(task.id)}">Open Intake</button>` : ""}
+          ${displayInfo.taskType === "return_review" && complaintDetail.detailsUrl ? `<a class="secondary-btn" href="${escapeHtml(complaintDetail.detailsUrl)}" target="_blank" rel="noopener" ${taskExternalLinkAttrs}>Open eBay</a>` : ""}
+          ${pending && canWorkTask ? `<button type="button" class="secondary-btn" data-return-task-start="${escapeHtml(task.id)}">Start</button>` : ""}
+          ${pending && canWorkTask ? `<button type="button" class="secondary-btn" data-return-task-progress="${escapeHtml(task.id)}">Progress / Delay</button>` : ""}
+          ${pending && canWorkTask ? `<button type="button" class="primary-btn" data-return-task-resolve="${escapeHtml(task.id)}">Resolve</button>` : ""}
+        </div>
+      </div>
+      ${renderReturnTaskAdminControls(task)}
+    </div>
+  `;
+}
+
 function renderReturnQueue() {
   const list = $("return-task-list");
   const count = $("return-task-count");
   if (!list) return;
   const tasks = getFilteredReturnTasks();
-  if (count) count.textContent = `${tasks.length} task${tasks.length === 1 ? "" : "s"}`;
+  if (count) count.textContent = `${tasks.length} of ${state.returnTasks.length} task${state.returnTasks.length === 1 ? "" : "s"}`;
 
   if (!tasks.length) {
     list.innerHTML = `<div class="history-empty">No return tasks match this view.</div>`;
     return;
   }
 
-  list.innerHTML = tasks.map((task) => {
-    const returnCase = getReturnTaskCase(task);
-    const pending = !["resolved", "cancelled"].includes(task.status);
-    const canWorkTask = isAdminUser() || task.assigned_to_user_id === state.user?.id || task.created_by === state.user?.id;
-    const lineIds = getReturnTaskLineIds(task);
-    const dueInfo = getReturnTaskDueInfo(task);
-    const requestedLabel = getReturnTaskRequestedLabel(task);
-    const complaintDetail = getReturnComplaintDetails(task);
-    const displayInfo = getReturnTaskDisplayInfo(task);
-    const displayTaskType = displayInfo.taskType;
-    const displayTitle = displayInfo.title;
-    const displayQuestion = displayInfo.question;
-    const taskExternalLinkAttrs = [
-      `data-return-external-link="${escapeHtml(task.id || "")}"`,
-      `data-return-external-return-id="${escapeHtml(returnCase.ebay_return_id || "")}"`,
-      `data-return-external-order-number="${escapeHtml(returnCase.order_number || "")}"`,
-      `data-return-external-buyer="${escapeHtml(returnCase.buyer_username || "")}"`,
-      `data-return-external-item-number="${escapeHtml((getReturnTaskPayload(task).itemNumber || getReturnTaskPayload(task).item_number || ""))}"`,
-    ].join(" ");
-    const orderLabel = returnCase.order_number || (
-      returnCase.case_type === "unmatched_legacy" ? "Legacy / no OG match" : "-"
-    );
-    return `
-      <article class="return-task-card is-${escapeHtml(task.status || "open")} priority-${escapeHtml(task.priority || "normal")}" data-return-task-id="${escapeHtml(task.id)}">
-        <div class="return-task-main">
-          <div>
-            <span class="eyebrow">${escapeHtml(getReturnTaskTypeLabel(displayTaskType))}</span>
-            <h3>${escapeHtml(displayTitle)}</h3>
-            <p>${escapeHtml(displayQuestion)}</p>
-            <div class="return-task-meta">
-              <span>${escapeHtml(getReturnTaskStatusLabel(task.status))}</span>
-              <span>${escapeHtml(getReturnTaskPriorityLabel(task.priority))}</span>
-              <span>Assigned: ${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
-            </div>
-            <div class="return-task-meta">
-              <span>Return ${escapeHtml(returnCase.ebay_return_id || returnCase.id || "-")}</span>
-              <span>Order ${escapeHtml(orderLabel)}</span>
-              <span>${returnCase.buyer_username ? `
-                <button
-                  type="button"
-                  class="buyer-insight-link compact"
-                  data-buyer-insights="${escapeHtml(returnCase.buyer_username)}"
-                  data-buyer-context="returns"
-                >${escapeHtml(returnCase.buyer_username)}</button>
-              ` : "No buyer"}</span>
-            </div>
-            <div class="return-task-facts">
-              <span>
-                <small>eBay deadline</small>
-                <b>${escapeHtml(dueInfo.label)}</b>
-                <em>${escapeHtml(dueInfo.sourceText || "No eBay action text captured")}</em>
-              </span>
-              <span>
-                <small>Requested</small>
-                <b>${escapeHtml(requestedLabel || "-")}</b>
-                <em>${escapeHtml(returnCase.return_reason || getReturnTaskPayload(task).returnReason || "No reason captured")}</em>
-              </span>
-            </div>
-            <small>${escapeHtml(getReturnTaskLineSummary(task))}</small>
-            ${renderReturnTaskVideoReceiptPanel(task)}
-            ${renderReturnComplaintDetails(task)}
-            ${renderReturnMessageLog(task)}
-          </div>
-          <div class="return-task-buttons">
-            ${displayTaskType === "return_intake" && lineIds.length ? `<button type="button" class="secondary-btn" data-return-task-open="${escapeHtml(task.id)}">Open Intake</button>` : ""}
-            ${displayTaskType === "return_review" && complaintDetail.detailsUrl ? `<a class="secondary-btn" href="${escapeHtml(complaintDetail.detailsUrl)}" target="_blank" rel="noopener" ${taskExternalLinkAttrs}>Open eBay</a>` : ""}
-            ${pending && canWorkTask ? `<button type="button" class="secondary-btn" data-return-task-start="${escapeHtml(task.id)}">Start</button>` : ""}
-            ${pending && canWorkTask ? `<button type="button" class="secondary-btn" data-return-task-progress="${escapeHtml(task.id)}">Progress / Delay</button>` : ""}
-            ${pending && canWorkTask ? `<button type="button" class="primary-btn" data-return-task-resolve="${escapeHtml(task.id)}">Resolve</button>` : ""}
-          </div>
-        </div>
-        ${isAdminUser() ? `
-          <div class="return-task-admin">
-            <label>
-              Assign to
-              <select data-return-task-assignee="${escapeHtml(task.id)}">
-                ${renderReturnAssigneeOptions(task.assigned_to_user_id || "")}
-              </select>
-            </label>
-            <label>
-              Priority
-              <select data-return-task-priority="${escapeHtml(task.id)}">
-                ${["low", "normal", "high", "urgent"].map((value) => `<option value="${value}" ${task.priority === value ? "selected" : ""}>${escapeHtml(getReturnTaskPriorityLabel(value))}</option>`).join("")}
-              </select>
-            </label>
-            <label>
-              Due
-              <input type="datetime-local" data-return-task-due="${escapeHtml(task.id)}" value="${escapeHtml(task.due_at ? toDateTimeLocalValue(task.due_at) : "")}" />
-            </label>
-            <label class="wide">
-              Assignment note
-              <input type="text" data-return-task-note="${escapeHtml(task.id)}" placeholder="Optional note for assignment changes" />
-            </label>
-            <button type="button" class="secondary-btn" data-return-task-assign="${escapeHtml(task.id)}">Save Assignment</button>
-            <label class="wide question">
-              New question / instruction
-              <textarea rows="2" data-return-task-question="${escapeHtml(task.id)}" placeholder="Question or instruction for this return"></textarea>
-            </label>
-            <button type="button" class="secondary-btn" data-return-task-create-question="${escapeHtml(task.id)}">Assign Question</button>
-          </div>
-        ` : ""}
-      </article>
-    `;
-  }).join("");
+  list.innerHTML = tasks.map((task) => `
+    <article class="return-task-card is-${escapeHtml(task.status || "open")} priority-${escapeHtml(task.priority || "normal")} ${state.expandedReturnTaskIds.has(task.id) ? "is-expanded" : "is-collapsed"}" data-return-task-id="${escapeHtml(task.id)}">
+      ${renderReturnTaskSummary(task)}
+      ${renderReturnTaskDetails(task)}
+    </article>
+  `).join("");
 
   bindReturnQueueActions();
   bindReturnVideoReceiptLinks(list);
@@ -3296,6 +3476,20 @@ function localDateTimeToIso(value) {
 
 function getReturnTaskById(taskId) {
   return state.returnTasks.find((task) => task.id === taskId) || null;
+}
+
+function toggleReturnTaskExpanded(taskId = "") {
+  if (!taskId) return;
+  if (state.expandedReturnTaskIds.has(taskId)) {
+    state.expandedReturnTaskIds.delete(taskId);
+    renderReturnQueue();
+    return;
+  }
+  state.expandedReturnTaskIds.add(taskId);
+  renderReturnQueue();
+  hydrateReturnTaskDetails(taskId).catch((error) => {
+    console.warn("Could not hydrate expanded return task:", error);
+  });
 }
 
 function openReturnTaskIntake(taskId) {
@@ -3444,6 +3638,17 @@ async function updateReturnTaskProgress(taskId) {
 }
 
 function bindReturnQueueActions() {
+  document.querySelectorAll("[data-return-task-toggle]").forEach((row) => {
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("a, button, input, select, textarea, label")) return;
+      toggleReturnTaskExpanded(row.dataset.returnTaskToggle);
+    });
+    row.addEventListener("keydown", (event) => {
+      if (!["Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      toggleReturnTaskExpanded(row.dataset.returnTaskToggle);
+    });
+  });
   document.querySelectorAll("[data-return-external-link]").forEach((link) => {
     link.addEventListener("click", () => rememberReturnExternalNavigation(link));
   });
@@ -3477,8 +3682,11 @@ function applyReturnTaskLaunchSelection() {
   state.returnTaskLaunchApplied = true;
   const returnCase = getReturnTaskCase(task);
   $("return-task-status-filter").value = "all";
+  if ($("return-task-issue-filter")) $("return-task-issue-filter").value = "all";
   $("return-task-search").value = returnCase.ebay_return_id || returnCase.order_number || task.title || "";
+  state.expandedReturnTaskIds.add(taskId);
   renderReturnQueue();
+  hydrateReturnTaskDetails(taskId).catch((error) => console.warn("Could not hydrate launched return task:", error));
   window.setTimeout(() => {
     document.querySelector(`[data-return-task-id="${CSS.escape(taskId)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
     if (getReturnTaskLineIds(task).length) openReturnTaskIntake(taskId);
@@ -9441,7 +9649,7 @@ function setupListeners() {
   });
   $("history-title-check")?.addEventListener("input", () => renderHistoryTitleCheck(state.filteredLines));
   $("history-title-check")?.addEventListener("change", () => renderHistoryTitleCheck(state.filteredLines));
-  ["return-task-status-filter", "return-task-assignee-filter", "return-task-search"].forEach((id) => {
+  ["return-task-status-filter", "return-task-issue-filter", "return-task-assignee-filter", "return-task-search"].forEach((id) => {
     $(id)?.addEventListener("input", renderReturnQueue);
     $(id)?.addEventListener("change", renderReturnQueue);
   });
