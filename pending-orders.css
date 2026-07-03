@@ -1266,6 +1266,43 @@ textarea:focus {
   word-break: break-word;
 }
 
+.buyer-card-finance-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid rgba(139, 190, 255, 0.26);
+  border-radius: 999px;
+  background: rgba(139, 190, 255, 0.1);
+  color: #cfe2ff;
+  font-size: 0.72rem;
+  font-weight: 950;
+  line-height: 1.1;
+}
+
+.buyer-card-finance-pill.is-on_hold,
+.buyer-line-finance-pill.is-on_hold {
+  border-color: rgba(255, 120, 120, 0.46);
+  background: rgba(255, 76, 76, 0.15);
+  color: #ffd6d6;
+}
+
+.buyer-card-finance-pill.is-paid_out,
+.buyer-line-finance-pill.is-paid_out {
+  border-color: rgba(125, 240, 178, 0.32);
+  background: rgba(48, 197, 112, 0.12);
+  color: #9df3c4;
+}
+
+.buyer-card-finance-pill.is-processing,
+.buyer-line-finance-pill.is-processing,
+.buyer-card-finance-pill.is-available,
+.buyer-line-finance-pill.is-available {
+  border-color: rgba(245, 197, 92, 0.38);
+  background: rgba(245, 197, 92, 0.12);
+  color: #ffe3a0;
+}
+
 .urgency-pill {
   display: inline-flex;
   align-items: center;
@@ -4326,6 +4363,20 @@ body.pending-order-detail-open .mobile-detail-close {
   border-radius: 999px;
   background: rgba(245, 197, 92, 0.1);
   color: #ffe7aa;
+  font-size: 0.72rem;
+  font-weight: 950;
+  line-height: 1.1;
+}
+
+.buyer-line-finance-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 9px;
+  border: 1px solid rgba(139, 190, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(139, 190, 255, 0.08);
+  color: #cfe2ff;
   font-size: 0.72rem;
   font-weight: 950;
   line-height: 1.1;

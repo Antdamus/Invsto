@@ -274,6 +274,7 @@ function normalizeLine(row) {
   const order = getOrderFromLine(row);
   const labelSearchText = getLabelMetadataSearchText(row.label_metadata, order.label_metadata);
   const apiSourceLabel = getEbayHistoryApiSourceLabel(row);
+  const financePayload = getFinancePayload(row);
   return {
     ...row,
     order,
@@ -301,6 +302,8 @@ function normalizeLine(row) {
       order.status,
       order.tracking_number,
       apiSourceLabel,
+      financePayload?.statusLabel,
+      financePayload?.status,
       labelSearchText,
     ]),
   };
@@ -788,6 +791,76 @@ function getLinePayout(line) {
   }
 
   return roundMoney(lineGross);
+}
+
+function getFinancePayload(source = {}) {
+  const order = getOrderFromLine(source);
+  const candidates = [
+    source?.raw_payload?.ebayFinance,
+    source?.ebay_finance,
+    source?.finance,
+    order?.raw_payload?.ebayFinance,
+    order?.ebay_finance,
+    order?.finance,
+  ];
+  return candidates.find((entry) => entry && typeof entry === "object") || null;
+}
+
+function normalizeFinanceStatus(value = "") {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return "";
+  if (text.includes("hold")) return "on_hold";
+  if (text.includes("process")) return "processing";
+  if (text.includes("available")) return "available";
+  if (text.includes("payout") || text.includes("paid")) return "paid_out";
+  return text;
+}
+
+function getFinanceStatusLabel(status = "") {
+  if (status === "on_hold") return "On hold";
+  if (status === "paid_out") return "Paid out";
+  if (status === "available") return "Available";
+  if (status === "processing") return "Processing";
+  return "Payout unknown";
+}
+
+function getFinanceStatusRank(status = "") {
+  if (status === "on_hold") return 50;
+  if (status === "processing") return 40;
+  if (status === "available") return 30;
+  if (status === "paid_out") return 20;
+  return 10;
+}
+
+function getFinanceStatusBadge(line = {}) {
+  const payload = getFinancePayload(line);
+  const status = normalizeFinanceStatus(payload?.status || payload?.transactionStatus || payload?.transaction_status);
+  const label = payload?.statusLabel || payload?.status_label || getFinanceStatusLabel(status);
+  const payoutIds = Array.isArray(payload?.payoutIds) ? payload.payoutIds : [payload?.payoutId].filter(Boolean);
+  const transactionIds = Array.isArray(payload?.transactionIds) ? payload.transactionIds : [payload?.transactionId].filter(Boolean);
+  const parts = [
+    label,
+    payload?.memo,
+    payoutIds.length ? `Payout ${payoutIds.slice(0, 2).join(", ")}` : "",
+    transactionIds.length ? `Transaction ${transactionIds.slice(0, 2).join(", ")}` : "",
+    payload?.syncedAt ? `Checked ${formatDateTime(payload.syncedAt)}` : "",
+  ].filter(Boolean);
+  return {
+    label,
+    status: status || "unknown",
+    title: parts.join(" | ") || "No eBay Finances payout status has been synced for this line yet.",
+  };
+}
+
+function renderFinanceBadgeMarkup(badge, className = "finance-status-pill") {
+  if (!badge) return "";
+  return `<span class="${escapeHtml(className)} is-${escapeHtml(badge.status || "unknown")}" title="${escapeHtml(badge.title || badge.label)}">${escapeHtml(badge.label)}</span>`;
+}
+
+function getLinesFinanceStatus(lines = []) {
+  const badges = lines.map(getFinanceStatusBadge).filter(Boolean);
+  if (!badges.length) return null;
+  return badges.sort((left, right) => getFinanceStatusRank(right.status) - getFinanceStatusRank(left.status))[0];
 }
 
 function getLineStatusLabel(line) {
@@ -2577,11 +2650,31 @@ function getReturnTaskEventLabel(event = {}) {
   return labels[event.action] || "Update";
 }
 
+function getReturnTaskEventPayload(event = {}) {
+  return event.payload && typeof event.payload === "object" ? event.payload : {};
+}
+
+function isSystemReturnTaskNoteText(note = "") {
+  return /return intake task opened from ebay return api|return review task opened from ebay return api|task opened from ebay return api|created from ebay return api|synced from ebay return api/i
+    .test(String(note || ""));
+}
+
+function isVisibleReturnTaskUpdateEvent(event = {}) {
+  const note = String(event.notes || "").trim();
+  if (!note) return false;
+  if (event.action === "created") return false;
+  if (isSystemReturnTaskNoteText(note)) return false;
+  const payload = getReturnTaskEventPayload(event);
+  if (/(api|import|sync)/i.test(String(payload.source || "")) && !event.signed_by_email) return false;
+  return ["assigned", "cancelled", "commented", "resolved", "status_changed"].includes(event.action)
+    || Boolean(event.signed_by_email);
+}
+
 function getReturnTaskUpdateEvents(task = {}, limit = 6) {
   const events = getReturnTaskEvents(task)
-    .filter((event) => String(event.notes || "").trim())
+    .filter(isVisibleReturnTaskUpdateEvent)
     .slice(0, limit);
-  if (!events.length && String(task.latest_note || "").trim()) {
+  if (!events.length && String(task.latest_note || "").trim() && !isSystemReturnTaskNoteText(task.latest_note)) {
     return [{
       id: `${task.id || "return-task"}-latest-note`,
       task_id: task.id,
@@ -2802,15 +2895,6 @@ function getFilteredReturnTasks() {
   return sortReturnTasks(filteredTasks);
 }
 
-function renderReturnAssigneeOptions(selectedUserId = "") {
-  return [
-    `<option value="">Unassigned</option>`,
-    ...state.returnAssignees.map((employee) => (
-      `<option value="${escapeHtml(employee.user_id || "")}" ${employee.user_id === selectedUserId ? "selected" : ""}>${escapeHtml(employee.display_name || employee.email || "Worker")}</option>`
-    )),
-  ].join("");
-}
-
 function renderReturnAssigneeFilter() {
   const select = $("return-task-assignee-filter");
   if (!select) return;
@@ -2964,6 +3048,10 @@ function getReturnTaskLineSummary(task = {}) {
 function getReturnTaskPricePills(task = {}) {
   const payoutTotal = getReturnTaskPayoutTotal(task);
   return payoutTotal > 0 ? [`Payout ${formatMoney(payoutTotal)}`] : [];
+}
+
+function getReturnTaskFinancePill(task = {}) {
+  return getLinesFinanceStatus(getReturnTaskLines(task));
 }
 
 function getReturnTaskPayoutTotal(task = {}) {
@@ -3582,6 +3670,7 @@ function renderReturnTaskSummary(task = {}) {
   const expanded = state.expandedReturnTaskIds.has(task.id);
   const loading = state.returnTaskHydratingIds.has(task.id) || state.returnMessageLoadingTaskIds.has(task.id);
   const pricePills = getReturnTaskPricePills(task);
+  const financePill = getReturnTaskFinancePill(task);
   const dueLabel = dueInfo.iso ? `Due ${dueInfo.label}` : "";
   const latestUpdateSummary = getReturnTaskUpdateSummary(task);
   const hoverUpdateText = getReturnTaskHoverUpdateText(task);
@@ -3607,6 +3696,7 @@ function renderReturnTaskSummary(task = {}) {
           <a class="return-task-order-link is-${escapeHtml(orderDestination.page)}" href="${escapeHtml(orderDestination.href)}">${escapeHtml(orderDestination.label)}</a>
         ` : `<span>${escapeHtml(orderDestination.label)}</span>`}
         ${pricePills.map((label) => `<span class="return-task-price-pill">${escapeHtml(label)}</span>`).join("")}
+        ${renderFinanceBadgeMarkup(financePill, "return-task-finance-pill")}
         <span>${escapeHtml(buyer)}</span>
         ${dueLabel ? `<span>${escapeHtml(dueLabel)}</span>` : ""}
       </div>
@@ -3616,40 +3706,6 @@ function renderReturnTaskSummary(task = {}) {
         ${latestUpdateSummary ? `<small class="return-task-latest-update" title="${escapeHtml(hoverUpdateText || latestUpdateSummary)}">${escapeHtml(latestUpdateSummary)}</small>` : ""}
         <b>${loading ? "Loading..." : expanded ? "Collapse" : "Expand"}</b>
       </div>
-    </div>
-  `;
-}
-
-function renderReturnTaskAdminControls(task = {}) {
-  if (!isAdminUser()) return "";
-  return `
-    <div class="return-task-admin">
-      <label>
-        Assign to
-        <select data-return-task-assignee="${escapeHtml(task.id)}">
-          ${renderReturnAssigneeOptions(task.assigned_to_user_id || "")}
-        </select>
-      </label>
-      <label>
-        Priority
-        <select data-return-task-priority="${escapeHtml(task.id)}">
-          ${["low", "normal", "high", "urgent"].map((value) => `<option value="${value}" ${task.priority === value ? "selected" : ""}>${escapeHtml(getReturnTaskPriorityLabel(value))}</option>`).join("")}
-        </select>
-      </label>
-      <label>
-        Due
-        <input type="datetime-local" data-return-task-due="${escapeHtml(task.id)}" value="${escapeHtml(task.due_at ? toDateTimeLocalValue(task.due_at) : "")}" />
-      </label>
-      <label class="wide">
-        Assignment note
-        <input type="text" data-return-task-note="${escapeHtml(task.id)}" placeholder="Optional note for assignment changes" />
-      </label>
-      <button type="button" class="secondary-btn" data-return-task-assign="${escapeHtml(task.id)}">Save Assignment</button>
-      <label class="wide question">
-        New question / instruction
-        <textarea rows="2" data-return-task-question="${escapeHtml(task.id)}" placeholder="Question or instruction for this return"></textarea>
-      </label>
-      <button type="button" class="secondary-btn" data-return-task-create-question="${escapeHtml(task.id)}">Assign Question</button>
     </div>
   `;
 }
@@ -3725,14 +3781,29 @@ function renderReturnTaskDetails(task = {}) {
         <div class="return-task-buttons">
           ${displayInfo.taskType === "return_intake" && lineIds.length ? `<button type="button" class="secondary-btn" data-return-task-open="${escapeHtml(task.id)}">Open Intake</button>` : ""}
           ${displayInfo.taskType === "return_review" && complaintDetail.detailsUrl ? `<a class="secondary-btn" href="${escapeHtml(complaintDetail.detailsUrl)}" target="_blank" rel="noopener" ${taskExternalLinkAttrs}>Open eBay</a>` : ""}
+          ${isAdminUser() ? `<button type="button" class="secondary-btn" data-return-task-assign="${escapeHtml(task.id)}">Assign Task</button>` : ""}
           ${pending && canWorkTask ? `<button type="button" class="secondary-btn" data-return-task-start="${escapeHtml(task.id)}">Start</button>` : ""}
           ${pending && canWorkTask ? `<button type="button" class="secondary-btn" data-return-task-progress="${escapeHtml(task.id)}">Progress / Delay</button>` : ""}
           ${pending && canWorkTask ? `<button type="button" class="primary-btn" data-return-task-resolve="${escapeHtml(task.id)}">Resolve</button>` : ""}
         </div>
       </div>
-      ${renderReturnTaskAdminControls(task)}
     </div>
   `;
+}
+
+function getReturnQueueCountLabel(visibleCount = 0, totalCount = 0) {
+  const statusFilter = $("return-task-status-filter")?.value || "pending";
+  const issueFilter = $("return-task-issue-filter")?.value || "all";
+  const assigneeFilter = $("return-task-assignee-filter")?.value || "";
+  const term = String($("return-task-search")?.value || "").trim();
+  const hasExtraFilters = issueFilter !== "all" || assigneeFilter || term;
+  if (statusFilter === "pending" && !hasExtraFilters) {
+    return `${visibleCount} pending task${visibleCount === 1 ? "" : "s"}`;
+  }
+  if (statusFilter === "all" && !hasExtraFilters) {
+    return `${totalCount} total task${totalCount === 1 ? "" : "s"}`;
+  }
+  return `${visibleCount} shown`;
 }
 
 function renderReturnQueue() {
@@ -3740,7 +3811,10 @@ function renderReturnQueue() {
   const count = $("return-task-count");
   if (!list) return;
   const tasks = getFilteredReturnTasks();
-  if (count) count.textContent = `${tasks.length} of ${state.returnTasks.length} task${state.returnTasks.length === 1 ? "" : "s"}`;
+  if (count) {
+    count.textContent = getReturnQueueCountLabel(tasks.length, state.returnTasks.length);
+    count.title = `${state.returnTasks.length} total return task${state.returnTasks.length === 1 ? "" : "s"} loaded, including resolved and cancelled history.`;
+  }
 
   if (!tasks.length) {
     list.innerHTML = `<div class="history-empty">No return tasks match this view.</div>`;
@@ -3811,11 +3885,48 @@ function openReturnTaskIntake(taskId) {
   setReturnIntakeStatus(`Opened return task for ${returnCase.order_number || "this order"}. Attach photos, inspect the item, then save.`, "success");
 }
 
+function getReturnAssigneePromptText() {
+  return state.returnAssignees
+    .map((employee, index) => `${index + 1}. ${employee.display_name || employee.email || "Worker"}${employee.email ? ` (${employee.email})` : ""}`)
+    .join("\n");
+}
+
+function resolveReturnAssigneeChoice(value = "") {
+  const clean = String(value || "").trim();
+  if (!clean) return null;
+  const index = Number(clean);
+  if (Number.isInteger(index) && index >= 1 && index <= state.returnAssignees.length) {
+    return state.returnAssignees[index - 1];
+  }
+  const normalized = clean.toLowerCase();
+  return state.returnAssignees.find((employee) => [
+    employee.display_name,
+    employee.email,
+    employee.user_id,
+  ].filter(Boolean).some((entry) => String(entry).toLowerCase() === normalized || String(entry).toLowerCase().includes(normalized))) || null;
+}
+
 async function assignReturnTask(taskId, button = null) {
-  const assignee = document.querySelector(`[data-return-task-assignee="${CSS.escape(taskId)}"]`)?.value || null;
-  const priority = document.querySelector(`[data-return-task-priority="${CSS.escape(taskId)}"]`)?.value || "normal";
-  const dueValue = document.querySelector(`[data-return-task-due="${CSS.escape(taskId)}"]`)?.value || "";
-  const note = document.querySelector(`[data-return-task-note="${CSS.escape(taskId)}"]`)?.value || "";
+  const task = getReturnTaskById(taskId);
+  if (!task) return;
+  if (!state.returnAssignees.length) await loadReturnAssignees();
+  const promptText = getReturnAssigneePromptText();
+  if (!promptText) {
+    setReturnTaskSaveStatus("No active assignees are available.", "error");
+    return;
+  }
+  const answer = window.prompt(
+    `Assign this return task to:\n\n${promptText}\n\nType the number, name, or email.`,
+    ""
+  );
+  if (answer === null) return;
+  const assignee = resolveReturnAssigneeChoice(answer);
+  if (!assignee?.user_id) {
+    setReturnTaskSaveStatus("Could not match that assignee. Use the number, exact name, or email.", "error");
+    return;
+  }
+  const priority = task.priority || "normal";
+  const dueAt = task.due_at || null;
   const originalText = button?.textContent || "";
   if (button) {
     button.disabled = true;
@@ -3825,19 +3936,17 @@ async function assignReturnTask(taskId, button = null) {
   try {
     const { error } = await supabase.rpc("assign_ebay_return_task", {
       _task_id: taskId,
-      _assigned_to_user_id: assignee || null,
+      _assigned_to_user_id: assignee.user_id,
       _priority: priority,
-      _due_at: dueValue ? new Date(dueValue).toISOString() : null,
-      _notes: note || null,
+      _due_at: dueAt,
+      _notes: `Task assigned to ${assignee.display_name || assignee.email || "worker"}.`,
       _signed_by_email: state.user?.email || null,
     });
     if (error) throw error;
     await loadReturnQueue();
-    const assigneeLabel = getReturnAssigneeLabel(assignee);
+    const assigneeLabel = getReturnAssigneeLabel(assignee.user_id);
     setReturnTaskSaveStatus(
-      assignee
-        ? `Assigned to ${assigneeLabel}. It will show on their worker dashboard.`
-        : "Task unassigned.",
+      `Assigned to ${assigneeLabel}. It will show on their worker dashboard.`,
       "success"
     );
   } catch (error) {
@@ -3846,49 +3955,7 @@ async function assignReturnTask(taskId, button = null) {
   } finally {
     if (button) {
       button.disabled = false;
-      button.textContent = originalText || "Save Assignment";
-    }
-  }
-}
-
-async function createReturnQuestionTask(taskId, button = null) {
-  const task = getReturnTaskById(taskId);
-  if (!task) return;
-  const question = document.querySelector(`[data-return-task-question="${CSS.escape(taskId)}"]`)?.value || "";
-  const assignee = document.querySelector(`[data-return-task-assignee="${CSS.escape(taskId)}"]`)?.value || null;
-  const priority = document.querySelector(`[data-return-task-priority="${CSS.escape(taskId)}"]`)?.value || "normal";
-  const dueValue = document.querySelector(`[data-return-task-due="${CSS.escape(taskId)}"]`)?.value || "";
-  const originalText = button?.textContent || "";
-  if (button) {
-    button.disabled = true;
-    button.textContent = "Creating...";
-  }
-  setReturnTaskSaveStatus("Creating question task...", "info");
-  try {
-    const { error } = await supabase.rpc("create_ebay_return_question_task", {
-      _return_case_id: task.return_case_id,
-      _question: question,
-      _assigned_to_user_id: assignee || null,
-      _priority: priority,
-      _due_at: dueValue ? new Date(dueValue).toISOString() : null,
-      _signed_by_email: state.user?.email || null,
-    });
-    if (error) throw error;
-    await loadReturnQueue();
-    const assigneeLabel = getReturnAssigneeLabel(assignee);
-    setReturnTaskSaveStatus(
-      assignee
-        ? `Question assigned to ${assigneeLabel}. It will show on their worker dashboard.`
-        : "Question task created unassigned.",
-      "success"
-    );
-  } catch (error) {
-    setReturnTaskSaveStatus(error.message || "Could not create question task.", "error");
-    throw error;
-  } finally {
-    if (button) {
-      button.disabled = false;
-      button.textContent = originalText || "Assign Question";
+      button.textContent = originalText || "Assign Task";
     }
   }
 }
@@ -4004,9 +4071,6 @@ function bindReturnQueueActions() {
   });
   document.querySelectorAll("[data-return-task-assign]").forEach((button) => {
     button.addEventListener("click", () => assignReturnTask(button.dataset.returnTaskAssign, button).catch((error) => alert(error.message || "Could not assign task.")));
-  });
-  document.querySelectorAll("[data-return-task-create-question]").forEach((button) => {
-    button.addEventListener("click", () => createReturnQuestionTask(button.dataset.returnTaskCreateQuestion, button).catch((error) => alert(error.message || "Could not create question task.")));
   });
 }
 
@@ -5013,6 +5077,8 @@ function getHistoryGroupSummaryBadges({ group, primaryStatus, statusClass, hasAt
   } else if (taskSummary?.totalCount) {
     badges.push(`<span class="history-task-pill">${taskSummary.totalCount} task${taskSummary.totalCount === 1 ? "" : "s"}</span>`);
   }
+  const financeStatus = getLinesFinanceStatus(group.lines || []);
+  if (financeStatus) badges.push(renderFinanceBadgeMarkup(financeStatus, "history-line-finance-pill"));
   const extraProofCount = getHistoryExtraOrderProofPhotos(group).length;
   if (extraProofCount) badges.push(`<span class="history-proof-pill is-extra">${extraProofCount} extra proof</span>`);
   if (groupPhotos.length) badges.push(`<span class="history-proof-pill">${groupPhotos.length} photo${groupPhotos.length === 1 ? "" : "s"}</span>`);
@@ -5115,6 +5181,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
         <div class="history-lines">
           ${group.lines.map((line) => {
             const lineIssue = getHistoryLineReturnIssue(line);
+            const lineFinanceStatus = getFinanceStatusBadge(line);
             return `
             <div class="history-line-row ${lineIssue ? "has-return-issue" : ""} ${lineIssue?.targeted ? "is-target-return-line" : ""}">
               <div>
@@ -5129,6 +5196,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
                   <span>${escapeHtml(getHistoryLineTimelineText(line))}</span>
                 </div>
                 ${getEbayHistoryApiSourceLabel(line) ? `<span class="history-api-source-pill is-line">${escapeHtml(getEbayHistoryApiSourceLabel(line))}</span>` : ""}
+                ${renderFinanceBadgeMarkup(lineFinanceStatus, "history-line-finance-pill")}
                 ${renderHistoryLineReturnIssue(line)}
                 ${renderHistoryLineVideoReceiptPhotos(line, group.events)}
                 ${renderHistoryLineNoteEvents(line, group.events)}

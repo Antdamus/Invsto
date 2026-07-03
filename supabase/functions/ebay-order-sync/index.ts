@@ -38,8 +38,12 @@ const EBAY_CLIENT_ID = (Deno.env.get("EBAY_CLIENT_ID") ?? Deno.env.get("EBAY_APP
 const EBAY_CLIENT_SECRET = (Deno.env.get("EBAY_CLIENT_SECRET") ?? Deno.env.get("EBAY_CERT_ID") ?? "").trim();
 const EBAY_REFRESH_TOKEN = (Deno.env.get("EBAY_REFRESH_TOKEN") ?? "").trim();
 const EBAY_ENV = (Deno.env.get("EBAY_ENV") ?? "production").trim().toLowerCase();
-const EBAY_ORDER_SCOPE = (Deno.env.get("EBAY_ORDER_SCOPE") ??
-  "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly https://api.ebay.com/oauth/api_scope/sell.inventory").trim();
+const EBAY_FINANCES_SCOPE = "https://api.ebay.com/oauth/api_scope/sell.finances";
+const EBAY_ORDER_SCOPE = unique([
+  ...String(Deno.env.get("EBAY_ORDER_SCOPE") ??
+    "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly https://api.ebay.com/oauth/api_scope/sell.inventory").split(/\s+/),
+  EBAY_FINANCES_SCOPE,
+].map(toText).filter(Boolean)).join(" ");
 
 const EBAY_API_BASE = EBAY_ENV === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
 const DEFAULT_DAYS_BACK = 14;
@@ -205,6 +209,138 @@ function getOrderCancelStatus(order: any): string {
   return toText(order?.cancelStatus?.cancelState || order?.cancelStatus?.cancelStatus).toUpperCase();
 }
 
+function normalizeFinanceTransactionStatus(value: unknown): string {
+  const status = toText(value).toUpperCase();
+  if (status.includes("HOLD")) return "on_hold";
+  if (status.includes("PROCESS")) return "processing";
+  if (status.includes("AVAILABLE")) return "available";
+  if (status.includes("PAYOUT") || status.includes("PAID")) return "paid_out";
+  return status ? "unknown" : "";
+}
+
+function getFinanceStatusLabel(status: string): string {
+  if (status === "on_hold") return "On hold";
+  if (status === "paid_out") return "Paid out";
+  if (status === "available") return "Available";
+  if (status === "processing") return "Processing";
+  return status ? "Payout unknown" : "";
+}
+
+function getFinanceStatusRank(status: string): number {
+  if (status === "on_hold") return 50;
+  if (status === "processing") return 40;
+  if (status === "available") return 30;
+  if (status === "paid_out") return 20;
+  return 10;
+}
+
+function getFinanceTransactionId(transaction: any): string {
+  return getNestedText(transaction?.transactionId, transaction?.transaction_id, transaction?.id);
+}
+
+function getFinanceTransactionAmount(transaction: any): number {
+  return toMoney(
+    transaction?.amount
+      || transaction?.transactionAmount
+      || transaction?.netAmount
+      || transaction?.totalAmount
+  );
+}
+
+function getFinanceLineItemIds(transaction: any): string[] {
+  const items = Array.isArray(transaction?.orderLineItems) ? transaction.orderLineItems : [];
+  return unique(items.flatMap((item: any) => [
+    item?.lineItemId,
+    item?.legacyItemId,
+    item?.transactionId,
+  ]).map(toText).filter(Boolean));
+}
+
+function summarizeFinanceTransactions(transactions: any[], orderNumber: string, lineItemId = ""): JsonRecord | null {
+  const relevant = transactions.filter((transaction) => {
+    if (!lineItemId) return true;
+    const lineIds = getFinanceLineItemIds(transaction);
+    return !lineIds.length || lineIds.includes(lineItemId);
+  });
+  if (!relevant.length) return null;
+
+  const compactTransactions = relevant.map((transaction) => {
+    const status = normalizeFinanceTransactionStatus(transaction?.transactionStatus);
+    const payoutId = getNestedText(transaction?.payoutId, transaction?.payoutReferenceId);
+    return {
+      transactionId: getFinanceTransactionId(transaction),
+      transactionType: toText(transaction?.transactionType),
+      transactionStatus: toText(transaction?.transactionStatus),
+      status,
+      payoutId,
+      transactionDate: toIsoDate(transaction?.transactionDate || transaction?.bookingEntry || transaction?.createdDate),
+      memo: toText(transaction?.transactionMemo),
+      amount: getFinanceTransactionAmount(transaction),
+      lineItemIds: getFinanceLineItemIds(transaction),
+    };
+  });
+
+  const winningStatus = compactTransactions
+    .map((transaction) => String(transaction.status || ""))
+    .filter(Boolean)
+    .sort((left, right) => getFinanceStatusRank(right) - getFinanceStatusRank(left))[0] || "unknown";
+  const payoutIds = unique(compactTransactions.map((transaction: any) => toText(transaction.payoutId)).filter(Boolean));
+  const transactionIds = unique(compactTransactions.map((transaction: any) => toText(transaction.transactionId)).filter(Boolean));
+  const lineItemIds = unique(compactTransactions.flatMap((transaction: any) => transaction.lineItemIds || []).map(toText).filter(Boolean));
+  const memos = unique(compactTransactions.map((transaction: any) => toText(transaction.memo)).filter(Boolean));
+
+  return {
+    source: "ebay_finances_api",
+    syncedAt: new Date().toISOString(),
+    orderNumber,
+    lineItemId: lineItemId || null,
+    status: winningStatus,
+    statusLabel: getFinanceStatusLabel(winningStatus),
+    payoutIds,
+    transactionIds,
+    lineItemIds,
+    memo: memos[0] || "",
+    transactions: compactTransactions.slice(0, 20),
+  };
+}
+
+async function fetchFinanceTransactionsForOrder(token: string, orderNumber: string): Promise<any[]> {
+  const transactions: any[] = [];
+  let offset = 0;
+  const limit = 100;
+  while (transactions.length < 500) {
+    const params = new URLSearchParams({
+      filter: `orderId:{${orderNumber}}`,
+      limit: String(limit),
+      offset: String(offset),
+    });
+    const payload = await ebayRequest(token, `/sell/finances/v1/transaction?${params.toString()}`);
+    const page = Array.isArray(payload?.transactions) ? payload.transactions : [];
+    transactions.push(...page);
+    if (!payload?.next || page.length < limit) break;
+    offset += limit;
+  }
+  return transactions;
+}
+
+async function loadFinanceTransactionsByOrder(token: string, orderNumbers: string[], syncFinance: boolean) {
+  const byOrder = new Map<string, any[]>();
+  const warnings: JsonRecord[] = [];
+  if (!syncFinance) return { byOrder, warnings };
+  for (const orderNumber of unique(orderNumbers.map(toText).filter(Boolean))) {
+    try {
+      byOrder.set(orderNumber, await fetchFinanceTransactionsForOrder(token, orderNumber));
+    } catch (error) {
+      warnings.push({
+        orderNumber,
+        reason: "ebay_finance_lookup_failed",
+        message: compactError(error),
+      });
+    }
+  }
+  return { byOrder, warnings };
+}
+
 function isPaidOrder(order: any): boolean {
   return getOrderPaymentStatus(order) === "PAID";
 }
@@ -244,7 +380,7 @@ function extractLineSku(line: any): string {
   ));
 }
 
-function prepareOrder(order: any, itemBySku: Map<string, any>): PreparedOrder | null {
+function prepareOrder(order: any, itemBySku: Map<string, any>, financeTransactions: any[] = []): PreparedOrder | null {
   const orderNumber = extractOrderNumber(order);
   if (!orderNumber) return null;
 
@@ -260,6 +396,7 @@ function prepareOrder(order: any, itemBySku: Map<string, any>): PreparedOrder | 
     const transactionId = getNestedText(line?.lineItemId, line?.transactionId, `${orderNumber}:${index + 1}`);
     const itemNumber = getNestedText(line?.legacyItemId, line?.itemId, line?.listingMarketplaceId, transactionId);
     const lineTotal = toMoney(line?.total || line?.lineItemCost);
+    const ebayFinance = summarizeFinanceTransactions(financeTransactions, orderNumber, transactionId);
 
     return {
       item_number: itemNumber,
@@ -276,10 +413,13 @@ function prepareOrder(order: any, itemBySku: Map<string, any>): PreparedOrder | 
       raw_payload: {
         source: "ebay_fulfillment_api",
         orderPaymentStatus: getOrderPaymentStatus(order),
+        ...(ebayFinance ? { ebayFinance } : {}),
         line,
       },
     };
   }).filter((line: any) => line.transaction_id && line.item_number);
+
+  const orderFinance = summarizeFinanceTransactions(financeTransactions, orderNumber);
 
   return {
     source: order,
@@ -310,6 +450,7 @@ function prepareOrder(order: any, itemBySku: Map<string, any>): PreparedOrder | 
       raw_payload: {
         source: "ebay_fulfillment_api",
         orderPaymentStatus: getOrderPaymentStatus(order),
+        ...(orderFinance ? { ebayFinance: orderFinance } : {}),
         order,
       },
     },
@@ -376,12 +517,38 @@ async function loadExistingOrders(supabase: any, orderNumbers: string[]): Promis
     const chunk = orderNumbers.slice(index, index + 100);
     const { data, error } = await supabase
       .from("ebay_orders")
-      .select("id,order_number,status")
+      .select("id,order_number,status,raw_payload")
       .in("order_number", chunk);
     if (error) throw error;
     (data || []).forEach((order: any) => existing.set(order.order_number, order));
   }
   return existing;
+}
+
+async function updateExistingOrderFinancePayloads(
+  supabase: any,
+  prepared: PreparedOrder[],
+  existingOrders: Map<string, any>,
+) {
+  const now = new Date().toISOString();
+  for (const entry of prepared) {
+    const existing = existingOrders.get(entry.order.order_number);
+    const finance = entry.order.raw_payload?.ebayFinance;
+    if (!existing?.id || !finance) continue;
+    const rawPayload = existing.raw_payload && typeof existing.raw_payload === "object" ? existing.raw_payload : {};
+    const { error } = await supabase
+      .from("ebay_orders")
+      .update({
+        raw_payload: {
+          ...rawPayload,
+          ebayFinance: finance,
+          last_ebay_finance_sync_at: now,
+        },
+        updated_at: now,
+      })
+      .eq("id", existing.id);
+    if (error) throw error;
+  }
 }
 
 async function loadExistingLines(supabase: any, orderIds: string[]): Promise<ExistingLineIndex> {
@@ -653,7 +820,15 @@ Deno.serve(async (req) => {
       (Array.isArray(order?.lineItems) ? order.lineItems : []).map(extractLineSku).filter(Boolean)
     ));
     const itemBySku = await loadItemMapBySku(supabase, allSkus);
-    const prepared = candidateOrders.map((order) => prepareOrder(order, itemBySku)).filter(Boolean) as PreparedOrder[];
+    const syncFinance = body.syncFinance !== false;
+    const { byOrder: financeByOrderNumber, warnings: financeWarnings } = await loadFinanceTransactionsByOrder(
+      token,
+      candidateOrders.map(extractOrderNumber).filter(Boolean),
+      syncFinance,
+    );
+    const prepared = candidateOrders
+      .map((order) => prepareOrder(order, itemBySku, financeByOrderNumber.get(extractOrderNumber(order)) || []))
+      .filter(Boolean) as PreparedOrder[];
 
     const orderNumbers = prepared.map((entry) => entry.order.order_number);
     const existingOrders = await loadExistingOrders(supabase, orderNumbers);
@@ -689,6 +864,7 @@ Deno.serve(async (req) => {
             ...(skippedClosed ? [{ skippedClosed }] : []),
             ...(skippedUnpaid ? [{ skippedUnpaid, reason: "payment_not_paid" }] : []),
             ...(skippedNotAwaitingShipment ? [{ skippedNotAwaitingShipment, reason: "not_awaiting_shipment" }] : []),
+            ...financeWarnings,
             ...localMismatchWarnings,
           ],
           finished_at: new Date().toISOString(),
@@ -711,6 +887,7 @@ Deno.serve(async (req) => {
         requestedOrderLimit,
         localPendingMismatchChecked: checkLocalMismatches && fetchedCompleteOrderWindow,
         localPendingMismatchCheckSkipped: checkLocalMismatches && !fetchedCompleteOrderWindow,
+        warnings: financeWarnings,
         preview,
       });
     }
@@ -732,6 +909,8 @@ Deno.serve(async (req) => {
         .map(([orderNumber, order]) => [orderNumber, order.id] as [string, string]),
       ...insertedOrders.map((order) => [order.order_number, order.id] as [string, string]),
     ]);
+
+    await updateExistingOrderFinancePayloads(supabase, importable, existingOrders);
 
     const orderIds = unique([...orderIdByNumber.values()].filter(Boolean));
     const existingLines = await loadExistingLines(supabase, orderIds);
@@ -822,6 +1001,7 @@ Deno.serve(async (req) => {
       ...(skippedClosed ? [{ skippedClosed }] : []),
       ...(skippedUnpaid ? [{ skippedUnpaid, reason: "payment_not_paid" }] : []),
       ...(skippedNotAwaitingShipment ? [{ skippedNotAwaitingShipment, reason: "not_awaiting_shipment" }] : []),
+      ...financeWarnings,
       ...localMismatchWarnings,
       ...reservationResults.filter((entry) => !entry.ok).map((entry) => ({
         lineId: entry.lineId,

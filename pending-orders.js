@@ -501,6 +501,76 @@ function getEbayApiStatusBadge(line) {
   return null;
 }
 
+function getFinancePayload(source = {}) {
+  const order = getOrderFromLine(source);
+  const candidates = [
+    source?.raw_payload?.ebayFinance,
+    source?.ebay_finance,
+    source?.finance,
+    order?.raw_payload?.ebayFinance,
+    order?.ebay_finance,
+    order?.finance,
+  ];
+  return candidates.find((entry) => entry && typeof entry === "object") || null;
+}
+
+function normalizeFinanceStatus(value = "") {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return "";
+  if (text.includes("hold")) return "on_hold";
+  if (text.includes("process")) return "processing";
+  if (text.includes("available")) return "available";
+  if (text.includes("payout") || text.includes("paid")) return "paid_out";
+  return text;
+}
+
+function getFinanceStatusLabel(status = "") {
+  if (status === "on_hold") return "On hold";
+  if (status === "paid_out") return "Paid out";
+  if (status === "available") return "Available";
+  if (status === "processing") return "Processing";
+  return "Payout unknown";
+}
+
+function getFinanceStatusRank(status = "") {
+  if (status === "on_hold") return 50;
+  if (status === "processing") return 40;
+  if (status === "available") return 30;
+  if (status === "paid_out") return 20;
+  return 10;
+}
+
+function getFinanceStatusBadge(line = {}) {
+  const payload = getFinancePayload(line);
+  const status = normalizeFinanceStatus(payload?.status || payload?.transactionStatus || payload?.transaction_status);
+  const label = payload?.statusLabel || payload?.status_label || getFinanceStatusLabel(status);
+  const payoutIds = Array.isArray(payload?.payoutIds) ? payload.payoutIds : [payload?.payoutId].filter(Boolean);
+  const transactionIds = Array.isArray(payload?.transactionIds) ? payload.transactionIds : [payload?.transactionId].filter(Boolean);
+  const parts = [
+    label,
+    payload?.memo,
+    payoutIds.length ? `Payout ${payoutIds.slice(0, 2).join(", ")}` : "",
+    transactionIds.length ? `Transaction ${transactionIds.slice(0, 2).join(", ")}` : "",
+    payload?.syncedAt ? `Checked ${formatDate(payload.syncedAt)}` : "",
+  ].filter(Boolean);
+  return {
+    label,
+    status: status || "unknown",
+    title: parts.join(" | ") || "No eBay Finances payout status has been synced for this line yet.",
+  };
+}
+
+function renderFinanceBadgeMarkup(badge, className = "finance-status-pill") {
+  if (!badge) return "";
+  return `<span class="${escapeHtml(className)} is-${escapeHtml(badge.status || "unknown")}" title="${escapeHtml(badge.title || badge.label)}">${escapeHtml(badge.label)}</span>`;
+}
+
+function getGroupFinanceStatus(lines = []) {
+  const badges = lines.map(getFinanceStatusBadge).filter(Boolean);
+  if (!badges.length) return null;
+  return badges.sort((left, right) => getFinanceStatusRank(right.status) - getFinanceStatusRank(left.status))[0];
+}
+
 function normalizePostOrderIssueType(value) {
   const text = String(value || "").trim().toLowerCase();
   if (text.includes("dispute") || text.includes("case")) return "dispute";
@@ -2320,6 +2390,38 @@ function normalizePendingOrderQueueRpcRow(row = {}) {
         },
       }
     : {};
+  const lineFinancePayload = row.line_finance_payload && typeof row.line_finance_payload === "object"
+    ? row.line_finance_payload
+    : {};
+  const orderFinancePayload = row.order_finance_payload && typeof row.order_finance_payload === "object"
+    ? row.order_finance_payload
+    : {};
+  const lineFinance = {
+    ...lineFinancePayload,
+    status: row.line_finance_status || lineFinancePayload.status || "",
+    statusLabel: row.line_finance_label || lineFinancePayload.statusLabel || "",
+    syncedAt: row.line_finance_synced_at || lineFinancePayload.syncedAt || "",
+    payoutIds: row.line_finance_payout_id ? [row.line_finance_payout_id] : (lineFinancePayload.payoutIds || []),
+    transactionIds: row.line_finance_transaction_id ? [row.line_finance_transaction_id] : (lineFinancePayload.transactionIds || []),
+    memo: row.line_finance_memo || lineFinancePayload.memo || "",
+  };
+  const orderFinance = {
+    ...orderFinancePayload,
+    status: row.order_finance_status || orderFinancePayload.status || "",
+    statusLabel: row.order_finance_label || orderFinancePayload.statusLabel || "",
+    syncedAt: row.order_finance_synced_at || orderFinancePayload.syncedAt || "",
+    payoutIds: row.order_finance_payout_id ? [row.order_finance_payout_id] : (orderFinancePayload.payoutIds || []),
+    transactionIds: row.order_finance_transaction_id ? [row.order_finance_transaction_id] : (orderFinancePayload.transactionIds || []),
+    memo: row.order_finance_memo || orderFinancePayload.memo || "",
+  };
+  const lineRawPayload = {
+    ...syncReviewPayload,
+    ...(lineFinance.status ? { ebayFinance: lineFinance } : {}),
+  };
+  const orderRawPayload = {
+    ...syncReviewPayload,
+    ...(orderFinance.status ? { ebayFinance: orderFinance } : {}),
+  };
   const postOrderIssue = {
     count: Number(row.post_order_issue_count || 0),
     type: row.post_order_issue_type || "",
@@ -2353,7 +2455,7 @@ function normalizePendingOrderQueueRpcRow(row = {}) {
     notes: row.notes,
     ebay_api_status: ebayApiStatus,
     post_order_issue: postOrderIssue,
-    raw_payload: syncReviewPayload,
+    raw_payload: lineRawPayload,
     video_receipt_photo_count: Number(row.video_receipt_photo_count || 0),
     line_note_count: Number(row.line_note_count || 0),
     latest_line_note: row.latest_line_note || "",
@@ -2379,7 +2481,7 @@ function normalizePendingOrderQueueRpcRow(row = {}) {
       label_uploaded_at: row.label_uploaded_at,
       ebay_api_status: ebayApiStatus,
       post_order_issue: postOrderIssue,
-      raw_payload: syncReviewPayload,
+      raw_payload: orderRawPayload,
     },
   };
 }
@@ -2418,8 +2520,44 @@ async function fetchOrderLineQueueViaRpc(status, admin) {
     });
     if (!data || data.length < ORDER_QUEUE_PAGE_SIZE) break;
   }
+  await hydrateFinancePayloadsForLines(rows);
   logPendingOrderPerf("fetchOrderLineQueue rpc total", startedAt, { admin, rows: rows.length, status });
   return rows;
+}
+
+async function hydrateFinancePayloadsForLines(lines = []) {
+  const ids = [...new Set(lines.map((line) => line.id).filter(Boolean))];
+  if (!ids.length) return;
+  const byId = new Map(lines.map((line) => [line.id, line]));
+  for (let index = 0; index < ids.length; index += 500) {
+    const chunk = ids.slice(index, index + 500);
+    const { data, error } = await supabase
+      .from("ebay_order_lines")
+      .select("id, raw_payload, ebay_orders(id, raw_payload)")
+      .in("id", chunk);
+    if (error) {
+      console.warn("Could not hydrate eBay finance status for pending order rows:", error);
+      return;
+    }
+    (data || []).forEach((row) => {
+      const line = byId.get(row.id);
+      if (!line) return;
+      const order = getOrderFromLine(line);
+      if (row.raw_payload && typeof row.raw_payload === "object") {
+        line.raw_payload = {
+          ...(line.raw_payload || {}),
+          ...row.raw_payload,
+        };
+      }
+      const hydratedOrder = Array.isArray(row.ebay_orders) ? row.ebay_orders[0] : row.ebay_orders;
+      if (hydratedOrder?.raw_payload && typeof hydratedOrder.raw_payload === "object") {
+        order.raw_payload = {
+          ...(order.raw_payload || {}),
+          ...hydratedOrder.raw_payload,
+        };
+      }
+    });
+  }
 }
 
 async function fetchOrderLineQueueViaPostgrest(status, admin) {
@@ -3222,6 +3360,7 @@ function renderOrders() {
     const hasSelectedAdminLines = group.lines.some((line) => state.adminSelectedLineIds.has(line.id));
     const postOrderIssueStatus = getGroupPostOrderIssueStatus(group.lines);
     const ebayApiStatus = getGroupEbayApiStatus(group.lines);
+    const financeStatus = getGroupFinanceStatus(group.lines);
     card.className = `buyer-order-card ${urgencyClass} ${groupIndex % 2 ? "is-alt-group" : ""} ${hasSelectedAdminLines ? "has-admin-selected-lines" : ""} ${postOrderIssueStatus ? "has-post-order-issue" : ""} ${ebayApiStatus ? "has-sync-mismatch" : ""} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""} ${isExpanded ? "is-expanded" : "is-collapsed"}`;
     card.dataset.buyerKey = group.key;
     card.dataset.buyerUsername = group.buyer;
@@ -3248,6 +3387,7 @@ function renderOrders() {
         <div class="buyer-card-alerts">
           ${urgencyMarkup}
           ${renderIssueBadgeMarkup(postOrderIssueStatus, "post-order-issue-pill")}
+          ${renderFinanceBadgeMarkup(financeStatus, "buyer-card-finance-pill")}
           ${ebayApiStatus ? `
             <span class="sync-mismatch-pill ${escapeHtml(ebayApiStatus.tone)}" title="${escapeHtml(ebayApiStatus.title)}">
               <i data-lucide="${escapeHtml(ebayApiStatus.icon)}"></i>
@@ -3381,6 +3521,7 @@ function renderOrders() {
       const canActOnLine = isOpenOrderLine(line);
       const linePostOrderIssueStatus = getPostOrderIssueBadge(line);
       const lineEbayApiStatus = getEbayApiStatusBadge(line);
+      const lineFinanceStatus = getFinanceStatusBadge(line);
       const lineUrgency = canActOnLine ? getOrderUrgency(order.ship_by_date) : null;
       const lineDueTone = lineUrgency?.level || "neutral";
       const orderLineKey = normalizeEbayOrderNumber(order.order_number) || order.order_number || order.id || line.order_id || line.id;
@@ -3445,6 +3586,7 @@ function renderOrders() {
               </span>
               ${orderLineSequence ? `<span class="buyer-line-sequence">${escapeHtml(orderLineSequence)}</span>` : ""}
               ${renderIssueBadgeMarkup(linePostOrderIssueStatus, "buyer-line-post-order-warning")}
+              ${renderFinanceBadgeMarkup(lineFinanceStatus, "buyer-line-finance-pill")}
               ${lineEbayApiStatus ? `<span class="buyer-line-sync-warning ${escapeHtml(lineEbayApiStatus.tone)}" title="${escapeHtml(lineEbayApiStatus.title)}"><i data-lucide="${escapeHtml(lineEbayApiStatus.icon)}"></i>${escapeHtml(lineEbayApiStatus.label)}</span>` : ""}
             </span>
             <small class="buyer-line-price">Line total ${formatMoney(line.total_price || line.sold_for || 0)}</small>

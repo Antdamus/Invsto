@@ -9,8 +9,12 @@ const EBAY_CLIENT_ID = (Deno.env.get("EBAY_CLIENT_ID") ?? Deno.env.get("EBAY_APP
 const EBAY_CLIENT_SECRET = (Deno.env.get("EBAY_CLIENT_SECRET") ?? Deno.env.get("EBAY_CERT_ID") ?? "").trim();
 const EBAY_REFRESH_TOKEN = (Deno.env.get("EBAY_REFRESH_TOKEN") ?? "").trim();
 const EBAY_ENV = (Deno.env.get("EBAY_ENV") ?? "production").trim().toLowerCase();
-const EBAY_ORDER_SCOPE = (Deno.env.get("EBAY_ORDER_SCOPE") ??
-  "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly").trim();
+const EBAY_FINANCES_SCOPE = "https://api.ebay.com/oauth/api_scope/sell.finances";
+const EBAY_ORDER_SCOPE = unique([
+  ...String(Deno.env.get("EBAY_ORDER_SCOPE") ??
+    "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly").split(/\s+/),
+  EBAY_FINANCES_SCOPE,
+].map(toText).filter(Boolean)).join(" ");
 
 const EBAY_API_BASE = EBAY_ENV === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
 // eBay says "2 years" but rejects requests right on the exact boundary.
@@ -259,6 +263,119 @@ async function ebayRequest(token: string, path: string): Promise<any> {
   return payload;
 }
 
+function normalizeFinanceTransactionStatus(value: unknown): string {
+  const status = toText(value).toUpperCase();
+  if (status.includes("HOLD")) return "on_hold";
+  if (status.includes("PROCESS")) return "processing";
+  if (status.includes("AVAILABLE")) return "available";
+  if (status.includes("PAYOUT") || status.includes("PAID")) return "paid_out";
+  return status ? "unknown" : "";
+}
+
+function getFinanceStatusLabel(status: string): string {
+  if (status === "on_hold") return "On hold";
+  if (status === "paid_out") return "Paid out";
+  if (status === "available") return "Available";
+  if (status === "processing") return "Processing";
+  return status ? "Payout unknown" : "";
+}
+
+function getFinanceStatusRank(status: string): number {
+  if (status === "on_hold") return 50;
+  if (status === "processing") return 40;
+  if (status === "available") return 30;
+  if (status === "paid_out") return 20;
+  return 10;
+}
+
+function getFinanceLineItemIds(transaction: any): string[] {
+  const items = Array.isArray(transaction?.orderLineItems) ? transaction.orderLineItems : [];
+  return unique(items.flatMap((item: any) => [
+    item?.lineItemId,
+    item?.legacyItemId,
+    item?.transactionId,
+  ]).map(toText).filter(Boolean));
+}
+
+function summarizeFinanceTransactions(transactions: any[], orderNumber: string, lineItemId = ""): JsonRecord | null {
+  const relevant = transactions.filter((transaction) => {
+    if (!lineItemId) return true;
+    const lineIds = getFinanceLineItemIds(transaction);
+    return !lineIds.length || lineIds.includes(lineItemId);
+  });
+  if (!relevant.length) return null;
+
+  const compactTransactions = relevant.map((transaction) => {
+    const status = normalizeFinanceTransactionStatus(transaction?.transactionStatus);
+    return {
+      transactionId: getNestedText(transaction?.transactionId, transaction?.transaction_id, transaction?.id),
+      transactionType: toText(transaction?.transactionType),
+      transactionStatus: toText(transaction?.transactionStatus),
+      status,
+      payoutId: getNestedText(transaction?.payoutId, transaction?.payoutReferenceId),
+      transactionDate: toIsoDate(transaction?.transactionDate || transaction?.bookingEntry || transaction?.createdDate),
+      memo: toText(transaction?.transactionMemo),
+      amount: toMoney(transaction?.amount || transaction?.transactionAmount || transaction?.netAmount || transaction?.totalAmount),
+      lineItemIds: getFinanceLineItemIds(transaction),
+    };
+  });
+  const winningStatus = compactTransactions
+    .map((transaction) => String(transaction.status || ""))
+    .filter(Boolean)
+    .sort((left, right) => getFinanceStatusRank(right) - getFinanceStatusRank(left))[0] || "unknown";
+
+  return {
+    source: "ebay_finances_api",
+    syncedAt: new Date().toISOString(),
+    orderNumber,
+    lineItemId: lineItemId || null,
+    status: winningStatus,
+    statusLabel: getFinanceStatusLabel(winningStatus),
+    payoutIds: unique(compactTransactions.map((transaction: any) => toText(transaction.payoutId)).filter(Boolean)),
+    transactionIds: unique(compactTransactions.map((transaction: any) => toText(transaction.transactionId)).filter(Boolean)),
+    lineItemIds: unique(compactTransactions.flatMap((transaction: any) => transaction.lineItemIds || []).map(toText).filter(Boolean)),
+    memo: unique(compactTransactions.map((transaction: any) => toText(transaction.memo)).filter(Boolean))[0] || "",
+    transactions: compactTransactions.slice(0, 20),
+  };
+}
+
+async function fetchFinanceTransactionsForOrder(token: string, orderNumber: string): Promise<any[]> {
+  const transactions: any[] = [];
+  let offset = 0;
+  const limit = 100;
+  while (transactions.length < 500) {
+    const params = new URLSearchParams({
+      filter: `orderId:{${orderNumber}}`,
+      limit: String(limit),
+      offset: String(offset),
+    });
+    const payload = await ebayRequest(token, `/sell/finances/v1/transaction?${params.toString()}`);
+    const page = Array.isArray(payload?.transactions) ? payload.transactions : [];
+    transactions.push(...page);
+    if (!payload?.next || page.length < limit) break;
+    offset += limit;
+  }
+  return transactions;
+}
+
+async function loadFinanceTransactionsByOrder(token: string, orderNumbers: string[], syncFinance: boolean) {
+  const byOrder = new Map<string, any[]>();
+  const warnings: JsonRecord[] = [];
+  if (!syncFinance) return { byOrder, warnings };
+  for (const orderNumber of unique(orderNumbers.map(toText).filter(Boolean))) {
+    try {
+      byOrder.set(orderNumber, await fetchFinanceTransactionsForOrder(token, orderNumber));
+    } catch (error) {
+      warnings.push({
+        orderNumber,
+        reason: "ebay_finance_lookup_failed",
+        message: compactError(error),
+      });
+    }
+  }
+  return { byOrder, warnings };
+}
+
 function toDateOrNull(value: unknown): Date | null {
   const iso = toIsoDate(value);
   return iso ? new Date(iso) : null;
@@ -414,7 +531,7 @@ function findExistingLine(existingLines: any, orderId: string, line: any): any |
     || null;
 }
 
-function prepareOrder(order: any, itemBySku: Map<string, any>, existingOrder: any | null, sourceName = "ebay_buyer_history_sync") {
+function prepareOrder(order: any, itemBySku: Map<string, any>, existingOrder: any | null, sourceName = "ebay_buyer_history_sync", financeTransactions: any[] = []) {
   const orderNumber = extractOrderNumber(order);
   const shipTo = extractShipTo(order);
   const payment = Array.isArray(order?.paymentSummary?.payments) ? order.paymentSummary.payments[0] : null;
@@ -440,6 +557,7 @@ function prepareOrder(order: any, itemBySku: Map<string, any>, existingOrder: an
     const itemNumber = getNestedText(line?.legacyItemId, line?.itemId, line?.listingMarketplaceId, transactionId);
     const lineTotal = toMoney(line?.total || line?.lineItemCost);
     const lineStatus = inferLineStatus(order);
+    const ebayFinance = summarizeFinanceTransactions(financeTransactions, orderNumber, transactionId);
     const fulfilledQuantity = ["fulfilled", "cancelled", "skipped"].includes(lineStatus) ? quantity : 0;
     const closedAt = lineStatus === "cancelled"
       ? cancelledAt || purchasedAt
@@ -467,10 +585,13 @@ function prepareOrder(order: any, itemBySku: Map<string, any>, existingOrder: an
         orderPaymentStatus: getOrderPaymentStatus(order),
         orderFulfillmentStatus: getOrderFulfillmentStatus(order),
         orderCancelStatus: getOrderCancelStatus(order),
+        ...(ebayFinance ? { ebayFinance } : {}),
         line,
       },
     };
   }).filter((line: any) => line.transaction_id && line.item_number);
+
+  const orderFinance = summarizeFinanceTransactions(financeTransactions, orderNumber);
 
   return {
     order: {
@@ -505,6 +626,7 @@ function prepareOrder(order: any, itemBySku: Map<string, any>, existingOrder: an
         orderPaymentStatus: getOrderPaymentStatus(order),
         orderFulfillmentStatus: getOrderFulfillmentStatus(order),
         orderCancelStatus: getOrderCancelStatus(order),
+        ...(orderFinance ? { ebayFinance: orderFinance, last_ebay_finance_sync_at: new Date().toISOString() } : {}),
         order,
       },
     },
@@ -606,6 +728,12 @@ Deno.serve(async (req) => {
     );
     const matchedOrders = orders.length;
     const orderNumbers = unique(orders.map(extractOrderNumber).filter(Boolean));
+    const syncFinance = body.syncFinance === true || (!scanAllBuyers && body.syncFinance !== false);
+    const { byOrder: financeByOrderNumber, warnings: financeWarnings } = await loadFinanceTransactionsByOrder(
+      token,
+      orderNumbers,
+      syncFinance,
+    );
     const existingOrders = await loadExistingOrders(supabase, orderNumbers);
     const skus = unique(orders.flatMap((order) =>
       (Array.isArray(order?.lineItems) ? order.lineItems : []).map(extractLineSku).filter(Boolean)
@@ -624,7 +752,7 @@ Deno.serve(async (req) => {
         skippedNewOpenOrdersByBuyer.set(buyerKey, (skippedNewOpenOrdersByBuyer.get(buyerKey) || 0) + 1);
         return [];
       }
-      return [prepareOrder(order, itemBySku, existingOrder, sourceName)];
+      return [prepareOrder(order, itemBySku, existingOrder, sourceName, financeByOrderNumber.get(orderNumber) || [])];
     });
     const buyerKeysSeen = unique(orders.map(extractBuyerUsername).map(normalizeBuyerKey).filter(Boolean));
     const buyersSeen = buyerKeysSeen.length;
@@ -646,6 +774,7 @@ Deno.serve(async (req) => {
         existingOrders: prepared.filter((entry) => existingOrders.has(entry.order.order_number)).length,
         newOrders: prepared.filter((entry) => !existingOrders.has(entry.order.order_number)).length,
         skippedNewOpenOrders,
+        financeWarnings,
         lineCount: prepared.reduce((sum, entry) => sum + entry.lines.length, 0),
       });
     }
@@ -728,6 +857,7 @@ Deno.serve(async (req) => {
             requestedFrom: fromDate.toISOString(),
             requestedTo: toDate.toISOString(),
             chunkKey,
+            financeWarnings,
             fulfilledLines: entries.reduce((sum, entry) => sum + entry.lines.filter((line: any) => String(line.line_status).toLowerCase() === "fulfilled").length, 0),
             cancelledLines: entries.reduce((sum, entry) => sum + entry.lines.filter((line: any) => String(line.line_status).toLowerCase() === "cancelled").length, 0),
           },
@@ -748,6 +878,7 @@ Deno.serve(async (req) => {
           requestedFrom: fromDate.toISOString(),
           requestedTo: toDate.toISOString(),
           chunkKey,
+          financeWarnings,
           fulfilledLines,
           cancelledLines,
         },
@@ -767,6 +898,7 @@ Deno.serve(async (req) => {
         last_error: null,
         raw_payload: {
           source: "ebay_buyer_history_sync",
+          financeWarnings,
           fulfilledLines,
           cancelledLines,
         },
@@ -789,6 +921,7 @@ Deno.serve(async (req) => {
       ordersUpserted: upsertedOrders.length,
       linesUpserted: upsertedLines.length,
       skippedNewOpenOrders,
+      financeWarnings,
       fulfilledLines,
       cancelledLines,
     });
