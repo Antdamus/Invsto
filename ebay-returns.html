@@ -237,7 +237,7 @@
       <section class="return-photo-panel" aria-label="Return evidence photos">
         <div>
           <span class="eyebrow">Return Photos</span>
-          <h3>Evidence Photos</h3>
+          <h3>Evidence Media</h3>
           <p>Use the OG phone app to photograph the returned item, packaging, and condition before saving the return.</p>
         </div>
         <div class="return-camera-row">
@@ -265,7 +265,7 @@
         </div>
         <label class="modal-field return-file-fallback">
           Fallback file upload
-          <input id="return-evidence-photo" type="file" accept="image/*" capture="environment" multiple />
+          <input id="return-evidence-photo" type="file" accept="image/*,video/*" multiple />
         </label>
         <div id="return-evidence-photo-list" class="history-extra-label-photo-list"></div>
       </section>
@@ -292,6 +292,7 @@
       <h2 id="evidence-photo-viewer-title">Evidence photo</h2>
       <div class="evidence-viewer-frame">
         <img id="evidence-photo-viewer-image" alt="Evidence photo preview" />
+        <video id="evidence-photo-viewer-video" class="hidden" controls playsinline preload="metadata"></video>
       </div>
       <p id="evidence-photo-viewer-caption" class="evidence-viewer-caption"></p>
       <div class="history-modal-actions">

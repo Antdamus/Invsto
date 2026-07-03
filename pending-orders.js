@@ -530,8 +530,27 @@ function normalizeFinanceStatus(value = "") {
 function getFinancePayloadRank(payload = {}) {
   const status = normalizeFinanceStatus(payload?.status || payload?.transactionStatus || payload?.transaction_status);
   const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
+  const activityKind = getFinanceActivityKind(payload);
+  if (activityKind) return 100 + getFinanceStatusRank(status);
   if (payload?.source === "ebay_finances_api" && status === "unknown" && transactions.length === 0) return 1;
   return getFinanceStatusRank(status);
+}
+
+function getFinanceActivityKind(payload = {}) {
+  const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
+  const text = [
+    payload?.memo,
+    ...transactions.flatMap((transaction) => [
+      transaction?.transactionType,
+      transaction?.transactionId,
+      transaction?.memo,
+      transaction?.bookingEntry,
+    ]),
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (/(dispute|claim|chargeback|case)/i.test(text)) return "dispute";
+  if (/(refund|return)/i.test(text)) return "refund";
+  if (/\bdebit\b/i.test(text) && !/\bsale\b/i.test(text)) return "adjustment";
+  return "";
 }
 
 function getFinanceStatusLabel(status = "") {
@@ -550,6 +569,13 @@ function getFinanceStatusDescription(status = "") {
   return "No eBay Finances status is saved for this line yet. Run the eBay sync/backfill or check the sync warning.";
 }
 
+function getFinanceActivityDescription(activityKind = "", statusLabel = "") {
+  if (activityKind === "dispute") return `eBay attached dispute/claim finance activity to this order. ${statusLabel} describes that finance transaction's payout ledger state, not a clean sale payout.`;
+  if (activityKind === "refund") return `eBay attached refund activity to this order. ${statusLabel} describes that refund transaction's payout ledger state, not that the original sale is untouched.`;
+  if (activityKind === "adjustment") return `eBay attached a debit/adjustment to this order. ${statusLabel} describes that adjustment transaction's payout ledger state.`;
+  return "";
+}
+
 function getFinanceStatusRank(status = "") {
   if (status === "on_hold") return 50;
   if (status === "processing") return 40;
@@ -562,17 +588,24 @@ function getFinanceStatusBadge(line = {}) {
   const payload = getFinancePayload(line);
   const status = normalizeFinanceStatus(payload?.status || payload?.transactionStatus || payload?.transaction_status);
   const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
+  const activityKind = getFinanceActivityKind(payload);
   const checkedWithNoTransactions = payload?.source === "ebay_finances_api"
     && status === "unknown"
     && transactions.length === 0;
+  const statusLabel = payload?.statusLabel || payload?.status_label || getFinanceStatusLabel(status);
   const label = checkedWithNoTransactions
     ? "No payout data"
-    : payload?.statusLabel || payload?.status_label || getFinanceStatusLabel(status);
+    : activityKind
+      ? `${activityKind === "dispute" ? "Dispute" : activityKind === "refund" ? "Refund" : "Adjustment"} / ${statusLabel}`
+      : statusLabel;
   const payoutIds = Array.isArray(payload?.payoutIds) ? payload.payoutIds : [payload?.payoutId].filter(Boolean);
   const transactionIds = Array.isArray(payload?.transactionIds) ? payload.transactionIds : [payload?.transactionId].filter(Boolean);
+  const activityDescription = getFinanceActivityDescription(activityKind, statusLabel);
   const parts = [
     checkedWithNoTransactions
       ? "Checked eBay Finances: eBay returned no transaction data for this order."
+      : activityDescription
+        ? activityDescription
       : `${label}: ${getFinanceStatusDescription(status)}`,
     payload?.memo,
     payoutIds.length ? `Payout ${payoutIds.slice(0, 2).join(", ")}` : "",
@@ -581,7 +614,8 @@ function getFinanceStatusBadge(line = {}) {
   ].filter(Boolean);
   return {
     label,
-    status: status || "unknown",
+    status: activityKind || status || "unknown",
+    rank: activityKind ? 100 + getFinanceStatusRank(status) : getFinanceStatusRank(status),
     title: parts.join(" | ") || "No eBay Finances payout status has been synced for this line yet.",
   };
 }
@@ -594,7 +628,7 @@ function renderFinanceBadgeMarkup(badge, className = "finance-status-pill") {
 function getGroupFinanceStatus(lines = []) {
   const badges = lines.map(getFinanceStatusBadge).filter(Boolean);
   if (!badges.length) return null;
-  return badges.sort((left, right) => getFinanceStatusRank(right.status) - getFinanceStatusRank(left.status))[0];
+  return badges.sort((left, right) => Number(right.rank || 0) - Number(left.rank || 0))[0];
 }
 
 function normalizePostOrderIssueType(value) {
@@ -5103,6 +5137,7 @@ function renderAssignedOrderTaskDetailEvent(event = {}) {
           data-label="${escapeHtml(photo.label || `Task photo ${index + 1}`)}"
           data-signed-by="${escapeHtml(photo.signed_by_email || event.signed_by_email || "")}"
           data-created-at="${escapeHtml(photo.created_at || event.created_at || "")}"
+          data-media-type="${escapeHtml(getEvidenceMediaType(photo))}"
         >
           ${isVideoReceiptEvidencePhoto(photo)
             ? `<span class="order-task-video-receipt-thumb-image" data-order-task-thumb-image="${escapeHtml(thumbnailRef.bucket || bucket)}:${escapeHtml(thumbnailRef.path || photo.path || "")}"></span>

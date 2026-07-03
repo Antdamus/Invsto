@@ -406,7 +406,7 @@
       <section class="return-photo-panel" aria-label="Return evidence photos">
         <div>
           <span class="eyebrow">Return Photos</span>
-          <h3>Evidence Photos</h3>
+          <h3>Evidence Media</h3>
           <p>Use the OG phone app to photograph the returned item, packaging, and condition before saving the return.</p>
         </div>
         <div class="return-camera-row">
@@ -434,7 +434,7 @@
         </div>
         <label class="modal-field return-file-fallback">
           Fallback file upload
-          <input id="return-evidence-photo" type="file" accept="image/*" capture="environment" multiple />
+          <input id="return-evidence-photo" type="file" accept="image/*,video/*" multiple />
         </label>
         <div id="return-evidence-photo-list" class="history-extra-label-photo-list"></div>
       </section>
@@ -496,15 +496,15 @@
         <textarea id="history-order-task-note" rows="4" placeholder="Write exactly what needs to be checked, fixed, refunded, shipped, or reviewed."></textarea>
       </label>
 
-      <section class="history-task-photo-panel" aria-label="Closed order task photos">
+      <section class="history-task-photo-panel" aria-label="Closed order task evidence">
         <div>
-          <span class="eyebrow">Optional Photos</span>
+          <span class="eyebrow">Optional Media</span>
           <h3>Attach task proof</h3>
-          <p>Add photos from this device or take a new phone photo before creating the task. They will stay attached to the task audit trail.</p>
+          <p>Add photos or videos from this device before creating the task. They will stay attached to the task audit trail.</p>
         </div>
         <label class="modal-field history-task-photo-picker">
-          Photos
-          <input id="history-order-task-photo-file" type="file" accept="image/*" capture="environment" multiple />
+          Evidence
+          <input id="history-order-task-photo-file" type="file" accept="image/*,video/*" multiple />
         </label>
         <div id="history-order-task-photo-list" class="history-extra-photo-list"></div>
       </section>
@@ -576,6 +576,7 @@
       </div>
       <div id="evidence-photo-viewer-frame" class="evidence-viewer-frame">
         <img id="evidence-photo-viewer-image" alt="Evidence photo preview" draggable="false" />
+        <video id="evidence-photo-viewer-video" class="hidden" controls playsinline preload="metadata"></video>
       </div>
       <p id="evidence-photo-viewer-caption" class="evidence-viewer-caption"></p>
       <div class="history-modal-actions">

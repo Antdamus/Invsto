@@ -518,10 +518,26 @@ textarea {
 }
 
 .return-task-summary-meta .return-task-finance-pill.is-on_hold,
+.return-task-summary-meta .return-task-finance-pill.is-dispute,
 .history-line-finance-pill.is-on_hold {
   border-color: rgba(255, 120, 120, 0.46);
   background: rgba(255, 76, 76, 0.15);
   color: #ffd6d6;
+}
+
+.history-line-finance-pill.is-dispute {
+  border-color: rgba(255, 120, 120, 0.46);
+  background: rgba(255, 76, 76, 0.15);
+  color: #ffd6d6;
+}
+
+.return-task-summary-meta .return-task-finance-pill.is-refund,
+.return-task-summary-meta .return-task-finance-pill.is-adjustment,
+.history-line-finance-pill.is-refund,
+.history-line-finance-pill.is-adjustment {
+  border-color: rgba(245, 197, 92, 0.46);
+  background: rgba(245, 197, 92, 0.15);
+  color: #ffe6a8;
 }
 
 .return-task-summary-meta .return-task-finance-pill.is-paid_out,
@@ -1773,7 +1789,8 @@ textarea {
   cursor: pointer;
 }
 
-.event-photo-thumb img {
+.event-photo-thumb img,
+.event-photo-thumb video {
   width: 100%;
   aspect-ratio: 1;
   object-fit: cover;
@@ -2051,6 +2068,13 @@ textarea {
   user-select: none;
 }
 
+.evidence-viewer-frame video {
+  width: min(100%, 980px);
+  max-height: min(68vh, 720px);
+  border-radius: 12px;
+  background: #000;
+}
+
 .evidence-viewer-frame.is-panning img {
   transition: none;
 }
@@ -2238,7 +2262,8 @@ textarea {
   align-items: center;
 }
 
-.history-extra-photo-card img {
+.history-extra-photo-card img,
+.history-extra-photo-card video {
   width: 58px;
   height: 58px;
   border-radius: 14px;

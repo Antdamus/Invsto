@@ -1281,10 +1281,21 @@ textarea:focus {
 }
 
 .buyer-card-finance-pill.is-on_hold,
-.buyer-line-finance-pill.is-on_hold {
+.buyer-card-finance-pill.is-dispute,
+.buyer-line-finance-pill.is-on_hold,
+.buyer-line-finance-pill.is-dispute {
   border-color: rgba(255, 120, 120, 0.46);
   background: rgba(255, 76, 76, 0.15);
   color: #ffd6d6;
+}
+
+.buyer-card-finance-pill.is-refund,
+.buyer-card-finance-pill.is-adjustment,
+.buyer-line-finance-pill.is-refund,
+.buyer-line-finance-pill.is-adjustment {
+  border-color: rgba(245, 197, 92, 0.46);
+  background: rgba(245, 197, 92, 0.15);
+  color: #ffe6a8;
 }
 
 .buyer-card-finance-pill.is-paid_out,
@@ -2849,7 +2860,8 @@ body.modal-open {
   cursor: zoom-in;
 }
 
-.no-inventory-photo-card img {
+.no-inventory-photo-card img,
+.no-inventory-photo-card video {
   width: 100%;
   aspect-ratio: 1;
   object-fit: cover;
@@ -2901,6 +2913,13 @@ body.modal-open {
   cursor: grab;
   touch-action: none;
   user-select: none;
+}
+
+.evidence-photo-viewer-frame video {
+  width: min(100%, 920px);
+  max-height: min(62vh, 620px);
+  border-radius: 12px;
+  background: #000;
 }
 
 .evidence-photo-viewer-frame img.is-loading-full {

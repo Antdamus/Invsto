@@ -95,6 +95,8 @@ const RETURN_CAPTURE_POLL_INTERVAL_MS = 1500;
 const RETURN_CAPTURE_PHOTO_SETTLE_MS = 3000;
 const RETURN_EVIDENCE_SIGNED_URL_TTL_SECONDS = 60 * 60;
 const RETURN_THUMBNAIL_TRANSFORM = { width: 260, height: 260, resize: "contain", quality: 60 };
+const HISTORY_EVIDENCE_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"]);
+const HISTORY_EVIDENCE_VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "ogg"]);
 const RETURN_EXTERNAL_NAV_RESTORE_KEY = "ogReturnExternalNavigationRestore";
 const TRACKING_NUMBER_PATTERN = /\b\d{20,30}\b/g;
 const FORMATTED_TRACKING_NUMBER_PATTERN = /\b\d{2,4}(?:[\s-]+\d{2,4}){4,8}\b/g;
@@ -820,8 +822,27 @@ function normalizeFinanceStatus(value = "") {
 function getFinancePayloadRank(payload = {}) {
   const status = normalizeFinanceStatus(payload?.status || payload?.transactionStatus || payload?.transaction_status);
   const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
+  const activityKind = getFinanceActivityKind(payload);
+  if (activityKind) return 100 + getFinanceStatusRank(status);
   if (payload?.source === "ebay_finances_api" && status === "unknown" && transactions.length === 0) return 1;
   return getFinanceStatusRank(status);
+}
+
+function getFinanceActivityKind(payload = {}) {
+  const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
+  const text = [
+    payload?.memo,
+    ...transactions.flatMap((transaction) => [
+      transaction?.transactionType,
+      transaction?.transactionId,
+      transaction?.memo,
+      transaction?.bookingEntry,
+    ]),
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (/(dispute|claim|chargeback|case)/i.test(text)) return "dispute";
+  if (/(refund|return)/i.test(text)) return "refund";
+  if (/\bdebit\b/i.test(text) && !/\bsale\b/i.test(text)) return "adjustment";
+  return "";
 }
 
 function getFinanceStatusLabel(status = "") {
@@ -840,6 +861,13 @@ function getFinanceStatusDescription(status = "") {
   return "No eBay Finances status is saved for this line yet. Run the eBay sync/backfill or check the sync warning.";
 }
 
+function getFinanceActivityDescription(activityKind = "", statusLabel = "") {
+  if (activityKind === "dispute") return `eBay attached dispute/claim finance activity to this order. ${statusLabel} describes that finance transaction's payout ledger state, not a clean sale payout.`;
+  if (activityKind === "refund") return `eBay attached refund activity to this order. ${statusLabel} describes that refund transaction's payout ledger state, not that the original sale is untouched.`;
+  if (activityKind === "adjustment") return `eBay attached a debit/adjustment to this order. ${statusLabel} describes that adjustment transaction's payout ledger state.`;
+  return "";
+}
+
 function getFinanceStatusRank(status = "") {
   if (status === "on_hold") return 50;
   if (status === "processing") return 40;
@@ -852,17 +880,24 @@ function getFinanceStatusBadge(line = {}) {
   const payload = getFinancePayload(line);
   const status = normalizeFinanceStatus(payload?.status || payload?.transactionStatus || payload?.transaction_status);
   const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
+  const activityKind = getFinanceActivityKind(payload);
   const checkedWithNoTransactions = payload?.source === "ebay_finances_api"
     && status === "unknown"
     && transactions.length === 0;
+  const statusLabel = payload?.statusLabel || payload?.status_label || getFinanceStatusLabel(status);
   const label = checkedWithNoTransactions
     ? "No payout data"
-    : payload?.statusLabel || payload?.status_label || getFinanceStatusLabel(status);
+    : activityKind
+      ? `${activityKind === "dispute" ? "Dispute" : activityKind === "refund" ? "Refund" : "Adjustment"} / ${statusLabel}`
+      : statusLabel;
   const payoutIds = Array.isArray(payload?.payoutIds) ? payload.payoutIds : [payload?.payoutId].filter(Boolean);
   const transactionIds = Array.isArray(payload?.transactionIds) ? payload.transactionIds : [payload?.transactionId].filter(Boolean);
+  const activityDescription = getFinanceActivityDescription(activityKind, statusLabel);
   const parts = [
     checkedWithNoTransactions
       ? "Checked eBay Finances: eBay returned no transaction data for this order."
+      : activityDescription
+        ? activityDescription
       : `${label}: ${getFinanceStatusDescription(status)}`,
     payload?.memo,
     payoutIds.length ? `Payout ${payoutIds.slice(0, 2).join(", ")}` : "",
@@ -871,7 +906,8 @@ function getFinanceStatusBadge(line = {}) {
   ].filter(Boolean);
   return {
     label,
-    status: status || "unknown",
+    status: activityKind || status || "unknown",
+    rank: activityKind ? 100 + getFinanceStatusRank(status) : getFinanceStatusRank(status),
     title: parts.join(" | ") || "No eBay Finances payout status has been synced for this line yet.",
   };
 }
@@ -884,7 +920,7 @@ function renderFinanceBadgeMarkup(badge, className = "finance-status-pill") {
 function getLinesFinanceStatus(lines = []) {
   const badges = lines.map(getFinanceStatusBadge).filter(Boolean);
   if (!badges.length) return null;
-  return badges.sort((left, right) => getFinanceStatusRank(right.status) - getFinanceStatusRank(left.status))[0];
+  return badges.sort((left, right) => Number(right.rank || 0) - Number(left.rank || 0))[0];
 }
 
 function getLineStatusLabel(line) {
@@ -1387,7 +1423,7 @@ async function signEventEvidencePhoto(photo, options = {}) {
 function applyEvidencePhotoViewerTransform() {
   const image = $("evidence-photo-viewer-image");
   const frame = $("evidence-photo-viewer-frame");
-  if (!image) return;
+  if (!image || image.classList.contains("hidden")) return;
   image.style.transform = `translate(${evidencePhotoViewerState.panX}px, ${evidencePhotoViewerState.panY}px) scale(${evidencePhotoViewerState.zoom})`;
   frame?.classList.toggle("is-pannable", evidencePhotoViewerState.zoom > 1);
 }
@@ -1419,7 +1455,7 @@ function adjustEvidencePhotoViewerZoom(delta) {
 function startEvidencePhotoViewerPan(event) {
   if (evidencePhotoViewerState.zoom <= 1) return;
   const image = $("evidence-photo-viewer-image");
-  if (!image) return;
+  if (!image || image.classList.contains("hidden")) return;
   evidencePhotoViewerState.panning = true;
   evidencePhotoViewerState.panStart = {
     pointerId: event.pointerId,
@@ -1449,18 +1485,40 @@ function endEvidencePhotoViewerPan(event) {
   $("evidence-photo-viewer-frame")?.classList.remove("is-panning");
 }
 
-function openEvidencePhotoViewer(url, label = "Evidence photo", meta = "") {
+function openEvidencePhotoViewer(url, label = "Evidence photo", meta = "", mediaType = "image") {
   if (!url) return;
   evidencePhotoViewerReturnFocus = document.activeElement;
   const image = $("evidence-photo-viewer-image");
+  const video = $("evidence-photo-viewer-video");
   const title = $("evidence-photo-viewer-title");
   const caption = $("evidence-photo-viewer-caption");
+  const tools = document.querySelector("#evidence-photo-viewer-modal .evidence-viewer-tools");
+  const isVideo = mediaType === "video" || isHistoryEvidenceVideo({ path: meta, label, media_type: mediaType });
   resetEvidencePhotoViewerTransform();
+  if (video) {
+    if (isVideo) {
+      video.src = url;
+      video.classList.remove("hidden");
+      video.setAttribute("aria-label", label || "Evidence video");
+    } else {
+      video.pause?.();
+      video.removeAttribute("src");
+      video.load?.();
+      video.classList.add("hidden");
+    }
+  }
   if (image) {
+    image.classList.toggle("hidden", isVideo);
+    if (isVideo) {
+      image.removeAttribute("src");
+      image.style.transform = "";
+    } else {
     image.src = url;
     image.alt = label;
     image.draggable = false;
+    }
   }
+  tools?.classList.toggle("hidden", isVideo);
   if (title) title.textContent = label;
   if (caption) caption.textContent = meta;
   openModal("evidence-photo-viewer-modal");
@@ -1469,10 +1527,19 @@ function openEvidencePhotoViewer(url, label = "Evidence photo", meta = "") {
 
 function closeEvidencePhotoViewer() {
   const image = $("evidence-photo-viewer-image");
+  const video = $("evidence-photo-viewer-video");
   if (image) {
     image.src = "";
     image.style.transform = "";
+    image.classList.remove("hidden");
   }
+  if (video) {
+    video.pause?.();
+    video.removeAttribute("src");
+    video.load?.();
+    video.classList.add("hidden");
+  }
+  document.querySelector("#evidence-photo-viewer-modal .evidence-viewer-tools")?.classList.remove("hidden");
   resetEvidencePhotoViewerTransform();
   closeModal("evidence-photo-viewer-modal");
   evidencePhotoViewerReturnFocus?.focus?.();
@@ -1499,14 +1566,17 @@ async function hydrateEventEvidencePhotos(events) {
       ...photo,
       thumbUrl: await signEventEvidencePhoto(photo),
       fullUrl: await signEventEvidencePhoto(photo, { thumbnail: false }),
-      label: photo.label || `Evidence photo ${index + 1}`,
+      media_type: getHistoryEvidenceMediaType(photo),
+      label: photo.label || `Evidence ${getHistoryEvidenceMediaType(photo) === "video" ? "video" : "photo"} ${index + 1}`,
     })));
     const visible = signed.filter((photo) => photo.thumbUrl || photo.fullUrl);
     if (!visible.length) continue;
 
     container.innerHTML = visible.map((photo) => `
-      <button class="event-photo-thumb" type="button" data-evidence-photo-url="${escapeHtml(photo.fullUrl || photo.thumbUrl)}" data-evidence-photo-label="${escapeHtml(photo.label)}" data-evidence-photo-meta="${escapeHtml(photo.bucket + "/" + photo.path)}">
-        <img src="${escapeHtml(photo.thumbUrl || photo.fullUrl)}" alt="${escapeHtml(photo.label)}" />
+      <button class="event-photo-thumb" type="button" data-evidence-photo-url="${escapeHtml(photo.fullUrl || photo.thumbUrl)}" data-evidence-photo-label="${escapeHtml(photo.label)}" data-evidence-photo-meta="${escapeHtml(photo.bucket + "/" + photo.path)}" data-evidence-media-type="${escapeHtml(photo.media_type || "image")}">
+        ${photo.media_type === "video"
+          ? `<video src="${escapeHtml(photo.thumbUrl || photo.fullUrl)}" muted playsinline preload="metadata"></video>`
+          : `<img src="${escapeHtml(photo.thumbUrl || photo.fullUrl)}" alt="${escapeHtml(photo.label)}" />`}
         <span>${escapeHtml(photo.label)}</span>
       </button>
     `).join("");
@@ -1516,7 +1586,8 @@ async function hydrateEventEvidencePhotos(events) {
         openEvidencePhotoViewer(
           button.dataset.evidencePhotoUrl,
           button.dataset.evidencePhotoLabel,
-          button.dataset.evidencePhotoMeta
+          button.dataset.evidencePhotoMeta,
+          button.dataset.evidenceMediaType || "image"
         );
       });
     });
@@ -5009,9 +5080,34 @@ function cleanupHistoryOrderTaskPhotoPreviews() {
   state.historyOrderTaskPreviewUrls = [];
 }
 
+function getHistoryEvidenceFileExtension(value = "") {
+  return (String(value || "").toLowerCase().match(/\.([a-z0-9]{2,5})(?:$|[?#\s])/i)?.[1] || "").toLowerCase();
+}
+
+function getHistoryEvidenceMediaType(file = {}) {
+  const explicitType = String(file.media_type || file.mediaType || "").trim().toLowerCase();
+  if (explicitType === "video" || explicitType === "image") return explicitType;
+  const mimeType = String(file.mime_type || file.mimeType || file.type || "").trim().toLowerCase();
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("image/")) return "image";
+  const extension = getHistoryEvidenceFileExtension(file.name || file.path || file.label || "");
+  return HISTORY_EVIDENCE_VIDEO_EXTENSIONS.has(extension) ? "video" : "image";
+}
+
+function isHistoryEvidenceVideo(file = {}) {
+  return getHistoryEvidenceMediaType(file) === "video";
+}
+
+function isAcceptedHistoryEvidenceFile(file = {}) {
+  const mimeType = String(file.type || file.mime_type || "").toLowerCase();
+  if (/^(image|video)\//.test(mimeType)) return true;
+  const extension = getHistoryEvidenceFileExtension(file.name || file.path || "");
+  return HISTORY_EVIDENCE_IMAGE_EXTENSIONS.has(extension) || HISTORY_EVIDENCE_VIDEO_EXTENSIONS.has(extension);
+}
+
 function getHistoryOrderTaskPhotoFiles() {
   return [...($("history-order-task-photo-file")?.files || [])].filter((file) =>
-    file && file.size > 0 && /^image\//i.test(file.type || "")
+    file && file.size > 0 && isAcceptedHistoryEvidenceFile(file)
   );
 }
 
@@ -5021,18 +5117,21 @@ function renderHistoryOrderTaskPhotoList() {
   const files = getHistoryOrderTaskPhotoFiles();
   if (!list) return;
   if (!files.length) {
-    list.innerHTML = `<div class="history-extra-photo-empty">No task photos selected yet.</div>`;
+    list.innerHTML = `<div class="history-extra-photo-empty">No task evidence selected yet.</div>`;
     return;
   }
   list.innerHTML = files.map((file, index) => {
     const previewUrl = URL.createObjectURL(file);
+    const mediaType = getHistoryEvidenceMediaType(file);
     state.historyOrderTaskPreviewUrls.push(previewUrl);
     return `
       <article class="history-extra-photo-card">
-        <img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(file.name || `Task photo ${index + 1}`)}" />
+        ${mediaType === "video"
+          ? `<video src="${escapeHtml(previewUrl)}" controls playsinline preload="metadata"></video>`
+          : `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(file.name || `Task photo ${index + 1}`)}" />`}
         <div>
-          <strong>${escapeHtml(file.name || `Task photo ${index + 1}`)}</strong>
-          <span>${escapeHtml(file.type || "image")} ${formatFileSize(file.size) ? `- ${escapeHtml(formatFileSize(file.size))}` : ""}</span>
+          <strong>${escapeHtml(file.name || `Task ${mediaType === "video" ? "video" : "photo"} ${index + 1}`)}</strong>
+          <span>${escapeHtml(file.type || mediaType)} ${formatFileSize(file.size) ? `- ${escapeHtml(formatFileSize(file.size))}` : ""}</span>
         </div>
       </article>
     `;
@@ -5049,7 +5148,8 @@ async function uploadHistoryOrderTaskPhotos(files, option = {}) {
 
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index];
-    const extension = String(file.name || "").split(".").pop()?.toLowerCase()?.replace(/[^a-z0-9]/g, "") || "jpg";
+    const mediaType = getHistoryEvidenceMediaType(file);
+    const extension = getHistoryEvidenceFileExtension(file.name) || (mediaType === "video" ? "mp4" : "jpg");
     const path = [
       "order-history-task-photos",
       cleanOrder,
@@ -5058,16 +5158,17 @@ async function uploadHistoryOrderTaskPhotos(files, option = {}) {
     const { error } = await supabase.storage
       .from(EXTRA_LABEL_EVIDENCE_BUCKET)
       .upload(path, file, {
-        contentType: file.type || "image/jpeg",
+        contentType: file.type || (mediaType === "video" ? "video/mp4" : "image/jpeg"),
         upsert: false,
       });
-    if (error) throw new Error(error.message || `Could not upload task photo ${index + 1}.`);
+    if (error) throw new Error(error.message || `Could not upload task evidence ${index + 1}.`);
     uploaded.push({
       bucket: EXTRA_LABEL_EVIDENCE_BUCKET,
       path,
-      label: file.name || `Closed order task photo ${index + 1}`,
+      label: file.name || `Closed order task ${mediaType === "video" ? "video" : "photo"} ${index + 1}`,
       original_name: file.name || "",
-      mime_type: file.type || "image/jpeg",
+      mime_type: file.type || (mediaType === "video" ? "video/mp4" : "image/jpeg"),
+      media_type: mediaType,
       size_bytes: file.size || 0,
       uploaded_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
@@ -5373,14 +5474,17 @@ async function hydrateHistoryGroupEvidencePhotos(groups) {
       ...photo,
       thumbUrl: await signEventEvidencePhoto(photo),
       fullUrl: await signEventEvidencePhoto(photo, { thumbnail: false }),
-      label: photo.label || `Evidence photo ${index + 1}`,
+      media_type: getHistoryEvidenceMediaType(photo),
+      label: photo.label || `Evidence ${getHistoryEvidenceMediaType(photo) === "video" ? "video" : "photo"} ${index + 1}`,
     })));
     const visible = signed.filter((photo) => photo.thumbUrl || photo.fullUrl);
     if (!visible.length) continue;
 
     container.innerHTML = visible.map((photo) => `
-      <button class="event-photo-thumb" type="button" data-evidence-photo-url="${escapeHtml(photo.fullUrl || photo.thumbUrl)}" data-evidence-photo-label="${escapeHtml(photo.label)}" data-evidence-photo-meta="${escapeHtml(photo.bucket + "/" + photo.path)}">
-        <img src="${escapeHtml(photo.thumbUrl || photo.fullUrl)}" alt="${escapeHtml(photo.label)}" />
+      <button class="event-photo-thumb" type="button" data-evidence-photo-url="${escapeHtml(photo.fullUrl || photo.thumbUrl)}" data-evidence-photo-label="${escapeHtml(photo.label)}" data-evidence-photo-meta="${escapeHtml(photo.bucket + "/" + photo.path)}" data-evidence-media-type="${escapeHtml(photo.media_type || "image")}">
+        ${photo.media_type === "video"
+          ? `<video src="${escapeHtml(photo.thumbUrl || photo.fullUrl)}" muted playsinline preload="metadata"></video>`
+          : `<img src="${escapeHtml(photo.thumbUrl || photo.fullUrl)}" alt="${escapeHtml(photo.label)}" />`}
         <span>${escapeHtml(photo.label)}</span>
       </button>
     `).join("");
@@ -5390,7 +5494,8 @@ async function hydrateHistoryGroupEvidencePhotos(groups) {
         openEvidencePhotoViewer(
           button.dataset.evidencePhotoUrl,
           button.dataset.evidencePhotoLabel,
-          button.dataset.evidencePhotoMeta
+          button.dataset.evidencePhotoMeta,
+          button.dataset.evidenceMediaType || "image"
         );
       });
     });
@@ -5751,7 +5856,7 @@ async function submitHistoryOrderTask() {
     const files = getHistoryOrderTaskPhotoFiles();
     let taskPhotos = [];
     if (files.length) {
-      setHistoryOrderTaskStatus("Uploading task photos...", "info");
+      setHistoryOrderTaskStatus("Uploading task evidence...", "info");
       taskPhotos = await uploadHistoryOrderTaskPhotos(files, option);
     }
     setHistoryOrderTaskStatus("Saving closed-order task...", "info");
@@ -6479,6 +6584,12 @@ function setAllReturnEvidencePhotosSelected(selected) {
 
 function getReturnEvidenceFileExtension(source, blob) {
   const value = `${source?.path || source?.name || ""} ${source?.mime_type || source?.type || ""} ${blob?.type || ""}`.toLowerCase();
+  const explicitExtension = getHistoryEvidenceFileExtension(source?.path || source?.name || "");
+  if (HISTORY_EVIDENCE_VIDEO_EXTENSIONS.has(explicitExtension)) return explicitExtension;
+  if (value.includes("quicktime") || value.includes("mov")) return "mov";
+  if (value.includes("mp4") || value.includes("mpeg-4")) return "mp4";
+  if (value.includes("webm")) return "webm";
+  if (value.includes("ogg")) return "ogg";
   if (value.includes("png")) return "png";
   if (value.includes("webp")) return "webp";
   if (value.includes("heic")) return "heic";
