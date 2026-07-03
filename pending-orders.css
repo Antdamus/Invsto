@@ -1951,12 +1951,17 @@ textarea:focus {
   font-size: 1.12rem;
 }
 
-#manual-video-receipt-preview {
+#manual-video-receipt-preview,
+#manual-video-receipt-video-preview {
   max-width: 100%;
   max-height: 56vh;
   border-radius: 14px;
   object-fit: contain;
   box-shadow: 0 20px 70px rgba(0, 0, 0, 0.35);
+}
+
+#manual-video-receipt-video-preview {
+  background: #000;
 }
 
 .manual-video-receipt-actions {
@@ -3878,6 +3883,14 @@ body.pending-order-detail-open .mobile-detail-close {
   border-color: rgba(255, 255, 255, 0.13) !important;
 }
 
+.buyer-card-task-video-btn,
+.buyer-card-order-video-btn,
+.task-video-action-btn {
+  border-color: rgba(125, 240, 178, 0.42) !important;
+  background: rgba(125, 240, 178, 0.12) !important;
+  color: #bfffd8 !important;
+}
+
 .buyer-card-approval-btn {
   min-height: 36px;
   padding: 0 14px;
@@ -4644,13 +4657,15 @@ body.pending-order-detail-open .mobile-detail-close {
 
   .buyer-card-complete-btn,
   .buyer-card-no-inventory-btn,
+  .buyer-card-order-video-btn,
   .buyer-card-task-btn,
   .buyer-card-expand-btn {
     min-height: 38px;
   }
 
   .buyer-card-expanded-actions .buyer-card-complete-btn,
-  .buyer-card-expanded-actions .buyer-card-no-inventory-btn {
+  .buyer-card-expanded-actions .buyer-card-no-inventory-btn,
+  .buyer-card-expanded-actions .buyer-card-order-video-btn {
     width: 100%;
   }
 

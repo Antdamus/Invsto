@@ -80,6 +80,8 @@ const state = {
   orderVideoReceipts: new Map(),
   videoReceiptEvidenceByLineId: new Map(),
   manualVideoReceiptLineId: "",
+  manualVideoReceiptLineIds: [],
+  manualVideoReceiptScope: "line",
   manualVideoReceiptPhoto: null,
   manualVideoReceiptPreviewUrl: "",
   manualVideoReceiptBusy: false,
@@ -3490,6 +3492,7 @@ function renderOrders() {
         <div class="buyer-card-expanded">
           <div class="buyer-card-expanded-actions">
             <button type="button" class="buyer-card-complete-btn primary-btn" data-buyer-complete-key="${escapeHtml(group.key)}" ${group.lines.some(isOpenOrderLine) ? "" : "disabled"}>Complete From Inventory</button>
+            <button type="button" class="secondary-btn buyer-card-order-video-btn task-video-action-btn" data-buyer-order-video-key="${escapeHtml(group.key)}" ${group.lines.some((line) => line.order_id) ? "" : "disabled"}>Add order video</button>
             <button type="button" class="buyer-card-no-inventory-btn secondary-btn caution-btn" data-buyer-no-inventory-key="${escapeHtml(group.key)}" ${getNoInventoryLineIdsForGroupAction(group).length ? "" : "disabled"}>Complete Without Inventory</button>
             ${approvalActionMarkup}
           </div>
@@ -3521,6 +3524,7 @@ function renderOrders() {
     const approvalButton = card.querySelector("[data-buyer-approval-key]");
     const approvalTaskButton = card.querySelector("[data-buyer-approval-task-id]");
     const noInventoryButton = card.querySelector("[data-buyer-no-inventory-key]");
+    const orderVideoButton = card.querySelector("[data-buyer-order-video-key]");
     expandButton?.addEventListener("click", (event) => {
       event.stopPropagation();
       toggleBuyerGroupExpanded(group.key);
@@ -3552,12 +3556,19 @@ function renderOrders() {
       event.stopPropagation();
       openBuyerGroupInventoryCompletion(group);
     });
+    orderVideoButton?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const nextLine = group.lines.find((line) => isOpenOrderLine(line) && line.order_id) || group.lines.find((line) => line.order_id);
+      if (!nextLine) return;
+      selectOrderLine(nextLine.id, { openDetail: false });
+      setTimeout(() => openManualVideoReceiptModal(nextLine.id, { scope: "order" }), 80);
+    });
     taskButton?.addEventListener("click", (event) => {
       event.stopPropagation();
       const nextLine = group.lines.find((line) => isOpenOrderLine(line) && !state.stagedFulfillments.has(line.id)) || group.lines[0];
       if (!nextLine) return;
       selectOrderLine(nextLine.id, { openDetail: false });
-      setTimeout(() => openOrderTaskModal(), 80);
+      setTimeout(() => openOrderTaskModal({ scope: "order" }), 80);
     });
     viewTaskButton?.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -3621,6 +3632,7 @@ function renderOrders() {
       const lineTaskActionMarkup = assignedLineTask
         ? `<button type="button" class="secondary-btn buyer-line-action-btn task-action-btn ${isPendingOrderApprovalTask(assignedLineTask) ? "is-approval" : "is-assigned"}" data-line-view-task="${escapeHtml(line.id)}" data-view-order-task="${escapeHtml(assignedLineTask.id)}" title="View ${isPendingOrderApprovalTask(assignedLineTask) ? "admin approval request" : `task assigned to ${escapeHtml(assignedLineTaskAssignee)}`}"><span>${isPendingOrderApprovalTask(assignedLineTask) ? "Pending approval" : "Task assigned"}</span><strong>${escapeHtml(assignedLineTaskAssignee)}</strong></button>`
         : `<button type="button" class="secondary-btn buyer-line-action-btn task-action-btn" data-line-assign-task="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>Assign Task</button>`;
+      const lineTaskVideoMarkup = `<button type="button" class="secondary-btn buyer-line-action-btn task-video-action-btn" data-line-add-video="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>Add item video</button>`;
       const lineNoteCount = getLineNoteCount(line);
       const lineNoteCountMarkup = lineNoteCount
         ? `<span class="buyer-line-note-count" title="${lineNoteCount.toLocaleString()} audited item note${lineNoteCount === 1 ? "" : "s"}">${lineNoteCount.toLocaleString()} note${lineNoteCount === 1 ? "" : "s"}</span>`
@@ -3672,12 +3684,12 @@ function renderOrders() {
           <span class="buyer-line-actions">
             <button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) ? "" : "disabled"}>Get Label</button>
             ${lineTaskActionMarkup}
+            ${lineTaskVideoMarkup}
             <button type="button" class="secondary-btn buyer-line-action-btn refund-btn" data-line-refund="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Refunded</button>
             <button type="button" class="secondary-btn buyer-line-action-btn danger-btn" data-line-cancel="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Cancel</button>
           </span>
           <span class="buyer-line-receipt-actions">
             ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Open video receipt</a>` : ""}
-            <button type="button" class="buyer-line-manual-receipt" data-line-manual-video-receipt="${escapeHtml(line.id)}">Add video receipt manually</button>
             <button type="button" class="buyer-line-note-btn" data-line-add-note="${escapeHtml(line.id)}">Add note</button>
             ${lineNoteCountMarkup}
             ${lineNotePreviewMarkup}
@@ -3713,7 +3725,11 @@ function renderOrders() {
       });
       button.querySelector("[data-line-assign-task]")?.addEventListener("click", () => {
         selectOrderLine(line.id, { openDetail: false });
-        setTimeout(() => openOrderTaskModal(), 80);
+        setTimeout(() => openOrderTaskModal({ scope: "line" }), 80);
+      });
+      button.querySelector("[data-line-add-video]")?.addEventListener("click", () => {
+        selectOrderLine(line.id, { openDetail: false });
+        setTimeout(() => openManualVideoReceiptModal(line.id, { scope: "line" }), 80);
       });
       button.querySelector("[data-line-view-task]")?.addEventListener("click", (event) => {
         openAssignedOrderTaskDetailsModal(event.currentTarget.dataset.viewOrderTask, { lineId: line.id });
@@ -3725,11 +3741,6 @@ function renderOrders() {
       button.querySelector("[data-line-refund]")?.addEventListener("click", () => {
         selectOrderLine(line.id, { openDetail: false });
         openWorkerCancelOrderModal({ lineIds: [line.id], mode: "refunded" });
-      });
-      button.querySelector("[data-line-manual-video-receipt]")?.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        openManualVideoReceiptModal(line.id);
       });
       button.querySelector("[data-line-add-note]")?.addEventListener("click", (event) => {
         event.preventDefault();
@@ -5730,6 +5741,8 @@ async function openOrderTaskModal(options = {}) {
     ? options.progress
       ? "Explain what happened, what is blocking completion, and when this should be checked again."
       : "Add an audited update. The current assignee will see it in their task queue; admins can reassign when needed."
+    : options.mediaPrompt
+    ? "Attach a video or photo, then describe what needs review for this order or item line."
     : "Send a question, instruction, or special handling request to an admin or worker.";
   $("submit-order-task").textContent = isApprovalMode ? "Send for Approval" : task ? options.progress ? "Save Progress" : "Send Update" : "Send Task";
   $("order-task-status-field")?.classList.toggle("hidden", !task || isApprovalMode);
@@ -5772,7 +5785,14 @@ async function openOrderTaskModal(options = {}) {
   }
 
   openModal("order-task-modal");
-  setTimeout(() => $("order-task-note")?.focus(), 80);
+  setTimeout(() => {
+    if (options.mediaPrompt) {
+      setOrderTaskPhotoStatus("Use Add Photos / Videos below to attach the recorded issue.", "info");
+      $("order-task-photo-file")?.closest("label")?.focus?.();
+    } else {
+      $("order-task-note")?.focus();
+    }
+  }, 80);
   loadNoInventoryCaptureStations({ silent: true }).catch((error) => {
     console.warn("Could not load order task camera stations:", error);
     setOrderTaskPhotoStatus(error?.message || "Could not load capture stations.", "error");
@@ -9711,6 +9731,12 @@ function getManualVideoReceiptLine() {
   return state.orders.find((entry) => entry.id === state.manualVideoReceiptLineId) || null;
 }
 
+function getManualVideoReceiptLines() {
+  const ids = new Set((state.manualVideoReceiptLineIds || []).filter(Boolean));
+  if (!ids.size && state.manualVideoReceiptLineId) ids.add(state.manualVideoReceiptLineId);
+  return state.orders.filter((entry) => ids.has(entry.id));
+}
+
 function setManualVideoReceiptError(message = "", type = "error") {
   const el = $("manual-video-receipt-error");
   if (!el) return;
@@ -9730,13 +9756,21 @@ function clearManualVideoReceiptPhoto() {
     preview.src = "";
     preview.classList.add("hidden");
   }
+  const video = $("manual-video-receipt-video-preview");
+  if (video) {
+    video.pause?.();
+    video.removeAttribute("src");
+    video.load?.();
+    video.classList.add("hidden");
+  }
   $("manual-video-receipt-empty")?.classList.remove("hidden");
   $("save-manual-video-receipt")?.toggleAttribute("disabled", true);
 }
 
 function setManualVideoReceiptPhoto(blob, metadata = {}) {
-  if (!(blob instanceof Blob) || !/^image\//i.test(blob.type || "")) {
-    setManualVideoReceiptError("Paste or choose an image file for the video receipt.");
+  const mediaType = getEvidenceMediaType({ ...metadata, mime_type: blob?.type || metadata.type || "" });
+  if (!(blob instanceof Blob) || !/^(image|video)\//i.test(blob.type || "") && !["image", "video"].includes(mediaType)) {
+    setManualVideoReceiptError("Choose a video or photo file for this evidence.");
     return;
   }
   if (state.manualVideoReceiptPreviewUrl?.startsWith("blob:")) {
@@ -9745,15 +9779,21 @@ function setManualVideoReceiptPhoto(blob, metadata = {}) {
   const previewUrl = URL.createObjectURL(blob);
   state.manualVideoReceiptPhoto = {
     blob,
-    name: metadata.name || "manual-video-receipt.png",
-    type: blob.type || metadata.type || "image/png",
+    name: metadata.name || `manual-order-evidence.${mediaType === "video" ? "mp4" : "png"}`,
+    type: blob.type || metadata.type || (mediaType === "video" ? "video/mp4" : "image/png"),
+    media_type: mediaType,
     size: blob.size || 0,
   };
   state.manualVideoReceiptPreviewUrl = previewUrl;
   const preview = $("manual-video-receipt-preview");
+  const video = $("manual-video-receipt-video-preview");
   if (preview) {
     preview.src = previewUrl;
-    preview.classList.remove("hidden");
+    preview.classList.toggle("hidden", mediaType === "video");
+  }
+  if (video) {
+    video.src = previewUrl;
+    video.classList.toggle("hidden", mediaType !== "video");
   }
   $("manual-video-receipt-empty")?.classList.add("hidden");
   $("save-manual-video-receipt")?.toggleAttribute("disabled", false);
@@ -9772,9 +9812,9 @@ function handleManualVideoReceiptPaste(event) {
 }
 
 function handleManualVideoReceiptFile(event) {
-  const file = [...(event.target?.files || [])].find((entry) => /^image\//i.test(entry.type || ""));
+  const file = [...(event.target?.files || [])].find(isAcceptedEvidenceFile);
   if (!file) {
-    setManualVideoReceiptError("Choose an image file for the video receipt.");
+    setManualVideoReceiptError("Choose a video or photo file for this evidence.");
     return;
   }
   setManualVideoReceiptPhoto(file, { name: file.name, type: file.type });
@@ -9784,55 +9824,71 @@ function handleManualVideoReceiptFile(event) {
 function closeManualVideoReceiptModal() {
   clearManualVideoReceiptPhoto();
   state.manualVideoReceiptLineId = "";
+  state.manualVideoReceiptLineIds = [];
+  state.manualVideoReceiptScope = "line";
   state.manualVideoReceiptBusy = false;
   setManualVideoReceiptError("");
   closeModal("manual-video-receipt-modal");
   returnToOrdersAfterMobileModalClose({ suppressMobileReturn: true });
 }
 
-function openManualVideoReceiptModal(lineId) {
+function openManualVideoReceiptModal(lineId, options = {}) {
   const line = state.orders.find((entry) => entry.id === lineId);
   if (!line?.id || !line.order_id) {
-    setStatus("Select a pending eBay order line before adding a manual video receipt.", "error");
+    setStatus("Select a pending eBay order line before adding video evidence.", "error");
     return;
   }
+  const scope = options.scope === "order" ? "order" : "line";
+  const scopedLines = scope === "order"
+    ? state.orders.filter((entry) => entry.order_id === line.order_id)
+    : [line];
   state.manualVideoReceiptLineId = line.id;
+  state.manualVideoReceiptLineIds = scopedLines.map((entry) => entry.id).filter(Boolean);
+  state.manualVideoReceiptScope = scope;
   clearManualVideoReceiptPhoto();
   setManualVideoReceiptError("");
   const order = getOrderFromLine(line);
-  $("manual-video-receipt-note").value = "Video receipt screenshot added manually because the automatic capture was not available.";
+  $("manual-video-receipt-title").textContent = scope === "order" ? "Add video to full order" : "Add video to item line";
+  $("manual-video-receipt-subtitle").textContent = scope === "order"
+    ? "This video or photo will save to the full order audit trail without creating a task."
+    : "This video or photo will save to this item line audit trail without creating a task.";
+  $("manual-video-receipt-note").value = "";
   $("manual-video-receipt-context").innerHTML = `
     <strong>${escapeHtml(order.order_number || "eBay order")} - ${escapeHtml(order.buyer_username || "unknown buyer")}</strong>
-    <span>${escapeHtml(line.item_title || "Untitled item")}</span>
-    <small>${escapeHtml(line.item_number || "No item number")} - Qty ${Number(line.quantity || 1).toLocaleString()}</small>
+    <span>${scope === "order" ? `${scopedLines.length.toLocaleString()} item line${scopedLines.length === 1 ? "" : "s"}` : escapeHtml(line.item_title || "Untitled item")}</span>
+    <small>${scope === "order" ? "Applies to the whole order" : `${escapeHtml(line.item_number || "No item number")} - Qty ${Number(line.quantity || 1).toLocaleString()}`}</small>
   `;
   openModal("manual-video-receipt-modal");
-  setTimeout(() => $("manual-video-receipt-dropzone")?.focus(), 80);
+  setTimeout(() => $("manual-video-receipt-file")?.click(), 80);
 }
 
 async function saveManualVideoReceipt() {
   const line = getManualVideoReceiptLine();
+  const targetLines = getManualVideoReceiptLines();
   const photo = state.manualVideoReceiptPhoto;
   if (!line?.id || !line.order_id) return setManualVideoReceiptError("This order line is no longer visible. Refresh pending orders and try again.");
-  if (!photo?.blob) return setManualVideoReceiptError("Paste or choose a screenshot before saving.");
+  if (!targetLines.length) return setManualVideoReceiptError("No order lines are available for this evidence.");
+  if (!photo?.blob) return setManualVideoReceiptError("Choose a video or photo before saving.");
 
   const note = String($("manual-video-receipt-note")?.value || "").trim();
-  if (!note) return setManualVideoReceiptError("Write an audit note before saving the manual receipt.");
+  if (!note) return setManualVideoReceiptError("Write an audit note before saving this evidence.");
   if (state.manualVideoReceiptBusy) return;
 
   const button = $("save-manual-video-receipt");
   state.manualVideoReceiptBusy = true;
   button?.toggleAttribute("disabled", true);
-  setManualVideoReceiptError("Saving manual video receipt...", "info");
+  setManualVideoReceiptError("Saving order evidence...", "info");
 
   try {
     const order = getOrderFromLine(line);
     const dateFolder = new Date().toISOString().slice(0, 10);
     const orderSegment = safeStorageSegment(order.order_number || line.order_id, "order");
-    const itemSegment = safeStorageSegment(line.item_number || line.id, "item");
+    const isWholeOrder = state.manualVideoReceiptScope === "order";
+    const itemSegment = safeStorageSegment(isWholeOrder ? "whole-order" : line.item_number || line.id, "item");
+    const mediaType = getEvidenceMediaType({ media_type: photo.media_type, mime_type: photo.type, path: photo.name });
     const extension = getNoInventoryEvidenceFileExtension({ path: photo.name, mime_type: photo.type }, photo.blob);
     const destinationPath = [
-      "video-receipts",
+      "standalone-order-evidence",
       "manual",
       dateFolder,
       orderSegment,
@@ -9842,14 +9898,16 @@ async function saveManualVideoReceipt() {
     const { error: uploadError } = await supabase.storage
       .from(NO_INVENTORY_EVIDENCE_BUCKET)
       .upload(destinationPath, photo.blob, {
-        contentType: photo.type || photo.blob.type || "image/png",
+        contentType: photo.type || photo.blob.type || (mediaType === "video" ? "video/mp4" : "image/png"),
         upsert: false,
       });
-    if (uploadError) throw new Error(uploadError.message || "Could not upload the manual video receipt screenshot.");
+    if (uploadError) throw new Error(uploadError.message || "Could not upload the order evidence.");
 
     const nowIso = new Date().toISOString();
     const actor = getVideoReceiptAuditActor();
-    const derivativeData = await createAndUploadEvidenceDerivatives(photo.blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath);
+    const derivativeData = mediaType === "video"
+      ? {}
+      : await createAndUploadEvidenceDerivatives(photo.blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath);
     const savedPhoto = {
       bucket: NO_INVENTORY_EVIDENCE_BUCKET,
       path: destinationPath,
@@ -9858,38 +9916,51 @@ async function saveManualVideoReceipt() {
       source_path: "manual-paste",
       capture_job_id: null,
       sort_order: 0,
-      label: `Manual video receipt - ${line.item_number || "item"}`,
-      mime_type: photo.type || photo.blob.type || "image/png",
+      label: `${isWholeOrder ? "Order" : "Item"} evidence ${mediaType === "video" ? "video" : "photo"} - ${isWholeOrder ? order.order_number || "order" : line.item_number || "item"}`,
+      mime_type: photo.type || photo.blob.type || (mediaType === "video" ? "video/mp4" : "image/png"),
+      media_type: mediaType,
       size_bytes: photo.blob.size || photo.size || 0,
       created_at: nowIso,
       signed_by_email: actor,
+      order_line_ids: targetLines.map((entry) => entry.id).filter(Boolean),
+      attachment_scope: isWholeOrder ? "order" : "line",
       metadata: {
-        source: "manual-video-receipt",
+        source: "standalone_order_evidence",
         manual: true,
         capturedAt: nowIso,
+        scope: isWholeOrder ? "order" : "line",
         orderNumber: order.order_number || "",
-        itemNumber: line.item_number || "",
+        buyerUsername: order.buyer_username || "",
+        itemNumber: isWholeOrder ? "" : line.item_number || "",
+        itemNumbers: targetLines.map((entry) => entry.item_number).filter(Boolean),
       },
     };
 
-    const question = [
-      `Video receipt screenshot captured manually for eBay item ${line.item_number || "item"}.`,
+    const auditNote = [
+      `${mediaType === "video" ? "Video" : "Photo"} evidence added manually for ${isWholeOrder ? "the full order" : `eBay item ${line.item_number || "item"}`}.`,
       note,
     ].filter(Boolean).join("\n");
 
-    const { error: taskError } = await supabase.rpc("create_ebay_order_coordination_task", {
-      _order_id: line.order_id,
-      _order_line_ids: [line.id],
-      _assigned_to_user_id: null,
-      _priority: "normal",
-      _question: question,
-      _due_at: order.ship_by_date || null,
-      _photo_attachments: [savedPhoto],
-      _signed_by_email: state.user?.email || state.employee?.display_name || "",
-    });
-    if (taskError) throw new Error(taskError.message || "Could not attach the manual receipt to the order audit trail.");
+    for (const targetLine of targetLines) {
+      const linePhoto = {
+        ...savedPhoto,
+        metadata: {
+          ...savedPhoto.metadata,
+          itemNumber: targetLine.item_number || "",
+          itemTitle: targetLine.item_title || "",
+        },
+      };
+      const { error: noteError } = await supabase.rpc("add_pending_order_line_note", {
+        _order_line_id: targetLine.id,
+        _note: auditNote,
+        _photo_attachments: [linePhoto],
+        _signed_by_email: state.user?.email || state.employee?.display_name || "",
+      });
+      if (noteError) throw new Error(noteError.message || "Could not attach this evidence to the order audit trail.");
+      targetLine.line_note_count = getLineNoteCount(targetLine) + 1;
+      targetLine.latest_line_note = auditNote;
+    }
 
-    await rememberVideoReceiptPhotoForQueue(line, savedPhoto, savedPhoto.metadata, { capturedAt: nowIso });
     state.queueVideoReceiptLoadedOrderIds.delete(line.order_id);
     if (state.selectedLine?.id === line.id || state.selectedLine?.order_id === line.order_id) {
       await loadSelectedOrderTasks();
@@ -9898,10 +9969,10 @@ async function saveManualVideoReceipt() {
 
     closeManualVideoReceiptModal();
     renderOrders();
-    setStatus("Manual video receipt saved to the order audit trail.", "success");
+    setStatus(`${mediaType === "video" ? "Video" : "Photo"} evidence saved to the ${isWholeOrder ? "order" : "item line"} audit trail.`, "success");
   } catch (error) {
-    console.error("Could not save manual video receipt:", error);
-    setManualVideoReceiptError(error?.message || "Could not save the manual video receipt.");
+    console.error("Could not save order evidence:", error);
+    setManualVideoReceiptError(error?.message || "Could not save the order evidence.");
   } finally {
     state.manualVideoReceiptBusy = false;
     button?.toggleAttribute("disabled", !state.manualVideoReceiptPhoto);
