@@ -119,6 +119,30 @@ function compactContextValue(value: unknown, depth = 0): unknown {
   return output;
 }
 
+function rawMetadataSearchText(value: unknown, depth = 0): string[] {
+  if (value === null || value === undefined || depth > 4) return [];
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    const result = text(value, 700);
+    return result ? [result] : [];
+  }
+  if (Array.isArray(value)) return value.slice(0, 40).flatMap((item) => rawMetadataSearchText(item, depth + 1));
+  if (typeof value !== "object") return [];
+
+  const rows: string[] = [];
+  for (const [key, item] of Object.entries(value as Record<string, unknown>).slice(0, 100)) {
+    if (/(raw|payload|token|secret|credential|authorization|access_token|refresh_token|html|body_html|body_text|attachment|blob|image|media|thumbnail|photo|picture|content)/i.test(key)) continue;
+    const keyMayContainLink = /(order|purchase|transaction|txn|item|listing|offer|reference|return|case|request|dispute|buyer|username|member|title|subject|url|href|action|link|id)/i.test(key);
+    if (keyMayContainLink) {
+      const keyText = text(key, 160);
+      if (keyText) rows.push(keyText);
+      rows.push(...rawMetadataSearchText(item, depth + 1));
+    } else if (depth <= 1 && typeof item === "object") {
+      rows.push(...rawMetadataSearchText(item, depth + 1));
+    }
+  }
+  return rows.filter(Boolean);
+}
+
 function daysBetween(left?: string | null, right?: string | null) {
   if (!left || !right) return null;
   const leftTime = Date.parse(left);
@@ -152,7 +176,9 @@ function buildSearchText(conversation: Record<string, any>, messages: Array<Reco
       message.message_body,
       message.message_body_preview,
     ]),
-  ].filter(Boolean).join("\n");
+    ...rawMetadataSearchText(conversation.raw_summary),
+    ...rawMetadataSearchText(conversation.raw_detail_metadata),
+  ].filter(Boolean).join("\n").slice(0, 60000);
 }
 
 function extractConversationIdentifiers(conversation: Record<string, any>, messages: Array<Record<string, any>>) {
@@ -519,6 +545,15 @@ async function buildLinkCandidates(
         confidence: 1.0,
         status: "confirmed",
       }));
+    }
+    const matchedOrderNumbers = new Set(orders.map((order) => String(order.order_number || "")));
+    const missingOrderNumbers = identifiers.orderNumbers.filter((orderNumber) => !matchedOrderNumbers.has(orderNumber));
+    if (missingOrderNumbers.length) {
+      warnings.push(warning(
+        "conversation_order_not_found_locally",
+        `eBay referenced order ${missingOrderNumbers.slice(0, 5).join(", ")}, but no matching local ebay_orders row was found. Sync order history or pending orders for that order number.`,
+        "warning",
+      ));
     }
   }
 

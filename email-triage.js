@@ -6623,6 +6623,82 @@
     return `https://www.ebay.com/mesh/ord/details?${params.toString()}`;
   }
 
+  function safeEbayExternalUrl(value) {
+    const href = safeEbayNotificationUrl(value);
+    if (!href) return "";
+    try {
+      const url = new URL(href);
+      const host = url.hostname.toLowerCase();
+      return host === "ebay.com" || host.endsWith(".ebay.com") ? url.href : "";
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function findEbayExternalUrlInRecord(record, depth = 0, containerKey = "") {
+    if (!record || depth > 4) return "";
+    const normalizedContainerKey = normalizeEbaySearchText(containerKey);
+    if (/(media|image|thumbnail|photo|picture|avatar|src)/.test(normalizedContainerKey)) return "";
+    if (typeof record === "string") return depth === 0 ? safeEbayExternalUrl(record) : "";
+    if (Array.isArray(record)) {
+      for (const item of record) {
+        const url = findEbayExternalUrlInRecord(item, depth + 1, containerKey);
+        if (url) return url;
+      }
+      return "";
+    }
+    if (typeof record !== "object") return "";
+
+    const preferredKeys = [
+      "conversationUrl",
+      "conversation_url",
+      "messageUrl",
+      "message_url",
+      "actionUrl",
+      "action_url",
+      "deepLink",
+      "deep_link",
+      "webUrl",
+      "web_url",
+      "href",
+      "url",
+      "link",
+    ];
+    for (const key of preferredKeys) {
+      const url = safeEbayExternalUrl(record[key]);
+      if (url) return url;
+    }
+    for (const [key, value] of Object.entries(record)) {
+      if (preferredKeys.includes(key)) continue;
+      const url = findEbayExternalUrlInRecord(value, depth + 1, key);
+      if (url) return url;
+    }
+    return "";
+  }
+
+  function buildEbayConversationUrl(conversation = {}) {
+    const existingUrl = findEbayExternalUrlInRecord([
+      conversation.raw_detail_metadata,
+      conversation.raw_summary,
+      conversation.raw,
+      conversation.summary,
+    ]);
+    if (existingUrl) return existingUrl;
+
+    const identity = ebayBuyerIdentity(conversation);
+    const params = new URLSearchParams();
+    const ebayConversationId = compactConversationText(conversation.ebay_conversation_id);
+    const buyer = compactConversationText(identity.username || conversation.other_party_username || identity.displayName);
+    const title = compactConversationText(conversation.conversation_title || ebayConversationTitle(conversation));
+    if (ebayConversationId) {
+      params.set("conversationId", ebayConversationId);
+      params.set("convId", ebayConversationId);
+    }
+    if (buyer && buyer !== "Unknown buyer") params.set("buyer", buyer);
+    if (title && title !== "Untitled conversation") params.set("q", title);
+    return `https://mesg.ebay.com/mesgweb/ViewMessages/0${params.toString() ? `?${params.toString()}` : ""}`;
+  }
+
   function buildPendingOrdersContextUrl(facts = {}) {
     const params = new URLSearchParams();
     if (facts.orderNumbers?.length) {
@@ -6731,9 +6807,14 @@
       return `<div class="ebay-order-context-strip is-muted"><span><i data-lucide="loader-circle"></i>Loading order context</span></div>`;
     }
     if (!hasOrderContext) {
+      const ebayConversationHref = buildEbayConversationUrl(conversation);
       return `
         <div class="ebay-order-context-strip is-muted">
           <span><i data-lucide="search"></i>No linked order yet</span>
+          <a class="ebay-order-context-link is-primary" href="${escapeHtml(ebayConversationHref)}" target="_blank" rel="noopener noreferrer" title="Open this buyer conversation in eBay to verify order linkage directly.">
+            <i data-lucide="external-link"></i>
+            Open eBay chat
+          </a>
           <a class="ebay-order-context-link" href="${escapeHtml(facts.pendingHref)}">Open pending queue</a>
         </div>
       `;
@@ -6764,7 +6845,7 @@
             <i data-lucide="external-link"></i>
             ${escapeHtml(facts.ogOrderLabel)}
           </a>
-          ${facts.ebayOrderHref ? `<a class="ebay-order-context-link" href="${escapeHtml(facts.ebayOrderHref)}" target="_blank" rel="noopener">Open in eBay</a>` : ""}
+          ${facts.ebayOrderHref ? `<a class="ebay-order-context-link" href="${escapeHtml(facts.ebayOrderHref)}" target="_blank" rel="noopener noreferrer">Open order in eBay</a>` : ""}
         </div>
       </div>
     `;
@@ -8046,6 +8127,7 @@
     const orderLabel = facts.orderNumbers.length > 1 ? `${facts.orderNumbers.length} orders` : facts.orderNumbers[0] || "";
     const valueLabel = facts.orderTotal !== null ? formatContextMoney(facts.orderTotal) : "";
     const receivedLabel = formatContextDate(ebayConversationTime(conversation));
+    const ebayConversationHref = buildEbayConversationUrl(conversation);
     const buyerHeading = isPlatformConversation
       ? ebayConversationTitle(conversation)
       : `${identity.displayName}${identity.name && identity.name !== identity.displayName ? ` - ${identity.name}` : ""}`;
@@ -8067,7 +8149,11 @@
           </div>
         </div>
         <div class="ebay-detail-actions">
-          ${facts.ebayOrderHref ? `<a class="secondary-btn" href="${escapeHtml(facts.ebayOrderHref)}" target="_blank" rel="noopener"><i data-lucide="external-link"></i>Open in eBay</a>` : ""}
+          <a class="secondary-btn" href="${escapeHtml(ebayConversationHref)}" target="_blank" rel="noopener noreferrer" title="Open this conversation in eBay. If eBay lands on the message center, search the buyer or copied conversation id shown here.">
+            <i data-lucide="external-link"></i>
+            Open eBay chat
+          </a>
+          ${facts.ebayOrderHref ? `<a class="secondary-btn" href="${escapeHtml(facts.ebayOrderHref)}" target="_blank" rel="noopener noreferrer"><i data-lucide="receipt-text"></i>Open order in eBay</a>` : ""}
           ${facts.orderNumbers.length && facts.ogOrderHref ? `<a class="secondary-btn" href="${escapeHtml(facts.ogOrderHref)}"><i data-lucide="history"></i>View order history</a>` : ""}
           <button type="button" class="secondary-btn" data-ebay-detail-action="classify-conversation" data-ebay-conversation-id="${escapeHtml(conversation.id)}" ${state.ebayConversationClassificationLoadingId === conversation.id ? "disabled" : ""}>
             <i data-lucide="${state.ebayConversationClassificationLoadingId === conversation.id ? "loader-circle" : "sparkles"}"></i>
@@ -8165,6 +8251,7 @@
     const linkConfidence = context?.link_confidence || {};
     const facts = ebayConversationContextFacts(state, conversation);
     const identity = ebayBuyerIdentity(conversation);
+    const ebayConversationHref = buildEbayConversationUrl(conversation);
     const compactSummary = context ? `
       <section class="context-card ebay-context-compact-summary">
         <div class="context-card-head">
@@ -8178,7 +8265,8 @@
           { label: "Link status", value: facts.orderNumbers.length ? "Order linked" : "Buyer linked" },
         ])}
         <div class="ebay-context-compact-actions">
-          ${facts.ebayOrderHref ? `<a class="secondary-btn" href="${escapeHtml(facts.ebayOrderHref)}" target="_blank" rel="noopener"><i data-lucide="external-link"></i>Open in eBay</a>` : ""}
+          <a class="secondary-btn" href="${escapeHtml(ebayConversationHref)}" target="_blank" rel="noopener noreferrer"><i data-lucide="external-link"></i>Open eBay chat</a>
+          ${facts.ebayOrderHref ? `<a class="secondary-btn" href="${escapeHtml(facts.ebayOrderHref)}" target="_blank" rel="noopener noreferrer"><i data-lucide="receipt-text"></i>Open order in eBay</a>` : ""}
           ${facts.orderNumbers.length && facts.ogOrderHref ? `<a class="secondary-btn" href="${escapeHtml(facts.ogOrderHref)}"><i data-lucide="history"></i>Open in history</a>` : ""}
           <button type="button" class="secondary-btn" data-ebay-detail-action="refresh-context" data-ebay-conversation-id="${escapeHtml(conversation.id)}" ${isLoading ? "disabled" : ""}>
             <i data-lucide="${isLoading ? "loader-circle" : "refresh-cw"}"></i>
