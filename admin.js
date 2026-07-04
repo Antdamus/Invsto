@@ -2332,7 +2332,7 @@ const esc = escapeHtml;
 async function loadUsers(){
   const { data, error } = await supabaseClient
     .from('employees')
-    .select('id, user_id, display_name, email, role, worker_type, hourly_rate, active, created_at, invited_at, accepted_at, email_triage_access')
+    .select('id, user_id, display_name, email, role, worker_type, hourly_rate, active, created_at, invited_at, accepted_at, email_triage_access, post_order_issue_access')
     .order('display_name', { ascending: true });
 
   if (error) throw error;
@@ -2351,6 +2351,7 @@ async function loadUsers(){
       invited_at: r.invited_at || null,
       accepted_at: r.accepted_at || null,
       email_triage_access: r.email_triage_access === true,
+      post_order_issue_access: r.post_order_issue_access === true,
     };
   });
 

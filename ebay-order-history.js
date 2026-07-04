@@ -956,6 +956,24 @@ function isAdminUser() {
   return String(state.employee?.role || "").toLowerCase() === "admin";
 }
 
+function employeeHasPostOrderIssueAccess(employee = {}) {
+  return String(employee.role || "").toLowerCase() === "admin"
+    || employee.post_order_issue_access === true;
+}
+
+async function canAccessPostOrderIssues(employee = {}) {
+  if (employeeHasPostOrderIssueAccess(employee)) return true;
+
+  try {
+    const { data, error } = await supabase.rpc("can_access_post_order_issues");
+    if (error) throw error;
+    return data === true;
+  } catch (error) {
+    console.warn("Could not verify Requests/Returns/Disputes access:", error);
+    return false;
+  }
+}
+
 function getEventGpsLabel(event) {
   const status = String(event?.gps_status || event?.payload?.gps?.status || "").trim();
   if (!status) return "";
@@ -1603,7 +1621,7 @@ async function checkHistoryAuth() {
 
   const { data: employee, error: employeeError } = await supabase
     .from("employees")
-    .select("id, user_id, email, role, active, display_name")
+    .select("id, user_id, email, role, active, display_name, post_order_issue_access")
     .eq("user_id", session.user.id)
     .maybeSingle();
 
@@ -1612,11 +1630,20 @@ async function checkHistoryAuth() {
     return false;
   }
 
+  const hasPostOrderIssueAccess = isReturnsWorkbenchPage()
+    ? await canAccessPostOrderIssues(employee)
+    : employeeHasPostOrderIssueAccess(employee);
+  if (isReturnsWorkbenchPage() && !hasPostOrderIssueAccess) {
+    window.location.href = "worker-dashboard.html";
+    return false;
+  }
+
   state.user = session.user;
   state.employee = employee;
+  window.__ogPostOrderIssueAccess = hasPostOrderIssueAccess;
   const greeting = $("history-greeting");
   if (greeting) {
-    const pageTitle = isReturnsWorkbenchPage() ? "eBay Post-Order Issues" : "eBay Order History";
+    const pageTitle = isReturnsWorkbenchPage() ? "eBay Requests, Returns, and Disputes" : "eBay Order History";
     greeting.textContent = `${pageTitle}${employee.display_name ? ` - ${employee.display_name}` : ""}`;
   }
   const subtitle = $("history-subtitle");
@@ -1628,7 +1655,7 @@ async function checkHistoryAuth() {
         : "Search completed orders and open packing proof photos.";
   }
   const mode = $("history-mode-label");
-  if (mode) mode.textContent = isReturnsWorkbenchPage() ? "Requests" : isAdminUser() ? "Admin" : "Proof";
+  if (mode) mode.textContent = isReturnsWorkbenchPage() ? "Post-order issues" : isAdminUser() ? "Admin" : "Proof";
   if (!isAdminUser()) {
     document.body.classList.add("history-worker-proof-mode");
     $("history-status")?.querySelector('option[value="reverted"]')?.remove();

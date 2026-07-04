@@ -203,17 +203,27 @@ async function saveUserNotificationPreferences({
   return true;
 }
 
-async function saveUserAppAccess({ userId, emailTriageAccess }) {
+async function saveUserAppAccess({ userId, emailTriageAccess, postOrderIssueAccess }) {
   if (!userId) return true;
 
-  const { error } = await supabase.rpc("admin_set_employee_email_triage_access", {
+  const { error: emailError } = await supabase.rpc("admin_set_employee_email_triage_access", {
     _user_id: userId,
     _enabled: !!emailTriageAccess
   });
 
-  if (error) {
-    console.error("App access save failed", error);
-    throw new Error(error.message || "App access save failed.");
+  if (emailError) {
+    console.error("Email Triage access save failed", emailError);
+    throw new Error(emailError.message || "Email Triage access save failed.");
+  }
+
+  const { error: postOrderError } = await supabase.rpc("admin_set_employee_post_order_issue_access", {
+    _user_id: userId,
+    _enabled: !!postOrderIssueAccess
+  });
+
+  if (postOrderError) {
+    console.error("Requests/Returns/Disputes access save failed", postOrderError);
+    throw new Error(postOrderError.message || "Requests/Returns/Disputes access save failed.");
   }
 
   return true;
@@ -385,6 +395,9 @@ if (!taxStatusLoaded) {
     chips.push(chip(`Role: ${role}`, "accent", "🧑‍💼"));
     if (String(role).toLowerCase() === "admin" || row.email_triage_access === true) {
       chips.push(chip("Email Triage", "accent", "MAIL"));
+    }
+    if (String(role).toLowerCase() === "admin" || row.post_order_issue_access === true) {
+      chips.push(chip("Requests/Returns/Disputes", "accent", "RRD"));
     }
 
 
@@ -617,6 +630,13 @@ if (!taxStatusLoaded) {
                   <span class="muted">Show Email Triage on this worker's dashboard and allow entry.</span>
                 </div>
               </label>
+              <label class="ud-field ud-active ud-span2">
+                <span>Requests, Returns & Disputes</span>
+                <div class="ud-switch">
+                  <input id="udPostOrderIssueAccess" type="checkbox" />
+                  <span class="muted">Show the eBay post-order workbench and allow return/request/dispute work.</span>
+                </div>
+              </label>
             </div>
           </section>
 <!-- Watchlist (who this user watches) -->
@@ -829,7 +849,8 @@ if (!taxStatusLoaded) {
             msg.textContent = "Saving app access...";
             await saveUserAppAccess({
               userId: activeUserId,
-              emailTriageAccess: !!qs("#udEmailTriageAccess")?.checked
+              emailTriageAccess: !!qs("#udEmailTriageAccess")?.checked,
+              postOrderIssueAccess: !!qs("#udPostOrderIssueAccess")?.checked
             });
             if (typeof window.loadUsers === "function") {
               await window.loadUsers();
@@ -905,7 +926,8 @@ function readDrawerState() {
     taskChannel: qs("#udTaskChannel")?.value || "auto",
     urgentBoth: !!qs("#udUrgentBoth")?.checked,
     emailOverride: qs("#udEmailOverride")?.value || "",
-    emailTriageAccess: !!qs("#udEmailTriageAccess")?.checked
+    emailTriageAccess: !!qs("#udEmailTriageAccess")?.checked,
+    postOrderIssueAccess: !!qs("#udPostOrderIssueAccess")?.checked
   };
 }
 
@@ -944,7 +966,8 @@ function setDirtyFromCurrent() {
     cur.taskChannel !== drawerSnapshot.taskChannel ||
     cur.urgentBoth !== drawerSnapshot.urgentBoth ||
     cur.emailOverride !== drawerSnapshot.emailOverride ||
-    cur.emailTriageAccess !== drawerSnapshot.emailTriageAccess;
+    cur.emailTriageAccess !== drawerSnapshot.emailTriageAccess ||
+    cur.postOrderIssueAccess !== drawerSnapshot.postOrderIssueAccess;
 
   setDirty(changed);
 }
@@ -1450,6 +1473,7 @@ const [phoneState, notificationState] = await Promise.all([
     qs("#udHourly").value = row.hourly_rate ?? row.hourly ?? "";
     qs("#udActive").checked = !!row.active;
     qs("#udEmailTriageAccess").checked = row.email_triage_access === true;
+    qs("#udPostOrderIssueAccess").checked = row.post_order_issue_access === true;
 
     drawer.setAttribute("data-employee-id", activeEmployeeId);
     // Phase 2: address section

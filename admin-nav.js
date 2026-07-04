@@ -15,7 +15,7 @@
     { href: "pending-orders.html", label: "Pending Orders", mark: "PO" },
     { href: "team-tasks.html", label: "Tasks", mark: "TS" },
     { href: "ebay-order-history.html", label: "Order History", mark: "OH" },
-    { href: "ebay-returns.html", label: "Returns", mark: "R" },
+    { href: "ebay-returns.html", label: "Requests, Returns & Disputes", mark: "RRD" },
     { href: "email-triage.html", label: "Email Triage", mark: "ET" },
     { href: "timeclock.html", label: "Timesheet", mark: "T" },
   ];
@@ -32,16 +32,18 @@
     { href: "email-triage.html", label: "Email Triage", mark: "ET", requiresEmailTriageAccess: true },
     { href: "team-tasks.html", label: "Tasks", mark: "TS" },
     { href: "ebay-order-history.html", label: "Order History", mark: "OH" },
-    { href: "ebay-returns.html", label: "Returns", mark: "R" },
+    { href: "ebay-returns.html", label: "Requests, Returns & Disputes", mark: "RRD", requiresPostOrderIssueAccess: true },
     { href: "locations.html", label: "Locations", mark: "L" },
     { href: "dashboard.html", label: "Admin Dashboard", mark: "AD" },
   ];
 
   function getWorkerNavItems() {
     const canAccessEmailTriage = window.__ogEmailTriageAccess === true;
+    const canAccessPostOrderIssues = window.__ogPostOrderIssueAccess === true;
     return WORKER_NAV_ITEMS.filter((item) => {
-      if (!item.requiresEmailTriageAccess) return true;
-      return canAccessEmailTriage;
+      if (item.requiresEmailTriageAccess) return canAccessEmailTriage;
+      if (item.requiresPostOrderIssueAccess) return canAccessPostOrderIssues;
+      return true;
     });
   }
 
@@ -102,7 +104,7 @@
 
     const { data, error } = await client
       .from("employees")
-      .select("id, user_id, display_name, role, active, email_triage_access")
+      .select("id, user_id, display_name, role, active, email_triage_access, post_order_issue_access")
       .eq("user_id", user.id)
       .maybeSingle();
 
@@ -138,6 +140,23 @@
       return data === true;
     } catch (error) {
       console.warn("Navigation Email Triage access lookup failed:", error);
+      return false;
+    }
+  }
+
+  async function checkPostOrderIssueAccess(employee) {
+    const role = String(employee?.role || "").toLowerCase();
+    if (role === "admin" || employee?.post_order_issue_access === true) return true;
+
+    const client = await waitForSupabaseReady();
+    if (!client?.rpc) return false;
+
+    try {
+      const { data, error } = await client.rpc("can_access_post_order_issues");
+      if (error) throw error;
+      return data === true;
+    } catch (error) {
+      console.warn("Navigation Requests/Returns/Disputes access lookup failed:", error);
       return false;
     }
   }
@@ -313,6 +332,7 @@
     const role = String(employee?.role || "").toLowerCase();
     if (employee?.active === false || !role) return;
     window.__ogEmailTriageAccess = await checkEmailTriageAccess(employee);
+    window.__ogPostOrderIssueAccess = await checkPostOrderIssueAccess(employee);
     renderRoleNavigation(role === "admin" ? "admin" : "worker");
   }
 
