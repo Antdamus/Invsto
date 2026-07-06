@@ -3612,13 +3612,6 @@
     return map[conversation.id] || null;
   }
 
-  function ebayConversationHasProviderUnreadSignal(conversation = {}) {
-    if (Number(conversation?.unread_count || 0) > 0) return true;
-    const localState = String(conversation?.local_read_state || conversation?.raw?.local_read_state || "").toLowerCase();
-    if (localState === "unread") return true;
-    return ebayConversationProviderReadState(conversation) === "unread";
-  }
-
   function ebayConversationUserReadRecordIsCurrent(conversation = {}, record = {}) {
     if (!record || record.state !== "read") return false;
     const latestMessageId = compactConversationText(conversation.latest_message_id || conversation.raw?.latest_message_id || "");
@@ -3634,7 +3627,7 @@
     const record = getEbayConversationUserReadRecord(conversation, state);
     if (record?.state === "unread") return true;
     if (ebayConversationUserReadRecordIsCurrent(conversation, record)) return false;
-    return ebayConversationHasProviderUnreadSignal(conversation);
+    return true;
   }
 
   function ebayConversationStateWithPersonalRead(conversationId, readState = "read", context = null, state = adminClassificationState) {
@@ -3670,14 +3663,14 @@
     return ebayConversationTaskSummary(state, conversation.id).pendingCount > 0;
   }
 
-  function ebaySavedViewMatches(conversation, filter = "all") {
+  function ebaySavedViewMatches(conversation, filter = "all", state = adminClassificationState) {
     const summary = ebayConversationSummary(conversation);
     const classification = ebayConversationClassification(conversation);
     if (filter === "last_24_hours") return ebayConversationIsLast24Hours(conversation);
-    if (filter === "pending_tasks") return ebayConversationHasPendingTasks(conversation);
+    if (filter === "pending_tasks") return ebayConversationHasPendingTasks(conversation, state);
     if (filter === "members") return ebayConversationSource(conversation) === "member_message";
     if (filter === "ebay_notifications") return ebayConversationSource(conversation) === "platform_notification";
-    if (filter === "unread") return ebayConversationIsUnreadForViewer(conversation);
+    if (filter === "unread") return ebayConversationIsUnreadForViewer(conversation, state);
     if (filter === "unclassified") return !classification;
     if (filter === "returns") return summary.has_return_link || ebayConversationHasTopic(conversation, ["return_request", "return"]);
     if (filter === "shipping_issues") return ebayConversationHasTopic(conversation, ["shipping_problem", "shipping_status_tracking", "missing_item", "shipping_issue", "order_status", "delivery_timing"]);
@@ -3862,7 +3855,7 @@
     const filter = state.ebayConversationFilter || "all";
     const search = parseEbayStructuredSearch(state.ebayConversationSearchQuery || "");
     return safeArray(state.ebayConversations).filter((conversation) => {
-      if (!ebaySavedViewMatches(conversation, filter)) return false;
+      if (!ebaySavedViewMatches(conversation, filter, state)) return false;
       if (!ebayClassificationMatchesFilters(conversation, state.ebayConversationClassificationFilters)) return false;
       if (!ebayConversationMatchesStructuredSearch(conversation, search.structured)) return false;
       if (!search.terms.length) return true;
@@ -4939,7 +4932,7 @@
 
   function renderEbayConversationBadges(conversation, options = {}) {
     const compact = options.compact === true;
-    const unread = ebayConversationIsUnreadForViewer(conversation);
+    const unread = ebayConversationIsUnreadForViewer(conversation, options.state || adminClassificationState);
     const badges = [
       renderEbayClassificationListBadges(conversation, { compact }),
       unread ? renderBadge("Unread", "warning") : renderBadge("Read", "muted"),
@@ -5831,7 +5824,7 @@
               ${summary.seller_username ? `<span>Seller ${escapeHtml(summary.seller_username)}</span>` : ""}
             </span>
           `}
-          ${renderEbayConversationBadges(conversation, { compact })}
+          ${renderEbayConversationBadges(conversation, { compact, state })}
         </button>
       `;
     }).join("") + renderEbayConversationTaskAuditModal(state);
@@ -5845,11 +5838,11 @@
     const smartCounts = ebayMailboxSmartCounts(state);
     const canonicalTotal = page.canonical_total ?? ebayMailboxCountValue(smartCounts.all, rows.length);
     const matchingTotal = page.matching_total ?? filtered.length;
-    const members = ebayMailboxCountValue(smartCounts.members, rows.filter((conversation) => ebaySavedViewMatches(conversation, "members")).length);
-    const notifications = ebayMailboxCountValue(smartCounts.ebay_notifications, rows.filter((conversation) => ebaySavedViewMatches(conversation, "ebay_notifications")).length);
+    const members = ebayMailboxCountValue(smartCounts.members, rows.filter((conversation) => ebaySavedViewMatches(conversation, "members", state)).length);
+    const notifications = ebayMailboxCountValue(smartCounts.ebay_notifications, rows.filter((conversation) => ebaySavedViewMatches(conversation, "ebay_notifications", state)).length);
     const unread = rows.filter((conversation) => ebayConversationIsUnreadForViewer(conversation, state)).length;
-    const unclassified = ebayMailboxCountValue(smartCounts.unclassified, rows.filter((conversation) => ebaySavedViewMatches(conversation, "unclassified")).length);
-    const returns = ebayMailboxCountValue(smartCounts.returns, rows.filter((conversation) => ebaySavedViewMatches(conversation, "returns")).length);
+    const unclassified = ebayMailboxCountValue(smartCounts.unclassified, rows.filter((conversation) => ebaySavedViewMatches(conversation, "unclassified", state)).length);
+    const returns = ebayMailboxCountValue(smartCounts.returns, rows.filter((conversation) => ebaySavedViewMatches(conversation, "returns", state)).length);
     const query = compactConversationText(state.ebayConversationSearchQuery);
     const activeFilterCount = countEbayClassificationFilters(state.ebayConversationClassificationFilters);
     const degraded = state.ebayMailboxMode === "legacy" || Boolean(state.ebayMailboxWarning);
@@ -6910,9 +6903,7 @@
   function ebayStateLabelGroups(conversation, classification = ebayConversationClassification(conversation)) {
     const stale = classification ? ebayClassificationIsStale(conversation, classification) : false;
     const stateLabels = [];
-    const localReadState = ebayConversationReadState(conversation);
-    const providerReadState = ebayConversationProviderReadState(conversation);
-    addConversationLabel(stateLabels, localReadState === "unread" || providerReadState === "unread" ? "Unread" : "Read");
+    addConversationLabel(stateLabels, ebayConversationIsUnreadForViewer(conversation, adminClassificationState) ? "Unread" : "Read");
     if (!classification) addConversationLabel(stateLabels, "Unclassified");
     if (conversation?.pending_provider_update === true) addConversationLabel(stateLabels, "Pending Read Sync");
     if (String(conversation?.read_sync_status || "").toLowerCase() === "provider_update_failed") addConversationLabel(stateLabels, "Read Sync Failed");

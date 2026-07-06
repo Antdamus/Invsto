@@ -1619,11 +1619,22 @@ async function checkHistoryAuth() {
     return false;
   }
 
-  const { data: employee, error: employeeError } = await supabase
+  let { data: employee, error: employeeError } = await supabase
     .from("employees")
     .select("id, user_id, email, role, active, display_name, post_order_issue_access")
     .eq("user_id", session.user.id)
     .maybeSingle();
+
+  if (employeeError && isReturnsWorkbenchPage()) {
+    console.warn("Employee access lookup with post-order flag failed; retrying base employee lookup:", employeeError);
+    const fallback = await supabase
+      .from("employees")
+      .select("id, user_id, email, role, active, display_name")
+      .eq("user_id", session.user.id)
+      .maybeSingle();
+    employee = fallback.data || null;
+    employeeError = fallback.error || null;
+  }
 
   if (employeeError || !employee || employee.active === false) {
     window.location.href = "worker-dashboard.html";
@@ -3046,13 +3057,27 @@ function setReturnTaskSaveStatus(message = "", type = "info") {
 }
 
 async function loadReturnAssignees() {
-  const { data, error } = await supabase
-    .from("employees")
-    .select("id, user_id, display_name, email, role, active")
-    .eq("active", true)
-    .order("display_name", { ascending: true });
-  if (error) throw error;
-  state.returnAssignees = (data || []).filter((employee) => employee.user_id);
+  try {
+    const { data, error } = await supabase
+      .from("employees")
+      .select("id, user_id, display_name, email, role, active")
+      .eq("active", true)
+      .order("display_name", { ascending: true });
+    if (error) throw error;
+    state.returnAssignees = (data || []).filter((employee) => employee.user_id);
+  } catch (error) {
+    console.warn("Could not load full return assignee directory; using current worker only:", error);
+    state.returnAssignees = state.employee?.user_id
+      ? [{
+        id: state.employee.id,
+        user_id: state.employee.user_id,
+        display_name: state.employee.display_name || state.employee.email || state.user?.email || "Current worker",
+        email: state.employee.email || state.user?.email || "",
+        role: state.employee.role || "employee",
+        active: state.employee.active !== false,
+      }]
+      : [];
+  }
   renderReturnAssigneeFilter();
 }
 
