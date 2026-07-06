@@ -960,7 +960,7 @@ async function loadCurrentWorker() {
   state.user = sessionData.session.user;
   const { data: employee, error } = await supabase
     .from("employees")
-    .select("id, display_name, role, active")
+    .select("id, user_id, email, display_name, role, active")
     .eq("user_id", state.user.id)
     .maybeSingle();
 
