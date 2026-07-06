@@ -3710,6 +3710,9 @@ function renderOrders() {
             ${lineNoteCountMarkup}
             ${lineNotePreviewMarkup}
           </span>
+          <span class="queue-video-receipt-evidence" data-queue-video-evidence="${escapeHtml(line.id)}">
+            <span class="queue-video-receipt-empty">Checking saved video receipt screenshot...</span>
+          </span>
         </span>
         <b>${escapeHtml(line.line_status || "pending")}</b>
       `;
@@ -3798,6 +3801,7 @@ function renderOrders() {
     }
 
     state.orderRenderFrame = 0;
+    scheduleQueueVideoReceiptEvidenceHydration(state.filteredOrders);
     logPendingOrderPerf("renderOrders complete", startedAt, {
       groups: groups.length,
       rows: state.filteredOrders.length,
