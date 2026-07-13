@@ -503,6 +503,11 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/ebay-inventory-sync/index.ts"
 
+[functions.ebay-order-sync]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ebay-order-sync/index.ts"
+
 [functions.ebay-account-deletion]
 enabled = true
 verify_jwt = false

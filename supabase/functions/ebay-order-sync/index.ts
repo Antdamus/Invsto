@@ -237,6 +237,39 @@ function getOrderCancelStatus(order: any): string {
   return toText(order?.cancelStatus?.cancelState || order?.cancelStatus?.cancelStatus).toUpperCase();
 }
 
+function isNormalCancelStatus(status: string): boolean {
+  return !status || ["NONE_REQUESTED", "NOT_REQUESTED", "NO_CANCEL", "NOT_CANCELLED"].includes(status);
+}
+
+function getCancelRequests(order: any): any[] {
+  return Array.isArray(order?.cancelStatus?.cancelRequests) ? order.cancelStatus.cancelRequests : [];
+}
+
+function hasCancellationSignal(order: any): boolean {
+  return !isNormalCancelStatus(getOrderCancelStatus(order)) || getCancelRequests(order).length > 0;
+}
+
+function buildApiCancellationCase(order: any): JsonRecord | null {
+  if (!hasCancellationSignal(order)) return null;
+  const requests = getCancelRequests(order);
+  const latest = requests[0] || {};
+  const cancelStatus = getOrderCancelStatus(order);
+  const orderNumber = extractOrderNumber(order);
+  return {
+    source: "ebay_fulfillment_api",
+    orderNumber,
+    cancelStatus,
+    cancellationStatus: cancelStatus,
+    cancelReason: toText(latest?.cancelReason || order?.cancelStatus?.cancelReason),
+    cancellationReason: toText(latest?.cancelReason || order?.cancelStatus?.cancelReason),
+    cancelInitiator: toText(latest?.cancelInitiator || order?.cancelStatus?.cancelInitiator),
+    requestedAt: toIsoDate(latest?.cancelRequestDate || latest?.requestedDate || latest?.creationDate || order?.cancelStatus?.cancelRequestDate),
+    completedAt: toIsoDate(latest?.cancelCompletedDate || order?.cancelStatus?.cancelledDate || order?.cancelStatus?.cancelCompletedDate),
+    importedAt: new Date().toISOString(),
+    cancelRequests: requests,
+  };
+}
+
 function normalizeFinanceTransactionStatus(value: unknown): string {
   const status = toText(value).toUpperCase();
   if (status.includes("HOLD")) return "on_hold";
@@ -439,6 +472,7 @@ function prepareOrder(order: any, itemBySku: Map<string, any>, financeTransactio
   const payment = Array.isArray(order?.paymentSummary?.payments) ? order.paymentSummary.payments[0] : null;
   const buyer = order?.buyer || {};
   const lineItems = Array.isArray(order?.lineItems) ? order.lineItems : [];
+  const apiCancellationCase = buildApiCancellationCase(order);
 
   const preparedLines = lineItems.map((line: any, index: number) => {
     const sku = extractLineSku(line);
@@ -464,6 +498,9 @@ function prepareOrder(order: any, itemBySku: Map<string, any>, financeTransactio
       raw_payload: {
         source: "ebay_fulfillment_api",
         orderPaymentStatus: getOrderPaymentStatus(order),
+        orderFulfillmentStatus: getOrderFulfillmentStatus(order),
+        orderCancelStatus: getOrderCancelStatus(order),
+        ...(apiCancellationCase ? { api_cancellation_case: apiCancellationCase } : {}),
         ...(ebayFinance ? { ebayFinance } : {}),
         line,
       },
@@ -501,6 +538,9 @@ function prepareOrder(order: any, itemBySku: Map<string, any>, financeTransactio
       raw_payload: {
         source: "ebay_fulfillment_api",
         orderPaymentStatus: getOrderPaymentStatus(order),
+        orderFulfillmentStatus: getOrderFulfillmentStatus(order),
+        orderCancelStatus: getOrderCancelStatus(order),
+        ...(apiCancellationCase ? { api_cancellation_case: apiCancellationCase } : {}),
         ...(orderFinance ? { ebayFinance: orderFinance } : {}),
         order,
       },
@@ -541,6 +581,40 @@ async function fetchOrders(token: string, body: JsonRecord): Promise<any[]> {
   }
 
   return orders.slice(0, limit);
+}
+
+async function hydrateCancellationOrderDetails(
+  token: string,
+  orders: any[],
+  detailLimit: number,
+): Promise<{ orders: any[]; checked: number; warnings: JsonRecord[] }> {
+  const warnings: JsonRecord[] = [];
+  const candidates = orders
+    .filter(hasCancellationSignal)
+    .slice(0, Math.max(0, detailLimit));
+  if (!candidates.length) return { orders, checked: 0, warnings };
+
+  const byOrderNumber = new Map<string, any>();
+  for (const order of candidates) {
+    const orderNumber = extractOrderNumber(order);
+    if (!orderNumber || byOrderNumber.has(orderNumber)) continue;
+    try {
+      byOrderNumber.set(orderNumber, await ebayRequest(token, `/sell/fulfillment/v1/order/${encodeURIComponent(orderNumber)}`));
+    } catch (error) {
+      warnings.push({
+        orderNumber,
+        reason: "ebay_cancellation_detail_lookup_failed",
+        message: compactError(error),
+      });
+    }
+  }
+
+  if (!byOrderNumber.size) return { orders, checked: candidates.length, warnings };
+  return {
+    orders: orders.map((order) => byOrderNumber.get(extractOrderNumber(order)) || order),
+    checked: byOrderNumber.size,
+    warnings,
+  };
 }
 
 async function loadItemMapBySku(supabase: any, skus: string[]): Promise<Map<string, any>> {
@@ -881,22 +955,33 @@ Deno.serve(async (req) => {
     runId = run.id;
 
     const token = await getEbayAccessToken();
-    const rawOrders = await fetchOrders(token, body);
+    let rawOrders = await fetchOrders(token, body);
     const orderIdsRequested = Array.isArray(body.orderIds)
       ? unique(body.orderIds.map(toText).filter(Boolean)).slice(0, MAX_ORDER_LIMIT)
       : [];
     const requestedOrderLimit = orderIdsRequested.length
       ? orderIdsRequested.length
       : Math.min(Math.max(Math.trunc(Number(body.limit || 50)), 1), MAX_ORDER_LIMIT);
+    const syncCancellations = body.syncCancellations !== false;
+    const cancellationDetailLimit = syncCancellations
+      ? Math.min(Math.max(Math.trunc(Number(body.cancellationDetailLimit || requestedOrderLimit)), 0), MAX_ORDER_LIMIT)
+      : 0;
+    const cancellationDetailHydration = await hydrateCancellationOrderDetails(token, rawOrders, cancellationDetailLimit);
+    rawOrders = cancellationDetailHydration.orders;
     const fetchedCompleteOrderWindow = orderIdsRequested.length > 0 || rawOrders.length < requestedOrderLimit;
     const checkLocalMismatches = body.checkLocalMismatches !== false;
     const localMismatchLimit = Math.min(Math.max(Math.trunc(Number(body.localMismatchLimit || MAX_ORDER_LIMIT)), 0), MAX_ORDER_LIMIT);
     const rawOrderNumbers = new Set(rawOrders.map(extractOrderNumber).filter(Boolean));
     const notAwaitingOrderNumbers = unique(rawOrders.filter((order) => !isAwaitingShipmentOrder(order)).map(extractOrderNumber).filter(Boolean));
-    const candidateOrders = rawOrders.filter(isAwaitingShipmentOrder);
+    const awaitingOrders = rawOrders.filter(isAwaitingShipmentOrder);
+    const cancellationOrders = syncCancellations ? rawOrders.filter(hasCancellationSignal) : [];
+    const candidateOrders = [...new Map([
+      ...awaitingOrders,
+      ...cancellationOrders,
+    ].map((order) => [extractOrderNumber(order), order])).values()].filter((order) => extractOrderNumber(order));
     const skippedUnpaid = rawOrders.filter((order) => !isPaidOrder(order)).length;
     const skippedNotAwaitingShipment = rawOrders.filter((order) =>
-      isPaidOrder(order) && !isAwaitingShipmentOrder(order)
+      isPaidOrder(order) && !isAwaitingShipmentOrder(order) && !hasCancellationSignal(order)
     ).length;
     const localOpenOrders = checkLocalMismatches ? await loadLocalOpenOrderSummaries(supabase) : [];
     const localByOrderNumber = new Map(localOpenOrders.map((order) => [order.orderNumber, order]));
@@ -970,6 +1055,8 @@ Deno.serve(async (req) => {
         paymentStatus: getOrderPaymentStatus(entry.source),
         fulfillmentStatus: getOrderFulfillmentStatus(entry.source),
         cancelStatus: getOrderCancelStatus(entry.source),
+        cancellationRequested: hasCancellationSignal(entry.source),
+        cancellation: buildApiCancellationCase(entry.source),
         shipByDate: entry.order.ship_by_date || null,
         lineCount: entry.lines.length,
         lines: entry.lines.map((line) => ({
@@ -992,6 +1079,7 @@ Deno.serve(async (req) => {
             ...(skippedClosed ? [{ skippedClosed }] : []),
             ...(skippedUnpaid ? [{ skippedUnpaid, reason: "payment_not_paid" }] : []),
             ...(skippedNotAwaitingShipment ? [{ skippedNotAwaitingShipment, reason: "not_awaiting_shipment" }] : []),
+            ...cancellationDetailHydration.warnings,
             ...financeWarnings,
             ...localMismatchWarnings,
           ],
@@ -1004,7 +1092,9 @@ Deno.serve(async (req) => {
         runId,
         dryRun: true,
         ordersSeen: rawOrders.length,
-        ebayAwaitingOrderCount: candidateOrders.length,
+        ebayAwaitingOrderCount: awaitingOrders.length,
+        ebayCancellationOrderCount: cancellationOrders.length,
+        ebayCancellationDetailsChecked: cancellationDetailHydration.checked,
         ordersImportable: importable.length,
         skippedClosed,
         skippedUnpaid,
@@ -1016,7 +1106,7 @@ Deno.serve(async (req) => {
         localPendingMismatchChecked: checkLocalMismatches && fetchedCompleteOrderWindow,
         localPendingMismatchCheckSkipped: checkLocalMismatches && !fetchedCompleteOrderWindow,
         financeStats,
-        warnings: financeWarnings,
+        warnings: [...cancellationDetailHydration.warnings, ...financeWarnings],
         preview,
       });
     }
@@ -1040,6 +1130,10 @@ Deno.serve(async (req) => {
         .map(([orderNumber, order]) => [orderNumber, order.id] as [string, string]),
       ...insertedOrders.map((order) => [order.order_number, order.id] as [string, string]),
     ]);
+    const cancellationOrderNumbers = new Set(cancellationOrders.map(extractOrderNumber).filter(Boolean));
+    const cancellationOrderIds = new Set([...orderIdByNumber.entries()]
+      .filter(([orderNumber]) => cancellationOrderNumbers.has(orderNumber))
+      .map(([, orderId]) => orderId));
 
     await updateExistingOrderFinancePayloads(supabase, importable, existingOrders);
 
@@ -1079,8 +1173,9 @@ Deno.serve(async (req) => {
     }
 
     let reservationResults: any[] = [];
-    if (shouldReserve && upsertedLines.length) {
-      const lineIds = upsertedLines.map((line) => line.id).filter(Boolean);
+    const reservableUpsertedLines = upsertedLines.filter((line) => !cancellationOrderIds.has(line.order_id));
+    if (shouldReserve && reservableUpsertedLines.length) {
+      const lineIds = reservableUpsertedLines.map((line) => line.id).filter(Boolean);
       const [lineStateResponse, reservationResponse] = await Promise.all([
         supabase
           .from("ebay_order_lines")
@@ -1099,7 +1194,7 @@ Deno.serve(async (req) => {
       const lineStateById = new Map((lineStateResponse.data || []).map((line: any) => [line.id, line]));
       const reservationByLineId = new Map((reservationResponse.data || []).map((reservation: any) => [reservation.order_line_id, reservation]));
 
-      reservationResults = upsertedLines.map((line) => {
+      reservationResults = reservableUpsertedLines.map((line) => {
         const latestLine = lineStateById.get(line.id) || line;
         const reservation = reservationByLineId.get(line.id);
         if (reservation) {
@@ -1132,6 +1227,7 @@ Deno.serve(async (req) => {
       ...(skippedClosed ? [{ skippedClosed }] : []),
       ...(skippedUnpaid ? [{ skippedUnpaid, reason: "payment_not_paid" }] : []),
       ...(skippedNotAwaitingShipment ? [{ skippedNotAwaitingShipment, reason: "not_awaiting_shipment" }] : []),
+      ...cancellationDetailHydration.warnings,
       ...financeWarnings,
       ...localMismatchWarnings,
       ...reservationResults.filter((entry) => !entry.ok).map((entry) => ({
@@ -1161,7 +1257,9 @@ Deno.serve(async (req) => {
       runId,
       dryRun: false,
       ordersSeen: rawOrders.length,
-      ebayAwaitingOrderCount: candidateOrders.length,
+      ebayAwaitingOrderCount: awaitingOrders.length,
+      ebayCancellationOrderCount: cancellationOrders.length,
+      ebayCancellationDetailsChecked: cancellationDetailHydration.checked,
       ordersImported: freshOrders.length,
       linesImported: upsertedLines.length,
       linesReserved: reserved,

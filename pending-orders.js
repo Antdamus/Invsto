@@ -51,16 +51,19 @@ const state = {
   handledEbayReportTransferIds: new Set(),
   handledVideoReceiptPhotoTransferIds: new Set(),
   handledEbayCancelProofTransferIds: new Set(),
+  handledEbayCancellationTransferIds: new Set(),
   handledEbayFocusBuyerRequestIds: new Set(),
   queuedEbayLabelTransfers: [],
   queuedEbayReportTransfers: [],
   queuedVideoReceiptPhotoTransfers: [],
   queuedEbayCancelProofTransfers: [],
+  queuedEbayCancellationTransfers: [],
   ebayTransferReceiverReady: false,
   ebayTransferReceiverSetup: false,
   ebayLabelReturnContext: null,
   ebayLabelBusy: false,
   ebayReportBusy: false,
+  ebayCancellationImportBusy: false,
   ebayOrderSyncBusy: false,
   ebayReconciliationBusy: false,
   ebayReconciliationPreview: [],
@@ -426,9 +429,33 @@ function getRawPayloadValue(source, ...paths) {
   return "";
 }
 
+function getCancellationPageCase(line = {}) {
+  const order = getOrderFromLine(line);
+  const candidates = [
+    line?.raw_payload?.api_cancellation_case,
+    line?.raw_payload?.cancellation_page_case,
+    order?.raw_payload?.api_cancellation_case,
+    order?.raw_payload?.cancellation_page_case,
+  ].filter((entry) => entry && typeof entry === "object");
+  return candidates[0] || null;
+}
+
+function buildCancellationPageCaseMessage(caseInfo = {}) {
+  if (!caseInfo || typeof caseInfo !== "object") return "";
+  const status = caseInfo.cancelStatus || caseInfo.cancellationStatus || caseInfo.status || "cancellation";
+  const reason = caseInfo.cancelReason || caseInfo.cancellationReason || caseInfo.reason || "";
+  const parts = [
+    `eBay cancellations page shows ${status}.`,
+    reason ? `Reason: ${reason}.` : "",
+    caseInfo.cancellationId || caseInfo.cancelId ? `Cancel ID: ${caseInfo.cancellationId || caseInfo.cancelId}.` : "",
+  ].filter(Boolean);
+  return parts.join(" ");
+}
+
 function getLineEbayApiStatus(line) {
   const order = getOrderFromLine(line);
   const mismatch = getOrderSyncMismatch(line);
+  const cancellationPageCase = getCancellationPageCase(line);
   const orderApiStatus = order?.ebay_api_status || {};
   const lineApiStatus = line?.ebay_api_status || {};
   return {
@@ -450,12 +477,15 @@ function getLineEbayApiStatus(line) {
       mismatch?.ebayCancelStatus
       || orderApiStatus.cancel_status
       || lineApiStatus.cancel_status
+      || cancellationPageCase?.cancelStatus
+      || cancellationPageCase?.cancellationStatus
+      || cancellationPageCase?.status
       || getRawPayloadValue(order, "orderCancelStatus", "order.cancelStatus.cancelState", "order.cancelStatus.cancelStatus")
       || getRawPayloadValue(line, "orderCancelStatus")
     ),
-    reviewReason: String(mismatch?.reason || orderApiStatus.review_reason || lineApiStatus.review_reason || "").trim(),
-    reviewMessage: String(mismatch?.message || orderApiStatus.review_message || lineApiStatus.review_message || "").trim(),
-    checkedAt: String(orderApiStatus.checked_at || lineApiStatus.checked_at || mismatch?.detectedAt || "").trim(),
+    reviewReason: String(mismatch?.reason || orderApiStatus.review_reason || lineApiStatus.review_reason || (cancellationPageCase ? "ebay_cancellations_page" : "") || "").trim(),
+    reviewMessage: String(mismatch?.message || orderApiStatus.review_message || lineApiStatus.review_message || buildCancellationPageCaseMessage(cancellationPageCase) || "").trim(),
+    checkedAt: String(orderApiStatus.checked_at || lineApiStatus.checked_at || mismatch?.detectedAt || cancellationPageCase?.importedAt || cancellationPageCase?.capturedAt || "").trim(),
   };
 }
 
@@ -1279,6 +1309,12 @@ function normalizeLine(line) {
     order.ebay_api_status?.cancel_status,
     order.ebay_api_status?.review_reason,
     order.ebay_api_status?.review_message,
+    getCancellationPageCase({ ...line, order })?.cancelStatus,
+    getCancellationPageCase({ ...line, order })?.cancellationStatus,
+    getCancellationPageCase({ ...line, order })?.cancelReason,
+    getCancellationPageCase({ ...line, order })?.cancellationReason,
+    getCancellationPageCase({ ...line, order })?.cancellationId,
+    getCancellationPageCase({ ...line, order })?.cancelId,
   ].filter(Boolean).join(" ");
   return {
     ...line,
@@ -2337,6 +2373,10 @@ function summarizeEbayOrderSyncResult(result, dryRun) {
   }
 
   const financeText = summarizeEbayFinanceSyncStatus(result);
+  const cancellationCount = Number(result.ebayCancellationOrderCount || 0);
+  const cancellationText = cancellationCount
+    ? ` API found ${cancellationCount.toLocaleString()} cancellation order${cancellationCount === 1 ? "" : "s"}.`
+    : "";
   if (dryRun) {
     const warnings = Array.isArray(result.warnings) && result.warnings.length
       ? ` ${result.warnings.length} warning(s).`
@@ -2351,7 +2391,7 @@ function summarizeEbayOrderSyncResult(result, dryRun) {
     const reconciliationText = result.localPendingMismatchChecked
       ? ` Complete reconciliation compared ${Number(result.localOpenOrderCount || 0).toLocaleString()} local open order(s).`
       : "";
-    return `Found ${Number(result.ordersSeen || 0).toLocaleString()} eBay order(s); ${Number(result.ordersImportable || 0).toLocaleString()} can be imported or updated.${financeText}${reconciliationText}${mismatchText}${skippedMismatchCheck}${warnings}`;
+    return `Found ${Number(result.ordersSeen || 0).toLocaleString()} eBay order(s); ${Number(result.ordersImportable || 0).toLocaleString()} can be imported or updated.${cancellationText}${financeText}${reconciliationText}${mismatchText}${skippedMismatchCheck}${warnings}`;
   }
 
   const warnings = Array.isArray(result.warnings) && result.warnings.length
@@ -2367,7 +2407,7 @@ function summarizeEbayOrderSyncResult(result, dryRun) {
   const reconciliationText = result.localPendingMismatchChecked
     ? ` Complete reconciliation compared ${Number(result.localOpenOrderCount || 0).toLocaleString()} local open order(s).`
     : "";
-  return `Synced ${Number(result.ordersImported || 0).toLocaleString()} order(s), ${Number(result.linesImported || 0).toLocaleString()} line(s), and reserved ${Number(result.linesReserved || 0).toLocaleString()} line(s).${financeText}${reconciliationText}${mismatchText}${skippedMismatchCheck}${warnings}`;
+  return `Synced ${Number(result.ordersImported || 0).toLocaleString()} order(s), ${Number(result.linesImported || 0).toLocaleString()} line(s), and reserved ${Number(result.linesReserved || 0).toLocaleString()} line(s).${cancellationText}${financeText}${reconciliationText}${mismatchText}${skippedMismatchCheck}${warnings}`;
 }
 
 function summarizeEbayFinanceSyncStatus(result = {}) {
@@ -2418,7 +2458,9 @@ async function runEbayOrderApiSync(dryRun = true) {
     dryRun,
     reserve: !dryRun,
     syncFinance: true,
+    syncCancellations: true,
     limit: getEbayOrderSyncLimit(),
+    cancellationDetailLimit: getEbayOrderSyncLimit(),
     localMismatchLimit: getEbayOrderSyncLimit(),
     daysBack: getEbayOrderSyncDaysBack(),
   };
@@ -9439,6 +9481,19 @@ function postEbayCancelProofTransferStatus(payload = {}) {
   }, window.location.origin);
 }
 
+function setEbayCancellationTransferStatus(message = "", type = "info") {
+  const text = message || "Waiting for eBay cancellation page import.";
+  setImportStatus(text, type);
+  setStatus(text, type);
+}
+
+function postEbayCancellationTransferStatus(payload = {}) {
+  window.postMessage({
+    type: "OG_EBAY_CANCELLATION_PAGE_TRANSFER_STATUS",
+    payload,
+  }, window.location.origin);
+}
+
 function postEbayPendingQueueChanged(payload = {}) {
   const orderNumbers = [...new Set((payload.orderNumbers || [])
     .map(normalizeEbayOrderNumber)
@@ -9477,6 +9532,7 @@ function markEbayTransferReceiverReady() {
   drainQueuedEbayTransfers("queuedEbayReportTransfers", handleEbayAwaitingReportTransfer);
   drainQueuedEbayTransfers("queuedVideoReceiptPhotoTransfers", handleVideoReceiptPhotoTransfer);
   drainQueuedEbayTransfers("queuedEbayCancelProofTransfers", handleEbayCancelProofTransfer);
+  drainQueuedEbayTransfers("queuedEbayCancellationTransfers", handleEbayCancellationPageTransfer);
 }
 
 function postEbayLabelExitReturnToQueue(reason = "pending-label-session-exit") {
@@ -10879,6 +10935,89 @@ async function handleEbayCancelProofTransfer(payload) {
   }
 }
 
+async function importEbayCancellationPageTransfer(payload = {}) {
+  const cancellations = Array.isArray(payload.cancellations) ? payload.cancellations : [];
+  if (!cancellations.length) throw new Error("The extension did not find visible eBay cancellation rows on that page.");
+  if (!canImportOrders()) throw new Error("Your OG user is not allowed to import eBay cancellation pages.");
+
+  const metadata = {
+    ...(payload.metadata || {}),
+    source: payload.metadata?.source || "ebay-cancellations-page",
+    cancellationCount: cancellations.length,
+    importTimestamp: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase.rpc("import_ebay_order_cancellation_page", {
+    _cancellations: cancellations,
+    _metadata: metadata,
+    _signed_by_email: state.user?.email || null,
+  });
+  if (error) throw new Error(error.message || "Could not import the eBay cancellation page.");
+  const row = Array.isArray(data) ? data[0] || {} : data || {};
+  return {
+    importedCount: Number(row.imported_count || row.importedCount || 0),
+    matchedPendingLines: Number(row.matched_pending_lines || row.matchedPendingLines || 0),
+    unmatchedCount: Number(row.unmatched_count || row.unmatchedCount || 0),
+  };
+}
+
+async function handleEbayCancellationPageTransfer(payload) {
+  const transferId = payload?.transferId || "";
+  if (!state.ebayTransferReceiverReady) {
+    queueEbayTransfer("queuedEbayCancellationTransfers", payload);
+    return;
+  }
+  if (transferId && state.handledEbayCancellationTransferIds.has(transferId)) return;
+  if (state.ebayCancellationImportBusy) return;
+  if (transferId) state.handledEbayCancellationTransferIds.add(transferId);
+  state.ebayCancellationImportBusy = true;
+  setEbayCancellationTransferStatus("Importing eBay cancellations page...");
+  postEbayCancellationTransferStatus({
+    transferId,
+    phase: "started",
+    message: "Pending Orders accepted the eBay cancellation page transfer.",
+  });
+
+  try {
+    const result = await importEbayCancellationPageTransfer(payload);
+    if (result.matchedPendingLines) {
+      const statusFilter = $("order-status-filter");
+      if (statusFilter) statusFilter.value = "cancellations";
+    }
+    await loadOrders();
+    const parts = [
+      `${result.importedCount.toLocaleString()} cancellation row${result.importedCount === 1 ? "" : "s"} imported`,
+      `${result.matchedPendingLines.toLocaleString()} pending line${result.matchedPendingLines === 1 ? "" : "s"} flagged`,
+      result.unmatchedCount ? `${result.unmatchedCount.toLocaleString()} not in current pending queue` : "",
+    ].filter(Boolean);
+    const message = parts.join(", ") || "eBay cancellation page imported.";
+    setEbayCancellationTransferStatus(message, result.unmatchedCount ? "info" : "success");
+    if (transferId && window.chrome?.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({
+        type: "OG_EBAY_CLEAR_PENDING_CANCELLATION_PAGE",
+        transferId,
+      }).catch(() => null);
+    }
+    postEbayCancellationTransferStatus({
+      transferId,
+      ok: true,
+      message,
+      ...result,
+    });
+  } catch (error) {
+    console.error("eBay cancellation page transfer failed:", error);
+    const message = error.message || "Could not import the eBay cancellation page.";
+    setEbayCancellationTransferStatus(message, "error");
+    postEbayCancellationTransferStatus({
+      transferId,
+      ok: false,
+      error: message,
+    });
+  } finally {
+    state.ebayCancellationImportBusy = false;
+  }
+}
+
 function getPendingLabelReceiverState() {
   const selectedOrderNumber = normalizeEbayOrderNumber(state.selectedLine?.order?.order_number);
   return {
@@ -11015,6 +11154,10 @@ function setupEbayLabelReceiver() {
     }
     if (event.data?.type === "OG_EBAY_CANCEL_PROOF_TRANSFER") {
       handleEbayCancelProofTransfer(event.data.payload);
+      return;
+    }
+    if (event.data?.type === "OG_EBAY_CANCELLATION_PAGE_TRANSFER") {
+      handleEbayCancellationPageTransfer(event.data.payload);
       return;
     }
     if (event.data?.type === "OG_EBAY_FOCUS_BUYER") {

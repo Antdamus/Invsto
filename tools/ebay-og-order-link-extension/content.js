@@ -15,6 +15,8 @@
   const SEND_RETURN_PANEL_ID = "og-ebay-return-panel";
   const SEND_RETURN_BATCH_ID = "og-ebay-send-return-batch";
   const SEND_RETURN_BUTTON_CLASS = "og-ebay-send-return";
+  const SEND_CANCELLATION_PANEL_ID = "og-ebay-cancellation-panel";
+  const SEND_CANCELLATION_BATCH_ID = "og-ebay-send-cancellation-batch";
   const RETURN_MESSAGE_SEND_ID = "og-ebay-send-return-message";
   const VIDEO_RECEIPT_ITEM_ID = "og-ebay-open-video-receipt-from-item";
   const VIDEO_RECEIPT_DETAILS_ID = "og-ebay-open-video-receipt";
@@ -78,6 +80,10 @@
   let ogAutoVideoReceiptStarted = false;
   let ogReturnBatchExportInProgress = false;
   let ogReturnBatchStatusHoldUntil = 0;
+  let ogCancellationEntriesCache = null;
+  let ogCancellationEntriesSignature = "";
+  let ogCancellationBatchExportInProgress = false;
+  let ogCancellationBatchStatusHoldUntil = 0;
   let ogReturnMessageAutoSendHooked = false;
   let ogReturnMessageLastLogKey = "";
   let ogReturnMessageLastLogAt = 0;
@@ -1001,6 +1007,220 @@
     ogReturnEntriesSignature = signature;
     ogReturnEntriesCache = [...byReturnId.values()].sort((a, b) => String(a.returnId).localeCompare(String(b.returnId), undefined, { numeric: true }));
     return ogReturnEntriesCache;
+  }
+
+  function isEbayCancellationsPage() {
+    if (isCancelConfirmationDetailsPage()) return false;
+    const url = new URL(window.location.href);
+    const sample = getPageTextSample();
+    const pageMarkers = `${url.pathname} ${url.search} ${url.hash} ${document.title || ""} ${sample}`;
+    const looksLikeSellerOrders = /\/sh\/ord|sellerhub|seller|orders?|cancellations?/i.test(pageMarkers);
+    const hasCancellationMarker = /cancel(?:led|ed|lation| request| pending| status)?|Cancel ID|cancellation request|buyer asked to cancel/i.test(pageMarkers);
+    const hasOrderMarker = ORDER_NUMBER_PATTERN.test(pageMarkers);
+    return looksLikeSellerOrders && hasCancellationMarker && (hasOrderMarker || /cancellations?/i.test(pageMarkers));
+  }
+
+  function normalizeCancellationStatusText(value) {
+    return cleanText(String(value || "")
+      .replace(/^cancel(?:lation)?\s*(?:status|state)?\s*:\s*/i, "")
+      .replace(/^status\s*:\s*/i, ""));
+  }
+
+  function parseCancellationStatusFromText(text = "") {
+    const body = cleanText(text);
+    const direct = body.match(/\b(cancel(?:lation)?\s+(?:requested|pending|open|closed|complete|completed|approved|rejected|declined)|cancel(?:led|ed)|buyer requested cancellation|seller canceled|order canceled)\b/i);
+    return normalizeCancellationStatusText(direct?.[0] || "");
+  }
+
+  function parseCancellationReasonFromText(text = "") {
+    const body = cleanText(text);
+    return normalizeCancellationStatusText(
+      readFirstRegexMatch(body, /\b(?:reason|cancellation reason|cancel reason)\s*:?\s*([a-z0-9][\s\S]{0,120}?)(?:\s{2,}|$|\b(?:status|order|buyer|item|cancel id)\b)/i)
+    );
+  }
+
+  function getCancellationDetailsUrlFromText(text = "") {
+    const body = String(text || "");
+    const patterns = [
+      /https?:\\?\/\\?\/(?:www\.)?ebay\.com\\?\/[^"'<>\s\\]*(?:Cancel|cancel|cancellation)[^"'<>\s\\]*/i,
+      /"URL"\s*:\s*"([^"]*(?:Cancel|cancel|cancellation)[^"]*)"/i,
+      /href=["']([^"']*(?:Cancel|cancel|cancellation)[^"']*)["']/i,
+    ];
+    for (const pattern of patterns) {
+      const found = readFirstRegexMatch(body, pattern);
+      if (found) return normalizeEbayNavigationUrl(found, window.location.href);
+    }
+    return "";
+  }
+
+  function getCancellationIdFromText(text = "") {
+    const body = String(text || "");
+    return cleanText(
+      readFirstRegexMatch(body, /(?:cancelId|cancellationId|cancel_id|cancellation_id)["'\s:=]+([A-Za-z0-9._:-]{4,80})/i)
+      || readFirstRegexMatch(body, /\bCancel(?:lation)?\s*ID\s*:?\s*([A-Za-z0-9._:-]{4,80})/i)
+      || readFirstRegexMatch(body, /[?&]cancelId=([^&#"'\s]+)/i)
+    );
+  }
+
+  function normalizeCancellationEntry(candidate = {}) {
+    const visibleSummaryText = cleanText(candidate.visibleSummaryText || "");
+    const orderNumber = normalizeOrderNumber(candidate.orderNumber || candidate.orderId || candidate.omsOrderId || visibleSummaryText);
+    if (!orderNumber) return null;
+    const detailsUrl = normalizeEbayNavigationUrl(candidate.detailsUrl || candidate.detailUrl || getCancellationDetailsUrlFromText(visibleSummaryText), window.location.href);
+    const cancellationId = cleanText(
+      candidate.cancellationId
+      || candidate.cancelId
+      || candidate.requestId
+      || getCancellationIdFromText(`${detailsUrl} ${visibleSummaryText}`)
+    );
+    const itemNumber = cleanText(candidate.itemNumber || candidate.itemId || readFirstRegexMatch(visibleSummaryText, /\b(?:item|listing)\s*(?:number|id)?\s*:?\s*(\d{9,15})\b/i) || readFirstRegexMatch(visibleSummaryText, /\/itm\/(\d{9,15})/i));
+    const transactionId = cleanText(candidate.transactionId || candidate.txnId || readFirstRegexMatch(visibleSummaryText, /\b(?:txn|transaction)\s*(?:id)?\s*:?\s*([A-Za-z0-9._:-]{4,80})/i));
+    const cancelStatus = normalizeCancellationStatusText(candidate.cancelStatus || candidate.cancellationStatus || candidate.status || candidate.state || parseCancellationStatusFromText(visibleSummaryText));
+    const cancelReason = normalizeCancellationStatusText(candidate.cancelReason || candidate.cancellationReason || candidate.reason || parseCancellationReasonFromText(visibleSummaryText));
+    return {
+      source: "ebay-cancellations-page",
+      cancellationId,
+      cancelId: cancellationId,
+      orderNumber,
+      itemNumber,
+      transactionId,
+      itemTitle: cleanText(candidate.itemTitle || candidate.title || ""),
+      buyerUsername: cleanText(candidate.buyerUsername || candidate.buyerUserName || candidate.buyer || ""),
+      cancelStatus,
+      cancellationStatus: cancelStatus,
+      cancelReason,
+      cancellationReason: cancelReason,
+      requestedAt: cleanText(candidate.requestedAt || candidate.createdAt || candidate.openedAt || ""),
+      detailsUrl,
+      pageUrl: window.location.href,
+      pageTitle: document.title || "",
+      visibleSummaryText,
+      capturedAt: new Date().toISOString(),
+      rawCancellation: candidate.rawCancellation || null,
+    };
+  }
+
+  function extractCancellationEntriesFromText(rawText = "") {
+    const text = rawText.replace(/&quot;/g, '"').replace(/&#34;/g, '"');
+    const results = [];
+    const orderPattern = new RegExp(ORDER_NUMBER_PATTERN.source, "g");
+    for (const match of text.matchAll(orderPattern)) {
+      const orderNumber = normalizeOrderNumber(match?.[0] || "");
+      if (!orderNumber) continue;
+      const before = text.slice(Math.max(0, (match.index || 0) - 7000), match.index || 0);
+      const after = text.slice(match.index || 0, (match.index || 0) + 12000);
+      const windowText = `${before} ${after}`;
+      if (!/cancel/i.test(windowText)) continue;
+      const normalized = normalizeCancellationEntry({
+        orderNumber,
+        cancellationId: getCancellationIdFromText(windowText),
+        itemNumber: readFirstRegexMatch(windowText, /"(?:itemNumber|itemId|listingId)"\s*:\s*"([^"]+)"/i) || readFirstRegexMatch(windowText, /\/itm\/(\d{9,15})/i),
+        transactionId: readFirstRegexMatch(windowText, /"(?:transactionId|txnId)"\s*:\s*"([^"]+)"/i),
+        itemTitle: readLastRegexMatch(before, /"title"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/g) || readFirstRegexMatch(windowText, /"(?:itemTitle|title)"\s*:\s*"((?:\\.|[^"\\])*)"/i),
+        buyerUsername: readFirstRegexMatch(windowText, /"(?:buyerUsername|buyerUserName|buyer)"\s*:\s*"((?:\\.|[^"\\])*)"/i) || readFirstRegexMatch(windowText, /"buyerid"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/i),
+        cancelStatus: readFirstRegexMatch(windowText, /"(?:cancelStatus|cancellationStatus|status|state)"\s*:\s*"((?:\\.|[^"\\])*)"/i),
+        cancelReason: readFirstRegexMatch(windowText, /"(?:cancelReason|cancellationReason|reason)"\s*:\s*"((?:\\.|[^"\\])*)"/i),
+        requestedAt: readFirstRegexMatch(windowText, /"(?:requestedAt|createdAt|openedAt)"\s*:\s*"((?:\\.|[^"\\])*)"/i),
+        detailsUrl: getCancellationDetailsUrlFromText(windowText),
+        visibleSummaryText: decodeJsonishText(windowText).slice(0, 1200),
+        rawCancellation: {
+          orderNumber,
+          cancellationId: getCancellationIdFromText(windowText),
+        },
+      });
+      if (normalized) results.push(normalized);
+    }
+    return results;
+  }
+
+  function extractCancellationEntriesFromDom() {
+    const selectors = [
+      "tr",
+      '[role="row"]',
+      "article",
+      "section",
+      "li",
+      '[data-testid*="order" i]',
+      '[data-testid*="cancel" i]',
+      '[class*="order" i]',
+      '[class*="cancel" i]',
+    ].join(",");
+    const nodes = [...document.querySelectorAll(selectors)];
+    return nodes.map((node) => {
+      if (!isElementVisible(node)) return null;
+      const text = cleanText(node.textContent || node.getAttribute("aria-label") || "");
+      const orderNumber = normalizeOrderNumber(text);
+      if (!orderNumber || !/cancel/i.test(text) || text.length < 18) return null;
+      const cancelLink = [...node.querySelectorAll("a[href]")]
+        .find((anchor) => /cancel|cancellation/i.test(`${anchor.href || ""} ${anchor.textContent || ""}`));
+      const itemLink = [...node.querySelectorAll('a[href*="/itm/"], a[href*="itm/"]')][0] || null;
+      return normalizeCancellationEntry({
+        orderNumber,
+        cancellationId: getCancellationIdFromText(`${cancelLink?.href || ""} ${text}`),
+        itemNumber: normalizeOrderNumber(itemLink?.href || "") ? "" : readFirstRegexMatch(itemLink?.href || text, /\/itm\/(\d{9,15})/i),
+        itemTitle: cleanText(itemLink?.textContent || ""),
+        buyerUsername: readFirstRegexMatch(text, /\bbuyer\s*:?\s*([A-Za-z0-9_.-]{2,80})/i),
+        cancelStatus: parseCancellationStatusFromText(text),
+        cancelReason: parseCancellationReasonFromText(text),
+        detailsUrl: cancelLink?.href || getCancellationDetailsUrlFromText(node.innerHTML || ""),
+        visibleSummaryText: text.slice(0, 1200),
+      });
+    }).filter(Boolean);
+  }
+
+  function getEbayCancellationJsonTextCandidates() {
+    const scripts = [...document.scripts]
+      .map((script) => script.textContent || "")
+      .filter((text) => /cancel/i.test(text) && ORDER_NUMBER_PATTERN.test(text));
+    return [...scripts, document.documentElement?.innerHTML || ""].filter(Boolean);
+  }
+
+  function scoreCancellationEntry(entry = {}) {
+    return [
+      entry.cancellationId,
+      entry.itemNumber,
+      entry.transactionId,
+      entry.itemTitle,
+      entry.buyerUsername,
+      entry.cancelStatus,
+      entry.cancelReason,
+      entry.detailsUrl,
+    ].filter(Boolean).length + Math.min(cleanText(entry.visibleSummaryText || "").length, 500) / 500;
+  }
+
+  function getEbayCancellationEntries() {
+    if (!isEbayCancellationsPage()) return [];
+    const signature = `${window.location.href}|${document.scripts.length}|${document.body?.innerText?.length || 0}`;
+    if (ogCancellationEntriesCache && ogCancellationEntriesSignature === signature) return ogCancellationEntriesCache;
+    const entries = [];
+    getEbayCancellationJsonTextCandidates().forEach((text) => {
+      entries.push(...extractCancellationEntriesFromText(text));
+    });
+    entries.push(...extractCancellationEntriesFromDom());
+
+    const byIdentity = new Map();
+    entries.forEach((entry) => {
+      const normalized = normalizeCancellationEntry(entry);
+      if (!normalized?.orderNumber) return;
+      const key = [
+        normalized.cancellationId || "",
+        normalized.orderNumber,
+        normalized.itemNumber || "",
+        normalized.transactionId || "",
+        normalized.cancelStatus || "",
+      ].join("|");
+      const existing = byIdentity.get(key);
+      if (!existing || scoreCancellationEntry(normalized) > scoreCancellationEntry(existing)) {
+        byIdentity.set(key, normalized);
+      }
+    });
+
+    ogCancellationEntriesSignature = signature;
+    ogCancellationEntriesCache = [...byIdentity.values()].sort((a, b) =>
+      String(a.orderNumber).localeCompare(String(b.orderNumber), undefined, { numeric: true })
+      || String(a.cancellationId || "").localeCompare(String(b.cancellationId || ""), undefined, { numeric: true })
+    );
+    return ogCancellationEntriesCache;
   }
 
   function findReturnAnchor(returnInfo = {}) {
@@ -3306,6 +3526,84 @@
     }
   }
 
+  function setCancellationButtonStatus(button, text, tone = "") {
+    if (!button) return;
+    button.textContent = text;
+    button.dataset.statusTone = tone;
+    if (button.id === SEND_CANCELLATION_BATCH_ID && text === "Export Visible Cancellations to OG") {
+      ogCancellationBatchStatusHoldUntil = 0;
+    }
+    button.disabled = /opening|sending|matching|reading|exporting|importing/i.test(text);
+  }
+
+  function buildCancellationBatchTransferPayload(cancellations = []) {
+    const capturedAt = new Date().toISOString();
+    return {
+      cancellations: cancellations.map((cancellation) => ({
+        ...cancellation,
+        capturedAt,
+        pageUrl: window.location.href,
+        pageTitle: document.title || cancellation.pageTitle || "",
+      })),
+      metadata: {
+        source: "ebay-cancellations-page",
+        cancellationCount: cancellations.length,
+        pageUrl: window.location.href,
+        pageTitle: document.title || "",
+        capturedAt,
+      },
+    };
+  }
+
+  async function sendCancellationBatchToOg(cancellations = [], button = null) {
+    if (ogCancellationBatchExportInProgress) return;
+    ogCancellationBatchExportInProgress = true;
+    try {
+      assertExtensionContextActive();
+    } catch (error) {
+      ogCancellationBatchExportInProgress = false;
+      setCancellationButtonStatus(button, "Refresh page", "error");
+      window.alert(error.message);
+      return;
+    }
+
+    try {
+      const visibleCancellations = Array.isArray(cancellations) && cancellations.length ? cancellations : getEbayCancellationEntries();
+      if (!visibleCancellations.length) throw new Error("No visible eBay cancellation rows were found on this page yet.");
+      console.log("[OG eBay Cancellation] Exporting visible cancellations", visibleCancellations.length, visibleCancellations);
+      const payload = buildCancellationBatchTransferPayload(visibleCancellations);
+      setCancellationButtonStatus(button, "Sending cancellations...");
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_SEND_CANCELLATION_PAGE",
+        payload,
+      });
+      if (!response?.ok) throw new Error(response?.error || "Could not export the eBay cancellations to OG.");
+      const imported = Number(response.importedCount || response.imported_count || 0);
+      const matched = Number(response.matchedPendingLines || response.matched_pending_lines || 0);
+      const unmatched = Number(response.unmatchedCount || response.unmatched_count || 0);
+      const parts = [
+        imported ? `${imported} imported` : "",
+        matched ? `${matched} pending line${matched === 1 ? "" : "s"} flagged` : "",
+        unmatched ? `${unmatched} not pending` : "",
+      ].filter(Boolean);
+      ogCancellationBatchStatusHoldUntil = Date.now() + 4500;
+      setCancellationButtonStatus(button, parts.length ? parts.join(", ") : "Sent to OG", response.ok ? "success" : "error");
+      window.setTimeout(() => {
+        if (!ogCancellationBatchExportInProgress) setCancellationButtonStatus(button, "Export Visible Cancellations to OG");
+      }, 4500);
+    } catch (error) {
+      console.error("[OG eBay Cancellation] Batch transfer failed:", error);
+      ogCancellationBatchStatusHoldUntil = Date.now() + 5000;
+      setCancellationButtonStatus(button, "Export failed", "error");
+      window.alert(error?.message || "Could not export these eBay cancellations to OG.");
+      window.setTimeout(() => {
+        if (!ogCancellationBatchExportInProgress) setCancellationButtonStatus(button, "Export Visible Cancellations to OG");
+      }, 5000);
+    } finally {
+      ogCancellationBatchExportInProgress = false;
+    }
+  }
+
   async function sendBulkLabelToOg() {
     try {
       assertExtensionContextActive();
@@ -5211,7 +5509,8 @@
         background: #d4f8df;
       }
 
-      #${SEND_RETURN_BATCH_ID} {
+      #${SEND_RETURN_BATCH_ID},
+      #${SEND_CANCELLATION_BATCH_ID} {
         width: 100%;
         margin: 0;
         border: 1px solid #116b36;
@@ -5225,11 +5524,13 @@
         text-align: center;
       }
 
-      #${SEND_RETURN_BATCH_ID}:hover {
+      #${SEND_RETURN_BATCH_ID}:hover,
+      #${SEND_CANCELLATION_BATCH_ID}:hover {
         background: #d4f8df;
       }
 
-      #${SEND_RETURN_PANEL_ID} {
+      #${SEND_RETURN_PANEL_ID},
+      #${SEND_CANCELLATION_PANEL_ID} {
         position: fixed;
         right: 16px;
         bottom: 154px;
@@ -5243,6 +5544,7 @@
       #${SEND_BULK_LABELS_ID}[data-status-tone="error"],
       #${SEND_AWAITING_REPORT_ID}[data-status-tone="error"],
       #${SEND_RETURN_BATCH_ID}[data-status-tone="error"],
+      #${SEND_CANCELLATION_BATCH_ID}[data-status-tone="error"],
       .${SEND_RETURN_BUTTON_CLASS}[data-status-tone="error"] {
         border-color: #b42318;
         background: #fff0ed;
@@ -5253,6 +5555,7 @@
       #${SEND_BULK_LABELS_ID}[data-status-tone="success"],
       #${SEND_AWAITING_REPORT_ID}[data-status-tone="success"],
       #${SEND_RETURN_BATCH_ID}[data-status-tone="success"],
+      #${SEND_CANCELLATION_BATCH_ID}[data-status-tone="success"],
       .${SEND_RETURN_BUTTON_CLASS}[data-status-tone="success"] {
         border-color: #116b36;
         background: #d8f8e2;
@@ -6738,6 +7041,70 @@
     ensureReturnBatchExportButton(panel, returns);
   }
 
+  function ensureCancellationBatchExportButton(panel, cancellations = [], options = {}) {
+    if (!panel) return null;
+    let button = panel.querySelector(`#${SEND_CANCELLATION_BATCH_ID}`);
+    if (!button) {
+      panel.textContent = "";
+      button = document.createElement("button");
+      button.id = SEND_CANCELLATION_BATCH_ID;
+      button.type = "button";
+      button.title = "Export the visible eBay cancellations on this page to OG Pending Orders";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        sendCancellationBatchToOg(getEbayCancellationEntries(), event.currentTarget);
+      });
+      panel.appendChild(button);
+    }
+
+    button.dataset.ogCancellationCount = String(cancellations.length || 0);
+    button.title = options.title || "Export the visible eBay cancellations on this page to OG Pending Orders";
+
+    const preserveCurrentStatus = ogCancellationBatchExportInProgress || Date.now() < ogCancellationBatchStatusHoldUntil;
+    if (!preserveCurrentStatus) {
+      setCancellationButtonStatus(button, options.label || "Export Visible Cancellations to OG", options.tone || "");
+      button.disabled = Boolean(options.disabled);
+    }
+
+    return button;
+  }
+
+  function injectCancellationPageButtons() {
+    const looksLikeCancellationsPage = isEbayCancellationsPage();
+    const cancellations = getEbayCancellationEntries();
+    let panel = document.getElementById(SEND_CANCELLATION_PANEL_ID);
+
+    if (!cancellations.length) {
+      if (looksLikeCancellationsPage) {
+        if (!panel) {
+          panel = document.createElement("aside");
+          panel.id = SEND_CANCELLATION_PANEL_ID;
+          document.body.appendChild(panel);
+        }
+        ensureCancellationBatchExportButton(panel, cancellations, {
+          label: "Finding eBay cancellations...",
+          tone: "error",
+          disabled: true,
+          title: "The extension has not found visible eBay cancellation rows on this page yet.",
+        });
+      } else {
+        panel?.remove();
+      }
+      return;
+    }
+
+    if (!panel) {
+      panel = document.createElement("aside");
+      panel.id = SEND_CANCELLATION_PANEL_ID;
+      document.body.appendChild(panel);
+    }
+
+    ensureCancellationBatchExportButton(panel, cancellations, {
+      title: `Export ${cancellations.length} visible eBay cancellation${cancellations.length === 1 ? "" : "s"} to OG Pending Orders`,
+    });
+  }
+
   function injectPrioritizeDueOrdersButton() {
     let button = document.getElementById(PRIORITIZE_DUE_ORDERS_ID);
 
@@ -6843,6 +7210,7 @@
     injectBulkLabelSendButton();
     injectAwaitingReportButton();
     injectReturnPageButtons();
+    injectCancellationPageButtons();
     injectReturnDetailPageButton();
     injectReturnMessageLoggerButton();
     injectCancelConfirmationProofButton();

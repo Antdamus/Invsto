@@ -8,6 +8,7 @@
   const PENDING_RETURN_MESSAGE_PREFIX = "ogPendingReturnMessage:";
   const PENDING_VIDEO_RECEIPT_PHOTO_PREFIX = "ogPendingVideoReceiptPhoto:";
   const PENDING_CANCEL_PROOF_PREFIX = "ogPendingCancelProof:";
+  const PENDING_CANCELLATION_PAGE_PREFIX = "ogPendingCancellationPage:";
   const DOWNLOAD_CAPTURE_TIMEOUT_MS = 45000;
   const REPORT_DOWNLOAD_CAPTURE_TIMEOUT_MS = 180000;
   const APP_ACK_TIMEOUT_MS = 300000;
@@ -20,6 +21,7 @@
   const appReturnMessageAcks = new Map();
   const appVideoReceiptPhotoAcks = new Map();
   const appCancelProofAcks = new Map();
+  const appCancellationPageAcks = new Map();
   let pendingPriorityCache = null;
   let pendingPriorityCacheAt = 0;
   const PENDING_PRIORITY_CACHE_TTL_MS = 15000;
@@ -220,6 +222,14 @@
     return `cancel-proof:${orderNumber || "order"}:${cancelId || "cancel"}:${Date.now()}`;
   }
 
+  function buildCancellationPageTransferId(cancellationTransfer = {}) {
+    const cancellations = Array.isArray(cancellationTransfer.cancellations) ? cancellationTransfer.cancellations : [];
+    const first = cancellations[0] || cancellationTransfer.metadata || {};
+    const orderNumber = String(first.orderNumber || first.orderId || "order").replace(/[^a-z0-9._-]/gi, "-").slice(0, 60);
+    const cancelId = String(first.cancellationId || first.cancelId || "cancel").replace(/[^a-z0-9._-]/gi, "-").slice(0, 60);
+    return `cancellation-page:${cancellations.length || 0}:${orderNumber || "order"}:${cancelId || "cancel"}:${Date.now()}`;
+  }
+
   async function getAppUrl() {
     const stored = await chrome.storage.sync.get(APP_URL_KEY);
     return normalizeUrl(stored[APP_URL_KEY]);
@@ -285,6 +295,16 @@
     });
   }
 
+  async function storePendingCancellationPage(transferId, cancellationTransfer) {
+    await chrome.storage.local.set({
+      [`${PENDING_CANCELLATION_PAGE_PREFIX}${transferId}`]: {
+        ...cancellationTransfer,
+        transferId,
+        relayedAt: new Date().toISOString(),
+      },
+    });
+  }
+
   async function getPendingLabel(transferId) {
     const key = `${PENDING_LABEL_PREFIX}${transferId}`;
     const stored = await chrome.storage.local.get(key);
@@ -321,6 +341,12 @@
     return stored[key] || null;
   }
 
+  async function getPendingCancellationPage(transferId) {
+    const key = `${PENDING_CANCELLATION_PAGE_PREFIX}${transferId}`;
+    const stored = await chrome.storage.local.get(key);
+    return stored[key] || null;
+  }
+
   async function removePendingLabel(transferId) {
     await chrome.storage.local.remove(`${PENDING_LABEL_PREFIX}${transferId}`);
   }
@@ -343,6 +369,10 @@
 
   async function removePendingCancelProof(transferId) {
     await chrome.storage.local.remove(`${PENDING_CANCEL_PROOF_PREFIX}${transferId}`);
+  }
+
+  async function removePendingCancellationPage(transferId) {
+    await chrome.storage.local.remove(`${PENDING_CANCELLATION_PAGE_PREFIX}${transferId}`);
   }
 
   function waitForAppTransferAck(transferId) {
@@ -471,6 +501,27 @@
     });
   }
 
+  function waitForAppCancellationPageAck(transferId) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        appCancellationPageAcks.delete(transferId);
+        resolve({
+          ok: false,
+          transferId,
+          error: "OG Pending Orders opened, but did not confirm the eBay cancellation page import within 5 minutes.",
+        });
+      }, APP_ACK_TIMEOUT_MS);
+
+      appCancellationPageAcks.set(transferId, {
+        resolve: (status) => {
+          clearTimeout(timer);
+          appCancellationPageAcks.delete(transferId);
+          resolve(status);
+        },
+      });
+    });
+  }
+
   async function handleAppTransferStatus(status = {}, sender = null) {
     const transferId = status.transferId || "";
     if (!transferId) return;
@@ -542,6 +593,16 @@
     if (status.ok) await removePendingCancelProof(transferId);
     if (status.ok && status.tabId) await focusTab(status.tabId);
     const waiter = appCancelProofAcks.get(transferId);
+    if (waiter) waiter.resolve(status);
+  }
+
+  async function handleAppCancellationPageStatus(status = {}) {
+    const transferId = status.transferId || "";
+    if (!transferId) return;
+    if (status.phase === "started") return;
+    if (status.ok) await removePendingCancellationPage(transferId);
+    if (status.ok && status.tabId) await focusTab(status.tabId);
+    const waiter = appCancellationPageAcks.get(transferId);
     if (waiter) waiter.resolve(status);
   }
 
@@ -897,6 +958,20 @@
     url.searchParams.set("cancelProofTransferId", payload.transferId);
     if (payload.metadata?.orderNumber) url.searchParams.set("orderId", payload.metadata.orderNumber);
     if (payload.metadata?.cancelId) url.searchParams.set("cancelId", payload.metadata.cancelId);
+    return url;
+  }
+
+  function buildCancellationPageUrl(appUrl, payload, pageName = "pending-orders.html") {
+    const url = new URL(appUrl.toString());
+    if (pageName) {
+      url.pathname = url.pathname.replace(/[^/]*$/, pageName);
+    }
+    url.searchParams.set("source", "ebay");
+    url.searchParams.set("cancellationTransferId", payload.transferId);
+    if (Array.isArray(payload.cancellations) && payload.cancellations.length) {
+      url.searchParams.set("cancellationCount", String(payload.cancellations.length));
+      if (payload.cancellations[0]?.orderNumber) url.searchParams.set("orderId", payload.cancellations[0].orderNumber);
+    }
     return url;
   }
 
@@ -1419,6 +1494,62 @@
     };
   }
 
+  async function deliverCancellationPageToTab(tab, payload) {
+    const appAckPromise = waitForAppCancellationPageAck(payload.transferId);
+    await chrome.tabs.sendMessage(tab.id, { type: "OG_EBAY_CANCELLATION_PAGE_TRANSFER", payload });
+    return appAckPromise;
+  }
+
+  async function openCancellationPageAndWait(appUrl, payload, existingTab = null) {
+    const appAckPromise = waitForAppCancellationPageAck(payload.transferId);
+    const url = buildCancellationPageUrl(appUrl, payload);
+    await openTransferUrl(url, existingTab);
+    return appAckPromise;
+  }
+
+  async function relayCancellationPageToApp(cancellationTransfer = {}) {
+    const appUrl = await getAppUrl();
+    if (!appUrl) throw new Error("Set the OG Pending Orders URL in the extension options first.");
+
+    const transferId = buildCancellationPageTransferId(cancellationTransfer);
+    const payload = { ...cancellationTransfer, transferId };
+    await storePendingCancellationPage(transferId, payload);
+
+    const tabs = await findAppTabs(appUrl);
+    const pendingTab = tabs.find((tab) => {
+      const tabUrl = normalizeUrl(tab?.url);
+      return tabUrl?.origin === appUrl.origin && /\/pending-orders\.html$/i.test(tabUrl.pathname);
+    });
+
+    if (pendingTab?.id) {
+      try {
+        const ack = await deliverCancellationPageToTab(pendingTab, payload);
+        if (ack?.ok) await focusTab(pendingTab.id);
+        return { ...ack, transferId, delivered: true, opened: false };
+      } catch (error) {
+        const ack = await openCancellationPageAndWait(appUrl, payload, pendingTab);
+        return {
+          ...ack,
+          transferId,
+          delivered: false,
+          opened: true,
+          reusedTab: true,
+          recoveredFromMissingBridge: /receiving end|connection/i.test(error?.message || ""),
+        };
+      }
+    }
+
+    const reusableTab = tabs[0] || null;
+    const ack = await openCancellationPageAndWait(appUrl, payload, reusableTab);
+    return {
+      ...ack,
+      transferId,
+      delivered: false,
+      opened: true,
+      reusedTab: Boolean(reusableTab),
+    };
+  }
+
   async function captureVideoReceiptFrame(payload = {}, sender = null) {
     const tab = sender?.tab;
     if (!tab?.windowId) throw new Error("The video receipt tab was not available for screenshot capture.");
@@ -1819,6 +1950,16 @@
       return true;
     }
 
+    if (message.type === "OG_EBAY_CANCELLATION_PAGE_TRANSFER_STATUS") {
+      handleAppCancellationPageStatus({
+        ...(message.payload || {}),
+        tabId: _sender?.tab?.id || message.payload?.tabId || null,
+      })
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
     if (message.type === "OG_EBAY_SEND_AWAITING_REPORT") {
       relayAwaitingReportToApp(message.payload)
         .then(sendResponse)
@@ -1828,6 +1969,13 @@
 
     if (message.type === "OG_EBAY_SEND_RETURN" || message.type === "OG_EBAY_SEND_RETURN_BATCH") {
       relayReturnToApp(message.payload)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_SEND_CANCELLATION_PAGE") {
+      relayCancellationPageToApp(message.payload || {})
         .then(sendResponse)
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;
@@ -1954,6 +2102,13 @@
       return true;
     }
 
+    if (message.type === "OG_EBAY_GET_PENDING_CANCELLATION_PAGE") {
+      getPendingCancellationPage(message.transferId)
+        .then((payload) => sendResponse({ ok: true, payload }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
     if (message.type === "OG_EBAY_CLEAR_PENDING_LABEL") {
       removePendingLabel(message.transferId)
         .then(() => sendResponse({ ok: true }))
@@ -1991,6 +2146,13 @@
 
     if (message.type === "OG_EBAY_CLEAR_PENDING_CANCEL_PROOF") {
       removePendingCancelProof(message.transferId)
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_CLEAR_PENDING_CANCELLATION_PAGE") {
+      removePendingCancellationPage(message.transferId)
         .then(() => sendResponse({ ok: true }))
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;
