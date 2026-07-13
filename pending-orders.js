@@ -2460,8 +2460,9 @@ async function runEbayOrderApiSync(dryRun = true) {
     syncFinance: true,
     syncCancellations: true,
     limit: getEbayOrderSyncLimit(),
-    cancellationDetailLimit: getEbayOrderSyncLimit(),
-    localMismatchLimit: getEbayOrderSyncLimit(),
+    cancellationDetailLimit: Math.min(getEbayOrderSyncLimit(), 50),
+    localMismatchLimit: Math.min(getEbayOrderSyncLimit(), 120),
+    responseBudgetMs: 45000,
     daysBack: getEbayOrderSyncDaysBack(),
   };
 

@@ -50,6 +50,12 @@ const EBAY_FINANCES_API_BASE = EBAY_ENV === "sandbox" ? "https://apiz.sandbox.eb
 const DEFAULT_DAYS_BACK = 14;
 const MAX_ORDER_LIMIT = 1000;
 const PAGE_LIMIT = 50;
+const DEFAULT_RESPONSE_BUDGET_MS = 45_000;
+const MIN_RESPONSE_BUDGET_MS = 15_000;
+const MAX_RESPONSE_BUDGET_MS = 110_000;
+const RESPONSE_BUDGET_SAFETY_MS = 4_000;
+const EBAY_LOOKUP_CONCURRENCY = 5;
+const EBAY_FETCH_TIMEOUT_MS = 10_000;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -130,6 +136,47 @@ function compactError(error: unknown): string {
   return String(error || "Unknown error");
 }
 
+function getResponseDeadline(body: JsonRecord): number {
+  const requested = Math.trunc(Number(body.responseBudgetMs || DEFAULT_RESPONSE_BUDGET_MS));
+  const budget = Math.min(Math.max(requested, MIN_RESPONSE_BUDGET_MS), MAX_RESPONSE_BUDGET_MS);
+  return Date.now() + budget - RESPONSE_BUDGET_SAFETY_MS;
+}
+
+function hasTimeBudget(deadlineMs = 0): boolean {
+  return !deadlineMs || Date.now() < deadlineMs;
+}
+
+function budgetWarning(stage: string, skipped: number): JsonRecord | null {
+  if (skipped <= 0) return null;
+  return {
+    reason: "ebay_sync_time_budget_exhausted",
+    stage,
+    skipped,
+    message: `${stage} stopped early so the eBay sync could return before the HTTP connection closed.`,
+  };
+}
+
+async function mapWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  deadlineMs: number,
+  worker: (item: T, index: number) => Promise<void>,
+): Promise<number> {
+  let cursor = 0;
+  let attempted = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, items.length || 1));
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (hasTimeBudget(deadlineMs)) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      attempted += 1;
+      await worker(items[index], index);
+    }
+  }));
+  return attempted;
+}
+
 async function getEbayAccessToken(): Promise<string> {
   if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET || !EBAY_REFRESH_TOKEN) {
     throw new Error("Missing eBay OAuth secrets. Set EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, and EBAY_REFRESH_TOKEN.");
@@ -143,6 +190,7 @@ async function getEbayAccessToken(): Promise<string> {
 
   const res = await fetch(`${EBAY_API_BASE}/identity/v1/oauth2/token`, {
     method: "POST",
+    signal: AbortSignal.timeout(EBAY_FETCH_TIMEOUT_MS),
     headers: {
       "Authorization": `Basic ${btoa(`${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`)}`,
       "Content-Type": "application/x-www-form-urlencoded",
@@ -163,6 +211,7 @@ async function getEbayAccessToken(): Promise<string> {
 async function ebayRequest(token: string, path: string): Promise<any> {
   const res = await fetch(`${EBAY_API_BASE}${path}`, {
     method: "GET",
+    signal: AbortSignal.timeout(EBAY_FETCH_TIMEOUT_MS),
     headers: {
       "Authorization": `Bearer ${token}`,
       "Accept": "application/json",
@@ -189,6 +238,7 @@ async function ebayRequest(token: string, path: string): Promise<any> {
 async function ebayFinanceRequest(token: string, path: string): Promise<any> {
   const res = await fetch(`${EBAY_FINANCES_API_BASE}${path}`, {
     method: "GET",
+    signal: AbortSignal.timeout(EBAY_FETCH_TIMEOUT_MS),
     headers: {
       "Authorization": `Bearer ${token}`,
       "Accept": "application/json",
@@ -385,7 +435,7 @@ async function fetchFinanceTransactionsForOrder(token: string, orderNumber: stri
   return transactions;
 }
 
-async function loadFinanceTransactionsByOrder(token: string, orderNumbers: string[], syncFinance: boolean) {
+async function loadFinanceTransactionsByOrder(token: string, orderNumbers: string[], syncFinance: boolean, deadlineMs = 0) {
   const byOrder = new Map<string, any[]>();
   const warnings: JsonRecord[] = [];
   const checkedOrderNumbers = syncFinance ? unique(orderNumbers.map(toText).filter(Boolean)) : [];
@@ -401,7 +451,7 @@ async function loadFinanceTransactionsByOrder(token: string, orderNumbers: strin
       },
     };
   }
-  for (const orderNumber of checkedOrderNumbers) {
+  const attempted = await mapWithConcurrency(checkedOrderNumbers, EBAY_LOOKUP_CONCURRENCY, deadlineMs, async (orderNumber) => {
     try {
       byOrder.set(orderNumber, await fetchFinanceTransactionsForOrder(token, orderNumber));
     } catch (error) {
@@ -411,16 +461,20 @@ async function loadFinanceTransactionsByOrder(token: string, orderNumbers: strin
         message: compactError(error),
       });
     }
-  }
+  });
+  const skippedByBudget = checkedOrderNumbers.length - attempted;
+  const timeoutWarning = budgetWarning("finance transaction lookup", skippedByBudget);
+  if (timeoutWarning) warnings.push(timeoutWarning);
   const withTransactions = [...byOrder.values()].filter((transactions) => transactions.length > 0).length;
   return {
     byOrder,
     warnings,
     stats: {
       financeSyncEnabled: true,
-      financeOrdersChecked: checkedOrderNumbers.length,
+      financeOrdersChecked: attempted,
       financeOrdersWithTransactions: withTransactions,
-      financeOrdersWithoutTransactions: Math.max(0, checkedOrderNumbers.length - withTransactions - warnings.length),
+      financeOrdersWithoutTransactions: Math.max(0, attempted - withTransactions - warnings.filter((entry) => entry.reason === "ebay_finance_lookup_failed").length),
+      financeOrdersSkippedDueToBudget: skippedByBudget,
     },
   };
 }
@@ -587,6 +641,7 @@ async function hydrateCancellationOrderDetails(
   token: string,
   orders: any[],
   detailLimit: number,
+  deadlineMs = 0,
 ): Promise<{ orders: any[]; checked: number; warnings: JsonRecord[] }> {
   const warnings: JsonRecord[] = [];
   const candidates = orders
@@ -595,9 +650,9 @@ async function hydrateCancellationOrderDetails(
   if (!candidates.length) return { orders, checked: 0, warnings };
 
   const byOrderNumber = new Map<string, any>();
-  for (const order of candidates) {
+  const attempted = await mapWithConcurrency(candidates, EBAY_LOOKUP_CONCURRENCY, deadlineMs, async (order) => {
     const orderNumber = extractOrderNumber(order);
-    if (!orderNumber || byOrderNumber.has(orderNumber)) continue;
+    if (!orderNumber || byOrderNumber.has(orderNumber)) return;
     try {
       byOrderNumber.set(orderNumber, await ebayRequest(token, `/sell/fulfillment/v1/order/${encodeURIComponent(orderNumber)}`));
     } catch (error) {
@@ -607,12 +662,14 @@ async function hydrateCancellationOrderDetails(
         message: compactError(error),
       });
     }
-  }
+  });
+  const timeoutWarning = budgetWarning("cancellation detail lookup", candidates.length - attempted);
+  if (timeoutWarning) warnings.push(timeoutWarning);
 
-  if (!byOrderNumber.size) return { orders, checked: candidates.length, warnings };
+  if (!byOrderNumber.size) return { orders, checked: attempted, warnings };
   return {
     orders: orders.map((order) => byOrderNumber.get(extractOrderNumber(order)) || order),
-    checked: byOrderNumber.size,
+    checked: attempted,
     warnings,
   };
 }
@@ -820,16 +877,18 @@ async function verifyLocalOpenOrderMismatches(
   localOrders: LocalOpenOrderSummary[],
   seenOrderNumbers: Set<string>,
   limit: number,
-): Promise<LocalOrderMismatch[]> {
+  deadlineMs = 0,
+): Promise<{ mismatches: LocalOrderMismatch[]; warnings: JsonRecord[]; attempted: number }> {
   const toVerify = localOrders
     .filter((order) => !seenOrderNumbers.has(order.orderNumber))
     .slice(0, Math.max(0, limit));
   const mismatches: LocalOrderMismatch[] = [];
+  const warnings: JsonRecord[] = [];
 
-  for (const local of toVerify) {
+  const attempted = await mapWithConcurrency(toVerify, EBAY_LOOKUP_CONCURRENCY, deadlineMs, async (local) => {
     try {
       const ebayOrder = await ebayRequest(token, `/sell/fulfillment/v1/order/${encodeURIComponent(local.orderNumber)}`);
-      if (isAwaitingShipmentOrder(ebayOrder)) continue;
+      if (isAwaitingShipmentOrder(ebayOrder)) return;
       const paymentStatus = getOrderPaymentStatus(ebayOrder);
       const fulfillmentStatus = getOrderFulfillmentStatus(ebayOrder);
       const cancelStatus = getOrderCancelStatus(ebayOrder);
@@ -852,9 +911,11 @@ async function verifyLocalOpenOrderMismatches(
         fetchError: compactError(error),
       });
     }
-  }
+  });
+  const timeoutWarning = budgetWarning("local pending mismatch lookup", toVerify.length - attempted);
+  if (timeoutWarning) warnings.push(timeoutWarning);
 
-  return mismatches;
+  return { mismatches, warnings, attempted };
 }
 
 function buildReturnedNotAwaitingMismatch(
@@ -943,6 +1004,7 @@ Deno.serve(async (req) => {
 
   try {
     body = await req.json().catch(() => ({}));
+    const responseDeadlineMs = getResponseDeadline(body);
     const dryRun = body.dryRun !== false;
     const shouldReserve = body.reserve !== false;
 
@@ -964,13 +1026,13 @@ Deno.serve(async (req) => {
       : Math.min(Math.max(Math.trunc(Number(body.limit || 50)), 1), MAX_ORDER_LIMIT);
     const syncCancellations = body.syncCancellations !== false;
     const cancellationDetailLimit = syncCancellations
-      ? Math.min(Math.max(Math.trunc(Number(body.cancellationDetailLimit || requestedOrderLimit)), 0), MAX_ORDER_LIMIT)
+      ? Math.min(Math.max(Math.trunc(Number(body.cancellationDetailLimit || Math.min(requestedOrderLimit, 50))), 0), MAX_ORDER_LIMIT)
       : 0;
-    const cancellationDetailHydration = await hydrateCancellationOrderDetails(token, rawOrders, cancellationDetailLimit);
+    const cancellationDetailHydration = await hydrateCancellationOrderDetails(token, rawOrders, cancellationDetailLimit, responseDeadlineMs);
     rawOrders = cancellationDetailHydration.orders;
     const fetchedCompleteOrderWindow = orderIdsRequested.length > 0 || rawOrders.length < requestedOrderLimit;
     const checkLocalMismatches = body.checkLocalMismatches !== false;
-    const localMismatchLimit = Math.min(Math.max(Math.trunc(Number(body.localMismatchLimit || MAX_ORDER_LIMIT)), 0), MAX_ORDER_LIMIT);
+    const localMismatchLimit = Math.min(Math.max(Math.trunc(Number(body.localMismatchLimit || Math.min(requestedOrderLimit, 120))), 0), MAX_ORDER_LIMIT);
     const rawOrderNumbers = new Set(rawOrders.map(extractOrderNumber).filter(Boolean));
     const notAwaitingOrderNumbers = unique(rawOrders.filter((order) => !isAwaitingShipmentOrder(order)).map(extractOrderNumber).filter(Boolean));
     const awaitingOrders = rawOrders.filter(isAwaitingShipmentOrder);
@@ -992,9 +1054,10 @@ Deno.serve(async (req) => {
     const localPendingMismatchCandidates = checkLocalMismatches
       ? localOpenOrders.filter((order) => !rawOrderNumbers.has(order.orderNumber)).length
       : 0;
-    const missingLocalMismatches = checkLocalMismatches && fetchedCompleteOrderWindow
-      ? await verifyLocalOpenOrderMismatches(token, localOpenOrders, rawOrderNumbers, localMismatchLimit)
-      : [];
+    const missingLocalMismatchResult = checkLocalMismatches && fetchedCompleteOrderWindow
+      ? await verifyLocalOpenOrderMismatches(token, localOpenOrders, rawOrderNumbers, localMismatchLimit, responseDeadlineMs)
+      : { mismatches: [], warnings: [], attempted: 0 };
+    const missingLocalMismatches = missingLocalMismatchResult.mismatches;
     const localPendingMismatches = [...new Map([
       ...returnedNotAwaitingMismatches,
       ...missingLocalMismatches,
@@ -1007,6 +1070,7 @@ Deno.serve(async (req) => {
           orders: localPendingMismatches,
         }]
         : []),
+      ...missingLocalMismatchResult.warnings,
       ...(checkLocalMismatches && !fetchedCompleteOrderWindow
         ? [{
           localPendingMismatchCheckSkipped: true,
@@ -1038,6 +1102,7 @@ Deno.serve(async (req) => {
       token,
       financeOrderNumbers,
       syncFinance,
+      responseDeadlineMs,
     );
     const prepared = candidateOrders
       .map((order) => prepareOrder(order, itemBySku, financeByOrderNumber.get(extractOrderNumber(order)) || []))
