@@ -467,6 +467,62 @@ function isNormalEbayPaymentStatus(status) {
   return !status || ["PAID", "FULLY_PAID"].includes(status);
 }
 
+function isCancellationReviewMode(status = $("order-status-filter")?.value || "") {
+  return String(status || "").toLowerCase() === "cancellations";
+}
+
+function getQueueLoadStatus(status = $("order-status-filter")?.value || "pending") {
+  return isCancellationReviewMode(status) ? "pending" : status;
+}
+
+function getCancellationReviewDecision(line = {}) {
+  const order = getOrderFromLine(line);
+  const candidates = [
+    order?.raw_payload?.cancellation_review,
+    line?.raw_payload?.cancellation_review,
+  ].filter((entry) => entry && typeof entry === "object");
+  return candidates[0] || null;
+}
+
+function isCancellationReviewKeptPending(line = {}) {
+  return String(getCancellationReviewDecision(line)?.decision || "").toLowerCase() === "keep_pending";
+}
+
+function getLineCancellationSignal(line = {}) {
+  const status = getLineEbayApiStatus(line);
+  if (isNormalEbayCancelStatus(status.cancelStatus)) return null;
+  return {
+    ...status,
+    label: status.cancelStatus.includes("PENDING") || status.cancelStatus.includes("REQUEST")
+      ? "Cancel pending"
+      : "Cancelled",
+  };
+}
+
+function isActiveCancellationReviewLine(line = {}) {
+  return isOpenOrderLine(line)
+    && Boolean(getLineCancellationSignal(line))
+    && !isCancellationReviewKeptPending(line);
+}
+
+function getActiveCancellationReviewLines(lines = state.orders) {
+  return (lines || []).filter(isActiveCancellationReviewLine);
+}
+
+function buildCancellationReviewTitle(line = {}, status = getLineCancellationSignal(line) || {}) {
+  const decision = getCancellationReviewDecision(line);
+  const base = buildEbayApiStatusTitle(status, "eBay reported a cancellation state for this order.");
+  if (!decision) return base;
+  const actor = decision.reviewedByEmail || decision.reviewed_by_email || "OG user";
+  const reviewedAt = decision.reviewedAt || decision.reviewed_at || "";
+  const note = decision.note || "";
+  return [
+    base,
+    `Reviewed: keep pending by ${actor}${reviewedAt ? ` on ${formatDate(reviewedAt)}` : ""}`,
+    note ? `Note: ${note}` : "",
+  ].filter(Boolean).join(" | ");
+}
+
 function buildEbayApiStatusTitle(status, fallback = "Verify this order in eBay before acting.") {
   const parts = [
     status.reviewMessage,
@@ -488,6 +544,15 @@ function getEbayApiStatusBadge(line) {
   }
 
   if (!isNormalEbayCancelStatus(status.cancelStatus)) {
+    if (isCancellationReviewKeptPending(line)) {
+      return {
+        label: "Kept pending",
+        tone: "is-review",
+        icon: "check-circle-2",
+        severity: 34,
+        title: buildCancellationReviewTitle(line, status),
+      };
+    }
     const label = status.cancelStatus.includes("PENDING") || status.cancelStatus.includes("REQUEST")
       ? "Cancel pending"
       : "Cancelled";
@@ -2381,6 +2446,7 @@ async function runEbayOrderApiSync(dryRun = true) {
 }
 
 function buildOrderLineQueueQuery(status, admin) {
+  const queueStatus = getQueueLoadStatus(status);
   const moneyLineFields = `
       sold_for,
       shipping_and_handling,
@@ -2440,9 +2506,9 @@ function buildOrderLineQueueQuery(status, admin) {
     .order("created_at", { ascending: false })
     .order("id", { ascending: false });
 
-  if (status === "pending") {
+  if (queueStatus === "pending") {
     query = query.in("line_status", ["pending", "partially_fulfilled"]);
-  } else if (status === "fulfilled") {
+  } else if (queueStatus === "fulfilled") {
     query = query.eq("line_status", "fulfilled");
   } else {
     query = query.in("line_status", ["pending", "partially_fulfilled", "fulfilled"]);
@@ -2584,11 +2650,12 @@ function isMissingPendingOrderQueueRpcError(error) {
 
 async function fetchOrderLineQueueViaRpc(status, admin) {
   const startedAt = nowMs();
+  const queueStatus = getQueueLoadStatus(status);
   const rows = [];
   for (let from = 0; ; from += ORDER_QUEUE_PAGE_SIZE) {
     const pageStartedAt = nowMs();
     const { data, error } = await supabase.rpc("list_pending_ebay_order_queue", {
-      _status: status,
+      _status: queueStatus,
       _include_admin_fields: Boolean(admin),
       _limit: ORDER_QUEUE_PAGE_SIZE,
       _offset: from,
@@ -2600,12 +2667,12 @@ async function fetchOrderLineQueueViaRpc(status, admin) {
       admin,
       from,
       rows: pageRows.length,
-      status,
+      status: queueStatus,
     });
     if (!data || data.length < ORDER_QUEUE_PAGE_SIZE) break;
   }
   await hydrateFinancePayloadsForLines(rows);
-  logPendingOrderPerf("fetchOrderLineQueue rpc total", startedAt, { admin, rows: rows.length, status });
+  logPendingOrderPerf("fetchOrderLineQueue rpc total", startedAt, { admin, rows: rows.length, status: queueStatus });
   return rows;
 }
 
@@ -2826,7 +2893,12 @@ function expandSearchMatchesToBuyerBundles(lines = [], term = "") {
 function applyOrderFilters() {
   const term = String($("order-search")?.value || "").trim().toLowerCase();
   const createdDate = $("order-created-date-filter")?.value || "";
+  const statusMode = $("order-status-filter")?.value || "pending";
   let filtered = [...state.orders];
+
+  if (isCancellationReviewMode(statusMode)) {
+    filtered = filtered.filter(isActiveCancellationReviewLine);
+  }
 
   if (createdDate) {
     filtered = filtered.filter((line) => toLocalDateInputValue(line.orderCreatedAt || getOrderCreatedAt(line)) === createdDate);
@@ -2846,6 +2918,7 @@ function applyOrderFilters() {
 
   state.filteredOrders = filtered;
   renderSummaryStrip();
+  renderCancellationReviewIndicator();
   renderAdminOrderActions();
   renderLiveLotOrderMatches();
   renderOrders();
@@ -2991,6 +3064,9 @@ function renderPendingOrderSummaryLoading() {
   $("summary-tomorrow-orders").textContent = "Loading";
   $("summary-tomorrow-lines").textContent = "Checking due dates...";
   $("order-count-pill").textContent = "Loading orders";
+  const cancellationCount = $("cancellation-review-count");
+  if (cancellationCount) cancellationCount.textContent = "0";
+  $("cancellation-review-toggle")?.classList.remove("has-cancellations");
 }
 
 function renderSummaryStrip() {
@@ -3023,6 +3099,25 @@ function renderSummaryStrip() {
   const buyerGroupCount = groupLinesByBuyer(state.filteredOrders).length;
   const visibleLineCount = state.filteredOrders.length;
   $("order-count-pill").textContent = `${visibleLineCount.toLocaleString()} line${visibleLineCount === 1 ? "" : "s"} / ${buyerGroupCount.toLocaleString()} buyer${buyerGroupCount === 1 ? "" : "s"}`;
+}
+
+function renderCancellationReviewIndicator() {
+  const button = $("cancellation-review-toggle");
+  const countEl = $("cancellation-review-count");
+  if (!button) return;
+  const activeLines = getActiveCancellationReviewLines(state.orders);
+  const activeGroups = groupLinesByBuyer(activeLines);
+  const lineCount = activeLines.length;
+  const groupCount = activeGroups.length;
+  const isActive = isCancellationReviewMode();
+  const label = lineCount.toLocaleString();
+  if (countEl) countEl.textContent = label;
+  button.classList.toggle("has-cancellations", lineCount > 0);
+  button.classList.toggle("is-active", isActive);
+  button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  button.title = lineCount
+    ? `${lineCount.toLocaleString()} pending line${lineCount === 1 ? "" : "s"} in ${groupCount.toLocaleString()} buyer group${groupCount === 1 ? "" : "s"} have an active eBay cancellation state.`
+    : "No active eBay cancellation states are showing in the current pending queue.";
 }
 
 function groupLinesByBuyer(lines) {
@@ -3375,6 +3470,61 @@ function renderBuyerBundlePanel() {
   });
 }
 
+function applyLocalCancellationReviewDecision(orderId, reviewPayload = {}) {
+  state.orders.forEach((line) => {
+    if (line.order_id !== orderId) return;
+    const order = line.order || getOrderFromLine(line);
+    order.raw_payload = {
+      ...(order.raw_payload || {}),
+      cancellation_review: reviewPayload,
+    };
+    line.order = order;
+  });
+}
+
+async function markCancellationReviewKeepPending(lineId) {
+  const line = state.orders.find((entry) => entry.id === lineId);
+  if (!line) return setStatus("Could not find that pending order line. Refresh and try again.", "error");
+  const signal = getLineCancellationSignal(line);
+  if (!signal) return setStatus("eBay is not reporting an active cancellation state for this line.", "info");
+
+  const note = "Reviewed from Pending Orders cancellation lane; keep this order pending.";
+  setStatus("Saving cancellation review decision...", "info");
+  try {
+    const { data, error } = await supabase.rpc("mark_pending_order_cancellation_review", {
+      _order_line_id: lineId,
+      _decision: "keep_pending",
+      _note: note,
+      _signed_by_email: state.user?.email || "",
+    });
+
+    if (error) {
+      const missingRpc = isRpcSchemaCacheMiss(error, "mark_pending_order_cancellation_review");
+      const message = missingRpc
+        ? "The cancellation review migration is not deployed yet. Deploy the new migration, then try Keep pending again."
+        : error.message || "Could not save the cancellation review decision.";
+      console.error("Could not save cancellation review decision:", error);
+      setStatus(message, "error");
+      return;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    const reviewPayload = row?.review_payload || {
+      decision: "keep_pending",
+      note,
+      ebayCancelStatus: signal.cancelStatus,
+      reviewedAt: new Date().toISOString(),
+      reviewedByEmail: state.user?.email || "",
+    };
+    applyLocalCancellationReviewDecision(row?.order_id || line.order_id, reviewPayload);
+    applyOrderFilters();
+    setStatus("Cancellation reviewed. The order stays in Pending Orders and no longer appears in the active cancellation lane.", "success");
+  } catch (error) {
+    console.error("Could not save cancellation review decision:", error);
+    setStatus(error?.message || "Could not save the cancellation review decision.", "error");
+  }
+}
+
 function renderOrders() {
   const startedAt = nowMs();
   const list = $("orders-list");
@@ -3624,6 +3774,9 @@ function renderOrders() {
       const linePostOrderIssueStatus = getPostOrderIssueBadge(line);
       const lineEbayApiStatus = getEbayApiStatusBadge(line);
       const lineFinanceStatus = getFinanceStatusBadge(line);
+      const lineCancellationReviewActionMarkup = isActiveCancellationReviewLine(line)
+        ? `<button type="button" class="secondary-btn buyer-line-action-btn cancellation-review-keep-btn" data-line-keep-pending="${escapeHtml(line.id)}" title="Mark this eBay cancellation state reviewed and keep the order in Pending Orders">Keep pending</button>`
+        : "";
       const lineUrgency = canActOnLine ? getOrderUrgency(order.ship_by_date) : null;
       const lineDueTone = lineUrgency?.level || "neutral";
       const orderLineKey = normalizeEbayOrderNumber(order.order_number) || order.order_number || order.id || line.order_id || line.id;
@@ -3701,6 +3854,7 @@ function renderOrders() {
             <button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) ? "" : "disabled"}>Get Label</button>
             ${lineTaskActionMarkup}
             ${lineTaskVideoMarkup}
+            ${lineCancellationReviewActionMarkup}
             <button type="button" class="secondary-btn buyer-line-action-btn refund-btn" data-line-refund="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Refunded</button>
             <button type="button" class="secondary-btn buyer-line-action-btn danger-btn" data-line-cancel="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Cancel</button>
           </span>
@@ -3753,6 +3907,9 @@ function renderOrders() {
       });
       button.querySelector("[data-line-view-task]")?.addEventListener("click", (event) => {
         openAssignedOrderTaskDetailsModal(event.currentTarget.dataset.viewOrderTask, { lineId: line.id });
+      });
+      button.querySelector("[data-line-keep-pending]")?.addEventListener("click", () => {
+        markCancellationReviewKeepPending(line.id);
       });
       button.querySelector("[data-line-cancel]")?.addEventListener("click", () => {
         selectOrderLine(line.id, { openDetail: false });
@@ -10912,6 +11069,13 @@ function setupListeners() {
     applyOrderFilters();
   });
   $("order-status-filter")?.addEventListener("change", loadOrders);
+  $("cancellation-review-toggle")?.addEventListener("click", async () => {
+    const select = $("order-status-filter");
+    if (!select) return;
+    select.value = isCancellationReviewMode(select.value) ? "pending" : "cancellations";
+    clearEbayLaunchFilter({ apply: false });
+    await loadOrders();
+  });
   $("order-created-date-filter")?.addEventListener("change", () => {
     clearEbayLaunchFilter({ apply: false });
     applyOrderFilters();

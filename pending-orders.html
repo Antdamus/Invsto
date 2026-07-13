@@ -325,9 +325,21 @@
             />
             <select id="order-status-filter" aria-label="Order status">
               <option value="pending">Pending</option>
+              <option value="cancellations">Cancellations</option>
               <option value="all">All open</option>
               <option value="fulfilled">Fulfilled</option>
             </select>
+            <button
+              id="cancellation-review-toggle"
+              type="button"
+              class="cancellation-review-tab"
+              aria-pressed="false"
+              title="Show pending orders where eBay is reporting a cancellation request or cancellation state"
+            >
+              <i data-lucide="ban"></i>
+              <span>Cancellations</span>
+              <strong id="cancellation-review-count">0</strong>
+            </button>
             <input
               id="order-created-date-filter"
               name="pending-orders-created-date"

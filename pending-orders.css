@@ -1137,6 +1137,58 @@ button.task-action-btn.is-assigned:hover,
   border-radius: 13px;
 }
 
+.cancellation-review-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 139, 139, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 86, 86, 0.055);
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.cancellation-review-tab svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cancellation-review-tab strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+
+.cancellation-review-tab.has-cancellations {
+  border-color: rgba(255, 139, 139, 0.52);
+  background:
+    linear-gradient(90deg, rgba(255, 86, 86, 0.18), rgba(245, 197, 92, 0.08)),
+    rgba(0, 0, 0, 0.24);
+  color: #ffd6d6;
+  box-shadow:
+    0 0 0 1px rgba(255, 139, 139, 0.12),
+    0 0 18px rgba(255, 86, 86, 0.18);
+}
+
+.cancellation-review-tab.is-active {
+  border-color: rgba(245, 197, 92, 0.58);
+  color: var(--gold-strong);
+}
+
 input,
 select,
 textarea {
@@ -3959,6 +4011,12 @@ body.pending-order-detail-open .mobile-detail-close {
 
 .buyer-card-task-btn.is-clear {
   border-color: rgba(255, 255, 255, 0.13) !important;
+}
+
+.buyer-line-action-btn.cancellation-review-keep-btn {
+  border-color: rgba(245, 197, 92, 0.45) !important;
+  background: rgba(245, 197, 92, 0.12) !important;
+  color: var(--gold-strong) !important;
 }
 
 .buyer-card-task-video-btn,
