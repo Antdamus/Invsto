@@ -452,6 +452,45 @@ function buildCancellationPageCaseMessage(caseInfo = {}) {
   return parts.join(" ");
 }
 
+function normalizeEbayCancellationDetailsUrl(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw, "https://www.ebay.com");
+    if (!/(^|\.)ebay\.com$/i.test(url.hostname)) return "";
+    if (!/\/Cancel\/Details$/i.test(url.pathname)) return "";
+    if (!url.searchParams.get("cancelId")) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function getCancellationCaseId(caseInfo = {}) {
+  return String(
+    caseInfo?.cancellationId
+    || caseInfo?.cancelId
+    || caseInfo?.requestId
+    || caseInfo?.caseId
+    || ""
+  ).trim();
+}
+
+function buildEbayCancellationDetailsUrl(cancelId = "") {
+  const cleanId = String(cancelId || "").trim();
+  if (!cleanId) return "";
+  const url = new URL("https://www.ebay.com/Cancel/Details");
+  url.searchParams.set("cancelId", cleanId);
+  return url.toString();
+}
+
+function getEbayCancellationDetailsUrl(line = {}) {
+  const caseInfo = getCancellationPageCase(line);
+  if (!caseInfo) return "";
+  return normalizeEbayCancellationDetailsUrl(caseInfo.detailsUrl || caseInfo.detailUrl || caseInfo.actionUrl)
+    || buildEbayCancellationDetailsUrl(getCancellationCaseId(caseInfo));
+}
+
 function getLineEbayApiStatus(line) {
   const order = getOrderFromLine(line);
   const mismatch = getOrderSyncMismatch(line);
@@ -2954,7 +2993,7 @@ function applyOrderFilters() {
   if (state.ebayLaunchBuyerKeys.size) {
     filtered = filtered.filter((line) => state.ebayLaunchBuyerKeys.has(getBuyerKey(line)));
   } else if (state.ebayLaunchOrderNumbers.size) {
-    filtered = filtered.filter((line) => state.ebayLaunchOrderNumbers.has(String(line.order?.order_number || "")));
+    filtered = filtered.filter((line) => state.ebayLaunchOrderNumbers.has(normalizeEbayOrderNumber(getOrderFromLine(line).order_number)));
   }
 
   filtered = expandSearchMatchesToBuyerBundles(filtered, term);
@@ -2978,7 +3017,7 @@ function clearEbayLaunchFilter({ apply = true } = {}) {
   if (apply) applyOrderFilters();
 }
 
-function applyEbayLaunchOrderSelection() {
+async function applyEbayLaunchOrderSelection() {
   const orderNumbers = getRequestedEbayOrderNumbers();
   if (!orderNumbers.length) return;
 
@@ -2989,14 +3028,25 @@ function applyEbayLaunchOrderSelection() {
   state.ebayLaunchTotalCount = getRequestedPositiveIntegerParam("ebayTotalCount") || state.ebayLaunchAllOrderNumbers.size || orderNumbers.length;
   state.ebayLaunchBuyerKeys.clear();
   clearLiveLotSelection({ render: false });
-  const matches = state.orders.filter((line) => state.ebayLaunchOrderNumbers.has(String(line.order?.order_number || "")));
+  let matches = state.orders.filter((line) => state.ebayLaunchOrderNumbers.has(normalizeEbayOrderNumber(getOrderFromLine(line).order_number)));
+  let lookupError = null;
+  if (!matches.length) {
+    try {
+      await ensureExtensionOrderLinesLoaded({ orderNumbers });
+      matches = state.orders.filter((line) => state.ebayLaunchOrderNumbers.has(normalizeEbayOrderNumber(getOrderFromLine(line).order_number)));
+    } catch (error) {
+      lookupError = error;
+      console.warn("Could not look up eBay launch order in pending/cancellation queue:", error);
+    }
+  }
 
   if (!matches.length) {
     applyOrderFilters();
     const joined = orderNumbers.join(", ");
     const snapshotSummary = formatEbaySnapshotSummary(state.ebayLaunchSnapshot);
     const pageDetails = snapshotSummary ? ` Page data: ${snapshotSummary}.` : "";
-    setStatus(`No pending order line matched eBay order ${joined}.${pageDetails} Make sure the latest eBay report was imported.`, "error");
+    const lookupDetails = lookupError?.message ? ` Lookup error: ${lookupError.message}` : "";
+    setStatus(`No pending or cancellation order line matched eBay order ${joined}.${pageDetails}${lookupDetails} Make sure the latest eBay report was imported.`, "error");
     return;
   }
 
@@ -3006,7 +3056,7 @@ function applyEbayLaunchOrderSelection() {
   if (openMatch) {
     selectOrderLine(openMatch.id);
   }
-  const foundNumbers = new Set(matches.map((line) => line.order?.order_number).filter(Boolean));
+  const foundNumbers = new Set(matches.map((line) => normalizeEbayOrderNumber(getOrderFromLine(line).order_number)).filter(Boolean));
   const missing = orderNumbers.filter((orderNumber) => !foundNumbers.has(orderNumber));
   const visibleBuyerLines = state.filteredOrders.length;
   let message = missing.length
@@ -3817,6 +3867,11 @@ function renderOrders() {
       const linePostOrderIssueStatus = getPostOrderIssueBadge(line);
       const lineEbayApiStatus = getEbayApiStatusBadge(line);
       const lineFinanceStatus = getFinanceStatusBadge(line);
+      const lineCancellationDetailsUrl = getEbayCancellationDetailsUrl(line);
+      const lineCancellationCaseId = getCancellationCaseId(getCancellationPageCase(line));
+      const lineCancellationDetailsActionMarkup = lineCancellationDetailsUrl
+        ? `<a class="secondary-btn buyer-line-action-btn cancellation-details-btn" href="${escapeHtml(lineCancellationDetailsUrl)}" target="_blank" rel="noopener" title="Open eBay cancellation details${lineCancellationCaseId ? ` for cancel ID ${escapeHtml(lineCancellationCaseId)}` : ""}">eBay cancel</a>`
+        : "";
       const lineCancellationReviewActionMarkup = isActiveCancellationReviewLine(line)
         ? `<button type="button" class="secondary-btn buyer-line-action-btn cancellation-review-keep-btn" data-line-keep-pending="${escapeHtml(line.id)}" title="Mark this eBay cancellation state reviewed and keep the order in Pending Orders">Keep pending</button>`
         : "";
@@ -3897,6 +3952,7 @@ function renderOrders() {
             <button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) ? "" : "disabled"}>Get Label</button>
             ${lineTaskActionMarkup}
             ${lineTaskVideoMarkup}
+            ${lineCancellationDetailsActionMarkup}
             ${lineCancellationReviewActionMarkup}
             <button type="button" class="secondary-btn buyer-line-action-btn refund-btn" data-line-refund="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Refunded</button>
             <button type="button" class="secondary-btn buyer-line-action-btn danger-btn" data-line-cancel="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Cancel</button>
@@ -9575,20 +9631,102 @@ function isWorkerNoInventoryModalOpen() {
 }
 
 function getMatchingOrderLines(orderNumber) {
-  return state.orders.filter((line) => String(line.order?.order_number || "") === orderNumber);
+  const normalized = normalizeEbayOrderNumber(orderNumber);
+  if (!normalized) return [];
+  return state.orders.filter((line) => normalizeEbayOrderNumber(getOrderFromLine(line).order_number) === normalized);
+}
+
+function mergePendingOrderLinesIntoState(lines = []) {
+  const normalizedLines = lines.map(normalizeLine);
+  if (!normalizedLines.length) return [];
+  const byId = new Map(state.orders.map((line) => [line.id, line]));
+  normalizedLines.forEach((line) => {
+    if (line?.id) byId.set(line.id, line);
+  });
+  state.orders = [...byId.values()];
+  return normalizedLines;
+}
+
+async function loadPendingOrderLinesForExtensionMatch(options = {}) {
+  const orderNumbers = [...new Set((options.orderNumbers || [])
+    .map(normalizeEbayOrderNumber)
+    .filter(Boolean))];
+  const itemNumber = String(options.itemNumber || options.itemId || "").trim();
+  const transactionId = String(options.transactionId || options.txnId || "").trim();
+  if (!orderNumbers.length && !itemNumber && !transactionId) return [];
+
+  const admin = isAdminUser();
+  const rows = [];
+  if (orderNumbers.length) {
+    for (let index = 0; index < orderNumbers.length; index += 50) {
+      const chunk = orderNumbers.slice(index, index + 50);
+      let query = buildOrderLineQueueQuery("pending", admin)
+        .in("ebay_orders.order_number", chunk)
+        .limit(ORDER_QUEUE_PAGE_SIZE);
+      if (itemNumber) query = query.eq("item_number", itemNumber);
+      if (transactionId) query = query.eq("transaction_id", transactionId);
+      const { data, error } = await query;
+      if (error) throw new Error(error.message || "Could not look up pending eBay cancellation/order lines.");
+      rows.push(...(data || []));
+    }
+  } else {
+    let query = buildOrderLineQueueQuery("pending", admin).limit(100);
+    if (itemNumber) query = query.eq("item_number", itemNumber);
+    if (transactionId) query = query.eq("transaction_id", transactionId);
+    const { data, error } = await query;
+    if (error) throw new Error(error.message || "Could not look up pending eBay cancellation/order lines.");
+    rows.push(...(data || []));
+  }
+
+  await hydrateFinancePayloadsForLines(rows);
+  const merged = mergePendingOrderLinesIntoState(rows);
+  if (merged.length) {
+    applyOrderFilters();
+    hydratePendingOrderExtrasInBackground(state.orders);
+  }
+  return merged;
+}
+
+async function ensureExtensionOrderLinesLoaded(options = {}) {
+  const orderNumbers = [...new Set((options.orderNumbers || [])
+    .map(normalizeEbayOrderNumber)
+    .filter(Boolean))];
+  const itemNumber = String(options.itemNumber || options.itemId || "").trim();
+  const transactionId = String(options.transactionId || options.txnId || "").trim();
+  let matches = state.orders.filter((line) => {
+    const order = getOrderFromLine(line);
+    if (orderNumbers.length && !orderNumbers.includes(normalizeEbayOrderNumber(order.order_number))) return false;
+    if (itemNumber && String(line.item_number || "").trim() !== itemNumber) return false;
+    if (transactionId && String(line.transaction_id || "").trim() !== transactionId) return false;
+    return orderNumbers.length || itemNumber || transactionId;
+  });
+  const foundOrderNumbers = new Set(matches.map((line) => normalizeEbayOrderNumber(getOrderFromLine(line).order_number)).filter(Boolean));
+  const missingOrderNumbers = orderNumbers.filter((orderNumber) => !foundOrderNumbers.has(orderNumber));
+  if (missingOrderNumbers.length || (!matches.length && (itemNumber || transactionId))) {
+    await loadPendingOrderLinesForExtensionMatch({
+      orderNumbers: missingOrderNumbers.length ? missingOrderNumbers : orderNumbers,
+      itemNumber,
+      transactionId,
+    });
+    matches = state.orders.filter((line) => {
+      const order = getOrderFromLine(line);
+      if (orderNumbers.length && !orderNumbers.includes(normalizeEbayOrderNumber(order.order_number))) return false;
+      if (itemNumber && String(line.item_number || "").trim() !== itemNumber) return false;
+      if (transactionId && String(line.transaction_id || "").trim() !== transactionId) return false;
+      return orderNumbers.length || itemNumber || transactionId;
+    });
+  }
+  return matches;
 }
 
 async function openPendingNoInventorySessionForLabel(orderNumber) {
-  let matchingLines = getMatchingOrderLines(orderNumber);
-  if (!matchingLines.length) {
-    await loadOrders();
-    matchingLines = getMatchingOrderLines(orderNumber);
-  }
+  const normalizedOrderNumber = normalizeEbayOrderNumber(orderNumber);
+  const matchingLines = await ensureExtensionOrderLinesLoaded({ orderNumbers: [normalizedOrderNumber] });
 
   const openMatch = matchingLines.find(isOpenOrderLine);
   if (!openMatch) return false;
 
-  state.ebayLaunchOrderNumbers = new Set([orderNumber]);
+  state.ebayLaunchOrderNumbers = new Set([normalizedOrderNumber]);
   state.ebayLaunchBuyerKeys = new Set(matchingLines.map(getBuyerKey).filter(Boolean));
   clearLiveLotSelection({ render: false });
   applyOrderFilters();
@@ -9727,11 +9865,7 @@ async function attachEbayLabelToOrder(transferPayload) {
     throw new Error(`This eBay label is for ${targetOrderNumbers.join(", ")}, but the open OG session is ${selectedOrderNumber}. Open the matching OG order/session before sending this label.`);
   }
 
-  let matchingLines = targetOrderNumbers.flatMap(getMatchingOrderLines);
-  if (!matchingLines.length) {
-    await loadOrders();
-    matchingLines = targetOrderNumbers.flatMap(getMatchingOrderLines);
-  }
+  const matchingLines = await ensureExtensionOrderLinesLoaded({ orderNumbers: targetOrderNumbers });
 
   const directOrders = await loadEbayOrdersForLabels(targetOrderNumbers);
   const directOrderByNumber = new Map(directOrders.map((order) => [order.order_number, order]));
@@ -9746,7 +9880,7 @@ async function attachEbayLabelToOrder(transferPayload) {
     throw new Error(`Order ${missingOrderNumbers.join(", ")} ${missingOrderNumbers.length === 1 ? "is" : "are"} not in OG yet. Import the latest eBay order report first, then open the matching order/session and send the label again.`);
   }
   if (!matchingLines.length) {
-    throw createLabelRouteError("history", `Order ${targetOrderNumbers.join(", ")} ${targetOrderNumbers.length === 1 ? "is not" : "are not"} in the pending queue. Opening order history to attach the label.`);
+    throw createLabelRouteError("history", `Order ${targetOrderNumbers.join(", ")} ${targetOrderNumbers.length === 1 ? "is not" : "are not"} in the pending or cancellation queue. Opening order history to attach the label.`);
   }
 
   const closedOrderNumbers = targetOrderNumbers.filter((orderNumber) => {
@@ -9984,7 +10118,14 @@ function getVideoReceiptPhotoLineMatches(metadata = {}) {
 async function findVideoReceiptPhotoLine(metadata = {}) {
   let matches = getVideoReceiptPhotoLineMatches(metadata);
   if (!matches.length) {
-    await loadOrders();
+    const orderNumber = normalizeEbayOrderNumber(metadata.orderNumber || metadata.orderId || "");
+    const itemNumber = String(metadata.itemNumber || metadata.selectedItemId || "").trim();
+    const transactionId = String(metadata.transactionId || "").trim();
+    await ensureExtensionOrderLinesLoaded({
+      orderNumbers: orderNumber ? [orderNumber] : [],
+      itemNumber,
+      transactionId,
+    });
     matches = getVideoReceiptPhotoLineMatches(metadata);
   }
   if (!matches.length) return null;
@@ -10820,7 +10961,12 @@ function getEbayCancelProofLineMatches(metadata = {}) {
 async function findEbayCancelProofLine(metadata = {}) {
   let matches = getEbayCancelProofLineMatches(metadata);
   if (!matches.length) {
-    await loadOrders();
+    const orderNumber = normalizeEbayOrderNumber(metadata.orderNumber || metadata.orderId || metadata.omsOrderId || "");
+    const itemNumber = String(metadata.itemNumber || metadata.itemId || "").trim();
+    await ensureExtensionOrderLinesLoaded({
+      orderNumbers: orderNumber ? [orderNumber] : [],
+      itemNumber,
+    });
     matches = getEbayCancelProofLineMatches(metadata);
   }
   if (!matches.length) return null;
@@ -10875,7 +11021,7 @@ async function attachEbayCancelProofToWorkerModal(payload = {}) {
   const line = await findEbayCancelProofLine(metadata);
   const orderNumber = normalizeEbayOrderNumber(metadata.orderNumber || metadata.orderId || metadata.omsOrderId || "");
   if (!line?.id) {
-    throw new Error(`Could not find eBay order ${orderNumber || "from the cancellation page"} in the pending queue. Import/sync pending orders, then try again.`);
+    throw new Error(`Could not find eBay order ${orderNumber || "from the cancellation page"} in the pending or cancellation queue. Import/sync pending orders, then try again.`);
   }
 
   if (state.selectedLine?.id !== line.id) {
@@ -11634,7 +11780,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const openedTask = await openRequestedOrderTask();
   if (!openedTask) {
     const requestedOrders = getRequestedEbayOrderNumbers();
-    if (requestedOrders.length) applyEbayLaunchOrderSelection();
+    if (requestedOrders.length) await applyEbayLaunchOrderSelection();
     else applyRequestedEbayBuyerSelection();
   }
   markEbayTransferReceiverReady();
