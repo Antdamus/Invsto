@@ -17,6 +17,7 @@ const state = {
   returnMessageLoadingTaskIds: new Set(),
   returnTaskLines: new Map(),
   returnTaskOrderEvents: [],
+  relatedOrderTasks: [],
   relatedOrderTaskEvents: [],
   returnAssignees: [],
   historyOrderTaskAssignees: [],
@@ -2377,6 +2378,7 @@ async function loadOrderHistory() {
   let relatedRevertEvents = [];
   let relatedLabelEvents = [];
   let relatedReturnEvents = [];
+  let relatedOrderTasks = [];
   let relatedOrderTaskEvents = [];
   let returnCases = [];
 
@@ -2391,9 +2393,9 @@ async function loadOrderHistory() {
         ? fetchReturnCasesForOrders(closedOrderIds)
         : Promise.resolve({ data: [], error: null }),
       fetchOverlappingRows("ebay_return_events", "order_line_ids", closedLineIds),
-      loadOrderTaskEventsForLines(closedLineIds)
+      loadOrderTaskDataForLines(closedLineIds, closedOrderIds, { lines: closedLines })
         .then((data) => ({ data, error: null }))
-        .catch((error) => ({ data: [], error })),
+        .catch((error) => ({ data: { tasks: [], events: [] }, error })),
     ]);
 
     if (relatedAdminResult.error) {
@@ -2427,9 +2429,10 @@ async function loadOrderHistory() {
     }
 
     if (relatedOrderTaskResult.error) {
-      console.warn("Failed to load order coordination video receipt photos for visible order lines:", relatedOrderTaskResult.error);
+      console.warn("Failed to load order coordination tasks for visible order lines:", relatedOrderTaskResult.error);
     } else {
-      relatedOrderTaskEvents = relatedOrderTaskResult.data || [];
+      relatedOrderTasks = relatedOrderTaskResult.data?.tasks || [];
+      relatedOrderTaskEvents = relatedOrderTaskResult.data?.events || [];
     }
   }
 
@@ -2441,6 +2444,7 @@ async function loadOrderHistory() {
   state.relatedRevertEvents = relatedRevertEvents;
   state.relatedLabelEvents = relatedLabelEvents;
   state.relatedReturnEvents = relatedReturnEvents;
+  state.relatedOrderTasks = relatedOrderTasks;
   state.relatedOrderTaskEvents = relatedOrderTaskEvents;
   state.returnCases = returnCases;
   state.adminCloseoutLineIds = new Set(
@@ -2462,18 +2466,54 @@ async function loadOrderHistory() {
   drainQueuedHistoryReturnMessageTransfers();
 }
 
-async function loadOrderTaskEventsForLines(lineIds = []) {
+const ORDER_HISTORY_TASK_SELECT = "id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_user_id, assigned_to_email, assigned_by_email, due_at, latest_note, latest_photo_count, created_by_email, created_at, updated_at, metadata";
+
+async function loadOrderTaskDataForLines(lineIds = [], orderIds = [], options = {}) {
   const cleanLineIds = [...new Set(lineIds.filter(Boolean))];
-  if (!cleanLineIds.length) return [];
+  const cleanOrderIds = [...new Set(orderIds.filter(Boolean))];
+  if (!cleanLineIds.length && !cleanOrderIds.length) return { tasks: [], events: [] };
 
-  const { data: tasks, error } = await fetchOverlappingRows("ebay_order_tasks", "order_line_ids", cleanLineIds, {
-    select: "id, order_id, order_line_ids, title, question, status, priority, assigned_to_user_id, assigned_to_email, due_at, latest_note, created_by_email, created_at, updated_at, metadata",
+  const lineIdsByOrderId = new Map();
+  (options.lines || []).forEach((line) => {
+    if (!line?.order_id || !line?.id) return;
+    const ids = lineIdsByOrderId.get(line.order_id) || [];
+    ids.push(line.id);
+    lineIdsByOrderId.set(line.order_id, ids);
   });
-  if (error) throw error;
 
-  const taskById = new Map((tasks || []).map((task) => [task.id, task]));
+  const taskRows = [];
+  if (cleanLineIds.length) {
+    const { data, error } = await fetchOverlappingRows("ebay_order_tasks", "order_line_ids", cleanLineIds, {
+      select: ORDER_HISTORY_TASK_SELECT,
+      orderBy: "updated_at",
+      limitPerChunk: 1000,
+    });
+    if (error) throw error;
+    taskRows.push(...(data || []));
+  }
+
+  for (const chunk of chunkArray(cleanOrderIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
+    const { data, error } = await supabase
+      .from("ebay_order_tasks")
+      .select(ORDER_HISTORY_TASK_SELECT)
+      .in("order_id", chunk)
+      .order("updated_at", { ascending: false })
+      .limit(1000);
+    if (error) throw error;
+    taskRows.push(...(data || []));
+  }
+
+  const tasks = uniqueById(taskRows).map((task) => {
+    const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
+    if (taskLineIds.length || !task.order_id) return task;
+    return {
+      ...task,
+      order_line_ids: lineIdsByOrderId.get(task.order_id) || [],
+    };
+  });
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
   const taskIds = [...taskById.keys()];
-  if (!taskIds.length) return [];
+  if (!taskIds.length) return { tasks: [], events: [] };
 
   const events = [];
   for (const chunk of chunkArray(taskIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
@@ -2487,7 +2527,7 @@ async function loadOrderTaskEventsForLines(lineIds = []) {
     events.push(...(data || []));
   }
 
-  return uniqueById(events).map((event) => {
+  const enrichedEvents = uniqueById(events).map((event) => {
     const task = taskById.get(event.task_id) || {};
     return {
       ...event,
@@ -2506,6 +2546,13 @@ async function loadOrderTaskEventsForLines(lineIds = []) {
       created_by_email: event.signed_by_email || task.created_by_email || "",
     };
   });
+
+  return { tasks, events: enrichedEvents };
+}
+
+async function loadOrderTaskEventsForLines(lineIds = []) {
+  const result = await loadOrderTaskDataForLines(lineIds, [], { lines: state.lines });
+  return result.events || [];
 }
 
 function renderWorkerOptions() {
@@ -5014,13 +5061,61 @@ function getHistoryTaskEventsForLineIds(lineIds = []) {
   ));
 }
 
+function getHistoryTaskEventsForTaskId(taskId = "") {
+  if (!taskId) return [];
+  return state.relatedOrderTaskEvents
+    .filter((event) => event.task_id === taskId)
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+}
+
 function isHistoryExtraPhotoTaskEvent(event = {}) {
   return event.action === "history_extra_photo"
     || event.payload?.source === "order_history_extra_photo"
     || event.task_metadata?.source === "order_history_extra_photo";
 }
 
-function getHistoryTaskSummaryForLineIds(lineIds = []) {
+function isHiddenHistoryOrderTask(task = {}) {
+  const text = [
+    task.title,
+    task.question,
+    task.latest_note,
+    task.metadata?.source,
+    task.metadata?.proof_type,
+  ].filter(Boolean).join(" ");
+  return Boolean(task.metadata?.hidden_from_task_board || task.metadata?.history_removed_at)
+    || /order_history_extra_photo|history_extra_photo|extra_order_proof/i.test(text)
+    || /pending_order_line_note|manual-line-note|line-notes/i.test(text)
+    || /video receipt screenshot captured/i.test(text);
+}
+
+function getHistoryOrderTasksForLineIds(lineIds = []) {
+  const wanted = new Set(lineIds.filter(Boolean));
+  if (!wanted.size) return [];
+  return state.relatedOrderTasks
+    .filter((task) => !isHiddenHistoryOrderTask(task))
+    .filter((task) => {
+      const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
+      return taskLineIds.some((lineId) => wanted.has(lineId));
+    });
+}
+
+function summarizeHistoryOrderTask(task = {}) {
+  const events = getHistoryTaskEventsForTaskId(task.id);
+  const latestEvent = events[0] || null;
+  return {
+    ...task,
+    status: task.status || latestEvent?.new_status || "",
+    title: task.title || latestEvent?.task_title || "",
+    question: task.question || latestEvent?.task_question || "",
+    assignee: task.assigned_to_email || latestEvent?.task_assigned_to_email || "",
+    dueAt: task.due_at || latestEvent?.task_due_at || "",
+    latestAt: task.updated_at || latestEvent?.created_at || task.created_at || "",
+    latestEvent,
+    events,
+  };
+}
+
+function getHistoryTaskSummaryFromEvents(lineIds = []) {
   const taskMap = new Map();
   getHistoryTaskEventsForLineIds(lineIds)
     .filter((event) => !isHistoryExtraPhotoTaskEvent(event))
@@ -5056,6 +5151,21 @@ function getHistoryTaskSummaryForLineIds(lineIds = []) {
   const tasks = [...taskMap.values()].sort((a, b) => (
     new Date(b.latestAt || 0) - new Date(a.latestAt || 0)
   ));
+  const activeTasks = tasks.filter((task) => isActiveHistoryOrderTaskStatus(task.status));
+  return {
+    tasks,
+    activeTasks,
+    totalCount: tasks.length,
+    activeCount: activeTasks.length,
+    latestTask: tasks[0] || null,
+  };
+}
+
+function getHistoryTaskSummaryForLineIds(lineIds = []) {
+  const tasks = getHistoryOrderTasksForLineIds(lineIds)
+    .map(summarizeHistoryOrderTask)
+    .sort((a, b) => new Date(b.latestAt || 0) - new Date(a.latestAt || 0));
+  if (!tasks.length) return getHistoryTaskSummaryFromEvents(lineIds);
   const activeTasks = tasks.filter((task) => isActiveHistoryOrderTaskStatus(task.status));
   return {
     tasks,
@@ -5286,6 +5396,103 @@ async function uploadHistoryOrderTaskPhotos(files, option = {}, scopedLines = op
   return uploaded;
 }
 
+function getHistoryTaskLineCount(task = {}) {
+  return (Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : []).length;
+}
+
+function getHistoryTaskAssigneeLabel(task = {}) {
+  return task.assignee || task.assigned_to_email || task.assigned_by_email || task.created_by_email || "Unassigned";
+}
+
+function getHistoryTaskLatestUpdateText(task = {}) {
+  const event = task.latestEvent || null;
+  return getDisplayHistoryNote(event?.notes || task.latest_note || task.question || "No instruction recorded.");
+}
+
+function getHistoryTaskLatestUpdateActor(task = {}) {
+  const event = task.latestEvent || null;
+  return event?.signed_by_email || event?.created_by_email || task.created_by_email || task.assigned_by_email || "Unknown user";
+}
+
+function getHistoryTaskOpenUrl(task = {}) {
+  return task.id ? `team-tasks.html?taskId=${encodeURIComponent(task.id)}` : "";
+}
+
+function getHistoryTaskEvidenceCount(task = {}) {
+  const eventPhotos = (task.events || []).reduce((sum, event) => sum + getEventEvidencePhotos(event).length, 0);
+  return Math.max(Number(task.latest_photo_count || 0), eventPhotos);
+}
+
+function renderHistoryOrderTaskCard(task = {}, options = {}) {
+  const active = isActiveHistoryOrderTaskStatus(task.status);
+  const compact = options.compact === true;
+  const title = task.title || "Closed order task";
+  const updateText = getHistoryTaskLatestUpdateText(task);
+  const openUrl = getHistoryTaskOpenUrl(task);
+  const evidenceCount = getHistoryTaskEvidenceCount(task);
+  return `
+    <article class="history-order-task-card ${active ? "is-active" : "is-closed"} priority-${escapeHtml(task.priority || "normal")} ${compact ? "is-compact" : ""}">
+      <div>
+        <div class="history-order-task-card-head">
+          <span class="history-status ${active ? "is-admin" : ""}">${escapeHtml(getHistoryOrderTaskStatusLabel(task.status))}</span>
+          <strong>${escapeHtml(title)}</strong>
+        </div>
+        ${!compact ? `<p>${escapeHtml(task.question || updateText)}</p>` : ""}
+        <div class="history-order-task-card-meta">
+          <span>${escapeHtml(getHistoryTaskAssigneeLabel(task))}</span>
+          <span>${escapeHtml(task.dueAt ? `Due ${formatDateTime(task.dueAt)}` : "No due date")}</span>
+          <span>${getHistoryTaskLineCount(task).toLocaleString()} line${getHistoryTaskLineCount(task) === 1 ? "" : "s"}</span>
+          ${evidenceCount ? `<span>${evidenceCount.toLocaleString()} media</span>` : ""}
+        </div>
+        ${!compact && updateText ? `
+          <small class="history-order-task-latest">${escapeHtml(formatDateTime(task.latestAt))} - ${escapeHtml(getHistoryTaskLatestUpdateActor(task))} - ${escapeHtml(updateText)}</small>
+        ` : ""}
+      </div>
+      ${openUrl ? `<a class="secondary-btn history-task-open-link" href="${escapeHtml(openUrl)}">Open task</a>` : ""}
+    </article>
+  `;
+}
+
+function renderHistoryOrderTaskStrip(group = {}) {
+  const taskSummary = getHistoryGroupTaskSummary(group);
+  if (!taskSummary.totalCount) return "";
+  const tasks = taskSummary.tasks.slice(0, 8);
+  const hiddenCount = Math.max(0, taskSummary.totalCount - tasks.length);
+  return `
+    <section class="history-order-task-strip">
+      <div class="history-order-task-strip-head">
+        <div>
+          <span class="eyebrow">Assigned Tasks</span>
+          <strong>${taskSummary.activeCount ? `${taskSummary.activeCount} active` : "No active tasks"}</strong>
+          <small>${taskSummary.totalCount.toLocaleString()} total task${taskSummary.totalCount === 1 ? "" : "s"} tied to this closed order group</small>
+        </div>
+        <button type="button" class="secondary-btn history-task-btn" data-history-order-task="${escapeHtml(getHistoryGroupKey(group))}">Add Task</button>
+      </div>
+      <div class="history-order-task-list">
+        ${tasks.map((task) => renderHistoryOrderTaskCard(task)).join("")}
+        ${hiddenCount ? `<div class="history-order-task-more">${hiddenCount.toLocaleString()} more task${hiddenCount === 1 ? "" : "s"}</div>` : ""}
+      </div>
+    </section>
+  `;
+}
+
+function renderHistoryLineTaskStrip(line = {}) {
+  const taskSummary = getHistoryTaskSummaryForLineIds(line?.id ? [line.id] : []);
+  if (!taskSummary.totalCount) return "";
+  const tasks = taskSummary.tasks.slice(0, 3);
+  return `
+    <div class="history-line-task-strip">
+      <div class="history-line-task-head">
+        <span>Assigned task${taskSummary.totalCount === 1 ? "" : "s"}</span>
+        <strong>${taskSummary.activeCount ? `${taskSummary.activeCount} active` : `${taskSummary.totalCount} total`}</strong>
+      </div>
+      <div class="history-line-task-list">
+        ${tasks.map((task) => renderHistoryOrderTaskCard(task, { compact: true })).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function getHistoryGroupSummaryBadges({ group, primaryStatus, statusClass, hasAttachedLabel, hasReturns, hasActiveReturnCase, groupPhotos, receiptCount, taskSummary }) {
   const badges = [
     `<span class="history-status ${escapeHtml(statusClass)}">${escapeHtml(primaryStatus)}</span>`,
@@ -5393,6 +5600,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
       <div class="history-order-detail">
         ${renderGroupLabelControl(group, groupOrders)}
         ${renderGroupReturnControl(group)}
+        ${renderHistoryOrderTaskStrip(group)}
         ${groupPhotos.length ? `
           <div class="history-evidence-strip">
             <div>
@@ -5422,6 +5630,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
                 ${getEbayHistoryApiSourceLabel(line) ? `<span class="history-api-source-pill is-line">${escapeHtml(getEbayHistoryApiSourceLabel(line))}</span>` : ""}
                 ${renderFinanceBadgeMarkup(lineFinanceStatus, "history-line-finance-pill")}
                 ${renderHistoryLineReturnIssue(line)}
+                ${renderHistoryLineTaskStrip(line)}
                 ${renderHistoryLineVideoReceiptPhotos(line, group.events)}
                 ${renderHistoryLineNoteEvents(line, group.events)}
               </div>
@@ -5518,10 +5727,12 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
       const ids = event.currentTarget.dataset.revertLines.split(",").filter(Boolean);
       openRevertModal(ids);
     });
-    card.querySelector("[data-history-order-task]")?.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      openHistoryOrderTaskModal(group, groupKey);
+    card.querySelectorAll("[data-history-order-task]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openHistoryOrderTaskModal(group, groupKey);
+      });
     });
     card.querySelector("[data-history-extra-photo]")?.addEventListener("click", (event) => {
       event.preventDefault();
