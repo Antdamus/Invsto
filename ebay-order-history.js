@@ -5074,19 +5074,57 @@ function isHistoryExtraPhotoTaskEvent(event = {}) {
     || event.task_metadata?.source === "order_history_extra_photo";
 }
 
-function isHiddenHistoryOrderTask(task = {}) {
-  const text = [
+function getHistoryTaskTextForFiltering(task = {}, events = []) {
+  return [
     task.title,
     task.question,
     task.latest_note,
     task.metadata?.source,
     task.metadata?.proof_type,
+    task.metadata?.task_scope,
+    ...events.flatMap((event) => [
+      event.action,
+      event.notes,
+      event.payload?.source,
+      event.payload?.proof_type,
+      event.payload?.assignment_action,
+      event.task_title,
+      event.task_question,
+      event.task_latest_note,
+      event.task_metadata?.source,
+      event.task_metadata?.proof_type,
+      ...(Array.isArray(event.photo_attachments) ? event.photo_attachments.flatMap((photo) => [
+        photo.label,
+        photo.path,
+        photo.source_path,
+        photo.metadata?.source,
+        photo.metadata?.videoReceiptUrl,
+        photo.metadata?.pageUrl,
+      ]) : []),
+    ]),
   ].filter(Boolean).join(" ");
+}
+
+function isVideoReceiptCaptureHistoryTask(task = {}, events = []) {
+  return /video[-_\s]?receipt\s+screenshot|video receipt screenshot captured|ebaylive\/events/i
+    .test(getHistoryTaskTextForFiltering(task, events));
+}
+
+function isCancelledAssignmentHistoryTask(task = {}, events = []) {
+  const text = getHistoryTaskTextForFiltering(task, events);
+  return !task.assigned_to_user_id
+    && !task.assigned_to_email
+    && /assignment\s+cancelled|assignment\s+canceled/i.test(text);
+}
+
+function isHiddenHistoryOrderTask(task = {}) {
+  const events = getHistoryTaskEventsForTaskId(task.id);
+  const text = getHistoryTaskTextForFiltering(task, events);
   return Boolean(task.metadata?.hidden_from_task_board || task.metadata?.history_removed_at)
     || /order_history_extra_photo|history_extra_photo|extra_order_proof/i.test(text)
     || /pending_order_line_note|manual-line-note|line-notes/i.test(text)
-    || /video receipt screenshot captured/i.test(text)
-    || (!task.assigned_to_user_id && !task.assigned_to_email && /assignment\s+cancelled|assignment\s+canceled/i.test(text));
+    || isVideoReceiptCaptureHistoryTask(task, events)
+    || isCancelledAssignmentHistoryTask(task, events);
 }
 
 function getHistoryOrderTaskScopeFromTask(task = {}) {
@@ -5136,6 +5174,11 @@ function getHistoryTaskSummaryFromEvents(lineIds = [], options = {}) {
     .filter((event) => options.includeWholeOrderTasks !== false || getHistoryOrderTaskScopeFromTask({ metadata: event.task_metadata || {} }) === "line")
     .filter((event) => !isHistoryExtraPhotoTaskEvent(event))
     .filter((event) => !isPendingOrderLineNoteTaskEvent(event))
+    .filter((event) => !isVideoReceiptCaptureHistoryTask({}, [event]))
+    .filter((event) => !isCancelledAssignmentHistoryTask({
+      assigned_to_user_id: event.task_assigned_to_user_id,
+      assigned_to_email: event.task_assigned_to_email,
+    }, [event]))
     .forEach((event) => {
     const taskId = event.task_id || event.id || "";
     if (!taskId) return;
