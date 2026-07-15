@@ -102,7 +102,12 @@ const TASK_LINE_SELECT = `
   fulfilled_quantity,
   fulfilled_at,
   notes,
-  raw_payload
+  raw_payload,
+  order:ebay_orders(
+    order_number,
+    buyer_username,
+    buyer_name
+  )
 `;
 const ORDER_TASK_ORDER_SELECT = `
   order_number,
@@ -1303,6 +1308,19 @@ async function loadTasks() {
       .eq("id", requested)
       .maybeSingle();
     if (!requestedError && requestedTask) state.tasks.unshift(normalizeTeamTask(requestedTask));
+  }
+  if (requested && !state.tasks.some((task) => task.id === requested)) {
+    const { data: requestedOrderTask, error: requestedOrderError } = await supabase
+      .from("ebay_order_tasks")
+      .select(`id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, created_at, updated_at, completed_at, resolved_at, latest_note, latest_photo_count, created_by, created_by_email, metadata, ebay_orders(${ORDER_TASK_ORDER_SELECT})`)
+      .eq("id", requested)
+      .maybeSingle();
+    if (!requestedOrderError && requestedOrderTask) {
+      const normalized = normalizeOrderTask(requestedOrderTask);
+      state.tasks.unshift(normalized);
+      await enrichTasksWithDetails([normalized]);
+      await hydrateOrderWorkflowChildren([normalized]);
+    }
   }
 
   state.tasks = sortTasksForCurrentView(state.tasks);
@@ -3272,9 +3290,8 @@ function renderOrderHistoryTaskLines(task = {}, events = []) {
           const photos = getTaskLineReceiptPhotos(line);
           const amount = formatMoney(line.total_price || line.sold_for || "");
           const title = line.item_number ? `${line.item_number} - ${line.item_title || "Untitled item"}` : line.item_title || "Untitled item";
-          const orderNumber = orderNumbers.length === 1 ? orderNumbers[0] : "";
+          const orderNumber = normalizeEbayOrderNumber(line.order?.order_number || line.order_number || (orderNumbers.length === 1 ? orderNumbers[0] : ""));
           const chips = [
-            orderNumber ? `Order ${orderNumber}` : "",
             line.quantity ? `Qty ${line.quantity}` : "Qty 1",
             amount || "",
             line.line_status ? formatTaskTag(line.line_status) : "",
@@ -3286,6 +3303,7 @@ function renderOrderHistoryTaskLines(task = {}, events = []) {
               <div class="team-task-approval-line-main">
                 <strong>${escapeHtml(title)}</strong>
                 <div class="team-task-approval-line-meta">
+                  ${orderNumber ? renderTaskOrderNumberAction(orderNumber, "Order") : `<span>Order number missing</span>`}
                   ${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}
                   ${renderTaskLineVideoReceiptOpenButton(line, task)}
                 </div>
@@ -3816,7 +3834,7 @@ function renderReturnTaskContext(task = {}) {
 
 function getEbayConversationTaskContext(task = {}) {
   const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
-  if (metadata.source !== "ebay_conversation_message") return null;
+  if (!metadata.conversation_id && !metadata.ebay_conversation_id && !metadata.conversation_link) return null;
   const params = new URLSearchParams();
   if (metadata.conversation_id) params.set("ebayConversationDbId", metadata.conversation_id);
   if (metadata.message_id) params.set("ebayMessageDbId", metadata.message_id);
@@ -3881,8 +3899,9 @@ function renderEbayConversationTeamTaskContext(task = {}) {
 }
 
 function renderTaskContext(task = {}) {
-  if (task.source === "order") return renderOrderTaskContext(task);
-  if (task.source === "return") return renderReturnTaskContext(task);
+  const ebayConversationContext = renderEbayConversationTeamTaskContext(task);
+  if (task.source === "order") return `${renderOrderTaskContext(task)}${ebayConversationContext}`;
+  if (task.source === "return") return `${renderReturnTaskContext(task)}${ebayConversationContext}`;
   if (task.source === "team") return renderEbayConversationTeamTaskContext(task);
   return "";
 }

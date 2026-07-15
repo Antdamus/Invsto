@@ -2007,6 +2007,33 @@
     };
   }
 
+  async function createEbayConversationLinkedOrderTask(context, values = {}) {
+    const session = await currentSession(context, "Create eBay conversation linked order task");
+    const { data, error } = await context.client.rpc("create_ebay_conversation_linked_order_task", {
+      _conversation_id: values.conversationId || null,
+      _message_id: values.messageId || null,
+      _target_source: values.targetSource || "pending_order",
+      _order_id: values.orderId || null,
+      _order_line_ids: Array.isArray(values.orderLineIds) ? values.orderLineIds : [],
+      _assigned_to_user_id: values.assignedToUserId || null,
+      _priority: values.priority || "normal",
+      _title: String(values.title || "").trim(),
+      _question: String(values.description || "").trim() || null,
+      _due_at: values.dueAt || null,
+      _task_tag: values.taskTag || null,
+      _refund_amount: values.refundAmount || null,
+      _task_scope: values.taskScope || "order",
+      _group_order_ids: Array.isArray(values.groupOrderIds) ? values.groupOrderIds : [],
+      _group_order_numbers: Array.isArray(values.groupOrderNumbers) ? values.groupOrderNumbers : [],
+      _signed_by_email: session.user?.email || values.signedByEmail || null,
+    });
+    throwSupabaseReadError(error, "ebay_conversation_linked_order_task_create_failed");
+    return {
+      ok: true,
+      task: data || null,
+    };
+  }
+
   async function fetchEbayConversationTaskStatuses(context, conversationIds = []) {
     await currentSession(context, "eBay conversation task statuses");
     const ids = Array.from(new Set((Array.isArray(conversationIds) ? conversationIds : [])
@@ -2377,6 +2404,7 @@
     fetchEbayConversationMessages,
     fetchTeamTaskAssignees,
     createEbayConversationMessageTask,
+    createEbayConversationLinkedOrderTask,
     fetchEbayConversationTaskStatuses,
     markEbayConversationRead,
     syncEbayProviderReadState,

@@ -6686,6 +6686,102 @@ button.ebay-filter-chip {
   color: rgba(241,214,155,.9);
 }
 
+.ebay-task-target-picker {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(157,242,189,.18);
+  border-radius: 10px;
+  background: rgba(157,242,189,.035);
+  padding: 11px;
+}
+
+.ebay-task-target-picker legend {
+  color: rgba(241,214,155,.9);
+  font-size: .72rem;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.ebay-task-target-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.ebay-task-target-card {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: flex-start;
+  min-height: 74px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 9px;
+  background: rgba(0,0,0,.18);
+  padding: 9px;
+}
+
+.ebay-task-target-card.is-selected,
+.ebay-task-target-card:has(input:checked) {
+  border-color: rgba(157,242,189,.38);
+  background: rgba(157,242,189,.08);
+}
+
+.ebay-task-target-card input {
+  margin-top: 3px;
+}
+
+.ebay-task-target-card span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.ebay-task-target-card strong {
+  color: rgba(242,243,245,.95);
+  font-size: .82rem;
+  font-weight: 950;
+  line-height: 1.2;
+}
+
+.ebay-task-target-card small {
+  color: rgba(242,243,245,.62);
+  font-size: .72rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.ebay-task-target-card em {
+  grid-column: 2;
+  justify-self: start;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(241,214,155,.2);
+  border-radius: 999px;
+  background: rgba(241,214,155,.08);
+  color: rgba(241,214,155,.9);
+  font-size: .66rem;
+  font-style: normal;
+  font-weight: 950;
+  padding: 0 8px;
+}
+
+.ebay-task-target-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: rgba(242,243,245,.62);
+  font-size: .74rem;
+  font-weight: 850;
+}
+
+.ebay-task-target-hint.is-error {
+  color: #ffbac8;
+}
+
 .ebay-task-assignment-panel {
   border-color: rgba(157,242,189,.22);
   background:

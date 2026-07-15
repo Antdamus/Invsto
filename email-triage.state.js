@@ -137,6 +137,7 @@
       ebayConversationTaskSaving: false,
       ebayConversationTaskError: null,
       ebayConversationTaskMessage: null,
+      ebayConversationTaskTargetKey: "chat",
       ebayConversationTaskSummariesById: {},
       ebayConversationTaskSummariesLoading: false,
       ebayConversationTaskSummariesError: null,
