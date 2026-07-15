@@ -1284,7 +1284,9 @@ async function loadTasks() {
     loadOrderTaskRecords(),
     loadReturnTaskRecords(),
   ]);
-  const tasks = results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+  const tasks = results
+    .flatMap((result) => result.status === "fulfilled" ? result.value : [])
+    .filter((task) => !isTaskHiddenFromTaskPage(task));
   const failures = results.filter((result) => result.status === "rejected");
 
   failures.forEach((failure) => console.warn("Could not load one task source:", failure.reason));
@@ -1307,7 +1309,10 @@ async function loadTasks() {
       .select("*")
       .eq("id", requested)
       .maybeSingle();
-    if (!requestedError && requestedTask) state.tasks.unshift(normalizeTeamTask(requestedTask));
+    if (!requestedError && requestedTask) {
+      const normalized = normalizeTeamTask(requestedTask);
+      if (!isTaskHiddenFromTaskPage(normalized)) state.tasks.unshift(normalized);
+    }
   }
   if (requested && !state.tasks.some((task) => task.id === requested)) {
     const { data: requestedOrderTask, error: requestedOrderError } = await supabase
@@ -1317,9 +1322,11 @@ async function loadTasks() {
       .maybeSingle();
     if (!requestedOrderError && requestedOrderTask) {
       const normalized = normalizeOrderTask(requestedOrderTask);
-      state.tasks.unshift(normalized);
-      await enrichTasksWithDetails([normalized]);
-      await hydrateOrderWorkflowChildren([normalized]);
+      if (!isTaskHiddenFromTaskPage(normalized)) {
+        state.tasks.unshift(normalized);
+        await enrichTasksWithDetails([normalized]);
+        await hydrateOrderWorkflowChildren([normalized]);
+      }
     }
   }
 
@@ -1580,22 +1587,33 @@ function isOrderHistoryTask(task = {}) {
   return task.source === "order" && task.metadata?.source === "order_history";
 }
 
-function isOrderHistoryAssignmentCancellation(task = {}) {
-  if (!isOrderHistoryTask(task)) return false;
-  if (task.metadata?.history_removed_at) return false;
+function isTruthyMetadataFlag(value) {
+  return value === true || ["true", "1", "yes"].includes(String(value || "").trim().toLowerCase());
+}
+
+function isAdminCancelledAssignmentTask(task = {}) {
+  const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
+  if (metadata.assignment_cancelled_at || metadata.assignment_canceled_at) return true;
   const latestText = [
     task.latest_note,
     task.description,
     task.question,
-    task.metadata?.history_removed_note,
+    metadata.history_removed_note,
+    metadata.assignment_cancelled_note,
+    metadata.assignment_canceled_note,
   ].filter(Boolean).join(" ");
   return !task.assigned_to_user_id
     && !task.assigned_to_email
     && /assignment\s+cancelled|assignment\s+canceled/i.test(latestText);
 }
 
+function isTaskHiddenFromTaskPage(task = {}) {
+  const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
+  return isTruthyMetadataFlag(metadata.hidden_from_task_board) || isAdminCancelledAssignmentTask(task);
+}
+
 function isTaskRemovedFromActiveView(task = {}) {
-  return Boolean(task?.metadata?.history_removed_at || isOrderHistoryAssignmentCancellation(task));
+  return Boolean(task?.metadata?.history_removed_at);
 }
 
 function getOrderHistoryTaskScope(task = {}) {
