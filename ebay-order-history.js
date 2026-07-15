@@ -5085,7 +5085,8 @@ function isHiddenHistoryOrderTask(task = {}) {
   return Boolean(task.metadata?.hidden_from_task_board || task.metadata?.history_removed_at)
     || /order_history_extra_photo|history_extra_photo|extra_order_proof/i.test(text)
     || /pending_order_line_note|manual-line-note|line-notes/i.test(text)
-    || /video receipt screenshot captured/i.test(text);
+    || /video receipt screenshot captured/i.test(text)
+    || (!task.assigned_to_user_id && !task.assigned_to_email && /assignment\s+cancelled|assignment\s+canceled/i.test(text));
 }
 
 function getHistoryOrderTaskScopeFromTask(task = {}) {

@@ -1272,8 +1272,8 @@ async function loadTasks() {
     return;
   }
 
-  const activeHistoryTasks = tasks.filter((task) => !task?.metadata?.history_removed_at);
-  const removedHistoryTasks = tasks.filter((task) => task?.metadata?.history_removed_at);
+  const activeHistoryTasks = tasks.filter((task) => !isTaskRemovedFromActiveView(task));
+  const removedHistoryTasks = tasks.filter(isTaskRemovedFromActiveView);
   state.tasks = isCanceledTaskScope() ? removedHistoryTasks : activeHistoryTasks;
   state.removedTasks = [];
   const visibleTasks = state.tasks;
@@ -1544,6 +1544,24 @@ function normalizeTeamTask(task = {}) {
 
 function isOrderHistoryTask(task = {}) {
   return task.source === "order" && task.metadata?.source === "order_history";
+}
+
+function isOrderHistoryAssignmentCancellation(task = {}) {
+  if (!isOrderHistoryTask(task)) return false;
+  if (task.metadata?.history_removed_at) return false;
+  const latestText = [
+    task.latest_note,
+    task.description,
+    task.question,
+    task.metadata?.history_removed_note,
+  ].filter(Boolean).join(" ");
+  return !task.assigned_to_user_id
+    && !task.assigned_to_email
+    && /assignment\s+cancelled|assignment\s+canceled/i.test(latestText);
+}
+
+function isTaskRemovedFromActiveView(task = {}) {
+  return Boolean(task?.metadata?.history_removed_at || isOrderHistoryAssignmentCancellation(task));
 }
 
 function getOrderHistoryTaskScope(task = {}) {
@@ -5509,11 +5527,14 @@ function openAdminAssignmentModal({ taskSource = "", taskId = "", action = "" } 
   if (!canUseAdminTaskControls()) return setStatus("Switch back to your admin view to manage task assignments.", "error");
 
   if (action === "cancel_assignment") {
+    const isHistoryTask = isOrderHistoryTask(task);
     return saveAdminAssignmentAction({
       task,
       action,
-      confirmMessage: "Cancel this assignment and return the task to the unassigned queue?",
-      successMessage: "Assignment cancelled.",
+      confirmMessage: isHistoryTask
+        ? "Remove this closed-order task from the active order history view?"
+        : "Cancel this assignment and return the task to the unassigned queue?",
+      successMessage: isHistoryTask ? "Closed-order task removed." : "Assignment cancelled.",
     });
   }
 
@@ -5582,6 +5603,22 @@ async function saveAdminAssignmentAction({
 
   try {
     const signedByEmail = state.user?.email || state.employee?.email || state.employee?.display_name || "";
+    if (action === "cancel_assignment" && isOrderHistoryTask(task)) {
+      const { error } = await supabase.rpc("admin_manage_task_history", {
+        _task_source: task.source,
+        _task_id: task.id,
+        _action: "remove_history",
+        _note: note || "Assignment cancelled by admin.",
+        _signed_by_email: signedByEmail,
+      });
+      if (error) throw error;
+      setStatus(successMessage, "success");
+      state.lineReviewDecisions = new Map();
+      closeModal();
+      await loadTasks();
+      return;
+    }
+
     const { error } = await supabase.rpc("admin_manage_task_assignment", {
       _task_source: task.source,
       _task_id: task.id,
