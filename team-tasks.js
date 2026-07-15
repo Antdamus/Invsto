@@ -231,6 +231,22 @@ function formatMoney(value) {
   });
 }
 
+function parseMoneyNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : Number.NaN;
+  const text = String(value ?? "").trim();
+  if (!text) return Number.NaN;
+  const amount = Number(text.replace(/[$,\s]/g, ""));
+  return Number.isFinite(amount) ? amount : Number.NaN;
+}
+
+function firstPositiveMoneyNumber(values = []) {
+  for (const value of values) {
+    const amount = parseMoneyNumber(value);
+    if (Number.isFinite(amount) && amount > 0) return amount;
+  }
+  return Number.NaN;
+}
+
 function formatTaskTag(value = "") {
   const label = String(value || "").trim().replace(/[_-]+/g, " ");
   if (!label) return "";
@@ -3889,6 +3905,8 @@ function getTaskMoneyLabel(task = {}) {
     return formatMoney(task.metadata.refund_amount) || task.metadata.refund_amount;
   }
   if (task.source === "order") {
+    const wholeOrderTotal = getOrderHistoryTaskMoneyValue(task);
+    if (Number.isFinite(wholeOrderTotal) && wholeOrderTotal > 0) return formatMoney(wholeOrderTotal);
     const totals = getTaskLineMoneyTotals(Array.isArray(task.lineDetails) ? task.lineDetails : [], task.order || {});
     return formatMoney(totals.total);
   }
@@ -3897,12 +3915,39 @@ function getTaskMoneyLabel(task = {}) {
 
 function getTaskMoneyValue(task = {}) {
   if (task.source === "order") {
+    const wholeOrderTotal = getOrderHistoryTaskMoneyValue(task);
+    if (Number.isFinite(wholeOrderTotal) && wholeOrderTotal > 0) return wholeOrderTotal;
     const totals = getTaskLineMoneyTotals(Array.isArray(task.lineDetails) ? task.lineDetails : [], task.order || {});
     return Number.isFinite(totals.total) && totals.total > 0 ? totals.total : Number.NaN;
   }
   const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
-  const value = Number(metadata.refund_amount || metadata.order_value || metadata.orderValue || 0);
+  const value = firstPositiveMoneyNumber([metadata.refund_amount, metadata.order_value, metadata.orderValue]);
   return Number.isFinite(value) && value > 0 ? value : Number.NaN;
+}
+
+function getOrderHistoryTaskMoneyValue(task = {}) {
+  if (!isOrderHistoryTask(task)) return Number.NaN;
+  const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
+  const rawScope = String(metadata.task_scope || metadata.scope || "").trim().toLowerCase();
+  const scope = getOrderHistoryTaskScope(task);
+  if (rawScope === "line" || scope === "line") return Number.NaN;
+  const orderNumbers = getOrderHistoryTaskOrderNumbers(task);
+  const orderCount = Number(metadata.order_count || metadata.orderCount || 0);
+  const isWholeOrderTask = rawScope === "group"
+    || rawScope === "order"
+    || orderNumbers.length > 1
+    || orderCount > 1
+    || /^closed order group\b/i.test(String(task.title || ""));
+  if (!isWholeOrderTask) return Number.NaN;
+  return firstPositiveMoneyNumber([
+    metadata.order_total_price,
+    metadata.orderTotalPrice,
+    metadata.group_total_price,
+    metadata.groupTotalPrice,
+    metadata.total_price,
+    metadata.totalPrice,
+    task.order?.total_price,
+  ]);
 }
 
 function getTaskOriginalInstruction(task = {}) {
