@@ -490,6 +490,12 @@ textarea {
   background: rgba(255, 204, 102, 0.09);
 }
 
+.return-task-summary-meta .return-task-order-link.is-external {
+  border-color: rgba(125, 240, 178, 0.28);
+  color: var(--history-green);
+  background: rgba(125, 240, 178, 0.08);
+}
+
 .return-task-summary-foot b {
   margin-left: auto;
   color: var(--history-gold-strong);
@@ -666,7 +672,8 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-.return-complaint-details {
+.return-complaint-details,
+.return-task-api-details {
   display: grid;
   gap: 10px;
   margin-top: 14px;

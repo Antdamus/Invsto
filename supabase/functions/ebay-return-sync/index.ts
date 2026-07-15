@@ -30,6 +30,9 @@ type PreparedReturn = {
   requestAmount: string;
   onHoldAmount: string;
   detailsUrl: string;
+  orderDetailsUrl?: string;
+  apiExtractedDetails?: JsonRecord;
+  apiDetailsText?: string;
   itemImageUrl: string;
   trackingNumber: string;
   fileIds: string[];
@@ -546,6 +549,252 @@ function getItemImageUrl(detail: any, summary: any): string {
   return firstText(...images);
 }
 
+const EBAY_ORDER_NUMBER_PATTERN = /\b\d{2}-\d{5}-\d{5}\b/;
+const EBAY_ITEM_NUMBER_PATTERN = /\b\d{9,15}\b/;
+
+type DeepTextCandidate = {
+  key: string;
+  path: string;
+  text: string;
+};
+
+function cleanDeepText(value: unknown): string {
+  return decodeHtmlEntities(toText(value)).replace(/\s+/g, " ").trim();
+}
+
+function collectDeepText(
+  value: unknown,
+  key = "",
+  path = "",
+  depth = 0,
+  seen = new Set<object>(),
+  output: DeepTextCandidate[] = [],
+): DeepTextCandidate[] {
+  if (value == null || depth > 8) return output;
+
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    const text = cleanDeepText(value);
+    if (text && text !== "[object Object]") output.push({ key, path, text });
+    return output;
+  }
+
+  if (value instanceof Date) {
+    output.push({ key, path, text: value.toISOString() });
+    return output;
+  }
+
+  if (typeof value !== "object") return output;
+  if (seen.has(value)) return output;
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    value.forEach((child, index) => collectDeepText(child, String(index), path, depth + 1, seen, output));
+    return output;
+  }
+
+  for (const [childKey, child] of Object.entries(value as JsonRecord)) {
+    const childPath = path ? `${path}.${childKey}` : childKey;
+    collectDeepText(child, childKey, childPath, depth + 1, seen, output);
+  }
+  return output;
+}
+
+function collectDeepTexts(...values: unknown[]): DeepTextCandidate[] {
+  const output: DeepTextCandidate[] = [];
+  values.forEach((value, index) => collectDeepText(value, "", `source${index}`, 0, new Set<object>(), output));
+  return output;
+}
+
+function candidatePath(candidate: DeepTextCandidate): string {
+  return `${candidate.path} ${candidate.key}`;
+}
+
+function findDeepPattern(
+  candidates: DeepTextCandidate[],
+  valuePattern: RegExp,
+  keyPattern?: RegExp,
+): string {
+  for (const candidate of candidates) {
+    if (keyPattern && !keyPattern.test(candidatePath(candidate))) continue;
+    const match = candidate.text.match(valuePattern);
+    if (match?.[0]) return match[0];
+  }
+  return "";
+}
+
+function findDeepTextValue(
+  candidates: DeepTextCandidate[],
+  keyPattern: RegExp,
+  isValid: (text: string, candidate: DeepTextCandidate) => boolean = (text) => Boolean(text),
+): string {
+  for (const candidate of candidates) {
+    if (!keyPattern.test(candidatePath(candidate))) continue;
+    const text = candidate.text;
+    if (isValid(text, candidate)) return text;
+  }
+  return "";
+}
+
+function findDeepOrderNumber(...values: unknown[]): string {
+  const candidates = collectDeepTexts(...values);
+  return findDeepPattern(candidates, EBAY_ORDER_NUMBER_PATTERN, /(order|salesrecord|transaction)/i)
+    || findDeepPattern(candidates, EBAY_ORDER_NUMBER_PATTERN);
+}
+
+function findDeepItemNumber(...values: unknown[]): string {
+  const candidates = collectDeepTexts(...values);
+  return findDeepPattern(candidates, EBAY_ITEM_NUMBER_PATTERN, /(item|listing|legacy)/i);
+}
+
+function findDeepTransactionId(...values: unknown[]): string {
+  const candidates = collectDeepTexts(...values);
+  return findDeepPattern(candidates, EBAY_ITEM_NUMBER_PATTERN, /(transaction|txn)/i);
+}
+
+function findDeepBuyerUsername(...values: unknown[]): string {
+  const candidates = collectDeepTexts(...values);
+  return findDeepTextValue(candidates, /(buyer|purchaser|recipient)/i, (text, candidate) => {
+    const path = candidatePath(candidate);
+    if (/seller/i.test(path) && !/buyer/i.test(path)) return false;
+    if (/(comment|message|note|reason|description|text)/i.test(path)) return false;
+    if (EBAY_ORDER_NUMBER_PATTERN.test(text) || EBAY_ITEM_NUMBER_PATTERN.test(text)) return false;
+    if (/^\d+(?:\.\d+)?$/.test(text) || /\$|usd|reported|reason|received|request/i.test(text)) return false;
+    return text.length >= 2 && text.length <= 80;
+  });
+}
+
+function findDeepItemTitle(...values: unknown[]): string {
+  const candidates = collectDeepTexts(...values);
+  return findDeepTextValue(candidates, /(item|listing|product).*(title|name)|itemtitle|listingtitle/i, (text) => {
+    if (text.length < 5 || text.length > 220) return false;
+    if (/^https?:\/\//i.test(text) || EBAY_ORDER_NUMBER_PATTERN.test(text)) return false;
+    if (/^(item not received|not as described|missing parts|defective item)$/i.test(text)) return false;
+    return !/^\d+$/.test(text);
+  });
+}
+
+function findDeepReason(...values: unknown[]): string {
+  const candidates = collectDeepTexts(...values);
+  return findDeepTextValue(candidates, /(reason|issue|problem|case|inquiry|request).*?(type|reason|description)?/i, (text, candidate) => {
+    const path = candidatePath(candidate);
+    const normalized = text.trim().toLowerCase();
+    if (!text || text.length > 400) return false;
+    if (/(id|lane|url|href|link)$/i.test(path)) return false;
+    if (["return", "inquiry", "request", "case"].includes(normalized)) return false;
+    if (EBAY_ORDER_NUMBER_PATTERN.test(text) || /^\d+$/.test(text)) return false;
+    return !/^https?:\/\//i.test(text);
+  });
+}
+
+function findDeepStatus(...values: unknown[]): string {
+  const candidates = collectDeepTexts(...values);
+  return findDeepTextValue(candidates, /(status|state)$/i, (text) => text.length > 1 && text.length <= 120);
+}
+
+function findDeepActionDue(...values: unknown[]): string {
+  const candidates = collectDeepTexts(...values);
+  return findDeepTextValue(candidates, /(action|activity|seller|buyer).*(due|required|option)|availableoptions/i, (text) => {
+    if (text.length > 220 || /^https?:\/\//i.test(text)) return false;
+    return !EBAY_ORDER_NUMBER_PATTERN.test(text);
+  });
+}
+
+function findDeepDateByKey(keyPattern: RegExp, ...values: unknown[]): string | null {
+  const candidates = collectDeepTexts(...values);
+  for (const candidate of candidates) {
+    if (!keyPattern.test(candidatePath(candidate))) continue;
+    const iso = firstDate(candidate.text);
+    if (iso) return iso;
+  }
+  return null;
+}
+
+function findDeepUrl(...values: unknown[]): string {
+  const candidates = collectDeepTexts(...values);
+  return findDeepTextValue(candidates, /(detail|action|case|request|return|inquiry|url|href|link)/i, (text, candidate) => {
+    if (!/^https?:\/\//i.test(text)) return false;
+    const path = candidatePath(candidate);
+    if (/(image|picture|thumbnail|photo|avatar|logo)/i.test(path) || /\.(?:png|jpe?g|gif|webp)(?:\?|$)/i.test(text)) return false;
+    return true;
+  });
+}
+
+function findDeepMoneyText(...values: unknown[]): string {
+  const found = findDeepMoneyContainer(values);
+  if (found) return moneyText(found);
+  const candidates = collectDeepTexts(...values);
+  const text = findDeepTextValue(candidates, /(amount|refund|total|price|value|cost|hold)/i, (candidateText) => (
+    /\$|usd/i.test(candidateText) && /\d/.test(candidateText)
+  ));
+  if (!text) return "";
+  const numeric = Number(text.replace(/[^\d.-]/g, ""));
+  return Number.isFinite(numeric) ? `USD ${numeric.toFixed(2)}` : text;
+}
+
+function findDeepMoneyContainer(values: unknown[], depth = 0, seen = new Set<object>()): any {
+  if (depth > 8) return null;
+  for (const value of values) {
+    if (!value || typeof value !== "object") continue;
+    if (seen.has(value)) continue;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      const found = findDeepMoneyContainer(value, depth + 1, seen);
+      if (found) return found;
+      continue;
+    }
+    const record = value as any;
+    if (record.currency && record.value != null) return record;
+    const direct = getAmountContainer(record.amount, record.refundAmount, record.totalAmount, record.price, record.value);
+    if (direct) return direct;
+    for (const [key, child] of Object.entries(record)) {
+      if (/(amount|refund|total|price|cost|hold)/i.test(key)) {
+        if (child && typeof child === "object") {
+          const amount = getAmountContainer(child);
+          if (amount) return amount;
+        }
+        const numeric = Number(child);
+        if (Number.isFinite(numeric) && numeric > 1) return { currency: "USD", value: numeric };
+      }
+      if (child && typeof child === "object") {
+        const found = findDeepMoneyContainer([child], depth + 1, seen);
+        if (found) return found;
+      }
+    }
+  }
+  return null;
+}
+
+function ebayOrderDetailsUrl(orderNumber: string): string {
+  const cleanNumber = toText(orderNumber);
+  return cleanNumber
+    ? `https://www.ebay.com/mesh/ord/details?orderid=${encodeURIComponent(cleanNumber)}`
+    : "";
+}
+
+function pruneEmptyRecord(record: JsonRecord): JsonRecord {
+  const output: JsonRecord = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (value == null) continue;
+    if (typeof value === "string" && !value.trim()) continue;
+    if (Array.isArray(value) && !value.length) continue;
+    output[key] = value;
+  }
+  return output;
+}
+
+function buildApiDetailsText(details: JsonRecord): string {
+  return [
+    details.requestId ? `Request ${details.requestId}` : "",
+    details.issueLane ? `Lane ${details.issueLane}` : "",
+    details.orderNumber ? `Order ${details.orderNumber}` : "",
+    details.buyerUsername ? `Buyer ${details.buyerUsername}` : "",
+    details.itemNumber || details.itemTitle ? `Item ${[details.itemNumber, details.itemTitle].filter(Boolean).join(" - ")}` : "",
+    details.requestAmount ? `Amount ${details.requestAmount}` : "",
+    details.reason ? `Reason ${details.reason}` : "",
+    details.status ? `Status ${details.status}` : "",
+  ].map((value) => toText(value)).filter(Boolean).join(" | ");
+}
+
 const TRACKING_KEY_PATTERN = /(tracking|shipment|package|carrier)/i;
 const TRACKING_NUMBER_PATTERN = /\b(?:1Z[A-Z0-9]{16}|[A-Z]{2}\d{9}[A-Z]{2}|\d{18,34})\b/i;
 const TRACKING_NUMBER_KEYED_PATTERN = /\b(?:1Z[A-Z0-9]{16}|[A-Z]{2}\d{9}[A-Z]{2}|\d{12,34})\b/i;
@@ -612,11 +861,20 @@ function extractTracking(detail: any, summary: any = {}): string {
 function buildReturnPayload(prepared: Omit<PreparedReturn, "payload">, uploadedComplaintImages: any[] = []): JsonRecord {
   const ebayComplaintImages = uploadedComplaintImages.length ? uploadedComplaintImages : getComplaintImages(prepared.files);
   const complaintImageUrls = ebayComplaintImages.map((image) => image.url).filter(Boolean);
+  const issueLane = firstText(
+    prepared.source?.__ogIssueLane,
+    prepared.summary?.__ogIssueLane,
+    (prepared.apiExtractedDetails as any)?.issueLane,
+    "return",
+  );
   return {
     source: "ebay_return_api",
     syncedAt: new Date().toISOString(),
     caseType: prepared.orderNumber ? "matched_or_unmatched_by_order" : "unmatched_legacy",
     ebayReturnId: prepared.returnId,
+    ebayIssueId: prepared.returnId,
+    ebayRequestId: prepared.returnId,
+    postOrderIssueLane: issueLane,
     orderNumber: prepared.orderNumber,
     buyerUsername: prepared.buyerUsername,
     itemNumber: prepared.itemNumber,
@@ -636,6 +894,9 @@ function buildReturnPayload(prepared: Omit<PreparedReturn, "payload">, uploadedC
     returnInitiated: prepared.requestedAt,
     refundText: prepared.requestAmount,
     detailsUrl: prepared.detailsUrl,
+    orderDetailsUrl: prepared.orderDetailsUrl,
+    apiExtractedDetails: prepared.apiExtractedDetails,
+    apiDetailsText: prepared.apiDetailsText,
     returnTrackingNumber: prepared.trackingNumber,
     returnFileIds: prepared.fileIds,
     returnFileCount: prepared.files.length,
@@ -646,6 +907,7 @@ function buildReturnPayload(prepared: Omit<PreparedReturn, "payload">, uploadedC
       requestAmount: prepared.requestAmount,
       onHoldAmount: prepared.onHoldAmount,
       detailsUrl: prepared.detailsUrl,
+      orderDetailsUrl: prepared.orderDetailsUrl,
       itemImageUrl: prepared.itemImageUrl,
       datePurchased: prepared.requestedAt,
       returnFileIds: prepared.fileIds,
@@ -699,32 +961,86 @@ function prepareReturn(summary: any, detailPayload: any, filesPayload: any): Pre
   const returnId = firstText(summary?.returnId, mergedSummary?.returnId, detail?.returnId, detailPayload?.returnId);
   if (!returnId) return null;
 
+  const apiSources = [summary, detailPayload, detailSummary, sourceSummary, mergedSummary, detail, creation, item];
+  const orderNumber = firstText(mergedSummary?.orderId, detail?.orderId, creation?.orderId, findDeepOrderNumber(...apiSources));
+  const buyerUsername = firstText(mergedSummary?.buyerLoginName, detail?.buyerLoginName, findDeepBuyerUsername(...apiSources));
+  const itemNumber = firstText(item?.itemId, item?.legacyItemId, detail?.itemDetail?.itemId, findDeepItemNumber(...apiSources));
+  const transactionId = firstText(item?.transactionId, detail?.itemDetail?.transactionId, findDeepTransactionId(...apiSources));
+  const itemTitle = firstText(item?.title, item?.itemTitle, detail?.itemDetail?.title, detail?.itemDetail?.itemTitle, findDeepItemTitle(...apiSources));
+  const reason = firstText(creation?.reason, detail?.returnReason, detail?.buyerReturnReason, findDeepReason(...apiSources));
+  const status = firstText(mergedSummary?.status, detail?.status, findDeepStatus(...apiSources));
+  const state = firstText(mergedSummary?.state, detail?.state);
+  const actionDue = firstText(sellerActionDue, buyerActionDue, sellerOptionTypes[0], findDeepActionDue(...apiSources));
+  const dueAt = firstDate(
+    sellerDue?.respondByDate?.value,
+    sellerDue?.respondByDate,
+    buyerDue?.respondByDate?.value,
+    mergedSummary?.timeoutDate?.value,
+    findDeepDateByKey(/respond|deadline|due|resolve|timeout/i, ...apiSources),
+  );
+  const requestedAt = firstDate(
+    creation?.creationDate?.value,
+    creation?.creationDate,
+    mergedSummary?.creationDate?.value,
+    findDeepDateByKey(/creation|created|open|opened|filed|filing|requested/i, ...apiSources),
+  );
+  const buyerComment = commentText(creation?.comments?.content, creation?.comments, detail?.comments?.content, detail?.comments);
+  const requestAmount = moneyText(refundContainer) || findDeepMoneyText(...apiSources);
+  const onHoldAmount = moneyText(holdContainer);
+  const detailsUrl = getActionUrl(mergedSummary) || findDeepUrl(...apiSources);
+  const orderDetailsUrl = ebayOrderDetailsUrl(orderNumber);
+  const apiExtractedDetails = pruneEmptyRecord({
+    source: "ebay_post_order_api",
+    issueLane: "return",
+    requestId: returnId,
+    orderNumber,
+    orderDetailsUrl,
+    buyerUsername,
+    itemNumber,
+    transactionId,
+    itemTitle,
+    quantity: Math.max(1, Math.trunc(toNumber(item?.returnQuantity, 1))),
+    reason,
+    status,
+    state,
+    actionDue,
+    dueAt,
+    requestedAt,
+    buyerComment,
+    requestAmount,
+    onHoldAmount,
+    detailsUrl,
+  });
+
   const preparedBase = {
     source: summary,
     summary: mergedSummary,
     detail,
     filesPayload,
     returnId,
-    orderNumber: firstText(mergedSummary?.orderId, detail?.orderId, creation?.orderId),
-    buyerUsername: firstText(mergedSummary?.buyerLoginName, detail?.buyerLoginName),
-    itemNumber: firstText(item?.itemId, item?.legacyItemId, detail?.itemDetail?.itemId),
-    transactionId: firstText(item?.transactionId, detail?.itemDetail?.transactionId),
-    itemTitle: firstText(item?.title, item?.itemTitle, detail?.itemDetail?.title, detail?.itemDetail?.itemTitle),
+    orderNumber,
+    buyerUsername,
+    itemNumber,
+    transactionId,
+    itemTitle,
     quantity: Math.max(1, Math.trunc(toNumber(item?.returnQuantity, 1))),
-    reason: firstText(creation?.reason, detail?.returnReason, detail?.buyerReturnReason),
-    status: firstText(mergedSummary?.status, detail?.status),
-    state: firstText(mergedSummary?.state, detail?.state),
-    actionDue: firstText(sellerActionDue, buyerActionDue, sellerOptionTypes[0]),
+    reason,
+    status,
+    state,
+    actionDue,
     sellerActionDue,
     buyerActionDue,
     sellerOptionTypes,
     buyerOptionTypes,
-    dueAt: firstDate(sellerDue?.respondByDate?.value, sellerDue?.respondByDate, buyerDue?.respondByDate?.value, mergedSummary?.timeoutDate?.value),
-    requestedAt: firstDate(creation?.creationDate?.value, creation?.creationDate, mergedSummary?.creationDate?.value),
-    buyerComment: commentText(creation?.comments?.content, creation?.comments, detail?.comments?.content, detail?.comments),
-    requestAmount: moneyText(refundContainer),
-    onHoldAmount: moneyText(holdContainer),
-    detailsUrl: getActionUrl(mergedSummary),
+    dueAt,
+    requestedAt,
+    buyerComment,
+    requestAmount,
+    onHoldAmount,
+    detailsUrl,
+    orderDetailsUrl,
+    apiExtractedDetails,
+    apiDetailsText: buildApiDetailsText(apiExtractedDetails),
     itemImageUrl: getItemImageUrl(detail, mergedSummary),
     trackingNumber: extractTracking(detail, mergedSummary),
     fileIds,
@@ -819,6 +1135,101 @@ function preparePostOrderIssue(
   const issueId = postOrderIssueId(summary, detailPayload);
   if (!issueId) return null;
 
+  const apiSources = [summary, detailPayload, detailSummary, sourceSummary, mergedSummary, detail, creation, item];
+  const orderNumber = firstText(
+    mergedSummary?.orderId,
+    mergedSummary?.orderNumber,
+    detail?.orderId,
+    detail?.orderNumber,
+    creation?.orderId,
+    findDeepOrderNumber(...apiSources),
+  );
+  const buyerUsername = firstText(
+    mergedSummary?.buyerLoginName,
+    mergedSummary?.buyerUsername,
+    mergedSummary?.buyerUserName,
+    detail?.buyerLoginName,
+    detail?.buyerUsername,
+    detail?.buyerUserName,
+    detail?.buyer?.username,
+    detail?.buyer?.userName,
+    findDeepBuyerUsername(...apiSources),
+  );
+  const itemNumber = firstText(item?.itemId, item?.legacyItemId, item?.listingId, detail?.itemDetail?.itemId, findDeepItemNumber(...apiSources));
+  const transactionId = firstText(item?.transactionId, detail?.itemDetail?.transactionId, findDeepTransactionId(...apiSources));
+  const itemTitle = firstText(item?.title, item?.itemTitle, detail?.itemDetail?.title, detail?.itemDetail?.itemTitle, findDeepItemTitle(...apiSources));
+  const quantity = Math.max(1, Math.trunc(toNumber(item?.quantity, toNumber(item?.returnQuantity, 1))));
+  const reason = firstText(
+    creation?.reason,
+    mergedSummary?.reason,
+    mergedSummary?.issueType,
+    detail?.reason,
+    detail?.inquiryReason,
+    detail?.caseReason,
+    detail?.buyerInquiryReason,
+    findDeepReason(...apiSources),
+  );
+  const status = firstText(mergedSummary?.status, detail?.status, findDeepStatus(...apiSources));
+  const state = firstText(mergedSummary?.state, detail?.state);
+  const actionDue = firstText(sellerActionDue, buyerActionDue, sellerOptionTypes[0], findDeepActionDue(...apiSources));
+  const dueAt = firstDate(
+    sellerDue?.respondByDate?.value,
+    sellerDue?.respondByDate,
+    buyerDue?.respondByDate?.value,
+    mergedSummary?.respondByDate?.value,
+    mergedSummary?.respondByDate,
+    mergedSummary?.timeoutDate?.value,
+    detail?.respondByDate?.value,
+    detail?.respondByDate,
+    findDeepDateByKey(/respond|deadline|due|resolve|timeout/i, ...apiSources),
+  );
+  const requestedAt = firstDate(
+    creation?.creationDate?.value,
+    creation?.creationDate,
+    mergedSummary?.creationDate?.value,
+    mergedSummary?.creationDate,
+    mergedSummary?.openedDate?.value,
+    detail?.creationDate?.value,
+    detail?.creationDate,
+    detail?.openedDate?.value,
+    findDeepDateByKey(/creation|created|open|opened|filed|filing|requested/i, ...apiSources),
+  );
+  const buyerComment = commentText(
+    creation?.comments?.content,
+    creation?.comments,
+    mergedSummary?.buyerComment,
+    mergedSummary?.comments,
+    detail?.buyerComment,
+    detail?.comments?.content,
+    detail?.comments,
+  );
+  const requestAmount = moneyText(refundContainer) || findDeepMoneyText(...apiSources);
+  const onHoldAmount = moneyText(holdContainer);
+  const detailsUrl = getIssueActionUrl(mergedSummary, detail) || findDeepUrl(...apiSources);
+  const orderDetailsUrl = ebayOrderDetailsUrl(orderNumber);
+  const apiExtractedDetails = pruneEmptyRecord({
+    source: "ebay_post_order_api",
+    issueLane: lane,
+    requestId: issueId,
+    orderNumber,
+    orderDetailsUrl,
+    buyerUsername,
+    itemNumber,
+    transactionId,
+    itemTitle,
+    quantity,
+    reason,
+    status,
+    state,
+    actionDue,
+    dueAt,
+    requestedAt,
+    buyerComment,
+    requestAmount,
+    onHoldAmount,
+    detailsUrl,
+  });
+
   const preparedBase = {
     source: {
       ...(sourceSummary || {}),
@@ -831,75 +1242,29 @@ function preparePostOrderIssue(
     detail,
     filesPayload,
     returnId: issueId,
-    orderNumber: firstText(
-      mergedSummary?.orderId,
-      mergedSummary?.orderNumber,
-      detail?.orderId,
-      detail?.orderNumber,
-      creation?.orderId,
-    ),
-    buyerUsername: firstText(
-      mergedSummary?.buyerLoginName,
-      mergedSummary?.buyerUsername,
-      mergedSummary?.buyerUserName,
-      detail?.buyerLoginName,
-      detail?.buyerUsername,
-      detail?.buyerUserName,
-      detail?.buyer?.username,
-      detail?.buyer?.userName,
-    ),
-    itemNumber: firstText(item?.itemId, item?.legacyItemId, item?.listingId, detail?.itemDetail?.itemId),
-    transactionId: firstText(item?.transactionId, detail?.itemDetail?.transactionId),
-    itemTitle: firstText(item?.title, item?.itemTitle, detail?.itemDetail?.title, detail?.itemDetail?.itemTitle),
-    quantity: Math.max(1, Math.trunc(toNumber(item?.quantity, toNumber(item?.returnQuantity, 1)))),
-    reason: firstText(
-      creation?.reason,
-      mergedSummary?.reason,
-      mergedSummary?.issueType,
-      detail?.reason,
-      detail?.inquiryReason,
-      detail?.caseReason,
-      detail?.buyerInquiryReason,
-    ),
-    status: firstText(mergedSummary?.status, detail?.status),
-    state: firstText(mergedSummary?.state, detail?.state),
-    actionDue: firstText(sellerActionDue, buyerActionDue, sellerOptionTypes[0]),
+    orderNumber,
+    buyerUsername,
+    itemNumber,
+    transactionId,
+    itemTitle,
+    quantity,
+    reason,
+    status,
+    state,
+    actionDue,
     sellerActionDue,
     buyerActionDue,
     sellerOptionTypes,
     buyerOptionTypes,
-    dueAt: firstDate(
-      sellerDue?.respondByDate?.value,
-      sellerDue?.respondByDate,
-      buyerDue?.respondByDate?.value,
-      mergedSummary?.respondByDate?.value,
-      mergedSummary?.respondByDate,
-      mergedSummary?.timeoutDate?.value,
-      detail?.respondByDate?.value,
-      detail?.respondByDate,
-    ),
-    requestedAt: firstDate(
-      creation?.creationDate?.value,
-      creation?.creationDate,
-      mergedSummary?.creationDate?.value,
-      mergedSummary?.creationDate,
-      mergedSummary?.openedDate?.value,
-      detail?.creationDate?.value,
-      detail?.creationDate,
-      detail?.openedDate?.value,
-    ),
-    buyerComment: commentText(
-      creation?.comments?.content,
-      creation?.comments,
-      mergedSummary?.buyerComment,
-      mergedSummary?.comments,
-      detail?.buyerComment,
-      detail?.comments?.content,
-      detail?.comments,
-    ),
-    requestAmount: moneyText(refundContainer),
-    onHoldAmount: moneyText(holdContainer),
-    detailsUrl: getIssueActionUrl(mergedSummary, detail),
+    dueAt,
+    requestedAt,
+    buyerComment,
+    requestAmount,
+    onHoldAmount,
+    detailsUrl,
+    orderDetailsUrl,
+    apiExtractedDetails,
+    apiDetailsText: buildApiDetailsText(apiExtractedDetails),
     itemImageUrl: getItemImageUrl(detail, mergedSummary),
     trackingNumber: extractTracking(detail, mergedSummary),
     fileIds,
@@ -2691,9 +3056,11 @@ Deno.serve(async (req) => {
             returnId: prepared.returnId,
             issueLane: prepared.source?.__ogIssueLane || prepared.summary?.__ogIssueLane || "return",
             orderNumber: prepared.orderNumber,
+            orderDetailsUrl: prepared.orderDetailsUrl,
             buyerUsername: prepared.buyerUsername,
             itemNumber: prepared.itemNumber,
             itemTitle: prepared.itemTitle,
+            apiDetailsText: prepared.apiDetailsText,
             reason: prepared.reason,
             status: prepared.status || prepared.state,
             actionDue: prepared.actionDue,
@@ -2734,9 +3101,11 @@ Deno.serve(async (req) => {
           returnId: prepared.returnId,
           issueLane: prepared.source?.__ogIssueLane || prepared.summary?.__ogIssueLane || "return",
           orderNumber: caseRow.order_number || prepared.orderNumber,
+          orderDetailsUrl: prepared.orderDetailsUrl,
           buyerUsername: caseRow.buyer_username || prepared.buyerUsername,
           itemNumber: prepared.itemNumber,
           itemTitle: prepared.itemTitle,
+          apiDetailsText: prepared.apiDetailsText,
           reason: prepared.reason,
           status: caseRow.status,
           actionDue: prepared.actionDue,
@@ -2763,8 +3132,11 @@ Deno.serve(async (req) => {
           returnId: prepared.returnId,
           issueLane: prepared.source?.__ogIssueLane || prepared.summary?.__ogIssueLane || "return",
           orderNumber: prepared.orderNumber,
+          orderDetailsUrl: prepared.orderDetailsUrl,
           buyerUsername: prepared.buyerUsername,
           itemNumber: prepared.itemNumber,
+          itemTitle: prepared.itemTitle,
+          apiDetailsText: prepared.apiDetailsText,
           status: "error",
           matched: false,
           error: compactError(error),

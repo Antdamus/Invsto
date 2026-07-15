@@ -2903,6 +2903,7 @@ function getReturnTaskSearchText(task = {}) {
   const returnCase = getReturnTaskCase(task);
   const lines = getReturnTaskLines(task);
   const metadata = returnCase.raw_payload || task.metadata || {};
+  const apiDetails = getReturnTaskApiDetails(task);
   return [
     task.title,
     task.question,
@@ -2926,6 +2927,19 @@ function getReturnTaskSearchText(task = {}) {
     metadata.itemNumber,
     metadata.itemTitle,
     metadata.transactionId,
+    metadata.ebayRequestId,
+    metadata.ebayIssueId,
+    metadata.postOrderIssueLane,
+    metadata.apiDetailsText,
+    apiDetails.requestId,
+    apiDetails.orderNumber,
+    apiDetails.orderDetailsUrl,
+    apiDetails.buyerUsername,
+    apiDetails.itemNumber,
+    apiDetails.itemTitle,
+    apiDetails.requestAmount,
+    apiDetails.reason,
+    apiDetails.buyerComment,
     metadata.returnStatus,
     metadata.returnAction,
     metadata.refundText,
@@ -3226,12 +3240,14 @@ function getReturnTaskLineSummary(task = {}) {
   const returnCase = getReturnTaskCase(task);
   if (!lines.length) {
     const metadata = returnCase.raw_payload || task.metadata || {};
+    const apiDetails = getReturnTaskApiDetails(task);
     if (returnCase.case_type === "unmatched_legacy" || metadata.caseType === "unmatched_legacy") {
-      const item = [metadata.itemNumber || metadata.item_number, metadata.itemTitle || metadata.item_title]
+      const item = [apiDetails.itemNumber || metadata.itemNumber || metadata.item_number, apiDetails.itemTitle || metadata.itemTitle || metadata.item_title]
         .filter(Boolean)
         .join(" - ");
-      const reason = returnCase.return_reason || metadata.returnReason || metadata.return_reason || "";
-      return `No matched OG order history${item ? ` - ${item}` : ""}${reason ? ` (${reason})` : ""}`;
+      const order = apiDetails.orderNumber ? `Order ${apiDetails.orderNumber}` : "No matched OG order history";
+      const reason = apiDetails.reason || returnCase.return_reason || metadata.returnReason || metadata.return_reason || "";
+      return `${order}${item ? ` - ${item}` : ""}${reason ? ` (${reason})` : ""}`;
     }
     return "No line details loaded";
   }
@@ -3242,7 +3258,9 @@ function getReturnTaskLineSummary(task = {}) {
 
 function getReturnTaskPricePills(task = {}) {
   const payoutTotal = getReturnTaskPayoutTotal(task);
-  return payoutTotal > 0 ? [`Payout ${formatMoney(payoutTotal)}`] : [];
+  if (payoutTotal > 0) return [`Payout ${formatMoney(payoutTotal)}`];
+  const apiAmount = getReturnTaskApiDetails(task).requestAmount;
+  return apiAmount ? [`Amount ${apiAmount}`] : [];
 }
 
 function getReturnTaskFinancePill(task = {}) {
@@ -3261,14 +3279,23 @@ function getReturnTaskOrderDestination(task = {}) {
   const returnCase = getReturnTaskCase(task);
   const lines = getReturnTaskLines(task);
   const lineIds = getReturnTaskLineIds(task);
+  const apiDetails = getReturnTaskApiDetails(task);
   const orderNumber = returnCase.order_number
     || lines.map((line) => line.order?.order_number).find(Boolean)
+    || apiDetails.orderNumber
     || "";
   if (!orderNumber) {
     return {
       label: returnCase.case_type === "unmatched_legacy" ? "Legacy / no OG match" : "No OG order",
       href: "",
       page: "unmatched",
+    };
+  }
+  if (!lines.length && apiDetails.orderDetailsUrl) {
+    return {
+      label: `eBay ${orderNumber}`,
+      href: apiDetails.orderDetailsUrl,
+      page: "external",
     };
   }
   const hasPendingLine = lines.some(isPendingReturnTaskLine);
@@ -3294,9 +3321,10 @@ function getReturnTaskOrderDestination(task = {}) {
 function getReturnTaskBuyerDisplay(task = {}) {
   const returnCase = getReturnTaskCase(task);
   const metadata = getReturnTaskPayload(task);
+  const apiDetails = getReturnTaskApiDetails(task);
   const lines = getReturnTaskLines(task);
   const order = lines.map((line) => line.order).find(Boolean) || {};
-  const username = returnCase.buyer_username || metadata.buyerUsername || metadata.buyer_username || order.buyer_username || "";
+  const username = returnCase.buyer_username || metadata.buyerUsername || metadata.buyer_username || apiDetails.buyerUsername || order.buyer_username || "";
   const name = order.buyer_name || metadata.buyerName || metadata.buyer_name || metadata.returnDetails?.buyerName || "";
   if (name && username && name.toLowerCase() !== username.toLowerCase()) return `${name} (${username})`;
   return name || username || "No buyer";
@@ -3305,6 +3333,7 @@ function getReturnTaskBuyerDisplay(task = {}) {
 function getReturnComplaintDetails(task = {}) {
   const metadata = getReturnTaskPayload(task);
   const detail = metadata.returnDetails || {};
+  const apiDetails = getReturnTaskApiDetails(task);
   const imageUrls = unique([
     ...(Array.isArray(task.complaintImageUrls) ? task.complaintImageUrls : []),
     metadata.complaintImageUrl,
@@ -3320,13 +3349,13 @@ function getReturnComplaintDetails(task = {}) {
     ...(Array.isArray(detail.returnFileIds) ? detail.returnFileIds : []),
   ]);
   return {
-    buyerComment: metadata.buyerComment || detail.buyerComment || "",
-    requestAmount: metadata.requestAmount || detail.requestAmount || "",
-    onHoldAmount: metadata.onHoldAmount || detail.onHoldAmount || "",
+    buyerComment: metadata.buyerComment || detail.buyerComment || apiDetails.buyerComment || "",
+    requestAmount: prettifyApiMoneyText(metadata.requestAmount || detail.requestAmount || apiDetails.requestAmount || ""),
+    onHoldAmount: prettifyApiMoneyText(metadata.onHoldAmount || detail.onHoldAmount || apiDetails.onHoldAmount || ""),
     trackingNumber: getReturnTaskTrackingNumber(task),
-    orderDetailsUrl: metadata.orderDetailsUrl || detail.orderDetailsUrl || "",
+    orderDetailsUrl: metadata.orderDetailsUrl || detail.orderDetailsUrl || apiDetails.orderDetailsUrl || "",
     videoReceiptUrl: metadata.videoReceiptUrl || detail.videoReceiptUrl || "",
-    detailsUrl: metadata.detailsUrl || detail.detailsUrl || getReturnTaskPayload(task).pageUrl || "",
+    detailsUrl: metadata.detailsUrl || detail.detailsUrl || apiDetails.detailsUrl || getReturnTaskPayload(task).pageUrl || "",
     itemImageUrl: metadata.itemImageUrl || detail.itemImageUrl || "",
     datePurchased: metadata.datePurchased || detail.datePurchased || "",
     returnFileIds,
@@ -3792,12 +3821,13 @@ function renderReturnMessageLog(task = {}) {
 function renderReturnComplaintDetails(task = {}) {
   const detail = getReturnComplaintDetails(task);
   const returnCase = getReturnTaskCase(task);
+  const apiDetails = getReturnTaskApiDetails(task);
   const externalLinkAttrs = [
     `data-return-external-link="${escapeHtml(task.id || "")}"`,
-    `data-return-external-return-id="${escapeHtml(returnCase.ebay_return_id || "")}"`,
-    `data-return-external-order-number="${escapeHtml(returnCase.order_number || "")}"`,
-    `data-return-external-buyer="${escapeHtml(returnCase.buyer_username || "")}"`,
-    `data-return-external-item-number="${escapeHtml((getReturnTaskPayload(task).itemNumber || getReturnTaskPayload(task).item_number || ""))}"`,
+    `data-return-external-return-id="${escapeHtml(returnCase.ebay_return_id || apiDetails.requestId || "")}"`,
+    `data-return-external-order-number="${escapeHtml(returnCase.order_number || apiDetails.orderNumber || "")}"`,
+    `data-return-external-buyer="${escapeHtml(returnCase.buyer_username || apiDetails.buyerUsername || "")}"`,
+    `data-return-external-item-number="${escapeHtml(apiDetails.itemNumber || getReturnTaskPayload(task).itemNumber || getReturnTaskPayload(task).item_number || "")}"`,
   ].join(" ");
   const hasDetails = Boolean(
     detail.buyerComment
@@ -3860,8 +3890,9 @@ function renderReturnTaskSummary(task = {}) {
   const dueInfo = getReturnTaskDueInfo(task);
   const issueKind = getIndexedReturnTaskIssueKind(task);
   const orderDestination = getReturnTaskOrderDestination(task);
+  const apiDetails = getReturnTaskApiDetails(task);
   const buyer = getReturnTaskBuyerDisplay(task);
-  const reason = returnCase.return_reason || metadata.returnReason || metadata.return_reason || "";
+  const reason = apiDetails.reason || returnCase.return_reason || metadata.returnReason || metadata.return_reason || "";
   const expanded = state.expandedReturnTaskIds.has(task.id);
   const loading = state.returnTaskHydratingIds.has(task.id) || state.returnMessageLoadingTaskIds.has(task.id);
   const pricePills = getReturnTaskPricePills(task);
@@ -3890,6 +3921,7 @@ function renderReturnTaskSummary(task = {}) {
         ${orderDestination.href ? `
           <a class="return-task-order-link is-${escapeHtml(orderDestination.page)}" href="${escapeHtml(orderDestination.href)}">${escapeHtml(orderDestination.label)}</a>
         ` : `<span>${escapeHtml(orderDestination.label)}</span>`}
+        ${apiDetails.requestId ? `<span title="eBay request ID">Request ${escapeHtml(apiDetails.requestId)}</span>` : ""}
         ${pricePills.map((label) => `<span class="return-task-price-pill">${escapeHtml(label)}</span>`).join("")}
         ${renderFinanceBadgeMarkup(financePill, "return-task-finance-pill")}
         <span>${escapeHtml(buyer)}</span>
@@ -3934,6 +3966,55 @@ function renderReturnTaskUpdates(task = {}, canWorkTask = false) {
   `;
 }
 
+function renderReturnTaskApiDetails(task = {}) {
+  const apiDetails = getReturnTaskApiDetails(task);
+  const hasDetails = Boolean(
+    apiDetails.requestId
+    || apiDetails.orderNumber
+    || apiDetails.buyerUsername
+    || apiDetails.itemNumber
+    || apiDetails.itemTitle
+    || apiDetails.requestAmount
+    || apiDetails.reason
+    || apiDetails.buyerComment
+  );
+  if (!hasDetails) return "";
+  const linkAttrs = [
+    `data-return-external-link="${escapeHtml(task.id || "")}"`,
+    `data-return-external-return-id="${escapeHtml(apiDetails.requestId || "")}"`,
+    `data-return-external-order-number="${escapeHtml(apiDetails.orderNumber || "")}"`,
+    `data-return-external-buyer="${escapeHtml(apiDetails.buyerUsername || "")}"`,
+    `data-return-external-item-number="${escapeHtml(apiDetails.itemNumber || "")}"`,
+  ].join(" ");
+  return `
+    <div class="return-task-api-details">
+      <div class="return-complaint-header">
+        <span class="eyebrow">eBay API Details</span>
+        <div>
+          ${apiDetails.detailsUrl ? `<a href="${escapeHtml(apiDetails.detailsUrl)}" target="_blank" rel="noopener" ${linkAttrs}>Open eBay request</a>` : ""}
+          ${apiDetails.orderDetailsUrl ? `<a href="${escapeHtml(apiDetails.orderDetailsUrl)}" target="_blank" rel="noopener" ${linkAttrs}>Open eBay order</a>` : ""}
+        </div>
+      </div>
+      <div class="return-complaint-grid">
+        ${apiDetails.requestId ? `<span><small>Request ID</small><b>${escapeHtml(apiDetails.requestId)}</b></span>` : ""}
+        ${apiDetails.orderNumber ? `<span><small>Order number</small><b>${escapeHtml(apiDetails.orderNumber)}</b></span>` : ""}
+        ${apiDetails.buyerUsername ? `<span><small>Buyer</small><b>${escapeHtml(apiDetails.buyerUsername)}</b></span>` : ""}
+        ${apiDetails.requestAmount ? `<span><small>Amount</small><b>${escapeHtml(apiDetails.requestAmount)}</b></span>` : ""}
+        ${apiDetails.itemNumber ? `<span><small>Item number</small><b>${escapeHtml(apiDetails.itemNumber)}</b></span>` : ""}
+        ${apiDetails.itemTitle ? `<span><small>Item title</small><b>${escapeHtml(apiDetails.itemTitle)}</b></span>` : ""}
+        ${apiDetails.reason ? `<span><small>Reason</small><b>${escapeHtml(apiDetails.reason)}</b></span>` : ""}
+        ${apiDetails.requestedAt ? `<span><small>Date opened</small><b>${escapeHtml(formatDateOnly(apiDetails.requestedAt))}</b></span>` : ""}
+      </div>
+      ${apiDetails.buyerComment ? `
+        <p class="return-complaint-comment">
+          <strong>Buyer comment</strong>
+          <span>${escapeHtml(apiDetails.buyerComment)}</span>
+        </p>
+      ` : ""}
+    </div>
+  `;
+}
+
 function renderReturnTaskDetails(task = {}) {
   if (!state.expandedReturnTaskIds.has(task.id)) return "";
   const returnCase = getReturnTaskCase(task);
@@ -3944,12 +4025,13 @@ function renderReturnTaskDetails(task = {}) {
   const requestedLabel = getReturnTaskRequestedLabel(task);
   const complaintDetail = getReturnComplaintDetails(task);
   const displayInfo = getReturnTaskDisplayInfo(task);
+  const apiDetails = getReturnTaskApiDetails(task);
   const taskExternalLinkAttrs = [
     `data-return-external-link="${escapeHtml(task.id || "")}"`,
-    `data-return-external-return-id="${escapeHtml(returnCase.ebay_return_id || "")}"`,
-    `data-return-external-order-number="${escapeHtml(returnCase.order_number || "")}"`,
-    `data-return-external-buyer="${escapeHtml(returnCase.buyer_username || "")}"`,
-    `data-return-external-item-number="${escapeHtml((getReturnTaskPayload(task).itemNumber || getReturnTaskPayload(task).item_number || ""))}"`,
+    `data-return-external-return-id="${escapeHtml(returnCase.ebay_return_id || apiDetails.requestId || "")}"`,
+    `data-return-external-order-number="${escapeHtml(returnCase.order_number || apiDetails.orderNumber || "")}"`,
+    `data-return-external-buyer="${escapeHtml(returnCase.buyer_username || apiDetails.buyerUsername || "")}"`,
+    `data-return-external-item-number="${escapeHtml(apiDetails.itemNumber || getReturnTaskPayload(task).itemNumber || getReturnTaskPayload(task).item_number || "")}"`,
   ].join(" ");
   return `
     <div class="return-task-expanded">
@@ -3966,8 +4048,19 @@ function renderReturnTaskDetails(task = {}) {
               <b>${escapeHtml(requestedLabel || "-")}</b>
               <em>${escapeHtml(returnCase.return_reason || getReturnTaskPayload(task).returnReason || "No reason captured")}</em>
             </span>
+            <span>
+              <small>eBay request</small>
+              <b>${escapeHtml(apiDetails.requestId || "-")}</b>
+              <em>${escapeHtml(apiDetails.issueLane || "return")}</em>
+            </span>
+            <span>
+              <small>API order</small>
+              <b>${escapeHtml(apiDetails.orderNumber || "-")}</b>
+              <em>${escapeHtml([apiDetails.buyerUsername, apiDetails.requestAmount].filter(Boolean).join(" - ") || "No buyer or amount captured")}</em>
+            </span>
           </div>
           ${state.returnTaskHydratingIds.has(task.id) ? `<div class="return-task-loading">Loading eBay complaint photos and messages...</div>` : ""}
+          ${renderReturnTaskApiDetails(task)}
           ${renderReturnTaskVideoReceiptPanel(task)}
           ${renderReturnComplaintDetails(task)}
           ${renderReturnMessageLog(task)}
@@ -7810,6 +7903,72 @@ function getReturnTaskPayload(task = {}) {
   };
 }
 
+function prettifyApiMoneyText(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const usdMatch = text.match(/^USD\s+(-?\d+(?:\.\d+)?)$/i);
+  if (usdMatch) return formatMoney(Number(usdMatch[1]));
+  return text;
+}
+
+function getReturnTaskApiDetails(task = {}) {
+  const returnCase = getReturnTaskCase(task);
+  const metadata = getReturnTaskPayload(task);
+  const detail = metadata.returnDetails || {};
+  const api = metadata.apiExtractedDetails || detail.apiExtractedDetails || {};
+  const lines = getReturnTaskLines(task);
+  const firstLine = lines[0] || {};
+  const firstOrder = lines.map((line) => line.order).find(Boolean) || {};
+  const requestId = returnCase.ebay_return_id
+    || metadata.ebayRequestId
+    || metadata.ebayIssueId
+    || metadata.ebayReturnId
+    || metadata.returnId
+    || api.requestId
+    || "";
+  const orderNumber = returnCase.order_number
+    || metadata.orderNumber
+    || metadata.order_number
+    || api.orderNumber
+    || firstOrder.order_number
+    || "";
+  const buyerUsername = returnCase.buyer_username
+    || metadata.buyerUsername
+    || metadata.buyer_username
+    || api.buyerUsername
+    || firstOrder.buyer_username
+    || "";
+  const itemNumber = metadata.itemNumber || metadata.item_number || api.itemNumber || firstLine.item_number || "";
+  const itemTitle = metadata.itemTitle || metadata.item_title || api.itemTitle || firstLine.item_title || "";
+  const requestAmount = prettifyApiMoneyText(metadata.requestAmount || detail.requestAmount || metadata.refundText || api.requestAmount || "");
+  const onHoldAmount = prettifyApiMoneyText(metadata.onHoldAmount || detail.onHoldAmount || api.onHoldAmount || "");
+  const orderDetailsUrl = metadata.orderDetailsUrl
+    || detail.orderDetailsUrl
+    || api.orderDetailsUrl
+    || buildEbayOrderDetailsUrl(orderNumber);
+  return {
+    requestId,
+    issueLane: metadata.postOrderIssueLane || api.issueLane || "return",
+    orderNumber,
+    orderDetailsUrl,
+    buyerUsername,
+    itemNumber,
+    itemTitle,
+    transactionId: metadata.transactionId || metadata.transaction_id || api.transactionId || firstLine.transaction_id || "",
+    quantity: Number(metadata.returnQuantity || api.quantity || firstLine.quantity || 1),
+    reason: returnCase.return_reason || metadata.returnReason || metadata.return_reason || api.reason || "",
+    status: metadata.returnStatus || metadata.returnState || api.status || api.state || returnCase.status || "",
+    actionDue: metadata.returnAction || api.actionDue || "",
+    dueAt: metadata.returnDueAt || api.dueAt || task.due_at || "",
+    requestedAt: metadata.returnInitiated || api.requestedAt || returnCase.opened_at || "",
+    buyerComment: metadata.buyerComment || detail.buyerComment || api.buyerComment || "",
+    requestAmount,
+    onHoldAmount,
+    detailsUrl: metadata.detailsUrl || detail.detailsUrl || api.detailsUrl || "",
+    apiDetailsText: metadata.apiDetailsText || api.apiDetailsText || "",
+  };
+}
+
 function parseReturnDateText(value = "", referenceValue = "") {
   const text = String(value || "").trim();
   if (!text) return null;
@@ -9687,7 +9846,14 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
       <div class="return-import-list">
         <strong>Missing OG matches</strong>
         ${unmatchedReturns.slice(0, 8).map((entry) => `
-          <p>${escapeHtml(entry.returnId || "No return ID")} - ${escapeHtml(entry.buyerUsername || "No buyer")} - ${escapeHtml(entry.itemNumber || "No item #")} - ${escapeHtml(entry.reason || "Review task opened")}</p>
+          <p>
+            <strong>Request ${escapeHtml(entry.returnId || "No request ID")}</strong>
+            - ${escapeHtml(entry.orderNumber ? `Order ${entry.orderNumber}` : "No order number")}
+            - ${escapeHtml(entry.buyerUsername || "No buyer")}
+            - ${escapeHtml([entry.itemNumber, entry.itemTitle].filter(Boolean).join(" - ") || "No item captured")}
+            ${entry.requestAmount ? `- ${escapeHtml(prettifyApiMoneyText(entry.requestAmount))}` : ""}
+            - ${escapeHtml(entry.reason || "Review task opened")}
+          </p>
         `).join("")}
       </div>
     ` : ""}
@@ -9695,7 +9861,13 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
       <div class="return-import-list is-error">
         <strong>Rejected by OG</strong>
         ${failedReturns.slice(0, 8).map((entry) => `
-          <p>${escapeHtml(entry.returnId || "No return ID")} - ${escapeHtml(entry.buyerUsername || "No buyer")} - ${escapeHtml(entry.itemNumber || "No item #")} - ${escapeHtml(entry.error || "Import failed")}</p>
+          <p>
+            <strong>Request ${escapeHtml(entry.returnId || "No request ID")}</strong>
+            - ${escapeHtml(entry.orderNumber ? `Order ${entry.orderNumber}` : "No order number")}
+            - ${escapeHtml(entry.buyerUsername || "No buyer")}
+            - ${escapeHtml([entry.itemNumber, entry.itemTitle].filter(Boolean).join(" - ") || "No item captured")}
+            - ${escapeHtml(entry.error || "Import failed")}
+          </p>
         `).join("")}
       </div>
     ` : ""}
@@ -10077,16 +10249,26 @@ function buildReturnApiSyncSummary(response = {}) {
     .filter((entry) => entry?.error)
     .map((entry) => ({
       returnId: entry.returnId,
+      orderNumber: entry.orderNumber,
+      orderDetailsUrl: entry.orderDetailsUrl,
       buyerUsername: entry.buyerUsername,
       itemNumber: entry.itemNumber,
+      itemTitle: entry.itemTitle,
+      requestAmount: entry.requestAmount,
       error: entry.error,
     }));
   const unmatchedReturns = results
     .filter((entry) => entry && entry.matched === false && !entry.error)
     .map((entry) => ({
       returnId: entry.returnId,
+      orderNumber: entry.orderNumber,
+      orderDetailsUrl: entry.orderDetailsUrl,
       buyerUsername: entry.buyerUsername,
       itemNumber: entry.itemNumber,
+      itemTitle: entry.itemTitle,
+      requestAmount: entry.requestAmount,
+      issueLane: entry.issueLane,
+      apiDetailsText: entry.apiDetailsText,
       reason: entry.reason || entry.status || "No OG match",
     }));
   return {
