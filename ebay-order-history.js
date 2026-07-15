@@ -99,6 +99,8 @@ const RETURN_THUMBNAIL_TRANSFORM = { width: 260, height: 260, resize: "contain",
 const HISTORY_EVIDENCE_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"]);
 const HISTORY_EVIDENCE_VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "ogg"]);
 const RETURN_EXTERNAL_NAV_RESTORE_KEY = "ogReturnExternalNavigationRestore";
+const RETURN_ACTIVE_TASK_STATUSES = new Set(["open", "assigned", "in_progress", "blocked", "deferred"]);
+const RETURN_INACTIVE_TASK_STATUSES = new Set(["resolved", "closed", "cancelled"]);
 const TRACKING_NUMBER_PATTERN = /\b\d{20,30}\b/g;
 const FORMATTED_TRACKING_NUMBER_PATTERN = /\b\d{2,4}(?:[\s-]+\d{2,4}){4,8}\b/g;
 const BARCODE_GROUP_SEPARATOR = String.fromCharCode(29);
@@ -3061,9 +3063,8 @@ function getFilteredReturnTasks() {
   const issueFilter = $("return-task-issue-filter")?.value || "all";
   const assigneeFilter = $("return-task-assignee-filter")?.value || "";
   const term = String($("return-task-search")?.value || "").trim().toLowerCase();
-  const pendingStatuses = new Set(["open", "assigned", "in_progress", "blocked", "deferred"]);
   const filteredTasks = state.returnTasks.filter((task) => {
-    if (statusFilter === "pending" && !pendingStatuses.has(task.status)) return false;
+    if (statusFilter === "pending" && !RETURN_ACTIVE_TASK_STATUSES.has(task.status)) return false;
     if (statusFilter === "mine" && task.assigned_to_user_id !== state.user?.id) return false;
     if (!["pending", "mine", "all"].includes(statusFilter) && task.status !== statusFilter) return false;
     if (issueFilter !== "all" && getIndexedReturnTaskIssueKind(task) !== issueFilter) return false;
@@ -3992,12 +3993,115 @@ function getReturnQueueCountLabel(visibleCount = 0, totalCount = 0) {
   const term = String($("return-task-search")?.value || "").trim();
   const hasExtraFilters = issueFilter !== "all" || assigneeFilter || term;
   if (statusFilter === "pending" && !hasExtraFilters) {
-    return `${visibleCount} pending task${visibleCount === 1 ? "" : "s"}`;
+    return `${visibleCount} OG pending task${visibleCount === 1 ? "" : "s"}`;
   }
   if (statusFilter === "all" && !hasExtraFilters) {
     return `${totalCount} total task${totalCount === 1 ? "" : "s"}`;
   }
   return `${visibleCount} shown`;
+}
+
+function getReturnLocalQueueStats() {
+  const tasks = Array.isArray(state.returnTasks) ? state.returnTasks : [];
+  return tasks.reduce((stats, task) => {
+    const status = String(task?.status || "").toLowerCase();
+    stats.total += 1;
+    if (RETURN_ACTIVE_TASK_STATUSES.has(status)) stats.active += 1;
+    else if (RETURN_INACTIVE_TASK_STATUSES.has(status)) stats.inactive += 1;
+    else stats.other += 1;
+    return stats;
+  }, { total: 0, active: 0, inactive: 0, other: 0 });
+}
+
+function getReturnSummaryNumber(summary = {}, keys = []) {
+  for (const key of keys) {
+    const value = Number(summary?.[key]);
+    if (Number.isFinite(value)) return value;
+  }
+  return 0;
+}
+
+function getReturnSummaryEbayTotal(summary = state.lastReturnImportSummary) {
+  if (!summary) return null;
+  const value = Number(summary.ebayTotalEntries ?? summary.requestedCount ?? summary.total);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function getReturnSummaryEbayLabel(summary = state.lastReturnImportSummary) {
+  return summary?.ebayTotalLabel || summary?.sourceLabel || (summary?.source === "ebay-return-api" ? "API issues" : "eBay visible");
+}
+
+function formatReturnLaneCounts(laneCounts = {}) {
+  const entries = Object.entries(laneCounts || {})
+    .map(([key, value]) => [key, Number(value)])
+    .filter(([, value]) => Number.isFinite(value) && value > 0);
+  if (!entries.length) return "";
+  const labels = {
+    returns: "returns",
+    return: "returns",
+    inquiry: "requests",
+    inquiries: "requests",
+  };
+  return entries
+    .map(([key, value]) => `${labels[key] || key} ${value.toLocaleString()}`)
+    .join(" / ");
+}
+
+function renderReturnQueueReconciliation() {
+  const panel = $("return-queue-reconciliation");
+  if (!panel) return;
+  const summary = state.lastReturnImportSummary;
+  const local = getReturnLocalQueueStats();
+  const ebayTotal = getReturnSummaryEbayTotal(summary);
+
+  if (!summary || ebayTotal == null) {
+    panel.classList.remove("hidden", "is-warning", "is-clear");
+    panel.classList.add("is-warning");
+    panel.title = "OG pending is the active local work queue count. Run an eBay check or sync to compare it against eBay's current visible count.";
+    panel.innerHTML = `
+      <span><small>eBay source</small><b>Check needed</b></span>
+      <span><small>OG pending</small><b>${local.active.toLocaleString()}</b></span>
+      <span><small>Gap vs eBay</small><b>-</b></span>
+      <span><small>Loaded closed/resolved</small><b>${local.inactive.toLocaleString()}</b></span>
+      <em>Latest eBay visible count is not stored yet.</em>
+    `;
+    return;
+  }
+
+  const matched = getReturnSummaryNumber(summary, ["importedCreatedCount", "matched"]);
+  const unmatched = getReturnSummaryNumber(summary, ["unmatchedCreated", "unmatched"]);
+  const failed = getReturnSummaryNumber(summary, ["failedCount", "errors"]);
+  const alreadyInactive = getReturnSummaryNumber(summary, ["duplicateResolvedCount", "taskSkippedCount"]);
+  const heldOpen = getReturnSummaryNumber(summary, ["staleCasesHeldOpen"]);
+  const fetched = getReturnSummaryNumber(summary, ["fetchedCount", "ebayFetchedEntries", "requestedCount"]);
+  const prepared = getReturnSummaryNumber(summary, ["preparedCount", "ebayPreparedEntries", "processedCount"]);
+  const activeGap = Math.max(0, ebayTotal - local.active);
+  const ebayLabel = getReturnSummaryEbayLabel(summary);
+  const notFetched = fetched ? Math.max(0, ebayTotal - fetched) : 0;
+  const notPrepared = fetched && prepared ? Math.max(0, fetched - prepared) : 0;
+  const syncedAt = summary.finishedAt || summary.startedAt || "";
+  const statusText = [
+    formatReturnLaneCounts(summary.laneCounts) ? `API split: ${formatReturnLaneCounts(summary.laneCounts)}` : "",
+    alreadyInactive ? `${alreadyInactive.toLocaleString()} already closed/resolved locally` : "",
+    unmatched ? `${unmatched.toLocaleString()} no OG match` : "",
+    failed ? `${failed.toLocaleString()} failed/rejected` : "",
+    notFetched ? `${notFetched.toLocaleString()} not fetched from eBay yet` : "",
+    notPrepared ? `${notPrepared.toLocaleString()} fetched but not extracted` : "",
+    heldOpen ? `${heldOpen.toLocaleString()} held open for local action` : "",
+  ].filter(Boolean).join(" - ");
+
+  panel.classList.remove("hidden", "is-warning", "is-clear");
+  panel.classList.add(activeGap ? "is-warning" : "is-clear");
+  panel.title = `${ebayLabel} is the raw open eBay result count from the last check/import. OG pending is the active local work queue count after statuses are applied.`;
+  panel.innerHTML = `
+    <span><small>${escapeHtml(ebayLabel)}</small><b>${ebayTotal.toLocaleString()}</b></span>
+    <span><small>OG pending</small><b>${local.active.toLocaleString()}</b></span>
+    <span><small>Gap vs eBay</small><b>${activeGap.toLocaleString()}</b></span>
+    <span><small>Loaded closed/resolved</small><b>${local.inactive.toLocaleString()}</b></span>
+    <span><small>Matched to OG</small><b>${matched.toLocaleString()}</b></span>
+    ${statusText ? `<em>${escapeHtml(statusText)}</em>` : `<em>Last sync accounted for the visible eBay result count.</em>`}
+    ${syncedAt ? `<em>Checked ${escapeHtml(formatDateTime(syncedAt))}</em>` : ""}
+  `;
 }
 
 function renderReturnQueue() {
@@ -4007,8 +4111,9 @@ function renderReturnQueue() {
   const tasks = getFilteredReturnTasks();
   if (count) {
     count.textContent = getReturnQueueCountLabel(tasks.length, state.returnTasks.length);
-    count.title = `${state.returnTasks.length} total return task${state.returnTasks.length === 1 ? "" : "s"} loaded, including resolved and cancelled history.`;
+    count.title = `${state.returnTasks.length} total OG return task${state.returnTasks.length === 1 ? "" : "s"} loaded, including resolved and cancelled history. eBay's raw visible count is shown in the reconciliation panel after a check or sync.`;
   }
+  renderReturnQueueReconciliation();
 
   if (!tasks.length) {
     list.innerHTML = `<div class="history-empty">No return tasks match this view.</div>`;
@@ -7566,13 +7671,15 @@ function buildUnmatchedReturnTransferNote(info = {}) {
 function returnTransferMatchesLine(info = {}, line = {}) {
   const itemNumber = normalizeReturnLookup(info.itemNumber);
   const transactionId = normalizeReturnLookup(info.transactionId);
+  const orderNumber = normalizeReturnLookup(info.orderNumber);
   const buyer = normalizeReturnLookup(info.buyerUsername);
   const title = normalizeReturnLookup(info.itemTitle);
   if (transactionId && normalizeReturnLookup(line.transaction_id) === transactionId) return true;
+  if (orderNumber && normalizeReturnLookup(line.order?.order_number) !== orderNumber) return false;
   if (itemNumber && normalizeReturnLookup(line.item_number) !== itemNumber) return false;
   if (buyer && normalizeReturnLookup(line.order?.buyer_username) !== buyer) return false;
   if (!itemNumber && title && normalizeReturnLookup(line.item_title) !== title) return false;
-  return Boolean(itemNumber || title);
+  return Boolean(itemNumber || title || orderNumber);
 }
 
 function mergeHistoryLines(rows = []) {
@@ -7587,7 +7694,8 @@ function mergeHistoryLines(rows = []) {
 async function fetchReturnTransferLines(info = {}) {
   const transactionId = String(info.transactionId || "").trim();
   const itemNumber = String(info.itemNumber || "").trim();
-  if (!transactionId && !itemNumber) return [];
+  const orderNumber = String(info.orderNumber || "").trim();
+  if (!transactionId && !itemNumber && !orderNumber) return [];
 
   let query = supabase
     .from("ebay_order_lines")
@@ -7596,7 +7704,9 @@ async function fetchReturnTransferLines(info = {}) {
     .order("fulfilled_at", { ascending: false })
     .limit(50);
 
-  query = transactionId ? query.eq("transaction_id", transactionId) : query.eq("item_number", itemNumber);
+  if (transactionId) query = query.eq("transaction_id", transactionId);
+  else if (itemNumber) query = query.eq("item_number", itemNumber);
+  else query = query.eq("ebay_orders.order_number", orderNumber);
   const { data, error } = await query;
   if (error) throw error;
   const normalized = (data || []).map(normalizeLine);
@@ -7618,8 +7728,10 @@ async function findReturnTransferLines(payload = {}) {
   if (info.transactionId) return matches.slice(0, 1);
   const buyer = normalizeReturnLookup(info.buyerUsername);
   const itemNumber = normalizeReturnLookup(info.itemNumber);
+  const orderNumber = normalizeReturnLookup(info.orderNumber);
   return matches
     .filter((line) => !buyer || normalizeReturnLookup(line.order?.buyer_username) === buyer)
+    .filter((line) => !orderNumber || normalizeReturnLookup(line.order?.order_number) === orderNumber)
     .filter((line) => !itemNumber || normalizeReturnLookup(line.item_number) === itemNumber)
     .sort((a, b) => new Date(b.fulfilled_at || 0) - new Date(a.fulfilled_at || 0))
     .slice(0, 5);
@@ -7645,13 +7757,18 @@ function buildReturnBatchItemPayload(payload = {}, returnInfo = {}, index = 0) {
     },
     metadata: {
       ...metadata,
-      source: "ebay-returns-page-batch-item",
+      source: metadata.source === "ebay-requests-disputes-page-batch" ? "ebay-requests-disputes-page-batch-item" : "ebay-returns-page-batch-item",
       batchTransferId: payload.transferId || "",
       batchIndex: index + 1,
       returnId,
       itemNumber,
       buyerUsername: returnInfo.buyerUsername || "",
       transactionId: returnInfo.transactionId || "",
+      orderNumber: returnInfo.orderNumber || metadata.orderNumber || "",
+      caseType: returnInfo.caseType || metadata.caseType || "",
+      ebayTotalLabel: metadata.ebayTotalLabel || "",
+      sellerHubVisibleTotal: metadata.sellerHubVisibleTotal || null,
+      sellerHubVisibleCount: metadata.sellerHubVisibleCount || null,
       pageUrl: returnInfo.pageUrl || metadata.pageUrl || "",
       capturedAt: returnInfo.capturedAt || metadata.capturedAt || new Date().toISOString(),
     },
@@ -9434,6 +9551,70 @@ async function clearReturnImportTestData() {
   }
 }
 
+function getReturnSyncTotalsWarning(warnings = []) {
+  if (!Array.isArray(warnings)) return {};
+  return warnings.find((entry) => entry?.reason === "ebay_return_search_totals") || {};
+}
+
+function buildReturnSyncRunSummary(row = {}) {
+  const totals = getReturnSyncTotalsWarning(row.warnings);
+  const hasStoredEbayTotal = totals.ebayTotalEntries !== undefined || totals.ebayFetchedEntries !== undefined;
+  const ebayTotal = Number(hasStoredEbayTotal ? totals.ebayTotalEntries ?? row.returns_seen ?? 0 : 0);
+  const fetched = Number(totals.ebayFetchedEntries ?? row.returns_seen ?? 0);
+  const prepared = Number(totals.ebayPreparedEntries ?? row.returns_seen ?? 0);
+  const returnsSeen = Number(row.returns_seen || 0);
+  const errors = Number(row.errors || 0);
+  return {
+    ok: row.status === "completed" && !errors,
+    runId: row.id || null,
+    dryRun: row.dry_run === true,
+    source: "ebay-return-api",
+    ebayTotalLabel: "API issues",
+    hasEbayTotal: hasStoredEbayTotal,
+    ebayTotalEntries: hasStoredEbayTotal && Number.isFinite(ebayTotal) ? ebayTotal : 0,
+    fetchedCount: Number.isFinite(fetched) ? fetched : 0,
+    preparedCount: Number.isFinite(prepared) ? prepared : returnsSeen,
+    requestedCount: hasStoredEbayTotal && Number.isFinite(ebayTotal) ? ebayTotal : 0,
+    processedCount: Math.max(0, returnsSeen - errors),
+    importedCreatedCount: Number(row.cases_matched || 0),
+    unmatchedCreated: Number(row.cases_unmatched || 0),
+    failedCount: errors,
+    duplicateResolvedCount: Number(totals.taskSkippedCount || 0),
+    messagesImported: Number(row.messages_imported || 0),
+    filesSeen: Number(row.files_seen || 0),
+    ebayTruncated: totals.ebayTruncated === true,
+    requestedFrom: totals.requestedFrom || "",
+    requestedTo: totals.requestedTo || "",
+    laneCounts: totals.laneCounts || {},
+    warnings: Array.isArray(row.warnings) ? row.warnings : [],
+    startedAt: row.started_at || "",
+    finishedAt: row.finished_at || "",
+    importedReturns: [],
+    unmatchedReturns: [],
+    failedReturns: [],
+    message: hasStoredEbayTotal
+      ? `Latest eBay issue sync extracted ${returnsSeen.toLocaleString()} record${returnsSeen === 1 ? "" : "s"} from ${Number.isFinite(ebayTotal) && ebayTotal ? ebayTotal.toLocaleString() : "the"} visible eBay result${Number.isFinite(ebayTotal) && ebayTotal === 1 ? "" : "s"}.`
+      : "Latest eBay issue sync did not store the eBay visible count. Run Check eBay Issues or Sync eBay Issues to refresh the reconciliation.",
+  };
+}
+
+async function loadLatestReturnSyncSummary() {
+  if (!isReturnsWorkbenchPage()) return;
+  try {
+    const { data, error } = await supabase
+      .from("ebay_return_sync_runs")
+      .select("id,dry_run,status,returns_seen,cases_matched,cases_unmatched,tasks_created,tasks_updated,messages_imported,files_seen,errors,warnings,started_at,finished_at")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) setLastReturnImportSummary(buildReturnSyncRunSummary(data));
+  } catch (error) {
+    console.warn("Could not load latest eBay return sync summary:", error);
+    renderReturnQueueReconciliation();
+  }
+}
+
 function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
   const panel = $("return-import-summary");
   const count = $("return-import-count");
@@ -9447,24 +9628,35 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
     return;
   }
 
-  const requested = Number(summary.requestedCount ?? summary.total ?? 0);
+  const requested = Number(summary.ebayTotalEntries ?? summary.requestedCount ?? summary.total ?? 0);
+  const hasEbayTotal = summary.hasEbayTotal !== false && requested > 0;
+  const fetched = Number(summary.fetchedCount ?? summary.ebayFetchedEntries ?? requested);
+  const prepared = Number(summary.preparedCount ?? summary.ebayPreparedEntries ?? summary.processedCount ?? 0);
   const matched = Number(summary.importedCreatedCount ?? summary.importedCount ?? 0);
   const unmatched = Number(summary.unmatchedCreated ?? summary.unmatchedCount ?? 0);
   const failed = Number(summary.failedCount || 0);
   const duplicate = Number(summary.duplicateResolvedCount || 0);
   const heldOpen = Number(summary.staleCasesHeldOpen || 0);
   const processed = Number(summary.processedCount || matched + unmatched + duplicate + heldOpen);
-  const missing = Math.max(0, requested - processed - failed);
+  const missing = hasEbayTotal ? Math.max(0, requested - processed - failed) : 0;
+  const notFetched = hasEbayTotal && fetched ? Math.max(0, requested - fetched) : 0;
+  const notExtracted = hasEbayTotal && fetched && prepared ? Math.max(0, fetched - prepared) : 0;
+  const localStats = getReturnLocalQueueStats();
+  const activeGap = hasEbayTotal ? Math.max(0, requested - localStats.active) : 0;
   const failedReturns = Array.isArray(summary.failedReturns) ? summary.failedReturns : [];
   const unmatchedReturns = Array.isArray(summary.unmatchedReturns) ? summary.unmatchedReturns : [];
   const financeStats = summary.financeStats || {};
   const financeChecked = Number(financeStats.financeOrdersChecked || 0);
   const financeFound = Number(financeStats.financeOrdersWithTransactions || 0);
+  const ebayLabel = getReturnSummaryEbayLabel(summary);
+  const laneCountsText = formatReturnLaneCounts(summary.laneCounts);
 
   panel.classList.remove("hidden");
   panel.classList.toggle("is-error", Boolean(failed || missing));
   if (count) {
-    count.textContent = failed || missing
+    count.textContent = hasEbayTotal
+      ? `${localStats.active.toLocaleString()} OG / ${requested.toLocaleString()} eBay`
+      : failed || missing
       ? `${failed + missing} issue${failed + missing === 1 ? "" : "s"}`
       : `${processed} imported`;
   }
@@ -9474,16 +9666,21 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
 
   details.innerHTML = `
     <div class="return-import-grid">
-      <span><small>Visible on eBay</small><b>${requested.toLocaleString()}</b></span>
+      <span><small>${escapeHtml(ebayLabel)}</small><b>${hasEbayTotal ? requested.toLocaleString() : "Check needed"}</b></span>
+      <span><small>OG pending now</small><b>${localStats.active.toLocaleString()}</b></span>
+      <span><small>Gap vs pending</small><b>${activeGap.toLocaleString()}</b></span>
       <span><small>Matched to OG</small><b>${matched.toLocaleString()}</b></span>
       <span><small>Missing OG match</small><b>${unmatched.toLocaleString()}</b></span>
       <span><small>Rejected / failed</small><b>${failed.toLocaleString()}</b></span>
       <span><small>Already resolved</small><b>${duplicate.toLocaleString()}</b></span>
       ${heldOpen ? `<span><small>Needs local action</small><b>${heldOpen.toLocaleString()}</b></span>` : ""}
+      ${notFetched ? `<span><small>Not fetched yet</small><b>${notFetched.toLocaleString()}</b></span>` : ""}
+      ${notExtracted ? `<span><small>Fetched not extracted</small><b>${notExtracted.toLocaleString()}</b></span>` : ""}
       <span><small>Not accounted for</small><b>${missing.toLocaleString()}</b></span>
       ${messagesImported ? `<span><small>Messages imported</small><b>${messagesImported.toLocaleString()}</b></span>` : ""}
       ${filesSeen ? `<span><small>eBay files/photos</small><b>${filesSeen.toLocaleString()}</b></span>` : ""}
       ${financeChecked ? `<span><small>Payout checked</small><b>${financeFound.toLocaleString()} / ${financeChecked.toLocaleString()}</b></span>` : ""}
+      ${laneCountsText ? `<span><small>API split</small><b>${escapeHtml(laneCountsText)}</b></span>` : ""}
     </div>
     ${summary.message ? `<p class="return-import-message">${escapeHtml(summary.message)}</p>` : ""}
     ${unmatchedReturns.length ? `
@@ -9508,6 +9705,7 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
 function setLastReturnImportSummary(summary) {
   state.lastReturnImportSummary = summary || null;
   renderReturnImportSummary(state.lastReturnImportSummary);
+  renderReturnQueueReconciliation();
 }
 
 function getEbayBuyerHistorySyncUrl() {
@@ -9700,6 +9898,10 @@ function mergeReturnApiSyncTotals(total = {}, next = {}) {
     ok: total.ok !== false && next.ok !== false,
     runId: next.runId || total.runId || null,
     dryRun: next.dryRun === true,
+    ebayTotalEntries: Number(total.ebayTotalEntries || 0) + Number(next.ebayTotalEntries || next.totalEntries || 0),
+    fetchedCount: Number(total.fetchedCount || 0) + Number(next.fetchedCount || next.ebayFetchedEntries || 0),
+    preparedCount: Number(total.preparedCount || 0) + Number(next.preparedCount || next.ebayPreparedEntries || next.total || 0),
+    ebayTruncated: total.ebayTruncated === true || next.ebayTruncated === true,
     total: Number(total.total || 0) + Number(next.total || 0),
     matched: Number(total.matched || 0) + Number(next.matched || 0),
     unmatched: Number(total.unmatched || 0) + Number(next.unmatched || 0),
@@ -9860,6 +10062,7 @@ function buildReturnApiSyncSummary(response = {}) {
   const financeChecked = Number(financeStats.financeOrdersChecked || 0);
   const financeFound = Number(financeStats.financeOrdersWithTransactions || 0);
   const financeWarnings = Array.isArray(response.financeWarnings) ? response.financeWarnings : [];
+  const laneCounts = response.laneCounts || {};
   const financeSummaryText = financeChecked
     ? ` Payout lookup checked ${financeChecked.toLocaleString()} order${financeChecked === 1 ? "" : "s"} and found transaction data for ${financeFound.toLocaleString()}.`
     : "";
@@ -9867,6 +10070,9 @@ function buildReturnApiSyncSummary(response = {}) {
     ? ` Finance warning: ${financeWarnings[0]?.message || financeWarnings[0]?.reason || "lookup failed"}.`
     : "";
   const skippedAlreadyProcessed = results.filter((entry) => entry?.taskSkipped).length;
+  const ebayTotalEntries = Number(response.ebayTotalEntries ?? response.totalEntries ?? response.total ?? results.length ?? 0);
+  const fetchedCount = Number(response.fetchedCount ?? response.ebayFetchedEntries ?? response.total ?? results.length ?? 0);
+  const preparedCount = Number(response.preparedCount ?? response.ebayPreparedEntries ?? response.total ?? results.length ?? 0);
   const failedReturns = results
     .filter((entry) => entry?.error)
     .map((entry) => ({
@@ -9886,12 +10092,23 @@ function buildReturnApiSyncSummary(response = {}) {
   return {
     ok: response.ok === true,
     runId: response.runId || null,
-    requestedCount: Number(response.total || results.length || 0),
+    source: "ebay-return-api",
+    ebayTotalLabel: "API issues",
+    hasEbayTotal: true,
+    ebayTotalEntries,
+    fetchedCount,
+    preparedCount,
+    ebayTruncated: response.ebayTruncated === true,
+    requestedFrom: response.requestedFrom || "",
+    requestedTo: response.requestedTo || "",
+    laneCounts,
+    requestedCount: ebayTotalEntries,
     processedCount: Math.max(0, Number(response.total || results.length || 0) - Number(response.errors || 0)),
     importedCreatedCount: Number(response.matched || 0),
     unmatchedCreated: Number(response.unmatched || 0),
     failedCount: Number(response.errors || 0),
     duplicateResolvedCount: skippedAlreadyProcessed,
+    taskSkippedCount: skippedAlreadyProcessed,
     messagesImported: Number(response.messagesImported || 0),
     filesSeen: Number(response.filesSeen || 0),
     staleCasesClosed: Number(response.staleCasesClosed || 0),
@@ -10189,6 +10406,10 @@ async function openReturnIntakeForTransfer(payload = {}) {
 async function importReturnBatchTransfer(payload = {}) {
   const transferId = payload?.transferId || "";
   const returns = Array.isArray(payload.returns) ? payload.returns.filter(Boolean) : [];
+  const metadata = payload.metadata || {};
+  const visibleTotal = Number(metadata.sellerHubVisibleTotal || metadata.ebayTotalEntries || returns.length || 0);
+  const visibleCount = Number(metadata.sellerHubVisibleCount || returns.length || 0);
+  const ebayTotalLabel = metadata.ebayTotalLabel || (metadata.source === "ebay-requests-disputes-page-batch" ? "Seller Hub visible" : "Visible on eBay");
   const importedReturns = [];
   const unmatchedReturns = [];
   const failedReturns = [];
@@ -10295,7 +10516,13 @@ async function importReturnBatchTransfer(payload = {}) {
   const summary = {
     transferId,
     ok,
-    requestedCount: returns.length,
+    source: metadata.source || "ebay-returns-page-batch",
+    ebayTotalLabel,
+    hasEbayTotal: true,
+    ebayTotalEntries: Number.isFinite(visibleTotal) && visibleTotal > 0 ? visibleTotal : returns.length,
+    fetchedCount: Number.isFinite(visibleCount) && visibleCount > 0 ? visibleCount : returns.length,
+    preparedCount: returns.length,
+    requestedCount: Number.isFinite(visibleTotal) && visibleTotal > 0 ? visibleTotal : returns.length,
     opened: true,
     imported: processedCount,
     importedCount,
@@ -10310,7 +10537,11 @@ async function importReturnBatchTransfer(payload = {}) {
     unmatchedReturns,
     failedReturns,
     error,
-    message,
+    message: [
+      ebayTotalLabel ? `${ebayTotalLabel}: ${(Number.isFinite(visibleTotal) && visibleTotal > 0 ? visibleTotal : returns.length).toLocaleString()}` : "",
+      visibleCount && visibleCount !== visibleTotal ? `${visibleCount.toLocaleString()} loaded from the visible page` : "",
+      message,
+    ].filter(Boolean).join(". "),
   };
 
   setLastReturnImportSummary(summary);
@@ -10371,10 +10602,16 @@ async function handleHistoryReturnTransfer(payload) {
         buyerUsername: getReturnTransferInfo(payload).buyerUsername || "",
         error: message,
       }];
+    const metadata = payload.metadata || {};
+    const failedRequestedCount = Number(metadata.sellerHubVisibleTotal || failedReturnInfos.length || 0);
     setLastReturnImportSummary({
       transferId,
       ok: false,
-      requestedCount: failedReturnInfos.length,
+      source: metadata.source || "",
+      ebayTotalLabel: metadata.ebayTotalLabel || (metadata.source === "ebay-requests-disputes-page-batch" ? "Seller Hub visible" : "eBay visible"),
+      hasEbayTotal: Boolean(failedRequestedCount),
+      ebayTotalEntries: failedRequestedCount,
+      requestedCount: failedRequestedCount || failedReturnInfos.length,
       processedCount: 0,
       importedCount: 0,
       importedCreatedCount: 0,
@@ -10943,6 +11180,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (isReturnsWorkbenchPage()) {
     state.historyLoaded = true;
     await loadReturnQueue();
+    await loadLatestReturnSyncSummary();
     drainQueuedHistoryReturnTransfers();
     drainQueuedHistoryReturnMessageTransfers();
   } else {

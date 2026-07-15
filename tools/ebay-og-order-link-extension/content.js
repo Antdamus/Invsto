@@ -737,8 +737,26 @@
     const url = new URL(window.location.href);
     const sample = getPageTextSample();
     const pageMarkers = `${url.pathname} ${url.search} ${url.hash} ${sample}`;
-    return /currentpage_SHOrderReturn|pageTopLevelModId"?\s*:\s*"app-mod-returns-wrapper"|app-mod-returns-wrapper|page"?\s*:\s*\{[^}]*id"?\s*:\s*"RETURNS"|Manage returns|Table of returns/i.test(pageMarkers)
+    return isEbayRequestsDisputesPage()
+      || /currentpage_SHOrderReturn|pageTopLevelModId"?\s*:\s*"app-mod-returns-wrapper"|app-mod-returns-wrapper|page"?\s*:\s*\{[^}]*id"?\s*:\s*"RETURNS"|Manage returns|Table of returns/i.test(pageMarkers)
       && /returns?|returnId|Return ID|return requested|return shipped|return delivered|waiting for buyer to ship|issue refund/i.test(pageMarkers);
+  }
+
+  function isEbayRequestsDisputesPage() {
+    const url = new URL(window.location.href);
+    const sample = getPageTextSample();
+    const pageMarkers = `${url.pathname} ${url.search} ${url.hash} ${document.title || ""} ${sample}`;
+    return /Requests and disputes|Open requests and disputes|Request ID:|Issue type/i.test(pageMarkers)
+      && /Order number|Item not received|not as described|case|dispute|request/i.test(pageMarkers);
+  }
+
+  function getEbayVisibleResultsTotal() {
+    const text = document.body?.innerText || "";
+    const rangeMatch = text.match(/Results:\s*\d+\s*-\s*\d+\s*of\s*([\d,]+)/i);
+    if (rangeMatch?.[1]) return Number(String(rangeMatch[1]).replace(/,/g, ""));
+    const simpleMatch = text.match(/Results:\s*\d+\s*of\s*([\d,]+)/i);
+    if (simpleMatch?.[1]) return Number(String(simpleMatch[1]).replace(/,/g, ""));
+    return 0;
   }
 
   function getAwaitingReportMetadata() {
@@ -972,6 +990,170 @@
     return results;
   }
 
+  function getSellerHubIssueRowCandidates() {
+    const selectors = [
+      "tr",
+      '[role="row"]',
+      "article",
+      "section",
+      "li",
+      '[class*="row" i]',
+      '[class*="result" i]',
+      '[class*="item" i]',
+    ].join(",");
+    const candidates = [...document.querySelectorAll(selectors)]
+      .filter((node) => {
+        if (!isElementVisible(node)) return false;
+        const text = cleanText(node.innerText || node.textContent || "");
+        return text.length >= 40
+          && text.length <= 3000
+          && /Request ID:/i.test(text)
+          && /Order number:/i.test(text);
+      });
+    return candidates.filter((node) => !candidates.some((other) => {
+      if (other === node || !node.contains(other)) return false;
+      const otherText = cleanText(other.innerText || other.textContent || "");
+      return /Request ID:/i.test(otherText) && /Order number:/i.test(otherText);
+    }));
+  }
+
+  function getIssueDetailsUrl(row) {
+    const links = [...(row?.querySelectorAll?.("a[href]") || [])];
+    const direct = links.find((anchor) => /see details|details|request id/i.test(cleanText(anchor.textContent || anchor.getAttribute("aria-label") || "")));
+    if (direct) return normalizeEbayNavigationUrl(direct.getAttribute("href") || direct.href || "", window.location.href);
+    const href = links.map((anchor) => anchor.getAttribute("href") || anchor.href || "")
+      .find((value) => /request|case|dispute|return|rtn|cancel/i.test(value));
+    return normalizeEbayNavigationUrl(href || "", window.location.href);
+  }
+
+  function getIssueOrderDetailsUrl(row, orderNumber = "") {
+    const links = [...(row?.querySelectorAll?.("a[href]") || [])];
+    const direct = links.find((anchor) => {
+      const text = cleanText(anchor.textContent || "");
+      const href = anchor.getAttribute("href") || anchor.href || "";
+      return text.includes(orderNumber) || href.includes(orderNumber) || /\/mesh\/ord\/details|orderId=|orderid=/i.test(href);
+    });
+    return normalizeEbayNavigationUrl(direct?.getAttribute("href") || direct?.href || "", window.location.href);
+  }
+
+  function getIssueItemLink(row) {
+    const links = [...(row?.querySelectorAll?.("a[href]") || [])];
+    return links.find((anchor) => {
+      const text = cleanText(anchor.textContent || "");
+      const href = anchor.getAttribute("href") || anchor.href || "";
+      return /\/itm\//i.test(href)
+        || /^#\d+\s*-/i.test(text)
+        || text.includes(" - ") && !ORDER_NUMBER_PATTERN.test(text) && !/see details|request id|open in og/i.test(text);
+    }) || null;
+  }
+
+  function getIssueBuyerUsername(row, text = "") {
+    const links = [...(row?.querySelectorAll?.("a[href]") || [])];
+    const buyerLink = links.find((anchor) => {
+      const label = cleanText(anchor.textContent || "");
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{1,79}$/.test(label)) return false;
+      if (/^\d+$/.test(label) || ORDER_NUMBER_PATTERN.test(label)) return false;
+      if (/details|request|order|open|item/i.test(label)) return false;
+      return true;
+    });
+    if (buyerLink) return cleanText(buyerLink.textContent || "");
+    return readFirstRegexMatch(text, /\bQuantity:\s*\d+\s+([A-Za-z0-9_.-]{2,80})\s+\$/i)
+      || readFirstRegexMatch(text, /\bBuyer\s*:?\s*([A-Za-z0-9_.-]{2,80})\b/i);
+  }
+
+  function getIssueTypeText(text = "") {
+    const afterDetails = readFirstRegexMatch(text, /\bSee details\s+(.+?)\s+(?:#\d+|\d{9,15}\s+-|Order number:)/i);
+    if (afterDetails) return afterDetails;
+    const known = [
+      "Item not received",
+      "Item not as described",
+      "Not as described",
+      "Defective item",
+      "Missing parts",
+      "Return request",
+      "Payment dispute",
+      "Request",
+      "Dispute",
+    ];
+    return known.find((label) => new RegExp(escapeRegex(label), "i").test(text)) || "";
+  }
+
+  function getIssueDateOpened(text = "") {
+    const dates = [...text.matchAll(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+\d{4}\b/gi)]
+      .map((match) => cleanText(match[0]));
+    return dates.length ? dates[dates.length - 1] : "";
+  }
+
+  function normalizeSellerHubIssueEntry(row) {
+    const text = cleanText(row?.innerText || row?.textContent || "");
+    const orderNumber = normalizeOrderNumber(text);
+    const requestId = readFirstRegexMatch(text, /\bRequest ID:\s*([A-Za-z0-9._:-]+)/i);
+    if (!orderNumber || !requestId) return null;
+    const itemLink = getIssueItemLink(row);
+    const itemLinkText = cleanText(itemLink?.textContent || "");
+    const itemTitle = itemLinkText
+      || readFirstRegexMatch(text, /((?:#\d+\s*-\s*)?[^$]{8,220}?)\s+Order number:/i)
+      || "";
+    const issueType = getIssueTypeText(text);
+    const reason = readFirstRegexMatch(text, /\bReason:\s*([\s\S]{1,220}?)(?:\s+Quantity:|\s+\$|\s+[A-Z][a-z]{2,8}\s+\d{1,2},\s+\d{4}|$)/i);
+    const statusText = readFirstRegexMatch(text, /\b((?:Resolve|Respond)\s+by\s+[A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})\b/i)
+      || readFirstRegexMatch(text, /\b((?:Due|Action due)\s+[A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})\b/i);
+    const amount = (text.match(/\$\s*\d[\d,]*(?:\.\d{2})?/i) || [])[0] || "";
+    const quantity = Number(readFirstRegexMatch(text, /\bQuantity:\s*(\d+)/i) || 1);
+    const detailsUrl = getIssueDetailsUrl(row);
+    const orderDetailsUrl = getIssueOrderDetailsUrl(row, orderNumber);
+    const itemUrl = normalizeEbayNavigationUrl(itemLink?.getAttribute?.("href") || itemLink?.href || "", window.location.href);
+    const imageUrl = normalizeEbayNavigationUrl(row?.querySelector?.("img[src]")?.getAttribute("src") || "", window.location.href);
+    return {
+      source: "ebay-requests-disputes-page",
+      caseType: "seller_hub_request_dispute",
+      returnId: requestId,
+      requestId,
+      orderNumber,
+      itemNumber: readFirstRegexMatch(itemUrl, /\/itm\/(\d{9,15})/i),
+      transactionId: "",
+      itemTitle,
+      quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+      buyerUsername: getIssueBuyerUsername(row, text),
+      returnStatus: issueType || "Request/dispute",
+      returnAction: statusText,
+      returnReason: reason || issueType || "Request/dispute",
+      returnInitiated: getIssueDateOpened(text),
+      refundText: amount,
+      requestAmount: amount,
+      detailsUrl,
+      orderDetailsUrl,
+      itemUrl,
+      imageUrl,
+      pageUrl: window.location.href,
+      pageTitle: document.title || "",
+      visibleSummaryText: text.slice(0, 1200),
+      capturedAt: new Date().toISOString(),
+      rawReturn: {
+        source: "ebay-requests-disputes-page",
+        requestId,
+        orderNumber,
+        issueType,
+        reason,
+        statusText,
+      },
+    };
+  }
+
+  function extractSellerHubRequestDisputeEntriesFromDom() {
+    if (!isEbayRequestsDisputesPage()) return [];
+    const byRequestId = new Map();
+    getSellerHubIssueRowCandidates().forEach((row) => {
+      const entry = normalizeSellerHubIssueEntry(row);
+      if (!entry?.returnId || !entry?.orderNumber) return;
+      const existing = byRequestId.get(entry.returnId);
+      if (!existing || cleanText(entry.visibleSummaryText || "").length > cleanText(existing.visibleSummaryText || "").length) {
+        byRequestId.set(entry.returnId, entry);
+      }
+    });
+    return [...byRequestId.values()];
+  }
+
   function getEbayReturnJsonTextCandidates() {
     const scripts = [...document.scripts]
       .map((script) => script.textContent || "")
@@ -994,11 +1176,13 @@
         entries.push(...extractReturnMembersFromText(text));
       }
     });
+    entries.push(...extractSellerHubRequestDisputeEntriesFromDom());
     const byReturnId = new Map();
     entries.forEach((entry) => {
-      if (!entry?.returnId || !entry?.itemNumber) return;
-      const existing = byReturnId.get(entry.returnId);
-      byReturnId.set(entry.returnId, {
+      if (!entry?.returnId || !(entry?.itemNumber || entry?.orderNumber)) return;
+      const key = [entry.source || "", entry.returnId, entry.orderNumber || "", entry.itemNumber || ""].join("|");
+      const existing = byReturnId.get(key);
+      byReturnId.set(key, {
         ...(existing || {}),
         ...entry,
         rawReturn: entry.rawReturn || existing?.rawReturn || null,
@@ -1011,6 +1195,7 @@
 
   function isEbayCancellationsPage() {
     if (isCancelConfirmationDetailsPage()) return false;
+    if (isEbayRequestsDisputesPage()) return false;
     const url = new URL(window.location.href);
     const sample = getPageTextSample();
     const pageMarkers = `${url.pathname} ${url.search} ${url.hash} ${document.title || ""} ${sample}`;
@@ -3384,10 +3569,26 @@
     if (!button) return;
     button.textContent = text;
     button.dataset.statusTone = tone;
-    if (button.id === SEND_RETURN_BATCH_ID && text === "Export Visible Returns to OG") {
+    if (button.id === SEND_RETURN_BATCH_ID && /^Export Visible (?:Returns|Issues) to OG$/i.test(text)) {
       ogReturnBatchStatusHoldUntil = 0;
     }
     button.disabled = /opening|sending|matching|reading|exporting/i.test(text);
+  }
+
+  function getReturnBatchPageKind() {
+    return isEbayRequestsDisputesPage() ? "requests_disputes" : "returns";
+  }
+
+  function getReturnBatchExportLabel() {
+    return getReturnBatchPageKind() === "requests_disputes"
+      ? "Export Visible Issues to OG"
+      : "Export Visible Returns to OG";
+  }
+
+  function getReturnBatchExportTitle() {
+    return getReturnBatchPageKind() === "requests_disputes"
+      ? "Export the visible eBay requests/disputes on this page to OG Return Work Queue"
+      : "Export the visible eBay returns on this page to OG Return Work Queue";
   }
 
   function buildReturnTransferPayload(returnInfo = {}) {
@@ -3427,6 +3628,8 @@
 
   function buildReturnBatchTransferPayload(returns = []) {
     const capturedAt = new Date().toISOString();
+    const pageKind = getReturnBatchPageKind();
+    const visibleTotal = getEbayVisibleResultsTotal();
     return {
       returns: returns.map((returnInfo) => ({
         ...returnInfo,
@@ -3435,7 +3638,11 @@
         pageTitle: document.title || returnInfo.pageTitle || "",
       })),
       metadata: {
-        source: "ebay-returns-page-batch",
+        source: pageKind === "requests_disputes" ? "ebay-requests-disputes-page-batch" : "ebay-returns-page-batch",
+        issuePageKind: pageKind,
+        ebayTotalLabel: pageKind === "requests_disputes" ? "Seller Hub visible" : "Visible on eBay",
+        sellerHubVisibleTotal: visibleTotal || returns.length,
+        sellerHubVisibleCount: returns.length,
         returnCount: returns.length,
         pageUrl: window.location.href,
         pageTitle: document.title || "",
@@ -3487,12 +3694,16 @@
 
     try {
       const visibleReturns = Array.isArray(returns) && returns.length ? returns : getEbayReturnEntries();
-      if (!visibleReturns.length) throw new Error("No visible eBay returns were found on this page yet.");
+      if (!visibleReturns.length) {
+        throw new Error(getReturnBatchPageKind() === "requests_disputes"
+          ? "No visible eBay requests or disputes were found on this page yet."
+          : "No visible eBay returns were found on this page yet.");
+      }
       console.log("[OG eBay Return] Exporting visible returns", visibleReturns.length, visibleReturns);
       setReturnButtonStatus(button, "Reading details...");
       const enrichedReturns = await enrichReturnsForImport(visibleReturns, button);
       const payload = buildReturnBatchTransferPayload(enrichedReturns);
-      setReturnButtonStatus(button, "Sending returns...");
+      setReturnButtonStatus(button, getReturnBatchPageKind() === "requests_disputes" ? "Sending issues..." : "Sending returns...");
       const response = await chrome.runtime.sendMessage({
         type: "OG_EBAY_SEND_RETURN_BATCH",
         payload,
@@ -3511,7 +3722,7 @@
       ogReturnBatchStatusHoldUntil = Date.now() + 4000;
       setReturnButtonStatus(button, parts.length ? parts.join(", ") : "Sent to OG", failed ? "error" : "success");
       window.setTimeout(() => {
-        if (!ogReturnBatchExportInProgress) setReturnButtonStatus(button, "Export Visible Returns to OG");
+        if (!ogReturnBatchExportInProgress) setReturnButtonStatus(button, getReturnBatchExportLabel());
       }, 4000);
     } catch (error) {
       console.error("[OG eBay Return] Batch transfer failed:", error);
@@ -3519,7 +3730,7 @@
       setReturnButtonStatus(button, "Export failed", "error");
       window.alert(error?.message || "Could not export these eBay returns to OG.");
       window.setTimeout(() => {
-        if (!ogReturnBatchExportInProgress) setReturnButtonStatus(button, "Export Visible Returns to OG");
+        if (!ogReturnBatchExportInProgress) setReturnButtonStatus(button, getReturnBatchExportLabel());
       }, 5000);
     } finally {
       ogReturnBatchExportInProgress = false;
@@ -6959,7 +7170,7 @@
       button = document.createElement("button");
       button.id = SEND_RETURN_BATCH_ID;
       button.type = "button";
-      button.title = "Export the visible eBay returns on this page to OG Return Work Queue";
+      button.title = getReturnBatchExportTitle();
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -6969,11 +7180,11 @@
     }
 
     button.dataset.ogReturnCount = String(returns.length || 0);
-    button.title = options.title || "Export the visible eBay returns on this page to OG Return Work Queue";
+    button.title = options.title || getReturnBatchExportTitle();
 
     const preserveCurrentStatus = ogReturnBatchExportInProgress || Date.now() < ogReturnBatchStatusHoldUntil;
     if (!preserveCurrentStatus) {
-      setReturnButtonStatus(button, options.label || "Export Visible Returns to OG", options.tone || "");
+      setReturnButtonStatus(button, options.label || getReturnBatchExportLabel(), options.tone || "");
       button.disabled = Boolean(options.disabled);
     }
 

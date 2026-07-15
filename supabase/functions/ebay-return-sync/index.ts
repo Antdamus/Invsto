@@ -48,6 +48,18 @@ type ReturnSummaryFetch = {
   truncated: boolean;
   from: string;
   to: string;
+  laneCounts?: JsonRecord;
+  warnings?: JsonRecord[];
+};
+
+type PostOrderIssueLane = "return" | "inquiry";
+
+type IssueLaneConfig = {
+  lane: PostOrderIssueLane;
+  path: string;
+  stateParam: string;
+  openState: string;
+  sort: string;
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -732,6 +744,187 @@ function prepareReturn(summary: any, detailPayload: any, filesPayload: any): Pre
   };
 }
 
+function firstArray(...values: unknown[]): any[] {
+  for (const value of values) {
+    if (Array.isArray(value)) return value;
+  }
+  return [];
+}
+
+function postOrderIssueId(summary: any, detailPayload: any = {}): string {
+  const detail = detailPayload?.detail || detailPayload || {};
+  const sourceSummary = summary?.summary || summary || {};
+  return firstText(
+    summary?.returnId,
+    sourceSummary?.returnId,
+    detail?.returnId,
+    summary?.inquiryId,
+    sourceSummary?.inquiryId,
+    detail?.inquiryId,
+    summary?.requestId,
+    sourceSummary?.requestId,
+    detail?.requestId,
+    summary?.caseId,
+    sourceSummary?.caseId,
+    detail?.caseId,
+  );
+}
+
+function getIssueActionUrl(summary: any, detail: any = {}): string {
+  return getActionUrl(summary?.summary || summary)
+    || getActionUrl(detail)
+    || firstText(summary?.detailsUrl, summary?.detailUrl, detail?.detailsUrl, detail?.detailUrl);
+}
+
+function preparePostOrderIssue(
+  summary: any,
+  detailPayload: any,
+  filesPayload: any,
+  lane: PostOrderIssueLane,
+): PreparedReturn | null {
+  if (lane === "return") return prepareReturn(summary, detailPayload, filesPayload);
+
+  const detail = detailPayload?.detail || detailPayload || {};
+  const detailSummary = detailPayload?.summary || {};
+  const sourceSummary = summary?.summary || summary || {};
+  const mergedSummary = { ...detailSummary, ...sourceSummary };
+  const creation = mergedSummary?.creationInfo || detail?.creationInfo || {};
+  const item = creation?.item || detail?.itemDetail || mergedSummary?.item || detail?.item || {};
+  const sellerDue = mergedSummary?.sellerResponseDue || detail?.sellerResponseDue || mergedSummary?.sellerDue || {};
+  const buyerDue = mergedSummary?.buyerResponseDue || detail?.buyerResponseDue || {};
+  const sellerOptionTypes = unique([
+    ...firstArray(mergedSummary?.sellerAvailableOptions, detail?.sellerAvailableOptions),
+  ].map((option: any) => firstText(option?.actionType, option?.type, option)).filter(Boolean));
+  const buyerOptionTypes = unique([
+    ...firstArray(mergedSummary?.buyerAvailableOptions, detail?.buyerAvailableOptions),
+  ].map((option: any) => firstText(option?.actionType, option?.type, option)).filter(Boolean));
+  const sellerActionDue = firstText(sellerDue?.activityDue, mergedSummary?.sellerActionDue, detail?.sellerActionDue);
+  const buyerActionDue = firstText(buyerDue?.activityDue, mergedSummary?.buyerActionDue, detail?.buyerActionDue);
+  const refundContainer = getAmountContainer(
+    mergedSummary?.amount,
+    mergedSummary?.requestAmount,
+    mergedSummary?.sellerTotalRefund,
+    mergedSummary?.buyerTotalRefund,
+    detail?.amount,
+    detail?.requestAmount,
+    detail?.refundInfo?.estimatedRefundAmount,
+    detail?.refundInfo?.actualRefundAmount,
+  );
+  const holdContainer = getAmountContainer(detail?.holdInfo?.holdAmount, detail?.payoutRecoupInfo?.recoupAmount);
+  const files = unique([
+    ...getFilesFromPayload(filesPayload),
+    ...getFilesFromPayload(detail),
+  ]);
+  const fileIds = unique(files.map(fileIdFrom).filter(Boolean));
+  const issueId = postOrderIssueId(summary, detailPayload);
+  if (!issueId) return null;
+
+  const preparedBase = {
+    source: {
+      ...(sourceSummary || {}),
+      __ogIssueLane: lane,
+    },
+    summary: {
+      ...(mergedSummary || {}),
+      __ogIssueLane: lane,
+    },
+    detail,
+    filesPayload,
+    returnId: issueId,
+    orderNumber: firstText(
+      mergedSummary?.orderId,
+      mergedSummary?.orderNumber,
+      detail?.orderId,
+      detail?.orderNumber,
+      creation?.orderId,
+    ),
+    buyerUsername: firstText(
+      mergedSummary?.buyerLoginName,
+      mergedSummary?.buyerUsername,
+      mergedSummary?.buyerUserName,
+      detail?.buyerLoginName,
+      detail?.buyerUsername,
+      detail?.buyerUserName,
+      detail?.buyer?.username,
+      detail?.buyer?.userName,
+    ),
+    itemNumber: firstText(item?.itemId, item?.legacyItemId, item?.listingId, detail?.itemDetail?.itemId),
+    transactionId: firstText(item?.transactionId, detail?.itemDetail?.transactionId),
+    itemTitle: firstText(item?.title, item?.itemTitle, detail?.itemDetail?.title, detail?.itemDetail?.itemTitle),
+    quantity: Math.max(1, Math.trunc(toNumber(item?.quantity, toNumber(item?.returnQuantity, 1)))),
+    reason: firstText(
+      creation?.reason,
+      mergedSummary?.reason,
+      mergedSummary?.issueType,
+      detail?.reason,
+      detail?.inquiryReason,
+      detail?.caseReason,
+      detail?.buyerInquiryReason,
+    ),
+    status: firstText(mergedSummary?.status, detail?.status),
+    state: firstText(mergedSummary?.state, detail?.state),
+    actionDue: firstText(sellerActionDue, buyerActionDue, sellerOptionTypes[0]),
+    sellerActionDue,
+    buyerActionDue,
+    sellerOptionTypes,
+    buyerOptionTypes,
+    dueAt: firstDate(
+      sellerDue?.respondByDate?.value,
+      sellerDue?.respondByDate,
+      buyerDue?.respondByDate?.value,
+      mergedSummary?.respondByDate?.value,
+      mergedSummary?.respondByDate,
+      mergedSummary?.timeoutDate?.value,
+      detail?.respondByDate?.value,
+      detail?.respondByDate,
+    ),
+    requestedAt: firstDate(
+      creation?.creationDate?.value,
+      creation?.creationDate,
+      mergedSummary?.creationDate?.value,
+      mergedSummary?.creationDate,
+      mergedSummary?.openedDate?.value,
+      detail?.creationDate?.value,
+      detail?.creationDate,
+      detail?.openedDate?.value,
+    ),
+    buyerComment: commentText(
+      creation?.comments?.content,
+      creation?.comments,
+      mergedSummary?.buyerComment,
+      mergedSummary?.comments,
+      detail?.buyerComment,
+      detail?.comments?.content,
+      detail?.comments,
+    ),
+    requestAmount: moneyText(refundContainer),
+    onHoldAmount: moneyText(holdContainer),
+    detailsUrl: getIssueActionUrl(mergedSummary, detail),
+    itemImageUrl: getItemImageUrl(detail, mergedSummary),
+    trackingNumber: extractTracking(detail, mergedSummary),
+    fileIds,
+    files,
+  };
+  const lifecycleStage = returnLifecycleStage(preparedBase as PreparedReturn);
+  const classificationReason = returnClassificationReason(preparedBase as PreparedReturn, lifecycleStage);
+  const preparedWithClassification = {
+    ...preparedBase,
+    lifecycleStage,
+    classificationReason,
+  };
+
+  return {
+    ...preparedWithClassification,
+    payload: {
+      ...buildReturnPayload(preparedWithClassification),
+      postOrderIssueLane: lane,
+      caseType: "seller_hub_request_dispute",
+      ebayIssueId: issueId,
+      ebayRequestId: issueId,
+    },
+  };
+}
+
 async function getEbayAccessToken(): Promise<string> {
   if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET || !EBAY_REFRESH_TOKEN) {
     throw new Error("Missing eBay OAuth secrets. Set EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, and EBAY_REFRESH_TOKEN.");
@@ -1022,11 +1215,137 @@ async function fetchReturnSummaries(token: string, body: JsonRecord): Promise<Re
   }
 
   return {
+    summaries: summaries.slice(0, limit).map((summary: any) => ({
+      ...summary,
+      __ogIssueLane: "return",
+    })),
+    totalEntries,
+    truncated: totalEntries != null && totalEntries > summaries.length,
+    from,
+    to,
+    laneCounts: { returns: totalEntries ?? summaries.length },
+    warnings: [],
+  };
+}
+
+function issueMembersFromPayload(payload: any, lane: PostOrderIssueLane): any[] {
+  return firstArray(
+    payload?.members,
+    payload?.[`${lane}s`],
+    payload?.[`${lane}Summaries`],
+    payload?.inquiries,
+    payload?.inquirySummaries,
+    payload?.summaries,
+    payload?.issues,
+    payload?.cases,
+  );
+}
+
+async function fetchIssueLaneSummaries(
+  token: string,
+  body: JsonRecord,
+  config: IssueLaneConfig,
+): Promise<ReturnSummaryFetch> {
+  const limit = Math.min(Math.max(1, Math.trunc(Number(body.limit || 100))), MAX_RETURN_LIMIT);
+  const daysBack = Math.min(Math.max(1, Math.trunc(Number(body.daysBack || DEFAULT_DAYS_BACK))), 730);
+  const includeClosed = body.includeClosed === true;
+  const from = toIsoDate(body.from) || new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
+  const to = toIsoDate(body.to) || new Date().toISOString();
+  const summaries: any[] = [];
+  const warnings: JsonRecord[] = [];
+  let totalEntries: number | null = null;
+  let stateFilterSupported = !includeClosed;
+
+  for (let offset = 0; summaries.length < limit; offset += PAGE_LIMIT) {
+    const params = new URLSearchParams({
+      limit: String(Math.min(PAGE_LIMIT, limit - summaries.length)),
+      offset: String(offset),
+      creation_date_range_from: from,
+      creation_date_range_to: to,
+      sort: config.sort,
+    });
+    if (stateFilterSupported) params.set(config.stateParam, config.openState);
+
+    let pageResult = await ebayOptionalRequest(token, `${config.path}?${params.toString()}`);
+    if (!pageResult.ok && stateFilterSupported && offset === 0) {
+      warnings.push({
+        reason: `${config.lane}_search_state_filter_failed`,
+        lane: config.lane,
+        error: pageResult.error,
+      });
+      stateFilterSupported = false;
+      params.delete(config.stateParam);
+      pageResult = await ebayOptionalRequest(token, `${config.path}?${params.toString()}`);
+    }
+    if (!pageResult.ok && params.has("sort") && offset === 0) {
+      warnings.push({
+        reason: `${config.lane}_search_sort_filter_failed`,
+        lane: config.lane,
+        error: pageResult.error,
+      });
+      params.delete("sort");
+      pageResult = await ebayOptionalRequest(token, `${config.path}?${params.toString()}`);
+    }
+    if (!pageResult.ok) {
+      warnings.push({
+        reason: `${config.lane}_search_failed`,
+        lane: config.lane,
+        error: pageResult.error,
+      });
+      break;
+    }
+
+    const page = issueMembersFromPayload(pageResult.payload, config.lane);
+    summaries.push(...page.map((summary: any) => ({
+      ...summary,
+      __ogIssueLane: config.lane,
+    })));
+    totalEntries = Number(pageResult.payload?.paginationOutput?.totalEntries || pageResult.payload?.totalEntries || page.length || 0);
+    if (!page.length || summaries.length >= totalEntries) break;
+  }
+
+  return {
     summaries: summaries.slice(0, limit),
     totalEntries,
     truncated: totalEntries != null && totalEntries > summaries.length,
     from,
     to,
+    laneCounts: { [config.lane]: totalEntries ?? summaries.length },
+    warnings,
+  };
+}
+
+async function fetchPostOrderIssueSummaries(token: string, body: JsonRecord): Promise<ReturnSummaryFetch> {
+  const warnings: JsonRecord[] = [];
+  const laneCounts: JsonRecord = {};
+  const returns = await fetchReturnSummaries(token, body);
+  warnings.push(...(returns.warnings || []));
+  Object.assign(laneCounts, returns.laneCounts || {});
+
+  const inquiry = await fetchIssueLaneSummaries(token, body, {
+    lane: "inquiry",
+    path: "/post-order/v2/inquiry/search",
+    stateParam: "inquiry_state",
+    openState: "ALL_OPEN",
+    sort: "-FILING_DATE",
+  });
+  warnings.push(...(inquiry.warnings || []));
+  Object.assign(laneCounts, inquiry.laneCounts || {});
+
+  const summaries = [...returns.summaries, ...inquiry.summaries];
+  const totalEntries = [returns.totalEntries, inquiry.totalEntries]
+    .filter((value) => Number.isFinite(Number(value)))
+    .reduce((sum, value) => sum + Number(value), 0);
+  const effectiveTotalEntries = totalEntries || summaries.length;
+
+  return {
+    summaries,
+    totalEntries: effectiveTotalEntries,
+    truncated: returns.truncated || inquiry.truncated,
+    from: returns.from || inquiry.from,
+    to: returns.to || inquiry.to,
+    laneCounts,
+    warnings,
   };
 }
 
@@ -1044,6 +1363,7 @@ async function loadOrdersAndLines(supabase: any, orderNumbers: string[], itemNum
   const linesExact = new Map<string, any[]>();
   const linesFallback = new Map<string, any[]>();
   const linesByItemNumber = new Map<string, any[]>();
+  const linesByOrderId = new Map<string, any[]>();
   const cleanOrderNumbers = unique(orderNumbers.map(toText).filter(Boolean));
   const cleanItemNumbers = unique(itemNumbers.map(toText).filter(Boolean));
 
@@ -1054,6 +1374,7 @@ async function loadOrdersAndLines(supabase: any, orderNumbers: string[], itemNum
     const fallback = fallbackLineKey(line.order_id, toText(line.item_number), line.item_title);
     linesExact.set(exact, [...(linesExact.get(exact) || []), line]);
     linesFallback.set(fallback, [...(linesFallback.get(fallback) || []), line]);
+    if (line.order_id) linesByOrderId.set(line.order_id, [...(linesByOrderId.get(line.order_id) || []), line]);
     const itemKey = normalizeLookup(line.item_number);
     if (itemKey) linesByItemNumber.set(itemKey, unique([...(linesByItemNumber.get(itemKey) || []), line]));
   }
@@ -1100,12 +1421,23 @@ async function loadOrdersAndLines(supabase: any, orderNumbers: string[], itemNum
     });
   }
 
-  return { orders, ordersById, linesExact, linesFallback, linesByItemNumber };
+  return { orders, ordersById, linesExact, linesFallback, linesByItemNumber, linesByOrderId };
 }
 
 function findMatches(prepared: PreparedReturn, indexes: any): MatchResult {
   const order = indexes.orders.get(prepared.orderNumber) || null;
   if (order) {
+    const orderLines = indexes.linesByOrderId?.get(order.id) || [];
+    if (!prepared.itemNumber && !prepared.transactionId) {
+      const title = normalizeTitle(prepared.itemTitle);
+      const titleMatches = title
+        ? orderLines.filter((line: any) => normalizeTitle(line.item_title) === title || normalizeTitle(line.item_title).includes(title) || title.includes(normalizeTitle(line.item_title)))
+        : [];
+      return {
+        order,
+        lines: (titleMatches.length ? titleMatches : orderLines).slice(0, 10),
+      };
+    }
     const exact = indexes.linesExact.get(exactLineKey(order.id, prepared.itemNumber, prepared.transactionId)) || [];
     const fallback = indexes.linesFallback.get(fallbackLineKey(order.id, prepared.itemNumber, prepared.itemTitle)) || [];
     const sameOrderByItem = (indexes.linesByItemNumber.get(normalizeLookup(prepared.itemNumber)) || [])
@@ -1330,7 +1662,12 @@ function isAutoResolvableClosedReturnTask(task: any): boolean {
   return ["return_review", "return_intake"].includes(taskType);
 }
 
+function preparedIssueLane(prepared: PreparedReturn): string {
+  return firstText(prepared.source?.__ogIssueLane, prepared.summary?.__ogIssueLane, prepared.payload?.postOrderIssueLane, "return");
+}
+
 function preparedExpectsPhysicalReturn(prepared: PreparedReturn, matched: boolean): boolean {
+  if (preparedIssueLane(prepared) !== "return") return false;
   if (!matched) return false;
   if (Math.max(0, Math.trunc(Number(prepared.quantity || 0))) <= 0) return false;
   const text = `${prepared.status || ""} ${prepared.state || ""} ${prepared.actionDue || ""}`.toUpperCase();
@@ -1485,6 +1822,7 @@ function returnItemsNeedPhysicalIntake(row: any, items: any[]): boolean {
 
 function needsSellerDecision(prepared: PreparedReturn, matched: boolean): boolean {
   if (!matched) return false;
+  if (preparedIssueLane(prepared) !== "return") return true;
   return sellerDecisionRequiredByEbay(prepared);
 }
 
@@ -1494,6 +1832,7 @@ function taskTypeFor(prepared: PreparedReturn, matched: boolean): string {
 }
 
 function taskTitleFor(prepared: PreparedReturn, matched: boolean): string {
+  if (preparedIssueLane(prepared) !== "return") return matched ? "Review eBay request/dispute" : "Review unmatched eBay request/dispute";
   if (!matched) return "Review unmatched eBay return/refund";
   if (needsSellerDecision(prepared, matched)) return "Decide eBay return request";
   if (returnLifecycleStage(prepared) === "delivered") return "Inspect returned eBay item";
@@ -1510,6 +1849,11 @@ function priorityFor(prepared: PreparedReturn, matched: boolean): string {
 }
 
 function questionFor(prepared: PreparedReturn, matched: boolean): string {
+  if (preparedIssueLane(prepared) !== "return") {
+    return matched
+      ? "Open the eBay request or dispute, review the linked OG order/lines, and decide whether to respond, refund, challenge, or keep monitoring."
+      : "No matching OG order history was found. Review the eBay request/dispute details, buyer, item, value, and order number before deciding the next step.";
+  }
   if (!matched) {
     return "No matching OG order history was found. Review the eBay buyer, item, reason, refund value, and return details before deciding the next step.";
   }
@@ -2270,26 +2614,29 @@ Deno.serve(async (req) => {
     runId = run.id;
 
     const token = await getEbayAccessToken();
-    const fetchResult = await fetchReturnSummaries(token, body);
+    const fetchResult = await fetchPostOrderIssueSummaries(token, body);
     const summaries = fetchResult.summaries;
     const openReturnIdsFromSearch = new Set(
-      summaries.map((summary: any) => firstText(summary?.returnId, summary?.summary?.returnId)).filter(Boolean),
+      summaries.map((summary: any) => postOrderIssueId(summary)).filter(Boolean),
     );
     const preparedReturns: PreparedReturn[] = [];
-    const warnings: any[] = [];
+    const warnings: any[] = [...(fetchResult.warnings || [])];
 
     for (const summary of summaries) {
-      const returnId = firstText(summary?.returnId, summary?.summary?.returnId);
+      const lane = (summary?.__ogIssueLane || "return") as PostOrderIssueLane;
+      const returnId = postOrderIssueId(summary);
       if (!returnId) {
-        warnings.push({ reason: "missing_return_id", summary });
+        warnings.push({ reason: "missing_post_order_issue_id", lane, summary });
         continue;
       }
       if (cleanupOnly) continue;
-      const detailResult = await ebayOptionalRequest(token, `/post-order/v2/return/${encodeURIComponent(returnId)}?fieldgroups=FULL`);
-      const filesResult = await ebayOptionalRequest(token, `/post-order/v2/return/${encodeURIComponent(returnId)}/files`);
-      if (!detailResult.ok) warnings.push({ returnId, request: "detail", error: detailResult.error });
-      if (!filesResult.ok) warnings.push({ returnId, request: "files", error: filesResult.error });
-      const prepared = prepareReturn(summary, detailResult.ok ? detailResult.payload : {}, filesResult.ok ? filesResult.payload : {});
+      const detailResult = await ebayOptionalRequest(token, `/post-order/v2/${lane}/${encodeURIComponent(returnId)}?fieldgroups=FULL`);
+      const filesResult = lane === "return"
+        ? await ebayOptionalRequest(token, `/post-order/v2/return/${encodeURIComponent(returnId)}/files`)
+        : { ok: false as const, error: "No files endpoint used for non-return post-order issue lane." };
+      if (!detailResult.ok) warnings.push({ returnId, lane, request: "detail", error: detailResult.error });
+      if (lane === "return" && !filesResult.ok) warnings.push({ returnId, lane, request: "files", error: filesResult.error });
+      const prepared = preparePostOrderIssue(summary, detailResult.ok ? detailResult.payload : {}, filesResult.ok ? filesResult.payload : {}, lane);
       if (prepared) preparedReturns.push(prepared);
     }
 
@@ -2342,6 +2689,7 @@ Deno.serve(async (req) => {
           const taskSkipped = existingCase ? shouldSkipReturnApiTask(existingCase) : false;
           results.push({
             returnId: prepared.returnId,
+            issueLane: prepared.source?.__ogIssueLane || prepared.summary?.__ogIssueLane || "return",
             orderNumber: prepared.orderNumber,
             buyerUsername: prepared.buyerUsername,
             itemNumber: prepared.itemNumber,
@@ -2384,6 +2732,7 @@ Deno.serve(async (req) => {
 
         results.push({
           returnId: prepared.returnId,
+          issueLane: prepared.source?.__ogIssueLane || prepared.summary?.__ogIssueLane || "return",
           orderNumber: caseRow.order_number || prepared.orderNumber,
           buyerUsername: caseRow.buyer_username || prepared.buyerUsername,
           itemNumber: prepared.itemNumber,
@@ -2412,6 +2761,7 @@ Deno.serve(async (req) => {
         errors += 1;
         results.push({
           returnId: prepared.returnId,
+          issueLane: prepared.source?.__ogIssueLane || prepared.summary?.__ogIssueLane || "return",
           orderNumber: prepared.orderNumber,
           buyerUsername: prepared.buyerUsername,
           itemNumber: prepared.itemNumber,
@@ -2423,11 +2773,14 @@ Deno.serve(async (req) => {
     }
 
     if (cleanupClosed) {
-      if (fetchResult.truncated) {
+      const incompleteIssueLane = warnings.find((entry: any) => /_search_failed$/.test(toText(entry?.reason)));
+      if (fetchResult.truncated || incompleteIssueLane) {
         warnings.push({
-          reason: "cleanup_skipped_truncated_open_return_search",
+          reason: incompleteIssueLane ? "cleanup_skipped_incomplete_post_order_issue_search" : "cleanup_skipped_truncated_open_return_search",
           totalEntries: fetchResult.totalEntries,
           fetched: openReturnIdsFromSearch.size,
+          incompleteLane: incompleteIssueLane?.lane || null,
+          incompleteReason: incompleteIssueLane?.reason || null,
         });
       } else {
         try {
@@ -2457,6 +2810,22 @@ Deno.serve(async (req) => {
       }
     }
 
+    const taskSkippedCount = results.filter((entry: any) => entry?.taskSkipped).length;
+    const syncTotalsWarning = {
+      reason: "ebay_return_search_totals",
+      source: "ebay-return-api",
+      ebayTotalLabel: "API issues",
+      ebayTotalEntries: fetchResult.totalEntries ?? preparedReturns.length,
+      ebayFetchedEntries: summaries.length,
+      ebayPreparedEntries: preparedReturns.length,
+      ebayTruncated: fetchResult.truncated,
+      requestedFrom: fetchResult.from,
+      requestedTo: fetchResult.to,
+      laneCounts: fetchResult.laneCounts || {},
+      taskSkippedCount,
+    };
+    const completedWarnings = [syncTotalsWarning, ...warnings];
+
     const completed = {
       status: errors ? "failed" : "completed",
       returns_seen: preparedReturns.length,
@@ -2467,7 +2836,7 @@ Deno.serve(async (req) => {
       messages_imported: messagesImported,
       files_seen: filesSeen,
       errors,
-      warnings,
+      warnings: completedWarnings,
       finished_at: new Date().toISOString(),
     };
     await supabase.from("ebay_return_sync_runs").update(completed).eq("id", runId);
@@ -2477,6 +2846,13 @@ Deno.serve(async (req) => {
       runId,
       dryRun,
       total: preparedReturns.length,
+      ebayTotalEntries: fetchResult.totalEntries ?? preparedReturns.length,
+      fetchedCount: summaries.length,
+      preparedCount: preparedReturns.length,
+      ebayTruncated: fetchResult.truncated,
+      laneCounts: fetchResult.laneCounts || {},
+      requestedFrom: fetchResult.from,
+      requestedTo: fetchResult.to,
       matched,
       unmatched,
       tasksCreated,
@@ -2493,7 +2869,8 @@ Deno.serve(async (req) => {
       errors,
       financeStats,
       financeWarnings,
-      warnings,
+      taskSkippedCount,
+      warnings: completedWarnings,
       results,
     });
   } catch (error) {
