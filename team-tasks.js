@@ -1542,11 +1542,40 @@ function normalizeTeamTask(task = {}) {
   };
 }
 
+function isOrderHistoryTask(task = {}) {
+  return task.source === "order" && task.metadata?.source === "order_history";
+}
+
+function getOrderHistoryTaskScope(task = {}) {
+  if (!isOrderHistoryTask(task)) return "";
+  const scope = String(task.metadata?.task_scope || task.metadata?.scope || "").trim().toLowerCase();
+  if (scope === "group") return "group";
+  if (scope === "line") return "line";
+  return "order";
+}
+
+function getOrderHistoryTaskOrderNumbers(task = {}) {
+  const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
+  return unique([
+    ...(Array.isArray(metadata.order_numbers) ? metadata.order_numbers : []),
+    ...(Array.isArray(metadata.orderNumbers) ? metadata.orderNumbers : []),
+    metadata.order_number,
+    metadata.orderNumber,
+    task.order_number,
+    task.order?.order_number,
+  ].filter(Boolean).map(normalizeEbayOrderNumber));
+}
+
+function renderTaskOrderNumberActionsForTask(task = {}, fallbackLabel = "Order") {
+  const numbers = isOrderHistoryTask(task) ? getOrderHistoryTaskOrderNumbers(task) : [task.order_number || task.order?.order_number || ""].filter(Boolean);
+  return numbers.map((orderNumber, index) => renderTaskOrderNumberAction(orderNumber, numbers.length > 1 ? `Order ${index + 1}` : fallbackLabel)).join("");
+}
+
 function normalizeOrderTask(task = {}) {
   const order = getEmbeddedOne(task.ebay_orders);
   const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
-  const orderNumber = task.order_number || order.order_number || "";
-  const buyer = task.buyer_username || order.buyer_username || "";
+  const orderNumber = task.order_number || metadata.order_number || order.order_number || "";
+  const buyer = task.buyer_username || metadata.buyer_username || order.buyer_username || "";
   const isOrderHistoryTask = metadata.source === "order_history";
   let sourceLabel = "Pending Order";
   if (task.task_type === ORDER_SUBTASK_TYPE) {
@@ -1570,8 +1599,9 @@ function normalizeOrderTask(task = {}) {
     latest_note: task.latest_note || task.question || "",
     order,
     order_number: orderNumber,
+    order_numbers: isOrderHistoryTask ? getOrderHistoryTaskOrderNumbers({ ...task, order, metadata, source: "order", order_number: orderNumber }) : [orderNumber].filter(Boolean),
     buyer_username: buyer,
-    buyer_name: task.buyer_name || order.buyer_name || "",
+    buyer_name: task.buyer_name || metadata.buyer_name || order.buyer_name || "",
     order_status: task.order_status || order.status || "",
     ship_by_date: task.ship_by_date || order.ship_by_date || "",
     actionHref: isOrderHistoryTask
@@ -2727,9 +2757,10 @@ function getTaskOrderMiniStatus(task = {}) {
   const condition = getPendingOrderEbayCondition(task);
   const chipLabels = getPendingOrderSummaryStatusChips(task).map((chip) => chip.label).slice(0, 3);
   const customerName = getPendingOrderCustomerName(task);
+  const historyOrderNumbers = isOrderHistoryTask(task) ? getOrderHistoryTaskOrderNumbers(task) : [];
   return [
     chipLabels.length ? chipLabels.join(" / ") : condition.shortLabel || condition.label,
-    task.order_number ? `Order ${task.order_number}` : "",
+    historyOrderNumbers.length > 1 ? `Orders ${historyOrderNumbers.join(", ")}` : task.order_number ? `Order ${task.order_number}` : "",
     task.buyer_username ? `Buyer ${task.buyer_username}` : "",
     customerName ? `Customer ${customerName}` : "",
   ].filter(Boolean).join(" - ");
@@ -3167,6 +3198,63 @@ function renderPendingOrderApprovalLines(task = {}, events = []) {
                 </div>
                 ${lineReview?.note ? `<p class="team-task-line-review-note">${escapeHtml(lineReview.note)}</p>` : ""}
                 ${renderInlineOrderLineReviewControls(task, line, index, lineReview)}
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+      ${hiddenCount ? `<small class="team-task-more">+${escapeHtml(hiddenCount)} more line${hiddenCount === 1 ? "" : "s"} in the order detail drawer</small>` : ""}
+    </section>
+  `;
+}
+
+function renderOrderHistoryTaskLines(task = {}, events = []) {
+  const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
+  if (!lines.length) {
+    return `
+      <section class="team-task-approval-lines is-history-lines">
+        <div class="team-task-approval-lines-head">
+          <span class="eyebrow">Closed order lines</span>
+          <strong>No item lines loaded</strong>
+        </div>
+      </section>
+    `;
+  }
+  const shown = lines.slice(0, 10);
+  const hiddenCount = Math.max(0, lines.length - shown.length);
+  const scope = getOrderHistoryTaskScope(task);
+  const orderNumbers = getOrderHistoryTaskOrderNumbers(task);
+  const summaryLabel = scope === "group"
+    ? `${orderNumbers.length || 1} order${(orderNumbers.length || 1) === 1 ? "" : "s"} / ${getPendingOrderLineSummary(task)}`
+    : getPendingOrderLineSummary(task);
+  return `
+    <section class="team-task-approval-lines is-history-lines">
+      <div class="team-task-approval-lines-head">
+        <span class="eyebrow">${scope === "group" ? "Closed order group" : "Closed order lines"}</span>
+        <strong>${escapeHtml(summaryLabel || `${lines.length} linked line${lines.length === 1 ? "" : "s"}`)}</strong>
+      </div>
+      <div class="team-task-approval-line-list">
+        ${shown.map((line, index) => {
+          const photos = getTaskLineReceiptPhotos(line);
+          const amount = formatMoney(line.total_price || line.sold_for || "");
+          const title = line.item_number ? `${line.item_number} - ${line.item_title || "Untitled item"}` : line.item_title || "Untitled item";
+          const orderNumber = orderNumbers.length === 1 ? orderNumbers[0] : "";
+          const chips = [
+            orderNumber ? `Order ${orderNumber}` : "",
+            line.quantity ? `Qty ${line.quantity}` : "Qty 1",
+            amount || "",
+            line.line_status ? formatTaskTag(line.line_status) : "",
+            photos.length ? `Receipt photo ${photos.length}` : "No receipt photo",
+          ].filter(Boolean);
+          return `
+            <article class="team-task-approval-line ${photos.length ? "has-photo" : "is-missing-photo"}">
+              ${renderPendingOrderApprovalLinePhoto(line, task, index)}
+              <div class="team-task-approval-line-main">
+                <strong>${escapeHtml(title)}</strong>
+                <div class="team-task-approval-line-meta">
+                  ${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}
+                  ${renderTaskLineVideoReceiptOpenButton(line, task)}
+                </div>
               </div>
             </article>
           `;
@@ -3829,6 +3917,7 @@ function getTaskNextStepLabel(task = {}) {
 }
 
 function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
+  const isHistoryTask = isOrderHistoryTask(task);
   const originalInstruction = getTaskOriginalInstruction(task);
   const latestEvent = getLatestTaskEvent(events);
   const latestUpdate = String(latestEvent?.notes || "").trim();
@@ -3842,7 +3931,7 @@ function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
   const late = isTaskLate(task, { canceled });
   const lateAge = getTaskLateAgeLabel(task);
   const dueLabel = getTaskDueLabel(task);
-  const orderNumber = task.order_number || order.order_number || "";
+  const historyOrderNumbers = getOrderHistoryTaskOrderNumbers(task);
   const placedLabel = order.sale_date ? formatDate(order.sale_date) : "Not loaded";
   const shipByValue = task.ship_by_date || order.ship_by_date || task.due_at;
   const shipByLabel = shipByValue ? formatDate(shipByValue) : "Not set";
@@ -3852,6 +3941,7 @@ function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
     ["Status", canceled ? "Canceled" : getTaskStatusLabel(task.status)],
     ["Priority", formatTaskTag(task.priority || "normal")],
     ["Category", formatTaskTag(task.task_type || "general")],
+    isHistoryTask && historyOrderNumbers.length ? ["Closed orders", historyOrderNumbers.join(", ")] : null,
     lineSummary ? ["Lines / Qty", lineSummary] : null,
     task.due_at ? ["Task due", formatDate(task.due_at)] : null,
     task.ship_by_date || order.ship_by_date ? ["Ship by", formatDate(task.ship_by_date || order.ship_by_date)] : null,
@@ -3873,7 +3963,7 @@ function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
         <div class="team-task-order-work-main">
           <div class="team-task-order-work-toolbar">
             <div class="team-task-order-inline-meta">
-              ${renderTaskOrderNumberAction(orderNumber)}
+              ${renderTaskOrderNumberActionsForTask(task)}
               ${customerName ? `<span><small>Customer</small><b>${escapeHtml(customerName)}</b></span>` : ""}
               ${task.buyer_username ? `<span><small>Buyer</small><b>${escapeHtml(task.buyer_username)}</b></span>` : ""}
               <span><small>Placed</small><b>${escapeHtml(placedLabel)}</b></span>
@@ -3887,7 +3977,8 @@ function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
             <small>What needs to be done</small>
             <p>${escapeHtml(currentInstruction)}</p>
           </article>
-          ${renderPendingOrderApprovalLines(task, events)}
+          ${isHistoryTask ? renderOrderHistoryTaskLines(task, events) : renderPendingOrderApprovalLines(task, events)}
+          ${isHistoryTask ? renderPendingOrderEvidencePanel(task, events) : ""}
           ${hasLatestUpdate ? `
             <p class="team-task-latest-update"><strong>Latest update</strong><span>${escapeHtml(latestUpdate)}</span></p>
           ` : ""}
@@ -3896,7 +3987,7 @@ function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
       <details class="team-task-context-details team-task-brief-details team-task-order-audit-details">
         <summary>Extra eBay status, photos, and audit details</summary>
         ${renderPendingOrderStatusSnapshot(task)}
-        ${renderPendingOrderEvidencePanel(task, events)}
+        ${isHistoryTask ? "" : renderPendingOrderEvidencePanel(task, events)}
         <p class="team-task-next-step"><strong>Next step</strong><span>${escapeHtml(getTaskNextStepLabel(task))}</span></p>
         ${hasDifferentOriginal ? `
           <article class="team-task-instruction">
@@ -4018,9 +4109,10 @@ function renderTaskCard(task = {}, options = {}) {
   const lateAge = getTaskLateAgeLabel(task);
   const dueLabel = getTaskDueLabel(task);
   const preview = getTaskCardPreview(task, canceled);
+  const historyOrderNumbers = isOrderHistoryTask(task) ? getOrderHistoryTaskOrderNumbers(task) : [];
   const contextLine = [
     task.buyer_username ? `Buyer ${task.buyer_username}` : "",
-    task.order_number ? `Order ${task.order_number}` : "",
+    historyOrderNumbers.length > 1 ? `Orders ${historyOrderNumbers.join(", ")}` : task.order_number ? `Order ${task.order_number}` : "",
     task.source === "team" && task.metadata?.task_tag ? formatTaskTag(task.metadata.task_tag) : "",
   ].filter(Boolean).join(" - ");
   const orderMiniStatus = getTaskOrderMiniStatus(task);
