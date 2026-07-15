@@ -1230,6 +1230,44 @@ body {
   font-weight: 900;
 }
 
+.team-task-approval-line-meta .team-task-line-finance-pill {
+  min-height: 23px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(139, 190, 255, 0.24);
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: rgba(139, 190, 255, 0.08);
+  color: #cfe2ff;
+  font-size: 0.66rem;
+  font-weight: 950;
+  line-height: 1.1;
+  text-decoration: none;
+}
+
+.team-task-approval-line-meta .team-task-line-finance-pill.is-danger {
+  border-color: rgba(255, 120, 120, 0.46);
+  background: rgba(255, 76, 76, 0.15);
+  color: #ffd6d6;
+}
+
+.team-task-approval-line-meta .team-task-line-finance-pill.is-warning {
+  border-color: rgba(245, 197, 92, 0.46);
+  background: rgba(245, 197, 92, 0.14);
+  color: #ffe6a8;
+}
+
+.team-task-approval-line-meta .team-task-line-finance-pill.is-good {
+  border-color: rgba(125, 240, 178, 0.32);
+  background: rgba(48, 197, 112, 0.12);
+  color: #9df3c4;
+}
+
+a.team-task-line-finance-pill:hover,
+a.team-task-order-status-pill:hover {
+  filter: brightness(1.12);
+}
+
 .team-task-approval-line-meta .team-task-line-video-open {
   min-height: 23px;
   padding: 3px 8px;
@@ -1907,6 +1945,7 @@ body {
   font-size: 0.72rem;
   font-weight: 950;
   line-height: 1;
+  text-decoration: none;
 }
 
 .team-task-order-status-pill.is-good {

@@ -879,17 +879,54 @@ function getFinanceStatusRank(status = "") {
   return 10;
 }
 
+function getFinanceHoldDetails(payload = {}) {
+  if (!payload || typeof payload !== "object") return null;
+  const signals = Array.isArray(payload.holdSignals) ? payload.holdSignals.filter((signal) => signal && typeof signal === "object") : [];
+  const amount = [payload.holdAmount, payload.onHoldAmount, ...signals.map((signal) => signal.amount)]
+    .map(parseMoney)
+    .find((value) => Number.isFinite(value) && value > 0) || 0;
+  const amountText = payload.holdAmountText || payload.onHoldAmountText || signals.map((signal) => signal.amountText).find(Boolean) || "";
+  const requestIds = [
+    ...(Array.isArray(payload.requestIds) ? payload.requestIds : []),
+    ...signals.flatMap((signal) => Array.isArray(signal.requestIds) ? signal.requestIds : []),
+  ].filter(Boolean);
+  const returnIds = [
+    ...(Array.isArray(payload.returnIds) ? payload.returnIds : []),
+    ...signals.flatMap((signal) => Array.isArray(signal.returnIds) ? signal.returnIds : []),
+  ].filter(Boolean);
+  const requestDetailsUrl = payload.requestDetailsUrl || signals.map((signal) => signal.requestDetailsUrl).find(Boolean) || "";
+  const transactionListUrl = payload.transactionListUrl || signals.map((signal) => signal.transactionListUrl).find(Boolean) || "";
+  const hasHold = normalizeFinanceStatus(payload.status || payload.transactionStatus || payload.transaction_status) === "on_hold"
+    || signals.length
+    || amount > 0
+    || /\b(on hold|funds held|held for)\b/i.test([payload.memo, ...signals.map((signal) => signal.memo)].filter(Boolean).join(" "));
+  if (!hasHold) return null;
+  return {
+    amount,
+    amountLabel: amount ? formatMoney(amount) : amountText,
+    requestIds: [...new Set(requestIds.map(String))],
+    returnIds: [...new Set(returnIds.map(String))],
+    requestDetailsUrl,
+    transactionListUrl,
+  };
+}
+
 function getFinanceStatusBadge(line = {}) {
   const payload = getFinancePayload(line);
   const status = normalizeFinanceStatus(payload?.status || payload?.transactionStatus || payload?.transaction_status);
   const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
   const activityKind = getFinanceActivityKind(payload);
+  const holdDetails = getFinanceHoldDetails(payload);
   const checkedWithNoTransactions = payload?.source === "ebay_finances_api"
     && status === "unknown"
     && transactions.length === 0;
-  const statusLabel = payload?.statusLabel || payload?.status_label || getFinanceStatusLabel(status);
+  const statusLabel = holdDetails
+    ? `On hold${holdDetails.amountLabel ? ` ${holdDetails.amountLabel}` : ""}`
+    : payload?.statusLabel || payload?.status_label || getFinanceStatusLabel(status);
   const label = checkedWithNoTransactions
     ? "No payout data"
+    : holdDetails
+      ? statusLabel
     : activityKind
       ? `${activityKind === "dispute" ? "Dispute" : activityKind === "refund" ? "Refund" : "Adjustment"} / ${statusLabel}`
       : statusLabel;
@@ -902,6 +939,9 @@ function getFinanceStatusBadge(line = {}) {
       : activityDescription
         ? activityDescription
       : `${label}: ${getFinanceStatusDescription(status)}`,
+    holdDetails?.requestIds?.length ? `Request ${holdDetails.requestIds.slice(0, 2).join(", ")}` : "",
+    holdDetails?.returnIds?.length ? `Return ${holdDetails.returnIds.slice(0, 2).join(", ")}` : "",
+    holdDetails?.requestDetailsUrl ? "Click to open eBay request details." : holdDetails?.transactionListUrl ? "Click to open eBay on-hold transactions." : "",
     payload?.memo,
     payoutIds.length ? `Payout ${payoutIds.slice(0, 2).join(", ")}` : "",
     transactionIds.length ? `Transaction ${transactionIds.slice(0, 2).join(", ")}` : "",
@@ -909,15 +949,19 @@ function getFinanceStatusBadge(line = {}) {
   ].filter(Boolean);
   return {
     label,
-    status: activityKind || status || "unknown",
-    rank: activityKind ? 100 + getFinanceStatusRank(status) : getFinanceStatusRank(status),
+    status: holdDetails ? "on_hold" : activityKind || status || "unknown",
+    rank: holdDetails ? 150 : activityKind ? 100 + getFinanceStatusRank(status) : getFinanceStatusRank(status),
     title: parts.join(" | ") || "No eBay Finances payout status has been synced for this line yet.",
+    url: holdDetails?.requestDetailsUrl || holdDetails?.transactionListUrl || "",
   };
 }
 
 function renderFinanceBadgeMarkup(badge, className = "finance-status-pill") {
   if (!badge) return "";
-  return `<span class="${escapeHtml(className)} is-${escapeHtml(badge.status || "unknown")}" title="${escapeHtml(badge.title || badge.label)}">${escapeHtml(badge.label)}</span>`;
+  const attrs = `class="${escapeHtml(className)} is-${escapeHtml(badge.status || "unknown")}" title="${escapeHtml(badge.title || badge.label)}"`;
+  return badge.url
+    ? `<a ${attrs} href="${escapeHtml(badge.url)}" target="_blank" rel="noopener">${escapeHtml(badge.label)}</a>`
+    : `<span ${attrs}>${escapeHtml(badge.label)}</span>`;
 }
 
 function getLinesFinanceStatus(lines = []) {

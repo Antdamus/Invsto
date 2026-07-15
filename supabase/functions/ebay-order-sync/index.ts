@@ -47,6 +47,7 @@ const EBAY_ORDER_SCOPE = unique([
 
 const EBAY_API_BASE = EBAY_ENV === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
 const EBAY_FINANCES_API_BASE = EBAY_ENV === "sandbox" ? "https://apiz.sandbox.ebay.com" : "https://apiz.ebay.com";
+const EBAY_ON_HOLD_TRANSACTION_LIST_URL = "https://www.ebay.com/mes/transactionlist?sh=true";
 const DEFAULT_DAYS_BACK = 14;
 const MAX_ORDER_LIMIT = 1000;
 const PAGE_LIMIT = 50;
@@ -363,8 +364,128 @@ function getFinanceLineItemIds(transaction: any): string[] {
   return unique(items.flatMap((item: any) => [
     item?.lineItemId,
     item?.legacyItemId,
+    item?.itemId,
     item?.transactionId,
   ]).map(toText).filter(Boolean));
+}
+
+function pruneEmptyFinanceRecord(record: JsonRecord): JsonRecord {
+  const output: JsonRecord = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (value == null) continue;
+    if (typeof value === "string" && !value.trim()) continue;
+    if (Array.isArray(value) && !value.length) continue;
+    output[key] = value;
+  }
+  return output;
+}
+
+function financeAmountText(value: unknown): string {
+  const amount = toMoney(value);
+  if (!amount) return "";
+  const currency = typeof value === "object" && value !== null && "currency" in value
+    ? toText((value as JsonRecord).currency || "USD")
+    : "USD";
+  return currency === "USD" ? `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `${currency} ${amount.toFixed(2)}`;
+}
+
+function getFinanceOrderId(transaction: any): string {
+  return getNestedText(transaction?.orderId, transaction?.order_id, transaction?.order?.orderId, transaction?.order?.orderNumber);
+}
+
+function getFinanceBuyerUsername(transaction: any): string {
+  return getNestedText(
+    transaction?.buyer?.username,
+    transaction?.buyer?.userName,
+    transaction?.buyer?.userId,
+    transaction?.buyerUsername,
+  );
+}
+
+function getFinanceReferenceText(transaction: any): string {
+  const references = Array.isArray(transaction?.references) ? transaction.references : [];
+  return [
+    transaction?.transactionMemo,
+    transaction?.transactionId,
+    transaction?.transactionType,
+    transaction?.transactionStatus,
+    transaction?.payoutId,
+    transaction?.payoutReferenceId,
+    ...references.flatMap((reference: any) => [reference?.referenceId, reference?.referenceType, reference?.id, reference?.type]),
+  ].map(toText).filter(Boolean).join(" ");
+}
+
+function extractReferenceIdsFromText(text: string, pattern: RegExp): string[] {
+  return unique([...String(text || "").matchAll(pattern)].map((match) => toText(match[1])).filter(Boolean));
+}
+
+function getFinanceReferenceIds(transaction: any): JsonRecord {
+  const text = getFinanceReferenceText(transaction);
+  return pruneEmptyFinanceRecord({
+    requestIds: extractReferenceIdsFromText(text, /\b(?:request|case|claim)\s*(?:id|#)?\s*[:#-]?\s*([0-9]{6,})\b/gi),
+    returnIds: extractReferenceIdsFromText(text, /\breturn\s*(?:id|#)?\s*[:#-]?\s*([0-9]{6,})\b/gi),
+    disputeIds: extractReferenceIdsFromText(text, /\b(?:dispute|chargeback)\s*(?:id|#)?\s*[:#-]?\s*([A-Z0-9-]{6,})\b/gi),
+  });
+}
+
+function ebayRequestDetailsUrl(requestId: string): string {
+  const cleanId = toText(requestId);
+  return cleanId ? `https://www.ebay.com/res/ItemNotReceived/ViewRequest?id=${encodeURIComponent(cleanId)}` : "";
+}
+
+function compactFinanceLineItems(transaction: any): JsonRecord[] {
+  const items = Array.isArray(transaction?.orderLineItems) ? transaction.orderLineItems : [];
+  return items.map((item: any) => pruneEmptyFinanceRecord({
+    lineItemId: getNestedText(item?.lineItemId, item?.transactionId),
+    itemId: getNestedText(item?.itemId, item?.legacyItemId),
+    feeBasisAmount: financeAmountText(item?.feeBasisAmount),
+  })).filter((item: JsonRecord) => Object.keys(item).length);
+}
+
+function getFinanceHoldSignal(transaction: any): JsonRecord | null {
+  const status = normalizeFinanceTransactionStatus(transaction?.transactionStatus);
+  const memo = toText(transaction?.transactionMemo);
+  const holdText = getFinanceReferenceText(transaction).toLowerCase();
+  if (status !== "on_hold" && !/\b(on hold|funds held|held for|hold)\b/i.test(holdText)) return null;
+  const references = getFinanceReferenceIds(transaction);
+  const requestIds = Array.isArray(references.requestIds) ? references.requestIds.map(toText).filter(Boolean) : [];
+  const returnIds = Array.isArray(references.returnIds) ? references.returnIds.map(toText).filter(Boolean) : [];
+  const disputeIds = Array.isArray(references.disputeIds) ? references.disputeIds.map(toText).filter(Boolean) : [];
+  const requestDetailsUrls = requestIds.map(ebayRequestDetailsUrl).filter(Boolean);
+  const amount = getFinanceTransactionAmount(transaction);
+  return pruneEmptyFinanceRecord({
+    source: "ebay_finances_api",
+    status: "on_hold",
+    statusLabel: "On hold",
+    orderNumber: getFinanceOrderId(transaction),
+    buyerUsername: getFinanceBuyerUsername(transaction),
+    requestIds,
+    returnIds,
+    disputeIds,
+    requestDetailsUrl: requestDetailsUrls[0] || "",
+    requestDetailsUrls,
+    transactionListUrl: EBAY_ON_HOLD_TRANSACTION_LIST_URL,
+    amount,
+    amountText: financeAmountText(transaction?.amount || amount),
+    transactionId: getFinanceTransactionId(transaction),
+    transactionType: toText(transaction?.transactionType),
+    transactionStatus: toText(transaction?.transactionStatus),
+    transactionDate: toIsoDate(transaction?.transactionDate || transaction?.createdDate),
+    memo,
+    lineItemIds: getFinanceLineItemIds(transaction),
+    lineItems: compactFinanceLineItems(transaction),
+  });
+}
+
+function mergeFinanceTransactionsByOrder(byOrder: Map<string, any[]>, transactions: any[]) {
+  for (const transaction of transactions || []) {
+    const orderNumber = getFinanceOrderId(transaction);
+    if (!orderNumber) continue;
+    const existing = byOrder.get(orderNumber) || [];
+    const transactionId = getFinanceTransactionId(transaction);
+    if (transactionId && existing.some((entry) => getFinanceTransactionId(entry) === transactionId)) continue;
+    byOrder.set(orderNumber, [...existing, transaction]);
+  }
 }
 
 function summarizeFinanceTransactions(transactions: any[], orderNumber: string, lineItemId = ""): JsonRecord | null {
@@ -378,17 +499,22 @@ function summarizeFinanceTransactions(transactions: any[], orderNumber: string, 
   const compactTransactions = relevant.map((transaction) => {
     const status = normalizeFinanceTransactionStatus(transaction?.transactionStatus);
     const payoutId = getNestedText(transaction?.payoutId, transaction?.payoutReferenceId);
+    const holdSignal = getFinanceHoldSignal(transaction);
     return {
       transactionId: getFinanceTransactionId(transaction),
       transactionType: toText(transaction?.transactionType),
       transactionStatus: toText(transaction?.transactionStatus),
       bookingEntry: toText(transaction?.bookingEntry),
       status,
+      orderNumber: getFinanceOrderId(transaction),
+      buyerUsername: getFinanceBuyerUsername(transaction),
       payoutId,
       transactionDate: toIsoDate(transaction?.transactionDate || transaction?.bookingEntry || transaction?.createdDate),
       memo: toText(transaction?.transactionMemo),
       amount: getFinanceTransactionAmount(transaction),
       lineItemIds: getFinanceLineItemIds(transaction),
+      lineItems: compactFinanceLineItems(transaction),
+      ...(holdSignal ? { holdSignal } : {}),
     };
   });
 
@@ -400,17 +526,32 @@ function summarizeFinanceTransactions(transactions: any[], orderNumber: string, 
   const transactionIds = unique(compactTransactions.map((transaction: any) => toText(transaction.transactionId)).filter(Boolean));
   const lineItemIds = unique(compactTransactions.flatMap((transaction: any) => transaction.lineItemIds || []).map(toText).filter(Boolean));
   const memos = unique(compactTransactions.map((transaction: any) => toText(transaction.memo)).filter(Boolean));
+  const holdSignals = compactTransactions
+    .map((transaction: any) => transaction.holdSignal)
+    .filter((signal: any) => signal && typeof signal === "object");
+  const holdAmount = holdSignals.reduce((total: number, signal: any) => total + toMoney(signal.amount), 0);
+  const requestIds = unique(holdSignals.flatMap((signal: any) => Array.isArray(signal.requestIds) ? signal.requestIds : []).map(toText).filter(Boolean));
+  const returnIds = unique(holdSignals.flatMap((signal: any) => Array.isArray(signal.returnIds) ? signal.returnIds : []).map(toText).filter(Boolean));
+  const requestDetailsUrls = unique(holdSignals.flatMap((signal: any) => Array.isArray(signal.requestDetailsUrls) ? signal.requestDetailsUrls : [signal.requestDetailsUrl]).map(toText).filter(Boolean));
 
   return {
     source: "ebay_finances_api",
     syncedAt: new Date().toISOString(),
     orderNumber,
     lineItemId: lineItemId || null,
-    status: winningStatus,
-    statusLabel: getFinanceStatusLabel(winningStatus),
+    status: holdSignals.length ? "on_hold" : winningStatus,
+    statusLabel: holdSignals.length ? "On hold" : getFinanceStatusLabel(winningStatus),
     payoutIds,
     transactionIds,
     lineItemIds,
+    holdAmount: holdAmount || null,
+    holdAmountText: holdAmount ? financeAmountText(holdAmount) : "",
+    requestIds,
+    returnIds,
+    requestDetailsUrl: requestDetailsUrls[0] || "",
+    requestDetailsUrls,
+    transactionListUrl: EBAY_ON_HOLD_TRANSACTION_LIST_URL,
+    holdSignals: holdSignals.slice(0, 10),
     memo: memos[0] || "",
     transactions: compactTransactions.slice(0, 20),
   };
@@ -424,6 +565,25 @@ async function fetchFinanceTransactionsForOrder(token: string, orderNumber: stri
     const params = new URLSearchParams({
       filter: `orderId:{${orderNumber}}`,
       limit: String(limit),
+      offset: String(offset),
+    });
+    const payload = await ebayFinanceRequest(token, `/sell/finances/v1/transaction?${params.toString()}`);
+    const page = Array.isArray(payload?.transactions) ? payload.transactions : [];
+    transactions.push(...page);
+    if (!payload?.next || page.length < limit) break;
+    offset += limit;
+  }
+  return transactions;
+}
+
+async function fetchFundsOnHoldTransactions(token: string, maxTransactions = 1000, deadlineMs = 0): Promise<any[]> {
+  const transactions: any[] = [];
+  let offset = 0;
+  const limit = Math.min(1000, Math.max(1, maxTransactions));
+  while (transactions.length < maxTransactions && hasTimeBudget(deadlineMs)) {
+    const params = new URLSearchParams({
+      filter: "transactionStatus:{FUNDS_ON_HOLD}",
+      limit: String(Math.min(limit, maxTransactions - transactions.length)),
       offset: String(offset),
     });
     const payload = await ebayFinanceRequest(token, `/sell/finances/v1/transaction?${params.toString()}`);
@@ -465,7 +625,23 @@ async function loadFinanceTransactionsByOrder(token: string, orderNumbers: strin
   const skippedByBudget = checkedOrderNumbers.length - attempted;
   const timeoutWarning = budgetWarning("finance transaction lookup", skippedByBudget);
   if (timeoutWarning) warnings.push(timeoutWarning);
+  let onHoldTransactions: any[] = [];
+  if (hasTimeBudget(deadlineMs)) {
+    try {
+      onHoldTransactions = await fetchFundsOnHoldTransactions(token, 1000, deadlineMs);
+      mergeFinanceTransactionsByOrder(byOrder, onHoldTransactions);
+    } catch (error) {
+      warnings.push({
+        reason: "ebay_finance_on_hold_lookup_failed",
+        message: compactError(error),
+      });
+    }
+  } else {
+    const warning = budgetWarning("on-hold finance lookup", 1);
+    if (warning) warnings.push(warning);
+  }
   const withTransactions = [...byOrder.values()].filter((transactions) => transactions.length > 0).length;
+  const onHoldOrderNumbers = unique(onHoldTransactions.map(getFinanceOrderId).filter(Boolean));
   return {
     byOrder,
     warnings,
@@ -475,6 +651,9 @@ async function loadFinanceTransactionsByOrder(token: string, orderNumbers: strin
       financeOrdersWithTransactions: withTransactions,
       financeOrdersWithoutTransactions: Math.max(0, attempted - withTransactions - warnings.filter((entry) => entry.reason === "ebay_finance_lookup_failed").length),
       financeOrdersSkippedDueToBudget: skippedByBudget,
+      financeOnHoldTransactions: onHoldTransactions.length,
+      financeOnHoldOrders: onHoldOrderNumbers.length,
+      financeOrdersDiscoveredFromHold: onHoldOrderNumbers.filter((orderNumber) => !checkedOrderNumbers.includes(orderNumber)).length,
     },
   };
 }

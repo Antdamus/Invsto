@@ -1330,6 +1330,7 @@ textarea:focus {
   font-size: 0.72rem;
   font-weight: 950;
   line-height: 1.1;
+  text-decoration: none;
 }
 
 .buyer-card-finance-pill.is-on_hold,
@@ -4548,6 +4549,12 @@ body.pending-order-detail-open .mobile-detail-close {
   font-size: 0.72rem;
   font-weight: 950;
   line-height: 1.1;
+  text-decoration: none;
+}
+
+a.buyer-card-finance-pill:hover,
+a.buyer-line-finance-pill:hover {
+  filter: brightness(1.12);
 }
 
 .buyer-line-post-order-warning {

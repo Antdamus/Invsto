@@ -2633,12 +2633,47 @@ function getTaskFinanceStatusTone(status = "", activityKind = "") {
   return "is-muted";
 }
 
+function getTaskFinanceHoldDetails(payload = {}) {
+  if (!payload || typeof payload !== "object") return null;
+  const signals = Array.isArray(payload.holdSignals) ? payload.holdSignals.filter((signal) => signal && typeof signal === "object") : [];
+  const amount = [payload.holdAmount, payload.onHoldAmount, ...signals.map((signal) => signal.amount)]
+    .map(parseMoneyNumber)
+    .find((value) => Number.isFinite(value) && value > 0) || 0;
+  const amountText = payload.holdAmountText || payload.onHoldAmountText || signals.map((signal) => signal.amountText).find(Boolean) || "";
+  const requestIds = [
+    ...(Array.isArray(payload.requestIds) ? payload.requestIds : []),
+    ...signals.flatMap((signal) => Array.isArray(signal.requestIds) ? signal.requestIds : []),
+  ].filter(Boolean);
+  const returnIds = [
+    ...(Array.isArray(payload.returnIds) ? payload.returnIds : []),
+    ...signals.flatMap((signal) => Array.isArray(signal.returnIds) ? signal.returnIds : []),
+  ].filter(Boolean);
+  const requestDetailsUrl = payload.requestDetailsUrl || signals.map((signal) => signal.requestDetailsUrl).find(Boolean) || "";
+  const transactionListUrl = payload.transactionListUrl || signals.map((signal) => signal.transactionListUrl).find(Boolean) || "";
+  const hasHold = normalizeTaskFinanceStatus(payload.status || payload.transactionStatus || payload.transaction_status) === "on_hold"
+    || signals.length
+    || amount > 0
+    || /\b(on hold|funds held|held for)\b/i.test([payload.memo, ...signals.map((signal) => signal.memo)].filter(Boolean).join(" "));
+  if (!hasHold) return null;
+  return {
+    amount,
+    amountLabel: amount ? formatMoney(amount) : amountText,
+    requestIds: [...new Set(requestIds.map(String))],
+    returnIds: [...new Set(returnIds.map(String))],
+    requestDetailsUrl,
+    transactionListUrl,
+  };
+}
+
 function getTaskFinanceBadgeFromPayload(payload = {}) {
   if (!payload || typeof payload !== "object") return null;
   const status = normalizeTaskFinanceStatus(payload?.status || payload?.transactionStatus || payload?.transaction_status);
   const transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
   const activityKind = getTaskFinanceActivityKind(payload);
-  const statusLabel = payload?.statusLabel || payload?.status_label || getTaskFinanceStatusLabel(status);
+  const holdDetails = getTaskFinanceHoldDetails(payload);
+  const statusLabel = holdDetails
+    ? `On hold${holdDetails.amountLabel ? ` ${holdDetails.amountLabel}` : ""}`
+    : payload?.statusLabel || payload?.status_label || getTaskFinanceStatusLabel(status);
   const checkedWithNoTransactions = payload?.source === "ebay_finances_api"
     && status === "unknown"
     && transactions.length === 0;
@@ -2646,19 +2681,34 @@ function getTaskFinanceBadgeFromPayload(payload = {}) {
   return {
     label: checkedWithNoTransactions
       ? "No payout data"
+      : holdDetails
+        ? statusLabel
       : activityLabel
         ? `${activityLabel} / ${statusLabel}`
         : statusLabel,
-    tone: getTaskFinanceStatusTone(status, activityKind),
+    tone: getTaskFinanceStatusTone(holdDetails ? "on_hold" : status, activityKind),
     title: [
       checkedWithNoTransactions ? "eBay Finances checked this order but returned no transaction data." : "",
+      holdDetails ? "eBay says funds for this order or line are on hold." : "",
+      holdDetails?.requestIds?.length ? `Request ${holdDetails.requestIds.slice(0, 2).join(", ")}` : "",
+      holdDetails?.returnIds?.length ? `Return ${holdDetails.returnIds.slice(0, 2).join(", ")}` : "",
+      holdDetails?.requestDetailsUrl ? "Open eBay request details from this badge." : holdDetails?.transactionListUrl ? "Open eBay on-hold transactions from this badge." : "",
       activityLabel ? `${activityLabel} finance activity is attached to this order.` : "",
       statusLabel ? `Finance status: ${statusLabel}` : "",
       payload.memo,
       payload.syncedAt ? `Checked ${formatDate(payload.syncedAt)}` : "",
     ].filter(Boolean).join(" "),
-    rank: activityKind ? 100 + getTaskFinanceStatusRank(status) : getTaskFinanceStatusRank(status),
+    rank: holdDetails ? 150 : activityKind ? 100 + getTaskFinanceStatusRank(status) : getTaskFinanceStatusRank(status),
+    url: holdDetails?.requestDetailsUrl || holdDetails?.transactionListUrl || "",
   };
+}
+
+function renderTaskFinanceBadge(badge, className = "team-task-line-finance-pill") {
+  if (!badge) return "";
+  const attrs = `class="${escapeHtml(className)} ${escapeHtml(badge.tone || "is-muted")}" title="${escapeHtml(badge.title || badge.label)}"`;
+  return badge.url
+    ? `<a ${attrs} href="${escapeHtml(badge.url)}" target="_blank" rel="noopener">${escapeHtml(badge.label)}</a>`
+    : `<span ${attrs}>${escapeHtml(badge.label)}</span>`;
 }
 
 function getPendingOrderTaskFinanceBadge(task = {}) {
@@ -2684,7 +2734,7 @@ function getPendingOrderStatusPills(task = {}) {
     api.paymentStatus ? { label: `Payment ${formatCompactStatus(api.paymentStatus)}`, tone: isNormalEbayPaymentStatus(api.paymentStatus) ? "is-good" : "is-danger" } : null,
     api.fulfillmentStatus ? { label: `eBay ${formatCompactStatus(api.fulfillmentStatus)}`, tone: api.fulfillmentStatus === "FULFILLED" ? "is-warning" : "is-muted" } : null,
     api.cancelStatus && !isNormalEbayCancelStatus(api.cancelStatus) ? { label: `Cancel ${formatCompactStatus(api.cancelStatus)}`, tone: "is-danger" } : null,
-    financeBadge ? { label: financeBadge.label, tone: financeBadge.tone, title: financeBadge.title, rank: financeBadge.rank } : null,
+    financeBadge ? { label: financeBadge.label, tone: financeBadge.tone, title: financeBadge.title, rank: financeBadge.rank, url: financeBadge.url } : null,
     api.reviewReason || api.reviewMessage ? { label: "Needs eBay review", tone: "is-warning" } : null,
     lineStatuses.length ? { label: `Lines ${lineStatuses.join(", ")}`, tone: getPendingOrderStatusTone(lineStatuses.join(" ")) } : null,
   ].filter(Boolean);
@@ -2786,7 +2836,7 @@ function getPendingOrderSummaryStatusChips(task = {}) {
     !isNormalEbayCancelStatus(api.cancelStatus) ? { label: `Cancel ${formatCompactStatus(api.cancelStatus) || "flagged"}`, tone: "is-danger", title: "eBay cancellation status for this order." } : null,
     api.paymentStatus ? { label: `Payment ${formatCompactStatus(api.paymentStatus)}`, tone: isNormalEbayPaymentStatus(api.paymentStatus) ? "is-good" : "is-danger", title: "eBay payment status for this order." } : null,
     api.fulfillmentStatus ? { label: `eBay ${formatCompactStatus(api.fulfillmentStatus)}`, tone: api.fulfillmentStatus === "FULFILLED" ? "is-warning" : getPendingOrderStatusTone(api.fulfillmentStatus), title: "eBay fulfillment status for this order." } : null,
-    financeBadge ? { label: financeBadge.label, tone: financeBadge.tone, title: financeBadge.title, rank: financeBadge.rank } : null,
+    financeBadge ? { label: financeBadge.label, tone: financeBadge.tone, title: financeBadge.title, rank: financeBadge.rank, url: financeBadge.url } : null,
     api.reviewReason || api.reviewMessage ? { label: "eBay review", tone: "is-warning", title: api.reviewMessage || api.reviewReason } : null,
   ].filter(Boolean);
 
@@ -2884,7 +2934,7 @@ function renderPendingOrderStatusSnapshot(task = {}) {
           <summary>Order details and eBay fields</summary>
           ${pills.length ? `
             <div class="team-task-order-status-pills">
-              ${pills.map((pill) => `<span class="team-task-order-status-pill ${escapeHtml(pill.tone)}" title="${escapeHtml(pill.title || pill.label)}">${escapeHtml(pill.label)}</span>`).join("")}
+              ${pills.map((pill) => renderTaskFinanceBadge(pill, "team-task-order-status-pill")).join("")}
             </div>
           ` : `<p class="team-task-order-status-empty">No eBay status warning loaded for this task.</p>`}
           ${facts.length ? `
@@ -3249,6 +3299,7 @@ function renderPendingOrderApprovalLines(task = {}, events = []) {
           const amount = formatMoney(line.total_price || line.sold_for || "");
           const title = line.item_number ? `${line.item_number} - ${line.item_title || "Untitled item"}` : line.item_title || "Untitled item";
           const lineReview = getLineReviewForLine(line, reviewMap);
+          const financeBadge = getTaskFinanceBadgeFromPayload(getTaskFinancePayload({ ...line, order: task.order || {} }));
           const chips = [
             line.quantity ? `Qty ${line.quantity}` : "Qty 1",
             amount || "",
@@ -3263,6 +3314,7 @@ function renderPendingOrderApprovalLines(task = {}, events = []) {
                 <strong>${escapeHtml(title)}</strong>
                 <div class="team-task-approval-line-meta">
                   ${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}
+                  ${renderTaskFinanceBadge(financeBadge)}
                   ${receiptButton}
                   ${renderLineReviewBadge(lineReview)}
                 </div>
@@ -3309,6 +3361,7 @@ function renderOrderHistoryTaskLines(task = {}, events = []) {
           const amount = formatMoney(line.total_price || line.sold_for || "");
           const title = line.item_number ? `${line.item_number} - ${line.item_title || "Untitled item"}` : line.item_title || "Untitled item";
           const orderNumber = normalizeEbayOrderNumber(line.order?.order_number || line.order_number || (orderNumbers.length === 1 ? orderNumbers[0] : ""));
+          const financeBadge = getTaskFinanceBadgeFromPayload(getTaskFinancePayload({ ...line, order: line.order || task.order || {} }));
           const chips = [
             line.quantity ? `Qty ${line.quantity}` : "Qty 1",
             amount || "",
@@ -3323,6 +3376,7 @@ function renderOrderHistoryTaskLines(task = {}, events = []) {
                 <div class="team-task-approval-line-meta">
                   ${orderNumber ? renderTaskOrderNumberAction(orderNumber, "Order") : `<span>Order number missing</span>`}
                   ${chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("")}
+                  ${renderTaskFinanceBadge(financeBadge)}
                   ${renderTaskLineVideoReceiptOpenButton(line, task)}
                 </div>
               </div>

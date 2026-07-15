@@ -521,6 +521,12 @@ textarea {
   font-size: 0.72rem;
   font-weight: 950;
   line-height: 1.1;
+  text-decoration: none;
+}
+
+a.return-task-finance-pill:hover,
+a.history-line-finance-pill:hover {
+  filter: brightness(1.12);
 }
 
 .return-task-summary-meta .return-task-finance-pill.is-on_hold,
