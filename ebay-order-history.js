@@ -3307,8 +3307,50 @@ function getReturnTaskPricePills(task = {}) {
   return apiAmount ? [`Amount ${apiAmount}`] : [];
 }
 
+function getReturnTaskHoldFinancePill(task = {}) {
+  const apiDetails = getReturnTaskApiDetails(task);
+  const hold = apiDetails.financeHoldDetails || {};
+  const amountLabel = [
+    apiDetails.onHoldAmount,
+    hold.onHoldAmount,
+    hold.amountText,
+  ].map(prettifyApiMoneyText).find(hasPositiveMoneyText) || "";
+  const requestIds = unique([
+    apiDetails.requestId,
+    ...(Array.isArray(hold.requestIds) ? hold.requestIds : []),
+  ].map((value) => String(value || "").trim()).filter(Boolean));
+  const returnIds = unique([
+    ...(Array.isArray(hold.returnIds) ? hold.returnIds : []),
+  ].map((value) => String(value || "").trim()).filter(Boolean));
+  const url = normalizeEbayWebUrl(hold.requestDetailsUrl || hold.detailsUrl || apiDetails.detailsUrl)
+    || normalizeEbayWebUrl(hold.transactionListUrl)
+    || "";
+  const hasHoldSignal = Boolean(
+    amountLabel
+      || hold.transactionId
+      || hold.requestDetailsUrl
+      || hold.transactionListUrl
+      || String(hold.memo || "").match(/\b(on hold|funds held|held for)\b/i)
+  );
+  if (!hasHoldSignal) return null;
+  return {
+    label: amountLabel ? `On hold ${amountLabel}` : "On hold",
+    status: "on_hold",
+    rank: 200,
+    title: [
+      "eBay says funds for this request, return, or dispute are on hold.",
+      requestIds.length ? `Request ${requestIds.slice(0, 2).join(", ")}` : "",
+      returnIds.length ? `Return ${returnIds.slice(0, 2).join(", ")}` : "",
+      amountLabel ? `Amount ${amountLabel}` : "",
+      hold.memo,
+      url ? "Click to open eBay details." : "",
+    ].filter(Boolean).join(" | "),
+    url,
+  };
+}
+
 function getReturnTaskFinancePill(task = {}) {
-  return getLinesFinanceStatus(getReturnTaskLines(task));
+  return getReturnTaskHoldFinancePill(task) || getLinesFinanceStatus(getReturnTaskLines(task));
 }
 
 function getReturnTaskPayoutTotal(task = {}) {
@@ -3395,11 +3437,16 @@ function getReturnComplaintDetails(task = {}) {
   return {
     buyerComment: metadata.buyerComment || detail.buyerComment || apiDetails.buyerComment || "",
     requestAmount: prettifyApiMoneyText(metadata.requestAmount || detail.requestAmount || apiDetails.requestAmount || ""),
-    onHoldAmount: prettifyApiMoneyText(metadata.onHoldAmount || detail.onHoldAmount || apiDetails.onHoldAmount || ""),
+    onHoldAmount: [
+      metadata.onHoldAmount,
+      detail.onHoldAmount,
+      apiDetails.onHoldAmount,
+    ].map(prettifyApiMoneyText).find(hasPositiveMoneyText) || "",
     trackingNumber: getReturnTaskTrackingNumber(task),
     orderDetailsUrl: metadata.orderDetailsUrl || detail.orderDetailsUrl || apiDetails.orderDetailsUrl || "",
     videoReceiptUrl: metadata.videoReceiptUrl || detail.videoReceiptUrl || "",
-    detailsUrl: metadata.detailsUrl || detail.detailsUrl || apiDetails.detailsUrl || getReturnTaskPayload(task).pageUrl || "",
+    detailsUrl: apiDetails.detailsUrl
+      || normalizeEbayWebUrl(metadata.detailsUrl || detail.detailsUrl || getReturnTaskPayload(task).pageUrl || ""),
     itemImageUrl: metadata.itemImageUrl || detail.itemImageUrl || "",
     datePurchased: metadata.datePurchased || detail.datePurchased || "",
     returnFileIds,
@@ -4019,6 +4066,7 @@ function renderReturnTaskApiDetails(task = {}) {
     || apiDetails.itemNumber
     || apiDetails.itemTitle
     || apiDetails.requestAmount
+    || apiDetails.onHoldAmount
     || apiDetails.reason
     || apiDetails.buyerComment
   );
@@ -4044,6 +4092,7 @@ function renderReturnTaskApiDetails(task = {}) {
         ${apiDetails.orderNumber ? `<span><small>Order number</small><b>${escapeHtml(apiDetails.orderNumber)}</b></span>` : ""}
         ${apiDetails.buyerUsername ? `<span><small>Buyer</small><b>${escapeHtml(apiDetails.buyerUsername)}</b></span>` : ""}
         ${apiDetails.requestAmount ? `<span><small>Amount</small><b>${escapeHtml(apiDetails.requestAmount)}</b></span>` : ""}
+        ${apiDetails.onHoldAmount ? `<span><small>On hold</small><b>${escapeHtml(apiDetails.onHoldAmount)}</b></span>` : ""}
         ${apiDetails.itemNumber ? `<span><small>Item number</small><b>${escapeHtml(apiDetails.itemNumber)}</b></span>` : ""}
         ${apiDetails.itemTitle ? `<span><small>Item title</small><b>${escapeHtml(apiDetails.itemTitle)}</b></span>` : ""}
         ${apiDetails.reason ? `<span><small>Reason</small><b>${escapeHtml(apiDetails.reason)}</b></span>` : ""}
@@ -7955,11 +8004,42 @@ function prettifyApiMoneyText(value = "") {
   return text;
 }
 
+function hasPositiveMoneyText(value = "") {
+  return parseMoney(value) > 0;
+}
+
+function normalizeEbayWebUrl(value = "") {
+  const text = String(value || "").trim();
+  if (!text || /^\/?post-order\/v\d+\//i.test(text)) return "";
+  try {
+    const url = new URL(text, "https://www.ebay.com");
+    if (!/(^|\.)ebay\.com$/i.test(url.hostname)) return "";
+    return url.toString();
+  } catch (_) {
+    return "";
+  }
+}
+
+function buildEbayPostOrderIssueUrl(issueId = "", issueLane = "") {
+  const cleanId = String(issueId || "").trim();
+  if (!cleanId) return "";
+  const lane = String(issueLane || "").toLowerCase();
+  if (lane.includes("cancel")) return `https://www.ebay.com/Cancel/Details?cancelId=${encodeURIComponent(cleanId)}`;
+  if (lane.includes("return") && !lane.includes("request") && !lane.includes("inquiry")) {
+    return `https://www.ebay.com/rtn/Return/ReturnsDetail?returnId=${encodeURIComponent(cleanId)}`;
+  }
+  return `https://www.ebay.com/res/ItemNotReceived/ViewRequest?id=${encodeURIComponent(cleanId)}`;
+}
+
 function getReturnTaskApiDetails(task = {}) {
   const returnCase = getReturnTaskCase(task);
   const metadata = getReturnTaskPayload(task);
   const detail = metadata.returnDetails || {};
   const api = metadata.apiExtractedDetails || detail.apiExtractedDetails || {};
+  const financeHoldDetails = metadata.financeHoldDetails
+    || detail.financeHoldDetails
+    || api.financeHoldDetails
+    || {};
   const lines = getReturnTaskLines(task);
   const firstLine = lines[0] || {};
   const firstOrder = lines.map((line) => line.order).find(Boolean) || {};
@@ -7985,14 +8065,29 @@ function getReturnTaskApiDetails(task = {}) {
   const itemNumber = metadata.itemNumber || metadata.item_number || api.itemNumber || firstLine.item_number || "";
   const itemTitle = metadata.itemTitle || metadata.item_title || api.itemTitle || firstLine.item_title || "";
   const requestAmount = prettifyApiMoneyText(metadata.requestAmount || detail.requestAmount || metadata.refundText || api.requestAmount || "");
-  const onHoldAmount = prettifyApiMoneyText(metadata.onHoldAmount || detail.onHoldAmount || api.onHoldAmount || "");
+  const onHoldAmount = [
+    metadata.onHoldAmount,
+    detail.onHoldAmount,
+    api.onHoldAmount,
+    financeHoldDetails.onHoldAmount,
+    financeHoldDetails.amountText,
+  ].map(prettifyApiMoneyText).find(hasPositiveMoneyText) || "";
   const orderDetailsUrl = metadata.orderDetailsUrl
     || detail.orderDetailsUrl
     || api.orderDetailsUrl
     || buildEbayOrderDetailsUrl(orderNumber);
+  const issueLane = metadata.postOrderIssueLane || api.issueLane || returnCase.case_type || "return";
+  const detailsUrl = normalizeEbayWebUrl(
+    metadata.detailsUrl
+      || detail.detailsUrl
+      || api.detailsUrl
+      || financeHoldDetails.requestDetailsUrl
+      || financeHoldDetails.detailsUrl
+      || "",
+  ) || buildEbayPostOrderIssueUrl(requestId, issueLane);
   return {
     requestId,
-    issueLane: metadata.postOrderIssueLane || api.issueLane || "return",
+    issueLane,
     orderNumber,
     orderDetailsUrl,
     buyerUsername,
@@ -8008,7 +8103,8 @@ function getReturnTaskApiDetails(task = {}) {
     buyerComment: metadata.buyerComment || detail.buyerComment || api.buyerComment || "",
     requestAmount,
     onHoldAmount,
-    detailsUrl: metadata.detailsUrl || detail.detailsUrl || api.detailsUrl || "",
+    detailsUrl,
+    financeHoldDetails,
     apiDetailsText: metadata.apiDetailsText || api.apiDetailsText || "",
   };
 }
