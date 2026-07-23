@@ -12,6 +12,9 @@ let assignPlacementMode = "tray";
 const assignPlacementScanTimers = {};
 let pendingAssignLocationDraft = null;
 let pendingInventoryLabelPrintState = null;
+let lastInventoryBarcodeScan = { barcode: "", at: 0 };
+const INVENTORY_DUPLICATE_SCAN_GUARD_MS = 500;
+const inventoryBarcodeLookupInFlight = new Set();
 
 function escapeLocationDymoXml(value) {
   return String(value ?? "")
@@ -2095,6 +2098,12 @@ async function bumpInventoryVersion(changedIds = null) {
       const cancelBtn = document.getElementById("btn-cancel-password");
 
       let pendingAssignment = null; // { batchItem, location_id, location_name, quantityToAdd, placementMeta }
+      let confirmationInProgress = false;
+      const resetConfirmationButton = () => {
+        confirmationInProgress = false;
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "Confirm";
+      };
 
       // 👇 Called from assign-location modal
       window.showPasswordConfirmModal = (batchItem, location_id, location_name, quantityToAdd = null, placementMeta = {}) => {
@@ -2110,14 +2119,20 @@ async function bumpInventoryVersion(changedIds = null) {
         emailInput.value = currentUser.email || "";
         passwordInput.value = "";
         errorMsg.style.display = "none";
+        resetConfirmationButton();
         modal.classList.remove("hidden");
         updateBarcodeInputStateBasedOnModals();
         passwordInput.focus();
       };
 
       confirmBtn.onclick = async () => {
+        if (confirmationInProgress) return;
         const password = passwordInput.value.trim();
         if (!password) return;
+
+        confirmationInProgress = true;
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = "Saving...";
 
         const { data, error } = await supabase.auth.signInWithPassword({
           email: currentUser.email,
@@ -2126,11 +2141,9 @@ async function bumpInventoryVersion(changedIds = null) {
 
         if (error || !data.session) {
           errorMsg.style.display = "block";
+          resetConfirmationButton();
           return;
         }
-
-        const { batchItem, location_id, location_name, quantityToAdd } = pendingAssignment;
-        const isBulkFlow = !!batchItem?.bag_info?.bulkPayload; 
 
         try {
           const { batchItem, location_id, location_name, quantityToAdd, placementMeta = {} } = pendingAssignment;
@@ -2309,8 +2322,9 @@ async function bumpInventoryVersion(changedIds = null) {
         } catch (err) {
           console.error("❌ Unexpected error during stock confirmation:", err);
           showToast(`❌ Failed to confirm stock: ${err.message || err}`);
+        } finally {
+          resetConfirmationButton();
         }
-
       };
 
       cancelBtn.onclick = () => {
@@ -2817,6 +2831,21 @@ async function bumpInventoryVersion(changedIds = null) {
     //processing of the barcode, if present add, if not, render
     async function processBarcode(barcode) {
       if (!barcode) return;
+
+      const now = Date.now();
+      if (
+        barcode === lastInventoryBarcodeScan.barcode
+        && now - lastInventoryBarcodeScan.at < INVENTORY_DUPLICATE_SCAN_GUARD_MS
+      ) {
+        console.warn("Ignoring duplicate Add Inventory scan fired too quickly:", barcode);
+        const duplicateInput = document.getElementById("input-to-search-inventory-item");
+        if (duplicateInput) {
+          duplicateInput.value = "";
+          duplicateInput.focus();
+        }
+        return;
+      }
+      lastInventoryBarcodeScan = { barcode, at: now };
     
       const input = document.getElementById("input-to-search-inventory-item");
       input.value = "";     // Clear input field
@@ -2825,9 +2854,19 @@ async function bumpInventoryVersion(changedIds = null) {
       if (currentBatch[barcode]) {
         incrementCardCount(barcode);
       } else {
-        const item = await ExtractItemWithBarcodeFromSupabase(barcode, "item_types", "barcode", true);
-        if (item) {
-          showModalToConfirmItem(item);
+        if (inventoryBarcodeLookupInFlight.has(barcode)) {
+          console.warn("Ignoring Add Inventory lookup already in progress:", barcode);
+          return;
+        }
+
+        inventoryBarcodeLookupInFlight.add(barcode);
+        try {
+          const item = await ExtractItemWithBarcodeFromSupabase(barcode, "item_types", "barcode", true);
+          if (item) {
+            showModalToConfirmItem(item);
+          }
+        } finally {
+          inventoryBarcodeLookupInFlight.delete(barcode);
         }
       }
     }
