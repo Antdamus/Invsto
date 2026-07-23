@@ -703,6 +703,7 @@ function buildLocationChips(item) {
               <span>Locations</span>
               ${isDeleted ? `<span class="stock-deleted-lock">Deleted item</span>` : `
                 <span class="stock-card-action-cluster">
+                  <button type="button" class="add-inventory-card-btn" data-id="${item.id}" data-barcode="${escapeStockHtml(item.barcode || "")}">Add Inventory</button>
                   <button type="button" class="replenish-tray-btn" data-id="${item.id}">Replenish Tray</button>
                   <button type="button" class="return-storage-btn" data-id="${item.id}">Return to Storage</button>
                   <button type="button" class="manual-sale-card-btn" data-id="${item.id}">eBay/Pull</button>
@@ -963,6 +964,22 @@ function buildLocationChips(item) {
     if (renderToken !== stockListRenderToken) return;
     grid.appendChild(fragment);
     if (window.lucide) lucide.createIcons();
+    highlightReturnedStockCard();
+  }
+
+  function highlightReturnedStockCard() {
+    const params = new URLSearchParams(window.location.search);
+    const itemId = params.get("highlightItem");
+    if (!itemId) return;
+
+    const card = document.querySelector(`.stock-card[data-item-id="${CSS.escape(itemId)}"]`);
+    if (!card) return;
+
+    requestAnimationFrame(() => {
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      card.classList.add("stock-return-highlight");
+      setTimeout(() => card.classList.remove("stock-return-highlight"), 2800);
+    });
   }
 
   
@@ -1043,6 +1060,20 @@ function buildLocationChips(item) {
           e.stopPropagation();
           const itemId = replenishTrigger.dataset.id;
           if (itemId) window.storageTransferModule?.openForItem?.(itemId);
+          return;
+        }
+
+        const addInventoryTrigger = e.target.closest(".add-inventory-card-btn");
+        if (addInventoryTrigger) {
+          e.preventDefault();
+          e.stopPropagation();
+          const itemId = addInventoryTrigger.dataset.id || "";
+          const barcode = addInventoryTrigger.dataset.barcode || "";
+          const params = new URLSearchParams();
+          if (barcode) params.set("barcode", barcode);
+          if (itemId) params.set("returnItem", itemId);
+          params.set("mode", "quick-add");
+          window.location.href = `add-inventory.html?${params.toString()}`;
           return;
         }
 

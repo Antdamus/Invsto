@@ -1197,6 +1197,14 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   z-index: 5;
 }
 
+.stock-card.stock-return-highlight {
+  outline: 3px solid rgba(6, 182, 212, .55);
+  box-shadow:
+    0 0 0 8px rgba(6, 182, 212, .16),
+    0 18px 48px rgba(0, 0, 0, 0.08),
+    inset 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
 .stock-card.ebay-sync-excluded {
   border: 1px solid rgba(107, 114, 128, 0.28);
 }
@@ -2630,6 +2638,7 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 }
 
 .transfer-stock-btn,
+.add-inventory-card-btn,
 .replenish-tray-btn,
 .return-storage-btn,
 .manual-sale-card-btn,
@@ -2643,6 +2652,12 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   font-size: .82rem;
   font-weight: 800;
   cursor: pointer;
+}
+
+.add-inventory-card-btn {
+  border-color: rgba(14, 116, 144, .24);
+  background: rgba(6, 182, 212, .12);
+  color: #0e6474;
 }
 
 .replenish-tray-btn {

@@ -15,6 +15,42 @@ let pendingInventoryLabelPrintState = null;
 let lastInventoryBarcodeScan = { barcode: "", at: 0 };
 const INVENTORY_DUPLICATE_SCAN_GUARD_MS = 500;
 const inventoryBarcodeLookupInFlight = new Set();
+let quickAddFromStockState = {
+  active: false,
+  barcode: "",
+  returnItemId: "",
+  returnUrl: "",
+};
+
+function getQuickAddFromStockParams() {
+  const params = new URLSearchParams(window.location.search);
+  const barcode = String(params.get("barcode") || "").trim();
+  const mode = String(params.get("mode") || "").trim();
+  if (mode !== "quick-add" || !barcode) return null;
+
+  return {
+    barcode,
+    returnItemId: String(params.get("returnItem") || "").trim(),
+  };
+}
+
+function buildQuickAddStockReturnUrl(item, shortcutParams) {
+  const params = new URLSearchParams();
+  const barcode = String(item?.barcode || shortcutParams?.barcode || "").trim();
+  const itemId = String(shortcutParams?.returnItemId || item?.id || "").trim();
+
+  if (barcode) params.set("barcode", barcode);
+  if (itemId) params.set("highlightItem", itemId);
+  params.set("inventoryAdded", "1");
+
+  return `stock.html?${params.toString()}`;
+}
+
+function returnToStockAfterQuickAdd() {
+  if (!quickAddFromStockState.active || !quickAddFromStockState.returnUrl) return false;
+  window.location.href = quickAddFromStockState.returnUrl;
+  return true;
+}
 
 function escapeLocationDymoXml(value) {
   return String(value ?? "")
@@ -1339,6 +1375,7 @@ async function bumpInventoryVersion(changedIds = null) {
       cancelBtn.addEventListener("click", () => {
         modal.classList.add("hidden");
         updateBarcodeInputStateBasedOnModals();
+        if (returnToStockAfterQuickAdd()) return;
         barcodeInput.disabled = false;
         barcodeInput.focus();
       });
@@ -2000,6 +2037,7 @@ async function bumpInventoryVersion(changedIds = null) {
       modal?.setAttribute("aria-hidden", "true");
       pendingInventoryLabelPrintState = null;
       updateBarcodeInputStateBasedOnModals();
+      if (returnToStockAfterQuickAdd()) return;
       document.getElementById("input-to-search-inventory-item")?.focus();
     }
 
@@ -2330,6 +2368,7 @@ async function bumpInventoryVersion(changedIds = null) {
       cancelBtn.onclick = () => {
         modal.classList.add("hidden");
         updateBarcodeInputStateBasedOnModals();
+        if (returnToStockAfterQuickAdd()) return;
         document.getElementById("input-to-search-inventory-item").focus();
       };
     }
@@ -2870,6 +2909,44 @@ async function bumpInventoryVersion(changedIds = null) {
         }
       }
     }
+
+    async function openQuickAddFromStockShortcut() {
+      const shortcutParams = getQuickAddFromStockParams();
+      if (!shortcutParams) return;
+
+      const input = document.getElementById("input-to-search-inventory-item");
+      if (input) {
+        input.value = shortcutParams.barcode;
+        input.disabled = true;
+      }
+
+      showToast("Loading item for quick inventory add...");
+      const item = await ExtractItemWithBarcodeFromSupabase(shortcutParams.barcode, "item_types", "barcode", true);
+      if (!item) {
+        showToast("Could not find that item. Returning to Stock.");
+        setTimeout(() => {
+          window.location.href = "stock.html";
+        }, 1200);
+        return;
+      }
+
+      const card = createCardForItem(item);
+      currentBatch[item.barcode] = {
+        item,
+        count: 1,
+        maxCount: item.stock_batch_size_update || 10,
+        cardEl: card,
+      };
+
+      quickAddFromStockState = {
+        active: true,
+        barcode: item.barcode || shortcutParams.barcode,
+        returnItemId: shortcutParams.returnItemId || item.id || "",
+        returnUrl: buildQuickAddStockReturnUrl(item, shortcutParams),
+      };
+
+      showAssignLocationModal(currentBatch[item.barcode]);
+    }
       
     //listener for the barcode
     function searchForBarcodeListener() {
@@ -3120,6 +3197,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     //listerner for the password modal 
     setupPasswordConfirmationModal();
     bindInventoryLabelPrintControls();
+    openQuickAddFromStockShortcut().catch((error) => {
+      console.error("Quick add from stock failed:", error);
+      showToast(`Could not start quick inventory add: ${error?.message || error}`);
+    });
 
 
     // 🔁 Always refocus on barcode input when clicking outside modal or toast
