@@ -42,7 +42,7 @@
 
   
 
-  <button id="manual-ebay-sale-btn" class="manual-ebay-sale-fab" title="Manual eBay Sale" onclick="openManualEbaySaleModal()">
+  <button id="manual-ebay-sale-btn" class="manual-ebay-sale-fab" title="Manual eBay Sale">
     eBay Sale
   </button>
 
@@ -494,8 +494,16 @@
         No item selected yet.
       </section>
 
+      <label class="manual-sale-unknown-toggle" for="manual-sale-unknown-pull">
+        <input type="checkbox" id="manual-sale-unknown-pull" />
+        <span>
+          <strong>Item was already pulled from inventory</strong>
+          <small>No online sale details are known. The worker signs only, and no eBay order/value record is created.</small>
+        </span>
+      </label>
+
       <div class="manual-sale-form-grid">
-        <label>
+        <label class="manual-sale-online-field">
           eBay Order ID
           <input type="text" id="manual-sale-order-id" placeholder="Order number" autocomplete="off" />
         </label>
@@ -503,11 +511,11 @@
           Quantity
           <input type="number" id="manual-sale-quantity" min="1" step="1" value="1" />
         </label>
-        <label>
+        <label class="manual-sale-online-field">
           Sold Price
           <input type="number" id="manual-sale-sold-price" min="0" step="0.01" placeholder="0.00" />
         </label>
-        <label>
+        <label class="manual-sale-online-field">
           Amount Into Account
           <input type="number" id="manual-sale-payout" min="0" step="0.01" placeholder="Optional" />
         </label>

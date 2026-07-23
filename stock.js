@@ -124,6 +124,7 @@ const manualEbaySaleState = {
   item: null,
   stockRows: [],
   selectedStockRow: null,
+  unknownPull: false,
   busy: false,
 };
 
@@ -704,6 +705,7 @@ function buildLocationChips(item) {
                 <span class="stock-card-action-cluster">
                   <button type="button" class="replenish-tray-btn" data-id="${item.id}">Replenish Tray</button>
                   <button type="button" class="return-storage-btn" data-id="${item.id}">Return to Storage</button>
+                  <button type="button" class="manual-sale-card-btn" data-id="${item.id}">eBay/Pull</button>
                   <button type="button" class="store-transfer-card-btn" data-id="${item.id}">Store Transfer</button>
                   <button type="button" class="transfer-stock-btn" data-id="${item.id}">Move Stock</button>
                 </span>
@@ -1050,6 +1052,15 @@ function buildLocationChips(item) {
           e.stopPropagation();
           const itemId = returnStorageTrigger.dataset.id;
           if (itemId) window.storageTransferModule?.openReturnForItem?.(itemId);
+          return;
+        }
+
+        const manualSaleTrigger = e.target.closest(".manual-sale-card-btn");
+        if (manualSaleTrigger) {
+          e.preventDefault();
+          e.stopPropagation();
+          const itemId = manualSaleTrigger.dataset.id;
+          if (itemId) openManualEbaySaleModal({ itemId });
           return;
         }
 
@@ -7254,26 +7265,71 @@ function getManualSaleItemPhotoPath(item) {
   return (Array.isArray(item?.photoPaths) ? item.photoPaths : Array.isArray(item?.photos) ? item.photos : [])[0] || "";
 }
 
+function isManualSaleUnknownPullMode() {
+  return Boolean(document.getElementById("manual-sale-unknown-pull")?.checked);
+}
+
+function syncManualSaleUnknownPullMode() {
+  const enabled = isManualSaleUnknownPullMode();
+  manualEbaySaleState.unknownPull = enabled;
+
+  const modal = document.getElementById("manual-ebay-sale-modal");
+  modal?.classList.toggle("is-unknown-pull", enabled);
+
+  ["manual-sale-order-id", "manual-sale-sold-price", "manual-sale-payout"].forEach((id) => {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.disabled = enabled;
+    if (enabled) input.value = "";
+  });
+
+  const notes = document.getElementById("manual-sale-notes");
+  if (enabled && notes && !String(notes.value || "").trim()) {
+    notes.value = "Pulled from inventory without the proper online sale workflow; online sale value and order details are unknown.";
+  }
+
+  const finalizeBtn = document.getElementById("finalize-manual-ebay-sale");
+  if (finalizeBtn) finalizeBtn.textContent = enabled ? "Sign Inventory Pull" : "Finalize eBay Sale";
+  setManualSaleStatus(enabled ? "Unknown sale mode: choose the item/source, quantity, and sign. Order ID and value are not required." : "");
+}
+
 function resetManualEbaySale() {
   manualEbaySaleState.item = null;
   manualEbaySaleState.stockRows = [];
   manualEbaySaleState.selectedStockRow = null;
+  manualEbaySaleState.unknownPull = false;
   ["manual-sale-item-scan", "manual-sale-location-scan", "manual-sale-order-id", "manual-sale-sold-price", "manual-sale-payout", "manual-sale-notes", "manual-sale-password"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.value = "";
   });
+  const unknownPull = document.getElementById("manual-sale-unknown-pull");
+  if (unknownPull) unknownPull.checked = false;
   const qty = document.getElementById("manual-sale-quantity");
   if (qty) qty.value = "1";
   document.getElementById("manual-sale-item-results")?.replaceChildren();
   document.getElementById("manual-sale-location-results")?.replaceChildren();
   renderManualSaleSummary();
+  syncManualSaleUnknownPullMode();
   setManualSaleStatus("");
 }
 
-function openManualEbaySaleModal() {
+async function openManualEbaySaleModal(options = {}) {
   resetManualEbaySale();
   document.getElementById("manual-ebay-sale-modal")?.classList.remove("hidden");
   document.body.classList.add("modal-open");
+  const itemId = typeof options === "string" ? options : options?.itemId;
+  const item = itemId ? getStockItemById(itemId) : null;
+  if (item) {
+    try {
+      await selectManualSaleItem(item);
+      setManualSaleStatus("Item loaded. Scan or choose the source tray/location, then sign.");
+      setTimeout(() => document.getElementById("manual-sale-location-scan")?.focus(), 80);
+      return;
+    } catch (error) {
+      console.error("Could not preload manual sale item:", error);
+      setManualSaleStatus(error?.message || "Could not preload this item.", "error");
+    }
+  }
   setTimeout(() => document.getElementById("manual-sale-item-scan")?.focus(), 80);
 }
 
@@ -7366,7 +7422,9 @@ async function selectManualSaleItem(item) {
   manualEbaySaleState.item = item;
   manualEbaySaleState.selectedStockRow = null;
   document.getElementById("manual-sale-item-scan").value = item.barcode || item.title || "";
-  document.getElementById("manual-sale-sold-price").value = Number(item.sale_price || 0).toFixed(2);
+  if (!isManualSaleUnknownPullMode()) {
+    document.getElementById("manual-sale-sold-price").value = Number(item.sale_price || 0).toFixed(2);
+  }
   renderManualSaleItemResults([item]);
   renderManualSaleSummary();
   await loadManualSaleStockRows(item.id);
@@ -7426,7 +7484,7 @@ function selectManualSaleStockRow(row) {
   if (qtyInput) qtyInput.max = String(Math.max(1, Number(row.quantity || 1)));
   renderManualSaleLocationResults(manualEbaySaleState.stockRows);
   renderManualSaleSummary();
-  setManualSaleStatus("Source selected. Enter order details and sign.");
+  setManualSaleStatus(isManualSaleUnknownPullMode() ? "Source selected. Sign to record the unknown inventory pull." : "Source selected. Enter order details and sign.");
 }
 
 async function searchManualSaleLocation() {
@@ -7479,6 +7537,7 @@ async function finalizeManualEbaySale() {
   if (manualEbaySaleState.busy) return;
   const item = manualEbaySaleState.item;
   const row = manualEbaySaleState.selectedStockRow;
+  const unknownPull = isManualSaleUnknownPullMode();
   const orderId = String(document.getElementById("manual-sale-order-id")?.value || "").trim();
   const qty = Math.max(1, parseInt(document.getElementById("manual-sale-quantity")?.value || "1", 10) || 1);
   const soldPrice = parseManualSaleMoney(document.getElementById("manual-sale-sold-price")?.value);
@@ -7488,24 +7547,48 @@ async function finalizeManualEbaySale() {
   const notes = String(document.getElementById("manual-sale-notes")?.value || "").trim();
   if (!item) return setManualSaleStatus("Choose the sold item first.", "error");
   if (!row) return setManualSaleStatus("Choose the tray/location the item is shipping from.", "error");
-  if (!orderId) return setManualSaleStatus("Enter the eBay order ID.", "error");
-  if (!soldPrice) return setManualSaleStatus("Enter the sold price.", "error");
+  if (!unknownPull && !orderId) return setManualSaleStatus("Enter the eBay order ID.", "error");
+  if (!unknownPull && !soldPrice) return setManualSaleStatus("Enter the sold price.", "error");
   if (!password) return setManualSaleStatus("Enter your password to sign this sale.", "error");
   if (qty > Number(row.quantity || 0)) return setManualSaleStatus(`Only ${row.quantity} available in that source.`, "error");
   manualEbaySaleState.busy = true;
   document.getElementById("finalize-manual-ebay-sale").disabled = true;
   showLoading();
-  setManualSaleStatus("Signing and recording sale...");
+  setManualSaleStatus(unknownPull ? "Signing and recording inventory pull..." : "Signing and recording sale...");
   try {
     const valid = await verifyManualSalePassword(password);
     if (!valid) throw new Error("Incorrect password. Please try again.");
-    const { data: existingSale, error: existingError } = await supabase.from("sales").select("id").eq("platform", "ebay").eq("external_sales_id", orderId).maybeSingle();
-    if (existingError) throw new Error(existingError.message);
-    if (existingSale?.id) throw new Error("This eBay order ID was already checked out.");
+    if (!unknownPull) {
+      const { data: existingSale, error: existingError } = await supabase.from("sales").select("id").eq("platform", "ebay").eq("external_sales_id", orderId).maybeSingle();
+      if (existingError) throw new Error(existingError.message);
+      if (existingSale?.id) throw new Error("This eBay order ID was already checked out.");
+    }
     const { data: latestRow, error: latestError } = await supabase.from("item_stock_locations").select("quantity, location_id").eq("id", row.id).single();
     if (latestError) throw new Error(latestError.message);
     if (Number(latestRow.quantity || 0) < qty) throw new Error(`Only ${latestRow.quantity || 0} available at this source now.`);
     const user = currentUser || (await supabase.auth.getUser()).data.user;
+    if (unknownPull) {
+      const signedNote = notes || "Pulled from inventory without the proper online sale workflow; online sale value and order details are unknown.";
+      const { error: txError } = await supabase.from("stock_transactions").insert({
+        item_id: item.id,
+        location_id: latestRow.location_id || row.location_id,
+        quantity: -qty,
+        action_type: "checkout",
+        confirmed_at: new Date().toISOString(),
+        user_id: user?.id || null,
+        email: user?.email || null,
+        notes: `Unknown online sale inventory pull${row.locationLabel ? ` from ${row.locationLabel}` : ""}: ${signedNote}`,
+        method: "manual_unknown_inventory_pull"
+      });
+      if (txError) throw new Error(`Failed transaction log: ${txError.message}`);
+      const { error: rpcError } = await supabase.rpc("subtract_quantity", { loc_id: row.id, delta: qty });
+      if (rpcError) throw new Error(`Failed stock update: ${rpcError.message}`);
+      await bumpInventoryVersion([item.id]);
+      await refreshItemById(item.id);
+      showToast("Inventory pull signed and stock removed.");
+      closeManualEbaySaleModal();
+      return;
+    }
     const lineSubtotal = soldPrice * qty;
     const platformFeeAmount = Math.max(0, lineSubtotal - payout);
     const platformFeePercent = lineSubtotal > 0 ? (platformFeeAmount / lineSubtotal) * 100 : 0;
@@ -7552,6 +7635,7 @@ function setupManualEbaySale() {
   document.getElementById("manual-ebay-sale-btn")?.addEventListener("click", openManualEbaySaleModal);
   document.getElementById("close-manual-ebay-sale")?.addEventListener("click", closeManualEbaySaleModal);
   document.getElementById("cancel-manual-ebay-sale")?.addEventListener("click", closeManualEbaySaleModal);
+  document.getElementById("manual-sale-unknown-pull")?.addEventListener("change", syncManualSaleUnknownPullMode);
   document.getElementById("manual-sale-find-item")?.addEventListener("click", searchManualSaleItem);
   document.getElementById("manual-sale-find-location")?.addEventListener("click", searchManualSaleLocation);
   document.getElementById("finalize-manual-ebay-sale")?.addEventListener("click", finalizeManualEbaySale);

@@ -2632,6 +2632,7 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 .transfer-stock-btn,
 .replenish-tray-btn,
 .return-storage-btn,
+.manual-sale-card-btn,
 .store-transfer-card-btn {
   border: 1px solid rgba(0,113,227,.20);
   border-radius: 999px;
@@ -2654,6 +2655,12 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   border-color: rgba(23, 124, 91, .25);
   background: rgba(34, 163, 117, .12);
   color: #116149;
+}
+
+.manual-sale-card-btn {
+  border-color: rgba(190, 18, 60, .22);
+  background: rgba(244, 63, 94, .10);
+  color: #9f1239;
 }
 
 .store-transfer-card-btn {
@@ -3568,6 +3575,46 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   margin: 16px 0;
   display: grid;
   gap: 8px;
+}
+
+.manual-sale-unknown-toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(190, 18, 60, 0.22);
+  border-radius: 14px;
+  background: #fff1f2;
+  color: #3f1d25;
+  cursor: pointer;
+}
+
+.manual-sale-unknown-toggle input {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  accent-color: #be123c;
+}
+
+.manual-sale-unknown-toggle span {
+  display: grid;
+  gap: 4px;
+}
+
+.manual-sale-unknown-toggle strong {
+  font-size: 0.95rem;
+}
+
+.manual-sale-unknown-toggle small {
+  color: #7f3545;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+#manual-ebay-sale-modal.is-unknown-pull .manual-sale-online-field {
+  display: none;
 }
 
 .manual-sale-summary-grid {
