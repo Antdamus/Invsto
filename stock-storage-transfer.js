@@ -619,6 +619,7 @@ window.storageTransferModule = (function () {
       .from("item_stock_locations")
       .select("id, item_id, quantity, location_id, locked_by, locked_at")
       .in("location_id", containerIds)
+      .eq("condition_status", "good")
       .gt("quantity", 0);
 
     if (stockError) throw stockError;
@@ -733,6 +734,7 @@ window.storageTransferModule = (function () {
       .from("item_stock_locations")
       .select("id, quantity, location:location_id (*)")
       .eq("item_id", state.selectedItem.id)
+      .eq("condition_status", "good")
       .gt("quantity", 0);
 
     if (error) throw error;
@@ -986,6 +988,7 @@ window.storageTransferModule = (function () {
       .from("item_stock_locations")
       .select("id, item_id, quantity, location_id, locked_by, locked_at, location:location_id (*)")
       .eq("item_id", item.id)
+      .eq("condition_status", "good")
       .gt("quantity", 0);
 
     if (error) throw error;

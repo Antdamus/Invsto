@@ -216,6 +216,14 @@
             <option value="sync_off">Sync Off</option>
             <option value="never_checked">Never Checked</option>
             </select>
+
+            <select name="defectStatus" id="defect-status-filter" title="Filter by defect status">
+              <option value="">All condition states</option>
+              <option value="has_defects">Has defects</option>
+              <option value="defects_only">Defects only</option>
+              <option value="no_defects">No defects</option>
+              <option value="good_available">Good stock available</option>
+            </select>
           </div>
         </div>
       </form>
@@ -1131,6 +1139,94 @@
         <img id="storage-transfer-photo-preview" alt="Item preview" />
       </div>
       <p id="storage-transfer-photo-caption" class="storage-transfer-photo-caption"></p>
+    </div>
+  </div>
+
+  <div id="defect-workflow-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="defect-workflow-title">
+    <div class="defect-workflow-content">
+      <button type="button" id="close-defect-workflow" class="stock-modal-close" title="Close">&times;</button>
+      <div class="defect-workflow-header">
+        <span class="storage-transfer-eyebrow">Defect inventory</span>
+        <h2 id="defect-workflow-title">Defect Stock</h2>
+        <p id="defect-workflow-subtitle">Move stock into defects, receive defective inventory, or restore defects back to good stock.</p>
+      </div>
+
+      <div class="defect-mode-toggle" role="tablist" aria-label="Defect workflow mode">
+        <button type="button" class="is-active" data-defect-mode="mark_defective">Good to Defect</button>
+        <button type="button" data-defect-mode="incoming_defective">Incoming Defect</button>
+        <button type="button" data-defect-mode="restore_or_move">Restore / Move Defect</button>
+      </div>
+
+      <div id="defect-item-summary" class="defect-summary-card is-empty">No item selected.</div>
+
+      <div class="defect-workflow-grid">
+        <section id="defect-source-panel" class="defect-panel">
+          <div class="defect-panel-head">
+            <strong id="defect-source-title">Source good stock</strong>
+            <small id="defect-source-help">Scan or choose the tray/location currently holding the good item.</small>
+          </div>
+          <label for="defect-source-scan">Source tray/location</label>
+          <div class="storage-transfer-scan-row">
+            <input type="text" id="defect-source-scan" placeholder="Scan source tray or location" autocomplete="off" />
+            <button type="button" id="defect-find-source" class="stock-secondary-btn">Find</button>
+          </div>
+          <div id="defect-source-results" class="defect-results"></div>
+        </section>
+
+        <section class="defect-panel">
+          <div class="defect-panel-head">
+            <strong id="defect-destination-title">Destination defect tray</strong>
+            <small id="defect-destination-help">Scan or choose where these units should go.</small>
+          </div>
+          <label for="defect-destination-scan">Destination tray/location</label>
+          <div class="storage-transfer-scan-row">
+            <input type="text" id="defect-destination-scan" placeholder="Scan destination tray or location" autocomplete="off" />
+            <button type="button" id="defect-find-destination" class="stock-secondary-btn">Find</button>
+          </div>
+          <div id="defect-destination-results" class="defect-results"></div>
+        </section>
+      </div>
+
+      <section class="defect-panel defect-signoff-panel">
+        <div class="defect-form-grid">
+          <label>
+            Quantity
+            <input type="number" id="defect-quantity" min="1" step="1" value="1" />
+          </label>
+          <label>
+            Destination condition
+            <select id="defect-destination-condition">
+              <option value="defective">Defective</option>
+              <option value="good">Good / sellable</option>
+            </select>
+          </label>
+          <label>
+            Reason
+            <select id="defect-reason">
+              <option value="">Select reason</option>
+              <option value="Broken clasp">Broken clasp</option>
+              <option value="Missing stone">Missing stone</option>
+              <option value="Scratched">Scratched</option>
+              <option value="Bent">Bent</option>
+              <option value="Tarnished">Tarnished</option>
+              <option value="Wrong item">Wrong item</option>
+              <option value="Needs repair">Needs repair</option>
+              <option value="Other defect">Other defect</option>
+            </select>
+          </label>
+          <label>
+            Your password
+            <input type="password" id="defect-password" autocomplete="current-password" placeholder="Sign this defect movement" />
+          </label>
+        </div>
+        <label for="defect-notes">Notes</label>
+        <textarea id="defect-notes" rows="3" placeholder="Short note for the audit trail"></textarea>
+        <p id="defect-workflow-status" class="defect-workflow-status"></p>
+        <div class="defect-workflow-actions">
+          <button type="button" id="cancel-defect-workflow" class="stock-secondary-btn">Cancel</button>
+          <button type="button" id="submit-defect-workflow" class="stock-primary-btn">Sign and Save</button>
+        </div>
+      </section>
     </div>
   </div>
 

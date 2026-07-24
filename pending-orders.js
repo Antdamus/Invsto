@@ -6580,6 +6580,7 @@ async function loadStockRowsForItem(itemId) {
       .from("item_stock_locations")
       .select("id,item_id,location_id,quantity,location:location_id(*)")
       .eq("item_id", itemId)
+      .eq("condition_status", "good")
       .gt("quantity", 0),
     supabase
       .from("active_stock_reservations")

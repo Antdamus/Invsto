@@ -347,6 +347,7 @@
       .from("item_stock_locations")
       .select("id, item_id, location_id, quantity")
       .eq("item_id", state.currentItem.id)
+      .eq("condition_status", "good")
       .gt("quantity", 0);
     if (error) throw error;
     return data || [];

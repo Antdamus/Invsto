@@ -1378,6 +1378,7 @@ async function loadEditSourceRowsForItem(item) {
         .from("item_stock_locations")
         .select("id,item_id,location_id,quantity,location:location_id(*)")
         .eq("item_id", item.id)
+        .eq("condition_status", "good")
         .gt("quantity", 0),
       supabase
         .from("active_stock_reservations")
@@ -2779,10 +2780,11 @@ async function loadSourceRowsForItem(item) {
 
   const [{ data: rows, error: rowError }, { data: reservations, error: reservationError }] = await Promise.all([
     supabase
-      .from("item_stock_locations")
-      .select("id,item_id,location_id,quantity,location:location_id(*)")
-      .eq("item_id", item.id)
-      .gt("quantity", 0),
+        .from("item_stock_locations")
+        .select("id,item_id,location_id,quantity,location:location_id(*)")
+        .eq("item_id", item.id)
+        .eq("condition_status", "good")
+        .gt("quantity", 0),
     supabase
       .from("active_stock_reservations")
       .select("stock_location_row_id,reserved_quantity")

@@ -2611,6 +2611,45 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   white-space: nowrap;
 }
 
+.stock-condition-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.stock-condition-summary span {
+  padding: 8px 10px;
+  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 12px;
+  background: rgba(255,255,255,.86);
+  font-family: system-ui, sans-serif;
+}
+
+.stock-condition-summary small {
+  display: block;
+  color: #6b7280;
+  font-size: .68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.stock-condition-summary strong {
+  display: block;
+  margin-top: 2px;
+  color: #151519;
+  font-size: .94rem;
+}
+
+.stock-condition-summary .has-defects {
+  border-color: rgba(190, 18, 60, .22);
+  background: rgba(244, 63, 94, .08);
+}
+
+.stock-condition-summary .has-defects strong {
+  color: #9f1239;
+}
+
 .stock-location-section {
   margin: 12px 0;
   padding: 12px;
@@ -2639,6 +2678,7 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 
 .transfer-stock-btn,
 .add-inventory-card-btn,
+.defects-card-btn,
 .replenish-tray-btn,
 .return-storage-btn,
 .manual-sale-card-btn,
@@ -2658,6 +2698,12 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   border-color: rgba(14, 116, 144, .24);
   background: rgba(6, 182, 212, .12);
   color: #0e6474;
+}
+
+.defects-card-btn {
+  border-color: rgba(190, 18, 60, .22);
+  background: rgba(244, 63, 94, .10);
+  color: #9f1239;
 }
 
 .replenish-tray-btn {
@@ -2717,6 +2763,17 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   grid-column: 2;
   align-self: center;
   color: #151519;
+}
+
+.stock-location-chip.is-defective {
+  border-color: rgba(190, 18, 60, .20);
+  background: rgba(255, 241, 242, .92);
+}
+
+.stock-location-chip.is-defective em {
+  color: #9f1239;
+  font-style: normal;
+  font-weight: 900;
 }
 
 .stock-location-chip.is-tray {
@@ -4622,6 +4679,190 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   }
 /*#endregion*/
 
+.defect-workflow-content {
+  width: min(1040px, calc(100vw - 32px));
+  max-height: 92vh;
+  overflow: auto;
+  padding: 24px;
+  border-radius: 22px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,.08);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, .24);
+}
+
+.defect-workflow-header {
+  padding-right: 42px;
+}
+
+.defect-workflow-header h2 {
+  margin: 4px 0;
+  color: #111827;
+  font-family: "DM Serif Display", serif;
+  font-size: 2rem;
+}
+
+.defect-workflow-header p,
+.defect-panel-head small {
+  color: #6b7280;
+  font-family: system-ui, sans-serif;
+}
+
+.defect-mode-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0 14px;
+}
+
+.defect-mode-toggle button {
+  border: 1px solid rgba(17,24,39,.14);
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #374151;
+  padding: 9px 13px;
+  font-family: system-ui, sans-serif;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.defect-mode-toggle button.is-active {
+  border-color: rgba(190, 18, 60, .26);
+  background: rgba(244, 63, 94, .11);
+  color: #9f1239;
+}
+
+.defect-summary-card,
+.defect-panel {
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 16px;
+  background: #f9fafb;
+  padding: 14px;
+}
+
+.defect-summary-card {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+  font-family: system-ui, sans-serif;
+}
+
+.defect-summary-card strong {
+  color: #111827;
+  font-size: 1rem;
+}
+
+.defect-summary-card span {
+  color: #4b5563;
+  font-weight: 800;
+}
+
+.defect-workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.defect-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.defect-panel.is-hidden {
+  display: none;
+}
+
+.defect-panel label,
+.defect-signoff-panel label {
+  color: #374151;
+  font-family: system-ui, sans-serif;
+  font-size: .78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.defect-panel input,
+.defect-panel select,
+.defect-panel textarea,
+.defect-signoff-panel input,
+.defect-signoff-panel select,
+.defect-signoff-panel textarea {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(17,24,39,.16);
+  border-radius: 12px;
+  background: #fff;
+  color: #111827;
+  padding: 10px 12px;
+  font-family: system-ui, sans-serif;
+  font-weight: 800;
+}
+
+.defect-results {
+  display: grid;
+  gap: 8px;
+}
+
+.defect-result-btn {
+  width: 100%;
+  border: 1px solid rgba(17,24,39,.12);
+  border-radius: 12px;
+  background: #fff;
+  color: #111827;
+  padding: 10px 12px;
+  text-align: left;
+  font-family: system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.defect-result-btn strong,
+.defect-result-btn span,
+.defect-result-btn small {
+  display: block;
+}
+
+.defect-result-btn span,
+.defect-result-btn small {
+  margin-top: 2px;
+  color: #6b7280;
+  font-size: .82rem;
+}
+
+.defect-result-btn.is-selected {
+  border-color: rgba(190, 18, 60, .32);
+  background: rgba(255, 241, 242, .9);
+}
+
+.defect-signoff-panel {
+  margin-top: 14px;
+}
+
+.defect-form-grid {
+  display: grid;
+  grid-template-columns: minmax(110px, .55fr) minmax(170px, .9fr) minmax(180px, 1fr) minmax(180px, 1fr);
+  gap: 12px;
+}
+
+.defect-workflow-status {
+  min-height: 20px;
+  color: #4b5563;
+  font-family: system-ui, sans-serif;
+  font-weight: 800;
+}
+
+.defect-workflow-status.is-error {
+  color: #b91c1c;
+}
+
+.defect-workflow-status.is-success {
+  color: #047857;
+}
+
+.defect-workflow-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 /* ================= Mobile Floating Filter Behavior (Overrides) ================= */
 @media (max-width: 768px) {
   .floating-filters {
@@ -4663,6 +4904,15 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   .filter-grid {
     grid-template-columns: 1fr;
     gap: 12px;
+  }
+
+  .defect-workflow-grid,
+  .defect-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .defect-workflow-actions {
+    flex-direction: column-reverse;
   }
 
   .metric-card {

@@ -39,6 +39,18 @@ const STOCK_CAPTURE_FALLBACK_LOOKBACK_MS = 15000;
 const STOCK_PROCESSED_BACKGROUND_PREFIX = "processed-backgrounds";
 const STOCK_DEFAULT_RECENT_PHOTO_LIMIT = 5;
 const STOCK_EBAY_LINK_BATCH_SIZE = 75;
+const STOCK_CONDITION_GOOD = "good";
+const STOCK_CONDITION_DEFECTIVE = "defective";
+const STOCK_DEFECT_REASONS = [
+  "Broken clasp",
+  "Missing stone",
+  "Scratched",
+  "Bent",
+  "Tarnished",
+  "Wrong item",
+  "Needs repair",
+  "Other defect",
+];
 const STOCK_THUMBNAIL_SIGNED_URL_TRANSFORM = {
   width: 240,
   height: 240,
@@ -59,6 +71,15 @@ const stockHistoryState = {
   itemId: null,
   events: [],
   photoUrlCache: new Map(),
+};
+const defectWorkflowState = {
+  item: null,
+  mode: "mark_defective",
+  sourceRows: [],
+  destinationLocations: [],
+  selectedSourceRow: null,
+  selectedDestinationLocation: null,
+  busy: false,
 };
 let stockBackgroundRemovalModulePromise = null;
 const STOCK_WORKER_ITEM_SELECT = [
@@ -497,6 +518,39 @@ async function loadStockAccessForCurrentUser() {
   return data;
 }
 
+function normalizeStockCondition(value) {
+  return String(value || STOCK_CONDITION_GOOD).toLowerCase() === STOCK_CONDITION_DEFECTIVE
+    ? STOCK_CONDITION_DEFECTIVE
+    : STOCK_CONDITION_GOOD;
+}
+
+function stockConditionLabel(value) {
+  return normalizeStockCondition(value) === STOCK_CONDITION_DEFECTIVE ? "Defective" : "Good";
+}
+
+function getItemGoodStock(item) {
+  return Number(item?.good_stock ?? item?.stock ?? 0) || 0;
+}
+
+function getItemDefectStock(item) {
+  return Number(item?.defect_stock ?? 0) || 0;
+}
+
+function getDefectReasonLabel(value) {
+  const clean = String(value || "").trim();
+  return clean || "Defect";
+}
+
+function getDefectStatusLabel(value) {
+  const labels = {
+    has_defects: "Has defects",
+    defects_only: "Defects only",
+    no_defects: "No defects",
+    good_available: "Good stock available",
+  };
+  return labels[value] || value;
+}
+
 function buildLocationChips(item) {
   const details = Array.isArray(item.stock_location_details) ? item.stock_location_details : [];
   if (!details.length) {
@@ -504,9 +558,9 @@ function buildLocationChips(item) {
   }
 
   return details.slice(0, 4).map((entry) => `
-    <span class="stock-location-chip ${entry.is_tray ? "is-tray" : ""} ${entry.is_container ? "is-container" : ""}">
+    <span class="stock-location-chip ${entry.is_tray ? "is-tray" : ""} ${entry.is_container ? "is-container" : ""} ${entry.condition_status === STOCK_CONDITION_DEFECTIVE ? "is-defective" : ""}">
       <strong>${escapeStockHtml(entry.location_name || "Unknown")}</strong>
-      <small>${escapeStockHtml(entry.storage_path || (entry.is_tray ? `${entry.tray_status_label || "Tray"} - ${entry.current_store || "Unassigned"}` : entry.store_name || "Fixed location"))}${Number(entry.reserved_quantity || 0) > 0 ? ` - ${Number(entry.reserved_quantity || 0).toLocaleString()} reserved` : ""}</small>
+      <small>${entry.condition_status === STOCK_CONDITION_DEFECTIVE ? `<em>Defective${entry.condition_reason ? `: ${escapeStockHtml(entry.condition_reason)}` : ""}</em> - ` : ""}${escapeStockHtml(entry.storage_path || (entry.is_tray ? `${entry.tray_status_label || "Tray"} - ${entry.current_store || "Unassigned"}` : entry.store_name || "Fixed location"))}${Number(entry.reserved_quantity || 0) > 0 ? ` - ${Number(entry.reserved_quantity || 0).toLocaleString()} reserved` : ""}</small>
       <b>${Number(entry.quantity || 0).toLocaleString()}</b>
     </span>
   `).join("") + (details.length > 4
@@ -633,7 +687,9 @@ function buildLocationChips(item) {
 
     //Build the full card body with data-driven text content and chips
     function buildCardContent(item) {
-      const stock = typeof item.stock === "number" ? item.stock : 0;
+      const stock = getItemGoodStock(item);
+      const defectStock = getItemDefectStock(item);
+      const totalPhysicalStock = stock + defectStock;
       const stockClass = stock === 0 ? "stock-zero" : "";
       const tooltip = item.stock_tooltip || "";
       const showSensitive = canViewSensitiveStockData();
@@ -698,12 +754,18 @@ function buildLocationChips(item) {
             <span><small>Barcode</small><button type="button" class="stock-barcode-btn" data-barcode="${escapeStockHtml(item.barcode || "")}">${escapeStockHtml(item.barcode || "-")}</button></span>
             ${showSensitive ? `<span><small>Cost</small><strong>${formatStockMoney(item.cost)}</strong></span>` : ""}
           </div>
+          <div class="stock-condition-summary">
+            <span><small>Good</small><strong>${Number(stock || 0).toLocaleString()}</strong></span>
+            <span class="${defectStock > 0 ? "has-defects" : ""}"><small>Defective</small><strong>${Number(defectStock || 0).toLocaleString()}</strong></span>
+            <span><small>Total</small><strong>${Number(totalPhysicalStock || 0).toLocaleString()}</strong></span>
+          </div>
           <div class="stock-location-section">
             <div class="stock-section-row">
               <span>Locations</span>
               ${isDeleted ? `<span class="stock-deleted-lock">Deleted item</span>` : `
                 <span class="stock-card-action-cluster">
                   <button type="button" class="add-inventory-card-btn" data-id="${item.id}" data-barcode="${escapeStockHtml(item.barcode || "")}">Add Inventory</button>
+                  <button type="button" class="defects-card-btn" data-id="${item.id}">Defects</button>
                   <button type="button" class="replenish-tray-btn" data-id="${item.id}">Replenish Tray</button>
                   <button type="button" class="return-storage-btn" data-id="${item.id}">Return to Storage</button>
                   <button type="button" class="manual-sale-card-btn" data-id="${item.id}">eBay/Pull</button>
@@ -1077,6 +1139,15 @@ function buildLocationChips(item) {
           return;
         }
 
+        const defectsTrigger = e.target.closest(".defects-card-btn");
+        if (defectsTrigger) {
+          e.preventDefault();
+          e.stopPropagation();
+          const itemId = defectsTrigger.dataset.id;
+          if (itemId) openDefectWorkflowModal(itemId);
+          return;
+        }
+
         const returnStorageTrigger = e.target.closest(".return-storage-btn");
         if (returnStorageTrigger) {
           e.preventDefault();
@@ -1253,6 +1324,8 @@ function buildLocationChips(item) {
             .filter(Boolean)
         )],
 
+        defectStatus: String(formData.get("defectStatus") || "").trim(),
+
 
       };
       /**this is a nutshell will return a key value object that then you can feed into other things
@@ -1309,6 +1382,13 @@ function buildLocationChips(item) {
           (filters.priceMax !== null ? item.sale_price <= filters.priceMax : true) &&
           (filters.stockMin !== null ? Number(item.stock || 0) >= filters.stockMin : true) &&
           (filters.stockMax !== null ? Number(item.stock || 0) <= filters.stockMax : true) &&
+          (
+            !filters.defectStatus ||
+            (filters.defectStatus === "has_defects" && getItemDefectStock(item) > 0) ||
+            (filters.defectStatus === "defects_only" && getItemDefectStock(item) > 0 && getItemGoodStock(item) === 0) ||
+            (filters.defectStatus === "no_defects" && getItemDefectStock(item) === 0) ||
+            (filters.defectStatus === "good_available" && getItemGoodStock(item) > 0)
+          ) &&
 
           (!filters.createdFrom || item.created_at >= filters.createdFrom) &&
           (!filters.createdTo || item.created_at <= filters.createdTo) &&
@@ -1539,6 +1619,7 @@ function buildLocationChips(item) {
       if (filters.barcode) parts.push(`barcode = ${filters.barcode}`);
       if (filters.distributor) parts.push(`distributor = ${filters.distributor}`);
       if (filters.ebayStatus) parts.push(`eBay: ${getEbayStatusLabel(filters.ebayStatus)}`);
+      if (filters.defectStatus) parts.push(`condition: ${getDefectStatusLabel(filters.defectStatus)}`);
 
       if (filters.costMin !== null || filters.costMax !== null) {
         parts.push(`cost: ${filters.costMin ?? '–'} to ${filters.costMax ?? '–'}`);
@@ -2149,6 +2230,7 @@ function buildLocationChips(item) {
         case "barcode":      label = `Barcode: ${value}`; break;
         case "distributor":  label = `Distributor: ${value}`; break;
         case "ebayStatus":   label = `eBay: ${getEbayStatusLabel(value)}`; break;
+        case "defectStatus": label = `Condition: ${getDefectStatusLabel(value)}`; break;
 
         case "weightMin":    label = `Weight ≥ ${value}`; break;
         case "weightMax":    label = `Weight ≤ ${value}`; break;
@@ -4007,6 +4089,107 @@ async function fetchActiveReservationMap(itemId = null) {
   }
 }
 
+function buildStockEntryFromRows(stockRows, locations, stores, reservations = new Map()) {
+  const locationMap = buildStockLocationMap(locations || [], stores || []);
+  const stockMap = {};
+
+  (stockRows || []).forEach((row) => {
+    const itemId = row.item_id;
+    if (!itemId) return;
+
+    const condition = normalizeStockCondition(row.condition_status);
+    const locationInfo = locationMap[row.location_id] || {};
+    const locName = locationInfo.label || "Unknown Location";
+    const physicalQty = Number(row.quantity || 0);
+    const reserved = condition === STOCK_CONDITION_GOOD
+      ? (reservations.get(row.id)?.reserved_quantity || 0)
+      : 0;
+    const available = Math.max(0, physicalQty - reserved);
+
+    if (!stockMap[itemId]) {
+      stockMap[itemId] = {
+        goodTotal: 0,
+        defectTotal: 0,
+        totalPhysical: 0,
+        goodBreakdown: {},
+        defectBreakdown: {},
+        details: [],
+      };
+    }
+
+    const entry = stockMap[itemId];
+    entry.totalPhysical += physicalQty;
+    if (condition === STOCK_CONDITION_DEFECTIVE) {
+      entry.defectTotal += available;
+      entry.defectBreakdown[locName] = (entry.defectBreakdown[locName] || 0) + available;
+    } else {
+      entry.goodTotal += available;
+      entry.goodBreakdown[locName] = (entry.goodBreakdown[locName] || 0) + available;
+    }
+
+    entry.details.push({
+      stock_location_row_id: row.id,
+      location_id: row.location_id,
+      location_name: locationInfo.location_name || locName,
+      store_name: locationInfo.store_name || "",
+      current_store: locationInfo.current_store || "",
+      tray_status_label: locationInfo.tray_status_label || "",
+      is_tray: Boolean(locationInfo.is_tray),
+      is_container: Boolean(locationInfo.is_container),
+      storage_path: locationInfo.storage_path || "",
+      quantity: available,
+      physical_quantity: physicalQty,
+      reserved_quantity: reserved,
+      condition_status: condition,
+      condition_reason: row.condition_reason || "",
+      condition_notes: row.condition_notes || "",
+    });
+  });
+
+  Object.values(stockMap).forEach((entry) => {
+    entry.details.sort((a, b) => {
+      const aDef = a.condition_status === STOCK_CONDITION_DEFECTIVE ? 1 : 0;
+      const bDef = b.condition_status === STOCK_CONDITION_DEFECTIVE ? 1 : 0;
+      return aDef - bDef || String(a.location_name || "").localeCompare(String(b.location_name || ""));
+    });
+  });
+
+  return stockMap;
+}
+
+function applyStockEntriesToItems(items, stockRows, locations, stores, reservations = new Map()) {
+  const stockMap = buildStockEntryFromRows(stockRows, locations, stores, reservations);
+
+  (items || []).forEach((item) => {
+    const stockEntry = stockMap[item.id];
+    item.good_stock = stockEntry?.goodTotal || 0;
+    item.defect_stock = stockEntry?.defectTotal || 0;
+    item.stock = item.good_stock;
+    item.total_physical_stock = stockEntry
+      ? (stockEntry.goodTotal + stockEntry.defectTotal)
+      : 0;
+    item.stock_location_details = stockEntry?.details || [];
+    item.defect_stock_location_details = (stockEntry?.details || [])
+      .filter((entry) => entry.condition_status === STOCK_CONDITION_DEFECTIVE);
+
+    if (stockEntry) {
+      const goodLines = Object.entries(stockEntry.goodBreakdown)
+        .map(([loc, qty]) => `${loc}: ${qty} good`);
+      const defectLines = Object.entries(stockEntry.defectBreakdown)
+        .map(([loc, qty]) => `${loc}: ${qty} defective`);
+      item.stock_tooltip = [...goodLines, ...defectLines].join("\n") || "No stock data available";
+    } else {
+      item.stock_tooltip = "No stock data available";
+    }
+
+    item.stock_locations = [...new Set((stockEntry?.details || [])
+      .map((entry) => entry.location_name)
+      .filter(Boolean))];
+  });
+
+  return items;
+}
+
 function renderCurrentInventoryItems() {
   const filtered = getFilteredItems(allItems);
   applySortAndRender(filtered);
@@ -4082,7 +4265,7 @@ async function refreshItemById(itemId) {
   // Step 3: Get stock info
   const { data: stockData, error: stockError } = await supabase
     .from("item_stock_locations")
-    .select("id, item_id, quantity, location_id")
+    .select("id, item_id, quantity, location_id, condition_status, condition_reason, condition_notes")
     .eq("item_id", itemId)
     .gt("quantity", 0);
 
@@ -4097,41 +4280,8 @@ async function refreshItemById(itemId) {
     ]);
 
     if (!locError && !storeError && locations) {
-      const locationMap = buildStockLocationMap(locations, stores);
-      const breakdown = {};
-      const locationDetails = [];
-      let total = 0;
-
       const reservations = await fetchActiveReservationMap(itemId);
-
-      stockData.forEach(({ id, quantity, location_id }) => {
-        const locationInfo = locationMap[location_id] || {};
-        const locName = locationInfo.label || "Unknown Location";
-        const reserved = reservations.get(id)?.reserved_quantity || 0;
-        const available = Math.max(0, Number(quantity || 0) - reserved);
-        total += available;
-        breakdown[locName] = (breakdown[locName] || 0) + available;
-        locationDetails.push({
-          stock_location_row_id: id,
-          location_id,
-          location_name: locationInfo.location_name || locName,
-          store_name: locationInfo.store_name || "",
-          current_store: locationInfo.current_store || "",
-          tray_status_label: locationInfo.tray_status_label || "",
-          is_tray: Boolean(locationInfo.is_tray),
-          is_container: Boolean(locationInfo.is_container),
-          storage_path: locationInfo.storage_path || "",
-          quantity: available,
-          physical_quantity: Number(quantity || 0),
-          reserved_quantity: reserved,
-        });
-      });
-
-      item.stock = total;
-      item.stock_location_details = locationDetails;
-      item.stock_tooltip = Object.entries(breakdown)
-        .map(([loc, qty]) => `${loc}: ${qty}`)
-        .join("\n");
+      applyStockEntriesToItems([item], stockData, locations, stores, reservations);
     }
   }
 
@@ -4248,6 +4398,459 @@ let stockPhotoViewerItemId = null;
 
 function getStockItemById(itemId) {
   return allItems.find((item) => String(item.id) === String(itemId)) || null;
+}
+
+function getDefectWorkflowConfig(mode = defectWorkflowState.mode) {
+  if (mode === "incoming_defective") {
+    return {
+      sourceCondition: null,
+      destinationCondition: STOCK_CONDITION_DEFECTIVE,
+      method: "defective_inventory_checkin",
+      submitLabel: "Sign and Add Defect",
+      sourceTitle: "No source needed",
+      sourceHelp: "This receives a new defective unit directly into the selected defect tray.",
+      destinationTitle: "Destination defect tray",
+      destinationHelp: "Scan where the defective incoming units should be placed.",
+      status: "Scan the defect tray, enter quantity, reason, and sign.",
+    };
+  }
+
+  if (mode === "restore_or_move") {
+    return {
+      sourceCondition: STOCK_CONDITION_DEFECTIVE,
+      destinationCondition: document.getElementById("defect-destination-condition")?.value || STOCK_CONDITION_GOOD,
+      method: "defect_restore_or_move",
+      submitLabel: "Sign and Move Defect",
+      sourceTitle: "Source defect stock",
+      sourceHelp: "Scan or choose the defect tray/location currently holding the item.",
+      destinationTitle: "Destination",
+      destinationHelp: "Choose whether the destination should be good/sellable or stay defective.",
+      status: "Choose the defective source, destination, quantity, and sign.",
+    };
+  }
+
+  return {
+    sourceCondition: STOCK_CONDITION_GOOD,
+    destinationCondition: STOCK_CONDITION_DEFECTIVE,
+    method: "mark_stock_defective",
+    submitLabel: "Sign and Mark Defective",
+    sourceTitle: "Source good stock",
+    sourceHelp: "Scan or choose the tray/location currently holding the good item.",
+    destinationTitle: "Destination defect tray",
+    destinationHelp: "Scan where the defective units should be moved.",
+    status: "Choose the good source, defect destination, quantity, reason, and sign.",
+  };
+}
+
+function setDefectWorkflowStatus(message = "", type = "info") {
+  const status = document.getElementById("defect-workflow-status");
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle("is-error", type === "error");
+  status.classList.toggle("is-success", type === "success");
+}
+
+function formatDefectLocationLabel(location = {}) {
+  const status = location.is_tray
+    ? (TRAY_STATUS_LABELS[location.tray_status] || "Tray")
+    : location.parent_location_id
+      ? "Container"
+      : "Location";
+  const code = location.location_code ? ` (${location.location_code})` : "";
+  const store = location.store_locations?.name || location.store_name || "";
+  return {
+    title: `${location.location_name || "Unnamed location"}${code}`,
+    meta: [status, store].filter(Boolean).join(" - "),
+  };
+}
+
+function normalizeDefectStockRow(row, reservationMap = new Map()) {
+  const condition = normalizeStockCondition(row.condition_status);
+  const reserved = condition === STOCK_CONDITION_GOOD
+    ? (reservationMap.get(row.id)?.reserved_quantity || 0)
+    : 0;
+  const available = Math.max(0, Number(row.quantity || 0) - reserved);
+  const location = row.location || {};
+  const label = formatDefectLocationLabel(location);
+  return {
+    ...row,
+    condition_status: condition,
+    physical_quantity: Number(row.quantity || 0),
+    reserved_quantity: reserved,
+    quantity: available,
+    locationLabel: `${label.title}${label.meta ? ` - ${label.meta}` : ""}`,
+    location_name: location.location_name || "",
+    location_code: location.location_code || "",
+  };
+}
+
+function renderDefectItemSummary() {
+  const item = defectWorkflowState.item;
+  const target = document.getElementById("defect-item-summary");
+  if (!target) return;
+  if (!item) {
+    target.classList.add("is-empty");
+    target.textContent = "No item selected.";
+    return;
+  }
+  target.classList.remove("is-empty");
+  target.innerHTML = `
+    <strong>${escapeStockHtml(item.title || "Untitled item")}</strong>
+    <span>${escapeStockHtml(item.barcode || "No barcode")} - Good ${getItemGoodStock(item).toLocaleString()} / Defective ${getItemDefectStock(item).toLocaleString()}</span>
+  `;
+}
+
+function renderDefectSourceRows(rows = defectWorkflowState.sourceRows) {
+  const container = document.getElementById("defect-source-results");
+  if (!container) return;
+  container.replaceChildren();
+  if (defectWorkflowState.mode === "incoming_defective") {
+    container.innerHTML = `<p class="stock-location-empty">Incoming defective inventory does not need a source.</p>`;
+    return;
+  }
+  if (!rows.length) {
+    container.innerHTML = `<p class="stock-location-empty">No matching ${stockConditionLabel(getDefectWorkflowConfig().sourceCondition).toLowerCase()} stock rows found.</p>`;
+    return;
+  }
+  rows.forEach((row) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `defect-result-btn ${defectWorkflowState.selectedSourceRow?.id === row.id ? "is-selected" : ""}`;
+    btn.dataset.defectSourceId = row.id;
+    btn.innerHTML = `
+      <strong>${escapeStockHtml(row.locationLabel)}</strong>
+      <span>${Number(row.quantity || 0).toLocaleString()} ${stockConditionLabel(row.condition_status).toLowerCase()} available${row.reserved_quantity ? ` - ${Number(row.reserved_quantity).toLocaleString()} reserved` : ""}</span>
+      ${row.condition_reason ? `<small>${escapeStockHtml(row.condition_reason)}</small>` : ""}
+    `;
+    container.appendChild(btn);
+  });
+}
+
+function renderDefectDestinationRows(rows = defectWorkflowState.destinationLocations) {
+  const container = document.getElementById("defect-destination-results");
+  if (!container) return;
+  container.replaceChildren();
+  if (!rows.length) {
+    container.innerHTML = `<p class="stock-location-empty">No matching active destination found.</p>`;
+    return;
+  }
+  rows.slice(0, 40).forEach((location) => {
+    const label = formatDefectLocationLabel(location);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `defect-result-btn ${defectWorkflowState.selectedDestinationLocation?.id === location.id ? "is-selected" : ""}`;
+    btn.dataset.defectDestinationId = location.id;
+    btn.innerHTML = `
+      <strong>${escapeStockHtml(label.title)}</strong>
+      <span>${escapeStockHtml(label.meta || "Active location")}</span>
+    `;
+    container.appendChild(btn);
+  });
+}
+
+function selectDefectSourceRow(rowId) {
+  defectWorkflowState.selectedSourceRow = defectWorkflowState.sourceRows.find((row) => String(row.id) === String(rowId)) || null;
+  const qty = document.getElementById("defect-quantity");
+  if (qty && defectWorkflowState.selectedSourceRow) {
+    qty.max = String(Math.max(1, Number(defectWorkflowState.selectedSourceRow.quantity || 1)));
+    qty.value = "1";
+  }
+  renderDefectSourceRows();
+  setDefectWorkflowStatus("Source selected. Choose destination and sign.");
+}
+
+function selectDefectDestination(locationId) {
+  defectWorkflowState.selectedDestinationLocation = defectWorkflowState.destinationLocations.find((loc) => String(loc.id) === String(locationId)) || null;
+  renderDefectDestinationRows();
+  setDefectWorkflowStatus(defectWorkflowState.selectedDestinationLocation ? "Destination selected. Enter quantity, reason, and sign." : "Choose a destination.", defectWorkflowState.selectedDestinationLocation ? "info" : "error");
+}
+
+function filterDefectSources(term) {
+  const query = String(term || "").trim().toLowerCase();
+  if (!query) return defectWorkflowState.sourceRows;
+  return defectWorkflowState.sourceRows.filter((row) =>
+    String(row.id || "").toLowerCase() === query ||
+    String(row.location_id || "").toLowerCase() === query ||
+    String(row.location_code || "").toLowerCase() === query ||
+    String(row.location_name || "").toLowerCase().includes(query) ||
+    String(row.locationLabel || "").toLowerCase().includes(query)
+  );
+}
+
+function filterDefectDestinations(term) {
+  const query = String(term || "").trim().toLowerCase();
+  if (!query) return defectWorkflowState.destinationLocations;
+  return defectWorkflowState.destinationLocations.filter((loc) =>
+    String(loc.id || "").toLowerCase() === query ||
+    String(loc.location_code || "").toLowerCase() === query ||
+    String(loc.location_name || "").toLowerCase().includes(query)
+  );
+}
+
+async function loadDefectWorkflowSources() {
+  const item = defectWorkflowState.item;
+  const config = getDefectWorkflowConfig();
+  defectWorkflowState.sourceRows = [];
+  defectWorkflowState.selectedSourceRow = null;
+  if (!item?.id || !config.sourceCondition) {
+    renderDefectSourceRows();
+    return;
+  }
+
+  const [{ data, error }, reservations] = await Promise.all([
+    supabase
+      .from("item_stock_locations")
+      .select("id,item_id,location_id,quantity,condition_status,condition_reason,condition_notes,location:location_id(*)")
+      .eq("item_id", item.id)
+      .eq("condition_status", config.sourceCondition)
+      .gt("quantity", 0),
+    fetchActiveReservationMap(item.id),
+  ]);
+
+  if (error) throw error;
+  defectWorkflowState.sourceRows = (data || [])
+    .map((row) => normalizeDefectStockRow(row, reservations))
+    .filter((row) => Number(row.quantity || 0) > 0)
+    .sort((a, b) => String(a.locationLabel || "").localeCompare(String(b.locationLabel || "")));
+  if (defectWorkflowState.sourceRows.length === 1) {
+    defectWorkflowState.selectedSourceRow = defectWorkflowState.sourceRows[0];
+  }
+  renderDefectSourceRows();
+}
+
+async function loadDefectWorkflowDestinations() {
+  const [{ data: locations, error: locError }, { data: stores, error: storeError }] = await Promise.all([
+    supabase
+      .from("locations")
+      .select("*")
+      .eq("active", true)
+      .limit(1000),
+    supabase
+      .from("store_locations")
+      .select("id, name"),
+  ]);
+  if (locError) throw locError;
+  if (storeError) console.warn("Could not load store names for defect locations:", storeError);
+
+  const storeMap = new Map((stores || []).map((store) => [store.id, store.name]));
+  defectWorkflowState.destinationLocations = (locations || [])
+    .map((location) => ({
+      ...location,
+      store_name: storeMap.get(location.store_id) || storeMap.get(location.tray_current_store_id) || "",
+    }))
+    .sort((a, b) => String(a.location_name || "").localeCompare(String(b.location_name || "")));
+  renderDefectDestinationRows();
+}
+
+function syncDefectWorkflowMode() {
+  const config = getDefectWorkflowConfig();
+  const sourcePanel = document.getElementById("defect-source-panel");
+  const conditionSelect = document.getElementById("defect-destination-condition");
+  const submitBtn = document.getElementById("submit-defect-workflow");
+
+  document.querySelectorAll("[data-defect-mode]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.defectMode === defectWorkflowState.mode);
+  });
+
+  if (sourcePanel) sourcePanel.classList.toggle("is-hidden", defectWorkflowState.mode === "incoming_defective");
+  if (conditionSelect) {
+    conditionSelect.disabled = defectWorkflowState.mode !== "restore_or_move";
+    conditionSelect.value = defectWorkflowState.mode === "restore_or_move" ? conditionSelect.value || STOCK_CONDITION_GOOD : STOCK_CONDITION_DEFECTIVE;
+  }
+  const sourceTitle = document.getElementById("defect-source-title");
+  const sourceHelp = document.getElementById("defect-source-help");
+  const destinationTitle = document.getElementById("defect-destination-title");
+  const destinationHelp = document.getElementById("defect-destination-help");
+  if (sourceTitle) sourceTitle.textContent = config.sourceTitle;
+  if (sourceHelp) sourceHelp.textContent = config.sourceHelp;
+  if (destinationTitle) destinationTitle.textContent = config.destinationTitle;
+  if (destinationHelp) destinationHelp.textContent = config.destinationHelp;
+  if (submitBtn) submitBtn.textContent = config.submitLabel;
+  setDefectWorkflowStatus(config.status);
+}
+
+async function setDefectWorkflowMode(mode) {
+  defectWorkflowState.mode = mode;
+  defectWorkflowState.selectedSourceRow = null;
+  defectWorkflowState.selectedDestinationLocation = null;
+  const conditionSelect = document.getElementById("defect-destination-condition");
+  if (conditionSelect) {
+    conditionSelect.value = mode === "restore_or_move" ? STOCK_CONDITION_GOOD : STOCK_CONDITION_DEFECTIVE;
+  }
+  document.getElementById("defect-source-scan").value = "";
+  document.getElementById("defect-destination-scan").value = "";
+  document.getElementById("defect-quantity").value = "1";
+  syncDefectWorkflowMode();
+  await loadDefectWorkflowSources();
+  renderDefectDestinationRows();
+}
+
+async function openDefectWorkflowModal(itemId) {
+  const item = getStockItemById(itemId);
+  if (!item) {
+    showToast("Could not find that item for defects.");
+    return;
+  }
+
+  defectWorkflowState.item = item;
+  defectWorkflowState.mode = "mark_defective";
+  defectWorkflowState.sourceRows = [];
+  defectWorkflowState.destinationLocations = [];
+  defectWorkflowState.selectedSourceRow = null;
+  defectWorkflowState.selectedDestinationLocation = null;
+  defectWorkflowState.busy = false;
+
+  const modal = document.getElementById("defect-workflow-modal");
+  document.getElementById("defect-password").value = "";
+  document.getElementById("defect-notes").value = "";
+  document.getElementById("defect-reason").value = "";
+  document.getElementById("defect-quantity").value = "1";
+  document.getElementById("defect-destination-condition").value = STOCK_CONDITION_DEFECTIVE;
+  renderDefectItemSummary();
+  syncDefectWorkflowMode();
+  modal?.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+
+  try {
+    setDefectWorkflowStatus("Loading defect stock options...");
+    await Promise.all([loadDefectWorkflowSources(), loadDefectWorkflowDestinations()]);
+    setDefectWorkflowStatus(getDefectWorkflowConfig().status);
+    setTimeout(() => document.getElementById("defect-source-scan")?.focus(), 80);
+  } catch (error) {
+    console.error("Could not load defect workflow:", error);
+    setDefectWorkflowStatus(error.message || "Could not load defect workflow.", "error");
+  }
+}
+
+function closeDefectWorkflowModal() {
+  document.getElementById("defect-workflow-modal")?.classList.add("hidden");
+  document.body.classList.remove("modal-open");
+  defectWorkflowState.item = null;
+  defectWorkflowState.sourceRows = [];
+  defectWorkflowState.destinationLocations = [];
+  defectWorkflowState.selectedSourceRow = null;
+  defectWorkflowState.selectedDestinationLocation = null;
+}
+
+async function verifyDefectWorkflowPassword(password) {
+  const user = currentUser || (await supabase.auth.getUser()).data.user;
+  if (!user?.email || !password) return null;
+  const { error } = await supabase.auth.signInWithPassword({ email: user.email, password });
+  if (error) return null;
+  return user;
+}
+
+async function submitDefectWorkflow() {
+  if (defectWorkflowState.busy) return;
+  const item = defectWorkflowState.item;
+  const config = getDefectWorkflowConfig();
+  const quantity = Math.max(1, parseInt(document.getElementById("defect-quantity")?.value || "1", 10) || 1);
+  const reason = String(document.getElementById("defect-reason")?.value || "").trim();
+  const notes = String(document.getElementById("defect-notes")?.value || "").trim();
+  const password = document.getElementById("defect-password")?.value || "";
+  const destination = defectWorkflowState.selectedDestinationLocation;
+  const source = defectWorkflowState.selectedSourceRow;
+
+  if (!item?.id) return setDefectWorkflowStatus("No item selected.", "error");
+  if (config.sourceCondition && !source) return setDefectWorkflowStatus("Choose the source tray/location first.", "error");
+  if (!destination) return setDefectWorkflowStatus("Choose the destination tray/location first.", "error");
+  if (config.sourceCondition && quantity > Number(source.quantity || 0)) return setDefectWorkflowStatus(`Only ${source.quantity || 0} available at the selected source.`, "error");
+  if (config.destinationCondition === STOCK_CONDITION_DEFECTIVE && !reason) return setDefectWorkflowStatus("Choose a defect reason.", "error");
+  if (!password) return setDefectWorkflowStatus("Enter your password to sign this movement.", "error");
+
+  defectWorkflowState.busy = true;
+  const submitBtn = document.getElementById("submit-defect-workflow");
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Saving...";
+  }
+  showLoading();
+  setDefectWorkflowStatus("Signing and saving defect movement...");
+  try {
+    const user = await verifyDefectWorkflowPassword(password);
+    if (!user) throw new Error("Incorrect password. Please try again.");
+
+    if (defectWorkflowState.mode === "incoming_defective") {
+      const { error } = await supabase.rpc("add_defective_inventory", {
+        _item_id: item.id,
+        _destination_location_id: destination.id,
+        _quantity: quantity,
+        _defect_reason: reason,
+        _notes: notes,
+        _user_id: user.id,
+        _email: user.email,
+      });
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.rpc("move_stock_condition", {
+        _source_stock_location_row_id: source.id,
+        _destination_location_id: destination.id,
+        _quantity: quantity,
+        _destination_condition: config.destinationCondition,
+        _defect_reason: reason,
+        _notes: notes,
+        _user_id: user.id,
+        _email: user.email,
+        _method: config.method,
+      });
+      if (error) throw error;
+    }
+
+    await bumpInventoryVersion([item.id]);
+    await refreshItemById(item.id);
+    setDefectWorkflowStatus("Defect stock saved.", "success");
+    showToast("Defect stock updated.");
+    closeDefectWorkflowModal();
+  } catch (error) {
+    console.error("Defect workflow failed:", error);
+    setDefectWorkflowStatus(error.message || "Could not save defect stock.", "error");
+  } finally {
+    defectWorkflowState.busy = false;
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = getDefectWorkflowConfig().submitLabel;
+    }
+    hideLoading();
+  }
+}
+
+function setupDefectWorkflowListeners() {
+  document.getElementById("close-defect-workflow")?.addEventListener("click", closeDefectWorkflowModal);
+  document.getElementById("cancel-defect-workflow")?.addEventListener("click", closeDefectWorkflowModal);
+  document.querySelectorAll("[data-defect-mode]").forEach((button) => {
+    button.addEventListener("click", () => setDefectWorkflowMode(button.dataset.defectMode || "mark_defective"));
+  });
+  document.getElementById("defect-destination-condition")?.addEventListener("change", () => {
+    syncDefectWorkflowMode();
+  });
+  document.getElementById("defect-find-source")?.addEventListener("click", () => {
+    const matches = filterDefectSources(document.getElementById("defect-source-scan")?.value || "");
+    renderDefectSourceRows(matches);
+    if (matches.length === 1) selectDefectSourceRow(matches[0].id);
+  });
+  document.getElementById("defect-find-destination")?.addEventListener("click", () => {
+    const matches = filterDefectDestinations(document.getElementById("defect-destination-scan")?.value || "");
+    renderDefectDestinationRows(matches);
+    if (matches.length === 1) selectDefectDestination(matches[0].id);
+  });
+  document.getElementById("defect-source-results")?.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-defect-source-id]");
+    if (trigger) selectDefectSourceRow(trigger.dataset.defectSourceId);
+  });
+  document.getElementById("defect-destination-results")?.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-defect-destination-id]");
+    if (trigger) selectDefectDestination(trigger.dataset.defectDestinationId);
+  });
+  ["defect-source-scan", "defect-destination-scan", "defect-quantity", "defect-password"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      if (id === "defect-source-scan") document.getElementById("defect-find-source")?.click();
+      else if (id === "defect-destination-scan") document.getElementById("defect-find-destination")?.click();
+      else if (id === "defect-password") submitDefectWorkflow();
+    });
+  });
+  document.getElementById("submit-defect-workflow")?.addEventListener("click", submitDefectWorkflow);
 }
 
 function normalizeDymoStoragePath(reference) {
@@ -7050,7 +7653,7 @@ async function fetchStockItems() {
   // Step 2: Fetch stock quantities
   const { data: stockData, error: stockError } = await supabase
     .from("item_stock_locations")
-    .select("id, item_id, quantity, location_id")
+    .select("id, item_id, quantity, location_id, condition_status, condition_reason, condition_notes")
     .gt("quantity", 0);
 
   if (stockError || !stockData) {
@@ -7073,53 +7676,8 @@ async function fetchStockItems() {
     return items;
   }
 
-  const locationMap = buildStockLocationMap(locations, stores);
   const reservations = await fetchActiveReservationMap();
-
-  // Step 4: Aggregate stock per item
-  const stockMap = {};
-  stockData.forEach(({ id, item_id, quantity, location_id }) => {
-    const locationInfo = locationMap[location_id] || {};
-    const locName = locationInfo.label || "Unknown Location";
-    const reserved = reservations.get(id)?.reserved_quantity || 0;
-    const available = Math.max(0, Number(quantity || 0) - reserved);
-    if (!stockMap[item_id]) {
-      stockMap[item_id] = { total: 0, breakdown: {}, details: [] };
-    }
-    stockMap[item_id].total += available;
-    stockMap[item_id].breakdown[locName] = (stockMap[item_id].breakdown[locName] || 0) + available;
-    stockMap[item_id].details.push({
-      stock_location_row_id: id,
-      location_id,
-      location_name: locationInfo.location_name || locName,
-      store_name: locationInfo.store_name || "",
-      current_store: locationInfo.current_store || "",
-      tray_status_label: locationInfo.tray_status_label || "",
-      is_tray: Boolean(locationInfo.is_tray),
-      is_container: Boolean(locationInfo.is_container),
-      storage_path: locationInfo.storage_path || "",
-      quantity: available,
-      physical_quantity: Number(quantity || 0),
-      reserved_quantity: reserved,
-    });
-  });
-
-  // Step 5: Inject stock and tooltip
-  items.forEach(item => {
-    const stockEntry = stockMap[item.id];
-    item.stock = stockEntry?.total || 0;
-    item.stock_location_details = stockEntry?.details || [];
-
-    if (stockEntry) {
-      item.stock_tooltip = Object.entries(stockEntry.breakdown)
-        .map(([loc, qty]) => `${loc}: ${qty}`)
-        .join("\n");
-    } else {
-      item.stock_tooltip = "No stock data available";
-    }
-
-    item.stock_locations = Object.keys(stockEntry?.breakdown || {}); // ← ✅ this is the key line
-  });
+  applyStockEntriesToItems(items, stockData, locations, stores, reservations);
   
 
   return items;
@@ -7478,6 +8036,7 @@ async function loadManualSaleStockRows(itemId) {
       .from("item_stock_locations")
       .select(`id, item_id, location_id, quantity, location:location_id (*)`)
       .eq("item_id", itemId)
+      .eq("condition_status", STOCK_CONDITION_GOOD)
       .gt("quantity", 0),
     fetchActiveReservationMap(itemId),
   ]);
@@ -7549,6 +8108,7 @@ async function searchManualSaleLocation() {
     .from("item_stock_locations")
     .select("item_id, quantity, location_id")
     .in("location_id", matches.map((loc) => loc.id))
+    .eq("condition_status", STOCK_CONDITION_GOOD)
     .gt("quantity", 0);
   if (stockError) return setManualSaleStatus(stockError.message || "Could not load stock in that location.", "error");
   const itemIds = new Set((stockRows || []).map((row) => row.item_id));
@@ -7594,8 +8154,9 @@ async function finalizeManualEbaySale() {
       if (existingError) throw new Error(existingError.message);
       if (existingSale?.id) throw new Error("This eBay order ID was already checked out.");
     }
-    const { data: latestRow, error: latestError } = await supabase.from("item_stock_locations").select("quantity, location_id").eq("id", row.id).single();
+    const { data: latestRow, error: latestError } = await supabase.from("item_stock_locations").select("quantity, location_id, condition_status").eq("id", row.id).single();
     if (latestError) throw new Error(latestError.message);
+    if (normalizeStockCondition(latestRow.condition_status) !== STOCK_CONDITION_GOOD) throw new Error("That source row is defective and cannot be sold.");
     if (Number(latestRow.quantity || 0) < qty) throw new Error(`Only ${latestRow.quantity || 0} available at this source now.`);
     const user = currentUser || (await supabase.auth.getUser()).data.user;
     if (unknownPull) {
@@ -7609,7 +8170,8 @@ async function finalizeManualEbaySale() {
         user_id: user?.id || null,
         email: user?.email || null,
         notes: `Unknown online sale inventory pull${row.locationLabel ? ` from ${row.locationLabel}` : ""}: ${signedNote}`,
-        method: "manual_unknown_inventory_pull"
+        method: "manual_unknown_inventory_pull",
+        stock_condition: STOCK_CONDITION_GOOD
       });
       if (txError) throw new Error(`Failed transaction log: ${txError.message}`);
       const { error: rpcError } = await supabase.rpc("subtract_quantity", { loc_id: row.id, delta: qty });
@@ -7643,7 +8205,7 @@ async function finalizeManualEbaySale() {
       if (categoryError) throw new Error(`Failed to record category "${category}": ${categoryError.message}`);
     }
     const { error: txError } = await supabase.from("stock_transactions").insert({
-      item_id: item.id, location_id: latestRow.location_id || row.location_id, quantity: -qty, action_type: "checkout", confirmed_at: new Date().toISOString(), user_id: user?.id || null, email: user?.email || null, notes: `Manual eBay sale, Order ID: ${orderId}${notes ? ` - ${notes}` : ""}`, method: "manual_ebay_sale"
+      item_id: item.id, location_id: latestRow.location_id || row.location_id, quantity: -qty, action_type: "checkout", confirmed_at: new Date().toISOString(), user_id: user?.id || null, email: user?.email || null, notes: `Manual eBay sale, Order ID: ${orderId}${notes ? ` - ${notes}` : ""}`, method: "manual_ebay_sale", stock_condition: STOCK_CONDITION_GOOD
     });
     if (txError) throw new Error(`Failed transaction log: ${txError.message}`);
     const { error: rpcError } = await supabase.rpc("subtract_quantity", { loc_id: row.id, delta: qty });
@@ -8228,6 +8790,7 @@ populateDropdowns({
     //event listerner for the export modal and logic
     setupExportModal();
     setupManualEbaySale();
+    setupDefectWorkflowListeners();
     setupEbaySyncConsole();
     setupEbayExportButton(); // <— this must run
 

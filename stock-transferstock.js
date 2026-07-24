@@ -157,6 +157,7 @@ window.transferModule = (function () {
                     .from("item_stock_locations")
                     .select("item_id, quantity")
                     .eq("location_id", locationId)
+                    .eq("condition_status", "good")
                     .gt("quantity", 0),
             ]);
 
@@ -313,10 +314,11 @@ window.transferModule = (function () {
     const { data: stockData, error: stockError } = await supabase
         .from("item_stock_locations")
         .select(`
-        id, quantity, locked_by, locked_at,
+        id, quantity, locked_by, locked_at, condition_status,
         location:location_id (*)
         `)
-        .eq("item_id", itemId);
+        .eq("item_id", itemId)
+        .eq("condition_status", "good");
 
     if (stockError || !stockData) {
         console.error("❌ Could not fetch stock locations:", stockError);
@@ -468,6 +470,7 @@ window.transferModule = (function () {
                     .select("quantity")
                     .eq("item_id", currentItem.id)
                     .eq("location_id", destId)
+                    .eq("condition_status", "good")
                     .maybeSingle();  // ✅ allows 0 rows without throwing
 
                 if (destFetchError) {
@@ -553,6 +556,7 @@ window.transferModule = (function () {
             .select("id, quantity")
             .eq("item_id", currentItem.id)
             .eq("location_id", destId)
+            .eq("condition_status", "good")
             .maybeSingle(); // ✅ allows 0 rows without throwing
 
             if (destFetchError) {
@@ -574,9 +578,10 @@ window.transferModule = (function () {
                 quantity: existingDest.quantity + qty,
                 last_updated: new Date().toISOString(),
                 added_by: currentUser.user.id,
-                confirmation_email: currentUser.email,
+                confirmation_email: currentUser.user.email,
                 confirmed_at: new Date().toISOString(),
-                confirmation_method: "transfer"
+                confirmation_method: "transfer",
+                condition_status: "good"
                 })
                 .eq("id", existingDest.id);
             if (updateError) throw new Error(`Failed to update destination quantity: ${updateError.message}`);
@@ -588,9 +593,10 @@ window.transferModule = (function () {
                 location_id: destId,
                 quantity: qty,
                 added_by: currentUser.user.id,
-                confirmation_email: currentUser.email,
+                confirmation_email: currentUser.user.email,
                 confirmed_at: new Date().toISOString(),
-                confirmation_method: "transfer"
+                confirmation_method: "transfer",
+                condition_status: "good"
                 });
             if (insertError) throw new Error(`Failed to insert destination quantity: ${insertError.message}`);
             }
@@ -605,9 +611,10 @@ window.transferModule = (function () {
                 action_type: "transfer",
                 confirmed_at: new Date().toISOString(),
                 method: "transfer",
-                email: currentUser.email,
+                email: currentUser.user.email,
                 user_id: currentUser.user.id,
-                notes: `Transferred ${qty} from source location ID ${sourceRecord.location_id} to destination ID ${destId}`
+                notes: `Transferred ${qty} from source location ID ${sourceRecord.location_id} to destination ID ${destId}`,
+                stock_condition: "good"
             });
             if (logError) throw new Error(`Failed to log transfer: ${logError.message}`);
 

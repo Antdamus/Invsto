@@ -1172,6 +1172,7 @@ async function bumpInventoryVersion(changedIds = null) {
       .from("item_stock_locations")
       .select("quantity, confirmed_at, locations(location_name, location_code, store_id)")
       .eq("item_id", batchItem.item.id)
+      .eq("condition_status", "good")
       .order("confirmed_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -2201,6 +2202,7 @@ async function bumpInventoryVersion(changedIds = null) {
               .select("id, quantity")
               .eq("item_id", batchItem.item.id)
               .eq("location_id", location_id)
+              .eq("condition_status", "good")
               .maybeSingle();
 
             if (fetchError) {
@@ -2220,6 +2222,7 @@ async function bumpInventoryVersion(changedIds = null) {
                   confirmation_email: signedEmail,
                   confirmation_method: confirmationMethod,
                   confirmed_at: signedAt,
+                  condition_status: "good",
                 })
                 .eq("id", existingStock.id);
 
@@ -2240,6 +2243,7 @@ async function bumpInventoryVersion(changedIds = null) {
                   confirmation_email: signedEmail,
                   confirmation_method: confirmationMethod,
                   confirmed_at: signedAt,
+                  condition_status: "good",
                 });
 
               if (insertError) {
@@ -2267,6 +2271,7 @@ async function bumpInventoryVersion(changedIds = null) {
                 placementMeta.parent_location_name ? `parent: ${placementMeta.parent_location_name}` : "",
                 `signed by ${signedEmail}`,
               ].filter(Boolean).join(" | "),
+              stock_condition: "good",
             }).select("id, notes").maybeSingle();
             if (!txError) {
               stockTransactionId = txData?.id || "";
@@ -2325,6 +2330,7 @@ async function bumpInventoryVersion(changedIds = null) {
                 placementMeta.parent_location_name ? `parent: ${placementMeta.parent_location_name}` : "",
                 `signed by ${signedEmail}`,
               ].filter(Boolean).join(" | "),
+              stock_condition: "good",
             }).select("id, notes").maybeSingle();
             if (!bulkTxErr) {
               stockTransactionId = bulkTxData?.id || "";
@@ -2447,7 +2453,7 @@ async function bumpInventoryVersion(changedIds = null) {
         // 3️⃣ Fetch stock quantities for this item across all locations
         const { data: stockData, error: stockError } = await supabase
           .from("item_stock_locations")
-          .select("quantity, location_id")
+          .select("quantity, location_id, condition_status")
           .eq("item_id", data.id);
 
         if (stockError) {
@@ -2468,7 +2474,8 @@ async function bumpInventoryVersion(changedIds = null) {
         let totalStock = 0;
         const breakdown = {};
 
-        stockData.forEach(({ quantity, location_id }) => {
+        stockData.forEach(({ quantity, location_id, condition_status }) => {
+          if (String(condition_status || "good").toLowerCase() === "defective") return;
           const locName = locationMap[location_id] || "Unknown Location";
           totalStock += quantity;
           breakdown[locName] = (breakdown[locName] || 0) + quantity;
