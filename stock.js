@@ -77,6 +77,7 @@ const defectWorkflowState = {
   mode: "mark_defective",
   sourceRows: [],
   destinationLocations: [],
+  destinationSearchRows: [],
   selectedSourceRow: null,
   selectedDestinationLocation: null,
   busy: false,
@@ -4526,15 +4527,18 @@ function renderDefectSourceRows(rows = defectWorkflowState.sourceRows) {
   });
 }
 
-function renderDefectDestinationRows(rows = defectWorkflowState.destinationLocations) {
+function renderDefectDestinationRows(rows = null, message = "Scan or type a destination tray/location, then press Find.") {
   const container = document.getElementById("defect-destination-results");
   if (!container) return;
   container.replaceChildren();
-  if (!rows.length) {
-    container.innerHTML = `<p class="stock-location-empty">No matching active destination found.</p>`;
+  const visibleRows = Array.isArray(rows)
+    ? rows
+    : (defectWorkflowState.selectedDestinationLocation ? [defectWorkflowState.selectedDestinationLocation] : defectWorkflowState.destinationSearchRows);
+  if (!visibleRows.length) {
+    container.innerHTML = `<p class="stock-location-empty">${escapeStockHtml(message)}</p>`;
     return;
   }
-  rows.slice(0, 40).forEach((location) => {
+  visibleRows.slice(0, 12).forEach((location) => {
     const label = formatDefectLocationLabel(location);
     const btn = document.createElement("button");
     btn.type = "button";
@@ -4561,7 +4565,8 @@ function selectDefectSourceRow(rowId) {
 
 function selectDefectDestination(locationId) {
   defectWorkflowState.selectedDestinationLocation = defectWorkflowState.destinationLocations.find((loc) => String(loc.id) === String(locationId)) || null;
-  renderDefectDestinationRows();
+  defectWorkflowState.destinationSearchRows = defectWorkflowState.selectedDestinationLocation ? [defectWorkflowState.selectedDestinationLocation] : [];
+  renderDefectDestinationRows(defectWorkflowState.destinationSearchRows);
   setDefectWorkflowStatus(defectWorkflowState.selectedDestinationLocation ? "Destination selected. Enter quantity, reason, and sign." : "Choose a destination.", defectWorkflowState.selectedDestinationLocation ? "info" : "error");
 }
 
@@ -4579,11 +4584,15 @@ function filterDefectSources(term) {
 
 function filterDefectDestinations(term) {
   const query = String(term || "").trim().toLowerCase();
-  if (!query) return defectWorkflowState.destinationLocations;
+  if (!query) return [];
   return defectWorkflowState.destinationLocations.filter((loc) =>
     String(loc.id || "").toLowerCase() === query ||
     String(loc.location_code || "").toLowerCase() === query ||
-    String(loc.location_name || "").toLowerCase().includes(query)
+    String(loc.location_code || "").toLowerCase().includes(query) ||
+    String(loc.location_name || "").toLowerCase().includes(query) ||
+    String(loc.location_type || "").toLowerCase().includes(query) ||
+    String(loc.store_name || "").toLowerCase().includes(query) ||
+    String(formatDefectLocationLabel(loc).title || "").toLowerCase().includes(query)
   );
 }
 
@@ -4639,7 +4648,8 @@ async function loadDefectWorkflowDestinations() {
       store_name: storeMap.get(location.store_id) || storeMap.get(location.tray_current_store_id) || "",
     }))
     .sort((a, b) => String(a.location_name || "").localeCompare(String(b.location_name || "")));
-  renderDefectDestinationRows();
+  defectWorkflowState.destinationSearchRows = [];
+  renderDefectDestinationRows([]);
 }
 
 function syncDefectWorkflowMode() {
@@ -4673,6 +4683,7 @@ async function setDefectWorkflowMode(mode) {
   defectWorkflowState.mode = mode;
   defectWorkflowState.selectedSourceRow = null;
   defectWorkflowState.selectedDestinationLocation = null;
+  defectWorkflowState.destinationSearchRows = [];
   const conditionSelect = document.getElementById("defect-destination-condition");
   if (conditionSelect) {
     conditionSelect.value = mode === "restore_or_move" ? STOCK_CONDITION_GOOD : STOCK_CONDITION_DEFECTIVE;
@@ -4682,7 +4693,7 @@ async function setDefectWorkflowMode(mode) {
   document.getElementById("defect-quantity").value = "1";
   syncDefectWorkflowMode();
   await loadDefectWorkflowSources();
-  renderDefectDestinationRows();
+  renderDefectDestinationRows([]);
 }
 
 async function openDefectWorkflowModal(itemId) {
@@ -4696,6 +4707,7 @@ async function openDefectWorkflowModal(itemId) {
   defectWorkflowState.mode = "mark_defective";
   defectWorkflowState.sourceRows = [];
   defectWorkflowState.destinationLocations = [];
+  defectWorkflowState.destinationSearchRows = [];
   defectWorkflowState.selectedSourceRow = null;
   defectWorkflowState.selectedDestinationLocation = null;
   defectWorkflowState.busy = false;
@@ -4728,6 +4740,7 @@ function closeDefectWorkflowModal() {
   defectWorkflowState.item = null;
   defectWorkflowState.sourceRows = [];
   defectWorkflowState.destinationLocations = [];
+  defectWorkflowState.destinationSearchRows = [];
   defectWorkflowState.selectedSourceRow = null;
   defectWorkflowState.selectedDestinationLocation = null;
 }
@@ -4829,9 +4842,15 @@ function setupDefectWorkflowListeners() {
     if (matches.length === 1) selectDefectSourceRow(matches[0].id);
   });
   document.getElementById("defect-find-destination")?.addEventListener("click", () => {
-    const matches = filterDefectDestinations(document.getElementById("defect-destination-scan")?.value || "");
+    const term = document.getElementById("defect-destination-scan")?.value || "";
+    const matches = filterDefectDestinations(term);
+    defectWorkflowState.selectedDestinationLocation = null;
+    defectWorkflowState.destinationSearchRows = matches;
     renderDefectDestinationRows(matches);
     if (matches.length === 1) selectDefectDestination(matches[0].id);
+    else if (!String(term || "").trim()) setDefectWorkflowStatus("Scan or type a destination tray/location first.", "info");
+    else if (!matches.length) setDefectWorkflowStatus("No matching active destination found.", "error");
+    else setDefectWorkflowStatus("Choose the matching destination tray/location.", "info");
   });
   document.getElementById("defect-source-results")?.addEventListener("click", (event) => {
     const trigger = event.target.closest("[data-defect-source-id]");

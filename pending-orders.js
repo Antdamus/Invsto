@@ -16,6 +16,7 @@ const state = {
   stagedFulfillments: new Map(),
   adminSelectedLineIds: new Set(),
   adminCloseoutAction: "",
+  adminCloseoutScope: "selected",
   orderSort: "created_asc",
   pendingItemCandidate: null,
   itemSearchTimer: null,
@@ -3439,6 +3440,20 @@ function getSelectedAdminLines() {
   return state.orders.filter((line) => state.adminSelectedLineIds.has(line.id) && isAdminCloseoutSelectable(line));
 }
 
+function getAllPendingAdminCloseoutLines() {
+  return state.orders.filter((line) => {
+    if (!isAdminCloseoutSelectable(line)) return false;
+    const status = String(line.line_status || "pending").toLowerCase();
+    return status === "pending" || status === "partially_fulfilled";
+  });
+}
+
+function getAdminCloseoutLinesForActiveScope() {
+  return state.adminCloseoutScope === "all_pending"
+    ? getAllPendingAdminCloseoutLines()
+    : getSelectedAdminLines();
+}
+
 function getUniqueOrderNumbersForLines(lines = []) {
   return [...new Set((lines || [])
     .map((line) => normalizeEbayOrderNumber(line?.order?.order_number))
@@ -3536,15 +3551,17 @@ function renderAdminOrderActions() {
 
   pruneAdminSelection();
   const count = state.adminSelectedLineIds.size;
-  panel.classList.toggle("hidden", count === 0);
+  const allPendingCount = getAllPendingAdminCloseoutLines().length;
+  panel.classList.remove("hidden");
   panel.classList.toggle("has-selection", count > 0);
   const countEl = $("admin-order-selected-count");
-  if (countEl) countEl.textContent = `${count} selected`;
+  if (countEl) countEl.textContent = `${count} selected / ${allPendingCount} pending`;
 
   $("admin-clear-order-selection")?.toggleAttribute("disabled", count === 0);
   $("admin-open-ebay-labels")?.toggleAttribute("disabled", count === 0);
   $("admin-mark-packed-no-stock")?.toggleAttribute("disabled", count === 0);
   $("admin-mark-cancelled")?.toggleAttribute("disabled", count === 0);
+  $("admin-close-all-pending")?.toggleAttribute("disabled", allPendingCount === 0);
 }
 
 function setAdminLineSelection(lineId, checked) {
@@ -7275,6 +7292,7 @@ function closeBundleReviewModal(options = {}) {
 
 function closeAdminOrderCloseoutModal(options = {}) {
   state.adminCloseoutAction = "";
+  state.adminCloseoutScope = "selected";
   closeModal("admin-order-closeout-modal");
   returnToOrdersAfterMobileModalClose(options);
 }
@@ -9070,7 +9088,16 @@ async function confirmWorkerCancelOrder() {
   }
 }
 
-function getAdminCloseoutActionCopy(action) {
+function getAdminCloseoutActionCopy(action, scope = "selected") {
+  if (scope === "all_pending") {
+    return {
+      title: "Close all pending orders",
+      subtitle: "This removes every open pending line currently in the queue as canceled. No stock will be removed.",
+      notePlaceholder: "Example: duplicate import cleanup, already handled in eBay, or another bulk closeout reason.",
+      button: "Sign and Close All",
+    };
+  }
+
   if (action === "cancelled") {
     return {
       title: "Mark selected orders canceled",
@@ -9088,12 +9115,25 @@ function getAdminCloseoutActionCopy(action) {
   };
 }
 
-function renderAdminCloseoutList(lines) {
+function renderAdminCloseoutList(lines, options = {}) {
   const list = $("admin-order-closeout-list");
   if (!list) return;
   list.replaceChildren();
 
-  lines.forEach((line) => {
+  const limit = Number(options.limit || lines.length);
+  const visibleLines = lines.slice(0, limit);
+  const orderCount = getUniqueOrderNumbersForLines(lines).length;
+  if (options.bulk) {
+    const summary = document.createElement("article");
+    summary.className = "admin-closeout-bulk-summary";
+    summary.innerHTML = `
+      <strong>${lines.length.toLocaleString()} pending line${lines.length === 1 ? "" : "s"}</strong>
+      <span>${orderCount.toLocaleString()} distinct eBay order${orderCount === 1 ? "" : "s"} will be closed with the same note.</span>
+    `;
+    list.appendChild(summary);
+  }
+
+  visibleLines.forEach((line) => {
     const order = line.order || {};
     const card = document.createElement("article");
     card.className = "bundle-review-item";
@@ -9107,26 +9147,37 @@ function renderAdminCloseoutList(lines) {
     `;
     list.appendChild(card);
   });
+
+  const hiddenCount = lines.length - visibleLines.length;
+  if (hiddenCount > 0) {
+    const more = document.createElement("div");
+    more.className = "admin-closeout-more";
+    more.textContent = `And ${hiddenCount.toLocaleString()} more pending line${hiddenCount === 1 ? "" : "s"}.`;
+    list.appendChild(more);
+  }
 }
 
-function openAdminOrderCloseoutModal(action) {
+function openAdminOrderCloseoutModal(action, options = {}) {
   if (!isAdminUser()) return;
-  const lines = getSelectedAdminLines();
+  const scope = options.scope || "selected";
+  state.adminCloseoutScope = scope;
+  const lines = getAdminCloseoutLinesForActiveScope();
   if (!lines.length) {
-    setImportStatus("Select at least one pending order line first.", "error");
+    setImportStatus(scope === "all_pending" ? "There are no pending order lines to close." : "Select at least one pending order line first.", "error");
+    state.adminCloseoutScope = "selected";
     return;
   }
 
   state.adminCloseoutAction = action;
-  const copy = getAdminCloseoutActionCopy(action);
+  const copy = getAdminCloseoutActionCopy(action, scope);
   $("admin-order-closeout-title").textContent = copy.title;
-  $("admin-order-closeout-subtitle").textContent = `${copy.subtitle} ${lines.length} line(s) selected.`;
+  $("admin-order-closeout-subtitle").textContent = `${copy.subtitle} ${lines.length.toLocaleString()} line(s) will be affected.`;
   $("admin-order-closeout-note").value = "";
   $("admin-order-closeout-note").placeholder = copy.notePlaceholder;
   $("admin-order-closeout-password").value = "";
   $("admin-order-closeout-error").textContent = "";
   $("confirm-admin-order-closeout").textContent = copy.button;
-  renderAdminCloseoutList(lines);
+  renderAdminCloseoutList(lines, { bulk: scope === "all_pending", limit: scope === "all_pending" ? 25 : lines.length });
   openModal("admin-order-closeout-modal");
   setTimeout(() => $("admin-order-closeout-note")?.focus(), 80);
 }
@@ -9142,13 +9193,15 @@ async function verifyCurrentUserPassword(password) {
 
 async function confirmAdminOrderCloseout() {
   if (!isAdminUser() || state.busy) return;
-  const lines = getSelectedAdminLines();
+  const lines = getAdminCloseoutLinesForActiveScope();
   const note = String($("admin-order-closeout-note")?.value || "").trim();
   const password = String($("admin-order-closeout-password")?.value || "").trim();
   const errorEl = $("admin-order-closeout-error");
+  const scope = state.adminCloseoutScope || "selected";
+  const action = state.adminCloseoutAction || "cancelled";
 
   if (!lines.length) {
-    if (errorEl) errorEl.textContent = "Select at least one pending order line.";
+    if (errorEl) errorEl.textContent = scope === "all_pending" ? "There are no pending order lines to close." : "Select at least one pending order line.";
     return;
   }
   if (!note) {
@@ -9176,28 +9229,35 @@ async function confirmAdminOrderCloseout() {
 
     const { data, error } = await supabase.rpc("admin_close_ebay_order_lines", {
       _order_line_ids: lines.map((line) => line.id),
-      _action: state.adminCloseoutAction,
-      _notes: note,
+      _action: action,
+      _notes: scope === "all_pending" ? `Closed en masse: ${note}` : note,
       _signed_by_email: state.user.email,
     });
     if (error) throw error;
 
     closeAdminOrderCloseoutModal({ suppressMobileReturn: true });
     clearAdminOrderSelection();
-    setImportStatus(`Closed ${data?.[0]?.updated_lines || lines.length} order line(s).`, "success");
+    const updatedLines = data?.[0]?.updated_lines || lines.length;
+    setImportStatus(
+      scope === "all_pending"
+        ? `Closed ${updatedLines.toLocaleString()} pending order line(s) en masse.`
+        : `Closed ${updatedLines.toLocaleString()} order line(s).`,
+      "success"
+    );
     await loadOrders();
     postEbayPendingQueueChanged({
-      action: `admin_${state.adminCloseoutAction || "closeout"}`,
+      action: scope === "all_pending" ? `admin_bulk_${action}` : `admin_${action}`,
       orderNumbers: closedOrderNumbers,
       lineCount: lines.length,
-      updatedLines: data?.[0]?.updated_lines || lines.length,
+      updatedLines,
     });
   } catch (error) {
     console.error("Admin order closeout failed:", error);
     if (errorEl) errorEl.textContent = error.message || "Could not close selected orders.";
   } finally {
     state.busy = false;
-    $("confirm-admin-order-closeout").disabled = false;
+    const confirmButton = $("confirm-admin-order-closeout");
+    if (confirmButton) confirmButton.disabled = false;
   }
 }
 
@@ -11424,6 +11484,7 @@ function setupListeners() {
   $("admin-open-ebay-labels")?.addEventListener("click", openAdminSelectedEbayLabelPages);
   $("admin-mark-packed-no-stock")?.addEventListener("click", () => openAdminOrderCloseoutModal("fulfilled_no_inventory"));
   $("admin-mark-cancelled")?.addEventListener("click", () => openAdminOrderCloseoutModal("cancelled"));
+  $("admin-close-all-pending")?.addEventListener("click", () => openAdminOrderCloseoutModal("cancelled", { scope: "all_pending" }));
   $("close-admin-order-closeout")?.addEventListener("click", closeAdminOrderCloseoutModal);
   $("cancel-admin-order-closeout")?.addEventListener("click", closeAdminOrderCloseoutModal);
   $("confirm-admin-order-closeout")?.addEventListener("click", confirmAdminOrderCloseout);

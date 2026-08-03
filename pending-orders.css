@@ -587,6 +587,11 @@ button.task-action-btn.is-assigned:hover,
   padding: 0 12px;
 }
 
+.admin-order-actions-controls #admin-close-all-pending {
+  border-color: rgba(255, 123, 123, 0.5);
+  background: rgba(255, 123, 123, 0.1);
+}
+
 .checkout-store-panel h2 {
   margin-bottom: 0;
   font-family: inherit;
@@ -3120,6 +3125,33 @@ body.modal-open {
   display: grid;
   gap: 10px;
   margin-top: 14px;
+}
+
+.admin-closeout-bulk-summary {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 123, 123, 0.26);
+  border-radius: 14px;
+  background: rgba(255, 123, 123, 0.08);
+}
+
+.admin-closeout-bulk-summary strong {
+  color: #ffd0d0;
+  font-size: 1rem;
+}
+
+.admin-closeout-bulk-summary span,
+.admin-closeout-more {
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.admin-closeout-more {
+  padding: 4px 2px;
+  text-align: center;
+  font-weight: 800;
 }
 
 .bundle-review-item {
