@@ -13,6 +13,7 @@ const state = {
   activeBuyerKey: "",
   expandedBuyerKeys: new Set(),
   collapsedBuyerKeys: new Set(),
+  expandedBuyerNoteKeys: new Set(),
   stagedFulfillments: new Map(),
   adminSelectedLineIds: new Set(),
   adminCloseoutAction: "",
@@ -3329,6 +3330,50 @@ function getLineNoteCount(line = {}) {
   return Math.max(0, Number(line.line_note_count || 0));
 }
 
+function getGroupLineNoteEntries(lines = []) {
+  return (lines || [])
+    .map((line) => {
+      const note = String(line.latest_line_note || "").trim();
+      const noteCount = Math.max(getLineNoteCount(line), note ? 1 : 0);
+      if (!noteCount) return null;
+      const order = getOrderFromLine(line);
+      return {
+        line,
+        note,
+        noteCount,
+        title: line.item_title || "Untitled eBay item",
+        orderNumber: order.order_number || "",
+        buyer: order.buyer_username || getBuyerLabel(line),
+        itemNumber: line.item_number || "",
+      };
+    })
+    .filter(Boolean);
+}
+
+function getGroupLineNoteCount(entries = []) {
+  return entries.reduce((sum, entry) => sum + Number(entry.noteCount || 0), 0);
+}
+
+function renderGroupLineNotePreview(entries = []) {
+  if (!entries.length) return "";
+  const visibleEntries = entries.slice(0, 4);
+  const hiddenCount = entries.length - visibleEntries.length;
+  return `
+    <div class="buyer-card-note-preview">
+      ${visibleEntries.map((entry) => `
+        <button type="button" class="buyer-card-note-preview-item" data-group-note-line="${escapeHtml(entry.line.id)}">
+          <span>
+            <strong>${escapeHtml(entry.title)}</strong>
+            <small>${escapeHtml(entry.orderNumber || entry.itemNumber || entry.buyer || "Order line")}</small>
+          </span>
+          <em>${entry.note ? escapeHtml(entry.note) : `${entry.noteCount.toLocaleString()} saved note${entry.noteCount === 1 ? "" : "s"}`}</em>
+        </button>
+      `).join("")}
+      ${hiddenCount > 0 ? `<div class="buyer-card-note-preview-more">${hiddenCount.toLocaleString()} more noted line${hiddenCount === 1 ? "" : "s"}</div>` : ""}
+    </div>
+  `;
+}
+
 function getGroupVideoReceiptCoverage(group = {}) {
   const lines = Array.isArray(group.lines) ? group.lines : [];
   const total = lines.length;
@@ -3707,6 +3752,9 @@ function renderOrders() {
     const assignedTask = approvalTask || getAssignedOrderTaskForGroup(group);
     const assignmentLabel = getGroupAssignmentLabel(group);
     const groupCustomerName = getGroupCustomerSummary(group);
+    const groupLineNoteEntries = getGroupLineNoteEntries(group.lines);
+    const groupLineNoteCount = getGroupLineNoteCount(groupLineNoteEntries);
+    const isNotePreviewOpen = state.expandedBuyerNoteKeys.has(group.key);
     const orderCountLabel = `${group.orderNumbers.size.toLocaleString()} order${group.orderNumbers.size === 1 ? "" : "s"}`;
     const lineCountLabel = `${group.lines.length.toLocaleString()} line${group.lines.length === 1 ? "" : "s"}`;
     const quantityLabel = `Qty ${Number(group.totalQuantity || 0).toLocaleString()}`;
@@ -3744,6 +3792,9 @@ function renderOrders() {
     const approvalActionMarkup = approvalTask
       ? `<button type="button" class="buyer-card-approval-btn is-pending" data-buyer-approval-task-id="${escapeHtml(approvalTask.id)}">Pending Admin Approval</button>`
       : `<button type="button" class="buyer-card-approval-btn" data-buyer-approval-key="${escapeHtml(group.key)}" ${getPendingOrderApprovalLinesForGroup(group).length ? "" : "disabled"}>Send for Approval</button>`;
+    const groupNoteMarkup = groupLineNoteEntries.length
+      ? `<button type="button" class="buyer-card-note-pill ${isNotePreviewOpen ? "is-open" : ""}" data-buyer-note-key="${escapeHtml(group.key)}" aria-expanded="${isNotePreviewOpen ? "true" : "false"}" title="Show notes saved on lines in this group"><i data-lucide="message-square"></i><span>${groupLineNoteCount.toLocaleString()} note${groupLineNoteCount === 1 ? "" : "s"}</span></button>`
+      : "";
     const card = document.createElement("article");
     const hasSelectedAdminLines = group.lines.some((line) => state.adminSelectedLineIds.has(line.id));
     const postOrderIssueStatus = getGroupPostOrderIssueStatus(group.lines);
@@ -3774,6 +3825,7 @@ function renderOrders() {
         </div>
         <div class="buyer-card-alerts">
           ${urgencyMarkup}
+          ${groupNoteMarkup}
           ${renderIssueBadgeMarkup(postOrderIssueStatus, "post-order-issue-pill")}
           ${renderFinanceBadgeMarkup(financeStatus, "buyer-card-finance-pill")}
           ${ebayApiStatus ? `
@@ -3820,6 +3872,7 @@ function renderOrders() {
         <div class="buyer-card-collapsed-hint">
           <span>Open to inspect ${escapeHtml(lineCountLabel)} for labels, video receipts, photos, and line actions.</span>
         </div>
+        ${isNotePreviewOpen ? renderGroupLineNotePreview(groupLineNoteEntries) : ""}
       `}
     `;
 
@@ -3835,12 +3888,39 @@ function renderOrders() {
     const noInventoryButton = card.querySelector("[data-buyer-no-inventory-key]");
     const orderVideoButton = card.querySelector("[data-buyer-order-video-key]");
     const viewOrderVideosButton = card.querySelector("[data-buyer-view-order-videos-key]");
+    const groupNoteButton = card.querySelector("[data-buyer-note-key]");
     expandButton?.addEventListener("click", (event) => {
       event.stopPropagation();
       toggleBuyerGroupExpanded(group.key);
     });
+    groupNoteButton?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (isBuyerGroupExpanded(group.key) && groupLineNoteEntries.length) {
+        const firstLineId = groupLineNoteEntries[0]?.line?.id;
+        if (!firstLineId) return;
+        selectOrderLine(firstLineId, { openDetail: false });
+        setTimeout(() => {
+          document.querySelector(`[data-line-id="${firstLineId}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+        }, 120);
+        return;
+      }
+      toggleBuyerGroupNotePreview(group.key);
+    });
+    card.querySelectorAll("[data-group-note-line]").forEach((noteItem) => {
+      noteItem.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const lineId = event.currentTarget.dataset.groupNoteLine;
+        if (!lineId) return;
+        state.expandedBuyerNoteKeys.delete(group.key);
+        setBuyerGroupExpanded(group.key, true, { render: false });
+        selectOrderLine(lineId, { openDetail: false });
+        setTimeout(() => {
+          document.querySelector(`[data-line-id="${lineId}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+        }, 120);
+      });
+    });
     card.addEventListener("click", (event) => {
-      if (event.target.closest("button,a,input,label,select,textarea,.buyer-card-expanded,.buyer-line-list")) return;
+      if (event.target.closest("button,a,input,label,select,textarea,.buyer-card-expanded,.buyer-line-list,.buyer-card-note-preview")) return;
       if (!event.target.closest(".buyer-card-head,.buyer-card-meta,.buyer-card-collapsed-hint")) return;
       toggleBuyerGroupExpanded(group.key);
     });
@@ -4982,6 +5062,17 @@ function toggleBuyerGroupExpanded(groupOrKey = "") {
   const key = getBuyerExpansionKey(groupOrKey);
   if (!key) return;
   setBuyerGroupExpanded(key, !isBuyerGroupExpanded(key));
+}
+
+function toggleBuyerGroupNotePreview(groupOrKey = "") {
+  const key = getBuyerExpansionKey(groupOrKey);
+  if (!key) return;
+  if (state.expandedBuyerNoteKeys.has(key)) {
+    state.expandedBuyerNoteKeys.delete(key);
+  } else {
+    state.expandedBuyerNoteKeys.add(key);
+  }
+  renderOrders();
 }
 
 function isClearedVideoReceiptCaptureTask(task = {}, events = []) {

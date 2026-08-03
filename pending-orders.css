@@ -3824,6 +3824,7 @@ body.pending-order-detail-open .mobile-detail-close {
 .buyer-order-card.is-collapsed .buyer-card-value,
 .buyer-order-card.is-collapsed .status-badge,
 .buyer-order-card.is-collapsed .urgency-pill,
+.buyer-order-card.is-collapsed .buyer-card-note-pill,
 .buyer-order-card.is-collapsed .post-order-issue-pill,
 .buyer-order-card.is-collapsed .sync-mismatch-pill,
 .buyer-order-card.is-collapsed .buyer-card-task-btn,
@@ -3945,6 +3946,105 @@ body.pending-order-detail-open .mobile-detail-close {
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
+}
+
+.buyer-card-note-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid rgba(96, 165, 250, 0.46);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.18);
+  color: #bfdbfe;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.buyer-card-note-pill svg {
+  width: 14px;
+  height: 14px;
+}
+
+.buyer-card-note-pill.is-open,
+.buyer-card-note-pill:hover {
+  border-color: rgba(147, 197, 253, 0.72);
+  background: rgba(37, 99, 235, 0.28);
+  color: #e0f2fe;
+}
+
+.buyer-card-note-preview {
+  display: grid;
+  gap: 7px;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.32);
+}
+
+.buyer-card-note-preview-item {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.46fr) minmax(0, 1fr);
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: 10px;
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.buyer-card-note-preview-item:hover {
+  border-color: rgba(147, 197, 253, 0.48);
+  background: rgba(37, 99, 235, 0.14);
+}
+
+.buyer-card-note-preview-item span,
+.buyer-card-note-preview-item strong,
+.buyer-card-note-preview-item small,
+.buyer-card-note-preview-item em {
+  min-width: 0;
+}
+
+.buyer-card-note-preview-item strong,
+.buyer-card-note-preview-item small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.buyer-card-note-preview-item strong {
+  color: #dbeafe;
+  font-size: 0.78rem;
+}
+
+.buyer-card-note-preview-item small {
+  margin-top: 2px;
+  color: rgba(219, 234, 254, 0.62);
+  font-size: 0.68rem;
+}
+
+.buyer-card-note-preview-item em {
+  color: #e5e7eb;
+  font-size: 0.78rem;
+  font-style: normal;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.buyer-card-note-preview-more {
+  color: rgba(219, 234, 254, 0.72);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-align: center;
 }
 
 .buyer-card-expanded {
@@ -4814,6 +4914,10 @@ a.buyer-line-finance-pill:hover {
     grid-template-columns: 1fr;
     gap: 5px;
     font-size: 0.8rem;
+  }
+
+  .buyer-card-note-preview-item {
+    grid-template-columns: 1fr;
   }
 
   .buyer-card-customer {
