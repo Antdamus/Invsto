@@ -3,8 +3,16 @@
 
 function waitForSupabaseReady() {
   return new Promise((resolve) => {
-    if (window.supabase) return resolve(window.supabase);
-    document.addEventListener("supabase-ready", () => resolve(window.supabase), { once: true });
+    const getClient = () => {
+      if (window.supabaseClient?.auth?.getSession) return window.supabaseClient;
+      if (window.supabase?.auth?.getSession) return window.supabase;
+      return null;
+    };
+
+    const client = getClient();
+    if (client) return resolve(client);
+
+    document.addEventListener("supabase-ready", () => resolve(getClient()), { once: true });
   });
 }
 
