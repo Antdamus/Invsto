@@ -16,6 +16,24 @@ function waitForSupabaseReady() {
   });
 }
 
+function isRetryableAuthError(error) {
+  const message = String(error?.message || "");
+  const status = Number(error?.status || error?.statusCode || 0);
+  return status === 504 || /\bHTTP 504\b|timeout|temporar/i.test(message);
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function signInWithRetry(sb, credentials) {
+  const first = await sb.auth.signInWithPassword(credentials);
+  if (!first.error || !isRetryableAuthError(first.error)) return first;
+
+  await wait(1200);
+  return sb.auth.signInWithPassword(credentials);
+}
+
 async function getEmployeeRoleByUserId(userId) {
   const sb = await waitForSupabaseReady();
 
@@ -116,6 +134,11 @@ document.getElementById("toggle-password")?.addEventListener("click", () => {
 (async () => {
   const sb = await waitForSupabaseReady();
   const { data: { session }, error } = await sb.auth.getSession();
+  if (error && isRetryableAuthError(error)) {
+    console.error("Session error:", error);
+    await sb.auth.signOut({ scope: "local" });
+    return;
+  }
   if (error) console.error("❌ Session error:", error);
 
   if (session) {
@@ -145,9 +168,18 @@ if (feedback) {
   feedback.textContent = "⏳ Entering secure portal…";
 }
 
-  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  const { data, error } = await signInWithRetry(sb, { email, password });
 
   if (error) {
+    if (isRetryableAuthError(error)) {
+      if (feedback) {
+        feedback.style.color = "crimson";
+        feedback.textContent = "Login service timed out. Please try again in a minute.";
+      }
+      setLoginLoadingState(false);
+      return;
+    }
+
     if (feedback) {
       feedback.style.color = "crimson";
       feedback.textContent = `❌ Login failed: ${error.message}`;
