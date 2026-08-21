@@ -49,13 +49,17 @@ EBAY_REFRESH_TOKEN=...
 EBAY_ENV=production
 EBAY_SCOPE=https://api.ebay.com/oauth/api_scope/sell.inventory
 EBAY_ACCOUNT_SCOPE=https://api.ebay.com/oauth/api_scope/sell.account.readonly https://api.ebay.com/oauth/api_scope/sell.inventory
-EBAY_OAUTH_SCOPES=https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account.readonly
+EBAY_ORDER_SCOPE=https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.finances
+EBAY_RETURN_SCOPE=https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly https://api.ebay.com/oauth/api_scope/sell.fulfillment https://api.ebay.com/oauth/api_scope/sell.finances
+EBAY_OAUTH_SCOPES=https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account.readonly https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly https://api.ebay.com/oauth/api_scope/sell.fulfillment https://api.ebay.com/oauth/api_scope/sell.finances https://api.ebay.com/oauth/api_scope/commerce.message https://api.ebay.com/oauth/api_scope/commerce.notification.subscription
 EBAY_SYNC_ALLOW_PUBLISH=false
 EBAY_SOURCE_PHOTO_BUCKET=photos
 EBAY_PUBLIC_PHOTO_BUCKET=public-ebay-photos
 ```
 
 Use a refresh token created with the authorization-code user consent flow. Inventory writes require the `sell.inventory` scope. The publishing setup helper also needs `sell.account.readonly` so it can list business policy IDs.
+
+If eBay returns `invalid_grant` after a seller password or login-name change, the saved refresh token has usually been revoked by eBay. Open the deployed OAuth callback URL, choose **Connect eBay OAuth**, sign in to eBay again, copy the new refresh token, and replace the deployed `EBAY_REFRESH_TOKEN` Supabase secret.
 
 ## Required settings row
 

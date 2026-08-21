@@ -4,8 +4,12 @@ const EBAY_OAUTH_RUNAME = (Deno.env.get("EBAY_OAUTH_RUNAME") ?? "").trim();
 const EBAY_ENV = (Deno.env.get("EBAY_ENV") ?? "production").trim().toLowerCase();
 const EBAY_OAUTH_SCOPES = (Deno.env.get("EBAY_OAUTH_SCOPES") ??
   [
+    "https://api.ebay.com/oauth/api_scope",
     "https://api.ebay.com/oauth/api_scope/sell.inventory",
     "https://api.ebay.com/oauth/api_scope/sell.account.readonly",
+    "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
+    "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+    "https://api.ebay.com/oauth/api_scope/sell.finances",
     "https://api.ebay.com/oauth/api_scope/commerce.message",
     "https://api.ebay.com/oauth/api_scope/commerce.notification.subscription",
   ].join(" ")).trim();

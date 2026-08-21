@@ -2268,6 +2268,12 @@ function getEbayOrderSyncUrl() {
   return `https://${projectRef}.functions.supabase.co/ebay-order-sync`;
 }
 
+function getEbayOAuthCallbackUrl() {
+  const projectRef = String(window.SUPABASE_URL || "")
+    .match(/^https:\/\/([^.]+)\.supabase\.co/i)?.[1] || "byhytmarmigalvawkedi";
+  return `https://${projectRef}.functions.supabase.co/ebay-oauth-callback`;
+}
+
 async function postEbayOrderSyncPayload(payload) {
   const response = await fetch(getEbayOrderSyncUrl(), {
     method: "POST",
@@ -2513,6 +2519,14 @@ function summarizeEbayFinanceSyncStatus(result = {}) {
 
 function formatEbayOrderSyncError(error) {
   if (!error) return "";
+  const rawMessage = typeof error === "string"
+    ? error
+    : error instanceof Error
+    ? error.message
+    : "";
+  if (/invalid_grant|refresh token is invalid|authorization refresh token|revoked/i.test(rawMessage)) {
+    return `eBay needs to be reconnected. The saved eBay authorization was revoked, which commonly happens after a seller password change. Open ${getEbayOAuthCallbackUrl()}, choose Connect eBay OAuth, then save the new refresh token as EBAY_REFRESH_TOKEN in Supabase.`;
+  }
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.message;
   if (typeof error === "object") {
@@ -2522,6 +2536,10 @@ function formatEbayOrderSyncError(error) {
       error.hint,
       error.code ? `code: ${error.code}` : "",
     ].map((value) => String(value || "").trim()).filter(Boolean);
+    const objectMessage = parts.join(" | ");
+    if (/invalid_grant|refresh token is invalid|authorization refresh token|revoked/i.test(objectMessage)) {
+      return `eBay needs to be reconnected. The saved eBay authorization was revoked, which commonly happens after a seller password change. Open ${getEbayOAuthCallbackUrl()}, choose Connect eBay OAuth, then save the new refresh token as EBAY_REFRESH_TOKEN in Supabase.`;
+    }
     if (parts.length) return parts.join(" | ");
     try {
       return JSON.stringify(error);

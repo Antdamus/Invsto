@@ -201,6 +201,12 @@ async function getEbayAccessToken(): Promise<string> {
 
   const text = await res.text();
   if (!res.ok) {
+    if (res.status === 400 && /invalid_grant|refresh token|authorization refresh token/i.test(text)) {
+      throw new Error(
+        "eBay OAuth refresh token is invalid or revoked. Reconnect eBay and replace the EBAY_REFRESH_TOKEN Supabase secret. " +
+          "This commonly happens after an eBay password or seller login change.",
+      );
+    }
     throw new Error(`eBay OAuth refresh failed (${res.status}): ${text.slice(0, 800)}`);
   }
 
