@@ -6914,7 +6914,7 @@
     };
     facts.isPendingOrder = orderContextIsPending(facts);
     facts.ogOrderHref = facts.isPendingOrder ? facts.pendingHref : facts.historyHref;
-    facts.ogOrderLabel = facts.isPendingOrder ? "Open in Pending" : "Open in History";
+    facts.ogOrderLabel = facts.isPendingOrder ? "Pending" : "History";
     return facts;
   }
 
@@ -7120,9 +7120,9 @@
           <span><i data-lucide="search"></i>No linked order yet</span>
           <a class="ebay-order-context-link is-primary" href="${escapeHtml(ebayConversationHref)}" target="_blank" rel="noopener noreferrer" title="Open this buyer conversation in eBay to verify order linkage directly.">
             <i data-lucide="external-link"></i>
-            Open eBay chat
+            eBay chat
           </a>
-          <a class="ebay-order-context-link" href="${escapeHtml(facts.pendingHref)}">Open pending queue</a>
+          <a class="ebay-order-context-link" href="${escapeHtml(facts.pendingHref)}">Pending queue</a>
         </div>
       `;
     }
@@ -7152,7 +7152,7 @@
             <i data-lucide="external-link"></i>
             ${escapeHtml(facts.ogOrderLabel)}
           </a>
-          ${facts.ebayOrderHref ? `<a class="ebay-order-context-link" href="${escapeHtml(facts.ebayOrderHref)}" target="_blank" rel="noopener noreferrer">Open order in eBay</a>` : ""}
+          ${facts.ebayOrderHref ? `<a class="ebay-order-context-link" href="${escapeHtml(facts.ebayOrderHref)}" target="_blank" rel="noopener noreferrer">eBay order</a>` : ""}
         </div>
       </div>
     `;
@@ -8456,17 +8456,17 @@
         <div class="ebay-detail-actions">
           <a class="secondary-btn" href="${escapeHtml(ebayConversationHref)}" target="_blank" rel="noopener noreferrer" title="Open this conversation in eBay. If eBay lands on the message center, search the buyer or copied conversation id shown here.">
             <i data-lucide="external-link"></i>
-            Open eBay chat
+            eBay chat
           </a>
-          ${facts.ebayOrderHref ? `<a class="secondary-btn" href="${escapeHtml(facts.ebayOrderHref)}" target="_blank" rel="noopener noreferrer"><i data-lucide="receipt-text"></i>Open order in eBay</a>` : ""}
-          ${facts.orderNumbers.length && facts.ogOrderHref ? `<a class="secondary-btn" href="${escapeHtml(facts.ogOrderHref)}"><i data-lucide="history"></i>View order history</a>` : ""}
+          ${facts.ebayOrderHref ? `<a class="secondary-btn" href="${escapeHtml(facts.ebayOrderHref)}" target="_blank" rel="noopener noreferrer"><i data-lucide="receipt-text"></i>eBay order</a>` : ""}
+          ${facts.orderNumbers.length && facts.ogOrderHref ? `<a class="secondary-btn" href="${escapeHtml(facts.ogOrderHref)}"><i data-lucide="history"></i>History</a>` : ""}
           <button type="button" class="secondary-btn" data-ebay-detail-action="classify-conversation" data-ebay-conversation-id="${escapeHtml(conversation.id)}" ${state.ebayConversationClassificationLoadingId === conversation.id ? "disabled" : ""}>
             <i data-lucide="${state.ebayConversationClassificationLoadingId === conversation.id ? "loader-circle" : "sparkles"}"></i>
-            ${escapeHtml(classification ? "Classify again" : "Classify")}
+            Classify
           </button>
           <button type="button" class="secondary-btn" data-ebay-detail-action="refresh-messages" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="Deep refresh only this selected conversation and reload its timeline." ${isLoading ? "disabled" : ""}>
             <i data-lucide="${isLoading ? "loader-circle" : "refresh-cw"}"></i>
-            ${escapeHtml(isLoading ? "Refreshing selected conversation" : "Refresh Timeline")}
+            ${escapeHtml(isLoading ? "Refreshing" : "Refresh")}
           </button>
           <button type="button" class="secondary-btn" data-ebay-detail-action="personal-read-state" data-ebay-read-state="${escapeHtml(unreadForViewer ? "read" : "unread")}" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="${escapeHtml(unreadForViewer ? "Clear this conversation from your unread feed" : "Move this conversation back to unread for you")}">
             <i data-lucide="${unreadForViewer ? "mail-check" : "mail-open"}"></i>
@@ -8475,7 +8475,7 @@
           <details class="ebay-maintenance-actions ebay-read-sync-actions">
             <summary class="secondary-btn">
               <i data-lucide="mail-check"></i>
-              Read Sync
+              Sync
             </summary>
             <div class="ebay-maintenance-action-menu">
               <button type="button" class="secondary-btn" data-ebay-detail-action="sync-provider-read" data-ebay-read-state="read" data-ebay-conversation-id="${escapeHtml(conversation.id)}" title="Set this conversation read in eBay and reconcile OG after provider confirmation." ${readSyncLoading ? "disabled" : ""}>
@@ -8570,9 +8570,9 @@
           { label: "Link status", value: facts.orderNumbers.length ? "Order linked" : "Buyer linked" },
         ])}
         <div class="ebay-context-compact-actions">
-          <a class="secondary-btn" href="${escapeHtml(ebayConversationHref)}" target="_blank" rel="noopener noreferrer"><i data-lucide="external-link"></i>Open eBay chat</a>
-          ${facts.ebayOrderHref ? `<a class="secondary-btn" href="${escapeHtml(facts.ebayOrderHref)}" target="_blank" rel="noopener noreferrer"><i data-lucide="receipt-text"></i>Open order in eBay</a>` : ""}
-          ${facts.orderNumbers.length && facts.ogOrderHref ? `<a class="secondary-btn" href="${escapeHtml(facts.ogOrderHref)}"><i data-lucide="history"></i>Open in history</a>` : ""}
+          <a class="secondary-btn" href="${escapeHtml(ebayConversationHref)}" target="_blank" rel="noopener noreferrer"><i data-lucide="external-link"></i>eBay chat</a>
+          ${facts.ebayOrderHref ? `<a class="secondary-btn" href="${escapeHtml(facts.ebayOrderHref)}" target="_blank" rel="noopener noreferrer"><i data-lucide="receipt-text"></i>eBay order</a>` : ""}
+          ${facts.orderNumbers.length && facts.ogOrderHref ? `<a class="secondary-btn" href="${escapeHtml(facts.ogOrderHref)}"><i data-lucide="history"></i>History</a>` : ""}
           <button type="button" class="secondary-btn" data-ebay-detail-action="refresh-context" data-ebay-conversation-id="${escapeHtml(conversation.id)}" ${isLoading ? "disabled" : ""}>
             <i data-lucide="${isLoading ? "loader-circle" : "refresh-cw"}"></i>
             Refresh context
