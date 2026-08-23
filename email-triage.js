@@ -6979,8 +6979,8 @@
     const sameTitleRows = anchorTitle
       ? rows.filter((row) => compactConversationText(row.title).toLowerCase() === anchorTitle)
       : [];
-    if (sameTitleRows.length <= 1) return null;
-    const groupRows = sameTitleRows;
+    const groupRows = sameTitleRows.length > 1 ? sameTitleRows : rows;
+    if (groupRows.length <= 1) return null;
     const lineIdsForGroup = uniqueCompactValues(groupRows.map((row) => row.line_id));
     const orderIdsForGroup = uniqueCompactValues(groupRows.map((row) => row.order_id));
     const total = groupRows.reduce((sum, row) => {

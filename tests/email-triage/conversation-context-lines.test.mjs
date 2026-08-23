@@ -45,7 +45,8 @@ test("task target picker stays limited to directly linked order targets", () => 
   assert.match(js, /\|\| ebayConversationIdentifierMatches\(row\.item_number, itemNumbers\)/);
   assert.match(js, /\|\| ebayConversationIdentifierMatches\(row\.transaction_id, transactionIds\)/);
   assert.match(js, /const sameTitleRows = anchorTitle/);
-  assert.match(js, /if \(sameTitleRows\.length <= 1\) return null;/);
+  assert.match(js, /const groupRows = sameTitleRows\.length > 1 \? sameTitleRows : rows;/);
+  assert.match(js, /if \(groupRows\.length <= 1\) return null;/);
   assert.match(js, /source: "buyer_history"/);
   assert.match(js, /function ebayConversationBuyerHistoryLinkedGroup\(context = \{\}, linkedTargetIds = \{\}, linkedLines = \[\]\)/);
   assert.match(js, /safeArray\(context\?\.buyer_history_groups\)\.find/);
