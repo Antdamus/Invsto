@@ -1,4 +1,4 @@
-const CONTEXT_VERSION = "ebay-conversation-context-v3";
+const CONTEXT_VERSION = "ebay-conversation-context-v4";
 const MAX_LINKS = 80;
 const MAX_MESSAGES = 100;
 const MAX_RETURNS = 20;
@@ -1092,6 +1092,39 @@ function compactOrderLine(line: Record<string, any>, order: Record<string, any> 
   };
 }
 
+function compactOrderGroup(
+  event: Record<string, any>,
+  lineById: Map<string, Record<string, any>>,
+  orderById: Map<string, Record<string, any>>,
+) {
+  const orderLineIds = uniqueIds(Array.isArray(event.order_line_ids) ? event.order_line_ids : [], MAX_LINKS * 20);
+  const groupLines = orderLineIds
+    .map((lineId) => lineById.get(String(lineId)))
+    .filter(Boolean) as Array<Record<string, any>>;
+  const orderIds = uniqueIds([
+    ...(Array.isArray(event.order_ids) ? event.order_ids : []),
+    ...groupLines.map((line) => line.order_id),
+  ], MAX_LINKS * 20);
+  const orderNumbers = unique(
+    orderIds.map((orderId) => orderById.get(String(orderId))?.order_number),
+    MAX_LINKS * 20,
+  );
+  const totalPrice = groupLines.reduce((sum, line) => {
+    const value = Number(line.total_price ?? line.sold_for ?? 0);
+    return Number.isFinite(value) ? sum + value : sum;
+  }, 0);
+  return {
+    id: event.id,
+    action: shortText(event.action, 120),
+    created_at: event.created_at || null,
+    order_ids: orderIds,
+    order_line_ids: orderLineIds,
+    order_numbers: orderNumbers,
+    line_count: groupLines.length,
+    total_price: numberOrNull(totalPrice),
+  };
+}
+
 function mergeRowsById(...groups: Array<Array<Record<string, any>>>) {
   const rowsById = new Map<string, Record<string, any>>();
   for (const group of groups) {
@@ -1398,6 +1431,11 @@ export async function buildEbayConversationContext(
   if (orderLinesResult.error) warnings.push(warning("order_sibling_line_context_partial", "All lines for matched orders could not be loaded.", "warning"));
   const orderLines = (orderLinesResult.data || []) as Array<Record<string, any>>;
   const lines = mergeRowsById(contextSeedLines, orderLines);
+  const lineById = new Map<string, Record<string, any>>();
+  for (const line of lines) lineById.set(String(line.id), line);
+  const matchedOrderGroups = ((groupEventsResult.data || []) as Array<Record<string, any>>)
+    .map((event) => compactOrderGroup(event, lineById, orderById))
+    .filter((group) => group.order_line_ids.length > 0);
 
   const orderNumbers = unique(orders.map((order) => order.order_number), MAX_LINKS);
   const returnRows = new Map<string, Record<string, any>>();
@@ -1515,6 +1553,7 @@ export async function buildEbayConversationContext(
     buyer,
     matched_orders: orders.map(compactOrder),
     matched_order_lines: lines.map((line) => compactOrderLine(line, orderById.get(String(line.order_id)) || null)),
+    matched_order_groups: matchedOrderGroups,
     matched_returns: returns.map((returnCase) => compactReturnCase(returnCase, returnItemsByCase.get(String(returnCase.id)) || [])),
     context_resolution: resolution,
     buyer_history_summary: buyerHistorySummary,

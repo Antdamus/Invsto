@@ -6950,10 +6950,23 @@
     };
   }
 
+  function ebayConversationLinkedOrderGroup(context = {}, linkedTargetIds = {}) {
+    const lineIds = new Set(safeArray(linkedTargetIds.lineIds).map((id) => String(id)));
+    const orderIds = new Set(safeArray(linkedTargetIds.orderIds).map((id) => String(id)));
+    return safeArray(context?.matched_order_groups).find((group) => {
+      const groupLineIds = safeArray(group?.order_line_ids).map((id) => String(id));
+      const groupOrderIds = safeArray(group?.order_ids).map((id) => String(id));
+      return groupLineIds.some((id) => lineIds.has(id)) || groupOrderIds.some((id) => orderIds.has(id));
+    }) || null;
+  }
+
   function buildEbayConversationTaskTargetOptions(state, conversation) {
     const payload = state.ebayConversationContextsById?.[conversation?.id] || null;
     const context = contextFromEbayPayload(payload);
     const linkedTargetIds = ebayConversationLinkedTargetIds(context);
+    const linkedOrderGroup = ebayConversationLinkedOrderGroup(context, linkedTargetIds);
+    const groupLineIds = uniqueCompactValues(safeArray(linkedOrderGroup?.order_line_ids));
+    const groupOrderIds = uniqueCompactValues(safeArray(linkedOrderGroup?.order_ids));
     const allOrders = safeArray(context?.matched_orders).filter((order) => order?.id);
     const allLines = safeArray(context?.matched_order_lines).filter((line) => line?.id);
     const directLines = linkedTargetIds.lineIds.length
@@ -6961,8 +6974,9 @@
       : linkedTargetIds.orderIds.length ? [] : allLines;
     const targetOrderIds = uniqueCompactValues([
       ...linkedTargetIds.orderIds,
+      ...groupOrderIds,
       ...directLines.map((line) => line.order_id),
-      ...(linkedTargetIds.orderIds.length || directLines.length ? [] : allOrders.map((order) => order.id)),
+      ...(linkedTargetIds.orderIds.length || groupOrderIds.length || directLines.length ? [] : allOrders.map((order) => order.id)),
     ]);
     const orders = targetOrderIds.length
       ? allOrders.filter((order) => targetOrderIds.includes(String(order.id)))
@@ -6995,27 +7009,41 @@
       targetRows.push(target);
     };
 
-    const allOrderRows = [...orderById.values()].filter((order) => order?.id);
-    allOrderRows.forEach((order) => {
-      const contextLines = allLinesByOrderId.get(String(order.id)) || [];
-      const linkedLines = directLinesByOrderId.get(String(order.id)) || [];
-      const pending = ebayConversationTaskTargetIsPending(order, contextLines.length ? contextLines : linkedLines);
+    const primaryOrderId = compactConversationText(directLines[0]?.order_id || linkedTargetIds.orderIds[0] || groupOrderIds[0]);
+    const primaryOrder = orderById.get(primaryOrderId) || [...orderById.values()].find((order) => order?.id) || null;
+    if (primaryOrder?.id) {
+      const groupLineSet = new Set(groupLineIds.map((id) => String(id)));
+      const groupLines = groupLineIds.length
+        ? allLines.filter((line) => groupLineSet.has(String(line.id)))
+        : [];
+      const contextLines = allLinesByOrderId.get(String(primaryOrder.id)) || [];
+      const linkedLines = directLinesByOrderId.get(String(primaryOrder.id)) || [];
+      const parentLines = groupLines.length ? groupLines : contextLines.length ? contextLines : linkedLines;
+      const parentOrderIds = groupOrderIds.length ? groupOrderIds : [primaryOrder.id];
+      const parentOrderNumbers = groupOrderIds.length
+        ? uniqueCompactValues(parentOrderIds.map((orderId) => orderById.get(String(orderId))?.order_number))
+        : [primaryOrder.order_number].filter(Boolean);
+      const pending = ebayConversationTaskTargetIsPending(primaryOrder, parentLines);
       const source = pending ? "pending_order" : "order_history";
-      const amount = ebayConversationTaskTargetAmount(order, contextLines.length ? contextLines : linkedLines);
+      const groupAmount = Number(linkedOrderGroup?.total_price || 0);
+      const amount = Number.isFinite(groupAmount) && groupAmount > 0
+        ? groupAmount
+        : ebayConversationTaskTargetAmount(primaryOrder, parentLines);
+      const parentLineCount = Number(linkedOrderGroup?.line_count || parentLines.length || 0);
       pushTarget({
-        key: `${source}:order:${order.id}`,
+        key: `${source}:order:${primaryOrder.id}:${groupLineIds.join(",")}`,
         targetKind: "order",
         targetSource: source,
-        taskScope: "order",
-        orderId: order.id,
-        orderLineIds: [],
-        groupOrderIds: [order.id],
-        groupOrderNumbers: [order.order_number].filter(Boolean),
-        label: `${source === "order_history" ? "Entire closed order" : "Entire pending order"} ${order.order_number || ""}`.trim(),
-        detail: `${order.buyer_username || conversation?.other_party_username || "Unknown buyer"} / all lines in this order${amount ? ` / order total ${formatContextMoney(amount)}` : ""}`,
+        taskScope: parentOrderIds.length > 1 ? "group" : "order",
+        orderId: primaryOrder.id,
+        orderLineIds: parentOrderIds.length > 1 ? groupLineIds : [],
+        groupOrderIds: parentOrderIds,
+        groupOrderNumbers: parentOrderNumbers,
+        label: `${source === "order_history" ? "Entire closed order" : "Entire pending order"} ${primaryOrder.order_number || ""}`.trim(),
+        detail: `${primaryOrder.buyer_username || conversation?.other_party_username || "Unknown buyer"} / ${parentLineCount > 1 ? `${parentLineCount} lines in this order` : "all lines in this order"}${amount ? ` / order total ${formatContextMoney(amount)}` : ""}`,
         badge: "Order",
       });
-    });
+    }
 
     directLines.forEach((line) => {
       const order = orderById.get(String(line.order_id)) || {};
