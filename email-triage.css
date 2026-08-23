@@ -5983,16 +5983,24 @@ button.ebay-filter-chip {
 .ebay-message-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: 6px;
   justify-content: flex-start;
-  margin-top: 9px;
+  margin-top: 8px;
 }
 
 .ebay-message-actions .secondary-btn {
-  min-height: 30px;
-  border-radius: 7px;
-  padding: 0 9px;
-  font-size: .72rem;
+  width: auto;
+  min-height: 28px;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: .68rem;
+  gap: 5px;
+  line-height: 1;
+}
+
+.ebay-message-actions .secondary-btn svg {
+  width: 14px;
+  height: 14px;
 }
 
 .ebay-message-debug {
@@ -8207,10 +8215,19 @@ button.ebay-filter-chip {
     white-space: pre-wrap;
   }
 
+  .ebay-message-actions {
+    gap: 6px;
+    width: auto;
+  }
+
   .ebay-message-actions .secondary-btn {
-    min-height: 38px;
-    border-radius: 10px;
-    flex: 1 1 140px;
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 0;
+    min-height: 30px;
+    border-radius: 999px;
+    padding: 0 9px;
+    font-size: .68rem;
   }
 
   .ebay-classification-card,
@@ -8341,7 +8358,6 @@ button.ebay-filter-chip {
 
   .ebay-purchase-context-header,
   .ebay-draft-actions,
-  .ebay-message-actions,
   .ebay-detail-actions,
   .ebay-context-actions,
   .ebay-order-context-actions {
@@ -8350,14 +8366,12 @@ button.ebay-filter-chip {
   }
 
   .ebay-purchase-context-actions,
-  .ebay-message-actions,
   .ebay-detail-actions,
   .ebay-context-actions,
   .ebay-order-context-actions {
     width: 100%;
   }
 
-  .ebay-message-actions .secondary-btn,
   .ebay-purchase-context-actions .ebay-order-context-link,
   .ebay-order-context-actions .ebay-order-context-link {
     width: 100%;

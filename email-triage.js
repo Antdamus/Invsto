@@ -6665,13 +6665,13 @@
               ${canGenerate ? `
                 <button type="button" class="secondary-btn" data-ebay-draft-action="generate" data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-ebay-target-message-id="${escapeHtml(message.id)}" ${isActionLoading ? "disabled" : ""}>
                   <i data-lucide="${isActionLoading ? "loader-circle" : "wand-sparkles"}"></i>
-                  ${escapeHtml(isActionLoading ? "Generating" : "Generate AI Reply")}
+                  ${escapeHtml(isActionLoading ? "Generating" : "AI Reply")}
                 </button>
               ` : ""}
               ${canCreateTask ? `
                 <button type="button" class="secondary-btn" data-ebay-message-task-action="create" data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-ebay-message-id="${escapeHtml(message.id)}">
                   <i data-lucide="clipboard-plus"></i>
-                  Create Task
+                  Task
                 </button>
               ` : ""}
             </div>

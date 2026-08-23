@@ -28,14 +28,22 @@ test("returning to mobile inbox restores the previous scroll anchor", () => {
 
 test("mobile inbox switcher uses restore mode and ships with a fresh cache key", () => {
   assert.match(js, /restoreInboxScroll: button\.getAttribute\("data-ebay-mobile-view"\) === "inbox"/);
-  assert.match(html, /email-triage\.js\?v=user-read-response-status-20260823/);
+  assert.match(html, /email-triage\.js\?v=message-actions-compact-20260823/);
 });
 
 test("mobile eBay workspace stays compact and touch-friendly on phones", () => {
-  assert.match(html, /email-triage\.css\?v=mobile-polish-20260823/);
+  assert.match(html, /email-triage\.css\?v=message-actions-compact-20260823/);
   assert.match(css, /\.ebay-mobile-workspace-switcher\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)\s*!important;/);
   assert.match(css, /\.ebay-mobile-workspace-switcher\s*\{[\s\S]*?top:\s*calc\(64px \+ env\(safe-area-inset-top\)\);/);
   assert.match(css, /\.ebay-conversation-sync-result \.inbox-skipped-reasons\s*\{[\s\S]*?overflow-x:\s*auto;/);
   assert.match(css, /\.ebay-detail-head,\s*\.ebay-context-head\s*\{[\s\S]*?position:\s*static;/);
   assert.match(css, /\.ebay-conversation-actions,\s*\.ebay-conversation-filter-strip\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/);
+});
+
+test("message timeline actions stay compact on mobile", () => {
+  assert.match(js, /isActionLoading \? "Generating" : "AI Reply"/);
+  assert.match(js, /<i data-lucide="clipboard-plus"><\/i>\s*Task/);
+  assert.match(css, /\.ebay-message-actions \.secondary-btn\s*\{[\s\S]*?border-radius:\s*999px;/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.ebay-message-actions \.secondary-btn\s*\{[\s\S]*?flex:\s*0 0 auto;/);
+  assert.doesNotMatch(css, /@media \(max-width: 760px\)[\s\S]*?\.ebay-message-actions,[\s\S]*?flex-direction:\s*column;/);
 });
