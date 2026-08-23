@@ -555,7 +555,7 @@ entrypoint = "./functions/ebay-notification-admin/index.ts"
 
 [functions.ebay-conversation-context]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 entrypoint = "./functions/ebay-conversation-context/index.ts"
 
 [functions.ebay-conversation-classify]

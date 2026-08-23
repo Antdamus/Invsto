@@ -175,6 +175,7 @@ function buildSearchText(conversation: Record<string, any>, messages: Array<Reco
       message.subject,
       message.message_body,
       message.message_body_preview,
+      ...rawMetadataSearchText(message.raw_message_metadata),
     ]),
     ...rawMetadataSearchText(conversation.raw_summary),
     ...rawMetadataSearchText(conversation.raw_detail_metadata),
@@ -279,7 +280,7 @@ async function loadConversationByEbayId(
 async function loadMessages(supabase: EbayConversationContextClient, conversationId: string) {
   const { data, error } = await supabase
     .from("ebay_conversation_messages")
-    .select("id, ebay_message_id, sender_username, recipient_username, direction, direction_confidence, subject, message_body, message_body_preview, read_status, is_read, message_status, created_at_ebay, has_media, media_count, message_media")
+    .select("id, ebay_message_id, sender_username, recipient_username, direction, direction_confidence, subject, message_body, message_body_preview, read_status, is_read, message_status, created_at_ebay, has_media, media_count, message_media, raw_message_metadata")
     .eq("conversation_id", conversationId)
     .order("created_at_ebay", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: true })
@@ -493,6 +494,66 @@ function returnCandidateFrom(
   };
 }
 
+const TITLE_STOP_WORDS = new Set([
+  "about",
+  "and",
+  "ebay",
+  "for",
+  "from",
+  "item",
+  "listing",
+  "message",
+  "order",
+  "question",
+  "sale",
+  "sold",
+  "that",
+  "the",
+  "this",
+  "with",
+]);
+
+function normalizeTitleForMatch(value: unknown) {
+  return text(value, 400)
+    .toLowerCase()
+    .replace(/\bsold\s*[-:]\s*/g, " ")
+    .replace(/#[0-9]+\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function titleTokens(value: unknown) {
+  return unique(normalizeTitleForMatch(value).split(" "), 80)
+    .filter((token) => token.length >= 3 && !TITLE_STOP_WORDS.has(token));
+}
+
+function titleMatchScore(left: unknown, right: unknown) {
+  const leftText = normalizeTitleForMatch(left);
+  const rightText = normalizeTitleForMatch(right);
+  if (!leftText || !rightText) return 0;
+  if ((leftText.length >= 12 && rightText.includes(leftText)) || (rightText.length >= 12 && leftText.includes(rightText))) {
+    return 0.96;
+  }
+
+  const leftTokens = titleTokens(leftText);
+  const rightTokens = titleTokens(rightText);
+  if (!leftTokens.length || !rightTokens.length) return 0;
+  const rightSet = new Set(rightTokens);
+  const common = leftTokens.filter((token) => rightSet.has(token)).length;
+  const overlap = common / Math.min(leftTokens.length, rightTokens.length);
+  const union = new Set([...leftTokens, ...rightTokens]).size || 1;
+  const jaccard = common / union;
+  return (overlap * 0.82) + (jaccard * 0.18);
+}
+
+function conversationTitleCandidates(conversation: Record<string, any>, messages: Array<Record<string, any>>) {
+  return unique([
+    conversation.conversation_title,
+    ...messages.map((message) => message.subject),
+  ], 12).filter((value) => titleTokens(value).length >= 2);
+}
+
 function bestLineByBuyerAndTime(lines: Array<Record<string, any>>, buyerUsernames: string[], targetTime: string | null) {
   const buyerKeys = new Set(buyerUsernames.map(lowerTrim).filter(Boolean));
   const buyerMatched = buyerKeys.size
@@ -515,6 +576,127 @@ function bestLineByBuyerAndTime(lines: Array<Record<string, any>>, buyerUsername
     uniqueByTime: best.days !== null && (!second || second.days === null || second.days - best.days >= 2),
     candidateCount: lines.length,
   };
+}
+
+async function pushBuyerTitleOrderLineCandidates(
+  supabase: EbayConversationContextClient,
+  candidates: LinkCandidate[],
+  conversation: Record<string, any>,
+  messages: Array<Record<string, any>>,
+  identifiers: ReturnType<typeof extractConversationIdentifiers>,
+  targetTime: string | null,
+  warnings: Array<Record<string, unknown>>,
+) {
+  const buyerUsernames = unique(identifiers.buyerUsernames, 10);
+  const titleCandidates = conversationTitleCandidates(conversation, messages);
+  if (!buyerUsernames.length || !titleCandidates.length) return;
+
+  const { data: orders, error: ordersError } = await supabase
+    .from("ebay_orders")
+    .select("id, order_number, buyer_username, buyer_name, buyer_email, status, sale_date, paid_on_date")
+    .in("buyer_username", buyerUsernames)
+    .order("sale_date", { ascending: false, nullsFirst: false })
+    .limit(80);
+  if (ordersError) throw new EbayConversationContextError("order_lookup_failed", { phase: "buyer_title_order_lookup", message: ordersError.message });
+  const orderIds = uniqueIds((orders || []).map((order: Record<string, any>) => order.id), 80);
+  if (!orderIds.length) return;
+
+  const lines = await queryByChunks<Record<string, any>>(orderIds, async (chunk) => {
+    const { data, error } = await supabase
+      .from("ebay_order_lines")
+      .select(orderLineSelect())
+      .in("order_id", chunk)
+      .limit(120);
+    if (error) throw new EbayConversationContextError("order_line_lookup_failed", { phase: "buyer_title_line_lookup", message: error.message });
+    return data || [];
+  });
+
+  const scored = lines
+    .flatMap((line) => titleCandidates.map((candidateTitle) => ({
+      line,
+      candidateTitle,
+      titleScore: titleMatchScore(candidateTitle, line.item_title),
+      days: daysBetween(targetTime, line.order?.sale_date || line.order?.paid_on_date),
+    })))
+    .filter((entry) => entry.titleScore >= 0.72)
+    .sort((a, b) => {
+      const scoreDelta = b.titleScore - a.titleScore;
+      if (Math.abs(scoreDelta) > 0.001) return scoreDelta;
+      return (a.days ?? 999999) - (b.days ?? 999999);
+    });
+
+  const best = scored[0] || null;
+  if (!best) {
+    warnings.push(warning("buyer_title_order_line_not_found", "Buyer was found, but no stored order line title matched the eBay conversation title.", "info"));
+    return;
+  }
+  const second = scored.find((entry) => String(entry.line.id) !== String(best.line.id)) || null;
+  const closeSecond = second && second.titleScore >= best.titleScore - 0.08 && Math.abs((second.days ?? 999999) - (best.days ?? 999999)) <= 2;
+  const status: LinkStatus = best.titleScore >= 0.86 && !closeSecond ? "confirmed" : "suggested";
+  candidates.push(lineCandidateFrom(conversation, identifiers, best.line, {
+    matchedValue: text(best.candidateTitle, 180),
+    method: "buyer_title_time_order_line",
+    confidence: status === "confirmed" ? 0.88 : 0.74,
+    status,
+    extra: {
+      buyer_matched: true,
+      title_score: Number(best.titleScore.toFixed(3)),
+      proximity_days: best.days,
+      candidate_count: scored.length,
+    },
+  }));
+}
+
+async function pushBuyerRecentOrderCandidates(
+  supabase: EbayConversationContextClient,
+  candidates: LinkCandidate[],
+  conversation: Record<string, any>,
+  identifiers: ReturnType<typeof extractConversationIdentifiers>,
+  targetTime: string | null,
+  warnings: Array<Record<string, unknown>>,
+) {
+  const buyerUsernames = unique(identifiers.buyerUsernames, 10);
+  if (!buyerUsernames.length || !targetTime) return;
+
+  const { data: orders, error } = await supabase
+    .from("ebay_orders")
+    .select("id, order_number, buyer_username, buyer_name, buyer_email, status, sale_date, paid_on_date")
+    .in("buyer_username", buyerUsernames)
+    .order("sale_date", { ascending: false, nullsFirst: false })
+    .limit(40);
+  if (error) throw new EbayConversationContextError("order_lookup_failed", { phase: "buyer_recent_order_lookup", message: error.message });
+
+  const scored = (orders || [])
+    .map((order: Record<string, any>) => ({
+      order,
+      days: daysBetween(targetTime, order.sale_date || order.paid_on_date),
+    }))
+    .filter((entry: { days: number | null }) => entry.days !== null && entry.days <= 14)
+    .sort((a: { days: number | null }, b: { days: number | null }) => (a.days ?? 999999) - (b.days ?? 999999));
+  const best = scored[0] || null;
+  if (!best) return;
+
+  const second = scored[1] || null;
+  const uniqueByTime = !second || second.days === null || (second.days ?? 999999) - (best.days ?? 999999) >= 2;
+  const veryClose = (best.days ?? 999999) <= 2;
+  if (!uniqueByTime && !veryClose) {
+    warnings.push(warning("ambiguous_buyer_recent_orders", "Buyer has multiple recent orders near this conversation time, so no automatic buyer-only order link was created.", "info"));
+    return;
+  }
+
+  const status: LinkStatus = veryClose && uniqueByTime ? "confirmed" : "suggested";
+  candidates.push(orderCandidateFrom(conversation, identifiers, best.order, {
+    matchedValue: String(best.order.order_number || best.order.id),
+    method: "buyer_recent_unique_order",
+    confidence: status === "confirmed" ? 0.82 : 0.68,
+    status,
+    extra: {
+      buyer_matched: true,
+      proximity_days: best.days,
+      candidate_count: scored.length,
+      title_not_required: true,
+    },
+  }));
 }
 
 async function buildLinkCandidates(
@@ -649,6 +831,15 @@ async function buildLinkCandidates(
         warnings.push(warning("ambiguous_custom_label_order_lines", `Custom label ${label} matched multiple order lines.`, "warning"));
       }
     }
+  }
+
+  const hasOrderCandidate = candidates.some((candidate) => candidate.link_type === "ebay_order" || candidate.link_type === "ebay_order_line");
+  if (!hasOrderCandidate) {
+    await pushBuyerTitleOrderLineCandidates(supabase, candidates, conversation, messages, identifiers, targetTime, warnings);
+  }
+  const hasFallbackOrderCandidate = candidates.some((candidate) => candidate.link_type === "ebay_order" || candidate.link_type === "ebay_order_line");
+  if (!hasFallbackOrderCandidate) {
+    await pushBuyerRecentOrderCandidates(supabase, candidates, conversation, identifiers, targetTime, warnings);
   }
 
   const orderIds = uniqueIds(candidates.map((candidate) => candidate.ebay_order_id), MAX_LINKS);

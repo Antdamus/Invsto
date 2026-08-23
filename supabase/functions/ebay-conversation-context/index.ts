@@ -7,7 +7,7 @@ import {
   resolveEbayConversation,
 } from "../_shared/ebay-conversation-context.ts";
 
-type ServiceClient = ReturnType<typeof createClient>;
+type ServiceClient = any;
 type Mode = "context" | "link_conversation" | "link_and_context";
 
 type Input = {

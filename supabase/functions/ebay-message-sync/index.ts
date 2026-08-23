@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { linkEbayConversationContext } from "../_shared/ebay-conversation-context.ts";
 
-type ServiceClient = ReturnType<typeof createClient>;
+type ServiceClient = any;
 type JsonRecord = Record<string, unknown>;
 type ConversationType = "FROM_MEMBERS" | "FROM_EBAY";
 type MessageDirection = "inbound" | "outbound" | "platform" | "unknown";
@@ -38,6 +38,9 @@ type SyncInput = {
   latestSyncLookbackDays: number;
   recentDetailSweepLimit: number;
   suppressConversationActivityEvents: boolean;
+  syncRecentOrdersBeforeMessages: boolean;
+  recentOrderSyncDaysBack: number;
+  recentOrderSyncLimit: number;
 };
 
 type EbayAccount = {
@@ -177,6 +180,11 @@ const DEFAULT_LATEST_SYNC_LOOKBACK_DAYS = 14;
 const MAX_LATEST_SYNC_LOOKBACK_DAYS = 90;
 const DEFAULT_RECENT_DETAIL_SWEEP_LIMIT = 100;
 const MAX_RECENT_DETAIL_SWEEP_LIMIT = 100;
+const DEFAULT_RECENT_ORDER_SYNC_DAYS_BACK = 14;
+const DEFAULT_RECENT_ORDER_SYNC_LIMIT = 200;
+const MAX_RECENT_ORDER_SYNC_LIMIT = 500;
+const RECENT_ORDER_SYNC_RESPONSE_BUDGET_MS = 35000;
+const RECENT_ORDER_SYNC_TIMEOUT_MS = 45000;
 const DEFAULT_BACKFILL_RATE_LIMIT_PAUSE_MS = 100;
 const MAX_RATE_LIMIT_PAUSE_MS = 5000;
 const EBAY_GET_MAX_ATTEMPTS = 4;
@@ -353,6 +361,7 @@ async function parseInput(req: Request): Promise<SyncInput> {
     ? [...SUPPORTED_CONVERSATION_TYPES]
     : conversationTypesFrom(explicitConversationTypes, isBackfill ? [...SUPPORTED_CONVERSATION_TYPES] : ["FROM_MEMBERS"]);
   const isBatchOperation = !conversationId;
+  const shouldSyncRecentOrdersDefault = !["backfill", "replay"].includes(runType);
   const defaultCheckpointScope = runType === "backfill"
     ? DEFAULT_BACKFILL_CHECKPOINT_SCOPE
     : runType === "incremental"
@@ -402,7 +411,103 @@ async function parseInput(req: Request): Promise<SyncInput> {
       MAX_RECENT_DETAIL_SWEEP_LIMIT,
     ),
     suppressConversationActivityEvents: booleanValue(getValue("suppressConversationActivityEvents"), isBatchOperation),
+    syncRecentOrdersBeforeMessages: booleanValue(
+      getValue("syncRecentOrdersBeforeMessages") ?? getValue("syncRecentOrders"),
+      shouldSyncRecentOrdersDefault,
+    ),
+    recentOrderSyncDaysBack: boundedInteger(
+      getValue("recentOrderSyncDaysBack") ?? getValue("orderSyncDaysBack") ?? getValue("latestSyncLookbackDays") ?? getValue("lookbackDays"),
+      DEFAULT_RECENT_ORDER_SYNC_DAYS_BACK,
+      1,
+      MAX_LATEST_SYNC_LOOKBACK_DAYS,
+    ),
+    recentOrderSyncLimit: boundedInteger(
+      getValue("recentOrderSyncLimit") ?? getValue("orderSyncLimit"),
+      DEFAULT_RECENT_ORDER_SYNC_LIMIT,
+      1,
+      MAX_RECENT_ORDER_SYNC_LIMIT,
+    ),
   };
+}
+
+function summarizeRecentOrderSync(payload: JsonRecord, status: number, startedMs: number, ok: boolean, error = ""): JsonRecord {
+  const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+  return {
+    attempted: true,
+    ok,
+    status,
+    runId: stringOrNull(payload.runId),
+    dryRun: payload.dryRun === true,
+    ordersSeen: numberOrNull(payload.ordersSeen) ?? 0,
+    ordersImported: numberOrNull(payload.ordersImported) ?? 0,
+    linesImported: numberOrNull(payload.linesImported) ?? 0,
+    linesReserved: numberOrNull(payload.linesReserved) ?? 0,
+    ebayAwaitingOrderCount: numberOrNull(payload.ebayAwaitingOrderCount) ?? 0,
+    ebayCancellationOrderCount: numberOrNull(payload.ebayCancellationOrderCount) ?? 0,
+    skippedClosed: numberOrNull(payload.skippedClosed) ?? 0,
+    skippedUnpaid: numberOrNull(payload.skippedUnpaid) ?? 0,
+    skippedNotAwaitingShipment: numberOrNull(payload.skippedNotAwaitingShipment) ?? 0,
+    warningsCount: warnings.length,
+    error: error || null,
+    durationMs: Math.max(Date.now() - startedMs, 0),
+  };
+}
+
+async function syncRecentOrdersBeforeMessageSync(input: SyncInput): Promise<JsonRecord> {
+  const startedMs = Date.now();
+  if (!input.syncRecentOrdersBeforeMessages) {
+    return {
+      attempted: false,
+      ok: true,
+      skipped: true,
+      reason: "disabled_for_this_message_sync",
+      durationMs: 0,
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), RECENT_ORDER_SYNC_TIMEOUT_MS);
+  try {
+    const serviceRoleKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
+    const functionBaseUrl = requiredEnv("SUPABASE_URL").replace(/\/+$/, "");
+    const response = await fetch(`${functionBaseUrl}/functions/v1/ebay-order-sync`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${serviceRoleKey}`,
+        "apikey": serviceRoleKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        dryRun: false,
+        limit: input.recentOrderSyncLimit,
+        daysBack: input.recentOrderSyncDaysBack,
+        reserve: false,
+        syncFinance: false,
+        checkLocalMismatches: false,
+        responseBudgetMs: RECENT_ORDER_SYNC_RESPONSE_BUDGET_MS,
+      }),
+      signal: controller.signal,
+    });
+    const payload = recordOrEmpty(await response.json().catch(() => ({})));
+    const ok = response.ok && payload.ok !== false;
+    const error = ok
+      ? ""
+      : firstText(payload.error, payload.message, `recent_order_sync_failed_${response.status}`);
+    return summarizeRecentOrderSync(payload, response.status, startedMs, ok, error);
+  } catch (error) {
+    const code = error instanceof DOMException && error.name === "AbortError"
+      ? "recent_order_sync_timeout"
+      : compactError(error);
+    return {
+      attempted: true,
+      ok: false,
+      status: 0,
+      error: code,
+      durationMs: Math.max(Date.now() - startedMs, 0),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function text(value: unknown) {
@@ -821,6 +926,9 @@ async function createRun(supabase: ServiceClient, input: SyncInput, account: Eba
         rateLimitPauseMs: input.rateLimitPauseMs,
         latestSyncLookbackDays: input.latestSyncLookbackDays,
         recentDetailSweepLimit: input.recentDetailSweepLimit,
+        syncRecentOrdersBeforeMessages: input.syncRecentOrdersBeforeMessages,
+        recentOrderSyncDaysBack: input.recentOrderSyncDaysBack,
+        recentOrderSyncLimit: input.recentOrderSyncLimit,
         suppress_conversation_activity_events: input.suppressConversationActivityEvents,
         readOnly: true,
         sendsEnabled: false,
@@ -833,7 +941,12 @@ async function createRun(supabase: ServiceClient, input: SyncInput, account: Eba
   return data.id as string;
 }
 
-async function existingConversationsById(supabase: ServiceClient, accountId: string, conversationType: ConversationType, ids: string[]) {
+async function existingConversationsById(
+  supabase: ServiceClient,
+  accountId: string,
+  conversationType: ConversationType,
+  ids: string[],
+): Promise<Map<string, ExistingConversation>> {
   if (!ids.length) return new Map<string, ExistingConversation>();
   const { data, error } = await supabase
     .from("ebay_conversations")
@@ -842,8 +955,8 @@ async function existingConversationsById(supabase: ServiceClient, accountId: str
     .eq("conversation_type", conversationType)
     .in("ebay_conversation_id", ids);
   if (error) throw new SyncError("conversation_existing_lookup_failed", { phase: "database", message: error.message });
-  return new Map((data || [])
-    .map((row: any) => [text(row.ebay_conversation_id), {
+  const entries = (data || [])
+    .map((row: any): [string, ExistingConversation] => [text(row.ebay_conversation_id), {
       id: text(row.id),
       ebay_conversation_id: text(row.ebay_conversation_id),
       unread_count: Number(row.unread_count || 0),
@@ -853,8 +966,9 @@ async function existingConversationsById(supabase: ServiceClient, accountId: str
       pending_provider_update: row.pending_provider_update === true,
       read_sync_status: text(row.read_sync_status) || null,
       read_sync_error: text(row.read_sync_error) || null,
-    }] as const)
-    .filter(([id]) => Boolean(id)));
+    }])
+    .filter(([id]: [string, ExistingConversation]) => Boolean(id));
+  return new Map(entries);
 }
 
 async function upsertConversation(
@@ -994,7 +1108,7 @@ async function existingMessagesById(
   conversationType: ConversationType,
   ebayConversationId: string,
   messageIds: string[],
-) {
+): Promise<Map<string, ExistingMessage>> {
   if (!messageIds.length) return new Map<string, ExistingMessage>();
   const { data, error } = await supabase
     .from("ebay_conversation_messages")
@@ -1004,8 +1118,8 @@ async function existingMessagesById(
     .eq("ebay_conversation_id", ebayConversationId)
     .in("ebay_message_id", messageIds);
   if (error) throw new SyncError("message_existing_lookup_failed", { phase: "database", message: error.message });
-  return new Map((data || [])
-    .map((row: any) => [text(row.ebay_message_id), {
+  const entries = (data || [])
+    .map((row: any): [string, ExistingMessage] => [text(row.ebay_message_id), {
       ebay_message_id: text(row.ebay_message_id),
       sender_username: row.sender_username ?? null,
       recipient_username: row.recipient_username ?? null,
@@ -1020,8 +1134,9 @@ async function existingMessagesById(
       media_count: numberOrNull(row.media_count),
       read_status: row.read_status ?? null,
       is_read: typeof row.is_read === "boolean" ? row.is_read : null,
-    }] as const)
-    .filter(([id]) => Boolean(id)));
+    }])
+    .filter(([id]: [string, ExistingMessage]) => Boolean(id));
+  return new Map(entries);
 }
 
 function nullableComparable(value: unknown) {
@@ -1493,6 +1608,9 @@ function syncRunProgressMetadata(input: SyncInput, counters: Counters, extra: Js
     rateLimitPauseMs: input.rateLimitPauseMs,
     latestSyncLookbackDays: input.latestSyncLookbackDays,
     recentDetailSweepLimit: input.recentDetailSweepLimit,
+    syncRecentOrdersBeforeMessages: input.syncRecentOrdersBeforeMessages,
+    recentOrderSyncDaysBack: input.recentOrderSyncDaysBack,
+    recentOrderSyncLimit: input.recentOrderSyncLimit,
     conversationIds: counters.conversationIds,
     canonicalDetailSweepCandidates: counters.canonicalDetailSweepCandidates,
     canonicalDetailSweepRefreshed: counters.canonicalDetailSweepRefreshed,
@@ -1853,6 +1971,12 @@ function failureDetails(error: unknown): JsonRecord {
     },
     ...(syncError?.details || {}),
   };
+}
+
+function compactError(error: unknown, maxLength = 500) {
+  if (error instanceof SyncError) return error.code || error.message.slice(0, maxLength);
+  if (error instanceof Error) return error.message.slice(0, maxLength);
+  return String(error || "unknown_error").slice(0, maxLength);
 }
 
 async function processConversationPage(options: {
@@ -2291,6 +2415,9 @@ function syncEventSummary(input: SyncInput, counters: Counters, startedMs: numbe
     checkpoint_scope: input.checkpointScope,
     conversation_types: input.conversationTypes,
     recent_detail_sweep_limit: input.recentDetailSweepLimit,
+    sync_recent_orders_before_messages: input.syncRecentOrdersBeforeMessages,
+    recent_order_sync_days_back: input.recentOrderSyncDaysBack,
+    recent_order_sync_limit: input.recentOrderSyncLimit,
     conversation_ids: counters.conversationIds,
     duration_ms: Math.max(Date.now() - startedMs, 0),
     pages_processed: counters.pagesFetched,
@@ -2456,6 +2583,7 @@ serve(async (req) => {
   let input: SyncInput | null = null;
   let operator: Operator | null = null;
   let account: EbayAccount | null = null;
+  let recentOrderSync: JsonRecord | null = null;
   let unclassifiedBefore: number | null = null;
   const startedMs = Date.now();
   const supabase = serviceClient();
@@ -2503,6 +2631,14 @@ serve(async (req) => {
         : [{ code: "seller_username_not_configured", message: "Set EBAY_SELLER_USERNAME for strongest direction derivation." }],
       totalsByConversationType: {},
     };
+    recentOrderSync = await syncRecentOrdersBeforeMessageSync(input);
+    if (recentOrderSync.attempted && recentOrderSync.ok === false) {
+      counters.warnings.push({
+        code: "recent_order_sync_failed",
+        message: firstText(recentOrderSync.error, "Recent eBay order sync failed before message sync."),
+        recentOrderSync,
+      });
+    }
     if (input.runType === "backfill") {
       await recordBackfillActivityEvent({
         supabase,
@@ -2583,6 +2719,7 @@ serve(async (req) => {
       canonicalTotalConversations,
       unclassifiedBefore,
       unclassifiedAfter,
+      recentOrderSync,
       readOnly: true,
       sendsEnabled: false,
       ebayMutationsPerformed: false,
@@ -2617,6 +2754,7 @@ serve(async (req) => {
           unclassified_before: unclassifiedBefore,
           unclassified_after: unclassifiedAfter,
           remaining_unclassified: unclassifiedAfter,
+          recent_order_sync: recentOrderSync || {},
         },
       });
     } else if (shouldRecordAggregateSyncEvent(input)) {
@@ -2635,6 +2773,7 @@ serve(async (req) => {
           unclassified_before: unclassifiedBefore,
           unclassified_after: unclassifiedAfter,
           remaining_unclassified: unclassifiedAfter,
+          recent_order_sync: recentOrderSync || {},
         },
       });
     }
@@ -2653,6 +2792,7 @@ serve(async (req) => {
       unclassifiedBefore,
       unclassifiedAfter,
       remainingUnclassified: unclassifiedAfter,
+      recentOrderSync,
       durationMs: Math.max(Date.now() - startedMs, 0),
       safety: {
         readOnly: true,
@@ -2691,6 +2831,7 @@ serve(async (req) => {
         backfillProgress: failedBackfillProgress,
         unclassifiedBefore,
         unclassifiedAfter: failedUnclassifiedAfter,
+        recentOrderSync,
         readOnly: true,
         sendsEnabled: false,
         ebayMutationsPerformed: false,
@@ -2719,6 +2860,7 @@ serve(async (req) => {
           unclassified_before: unclassifiedBefore,
           unclassified_after: failedUnclassifiedAfter,
           remaining_unclassified: failedUnclassifiedAfter,
+          recent_order_sync: recentOrderSync || {},
           error_code: failure.error_code,
           error_phase: failure.error_phase,
         },
@@ -2741,6 +2883,7 @@ serve(async (req) => {
           unclassified_before: unclassifiedBefore,
           unclassified_after: failedUnclassifiedAfter,
           remaining_unclassified: failedUnclassifiedAfter,
+          recent_order_sync: recentOrderSync || {},
           error_code: failure.error_code,
           error_phase: failure.error_phase,
         },
@@ -2755,6 +2898,7 @@ serve(async (req) => {
       message: error instanceof Error ? error.message : String(error || "Unknown error"),
       diagnostic: failureDetails(error),
       backfillProgress: failedBackfillProgress,
+      recentOrderSync,
       safety: {
         readOnly: true,
         ebayMutationsPerformed: false,

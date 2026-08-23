@@ -8675,6 +8675,7 @@
     const isBackfill = result?.runType === "backfill";
     const isTargetedRefresh = Boolean(result?.targeted_conversation_id || result?.targeted_ebay_conversation_id);
     const classificationMode = result?.classificationMode || "none";
+    const recentOrderSync = result?.recentOrderSync || result?.recent_order_sync || null;
     const progress = result?.backfillProgress && typeof result.backfillProgress === "object" ? result.backfillProgress : null;
     const progressStatus = String(progress?.status || "");
     const backfillComplete = progress?.completed === true || progressStatus === "completed";
@@ -8700,6 +8701,8 @@
       Math.max(messagesSeen - messagesInserted, 0)
     );
     const recovered = result?.requestTimedOut === true && result?.durable_run_found === true;
+    const orderSyncAttempted = recentOrderSync && recentOrderSync.attempted !== false;
+    const orderSyncOk = recentOrderSync?.ok !== false;
     const lifecycleStatus = String(result?.status || "").toLowerCase();
     const noticeClass = lifecycleStatus === "failed"
       ? "is-error"
@@ -8728,6 +8731,15 @@
         remaining unclassified: ${escapeHtml(result?.remainingUnclassified === null || result?.remainingUnclassified === undefined ? "--" : formatContextNumber(result.remainingUnclassified))};
         warnings: ${escapeHtml(formatContextNumber(warnings.length || counters.errors || 0))}.
       </div>
+      ${orderSyncAttempted ? `
+        <div class="inbox-skipped-reasons">
+          <b>Order pre-sync <em>${escapeHtml(orderSyncOk ? "ok" : "warning")}</em></b>
+          <b>Orders seen <em>${escapeHtml(formatContextNumber(recentOrderSync.ordersSeen || recentOrderSync.orders_seen || 0))}</em></b>
+          <b>Orders imported <em>${escapeHtml(formatContextNumber(recentOrderSync.ordersImported || recentOrderSync.orders_imported || 0))}</em></b>
+          <b>Lines imported <em>${escapeHtml(formatContextNumber(recentOrderSync.linesImported || recentOrderSync.lines_imported || 0))}</em></b>
+          ${recentOrderSync.error ? `<b>Error <em>${escapeHtml(humanizeValue(recentOrderSync.error))}</em></b>` : ""}
+        </div>
+      ` : ""}
       ${recovered ? `<div class="classification-notice">Checked durable sync run state, latest activity event, mailbox counts, and checkpoint counters before showing this summary.</div>` : ""}
       ${isBackfill && progress ? `
         <div class="inbox-skipped-reasons">
@@ -9747,6 +9759,7 @@
       unclassifiedBefore: payload.unclassified_before ?? metadata.unclassifiedBefore ?? null,
       unclassifiedAfter: payload.unclassified_after ?? metadata.unclassifiedAfter ?? null,
       remainingUnclassified: payload.remaining_unclassified ?? payload.unclassified_after ?? metadata.unclassifiedAfter ?? null,
+      recentOrderSync: payload.recent_order_sync || payload.recentOrderSync || metadata.recentOrderSync || metadata.recent_order_sync || null,
     };
   }
 
