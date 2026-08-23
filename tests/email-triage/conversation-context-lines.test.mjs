@@ -6,7 +6,7 @@ const context = readFileSync(new URL("../../supabase/functions/_shared/ebay-conv
 const js = readFileSync(new URL("../../email-triage.js", import.meta.url), "utf8");
 
 test("conversation context loads every line for a matched order", () => {
-  assert.match(context, /const CONTEXT_VERSION = "ebay-conversation-context-v5"/);
+  assert.match(context, /const CONTEXT_VERSION = "ebay-conversation-context-v6"/);
   assert.match(context, /function mergeRowsById\(\.\.\.groups: Array<Array<Record<string, any>>>\)/);
   assert.match(context, /function compactOrderGroup\(/);
   assert.match(context, /const linkedLines = \(linkedLinesResult\.data \|\| \[\]\) as Array<Record<string, any>>;/);
@@ -19,6 +19,9 @@ test("conversation context loads every line for a matched order", () => {
   assert.match(context, /matched_order_lines: lines\.map\(\(line\) => compactOrderLine\(line, orderById\.get\(String\(line\.order_id\)\) \|\| null\)\)/);
   assert.match(context, /matched_order_groups: matchedOrderGroups/);
   assert.match(context, /order_total: numberOrNull\(row\.orderTotal\)/);
+  assert.match(context, /function loadBuyerHistoryGroups\(/);
+  assert.match(context, /\.overlaps\("order_line_ids", lineIds\)/);
+  assert.match(context, /buyer_history_groups: buyerHistoryGroups/);
 });
 
 test("task target labels distinguish whole orders from specific lines", () => {
@@ -42,14 +45,15 @@ test("task target picker stays limited to directly linked order targets", () => 
   assert.match(js, /\|\| ebayConversationIdentifierMatches\(row\.item_number, itemNumbers\)/);
   assert.match(js, /\|\| ebayConversationIdentifierMatches\(row\.transaction_id, transactionIds\)/);
   assert.match(js, /const sameTitleRows = anchorTitle/);
+  assert.match(js, /if \(sameTitleRows\.length <= 1\) return null;/);
   assert.match(js, /source: "buyer_history"/);
+  assert.match(js, /function ebayConversationBuyerHistoryLinkedGroup\(context = \{\}, linkedTargetIds = \{\}, linkedLines = \[\]\)/);
+  assert.match(js, /safeArray\(context\?\.buyer_history_groups\)\.find/);
   assert.match(js, /function ebayConversationLinkedOrderGroup\(context = \{\}, linkedTargetIds = \{\}\)/);
-  assert.match(js, /function chooseEbayConversationTaskOrderGroup\(eventGroup = null, buyerHistoryGroup = null\)/);
-  assert.match(js, /if \(eventLineCount <= 1 && historyLineCount > eventLineCount\) return buyerHistoryGroup;/);
   assert.match(js, /const linkedTargetIds = ebayConversationLinkedTargetIds\(context\)/);
   assert.match(js, /const directLines = linkedTargetIds\.lineIds\.length/);
   assert.match(js, /: linkedTargetIds\.orderIds\.length \? \[\] : allLines/);
-  assert.match(js, /const linkedOrderGroup = chooseEbayConversationTaskOrderGroup\(/);
+  assert.match(js, /const linkedOrderGroup = ebayConversationBuyerHistoryLinkedGroup\(context, linkedTargetIds, directLines\)/);
   assert.match(js, /const groupAmount = Number\(linkedOrderGroup\?\.total_price \|\| 0\)/);
   assert.match(js, /Entire related closed order set/);
   assert.match(js, /related closed lines/);

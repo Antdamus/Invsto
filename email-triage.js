@@ -6979,7 +6979,8 @@
     const sameTitleRows = anchorTitle
       ? rows.filter((row) => compactConversationText(row.title).toLowerCase() === anchorTitle)
       : [];
-    const groupRows = sameTitleRows.length > 1 ? sameTitleRows : rows;
+    if (sameTitleRows.length <= 1) return null;
+    const groupRows = sameTitleRows;
     const lineIdsForGroup = uniqueCompactValues(groupRows.map((row) => row.line_id));
     const orderIdsForGroup = uniqueCompactValues(groupRows.map((row) => row.order_id));
     const total = groupRows.reduce((sum, row) => {
@@ -7000,6 +7001,20 @@
     };
   }
 
+  function ebayConversationBuyerHistoryLinkedGroup(context = {}, linkedTargetIds = {}, linkedLines = []) {
+    const lineIds = new Set(safeArray(linkedTargetIds.lineIds).map((id) => String(id)));
+    const orderIds = new Set(safeArray(linkedTargetIds.orderIds).map((id) => String(id)));
+    const orderNumbers = ebayConversationIdentifierSet(safeArray(linkedLines).map((line) => line?.order_number || line?.order?.order_number));
+    return safeArray(context?.buyer_history_groups).find((group) => {
+      const groupLineIds = safeArray(group?.order_line_ids).map((id) => String(id));
+      const groupOrderIds = safeArray(group?.order_ids).map((id) => String(id));
+      const groupOrderNumbers = safeArray(group?.order_numbers);
+      return groupLineIds.some((id) => lineIds.has(id))
+        || groupOrderIds.some((id) => orderIds.has(id))
+        || groupOrderNumbers.some((orderNumber) => ebayConversationIdentifierMatches(orderNumber, orderNumbers));
+    }) || null;
+  }
+
   function ebayConversationLinkedOrderGroup(context = {}, linkedTargetIds = {}) {
     const lineIds = new Set(safeArray(linkedTargetIds.lineIds).map((id) => String(id)));
     const orderIds = new Set(safeArray(linkedTargetIds.orderIds).map((id) => String(id)));
@@ -7008,21 +7023,6 @@
       const groupOrderIds = safeArray(group?.order_ids).map((id) => String(id));
       return groupLineIds.some((id) => lineIds.has(id)) || groupOrderIds.some((id) => orderIds.has(id));
     }) || null;
-  }
-
-  function ebayConversationGroupLineCount(group = null) {
-    const declaredCount = Number(group?.line_count || 0);
-    if (Number.isFinite(declaredCount) && declaredCount > 0) return declaredCount;
-    return uniqueCompactValues(safeArray(group?.order_line_ids)).length;
-  }
-
-  function chooseEbayConversationTaskOrderGroup(eventGroup = null, buyerHistoryGroup = null) {
-    if (!eventGroup) return buyerHistoryGroup;
-    if (!buyerHistoryGroup) return eventGroup;
-    const eventLineCount = ebayConversationGroupLineCount(eventGroup);
-    const historyLineCount = ebayConversationGroupLineCount(buyerHistoryGroup);
-    if (eventLineCount <= 1 && historyLineCount > eventLineCount) return buyerHistoryGroup;
-    return eventGroup;
   }
 
   function buildEbayConversationTaskTargetOptions(state, conversation) {
@@ -7034,10 +7034,9 @@
     const directLines = linkedTargetIds.lineIds.length
       ? allLines.filter((line) => linkedTargetIds.lineIds.includes(String(line.id)))
       : linkedTargetIds.orderIds.length ? [] : allLines;
-    const linkedOrderGroup = chooseEbayConversationTaskOrderGroup(
-      ebayConversationLinkedOrderGroup(context, linkedTargetIds),
-      ebayConversationBuyerHistoryFallbackGroup(context, linkedTargetIds, directLines),
-    );
+    const linkedOrderGroup = ebayConversationBuyerHistoryLinkedGroup(context, linkedTargetIds, directLines)
+      || ebayConversationLinkedOrderGroup(context, linkedTargetIds)
+      || ebayConversationBuyerHistoryFallbackGroup(context, linkedTargetIds, directLines);
     const groupLineIds = uniqueCompactValues(safeArray(linkedOrderGroup?.order_line_ids));
     const groupOrderIds = uniqueCompactValues(safeArray(linkedOrderGroup?.order_ids));
     const targetOrderIds = uniqueCompactValues([

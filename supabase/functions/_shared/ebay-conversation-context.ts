@@ -1,4 +1,4 @@
-const CONTEXT_VERSION = "ebay-conversation-context-v5";
+const CONTEXT_VERSION = "ebay-conversation-context-v6";
 const MAX_LINKS = 80;
 const MAX_MESSAGES = 100;
 const MAX_RETURNS = 20;
@@ -1341,6 +1341,90 @@ function compactBuyerValueLineBreakdown(data: Record<string, any> | null) {
   }));
 }
 
+function buyerHistoryRowKey(row: Record<string, any>) {
+  return shortText(row.line_id, 120) ||
+    [row.order_id, row.item_number, row.transaction_id].map((value) => shortText(value, 120)).filter(Boolean).join(":");
+}
+
+function compactBuyerHistoryGroup(
+  id: string,
+  source: string,
+  rows: Array<Record<string, any>>,
+  event: Record<string, any> | null = null,
+) {
+  const totalPrice = rows.reduce((sum, row) => {
+    const value = Number(row.gross_value ?? row.line_total ?? row.total_price ?? 0);
+    return Number.isFinite(value) ? sum + value : sum;
+  }, 0);
+  return {
+    id,
+    source,
+    event_id: event?.id || null,
+    action: shortText(event?.action, 120),
+    created_at: event?.created_at || null,
+    order_ids: uniqueIds(rows.map((row) => row.order_id), MAX_BUYER_VALUE_LINES),
+    order_line_ids: uniqueIds(rows.map((row) => row.line_id), MAX_BUYER_VALUE_LINES),
+    order_numbers: unique(rows.map((row) => shortText(row.order_number, 120)), MAX_BUYER_VALUE_LINES),
+    line_count: rows.length,
+    total_price: numberOrNull(totalPrice),
+  };
+}
+
+async function loadBuyerHistoryGroups(
+  supabase: EbayConversationContextClient,
+  rows: Array<Record<string, any>>,
+  warnings: Array<Record<string, unknown>>,
+) {
+  const compactRows = rows.filter((row) => buyerHistoryRowKey(row));
+  if (!compactRows.length) return [];
+  const lineIds = uniqueIds(compactRows.map((row) => row.line_id), MAX_BUYER_VALUE_LINES);
+  const orderIds = uniqueIds(compactRows.map((row) => row.order_id), MAX_BUYER_VALUE_LINES);
+  const eventRows = new Map<string, Record<string, any>>();
+  const lookups = await Promise.all([
+    lineIds.length
+      ? supabase
+        .from("ebay_order_admin_events")
+        .select("id, action, order_ids, order_line_ids, created_at, payload")
+        .overlaps("order_line_ids", lineIds)
+        .limit(MAX_BUYER_VALUE_LINES * 4)
+      : Promise.resolve({ data: [], error: null }),
+    orderIds.length
+      ? supabase
+        .from("ebay_order_admin_events")
+        .select("id, action, order_ids, order_line_ids, created_at, payload")
+        .overlaps("order_ids", orderIds)
+        .limit(MAX_BUYER_VALUE_LINES * 4)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  for (const result of lookups) {
+    if (result.error) {
+      warnings.push(warning("buyer_history_group_context_partial", "Buyer history order groups could not be loaded.", "warning"));
+      continue;
+    }
+    for (const event of result.data || []) eventRows.set(String(event.id), event);
+  }
+
+  const groups: Array<Record<string, any>> = [];
+  const coveredRowKeys = new Set<string>();
+  const events = [...eventRows.values()].sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+  for (const event of events) {
+    const eventLineIds = new Set(uniqueIds(Array.isArray(event.order_line_ids) ? event.order_line_ids : [], MAX_BUYER_VALUE_LINES * 4));
+    const eventOrderIds = new Set(uniqueIds(Array.isArray(event.order_ids) ? event.order_ids : [], MAX_BUYER_VALUE_LINES * 4));
+    const eventGroupRows = compactRows.filter((row) =>
+      eventLineIds.has(String(row.line_id || "")) || eventOrderIds.has(String(row.order_id || ""))
+    );
+    if (!eventGroupRows.length) continue;
+    eventGroupRows.forEach((row) => coveredRowKeys.add(buyerHistoryRowKey(row)));
+    groups.push(compactBuyerHistoryGroup(`buyer-history-event:${event.id}`, "order_history_event", eventGroupRows, event));
+  }
+
+  const remainingRows = compactRows.filter((row) => !coveredRowKeys.has(buyerHistoryRowKey(row)));
+  if (remainingRows.length) {
+    groups.push(compactBuyerHistoryGroup("buyer-history-remaining", "buyer_history_remaining", remainingRows));
+  }
+  return groups;
+}
+
 export async function resolveEbayConversation(
   supabase: EbayConversationContextClient,
   options: { conversationId?: string | null; ebayConversationId?: string | null; conversationType?: string | null },
@@ -1514,6 +1598,7 @@ export async function buildEbayConversationContext(
   }
   let buyerHistorySummary = null;
   let buyerValueLineBreakdown: Array<Record<string, unknown>> = [];
+  let buyerHistoryGroups: Array<Record<string, unknown>> = [];
   if (buyer.username && buyer.confidence === "confirmed") {
     const key = buyerKey(buyer.username);
     const [insightsResult, valueLineResult, buyerSyncResult, accountRunResult] = await Promise.all([
@@ -1542,6 +1627,7 @@ export async function buildEbayConversationContext(
       accountHistoryRun: accountRunResult.error ? null : accountRunResult.data as Record<string, any> | null,
     });
     buyerValueLineBreakdown = valueLineResult.error ? [] : compactBuyerValueLineBreakdown(valueLineResult.data as Record<string, any> | null);
+    buyerHistoryGroups = await loadBuyerHistoryGroups(supabase, buyerValueLineBreakdown as Array<Record<string, any>>, warnings);
   } else if (buyer.username) {
     warnings.push(warning("buyer_history_skipped", "Buyer history was skipped because the buyer match is weak.", "info"));
   }
@@ -1559,6 +1645,7 @@ export async function buildEbayConversationContext(
     context_resolution: resolution,
     buyer_history_summary: buyerHistorySummary,
     buyer_value_line_breakdown: buyerValueLineBreakdown,
+    buyer_history_groups: buyerHistoryGroups,
     inventory_listing_context: [...inventoryLinks.values()].map(compactInventoryLink),
     warnings,
     link_confidence: summarizeLinkConfidence(links),
