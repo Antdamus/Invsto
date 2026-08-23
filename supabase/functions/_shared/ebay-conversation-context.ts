@@ -1,4 +1,4 @@
-const CONTEXT_VERSION = "ebay-conversation-context-v2";
+const CONTEXT_VERSION = "ebay-conversation-context-v3";
 const MAX_LINKS = 80;
 const MAX_MESSAGES = 100;
 const MAX_RETURNS = 20;
@@ -1350,7 +1350,30 @@ export async function buildEbayConversationContext(
     : { data: [], error: null };
   if (linkedLinesResult.error) warnings.push(warning("order_line_context_partial", "Linked order lines could not be loaded.", "warning"));
   const linkedLines = (linkedLinesResult.data || []) as Array<Record<string, any>>;
-  const lineOrderIds = uniqueIds(linkedLines.map((line) => line.order_id), MAX_LINKS);
+  const linkedLineIds = uniqueIds(linkedLines.map((line) => line.id), MAX_LINKS);
+  const groupEventsResult = linkedLineIds.length
+    ? await supabase
+      .from("ebay_order_admin_events")
+      .select("id, category, action, order_line_ids, order_numbers, created_at")
+      .overlaps("order_line_ids", linkedLineIds)
+      .limit(MAX_LINKS)
+    : { data: [], error: null };
+  if (groupEventsResult.error) warnings.push(warning("order_history_group_context_partial", "Related order-history groups could not be loaded.", "warning"));
+  const groupLineIds = uniqueIds(
+    (groupEventsResult.data || []).flatMap((event: Record<string, any>) => Array.isArray(event.order_line_ids) ? event.order_line_ids : []),
+    MAX_LINKS * 20,
+  );
+  const groupLinesResult = groupLineIds.length
+    ? await supabase
+      .from("ebay_order_lines")
+      .select("id, order_id, item_number, transaction_id, custom_label, item_title, quantity, sold_for, total_price, line_status, internal_item_id, sale_id")
+      .in("id", groupLineIds)
+      .limit(MAX_LINKS * 20)
+    : { data: [], error: null };
+  if (groupLinesResult.error) warnings.push(warning("order_history_group_line_context_partial", "Lines from related order-history groups could not be loaded.", "warning"));
+  const groupLines = (groupLinesResult.data || []) as Array<Record<string, any>>;
+  const contextSeedLines = mergeRowsById(linkedLines, groupLines);
+  const lineOrderIds = uniqueIds(contextSeedLines.map((line) => line.order_id), MAX_LINKS);
   const allOrderIds = uniqueIds([...directOrderIds, ...lineOrderIds], MAX_LINKS);
 
   const ordersResult = allOrderIds.length
@@ -1374,7 +1397,7 @@ export async function buildEbayConversationContext(
     : { data: [], error: null };
   if (orderLinesResult.error) warnings.push(warning("order_sibling_line_context_partial", "All lines for matched orders could not be loaded.", "warning"));
   const orderLines = (orderLinesResult.data || []) as Array<Record<string, any>>;
-  const lines = mergeRowsById(linkedLines, orderLines);
+  const lines = mergeRowsById(contextSeedLines, orderLines);
 
   const orderNumbers = unique(orders.map((order) => order.order_number), MAX_LINKS);
   const returnRows = new Map<string, Record<string, any>>();
