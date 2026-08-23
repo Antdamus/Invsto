@@ -26,10 +26,13 @@ test("task target labels distinguish whole orders from specific lines", () => {
   assert.match(js, /badge: "Line item"/);
 });
 
-test("task target picker includes buyer history snapshot lines", () => {
+test("task target picker stays limited to directly linked order targets", () => {
   assert.match(js, /"fulfilled", "successful", "success"/);
-  assert.match(js, /function ebayBuyerHistoryLineToTaskLine\(row = \{\}\)/);
-  assert.match(js, /const buyerHistoryLines = safeArray\(context\?\.buyer_value_line_breakdown\)/);
-  assert.match(js, /\.map\(ebayBuyerHistoryLineToTaskLine\)/);
-  assert.match(js, /const lines = mergeEbayTaskTargetLines\(matchedLines, buyerHistoryLines\)/);
+  assert.match(js, /function ebayConversationLinkedTargetIds\(context = \{\}\)/);
+  assert.match(js, /const linkedTargetIds = ebayConversationLinkedTargetIds\(context\)/);
+  assert.match(js, /const directLines = linkedTargetIds\.lineIds\.length/);
+  assert.match(js, /: linkedTargetIds\.orderIds\.length \? \[\] : allLines/);
+  assert.match(js, /orderLineIds: \[\],/);
+  assert.doesNotMatch(js, /const buyerHistoryLines = safeArray\(context\?\.buyer_value_line_breakdown\)/);
+  assert.doesNotMatch(js, /"Order-history group"/);
 });
