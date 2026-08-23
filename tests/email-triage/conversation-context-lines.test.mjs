@@ -6,7 +6,7 @@ const context = readFileSync(new URL("../../supabase/functions/_shared/ebay-conv
 const js = readFileSync(new URL("../../email-triage.js", import.meta.url), "utf8");
 
 test("conversation context loads every line for a matched order", () => {
-  assert.match(context, /const CONTEXT_VERSION = "ebay-conversation-context-v4"/);
+  assert.match(context, /const CONTEXT_VERSION = "ebay-conversation-context-v5"/);
   assert.match(context, /function mergeRowsById\(\.\.\.groups: Array<Array<Record<string, any>>>\)/);
   assert.match(context, /function compactOrderGroup\(/);
   assert.match(context, /const linkedLines = \(linkedLinesResult\.data \|\| \[\]\) as Array<Record<string, any>>;/);
@@ -18,6 +18,7 @@ test("conversation context loads every line for a matched order", () => {
   assert.match(context, /const matchedOrderGroups = \(\(groupEventsResult\.data \|\| \[\]\) as Array<Record<string, any>>\)/);
   assert.match(context, /matched_order_lines: lines\.map\(\(line\) => compactOrderLine\(line, orderById\.get\(String\(line\.order_id\)\) \|\| null\)\)/);
   assert.match(context, /matched_order_groups: matchedOrderGroups/);
+  assert.match(context, /order_total: numberOrNull\(row\.orderTotal\)/);
 });
 
 test("task target labels distinguish whole orders from specific lines", () => {
@@ -34,6 +35,9 @@ test("task target labels distinguish whole orders from specific lines", () => {
 test("task target picker stays limited to directly linked order targets", () => {
   assert.match(js, /"fulfilled", "successful", "success"/);
   assert.match(js, /function ebayConversationLinkedTargetIds\(context = \{\}\)/);
+  assert.match(js, /function ebayConversationBuyerHistoryFallbackGroup\(context = \{\}, linkedTargetIds = \{\}\)/);
+  assert.match(js, /const sameTitleRows = anchorTitle/);
+  assert.match(js, /source: "buyer_history"/);
   assert.match(js, /function ebayConversationLinkedOrderGroup\(context = \{\}, linkedTargetIds = \{\}\)/);
   assert.match(js, /const linkedTargetIds = ebayConversationLinkedTargetIds\(context\)/);
   assert.match(js, /const linkedOrderGroup = ebayConversationLinkedOrderGroup\(context, linkedTargetIds\)/);

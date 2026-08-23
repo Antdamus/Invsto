@@ -6950,14 +6950,49 @@
     };
   }
 
+  function ebayConversationBuyerHistoryFallbackGroup(context = {}, linkedTargetIds = {}) {
+    const lineIds = new Set(safeArray(linkedTargetIds.lineIds).map((id) => String(id)));
+    const orderIds = new Set(safeArray(linkedTargetIds.orderIds).map((id) => String(id)));
+    const rows = safeArray(context?.buyer_value_line_breakdown)
+      .filter((row) => row?.line_id && row?.order_id);
+    const anchor = rows.find((row) =>
+      lineIds.has(String(row.line_id)) || orderIds.has(String(row.order_id))
+    );
+    if (!anchor) return null;
+    const anchorTitle = compactConversationText(anchor.title).toLowerCase();
+    const sameTitleRows = anchorTitle
+      ? rows.filter((row) => compactConversationText(row.title).toLowerCase() === anchorTitle)
+      : [];
+    const groupRows = sameTitleRows.length > 1 ? sameTitleRows : rows;
+    const lineIdsForGroup = uniqueCompactValues(groupRows.map((row) => row.line_id));
+    const orderIdsForGroup = uniqueCompactValues(groupRows.map((row) => row.order_id));
+    const total = groupRows.reduce((sum, row) => {
+      const value = Number(row?.gross_value ?? row?.line_total ?? row?.total_price ?? 0);
+      return Number.isFinite(value) ? sum + value : sum;
+    }, 0);
+    const anchorOrderTotal = Number(anchor.order_total || 0);
+    const groupTotal = total > 0 ? total : Number.isFinite(anchorOrderTotal) && anchorOrderTotal > 0 ? anchorOrderTotal : 0;
+    if (!lineIdsForGroup.length && !orderIdsForGroup.length && !groupTotal) return null;
+    return {
+      id: `buyer-history:${anchor.order_id || anchor.line_id}`,
+      source: "buyer_history",
+      order_ids: orderIdsForGroup,
+      order_line_ids: lineIdsForGroup,
+      order_numbers: uniqueCompactValues(groupRows.map((row) => row.order_number)),
+      line_count: groupRows.length,
+      total_price: groupTotal,
+    };
+  }
+
   function ebayConversationLinkedOrderGroup(context = {}, linkedTargetIds = {}) {
     const lineIds = new Set(safeArray(linkedTargetIds.lineIds).map((id) => String(id)));
     const orderIds = new Set(safeArray(linkedTargetIds.orderIds).map((id) => String(id)));
-    return safeArray(context?.matched_order_groups).find((group) => {
+    const matchedGroup = safeArray(context?.matched_order_groups).find((group) => {
       const groupLineIds = safeArray(group?.order_line_ids).map((id) => String(id));
       const groupOrderIds = safeArray(group?.order_ids).map((id) => String(id));
       return groupLineIds.some((id) => lineIds.has(id)) || groupOrderIds.some((id) => orderIds.has(id));
-    }) || null;
+    });
+    return matchedGroup || ebayConversationBuyerHistoryFallbackGroup(context, linkedTargetIds);
   }
 
   function buildEbayConversationTaskTargetOptions(state, conversation) {
@@ -7021,7 +7056,10 @@
       const parentLines = groupLines.length ? groupLines : contextLines.length ? contextLines : linkedLines;
       const parentOrderIds = groupOrderIds.length ? groupOrderIds : [primaryOrder.id];
       const parentOrderNumbers = groupOrderIds.length
-        ? uniqueCompactValues(parentOrderIds.map((orderId) => orderById.get(String(orderId))?.order_number))
+        ? uniqueCompactValues([
+          ...parentOrderIds.map((orderId) => orderById.get(String(orderId))?.order_number),
+          ...safeArray(linkedOrderGroup?.order_numbers),
+        ])
         : [primaryOrder.order_number].filter(Boolean);
       const pending = ebayConversationTaskTargetIsPending(primaryOrder, parentLines);
       const source = pending ? "pending_order" : "order_history";

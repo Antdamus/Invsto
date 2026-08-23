@@ -1,4 +1,4 @@
-const CONTEXT_VERSION = "ebay-conversation-context-v4";
+const CONTEXT_VERSION = "ebay-conversation-context-v5";
 const MAX_LINKS = 80;
 const MAX_MESSAGES = 100;
 const MAX_RETURNS = 20;
@@ -1333,6 +1333,7 @@ function compactBuyerValueLineBreakdown(data: Record<string, any> | null) {
     transaction_id: shortText(row.transactionId, 120),
     custom_label: shortText(row.customLabel, 180),
     gross_value: numberOrNull(row.lineTotal ?? row.orderTotal),
+    order_total: numberOrNull(row.orderTotal),
     returned_value: numberOrNull(row.lineReturnedAmount ?? row.orderReturnedAmount),
     retained_value: numberOrNull(row.lineRetainedAmount ?? row.orderRetainedAmount),
     return_count: integerOrNull(row.returnCount),
