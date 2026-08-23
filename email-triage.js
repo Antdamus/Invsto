@@ -4576,7 +4576,7 @@
           <div class="ebay-task-modal-head">
             <div>
               <span class="eyebrow">Customer Service Task</span>
-              <h3 id="ebay-task-modal-title">Create task from message</h3>
+              <h3 id="ebay-task-modal-title">Create task</h3>
               <p>${escapeHtml(ebayConversationParty(conversation))}${message ? ` - ${escapeHtml(formatContextDate(ebayMessageCreatedAt(message)))}` : ""}</p>
             </div>
             <button type="button" class="secondary-btn" data-ebay-message-task-action="close" aria-label="Close task creator">
@@ -4597,16 +4597,16 @@
           ` : ""}
           ${renderEbayConversationTaskTargetPicker(state, conversation)}
           <label class="ebay-draft-field">
-            <span>Task title</span>
+            <span>Title</span>
             <input name="taskTitle" type="text" value="${escapeHtml(modal.title || "")}" required />
           </label>
           <label class="ebay-draft-field">
-            <span>What needs to be done</span>
-            <textarea name="taskDescription" required placeholder="Write the actual work instructions here. The full eBay conversation stays linked from the task manager.">${escapeHtml(modal.description || "")}</textarea>
+            <span>Instructions</span>
+            <textarea name="taskDescription" required placeholder="What should the owner do?">${escapeHtml(modal.description || "")}</textarea>
           </label>
           <div class="ebay-task-assignment-panel">
             <label class="ebay-draft-field ebay-task-owner-field">
-              <span>Assign owner</span>
+              <span>Owner</span>
               <select name="assignedToUserId">
                 ${renderEbayTaskAssigneeOptions(state, modal.assignedToUserId || "")}
               </select>
@@ -4615,7 +4615,7 @@
           </div>
           <div class="ebay-task-modal-grid">
             <label class="ebay-draft-field">
-              <span>Task tag</span>
+              <span>Tag</span>
               <select name="taskTag">
                 ${renderEbayTaskTagOptions(selectedTag)}
               </select>
@@ -4631,7 +4631,7 @@
               </select>
             </label>
             <fieldset class="ebay-task-due-field">
-              <legend>Due date & time</legend>
+              <legend>Due</legend>
               <div class="ebay-task-due-picker">
                 <label>
                   <span>Date</span>
@@ -7068,7 +7068,7 @@
     const error = state.ebayConversationContextErrorsById?.[conversation?.id];
     return `
       <fieldset class="ebay-task-target-picker">
-        <legend>Task target</legend>
+        <legend>Target</legend>
         <div class="ebay-task-target-list">
           ${targets.map((target) => `
             <label class="ebay-task-target-card ${target.key === selected?.key ? "is-selected" : ""}">
