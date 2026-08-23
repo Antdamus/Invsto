@@ -203,6 +203,43 @@ async function saveUserNotificationPreferences({
   return true;
 }
 
+function currentAdminAppBaseUrl() {
+  try {
+    const url = new URL(".", window.location.href);
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      if (["localhost", "127.0.0.1", "0.0.0.0"].includes(url.hostname)) return null;
+      return url.href.replace(/\/+$/, "");
+    }
+  } catch (_) {
+    // Ignore invalid local URLs; the database will keep the previous app link.
+  }
+  return null;
+}
+
+async function saveUserEbayBuyerMessageSmsPreference({
+  userId,
+  enabled,
+  minOrderTotal,
+  maxOrderTotal
+}) {
+  if (!userId) return true;
+
+  const { error } = await supabase.rpc("admin_upsert_ebay_buyer_message_sms_preference", {
+    _user_id: userId,
+    _enabled: !!enabled,
+    _app_base_url: currentAdminAppBaseUrl(),
+    _min_order_total: minOrderTotal,
+    _max_order_total: maxOrderTotal
+  });
+
+  if (error) {
+    console.error("Buyer message SMS preference save failed", error);
+    throw new Error(error.message || "Buyer message SMS preference save failed.");
+  }
+
+  return true;
+}
+
 async function saveUserAppAccess({ userId, emailTriageAccess, postOrderIssueAccess }) {
   if (!userId) return true;
 
@@ -243,6 +280,23 @@ function normalizePhoneE164(value) {
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
   throw new Error("Phone must be a valid number, for example 3055551234.");
+}
+
+function normalizeOptionalMoney(value, label) {
+  const raw = String(value || "").trim().replace(/[$,]/g, "");
+  if (!raw) return null;
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new Error(`${label} must be a valid dollar amount.`);
+  }
+  return Math.round(amount * 100) / 100;
+}
+
+function formatOptionalMoney(value) {
+  if (value === null || value === undefined || value === "") return "";
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "";
+  return amount.toFixed(2);
 }
 
 function ensureUserSaveSuccessModal() {
@@ -579,6 +633,24 @@ if (!taxStatusLoaded) {
         <span class="muted">Send SMS and email when urgent</span>
       </div>
     </label>
+
+    <label class="ud-field ud-active ud-span2">
+      <span>Buyer message texts</span>
+      <div class="ud-switch">
+        <input id="udEbayBuyerSms" type="checkbox" />
+        <span class="muted">Text this worker when buyers message in eBay chat.</span>
+      </div>
+    </label>
+
+    <label class="ud-field">
+      <span>Text if order is at least</span>
+      <input id="udEbayBuyerSmsMin" type="number" min="0" step="0.01" placeholder="Any amount" />
+    </label>
+
+    <label class="ud-field">
+      <span>Text if order is at most</span>
+      <input id="udEbayBuyerSmsMax" type="number" min="0" step="0.01" placeholder="Any amount" />
+    </label>
   </div>
 </section>
 
@@ -834,6 +906,14 @@ if (!taxStatusLoaded) {
           
           msg.textContent = "Saving notification preferences...";
           if (activeUserId) {
+            const minOrderTotal = normalizeOptionalMoney(qs("#udEbayBuyerSmsMin")?.value || "", "Minimum order amount");
+            const maxOrderTotal = normalizeOptionalMoney(qs("#udEbayBuyerSmsMax")?.value || "", "Maximum order amount");
+            if (minOrderTotal !== null && maxOrderTotal !== null && minOrderTotal > maxOrderTotal) {
+              throw new Error("Minimum order amount cannot be higher than maximum order amount.");
+            }
+            if (qs("#udEbayBuyerSmsMin")) qs("#udEbayBuyerSmsMin").value = formatOptionalMoney(minOrderTotal);
+            if (qs("#udEbayBuyerSmsMax")) qs("#udEbayBuyerSmsMax").value = formatOptionalMoney(maxOrderTotal);
+
             await saveUserPhone({
               userId: activeUserId,
               phone: normalizedPhone,
@@ -845,6 +925,12 @@ if (!taxStatusLoaded) {
               preferredTaskChannel: qs("#udTaskChannel")?.value || "auto",
               urgentSendBoth: !!qs("#udUrgentBoth")?.checked,
               emailOverride: (qs("#udEmailOverride")?.value || "").trim()
+            });
+            await saveUserEbayBuyerMessageSmsPreference({
+              userId: activeUserId,
+              enabled: !!qs("#udEbayBuyerSms")?.checked,
+              minOrderTotal,
+              maxOrderTotal
             });
             msg.textContent = "Saving app access...";
             await saveUserAppAccess({
@@ -926,6 +1012,9 @@ function readDrawerState() {
     taskChannel: qs("#udTaskChannel")?.value || "auto",
     urgentBoth: !!qs("#udUrgentBoth")?.checked,
     emailOverride: qs("#udEmailOverride")?.value || "",
+    ebayBuyerSms: !!qs("#udEbayBuyerSms")?.checked,
+    ebayBuyerSmsMin: qs("#udEbayBuyerSmsMin")?.value || "",
+    ebayBuyerSmsMax: qs("#udEbayBuyerSmsMax")?.value || "",
     emailTriageAccess: !!qs("#udEmailTriageAccess")?.checked,
     postOrderIssueAccess: !!qs("#udPostOrderIssueAccess")?.checked
   };
@@ -1412,25 +1501,28 @@ async function loadUserPhone(userId) {
 async function loadUserNotificationPreferences(userId) {
   const supabase = window.supabase;
   if (!supabase || !userId) {
-    return { canEmail: true, preferredTaskChannel: "auto", urgentSendBoth: false, emailOverride: "" };
+    return { canEmail: true, preferredTaskChannel: "auto", urgentSendBoth: false, emailOverride: "", ebayBuyerMessageSms: false, ebayBuyerMessageSmsMinOrderTotal: null, ebayBuyerMessageSmsMaxOrderTotal: null };
   }
 
   const { data, error } = await supabase
     .from("user_notification_preferences")
-    .select("can_email, preferred_task_channel, urgent_send_both, email_override")
+    .select("can_email, preferred_task_channel, urgent_send_both, email_override, ebay_buyer_message_sms, ebay_buyer_message_sms_min_order_total, ebay_buyer_message_sms_max_order_total")
     .eq("user_id", userId)
     .maybeSingle();
 
   if (error) {
     console.error("Failed to load notification preferences", error);
-    return { canEmail: true, preferredTaskChannel: "auto", urgentSendBoth: false, emailOverride: "" };
+    return { canEmail: true, preferredTaskChannel: "auto", urgentSendBoth: false, emailOverride: "", ebayBuyerMessageSms: false, ebayBuyerMessageSmsMinOrderTotal: null, ebayBuyerMessageSmsMaxOrderTotal: null };
   }
 
   return {
     canEmail: data?.can_email !== false,
     preferredTaskChannel: data?.preferred_task_channel || "auto",
     urgentSendBoth: data?.urgent_send_both === true,
-    emailOverride: data?.email_override || ""
+    emailOverride: data?.email_override || "",
+    ebayBuyerMessageSms: data?.ebay_buyer_message_sms === true,
+    ebayBuyerMessageSmsMinOrderTotal: data?.ebay_buyer_message_sms_min_order_total ?? null,
+    ebayBuyerMessageSmsMaxOrderTotal: data?.ebay_buyer_message_sms_max_order_total ?? null
   };
 }
 
@@ -1455,6 +1547,9 @@ const [phoneState, notificationState] = await Promise.all([
     qs("#udTaskChannel").value = notificationState.preferredTaskChannel;
     qs("#udUrgentBoth").checked = notificationState.urgentSendBoth;
     qs("#udEmailOverride").value = notificationState.emailOverride;
+    qs("#udEbayBuyerSms").checked = notificationState.ebayBuyerMessageSms;
+    qs("#udEbayBuyerSmsMin").value = formatOptionalMoney(notificationState.ebayBuyerMessageSmsMinOrderTotal);
+    qs("#udEbayBuyerSmsMax").value = formatOptionalMoney(notificationState.ebayBuyerMessageSmsMaxOrderTotal);
 
 
     const backdrop = qs("#userDrawerBackdrop");

@@ -1507,6 +1507,12 @@ async function refreshCanonicalRecentConversationDetail(options: {
       warnings: linkResult.warnings.slice(0, 10),
     });
   }
+  await enqueueBuyerMessageSmsAfterLinking({
+    supabase: options.supabase,
+    conversationRowId: options.conversation.id,
+    ebayConversationId: options.conversation.ebay_conversation_id,
+    counters: options.counters,
+  });
 
   const afterSnapshot = await loadConversationLatestSnapshot(options.supabase, options.conversation.id);
   const insertedDelta = options.counters.messagesInserted - messagesInsertedBefore;
@@ -2056,6 +2062,12 @@ async function processConversationPage(options: {
       reference_type: referenceType(conversation) || conversationRow.reference_type,
       other_party_username: otherPartyUsername(conversation) || conversationRow.other_party_username,
     });
+    await enqueueBuyerMessageSmsAfterLinking({
+      supabase: options.supabase,
+      conversationRowId: conversationRow.id,
+      ebayConversationId,
+      counters: options.counters,
+    });
     await sleep(options.input.rateLimitPauseMs);
   }
 
@@ -2132,6 +2144,24 @@ async function classifyProcessedConversations(options: {
       });
     }
     await sleep(options.input.rateLimitPauseMs);
+  }
+}
+
+async function enqueueBuyerMessageSmsAfterLinking(options: {
+  supabase: ServiceClient;
+  conversationRowId: string;
+  ebayConversationId: string;
+  counters: Counters;
+}) {
+  const { error } = await options.supabase.rpc("enqueue_ebay_buyer_message_sms_for_conversation", {
+    _conversation_id: options.conversationRowId,
+  });
+  if (error) {
+    options.counters.warnings.push({
+      code: "buyer_message_sms_enqueue_failed",
+      conversationId: options.ebayConversationId,
+      message: error.message.slice(0, 500),
+    });
   }
 }
 
