@@ -9,7 +9,7 @@ test("conversation context loads every line for a matched order", () => {
   assert.match(context, /const CONTEXT_VERSION = "ebay-conversation-context-v3"/);
   assert.match(context, /function mergeRowsById\(\.\.\.groups: Array<Array<Record<string, any>>>\)/);
   assert.match(context, /const linkedLines = \(linkedLinesResult\.data \|\| \[\]\) as Array<Record<string, any>>;/);
-  assert.match(context, /\.from\("ebay_order_admin_events"\)\s*\.select\("id, category, action, order_line_ids, order_numbers, created_at"\)\s*\.overlaps\("order_line_ids", linkedLineIds\)/);
+  assert.match(context, /\.from\("ebay_order_admin_events"\)\s*\.select\("id, action, order_ids, order_line_ids, created_at, payload"\)\s*\.overlaps\("order_line_ids", linkedLineIds\)/);
   assert.match(context, /const groupLines = \(groupLinesResult\.data \|\| \[\]\) as Array<Record<string, any>>;/);
   assert.match(context, /const contextSeedLines = mergeRowsById\(linkedLines, groupLines\);/);
   assert.match(context, /\.from\("ebay_order_lines"\)\s*\.select\("id, order_id, item_number, transaction_id, custom_label, item_title, quantity, sold_for, total_price, line_status, internal_item_id, sale_id"\)\s*\.in\("order_id", allOrderIds\)/);

@@ -1354,7 +1354,7 @@ export async function buildEbayConversationContext(
   const groupEventsResult = linkedLineIds.length
     ? await supabase
       .from("ebay_order_admin_events")
-      .select("id, category, action, order_line_ids, order_numbers, created_at")
+      .select("id, action, order_ids, order_line_ids, created_at, payload")
       .overlaps("order_line_ids", linkedLineIds)
       .limit(MAX_LINKS)
     : { data: [], error: null };
