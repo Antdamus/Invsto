@@ -7011,9 +7011,9 @@
         orderLineIds: [],
         groupOrderIds: [order.id],
         groupOrderNumbers: [order.order_number].filter(Boolean),
-        label: `${source === "order_history" ? "Whole closed order" : "Whole pending order"} ${order.order_number || ""}`.trim(),
-        detail: `${order.buyer_username || conversation?.other_party_username || "Unknown buyer"} / entire order${amount ? ` / ${formatContextMoney(amount)}` : ""}`,
-        badge: "Whole order",
+        label: `${source === "order_history" ? "Entire closed order" : "Entire pending order"} ${order.order_number || ""}`.trim(),
+        detail: `${order.buyer_username || conversation?.other_party_username || "Unknown buyer"} / all lines in this order${amount ? ` / order total ${formatContextMoney(amount)}` : ""}`,
+        badge: "Order",
       });
     });
 
@@ -7031,7 +7031,7 @@
         orderLineIds: [line.id],
         groupOrderIds: [line.order_id || order.id].filter(Boolean),
         groupOrderNumbers: [line.order_number || order.order_number].filter(Boolean),
-        label: `${source === "order_history" ? "Specific closed line" : "Specific pending line"} ${line.order_number || order.order_number || ""}`.trim(),
+        label: `${source === "order_history" ? "This closed line only" : "This pending line only"} ${line.order_number || order.order_number || ""}`.trim(),
         detail: `${ebayConversationTaskTargetLineTitle(line)}${amount ? ` / ${formatContextMoney(amount)}` : ""}`,
         badge: "Line item",
       });

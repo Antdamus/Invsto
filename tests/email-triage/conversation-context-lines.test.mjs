@@ -18,11 +18,13 @@ test("conversation context loads every line for a matched order", () => {
 });
 
 test("task target labels distinguish whole orders from specific lines", () => {
-  assert.match(js, /"Whole closed order"/);
-  assert.match(js, /"Whole pending order"/);
-  assert.match(js, /badge: "Whole order"/);
-  assert.match(js, /"Specific closed line"/);
-  assert.match(js, /"Specific pending line"/);
+  assert.match(js, /"Entire closed order"/);
+  assert.match(js, /"Entire pending order"/);
+  assert.match(js, /all lines in this order/);
+  assert.match(js, /order total/);
+  assert.match(js, /badge: "Order"/);
+  assert.match(js, /"This closed line only"/);
+  assert.match(js, /"This pending line only"/);
   assert.match(js, /badge: "Line item"/);
 });
 
