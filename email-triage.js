@@ -7027,9 +7027,9 @@
         orderLineIds: uniqueCompactValues(orderLines.map((line) => line.id)),
         groupOrderIds: [order.id],
         groupOrderNumbers: [order.order_number].filter(Boolean),
-        label: `${source === "order_history" ? "Closed order" : "Pending order"} ${order.order_number || ""}`.trim(),
+        label: `${source === "order_history" ? "Whole closed order" : "Whole pending order"} ${order.order_number || ""}`.trim(),
         detail: `${order.buyer_username || conversation?.other_party_username || "Unknown buyer"}${orderLines.length ? ` / ${orderLines.length} line${orderLines.length === 1 ? "" : "s"}` : ""}${amount ? ` / ${formatContextMoney(amount)}` : ""}`,
-        badge: source === "order_history" ? "Order history" : "Pending order",
+        badge: "Whole order",
       });
     });
 
@@ -7047,9 +7047,9 @@
         orderLineIds: [line.id],
         groupOrderIds: [line.order_id || order.id].filter(Boolean),
         groupOrderNumbers: [line.order_number || order.order_number].filter(Boolean),
-        label: `${source === "order_history" ? "Closed line" : "Pending line"} ${line.order_number || order.order_number || ""}`.trim(),
+        label: `${source === "order_history" ? "Specific closed line" : "Specific pending line"} ${line.order_number || order.order_number || ""}`.trim(),
         detail: `${ebayConversationTaskTargetLineTitle(line)}${amount ? ` / ${formatContextMoney(amount)}` : ""}`,
-        badge: source === "order_history" ? "Specific history line" : "Specific pending line",
+        badge: "Line item",
       });
     });
 
