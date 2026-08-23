@@ -2500,6 +2500,33 @@ async function markDraftSent(
   return data as Record<string, any>;
 }
 
+async function markConversationWaitingOnBuyerAfterSend(
+  supabase: ServiceClient,
+  options: {
+    conversationId: string;
+    sendAttemptId: string | null;
+    admin: { userId: string | null; email: string | null };
+  },
+) {
+  const { conversationId, sendAttemptId, admin } = options;
+  if (!conversationId) return null;
+  const { data, error } = await supabase.rpc("mark_ebay_conversation_waiting_on_buyer_after_send", {
+    _conversation_id: conversationId,
+    _send_attempt_id: sendAttemptId,
+    _actor_user_id: admin.userId || null,
+    _actor_email: admin.email || null,
+  });
+  if (error) {
+    console.warn("[ebay-conversation-draft] Could not mark conversation waiting_on_buyer after send:", {
+      conversation_id: conversationId,
+      send_attempt_id: sendAttemptId,
+      message: error.message,
+    });
+    return null;
+  }
+  return data || null;
+}
+
 async function sendDraft(
   supabase: ServiceClient,
   input: Input,
@@ -2825,6 +2852,11 @@ async function sendDraft(
   }
 
   await markDraftSent(supabase, draft, admin);
+  const responseStatusUpdate = await markConversationWaitingOnBuyerAfterSend(supabase, {
+    conversationId: draft.conversation_id,
+    sendAttemptId: attempt.id || null,
+    admin,
+  });
 
   const result = await viewDrafts(supabase, draft.conversation_id);
   return {
@@ -2837,6 +2869,7 @@ async function sendDraft(
     sent_at: nowIso,
     local_outbound_message: localOutboundMessage,
     local_outbound_message_error: localOutboundMessageError,
+    response_status_update: responseStatusUpdate,
     safety: safetyEnvelope({ sendsEnabled: true, messagesSent: 1, ebayMutationsPerformed: true }),
   };
 }

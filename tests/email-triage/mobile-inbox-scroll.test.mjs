@@ -28,7 +28,7 @@ test("returning to mobile inbox restores the previous scroll anchor", () => {
 
 test("mobile inbox switcher uses restore mode and ships with a fresh cache key", () => {
   assert.match(js, /restoreInboxScroll: button\.getAttribute\("data-ebay-mobile-view"\) === "inbox"/);
-  assert.match(html, /email-triage\.js\?v=reply-audit-persist-20260627/);
+  assert.match(html, /email-triage\.js\?v=user-read-response-status-20260823/);
 });
 
 test("mobile eBay workspace stays compact and touch-friendly on phones", () => {

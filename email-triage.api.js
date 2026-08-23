@@ -2075,6 +2075,49 @@
     };
   }
 
+  async function fetchEbayConversationUserReadStates(context, conversationIds = []) {
+    await currentSession(context, "eBay conversation user read states");
+    const ids = Array.from(new Set((Array.isArray(conversationIds) ? conversationIds : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)));
+    if (!ids.length) {
+      return {
+        ok: true,
+        read_states: [],
+      };
+    }
+
+    const { data, error } = await context.client.rpc("list_ebay_conversation_user_read_states", {
+      _conversation_ids: ids,
+    });
+    throwSupabaseReadError(error, "ebay_conversation_user_read_states_failed");
+    return {
+      ok: true,
+      read_states: Array.isArray(data) ? data : [],
+    };
+  }
+
+  async function saveEbayConversationUserReadState(context, conversationId, readState = "read", conversation = {}) {
+    await currentSession(context, "Save eBay conversation user read state");
+    if (!conversationId) {
+      const error = new Error("conversation_id_required");
+      error.code = "conversation_id_required";
+      throw error;
+    }
+    const normalizedReadState = String(readState || "").trim().toLowerCase() === "unread" ? "unread" : "read";
+    const { data, error } = await context.client.rpc("upsert_ebay_conversation_user_read_state", {
+      _conversation_id: conversationId,
+      _read_state: normalizedReadState,
+      _latest_message_id: conversation.latest_message_id || conversation.raw?.latest_message_id || null,
+      _latest_message_created_at: conversation.latest_message_created_at || conversation.last_message_created_at || conversation.raw?.latest_message_created_at || null,
+    });
+    throwSupabaseReadError(error, "ebay_conversation_user_read_state_save_failed");
+    return {
+      ok: true,
+      read_state: Array.isArray(data) ? data[0] || null : data || null,
+    };
+  }
+
   async function syncEbayProviderReadState(context, conversationId, readState = "read", options = {}) {
     const session = await currentSession(context, "Sync eBay provider read state");
     if (!conversationId) {
@@ -2407,6 +2450,8 @@
     createEbayConversationLinkedOrderTask,
     fetchEbayConversationTaskStatuses,
     markEbayConversationRead,
+    fetchEbayConversationUserReadStates,
+    saveEbayConversationUserReadState,
     syncEbayProviderReadState,
     processPendingEbayProviderReadState,
     fetchEbayConversationContext,
