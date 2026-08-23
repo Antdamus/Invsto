@@ -49,11 +49,17 @@ test("task target picker stays limited to directly linked order targets", () => 
   assert.match(js, /source: "buyer_history"/);
   assert.match(js, /function ebayConversationBuyerHistoryLinkedGroup\(context = \{\}, linkedTargetIds = \{\}, linkedLines = \[\]\)/);
   assert.match(js, /safeArray\(context\?\.buyer_history_groups\)\.find/);
+  assert.match(js, /function ebayConversationGroupIsMultiTarget\(group = null\)/);
+  assert.match(js, /function ebayConversationHasMultiEventHistoryGroup\(context = \{\}\)/);
+  assert.match(js, /group\?\.source === "order_history_event" && ebayConversationGroupIsMultiTarget\(group\)/);
   assert.match(js, /function ebayConversationLinkedOrderGroup\(context = \{\}, linkedTargetIds = \{\}\)/);
+  assert.match(js, /function chooseEbayConversationTaskOrderGroup\(context = \{\}, eventHistoryGroup = null, linkedOrderGroup = null, buyerHistoryFallbackGroup = null\)/);
+  assert.match(js, /if \(eventHistoryGroup && ebayConversationGroupIsMultiTarget\(eventHistoryGroup\)\) return eventHistoryGroup;/);
+  assert.match(js, /&& !ebayConversationHasMultiEventHistoryGroup\(context\)/);
   assert.match(js, /const linkedTargetIds = ebayConversationLinkedTargetIds\(context\)/);
   assert.match(js, /const directLines = linkedTargetIds\.lineIds\.length/);
   assert.match(js, /: linkedTargetIds\.orderIds\.length \? \[\] : allLines/);
-  assert.match(js, /const linkedOrderGroup = ebayConversationBuyerHistoryLinkedGroup\(context, linkedTargetIds, directLines\)/);
+  assert.match(js, /const linkedOrderGroup = chooseEbayConversationTaskOrderGroup\(/);
   assert.match(js, /const groupAmount = Number\(linkedOrderGroup\?\.total_price \|\| 0\)/);
   assert.match(js, /Entire related closed order set/);
   assert.match(js, /related closed lines/);
