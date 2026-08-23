@@ -6,7 +6,7 @@ import {
   resolveEbayConversation,
 } from "../_shared/ebay-conversation-context.ts";
 
-type ServiceClient = ReturnType<typeof createClient>;
+type ServiceClient = any;
 type Mode = "view" | "generate" | "regenerate" | "improve" | "save_edit" | "discard" | "approve" | "unapprove" | "send" | "translate_message";
 
 type Input = {
@@ -250,10 +250,10 @@ async function parseResponse(res: Response): Promise<Record<string, unknown>> {
   }
 }
 
-function safeMessage(payload: unknown) {
+function safeMessage(payload: unknown): string {
   if (!payload || typeof payload !== "object") return text(payload, 500) || "No response body.";
   const record = payload as Record<string, any>;
-  const parts = [
+  const parts: string[] = [
     record.message,
     record.longMessage,
     record.error,
