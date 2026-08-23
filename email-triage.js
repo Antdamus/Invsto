@@ -6864,7 +6864,7 @@
   }
 
   function orderContextIsPending(facts = {}) {
-    const closedLineStatuses = new Set(["fulfilled", "cancelled", "canceled", "skipped", "delivered", "archived"]);
+    const closedLineStatuses = new Set(["fulfilled", "successful", "success", "cancelled", "canceled", "skipped", "delivered", "archived"]);
     const lineStatuses = safeArray(facts.lines)
       .map((line) => normalizeOrderContextStatus(line?.line_status || line?.status))
       .filter(Boolean);
@@ -6939,11 +6939,64 @@
     ].filter(Boolean).join(" - "));
   }
 
+  function ebayBuyerHistoryLineToTaskLine(row = {}) {
+    const id = compactConversationText(row.line_id || row.id);
+    const orderId = compactConversationText(row.order_id);
+    if (!id || !orderId) return null;
+    const gross = Number(row.gross_value ?? row.line_total ?? row.total_price ?? row.sold_for ?? 0);
+    const lineTotal = Number.isFinite(gross) ? gross : 0;
+    return {
+      id,
+      order_id: orderId,
+      order_number: compactConversationText(row.order_number),
+      item_number: compactConversationText(row.item_number),
+      transaction_id: compactConversationText(row.transaction_id),
+      custom_label: compactConversationText(row.custom_label),
+      item_title: compactConversationText(row.title || row.item_title),
+      quantity: 1,
+      sold_for: lineTotal,
+      total_price: lineTotal,
+      line_status: compactConversationText(row.item_state || row.line_status || "successful"),
+      internal_item_id: compactConversationText(row.internal_item_id),
+      sale_id: compactConversationText(row.sale_id),
+    };
+  }
+
+  function mergeEbayTaskTargetLines(...groups) {
+    const byId = new Map();
+    groups.forEach((group) => {
+      safeArray(group).forEach((line) => {
+        if (!line?.id) return;
+        const key = String(line.id);
+        const current = byId.get(key);
+        if (!current) {
+          byId.set(key, line);
+          return;
+        }
+        const merged = { ...current };
+        Object.entries(line).forEach(([field, value]) => {
+          const hasValue = value !== undefined && value !== null && value !== "";
+          if ((field === "total_price" || field === "sold_for") && Number(merged[field] || 0) <= 0 && Number(value || 0) > 0) {
+            merged[field] = value;
+          } else if (hasValue && (merged[field] === undefined || merged[field] === null || merged[field] === "")) {
+            merged[field] = value;
+          }
+        });
+        byId.set(key, merged);
+      });
+    });
+    return [...byId.values()];
+  }
+
   function buildEbayConversationTaskTargetOptions(state, conversation) {
     const payload = state.ebayConversationContextsById?.[conversation?.id] || null;
     const context = contextFromEbayPayload(payload);
     const orders = safeArray(context?.matched_orders).filter((order) => order?.id);
-    const lines = safeArray(context?.matched_order_lines).filter((line) => line?.id);
+    const matchedLines = safeArray(context?.matched_order_lines).filter((line) => line?.id);
+    const buyerHistoryLines = safeArray(context?.buyer_value_line_breakdown)
+      .map(ebayBuyerHistoryLineToTaskLine)
+      .filter((line) => line?.id && line?.order_id);
+    const lines = mergeEbayTaskTargetLines(matchedLines, buyerHistoryLines).filter((line) => line?.id);
     const orderById = new Map(orders.map((order) => [String(order.id), order]));
     const linesByOrderId = new Map();
     lines.forEach((line) => {

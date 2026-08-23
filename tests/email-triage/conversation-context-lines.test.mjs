@@ -25,3 +25,11 @@ test("task target labels distinguish whole orders from specific lines", () => {
   assert.match(js, /"Specific pending line"/);
   assert.match(js, /badge: "Line item"/);
 });
+
+test("task target picker includes buyer history snapshot lines", () => {
+  assert.match(js, /"fulfilled", "successful", "success"/);
+  assert.match(js, /function ebayBuyerHistoryLineToTaskLine\(row = \{\}\)/);
+  assert.match(js, /const buyerHistoryLines = safeArray\(context\?\.buyer_value_line_breakdown\)/);
+  assert.match(js, /\.map\(ebayBuyerHistoryLineToTaskLine\)/);
+  assert.match(js, /const lines = mergeEbayTaskTargetLines\(matchedLines, buyerHistoryLines\)/);
+});
