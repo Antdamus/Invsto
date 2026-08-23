@@ -26,7 +26,7 @@ test("task target labels distinguish whole orders from specific lines", () => {
   assert.match(js, /"Entire pending order"/);
   assert.match(js, /all lines in this order/);
   assert.match(js, /order total/);
-  assert.match(js, /badge: "Order"/);
+  assert.match(js, /badge: isRelatedHistorySet \? "Order set" : "Order"/);
   assert.match(js, /"This closed line only"/);
   assert.match(js, /"This pending line only"/);
   assert.match(js, /badge: "Line item"/);
@@ -44,11 +44,15 @@ test("task target picker stays limited to directly linked order targets", () => 
   assert.match(js, /const sameTitleRows = anchorTitle/);
   assert.match(js, /source: "buyer_history"/);
   assert.match(js, /function ebayConversationLinkedOrderGroup\(context = \{\}, linkedTargetIds = \{\}\)/);
+  assert.match(js, /function chooseEbayConversationTaskOrderGroup\(eventGroup = null, buyerHistoryGroup = null\)/);
+  assert.match(js, /if \(eventLineCount <= 1 && historyLineCount > eventLineCount\) return buyerHistoryGroup;/);
   assert.match(js, /const linkedTargetIds = ebayConversationLinkedTargetIds\(context\)/);
   assert.match(js, /const directLines = linkedTargetIds\.lineIds\.length/);
   assert.match(js, /: linkedTargetIds\.orderIds\.length \? \[\] : allLines/);
-  assert.match(js, /const linkedOrderGroup = ebayConversationLinkedOrderGroup\(context, linkedTargetIds\)\s*\|\| ebayConversationBuyerHistoryFallbackGroup\(context, linkedTargetIds, directLines\)/);
+  assert.match(js, /const linkedOrderGroup = chooseEbayConversationTaskOrderGroup\(/);
   assert.match(js, /const groupAmount = Number\(linkedOrderGroup\?\.total_price \|\| 0\)/);
+  assert.match(js, /Entire related closed order set/);
+  assert.match(js, /related closed lines/);
   assert.match(js, /taskScope: parentOrderIds\.length > 1 \? "group" : "order"/);
   assert.match(js, /orderLineIds: parentOrderIds\.length > 1 \? groupLineIds : \[\]/);
   assert.doesNotMatch(js, /const buyerHistoryLines = safeArray\(context\?\.buyer_value_line_breakdown\)/);

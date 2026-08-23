@@ -7010,6 +7010,21 @@
     }) || null;
   }
 
+  function ebayConversationGroupLineCount(group = null) {
+    const declaredCount = Number(group?.line_count || 0);
+    if (Number.isFinite(declaredCount) && declaredCount > 0) return declaredCount;
+    return uniqueCompactValues(safeArray(group?.order_line_ids)).length;
+  }
+
+  function chooseEbayConversationTaskOrderGroup(eventGroup = null, buyerHistoryGroup = null) {
+    if (!eventGroup) return buyerHistoryGroup;
+    if (!buyerHistoryGroup) return eventGroup;
+    const eventLineCount = ebayConversationGroupLineCount(eventGroup);
+    const historyLineCount = ebayConversationGroupLineCount(buyerHistoryGroup);
+    if (eventLineCount <= 1 && historyLineCount > eventLineCount) return buyerHistoryGroup;
+    return eventGroup;
+  }
+
   function buildEbayConversationTaskTargetOptions(state, conversation) {
     const payload = state.ebayConversationContextsById?.[conversation?.id] || null;
     const context = contextFromEbayPayload(payload);
@@ -7019,8 +7034,10 @@
     const directLines = linkedTargetIds.lineIds.length
       ? allLines.filter((line) => linkedTargetIds.lineIds.includes(String(line.id)))
       : linkedTargetIds.orderIds.length ? [] : allLines;
-    const linkedOrderGroup = ebayConversationLinkedOrderGroup(context, linkedTargetIds)
-      || ebayConversationBuyerHistoryFallbackGroup(context, linkedTargetIds, directLines);
+    const linkedOrderGroup = chooseEbayConversationTaskOrderGroup(
+      ebayConversationLinkedOrderGroup(context, linkedTargetIds),
+      ebayConversationBuyerHistoryFallbackGroup(context, linkedTargetIds, directLines),
+    );
     const groupLineIds = uniqueCompactValues(safeArray(linkedOrderGroup?.order_line_ids));
     const groupOrderIds = uniqueCompactValues(safeArray(linkedOrderGroup?.order_ids));
     const targetOrderIds = uniqueCompactValues([
@@ -7084,6 +7101,7 @@
         ? groupAmount
         : ebayConversationTaskTargetAmount(primaryOrder, parentLines);
       const parentLineCount = Number(linkedOrderGroup?.line_count || parentLines.length || 0);
+      const isRelatedHistorySet = source === "order_history" && parentOrderIds.length > 1;
       pushTarget({
         key: `${source}:order:${primaryOrder.id}:${groupLineIds.join(",")}`,
         targetKind: "order",
@@ -7093,9 +7111,13 @@
         orderLineIds: parentOrderIds.length > 1 ? groupLineIds : [],
         groupOrderIds: parentOrderIds,
         groupOrderNumbers: parentOrderNumbers,
-        label: `${source === "order_history" ? "Entire closed order" : "Entire pending order"} ${primaryOrder.order_number || ""}`.trim(),
-        detail: `${primaryOrder.buyer_username || conversation?.other_party_username || "Unknown buyer"} / ${parentLineCount > 1 ? `${parentLineCount} lines in this order` : "all lines in this order"}${amount ? ` / order total ${formatContextMoney(amount)}` : ""}`,
-        badge: "Order",
+        label: isRelatedHistorySet
+          ? "Entire related closed order set"
+          : `${source === "order_history" ? "Entire closed order" : "Entire pending order"} ${primaryOrder.order_number || ""}`.trim(),
+        detail: isRelatedHistorySet
+          ? `${primaryOrder.buyer_username || conversation?.other_party_username || "Unknown buyer"} / ${parentLineCount} related closed lines / ${parentOrderIds.length} orders${amount ? ` / total ${formatContextMoney(amount)}` : ""}`
+          : `${primaryOrder.buyer_username || conversation?.other_party_username || "Unknown buyer"} / ${parentLineCount > 1 ? `${parentLineCount} lines in this order` : "all lines in this order"}${amount ? ` / order total ${formatContextMoney(amount)}` : ""}`,
+        badge: isRelatedHistorySet ? "Order set" : "Order",
       });
     }
 
