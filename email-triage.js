@@ -6950,13 +6950,29 @@
     };
   }
 
-  function ebayConversationBuyerHistoryFallbackGroup(context = {}, linkedTargetIds = {}) {
+  function ebayConversationIdentifierSet(values = []) {
+    return new Set(uniqueCompactValues(values).map((value) => value.toLowerCase()));
+  }
+
+  function ebayConversationIdentifierMatches(value, set = new Set()) {
+    const key = compactConversationText(value).toLowerCase();
+    return Boolean(key && set.has(key));
+  }
+
+  function ebayConversationBuyerHistoryFallbackGroup(context = {}, linkedTargetIds = {}, linkedLines = []) {
     const lineIds = new Set(safeArray(linkedTargetIds.lineIds).map((id) => String(id)));
     const orderIds = new Set(safeArray(linkedTargetIds.orderIds).map((id) => String(id)));
+    const orderNumbers = ebayConversationIdentifierSet(safeArray(linkedLines).map((line) => line?.order_number || line?.order?.order_number));
+    const itemNumbers = ebayConversationIdentifierSet(safeArray(linkedLines).map((line) => line?.item_number));
+    const transactionIds = ebayConversationIdentifierSet(safeArray(linkedLines).map((line) => line?.transaction_id));
     const rows = safeArray(context?.buyer_value_line_breakdown)
-      .filter((row) => row?.line_id && row?.order_id);
+      .filter((row) => row?.line_id || row?.order_id || row?.order_number || row?.item_number || row?.transaction_id);
     const anchor = rows.find((row) =>
-      lineIds.has(String(row.line_id)) || orderIds.has(String(row.order_id))
+      lineIds.has(String(row.line_id))
+        || orderIds.has(String(row.order_id))
+        || ebayConversationIdentifierMatches(row.order_number, orderNumbers)
+        || ebayConversationIdentifierMatches(row.item_number, itemNumbers)
+        || ebayConversationIdentifierMatches(row.transaction_id, transactionIds)
     );
     if (!anchor) return null;
     const anchorTitle = compactConversationText(anchor.title).toLowerCase();
@@ -6987,26 +7003,26 @@
   function ebayConversationLinkedOrderGroup(context = {}, linkedTargetIds = {}) {
     const lineIds = new Set(safeArray(linkedTargetIds.lineIds).map((id) => String(id)));
     const orderIds = new Set(safeArray(linkedTargetIds.orderIds).map((id) => String(id)));
-    const matchedGroup = safeArray(context?.matched_order_groups).find((group) => {
+    return safeArray(context?.matched_order_groups).find((group) => {
       const groupLineIds = safeArray(group?.order_line_ids).map((id) => String(id));
       const groupOrderIds = safeArray(group?.order_ids).map((id) => String(id));
       return groupLineIds.some((id) => lineIds.has(id)) || groupOrderIds.some((id) => orderIds.has(id));
-    });
-    return matchedGroup || ebayConversationBuyerHistoryFallbackGroup(context, linkedTargetIds);
+    }) || null;
   }
 
   function buildEbayConversationTaskTargetOptions(state, conversation) {
     const payload = state.ebayConversationContextsById?.[conversation?.id] || null;
     const context = contextFromEbayPayload(payload);
     const linkedTargetIds = ebayConversationLinkedTargetIds(context);
-    const linkedOrderGroup = ebayConversationLinkedOrderGroup(context, linkedTargetIds);
-    const groupLineIds = uniqueCompactValues(safeArray(linkedOrderGroup?.order_line_ids));
-    const groupOrderIds = uniqueCompactValues(safeArray(linkedOrderGroup?.order_ids));
     const allOrders = safeArray(context?.matched_orders).filter((order) => order?.id);
     const allLines = safeArray(context?.matched_order_lines).filter((line) => line?.id);
     const directLines = linkedTargetIds.lineIds.length
       ? allLines.filter((line) => linkedTargetIds.lineIds.includes(String(line.id)))
       : linkedTargetIds.orderIds.length ? [] : allLines;
+    const linkedOrderGroup = ebayConversationLinkedOrderGroup(context, linkedTargetIds)
+      || ebayConversationBuyerHistoryFallbackGroup(context, linkedTargetIds, directLines);
+    const groupLineIds = uniqueCompactValues(safeArray(linkedOrderGroup?.order_line_ids));
+    const groupOrderIds = uniqueCompactValues(safeArray(linkedOrderGroup?.order_ids));
     const targetOrderIds = uniqueCompactValues([
       ...linkedTargetIds.orderIds,
       ...groupOrderIds,

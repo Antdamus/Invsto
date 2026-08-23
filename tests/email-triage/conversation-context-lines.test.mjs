@@ -35,14 +35,19 @@ test("task target labels distinguish whole orders from specific lines", () => {
 test("task target picker stays limited to directly linked order targets", () => {
   assert.match(js, /"fulfilled", "successful", "success"/);
   assert.match(js, /function ebayConversationLinkedTargetIds\(context = \{\}\)/);
-  assert.match(js, /function ebayConversationBuyerHistoryFallbackGroup\(context = \{\}, linkedTargetIds = \{\}\)/);
+  assert.match(js, /function ebayConversationIdentifierSet\(values = \[\]\)/);
+  assert.match(js, /function ebayConversationIdentifierMatches\(value, set = new Set\(\)\)/);
+  assert.match(js, /function ebayConversationBuyerHistoryFallbackGroup\(context = \{\}, linkedTargetIds = \{\}, linkedLines = \[\]\)/);
+  assert.match(js, /const orderNumbers = ebayConversationIdentifierSet\(safeArray\(linkedLines\)\.map\(\(line\) => line\?\.order_number \|\| line\?\.order\?\.order_number\)\)/);
+  assert.match(js, /\|\| ebayConversationIdentifierMatches\(row\.item_number, itemNumbers\)/);
+  assert.match(js, /\|\| ebayConversationIdentifierMatches\(row\.transaction_id, transactionIds\)/);
   assert.match(js, /const sameTitleRows = anchorTitle/);
   assert.match(js, /source: "buyer_history"/);
   assert.match(js, /function ebayConversationLinkedOrderGroup\(context = \{\}, linkedTargetIds = \{\}\)/);
   assert.match(js, /const linkedTargetIds = ebayConversationLinkedTargetIds\(context\)/);
-  assert.match(js, /const linkedOrderGroup = ebayConversationLinkedOrderGroup\(context, linkedTargetIds\)/);
   assert.match(js, /const directLines = linkedTargetIds\.lineIds\.length/);
   assert.match(js, /: linkedTargetIds\.orderIds\.length \? \[\] : allLines/);
+  assert.match(js, /const linkedOrderGroup = ebayConversationLinkedOrderGroup\(context, linkedTargetIds\)\s*\|\| ebayConversationBuyerHistoryFallbackGroup\(context, linkedTargetIds, directLines\)/);
   assert.match(js, /const groupAmount = Number\(linkedOrderGroup\?\.total_price \|\| 0\)/);
   assert.match(js, /taskScope: parentOrderIds\.length > 1 \? "group" : "order"/);
   assert.match(js, /orderLineIds: parentOrderIds\.length > 1 \? groupLineIds : \[\]/);
