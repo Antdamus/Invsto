@@ -71,6 +71,9 @@ const state = {
   expandedHistoryGroupIds: new Set(),
   targetHistoryReturnLineIds: new Set(),
   autoExpandedHistoryReturnLineGroups: new Set(),
+  targetHistoryFocus: null,
+  autoExpandedHistoryFocusGroups: new Set(),
+  historyFocusScrolled: false,
   lastBarcodeLookupMissLog: "",
   busy: false,
 };
@@ -6004,6 +6007,42 @@ function bindReturnVideoReceiptLinks(root = document) {
   });
 }
 
+function normalizeHistoryFocusValue(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function historyFocusMatchesLine(line = {}, focus = state.targetHistoryFocus) {
+  if (!focus) return false;
+  const lineId = String(line.id || "").trim();
+  const lineOrderNumber = normalizeEbayOrderNumber(line.order?.order_number || line.order_number);
+  const lineItemNumber = normalizeHistoryFocusValue(line.item_number);
+  const lineTransactionId = normalizeHistoryFocusValue(line.transaction_id);
+  const focusItemNumber = normalizeHistoryFocusValue(focus.itemNumber);
+  const focusTransactionId = normalizeHistoryFocusValue(focus.transactionId);
+
+  if (focus.lineId && lineId === focus.lineId) return true;
+  if (focus.orderNumber && lineOrderNumber && lineOrderNumber !== focus.orderNumber) return false;
+  if (focusTransactionId && lineTransactionId === focusTransactionId) return true;
+  if (focusItemNumber && lineItemNumber === focusItemNumber) return true;
+  return Boolean(focus.orderNumber && lineOrderNumber === focus.orderNumber);
+}
+
+function historyFocusMatchesGroup(group = {}, focus = state.targetHistoryFocus) {
+  if (!focus) return false;
+  return (group.lines || []).some((line) => historyFocusMatchesLine(line, focus));
+}
+
+function requestHistoryFocusScroll() {
+  if (!state.targetHistoryFocus || state.historyFocusScrolled) return;
+  window.requestAnimationFrame(() => {
+    const target = document.querySelector('[data-history-line-focus="true"]')
+      || document.querySelector('[data-history-group-focus="true"]');
+    if (!target) return;
+    state.historyFocusScrolled = true;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+}
+
 function renderHistoryList(groups = getVisibleHistoryGroups()) {
   const list = $("history-list");
   if (!list) return;
@@ -6036,9 +6075,14 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
     const hasActiveReturnCase = returnCases.some(isActiveReturnCase);
     const groupKey = getHistoryGroupKey(group, groupIndex);
     const hasTargetReturnLine = group.lines.some((line) => state.targetHistoryReturnLineIds.has(line.id));
+    const hasHistoryFocus = historyFocusMatchesGroup(group);
     if (hasTargetReturnLine && !state.autoExpandedHistoryReturnLineGroups.has(groupKey)) {
       state.expandedHistoryGroupIds.add(groupKey);
       state.autoExpandedHistoryReturnLineGroups.add(groupKey);
+    }
+    if (hasHistoryFocus && !state.autoExpandedHistoryFocusGroups.has(groupKey)) {
+      state.expandedHistoryGroupIds.add(groupKey);
+      state.autoExpandedHistoryFocusGroups.add(groupKey);
     }
     const isExpanded = state.expandedHistoryGroupIds.has(groupKey);
     const groupQty = getHistoryGroupQuantity(group);
@@ -6080,8 +6124,13 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
           ${group.lines.map((line) => {
             const lineIssue = getHistoryLineReturnIssue(line);
             const lineFinanceStatus = getFinanceStatusBadge(line);
+            const lineFocused = historyFocusMatchesLine(line);
             return `
-            <div class="history-line-row ${lineIssue ? "has-return-issue" : ""} ${lineIssue?.targeted ? "is-target-return-line" : ""}">
+            <div
+              class="history-line-row ${lineIssue ? "has-return-issue" : ""} ${lineIssue?.targeted ? "is-target-return-line" : ""} ${lineFocused ? "is-history-focus" : ""}"
+              data-history-line-id="${escapeHtml(line.id || "")}"
+              data-history-line-focus="${lineFocused ? "true" : "false"}"
+            >
               <div>
                 <div class="history-line-title-row">
                   <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
@@ -6126,8 +6175,9 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
     ` : "";
 
     const card = document.createElement("article");
-    card.className = `history-order-card ${isExpanded ? "is-expanded" : "is-collapsed"}`;
+    card.className = `history-order-card ${isExpanded ? "is-expanded" : "is-collapsed"} ${hasHistoryFocus ? "is-history-focus" : ""}`;
     card.dataset.historyGroupKey = groupKey;
+    card.dataset.historyGroupFocus = hasHistoryFocus ? "true" : "false";
     card.innerHTML = `
       <div class="history-order-summary" data-history-group-summary>
         <div class="history-order-identity">
@@ -6232,6 +6282,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
     });
     list.appendChild(card);
   });
+  requestHistoryFocusScroll();
   hydrateHistoryGroupEvidencePhotos(groups).catch((error) => {
     console.warn("Could not load grouped evidence photos:", error);
   });
@@ -9043,10 +9094,41 @@ function applyHistoryBuyerLaunchSearch() {
   state.historyBuyerSearchApplied = true;
 }
 
+function getInitialHistoryFocusFromParams(params) {
+  const orderNumber = normalizeEbayOrderNumber(
+    params.get("focusOrder") ||
+    params.get("orderNumber") ||
+    params.get("orderId") ||
+    params.get("order") ||
+    params.get("ebayOrder")
+  );
+  const lineId = String(
+    params.get("focusLineId") ||
+    params.get("orderLineId") ||
+    params.get("lineId") ||
+    ""
+  ).trim();
+  const itemNumber = String(params.get("focusItemNumber") || params.get("itemNumber") || "").trim();
+  const transactionId = String(params.get("focusTransactionId") || params.get("transactionId") || "").trim();
+  if (!orderNumber && !lineId && !itemNumber && !transactionId) return null;
+  return { orderNumber, lineId, itemNumber, transactionId };
+}
+
 function applyInitialHistorySearchParams() {
   if (isReturnsWorkbenchPage()) return;
   const params = new URLSearchParams(window.location.search);
-  const searchValue = String(params.get("historySearch") || params.get("orderHistorySearch") || "").trim();
+  const focus = getInitialHistoryFocusFromParams(params);
+  state.targetHistoryFocus = focus;
+  state.autoExpandedHistoryFocusGroups = new Set();
+  state.historyFocusScrolled = false;
+  const searchValue = String(
+    params.get("historySearch") ||
+    params.get("orderHistorySearch") ||
+    focus?.orderNumber ||
+    focus?.itemNumber ||
+    focus?.transactionId ||
+    ""
+  ).trim();
   state.targetHistoryReturnLineIds = new Set(String(params.get("returnLineIds") || "")
     .split(",")
     .map((value) => value.trim())

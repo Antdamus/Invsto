@@ -566,6 +566,13 @@ body {
     var(--task-panel);
 }
 
+.team-task-card.is-direct-focus {
+  border-color: rgba(157, 242, 189, 0.5);
+  box-shadow:
+    0 0 0 2px rgba(157, 242, 189, 0.13),
+    0 18px 42px rgba(157, 242, 189, 0.08);
+}
+
 .team-task-card.is-overdue {
   border-color: rgba(255, 157, 157, 0.5);
   box-shadow:

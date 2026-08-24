@@ -900,6 +900,11 @@ function getTasksForSourceFilter(tasks = []) {
 }
 
 function getVisibleTasksForCurrentFilters(tasks = []) {
+  const requested = getRequestedTaskId();
+  if (requested) {
+    const focusedTask = tasks.find((task) => task.id === requested);
+    if (focusedTask) return [focusedTask];
+  }
   const filtered = getTasksForSourceFilter(getTasksForOwnerFilter(getTasksForReadFilter(tasks)));
   return isTaskHistoryView() ? sortHistoryTasks(filtered) : sortUnifiedTasks(filtered);
 }
@@ -4303,7 +4308,7 @@ function renderTaskCard(task = {}, options = {}) {
       `;
 
   return `
-    <article class="team-task-card ${urgent ? "is-urgent" : ""} ${late ? "is-overdue" : ""} ${resolved ? "is-resolved" : ""} ${expanded ? "is-expanded" : "is-collapsed"} ${escapeHtml(readInfo.className)}" data-team-task-card="${escapeHtml(task.id)}" data-team-task-card-key="${escapeHtml(taskKey)}">
+    <article class="team-task-card ${urgent ? "is-urgent" : ""} ${late ? "is-overdue" : ""} ${resolved ? "is-resolved" : ""} ${task.id === getRequestedTaskId() ? "is-direct-focus" : ""} ${expanded ? "is-expanded" : "is-collapsed"} ${escapeHtml(readInfo.className)}" data-team-task-card="${escapeHtml(task.id)}" data-team-task-card-key="${escapeHtml(taskKey)}">
       <button type="button" class="team-task-card-summary" data-team-task-toggle="${escapeHtml(taskKey)}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="${escapeHtml(detailsId)}">
         <span class="team-task-source-dot">${escapeHtml(sourceLabel.slice(0, 2).toUpperCase())}</span>
         <span class="team-task-summary-main">

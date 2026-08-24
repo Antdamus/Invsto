@@ -6857,12 +6857,34 @@
 
   function buildOrderHistoryContextUrl(facts = {}) {
     const params = new URLSearchParams();
-    const orderNumber = facts.orderNumbers?.[0] || "";
+    const lines = safeArray(facts.lines);
+    const focusLine = lines.find((line) => compactConversationText(
+      line?.order_number ||
+      line?.order?.order_number ||
+      line?.item_number ||
+      line?.transaction_id ||
+      line?.id
+    )) || {};
+    const orderNumber = compactConversationText(
+      focusLine.order_number ||
+      focusLine.order?.order_number ||
+      facts.orderNumbers?.[0] ||
+      ""
+    );
+    const itemNumber = compactConversationText(focusLine.item_number);
+    const transactionId = compactConversationText(focusLine.transaction_id);
+    const lineId = compactConversationText(focusLine.id || focusLine.line_id);
+    const searchValue = orderNumber || itemNumber || transactionId || compactConversationText(facts.buyer);
+    if (searchValue) params.set("historySearch", searchValue);
     if (orderNumber) {
       params.set("orderNumber", orderNumber);
+      params.set("focusOrder", orderNumber);
     } else if (facts.buyer) {
       params.set("buyer", facts.buyer);
     }
+    if (lineId) params.set("focusLineId", lineId);
+    if (itemNumber) params.set("focusItemNumber", itemNumber);
+    if (transactionId) params.set("focusTransactionId", transactionId);
     params.set("allDates", "true");
     return params.toString() ? `ebay-order-history.html?${params.toString()}` : "ebay-order-history.html";
   }
@@ -6917,7 +6939,7 @@
       netPayout,
       firstItemTitle: compactConversationText(firstLine?.item_title),
       pendingHref: buildPendingOrdersContextUrl({ orderNumbers, buyer }),
-      historyHref: buildOrderHistoryContextUrl({ orderNumbers, buyer }),
+      historyHref: buildOrderHistoryContextUrl({ orderNumbers, buyer, lines, orders }),
       ebayOrderHref: orderNumbers.length === 1 ? buildEbayOrderDetailsUrl(orderNumbers[0]) : "",
     };
     facts.isPendingOrder = orderContextIsPending(facts);
