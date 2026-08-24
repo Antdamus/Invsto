@@ -1347,7 +1347,7 @@ async function loadTasks() {
 
   if (requested) {
     const card = document.querySelector(`[data-team-task-card="${CSS.escape(requested)}"]`);
-    card?.scrollIntoView({ behavior: "smooth", block: "center" });
+    card?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 }
 
@@ -4308,7 +4308,7 @@ function renderTaskCard(task = {}, options = {}) {
       `;
 
   return `
-    <article class="team-task-card ${urgent ? "is-urgent" : ""} ${late ? "is-overdue" : ""} ${resolved ? "is-resolved" : ""} ${task.id === getRequestedTaskId() ? "is-direct-focus" : ""} ${expanded ? "is-expanded" : "is-collapsed"} ${escapeHtml(readInfo.className)}" data-team-task-card="${escapeHtml(task.id)}" data-team-task-card-key="${escapeHtml(taskKey)}">
+    <article class="team-task-card is-${escapeHtml(task.source || "team")}-task-card ${urgent ? "is-urgent" : ""} ${late ? "is-overdue" : ""} ${resolved ? "is-resolved" : ""} ${task.id === getRequestedTaskId() ? "is-direct-focus" : ""} ${expanded ? "is-expanded" : "is-collapsed"} ${escapeHtml(readInfo.className)}" data-team-task-card="${escapeHtml(task.id)}" data-team-task-card-key="${escapeHtml(taskKey)}">
       <button type="button" class="team-task-card-summary" data-team-task-toggle="${escapeHtml(taskKey)}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="${escapeHtml(detailsId)}">
         <span class="team-task-source-dot">${escapeHtml(sourceLabel.slice(0, 2).toUpperCase())}</span>
         <span class="team-task-summary-main">
@@ -6459,6 +6459,7 @@ function setupListeners() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  document.body.classList.toggle("team-task-direct-mode", Boolean(getRequestedTaskId()));
   await waitForSupabaseReady();
   const ok = await loadCurrentUser();
   if (!ok) return;

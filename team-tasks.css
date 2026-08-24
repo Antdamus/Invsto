@@ -3699,3 +3699,377 @@ body.modal-open {
     border-radius: 16px;
   }
 }
+
+@media (max-width: 680px) {
+  #team-task-status:empty {
+    display: none;
+  }
+
+  .team-task-card {
+    scroll-margin-top: calc(92px + env(safe-area-inset-top, 0px));
+  }
+
+  body.team-task-direct-mode .header,
+  body.team-task-direct-mode .team-task-hero,
+  body.team-task-direct-mode .team-task-board-head {
+    display: none;
+  }
+
+  body.team-task-direct-mode .content.team-task-page {
+    padding: 8px 8px calc(28px + env(safe-area-inset-bottom, 0px));
+  }
+
+  body.team-task-direct-mode .team-task-board {
+    gap: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  body.team-task-direct-mode .team-task-list {
+    gap: 0;
+  }
+
+  body.team-task-direct-mode .team-task-card.is-direct-focus {
+    border-color: rgba(157, 242, 189, 0.46);
+    box-shadow: 0 0 0 1px rgba(157, 242, 189, 0.12);
+  }
+
+  .team-task-card.is-expanded {
+    padding: 6px;
+    border-radius: 16px;
+  }
+
+  .team-task-card-summary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+    padding: 8px;
+    border-radius: 12px;
+  }
+
+  body.team-task-direct-mode .team-task-card-summary {
+    padding: 7px 8px;
+  }
+
+  body.team-task-direct-mode .team-task-source-dot,
+  body.team-task-direct-mode .team-task-expand-pill {
+    display: none;
+  }
+
+  .team-task-summary-title-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 5px;
+  }
+
+  .team-task-summary-title-row strong {
+    min-width: 0;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.15;
+  }
+
+  .team-task-summary-title-row .team-task-read-chip,
+  .team-task-summary-title-row .team-task-mark-read-chip {
+    display: none;
+  }
+
+  .team-task-status-chip {
+    justify-self: end;
+    max-width: 118px;
+    justify-content: center;
+  }
+
+  .team-task-summary-preview,
+  .team-task-summary-context {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.25;
+  }
+
+  .team-task-summary-facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    justify-content: stretch;
+  }
+
+  .team-task-summary-facts span {
+    width: 100%;
+    max-width: none;
+    min-height: 26px;
+    justify-content: center;
+    border-radius: 9px;
+    text-align: center;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.12;
+  }
+
+  .team-task-card-details {
+    gap: 7px;
+    padding: 5px 0 0;
+  }
+
+  .team-task-brief,
+  .team-task-update-trail,
+  .team-task-context {
+    gap: 8px;
+    padding: 9px;
+    border-radius: 13px;
+  }
+
+  .team-task-brief.is-pending-order-task {
+    box-shadow: none;
+  }
+
+  .team-task-order-brief {
+    gap: 8px;
+  }
+
+  .team-task-order-work-card {
+    padding: 8px;
+    border-radius: 12px;
+  }
+
+  .team-task-order-work-main {
+    gap: 7px;
+  }
+
+  .team-task-order-work-toolbar {
+    gap: 7px;
+  }
+
+  .team-task-order-inline-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .team-task-order-inline-meta > span,
+  .team-task-order-work-toolbar .team-task-order-number-action {
+    width: 100%;
+    max-width: none;
+    min-height: 42px;
+    display: grid;
+    grid-template-columns: 1fr;
+    align-content: center;
+    gap: 2px;
+    border-radius: 10px;
+    padding: 6px 8px;
+  }
+
+  .team-task-order-work-toolbar .team-task-order-number-action {
+    grid-column: 1 / -1;
+  }
+
+  .team-task-order-inline-meta small,
+  .team-task-order-number-action span {
+    font-size: 0.6rem;
+    letter-spacing: 0.035em;
+  }
+
+  .team-task-order-inline-meta b,
+  .team-task-order-number-action strong {
+    width: 100%;
+    font-size: 0.76rem;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.12;
+  }
+
+  .team-task-order-compact-status {
+    align-items: flex-start;
+    gap: 5px;
+  }
+
+  .team-task-order-compact-status .team-task-order-primary-status,
+  .team-task-order-status-pill {
+    min-height: 26px;
+    border-radius: 9px;
+    padding: 4px 7px;
+    font-size: 0.66rem;
+    line-height: 1.08;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .team-task-order-compact-status em {
+    max-width: 100%;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    font-size: 0.72rem;
+  }
+
+  .team-task-order-instruction {
+    padding: 9px;
+  }
+
+  .team-task-order-instruction p {
+    font-size: 0.92rem;
+    line-height: 1.28;
+  }
+
+  .team-task-approval-lines {
+    padding: 7px;
+    border-radius: 11px;
+  }
+
+  .team-task-approval-lines-head {
+    display: grid;
+    gap: 2px;
+  }
+
+  .team-task-approval-line {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 7px;
+    min-height: auto;
+    padding: 6px;
+    border-radius: 10px;
+  }
+
+  .team-task-approval-line-photo {
+    width: 48px;
+    height: 44px;
+    border-radius: 8px;
+  }
+
+  .team-task-approval-line-main {
+    gap: 4px;
+  }
+
+  .team-task-approval-line-main strong {
+    font-size: 0.82rem;
+    line-height: 1.12;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .team-task-approval-line-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .team-task-approval-line-meta span,
+  .team-task-approval-line-meta .team-task-line-finance-pill,
+  .team-task-approval-line-meta .team-task-line-video-open,
+  .team-task-line-review-badge {
+    width: 100%;
+    max-width: 100%;
+    min-height: 22px;
+    justify-content: center;
+    border-radius: 8px;
+    padding: 3px 5px;
+    font-size: 0.6rem;
+    line-height: 1.08;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .team-task-card-details > .team-task-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    width: 100%;
+  }
+
+  .team-task-card-details > .team-task-actions .primary-btn,
+  .team-task-card-details > .team-task-actions .secondary-btn,
+  .team-task-card-details > .team-task-actions a,
+  .team-task-card-details > .team-task-actions .team-task-action-menu,
+  .team-task-card-details > .team-task-actions .team-task-action-menu summary {
+    width: 100%;
+    min-height: 38px;
+    border-radius: 14px;
+    padding: 7px 8px;
+    font-size: 0.76rem;
+    line-height: 1.12;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .team-task-card-details > .team-task-actions .team-task-action-menu {
+    display: grid;
+  }
+
+  .team-task-action-menu-body {
+    border-radius: 12px;
+    padding: 6px;
+  }
+
+  .order-task-context-details summary {
+    min-width: 0;
+    gap: 5px;
+    font-size: 0.78rem;
+  }
+
+  .order-task-context-details summary::after {
+    box-sizing: border-box;
+    min-height: 28px;
+    border-radius: 10px;
+  }
+
+  .order-task-context-details summary > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .order-task-context-details summary > span:last-child {
+    font-size: 0.7rem;
+    line-height: 1.2;
+  }
+
+  .team-task-line,
+  .order-workflow-item,
+  .team-task-event {
+    padding: 8px;
+  }
+
+  .team-task-line-facts,
+  .team-task-order-status-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .team-task-line strong,
+  .team-task-facts b,
+  .team-task-line-facts b,
+  .team-task-order-status-facts b {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+
+  .team-task-update-trail.is-collapsible > summary {
+    padding: 9px;
+  }
+
+  .team-task-update-trail.is-collapsible .team-task-events {
+    padding: 0 9px 9px;
+  }
+}
+
+@media (max-width: 340px) {
+  .team-task-summary-facts,
+  .team-task-order-inline-meta,
+  .team-task-approval-line-meta,
+  .team-task-line-facts,
+  .team-task-order-status-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .team-task-card-details > .team-task-actions {
+    grid-template-columns: 1fr;
+  }
+}

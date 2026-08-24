@@ -10,7 +10,7 @@ const migration = readFileSync(
 );
 
 test("task notification links open the unified task page", () => {
-  assert.match(teamTasksHtml, /team-tasks\.js\?v=task-direct-focus-20260823/);
+  assert.match(teamTasksHtml, /team-tasks\.js\?v=mobile-task-sheet-20260824/);
   assert.match(
     teamTasksJs,
     /function getTaskNotificationHref\(notification = \{\}\) \{\s*return `team-tasks\.html\?taskId=\$\{encodeURIComponent\(notification\.task_id \|\| ""\)\}`;\s*\}/,
@@ -19,7 +19,7 @@ test("task notification links open the unified task page", () => {
 });
 
 test("direct task links show only the requested task", () => {
-  assert.match(teamTasksHtml, /team-tasks\.css\?v=task-direct-focus-20260823/);
+  assert.match(teamTasksHtml, /team-tasks\.css\?v=mobile-task-sheet-20260824/);
   assert.match(teamTasksJs, /const requested = getRequestedTaskId\(\);\s*if \(requested\) \{\s*const focusedTask = tasks\.find\(\(task\) => task\.id === requested\);\s*if \(focusedTask\) return \[focusedTask\];\s*\}/);
   assert.match(teamTasksJs, /task\.id === getRequestedTaskId\(\) \? "is-direct-focus" : ""/);
 });
