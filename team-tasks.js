@@ -1347,12 +1347,6 @@ async function loadTasks() {
 }
 
 function getTaskNotificationHref(notification = {}) {
-  if (notification.source === "order") {
-    return `pending-orders.html?orderTaskId=${encodeURIComponent(notification.task_id || "")}#order-task-panel`;
-  }
-  if (notification.source === "return") {
-    return `ebay-returns.html?returnTaskId=${encodeURIComponent(notification.task_id || "")}#return-work-queue`;
-  }
   return `team-tasks.html?taskId=${encodeURIComponent(notification.task_id || "")}`;
 }
 
