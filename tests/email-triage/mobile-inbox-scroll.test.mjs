@@ -28,11 +28,11 @@ test("returning to mobile inbox restores the previous scroll anchor", () => {
 
 test("mobile inbox switcher uses restore mode and ships with a fresh cache key", () => {
   assert.match(js, /restoreInboxScroll: button\.getAttribute\("data-ebay-mobile-view"\) === "inbox"/);
-  assert.match(html, /email-triage\.js\?v=context-history-focus-20260823/);
+  assert.match(html, /email-triage\.js\?v=conversation-name-search-20260824/);
 });
 
 test("mobile eBay workspace stays compact and touch-friendly on phones", () => {
-  assert.match(html, /email-triage\.css\?v=context-history-focus-20260823/);
+  assert.match(html, /email-triage\.css\?v=conversation-name-search-20260824/);
   assert.match(css, /\.ebay-mobile-workspace-switcher\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)\s*!important;/);
   assert.match(css, /\.ebay-mobile-workspace-switcher\s*\{[\s\S]*?top:\s*calc\(64px \+ env\(safe-area-inset-top\)\);/);
   assert.match(css, /\.ebay-conversation-sync-result \.inbox-skipped-reasons\s*\{[\s\S]*?overflow-x:\s*auto;/);
@@ -64,7 +64,7 @@ test("mobile message detail panels use compact controls instead of stacked block
 });
 
 test("mobile task composer renders as a compact phone sheet", () => {
-  assert.match(html, /email-triage-asset-version" content="context-history-focus-20260823"/);
+  assert.match(html, /email-triage-asset-version" content="conversation-name-search-20260824"/);
   assert.match(js, /<h3 id="ebay-task-modal-title">Create task<\/h3>/);
   assert.match(js, /<legend>Target<\/legend>/);
   assert.match(js, /<span>Instructions<\/span>/);

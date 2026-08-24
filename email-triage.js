@@ -2924,6 +2924,39 @@
     };
   }
 
+  function ebayConversationIdentitySearchParts(conversation) {
+    const identity = ebayBuyerIdentity(conversation);
+    const rawIdentity = conversation?.raw?.buyer_identity && typeof conversation.raw.buyer_identity === "object"
+      ? conversation.raw.buyer_identity
+      : {};
+    const summary = ebayConversationSummary(conversation);
+    const summaryIdentity = summary.buyer_identity && typeof summary.buyer_identity === "object"
+      ? summary.buyer_identity
+      : {};
+    return [
+      identity.username,
+      identity.displayName,
+      identity.name,
+      identity.email,
+      rawIdentity.username,
+      rawIdentity.display_name,
+      rawIdentity.displayName,
+      rawIdentity.name,
+      rawIdentity.email,
+      summaryIdentity.username,
+      summaryIdentity.display_name,
+      summaryIdentity.displayName,
+      summaryIdentity.name,
+      summaryIdentity.email,
+      conversation?.buyer_username,
+      conversation?.buyer_name,
+      conversation?.buyer_email,
+      conversation?.raw?.buyer_username,
+      conversation?.raw?.buyer_name,
+      conversation?.raw?.buyer_email,
+    ];
+  }
+
   function ebayIdentitySourceLabel(source) {
     const labels = {
       order: "Order buyer",
@@ -3059,6 +3092,7 @@
       conversation?.reference_id,
       conversation?.reference_type,
       conversation?.latest_message_preview,
+      ebayConversationIdentitySearchParts(conversation),
       ebayConversationParty(conversation),
       summary.buyer_usernames,
       summary.participant_usernames,
@@ -10549,24 +10583,37 @@
       cleanUpdates.selectedEbaySavedViewId = null;
     }
     const searchChanged = Object.prototype.hasOwnProperty.call(cleanUpdates, "ebayConversationSearchQuery");
+    const preserveLoadedRows = searchChanged && safeArray(adminClassificationState.ebayConversations).length > 0;
+    const nextConversations = preserveLoadedRows ? adminClassificationState.ebayConversations : [];
+    const nextSelectionState = preserveLoadedRows
+      ? {
+        ...adminClassificationState,
+        ...cleanUpdates,
+        ebayConversations: nextConversations,
+      }
+      : null;
+    const nextVisibleRows = nextSelectionState ? filteredEbayConversations(nextSelectionState) : [];
+    const selectedStillVisible = nextVisibleRows.some((conversation) => conversation.id === adminClassificationState.selectedEbayConversationId);
     setEbayConversationState({
       ...cleanUpdates,
       ebayConversationLoading: true,
       ebayConversationLoadingMore: false,
       ebayConversationError: null,
-      ebayConversations: [],
-      selectedEbayConversationId: null,
+      ebayConversations: nextConversations,
+      selectedEbayConversationId: preserveLoadedRows
+        ? selectedStillVisible ? adminClassificationState.selectedEbayConversationId : nextVisibleRows[0]?.id || null
+        : null,
       ebayMailboxWarning: null,
       ebayMailboxPagination: {
         ...ebayMailboxPageInfo(adminClassificationState),
         matching_total: null,
-        loaded_count: 0,
+        loaded_count: nextConversations.length,
         offset: 0,
         next_offset: null,
         has_more: false,
       },
     });
-    scheduleEbayConversationListReload(context, { delay: searchChanged ? 350 : 0 });
+    scheduleEbayConversationListReload(context, { delay: searchChanged ? 180 : 0 });
   }
 
   function updateEbayConversationClassificationFilter(context, groupKey, value, active) {

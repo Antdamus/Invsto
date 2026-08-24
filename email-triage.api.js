@@ -1400,11 +1400,35 @@
   function ebayApiConversationSearchBlob(conversation = {}) {
     const summary = ebayLegacySummary(conversation);
     const classification = ebayApiEffectiveClassification(ebayLegacyClassification(conversation));
+    const identity = conversation.buyer_identity && typeof conversation.buyer_identity === "object" ? conversation.buyer_identity : {};
+    const rawIdentity = conversation.raw?.buyer_identity && typeof conversation.raw.buyer_identity === "object" ? conversation.raw.buyer_identity : {};
+    const summaryIdentity = summary.buyer_identity && typeof summary.buyer_identity === "object" ? summary.buyer_identity : {};
     return [
       summary.search_text,
       conversation.ebay_conversation_id,
       conversation.conversation_title,
       conversation.other_party_username,
+      identity.username,
+      identity.display_name,
+      identity.displayName,
+      identity.name,
+      identity.email,
+      rawIdentity.username,
+      rawIdentity.display_name,
+      rawIdentity.displayName,
+      rawIdentity.name,
+      rawIdentity.email,
+      summaryIdentity.username,
+      summaryIdentity.display_name,
+      summaryIdentity.displayName,
+      summaryIdentity.name,
+      summaryIdentity.email,
+      conversation.buyer_username,
+      conversation.buyer_name,
+      conversation.buyer_email,
+      conversation.raw?.buyer_username,
+      conversation.raw?.buyer_name,
+      conversation.raw?.buyer_email,
       conversation.reference_id,
       conversation.reference_type,
       conversation.latest_message_preview,
