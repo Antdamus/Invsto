@@ -587,9 +587,9 @@ button.task-action-btn.is-assigned:hover,
   padding: 0 12px;
 }
 
-.admin-order-actions-controls #admin-close-all-pending {
-  border-color: rgba(255, 123, 123, 0.5);
-  background: rgba(255, 123, 123, 0.1);
+.admin-order-actions-controls #admin-select-visible-pending {
+  border-color: rgba(227, 189, 119, 0.34);
+  background: rgba(227, 189, 119, 0.08);
 }
 
 .checkout-store-panel h2 {
@@ -1555,6 +1555,20 @@ textarea:focus {
   width: 18px;
   min-height: 18px;
   accent-color: var(--gold);
+}
+
+.buyer-card-quick-select {
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid rgba(227, 189, 119, 0.24);
+  border-radius: 999px;
+  background: rgba(227, 189, 119, 0.06);
+}
+
+.buyer-card-quick-select span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .buyer-card-admin-row {

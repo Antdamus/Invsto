@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css" />
+  <link rel="stylesheet" href="pending-orders.css?v=selected-closeout-20260824" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
@@ -291,15 +291,15 @@
         <div>
           <span class="eyebrow">Order Actions</span>
           <h2>Pending Order Actions</h2>
-          <p>Select pending order lines for targeted actions, or close the whole pending queue with one signed note.</p>
+          <p>Select pending order lines, then close only the checked orders with one signed note.</p>
         </div>
         <div class="admin-order-actions-controls">
           <span id="admin-order-selected-count" class="count-pill">0 selected</span>
           <button id="admin-clear-order-selection" type="button" class="secondary-btn">Clear</button>
           <button id="admin-open-ebay-labels" type="button" class="secondary-btn">Get eBay Labels</button>
           <button id="admin-mark-packed-no-stock" type="button" class="secondary-btn">Confirm Packed</button>
-          <button id="admin-mark-cancelled" type="button" class="secondary-btn danger-btn">Mark Canceled</button>
-          <button id="admin-close-all-pending" type="button" class="secondary-btn danger-btn">Close All Pending</button>
+          <button id="admin-mark-cancelled" type="button" class="secondary-btn danger-btn">Close Selected</button>
+          <button id="admin-select-visible-pending" type="button" class="secondary-btn">Select Visible</button>
         </div>
       </section>
 
@@ -953,6 +953,6 @@
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
   <script src="ebay-buyer-insights.js"></script>
-  <script src="pending-orders.js"></script>
+  <script src="pending-orders.js?v=selected-closeout-20260824"></script>
 </body>
 </html>

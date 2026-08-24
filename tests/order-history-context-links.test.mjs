@@ -8,8 +8,15 @@ const orderHistoryHtml = readFileSync(new URL("../ebay-order-history.html", impo
 const orderHistoryJs = readFileSync(new URL("../ebay-order-history.js", import.meta.url), "utf8");
 const orderHistoryCss = readFileSync(new URL("../ebay-order-history.css", import.meta.url), "utf8");
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 test("triage order-history context links search and focus the linked order line", () => {
-  assert.match(emailTriageHtml, /email-triage\.js\?v=context-history-focus-20260823/);
+  const assetVersion = emailTriageHtml.match(/email-triage-asset-version" content="([^"]+)"/)?.[1];
+
+  assert.ok(assetVersion);
+  assert.match(emailTriageHtml, new RegExp(`email-triage\\.js\\?v=${escapeRegExp(assetVersion)}`));
   assert.match(emailTriageJs, /function buildOrderHistoryContextUrl\(facts = \{\}\)/);
   assert.match(emailTriageJs, /params\.set\("historySearch", searchValue\)/);
   assert.match(emailTriageJs, /params\.set\("focusOrder", orderNumber\)/);

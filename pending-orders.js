@@ -3512,9 +3512,7 @@ function getAllPendingAdminCloseoutLines() {
 }
 
 function getAdminCloseoutLinesForActiveScope() {
-  return state.adminCloseoutScope === "all_pending"
-    ? getAllPendingAdminCloseoutLines()
-    : getSelectedAdminLines();
+  return getSelectedAdminLines();
 }
 
 function getUniqueOrderNumbersForLines(lines = []) {
@@ -3615,6 +3613,9 @@ function renderAdminOrderActions() {
   pruneAdminSelection();
   const count = state.adminSelectedLineIds.size;
   const allPendingCount = getAllPendingAdminCloseoutLines().length;
+  const visibleSelectableCount = (Array.isArray(state.filteredOrders) ? state.filteredOrders : [])
+    .filter(isAdminCloseoutSelectable)
+    .length;
   panel.classList.remove("hidden");
   panel.classList.toggle("has-selection", count > 0);
   const countEl = $("admin-order-selected-count");
@@ -3624,7 +3625,7 @@ function renderAdminOrderActions() {
   $("admin-open-ebay-labels")?.toggleAttribute("disabled", count === 0);
   $("admin-mark-packed-no-stock")?.toggleAttribute("disabled", count === 0);
   $("admin-mark-cancelled")?.toggleAttribute("disabled", count === 0);
-  $("admin-close-all-pending")?.toggleAttribute("disabled", allPendingCount === 0);
+  $("admin-select-visible-pending")?.toggleAttribute("disabled", visibleSelectableCount === 0);
 }
 
 function setAdminLineSelection(lineId, checked) {
@@ -3645,6 +3646,15 @@ function setAdminGroupSelection(group, checked) {
 
 function clearAdminOrderSelection() {
   state.adminSelectedLineIds.clear();
+  renderOrders();
+  renderAdminOrderActions();
+}
+
+function setVisibleAdminOrderSelection(checked = true) {
+  (Array.isArray(state.filteredOrders) ? state.filteredOrders : []).filter(isAdminCloseoutSelectable).forEach((line) => {
+    if (checked) state.adminSelectedLineIds.add(line.id);
+    else state.adminSelectedLineIds.delete(line.id);
+  });
   renderOrders();
   renderAdminOrderActions();
 }
@@ -3852,6 +3862,12 @@ function renderOrders() {
               ${escapeHtml(ebayApiStatus.label)}
             </span>
           ` : ""}
+          ${isAdminUser() ? `
+            <label class="admin-group-select buyer-card-quick-select" title="Select all open pending lines in this card">
+              <input type="checkbox" data-admin-group-select="${escapeHtml(group.key)}" />
+              <span>Select</span>
+            </label>
+          ` : ""}
           <span class="buyer-card-value">${formatMoney(group.totalValue)}</span>
           ${taskControlMarkup}
           <span class="status-badge">${group.pendingCount} pending</span>
@@ -3897,7 +3913,7 @@ function renderOrders() {
     const expandButton = card.querySelector("[data-buyer-expand-key]");
     const lineList = card.querySelector(".buyer-line-list");
     const buyerLabelButton = card.querySelector("[data-buyer-label-key]");
-    const groupCheckbox = card.querySelector("[data-admin-group-select]");
+    const groupCheckboxes = [...card.querySelectorAll("[data-admin-group-select]")];
     const completeButton = card.querySelector("[data-buyer-complete-key]");
     const taskButton = card.querySelector("[data-buyer-task-key]");
     const viewTaskButton = card.querySelector("[data-view-order-task]");
@@ -3942,15 +3958,17 @@ function renderOrders() {
       if (!event.target.closest(".buyer-card-head,.buyer-card-meta,.buyer-card-collapsed-hint")) return;
       toggleBuyerGroupExpanded(group.key);
     });
-    if (groupCheckbox) {
+    if (groupCheckboxes.length) {
       const selectable = group.lines.filter(isAdminCloseoutSelectable);
       const selected = selectable.filter((line) => state.adminSelectedLineIds.has(line.id));
       const selectedOrderNumbers = getUniqueOrderNumbersForLines(selected);
-      groupCheckbox.checked = selectable.length > 0 && selected.length === selectable.length;
-      groupCheckbox.indeterminate = selected.length > 0 && selected.length < selectable.length;
-      groupCheckbox.disabled = selectable.length === 0;
-      groupCheckbox.addEventListener("click", (event) => event.stopPropagation());
-      groupCheckbox.addEventListener("change", (event) => setAdminGroupSelection(group, event.target.checked));
+      groupCheckboxes.forEach((groupCheckbox) => {
+        groupCheckbox.checked = selectable.length > 0 && selected.length === selectable.length;
+        groupCheckbox.indeterminate = selected.length > 0 && selected.length < selectable.length;
+        groupCheckbox.disabled = selectable.length === 0;
+        groupCheckbox.addEventListener("click", (event) => event.stopPropagation());
+        groupCheckbox.addEventListener("change", (event) => setAdminGroupSelection(group, event.target.checked));
+      });
       if (buyerLabelButton) {
         buyerLabelButton.disabled = selectedOrderNumbers.length === 0;
         buyerLabelButton.textContent = selectedOrderNumbers.length > 1 ? `Get ${selectedOrderNumbers.length} Labels` : "Get Label";
@@ -9197,22 +9215,13 @@ async function confirmWorkerCancelOrder() {
   }
 }
 
-function getAdminCloseoutActionCopy(action, scope = "selected") {
-  if (scope === "all_pending") {
-    return {
-      title: "Close all pending orders",
-      subtitle: "This removes every open pending line currently in the queue as canceled. No stock will be removed.",
-      notePlaceholder: "Example: duplicate import cleanup, already handled in eBay, or another bulk closeout reason.",
-      button: "Sign and Close All",
-    };
-  }
-
+function getAdminCloseoutActionCopy(action) {
   if (action === "cancelled") {
     return {
-      title: "Mark selected orders canceled",
+      title: "Close selected pending orders",
       subtitle: "These lines will be removed from the pending queue as canceled. No stock will be removed.",
       notePlaceholder: "Example: Buyer canceled on eBay / order refunded.",
-      button: "Sign and Mark Canceled",
+      button: "Sign and Close Selected",
     };
   }
 
@@ -9266,19 +9275,18 @@ function renderAdminCloseoutList(lines, options = {}) {
   }
 }
 
-function openAdminOrderCloseoutModal(action, options = {}) {
+function openAdminOrderCloseoutModal(action) {
   if (!isAdminUser()) return;
-  const scope = options.scope || "selected";
-  state.adminCloseoutScope = scope;
+  state.adminCloseoutScope = "selected";
   const lines = getAdminCloseoutLinesForActiveScope();
   if (!lines.length) {
-    setImportStatus(scope === "all_pending" ? "There are no pending order lines to close." : "Select at least one pending order line first.", "error");
+    setImportStatus("Select at least one pending order line first.", "error");
     state.adminCloseoutScope = "selected";
     return;
   }
 
   state.adminCloseoutAction = action;
-  const copy = getAdminCloseoutActionCopy(action, scope);
+  const copy = getAdminCloseoutActionCopy(action);
   $("admin-order-closeout-title").textContent = copy.title;
   $("admin-order-closeout-subtitle").textContent = `${copy.subtitle} ${lines.length.toLocaleString()} line(s) will be affected.`;
   $("admin-order-closeout-note").value = "";
@@ -9286,7 +9294,7 @@ function openAdminOrderCloseoutModal(action, options = {}) {
   $("admin-order-closeout-password").value = "";
   $("admin-order-closeout-error").textContent = "";
   $("confirm-admin-order-closeout").textContent = copy.button;
-  renderAdminCloseoutList(lines, { bulk: scope === "all_pending", limit: scope === "all_pending" ? 25 : lines.length });
+  renderAdminCloseoutList(lines, { bulk: false, limit: lines.length });
   openModal("admin-order-closeout-modal");
   setTimeout(() => $("admin-order-closeout-note")?.focus(), 80);
 }
@@ -9306,11 +9314,10 @@ async function confirmAdminOrderCloseout() {
   const note = String($("admin-order-closeout-note")?.value || "").trim();
   const password = String($("admin-order-closeout-password")?.value || "").trim();
   const errorEl = $("admin-order-closeout-error");
-  const scope = state.adminCloseoutScope || "selected";
   const action = state.adminCloseoutAction || "cancelled";
 
   if (!lines.length) {
-    if (errorEl) errorEl.textContent = scope === "all_pending" ? "There are no pending order lines to close." : "Select at least one pending order line.";
+    if (errorEl) errorEl.textContent = "Select at least one pending order line.";
     return;
   }
   if (!note) {
@@ -9339,7 +9346,7 @@ async function confirmAdminOrderCloseout() {
     const { data, error } = await supabase.rpc("admin_close_ebay_order_lines", {
       _order_line_ids: lines.map((line) => line.id),
       _action: action,
-      _notes: scope === "all_pending" ? `Closed en masse: ${note}` : note,
+      _notes: note,
       _signed_by_email: state.user.email,
     });
     if (error) throw error;
@@ -9348,14 +9355,12 @@ async function confirmAdminOrderCloseout() {
     clearAdminOrderSelection();
     const updatedLines = data?.[0]?.updated_lines || lines.length;
     setImportStatus(
-      scope === "all_pending"
-        ? `Closed ${updatedLines.toLocaleString()} pending order line(s) en masse.`
-        : `Closed ${updatedLines.toLocaleString()} order line(s).`,
+      `Closed ${updatedLines.toLocaleString()} selected order line(s).`,
       "success"
     );
     await loadOrders();
     postEbayPendingQueueChanged({
-      action: scope === "all_pending" ? `admin_bulk_${action}` : `admin_${action}`,
+      action: `admin_${action}`,
       orderNumbers: closedOrderNumbers,
       lineCount: lines.length,
       updatedLines,
@@ -11593,7 +11598,7 @@ function setupListeners() {
   $("admin-open-ebay-labels")?.addEventListener("click", openAdminSelectedEbayLabelPages);
   $("admin-mark-packed-no-stock")?.addEventListener("click", () => openAdminOrderCloseoutModal("fulfilled_no_inventory"));
   $("admin-mark-cancelled")?.addEventListener("click", () => openAdminOrderCloseoutModal("cancelled"));
-  $("admin-close-all-pending")?.addEventListener("click", () => openAdminOrderCloseoutModal("cancelled", { scope: "all_pending" }));
+  $("admin-select-visible-pending")?.addEventListener("click", () => setVisibleAdminOrderSelection(true));
   $("close-admin-order-closeout")?.addEventListener("click", closeAdminOrderCloseoutModal);
   $("cancel-admin-order-closeout")?.addEventListener("click", closeAdminOrderCloseoutModal);
   $("confirm-admin-order-closeout")?.addEventListener("click", confirmAdminOrderCloseout);
