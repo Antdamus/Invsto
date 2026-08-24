@@ -469,6 +469,40 @@
     return (event.ctrlKey || event.metaKey) && ["a", "c", "v", "x"].includes(key);
   }
 
+  function updateEbayTaskModalViewportHeight() {
+    const viewportHeight = Math.round(
+      window.visualViewport?.height ||
+      window.innerHeight ||
+      document.documentElement?.clientHeight ||
+      0,
+    );
+    if (!viewportHeight) return;
+    document.documentElement.style.setProperty("--ebay-task-viewport-height", `${Math.max(320, viewportHeight)}px`);
+    document.documentElement.classList.toggle("is-ebay-task-compact-viewport", viewportHeight < 560);
+  }
+
+  function bindEbayTaskModalViewportFallback() {
+    updateEbayTaskModalViewportHeight();
+    window.addEventListener("resize", updateEbayTaskModalViewportHeight, { passive: true });
+    window.visualViewport?.addEventListener("resize", updateEbayTaskModalViewportHeight, { passive: true });
+    window.visualViewport?.addEventListener("scroll", updateEbayTaskModalViewportHeight, { passive: true });
+  }
+
+  function syncEbayTaskModalDocumentState(state = adminClassificationState) {
+    document.body?.classList.toggle(
+      "has-ebay-task-modal",
+      Boolean(state.ebayConversationTaskModal || state.ebayConversationTaskAuditModal),
+    );
+  }
+
+  function focusEbayTaskModalFieldIntoView(target) {
+    if (!target?.closest?.("[data-ebay-message-task-form]")) return;
+    updateEbayTaskModalViewportHeight();
+    window.setTimeout(() => {
+      target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    }, 140);
+  }
+
   const els = {
     refreshClassificationAdmin: document.getElementById("refresh-classification-admin"),
     toggleCategoryPanel: document.getElementById("toggle-category-panel"),
@@ -4364,6 +4398,7 @@
       setEbayConversationState({ ebayConversationTaskError: "Could not find that message in the loaded timeline." });
       return;
     }
+    updateEbayTaskModalViewportHeight();
     setEbayConversationState({
       ebayConversationTaskModal: {
         conversationId,
@@ -9117,6 +9152,7 @@
     renderEbayConversationList(state);
     renderEbayConversationDetail(state);
     renderEbayConversationContextPanel(state);
+    syncEbayTaskModalDocumentState(state);
     if (window.lucide?.createIcons) window.lucide.createIcons();
   }
 
@@ -11254,6 +11290,9 @@
       const form = event.target.closest("[data-ebay-draft-form]");
       if (form) rememberEbayComposerDraft(form);
     });
+    els.ebayConversationDetail?.addEventListener("focusin", (event) => {
+      focusEbayTaskModalFieldIntoView(event.target);
+    });
     els.ebayConversationDetail?.addEventListener("change", (event) => {
       const taskForm = event.target.closest("[data-ebay-message-task-form]");
       if (taskForm && event.target.name === "taskTag") syncEbayTaskRefundField(taskForm);
@@ -12079,6 +12118,7 @@
   }
 
   async function init() {
+    bindEbayTaskModalViewportFallback();
     bindEbayMobileWorkspaceEvents();
 
     const context = await requireAdmin({ greetingEl: els.greeting });

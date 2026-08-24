@@ -28,5 +28,5 @@ test("typing in conversation search filters loaded rows immediately", () => {
   assert.match(js, /ebayConversations: nextConversations/);
   assert.match(js, /const nextVisibleRows = nextSelectionState \? filteredEbayConversations\(nextSelectionState\) : \[\]/);
   assert.match(js, /scheduleEbayConversationListReload\(context, \{ delay: searchChanged \? 180 : 0 \}\)/);
-  assert.match(html, /email-triage-asset-version" content="conversation-name-search-20260824"/);
+  assert.match(html, /email-triage-asset-version" content="task-mobile-sheet-20260824"/);
 });
