@@ -3794,9 +3794,11 @@ function renderOrderWorkflowPanel(task = {}) {
   `;
 }
 
-function renderOrderTaskContext(task = {}) {
+function renderOrderTaskContext(task = {}, options = {}) {
+  const chatLinked = Boolean(options.chatLinked);
   const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
   const lineSummary = getPendingOrderLineSummary(task);
+  if (chatLinked) return "";
   return `
     ${lines.length ? `
       <details class="team-task-context order-task-context-details">
@@ -3930,6 +3932,10 @@ function getEbayConversationTaskContext(task = {}) {
   };
 }
 
+function hasEbayConversationTaskContext(task = {}) {
+  return Boolean(getEbayConversationTaskContext(task));
+}
+
 function renderEbayConversationTeamTaskContext(task = {}) {
   const context = getEbayConversationTaskContext(task);
   if (!context) return "";
@@ -3971,7 +3977,8 @@ function renderEbayConversationTeamTaskContext(task = {}) {
 
 function renderTaskContext(task = {}) {
   const ebayConversationContext = renderEbayConversationTeamTaskContext(task);
-  if (task.source === "order") return `${renderOrderTaskContext(task)}${ebayConversationContext}`;
+  const chatLinked = hasEbayConversationTaskContext(task);
+  if (task.source === "order") return `${ebayConversationContext}${renderOrderTaskContext(task, { chatLinked })}`;
   if (task.source === "return") return `${renderReturnTaskContext(task)}${ebayConversationContext}`;
   if (task.source === "team") return renderEbayConversationTeamTaskContext(task);
   return "";
@@ -4071,6 +4078,7 @@ function getTaskNextStepLabel(task = {}) {
 
 function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
   const isHistoryTask = isOrderHistoryTask(task);
+  const chatLinked = hasEbayConversationTaskContext(task);
   const originalInstruction = getTaskOriginalInstruction(task);
   const latestEvent = getLatestTaskEvent(events);
   const latestUpdate = String(latestEvent?.notes || "").trim();
@@ -4089,6 +4097,17 @@ function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
   const shipByValue = task.ship_by_date || order.ship_by_date || task.due_at;
   const shipByLabel = shipByValue ? formatDate(shipByValue) : "Not set";
   const assignedByLabel = getTaskAssignerLabel(task);
+  const showLineWorkPanel = !chatLinked && (isHistoryTask || isOrderPendingApprovalTask(task));
+  const showHistoryEvidence = !chatLinked && isHistoryTask;
+  const inlineMetaHtml = [
+    renderTaskOrderNumberActionsForTask(task),
+    customerName ? `<span><small>Customer</small><b>${escapeHtml(customerName)}</b></span>` : "",
+    task.buyer_username ? `<span><small>Buyer</small><b>${escapeHtml(task.buyer_username)}</b></span>` : "",
+    !chatLinked ? `<span><small>Placed</small><b>${escapeHtml(placedLabel)}</b></span>` : "",
+    !chatLinked ? `<span class="${late ? "is-overdue-fact" : ""}"><small>${escapeHtml(late ? "Late due" : "Due")}</small><b>${escapeHtml(shipByLabel)}</b></span>` : "",
+    !chatLinked ? `<span><small>Assigned by</small><b>${escapeHtml(assignedByLabel)}</b></span>` : "",
+    moneyLabel ? `<span><small>Amount</small><b>${escapeHtml(moneyLabel)}</b></span>` : "",
+  ].filter(Boolean).join("");
   const advancedFacts = [
     ["Source", getTaskSourceLabel(task)],
     ["Status", canceled ? "Canceled" : getTaskStatusLabel(task.status)],
@@ -4116,44 +4135,40 @@ function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
         <div class="team-task-order-work-main">
           <div class="team-task-order-work-toolbar">
             <div class="team-task-order-inline-meta">
-              ${renderTaskOrderNumberActionsForTask(task)}
-              ${customerName ? `<span><small>Customer</small><b>${escapeHtml(customerName)}</b></span>` : ""}
-              ${task.buyer_username ? `<span><small>Buyer</small><b>${escapeHtml(task.buyer_username)}</b></span>` : ""}
-              <span><small>Placed</small><b>${escapeHtml(placedLabel)}</b></span>
-              <span class="${late ? "is-overdue-fact" : ""}"><small>${escapeHtml(late ? "Late due" : "Due")}</small><b>${escapeHtml(shipByLabel)}</b></span>
-              <span><small>Assigned by</small><b>${escapeHtml(assignedByLabel)}</b></span>
-              ${moneyLabel ? `<span><small>Amount</small><b>${escapeHtml(moneyLabel)}</b></span>` : ""}
+              ${inlineMetaHtml}
             </div>
-            ${renderPendingOrderCompactStatus(task)}
+            ${chatLinked ? "" : renderPendingOrderCompactStatus(task)}
           </div>
           <article class="team-task-instruction is-current team-task-order-instruction">
             <small>What needs to be done</small>
             <p>${escapeHtml(currentInstruction)}</p>
           </article>
-          ${isHistoryTask ? renderOrderHistoryTaskLines(task, events) : renderPendingOrderApprovalLines(task, events)}
-          ${isHistoryTask ? renderPendingOrderEvidencePanel(task, events) : ""}
+          ${showLineWorkPanel ? (isHistoryTask ? renderOrderHistoryTaskLines(task, events) : renderPendingOrderApprovalLines(task, events)) : ""}
+          ${showHistoryEvidence ? renderPendingOrderEvidencePanel(task, events) : ""}
           ${hasLatestUpdate ? `
             <p class="team-task-latest-update"><strong>Latest update</strong><span>${escapeHtml(latestUpdate)}</span></p>
           ` : ""}
         </div>
       </div>
-      <details class="team-task-context-details team-task-brief-details team-task-order-audit-details">
-        <summary>Extra eBay status, photos, and audit details</summary>
-        ${renderPendingOrderStatusSnapshot(task)}
-        ${isHistoryTask ? "" : renderPendingOrderEvidencePanel(task, events)}
-        <p class="team-task-next-step"><strong>Next step</strong><span>${escapeHtml(getTaskNextStepLabel(task))}</span></p>
-        ${hasDifferentOriginal ? `
-          <article class="team-task-instruction">
-            <small>Original assignment</small>
-            <p>${escapeHtml(originalInstruction)}</p>
-          </article>
-        ` : ""}
-        ${advancedFacts.length ? `
-          <div class="team-task-facts">
-            ${advancedFacts.map(([label, value]) => `<span><small>${escapeHtml(label)}</small><b>${escapeHtml(value)}</b></span>`).join("")}
-          </div>
-        ` : ""}
-      </details>
+      ${chatLinked ? "" : `
+        <details class="team-task-context-details team-task-brief-details team-task-order-audit-details">
+          <summary>Extra eBay status, photos, and audit details</summary>
+          ${renderPendingOrderStatusSnapshot(task)}
+          ${isHistoryTask ? "" : renderPendingOrderEvidencePanel(task, events)}
+          <p class="team-task-next-step"><strong>Next step</strong><span>${escapeHtml(getTaskNextStepLabel(task))}</span></p>
+          ${hasDifferentOriginal ? `
+            <article class="team-task-instruction">
+              <small>Original assignment</small>
+              <p>${escapeHtml(originalInstruction)}</p>
+            </article>
+          ` : ""}
+          ${advancedFacts.length ? `
+            <div class="team-task-facts">
+              ${advancedFacts.map(([label, value]) => `<span><small>${escapeHtml(label)}</small><b>${escapeHtml(value)}</b></span>`).join("")}
+            </div>
+          ` : ""}
+        </details>
+      `}
     </section>
   `;
 }
@@ -4250,6 +4265,7 @@ function renderTaskCard(task = {}, options = {}) {
     || ["urgent", "high"].includes(String(task.priority || "").toLowerCase())
     || ["blocked", "deferred"].includes(String(task.status || "").toLowerCase());
   const resolved = HISTORY_TASK_STATUSES.includes(String(task.status || "").toLowerCase());
+  const chatLinked = hasEbayConversationTaskContext(task);
   const taskKey = getUnifiedTaskKey(task);
   const expanded = state.expandedTaskKeys.has(taskKey);
   const readInfo = getTaskReadInfo(task);
@@ -4269,6 +4285,25 @@ function renderTaskCard(task = {}, options = {}) {
     task.source === "team" && task.metadata?.task_tag ? formatTaskTag(task.metadata.task_tag) : "",
   ].filter(Boolean).join(" - ");
   const orderMiniStatus = getTaskOrderMiniStatus(task);
+  const summaryFactsHtml = chatLinked
+    ? [
+        moneyLabel ? `<span>${escapeHtml(moneyLabel)}</span>` : "",
+        `<span class="${late ? "team-task-overdue-pill" : ""}">${escapeHtml(late ? `Overdue ${lateAge || ""}`.trim() : `Due ${dueLabel}`)}${late ? ` - Due ${escapeHtml(dueLabel)}` : ""}</span>`,
+        `<span>${escapeHtml(assigneeLabel)}</span>`,
+        `<span>${escapeHtml(eventCountLabel)}</span>`,
+        canceled ? `<span>Removed ${escapeHtml(formatDate(task.metadata?.history_removed_at))}</span>` : "",
+      ].filter(Boolean).join("")
+    : `
+          <span>${escapeHtml(sourceLabel)}</span>
+          ${renderTaskOrderSummaryStatusChip(task)}
+          <span>${escapeHtml(formatTaskTag(task.task_type || "general"))}</span>
+          <span class="team-task-priority-chip">${escapeHtml(formatTaskTag(task.priority || "normal"))}</span>
+          ${moneyLabel ? `<span>${escapeHtml(moneyLabel)}</span>` : ""}
+          <span class="${late ? "team-task-overdue-pill" : ""}">${escapeHtml(late ? `Overdue ${lateAge || ""}`.trim() : `Due ${dueLabel}`)}${late ? ` - Due ${escapeHtml(dueLabel)}` : ""}</span>
+          <span>${escapeHtml(assigneeLabel)}</span>
+          <span>${escapeHtml(eventCountLabel)}</span>
+          ${canceled ? `<span>Removed ${escapeHtml(formatDate(task.metadata?.history_removed_at))}</span>` : ""}
+        `;
   const readActionHtml = readInfo.status === "read" ? `
               <span
                 role="button"
@@ -4292,13 +4327,21 @@ function renderTaskCard(task = {}, options = {}) {
     </div>
   ` : renderTaskActions(task, resolved);
   const detailsHtml = task.source === "order"
-    ? `
-        ${renderTeamTaskBrief(task, events, canceled)}
-        ${renderAdminReassignRequestNotice(task)}
-        ${actionHtml}
-        ${renderTaskContext(task)}
-        ${renderTaskUpdateTrail(task, events, { collapsed: true })}
-      `
+    ? chatLinked
+      ? `
+          ${renderTeamTaskBrief(task, events, canceled)}
+          ${renderTaskContext(task)}
+          ${renderAdminReassignRequestNotice(task)}
+          ${actionHtml}
+          ${renderTaskUpdateTrail(task, events, { collapsed: true })}
+        `
+      : `
+          ${renderTeamTaskBrief(task, events, canceled)}
+          ${renderAdminReassignRequestNotice(task)}
+          ${actionHtml}
+          ${renderTaskContext(task)}
+          ${renderTaskUpdateTrail(task, events, { collapsed: true })}
+        `
     : `
         ${renderTeamTaskBrief(task, events, canceled)}
         ${renderTaskContext(task)}
@@ -4308,7 +4351,7 @@ function renderTaskCard(task = {}, options = {}) {
       `;
 
   return `
-    <article class="team-task-card is-${escapeHtml(task.source || "team")}-task-card ${urgent ? "is-urgent" : ""} ${late ? "is-overdue" : ""} ${resolved ? "is-resolved" : ""} ${task.id === getRequestedTaskId() ? "is-direct-focus" : ""} ${expanded ? "is-expanded" : "is-collapsed"} ${escapeHtml(readInfo.className)}" data-team-task-card="${escapeHtml(task.id)}" data-team-task-card-key="${escapeHtml(taskKey)}">
+    <article class="team-task-card is-${escapeHtml(task.source || "team")}-task-card ${chatLinked ? "has-chat-context" : ""} ${urgent ? "is-urgent" : ""} ${late ? "is-overdue" : ""} ${resolved ? "is-resolved" : ""} ${task.id === getRequestedTaskId() ? "is-direct-focus" : ""} ${expanded ? "is-expanded" : "is-collapsed"} ${escapeHtml(readInfo.className)}" data-team-task-card="${escapeHtml(task.id)}" data-team-task-card-key="${escapeHtml(taskKey)}">
       <button type="button" class="team-task-card-summary" data-team-task-toggle="${escapeHtml(taskKey)}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="${escapeHtml(detailsId)}">
         <span class="team-task-source-dot">${escapeHtml(sourceLabel.slice(0, 2).toUpperCase())}</span>
         <span class="team-task-summary-main">
@@ -4322,15 +4365,7 @@ function renderTaskCard(task = {}, options = {}) {
           ${orderMiniStatus || contextLine ? `<span class="team-task-summary-context">${escapeHtml(orderMiniStatus || contextLine)}</span>` : ""}
         </span>
         <span class="team-task-summary-facts">
-          <span>${escapeHtml(sourceLabel)}</span>
-          ${renderTaskOrderSummaryStatusChip(task)}
-          <span>${escapeHtml(formatTaskTag(task.task_type || "general"))}</span>
-          <span class="team-task-priority-chip">${escapeHtml(formatTaskTag(task.priority || "normal"))}</span>
-          ${moneyLabel ? `<span>${escapeHtml(moneyLabel)}</span>` : ""}
-          <span class="${late ? "team-task-overdue-pill" : ""}">${escapeHtml(late ? `Overdue ${lateAge || ""}`.trim() : `Due ${dueLabel}`)}${late ? ` - Due ${escapeHtml(dueLabel)}` : ""}</span>
-          <span>${escapeHtml(assigneeLabel)}</span>
-          <span>${escapeHtml(eventCountLabel)}</span>
-          ${canceled ? `<span>Removed ${escapeHtml(formatDate(task.metadata?.history_removed_at))}</span>` : ""}
+          ${summaryFactsHtml}
         </span>
         <span class="team-task-expand-pill">
           ${expanded ? "Close" : "Open"}
@@ -4640,6 +4675,7 @@ function isShippingTaskReadyForFulfillment(task = {}) {
 
 function renderOrderTaskActions(task = {}, resolved = false, options = {}) {
   const compact = Boolean(options.compact);
+  const chatLinked = hasEbayConversationTaskContext(task);
   const isParent = isOrderParentTask(task);
   const isSubtask = task.task_type === ORDER_SUBTASK_TYPE;
   const isShipping = task.task_type === ORDER_SHIPPING_TYPE;
@@ -4681,6 +4717,29 @@ function renderOrderTaskActions(task = {}, resolved = false, options = {}) {
       moreLabel: "More",
     });
     return `${actionHtml}${renderAdminHistoryActions(task)}`;
+  }
+
+  if (chatLinked && isParent && !compact && !isTaskHistoryView()) {
+    const primaryButtons = [];
+    const moreButtons = [];
+    if (task.actionHref) {
+      const orderLinkLabel = isShippingTaskReadyForFulfillment(task) ? "Fulfill Shipment" : "Open Pending Order";
+      primaryButtons.push(`<a class="secondary-btn" href="${escapeHtml(task.actionHref)}">${escapeHtml(orderLinkLabel)}</a>`);
+    }
+    if (workerOwnsTask && !["completed_by_employee", "approved_for_shipping", "assigned_for_shipping", "shipped_completed", "closed", "cancelled"].includes(task.status)) {
+      primaryButtons.push(`<button type="button" class="secondary-btn" data-order-workflow-action="task-progress" data-task-id="${escapeHtml(task.id)}"${actionAttrs}>Progress Update</button>`);
+      primaryButtons.push(`<button type="button" class="primary-btn" data-order-workflow-action="task-complete" data-task-id="${escapeHtml(task.id)}"${actionAttrs}>Complete Task</button>`);
+      moreButtons.push(`<button type="button" class="secondary-btn" data-order-workflow-action="reassign-request" data-task-id="${escapeHtml(task.id)}"${actionAttrs}>Request Reassign</button>`);
+    }
+    if (canUseAdminTaskControls()) {
+      primaryButtons.push(`<button type="button" class="primary-btn" data-order-workflow-action="assign-shipping" data-task-id="${escapeHtml(task.id)}" ${canApproveShipping ? "" : "disabled"}>Approve / Assign Shipping</button>`);
+      moreButtons.push(`<button type="button" class="secondary-btn" data-order-workflow-action="add-subtask" data-task-id="${escapeHtml(task.id)}">Add Subtask</button>`);
+      moreButtons.push(...getAdminAssignmentActionButtons(task));
+    }
+    return `${renderTaskActionGroup(primaryButtons, moreButtons, {
+      className: "team-task-chat-linked-actions",
+      moreLabel: "More",
+    })}${renderAdminHistoryActions(task)}`;
   }
 
   const buttons = [];
