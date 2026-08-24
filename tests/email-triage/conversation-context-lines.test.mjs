@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 const context = readFileSync(new URL("../../supabase/functions/_shared/ebay-conversation-context.ts", import.meta.url), "utf8");
 const js = readFileSync(new URL("../../email-triage.js", import.meta.url), "utf8");
+const ownerMigration = readFileSync(new URL("../../supabase/migrations/20260823133000_require_email_triage_task_owner.sql", import.meta.url), "utf8");
 
 test("conversation context loads every line for a matched order", () => {
   assert.match(context, /const CONTEXT_VERSION = "ebay-conversation-context-v6"/);
@@ -33,6 +34,18 @@ test("task target labels distinguish whole orders from specific lines", () => {
   assert.match(js, /"This closed line only"/);
   assert.match(js, /"This pending line only"/);
   assert.match(js, /badge: "Line item"/);
+});
+
+test("chat task creation defaults to the specific line and requires an owner", () => {
+  assert.match(js, /targetKey:\s*""/);
+  assert.match(js, /return targets\.find\(\(target\) => target\.taskScope === "line"\)/);
+  assert.match(js, /<select name="assignedToUserId" required>/);
+  assert.match(js, /Assign this task to someone before creating it\./);
+  assert.match(ownerMigration, /create or replace function public\.require_email_triage_task_owner\(\)/);
+  assert.match(ownerMigration, /on public\.team_tasks/);
+  assert.match(ownerMigration, /on public\.ebay_order_tasks/);
+  assert.match(ownerMigration, /v_metadata ->> 'created_from' = 'email_triage'/);
+  assert.match(ownerMigration, /new\.assigned_to_user_id is null/);
 });
 
 test("task target picker stays limited to directly linked order targets", () => {

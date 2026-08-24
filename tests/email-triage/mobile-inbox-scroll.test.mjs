@@ -28,11 +28,11 @@ test("returning to mobile inbox restores the previous scroll anchor", () => {
 
 test("mobile inbox switcher uses restore mode and ships with a fresh cache key", () => {
   assert.match(js, /restoreInboxScroll: button\.getAttribute\("data-ebay-mobile-view"\) === "inbox"/);
-  assert.match(html, /email-triage\.js\?v=task-buyer-history-set-20260823/);
+  assert.match(html, /email-triage\.js\?v=task-line-owner-mobile-20260823/);
 });
 
 test("mobile eBay workspace stays compact and touch-friendly on phones", () => {
-  assert.match(html, /email-triage\.css\?v=task-buyer-history-set-20260823/);
+  assert.match(html, /email-triage\.css\?v=task-line-owner-mobile-20260823/);
   assert.match(css, /\.ebay-mobile-workspace-switcher\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)\s*!important;/);
   assert.match(css, /\.ebay-mobile-workspace-switcher\s*\{[\s\S]*?top:\s*calc\(64px \+ env\(safe-area-inset-top\)\);/);
   assert.match(css, /\.ebay-conversation-sync-result \.inbox-skipped-reasons\s*\{[\s\S]*?overflow-x:\s*auto;/);
@@ -64,17 +64,22 @@ test("mobile message detail panels use compact controls instead of stacked block
 });
 
 test("mobile task composer renders as a compact phone sheet", () => {
-  assert.match(html, /email-triage-asset-version" content="task-buyer-history-set-20260823"/);
+  assert.match(html, /email-triage-asset-version" content="task-line-owner-mobile-20260823"/);
   assert.match(js, /<h3 id="ebay-task-modal-title">Create task<\/h3>/);
   assert.match(js, /<legend>Target<\/legend>/);
   assert.match(js, /<span>Instructions<\/span>/);
   assert.match(js, /placeholder="What should the owner do\?"/);
-  assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.ebay-task-modal\s*\{[\s\S]*?align-items:\s*end;[\s\S]*?height:\s*100dvh;/);
-  assert.match(css, /\.ebay-task-modal-card\s*\{[\s\S]*?max-height:\s*100dvh;[\s\S]*?border-radius:\s*16px 16px 0 0;/);
+  assert.match(js, /<select name="assignedToUserId" required>/);
+  assert.match(js, /Pick yourself if you are taking it/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.ebay-task-modal\s*\{[\s\S]*?align-items:\s*end;[\s\S]*?height:\s*100dvh;[\s\S]*?padding:\s*calc\(72px \+ env\(safe-area-inset-top\)\) 0 0;/);
+  assert.match(css, /\.ebay-task-modal-card\s*\{[\s\S]*?max-height:\s*calc\(100dvh - 72px - env\(safe-area-inset-top\)\);[\s\S]*?border-radius:\s*16px 16px 0 0;/);
   assert.match(css, /\.ebay-task-source-summary p\s*\{[\s\S]*?-webkit-line-clamp:\s*2;/);
+  assert.match(css, /\.ebay-task-target-picker\s*\{[\s\S]*?border:\s*1px solid rgba\(255,255,255,\.1\);[\s\S]*?background:\s*rgba\(255,255,255,\.025\);/);
+  assert.match(css, /\.ebay-task-target-card\.is-selected,\s*\.ebay-task-target-card:has\(input:checked\)\s*\{[\s\S]*?background:\s*rgba\(157,242,189,\.08\);/);
   assert.match(css, /\.ebay-task-target-card\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?padding:\s*8px;/);
   assert.match(css, /\.ebay-task-modal-card \.ebay-draft-field textarea\s*\{[\s\S]*?min-height:\s*96px;/);
   assert.match(css, /\.ebay-task-assignment-panel p\s*\{[\s\S]*?display:\s*none;/);
   assert.match(css, /\.ebay-refund-amount-field:not\(\.is-active\)\s*\{[\s\S]*?display:\s*none;/);
+  assert.match(css, /@media \(max-width: 420px\)[\s\S]*?\.ebay-task-due-picker\s*\{[\s\S]*?grid-template-columns:\s*1fr;/);
   assert.match(css, /\.ebay-task-modal-actions\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?grid-template-columns:\s*\.72fr 1fr;/);
 });

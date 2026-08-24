@@ -4341,9 +4341,9 @@
         dueAt: "",
         taskTag: "",
         refundAmount: "",
-        targetKey: "chat",
+        targetKey: "",
       },
-      ebayConversationTaskTargetKey: "chat",
+      ebayConversationTaskTargetKey: "",
       ebayConversationTaskError: null,
       ebayConversationTaskMessage: null,
     });
@@ -4363,7 +4363,7 @@
     const assignees = safeArray(state.ebayConversationTaskAssignees);
     if (state.ebayConversationTaskAssigneesLoading) return `<option value="">Loading assignees...</option>`;
     return [
-      `<option value=""${selectedUserId ? "" : " selected"}>Unassigned for now</option>`,
+      `<option value="" disabled${selectedUserId ? "" : " selected"}>Choose owner</option>`,
       ...assignees.map((assignee) => {
         const label = assignee.display_name && assignee.email
           ? `${assignee.display_name} - ${assignee.email}`
@@ -4607,11 +4607,11 @@
           <div class="ebay-task-assignment-panel">
             <label class="ebay-draft-field ebay-task-owner-field">
               <span>Owner</span>
-              <select name="assignedToUserId">
+              <select name="assignedToUserId" required>
                 ${renderEbayTaskAssigneeOptions(state, modal.assignedToUserId || "")}
               </select>
             </label>
-            <p>${state.ebayConversationTaskAssigneesLoading ? "Loading the team list..." : "Choose the person responsible for completing this task. Leave unassigned only if it needs manager routing later."}</p>
+            <p>${state.ebayConversationTaskAssigneesLoading ? "Loading the team list..." : "Choose the person responsible for completing this task. Pick yourself if you are taking it."}</p>
           </div>
           <div class="ebay-task-modal-grid">
             <label class="ebay-draft-field">
@@ -4698,14 +4698,14 @@
       messageId,
       title: String(formData.get("taskTitle") || "").trim(),
       description: String(formData.get("taskDescription") || "").trim(),
-      assignedToUserId: String(formData.get("assignedToUserId") || ""),
+      assignedToUserId: String(formData.get("assignedToUserId") || "").trim(),
       priority: String(formData.get("priority") || "normal"),
       dueAt: combineTaskDueDateTime(dueDate, dueTime) || "",
       dueDate,
       dueTime,
       taskTag: String(formData.get("taskTag") || "").trim(),
       refundAmount: String(formData.get("refundAmount") || "").trim(),
-      targetKey: String(formData.get("taskTargetKey") || "chat").trim() || "chat",
+      targetKey: String(formData.get("taskTargetKey") || "").trim(),
     };
   }
 
@@ -4715,7 +4715,7 @@
     const formData = new FormData(form);
     const title = String(formData.get("taskTitle") || "").trim();
     const description = String(formData.get("taskDescription") || "").trim();
-    const assignedToUserId = String(formData.get("assignedToUserId") || "");
+    const assignedToUserId = String(formData.get("assignedToUserId") || "").trim();
     const priority = String(formData.get("priority") || "normal");
     const dueDate = String(formData.get("dueDate") || "").trim();
     const dueTime = String(formData.get("dueTime") || "").trim();
@@ -4723,7 +4723,7 @@
     const taskTag = String(formData.get("taskTag") || "").trim();
     const refundAmountRaw = String(formData.get("refundAmount") || "").trim();
     const refundAmount = taskTag === "refunds" ? parseRefundAmount(refundAmountRaw) : null;
-    const taskTargetKey = String(formData.get("taskTargetKey") || "chat").trim() || "chat";
+    const taskTargetKey = String(formData.get("taskTargetKey") || "").trim();
     const conversation = selectedEbayConversationById(conversationId, adminClassificationState);
     const taskTarget = selectedEbayConversationTaskTarget(adminClassificationState, conversation, taskTargetKey);
     const modalDraft = {
@@ -4746,6 +4746,14 @@
         ebayConversationTaskModal: modalDraft,
         ebayConversationTaskError: "Add a title and instructions before creating the task.",
       });
+      return;
+    }
+    if (!assignedToUserId) {
+      setEbayConversationState({
+        ebayConversationTaskModal: modalDraft,
+        ebayConversationTaskError: "Assign this task to someone before creating it.",
+      });
+      form?.querySelector("select[name='assignedToUserId']")?.focus();
       return;
     }
     if (dueAt === null) {
@@ -7194,7 +7202,13 @@
 
   function selectedEbayConversationTaskTarget(state, conversation, targetKey = "") {
     const targets = buildEbayConversationTaskTargetOptions(state, conversation);
-    return targets.find((target) => target.key === targetKey) || targets.find((target) => target.key !== "chat") || targets[0] || null;
+    const explicitKey = String(targetKey || "").trim();
+    const explicitTarget = explicitKey ? targets.find((target) => target.key === explicitKey) : null;
+    if (explicitTarget) return explicitTarget;
+    return targets.find((target) => target.taskScope === "line")
+      || targets.find((target) => target.key !== "chat")
+      || targets[0]
+      || null;
   }
 
   function renderEbayConversationTaskTargetPicker(state, conversation) {
