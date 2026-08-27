@@ -28,11 +28,11 @@ test("returning to mobile inbox restores the previous scroll anchor", () => {
 
 test("mobile inbox switcher uses restore mode and ships with a fresh cache key", () => {
   assert.match(js, /restoreInboxScroll: button\.getAttribute\("data-ebay-mobile-view"\) === "inbox"/);
-  assert.match(html, /email-triage\.js\?v=task-mobile-sheet-20260824/);
+  assert.match(html, /email-triage\.js\?v=task-draft-stability-20260826/);
 });
 
 test("mobile eBay workspace stays compact and touch-friendly on phones", () => {
-  assert.match(html, /email-triage\.css\?v=task-mobile-sheet-20260824/);
+  assert.match(html, /email-triage\.css\?v=task-draft-stability-20260826/);
   assert.match(css, /\.ebay-mobile-workspace-switcher\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)\s*!important;/);
   assert.match(css, /\.ebay-mobile-workspace-switcher\s*\{[\s\S]*?top:\s*calc\(64px \+ env\(safe-area-inset-top\)\);/);
   assert.match(css, /\.ebay-conversation-sync-result \.inbox-skipped-reasons\s*\{[\s\S]*?overflow-x:\s*auto;/);
@@ -64,7 +64,7 @@ test("mobile message detail panels use compact controls instead of stacked block
 });
 
 test("mobile task composer renders as a compact phone sheet", () => {
-  assert.match(html, /email-triage-asset-version" content="task-mobile-sheet-20260824"/);
+  assert.match(html, /email-triage-asset-version" content="task-draft-stability-20260826"/);
   assert.match(js, /<h3 id="ebay-task-modal-title">Create task<\/h3>/);
   assert.match(js, /<legend>Target<\/legend>/);
   assert.match(js, /<span>Instructions<\/span>/);
@@ -75,16 +75,24 @@ test("mobile task composer renders as a compact phone sheet", () => {
   assert.match(js, /window\.visualViewport\?\.height/);
   assert.match(js, /--ebay-task-viewport-height/);
   assert.match(js, /focusEbayTaskModalFieldIntoView\(event\.target\)/);
+  assert.match(js, /function captureEbayTaskModalRenderState\(\)/);
+  assert.match(js, /function stateWithLiveEbayTaskDraft\(next = \{\}, snapshot = null\)/);
+  assert.match(js, /payload: stateWithLiveEbayTaskDraft\(next, taskModalSnapshot\)/);
+  assert.match(js, /restoreEbayTaskModalRenderState\(taskModalSnapshot\)/);
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*?body\.has-ebay-task-modal\s*\{[\s\S]*?overflow:\s*hidden;/);
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.ebay-task-modal\s*\{[\s\S]*?--ebay-task-modal-top-gap:\s*max\(76px,\s*calc\(76px \+ env\(safe-area-inset-top\)\)\);[\s\S]*?height:\s*var\(--ebay-task-viewport-height,\s*100vh\);[\s\S]*?padding:\s*var\(--ebay-task-modal-top-gap\) 0 0;/);
   assert.match(css, /\.ebay-task-modal-card\s*\{[\s\S]*?height:\s*calc\(var\(--ebay-task-viewport-height,\s*100vh\) - var\(--ebay-task-modal-top-gap\)\);[\s\S]*?overflow-y:\s*auto;[\s\S]*?border-radius:\s*16px 16px 0 0;/);
+  assert.match(css, /\.ebay-task-modal-card\s*\{[\s\S]*?overflow-anchor:\s*none;/);
   assert.match(css, /\.ebay-task-source-summary p\s*\{[\s\S]*?-webkit-line-clamp:\s*2;/);
   assert.match(css, /\.ebay-task-target-picker\s*\{[\s\S]*?border:\s*1px solid rgba\(255,255,255,\.1\);[\s\S]*?background:\s*rgba\(255,255,255,\.025\);/);
   assert.match(css, /\.ebay-task-target-card\.is-selected,\s*\.ebay-task-target-card:has\(input:checked\)\s*\{[\s\S]*?background:\s*rgba\(157,242,189,\.08\);/);
   assert.match(css, /\.ebay-task-target-card\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?padding:\s*8px;/);
   assert.match(css, /\.ebay-task-modal-card \.ebay-draft-field textarea\s*\{[\s\S]*?min-height:\s*96px;/);
+  assert.match(css, /\.ebay-task-modal-card \.ebay-draft-field input,\s*\.ebay-task-modal-card \.ebay-draft-field select,\s*\.ebay-task-due-picker input\s*\{[\s\S]*?font-size:\s*16px;/);
+  assert.match(css, /\.ebay-task-modal-card \.ebay-draft-field textarea\s*\{[\s\S]*?font-size:\s*16px;/);
   assert.match(css, /\.ebay-task-assignment-panel p\s*\{[\s\S]*?display:\s*none;/);
   assert.match(css, /\.ebay-refund-amount-field:not\(\.is-active\)\s*\{[\s\S]*?display:\s*none;/);
   assert.match(css, /@media \(max-width: 480px\)[\s\S]*?\.ebay-task-due-picker\s*\{[\s\S]*?grid-template-columns:\s*1fr;/);
   assert.match(css, /\.ebay-task-modal-actions\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?bottom:\s*0;[\s\S]*?grid-template-columns:\s*\.72fr 1fr;/);
+  assert.doesNotMatch(css, /is-ebay-task-compact-viewport/);
 });

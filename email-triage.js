@@ -478,7 +478,6 @@
     );
     if (!viewportHeight) return;
     document.documentElement.style.setProperty("--ebay-task-viewport-height", `${Math.max(320, viewportHeight)}px`);
-    document.documentElement.classList.toggle("is-ebay-task-compact-viewport", viewportHeight < 560);
   }
 
   function bindEbayTaskModalViewportFallback() {
@@ -496,11 +495,74 @@
   }
 
   function focusEbayTaskModalFieldIntoView(target) {
-    if (!target?.closest?.("[data-ebay-message-task-form]")) return;
+    const form = target?.closest?.("[data-ebay-message-task-form]");
+    if (!form) return;
     updateEbayTaskModalViewportHeight();
     window.setTimeout(() => {
-      target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
-    }, 140);
+      const card = target.closest(".ebay-task-modal-card");
+      if (!card) return;
+      const cardRect = card.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const topBuffer = 58;
+      const bottomBuffer = 92;
+      if (targetRect.bottom > cardRect.bottom - bottomBuffer) {
+        card.scrollTop += targetRect.bottom - (cardRect.bottom - bottomBuffer);
+      } else if (targetRect.top < cardRect.top + topBuffer) {
+        card.scrollTop += targetRect.top - (cardRect.top + topBuffer);
+      }
+    }, 90);
+  }
+
+  function captureEbayTaskModalRenderState() {
+    const form = document.querySelector("[data-ebay-message-task-form]");
+    if (!form) return null;
+    const active = document.activeElement;
+    const activeName = active?.closest?.("[data-ebay-message-task-form]") === form ? active.name || "" : "";
+    const canRestoreSelection = Boolean(activeName && typeof active.selectionStart === "number" && typeof active.selectionEnd === "number");
+    return {
+      conversationId: form.getAttribute("data-ebay-conversation-id") || "",
+      messageId: form.getAttribute("data-ebay-message-id") || "",
+      draft: currentEbayConversationTaskModalDraft(),
+      scrollTop: form.scrollTop || 0,
+      activeName,
+      selectionStart: canRestoreSelection ? active.selectionStart : null,
+      selectionEnd: canRestoreSelection ? active.selectionEnd : null,
+    };
+  }
+
+  function stateWithLiveEbayTaskDraft(next = {}, snapshot = null) {
+    if (!snapshot?.draft) return next;
+    if (Object.prototype.hasOwnProperty.call(next, "ebayConversationTaskModal")) return next;
+    const current = adminClassificationState.ebayConversationTaskModal;
+    if (!current || current.conversationId !== snapshot.conversationId || current.messageId !== snapshot.messageId) return next;
+    return {
+      ...next,
+      ebayConversationTaskModal: snapshot.draft,
+    };
+  }
+
+  function restoreEbayTaskModalRenderState(snapshot = null) {
+    if (!snapshot) return;
+    const form = document.querySelector("[data-ebay-message-task-form]");
+    if (!form) return;
+    if (form.getAttribute("data-ebay-conversation-id") !== snapshot.conversationId) return;
+    if (form.getAttribute("data-ebay-message-id") !== snapshot.messageId) return;
+    form.scrollTop = snapshot.scrollTop || 0;
+    if (!snapshot.activeName) return;
+    const field = [...form.elements].find((element) => element.name === snapshot.activeName);
+    if (!field) return;
+    try {
+      field.focus({ preventScroll: true });
+    } catch (_error) {
+      field.focus();
+    }
+    if (
+      typeof field.setSelectionRange === "function" &&
+      typeof snapshot.selectionStart === "number" &&
+      typeof snapshot.selectionEnd === "number"
+    ) {
+      field.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+    }
   }
 
   const els = {
@@ -4081,9 +4143,14 @@
   }
 
   function setEbayConversationState(next) {
-    triageStore.dispatch({ type: TRANSITIONS.SET_STATE, payload: next });
+    const taskModalSnapshot = captureEbayTaskModalRenderState();
+    triageStore.dispatch({
+      type: TRANSITIONS.SET_STATE,
+      payload: stateWithLiveEbayTaskDraft(next, taskModalSnapshot),
+    });
     adminClassificationState = triageStore.getState();
     renderEbayConversationInbox(adminClassificationState);
+    restoreEbayTaskModalRenderState(taskModalSnapshot);
   }
 
   function ebayConversationDeepLinkRequest() {

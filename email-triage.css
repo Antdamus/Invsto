@@ -6618,6 +6618,7 @@ button.ebay-filter-chip {
   min-width: 0;
   max-height: calc(100vh - 36px);
   overflow: auto;
+  overflow-anchor: none;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   border: 1px solid rgba(241,214,155,.26);
@@ -8845,6 +8846,7 @@ button.ebay-filter-chip {
 @media (max-width: 760px) {
   body.has-ebay-task-modal {
     overflow: hidden;
+    overscroll-behavior: none;
   }
 
   .ebay-task-modal {
@@ -8866,6 +8868,7 @@ button.ebay-filter-chip {
     min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
+    overflow-anchor: none;
     scroll-padding-bottom: calc(74px + env(safe-area-inset-bottom));
     border-width: 1px 0 0;
     border-radius: 16px 16px 0 0;
@@ -9009,14 +9012,14 @@ button.ebay-filter-chip {
     max-width: 100%;
     min-height: 40px;
     border-radius: 9px;
-    font-size: .82rem;
+    font-size: 16px;
     padding: 8px 10px;
   }
 
   .ebay-task-modal-card .ebay-draft-field textarea {
     min-height: 96px;
     border-radius: 9px;
-    font-size: .82rem;
+    font-size: 16px;
     line-height: 1.4;
     padding: 9px 10px;
   }
@@ -9062,14 +9065,6 @@ button.ebay-filter-chip {
     border-top: 1px solid rgba(255,255,255,.08);
     background: linear-gradient(0deg, rgba(13,14,17,.98), rgba(22,24,27,.94));
     backdrop-filter: blur(12px);
-  }
-
-  .is-ebay-task-compact-viewport .ebay-task-modal {
-    --ebay-task-modal-top-gap: max(8px, env(safe-area-inset-top));
-  }
-
-  .is-ebay-task-compact-viewport .ebay-task-source-summary {
-    display: none;
   }
 
   .ebay-task-modal-actions .primary-btn,
