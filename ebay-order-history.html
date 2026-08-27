@@ -8,7 +8,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="ebay-order-history.css?v=history-focus-20260823" />
+  <link rel="stylesheet" href="ebay-order-history.css?v=history-media-evidence-20260827" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
@@ -99,7 +99,7 @@
         <div class="header-inner">
           <div class="greeting">
             <strong id="history-greeting">eBay Order History</strong>
-            <div id="history-subtitle" class="sub">Search completed orders and proof photos.</div>
+            <div id="history-subtitle" class="sub">Search completed orders, tracking, and proof evidence.</div>
           </div>
           <div class="header-pills" aria-label="Page context">
             <div class="pill">Scope: <b>eBay</b></div>
@@ -182,9 +182,9 @@
           <label>
             Proof photos
             <select id="history-proof-filter">
-              <option value="all">All proof photos</option>
-              <option value="extra_photos">Has extra photo</option>
-              <option value="missing_extra_photos">No extra photo</option>
+              <option value="all">All proof evidence</option>
+              <option value="extra_photos">Has extra evidence</option>
+              <option value="missing_extra_photos">No extra evidence</option>
             </select>
           </label>
           <label>
@@ -303,7 +303,7 @@
       <button id="close-proof-trail-modal" type="button" class="modal-close-btn" aria-label="Close">x</button>
       <span class="eyebrow">Proof Trail</span>
       <h2 id="proof-trail-title">Closeout and Photo Events</h2>
-      <p>Detailed packing proof, evidence photos, and closeout events for the current filters.</p>
+      <p>Detailed packing proof, evidence files, and closeout events for the current filters.</p>
       <div id="event-list" class="event-list compact-modal-list">
         <div class="history-empty">Loading proof events...</div>
       </div>
@@ -535,9 +535,9 @@
   <div id="history-extra-photo-modal" class="history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="history-extra-photo-title">
     <div class="history-modal-card history-extra-photo-modal-card">
       <button id="close-history-extra-photo-modal" type="button" class="modal-close-btn" aria-label="Close">x</button>
-      <span class="eyebrow">Order History Proof</span>
-      <h2 id="history-extra-photo-title">Add extra photo</h2>
-      <p>Add a post-close photo for this order without reopening it. The upload is tied to the closed order and saved in the audit trail.</p>
+      <span class="eyebrow">Order History Evidence</span>
+      <h2 id="history-extra-photo-title">Add closed-order evidence</h2>
+      <p>Add photos, videos, external label PDFs, label screenshots, or tracking details after an order is already closed. The evidence is tied to the closed order and saved in the audit trail.</p>
 
       <div id="history-extra-photo-status" class="history-label-status"></div>
       <div id="history-extra-photo-context" class="history-order-task-context history-extra-photo-context"></div>
@@ -551,7 +551,11 @@
         <label class="modal-field">
           Reason
           <select id="history-extra-photo-reason">
-            <option value="correction_photo">Correction photo</option>
+            <option value="item_photo">Item photo</option>
+            <option value="item_video">Item video</option>
+            <option value="label_pdf">External label PDF</option>
+            <option value="label_screenshot">External label screenshot</option>
+            <option value="tracking_update">Tracking update</option>
             <option value="packaging_proof">Packaging proof</option>
             <option value="condition_note">Condition note</option>
             <option value="customer_request">Customer request</option>
@@ -559,8 +563,19 @@
           </select>
         </label>
         <label class="modal-field">
-          Photo
-          <input id="history-extra-photo-file" type="file" accept="image/*" capture="environment" multiple />
+          Evidence files
+          <input id="history-extra-photo-file" type="file" accept="image/*,video/*,application/pdf" multiple />
+        </label>
+      </div>
+
+      <div class="history-extra-photo-grid history-label-evidence-grid">
+        <label class="modal-field">
+          Tracking number
+          <input id="history-extra-photo-tracking" type="text" inputmode="text" autocomplete="off" placeholder="Optional tracking number" />
+        </label>
+        <label class="modal-field">
+          Carrier / provider
+          <input id="history-extra-photo-provider" type="text" autocomplete="off" placeholder="Optional label provider" />
         </label>
       </div>
 
@@ -568,13 +583,13 @@
 
       <label class="modal-field">
         Note
-        <textarea id="history-extra-photo-note" rows="3" placeholder="Explain why this extra photo is being added."></textarea>
+        <textarea id="history-extra-photo-note" rows="3" placeholder="Explain why this evidence is being added."></textarea>
       </label>
 
       <p id="history-extra-photo-error" class="history-error"></p>
       <div class="history-modal-actions">
         <button id="cancel-history-extra-photo" type="button" class="secondary-btn">Cancel</button>
-        <button id="save-history-extra-photo" type="button" class="primary-btn" disabled>Save Photo</button>
+        <button id="save-history-extra-photo" type="button" class="primary-btn" disabled>Save Evidence</button>
       </div>
     </div>
   </div>
@@ -622,6 +637,6 @@
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
   <script src="ebay-buyer-insights.js"></script>
-  <script src="ebay-order-history.js?v=history-focus-20260823"></script>
+  <script src="ebay-order-history.js?v=history-media-evidence-20260827"></script>
 </body>
 </html>

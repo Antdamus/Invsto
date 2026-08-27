@@ -2511,6 +2511,28 @@ a.history-line-finance-pill:hover {
   background: rgba(0, 0, 0, 0.3);
 }
 
+.event-file-thumb,
+.history-extra-file-thumb {
+  display: inline-grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border: 1px solid rgba(227, 189, 119, 0.28);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(227, 189, 119, 0.18), transparent 58%),
+    rgba(0, 0, 0, 0.26);
+  color: var(--history-gold);
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0;
+}
+
+.event-photo-thumb .event-file-thumb {
+  width: 52px;
+  height: 52px;
+}
+
 .history-extra-photo-card strong,
 .history-extra-photo-card span {
   display: block;

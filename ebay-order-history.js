@@ -101,6 +101,7 @@ const RETURN_EVIDENCE_SIGNED_URL_TTL_SECONDS = 60 * 60;
 const RETURN_THUMBNAIL_TRANSFORM = { width: 260, height: 260, resize: "contain", quality: 60 };
 const HISTORY_EVIDENCE_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"]);
 const HISTORY_EVIDENCE_VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "ogg"]);
+const HISTORY_EVIDENCE_DOCUMENT_EXTENSIONS = new Set(["pdf"]);
 const RETURN_EXTERNAL_NAV_RESTORE_KEY = "ogReturnExternalNavigationRestore";
 const RETURN_ACTIVE_TASK_STATUSES = new Set(["open", "assigned", "in_progress", "blocked", "deferred"]);
 const RETURN_INACTIVE_TASK_STATUSES = new Set(["resolved", "closed", "cancelled"]);
@@ -523,6 +524,8 @@ function getLabelMetadataSearchText(...metadataObjects) {
     "videoReceiptUrls",
     "lookupKeys",
     "labelRows",
+    "externalLabelProvider",
+    "externalLabelEvidence",
   ];
   return buildHistorySearchText(metadataObjects.flatMap((metadata) => {
     if (!metadata || typeof metadata !== "object") return [];
@@ -1169,7 +1172,7 @@ function isHistoryExtraOrderProofPhoto(photo = {}) {
     event.payload?.source,
     event.payload?.proof_type,
   ].filter(Boolean).join(" ");
-  return /order_history_extra_photo|history_extra_photo|extra_order_proof/i.test(text);
+  return /order_history_extra_photo|order_history_media_evidence|history_extra_photo|extra_order_proof/i.test(text);
 }
 
 function getHistoryExtraOrderProofPhotos(group = {}) {
@@ -1458,18 +1461,24 @@ function getOrderTaskEventSearchTextForLine(line) {
     event.task_latest_note,
     event.payload?.source,
     event.payload?.proof_type,
+    event.payload?.evidence_type,
+    event.payload?.tracking_number,
+    event.payload?.label_provider,
     ...(getEventEvidencePhotos(event) || []).flatMap((photo) => [
       photo.label,
       photo.original_name,
       photo.metadata?.source,
       photo.metadata?.proof_type,
+      photo.metadata?.evidenceType,
+      photo.metadata?.trackingNumber,
+      photo.metadata?.labelProvider,
       `${photo.bucket}/${photo.path}`,
     ]),
   ]));
 }
 
 async function signEventEvidencePhoto(photo, options = {}) {
-  const thumbnail = options.thumbnail !== false;
+  const thumbnail = options.thumbnail !== false && getHistoryEvidenceMediaType(photo) !== "pdf";
   try {
     const storage = supabase.storage.from(photo.bucket);
     const { data, error } = thumbnail
@@ -1555,6 +1564,10 @@ function endEvidencePhotoViewerPan(event) {
 
 function openEvidencePhotoViewer(url, label = "Evidence photo", meta = "", mediaType = "image") {
   if (!url) return;
+  if (mediaType === "pdf") {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
   evidencePhotoViewerReturnFocus = document.activeElement;
   const image = $("evidence-photo-viewer-image");
   const video = $("evidence-photo-viewer-video");
@@ -1635,7 +1648,7 @@ async function hydrateEventEvidencePhotos(events) {
       thumbUrl: await signEventEvidencePhoto(photo),
       fullUrl: await signEventEvidencePhoto(photo, { thumbnail: false }),
       media_type: getHistoryEvidenceMediaType(photo),
-      label: photo.label || `Evidence ${getHistoryEvidenceMediaType(photo) === "video" ? "video" : "photo"} ${index + 1}`,
+      label: photo.label || `Evidence ${getHistoryEvidenceMediaType(photo) === "video" ? "video" : getHistoryEvidenceMediaType(photo) === "pdf" ? "PDF" : "photo"} ${index + 1}`,
     })));
     const visible = signed.filter((photo) => photo.thumbUrl || photo.fullUrl);
     if (!visible.length) continue;
@@ -1644,7 +1657,9 @@ async function hydrateEventEvidencePhotos(events) {
       <button class="event-photo-thumb" type="button" data-evidence-photo-url="${escapeHtml(photo.fullUrl || photo.thumbUrl)}" data-evidence-photo-label="${escapeHtml(photo.label)}" data-evidence-photo-meta="${escapeHtml(photo.bucket + "/" + photo.path)}" data-evidence-media-type="${escapeHtml(photo.media_type || "image")}">
         ${photo.media_type === "video"
           ? `<video src="${escapeHtml(photo.thumbUrl || photo.fullUrl)}" muted playsinline preload="metadata"></video>`
-          : `<img src="${escapeHtml(photo.thumbUrl || photo.fullUrl)}" alt="${escapeHtml(photo.label)}" />`}
+          : photo.media_type === "pdf"
+            ? `<span class="event-file-thumb" aria-hidden="true">PDF</span>`
+            : `<img src="${escapeHtml(photo.thumbUrl || photo.fullUrl)}" alt="${escapeHtml(photo.label)}" />`}
         <span>${escapeHtml(photo.label)}</span>
       </button>
     `).join("");
@@ -1713,7 +1728,7 @@ async function checkHistoryAuth() {
       ? "Requests, returns, disputes, assignments, unmatched refunds, and intake photos."
       : isAdminUser()
         ? "Admin shipping monitor - completed, canceled, and reverted orders"
-        : "Search completed orders and open packing proof photos.";
+        : "Search completed orders and open packing proof evidence.";
   }
   const mode = $("history-mode-label");
   if (mode) mode.textContent = isReturnsWorkbenchPage() ? "Post-order issues" : isAdminUser() ? "Admin" : "Proof";
@@ -4729,7 +4744,7 @@ function getEventLabel(event) {
   if (event.category === "revert") return "Reverted";
   if (event.category === "label") return event.action === "replaced" ? "Shipping label replaced" : "Shipping label attached";
   if (event.category === "task") {
-    if (isHistoryExtraPhotoTaskEvent(event)) return "Extra order proof photo";
+    if (isHistoryExtraPhotoTaskEvent(event)) return "Order history evidence";
     if (isPendingOrderLineNoteTaskEvent(event)) return "Order line note";
     return getEventEvidencePhotos(event).some(isVideoReceiptEvidencePhoto)
       ? "Video receipt screenshot"
@@ -5381,6 +5396,9 @@ function getHistoryTaskTextForFiltering(task = {}, events = []) {
       event.notes,
       event.payload?.source,
       event.payload?.proof_type,
+      event.payload?.evidence_type,
+      event.payload?.tracking_number,
+      event.payload?.label_provider,
       event.payload?.assignment_action,
       event.task_title,
       event.task_question,
@@ -5394,6 +5412,8 @@ function getHistoryTaskTextForFiltering(task = {}, events = []) {
         photo.metadata?.source,
         photo.metadata?.videoReceiptUrl,
         photo.metadata?.pageUrl,
+        photo.metadata?.trackingNumber,
+        photo.metadata?.labelProvider,
       ]) : []),
     ]),
   ].filter(Boolean).join(" ");
@@ -5415,7 +5435,7 @@ function isHiddenHistoryOrderTask(task = {}) {
   const events = getHistoryTaskEventsForTaskId(task.id);
   const text = getHistoryTaskTextForFiltering(task, events);
   return Boolean(task.metadata?.hidden_from_task_board || task.metadata?.history_removed_at)
-    || /order_history_extra_photo|history_extra_photo|extra_order_proof/i.test(text)
+    || /order_history_extra_photo|order_history_media_evidence|history_extra_photo|extra_order_proof/i.test(text)
     || /pending_order_line_note|manual-line-note|line-notes/i.test(text)
     || isVideoReceiptCaptureHistoryTask(task, events)
     || isCancelledAssignmentHistoryTask(task, events);
@@ -5694,11 +5714,13 @@ function getHistoryEvidenceFileExtension(value = "") {
 
 function getHistoryEvidenceMediaType(file = {}) {
   const explicitType = String(file.media_type || file.mediaType || "").trim().toLowerCase();
-  if (explicitType === "video" || explicitType === "image") return explicitType;
+  if (explicitType === "video" || explicitType === "image" || explicitType === "pdf") return explicitType;
   const mimeType = String(file.mime_type || file.mimeType || file.type || "").trim().toLowerCase();
   if (mimeType.startsWith("video/")) return "video";
   if (mimeType.startsWith("image/")) return "image";
+  if (mimeType === "application/pdf") return "pdf";
   const extension = getHistoryEvidenceFileExtension(file.name || file.path || file.label || "");
+  if (HISTORY_EVIDENCE_DOCUMENT_EXTENSIONS.has(extension)) return "pdf";
   return HISTORY_EVIDENCE_VIDEO_EXTENSIONS.has(extension) ? "video" : "image";
 }
 
@@ -5709,8 +5731,11 @@ function isHistoryEvidenceVideo(file = {}) {
 function isAcceptedHistoryEvidenceFile(file = {}) {
   const mimeType = String(file.type || file.mime_type || "").toLowerCase();
   if (/^(image|video)\//.test(mimeType)) return true;
+  if (mimeType === "application/pdf") return true;
   const extension = getHistoryEvidenceFileExtension(file.name || file.path || "");
-  return HISTORY_EVIDENCE_IMAGE_EXTENSIONS.has(extension) || HISTORY_EVIDENCE_VIDEO_EXTENSIONS.has(extension);
+  return HISTORY_EVIDENCE_IMAGE_EXTENSIONS.has(extension)
+    || HISTORY_EVIDENCE_VIDEO_EXTENSIONS.has(extension)
+    || HISTORY_EVIDENCE_DOCUMENT_EXTENSIONS.has(extension);
 }
 
 function getHistoryOrderTaskPhotoFiles() {
@@ -5736,6 +5761,8 @@ function renderHistoryOrderTaskPhotoList() {
       <article class="history-extra-photo-card">
         ${mediaType === "video"
           ? `<video src="${escapeHtml(previewUrl)}" controls playsinline preload="metadata"></video>`
+          : mediaType === "pdf"
+            ? `<span class="event-file-thumb history-extra-file-thumb" aria-hidden="true">PDF</span>`
           : `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(file.name || `Task photo ${index + 1}`)}" />`}
         <div>
           <strong>${escapeHtml(file.name || `Task ${mediaType === "video" ? "video" : "photo"} ${index + 1}`)}</strong>
@@ -6212,7 +6239,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
           <div class="history-order-badge-row">${summaryBadges}</div>
           <div class="history-order-summary-buttons">
             <button type="button" class="secondary-btn history-task-btn" data-history-order-task="${escapeHtml(groupKey)}">Add Task</button>
-            <button type="button" class="secondary-btn history-extra-photo-btn" data-history-extra-photo="${escapeHtml(groupKey)}">Add Photo</button>
+            <button type="button" class="secondary-btn history-extra-photo-btn" data-history-extra-photo="${escapeHtml(groupKey)}">Add Evidence</button>
             ${isAdminUser() ? `<button type="button" class="secondary-btn revert-order-btn" data-revert-lines="${escapeHtml(lineIds.join(","))}">Revert Order</button>` : ""}
             <button type="button" class="secondary-btn history-group-toggle" data-history-group-toggle="${escapeHtml(groupKey)}" aria-expanded="${isExpanded ? "true" : "false"}">${isExpanded ? "Close" : "Open"}</button>
           </div>
@@ -6302,7 +6329,7 @@ async function hydrateHistoryGroupEvidencePhotos(groups) {
       thumbUrl: await signEventEvidencePhoto(photo),
       fullUrl: await signEventEvidencePhoto(photo, { thumbnail: false }),
       media_type: getHistoryEvidenceMediaType(photo),
-      label: photo.label || `Evidence ${getHistoryEvidenceMediaType(photo) === "video" ? "video" : "photo"} ${index + 1}`,
+      label: photo.label || `Evidence ${getHistoryEvidenceMediaType(photo) === "video" ? "video" : getHistoryEvidenceMediaType(photo) === "pdf" ? "PDF" : "photo"} ${index + 1}`,
     })));
     const visible = signed.filter((photo) => photo.thumbUrl || photo.fullUrl);
     if (!visible.length) continue;
@@ -6311,7 +6338,9 @@ async function hydrateHistoryGroupEvidencePhotos(groups) {
       <button class="event-photo-thumb" type="button" data-evidence-photo-url="${escapeHtml(photo.fullUrl || photo.thumbUrl)}" data-evidence-photo-label="${escapeHtml(photo.label)}" data-evidence-photo-meta="${escapeHtml(photo.bucket + "/" + photo.path)}" data-evidence-media-type="${escapeHtml(photo.media_type || "image")}">
         ${photo.media_type === "video"
           ? `<video src="${escapeHtml(photo.thumbUrl || photo.fullUrl)}" muted playsinline preload="metadata"></video>`
-          : `<img src="${escapeHtml(photo.thumbUrl || photo.fullUrl)}" alt="${escapeHtml(photo.label)}" />`}
+          : photo.media_type === "pdf"
+            ? `<span class="event-file-thumb" aria-hidden="true">PDF</span>`
+            : `<img src="${escapeHtml(photo.thumbUrl || photo.fullUrl)}" alt="${escapeHtml(photo.label)}" />`}
         <span>${escapeHtml(photo.label)}</span>
       </button>
     `).join("");
@@ -6518,7 +6547,7 @@ function renderEventList() {
           <span>${Number(event.order_line_ids?.length || event.payload?.reverted_lines || event.order_numbers?.length || 0).toLocaleString()} line(s)${escapeHtml(units)}</span>
           ${gps ? `<span>${escapeHtml(gps)}</span>` : ""}
           ${store ? `<span>${escapeHtml(store)}</span>` : ""}
-          ${evidenceCount ? `<span>${evidenceCount} evidence photo${evidenceCount === 1 ? "" : "s"}</span>` : ""}
+          ${evidenceCount ? `<span>${evidenceCount} evidence file${evidenceCount === 1 ? "" : "s"}</span>` : ""}
         </div>
         <p>${escapeHtml(eventDetail)}</p>
         ${evidenceCount ? `<div class="event-photo-grid" data-event-evidence-index="${eventIndex}"></div>` : ""}
@@ -6751,8 +6780,30 @@ function cleanupHistoryExtraPhotoPreviews() {
   state.historyExtraPhotoPreviewUrls = [];
 }
 
+function getHistoryEvidenceTypeLabel(mediaType = "image") {
+  if (mediaType === "video") return "video";
+  if (mediaType === "pdf") return "PDF";
+  return "photo";
+}
+
+function getHistoryExtraEvidenceTrackingNumber() {
+  return String($("history-extra-photo-tracking")?.value || "").trim();
+}
+
+function getHistoryExtraEvidenceProvider() {
+  return String($("history-extra-photo-provider")?.value || "").trim();
+}
+
 function getHistoryExtraPhotoFiles() {
-  return [...($("history-extra-photo-file")?.files || [])].filter((file) => file && file.size > 0);
+  return [...($("history-extra-photo-file")?.files || [])].filter((file) =>
+    file && file.size > 0 && isAcceptedHistoryEvidenceFile(file)
+  );
+}
+
+function updateHistoryExtraEvidenceSaveState() {
+  const saveButton = $("save-history-extra-photo");
+  if (!saveButton) return;
+  saveButton.disabled = !(getHistoryExtraPhotoFiles().length || getHistoryExtraEvidenceTrackingNumber());
 }
 
 function getSelectedHistoryExtraPhotoOption() {
@@ -6805,9 +6856,9 @@ function renderHistoryExtraPhotoContext() {
       ${order.ship_by_date ? `<span>Ship by ${escapeHtml(formatDateTime(order.ship_by_date))}</span>` : ""}
     </div>
     <div class="history-order-task-context-card ${existingPhotoCount ? "is-active" : ""}">
-      <span class="eyebrow">Post-close proof</span>
-      <strong>${existingPhotoCount ? `${existingPhotoCount} extra photo${existingPhotoCount === 1 ? "" : "s"}` : "No extra photos yet"}</strong>
-      <span>This saves evidence only. It does not reopen or change the closed order.</span>
+      <span class="eyebrow">Post-close evidence</span>
+      <strong>${existingPhotoCount ? `${existingPhotoCount} evidence file${existingPhotoCount === 1 ? "" : "s"}` : "No extra evidence yet"}</strong>
+      <span>This saves evidence and tracking only. It does not reopen or change the closed order.</span>
     </div>
   `;
 }
@@ -6816,21 +6867,28 @@ function renderHistoryExtraPhotoFileList() {
   cleanupHistoryExtraPhotoPreviews();
   const list = $("history-extra-photo-list");
   const files = getHistoryExtraPhotoFiles();
-  const saveButton = $("save-history-extra-photo");
-  if (saveButton) saveButton.disabled = !files.length;
+  const trackingNumber = getHistoryExtraEvidenceTrackingNumber();
+  updateHistoryExtraEvidenceSaveState();
   if (!list) return;
   if (!files.length) {
-    list.innerHTML = `<div class="history-extra-photo-empty">No photo selected yet.</div>`;
+    list.innerHTML = trackingNumber
+      ? `<div class="history-extra-photo-empty">Tracking ${escapeHtml(trackingNumber)} will be saved to this closed order.</div>`
+      : `<div class="history-extra-photo-empty">No evidence file selected yet.</div>`;
     return;
   }
   list.innerHTML = files.map((file, index) => {
     const previewUrl = URL.createObjectURL(file);
+    const mediaType = getHistoryEvidenceMediaType(file);
     state.historyExtraPhotoPreviewUrls.push(previewUrl);
     return `
       <article class="history-extra-photo-card">
-        <img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(file.name || `Selected photo ${index + 1}`)}" />
+        ${mediaType === "video"
+          ? `<video src="${escapeHtml(previewUrl)}" controls playsinline preload="metadata"></video>`
+          : mediaType === "pdf"
+            ? `<span class="event-file-thumb history-extra-file-thumb" aria-hidden="true">PDF</span>`
+            : `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(file.name || `Selected photo ${index + 1}`)}" />`}
         <div>
-          <strong>${escapeHtml(file.name || `Photo ${index + 1}`)}</strong>
+          <strong>${escapeHtml(file.name || `${getHistoryEvidenceTypeLabel(mediaType)} ${index + 1}`)}</strong>
           <span>${escapeHtml(file.type || "image")} ${formatFileSize(file.size) ? `- ${escapeHtml(formatFileSize(file.size))}` : ""}</span>
         </div>
       </article>
@@ -6838,34 +6896,39 @@ function renderHistoryExtraPhotoFileList() {
   }).join("");
 }
 
-async function uploadHistoryExtraOrderProofPhotos(files, option = {}, reason = "") {
+async function uploadHistoryExtraOrderProofPhotos(files, option = {}, reason = "", extras = {}) {
   const order = option.order || {};
   const orderNumber = normalizeEbayOrderNumber(order.order_number) || "closed-order";
   const cleanOrder = safeStorageSegment(orderNumber, "closed-order");
   const cleanRun = safeStorageSegment(window.crypto?.randomUUID ? window.crypto.randomUUID() : String(Date.now()), "upload");
+  const trackingNumber = String(extras.trackingNumber || "").trim();
+  const labelProvider = String(extras.labelProvider || "").trim();
   const uploaded = [];
 
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index];
-    const extension = String(file.name || "").split(".").pop()?.toLowerCase()?.replace(/[^a-z0-9]/g, "") || "jpg";
+    const mediaType = getHistoryEvidenceMediaType(file);
+    const extension = getHistoryEvidenceFileExtension(file.name)
+      || (mediaType === "video" ? "mp4" : mediaType === "pdf" ? "pdf" : "jpg");
     const path = [
-      "order-history-extra-photos",
+      "order-history-evidence",
       cleanOrder,
       `${Date.now()}-${cleanRun}-${index + 1}.${extension}`,
     ].join("/");
     const { error } = await supabase.storage
       .from(EXTRA_LABEL_EVIDENCE_BUCKET)
       .upload(path, file, {
-        contentType: file.type || "image/jpeg",
+        contentType: file.type || (mediaType === "video" ? "video/mp4" : mediaType === "pdf" ? "application/pdf" : "image/jpeg"),
         upsert: false,
       });
-    if (error) throw new Error(error.message || "Could not upload the order history proof photo.");
+    if (error) throw new Error(error.message || "Could not upload the order history evidence.");
     uploaded.push({
       bucket: EXTRA_LABEL_EVIDENCE_BUCKET,
       path,
-      label: `Extra order proof photo ${index + 1}`,
+      label: `Closed-order ${getHistoryEvidenceTypeLabel(mediaType)} evidence ${index + 1}`,
       original_name: file.name || "",
-      mime_type: file.type || "image/jpeg",
+      mime_type: file.type || (mediaType === "video" ? "video/mp4" : mediaType === "pdf" ? "application/pdf" : "image/jpeg"),
+      media_type: mediaType,
       size_bytes: file.size || 0,
       uploaded_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
@@ -6873,8 +6936,11 @@ async function uploadHistoryExtraOrderProofPhotos(files, option = {}, reason = "
       order_number: orderNumber,
       item_numbers: option.lines.map((line) => line.item_number).filter(Boolean),
       metadata: {
-        source: "order_history_extra_photo",
+        source: "order_history_media_evidence",
         proof_type: reason || "extra_order_proof",
+        evidenceType: reason || "extra_order_proof",
+        trackingNumber: trackingNumber || "",
+        labelProvider: labelProvider || "",
         orderNumber,
         buyerUsername: order.buyer_username || "",
         buyerName: order.buyer_name || "",
@@ -6896,9 +6962,11 @@ function openHistoryExtraPhotoModal(group = {}, groupKey = "") {
   state.activeHistoryExtraPhotoGroupKey = groupKey;
   cleanupHistoryExtraPhotoPreviews();
   setHistoryExtraPhotoError("");
-  setHistoryExtraPhotoStatus("Add a post-close proof photo to this order history record. This is audited and will not reopen the order.", "info");
+  setHistoryExtraPhotoStatus("Add post-close evidence to this order history record. This is audited and will not reopen the order.", "info");
   if ($("history-extra-photo-note")) $("history-extra-photo-note").value = "";
-  if ($("history-extra-photo-reason")) $("history-extra-photo-reason").value = "correction_photo";
+  if ($("history-extra-photo-reason")) $("history-extra-photo-reason").value = "item_photo";
+  if ($("history-extra-photo-tracking")) $("history-extra-photo-tracking").value = "";
+  if ($("history-extra-photo-provider")) $("history-extra-photo-provider").value = "";
   const fileInput = $("history-extra-photo-file");
   if (fileInput) fileInput.value = "";
   renderHistoryExtraPhotoOrderSelect(group);
@@ -6918,45 +6986,52 @@ function closeHistoryExtraPhotoModal() {
 
 async function submitHistoryExtraPhoto() {
   const option = getSelectedHistoryExtraPhotoOption();
-  if (!option?.id) return setHistoryExtraPhotoError("Choose a closed order for this photo.");
+  if (!option?.id) return setHistoryExtraPhotoError("Choose a closed order for this evidence.");
 
   const files = getHistoryExtraPhotoFiles();
-  if (!files.length) {
-    setHistoryExtraPhotoError("Take or choose at least one photo first.");
-    $("history-extra-photo-file")?.focus();
+  const trackingNumber = getHistoryExtraEvidenceTrackingNumber();
+  const labelProvider = getHistoryExtraEvidenceProvider();
+  if (!files.length && !trackingNumber) {
+    setHistoryExtraPhotoError("Add at least one evidence file or tracking number first.");
+    ($("history-extra-photo-file") || $("history-extra-photo-tracking"))?.focus();
     return;
   }
 
-  const reason = $("history-extra-photo-reason")?.value || "correction_photo";
+  const reason = $("history-extra-photo-reason")?.value || "item_photo";
   const note = String($("history-extra-photo-note")?.value || "").trim();
   const button = $("save-history-extra-photo");
-  const originalText = button?.textContent || "Save Photo";
+  const originalText = button?.textContent || "Save Evidence";
   button?.toggleAttribute("disabled", true);
   if (button) button.textContent = "Saving...";
   setHistoryExtraPhotoError("");
-  setHistoryExtraPhotoStatus("Uploading proof photo...", "info");
+  setHistoryExtraPhotoStatus(files.length ? "Uploading evidence..." : "Recording tracking details...", "info");
 
   try {
-    const evidencePhotos = await uploadHistoryExtraOrderProofPhotos(files, option, reason);
+    const evidencePhotos = await uploadHistoryExtraOrderProofPhotos(files, option, reason, {
+      trackingNumber,
+      labelProvider,
+    });
     setHistoryExtraPhotoStatus("Recording order-history audit event...", "info");
-    const { error } = await supabase.rpc("add_ebay_order_history_extra_photos", {
+    const { error } = await supabase.rpc("add_ebay_order_history_media_evidence", {
       _order_id: option.id,
       _order_line_ids: option.lines.map((line) => line.id).filter(Boolean),
-      _photo_attachments: evidencePhotos,
+      _attachments: evidencePhotos,
       _note: note || null,
-      _proof_type: reason,
+      _evidence_type: reason,
       _signed_by_email: state.user?.email || state.employee?.display_name || "",
+      _tracking_number: trackingNumber || null,
+      _label_provider: labelProvider || null,
     });
     if (error) throw error;
 
     const groupKey = state.activeHistoryExtraPhotoGroupKey;
     if (groupKey) state.expandedHistoryGroupIds.add(groupKey);
-    setHistoryExtraPhotoStatus("Photo saved.", "success");
+    setHistoryExtraPhotoStatus("Evidence saved.", "success");
     closeHistoryExtraPhotoModal();
     await loadOrderHistory();
   } catch (error) {
-    console.error("Could not save order history extra photo:", error);
-    setHistoryExtraPhotoError(error?.message || "Could not save this photo.");
+    console.error("Could not save order history evidence:", error);
+    setHistoryExtraPhotoError(error?.message || "Could not save this evidence.");
     setHistoryExtraPhotoStatus("", "info");
   } finally {
     button?.toggleAttribute("disabled", false);
@@ -11466,6 +11541,8 @@ function setupListeners() {
   $("save-history-extra-photo")?.addEventListener("click", submitHistoryExtraPhoto);
   $("history-extra-photo-order")?.addEventListener("change", renderHistoryExtraPhotoContext);
   $("history-extra-photo-file")?.addEventListener("change", renderHistoryExtraPhotoFileList);
+  $("history-extra-photo-tracking")?.addEventListener("input", renderHistoryExtraPhotoFileList);
+  $("history-extra-photo-provider")?.addEventListener("input", updateHistoryExtraEvidenceSaveState);
   $("history-extra-photo-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "history-extra-photo-modal") closeHistoryExtraPhotoModal();
   });

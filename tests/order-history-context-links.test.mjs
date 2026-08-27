@@ -27,8 +27,8 @@ test("triage order-history context links search and focus the linked order line"
 });
 
 test("order history accepts direct order and line focus launch params", () => {
-  assert.match(orderHistoryHtml, /ebay-order-history\.css\?v=history-focus-20260823/);
-  assert.match(orderHistoryHtml, /ebay-order-history\.js\?v=history-focus-20260823/);
+  assert.match(orderHistoryHtml, /ebay-order-history\.css\?v=history-media-evidence-20260827/);
+  assert.match(orderHistoryHtml, /ebay-order-history\.js\?v=history-media-evidence-20260827/);
   assert.match(orderHistoryJs, /function getInitialHistoryFocusFromParams\(params\)/);
   assert.match(orderHistoryJs, /params\.get\("orderNumber"\)/);
   assert.match(orderHistoryJs, /focus\?\.orderNumber/);
