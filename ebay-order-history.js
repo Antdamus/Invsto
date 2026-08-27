@@ -26,6 +26,7 @@ const state = {
   historyOrderTaskPreviewUrls: [],
   activeHistoryExtraPhotoGroup: null,
   activeHistoryExtraPhotoGroupKey: "",
+  historyExtraEvidencePastedFiles: [],
   historyExtraPhotoPreviewUrls: [],
   returnTaskLaunchApplied: false,
   relatedAdminEvents: [],
@@ -6780,6 +6781,10 @@ function cleanupHistoryExtraPhotoPreviews() {
   state.historyExtraPhotoPreviewUrls = [];
 }
 
+function clearHistoryExtraEvidencePastedFiles() {
+  state.historyExtraEvidencePastedFiles = [];
+}
+
 function getHistoryEvidenceTypeLabel(mediaType = "image") {
   if (mediaType === "video") return "video";
   if (mediaType === "pdf") return "PDF";
@@ -6795,9 +6800,48 @@ function getHistoryExtraEvidenceProvider() {
 }
 
 function getHistoryExtraPhotoFiles() {
-  return [...($("history-extra-photo-file")?.files || [])].filter((file) =>
-    file && file.size > 0 && isAcceptedHistoryEvidenceFile(file)
-  );
+  const selectedFiles = [...($("history-extra-photo-file")?.files || [])];
+  const pastedFiles = Array.isArray(state.historyExtraEvidencePastedFiles)
+    ? state.historyExtraEvidencePastedFiles
+    : [];
+  const bySignature = new Map();
+  [...selectedFiles, ...pastedFiles]
+    .filter((file) => file && file.size > 0 && isAcceptedHistoryEvidenceFile(file))
+    .forEach((file) => {
+      const signature = [
+        file.name || "",
+        file.type || "",
+        file.size || 0,
+        file.lastModified || 0,
+      ].join(":");
+      if (!bySignature.has(signature)) bySignature.set(signature, file);
+    });
+  return [...bySignature.values()];
+}
+
+function getHistoryExtraEvidenceFilesFromClipboard(event = {}) {
+  const clipboardData = event.clipboardData || window.clipboardData;
+  if (!clipboardData) return [];
+  const files = [
+    ...([...clipboardData.files || []]),
+    ...([...clipboardData.items || []]
+      .map((item) => (item.kind === "file" ? item.getAsFile() : null))),
+  ];
+  return files.filter((file) => file && file.size > 0 && isAcceptedHistoryEvidenceFile(file));
+}
+
+function handleHistoryExtraEvidencePaste(event) {
+  if (!isModalOpen("history-extra-photo-modal")) return;
+  const files = getHistoryExtraEvidenceFilesFromClipboard(event);
+  if (!files.length) return;
+  event.preventDefault();
+  state.historyExtraEvidencePastedFiles = [
+    ...(state.historyExtraEvidencePastedFiles || []),
+    ...files,
+  ];
+  setHistoryExtraPhotoError("");
+  setHistoryExtraPhotoStatus(`${files.length} pasted evidence file${files.length === 1 ? "" : "s"} added.`, "success");
+  renderHistoryExtraPhotoFileList();
 }
 
 function updateHistoryExtraEvidenceSaveState() {
@@ -6961,6 +7005,7 @@ function openHistoryExtraPhotoModal(group = {}, groupKey = "") {
   state.activeHistoryExtraPhotoGroup = group;
   state.activeHistoryExtraPhotoGroupKey = groupKey;
   cleanupHistoryExtraPhotoPreviews();
+  clearHistoryExtraEvidencePastedFiles();
   setHistoryExtraPhotoError("");
   setHistoryExtraPhotoStatus("Add post-close evidence to this order history record. This is audited and will not reopen the order.", "info");
   if ($("history-extra-photo-note")) $("history-extra-photo-note").value = "";
@@ -6981,6 +7026,7 @@ function closeHistoryExtraPhotoModal() {
   setHistoryExtraPhotoError("");
   setHistoryExtraPhotoStatus("");
   cleanupHistoryExtraPhotoPreviews();
+  clearHistoryExtraEvidencePastedFiles();
   closeModal("history-extra-photo-modal");
 }
 
@@ -11546,6 +11592,7 @@ function setupListeners() {
   $("history-extra-photo-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "history-extra-photo-modal") closeHistoryExtraPhotoModal();
   });
+  $("history-extra-photo-modal")?.addEventListener("paste", handleHistoryExtraEvidencePaste);
   $("evidence-photo-viewer-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "evidence-photo-viewer-modal") closeEvidencePhotoViewer();
   });

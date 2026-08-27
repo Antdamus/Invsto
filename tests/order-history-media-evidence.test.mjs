@@ -26,6 +26,8 @@ test("order history evidence uploader sends media and tracking through the new R
   assert.match(js, /media_type: mediaType/);
   assert.match(js, /trackingNumber/);
   assert.match(js, /labelProvider/);
+  assert.match(js, /handleHistoryExtraEvidencePaste/);
+  assert.match(js, /clipboardData\.items/);
   assert.match(js, /add_ebay_order_history_media_evidence/);
   assert.match(js, /_tracking_number: trackingNumber \|\| null/);
   assert.match(js, /_label_provider: labelProvider \|\| null/);
