@@ -835,13 +835,6 @@ async function onClockAction(){
     // Decide store_id (ONLY used for clock-in; clock-out must NOT allow choosing)
     const storeRes = await resolveStoreForAction(kind, geo);
 
-    // Clock-in requires an assigned store (or exception that yields one)
-    if (kind === 'in' && !storeRes.store_id){
-      renderStoreContextLine(null, 'No store assigned today — contact a manager');
-      alert('You are not assigned to any store today. Ask a manager to assign you (or add a day exception).');
-      return;
-    }
-
     // UI feedback
     const distTxt = (storeRes?.distance_m != null)
       ? ` (distance ~${Math.round(storeRes.distance_m)}m)`
@@ -859,15 +852,15 @@ async function onClockAction(){
     let entry, err;
 
     if (kind === 'in') {
-      // ✅ Clock IN: pass store_id (allowed)
+      // The server is the source of truth for store selection. It resolves
+      // schedules, route exceptions, active store GPS, and geofence validity.
       ({ data: entry, error: err } = await supabaseClient.rpc('clock_in_now_geo', {
         _employee_id: currentEmployee.id,
         _lat: geo.lat, _lng: geo.lng, _accuracy_m: geo.accuracy,
-        _photo_path: photoPath,
-        _store_id: storeRes.store_id
+        _photo_path: photoPath
       }));
     } else {
-      // ✅ Clock OUT: DO NOT pass _store_id (DB forbids non-admin choosing store)
+      // Clock OUT also lets the server validate against the active shift store.
       ({ data: entry, error: err } = await supabaseClient.rpc('clock_out_now_geo', {
         _employee_id: currentEmployee.id,
         _lat: geo.lat, _lng: geo.lng, _accuracy_m: geo.accuracy,
