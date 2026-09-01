@@ -159,6 +159,16 @@
     0 0 0 1px rgba(0,0,0,.22) inset;
 }
 
+#panelSchedule .schedule-day-form select.schedule-time-select{
+  cursor: pointer;
+  color-scheme: dark;
+}
+
+#panelSchedule .schedule-day-form select.schedule-time-select option{
+  color: #111827;
+  background: #ffffff;
+}
+
 #panelSchedule .schedule-search{
   width: min(360px, 100%);
 }

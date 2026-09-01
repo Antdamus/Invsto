@@ -9,7 +9,8 @@ let scheduleFlowState = {
   assignmentType: 'store_work',
   workerSearch: '',
   syncEffectiveFromToWeek: true,
-  saving: false
+  saving: false,
+  dayDrafts: new Map()
 };
 let scheduleSaveBusy = false;
 let scheduleSaveModalResolve = null;
@@ -405,6 +406,59 @@ function escSched(value){
     .replace(/'/g, '&#39;');
 }
 
+function scheduleTimeLabel(value){
+  const [hourRaw, minuteRaw] = String(value || '').split(':');
+  const hour24 = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  if (!Number.isFinite(hour24) || !Number.isFinite(minute)) return '';
+  const suffix = hour24 >= 12 ? 'PM' : 'AM';
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`;
+}
+
+function scheduleTimeOptionsHTML(selectedValue = '', placeholder = 'Choose time...'){
+  const selected = normalizeScheduleTime(selectedValue);
+  const options = [`<option value="">${escSched(placeholder)}</option>`];
+  for (let minutes = 0; minutes < 24 * 60; minutes += 15){
+    const hour = Math.floor(minutes / 60);
+    const minute = minutes % 60;
+    const value = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    options.push(`<option value="${value}" ${value === selected ? 'selected' : ''}>${escSched(scheduleTimeLabel(value))}</option>`);
+  }
+  return options.join('');
+}
+
+function scheduleFlowDraftKey(dayIndex = scheduleFlowState.selectedDayIndex){
+  if (!schedEmpId) return '';
+  return `${schedEmpId}|${toISODate(addDays(schedWeekStart, Number(dayIndex) || 0))}`;
+}
+
+function getScheduleFlowDraft(dayIndex = scheduleFlowState.selectedDayIndex){
+  const key = scheduleFlowDraftKey(dayIndex);
+  return key ? (scheduleFlowState.dayDrafts.get(key) || {}) : {};
+}
+
+function setScheduleFlowDraft(patch = {}, dayIndex = scheduleFlowState.selectedDayIndex){
+  const key = scheduleFlowDraftKey(dayIndex);
+  if (!key) return {};
+  const current = scheduleFlowState.dayDrafts.get(key) || {};
+  const next = { ...current, ...patch };
+  scheduleFlowState.dayDrafts.set(key, next);
+  return next;
+}
+
+function captureScheduleFlowDraft(dayIndex = scheduleFlowState.selectedDayIndex){
+  if (!schedEmpId || !qs('schedFlowStart')) return getScheduleFlowDraft(dayIndex);
+  return setScheduleFlowDraft({
+    start: normalizeScheduleTime(qs('schedFlowStart')?.value || ''),
+    end: normalizeScheduleTime(qs('schedFlowEnd')?.value || ''),
+    storeId: qs('schedFlowStore')?.value || '',
+    clockInStoreIds: getCheckedScheduleStoreIds('schedFlowClockInStores'),
+    clockOutStoreIds: getCheckedScheduleStoreIds('schedFlowClockOutStores'),
+    assignmentType: scheduleFlowState.assignmentType
+  }, dayIndex);
+}
+
 function scheduleTypeLabel(type = scheduleFlowState.assignmentType){
   return type === 'live_show' ? 'Live show session' : 'Store work hours';
 }
@@ -455,8 +509,10 @@ function renderScheduleWorkerPicker(){
 function renderScheduleStorePicker(){
   const grid = qs('schedStoreGrid');
   if (!grid) return;
+  const draftStoreId = getScheduleFlowDraft().storeId || '';
+  const selectedStoreId = draftStoreId || scheduleFlowState.selectedStoreId;
   const temp = document.createElement('select');
-  temp.innerHTML = storeOptionsHTML(scheduleFlowState.selectedStoreId);
+  temp.innerHTML = storeOptionsHTML(selectedStoreId);
   const source = [...temp.options]
     .filter((option) => option.value)
     .map((option) => ({ id: option.value, name: option.textContent || 'Store' }));
@@ -470,7 +526,7 @@ function renderScheduleStorePicker(){
   }
 
   grid.innerHTML = source.map((store) => {
-    const active = String(store.id) === String(scheduleFlowState.selectedStoreId) ? ' active' : '';
+    const active = String(store.id) === String(selectedStoreId || scheduleFlowState.selectedStoreId) ? ' active' : '';
     return `
       <button type="button" class="schedule-store-card${active}" data-sched-store="${escSched(store.id)}">
         <strong>${escSched(store.name || 'Store')}</strong>
@@ -498,12 +554,14 @@ function syncScheduleFlowDates(){
   if (label) label.textContent = weekLabel(schedWeekStart);
 }
 
-function setScheduleType(type){
+function setScheduleType(type, options = {}){
+  if (options.capture !== false) captureScheduleFlowDraft();
   scheduleFlowState.assignmentType = type === 'live_show' ? 'live_show' : 'store_work';
+  setScheduleFlowDraft({ assignmentType: scheduleFlowState.assignmentType });
   document.querySelectorAll('#panelSchedule [data-sched-type]').forEach((button) => {
     button.classList.toggle('active', button.dataset.schedType === scheduleFlowState.assignmentType);
   });
-  renderScheduleDayDetail();
+  if (options.render !== false) renderScheduleDayDetail();
 }
 
 function renderScheduleDayPicker(){
@@ -515,9 +573,11 @@ function renderScheduleDayPicker(){
     const iso = toISODate(day);
     const resolved = scheduleWeekState.resolvedByDate.get(iso) || null;
     const ov = scheduleWeekState.overridesByDate.get(iso) || null;
+    const draft = getScheduleFlowDraft(i);
     const active = i === scheduleFlowState.selectedDayIndex ? ' active' : '';
-    const time = resolved ? `${fmtTimeHM(resolved.start_ts)}-${fmtTimeHM(resolved.end_ts)}` : 'No assignment';
-    const source = ov?.off ? 'Off this week' : (resolved?.source || 'Open');
+    const draftTime = draft.start && draft.end ? `${draft.start}-${draft.end}` : '';
+    const time = draftTime || (resolved ? `${fmtTimeHM(resolved.start_ts)}-${fmtTimeHM(resolved.end_ts)}` : 'No assignment');
+    const source = draftTime ? 'Editing' : (ov?.off ? 'Off this week' : (resolved?.source || 'Open'));
     const button = document.createElement('button');
     button.type = 'button';
     button.className = `schedule-day-card${active}`;
@@ -551,25 +611,30 @@ function renderScheduleDayDetail(){
   const resolved = scheduleWeekState.resolvedByDate.get(iso) || null;
   const ov = scheduleWeekState.overridesByDate.get(iso) || null;
   const dayException = scheduleWeekState.dayExceptionsByDate.get(iso) || null;
+  const draft = getScheduleFlowDraft(i);
   const employee = selectedScheduleEmployee();
-  const storeId = selectedScheduleStoreId();
+  const storeId = draft.storeId ?? selectedScheduleStoreId();
   const storeLabel = storeId ? storeNameById(storeId) : 'Choose a store';
   const resolvedStore = resolved?.store_id ? storeNameById(resolved.store_id) : '-';
   const resolvedTime = resolved ? `${fmtTimeHM(resolved.start_ts)}-${fmtTimeHM(resolved.end_ts)}` : 'Nothing assigned';
   const saveDisabled = scheduleFlowState.saving ? 'disabled' : '';
-  const startValue = ov?.start_local ? String(ov.start_local).slice(0,5) : (resolved ? new Date(resolved.start_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false}) : '');
-  const endValue = ov?.end_local ? String(ov.end_local).slice(0,5) : (resolved ? new Date(resolved.end_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false}) : '');
+  const baseStartValue = ov?.start_local ? String(ov.start_local).slice(0,5) : (resolved ? new Date(resolved.start_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false}) : '');
+  const baseEndValue = ov?.end_local ? String(ov.end_local).slice(0,5) : (resolved ? new Date(resolved.end_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false}) : '');
+  const startValue = draft.start ?? baseStartValue;
+  const endValue = draft.end ?? baseEndValue;
   const defaultRouteStoreId = storeId || resolved?.store_id || '';
-  const clockInStores = Array.isArray(dayException?.allowed_clock_in_store_ids) && dayException.allowed_clock_in_store_ids.length
+  const draftClockInStores = Array.isArray(draft.clockInStoreIds) ? draft.clockInStoreIds : null;
+  const draftClockOutStores = Array.isArray(draft.clockOutStoreIds) ? draft.clockOutStoreIds : null;
+  const clockInStores = draftClockInStores || (Array.isArray(dayException?.allowed_clock_in_store_ids) && dayException.allowed_clock_in_store_ids.length
     ? dayException.allowed_clock_in_store_ids
     : Array.isArray(resolved?.allowed_clock_in_store_ids) && resolved.allowed_clock_in_store_ids.length
       ? resolved.allowed_clock_in_store_ids
-      : [dayException?.clock_in_store_id || defaultRouteStoreId].filter(Boolean);
-  const clockOutStores = Array.isArray(dayException?.allowed_clock_out_store_ids) && dayException.allowed_clock_out_store_ids.length
+      : [dayException?.clock_in_store_id || defaultRouteStoreId].filter(Boolean));
+  const clockOutStores = draftClockOutStores || (Array.isArray(dayException?.allowed_clock_out_store_ids) && dayException.allowed_clock_out_store_ids.length
     ? dayException.allowed_clock_out_store_ids
     : Array.isArray(resolved?.allowed_clock_out_store_ids) && resolved.allowed_clock_out_store_ids.length
       ? resolved.allowed_clock_out_store_ids
-      : [dayException?.clock_out_store_id || defaultRouteStoreId].filter(Boolean);
+      : [dayException?.clock_out_store_id || defaultRouteStoreId].filter(Boolean));
   const routeSummary = `${scheduleStoreNameList(clockInStores)} -> ${scheduleStoreNameList(clockOutStores)}`;
   const copyOptions = Array.from({ length: 7 }, (_, index) => {
     const sourceDay = addDays(schedWeekStart, index);
@@ -613,11 +678,15 @@ function renderScheduleDayDetail(){
     <div class="schedule-day-form">
       <label>
         Start
-        <input id="schedFlowStart" type="time" value="${escSched(startValue)}" />
+        <select id="schedFlowStart" class="schedule-time-select" aria-label="Start time">
+          ${scheduleTimeOptionsHTML(startValue, 'Choose start...')}
+        </select>
       </label>
       <label>
         End
-        <input id="schedFlowEnd" type="time" value="${escSched(endValue)}" />
+        <select id="schedFlowEnd" class="schedule-time-select" aria-label="End time">
+          ${scheduleTimeOptionsHTML(endValue, 'Choose end...')}
+        </select>
       </label>
       <label>
         Store
@@ -1156,23 +1225,17 @@ function copyScheduleSourceIntoEditor(dayIndex){
     return;
   }
 
-  const start = qs('schedFlowStart');
-  const end = qs('schedFlowEnd');
-  const store = qs('schedFlowStore');
-
-  if (start) start.value = source.start || '';
-  if (end) end.value = source.end || '';
-  if (store) store.value = source.storeId || '';
-
   scheduleFlowState.selectedStoreId = source.storeId || scheduleFlowState.selectedStoreId;
-  setScheduleType(source.assignmentType || scheduleFlowState.assignmentType);
+  setScheduleFlowDraft({
+    start: source.start || '',
+    end: source.end || '',
+    storeId: source.storeId || '',
+    clockInStoreIds: source.clockInStoreIds || [],
+    clockOutStoreIds: source.clockOutStoreIds || [],
+    assignmentType: source.assignmentType || scheduleFlowState.assignmentType
+  });
+  setScheduleType(source.assignmentType || scheduleFlowState.assignmentType, { capture: false });
 
-  const refreshedStart = qs('schedFlowStart');
-  const refreshedEnd = qs('schedFlowEnd');
-  const refreshedStore = qs('schedFlowStore');
-  if (refreshedStart) refreshedStart.value = source.start || '';
-  if (refreshedEnd) refreshedEnd.value = source.end || '';
-  if (refreshedStore) refreshedStore.value = source.storeId || '';
   document.querySelectorAll('#panelSchedule input[name="schedFlowClockInStores"]').forEach((input) => {
     input.checked = source.clockInStoreIds.includes(input.value);
   });
@@ -1913,9 +1976,12 @@ qs('schedEmpSection').addEventListener('click', async (e) => {
     if (sel) sel.value = schedEmpId;
     loadScheduleWeek();
   } else if (btn.hasAttribute('data-sched-store')){
+    captureScheduleFlowDraft();
     scheduleFlowState.selectedStoreId = btn.dataset.schedStore || '';
+    setScheduleFlowDraft({ storeId: scheduleFlowState.selectedStoreId });
     renderScheduleFlow();
   } else if (btn.hasAttribute('data-sched-day')){
+    captureScheduleFlowDraft();
     scheduleFlowState.selectedDayIndex = Number(btn.dataset.schedDay || 0);
     renderScheduleFlow();
   } else if (btn.hasAttribute('data-sched-type')){
@@ -1978,6 +2044,18 @@ qs('schedEmpSection').addEventListener('change', (e) => {
     return;
   }
 
+  if (id === 'schedFlowStart'){
+    setScheduleFlowDraft({ start: normalizeScheduleTime(e.target.value || '') });
+    renderScheduleDayPicker();
+    return;
+  }
+
+  if (id === 'schedFlowEnd'){
+    setScheduleFlowDraft({ end: normalizeScheduleTime(e.target.value || '') });
+    renderScheduleDayPicker();
+    return;
+  }
+
   if (id === 'schedFlowEffSync'){
     scheduleFlowState.syncEffectiveFromToWeek = !!e.target.checked;
     syncScheduleFlowDates();
@@ -1993,9 +2071,21 @@ qs('schedEmpSection').addEventListener('change', (e) => {
   }
 
   if (id === 'schedFlowStore'){
+    captureScheduleFlowDraft();
     scheduleFlowState.selectedStoreId = e.target.value || '';
+    setScheduleFlowDraft({ storeId: scheduleFlowState.selectedStoreId });
     renderScheduleStorePicker();
     renderScheduleDayDetail();
+    return;
+  }
+
+  if (e.target?.name === 'schedFlowClockInStores'){
+    setScheduleFlowDraft({ clockInStoreIds: getCheckedScheduleStoreIds('schedFlowClockInStores') });
+    return;
+  }
+
+  if (e.target?.name === 'schedFlowClockOutStores'){
+    setScheduleFlowDraft({ clockOutStoreIds: getCheckedScheduleStoreIds('schedFlowClockOutStores') });
     return;
   }
 
