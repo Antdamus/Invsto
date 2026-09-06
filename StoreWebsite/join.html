@@ -81,6 +81,19 @@
               />
               <div class="hint">We’ll send a secure sign-in link and keep you close to upcoming OG moments.</div>
             </div>
+
+            <div class="field">
+              <label for="phone">Mobile phone <span class="muted">(optional)</span></label>
+              <input
+                id="phone"
+                name="phone"
+                type="tel"
+                placeholder="(305) 555-1212"
+                autocomplete="tel"
+                inputmode="tel"
+              />
+              <div class="hint">Use this if you want text alerts before OG live shows.</div>
+            </div>
           </div>
 
           <div class="consent">
@@ -93,6 +106,18 @@
             <p class="fineprint">
               By joining, you agree to our <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.
             </p>
+          </div>
+
+          <div class="consent sms-consent">
+            <label class="check">
+              <input type="checkbox" id="smsConsent" />
+              <span>
+                Text me OG Jewelry live show alerts at the mobile number I entered.
+                <span class="sms-legal">
+                  Message and data rates may apply. Reply STOP to unsubscribe.
+                </span>
+              </span>
+            </label>
           </div>
 
           <button id="submitBtn" class="btn primary" type="submit">

@@ -572,3 +572,18 @@ entrypoint = "./functions/ebay-conversation-draft/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/send-task-email-notifications/index.ts"
+
+[functions.sms-subscribe]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/sms-subscribe/index.ts"
+
+[functions.twilio-inbound-sms]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/twilio-inbound-sms/index.ts"
+
+[functions.sms-marketing-admin]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/sms-marketing-admin/index.ts"

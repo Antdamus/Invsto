@@ -6,7 +6,9 @@
   const form = $("#joinForm");
   const nameEl = $("#name");
   const emailEl = $("#email");
+  const phoneEl = $("#phone");
   const consentEl = $("#consent");
+  const smsConsentEl = $("#smsConsent");
   const statusEl = $("#status");
   const submitBtn = $("#submitBtn");
   const btnText = submitBtn?.querySelector(".btn-text");
@@ -22,6 +24,8 @@
 
   const COOLDOWN_MS = 60 * 1000;
   const COOLDOWN_KEY = "og_access_cooldown_until";
+  const SMS_CONSENT_TEXT =
+    "I agree to receive recurring automated SMS live show alerts from OG Jewelry at the number provided. Reply STOP to unsubscribe. Message and data rates may apply.";
 
   function setStatus(message, kind = "info") {
     if (!statusEl) return;
@@ -52,6 +56,21 @@
     const value = String(email || "").trim();
     if (value.length < 5) return false;
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  }
+
+  function normalizePhoneE164(phone) {
+    const raw = String(phone || "").trim();
+    if (!raw) return "";
+
+    if (raw.startsWith("+")) {
+      const candidate = `+${raw.slice(1).replace(/\D/g, "")}`;
+      return /^\+\d{7,15}$/.test(candidate) ? candidate : "";
+    }
+
+    const digits = raw.replace(/\D/g, "");
+    if (digits.length === 10) return `+1${digits}`;
+    if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+    return "";
   }
 
   function parseParams() {
@@ -219,6 +238,9 @@
     const name = String(nameEl?.value || "").trim();
     const email = String(emailEl?.value || "").trim();
     const consent = !!consentEl?.checked;
+    const phoneRaw = String(phoneEl?.value || "").trim();
+    const phoneE164 = normalizePhoneE164(phoneRaw);
+    const smsConsent = !!smsConsentEl?.checked;
 
     if (!validEmail(email)) {
       setStatus("Please enter a valid email address.", "error");
@@ -229,6 +251,24 @@
     if (!consent) {
       setStatus("Please confirm that you want OG Jewelers updates before continuing.", "error");
       consentEl?.focus();
+      return;
+    }
+
+    if (phoneRaw && !phoneE164) {
+      setStatus("Please enter a valid mobile phone number for SMS alerts.", "error");
+      phoneEl?.focus();
+      return;
+    }
+
+    if (smsConsent && !phoneE164) {
+      setStatus("Please enter your mobile phone number to receive SMS alerts.", "error");
+      phoneEl?.focus();
+      return;
+    }
+
+    if (phoneE164 && !smsConsent) {
+      setStatus("Please check the SMS consent box if you want text alerts, or remove the phone number.", "error");
+      smsConsentEl?.focus();
       return;
     }
 
@@ -246,11 +286,38 @@
         flow: "join",
         marketing_opt_in: true,
         marketing_opt_in_at: new Date().toISOString(),
+        sms_opt_in: smsConsent,
+        sms_opt_in_at: smsConsent ? new Date().toISOString() : null,
+        sms_phone_e164: smsConsent ? phoneE164 : null,
         joined_at: new Date().toISOString()
       };
       localStorage.setItem("og_join_context", JSON.stringify(joinContext));
 
       const redirectTo = computeRedirectToProfile();
+
+      if (smsConsent) {
+        const smsRes = await fetch(`${window.SUPABASE_URL}/functions/v1/sms-subscribe`, {
+          method: "POST",
+          credentials: "omit",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name,
+            email: safeLower(email),
+            phone: phoneE164,
+            smsConsent: true,
+            consentText: SMS_CONSENT_TEXT,
+            source: src,
+            campaign,
+            sourceUrl: window.location.href
+          })
+        });
+
+        const smsData = await smsRes.json().catch(() => ({}));
+        if (!smsRes.ok || !smsData?.ok) {
+          throw new Error("We could not save your SMS opt-in yet. Please check your number and try again.");
+        }
+      }
+
       const fnUrl = `${window.SUPABASE_URL}/functions/v1/og_send_magic_link`;
 
       const res = await fetch(fnUrl, {
@@ -284,7 +351,9 @@
 
       if (emailEl) emailEl.readOnly = true;
       if (nameEl) nameEl.readOnly = true;
+      if (phoneEl) phoneEl.readOnly = true;
       if (consentEl) consentEl.disabled = true;
+      if (smsConsentEl) smsConsentEl.disabled = true;
     } catch (err) {
       console.error(err);
       setLoading(false);

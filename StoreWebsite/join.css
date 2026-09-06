@@ -323,6 +323,18 @@ select {
   font-size: 0.8rem;
 }
 
+.sms-consent {
+  margin-top: 12px;
+}
+
+.sms-legal {
+  display: block;
+  margin-top: 4px;
+  color: rgba(244, 237, 225, 0.58);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;

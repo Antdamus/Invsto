@@ -11,6 +11,7 @@
     { href: "stock.html", label: "Stock", mark: "S" },
     { href: "store-transfers.html", label: "Store Transfers", mark: "ST" },
     { href: "live-sales.html", label: "Live Sales", mark: "LS" },
+    { href: "sms-marketing.html", label: "SMS Alerts", mark: "SMS" },
     { href: "past-live-sales.html", label: "Past Live Sales", mark: "PL" },
     { href: "pending-orders.html", label: "Pending Orders", mark: "PO" },
     { href: "team-tasks.html", label: "Tasks", mark: "TS" },
