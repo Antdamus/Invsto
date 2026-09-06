@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#070708" />
-  <title>OG Jewelry - SMS Alerts</title>
+  <title>OG Jewelers - SMS Alerts</title>
 
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="sms-marketing.css" />
@@ -14,7 +14,7 @@
   <main class="sms-shell">
     <section class="sms-hero">
       <div>
-        <p class="eyebrow">OG Jewelry customer alerts</p>
+        <p class="eyebrow">OG Jewelers customer alerts</p>
         <h1>SMS Alerts</h1>
         <p class="hero-copy">Live show messages for customers who opted in by form or by texting the OG number.</p>
       </div>
@@ -57,19 +57,44 @@
             <input id="campaignTitle" type="text" maxlength="160" placeholder="Tonight live show" />
           </label>
 
+          <div class="template-grid">
+            <label class="field">
+              <span>Template</span>
+              <select id="templateSelect">
+                <option value="starting-soon">Show starting soon</option>
+                <option value="next-show">Next show announcement</option>
+                <option value="reminder">Same-day reminder</option>
+                <option value="live-now">Live now</option>
+                <option value="last-call">Last call</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Show date</span>
+              <input id="showDate" type="date" />
+            </label>
+
+            <label class="field">
+              <span>Show time</span>
+              <input id="showTime" type="time" />
+            </label>
+          </div>
+
+          <button id="applyTemplateBtn" class="btn ghost compact" type="button">Use Template</button>
+
           <label class="field">
             <span>Message</span>
-            <textarea id="messageBody" rows="6" maxlength="360" placeholder="Our live show starts tonight at 8 PM. Watch here:"></textarea>
+            <textarea id="messageBody" rows="6" maxlength="360" placeholder="Our live show starts tonight at 8 PM."></textarea>
           </label>
 
           <label class="field">
-            <span>Link</span>
+            <span>Show link</span>
             <input id="linkUrl" type="url" placeholder="https://www.ebay.com/live/..." />
           </label>
 
           <div class="preview-panel" aria-label="SMS preview">
             <span>Preview</span>
-            <p id="smsPreview">OG Jewelry: Our live show starts tonight at 8 PM. Reply STOP to unsubscribe.</p>
+            <p id="smsPreview">OG Jewelers: Our live show starts tonight at 8 PM. Reply STOP to unsubscribe.</p>
             <small id="charCount">0 / 480</small>
           </div>
 

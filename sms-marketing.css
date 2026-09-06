@@ -34,6 +34,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -116,6 +117,13 @@ h2 {
 
 .btn.ghost {
   color: var(--muted);
+}
+
+.btn.compact {
+  width: auto;
+  min-height: 38px;
+  margin: -2px 0 14px;
+  padding: 0 12px;
 }
 
 .btn:disabled {
@@ -223,6 +231,7 @@ h2 {
 }
 
 .field input,
+.field select,
 .field textarea {
   width: 100%;
   border: 1px solid var(--border);
@@ -233,15 +242,35 @@ h2 {
   padding: 12px;
 }
 
+.field select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(243, 244, 246, 0.8) 50%),
+    linear-gradient(135deg, rgba(243, 244, 246, 0.8) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 50%,
+    calc(100% - 12px) 50%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 34px;
+}
+
 .field textarea {
   resize: vertical;
   line-height: 1.5;
 }
 
 .field input:focus,
+.field select:focus,
 .field textarea:focus {
   border-color: var(--border-strong);
   box-shadow: 0 0 0 3px rgba(214, 178, 94, 0.1);
+}
+
+.template-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.25fr) minmax(150px, 0.85fr) minmax(130px, 0.72fr);
+  gap: 12px;
 }
 
 .preview-panel {
@@ -350,6 +379,11 @@ h2 {
 
   .stats-grid {
     grid-template-columns: 1fr;
+  }
+
+  .template-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
   }
 }
 

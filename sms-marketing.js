@@ -5,6 +5,31 @@
 
   let supabaseClient = null;
   let latestSummary = null;
+  let messageTemplateSynced = true;
+  let campaignTitleSynced = true;
+
+  const SMS_TEMPLATES = {
+    "starting-soon": {
+      title: ({ titleDate, time }) => `Live show ${titleDate}${time ? ` ${time}` : ""}`.trim(),
+      message: ({ when }) => `Our live jewelry show starts ${when}. Watch here:`,
+    },
+    "next-show": {
+      title: ({ titleDate, time }) => `Next live show ${titleDate}${time ? ` ${time}` : ""}`.trim(),
+      message: ({ when }) => `Our next live jewelry show is ${when}. Watch here:`,
+    },
+    "reminder": {
+      title: ({ titleDate, time }) => `Reminder ${titleDate}${time ? ` ${time}` : ""}`.trim(),
+      message: ({ when }) => `Reminder: we go live ${when}. Watch here:`,
+    },
+    "live-now": {
+      title: ({ titleDate }) => `Live now ${titleDate}`.trim(),
+      message: () => "We are live now. Watch the show here:",
+    },
+    "last-call": {
+      title: ({ titleDate }) => `Last call ${titleDate}`.trim(),
+      message: () => "Last call: the live show is happening now. Watch here:",
+    },
+  };
 
   function waitForSupabaseReady(timeoutMs = 8000) {
     return new Promise((resolve, reject) => {
@@ -61,6 +86,76 @@
     });
   }
 
+  function todayInputValue() {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  function dateFromInput(value) {
+    const parts = String(value || "").split("-").map(Number);
+    if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return null;
+    const [year, month, day] = parts;
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+    return date;
+  }
+
+  function formatMessageDate(value) {
+    const date = dateFromInput(value);
+    if (!date) return "";
+
+    const now = new Date();
+    return date.toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: date.getFullYear() === now.getFullYear() ? undefined : "numeric",
+    });
+  }
+
+  function formatTitleDate(value) {
+    const date = dateFromInput(value);
+    if (!date) return "show";
+    return date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
+  }
+
+  function formatTime(value) {
+    const match = String(value || "").match(/^(\d{2}):(\d{2})/);
+    if (!match) return "";
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (hours > 23 || minutes > 59) return "";
+    return new Date(2026, 0, 1, hours, minutes).toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
+  function templateContext() {
+    const dateValue = $("#showDate")?.value || "";
+    const time = formatTime($("#showTime")?.value || "");
+    const date = formatMessageDate(dateValue);
+    const titleDate = formatTitleDate(dateValue);
+
+    return {
+      date,
+      time,
+      titleDate,
+      when: date && time ? `${date} at ${time}` : date || (time ? `at ${time}` : "soon"),
+    };
+  }
+
+  function getSelectedTemplate() {
+    const key = $("#templateSelect")?.value || "starting-soon";
+    return SMS_TEMPLATES[key] || SMS_TEMPLATES["starting-soon"];
+  }
+
   function normalizeSpaces(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
   }
@@ -76,11 +171,30 @@
     }
   }
 
+  function applyTemplate(options = {}) {
+    const template = getSelectedTemplate();
+    const context = templateContext();
+    const messageEl = $("#messageBody");
+    const titleEl = $("#campaignTitle");
+
+    if (messageEl && (options.forceMessage || messageTemplateSynced || !messageEl.value.trim())) {
+      messageEl.value = template.message(context);
+      messageTemplateSynced = true;
+    }
+
+    if (titleEl && (options.forceTitle || campaignTitleSynced || !titleEl.value.trim())) {
+      titleEl.value = template.title(context);
+      campaignTitleSynced = true;
+    }
+
+    updatePreview();
+  }
+
   function buildPreviewBody() {
     let body = normalizeSpaces($("#messageBody")?.value || "Our live show starts tonight at 8 PM.");
     const link = cleanLink($("#linkUrl")?.value);
     if (link && !body.includes(link)) body = `${body} ${link}`;
-    if (!/^og jewel(?:ry|ers):/i.test(body)) body = `OG Jewelry: ${body}`;
+    if (!/^og jewel(?:ry|ers):/i.test(body)) body = `OG Jewelers: ${body}`;
     if (!/\breply\s+stop\b|\bstop\s+to\s+unsubscribe\b|\bunsubscribe\b/i.test(body)) {
       body = `${body.replace(/[. ]+$/, "")}. Reply STOP to unsubscribe.`;
     }
@@ -220,6 +334,11 @@
       $("#messageBody")?.focus();
       return;
     }
+    if (!cleanLink($("#linkUrl")?.value)) {
+      setStatus("Add a valid show link first.", "error");
+      $("#linkUrl")?.focus();
+      return;
+    }
     if (body.length > 480) {
       setStatus("The final SMS is too long.", "error");
       return;
@@ -242,7 +361,10 @@
         confirm: "SEND_OG_SMS",
         title: $("#campaignTitle")?.value || "",
         message: $("#messageBody")?.value || "",
-        linkUrl: $("#linkUrl")?.value || "",
+        linkUrl: cleanLink($("#linkUrl")?.value),
+        templateId: $("#templateSelect")?.value || "starting-soon",
+        showDate: $("#showDate")?.value || "",
+        showTime: $("#showTime")?.value || "",
       });
 
       const result = data.result || {};
@@ -274,10 +396,22 @@
       loadSummary().catch((error) => setStatus(error?.message || "Refresh failed.", "error"));
     });
     $("#smsForm")?.addEventListener("submit", sendCampaign);
-    $("#messageBody")?.addEventListener("input", updatePreview);
+    $("#campaignTitle")?.addEventListener("input", () => {
+      campaignTitleSynced = false;
+    });
+    $("#messageBody")?.addEventListener("input", () => {
+      messageTemplateSynced = false;
+      updatePreview();
+    });
     $("#linkUrl")?.addEventListener("input", updatePreview);
+    $("#templateSelect")?.addEventListener("change", () => applyTemplate({ forceMessage: true, forceTitle: true }));
+    $("#showDate")?.addEventListener("change", () => applyTemplate({ forceMessage: true }));
+    $("#showTime")?.addEventListener("change", () => applyTemplate({ forceMessage: true }));
+    $("#applyTemplateBtn")?.addEventListener("click", () => applyTemplate({ forceMessage: true }));
 
-    updatePreview();
+    if ($("#showDate") && !$("#showDate").value) $("#showDate").value = todayInputValue();
+    if ($("#showTime") && !$("#showTime").value) $("#showTime").value = "20:00";
+    applyTemplate({ forceMessage: true, forceTitle: true });
     await loadSummary();
   }
 

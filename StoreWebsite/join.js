@@ -25,7 +25,7 @@
   const COOLDOWN_MS = 60 * 1000;
   const COOLDOWN_KEY = "og_access_cooldown_until";
   const SMS_CONSENT_TEXT =
-    "I agree to receive recurring automated SMS live show alerts from OG Jewelry at the number provided. Reply STOP to unsubscribe. Message and data rates may apply.";
+    "I agree to receive recurring automated SMS live show alerts from OG Jewelers at the number provided. Reply STOP to unsubscribe. Message and data rates may apply.";
 
   function setStatus(message, kind = "info") {
     if (!statusEl) return;

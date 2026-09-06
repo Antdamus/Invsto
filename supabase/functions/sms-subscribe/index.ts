@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 const DEFAULT_CONSENT_TEXT =
-  "I agree to receive recurring automated SMS live show alerts from OG Jewelry at the number provided. Reply STOP to unsubscribe. Message and data rates may apply.";
+  "I agree to receive recurring automated SMS live show alerts from OG Jewelers at the number provided. Reply STOP to unsubscribe. Message and data rates may apply.";
 
 function json(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {

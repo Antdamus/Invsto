@@ -149,11 +149,13 @@ function normalizeSpaces(value: string) {
 
 function buildFinalSmsBody(message: unknown, linkUrl: unknown) {
   let body = normalizeSpaces(text(message));
+  const rawLink = text(linkUrl);
   const link = normalizeUrl(linkUrl);
 
   if (!body) throw new AdminError("message_required", { status: 400, message: "Message is required." });
+  if (rawLink && !link) throw new AdminError("invalid_link", { status: 400, message: "Show link must be a valid http or https URL." });
   if (link && !body.includes(link)) body = `${body} ${link}`;
-  if (!/^og jewel(?:ry|ers):/i.test(body)) body = `OG Jewelry: ${body}`;
+  if (!/^og jewel(?:ry|ers):/i.test(body)) body = `OG Jewelers: ${body}`;
   if (!/\breply\s+stop\b|\bstop\s+to\s+unsubscribe\b|\bunsubscribe\b/i.test(body)) {
     body = `${body.replace(/[. ]+$/, "")}. Reply STOP to unsubscribe.`;
   }
@@ -286,6 +288,11 @@ async function sendCampaign(req: Request, supabase: ServiceClient, operator: Ope
   }
 
   const finalBody = buildFinalSmsBody(payload.message || payload.body, payload.linkUrl || payload.link_url);
+  const rawLink = text(payload.linkUrl || payload.link_url);
+  const linkUrl = normalizeUrl(rawLink);
+  if (rawLink && !linkUrl) {
+    throw new AdminError("invalid_link", { status: 400, message: "Show link must be a valid http or https URL." });
+  }
   const title = text(payload.title) || `OG SMS ${new Date().toLocaleString("en-US", { timeZone: "America/New_York" })}`;
   const maxRecipients = Math.max(1, Math.min(
     Number(optionalEnv("CUSTOMER_SMS_MAX_RECIPIENTS")) || 500,
@@ -310,7 +317,7 @@ async function sendCampaign(req: Request, supabase: ServiceClient, operator: Ope
     .insert({
       title: title.slice(0, 240),
       body: text(payload.message || payload.body).slice(0, 480),
-      link_url: normalizeUrl(payload.linkUrl || payload.link_url) || null,
+      link_url: linkUrl || null,
       final_body: finalBody,
       status: "sending",
       recipient_count: audience.length,
@@ -320,6 +327,9 @@ async function sendCampaign(req: Request, supabase: ServiceClient, operator: Ope
       metadata: {
         requested_from: req.headers.get("origin") || "",
         limited_to: maxRecipients,
+        template_id: text(payload.templateId || payload.template_id) || null,
+        show_date: text(payload.showDate || payload.show_date) || null,
+        show_time: text(payload.showTime || payload.show_time) || null,
       },
     })
     .select("id")

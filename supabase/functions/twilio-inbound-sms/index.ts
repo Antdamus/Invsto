@@ -189,14 +189,14 @@ async function insertInboundEvent(
 }
 
 Deno.serve(async (req) => {
-  if (req.method !== "POST") return xml("OG Jewelry: Text OG to subscribe. Reply STOP to unsubscribe.", 405);
+  if (req.method !== "POST") return xml("OG Jewelers: Text OG to subscribe. Reply STOP to unsubscribe.", 405);
 
   let params: URLSearchParams;
   try {
     params = await parseParams(req);
   } catch (error) {
     console.error("[twilio-inbound-sms] parse failed", error);
-    return xml("OG Jewelry: We could not read that message. Please try again.");
+    return xml("OG Jewelers: We could not read that message. Please try again.");
   }
 
   const signatureOk = await validateTwilioSignature(req, params);
@@ -212,7 +212,7 @@ Deno.serve(async (req) => {
 
   if (!fromPhone) {
     console.error("[twilio-inbound-sms] missing sender", rawPayload);
-    return xml("OG Jewelry: We could not read your phone number. Please try again.");
+    return xml("OG Jewelers: We could not read your phone number. Please try again.");
   }
 
   const supabase = createClient(requiredEnv("SUPABASE_URL"), requiredEnv("SUPABASE_SERVICE_ROLE_KEY"), {
@@ -250,14 +250,14 @@ Deno.serve(async (req) => {
       if (error) throw error;
 
       if (optOutType === "STOP") return xml(null);
-      return xml("OG Jewelry: You are unsubscribed and will no longer receive OG Jewelry texts. Reply START to resubscribe.");
+      return xml("OG Jewelers: You are unsubscribed and will no longer receive OG Jewelers texts. Reply START to resubscribe.");
     }
 
     if (matchedSubscribe) {
       const { error } = await supabase.rpc("customer_sms_record_opt_in", {
         _phone_e164: fromPhone,
         _consent_source: optOutType === "START" ? "twilio_opt_in" : "inbound_sms",
-        _consent_text: `Customer texted ${body || "START"} to opt in to OG Jewelry SMS updates.`,
+        _consent_text: `Customer texted ${body || "START"} to opt in to OG Jewelers SMS updates.`,
         _name: null,
         _email: null,
         _source: "inbound_sms",
@@ -268,7 +268,7 @@ Deno.serve(async (req) => {
       if (error) throw error;
 
       if (optOutType === "START") return xml(null);
-      return xml("OG Jewelry: You are subscribed to OG live show texts. Reply STOP to unsubscribe.");
+      return xml("OG Jewelers: You are subscribed to OG live show texts. Reply STOP to unsubscribe.");
     }
 
     if (matchedHelp) {
@@ -280,7 +280,7 @@ Deno.serve(async (req) => {
         rawPayload: metadata,
       });
       if (optOutType === "HELP") return xml(null);
-      return xml("OG Jewelry alerts: text OG or SUBSCRIBE to join live show updates. Reply STOP to unsubscribe.");
+      return xml("OG Jewelers alerts: text OG or SUBSCRIBE to join live show updates. Reply STOP to unsubscribe.");
     }
 
     await insertInboundEvent(supabase, {
@@ -290,9 +290,9 @@ Deno.serve(async (req) => {
       eventType: "unknown",
       rawPayload: metadata,
     });
-    return xml("OG Jewelry: text OG or SUBSCRIBE to get live show alerts. Reply STOP to unsubscribe.");
+    return xml("OG Jewelers: text OG or SUBSCRIBE to get live show alerts. Reply STOP to unsubscribe.");
   } catch (error) {
     console.error("[twilio-inbound-sms] update failed", error);
-    return xml("OG Jewelry: We could not update your SMS status right now. Please try again.");
+    return xml("OG Jewelers: We could not update your SMS status right now. Please try again.");
   }
 });
