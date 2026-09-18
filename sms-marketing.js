@@ -10,6 +10,8 @@
   let campaignTitleSynced = true;
   let subscriberSearchTimer = null;
   let subscriberStatusFilter = "subscribed";
+  let activeAutoMessageKey = "username_prompt";
+  let autoMessages = {};
 
   const SMS_TEMPLATES = {
     "starting-soon": {
@@ -31,6 +33,57 @@
     "last-call": {
       title: ({ titleDate }) => `Last call ${titleDate}`.trim(),
       message: () => "Last call: the live show is happening now. Watch here:",
+    },
+  };
+
+  const AUTO_MESSAGE_DEFAULTS = {
+    username_prompt: {
+      key: "username_prompt",
+      title: "Ask for eBay username",
+      description: "Sent after someone texts OG or subscribes by text.",
+      body: `💰 WANT A CHANCE TO WIN $100 EVERY DAY? 💰
+
+Join our VIP text list for access to our DAILY GIVEAWAYS $100 SENT VIA ZELLE 🎉🔥
+
+To join, simply reply with your eBay username.
+
+📲 Daily giveaways
+💵 $100 sent via Zelle
+🎁 Exclusive offers & surprises
+
+Reply with your eBay username to get started! 🍀`,
+    },
+    username_saved: {
+      key: "username_saved",
+      title: "Username received",
+      description: "Sent after the customer sends their public eBay username.",
+      body: `🎉 CONGRATULATIONS! YOU’RE ALMOST IN! 🎉
+
+We received your eBay username ✅
+
+There’s just ONE LAST STEP to complete your entry for our daily $100 Zelle giveaways 💵🔥
+
+📲 Follow us on Instagram @OGJewelers
+
+Once you’ve followed us, reply DONE and you’re officially entered! 🍀💎`,
+    },
+    username_change_prompt: {
+      key: "username_change_prompt",
+      title: "Change username prompt",
+      description: "Sent after a subscribed customer replies CHANGE.",
+      body: "OG Jewelers: Send the new eBay username as publicly displayed. Just the public username, nothing more.",
+    },
+    username_status: {
+      key: "username_status",
+      title: "Username on file",
+      description: "Sent when a subscribed customer already has an eBay username saved.",
+      body: "OG Jewelers: Your eBay username on file is {{username}}. To change it, reply CHANGE.",
+    },
+    instagram_done: {
+      key: "instagram_done",
+      title: "Instagram DONE reply",
+      description: "Sent after the customer replies DONE after following Instagram.",
+      body: "OG Jewelers: You're officially entered for our daily $100 Zelle giveaways. Good luck!",
     },
   };
 
@@ -64,6 +117,13 @@
 
   function setStatus(message, kind = "") {
     const el = $("#sendStatus");
+    if (!el) return;
+    el.textContent = message || "";
+    el.className = `send-status ${kind}`.trim();
+  }
+
+  function setAutoMessageStatus(message, kind = "") {
+    const el = $("#autoMessageStatus");
     if (!el) return;
     el.textContent = message || "";
     el.className = `send-status ${kind}`.trim();
@@ -161,6 +221,22 @@
 
   function normalizeSpaces(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
+  }
+
+  function normalizeAutoMessageBody(value) {
+    return String(value || "").replace(/\r\n/g, "\n").trim();
+  }
+
+  function withOptOut(message) {
+    if (/\breply\s+stop\b|\bstop\s+to\s+unsubscribe\b/i.test(message)) return message;
+    return `${String(message || "").replace(/\s+$/, "")} Reply STOP to unsubscribe.`;
+  }
+
+  function renderAutoMessageBody(body, values = {}) {
+    return String(body || "").replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_match, rawKey) => {
+      const key = String(rawKey || "").toLowerCase();
+      return values[key] ?? "";
+    });
   }
 
   function cleanLink(value) {
@@ -340,6 +416,127 @@
     `).join("");
   }
 
+  function defaultAutoMessageRows() {
+    return Object.values(AUTO_MESSAGE_DEFAULTS).map((item) => ({
+      ...item,
+      fallbackBody: item.body,
+      isActive: true,
+      updatedAt: null,
+      updatedByEmail: null,
+    }));
+  }
+
+  function setAutoMessages(rows = []) {
+    const next = {};
+    for (const item of defaultAutoMessageRows()) next[item.key] = item;
+    for (const item of rows) {
+      const key = item?.key;
+      if (!key || !next[key]) continue;
+      next[key] = {
+        ...next[key],
+        ...item,
+        body: normalizeAutoMessageBody(item.body) || next[key].body,
+        fallbackBody: normalizeAutoMessageBody(item.fallbackBody) || next[key].fallbackBody,
+      };
+    }
+    autoMessages = next;
+  }
+
+  function currentAutoMessage() {
+    return autoMessages[activeAutoMessageKey]
+      || AUTO_MESSAGE_DEFAULTS[activeAutoMessageKey]
+      || AUTO_MESSAGE_DEFAULTS.username_prompt;
+  }
+
+  function updateAutoMessageTabs() {
+    $$("[data-auto-message-key]").forEach((button) => {
+      const active = button.dataset.autoMessageKey === activeAutoMessageKey;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+  }
+
+  function updateAutoMessagePreview() {
+    const body = normalizeAutoMessageBody($("#autoMessageBody")?.value || "");
+    const finalBody = withOptOut(renderAutoMessageBody(body, { username: "ZoilaCerda" }));
+    const preview = $("#autoMessagePreview");
+    const count = $("#autoMessageCount");
+    if (preview) preview.textContent = finalBody || "No message saved.";
+    if (count) {
+      count.textContent = `${body.length} / 1200`;
+      count.style.color = body.length > 1200 || !body ? "var(--danger)" : "";
+    }
+    const saveBtn = $("#saveAutoMessageBtn");
+    if (saveBtn) saveBtn.disabled = body.length > 1200 || !body;
+  }
+
+  function renderAutoMessageEditor() {
+    updateAutoMessageTabs();
+    const message = currentAutoMessage();
+    const title = $("#autoMessageTitle");
+    const body = $("#autoMessageBody");
+    const pill = $("#autoReplyPill");
+    if (title) title.textContent = message.title || "Automatic reply";
+    if (body) body.value = normalizeAutoMessageBody(message.body);
+    if (pill) pill.textContent = message.updatedAt ? "Saved" : "Default";
+    updateAutoMessagePreview();
+  }
+
+  async function loadAutoMessages() {
+    setAutoMessageStatus("Loading auto replies...");
+    const data = await invokeSmsAdmin({ action: "auto_messages" });
+    setAutoMessages(data.autoMessages || []);
+    renderAutoMessageEditor();
+    setAutoMessageStatus("");
+  }
+
+  async function saveAutoMessage() {
+    const body = normalizeAutoMessageBody($("#autoMessageBody")?.value || "");
+    if (!body) {
+      setAutoMessageStatus("Write the auto reply first.", "error");
+      return;
+    }
+    if (body.length > 1200) {
+      setAutoMessageStatus("The auto reply is too long.", "error");
+      return;
+    }
+
+    const saveBtn = $("#saveAutoMessageBtn");
+    if (saveBtn) saveBtn.disabled = true;
+    setAutoMessageStatus("Saving auto reply...");
+
+    try {
+      const data = await invokeSmsAdmin({
+        action: "save_auto_message",
+        key: activeAutoMessageKey,
+        body,
+      });
+      setAutoMessages([...(Object.values(autoMessages)), data.autoMessage].filter(Boolean));
+      renderAutoMessageEditor();
+      setAutoMessageStatus("Auto reply saved.", "ok");
+    } catch (error) {
+      setAutoMessageStatus(error?.message || "Auto reply was not saved.", "error");
+    } finally {
+      if (saveBtn) saveBtn.disabled = false;
+      updateAutoMessagePreview();
+    }
+  }
+
+  function resetAutoMessageToDefault() {
+    const message = currentAutoMessage();
+    const body = $("#autoMessageBody");
+    if (body) body.value = normalizeAutoMessageBody(message.fallbackBody || AUTO_MESSAGE_DEFAULTS[activeAutoMessageKey]?.body || "");
+    updateAutoMessagePreview();
+    setAutoMessageStatus("Default loaded. Save to apply it.", "");
+  }
+
+  function setActiveAutoMessage(key) {
+    if (!AUTO_MESSAGE_DEFAULTS[key]) return;
+    activeAutoMessageKey = key;
+    setAutoMessageStatus("");
+    renderAutoMessageEditor();
+  }
+
   function renderSummary(summary) {
     latestSummary = summary || {};
     renderCounts(latestSummary);
@@ -385,6 +582,9 @@
     const data = await invokeSmsAdmin({ action: "summary" });
     renderSummary(data.summary || {});
     await loadSubscribers(String($("#subscriberSearch")?.value || "").trim());
+    await loadAutoMessages().catch((error) => {
+      setAutoMessageStatus(error?.message || "Auto replies could not load.", "error");
+    });
     setStatus("");
   }
 
@@ -474,11 +674,19 @@
     $$("[data-subscriber-status]").forEach((button) => {
       button.addEventListener("click", () => setSubscriberStatusFilter(button.dataset.subscriberStatus || "subscribed"));
     });
+    $$("[data-auto-message-key]").forEach((button) => {
+      button.addEventListener("click", () => setActiveAutoMessage(button.dataset.autoMessageKey || "username_prompt"));
+    });
+    $("#autoMessageBody")?.addEventListener("input", updateAutoMessagePreview);
+    $("#saveAutoMessageBtn")?.addEventListener("click", saveAutoMessage);
+    $("#resetAutoMessageBtn")?.addEventListener("click", resetAutoMessageToDefault);
     $("#templateSelect")?.addEventListener("change", () => applyTemplate({ forceMessage: true, forceTitle: true }));
     $("#showDate")?.addEventListener("change", () => applyTemplate({ forceMessage: true }));
     $("#showTime")?.addEventListener("change", () => applyTemplate({ forceMessage: true }));
     $("#applyTemplateBtn")?.addEventListener("click", () => applyTemplate({ forceMessage: true }));
 
+    setAutoMessages();
+    renderAutoMessageEditor();
     if ($("#showDate") && !$("#showDate").value) $("#showDate").value = todayInputValue();
     if ($("#showTime") && !$("#showTime").value) $("#showTime").value = "20:00";
     updateSubscriberTabs();

@@ -136,6 +136,7 @@ h2 {
 .compose-panel,
 .side-panel,
 .history-panel,
+.auto-replies-panel,
 .stat {
   border: 1px solid var(--border);
   background: var(--panel);
@@ -192,7 +193,8 @@ h2 {
 
 .compose-panel,
 .side-panel,
-.history-panel {
+.history-panel,
+.auto-replies-panel {
   border-radius: 18px;
   padding: 18px;
 }
@@ -349,6 +351,40 @@ h2 {
   margin: 0 0 10px;
 }
 
+.auto-reply-tabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.auto-reply-tab {
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.auto-reply-tab.is-active {
+  border-color: rgba(214, 178, 94, 0.34);
+  background: rgba(214, 178, 94, 0.14);
+  color: #ffe7aa;
+}
+
+.auto-reply-preview p {
+  white-space: pre-wrap;
+}
+
+.auto-reply-actions {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.36fr) minmax(220px, 1fr);
+  gap: 10px;
+}
+
 .subscriber-tab {
   min-height: 34px;
   border: 1px solid var(--border);
@@ -498,7 +534,8 @@ h2 {
 
   .compose-panel,
   .side-panel,
-  .history-panel {
+  .history-panel,
+  .auto-replies-panel {
     border-radius: 14px;
     padding: 18px;
     overflow: hidden;
@@ -554,6 +591,19 @@ h2 {
   .subscriber-tab {
     min-height: 38px;
     font-size: 0.68rem;
+  }
+
+  .auto-reply-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .auto-reply-tab {
+    min-height: 40px;
+    font-size: 0.68rem;
+  }
+
+  .auto-reply-actions {
+    grid-template-columns: 1fr;
   }
 
   .subscriber-primary {

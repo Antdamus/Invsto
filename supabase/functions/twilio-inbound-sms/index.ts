@@ -1,5 +1,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  type CustomerSmsAutoMessageKey,
+  customerSmsAutoMessageDefault,
+  renderCustomerSmsAutoMessage,
+} from "../_shared/customer-sms-auto-messages.ts";
 
 const SUBSCRIBE_KEYWORDS = new Set([
   "og",
@@ -28,18 +33,8 @@ const UNSUBSCRIBE_KEYWORDS = new Set([
 
 const HELP_KEYWORDS = new Set(["help", "info"]);
 const CHANGE_USERNAME_KEYWORDS = new Set(["change", "update", "edit"]);
+const INSTAGRAM_DONE_KEYWORDS = new Set(["done", "followed", "complete", "completed"]);
 const EBAY_USERNAME_PATTERN = /^[A-Za-z0-9._-]{2,64}$/;
-const VIP_USERNAME_PROMPT = `💰 WANT A CHANCE TO WIN $100 EVERY DAY? 💰
-
-Join our VIP text list for access to our DAILY GIVEAWAYS $100 SENT VIA ZELLE 🎉🔥
-
-To join, simply reply with your eBay username.
-
-📲 Daily giveaways
-💵 $100 sent via Zelle
-🎁 Exclusive offers & surprises
-
-Reply with your eBay username to get started! 🍀`;
 
 type SubscriberRecord = {
   id: string;
@@ -114,6 +109,38 @@ function withOptOut(message: string) {
 
 function sms(message: string, status = 200) {
   return xml(withOptOut(message), status);
+}
+
+async function getAutoMessageBody(supabase: any, key: CustomerSmsAutoMessageKey) {
+  const fallback = customerSmsAutoMessageDefault(key).body;
+  try {
+    const { data, error } = await supabase
+      .from("customer_sms_auto_messages")
+      .select("body,is_active")
+      .eq("message_key", key)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("[twilio-inbound-sms] auto message lookup failed", key, error.message);
+      return fallback;
+    }
+
+    if (data?.is_active === false) return fallback;
+    return text(data?.body) || fallback;
+  } catch (error) {
+    console.warn("[twilio-inbound-sms] auto message lookup threw", key, error);
+    return fallback;
+  }
+}
+
+async function autoSms(
+  supabase: any,
+  key: CustomerSmsAutoMessageKey,
+  values: Record<string, string | null | undefined> = {},
+  status = 200,
+) {
+  const body = await getAutoMessageBody(supabase, key);
+  return sms(renderCustomerSmsAutoMessage(body, values), status);
 }
 
 function paramsToObject(params: URLSearchParams) {
@@ -338,6 +365,46 @@ async function saveEbayUsername(
   if (eventError) throw eventError;
 }
 
+async function recordInstagramDone(
+  supabase: any,
+  subscriber: SubscriberRecord,
+  input: {
+    phone: string;
+    toPhone: string;
+    body: string;
+    rawPayload: Record<string, unknown>;
+  },
+) {
+  const now = new Date().toISOString();
+  const metadata = {
+    ...subscriberMetadata(subscriber),
+    instagram_follow_done_at: now,
+    giveaway_entry_status: "entered",
+  };
+
+  const { error: updateError } = await supabase
+    .from("customer_sms_subscribers")
+    .update({
+      metadata,
+      last_inbound_body: input.body || null,
+      last_inbound_at: now,
+    })
+    .eq("id", subscriber.id);
+  if (updateError) throw updateError;
+
+  const { error: eventError } = await supabase.from("customer_sms_events").insert({
+    subscriber_id: subscriber.id,
+    phone_e164: input.phone,
+    from_phone: input.phone,
+    to_phone: input.toPhone || null,
+    direction: "inbound",
+    event_type: "instagram_follow_done",
+    body: input.body || null,
+    raw_payload: input.rawPayload,
+  });
+  if (eventError) throw eventError;
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") return sms("OG Jewelers: Text OG to subscribe.", 405);
 
@@ -421,7 +488,7 @@ Deno.serve(async (req) => {
       if (error) throw error;
 
       if (optOutType === "START") return xml(null);
-      return sms(VIP_USERNAME_PROMPT);
+      return await autoSms(supabase, "username_prompt");
     }
 
     if (matchedHelp) {
@@ -455,7 +522,19 @@ Deno.serve(async (req) => {
         body,
         rawPayload: metadata,
       });
-      return sms("OG Jewelers: Send the new eBay username as publicly displayed. Just the public username, nothing more.");
+      return await autoSms(supabase, "username_change_prompt");
+    }
+
+    if (INSTAGRAM_DONE_KEYWORDS.has(fullCommand) || INSTAGRAM_DONE_KEYWORDS.has(headCommand)) {
+      if (!subscriber?.ebay_username) return await autoSms(supabase, "username_prompt");
+
+      await recordInstagramDone(supabase, subscriber as SubscriberRecord, {
+        phone: fromPhone,
+        toPhone,
+        body,
+        rawPayload: metadata,
+      });
+      return await autoSms(supabase, "instagram_done", { username: subscriber.ebay_username });
     }
 
     if (isUsernameChangePending(subscriber) || !subscriber?.ebay_username) {
@@ -481,7 +560,7 @@ Deno.serve(async (req) => {
         username,
         rawPayload: metadata,
       });
-      return sms(`OG Jewelers: Your eBay username on file is ${username}. To change it, reply CHANGE.`);
+      return await autoSms(supabase, "username_saved", { username });
     }
 
     await insertInboundEvent(supabase, {
@@ -491,7 +570,7 @@ Deno.serve(async (req) => {
       eventType: "unknown",
       rawPayload: metadata,
     });
-    return sms(`OG Jewelers: Your eBay username on file is ${subscriber.ebay_username}. To change it, reply CHANGE.`);
+    return await autoSms(supabase, "username_status", { username: subscriber.ebay_username });
   } catch (error) {
     console.error("[twilio-inbound-sms] update failed", error);
     return sms("OG Jewelers: We could not update your SMS status right now. Please try again.");

@@ -7,7 +7,7 @@
   <title>OG Jewelers - SMS Alerts</title>
 
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="sms-marketing.css?v=20260918-template-layout-1" />
+  <link rel="stylesheet" href="sms-marketing.css?v=20260918-auto-replies-1" />
 </head>
 
 <body class="sms-alerts-page">
@@ -125,6 +125,42 @@
         </section>
       </section>
 
+      <section class="auto-replies-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Auto replies</p>
+            <h2>Customer Flow Messages</h2>
+          </div>
+          <span id="autoReplyPill" class="pill">Editable</span>
+        </div>
+
+        <div class="auto-reply-tabs" role="tablist" aria-label="Automatic SMS replies">
+          <button class="auto-reply-tab is-active" type="button" data-auto-message-key="username_prompt" aria-selected="true">Ask Username</button>
+          <button class="auto-reply-tab" type="button" data-auto-message-key="username_saved" aria-selected="false">Instagram Step</button>
+          <button class="auto-reply-tab" type="button" data-auto-message-key="username_change_prompt" aria-selected="false">Change</button>
+          <button class="auto-reply-tab" type="button" data-auto-message-key="username_status" aria-selected="false">On File</button>
+          <button class="auto-reply-tab" type="button" data-auto-message-key="instagram_done" aria-selected="false">DONE</button>
+        </div>
+
+        <label class="field">
+          <span id="autoMessageTitle">Ask for eBay username</span>
+          <textarea id="autoMessageBody" rows="9" maxlength="1200"></textarea>
+        </label>
+
+        <div class="preview-panel auto-reply-preview" aria-label="Auto reply preview">
+          <span>Final SMS preview</span>
+          <p id="autoMessagePreview"></p>
+          <small id="autoMessageCount">0 / 1200</small>
+        </div>
+
+        <div id="autoMessageStatus" class="send-status" role="status" aria-live="polite"></div>
+
+        <div class="auto-reply-actions">
+          <button id="resetAutoMessageBtn" class="btn ghost" type="button">Reset Default</button>
+          <button id="saveAutoMessageBtn" class="btn primary" type="button">Save Auto Reply</button>
+        </div>
+      </section>
+
       <section class="history-panel">
         <div class="panel-head">
           <div>
@@ -140,6 +176,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
-  <script src="sms-marketing.js?v=20260918-template-layout-1"></script>
+  <script src="sms-marketing.js?v=20260918-auto-replies-1"></script>
 </body>
 </html>

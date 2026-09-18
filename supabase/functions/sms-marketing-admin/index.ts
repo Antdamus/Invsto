@@ -1,5 +1,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  CUSTOMER_SMS_AUTO_MESSAGE_DEFINITIONS,
+  type CustomerSmsAutoMessageKey,
+  customerSmsAutoMessageDefault,
+  isCustomerSmsAutoMessageKey,
+} from "../_shared/customer-sms-auto-messages.ts";
 
 const DEFAULT_FROM_PHONE = "+18664127049";
 const SEND_CONFIRMATION = "SEND_OG_SMS";
@@ -22,6 +28,16 @@ type Operator = {
 type Subscriber = {
   id: string;
   phone_e164: string;
+};
+type AutoMessageRow = {
+  message_key: string;
+  title: string;
+  description: string | null;
+  body: string;
+  fallback_body: string;
+  is_active: boolean;
+  updated_by_email: string | null;
+  updated_at: string | null;
 };
 
 class AdminError extends Error {
@@ -145,6 +161,10 @@ function normalizeUrl(value: unknown) {
 
 function normalizeSpaces(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizeMessageBody(value: unknown) {
+  return String(value ?? "").replace(/\r\n/g, "\n").trim();
 }
 
 function cleanSubscriberSearch(value: unknown) {
@@ -306,6 +326,74 @@ async function getSubscribers(supabase: ServiceClient, payload: JsonRecord) {
   const { data, error } = await query;
   if (error) throw new AdminError("subscriber_search_failed", { status: 500, message: error.message });
   return data || [];
+}
+
+function autoMessageForClient(row: Partial<AutoMessageRow>, key: CustomerSmsAutoMessageKey) {
+  const defaults = customerSmsAutoMessageDefault(key);
+  return {
+    key,
+    title: text(row.title) || defaults.title,
+    description: text(row.description) || defaults.description,
+    body: normalizeMessageBody(row.body) || defaults.body,
+    fallbackBody: normalizeMessageBody(row.fallback_body) || defaults.body,
+    isActive: row.is_active !== false,
+    updatedByEmail: text(row.updated_by_email) || null,
+    updatedAt: text(row.updated_at) || null,
+  };
+}
+
+async function getAutoMessages(supabase: ServiceClient) {
+  const { data, error } = await supabase
+    .from("customer_sms_auto_messages")
+    .select("message_key,title,description,body,fallback_body,is_active,updated_by_email,updated_at");
+
+  if (error) throw new AdminError("auto_messages_query_failed", { status: 500, message: error.message });
+
+  const byKey = new Map<string, AutoMessageRow>();
+  for (const row of (Array.isArray(data) ? data : []) as AutoMessageRow[]) byKey.set(row.message_key, row);
+  return CUSTOMER_SMS_AUTO_MESSAGE_DEFINITIONS.map((defaults) => autoMessageForClient(byKey.get(defaults.key) || {}, defaults.key));
+}
+
+async function saveAutoMessage(supabase: ServiceClient, operator: Operator, payload: JsonRecord) {
+  const key = text(payload.key || payload.messageKey || payload.message_key);
+  if (!isCustomerSmsAutoMessageKey(key)) {
+    throw new AdminError("invalid_auto_message", { status: 400, message: "Choose a valid automatic SMS message." });
+  }
+
+  const defaults = customerSmsAutoMessageDefault(key);
+  const body = normalizeMessageBody(payload.body);
+  if (!body) throw new AdminError("auto_message_body_required", { status: 400, message: "Message body is required." });
+  if (body.length > 1200) {
+    throw new AdminError("auto_message_too_long", {
+      status: 400,
+      message: "Automatic SMS message must be 1200 characters or less.",
+      details: { length: body.length },
+    });
+  }
+
+  const { data, error } = await supabase
+    .from("customer_sms_auto_messages")
+    .upsert({
+      message_key: key,
+      title: defaults.title,
+      description: defaults.description,
+      body,
+      fallback_body: defaults.body,
+      is_active: payload.isActive === false ? false : true,
+      updated_by: operator.userId,
+      updated_by_email: operator.email,
+      metadata: {
+        updated_from: "sms_marketing_admin",
+      },
+    }, { onConflict: "message_key" })
+    .select("message_key,title,description,body,fallback_body,is_active,updated_by_email,updated_at")
+    .single();
+
+  if (error || !data) {
+    throw new AdminError("auto_message_save_failed", { status: 500, message: error?.message || "Automatic SMS message was not saved." });
+  }
+
+  return autoMessageForClient(data as AutoMessageRow, key);
 }
 
 async function recordOptOutFromTwilioBlock(supabase: ServiceClient, phone: string, error: TwilioSendError) {
@@ -529,6 +617,14 @@ Deno.serve(async (req) => {
       return json(req, 200, { ok: true, subscribers: await getSubscribers(supabase, payload) });
     }
 
+    if (action === "auto_messages") {
+      return json(req, 200, { ok: true, autoMessages: await getAutoMessages(supabase) });
+    }
+
+    if (action === "save_auto_message") {
+      return json(req, 200, { ok: true, autoMessage: await saveAutoMessage(supabase, operator, payload) });
+    }
+
     if (action === "preview") {
       const finalBody = buildFinalSmsBody(payload.message || payload.body, payload.linkUrl || payload.link_url);
       const summary = await getSummary(supabase);
@@ -547,7 +643,7 @@ Deno.serve(async (req) => {
       return json(req, 200, { ok: true, result, summary: await getSummary(supabase) });
     }
 
-    throw new AdminError("invalid_action", { status: 400, message: "Use action summary, subscribers, preview, or send." });
+    throw new AdminError("invalid_action", { status: 400, message: "Use action summary, subscribers, auto_messages, save_auto_message, preview, or send." });
   } catch (error) {
     const status = error instanceof AdminError ? error.status : 500;
     return json(req, status, {
