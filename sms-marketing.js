@@ -7,6 +7,7 @@
   let latestSummary = null;
   let messageTemplateSynced = true;
   let campaignTitleSynced = true;
+  let subscriberSearchTimer = null;
 
   const SMS_TEMPLATES = {
     "starting-soon": {
@@ -269,10 +270,18 @@
 
   function renderSubscribers(rows = []) {
     const host = $("#recentSubscribers");
+    const meta = $("#subscriberListMeta");
+    const query = String($("#subscriberSearch")?.value || "").trim();
     if (!host) return;
     if (!rows.length) {
-      host.innerHTML = `<div class="subscriber-row"><span>No SMS subscribers yet.</span></div>`;
+      if (meta) meta.textContent = query ? "No matching subscribers." : "No SMS subscribers yet.";
+      host.innerHTML = `<div class="subscriber-row"><span>${query ? "No matching subscribers." : "No SMS subscribers yet."}</span></div>`;
       return;
+    }
+
+    if (meta) {
+      const shown = rows.length.toLocaleString();
+      meta.textContent = query ? `${shown} match${rows.length === 1 ? "" : "es"}` : `Showing ${shown} most recent subscribers`;
     }
 
     host.innerHTML = rows.map((row) => `
@@ -312,14 +321,37 @@
   function renderSummary(summary) {
     latestSummary = summary || {};
     renderCounts(latestSummary);
-    renderSubscribers(latestSummary.recentSubscribers || []);
     renderCampaigns(latestSummary.recentCampaigns || []);
+  }
+
+  async function loadSubscribers(query = "") {
+    const meta = $("#subscriberListMeta");
+    if (meta) meta.textContent = query ? "Searching..." : "Loading subscribers...";
+    const data = await invokeSmsAdmin({
+      action: "subscribers",
+      query,
+      limit: 100,
+    });
+    renderSubscribers(data.subscribers || []);
+  }
+
+  function scheduleSubscriberSearch() {
+    if (subscriberSearchTimer) window.clearTimeout(subscriberSearchTimer);
+    subscriberSearchTimer = window.setTimeout(() => {
+      subscriberSearchTimer = null;
+      loadSubscribers(String($("#subscriberSearch")?.value || "").trim())
+        .catch((error) => {
+          const meta = $("#subscriberListMeta");
+          if (meta) meta.textContent = error?.message || "Subscriber search failed.";
+        });
+    }, 240);
   }
 
   async function loadSummary() {
     setStatus("Refreshing...");
     const data = await invokeSmsAdmin({ action: "summary" });
     renderSummary(data.summary || {});
+    await loadSubscribers(String($("#subscriberSearch")?.value || "").trim());
     setStatus("");
   }
 
@@ -405,6 +437,7 @@
       updatePreview();
     });
     $("#linkUrl")?.addEventListener("input", updatePreview);
+    $("#subscriberSearch")?.addEventListener("input", scheduleSubscriberSearch);
     $("#templateSelect")?.addEventListener("change", () => applyTemplate({ forceMessage: true, forceTitle: true }));
     $("#showDate")?.addEventListener("change", () => applyTemplate({ forceMessage: true }));
     $("#showTime")?.addEventListener("change", () => applyTemplate({ forceMessage: true }));

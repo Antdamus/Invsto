@@ -106,10 +106,16 @@
         <section class="side-panel">
           <div class="panel-head">
             <div>
-              <p class="eyebrow">Recent</p>
+              <p class="eyebrow">Directory</p>
               <h2>Subscribers</h2>
             </div>
           </div>
+
+          <label class="field search-field">
+            <span>Search subscribers</span>
+            <input id="subscriberSearch" type="search" placeholder="Name, phone, email, or eBay username" autocomplete="off" />
+          </label>
+          <div id="subscriberListMeta" class="list-meta">Loading subscribers...</div>
           <div id="recentSubscribers" class="list-panel"></div>
         </section>
       </section>

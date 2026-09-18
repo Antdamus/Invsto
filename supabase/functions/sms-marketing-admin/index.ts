@@ -147,6 +147,18 @@ function normalizeSpaces(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function cleanSubscriberSearch(value: unknown) {
+  return text(value)
+    .replace(/[%*(),]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+}
+
+function digitsOnly(value: string) {
+  return value.replace(/\D/g, "");
+}
+
 function buildFinalSmsBody(message: unknown, linkUrl: unknown) {
   let body = normalizeSpaces(text(message));
   const rawLink = text(linkUrl);
@@ -222,7 +234,7 @@ async function sendTwilioSms(toPhone: string, body: string) {
 }
 
 async function getSummary(supabase: ServiceClient) {
-  const [subscribed, unsubscribed, total, recentCampaigns, recentSubscribers] = await Promise.all([
+  const [subscribed, unsubscribed, total, recentCampaigns] = await Promise.all([
     supabase
       .from("customer_sms_subscribers")
       .select("id", { count: "exact", head: true })
@@ -241,14 +253,9 @@ async function getSummary(supabase: ServiceClient) {
       .select("id,title,final_body,status,recipient_count,sent_count,failed_count,skipped_count,created_at,completed_at,created_by_email")
       .order("created_at", { ascending: false })
       .limit(8),
-    supabase
-      .from("customer_sms_subscribers")
-      .select("phone_e164,name,email,ebay_username,status,source,campaign,opted_in_at,opted_out_at,last_inbound_at")
-      .order("updated_at", { ascending: false })
-      .limit(12),
   ]);
 
-  const errors = [subscribed.error, unsubscribed.error, total.error, recentCampaigns.error, recentSubscribers.error]
+  const errors = [subscribed.error, unsubscribed.error, total.error, recentCampaigns.error]
     .filter(Boolean);
   if (errors.length) throw new AdminError("summary_query_failed", {
     status: 500,
@@ -260,8 +267,35 @@ async function getSummary(supabase: ServiceClient) {
     unsubscribedCount: unsubscribed.count || 0,
     totalCount: total.count || 0,
     recentCampaigns: recentCampaigns.data || [],
-    recentSubscribers: recentSubscribers.data || [],
   };
+}
+
+async function getSubscribers(supabase: ServiceClient, payload: JsonRecord) {
+  const search = cleanSubscriberSearch(payload.query);
+  const phoneDigits = digitsOnly(search);
+  const limit = Math.max(1, Math.min(Number(payload.limit) || 100, 250));
+  let query = supabase
+    .from("customer_sms_subscribers")
+    .select("phone_e164,name,email,ebay_username,status,source,campaign,opted_in_at,opted_out_at,last_inbound_at,updated_at")
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+
+  if (search) {
+    const filters = [
+      `phone_e164.ilike.%${search}%`,
+      `name.ilike.%${search}%`,
+      `email.ilike.%${search}%`,
+      `ebay_username.ilike.%${search}%`,
+    ];
+    if (phoneDigits.length >= 2 && phoneDigits !== search) {
+      filters.push(`phone_e164.ilike.%${phoneDigits}%`);
+    }
+    query = query.or(filters.join(","));
+  }
+
+  const { data, error } = await query;
+  if (error) throw new AdminError("subscriber_search_failed", { status: 500, message: error.message });
+  return data || [];
 }
 
 async function recordOptOutFromTwilioBlock(supabase: ServiceClient, phone: string, error: TwilioSendError) {
@@ -481,6 +515,10 @@ Deno.serve(async (req) => {
       return json(req, 200, { ok: true, summary: await getSummary(supabase) });
     }
 
+    if (action === "subscribers") {
+      return json(req, 200, { ok: true, subscribers: await getSubscribers(supabase, payload) });
+    }
+
     if (action === "preview") {
       const finalBody = buildFinalSmsBody(payload.message || payload.body, payload.linkUrl || payload.link_url);
       const summary = await getSummary(supabase);
@@ -499,7 +537,7 @@ Deno.serve(async (req) => {
       return json(req, 200, { ok: true, result, summary: await getSummary(supabase) });
     }
 
-    throw new AdminError("invalid_action", { status: 400, message: "Use action summary, preview, or send." });
+    throw new AdminError("invalid_action", { status: 400, message: "Use action summary, subscribers, preview, or send." });
   } catch (error) {
     const status = error instanceof AdminError ? error.status : 500;
     return json(req, status, {

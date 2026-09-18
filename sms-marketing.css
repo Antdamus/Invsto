@@ -197,6 +197,11 @@ h2 {
   padding: 18px;
 }
 
+.side-panel {
+  display: grid;
+  align-content: start;
+}
+
 .panel-head {
   display: flex;
   align-items: flex-start;
@@ -314,6 +319,34 @@ h2 {
 .campaign-list {
   display: grid;
   gap: 10px;
+}
+
+.list-panel {
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 4px;
+  overscroll-behavior: contain;
+}
+
+.list-panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.list-panel::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(214, 178, 94, 0.26);
+}
+
+.search-field {
+  margin-bottom: 8px;
+}
+
+.list-meta {
+  min-height: 20px;
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
 .subscriber-row,
