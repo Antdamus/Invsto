@@ -59,7 +59,11 @@ Once you’ve followed us, reply DONE and you’re officially entered! 🍀💎`
     key: "instagram_done",
     title: "Instagram DONE reply",
     description: "Sent after the customer replies DONE after following Instagram.",
-    body: "OG Jewelers: You're officially entered for our daily $100 Zelle giveaways. Good luck!",
+    body: `OG Jewelers: You're officially entered for our daily $100 Zelle giveaways. Good luck!
+
+Instagram verification rule: if you are selected as a winner and were not following @OGJewelers before the winning draw, you will be disqualified and the prize will go to another eligible user.
+
+If you win, you must provide your Instagram username so we can message you there and verify the follow.`,
   },
 ];
 
