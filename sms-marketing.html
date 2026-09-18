@@ -115,6 +115,11 @@
             <span>Search subscribers</span>
             <input id="subscriberSearch" type="search" placeholder="Name, phone, email, or eBay username" autocomplete="off" />
           </label>
+          <div class="subscriber-tabs" role="tablist" aria-label="Subscriber status">
+            <button class="subscriber-tab is-active" type="button" data-subscriber-status="subscribed" aria-selected="true">Subscribed</button>
+            <button class="subscriber-tab" type="button" data-subscriber-status="unsubscribed" aria-selected="false">Unsubscribed</button>
+            <button class="subscriber-tab" type="button" data-subscriber-status="all" aria-selected="false">All</button>
+          </div>
           <div id="subscriberListMeta" class="list-meta">Loading subscribers...</div>
           <div id="recentSubscribers" class="list-panel"></div>
         </section>

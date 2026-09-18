@@ -272,6 +272,7 @@ async function getSummary(supabase: ServiceClient) {
 
 async function getSubscribers(supabase: ServiceClient, payload: JsonRecord) {
   const search = cleanSubscriberSearch(payload.query);
+  const status = text(payload.status).toLowerCase();
   const phoneDigits = digitsOnly(search);
   const limit = Math.max(1, Math.min(Number(payload.limit) || 100, 250));
   let query = supabase
@@ -279,6 +280,15 @@ async function getSubscribers(supabase: ServiceClient, payload: JsonRecord) {
     .select("phone_e164,name,email,ebay_username,status,source,campaign,opted_in_at,opted_out_at,last_inbound_at,updated_at")
     .order("updated_at", { ascending: false })
     .limit(limit);
+
+  if (status === "subscribed") {
+    query = query
+      .eq("status", "subscribed")
+      .eq("sms_consent", true)
+      .is("opted_out_at", null);
+  } else if (status === "unsubscribed") {
+    query = query.eq("status", "unsubscribed");
+  }
 
   if (search) {
     const filters = [

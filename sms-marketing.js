@@ -2,12 +2,14 @@
   "use strict";
 
   const $ = (selector) => document.querySelector(selector);
+  const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
   let supabaseClient = null;
   let latestSummary = null;
   let messageTemplateSynced = true;
   let campaignTitleSynced = true;
   let subscriberSearchTimer = null;
+  let subscriberStatusFilter = "subscribed";
 
   const SMS_TEMPLATES = {
     "starting-soon": {
@@ -268,31 +270,51 @@
     $("#audiencePill").textContent = `${Number(summary?.subscribedCount || 0).toLocaleString()} recipients`;
   }
 
+  function subscriberStatusLabel() {
+    if (subscriberStatusFilter === "unsubscribed") return "unsubscribed";
+    if (subscriberStatusFilter === "all") return "total";
+    return "subscribed";
+  }
+
+  function updateSubscriberTabs() {
+    $$("[data-subscriber-status]").forEach((button) => {
+      const active = button.dataset.subscriberStatus === subscriberStatusFilter;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+  }
+
   function renderSubscribers(rows = []) {
     const host = $("#recentSubscribers");
     const meta = $("#subscriberListMeta");
     const query = String($("#subscriberSearch")?.value || "").trim();
+    const statusLabel = subscriberStatusLabel();
     if (!host) return;
     if (!rows.length) {
-      if (meta) meta.textContent = query ? "No matching subscribers." : "No SMS subscribers yet.";
-      host.innerHTML = `<div class="subscriber-row"><span>${query ? "No matching subscribers." : "No SMS subscribers yet."}</span></div>`;
+      if (meta) meta.textContent = query ? `No matching ${statusLabel} subscribers.` : `No ${statusLabel} subscribers yet.`;
+      host.innerHTML = `<div class="subscriber-row"><span>${query ? "No matching subscribers." : `No ${statusLabel} subscribers yet.`}</span></div>`;
       return;
     }
 
     if (meta) {
       const shown = rows.length.toLocaleString();
-      meta.textContent = query ? `${shown} match${rows.length === 1 ? "" : "es"}` : `Showing ${shown} most recent subscribers`;
+      meta.textContent = query ? `${shown} ${statusLabel} match${rows.length === 1 ? "" : "es"}` : `Showing ${shown} ${statusLabel} subscribers`;
     }
 
-    host.innerHTML = rows.map((row) => `
-      <article class="subscriber-row">
-        <strong>${escapeHtml(row.phone_e164)}</strong>
-        <span>${escapeHtml(row.name || row.email || "Customer")}</span>
-        <span>${row.ebay_username ? `eBay: ${escapeHtml(row.ebay_username)}` : "eBay username not saved"}</span>
-        <span>${escapeHtml(row.status || "unknown")} / ${escapeHtml(row.source || "direct")}${row.campaign ? ` / ${escapeHtml(row.campaign)}` : ""}</span>
-        <span>${escapeHtml(row.status === "unsubscribed" ? formatDate(row.opted_out_at) : formatDate(row.opted_in_at || row.last_inbound_at))}</span>
-      </article>
-    `).join("");
+    host.innerHTML = rows.map((row) => {
+      const hasUsername = !!row.ebay_username;
+      const primary = hasUsername ? row.ebay_username : row.phone_e164;
+      const identity = row.name || row.email || (hasUsername ? "Customer" : "No name saved");
+      return `
+        <article class="subscriber-row" data-status="${escapeHtml(row.status || "unknown")}">
+          <strong class="subscriber-primary">${escapeHtml(primary || "Unknown subscriber")}</strong>
+          <span>${hasUsername ? `Phone: ${escapeHtml(row.phone_e164 || "Not saved")}` : "eBay username not saved"}</span>
+          <span>${escapeHtml(identity)}</span>
+          <span>${escapeHtml(row.status || "unknown")} / ${escapeHtml(row.source || "direct")}${row.campaign ? ` / ${escapeHtml(row.campaign)}` : ""}</span>
+          <span>${escapeHtml(row.status === "unsubscribed" ? formatDate(row.opted_out_at) : formatDate(row.opted_in_at || row.last_inbound_at))}</span>
+        </article>
+      `;
+    }).join("");
   }
 
   function renderCampaigns(rows = []) {
@@ -330,6 +352,7 @@
     const data = await invokeSmsAdmin({
       action: "subscribers",
       query,
+      status: subscriberStatusFilter,
       limit: 100,
     });
     renderSubscribers(data.subscribers || []);
@@ -345,6 +368,16 @@
           if (meta) meta.textContent = error?.message || "Subscriber search failed.";
         });
     }, 240);
+  }
+
+  function setSubscriberStatusFilter(status) {
+    subscriberStatusFilter = ["subscribed", "unsubscribed", "all"].includes(status) ? status : "subscribed";
+    updateSubscriberTabs();
+    loadSubscribers(String($("#subscriberSearch")?.value || "").trim())
+      .catch((error) => {
+        const meta = $("#subscriberListMeta");
+        if (meta) meta.textContent = error?.message || "Subscriber list failed.";
+      });
   }
 
   async function loadSummary() {
@@ -438,6 +471,9 @@
     });
     $("#linkUrl")?.addEventListener("input", updatePreview);
     $("#subscriberSearch")?.addEventListener("input", scheduleSubscriberSearch);
+    $$("[data-subscriber-status]").forEach((button) => {
+      button.addEventListener("click", () => setSubscriberStatusFilter(button.dataset.subscriberStatus || "subscribed"));
+    });
     $("#templateSelect")?.addEventListener("change", () => applyTemplate({ forceMessage: true, forceTitle: true }));
     $("#showDate")?.addEventListener("change", () => applyTemplate({ forceMessage: true }));
     $("#showTime")?.addEventListener("change", () => applyTemplate({ forceMessage: true }));
@@ -445,6 +481,7 @@
 
     if ($("#showDate") && !$("#showDate").value) $("#showDate").value = todayInputValue();
     if ($("#showTime") && !$("#showTime").value) $("#showTime").value = "20:00";
+    updateSubscriberTabs();
     applyTemplate({ forceMessage: true, forceTitle: true });
     await loadSummary();
   }

@@ -341,6 +341,30 @@ h2 {
   margin-bottom: 8px;
 }
 
+.subscriber-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0 0 10px;
+}
+
+.subscriber-tab {
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.subscriber-tab.is-active {
+  border-color: rgba(214, 178, 94, 0.34);
+  background: rgba(214, 178, 94, 0.14);
+  color: #ffe7aa;
+}
+
 .list-meta {
   min-height: 20px;
   margin: 0 0 10px;
@@ -363,6 +387,15 @@ h2 {
 .campaign-row strong {
   color: #fff;
   overflow-wrap: anywhere;
+}
+
+.subscriber-row[data-status="unsubscribed"] {
+  border-color: rgba(255, 155, 155, 0.18);
+}
+
+.subscriber-primary {
+  font-size: 1.12rem;
+  line-height: 1.16;
 }
 
 .subscriber-row span,
@@ -503,6 +536,15 @@ h2 {
   .campaign-row {
     border-radius: 12px;
     padding: 10px;
+  }
+
+  .subscriber-tab {
+    min-height: 38px;
+    font-size: 0.68rem;
+  }
+
+  .subscriber-primary {
+    font-size: 1.05rem;
   }
 }
 
