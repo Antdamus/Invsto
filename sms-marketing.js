@@ -279,6 +279,7 @@
       <article class="subscriber-row">
         <strong>${escapeHtml(row.phone_e164)}</strong>
         <span>${escapeHtml(row.name || row.email || "Customer")}</span>
+        <span>${row.ebay_username ? `eBay: ${escapeHtml(row.ebay_username)}` : "eBay username not saved"}</span>
         <span>${escapeHtml(row.status || "unknown")} / ${escapeHtml(row.source || "direct")}${row.campaign ? ` / ${escapeHtml(row.campaign)}` : ""}</span>
         <span>${escapeHtml(row.status === "unsubscribed" ? formatDate(row.opted_out_at) : formatDate(row.opted_in_at || row.last_inbound_at))}</span>
       </article>

@@ -27,6 +27,16 @@ const UNSUBSCRIBE_KEYWORDS = new Set([
 ]);
 
 const HELP_KEYWORDS = new Set(["help", "info"]);
+const CHANGE_USERNAME_KEYWORDS = new Set(["change", "update", "edit"]);
+const EBAY_USERNAME_PATTERN = /^[A-Za-z0-9._-]{2,64}$/;
+
+type SubscriberRecord = {
+  id: string;
+  status: string | null;
+  sms_consent: boolean | null;
+  ebay_username: string | null;
+  metadata: Record<string, unknown> | null;
+};
 
 function xml(message: string | null, status = 200) {
   const body = message
@@ -84,6 +94,15 @@ function optionalEnv(...names: string[]) {
     if (value) return value;
   }
   return "";
+}
+
+function withOptOut(message: string) {
+  if (/\breply\s+stop\b|\bstop\s+to\s+unsubscribe\b/i.test(message)) return message;
+  return `${message.replace(/\s+$/, "")} Reply STOP to unsubscribe.`;
+}
+
+function sms(message: string, status = 200) {
+  return xml(withOptOut(message), status);
 }
 
 function paramsToObject(params: URLSearchParams) {
@@ -156,7 +175,7 @@ async function insertInboundEvent(
     phone: string;
     toPhone: string;
     body: string;
-    eventType: "help" | "unknown";
+    eventType: "help" | "unknown" | "ebay_username_rejected";
     rawPayload: Record<string, unknown>;
   },
 ) {
@@ -188,15 +207,135 @@ async function insertInboundEvent(
   }
 }
 
+function subscriberMetadata(subscriber: SubscriberRecord | null): Record<string, unknown> {
+  if (!subscriber?.metadata || typeof subscriber.metadata !== "object" || Array.isArray(subscriber.metadata)) {
+    return {};
+  }
+  return subscriber.metadata;
+}
+
+function isSubscribed(subscriber: SubscriberRecord | null) {
+  return subscriber?.status === "subscribed" && subscriber.sms_consent === true;
+}
+
+function isUsernameChangePending(subscriber: SubscriberRecord | null) {
+  return subscriberMetadata(subscriber).ebay_username_change_pending === true;
+}
+
+function normalizeEbayUsername(value: unknown) {
+  return text(value).replace(/^@+/, "");
+}
+
+function validateEbayUsername(username: string) {
+  return EBAY_USERNAME_PATTERN.test(username);
+}
+
+async function getSmsSubscriber(supabase: any, phone: string): Promise<SubscriberRecord | null> {
+  const { data, error } = await supabase
+    .from("customer_sms_subscribers")
+    .select("id,status,sms_consent,ebay_username,metadata")
+    .eq("phone_e164", phone)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+async function requestUsernameChange(
+  supabase: any,
+  subscriber: SubscriberRecord,
+  input: {
+    phone: string;
+    toPhone: string;
+    body: string;
+    rawPayload: Record<string, unknown>;
+  },
+) {
+  const now = new Date().toISOString();
+  const metadata = {
+    ...subscriberMetadata(subscriber),
+    ebay_username_change_pending: true,
+    ebay_username_change_requested_at: now,
+  };
+
+  const { error: updateError } = await supabase
+    .from("customer_sms_subscribers")
+    .update({
+      metadata,
+      last_inbound_body: input.body || null,
+      last_inbound_at: now,
+    })
+    .eq("id", subscriber.id);
+  if (updateError) throw updateError;
+
+  const { error: eventError } = await supabase.from("customer_sms_events").insert({
+    subscriber_id: subscriber.id,
+    phone_e164: input.phone,
+    from_phone: input.phone,
+    to_phone: input.toPhone || null,
+    direction: "inbound",
+    event_type: "ebay_username_change_requested",
+    body: input.body || null,
+    raw_payload: input.rawPayload,
+  });
+  if (eventError) throw eventError;
+}
+
+async function saveEbayUsername(
+  supabase: any,
+  subscriber: SubscriberRecord,
+  input: {
+    phone: string;
+    toPhone: string;
+    body: string;
+    username: string;
+    rawPayload: Record<string, unknown>;
+  },
+) {
+  const now = new Date().toISOString();
+  const metadata = {
+    ...subscriberMetadata(subscriber),
+    ebay_username_change_pending: false,
+    ebay_username_updated_at: now,
+  };
+
+  const { error: updateError } = await supabase
+    .from("customer_sms_subscribers")
+    .update({
+      ebay_username: input.username,
+      ebay_username_collected_at: now,
+      ebay_username_source: "inbound_sms",
+      metadata,
+      last_inbound_body: input.body || null,
+      last_inbound_at: now,
+    })
+    .eq("id", subscriber.id);
+  if (updateError) throw updateError;
+
+  const { error: eventError } = await supabase.from("customer_sms_events").insert({
+    subscriber_id: subscriber.id,
+    phone_e164: input.phone,
+    from_phone: input.phone,
+    to_phone: input.toPhone || null,
+    direction: "inbound",
+    event_type: "ebay_username_saved",
+    body: input.body || null,
+    raw_payload: {
+      ...input.rawPayload,
+      ebay_username: input.username,
+    },
+  });
+  if (eventError) throw eventError;
+}
+
 Deno.serve(async (req) => {
-  if (req.method !== "POST") return xml("OG Jewelers: Text OG to subscribe. Reply STOP to unsubscribe.", 405);
+  if (req.method !== "POST") return sms("OG Jewelers: Text OG to subscribe.", 405);
 
   let params: URLSearchParams;
   try {
     params = await parseParams(req);
   } catch (error) {
     console.error("[twilio-inbound-sms] parse failed", error);
-    return xml("OG Jewelers: We could not read that message. Please try again.");
+    return sms("OG Jewelers: We could not read that message. Please try again.");
   }
 
   const signatureOk = await validateTwilioSignature(req, params);
@@ -212,7 +351,7 @@ Deno.serve(async (req) => {
 
   if (!fromPhone) {
     console.error("[twilio-inbound-sms] missing sender", rawPayload);
-    return xml("OG Jewelers: We could not read your phone number. Please try again.");
+    return sms("OG Jewelers: We could not read your phone number. Please try again.");
   }
 
   const supabase = createClient(requiredEnv("SUPABASE_URL"), requiredEnv("SUPABASE_SERVICE_ROLE_KEY"), {
@@ -245,7 +384,10 @@ Deno.serve(async (req) => {
         _phone_e164: fromPhone,
         _opt_out_source: optOutType === "STOP" ? "twilio_opt_out" : "inbound_sms",
         _inbound_body: body || null,
-        _metadata: metadata,
+        _metadata: {
+          ...metadata,
+          ebay_username_change_pending: false,
+        },
       });
       if (error) throw error;
 
@@ -268,7 +410,7 @@ Deno.serve(async (req) => {
       if (error) throw error;
 
       if (optOutType === "START") return xml(null);
-      return xml("OG Jewelers: You are subscribed to OG live show texts. Reply STOP to unsubscribe.");
+      return sms("OG Jewelers: You are subscribed to OG live show texts. If you want to participate in more promotions, send your eBay username as publicly displayed. Just the public username, nothing more.");
     }
 
     if (matchedHelp) {
@@ -280,7 +422,55 @@ Deno.serve(async (req) => {
         rawPayload: metadata,
       });
       if (optOutType === "HELP") return xml(null);
-      return xml("OG Jewelers alerts: text OG or SUBSCRIBE to join live show updates. Reply STOP to unsubscribe.");
+      return sms("OG Jewelers alerts: text OG or SUBSCRIBE to join live show updates. Reply CHANGE to update your public eBay username.");
+    }
+
+    const subscriber = await getSmsSubscriber(supabase, fromPhone);
+    if (!isSubscribed(subscriber)) {
+      await insertInboundEvent(supabase, {
+        phone: fromPhone,
+        toPhone,
+        body,
+        eventType: "unknown",
+        rawPayload: metadata,
+      });
+      return sms("OG Jewelers: text OG or SUBSCRIBE to get live show alerts.");
+    }
+
+    if (CHANGE_USERNAME_KEYWORDS.has(fullCommand) || CHANGE_USERNAME_KEYWORDS.has(headCommand)) {
+      await requestUsernameChange(supabase, subscriber as SubscriberRecord, {
+        phone: fromPhone,
+        toPhone,
+        body,
+        rawPayload: metadata,
+      });
+      return sms("OG Jewelers: Send the new eBay username as publicly displayed. Just the public username, nothing more.");
+    }
+
+    if (isUsernameChangePending(subscriber) || !subscriber?.ebay_username) {
+      const username = normalizeEbayUsername(body);
+      if (!validateEbayUsername(username)) {
+        await insertInboundEvent(supabase, {
+          phone: fromPhone,
+          toPhone,
+          body,
+          eventType: "ebay_username_rejected",
+          rawPayload: {
+            ...metadata,
+            rejection_reason: "invalid_ebay_username",
+          },
+        });
+        return sms("OG Jewelers: Please send only your public eBay username using letters, numbers, dots, dashes, or underscores.");
+      }
+
+      await saveEbayUsername(supabase, subscriber as SubscriberRecord, {
+        phone: fromPhone,
+        toPhone,
+        body,
+        username,
+        rawPayload: metadata,
+      });
+      return sms(`OG Jewelers: Your eBay username on file is ${username}. To change it, reply CHANGE.`);
     }
 
     await insertInboundEvent(supabase, {
@@ -290,9 +480,9 @@ Deno.serve(async (req) => {
       eventType: "unknown",
       rawPayload: metadata,
     });
-    return xml("OG Jewelers: text OG or SUBSCRIBE to get live show alerts. Reply STOP to unsubscribe.");
+    return sms(`OG Jewelers: Your eBay username on file is ${subscriber.ebay_username}. To change it, reply CHANGE.`);
   } catch (error) {
     console.error("[twilio-inbound-sms] update failed", error);
-    return xml("OG Jewelers: We could not update your SMS status right now. Please try again.");
+    return sms("OG Jewelers: We could not update your SMS status right now. Please try again.");
   }
 });

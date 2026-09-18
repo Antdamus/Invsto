@@ -243,7 +243,7 @@ async function getSummary(supabase: ServiceClient) {
       .limit(8),
     supabase
       .from("customer_sms_subscribers")
-      .select("phone_e164,name,email,status,source,campaign,opted_in_at,opted_out_at,last_inbound_at")
+      .select("phone_e164,name,email,ebay_username,status,source,campaign,opted_in_at,opted_out_at,last_inbound_at")
       .order("updated_at", { ascending: false })
       .limit(12),
   ]);
