@@ -7,7 +7,7 @@
   <title>OG Jewelers - SMS Alerts</title>
 
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="sms-marketing.css?v=20260918-auto-replies-1" />
+  <link rel="stylesheet" href="sms-marketing.css?v=20260918-giveaway-pool-1" />
 </head>
 
 <body class="sms-alerts-page">
@@ -35,6 +35,10 @@
         <div class="stat">
           <span>Unsubscribed</span>
           <strong id="unsubscribedCount">0</strong>
+        </div>
+        <div class="stat">
+          <span>Giveaway</span>
+          <strong id="giveawayCount">0</strong>
         </div>
         <div class="stat">
           <span>Total</span>
@@ -117,6 +121,7 @@
           </label>
           <div class="subscriber-tabs" role="tablist" aria-label="Subscriber status">
             <button class="subscriber-tab is-active" type="button" data-subscriber-status="subscribed" aria-selected="true">Subscribed</button>
+            <button class="subscriber-tab" type="button" data-subscriber-status="giveaway" aria-selected="false">Giveaway</button>
             <button class="subscriber-tab" type="button" data-subscriber-status="unsubscribed" aria-selected="false">Unsubscribed</button>
             <button class="subscriber-tab" type="button" data-subscriber-status="all" aria-selected="false">All</button>
           </div>
@@ -176,6 +181,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
-  <script src="sms-marketing.js?v=20260918-auto-replies-2"></script>
+  <script src="sms-marketing.js?v=20260918-giveaway-pool-1"></script>
 </body>
 </html>

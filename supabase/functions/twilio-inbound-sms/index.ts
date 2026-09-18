@@ -298,6 +298,9 @@ async function requestUsernameChange(
   const { error: updateError } = await supabase
     .from("customer_sms_subscribers")
     .update({
+      instagram_follow_claimed_at: now,
+      giveaway_entry_status: "entered",
+      giveaway_entry_source: "sms_done",
       metadata,
       last_inbound_body: input.body || null,
       last_inbound_at: now,

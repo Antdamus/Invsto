@@ -254,7 +254,7 @@ async function sendTwilioSms(toPhone: string, body: string) {
 }
 
 async function getSummary(supabase: ServiceClient) {
-  const [subscribed, unsubscribed, total, recentCampaigns] = await Promise.all([
+  const [subscribed, unsubscribed, giveawayEntries, total, recentCampaigns] = await Promise.all([
     supabase
       .from("customer_sms_subscribers")
       .select("id", { count: "exact", head: true })
@@ -267,6 +267,14 @@ async function getSummary(supabase: ServiceClient) {
       .eq("status", "unsubscribed"),
     supabase
       .from("customer_sms_subscribers")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "subscribed")
+      .eq("sms_consent", true)
+      .is("opted_out_at", null)
+      .eq("giveaway_entry_status", "entered")
+      .not("instagram_follow_claimed_at", "is", null),
+    supabase
+      .from("customer_sms_subscribers")
       .select("id", { count: "exact", head: true }),
     supabase
       .from("customer_sms_campaigns")
@@ -275,7 +283,7 @@ async function getSummary(supabase: ServiceClient) {
       .limit(8),
   ]);
 
-  const errors = [subscribed.error, unsubscribed.error, total.error, recentCampaigns.error]
+  const errors = [subscribed.error, unsubscribed.error, giveawayEntries.error, total.error, recentCampaigns.error]
     .filter(Boolean);
   if (errors.length) throw new AdminError("summary_query_failed", {
     status: 500,
@@ -285,6 +293,7 @@ async function getSummary(supabase: ServiceClient) {
   return {
     subscribedCount: subscribed.count || 0,
     unsubscribedCount: unsubscribed.count || 0,
+    giveawayEntryCount: giveawayEntries.count || 0,
     totalCount: total.count || 0,
     recentCampaigns: recentCampaigns.data || [],
   };
@@ -297,7 +306,7 @@ async function getSubscribers(supabase: ServiceClient, payload: JsonRecord) {
   const limit = Math.max(1, Math.min(Number(payload.limit) || 100, 250));
   let query = supabase
     .from("customer_sms_subscribers")
-    .select("phone_e164,name,email,ebay_username,status,source,campaign,opted_in_at,opted_out_at,last_inbound_at,updated_at")
+    .select("phone_e164,name,email,ebay_username,status,source,campaign,opted_in_at,opted_out_at,last_inbound_at,instagram_follow_claimed_at,giveaway_entry_status,giveaway_entry_source,updated_at")
     .order("updated_at", { ascending: false })
     .limit(limit);
 
@@ -308,6 +317,14 @@ async function getSubscribers(supabase: ServiceClient, payload: JsonRecord) {
       .is("opted_out_at", null);
   } else if (status === "unsubscribed") {
     query = query.eq("status", "unsubscribed");
+  } else if (status === "giveaway" || status === "entered" || status === "done") {
+    query = query
+      .eq("status", "subscribed")
+      .eq("sms_consent", true)
+      .is("opted_out_at", null)
+      .eq("giveaway_entry_status", "entered")
+      .not("instagram_follow_claimed_at", "is", null)
+      .order("instagram_follow_claimed_at", { ascending: false });
   }
 
   if (search) {

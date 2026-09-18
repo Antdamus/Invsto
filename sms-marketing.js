@@ -346,14 +346,16 @@ If you win, you must provide your Instagram username so we can message you there
   function renderCounts(summary) {
     $("#subscribedCount").textContent = Number(summary?.subscribedCount || 0).toLocaleString();
     $("#unsubscribedCount").textContent = Number(summary?.unsubscribedCount || 0).toLocaleString();
+    $("#giveawayCount").textContent = Number(summary?.giveawayEntryCount || 0).toLocaleString();
     $("#totalCount").textContent = Number(summary?.totalCount || 0).toLocaleString();
     $("#audiencePill").textContent = `${Number(summary?.subscribedCount || 0).toLocaleString()} recipients`;
   }
 
   function subscriberStatusLabel() {
-    if (subscriberStatusFilter === "unsubscribed") return "unsubscribed";
-    if (subscriberStatusFilter === "all") return "total";
-    return "subscribed";
+    if (subscriberStatusFilter === "giveaway") return "giveaway entries";
+    if (subscriberStatusFilter === "unsubscribed") return "unsubscribed subscribers";
+    if (subscriberStatusFilter === "all") return "subscribers";
+    return "subscribed subscribers";
   }
 
   function updateSubscriberTabs() {
@@ -371,24 +373,28 @@ If you win, you must provide your Instagram username so we can message you there
     const statusLabel = subscriberStatusLabel();
     if (!host) return;
     if (!rows.length) {
-      if (meta) meta.textContent = query ? `No matching ${statusLabel} subscribers.` : `No ${statusLabel} subscribers yet.`;
-      host.innerHTML = `<div class="subscriber-row"><span>${query ? "No matching subscribers." : `No ${statusLabel} subscribers yet.`}</span></div>`;
+      if (meta) meta.textContent = query ? `No matching ${statusLabel}.` : `No ${statusLabel} yet.`;
+      host.innerHTML = `<div class="subscriber-row"><span>${query ? "No matching subscribers." : `No ${statusLabel} yet.`}</span></div>`;
       return;
     }
 
     if (meta) {
       const shown = rows.length.toLocaleString();
-      meta.textContent = query ? `${shown} ${statusLabel} match${rows.length === 1 ? "" : "es"}` : `Showing ${shown} ${statusLabel} subscribers`;
+      meta.textContent = query ? `${shown} ${statusLabel} match${rows.length === 1 ? "" : "es"}` : `Showing ${shown} ${statusLabel}`;
     }
 
     host.innerHTML = rows.map((row) => {
       const hasUsername = !!row.ebay_username;
       const primary = hasUsername ? row.ebay_username : row.phone_e164;
       const identity = row.name || row.email || (hasUsername ? "Customer" : "No name saved");
+      const giveawayLine = row.instagram_follow_claimed_at
+        ? `<span class="subscriber-entry">Giveaway entry claimed ${escapeHtml(formatDate(row.instagram_follow_claimed_at))}</span>`
+        : "";
       return `
         <article class="subscriber-row" data-status="${escapeHtml(row.status || "unknown")}">
           <strong class="subscriber-primary">${escapeHtml(primary || "Unknown subscriber")}</strong>
           <span>${hasUsername ? `Phone: ${escapeHtml(row.phone_e164 || "Not saved")}` : "eBay username not saved"}</span>
+          ${giveawayLine}
           <span>${escapeHtml(identity)}</span>
           <span>${escapeHtml(row.status || "unknown")} / ${escapeHtml(row.source || "direct")}${row.campaign ? ` / ${escapeHtml(row.campaign)}` : ""}</span>
           <span>${escapeHtml(row.status === "unsubscribed" ? formatDate(row.opted_out_at) : formatDate(row.opted_in_at || row.last_inbound_at))}</span>
@@ -572,7 +578,7 @@ If you win, you must provide your Instagram username so we can message you there
   }
 
   function setSubscriberStatusFilter(status) {
-    subscriberStatusFilter = ["subscribed", "unsubscribed", "all"].includes(status) ? status : "subscribed";
+    subscriberStatusFilter = ["subscribed", "giveaway", "unsubscribed", "all"].includes(status) ? status : "subscribed";
     updateSubscriberTabs();
     loadSubscribers(String($("#subscriberSearch")?.value || "").trim())
       .catch((error) => {
