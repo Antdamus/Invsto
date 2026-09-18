@@ -29,6 +29,17 @@ const UNSUBSCRIBE_KEYWORDS = new Set([
 const HELP_KEYWORDS = new Set(["help", "info"]);
 const CHANGE_USERNAME_KEYWORDS = new Set(["change", "update", "edit"]);
 const EBAY_USERNAME_PATTERN = /^[A-Za-z0-9._-]{2,64}$/;
+const VIP_USERNAME_PROMPT = `💰 WANT A CHANCE TO WIN $100 EVERY DAY? 💰
+
+Join our VIP text list for access to our DAILY GIVEAWAYS $100 SENT VIA ZELLE 🎉🔥
+
+To join, simply reply with your eBay username.
+
+📲 Daily giveaways
+💵 $100 sent via Zelle
+🎁 Exclusive offers & surprises
+
+Reply with your eBay username to get started! 🍀`;
 
 type SubscriberRecord = {
   id: string;
@@ -410,7 +421,7 @@ Deno.serve(async (req) => {
       if (error) throw error;
 
       if (optOutType === "START") return xml(null);
-      return sms("OG Jewelers: You are subscribed to OG live show texts. If you want to participate in more promotions, send your eBay username as publicly displayed. Just the public username, nothing more.");
+      return sms(VIP_USERNAME_PROMPT);
     }
 
     if (matchedHelp) {
