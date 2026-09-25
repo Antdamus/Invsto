@@ -41,6 +41,7 @@ const ADD_ITEM_SOURCE_PHOTO_BUCKET = "photos";
 const ADD_ITEM_PUBLIC_EBAY_PHOTO_BUCKET = "public-ebay-photos";
 const ADD_ITEM_RELOAD_TOP_KEY = "og.addItem.reloadTopAfterSuccess";
 const ADD_ITEM_EBAY_CATEGORY_OPTIONS = [
+  { id: "31387", label: "Watches > Wristwatches", terms: ["watch", "watches", "wristwatch"] },
   { id: "261988", label: "Fine Jewelry > Bracelets & Charms", terms: ["bracelet", "bangle", "tennis"] },
   { id: "261989", label: "Fine Jewelry > Brooches & Pins", terms: ["brooch", "pin"] },
   { id: "261990", label: "Fine Jewelry > Earrings", terms: ["earring", "earrings", "stud", "hoop"] },
@@ -680,6 +681,7 @@ let uploadedImages = [];
   }
 
   function getAssistedMaterialPurityForSave() {
+    if (window.addItemWizard?.isWatch()) return { metal: null, purity_basis_points: null };
     const selected = window.addItemAssistedModule?.getSelectedMaterialPurity?.() || {};
     return {
       metal: normalizeInventoryMetal(selected.material),
@@ -713,6 +715,7 @@ let uploadedImages = [];
   }
 
   function inferAddItemEbayCategory() {
+    if (window.addItemWizard?.isWatch()) return getAddItemEbayCategoryOption("31387");
     const text = [
       document.getElementById("title")?.value || "",
       document.getElementById("description")?.value || "",
@@ -821,6 +824,14 @@ let uploadedImages = [];
     const text = getAddItemEbayTextBlob();
     const aspects = {};
 
+    const watch = window.addItemWizard?.getWatchDetails();
+    if (watch) {
+      setAddItemAspect(aspects, "Type", "Wristwatch");
+      setAddItemAspect(aspects, "Model", watch.model);
+      if (Number(weightValue) > 0) setAddItemAspect(aspects, "Item Weight", `${weightValue} g`);
+      return aspects;
+    }
+
     setAddItemAspect(aspects, "Brand", "Unbranded");
     setAddItemAspect(aspects, "Type", inferAddItemEbayType(categoryId, text));
     setAddItemAspect(aspects, "Style", inferAddItemEbayStyle(categoryId, text));
@@ -862,11 +873,15 @@ let uploadedImages = [];
     if (!syncEnabled) return { syncEnabled, categoryId, missing };
     if (!getAddItemEbayCategoryOption(categoryId)) missing.push("eBay category");
     if (!String(document.getElementById("title")?.value || "").trim()) missing.push("title");
-    if (!String(document.getElementById("description")?.value || "").trim()) missing.push("description");
+    if (!(window.addItemWizard?.descriptionForSave() || String(document.getElementById("description")?.value || "").trim())) missing.push("description");
     if (!(parseFloat(document.getElementById("sale-price")?.value?.replace(/,/g, "") || "0") > 0)) missing.push("sale price");
-    if (!materialPurity.metal) missing.push("material");
-    if (!materialPurity.purity_basis_points) missing.push("purity");
-    if (!String(document.getElementById("assisted-stone-type")?.value || "").trim()) missing.push("stone type");
+    if (window.addItemWizard?.isWatch()) {
+      missing.push("watch brand and department in eBay listing details");
+    } else {
+      if (!materialPurity.metal) missing.push("material");
+      if (!materialPurity.purity_basis_points) missing.push("purity");
+      if (!String(document.getElementById("assisted-stone-type")?.value || "").trim()) missing.push("stone type");
+    }
     if (!photoFiles.length && !assistedSelectedImages.length) missing.push("photo");
     if (!pendingStock || !(Number(pendingStock.quantity) > 0)) missing.push("stock quantity");
 
@@ -906,6 +921,15 @@ let uploadedImages = [];
   function setupAddItemEbayReadiness() {
     populateAddItemEbayCategorySelect();
     updateAddItemEbayReadiness();
+
+    document.addEventListener("add-item:mode-change", (event) => {
+      if (!event.detail?.restoring) {
+        const category = document.getElementById("ebay-category-id");
+        if (event.detail?.isWatch) category.value = "31387";
+        else if (category.value === "31387") category.value = "";
+      }
+      updateAddItemEbayReadiness();
+    });
 
     ["title", "description", "category", "assisted-material", "assisted-purity", "assisted-stone-type", "assisted-length", "sale-price", "scanned-barcode"].forEach((id) => {
       document.getElementById(id)?.addEventListener("input", () => updateAddItemEbayReadiness());
@@ -1250,6 +1274,7 @@ let uploadedImages = [];
 //#region functions needed to set the final sale cost of items
   //Cost & Sale Price Auto-Calculation
   function updateCostFromWeight() {
+    if (window.addItemWizard?.isWatch()) return;
     if (!autoCostCheckbox?.checked) return;
     const weight = parseFloat(document.getElementById("weight")?.value || "0");
     const pricePerWeight = parseFloat(pricePerWeightInput?.value || "0");
@@ -1292,6 +1317,10 @@ let uploadedImages = [];
     });
     pricePerWeightInput?.addEventListener('input', updateCostFromWeight);
     document.getElementById('cost')?.addEventListener('input', () => {
+      if (window.addItemWizard?.isWatch()) {
+        updateAddItemEbayReadiness();
+        return;
+      }
       const cost = parseFloat(document.getElementById('cost').value.replace(/,/g, ''));
       if (cost > 0) {
         const salePrice = Math.ceil((cost * 7.5) / 10) * 10;
@@ -2872,11 +2901,13 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   }
 
   const title = document.getElementById("title").value.trim();
-  const description = document.getElementById("description").value.trim();
-  const weight = parseFloat(document.getElementById("weight").value);
+  const description = window.addItemWizard?.descriptionForSave() ?? document.getElementById("description").value.trim();
+  const watch_details = window.addItemWizard?.getWatchDetails() || null;
+  const weightInputValue = document.getElementById("weight").value.trim();
+  const weight = weightInputValue ? parseFloat(weightInputValue) : null;
   const stone_type = document.getElementById("assisted-stone-type")?.value?.trim() || null;
   const item_length = document.getElementById("assisted-length")?.value?.trim() || null;
-  const price_per_weight = parseFloat(pricePerWeightInput?.value || "0");
+  const price_per_weight = watch_details ? null : parseFloat(pricePerWeightInput?.value || "0");
   const materialPurity = getAssistedMaterialPurityForSave();
   const ebay_sync_enabled = document.getElementById("ebay-sync-enabled")?.checked !== false;
   // force sync dropdown selection into hidden input if user typed or skipped selection
@@ -2997,6 +3028,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
     .insert({
       title,
       description,
+      ...(watch_details ? { watch_details } : {}),
       weight,
       stone_type,
       item_length,

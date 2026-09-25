@@ -90,6 +90,7 @@
     saveSelectedUploadedImagePaths: [],
     stableWeight: null,
     isReadingWeight: false,
+    isCapturingPhotos: false,
     isGeneratingCopy: false,
     isProcessingImage: false,
     isAutoBlackProcessing: false,
@@ -576,6 +577,7 @@
       version: 1,
       updatedAt: new Date().toISOString(),
       activeWorkflow: state.activeWorkflow,
+      wizard: window.addItemWizard?.getDraft(),
       selectedCaptureStationId: state.selectedCaptureStationId,
       aiSelectedUploadedImagePath: imagePaths.has(state.aiSelectedUploadedImagePath)
         ? state.aiSelectedUploadedImagePath
@@ -616,6 +618,7 @@
   function addItemDraftHasContent(payload) {
     if (!payload || typeof payload !== "object") return false;
     if (Array.isArray(payload.recentUploadedImages) && payload.recentUploadedImages.length > 0) return true;
+    if (payload.wizard?.itemKind === "watch") return true;
 
     const assisted = payload.assistedFields || {};
     const main = payload.mainFields || {};
@@ -827,6 +830,7 @@
     setInputValueById("distributor-name", main.distributorName, { dispatch: false });
     setInputValueById("distributor-phone", main.distributorPhone, { dispatch: false });
     setInputValueById("distributor-notes", main.distributorNotes, { dispatch: false });
+    window.addItemWizard?.restoreDraft(payload.wizard || {});
   }
 
   async function loadAddItemDraft(elements) {
@@ -986,6 +990,7 @@
   }
 
   function syncSilver925Pricing(elements) {
+    if (window.addItemWizard?.isWatch()) return;
     const priceInput = document.getElementById("price-per-weight");
     if (!priceInput) return;
 
@@ -2190,22 +2195,20 @@
   }
 
   function resolveCurrentWeight(elements) {
-    if (Number.isFinite(state.stableWeight)) {
-      return state.stableWeight;
-    }
-
-    const currentWeight = Number(elements.mainWeightInput?.value);
-    return Number.isFinite(currentWeight) ? currentWeight : null;
+    return parseWeightInput(elements.mainWeightInput?.value);
   }
 
   function collectAssistedWorkflowGenerationInputs(elements) {
     const selectedImage = state.aiSelectedUploadedImage;
+    const watchDetails = window.addItemWizard?.getWatchDetails() || null;
 
     return {
       bucket: asTrimmedString(selectedImage?.storageBucket) || INVENTORY_UPLOAD_BUCKET,
       imagePath: state.aiSelectedUploadedImagePath,
-      material: asTrimmedString(elements.materialSelect?.value),
-      purity: asTrimmedString(elements.puritySelect?.value),
+      itemKind: watchDetails ? "watch" : "jewelry",
+      watchDetails,
+      material: watchDetails ? "" : asTrimmedString(elements.materialSelect?.value),
+      purity: watchDetails ? "" : asTrimmedString(elements.puritySelect?.value),
       weight: resolveCurrentWeight(elements),
       stoneType: asTrimmedString(elements.stoneTypeInput?.value),
       length: asTrimmedString(elements.lengthInput?.value),
@@ -3315,86 +3318,48 @@
 
   async function handleReadWeight(elements) {
     if (state.isReadingWeight) return;
-
     state.isReadingWeight = true;
     setButtonBusy(elements.readWeightButton, "Reading Weight...", "Read Weight", true);
-    elements.scaleState.textContent = "Waiting for the scale integration point to return a stable reading...";
-    elements.captureState.textContent = "Waiting for stable weight";
-
+    elements.scaleState.textContent = "Waiting for a stable scale reading...";
     try {
-      const stableWeight = await simulateStableScaleReading();
-
-      setAssistedWeight(elements, stableWeight, {
-        message: `Stable weight locked at ${formatWeight(stableWeight)}.`,
-        refreshMessage: "Stable weight updated. Generate again to use the latest assisted measurement.",
-      });
-
-      const captureResult = await triggerIPhoneCapture({
-        material: asTrimmedString(elements.materialSelect?.value),
-        purity: asTrimmedString(elements.puritySelect?.value),
-        weight: stableWeight,
-      }, elements);
-
-      if (captureResult?.images?.length) {
-        setInlineStatus(
-          elements.imageStatus,
-          `Capture completed. Loaded ${captureResult.images.length} photo${captureResult.images.length === 1 ? "" : "s"}.`,
-          "is-success"
-        );
-      }
-
+      const weight = await simulateStableScaleReading();
+      setAssistedWeight(elements, weight, { message: `Stable weight locked at ${formatWeight(weight)}.` });
     } catch (error) {
-      console.error("Scale or capture flow failed:", error);
-      elements.scaleState.textContent = "Unable to get a stable weight reading right now.";
-      elements.captureState.textContent = error?.message || "Capture not triggered";
+      elements.scaleState.textContent = error?.message || "Unable to read the scale. Enter the weight manually.";
     } finally {
-      state.activeCaptureJobId = "";
       state.isReadingWeight = false;
       setButtonBusy(elements.readWeightButton, "Reading Weight...", "Read Weight", false);
     }
   }
 
-  async function handleUseManualWeight(elements) {
-    if (state.isReadingWeight) return;
-
-    const manualWeight = parseWeightInput(elements.manualWeightInput?.value);
-    if (!Number.isFinite(manualWeight)) {
+  function handleUseManualWeight(elements) {
+    const weight = parseWeightInput(elements.manualWeightInput?.value);
+    if (!Number.isFinite(weight)) {
       elements.scaleState.textContent = "Enter a manual weight greater than 0 grams.";
       return;
     }
+    setAssistedWeight(elements, weight, { message: `Manual weight set to ${formatWeight(weight)}.` });
+  }
 
-    state.isReadingWeight = true;
-    setButtonBusy(elements.useManualWeightButton, "Sending...", "Use Manual Weight", true);
-    elements.captureState.textContent = "Sending manual weight to capture app";
-
+  async function handleCapturePhotos(elements) {
+    if (state.isCapturingPhotos) return;
+    state.isCapturingPhotos = true;
+    const button = document.getElementById("assisted-capture-photo");
+    setButtonBusy(button, "Capturing...", "Capture Photos", true);
     try {
-      setAssistedWeight(elements, manualWeight, {
-        message: `Manual weight locked at ${formatWeight(manualWeight)}.`,
-        refreshMessage: "Manual weight updated. Generate again to use the latest assisted measurement.",
-      });
-
-      const captureResult = await triggerIPhoneCapture({
-        material: asTrimmedString(elements.materialSelect?.value),
-        purity: asTrimmedString(elements.puritySelect?.value),
-        weight: manualWeight,
-        weightSource: "manual",
+      const watchDetails = window.addItemWizard?.getWatchDetails() || null;
+      await triggerIPhoneCapture({
+        material: watchDetails ? "" : asTrimmedString(elements.materialSelect?.value),
+        purity: watchDetails ? "" : asTrimmedString(elements.puritySelect?.value),
+        watchDetails,
+        weight: resolveCurrentWeight(elements),
       }, elements);
-
-      if (captureResult?.images?.length) {
-        setInlineStatus(
-          elements.imageStatus,
-          `Capture completed. Loaded ${captureResult.images.length} photo${captureResult.images.length === 1 ? "" : "s"}.`,
-          "is-success"
-        );
-      }
     } catch (error) {
-      console.error("Manual weight capture flow failed:", error);
-      elements.scaleState.textContent = "Manual weight was saved, but the capture app was not triggered.";
-      elements.captureState.textContent = error?.message || "Capture not triggered";
+      elements.captureState.textContent = error?.message || "Could not capture photos. Try again or upload an image.";
     } finally {
+      state.isCapturingPhotos = false;
       state.activeCaptureJobId = "";
-      state.isReadingWeight = false;
-      setButtonBusy(elements.useManualWeightButton, "Sending...", "Use Manual Weight", false);
+      setButtonBusy(button, "Capturing...", "Capture Photos", false);
     }
   }
 
@@ -3416,7 +3381,12 @@
       return;
     }
 
-    if (!payload.material || !payload.purity) {
+    if (payload.itemKind === "watch" && !payload.watchDetails?.name) {
+      setInlineStatus(elements.generateStatus, "Enter the watch name in Information before generating copy.", "is-error");
+      return;
+    }
+
+    if (payload.itemKind !== "watch" && (!payload.material || !payload.purity)) {
       setInlineStatus(
         elements.generateStatus,
         "Choose both material and purity before generating copy.",
@@ -3425,7 +3395,7 @@
       return;
     }
 
-    if (!Number.isFinite(payload.weight)) {
+    if (payload.itemKind !== "watch" && !Number.isFinite(payload.weight)) {
       setInlineStatus(
         elements.generateStatus,
         "Read or enter a weight before generating copy.",
@@ -3542,7 +3512,7 @@
     );
     setInlineStatus(
       elements.generateStatus,
-      "Ready when you have an AI image selected and a weight.",
+      "Choose an AI image in Photos, then generate or write your own copy.",
       null
     );
 
@@ -3565,6 +3535,8 @@
     elements.assistedTab.setAttribute("aria-selected", isAssisted ? "true" : "false");
     elements.manualPanel.hidden = !isManual;
     elements.assistedPanel.hidden = !isAssisted;
+    const aiCopy = document.getElementById("item-ai-copy");
+    if (aiCopy) aiCopy.hidden = !isAssisted;
 
     if (isAssisted && !state.captureStations.length) {
       loadActiveCaptureStations(elements).catch((error) => {
@@ -3723,15 +3695,31 @@
       "distributor-name",
       "distributor-phone",
       "distributor-notes",
+      "auto-cost-checkbox",
+      "watch-name",
+      "watch-model",
+      "watch-materials",
+      "watch-modifications",
     ].forEach((id) => {
       const input = document.getElementById(id);
       input?.addEventListener("input", () => scheduleAddItemDraftSave(elements));
       input?.addEventListener("change", () => scheduleAddItemDraftSave(elements));
+      if (id.startsWith("watch-")) input?.addEventListener("input", () => {
+        markGeneratedCopyNeedsRefresh(elements, "Watch details changed. Generate again to use the updated information.");
+      });
+    });
+    document.addEventListener("add-item:wizard-change", () => scheduleAddItemDraftSave(elements));
+    document.addEventListener("add-item:mode-change", (event) => {
+      if (event.detail?.restoring) return;
+      markGeneratedCopyNeedsRefresh(elements, "Item mode changed. Generate again to use the current information.");
+      if (!event.detail?.isWatch) syncSilver925Pricing(elements);
+      scheduleAddItemDraftSave(elements);
     });
   }
 
   function exposeModule(elements) {
     window.addItemAssistedModule = {
+      isPhotoBusy: () => Boolean(state.isCapturingPhotos || state.isProcessingImage || state.isAutoBlackProcessing || elements.localImageUploadInput?.disabled),
       getSelectedUploadedImagesForSave,
       getSelectedUploadedImagePathsForSave,
       getAISelectedUploadedImagePath: () => state.aiSelectedUploadedImagePath,
@@ -3775,6 +3763,7 @@
     await loadActiveCaptureStations(elements, { silent: true });
 
     elements.readWeightButton?.addEventListener("click", () => handleReadWeight(elements));
+    document.getElementById("assisted-capture-photo")?.addEventListener("click", () => handleCapturePhotos(elements));
     elements.refreshStationsButton?.addEventListener("click", () => {
       loadActiveCaptureStations(elements, { silent: false }).catch((error) => {
         console.error("Failed to refresh capture stations:", error);

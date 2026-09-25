@@ -11,11 +11,13 @@ const DEFAULT_BUCKET = "InventoryUpload";
 const ALLOWED_BUCKETS = new Set(["InventoryUpload", "capture-photos"]);
 
 type RequestBody = {
+  itemKind?: "jewelry" | "watch";
+  watchDetails?: { name?: string; model?: string; materials?: string; modifications?: string };
   bucket?: string;
   imagePath?: string;
   material?: string;
   purity?: string;
-  weight?: number;
+  weight?: number | null;
   stoneType?: string;
   length?: string;
   notes?: string;
@@ -94,6 +96,20 @@ function detectKnownItemType(notes: string, category: string) {
 }
 
 function buildPlaceholderCopy(body: Required<Pick<RequestBody, "material" | "purity" | "weight">> & Partial<RequestBody>): CopyResult {
+  if (body.itemKind === "watch") {
+    const watch = body.watchDetails || {};
+    return {
+      mode: "placeholder",
+      generatedTitle: [watch.name, watch.model].filter(Boolean).join(" "),
+      generatedDescription: [
+        `${asTrimmedString(watch.name)}${watch.model ? `, model / reference ${watch.model}` : ""}.`,
+        watch.materials && `Materials by component: ${watch.materials}.`,
+        watch.modifications && `Modifications / customizations: ${watch.modifications}.`,
+        Number(body.weight) > 0 && `Total weight: ${Number(body.weight).toFixed(2)} g.`,
+        body.notes && `Additional details: ${body.notes}.`,
+      ].filter(Boolean).join(" "),
+    };
+  }
   const material = asTrimmedString(body.material);
   const purity = asTrimmedString(body.purity);
   const stoneType = asTrimmedString(body.stoneType);
@@ -206,6 +222,11 @@ async function tryGenerateWithOpenAI(
 
 const userPrompt = `
 Known metadata:
+- Item mode: ${body.itemKind || "jewelry"}
+- Watch name: ${body.watchDetails?.name || ""}
+- Watch model / reference: ${body.watchDetails?.model || ""}
+- Watch materials by component: ${body.watchDetails?.materials || ""}
+- Watch modifications / customizations: ${body.watchDetails?.modifications || ""}
 - Material: ${body.material ?? ""}
 - Purity: ${body.purity ?? ""}
 - Weight: ${body.weight ?? ""}
@@ -362,6 +383,13 @@ If material, purity, stone type, or other structured fields are provided by the 
 Do not contradict them.
 Do not replace them with guesses from the image.
 
+Watch mode rule:
+For a watch, preserve the supplied name, model/reference, component materials, and modifications.
+Different parts may use different materials; never describe the entire watch as one metal or purity.
+Disclose supplied aftermarket parts and customizations in the description.
+Never infer authenticity, factory originality, movement, water resistance, or unprovided specifications from the name, model, image, or total weight.
+Missing modifications mean unknown, not unmodified. Missing weight or materials must remain unspecified.
+
 Image usage rule:
 Use the image mainly to determine:
 - item category
@@ -477,9 +505,16 @@ serve(async (req) => {
     const body = (await req.json()) as RequestBody;
     const bucket = asTrimmedString(body.bucket || DEFAULT_BUCKET);
     const imagePath = normalizePath(body.imagePath || "");
-    const material = asTrimmedString(body.material);
-    const purity = asTrimmedString(body.purity);
-    const weight = Number(body.weight);
+    const isWatch = body.itemKind === "watch";
+    const material = isWatch ? "" : asTrimmedString(body.material);
+    const purity = isWatch ? "" : asTrimmedString(body.purity);
+    const weight = body.weight == null ? null : Number(body.weight);
+    const watchDetails = isWatch ? {
+      name: asTrimmedString(body.watchDetails?.name),
+      model: asTrimmedString(body.watchDetails?.model),
+      materials: asTrimmedString(body.watchDetails?.materials),
+      modifications: asTrimmedString(body.watchDetails?.modifications),
+    } : undefined;
 
     if (!ALLOWED_BUCKETS.has(bucket)) {
       return json(400, {
@@ -490,11 +525,13 @@ serve(async (req) => {
       });
     }
 
-    if (!imagePath || !material || !purity || !Number.isFinite(weight)) {
+    if (!imagePath || (isWatch
+      ? !watchDetails?.name
+      : (!material || !purity || !Number.isFinite(weight) || Number(weight) <= 0))) {
       return json(400, {
         ok: false,
         error: "missing_required_fields",
-        required: ["imagePath", "material", "purity", "weight"],
+        required: isWatch ? ["imagePath", "watchDetails.name"] : ["imagePath", "material", "purity", "weight"],
       });
     }
 
@@ -520,12 +557,14 @@ serve(async (req) => {
       });
     }
 
-    const fallback = buildPlaceholderCopy({
+    const normalizedBody = {
       ...body,
       material,
       purity,
-      weight,
-    });
+      weight: Number.isFinite(weight) && Number(weight) > 0 ? weight : null,
+      watchDetails,
+    };
+    const fallback = buildPlaceholderCopy(normalizedBody);
 
     let generated = fallback;
     let openAIDebug: OpenAIDebugInfo = {
@@ -537,7 +576,7 @@ serve(async (req) => {
     };
 
     try {
-      const { result, debug } = await tryGenerateWithOpenAI(body, signedData.signedUrl, fallback);
+      const { result, debug } = await tryGenerateWithOpenAI(normalizedBody, signedData.signedUrl, fallback);
       openAIDebug = debug;
       if (result) {
         generated = result;

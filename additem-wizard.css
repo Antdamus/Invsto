@@ -1,0 +1,54 @@
+/* Hidden panels must stay out of layout even when their base style uses grid/flex. */
+.add-main [hidden] { display: none !important; }
+
+.add-body .header { padding: 20px 26px; margin-bottom: 18px; }
+.add-body .add-heading { font-size: clamp(1.8rem, 3vw, 2.5rem); }
+.add-body .header-subcopy { margin-top: 8px; }
+.add-form { scroll-margin-top: 80px; }
+.item-progress { padding: 0 4px; }
+.item-progress ol { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); padding: 0; margin: 0; gap: 6px; list-style: none; }
+.item-progress button { width: 100%; display: flex; align-items: center; gap: 7px; min-height: 48px; padding: 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--text-soft); font: 600 .8rem "Manrope", sans-serif; cursor: pointer; }
+.item-progress button span { display: grid; place-items: center; flex-shrink: 0; width: 23px; height: 23px; border-radius: 50%; background: var(--field); }
+.item-progress button[aria-current="step"] { border-color: var(--gold); background: rgba(216, 180, 122, .12); color: var(--gold-strong); }
+.item-progress button.is-visited span { background: rgba(216, 180, 122, .2); }
+.item-progress button:disabled { color: var(--text-muted); opacity: .55; cursor: default; }
+.item-step-navigation { position: sticky; bottom: 12px; z-index: 90; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border: 1px solid var(--border-strong); border-radius: 18px; background: rgba(20, 17, 20, .97); box-shadow: var(--shadow-soft); }
+#item-step-hint { color: var(--text-muted); font-size: .88rem; }
+.item-mode-picker { display: flex; gap: 12px; padding: 0; margin: 0 0 22px; border: 0; }
+.item-mode-picker legend { margin-bottom: 10px; font-weight: 700; color: var(--text-soft); }
+.item-mode-picker label { display: flex; align-items: center; gap: 10px; padding: 12px 24px; border: 1px solid var(--border); border-radius: 14px; cursor: pointer; }
+.item-mode-picker label:has(input:checked) { border-color: var(--gold); background: rgba(216, 180, 122, .1); }
+.item-mode-picker input { accent-color: var(--gold); }
+#watch-fields, #jewelry-material-fields { margin-bottom: 20px; }
+#watch-fields .form-field-wide { grid-column: auto; }
+.item-optional-details { margin: 18px 0; border: 1px solid var(--border); border-radius: 14px; padding: 14px 18px; }
+.item-optional-details > summary { cursor: pointer; color: var(--text-soft); font-weight: 700; }
+.item-optional-details[open] > summary { margin-bottom: 18px; }
+.item-step .assisted-section { margin-top: 18px; }
+.item-step .assisted-selected-image-frame { min-height: 220px; height: 220px; }
+.item-step .assisted-selected-image-preview { height: 100%; object-fit: contain; }
+#assisted-selected-image-path { display: none; }
+.item-step .workflow-shell-header { margin-bottom: 16px; }
+.item-step .form-section-head { margin-bottom: 20px; }
+.item-step { animation: none; }
+.item-step .section-copy { margin-top: 8px; }
+.item-step .add-textarea, #watch-fields textarea { min-height: 88px; }
+.item-step [tabindex="-1"]:focus { outline: none; }
+.item-step-navigation button:focus-visible, .item-progress button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.item-review-summary { margin: 0 0 24px; }
+.item-review-summary > div { display: grid; grid-template-columns: 140px 1fr; gap: 18px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+.item-review-summary dt { font-weight: 700; color: var(--text-muted); }
+.item-review-summary dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 900px) {
+  .item-progress ol { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .add-body .header { padding: 18px; }
+  .item-progress button { font-size: .7rem; gap: 4px; padding: 6px 4px; }
+  .item-progress button span { width: 18px; height: 18px; }
+  .item-step-navigation { bottom: max(8px, env(safe-area-inset-bottom)); padding: 10px; }
+  #item-step-hint { display: none; }
+  .item-step-navigation button { min-width: 0; padding: 12px 16px; }
+  .item-review-summary > div { grid-template-columns: 1fr; gap: 6px; }
+  .item-optional-details { padding: 12px; }
+}

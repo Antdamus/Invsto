@@ -498,6 +498,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/process-inventory-image/index.ts"
 
+[functions.generate-inventory-copy]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/generate-inventory-copy/index.ts"
+
 [functions.ebay-inventory-sync]
 enabled = true
 verify_jwt = false

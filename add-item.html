@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="add-item.css" />
   <link rel="stylesheet" href="additembulk.css" />
   <link rel="stylesheet" href="additem-assisted.css" />
+  <link rel="stylesheet" href="additem-wizard.css?v=20260925-watch-steps" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 </head>
 
@@ -23,7 +24,7 @@
         <p class="page-kicker">OG Jewelry Atelier Console</p>
         <h1 class="add-heading">Add Item Type</h1>
         <p class="header-subcopy">
-          Move from intake to labeling, imagery, and stock preparation inside one calm, premium item-creation workspace.
+          Add one item, one step at a time. You can go back to change any detail.
         </p>
       </div>
 
@@ -36,71 +37,35 @@
     </header>
 
     <main class="add-main">
-      <section class="workflow-shell" aria-labelledby="workflow-shell-title">
-        <div class="workflow-shell-header">
-          <div>
-            <p id="workflow-shell-title" class="workflow-shell-kicker">Choose Intake Workflow</p>
-            <p class="workflow-shell-copy">
-              Switch between the standard manual entry flow and the guided assisted intake path without leaving the same item-creation system.
-            </p>
+      <form id="add-item-form" class="add-form" novalidate>
+        <nav class="item-progress" aria-label="Item creation steps">
+          <p id="item-step-status" class="section-kicker" aria-live="polite">Step 1 of 8 · Information</p>
+          <ol><li><button type="button" data-item-step-target="information" aria-current="step"><span>1</span>Information</button></li>
+<li><button type="button" data-item-step-target="photos" disabled><span>2</span>Photos</button></li>
+<li><button type="button" data-item-step-target="description" disabled><span>3</span>Description</button></li>
+<li><button type="button" data-item-step-target="pricing" disabled><span>4</span>Pricing</button></li>
+<li><button type="button" data-item-step-target="labels" disabled><span>5</span>Labels</button></li>
+<li><button type="button" data-item-step-target="stock" disabled><span>6</span>Stock</button></li>
+<li><button type="button" data-item-step-target="marketplace" disabled><span>7</span>Marketplace</button></li>
+<li><button type="button" data-item-step-target="review" disabled><span>8</span>Review</button></li></ol>
+        </nav>
+        <section class="form-section item-step" id="item-step-information" data-item-step="information" aria-labelledby="item-step-information-title">
+          <div class="form-section-head">
+            <h2 class="section-title" id="item-step-information-title" tabindex="-1">Item information</h2>
+            <p class="section-copy">Choose an item mode and enter the details you know.</p>
           </div>
-
-          <div class="workflow-tabs" role="tablist" aria-label="Add item workflows">
-            <button
-              type="button"
-              id="workflow-tab-manual"
-              class="workflow-tab"
-              role="tab"
-              aria-selected="false"
-              aria-controls="workflow-panel-manual"
-              data-workflow-target="manual"
-            >
-              Manual
-            </button>
-            <button
-              type="button"
-              id="workflow-tab-assisted"
-              class="workflow-tab is-active"
-              role="tab"
-              aria-selected="true"
-              aria-controls="workflow-panel-assisted"
-              data-workflow-target="assisted"
-            >
-              Assisted
-            </button>
+          <fieldset class="item-mode-picker">
+            <legend>Item mode</legend>
+            <label><input type="radio" name="item-kind" value="jewelry" checked /> Jewelry</label>
+            <label><input type="radio" name="item-kind" value="watch" /> Watch</label>
+          </fieldset>
+          <div id="watch-fields" class="form-grid form-grid-2" hidden>
+            <label class="form-field" for="watch-name"><span class="form-label">Watch name</span><input id="watch-name" class="add-input" placeholder="e.g. Rolex Datejust" maxlength="200" disabled /></label>
+            <label class="form-field" for="watch-model"><span class="form-label">Model / reference (if known)</span><input id="watch-model" class="add-input" placeholder="e.g. 126233" maxlength="200" disabled /></label>
+            <label class="form-field form-field-wide" for="watch-materials"><span class="form-label">Materials by component (if known)</span><textarea id="watch-materials" class="add-input add-textarea" placeholder="e.g. Stainless steel case, 18K yellow gold bezel, steel and gold bracelet" maxlength="4000" disabled></textarea><span class="field-helper">List each part and its material. Leave unknown materials unspecified.</span></label>
+            <label class="form-field form-field-wide" for="watch-modifications"><span class="form-label">Modifications / customizations (optional)</span><textarea id="watch-modifications" class="add-input add-textarea" placeholder="e.g. Aftermarket diamond bezel, replacement dial, custom strap. Enter None only if confirmed." maxlength="4000" disabled></textarea></label>
           </div>
-        </div>
-
-        <section
-          id="workflow-panel-manual"
-          class="workflow-panel"
-          role="tabpanel"
-          aria-labelledby="workflow-tab-manual"
-          data-workflow-panel="manual"
-          hidden
-        >
-          <h2 class="workflow-panel-title">Existing Manual Add Item Flow</h2>
-          <p class="workflow-panel-copy">
-            Direct entry remains fully intact, including category selection, barcode generation, QR handling, DYMO labels, photo upload, and the final item creation pipeline.
-          </p>
-        </section>
-
-        <section
-          id="workflow-panel-assisted"
-          class="workflow-panel workflow-panel-assisted"
-          role="tabpanel"
-          aria-labelledby="workflow-tab-assisted"
-          data-workflow-panel="assisted"
-        >
-          <div class="assisted-intake">
-            <div class="assisted-copy">
-              <h2 class="workflow-panel-title">Assisted Weight and Photo Intake</h2>
-              <p class="workflow-panel-copy">
-                Use this guided path to choose material and purity, read or enter a weight, route a capture job to a selected station, and review the completed capture photos before continuing with the existing Add Item form.
-              </p>
-            </div>
-
-            <div class="assisted-grid">
+          <div id="jewelry-material-fields">            <div class="assisted-grid">
               <label class="assisted-field" for="assisted-material">
                 <span class="assisted-label">Material</span>
                 <select id="assisted-material" class="assisted-select">
@@ -116,24 +81,50 @@
               </label>
             </div>
 
-            <div class="assisted-grid assisted-grid-secondary">
-              <label class="assisted-field" for="assisted-capture-station">
-                <span class="assisted-label">Capture Station</span>
-                <select id="assisted-capture-station" class="assisted-select">
-                  <option value="">Loading active stations...</option>
-                </select>
-              </label>
+</div>
+          <div class="form-grid form-grid-2">            <label class="form-field" for="weight">
+              <span id="item-weight-label" class="form-label">Weight (g)</span>
+              <input type="number" step="0.01" id="weight" min="0.01" placeholder="Weight (g)" class="add-input" required />
+            </label>
 
-              <div class="assisted-field assisted-field-action">
-                <span class="assisted-label">Station Directory</span>
-                <button type="button" id="assisted-refresh-stations" class="assisted-secondary-button assisted-station-button">
-                  Refresh Stations
+            <div class="form-field">
+              <span class="form-label">Category</span>
+              <div id="category-dropdown-container" class="custom-dropdown">
+                <button id="category-dropdown-toggle" type="button" class="dropdown-toggle">
+                  Select or Create Category
                 </button>
-                <span class="assisted-field-helper">Queued capture jobs are routed by station UUID, not by station name.</span>
+                <div id="category-dropdown-menu" class="dropdown-menu"></div>
               </div>
+              <input type="hidden" id="category" name="category" />
             </div>
-
-            <div class="assisted-grid assisted-grid-secondary">
+</div>
+          <details class="item-optional-details"><summary>Read or enter a weight</summary><div class="assisted-actions">
+              <button type="button" id="assisted-read-weight" class="assisted-read-button">
+                Read Weight
+              </button>
+              <label class="assisted-manual-weight" for="assisted-manual-weight">
+                <span class="assisted-label">Manual Weight (g)</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  id="assisted-manual-weight"
+                  class="assisted-input"
+                  placeholder="Type weight"
+                />
+              </label>
+              <button type="button" id="assisted-use-manual-weight" class="assisted-secondary-button">
+                Use Manual Weight
+              </button>
+              <span id="assisted-scale-state" class="assisted-scale-state" aria-live="polite">
+                Waiting for a material and purity selection.
+              </span>
+            </div><div class="assisted-result-card">
+                <span class="assisted-result-label">Stable Weight</span>
+                <strong id="assisted-weight-display" class="assisted-result-value">--</strong>
+                <p class="assisted-result-note">The reading updates the Weight field for this item.</p>
+              </div></details>
+          <details class="item-optional-details"><summary>Additional details and notes</summary>            <div class="assisted-grid assisted-grid-secondary">
               <label class="assisted-field" for="assisted-stone-type">
                 <span class="assisted-label">Stone Type (optional)</span>
                 <input
@@ -169,35 +160,69 @@
               </label>
             </div>
 
-            <div class="assisted-actions">
-              <button type="button" id="assisted-read-weight" class="assisted-read-button">
-                Read Weight
-              </button>
-              <label class="assisted-manual-weight" for="assisted-manual-weight">
-                <span class="assisted-label">Manual Weight (g)</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  id="assisted-manual-weight"
-                  class="assisted-input"
-                  placeholder="Type weight"
-                />
+</details>
+        </section>
+        <section class="form-section item-step" id="item-step-photos" data-item-step="photos" aria-labelledby="item-step-photos-title" hidden>
+          <div class="form-section-head"><h2 class="section-title" id="item-step-photos-title" tabindex="-1">Item photos</h2><p class="section-copy">Upload photos or capture them at a station, then choose the images to save.</p></div>
+                  <div class="workflow-shell-header">
+          <div>
+            <p id="workflow-shell-title" class="workflow-shell-kicker">Photo intake</p>
+            <p class="workflow-shell-copy">
+              Choose how to prepare your photos.
+            </p>
+          </div>
+
+          <div class="workflow-tabs" role="tablist" aria-label="Add item workflows">
+            <button
+              type="button"
+              id="workflow-tab-manual"
+              class="workflow-tab"
+              role="tab"
+              aria-selected="false"
+              aria-controls="workflow-panel-manual"
+              data-workflow-target="manual"
+            >
+              Manual
+            </button>
+            <button
+              type="button"
+              id="workflow-tab-assisted"
+              class="workflow-tab is-active"
+              role="tab"
+              aria-selected="true"
+              aria-controls="workflow-panel-assisted"
+              data-workflow-target="assisted"
+            >
+              Assisted
+            </button>
+          </div>
+        </div>
+
+
+          <section id="workflow-panel-manual" class="workflow-panel" role="tabpanel" aria-labelledby="workflow-tab-manual" data-workflow-panel="manual" hidden><p class="workflow-panel-copy">Upload images below and enter your own title and description in the next step.</p></section>
+          <section id="workflow-panel-assisted" class="workflow-panel workflow-panel-assisted" role="tabpanel" aria-labelledby="workflow-tab-assisted" data-workflow-panel="assisted">
+            <details class="item-optional-details"><summary>Capture from a station</summary><div class="assisted-intake">            <div class="assisted-grid assisted-grid-secondary">
+              <label class="assisted-field" for="assisted-capture-station">
+                <span class="assisted-label">Capture Station</span>
+                <select id="assisted-capture-station" class="assisted-select">
+                  <option value="">Loading active stations...</option>
+                </select>
               </label>
-              <button type="button" id="assisted-use-manual-weight" class="assisted-secondary-button">
-                Use Manual Weight
-              </button>
-              <span id="assisted-scale-state" class="assisted-scale-state" aria-live="polite">
-                Waiting for a material and purity selection.
-              </span>
+
+              <div class="assisted-field assisted-field-action">
+                <span class="assisted-label">Station Directory</span>
+                <button type="button" id="assisted-refresh-stations" class="assisted-secondary-button assisted-station-button">
+                  Refresh Stations
+                </button>
+                <span class="assisted-field-helper">Choose the station that will take the photos.</span>
+              </div>
             </div>
 
+
+
+            <button type="button" id="assisted-capture-photo" class="assisted-read-button">Capture Photos</button>
             <div class="assisted-results">
-              <div class="assisted-result-card">
-                <span class="assisted-result-label">Stable Weight</span>
-                <strong id="assisted-weight-display" class="assisted-result-value">--</strong>
-                <p class="assisted-result-note">When a stable reading is captured, it syncs into the existing Weight field below.</p>
-              </div>
+
 
               <div class="assisted-result-card">
                 <span class="assisted-result-label">Capture Session</span>
@@ -206,12 +231,14 @@
               </div>
             </div>
 
-            <section class="assisted-section" aria-labelledby="assisted-upload-title">
+</div></details>
+          </section>
+                      <section class="assisted-section" aria-labelledby="assisted-upload-title">
               <div class="assisted-section-header">
                 <div>
-                  <h3 id="assisted-upload-title" class="assisted-section-title">Captured Phone Images</h3>
+                  <h3 id="assisted-upload-title" class="assisted-section-title">Choose item photos</h3>
                   <p class="assisted-section-copy">
-                    After a capture job finishes, the completed photo set is loaded from Supabase. Reload Photos can also recover recent cloud images from earlier sessions.
+                    Uploaded and captured photos appear here. Reload to find images from earlier sessions.
                   </p>
                 </div>
                 <div class="assisted-upload-actions">
@@ -243,7 +270,7 @@
                   <div class="assisted-selected-image-card assisted-ai-image-card">
                     <div class="assisted-card-head">
                       <span class="assisted-card-kicker">AI Description Image</span>
-                      <span class="assisted-card-helper">Exactly one completed capture image is used for title and description generation.</span>
+                      <span class="assisted-card-helper">Choose one image for suggested titles and descriptions.</span>
                     </div>
                     <div class="assisted-selected-image-frame">
                       <img
@@ -262,6 +289,7 @@
                       <strong id="assisted-selected-image-name">No AI image selected</strong>
                       <span id="assisted-selected-image-path">Refresh after the phone upload finishes.</span>
                     </div>
+                    <details class="item-optional-details"><summary>Edit selected photo</summary>
                     <div class="assisted-bg-tools" aria-label="Background processing">
                       <button type="button" id="assisted-bg-auto-align" class="assisted-secondary-button assisted-bg-tools-wide" aria-pressed="false">
                         Auto Align: Off
@@ -278,13 +306,13 @@
                     </div>
                     <p id="assisted-bg-status" class="assisted-inline-status" aria-live="polite">
                       Select an image, then process it onto a clean background.
-                    </p>
+                    </p></details>
                   </div>
 
                   <div class="assisted-save-summary-card">
                     <div class="assisted-card-head">
                       <span class="assisted-card-kicker">Images That Will Be Saved</span>
-                      <span class="assisted-card-helper">Any image you mark here will be included with the final item. Assisted capture images are copied into the standard item photo pipeline during save.</span>
+                      <span class="assisted-card-helper">Included photos will be saved with this item.</span>
                     </div>
                     <strong id="assisted-save-selection-count" class="assisted-save-count">
                       0 images will be saved with this item.
@@ -312,12 +340,17 @@
               </div>
             </section>
 
-            <section class="assisted-section" aria-labelledby="assisted-ai-title">
+
+        </section>
+        <section class="form-section item-step" id="item-step-description" data-item-step="description" aria-labelledby="item-step-description-title" hidden>
+          <div class="form-section-head"><h2 class="section-title" id="item-step-description-title" tabindex="-1">Title and description</h2><p class="section-copy">Write the listing or use the photo and information from the earlier steps.</p></div>
+          <button type="button" id="use-watch-details" class="add-button-secondary" hidden>Fill from watch details</button>
+          <details id="item-ai-copy" class="item-optional-details"><summary>Generate from selected photo</summary>            <section class="assisted-section" aria-labelledby="assisted-ai-title">
               <div class="assisted-section-header">
                 <div>
                   <h3 id="assisted-ai-title" class="assisted-section-title">AI-Generated Inventory Copy</h3>
                   <p class="assisted-section-copy">
-                    Generation uses the selected AI image, measured weight, and entered assisted metadata. Review and edit the result before using it in the existing Add Item form.
+                    Use your selected photo and item details to suggest a title and description. Review the copy before applying it.
                   </p>
                 </div>
                 <button type="button" id="assisted-generate-copy" class="assisted-read-button assisted-generate-button">
@@ -326,7 +359,7 @@
               </div>
 
               <p id="assisted-generate-status" class="assisted-inline-status" aria-live="polite">
-                Ready when you have an AI image selected and a weight.
+                Choose an AI image in Photos, then generate or write your own copy.
               </p>
 
               <div class="assisted-generated-fields">
@@ -360,22 +393,8 @@
                 </span>
               </div>
             </section>
-          </div>
-        </section>
-      </section>
-
-      <form id="add-item-form" class="add-form">
-        <section class="form-section">
-          <div class="form-section-head">
-            <p class="section-kicker">Core Item Details</p>
-            <h2 class="section-title">Foundational Inventory Information</h2>
-            <p class="section-copy">
-              Capture the item identity first. Assisted intake can prefill the title, description, and weight without interrupting the manual flow.
-            </p>
-          </div>
-
-          <div class="form-grid form-grid-2">
-            <label class="form-field form-field-wide" for="title">
+</details>
+          <div class="form-grid form-grid-2">            <label class="form-field form-field-wide" for="title">
               <span class="form-label">Item Title</span>
               <input type="text" id="title" placeholder="Enter the primary inventory title" class="add-input" required />
             </label>
@@ -385,30 +404,15 @@
               <textarea id="description" placeholder="Describe the item for inventory and sales context" class="add-input add-textarea" required></textarea>
             </label>
 
-            <label class="form-field" for="weight">
-              <span class="form-label">Weight</span>
-              <input type="number" step="0.01" id="weight" placeholder="Weight (g)" class="add-input" required />
-            </label>
-
-            <div class="form-field">
-              <span class="form-label">Category</span>
-              <div id="category-dropdown-container" class="custom-dropdown">
-                <button id="category-dropdown-toggle" type="button" class="dropdown-toggle">
-                  Select or Create Category
-                </button>
-                <div id="category-dropdown-menu" class="dropdown-menu"></div>
-              </div>
-              <input type="hidden" id="category" name="category" />
-            </div>
-          </div>
+</div>
+          <p id="watch-description-note" class="field-helper" hidden>Your watch details are also included in the saved description. You can review the complete description before saving.</p>
         </section>
-
-        <section class="form-section">
+                <section class="form-section item-step" id="item-step-pricing" data-item-step="pricing" aria-labelledby="item-step-pricing-title" hidden>
           <div class="form-section-head">
             <p class="section-kicker">Pricing and Supplier</p>
-            <h2 class="section-title">Costing, Margin, and Source Details</h2>
+            <h2 class="section-title" id="item-step-pricing-title" tabindex="-1">Costing, Margin, and Source Details</h2>
             <p class="section-copy">
-              Keep pricing clean and traceable. Auto-cost can still derive cost from weight and price per weight whenever you want.
+              Enter the item cost and review the sale price. Watches use direct pricing; jewelry can use weight-based costing.
             </p>
           </div>
 
@@ -430,7 +434,7 @@
 
             <label class="form-field" for="cost">
               <span class="form-label">Cost</span>
-              <input type="number" step="0.01" id="cost" placeholder="Cost of Item ($)" class="add-input" required />
+              <input type="number" step="0.01" id="cost" min="0" placeholder="Cost of Item ($)" class="add-input" required />
             </label>
 
             <label class="form-field" for="sale-price">
@@ -455,10 +459,10 @@
           </div>
         </section>
 
-        <section class="form-section">
+        <section class="form-section item-step" id="item-step-labels" data-item-step="labels" aria-labelledby="item-step-labels-title" hidden>
           <div class="form-section-head">
             <p class="section-kicker">QR, Barcode, and Labeling</p>
-            <h2 class="section-title">Identity and Print Assets</h2>
+            <h2 class="section-title" id="item-step-labels-title" tabindex="-1">Identity and Print Assets</h2>
             <p class="section-copy">
               Generate or scan a 1D barcode, attach a QR destination, and stage the DYMO label from the same production panel.
             </p>
@@ -514,10 +518,10 @@
           </div>
         </section>
 
-        <section class="form-section">
+        <section class="form-section item-step" id="item-step-stock" data-item-step="stock" aria-labelledby="item-step-stock-title" hidden>
           <div class="form-section-head">
             <p class="section-kicker">Stock and Location</p>
-            <h2 class="section-title">Placement Before Save</h2>
+            <h2 class="section-title" id="item-step-stock-title" tabindex="-1">Placement Before Save</h2>
             <p class="section-copy">
               If needed, attach the incoming item type to a location and quantity assignment before final creation.
             </p>
@@ -536,10 +540,10 @@
           </div>
         </section>
 
-        <section class="form-section">
+        <section class="form-section item-step" id="item-step-marketplace" data-item-step="marketplace" aria-labelledby="item-step-marketplace-title" hidden>
           <div class="form-section-head">
             <p class="section-kicker">eBay Sync</p>
-            <h2 class="section-title">Marketplace Readiness</h2>
+            <h2 class="section-title" id="item-step-marketplace-title" tabindex="-1">Marketplace Readiness</h2>
             <p class="section-copy">
               Store categories stay internal. Choose the eBay category here so this item can sync cleanly when it reaches the eBay pipeline.
             </p>
@@ -566,20 +570,18 @@
           </div>
         </section>
 
-        <section class="form-section form-section-final">
-          <div class="form-section-head">
-            <p class="section-kicker">Final Action</p>
-            <h2 class="section-title">Create the Item Type</h2>
-            <p class="section-copy">
-              Submit the item once the copy, imagery, labeling, and stock details are ready. The current add-item pipeline remains unchanged underneath this redesigned surface.
-            </p>
-          </div>
 
-          <div class="final-action-bar">
-            <button type="submit" class="add-button">Add Item</button>
-            <p class="final-action-note">Barcode generation, DYMO upload, photos, and stock writes continue to use the existing save pipeline.</p>
-          </div>
+        <section class="form-section item-step" id="item-step-review" data-item-step="review" aria-labelledby="item-step-review-title" hidden>
+          <div class="form-section-head"><h2 class="section-title" id="item-step-review-title" tabindex="-1">Review your item</h2><p class="section-copy">Check the details below. Go back to any step to make changes.</p></div>
+          <dl id="item-review-summary" class="item-review-summary"></dl>
+          <div class="final-action-bar"><button type="submit" class="add-button">Add Item</button></div>
         </section>
+        <p id="item-step-error" class="inline-status inline-status-error" role="alert" hidden></p>
+        <div class="item-step-navigation">
+          <button type="button" id="item-step-back" class="add-button-secondary" disabled>Back</button>
+          <span id="item-step-hint">Up next: Photos</span>
+          <button type="button" id="item-step-next" class="add-button">Next: Photos</button>
+        </div>
       </form>
     </main>
   </div>
@@ -970,7 +972,8 @@
   <script src="admin-nav.js"></script>
   <script src="additem-dymolabel.js"></script>
   <script src="additembulk.js"></script>
-  <script src="additem.js"></script>
-  <script src="additem-assisted.js"></script>
+  <script src="additem-wizard.js?v=20260925-watch-steps"></script>
+  <script src="additem.js?v=20260925-watch-steps"></script>
+  <script src="additem-assisted.js?v=20260925-watch-steps"></script>
 </body>
 </html>
