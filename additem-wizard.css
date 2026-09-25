@@ -31,6 +31,11 @@
 .item-step .workflow-shell-header { margin-bottom: 16px; }
 .item-step .form-section-head { margin-bottom: 20px; }
 .item-step { animation: none; }
+.watch-reference-results { padding: 16px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 12px; overflow-wrap: anywhere; }
+.watch-reference-results h4 { margin: 0 0 8px; }
+.watch-reference-results p, .watch-reference-results li { font-size: .88rem; line-height: 1.6; }
+.watch-reference-results ul { padding-left: 20px; }
+.watch-reference-results a { color: var(--gold); text-decoration: underline; }
 .item-step .section-copy { margin-top: 8px; }
 .item-step .add-textarea, #watch-fields textarea { min-height: 88px; }
 .item-step [tabindex="-1"]:focus { outline: none; }

@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="add-item.css" />
   <link rel="stylesheet" href="additembulk.css" />
   <link rel="stylesheet" href="additem-assisted.css" />
-  <link rel="stylesheet" href="additem-wizard.css?v=20260925-watch-steps" />
+  <link rel="stylesheet" href="additem-wizard.css?v=20260925-watch-lookup" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 </head>
 
@@ -60,8 +60,8 @@
             <label><input type="radio" name="item-kind" value="watch" /> Watch</label>
           </fieldset>
           <div id="watch-fields" class="form-grid form-grid-2" hidden>
-            <label class="form-field" for="watch-name"><span class="form-label">Watch name</span><input id="watch-name" class="add-input" placeholder="e.g. Rolex Datejust" maxlength="200" disabled /></label>
-            <label class="form-field" for="watch-model"><span class="form-label">Model / reference (if known)</span><input id="watch-model" class="add-input" placeholder="e.g. 126233" maxlength="200" disabled /></label>
+            <label class="form-field" for="watch-name"><span class="form-label">Brand / watch name</span><input id="watch-name" class="add-input" placeholder="e.g. Rolex or Rolex Datejust" maxlength="200" disabled /></label>
+            <label class="form-field" for="watch-model"><span class="form-label">Model / reference number (if known)</span><input id="watch-model" class="add-input" placeholder="e.g. 126233" maxlength="200" disabled /><span class="field-helper">Use the full reference. In Description, AI can look up standard model details and draft the listing.</span></label>
             <label class="form-field form-field-wide" for="watch-materials"><span class="form-label">Materials by component (if known)</span><textarea id="watch-materials" class="add-input add-textarea" placeholder="e.g. Stainless steel case, 18K yellow gold bezel, steel and gold bracelet" maxlength="4000" disabled></textarea><span class="field-helper">List each part and its material. Leave unknown materials unspecified.</span></label>
             <label class="form-field form-field-wide" for="watch-modifications"><span class="form-label">Modifications / customizations (optional)</span><textarea id="watch-modifications" class="add-input add-textarea" placeholder="e.g. Aftermarket diamond bezel, replacement dial, custom strap. Enter None only if confirmed." maxlength="4000" disabled></textarea></label>
           </div>
@@ -349,7 +349,7 @@
               <div class="assisted-section-header">
                 <div>
                   <h3 id="assisted-ai-title" class="assisted-section-title">AI-Generated Inventory Copy</h3>
-                  <p class="assisted-section-copy">
+                  <p id="assisted-copy-help" class="assisted-section-copy">
                     Use your selected photo and item details to suggest a title and description. Review the copy before applying it.
                   </p>
                 </div>
@@ -361,6 +361,7 @@
               <p id="assisted-generate-status" class="assisted-inline-status" aria-live="polite">
                 Choose an AI image in Photos, then generate or write your own copy.
               </p>
+              <div id="watch-reference-results" class="watch-reference-results" aria-live="polite" hidden></div>
 
               <div class="assisted-generated-fields">
                 <label class="assisted-field" for="assisted-generated-title">
@@ -389,7 +390,7 @@
                   Use In Add Item Form
                 </button>
                 <span class="assisted-context-note">
-                  Based on selected image + weight + assisted fields + existing form data.
+                  Review the draft, then apply it. You can edit the listing before saving.
                 </span>
               </div>
             </section>
@@ -972,8 +973,8 @@
   <script src="admin-nav.js"></script>
   <script src="additem-dymolabel.js"></script>
   <script src="additembulk.js"></script>
-  <script src="additem-wizard.js?v=20260925-watch-steps"></script>
-  <script src="additem.js?v=20260925-watch-steps"></script>
-  <script src="additem-assisted.js?v=20260925-watch-steps"></script>
+  <script src="additem-wizard.js?v=20260925-watch-lookup"></script>
+  <script src="additem.js?v=20260925-watch-lookup"></script>
+  <script src="additem-assisted.js?v=20260925-watch-lookup"></script>
 </body>
 </html>

@@ -15,9 +15,12 @@
 
   const value = (id) => document.getElementById(id)?.value?.trim() || "";
   const isWatch = () => form.querySelector('[name="item-kind"]:checked')?.value === "watch";
-  const getWatchDetails = () => isWatch()
-    ? Object.fromEntries(watchKeys.map((key) => [key, value(`watch-${key}`)]))
-    : null;
+  const getWatchDetails = () => {
+    if (!isWatch()) return null;
+    const details = Object.fromEntries(watchKeys.map((key) => [key, value(`watch-${key}`)]));
+    const referenceLookup = window.addItemAssistedModule?.getWatchReferenceLookup?.();
+    return referenceLookup ? { ...details, referenceLookup } : details;
+  };
 
   function descriptionForSave() {
     const description = value("description");

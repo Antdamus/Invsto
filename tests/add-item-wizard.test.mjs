@@ -31,7 +31,12 @@ const mockServices = () => {
     functions: { invoke: async (name, options) => {
       if (name === "generate-inventory-copy") {
         window.testGeneration.push(options.body);
-        return { data: { mode: "placeholder", generatedTitle: "Watch copy", generatedDescription: "Reviewed watch copy" } };
+        if (window.testGenerationHold) await new Promise((resolve) => { window.testReleaseGeneration = resolve; });
+        return { data: { mode: "openai", generatedTitle: "Watch copy", generatedDescription: "Reviewed watch copy", watchReference: {
+          status: "found", matchedName: "Rolex Datejust", matchedReference: options.body.watchDetails?.model,
+          facts: [{ label: "Case diameter", value: "36 mm", sourceUrl: "https://www.rolex.com/watches/datejust", sourceTitle: "Rolex specifications" }],
+          warnings: ["Confirm the dial and bracelet variant."],
+        } } };
       }
       return { data: { images: [] } };
     } },
@@ -275,4 +280,78 @@ test("photo selection survives navigation and watch facts reach assisted generat
   await page.waitForFunction(() => window.addItemAssistedModule?.getAISelectedUploadedImagePath() === "test.jpg");
   assert.equal(await step(page), "review");
   assert.match(await page.locator("#item-review-summary").innerText(), /1 selected/);
+});
+
+test("watch reference lookup needs no photo, survives draft restore, saves sources and invalidates changed details", async (t) => {
+  const page = await pageFor(t);
+  await page.locator('[name="item-kind"][value="watch"]').check();
+  await page.locator("#watch-name").fill("Rolex");
+  await page.locator("#watch-model").fill("126233");
+  await page.locator("#watch-modifications").fill("Aftermarket diamond bezel");
+  await category(page, "Watches");
+  await next(page);
+  await page.locator("#workflow-tab-manual").click();
+  await next(page);
+  assert.equal(await page.locator("#item-ai-copy").isVisible(), true);
+  await page.locator("#item-ai-copy > summary").click();
+  await page.locator("#assisted-generate-copy").click();
+  await page.waitForFunction(() => document.querySelector("#watch-reference-results a"));
+  assert.equal(await page.locator("#watch-reference-results a").getAttribute("href"), "https://www.rolex.com/watches/datejust");
+  assert.match(await page.locator("#watch-reference-results").innerText(), /Confirm the dial/);
+  assert.equal(await page.evaluate(() => window.testGeneration[0].imagePath), "");
+  await page.locator("#assisted-apply-copy").click();
+  assert.equal(await page.locator("#description").inputValue(), "Reviewed watch copy");
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("test-draft") || "null")?.payload?.assistedFields?.watchReference?.status === "found");
+  await page.reload();
+  await page.waitForFunction(() => window.addItemWizard?.getWatchDetails()?.referenceLookup?.status === "found");
+  await page.locator("#item-ai-copy > summary").click();
+  assert.equal(await page.locator("#assisted-apply-copy").isDisabled(), false);
+  assert.equal(await page.locator("#watch-reference-results a").count(), 1);
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.screenshot({ path: new URL("test-results/watch-reference-mobile.png", root).pathname.replace(/^\/(\w:)/, "$1"), fullPage: true });
+  await next(page);
+  await page.locator("#cost").fill("4000");
+  await page.locator("#sale-price").fill("6500");
+  for (let i = 0; i < 4; i++) await next(page);
+  await page.locator('button[type="submit"]').first().click();
+  await page.waitForFunction(() => window.testWrites.length === 1);
+  assert.equal(await page.evaluate(() => window.testWrites[0].watch_details.referenceLookup.facts[0].value), "36 mm");
+  await page.locator('[data-item-step-target="information"]').click();
+  await page.locator("#watch-model").fill("126234");
+  assert.equal(await page.evaluate(() => window.addItemWizard.getWatchDetails().referenceLookup), undefined);
+  await page.locator('[data-item-step-target="description"]').click();
+  assert.equal(await page.locator("#assisted-apply-copy").isDisabled(), true);
+  assert.equal(await page.locator("#watch-reference-results").isVisible(), false);
+});
+
+test("changing watch information during a lookup discards the outdated response", async (t) => {
+  const page = await pageFor(t);
+  await page.locator('[name="item-kind"][value="watch"]').check();
+  await page.locator("#watch-name").fill("Rolex");
+  await page.locator("#watch-model").fill("126233");
+  await category(page, "Watches");
+  await next(page);
+  await next(page);
+  await page.locator("#item-ai-copy > summary").click();
+  await page.evaluate(() => { window.testGenerationHold = true; });
+  await page.locator("#assisted-generate-copy").click();
+  await page.waitForFunction(() => window.testReleaseGeneration);
+  await page.locator('[data-item-step-target="information"]').click();
+  await page.locator("#watch-modifications").fill("New replacement strap");
+  await page.evaluate(() => window.testReleaseGeneration());
+  await page.waitForFunction(() => !document.getElementById("assisted-generate-copy").disabled);
+  assert.equal(await page.locator("#assisted-generated-description").inputValue(), "");
+  assert.equal(await page.evaluate(() => window.addItemWizard.getWatchDetails().referenceLookup), undefined);
+  assert.match(await page.locator("#assisted-generate-status").textContent(), /Details changed during generation/);
+  await page.locator('[data-item-step-target="description"]').click();
+  await page.locator("#assisted-generate-copy").click();
+  await page.waitForFunction(() => window.testGeneration.length === 2);
+  await page.evaluate(() => {
+    document.getElementById("add-item-form").reset();
+    document.dispatchEvent(new Event("add-item-form:reset"));
+    window.testReleaseGeneration();
+  });
+  assert.equal(await page.locator("#assisted-generate-copy").isDisabled(), false);
+  assert.equal(await page.locator("#assisted-generated-description").inputValue(), "");
 });

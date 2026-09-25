@@ -7,20 +7,38 @@ import { test } from "node:test";
 const source = readFileSync(new URL("../supabase/functions/generate-inventory-copy/index.ts", import.meta.url), "utf8")
   .replace(/^import .*;\r?\n/gm, "");
 
-function handler({ ai = false } = {}) {
+const sourceUrl = "https://www.rolex.com/watches/datejust/m126233-0035";
+const research = (overrides = {}) => ({
+  status: "found", matchedName: "Rolex Datejust", matchedReference: "126233",
+  facts: [{ label: "Case diameter", value: "36 mm", sourceUrl }],
+  warnings: ["Confirm the dial and bracelet variant."], ...overrides,
+});
+
+function handler({ ai = false, lookup = research(), searchFails = false, copyFails = false, searchSources = [sourceUrl] } = {}) {
   let serveHandler, aiRequest;
+  const requests = [];
+  let signCount = 0;
   const context = {
-    Request, Response, console: { log() {}, error() {} },
+    Request, Response, AbortSignal, URL, console: { log() {}, error() {} },
     Deno: { env: { get: (name) => ({ SUPABASE_URL: "https://example.invalid", SUPABASE_SERVICE_ROLE_KEY: "test", ...(ai ? { OPENAI_API_KEY: "test", OPENAI_MODEL: "test" } : {}) })[name] } },
     serve: (fn) => { serveHandler = fn; },
-    createClient: () => ({ storage: { from: () => ({ createSignedUrl: async () => ({ data: { signedUrl: "https://example.invalid/photo.jpg" } }) }) } }),
+    createClient: () => ({ storage: { from: () => ({ createSignedUrl: async () => { signCount++; return { data: { signedUrl: "https://example.invalid/photo.jpg" } }; } }) } }),
     fetch: async (_url, options) => {
       aiRequest = JSON.parse(options.body);
+      requests.push(aiRequest);
+      if (aiRequest.tools) {
+        if (searchFails) throw new Error("Lookup timed out");
+        return new Response(JSON.stringify({
+          output_text: JSON.stringify(lookup),
+          output: [{ type: "web_search_call", status: "completed", action: { sources: searchSources.map((url) => ({ url, title: "Reference specifications" })) } }],
+        }));
+      }
+      if (copyFails) return new Response("Unavailable", { status: 503 });
       return new Response(JSON.stringify({ output_text: JSON.stringify({ generatedTitle: "Watch", generatedDescription: "Watch description" }) }));
     },
   };
   vm.runInNewContext(stripTypeScriptTypes(source), context);
-  return { invoke: (body) => serveHandler(new Request("https://example.invalid", { method: "POST", body: JSON.stringify(body) })), request: () => aiRequest };
+  return { invoke: (body) => serveHandler(new Request("https://example.invalid", { method: "POST", body: JSON.stringify(body) })), request: () => aiRequest, requests, signCount: () => signCount };
 }
 
 test("watch copy accepts mixed materials and modifications without requiring metal, purity or weight", async () => {
@@ -55,4 +73,68 @@ test("AI request carries watch facts and removes stale single-material metadata"
   assert.match(prompt, /Replacement dial/);
   assert.doesNotMatch(prompt, /925|Silver/);
   assert.match(request.input[0].content[0].text, /never describe the entire watch as one metal/i);
+});
+
+const referenceOnlyWatch = {
+  itemKind: "watch", watchDetails: { name: "Rolex", model: "126233", materials: "Steel case", modifications: "Aftermarket diamond bezel" },
+};
+
+test("reference-only watches search the exact model, return sourced facts and skip image signing", async () => {
+  const api = handler({ ai: true });
+  const response = await api.invoke(referenceOnlyWatch);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.watchReference.status, "found");
+  assert.equal(result.watchReference.facts[0].sourceUrl, sourceUrl);
+  assert.equal(api.signCount(), 0);
+  assert.equal(api.requests.length, 2);
+  assert.equal(api.requests[0].tools[0].type, "web_search");
+  assert.equal(api.requests[0].tool_choice, "required");
+  assert.match(api.requests[0].input[1].content, /126233/);
+  assert.doesNotMatch(api.requests[0].input[1].content, /Aftermarket/, "Only model identity goes to research");
+  assert.equal(api.request().input[1].content.length, 1, "No empty image attachment");
+  assert.match(api.request().input[1].content[0].text, /36 mm/);
+  assert.match(api.request().input[0].content[0].text, /modifications ALWAYS OVERRIDE stock specifications/);
+  assert.match(api.request().input[1].content[0].text, /Aftermarket diamond bezel/);
+});
+
+test("ambiguous, absent and mismatched references never contribute stock specifications", async () => {
+  for (const lookup of [research({ status: "ambiguous" }), research({ status: "not_found" }), research({ matchedReference: "126233-0035" })]) {
+    const api = handler({ ai: true, lookup });
+    const result = await (await api.invoke(referenceOnlyWatch)).json();
+    assert.notEqual(result.watchReference.status, "found");
+    assert.deepEqual(result.watchReference.facts, []);
+    assert.doesNotMatch(api.request().input[1].content[0].text, /36 mm/);
+  }
+});
+
+test("unretrieved and unsafe source URLs cannot support a watch fact", async () => {
+  for (const searchSources of [[], ["javascript:alert(1)"], ["https://127.0.0.1/watch"]]) {
+    const url = searchSources[0] || sourceUrl;
+    const api = handler({ ai: true, searchSources, lookup: research({ facts: [{ label: "Movement", value: "Unsupported fact", sourceUrl: url }] }) });
+    const result = await (await api.invoke(referenceOnlyWatch)).json();
+    assert.equal(result.watchReference.status, "not_found");
+  }
+  const api = handler({ ai: true, searchSources: ["https://www.rolex.com/other"] });
+  const result = await (await api.invoke(referenceOnlyWatch)).json();
+  assert.equal(result.watchReference.status, "not_found");
+  assert.doesNotMatch(api.request().input[1].content[0].text, /36 mm/);
+});
+
+test("lookup failures and missing AI config return explicit limitations without invented specifications", async () => {
+  for (const options of [{ ai: true, searchFails: true }, {}]) {
+    const api = handler(options);
+    const response = await api.invoke(referenceOnlyWatch);
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.watchReference.status, "unavailable");
+    assert.match(result.watchReference.warnings[0], /unavailable/);
+    assert.deepEqual(result.watchReference.facts, []);
+  }
+  const api = handler({ ai: true, copyFails: true });
+  const result = await (await api.invoke(referenceOnlyWatch)).json();
+  assert.equal(result.mode, "placeholder");
+  assert.match(result.generatedDescription, /Aftermarket diamond bezel/);
+  assert.doesNotMatch(result.generatedDescription, /36 mm/);
+  assert.equal((await api.invoke({ itemKind: "watch", watchDetails: { name: "Rolex" } })).status, 400);
 });

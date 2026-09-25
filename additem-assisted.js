@@ -92,6 +92,11 @@
     isReadingWeight: false,
     isCapturingPhotos: false,
     isGeneratingCopy: false,
+    generationRevision: 0,
+    generationRequestId: 0,
+    generatedCopyStale: false,
+    generationFingerprint: "",
+    watchReference: null,
     isProcessingImage: false,
     isAutoBlackProcessing: false,
     autoStraightenBackground: false,
@@ -596,6 +601,9 @@
         stableWeight: Number.isFinite(state.stableWeight) ? state.stableWeight : null,
         generatedTitle: asTrimmedString(elements.generatedTitleInput?.value),
         generatedDescription: asTrimmedString(elements.generatedDescriptionInput?.value),
+        generatedCopyStale: state.generatedCopyStale,
+        generationFingerprint: state.generationFingerprint,
+        watchReference: state.watchReference,
       },
       mainFields: {
         title: asTrimmedString(elements.mainTitleInput?.value),
@@ -888,6 +896,15 @@
       }
 
       setAISelectedImage(elements, nextAIPath, { silent: true, skipDraftSave: true });
+      state.generationFingerprint = payload.assistedFields?.generationFingerprint || "";
+      state.generatedCopyStale = Boolean(payload.assistedFields?.generatedCopyStale)
+        || Boolean(state.generationFingerprint && state.generationFingerprint !== generationFingerprint(elements));
+      state.watchReference = state.generatedCopyStale ? null : payload.assistedFields?.watchReference || null;
+      elements.applyCopyButton.disabled = state.generatedCopyStale;
+      updateCopyMode(elements);
+      renderWatchReference();
+      if (state.generatedCopyStale) setInlineStatus(elements.generateStatus, "Details changed. Generate again before applying this draft.", "is-waiting");
+      else if (elements.generatedDescriptionInput.value) setInlineStatus(elements.generateStatus, "Your saved draft is ready to review and edit. Reference sources, when available, are shown below.", "is-success");
       updateSaveSelectionSummary(elements);
       renderUploadedImages(elements);
       document.dispatchEvent(new Event("add-item-assisted:metadata-change"));
@@ -1883,10 +1900,15 @@
   }
 
   function markGeneratedCopyNeedsRefresh(elements, reason) {
+    state.generationRevision += 1;
+    state.watchReference = null;
+    renderWatchReference();
     const hasGeneratedCopy = asTrimmedString(elements.generatedTitleInput?.value)
       || asTrimmedString(elements.generatedDescriptionInput?.value);
 
     if (!hasGeneratedCopy) return;
+    state.generatedCopyStale = true;
+    elements.applyCopyButton.disabled = true;
 
     setInlineStatus(
       elements.generateStatus,
@@ -3363,6 +3385,68 @@
     }
   }
 
+  function generationFingerprint(elements) {
+    const payload = collectAssistedWorkflowGenerationInputs(elements);
+    const { existingTitle, existingDescription, qrType, watchDetails, ...inputs } = payload;
+    return JSON.stringify({ ...inputs, watchDetails: watchDetails ? Object.fromEntries(
+      ["name", "model", "materials", "modifications"].map((key) => [key, watchDetails[key] || ""])
+    ) : null });
+  }
+
+  function updateCopyMode(elements) {
+    const watch = window.addItemWizard?.isWatch();
+    const panel = document.getElementById("item-ai-copy");
+    if (panel) {
+      panel.hidden = state.activeWorkflow !== "assisted" && !watch;
+      panel.querySelector("summary").textContent = watch ? "Generate from watch reference" : "Generate from selected photo";
+    }
+    document.getElementById("assisted-copy-help").textContent = watch
+      ? "Look up the brand and reference from Information to draft your listing. A photo is optional. Your materials and modifications take priority; review the sources and copy before applying."
+      : "Use your selected photo and item details to suggest a title and description. Review the copy before applying it.";
+    if (!state.isGeneratingCopy) elements.generateCopyButton.textContent = watch ? "Look Up Reference & Generate" : "Generate Title & Description";
+    if (!elements.generatedDescriptionInput.value && !state.isGeneratingCopy) {
+      setInlineStatus(elements.generateStatus, watch
+        ? "Enter the brand and reference in Information, then look up the model here. A photo is optional."
+        : "Choose an AI image in Photos, then generate or write your own copy.", null);
+    }
+  }
+
+  function renderWatchReference() {
+    const panel = document.getElementById("watch-reference-results");
+    if (!panel) return;
+    panel.replaceChildren();
+    const lookup = state.watchReference;
+    panel.hidden = !lookup || !window.addItemWizard?.isWatch();
+    if (panel.hidden) return;
+    const heading = document.createElement("h4");
+    heading.textContent = lookup.status === "found" ? `Standard reference: ${lookup.matchedName} ${lookup.matchedReference}` : "Reference lookup";
+    panel.append(heading);
+    const context = document.createElement("p");
+    context.textContent = "These sources describe the factory model. Check the details against your watch; your modifications take priority.";
+    if (lookup.status === "found") panel.append(context);
+    const list = document.createElement("ul");
+    for (const fact of Array.isArray(lookup.facts) ? lookup.facts : []) {
+      let url;
+      try { url = new URL(fact.sourceUrl); } catch { continue; }
+      if (url.protocol !== "https:" || url.username || url.password) continue;
+      const item = document.createElement("li");
+      item.append(document.createTextNode(`${fact.label}: ${fact.value} `));
+      const link = document.createElement("a");
+      link.href = url.href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = `(${fact.sourceTitle || url.hostname})`;
+      item.append(link);
+      list.append(item);
+    }
+    panel.append(list);
+    for (const warning of Array.isArray(lookup.warnings) ? lookup.warnings : []) {
+      const note = document.createElement("p");
+      note.textContent = warning;
+      panel.append(note);
+    }
+  }
+
   async function handleGenerateCopy(elements) {
     if (state.isGeneratingCopy) return;
 
@@ -3376,8 +3460,10 @@
       addLengthOption(elements, payload.length);
     }
 
-    if (!payload.imagePath) {
-      setInlineStatus(elements.generateStatus, "Select an AI image before generating copy.", "is-error");
+    if (!payload.imagePath && !(payload.itemKind === "watch" && payload.watchDetails?.model)) {
+      setInlineStatus(elements.generateStatus, payload.itemKind === "watch"
+        ? "Enter a reference number in Information, or select a photo, before generating copy."
+        : "Select an AI image before generating copy.", "is-error");
       return;
     }
 
@@ -3405,15 +3491,26 @@
     }
 
     state.isGeneratingCopy = true;
+    const requestId = ++state.generationRequestId;
+    const revision = state.generationRevision;
+    const fingerprint = generationFingerprint(elements);
+    elements.applyCopyButton.disabled = true;
     setButtonBusy(elements.generateCopyButton, "Generating...", "Generate Title & Description", true);
     setInlineStatus(
       elements.generateStatus,
-      "Generating inventory copy from the selected AI image, stable weight, and assisted fields...",
+      payload.itemKind === "watch" && payload.watchDetails?.model
+        ? "Looking up the reference and drafting your description with your modifications. This may take about a minute..."
+        : "Generating inventory copy from your item details and selected photo...",
       "is-waiting"
     );
 
     try {
       const response = await requestAIGenerationForSelectedImage(payload);
+      if (requestId !== state.generationRequestId) return;
+      if (revision !== state.generationRevision || fingerprint !== generationFingerprint(elements)) {
+        setInlineStatus(elements.generateStatus, "Details changed during generation. Generate again to use the current information.", "is-waiting");
+        return;
+      }
       const generatedTitle = asTrimmedString(response?.generatedTitle);
       const generatedDescription = asTrimmedString(response?.generatedDescription);
 
@@ -3423,22 +3520,29 @@
 
       elements.generatedTitleInput.value = generatedTitle;
       elements.generatedDescriptionInput.value = generatedDescription;
+      state.generatedCopyStale = false;
+      state.generationFingerprint = fingerprint;
+      state.watchReference = payload.itemKind === "watch" ? response?.watchReference || null : null;
+      renderWatchReference();
       scheduleAddItemDraftSave(elements);
 
       if (response?.mode === "openai") {
         setInlineStatus(
           elements.generateStatus,
-          "AI-generated copy is ready from the selected AI image. Review and edit it before using it in the Add Item form.",
+          state.watchReference?.status === "found"
+            ? "Reference sources and AI draft are ready. Review the standard specifications and your modifications, then apply the copy."
+            : "AI draft is ready. Review and edit it before applying; any lookup limitations are shown below.",
           "is-success"
         );
       } else {
         setInlineStatus(
           elements.generateStatus,
-          "Generated copy is ready from secure backend placeholder mode. Review and edit it before using it in the Add Item form.",
+          "AI writing is unavailable. A basic draft from your entered details is ready to edit; researched facts have not been added to this draft.",
           "is-waiting"
         );
       }
     } catch (error) {
+      if (requestId !== state.generationRequestId) return;
       console.error("AI generation request failed:", error);
       setInlineStatus(
         elements.generateStatus,
@@ -3446,12 +3550,26 @@
         "is-error"
       );
     } finally {
-      state.isGeneratingCopy = false;
-      setButtonBusy(elements.generateCopyButton, "Generating...", "Generate Title & Description", false);
+      if (requestId === state.generationRequestId) {
+        // Preserve errors and stale-response notices when restoring the idle button.
+        const status = elements.generateStatus.textContent;
+        const statusClass = elements.generateStatus.className;
+        state.isGeneratingCopy = false;
+        setButtonBusy(elements.generateCopyButton, "Generating...", "Generate Title & Description", false);
+        elements.applyCopyButton.disabled = state.generatedCopyStale;
+        updateCopyMode(elements);
+        elements.generateStatus.textContent = status;
+        elements.generateStatus.className = statusClass;
+      }
     }
   }
 
   function handleApplyGeneratedCopy(elements) {
+    if (state.isGeneratingCopy || state.generatedCopyStale) return;
+    if (state.generationFingerprint && state.generationFingerprint !== generationFingerprint(elements)) {
+      markGeneratedCopyNeedsRefresh(elements, "Details changed. Generate again before applying this draft.");
+      return;
+    }
     const generatedTitle = asTrimmedString(elements.generatedTitleInput?.value);
     const generatedDescription = asTrimmedString(elements.generatedDescriptionInput?.value);
 
@@ -3486,6 +3604,15 @@
     state.stableWeight = null;
     state.isReadingWeight = false;
     state.isGeneratingCopy = false;
+    state.generationRevision += 1;
+    state.generationRequestId += 1;
+    state.generatedCopyStale = false;
+    state.generationFingerprint = "";
+    state.watchReference = null;
+    elements.applyCopyButton.disabled = false;
+    elements.generateCopyButton.disabled = false;
+    renderWatchReference();
+    updateCopyMode(elements);
     state.saveSelectedUploadedImagePaths = [];
 
     applyDefaultSilver925Selection(elements);
@@ -3535,8 +3662,7 @@
     elements.assistedTab.setAttribute("aria-selected", isAssisted ? "true" : "false");
     elements.manualPanel.hidden = !isManual;
     elements.assistedPanel.hidden = !isAssisted;
-    const aiCopy = document.getElementById("item-ai-copy");
-    if (aiCopy) aiCopy.hidden = !isAssisted;
+    updateCopyMode(elements);
 
     if (isAssisted && !state.captureStations.length) {
       loadActiveCaptureStations(elements).catch((error) => {
@@ -3664,6 +3790,7 @@
     });
 
     elements.mainWeightInput?.addEventListener("input", () => {
+      markGeneratedCopyNeedsRefresh(elements, "Weight changed. Generate again to use the updated measurement.");
       if (!state.isReadingWeight) {
         const currentWeight = parseWeightInput(elements.mainWeightInput.value);
         state.stableWeight = Number.isFinite(currentWeight) ? currentWeight : null;
@@ -3710,6 +3837,8 @@
     });
     document.addEventListener("add-item:wizard-change", () => scheduleAddItemDraftSave(elements));
     document.addEventListener("add-item:mode-change", (event) => {
+      updateCopyMode(elements);
+      renderWatchReference();
       if (event.detail?.restoring) return;
       markGeneratedCopyNeedsRefresh(elements, "Item mode changed. Generate again to use the current information.");
       if (!event.detail?.isWatch) syncSilver925Pricing(elements);
@@ -3719,6 +3848,7 @@
 
   function exposeModule(elements) {
     window.addItemAssistedModule = {
+      getWatchReferenceLookup: () => state.generatedCopyStale ? null : state.watchReference,
       isPhotoBusy: () => Boolean(state.isCapturingPhotos || state.isProcessingImage || state.isAutoBlackProcessing || elements.localImageUploadInput?.disabled),
       getSelectedUploadedImagesForSave,
       getSelectedUploadedImagePathsForSave,
