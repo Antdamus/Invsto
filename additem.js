@@ -1181,23 +1181,23 @@ let uploadedImages = [];
 
     const searchHTML = `
       <div class="dropdown-search-container">
-        <input type="text" id="${searchId}" class="dropdown-search" placeholder="${placeholder}">
+        <input type="text" id="${searchId}" class="dropdown-search" placeholder="${placeholder}" aria-label="${placeholder}" autocomplete="off">
       </div>
     `;
 
     const buildOptionsHTML = (filteredOpts, searchTerm) => {
       let html = filteredOpts.map(opt => `
-        <div class="${optionClass}" data-${dataAttribute}="${opt}" data-value="${opt}">
-          ${opt}
-        </div>
+        <button type="button" class="${optionClass}" data-${dataAttribute}="${escapeDropdownHtml(opt)}" data-value="${escapeDropdownHtml(opt)}">
+          ${escapeDropdownHtml(opt)}
+        </button>
       `).join("");
 
       const exactMatch = options.some(opt => opt.toLowerCase() === searchTerm.toLowerCase());
       if (searchTerm && !exactMatch) {
         html += `
-          <div class="${optionClass} new-entry" data-${dataAttribute}="${searchTerm}" data-value="${searchTerm}" data-new="true">
-            ➕ Create "${searchTerm}"
-          </div>
+          <button type="button" class="${optionClass} new-entry" data-${dataAttribute}="${escapeDropdownHtml(searchTerm)}" data-value="${escapeDropdownHtml(searchTerm)}" data-new="true">
+            ➕ Create "${escapeDropdownHtml(searchTerm)}"
+          </button>
         `;
       }
       return html;
@@ -1237,18 +1237,42 @@ let uploadedImages = [];
           }
 
           menu.classList.remove("show");
+          toggleBtn.setAttribute("aria-expanded", "false");
+          toggleBtn.focus({ preventScroll: true });
         });
       });
     };
 
+    toggleBtn.setAttribute("aria-controls", menuId);
+    toggleBtn.setAttribute("aria-expanded", "false");
     attachClickHandlers();
 
     input?.addEventListener("input", (e) => {
-      const searchTerm = e.target.value.toLowerCase();
-      container.innerHTML = buildOptionsHTML(options, searchTerm);
-      requestAnimationFrame(() => attachClickHandlers());
+      const searchTerm = e.target.value.trim();
+      const matches = options.filter(option => option.toLowerCase().includes(searchTerm.toLowerCase()));
+      container.innerHTML = buildOptionsHTML(matches, searchTerm);
+      attachClickHandlers();
     });
   }
+
+  function toggleItemDropdown(menu, toggle) {
+    const open = menu.classList.toggle("show");
+    toggle.setAttribute("aria-expanded", String(open));
+    if (open && window.matchMedia("(max-width: 900px)").matches) {
+      requestAnimationFrame(() => menu.scrollIntoView({ block: "nearest", behavior: "instant" }));
+    }
+  }
+
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    const menu = event.target.closest?.(".custom-dropdown")?.querySelector(".dropdown-menu.show");
+    if (!menu) return;
+    menu.classList.remove("show");
+    const toggle = menu.parentElement.querySelector(".dropdown-toggle");
+    toggle?.setAttribute("aria-expanded", "false");
+    toggle?.focus({ preventScroll: true });
+    event.preventDefault();
+  });
 
   // === dropdownoption=== //
   function setupCategoryDropdownToggle() {
@@ -1282,7 +1306,7 @@ let uploadedImages = [];
         menu.dataset.populated = "true";
       }
 
-      menu.classList.toggle("show");
+      toggleItemDropdown(menu, e.target);
     });
   }
 
@@ -2531,7 +2555,7 @@ let uploadedImages = [];
         menu.dataset.populated = "true";
       }
 
-      menu.classList.toggle("show");
+      toggleItemDropdown(menu, button);
       activeTypeDropdown = menu.classList.contains("show") ? menu : null;
     });
 

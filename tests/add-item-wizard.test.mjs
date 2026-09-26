@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, mkdir } from "node:fs/promises";
 import { createServer } from "node:http";
 import { test, before, after } from "node:test";
-import { chromium } from "@playwright/test";
+import { chromium, webkit } from "@playwright/test";
 
 const root = new URL("../", import.meta.url);
 let server, browser, origin;
@@ -28,7 +28,7 @@ const mockServices = () => {
   };
   const user = { id: "test-user", email: "test@example.invalid" };
   window.supabase = {
-    auth: { getUser: async () => ({ data: { user } }) },
+    auth: { getUser: async () => ({ data: { user } }), getSession: async () => ({ data: { session: { user } } }) },
     functions: { invoke: async (name, options) => {
       if (name === "generate-inventory-copy") {
         window.testGeneration.push(options.body);
@@ -48,7 +48,7 @@ const mockServices = () => {
     from(table) {
       let operation = "select", payload, single = false;
       const query = {
-        select() { return query; }, eq() { return query; }, order() { return query; },
+        select() { return query; }, eq() { return query; }, neq() { return query; }, order() { return query; },
         limit() { return query; }, in() { return query; }, not() { return query; },
         single() { single = true; return query; }, maybeSingle() { single = true; return query; },
         insert(data) { operation = "insert"; payload = data; return query; },
@@ -57,6 +57,7 @@ const mockServices = () => {
         then(resolve, reject) {
           let result = { data: single ? null : [] };
           if (table === "employees") result.data = { role: "admin", active: true };
+          if (table === "item_types" && operation === "select") result.data = (window.testCategories || []).map(category => ({ categories: [category] }));
           if (table === "add_item_drafts") {
             if (operation === "upsert") localStorage.setItem("test-draft", JSON.stringify(payload));
             if (operation === "delete") localStorage.removeItem("test-draft");
@@ -88,7 +89,7 @@ before(async () => {
       let content = await readFile(new URL(name, root), "utf8");
       if (name.endsWith("html")) {
         content = content.replace(/<script src="([^"]+)"(?: defer)?><\/script>/g, (tag, src) =>
-          ["additem-wizard.js", "additem.js", "additem-assisted.js", "barcode-scanner.js"].includes(src.split("?")[0]) ? tag : "");
+          ["admin-nav.js", "additem-wizard.js", "additem.js", "additem-assisted.js", "barcode-scanner.js"].includes(src.split("?")[0]) ? tag : "");
         content = content.replace("<head>", `<head><script>(${mockServices.toString()})();</script>`);
       }
       res.setHeader("Content-Type", name.endsWith("css") ? "text/css" : name.endsWith("js") ? "text/javascript" : "text/html");
@@ -97,19 +98,19 @@ before(async () => {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
-  browser = await chromium.launch({ headless: true });
+  browser = await (process.env.INVSTO_ITEM_BROWSER === "webkit" ? webkit : chromium).launch({ headless: true });
 });
 after(async () => { await browser?.close(); await new Promise((resolve) => server?.close(resolve)); });
 
 async function pageFor(t, viewport = { width: 1365, height: 1000 }) {
-  const page = await browser.newPage({ viewport });
+  const page = await browser.newPage({ viewport, isMobile: viewport.width <= 900, hasTouch: viewport.width <= 900 });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/*", (route) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
   await page.goto(`${origin}/add-item.html`);
-  await page.waitForFunction(() => window.addItemAssistedModule);
+  await page.waitForFunction(() => window.addItemAssistedModule && document.body.classList.contains("admin-unified-nav"));
   await page.waitForFunction(() => document.getElementById("assisted-generate-status").textContent.includes("Choose an AI image"));
-  t.after(async () => { assert.deepEqual(errors, []); await page.close(); });
+  t.after(async () => { await page.close(); assert.deepEqual(errors, []); });
   return page;
 }
 const step = (page) => page.locator("[data-item-step]:visible").getAttribute("data-item-step");
@@ -229,10 +230,13 @@ test("mobile watch form has one active step, no horizontal overflow and usable n
   assert.equal(await page.locator("[data-item-step]:visible").count(), 1);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   assert.equal(await page.evaluate(() => {
-    const button = document.getElementById("item-step-next");
-    const rect = button.getBoundingClientRect();
-    return button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
-  }), true, "Next remains clickable above the focused form");
+    const navigation = document.querySelector(".item-step-navigation");
+    const section = document.querySelector("[data-item-step]:not([hidden])");
+    return navigation.getBoundingClientRect().top >= section.getBoundingClientRect().bottom;
+  }), true, "Navigation follows the form instead of covering fields");
+  await category(page, "Watches");
+  await next(page);
+  assert.equal(await step(page), "photos");
   await mkdir(new URL("test-results/", root), { recursive: true });
   await page.screenshot({ path: new URL("test-results/add-item-mobile.png", root).pathname.replace(/^\/(\w:)/, "$1"), fullPage: true });
   await page.setViewportSize({ width: 1365, height: 1000 });
@@ -240,7 +244,7 @@ test("mobile watch form has one active step, no horizontal overflow and usable n
 });
 
 test("photo selection survives navigation and watch facts reach assisted generation", async (t) => {
-  const page = await pageFor(t);
+  const page = await pageFor(t, { width: 390, height: 744 });
   await page.evaluate(() => localStorage.setItem("test-draft", JSON.stringify({ payload: {
     activeWorkflow: "assisted",
     wizard: { step: "photos", furthest: 1, itemKind: "watch", watchDetails: { name: "Custom watch", model: "M1", materials: "Steel case, leather strap", modifications: "Replacement dial" } },
@@ -253,6 +257,19 @@ test("photo selection survives navigation and watch facts reach assisted generat
   await page.waitForFunction(() => window.addItemAssistedModule?.getAISelectedUploadedImagePath() === "test.jpg");
   assert.equal(await step(page), "photos");
   assert.equal(await page.locator("#assisted-selected-image-preview").isVisible(), true);
+  await assertPhoneLayout(page, 'selected photo on phone');
+  await page.getByText('Edit selected photo', { exact: true }).click();
+  await assertPhoneLayout(page, 'expanded photo tools on phone');
+  await page.locator('#assisted-open-image-editor').click();
+  await page.waitForFunction(() => !document.querySelector('#assisted-image-editor-modal').classList.contains('hidden'));
+  const editorBounds = await page.locator('.assisted-editor-dialog').boundingBox();
+  assert.ok(editorBounds.x >= 0 && editorBounds.x + editorBounds.width <= 390);
+  await page.locator('#assisted-editor-save').scrollIntoViewIfNeeded();
+  assert.equal(await page.evaluate(() => {
+    const button = document.querySelector('#assisted-editor-save'), r = button.getBoundingClientRect();
+    return button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+  }), true, 'crop action can be reached on phone');
+  await page.locator('#assisted-editor-close').click();
   await page.screenshot({ path: new URL("test-results/add-item-photos.png", root).pathname.replace(/^\/(\w:)/, "$1"), fullPage: true });
   await next(page);
   await page.locator("#item-step-back").click();
@@ -510,4 +527,112 @@ test("camera barcode updates the new item label and saved barcode on mobile", as
   await page.locator('button[type="submit"]').first().click();
   await page.waitForFunction(() => window.testWrites.length === 1);
   assert.equal(await page.evaluate(() => window.testWrites[0].barcode), '000-COIN-27');
+});
+
+
+async function assertPhoneLayout(page, label) {
+  const problems = await page.evaluate(() => {
+    const width = window.innerWidth;
+    const visible = element => element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden';
+    const outside = [...document.querySelectorAll('.header-actions, .item-progress button, [data-item-step]:not([hidden]) input:not([type=hidden]), [data-item-step]:not([hidden]) select, [data-item-step]:not([hidden]) textarea, [data-item-step]:not([hidden]) button')]
+      .filter(visible).filter(element => { const r = element.getBoundingClientRect(); return r.left < -1 || r.right > width + 1; })
+      .map(element => element.id || element.className);
+    const smallText = [...document.querySelectorAll('[data-item-step]:not([hidden]) input:not([type=checkbox]):not([type=radio]), [data-item-step]:not([hidden]) select, [data-item-step]:not([hidden]) textarea')]
+      .filter(visible).filter(element => parseFloat(getComputedStyle(element).fontSize) < 16).map(element => element.id);
+    return { overflow: document.documentElement.scrollWidth > width, outside, smallText };
+  });
+  assert.deepEqual(problems, { overflow: false, outside: [], smallText: [] }, label);
+}
+
+test('phone category menu stays above navigation, scrolls every option, filters, and creates categories', async t => {
+  const page = await pageFor(t, { width: 390, height: 744 });
+  await page.locator('[name="item-kind"][value="watch"]').check();
+  await page.locator('#watch-name').fill('Test watch');
+  await page.evaluate(() => { window.testCategories = ['bracelets', 'chains', 'necklace', 'pendants', 'testcard', ...Array.from({ length: 25 }, (_, i) => `Watch category ${String(i).padStart(2, '0')}`)]; });
+  await page.locator('#category-dropdown-toggle').click();
+  const menu = page.locator('#category-dropdown-menu');
+  await page.waitForFunction(() => document.querySelector('#category-dropdown-menu').classList.contains('show'));
+  assert.equal(await page.locator('#category-dropdown-toggle').getAttribute('aria-expanded'), 'true');
+  const bounds = await menu.boundingBox(), nav = await page.locator('.item-step-navigation').boundingBox();
+  assert.ok(bounds.y + bounds.height <= nav.y, 'menu pushes footer down');
+  const last = menu.locator('.dropdown-option').last();
+  await last.scrollIntoViewIfNeeded();
+  await mkdir(new URL('test-results/', root), { recursive: true });
+  await page.screenshot({ path: new URL('test-results/add-item-category-phone.png', root).pathname.replace(/^\/(\w:)/, '$1') });
+  await last.click();
+  assert.equal(await page.locator('#category').inputValue(), 'Watch category 24');
+  await page.locator('#category-dropdown-toggle').click();
+  await page.locator('#category-dropdown-search').fill('chains');
+  assert.equal(await menu.locator('.dropdown-option').count(), 1);
+  await menu.locator('.dropdown-option').click();
+  assert.equal(await page.locator('#category').inputValue(), 'chains');
+  await page.locator('#category-dropdown-toggle').click();
+  await page.locator('#category-dropdown-search').fill('Custom <watch> category');
+  await menu.locator('.new-entry').click();
+  assert.equal(await page.locator('#category').inputValue(), 'Custom <watch> category');
+  assert.equal(await menu.locator('watch').count(), 0, 'category names stay text');
+  await page.locator('#category-dropdown-toggle').click();
+  await page.locator('#category-dropdown-search').press('Escape');
+  assert.equal(await menu.isVisible(), false);
+  await next(page);
+  assert.equal(await step(page), 'photos');
+  await page.locator('#item-step-back').click();
+  assert.equal(await page.locator('#category').inputValue(), 'Custom <watch> category');
+});
+
+test('all eight add-item steps fit small phones, portrait and landscape with jewelry, watches and coins', async t => {
+  for (const [mode, viewport] of [['jewelry', { width: 320, height: 568 }], ['watch', { width: 390, height: 744 }], ['coin', { width: 844, height: 390 }]]) {
+    const page = await pageFor(t, viewport);
+    await page.locator(`[name="item-kind"][value="${mode}"]`).check();
+    if (mode === 'watch') await page.locator('#watch-name').fill('Mobile watch');
+    if (mode === 'coin') await page.locator('#coin-name').fill('Mobile collector coin');
+    if (mode === 'jewelry') await page.locator('#weight').fill('10');
+    await category(page, 'Mobile category');
+    await assertPhoneLayout(page, `${mode}: information`);
+    await next(page);
+    await assertPhoneLayout(page, `${mode}: photos`);
+    await next(page);
+    await page.locator('#title').fill('Mobile inventory item');
+    await page.locator('#description').fill('Phone entry');
+    await assertPhoneLayout(page, `${mode}: description`);
+    await next(page);
+    if (mode !== 'jewelry') { await page.locator('#cost').fill('50'); await page.locator('#sale-price').fill('100'); }
+    await assertPhoneLayout(page, `${mode}: pricing`);
+    for (const name of ['labels', 'stock', 'marketplace', 'review']) {
+      await next(page);
+      assert.equal(await step(page), name);
+      await assertPhoneLayout(page, `${mode}: ${name}`);
+      if (name === 'marketplace') await page.locator('#ebay-sync-enabled').uncheck();
+    }
+    await page.locator('#item-step-review button[type=submit]').scrollIntoViewIfNeeded();
+    assert.equal(await page.evaluate(() => {
+      const button = document.querySelector('#item-step-review button[type=submit]'), r = button.getBoundingClientRect();
+      return button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+    }), true, 'save button is unobstructed');
+    await page.screenshot({ path: new URL(`test-results/add-item-${mode}-phone-review.png`, root).pathname.replace(/^\/(\w:)/, '$1') });
+  }
+});
+
+test('phone dialogs and dropdowns adapt to a keyboard-sized visible viewport', async t => {
+  const page = await pageFor(t, { width: 390, height: 744 });
+  await page.evaluate(() => {
+    // Model Safari's visual viewport shrinking while its layout viewport stays tall.
+    Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: 340 });
+    window.visualViewport.dispatchEvent(new Event('resize'));
+    setupAddLocationModalListeners();
+    document.querySelector('#modal-add-location').classList.remove('hidden');
+    document.body.classList.add('modal-open');
+  });
+  await page.locator('#location-type-dropdown-toggle').click();
+  const menu = page.locator('#location-type-dropdown-menu');
+  await page.waitForFunction(() => document.querySelector('#location-type-dropdown-menu').classList.contains('show'));
+  assert.ok((await menu.boundingBox()).height <= 188, 'list respects visible height');
+  const dialog = page.locator('.modal-content-addlocation');
+  assert.ok((await dialog.boundingBox()).height <= 316, 'dialog respects keyboard space');
+  await page.locator('#location-notes').fill('Visible with the keyboard open');
+  await page.locator('#btn-submit-location').scrollIntoViewIfNeeded();
+  assert.equal(await page.evaluate(() => {
+    const button = document.querySelector('#btn-submit-location'), r = button.getBoundingClientRect();
+    return r.bottom <= 340 && button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+  }), true, 'entire dialog can scroll to its action buttons');
 });

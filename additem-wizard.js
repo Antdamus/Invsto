@@ -2,6 +2,16 @@
   const form = document.getElementById("add-item-form");
   if (!form) return;
 
+  // Mobile keyboards can shrink the visible area without resizing the layout viewport.
+  function updateVisibleHeight() {
+    document.documentElement.style.setProperty("--item-visible-height", `${window.visualViewport?.height || window.innerHeight}px`);
+    document.documentElement.style.setProperty("--item-visible-top", `${window.visualViewport?.offsetTop || 0}px`);
+  }
+  window.visualViewport?.addEventListener("resize", updateVisibleHeight);
+  window.visualViewport?.addEventListener("scroll", updateVisibleHeight);
+  window.addEventListener("resize", updateVisibleHeight);
+  updateVisibleHeight();
+
   const steps = [...form.querySelectorAll("[data-item-step]")];
   const links = [...form.querySelectorAll("[data-item-step-target]")];
   const names = ["Information", "Photos", "Description", "Pricing", "Labels", "Stock", "Marketplace", "Review"];

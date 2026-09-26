@@ -57,3 +57,45 @@
   .item-review-summary > div { grid-template-columns: 1fr; gap: 6px; }
   .item-optional-details { padding: 12px; }
 }
+
+/* Keep touch layouts in document flow so menus and keyboards cannot sit behind navigation. */
+@media (max-width: 900px) {
+  html { scroll-padding-top: calc(84px + env(safe-area-inset-top)); }
+  body.add-body.admin-unified-nav.admin-nav-offset { padding-top: calc(72px + env(safe-area-inset-top)); }
+  .add-body.admin-unified-nav .mobile-header { padding-top: calc(14px + env(safe-area-inset-top)); padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+  .add-body .page { padding-inline: max(10px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-right)); padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+  .add-body .header-actions { min-width: 0; }
+  .add-body .header-copy, .add-body .add-main, .item-step { min-width: 0; }
+  .item-step-navigation { position: static; margin-bottom: env(safe-area-inset-bottom); }
+  .item-step-navigation button { flex: 1 1 0; min-width: 0; white-space: normal; }
+  #item-step-hint { display: none; }
+  .item-progress button { flex-direction: column; justify-content: center; overflow-wrap: anywhere; }
+  .add-body input:not([type=checkbox]):not([type=radio]), .add-body select, .add-body textarea { font-size: 16px; max-width: 100%; min-width: 0; }
+  .add-body button, .add-body summary { touch-action: manipulation; min-height: 44px; }
+  .add-body input, .add-body select, .add-body textarea, .add-body button, .item-step h2 { scroll-margin-block: calc(84px + env(safe-area-inset-top)) 20px; }
+  .add-body .dropdown-menu { position: static; margin-top: 10px; max-height: min(320px, calc(var(--item-visible-height, 100dvh) * .55)); overscroll-behavior-y: contain; }
+  .add-body .dropdown-menu.show { animation: none; }
+  .add-body .dropdown-search-container { position: sticky; top: -12px; z-index: 1; padding: 8px 0; background: #161316; }
+  .add-body .dropdown-option { min-height: 44px; overflow-wrap: anywhere; }
+  .add-body .assisted-generate-button { min-width: 0; white-space: normal; }
+  .add-body .assisted-reload-count-control { flex-wrap: wrap; }
+  .add-body .assisted-editor-close { flex-shrink: 0; min-width: 44px; min-height: 44px; }
+  .add-body .modal { padding: 12px; top: var(--item-visible-top, 0px); bottom: auto; height: var(--item-visible-height, 100dvh); align-items: flex-start; }
+  .add-body .modal-content-assign-location,
+  .add-body .modal-content-addlocation,
+  .add-body #modal-bulk-bag .modal-content-bulk,
+  .add-body .assisted-editor-dialog,
+  .add-body .item-save-success-dialog,
+  .add-body .stock-placement-signature-dialog {
+    max-height: calc(var(--item-visible-height, 100dvh) - 24px);
+    max-width: 100%; min-width: 0; overflow-y: auto; margin: 0;
+  }
+  /* Let the entire placement dialog scroll, including its header and confirmation buttons. */
+  .add-body .modal-content-assign-location, .add-body .modal-content-addlocation { display: block; }
+  .add-body .modal-body-assign-location, .add-body .modal-body-addlocation { overflow: visible; }
+}
+@media (max-width: 560px) {
+  .add-body .form-section, .add-body .workflow-shell { padding: 16px; }
+  .item-mode-picker { gap: 8px; }
+  .item-mode-picker label { flex: 1 1 auto; justify-content: center; padding: 12px; }
+}

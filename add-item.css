@@ -312,10 +312,8 @@ body.modal-open {
   animation: pageFadeUp 0.55s ease;
 }
 
-.form-section:focus-within,
-.form-section:has(.dropdown-menu.show) {
-  z-index: 80;
-}
+.form-section:focus-within { z-index: 80; }
+.form-section:has(.dropdown-menu.show) { z-index: 100; }
 
 .form-section-head {
   margin-bottom: 18px;
@@ -775,6 +773,7 @@ input[type="file"].add-input::file-selector-button {
 }
 
 .dropdown-option {
+  display: block; width: 100%; border: 0; background: transparent; font: inherit; text-align: left;
   padding: 12px 14px;
   border-radius: 14px;
   color: #f5efe6;

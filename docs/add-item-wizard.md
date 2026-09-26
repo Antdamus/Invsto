@@ -19,3 +19,11 @@ Wristwatch category 31387 follows [eBay's watch category reference](https://ir.e
 ## Verification
 
 Run `npm run test:add-item`. Browser tests load the real form, assisted module, and save handler with mocked database, photo storage, and label services. They cover navigation, validation, watch save payloads, drafts, photo selection, mode changes, and mobile layout. Backend tests exercise the copy endpoint with mocked storage and AI responses. No live inventory, capture station, or printer is used.
+
+## Phone layout
+
+At widths up to 900px, navigation follows the active step in normal document flow. Category and location-type lists expand within the form and scroll independently, with their search field kept visible. Search filters existing values and preserves the entered spelling for a new category. Options are keyboard-operable buttons; Escape closes the list.
+
+Phone fields use 16px text, controls have touch-sized targets, and the page accounts for safe-area insets. The visual viewport supplies dialog/list height limits when a mobile keyboard reduces the available space. Placement dialogs scroll as a whole so their confirmation buttons remain reachable.
+
+The browser suite includes the real role-navigation header, all eight steps at 320px and 390px portrait sizes and 844px landscape, a long category list, category creation/filtering, selected photos and the crop editor, and a simulated keyboard viewport. Run the WebKit mobile checks with `INVSTO_ITEM_BROWSER=webkit node --test --test-name-pattern="phone category|all eight|phone dialogs|photo selection" tests/add-item-wizard.test.mjs`. Physical iPhone keyboard behavior still needs device verification.
