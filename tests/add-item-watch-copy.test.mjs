@@ -79,6 +79,56 @@ const referenceOnlyWatch = {
   itemKind: "watch", watchDetails: { name: "Rolex", model: "126233", materials: "Steel case", modifications: "Aftermarket diamond bezel" },
 };
 
+test("coin drafts preserve identity, fineness, condition and fine content without requiring a photo or weight", async () => {
+  const api = handler();
+  const response = await api.invoke({ itemKind: "coin", material: "Silver", purity: "925", coinDetails: {
+    name: "Collector coin", year: "1776–1976", country: "United States", denomination: "$1", mint: "S",
+    metal: "Gold", fineness: "916.7", fineMetalContent: "1 troy oz gold", condition: "Circulated", notes: "Cleaned; rim damage",
+  } });
+  assert.equal(response.status, 200);
+  const copy = await response.json();
+  assert.match(copy.generatedDescription, /916.7/);
+  assert.match(copy.generatedDescription, /1 troy oz gold/);
+  assert.match(copy.generatedDescription, /Cleaned; rim damage/);
+  assert.match(copy.generatedDescription, /Raw \/ ungraded/);
+  assert.doesNotMatch(copy.generatedDescription, /925|Silver|Total weight|rare|authentic/i);
+  assert.equal(api.signCount(), 0);
+  assert.equal(copy.watchReference, null);
+});
+
+test("coin validation rejects missing identity, impossible purity and incomplete grading claims", async () => {
+  const api = handler();
+  for (const coinDetails of [ {}, { name: "Coin", metal: "Gold", fineness: "1001" }, { name: "Coin", metal: "Silver", fineness: "-1" }, { name: "Coin", gradingStatus: "certified", grade: "MS 65" }, { name: "Coin", gradingStatus: "self-assessed" }, { name: "Coin", gradingStatus: "made-up" } ]) {
+    assert.equal((await api.invoke({ itemKind: "coin", coinDetails })).status, 400);
+  }
+  const valid = await api.invoke({ itemKind: "coin", coinDetails: { name: "Coin", gradingStatus: "certified", grade: "AU details", gradingService: "NGC", certNumber: "001234-001", notes: "Cleaned" } });
+  assert.equal(valid.status, 200);
+  const copy = await valid.json();
+  assert.match(copy.generatedDescription, /AU details/);
+  assert.match(copy.generatedDescription, /001234-001/);
+});
+
+test("coin AI uses its own facts and prompt, omitting stale jewelry and inactive certification details", async () => {
+  const api = handler({ ai: true });
+  await api.invoke({ itemKind: "coin", material: "Silver", purity: "925", stoneType: "Diamond", watchDetails: { name: "Rolex", model: "126233" }, coinDetails: { name: "Copper coin", year: "1909", gradingStatus: "ungraded", grade: "MS 70", gradingService: "PCGS", certNumber: "old-cert", notes: "Scratched" } });
+  assert.equal(api.requests.length, 1, "Coins do not invoke watch research");
+  const request = api.request();
+  assert.equal(request.input[1].content.length, 1);
+  const prompt = request.input[1].content[0].text;
+  assert.match(prompt, /1909|Scratched/);
+  assert.doesNotMatch(prompt, /925|Silver|Diamond|Rolex|MS 70|PCGS|old-cert/);
+  assert.match(request.input[0].content[0].text, /self-assessed grades must explicitly say seller-assessed/i);
+  assert.match(request.input[0].content[0].text, /Proof is a strike\/finish/);
+});
+
+test("plated coins and seller-assessed grades cannot inherit solid-metal or certification claims", async () => {
+  const api = handler();
+  const result = await (await api.invoke({ itemKind: "coin", coinDetails: { name: "Commemorative", metal: "Plated / clad", fineness: "999", composition: "Gold plating over copper", gradingStatus: "self-assessed", grade: "AU 50", gradingService: "PCGS", certNumber: "old-cert" } })).json();
+  assert.match(result.generatedDescription, /Gold plating over copper/);
+  assert.match(result.generatedDescription, /Seller-assessed grade/);
+  assert.doesNotMatch(result.generatedDescription, /999|PCGS|old-cert/);
+});
+
 test("reference-only watches search the exact model, return sourced facts and skip image signing", async () => {
   const api = handler({ ai: true });
   const response = await api.invoke(referenceOnlyWatch);

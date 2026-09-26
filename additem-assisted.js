@@ -626,7 +626,7 @@
   function addItemDraftHasContent(payload) {
     if (!payload || typeof payload !== "object") return false;
     if (Array.isArray(payload.recentUploadedImages) && payload.recentUploadedImages.length > 0) return true;
-    if (payload.wizard?.itemKind === "watch") return true;
+    if (["watch", "coin"].includes(payload.wizard?.itemKind)) return true;
 
     const assisted = payload.assistedFields || {};
     const main = payload.mainFields || {};
@@ -1007,7 +1007,7 @@
   }
 
   function syncSilver925Pricing(elements) {
-    if (window.addItemWizard?.isWatch()) return;
+    if (window.addItemWizard?.usesDirectPricing()) return;
     const priceInput = document.getElementById("price-per-weight");
     if (!priceInput) return;
 
@@ -2223,17 +2223,19 @@
   function collectAssistedWorkflowGenerationInputs(elements) {
     const selectedImage = state.aiSelectedUploadedImage;
     const watchDetails = window.addItemWizard?.getWatchDetails() || null;
+    const coinDetails = window.addItemWizard?.getCoinDetails() || null;
 
     return {
       bucket: asTrimmedString(selectedImage?.storageBucket) || INVENTORY_UPLOAD_BUCKET,
       imagePath: state.aiSelectedUploadedImagePath,
-      itemKind: watchDetails ? "watch" : "jewelry",
+      itemKind: watchDetails ? "watch" : coinDetails ? "coin" : "jewelry",
+      coinDetails,
       watchDetails,
-      material: watchDetails ? "" : asTrimmedString(elements.materialSelect?.value),
-      purity: watchDetails ? "" : asTrimmedString(elements.puritySelect?.value),
+      material: coinDetails ? coinDetails.metal : watchDetails ? "" : asTrimmedString(elements.materialSelect?.value),
+      purity: coinDetails ? coinDetails.fineness : watchDetails ? "" : asTrimmedString(elements.puritySelect?.value),
       weight: resolveCurrentWeight(elements),
-      stoneType: asTrimmedString(elements.stoneTypeInput?.value),
-      length: asTrimmedString(elements.lengthInput?.value),
+      stoneType: coinDetails ? "" : asTrimmedString(elements.stoneTypeInput?.value),
+      length: coinDetails ? "" : asTrimmedString(elements.lengthInput?.value),
       notes: asTrimmedString(elements.notesInput?.value),
       category: getCurrentCategory(elements),
       qrType: asTrimmedString(elements.qrTypeSelect?.value),
@@ -3369,12 +3371,14 @@
     const button = document.getElementById("assisted-capture-photo");
     setButtonBusy(button, "Capturing...", "Capture Photos", true);
     try {
-      const watchDetails = window.addItemWizard?.getWatchDetails() || null;
+      const { material, purity, watchDetails, coinDetails, weight, itemKind } = collectAssistedWorkflowGenerationInputs(elements);
       await triggerIPhoneCapture({
-        material: watchDetails ? "" : asTrimmedString(elements.materialSelect?.value),
-        purity: watchDetails ? "" : asTrimmedString(elements.puritySelect?.value),
+        material,
+        purity,
         watchDetails,
-        weight: resolveCurrentWeight(elements),
+        coinDetails,
+        weight,
+        itemKind,
       }, elements);
     } catch (error) {
       elements.captureState.textContent = error?.message || "Could not capture photos. Try again or upload an image.";
@@ -3395,17 +3399,22 @@
 
   function updateCopyMode(elements) {
     const watch = window.addItemWizard?.isWatch();
+    const coin = window.addItemWizard?.isCoin();
     const panel = document.getElementById("item-ai-copy");
     if (panel) {
-      panel.hidden = state.activeWorkflow !== "assisted" && !watch;
-      panel.querySelector("summary").textContent = watch ? "Generate from watch reference" : "Generate from selected photo";
+      panel.hidden = state.activeWorkflow !== "assisted" && !watch && !coin;
+      panel.querySelector("summary").textContent = coin ? "Generate from coin details" : watch ? "Generate from watch reference" : "Generate from selected photo";
     }
-    document.getElementById("assisted-copy-help").textContent = watch
+    document.getElementById("assisted-copy-help").textContent = coin
+      ? "Draft a title and description from your coin's year, metal, condition and grading details. Photos are optional. This uses the details you enter; it does not authenticate or grade the coin."
+      : watch
       ? "Look up the brand and reference from Information to draft your listing. A photo is optional. Your materials and modifications take priority; review the sources and copy before applying."
       : "Use your selected photo and item details to suggest a title and description. Review the copy before applying it.";
-    if (!state.isGeneratingCopy) elements.generateCopyButton.textContent = watch ? "Look Up Reference & Generate" : "Generate Title & Description";
+    if (!state.isGeneratingCopy) elements.generateCopyButton.textContent = coin ? "Generate Coin Description" : watch ? "Look Up Reference & Generate" : "Generate Title & Description";
     if (!elements.generatedDescriptionInput.value && !state.isGeneratingCopy) {
-      setInlineStatus(elements.generateStatus, watch
+      setInlineStatus(elements.generateStatus, coin
+        ? "Enter the coin details in Information, then generate and review your draft here."
+        : watch
         ? "Enter the brand and reference in Information, then look up the model here. A photo is optional."
         : "Choose an AI image in Photos, then generate or write your own copy.", null);
     }
@@ -3460,7 +3469,7 @@
       addLengthOption(elements, payload.length);
     }
 
-    if (!payload.imagePath && !(payload.itemKind === "watch" && payload.watchDetails?.model)) {
+    if (!payload.imagePath && payload.itemKind !== "coin" && !(payload.itemKind === "watch" && payload.watchDetails?.model)) {
       setInlineStatus(elements.generateStatus, payload.itemKind === "watch"
         ? "Enter a reference number in Information, or select a photo, before generating copy."
         : "Select an AI image before generating copy.", "is-error");
@@ -3472,7 +3481,12 @@
       return;
     }
 
-    if (payload.itemKind !== "watch" && (!payload.material || !payload.purity)) {
+    if (payload.itemKind === "coin" && !payload.coinDetails?.name) {
+      setInlineStatus(elements.generateStatus, "Enter the coin name / series in Information before generating copy.", "is-error");
+      return;
+    }
+
+    if (payload.itemKind === "jewelry" && (!payload.material || !payload.purity)) {
       setInlineStatus(
         elements.generateStatus,
         "Choose both material and purity before generating copy.",
@@ -3481,7 +3495,7 @@
       return;
     }
 
-    if (payload.itemKind !== "watch" && !Number.isFinite(payload.weight)) {
+    if (payload.itemKind === "jewelry" && !Number.isFinite(payload.weight)) {
       setInlineStatus(
         elements.generateStatus,
         "Read or enter a weight before generating copy.",
@@ -3498,7 +3512,8 @@
     setButtonBusy(elements.generateCopyButton, "Generating...", "Generate Title & Description", true);
     setInlineStatus(
       elements.generateStatus,
-      payload.itemKind === "watch" && payload.watchDetails?.model
+      payload.itemKind === "coin" ? "Drafting coin copy from your entered details and optional photo..."
+        : payload.itemKind === "watch" && payload.watchDetails?.model
         ? "Looking up the reference and drafting your description with your modifications. This may take about a minute..."
         : "Generating inventory copy from your item details and selected photo...",
       "is-waiting"
@@ -3827,13 +3842,14 @@
       "watch-model",
       "watch-materials",
       "watch-modifications",
+      ...Array.from(document.querySelectorAll("#coin-fields input, #coin-fields select, #coin-fields textarea"), (input) => input.id),
     ].forEach((id) => {
       const input = document.getElementById(id);
       input?.addEventListener("input", () => scheduleAddItemDraftSave(elements));
       input?.addEventListener("change", () => scheduleAddItemDraftSave(elements));
-      if (id.startsWith("watch-")) input?.addEventListener("input", () => {
-        markGeneratedCopyNeedsRefresh(elements, "Watch details changed. Generate again to use the updated information.");
-      });
+      if (id.startsWith("watch-") || id.startsWith("coin-")) ["input", "change"].forEach((eventName) => input?.addEventListener(eventName, () => {
+        markGeneratedCopyNeedsRefresh(elements, "Item details changed. Generate again to use the updated information.");
+      }));
     });
     document.addEventListener("add-item:wizard-change", () => scheduleAddItemDraftSave(elements));
     document.addEventListener("add-item:mode-change", (event) => {

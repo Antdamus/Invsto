@@ -14,12 +14,12 @@
 .item-progress button:disabled { color: var(--text-muted); opacity: .55; cursor: default; }
 .item-step-navigation { position: sticky; bottom: 12px; z-index: 90; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border: 1px solid var(--border-strong); border-radius: 18px; background: rgba(20, 17, 20, .97); box-shadow: var(--shadow-soft); }
 #item-step-hint { color: var(--text-muted); font-size: .88rem; }
-.item-mode-picker { display: flex; gap: 12px; padding: 0; margin: 0 0 22px; border: 0; }
+.item-mode-picker { display: flex; flex-wrap: wrap; gap: 12px; padding: 0; margin: 0 0 22px; border: 0; }
 .item-mode-picker legend { margin-bottom: 10px; font-weight: 700; color: var(--text-soft); }
 .item-mode-picker label { display: flex; align-items: center; gap: 10px; padding: 12px 24px; border: 1px solid var(--border); border-radius: 14px; cursor: pointer; }
 .item-mode-picker label:has(input:checked) { border-color: var(--gold); background: rgba(216, 180, 122, .1); }
 .item-mode-picker input { accent-color: var(--gold); }
-#watch-fields, #jewelry-material-fields { margin-bottom: 20px; }
+#watch-fields, #coin-fields, #jewelry-material-fields { margin-bottom: 20px; }
 #watch-fields .form-field-wide { grid-column: auto; }
 .item-optional-details { margin: 18px 0; border: 1px solid var(--border); border-radius: 14px; padding: 14px 18px; }
 .item-optional-details > summary { cursor: pointer; color: var(--text-soft); font-weight: 700; }

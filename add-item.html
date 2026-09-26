@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="add-item.css" />
   <link rel="stylesheet" href="additembulk.css" />
   <link rel="stylesheet" href="additem-assisted.css" />
-  <link rel="stylesheet" href="additem-wizard.css?v=20260925-watch-lookup" />
+  <link rel="stylesheet" href="additem-wizard.css?v=20260926-coins" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 </head>
 
@@ -58,12 +58,42 @@
             <legend>Item mode</legend>
             <label><input type="radio" name="item-kind" value="jewelry" checked /> Jewelry</label>
             <label><input type="radio" name="item-kind" value="watch" /> Watch</label>
+            <label><input type="radio" name="item-kind" value="coin" /> Coin</label>
           </fieldset>
           <div id="watch-fields" class="form-grid form-grid-2" hidden>
             <label class="form-field" for="watch-name"><span class="form-label">Brand / watch name</span><input id="watch-name" class="add-input" placeholder="e.g. Rolex or Rolex Datejust" maxlength="200" disabled /></label>
             <label class="form-field" for="watch-model"><span class="form-label">Model / reference number (if known)</span><input id="watch-model" class="add-input" placeholder="e.g. 126233" maxlength="200" disabled /><span class="field-helper">Use the full reference. In Description, AI can look up standard model details and draft the listing.</span></label>
             <label class="form-field form-field-wide" for="watch-materials"><span class="form-label">Materials by component (if known)</span><textarea id="watch-materials" class="add-input add-textarea" placeholder="e.g. Stainless steel case, 18K yellow gold bezel, steel and gold bracelet" maxlength="4000" disabled></textarea><span class="field-helper">List each part and its material. Leave unknown materials unspecified.</span></label>
             <label class="form-field form-field-wide" for="watch-modifications"><span class="form-label">Modifications / customizations (optional)</span><textarea id="watch-modifications" class="add-input add-textarea" placeholder="e.g. Aftermarket diamond bezel, replacement dial, custom strap. Enter None only if confirmed." maxlength="4000" disabled></textarea></label>
+          </div>
+          <div id="coin-fields" hidden>
+            <div class="form-grid form-grid-2">
+              <label class="form-field" for="coin-name"><span class="form-label">Coin name / series</span><input id="coin-name" class="add-input" maxlength="200" placeholder="e.g. Morgan dollar, Gold Eagle" disabled /></label>
+              <label class="form-field" for="coin-year"><span class="form-label">Year / date on coin</span><input id="coin-year" class="add-input" maxlength="80" placeholder="e.g. 1881, 1776–1976, or undated" disabled /></label>
+              <label class="form-field" for="coin-country"><span class="form-label">Country / issuing authority</span><input id="coin-country" class="add-input" maxlength="200" placeholder="e.g. United States" disabled /></label>
+              <label class="form-field" for="coin-denomination"><span class="form-label">Denomination / face value</span><input id="coin-denomination" class="add-input" maxlength="100" placeholder="e.g. $1, $50, 1 peso" disabled /></label>
+              <label class="form-field" for="coin-mint"><span class="form-label">Mint / mint mark</span><input id="coin-mint" class="add-input" maxlength="150" placeholder="e.g. S — San Francisco; no mint mark" disabled /></label>
+              <label class="form-field" for="coin-condition"><span class="form-label">Reported condition</span><input id="coin-condition" class="add-input" maxlength="300" list="coin-condition-options" placeholder="Circulated, worn, damaged, or unknown" disabled /><datalist id="coin-condition-options"><option value="Circulated" /><option value="Uncirculated (owner reported)" /><option value="Worn" /><option value="Damaged" /></datalist></label>
+              <label class="form-field" for="coin-metal"><span class="form-label">Metal / composition</span><select id="coin-metal" class="add-input" disabled><option value="">Unknown / not entered</option><option>Gold</option><option>Silver</option><option>Platinum</option><option>Palladium</option><option>Copper</option><option>Nickel</option><option>Bronze</option><option>Plated / clad</option><option>Other / mixed</option></select></label>
+              <label class="form-field" for="coin-fineness"><span class="form-label">Purity (parts per 1,000)</span><input id="coin-fineness" class="add-input" type="number" min="0.1" max="1000" step="0.1" placeholder="e.g. 900, 916.7, 999.9" disabled /><span class="field-helper">999 means 99.9% purity. Leave unknown purity blank.</span></label>
+            </div>
+            <details class="item-optional-details"><summary>Grading and certification</summary>
+              <div class="form-grid form-grid-2">
+                <label class="form-field" for="coin-gradingStatus"><span class="form-label">Grading status</span><select id="coin-gradingStatus" class="add-input" disabled><option value="ungraded">Raw / ungraded</option><option value="self-assessed">Seller-assessed grade</option><option value="certified">Third-party graded</option></select></label>
+                <label class="form-field" for="coin-grade"><span class="form-label">Grade as stated</span><input id="coin-grade" class="add-input" maxlength="100" placeholder="e.g. MS 65, AU details" disabled /></label>
+                <label class="form-field" for="coin-gradingService"><span class="form-label">Grading service</span><input id="coin-gradingService" class="add-input" maxlength="100" placeholder="e.g. PCGS, NGC" disabled /></label>
+                <label class="form-field" for="coin-certNumber"><span class="form-label">Certification number (optional)</span><input id="coin-certNumber" class="add-input" maxlength="150" placeholder="Copy the number from the holder" disabled /></label>
+              </div><p class="field-helper">Record the holder's grade exactly. Seller assessments are kept separate from third-party grades.</p>
+            </details>
+            <details class="item-optional-details"><summary>Variety, metal content and condition notes</summary>
+              <div class="form-grid form-grid-2">
+                <label class="form-field" for="coin-variety"><span class="form-label">Variety / catalog reference</span><input id="coin-variety" class="add-input" maxlength="200" placeholder="Variety, error designation or catalog number" disabled /></label>
+                <label class="form-field" for="coin-finish"><span class="form-label">Strike / finish</span><input id="coin-finish" class="add-input" maxlength="150" placeholder="e.g. Proof, business strike" disabled /></label>
+                <label class="form-field" for="coin-fineMetalContent"><span class="form-label">Fine metal content (include unit)</span><input id="coin-fineMetalContent" class="add-input" maxlength="150" placeholder="e.g. 1 troy oz gold, if confirmed" disabled /><span class="field-helper">This is precious metal content, separate from total weight in grams.</span></label>
+                <label class="form-field" for="coin-composition"><span class="form-label">Composition details</span><input id="coin-composition" class="add-input" maxlength="500" placeholder="Alloy, plating or mixed materials" disabled /></label>
+                <label class="form-field form-field-wide" for="coin-notes"><span class="form-label">Condition notes / alterations</span><textarea id="coin-notes" class="add-input add-textarea" maxlength="4000" placeholder="Cleaning, scratches, toning, holes, damage, repairs or other known details" disabled></textarea></label>
+              </div>
+            </details>
           </div>
           <div id="jewelry-material-fields">            <div class="assisted-grid">
               <label class="assisted-field" for="assisted-material">
@@ -345,6 +375,7 @@
         <section class="form-section item-step" id="item-step-description" data-item-step="description" aria-labelledby="item-step-description-title" hidden>
           <div class="form-section-head"><h2 class="section-title" id="item-step-description-title" tabindex="-1">Title and description</h2><p class="section-copy">Write the listing or use the photo and information from the earlier steps.</p></div>
           <button type="button" id="use-watch-details" class="add-button-secondary" hidden>Fill from watch details</button>
+          <button type="button" id="use-coin-details" class="add-button-secondary" hidden>Use coin details as title</button>
           <details id="item-ai-copy" class="item-optional-details"><summary>Generate from selected photo</summary>            <section class="assisted-section" aria-labelledby="assisted-ai-title">
               <div class="assisted-section-header">
                 <div>
@@ -407,13 +438,14 @@
 
 </div>
           <p id="watch-description-note" class="field-helper" hidden>Your watch details are also included in the saved description. You can review the complete description before saving.</p>
+          <p id="coin-description-note" class="field-helper" hidden>Your coin details, reported condition and grading information are included in the saved description. Review the complete description before saving.</p>
         </section>
                 <section class="form-section item-step" id="item-step-pricing" data-item-step="pricing" aria-labelledby="item-step-pricing-title" hidden>
           <div class="form-section-head">
             <p class="section-kicker">Pricing and Supplier</p>
             <h2 class="section-title" id="item-step-pricing-title" tabindex="-1">Costing, Margin, and Source Details</h2>
             <p class="section-copy">
-              Enter the item cost and review the sale price. Watches use direct pricing; jewelry can use weight-based costing.
+              Enter the item cost and review the sale price. Watches and coins use direct pricing; jewelry can use weight-based costing.
             </p>
           </div>
 
@@ -973,8 +1005,8 @@
   <script src="admin-nav.js"></script>
   <script src="additem-dymolabel.js"></script>
   <script src="additembulk.js"></script>
-  <script src="additem-wizard.js?v=20260925-watch-lookup"></script>
-  <script src="additem.js?v=20260925-watch-lookup"></script>
-  <script src="additem-assisted.js?v=20260925-watch-lookup"></script>
+  <script src="additem-wizard.js?v=20260926-coins"></script>
+  <script src="additem.js?v=20260926-coins"></script>
+  <script src="additem-assisted.js?v=20260926-coins"></script>
 </body>
 </html>

@@ -9,12 +9,24 @@
   const next = document.getElementById("item-step-next");
   const error = document.getElementById("item-step-error");
   const watchKeys = ["name", "model", "materials", "modifications"];
+  const coinLabels = { name: "Name / series", year: "Year / date", country: "Issuing country", denomination: "Denomination", mint: "Mint / mint mark", metal: "Metal", fineness: "Purity (parts per 1,000)", condition: "Reported condition", variety: "Variety / reference", finish: "Strike / finish", fineMetalContent: "Fine metal content", composition: "Composition details", gradingStatus: "Grading status", grade: "Grade as stated", gradingService: "Grading service", certNumber: "Certification number", notes: "Condition notes / alterations" };
+  const coinKeys = Object.keys(coinLabels);
   let current = 0;
   let furthest = 0;
   let jewelryAutoCost = true;
 
   const value = (id) => document.getElementById(id)?.value?.trim() || "";
   const isWatch = () => form.querySelector('[name="item-kind"]:checked')?.value === "watch";
+  const isCoin = () => form.querySelector('[name="item-kind"]:checked')?.value === "coin";
+  const usesDirectPricing = () => isWatch() || isCoin();
+  const getCoinDetails = () => {
+    if (!isCoin()) return null;
+    const coin = Object.fromEntries(coinKeys.map((key) => [key, value(`coin-${key}`)]));
+    if (document.getElementById("coin-fineness").disabled) coin.fineness = "";
+    if (coin.gradingStatus === "ungraded") coin.grade = "";
+    if (coin.gradingStatus !== "certified") { coin.gradingService = ""; coin.certNumber = ""; }
+    return coin;
+  };
   const getWatchDetails = () => {
     if (!isWatch()) return null;
     const details = Object.fromEntries(watchKeys.map((key) => [key, value(`watch-${key}`)]));
@@ -24,6 +36,12 @@
 
   function descriptionForSave() {
     const description = value("description");
+    const coin = getCoinDetails();
+    if (coin) {
+      const statusNames = { ungraded: "Raw / ungraded", "self-assessed": "Seller-assessed (not third-party graded)", certified: "Third-party graded (as entered)" };
+      const details = ["Coin details:", ...coinKeys.filter((key) => coin[key]).map((key) => `${coinLabels[key]}: ${key === "gradingStatus" ? statusNames[coin[key]] : coin[key]}`)].join("\n");
+      return [description, details].filter(Boolean).join("\n\n");
+    }
     const watch = getWatchDetails();
     if (!watch) return description;
     const details = [
@@ -38,28 +56,50 @@
 
   function updateMode({ restoring = false } = {}) {
     const watch = isWatch();
+    const coin = isCoin();
+    const directPricing = watch || coin;
+    document.getElementById("coin-fields").hidden = !coin;
+    coinKeys.forEach((key) => { document.getElementById(`coin-${key}`).disabled = !coin; });
+    document.getElementById("coin-name").required = coin;
+    updateCoinGrading();
     document.getElementById("watch-fields").hidden = !watch;
-    document.getElementById("jewelry-material-fields").hidden = watch;
+    document.getElementById("jewelry-material-fields").hidden = directPricing;
     watchKeys.forEach((key) => { document.getElementById(`watch-${key}`).disabled = !watch; });
     document.getElementById("watch-name").required = watch;
-    document.getElementById("weight").required = !watch;
-    document.getElementById("item-weight-label").textContent = watch ? "Total weight (g, optional)" : "Weight (g)";
-    document.getElementById("description").required = !watch;
+    document.getElementById("weight").required = !directPricing;
+    document.getElementById("item-weight-label").textContent = directPricing ? "Total weight (g, optional)" : "Weight (g)";
+    document.getElementById("description").required = !directPricing;
     document.getElementById("watch-description-note").hidden = !watch;
     document.getElementById("use-watch-details").hidden = !watch;
+    document.getElementById("coin-description-note").hidden = !coin;
+    document.getElementById("use-coin-details").hidden = !coin;
+    ["assisted-stone-type", "assisted-length"].forEach((id) => { document.getElementById(id).closest("label").hidden = coin; });
 
     const autoCost = document.getElementById("auto-cost-checkbox");
-    if (watch && !autoCost.disabled && !restoring) jewelryAutoCost = autoCost.checked;
-    autoCost.checked = watch ? false : jewelryAutoCost;
-    autoCost.disabled = watch;
-    document.getElementById("price-per-weight").disabled = watch;
+    if (directPricing && !autoCost.disabled && !restoring) jewelryAutoCost = autoCost.checked;
+    autoCost.checked = directPricing ? false : jewelryAutoCost;
+    autoCost.disabled = directPricing;
+    document.getElementById("price-per-weight").disabled = directPricing;
     const salePrice = document.getElementById("sale-price");
-    salePrice.readOnly = !watch;
-    salePrice.required = watch;
-    salePrice.placeholder = watch ? "Enter sale price ($)" : "Sale Price (auto)";
+    salePrice.readOnly = !directPricing;
+    salePrice.required = directPricing;
+    salePrice.placeholder = directPricing ? "Enter sale price ($)" : "Sale Price (auto)";
     salePrice.inputMode = "decimal";
-    document.dispatchEvent(new CustomEvent("add-item:mode-change", { detail: { isWatch: watch, restoring } }));
+    document.dispatchEvent(new CustomEvent("add-item:mode-change", { detail: { isWatch: watch, isCoin: coin, restoring } }));
     renderReview();
+  }
+
+  function updateCoinGrading() {
+    const coin = isCoin();
+    const status = value("coin-gradingStatus");
+    const grade = document.getElementById("coin-grade");
+    grade.disabled = !coin || status === "ungraded";
+    grade.required = coin && status !== "ungraded";
+    const service = document.getElementById("coin-gradingService");
+    service.disabled = !coin || status !== "certified";
+    service.required = coin && status === "certified";
+    document.getElementById("coin-certNumber").disabled = !coin || status !== "certified";
+    document.getElementById("coin-fineness").disabled = !coin || !value("coin-metal") || ["Plated / clad", "Other / mixed"].includes(value("coin-metal"));
   }
 
   function renderReview() {
@@ -67,7 +107,7 @@
     const selectedPhotos = window.addItemAssistedModule?.getSelectedUploadedImagesForSave?.() || [];
     const watch = getWatchDetails();
     const rows = [
-      ["Mode", watch ? "Watch" : "Jewelry"],
+      ["Mode", watch ? "Watch" : isCoin() ? "Coin" : "Jewelry"],
       ["Title", value("title") || "Not entered"],
       ["Category", value("category") || "Not selected"],
       ["Description", descriptionForSave() || "Not entered"],
@@ -147,7 +187,7 @@
     if (index === 0 && !value("category")) {
       return fail(index, document.getElementById("category-dropdown-toggle"), "Select or create an item category.");
     }
-    if (index === 3 && isWatch()) {
+    if (index === 3 && usesDirectPricing()) {
       const price = Number(value("sale-price").replace(/,/g, ""));
       if (!Number.isFinite(price) || price <= 0) return fail(index, document.getElementById("sale-price"), "Enter a sale price greater than zero.");
     }
@@ -163,15 +203,25 @@
       for (let i = current; i < index; i += 1) if (!validateStep(i)) return;
     }
     if (isWatch()) fillWatchTitle();
+    if (isCoin()) fillCoinTitle();
     showStep(index);
   }
 
   function fillWatchTitle(overwrite = false) {
     const watch = getWatchDetails();
     const title = document.getElementById("title");
-    if (!watch || (!overwrite && value("title") && title.value !== title.dataset.watchTitle)) return;
+    if (!watch || (!overwrite && value("title") && title.value !== title.dataset.watchTitle && title.value !== title.dataset.coinTitle)) return;
     title.value = [watch.name, watch.model].filter(Boolean).join(" ");
     title.dataset.watchTitle = title.value;
+    title.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function fillCoinTitle(overwrite = false) {
+    const coin = getCoinDetails();
+    const title = document.getElementById("title");
+    if (!coin || (!overwrite && value("title") && title.value !== title.dataset.coinTitle && title.value !== title.dataset.watchTitle)) return;
+    title.value = [coin.year, coin.name, coin.mint, coin.gradingStatus === "certified" && coin.gradingService, coin.grade && `${coin.grade}${coin.gradingStatus === "self-assessed" ? " (seller assessed)" : ""}`].filter(Boolean).join(" ");
+    title.dataset.coinTitle = title.value;
     title.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
@@ -181,6 +231,9 @@
   form.querySelectorAll('[name="item-kind"]').forEach((radio) => radio.addEventListener("change", () => updateMode()));
   document.getElementById("use-watch-details").textContent = "Use watch name as title";
   document.getElementById("use-watch-details").addEventListener("click", () => fillWatchTitle(true));
+  document.getElementById("use-coin-details").addEventListener("click", () => fillCoinTitle(true));
+  document.getElementById("coin-gradingStatus").addEventListener("change", updateCoinGrading);
+  document.getElementById("coin-metal").addEventListener("change", updateCoinGrading);
   document.addEventListener("add-item-assisted:metadata-change", () => {
     if (current === steps.length - 1) renderReview();
   });
@@ -206,28 +259,36 @@
     jewelryAutoCost = true;
     furthest = 0;
     delete document.getElementById("title").dataset.watchTitle;
+    delete document.getElementById("title").dataset.coinTitle;
     updateMode({ restoring: true });
     showStep(0, { focus: false, persist: false });
   });
 
   window.addItemWizard = {
     isWatch,
+    isCoin,
+    usesDirectPricing,
     getWatchDetails,
+    getCoinDetails,
     descriptionForSave,
     getDraft: () => ({
       step: steps[current].dataset.itemStep,
       furthest,
-      itemKind: isWatch() ? "watch" : "jewelry",
+      itemKind: isWatch() ? "watch" : isCoin() ? "coin" : "jewelry",
+      coinDetails: Object.fromEntries(coinKeys.map((key) => [key, value(`coin-${key}`)])),
       watchDetails: Object.fromEntries(watchKeys.map((key) => [key, value(`watch-${key}`)])),
       autoCost: document.getElementById("auto-cost-checkbox").checked,
       autoWatchTitle: document.getElementById("title").dataset.watchTitle || "",
-      jewelryAutoCost: isWatch() ? jewelryAutoCost : document.getElementById("auto-cost-checkbox").checked,
+      autoCoinTitle: document.getElementById("title").dataset.coinTitle || "",
+      jewelryAutoCost: usesDirectPricing() ? jewelryAutoCost : document.getElementById("auto-cost-checkbox").checked,
     }),
     restoreDraft: (draft = {}) => {
-      const kind = draft.itemKind === "watch" ? "watch" : "jewelry";
+      const kind = ["watch", "coin"].includes(draft.itemKind) ? draft.itemKind : "jewelry";
       form.querySelector(`[name="item-kind"][value="${kind}"]`).checked = true;
       watchKeys.forEach((key) => { document.getElementById(`watch-${key}`).value = draft.watchDetails?.[key] || ""; });
+      coinKeys.forEach((key) => { document.getElementById(`coin-${key}`).value = draft.coinDetails?.[key] || (key === "gradingStatus" ? "ungraded" : ""); });
       document.getElementById("title").dataset.watchTitle = draft.autoWatchTitle || "";
+      document.getElementById("title").dataset.coinTitle = draft.autoCoinTitle || "";
       jewelryAutoCost = (draft.jewelryAutoCost ?? draft.autoCost) !== false;
       updateMode({ restoring: true });
       furthest = Math.max(0, Math.min(Number(draft.furthest) || 0, steps.length - 1));

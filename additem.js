@@ -682,6 +682,11 @@ let uploadedImages = [];
 
   function getAssistedMaterialPurityForSave() {
     if (window.addItemWizard?.isWatch()) return { metal: null, purity_basis_points: null };
+    const coin = window.addItemWizard?.getCoinDetails();
+    if (coin) return {
+      metal: ["Gold", "Silver"].includes(coin.metal) ? coin.metal.toLowerCase() : null,
+      purity_basis_points: coin.fineness ? Math.round(Number(coin.fineness) * 10) : null,
+    };
     const selected = window.addItemAssistedModule?.getSelectedMaterialPurity?.() || {};
     return {
       metal: normalizeInventoryMetal(selected.material),
@@ -715,6 +720,7 @@ let uploadedImages = [];
   }
 
   function inferAddItemEbayCategory() {
+    if (window.addItemWizard?.isCoin()) return null;
     if (window.addItemWizard?.isWatch()) return getAddItemEbayCategoryOption("31387");
     const text = [
       document.getElementById("title")?.value || "",
@@ -893,6 +899,17 @@ let uploadedImages = [];
     const enabled = document.getElementById("ebay-sync-enabled");
     const summary = document.getElementById("ebay-readiness-summary");
     if (!select || !enabled || !summary) return;
+
+    const coin = Boolean(window.addItemWizard?.isCoin());
+    enabled.disabled = coin;
+    if (coin) {
+      enabled.checked = false;
+      select.value = "";
+      select.disabled = true;
+      summary.className = "form-field form-field-wide ebay-readiness-summary is-muted";
+      summary.textContent = "Your coin will be saved to inventory. Coin publishing on eBay needs coin-specific categories and grading descriptors; automatic eBay sync is off for coin entries.";
+      return;
+    }
 
     select.disabled = !enabled.checked;
     if (enabled.checked && !select.value && options.infer !== false) {
@@ -1274,7 +1291,7 @@ let uploadedImages = [];
 //#region functions needed to set the final sale cost of items
   //Cost & Sale Price Auto-Calculation
   function updateCostFromWeight() {
-    if (window.addItemWizard?.isWatch()) return;
+    if (window.addItemWizard?.usesDirectPricing()) return;
     if (!autoCostCheckbox?.checked) return;
     const weight = parseFloat(document.getElementById("weight")?.value || "0");
     const pricePerWeight = parseFloat(pricePerWeightInput?.value || "0");
@@ -1317,7 +1334,7 @@ let uploadedImages = [];
     });
     pricePerWeightInput?.addEventListener('input', updateCostFromWeight);
     document.getElementById('cost')?.addEventListener('input', () => {
-      if (window.addItemWizard?.isWatch()) {
+      if (window.addItemWizard?.usesDirectPricing()) {
         updateAddItemEbayReadiness();
         return;
       }
@@ -2903,13 +2920,14 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const title = document.getElementById("title").value.trim();
   const description = window.addItemWizard?.descriptionForSave() ?? document.getElementById("description").value.trim();
   const watch_details = window.addItemWizard?.getWatchDetails() || null;
+  const coin_details = window.addItemWizard?.getCoinDetails() || null;
   const weightInputValue = document.getElementById("weight").value.trim();
   const weight = weightInputValue ? parseFloat(weightInputValue) : null;
-  const stone_type = document.getElementById("assisted-stone-type")?.value?.trim() || null;
-  const item_length = document.getElementById("assisted-length")?.value?.trim() || null;
-  const price_per_weight = watch_details ? null : parseFloat(pricePerWeightInput?.value || "0");
+  const stone_type = coin_details ? null : document.getElementById("assisted-stone-type")?.value?.trim() || null;
+  const item_length = coin_details ? null : document.getElementById("assisted-length")?.value?.trim() || null;
+  const price_per_weight = watch_details || coin_details ? null : parseFloat(pricePerWeightInput?.value || "0");
   const materialPurity = getAssistedMaterialPurityForSave();
-  const ebay_sync_enabled = document.getElementById("ebay-sync-enabled")?.checked !== false;
+  const ebay_sync_enabled = !coin_details && document.getElementById("ebay-sync-enabled")?.checked !== false;
   // force sync dropdown selection into hidden input if user typed or skipped selection
   const categoryButton = document.getElementById("category-dropdown-toggle");
   const categoryHiddenInput = document.getElementById("category");
@@ -2920,7 +2938,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const categories = categoryInput ? [categoryInput] : [];
   const selectedEbayCategoryId = String(document.getElementById("ebay-category-id")?.value || "").trim();
   const inferredEbayCategoryId = inferAddItemEbayCategory()?.id || "";
-  const ebay_category_id = selectedEbayCategoryId || inferredEbayCategoryId || null;
+  const ebay_category_id = coin_details ? null : selectedEbayCategoryId || inferredEbayCategoryId || null;
   const ebay_aspects = ebay_sync_enabled
     ? buildAddItemEbayAspects(ebay_category_id, materialPurity, weight, item_length)
     : {};
@@ -3029,6 +3047,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
       title,
       description,
       ...(watch_details ? { watch_details } : {}),
+      ...(coin_details ? { coin_details } : {}),
       weight,
       stone_type,
       item_length,
@@ -3036,7 +3055,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
       purity_basis_points: materialPurity.purity_basis_points,
       ebay_sync_enabled,
       ebay_category_id,
-      ebay_condition: "NEW",
+      ebay_condition: coin_details ? null : "NEW",
       ebay_aspects,
       price_per_weight,
       categories,
