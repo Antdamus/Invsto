@@ -9,6 +9,8 @@
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="live-sales.css" />
   <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera-fields" />
+  <script src="barcode-scanner.js?v=20260926-camera-fields" defer></script>
 </head>
 <body>
   <div class="mobile-header">
@@ -171,7 +173,7 @@
             <p class="step-copy">Review the auction number and every item in this bag. Press Enter or confirm when it is correct, or go back to scan more items.</p>
             <label>
               Auction Number
-              <input id="auction-number" type="text" placeholder="Scan or type auction number" autocomplete="off" />
+              <input id="auction-number" data-camera-scan type="text" placeholder="Scan or type auction number" autocomplete="off" />
             </label>
             <label>
               Bag Owner
@@ -228,7 +230,7 @@
               <small>This seller owns the current auction bag.</small>
             </label>
             <div class="scan-row">
-              <input id="item-scan" type="search" placeholder="Scan item barcode" autocomplete="off" disabled />
+              <input id="item-scan" data-camera-scan type="search" placeholder="Scan item barcode" autocomplete="off" disabled />
               <button id="scan-item" type="button" class="secondary-btn" disabled>Scan</button>
             </div>
             <section class="manual-live-item-box" aria-label="Add general non-inventory item">
@@ -323,7 +325,7 @@
         </button>
       </header>
       <div class="bag-history-toolbar">
-        <input id="bag-history-search" type="search" placeholder="Search auction, bag, barcode, item, or source" autocomplete="off" />
+        <input id="bag-history-search" data-camera-scan type="search" placeholder="Search auction, bag, barcode, item, or source" autocomplete="off" />
       </div>
       <div class="bag-history-layout">
         <aside id="bag-history-list" class="bag-history-list">
@@ -382,7 +384,7 @@
         </label>
         <label>
           Replacement Item Barcode
-          <input id="edit-bag-replacement-scan" type="search" placeholder="Optional: scan correct item barcode" autocomplete="off" />
+          <input id="edit-bag-replacement-scan" data-camera-scan data-camera-action="edit-bag-find-replacement" type="search" placeholder="Optional: scan correct item barcode" autocomplete="off" />
         </label>
       </div>
       <div class="button-row">

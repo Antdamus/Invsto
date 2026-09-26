@@ -14,8 +14,8 @@
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
   <script src="https://qajavascriptsdktests.azurewebsites.net/JavaScript/dymo.connect.framework.js"></script>
 
-  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera" />
-  <script src="barcode-scanner.js?v=20260926-camera" defer></script>
+  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera-fields" />
+  <script src="barcode-scanner.js?v=20260926-camera-fields" defer></script>
 </head>
 <body>
   
@@ -37,7 +37,7 @@
           <a href="dashboard.html" class="back-button">
             <i data-lucide="arrow-left" class="icon"></i> Back
           </a>
-          <input type="text" id="input-to-search-inventory-item" placeholder="Scan barcode here..." autocomplete="off" />
+          <input type="text" id="input-to-search-inventory-item" data-camera-scan placeholder="Scan barcode here..." autocomplete="off" />
           <button type="button" class="camera-scan-button" data-scan-target="input-to-search-inventory-item">Scan with camera</button>
         </div>
       </header>
@@ -189,7 +189,7 @@
               </div>
               <input
                 type="text"
-                id="assign-placement-tray-barcode"
+                id="assign-placement-tray-barcode" data-camera-scan
                 class="location-search-input"
                 placeholder="Scan tray barcode"
                 autocomplete="off"
@@ -206,7 +206,7 @@
               </div>
               <input
                 type="text"
-                id="assign-placement-parent-barcode"
+                id="assign-placement-parent-barcode" data-camera-scan
                 class="location-search-input"
                 placeholder="Scan parent storage barcode"
                 autocomplete="off"
@@ -223,7 +223,7 @@
               </div>
               <input
                 type="text"
-                id="assign-placement-container-barcode"
+                id="assign-placement-container-barcode" data-camera-scan
                 class="location-search-input"
                 placeholder="Scan container barcode"
                 autocomplete="off"

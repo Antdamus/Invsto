@@ -11,6 +11,8 @@
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="inventory-activity.css" />
   <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera-fields" />
+  <script src="barcode-scanner.js?v=20260926-camera-fields" defer></script>
 </head>
 
 <body>
@@ -120,7 +122,7 @@
 
           <label class="activity-search">
             <span>Search</span>
-            <input id="activity-search" type="search" placeholder="Item, barcode, worker, location..." />
+            <input id="activity-search" data-camera-scan type="search" placeholder="Item, barcode, worker, location..." />
           </label>
         </div>
 

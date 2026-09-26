@@ -13,6 +13,8 @@
   <link rel="stylesheet" href="admin-taxdocs.css" />
   <link rel="stylesheet" href="admin-users.css" />
   <link rel="stylesheet" href="admin-changes.css" />
+  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera-fields" />
+  <script src="barcode-scanner.js?v=20260926-camera-fields" defer></script>
 </head>
 
 <body>
@@ -903,7 +905,7 @@
           </label>
           <label class="filter grow">
             <span>Search</span>
-            <input id="changesSearchInput" type="search" placeholder="Item, barcode, location, worker, field..." />
+            <input id="changesSearchInput" data-camera-scan type="search" placeholder="Item, barcode, location, worker, field..." />
           </label>
         </section>
 

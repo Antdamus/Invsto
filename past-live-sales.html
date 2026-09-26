@@ -10,6 +10,8 @@
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="past-live-sales.css" />
   <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera-fields" />
+  <script src="barcode-scanner.js?v=20260926-camera-fields" defer></script>
 </head>
 <body class="past-live-body">
   <div class="mobile-header">
@@ -143,7 +145,7 @@
           </label>
           <label class="wide-filter">
             Search
-            <input id="filter-search" type="search" placeholder="Show, auction, bag, item barcode, worker, notes..." autocomplete="off" />
+            <input id="filter-search" data-camera-scan type="search" placeholder="Show, auction, bag, item barcode, worker, notes..." autocomplete="off" />
           </label>
         </section>
 

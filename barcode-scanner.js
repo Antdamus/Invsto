@@ -3,6 +3,53 @@
   const scriptBase = new URL('.', document.currentScript.src);
   let libraryPromise, dialog, ui, active, generation = 0;
 
+  // Explicitly marked inputs get the same adjacent control, including fields
+  // inserted later by dropdowns and modals. Their existing listeners stay intact.
+  const fieldButtons = new WeakMap();
+  function enhanceField(input) {
+    if (!input.matches('input[data-camera-scan]') || !input.id) return;
+    let button = fieldButtons.get(input);
+    if (!button) {
+      const next = input.nextElementSibling;
+      button = next?.dataset.scanTarget === input.id ? next : document.createElement('button');
+      button.type = 'button';
+      button.classList.add('camera-scan-button');
+      button.dataset.scanTarget = input.id;
+      button.textContent = 'Scan with camera';
+      button.setAttribute('aria-label', `Scan with camera: ${input.getAttribute('aria-label') || input.placeholder || input.id}`);
+      if (input.dataset.cameraAction) button.dataset.scanAction = input.dataset.cameraAction;
+      const wrapper = document.createElement('span');
+      wrapper.className = 'camera-scan-field';
+      input.before(wrapper);
+      wrapper.append(input, button);
+      fieldButtons.set(input, button);
+      input.autocomplete = 'off';
+      input.setAttribute('autocapitalize', 'off');
+      input.spellcheck = false;
+    }
+    button.disabled = input.disabled || input.readOnly;
+    button.hidden = input.hidden || input.type === 'hidden';
+  }
+
+  function enhanceFields(root) {
+    if (root.nodeType !== Node.ELEMENT_NODE) return;
+    if (root.matches('input[data-camera-scan]')) enhanceField(root);
+    root.querySelectorAll('input[data-camera-scan]').forEach(enhanceField);
+  }
+
+  function watchFields() {
+    enhanceFields(document.body);
+    new MutationObserver(records => {
+      for (const record of records) {
+        if (record.type === 'attributes') enhanceField(record.target);
+        else record.addedNodes.forEach(enhanceFields);
+      }
+    }).observe(document.body, { childList: true, subtree: true, attributes: true,
+      attributeFilter: ['disabled', 'readonly', 'hidden', 'type', 'data-camera-scan'] });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchFields, { once: true });
+  else watchFields();
+
   function loadReader() {
     if (window.ZXingBrowser) return Promise.resolve(window.ZXingBrowser);
     if (!libraryPromise) libraryPromise = new Promise((resolve, reject) => {
@@ -193,6 +240,8 @@
     dialog.addEventListener('close', () => { if (!dialog.open && active) finish(); });
     // Keep Enter/Escape from reaching the underlying stock confirmation modal.
     dialog.addEventListener('keydown', event => event.stopPropagation());
+    // Keep dropdowns and underlying dialogs open while operating the scanner.
+    dialog.addEventListener('click', event => event.stopPropagation());
     ui.retry.addEventListener('click', () => startCamera());
     ui.switchCamera.addEventListener('click', () => {
       const cameras = active.cameras;
@@ -215,6 +264,10 @@
       target.value = code; // Keep strings intact, including leading zeros.
       target.dispatchEvent(new Event('input', { bubbles: true }));
       target.dispatchEvent(new Event('change', { bubbles: true }));
+      // Only explicit lookup actions run here; never synthesize Enter, which
+      // some workflows use to submit sales, finalize bags, or confirm transfers.
+      const lookup = document.getElementById(trigger.dataset.scanAction || '');
+      if (lookup && !lookup.disabled) lookup.click();
     });
   }
 

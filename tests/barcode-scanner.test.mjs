@@ -221,7 +221,7 @@ test('stock scan clears search filters and returns the matching item through rea
     document.body.append(location);
   });
   await fakeCamera(page);
-  await page.locator('[data-scan-target="stock-barcode-search"]').click();
+  await page.locator('[data-scan-target="stock-barcode-search"]').first().click();
   await page.waitForFunction(() => window.deliverBarcode);
   await page.evaluate(() => window.deliverBarcode('000123'));
   await page.locator('[data-camera="use"]').click();
@@ -240,6 +240,111 @@ test('each placement scan button points to an editable input; disabled fields ca
   }
   const page = await pageFor(t);
   await page.locator('#input-to-search-inventory-item').evaluate(el => { el.disabled = true; });
-  await open(page);
+  await page.waitForFunction(() => document.querySelector('[data-scan-target="input-to-search-inventory-item"]').disabled);
   assert.equal(await page.locator('dialog').count(), 0);
+});
+
+test('barcode entry fields across the app have one adjacent camera control, including later-created fields', async t => {
+  const pages = ['add-item.html', 'add-inventory.html', 'stock.html', 'pending-orders.html', 'live-sales.html', 'locations.html', 'store-transfers.html', 'ebay-order-history.html', 'ebay-returns.html', 'inventory-activity.html', 'past-live-sales.html', 'admin.html'];
+  let covered = 0;
+  for (const name of pages) {
+    const page = await pageFor(t, name);
+    const fields = await page.locator('input').evaluateAll(inputs => inputs
+      .filter(input => ['text', 'search'].includes(input.type) && !input.readOnly && input.id !== 'manual-live-item-description' && /barcode|scan|tracking/i.test(`${input.id} ${input.placeholder}`))
+      .map(input => ({ id: input.id, marked: input.hasAttribute('data-camera-scan'), adjacent: input.parentElement.classList.contains('camera-scan-field'), buttons: [...input.parentElement.querySelectorAll('[data-scan-target]')].filter(button => button.dataset.scanTarget === input.id).length, disabled: input.disabled, buttonDisabled: input.nextElementSibling?.disabled })));
+    for (const field of fields) {
+      assert.equal(field.marked, true, `${name}: ${field.id} is marked`);
+      assert.equal(field.adjacent, true, `${name}: ${field.id} has adjacent control`);
+      assert.equal(field.buttons, 1, `${name}: ${field.id} has no duplicate camera button`);
+      assert.equal(field.buttonDisabled, field.disabled, `${name}: ${field.id} follows its input state`);
+    }
+    covered += fields.length;
+    const badActions = await page.locator('[data-camera-action]').evaluateAll(inputs => inputs.filter(input => !document.getElementById(input.dataset.cameraAction)).map(input => input.id));
+    assert.deepEqual(badActions, [], `${name}: every lookup action exists`);
+    await page.close();
+  }
+  assert.equal(covered, 43);
+  const page = await pageFor(t);
+  await page.evaluate(() => {
+    const holder = document.createElement('div'); holder.id = 'dynamic-test-field';
+    holder.innerHTML = '<input id="dynamic-location" data-camera-scan placeholder="Scan location" disabled>';
+    document.body.append(holder);
+  });
+  await page.waitForFunction(() => document.querySelector('[data-scan-target="dynamic-location"]'));
+  assert.equal(await page.locator('[data-scan-target="dynamic-location"]').isDisabled(), true);
+  await page.locator('#dynamic-location').evaluate(input => { input.disabled = false; });
+  await page.waitForFunction(() => !document.querySelector('[data-scan-target="dynamic-location"]').disabled);
+  await page.locator('#dynamic-test-field').evaluate(holder => { document.body.append(holder); });
+  assert.equal(await page.locator('[data-scan-target="dynamic-location"]').count(), 1);
+});
+
+test('the Stock barcode filter has a visible mobile camera button and keeps the other search filters', async t => {
+  const page = await pageFor(t, 'stock.html');
+  await page.addScriptTag({ url: `${origin}/stock.js` });
+  await page.evaluate(() => {
+    setupToggleBehavior('toggle-filters', 'filter-section', 'Hide Filters', 'Show Filters');
+    document.getElementById('toggle-filters').click();
+    allItems = [{ id: 'one', barcode: '000123', title: 'Coin' }, { id: 'two', barcode: '456', title: 'Watch' }];
+    applySortAndRender = items => { window.filteredCodes = items.map(item => item.barcode); };
+    updateFilterChips = () => {}; updateURLFromForm = () => {}; showToast = () => {};
+    setupDynamicFilters('filter-form'); setupClearFilters();
+    document.querySelector('#filter-form [name="title"]').value = 'Coin';
+  });
+  const button = page.locator('#filter-form [data-scan-target="stock-barcode-search"]');
+  await page.locator('#stock-barcode-search').focus();
+  await button.scrollIntoViewIfNeeded();
+  assert.equal(await button.isVisible(), true);
+  const fieldBox = await page.locator('#stock-barcode-search').boundingBox();
+  const buttonBox = await button.boundingBox();
+  assert.ok(buttonBox.height >= 44 && buttonBox.x >= 0 && buttonBox.x + buttonBox.width <= 390);
+  assert.ok(buttonBox.y >= fieldBox.y + fieldBox.height && buttonBox.y - fieldBox.y - fieldBox.height <= 12);
+  await mkdir(new URL('test-results/', root), { recursive: true });
+  await page.screenshot({ path: new URL('test-results/stock-barcode-field-mobile.png', root).pathname.replace(/^\/([A-Z]:)/, '$1') });
+  await fakeCamera(page);
+  await button.click();
+  await page.waitForFunction(() => window.deliverBarcode);
+  await page.evaluate(() => window.deliverBarcode('000123'));
+  await page.locator('[data-camera="use"]').click();
+  assert.deepEqual(await page.evaluate(() => window.filteredCodes), ['000123']);
+  assert.equal(await page.locator('#filter-form [name="title"]').inputValue(), 'Coin');
+});
+
+test('camera acceptance in a stock sale modal runs its lookup once without submitting the sale', async t => {
+  const page = await pageFor(t, 'stock.html');
+  await page.addScriptTag({ url: `${origin}/stock.js` });
+  await page.evaluate(() => {
+    window.saleLookups = []; window.saleSubmits = 0;
+    searchManualSaleItem = () => window.saleLookups.push(document.getElementById('manual-sale-item-scan').value);
+    finalizeManualEbaySale = () => window.saleSubmits++;
+    setupManualEbaySale();
+    document.getElementById('manual-sale-item-scan').closest('.modal').classList.remove('hidden');
+  });
+  await fakeCamera(page);
+  await page.locator('[data-scan-target="manual-sale-item-scan"]').click();
+  await page.waitForFunction(() => window.deliverBarcode);
+  await page.evaluate(() => { window.deliverBarcode('000-SALE'); window.deliverBarcode('000-SALE'); });
+  await page.locator('[data-camera="use"]').click();
+  assert.deepEqual(await page.evaluate(() => window.saleLookups), ['000-SALE']);
+  assert.equal(await page.evaluate(() => window.saleSubmits), 0);
+  assert.equal(await page.locator('#manual-sale-item-scan').isVisible(), true);
+});
+
+test('camera controls keep a barcode dropdown open until the accepted code reaches its field', async t => {
+  const page = await pageFor(t);
+  await page.evaluate(() => {
+    const popup = document.createElement('div'); popup.id = 'barcode-dropdown';
+    popup.innerHTML = '<input id="dropdown-barcode" data-camera-scan placeholder="Search location barcode">';
+    document.body.append(popup);
+    document.addEventListener('click', event => { if (!popup.contains(event.target)) popup.hidden = true; });
+  });
+  await fakeCamera(page);
+  await page.locator('[data-scan-target="dropdown-barcode"]').click();
+  await page.waitForFunction(() => window.deliverBarcode);
+  await page.locator('[data-camera="switchCamera"]').click();
+  await page.waitForFunction(() => window.cameraCalls.length === 2);
+  assert.equal(await page.locator('#barcode-dropdown').isVisible(), true);
+  await page.evaluate(() => window.deliverBarcode('TRAY-0042'));
+  await page.locator('[data-camera="use"]').click();
+  assert.equal(await page.locator('#barcode-dropdown').isVisible(), true);
+  assert.equal(await page.locator('#dropdown-barcode').inputValue(), 'TRAY-0042');
 });

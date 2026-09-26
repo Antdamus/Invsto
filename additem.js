@@ -2329,7 +2329,7 @@ let uploadedImages = [];
         <div class="dropdown-search-container">
           <input
             type="text"
-            id="admin-location-dropdown-search"
+            id="admin-location-dropdown-search" data-camera-scan
             class="dropdown-search"
             placeholder="Search location, barcode, store, or type..."
             autocomplete="off"

@@ -12,6 +12,8 @@
   <link rel="stylesheet" href="locations.css" />
 
   <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera-fields" />
+  <script src="barcode-scanner.js?v=20260926-camera-fields" defer></script>
 </head>
 <body>
   <div class="mobile-header">
@@ -138,7 +140,7 @@
           <div class="locations-toolbar">
             <label class="locations-control">
               <span class="locations-control-label">Search</span>
-              <input type="search" id="locations-search" class="locations-input" placeholder="Search name, code, barcode, or notes" />
+              <input type="search" id="locations-search" data-camera-scan class="locations-input" placeholder="Search name, code, barcode, or notes" />
             </label>
 
             <label class="locations-control">
@@ -225,7 +227,7 @@
 
           <div id="location-create-parent-scan-wrap" class="location-edit-label full location-parent-scan hidden">
             <span>Scan or Select Parent Location</span>
-            <input type="text" id="location-create-parent-scan" class="location-edit-input" autocomplete="off" placeholder="Scan parent barcode first" />
+            <input type="text" id="location-create-parent-scan" data-camera-scan class="location-edit-input" autocomplete="off" placeholder="Scan parent barcode first" />
             <select id="location-create-parent" class="location-edit-select"></select>
             <small id="location-create-parent-scan-status" class="location-parent-scan-status">
               Scan the table, vault, or location label to select it automatically. Manual selection still requires the matching scan.

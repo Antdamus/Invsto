@@ -23,8 +23,8 @@
   <!-- 🧱 Google Icons: Outlined and Filled -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera" />
-  <script src="barcode-scanner.js?v=20260926-camera" defer></script>
+  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera-fields" />
+  <script src="barcode-scanner.js?v=20260926-camera-fields" defer></script>
 </head>
 
 <body class="stock-body stock-access-loading">
@@ -158,7 +158,7 @@
           <div class="filter-grid">
             <input type="text" name="title" placeholder="Search title..." />
             <input type="text" name="description" placeholder="Search description..." />
-            <input type="text" id="stock-barcode-search" name="barcode" placeholder="Search barcode..." />
+            <input type="text" id="stock-barcode-search" data-camera-scan name="barcode" placeholder="Search barcode..." />
             <input type="text" name="distributor" placeholder="Distributor name..." />
 
 <div class="dropdown-wrapper">
@@ -319,7 +319,7 @@
   <script src="stock-checkout.js"></script>
   <script src="stock-transferstock.js"></script>
   <script src="stock-storage-transfer.js"></script>
-  <script src="stock.js?v=20260926-camera"></script>
+  <script src="stock.js?v=20260926-camera-fields"></script>
 
   <!-- 📢 Toast + Loading Spinner Containers -->
   <div id="toast-container"></div>
@@ -485,7 +485,7 @@
         <section class="manual-sale-panel">
           <label for="manual-sale-item-scan">Item label or title</label>
           <div class="manual-sale-scan-row">
-            <input type="text" id="manual-sale-item-scan" placeholder="Scan item barcode or search title" autocomplete="off" />
+            <input type="text" id="manual-sale-item-scan" data-camera-scan data-camera-action="manual-sale-find-item" placeholder="Scan item barcode or search title" autocomplete="off" />
             <button type="button" id="manual-sale-find-item" class="stock-secondary-btn">Find</button>
           </div>
           <div id="manual-sale-item-results" class="manual-sale-results"></div>
@@ -494,7 +494,7 @@
         <section class="manual-sale-panel">
           <label for="manual-sale-location-scan">Tray or location label</label>
           <div class="manual-sale-scan-row">
-            <input type="text" id="manual-sale-location-scan" placeholder="Scan tray/location barcode or name" autocomplete="off" />
+            <input type="text" id="manual-sale-location-scan" data-camera-scan data-camera-action="manual-sale-find-location" placeholder="Scan tray/location barcode or name" autocomplete="off" />
             <button type="button" id="manual-sale-find-location" class="stock-secondary-btn">Find</button>
           </div>
           <div id="manual-sale-location-results" class="manual-sale-results"></div>
@@ -982,7 +982,7 @@
           </div>
           <label for="storage-transfer-item-scan">Item barcode or name</label>
           <div class="storage-transfer-scan-row">
-            <input type="text" id="storage-transfer-item-scan" placeholder="Scan item barcode or type item name" autocomplete="off" />
+            <input type="text" id="storage-transfer-item-scan" data-camera-scan placeholder="Scan item barcode or type item name" autocomplete="off" />
             <button type="button" id="storage-transfer-find-item" class="stock-secondary-btn">Confirm Item</button>
           </div>
           <div id="storage-transfer-item-summary" class="storage-transfer-summary-card is-empty">No item selected.</div>
@@ -993,7 +993,7 @@
           <section class="storage-transfer-panel">
             <label for="storage-transfer-parent-scan">Table / vault / storage label</label>
             <div class="storage-transfer-scan-row">
-              <input type="text" id="storage-transfer-parent-scan" placeholder="Scan parent location barcode" autocomplete="off" />
+              <input type="text" id="storage-transfer-parent-scan" data-camera-scan placeholder="Scan parent location barcode" autocomplete="off" />
               <button type="button" id="storage-transfer-find-parent" class="stock-secondary-btn">Confirm Parent</button>
             </div>
             <div id="storage-transfer-parent-summary" class="storage-transfer-summary-card is-empty">No parent location selected.</div>
@@ -1002,7 +1002,7 @@
           <section class="storage-transfer-panel">
             <label for="storage-transfer-container-scan">Bag / container label</label>
             <div class="storage-transfer-scan-row">
-              <input type="text" id="storage-transfer-container-scan" placeholder="Scan bag or container barcode" autocomplete="off" />
+              <input type="text" id="storage-transfer-container-scan" data-camera-scan placeholder="Scan bag or container barcode" autocomplete="off" />
               <button type="button" id="storage-transfer-find-container" class="stock-secondary-btn">Confirm Bag</button>
             </div>
             <div id="storage-transfer-container-summary" class="storage-transfer-summary-card is-empty">No bag selected.</div>
@@ -1011,7 +1011,7 @@
           <section class="storage-transfer-panel">
             <label for="storage-transfer-tray-scan">Destination tray label</label>
             <div class="storage-transfer-scan-row">
-              <input type="text" id="storage-transfer-tray-scan" placeholder="Scan destination tray barcode" autocomplete="off" />
+              <input type="text" id="storage-transfer-tray-scan" data-camera-scan placeholder="Scan destination tray barcode" autocomplete="off" />
               <button type="button" id="storage-transfer-find-tray" class="stock-secondary-btn">Confirm Tray</button>
             </div>
             <div id="storage-transfer-tray-summary" class="storage-transfer-summary-card is-empty">No tray selected.</div>
@@ -1053,7 +1053,7 @@
           <section class="storage-transfer-panel">
             <label for="return-transfer-item-scan">Item label</label>
             <div class="storage-transfer-scan-row">
-              <input type="text" id="return-transfer-item-scan" placeholder="Scan item barcode or type title" autocomplete="off" />
+              <input type="text" id="return-transfer-item-scan" data-camera-scan placeholder="Scan item barcode or type title" autocomplete="off" />
               <button type="button" id="return-transfer-find-item" class="stock-secondary-btn">Find</button>
             </div>
             <div id="return-transfer-item-summary" class="storage-transfer-summary-card is-empty">No item selected.</div>
@@ -1062,7 +1062,7 @@
           <section class="storage-transfer-panel">
             <label for="return-transfer-tray-scan">Source tray label</label>
             <div class="storage-transfer-scan-row">
-              <input type="text" id="return-transfer-tray-scan" placeholder="Scan the tray holding this item" autocomplete="off" />
+              <input type="text" id="return-transfer-tray-scan" data-camera-scan placeholder="Scan the tray holding this item" autocomplete="off" />
               <button type="button" id="return-transfer-find-tray" class="stock-secondary-btn">Confirm Tray</button>
             </div>
             <div id="return-transfer-selected-card" class="storage-transfer-selected-card is-empty">No return source selected.</div>
@@ -1071,7 +1071,7 @@
           <section class="storage-transfer-panel">
             <label for="return-transfer-parent-scan">Parent table / vault / location</label>
             <div class="storage-transfer-scan-row">
-              <input type="text" id="return-transfer-parent-scan" placeholder="Scan parent location barcode or name" autocomplete="off" />
+              <input type="text" id="return-transfer-parent-scan" data-camera-scan placeholder="Scan parent location barcode or name" autocomplete="off" />
               <button type="button" id="return-transfer-find-parent" class="stock-secondary-btn">Find</button>
             </div>
             <div id="return-transfer-parent-summary" class="storage-transfer-summary-card is-empty">No parent location selected.</div>
@@ -1080,7 +1080,7 @@
           <section class="storage-transfer-panel">
             <label for="return-transfer-bag-scan">Destination bag / container</label>
             <div class="storage-transfer-scan-row">
-              <input type="text" id="return-transfer-bag-scan" placeholder="Scan bag barcode or name" autocomplete="off" />
+              <input type="text" id="return-transfer-bag-scan" data-camera-scan placeholder="Scan bag barcode or name" autocomplete="off" />
               <button type="button" id="return-transfer-find-bag" class="stock-secondary-btn">Find</button>
             </div>
             <div id="return-transfer-bag-summary" class="storage-transfer-summary-card is-empty">No destination bag selected.</div>
@@ -1170,7 +1170,7 @@
           </div>
           <label for="defect-source-scan">Source tray/location</label>
           <div class="storage-transfer-scan-row">
-            <input type="text" id="defect-source-scan" placeholder="Scan source tray or location" autocomplete="off" />
+            <input type="text" id="defect-source-scan" data-camera-scan data-camera-action="defect-find-source" placeholder="Scan source tray or location" autocomplete="off" />
             <button type="button" id="defect-find-source" class="stock-secondary-btn">Find</button>
           </div>
           <div id="defect-source-results" class="defect-results"></div>
@@ -1183,7 +1183,7 @@
           </div>
           <label for="defect-destination-scan">Destination tray/location</label>
           <div class="storage-transfer-scan-row">
-            <input type="text" id="defect-destination-scan" placeholder="Scan destination tray or location" autocomplete="off" />
+            <input type="text" id="defect-destination-scan" data-camera-scan data-camera-action="defect-find-destination" placeholder="Scan destination tray or location" autocomplete="off" />
             <button type="button" id="defect-find-destination" class="stock-secondary-btn">Find</button>
           </div>
           <div id="defect-destination-results" class="defect-results"></div>

@@ -10,6 +10,8 @@
   <link rel="stylesheet" href="pending-orders.css?v=selected-closeout-20260824" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera-fields" />
+  <script src="barcode-scanner.js?v=20260926-camera-fields" defer></script>
 </head>
 <body>
   <div class="mobile-header">
@@ -179,7 +181,7 @@
             <span id="bag-lookup-status" class="count-pill">No bag loaded</span>
           </div>
           <div class="bag-lookup-scan">
-            <input id="global-live-lot-scan" type="search" placeholder="Scan auction number or LIVE bag ID" autocomplete="off" />
+            <input id="global-live-lot-scan" data-camera-scan type="search" placeholder="Scan auction number or LIVE bag ID" autocomplete="off" />
             <button id="global-find-live-lot" type="button" class="primary-btn">Inspect Bag</button>
             <button id="global-clear-live-lot" type="button" class="secondary-btn">Clear Bag</button>
           </div>
@@ -442,7 +444,7 @@
                 </div>
               </div>
               <div class="scan-row">
-                <input id="live-lot-scan" type="search" placeholder="Scan auction number or LIVE bag ID" autocomplete="off" />
+                <input id="live-lot-scan" data-camera-scan type="search" placeholder="Scan auction number or LIVE bag ID" autocomplete="off" />
                 <button id="find-live-lot" type="button" class="secondary-btn">Load Bag</button>
               </div>
               <div id="live-lot-panel" class="live-lot-panel">
@@ -459,7 +461,7 @@
                 </div>
               </div>
               <div class="scan-row">
-                <input id="item-scan" type="search" placeholder="Scan barcode or search item name / description" autocomplete="off" />
+                <input id="item-scan" data-camera-scan type="search" placeholder="Scan barcode or search item name / description" autocomplete="off" />
                 <button id="find-item" type="button" class="secondary-btn">Find</button>
               </div>
               <div id="item-results" class="result-list"></div>
@@ -474,7 +476,7 @@
                 </div>
               </div>
               <div class="scan-row">
-                <input id="location-scan" type="search" placeholder="Scan tray barcode if more than one source appears" autocomplete="off" />
+                <input id="location-scan" data-camera-scan type="search" placeholder="Scan tray barcode if more than one source appears" autocomplete="off" />
                 <button id="find-location" type="button" class="secondary-btn">Find</button>
               </div>
               <div id="location-results" class="result-list"></div>

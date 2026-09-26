@@ -11,6 +11,8 @@
   <link rel="stylesheet" href="ebay-order-history.css" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera-fields" />
+  <script src="barcode-scanner.js?v=20260926-camera-fields" defer></script>
 </head>
 <body data-page="ebay-returns">
   <div class="mobile-header">
@@ -217,7 +219,7 @@
         </label>
         <label class="modal-field">
           Return tracking
-          <input id="return-tracking" type="text" placeholder="Scan or paste tracking number" />
+          <input id="return-tracking" data-camera-scan type="text" placeholder="Scan or paste tracking number" />
         </label>
         <label class="modal-field">
           eBay return ID
@@ -225,7 +227,7 @@
         </label>
         <label class="modal-field">
           Restock destination
-          <input id="return-destination-scan" type="text" placeholder="Scan tray/location for restock items" />
+          <input id="return-destination-scan" data-camera-scan data-camera-action="find-return-destination" type="text" placeholder="Scan tray/location for restock items" />
         </label>
       </div>
 

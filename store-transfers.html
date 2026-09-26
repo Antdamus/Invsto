@@ -9,6 +9,8 @@
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="store-transfers.css" />
   <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera-fields" />
+  <script src="barcode-scanner.js?v=20260926-camera-fields" defer></script>
 </head>
 <body>
   <div class="page">
@@ -74,7 +76,7 @@
                 </div>
               </div>
               <div class="scan-row">
-                <input id="transfer-item-scan" type="text" placeholder="Scan item barcode or search by title" autocomplete="off" />
+                <input id="transfer-item-scan" data-camera-scan type="text" placeholder="Scan item barcode or search by title" autocomplete="off" />
                 <button id="find-transfer-item" type="button" class="secondary-btn">Find</button>
               </div>
               <div id="selected-transfer-item" class="selection-card is-empty">No item selected yet.</div>
@@ -89,7 +91,7 @@
                 </div>
               </div>
               <div class="scan-row">
-                <input id="transfer-source-scan" type="text" placeholder="Scan tray, parent location, or bag barcode" autocomplete="off" />
+                <input id="transfer-source-scan" data-camera-scan type="text" placeholder="Scan tray, parent location, or bag barcode" autocomplete="off" />
                 <button id="find-transfer-source" type="button" class="secondary-btn">Confirm Source</button>
               </div>
               <div id="selected-transfer-source" class="selection-card is-empty">No source selected yet.</div>
@@ -200,7 +202,7 @@
           </div>
         </div>
         <div class="scan-row">
-          <input id="receive-location-scan" type="text" placeholder="Scan destination tray, parent, or bag" autocomplete="off" />
+          <input id="receive-location-scan" data-camera-scan data-camera-action="find-receive-location" type="text" placeholder="Scan destination tray, parent, or bag" autocomplete="off" />
           <button id="find-receive-location" type="button" class="secondary-btn">Confirm</button>
         </div>
         <div id="receive-location-card" class="selection-card is-empty">No destination selected.</div>
