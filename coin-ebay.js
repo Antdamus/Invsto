@@ -92,7 +92,7 @@ function createEditor(container, getCoin, changed, setCoinField = () => {}) {
       specifics.append(field(`${descriptor.conditionDescriptorName}${constraints.usage==='REQUIRED'?' *':''}`,input));
       if (descriptor.conditionDescriptorHelpText) specifics.append(element('small',descriptor.conditionDescriptorHelpText));
     }
-    const details=element('details'); details.open=true; details.append(element('summary','Coin specifics for this category'));
+    const details=element('details'); details.append(element('summary','Additional coin specifics (prefilled where known)'));
     const values={...core.suggestedCoinAspects(coin,metadata),...(listing.aspects || {})};
     for (const aspect of metadata.aspects) {
       const name=aspect.localizedAspectName;
@@ -102,7 +102,7 @@ function createEditor(container, getCoin, changed, setCoinField = () => {}) {
       else input.maxLength=aspect.aspectConstraint?.aspectMaxLength || 1000;
       input.value=values[name] || '';
       input.addEventListener('change',()=>{listing.aspects={...(listing.aspects||{}),[name]:input.value};notify();});
-      details.append(field(`${name}${aspect.aspectConstraint?.aspectRequired?' *':''}`,input));
+      (aspect.aspectConstraint?.aspectRequired && !input.value ? specifics : details).append(field(`${name}${aspect.aspectConstraint?.aspectRequired?' *':''}`,input));
     }
     specifics.append(details);
   }
@@ -112,6 +112,11 @@ function createEditor(container, getCoin, changed, setCoinField = () => {}) {
     try {
       allCategories=await categories();
       if(version!==generation)return;
+      if(!id && !search.value){
+        const words=String(getCoin().name || '').split(/\W+/).filter(word=>word.length>3 && !['coin','dollar','silver','gold','bullion'].includes(word.toLowerCase()));
+        const matching=words.find(word=>allCategories.some(category=>category.label.toLowerCase().includes(word.toLowerCase())));
+        if(matching)search.value=matching;
+      }
       options();
       const loaded = id ? await requirements(id) : null;
       if(version!==generation)return;

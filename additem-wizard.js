@@ -12,9 +12,11 @@
   window.addEventListener("resize", updateVisibleHeight);
   updateVisibleHeight();
 
-  const steps = [...form.querySelectorAll("[data-item-step]")];
+  const allSteps = [...form.querySelectorAll("[data-item-step]")];
+  let steps = [...allSteps];
   const links = [...form.querySelectorAll("[data-item-step-target]")];
-  const names = ["Information", "Photos", "Description", "Pricing", "Labels", "Stock", "Marketplace", "Review"];
+  const names = {information:"Identify", photos:"Photos", pricing:"Pricing", stock:"Stock", marketplace:"eBay", review:"Review"};
+  let returnToReview = false;
   const back = document.getElementById("item-step-back");
   const next = document.getElementById("item-step-next");
   const error = document.getElementById("item-step-error");
@@ -42,6 +44,7 @@
   const getWatchDetails = () => {
     if (!isWatch()) return null;
     const details = Object.fromEntries(watchKeys.map((key) => [key, value(`watch-${key}`)]));
+    details.name = details.name || details.brand;
     const referenceLookup = window.addItemAssistedModule?.getWatchReferenceLookup?.();
     return referenceLookup ? { ...details, referenceLookup } : details;
   };
@@ -79,7 +82,7 @@
     document.getElementById("watch-fields").hidden = !watch;
     document.getElementById("jewelry-material-fields").hidden = directPricing;
     watchKeys.forEach((key) => { document.getElementById(`watch-${key}`).disabled = !watch; });
-    document.getElementById("watch-name").required = watch;
+    document.getElementById("watch-name").required = false;
     document.getElementById("weight").required = !directPricing;
     document.getElementById("item-weight-label").textContent = directPricing ? "Total weight (g, optional)" : "Weight (g)";
     document.getElementById("description").required = !directPricing;
@@ -100,6 +103,15 @@
     salePrice.placeholder = "Enter retail price ($)";
     salePrice.inputMode = "decimal";
     document.dispatchEvent(new CustomEvent("add-item:mode-change", { detail: { isWatch: watch, isCoin: coin, restoring } }));
+    document.getElementById("item-coin-photo-guide").hidden = !coin;
+    document.getElementById("price-per-weight").closest("label").hidden = directPricing;
+    document.getElementById("auto-cost-checkbox").closest(".form-field").hidden = directPricing;
+    const category = document.getElementById("category");
+    if (!restoring && (!category.value || ["Watches", "Coins"].includes(category.value))) {
+      category.value = watch ? "Watches" : coin ? "Coins" : "";
+      document.getElementById("category-dropdown-toggle").textContent = category.value || "Select or Create Category";
+    }
+    rebuildRoute();
     renderReview();
   }
 
@@ -116,61 +128,79 @@
     document.getElementById("coin-fineness").disabled = !coin || !value("coin-metal") || ["Plated / clad", "Other / mixed"].includes(value("coin-metal"));
   }
 
+  function rebuildRoute() {
+    const active = steps[current]?.dataset.itemStep || 'information';
+    steps = allSteps.filter(step => (step.dataset.itemStep !== 'marketplace' || document.getElementById('ebay-sync-enabled').checked)
+      && (step.dataset.itemStep !== 'stock' || document.getElementById('item-assign-stock').checked));
+    current = Math.max(0, steps.findIndex(step=>step.dataset.itemStep === active));
+    showStep(current, {focus:false,persist:false});
+  }
+
   function renderReview() {
-    const summary = document.getElementById("item-review-summary");
-    const selectedPhotos = window.addItemAssistedModule?.getSelectedUploadedImagesForSave?.() || [];
-    const watch = getWatchDetails();
+    const summary = document.getElementById('item-review-summary');
+    const photos = window.addItemAssistedModule?.getSelectedUploadedImagesForSave?.() || [];
     const rows = [
-      ["Mode", watch ? "Watch" : isCoin() ? "Coin" : "Jewelry"],
-      ["Title", value("title") || "Not entered"],
-      ["Category", value("category") || "Not selected"],
-      ["Description", descriptionForSave() || "Not entered"],
-      ["Weight", value("weight") ? `${value("weight")} g` : "Not entered"],
-      ["Photos", `${selectedPhotos.length} selected`],
-      ["Cost", value("cost") ? `$${value("cost")}` : "Not entered"],
-      ["Minimum sale / break-even", value("minimum-sale-price") ? `$${value("minimum-sale-price")}` : "Not set"],
-      ["Retail price", value("sale-price") ? `$${value("sale-price")}` : "Not entered"],
-      ["Barcode", value("scanned-barcode") || "Generated when saving"],
-      ["Stock", document.getElementById("assignment-preview-box").classList.contains("hidden")
-        ? "No placement assigned" : ["assignment-location", "assignment-quantity"].map((id) => document.getElementById(id).textContent).join(" · ")],
-      ["eBay sync", document.getElementById("ebay-sync-enabled").checked
-        ? document.getElementById("ebay-category-id").selectedOptions[0]?.textContent || "Choose a category"
-        : "Off"],
+      ['Item', value('title') || (getWatchDetails()?.name) || getCoinDetails()?.name || 'Not entered','information'],
+      ['Category',value('category') || 'Not selected','information'],
+      ['Cost',value('cost') ? `$${value('cost')}` : 'Not entered','pricing'],
+      ['Minimum sale',value('minimum-sale-price') ? `$${value('minimum-sale-price')}` : 'Not set','pricing'],
+      ['Retail',value('sale-price') ? `$${value('sale-price')}` : 'Not entered','pricing'],
+      ['Barcode',value('scanned-barcode') || 'Generated when saving','information'],
+      ['Stock',!document.getElementById('item-assign-stock').checked || document.getElementById('assignment-preview-box').classList.contains('hidden') ? 'Not assigned' : ['assignment-location','assignment-quantity'].map(id=>document.getElementById(id).textContent).join(' · '),'stock'],
+      ['eBay',document.getElementById('ebay-sync-enabled').checked ? document.getElementById('ebay-category-id').selectedOptions[0]?.textContent || 'Choose category' : 'Inventory only','marketplace'],
     ];
     summary.replaceChildren();
-    for (const [label, text] of rows) {
-      const row = document.createElement("div");
-      const term = document.createElement("dt");
-      const detail = document.createElement("dd");
-      term.textContent = label;
-      detail.textContent = text;
-      row.append(term, detail);
-      summary.append(row);
+    for (const [label,text,target] of rows) {
+      const row=document.createElement('div'),term=document.createElement('dt'),detail=document.createElement('dd'),edit=document.createElement('button');
+      term.textContent=label;detail.textContent=text;edit.type='button';edit.textContent='Edit';edit.className='intake-review-edit';edit.setAttribute('aria-label',`Edit ${label}`);
+      edit.addEventListener('click',()=>goTo(target,true));row.append(term,detail,edit);summary.append(row);
+    }
+    const gallery=document.getElementById('item-review-photos');gallery.replaceChildren();
+    for (const photo of photos.slice(0,4)) {
+      const img=document.createElement('img');img.src=photo.thumbnailUrl || photo.previewUrl || '';img.alt=photo.name || 'Item photo';gallery.append(img);
+    }
+    const photoEdit=document.createElement('button');photoEdit.type='button';photoEdit.textContent=`Edit photos (${photos.length})`;photoEdit.className='add-button-secondary';photoEdit.addEventListener('click',()=>goTo('photos',true));gallery.append(photoEdit);
+    const issues=document.getElementById('item-review-issues');issues.replaceChildren();
+    const readiness=window.collectAddItemEbayReadiness?.();
+    if (readiness?.syncEnabled && readiness.missing.length) {
+      const text=document.createElement('p');text.textContent='You can save this item to inventory. Before publishing to eBay, complete:';issues.append(text);
+      for (const missing of [...new Set(readiness.missing)]) {
+        const target=/stock/.test(missing)?'stock':/photo/.test(missing)?'photos':/price/.test(missing)?'pricing':/title|description/.test(missing)?'review':/brand|department|watch condition|material|purity|stone/.test(missing)?'information':'marketplace';
+        const button=document.createElement('button');button.type='button';button.textContent=missing;button.addEventListener('click',()=>goTo(target,true));issues.append(button);
+      }
     }
   }
 
-  function showStep(index, { focus = true, persist = true } = {}) {
-    current = Math.max(0, Math.min(index, steps.length - 1));
-    furthest = Math.max(furthest, current);
-    steps.forEach((step, i) => { step.hidden = i !== current; });
-    links.forEach((link, i) => {
-      link.disabled = i > furthest;
-      if (i === current) link.setAttribute("aria-current", "step");
-      else link.removeAttribute("aria-current");
-      link.classList.toggle("is-visited", i < furthest);
+  function showStep(index, {focus=true,persist=true}={}) {
+    current=Math.max(0,Math.min(index,steps.length-1));furthest=Math.max(furthest,current);
+    const active=steps[current];
+    allSteps.forEach(step=>step.hidden=step!==active);
+    links.forEach(link=>{
+      const i=steps.findIndex(step=>step.dataset.itemStep===link.dataset.itemStepTarget);
+      link.closest('li').hidden=i<0;
+      link.disabled=i>furthest;link.querySelector('span').textContent=String(i+1);
+      if(i===current)link.setAttribute('aria-current','step');else link.removeAttribute('aria-current');
+      link.classList.toggle('is-visited',i<furthest);
     });
-    back.disabled = current === 0;
-    next.hidden = current === steps.length - 1;
-    next.textContent = `Next: ${names[current + 1] || "Review"}`;
-    document.getElementById("item-step-status").textContent = `Step ${current + 1} of ${steps.length} · ${names[current]}`;
-    document.getElementById("item-step-hint").textContent = current === steps.length - 1 ? "Ready to save" : `Up next: ${names[current + 1]}`;
-    error.hidden = true;
-    if (current === steps.length - 1) renderReview();
-    if (focus) {
-      steps[current].querySelector("h2")?.focus({ preventScroll: true });
-      form.scrollIntoView({ block: "start", behavior: "instant" });
-    }
-    if (persist) document.dispatchEvent(new Event("add-item:wizard-change"));
+    document.querySelector('.item-progress ol').style.setProperty('--item-step-count',steps.length);
+    back.disabled=current===0;next.hidden=current===steps.length-1;
+    next.textContent=returnToReview?'Return to review':`Next: ${names[steps[current+1]?.dataset.itemStep] || 'Review'}`;
+    document.getElementById('item-step-status').textContent=`Step ${current+1} of ${steps.length} · ${names[active.dataset.itemStep]}`;
+    document.getElementById('item-step-hint').textContent=current===steps.length-1?'Review before saving':next.textContent;
+    error.hidden=true;
+    if(active.dataset.itemStep==='review')renderReview();
+    if(focus){active.querySelector('h2')?.focus({preventScroll:true});form.scrollIntoView({block:'start',behavior:'instant'});}
+    document.dispatchEvent(new CustomEvent('add-item:step-change',{detail:{step:active.dataset.itemStep}}));
+    if(persist)document.dispatchEvent(new Event('add-item:wizard-change'));
+  }
+
+  function goTo(key, editing=false) {
+    if(form.dataset.saving==='true')return;
+    if(key==='stock' && !document.getElementById('item-assign-stock').checked){document.getElementById('item-assign-stock').checked=true;rebuildRoute();}
+    if(key==='marketplace' && !document.getElementById('ebay-sync-enabled').checked){document.getElementById('ebay-sync-enabled').checked=true;document.getElementById('item-prepare-ebay').checked=true;rebuildRoute();}
+    returnToReview=editing && key!=='review';
+    const index=steps.findIndex(step=>step.dataset.itemStep===key);
+    if(index>=0)showStep(index);
   }
 
   function fail(index, control, message) {
@@ -189,7 +219,8 @@
   }
 
   function validateStep(index) {
-    if (index === 1 && window.addItemAssistedModule?.isPhotoBusy?.()) {
+    const key = steps[index].dataset.itemStep;
+    if (key === "photos" && window.addItemAssistedModule?.isPhotoBusy?.()) {
       return fail(index, null, "Wait for the photo upload or processing to finish before continuing.");
     }
     for (const control of steps[index].querySelectorAll("input, select, textarea")) {
@@ -199,21 +230,24 @@
       if (!control.checkValidity()) return fail(index, control, "Complete the highlighted field to continue.");
       if (control.required && !control.value.trim()) return fail(index, control, "Enter a value to continue.");
     }
-    if (index === 0 && !value("category")) {
+    if (key === "information" && !value("category")) {
       return fail(index, document.getElementById("category-dropdown-toggle"), "Select or create an item category.");
     }
-    if (index === 3) {
+    if (key === "pricing") {
       const price = Number(value("sale-price").replace(/,/g, ""));
       if (!Number.isFinite(price) || price <= 0) return fail(index, document.getElementById("sale-price"), "Enter a retail price greater than zero.");
     }
-    if (index === 3 && value("minimum-sale-price")) {
+    if (key === "pricing" && value("minimum-sale-price")) {
       const minimum = Number(value("minimum-sale-price"));
       const retail = Number(value("sale-price").replace(/,/g, ""));
       if (!Number.isFinite(minimum) || minimum < 0 || minimum > retail) return fail(index, document.getElementById("minimum-sale-price"), "Minimum sale price must be between zero and retail price.");
     }
-    if (index === 6 && document.getElementById("ebay-sync-enabled").checked && !value("ebay-category-id")) {
+    if (key === "marketplace" && document.getElementById("ebay-sync-enabled").checked && !value("ebay-category-id")) {
       return fail(index, document.getElementById("ebay-category-id"), "Choose an eBay category or turn off eBay sync.");
     }
+    if (key === 'information' && isWatch() && !value('watch-name') && !value('watch-brand')) return fail(index,document.getElementById('watch-brand'),'Enter the watch brand or model name.');
+    if (key === 'information' && window.addItemBarcodeMatch) return fail(index,document.getElementById('scanned-barcode'),'This barcode already exists. Add quantity to that item or generate a new barcode.');
+    if (key === 'stock' && document.getElementById('assignment-preview-box').classList.contains('hidden')) return fail(index,document.getElementById('btn-open-admin-stock'),'Assign and confirm a location, or turn off stock placement in Identify.');
     return true;
   }
 
@@ -224,6 +258,11 @@
     }
     if (isWatch()) fillWatchTitle();
     if (isCoin()) fillCoinTitle();
+    if(!isWatch() && !isCoin()){
+      const material=document.getElementById('assisted-material').value,purity=document.getElementById('assisted-purity').value;
+      if(!value('title'))document.getElementById('title').value=[purity,material,value('category')].filter(Boolean).join(' ');
+      if(!value('description'))document.getElementById('description').value=[value('category'),material && `Material: ${purity} ${material}.`,value('weight') && `Weight: ${value('weight')} g.`].filter(Boolean).join(' ');
+    }
     showStep(index);
   }
 
@@ -231,7 +270,8 @@
     const watch = getWatchDetails();
     const title = document.getElementById("title");
     if (!watch || (!overwrite && value("title") && title.value !== title.dataset.watchTitle && title.value !== title.dataset.coinTitle)) return;
-    title.value = [watch.name, watch.model].filter(Boolean).join(" ");
+    const name = watch.name.toLowerCase().startsWith(watch.brand.toLowerCase()) ? watch.name : [watch.brand,watch.name].filter(Boolean).join(" ");
+    title.value = [name, watch.model].filter(Boolean).join(" ");
     title.dataset.watchTitle = title.value;
     title.dispatchEvent(new Event("input", { bubbles: true }));
   }
@@ -246,8 +286,8 @@
   }
 
   back.addEventListener("click", () => moveTo(current - 1));
-  next.addEventListener("click", () => moveTo(current + 1));
-  links.forEach((link, i) => link.addEventListener("click", () => moveTo(i)));
+  next.addEventListener("click", () => { if(returnToReview){if(validateStep(current)){returnToReview=false;moveTo(steps.length-1);}}else moveTo(current+1); });
+  links.forEach(link => link.addEventListener("click", () => { returnToReview=false;moveTo(steps.findIndex(step=>step.dataset.itemStep===link.dataset.itemStepTarget)); }));
   form.querySelectorAll('[name="item-kind"]').forEach((radio) => radio.addEventListener("change", () => updateMode()));
   document.getElementById("use-watch-details").textContent = "Use watch name as title";
   document.getElementById("use-watch-details").addEventListener("click", () => fillWatchTitle(true));
@@ -276,6 +316,7 @@
   }, true);
 
   document.addEventListener("add-item-form:reset", () => {
+    returnToReview=false;
     jewelryAutoCost = true;
     delete document.getElementById("sale-price").dataset.manualRetail;
     furthest = 0;
@@ -286,6 +327,7 @@
   });
 
   window.addItemWizard = {
+    goTo, renderReview, rebuildRoute,
     isWatch,
     isCoin,
     usesDirectPricing,
@@ -293,6 +335,9 @@
     getCoinDetails,
     descriptionForSave,
     getDraft: () => ({
+      version: 2,
+      assignStock: document.getElementById("item-assign-stock").checked,
+      autoCopy: document.getElementById("item-auto-copy").checked,
       step: steps[current].dataset.itemStep,
       furthest,
       itemKind: isWatch() ? "watch" : isCoin() ? "coin" : "jewelry",
@@ -305,6 +350,9 @@
       jewelryAutoCost: usesDirectPricing() ? jewelryAutoCost : document.getElementById("auto-cost-checkbox").checked,
     }),
     restoreDraft: (draft = {}) => {
+      document.getElementById("item-assign-stock").checked = Boolean(draft.assignStock);
+      document.getElementById("item-auto-copy").checked = draft.autoCopy !== false;
+      document.getElementById("item-prepare-ebay").checked = document.getElementById("ebay-sync-enabled").checked;
       const kind = ["watch", "coin"].includes(draft.itemKind) ? draft.itemKind : "jewelry";
       form.querySelector(`[name="item-kind"][value="${kind}"]`).checked = true;
       watchKeys.forEach((key) => { document.getElementById(`watch-${key}`).value = draft.watchDetails?.[key] || ""; });
@@ -316,10 +364,19 @@
       jewelryAutoCost = (draft.jewelryAutoCost ?? draft.autoCost) !== false;
       updateMode({ restoring: true });
       furthest = Math.max(0, Math.min(Number(draft.furthest) || 0, steps.length - 1));
-      const index = steps.findIndex((step) => step.dataset.itemStep === draft.step);
+      const restoredStep = ["description", "labels"].includes(draft.step) ? "review" : draft.step;
+      const index = steps.findIndex((step) => step.dataset.itemStep === restoredStep);
       showStep(index < 0 ? 0 : index, { focus: false, persist: false });
     },
   };
+  document.getElementById('item-prepare-ebay').addEventListener('change',event=>{
+    const enabled=document.getElementById('ebay-sync-enabled');enabled.checked=event.target.checked;enabled.dispatchEvent(new Event('change',{bubbles:true}));rebuildRoute();document.dispatchEvent(new Event('add-item:wizard-change'));
+  });
+  document.getElementById('ebay-sync-enabled').addEventListener('change',()=>{document.getElementById('item-prepare-ebay').checked=document.getElementById('ebay-sync-enabled').checked;rebuildRoute();});
+  document.getElementById('item-assign-stock').addEventListener('change',()=>{rebuildRoute();document.dispatchEvent(new Event('add-item:wizard-change'));});
+  document.getElementById('item-auto-copy').addEventListener('change',()=>document.dispatchEvent(new Event('add-item:wizard-change')));
+  document.addEventListener('coin-ebay:change',()=>{if(steps[current]?.dataset.itemStep==='review')renderReview();});
+  form.addEventListener('input',()=>{if(steps[current]?.dataset.itemStep==='review')renderReview();});
   updateMode({ restoring: true });
   showStep(0, { focus: false, persist: false });
 })();

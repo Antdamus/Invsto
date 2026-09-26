@@ -1,29 +1,35 @@
-# Add Item steps and watch intake
+# Add Item intake
 
-The form shows Information, Photos, Description, Pricing, Labels, Stock, Marketplace, and Review one at a time. Back and previously visited steps preserve the fields and selected photos. Next validates the current step; Add Item validates all steps and opens the first field that needs attention. Enter on an earlier step advances without saving.
+The normal path is **Identify → Photos → Pricing → Review**. Choosing “Assign location and quantity now” or “Prepare for eBay” adds those steps. Back, visited steps and Review's Edit buttons preserve entered values. Next validates the current step; saving validates the whole active route. Enter on earlier steps advances without saving.
 
-Watch mode records a name, optional model/reference, component materials, and modifications in `item_types.watch_details`. The saved description includes those details so existing inventory and storefront views can display them. Watches do not inherit the jewelry metal, purity, or price per weight. Weight is optional; cost and sale price are entered directly. Jewelry keeps its existing cost calculation. Drafts retain the mode, fields, costing choice, and current step.
+Watch intake asks for brand and reference once. Optional collection name, component materials, modifications, department and condition remain available. Watch and coin modes suggest inventory categories and use direct prices; jewelry retains weight-based cost calculation. Minimum sale price is internal, retail is the only listing price. Old missing minimum prices remain allowed.
 
-Weight entry is on Information. Station capture is a separate action on Photos; upload, selection, crop, and background tools still use the existing image pipeline. Watch copy generation accepts a photo and watch name without requiring a single material, purity, or weight.
+Automatic description drafting starts after usable facts/photos are entered and runs while the user continues. The single title/description editor is in Review. Trusted user edits are never replaced automatically; an explicit replacement button can accept a newer draft. Responses for changed inputs or saved/reset items are discarded. Changes to facts clear untouched old automatic copy and reference provenance. Automatic drafting can be disabled; manual entry is always available.
 
-## Rollout
+## Photos and eBay
 
-1. Apply `supabase/migrations/20260925120000_item_watch_details.sql`.
-2. Deploy the updated `generate-inventory-copy` Supabase function with `--no-verify-jwt`. Its checked-in configuration also sets `verify_jwt = false`.
-3. Publish the HTML, JavaScript, and CSS, including both new `additem-wizard` assets.
+Take photo opens the phone camera; Choose photos supports multiple images. All successfully uploaded photos are included automatically. The selected cover is used for AI and saved first. Individual failures identify the file to retry while retaining successful uploads. Crop, background, recent photos and station capture are optional tools. Coins include front/back guidance.
 
-Deploy the database column before the frontend so watch inserts can succeed. This change does not deploy these resources automatically.
+The optional eBay step reuses watch/coin facts and checks current requirements. Coin category search suggests matches from the series name without selecting an uncertain category. Missing required specifics appear first; additional and prefilled specifics are collapsed. Review lists remaining requirements with Edit actions. Saving inventory does not itself publish an eBay listing. Existing publishing validation still blocks incomplete listings and uses retail only.
 
-Wristwatch category 31387 follows [eBay's watch category reference](https://ir.ebaystatic.com/pictures/aw/pics/sc/listing/2020_05_watches_item_specifics.pdf). Watch aspect generation avoids single-metal and unbranded defaults; eBay readiness calls out brand and department for completion in the marketplace listing workflow.
+## Saving and repeating
 
-## Verification
+Selected photo-copy failures block insertion and preserve the draft. Once the item is inserted, a photo, stock-log or other follow-up failure is reported as a saved item needing attention; retrying cannot insert that item again from the same form. Stock placement still requires explicit confirmation. No label/printer operation is in the save path.
 
-Run `npm run test:add-item`. Browser tests load the real form, assisted module, and save handler with mocked database, photo storage, and label services. They cover navigation, validation, watch save payloads, drafts, photo selection, mode changes, and mobile layout. Backend tests exercise the copy endpoint with mocked storage and AI responses. No live inventory, capture station, or printer is used.
+After saving, users can print now, print later, add a different item or add a similar item. Save & add similar moves straight to Identify when save follow-ups succeed. It retains shared category, supplier, material and watch/coin identity, plus prices only when requested. Year, mint, condition, modifications, grade, certification, photos, copy and barcode are cleared. A fresh barcode is generated. The previous location is only a suggestion; pending quantity and signatures are cleared and must be confirmed anew.
 
-## Phone layout
+Cloud drafts are serialized per page to prevent a completed item's delayed write from replacing the next draft. They restore the active step, facts, photo selection and manual-copy ownership. Stock confirmation and the print batch are intentionally session state.
 
-At widths up to 900px, navigation follows the active step in normal document flow. Category and location-type lists expand within the form and scroll independently, with their search field kept visible. Search filters existing values and preserves the entered spelling for a new category. Options are keyboard-operable buttons; Escape closes the list.
+Print last item and Print batch use saved item snapshots, even while a different item is being edited. Labels are generated from the saved barcode and QR destination, attached to the item, then queued to the existing local print helper. Failed entries remain available to retry. Batch state lasts for the current page session; Stock's Print DYMO Label can generate deferred labels later.
 
-Phone fields use 16px text, controls have touch-sized targets, and the page accounts for safe-area insets. The visual viewport supplies dialog/list height limits when a mobile keyboard reduces the available space. Placement dialogs scroll as a whole so their confirmation buttons remain reachable.
+Existing barcode lookup runs early and offers the existing Add Inventory quick-add flow. Save rechecks uniqueness and reports duplicate conflicts without silently replacing a scanned barcode.
 
-The browser suite includes the real role-navigation header, all eight steps at 320px and 390px portrait sizes and 844px landscape, a long category list, category creation/filtering, selected photos and the crop editor, and a simulated keyboard viewport. Run the WebKit mobile checks with `INVSTO_ITEM_BROWSER=webkit node --test --test-name-pattern="phone category|all eight|phone dialogs|photo selection" tests/add-item-wizard.test.mjs`. Physical iPhone keyboard behavior still needs device verification.
+## Phone layout and verification
+
+Phone navigation follows the form, category menus expand above it, fields use at least 16px text, and controls use touch targets. Dialogs use the visual viewport when the keyboard reduces available height.
+
+Run `npm run test:add-item`, `npm run test:inventory-prices`, and `npm run test:coin-ebay`. Tests load the real form and handlers with mocked inventory, storage, AI and printer services. WebKit checks use `INVSTO_ITEM_BROWSER=webkit node --test tests/add-item-wizard.test.mjs` (PowerShell: set `$env:INVSTO_ITEM_BROWSER='webkit'` first). The suite covers 320px/390px portrait and 844px landscape, keyboard-sized dialogs, photo tools, changed AI inputs, drafts, optional steps, repeat entry, barcode matching, post-insert failures and label retry/batching. Real iPhone camera and printer hardware require device testing.
+
+## Deployment
+
+This intake refinement is frontend-only. Publish `add-item.html`, `additem-layout.js`, `additem-wizard.js`, `additem-wizard.css`, `additem-assisted.js`, `additem-intake.js`, `additem.js`, `additem-dymolabel.js`, `coin-ebay.js`, `stock.html` and `stock.js`. Keep the asset cache versions aligned. Existing watch/coin schemas and edge functions are reused; no new database migration is required. JWT verification settings are unchanged.

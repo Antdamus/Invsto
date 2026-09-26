@@ -788,7 +788,7 @@ function buildLocationChips(item) {
             ${showSensitive ? `<p><strong>Notes:</strong> ${escapeStockHtml(item.distributor_notes || "-")}</p>` : ""}
             <p><strong>QR Type:</strong> ${escapeStockHtml(item.qr_type || "-")}</p>
             <p><strong>Last Updated:</strong> ${escapeStockHtml(new Date(item.created_at).toLocaleString())}</p>
-            ${item.dymo_label_url ? `<p><a href="#" class="dymo-link" data-id="${escapeStockHtml(item.id || "")}" data-path="${escapeStockHtml(item.dymo_label_url)}" data-barcode="${escapeStockHtml(item.barcode || "")}" data-title="${escapeStockHtml(item.title || "")}">Print DYMO Label</a></p>` : ""}
+            ${item.barcode ? `<p><a href="#" class="dymo-link" data-id="${escapeStockHtml(item.id || "")}" data-path="${escapeStockHtml(item.dymo_label_url)}" data-barcode="${escapeStockHtml(item.barcode || "")}" data-title="${escapeStockHtml(item.title || "")}">Print DYMO Label</a></p>` : ""}
           </details>
           <div class="stock-sensitive-legacy">
           <p><strong>Weight:</strong> ${item.weight}</p>
@@ -799,7 +799,7 @@ function buildLocationChips(item) {
           <p><strong>QR Type:</strong> ${item.qr_type}</p>
           <p><strong>Barcode:</strong> ${item.barcode || "—"}</p>
           <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
-          ${item.dymo_label_url ? `<p><a href="#" class="dymo-link" data-id="${escapeStockHtml(item.id || "")}" data-path="${escapeStockHtml(item.dymo_label_url)}" data-barcode="${escapeStockHtml(item.barcode || "")}" data-title="${escapeStockHtml(item.title || "")}">Print DYMO Label</a></p>` : ""}
+          ${item.barcode ? `<p><a href="#" class="dymo-link" data-id="${escapeStockHtml(item.id || "")}" data-path="${escapeStockHtml(item.dymo_label_url)}" data-barcode="${escapeStockHtml(item.barcode || "")}" data-title="${escapeStockHtml(item.title || "")}">Print DYMO Label</a></p>` : ""}
           </div>
           ${stockLabel}
           <p class="chip-section-label">Categories:</p>
@@ -4933,11 +4933,10 @@ async function loadDymoLabelXml(reference) {
 async function queueStockDymoLabelForHelper(link) {
   const item = getStockItemById(link?.dataset?.id) || {};
   const labelReference = link?.dataset?.path || item.dymo_label_url || "";
-  const labelXml = await loadDymoLabelXml(labelReference);
-
   if (!window.dymoModule?.printDymoLabelXml) {
     throw new Error("The DYMO label helper is not loaded on this page.");
   }
+  const labelXml = labelReference ? await loadDymoLabelXml(labelReference) : (await window.dymoModule.prepareSavedItemLabel(item)).templateXml;
 
   return window.dymoModule.printDymoLabelXml(labelXml, {
     copies: 1,

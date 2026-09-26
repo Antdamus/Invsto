@@ -604,6 +604,7 @@
         generatedCopyStale: state.generatedCopyStale,
         generationFingerprint: state.generationFingerprint,
         watchReference: state.watchReference,
+        copyEdited, lastAutoCopy,
       },
       mainFields: {
         title: asTrimmedString(elements.mainTitleInput?.value),
@@ -611,6 +612,7 @@
         weight: asTrimmedString(elements.mainWeightInput?.value),
         category: getCurrentCategory(elements),
         qrType: asTrimmedString(elements.qrTypeSelect?.value),
+        barcode:getInputValueById("scanned-barcode"),qrCode:getInputValueById("qr-code"),
         ebaySyncEnabled: Boolean(document.getElementById("ebay-sync-enabled")?.checked),
         ebayCategoryId: getInputValueById("ebay-category-id"),
         pricePerWeight: getInputValueById("price-per-weight"),
@@ -673,15 +675,23 @@
     return data?.user || null;
   }
 
-  async function persistAddItemDraft(elements) {
-    if (state.isApplyingDraft || state.draftUnavailable || !window.supabase) return false;
+  let draftWriteQueue=Promise.resolve();
+  function persistAddItemDraft(elements) {
+    draftWriteQueue=draftWriteQueue.catch(()=>{}).then(()=>writeAddItemDraft(elements));return draftWriteQueue;
+  }
+  function clearAddItemDraft() {
+    if(state.draftSaveTimer){clearTimeout(state.draftSaveTimer);state.draftSaveTimer=null;}
+    draftWriteQueue=draftWriteQueue.catch(()=>{}).then(()=>deleteAddItemDraft());return draftWriteQueue;
+  }
+  async function writeAddItemDraft(elements) {
+    if (state.isApplyingDraft || state.draftUnavailable || !window.supabase || document.getElementById("add-item-form")?.dataset.savedItemId) return false;
 
     const user = await getCurrentDraftUser();
     if (!user?.id) return false;
 
     const payload = collectAddItemDraftPayload(elements);
     if (!addItemDraftHasContent(payload)) {
-      await clearAddItemDraft();
+      await deleteAddItemDraft();
       return false;
     }
 
@@ -697,6 +707,8 @@
         { onConflict: "user_id,draft_key" }
       );
 
+    const draftStatus=document.getElementById("item-draft-status");
+    if(draftStatus)draftStatus.textContent=error?"Draft could not be saved. Keep this page open.":"Draft saved";
     if (!error) return true;
 
     if (isDraftTableUnavailableError(error)) {
@@ -710,7 +722,7 @@
   }
 
   function scheduleAddItemDraftSave(elements) {
-    if (state.isApplyingDraft || state.draftUnavailable || !window.supabase) return;
+    if (state.isApplyingDraft || state.draftUnavailable || !window.supabase || document.getElementById("add-item-form")?.dataset.savedItemId) return;
 
     if (state.draftSaveTimer) {
       window.clearTimeout(state.draftSaveTimer);
@@ -722,7 +734,7 @@
     }, ADD_ITEM_DRAFT_DEBOUNCE_MS);
   }
 
-  async function clearAddItemDraft() {
+  async function deleteAddItemDraft() {
     if (state.draftSaveTimer) {
       window.clearTimeout(state.draftSaveTimer);
       state.draftSaveTimer = null;
@@ -783,6 +795,8 @@
   function applyAddItemDraftFields(elements, payload) {
     const assisted = payload?.assistedFields || {};
     const main = payload?.mainFields || {};
+    copyEdited=assisted.copyEdited || {title:!!main.title,description:!!main.description};
+    lastAutoCopy=assisted.lastAutoCopy || {title:"",description:""};
 
     if (assisted.material && elements.materialSelect) {
       elements.materialSelect.value = assisted.material;
@@ -841,6 +855,8 @@
     setInputValueById("distributor-name", main.distributorName, { dispatch: false });
     setInputValueById("distributor-phone", main.distributorPhone, { dispatch: false });
     setInputValueById("distributor-notes", main.distributorNotes, { dispatch: false });
+    if(main.barcode){setInputValueById("scanned-barcode",main.barcode,{dispatch:false});document.getElementById("scanned-barcode").dispatchEvent(new Event('input',{bubbles:true}));}
+    if(main.qrCode)setInputValueById("qr-code",main.qrCode,{dispatch:false});
     window.addItemWizard?.restoreDraft(payload.wizard || {});
   }
 
@@ -1837,7 +1853,7 @@
   }
 
   function getSelectedUploadedImagesForSave() {
-    return state.saveSelectedUploadedImagePaths
+    return [...state.saveSelectedUploadedImagePaths].sort((a,b) => Number(b === state.aiSelectedUploadedImagePath) - Number(a === state.aiSelectedUploadedImagePath))
       .map((path) => getImageByPath(path))
       .filter(Boolean)
       .map((image) => ({
@@ -1866,8 +1882,8 @@
       elements.selectedImagePreview.hidden = true;
       elements.selectedImagePreview.removeAttribute("src");
       elements.selectedImageEmpty.hidden = false;
-      elements.selectedImageName.textContent = "No AI image selected";
-      elements.selectedImagePath.textContent = "Refresh after the phone upload finishes.";
+      elements.selectedImageName.textContent = "No cover photo yet";
+      elements.selectedImagePath.textContent = "Take a photo or choose photos above.";
       return;
     }
 
@@ -1876,7 +1892,7 @@
     elements.selectedImagePreview.hidden = false;
     elements.selectedImageEmpty.hidden = true;
     elements.selectedImageName.textContent = image.name;
-    elements.selectedImagePath.textContent = image.path;
+    elements.selectedImagePath.textContent = "Included as the first photo when you save.";
   }
 
   function updateSaveSelectionSummary(elements) {
@@ -1903,6 +1919,7 @@
   }
 
   function markGeneratedCopyNeedsRefresh(elements, reason) {
+    if (state.isApplyingDraft || (state.generationFingerprint && state.generationFingerprint === generationFingerprint(elements))) return;
     state.generationRevision += 1;
     state.watchReference = null;
     renderWatchReference();
@@ -1911,6 +1928,14 @@
 
     if (!hasGeneratedCopy) return;
     state.generatedCopyStale = true;
+    // Never leave old machine-written facts in the current listing after its inputs change.
+    for (const [key,input] of [['title',elements.mainTitleInput],['description',elements.mainDescriptionInput]]) {
+      if (!copyEdited[key] && lastAutoCopy[key] && input.value === lastAutoCopy[key]) {
+        input.value = '';
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+      }
+    }
+    document.getElementById('item-copy-background-status').textContent = 'Item details changed. The description needs review.';
     elements.applyCopyButton.disabled = true;
 
     setInlineStatus(
@@ -1944,12 +1969,13 @@
     if (!options.silent) {
       markGeneratedCopyNeedsRefresh(
         elements,
-        "AI image changed. Generate again if you want copy based on the new AI image."
+        "Cover photo changed. Update the description draft for this photo."
       );
     }
 
     if (!options.skipDraftSave) {
       scheduleAddItemDraftSave(elements);
+      scheduleAutomaticCopy(elements);
     }
   }
 
@@ -1971,9 +1997,11 @@
       .map((image) => image.path)
       .filter((path) => nextSelectedPaths.has(path));
 
+    if(!nextSelectedPaths.has(state.aiSelectedUploadedImagePath))setAISelectedImage(elements,state.saveSelectedUploadedImagePaths[0] || '',{silent:false});
     updateSaveSelectionSummary(elements);
     renderUploadedImages(elements);
     scheduleAddItemDraftSave(elements);
+    scheduleAutomaticCopy(elements);
   }
 
   function renderUploadedImages(elements) {
@@ -1982,7 +2010,7 @@
     if (!state.recentUploadedImages.length) {
       elements.uploadedImageStrip.innerHTML = `
         <div class="assisted-selected-image-empty" role="listitem">
-          No uploaded phone images are available yet.
+          Take a photo or choose photos to start.
         </div>
       `;
       return;
@@ -1993,9 +2021,9 @@
       const isAISelected = image.path === state.aiSelectedUploadedImagePath;
       const isSaveSelected = saveSelections.has(image.path);
       const aiBadge = isAISelected
-        ? '<span class="assisted-thumb-ai-badge">AI image</span>'
+        ? '<span class="assisted-thumb-ai-badge">Cover</span>'
         : "";
-      const saveButtonLabel = isSaveSelected ? "Included" : "Include";
+      const saveButtonLabel = isSaveSelected ? "Remove" : "Include";
       const saveButtonAriaLabel = `${isSaveSelected ? "Remove" : "Add"} ${escapeHtml(image.name)} ${isSaveSelected ? "from" : "to"} images saved with this item`;
 
       return `
@@ -2009,7 +2037,7 @@
             class="assisted-thumb-main"
             data-assisted-ai-select="${escapeHtml(image.path)}"
             aria-pressed="${isAISelected ? "true" : "false"}"
-            aria-label="Use ${escapeHtml(image.name)} as the AI description image"
+            aria-label="Use ${escapeHtml(image.name)} as the cover photo"
           >
             <span class="assisted-thumb-image">
               <img src="${escapeHtml(image.thumbnailUrl || image.previewUrl)}" alt="${escapeHtml(image.name)}" loading="lazy" decoding="async" fetchpriority="low" />
@@ -2018,7 +2046,7 @@
             <span class="assisted-thumb-meta">
               <span class="assisted-thumb-name">${escapeHtml(image.name)}</span>
               <span class="assisted-thumb-subtext">${escapeHtml(formatTimestamp(image.updatedAt || image.createdAt))}</span>
-              <span class="assisted-thumb-save-state">${isSaveSelected ? "Selected for final item photos" : "Not saved unless included"}</span>
+              <span class="assisted-thumb-save-state">${isSaveSelected ? "Included with this item" : "Not saved unless included"}</span>
               ${aiBadge}
             </span>
           </button>
@@ -3261,85 +3289,29 @@
   }
 
   async function handleLocalImageUpload(elements, event) {
-    const file = event?.target?.files?.[0] || null;
-    if (!file) return;
-
-    if (elements.localImageUploadInput) {
-      elements.localImageUploadInput.disabled = true;
-    }
-
-    setInlineStatus(elements.imageStatus, "Uploading selected document image into assisted images...", "is-waiting");
-
+    const files=Array.from(event?.target?.files || []);if(!files.length)return;
+    const camera=document.getElementById('item-camera-photo');
+    elements.localImageUploadInput.disabled=true;if(camera)camera.disabled=true;
+    const failed=[];let added=0;
     try {
-      const uploadPayload = await createLocalImageUploadPayload(file);
-      const { data, error } = await window.supabase.functions.invoke(IMAGE_PROCESS_FUNCTION_NAME, {
-        body: {
-          bucket: INVENTORY_UPLOAD_BUCKET,
-          imagePath: uploadPayload.fileName,
-          background: "uploaded",
-          processedImageBase64: uploadPayload.processedImageBase64,
-          processedMimeType: uploadPayload.processedMimeType,
-        },
-      });
-
-      if (error) {
-        throw new Error(await getFunctionErrorDetail(error) || "Could not upload selected image.");
+      for(const file of files){
+        setInlineStatus(elements.imageStatus,`Adding photo ${added+failed.length+1} of ${files.length}…`,'is-waiting');
+        try {
+          const payload=await createLocalImageUploadPayload(file);
+          const {data,error}=await window.supabase.functions.invoke(IMAGE_PROCESS_FUNCTION_NAME,{body:{bucket:INVENTORY_UPLOAD_BUCKET,imagePath:payload.fileName,background:'uploaded',processedImageBase64:payload.processedImageBase64,processedMimeType:payload.processedMimeType}});
+          if(error || !data?.ok || !data.path || !data.bucket)throw new Error(error?.message || data?.detail || 'Upload failed');
+          const image=normalizeImageRow({path:data.path,name:file.name,createdAt:data.createdAt || new Date().toISOString(),previewUrl:data.previewUrl || '',storageBucket:data.bucket,sourceType:'document-upload',sortOrder:-4,mimeType:data.mimeType || payload.processedMimeType},0);
+          state.recentUploadedImages=[...state.recentUploadedImages.filter(row=>row.path!==image.path),image];
+          state.saveSelectedUploadedImagePaths=[...new Set([...state.saveSelectedUploadedImagePaths,image.path])];
+          if(!state.aiSelectedUploadedImagePath)setAISelectedImage(elements,image.path,{autoSelectForSave:true,silent:true});
+          added++;updateSaveSelectionSummary(elements);renderUploadedImages(elements);
+        }catch(error){failed.push(file.name);console.warn('Photo upload failed',error);}
       }
-
-      if (!data?.ok || !data?.path || !data?.bucket) {
-        throw new Error(data?.detail || data?.error || "Upload returned no image.");
-      }
-
-      const uploadedImage = normalizeImageRow(
-        {
-          path: data.path,
-          name: data.name || `uploaded - ${file.name}`,
-          createdAt: data.createdAt || new Date().toISOString(),
-          updatedAt: data.createdAt || new Date().toISOString(),
-          previewUrl: data.previewUrl || "",
-          storageBucket: data.bucket,
-          sourceType: "document-upload",
-          sortOrder: -4,
-          mimeType: data.mimeType || uploadPayload.processedMimeType || "image/jpeg",
-        },
-        0
-      );
-
-      state.recentUploadedImages = [
-        uploadedImage,
-        ...state.recentUploadedImages.filter((image) => image.path !== uploadedImage.path),
-      ];
-
-      setAISelectedImage(elements, uploadedImage.path, {
-        autoSelectForSave: true,
-        silent: true,
-      });
-      updateSaveSelectionSummary(elements);
-      renderUploadedImages(elements);
-      autoProcessBlackBackgroundImages(elements, [uploadedImage], {
-        preferredPath: uploadedImage.path,
-        maxCount: 1,
-      });
-      const draftSaved = await persistAddItemDraft(elements);
-      setInlineStatus(
-        elements.imageStatus,
-        draftSaved
-          ? "Document image uploaded and saved to your account. It should reopen from another device after refresh."
-          : "Document image uploaded, but the account draft did not confirm. Try Reload Recent Photos on the other device.",
-        draftSaved ? "is-success" : "is-waiting"
-      );
-    } catch (error) {
-      console.error("Document image upload failed:", error);
-      setInlineStatus(
-        elements.imageStatus,
-        error?.message || "Could not upload the selected image.",
-        "is-error"
-      );
-    } finally {
-      if (elements.localImageUploadInput) {
-        elements.localImageUploadInput.disabled = false;
-        elements.localImageUploadInput.value = "";
-      }
+      await persistAddItemDraft(elements);
+      setInlineStatus(elements.imageStatus,failed.length?`${added} photos added. Could not upload: ${failed.join(', ')}. Choose those photos again to retry.`:`${added} photo${added===1?'':'s'} added and included. Tap a photo to change the cover.`,failed.length?'is-error':'is-success');
+    }finally{
+      elements.localImageUploadInput.disabled=false;if(camera)camera.disabled=false;
+      event.target.value='';scheduleAutomaticCopy(elements);window.addItemWizard?.renderReview();
     }
   }
 
@@ -3392,10 +3364,15 @@
     }
   }
 
+  let autoCopyTimer, autoCopyAttempt = "", applyingCopy = false;
+  let lastAutoCopy = { title:"", description:"" };
+  let copyEdited = { title:false, description:false };
+
   function generationFingerprint(elements) {
     const payload = collectAssistedWorkflowGenerationInputs(elements);
-    const { existingTitle, existingDescription, qrType, watchDetails, ...inputs } = payload;
-    return JSON.stringify({ ...inputs, watchDetails: watchDetails ? Object.fromEntries(
+    const { existingTitle, existingDescription, qrType, watchDetails, coinDetails, ...inputs } = payload;
+    const coinFacts = coinDetails ? Object.fromEntries(Object.entries(coinDetails).filter(([key])=>key!=="ebay")) : null;
+    return JSON.stringify({ ...inputs, coinDetails:coinFacts, watchDetails: watchDetails ? Object.fromEntries(
       ["name", "brand", "model", "department", "condition", "materials", "modifications"].map((key) => [key, watchDetails[key] || ""])
     ) : null });
   }
@@ -3459,7 +3436,7 @@
     }
   }
 
-  async function handleGenerateCopy(elements) {
+  async function handleGenerateCopy(elements, { automatic=false }={}) {
     if (state.isGeneratingCopy) return;
 
     const payload = collectAssistedWorkflowGenerationInputs(elements);
@@ -3511,6 +3488,10 @@
     const requestId = ++state.generationRequestId;
     const revision = state.generationRevision;
     const fingerprint = generationFingerprint(elements);
+    const beforeCopy = { title:elements.mainTitleInput.value, description:elements.mainDescriptionInput.value };
+    autoCopyAttempt = fingerprint;
+    const backgroundStatus=document.getElementById("item-copy-background-status");
+    if(backgroundStatus) backgroundStatus.textContent="Preparing description… You can continue.";
     elements.applyCopyButton.disabled = true;
     setButtonBusy(elements.generateCopyButton, "Generating...", "Generate Title & Description", true);
     setInlineStatus(
@@ -3524,7 +3505,7 @@
 
     try {
       const response = await requestAIGenerationForSelectedImage(payload);
-      if (requestId !== state.generationRequestId) return;
+      if (requestId !== state.generationRequestId || document.getElementById("add-item-form").dataset.saving === "true") return;
       if (revision !== state.generationRevision || fingerprint !== generationFingerprint(elements)) {
         setInlineStatus(elements.generateStatus, "Details changed during generation. Generate again to use the current information.", "is-waiting");
         return;
@@ -3542,14 +3523,22 @@
       state.generationFingerprint = fingerprint;
       state.watchReference = payload.itemKind === "watch" ? response?.watchReference || null : null;
       renderWatchReference();
+      applyingCopy=true;
+      for(const [key,input,generated] of [['title',elements.mainTitleInput,generatedTitle],['description',elements.mainDescriptionInput,generatedDescription]]) {
+        if(!copyEdited[key] && input.value===beforeCopy[key]) {input.value=generated;lastAutoCopy[key]=generated;input.dispatchEvent(new Event('input',{bubbles:true}));}
+      }
+      applyingCopy=false;
+      elements.applyCopyButton.hidden=!(copyEdited.title || copyEdited.description);
+      if(backgroundStatus)backgroundStatus.textContent='Description draft ready to review.';
+      window.addItemWizard?.renderReview();
       scheduleAddItemDraftSave(elements);
 
       if (response?.mode === "openai") {
         setInlineStatus(
           elements.generateStatus,
           state.watchReference?.status === "found"
-            ? "Reference sources and AI draft are ready. Review the standard specifications and your modifications, then apply the copy."
-            : "AI draft is ready. Review and edit it before applying; any lookup limitations are shown below.",
+            ? "Reference sources and AI draft are ready. Review the standard specifications and your modifications, review the draft below."
+            : "AI draft is ready. Review and edit it below; any lookup limitations are shown below.",
           "is-success"
         );
       } else {
@@ -3573,11 +3562,13 @@
         const status = elements.generateStatus.textContent;
         const statusClass = elements.generateStatus.className;
         state.isGeneratingCopy = false;
+        if(backgroundStatus && backgroundStatus.textContent.startsWith("Preparing"))backgroundStatus.textContent="Description needs review. You can write it in Review.";
         setButtonBusy(elements.generateCopyButton, "Generating...", "Generate Title & Description", false);
         elements.applyCopyButton.disabled = state.generatedCopyStale;
         updateCopyMode(elements);
         elements.generateStatus.textContent = status;
         elements.generateStatus.className = statusClass;
+        if(document.getElementById("item-auto-copy")?.checked && fingerprint!==generationFingerprint(elements))scheduleAutomaticCopy(elements);
       }
     }
   }
@@ -3600,6 +3591,9 @@
       return;
     }
 
+    applyingCopy=true;
+    copyEdited={title:false,description:false};
+    lastAutoCopy={title:generatedTitle,description:generatedDescription};
     if (generatedTitle) {
       elements.mainTitleInput.value = generatedTitle;
       elements.mainTitleInput.dispatchEvent(new Event("input", { bubbles: true }));
@@ -3610,7 +3604,10 @@
       elements.mainDescriptionInput.dispatchEvent(new Event("input", { bubbles: true }));
     }
 
-    window.showToast?.("AI copy applied to the Add Item form.");
+    applyingCopy=false;
+    elements.applyCopyButton.hidden=true;
+    window.addItemWizard?.renderReview();
+    window.showToast?.("Description draft restored.");
     setInlineStatus(
       elements.generateStatus,
       "Generated copy was copied into the existing Add Item form. You can still edit it before saving.",
@@ -3619,6 +3616,8 @@
   }
 
   function resetAssistedWorkflow(elements, options = {}) {
+    clearTimeout(autoCopyTimer);autoCopyAttempt="";lastAutoCopy={title:"",description:""};copyEdited={title:false,description:false};
+    if(document.getElementById("item-copy-background-status"))document.getElementById("item-copy-background-status").textContent="";
     state.stableWeight = null;
     state.isReadingWeight = false;
     state.isGeneratingCopy = false;
@@ -3628,7 +3627,10 @@
     state.generationFingerprint = "";
     state.watchReference = null;
     elements.applyCopyButton.disabled = false;
+    elements.applyCopyButton.hidden = true;
     elements.generateCopyButton.disabled = false;
+    document.getElementById("item-draft-status").textContent="Drafts save as you work.";
+    document.getElementById("item-copy-background-status").textContent="";
     renderWatchReference();
     updateCopyMode(elements);
     state.saveSelectedUploadedImagePaths = [];
@@ -3644,15 +3646,16 @@
     if (elements.scaleState) elements.scaleState.textContent = "Ready to read from the scale integration point.";
     if (elements.captureState) elements.captureState.textContent = "Idle";
 
-    const latestImage = getLatestUploadedImage(state.recentUploadedImages);
-    setAISelectedImage(elements, latestImage?.path || "", { silent: true, skipDraftSave: true });
+    releaseImagePreviewUrls(state.recentUploadedImages);
+    state.recentUploadedImages=[];
+    setAISelectedImage(elements, "", { silent: true, skipDraftSave: true });
     updateSaveSelectionSummary(elements);
     renderUploadedImages(elements);
     setInlineStatus(
       elements.imageStatus,
       state.recentUploadedImages.length
         ? "Assisted workflow reset. Choose an AI image and any save images you want for the next item."
-        : "Refresh uploads to load recent phone images for the next item.",
+        : "Take a photo or choose photos for the next item.",
       state.recentUploadedImages.length ? "is-success" : "is-waiting"
     );
     setInlineStatus(
@@ -3717,6 +3720,7 @@
       const aiButton = event.target.closest("[data-assisted-ai-select]");
       if (aiButton) {
         setAISelectedImage(elements, aiButton.getAttribute("data-assisted-ai-select"), {
+          autoSelectForSave: true,
           silent: false,
         });
         return;
@@ -3869,6 +3873,17 @@
     });
   }
 
+  function scheduleAutomaticCopy(elements) {
+    clearTimeout(autoCopyTimer);
+    if(state.isApplyingDraft || !document.getElementById('item-auto-copy')?.checked || document.getElementById('add-item-form').dataset.saving==='true' || document.getElementById('add-item-form').dataset.savedItemId)return;
+    autoCopyTimer=setTimeout(()=>{
+      if(state.isGeneratingCopy || elements.localImageUploadInput.disabled || document.getElementById('add-item-form').dataset.saving==='true' || document.getElementById('add-item-form').dataset.savedItemId)return;
+      const p=collectAssistedWorkflowGenerationInputs(elements), fingerprint=generationFingerprint(elements);
+      const ready=p.itemKind==='coin'?!!p.coinDetails?.name:p.itemKind==='watch'?!!p.watchDetails?.name && !!(p.watchDetails?.model || p.imagePath):!!p.imagePath && !!p.material && !!p.purity && Number.isFinite(p.weight) && p.weight>0;
+      if(ready && fingerprint!==autoCopyAttempt)void handleGenerateCopy(elements,{automatic:true});
+    },1200);
+  }
+
   function exposeModule(elements) {
     window.addItemAssistedModule = {
       getWatchReferenceLookup: () => state.generatedCopyStale ? null : state.watchReference,
@@ -3887,6 +3902,15 @@
       }),
       loadActiveCaptureStations: () => loadActiveCaptureStations(elements, { silent: false }),
       clearSavedDraft: () => clearAddItemDraft(),
+      persistDraft: () => persistAddItemDraft(elements),
+      cancelGeneration:()=>{
+        clearTimeout(autoCopyTimer);state.generationRequestId++;state.isGeneratingCopy=false;
+        setButtonBusy(elements.generateCopyButton,"Generating...","Generate Title & Description",false);
+        elements.applyCopyButton.disabled=state.generatedCopyStale;
+        document.getElementById('item-copy-background-status').textContent='';
+      },
+      applySimilar: (payload)=>{state.isApplyingDraft=true;try{applyAddItemDraftFields(elements,payload);}finally{state.isApplyingDraft=false;}scheduleAddItemDraftSave(elements);},
+
     };
   }
 
@@ -3985,10 +4009,17 @@
     elements.imageEditorCanvas?.addEventListener("pointerup", (event) => handleEditorPointerUp(event, elements));
     elements.imageEditorCanvas?.addEventListener("pointercancel", (event) => handleEditorPointerUp(event, elements));
     elements.generateCopyButton?.addEventListener("click", () => handleGenerateCopy(elements));
+    document.getElementById('item-camera-photo')?.addEventListener('change',event=>handleLocalImageUpload(elements,event));
+    for(const [key,input] of [['title',elements.mainTitleInput],['description',elements.mainDescriptionInput]])input.addEventListener('input',event=>{if(!applyingCopy && event.isTrusted)copyEdited[key]=true;});
+    document.getElementById('add-item-form').addEventListener('change',event=>{
+      if(event.target.id==='item-auto-copy' && !event.target.checked){clearTimeout(autoCopyTimer);state.generationRequestId++;state.isGeneratingCopy=false;elements.generateCopyButton.disabled=false;return;}
+      if(event.target.closest('#item-step-information'))scheduleAutomaticCopy(elements);
+    });
+    document.addEventListener('add-item:step-change',event=>{if(event.detail.step!=='information')scheduleAutomaticCopy(elements);});
     elements.applyCopyButton?.addEventListener("click", () => handleApplyGeneratedCopy(elements));
 
-    document.addEventListener("add-item-form:reset", () => {
-      resetAssistedWorkflow(elements, { clearDraft: true });
+    document.addEventListener("add-item-form:reset", event => {
+      resetAssistedWorkflow(elements, { clearDraft: event.detail?.clearDraft !== false });
     });
 
     window.addEventListener("beforeunload", () => {
@@ -3999,14 +4030,10 @@
     const restoredDraft = await loadAddItemDraft(elements);
     if (!restoredDraft) {
       resetAssistedWorkflow(elements, { skipDraftSave: true });
-      await loadRecentInventoryUploadImages(elements, {
-        refreshNotice: true,
-        preserveSelection: false,
-        autoProcess: false,
-        selectLatestOnly: true,
-      });
+
     }
-    setActiveWorkflow(elements, restoredDraft?.activeWorkflow || "assisted", { skipDraftSave: true });
+    setActiveWorkflow(elements, "assisted", { skipDraftSave: true });
+    document.dispatchEvent(new Event("add-item:ready"));
   }
 
   document.addEventListener("DOMContentLoaded", init);

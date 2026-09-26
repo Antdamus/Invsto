@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="add-item.css?v=20260926-mobile" />
   <link rel="stylesheet" href="additembulk.css" />
   <link rel="stylesheet" href="additem-assisted.css" />
-  <link rel="stylesheet" href="additem-wizard.css?v=20260926-mobile" />
+  <link rel="stylesheet" href="additem-wizard.css?v=20260926-fast-intake" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
@@ -24,7 +24,7 @@
     <header class="header">
       <div class="header-copy">
         <p class="page-kicker">OG Jewelry Atelier Console</p>
-        <h1 class="add-heading">Add Item Type</h1>
+        <h1 class="add-heading">Add item</h1>
         <p class="header-subcopy">
           Add one item, one step at a time. You can go back to change any detail.
         </p>
@@ -63,8 +63,8 @@
             <label><input type="radio" name="item-kind" value="coin" /> Coin</label>
           </fieldset>
           <div id="watch-fields" class="form-grid form-grid-2" hidden>
-            <label class="form-field" for="watch-name"><span class="form-label">Brand / watch name</span><input id="watch-name" class="add-input" placeholder="e.g. Rolex or Rolex Datejust" maxlength="200" disabled /></label>
-            <label class="form-field" for="watch-brand"><span class="form-label">Watch brand</span><input id="watch-brand" class="add-input" placeholder="e.g. Rolex" maxlength="100" disabled /><span class="field-helper">Required for eBay. Enter Unbranded only if confirmed.</span></label>
+            <label class="form-field" for="watch-name"><span class="form-label">Model / collection (optional)</span><input id="watch-name" class="add-input" placeholder="e.g. Datejust" maxlength="200" disabled /></label>
+            <label class="form-field" for="watch-brand"><span class="form-label">Brand</span><input id="watch-brand" class="add-input" placeholder="e.g. Rolex" maxlength="100" disabled /><span class="field-helper">Required for eBay. Enter Unbranded only if confirmed.</span></label>
             <label class="form-field" for="watch-department"><span class="form-label">Watch department</span><select id="watch-department" class="add-input" disabled><option value="">Choose department</option><option>Men</option><option>Women</option><option>Unisex Adults</option><option>Boys</option><option>Girls</option><option>Unisex Kids</option></select></label>
             <label class="form-field" for="watch-condition"><span class="form-label">Watch condition</span><select id="watch-condition" class="add-input" disabled><option value="">Choose condition</option><option value="NEW">New with box and papers</option><option value="NEW_OTHER">New without box or papers</option><option value="NEW_WITH_DEFECTS">New with imperfections</option><option value="SELLER_REFURBISHED">Seller refurbished</option><option value="PRE_OWNED_EXCELLENT">Pre-owned - Excellent</option><option value="USED_EXCELLENT">Pre-owned - Good</option><option value="PRE_OWNED_FAIR">Pre-owned - Fair</option><option value="FOR_PARTS_OR_NOT_WORKING">For parts or not working</option></select><span class="field-helper">Choose the actual condition before publishing to eBay.</span></label>
             <label class="form-field" for="watch-model"><span class="form-label">Model / reference number (if known)</span><input id="watch-model" class="add-input" placeholder="e.g. 126233" maxlength="200" disabled /><span class="field-helper">Use the full reference. In Description, AI can look up standard model details and draft the listing.</span></label>
@@ -279,7 +279,7 @@
                 <div class="assisted-upload-actions">
                   <label class="assisted-secondary-button assisted-file-upload-button" for="assisted-local-image-upload">
                     Upload From Documents
-                    <input type="file" id="assisted-local-image-upload" accept="image/*" hidden />
+                    <input type="file" id="assisted-local-image-upload" accept="image/*" multiple hidden />
                   </label>
                   <label class="assisted-reload-count-control" for="assisted-recent-photo-limit">
                     <span>Show</span>
@@ -597,7 +597,7 @@
             <label class="form-field form-field-toggle ebay-sync-toggle" for="ebay-sync-enabled">
               <span class="form-label">Automatic eBay Sync</span>
               <span class="auto-cost-toggle">
-                <input type="checkbox" id="ebay-sync-enabled" checked />
+                <input type="checkbox" id="ebay-sync-enabled" />
                 <span>Include this item in eBay sync</span>
               </span>
             </label>
@@ -619,7 +619,7 @@
         <section class="form-section item-step" id="item-step-review" data-item-step="review" aria-labelledby="item-step-review-title" hidden>
           <div class="form-section-head"><h2 class="section-title" id="item-step-review-title" tabindex="-1">Review your item</h2><p class="section-copy">Check the details below. Go back to any step to make changes.</p></div>
           <dl id="item-review-summary" class="item-review-summary"></dl>
-          <div class="final-action-bar"><button type="submit" class="add-button">Add Item</button></div>
+          <div class="final-action-bar"><button type="submit" class="add-button">Save item</button><button type="submit" class="add-button-secondary" data-next-item="similar">Save &amp; add similar</button></div>
         </section>
         <p id="item-step-error" class="inline-status inline-status-error" role="alert" hidden></p>
         <div class="item-step-navigation">
@@ -1018,12 +1018,14 @@
 
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
-  <script src="additem-dymolabel.js"></script>
+  <script src="additem-dymolabel.js?v=20260926-fast-intake"></script>
   <script src="additembulk.js"></script>
   <link rel="stylesheet" href="coin-ebay.css?v=20260926-coins-ebay" />
-  <script type="module" src="coin-ebay.js?v=20260926-coins-ebay"></script>
-  <script src="additem-wizard.js?v=20260926-coins-ebay"></script>
-  <script src="additem.js?v=20260926-coins-ebay"></script>
-  <script src="additem-assisted.js?v=20260926-prices-watch"></script>
+  <script type="module" src="coin-ebay.js?v=20260926-fast-intake"></script>
+  <script src="additem-layout.js?v=20260926-fast-intake"></script>
+  <script src="additem-wizard.js?v=20260926-fast-intake"></script>
+  <script src="additem.js?v=20260926-fast-intake"></script>
+  <script src="additem-assisted.js?v=20260926-fast-intake"></script>
+  <script src="additem-intake.js?v=20260926-fast-intake"></script>
 </body>
 </html>

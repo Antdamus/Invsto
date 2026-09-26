@@ -11,15 +11,17 @@ const coinMetadata = JSON.parse(await readFile(new URL("fixtures/coin-ebay-metad
 // Exercise the real page and save handler without touching inventory or hardware.
 const mockServices = () => {
   window.testWrites = [];
-  window.testGeneration = [];
+  window.testGeneration = [];window.testUploads=[];window.testPrints=[];window.testLabelPrepares=[];window.testStockWrites=[];window.testLabelPreferences=[];
   window.alert = () => {};
   window.QRCode = { toCanvas: (_canvas, _url, _options, callback) => callback?.() };
   window.testBarcodeRenders = [];
   window.JsBarcode = (_canvas, code) => window.testBarcodeRenders.push(code);
-  window.addItemBulkModule = { setupBulkModalOpeners() {} };
+  window.addItemBulkModule = { setupBulkModalOpeners() {},saveRegistryForItem:async()=>({skipped:true}) };
   window.dymoModule = {
     setupGenerateDymoButtonListener() {},
-    barcodeExists: async () => false,
+    barcodeExists: async code => !!window.testExistingItem && window.testExistingItem.barcode===code,
+    prepareSavedItemLabel:async item=>{window.testLabelPrepares.push(item.barcode);if(window.testLabelFailure)throw new Error('Printer preparation unavailable');return {templateXml:`<label>${item.barcode}</label>`,labelPath:`labels/${item.id}.dymo`};},
+    printDymoLabelXml:async(xml,options)=>{window.testPrints.push({xml,...options});return {mode:'queued-download'};},
     generateDymoLabelFromForm: async () => {
       window.latestDymoXml = "<label/>";
       window.latestDymoUrl = "labels/test.dymo";
@@ -29,7 +31,7 @@ const mockServices = () => {
   };
   const user = { id: "test-user", email: "test@example.invalid" };
   window.supabase = {
-    auth: { getUser: async () => ({ data: { user } }), getSession: async () => ({ data: { session: { user } } }) },
+    auth: { getUser: async () => ({ data: { user } }), getSession: async () => ({ data: { session: { user } } }), signInWithPassword:async()=>({data:{user}}) },
     functions: { invoke: async (name, options) => {
       if (name === "ebay-inventory-sync") {
         if (window.testCoinMetadataFailure) return { error: { message: "Metadata offline. Try again." } };
@@ -38,6 +40,11 @@ const mockServices = () => {
           if (window.testCoinMetadataHold === options.body.categoryId) await new Promise(resolve => { window.testReleaseCoinMetadata=resolve; });
           return { data: window.testCoinMetadata[options.body.categoryId] };
         }
+      }
+      if(name==='process-inventory-image'){
+        window.testUploads.push(options.body);
+        if(window.testFailUploadAt===window.testUploads.length)return {error:{message:'Photo upload offline'}};
+        return {data:{ok:true,path:`uploaded-${window.testUploads.length}.jpg`,name:'Photo',bucket:'InventoryUpload',previewUrl:`${location.origin}/test-photo.svg`,mimeType:'image/jpeg'}};
       }
       if (name === "generate-inventory-copy") {
         window.testGeneration.push(options.body);
@@ -50,23 +57,29 @@ const mockServices = () => {
       }
       return { data: { images: [] } };
     } },
+    rpc:async(name,payload)=>{if(name==='set_item_label_print_preference')window.testLabelPreferences.push(payload);return {data:[]};},
     storage: { from: () => ({
+      upload:async()=>window.testCopyFailure?{error:{message:'Storage offline'}}:{data:{}},
+      download:async()=>({data:new Blob(['photo'])}),
       list: async () => ({ data: [] }),
       createSignedUrl: async () => ({ data: { signedUrl: `${location.origin}/test-photo.svg` } }),
     }) },
     from(table) {
-      let operation = "select", payload, single = false;
+      let operation = "select", payload, single = false, filters={};
       const query = {
-        select() { return query; }, eq() { return query; }, neq() { return query; }, order() { return query; },
+        select() { return query; }, eq(key,value) { filters[key]=value;return query; }, neq() { return query; }, order() { return query; },
         limit() { return query; }, in() { return query; }, not() { return query; },
         single() { single = true; return query; }, maybeSingle() { single = true; return query; },
         insert(data) { operation = "insert"; payload = data; return query; },
+        update(data){operation="update";payload=data;return query;},
         upsert(data) { operation = "upsert"; payload = data; return query; },
         delete() { operation = "delete"; return query; },
         then(resolve, reject) {
           let result = { data: single ? null : [] };
+          if (table === 'locations') result.data=window.testLocations || [];
           if (table === "employees") result.data = { role: "admin", active: true };
-          if (table === "item_types" && operation === "select") result.data = (window.testCategories || []).map(category => ({ categories: [category] }));
+          if (table === "item_types" && operation === "select") result.data = filters.barcode ? (window.testExistingItem?.barcode===filters.barcode?window.testExistingItem:null) : (window.testCategories || []).map(category => ({ categories: [category] }));
+          if(table==='item_stock_locations' && operation==='insert'){window.testStockWrites.push(payload);if(window.testStockFailure)result.error={message:'Stock failed'};}
           if (table === "add_item_drafts") {
             if (operation === "upsert") localStorage.setItem("test-draft", JSON.stringify(payload));
             if (operation === "delete") localStorage.removeItem("test-draft");
@@ -75,7 +88,7 @@ const mockServices = () => {
           if (table === "item_types" && operation === "insert") {
             window.testWrites.push(payload);
             // Stop here: the payload is inspected, never sent to a real database.
-            result = { data: null, error: { message: "Test save intercepted" } };
+            result = window.testSaveSuccess ? {data:[{...payload,id:`item-${window.testWrites.length}`}]} : { data: null, error: { message: "Test save intercepted" } };
           }
           return Promise.resolve(result).then(resolve, reject);
         },
@@ -98,7 +111,7 @@ before(async () => {
       let content = await readFile(new URL(name, root), "utf8");
       if (name.endsWith("html")) {
         content = content.replace(/<script src="([^"]+)"(?: defer)?><\/script>/g, (tag, src) =>
-          ["admin-nav.js", "additem-wizard.js", "additem.js", "additem-assisted.js", "barcode-scanner.js"].includes(src.split("?")[0]) ? tag : "");
+          ["admin-nav.js", "additem-layout.js", "additem-wizard.js", "additem.js", "additem-assisted.js", "additem-intake.js", "barcode-scanner.js"].includes(src.split("?")[0]) ? tag : "");
         content = content.replace("<head>", `<head><script>(${mockServices.toString()})();window.testCoinMetadata=${JSON.stringify(coinMetadata)};</script>`);
       }
       res.setHeader("Content-Type", name.endsWith("css") ? "text/css" : name.endsWith("js") ? "text/javascript" : "text/html");
@@ -109,7 +122,7 @@ before(async () => {
   origin = `http://127.0.0.1:${server.address().port}`;
   browser = await (process.env.INVSTO_ITEM_BROWSER === "webkit" ? webkit : chromium).launch({ headless: true });
 });
-after(async () => { await browser?.close(); await new Promise((resolve) => server?.close(resolve)); });
+after(async () => { server?.closeAllConnections(); await browser?.close(); await new Promise((resolve) => server?.close(resolve)); });
 
 async function pageFor(t, viewport = { width: 1365, height: 1000 }) {
   const page = await browser.newPage({ viewport, isMobile: viewport.width <= 900, hasTouch: viewport.width <= 900 });
@@ -118,7 +131,9 @@ async function pageFor(t, viewport = { width: 1365, height: 1000 }) {
   await page.route("**/*", (route) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
   await page.goto(`${origin}/add-item.html`);
   await page.waitForFunction(() => window.coinEbayForm && window.addItemAssistedModule && document.body.classList.contains("admin-unified-nav"));
-  await page.waitForFunction(() => document.getElementById("assisted-generate-status").textContent.includes("Choose an AI image"));
+  await page.waitForFunction(() => window.addItemIntake && document.getElementById("assisted-material").value);
+  page.on("dialog",dialog=>dialog.dismiss());
+  await page.locator("#item-auto-copy").uncheck();
   t.after(async () => { await page.close(); assert.deepEqual(errors, []); });
   return page;
 }
@@ -130,425 +145,139 @@ async function category(page, text) {
   await page.locator("#category-dropdown-menu .new-entry").click();
 }
 
-test("jewelry progresses one block at a time, keeps edits, and validates before saving", async (t) => {
-  const page = await pageFor(t);
-  assert.equal(await step(page), "information");
-  await next(page);
-  assert.equal(await step(page), "information");
-  await page.locator("#weight").fill("12.5");
-  await category(page, "Bracelets");
-  await next(page);
-  assert.equal(await step(page), "photos");
-  await page.locator("#workflow-tab-manual").click();
-  await next(page);
-  assert.equal(await step(page), "description");
-  assert.equal(await page.locator("#item-ai-copy").isVisible(), false);
-  await page.locator("#title").fill("Silver bracelet");
-  await page.locator("#description").fill("Sterling silver bracelet.");
-  await page.locator("#item-step-back").click();
-  await next(page);
-  assert.equal(await page.locator("#title").inputValue(), "Silver bracelet");
-  await next(page);
-  assert.equal(await step(page), "pricing");
-  assert.equal(await page.locator("#cost").inputValue(), "87.50");
-  for (let i = 0; i < 4; i++) await next(page);
-  assert.equal(await step(page), "review");
-  assert.equal(await page.locator("[data-item-step]:visible").count(), 1);
-  await page.locator('[data-item-step-target="description"]').click();
-  await page.locator("#title").fill("");
-  await page.locator('[data-item-step-target="review"]').click();
-  assert.equal(await step(page), "description");
-  assert.equal(await page.evaluate(() => window.testWrites.length), 0);
-  await page.locator("#title").fill("Silver bracelet");
-  await page.locator('[data-item-step-target="review"]').click();
-  await page.evaluate(() => { document.getElementById("weight").value = ""; });
-  await page.locator('#item-step-review button[type="submit"]').click();
-  assert.equal(await step(page), "information");
-  assert.equal(await page.evaluate(() => window.testWrites.length), 0);
+async function prepareWatch(page,{auto=false}={}) {
+ await page.locator('[name="item-kind"][value="watch"]').check();
+ await page.locator('#item-auto-copy').setChecked(auto);
+ await page.locator('#watch-brand').fill('Rolex');await page.locator('#watch-model').fill('126233');
+ await next(page);await next(page);
+ await page.locator('#cost').fill('4100');await page.locator('#minimum-sale-price').fill('4700');await page.locator('#sale-price').fill('6500');
+ await next(page);
+}
+async function seed(page,{kind='coin',details={},main={},photos=[],step='information',assignStock=false}={}) {
+ await page.evaluate(data=>localStorage.setItem('test-draft',JSON.stringify({payload:{activeWorkflow:'assisted',wizard:{version:2,step:data.step,furthest:6,itemKind:data.kind,autoCopy:false,assignStock:data.assignStock,coinDetails:{name:'Morgan dollar',year:'1881',metal:'Silver',fineness:'900',gradingStatus:'ungraded',...data.details},watchDetails:data.kind==='watch'?{brand:'Rolex',model:'126233',...data.details}:{}},mainFields:{category:data.kind==='watch'?'Watches':'Coins',title:'Collector item',description:'Known item details.',cost:'40',salePrice:'90',minimumSalePrice:'55',ebaySyncEnabled:false,...data.main},assistedFields:{material:'Silver',purity:'925'},recentUploadedImages:data.photos,saveSelectedUploadedImagePaths:data.photos.map(p=>p.path),aiSelectedUploadedImagePath:data.photos[0]?.path || ''}})),{kind,details,main,photos,step,assignStock});
+ await page.reload();await page.waitForFunction(()=>window.addItemIntake && window.addItemAssistedModule && document.getElementById('cost').value==='40');
+}
+const twoPhotos=[{path:'front.jpg',storageBucket:'photos',name:'Front',mimeType:'image/jpeg'},{path:'back.jpg',storageBucket:'photos',name:'Back',mimeType:'image/jpeg'}];
+const photoFile=name=>({name,mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64')});
+
+test('normal jewelry intake has four steps, editable review, and distinct minimum and retail prices',async t=>{
+ const page=await pageFor(t);
+ assert.match(await page.locator('#item-step-status').innerText(),/of 4/i);
+ await next(page);assert.equal(await step(page),'information');
+ await page.locator('#weight').fill('12.5');await category(page,'Bracelets');await next(page);
+ assert.equal(await step(page),'photos');await next(page);assert.equal(await step(page),'pricing');
+ await page.locator('#sale-price').fill('300');await page.locator('#minimum-sale-price').fill('400');await next(page);assert.equal(await step(page),'pricing');
+ await page.locator('#minimum-sale-price').fill('150');await next(page);assert.equal(await step(page),'review');
+ assert.match(await page.locator('#title').inputValue(),/Silver Bracelets/);
+ await page.getByRole('button',{name:'Edit Retail',exact:true}).click();assert.equal(await step(page),'pricing');
+ await page.locator('#cost').fill('100');assert.equal(await page.locator('#sale-price').inputValue(),'300');await next(page);assert.equal(await step(page),'review');
+ await page.getByRole('button',{name:'Save item',exact:true}).click();await page.waitForFunction(()=>window.testWrites.length===1);
+ const saved=await page.evaluate(()=>window.testWrites[0]);assert.equal(saved.minimum_sale_price,150);assert.equal(saved.sale_price,300);assert.equal(saved.ebay_sync_enabled,false);assert.equal(saved.dymo_label_url,'');
 });
 
-test("watch details survive back, refresh, price changes and reach the save payload", async (t) => {
-  const page = await pageFor(t);
-  await page.locator('[name="item-kind"][value="watch"]').check();
-  await page.locator("#watch-name").fill("Rolex Datejust");
-  await page.locator("#watch-brand").fill("Rolex");
-  await page.locator("#watch-department").selectOption("Unisex Adults");
-  await page.locator("#watch-condition").selectOption("USED_EXCELLENT");
-  await page.locator("#watch-model").fill("126233");
-  await page.locator("#watch-materials").fill("Steel case; 18K gold bezel; steel and gold bracelet");
-  await page.locator("#watch-modifications").fill("Aftermarket diamond bezel");
-  await category(page, "Watches");
-  await next(page);
-  await next(page);
-  assert.equal(await page.locator("#title").inputValue(), "Rolex Datejust 126233");
-  await next(page);
-  assert.equal(await page.locator("#auto-cost-checkbox").isChecked(), false);
-  assert.equal(await page.locator("#auto-cost-checkbox").isDisabled(), true);
-  await page.locator("#cost").fill("4000");
-  await page.locator("#sale-price").fill("6500");
-  await page.locator("#minimum-sale-price").fill("4700");
-  await page.locator("#cost").fill("4100");
-  assert.equal(await page.locator("#sale-price").inputValue(), "6500");
-  await page.waitForFunction(() => JSON.parse(localStorage.getItem("test-draft") || "null")?.payload?.mainFields?.cost === "4100");
-  await page.reload();
-  await page.waitForFunction(() => window.addItemWizard?.isWatch());
-  assert.equal(await step(page), "pricing");
-  assert.equal(await page.locator("#watch-modifications").inputValue(), "Aftermarket diamond bezel");
-  assert.equal(await page.locator("#sale-price").inputValue(), "6500");
-  for (let i = 0; i < 4; i++) await next(page);
-  assert.equal(await step(page), "review");
-  assert.match(await page.locator("#item-review-summary").innerText(), /Aftermarket diamond bezel/);
-  await page.locator('button[type="submit"]').first().click();
-  await page.waitForFunction(() => window.testWrites.length === 1);
-  const saved = await page.evaluate(() => window.testWrites[0]);
-  assert.equal(saved.watch_details.name, "Rolex Datejust");
-  assert.equal(saved.watch_details.model, "126233");
-  assert.equal(saved.watch_details.modifications, "Aftermarket diamond bezel");
-  assert.match(saved.description, /Steel case; 18K gold bezel/);
-  assert.equal(saved.metal, null);
-  assert.equal(saved.purity_basis_points, null);
-  assert.equal(saved.price_per_weight, null);
-  assert.equal(saved.weight, null);
-  assert.equal(saved.sale_price, 6500);
-  assert.equal(saved.minimum_sale_price, 4700);
-  assert.equal(saved.ebay_condition, "USED_EXCELLENT");
-  assert.deepEqual(saved.ebay_aspects.Brand, ["Rolex"]);
-  assert.deepEqual(saved.ebay_aspects.Department, ["Unisex Adults"]);
-  assert.deepEqual(saved.ebay_aspects["Reference Number"], ["126233"]);
-  assert.equal(saved.ebay_category_id, "31387");
-  assert.equal(saved.ebay_aspects.Metal, undefined);
-  await page.evaluate(() => { document.getElementById("add-item-form").reset(); document.dispatchEvent(new Event("add-item-form:reset")); });
-  assert.equal(await step(page), "information");
-  assert.equal(await page.locator("#watch-name").inputValue(), "");
-  assert.equal(await page.locator('[name="item-kind"][value="jewelry"]').isChecked(), true);
+test('watch brand and reference are entered once, category is automatic and optional steps adapt',async t=>{
+ const page=await pageFor(t);await prepareWatch(page);
+ assert.equal(await step(page),'review');assert.equal(await page.locator('#title').inputValue(),'Rolex 126233');
+ assert.equal(await page.evaluate(()=>window.addItemWizard.getWatchDetails().name),'Rolex');
+ await page.getByRole('button',{name:'Edit Item',exact:true}).click();
+ await page.locator('#item-prepare-ebay').check();await page.locator('#item-assign-stock').check();assert.match(await page.locator('#item-step-status').innerText(),/of 6/i);
+ await page.locator('#item-prepare-ebay').uncheck();await page.locator('#item-assign-stock').uncheck();assert.match(await page.locator('#item-step-status').innerText(),/of 4/i);
+ await next(page);assert.equal(await step(page),'review');
+ await page.getByRole('button',{name:'Save item',exact:true}).click();await page.waitForFunction(()=>window.testWrites.length===1);
+ const saved=await page.evaluate(()=>window.testWrites[0]);assert.equal(saved.watch_details.brand,'Rolex');assert.equal(saved.sale_price,6500);assert.equal(saved.minimum_sale_price,4700);
 });
 
-test("watch mode can switch back without losing details or leaking them into jewelry", async (t) => {
-  const page = await pageFor(t);
-  await page.locator('[name="item-kind"][value="watch"]').check();
-  await page.locator("#watch-name").fill("Custom watch");
-  await category(page, "Watches");
-  await next(page);
-  await page.locator("#item-step-back").click();
-  await page.locator("#watch-model").fill("M2");
-  await next(page);
-  assert.equal(await page.locator("#title").inputValue(), "Custom watch M2");
-  await page.locator("#item-step-back").click();
-  await page.locator('[name="item-kind"][value="jewelry"]').check();
-  assert.equal(await page.evaluate(() => window.addItemWizard.getWatchDetails()), null);
-  assert.equal(await page.locator("#auto-cost-checkbox").isChecked(), true);
-  await page.locator('[name="item-kind"][value="watch"]').check();
-  assert.equal(await page.locator("#watch-name").inputValue(), "Custom watch");
+test('automatic reference drafting runs while continuing, preserves manual edits and exposes sources',async t=>{
+ const page=await pageFor(t);await page.evaluate(()=>window.testGenerationHold=true);
+ await prepareWatch(page,{auto:true});await page.waitForFunction(()=>window.testReleaseGeneration);
+ await page.locator('#title').fill('My custom title');await page.locator('#description').fill('My verified description.');
+ await page.evaluate(()=>window.testReleaseGeneration());await page.waitForFunction(()=>document.getElementById('watch-reference-results').querySelector('a'));
+ assert.equal(await page.locator('#title').inputValue(),'My custom title');assert.equal(await page.locator('#description').inputValue(),'My verified description.');
+ assert.equal(await page.locator('#assisted-apply-copy').isVisible(),true);
+ await page.locator('#assisted-apply-copy').click();assert.equal(await page.locator('#description').inputValue(),'Reviewed watch copy');
+ await page.waitForFunction(()=>JSON.parse(localStorage.getItem('test-draft'))?.payload?.assistedFields?.watchReference?.status==='found');
+ await page.reload();await page.waitForFunction(()=>window.addItemWizard?.getWatchDetails()?.referenceLookup?.status==='found');
+ assert.equal(await page.locator('#description').inputValue(),'Reviewed watch copy');
 });
 
-test("mobile watch form has one active step, no horizontal overflow and usable navigation", async (t) => {
-  const page = await pageFor(t, { width: 390, height: 844 });
-  await page.locator('[name="item-kind"][value="watch"]').check();
-  await page.locator("#watch-name").fill("Custom watch");
-  assert.equal(await page.locator("[data-item-step]:visible").count(), 1);
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
-  assert.equal(await page.evaluate(() => {
-    const navigation = document.querySelector(".item-step-navigation");
-    const section = document.querySelector("[data-item-step]:not([hidden])");
-    return navigation.getBoundingClientRect().top >= section.getBoundingClientRect().bottom;
-  }), true, "Navigation follows the form instead of covering fields");
-  await category(page, "Watches");
-  await next(page);
-  assert.equal(await step(page), "photos");
-  await mkdir(new URL("test-results/", root), { recursive: true });
-  await page.screenshot({ path: new URL("test-results/add-item-mobile.png", root).pathname.replace(/^\/(\w:)/, "$1"), fullPage: true });
-  await page.setViewportSize({ width: 1365, height: 1000 });
-  await page.screenshot({ path: new URL("test-results/add-item-desktop.png", root).pathname.replace(/^\/(\w:)/, "$1"), fullPage: true });
+test('automatic drafting applies to the one visible editor and ignores obsolete reference responses',async t=>{
+ const page=await pageFor(t);await page.evaluate(()=>window.testGenerationHold=true);
+ await prepareWatch(page,{auto:true});await page.waitForFunction(()=>window.testReleaseGeneration);
+ await page.getByRole('button',{name:'Edit Item',exact:true}).click();await page.locator('#watch-model').fill('NEW-REF');
+ await page.evaluate(()=>{window.testGenerationHold=false;window.testReleaseGeneration();});
+ await next(page);await page.waitForFunction(()=>window.testGeneration.length===2 && document.getElementById('description').value==='Reviewed watch copy');
+ assert.equal(await page.evaluate(()=>window.addItemWizard.getWatchDetails().referenceLookup.matchedReference),'NEW-REF');
+ assert.equal(await page.locator('#assisted-generated-description').isVisible(),false);
 });
 
-test("photo selection survives navigation and watch facts reach assisted generation", async (t) => {
-  const page = await pageFor(t, { width: 390, height: 744 });
-  await page.evaluate(() => localStorage.setItem("test-draft", JSON.stringify({ payload: {
-    activeWorkflow: "assisted",
-    wizard: { step: "photos", furthest: 1, itemKind: "watch", watchDetails: { name: "Custom watch", model: "M1", materials: "Steel case, leather strap", modifications: "Replacement dial" } },
-    mainFields: { category: "Watches", title: "Custom watch", ebaySyncEnabled: false },
-    assistedFields: {},
-    recentUploadedImages: [{ path: "test.jpg", storageBucket: "InventoryUpload", name: "Watch photo", mimeType: "image/jpeg" }],
-    aiSelectedUploadedImagePath: "test.jpg", saveSelectedUploadedImagePaths: ["test.jpg"],
-  } })));
-  await page.reload();
-  await page.waitForFunction(() => window.addItemAssistedModule?.getAISelectedUploadedImagePath() === "test.jpg");
-  assert.equal(await step(page), "photos");
-  assert.equal(await page.locator("#assisted-selected-image-preview").isVisible(), true);
-  await assertPhoneLayout(page, 'selected photo on phone');
-  await page.getByText('Edit selected photo', { exact: true }).click();
-  await assertPhoneLayout(page, 'expanded photo tools on phone');
-  await page.locator('#assisted-open-image-editor').click();
-  await page.waitForFunction(() => !document.querySelector('#assisted-image-editor-modal').classList.contains('hidden'));
-  const editorBounds = await page.locator('.assisted-editor-dialog').boundingBox();
-  assert.ok(editorBounds.x >= 0 && editorBounds.x + editorBounds.width <= 390);
-  await page.locator('#assisted-editor-save').scrollIntoViewIfNeeded();
-  assert.equal(await page.evaluate(() => {
-    const button = document.querySelector('#assisted-editor-save'), r = button.getBoundingClientRect();
-    return button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
-  }), true, 'crop action can be reached on phone');
-  await page.locator('#assisted-editor-close').click();
-  await page.screenshot({ path: new URL("test-results/add-item-photos.png", root).pathname.replace(/^\/(\w:)/, "$1"), fullPage: true });
-  await next(page);
-  await page.locator("#item-step-back").click();
-  assert.equal(await page.evaluate(() => window.addItemAssistedModule.getSelectedUploadedImagesForSave().length), 1);
-  await next(page);
-  await page.locator("#item-ai-copy > summary").click();
-  await page.locator("#assisted-generate-copy").click();
-  await page.waitForFunction(() => window.testGeneration.length === 1);
-  const payload = await page.evaluate(() => window.testGeneration[0]);
-  assert.equal(payload.imagePath, "test.jpg");
-  assert.equal(payload.watchDetails.modifications, "Replacement dial");
-  assert.equal(payload.watchDetails.materials, "Steel case, leather strap");
-  assert.equal(payload.material, "");
-  assert.equal(payload.purity, "");
-  assert.equal(payload.weight, null);
-  await page.locator("#assisted-apply-copy").click();
-  assert.equal(await page.locator("#title").inputValue(), "Watch copy");
-  assert.equal(await page.locator("#description").inputValue(), "Reviewed watch copy");
-  await page.evaluate(() => {
-    const draft = JSON.parse(localStorage.getItem("test-draft"));
-    draft.payload.wizard.step = "review";
-    draft.payload.wizard.furthest = 7;
-    localStorage.setItem("test-draft", JSON.stringify(draft));
-  });
-  await page.reload();
-  await page.waitForFunction(() => window.addItemAssistedModule?.getAISelectedUploadedImagePath() === "test.jpg");
-  assert.equal(await step(page), "review");
-  assert.match(await page.locator("#item-review-summary").innerText(), /1 selected/);
+test('multiple phone photos are included automatically, cover stays stable and removals update review',async t=>{
+ const page=await pageFor(t,{width:390,height:844});await page.locator('[name="item-kind"][value="coin"]').check();await page.locator('#coin-name').fill('Morgan dollar');await next(page);
+ await page.locator('#assisted-local-image-upload').setInputFiles([photoFile('Front.png'),photoFile('Back.png')]);
+ await page.waitForFunction(()=>window.addItemAssistedModule.getSelectedUploadedImagesForSave().length===2 && !window.addItemAssistedModule.isPhotoBusy());
+ assert.equal(await page.evaluate(()=>window.addItemAssistedModule.getAISelectedUploadedImagePath()),'uploaded-1.jpg');
+ assert.equal(await page.locator('#item-camera-photo').getAttribute('capture'),'environment');assert.equal(await page.locator('#item-coin-photo-guide').isVisible(),true);
+ await page.locator('[data-assisted-ai-select="uploaded-2.jpg"]').click();assert.equal(await page.evaluate(()=>window.addItemAssistedModule.getAISelectedUploadedImagePath()),'uploaded-2.jpg');
+ assert.equal(await page.evaluate(()=>window.addItemAssistedModule.getSelectedUploadedImagesForSave()[0].path),'uploaded-2.jpg');
+ await page.locator('[data-assisted-save-toggle="uploaded-2.jpg"]').click();assert.equal(await page.evaluate(()=>window.addItemAssistedModule.getSelectedUploadedImagesForSave().length),1);
+ assert.equal(await page.evaluate(()=>window.addItemAssistedModule.getAISelectedUploadedImagePath()),'uploaded-1.jpg');
+ await page.locator('[data-assisted-ai-select="uploaded-2.jpg"]').click();
+ assert.equal(await page.evaluate(()=>window.addItemAssistedModule.getSelectedUploadedImagesForSave()[0].path),'uploaded-2.jpg');
+ assert.equal(await page.evaluate(()=>window.addItemAssistedModule.getSelectedUploadedImagesForSave().length),2);
 });
 
-test("watch reference lookup needs no photo, survives draft restore, saves sources and invalidates changed details", async (t) => {
-  const page = await pageFor(t);
-  await page.locator('[name="item-kind"][value="watch"]').check();
-  await page.locator("#watch-name").fill("Rolex");
-  await page.locator("#watch-model").fill("126233");
-  await page.locator("#watch-modifications").fill("Aftermarket diamond bezel");
-  await category(page, "Watches");
-  await next(page);
-  await page.locator("#workflow-tab-manual").click();
-  await next(page);
-  assert.equal(await page.locator("#item-ai-copy").isVisible(), true);
-  await page.locator("#item-ai-copy > summary").click();
-  await page.locator("#assisted-generate-copy").click();
-  await page.waitForFunction(() => document.querySelector("#watch-reference-results a"));
-  assert.equal(await page.locator("#watch-reference-results a").getAttribute("href"), "https://www.rolex.com/watches/datejust");
-  assert.match(await page.locator("#watch-reference-results").innerText(), /Confirm the dial/);
-  assert.equal(await page.evaluate(() => window.testGeneration[0].imagePath), "");
-  await page.locator("#assisted-apply-copy").click();
-  assert.equal(await page.locator("#description").inputValue(), "Reviewed watch copy");
-  await page.waitForFunction(() => JSON.parse(localStorage.getItem("test-draft") || "null")?.payload?.assistedFields?.watchReference?.status === "found");
-  await page.reload();
-  await page.waitForFunction(() => window.addItemWizard?.getWatchDetails()?.referenceLookup?.status === "found");
-  await page.locator("#item-ai-copy > summary").click();
-  assert.equal(await page.locator("#assisted-apply-copy").isDisabled(), false);
-  assert.equal(await page.locator("#watch-reference-results a").count(), 1);
-  await page.setViewportSize({ width: 390, height: 844 });
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await page.screenshot({ path: new URL("test-results/watch-reference-mobile.png", root).pathname.replace(/^\/(\w:)/, "$1"), fullPage: true });
-  await next(page);
-  await page.locator("#cost").fill("4000");
-  await page.locator("#sale-price").fill("6500");
-  for (let i = 0; i < 4; i++) await next(page);
-  await page.locator('button[type="submit"]').first().click();
-  await page.waitForFunction(() => window.testWrites.length === 1);
-  assert.equal(await page.evaluate(() => window.testWrites[0].watch_details.referenceLookup.facts[0].value), "36 mm");
-  await page.locator('[data-item-step-target="information"]').click();
-  await page.locator("#watch-model").fill("126234");
-  assert.equal(await page.evaluate(() => window.addItemWizard.getWatchDetails().referenceLookup), undefined);
-  await page.locator('[data-item-step-target="description"]').click();
-  assert.equal(await page.locator("#assisted-apply-copy").isDisabled(), true);
-  assert.equal(await page.locator("#watch-reference-results").isVisible(), false);
+test('partial photo upload failure retains successful photos and reports which photo to retry',async t=>{
+ const page=await pageFor(t);await page.locator('[name="item-kind"][value="coin"]').check();await page.locator('#coin-name').fill('Coin');await next(page);await page.evaluate(()=>window.testFailUploadAt=2);
+ await page.locator('#assisted-local-image-upload').setInputFiles([photoFile('Front.png'),photoFile('Back.png')]);
+ await page.waitForFunction(()=>!window.addItemAssistedModule.isPhotoBusy());
+ assert.match(await page.locator('#assisted-image-status').innerText(),/Back.png/);assert.equal(await page.evaluate(()=>window.addItemAssistedModule.getSelectedUploadedImagesForSave().length),1);
 });
 
-test("changing watch information during a lookup discards the outdated response", async (t) => {
-  const page = await pageFor(t);
-  await page.locator('[name="item-kind"][value="watch"]').check();
-  await page.locator("#watch-name").fill("Rolex");
-  await page.locator("#watch-model").fill("126233");
-  await category(page, "Watches");
-  await next(page);
-  await next(page);
-  await page.locator("#item-ai-copy > summary").click();
-  await page.evaluate(() => { window.testGenerationHold = true; });
-  await page.locator("#assisted-generate-copy").click();
-  await page.waitForFunction(() => window.testReleaseGeneration);
-  await page.locator('[data-item-step-target="information"]').click();
-  await page.locator("#watch-modifications").fill("New replacement strap");
-  await page.evaluate(() => window.testReleaseGeneration());
-  await page.waitForFunction(() => !document.getElementById("assisted-generate-copy").disabled);
-  assert.equal(await page.locator("#assisted-generated-description").inputValue(), "");
-  assert.equal(await page.evaluate(() => window.addItemWizard.getWatchDetails().referenceLookup), undefined);
-  assert.match(await page.locator("#assisted-generate-status").textContent(), /Details changed during generation/);
-  await page.locator('[data-item-step-target="description"]').click();
-  await page.locator("#assisted-generate-copy").click();
-  await page.waitForFunction(() => window.testGeneration.length === 2);
-  await page.evaluate(() => {
-    document.getElementById("add-item-form").reset();
-    document.dispatchEvent(new Event("add-item-form:reset"));
-    window.testReleaseGeneration();
-  });
-  assert.equal(await page.locator("#assisted-generate-copy").isDisabled(), false);
-  assert.equal(await page.locator("#assisted-generated-description").inputValue(), "");
+test('scanning an existing barcode offers quantity entry early without changing the barcode',async t=>{
+ const page=await pageFor(t);await page.evaluate(()=>window.testExistingItem={id:'existing',title:'Existing Morgan',barcode:'COIN123'});
+ await page.locator('#item-barcode-options > summary').click();await page.locator('#scanned-barcode').fill('COIN123');await page.waitForFunction(()=>window.addItemBarcodeMatch);
+ assert.match(await page.locator('#item-barcode-result').innerText(),/Existing Morgan/);
+ assert.match(await page.locator('#item-barcode-result a').getAttribute('href'),/add-inventory.html\?mode=quick-add&barcode=COIN123/);
+ assert.equal(await page.locator('#scanned-barcode').inputValue(),'COIN123');
+ await page.getByRole('button',{name:'Create a different item',exact:true}).click();assert.notEqual(await page.locator('#scanned-barcode').inputValue(),'COIN123');assert.equal(await page.evaluate(()=>window.addItemBarcodeMatch),null);
 });
 
-test("coin intake survives refresh and saves year, condition and fineness with direct pricing", async (t) => {
-  const page = await pageFor(t);
-  await page.locator('[name="item-kind"][value="coin"]').check();
-  await page.locator("#coin-name").fill("Morgan dollar");
-  await page.locator("#coin-year").fill("1881");
-  await page.locator("#coin-country").fill("United States");
-  await page.locator("#coin-denomination").fill("$1");
-  await page.locator("#coin-mint").fill("S");
-  await page.locator("#coin-metal").selectOption("Silver");
-  await page.locator("#coin-fineness").fill("900");
-  await page.locator("#coin-condition").fill("Circulated; light scratches");
-  await category(page, "Collector coins");
-  await page.setViewportSize({ width: 390, height: 844 });
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await page.screenshot({ path: new URL("test-results/add-item-coin-mobile.png", root).pathname.replace(/^\/(\w:)/, "$1"), fullPage: true });
-  await page.setViewportSize({ width: 1365, height: 1000 });
-  await next(page);
-  await page.locator("#workflow-tab-manual").click();
-  await next(page);
-  assert.equal(await page.locator("#title").inputValue(), "1881 Morgan dollar S");
-  await page.locator("#item-ai-copy > summary").click();
-  await page.locator("#assisted-generate-copy").click();
-  await page.waitForFunction(() => window.testGeneration.length === 1);
-  const payload = await page.evaluate(() => window.testGeneration[0]);
-  assert.equal(payload.itemKind, "coin");
-  assert.equal(payload.imagePath, "");
-  assert.equal(payload.purity, "900");
-  assert.equal(payload.coinDetails.condition, "Circulated; light scratches");
-  assert.equal(payload.watchDetails, null);
-  assert.equal(await page.locator("#watch-reference-results").isVisible(), false);
-  await next(page);
-  await page.locator("#cost").fill("40");
-  await page.locator("#sale-price").fill("90");
-  await page.locator("#minimum-sale-price").fill("55");
-  await page.locator("#cost").fill("45");
-  assert.equal(await page.locator("#sale-price").inputValue(), "90");
-  assert.equal(await page.locator("#auto-cost-checkbox").isDisabled(), true);
-  await page.waitForFunction(() => JSON.parse(localStorage.getItem("test-draft") || "null")?.payload?.mainFields?.cost === "45");
-  await page.reload();
-  await page.waitForFunction(() => window.addItemWizard?.isCoin());
-  assert.equal(await page.locator("#coin-condition").inputValue(), "Circulated; light scratches");
-  assert.equal(await step(page), "pricing");
-  for (let i = 0; i < 4; i++) await next(page);
-  assert.match(await page.locator("#item-review-summary").innerText(), /Coin details:[\s\S]*1881[\s\S]*900[\s\S]*Circulated/);
-  await page.locator('button[type="submit"]').first().click();
-  await page.waitForFunction(() => window.testWrites.length === 1);
-  const saved = await page.evaluate(() => window.testWrites[0]);
-  assert.equal(saved.coin_details.name, "Morgan dollar");
-  assert.equal(saved.coin_details.year, "1881");
-  assert.equal(saved.metal, "silver");
-  assert.equal(saved.purity_basis_points, 9000);
-  assert.equal(saved.weight, null);
-  assert.equal(saved.price_per_weight, null);
-  assert.equal(saved.sale_price, 90);
-  assert.equal(saved.minimum_sale_price, 55);
-  assert.equal(saved.stone_type, null);
-  assert.equal(saved.ebay_sync_enabled, false);
-  assert.equal(saved.ebay_condition, null);
-  assert.equal(saved.ebay_category_id, null);
-  assert.deepEqual(saved.ebay_aspects, {});
-  assert.equal(saved.watch_details, undefined);
+test('saving works with unavailable labels, and print retry never inserts another item',async t=>{
+ const page=await pageFor(t);await page.evaluate(()=>{window.testSaveSuccess=true;window.testLabelFailure=true;});await prepareWatch(page);
+ await page.getByRole('button',{name:'Save item',exact:true}).click();await page.locator('#item-save-success-modal').waitFor({state:'visible'});
+ assert.equal(await page.evaluate(()=>window.testWrites.length),1);assert.equal(await page.evaluate(()=>window.testLabelPrepares.length),0);
+ await page.locator('#item-label-print-one').click();await page.waitForFunction(()=>document.getElementById('item-label-print-status').textContent.includes('Printer preparation unavailable'));
+ assert.equal(await page.evaluate(()=>window.testWrites.length),1);
+ await page.locator('#item-save-success-continue').click();assert.equal(await step(page),'information');assert.equal(await page.locator('[name="item-kind"][value="jewelry"]').isChecked(),true);
 });
 
-test("coin grading, unknown purity, mode switches and reset keep unrelated data separate", async (t) => {
-  const page = await pageFor(t);
-  await page.locator('[name="item-kind"][value="coin"]').check();
-  await page.locator("#coin-name").fill("Gold collector coin");
-  await category(page, "Coins");
-  await page.locator("#coin-metal").selectOption("Gold");
-  await page.locator("#coin-fineness").fill("1001");
-  await next(page);
-  assert.equal(await step(page), "information");
-  await page.locator("#coin-fineness").fill("916.7");
-  await page.locator("#coin-fields details").first().locator("summary").click();
-  await page.locator("#coin-gradingStatus").selectOption("certified");
-  await page.locator("#coin-grade").fill("MS 65");
-  await next(page);
-  assert.equal(await step(page), "information");
-  await page.locator("#coin-gradingService").fill("NGC");
-  await page.locator("#coin-certNumber").fill("001234-001");
-  await next(page);
-  await next(page);
-  assert.match(await page.locator("#title").inputValue(), /NGC MS 65/);
-  assert.match(await page.evaluate(() => window.addItemWizard.descriptionForSave()), /001234-001/);
-  await page.locator('[data-item-step-target="information"]').click();
-  await page.locator("#coin-gradingStatus").selectOption("self-assessed");
-  assert.equal(await page.locator("#coin-gradingService").isDisabled(), true);
-  assert.doesNotMatch(await page.evaluate(() => window.addItemWizard.descriptionForSave()), /NGC|001234/);
-  await page.locator("#coin-metal").selectOption("Plated / clad");
-  assert.equal(await page.evaluate(() => window.addItemWizard.getCoinDetails().fineness), "");
-  await page.locator('[name="item-kind"][value="watch"]').check();
-  assert.equal(await page.evaluate(() => window.addItemWizard.getCoinDetails()), null);
-  await page.locator("#watch-name").fill("Test watch");
-  await next(page);
-  assert.equal(await page.locator("#title").inputValue(), "Test watch");
-  await page.locator('[data-item-step-target="information"]').click();
-  await page.locator('[name="item-kind"][value="jewelry"]').check();
-  assert.equal(await page.locator("#auto-cost-checkbox").isDisabled(), false);
-  await page.locator('[name="item-kind"][value="coin"]').check();
-  assert.equal(await page.locator("#coin-year").inputValue(), "");
-  assert.equal(await page.locator("#coin-grade").inputValue(), "MS 65");
-  await page.locator("#coin-gradingStatus").selectOption("ungraded");
-  assert.equal(await page.evaluate(() => window.addItemWizard.getCoinDetails().grade), "");
-  await page.evaluate(() => { document.getElementById("add-item-form").reset(); document.dispatchEvent(new Event("add-item-form:reset")); });
-  assert.equal(await page.locator("#coin-name").inputValue(), "");
-  assert.equal(await page.locator("#coin-grade").isDisabled(), true);
-  assert.equal(await page.locator("#coin-gradingService").evaluate((input) => input.required), false);
+test('Save and add similar retains selected shared fields, clears unique facts, and saves a fresh draft',async t=>{
+ const page=await pageFor(t);await seed(page,{kind:'coin',step:'review',details:{gradingStatus:'certified',grade:'MS 65',gradingService:'PCGS',certNumber:'000123',mint:'S',condition:'Cleaned',notes:'Scratch'},photos:twoPhotos,main:{distributorName:'Supplier A',distributorPhone:'555-0100'}});
+ await page.evaluate(()=>window.testSaveSuccess=true);const originalBarcode=await page.locator('#scanned-barcode').inputValue();await page.locator('#item-keep-prices').check();
+ await page.getByRole('button',{name:'Save & add similar',exact:true}).click();await page.waitForFunction(()=>window.testWrites.length===1 && document.getElementById('coin-name').value==='Morgan dollar' && !document.getElementById('add-item-form').dataset.savedItemId);
+ assert.equal(await step(page),'information');assert.equal(await page.locator('#coin-year').inputValue(),'');assert.equal(await page.locator('#coin-grade').inputValue(),'');assert.equal(await page.locator('#coin-certNumber').inputValue(),'');assert.equal(await page.locator('#coin-condition').inputValue(),'');
+ assert.equal(await page.locator('#distributor-name').inputValue(),'Supplier A');assert.equal(await page.locator('#sale-price').inputValue(),'90');assert.equal(await page.locator('#minimum-sale-price').inputValue(),'55');
+ assert.notEqual(await page.locator('#scanned-barcode').inputValue(),originalBarcode);assert.equal(await page.evaluate(()=>window.addItemAssistedModule.getSelectedUploadedImagesForSave().length),0);
+ await page.waitForFunction(()=>JSON.parse(localStorage.getItem('test-draft'))?.payload?.wizard?.coinDetails?.year==='');
+ await page.reload();await page.waitForFunction(()=>window.addItemWizard?.isCoin() && document.getElementById('coin-name').value==='Morgan dollar');assert.equal(await page.locator('#coin-certNumber').inputValue(),'');
 });
 
-test("camera barcode updates the new item label and saved barcode on mobile", async t => {
-  const page = await pageFor(t, { width: 390, height: 844 });
-  await page.locator('[name="item-kind"][value="coin"]').check();
-  await page.locator('#coin-name').fill('Collector coin');
-  await category(page, 'Coins');
-  await next(page);
-  await page.locator('#workflow-tab-manual').click();
-  await next(page);
-  await next(page);
-  await page.locator('#cost').fill('40');
-  await page.locator('#sale-price').fill('80');
-  await next(page);
-  assert.equal(await step(page), 'labels');
-  await page.evaluate(() => {
-    pendingStockAssignments[document.getElementById('scanned-barcode').value] = { location_id: 'test-tray', quantity: 3 };
-    navigator.mediaDevices.getUserMedia = async () => {
-      const canvas = document.createElement('canvas'); canvas.width = 100; canvas.height = 100;
-      canvas.getContext('2d').fillRect(0, 0, 100, 100);
-      const stream = canvas.captureStream(15);
-      setInterval(() => stream.getVideoTracks()[0].requestFrame(), 60);
-      return stream;
-    };
-    navigator.mediaDevices.enumerateDevices = async () => [];
-    window.ZXingWASM = {
-      prepareZXingModule: async () => {},
-      readBarcodes: () => new Promise(resolve => {
-        window.testScan = code => resolve([{ text: code, isValid: true, error: '' }]);
-      }),
-    };
-  });
-  await page.locator('[data-scan-target="scanned-barcode"]').click();
-  await page.waitForFunction(() => window.testScan);
-  await page.evaluate(() => window.testScan('000-COIN-27'));
-  await page.locator('[data-camera="use"]').click();
-  assert.equal(await page.locator('#scanned-barcode').inputValue(), '000-COIN-27');
-  assert.equal(await page.evaluate(() => window.testBarcodeRenders.at(-1)), '000-COIN-27');
-  assert.deepEqual(await page.evaluate(() => pendingStockAssignments['000-COIN-27']), { location_id: 'test-tray', quantity: 3 });
-  await page.waitForFunction(() => window.latestDymoBarcode === '000-COIN-27');
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await page.screenshot({ path: new URL('test-results/add-item-camera-labels-mobile.png', root).pathname.replace(/^\/(\w:)/, '$1'), fullPage: true });
-  await next(page);
-  await next(page);
-  await next(page);
-  await page.locator('button[type="submit"]').first().click();
-  await page.waitForFunction(() => window.testWrites.length === 1);
-  assert.equal(await page.evaluate(() => window.testWrites[0].barcode), '000-COIN-27');
+test('batch printing uses saved item snapshots while the next item is edited',async t=>{
+ const page=await pageFor(t);await page.evaluate(()=>window.testSaveSuccess=true);await prepareWatch(page);
+ await page.getByRole('button',{name:'Save & add similar',exact:true}).click();await page.waitForFunction(()=>window.testWrites.length===1 && !document.getElementById('add-item-form').dataset.savedItemId);
+ await next(page);await next(page);await page.locator('#cost').fill('4000');await page.locator('#sale-price').fill('6000');await next(page);
+ await page.getByRole('button',{name:'Save & add similar',exact:true}).click();await page.waitForFunction(()=>window.testWrites.length===2 && !document.getElementById('add-item-form').dataset.savedItemId);
+ const codes=await page.evaluate(()=>window.testWrites.map(item=>item.barcode));await page.locator('#watch-model').fill('UNSAVED-REF');
+ await page.locator('#item-print-session').click();await page.waitForFunction(()=>window.testPrints.length===2);
+ await page.waitForFunction(()=>window.testLabelPreferences.filter(p=>p._strategy==='individual_batch').length===2);
+ assert.deepEqual(await page.evaluate(()=>window.testLabelPreferences.filter(p=>p._strategy==='individual_batch').map(p=>p._item_id)),['item-1','item-2']);
+ assert.deepEqual(await page.evaluate(()=>window.testPrints.map(item=>item.barcode)),codes);assert.match(await page.locator('#item-print-session').innerText(),/\(0\)/);
 });
 
+test('selected photo copy failure blocks insertion and retains the draft',async t=>{
+ const page=await pageFor(t);await seed(page,{step:'review',photos:[{...twoPhotos[0],storageBucket:'InventoryUpload'}]});await page.evaluate(()=>{window.testCopyFailure=true;window.testSaveSuccess=true;});
+ await page.getByRole('button',{name:'Save item',exact:true}).click();await page.waitForFunction(()=>!document.getElementById('add-item-form').dataset.saving);
+ assert.equal(await page.evaluate(()=>window.testWrites.length),0);assert.equal(await page.evaluate(()=>window.addItemAssistedModule.getSelectedUploadedImagesForSave().length),1);
+});
 
 async function assertPhoneLayout(page, label) {
   const problems = await page.evaluate(() => {
@@ -567,7 +296,7 @@ async function assertPhoneLayout(page, label) {
 test('phone category menu stays above navigation, scrolls every option, filters, and creates categories', async t => {
   const page = await pageFor(t, { width: 390, height: 744 });
   await page.locator('[name="item-kind"][value="watch"]').check();
-  await page.locator('#watch-name').fill('Test watch');
+  await page.locator('#watch-brand').fill('Test watch');
   await page.evaluate(() => { window.testCategories = ['bracelets', 'chains', 'necklace', 'pendants', 'testcard', ...Array.from({ length: 25 }, (_, i) => `Watch category ${String(i).padStart(2, '0')}`)]; });
   await page.locator('#category-dropdown-toggle').click();
   const menu = page.locator('#category-dropdown-menu');
@@ -600,38 +329,6 @@ test('phone category menu stays above navigation, scrolls every option, filters,
   assert.equal(await page.locator('#category').inputValue(), 'Custom <watch> category');
 });
 
-test('all eight add-item steps fit small phones, portrait and landscape with jewelry, watches and coins', async t => {
-  for (const [mode, viewport] of [['jewelry', { width: 320, height: 568 }], ['watch', { width: 390, height: 744 }], ['coin', { width: 844, height: 390 }]]) {
-    const page = await pageFor(t, viewport);
-    await page.locator(`[name="item-kind"][value="${mode}"]`).check();
-    if (mode === 'watch') await page.locator('#watch-name').fill('Mobile watch');
-    if (mode === 'coin') await page.locator('#coin-name').fill('Mobile collector coin');
-    if (mode === 'jewelry') await page.locator('#weight').fill('10');
-    await category(page, 'Mobile category');
-    await assertPhoneLayout(page, `${mode}: information`);
-    await next(page);
-    await assertPhoneLayout(page, `${mode}: photos`);
-    await next(page);
-    await page.locator('#title').fill('Mobile inventory item');
-    await page.locator('#description').fill('Phone entry');
-    await assertPhoneLayout(page, `${mode}: description`);
-    await next(page);
-    if (mode !== 'jewelry') { await page.locator('#cost').fill('50'); await page.locator('#sale-price').fill('100'); }
-    await assertPhoneLayout(page, `${mode}: pricing`);
-    for (const name of ['labels', 'stock', 'marketplace', 'review']) {
-      await next(page);
-      assert.equal(await step(page), name);
-      await assertPhoneLayout(page, `${mode}: ${name}`);
-      if (name === 'marketplace') await page.locator('#ebay-sync-enabled').uncheck();
-    }
-    await page.locator('#item-step-review button[type=submit]').scrollIntoViewIfNeeded();
-    assert.equal(await page.evaluate(() => {
-      const button = document.querySelector('#item-step-review button[type=submit]'), r = button.getBoundingClientRect();
-      return button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
-    }), true, 'save button is unobstructed');
-    await page.screenshot({ path: new URL(`test-results/add-item-${mode}-phone-review.png`, root).pathname.replace(/^\/(\w:)/, '$1') });
-  }
-});
 
 test('phone dialogs and dropdowns adapt to a keyboard-sized visible viewport', async t => {
   const page = await pageFor(t, { width: 390, height: 744 });
@@ -658,52 +355,15 @@ test('phone dialogs and dropdowns adapt to a keyboard-sized visible viewport', a
 });
 
 
-test("jewelry minimum and editable retail stay distinct, validate and restore from draft", async (t) => {
-  const page = await pageFor(t);
-  await page.locator("#weight").fill("10");
-  await category(page, "Bracelets");
-  await next(page); await next(page);
-  await page.locator("#title").fill("Silver bracelet");
-  await page.locator("#description").fill("Sterling bracelet");
-  await next(page);
-  await page.locator("#sale-price").fill("300");
-  await page.locator("#minimum-sale-price").fill("400");
-  await next(page);
-  assert.equal(await step(page), "pricing");
-  assert.match(await page.locator("#item-step-error").innerText(), /no|between/);
-  await page.locator("#minimum-sale-price").fill("150");
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator("#minimum-sale-price").scrollIntoViewIfNeeded();
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-  await page.screenshot({ path: new URL("test-results/add-item-prices-mobile.png", root).pathname.replace(/^\/(\w:)/, "$1") });
-  await page.setViewportSize({ width: 1365, height: 1000 });
-  await page.locator("#cost").fill("100");
-  assert.equal(await page.locator("#sale-price").inputValue(), "300");
-  await page.waitForFunction(() => JSON.parse(localStorage.getItem("test-draft") || "null")?.payload?.mainFields?.minimumSalePrice === "150");
-  await page.reload();
-  await page.waitForFunction(() => document.getElementById("minimum-sale-price").value === "150");
-  await page.locator("#cost").fill("110");
-  assert.equal(await page.locator("#sale-price").inputValue(), "300");
-  for (let i=0; i<4; i++) await next(page);
-  assert.match(await page.locator("#item-review-summary").innerText(), /Minimum sale.*[\s\S]*150/);
-  await page.locator('button[type="submit"]').first().click();
-  await page.waitForFunction(() => window.testWrites.length === 1);
-  assert.equal(await page.evaluate(() => window.testWrites[0].minimum_sale_price), 150);
-  assert.equal(await page.evaluate(() => window.testWrites[0].sale_price), 300);
-});
 
 async function coinMarketplacePage(t, details={}) {
-  const page=await pageFor(t,{width:390,height:844});
-  await page.evaluate(details=>localStorage.setItem('test-draft',JSON.stringify({payload:{
-    activeWorkflow:'manual', wizard:{step:'marketplace',furthest:6,itemKind:'coin',coinDetails:{name:'Morgan dollar',year:'1881',metal:'Silver',fineness:'900',gradingStatus:'ungraded',...details}},
-    mainFields:{category:'Coins',title:'1881 Morgan dollar',description:'Silver collector coin.',cost:'40',salePrice:'90',minimumSalePrice:'55',ebaySyncEnabled:false},assistedFields:{},
-    recentUploadedImages:[{path:'front.jpg',storageBucket:'photos',name:'Front',mimeType:'image/jpeg'},{path:'back.jpg',storageBucket:'photos',name:'Back',mimeType:'image/jpeg'}],
-    aiSelectedUploadedImagePath:'front.jpg',saveSelectedUploadedImagePaths:['front.jpg','back.jpg'],
-  }})),details);
-  await page.reload();
-  await page.waitForFunction(()=>window.coinEbayForm && window.addItemWizard?.isCoin() && document.querySelector('[data-coin-ebay-category]').options.length>1);
-  return page;
+ const page=await pageFor(t,{width:390,height:844});
+ await seed(page,{details,photos:twoPhotos,step:'marketplace',main:{ebaySyncEnabled:true}});
+ await page.waitForFunction(()=>window.coinEbayForm && document.querySelector('[data-coin-ebay-category]').options.length>1);
+ await page.locator('#coin-ebay-add input[type=search]').fill('');
+ return page;
 }
+
 test('coin eBay category, raw condition and photo confirmation survive drafts and save with retail',async(t)=>{
   const page=await coinMarketplacePage(t);
   await page.locator('#coin-ebay-add input[type=search]').fill('Morgan');
@@ -723,7 +383,7 @@ test('coin eBay category, raw condition and photo confirmation survive drafts an
   assert.equal(await page.locator('[data-coin-descriptor="2"]').inputValue(),'9');
   assert.equal(await page.locator('[data-coin-ebay-photos]').isChecked(),true);
   await next(page); assert.equal(await step(page),'review');
-  await page.locator('#item-step-review button[type=submit]').click();
+  await page.getByRole('button',{name:'Save item',exact:true}).click();
   await page.waitForFunction(()=>window.testWrites.length===1);
   const saved=await page.evaluate(()=>window.testWrites[0]);
   assert.equal(saved.ebay_sync_enabled,true);assert.equal(saved.ebay_category_id,'39464');assert.equal(saved.ebay_condition,'USED_VERY_GOOD');
@@ -780,4 +440,88 @@ test('Stock coin editor prepares older coins without automatically opting them i
   assert.deepEqual(details.ebay.descriptors['2'],{values:['8']});
   await page.evaluate(()=>window.coinEbayStock.open({coin_details:{name:'Coin'},ebay_sync_enabled:false},false));
   assert.equal(await page.locator('#edit-coin-details').isVisible(),false);
+});
+
+
+test('all adaptive steps fit small phones, portrait and landscape',async t=>{
+ await mkdir(new URL('test-results/',root),{recursive:true});
+ for(const [kind,viewport] of [['jewelry',{width:320,height:568}],['watch',{width:390,height:844}],['coin',{width:844,height:390}]]){
+  const page=await pageFor(t,viewport);await seed(page,{kind,photos:twoPhotos,main:{ebaySyncEnabled:false}});
+  if(kind==='jewelry')await page.locator('#weight').fill('10');
+  await assertPhoneLayout(page,kind+': Identify');
+  await next(page);await assertPhoneLayout(page,kind+': Photos');
+  await page.getByText('Crop, background and recent station photos',{exact:true}).click();
+  await assertPhoneLayout(page,kind+': Photo tools');
+  await page.locator('#assisted-open-image-editor').click();await page.locator('.assisted-editor-dialog').waitFor({state:'visible'});
+  await page.locator('#assisted-editor-save').scrollIntoViewIfNeeded();
+  assert.equal(await page.locator('#assisted-editor-save').evaluate(button=>{const r=button.getBoundingClientRect();return button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),true);
+  await page.locator('#assisted-editor-close').click();
+  await page.screenshot({path:new URL(`test-results/fast-intake-${kind}-photos.png`,root).pathname.replace(/^\/(\w:)/,'$1'),fullPage:true});
+  await next(page);await assertPhoneLayout(page,kind+': Pricing');await next(page);await assertPhoneLayout(page,kind+': Review');
+  await page.getByRole('button',{name:'Edit Stock',exact:true}).click();await assertPhoneLayout(page,kind+': Stock');
+  await next(page);assert.equal(await step(page),'stock','Unsigned stock cannot pass');
+  await page.locator('[data-item-step-target="information"]').click();await page.locator('#item-assign-stock').uncheck();
+  await page.locator('[data-item-step-target="review"]').click();await page.getByRole('button',{name:'Edit eBay',exact:true}).click();await assertPhoneLayout(page,kind+': eBay');
+  await page.locator('#ebay-sync-enabled').uncheck();await page.locator('[data-item-step-target="review"]').click();
+  await page.getByRole('button',{name:'Save item',exact:true}).scrollIntoViewIfNeeded();
+  assert.equal(await page.getByRole('button',{name:'Save item',exact:true}).evaluate(button=>{const r=button.getBoundingClientRect();return button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),true);
+  await page.screenshot({path:new URL(`test-results/fast-intake-${kind}-review.png`,root).pathname.replace(/^\/(\w:)/,'$1'),fullPage:true});
+ }
+});
+
+test('new facts clear old automatic copy, manual edits remain, and late results cannot change the next item',async t=>{
+ const page=await pageFor(t);await prepareWatch(page,{auto:true});await page.waitForFunction(()=>document.getElementById('description').value==='Reviewed watch copy');
+ await page.locator('#title').fill('My watch');await page.getByRole('button',{name:'Edit Item',exact:true}).click();await page.locator('#watch-model').fill('NEXT');
+ assert.equal(await page.locator('#description').inputValue(),'');assert.equal(await page.locator('#title').inputValue(),'My watch');
+ await page.evaluate(()=>window.testGenerationHold=true);await next(page);await page.waitForFunction(()=>window.testReleaseGeneration);
+ await page.locator('#description').fill('My verified current description.');await page.evaluate(()=>window.testSaveSuccess=true);
+ await page.getByRole('button',{name:'Save & add similar',exact:true}).click();await page.waitForFunction(()=>window.testWrites.length===1 && !document.getElementById('add-item-form').dataset.savedItemId);
+ await page.evaluate(()=>window.testReleaseGeneration());
+ assert.equal(await page.locator('#description').inputValue(),'');assert.equal(await page.locator('#assisted-generate-copy').isDisabled(),false);
+ assert.equal(await page.locator('#sale-price').inputValue(),'');assert.equal(await page.locator('#minimum-sale-price').inputValue(),'');
+});
+
+test('signed stock is saved once and similar entry only suggests the location, never copies its signature',async t=>{
+ const page=await pageFor(t);await seed(page,{kind:'watch',assignStock:true,step:'stock'});
+ await page.evaluate(()=>{
+  window.testSaveSuccess=true;
+  pendingStockAssignments[document.getElementById('scanned-barcode').value]={location_id:'tray-1',location_name:'Tray one',quantity:2,placement_type:'tray',signed_by_email:'test@example.invalid',signed_at:new Date().toISOString(),confirmation_method:'password_stock_placement'};
+  document.getElementById('assignment-preview-box').classList.remove('hidden');
+ });
+ await next(page);await page.getByRole('button',{name:'Save & add similar',exact:true}).click();
+ await page.waitForFunction(()=>window.testWrites.length===1 && !document.getElementById('add-item-form').dataset.savedItemId);
+ assert.equal(await page.evaluate(()=>window.testStockWrites.length),1);assert.equal(await page.evaluate(()=>window.testStockWrites[0].quantity),2);
+ assert.equal(await page.evaluate(()=>window.addItemLocationHint.location_id),'tray-1');assert.deepEqual(await page.evaluate(()=>Object.keys(pendingStockAssignments)),[]);
+ await next(page);await next(page);await page.locator('#cost').fill('40');await page.locator('#sale-price').fill('90');await next(page);
+ assert.equal(await step(page),'stock');await next(page);assert.equal(await step(page),'stock');assert.match(await page.locator('#item-step-error').innerText(),/confirm a location/);
+});
+
+test('stock failure keeps the item saved, explains missing quantity, and cannot repeat the item insert',async t=>{
+ const page=await pageFor(t);await seed(page,{kind:'watch',assignStock:true,step:'stock'});
+ await page.evaluate(()=>{
+  window.testSaveSuccess=true;window.testStockFailure=true;
+  pendingStockAssignments[document.getElementById('scanned-barcode').value]={location_id:'tray-1',location_name:'Tray one',quantity:2};
+  document.getElementById('assignment-preview-box').classList.remove('hidden');
+ });
+ await next(page);await page.getByRole('button',{name:'Save item',exact:true}).click();await page.locator('#item-save-success-modal').waitFor({state:'visible'});
+ assert.match(await page.locator('#item-save-success-copy').innerText(),/Stock quantity was not assigned/);
+ assert.equal(await page.locator('#item-save-success-stock').innerText(),'No stock quantity assigned');
+ await page.evaluate(()=>document.getElementById('add-item-form').requestSubmit());assert.equal(await page.evaluate(()=>window.testWrites.length),1);
+});
+
+test('similar location hint opens the actual placement dialog but requires a fresh password confirmation',async t=>{
+ const page=await pageFor(t,{width:390,height:844});await seed(page,{kind:'watch',assignStock:true,step:'stock'});
+ await page.evaluate(()=>{
+  window.testLocations=[{id:'tray-1',location_name:'Tray one',location_code:'TRAY-1',type:'tray',is_tray:true,active:true}];
+  window.addItemLocationHint={location_id:'tray-1',placement_type:'tray'};
+ });
+ await page.locator('#btn-open-admin-stock').click();await page.waitForFunction(()=>document.getElementById('admin-location-id').value==='tray-1');
+ assert.deepEqual(await page.evaluate(()=>Object.keys(pendingStockAssignments)),[]);
+ await page.locator('#admin-stock-quantity').fill('3');await page.locator('#btn-confirm-admin-stock').click();
+ await page.locator('#stock-placement-signature-modal').waitFor({state:'visible'});
+ assert.deepEqual(await page.evaluate(()=>Object.keys(pendingStockAssignments)),[]);
+ await page.locator('#stock-placement-password').fill('test-password');await page.locator('#stock-placement-password-confirm').click();
+ await page.waitForFunction(()=>Object.keys(pendingStockAssignments).length===1);
+ const pending=await page.evaluate(()=>Object.values(pendingStockAssignments)[0]);assert.equal(pending.quantity,3);assert.equal(pending.confirmation_method,'password_stock_placement');assert.ok(pending.signed_at);
+ await next(page);assert.equal(await step(page),'review');
 });

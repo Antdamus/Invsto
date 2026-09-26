@@ -623,7 +623,7 @@ let uploadedImages = [];
   function resetAddItemDraftStateAfterSuccess() {
     clearAutomaticDymoGeneration();
     document.getElementById("add-item-form")?.reset();
-    document.dispatchEvent(new Event("add-item-form:reset"));
+    document.dispatchEvent(new CustomEvent("add-item-form:reset",{detail:{clearDraft:false}}));
     if (previewContainer) previewContainer.innerHTML = "";
     uploadedImages = [];
     window.dymoModule?.clearPendingDymoLabel?.({
@@ -639,7 +639,7 @@ let uploadedImages = [];
     }
     if (autoCostCheckbox) autoCostCheckbox.checked = true;
     const ebaySyncEnabled = document.getElementById("ebay-sync-enabled");
-    if (ebaySyncEnabled) ebaySyncEnabled.checked = true;
+    if (ebaySyncEnabled) ebaySyncEnabled.checked = false;
     const ebayCategorySelect = document.getElementById("ebay-category-id");
     if (ebayCategorySelect) ebayCategorySelect.value = "";
     updateAddItemEbayReadiness({ infer: false });
@@ -879,7 +879,7 @@ let uploadedImages = [];
     const materialPurity = getAssistedMaterialPurityForSave();
     const photoFiles = photoInput?.files || [];
     const assistedSelectedImages = window.addItemAssistedModule?.getSelectedUploadedImagesForSave?.() || [];
-    const pendingStock = pendingStockAssignments[barcodeInput?.value?.trim() || ""] || null;
+    const pendingStock = document.getElementById("item-assign-stock")?.checked ? pendingStockAssignments[barcodeInput?.value?.trim() || ""] || null : null;
     const missing = [];
 
     if (!syncEnabled) return { syncEnabled, categoryId, missing };
@@ -956,7 +956,7 @@ let uploadedImages = [];
     document.addEventListener("add-item:mode-change", (event) => {
       if (!event.detail?.restoring) {
         const category = document.getElementById("ebay-category-id");
-        if (event.detail?.isCoin) document.getElementById("ebay-sync-enabled").checked = false;
+        if (event.detail?.isCoin && !document.getElementById("item-prepare-ebay")?.checked) document.getElementById("ebay-sync-enabled").checked = false;
         if (event.detail?.isWatch) category.value = "31387";
         else if (category.value === "31387") category.value = "";
       }
@@ -1346,6 +1346,7 @@ let uploadedImages = [];
   }
 
   function scheduleAutomaticDymoGeneration(delayMs = 450) {
+    if(window.addItemLayoutReady)return;
     if (automaticDymoTimer) {
       window.clearTimeout(automaticDymoTimer);
     }
@@ -1457,7 +1458,8 @@ let uploadedImages = [];
   }
 
   function generateNewItemBarcode(options = {}) {
-    const code = 'OG' + Date.now();
+    const code = 'OG' + Date.now() + Math.random().toString(36).slice(2,5).toUpperCase();
+    document.dispatchEvent(new Event('add-item:new-barcode'));
     barcodeInput.value = code;
     updateItemBarcodePreview();
 
@@ -1523,6 +1525,14 @@ let uploadedImages = [];
     activeStoreOptions = activeStoreOptions.length ? activeStoreOptions : await fetchActiveStores();
     activeAdminLocationOptions = await fetchAdminLocationOptions();
     resetAdminStockPlacementFlow();
+    const hint=window.addItemLocationHint;
+    const suggested=hint && activeAdminLocationOptions.find(location=>location.id===hint.location_id);
+    if(suggested){
+      if(hint.placement_type==='container'){
+        const parent=activeAdminLocationOptions.find(location=>location.id===hint.parent_location_id);
+        if(parent && String(suggested.parentId || '')===String(parent.id)){setStockPlacementMode('container');completeParentPlacementScan(parent);completeContainerPlacementScan(suggested);}
+      }else if(isTrayAdminLocation(suggested)){setStockPlacementMode('tray');completeTrayPlacementScan(suggested);}
+    }
     focusPlacementInput(stockPlacementMode === "container" ? "placement-parent-barcode" : "placement-tray-barcode");
   }
 
@@ -2942,6 +2952,7 @@ let uploadedImages = [];
     };
   }
 
+  window.collectAddItemEbayReadiness=collectAddItemEbayReadiness;
   setupAddItemEbayReadiness();
 
   //== run the add location modal only if the user is an admin
@@ -2951,11 +2962,26 @@ let uploadedImages = [];
 
 //#endregion
 
+window.startNewItemBarcode=()=>generateNewItemBarcode({generateDymo:false});
+window.resetForNextIntake=async function(similar=null){
+  await window.addItemAssistedModule?.clearSavedDraft();
+  resetAddItemDraftStateAfterSuccess();
+  for(const code of Object.keys(pendingStockAssignments))delete pendingStockAssignments[code];
+  document.getElementById('assignment-preview-box').classList.add('hidden');
+  document.getElementById('assignment-location').textContent='Location: --';
+  document.getElementById('assignment-quantity').textContent='Quantity: --';
+  if(!similar)window.addItemLocationHint=null;
+  const form=document.getElementById('add-item-form');delete form.dataset.savedItemId;delete form.dataset.saving;
+  applyDefaultItemAutomation({generateBarcode:true,generateDymo:false});
+  if(similar)window.addItemAssistedModule.applySimilar(similar);
+  window.addItemWizard.rebuildRoute();
+};
+
 // === FORM SUBMIT ===
 document.getElementById("add-item-form")?.addEventListener("submit", async (e) => {
   e.preventDefault();
   const addItemForm = e.currentTarget;
-  if (addItemForm?.dataset.saving === "true") return;
+  if (addItemForm?.dataset.saving === "true" || addItemForm?.dataset.savedItemId) return;
 
   if (addItemForm) addItemForm.dataset.saving = "true";
   const submitButton = addItemForm?.querySelector('button[type="submit"]');
@@ -2972,7 +2998,12 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
     }
   };
   clearAutomaticDymoGeneration();
-
+  window.addItemAssistedModule?.cancelGeneration();
+  const nextMode=e.submitter?.dataset.nextItem || 'new';
+  const similar=window.addItemIntake?.captureSimilar();
+  let committedItem=null;
+  const saveWarnings=[];
+  try {
   // Check category selection
   const categoryValue = document.getElementById("category").value.trim();
   if (!categoryValue) {
@@ -3031,29 +3062,17 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
     barcode = generateNewItemBarcode({ generateDymo: false });
   }
 
-  try {
-    const duplicateBarcode = await dymoModule.barcodeExists(barcode);
-    if (duplicateBarcode) {
-      window.dymoModule?.clearPendingDymoLabel?.({
-        statusMessage: "That barcode already exists. A fresh barcode was generated.",
-      });
-      generateNewItemBarcode({ generateDymo: true });
-      alert(`Barcode "${barcode}" already exists in inventory. I generated a new barcode for this item; please review it and submit again.`);
-      releaseAddItemSubmit();
-      return;
-    }
-
-    await ensureCurrentDymoLabelForSubmit(barcode);
-  } catch (dymoPrepError) {
-    console.error("DYMO preparation failed:", dymoPrepError);
-    alert(`Failed to prepare DYMO label: ${dymoPrepError.message || dymoPrepError}`);
-    releaseAddItemSubmit();
-    return;
+  if(await dymoModule.barcodeExists(barcode)) {
+    await window.addItemIntake?.checkBarcode();
+    window.addItemWizard.goTo('information');
+    showToast('This barcode already exists. Add quantity to it or create a different item.');
+    releaseAddItemSubmit();return;
   }
 
   const photoFiles = photoInput?.files || [];
   const photoUrls = [];
   const assistedSelectedImages = window.addItemAssistedModule?.getSelectedUploadedImagesForSave?.() || [];
+  let uploadFailureCount = 0;
   let assistedCopySuccessCount = 0;
   let assistedCopyFailureCount = 0;
   const photoStatus = document.getElementById("photo-status");
@@ -3068,6 +3087,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
       .upload(path, file, { upsert: true });
 
     if (uploadError) {
+      uploadFailureCount++;
       console.error(`Upload photo failed for ${file.name}:`, uploadError.message);
       photoStatus.innerHTML += `❌ Failed to upload <strong>${file.name}</strong>: ${uploadError.message}<br>`;
       continue;
@@ -3106,8 +3126,8 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   }
 
   const finalPhotoPaths = [...new Set(photoUrls.filter(Boolean))];
-  if (assistedSelectedImages.length && assistedCopyFailureCount && !assistedCopySuccessCount && !photoFiles.length) {
-    alert("The selected assisted photos could not be saved to the item. Please try again before adding the item.");
+  if (uploadFailureCount || assistedCopyFailureCount) {
+    alert("Some selected photos could not be saved. Please retry before adding the item; your selection is preserved.");
     releaseAddItemSubmit();
     return;
   }
@@ -3140,7 +3160,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
       qr_code,
       barcode,
       photos: finalPhotoPaths,
-      dymo_label_url: window.latestDymoUrl || "",
+      dymo_label_url: "",
       added_by: currentUser.id,              // ✅ NEW: track user ID
       added_by_email: currentUser.email      // ✅ NEW: track user email
     })
@@ -3149,10 +3169,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
 
   if (error || !insertedItems || insertedItems.length === 0) {
     if (error?.code === "23505" || /duplicate|unique/i.test(error?.message || "")) {
-      window.dymoModule?.clearPendingDymoLabel?.({
-        statusMessage: "That barcode was already saved. A fresh barcode was generated.",
-      });
-      generateNewItemBarcode({ generateDymo: true });
+      await window.addItemIntake?.checkBarcode();window.addItemWizard.goTo('information');
     }
     alert("Failed to save item: " + (error?.message || "Unknown error"));
     releaseAddItemSubmit();
@@ -3160,38 +3177,12 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   }
 
   const newItem = insertedItems[0];
-
+  committedItem=newItem;
+  addItemForm.dataset.savedItemId=newItem.id;
   try {
-    const finalDymoPath = await attachDymoLabelToSavedItem(newItem.id, barcode);
-    newItem.dymo_label_url = finalDymoPath;
-  } catch (err) {
-    alert(`❌ Item was saved, but the DYMO label could not be attached: ${err.message || err}`);
-    releaseAddItemSubmit();
-    return;
-  }
-
-  const savedDymoXml = window.latestDymoXml || "";
-  const savedDymoPath = newItem.dymo_label_url || window.latestDymoUrl || "";
-
-  try {
-    const savedPhotos = await ensureItemPhotosSaved(newItem, finalPhotoPaths);
-    newItem.photos = savedPhotos;
-  } catch (photoAttachError) {
-    console.error("Final item photo attach failed:", photoAttachError);
-    alert(photoAttachError.message || "Item saved, but selected photos could not be attached.");
-    releaseAddItemSubmit();
-    return;
-  }
-
-  if (ebay_sync_enabled && finalPhotoPaths.length) {
-    const ebayPhotoPrep = await copyItemPhotosToPublicEbayBucket(newItem, finalPhotoPaths);
-    if (photoStatus && ebayPhotoPrep.copied > 0) {
-      photoStatus.innerHTML += `Prepared ${ebayPhotoPrep.copied} eBay public photo${ebayPhotoPrep.copied === 1 ? "" : "s"}.<br>`;
-    }
-    if (ebayPhotoPrep.failed > 0) {
-      showToast(`Item saved, but ${ebayPhotoPrep.failed} eBay photo${ebayPhotoPrep.failed === 1 ? "" : "s"} still need prep.`);
-    }
-  }
+    newItem.photos=await ensureItemPhotosSaved(newItem,finalPhotoPaths);
+  }catch(error){saveWarnings.push('Selected photos need attention in Stock.');console.warn(error);}
+  // eBay publishing/export prepares public images when requested, independently of intake.
 
 // Hoisted so we can check it later (outside the try)
 let bulkRes = null;
@@ -3203,27 +3194,29 @@ try {
     window.addItemBulkModule?.generateBagBarcode?.() ||
     `BAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
 
-  const locationId = pendingStockAssignments[newItem.barcode]?.location_id || null;
+  const locationId = document.getElementById("item-assign-stock").checked ? pendingStockAssignments[newItem.barcode]?.location_id || null : null;
 
   // ⬅️ assign into the hoisted variable
   bulkRes = await window.addItemBulkModule.saveRegistryForItem(
     newItem.id,
     bagBarcode,
     locationId,
-    pendingStockAssignments[newItem.barcode] || null
+    document.getElementById("item-assign-stock").checked ? pendingStockAssignments[newItem.barcode] || null : null
   );
 
   if (bulkRes?.error) {
-    showToast("⚠️ Item saved, but bulk registry failed.");
+    saveWarnings.push("The bulk bag needs attention in Stock.");
     console.warn(bulkRes.error);
   } else if (!bulkRes?.skipped) {
     showToast(`✅ Bulk registry saved. Bag barcode: ${bagBarcode}`);
   }
 } catch (err) {
+  saveWarnings.push("The bulk bag needs attention in Stock.");
   console.warn("Bulk registry insert error:", err);
 }
 
-const stockInfo = pendingStockAssignments[newItem.barcode];
+const stockInfo = document.getElementById("item-assign-stock").checked ? pendingStockAssignments[newItem.barcode] : null;
+let stockSaved=!!bulkRes?.data && !bulkRes?.error && !bulkRes?.skipped;
 
 // Only do the generic stock write if we did NOT do a per-bag save
 if (stockInfo && (bulkRes?.skipped === true))  {
@@ -3237,7 +3230,7 @@ if (stockInfo && (bulkRes?.skipped === true))  {
     confirmed_at: stockInfo.signed_at || new Date().toISOString()
   });
 
-  const stockLog = await supabase.from("stock_transactions").insert({
+  const stockLog = stockInsert.error ? {error:null} : await supabase.from("stock_transactions").insert({
     item_id: newItem.id,
     location_id: stockInfo.location_id,
     quantity: stockInfo.quantity,
@@ -3251,24 +3244,28 @@ if (stockInfo && (bulkRes?.skipped === true))  {
 
   if (stockInsert.error || stockLog.error) {
     console.warn("⚠️ Stock added but not logged properly:", stockInsert.error, stockLog.error);
-    showToast("⚠️ Stock saved, but transaction log might be missing.");
+    saveWarnings.push(stockInsert.error ? "Stock quantity was not assigned. Use Add quantity in Stock to finish." : "Stock quantity saved, but its activity log needs attention.");
   } else {
     showToast(`✅ Saved ${stockInfo.quantity} units to ${stockInfo.location_name}`);
   }
 
+  stockSaved=!stockInsert.error;
   // Clean up
   delete pendingStockAssignments[newItem.barcode];
 }
 
-  resetAddItemDraftStateAfterSuccess();
+  window.addItemLocationHint=stockInfo || null;
+  await window.addItemAssistedModule?.clearSavedDraft();
   await bumpInventoryVersion([newItem.id]);
-  showItemSaveSuccessModal(newItem, {
-    photoCount: finalPhotoPaths.length,
-    stockInfo,
-    bulkInfo: bulkRes,
-    dymoXml: savedDymoXml,
-    dymoPath: savedDymoPath,
-  });
+  releaseAddItemSubmit();
+  await window.addItemIntake.saved(newItem,{similar,nextMode,stockInfo,stockSaved,warnings:saveWarnings});
+  }catch(error){
+    console.error('Item save failed',error);releaseAddItemSubmit();
+    if(committedItem){
+      await window.addItemAssistedModule?.clearSavedDraft();
+      await window.addItemIntake.saved(committedItem,{similar,nextMode:'new',stockSaved:false,warnings:['The item was created, but a follow-up step did not finish. Check its photos and stock in Stock before adding quantity.']});
+    }else showToast(`Could not save item: ${error.message || error}. Your draft is still here.`);
+  }
 });
 
 // === DOM Loader ===
@@ -3312,5 +3309,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupAdminLocationDropdownToggle();
   setupCategoryDropdownToggle();
   dymoModule.setupGenerateDymoButtonListener();
-  applyDefaultItemAutomation({ generateBarcode: true, generateDymo: true });
+  applyDefaultItemAutomation({ generateBarcode: true, generateDymo: false });
 });

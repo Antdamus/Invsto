@@ -38,6 +38,8 @@ window.dymoModule = (function () {
 
     //generate the dymo label
     async function generateAndUploadDymoLabel({ barcode, qr, price, typeqr }) {
+        const xmlValue = value => String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+        barcode=xmlValue(barcode);qr=xmlValue(qr);price=xmlValue(price);typeqr=xmlValue(typeqr);
         // generate XML,this rewrites the actual file
         const templateXml = `<?xml version="1.0" encoding="utf-8"?>
         <DesktopLabel Version="1">
@@ -1137,7 +1139,20 @@ window.dymoModule = (function () {
         return window.latestDymoUrl;
     }
 
+  async function prepareSavedItemLabel(item) {
+    if(!item?.id || !item.barcode)throw new Error('Save the item before preparing its label.');
+    const {templateXml}=await generateAndUploadDymoLabel({barcode:item.barcode,qr:item.qr_code || (item.qr_type && item.qr_type !== 'website' ? 'https://ogjewelry.store/auth?id='+encodeURIComponent(item.barcode) : WEBSITE_QR_URL),price:item.weight ?? '',typeqr:item.qr_type || 'website'});
+    const labelPath=`labels/${item.id}.dymo`;
+    const {error}=await supabase.storage.from('dymo-labels').upload(labelPath,new Blob([templateXml],{type:'application/octet-stream'}),{upsert:true,contentType:'application/octet-stream'});
+    if(error)throw error;
+    const {error:updateError}=await supabase.from('item_types').update({dymo_label_url:labelPath}).eq('id',item.id);
+    if(updateError)throw updateError;
+    item.dymo_label_url=labelPath;
+    return {templateXml,labelPath};
+  }
+
   return { 
+    prepareSavedItemLabel,
     generateAndUploadDymoLabel, 
     generateDymoLabelFromForm,
     barcodeExists, 
