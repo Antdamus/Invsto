@@ -27,7 +27,29 @@
   let furthest = 0;
   let jewelryAutoCost = true;
 
-  const value = (id) => document.getElementById(id)?.value?.trim() || "";
+  const categoryInput = document.getElementById("category");
+  const categoryToggle = document.getElementById("category-dropdown-toggle");
+  const categoryPlaceholder = "Select or Create Category";
+  function setCategory(category, { notify = true } = {}) {
+    const selected = String(category ?? "").trim();
+    const label = selected || categoryPlaceholder;
+    const changed = categoryInput.value !== selected || categoryToggle.textContent.trim() !== label;
+    categoryInput.value = selected;
+    categoryToggle.textContent = label;
+    if (changed && notify) {
+      categoryInput.dispatchEvent(new Event("input", { bubbles: true }));
+      categoryInput.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    return selected;
+  }
+  function getCategory() {
+    // Recover a visible selection left by an older draft/browser restore before validating it.
+    const label = categoryToggle.textContent.trim();
+    const selected = categoryInput.value.trim() || (label !== categoryPlaceholder ? label : "");
+    return setCategory(selected, { notify: false });
+  }
+  window.addItemCategory = { get: getCategory, set: setCategory };
+  const value = (id) => id === "category" ? getCategory() : document.getElementById(id)?.value?.trim() || "";
   const isWatch = () => form.querySelector('[name="item-kind"]:checked')?.value === "watch";
   const isCoin = () => form.querySelector('[name="item-kind"]:checked')?.value === "coin";
   const usesDirectPricing = () => isWatch() || isCoin();
@@ -106,10 +128,9 @@
     document.getElementById("item-coin-photo-guide").hidden = !coin;
     document.getElementById("price-per-weight").closest("label").hidden = directPricing;
     document.getElementById("auto-cost-checkbox").closest(".form-field").hidden = directPricing;
-    const category = document.getElementById("category");
-    if (!restoring && (!category.value || ["Watches", "Coins"].includes(category.value))) {
-      category.value = watch ? "Watches" : coin ? "Coins" : "";
-      document.getElementById("category-dropdown-toggle").textContent = category.value || "Select or Create Category";
+    const category = getCategory();
+    if (!category || (!restoring && ["Watches", "Coins"].includes(category))) {
+      setCategory(watch ? "Watches" : coin ? "Coins" : "", { notify: !restoring });
     }
     rebuildRoute();
     renderReview();
@@ -316,6 +337,7 @@
   }, true);
 
   document.addEventListener("add-item-form:reset", () => {
+    setCategory("", { notify: false });
     returnToReview=false;
     jewelryAutoCost = true;
     delete document.getElementById("sale-price").dataset.manualRetail;

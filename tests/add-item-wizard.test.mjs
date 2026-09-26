@@ -90,6 +90,9 @@ const mockServices = () => {
             // Stop here: the payload is inspected, never sent to a real database.
             result = window.testSaveSuccess ? {data:[{...payload,id:`item-${window.testWrites.length}`}]} : { data: null, error: { message: "Test save intercepted" } };
           }
+          if(table==='add_item_drafts' && operation==='select' && window.testDraftHold) {
+            return new Promise(release=>{window.testReleaseDraft=release;}).then(()=>result).then(resolve,reject);
+          }
           return Promise.resolve(result).then(resolve, reject);
         },
       };
@@ -524,4 +527,45 @@ test('similar location hint opens the actual placement dialog but requires a fre
  await page.waitForFunction(()=>Object.keys(pendingStockAssignments).length===1);
  const pending=await page.evaluate(()=>Object.values(pendingStockAssignments)[0]);assert.equal(pending.quantity,3);assert.equal(pending.confirmation_method,'password_stock_placement');assert.ok(pending.signed_at);
  await next(page);assert.equal(await step(page),'review');
+});
+
+
+test('slow draft restore keeps the visible watch category valid through navigation and saving',async t=>{
+ const page=await pageFor(t,{width:390,height:844});
+ await page.evaluate(()=>localStorage.setItem('test-draft',JSON.stringify({payload:{
+  wizard:{version:2,step:'information',itemKind:'watch',autoCopy:false,watchDetails:{brand:'Rolex',model:'126233'}},
+  mainFields:{category:'',title:'My watch',cost:'40',salePrice:'90',ebaySyncEnabled:false},assistedFields:{}
+ }})));
+ await page.addInitScript(()=>{window.testDraftHold=true;});
+ await page.reload();await page.waitForFunction(()=>window.testReleaseDraft && window.addItemAssistedModule);
+ await page.locator('[name="item-kind"][value="watch"]').check();
+ assert.equal(await page.locator('#category-dropdown-toggle').innerText(),'Watches');
+ await page.evaluate(()=>window.testReleaseDraft());await page.waitForFunction(()=>document.getElementById('cost').value==='40');
+ assert.equal(await page.locator('#category-dropdown-toggle').innerText(),'Watches');
+ await next(page);assert.equal(await step(page),'photos');
+ assert.equal(await page.locator('#category').inputValue(),'Watches');
+ await next(page);await next(page);await page.getByRole('button',{name:'Save item',exact:true}).click();
+ await page.waitForFunction(()=>window.testWrites.length===1);assert.deepEqual(await page.evaluate(()=>window.testWrites[0].categories),['Watches']);
+});
+
+test('missing categories on restored coin drafts use Coins and explicit custom categories stay unchanged',async t=>{
+ const page=await pageFor(t);await seed(page,{main:{category:''}});
+ assert.equal(await page.locator('#category-dropdown-toggle').innerText(),'Coins');
+ await next(page);assert.equal(await step(page),'photos');
+ await seed(page,{main:{category:'Rare <collector> coins'}});
+ assert.equal(await page.locator('#category-dropdown-toggle').innerText(),'Rare <collector> coins');
+ assert.equal(await page.locator('#category').inputValue(),'Rare <collector> coins');
+ await next(page);assert.equal(await step(page),'photos');
+});
+
+test('category validation recovers a displayed selection but never accepts the placeholder',async t=>{
+ const page=await pageFor(t);await page.locator('#weight').fill('10');
+ await category(page,'Custom bracelets');
+ await page.evaluate(()=>{document.getElementById('category').value='';});
+ await next(page);assert.equal(await step(page),'photos');
+ assert.equal(await page.locator('#category').inputValue(),'Custom bracelets');
+ await page.evaluate(()=>window.resetForNextIntake());
+ assert.equal(await page.locator('#category-dropdown-toggle').innerText(),'Select or Create Category');
+ await page.locator('#weight').fill('10');await next(page);assert.equal(await step(page),'information');
+ assert.match(await page.locator('#item-step-error').innerText(),/Select or create an item category/);
 });

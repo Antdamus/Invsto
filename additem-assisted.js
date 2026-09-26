@@ -839,10 +839,7 @@
     if (elements.mainDescriptionInput && main.description !== undefined) elements.mainDescriptionInput.value = main.description || "";
     if (elements.mainWeightInput && main.weight !== undefined) elements.mainWeightInput.value = main.weight || "";
     if (elements.mainCategoryInput && main.category !== undefined) {
-      elements.mainCategoryInput.value = main.category || "";
-      if (elements.categoryToggle && main.category) {
-        elements.categoryToggle.textContent = main.category;
-      }
+      window.addItemCategory.set(main.category, { notify: false });
     }
     if (elements.qrTypeSelect && main.qrType !== undefined) elements.qrTypeSelect.value = main.qrType || "";
 
@@ -1005,16 +1002,8 @@
     );
   }
 
-  function getCurrentCategory(elements) {
-    const hiddenValue = asTrimmedString(elements.mainCategoryInput?.value);
-    if (hiddenValue) return hiddenValue;
-
-    const toggleText = asTrimmedString(elements.categoryToggle?.textContent);
-    if (toggleText && toggleText !== "Select or Create Category") {
-      return toggleText;
-    }
-
-    return "";
+  function getCurrentCategory() {
+    return window.addItemCategory.get();
   }
 
   function syncWeightIntoMainForm(elements, stableWeight) {

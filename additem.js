@@ -1241,10 +1241,14 @@ let uploadedImages = [];
           const value = optionEl.dataset.value;
           const isNew = optionEl.dataset.new === "true";
 
-          hiddenInput.value = value;
-          hiddenInput.dispatchEvent(new Event("input", { bubbles: true }));
-          hiddenInput.dispatchEvent(new Event("change", { bubbles: true }));
-          toggleBtn.innerText = value;
+          if (hiddenInputId === "category") {
+            window.addItemCategory.set(value);
+          } else {
+            hiddenInput.value = value;
+            toggleBtn.innerText = value;
+            hiddenInput.dispatchEvent(new Event("input", { bubbles: true }));
+            hiddenInput.dispatchEvent(new Event("change", { bubbles: true }));
+          }
 
           onClick(value, isNew, optionEl);
           if (hiddenInputId === "category") {
@@ -3005,7 +3009,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const saveWarnings=[];
   try {
   // Check category selection
-  const categoryValue = document.getElementById("category").value.trim();
+  const categoryValue = window.addItemCategory.get();
   if (!categoryValue) {
     showToast("❌ Please select or create a category.");
     releaseAddItemSubmit();
@@ -3023,14 +3027,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const price_per_weight = watch_details || coin_details ? null : parseFloat(pricePerWeightInput?.value || "0");
   const materialPurity = getAssistedMaterialPurityForSave();
   const ebay_sync_enabled = document.getElementById("ebay-sync-enabled")?.checked !== false;
-  // force sync dropdown selection into hidden input if user typed or skipped selection
-  const categoryButton = document.getElementById("category-dropdown-toggle");
-  const categoryHiddenInput = document.getElementById("category");
-  if (!categoryHiddenInput.value && categoryButton.innerText !== "Select or Create Category") {
-    categoryHiddenInput.value = categoryButton.innerText.trim();
-  }
-  const categoryInput = document.getElementById("category").value.trim();
-  const categories = categoryInput ? [categoryInput] : [];
+  const categories = [categoryValue];
   const selectedEbayCategoryId = String(document.getElementById("ebay-category-id")?.value || "").trim();
   const inferredEbayCategoryId = inferAddItemEbayCategory()?.id || "";
   const ebay_category_id = selectedEbayCategoryId || inferredEbayCategoryId || null;
