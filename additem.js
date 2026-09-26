@@ -197,7 +197,7 @@ const previewContainer = document.getElementById("carousel-preview");
 const photoInput = document.getElementById("item-photo");
 const pricePerWeightInput = document.getElementById("price-per-weight");
 const autoCostCheckbox = document.getElementById("auto-cost-checkbox");
-const pendingStockAssignments = {}; // { barcode: { location_name, quantity, location_id } }
+const pendingStockAssignments = Object.create(null); // { barcode: { location_name, quantity, location_id } }
 let uploadedImages = [];
 
 //#region general utilities needed to run theh program
@@ -1396,10 +1396,30 @@ let uploadedImages = [];
   }
 
   //respective event listener
+  let previousItemBarcode = barcodeInput?.value.trim() || '';
+
+  function updateItemBarcodePreview() {
+    const code = barcodeInput.value.trim();
+    if (code !== previousItemBarcode && pendingStockAssignments[previousItemBarcode]) {
+      pendingStockAssignments[code] = pendingStockAssignments[previousItemBarcode];
+      delete pendingStockAssignments[previousItemBarcode];
+    }
+    previousItemBarcode = code;
+    window.dymoModule?.clearPendingDymoLabel?.();
+    barcodeInput.setCustomValidity('');
+    if (!code) {
+      barcodeCanvas.getContext('2d').clearRect(0, 0, barcodeCanvas.width, barcodeCanvas.height);
+      return;
+    }
+    try { renderBarcode(code); } catch (_) {
+      barcodeInput.setCustomValidity('Use a printable barcode containing letters, numbers, or symbols.');
+    }
+  }
+
   function generateNewItemBarcode(options = {}) {
     const code = 'OG' + Date.now();
     barcodeInput.value = code;
-    renderBarcode(code);
+    updateItemBarcodePreview();
 
     if (options.generateDymo !== false) {
       scheduleAutomaticDymoGeneration(options.dymoDelayMs ?? 250);
@@ -1433,6 +1453,10 @@ let uploadedImages = [];
   }
 
   function setupBarcodeGeneration() {
+    barcodeInput?.addEventListener('input', () => {
+      updateItemBarcodePreview();
+      if (barcodeInput.value.trim() && barcodeInput.validity.valid) scheduleAutomaticDymoGeneration();
+    });
     document.getElementById('generate-barcode')?.addEventListener('click', () => {
       generateNewItemBarcode({ generateDymo: true });
     });

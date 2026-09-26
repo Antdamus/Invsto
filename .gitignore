@@ -10,3 +10,6 @@ tests/email-triage/test-results/
 tests/email-triage/playwright-report/
 test-results/
 playwright-report/
+
+# Dependencies are installed from package-lock.json.
+node_modules/

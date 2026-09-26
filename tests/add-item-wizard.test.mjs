@@ -13,7 +13,8 @@ const mockServices = () => {
   window.testGeneration = [];
   window.alert = () => {};
   window.QRCode = { toCanvas: (_canvas, _url, _options, callback) => callback?.() };
-  window.JsBarcode = () => {};
+  window.testBarcodeRenders = [];
+  window.JsBarcode = (_canvas, code) => window.testBarcodeRenders.push(code);
   window.addItemBulkModule = { setupBulkModalOpeners() {} };
   window.dymoModule = {
     setupGenerateDymoButtonListener() {},
@@ -86,8 +87,8 @@ before(async () => {
     try {
       let content = await readFile(new URL(name, root), "utf8");
       if (name.endsWith("html")) {
-        content = content.replace(/<script src="([^"]+)"><\/script>/g, (tag, src) =>
-          ["additem-wizard.js", "additem.js", "additem-assisted.js"].includes(src.split("?")[0]) ? tag : "");
+        content = content.replace(/<script src="([^"]+)"(?: defer)?><\/script>/g, (tag, src) =>
+          ["additem-wizard.js", "additem.js", "additem-assisted.js", "barcode-scanner.js"].includes(src.split("?")[0]) ? tag : "");
         content = content.replace("<head>", `<head><script>(${mockServices.toString()})();</script>`);
       }
       res.setHeader("Content-Type", name.endsWith("css") ? "text/css" : name.endsWith("js") ? "text/javascript" : "text/html");
@@ -461,4 +462,47 @@ test("coin grading, unknown purity, mode switches and reset keep unrelated data 
   assert.equal(await page.locator("#coin-name").inputValue(), "");
   assert.equal(await page.locator("#coin-grade").isDisabled(), true);
   assert.equal(await page.locator("#coin-gradingService").evaluate((input) => input.required), false);
+});
+
+test("camera barcode updates the new item label and saved barcode on mobile", async t => {
+  const page = await pageFor(t, { width: 390, height: 844 });
+  await page.locator('[name="item-kind"][value="coin"]').check();
+  await page.locator('#coin-name').fill('Collector coin');
+  await category(page, 'Coins');
+  await next(page);
+  await page.locator('#workflow-tab-manual').click();
+  await next(page);
+  await next(page);
+  await page.locator('#cost').fill('40');
+  await page.locator('#sale-price').fill('80');
+  await next(page);
+  assert.equal(await step(page), 'labels');
+  await page.evaluate(() => {
+    pendingStockAssignments[document.getElementById('scanned-barcode').value] = { location_id: 'test-tray', quantity: 3 };
+    navigator.mediaDevices.getUserMedia = async () => ({ getTracks: () => [], getVideoTracks: () => [] });
+    navigator.mediaDevices.enumerateDevices = async () => [];
+    window.ZXingBrowser = { BrowserMultiFormatReader: class {
+      async decodeFromStream(stream, video, callback) {
+        const controls = { stop() {} };
+        window.testScan = code => callback({ getText: () => code }, null, controls);
+        return controls;
+      }
+    } };
+  });
+  await page.locator('[data-scan-target="scanned-barcode"]').click();
+  await page.waitForFunction(() => window.testScan);
+  await page.evaluate(() => window.testScan('000-COIN-27'));
+  await page.locator('[data-camera="use"]').click();
+  assert.equal(await page.locator('#scanned-barcode').inputValue(), '000-COIN-27');
+  assert.equal(await page.evaluate(() => window.testBarcodeRenders.at(-1)), '000-COIN-27');
+  assert.deepEqual(await page.evaluate(() => pendingStockAssignments['000-COIN-27']), { location_id: 'test-tray', quantity: 3 });
+  await page.waitForFunction(() => window.latestDymoBarcode === '000-COIN-27');
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.screenshot({ path: new URL('test-results/add-item-camera-labels-mobile.png', root).pathname.replace(/^\/(\w:)/, '$1'), fullPage: true });
+  await next(page);
+  await next(page);
+  await next(page);
+  await page.locator('button[type="submit"]').first().click();
+  await page.waitForFunction(() => window.testWrites.length === 1);
+  assert.equal(await page.evaluate(() => window.testWrites[0].barcode), '000-COIN-27');
 });

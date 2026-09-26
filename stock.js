@@ -2078,6 +2078,13 @@ function buildLocationChips(item) {
       );
       
 
+      document.querySelectorAll(".dropdown-option.selected[data-location]").forEach(el =>
+        el.classList.remove("selected")
+      );
+      const favoritesToggle = document.getElementById("show-favorites-only");
+      if (favoritesToggle) favoritesToggle.checked = false;
+      showOnlyFavorites = false;
+
       // 🔹 Reset pagination and re-apply filtering + rendering
       currentPage = 1;
       const filtered = getFilteredItems(allItems); 

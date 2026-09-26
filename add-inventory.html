@@ -14,6 +14,8 @@
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
   <script src="https://qajavascriptsdktests.azurewebsites.net/JavaScript/dymo.connect.framework.js"></script>
 
+  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera" />
+  <script src="barcode-scanner.js?v=20260926-camera" defer></script>
 </head>
 <body>
   
@@ -36,6 +38,7 @@
             <i data-lucide="arrow-left" class="icon"></i> Back
           </a>
           <input type="text" id="input-to-search-inventory-item" placeholder="Scan barcode here..." autocomplete="off" />
+          <button type="button" class="camera-scan-button" data-scan-target="input-to-search-inventory-item">Scan with camera</button>
         </div>
       </header>
     </div>
@@ -191,6 +194,7 @@
                 placeholder="Scan tray barcode"
                 autocomplete="off"
               />
+              <button type="button" class="camera-scan-button" data-scan-target="assign-placement-tray-barcode">Scan with camera</button>
               <small id="assign-placement-tray-status">Waiting for tray scan.</small>
             </div>
 
@@ -207,6 +211,7 @@
                 placeholder="Scan parent storage barcode"
                 autocomplete="off"
               />
+              <button type="button" class="camera-scan-button" data-scan-target="assign-placement-parent-barcode">Scan with camera</button>
               <small id="assign-placement-parent-status">Scan the parent storage label first.</small>
             </div>
 
@@ -223,6 +228,7 @@
                 placeholder="Scan container barcode"
                 autocomplete="off"
               />
+              <button type="button" class="camera-scan-button" data-scan-target="assign-placement-container-barcode">Scan with camera</button>
               <small id="assign-placement-container-status">Container must belong to the scanned parent.</small>
             </div>
           </div>

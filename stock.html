@@ -23,6 +23,8 @@
   <!-- 🧱 Google Icons: Outlined and Filled -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera" />
+  <script src="barcode-scanner.js?v=20260926-camera" defer></script>
 </head>
 
 <body class="stock-body stock-access-loading">
@@ -50,6 +52,7 @@
     <!-- 🔹 Unified Sticky Header Control Bar -->
     <header class="stock-header sticky">
       <div class="top-controls">
+        <button type="button" class="camera-scan-button" data-scan-target="stock-barcode-search" data-scan-clear-filters="clear-filters" data-scan-hint="Search stock using this code. Current search filters will be cleared.">Scan item</button>
         <!-- 🔙 Back Button to Dashboard -->
         <a href="dashboard.html" class="back-button">
           <i data-lucide="arrow-left" class="icon"></i> Back
@@ -155,7 +158,7 @@
           <div class="filter-grid">
             <input type="text" name="title" placeholder="Search title..." />
             <input type="text" name="description" placeholder="Search description..." />
-            <input type="text" name="barcode" placeholder="Search barcode..." />
+            <input type="text" id="stock-barcode-search" name="barcode" placeholder="Search barcode..." />
             <input type="text" name="distributor" placeholder="Distributor name..." />
 
 <div class="dropdown-wrapper">
@@ -316,7 +319,7 @@
   <script src="stock-checkout.js"></script>
   <script src="stock-transferstock.js"></script>
   <script src="stock-storage-transfer.js"></script>
-  <script src="stock.js"></script>
+  <script src="stock.js?v=20260926-camera"></script>
 
   <!-- 📢 Toast + Loading Spinner Containers -->
   <div id="toast-container"></div>

@@ -15,6 +15,8 @@
   <link rel="stylesheet" href="additem-assisted.css" />
   <link rel="stylesheet" href="additem-wizard.css?v=20260926-coins" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-camera" />
+  <script src="barcode-scanner.js?v=20260926-camera" defer></script>
 </head>
 
 <body class="add-body">
@@ -527,6 +529,7 @@
                   <button type="button" id="generate-barcode" class="add-button-secondary">Generate Barcode</button>
                   <span class="barcode-divider">or</span>
                   <input type="text" id="scanned-barcode" placeholder="Paste or Scan Barcode" class="add-input" />
+                  <button type="button" class="camera-scan-button" data-scan-target="scanned-barcode">Scan with camera</button>
                 </div>
 
                 <button id="generate-dymo-label" type="button" class="add-button-secondary">
@@ -644,6 +647,7 @@
             <span class="placement-step-kicker">Step 1</span>
             <span class="placement-step-title">Scan tray barcode</span>
             <input type="text" id="placement-tray-barcode" class="add-input placement-barcode-input" placeholder="Scan tray barcode" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="search" />
+            <button type="button" class="camera-scan-button" data-scan-target="placement-tray-barcode">Scan with camera</button>
             <small id="placement-tray-status">Waiting for tray scan.</small>
           </label>
 
@@ -651,6 +655,7 @@
             <span class="placement-step-kicker">Step 1</span>
             <span class="placement-step-title">Scan parent table, vault, or storage barcode</span>
             <input type="text" id="placement-parent-barcode" class="add-input placement-barcode-input" placeholder="Scan parent storage barcode" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="search" />
+            <button type="button" class="camera-scan-button" data-scan-target="placement-parent-barcode">Scan with camera</button>
             <small id="placement-parent-status">Scan the selected parent storage label first.</small>
           </label>
 
@@ -658,6 +663,7 @@
             <span class="placement-step-kicker">Step 2</span>
             <span class="placement-step-title">Scan container or bag barcode</span>
             <input type="text" id="placement-container-barcode" class="add-input placement-barcode-input" placeholder="Scan container barcode" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="search" />
+            <button type="button" class="camera-scan-button" data-scan-target="placement-container-barcode">Scan with camera</button>
             <small id="placement-container-status">Container must belong to the scanned parent.</small>
           </label>
         </div>
@@ -1006,7 +1012,7 @@
   <script src="additem-dymolabel.js"></script>
   <script src="additembulk.js"></script>
   <script src="additem-wizard.js?v=20260926-coins"></script>
-  <script src="additem.js?v=20260926-coins"></script>
+  <script src="additem.js?v=20260926-camera"></script>
   <script src="additem-assisted.js?v=20260926-coins"></script>
 </body>
 </html>
