@@ -833,7 +833,9 @@ let uploadedImages = [];
     const watch = window.addItemWizard?.getWatchDetails();
     if (watch) {
       setAddItemAspect(aspects, "Type", "Wristwatch");
-      setAddItemAspect(aspects, "Model", watch.model);
+      setAddItemAspect(aspects, "Brand", watch.brand);
+      setAddItemAspect(aspects, "Department", watch.department);
+      setAddItemAspect(aspects, "Reference Number", watch.model);
       if (Number(weightValue) > 0) setAddItemAspect(aspects, "Item Weight", `${weightValue} g`);
       return aspects;
     }
@@ -882,7 +884,10 @@ let uploadedImages = [];
     if (!(window.addItemWizard?.descriptionForSave() || String(document.getElementById("description")?.value || "").trim())) missing.push("description");
     if (!(parseFloat(document.getElementById("sale-price")?.value?.replace(/,/g, "") || "0") > 0)) missing.push("sale price");
     if (window.addItemWizard?.isWatch()) {
-      missing.push("watch brand and department in eBay listing details");
+      const watch = window.addItemWizard.getWatchDetails();
+      if (!watch.brand) missing.push("watch brand (Information)");
+      if (!watch.department) missing.push("watch department (Information)");
+      if (!watch.condition) missing.push("watch condition (Information)");
     } else {
       if (!materialPurity.metal) missing.push("material");
       if (!materialPurity.purity_basis_points) missing.push("purity");
@@ -948,7 +953,7 @@ let uploadedImages = [];
       updateAddItemEbayReadiness();
     });
 
-    ["title", "description", "category", "assisted-material", "assisted-purity", "assisted-stone-type", "assisted-length", "sale-price", "scanned-barcode"].forEach((id) => {
+    ["title", "description", "category", "assisted-material", "assisted-purity", "assisted-stone-type", "assisted-length", "sale-price", "watch-brand", "watch-department", "watch-condition", "scanned-barcode"].forEach((id) => {
       document.getElementById(id)?.addEventListener("input", () => updateAddItemEbayReadiness());
       document.getElementById(id)?.addEventListener("change", () => updateAddItemEbayReadiness());
     });
@@ -1325,7 +1330,7 @@ let uploadedImages = [];
 
       // New: round sale price up to nearest 10
       const salePrice = Math.ceil((newCost * 7.5) / 10) * 10;
-      document.getElementById('sale-price').value = salePrice.toLocaleString("en-US");
+      if (document.getElementById("sale-price").dataset.manualRetail !== "true") document.getElementById('sale-price').value = salePrice.toLocaleString("en-US");
       updateAddItemEbayReadiness();
     }
   }
@@ -1352,6 +1357,7 @@ let uploadedImages = [];
 
   //listeners for the calculation and calculation of the final prince
   function setupCostAndPriceListeners() {
+    document.getElementById("sale-price")?.addEventListener("input", (event) => { event.target.dataset.manualRetail = "true"; });
     document.getElementById("weight")?.addEventListener('input', () => {
       updateCostFromWeight();
       scheduleAutomaticDymoGeneration();
@@ -1365,9 +1371,9 @@ let uploadedImages = [];
       const cost = parseFloat(document.getElementById('cost').value.replace(/,/g, ''));
       if (cost > 0) {
         const salePrice = Math.ceil((cost * 7.5) / 10) * 10;
-        document.getElementById('sale-price').value = salePrice.toLocaleString("en-US");
+        if (document.getElementById("sale-price").dataset.manualRetail !== "true") document.getElementById('sale-price').value = salePrice.toLocaleString("en-US");
       } else {
-        document.getElementById('sale-price').value = '';
+        if (document.getElementById("sale-price").dataset.manualRetail !== "true") document.getElementById('sale-price').value = '';
       }
       updateAddItemEbayReadiness();
     });
@@ -2998,6 +3004,13 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   }
   const cost = parseFloat(document.getElementById("cost").value.replace(/,/g, ''));
   const sale_price = parseFloat(document.getElementById("sale-price").value.replace(/,/g, ''));
+  const minimumText = document.getElementById("minimum-sale-price").value.trim();
+  const minimum_sale_price = minimumText === "" ? null : Number(minimumText);
+  if (!Number.isFinite(sale_price) || sale_price <= 0 || (minimum_sale_price !== null && (!Number.isFinite(minimum_sale_price) || minimum_sale_price < 0 || minimum_sale_price > sale_price))) {
+    showToast("Enter a positive retail price and a minimum sale price no higher than retail.");
+    releaseAddItemSubmit();
+    return;
+  }
   const distributor_name = document.getElementById("distributor-name").value.trim();
   const distributor_phone = document.getElementById("distributor-phone").value.trim();
   const distributor_notes = document.getElementById("distributor-notes").value.trim();
@@ -3103,12 +3116,13 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
       purity_basis_points: materialPurity.purity_basis_points,
       ebay_sync_enabled,
       ebay_category_id,
-      ebay_condition: coin_details ? null : "NEW",
+      ebay_condition: coin_details ? null : watch_details ? watch_details.condition || null : "NEW",
       ebay_aspects,
       price_per_weight,
       categories,
       cost,
       sale_price,
+      minimum_sale_price,
       distributor_name,
       distributor_phone,
       distributor_notes,

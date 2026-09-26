@@ -91,6 +91,9 @@ const STOCK_WORKER_ITEM_SELECT = [
   "stone_type",
   "item_length",
   "sale_price",
+  "minimum_sale_price",
+  "watch_details",
+  "coin_details",
   "barcode",
   "qr_code",
   "photo_url",
@@ -751,7 +754,8 @@ function buildLocationChips(item) {
           </div>
           <div class="stock-metric-grid">
             <span><small>Weight</small><strong>${Number(item.weight || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} g</strong></span>
-            <span><small>Sale</small><strong>${formatStockMoney(item.sale_price)}</strong></span>
+            <span><small>Retail</small><strong>${formatStockMoney(item.sale_price)}</strong></span>
+            <span><small>Minimum sale</small><strong>${item.minimum_sale_price == null ? "Not set" : formatStockMoney(item.minimum_sale_price)}</strong></span>
             <span><small>Barcode</small><button type="button" class="stock-barcode-btn" data-barcode="${escapeStockHtml(item.barcode || "")}">${escapeStockHtml(item.barcode || "-")}</button></span>
             ${showSensitive ? `<span><small>Cost</small><strong>${formatStockMoney(item.cost)}</strong></span>` : ""}
           </div>
@@ -4988,7 +4992,8 @@ function stockHistoryFieldLabel(field) {
     stone_type: "Stone type",
     item_length: "Length",
     cost: "Cost",
-    sale_price: "Sale price",
+    sale_price: "Retail price",
+    minimum_sale_price: "Minimum sale price",
     barcode: "Barcode",
     qr_type: "QR type",
     qr_code: "QR data",

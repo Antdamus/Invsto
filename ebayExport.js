@@ -28,7 +28,9 @@ const requiredHeaders = {
   metal: "C:Metal",
   purity: "C:Metal Purity",
   style: "C:Style",
-  type: "C:Type"
+  type: "C:Type",
+  department: "C:Department",
+  reference: "C:Reference Number"
 };
 
 const EBAY_EXPORT_PROFILES = {
@@ -60,6 +62,32 @@ const EBAY_EXPORT_PROFILES = {
   }
 };
 
+EBAY_EXPORT_PROFILES.watch = {
+  ...EBAY_EXPORT_PROFILES.pendant, label: "Watch", slug: "watches", type: "Wristwatch",
+  categoryId: "31387", categoryName: "/Jewelry & Watches/Watches, Parts & Accessories/Watches/Wristwatches",
+};
+const WATCH_EXPORT_CONDITIONS = { NEW: "1000", NEW_OTHER: "1500", NEW_WITH_DEFECTS: "1750", SELLER_REFURBISHED: "2500", PRE_OWNED_EXCELLENT: "2990", USED_EXCELLENT: "3000", PRE_OWNED_FAIR: "3010", FOR_PARTS_OR_NOT_WORKING: "7000" };
+function validateEbayExportItems(items, profile, requirements) {
+  for (const item of items) {
+    const watch = item.watch_details;
+    const name = item.title || item.barcode || "Selected item";
+    if (!Number.isFinite(Number(item.sale_price)) || Number(item.sale_price) <= 0) throw new Error(`${name}: enter a retail price before exporting.`);
+    if (item.coin_details) throw new Error(`${name}: coin-specific eBay export is not available.`);
+    if (profile.type !== "Wristwatch" && (watch || item.ebay_category_id === "31387")) throw new Error(`${name}: choose the Watch export category.`);
+    if (profile.type === "Wristwatch") {
+      if (!watch) throw new Error(`${name}: select only items entered in Watch mode.`);
+      for (const key of ["brand", "department", "condition"]) if (!watch[key]) throw new Error(`${name}: enter watch ${key} in Edit Item before exporting.`);
+      const conditionId = WATCH_EXPORT_CONDITIONS[watch.condition];
+      if (!conditionId) throw new Error(`${name}: choose a supported watch condition.`);
+      if (requirements) {
+        const aspects = { Brand: watch.brand, Department: watch.department, Type: "Wristwatch", "Reference Number": watch.model };
+        for (const field of requirements.requiredAspects) if (!aspects[field]) throw new Error(`${name}: eBay requires ${field}. Complete the watch details first.`);
+        if (!requirements.conditions.some(condition => String(condition.id) === conditionId)) throw new Error(`${name}: condition is not supported for watches on eBay.`);
+        if (!requirements.departments.includes(watch.department)) throw new Error(`${name}: department is not supported for watches on eBay.`);
+      }
+    }
+  }
+}
 window.EBAY_EXPORT_PROFILES = EBAY_EXPORT_PROFILES;
 
 function getSelectedExportProfile(exportType = "pendant") {
@@ -258,6 +286,7 @@ async function getQuantitiesByItemId(items, options = {}) {
 }
 
 async function buildListingRows(items, headers, profile, options = {}) {
+  validateEbayExportItems(items, profile);
   const indexes = getHeaderIndexes(headers);
   const quantitiesByItemId = await getQuantitiesByItemId(items, options);
   const outputRows = [];
@@ -314,19 +343,30 @@ async function buildListingRows(items, headers, profile, options = {}) {
     setRowValue(row, indexes, "startPrice", item.sale_price || 0);
     setRowValue(row, indexes, "quantity", totalQty);
     setRowValue(row, indexes, "photoUrl", await getPublicImageUrls(item));
-    setRowValue(row, indexes, "condition", profile.condition);
-    setRowValue(row, indexes, "description", item.description || "");
+    setRowValue(row, indexes, "condition", profile.type === "Wristwatch" ? WATCH_EXPORT_CONDITIONS[item.watch_details.condition] : profile.condition);
+    const watchLabels = { name: "Name", brand: "Brand", model: "Model / reference", department: "Department", materials: "Materials by component", modifications: "Modifications / customizations" };
+    const description = profile.type === "Wristwatch" ? [
+      String(item.description || "").replace(/\n*Watch details:\n[\s\S]*$/, "").trim(),
+      "Watch details:\n" + Object.entries(watchLabels).filter(([key]) => item.watch_details[key]).map(([key, label]) => `${label}: ${item.watch_details[key]}`).join("\n"),
+    ].filter(Boolean).join("\n\n") : item.description || "";
+    setRowValue(row, indexes, "description", description);
     setRowValue(row, indexes, "format", "FixedPrice");
     setRowValue(row, indexes, "duration", "GTC");
     setRowValue(row, indexes, "location", "Miami, FL");
     setRowValue(row, indexes, "shippingProfile", profile.shippingProfile);
     setRowValue(row, indexes, "returnProfile", profile.returnProfile);
     setRowValue(row, indexes, "paymentProfile", profile.paymentProfile);
-    setRowValue(row, indexes, "brand", "Unbranded");
-    setRowValue(row, indexes, "stone", "Unknown");
-    setRowValue(row, indexes, "metal", "Fine Silver");
-    setRowValue(row, indexes, "purity", "925");
-    setRowValue(row, indexes, "style", profile.style);
+    if (profile.type === "Wristwatch") {
+      setRowValue(row, indexes, "brand", item.watch_details.brand);
+      setRowValue(row, indexes, "department", item.watch_details.department);
+      setRowValue(row, indexes, "reference", item.watch_details.model || "");
+    } else {
+      setRowValue(row, indexes, "brand", "Unbranded");
+      setRowValue(row, indexes, "stone", "Unknown");
+      setRowValue(row, indexes, "metal", "Fine Silver");
+      setRowValue(row, indexes, "purity", "925");
+      setRowValue(row, indexes, "style", profile.style);
+    }
     setRowValue(row, indexes, "type", profile.type);
     outputRows.push(row);
     reportProgress(options, {
@@ -349,6 +389,12 @@ window.exportToEbayXLSX = async function (items, options = {}) {
 
   const exportType = typeof options === "string" ? options : options.exportType;
   const profile = getSelectedExportProfile(exportType);
+  validateEbayExportItems(items, profile);
+  if (profile.type === "Wristwatch") {
+    const { data, error } = await supabase.functions.invoke("ebay-inventory-sync", { body: { action: "watchRequirements" } });
+    if (error || !data?.ok) throw new Error("Could not verify eBay watch requirements. Try again before exporting.");
+    validateEbayExportItems(items, profile, data);
+  }
   reportProgress(options, {
     title: "Loading eBay template",
     detail: `Opening ${profile.templateUrl}...`,
@@ -358,7 +404,9 @@ window.exportToEbayXLSX = async function (items, options = {}) {
     visible: true
   });
   const workbook = await loadEbayTemplateWorkbook(profile.templateUrl);
-  const sheet = workbook.Sheets[LISTINGS_SHEET_NAME];
+  const sheet = profile.type === "Wristwatch"
+    ? XLSX.utils.aoa_to_sheet([[], [], [], Object.entries(requiredHeaders).filter(([key]) => !["stone", "metal", "purity", "style"].includes(key)).map(([, header]) => header)])
+    : workbook.Sheets[LISTINGS_SHEET_NAME];
 
   if (!sheet) {
     throw new Error(`The template is missing a ${LISTINGS_SHEET_NAME} sheet.`);

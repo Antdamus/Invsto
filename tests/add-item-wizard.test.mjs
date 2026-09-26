@@ -162,6 +162,9 @@ test("watch details survive back, refresh, price changes and reach the save payl
   const page = await pageFor(t);
   await page.locator('[name="item-kind"][value="watch"]').check();
   await page.locator("#watch-name").fill("Rolex Datejust");
+  await page.locator("#watch-brand").fill("Rolex");
+  await page.locator("#watch-department").selectOption("Unisex Adults");
+  await page.locator("#watch-condition").selectOption("USED_EXCELLENT");
   await page.locator("#watch-model").fill("126233");
   await page.locator("#watch-materials").fill("Steel case; 18K gold bezel; steel and gold bracelet");
   await page.locator("#watch-modifications").fill("Aftermarket diamond bezel");
@@ -174,6 +177,7 @@ test("watch details survive back, refresh, price changes and reach the save payl
   assert.equal(await page.locator("#auto-cost-checkbox").isDisabled(), true);
   await page.locator("#cost").fill("4000");
   await page.locator("#sale-price").fill("6500");
+  await page.locator("#minimum-sale-price").fill("4700");
   await page.locator("#cost").fill("4100");
   assert.equal(await page.locator("#sale-price").inputValue(), "6500");
   await page.waitForFunction(() => JSON.parse(localStorage.getItem("test-draft") || "null")?.payload?.mainFields?.cost === "4100");
@@ -197,6 +201,11 @@ test("watch details survive back, refresh, price changes and reach the save payl
   assert.equal(saved.price_per_weight, null);
   assert.equal(saved.weight, null);
   assert.equal(saved.sale_price, 6500);
+  assert.equal(saved.minimum_sale_price, 4700);
+  assert.equal(saved.ebay_condition, "USED_EXCELLENT");
+  assert.deepEqual(saved.ebay_aspects.Brand, ["Rolex"]);
+  assert.deepEqual(saved.ebay_aspects.Department, ["Unisex Adults"]);
+  assert.deepEqual(saved.ebay_aspects["Reference Number"], ["126233"]);
   assert.equal(saved.ebay_category_id, "31387");
   assert.equal(saved.ebay_aspects.Metal, undefined);
   await page.evaluate(() => { document.getElementById("add-item-form").reset(); document.dispatchEvent(new Event("add-item-form:reset")); });
@@ -407,6 +416,7 @@ test("coin intake survives refresh and saves year, condition and fineness with d
   await next(page);
   await page.locator("#cost").fill("40");
   await page.locator("#sale-price").fill("90");
+  await page.locator("#minimum-sale-price").fill("55");
   await page.locator("#cost").fill("45");
   assert.equal(await page.locator("#sale-price").inputValue(), "90");
   assert.equal(await page.locator("#auto-cost-checkbox").isDisabled(), true);
@@ -427,6 +437,7 @@ test("coin intake survives refresh and saves year, condition and fineness with d
   assert.equal(saved.weight, null);
   assert.equal(saved.price_per_weight, null);
   assert.equal(saved.sale_price, 90);
+  assert.equal(saved.minimum_sale_price, 55);
   assert.equal(saved.stone_type, null);
   assert.equal(saved.ebay_sync_enabled, false);
   assert.equal(saved.ebay_condition, null);
@@ -635,4 +646,39 @@ test('phone dialogs and dropdowns adapt to a keyboard-sized visible viewport', a
     const button = document.querySelector('#btn-submit-location'), r = button.getBoundingClientRect();
     return r.bottom <= 340 && button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
   }), true, 'entire dialog can scroll to its action buttons');
+});
+
+
+test("jewelry minimum and editable retail stay distinct, validate and restore from draft", async (t) => {
+  const page = await pageFor(t);
+  await page.locator("#weight").fill("10");
+  await category(page, "Bracelets");
+  await next(page); await next(page);
+  await page.locator("#title").fill("Silver bracelet");
+  await page.locator("#description").fill("Sterling bracelet");
+  await next(page);
+  await page.locator("#sale-price").fill("300");
+  await page.locator("#minimum-sale-price").fill("400");
+  await next(page);
+  assert.equal(await step(page), "pricing");
+  assert.match(await page.locator("#item-step-error").innerText(), /no|between/);
+  await page.locator("#minimum-sale-price").fill("150");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator("#minimum-sale-price").scrollIntoViewIfNeeded();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.screenshot({ path: new URL("test-results/add-item-prices-mobile.png", root).pathname.replace(/^\/(\w:)/, "$1") });
+  await page.setViewportSize({ width: 1365, height: 1000 });
+  await page.locator("#cost").fill("100");
+  assert.equal(await page.locator("#sale-price").inputValue(), "300");
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("test-draft") || "null")?.payload?.mainFields?.minimumSalePrice === "150");
+  await page.reload();
+  await page.waitForFunction(() => document.getElementById("minimum-sale-price").value === "150");
+  await page.locator("#cost").fill("110");
+  assert.equal(await page.locator("#sale-price").inputValue(), "300");
+  for (let i=0; i<4; i++) await next(page);
+  assert.match(await page.locator("#item-review-summary").innerText(), /Minimum sale.*[\s\S]*150/);
+  await page.locator('button[type="submit"]').first().click();
+  await page.waitForFunction(() => window.testWrites.length === 1);
+  assert.equal(await page.evaluate(() => window.testWrites[0].minimum_sale_price), 150);
+  assert.equal(await page.evaluate(() => window.testWrites[0].sale_price), 300);
 });

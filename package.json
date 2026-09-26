@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "test:inventory-prices": "node --test tests/inventory-prices-ebay.test.mjs",
     "test:add-item": "node --test tests/add-item-wizard.test.mjs tests/add-item-watch-copy.test.mjs",
     "test:ebay-notification": "node --test tests/email-triage/ebay-message-notification.test.mjs tests/email-triage/ebay-notification-admin.test.mjs",
     "test:ebay-notification:live": "node tests/email-triage/ebay-message-notification-live-probe.mjs",

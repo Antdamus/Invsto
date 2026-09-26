@@ -616,6 +616,7 @@
         pricePerWeight: getInputValueById("price-per-weight"),
         cost: getInputValueById("cost"),
         salePrice: getInputValueById("sale-price"),
+        minimumSalePrice: getInputValueById("minimum-sale-price"),
         distributorName: getInputValueById("distributor-name"),
         distributorPhone: getInputValueById("distributor-phone"),
         distributorNotes: getInputValueById("distributor-notes"),
@@ -645,6 +646,7 @@
       main.pricePerWeight,
       main.cost,
       main.salePrice,
+      main.minimumSalePrice,
       main.distributorName,
       main.distributorPhone,
       main.distributorNotes,
@@ -835,6 +837,7 @@
     setInputValueById("price-per-weight", main.pricePerWeight, { dispatch: false });
     setInputValueById("cost", main.cost, { dispatch: false });
     setInputValueById("sale-price", main.salePrice, { dispatch: false });
+    setInputValueById("minimum-sale-price", main.minimumSalePrice, { dispatch: false });
     setInputValueById("distributor-name", main.distributorName, { dispatch: false });
     setInputValueById("distributor-phone", main.distributorPhone, { dispatch: false });
     setInputValueById("distributor-notes", main.distributorNotes, { dispatch: false });
@@ -3393,7 +3396,7 @@
     const payload = collectAssistedWorkflowGenerationInputs(elements);
     const { existingTitle, existingDescription, qrType, watchDetails, ...inputs } = payload;
     return JSON.stringify({ ...inputs, watchDetails: watchDetails ? Object.fromEntries(
-      ["name", "model", "materials", "modifications"].map((key) => [key, watchDetails[key] || ""])
+      ["name", "brand", "model", "department", "condition", "materials", "modifications"].map((key) => [key, watchDetails[key] || ""])
     ) : null });
   }
 
@@ -3834,11 +3837,15 @@
       "price-per-weight",
       "cost",
       "sale-price",
+      "minimum-sale-price",
       "distributor-name",
       "distributor-phone",
       "distributor-notes",
       "auto-cost-checkbox",
       "watch-name",
+      "watch-brand",
+      "watch-department",
+      "watch-condition",
       "watch-model",
       "watch-materials",
       "watch-modifications",

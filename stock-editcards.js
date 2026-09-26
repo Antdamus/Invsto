@@ -17,7 +17,7 @@ window.editCardModule = (function () {
         }
         return canViewSensitiveStockFields()
             ? "*"
-            : "id, title, description, weight, stone_type, item_length, sale_price, barcode, qr_code, photo_url, created_at, dymo_label_url, photos, qr_type, categories, stock, stock_batch_size_update, ebay_sync_enabled, ebay_category_id, added_by, added_by_email";
+            : "id, title, description, weight, stone_type, item_length, sale_price, minimum_sale_price, watch_details, coin_details, barcode, qr_code, photo_url, created_at, dymo_label_url, photos, qr_type, categories, stock, stock_batch_size_update, ebay_sync_enabled, ebay_category_id, added_by, added_by_email";
     }
 
     function setEditFieldVisible(fieldId, visible) {
@@ -46,6 +46,7 @@ window.editCardModule = (function () {
             "edit-qr",
             "edit-cost",
             "edit-sale-price",
+            "edit-minimum-sale-price",
             "edit-price-per-weight",
             "edit-stock-batch",
         ].forEach((fieldId) => setEditFieldVisible(fieldId, canSensitive));
@@ -306,7 +307,10 @@ window.editCardModule = (function () {
         document.getElementById("edit-stone-type").value = item.stone_type || extractStoneFromDescription(item.description) || "";
         document.getElementById("edit-length").value = item.item_length || extractLengthFromDescription(item.description) || "";
         document.getElementById("edit-cost").value = item.cost || "";
-        document.getElementById("edit-sale-price").value = item.sale_price || "";
+        document.getElementById("edit-sale-price").value = item.sale_price ?? "";
+        document.getElementById("edit-minimum-sale-price").value = item.minimum_sale_price ?? "";
+        document.getElementById("edit-watch-details").hidden = !canViewSensitiveStockFields() || !item.watch_details;
+        for (const key of ["brand", "model", "department", "condition"]) document.getElementById(`edit-watch-${key}`).value = item.watch_details?.[key] || "";
         document.getElementById("edit-price-per-weight").value = item.price_per_weight || "";
         document.getElementById("edit-stock-batch").value = item.stock_batch_size_update || "";
         document.getElementById("edit-photos").value = ""; // clear file input
@@ -670,6 +674,12 @@ window.editCardModule = (function () {
         const itemLength = document.getElementById("edit-length")?.value?.trim() || "";
         const cost = parseFloat(document.getElementById("edit-cost").value) || 0;
         const salePrice = parseFloat(document.getElementById("edit-sale-price").value) || 0;
+        const minimumText = document.getElementById("edit-minimum-sale-price").value.trim();
+        const minimumSalePrice = minimumText === "" ? null : Number(minimumText);
+        if (canViewSensitiveStockFields() && minimumSalePrice !== null && (!Number.isFinite(minimumSalePrice) || minimumSalePrice < 0 || minimumSalePrice > salePrice)) {
+            alert("Minimum sale price must be between zero and retail price.");
+            return;
+        }
         const pricePerWeight = parseFloat(document.getElementById("edit-price-per-weight").value) || 0;
         const stockBatch = parseInt(document.getElementById("edit-stock-batch").value, 10) || 0;
         const photosInput = document.getElementById("edit-photos");
@@ -820,10 +830,19 @@ window.editCardModule = (function () {
         console.log(`Keeping removed photo file for recovery: ${oldPath}`);
         }
 
+        const watchDetails = canViewSensitiveStockFields() && existingItem.watch_details ? {
+            ...existingItem.watch_details,
+            ...Object.fromEntries(["brand", "model", "department", "condition"].map(key => [key, document.getElementById(`edit-watch-${key}`).value.trim()]))
+        } : null;
+        const watchLabels = { name: "Name", brand: "Brand", model: "Model / reference", department: "Department", materials: "Materials by component", modifications: "Modifications / customizations" };
+        const savedDescription = watchDetails ? [
+            description.replace(/\n*Watch details:\n[\s\S]*$/, "").trim(),
+            "Watch details:\n" + Object.entries(watchLabels).filter(([key]) => watchDetails[key]).map(([key, label]) => `${label}: ${watchDetails[key]}`).join("\n"),
+        ].filter(Boolean).join("\n\n") : description;
         const updates = {
             _item_id: currentItemId,
             _title: title,
-            _description: description,
+            _description: savedDescription,
             _weight: weight,
             _stone_type: stoneType,
             _item_length: itemLength,
@@ -831,6 +850,8 @@ window.editCardModule = (function () {
             _qr_code: document.getElementById("edit-qr").value.trim() || null,
             _cost: cost,
             _sale_price: salePrice,
+            _minimum_sale_price: minimumSalePrice,
+            _watch_details: watchDetails,
             _price_per_weight: pricePerWeight,
             _stock_batch_size_update: stockBatch,
             _dymo_label_url: newDymoLabelUrl,
@@ -839,7 +860,7 @@ window.editCardModule = (function () {
             _signed_by_email: getAuthenticatedStockUser()?.email || null,
         };
 
-        const { error } = await supabase.rpc("update_certified_item_details", updates);
+        const { error } = await supabase.rpc("update_certified_item_details_v2", updates);
 
         if (error) {
             console.error("Error updating item:", error);

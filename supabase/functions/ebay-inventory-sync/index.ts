@@ -23,6 +23,8 @@ type ItemRow = {
   title: string;
   description: string | null;
   sale_price: number | null;
+  watch_details?: JsonRecord | null;
+  coin_details?: JsonRecord | null;
   barcode: string | null;
   photos: string[] | null;
   photo_url: string | null;
@@ -87,6 +89,8 @@ const EBAY_CONDITION_VALUES = new Set([
   "VERY_GOOD_REFURBISHED",
   "GOOD_REFURBISHED",
   "SELLER_REFURBISHED",
+  "PRE_OWNED_EXCELLENT",
+  "PRE_OWNED_FAIR",
   "USED_EXCELLENT",
   "USED_VERY_GOOD",
   "USED_GOOD",
@@ -169,6 +173,7 @@ function collectPhotoPaths(item: ItemRow): string[] {
 }
 
 function chooseCategory(item: ItemRow, settings: SyncSettings): { categoryId: string; source: "override" | "rule" | "default" } {
+  if (item.watch_details) return { categoryId: "31387", source: "override" };
   const override = String(item.ebay_category_id || "").trim();
   if (override) return { categoryId: override, source: "override" };
 
@@ -281,7 +286,76 @@ function inferColor(item: ItemRow): string | null {
   return null;
 }
 
+function isWatch(item: ItemRow): boolean {
+  return Boolean(item.watch_details || item.ebay_category_id === "31387");
+}
+
+function watchAspects(item: ItemRow): Record<string, string[]> {
+  const watch = item.watch_details || {};
+  const aspects: Record<string, string[]> = { Type: ["Wristwatch"] };
+  // Only explicit watch facts: old records may contain automatically inferred jewelry aspects.
+  for (const [key, name] of [["brand", "Brand"], ["department", "Department"], ["model", "Reference Number"]]) {
+    const value = firstText(watch[key]);
+    if (value) aspects[name] = [value];
+  }
+  return aspects;
+}
+
+function watchDescription(item: ItemRow): string {
+  if (!isWatch(item)) return item.description || item.title || "";
+  const watch = item.watch_details || {};
+  const labels: Record<string, string> = { name: "Name", brand: "Brand", model: "Model / reference", department: "Department", materials: "Materials by component", modifications: "Modifications / customizations" };
+  const details = Object.entries(labels).flatMap(([key, label]) => firstText(watch[key]) ? [`${label}: ${firstText(watch[key])}`] : []);
+  const description = String(item.description || "").replace(/\n*Watch details:\n[\s\S]*$/, "").trim();
+  return [description, details.length ? `Watch details:\n${details.join("\n")}` : ""].filter(Boolean).join("\n\n");
+}
+
+const WATCH_CONDITION_IDS: Record<string, string> = { NEW: "1000", NEW_OTHER: "1500", NEW_WITH_DEFECTS: "1750", SELLER_REFURBISHED: "2500", PRE_OWNED_EXCELLENT: "2990", USED_EXCELLENT: "3000", PRE_OWNED_FAIR: "3010", FOR_PARTS_OR_NOT_WORKING: "7000" };
+type WatchMetadata = { aspects: any[]; conditions: any[] };
+const watchMetadataCache = new Map<string, { until: number; metadata: WatchMetadata }>();
+
+async function loadWatchMetadata(marketplace: string): Promise<WatchMetadata> {
+  const cached = watchMetadataCache.get(marketplace);
+  if (cached && cached.until > Date.now()) return cached.metadata;
+  if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET) throw new Error("eBay watch requirements unavailable: missing app credentials.");
+  const tokenResponse = await fetch(`${EBAY_API_BASE}/identity/v1/oauth2/token`, {
+    method: "POST",
+    headers: { Authorization: `Basic ${btoa(`${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`)}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "client_credentials", scope: "https://api.ebay.com/oauth/api_scope" }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!tokenResponse.ok) throw new Error(`eBay watch metadata authentication failed (${tokenResponse.status}).`);
+  const { access_token: token } = await tokenResponse.json();
+  if (!token) throw new Error("eBay watch metadata token is missing.");
+  const tree = await ebayRequest(token, "GET", `/commerce/taxonomy/v1/get_default_category_tree_id?marketplace_id=${encodeURIComponent(marketplace)}`);
+  if (!tree.categoryTreeId) throw new Error("eBay category tree is unavailable.");
+  const [taxonomy, policies] = await Promise.all([
+    ebayRequest(token, "GET", `/commerce/taxonomy/v1/category_tree/${encodeURIComponent(tree.categoryTreeId)}/get_item_aspects_for_category?category_id=31387`),
+    ebayRequest(token, "GET", `/sell/metadata/v1/marketplace/${encodeURIComponent(marketplace)}/get_item_condition_policies?filter=${encodeURIComponent("categoryIds:{31387}")}`),
+  ]);
+  const conditions = policies.itemConditionPolicies?.find((policy: any) => String(policy.categoryId) === "31387")?.itemConditions;
+  if (!Array.isArray(taxonomy.aspects) || !Array.isArray(conditions) || !conditions.length) throw new Error("eBay returned incomplete watch requirements. Try again before syncing.");
+  const metadata = { aspects: taxonomy.aspects, conditions };
+  watchMetadataCache.set(marketplace, { until: Date.now() + 3600000, metadata });
+  return metadata;
+}
+
+function validateWatchMetadata(item: ItemRow, aspects: Record<string, string[]>, metadata: WatchMetadata): string[] {
+  const reasons: string[] = [];
+  for (const aspect of metadata.aspects) {
+    const name = aspect.localizedAspectName;
+    const value = firstText(aspects[name]);
+    if (!value && aspect.aspectConstraint?.aspectRequired) reasons.push(`missing ${name}`);
+    if (value && aspect.aspectConstraint?.aspectMode === "SELECTION_ONLY" && !aspect.aspectValues?.some((entry: any) => entry.localizedValue?.toLowerCase() === value.toLowerCase())) reasons.push(`invalid ${name} for eBay watches`);
+  }
+  const condition = String(item.watch_details?.condition || "");
+  const id = WATCH_CONDITION_IDS[condition];
+  if (!id || !metadata.conditions.some((entry: any) => String(entry.conditionId) === id)) reasons.push("choose a supported watch condition in item details");
+  return reasons;
+}
+
 function buildAspects(item: ItemRow, categoryId: string): Record<string, string[]> {
+  if (isWatch(item)) return watchAspects(item);
   const aspects: Record<string, string[]> = {
     Brand: ["Unbranded"],
     Type: [inferJewelryType(item, categoryId)],
@@ -319,12 +393,14 @@ function collectPublishBlockingReasons(item: ItemRow, price: number, quantity: n
   if (!String(item.title || "").trim()) reasons.push("missing title");
   if (!String(item.description || "").trim()) reasons.push("missing description");
   if (!String(item.barcode || "").trim()) reasons.push("missing SKU/barcode");
-  if (price <= 0) reasons.push("missing sale price");
+  if (!Number.isFinite(price) || price <= 0) reasons.push("missing retail price");
+  if (item.coin_details) reasons.push("coin publishing requires coin-specific category and grading support");
+  if (isWatch(item) && !WATCH_CONDITION_IDS[String(item.watch_details?.condition || "")]) reasons.push("missing or unsupported watch condition");
   if (quantity <= 0) reasons.push("quantity is 0");
   if (!categoryId || categorySource === "default") reasons.push("missing eBay category");
   if (!imageReady) reasons.push("missing eBay image");
 
-  for (const aspectName of ["Brand", "Type", "Style", "Main Stone", "Metal", "Metal Purity"]) {
+  for (const aspectName of (isWatch(item) ? ["Brand", "Department", "Type"] : ["Brand", "Type", "Style", "Main Stone", "Metal", "Metal Purity"])) {
     if (!firstText(aspects[aspectName])) reasons.push(`missing ${aspectName}`);
   }
 
@@ -474,7 +550,7 @@ async function prepareItem(
   item: ItemRow,
   quantity: number,
   settings: SyncSettings,
-  options: { copyMissingPhotos: boolean },
+  options: { copyMissingPhotos: boolean; watchMetadata?: WatchMetadata; watchMetadataError?: string },
 ): Promise<PreparedItem> {
   const warnings: string[] = [];
   const sku = normalizeSku(item.barcode || "");
@@ -492,15 +568,20 @@ async function prepareItem(
   }
   const price = Number(item.sale_price || 0);
   if (price <= 0) warnings.push("Item has no sale price.");
-  const rawCondition = item.ebay_condition || settings.default_condition;
-  const condition = normalizeEbayCondition(rawCondition);
-  if (condition !== rawCondition) warnings.push(`Unsupported eBay condition "${rawCondition || "blank"}"; using NEW.`);
+  const rawCondition = isWatch(item) ? String(item.watch_details?.condition || "") : item.ebay_condition || settings.default_condition;
+  const condition = isWatch(item) ? rawCondition : normalizeEbayCondition(rawCondition);
+  if (!isWatch(item) && condition !== rawCondition) warnings.push(`Unsupported eBay condition "${rawCondition || "blank"}"; using NEW.`);
   const aspects = buildAspects(item, categoryId);
   const blockingReasons = collectPublishBlockingReasons(item, price, quantity, imageReady, categoryId, categoryChoice.source, aspects);
 
+  if (isWatch(item)) {
+    if (options.watchMetadata) blockingReasons.push(...validateWatchMetadata(item, aspects, options.watchMetadata));
+    else blockingReasons.push(options.watchMetadataError || "eBay watch requirements could not be verified");
+  }
+
   const product: JsonRecord = {
     title: String(item.title || sku).slice(0, 80),
-    description: item.description || item.title || sku,
+    description: watchDescription(item) || sku,
     aspects,
   };
   if (imageUrls.length) product.imageUrls = imageUrls;
@@ -530,7 +611,7 @@ async function prepareItem(
         value: toMoney(price),
       },
     },
-    listingDescription: item.description || item.title || sku,
+    listingDescription: watchDescription(item) || sku,
     listingPolicies: {
       fulfillmentPolicyId: settings.fulfillment_policy_id,
       paymentPolicyId: settings.payment_policy_id,
@@ -567,7 +648,7 @@ async function loadItems(supabase: any, itemIds: string[], limit: number, dirtyO
 
   let query = supabase
     .from("item_types")
-    .select("id,title,description,sale_price,barcode,photos,photo_url,categories,weight,metal,purity_basis_points,stone_type,item_length,ebay_sync_enabled,ebay_category_id,ebay_condition,ebay_aspects,deleted_at")
+    .select("id,title,description,sale_price,watch_details,coin_details,barcode,photos,photo_url,categories,weight,metal,purity_basis_points,stone_type,item_length,ebay_sync_enabled,ebay_category_id,ebay_condition,ebay_aspects,deleted_at")
     .is("deleted_at", null)
     .neq("ebay_sync_enabled", false)
     .not("barcode", "is", null)
@@ -734,6 +815,13 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const settings = await loadSettings(supabase);
+    if (body.action === "watchRequirements") {
+      const metadata = await loadWatchMetadata(settings.marketplace_id);
+      return jsonResponse(200, { ok: true, categoryId: "31387", marketplace: settings.marketplace_id,
+        requiredAspects: metadata.aspects.filter((aspect: any) => aspect.aspectConstraint?.aspectRequired).map((aspect: any) => aspect.localizedAspectName),
+        departments: metadata.aspects.find((aspect: any) => aspect.localizedAspectName === "Department")?.aspectValues?.map((entry: any) => entry.localizedValue) || [],
+        conditions: metadata.conditions.map((condition: any) => ({ id: condition.conditionId, name: condition.conditionDescription })) });
+    }
     const publishAllowed = Boolean(publishRequested && settings.publish_enabled && EBAY_SYNC_ALLOW_PUBLISH);
 
     if (!dryRun && !settings.enabled) {
@@ -767,6 +855,12 @@ Deno.serve(async (req) => {
     runId = run.id;
 
     const items = await loadItems(supabase, itemIds, limit, dirtyOnly);
+    let watchMetadata: WatchMetadata | undefined;
+    let watchMetadataError: string | undefined;
+    if (items.some(isWatch)) {
+      try { watchMetadata = await loadWatchMetadata(settings.marketplace_id); }
+      catch (error) { watchMetadataError = error instanceof Error ? error.message : "Could not verify eBay watch requirements."; }
+    }
     const links = await loadEbayLinks(supabase, items.map((item) => item.id));
     const linkByItem = new Map<string, any>(links.map((link: any) => [link.item_type_id, link]));
     const prepared: PreparedItem[] = [];
@@ -778,7 +872,7 @@ Deno.serve(async (req) => {
 
     for (const item of items) {
       try {
-        const next = await prepareItem(supabase, item, item.quantity, settings, { copyMissingPhotos: !dryRun });
+        const next = await prepareItem(supabase, item, item.quantity, settings, { copyMissingPhotos: !dryRun, watchMetadata, watchMetadataError });
         prepared.push(next);
         if (dryRun) {
           const status = next.quantity <= 0 ? "out_of_stock" : next.offerPayload ? "ready" : "inventory_only";
@@ -812,6 +906,9 @@ Deno.serve(async (req) => {
             warnings,
           });
         } else {
+          if (item.coin_details || (isWatch(item) && next.blockingReasons.some(reason => reason !== "quantity is 0"))) {
+            throw new Error(`Item is not ready for eBay: ${[...new Set(next.blockingReasons)].join(", ")}`);
+          }
           const link = linkByItem.get(item.id);
           const isUnchanged = Boolean(
             skipUnchanged &&
@@ -884,11 +981,18 @@ Deno.serve(async (req) => {
     if (!dryRun && ebayWork.length) {
       const token = await getEbayAccessToken();
 
+      const inventoryErrors = new Map<string, string>();
       for (let index = 0; index < ebayWork.length; index += 25) {
         const chunk = ebayWork.slice(index, index + 25);
-        await ebayRequest(token, "POST", "/sell/inventory/v1/bulk_create_or_replace_inventory_item", {
+        const response = await ebayRequest(token, "POST", "/sell/inventory/v1/bulk_create_or_replace_inventory_item", {
           requests: chunk.map((entry) => entry.inventoryPayload),
         });
+        for (const entry of chunk) {
+          const result = response.responses?.find((result: any) => result.sku === entry.sku);
+          if (!result || Number(result.statusCode) < 200 || Number(result.statusCode) >= 300 || !Number.isFinite(Number(result.statusCode))) {
+            inventoryErrors.set(entry.sku, result?.errors?.map((error: any) => error.message).filter(Boolean).join("; ") || "eBay did not accept the inventory record.");
+          }
+        }
       }
 
       for (const entry of ebayWork) {
@@ -896,6 +1000,7 @@ Deno.serve(async (req) => {
         const status = entry.quantity <= 0 ? "out_of_stock" : "synced";
 
         try {
+          if (inventoryErrors.has(entry.sku)) throw new Error(inventoryErrors.get(entry.sku));
           let offerId = existingLink?.offer_id ? String(existingLink.offer_id) : "";
           let listingId = existingLink?.listing_id ? String(existingLink.listing_id) : "";
           let matchedExistingOffer: JsonRecord | null = null;

@@ -18,7 +18,7 @@
   const back = document.getElementById("item-step-back");
   const next = document.getElementById("item-step-next");
   const error = document.getElementById("item-step-error");
-  const watchKeys = ["name", "model", "materials", "modifications"];
+  const watchKeys = ["name", "brand", "model", "department", "condition", "materials", "modifications"];
   const coinLabels = { name: "Name / series", year: "Year / date", country: "Issuing country", denomination: "Denomination", mint: "Mint / mint mark", metal: "Metal", fineness: "Purity (parts per 1,000)", condition: "Reported condition", variety: "Variety / reference", finish: "Strike / finish", fineMetalContent: "Fine metal content", composition: "Composition details", gradingStatus: "Grading status", grade: "Grade as stated", gradingService: "Grading service", certNumber: "Certification number", notes: "Condition notes / alterations" };
   const coinKeys = Object.keys(coinLabels);
   let current = 0;
@@ -57,6 +57,8 @@
     const details = [
       "Watch details:",
       `Name: ${watch.name}`,
+      watch.brand && `Brand: ${watch.brand}`,
+      watch.department && `Department: ${watch.department}`,
       watch.model && `Model / reference: ${watch.model}`,
       watch.materials && `Materials by component: ${watch.materials}`,
       watch.modifications && `Modifications / customizations: ${watch.modifications}`,
@@ -91,9 +93,9 @@
     autoCost.disabled = directPricing;
     document.getElementById("price-per-weight").disabled = directPricing;
     const salePrice = document.getElementById("sale-price");
-    salePrice.readOnly = !directPricing;
-    salePrice.required = directPricing;
-    salePrice.placeholder = directPricing ? "Enter sale price ($)" : "Sale Price (auto)";
+    salePrice.readOnly = false;
+    salePrice.required = true;
+    salePrice.placeholder = "Enter retail price ($)";
     salePrice.inputMode = "decimal";
     document.dispatchEvent(new CustomEvent("add-item:mode-change", { detail: { isWatch: watch, isCoin: coin, restoring } }));
     renderReview();
@@ -124,7 +126,8 @@
       ["Weight", value("weight") ? `${value("weight")} g` : "Not entered"],
       ["Photos", `${selectedPhotos.length} selected`],
       ["Cost", value("cost") ? `$${value("cost")}` : "Not entered"],
-      ["Sale price", value("sale-price") ? `$${value("sale-price")}` : "Not entered"],
+      ["Minimum sale / break-even", value("minimum-sale-price") ? `$${value("minimum-sale-price")}` : "Not set"],
+      ["Retail price", value("sale-price") ? `$${value("sale-price")}` : "Not entered"],
       ["Barcode", value("scanned-barcode") || "Generated when saving"],
       ["Stock", document.getElementById("assignment-preview-box").classList.contains("hidden")
         ? "No placement assigned" : ["assignment-location", "assignment-quantity"].map((id) => document.getElementById(id).textContent).join(" · ")],
@@ -197,9 +200,14 @@
     if (index === 0 && !value("category")) {
       return fail(index, document.getElementById("category-dropdown-toggle"), "Select or create an item category.");
     }
-    if (index === 3 && usesDirectPricing()) {
+    if (index === 3) {
       const price = Number(value("sale-price").replace(/,/g, ""));
-      if (!Number.isFinite(price) || price <= 0) return fail(index, document.getElementById("sale-price"), "Enter a sale price greater than zero.");
+      if (!Number.isFinite(price) || price <= 0) return fail(index, document.getElementById("sale-price"), "Enter a retail price greater than zero.");
+    }
+    if (index === 3 && value("minimum-sale-price")) {
+      const minimum = Number(value("minimum-sale-price"));
+      const retail = Number(value("sale-price").replace(/,/g, ""));
+      if (!Number.isFinite(minimum) || minimum < 0 || minimum > retail) return fail(index, document.getElementById("minimum-sale-price"), "Minimum sale price must be between zero and retail price.");
     }
     if (index === 6 && document.getElementById("ebay-sync-enabled").checked && !value("ebay-category-id")) {
       return fail(index, document.getElementById("ebay-category-id"), "Choose an eBay category or turn off eBay sync.");
@@ -267,6 +275,7 @@
 
   document.addEventListener("add-item-form:reset", () => {
     jewelryAutoCost = true;
+    delete document.getElementById("sale-price").dataset.manualRetail;
     furthest = 0;
     delete document.getElementById("title").dataset.watchTitle;
     delete document.getElementById("title").dataset.coinTitle;
@@ -287,6 +296,7 @@
       itemKind: isWatch() ? "watch" : isCoin() ? "coin" : "jewelry",
       coinDetails: Object.fromEntries(coinKeys.map((key) => [key, value(`coin-${key}`)])),
       watchDetails: Object.fromEntries(watchKeys.map((key) => [key, value(`watch-${key}`)])),
+      manualRetail: document.getElementById("sale-price").dataset.manualRetail === "true",
       autoCost: document.getElementById("auto-cost-checkbox").checked,
       autoWatchTitle: document.getElementById("title").dataset.watchTitle || "",
       autoCoinTitle: document.getElementById("title").dataset.coinTitle || "",
@@ -299,6 +309,7 @@
       coinKeys.forEach((key) => { document.getElementById(`coin-${key}`).value = draft.coinDetails?.[key] || (key === "gradingStatus" ? "ungraded" : ""); });
       document.getElementById("title").dataset.watchTitle = draft.autoWatchTitle || "";
       document.getElementById("title").dataset.coinTitle = draft.autoCoinTitle || "";
+      document.getElementById("sale-price").dataset.manualRetail = String(Boolean(draft.manualRetail));
       jewelryAutoCost = (draft.jewelryAutoCost ?? draft.autoCost) !== false;
       updateMode({ restoring: true });
       furthest = Math.max(0, Math.min(Number(draft.furthest) || 0, steps.length - 1));
