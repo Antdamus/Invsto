@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, mkdir } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { test, before, after } from 'node:test';
-import { chromium } from '@playwright/test';
+import { chromium, webkit } from '@playwright/test';
 
 const root = new URL('../', import.meta.url);
 let server, browser, origin;
@@ -13,13 +13,13 @@ before(async () => {
     try {
       let content = await readFile(new URL(name, root));
       if (name.endsWith('.html')) content = content.toString().replace(/<script\b[\s\S]*?<\/script>/gi, tag => tag.includes('src="barcode-scanner.js') ? tag : '');
-      res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html');
+      res.setHeader('Content-Type', name.endsWith('.wasm') ? 'application/wasm' : name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html');
       res.end(content);
     } catch { res.writeHead(404).end(); }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
-  browser = await chromium.launch({ headless: true });
+  browser = await (process.env.INVSTO_SCANNER_BROWSER === 'webkit' ? webkit : chromium).launch({ headless: true });
 });
 after(async () => { await browser?.close(); await new Promise(resolve => server?.close(resolve)); });
 
@@ -28,7 +28,7 @@ async function pageFor(t, name = 'add-inventory.html') {
   page.setDefaultTimeout(10000);
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
-  await page.route('**/*', route => route.request().url().startsWith(origin) ? route.continue() : route.abort());
+  await page.route('**/*', route => [origin, `blob:${origin}`, 'data:'].some(prefix => route.request().url().startsWith(prefix)) ? route.continue() : route.abort());
   await page.goto(`${origin}/${name}`);
   t.after(async () => { await page.close(); assert.deepEqual(errors, []); });
   return page;
@@ -36,7 +36,11 @@ async function pageFor(t, name = 'add-inventory.html') {
 const open = page => page.locator('[data-scan-target="input-to-search-inventory-item"]').click();
 const status = page => page.locator('[data-camera="status"]');
 async function deniedCamera(page) {
-  await page.evaluate(() => { navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Denied', 'NotAllowedError'); }; });
+  await page.evaluate(() => {
+    // Windows WebKit omits getUserMedia; retain photo-decoding coverage there.
+    if (!navigator.mediaDevices) Object.defineProperty(navigator, 'mediaDevices', { value: {}, configurable: true });
+    navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Denied', 'NotAllowedError'); };
+  });
 }
 
 async function fixture(page, format, code) {
@@ -121,21 +125,27 @@ test('real video decoder waits through blank frames, reads a barcode, and stops 
 
 async function fakeCamera(page, deferred = false) {
   await page.evaluate(deferred => {
-    window.cameraStops = 0; window.controlStops = 0; window.cameraCalls = [];
+    window.cameraStops = 0; window.cameraCalls = [];
     navigator.mediaDevices.getUserMedia = async constraints => {
+      window.deliverBarcode = null;
       window.cameraCalls.push(constraints);
       if (deferred) await new Promise(resolve => { window.releasePermission = resolve; });
-      const track = { stop: () => window.cameraStops++, getSettings: () => ({ deviceId: constraints.video.deviceId?.exact || 'rear' }) };
-      return { getTracks: () => [track], getVideoTracks: () => [track] };
+      const canvas = document.createElement('canvas'); canvas.width = 100; canvas.height = 100;
+      canvas.getContext('2d').fillRect(0, 0, 100, 100);
+      const stream = canvas.captureStream(15), track = stream.getVideoTracks()[0];
+      const stop = track.stop.bind(track);
+      const timer = setInterval(() => track.requestFrame(), 60);
+      track.stop = () => { window.cameraStops++; clearInterval(timer); stop(); };
+      track.getSettings = () => ({ deviceId: constraints.video.deviceId?.exact || 'rear' });
+      return stream;
     };
     navigator.mediaDevices.enumerateDevices = async () => ['rear', 'front'].map(deviceId => ({ kind: 'videoinput', deviceId }));
-    window.ZXingBrowser = { BrowserMultiFormatReader: class {
-      async decodeFromStream(stream, video, callback) {
-        const controls = { stop: () => window.controlStops++ };
-        window.deliverBarcode = code => callback({ getText: () => code }, null, controls);
-        return controls;
-      }
-    } };
+    window.ZXingWASM = {
+      prepareZXingModule: async () => {},
+      readBarcodes: () => new Promise(resolve => {
+        window.deliverBarcode = code => resolve([{ text: code, isValid: true, error: '' }]);
+      }),
+    };
   }, deferred);
 }
 
@@ -171,7 +181,7 @@ test('switch camera stops previous stream; duplicate frames result in only one a
   });
   await open(page);
   await page.locator('[data-camera="switchCamera"]').click();
-  await page.waitForFunction(() => window.cameraCalls.length === 2);
+  await page.waitForFunction(() => window.cameraCalls.length === 2 && window.deliverBarcode);
   assert.equal(await page.evaluate(() => window.cameraCalls[1].video.deviceId.exact), 'front');
   assert.ok(await page.evaluate(() => window.cameraStops >= 1));
   await page.evaluate(() => { window.deliverBarcode('000987'); window.deliverBarcode('000987'); });
@@ -199,6 +209,7 @@ test('camera acceptance runs the existing inventory lookup once and increments a
   assert.deepEqual(await page.evaluate(() => window.lookups), ['000123']);
   await page.evaluate(() => { currentBatch['000123'] = { count: 1 }; lastInventoryBarcodeScan.at = 0; });
   await open(page);
+  await page.waitForFunction(() => window.deliverBarcode);
   await page.evaluate(() => window.deliverBarcode('000123'));
   await page.locator('[data-camera="use"]').click();
   await page.waitForFunction(() => window.counts.length === 1);
@@ -341,10 +352,90 @@ test('camera controls keep a barcode dropdown open until the accepted code reach
   await page.locator('[data-scan-target="dropdown-barcode"]').click();
   await page.waitForFunction(() => window.deliverBarcode);
   await page.locator('[data-camera="switchCamera"]').click();
-  await page.waitForFunction(() => window.cameraCalls.length === 2);
+  await page.waitForFunction(() => window.cameraCalls.length === 2 && window.deliverBarcode);
   assert.equal(await page.locator('#barcode-dropdown').isVisible(), true);
   await page.evaluate(() => window.deliverBarcode('TRAY-0042'));
   await page.locator('[data-camera="use"]').click();
   assert.equal(await page.locator('#barcode-dropdown').isVisible(), true);
   assert.equal(await page.locator('#dropdown-barcode').inputValue(), 'TRAY-0042');
+});
+
+test('real portrait video decodes a small rotated QR code', async t => {
+  const page = await pageFor(t);
+  const photo = await fixture(page, 'QR', 'OG-PORTRAIT-00012');
+  await page.evaluate(async url => {
+    const canvas = document.createElement('canvas'); canvas.width = 720; canvas.height = 1280;
+    const ctx = canvas.getContext('2d'); ctx.fillStyle = '#b9b5a6'; ctx.fillRect(0, 0, 720, 1280);
+    const img = new Image(); img.src = url; await img.decode();
+    ctx.translate(340, 550); ctx.rotate(Math.PI / 2 + .07); ctx.drawImage(img, -120, -120, 240, 240);
+    window.portraitStream = canvas.captureStream(15);
+    setInterval(() => window.portraitStream.getVideoTracks()[0].requestFrame(), 70);
+    navigator.mediaDevices.getUserMedia = async () => window.portraitStream;
+    navigator.mediaDevices.enumerateDevices = async () => [];
+  }, `data:image/png;base64,${photo.buffer.toString('base64')}`);
+  await open(page);
+  await page.waitForFunction(() => !document.querySelector('[data-camera="use"]').disabled);
+  assert.equal(await page.locator('[data-camera="value"]').textContent(), 'OG-PORTRAIT-00012');
+  assert.equal(await page.evaluate(() => window.portraitStream.getVideoTracks()[0].readyState), 'ended');
+});
+
+test('unreadable frames produce recovery guidance and invalid checksums never fill the field', async t => {
+  const page = await pageFor(t);
+  await fakeCamera(page);
+  await page.evaluate(() => { window.ZXingWASM.readBarcodes = async () => []; });
+  await open(page);
+  await page.waitForFunction(() => document.querySelector('[data-camera="video"]').readyState >= 2);
+  await page.evaluate(() => { const now = Date.now() + 8000; Date.now = () => now; });
+  await page.waitForFunction(() => document.querySelector('[data-camera="status"]').textContent.includes('Still looking'));
+  await page.evaluate(() => { window.ZXingWASM.readBarcodes = async () => [{ isValid: false, text: 'INVALID-CODE', error: 'Checksum' }]; });
+  await page.waitForFunction(() => document.querySelector('[data-camera="status"]').textContent.includes('not clear enough'));
+  assert.equal(await page.locator('[data-camera="use"]').isDisabled(), true);
+  assert.equal(await page.locator('#input-to-search-inventory-item').inputValue(), '');
+  await page.locator('[data-camera="cancel"]').click();
+  assert.equal(await page.evaluate(() => window.cameraStops), 1);
+});
+
+// Optional local reproduction: the user's private image is never committed or uploaded.
+test('reported phone image decodes as a photo and through a portrait camera stream', {
+  skip: !process.env.INVSTO_SCANNER_REPRO_IMAGE || !process.env.INVSTO_SCANNER_REPRO_CODE,
+}, async t => {
+  const page = await pageFor(t);
+  const buffer = await readFile(process.env.INVSTO_SCANNER_REPRO_IMAGE);
+  const expected = process.env.INVSTO_SCANNER_REPRO_CODE;
+  await deniedCamera(page);
+  await open(page);
+  await page.locator('[data-camera="photo"]').setInputFiles({ name: 'reported-image.jpg', mimeType: 'image/jpeg', buffer });
+  await page.waitForFunction(() => !document.querySelector('[data-camera="use"]').disabled);
+  assert.equal(await page.locator('[data-camera="value"]').textContent(), expected);
+  await page.locator('[data-camera="cancel"]').click();
+  await page.evaluate(async url => {
+    const image = new Image(); image.src = url; await image.decode();
+    const canvas = document.createElement('canvas'); canvas.width = 720; canvas.height = 1280;
+    // Replay the actual portrait camera preview from the supplied screenshot.
+    canvas.getContext('2d').drawImage(image, 177, 366, 235, 417, 0, 0, 720, 1280);
+    window.reportedStream = canvas.captureStream(15);
+    setInterval(() => window.reportedStream.getVideoTracks()[0].requestFrame(), 70);
+    navigator.mediaDevices.getUserMedia = async () => window.reportedStream;
+    navigator.mediaDevices.enumerateDevices = async () => [];
+  }, `data:image/jpeg;base64,${buffer.toString('base64')}`);
+  await open(page);
+  await page.waitForFunction(() => !document.querySelector('[data-camera="use"]').disabled);
+  assert.equal(await page.locator('[data-camera="value"]').textContent(), expected);
+  await page.locator('[data-camera="use"]').click();
+  assert.equal(await page.locator('#input-to-search-inventory-item').inputValue(), expected);
+  assert.equal(await page.evaluate(() => window.reportedStream.getVideoTracks()[0].readyState), 'ended');
+});
+
+test('reported phone photo decodes in the browser engine without a camera', {
+  skip: !process.env.INVSTO_SCANNER_REPRO_IMAGE || !process.env.INVSTO_SCANNER_REPRO_CODE,
+}, async t => {
+  const page = await pageFor(t);
+  await deniedCamera(page);
+  const buffer = await readFile(process.env.INVSTO_SCANNER_REPRO_IMAGE);
+  await open(page);
+  await page.locator('[data-camera="photo"]').setInputFiles({ name: 'reported-image.jpg', mimeType: 'image/jpeg', buffer });
+  await page.waitForFunction(() => !document.querySelector('[data-camera="use"]').disabled).catch(async error => { throw new Error(`${error.message}: ${await status(page).textContent()}`); });
+  assert.equal(await page.locator('[data-camera="value"]').textContent(), process.env.INVSTO_SCANNER_REPRO_CODE);
+  await page.locator('[data-camera="use"]').click();
+  assert.equal(await page.locator('#input-to-search-inventory-item').inputValue(), process.env.INVSTO_SCANNER_REPRO_CODE);
 });

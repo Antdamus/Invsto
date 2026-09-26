@@ -479,15 +479,20 @@ test("camera barcode updates the new item label and saved barcode on mobile", as
   assert.equal(await step(page), 'labels');
   await page.evaluate(() => {
     pendingStockAssignments[document.getElementById('scanned-barcode').value] = { location_id: 'test-tray', quantity: 3 };
-    navigator.mediaDevices.getUserMedia = async () => ({ getTracks: () => [], getVideoTracks: () => [] });
+    navigator.mediaDevices.getUserMedia = async () => {
+      const canvas = document.createElement('canvas'); canvas.width = 100; canvas.height = 100;
+      canvas.getContext('2d').fillRect(0, 0, 100, 100);
+      const stream = canvas.captureStream(15);
+      setInterval(() => stream.getVideoTracks()[0].requestFrame(), 60);
+      return stream;
+    };
     navigator.mediaDevices.enumerateDevices = async () => [];
-    window.ZXingBrowser = { BrowserMultiFormatReader: class {
-      async decodeFromStream(stream, video, callback) {
-        const controls = { stop() {} };
-        window.testScan = code => callback({ getText: () => code }, null, controls);
-        return controls;
-      }
-    } };
+    window.ZXingWASM = {
+      prepareZXingModule: async () => {},
+      readBarcodes: () => new Promise(resolve => {
+        window.testScan = code => resolve([{ text: code, isValid: true, error: '' }]);
+      }),
+    };
   });
   await page.locator('[data-scan-target="scanned-barcode"]').click();
   await page.waitForFunction(() => window.testScan);

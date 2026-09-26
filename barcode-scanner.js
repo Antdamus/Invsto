@@ -51,15 +51,94 @@
   else watchFields();
 
   function loadReader() {
-    if (window.ZXingBrowser) return Promise.resolve(window.ZXingBrowser);
-    if (!libraryPromise) libraryPromise = new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = new URL('vendor/zxing-browser-0.1.5.min.js', scriptBase).href;
-      script.onload = () => resolve(window.ZXingBrowser);
-      script.onerror = () => { script.remove(); libraryPromise = null; reject(new Error('reader-load')); };
-      document.head.append(script);
-    });
+    if (!libraryPromise) {
+      libraryPromise = (async () => {
+        if (!window.ZXingWASM) {
+          await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            const timeout = setTimeout(() => { script.remove(); reject(new Error('reader-load')); }, 20000);
+            script.src = new URL('vendor/zxing-wasm-reader-3.1.4.js', scriptBase).href;
+            script.onload = () => { clearTimeout(timeout); resolve(); };
+            script.onerror = () => { clearTimeout(timeout); script.remove(); reject(new Error('reader-load')); };
+            document.head.append(script);
+          });
+        }
+        const library = window.ZXingWASM;
+        // Keep the decoder and its binary on our own host. Images never leave the device.
+        await library.prepareZXingModule({
+          overrides: { locateFile: () => new URL('vendor/zxing-reader-3.1.4.wasm', scriptBase).href },
+          fireImmediately: true,
+        });
+        return library;
+      })().catch(() => { libraryPromise = null; throw new Error('reader-load'); });
+    }
     return libraryPromise;
+  }
+
+  const readOptions = {
+    formats: ['QRCode', 'DataMatrix', 'Code128', 'Code39', 'Code93', 'EAN13', 'EAN8', 'UPCA', 'UPCE', 'ITF', 'PDF417', 'Aztec', 'Codabar'],
+    tryHarder: true, tryRotate: true, tryInvert: true, maxNumberOfSymbols: 4,
+    returnErrors: true, textMode: 'Plain',
+  };
+
+  function isInventoryCode(raw) {
+    const code = String(raw).trim();
+    return code.length > 0 && code.length <= 128 && !/[^\x20-\x7e]/.test(code)
+      && !/^(?:[a-z][a-z\d+.-]*:|\/\/|www\.)/i.test(code);
+  }
+
+  async function decodeCanvas(library, canvas) {
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    const results = await library.readBarcodes(context.getImageData(0, 0, canvas.width, canvas.height), readOptions);
+    // A label can include both an item code and a website QR. Prefer the item code.
+    const valid = results.filter(result => result.isValid && !result.error).map(result => {
+      // ZXing-C++ reports UPC-A as EAN-13 with a padding zero. Match the
+      // prior scanner's 12-digit UPC-A output; never alter QR/Code 128 zeros.
+      if (result.format === 'EAN13' && /^0\d{12}$/.test(result.text)) return { ...result, text: result.text.slice(1) };
+      return result;
+    });
+    return { result: valid.find(result => isInventoryCode(result.text)) || valid[0], detected: results.length > 0 };
+  }
+
+  function scanVideo(library, session, token) {
+    const video = ui.video;
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    const started = Date.now();
+    let stopped = false, timer;
+    const current = () => !stopped && active === session && token === generation;
+    const controls = { stop() { stopped = true; clearTimeout(timer); } };
+    const fail = () => {
+      if (!current()) return;
+      stopCapture();
+      ui.retry.hidden = false;
+      message('The camera scan stopped. Tap Scan again or choose a barcode photo.');
+    };
+    const scanFrame = async () => {
+      if (!current()) return;
+      if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+        if (Date.now() - started > 10000) { fail(); return; }
+        timer = setTimeout(scanFrame, 100);
+        return;
+      }
+      try {
+        // Use the actual frame dimensions, including portrait orientation changes.
+        const scale = Math.min(1, 1600 / Math.max(video.videoWidth, video.videoHeight));
+        const width = Math.round(video.videoWidth * scale), height = Math.round(video.videoHeight * scale);
+        if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+        context.drawImage(video, 0, 0, width, height);
+        const { result, detected } = await decodeCanvas(library, canvas);
+        if (!current()) return;
+        if (result) { receive(result.text, token); return; }
+        if (detected) message('A code is visible but not clear enough to read. Hold steady, reduce glare, or choose a barcode photo.');
+        else if (Date.now() - started > 7000) message('Still looking for a readable code. Move slightly farther away to focus, keep the whole code visible, or choose a barcode photo.');
+        timer = setTimeout(scanFrame, 140);
+      } catch (_) { fail(); }
+    };
+    video.srcObject = session.stream;
+    video.play().catch(fail);
+    timer = setTimeout(scanFrame, 0);
+    return controls;
   }
 
   function stopControls(controls) {
@@ -133,7 +212,7 @@
     stopCapture();
     resetResult();
     const session = active, token = generation;
-    message('Starting camera... Allow camera access when your browser asks.');
+    message('Loading barcode reader...');
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       message('Live scanning needs a browser with camera access on HTTPS. You can still choose a barcode photo below.');
       ui.retry.hidden = false;
@@ -142,6 +221,7 @@
     try {
       const library = await loadReader();
       if (active !== session || token !== generation) return;
+      message('Starting camera... Allow camera access when your browser asks.');
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: { ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } }), width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -156,20 +236,7 @@
       session.deviceId = stream.getVideoTracks()[0]?.getSettings?.().deviceId;
       ui.preview.hidden = false;
       message('Center the whole barcode in the frame. Hold steady with good light.');
-      const reader = new library.BrowserMultiFormatReader(undefined, { delayBetweenScanAttempts: 180, delayBetweenScanSuccess: 500 });
-      const controls = await reader.decodeFromStream(stream, ui.video, (result, error, scanControls) => {
-        if (active !== session || token !== generation) { stopControls(scanControls); return; }
-        if (result) { stopControls(scanControls); receive(result.getText(), token); }
-        // The minified decoder preserves exception kinds, but minifies class names.
-        else if (error && !['NotFoundException', 'ChecksumException', 'FormatException'].includes(error.constructor?.kind || error.name)) {
-          stopControls(scanControls);
-          stopCapture();
-          ui.retry.hidden = false;
-          message('The camera scan stopped. Retry or choose a barcode photo.');
-        }
-      });
-      if (active !== session || token !== generation) { stopControls(controls); return; }
-      session.controls = controls;
+      session.controls = scanVideo(library, session, token);
       const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
       if (active !== session || token !== generation) return;
       session.cameras = devices.filter(device => device.kind === 'videoinput');
@@ -206,8 +273,9 @@
       context.fillStyle = '#fff';
       context.fillRect(0, 0, canvas.width, canvas.height);
       context.drawImage(photo, 0, 0, canvas.width, canvas.height);
-      const result = new library.BrowserMultiFormatReader().decodeFromCanvas(canvas);
-      receive(result.getText(), token);
+      const { result } = await decodeCanvas(library, canvas);
+      if (!result) throw new Error('unreadable');
+      receive(result.text, token);
     } catch (error) {
       if (active !== session || token !== generation) return;
       ui.retry.hidden = false;

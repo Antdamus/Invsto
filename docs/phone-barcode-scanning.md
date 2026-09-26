@@ -37,3 +37,16 @@ The shared scanner adds its adjacent button, including for dynamic fields. Add
 `data-camera-action="lookup-button-id"` only for a lookup that does not already run
 on input; never point it at a submit/finalize action. Include the versioned shared
 scanner CSS and JS on the page.
+
+The camera reader uses the self-hosted ZXing-C++ WebAssembly decoder and scans
+portrait/rotated codes as well as linear barcodes. If a visible code fails its
+checksum, it shows a focus/glare hint and never uses the partial result. After
+seven seconds without a readable result it shows recovery instructions while
+continuing to scan. UPC-A retains the previous scanner's 12-digit representation;
+zeros inside QR and Code 128 identifiers are preserved exactly.
+
+To reproduce a private reported image locally without committing or uploading it,
+set `INVSTO_SCANNER_REPRO_IMAGE` to its path and `INVSTO_SCANNER_REPRO_CODE` to the
+known expected value before running the barcode tests. WebKit photo checks can
+be run with `INVSTO_SCANNER_BROWSER=webkit`; Windows WebKit does not expose a
+camera, so use the photo/field tests there and Chromium for the video-stream tests.

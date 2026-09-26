@@ -14,6 +14,7 @@
     "supabase": "^2.72.8"
   },
   "dependencies": {
-    "@zxing/browser": "0.1.5"
+    "@zxing/browser": "0.1.5",
+    "zxing-wasm": "3.1.4"
   }
 }
