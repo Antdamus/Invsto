@@ -66,13 +66,15 @@ EBAY_EXPORT_PROFILES.watch = {
   ...EBAY_EXPORT_PROFILES.pendant, label: "Watch", slug: "watches", type: "Wristwatch",
   categoryId: "31387", categoryName: "/Jewelry & Watches/Watches, Parts & Accessories/Watches/Wristwatches",
 };
+EBAY_EXPORT_PROFILES.coin = { ...EBAY_EXPORT_PROFILES.pendant, label: "Coin", slug: "coins", type: "Coin", categoryId: "", categoryName: "" };
 const WATCH_EXPORT_CONDITIONS = { NEW: "1000", NEW_OTHER: "1500", NEW_WITH_DEFECTS: "1750", SELLER_REFURBISHED: "2500", PRE_OWNED_EXCELLENT: "2990", USED_EXCELLENT: "3000", PRE_OWNED_FAIR: "3010", FOR_PARTS_OR_NOT_WORKING: "7000" };
 function validateEbayExportItems(items, profile, requirements) {
   for (const item of items) {
     const watch = item.watch_details;
     const name = item.title || item.barcode || "Selected item";
     if (!Number.isFinite(Number(item.sale_price)) || Number(item.sale_price) <= 0) throw new Error(`${name}: enter a retail price before exporting.`);
-    if (item.coin_details) throw new Error(`${name}: coin-specific eBay export is not available.`);
+    if (item.coin_details && profile.type !== "Coin") throw new Error(`${name}: choose the Coin export category.`);
+    if (profile.type === "Coin" && !item.coin_details?.ebay?.categoryId) throw new Error(`${name}: complete the coin eBay category and grading details in Edit Item.`);
     if (profile.type !== "Wristwatch" && (watch || item.ebay_category_id === "31387")) throw new Error(`${name}: choose the Watch export category.`);
     if (profile.type === "Wristwatch") {
       if (!watch) throw new Error(`${name}: select only items entered in Watch mode.`);
@@ -288,6 +290,12 @@ async function getQuantitiesByItemId(items, options = {}) {
 async function buildListingRows(items, headers, profile, options = {}) {
   validateEbayExportItems(items, profile);
   const indexes = getHeaderIndexes(headers);
+  const coinListings = new Map();
+  if (profile.type === "Coin") for (const item of items) {
+    const listing = window.CoinEbay.buildCoinListing(item, options.coinMetadataMap?.get(item.coin_details.ebay.categoryId));
+    if (listing.reasons.length) throw new Error(`${item.title || item.barcode}: ${listing.reasons.join("; ")}`);
+    coinListings.set(item.id, listing);
+  }
   const quantitiesByItemId = await getQuantitiesByItemId(items, options);
   const outputRows = [];
   let processed = 0;
@@ -334,29 +342,41 @@ async function buildListingRows(items, headers, profile, options = {}) {
       continue;
     }
 
+    const coinListing = coinListings.get(item.id);
     const row = new Array(headers.length).fill("");
     setRowValue(row, indexes, "action", "Add");
     setRowValue(row, indexes, "sku", item.barcode || "");
-    setRowValue(row, indexes, "categoryId", profile.categoryId);
-    setRowValue(row, indexes, "categoryName", profile.categoryName);
+    setRowValue(row, indexes, "categoryId", coinListing?.categoryId || profile.categoryId);
+    setRowValue(row, indexes, "categoryName", coinListing ? `/Coins & Paper Money/${coinListing.categoryLabel.replaceAll(" > ", "/")}` : profile.categoryName);
     setRowValue(row, indexes, "title", item.title || "");
     setRowValue(row, indexes, "startPrice", item.sale_price || 0);
     setRowValue(row, indexes, "quantity", totalQty);
-    setRowValue(row, indexes, "photoUrl", await getPublicImageUrls(item));
-    setRowValue(row, indexes, "condition", profile.type === "Wristwatch" ? WATCH_EXPORT_CONDITIONS[item.watch_details.condition] : profile.condition);
+    const photoUrls = await getPublicImageUrls(item);
+    if (coinListing && new Set(photoUrls.split("|").filter(Boolean)).size < 2) throw new Error(`${item.title || item.barcode}: both front and back photos must be available before exporting.`);
+    setRowValue(row, indexes, "photoUrl", photoUrls);
+    setRowValue(row, indexes, "condition", coinListing ? coinListing.conditionId : profile.type === "Wristwatch" ? WATCH_EXPORT_CONDITIONS[item.watch_details.condition] : profile.condition);
     const watchLabels = { name: "Name", brand: "Brand", model: "Model / reference", department: "Department", materials: "Materials by component", modifications: "Modifications / customizations" };
     const description = profile.type === "Wristwatch" ? [
       String(item.description || "").replace(/\n*Watch details:\n[\s\S]*$/, "").trim(),
       "Watch details:\n" + Object.entries(watchLabels).filter(([key]) => item.watch_details[key]).map(([key, label]) => `${label}: ${item.watch_details[key]}`).join("\n"),
     ].filter(Boolean).join("\n\n") : item.description || "";
-    setRowValue(row, indexes, "description", description);
+    setRowValue(row, indexes, "description", coinListing?.description || description);
     setRowValue(row, indexes, "format", "FixedPrice");
     setRowValue(row, indexes, "duration", "GTC");
     setRowValue(row, indexes, "location", "Miami, FL");
     setRowValue(row, indexes, "shippingProfile", profile.shippingProfile);
     setRowValue(row, indexes, "returnProfile", profile.returnProfile);
     setRowValue(row, indexes, "paymentProfile", profile.paymentProfile);
-    if (profile.type === "Wristwatch") {
+    if (coinListing) {
+      for (const [name, values] of Object.entries(coinListing.aspects)) {
+        const index = headers.indexOf(`C:${name}`);
+        if (index >= 0) row[index] = values.join("|");
+      }
+      for (const descriptor of coinListing.conditionDescriptors) {
+        const index = headers.findIndex(header => header.startsWith(descriptor.additionalInfo !== undefined ? "CDA:" : "CD:") && header.endsWith(`(ID: ${descriptor.name})`));
+        if (index >= 0) row[index] = descriptor.additionalInfo ?? descriptor.values.join("|");
+      }
+    } else if (profile.type === "Wristwatch") {
       setRowValue(row, indexes, "brand", item.watch_details.brand);
       setRowValue(row, indexes, "department", item.watch_details.department);
       setRowValue(row, indexes, "reference", item.watch_details.model || "");
@@ -395,6 +415,11 @@ window.exportToEbayXLSX = async function (items, options = {}) {
     if (error || !data?.ok) throw new Error("Could not verify eBay watch requirements. Try again before exporting.");
     validateEbayExportItems(items, profile, data);
   }
+  if (profile.type === "Coin") {
+    const coinMetadataMap = new Map();
+    for (const id of new Set(items.map(item => item.coin_details.ebay.categoryId))) coinMetadataMap.set(id, await window.loadCoinEbayRequirements(id));
+    options = { ...options, coinMetadataMap };
+  }
   reportProgress(options, {
     title: "Loading eBay template",
     detail: `Opening ${profile.templateUrl}...`,
@@ -404,7 +429,16 @@ window.exportToEbayXLSX = async function (items, options = {}) {
     visible: true
   });
   const workbook = await loadEbayTemplateWorkbook(profile.templateUrl);
-  const sheet = profile.type === "Wristwatch"
+  const coinHeaders = Object.entries(requiredHeaders).filter(([, header]) => !header.startsWith("C:")).map(([, header]) => header);
+  if (profile.type === "Coin") for (const metadata of options.coinMetadataMap.values()) {
+    for (const aspect of metadata.aspects) coinHeaders.push(`C:${aspect.localizedAspectName}`);
+    for (const condition of metadata.policy.itemConditions || []) for (const descriptor of condition.conditionDescriptors || []) {
+      const prefix = descriptor.conditionDescriptorConstraint?.mode === "FREE_TEXT" ? "CDA" : "CD";
+      const name = descriptor.conditionDescriptorName.replace(/\s*\(optional\)/i, "");
+      coinHeaders.push(`${prefix}:${name} - (ID: ${descriptor.conditionDescriptorId})`);
+    }
+  }
+  const sheet = profile.type === "Coin" ? XLSX.utils.aoa_to_sheet([[], [], [], [...new Set(coinHeaders)]]) : profile.type === "Wristwatch"
     ? XLSX.utils.aoa_to_sheet([[], [], [], Object.entries(requiredHeaders).filter(([key]) => !["stone", "metal", "purity", "style"].includes(key)).map(([, header]) => header)])
     : workbook.Sheets[LISTINGS_SHEET_NAME];
 

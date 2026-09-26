@@ -608,6 +608,7 @@
               <span class="field-helper">Use the eBay category, not your internal store category.</span>
             </label>
 
+            <div id="coin-ebay-add" class="form-field form-field-wide coin-ebay-editor" hidden></div>
             <div class="form-field form-field-wide ebay-readiness-summary" id="ebay-readiness-summary" aria-live="polite">
               eBay readiness will update as you complete the item.
             </div>
@@ -1019,8 +1020,10 @@
   <script src="admin-nav.js"></script>
   <script src="additem-dymolabel.js"></script>
   <script src="additembulk.js"></script>
-  <script src="additem-wizard.js?v=20260926-prices-watch"></script>
-  <script src="additem.js?v=20260926-prices-watch"></script>
+  <link rel="stylesheet" href="coin-ebay.css?v=20260926-coins-ebay" />
+  <script type="module" src="coin-ebay.js?v=20260926-coins-ebay"></script>
+  <script src="additem-wizard.js?v=20260926-coins-ebay"></script>
+  <script src="additem.js?v=20260926-coins-ebay"></script>
   <script src="additem-assisted.js?v=20260926-prices-watch"></script>
 </body>
 </html>

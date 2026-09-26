@@ -716,6 +716,8 @@ let uploadedImages = [];
 
   function getAddItemEbayCategoryOption(categoryId) {
     const normalized = String(categoryId || "").trim();
+    const coin = window.addItemWizard?.getCoinDetails();
+    if (coin?.ebay?.categoryId === normalized && normalized) return { id: normalized, label: coin.ebay.categoryLabel || `Coin category ${normalized}` };
     return ADD_ITEM_EBAY_CATEGORY_OPTIONS.find((option) => option.id === normalized) || null;
   }
 
@@ -830,6 +832,8 @@ let uploadedImages = [];
     const text = getAddItemEbayTextBlob();
     const aspects = {};
 
+    const coin = window.addItemWizard?.getCoinDetails();
+    if (coin) return window.CoinEbay?.buildCoinListing({ coin_details: coin, ebay_category_id: categoryId }, window.coinEbayForm?.getMetadata()).aspects || {};
     const watch = window.addItemWizard?.getWatchDetails();
     if (watch) {
       setAddItemAspect(aspects, "Type", "Wristwatch");
@@ -883,7 +887,12 @@ let uploadedImages = [];
     if (!String(document.getElementById("title")?.value || "").trim()) missing.push("title");
     if (!(window.addItemWizard?.descriptionForSave() || String(document.getElementById("description")?.value || "").trim())) missing.push("description");
     if (!(parseFloat(document.getElementById("sale-price")?.value?.replace(/,/g, "") || "0") > 0)) missing.push("sale price");
-    if (window.addItemWizard?.isWatch()) {
+    if (window.addItemWizard?.isCoin()) {
+      const coin = window.addItemWizard.getCoinDetails();
+      const preview = window.CoinEbay?.buildCoinListing({ coin_details: coin, ebay_category_id: categoryId, title: document.getElementById("title").value, description: document.getElementById("description").value,
+        sale_price: Number(document.getElementById("sale-price").value.replace(/,/g,"")), photos: [...assistedSelectedImages.map((image,index)=>image.path || `selected-${index}`), ...Array.from(photoFiles).map(file=>file.name)] }, window.coinEbayForm?.getMetadata());
+      missing.push(...(preview?.reasons || ["coin category requirements are still loading"]));
+    } else if (window.addItemWizard?.isWatch()) {
       const watch = window.addItemWizard.getWatchDetails();
       if (!watch.brand) missing.push("watch brand (Information)");
       if (!watch.department) missing.push("watch department (Information)");
@@ -906,17 +915,16 @@ let uploadedImages = [];
     if (!select || !enabled || !summary) return;
 
     const coin = Boolean(window.addItemWizard?.isCoin());
-    enabled.disabled = coin;
+    enabled.disabled = false;
     if (coin) {
-      enabled.checked = false;
-      select.value = "";
+      const details = window.addItemWizard.getCoinDetails();
+      const categoryId = details.ebay?.categoryId || "";
+      if (categoryId && !Array.from(select.options).some(option => option.value === categoryId)) select.add(new Option(details.ebay.categoryLabel || `Coin category ${categoryId}`, categoryId));
+      select.value = categoryId;
       select.disabled = true;
-      summary.className = "form-field form-field-wide ebay-readiness-summary is-muted";
-      summary.textContent = "Your coin will be saved to inventory. Coin publishing on eBay needs coin-specific categories and grading descriptors; automatic eBay sync is off for coin entries.";
-      return;
     }
 
-    select.disabled = !enabled.checked;
+    select.disabled = coin || !enabled.checked;
     if (enabled.checked && !select.value && options.infer !== false) {
       const inferred = inferAddItemEbayCategory();
       if (inferred) select.value = inferred.id;
@@ -944,9 +952,11 @@ let uploadedImages = [];
     populateAddItemEbayCategorySelect();
     updateAddItemEbayReadiness();
 
+    document.addEventListener("coin-ebay:change", () => updateAddItemEbayReadiness({ infer: false }));
     document.addEventListener("add-item:mode-change", (event) => {
       if (!event.detail?.restoring) {
         const category = document.getElementById("ebay-category-id");
+        if (event.detail?.isCoin) document.getElementById("ebay-sync-enabled").checked = false;
         if (event.detail?.isWatch) category.value = "31387";
         else if (category.value === "31387") category.value = "";
       }
@@ -2981,7 +2991,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const item_length = coin_details ? null : document.getElementById("assisted-length")?.value?.trim() || null;
   const price_per_weight = watch_details || coin_details ? null : parseFloat(pricePerWeightInput?.value || "0");
   const materialPurity = getAssistedMaterialPurityForSave();
-  const ebay_sync_enabled = !coin_details && document.getElementById("ebay-sync-enabled")?.checked !== false;
+  const ebay_sync_enabled = document.getElementById("ebay-sync-enabled")?.checked !== false;
   // force sync dropdown selection into hidden input if user typed or skipped selection
   const categoryButton = document.getElementById("category-dropdown-toggle");
   const categoryHiddenInput = document.getElementById("category");
@@ -2992,7 +3002,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const categories = categoryInput ? [categoryInput] : [];
   const selectedEbayCategoryId = String(document.getElementById("ebay-category-id")?.value || "").trim();
   const inferredEbayCategoryId = inferAddItemEbayCategory()?.id || "";
-  const ebay_category_id = coin_details ? null : selectedEbayCategoryId || inferredEbayCategoryId || null;
+  const ebay_category_id = selectedEbayCategoryId || inferredEbayCategoryId || null;
   const ebay_aspects = ebay_sync_enabled
     ? buildAddItemEbayAspects(ebay_category_id, materialPurity, weight, item_length)
     : {};
@@ -3116,7 +3126,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
       purity_basis_points: materialPurity.purity_basis_points,
       ebay_sync_enabled,
       ebay_category_id,
-      ebay_condition: coin_details ? null : watch_details ? watch_details.condition || null : "NEW",
+      ebay_condition: coin_details ? window.CoinEbay?.CONDITION_ENUMS[coin_details.ebay?.conditionId] || null : watch_details ? watch_details.condition || null : "NEW",
       ebay_aspects,
       price_per_weight,
       categories,

@@ -252,6 +252,7 @@ function inferEbayCategoryOption(item) {
 }
 
 function getEffectiveEbayCategoryOption(item) {
+  if (item?.coin_details) return item.ebay_category_id ? { id: item.ebay_category_id, label: item.coin_details.ebay?.categoryLabel || `Coins > ${item.ebay_category_id}` } : null;
   return getEbayCategoryOptionById(item?.ebay_category_id) || inferEbayCategoryOption(item);
 }
 
@@ -2594,6 +2595,10 @@ function buildLocationChips(item) {
     if (!ids.length) return;
 
     const selectedRows = allItems.filter((item) => selectedItems.has(item.id));
+    if (selectedRows.some(item => item.coin_details)) {
+      showToast("Set each coin's eBay category and grading in Edit Item so its requirements can be checked.");
+      return;
+    }
     const explicitCategoryIds = [...new Set(selectedRows.map((item) => String(item.ebay_category_id || "").trim()).filter(Boolean))];
     populateEbayCategorySelect(explicitCategoryIds.length === 1 ? explicitCategoryIds[0] : "");
 

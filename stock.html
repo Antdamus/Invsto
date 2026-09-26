@@ -314,12 +314,14 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
   <script src="additem-dymolabel.js"></script>
-  <script src="stock-editcards.js?v=20260926-prices-watch"></script>
-  <script src="ebayExport.js?v=20260926-prices-watch"></script>
+  <link rel="stylesheet" href="coin-ebay.css?v=20260926-coins-ebay" />
+  <script type="module" src="coin-ebay.js?v=20260926-coins-ebay"></script>
+  <script src="stock-editcards.js?v=20260926-coins-ebay"></script>
+  <script src="ebayExport.js?v=20260926-coins-ebay"></script>
   <script src="stock-checkout.js"></script>
   <script src="stock-transferstock.js"></script>
   <script src="stock-storage-transfer.js"></script>
-  <script src="stock.js?v=20260926-prices-watch"></script>
+  <script src="stock.js?v=20260926-coins-ebay"></script>
 
   <!-- 📢 Toast + Loading Spinner Containers -->
   <div id="toast-container"></div>
@@ -577,6 +579,7 @@
             <input type="radio" name="ebay-export-type" value="watch" />
             <span>Watch<small>Wristwatches</small></span>
           </label>
+          <label class="export-type-choice"><input type="radio" name="ebay-export-type" value="coin" /><span>Coin<small>Collector and bullion coins</small></span></label>
         </div>
       </div>
 
@@ -663,6 +666,7 @@
           <label for="edit-sale-price">Retail Price ($):</label>
           <input type="number" id="edit-sale-price" name="sale_price" step="0.01" min="0">
 
+          <fieldset id="edit-coin-details" class="coin-ebay-editor" hidden><legend>Coin and eBay listing details</legend></fieldset>
           <fieldset id="edit-watch-details" hidden>
             <legend>Watch listing details</legend>
             <label for="edit-watch-brand">Brand</label><input id="edit-watch-brand" maxlength="100" />

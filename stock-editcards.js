@@ -309,6 +309,7 @@ window.editCardModule = (function () {
         document.getElementById("edit-cost").value = item.cost || "";
         document.getElementById("edit-sale-price").value = item.sale_price ?? "";
         document.getElementById("edit-minimum-sale-price").value = item.minimum_sale_price ?? "";
+        window.coinEbayStock?.open(item, canViewSensitiveStockFields());
         document.getElementById("edit-watch-details").hidden = !canViewSensitiveStockFields() || !item.watch_details;
         for (const key of ["brand", "model", "department", "condition"]) document.getElementById(`edit-watch-${key}`).value = item.watch_details?.[key] || "";
         document.getElementById("edit-price-per-weight").value = item.price_per_weight || "";
@@ -835,10 +836,15 @@ window.editCardModule = (function () {
             ...Object.fromEntries(["brand", "model", "department", "condition"].map(key => [key, document.getElementById(`edit-watch-${key}`).value.trim()]))
         } : null;
         const watchLabels = { name: "Name", brand: "Brand", model: "Model / reference", department: "Department", materials: "Materials by component", modifications: "Modifications / customizations" };
-        const savedDescription = watchDetails ? [
+        let savedDescription = watchDetails ? [
             description.replace(/\n*Watch details:\n[\s\S]*$/, "").trim(),
             "Watch details:\n" + Object.entries(watchLabels).filter(([key]) => watchDetails[key]).map(([key, label]) => `${label}: ${watchDetails[key]}`).join("\n"),
         ].filter(Boolean).join("\n\n") : description;
+        const coinDetails = canViewSensitiveStockFields() && existingItem.coin_details ? window.coinEbayStock?.getDetails() || existingItem.coin_details : null;
+        if (coinDetails && window.CoinEbay) savedDescription = [
+            description.replace(/\n*Coin details:\n[\s\S]*$/, "").trim(),
+            "Coin details:\n" + Object.entries(window.CoinEbay.COIN_LABELS).filter(([key]) => coinDetails[key]).map(([key, label]) => `${label}: ${coinDetails[key]}`).join("\n"),
+        ].filter(Boolean).join("\n\n");
         const updates = {
             _item_id: currentItemId,
             _title: title,
@@ -852,6 +858,8 @@ window.editCardModule = (function () {
             _sale_price: salePrice,
             _minimum_sale_price: minimumSalePrice,
             _watch_details: watchDetails,
+            _coin_details: coinDetails,
+            _ebay_sync_enabled: coinDetails ? window.coinEbayStock?.enabled() ?? existingItem.ebay_sync_enabled : null,
             _price_per_weight: pricePerWeight,
             _stock_batch_size_update: stockBatch,
             _dymo_label_url: newDymoLabelUrl,
@@ -860,7 +868,7 @@ window.editCardModule = (function () {
             _signed_by_email: getAuthenticatedStockUser()?.email || null,
         };
 
-        const { error } = await supabase.rpc("update_certified_item_details_v2", updates);
+        const { error } = await supabase.rpc("update_certified_item_details_v3", updates);
 
         if (error) {
             console.error("Error updating item:", error);

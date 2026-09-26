@@ -4,10 +4,11 @@ import { stripTypeScriptTypes } from 'node:module';
 import { webcrypto } from 'node:crypto';
 import vm from 'node:vm';
 import { test } from 'node:test';
+import * as coinCore from '../coin-ebay-core.mjs';
 const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const source = read('supabase/functions/ebay-inventory-sync/index.ts').replace(/^import .*;\r?\n/gm, '');
 function backend() {
-  const context = { Deno: { env: { get: () => '' }, serve() {} }, console, TextEncoder, crypto: webcrypto, URL, URLSearchParams, Response, AbortSignal };
+  const context = { buildCoinListing:coinCore.buildCoinListing, Deno: { env: { get: () => '' }, serve() {} }, console, TextEncoder, crypto: webcrypto, URL, URLSearchParams, Response, AbortSignal };
   vm.createContext(context);
   vm.runInContext(stripTypeScriptTypes(source), context);
   return context;
@@ -45,7 +46,8 @@ test('no minimum-price fallback for zero retail, and coins cannot become jewelry
   const result=await api.prepareItem({}, {...item,sale_price:0},1,settings,{copyMissingPhotos:false,watchMetadata:metadata});
   assert.equal(result.offerPayload,null);
   assert.match(result.blockingReasons.join(','),/retail price/);
-  assert.match(api.collectPublishBlockingReasons({...item,coin_details:{name:'Coin'}},90,1,true,'261993','override',{}).join(','),/coin-specific/);
+  const coinResult = await api.prepareItem({}, {...item,coin_details:{name:'Coin'}},1,settings,{copyMissingPhotos:false});
+  assert.match(coinResult.blockingReasons.join(','),/coin requirements could not be verified/);
 });
 test('required eBay aspects and allowed condition values are checked',()=>{
   const api=backend();
@@ -54,7 +56,7 @@ test('required eBay aspects and allowed condition values are checked',()=>{
   assert.match(reasons,/Movement/); assert.match(reasons,/supported watch condition/);
 });
 function exporter(){
-  const context={window:{},console,setTimeout,clearTimeout};
+  const context={window:{CoinEbay:coinCore},console,setTimeout,clearTimeout};
   vm.createContext(context);vm.runInContext(read('ebayExport.js'),context);
   vm.runInContext('getQuantitiesByItemId = async () => ({watch:1,jewelry:2}); getPublicImageUrls = async () => "https://example.invalid/photo.jpg";',context);
   return context;
@@ -65,7 +67,7 @@ test('watch CSV uses retail, watch category and condition without jewelry specif
   const rows=await api.buildListingRows([item],headers,api.window.EBAY_EXPORT_PROFILES.watch);
   assert.deepEqual(plain(rows[0]),[6500,'31387','3000','Rolex','Unisex Adults','126233','','']);
   assert.throws(()=>api.validateEbayExportItems([item],api.window.EBAY_EXPORT_PROFILES.pendant),/Watch export/);
-  assert.throws(()=>api.validateEbayExportItems([{...item,coin_details:{name:'Coin'}}],api.window.EBAY_EXPORT_PROFILES.watch),/coin-specific/);
+  assert.throws(()=>api.validateEbayExportItems([{...item,coin_details:{name:'Coin'}}],api.window.EBAY_EXPORT_PROFILES.watch),/Coin export category/);
   assert.throws(()=>api.validateEbayExportItems([{...item,sale_price:0}],api.window.EBAY_EXPORT_PROFILES.watch),/retail price/);
 });
 test('jewelry CSV also uses retail, never the internal selling floor',async()=>{

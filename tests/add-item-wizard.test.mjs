@@ -6,6 +6,7 @@ import { chromium, webkit } from "@playwright/test";
 
 const root = new URL("../", import.meta.url);
 let server, browser, origin;
+const coinMetadata = JSON.parse(await readFile(new URL("fixtures/coin-ebay-metadata.json", import.meta.url), "utf8"));
 
 // Exercise the real page and save handler without touching inventory or hardware.
 const mockServices = () => {
@@ -30,6 +31,14 @@ const mockServices = () => {
   window.supabase = {
     auth: { getUser: async () => ({ data: { user } }), getSession: async () => ({ data: { session: { user } } }) },
     functions: { invoke: async (name, options) => {
+      if (name === "ebay-inventory-sync") {
+        if (window.testCoinMetadataFailure) return { error: { message: "Metadata offline. Try again." } };
+        if (options.body.action === "coinCategories") return { data: { ok:true, categories:Object.values(window.testCoinMetadata).map(data => data.category) } };
+        if (options.body.action === "coinRequirements") {
+          if (window.testCoinMetadataHold === options.body.categoryId) await new Promise(resolve => { window.testReleaseCoinMetadata=resolve; });
+          return { data: window.testCoinMetadata[options.body.categoryId] };
+        }
+      }
       if (name === "generate-inventory-copy") {
         window.testGeneration.push(options.body);
         if (window.testGenerationHold) await new Promise((resolve) => { window.testReleaseGeneration = resolve; });
@@ -90,7 +99,7 @@ before(async () => {
       if (name.endsWith("html")) {
         content = content.replace(/<script src="([^"]+)"(?: defer)?><\/script>/g, (tag, src) =>
           ["admin-nav.js", "additem-wizard.js", "additem.js", "additem-assisted.js", "barcode-scanner.js"].includes(src.split("?")[0]) ? tag : "");
-        content = content.replace("<head>", `<head><script>(${mockServices.toString()})();</script>`);
+        content = content.replace("<head>", `<head><script>(${mockServices.toString()})();window.testCoinMetadata=${JSON.stringify(coinMetadata)};</script>`);
       }
       res.setHeader("Content-Type", name.endsWith("css") ? "text/css" : name.endsWith("js") ? "text/javascript" : "text/html");
       res.end(content);
@@ -108,7 +117,7 @@ async function pageFor(t, viewport = { width: 1365, height: 1000 }) {
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/*", (route) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
   await page.goto(`${origin}/add-item.html`);
-  await page.waitForFunction(() => window.addItemAssistedModule && document.body.classList.contains("admin-unified-nav"));
+  await page.waitForFunction(() => window.coinEbayForm && window.addItemAssistedModule && document.body.classList.contains("admin-unified-nav"));
   await page.waitForFunction(() => document.getElementById("assisted-generate-status").textContent.includes("Choose an AI image"));
   t.after(async () => { await page.close(); assert.deepEqual(errors, []); });
   return page;
@@ -681,4 +690,94 @@ test("jewelry minimum and editable retail stay distinct, validate and restore fr
   await page.waitForFunction(() => window.testWrites.length === 1);
   assert.equal(await page.evaluate(() => window.testWrites[0].minimum_sale_price), 150);
   assert.equal(await page.evaluate(() => window.testWrites[0].sale_price), 300);
+});
+
+async function coinMarketplacePage(t, details={}) {
+  const page=await pageFor(t,{width:390,height:844});
+  await page.evaluate(details=>localStorage.setItem('test-draft',JSON.stringify({payload:{
+    activeWorkflow:'manual', wizard:{step:'marketplace',furthest:6,itemKind:'coin',coinDetails:{name:'Morgan dollar',year:'1881',metal:'Silver',fineness:'900',gradingStatus:'ungraded',...details}},
+    mainFields:{category:'Coins',title:'1881 Morgan dollar',description:'Silver collector coin.',cost:'40',salePrice:'90',minimumSalePrice:'55',ebaySyncEnabled:false},assistedFields:{},
+    recentUploadedImages:[{path:'front.jpg',storageBucket:'photos',name:'Front',mimeType:'image/jpeg'},{path:'back.jpg',storageBucket:'photos',name:'Back',mimeType:'image/jpeg'}],
+    aiSelectedUploadedImagePath:'front.jpg',saveSelectedUploadedImagePaths:['front.jpg','back.jpg'],
+  }})),details);
+  await page.reload();
+  await page.waitForFunction(()=>window.coinEbayForm && window.addItemWizard?.isCoin() && document.querySelector('[data-coin-ebay-category]').options.length>1);
+  return page;
+}
+test('coin eBay category, raw condition and photo confirmation survive drafts and save with retail',async(t)=>{
+  const page=await coinMarketplacePage(t);
+  await page.locator('#coin-ebay-add input[type=search]').fill('Morgan');
+  await page.locator('[data-coin-ebay-category]').selectOption('39464');
+  await page.waitForFunction(()=>window.coinEbayForm.getMetadata()?.category.id==='39464');
+  await page.locator('#ebay-sync-enabled').check();
+  await page.locator('[data-coin-descriptor="2"]').selectOption('9');
+  await page.locator('[data-coin-ebay-photos]').check();
+  assert.equal(await page.locator('[data-coin-aspect="Fineness"]').inputValue(),'0.9');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.locator('[data-coin-descriptor="2"]').scrollIntoViewIfNeeded();
+  await page.screenshot({path:new URL('test-results/coin-ebay-mobile.png',root).pathname.replace(/^\/(\w:)/,'$1')});
+  await page.waitForFunction(()=>JSON.parse(localStorage.getItem('test-draft'))?.payload?.wizard?.coinDetails?.ebay?.photosConfirmed===true);
+  await page.reload();
+  await page.waitForFunction(()=>window.coinEbayForm?.getMetadata()?.category.id==='39464');
+  assert.equal(await page.locator('#ebay-sync-enabled').isChecked(),true);
+  assert.equal(await page.locator('[data-coin-descriptor="2"]').inputValue(),'9');
+  assert.equal(await page.locator('[data-coin-ebay-photos]').isChecked(),true);
+  await next(page); assert.equal(await step(page),'review');
+  await page.locator('#item-step-review button[type=submit]').click();
+  await page.waitForFunction(()=>window.testWrites.length===1);
+  const saved=await page.evaluate(()=>window.testWrites[0]);
+  assert.equal(saved.ebay_sync_enabled,true);assert.equal(saved.ebay_category_id,'39464');assert.equal(saved.ebay_condition,'USED_VERY_GOOD');
+  assert.deepEqual(saved.coin_details.ebay.descriptors['2'],{values:['9']});assert.equal(saved.sale_price,90);assert.equal(saved.minimum_sale_price,55);assert.equal(saved.photos.length,2);
+});
+test('certified coin controls use live dependent grades and track changes to the entered grade',async(t)=>{
+  const page=await coinMarketplacePage(t,{gradingStatus:'certified',grade:'MS 65',gradingService:'PCGS',certNumber:'00012345'});
+  await page.locator('[data-coin-ebay-category]').selectOption('39464');
+  await page.waitForFunction(()=>window.coinEbayForm.getMetadata()?.category.id==='39464');
+  assert.equal(await page.locator('[data-coin-descriptor="1"]').inputValue(),'14');
+  assert.equal(await page.locator('[data-coin-descriptor="4"]').inputValue(),'55');
+  assert.equal(await page.locator('[data-coin-descriptor="5"]').inputValue(),'00012345');
+  await page.locator('[data-coin-descriptor="3"]').selectOption('19');
+  assert.equal(await page.locator('[data-coin-descriptor="4"]').inputValue(),'');
+  assert.equal(await page.locator('[data-coin-descriptor="4"] option[value="55"]').count(),0);
+  await page.locator('[data-coin-descriptor="4"]').selectOption('27');
+  assert.equal(await page.locator('#coin-grade').inputValue(),'AU 58');
+  await page.locator('[data-item-step-target="information"]').click();
+  await page.locator('#coin-grade').evaluate(el=>{el.value='MS64';el.dispatchEvent(new Event('change',{bubbles:true}));});
+  assert.equal(await page.locator('[data-coin-descriptor="4"]').inputValue(),'56');
+});
+test('coin metadata loading keeps the latest category when responses arrive out of order',async(t)=>{
+  const page=await coinMarketplacePage(t);
+  await page.evaluate(()=>window.testCoinMetadataHold='39464');
+  await page.locator('[data-coin-ebay-category]').selectOption('39464');
+  await page.waitForFunction(()=>window.testReleaseCoinMetadata);
+  await page.locator('[data-coin-ebay-category]').selectOption('177652');
+  await page.waitForFunction(()=>window.coinEbayForm.getMetadata()?.category.id==='177652');
+  await page.evaluate(()=>window.testReleaseCoinMetadata());
+  await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(()=>window.coinEbayForm.getMetadata()?.category.id),'177652');
+  assert.equal(await page.locator('[data-coin-aspect="Certification"]').inputValue(),'Uncertified');
+  assert.equal(await page.locator('[data-coin-descriptor]').count(),0);
+});
+
+test('Stock coin editor prepares older coins without automatically opting them into eBay',async(t)=>{
+  const page=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+  t.after(()=>page.close());
+  await page.route('**/*',route=>route.request().url().startsWith(origin)?route.continue():route.abort());
+  await page.goto(`${origin}/stock.html`);
+  await page.waitForFunction(()=>window.coinEbayStock);
+  await page.evaluate(()=>{
+    window.coinEbayStock.open({coin_details:{name:'Morgan dollar',year:'1881',metal:'Silver',gradingStatus:'ungraded'},ebay_sync_enabled:false},true);
+    document.getElementById('editItemModal').classList.remove('hidden');
+    document.getElementById('editItemModal').classList.add('show');
+  });
+  await page.waitForFunction(()=>document.querySelector('[data-coin-ebay-category]').options.length>1);
+  assert.equal(await page.locator('#edit-coin-ebay-enabled').isChecked(),false);
+  await page.locator('[data-coin-ebay-category]').selectOption('39464');
+  await page.locator('[data-coin-descriptor="2"]').selectOption('8');
+  await page.locator('#edit-coin-ebay-enabled').check();
+  const details=await page.evaluate(()=>window.coinEbayStock.getDetails());
+  assert.equal(details.year,'1881');assert.equal(details.ebay.categoryId,'39464');assert.equal(details.ebay.conditionId,'4000');
+  assert.deepEqual(details.ebay.descriptors['2'],{values:['8']});
+  await page.evaluate(()=>window.coinEbayStock.open({coin_details:{name:'Coin'},ebay_sync_enabled:false},false));
+  assert.equal(await page.locator('#edit-coin-details').isVisible(),false);
 });

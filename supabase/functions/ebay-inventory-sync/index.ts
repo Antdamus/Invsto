@@ -1,5 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+import { buildCoinListing } from "../../../coin-ebay-core.mjs";
+
 type JsonRecord = Record<string, unknown>;
 
 type SyncSettings = {
@@ -173,6 +175,7 @@ function collectPhotoPaths(item: ItemRow): string[] {
 }
 
 function chooseCategory(item: ItemRow, settings: SyncSettings): { categoryId: string; source: "override" | "rule" | "default" } {
+  if (item.coin_details) return { categoryId: String((item.coin_details.ebay as any)?.categoryId ?? item.ebay_category_id ?? ""), source: "override" };
   if (item.watch_details) return { categoryId: "31387", source: "override" };
   const override = String(item.ebay_category_id || "").trim();
   if (override) return { categoryId: override, source: "override" };
@@ -287,7 +290,7 @@ function inferColor(item: ItemRow): string | null {
 }
 
 function isWatch(item: ItemRow): boolean {
-  return Boolean(item.watch_details || item.ebay_category_id === "31387");
+  return !item.coin_details && Boolean(item.watch_details || item.ebay_category_id === "31387");
 }
 
 function watchAspects(item: ItemRow): Record<string, string[]> {
@@ -340,6 +343,62 @@ async function loadWatchMetadata(marketplace: string): Promise<WatchMetadata> {
   return metadata;
 }
 
+// Coin category and condition metadata are fetched from eBay, never guessed from metal.
+const coinCategoryCache = new Map<string, { until: number; categories: any[] }>();
+const coinMetadataCache = new Map<string, { until: number; metadata: any }>();
+async function coinMetadataClient(marketplace: string) {
+  if (!EBAY_CLIENT_ID || !EBAY_CLIENT_SECRET) throw new Error("Missing eBay metadata credentials.");
+  const response = await fetch(`${EBAY_API_BASE}/identity/v1/oauth2/token`, {
+    method: "POST", signal: AbortSignal.timeout(15000),
+    headers: { Authorization: `Basic ${btoa(`${EBAY_CLIENT_ID}:${EBAY_CLIENT_SECRET}`)}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "client_credentials", scope: "https://api.ebay.com/oauth/api_scope" }),
+  });
+  if (!response.ok) throw new Error(`eBay category authentication failed (${response.status}).`);
+  const token = (await response.json()).access_token;
+  if (!token) throw new Error("Missing eBay metadata token.");
+  const tree = await ebayRequest(token, "GET", `/commerce/taxonomy/v1/get_default_category_tree_id?marketplace_id=${encodeURIComponent(marketplace)}`);
+  return { token, treeId: String(tree.categoryTreeId) };
+}
+async function loadCoinCategories(marketplace: string): Promise<any[]> {
+  const cached = coinCategoryCache.get(marketplace);
+  if (cached && cached.until > Date.now()) return cached.categories;
+  if (marketplace !== "EBAY_US") throw new Error("Coin category selection currently supports the US eBay marketplace.");
+  const { token, treeId } = await coinMetadataClient(marketplace);
+  const tree = await ebayRequest(token, "GET", `/commerce/taxonomy/v1/category_tree/${treeId}/get_category_subtree?category_id=11116`);
+  const categories: any[] = [];
+  const collectorRoots = new Set(["253", "256", "3377", "4733", "18466"]);
+  function walk(node: any, parents: any[] = []) {
+    const path = [...parents, node.category];
+    if (node.leafCategoryTreeNode) {
+      const collector = path.some(category => collectorRoots.has(String(category.categoryId)));
+      const bullion = path.some(category => category.categoryName === "Bullion") && /coin/i.test(node.category.categoryName);
+      if (collector || bullion) categories.push({ id: String(node.category.categoryId), label: path.slice(1).map(category => category.categoryName).join(" > "), bullion });
+    }
+    for (const child of node.childCategoryTreeNodes || []) walk(child, path);
+  }
+  walk(tree.categorySubtreeNode);
+  if (!categories.length) throw new Error("eBay returned no coin categories.");
+  coinCategoryCache.set(marketplace, { until: Date.now() + 3600000, categories });
+  return categories;
+}
+async function loadCoinMetadata(marketplace: string, categoryId: string): Promise<any> {
+  const key = `${marketplace}:${categoryId}`;
+  const cached = coinMetadataCache.get(key);
+  if (cached && cached.until > Date.now()) return cached.metadata;
+  const category = (await loadCoinCategories(marketplace)).find(category => category.id === categoryId);
+  if (!category) throw new Error("Choose a valid coin category from eBay.");
+  const { token, treeId } = await coinMetadataClient(marketplace);
+  const [taxonomy, policies] = await Promise.all([
+    ebayRequest(token, "GET", `/commerce/taxonomy/v1/category_tree/${treeId}/get_item_aspects_for_category?category_id=${categoryId}`),
+    ebayRequest(token, "GET", `/sell/metadata/v1/marketplace/${marketplace}/get_item_condition_policies?filter=${encodeURIComponent(`categoryIds:{${categoryId}}`)}`),
+  ]);
+  const policy = policies.itemConditionPolicies?.find((entry: any) => String(entry.categoryId) === categoryId);
+  if (!Array.isArray(taxonomy.aspects) || !policy) throw new Error("Could not load the coin category requirements from eBay.");
+  const metadata = { category, aspects: taxonomy.aspects, policy };
+  coinMetadataCache.set(key, { until: Date.now() + 3600000, metadata });
+  return metadata;
+}
+
 function validateWatchMetadata(item: ItemRow, aspects: Record<string, string[]>, metadata: WatchMetadata): string[] {
   const reasons: string[] = [];
   for (const aspect of metadata.aspects) {
@@ -355,6 +414,7 @@ function validateWatchMetadata(item: ItemRow, aspects: Record<string, string[]>,
 }
 
 function buildAspects(item: ItemRow, categoryId: string): Record<string, string[]> {
+  if (item.coin_details) return {};
   if (isWatch(item)) return watchAspects(item);
   const aspects: Record<string, string[]> = {
     Brand: ["Unbranded"],
@@ -394,13 +454,12 @@ function collectPublishBlockingReasons(item: ItemRow, price: number, quantity: n
   if (!String(item.description || "").trim()) reasons.push("missing description");
   if (!String(item.barcode || "").trim()) reasons.push("missing SKU/barcode");
   if (!Number.isFinite(price) || price <= 0) reasons.push("missing retail price");
-  if (item.coin_details) reasons.push("coin publishing requires coin-specific category and grading support");
   if (isWatch(item) && !WATCH_CONDITION_IDS[String(item.watch_details?.condition || "")]) reasons.push("missing or unsupported watch condition");
   if (quantity <= 0) reasons.push("quantity is 0");
   if (!categoryId || categorySource === "default") reasons.push("missing eBay category");
   if (!imageReady) reasons.push("missing eBay image");
 
-  for (const aspectName of (isWatch(item) ? ["Brand", "Department", "Type"] : ["Brand", "Type", "Style", "Main Stone", "Metal", "Metal Purity"])) {
+  for (const aspectName of (item.coin_details ? [] : isWatch(item) ? ["Brand", "Department", "Type"] : ["Brand", "Type", "Style", "Main Stone", "Metal", "Metal Purity"])) {
     if (!firstText(aspects[aspectName])) reasons.push(`missing ${aspectName}`);
   }
 
@@ -550,7 +609,7 @@ async function prepareItem(
   item: ItemRow,
   quantity: number,
   settings: SyncSettings,
-  options: { copyMissingPhotos: boolean; watchMetadata?: WatchMetadata; watchMetadataError?: string },
+  options: { copyMissingPhotos: boolean; watchMetadata?: WatchMetadata; watchMetadataError?: string; coinMetadata?: any; coinMetadataError?: string },
 ): Promise<PreparedItem> {
   const warnings: string[] = [];
   const sku = normalizeSku(item.barcode || "");
@@ -568,12 +627,15 @@ async function prepareItem(
   }
   const price = Number(item.sale_price || 0);
   if (price <= 0) warnings.push("Item has no sale price.");
+  const coinListing = item.coin_details && options.coinMetadata ? buildCoinListing(item, options.coinMetadata) : null;
   const rawCondition = isWatch(item) ? String(item.watch_details?.condition || "") : item.ebay_condition || settings.default_condition;
-  const condition = isWatch(item) ? rawCondition : normalizeEbayCondition(rawCondition);
-  if (!isWatch(item) && condition !== rawCondition) warnings.push(`Unsupported eBay condition "${rawCondition || "blank"}"; using NEW.`);
-  const aspects = buildAspects(item, categoryId);
+  const condition = item.coin_details ? coinListing?.condition : isWatch(item) ? rawCondition : normalizeEbayCondition(rawCondition);
+  if (!item.coin_details && !isWatch(item) && condition !== rawCondition) warnings.push(`Unsupported eBay condition "${rawCondition || "blank"}"; using NEW.`);
+  const aspects = (coinListing?.aspects || buildAspects(item, categoryId)) as Record<string, string[]>;
   const blockingReasons = collectPublishBlockingReasons(item, price, quantity, imageReady, categoryId, categoryChoice.source, aspects);
 
+  if (item.coin_details) blockingReasons.push(...(coinListing?.reasons || [options.coinMetadataError || "eBay coin requirements could not be verified"]));
+  if (item.coin_details && options.copyMissingPhotos && new Set(imageUrls).size < 2) blockingReasons.push("both front and back photos must be available for the coin listing");
   if (isWatch(item)) {
     if (options.watchMetadata) blockingReasons.push(...validateWatchMetadata(item, aspects, options.watchMetadata));
     else blockingReasons.push(options.watchMetadataError || "eBay watch requirements could not be verified");
@@ -581,7 +643,7 @@ async function prepareItem(
 
   const product: JsonRecord = {
     title: String(item.title || sku).slice(0, 80),
-    description: watchDescription(item) || sku,
+    description: coinListing?.description || watchDescription(item) || sku,
     aspects,
   };
   if (imageUrls.length) product.imageUrls = imageUrls;
@@ -594,7 +656,8 @@ async function prepareItem(
         quantity,
       },
     },
-    condition,
+    ...(condition ? { condition } : {}),
+    ...(coinListing?.conditionDescriptors.length ? { conditionDescriptors: coinListing.conditionDescriptors } : {}),
     product,
   };
 
@@ -611,7 +674,7 @@ async function prepareItem(
         value: toMoney(price),
       },
     },
-    listingDescription: watchDescription(item) || sku,
+    listingDescription: coinListing?.description || watchDescription(item) || sku,
     listingPolicies: {
       fulfillmentPolicyId: settings.fulfillment_policy_id,
       paymentPolicyId: settings.payment_policy_id,
@@ -815,6 +878,8 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const settings = await loadSettings(supabase);
+    if (body.action === "coinCategories") return jsonResponse(200, { ok: true, categories: await loadCoinCategories(settings.marketplace_id) });
+    if (body.action === "coinRequirements") return jsonResponse(200, { ok: true, ...(await loadCoinMetadata(settings.marketplace_id, String(body.categoryId || ""))) });
     if (body.action === "watchRequirements") {
       const metadata = await loadWatchMetadata(settings.marketplace_id);
       return jsonResponse(200, { ok: true, categoryId: "31387", marketplace: settings.marketplace_id,
@@ -861,6 +926,15 @@ Deno.serve(async (req) => {
       try { watchMetadata = await loadWatchMetadata(settings.marketplace_id); }
       catch (error) { watchMetadataError = error instanceof Error ? error.message : "Could not verify eBay watch requirements."; }
     }
+    const coinMetadata = new Map<string, any>();
+    const coinMetadataErrors = new Map<string, string>();
+    const coinCategories = [...new Set(items.filter(item => item.coin_details).map(item => chooseCategory(item, settings).categoryId))];
+    for (let index = 0; index < coinCategories.length; index += 3) {
+      await Promise.all(coinCategories.slice(index, index + 3).map(async categoryId => {
+        try { coinMetadata.set(categoryId, await loadCoinMetadata(settings.marketplace_id, categoryId)); }
+        catch (error) { coinMetadataErrors.set(categoryId, error instanceof Error ? error.message : "Could not verify eBay coin requirements."); }
+      }));
+    }
     const links = await loadEbayLinks(supabase, items.map((item) => item.id));
     const linkByItem = new Map<string, any>(links.map((link: any) => [link.item_type_id, link]));
     const prepared: PreparedItem[] = [];
@@ -872,7 +946,7 @@ Deno.serve(async (req) => {
 
     for (const item of items) {
       try {
-        const next = await prepareItem(supabase, item, item.quantity, settings, { copyMissingPhotos: !dryRun, watchMetadata, watchMetadataError });
+        const next = await prepareItem(supabase, item, item.quantity, settings, { copyMissingPhotos: !dryRun, watchMetadata, watchMetadataError, coinMetadata: coinMetadata.get(chooseCategory(item, settings).categoryId), coinMetadataError: coinMetadataErrors.get(chooseCategory(item, settings).categoryId) });
         prepared.push(next);
         if (dryRun) {
           const status = next.quantity <= 0 ? "out_of_stock" : next.offerPayload ? "ready" : "inventory_only";
@@ -906,7 +980,7 @@ Deno.serve(async (req) => {
             warnings,
           });
         } else {
-          if (item.coin_details || (isWatch(item) && next.blockingReasons.some(reason => reason !== "quantity is 0"))) {
+          if ((item.coin_details || isWatch(item)) && next.blockingReasons.some(reason => reason !== "quantity is 0")) {
             throw new Error(`Item is not ready for eBay: ${[...new Set(next.blockingReasons)].join(", ")}`);
           }
           const link = linkByItem.get(item.id);

@@ -35,6 +35,8 @@
     if (document.getElementById("coin-fineness").disabled) coin.fineness = "";
     if (coin.gradingStatus === "ungraded") coin.grade = "";
     if (coin.gradingStatus !== "certified") { coin.gradingService = ""; coin.certNumber = ""; }
+    const ebay = window.coinEbayForm?.getDetails();
+    if (ebay) coin.ebay = ebay;
     return coin;
   };
   const getWatchDetails = () => {
@@ -294,7 +296,7 @@
       step: steps[current].dataset.itemStep,
       furthest,
       itemKind: isWatch() ? "watch" : isCoin() ? "coin" : "jewelry",
-      coinDetails: Object.fromEntries(coinKeys.map((key) => [key, value(`coin-${key}`)])),
+      coinDetails: { ...Object.fromEntries(coinKeys.map((key) => [key, value(`coin-${key}`)])), ebay: window.coinEbayForm?.getDetails() },
       watchDetails: Object.fromEntries(watchKeys.map((key) => [key, value(`watch-${key}`)])),
       manualRetail: document.getElementById("sale-price").dataset.manualRetail === "true",
       autoCost: document.getElementById("auto-cost-checkbox").checked,
@@ -307,6 +309,7 @@
       form.querySelector(`[name="item-kind"][value="${kind}"]`).checked = true;
       watchKeys.forEach((key) => { document.getElementById(`watch-${key}`).value = draft.watchDetails?.[key] || ""; });
       coinKeys.forEach((key) => { document.getElementById(`coin-${key}`).value = draft.coinDetails?.[key] || (key === "gradingStatus" ? "ungraded" : ""); });
+      window.coinEbayForm?.reset(draft.coinDetails || {}, kind === "coin");
       document.getElementById("title").dataset.watchTitle = draft.autoWatchTitle || "";
       document.getElementById("title").dataset.coinTitle = draft.autoCoinTitle || "";
       document.getElementById("sale-price").dataset.manualRetail = String(Boolean(draft.manualRetail));

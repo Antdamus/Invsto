@@ -1,0 +1,14 @@
+.coin-ebay-editor { min-width:0; width:100%; box-sizing:border-box; }
+.coin-ebay-editor[hidden] { display:none !important; }
+.coin-ebay-editor .coin-ebay-field { display:flex; flex-direction:column; gap:8px; margin:14px 0; min-width:0; font-size:16px; }
+.coin-ebay-editor input:not([type=checkbox]), .coin-ebay-editor select { box-sizing:border-box; width:100%; min-width:0; min-height:48px; padding:12px; border:1px solid #857758; border-radius:12px; font:inherit; font-size:16px; background:var(--add-surface, #252323); color:#f4eee1; }
+.coin-ebay-editor select { text-overflow:ellipsis; }
+.coin-ebay-editor option { background:#252323; color:#f4eee1; }
+.coin-ebay-editor button { min-height:44px; padding:10px 16px; font:inherit; border-radius:12px; cursor:pointer; }
+.coin-ebay-editor .coin-ebay-confirm { flex-direction:row-reverse; justify-content:flex-end; align-items:center; }
+.coin-ebay-editor input[type=checkbox] { min-width:22px; height:22px; margin:4px; }
+.coin-ebay-editor .coin-ebay-status, .coin-ebay-editor small { display:block; overflow-wrap:anywhere; line-height:1.5; }
+.coin-ebay-editor details { margin:16px 0; }
+.coin-ebay-editor summary { cursor:pointer; padding:10px 0; font-weight:600; }
+.coin-ebay-editor a { display:inline-block; margin:12px 0; color:inherit; text-decoration:underline; }
+#edit-coin-details { border:1px solid #b8a16c; border-radius:12px; padding:12px; margin:16px 0; }
