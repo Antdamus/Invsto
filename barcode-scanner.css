@@ -35,7 +35,21 @@ dialog.camera-scanner {
 .camera-scanner button:disabled { opacity: .5; cursor: default; }
 .camera-scanner .camera-scanner-help, .camera-scanner .camera-scanner-privacy { color: #cbc7bd; }
 .camera-scanner-preview { position: relative; overflow: hidden; border-radius: 12px; background: #080808; }
-.camera-scanner video { display: block; width: 100%; height: auto; max-height: 34dvh; object-fit: contain; }
+.camera-scanner-viewfinder {
+  position: relative; overflow: hidden; margin: auto;
+  width: min(100%, calc(34dvh * var(--camera-ratio, 1.333333)));
+  aspect-ratio: var(--camera-ratio, 1.333333);
+}
+.camera-scanner video { display: block; width: 100%; height: 100%; object-fit: contain; transform: scale(var(--camera-zoom, 2)); }
+.camera-scanner-can-focus .camera-scanner-viewfinder { cursor: crosshair; }
+.camera-scanner-tools { margin-top: 12px; }
+.camera-scanner-zoom { display: flex; flex-wrap: wrap; gap: 8px; }
+.camera-scanner-zoom button { flex: 1 1 auto; padding: 10px; }
+.camera-scanner-zoom button[aria-pressed=true] { background: #e0c385; color: #242016; border-color: #e0c385; }
+.camera-scanner .camera-scanner-focus-hint, .camera-scanner-camera-choice span { font-size: 13px; color: #cbc7bd; }
+.camera-scanner-camera-choice { display: block; margin-top: 12px; font-size: 14px; }
+.camera-scanner-camera-choice select { display: block; width: 100%; min-height: 44px; margin: 5px 0; padding: 8px; border: 1px solid #766749; border-radius: 8px; background: #292a2c; color: #fff1d0; font: inherit; }
+.camera-scanner-camera-choice span { display: block; }
 .camera-scanner-frame { position: absolute; inset: 18% 7%; border: 2px solid #e5ca8c; border-radius: 10px; pointer-events: none; }
 .camera-scanner-status { min-height: 3em; }
 .camera-scanner-result { padding: 15px; background: #303329; border: 1px solid #77825a; border-radius: 10px; }

@@ -115,6 +115,7 @@ test('real video decoder waits through blank frames, reads a barcode, and stops 
   await page.waitForFunction(() => document.querySelector('[data-camera="video"]').readyState >= 2);
   await page.waitForTimeout(450); // Let the real reader encounter empty camera frames.
   assert.match(await status(page).textContent(), /Center the whole barcode/);
+  await page.locator('[data-zoom="1"]').click();
   await page.evaluate(() => window.drawTestBarcode());
   await page.waitForFunction(() => !document.querySelector('[data-camera="use"]').disabled);
   assert.equal(await page.locator('[data-camera="value"]').textContent(), 'OG-CAMERA-00012');
@@ -123,9 +124,9 @@ test('real video decoder waits through blank frames, reads a barcode, and stops 
   assert.equal(await page.locator('#input-to-search-inventory-item').inputValue(), 'OG-CAMERA-00012');
 });
 
-async function fakeCamera(page, deferred = false) {
-  await page.evaluate(deferred => {
-    window.cameraStops = 0; window.cameraCalls = [];
+async function fakeCamera(page, deferred = false, focus = false) {
+  await page.evaluate(({ deferred, focus }) => {
+    window.cameraStops = 0; window.cameraCalls = []; window.focusCalls = [];
     navigator.mediaDevices.getUserMedia = async constraints => {
       window.deliverBarcode = null;
       window.cameraCalls.push(constraints);
@@ -137,16 +138,24 @@ async function fakeCamera(page, deferred = false) {
       const timer = setInterval(() => track.requestFrame(), 60);
       track.stop = () => { window.cameraStops++; clearInterval(timer); stop(); };
       track.getSettings = () => ({ deviceId: constraints.video.deviceId?.exact || 'rear' });
+      track.getCapabilities = () => focus ? { focusMode: ['manual', 'continuous'] } : {};
+      track.getConstraints = () => constraints.video;
+      track.applyConstraints = async value => {
+        window.focusCalls.push(value);
+        if (window.rejectFocus) throw new DOMException('Unsupported', 'OverconstrainedError');
+        if (window.deferFocus) await new Promise(resolve => { window.releaseFocus = resolve; });
+      };
       return stream;
     };
-    navigator.mediaDevices.enumerateDevices = async () => ['rear', 'front'].map(deviceId => ({ kind: 'videoinput', deviceId }));
+    navigator.mediaDevices.getSupportedConstraints = () => ({ focusMode: focus, pointsOfInterest: focus });
+    navigator.mediaDevices.enumerateDevices = async () => ['rear', 'front'].map(deviceId => ({ kind: 'videoinput', deviceId, label: deviceId === 'rear' ? 'Back Camera' : 'Front Camera' }));
     window.ZXingWASM = {
       prepareZXingModule: async () => {},
       readBarcodes: () => new Promise(resolve => {
         window.deliverBarcode = code => resolve([{ text: code, isValid: true, error: '' }]);
       }),
     };
-  }, deferred);
+  }, { deferred, focus });
 }
 
 test('cancel releases late camera permission, stale results cannot change another field, and Escape stays inside scanner', async t => {
@@ -419,6 +428,7 @@ test('reported phone image decodes as a photo and through a portrait camera stre
     navigator.mediaDevices.enumerateDevices = async () => [];
   }, `data:image/jpeg;base64,${buffer.toString('base64')}`);
   await open(page);
+  await page.locator('[data-zoom="1"]').click();
   await page.waitForFunction(() => !document.querySelector('[data-camera="use"]').disabled);
   assert.equal(await page.locator('[data-camera="value"]').textContent(), expected);
   await page.locator('[data-camera="use"]').click();
@@ -438,4 +448,118 @@ test('reported phone photo decodes in the browser engine without a camera', {
   assert.equal(await page.locator('[data-camera="value"]').textContent(), process.env.INVSTO_SCANNER_REPRO_CODE);
   await page.locator('[data-camera="use"]').click();
   assert.equal(await page.locator('#input-to-search-inventory-item').inputValue(), process.env.INVSTO_SCANNER_REPRO_CODE);
+});
+
+
+test('small-label preset crops actual decoder pixels, zoom never restarts the camera, and unsupported focus stays usable', async t => {
+  const page = await pageFor(t);
+  await fakeCamera(page);
+  await page.evaluate(() => {
+    window.decodedFrames = [];
+    window.ZXingWASM.readBarcodes = async data => { window.decodedFrames.push([data.width, data.height]); return []; };
+  });
+  await open(page);
+  await page.waitForFunction(() => window.decodedFrames.length);
+  assert.equal(await page.locator('[data-zoom="2"]').getAttribute('aria-pressed'), 'true');
+  assert.deepEqual(await page.evaluate(() => window.decodedFrames.at(-1)), [50, 50]);
+  assert.equal(await page.locator('[data-camera="focusCenter"]').isVisible(), false);
+  assert.match(await page.locator('[data-camera="focusHint"]').textContent(), /Focus is controlled by your phone/);
+  await page.locator('[data-zoom="3"]').click();
+  await page.waitForFunction(() => window.decodedFrames.at(-1)[0] === 33);
+  await page.locator('[data-zoom="1"]').click();
+  await page.waitForFunction(() => window.decodedFrames.at(-1)[0] === 100);
+  assert.equal(await page.evaluate(() => window.cameraCalls.length), 1);
+  assert.equal(await page.evaluate(() => window.focusCalls.length), 0);
+  assert.equal(await page.evaluate(() => window.cameraCalls[0].video.width.ideal), 1920);
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('[data-camera="video"]')).transform), 'matrix(1, 0, 0, 1, 0, 0)');
+  await page.locator('[data-camera="cancel"]').click();
+  assert.equal(await page.evaluate(() => window.cameraStops), 1);
+});
+
+test('autofocus and tapped focus preserve camera constraints, map zoom coordinates, and survive rejection or cancellation', async t => {
+  const page = await pageFor(t);
+  await fakeCamera(page, false, true);
+  await open(page);
+  await page.waitForFunction(() => !document.querySelector('[data-camera="focusCenter"]').hidden && window.deliverBarcode);
+  assert.equal(await page.evaluate(() => window.focusCalls[0].advanced[0].focusMode), 'continuous');
+  const view = page.locator('[data-camera="viewfinder"]');
+  const bounds = await view.boundingBox();
+  await view.click({ position: { x: bounds.width * .75, y: bounds.height * .25 } });
+  const applied = await page.evaluate(() => window.focusCalls.at(-1));
+  assert.equal(applied.width.ideal, 1920);
+  assert.ok(Math.abs(applied.advanced[0].pointsOfInterest[0].x - .625) < .005);
+  assert.ok(Math.abs(applied.advanced[0].pointsOfInterest[0].y - .375) < .005);
+  assert.equal(await page.evaluate(() => window.cameraCalls.length), 1);
+  await page.evaluate(() => { window.rejectFocus = true; });
+  await page.locator('[data-camera="focusCenter"]').click();
+  await page.waitForFunction(() => document.querySelector('[data-camera="focusCenter"]').hidden);
+  await page.evaluate(() => window.deliverBarcode('FOCUS-FALLBACK-001'));
+  await page.locator('[data-camera="use"]').click();
+  assert.equal(await page.locator('#input-to-search-inventory-item').inputValue(), 'FOCUS-FALLBACK-001');
+
+  await page.evaluate(() => { window.rejectFocus = false; window.deferFocus = true; });
+  await open(page);
+  await page.waitForFunction(() => window.releaseFocus);
+  await page.locator('[data-camera="cancel"]').click();
+  await page.evaluate(() => { window.deferFocus = false; window.releaseFocus(); });
+  assert.equal(await page.locator('dialog').isVisible(), false);
+  await open(page);
+  await page.waitForFunction(() => window.deliverBarcode);
+  await page.evaluate(() => window.deliverBarcode('AFTER-CANCEL'));
+  await page.locator('[data-camera="use"]').click();
+  assert.equal(await page.locator('#input-to-search-inventory-item').inputValue(), 'AFTER-CANCEL');
+});
+
+test('camera choice is remembered on reopen, and expired camera IDs fall back to the rear camera', async t => {
+  const page = await pageFor(t);
+  await fakeCamera(page);
+  await open(page);
+  await page.locator('[data-camera="cameraSelect"]').selectOption('front');
+  await page.waitForFunction(() => window.cameraCalls.length === 2 && window.deliverBarcode);
+  await page.locator('[data-camera="cancel"]').click();
+  await open(page);
+  await page.waitForFunction(() => window.cameraCalls.length === 3 && window.deliverBarcode);
+  assert.equal(await page.evaluate(() => window.cameraCalls[2].video.deviceId.exact), 'front');
+  await page.locator('[data-camera="cancel"]').click();
+  await page.evaluate(() => {
+    localStorage.setItem('inventory-scanner-camera', 'expired');
+    const getCamera = navigator.mediaDevices.getUserMedia;
+    navigator.mediaDevices.getUserMedia = async constraints => {
+      if (constraints.video.deviceId?.exact === 'expired') throw new DOMException('Missing camera', 'NotFoundError');
+      return getCamera(constraints);
+    };
+  });
+  await open(page);
+  await page.waitForFunction(() => window.cameraCalls.length === 4 && window.deliverBarcode);
+  assert.equal(await page.evaluate(() => window.cameraCalls[3].video.facingMode.ideal), 'environment');
+  await page.evaluate(() => window.deliverBarcode('NEW-CAMERA-001'));
+  await page.locator('[data-camera="use"]').click();
+  assert.equal(await page.locator('#input-to-search-inventory-item').inputValue(), 'NEW-CAMERA-001');
+});
+
+test('small-label zoom reads a tiny centered QR in a high-resolution camera frame', async t => {
+  const page = await pageFor(t);
+  const photo = await fixture(page, 'QR', '00-TINY-QR-012');
+  await page.evaluate(async url => {
+    const canvas = document.createElement('canvas'); canvas.width = 1920; canvas.height = 1080;
+    const ctx = canvas.getContext('2d'); ctx.fillStyle = '#ddd'; ctx.fillRect(0, 0, 1920, 1080);
+    const img = new Image(); img.src = url; await img.decode();
+    window.drawTinyLabel = () => ctx.drawImage(img, 885, 465, 150, 150);
+    window.tinyStream = canvas.captureStream(15);
+    setInterval(() => { ctx.fillRect(0, 0, 1, 1); window.tinyStream.getVideoTracks()[0].requestFrame(); }, 70);
+    navigator.mediaDevices.getUserMedia = async () => window.tinyStream;
+    navigator.mediaDevices.enumerateDevices = async () => [];
+  }, `data:image/png;base64,${photo.buffer.toString('base64')}`);
+  await open(page);
+  await page.waitForFunction(() => document.querySelector('[data-camera="video"]').readyState >= 2).catch(async error => { throw new Error(`${error.message}: ${await status(page).textContent()}`); });
+  assert.equal(await page.locator('[data-zoom="2"]').getAttribute('aria-pressed'), 'true');
+  await page.waitForFunction(() => Number(document.querySelector('[data-camera="preview"]').style.getPropertyValue('--camera-ratio')) === 1920 / 1080);
+  const bounds = await page.locator('[data-camera="viewfinder"]').boundingBox();
+  assert.ok(Math.abs(bounds.width / bounds.height - 1920 / 1080) < .01);
+  assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 390);
+  await page.screenshot({ path: new URL('test-results/scanner-small-label-controls.png', root).pathname.replace(/^\/([A-Z]:)/, '$1') });
+  await page.evaluate(() => window.drawTinyLabel());
+  await page.waitForFunction(() => !document.querySelector('[data-camera="use"]').disabled);
+  assert.equal(await page.locator('[data-camera="value"]').textContent(), '00-TINY-QR-012');
+  assert.equal(await page.evaluate(() => window.tinyStream.getVideoTracks()[0].readyState), 'ended');
 });

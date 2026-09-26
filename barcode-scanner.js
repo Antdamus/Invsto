@@ -3,6 +3,65 @@
   const scriptBase = new URL('.', document.currentScript.src);
   let libraryPromise, dialog, ui, active, generation = 0;
 
+  const cameraPreferenceKey = 'inventory-scanner-camera';
+  const focusFallback = 'Focus is controlled by your phone. Move back if the label is blurry.';
+  let preferredZoom = 2;
+  function savedCamera() {
+    try { return localStorage.getItem(cameraPreferenceKey) || ''; } catch (_) { return ''; }
+  }
+  function rememberCamera(deviceId) {
+    try { localStorage.setItem(cameraPreferenceKey, deviceId); } catch (_) { /* Private browsing can block storage. */ }
+  }
+
+  function setZoom(value) {
+    if (!active) return;
+    active.zoom = preferredZoom = value;
+    ui.preview.style.setProperty('--camera-zoom', value);
+    ui.zoom.querySelectorAll('[data-zoom]').forEach(button => {
+      button.setAttribute('aria-pressed', String(Number(button.dataset.zoom) === value));
+    });
+  }
+
+  function showFocusSupport(session) {
+    ui.focusHint.textContent = session.tapFocus ? 'Tap the label in the preview to request focus.' : focusFallback;
+    ui.preview.classList.toggle('camera-scanner-can-focus', session.tapFocus);
+    ui.focusCenter.hidden = !session.tapFocus;
+  }
+
+  async function configureFocus(session, token) {
+    const track = session.stream?.getVideoTracks()[0];
+    session.tapFocus = false;
+    try {
+      const capabilities = track?.getCapabilities?.() || {};
+      // Leave the browser's defaults alone unless this actual camera advertises autofocus.
+      if (capabilities.focusMode?.includes('continuous') && track.applyConstraints) {
+        await track.applyConstraints({ ...track.getConstraints?.(), advanced: [{ focusMode: 'continuous' }] });
+        if (active !== session || token !== generation) return;
+        session.tapFocus = navigator.mediaDevices.getSupportedConstraints?.().pointsOfInterest === true;
+      }
+    } catch (_) { /* Optional focus controls must never interrupt barcode scanning. */ }
+    if (active === session && token === generation) showFocusSupport(session);
+  }
+
+  async function requestFocus(x = 0.5, y = 0.5) {
+    const session = active, token = generation;
+    if (!session?.tapFocus || session.focusBusy || !session.stream) return;
+    const track = session.stream.getVideoTracks()[0];
+    session.focusBusy = true;
+    ui.focusHint.textContent = 'Requesting focus... Hold steady.';
+    try {
+      // Points of interest use normalized sensor coordinates, accounting for the zoom crop.
+      await track.applyConstraints({ ...track.getConstraints?.(), advanced: [{
+        focusMode: 'continuous', pointsOfInterest: [{ x: 0.5 + (x - 0.5) / session.zoom, y: 0.5 + (y - 0.5) / session.zoom }],
+      }] });
+      if (active === session && token === generation) ui.focusHint.textContent = 'Focus requested. Hold steady, or move back if the label is still blurry.';
+    } catch (_) {
+      if (active === session && token === generation) { session.tapFocus = false; showFocusSupport(session); }
+    } finally {
+      if (active === session && token === generation) session.focusBusy = false;
+    }
+  }
+
   // Explicitly marked inputs get the same adjacent control, including fields
   // inserted later by dropdowns and modals. Their existing listeners stay intact.
   const fieldButtons = new WeakMap();
@@ -123,10 +182,14 @@
       }
       try {
         // Use the actual frame dimensions, including portrait orientation changes.
-        const scale = Math.min(1, 1600 / Math.max(video.videoWidth, video.videoHeight));
-        const width = Math.round(video.videoWidth * scale), height = Math.round(video.videoHeight * scale);
+        const sourceWidth = video.videoWidth / session.zoom, sourceHeight = video.videoHeight / session.zoom;
+        const scale = Math.min(1, 1600 / Math.max(sourceWidth, sourceHeight));
+        const width = Math.max(1, Math.round(sourceWidth * scale)), height = Math.max(1, Math.round(sourceHeight * scale));
         if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
-        context.drawImage(video, 0, 0, width, height);
+        ui.preview.style.setProperty('--camera-ratio', video.videoWidth / video.videoHeight);
+        // Decode exactly the center crop shown in the preview, retaining its original pixels.
+        context.drawImage(video, (video.videoWidth - sourceWidth) / 2, (video.videoHeight - sourceHeight) / 2,
+          sourceWidth, sourceHeight, 0, 0, width, height);
         const { result, detected } = await decodeCanvas(library, canvas);
         if (!current()) return;
         if (result) { receive(result.text, token); return; }
@@ -156,6 +219,8 @@
     ui.video.srcObject = null;
     ui.preview.hidden = true;
     ui.switchCamera.hidden = true;
+    ui.cameraTools.hidden = true;
+    ui.cameraChoice.hidden = true;
   }
 
   function finish() {
@@ -208,10 +273,14 @@
     return 'The camera could not start. Retry or choose a clear photo of the barcode.';
   }
 
-  async function startCamera(deviceId) {
+  async function startCamera(deviceId = savedCamera()) {
     stopCapture();
     resetResult();
     const session = active, token = generation;
+    session.tapFocus = false;
+    session.focusBusy = false;
+    setZoom(preferredZoom);
+    showFocusSupport(session);
     message('Loading barcode reader...');
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       message('Live scanning needs a browser with camera access on HTTPS. You can still choose a barcode photo below.');
@@ -222,10 +291,20 @@
       const library = await loadReader();
       if (active !== session || token !== generation) return;
       message('Starting camera... Allow camera access when your browser asks.');
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const constraints = id => ({
         audio: false,
-        video: { ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } }), width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { ...(id ? { deviceId: { exact: id } } : { facingMode: { ideal: 'environment' } }),
+          width: { ideal: 1920 }, height: { ideal: 1080 } },
       });
+      let stream;
+      try { stream = await navigator.mediaDevices.getUserMedia(constraints(deviceId)); }
+      catch (error) {
+        // Saved camera IDs can expire after permission or device changes.
+        if (!deviceId || !['NotFoundError', 'OverconstrainedError'].includes(error.name)) throw error;
+        if (active !== session || token !== generation) return;
+        rememberCamera('');
+        stream = await navigator.mediaDevices.getUserMedia(constraints());
+      }
       // A permission prompt can finish after Cancel or after another scan opens.
       if (active !== session || token !== generation) { stream.getTracks().forEach(track => track.stop()); return; }
       session.stream = stream;
@@ -235,12 +314,22 @@
       ui.video = freshVideo;
       session.deviceId = stream.getVideoTracks()[0]?.getSettings?.().deviceId;
       ui.preview.hidden = false;
-      message('Center the whole barcode in the frame. Hold steady with good light.');
+      ui.cameraTools.hidden = false;
+      message('Center the whole barcode in the frame. For tiny labels, move back and use 2× or 3×. Use 1× for wide barcodes.');
       session.controls = scanVideo(library, session, token);
+      void configureFocus(session, token);
       const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
       if (active !== session || token !== generation) return;
       session.cameras = devices.filter(device => device.kind === 'videoinput');
       ui.switchCamera.hidden = session.cameras.length < 2;
+      ui.cameraChoice.hidden = session.cameras.length < 2;
+      ui.cameraSelect.replaceChildren(...session.cameras.map((camera, index) => {
+        const option = document.createElement('option');
+        option.value = camera.deviceId;
+        option.textContent = camera.label || `Camera ${index + 1}`;
+        return option;
+      }));
+      ui.cameraSelect.value = session.deviceId || '';
     } catch (error) {
       if (active !== session || token !== generation) return;
       stopCapture();
@@ -295,7 +384,13 @@
     dialog.innerHTML = `
       <div class="camera-scanner-heading"><h2 id="camera-scanner-title">Scan a barcode</h2><button type="button" data-camera="cancel" aria-label="Close scanner">Close</button></div>
       <p class="camera-scanner-help">Scan a striped barcode or an inventory QR code.</p>
-      <div data-camera="preview" class="camera-scanner-preview" hidden><video data-camera="video" autoplay muted playsinline aria-label="Camera preview"></video><span class="camera-scanner-frame" aria-hidden="true"></span></div>
+      <div data-camera="preview" class="camera-scanner-preview" hidden><div data-camera="viewfinder" class="camera-scanner-viewfinder"><video data-camera="video" autoplay muted playsinline aria-label="Camera preview"></video><span class="camera-scanner-frame" aria-hidden="true"></span></div></div>
+      <div data-camera="cameraTools" class="camera-scanner-tools" hidden>
+        <div data-camera="zoom" class="camera-scanner-zoom" role="group" aria-label="Preview zoom"><button type="button" data-zoom="1" aria-pressed="false">1×</button><button type="button" data-zoom="2" aria-pressed="true">2× · Small labels</button><button type="button" data-zoom="3" aria-pressed="false">3×</button></div>
+        <p data-camera="focusHint" class="camera-scanner-focus-hint"></p>
+        <button type="button" data-camera="focusCenter" hidden>Focus on center</button>
+        <label data-camera="cameraChoice" class="camera-scanner-camera-choice" hidden>Camera<select data-camera="cameraSelect"></select><span>If close labels stay blurry, try another rear camera. Your choice is remembered.</span></label>
+      </div>
       <p data-camera="status" class="camera-scanner-status" role="status" aria-live="polite"></p>
       <div data-camera="result" class="camera-scanner-result" hidden><span>Scanned code</span><strong data-camera="value"></strong><p data-camera="hint"></p><button type="button" data-camera="use" disabled>Use code</button></div>
       <div class="camera-scanner-actions"><button type="button" data-camera="retry" hidden>Scan again</button><button type="button" data-camera="switchCamera" hidden>Switch camera</button></div>
@@ -310,11 +405,26 @@
     dialog.addEventListener('keydown', event => event.stopPropagation());
     // Keep dropdowns and underlying dialogs open while operating the scanner.
     dialog.addEventListener('click', event => event.stopPropagation());
+    ui.zoom.addEventListener('click', event => {
+      const button = event.target.closest('[data-zoom]');
+      if (button) setZoom(Number(button.dataset.zoom));
+    });
+    ui.viewfinder.addEventListener('click', event => {
+      const bounds = ui.viewfinder.getBoundingClientRect();
+      if (bounds.width && bounds.height) void requestFocus((event.clientX - bounds.left) / bounds.width, (event.clientY - bounds.top) / bounds.height);
+    });
+    ui.focusCenter.addEventListener('click', () => { void requestFocus(); });
+    ui.cameraSelect.addEventListener('change', () => {
+      rememberCamera(ui.cameraSelect.value);
+      startCamera(ui.cameraSelect.value);
+    });
     ui.retry.addEventListener('click', () => startCamera());
     ui.switchCamera.addEventListener('click', () => {
       const cameras = active.cameras;
       const index = cameras.findIndex(camera => camera.deviceId === active.deviceId);
-      startCamera(cameras[(index + 1) % cameras.length].deviceId);
+      const deviceId = cameras[(index + 1) % cameras.length].deviceId;
+      rememberCamera(deviceId);
+      startCamera(deviceId);
     });
     ui.photo.addEventListener('click', () => {
       stopCapture();
