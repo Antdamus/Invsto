@@ -1952,7 +1952,7 @@ async function bumpInventoryVersion(changedIds = null) {
       const state = pendingInventoryLabelPrintState;
       if (!state?.stockTransactionId) return false;
 
-      const deliveryVerb = deliveryMode === "queued-download" ? "queued" : "printed";
+      const deliveryVerb = ["queued-download", "remote-queue"].includes(deliveryMode) ? "queued" : "printed";
       const decisionLabel = strategy === "individual_batch"
         ? `${deliveryVerb} ${printQuantity} recommended label${printQuantity === 1 ? "" : "s"}`
         : strategy === "collective_only"
@@ -2027,7 +2027,7 @@ async function bumpInventoryVersion(changedIds = null) {
         labelKind: "InventoryLabel",
         listenerOnly: true,
         onProgress: (current, total, printer) => {
-          setInventoryLabelPrintStatus(`Downloading helper label ${current} of ${total} for ${printer?.name || "local print helper"}...`);
+          setInventoryLabelPrintStatus(`Sending label ${current} of ${total} for ${printer?.name || "local print helper"}...`);
         },
       });
     }
@@ -2065,13 +2065,14 @@ async function bumpInventoryVersion(changedIds = null) {
         }
 
         const printResult = await printInventoryItemLabels(printQuantity);
-        const printVerb = printResult?.mode === "queued-download" ? "Queued" : "Printed";
+        const printVerb = printResult?.mode === "direct" ? "Sent to printer" : "Queued";
         const notes = strategy === "collective_only"
           ? `${printVerb} one collective label after adding ${state.quantityAdded} inventory unit${Number(state.quantityAdded) === 1 ? "" : "s"} to ${state.locationName || "selected storage"}.`
           : `${printVerb} recommended label batch after adding ${state.quantityAdded} inventory unit${Number(state.quantityAdded) === 1 ? "" : "s"} to ${state.locationName || "selected storage"}.`;
-        const recorded = await recordInventoryLabelPreference(strategy, printQuantity, labelsPerOrder, notes);
-        await recordInventoryLabelPrintAudit(strategy, printQuantity, labelsPerOrder, printResult?.mode || "direct");
-        const delivery = printResult?.mode === "queued-download"
+        const recorded = await recordInventoryLabelPreference(strategy, printResult?.copies || printQuantity, labelsPerOrder, notes);
+        await recordInventoryLabelPrintAudit(strategy, printResult?.copies || printQuantity, labelsPerOrder, printResult?.mode || "direct");
+        const delivery = printResult?.mode === "remote-queue" ? `Queued ${printResult.copies} labels for ${printResult.stationName}. View Print stations for status`
+          : printResult?.mode === "queued-download"
           ? `Downloaded ${printResult.filename || "the DYMO label"} for the local print helper`
           : `Printed ${printQuantity} label${printQuantity === 1 ? "" : "s"}`;
         setInventoryLabelPrintStatus(`${delivery}.${recorded ? "" : " Label tag will record after the migration is pushed."}`, "success");
@@ -2118,7 +2119,7 @@ async function bumpInventoryVersion(changedIds = null) {
       if (labelsPerOrderInput) labelsPerOrderInput.value = "2";
 
       updateInventoryLabelPrintEstimate();
-      setInventoryLabelPrintStatus("Ready to send to the local print helper. Keep tools/start-dymo-print-helper.bat open.");
+      setInventoryLabelPrintStatus("Choose Print to select the computer and printer that should receive these labels.");
       setInventoryLabelPrintBusy(false);
       modal.classList.remove("hidden");
       modal.setAttribute("aria-hidden", "false");

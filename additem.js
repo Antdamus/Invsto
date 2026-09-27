@@ -439,12 +439,13 @@ let uploadedImages = [];
       }
 
       const printResult = await printSavedItemLabels(printQuantity, strategy);
-      const printVerb = printResult?.mode === "queued-download" ? "Queued" : "Printed";
+      const printVerb = printResult?.mode === "direct" ? "Sent to printer" : "Queued";
       const notes = strategy === "collective_only"
         ? `${printVerb} one collective label; item should not receive individual labels.`
         : `${printVerb} recommended label batch after add-item save.`;
-      const recorded = await recordItemLabelPreference(strategy, printQuantity, labelsPerOrder, notes);
-      const delivery = printResult?.mode === "queued-download"
+      const recorded = await recordItemLabelPreference(strategy, printResult?.copies || printQuantity, labelsPerOrder, notes);
+      const delivery = printResult?.mode === "remote-queue" ? `Queued ${printResult.copies} labels for ${printResult.stationName}. View Print stations for status`
+        : printResult?.mode === "queued-download"
         ? `Queued ${printResult.filename || "the DYMO label"} for automatic local printing`
         : `Printed ${printQuantity} label${printQuantity === 1 ? "" : "s"}`;
       setLabelPrintStatus(`${delivery}.${recorded ? " Reloading for the next item..." : " Label tag will record after the migration is pushed. Reloading..."}`, "success");

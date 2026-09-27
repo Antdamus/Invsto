@@ -949,7 +949,9 @@ window.dymoModule = (function () {
             throw new Error("No DYMO label XML was provided.");
         }
 
-        const copies = Math.max(1, Math.floor(Number(options.copies) || 1));
+        const destination = options.printDestination || (window.printStations ? await window.printStations.chooseDestination(options) : null);
+        if (destination?.stationId) return window.printStations.enqueueLabel(labelXml, { ...options, printDestination: destination });
+        const copies = Math.max(1, Math.floor(Number(destination?.copies || options.copies) || 1));
         const preferredPrinterName = String(options.printerName || "").trim();
         const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
         const allowQueueFallback = options.queueFallback !== false;

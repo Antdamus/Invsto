@@ -1,6 +1,8 @@
 # OG Jewelers DYMO Print Helper
 
-This helper makes the live-sale flow print labels with almost no seller friction.
+For phone-to-computer printing and multiple named computers, use [Remote print stations](remote-print-stations.md). The app now offers a destination picker for label printing.
+
+This older helper handles the explicit **Download on this device (local helper)** option by watching a local downloads folder.
 
 ## What It Does
 

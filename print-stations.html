@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Print stations · Invsto</title>
+<link rel="stylesheet" href="add-item.css"><link rel="stylesheet" href="print-stations.css?v=20260927-1">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head><body class="add-body"><header class="header"><h1>Invsto</h1></header>
+<main id="print-stations-page" class="print-stations-page">
+<h1>Print stations</h1><p>Send your labels to a named computer, even when you are in another location.</p>
+<p id="print-page-status" role="status">Loading your print stations…</p><button id="print-refresh" type="button">Refresh status</button>
+<section><h2>Your computers</h2><div id="print-station-list"></div></section>
+<section id="print-setup" hidden><h2>Add a printing computer</h2>
+<ol><li>Name the computer below, for example “Florida counter.”</li><li>On that Windows computer, download the helper, extract the ZIP, and double-click <strong>Install-Print-Station.cmd</strong>.</li><li>Choose its DYMO printer and enter the pairing code shown here. Leave the computer awake and the printer connected.</li></ol>
+<p>The helper starts with Windows sign-in. DYMO Connect must be installed on the printing computer. If Windows asks whether to run the downloaded helper, check that it came from this Invsto page.</p>
+<p><a class="print-download-link" href="downloads/Invsto-Print-Station-Windows.zip?v=20260927-1" download>Download Windows helper</a> · <a href="https://www.dymo.com/support?cfid=software-downloads">DYMO software</a></p>
+<form id="print-register-form"><label for="print-station-name">Computer name</label><input id="print-station-name" required maxlength="80" placeholder="e.g. Florida counter"><button type="submit">Create pairing code</button></form>
+<div id="print-pairing" hidden><h3>Pair this computer</h3><code id="print-pair-code"></code><p id="print-pair-expiry"></p><button type="button" id="print-copy-code">Copy code</button></div>
+</section>
+<section><h2>Recent print jobs</h2><p>“Sent to printer” means DYMO accepted the request. Check the printer for the physical labels. An interrupted job is never automatically reprinted.</p><div id="print-job-list"></div></section>
+</main><script src="initSupabase.js"></script><script src="admin-nav.js?v=20260927-print-stations"></script><script src="print-stations.js?v=20260927-1"></script></body></html>

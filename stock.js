@@ -4961,7 +4961,7 @@ document.addEventListener("click", async (event) => {
 
   try {
     const result = await queueStockDymoLabelForHelper(link);
-    showToast(`DYMO label sent to local print helper${result?.filename ? `: ${result.filename}` : "."}`);
+    showToast(result?.mode === "remote-queue" ? `Label queued for ${result.stationName}. View Print stations for status.` : `DYMO label downloaded for the local print helper${result?.filename ? `: ${result.filename}` : "."}`);
   } catch (error) {
     console.error("Stock DYMO helper print failed:", error);
     showToast(error?.message || "Unable to queue DYMO label for printing.");

@@ -20,7 +20,7 @@ After saving, users can print now, print later, add a different item or add a si
 
 Cloud drafts are serialized per page to prevent a completed item's delayed write from replacing the next draft. They restore the active step, facts, photo selection and manual-copy ownership. Stock confirmation and the print batch are intentionally session state.
 
-Print last item and Print batch use saved item snapshots, even while a different item is being edited. Labels are generated from the saved barcode and QR destination, attached to the item, then queued to the existing local print helper. Failed entries remain available to retry. Batch state lasts for the current page session; Stock's Print DYMO Label can generate deferred labels later.
+Print last item and Print batch use saved item snapshots, even while a different item is being edited. Labels are generated from the saved barcode and QR destination, attached to the item, then queued to the named computer selected in the shared print destination picker. A batch selects its computer once; the existing local download helper remains an explicit option. See [remote print stations](remote-print-stations.md) for setup and retry behavior. Failed entries remain available to retry. Batch state lasts for the current page session; Stock's Print DYMO Label can generate deferred labels later.
 
 Existing barcode lookup runs early and offers the existing Add Inventory quick-add flow. Save rechecks uniqueness and reports duplicate conflicts without silently replacing a scanned barcode.
 
@@ -32,4 +32,4 @@ Run `npm run test:add-item`, `npm run test:inventory-prices`, and `npm run test:
 
 ## Deployment
 
-This intake refinement is frontend-only. Publish `add-item.html`, `additem-layout.js`, `additem-wizard.js`, `additem-wizard.css`, `additem-assisted.js`, `additem-intake.js`, `additem.js`, `additem-dymolabel.js`, `coin-ebay.js`, `stock.html` and `stock.js`. Keep the asset cache versions aligned. Existing watch/coin schemas and edge functions are reused; no new database migration is required. JWT verification settings are unchanged.
+The original intake refinement is frontend-only. Remote printing additionally requires the migration and deployment documented in [remote print stations](remote-print-stations.md). Publish `add-item.html`, `additem-layout.js`, `additem-wizard.js`, `additem-wizard.css`, `additem-assisted.js`, `additem-intake.js`, `additem.js`, `additem-dymolabel.js`, `coin-ebay.js`, `stock.html` and `stock.js`. Keep the asset cache versions aligned. Existing watch/coin schemas and edge functions are reused; no new database migration is required. JWT verification settings are unchanged.

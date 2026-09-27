@@ -2141,8 +2141,10 @@ async function printLiveSaleBagLabel(lotId) {
     freeText: lot.auction_number,
   });
   const filename = `${getLiveSaleLabelBaseName(lot)}_Reprint_Copies_1.dymo`;
-  downloadTextFile(xml, filename);
-  setStatus(`DYMO label for auction ${lot.auction_number || lot.lot_code || "bag"} queued for automatic printing.`, "success");
+  try {
+    const result = await window.printStations.printLabel(xml, {filename,copies:1,title:`Auction ${lot.auction_number || lot.lot_code}`,barcode:lot.lot_code});
+    setStatus(result.mode === 'remote-queue' ? `Label queued for ${result.stationName}. View Print stations for status.` : 'Label downloaded for the local helper.', 'success');
+  } catch (error) { setStatus(error.message || 'Could not send the label.', 'error'); }
 }
 
 function renderLabelReview() {
@@ -3397,12 +3399,12 @@ async function generateLiveLabel(options = {}) {
     renderAll();
 
     const downloadName = `${labelBaseName}_Copies_1.dymo`;
-    downloadTextFile(xml, downloadName);
+    const printResult = await window.printStations.printLabel(xml, {filename:downloadName,copies:1,title:`Auction ${state.currentLot.auction_number || state.currentLot.lot_code}`,barcode:state.currentLot.lot_code});
     const signed = await supabase.storage.from("dymo-labels").createSignedUrl(labelPath, 3600);
     const openLink = signed.data?.signedUrl
       ? ` <a href="${escapeHtml(signed.data.signedUrl)}" target="_blank" rel="noreferrer">Open uploaded label</a>`
       : "";
-    setLabelStatus(`DYMO label generated and queued as ${escapeHtml(downloadName)} for automatic local printing.${openLink}`, "success");
+    setLabelStatus(`${printResult.mode === 'remote-queue' ? `Label queued for ${escapeHtml(printResult.stationName)}. View Print stations for status.` : `Label downloaded as ${escapeHtml(downloadName)} for the local helper.`}${openLink}`, "success");
     return true;
   } catch (error) {
     console.error("Generate live sale label failed:", error);

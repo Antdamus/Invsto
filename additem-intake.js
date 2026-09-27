@@ -59,7 +59,7 @@
     try {
       const {error}=await window.supabase.rpc('set_item_label_print_preference',{
         _item_id:item.id,_strategy:strategy,_labels_per_order:units,
-        _label_print_quantity:copies,_notes:strategy==='deferred'?'Print later from the intake batch or Stock.':'Labels queued to the local print helper.'
+        _label_print_quantity:copies,_notes:strategy==='deferred'?'Print later from the intake batch or Stock.':'Labels queued to the selected print destination.'
       });
       if(error)throw error;
       return true;
@@ -71,14 +71,16 @@
     const status=$('item-print-session-status');const modalStatus=$('item-label-print-status');
     let done=0,preferenceFailed=false;
     try {
+      const printDestination=window.printStations?await window.printStations.chooseDestination({copies,labelCount:entries.length}):null;
+      copies=printDestination?.copies || copies;
       for(const entry of entries){
         status.textContent=modalStatus.textContent=`Preparing label ${done+1} of ${entries.length}…`;
         if(!entry.xml)entry.xml=(await window.dymoModule.prepareSavedItemLabel(entry.item)).templateXml;
-        await window.dymoModule.printDymoLabelXml(entry.xml,{copies,barcode:entry.item.barcode,title:entry.item.title,labelKind:'ItemLabel',listenerOnly:true});
+        await window.dymoModule.printDymoLabelXml(entry.xml,{copies,barcode:entry.item.barcode,title:entry.item.title,labelKind:'ItemLabel',listenerOnly:true,printDestination});
         printQueue.delete(entry.item.id);done++;
         if(!await recordPrintChoice(entry.item,strategy,copies,units))preferenceFailed=true;
       }
-      status.textContent=modalStatus.textContent=`Queued ${done*copies} label${done*copies===1?'':'s'} for printing.${preferenceFailed?' The label preference could not be recorded.':''}`;
+      status.textContent=modalStatus.textContent=`Queued ${done*copies} label${done*copies===1?'':'s'}${printDestination?.stationId?' for '+printDestination.name:''}. View Print stations for job status.${preferenceFailed?' The label preference could not be recorded.':''}`;
     }catch(error){status.textContent=modalStatus.textContent=`${done} item labels queued. ${error.message || 'Printing unavailable'}. Remaining items are still saved; retry printing later.`;}
     finally{printing=false;updateQueue();}
   }

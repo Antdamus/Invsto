@@ -1,0 +1,23 @@
+.print-station-dialog { box-sizing:border-box; width:min(520px,calc(100vw - 24px)); max-height:calc(100dvh - 24px); overflow:auto; border:1px solid #786747; border-radius:20px; padding:22px; color:#f5efe6; background:#211e20; box-shadow:0 20px 80px #0009; font:16px/1.5 'Manrope',sans-serif; }
+.print-station-dialog::backdrop { background:#0009; }
+.print-station-dialog * { box-sizing:border-box; }
+.print-dialog-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.print-dialog-head h2 { margin:0; }
+.print-station-dialog label { display:grid; gap:7px; margin:16px 0; font-weight:700; }
+.print-station-dialog select,.print-station-dialog input { width:100%; min-width:0; padding:12px; font:inherit; color:#f5efe6; background:#302b2d; border:1px solid #786747; border-radius:10px; }
+.print-station-dialog button,.print-stations-page button,.print-download-link { min-height:44px; border:1px solid #786747; border-radius:12px; padding:10px 16px; background:#302b2d; color:#f5efe6; font:700 15px/1.4 'Manrope',sans-serif; cursor:pointer; }
+.print-station-dialog button:disabled,.print-stations-page button:disabled { opacity:.5; cursor:default; }
+.print-station-dialog a,.print-stations-page a { color:#edc994; }
+.print-dialog-actions,.print-card-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
+.print-dialog-actions button { flex:1; }
+.print-dialog-actions [data-send],.print-stations-page button[type=submit] { color:#211b13; background:#edc994; }
+.print-stations-page { max-width:1000px; margin:24px auto; padding:20px; color:#f5efe6; font:16px/1.5 'Manrope',sans-serif; }
+.print-stations-page [hidden] { display:none !important; }
+.print-stations-page h1,.print-stations-page h2,.print-stations-page h3 { line-height:1.25; }
+.print-stations-page section { margin:24px 0; padding:20px; background:#211e20; border:1px solid #4d4337; border-radius:18px; }
+.print-station-card,.print-job-card { margin:12px 0; padding:16px; border:1px solid #514638; border-radius:14px; overflow-wrap:anywhere; }
+.print-station-card h3,.print-job-card h3 { margin:0 0 10px; }
+.print-stations-page input { box-sizing:border-box; width:100%; padding:12px; margin:8px 0 14px; border:1px solid #786747; border-radius:10px; background:#302b2d; color:#f5efe6; font:inherit; }
+#print-pair-code { display:block; font:700 clamp(18px,4vw,28px) monospace; letter-spacing:1px; overflow-wrap:anywhere; margin:15px 0; }
+.print-download-link { display:inline-block; text-decoration:none; }
+@media(max-width:600px) { .print-stations-page { padding:12px; } .print-stations-page section { padding:14px; } .print-station-dialog { padding:16px; } }
