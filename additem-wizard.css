@@ -162,3 +162,12 @@
   #item-step-photos .assisted-thumb-save-ribbon { display:none; }
   #item-step-photos .assisted-selected-image-empty { grid-column:1 / -1; }
 }
+
+.intake-photo-gallery { min-width:0; }
+.intake-photo-gallery > summary { cursor:pointer; min-height:44px; padding:14px; border:1px solid var(--border); border-radius:14px; background:var(--field); color:var(--text); font-weight:700; }
+.intake-photo-gallery > summary::marker { color:var(--gold-strong); }
+.intake-photo-gallery > summary:focus-visible { outline:2px solid var(--gold-strong); outline-offset:3px; }
+.intake-photo-gallery > summary .assisted-section-title { display:inline; font-size:1rem; }
+.intake-photo-gallery > summary > span { float:right; margin-left:8px; color:var(--text-soft); font-size:.85rem; }
+.intake-photo-gallery[open] .intake-gallery-expand, .intake-photo-gallery:not([open]) .intake-gallery-collapse { display:none; }
+.intake-photo-gallery[open] > summary { margin-bottom:12px; }

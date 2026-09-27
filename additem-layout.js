@@ -66,8 +66,12 @@
   const coinGuide=block('p','For coins, take a clear front photo and back photo of the actual coin.', 'field-helper');coinGuide.id='item-coin-photo-guide';coinGuide.hidden=true;
   photos.querySelector('.form-section-head').after(photoActions,coinGuide);
   photos.querySelector('.section-copy').textContent='New photos appear first and are included automatically. Tap a photo to make it the cover.';
-  byId('assisted-upload-title').textContent='Your photos';
-  document.querySelector('.assisted-image-layout').prepend(document.querySelector('.assisted-upload-browser'));
+  const galleryTitle=byId('assisted-upload-title');galleryTitle.textContent='Your photos';
+  const gallery=block('details', '<summary><span class="intake-gallery-expand">Expand</span><span class="intake-gallery-collapse">Collapse</span></summary>', 'intake-photo-gallery');
+  gallery.id='item-photo-gallery';gallery.open=true;
+  gallery.querySelector('summary').prepend(galleryTitle);
+  gallery.append(byId('assisted-image-status'),document.querySelector('.assisted-upload-browser'));
+  document.querySelector('.assisted-image-layout').prepend(gallery);
   document.querySelector('.workflow-shell-header').hidden=true;
   document.querySelector('.workflow-tabs').hidden=true;
   document.querySelector('.assisted-ai-image-card').querySelector('.assisted-card-kicker').textContent='Cover photo';
@@ -80,6 +84,7 @@
   byId('assisted-selected-image-empty').textContent='Take or choose a photo to get started.';
   document.querySelector('.assisted-save-summary-card').hidden=true;
   document.querySelector('.assisted-upload-browser-head').hidden=true;
+  gallery.closest('.assisted-section').querySelector('.assisted-section-header').hidden=true;
   // Compact status and repeat-entry actions stay outside the form.
   const status=block('div','<span id="item-draft-status" role="status">Drafts save as you work.</span><span id="item-copy-background-status" role="status"></span>', 'intake-status');
   form.querySelector('.item-progress').before(status);

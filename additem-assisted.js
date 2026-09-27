@@ -3288,6 +3288,7 @@
   async function handleLocalImageUpload(elements, event) {
     const files = Array.from(event?.target?.files || []);
     if (!files.length) return;
+    document.getElementById('item-photo-gallery').open = true;
     setLocalPhotoInputsEnabled(elements, false);
     const failed = [], addedImages = [];
     try {
