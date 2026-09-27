@@ -2,7 +2,6 @@
 let pendingItem = null; // Store the scanned item awaiting confirmation
 let currentBatch = {}; 
 let latestLocationDymoXml = null;
-let latestLocationDymoUrl = null;
 let pendingBulkItem = null; // item selected for a bulk bag
 let activeStoreOptions = [];
 let activeAssignLocationOptions = [];
@@ -1600,10 +1599,11 @@ async function bumpInventoryVersion(changedIds = null) {
         </DesktopLabel>`;
         latestLocationDymoXml = buildLocationDymoXml(generatedCode, nameInput?.value || "");
 
-        // Immediately upload DYMO file and show link
+        // Upload the prepared label and offer the shared printer picker.
+        const previewXml = latestLocationDymoXml;
         (async () => {
           const labelPath = `labels/location_${Date.now()}.dymo`;
-          const blob = new Blob([latestLocationDymoXml], { type: "application/octet-stream" });
+          const blob = new Blob([previewXml], { type: "application/octet-stream" });
 
           const { error: uploadError } = await supabase.storage
             .from("dymo-labels")
@@ -1614,22 +1614,9 @@ async function bumpInventoryVersion(changedIds = null) {
             return;
           }
 
-          const { data: signedData, error: urlError } = await supabase.storage
-            .from("dymo-labels")
-            .createSignedUrl(labelPath, 60 * 60 * 24 * 365 * 10); // 10 years
-
-          if (urlError) {
-            console.error("❌ Failed to get signed URL for DYMO file:", urlError);
-            return;
-          }
-
-          latestLocationDymoUrl = signedData.signedUrl;
-
-          // Inject the link into the modal
+          if (latestLocationDymoXml !== previewXml) return;
           const linkContainer = document.getElementById("dymo-link-preview");
-          if (linkContainer) {
-            linkContainer.innerHTML = `<a href="${latestLocationDymoUrl}" target="_blank">📎 View DYMO Label</a>`;
-          }
+          window.printStations.mountLabelButton(linkContainer, () => ({xml:previewXml,barcode:generatedCode,title:`Location: ${generatedCode}`}));
         })();
 
 
@@ -1993,6 +1980,7 @@ async function bumpInventoryVersion(changedIds = null) {
 
     async function loadDymoLabelXmlForInventoryItem(item) {
       const labelReference = String(item?.dymo_label_url || "").trim();
+      if(!labelReference && item?.barcode) return (await window.dymoModule.prepareSavedItemLabel(item)).templateXml;
       const storagePath = extractDymoStoragePath(labelReference);
 
       if (storagePath) {
@@ -2612,7 +2600,7 @@ async function bumpInventoryVersion(changedIds = null) {
               ${show("sale_price") ? `<p><strong>Sale Price:</strong> $${item.sale_price.toLocaleString()}</p>` : ""}
               ${show("barcode") ? `<p><strong>Barcode:</strong> ${item.barcode || "—"}</p>` : ""}
               ${show("created_at") ? `<p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>` : ""}
-              ${show("dymo_label_url") ? `<p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>` : ""}
+              ${show("dymo_label_url") ? `<div class="inventory-card-label-print"></div>` : ""}
               ${show("stock") ? stockLabel : ""}
               ${show("units_scanned") ? `<p class="units-scanned"><strong>Units Scanned:</strong> 1</p>` : ""}
               ${show("categories") ? `
@@ -2684,6 +2672,8 @@ async function bumpInventoryVersion(changedIds = null) {
             ${content}
             `;
         
+            const labelContainer=card.querySelector('.inventory-card-label-print');
+            if(labelContainer)window.printStations.mountLabelButton(labelContainer,async()=>({xml:await loadDymoLabelXmlForInventoryItem(item),barcode:item.barcode,title:item.title}));
             return card;
         }
     //#endregion

@@ -63,10 +63,10 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js" defer></script>
   <script src="initSupabase.js" defer></script>
   <script src="admin-nav.js?v=20260927-print-stations" defer></script>
-  <script src="print-stations.js?v=20260927-1" defer></script>
-  <script src="additem-dymolabel.js?v=20260927-print-stations" defer></script>
-  <script src="additembulk.js" defer></script>  <!-- ⬅️ add this -->
-  <script src="add-inventory.js?v=20260927-print-stations" defer></script>
+  <script src="print-stations.js?v=20260927-all-labels" defer></script>
+  <script src="additem-dymolabel.js?v=20260927-all-labels" defer></script>
+  <script src="additembulk.js?v=20260927-all-labels" defer></script>  <!-- ⬅️ add this -->
+  <script src="add-inventory.js?v=20260927-all-labels" defer></script>
 
   <!-- 📢 Toast + Loading Spinner Containers -->
   <div id="toast-container"></div>
@@ -449,6 +449,7 @@
             </div>
 
             <div id="bulk-dymo-status" class="bulk-note" style="margin-top:8px;"></div>
+              <button type="button" id="bulk-print-label" class="print-label-button" hidden>Print bag label</button>
           </div>
 
           <div class="bulk-samples">

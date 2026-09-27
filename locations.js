@@ -1235,8 +1235,7 @@ function openCreateLocationModal({ tray = false, container = false } = {}) {
   }
 }
 
-async function uploadCreateLocationDymo(locationCode, locationName = "") {
-  const xml = buildLocationDymoXml(locationCode, locationName);
+async function uploadCreateLocationDymo(locationCode, locationName = "", xml = buildLocationDymoXml(locationCode, locationName)) {
   const labelPath = `labels/location_${Date.now()}.dymo`;
   const blob = new Blob([xml], { type: "application/octet-stream" });
   const { error } = await supabase.storage
@@ -1262,7 +1261,8 @@ async function regenerateLocationDymoLabel(locationId) {
   setLocationDymoStatus("Generating a fresh LocationLabelSystem DYMO label...");
 
   const previousPath = location.dymo_label_url || "";
-  const labelPath = await uploadCreateLocationDymo(locationCode, location.location_name);
+  const xml = buildLocationDymoXml(locationCode, location.location_name);
+  const labelPath = await uploadCreateLocationDymo(locationCode, location.location_name, xml);
 
   const { error } = await supabase
     .from("locations")
@@ -1275,12 +1275,9 @@ async function regenerateLocationDymoLabel(locationId) {
   state.dymoUrls.delete(labelPath);
   location.dymo_label_url = labelPath;
 
-  const signedUrl = await resolveDymoUrl(location);
-  if (!signedUrl) throw new Error("The new label was saved, but could not be opened.");
-
   setLocationDymoStatus("New DYMO label generated and saved to this location.");
   renderLocationsTable();
-  return signedUrl;
+  return {xml, barcode:locationCode, title:`Location: ${location.location_name || locationCode}`};
 }
 
 async function uploadCreateLocationPhoto(file) {
@@ -2322,9 +2319,9 @@ async function renderLocationDetail(locationId) {
               Copy Barcode
             </button>
             <button type="button" class="locations-link-button" data-open-location-dymo="${escapeHtml(location.id)}" ${location.location_code ? "" : "disabled"}>
-              ${location.dymo_label_url ? "Generate New DYMO Label" : "Generate DYMO Label"}
+              Print DYMO Label
             </button>
-            <div id="location-dymo-status" class="location-status-line">Opens a fresh label using the LocationLabelSystem template.</div>
+            <div id="location-dymo-status" class="location-status-line">Choose the computer that should print this location label.</div>
           </div>
         </div>
 
@@ -2877,24 +2874,19 @@ function bindEvents() {
     if (dymoButton) {
       event.preventDefault();
       const locationId = dymoButton.getAttribute("data-open-location-dymo");
-      const labelWindow = window.open("about:blank", "_blank");
       dymoButton.disabled = true;
       dymoButton.textContent = "Generating...";
 
       try {
-        const signedUrl = await regenerateLocationDymoLabel(locationId);
-        if (labelWindow) {
-          labelWindow.location.href = signedUrl;
-        } else {
-          window.open(signedUrl, "_blank");
-        }
+        const {xml,...options} = await regenerateLocationDymoLabel(locationId);
+        const result = await window.printStations.printLabel(xml, options);
         await renderLocationDetail(locationId);
+        setLocationDymoStatus(window.printStations.deliveryMessage(result));
       } catch (error) {
         console.error("Location DYMO regeneration failed:", error);
-        if (labelWindow && !labelWindow.closed) labelWindow.close();
-        setLocationDymoStatus(`Could not generate label: ${error?.message || "Unknown error"}`);
+        setLocationDymoStatus(error?.message || "Could not send this label.");
         dymoButton.disabled = false;
-        dymoButton.textContent = "Generate New DYMO Label";
+        dymoButton.textContent = "Print DYMO Label";
       }
       return;
     }

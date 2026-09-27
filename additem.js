@@ -28,7 +28,6 @@ console.log("Loaded JS")
 let latestDymoXml = "";
 let typeqr = "";
 let latestLocationDymoXml = null;
-let latestLocationDymoUrl = null;
 let activeStoreOptions = [];
 let activeAdminLocationOptions = [];
 let selectedAdminLocation = null;
@@ -2436,7 +2435,6 @@ let uploadedImages = [];
     }
     document.getElementById("location-type").value = "";
     latestLocationDymoXml = null;
-    latestLocationDymoUrl = null;
 
     if (barcodeCanvas) {
       const ctx = barcodeCanvas.getContext("2d");
@@ -2485,9 +2483,10 @@ let uploadedImages = [];
       document.getElementById("location-name")?.value || ""
     );
 
+    const previewXml = latestLocationDymoXml;
     (async () => {
       const labelPath = `labels/location_${Date.now()}.dymo`;
-      const blob = new Blob([latestLocationDymoXml], { type: "application/octet-stream" });
+      const blob = new Blob([previewXml], { type: "application/octet-stream" });
 
       const { error: uploadError } = await supabase.storage
         .from("dymo-labels")
@@ -2498,21 +2497,9 @@ let uploadedImages = [];
         return;
       }
 
-      const { data: signedData, error: urlError } = await supabase.storage
-        .from("dymo-labels")
-        .createSignedUrl(labelPath, 60 * 60 * 24 * 365 * 10);
-
-      if (urlError) {
-        console.error("Failed to get signed URL for location DYMO file:", urlError);
-        return;
-      }
-
-      latestLocationDymoUrl = signedData.signedUrl;
-
+      if (latestLocationDymoXml !== previewXml) return;
       const linkContainer = document.getElementById("dymo-link-preview");
-      if (linkContainer) {
-        linkContainer.innerHTML = `<a href="${latestLocationDymoUrl}" target="_blank">View DYMO Label</a>`;
-      }
+      window.printStations.mountLabelButton(linkContainer, () => ({xml:previewXml,barcode:generatedCode,title:`Location: ${generatedCode}`}));
     })();
   }
 

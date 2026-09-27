@@ -8833,36 +8833,6 @@ populateDropdowns({
     //event listerner for the card dropdown
     setupCardChipDropdownDelegated()
 
-    //for the dynamo label
-    document.addEventListener("click", async (e) => {
-  const link = e.target.closest(".dymo-link");
-  if (!link) return;
-
-  e.preventDefault();
-  let fullPath = link.dataset.path;
-  if (!fullPath.startsWith("labels/")) {
-    fullPath = `labels/${fullPath}`;
-  }
-
-  try {
-    const { data, error } = await supabase
-      .storage
-      .from("dymo-labels")
-      .createSignedUrl(fullPath, 60 * 60 * 24 * 365);
-
-    if (error || !data?.signedUrl) {
-      console.error("❌ Error generating signed URL:", error?.message);
-      alert("Unable to open DYMO label.");
-      return;
-    }
-
-    window.open(data.signedUrl, "_blank");
-  } catch (err) {
-    console.error("❌ Exception generating DYMO URL:", err);
-    alert("Unexpected error opening label.");
-  }
-    });
-
     //#region events listeners for the checkout module
       //event listener fo the toggle button
       checkoutModule.setupCheckoutToggleButton();

@@ -5,7 +5,7 @@
 .print-dialog-head h2 { margin:0; }
 .print-station-dialog label { display:grid; gap:7px; margin:16px 0; font-weight:700; }
 .print-station-dialog select,.print-station-dialog input { width:100%; min-width:0; padding:12px; font:inherit; color:#f5efe6; background:#302b2d; border:1px solid #786747; border-radius:10px; }
-.print-station-dialog button,.print-stations-page button,.print-download-link { min-height:44px; border:1px solid #786747; border-radius:12px; padding:10px 16px; background:#302b2d; color:#f5efe6; font:700 15px/1.4 'Manrope',sans-serif; cursor:pointer; }
+.print-label-button,.print-station-dialog button,.print-stations-page button,.print-download-link { min-height:44px; border:1px solid #786747; border-radius:12px; padding:10px 16px; background:#302b2d; color:#f5efe6; font:700 15px/1.4 'Manrope',sans-serif; cursor:pointer; }
 .print-station-dialog button:disabled,.print-stations-page button:disabled { opacity:.5; cursor:default; }
 .print-station-dialog a,.print-stations-page a { color:#edc994; }
 .print-dialog-actions,.print-card-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }

@@ -541,7 +541,7 @@
                 </div>
 
                 <button id="generate-dymo-label" type="button" class="add-button-secondary">
-                  Generate DYMO Label
+                  Generate &amp; Print Label
                 </button>
               </div>
             </div>
@@ -1004,6 +1004,7 @@
             <div class="bulk-media-panel">
               <div id="bulk-bag-photo-preview" class="bulk-bag-photo-preview"></div>
               <div id="bulk-dymo-status" class="bulk-inline-status" aria-live="polite"></div>
+              <button type="button" id="bulk-print-label" class="print-label-button" hidden>Print bag label</button>
             </div>
           </div>
         </section>
@@ -1018,14 +1019,14 @@
 
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js?v=20260927-print-stations"></script>
-  <script src="print-stations.js?v=20260927-1"></script>
-  <script src="additem-dymolabel.js?v=20260927-print-stations"></script>
-  <script src="additembulk.js"></script>
+  <script src="print-stations.js?v=20260927-all-labels"></script>
+  <script src="additem-dymolabel.js?v=20260927-all-labels"></script>
+  <script src="additembulk.js?v=20260927-all-labels"></script>
   <link rel="stylesheet" href="coin-ebay.css?v=20260926-coins-ebay" />
   <script type="module" src="coin-ebay.js?v=20260926-fast-intake"></script>
   <script src="additem-layout.js?v=20260926-photo-navigation"></script>
   <script src="additem-wizard.js?v=20260926-category-sync"></script>
-  <script src="additem.js?v=20260927-print-stations"></script>
+  <script src="additem.js?v=20260927-all-labels"></script>
   <script src="additem-assisted.js?v=20260926-photo-navigation"></script>
   <script src="additem-intake.js?v=20260927-print-stations"></script>
 </body>

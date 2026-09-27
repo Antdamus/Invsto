@@ -15,7 +15,11 @@ The helper supports Invsto DYMO label XML, not arbitrary PDF or office documents
 
 ## Print entry points
 
-Add Item (last item and batch), Add Inventory, Stock, and Live Sales use the same mobile destination picker. The remembered choice is still shown for explicit confirmation. A batch chooses its destination once. Copy count is 1–100 per label. **Download on this device (local helper)** remains an explicit option for the older Downloads-folder helper.
+Add Item (last item, batch, and explicit draft-label printing), Add Inventory, Stock (including edited labels), bulk-bag capture/reprint, Locations, location drafts in intake, Live Sales, and Past Live Sales reprints use the same mobile destination picker. The remembered choice is still shown for explicit confirmation. A batch chooses its destination once. Copy count is 1–100 per label. **Download on this device (local helper)** remains an explicit option for the older Downloads-folder helper.
+
+Automatic item-label preparation stays silent. Only an explicit print action opens the destination picker. Cancelling leaves prepared draft labels intact. Bulk-bag capture retains its barcode and label independently of later item-form changes, and its Print bag label action retries without capturing another bag. Past Live Sales records a reprint only after enqueue/download succeeds.
+
+Location labels use the existing Address layout; item/bag labels use their existing jewelry layouts. Load the matching label stock. On a Twin Turbo, check which roll the first test label uses before printing a batch. Shipping-label PDFs in eBay Order History, and ordinary document printing, are separate from this DYMO XML queue.
 
 The Print Stations page shows computers, connection status, queued and recent jobs. Inventory staff may enqueue/review jobs, cancel jobs still waiting, or deliberately request a new copy. Only active employee records with the admin role may pair/disconnect computers. Disconnecting revokes the station credential and cancels waiting jobs; a label already submitted cannot be recalled.
 
@@ -55,3 +59,5 @@ Jobs and label XML are retained in the database in this initial release; recent-
 `npx supabase test db --linked supabase/tests/print_stations_test.sql` runs 27 transactional pgTAP checks and rolls back every test station and job. It needs the CLI's Docker test runtime and an existing active admin record in the linked project. The file covers access restrictions, pairing, idempotency, station isolation, offline queuing, claim expiry, acknowledgment recovery and revocation.
 
 Verified for this release: 27 database checks passed through the authenticated CLI SQL runner with migrations disabled and all test data rolled back; the Docker pgTAP runner was unavailable on this host. The same pgTAP assertions were wrapped in one SQL block that raises on any failed assertion. No physical labels were printed during automated validation.
+
+Coverage follow-up: 21 print-station/helper/browser checks and 44 Add Item regressions passed after routing the older label actions through the shared picker. The Windows helper and database did not change; an existing paired station needs no reinstall.

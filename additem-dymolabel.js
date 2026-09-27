@@ -1061,18 +1061,6 @@ window.dymoModule = (function () {
             typeqr: effectiveQrType,
         });
 
-        if (downloadPreview) {
-            const blob = new Blob([templateXml], { type: "application/octet-stream" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "OGJewelryLabel.dymo";
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }
-
         window.latestDymoXml = templateXml;
         window.latestDymoUrl = labelPath;
         window.latestDymoBarcode = barcode;
@@ -1085,6 +1073,10 @@ window.dymoModule = (function () {
                 : "✅ DYMO label staged. It will be saved only after the item is added.";
         }
 
+        if (downloadPreview) {
+            const result=await printDymoLabelXml(templateXml,{barcode,title:document.getElementById('title')?.value || barcode,listenerOnly:true});
+            if(statusEl)statusEl.textContent=window.printStations.deliveryMessage(result)+' This item has not been saved yet.';
+        }
         return { templateXml, labelPath };
     }
 
@@ -1097,12 +1089,13 @@ window.dymoModule = (function () {
         }
 
         button.addEventListener("click", async () => {
+            if(button.disabled)return;button.disabled=true;
             try {
-                await generateDymoLabelFromForm({ downloadPreview: false });
+                await generateDymoLabelFromForm({ downloadPreview: true });
             } catch (err) {
-                console.error("❌ DYMO generation failed:", err);
-                alert(`DYMO generation failed: ${err.message || err}`);
-            }
+                const status=document.getElementById('dymo-status');
+                if(status)status.textContent=err.message || 'Could not prepare or send the label.';
+            } finally {button.disabled=false;}
         });
     }
 

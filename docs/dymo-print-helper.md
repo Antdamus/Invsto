@@ -1,6 +1,6 @@
 # OG Jewelers DYMO Print Helper
 
-For phone-to-computer printing and multiple named computers, use [Remote print stations](remote-print-stations.md). The app now offers a destination picker for label printing.
+For phone-to-computer printing and multiple named computers, use [Remote print stations](remote-print-stations.md). The app now offers a destination picker for DYMO item, bulk-bag, location, live-sale and past-sale labels. Shipping-label PDFs use a separate flow.
 
 This older helper handles the explicit **Download on this device (local helper)** option by watching a local downloads folder.
 

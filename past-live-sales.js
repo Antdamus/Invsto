@@ -886,14 +886,14 @@ async function printLiveSaleBagLabel(lotId) {
       freeText: lot.auction_number,
     });
     const filename = `${getLiveSaleLabelBaseName(lot, session)}_Reprint_Copies_1.dymo`;
-    downloadTextFile(xml, filename);
+    const printResult = await window.printStations.printLabel(xml, {filename,copies:1,title:`Auction ${lot.auction_number || lot.lot_code}`,barcode:lot.lot_code});
     const { error } = await supabase.rpc("record_live_sale_label_reprint", {
       _lot_id: lot.id,
       _label_path: lot.label_path || null,
       _signed_by_email: state.user?.email || null,
     });
     if (error) console.warn("Could not record live sale label reprint:", error);
-    setStatus(`DYMO label for auction ${lot.auction_number || lot.lot_code || "bag"} queued for automatic printing.`, "success");
+    setStatus(window.printStations.deliveryMessage(printResult), "success");
     await loadPastLiveSales();
   } catch (error) {
     console.error("Past live sale label print failed:", error);

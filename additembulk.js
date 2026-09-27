@@ -1,6 +1,9 @@
 /* ================= Bulk Bag Modal Module ============= */
 window.addItemBulkModule = (function () {
   let lastFocusedEl = null;
+  let capturing = false;
+  let bagPrinting = false;
+  let lastBagLabel = null;
 
 
   // local state for the modal
@@ -142,30 +145,19 @@ window.addItemBulkModule = (function () {
   function handleSaveClick() {
     const { saveBtn } = els();
     saveBtn?.addEventListener("click", async () => {
-      if (!state.valid) return;
-
-      // Build payload and keep in memory
-      state.payload = buildPayload();
-
-      // Create a bag barcode now so the label matches this bag
-      const bagBarcode =
-        window.addItemBulkModule?.generateBagBarcode?.() ||
-        `BAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
-
-      // ⚡ Generate & DOWNLOAD the label immediately (user gesture-safe)
-      await generateAndDownloadBagLabel(bagBarcode);
-
-      // Notify Add-Inventory (or whoever listens)
-      window.dispatchEvent(new CustomEvent("bulkbag:captured", {
-        detail: {
-          bag_barcode: bagBarcode,
-          estimated_qty: state.estimated_qty,
-          payload: state.payload
-        }
-      }));
-
-      window.showToast?.(`👜 Bulk bag captured (${state.estimated_qty}). Label generated.`);
-      closeModal();
+      if (!state.valid || capturing || bagPrinting) return;
+      capturing=true;saveBtn.disabled=true;
+      try {
+        state.payload = buildPayload();
+        const bagBarcode = generateBagBarcode();
+        await prepareBagLabel(bagBarcode);
+        window.dispatchEvent(new CustomEvent("bulkbag:captured", {
+          detail: {bag_barcode:bagBarcode,estimated_qty:state.estimated_qty,payload:state.payload}
+        }));
+        closeModal();
+        window.showToast?.(`Bulk bag captured (${state.estimated_qty}).${lastBagLabel?'':' Label could not be prepared.'}`);
+        if(lastBagLabel)await printCapturedBagLabel();
+      } finally {capturing=false;recompute();}
     });
   }
 
@@ -176,7 +168,11 @@ window.addItemBulkModule = (function () {
     // 1) Upload the DYMO label (if one was generated during Save click)
     let bagLabelUrl = null;
     try {
-      if (
+      if (lastBagLabel?.barcode === bagBarcode) {
+        const {error}=await supabase.storage.from('dymo-labels').upload(lastBagLabel.labelPath,new Blob([lastBagLabel.xml],{type:'application/octet-stream'}),{upsert:true,contentType:'application/octet-stream'});
+        if(error)throw error;
+        bagLabelUrl=lastBagLabel.labelPath;
+      } else if (
         window.dymoModule?.uploadFinalDymoLabel &&
         window.latestDymoXml &&
         window.latestDymoUrl &&
@@ -327,49 +323,13 @@ window.addItemBulkModule = (function () {
     wireInputs();
     wirePhotoInput();    // ← add this line
     handleSaveClick();
+    document.getElementById("bulk-print-label")?.addEventListener("click",printCapturedBagLabel);
   }
 
   // Build a QR payload for bags (distinct from item-type)
   function buildBagQr(bagBarcode) {
     // keep it simple; if you later want a deep link, replace this
     return `bag:${bagBarcode}`;
-  }
-
-  // Generate and upload the DYMO label for a BAG barcode
-  async function generateAndUploadBagLabel(bagBarcode) {
-    // If DYMO isn't available on this page, skip gracefully
-    if (!window.dymoModule?.generateAndUploadDymoLabel) return null;
-
-    const qr = `bag:${bagBarcode}`;
-    const typeqr = "bag";
-    const price = ""; // not used for bags
-
-    // Reuse the exact same template generator you use for items
-    const { templateXml, labelPath } = await dymoModule.generateAndUploadDymoLabel({
-      barcode: bagBarcode, qr, price, typeqr
-    });
-
-    // Upload to storage (same bucket you use for labels)
-    const blob = new Blob([templateXml], { type: "application/octet-stream" });
-    const { error: uploadError } = await supabase
-      .storage
-      .from("dymo-labels")
-      .upload(labelPath, blob, { upsert: true, contentType: "application/octet-stream" });
-    if (uploadError) throw uploadError;
-
-    // Optional: auto-download so you can print immediately
-    try {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "OGJewelry-BagLabel.dymo";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (_) {}
-
-    return labelPath; // save this into bulk_batches.bag_label_url
   }
 
   function wirePhotoInput() {
@@ -396,48 +356,38 @@ window.addItemBulkModule = (function () {
     });
   }
 
-  // Generate and DOWNLOAD a DYMO label for a bag barcode (uses your existing module)
-  // This mirrors your Add-Item flow: download now, upload later.
-  async function generateAndDownloadBagLabel(bagBarcode) {
-    const statusEl = document.getElementById("bulk-dymo-status");
-    if (!window.dymoModule?.generateAndUploadDymoLabel) {
-      statusEl && (statusEl.textContent = "ℹ️ DYMO module not loaded; skipping label generation.");
-      return { labelPath: null, downloaded: false };
-    }
-
-    const qr = `bag:${bagBarcode}`;
-    const typeqr = "bag";
-    const price = ""; // not used for bags
-
-    // Reuse the same generator
-    const { templateXml, labelPath } = await dymoModule.generateAndUploadDymoLabel({
-      barcode: bagBarcode, qr, price, typeqr
-    });
-
-    // Auto-download (same as your Add-Item flow)
+  async function prepareBagLabel(bagBarcode) {
+    const statusEl=document.getElementById('bulk-dymo-status');
+    const button=document.getElementById('bulk-print-label');
+    lastBagLabel=null;
+    if(button)button.hidden=true;
     try {
-      const blob = new Blob([templateXml], { type: "application/octet-stream" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "OGJewelry-BagLabel.dymo";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      // Store in globals so we can upload later with the SAME helper
-      window.latestDymoXml = templateXml;
-      window.latestDymoUrl = labelPath;
-      window.latestDymoBarcode = bagBarcode;
-      window.latestDymoGeneratedAt = new Date().toISOString();
-
-      statusEl && (statusEl.textContent = "✅ DYMO label generated & downloaded. It will be saved on submit.");
-      return { labelPath, downloaded: true };
-    } catch (e) {
-      statusEl && (statusEl.textContent = "⚠️ DYMO label generated, but download failed.");
-      return { labelPath, downloaded: false };
+      if(!window.dymoModule?.generateAndUploadDymoLabel)throw new Error('Label module is unavailable.');
+      const {templateXml,labelPath}=await dymoModule.generateAndUploadDymoLabel({barcode:bagBarcode,qr:`bag:${bagBarcode}`,price:'',typeqr:'bag'});
+      lastBagLabel={xml:templateXml,labelPath,barcode:bagBarcode};
+      window.latestDymoXml=templateXml;window.latestDymoUrl=labelPath;window.latestDymoBarcode=bagBarcode;
+      window.latestDymoGeneratedAt=new Date().toISOString();
+      if(button){button.hidden=false;button.disabled=false;button.textContent=`Print bag label ${bagBarcode}`;}
+      if(statusEl)statusEl.textContent='Bag label prepared. It will be saved with the bag.';
+    } catch(error) {
+      if(statusEl)statusEl.textContent=error.message || 'Could not prepare the bag label.';
     }
+  }
+
+  async function printCapturedBagLabel() {
+    if(!lastBagLabel || bagPrinting)return;
+    bagPrinting=true;
+    const label=lastBagLabel,button=document.getElementById('bulk-print-label'),statusEl=document.getElementById('bulk-dymo-status');
+    if(button)button.disabled=true;
+    try {
+      const result=await window.dymoModule.printDymoLabelXml(label.xml,{barcode:label.barcode,title:`Bulk bag ${label.barcode}`,labelKind:'BagLabel',listenerOnly:true});
+      const message=window.printStations.deliveryMessage(result);
+      if(statusEl)statusEl.textContent=message;window.showToast?.(message);
+      return result;
+    } catch(error) {
+      const message=`Bag details are retained. ${error.message || 'Could not send the label.'} Reopen Bulk Bag and use Print bag label to try again.`;
+      if(statusEl)statusEl.textContent=message;window.showToast?.(message);
+    } finally {bagPrinting=false;if(button)button.disabled=false;}
   }
 
   return {

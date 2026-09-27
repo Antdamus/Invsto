@@ -2,9 +2,9 @@
   'use strict';
   const PREF = 'invsto.print.destination.v1';
   const PENDING = 'invsto.print.pending.v1.';
-  const styles = document.createElement('link');styles.rel='stylesheet';styles.href='print-stations.css?v=20260927-1';document.head.append(styles);
+  const styles = document.createElement('link');styles.rel='stylesheet';styles.href='print-stations.css?v=20260927-all-labels';document.head.append(styles);
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const cancelled = () => Object.assign(new Error('Printing cancelled. Your items are still saved.'), {cancelled:true});
+  const cancelled = () => Object.assign(new Error('Printing cancelled. No new print request was sent.'), {cancelled:true});
   async function rpc(name, args={}) {
     if (!window.supabase?.auth?.getSession) throw new Error('Sign in to Invsto before sending labels.');
     const {data:{session}={}}=await window.supabase.auth.getSession();
@@ -72,6 +72,28 @@
     a.href=url;a.download=options.filename ? options.filename.replace(/_Copies_\d+/i,`_Copies_${destination.copies}`) : `OGJewelers_Label_Copies_${destination.copies}_${Date.now()}.dymo`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     return {mode:'queued-download',filename:a.download,copies:destination.copies};
   }
+  function deliveryMessage(result) {
+    return result.mode==='remote-queue'
+      ? `Queued ${result.copies} label${result.copies===1?'':'s'} for ${result.stationName}. View Print Stations for status.`
+      : `Downloaded ${result.copies} label cop${result.copies===1?'y':'ies'} for the local helper.`;
+  }
+  function mountLabelButton(container, getLabel) {
+    if (!container) return;
+    const button=document.createElement('button'),status=document.createElement('p');
+    button.type='button';button.className='print-label-button';button.textContent='Print DYMO Label';
+    status.setAttribute('role','status');container.replaceChildren(button,status);
+    button.addEventListener('click',async()=>{
+      if(button.disabled)return;
+      button.disabled=true;status.textContent='Preparing label…';
+      try {
+        const {xml,...options}=await getLabel();
+        if(!xml)throw new Error('Generate a label before printing.');
+        const result=await printLabel(xml,options);status.textContent=deliveryMessage(result);
+      } catch(error) {status.textContent=error.message || 'Could not send this label.';}
+      finally {button.disabled=false;}
+    });
+    return button;
+  }
   async function initPage() {
     const root=document.getElementById('print-stations-page');if(!root)return;
     const message=document.getElementById('print-page-status'),stationList=document.getElementById('print-station-list'),jobsList=document.getElementById('print-job-list');
@@ -113,6 +135,6 @@
     try{admin=Boolean(await rpc('can_manage_print_stations'));document.getElementById('print-setup').hidden=!admin;message.textContent=admin?'Ready. Pair a computer or review your print jobs.':'Choose an existing station when printing. An administrator can pair additional computers.';}catch(error){report(error);}
     await refresh();setInterval(()=>{if(!document.hidden)void refresh();},5000);
   }
-  window.printStations={chooseDestination,enqueueLabel,printLabel,stationStatus,jobStatus};
+  window.printStations={chooseDestination,enqueueLabel,printLabel,stationStatus,jobStatus,deliveryMessage,mountLabelButton};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initPage);else void initPage();
 })();
