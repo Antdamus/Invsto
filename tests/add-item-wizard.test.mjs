@@ -44,7 +44,7 @@ const mockServices = () => {
       if(name==='process-inventory-image'){
         window.testUploads.push(options.body);
         if(window.testFailUploadAt===window.testUploads.length)return {error:{message:'Photo upload offline'}};
-        return {data:{ok:true,path:`uploaded-${window.testUploads.length}.jpg`,name:'Photo',bucket:'InventoryUpload',previewUrl:`${location.origin}/test-photo.svg`,mimeType:'image/jpeg'}};
+        return {data:{ok:true,path:`uploaded-${window.testUploads.length}.jpg`,name:'Photo',bucket:'InventoryUpload',previewUrl:window.testUploadPreviewUrl || `${location.origin}/test-photo.svg`,mimeType:'image/jpeg'}};
       }
       if (name === "generate-inventory-copy") {
         window.testGeneration.push(options.body);
@@ -125,13 +125,17 @@ before(async () => {
   origin = `http://127.0.0.1:${server.address().port}`;
   browser = await (process.env.INVSTO_ITEM_BROWSER === "webkit" ? webkit : chromium).launch({ headless: true });
 });
-after(async () => { server?.closeAllConnections(); await browser?.close(); await new Promise((resolve) => server?.close(resolve)); });
+after(async () => {
+  if (server) await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
+  await browser?.close();
+});
 
 async function pageFor(t, viewport = { width: 1365, height: 1000 }) {
   const page = await browser.newPage({ viewport, isMobile: viewport.width <= 900, hasTouch: viewport.width <= 900 });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.route("**/*", (route) => route.request().url().startsWith(origin) ? route.continue() : route.abort());
+  // WebKit routes local blob previews through this handler; allow them while blocking external services.
+  await page.route("**/*", (route) => (route.request().url().startsWith(origin) || route.request().url().startsWith("blob:")) ? route.continue() : route.abort());
   await page.goto(`${origin}/add-item.html`);
   await page.waitForFunction(() => window.coinEbayForm && window.addItemAssistedModule && document.body.classList.contains("admin-unified-nav"));
   await page.waitForFunction(() => window.addItemIntake && document.getElementById("assisted-material").value);
@@ -568,4 +572,65 @@ test('category validation recovers a displayed selection but never accepts the p
  assert.equal(await page.locator('#category-dropdown-toggle').innerText(),'Select or Create Category');
  await page.locator('#weight').fill('10');await next(page);assert.equal(await step(page),'information');
  assert.match(await page.locator('#item-step-error').innerText(),/Select or create an item category/);
+});
+
+
+async function galleryPhoto(page,name,color) {
+ const base64=await page.evaluate(color=>{
+  const canvas=document.createElement('canvas');canvas.width=320;canvas.height=320;
+  const ctx=canvas.getContext('2d');ctx.fillStyle=color;ctx.fillRect(0,0,320,320);
+  return canvas.toDataURL('image/png').split(',')[1];
+ },color);
+ return {name,mimeType:'image/png',buffer:Buffer.from(base64,'base64')};
+}
+
+test('phone gallery uploads appear before old capture photos, become the cover and survive draft restore',async t=>{
+ const page=await pageFor(t,{width:390,height:844});
+ const captures=Array.from({length:8},(_,i)=>({path:`capture-${i+1}.jpg`,storageBucket:'photos',name:`Capture ${i+1}`,mimeType:'image/jpeg'}));
+ await seed(page,{kind:'watch',step:'photos',photos:captures});
+ assert.equal(await page.locator('#assisted-selected-image-name').innerText(),'Capture 1');
+ await page.evaluate(()=>window.testUploadPreviewUrl=`${location.origin}/missing-remote-preview.png`);
+ await page.locator('#assisted-local-image-upload').setInputFiles([await galleryPhoto(page,'Gallery front.png','#cf6650'),await galleryPhoto(page,'Gallery back.png','#307d75')]);
+ await page.waitForFunction(()=>window.testUploads.length===2 && !window.addItemAssistedModule.isPhotoBusy());
+ assert.equal(await page.locator('#assisted-selected-image-name').innerText(),'Gallery front.png');
+ await page.waitForFunction(()=>document.getElementById('assisted-selected-image-preview').naturalWidth===320);
+ assert.deepEqual(await page.locator('#assisted-selected-image-preview').evaluate(img=>{const canvas=document.createElement('canvas');canvas.width=320;canvas.height=320;const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0);return [...ctx.getImageData(5,5,1,1).data];}),[207,102,80,255],'Preview pixels are from the file just chosen, without depending on the remote preview');
+ assert.doesNotMatch(await page.evaluate(()=>localStorage.getItem('test-draft')),/blob:|data:image/);
+ const thumbs=page.locator('.assisted-thumb');
+ assert.deepEqual(await thumbs.locator('.assisted-thumb-name').allTextContents(),['Gallery front.png','Gallery back.png',...captures.map(p=>p.name)]);
+ const gallery=await page.locator('.assisted-upload-browser').boundingBox(),cover=await page.locator('.assisted-image-sidebar').boundingBox();
+ assert.ok(gallery.y+gallery.height<=cover.y,'The phone gallery appears above the cover and tools');
+ assert.equal(await page.locator('#assisted-uploaded-image-strip').evaluate(el=>el.scrollHeight<=el.clientHeight+1),true,'No nested scroll hides the new photos');
+ for(const image of await thumbs.locator('img').all())await image.scrollIntoViewIfNeeded();
+ await page.waitForFunction(()=>[...document.querySelectorAll('.assisted-thumb img')].every(img=>img.complete && img.naturalWidth>0));
+ const selected=await page.evaluate(()=>window.addItemAssistedModule.getSelectedUploadedImagesForSave());
+ assert.equal(selected.length,10);assert.equal(selected[0].path,'uploaded-1.jpg');
+ await page.locator('#assisted-image-status').scrollIntoViewIfNeeded();
+ await mkdir(new URL('test-results/',root),{recursive:true});
+ await page.screenshot({path:new URL('test-results/gallery-upload-phone.png',root).pathname.replace(/^\/(\w:)/,'$1')});
+ await page.reload();await page.waitForFunction(()=>window.addItemAssistedModule?.getSelectedUploadedImagesForSave().length===10);
+ assert.equal(await page.locator('#assisted-selected-image-name').innerText(),'Gallery front.png');
+ await page.waitForFunction(()=>document.getElementById('assisted-selected-image-preview').naturalWidth>0);
+ await next(page);await next(page);await page.getByRole('button',{name:'Save item',exact:true}).click();
+ await page.waitForFunction(()=>window.testWrites.length===1);
+ assert.equal(await page.evaluate(()=>window.testWrites[0].photos.length),10);
+});
+
+
+test('photo pickers wait for draft restoration so a slow response cannot erase a new upload',async t=>{
+ const page=await pageFor(t);await page.addInitScript(()=>{window.testDraftHold=true;});await page.reload();
+ await page.waitForFunction(()=>window.testReleaseDraft && window.addItemAssistedModule);
+ assert.equal(await page.locator('#assisted-local-image-upload').isDisabled(),true);assert.equal(await page.locator('#item-camera-photo').isDisabled(),true);
+ await page.evaluate(()=>window.testReleaseDraft());await page.waitForFunction(()=>!document.getElementById('assisted-local-image-upload').disabled);
+ assert.equal(await page.locator('#item-camera-photo').isDisabled(),false);
+});
+
+test('the first successful gallery photo becomes the new cover when an earlier file fails',async t=>{
+ const page=await pageFor(t);await seed(page,{step:'photos',photos:twoPhotos});
+ await page.evaluate(()=>window.testFailUploadAt=1);
+ await page.locator('#assisted-local-image-upload').setInputFiles([photoFile('Failed front.png'),photoFile('New back.png')]);
+ await page.waitForFunction(()=>window.testUploads.length===2 && !window.addItemAssistedModule.isPhotoBusy());
+ assert.equal(await page.locator('#assisted-selected-image-name').innerText(),'New back.png');
+ assert.match(await page.locator('#assisted-image-status').innerText(),/Failed front.png/);
+ assert.deepEqual(await page.evaluate(()=>window.addItemAssistedModule.getSelectedUploadedImagesForSave().map(p=>p.path)),['uploaded-2.jpg','front.jpg','back.jpg']);
 });

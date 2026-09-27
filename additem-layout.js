@@ -56,13 +56,18 @@
   const reviewIssues=block('div','', 'intake-review-issues');reviewIssues.id='item-review-issues';reviewIssues.setAttribute('aria-live','polite');copyEditor.after(reviewIssues);
   // The simple camera/library controls are always available; station and editing tools remain optional.
   const photos=byId('item-step-photos');
-  const camera=block('label','Take photo<input id="item-camera-photo" type="file" accept="image/*" capture="environment" hidden>', 'add-button intake-file-button');
+  const camera=block('label','Take photo<input id="item-camera-photo" type="file" accept="image/*" capture="environment" disabled hidden>', 'add-button intake-file-button');
   const upload=byId('assisted-local-image-upload').closest('label');
   upload.replaceChildren(document.createTextNode('Choose photos'),byId('assisted-local-image-upload'));
+  byId('assisted-local-image-upload').disabled=true;
+  camera.setAttribute('aria-disabled','true');upload.setAttribute('aria-disabled','true');
+  byId('assisted-image-status').textContent='Loading saved photos…';
   const photoActions=block('div','', 'intake-photo-actions');photoActions.append(camera,upload);
   const coinGuide=block('p','For coins, take a clear front photo and back photo of the actual coin.', 'field-helper');coinGuide.id='item-coin-photo-guide';coinGuide.hidden=true;
   photos.querySelector('.form-section-head').after(photoActions,coinGuide);
-  photos.querySelector('.section-copy').textContent='New photos are included automatically. Tap a photo to make it the cover.';
+  photos.querySelector('.section-copy').textContent='New photos appear first and are included automatically. Tap a photo to make it the cover.';
+  byId('assisted-upload-title').textContent='Your photos';
+  document.querySelector('.assisted-image-layout').prepend(document.querySelector('.assisted-upload-browser'));
   document.querySelector('.workflow-shell-header').hidden=true;
   document.querySelector('.workflow-tabs').hidden=true;
   document.querySelector('.assisted-ai-image-card').querySelector('.assisted-card-kicker').textContent='Cover photo';

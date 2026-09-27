@@ -788,8 +788,7 @@
           previewUrl,
           thumbnailUrl,
         };
-      })
-      .sort(compareNewestFirst);
+      });
   }
 
   function applyAddItemDraftFields(elements, payload) {
@@ -2403,6 +2402,7 @@
       processedImageBase64,
       processedMimeType: uploadBlob.type || "image/jpeg",
       fileName: getSafeUploadName(file),
+      previewBlob: uploadBlob,
     };
   }
 
@@ -3277,30 +3277,60 @@
     }
   }
 
+  function setLocalPhotoInputsEnabled(elements, enabled) {
+    for (const input of [elements.localImageUploadInput, document.getElementById('item-camera-photo')]) {
+      if (!input) continue;
+      input.disabled = !enabled;
+      input.closest('label')?.setAttribute('aria-disabled', String(!enabled));
+    }
+  }
+
   async function handleLocalImageUpload(elements, event) {
-    const files=Array.from(event?.target?.files || []);if(!files.length)return;
-    const camera=document.getElementById('item-camera-photo');
-    elements.localImageUploadInput.disabled=true;if(camera)camera.disabled=true;
-    const failed=[];let added=0;
+    const files = Array.from(event?.target?.files || []);
+    if (!files.length) return;
+    setLocalPhotoInputsEnabled(elements, false);
+    const failed = [], addedImages = [];
     try {
-      for(const file of files){
-        setInlineStatus(elements.imageStatus,`Adding photo ${added+failed.length+1} of ${files.length}…`,'is-waiting');
+      for (const [index, file] of files.entries()) {
+        setInlineStatus(elements.imageStatus, `Adding photo ${index + 1} of ${files.length}: ${file.name}…`, 'is-waiting');
         try {
-          const payload=await createLocalImageUploadPayload(file);
-          const {data,error}=await window.supabase.functions.invoke(IMAGE_PROCESS_FUNCTION_NAME,{body:{bucket:INVENTORY_UPLOAD_BUCKET,imagePath:payload.fileName,background:'uploaded',processedImageBase64:payload.processedImageBase64,processedMimeType:payload.processedMimeType}});
-          if(error || !data?.ok || !data.path || !data.bucket)throw new Error(error?.message || data?.detail || 'Upload failed');
-          const image=normalizeImageRow({path:data.path,name:file.name,createdAt:data.createdAt || new Date().toISOString(),previewUrl:data.previewUrl || '',storageBucket:data.bucket,sourceType:'document-upload',sortOrder:-4,mimeType:data.mimeType || payload.processedMimeType},0);
-          state.recentUploadedImages=[...state.recentUploadedImages.filter(row=>row.path!==image.path),image];
-          state.saveSelectedUploadedImagePaths=[...new Set([...state.saveSelectedUploadedImagePaths,image.path])];
-          if(!state.aiSelectedUploadedImagePath)setAISelectedImage(elements,image.path,{autoSelectForSave:true,silent:true});
-          added++;updateSaveSelectionSummary(elements);renderUploadedImages(elements);
-        }catch(error){failed.push(file.name);console.warn('Photo upload failed',error);}
+          const payload = await createLocalImageUploadPayload(file);
+          const { data, error } = await window.supabase.functions.invoke(IMAGE_PROCESS_FUNCTION_NAME, {
+            body: { bucket: INVENTORY_UPLOAD_BUCKET, imagePath: payload.fileName, background: 'uploaded',
+              processedImageBase64: payload.processedImageBase64, processedMimeType: payload.processedMimeType },
+          });
+          if (error || !data?.ok || !data.path || !data.bucket) throw new Error(error?.message || data?.detail || 'Upload failed');
+          const image = normalizeImageRow({
+            path: data.path, name: file.name, createdAt: data.createdAt || new Date().toISOString(),
+            previewUrl: URL.createObjectURL(payload.previewBlob), storageBucket: data.bucket,
+            sourceType: 'document-upload', sortOrder: -4, mimeType: data.mimeType || payload.processedMimeType,
+          }, 0);
+          addedImages.push(image);
+          const addedPaths = new Set(addedImages.map(entry => entry.path));
+          state.recentUploadedImages = [...addedImages, ...state.recentUploadedImages.filter(row => !addedPaths.has(row.path))];
+          state.saveSelectedUploadedImagePaths = [...new Set([...state.saveSelectedUploadedImagePaths, image.path])];
+          // An explicit gallery/camera selection should show the photo just chosen, including over a restored cover.
+          if (addedImages.length === 1) setAISelectedImage(elements, image.path, { autoSelectForSave: true });
+          updateSaveSelectionSummary(elements);
+          renderUploadedImages(elements);
+          elements.uploadedImageStrip.scrollTop = 0;
+        } catch (error) {
+          failed.push(file.name);
+          console.warn('Photo upload failed', error);
+        }
       }
       await persistAddItemDraft(elements);
-      setInlineStatus(elements.imageStatus,failed.length?`${added} photos added. Could not upload: ${failed.join(', ')}. Choose those photos again to retry.`:`${added} photo${added===1?'':'s'} added and included. Tap a photo to change the cover.`,failed.length?'is-error':'is-success');
-    }finally{
-      elements.localImageUploadInput.disabled=false;if(camera)camera.disabled=false;
-      event.target.value='';scheduleAutomaticCopy(elements);window.addItemWizard?.renderReview();
+      const added = addedImages.length, included = state.saveSelectedUploadedImagePaths.length;
+      setInlineStatus(elements.imageStatus, failed.length
+        ? `${added} photos added. Could not upload: ${failed.join(', ')}. Choose those photos again to retry.`
+        : `${added} photo${added === 1 ? '' : 's'} added at the top. ${included} included in this item. The first new photo is the cover; tap another photo to change it.`,
+      failed.length ? 'is-error' : 'is-success');
+      if (added && !document.getElementById('item-step-photos').hidden) elements.imageStatus.scrollIntoView({ block: 'start', behavior: 'instant' });
+    } finally {
+      setLocalPhotoInputsEnabled(elements, true);
+      event.target.value = '';
+      scheduleAutomaticCopy(elements);
+      window.addItemWizard?.renderReview();
     }
   }
 
@@ -4016,12 +4046,14 @@
     });
 
     exposeModule(elements);
-    const restoredDraft = await loadAddItemDraft(elements);
-    if (!restoredDraft) {
-      resetAssistedWorkflow(elements, { skipDraftSave: true });
-
+    try {
+      const restoredDraft = await loadAddItemDraft(elements);
+      if (!restoredDraft) resetAssistedWorkflow(elements, { skipDraftSave: true });
+      setActiveWorkflow(elements, "assisted", { skipDraftSave: true });
+    } finally {
+      // Do not accept uploads until draft photos have finished restoring over this state.
+      setLocalPhotoInputsEnabled(elements, true);
     }
-    setActiveWorkflow(elements, "assisted", { skipDraftSave: true });
     document.dispatchEvent(new Event("add-item:ready"));
   }
 
