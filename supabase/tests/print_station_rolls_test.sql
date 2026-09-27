@@ -1,0 +1,60 @@
+-- Transactional checks; no real station or physical printer is used.
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+create temp table roll_tap_results(result text);
+do $roll_checks$
+declare
+ admin_id text := (select user_id::text from public.employees where role='admin' and active is distinct from false limit 1);
+ station jsonb; station_id uuid; single_station jsonb; single_id uuid;
+ left_job jsonb; right_job jsonb; claim jsonb; retried jsonb;
+ request_id uuid := gen_random_uuid();
+ label text := '<DesktopLabel Version="1"></DesktopLabel>';
+begin
+ insert into roll_tap_results select plan(24);
+ insert into roll_tap_results select ok(not has_function_privilege('anon','public.configure_print_station_rolls(uuid,text,text,text)','EXECUTE'),'anonymous users cannot configure rolls');
+ perform set_config('request.jwt.claim.sub',gen_random_uuid()::text,true);
+ insert into roll_tap_results select throws_ok('select public.configure_print_station_rolls(gen_random_uuid())','42501','Administrator access required','non-admin cannot change roll settings');
+ perform set_config('request.jwt.claim.sub',admin_id,true);
+ station := public.register_print_station('__roll_test_'||gen_random_uuid()::text); station_id := (station->>'station_id')::uuid;
+ perform public.pair_print_station(station->>'code',repeat('d',64),'Test PC','Renamed printer','DYMO LabelWriter 450 Twin Turbo');
+ single_station := public.register_print_station('__single_test_'||gen_random_uuid()::text); single_id := (single_station->>'station_id')::uuid;
+ perform public.pair_print_station(single_station->>'code',repeat('e',64),'Test PC 2','DYMO single','450');
+ insert into roll_tap_results select throws_ok(format('select public.configure_print_station_rolls(%L::uuid,%L)',single_id,'Left'),'P0001','Select a paired Twin Turbo printer','single-roll printers cannot have roll settings');
+ insert into roll_tap_results select throws_ok(format('select public.enqueue_label_print(%L::uuid,gen_random_uuid(),%L,1)',station_id,label),'P0001','Choose Left or Right for this Twin Turbo printer','unconfigured Twin Turbo requires an explicit roll');
+ insert into roll_tap_results select throws_ok(format('select public.enqueue_label_print(%L::uuid,gen_random_uuid(),%L,1,_printer_roll:=%L)',station_id,label,'Auto'),'P0001','Choose Left or Right for this Twin Turbo printer','automatic roll switching is not allowed');
+ insert into roll_tap_results select throws_ok(format('select public.enqueue_label_print(%L::uuid,gen_random_uuid(),%L,1,_printer_roll:=%L)',single_id,label,'Right'),'P0001','Left/right roll selection requires a Twin Turbo printer','single-roll printer rejects explicit roll');
+ perform public.configure_print_station_rolls(station_id,'Left','30299 jewelry','Address');
+ insert into roll_tap_results select is((select s->>'left_roll_label' from jsonb_array_elements(public.list_print_stations()) s where s->>'id'=station_id::text),'30299 jewelry','roll names are returned to the picker');
+ left_job := public.enqueue_label_print(station_id,request_id,label,1);
+ right_job := public.enqueue_label_print(station_id,gen_random_uuid(),label,1,_printer_roll:='Right');
+ insert into roll_tap_results select is((select printer_roll from public.label_print_jobs where id=(left_job->>'id')::uuid),'Left','saved default is pinned into the job');
+ insert into roll_tap_results select is((select printer_roll from public.label_print_jobs where id=(right_job->>'id')::uuid),'Right','explicit right overrides saved left');
+ -- Use deterministic queue order even though all test statements share now().
+ update public.label_print_jobs set created_at=now()-interval '1 minute' where id=(left_job->>'id')::uuid;
+ perform public.configure_print_station_rolls(station_id,'Right','New stock name','Address');
+ insert into roll_tap_results select is((select printer_roll from public.label_print_jobs where id=(left_job->>'id')::uuid),'Left','changing station settings cannot retarget waiting jobs');
+ insert into roll_tap_results select is(public.enqueue_label_print(station_id,request_id,label,1)->>'id',left_job->>'id','lost legacy response confirms original job after default changes');
+ insert into roll_tap_results select throws_ok(format('select public.enqueue_label_print(%L::uuid,%L::uuid,%L,1,_printer_roll:=%L)',station_id,request_id,label,'Right'),'P0001','This print request already has a different destination or content','same request id cannot change its roll');
+ insert into roll_tap_results select is(public.poll_print_station(station_id,repeat('d',64),true,'','1.0.0'),null::jsonb,'old helper cannot claim a roll-specific job');
+ insert into roll_tap_results select is((select status from public.label_print_jobs where id=(left_job->>'id')::uuid),'queued','old helper leaves job waiting');
+ insert into roll_tap_results select is((select s->>'roll_selection_ready' from jsonb_array_elements(public.list_print_stations()) s where s->>'id'=station_id::text),'false','picker knows old helper needs an update');
+ insert into roll_tap_results select is(public.poll_print_station(station_id,repeat('d',64),true,'',''),null::jsonb,'missing helper version cannot bypass the update');
+ claim := public.poll_print_station(station_id,repeat('d',64),true,'','1.1.0');
+ insert into roll_tap_results select is(claim->>'printer_roll','Left','new helper receives original left selection');
+ insert into roll_tap_results select is(claim->>'id',left_job->>'id','new helper claims the waiting job');
+ perform public.report_label_print(station_id,repeat('d',64),(claim->>'id')::uuid,(claim->>'claim_token')::uuid,'submitted',1);
+ claim := public.poll_print_station(station_id,repeat('d',64),true,'','1.1.0');
+ insert into roll_tap_results select is(claim->>'printer_roll','Right','right selection also reaches the helper');
+ perform public.report_label_print(station_id,repeat('d',64),(claim->>'id')::uuid,(claim->>'claim_token')::uuid,'submitted',1);
+ perform public.configure_print_station_rolls(station_id,'Left','Jewelry','Address');
+ retried := public.retry_label_print((right_job->>'id')::uuid,gen_random_uuid());
+ insert into roll_tap_results select is((select printer_roll from public.label_print_jobs where id=(retried->>'id')::uuid),'Right','explicit reprint retains original right roll after default changes');
+ insert into roll_tap_results select is((select s->>'roll_selection_ready' from jsonb_array_elements(public.list_print_stations()) s where s->>'id'=station_id::text),'true','picker enables selection after updated helper checks in');
+ insert into roll_tap_results select is((select j->>'printer_roll' from jsonb_array_elements(public.list_label_print_jobs(station_id)) j where j->>'id'=right_job->>'id'),'Right','job history includes roll');
+ insert into roll_tap_results select ok(not public._print_helper_supports_roll('1.0.999') and not public._print_helper_supports_roll('invalid') and public._print_helper_supports_roll('1.10.0'),'helper version gating is numeric and fails closed');
+ insert into roll_tap_results select throws_ok(format('select public.configure_print_station_rolls(%L::uuid,%L)',station_id,'Auto'),'P0001','Choose Left or Right and keep roll names under 81 characters','invalid default roll cannot be saved');
+ insert into roll_tap_results select * from finish();
+end $roll_checks$;
+select result from roll_tap_results;
+rollback;

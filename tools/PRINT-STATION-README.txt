@@ -1,4 +1,4 @@
-INVSTO PRINT STATION - WINDOWS
+INVSTO PRINT STATION 1.1.0 - WINDOWS
 
 1. Install DYMO Connect and confirm your LabelWriter appears there.
 2. Extract all files from this ZIP into a folder.
@@ -24,3 +24,20 @@ review before you explicitly send a new print request; the helper does not repla
 
 This package handles Invsto DYMO label files. PDF/general document printing is not
 included. Disconnect a station from Invsto to revoke its access and cancel queued jobs.
+
+UPDATING AN EXISTING STATION
+Extract the new ZIP and run Install-Print-Station.cmd again. The installer waits
+for the current job to finish, keeps your pairing, updates and restarts the helper.
+No new code is needed. Do not disconnect your station just to update it.
+
+TWIN TURBO ROLLS
+In Invsto, open Print Stations > Roll settings to name the labels on Left and Right
+and optionally choose a default. You can change the roll in every Print labels
+window. Left/right mean as you face the front of the printer. Load matching label
+stock on that side. Jobs and reprints keep the chosen roll even after defaults change.
+
+Older helpers cannot accept a roll-specific job. After this update, wait until
+Invsto shows the station online, refresh the page and send one test label.
+
+To intentionally replace an existing pairing, run install-print-station.ps1 with
+-PairAgain. Normal updates keep the current pairing and any unacknowledged journal.

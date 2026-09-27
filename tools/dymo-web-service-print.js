@@ -74,6 +74,7 @@ function parsePrinters(xml) {
       modelName: textFromXml(block, "ModelName"),
       isConnected: /^true$/i.test(textFromXml(block, "IsConnected")),
       isLocal: /^true$/i.test(textFromXml(block, "IsLocal")),
+      isTwinTurbo: /^true$/i.test(textFromXml(block, "IsTwinTurbo")) || /twin\s*turbo/i.test(textFromXml(block, "ModelName") + ' ' + textFromXml(block, "Name")),
     };
   }).filter((printer) => printer.name);
 }
@@ -152,14 +153,20 @@ function choosePrinter(printers, preferredPrinterName) {
   return printers.find((printer) => printer.isConnected) || printers[0] || null;
 }
 
-async function printLabel(baseUrl, printerName, labelXml, copyIndex, totalCopies) {
+function buildPrintParams(roll = 'default') {
+  if (!['default', 'Left', 'Right'].includes(roll)) throw new Error('Invalid printer roll');
+  // DYMO Connect's LabelWriterPrintParams schema. Never use Auto for different stock.
+  return roll === 'default' ? '' : `<LabelWriterPrintParams><TwinTurboRoll>${roll}</TwinTurboRoll></LabelWriterPrintParams>`;
+}
+
+async function printLabel(baseUrl, printerName, labelXml, copyIndex, totalCopies, roll = 'default', send = requestText) {
   const params = new URLSearchParams();
   params.set("printerName", printerName);
-  params.set("printParamsXml", "");
+  params.set("printParamsXml", buildPrintParams(roll));
   params.set("labelXml", labelXml);
   params.set("labelSetXml", "");
 
-  await requestText(baseUrl, "POST", "/PrintLabel", params.toString(), {
+  await send(baseUrl, "POST", "/PrintLabel", params.toString(), {
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
   });
 

@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const { execFileSync, spawn } = require('node:child_process');
 const readline = require('node:readline/promises');
 const dymo = require('./dymo-web-service-print.js');
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function writeDurable(file, value) {
@@ -44,22 +44,25 @@ function makeApi(publicConfig, config) {
     report: (job, status, submitted, detail = '') => rpc('report_label_print', { _station_id: config.stationId, _token: config.token, _job_id: job.id, _claim_token: job.claim_token, _status: status, _submitted: submitted, _detail: detail }),
   };
 }
-function validateJob(job, printerName) {
+function validateJob(job, printerName, isTwinTurbo = false) {
   if (!job?.id || !job.claim_token || !Number.isInteger(job.copies) || job.copies < 1 || job.copies > 100) throw new Error('Invalid print job');
   if (job.printer_name !== printerName) throw new Error('This job targets a different printer. It was not rerouted.');
+  const roll = job.printer_roll ?? 'default';
+  if (!['default', 'Left', 'Right'].includes(roll)) throw new Error('Invalid printer roll');
+  if (roll !== 'default' && !isTwinTurbo) throw new Error('Left/right roll selection requires a Twin Turbo printer.');
   if (typeof job.label_xml !== 'string' || Buffer.byteLength(job.label_xml) > 2000000 || !/<(DesktopLabel|DieCutLabel|ContinuousLabel)[ >]/.test(job.label_xml) || /<!(DOCTYPE|ENTITY)/i.test(job.label_xml)) throw new Error('Invalid DYMO label');
 }
-async function processPrintJob(job, { api, printerName, print, save, pause = sleep }) {
+async function processPrintJob(job, { api, printerName, isTwinTurbo = false, print, save, pause = sleep }) {
   const entry = { job, submitted: 0, status: 'working', inflight: false, detail: '' };
   save(entry);
   try {
-    validateJob(job, printerName);
+    validateJob(job, printerName, isTwinTurbo);
     for (let copy = 0; copy < job.copies; copy++) {
       // The server must still own the claim immediately before every physical submission.
       const gate = await api.report(job, 'claimed', entry.submitted);
       if (gate?.status !== 'claimed') throw new Error('This print request is no longer active');
       entry.inflight = true;save(entry);
-      await print(job.label_xml, copy + 1, job.copies);
+      await print(job.label_xml, copy + 1, job.copies, job.printer_roll ?? 'default');
       entry.submitted++;entry.inflight = false;save(entry);
       if (copy + 1 < job.copies) await pause(500);
     }
@@ -152,11 +155,12 @@ async function run(dataDir, publicConfig) {
       catch { error = 'DYMO Connect is unavailable. Open DYMO Connect on this computer.'; }
       const job = await api.poll(Boolean(local?.printer?.isConnected), error);
       if (job) {
-        const result = await processPrintJob(job, { api, printerName: config.printerName, save,
-          print: async (xml, copy, copies) => {
+        const result = await processPrintJob(job, { api, printerName: config.printerName, isTwinTurbo: local?.printer?.isTwinTurbo, save,
+          print: async (xml, copy, copies, roll) => {
             const fresh = await readPrinter(config.printerName);
             if (!fresh.printer?.isConnected) throw new Error('Selected printer disconnected');
-            await dymo.printLabel(fresh.base, config.printerName, xml, copy, copies);
+            if (roll !== 'default' && !fresh.printer.isTwinTurbo) throw new Error('Selected printer no longer supports two rolls');
+            await dymo.printLabel(fresh.base, config.printerName, xml, copy, copies, roll);
           } });
         log(`${job.id}: ${result.status}, ${result.submitted}/${job.copies}`);
       }

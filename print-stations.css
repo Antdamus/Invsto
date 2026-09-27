@@ -1,5 +1,6 @@
 .print-station-dialog { box-sizing:border-box; width:min(520px,calc(100vw - 24px)); max-height:calc(100dvh - 24px); overflow:auto; border:1px solid #786747; border-radius:20px; padding:22px; color:#f5efe6; background:#211e20; box-shadow:0 20px 80px #0009; font:16px/1.5 'Manrope',sans-serif; }
 .print-station-dialog::backdrop { background:#0009; }
+.print-station-dialog [hidden] { display:none !important; }
 .print-station-dialog * { box-sizing:border-box; }
 .print-dialog-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .print-dialog-head h2 { margin:0; }
@@ -21,3 +22,5 @@
 #print-pair-code { display:block; font:700 clamp(18px,4vw,28px) monospace; letter-spacing:1px; overflow-wrap:anywhere; margin:15px 0; }
 .print-download-link { display:inline-block; text-decoration:none; }
 @media(max-width:600px) { .print-stations-page { padding:12px; } .print-stations-page section { padding:14px; } .print-station-dialog { padding:16px; } }
+
+.print-station-dialog .print-dialog-actions { position:sticky; bottom:0; padding:12px 0 2px; background:#211e20; }

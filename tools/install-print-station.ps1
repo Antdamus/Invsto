@@ -1,3 +1,4 @@
+param([switch]$PairAgain)
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $stationHome = Join-Path $env:LOCALAPPDATA 'InvstoPrintStation'
@@ -43,8 +44,12 @@ try {
   foreach ($file in @('print-station-agent.cjs','dymo-web-service-print.js','station-public-config.json')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $stationHome $file) -Force
   }
-  & $nodeExe $agentPath --setup
-  if ($LASTEXITCODE -ne 0) { throw 'Pairing did not finish. Check DYMO Connect and the pairing code, then run setup again.' }
+  if ((Test-Path -LiteralPath (Join-Path $stationHome 'station.json')) -and -not $PairAgain) {
+    Write-Host 'Updating the helper. Your existing station and printer pairing are being kept.'
+  } else {
+    & $nodeExe $agentPath --setup
+    if ($LASTEXITCODE -ne 0) { throw 'Pairing did not finish. Check DYMO Connect and the pairing code, then run setup again.' }
+  }
   $shell = New-Object -ComObject WScript.Shell
   $vbsPath = Join-Path $stationHome 'Start Print Station.vbs'
   $command = '"' + $nodeExe + '" "' + $agentPath + '" --run'

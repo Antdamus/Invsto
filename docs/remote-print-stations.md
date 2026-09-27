@@ -19,22 +19,34 @@ Add Item (last item, batch, and explicit draft-label printing), Add Inventory, S
 
 Automatic item-label preparation stays silent. Only an explicit print action opens the destination picker. Cancelling leaves prepared draft labels intact. Bulk-bag capture retains its barcode and label independently of later item-form changes, and its Print bag label action retries without capturing another bag. Past Live Sales records a reprint only after enqueue/download succeeds.
 
-Location labels use the existing Address layout; item/bag labels use their existing jewelry layouts. Load the matching label stock. On a Twin Turbo, check which roll the first test label uses before printing a batch. Shipping-label PDFs in eBay Order History, and ordinary document printing, are separate from this DYMO XML queue.
+Location labels use the existing Address layout; item/bag labels use their existing jewelry layouts. Load the matching label stock. On a Twin Turbo, choose Left or Right in the print dialog and check the first physical label before printing a batch. Left and right are viewed from the front of the printer. Shipping-label PDFs in eBay Order History, and ordinary document printing, are separate from this DYMO XML queue.
 
 The Print Stations page shows computers, connection status, queued and recent jobs. Inventory staff may enqueue/review jobs, cancel jobs still waiting, or deliberately request a new copy. Only active employee records with the admin role may pair/disconnect computers. Disconnecting revokes the station credential and cancels waiting jobs; a label already submitted cannot be recalled.
 
+## Twin Turbo rolls and helper updates
+
+The print dialog offers Left and Right for a paired Twin Turbo, identified by the installed printer model/name. Every copy uses the chosen roll via DYMO's `LabelWriterPrintParams/TwinTurboRoll`; automatic switching is never requested. Single-roll printers keep their normal printing behavior. The local-file download option does not set the remote roll.
+
+Administrators can open **Roll settings** on Print Stations to name the stock on each side and set a default, or choose each time. For example, name Left "30299 jewelry tags" and Right "Address labels" only if that is what is physically loaded. These names are reminders, not automatic media sensing or label-size validation. The print dialog still allows an explicit override. Changing settings never changes a waiting job, and reprints retain the original roll. Job history shows the roll.
+
+Install helper **1.1.0** on each printing computer for this feature: download the new ZIP, extract all files and run `Install-Print-Station.cmd` again. The installer waits for the old helper to finish, updates its files, preserves `station.json` and the protected pairing credential, and restarts it. An outstanding journal is recovered by acknowledgement only. No new pairing code is needed. Intentional re-pairing remains available by running `install-print-station.ps1 -PairAgain`; normal updates keep pairing.
+
+The page enables roll selection after the updated helper checks in. The server never gives a roll-specific job to an older or unrecognized helper version; it waits for an update. Existing jobs created before roll support retain their old printer-default behavior. New Twin Turbo jobs need an explicit roll or saved station default. Already paired helpers are not remotely updated by publishing the website.
+
+Protocol reference: [official DYMO Connect framework](https://github.com/dymosoftware/dymo-connect-framework/blob/master/dymo.connect.framework.full.js), `createLabelWriterPrintParamsXml` and `TwinTurboRoll`.
+
 ## Delivery and retry behavior
 
-- An enqueue request has a persisted browser request ID. A lost response can be confirmed by retrying the same label, quantity and station, including after a page reload. A pending request cannot silently change stations. Merely viewing job history does not clear a pending enqueue ID.
+- An enqueue request has a persisted browser request ID. A lost response can be confirmed by retrying the same label, quantity, station and roll, including after a page reload. A pending request cannot silently change stations or rolls. Merely viewing job history does not clear a pending enqueue ID.
 - The server claims one job per station, with a lease. Other stations cannot read its XML, claim it, or acknowledge it. Offline printers do not claim waiting jobs.
 - The helper persists a journal before every physical submission. It verifies the server claim and exact printer before sending each copy. It never resumes an interrupted journal by printing it again.
-- Losing a final acknowledgment retries only the acknowledgment. Interrupted/expired/ambiguous submissions become **Check printer before retrying**. An explicit retry sends a new full-quantity request to the same station, with confirmation when a label may already have printed.
+- Losing a final acknowledgment retries only the acknowledgment. Interrupted/expired/ambiguous submissions become **Check printer before retrying**. An explicit retry sends a new full-quantity request to the same station and roll, with confirmation when a label may already have printed.
 - **Sent to printer** means DYMO accepted the request. It does not prove paper completed. This is at-most-once automatic submission per claimed job, with conservative uncertainty after interruption, rather than a physical delivery guarantee.
 - The helper's Stop shortcut finishes its current job. Start is protected by a process lock. Re-pairing is blocked until an outstanding journal has been acknowledged by the previous station.
 
 ## Security and storage
 
-`20260927150000_remote_label_print_stations.sql` adds the station, pairing and job tables and RPCs. RLS and revoked client table grants prevent direct access. Staff RPCs use existing inventory permissions; station administration checks employee records rather than editable user metadata. Pairing codes are random, hashed and short lived. Each helper chooses a random 256-bit station credential, stored only as a hash by the server and protected with Windows DPAPI locally. Only that Windows account can decrypt it.
+`20260927200000_print_station_roll_selection.sql` adds roll settings and per-job roll snapshots. `20260927150000_remote_label_print_stations.sql` adds the station, pairing and job tables and RPCs. RLS and revoked client table grants prevent direct access. Staff RPCs use existing inventory permissions; station administration checks employee records rather than editable user metadata. Pairing codes are random, hashed and short lived. Each helper chooses a random 256-bit station credential, stored only as a hash by the server and protected with Windows DPAPI locally. Only that Windows account can decrypt it.
 
 The ZIP contains only source files and the same public anon configuration used by the browser; it contains no privileged key, account password, or paired station credential. The helper receives XML only from its scoped queue, rejects non-label/oversized/entity-bearing documents and never executes label content. Application RPC authentication is separate from Edge Function gateway JWT settings; this feature adds no Edge Function and changes none of those settings.
 
@@ -61,3 +73,5 @@ Jobs and label XML are retained in the database in this initial release; recent-
 Verified for this release: 27 database checks passed through the authenticated CLI SQL runner with migrations disabled and all test data rolled back; the Docker pgTAP runner was unavailable on this host. The same pgTAP assertions were wrapped in one SQL block that raises on any failed assertion. No physical labels were printed during automated validation.
 
 Coverage follow-up: 21 print-station/helper/browser checks and 44 Add Item regressions passed after routing the older label actions through the shared picker. The Windows helper and database did not change; an existing paired station needs no reinstall.
+
+Roll release verification: 28 helper/browser checks, 4 WebKit roll-flow checks, and 51 transactional database assertions passed. The database preflight exercised the new migration and rolled it back along with all test data before deployment. The additional pgTAP suite is `supabase/tests/print_station_rolls_test.sql` (24 checks). Physical left/right printing still requires a test on the destination Twin Turbo.

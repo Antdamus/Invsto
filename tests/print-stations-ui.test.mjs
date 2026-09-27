@@ -32,6 +32,7 @@ async function openPage(t,admin=true,path='fixture.html'){
    if(name==='list_label_print_jobs')return {data:window.testJobs};
    if(name==='enqueue_label_print')return window.testSendError?{error:{message:'Connection lost'}}:{data:{id:'job-1',status:'queued'}};
    if(name==='retry_label_print')return window.testRetryError?{error:{message:'Connection lost'}}:{data:{id:'job-2',status:'queued'}};
+   if(name==='configure_print_station_rolls'){Object.assign(window.testStations.find(s=>s.id===args._station_id),{default_roll:args._default_roll,left_roll_label:args._left_label,right_roll_label:args._right_label});return {data:null};}
    if(name==='register_print_station')return {data:{station_id:'c',code:'1234567890ABCDEF',expires_at:new Date(Date.now()+900000).toISOString()}};
    return {data:null};
   }};
@@ -116,4 +117,26 @@ test('automatic item-label preparation stays silent while the explicit print act
  const page=await openPage(t);await page.evaluate(()=>{document.body.insertAdjacentHTML('beforeend','<input id="scanned-barcode" value="COIN42"><input id="qr-code" value="https://example.invalid/coin"><input id="qr-type" value="website"><input id="title" value="Silver coin"><input id="weight" value="31.1"><div id="dymo-status"></div><button id="generate-dymo-label">Generate and Print</button>');});
  await page.evaluate(()=>window.dymoModule.generateDymoLabelFromForm({downloadPreview:false,silent:true}));assert.equal(await page.locator('.print-station-dialog').count(),0);assert.equal(await page.evaluate(()=>window.calls.length),0);
  await page.evaluate(()=>window.dymoModule.setupGenerateDymoButtonListener());await page.locator('#generate-dymo-label').click();await page.locator('[data-destination]:enabled').waitFor();await page.locator('[data-destination]').selectOption('a');await page.locator('[data-send]').click();await page.waitForFunction(()=>document.getElementById('dymo-status').textContent.includes('Queued'));assert.equal(await page.evaluate(()=>window.calls.find(c=>c.name==='enqueue_label_print').args._barcode),'COIN42');assert.match(await page.locator('#dymo-status').innerText(),/not been saved yet/);
+});
+
+async function twinStation(page,extra={}){
+ await page.evaluate(extra=>Object.assign(window.testStations[0],{printer_model:'DYMO LabelWriter 450 Twin Turbo',roll_selection_ready:true,left_roll_label:'30299 jewelry tags',right_roll_label:'Address labels',default_roll:null},extra),extra);
+}
+test('Twin Turbo requires a roll and sends an explicit override of the saved default',async t=>{
+ const page=await openPage(t);await twinStation(page);await begin(page);await page.locator('[data-destination]').selectOption('a');assert.equal(await page.locator('[data-send]').isDisabled(),true);assert.match(await page.locator('[data-roll]').innerText(),/Left roll - 30299 jewelry tags/);await page.locator('[data-roll]').selectOption('Right');await page.locator('[data-send]').click();await page.waitForFunction(()=>window.testResult);assert.equal(await page.evaluate(()=>window.calls.find(c=>c.name==='enqueue_label_print').args._printer_roll),'Right');
+ await twinStation(page,{default_roll:'Left'});await begin(page);assert.equal(await page.locator('[data-roll]').inputValue(),'Left');await page.locator('[data-roll]').selectOption('Right');await page.locator('[data-send]').click();await page.waitForFunction(()=>window.testResult);assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.name==='enqueue_label_print').at(-1).args._printer_roll),'Right');
+});
+test('old Twin Turbo helper cannot send a roll-specific request and single-roll destinations hide the choice',async t=>{
+ const page=await openPage(t);await twinStation(page,{roll_selection_ready:false,default_roll:'Right'});await begin(page);await page.locator('[data-destination]').selectOption('a');assert.equal(await page.locator('[data-roll-update]').isVisible(),true);assert.equal(await page.locator('[data-send]').isDisabled(),true);
+ await page.locator('[data-destination]').selectOption('b');assert.equal(await page.locator('[data-roll-section]').isVisible(),false);await page.locator('[data-send]').click();await page.waitForFunction(()=>window.testResult);assert.equal(await page.evaluate(()=>window.calls.find(c=>c.name==='enqueue_label_print').args._printer_roll),'default');
+});
+test('lost response cannot silently change rolls and preserves its request id after reload',async t=>{
+ const page=await openPage(t);await twinStation(page,{default_roll:'Left'});await page.evaluate(()=>window.testSendError=true);await begin(page);await send(page,'a');const request=await page.evaluate(()=>window.calls.find(c=>c.name==='enqueue_label_print').args._request_id);
+ await begin(page);await page.locator('[data-roll]').selectOption('Right');await page.locator('[data-send]').click();await page.waitForFunction(()=>window.testError);assert.match(await page.evaluate(()=>window.testError.message),/original computer and roll/);assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.name==='enqueue_label_print').length),1);
+ await page.reload();await twinStation(page,{default_roll:'Left'});await begin(page);await send(page,'a');assert.equal(await page.evaluate(()=>window.calls.find(c=>c.name==='enqueue_label_print').args._request_id),request);
+});
+test('mobile roll configuration survives refresh and appears in the print picker and job history',async t=>{
+ const page=await openPage(t,true,'print-stations.html');await twinStation(page);await page.getByRole('button',{name:'Refresh status'}).click();await page.locator('[data-configure-rolls]').click();await page.locator('[data-left]').fill('30299 tags');await page.locator('[data-right]').fill('Address <label>');await page.locator('[data-default-roll]').selectOption('Right');await page.getByRole('button',{name:'Save roll settings'}).click();await page.waitForFunction(()=>window.calls.some(c=>c.name==='configure_print_station_rolls'));await page.locator('[data-configure-rolls]').waitFor();
+ await page.evaluate(()=>window.testJobs=[{id:'roll-job',status:'queued',title:'Tag',station_name:'Florida',printer_name:'DYMO',printer_roll:'Right',copies:1,submitted_copies:0,created_at:new Date().toISOString()}]);await page.getByRole('button',{name:'Refresh status'}).click();assert.match(await page.locator('.print-job-card').innerText(),/Right roll/);
+ await begin(page);await page.locator('[data-destination]').selectOption('a');assert.equal(await page.locator('[data-roll]').inputValue(),'Right');assert.match(await page.locator('[data-roll]').innerText(),/Address <label>/);await page.setViewportSize({width:320,height:740});assert.ok(await page.locator('.print-station-dialog').evaluate(el=>el.scrollWidth<=el.clientWidth));await page.screenshot({path:new URL('../test-results/print-rolls-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1'),fullPage:false});await page.locator('[data-cancel]').click();
 });

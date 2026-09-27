@@ -4,7 +4,7 @@ set local search_path=public,extensions;
 select plan(27);
 select ok(not has_table_privilege('anon','public.print_stations','SELECT'),'anonymous clients cannot read station credentials');
 select ok(not has_table_privilege('authenticated','public.label_print_jobs','SELECT'),'staff cannot bypass job RPC validation');
-select ok(not has_function_privilege('anon','public.enqueue_label_print(uuid,uuid,text,integer,text,text,uuid)','EXECUTE'),'anonymous callers cannot enqueue');
+select ok(not has_function_privilege('anon','public.enqueue_label_print(uuid,uuid,text,integer,text,text,uuid,text)','EXECUTE'),'anonymous callers cannot enqueue');
 select ok(not has_function_privilege('anon','public._print_station_authorize(uuid,text)','EXECUTE'),'station auth helper is private');
 select set_config('request.jwt.claim.sub',gen_random_uuid()::text,true);
 select throws_ok('select public.list_print_stations()','42501','Inventory access required','non-staff cannot list stations');
