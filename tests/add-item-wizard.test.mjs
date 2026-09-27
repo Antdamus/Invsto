@@ -652,3 +652,44 @@ test('the first successful gallery photo becomes the new cover when an earlier f
  assert.match(await page.locator('#assisted-image-status').innerText(),/Failed front.png/);
  assert.deepEqual(await page.evaluate(()=>window.addItemAssistedModule.getSelectedUploadedImagesForSave().map(p=>p.path)),['uploaded-2.jpg','front.jpg','back.jpg']);
 });
+
+
+test('preview navigation cycles included photos with the gallery collapsed and cropping retains the full set',async t=>{
+ const page=await pageFor(t,{width:390,height:844});
+ assert.equal(await page.locator('#assisted-photo-previous').isDisabled(),true);
+ assert.equal(await page.locator('#assisted-photo-next').isDisabled(),true);
+ const photos=[twoPhotos[0],{...twoPhotos[0],path:'excluded.jpg',name:'Excluded'},twoPhotos[1],{...twoPhotos[0],path:'side.jpg',name:'Side'}];
+ await seed(page,{kind:'watch',step:'photos',photos});
+ await page.locator('[data-assisted-save-toggle="excluded.jpg"]').click();
+ await page.locator('#item-photo-gallery > summary').click();
+ const tools=page.getByText('Crop, background and recent station photos',{exact:true});await tools.click();
+ const forward=page.getByRole('button',{name:'Next photo',exact:true}),back=page.getByRole('button',{name:'Previous photo',exact:true});
+ const position=page.locator('#assisted-photo-position');
+ assert.equal(await position.innerText(),'1 / 3');
+ await forward.click();assert.equal(await page.locator('#assisted-selected-image-name').innerText(),'Back');assert.equal(await position.innerText(),'2 / 3');
+ await back.click();assert.equal(await page.locator('#assisted-selected-image-name').innerText(),'Front');
+ await back.click();assert.equal(await page.locator('#assisted-selected-image-name').innerText(),'Side');assert.equal(await position.innerText(),'3 / 3');
+ await forward.click();await forward.click();
+ assert.equal(await page.locator('#assisted-selected-image-name').innerText(),'Back');
+ assert.equal(await page.locator('#assisted-uploaded-image-strip').isVisible(),false);
+ assert.equal(await page.locator('#assisted-open-image-editor').isVisible(),true,'Switching keeps the editing tools open');
+ await page.locator('#assisted-open-image-editor').click();
+ await page.waitForFunction(()=>document.getElementById('assisted-editor-status').textContent.startsWith('Drag the image'));
+ await page.locator('#assisted-editor-save').click();await page.locator('.assisted-editor-dialog').waitFor({state:'hidden'});
+ assert.deepEqual(await page.evaluate(()=>({path:window.testUploads[0].imagePath,action:window.testUploads[0].background})),{path:'back.jpg',action:'edited'},'The crop uses the photo selected with Next');
+ assert.deepEqual(await page.evaluate(()=>window.addItemAssistedModule.getSelectedUploadedImagesForSave().map(photo=>photo.path)),['uploaded-1.jpg','front.jpg','side.jpg']);
+ assert.equal(await position.innerText(),'2 / 3','The cropped photo keeps its place among included photos');
+ await forward.click();assert.equal(await page.locator('#assisted-selected-image-name').innerText(),'Side');
+ await back.click();assert.equal(await page.locator('#assisted-selected-image-name').innerText(),'Photo');
+ assert.equal(await page.locator('#assisted-uploaded-image-strip').isVisible(),false);
+ await assertPhoneLayout(page,'Collapsed photo navigation');
+ await page.locator('.assisted-ai-image-card').scrollIntoViewIfNeeded();
+ await mkdir(new URL('test-results/',root),{recursive:true});
+ await page.screenshot({path:new URL('test-results/photo-navigation-phone.png',root).pathname.replace(/^\/(\w:)/,'$1')});
+ await page.reload();await page.waitForFunction(()=>window.addItemAssistedModule?.getSelectedUploadedImagesForSave().length===3);
+ assert.equal(await position.innerText(),'2 / 3');
+ await page.locator('[data-assisted-save-toggle="front.jpg"]').click();await page.locator('[data-assisted-save-toggle="side.jpg"]').click();
+ assert.equal(await position.innerText(),'1 / 1');assert.equal(await forward.isDisabled(),true);assert.equal(await back.isDisabled(),true);
+ await page.locator('[data-assisted-save-toggle="uploaded-1.jpg"]').click();
+ assert.equal(await position.innerText(),'0 / 0');assert.equal(await forward.isDisabled(),true);assert.equal(await back.isDisabled(),true);
+});

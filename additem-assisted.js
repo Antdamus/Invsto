@@ -170,6 +170,9 @@
       selectedImageEmpty: document.getElementById("assisted-selected-image-empty"),
       selectedImageName: document.getElementById("assisted-selected-image-name"),
       selectedImagePath: document.getElementById("assisted-selected-image-path"),
+      previousPhotoButton: document.getElementById("assisted-photo-previous"),
+      nextPhotoButton: document.getElementById("assisted-photo-next"),
+      photoPosition: document.getElementById("assisted-photo-position"),
       bgAutoAlignButton: document.getElementById("assisted-bg-auto-align"),
       bgBlackButton: document.getElementById("assisted-bg-black"),
       bgWhiteButton: document.getElementById("assisted-bg-white"),
@@ -977,6 +980,7 @@
       elements.bgWhiteButton.disabled = isBusy;
       elements.bgWhiteButton.textContent = whiteLabel;
     }
+    updatePhotoNavigation(elements);
   }
 
   function updateAutoAlignButton(elements) {
@@ -1863,6 +1867,29 @@
     return state.recentUploadedImages.find((image) => image.path === path) || null;
   }
 
+  function getNavigablePhotos() {
+    const included = new Set(state.saveSelectedUploadedImagePaths);
+    // Gallery order stays stable when choosing a different cover photo.
+    return state.recentUploadedImages.filter(image => included.has(image.path));
+  }
+
+  function updatePhotoNavigation(elements) {
+    const photos = getNavigablePhotos();
+    const index = photos.findIndex(image => image.path === state.aiSelectedUploadedImagePath);
+    const busy = elements.localImageUploadInput?.disabled || elements.bgBlackButton?.disabled;
+    elements.previousPhotoButton.disabled = elements.nextPhotoButton.disabled = photos.length < 2 || busy;
+    elements.photoPosition.textContent = `${index + 1} / ${photos.length}`;
+    elements.photoPosition.setAttribute('aria-label', index < 0 ? 'No included photo selected' : `Photo ${index + 1} of ${photos.length}`);
+  }
+
+  function switchIncludedPhoto(elements, direction) {
+    if (elements.previousPhotoButton.disabled || elements.nextPhotoButton.disabled) return;
+    const photos = getNavigablePhotos();
+    const index = photos.findIndex(image => image.path === state.aiSelectedUploadedImagePath);
+    const nextIndex = index < 0 ? (direction < 0 ? photos.length - 1 : 0) : (index + direction + photos.length) % photos.length;
+    if (photos[nextIndex]) setAISelectedImage(elements, photos[nextIndex].path);
+  }
+
   function updateSelectedImagePreview(elements) {
     const image = state.aiSelectedUploadedImage;
 
@@ -1993,6 +2020,7 @@
   }
 
   function renderUploadedImages(elements) {
+    updatePhotoNavigation(elements);
     if (!elements.uploadedImageStrip) return;
 
     if (!state.recentUploadedImages.length) {
@@ -3252,13 +3280,15 @@
         0
       );
 
-      state.recentUploadedImages = [
-        croppedImage,
-        ...state.recentUploadedImages.filter((image) => image.path !== croppedImage.path),
-      ];
-
-      setAISelectedImage(elements, croppedImage.path, { silent: true });
-      state.saveSelectedUploadedImagePaths = [croppedImage.path];
+      state.recentUploadedImages = state.recentUploadedImages.filter(image => image.path !== croppedImage.path);
+      const sourceIndex = state.recentUploadedImages.findIndex(image => image.path === selectedImage.path);
+      state.recentUploadedImages.splice(Math.max(0, sourceIndex), 0, croppedImage);
+      // Replace only this photo, preserving the other included photos and their navigation order.
+      state.saveSelectedUploadedImagePaths = [...new Set([
+        ...state.saveSelectedUploadedImagePaths.map(path => path === selectedImage.path ? croppedImage.path : path),
+        croppedImage.path,
+      ])];
+      setAISelectedImage(elements, croppedImage.path);
       updateSaveSelectionSummary(elements);
       renderUploadedImages(elements);
       scheduleAddItemDraftSave(elements);
@@ -3283,6 +3313,7 @@
       input.disabled = !enabled;
       input.closest('label')?.setAttribute('aria-disabled', String(!enabled));
     }
+    updatePhotoNavigation(elements);
   }
 
   async function handleLocalImageUpload(elements, event) {
@@ -3736,6 +3767,8 @@
   }
 
   function setupImageStripListeners(elements) {
+    elements.previousPhotoButton.addEventListener('click', () => switchIncludedPhoto(elements, -1));
+    elements.nextPhotoButton.addEventListener('click', () => switchIncludedPhoto(elements, 1));
     elements.uploadedImageStrip?.addEventListener("click", (event) => {
       const aiButton = event.target.closest("[data-assisted-ai-select]");
       if (aiButton) {

@@ -75,7 +75,10 @@
   document.querySelector('.workflow-shell-header').hidden=true;
   document.querySelector('.workflow-tabs').hidden=true;
   document.querySelector('.assisted-ai-image-card').querySelector('.assisted-card-kicker').textContent='Cover photo';
-  document.querySelector('.assisted-ai-image-card .assisted-card-helper').textContent='Also used for the description draft.';
+  document.querySelector('.assisted-ai-image-card .assisted-card-helper').textContent='The shown photo is the cover and is used for the description draft.';
+  const photoNavigation=block('div', '<button type="button" id="assisted-photo-previous" aria-label="Previous photo" aria-controls="assisted-selected-image-preview" disabled>← Previous</button><span id="assisted-photo-position" role="status" aria-live="polite" aria-atomic="true">0 / 0</span><button type="button" id="assisted-photo-next" aria-label="Next photo" aria-controls="assisted-selected-image-preview" disabled>Next →</button>', 'intake-photo-navigation');
+  photoNavigation.setAttribute('role','group');photoNavigation.setAttribute('aria-label','Switch included photo');
+  document.querySelector('.assisted-ai-image-card .assisted-selected-image-meta').after(photoNavigation);
   const tools=disclosure('Crop, background and recent station photos', [document.querySelector('.assisted-bg-tools'),byId('assisted-bg-status'),document.querySelector('.assisted-upload-actions')]);
   document.querySelector('.assisted-ai-image-card > details').remove();
   tools.append(document.querySelector('#workflow-panel-assisted > details'));
