@@ -2027,7 +2027,7 @@ async function bumpInventoryVersion(changedIds = null) {
       pendingInventoryLabelPrintState = null;
       updateBarcodeInputStateBasedOnModals();
       if (returnToStockAfterQuickAdd()) return;
-      document.getElementById("input-to-search-inventory-item")?.focus();
+      (document.body.classList.contains("receiving-mode") ? document.getElementById("receive-search") : document.getElementById("input-to-search-inventory-item"))?.focus();
     }
 
     async function handleInventoryLabelPrintDecision(strategy) {
@@ -2184,95 +2184,21 @@ async function bumpInventoryVersion(changedIds = null) {
           let stockTransactionNotes = "";
 
           if (!isBulkFlow) {
-            // ── NON-BULK: generic stock write ───────────────────────────────
-            // Check if stock already exists at this location
-            const { data: existingStock, error: fetchError } = await supabase
-              .from("item_stock_locations")
-              .select("id, quantity")
-              .eq("item_id", batchItem.item.id)
-              .eq("location_id", location_id)
-              .eq("condition_status", "good")
-              .maybeSingle();
-
-            if (fetchError) {
-              console.error("❌ Failed to check existing stock:", fetchError);
-              showToast("❌ Could not check existing stock.");
+            // One atomic, idempotent write also serves the scan-counting flow.
+            batchItem.receivingRequestId ||= crypto.randomUUID();
+            const {data: receipt, error: receiveError} = await supabase.rpc('receive_inventory_batch', {
+              _request_id: batchItem.receivingRequestId,
+              _location_id: location_id,
+              _lines: [{item_id: batchItem.item.id, quantity: quantityToAdd}],
+              _notes: 'Added using scan counting',
+            });
+            if (receiveError) {
+              showToast('Could not confirm stock: ' + receiveError.message + '. Retry the same item, quantity and location.');
               return;
             }
-
-            if (existingStock) {
-              // Update existing stock
-              const { error: updateError } = await supabase
-                .from("item_stock_locations")
-                .update({
-                  quantity: existingStock.quantity + quantityToAdd,
-                  last_updated: signedAt,
-                  added_by: currentUser.id,
-                  confirmation_email: signedEmail,
-                  confirmation_method: confirmationMethod,
-                  confirmed_at: signedAt,
-                  condition_status: "good",
-                })
-                .eq("id", existingStock.id);
-
-              if (updateError) {
-                console.error("❌ Failed to update existing stock:", updateError);
-                showToast("❌ Failed to update existing stock.");
-                return;
-              }
-            } else {
-              // Insert new stock
-              const { error: insertError } = await supabase
-                .from("item_stock_locations")
-                .insert({
-                  item_id: batchItem.item.id,
-                  location_id,
-                  quantity: quantityToAdd,
-                  added_by: currentUser.id,
-                  confirmation_email: signedEmail,
-                  confirmation_method: confirmationMethod,
-                  confirmed_at: signedAt,
-                  condition_status: "good",
-                });
-
-              if (insertError) {
-                console.error("❌ Failed to insert new stock:", insertError);
-                showToast("❌ Failed to save stock assignment.");
-                return;
-              }
-            }
-
-            // Audit (non-bulk only)
-            const { data: txData, error: txError } = await supabase.from("stock_transactions").insert({
-              item_id: batchItem.item.id,
-              location_id,
-              quantity: quantityToAdd,
-              action_type: "checkin",
-              method: confirmationMethod,
-              user_id: currentUser.id,
-              email: signedEmail,
-              timestamp: signedAt,
-              confirmed_at: signedAt,
-              notes: [
-                "Added via Add Inventory Module",
-                placementMeta.placement_type ? `destination type: ${placementMeta.placement_type}` : "",
-                placementMeta.location_code ? `location barcode: ${placementMeta.location_code}` : "",
-                placementMeta.parent_location_name ? `parent: ${placementMeta.parent_location_name}` : "",
-                `signed by ${signedEmail}`,
-              ].filter(Boolean).join(" | "),
-              stock_condition: "good",
-            }).select("id, notes").maybeSingle();
-            if (!txError) {
-              stockTransactionId = txData?.id || "";
-              stockTransactionNotes = txData?.notes || "";
-            }
-
-            if (txError) {
-              console.error("❌ Failed to log transaction:", txError);
-              showToast("⚠️ Stock saved, but audit log failed.");
-            } else {
-              showToast(`✅ Saved ${quantityToAdd} to ${location_name}`);
-            }
+            stockTransactionId = receipt.lines[0].transaction_id;
+            stockTransactionNotes = 'Added using scan counting';
+            showToast(`Saved ${quantityToAdd} to ${location_name}`);
           } else {
             // ── BULK BAG: per-bag stock only (no generic item stock write) ──
             const { bagBarcode, bulkPayload } = bagInfo || {};
@@ -2998,6 +2924,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Define currentUser globally for the existing inventory flow.
     window.currentUser = session.user;
+    if (new URLSearchParams(window.location.search).get('mode') !== 'count') {
+      bindInventoryLabelPrintControls();
+      try { await window.inventoryReceiving.init({user: session.user, openLabels: showInventoryLabelPrintModal}); }
+      catch(error) { showToast('Could not open inventory receiving: ' + error.message); }
+      return;
+    }
+
   
     console.log("✅ Session loaded. User is authenticated.");
     searchForBarcodeListener();

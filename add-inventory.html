@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Add Inventory</title>
   <link rel="stylesheet" href="add-inventory.css" />
+  <link rel="stylesheet" href="inventory-receiving.css?v=20260927-receiving" />
   <link rel="stylesheet" href="additembulk.css" />
   <!-- 🅰️ Google Fonts: Display Serif Font -->
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet"/>
@@ -19,6 +20,7 @@
 </head>
 <body>
   
+  <main id="inventory-receiving" hidden></main>
   <main class="add-inventory-wrapper">
 
     <button id="toggle-controller" class="toggle-controller-btn" title="Show/Hide Controls" aria-label="Toggle Controls">
@@ -44,7 +46,8 @@
     </div>
 
     <section class="batch-section">
-      <h2 id="current-batch-heading">Current Batch</h2>
+      <h2 id="current-batch-heading">Scan counting / bulk bags</h2>
+      <p><a href="add-inventory.html">Switch to quick inventory receiving</a></p>
       <div id="batch-items-container" class="batch-container">
         <!-- Items being added will be rendered here -->
       </div>
@@ -54,7 +57,7 @@
     <!-- ✅ Manual Assign Button -->
     <div style="text-align: center; margin-top: 24px;">
       <button id="btn-manual-assign" class="confirm-btn">
-        📦 Submit Current Batch
+        📦 Place Next Item
       </button>
     </div>
 
@@ -66,7 +69,8 @@
   <script src="print-stations.js?v=20260927-rolls" defer></script>
   <script src="additem-dymolabel.js?v=20260927-all-labels" defer></script>
   <script src="additembulk.js?v=20260927-all-labels" defer></script>  <!-- ⬅️ add this -->
-  <script src="add-inventory.js?v=20260927-all-labels" defer></script>
+  <script src="inventory-receiving.js?v=20260927-receiving" defer></script>
+  <script src="add-inventory.js?v=20260927-receiving" defer></script>
 
   <!-- 📢 Toast + Loading Spinner Containers -->
   <div id="toast-container"></div>
