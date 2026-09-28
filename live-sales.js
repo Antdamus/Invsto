@@ -82,6 +82,7 @@ function formatElapsed(seconds) {
 }
 
 function setStatus(message = "", type = "info") {
+  const setupStatus=$("session-feedback");if(setupStatus && (!state.currentSession||document.body.classList.contains("live-setup-open"))) {setupStatus.textContent=message;setupStatus.classList.toggle("is-error",type==="error");}
   const el = $("live-status");
   if (!el) return;
   el.textContent = message;
@@ -495,7 +496,8 @@ async function loadSessions({ keepSelection = true } = {}) {
     const stillActive = state.sessions.find((session) => session.id === state.currentSession.id);
     state.currentSession = stillActive || state.sessions[0] || null;
   } else {
-    state.currentSession = state.sessions[0] || null;
+    const saved=localStorage.getItem("invsto-live-show");
+    state.currentSession = state.sessions.find(s=>s.id===saved) || state.sessions[0] || null;
   }
 
   if (!state.currentSession) state.currentLot = null;
@@ -607,6 +609,7 @@ function updateScanGate() {
   const ownerEnabled = Boolean(state.currentLot && state.currentLot.status !== "packed" && !state.busy);
   $("bag-owner-select")?.toggleAttribute("disabled", !ownerEnabled);
   $("label-bag-owner-select")?.toggleAttribute("disabled", !ownerEnabled);
+  $("review-scanned-bag")?.toggleAttribute("disabled",!state.currentLot || !getManifestGroups().length || state.busy);
   window.ebayLive?.applyGate();
 }
 
@@ -861,7 +864,7 @@ function renderManifest() {
 
   if (meta) {
     meta.innerHTML = `
-      <span><b>Auction</b> ${escapeHtml(state.currentLot.auction_number || "-")}</span>
+      <span><b>Auction</b> ${escapeHtml(window.ebayLive?.current()?.listing_title || state.currentLot.auction_number || "-")}</span>
       <span><b>Owner</b> ${escapeHtml(getLotOwnerLabel() || "Unassigned")}</span>
       <span><b>Bag</b> ${escapeHtml(state.currentLot.lot_code || "-")}</span>
       <span><b>Status</b> ${escapeHtml(state.currentLot.status || "open")}</span>
@@ -2217,6 +2220,12 @@ async function startSession() {
   const notes = $("session-notes")?.value?.trim() || null;
   const startAuctionInput = $("session-start-auction-number");
   const startAuctionNumber = startAuctionInput?.value?.trim() || "";
+  const automatic = $("session-workflow")?.value === "ebay_live";
+  let eventId = "";
+  if (automatic) {
+    try { eventId = window.ebayLive.eventIdFromUrl($("session-ebay-url").value); }
+    catch(error) { setStatus(error.message,"error"); $("session-ebay-url").focus(); return; }
+  }
   const primarySellerId = $("session-primary-seller")?.value || state.employee?.id || null;
   const coSellerIds = getSelectedCoSellerIds();
 
@@ -2226,7 +2235,7 @@ async function startSession() {
     return;
   }
 
-  if (!startAuctionNumber) {
+  if (!automatic && !startAuctionNumber) {
     setStatus("Enter the auction number where this live session should start.", "error");
     startAuctionInput?.focus();
     return;
@@ -2240,17 +2249,13 @@ async function startSession() {
 
   try {
     saveStoreId(storeId);
-    state.pendingStartAuctionNumber = startAuctionNumber;
+    state.pendingStartAuctionNumber = automatic ? "" : startAuctionNumber;
     state.busy = true;
     setStatus("Starting live sale session...");
-    const { data, error } = await supabase.rpc("start_live_sale_session", {
-      _title: title,
-      _store_id: storeId,
-      _notes: notes,
-      _signed_by_email: state.user?.email || null,
-      _primary_seller_employee_id: primarySellerId,
-      _co_seller_employee_ids: coSellerIds,
-    });
+    const args = {_title:title,_store_id:storeId,_notes:notes,_primary_seller_employee_id:primarySellerId,_co_seller_employee_ids:coSellerIds};
+    if (automatic) args._event_id=eventId;
+    else args._signed_by_email=state.user?.email||null;
+    const { data, error } = await supabase.rpc(automatic ? "start_ebay_live_session" : "start_live_sale_session",args);
     if (error) throw error;
     state.currentSession = Array.isArray(data) ? data[0] : data;
     state.currentLot = null;
@@ -2258,7 +2263,8 @@ async function startSession() {
     await loadSessions({ keepSelection: true });
     state.busy = false;
     await prepareNextBag();
-    setStatus(`Show session started at auction ${startAuctionNumber}. Scan the first item into the current bag.`, "success");
+    document.body.classList.remove("live-setup-open");
+    setStatus(automatic ? "Show connected. Select a paid auction from the queue; its bag is created automatically." : `Show session started at auction ${startAuctionNumber}. Scan the first item into the current bag.`, "success");
   } catch (error) {
     console.error("Start live sale session failed:", error);
     state.pendingStartAuctionNumber = "";
@@ -3445,7 +3451,7 @@ function finishBagScanning() {
     return;
   }
   if (!getManifestGroups().length) {
-    setStatus("Scan at least one item or add one general item before printing the auction bag label.", "error");
+    setStatus("Scan at least one item or add an item without a barcode before reviewing the bag.", "error");
     focusItemScanner();
     return;
   }
@@ -3455,11 +3461,13 @@ function finishBagScanning() {
   if (auctionInput) {
     auctionInput.value = state.currentLot.auction_number || auctionInput.value || "";
     setTimeout(() => {
-      auctionInput.focus();
-      auctionInput.select();
+      if (window.ebayLive?.linked()) $("generate-live-label")?.focus({preventScroll:true});
+      else {auctionInput.focus();auctionInput.select();}
     }, 80);
   }
   renderLabelReview();
+  updateScanGate();
+  if (window.ebayLive?.linked()) $("bag-label-panel").scrollIntoView({block:"start",behavior:"smooth"});
   setStatus(window.ebayLive?.linked() ? "Review the items and close this paid bag. Printing is available afterward." : "Confirm the auction number. Press Enter to generate the DYMO label and start the next bag.", "success");
 }
 
@@ -3525,6 +3533,9 @@ function scheduleItemSearch() {
 }
 
 function setupListeners() {
+  $("manage-live-show")?.addEventListener("click",()=>{document.body.classList.toggle("live-setup-open");if(document.body.classList.contains("live-setup-open"))$("session-setup-panel").scrollIntoView({block:"start",behavior:"smooth"});});
+  $("session-workflow")?.addEventListener("change",()=>{const automatic=$("session-workflow").value==="ebay_live";$("session-ebay-url-field").hidden=!automatic;document.querySelector(".session-start-auction-field").hidden=automatic;});
+  $("review-scanned-bag")?.addEventListener("click",finishBagScanning);
   $("session-store-select")?.addEventListener("change", (event) => {
     saveStoreId(event.target.value || "");
     syncStartingAuctionSuggestion();
@@ -3767,8 +3778,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadSellerDirectory();
   await window.ebayLive?.init({
     state, updateGate: updateScanGate,
+    finishScan: finishBagScanning,
+    async selectShow(id) { const selected=state.sessions.find(s=>s.id===id);if(!selected||state.busy)return;state.currentSession=selected;state.currentLot=null;clearScan();await loadLotItems();await prepareNextBag();renderAll(); },
     clearBag() { state.currentLot=null; state.lotItems=[]; clearScan(); setFlowStep("scan"); renderAll(); },
     async openBag(lot) { state.currentLot=lot; rememberBagOwner(lot.owner_employee_id); clearScan(); await loadLotItems(); $("auction-number").value=lot.auction_number; $("label-free-text").value=lot.auction_number; setFlowStep("scan"); renderAll(); },
+    async restoreBag(id) { const {data,error}=await supabase.from("live_sale_lots").select("*").eq("id",id).single();if(error)throw error;state.currentLot=data;await loadLotItems();$("auction-number").value=data.auction_number;setFlowStep("scan");renderAll(); },
     async printBag(id) { const {data,error}=await supabase.from("live_sale_lots").select("*").eq("id",id).single(); if(error)throw error; state.bagHistoryLots=[...state.bagHistoryLots.filter(l=>l.id!==id),data]; await printLiveSaleBagLabel(id); }
   });
   await loadStores();

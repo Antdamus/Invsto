@@ -9,6 +9,7 @@
   box.append(button,note);document.body.append(box);
   let active=false,busy=false,cache={},sent=new Map(),pageAt=0,stopping=false,latestNext=true;
   const sweepPositions=new WeakMap();
+  let lastClock=null,clockChangedAt=0,clockWasAdvancing=false;
   const tab = name => [...document.querySelectorAll('[role="tab"]')].find(el=>new RegExp('^'+name+'(?:\\s|\\(|$)','i').test(el.textContent.trim()));
   const choose = el => {if(el && el.getAttribute('aria-selected')!=='true') el.click();};
   button.onclick=()=>{active=!active;button.textContent=active?'Stop Invsto capture':'Start Invsto capture';sent.clear();stopping=!active;tick();};
@@ -23,19 +24,21 @@
       const parsed=InvstoLiveParser.parse(document,cache);cache=parsed.cache;
       const activitySelected=tab('Activity')?.getAttribute('aria-selected')==='true';
       const soldSelected=tab('Sold')?.getAttribute('aria-selected')==='true';
-      const ready=active && parsed.supported && parsed.panelPresent && activitySelected && soldSelected && document.visibilityState==='visible';
+      if(parsed.elapsed!==null && parsed.elapsed!==lastClock){clockWasAdvancing=lastClock!==null;lastClock=parsed.elapsed;clockChangedAt=Date.now();}
+      const advancing=clockWasAdvancing && Date.now()-clockChangedAt<20000;
+      const ready=active && parsed.supported && parsed.panelPresent && activitySelected && soldSelected && navigator.onLine && (document.visibilityState==='visible' || advancing);
       const events=[];
       if(active) for(const event of parsed.events) {
         const signature=JSON.stringify([event.listing_id,event.kind,event.buyer,event.amount]);
         if(sent.get(event.key)!==signature) {if(events.length<100)events.push(event);}
       }
-      const result=await chrome.runtime.sendMessage({type:'INVSTO_CAPTURE',event_id,events,health:{observed_at:new Date().toISOString(),ready,message:ready?'Reading Activity and Sold items':active?(parsed.supported?'Keep Stream Manager visible with Activity and Sold selected':'Stream Manager layout is not recognized; verify payment manually'):'Capture stopped'}});
+      const result=await chrome.runtime.sendMessage({type:'INVSTO_CAPTURE',event_id,events,health:{observed_at:new Date().toISOString(),ready,message:ready?'Reading Activity and Sold items':active?(parsed.supported?'Bring Stream Manager forward; its clock must keep updating':'Stream Manager layout is not recognized; verify payment manually'):'Capture stopped'}});
       if(!active&&result?.ok)stopping=false;
       if(result?.ok) for(const e of events) sent.set(e.key,JSON.stringify([e.listing_id,e.kind,e.buyer,e.amount]));
       const statusText=(ready?'Capturing · ':active?'Paused · ':'Stopped · ')+(result?.status||result?.error||'Waiting for receiver');
       if(note.textContent!==statusText)note.textContent=statusText;
       // The Activity feed is virtualized. Sweep it so failures below the fold are read too.
-      if(ready && Date.now()-pageAt>1500) {
+      if(active && parsed.supported && parsed.panelPresent && activitySelected && soldSelected && Date.now()-pageAt>1500) {
         const scrollers=new Set([document.querySelector('#activity-panel [class*="_list_"]')]);
         let parent=document.querySelector('[data-testid="listing-tile"]')?.parentElement;
         while(parent && parent!==document.body) { if(parent.className?.includes('_list_') && parent.scrollHeight>parent.clientHeight){scrollers.add(parent);break;}parent=parent.parentElement; }

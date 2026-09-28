@@ -1,16 +1,16 @@
-# Invsto Live Capture (1.0.0)
+# Invsto Live Capture (1.0.1)
 
 This helper copies visible eBay Stream Manager auction and payment evidence into Invsto. It does not start auctions, bid, change listings, charge buyers, or cancel eBay orders.
 
 ## Dedicated computer setup
 
-1. Download **Invsto Live Capture** from Live Sales → Set up the capture computer. Extract the ZIP into a permanent folder.
+1. Download **Invsto Live Capture** from Live Sales → Capture setup and connection help. Extract the ZIP into a permanent folder.
 2. In Microsoft Edge open **Extensions → Manage extensions**. Enable **Developer mode**, choose **Load unpacked**, then select the extracted folder containing `manifest.json`. Chrome supports the same steps.
-3. Sign in to Invsto and open **Live Sales**. Start a show session, select its seller/store, and paste the eBay Stream Manager event URL into **Link selected show**. Use a new session for each event.
+3. Sign in to Invsto and open **Live Sales**. Choose the eBay Live workflow, select its seller/store, paste the event URL, and start the show. No starting auction number is required. Use a new session for each event.
 4. Open the **capture receiver** link on that page in the same browser profile. Keep it signed in, open, and on the matching show.
 5. Open the event's Stream Manager in a separate visible browser window. Click **Start Invsto capture** in the bottom-left corner. The helper selects Activity → All and Sold, and scrolls those lists. Use another window if you need to operate the broadcast.
-6. Keep the computer awake. Allow these two pages to stay active in the browser's sleeping-tabs / memory-saver settings. The receiver can be behind the Stream Manager window; the Stream Manager tab must remain visible. Click Start again after reloading it.
-7. On each phone, sign in to Invsto, open Live Sales, and select the same show. Wait for **Capture connected**, then choose **Scan sold item** on a paid auction. Scan the inventory barcode/QR, review the manifest, and **Close paid bag**. Printing is optional afterward and supports your existing print stations.
+6. Keep the computer awake. Allow these two pages to stay active in the browser's sleeping-tabs / memory-saver settings. The receiver can be behind the Stream Manager window; the Stream Manager tab may remain in the background while its elapsed clock continues updating. If the clock stops, bring it forward. Click Start again after reloading it.
+7. On each phone, sign in to Invsto, open Live Sales, and select the same show. Wait for **Connected - auctions update automatically**, then choose **Scan sold item** on a paid auction. Scan the inventory barcode/QR, review the manifest, and **Close paid bag**. Printing is optional afterward and supports your existing print stations.
 
 Start capture before the first auction. A late start can backfill rendered auction cards, but seller attribution reflects the seller selected at capture time. Set the active seller when the on-air seller changes.
 

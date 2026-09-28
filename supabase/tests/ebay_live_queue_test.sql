@@ -9,7 +9,7 @@ declare
  other uuid:=(select user_id from public.employees where user_id<>actor and active is distinct from false limit 1);
  sid uuid:=gen_random_uuid();event text:='TEST-'||replace(gen_random_uuid()::text,'-','');
  item uuid:=gen_random_uuid();loc uuid:=gen_random_uuid();stock uuid:=gen_random_uuid();rowid uuid;
- a uuid;b uuid;l public.live_sale_lots;obs jsonb;health jsonb:=jsonb_build_object('observed_at',now(),'ready',true);dash jsonb;ord uuid;line uuid;
+ a uuid;b uuid;l public.live_sale_lots;obs jsonb;health jsonb:=jsonb_build_object('observed_at',now(),'ready',true);dash jsonb;ord uuid;line uuid; connected public.live_sale_sessions; before_count integer;
 begin
  insert into live_tap_results select no_plan();
  insert into live_tap_results select ok(not has_function_privilege('anon','public.ingest_ebay_live_events(text,jsonb,jsonb)','EXECUTE'),'anonymous cannot ingest');
@@ -99,6 +99,39 @@ begin
  insert into live_tap_results select is((select payment_state from public.ebay_live_attempts where id=b),'review','order import trigger catches later refunds without a dashboard visit');
  insert into live_tap_results select ok((select status='reserved' from public.live_sale_manual_lot_items where lot_id=l.id),'refund keeps manual bag contents for review');
  insert into live_tap_results select ok(not has_function_privilege('authenticated','public.reconcile_ebay_live_orders_internal(text)','EXECUTE'),'internal reconciliation has no client execution grant');
+ -- eBay setup has no starting bag and linking is one transaction.
+ connected:=public.start_ebay_live_session('__automatic_test',null,event||'AUTO',seller);
+ insert into live_tap_results select is(connected.workflow_mode,'ebay_live','new show is explicitly automatic');
+ insert into live_tap_results select is((select count(*)::int from public.live_sale_lots where session_id=connected.id),0,'automatic show creates no premature bag');
+ insert into live_tap_results select ok(exists(select 1 from public.ebay_live_connections where session_id=connected.id),'new show is linked atomically');
+ select count(*) into before_count from public.live_sale_sessions;
+ insert into live_tap_results select throws_ok(format('select public.start_ebay_live_session(''__invalid_test'',null,%L,%L)',event,seller),'22023','This event is already linked to another show','duplicate event cannot start a second show');
+ insert into live_tap_results select is((select count(*)::int from public.live_sale_sessions),before_count,'failed connection does not leave an orphan show');
+ -- Failure notifications may be read before their win row in a virtualized feed.
+ obs:=obs||'{"listing_id":"333333333333","buyer":"sequencebuyer","time_label":"11:28 AM"}';
+ perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"failure-first","kind":"failed"}'),health);
+ select id into a from public.ebay_live_attempts where event_id=event and listing_id='333333333333';
+ perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"win-after-failure","kind":"won"}'),health);
+ insert into live_tap_results select is((select count(*)::int from public.ebay_live_attempts where event_id=event and listing_id='333333333333'),1,'failure followed by matching win does not create duplicate');
+ insert into live_tap_results select ok((select win_key='win-after-failure' and payment_state='failed' from public.ebay_live_attempts where id=a),'attaching win never revives payment failure');
+ perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"paid-after-failure","kind":"paid","source":"listing"}'),health);
+ insert into live_tap_results select is((select payment_state from public.ebay_live_attempts where id=a),'review','contradictory paid badge requires verification');
+ insert into live_tap_results select ok((select capture_ready from public.ebay_live_connections where event_id=event),'known failed auction does not stop unrelated sales');
+ perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"win-different-time","time_label":"11:31 AM"}'),health);
+ insert into live_tap_results select is((select count(*)::int from public.ebay_live_attempts where event_id=event and listing_id='333333333333'),2,'distinct win is not collapsed into failed attempt');
+ perform public.ingest_ebay_live_events(event,jsonb_build_array('{"key":"unidentified-win","kind":"won","source":"activity","title":"Still loading"}'::jsonb),health);
+ dash:=public.get_ebay_live_dashboard(sid);
+ insert into live_tap_results select ok((dash#>>'{connection,capture_ready}')::boolean,'missing win metadata does not stop other paid sales');
+ insert into live_tap_results select ok(exists(select 1 from jsonb_array_elements(dash->'unmatched') x where x->>'source_key'='unidentified-win' and x->>'blocking'='false'),'dashboard distinguishes harmless metadata from payment risk');
+ -- A combined capture artifact must not obstruct an exact official order match.
+ perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"merged-order-win","listing_id":"444444444444","buyer":"mergebuyer"}'),health);
+ select id into b from public.ebay_live_attempts where event_id=event and win_key='merged-order-win';
+ insert into public.ebay_live_attempts(event_id,listing_id,listing_title,buyer,amount,payment_state,resolved_at,merged_into) values(event,'444444444444','Merged artifact','mergebuyer',100,'review',now(),b);
+ insert into public.ebay_orders(order_number,buyer_username,sale_date,raw_payload) values('__test_'||gen_random_uuid(),'mergebuyer',now(),'{"orderPaymentStatus":"PAID"}') returning id into ord;
+ insert into public.ebay_order_lines(order_id,item_number,transaction_id,item_title,sold_for) values(ord,'444444444444','test','__live_test',100) returning id into line;
+ perform public.reconcile_ebay_live_orders(event);
+ insert into live_tap_results select ok((select order_line_id=line and payment_state='paid' from public.ebay_live_attempts where id=b),'merged artifact does not prevent official reconciliation');
+ insert into live_tap_results select is((select count(*)::int from jsonb_array_elements(public.get_ebay_live_dashboard(sid)->'attempts') x where x->>'listing_id'='444444444444'),1,'merged duplicate is hidden from queue');
  -- A notification with missing identity blocks the whole automatic queue, not a guessed buyer.
  perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"failure-without-buyer","kind":"failed","buyer":""}'),health);
  insert into live_tap_results select ok((select not capture_ready from public.ebay_live_connections where event_id=event),'payment failure missing its buyer stops auto scanning');
