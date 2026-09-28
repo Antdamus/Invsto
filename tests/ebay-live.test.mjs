@@ -19,7 +19,7 @@ test('ambiguous listing titles and unfamiliar payment text remain unverified',as
 test('failures without buyer details and identical repeated auction notifications require review',async t=>{const page=await parser(t,tile('123456789012','Payment failed','#001 - Watch','')+'<div id="activity-panel">'+row()+row()+'</div>');const r=await page.evaluate(()=>InvstoLiveParser.parse(document));assert.equal(r.events[0].kind,'failed');assert.equal(r.events[0].buyer,'');assert.ok(r.events.some(e=>e.kind==='unknown'&&e.key.startsWith('ambiguous|')));});
 test('unrecognized currencies are never parsed as a USD paid price',async t=>{const page=await parser(t,tile().replace('$100.00','C$100.00'));assert.equal((await page.evaluate(()=>InvstoLiveParser.parse(document))).events.length,0);});
 async function open(t,query='',resume=false){
- const context=await browser.newContext({viewport:{width:390,height:844}});t.after(()=>context.close());await context.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
+ const context=await browser.newContext({viewport:{width:390,height:844}});t.after(()=>context.close());await context.route('**/*',r=>(r.request().url().startsWith(origin)||r.request().url().startsWith('blob:'+origin)||r.request().url().startsWith('data:image/'))?r.continue():r.abort());
  await context.addInitScript(({resume})=>{
   const user={id:'worker',email:'worker@example.invalid'},employee={id:'seller',user_id:'worker',display_name:'Test seller',active:true,role:'admin'};
   window.lucide={createIcons(){}};window.calls=[];window.mockItems=[];window.mockManualItems=[];window.mockLots=[];window.failUpload=false;window.failManual=false;window.uploadedPhoto="";window.failDashboard=false;window.failClose=false;
@@ -134,7 +134,10 @@ test('scanner refocus does not interrupt item notes or payment-review dialogs',a
 async function addManualPhoto(p,input='manual-live-item-photo'){
  const base64=await p.evaluate(()=>{const c=document.createElement('canvas');c.width=40;c.height=30;const x=c.getContext('2d');x.fillStyle='gold';x.fillRect(0,0,40,30);return c.toDataURL('image/png').split(',')[1];});
  await p.locator('#'+input).setInputFiles({name:'phone-photo.png',mimeType:'image/png',buffer:Buffer.from(base64,'base64')});
- await p.locator('#'+(input.startsWith('manual-edit')?'manual-edit':'manual-live-item')+'-preview').waitFor({state:'visible'});
+ const prefix=input.startsWith('manual-edit')?'manual-edit':'manual-live-item';
+ await p.waitForFunction(prefix=>{const text=document.getElementById(prefix+'-photo-status').textContent;return text&&!text.includes('Preparing');},prefix,{timeout:10000});
+ assert.match(await p.locator('#'+prefix+'-photo-status').innerText(),/Photo ready/);
+ await p.locator('#'+prefix+'-preview').waitFor({state:'visible'});
 }
 test('manual item photo and break-even can be added then edited directly in final review on a phone',async t=>{
  const p=await open(t);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);
