@@ -3,6 +3,10 @@
   const $ = id => document.getElementById(id);
   const escape = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const money = value => value == null ? 'Missing data' : new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(value);
+  const signedMoney = cents => cents==null?'—':(cents>0?'+':'')+money(cents/100);
+  const marginCents = a => a?.payment_state==='paid'&&!a.resolved_at&&Number(a.units)>0&&a.minimum_total!=null&&Number.isFinite(Number(a.minimum_total))&&Number.isFinite(Number(a.amount))?Math.round(Number(a.amount)*100)-Math.round(Number(a.minimum_total)*100):null;
+  const marginClass = cents => cents==null?'':cents<0?'is-loss':cents>0?'is-gain':'';
+  function marginTotal(rows){const priced=rows.map(marginCents).filter(n=>n!=null);return {cents:priced.length?priced.reduce((sum,n)=>sum+n,0):null,count:priced.length,missing:rows.length-priced.length};}
   let api, data={connection:null,attempts:[],unmatched:[]}, loadedSession, lastRead=0, lastReconcile=0, loading, busy=false, sessionError=false, browsing=false, lastClosedId=null, restoredSession=null;
   const session = () => api?.state.currentSession?.id;
   const linked = () => !!data.connection && loadedSession===session();
@@ -39,11 +43,27 @@
         const selected=current();
         if(selected?.closed_at && !busy){lastClosedId=selected.id;api.clearBag();browsing=false;}
         render();api.updateGate();
-      } catch(error) {sessionError=true;message('Live queue unavailable: '+error.message,true);api.updateGate();}
+      } catch(error) {sessionError=true;message('Live queue unavailable: '+error.message,true);renderRunningTotals();api.updateGate();}
     })();
     try{await loading;}finally{loading=null;}
   }
   function totals(rows,field) {const known=rows.filter(a=>a[field]!=null);return {sum:known.reduce((v,a)=>v+Number(a[field]),0),missing:rows.length-known.length};}
+  function renderRunningTotals(){
+    if(!api||!$('ebay-running-total')||!linked())return;
+    const paid=data.attempts.filter(a=>a.payment_state==='paid'&&!a.resolved_at);
+    const open=paid.filter(a=>!a.closed_at),closed=paid.filter(a=>a.closed_at);
+    const combined=marginTotal(paid),inProgress=marginTotal(open),finished=marginTotal(closed);
+    for(const [id,total] of [['ebay-running-total',combined],['ebay-running-open',inProgress],['ebay-running-closed',finished]]){
+      const value=signedMoney(total.cents);if($(id).textContent!==value)$(id).textContent=value;$(id).classList.toggle('is-loss',total.cents<0);$(id).classList.toggle('is-gain',total.cents>0);
+    }
+    $('ebay-running-coverage').textContent=`${combined.count} priced paid ${combined.count===1?'bag':'bags'} · ${combined.missing} missing break-even prices`;
+    $('ebay-running-freshness').textContent=sessionError?'Updates paused — showing the last saved figures.':'Updates as items are saved. Open bags are provisional.';
+    const active=current(),value=marginCents(active),line=$('ebay-current-result');line.hidden=!active;
+    if(active){line.className='ebay-current-result '+marginClass(value);line.textContent=active.payment_state!=='paid'||active.resolved_at?'Current bag: payment needs review; excluded from totals.':value==null?`Current bag: ${money(active.amount)} sold · enter all item break-even prices to see its result.`:`Current bag: ${money(active.amount)} sold − ${money(active.minimum_total)} break-even = ${signedMoney(value)} ${value<0?'below':value>0?'above':'at'} break-even${active.closed_at?'':' (open bag)'}.`;}
+    const sellers=new Map();for(const a of paid){const id=a.seller_id||'unassigned';if(!sellers.has(id))sellers.set(id,[]);sellers.get(id).push(a);}
+    const html=[...sellers.values()].map(rows=>{const t=marginTotal(rows);return `<div class="ebay-running-seller"><b>${escape(rows[0].seller_name||'Unassigned seller')}</b><strong class="${marginClass(t.cents)}">${signedMoney(t.cents)}</strong><small>${rows.filter(a=>a.closed_at).length} closed · ${rows.filter(a=>!a.closed_at).length} open · ${t.missing} missing prices</small></div>`;}).join('')||'<p>No paid sales yet.</p>';
+    if($('ebay-running-sellers').innerHTML!==html)$('ebay-running-sellers').innerHTML=html;
+  }
   function render() {
     if(!api)return;
     const c=linked()?data.connection:null;
@@ -60,6 +80,7 @@
     $('ebay-live-session-hint').textContent=session()?'Link this show to its eBay event.':'Start or select a show session below, then link its eBay event.';
     $('ebay-link').disabled=!session() || busy;
     if(!c)return;
+    renderRunningTotals();
     const health=$('ebay-live-health');
     const blocked=data.unmatched.some(o=>o.blocking ?? ['failed','cancelled','unknown'].includes(o.kind));
     health.textContent=c.review_completed_at?'Session closed - review complete':postShow()?(blocked?'Broadcast ended - review payment notifications':'Broadcast ended - finish checking the bags'):fresh()?'Connected - auctions update automatically':blocked?'Payment notification needs review - scanning paused':`Capture paused - ${c.health?.message || 'keep the eBay helper running'}`;
@@ -90,7 +111,7 @@
       const needsBagCheck=['failed','review','cancelled'].includes(a.payment_state)&&a.lot_id&&!a.resolved_at;
       const state=a.resolved_at?'Resolved':needsBagCheck?'STOP · check this bag':a.closed_at&&a.payment_state==='paid'?'Paid · bag closed':({waiting:'Waiting for payment',paid:'Payment confirmed',failed:'Payment failed',cancelled:'Cancelled',review:'Payment needs review'}[a.payment_state]);
       const time=a.stream_offset_seconds==null?'':` · approx. stream ${Math.floor(a.stream_offset_seconds/60)}:${String(a.stream_offset_seconds%60).padStart(2,'0')}`;
-      return `<article class="ebay-auction ${needsBagCheck?'needs-review':''}" data-attempt="${escape(a.id)}"><div class="ebay-auction-head"><strong>${escape(a.listing_title)}</strong><b>${money(a.amount)}</b></div><p>${escape(a.buyer)} · Sold by ${escape(a.seller_name||'Unassigned seller')}</p><span class="ebay-state">${escape(state)}</span><small>${escape(a.win_time_label||'Time not captured')}${escape(time)} · Listing ${escape(a.listing_id)}</small>${a.review_note?`<p>${escape(a.review_note)}</p>`:''}${a.lot_id?`<p>${Number(a.units||0)} inventory units · Minimum ${money(a.minimum_total)}${held?' · Claimed by another scanner':''}</p>`:''}<div class="button-row">${!a.resolved_at&&!a.closed_at&&a.payment_state==='paid'?`<button type="button" data-action="scan" ${!ready(a)||held?'disabled':''}>${mine?'Continue scanning':'Scan sold item'}</button>`:''}${a.closed_at&&a.payment_state==='paid'&&!a.resolved_at?'<button type="button" data-action="reopen" class="secondary-btn">Reopen to check / add items</button><button type="button" data-action="print">Print bag label</button>':''}${!a.resolved_at?'<button type="button" class="secondary-btn" data-action="review">Payment / bag review</button>':''}</div></article>`;
+      return `<article class="ebay-auction ${needsBagCheck?'needs-review':''}" data-attempt="${escape(a.id)}"><div class="ebay-auction-head"><strong>${escape(a.listing_title)}</strong><b>${money(a.amount)}</b></div><p>${escape(a.buyer)} · Sold by ${escape(a.seller_name||'Unassigned seller')}</p><span class="ebay-state">${escape(state)}</span><small>${escape(a.win_time_label||'Time not captured')}${escape(time)} · Listing ${escape(a.listing_id)}</small>${a.review_note?`<p>${escape(a.review_note)}</p>`:''}${a.lot_id?`<p>${Number(a.units||0)} inventory units · Minimum ${money(a.minimum_total)}${held?' · Claimed by another scanner':''}</p>`:''}${marginCents(a)!=null?`<p class="${marginClass(marginCents(a))}"><b>${signedMoney(marginCents(a))} vs break-even</b>${a.closed_at?'':' · Open bag, provisional'}</p>`:''}<div class="button-row">${!a.resolved_at&&!a.closed_at&&a.payment_state==='paid'?`<button type="button" data-action="scan" ${!ready(a)||held?'disabled':''}>${mine?'Continue scanning':'Scan sold item'}</button>`:''}${a.closed_at&&a.payment_state==='paid'&&!a.resolved_at?'<button type="button" data-action="reopen" class="secondary-btn">Reopen to check / add items</button><button type="button" data-action="print">Print bag label</button>':''}${!a.resolved_at?'<button type="button" class="secondary-btn" data-action="review">Payment / bag review</button>':''}</div></article>`;
     }).join('')||`<div class="ebay-empty"><strong>${filter==='ready'?(postShow()?'All paid bags are closed':'Waiting for a paid auction'):'No auctions in this view'}</strong><p>${filter==='ready'?(postShow()?'Check all auctions and finish the final checklist before closing this session.':'Auction wins appear automatically. Scanning becomes available after payment is confirmed.'):'Use the filter to view other auctions.'}</p></div>`;
     // Do not replace controls under a finger every two seconds.
     if($('ebay-live-queue').dataset.rendered!==html){$('ebay-live-queue').innerHTML=html;$('ebay-live-queue').dataset.rendered=html;}
@@ -194,6 +215,14 @@
       <div id="ebay-live-setup"><p id="ebay-live-session-hint"></p><label>Connect the selected show to eBay<input id="ebay-live-url" type="url" placeholder="Paste the Stream Manager event URL"></label><button id="ebay-link" type="button">Connect selected show</button></div>
       <div id="ebay-live-connected" hidden>
         <div class="ebay-connection"><p id="ebay-live-health" role="status"></p><small id="ebay-capture-detail"></small><small id="ebay-capture-receiver" hidden>This computer is receiving capture data. Keep this tab open.</small></div>
+        <section id="ebay-running-margin" class="ebay-running-margin" aria-label="Running result versus break-even">
+          <div class="ebay-running-head"><span>Running vs break-even</span><strong id="ebay-running-total" aria-live="polite">—</strong></div>
+          <small id="ebay-running-coverage"></small>
+          <div class="ebay-running-split"><span>Closed bags <b id="ebay-running-closed">—</b></span><span>Open bags <b id="ebay-running-open">—</b></span></div>
+          <p id="ebay-current-result" hidden></p>
+          <details><summary>By seller and calculation</summary><div id="ebay-running-sellers"></div><p>Sale price minus break-even × quantity for each saved item. Open bags can change as more items are added. This includes fees only if your break-even prices include them. Unpaid, failed and cancelled sales are excluded.</p></details>
+          <small id="ebay-running-freshness"></small>
+        </section>
         <button type="button" id="ebay-mark-ended" class="secondary-btn">Stream ended? Start bag review</button>
         <section id="ebay-post-show" class="ebay-post-show" hidden aria-labelledby="ebay-post-heading">
           <h3 id="ebay-post-heading">Finish this show</h3><p>The broadcast is over. The session stays open while you check bags, scan missing items and resolve payments.</p>
@@ -246,7 +275,8 @@
       const id=eventIdFromUrl($('ebay-live-url').value);
       await rpc('link_ebay_live_event',{_session_id:session(),_event_id:id});await refresh();await prepare();message('Show linked. Start capture on the dedicated computer.');
     });
-    $('ebay-seller-control').ontoggle=()=>{if($('ebay-seller-control').open){populateOnAirSeller();$('ebay-correct-existing').checked=false;$('ebay-seller-reason-label').hidden=true;$('ebay-seller-reason').value='';$('ebay-save-seller').textContent='Use for next auctions';$('ebay-seller-error').textContent='';}};
+    // Initialize before opening; a queued native toggle event can arrive after the user edits.
+    $('ebay-seller-control').querySelector('summary').onclick=()=>{if(!$('ebay-seller-control').open){populateOnAirSeller();$('ebay-correct-existing').checked=false;$('ebay-seller-reason-label').hidden=true;$('ebay-seller-reason').value='';$('ebay-save-seller').textContent='Use for next auctions';$('ebay-seller-error').textContent='';}};
     $('ebay-correct-existing').onchange=()=>{$('ebay-seller-reason-label').hidden=!$('ebay-correct-existing').checked;$('ebay-save-seller').textContent=$('ebay-correct-existing').checked?'Correct this show and set seller':'Use for next auctions';};
     $('ebay-save-seller').onclick=()=>action(async()=>{try{
       const selected=$('ebay-live-seller').value,correct=$('ebay-correct-existing').checked,reason=$('ebay-seller-reason').value.trim();

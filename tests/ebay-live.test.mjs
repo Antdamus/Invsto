@@ -35,7 +35,9 @@ async function open(t,query='',resume=false){
     if(failManual)return {error:{message:'Manual item save interrupted'}};
     let row=mockManualItems.find(i=>i.id===args._item_id);if(row&&args._expected_revision!==row.edit_revision)return {error:{message:'This item changed. Reopen Edit to load the latest details'}};
     const saved={id:args._item_id,lot_id:args._lot_id,item_category:args._category,item_description:args._description,quantity:args._quantity,live_unit_minimum:args._unit_minimum,photo_path:args._photo_path,edit_revision:(row?.edit_revision||0)+1,status:args._quantity===0?'released':'reserved',created_at:new Date().toISOString(),show_elapsed_seconds:120};
-    if(row)Object.assign(row,saved);else mockManualItems.push(saved);return {data:saved};
+    if(row)Object.assign(row,saved);else mockManualItems.push(saved);
+    const attempt=dashboard.attempts.find(a=>a.lot_id===args._lot_id);if(attempt){const entries=[...mockItems,...mockManualItems].filter(i=>i.lot_id===args._lot_id&&['reserved','packed'].includes(i.status));attempt.units=entries.reduce((n,i)=>n+i.quantity,0);attempt.minimum_total=entries.length&&entries.every(i=>i.live_unit_minimum!=null)?entries.reduce((n,i)=>n+i.quantity*Number(i.live_unit_minimum),0):null;}
+    return {data:saved};
    }
    if(name==='set_ebay_live_seller'){dashboard.connection.active_seller_id=args._seller_id;dashboard.connection.active_seller_name=args._seller_id==='next-seller'?'Sydney Miller':'Test seller';if(args._correct_existing){for(const l of mockLots)l.owner_employee_id=args._seller_id;for(const a of dashboard.attempts){a.seller_id=args._seller_id;a.seller_name=dashboard.connection.active_seller_name;}}return {data:args._correct_existing?dashboard.attempts.length:0};}
    if(name==='mark_ebay_live_broadcast_ended'){dashboard.connection.broadcast_ended_at=new Date().toISOString();dashboard.connection.capture_ready=false;return {data:null};}
@@ -147,9 +149,11 @@ test('manual item photo and break-even can be added then edited directly in fina
  await p.locator('.manual-live-item-box > summary').click();await p.locator('#manual-live-item-category').selectOption('Chain');await p.locator('#manual-live-item-description').fill('Gold chain');await p.locator('#manual-live-item-quantity').fill('2');await p.locator('#manual-live-item-minimum').fill('40');
  assert.equal(await p.locator('#manual-live-item-camera').getAttribute('capture'),'environment');await addManualPhoto(p);assert.equal(await p.locator('#add-manual-live-item').isEnabled(),true);await p.locator('#add-manual-live-item').click();await p.waitForFunction(()=>mockManualItems.length===1);
  assert.equal(await p.evaluate(()=>calls.find(c=>c.name==='upload').type),'image/jpeg');assert.match(await p.evaluate(()=>mockManualItems[0].photo_path),/^live-manual\/lot\//);
+ await p.waitForFunction(()=>document.getElementById('ebay-running-total').textContent==='+$20.00');assert.match(await p.locator('#ebay-current-result').innerText(),/\$100.00 sold.*\$80.00 break-even.*\+\$20.00/);assert.equal(await p.locator('#ebay-running-margin').isVisible(),true);
  await p.locator('#review-scanned-bag').click();assert.match(await p.locator('#manual-break-even-summary').innerText(),/Break-even \$80.00.*\$20.00/);await p.locator('[data-edit-manual]').click();
  assert.equal(await p.locator('#manual-edit-minimum').inputValue(),'40');await p.locator('#manual-edit-quantity').fill('3');await p.locator('#manual-edit-minimum').fill('35');await p.locator('#manual-edit-description').fill('Gold chain, corrected');await p.locator('#manual-edit-save').click();await p.locator('#manual-item-editor').waitFor({state:'hidden'});
  assert.equal(await p.locator('#bag-label-panel').isVisible(),true);assert.match(await p.locator('#label-review-manifest').innerText(),/Gold chain, corrected/);assert.match(await p.locator('#manual-break-even-summary').innerText(),/Break-even \$105.00.*-\$5.00/);
+ assert.equal(await p.locator('#ebay-running-total').innerText(),'-$5.00');assert.match(await p.locator('#ebay-running-total').getAttribute('class'),/is-loss/);assert.match(await p.locator('#ebay-current-result').innerText(),/below break-even/);
  assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='upload').length),1);assert.equal(await p.evaluate(()=>mockManualItems[0].edit_revision),2);
  await p.locator('[data-edit-manual]').click();await p.locator('#manual-edit-remove-photo').click();await p.locator('#manual-edit-save').click();await p.locator('#manual-item-editor').waitFor({state:'hidden'});assert.equal(await p.evaluate(()=>mockManualItems[0].photo_path),null);
  assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.deepEqual(p.errors,[]);
@@ -162,7 +166,7 @@ test('failed manual photo upload keeps the draft and does not create an item unt
  await p.evaluate(()=>{failUpload=false;});await p.locator('#add-manual-live-item').click();await p.waitForFunction(()=>mockManualItems.length===1);assert.equal(await p.evaluate(()=>mockManualItems[0].live_unit_minimum),null);
 });
 test('on-air seller switch preserves previous sales; correcting the whole show is explicit',async t=>{
- const p=await open(t);assert.match(await p.locator('#ebay-on-air-name').innerText(),/Test seller/);await p.locator('#ebay-seller-control > summary').click();await p.locator('#ebay-live-seller').selectOption('next-seller');await p.evaluate(()=>ebayLive.refresh());assert.equal(await p.locator('#ebay-live-seller').inputValue(),'next-seller');
+ const p=await open(t);assert.match(await p.locator('#ebay-on-air-name').innerText(),/Test seller/);await p.locator('#ebay-seller-control > summary').click();await p.locator('#ebay-live-seller').selectOption('next-seller');await p.evaluate(()=>{document.getElementById('ebay-seller-control').dispatchEvent(new Event('toggle'));return ebayLive.refresh();});assert.equal(await p.locator('#ebay-live-seller').inputValue(),'next-seller');
  await p.locator('#ebay-save-seller').click();await p.waitForFunction(()=>document.getElementById('ebay-on-air-name').textContent.includes('Sydney'));
  assert.equal(await p.evaluate(()=>calls.find(c=>c.name==='set_ebay_live_seller').args._correct_existing),false);assert.match(await p.locator('#ebay-live-queue').innerText(),/Sold by Test seller/);
  await p.locator('#ebay-seller-control > summary').click();await p.locator('#ebay-correct-existing').check();await p.locator('#ebay-save-seller').click();assert.match(await p.locator('#ebay-seller-error').innerText(),/Explain/);
@@ -205,4 +209,29 @@ test('end detection requires the explicit terminal control and ignores a reset c
 test('a stopped helper still reports the explicit ended event without inventing auction payments',async t=>{
  const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123');await p.setContent('<button disabled>Event ended</button>');await p.evaluate(()=>{window.packets=[];window.chrome={runtime:{sendMessage:async m=>{packets.push(m);return {ok:true,status:'Connected'}}}};});
  for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});await p.waitForFunction(()=>packets.length>0);const result=await p.evaluate(()=>packets[0]);assert.equal(result.health.broadcast_ended,true);assert.equal(result.health.ready,false);assert.deepEqual(result.events,[]);
+});
+
+test('running counter includes priced open bags, separates closed results, and excludes unpaid or incomplete bags',async t=>{
+ const p=await open(t);
+ await p.evaluate(()=>{const a=dashboard.attempts[0];Object.assign(a,{units:1,minimum_total:80});dashboard.attempts=[a,
+ {...a,id:'closed-loss',seller_id:'next-seller',seller_name:'Sydney Miller',amount:50,minimum_total:70,closed_at:new Date().toISOString()},
+ {...a,id:'free-cost',amount:40,minimum_total:0},
+ {...a,id:'unknown-minimum',amount:80,minimum_total:null},
+ {...a,id:'empty-bag',amount:150,minimum_total:0,units:0},
+ {...a,id:'failed',amount:999,payment_state:'failed'},
+ {...a,id:'waiting',amount:999,payment_state:'waiting'},
+ {...a,id:'resolved',amount:999,resolved_at:new Date().toISOString()}];});
+ await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-running-total').textContent==='+$40.00');
+ assert.equal(await p.locator('#ebay-running-open').innerText(),'+$60.00');assert.equal(await p.locator('#ebay-running-closed').innerText(),'-$20.00');assert.match(await p.locator('#ebay-running-coverage').innerText(),/3 priced paid bags.*2 missing/);
+ await p.locator('#ebay-running-margin summary').click();assert.match(await p.locator('#ebay-running-sellers').innerText(),/Sydney Miller\s*-\$20.00/);
+ await p.locator('[data-attempt="sale"] [data-action=scan]').click();assert.equal(await p.locator('#ebay-running-margin').isVisible(),true);assert.match(await p.locator('#ebay-current-result').innerText(),/\+\$20.00 above break-even/);
+ await p.setViewportSize({width:320,height:740});assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await p.locator('#ebay-running-margin').screenshot({path:new URL('../test-results/running-margin-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+ await p.evaluate(()=>{dashboard.attempts[0].payment_state='failed';});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-running-total').textContent==='+$20.00');assert.match(await p.locator('#ebay-current-result').innerText(),/excluded from totals/);
+ await p.evaluate(()=>{failDashboard=true;});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-running-freshness').textContent.includes('Updates paused'));assert.deepEqual(p.errors,[]);
+});
+
+test('running counter shows missing data rather than inventing zero profit and uses exact cents',async t=>{
+ const p=await open(t);assert.equal(await p.locator('#ebay-running-total').innerText(),'—');assert.match(await p.locator('#ebay-running-coverage').innerText(),/0 priced paid bags.*1 missing/);
+ await p.evaluate(()=>{const a=dashboard.attempts[0];Object.assign(a,{units:1,amount:1,minimum_total:.9});dashboard.attempts=[a,{...a,id:'two',minimum_total:.8},{...a,id:'three',minimum_total:1.3}];});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-running-total').textContent==='$0.00');assert.doesNotMatch(await p.locator('#ebay-running-total').getAttribute('class')||'',/is-loss|is-gain/);
+ await p.evaluate(()=>{dashboard.attempts[0].minimum_total=1.9;});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-running-total').textContent==='-$1.00');assert.match(await p.locator('#ebay-running-total').getAttribute('class'),/is-loss/);assert.deepEqual(p.errors,[]);
 });
