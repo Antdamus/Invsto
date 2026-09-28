@@ -37,7 +37,7 @@ async function open(t,query='',resume=false){
     const saved={id:args._item_id,lot_id:args._lot_id,item_category:args._category,item_description:args._description,quantity:args._quantity,live_unit_minimum:args._unit_minimum,photo_path:args._photo_path,edit_revision:(row?.edit_revision||0)+1,status:args._quantity===0?'released':'reserved',created_at:new Date().toISOString(),show_elapsed_seconds:120};
     if(row)Object.assign(row,saved);else mockManualItems.push(saved);return {data:saved};
    }
-   if(name==='set_ebay_live_seller'){dashboard.connection.active_seller_id=args._seller_id;dashboard.connection.active_seller_name=args._seller_id==='next-seller'?'Sydney Miller':'Test seller';if(args._correct_existing){for(const a of dashboard.attempts){a.seller_id=args._seller_id;a.seller_name=dashboard.connection.active_seller_name;}}return {data:args._correct_existing?dashboard.attempts.length:0};}
+   if(name==='set_ebay_live_seller'){dashboard.connection.active_seller_id=args._seller_id;dashboard.connection.active_seller_name=args._seller_id==='next-seller'?'Sydney Miller':'Test seller';if(args._correct_existing){for(const l of mockLots)l.owner_employee_id=args._seller_id;for(const a of dashboard.attempts){a.seller_id=args._seller_id;a.seller_name=dashboard.connection.active_seller_name;}}return {data:args._correct_existing?dashboard.attempts.length:0};}
    if(name==='start_ebay_live_session'){window.showSession={...window.showSession,id:'newshow',workflow_mode:'ebay_live',title:args._title};window.dashboard.connection={...window.dashboard.connection,session_id:'newshow',event_id:args._event_id};return {data:window.showSession};}
    if(name==='claim_ebay_live_bag'){const a=window.dashboard.attempts.find(a=>a.id===args._attempt_id);a.claimed_by='worker';a.lot_id='lot';const lot={id:'lot',session_id:'show',auction_number:'EB-29-SALE',lot_code:'LIVE-TEST',status:'open',owner_employee_id:'seller'};window.mockLots=[lot];return {data:lot};}
    if(name==='close_ebay_live_bag'){if(window.failClose)return {error:{message:'Payment is not confirmed for this bag'}};window.dashboard.attempts[0].closed_at=new Date().toISOString();return {data:null};}
@@ -164,4 +164,11 @@ test('on-air seller switch preserves previous sales; correcting the whole show i
  assert.equal(await p.evaluate(()=>calls.find(c=>c.name==='set_ebay_live_seller').args._correct_existing),false);assert.match(await p.locator('#ebay-live-queue').innerText(),/Sold by Test seller/);
  await p.locator('#ebay-seller-control > summary').click();await p.locator('#ebay-correct-existing').check();await p.locator('#ebay-save-seller').click();assert.match(await p.locator('#ebay-seller-error').innerText(),/Explain/);
  await p.locator('#ebay-seller-reason').fill('All sales in this show were actually made by Sydney');await p.locator('#ebay-save-seller').click();await p.waitForFunction(()=>dashboard.attempts[0].seller_id==='next-seller');assert.match(await p.locator('#ebay-live-queue').innerText(),/Sold by Sydney Miller/);assert.deepEqual(p.errors,[]);
+});
+
+test('correcting the seller refreshes the already open bag without crediting the scanner',async t=>{
+ const p=await open(t);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);
+ await p.locator('#ebay-seller-control > summary').click();await p.locator('#ebay-live-seller').selectOption('next-seller');await p.locator('#ebay-correct-existing').check();await p.locator('#ebay-seller-reason').fill('The full show was sold by Sydney, not the scanner');await p.locator('#ebay-save-seller').click();
+ await p.waitForFunction(()=>document.getElementById('manifest-bag-meta').textContent.includes('Sydney'));
+ assert.match(await p.locator('#manifest-bag-meta').innerText(),/Sold by Sydney Miller/);assert.doesNotMatch(await p.locator('#manifest-bag-meta').innerText(),/Owner Test seller/);assert.equal(await p.evaluate(()=>dashboard.attempts[0].claimed_by),'worker');assert.deepEqual(p.errors,[]);
 });

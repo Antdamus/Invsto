@@ -117,6 +117,7 @@
     if(connected&&selected&&api.state.flowStep==='label')$('lot-status-pill').textContent=ready(selected)?'Ready to close':'Payment needs review';
     const labelHeading=$('bag-review-heading');if(labelHeading)labelHeading.textContent=connected?'Review sold item and close bag':'Confirm auction number';
     const reviewCopy=document.querySelector('#bag-label-panel .step-copy');if(reviewCopy)reviewCopy.textContent=connected?'Check the winner and the items below. Close this bag when its contents are correct. You can print its label afterward.':'Review the auction number and items before printing the bag label.';
+    const manifestOwner=document.querySelector('#manifest-bag-meta>span:nth-child(2)');if(connected&&selected&&manifestOwner)manifestOwner.textContent='Sold by '+(selected.seller_name||'Unassigned seller');
     const manifestTitle=document.querySelector('#manifest-bag-meta>span');if(connected&&selected&&manifestTitle)manifestTitle.textContent=selected.listing_title;
     const reviewTitle=$('confirm-auction-number');if(connected&&selected&&reviewTitle)reviewTitle.textContent=selected.listing_title;
     $('ebay-empty-workspace').hidden=!connected||!!selected||document.body.classList.contains('live-setup-open');
@@ -209,7 +210,7 @@
       if(correct&&reason.length<10)throw Error('Explain the seller correction (at least 10 characters).');
       const count=await rpc('set_ebay_live_seller',{_event_id:data.connection.event_id,_seller_id:selected,_correct_existing:correct,_reason:correct?reason:null});
       if(correct){api.state.currentSession.primary_seller_employee_id=selected;if($('session-primary-seller'))$('session-primary-seller').value=selected;}
-      $('ebay-seller-control').open=false;await refresh();message(correct?`Seller corrected for ${count} captured sales and their bags.`:'On-air seller changed. Earlier auctions keep their original seller.');
+      $('ebay-seller-control').open=false;await refresh();if(correct)await api.reloadBag?.();message(correct?`Seller corrected for ${count} captured sales and their bags.`:'On-air seller changed. Earlier auctions keep their original seller.');
     }catch(error){$('ebay-seller-error').textContent=error.message;throw error;}});
     $('ebay-live-settings').ontoggle=()=>{if(!$('ebay-live-settings').open||!linked())return;const c=data.connection;$('ebay-expenses').hidden=api.state.employee.role!=='admin';for(const [id,key] of [['ebay-fee-percent','fee_percent'],['ebay-fee-fixed','fee_fixed'],['ebay-shipping','shipping_per_sale']])$(id).value=c[key]??'';};
     $('ebay-save-settings').onclick=()=>action(async()=>{const val=id=>api.state.employee.role!=='admin'||$(id).value.trim()===''?null:Number($(id).value);await rpc('configure_ebay_live_event',{_event_id:data.connection.event_id,_seller_id:data.connection.active_seller_id,_fee_percent:val('ebay-fee-percent'),_fee_fixed:val('ebay-fee-fixed'),_shipping:val('ebay-shipping')});await refresh();message('Expense estimates saved.');});

@@ -905,7 +905,7 @@ function renderManifest() {
           <input class="manifest-qty-input" data-manifest-qty-input data-group-key="${escapeHtml(group.key)}" type="number" min="0" max="${maxQuantity}" step="1" value="${Number(group.quantity || 0)}" title="Maximum available for the selected source(s): ${maxQuantity}" />
           <button type="button" class="tiny-btn" data-qty-action="increase" data-group-key="${escapeHtml(group.key)}" ${canIncrease ? "" : "disabled"}>+</button>
         </div>
-        <small class="manifest-max-note">${group.isManual ? "Counts only" : `Max ${maxQuantity.toLocaleString()}`}</small>
+        <small class="manifest-max-note">${group.isManual ? "Manual item" : `Max ${maxQuantity.toLocaleString()}`}</small>
         <button type="button" class="tiny-btn" data-edit-group="${escapeHtml(group.key)}">Edit</button>
         <button type="button" class="tiny-btn" data-release-group="${escapeHtml(group.key)}">Release</button>
       </div>
@@ -3755,6 +3755,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await window.ebayLive?.init({
     state, updateGate: updateScanGate,
     finishScan: finishBagScanning,
+    async reloadBag() { if(state.currentLot){await reloadCurrentLot();await loadLotItems();} },
     async selectShow(id) { const selected=state.sessions.find(s=>s.id===id);if(!selected||state.busy)return;state.currentSession=selected;state.currentLot=null;clearScan();await loadLotItems();await prepareNextBag();renderAll(); },
     clearBag() { state.currentLot=null; state.lotItems=[]; clearScan(); setFlowStep("scan"); renderAll(); },
     async openBag(lot) { state.currentLot=lot; rememberBagOwner(lot.owner_employee_id); clearScan(); await loadLotItems(); $("auction-number").value=lot.auction_number; $("label-free-text").value=lot.auction_number; setFlowStep("scan"); renderAll(); },
