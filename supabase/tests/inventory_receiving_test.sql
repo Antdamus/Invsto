@@ -23,11 +23,7 @@ begin
  insert into public.locations(id,location_name,location_code,active,is_tray,location_role,parent_location_id) values(box,'__receiving_box',gen_random_uuid()::text,true,false,'container',parent);
  insert into public.item_stock_locations(item_id,location_id,quantity,condition_status) values(item_a,tray,4,'good'),(item_a,tray,2,'defective');
  insert into public.bulk_batches(id,item_type_id,bag_barcode,location_id,tare_weight_g,gross_weight_g,unit_weight_g,estimated_qty) values(bag,item_a,gen_random_uuid()::text,tray,1,8,1,7);
- -- Model an existing bag placement without invoking the legacy bag-quantity trigger,
- -- which references absent bulk_batches.low_threshold/initial_qty columns. Receiving
- -- must never update this row or invoke that trigger for a bag.
- insert into public.item_stock_locations(item_id,location_id,quantity,condition_status) values(item_a,tray,7,'good');
- update public.item_stock_locations set batch_id=bag where item_id=item_a and location_id=tray and quantity=7;
+ insert into public.item_stock_locations(item_id,location_id,batch_id,quantity,condition_status) values(item_a,tray,bag,7,'good');
  payload:=jsonb_build_array(jsonb_build_object('item_id',item_a,'quantity',3),jsonb_build_object('item_id',item_b,'quantity',2));
  receipt:=public.receive_inventory_batch(request_id,tray,payload,'Test shipment');
  insert into receiving_tap_results select is((receipt->>'quantity_added')::integer,5,'multiple items save as a single receiving batch');

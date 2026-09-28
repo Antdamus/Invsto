@@ -22,6 +22,7 @@ async function open(t,query=''){
    const q={select(){return q;},update(){return q;},eq(k,v){filters.push(row=>row[k]===v);return q;},is(k,v){filters.push(row=>v===null?row[k]==null:row[k]===v);return q;},in(k,v){filters.push(row=>v.includes(row[k]));return q;},ilike(k,v){const term=v.slice(1,-1).replace(/\\([\\%_])/g,'$1').toLowerCase();filters.push(row=>String(row[k]).toLowerCase().includes(term));return q;},order(){return q;},range(a,b){range=[a,b];return q;},limit(v){limit=v;return q;},maybeSingle:async()=>({data:{role:'admin',active:true}}),then(resolve){let rows=table==='item_types'?window.testItems:table==='locations'?locations:table==='store_locations'?[{id:'store',name:'Showroom',active:true}]:table==='item_stock_locations'?[{item_id:'watch',quantity:4,location_id:'tray',condition_status:'good'},{item_id:'coin',quantity:2,location_id:'tray',condition_status:'good'}]:[];rows=rows.filter(row=>filters.every(f=>f(row)));if(range)rows=rows.slice(range[0],range[1]+1);return Promise.resolve({data:rows.slice(0,limit),error:null}).then(resolve);}};return q;
   },rpc:async(name,args)=>{
    window.calls.push({name,args});const receipts=JSON.parse(localStorage.getItem('mock-receipts')||'{}');
+   if(name==='receive_bulk_bag')return window.deniedSave?{error:{code:'22023',message:'Bag destination full'}}:{data:{bag:{id:'bag',bag_barcode:args._bag_barcode},stock_location_id:'stock-bag',transaction_id:'bag-tx',quantity_added:args._payload.estimated_qty}};
    if(name==='get_inventory_receiving_receipt')return {data:receipts[args._request_id]||null};
    if(name==='receive_inventory_batch'){
     if(window.deniedSave)return {error:{code:'22023',message:'This batch exceeds the destination capacity'}};
@@ -73,4 +74,23 @@ test('scan-counting mode retains its UI but ordinary stock writes use the atomic
  const page=await open(t,'?mode=count');assert.equal(await page.locator('#inventory-receiving').isVisible(),false);
  await page.evaluate(()=>{const card=document.createElement('div');document.getElementById('batch-items-container').append(card);const batchItem={item:window.testItems[0],count:2,cardEl:card};currentBatch['000123']=batchItem;window.showPasswordConfirmModal(batchItem,'tray','Show tray',2);});
  await page.locator('#password-confirm-password').fill('test password');await page.locator('#btn-confirm-password').click();await page.locator('#inventory-label-print-modal:not(.hidden)').waitFor();const writes=await page.evaluate(()=>window.calls.filter(c=>c.name==='receive_inventory_batch'));assert.equal(writes.length,1);assert.deepEqual(writes[0].args._lines,[{item_id:'watch',quantity:2}]);assert.equal(await page.locator('#batch-items-container').innerText(),'');
+});
+
+
+test('weighed inventory keeps the printed barcode through capture, rejection and placement without a second audit',async t=>{
+ const page=await open(t,'?mode=count');await page.addScriptTag({url:origin+'/additembulk.js'});
+ await page.evaluate(()=>{
+  window.renderInventoryItem=()=>{const node=document.createElement('article');node.innerHTML='<span class="units-scanned"></span>';return node;};
+  showAssignLocationModal=async batch=>{window.capturedBatch=batch;};
+  window.dymoModule.generateAndUploadDymoLabel=async data=>({templateXml:'<Label>'+data.barcode+'</Label>',labelPath:data.barcode+'.label'});
+  window.dymoModule.printDymoLabelXml=async()=>({mode:'remote-queue',copies:1,stationName:'Test'});
+  window.addItemBulkModule.setupBulkModalOpeners();pendingItem=window.testItems[0];
+ });
+ await page.locator('#btn-add-bulk-bag').evaluate(el=>el.click());await page.locator('#bulk-tare').fill('1');await page.locator('#bulk-gross').fill('11');await page.locator('#bulk-unit-override').fill('2');await page.locator('#bulk-save').click();await page.waitForFunction(()=>window.capturedBatch);
+ const capture=await page.evaluate(()=>({printed:window.latestDymoBarcode,bag:window.capturedBatch.bag_info,count:window.capturedBatch.count}));assert.equal(capture.bag.bagBarcode,capture.printed);assert.equal(capture.count,5);
+ await page.evaluate(()=>{incrementCardCount('000123');window.deniedSave=true;window.showPasswordConfirmModal(window.capturedBatch,'tray','Show tray',5);});
+ assert.equal(await page.evaluate(()=>window.capturedBatch.count),5);
+ await page.locator('#password-confirm-password').fill('test password');await page.locator('#btn-confirm-password').click();await page.waitForFunction(()=>window.calls.some(c=>c.name==='receive_bulk_bag'));await page.locator('#btn-confirm-password:enabled').waitFor();assert.equal(await page.locator('#batch-items-container article').count(),1);assert.equal(await page.locator('#inventory-label-print-modal').isVisible(),false);
+ await page.evaluate(()=>window.deniedSave=false);await page.locator('#btn-confirm-password').click();await page.locator('#inventory-label-print-modal:not(.hidden)').waitFor();
+ const calls=await page.evaluate(()=>window.calls.filter(c=>c.name==='receive_bulk_bag'));assert.equal(calls.length,2);assert.deepEqual(calls[0].args,calls[1].args);assert.equal(calls[0].args._bag_barcode,capture.printed);assert.equal(calls[0].args._payload.estimated_qty,5);assert.equal(await page.locator('#batch-items-container article').count(),0);
 });

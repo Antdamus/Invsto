@@ -3171,13 +3171,11 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
 
 // Hoisted so we can check it later (outside the try)
 let bulkRes = null;
+const capturedBag = window.addItemBulkModule.getCapturedBag();
 
 // Save a bulk registry row if the modal captured data
 try {
-  // Create a bag-specific barcode (ephemeral; retired when bag is empty)
-  const bagBarcode =
-    window.addItemBulkModule?.generateBagBarcode?.() ||
-    `BAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
+  const bagBarcode = capturedBag?.bag_barcode || null;
 
   const locationId = document.getElementById("item-assign-stock").checked ? pendingStockAssignments[newItem.barcode]?.location_id || null : null;
 
@@ -3190,18 +3188,20 @@ try {
   );
 
   if (bulkRes?.error) {
-    saveWarnings.push("The bulk bag needs attention in Stock.");
+    saveWarnings.push("The bag save was not confirmed. Use Retry bag save before adding this quantity again.");
     console.warn(bulkRes.error);
   } else if (!bulkRes?.skipped) {
     showToast(`✅ Bulk registry saved. Bag barcode: ${bagBarcode}`);
   }
 } catch (err) {
-  saveWarnings.push("The bulk bag needs attention in Stock.");
+  saveWarnings.push("The bag save was not confirmed. Use Retry bag save before adding this quantity again.");
   console.warn("Bulk registry insert error:", err);
 }
 
 const stockInfo = document.getElementById("item-assign-stock").checked ? pendingStockAssignments[newItem.barcode] : null;
-let stockSaved=!!bulkRes?.data && !bulkRes?.error && !bulkRes?.skipped;
+let stockSaved=Boolean(bulkRes?.receipt?.stock_location_id);
+if (stockSaved && stockInfo) stockInfo.quantity=bulkRes.receipt.quantity_added;
+if (capturedBag) window.addItemBulkModule.clearCapture();
 
 // Only do the generic stock write if we did NOT do a per-bag save
 if (stockInfo && (bulkRes?.skipped === true))  {
@@ -3243,7 +3243,9 @@ if (stockInfo && (bulkRes?.skipped === true))  {
   await window.addItemAssistedModule?.clearSavedDraft();
   await bumpInventoryVersion([newItem.id]);
   releaseAddItemSubmit();
-  await window.addItemIntake.saved(newItem,{similar,nextMode,stockInfo,stockSaved,warnings:saveWarnings});
+  await window.addItemIntake.saved(newItem,{similar,nextMode,stockInfo,stockSaved,warnings:saveWarnings,
+    retryBulkBag:capturedBag && !bulkRes?.data ? async()=>window.addItemBulkModule.saveRegistryForItem(newItem.id,capturedBag.bag_barcode,stockInfo?.location_id || null,stockInfo) : null
+  });
   }catch(error){
     console.error('Item save failed',error);releaseAddItemSubmit();
     if(committedItem){

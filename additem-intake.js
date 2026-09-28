@@ -93,6 +93,23 @@
     $('item-save-success-barcode').textContent=`Barcode ${item.barcode}`;
     $('item-save-success-stock').textContent=options.stockSaved && options.stockInfo?`${options.stockInfo.quantity} units added to ${options.stockInfo.location_name}`:'No stock quantity assigned';
     $('item-save-success-copy').textContent=options.warnings.length?`Item saved. ${options.warnings.join(' ')}`:'Item and photos saved. You can print labels now or later from Stock.';
+    document.getElementById('item-retry-bag-save')?.remove();
+    if(options.retryBulkBag){
+      const retry=document.createElement('button');retry.id='item-retry-bag-save';retry.type='button';retry.className='add-button-secondary';retry.textContent='Retry bag save';
+      $('item-save-success-stock').after(retry);
+      retry.onclick=async()=>{
+        retry.disabled=true;retry.textContent='Checking bag save…';printing=true;updateQueue();
+        try {
+          const result=await options.retryBulkBag();
+          if(result?.error || !result?.data)throw new Error(result?.error?.message || 'Bag save was not confirmed.');
+          options.retryBulkBag=null;options.stockSaved=Boolean(result.receipt?.stock_location_id);
+          if(options.stockInfo && options.stockSaved)options.stockInfo.quantity=result.receipt.quantity_added;
+          options.warnings=options.warnings.filter(w=>!w.startsWith('The bag save was not confirmed.'));
+          await saved(item,options);
+        }catch(error){$('item-save-success-copy').textContent='Bag save not confirmed: '+error.message;retry.disabled=false;retry.textContent='Retry bag save';}
+        finally{printing=false;updateQueue();}
+      };
+    }
     $('item-label-print-status').textContent='Printing is optional. Your inventory is already saved.';
     $('item-labels-per-order').value='1';
     const quantity=options.stockSaved && options.stockInfo?Math.max(1,Number(options.stockInfo.quantity)):1;

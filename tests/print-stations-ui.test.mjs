@@ -27,6 +27,7 @@ async function openPage(t,admin=true,path='fixture.html'){
    const query={select(){return query;},eq(){return query;},limit(){return query;},maybeSingle:async()=>({data:null}),insert(payload){window.testWrites.push({table,payload});return query;},single:async()=>({data:{id:'saved-bag'}})};return query;
   },auth:{getSession:async()=>({data:{session:{user:{id:'staff'}}}})},rpc:async(name,args)=>{
    window.calls.push({name,args});
+   if(name==='receive_bulk_bag')return window.testBagError?{error:{message:'Stock save failed'}}:{data:{bag:{id:'saved-bag',bag_barcode:args._bag_barcode},stock_location_id:args._location_id?'stock-bag':null,transaction_id:args._location_id?'bag-tx':null,quantity_added:args._location_id?args._payload.estimated_qty:0}};
    if(name==='can_manage_print_stations')return {data:window.testAdmin};
    if(name==='list_print_stations')return window.testListError?{error:{message:'Connection unavailable'}}:{data:window.testStations};
    if(name==='list_label_print_jobs')return {data:window.testJobs};
@@ -89,7 +90,7 @@ test('bulk bag capture prints via the station and saves its label even if item g
  const page=await openBulk(t);await page.locator('[data-destination]').selectOption('a');await page.locator('[data-send]').click();await page.waitForFunction(()=>window.testToasts.some(text=>text.includes('Queued')));
  const before=await page.evaluate(()=>({captured:window.testCaptured,xml:window.latestDymoXml,call:window.calls.find(c=>c.name==='enqueue_label_print').args}));assert.equal(before.captured.length,1);assert.equal(before.captured[0].estimated_qty,5);assert.equal(before.call._barcode,before.captured[0].bag_barcode);assert.equal(before.call._label_xml,before.xml);
  await page.evaluate(async()=>{const bag=window.testCaptured[0];window.latestDymoXml='<DifferentItem/>';window.latestDymoBarcode='ITEM';await window.addItemBulkModule.saveRegistryForItem('item-id',bag.bag_barcode);});
- const saved=await page.evaluate(()=>({uploads:window.testUploads,writes:window.testWrites}));assert.equal(saved.uploads.length,1);assert.equal(saved.uploads[0].xml,before.xml);assert.equal(saved.writes[0].payload.bag_barcode,before.captured[0].bag_barcode);assert.equal(saved.writes[0].payload.bag_label_url,saved.uploads[0].path);
+ const saved=await page.evaluate(()=>({uploads:window.testUploads,writes:window.testWrites,call:window.calls.find(c=>c.name==='receive_bulk_bag').args}));assert.equal(saved.uploads.length,1);assert.equal(saved.uploads[0].xml,before.xml);assert.equal(saved.call._bag_barcode,before.captured[0].bag_barcode);assert.equal(saved.call._bag_label_url,saved.uploads[0].path);assert.equal(saved.writes.length,0,'no separate registry/stock/audit writes');
 });
 test('cancelled bag printing keeps the captured barcode and retry never captures a second bag',async t=>{
  const page=await openBulk(t);await page.locator('[data-cancel]').click();await page.waitForFunction(()=>window.testToasts.some(text=>text.includes('retained')));const barcode=await page.evaluate(()=>window.testCaptured[0].bag_barcode);
@@ -139,4 +140,28 @@ test('mobile roll configuration survives refresh and appears in the print picker
  const page=await openPage(t,true,'print-stations.html');await twinStation(page);await page.getByRole('button',{name:'Refresh status'}).click();await page.locator('[data-configure-rolls]').click();await page.locator('[data-left]').fill('30299 tags');await page.locator('[data-right]').fill('Address <label>');await page.locator('[data-default-roll]').selectOption('Right');await page.getByRole('button',{name:'Save roll settings'}).click();await page.waitForFunction(()=>window.calls.some(c=>c.name==='configure_print_station_rolls'));await page.locator('[data-configure-rolls]').waitFor();
  await page.evaluate(()=>window.testJobs=[{id:'roll-job',status:'queued',title:'Tag',station_name:'Florida',printer_name:'DYMO',printer_roll:'Right',copies:1,submitted_copies:0,created_at:new Date().toISOString()}]);await page.getByRole('button',{name:'Refresh status'}).click();assert.match(await page.locator('.print-job-card').innerText(),/Right roll/);
  await begin(page);await page.locator('[data-destination]').selectOption('a');assert.equal(await page.locator('[data-roll]').inputValue(),'Right');assert.match(await page.locator('[data-roll]').innerText(),/Address <label>/);await page.setViewportSize({width:320,height:740});assert.ok(await page.locator('.print-station-dialog').evaluate(el=>el.scrollWidth<=el.clientWidth));await page.screenshot({path:new URL('../test-results/print-rolls-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1'),fullPage:false});await page.locator('[data-cancel]').click();
+});
+
+
+test('bag measurements cannot be replaced by a later capture and failed stock saves stay failures',async t=>{
+ const page=await openBulk(t);await page.locator('[data-cancel]').click();await page.waitForFunction(()=>window.testToasts.some(text=>text.includes('retained')));
+ const first=await page.evaluate(()=>window.testCaptured[0]);
+ await page.evaluate(()=>window.addItemBulkModule.openModal());await page.locator('#bulk-gross').fill('9');await page.locator('#bulk-save').click();await page.locator('[data-destination]:enabled').waitFor();await page.locator('[data-cancel]').click();
+ await page.waitForFunction(()=>window.testCaptured.length===2);
+ const result=await page.evaluate(async first=>{window.testBagError=true;return window.addItemBulkModule.saveRegistryForItem('first-item',first.bag_barcode,'tray');},first);
+ assert.equal(result.data,null);assert.match(result.error.message,/Stock save failed/);
+ let calls=await page.evaluate(()=>window.calls.filter(c=>c.name==='receive_bulk_bag'));assert.equal(calls[0].args._payload.estimated_qty,5);assert.equal(calls[0].args._bag_barcode,first.bag_barcode);
+ const retry=await page.evaluate(async first=>{window.testBagError=false;return window.addItemBulkModule.saveRegistryForItem('first-item',first.bag_barcode,'tray');},first);
+ assert.equal(retry.receipt.quantity_added,5);calls=await page.evaluate(()=>window.calls.filter(c=>c.name==='receive_bulk_bag'));assert.deepEqual(calls[0].args,calls[1].args);
+ assert.equal(await page.evaluate(()=>window.testWrites.length),0);
+ await page.evaluate(()=>window.addItemBulkModule.clearCapture());assert.equal(await page.evaluate(()=>window.addItemBulkModule.getCapturedBag()),null);
+ assert.equal((await page.evaluate(()=>window.addItemBulkModule.saveRegistryForItem('next-item',null))).skipped,true);
+});
+
+test('bag capture rejects negative tare and quantities below one unit',async t=>{
+ const page=await openBulk(t);await page.locator('[data-cancel]').click();await page.waitForFunction(()=>window.testToasts.some(text=>text.includes('retained')));await page.evaluate(()=>window.addItemBulkModule.openModal());
+ await page.locator('#bulk-tare').fill('-1');assert.equal(await page.locator('#bulk-save').isDisabled(),true);
+ await page.locator('#bulk-tare').fill('1');await page.locator('#bulk-gross').fill('1.5');assert.equal(await page.locator('#bulk-save').isDisabled(),true);
+ await page.locator('#bulk-gross').fill('6');assert.equal(await page.locator('#bulk-save').isEnabled(),true);
+ await page.locator('#bulk-tare').fill('0');await page.locator('#bulk-gross').fill('0.3');await page.locator('#bulk-unit-override').fill('0.1');assert.equal(await page.locator('#bulk-estimated-qty').innerText(),'3');
 });

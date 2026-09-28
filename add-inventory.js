@@ -1184,7 +1184,10 @@ async function bumpInventoryVersion(changedIds = null) {
 
     if (itemTitle) itemTitle.textContent = batchItem.item.title || "Current Batch Item";
     if (scannedCount) scannedCount.textContent = String(batchItem.count || 0);
-    if (quantityInput) quantityInput.value = String(Math.max(1, Number(batchItem.count) || 1));
+    if (quantityInput) {
+      quantityInput.value = String(batchItem.bag_info?.bulkPayload?.estimated_qty || Math.max(1, Number(batchItem.count) || 1));
+      quantityInput.readOnly = Boolean(batchItem.bag_info);
+    }
 
     if (error) {
       console.error("❌ Error fetching last used location:", error);
@@ -2177,6 +2180,9 @@ async function bumpInventoryVersion(changedIds = null) {
           const { batchItem, location_id, location_name, quantityToAdd, placementMeta = {} } = pendingAssignment;
           const bagInfo = batchItem?.bag_info;
           const isBulkFlow = !!(bagInfo && bagInfo.bulkPayload);
+          if (isBulkFlow && quantityToAdd !== bagInfo.bulkPayload.estimated_qty) {
+            showToast('This bag quantity must match its captured weights. Reopen placement to use the weighed quantity.');return;
+          }
           const signedAt = new Date().toISOString();
           const signedEmail = currentUser.email || "";
           const confirmationMethod = "password_stock_placement";
@@ -2223,41 +2229,13 @@ async function bumpInventoryVersion(changedIds = null) {
 
             if (res?.error) {
               console.error("❌ Failed to save bulk bag:", res.error);
-              showToast("❌ Failed to save bulk bag.");
+              showToast(`Bag save not confirmed: ${res.error.message}. Retry this same bag.`);
               return;
             }
 
-            // Audit (bulk)
-            const { data: bulkTxData, error: bulkTxErr } = await supabase.from("stock_transactions").insert({
-              item_id: batchItem.item.id,
-              location_id,
-              quantity: quantityToAdd,
-              action_type: "checkin",
-              method: "bulk_bag",
-              user_id: currentUser.id,
-              email: signedEmail,
-              timestamp: signedAt,
-              confirmed_at: signedAt,
-              notes: [
-                `Added via Bulk Bag ${bagBarcode}`,
-                placementMeta.placement_type ? `destination type: ${placementMeta.placement_type}` : "",
-                placementMeta.location_code ? `location barcode: ${placementMeta.location_code}` : "",
-                placementMeta.parent_location_name ? `parent: ${placementMeta.parent_location_name}` : "",
-                `signed by ${signedEmail}`,
-              ].filter(Boolean).join(" | "),
-              stock_condition: "good",
-            }).select("id, notes").maybeSingle();
-            if (!bulkTxErr) {
-              stockTransactionId = bulkTxData?.id || "";
-              stockTransactionNotes = bulkTxData?.notes || "";
-            }
-
-            if (bulkTxErr) {
-              console.warn("⚠️ Bulk saved, but audit log failed:", bulkTxErr);
-              showToast("⚠️ Bulk saved, but audit log failed.");
-            } else {
-              showToast(`✅ Saved ${quantityToAdd} to ${location_name} (Bag ${bagBarcode})`);
-            }
+            stockTransactionId = res.receipt.transaction_id;
+            stockTransactionNotes = `Added via Bulk Bag ${bagBarcode}`;
+            showToast(`Saved ${res.receipt.quantity_added} to ${location_name} (Bag ${bagBarcode})`);
           }
 
           // ── Close modals & cleanup (shared) ───────────────────────────────
@@ -2638,6 +2616,7 @@ async function bumpInventoryVersion(changedIds = null) {
     //function necessary to increment the stock count once the card has been already created
     function incrementCardCount(barcode) {
       const batchItem = currentBatch[barcode];
+      if (batchItem.bag_info) {showToast('This bag already has a weighed quantity. Place it before scanning more units.');return;}
     
       if (batchItem.count >= batchItem.maxCount) {
         showToast("🚫 This item has already reached its batch limit.");
@@ -2724,7 +2703,9 @@ async function bumpInventoryVersion(changedIds = null) {
         const bulkBtn = document.getElementById("btn-add-bulk-bag");
         bulkBtn.addEventListener("click", () => {
           if (!pendingItem) return;
+          if (currentBatch[pendingItem.barcode]) {showToast('Place the current batch for this item before weighing a new bag.');return;}
           pendingBulkItem = pendingItem; // remember which item
+          window.addItemBulkModule?.clearCapture();
           document.getElementById("modalToConfirmItem").classList.add("hidden");
 
           // ✅ Pass the item title so Save can enable once weights are valid
@@ -3164,18 +3145,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     };
   }
 
-  // Increase the scanned count by the estimated qty from the bulk modal
-  currentBatch[item.barcode].count += Number(detail.estimated_qty || 0);
+  // This line represents exactly one captured bag.
+  currentBatch[item.barcode].count = Number(detail.estimated_qty || 0);
 
   const unitDisplay = currentBatch[item.barcode].cardEl.querySelector(".units-scanned");
   if (unitDisplay) {
     unitDisplay.textContent = `Units Scanned: ${currentBatch[item.barcode].count}`;
   }
 
-  // Generate a bag barcode + stash bulk payload so we can log the registry after location confirm
-  const bagBarcode =
-    window.addItemBulkModule?.generateBagBarcode?.() ||
-    `BAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
+  // Use the exact barcode already encoded on the printed bag label.
+  const bagBarcode = detail.bag_barcode;
 
   currentBatch[item.barcode].bag_info = {
     bagBarcode,

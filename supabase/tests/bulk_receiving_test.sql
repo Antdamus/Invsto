@@ -1,0 +1,68 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+create temp table bulk_tap_results(result text);
+do $bulk_checks$
+declare
+ actor uuid:=(select user_id from public.employees where role='admin' and active is distinct from false limit 1);
+ item uuid:=gen_random_uuid();tray uuid:=gen_random_uuid();other_tray uuid:=gen_random_uuid();
+ code text:='BAG-TEST-'||upper(replace(gen_random_uuid()::text,'-',''));payload jsonb;receipt jsonb;bag uuid;stock uuid;extra uuid;
+begin
+ insert into bulk_tap_results select plan(30);
+ insert into bulk_tap_results select ok(not has_function_privilege('anon','public.receive_bulk_bag(uuid,text,uuid,jsonb,text,text)','EXECUTE'),'anonymous cannot receive bags');
+ insert into bulk_tap_results select ok(not has_table_privilege('authenticated','public.bulk_receiving_receipts','SELECT'),'receipt table is private');
+ perform set_config('request.jwt.claim.sub',gen_random_uuid()::text,true);
+ insert into bulk_tap_results select throws_ok('select public.receive_bulk_bag(null,null,null,null)','42501','Inventory access required','nonstaff cannot receive bags');
+ perform set_config('request.jwt.claim.sub',actor::text,true);
+ insert into public.item_types(id,title,barcode) values(item,'__bulk_test',gen_random_uuid()::text);
+ insert into public.locations(id,location_name,location_code,active,is_tray,location_role,max_capacity)
+ values(tray,'__bulk_tray',gen_random_uuid()::text,true,true,'tray',20),(other_tray,'__bulk_other',gen_random_uuid()::text,true,true,'tray',20);
+ payload:='{"tare_weight_g":1,"gross_weight_g":11,"unit_weight_g":2,"unit_override_g":2,"unit_source":"override","estimated_qty":5}';
+ receipt:=public.receive_bulk_bag(item,code,tray,payload,'bag.label','bag.jpg');
+ bag:=(receipt->'bag'->>'id')::uuid;stock:=(receipt->>'stock_location_id')::uuid;
+ insert into bulk_tap_results select is((receipt->>'quantity_added')::integer,5,'weighed bag saves estimated units');
+ insert into bulk_tap_results select ok((select item_id=item and batch_id=bag and quantity=5 from public.item_stock_locations where id=stock),'stock points to the exact bag');
+ insert into bulk_tap_results select is((select count(*)::int from public.stock_transactions where destination_stock_location_row_id=stock),1,'one audit entry per bag');
+ insert into bulk_tap_results select ok((select user_id=actor and metadata->>'bag_barcode'=code from public.stock_transactions where id=(receipt->>'transaction_id')::uuid),'audit uses authenticated identity and printed barcode');
+ insert into bulk_tap_results select ok((select bag_label_url='bag.label' and bag_photo_url='bag.jpg' and net_weight_g=10 and residual_g=0 and retired_at is null from public.bulk_batches where id=bag),'bag retains attachments and derived weights');
+ insert into bulk_tap_results select is(public.receive_bulk_bag(item,code,tray,payload,'bag.label','bag.jpg'),receipt,'lost response retry returns original receipt');
+ insert into bulk_tap_results select is((select quantity from public.item_stock_locations where id=stock),5,'retry does not add stock twice');
+ insert into bulk_tap_results select throws_ok(format('select public.receive_bulk_bag(%L,%L,%L,%L)',item,code,other_tray,payload),'22023','This bag barcode already belongs to a different saved bag','same barcode cannot change destination');
+ insert into bulk_tap_results select throws_ok(format('select public.receive_bulk_bag(%L,%L,%L,%L)',item,code||'-BAD',tray,payload||'{"estimated_qty":6}'::jsonb),'22023','Bag quantity does not match its weights','mismatched quantity rejected');
+ insert into bulk_tap_results select throws_ok(format('select public.receive_bulk_bag(%L,%L,%L,%L)',item,code||'-BAD',tray,payload||'{"tare_weight_g":-1}'::jsonb),'22023','Use nonnegative weights with up to four decimal places','negative tare rejected');
+ insert into bulk_tap_results select throws_ok(format('select public.receive_bulk_bag(%L,%L,%L,%L)',item,code||'-BAD',tray,payload||'{"gross_weight_g":1.5,"estimated_qty":0}'::jsonb),'22023','Bag must contain 1-999999 estimated units','empty estimate rejected');
+ update public.locations set max_capacity=5 where id=tray;
+ insert into bulk_tap_results select throws_ok(format('select public.receive_bulk_bag(%L,%L,%L,%L)',item,code||'-FULL',tray,payload),'22023','This bag exceeds the destination capacity','bag honors destination capacity');
+ insert into bulk_tap_results select is((select count(*)::int from public.bulk_batches where bag_barcode=code||'-FULL'),0,'failed validation leaves no orphan bag');
+ update public.locations set max_capacity=20 where id=tray;
+ -- A late audit failure must undo registry and stock writes as well.
+ create function pg_temp.reject_bulk_audit() returns trigger language plpgsql as $f$ begin raise exception 'test audit failure';end $f$;
+ create trigger test_bulk_audit_failure before insert on public.stock_transactions for each row execute function pg_temp.reject_bulk_audit();
+ insert into bulk_tap_results select throws_ok(format('select public.receive_bulk_bag(%L,%L,%L,%L)',item,code||'-AUDIT',tray,payload),'P0001','test audit failure','audit failure rejects entire save');
+ drop trigger test_bulk_audit_failure on public.stock_transactions;
+ insert into bulk_tap_results select is((select count(*)::int from public.bulk_batches where bag_barcode=code||'-AUDIT'),0,'audit failure rolls bag back');
+ insert into bulk_tap_results select is((select count(*)::int from public.item_stock_locations where item_id=item),1,'audit failure rolls stock back');
+ insert into bulk_tap_results select is((select count(*)::int from public.bulk_receiving_receipts where bag_barcode=code||'-AUDIT'),0,'audit failure rolls receipt back');
+ insert into public.item_stock_locations(item_id,location_id,batch_id,quantity,condition_status) values(item,other_tray,bag,2,'defective') returning id into extra;
+ update public.item_stock_locations set quantity=0 where id=stock;
+ insert into bulk_tap_results select ok((select retired_at is null from public.bulk_batches where id=bag),'bag stays active while another row contains stock');
+ delete from public.item_stock_locations where id=extra;
+ insert into bulk_tap_results select ok((select retired_at is not null from public.bulk_batches where id=bag),'deleting final positive placement retires bag');
+ update public.item_stock_locations set quantity=3 where id=stock;
+ insert into bulk_tap_results select ok((select retired_at is null from public.bulk_batches where id=bag),'restoring quantity reactivates bag');
+ update public.item_stock_locations set batch_id=null where id=stock;
+ insert into bulk_tap_results select ok((select retired_at is not null from public.bulk_batches where id=bag),'detaching final stock retires old bag');
+ update public.item_stock_locations set batch_id=bag where id=stock;
+ insert into bulk_tap_results select ok((select retired_at is null from public.bulk_batches where id=bag),'attaching stock reactivates bag');
+ delete from public.item_stock_locations where id=stock;
+ insert into bulk_tap_results select ok((select retired_at is not null from public.bulk_batches where id=bag),'deleting last stock row retires bag');
+ receipt:=public.receive_bulk_bag(item,code||'-UNASSIGNED',null,payload);
+ insert into bulk_tap_results select ok(receipt->>'stock_location_id' is null and (receipt->>'quantity_added')::int=0,'unassigned bag does not claim inventory was placed');
+ insert into bulk_tap_results select ok((receipt->'bag'->>'retired_at') is null,'unassigned bag stays available');
+ payload:=payload||'{"unit_source":"samples","unit_override_g":null,"sample_w1_g":1,"sample_w2_g":2,"sample_w3_g":3}'::jsonb;
+ insert into bulk_tap_results select is((public.receive_bulk_bag(item,code||'-SAMPLES',tray,payload)->>'quantity_added')::int,5,'three samples can establish unit weight');
+ insert into bulk_tap_results select throws_ok(format('select public.receive_bulk_bag(%L,%L,%L,%L)',item,code||'-BAD-SAMPLES',tray,payload||'{"sample_w3_g":null}'::jsonb),'22023','Use at least three samples matching the unit weight','insufficient samples are rejected');
+ insert into bulk_tap_results select * from finish();
+end $bulk_checks$;
+select result from bulk_tap_results;
+rollback;

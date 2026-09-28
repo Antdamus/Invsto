@@ -4,6 +4,8 @@ window.addItemBulkModule = (function () {
   let capturing = false;
   let bagPrinting = false;
   let lastBagLabel = null;
+  let currentCapture = null;
+  const captures = new Map();
 
 
   // local state for the modal
@@ -87,16 +89,16 @@ window.addItemBulkModule = (function () {
     // unit used
     state.unit_used_g = overrideValid ? state.unit_override_g : state.unit_avg_g;
 
-    const haveWeights = state.tare_g !== null && state.gross_g !== null && state.gross_g > state.tare_g;
+    const haveWeights = state.tare_g !== null && state.tare_g >= 0 && state.gross_g !== null && state.gross_g > state.tare_g;
     const haveUnit = state.unit_used_g && state.unit_used_g > 0;
 
     state.net_g = haveWeights ? +(state.gross_g - state.tare_g).toFixed(4) : null;
 
     if (haveWeights && haveUnit) {
-      const est = Math.floor(state.net_g / state.unit_used_g);
+      const est = Math.floor(Math.round(state.net_g * 10000) / Math.round(state.unit_used_g * 10000));
       state.estimated_qty = Math.max(est, 0);
       state.residual_g = +(state.net_g - (state.estimated_qty * state.unit_used_g)).toFixed(4);
-      state.valid = state.item_title.length > 0;
+      state.valid = state.item_title.length > 0 && state.estimated_qty > 0 && state.estimated_qty <= 999999;
     } else {
       state.estimated_qty = null;
       state.residual_g = null;
@@ -149,13 +151,17 @@ window.addItemBulkModule = (function () {
       capturing=true;saveBtn.disabled=true;
       try {
         state.payload = buildPayload();
+        const payload = {...state.payload};
+        const bagPhoto = state.bagPhotoFile;
         const bagBarcode = generateBagBarcode();
         await prepareBagLabel(bagBarcode);
+        currentCapture = {bag_barcode:bagBarcode,estimated_qty:payload.estimated_qty,payload,label:lastBagLabel,photo:bagPhoto};
+        captures.set(bagBarcode,currentCapture);
         window.dispatchEvent(new CustomEvent("bulkbag:captured", {
-          detail: {bag_barcode:bagBarcode,estimated_qty:state.estimated_qty,payload:state.payload}
+          detail: {bag_barcode:bagBarcode,estimated_qty:currentCapture.estimated_qty,payload:{...currentCapture.payload}}
         }));
         closeModal();
-        window.showToast?.(`Bulk bag captured (${state.estimated_qty}).${lastBagLabel?'':' Label could not be prepared.'}`);
+        window.showToast?.(`Bulk bag captured (${payload.estimated_qty}).${lastBagLabel?'':' Label could not be prepared.'}`);
         if(lastBagLabel)await printCapturedBagLabel();
       } finally {capturing=false;recompute();}
     });
@@ -163,22 +169,18 @@ window.addItemBulkModule = (function () {
 
   // called from the add-item flow after item_types insert
   async function saveRegistryForItem(itemTypeId, bagBarcode, locationId = null, placementMeta = null) {
-    if (!state.payload) return { skipped: true, data: null };
+    const captured = captures.get(bagBarcode);
+    if (!captured) return bagBarcode ? {data:null,error:{message:'Captured bag details are unavailable. Reopen Bulk Bag.'}} : {skipped:true,data:null};
+    // Each captured bag owns its measurements and assets, even after another capture.
+    const label = captured.label;
 
     // 1) Upload the DYMO label (if one was generated during Save click)
     let bagLabelUrl = null;
     try {
-      if (lastBagLabel?.barcode === bagBarcode) {
-        const {error}=await supabase.storage.from('dymo-labels').upload(lastBagLabel.labelPath,new Blob([lastBagLabel.xml],{type:'application/octet-stream'}),{upsert:true,contentType:'application/octet-stream'});
+      if (label?.barcode === bagBarcode) {
+        const {error}=await supabase.storage.from('dymo-labels').upload(label.labelPath,new Blob([label.xml],{type:'application/octet-stream'}),{upsert:true,contentType:'application/octet-stream'});
         if(error)throw error;
-        bagLabelUrl=lastBagLabel.labelPath;
-      } else if (
-        window.dymoModule?.uploadFinalDymoLabel &&
-        window.latestDymoXml &&
-        window.latestDymoUrl &&
-        window.latestDymoBarcode === bagBarcode
-      ) {
-        bagLabelUrl = await dymoModule.uploadFinalDymoLabel(); // uses latestDymoXml/Url
+        bagLabelUrl=label.labelPath;
       }
     } catch (e) {
       console.warn("⚠️ Bag label upload failed:", e);
@@ -187,13 +189,13 @@ window.addItemBulkModule = (function () {
     // 2) (optional) upload the bag photo
     let bagPhotoUrl = null;
     try {
-      if (state.bagPhotoFile) {
-        const safeName = state.bagPhotoFile.name.replace(/[^\w.\-]+/g, "_");
-        const path = `bag_photos/${bagBarcode}-${Date.now()}-${safeName}`;
+      if (captured.photo) {
+        const safeName = captured.photo.name.replace(/[^\w.\-]+/g, "_");
+        const path = `bag_photos/${bagBarcode}-${safeName}`;
         const { error: upErr } = await supabase
           .storage
           .from("photos")
-          .upload(path, state.bagPhotoFile, { upsert: true });
+          .upload(path, captured.photo, { upsert: true });
         if (upErr) throw upErr;
         bagPhotoUrl = path; // store raw path; sign on read
       }
@@ -201,60 +203,22 @@ window.addItemBulkModule = (function () {
       console.warn("⚠️ Bag photo upload failed:", e);
     }
 
-    // 3) insert the bulk batch row with label+photo
-    const { data: bag, error: bagErr } = await supabase
-      .from("bulk_batches")
-      .insert({
-        ...state.payload,               // weights, unit_used_g, estimated_qty, etc.
-        item_type_id: itemTypeId,       // (keep item_id if your column is named that)
-        bag_barcode: bagBarcode,
-        location_id: locationId,
-        bag_label_url: bagLabelUrl,
-        bag_photo_url: bagPhotoUrl
-      })
-      .select()
-      .single();
-    if (bagErr) return { data: null, error: bagErr };
+    // Registry, per-bag stock, audit and retry receipt commit together on the server.
+    const {data: receipt,error} = await supabase.rpc('receive_bulk_bag',{
+      _item_id:itemTypeId,_bag_barcode:bagBarcode,_location_id:locationId,
+      _payload:captured.payload,_bag_label_url:bagLabelUrl,_bag_photo_url:bagPhotoUrl
+    });
+    if(error)return {data:null,error};
+    if(!receipt?.bag?.id)return {data:null,error:{message:'Bag save was not confirmed. Retry the same captured bag.'}};
+    return {data:receipt.bag,error:null,receipt};
+  }
 
-    // 4) per-bag STOCK row (only if you already collect a location here)
-    if (locationId) {
-      const { error: stockErr } = await supabase
-        .from("item_stock_locations")
-        .insert({
-          item_id: itemTypeId,          // ← matches your table FK
-          location_id: locationId,
-          batch_id: bag.id,             // tie this stock to THIS bag
-          quantity: state.estimated_qty,
-          added_by: window.currentUser?.id || null,
-          confirmation_email: placementMeta?.signed_by_email || window.currentUser?.email || null,
-          confirmation_method: placementMeta?.confirmation_method || "password_stock_placement",
-          confirmed_at: placementMeta?.signed_at || new Date().toISOString()
-        });
-      if (stockErr) {
-        console.warn("⚠️ bag stock insert failed:", stockErr);
-        // we still return the bag so the caller can decide what to do
-      } else {
-        const { error: stockTxErr } = await supabase
-          .from("stock_transactions")
-          .insert({
-            item_id: itemTypeId,
-            location_id: locationId,
-            quantity: state.estimated_qty,
-            action_type: "checkin",
-            confirmed_at: placementMeta?.signed_at || new Date().toISOString(),
-            user_id: window.currentUser?.id || null,
-            email: placementMeta?.signed_by_email || window.currentUser?.email || null,
-            notes: `Add item bulk stock placement into ${placementMeta?.placement_type || "location"} ${placementMeta?.location_name || locationId}`,
-            method: placementMeta?.confirmation_method || "password_stock_placement",
-            timestamp: placementMeta?.signed_at || new Date().toISOString()
-          });
-        if (stockTxErr) {
-          console.warn("⚠️ bag stock transaction insert failed:", stockTxErr);
-        }
-      }
-    }
-
-    return { data: bag, error: null };
+  function clearCapture() {
+    currentCapture=null;lastBagLabel=null;state.payload=null;state.bagPhotoFile=null;
+    const e=els();[e.itemTitle,e.tare,e.gross,e.unitOverride,...e.s,e.bagPhoto].forEach(input=>{if(input)input.value='';});
+    if(e.bagPhotoPreview)e.bagPhotoPreview.replaceChildren();
+    const printButton=document.getElementById('bulk-print-label');if(printButton)printButton.hidden=true;
+    recompute();
   }
 
   // ------- open/close & wiring -------
@@ -395,6 +359,8 @@ window.addItemBulkModule = (function () {
     openModal,
     closeModal,
     saveRegistryForItem, // call this after item is created
+    getCapturedBag: () => currentCapture,
+    clearCapture,
     generateBagBarcode,   
   };
 })();

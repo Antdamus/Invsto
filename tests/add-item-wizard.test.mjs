@@ -16,7 +16,7 @@ const mockServices = () => {
   window.QRCode = { toCanvas: (_canvas, _url, _options, callback) => callback?.() };
   window.testBarcodeRenders = [];
   window.JsBarcode = (_canvas, code) => window.testBarcodeRenders.push(code);
-  window.addItemBulkModule = { setupBulkModalOpeners() {},saveRegistryForItem:async()=>({skipped:true}) };
+  window.addItemBulkModule = { setupBulkModalOpeners() {},getCapturedBag:()=>null,clearCapture(){},saveRegistryForItem:async()=>({skipped:true}) };
   window.dymoModule = {
     setupGenerateDymoButtonListener() {},
     barcodeExists: async code => !!window.testExistingItem && window.testExistingItem.barcode===code,
@@ -692,4 +692,23 @@ test('preview navigation cycles included photos with the gallery collapsed and c
  assert.equal(await position.innerText(),'1 / 1');assert.equal(await forward.isDisabled(),true);assert.equal(await back.isDisabled(),true);
  await page.locator('[data-assisted-save-toggle="uploaded-1.jpg"]').click();
  assert.equal(await position.innerText(),'0 / 0');assert.equal(await forward.isDisabled(),true);assert.equal(await back.isDisabled(),true);
+});
+
+
+test('new item bag retries retain its printed barcode and never insert the catalog item twice',async t=>{
+ const page=await pageFor(t);await seed(page,{kind:'watch',assignStock:true,step:'stock'});
+ await page.evaluate(()=>{
+  window.testSaveSuccess=true;window.testBagCalls=[];window.testBagFailure=true;
+  let capture={bag_barcode:'BAG-PRINTED-123'};
+  window.addItemBulkModule.getCapturedBag=()=>capture;window.addItemBulkModule.clearCapture=()=>{capture=null;};
+  window.addItemBulkModule.saveRegistryForItem=async(item,barcode,location)=>{window.testBagCalls.push({item,barcode,location});return window.testBagFailure?{data:null,error:{message:'Connection lost'}}:{data:{id:'bag'},receipt:{stock_location_id:'bag-stock',quantity_added:5}};};
+  pendingStockAssignments[document.getElementById('scanned-barcode').value]={location_id:'tray-1',location_name:'Tray one',quantity:2};
+  document.getElementById('assignment-preview-box').classList.remove('hidden');
+ });
+ await next(page);await page.getByRole('button',{name:'Save item',exact:true}).click();await page.locator('#item-retry-bag-save').waitFor({state:'visible'});
+ assert.equal(await page.evaluate(()=>window.testWrites.length),1);assert.equal(await page.evaluate(()=>window.addItemBulkModule.getCapturedBag()),null);assert.equal(await page.evaluate(()=>window.testStockWrites.length),0);
+ await page.locator('#item-retry-bag-save').click();await page.locator('#item-retry-bag-save:enabled').waitFor();assert.match(await page.locator('#item-save-success-copy').innerText(),/Connection lost/);
+ await page.evaluate(()=>window.testBagFailure=false);await page.locator('#item-retry-bag-save').click();await page.locator('#item-retry-bag-save').waitFor({state:'detached'});
+ assert.match(await page.locator('#item-save-success-stock').innerText(),/5 units added to Tray one/);assert.equal(await page.evaluate(()=>window.testWrites.length),1);
+ const calls=await page.evaluate(()=>window.testBagCalls);assert.equal(calls.length,3);assert.ok(calls.every(c=>c.item==='item-1'&&c.barcode==='BAG-PRINTED-123'&&c.location==='tray-1'));
 });

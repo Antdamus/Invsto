@@ -26,7 +26,9 @@ Limits: 100 distinct item lines per batch; quantities 1-999999; batch note up to
 
 **Scan counting / bulk bags** opens `add-inventory.html?mode=count`. The previous scan-counting workflow remains available; its ordinary stock save now uses the same atomic RPC. The button previously called Submit Current Batch is accurately named Place Next Item because that workflow handles one item at a time. Weighed bag creation remains its existing workflow rather than being treated as loose inventory.
 
-Known pre-existing limitation found during validation: the legacy `sync_batch_qty_from_stock` bag trigger references absent `bulk_batches.low_threshold`/`initial_qty` columns. It was not changed by this receiving release. The receiving database test models an existing bag placement without firing that legacy trigger, then proves that receiving does not alter its quantity. Weighed-bag writes require a separate repair of that legacy path.
+Weighed-bag saving is repaired by `20260928010000_repair_bulk_bag_receiving.sql`. The captured barcode is reused on the label, registry, stock and audit. Each capture owns its measurements and attachments. `receive_bulk_bag` checks the weights, computes the quantity, validates the destination, and commits registry/stock/audit/receipt together. Retrying the same bag returns its receipt; reusing its barcode for a different bag is rejected. A bag captured without a destination is registered but does not claim placed stock. When a new catalog item has saved but its bag has not been confirmed, the success panel offers **Retry bag save** against that same item and captured barcode; retrying never inserts another catalog item.
+
+The repaired stock trigger uses the real stock rows rather than nonexistent bag columns. It retires a bag only when all its placements are empty and clears retirement when quantity returns. Inserts, quantity edits, deletion and batch reassignment are covered. Existing historical bag records are not rewritten or refilled automatically. Label/photo storage remains optional and separate from the inventory transaction; storage upload failures do not create a partial stock save.
 
 ## Validation
 
@@ -34,3 +36,6 @@ Known pre-existing limitation found during validation: the legacy `sync_batch_qt
 - `INVSTO_ITEM_BROWSER=webkit` uses the phone browser engine.
 - `supabase/tests/inventory_receiving_test.sql`: 27 transactional pgTAP checks for permissions, validation, stock/audit atomicity, retries, isolation of bag/defective stock and catalog preservation. Tests roll back fixtures.
 - Barcode scanner regressions still cover camera acceptance and the legacy scan flow. No real stock is saved or physical label printed by browser tests.
+
+- `supabase/tests/bulk_receiving_test.sql`: 30 rollback-only checks for weighed bags, retry isolation, validation, audit failure rollback and bag retirement.
+- `npm run test:print-stations`: includes exact captured bag barcode/label, per-capture measurements, retries, rejection and empty/negative weight checks.
