@@ -37,15 +37,6 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function escapeXml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
 function formatDateTime(value) {
   if (!value) return "-";
   const date = new Date(value);
@@ -599,6 +590,7 @@ function renderBagList(session) {
         </div>
         <div class="bag-actions">
           <b class="status-badge ${getStatusClass(lot.status)}">${escapeHtml(statusLabel(lot.status))}</b>
+          <a class="tiny-btn" href="${window.liveBagLabel.url(lot.lot_code)}" target="_blank" rel="noopener">Full bag details</a>
           <button type="button" class="tiny-btn" data-print-label="${escapeHtml(lot.id)}">Print Label</button>
           <button type="button" class="tiny-btn" data-edit-lot="${escapeHtml(lot.id)}">Edit</button>
           ${["open", "reserved"].includes(lot.status) ? `<button type="button" class="tiny-btn danger-btn" data-cancel-lot="${escapeHtml(lot.id)}">Cancel Bag</button>` : ""}
@@ -718,126 +710,6 @@ function formatEventType(value = "") {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function qrObject(name, value, x, y, width, height) {
-  const safe = escapeXml(value);
-  return `
-    <QRCodeObject>
-      <Name>${name}</Name>
-      <Brushes>
-        <BackgroundBrush><SolidColorBrush><Color A="1" R="1" G="1" B="1"></Color></SolidColorBrush></BackgroundBrush>
-        <BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush>
-        <StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush>
-        <FillBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush>
-      </Brushes>
-      <Rotation>Rotation0</Rotation>
-      <OutlineThickness>1</OutlineThickness>
-      <IsOutlined>False</IsOutlined>
-      <BorderStyle>SolidLine</BorderStyle>
-      <Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin>
-      <BarcodeFormat>QRCode</BarcodeFormat>
-      <Data><DataString>${safe}</DataString></Data>
-      <HorizontalAlignment>Center</HorizontalAlignment>
-      <VerticalAlignment>Middle</VerticalAlignment>
-      <Size>AutoFit</Size>
-      <EQRCodeType>QRCodeText</EQRCodeType>
-      <TextDataHolder><Value>${safe}</Value></TextDataHolder>
-      <ObjectLayout>
-        <DYMOPoint><X>${x}</X><Y>${y}</Y></DYMOPoint>
-        <Size><Width>${width}</Width><Height>${height}</Height></Size>
-      </ObjectLayout>
-    </QRCodeObject>
-  `;
-}
-
-function textObject(name, value, x, y, fontSize = "4") {
-  const safe = escapeXml(value);
-  return `
-    <TextObject>
-      <Name>${name}</Name>
-      <Brushes>
-        <BackgroundBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></BackgroundBrush>
-        <BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush>
-        <StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush>
-        <FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush>
-      </Brushes>
-      <Rotation>Rotation90</Rotation>
-      <OutlineThickness>1</OutlineThickness>
-      <IsOutlined>False</IsOutlined>
-      <BorderStyle>SolidLine</BorderStyle>
-      <Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin>
-      <HorizontalAlignment>Center</HorizontalAlignment>
-      <VerticalAlignment>Bottom</VerticalAlignment>
-      <FitMode>None</FitMode>
-      <IsVertical>False</IsVertical>
-      <FormattedText>
-        <FitMode>None</FitMode>
-        <HorizontalAlignment>Center</HorizontalAlignment>
-        <VerticalAlignment>Bottom</VerticalAlignment>
-        <IsVertical>False</IsVertical>
-        <LineTextSpan>
-          <TextSpan>
-            <Text>${safe}</Text>
-            <FontInfo>
-              <FontName>Segoe UI</FontName>
-              <FontSize>${fontSize}</FontSize>
-              <IsBold>True</IsBold>
-              <IsItalic>False</IsItalic>
-              <IsUnderline>False</IsUnderline>
-              <FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush>
-            </FontInfo>
-          </TextSpan>
-        </LineTextSpan>
-      </FormattedText>
-      <ObjectLayout>
-        <DYMOPoint><X>${x}</X><Y>${y}</Y></DYMOPoint>
-        <Size><Width>0.12500001</Width><Height>0.378334</Height></Size>
-      </ObjectLayout>
-    </TextObject>
-  `;
-}
-
-function buildLiveAuctionDymoXml({ auctionNumber, lotCode, freeText }) {
-  const auctionValue = String(auctionNumber || "").trim();
-  const lotValue = String(lotCode || "").trim();
-  const rightText = String(freeText || auctionValue || "AUCTION").trim().toUpperCase().slice(0, 18);
-  const leftText = lotValue.toUpperCase().slice(0, 18);
-
-  return `<?xml version="1.0" encoding="utf-8"?>
-<DesktopLabel Version="1">
-  <DYMOLabel Version="4">
-    <Description>DYMO Label</Description>
-    <Orientation>Portrait</Orientation>
-    <LabelName>Jewelry30299</LabelName>
-    <InitialLength>0</InitialLength>
-    <BorderStyle>SolidLine</BorderStyle>
-    <DYMORect>
-      <DYMOPoint><X>0.040000137</X><Y>0.060000002</Y></DYMOPoint>
-      <Size><Width>2.0433333</Width><Height>0.75666666</Height></Size>
-    </DYMORect>
-    <BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor>
-    <BorderThickness>1</BorderThickness>
-    <Show_Border>False</Show_Border>
-    <HasFixedLength>False</HasFixedLength>
-    <FixedLengthValue>0</FixedLengthValue>
-    <DynamicLayoutManager>
-      <RotationBehavior>ClearObjects</RotationBehavior>
-      <LabelObjects>
-        ${qrObject("QRCodeObject0", auctionValue, "1.5044161", "0.06538457", "0.28525865", "0.32408708")}
-        ${qrObject("QRCodeObject1", auctionValue, "1.5044161", "0.47906214", "0.3110023", "0.29687557")}
-        ${textObject("TextObject0", rightText, "1.4095135", "0.059999704", "4.8")}
-        ${textObject("TextObject1", rightText, "1.4095135", "0.43833333", "4.8")}
-        ${qrObject("QRCodeObject2", lotValue, "0.26554355", "0.47743064", "0.30536497", "0.30013865")}
-        ${qrObject("QRCodeObject3", lotValue, "0.2628106", "0.09862068", "0.308098", "0.290851")}
-        ${textObject("TextObject4", leftText, "0.13781057", "0.059999704", "4")}
-        ${textObject("TextObject5", leftText, "0.13781057", "0.43833315", "4")}
-      </LabelObjects>
-    </DynamicLayoutManager>
-  </DYMOLabel>
-  <LabelApplication>Blank</LabelApplication>
-  <DataTable><Columns></Columns><Rows></Rows></DataTable>
-</DesktopLabel>`;
-}
-
 function downloadTextFile(text, filename) {
   const blob = new Blob([text], { type: "application/octet-stream" });
   const url = URL.createObjectURL(blob);
@@ -880,13 +752,12 @@ async function printLiveSaleBagLabel(lotId) {
   }
 
   try {
-    const xml = buildLiveAuctionDymoXml({
-      auctionNumber: lot.auction_number,
-      lotCode: lot.lot_code,
-      freeText: lot.auction_number,
-    });
+    const { data: auction, error: auctionError } = await supabase.from("ebay_live_attempts").select("listing_title,buyer").eq("lot_id", lot.id).maybeSingle();
+    if (auctionError) throw auctionError;
+    const identity = window.liveBagLabel.identity(lot, auction);
+    const xml = window.liveBagLabel.build(identity);
     const filename = `${getLiveSaleLabelBaseName(lot, session)}_Reprint_Copies_1.dymo`;
-    const printResult = await window.printStations.printLabel(xml, {filename,copies:1,title:`Auction ${lot.auction_number || lot.lot_code}`,barcode:lot.lot_code});
+    const printResult = await window.printStations.printLabel(xml, {filename,copies:1,title:identity.title,barcode:lot.lot_code});
     const { error } = await supabase.rpc("record_live_sale_label_reprint", {
       _lot_id: lot.id,
       _label_path: lot.label_path || null,

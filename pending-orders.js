@@ -7309,6 +7309,7 @@ function renderLiveLotPanelInto(panel, { global = false } = {}) {
     <div class="live-lot-head">
       <div>
         <strong>Auction ${escapeHtml(lot.auction_number || "-")}</strong>
+        <a href="bag-lookup.html?bag=${encodeURIComponent(lot.lot_code)}" target="_blank" rel="noopener">Winner, prices and full bag details</a>
         <small>Bag ${escapeHtml(lot.lot_code || "-")} - ${escapeHtml(lot.session?.session_code || "No session")}${escapeHtml(sessionStatus)} - Started ${escapeHtml(formatDate(lot.session?.started_at))}</small>
       </div>
       <span class="live-lot-badge">${packableItems.length} type(s) / ${totalQty} unit(s)${sourceCount ? ` / ${sourceCount} source(s)` : ""}</span>

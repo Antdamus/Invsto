@@ -23,7 +23,7 @@ test("pending order admin can select the currently visible queue before closeout
   assert.match(js, /adminSelectedLineIds\.add\(line\.id\)/);
   assert.match(js, /admin-select-visible-pending"\)\?\.addEventListener\("click", \(\) => setVisibleAdminOrderSelection\(true\)\)/);
   assert.match(css, /#admin-select-visible-pending/);
-  assert.match(html, /pending-orders\.js\?v=selected-closeout-20260824/);
+  assert.match(html, /pending-orders\.js\?v=[\w-]+/);
   assert.match(js, /buyer-card-quick-select/);
   assert.match(js, /card\.querySelectorAll\("\[data-admin-group-select\]"\)/);
   assert.match(css, /\.buyer-card-quick-select/);

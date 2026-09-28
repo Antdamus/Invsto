@@ -6,7 +6,7 @@ import {chromium,webkit} from '@playwright/test';
 import vm from 'node:vm';
 const root=new URL('../',import.meta.url);let server,browser,origin;
 before(async()=>{
- server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:ebay-live|live-sales|live-manual-items)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
+ server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:ebay-live|live-sales|live-manual-items|live-bag-label)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;
  browser=await(process.env.INVSTO_ITEM_BROWSER==='webkit'?webkit:chromium).launch();
 });
@@ -234,4 +234,16 @@ test('running counter shows missing data rather than inventing zero profit and u
  const p=await open(t);assert.equal(await p.locator('#ebay-running-total').innerText(),'—');assert.match(await p.locator('#ebay-running-coverage').innerText(),/0 priced paid bags.*1 missing/);
  await p.evaluate(()=>{const a=dashboard.attempts[0];Object.assign(a,{units:1,amount:1,minimum_total:.9});dashboard.attempts=[a,{...a,id:'two',minimum_total:.8},{...a,id:'three',minimum_total:1.3}];});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-running-total').textContent==='$0.00');assert.doesNotMatch(await p.locator('#ebay-running-total').getAttribute('class')||'',/is-loss|is-gain/);
  await p.evaluate(()=>{dashboard.attempts[0].minimum_total=1.9;});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-running-total').textContent==='-$1.00');assert.match(await p.locator('#ebay-running-total').getAttribute('class'),/is-loss/);assert.deepEqual(p.errors,[]);
+});
+
+
+test('phone bag lookup entry stays visible during a linked show and reprints identify the bag on every QR',async t=>{
+ const p=await open(t);await p.setViewportSize({width:320,height:740});
+ assert.equal(await p.locator('#scan-bag-label').isVisible(),true);
+ assert.equal(await p.locator('#scan-bag-label').getAttribute('href'),'bag-lookup.html');
+ await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);
+ await p.evaluate(()=>ebayLive.closeCurrent());await p.locator('#ebay-print-last').click();await p.waitForFunction(()=>calls.some(c=>c.name==='print'));
+ const xml=await p.evaluate(()=>calls.find(c=>c.name==='print').xml);
+ assert.deepEqual([...xml.matchAll(/<DataString>(.*?)<\/DataString>/g)].map(m=>m[1]),Array(4).fill('LIVE-TEST'));
+ assert.match(xml,/<Text>#001<\/Text>/);
 });

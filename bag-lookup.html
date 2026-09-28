@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Scan bag label · Invsto</title>
+  <link rel="stylesheet" href="bag-lookup.css?v=20260928-bag-lookup">
+  <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup">
+  <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
+</head>
+<body>
+  <main class="bag-page">
+    <nav aria-label="Bag navigation"><a href="live-sales.html">Live Sales</a><a href="pending-orders.html">Pending Orders</a></nav>
+    <h1>Scan bag label</h1>
+    <p>See the winner and everything saved in a bag, including past shows.</p>
+    <form id="bag-search">
+      <label for="bag-code">Bag ID</label>
+      <div class="bag-search-row"><input id="bag-code" type="search" placeholder="LIVE-…" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="80" disabled><button id="bag-find" type="submit" disabled>Find bag</button></div>
+      <button id="bag-camera" type="button" data-scan-target="bag-code" data-scan-action="bag-find" data-scan-hint="Scan either QR on a new bag label. On older labels, scan the QR beside the LIVE bag ID." disabled>Scan QR with camera</button>
+      <small>Older labels: scan the QR beside the LIVE bag ID. Auction numbers can repeat between shows.</small>
+    </form>
+    <p id="bag-status" role="status" aria-live="polite">Checking your sign-in…</p>
+    <p id="bag-sign-in" hidden><a href="index.html" target="_blank" rel="noopener">Sign in to Invsto</a>, then return here and refresh.</p>
+    <button id="bag-refresh" type="button">Refresh</button>
+    <section id="bag-result" aria-label="Bag details" hidden></section>
+    <dialog id="bag-photo-dialog"><button type="button" id="bag-photo-close">Close photo</button><img id="bag-photo" alt=""><p id="bag-photo-title"></p></dialog>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="initSupabase.js"></script>
+  <script src="live-bag-label.js?v=20260928-bag-lookup"></script>
+  <script src="print-stations.js?v=20260927-rolls"></script>
+  <script src="bag-lookup.js?v=20260928-bag-lookup"></script>
+</body>
+</html>

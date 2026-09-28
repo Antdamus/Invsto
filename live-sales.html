@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="live-sales.css" />
-  <link rel="stylesheet" href="ebay-live.css?v=20260928-running-totals" />
+  <link rel="stylesheet" href="ebay-live.css?v=20260928-bag-lookup" />
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
@@ -92,6 +92,7 @@
             <p>Choose a paid auction, scan the sold item, and close its bag.</p>
           </div>
           <div class="hero-actions">
+            <a id="scan-bag-label" href="bag-lookup.html" target="_blank" rel="noopener" class="secondary-btn">Scan bag label</a>
             <button id="manage-live-show" type="button" class="secondary-btn">Show settings</button>
             <button id="refresh-live-sales" type="button" class="secondary-btn">
               <i data-lucide="refresh-cw"></i>
@@ -444,9 +445,10 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js?v=20260927-print-stations"></script>
+  <script src="live-bag-label.js?v=20260928-bag-lookup"></script>
   <script src="print-stations.js?v=20260927-rolls"></script>
-  <script src="live-manual-items.js?v=20260928-running-totals"></script>
-  <script src="ebay-live.js?v=20260928-running-totals"></script>
-  <script src="live-sales.js?v=20260928-running-totals"></script>
+  <script src="live-manual-items.js?v=20260928-bag-lookup"></script>
+  <script src="ebay-live.js?v=20260928-bag-lookup"></script>
+  <script src="live-sales.js?v=20260928-bag-lookup"></script>
 </body>
 </html>
