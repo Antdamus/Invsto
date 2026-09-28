@@ -40,7 +40,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
         const id=event_id+'|'+event.key;
         data.events[id]={id,event_id,event};
       }
-      data.health[event_id]={...message.health,broadcast_ended:!!(data.health[event_id]?.broadcast_ended||message.health?.broadcast_ended),pending:Object.keys(data.events).length,version:'1.0.2'};
+      data.health[event_id]={...message.health,broadcast_ended:!!(data.health[event_id]?.broadcast_ended||message.health?.broadcast_ended),pending:Object.keys(data.events).length,version:'1.0.3'};
       if (Object.keys(data.events).length>10000) {data.health[event_id].ready=false;data.status='Capture backlog is full. Reconnect Invsto before continuing.';}
     } else return {ok:false};
     // Persist first: a browser crash or network outage must not drop a payment failure.

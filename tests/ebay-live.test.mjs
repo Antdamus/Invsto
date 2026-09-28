@@ -338,6 +338,22 @@ test('capture routes a saved show by event while another show is selected, never
  await p.evaluate(()=>window.postMessage({type:'INVSTO_LIVE_BATCH',id:'unknown',payload:{event_id:'UNKNOWN123',events:[],health:{}}},location.origin));await p.waitForFunction(()=>acks.length===2);assert.equal(await p.evaluate(()=>acks[1].ok),false);assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='ingest_ebay_live_events').length),1);
 });
 
+test('capture waits before the first sale and automatically moves from disabled Sold to the first paid auction',async t=>{
+ const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123');
+ await p.setContent('<button role="tab" aria-selected="true">Activity</button><button role="tab" aria-selected="true" id="all-listings">All (57)</button><button role="tab" aria-selected="false" id="sold-listings" disabled>Sold</button><span id="metric-elapsed-time-value">00:25:42</span><div id="listings"></div><div id="activity-panel"><div aria-label="Filter activity"><button aria-pressed="true">All</button></div><p>No activity found</p></div>');
+ await p.evaluate(()=>{
+  window.packets=[];window.disabledClicks=0;window.chrome={runtime:{sendMessage:async m=>{packets.push(m);return {ok:true,status:'Connected · 0 pending'}}}};
+  document.getElementById('sold-listings').onclick=e=>{if(e.currentTarget.disabled)disabledClicks++;else{e.currentTarget.setAttribute('aria-selected','true');document.getElementById('all-listings').setAttribute('aria-selected','false');}};
+ });
+ for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+ await p.getByRole('button',{name:'Start Invsto capture',exact:true}).click();await p.waitForFunction(()=>packets.length);
+ assert.equal(await p.evaluate(()=>packets.at(-1).health.ready),true);assert.match(await p.evaluate(()=>packets.at(-1).health.message),/waiting for the first sale/);assert.equal(await p.evaluate(()=>packets.at(-1).events.length),0);assert.equal(await p.evaluate(()=>disabledClicks),0);
+ await p.evaluate(({listing,activity})=>{document.getElementById('sold-listings').disabled=false;document.getElementById('listings').innerHTML=listing;document.getElementById('activity-panel').insertAdjacentHTML('beforeend',activity);},{listing:tile(),activity:row()});
+ await p.waitForFunction(()=>packets.at(-1).health.ready&&packets.at(-1).events.some(e=>e.kind==='paid'));
+ assert.equal(await p.locator('#sold-listings').getAttribute('aria-selected'),'true');assert.match(await p.evaluate(()=>packets.at(-1).health.message),/Reading Activity and Sold/);
+ await p.locator('#sold-listings').evaluate(el=>el.remove());await p.waitForFunction(()=>!packets.at(-1).health.ready);assert.match(await p.evaluate(()=>packets.at(-1).health.message),/Waiting for the Sold or All listings panel/);
+});
+
 test('refresh never carries the previous show bag into another unfinished show',async t=>{
  const p=await open(t,'',true);await p.evaluate(()=>{
   const next={...showSession,id:'other',title:'Other show'};

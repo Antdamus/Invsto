@@ -11,35 +11,42 @@
   const sweepPositions=new WeakMap();
   let lastClock=null,clockChangedAt=0,clockWasAdvancing=false;
   const tab = name => [...document.querySelectorAll('[role="tab"]')].find(el=>new RegExp('^'+name+'(?:\\s|\\(|$)','i').test(el.textContent.trim()));
-  const choose = el => {if(el && el.getAttribute('aria-selected')!=='true') el.click();};
+  const disabled = el => !!el && (el.disabled || el.getAttribute('aria-disabled')==='true');
+  const choose = el => {if(el && !disabled(el) && el.getAttribute('aria-selected')!=='true') el.click();};
   button.onclick=()=>{active=!active;button.textContent=active?'Stop Invsto capture':'Start Invsto capture';sent.clear();stopping=!active;tick();};
   async function tick() {
     if(busy || (!active&&!stopping&&(endReported||!InvstoLiveParser.hasEnded(document)))) return;busy=true;
     try {
       if (active) {
-        choose(tab('Activity'));choose(tab('Sold'));
+        choose(tab('Activity'));choose(disabled(tab('Sold'))?tab('All'):tab('Sold'));
         const all=[...document.querySelectorAll('#activity-panel [aria-label="Filter activity"] button')].find(b=>b.textContent.trim()==='All');
         if(all && all.getAttribute('aria-pressed')!=='true') all.click();
       }
       const parsed=InvstoLiveParser.parse(document,cache);cache=parsed.cache;
       const activitySelected=tab('Activity')?.getAttribute('aria-selected')==='true';
       const soldSelected=tab('Sold')?.getAttribute('aria-selected')==='true';
+      // eBay disables Sold before the first sale. Watch Activity and the All
+      // listings in that state, then select Sold as soon as it becomes available.
+      const waitingForSales=disabled(tab('Sold')) && tab('All')?.getAttribute('aria-selected')==='true';
+      const listingsReady=soldSelected || waitingForSales;
       if(parsed.elapsed!==null && parsed.elapsed!==lastClock){clockWasAdvancing=lastClock!==null;lastClock=parsed.elapsed;clockChangedAt=Date.now();}
       const advancing=clockWasAdvancing && Date.now()-clockChangedAt<20000;
-      const ready=active && !parsed.broadcastEnded && parsed.supported && parsed.panelPresent && activitySelected && soldSelected && navigator.onLine && (document.visibilityState==='visible' || advancing);
+      const clockReady=document.visibilityState==='visible' || advancing;
+      const ready=active && !parsed.broadcastEnded && parsed.supported && parsed.panelPresent && activitySelected && listingsReady && navigator.onLine && clockReady;
+      const reason=parsed.broadcastEnded?'Broadcast ended. Finish the bag review in Invsto.':!active?'Capture stopped':!navigator.onLine?'Capture computer is offline':!parsed.supported?'Stream Manager layout is not recognized; verify payment manually':!activitySelected||!parsed.panelPresent?'Waiting for the Activity panel to load':!listingsReady?'Waiting for the Sold or All listings panel':!clockReady?'Bring Stream Manager forward; its clock must keep updating':waitingForSales?'Watching Activity; waiting for the first sale':'Reading Activity and Sold items';
       const events=[];
       if(active) for(const event of parsed.events) {
         const signature=JSON.stringify([event.listing_id,event.kind,event.buyer,event.amount]);
         if(sent.get(event.key)!==signature) {if(events.length<100)events.push(event);}
       }
-      const result=await chrome.runtime.sendMessage({type:'INVSTO_CAPTURE',event_id,events,health:{observed_at:new Date().toISOString(),ready,broadcast_ended:parsed.broadcastEnded,message:parsed.broadcastEnded?'Broadcast ended. Finish the bag review in Invsto.':ready?'Reading Activity and Sold items':active?(parsed.supported?'Bring Stream Manager forward; its clock must keep updating':'Stream Manager layout is not recognized; verify payment manually'):'Capture stopped'}});
+      const result=await chrome.runtime.sendMessage({type:'INVSTO_CAPTURE',event_id,events,health:{observed_at:new Date().toISOString(),ready,broadcast_ended:parsed.broadcastEnded,message:reason}});
       if(result?.ok&&parsed.broadcastEnded)endReported=true;
       if(!active&&result?.ok)stopping=false;
       if(result?.ok) for(const e of events) sent.set(e.key,JSON.stringify([e.listing_id,e.kind,e.buyer,e.amount]));
-      const statusText=(parsed.broadcastEnded?'Broadcast ended · ':ready?'Capturing · ':active?'Paused · ':'Stopped · ')+(result?.status||result?.error||'Waiting for receiver');
+      const statusText=reason+' · '+(result?.status||result?.error||'Waiting for receiver');
       if(note.textContent!==statusText)note.textContent=statusText;
       // The Activity feed is virtualized. Sweep it so failures below the fold are read too.
-      if(active && parsed.supported && parsed.panelPresent && activitySelected && soldSelected && Date.now()-pageAt>1500) {
+      if(active && parsed.supported && parsed.panelPresent && activitySelected && listingsReady && Date.now()-pageAt>1500) {
         const scrollers=new Set([document.querySelector('#activity-panel [class*="_list_"]')]);
         let parent=document.querySelector('[data-testid="listing-tile"]')?.parentElement;
         while(parent && parent!==document.body) { if(parent.className?.includes('_list_') && parent.scrollHeight>parent.clientHeight){scrollers.add(parent);break;}parent=parent.parentElement; }
