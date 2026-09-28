@@ -38,6 +38,9 @@ async function open(t,query='',resume=false){
     if(row)Object.assign(row,saved);else mockManualItems.push(saved);return {data:saved};
    }
    if(name==='set_ebay_live_seller'){dashboard.connection.active_seller_id=args._seller_id;dashboard.connection.active_seller_name=args._seller_id==='next-seller'?'Sydney Miller':'Test seller';if(args._correct_existing){for(const l of mockLots)l.owner_employee_id=args._seller_id;for(const a of dashboard.attempts){a.seller_id=args._seller_id;a.seller_name=dashboard.connection.active_seller_name;}}return {data:args._correct_existing?dashboard.attempts.length:0};}
+   if(name==='mark_ebay_live_broadcast_ended'){dashboard.connection.broadcast_ended_at=new Date().toISOString();dashboard.connection.capture_ready=false;return {data:null};}
+   if(name==='complete_ebay_live_session'){if(window.failComplete)return {error:{message:'A payment changed; review the outstanding issue'}};showSession.status='ended';return {data:null};}
+   if(name==='reopen_ebay_live_bag'){const a=dashboard.attempts.find(a=>a.id===args._attempt_id);a.closed_at=null;a.claimed_by='worker';const lot=mockLots.find(l=>l.id===a.lot_id);lot.closed_at=null;return {data:lot};}
    if(name==='start_ebay_live_session'){window.showSession={...window.showSession,id:'newshow',workflow_mode:'ebay_live',title:args._title};window.dashboard.connection={...window.dashboard.connection,session_id:'newshow',event_id:args._event_id};return {data:window.showSession};}
    if(name==='claim_ebay_live_bag'){const a=window.dashboard.attempts.find(a=>a.id===args._attempt_id);a.claimed_by='worker';a.lot_id='lot';const lot={id:'lot',session_id:'show',auction_number:'EB-29-SALE',lot_code:'LIVE-TEST',status:'open',owner_employee_id:'seller'};window.mockLots=[lot];return {data:lot};}
    if(name==='close_ebay_live_bag'){if(window.failClose)return {error:{message:'Payment is not confirmed for this bag'}};window.dashboard.attempts[0].closed_at=new Date().toISOString();return {data:null};}
@@ -171,4 +174,35 @@ test('correcting the seller refreshes the already open bag without crediting the
  await p.locator('#ebay-seller-control > summary').click();await p.locator('#ebay-live-seller').selectOption('next-seller');await p.locator('#ebay-correct-existing').check();await p.locator('#ebay-seller-reason').fill('The full show was sold by Sydney, not the scanner');await p.locator('#ebay-save-seller').click();
  await p.waitForFunction(()=>document.getElementById('manifest-bag-meta').textContent.includes('Sydney'));
  assert.match(await p.locator('#manifest-bag-meta').innerText(),/Sold by Sydney Miller/);assert.doesNotMatch(await p.locator('#manifest-bag-meta').innerText(),/Owner Test seller/);assert.equal(await p.evaluate(()=>dashboard.attempts[0].claimed_by),'worker');assert.deepEqual(p.errors,[]);
+});
+
+test('post-show allows missing item scans without a live clock but never bypasses payment or connection failures',async t=>{
+ const p=await open(t);await p.evaluate(()=>{dashboard.connection.broadcast_ended_at=new Date().toISOString();dashboard.connection.capture_ready=false;dashboard.connection.source_seen_at='2020-01-01';});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>!document.querySelector('[data-action=scan]').disabled);
+ assert.match(await p.locator('#ebay-live-health').innerText(),/Broadcast ended/);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);
+ await p.evaluate(()=>{dashboard.unmatched=[{kind:'failed',blocking:true,evidence:'Unmatched failure'}];});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('item-scan').disabled);
+ await p.evaluate(()=>{dashboard.unmatched=[];dashboard.attempts[0].payment_state='failed';});await p.locator('#ebay-live-refresh').click();assert.equal(await p.locator('#item-scan').isDisabled(),true);
+ await p.evaluate(()=>{dashboard.attempts[0].payment_state='paid';failDashboard=true;});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-live-message').textContent.includes('Network interrupted'));assert.equal(await p.locator('#item-scan').isDisabled(),true);assert.deepEqual(p.errors,[]);
+});
+
+test('post-show completion requires finished bags, physical checks and a successful server recheck',async t=>{
+ const p=await open(t);p.on('dialog',d=>d.accept());await p.locator('#ebay-mark-ended').click();await p.locator('#ebay-post-show').waitFor({state:'visible'});assert.equal(await p.evaluate(()=>showSession.status),'active');
+ await p.evaluate(()=>{dashboard.post_show={open_paid_bags:1,payment_issues:0,unmatched_notifications:0,unlinked_bags:0,paid_bags:1,closed_bags:0};});await p.locator('#ebay-live-refresh').click();await p.locator('#ebay-final-checklist>summary').click();await p.locator('#ebay-final-bags').check();await p.locator('#ebay-final-payments').check();assert.equal(await p.locator('#ebay-complete-show').isDisabled(),true);
+ await p.evaluate(()=>{dashboard.post_show.open_paid_bags=0;dashboard.post_show.closed_bags=1;});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>!document.getElementById('ebay-complete-show').disabled);
+ await p.evaluate(()=>{failComplete=true;});await p.locator('#ebay-complete-show').click();await p.waitForFunction(()=>document.getElementById('ebay-complete-error').textContent.includes('payment changed'));assert.equal(await p.evaluate(()=>showSession.status),'active');
+ await p.setViewportSize({width:320,height:740});assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await p.screenshot({path:new URL('../test-results/post-show-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1'),fullPage:true});
+ await p.evaluate(()=>{failComplete=false;});await p.locator('#ebay-complete-show').click();await p.waitForFunction(()=>showSession.status==='ended');assert.deepEqual(p.errors,[]);
+});
+
+test('closed paid bags can reopen for post-show corrections without changing the seller',async t=>{
+ const p=await open(t,'',true);await p.evaluate(()=>{dashboard.connection.broadcast_ended_at=new Date().toISOString();dashboard.connection.capture_ready=false;dashboard.attempts[0].closed_at=new Date().toISOString();});await p.locator('#ebay-live-refresh').click();await p.locator('#ebay-live-filter').selectOption('closed');await p.locator('[data-action=reopen]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);assert.equal(await p.evaluate(()=>dashboard.attempts[0].closed_at),null);assert.equal(await p.evaluate(()=>dashboard.attempts[0].seller_id),'seller');assert.deepEqual(p.errors,[]);
+});
+
+test('end detection requires the explicit terminal control and ignores a reset clock',async t=>{
+ const p=await parser(t,'<span id="metric-elapsed-time-value">00:00:00</span><p>Event ended</p>');assert.equal(await p.evaluate(()=>InvstoLiveParser.parse(document).broadcastEnded),false);
+ await p.setContent('<button disabled>Event ended</button><span id="metric-elapsed-time-value">00:00:00</span>');const r=await p.evaluate(()=>InvstoLiveParser.parse(document));assert.equal(r.broadcastEnded,true);assert.equal(r.elapsed,null);
+});
+
+test('a stopped helper still reports the explicit ended event without inventing auction payments',async t=>{
+ const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123');await p.setContent('<button disabled>Event ended</button>');await p.evaluate(()=>{window.packets=[];window.chrome={runtime:{sendMessage:async m=>{packets.push(m);return {ok:true,status:'Connected'}}}};});
+ for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});await p.waitForFunction(()=>packets.length>0);const result=await p.evaluate(()=>packets[0]);assert.equal(result.health.broadcast_ended,true);assert.equal(result.health.ready,false);assert.deepEqual(result.events,[]);
 });

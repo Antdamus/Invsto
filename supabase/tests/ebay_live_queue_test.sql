@@ -135,6 +135,8 @@ begin
  -- A notification with missing identity blocks the whole automatic queue, not a guessed buyer.
  perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"failure-without-buyer","kind":"failed","buyer":""}'),health);
  insert into live_tap_results select ok((select not capture_ready from public.ebay_live_connections where event_id=event),'payment failure missing its buyer stops auto scanning');
+ -- Fixture a completed session; public completion validation has its own tests.
+ update public.ebay_live_connections set broadcast_ended_at=now(),review_completed_at=now(),review_completed_by=actor where event_id=event;
  update public.live_sale_sessions set status='ended',ended_at=now() where id=sid;
  insert into live_tap_results select throws_ok(format('select public.ingest_ebay_live_events(%L,''[]'')',event),'22023','This show has ended','ended shows cannot keep capturing new auctions');
  insert into live_tap_results select * from finish();

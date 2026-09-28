@@ -17,13 +17,16 @@
     if (/^(cancelled|canceled|order cancelled|order canceled)$/.test(v)) return 'cancelled';
     return 'unknown';
   };
+  // eBay's terminal control, not a frozen/zero clock or a chat message.
+  const hasEnded = doc => [...doc.querySelectorAll('button[disabled]')].some(button => text(button)==='Event ended' && !button.closest('#activity-panel,[role="log"],[role="region"]'));
   function parse(doc, cache = {}, now = new Date()) {
     const observed_at = now.toISOString();
     const events = [];
     let supported=true;
     const elapsedText = text(doc.querySelector('#metric-elapsed-time-value'));
     const elapsedParts = elapsedText.split(':').map(Number);
-    const elapsed = /^\d+:\d{2}:\d{2}$/.test(elapsedText) ? elapsedParts[0]*3600+elapsedParts[1]*60+elapsedParts[2] : null;
+    const broadcastEnded=hasEnded(doc);
+    const elapsed = !broadcastEnded && /^\d+:\d{2}:\d{2}$/.test(elapsedText) ? elapsedParts[0]*3600+elapsedParts[1]*60+elapsedParts[2] : null;
     for (const tile of doc.querySelectorAll('[data-testid="listing-tile"]')) {
       const listing_id = tile.querySelector('[data-testid^="checkbox-"]')?.dataset.testid?.match(/^checkbox-(\d{8,20})$/)?.[1];
       const title = text(tile.querySelector('[data-testid="inline-edit-title"]'));
@@ -66,7 +69,7 @@
     const counts=new Map();
     for(const e of events.filter(e=>e.source==='activity'))counts.set(e.key,(counts.get(e.key)||0)+1);
     for(const [k,count] of counts)if(count>1)events.push({key:'ambiguous|'+k,kind:'unknown',source:'activity',observed_at,evidence:'Identical auction notifications cannot be distinguished. Verify each auction attempt on eBay.'});
-    return {events, cache, supported, panelPresent: !!panel, elapsed};
+    return {events, cache, supported, panelPresent: !!panel, elapsed, broadcastEnded};
   }
-  root.InvstoLiveParser = {parse,status,money,key};
+  root.InvstoLiveParser = {parse,status,money,key,hasEnded};
 })(typeof globalThis !== 'undefined' ? globalThis : window);

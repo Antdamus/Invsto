@@ -2288,6 +2288,7 @@ async function startSession() {
 
 async function endSession() {
   if (!state.currentSession || state.busy) return;
+  if (window.ebayLive?.showPostShow()) return;
   const ok = window.confirm("End the active live sale session? Existing reserved bags will remain reserved.");
   if (!ok) return;
 
@@ -3755,6 +3756,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await window.ebayLive?.init({
     state, updateGate: updateScanGate,
     finishScan: finishBagScanning,
+    async sessionClosed() { state.currentSession=null;state.currentLot=null;clearScan();await loadSessions({keepSelection:false});renderAll();setStatus("Session closed after bag and payment review.","success"); },
     async reloadBag() { if(state.currentLot){await reloadCurrentLot();await loadLotItems();} },
     async selectShow(id) { const selected=state.sessions.find(s=>s.id===id);if(!selected||state.busy)return;state.currentSession=selected;state.currentLot=null;clearScan();await loadLotItems();await prepareNextBag();renderAll(); },
     clearBag() { state.currentLot=null; state.lotItems=[]; clearScan(); setFlowStep("scan"); renderAll(); },

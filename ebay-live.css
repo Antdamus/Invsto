@@ -73,6 +73,7 @@ body.ebay-live-linked:not(.ebay-has-bag) #scan-stage{display:none}
  body.ebay-live-linked #refresh-live-sales,body.ebay-live-linked .hero-actions>a,body.ebay-live-linked #cancel-session{display:none}
  body.ebay-live-linked #ebay-empty-workspace{display:none}
  body.ebay-live-linked.ebay-has-bag:not(.ebay-browsing) #ebay-queue-area,
+ body.ebay-live-linked.ebay-has-bag:not(.ebay-browsing) #ebay-post-show,
  body.ebay-live-linked.ebay-has-bag:not(.ebay-browsing) #ebay-show-totals,
  body.ebay-live-linked.ebay-has-bag:not(.ebay-browsing) #ebay-live-settings,
  body.ebay-live-linked.ebay-has-bag:not(.ebay-browsing) #ebay-capture-help,
@@ -89,6 +90,11 @@ body.ebay-live-linked:not(.ebay-has-bag) #scan-stage{display:none}
 @media(max-width:768px){body.ebay-live-linked .main>.header{display:none}body.ebay-live-linked .main{padding-top:0}body.ebay-live-linked .live-hero>div:first-child{display:none}body.ebay-live-linked .live-sales-content{padding-top:12px}}
 
 .ebay-on-air{margin:14px 0;border:1px solid #d8b57760;border-radius:12px;padding:12px 14px;background:#b99b5f10}
+.ebay-post-show{margin:14px 0;padding:16px;border:1px solid #d6ba7c;border-radius:14px;background:#b99b5f18;scroll-margin-top:100px}
+.ebay-post-show h3{margin:0 0 10px}.ebay-post-show p{line-height:1.55}
+#ebay-post-show .ebay-final-check{display:flex;align-items:flex-start;gap:12px;font-size:.92rem;line-height:1.5}
+#ebay-post-show .ebay-final-check input{width:24px;min-width:24px;min-height:24px;margin:2px 0 0}
+#ebay-complete-error{color:#ffaaa0}#ebay-complete-show{width:100%}
 #ebay-on-air details{margin:8px 0 0;padding:0;border:0}
 #ebay-on-air p{font-size:.88rem;line-height:1.5}
 #ebay-on-air .ebay-checkbox{display:flex;align-items:flex-start;gap:10px}

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Invsto Live Capture",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Send visible eBay Live wins and payment evidence to your signed-in Invsto Live Sales screen.",
   "permissions": ["storage", "alarms"],
   "background": {"service_worker": "worker.js"},

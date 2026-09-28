@@ -9,6 +9,7 @@ async function deliver(data) {
   const eventIds = Object.keys(data.health);
   for (const event_id of eventIds) {
     const batch = Object.values(data.events).filter(e=>e.event_id===event_id).slice(0,80);
+    data.health[event_id].pending=Object.values(data.events).filter(e=>e.event_id===event_id).length;
     let accepted = false;
     for (const [tab] of receivers) {
       try {
@@ -39,7 +40,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
         const id=event_id+'|'+event.key;
         data.events[id]={id,event_id,event};
       }
-      data.health[event_id]={...message.health,pending:Object.keys(data.events).length,version:'1.0.1'};
+      data.health[event_id]={...message.health,broadcast_ended:!!(data.health[event_id]?.broadcast_ended||message.health?.broadcast_ended),pending:Object.keys(data.events).length,version:'1.0.2'};
       if (Object.keys(data.events).length>10000) {data.health[event_id].ready=false;data.status='Capture backlog is full. Reconnect Invsto before continuing.';}
     } else return {ok:false};
     // Persist first: a browser crash or network outage must not drop a payment failure.

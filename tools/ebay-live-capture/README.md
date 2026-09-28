@@ -1,4 +1,4 @@
-# Invsto Live Capture (1.0.1)
+# Invsto Live Capture (1.0.2)
 
 This helper copies visible eBay Stream Manager auction and payment evidence into Invsto. It does not start auctions, bid, change listings, charge buyers, or cancel eBay orders.
 
@@ -24,6 +24,14 @@ Start capture before the first auction. A late start can backfill rendered aucti
 - If capture stops or becomes stale, scans pause. After verifying the current transaction directly on eBay, staff may record payment evidence for a two-minute manual scanning window.
 - Unsent observations remain in the extension's local outbox until Invsto acknowledges a successful database save. Reconnect the receiver before ending the show. Do not uninstall the extension or clear browser storage while it reports pending observations.
 - Existing eBay order imports reconcile exact unique matches and later cancellations/refunds, even after closing a bag. Packed items need the existing order/return correction workflow; the queue cannot silently put shipped stock back.
+
+## After the broadcast
+
+The helper detects eBay's explicit **Event ended** control and moves Invsto into **Post-show review**. A frozen clock or zero viewers never ends a show. With an older helper or if capture is stopped, use **Stream ended? Start bag review** in Invsto.
+
+The inventory session stays open. Finish every paid bag, scan missing items, and use **Reopen to check / add items** to correct a closed bag. Payment failures, waiting payments and unmatched notifications still require review. A bag already in packing must be checked in Pending Orders.
+
+Compare the complete auction list against the final eBay orders, including any sales capture missed. When all recorded paid bags are closed and outstanding payment/notification issues are resolved, confirm the physical bag and payment checkboxes and choose **Close reviewed session**. Ending the broadcast never automatically closes bags, cancels orders or releases inventory.
 
 ## Totals and timing
 
