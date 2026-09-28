@@ -45,7 +45,7 @@
         const selected=current();
         if(selected?.closed_at && !busy){lastClosedId=selected.id;api.clearBag();browsing=false;}
         render();api.updateGate();
-      } catch(error) {sessionError=true;message('Live queue unavailable: '+error.message,true);renderRunningTotals();api.updateGate();}
+      } catch(error) {if(id!==session())return;sessionError=true;message('Live queue unavailable: '+error.message,true);renderRunningTotals();api.updateGate();}
     })();
     try{await loading;}finally{loading=null;}
   }
@@ -71,10 +71,10 @@
     const c=linked()?data.connection:null;
     const showSelect=$('ebay-show-select');
     if(document.activeElement!==showSelect){
-      const options=api.state.sessions.map(s=>`<option value="${escape(s.id)}">${escape(s.title||s.session_code)} - ${escape(s.session_code)}</option>`).join('') || '<option value="">No active show</option>';
-      if(showSelect.innerHTML!==options)showSelect.innerHTML=options;showSelect.value=session()||'';
+      const options=api.state.sessions.map(s=>`<option value="${escape(s.id)}">${s.saved_for_later_at?'Draft · ':''}${escape(s.title||s.session_code)} - ${escape(s.session_code)}</option>`).join('') || '<option value="">No active show</option>';
+      const markup='<option value="">Choose an unfinished show…</option>'+options;if(showSelect.innerHTML!==markup)showSelect.innerHTML=markup;showSelect.value=session()||'';
     }
-    showSelect.disabled=busy||api.state.busy||!api.state.sessions.length;
+    showSelect.disabled=busy||api.state.busy||!!window.liveShowDrafts?.isBusy()||!api.state.sessions.length;
     $('ebay-show-selector').hidden=!api.state.sessions.length;
     $('ebay-link').hidden=!session();
     $('ebay-live-setup').hidden=!!c||!session();
@@ -219,7 +219,7 @@
       throw error;
     } finally { api.updateGate(); }
   }
-  async function action(fn) {if(busy)return;busy=true;api.updateGate();try{await fn();}catch(e){message(e.message,true);}finally{busy=false;render();api.updateGate();}}
+  async function action(fn) {if(busy||window.liveShowDrafts?.isBusy())return;busy=true;api.updateGate();try{await fn();}catch(e){message(e.message,true);}finally{busy=false;render();api.updateGate();}}
   function showReview(a) {
     const dialog=$('ebay-live-review');dialog.dataset.attempt=a?.id||'';dialog.dataset.observation='';
     $('ebay-review-title').textContent=a?`${a.listing_title} · ${a.buyer}`:'Review notification';
@@ -237,12 +237,12 @@
     const section=document.createElement('section');section.className='live-panel ebay-live-panel';section.id='ebay-live-panel';
     section.innerHTML=`
       <div class="panel-head"><div><span class="eyebrow">eBay Live</span><h2 id="ebay-phase-heading">Paid auctions</h2></div><button type="button" id="ebay-live-refresh" class="secondary-btn">Refresh</button></div>
-      <label id="ebay-show-selector">Active show<select id="ebay-show-select"></select></label>
+      <label id="ebay-show-selector">Current show<select id="ebay-show-select"></select></label>
       <p id="ebay-live-message" role="status"></p>
       <div id="ebay-live-setup"><p id="ebay-live-session-hint"></p><label>Connect the selected show to eBay<input id="ebay-live-url" type="url" placeholder="Paste the Stream Manager event URL"></label><button id="ebay-link" type="button">Connect selected show</button></div>
       <div id="ebay-live-connected" hidden>
         <section id="ebay-closed-receipt" class="ebay-receipt" hidden><strong id="ebay-closed-heading"></strong><p id="ebay-closed-description"></p><button type="button" id="ebay-print-last">Print bag label</button><p id="ebay-print-last-status" class="ebay-print-status" role="status"></p></section>
-        <div class="ebay-connection"><p id="ebay-live-health" role="status"></p><small id="ebay-capture-detail"></small><small id="ebay-capture-receiver" hidden>This computer is receiving capture data. Keep this tab open.</small></div>
+        <div class="ebay-connection"><p id="ebay-live-health" role="status"></p><small id="ebay-capture-detail"></small><small id="ebay-capture-receiver" hidden>This computer receives capture data for all linked, unfinished shows. Keep this tab open.</small></div>
         <section id="ebay-running-margin" class="ebay-running-margin" aria-label="Running result versus break-even">
           <div class="ebay-running-head"><span>Running vs break-even</span><strong id="ebay-running-total" aria-live="polite">—</strong></div>
           <small id="ebay-running-coverage"></small>
@@ -296,7 +296,7 @@
         await api.sessionClosed();await refresh();message('Session closed. The completed show is available in Past Live Sales.');
       }catch(error){$('ebay-complete-error').textContent=error.message;await refresh();throw error;}
     });
-    $('ebay-show-select').onchange=()=>action(async()=>{browsing=false;lastClosedId=null;restoredSession=null;$('ebay-final-bags').checked=false;$('ebay-final-payments').checked=false;await api.selectShow($('ebay-show-select').value);});
+    $('ebay-show-select').onchange=async()=>{if($('ebay-show-select').value)await api.selectShow($('ebay-show-select').value);render();api.updateGate();};
     $('ebay-back-to-queue').onclick=()=>{browsing=true;api.updateGate();$('ebay-live-panel').scrollIntoView({block:'start',behavior:'smooth'});};
     $('ebay-return-to-bag').onclick=()=>{browsing=false;api.updateGate();$(api.state.flowStep==='label'?'bag-label-panel':'scan-stage').scrollIntoView({block:'start',behavior:'smooth'});};
     $('ebay-attention-shortcut').onclick=()=>{$('ebay-live-filter').value='attention';render();};
@@ -336,12 +336,16 @@
     window.addEventListener('message',async e=>{
       if(new URL(location.href).searchParams.get('capture')!=='1'||e.source!==window||e.origin!==location.origin||e.data?.type!=='INVSTO_LIVE_BATCH')return;
       const {id,payload}=e.data;try{
-        if(!linked()||data.connection.event_id!==payload?.event_id)throw Error('Select and link the matching show in the Invsto receiver.');
+        if(!/^[A-Za-z0-9_-]{6,100}$/.test(payload?.event_id||''))throw Error('Invalid eBay event.');
+        if(!linked()||data.connection.event_id!==payload.event_id){
+          const {data:connection,error}=await window.supabase.from('ebay_live_connections').select('event_id,session_id').eq('event_id',payload.event_id).maybeSingle();
+          if(error||!connection)throw Error('Link this eBay event to an Invsto show before capturing.');
+        }
         await rpc('ingest_ebay_live_events',{_event_id:payload.event_id,_events:payload.events,_health:payload.health});
-        window.postMessage({type:'INVSTO_LIVE_ACK',id,ok:true},location.origin);await refresh();
+        window.postMessage({type:'INVSTO_LIVE_ACK',id,ok:true},location.origin);if(data.connection?.event_id===payload.event_id)await refresh();
       }catch(error){window.postMessage({type:'INVSTO_LIVE_ACK',id,ok:false,error:error.message},location.origin);message(error.message,true);}
     });
     setInterval(()=>refresh(),2000);
   }
-  window.ebayLive={init,prepare,refresh,linked,applyGate,eventIdFromUrl,closeCurrent,current,showPostShow,reviewCurrent:()=>{const a=current();if(a)showReview(a);else message('Choose an eBay auction to review.',true);}};
+  window.ebayLive={init,prepare,refresh,isBusy:()=>busy,resetSelection(){browsing=false;lastClosedId=null;restoredSession=null;$('ebay-final-bags').checked=false;$('ebay-final-payments').checked=false;},linked,applyGate,eventIdFromUrl,closeCurrent,current,showPostShow,reviewCurrent:()=>{const a=current();if(a)showReview(a);else message('Choose an eBay auction to review.',true);}};
 })();

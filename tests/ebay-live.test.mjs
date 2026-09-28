@@ -6,7 +6,7 @@ import {chromium,webkit} from '@playwright/test';
 import vm from 'node:vm';
 const root=new URL('../',import.meta.url);let server,browser,origin;
 before(async()=>{
- server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:ebay-live|live-sales|live-manual-items|live-bag-label)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
+ server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:ebay-live|live-sales|live-manual-items|live-bag-label|live-show-drafts)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;
  browser=await(process.env.INVSTO_ITEM_BROWSER==='webkit'?webkit:chromium).launch();
 });
@@ -18,9 +18,9 @@ test('parser distinguishes explicit paid badge from auction wins and AUC labels'
 test('ambiguous listing titles and unfamiliar payment text remain unverified',async t=>{const page=await parser(t,tile()+tile('222222222222')+'<div id="activity-panel">'+row('payment maybe received')+'</div>');const r=await page.evaluate(()=>InvstoLiveParser.parse(document));const activity=r.events.find(e=>e.source==='activity');assert.equal(activity.kind,'unknown');assert.equal(activity.listing_id,undefined);});
 test('failures without buyer details and identical repeated auction notifications require review',async t=>{const page=await parser(t,tile('123456789012','Payment failed','#001 - Watch','')+'<div id="activity-panel">'+row()+row()+'</div>');const r=await page.evaluate(()=>InvstoLiveParser.parse(document));assert.equal(r.events[0].kind,'failed');assert.equal(r.events[0].buyer,'');assert.ok(r.events.some(e=>e.kind==='unknown'&&e.key.startsWith('ambiguous|')));});
 test('unrecognized currencies are never parsed as a USD paid price',async t=>{const page=await parser(t,tile().replace('$100.00','C$100.00'));assert.equal((await page.evaluate(()=>InvstoLiveParser.parse(document))).events.length,0);});
-async function open(t,query='',resume=false){
+async function open(t,query='',resume=false,drafts=false){
  const context=await browser.newContext({viewport:{width:390,height:844}});t.after(()=>context.close());await context.route('**/*',r=>(r.request().url().startsWith(origin)||r.request().url().startsWith('blob:'+origin)||r.request().url().startsWith('data:image/'))?r.continue():r.abort());
- await context.addInitScript(({resume})=>{
+ await context.addInitScript(({resume,drafts})=>{
   const user={id:'worker',email:'worker@example.invalid'},employee={id:'seller',user_id:'worker',display_name:'Test seller',active:true,role:'admin'};
   window.lucide={createIcons(){}};window.calls=[];window.mockItems=[];window.mockManualItems=[];window.mockLots=[];window.failUpload=false;window.failManual=false;window.uploadedPhoto="";window.failDashboard=false;window.failClose=false;
   window.showSession={id:'show',session_code:'SHOW',title:'Test show',status:'active',store_id:'store',primary_seller_employee_id:'seller',started_at:new Date().toISOString()};
@@ -28,9 +28,9 @@ async function open(t,query='',resume=false){
   window.printStations={printLabel:async(xml)=>{window.calls.push({name:'print',xml});return {mode:'remote-queue',stationName:'Test printer'};}};
   const nextSeller={id:'next-seller',display_name:'Sydney Miller',active:true,role:'employee'};
   window.supabase={auth:{getSession:async()=>({data:{session:{user}}})},storage:{from:()=>({createSignedUrl:async()=>({data:{signedUrl:window.uploadedPhoto||''}}),upload:async(path,blob)=>{calls.push({name:'upload',path,type:blob.type});if(failUpload)return {error:{message:'Photo upload interrupted'}};uploadedPhoto=await new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.readAsDataURL(blob);});return {data:{path}};}})},from(table){
-   let filters=[],limit=1000;const all=()=>table==='employees'?[employee]:table==='store_locations'?[{id:'store',name:'Showroom',active:true}]:table==='live_sale_sessions'?[window.showSession]:table==='ebay_live_attempts'?window.dashboard.attempts:table==='live_sale_lots'?window.mockLots:table==='live_sale_lot_items'?window.mockItems:table==='live_sale_manual_lot_items'?window.mockManualItems:[];
+   let filters=[],limit=1000;const all=()=>table==='employees'?[employee]:table==='store_locations'?[{id:'store',name:'Showroom',active:true}]:table==='live_sale_sessions'?(window.showSessions||[window.showSession]):table==='ebay_live_connections'?(window.dashboardByShow?Object.values(window.dashboardByShow).map(d=>d.connection):[window.dashboard.connection]):table==='ebay_live_attempts'?window.dashboard.attempts:table==='live_sale_lots'?window.mockLots:table==='live_sale_lot_items'?window.mockItems:table==='live_sale_manual_lot_items'?window.mockManualItems:[];
    const q={select(){return q},eq(k,v){filters.push(r=>r[k]===v);return q},in(){return q},is(){return q},order(){return q},limit(n){limit=n;return q},maybeSingle:async()=>({data:all().find(r=>filters.every(f=>f(r)))||null}),single:async()=>({data:all().find(r=>filters.every(f=>f(r)))||null}),then(fn){return Promise.resolve({data:all().filter(r=>filters.every(f=>f(r))).slice(0,limit)}).then(fn)}};return q;
-  },rpc:async(name,args)=>{window.calls.push({name,args});if(name==='get_live_sale_seller_directory')return {data:[employee,nextSeller]};if(name==='get_ebay_live_dashboard')return window.failDashboard?{error:{message:'Network interrupted'}}:{data:structuredClone(window.dashboard)};
+  },rpc:async(name,args)=>{window.calls.push({name,args});if(name==='get_live_sale_seller_directory')return {data:[employee,nextSeller]};if(name==='get_ebay_live_dashboard')return window.failDashboard?{error:{message:'Network interrupted'}}:{data:structuredClone(window.dashboardByShow?.[args._session_id]||window.dashboard)};
    if(name==='save_live_sale_manual_item'){
     if(failManual)return {error:{message:'Manual item save interrupted'}};
     let row=mockManualItems.find(i=>i.id===args._item_id);if(row&&args._expected_revision!==row.edit_revision)return {error:{message:'This item changed. Reopen Edit to load the latest details'}};
@@ -43,7 +43,8 @@ async function open(t,query='',resume=false){
    if(name==='mark_ebay_live_broadcast_ended'){dashboard.connection.broadcast_ended_at=new Date().toISOString();dashboard.connection.capture_ready=false;return {data:null};}
    if(name==='complete_ebay_live_session'){if(window.failComplete)return {error:{message:'A payment changed; review the outstanding issue'}};showSession.status='ended';return {data:null};}
    if(name==='reopen_ebay_live_bag'){const a=dashboard.attempts.find(a=>a.id===args._attempt_id);a.closed_at=null;a.claimed_by='worker';const lot=mockLots.find(l=>l.id===a.lot_id);lot.closed_at=null;return {data:lot};}
-   if(name==='start_ebay_live_session'){window.showSession={...window.showSession,id:'newshow',workflow_mode:'ebay_live',title:args._title};window.dashboard.connection={...window.dashboard.connection,session_id:'newshow',event_id:args._event_id};return {data:window.showSession};}
+   if(name==='set_live_sale_session_draft'){if(window.failDraft)return {error:{message:'Draft save interrupted'}};const s=(window.showSessions||[showSession]).find(s=>s.id===args._session_id);if(!s||s.status!=='active')return {error:{message:'This show is already closed or unavailable'}};s.saved_for_later_at=args._saved?new Date().toISOString():null;s.saved_for_later_by=args._saved?'worker':null;return {data:structuredClone(s)};}
+   if(name==='start_ebay_live_session'){window.showSession={...window.showSession,id:'newshow',workflow_mode:'ebay_live',title:args._title};window.dashboard.connection={...window.dashboard.connection,session_id:'newshow',event_id:args._event_id};if(window.showSessions)window.showSessions.push(window.showSession);if(window.dashboardByShow){window.dashboard.attempts=[];window.dashboardByShow[window.showSession.id]=window.dashboard;}return {data:window.showSession};}
    if(name==='claim_ebay_live_bag'){const a=window.dashboard.attempts.find(a=>a.id===args._attempt_id);a.claimed_by='worker';a.lot_id='lot';const lot={id:'lot',session_id:'show',auction_number:'EB-29-SALE',lot_code:'LIVE-TEST',status:'open',owner_employee_id:'seller'};window.mockLots=[lot];return {data:lot};}
    if(name==='close_ebay_live_bag'){if(window.failClose)return {error:{message:'Payment is not confirmed for this bag'}};window.dashboard.attempts[0].closed_at=new Date().toISOString();return {data:null};}
    if(name==='resolve_ebay_live_attempt'){const a=window.dashboard.attempts.find(a=>a.id===args._attempt_id);if(args._action==='cancel_release'){a.resolved_at=new Date().toISOString();a.payment_state='cancelled';}return {data:null};}
@@ -51,8 +52,9 @@ async function open(t,query='',resume=false){
    return {data:null};
   }};
   if(resume){dashboard.attempts[0].claimed_by='worker';dashboard.attempts[0].lot_id='lot';mockLots=[{id:'lot',session_id:'show',auction_number:'EB-29-SALE',lot_code:'LIVE-TEST',status:'open',owner_employee_id:'seller'}];}
- },{resume});
- const page=await context.newPage();page.errors=[];page.on('pageerror',e=>page.errors.push(e.message));await page.goto(origin+'/live-sales.html'+query);await page.locator('#ebay-live-connected:visible').waitFor();if(resume)await page.waitForFunction(()=>!document.getElementById('item-scan').disabled);else await page.locator('[data-action="scan"]').waitFor();return page;
+  if(drafts){showSession.saved_for_later_at=new Date().toISOString();window.showSessions=[showSession,...Array.from({length:25},(_,i)=>({...showSession,id:'older-'+i,title:'Earlier show '+i,session_code:'EARLIER-'+i}))];}
+ },{resume,drafts});
+ const page=await context.newPage();page.errors=[];page.on('pageerror',e=>page.errors.push(e.message));await page.goto(origin+'/live-sales.html'+query);if(drafts){await page.waitForFunction(()=>document.getElementById('show-drafts-open')?.textContent.includes('(26)'));return page;}await page.locator('#ebay-live-connected:visible').waitFor();if(resume)await page.waitForFunction(()=>!document.getElementById('item-scan').disabled);else await page.locator('[data-action="scan"]').waitFor();return page;
 }
 test('linked show waits for paid selection and claims a bag through existing scan UI',async t=>{const p=await open(t);assert.equal(await p.locator('#item-scan').isDisabled(),true);assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='create_live_sale_lot')),false);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);assert.equal(await p.locator('#auction-number').getAttribute('readonly'),'');assert.match(await p.locator('#ebay-live-current').innerText(),/testbuyer.*\$100/);assert.deepEqual(p.errors,[]);});
 test('late failure disables active phone scanner and removes the sale from completed totals',async t=>{const p=await open(t);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);await p.evaluate(()=>{dashboard.attempts[0].payment_state='failed';});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('item-scan').disabled);await p.locator('#ebay-back-to-queue').click();await p.locator('#ebay-live-filter').selectOption('attention');assert.match(await p.locator('#ebay-live-queue').innerText(),/STOP.*check this bag/);assert.equal(await p.locator('[data-action=scan]').count(),0);await p.locator('#ebay-show-totals > summary').click();assert.match(await p.locator('#ebay-live-totals').innerText(),/0 \/ \$0.00/);});
@@ -288,4 +290,60 @@ test('print rechecks payment and does not send a cancelled bag or allow repeated
  await p.locator('#ebay-print-scan').click();await p.waitForFunction(()=>!!window.finishPrint);assert.equal(await p.locator('#ebay-print-scan').isDisabled(),true);
  await p.evaluate(()=>document.getElementById('ebay-print-scan').click());assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='print').length),1);
  await p.evaluate(()=>finishPrint());await p.waitForFunction(()=>!document.getElementById('ebay-print-scan').disabled);assert.deepEqual(p.errors,[]);
+});
+
+
+test('save a show draft, start the next show, then restore the original bag and totals',async t=>{
+ const p=await open(t,'',true);
+ await p.evaluate(async()=>{
+  showSessions=[showSession];dashboardByShow={show:structuredClone(dashboard)};
+  mockManualItems=[{id:'saved-manual',lot_id:'lot',session_id:'show',item_category:'Watch',item_description:'First show watch',quantity:1,live_unit_minimum:70,photo_path:'live-manual/saved.jpg',status:'reserved'}];
+  dashboardByShow.show.attempts[0].minimum_total=70;dashboardByShow.show.attempts[0].units=1;
+  await loadLotItems();
+ });
+ await p.locator('#show-draft-save').click();await p.locator('#show-drafts-dialog').waitFor();
+ assert.match(await p.locator('#show-draft-list').innerText(),/Draft · finish later/);
+ assert.equal(await p.evaluate(()=>showSessions[0].status),'active');assert.equal(await p.evaluate(()=>mockManualItems[0].status),'reserved');
+ assert.equal(await p.evaluate(()=>calls.some(c=>['end_live_sale_session','complete_ebay_live_session','cancel_live_sale_lot'].includes(c.name))),false);
+ await p.locator('#show-list-new').click();assert.equal(await p.locator('#session-setup-panel').isVisible(),true);assert.equal(await p.locator('#session-ebay-url').inputValue(),'');
+ await p.locator('#session-store-select').selectOption('store');await p.locator('#session-primary-seller').selectOption('next-seller');await p.locator('#session-ebay-url').fill('https://www.ebay.com/ebaylive/host/events/SECOND123');await p.locator('#session-title').fill('Second show today');await p.locator('#start-session').click();
+ await p.waitForFunction(()=>document.getElementById('show-current-name').textContent.includes('Second show today'));
+ assert.match(await p.locator('#ebay-live-event').innerText(),/SECOND123/);assert.equal(await p.evaluate(()=>showSessions.length),2);
+ await p.locator('#show-drafts-open').click();await p.locator('[data-resume-show="show"]').click();await p.waitForFunction(()=>document.getElementById('ebay-live-event').textContent.includes('EVENT123')&&!document.getElementById('item-scan').disabled);
+ assert.equal(await p.evaluate(()=>ebayLive.current().lot_id),'lot');assert.match(await p.locator('#lot-manifest').innerText(),/First show watch/);assert.match(await p.locator('#ebay-running-total').innerText(),/30.00/);
+ assert.equal(await p.evaluate(()=>showSessions[0].saved_for_later_at),null);assert.ok(await p.evaluate(()=>showSessions[1].saved_for_later_at));assert.equal(await p.evaluate(()=>mockManualItems[0].photo_path),'live-manual/saved.jpg');assert.deepEqual(p.errors,[]);
+});
+
+test('draft save failure and unsaved manual input keep the current show intact',async t=>{
+ const p=await open(t,'',true);await p.evaluate(()=>failDraft=true);await p.locator('#show-draft-save').click();await p.waitForFunction(()=>document.getElementById('show-draft-status').textContent.includes('Draft save interrupted'));
+ assert.equal(await p.evaluate(()=>ebayLive.current().lot_id),'lot');assert.equal(await p.locator('#show-drafts-dialog').isVisible(),false);
+ await p.evaluate(()=>failDraft=false);await p.locator('.manual-live-item-box > summary').click();await p.locator('#manual-live-item-description').fill('Not yet added');await p.locator('#show-draft-save').click();
+ assert.match(await p.locator('#show-draft-status').innerText(),/Add your manual item/);assert.equal(await p.locator('#manual-live-item-description').inputValue(),'Not yet added');assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='set_live_sale_session_draft').length),1);
+});
+
+test('drafts are loaded from the account on another device and fit small phone screens',async t=>{
+ const p=await open(t,'',false,true);await p.locator('#show-drafts-open').click();await p.waitForFunction(()=>document.querySelectorAll('[data-resume-show]').length===26);
+ assert.equal(await p.locator('#show-draft-save').isVisible(),false);assert.match(await p.locator('#show-draft-list').innerText(),/Earlier show 24/);
+ await p.setViewportSize({width:320,height:740});assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ await mkdir(new URL('../test-results',import.meta.url),{recursive:true});await p.screenshot({path:new URL('../test-results/show-drafts-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});assert.deepEqual(p.errors,[]);
+});
+
+test('capture routes a saved show by event while another show is selected, never to the selected show',async t=>{
+ const p=await open(t,'?capture=1');await p.evaluate(()=>{
+  dashboardByShow={show:dashboard,older:{connection:{event_id:'OLDER123',session_id:'older-show'},attempts:[],unmatched:[]}};
+  acks=[];window.addEventListener('message',e=>{if(e.data?.type==='INVSTO_LIVE_ACK')acks.push(e.data);});
+  window.postMessage({type:'INVSTO_LIVE_BATCH',id:'old',payload:{event_id:'OLDER123',events:[{key:'late-failure',kind:'failed'}],health:{}}},location.origin);
+ });await p.waitForFunction(()=>acks.length===1);assert.equal(await p.evaluate(()=>acks[0].ok),true);
+ assert.equal(await p.evaluate(()=>calls.find(c=>c.name==='ingest_ebay_live_events').args._event_id),'OLDER123');assert.match(await p.locator('#ebay-live-event').innerText(),/EVENT123/);
+ await p.evaluate(()=>window.postMessage({type:'INVSTO_LIVE_BATCH',id:'unknown',payload:{event_id:'UNKNOWN123',events:[],health:{}}},location.origin));await p.waitForFunction(()=>acks.length===2);assert.equal(await p.evaluate(()=>acks[1].ok),false);assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='ingest_ebay_live_events').length),1);
+});
+
+test('refresh never carries the previous show bag into another unfinished show',async t=>{
+ const p=await open(t,'',true);await p.evaluate(()=>{
+  const next={...showSession,id:'other',title:'Other show'};
+  showSession.status='ended';showSessions=[showSession,next];
+  dashboardByShow={show:dashboard,other:{connection:{...dashboard.connection,event_id:'OTHER123',session_id:'other'},attempts:[],unmatched:[]}};
+ });await p.setViewportSize({width:1280,height:900});await p.locator('#refresh-live-sales').click();
+ await p.waitForFunction(()=>document.getElementById('show-current-name').textContent.includes('Other show'));
+ assert.equal(await p.evaluate(()=>ebayLive.current()?.lot_id||null),null);assert.equal(await p.locator('#lot-manifest [data-item-id]').count(),0);assert.deepEqual(p.errors,[]);
 });

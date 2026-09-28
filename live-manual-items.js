@@ -74,5 +74,6 @@
     for(const mode of ['add','edit'])bindPhoto(mode);
     $('manual-edit-save').onclick=()=>save('edit');$('manual-edit-cancel').onclick=()=>dialog.close();dialog.addEventListener('cancel',e=>{if(saving)e.preventDefault();});
   }
-  window.liveManualItems={init,open,add:()=>save('add'),sync,priceText,summary};
+  function hasUnsaved(){return !!(saving||drafts.add.processing||drafts.add.blob||drafts.add.path||$('manual-item-editor')?.open||$('manual-live-item-description')?.value.trim()||$('manual-live-item-minimum')?.value.trim()||Number($('manual-live-item-quantity')?.value||1)!==1);}
+  window.liveManualItems={init,open,hasUnsaved,add:()=>save('add'),sync,priceText,summary};
 })();
