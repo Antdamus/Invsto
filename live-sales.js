@@ -2601,9 +2601,13 @@ function focusItemScanner() {
 }
 
 function shouldReturnFocusToScanner() {
+  if (window.matchMedia("(pointer: coarse)").matches) return false;
+  if (document.querySelector("dialog[open]")) return false;
   if (document.activeElement?.closest("#ebay-live-panel")) return false;
   const scanner = $("item-scan");
-  if (!scanner || scanner.disabled) return false;
+  if (!scanner || scanner.disabled || !scanner.getClientRects().length) return false;
+  const active = document.activeElement;
+  if (active !== scanner && active?.matches("input, textarea, select, [contenteditable=true]")) return false;
   if (!state.currentSession || !state.currentLot || state.flowStep !== "scan") return false;
   if (!$("live-photo-modal")?.hidden) return false;
   if (!$("bag-history-modal")?.hidden) return false;

@@ -115,3 +115,10 @@ test('newly captured paid sales appear first so the next winner is easy to find'
  const p=await open(t);await p.evaluate(()=>{dashboard.attempts.push({...dashboard.attempts[0],id:'new-sale',listing_title:'#002 - Latest sale',created_at:new Date(Date.now()+1000).toISOString()});});
  await p.locator('#ebay-live-refresh').click();assert.equal(await p.locator('#ebay-live-queue article').first().getAttribute('data-attempt'),'new-sale');
 });
+
+test('scanner refocus does not interrupt item notes or payment-review dialogs',async t=>{
+ const p=await open(t);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);
+ await p.locator('.manual-live-item-box > summary').click();await p.locator('#manual-live-item-description').fill('Gold watch with replacement strap');
+ assert.equal(await p.evaluate(()=>shouldReturnFocusToScanner()),false);
+ await p.locator('#cancel-lot').click();assert.equal(await p.locator('#ebay-live-review').isVisible(),true);assert.equal(await p.evaluate(()=>shouldReturnFocusToScanner()),false);
+});
