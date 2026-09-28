@@ -127,3 +127,13 @@ body.ebay-live-linked:not(.ebay-has-bag) #scan-stage{display:none}
 .label-review-actions{display:grid;gap:12px;justify-items:stretch}
 #manual-break-even-summary{line-height:1.65}#manual-break-even-summary.is-loss{border-color:#ff947d;color:#ffc2b5}
 @media(max-width:600px){.label-review-actions{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between}.manual-photo-controls .button-row{display:flex;gap:8px;flex-wrap:wrap}.manual-photo-controls .button-row button{flex:1 1 110px}#manual-item-editor{padding:18px}.manual-edit-grid{grid-template-columns:1fr}}
+
+/* Keep label actions next to the bag being handled, including on phones. */
+.ebay-bag-print-access{grid-column:1/-1;min-width:0}
+.ebay-bag-print-access:has(button[hidden]){display:none}
+.ebay-bag-print-access button{min-height:48px;width:100%}
+.ebay-print-status:empty{display:none}
+.ebay-print-status{margin:10px 0;overflow-wrap:anywhere;font-size:.9rem}
+.ebay-print-status.is-error{color:#ffaaa0}
+#ebay-closed-receipt{scroll-margin-top:110px}
+#ebay-print-last{width:100%;min-height:50px}

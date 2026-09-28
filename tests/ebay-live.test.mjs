@@ -247,3 +247,45 @@ test('phone bag lookup entry stays visible during a linked show and reprints ide
  assert.deepEqual([...xml.matchAll(/<DataString>(.*?)<\/DataString>/g)].map(m=>m[1]),Array(4).fill('LIVE-TEST'));
  assert.match(xml,/<Text>#001<\/Text>/);
 });
+
+
+test('print is one tap from scanning and final review without closing the current bag',async t=>{
+ const p=await open(t);assert.equal(await p.locator('[data-action=print]').count(),0);
+ await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);
+ assert.equal(await p.locator('#ebay-print-scan').isVisible(),true);await p.locator('#ebay-print-scan').click();
+ await p.waitForFunction(()=>document.getElementById('ebay-print-scan-status').textContent.includes('Label queued for Test printer'));
+ assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='close_ebay_live_bag').length),0);assert.equal(await p.evaluate(()=>ebayLive.current().id),'sale');
+ await p.evaluate(async()=>{mockItems=[{id:'entry',lot_id:'lot',item_id:'watch',quantity:1,status:'reserved',item:{title:'Test watch'},show_elapsed_seconds:60}];await loadLotItems();});
+ await p.locator('#review-scanned-bag').click();assert.equal(await p.locator('#ebay-print-review').isVisible(),true);
+ await p.locator('#ebay-print-review').click();await p.waitForFunction(()=>calls.filter(c=>c.name==='print').length===2);
+ assert.match(await p.locator('#ebay-print-review-status').innerText(),/Label queued/);assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='close_ebay_live_bag')),false);
+ await p.locator('#generate-live-label').click();await p.waitForFunction(()=>{const r=document.getElementById('ebay-closed-receipt').getBoundingClientRect(),b=document.getElementById('ebay-print-last').getBoundingClientRect();return r.top>=90&&r.top<=130&&b.bottom<=innerHeight;});
+ assert.match(await p.locator('#ebay-closed-heading').innerText(),/label queued/);assert.equal(await p.locator('#ebay-print-last').innerText(),'Reprint bag label');
+ assert.ok(await p.locator('#ebay-closed-receipt').evaluate(e=>!!(e.compareDocumentPosition(document.getElementById('ebay-running-margin'))&Node.DOCUMENT_POSITION_FOLLOWING)));
+ await mkdir(new URL('../test-results',import.meta.url),{recursive:true});await p.screenshot({path:new URL('../test-results/bag-print-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});assert.deepEqual(p.errors,[]);
+});
+
+test('each generated bag has its own queue print action and errors stay next to the active bag',async t=>{
+ const p=await open(t,'',true);await p.evaluate(()=>{
+  dashboard.attempts.push({...dashboard.attempts[0],id:'other',lot_id:'other-lot',listing_title:'#002 - Other sale',buyer:'other-winner',claimed_by:'other-worker'});
+  mockLots.push({id:'other-lot',session_id:'show',lot_code:'LIVE-OTHER',auction_number:'EB-OTHER'});
+ });await p.locator('#ebay-live-refresh').click();await p.locator('#ebay-back-to-queue').click();
+ await p.locator('[data-attempt="other"] [data-action=print]').click();await p.waitForFunction(()=>calls.some(c=>c.name==='print'));
+ const xml=await p.evaluate(()=>calls.find(c=>c.name==='print').xml);assert.match(xml,/LIVE-OTHER/);assert.match(xml,/OTHER-WINNER/);assert.doesNotMatch(xml,/LIVE-TEST/);
+ assert.equal(await p.evaluate(()=>ebayLive.current().id),'sale');assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='close_ebay_live_bag')),false);
+ await p.locator('#ebay-return-to-bag').click();await p.evaluate(()=>{printStations.printLabel=async()=>{throw Error('Choose a label roll before sending');};});
+ await p.locator('#ebay-print-scan').click();await p.waitForFunction(()=>document.getElementById('ebay-print-scan-status').textContent.includes('Choose a label roll'));
+ assert.equal(await p.locator('#ebay-print-scan').isEnabled(),true);assert.deepEqual(p.errors,[]);
+});
+
+test('print rechecks payment and does not send a cancelled bag or allow repeated taps',async t=>{
+ const p=await open(t,'',true);
+ await p.evaluate(()=>{auctionsBeforePrint=structuredClone(dashboard.attempts);dashboard.attempts[0].payment_state='failed';});
+ await p.locator('#ebay-print-scan').click();await p.waitForFunction(()=>document.getElementById('ebay-print-scan-status').textContent.includes('check payment'));
+ assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='print')),false);assert.equal(await p.locator('#ebay-print-scan').isDisabled(),true);
+ await p.evaluate(()=>{dashboard.attempts=auctionsBeforePrint;});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>!document.getElementById('ebay-print-scan').disabled);
+ await p.evaluate(()=>{printStations.printLabel=async()=>{calls.push({name:'print'});return new Promise(resolve=>window.finishPrint=()=>resolve({mode:'remote-queue',stationName:'Test printer'}));};});
+ await p.locator('#ebay-print-scan').click();await p.waitForFunction(()=>!!window.finishPrint);assert.equal(await p.locator('#ebay-print-scan').isDisabled(),true);
+ await p.evaluate(()=>document.getElementById('ebay-print-scan').click());assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='print').length),1);
+ await p.evaluate(()=>finishPrint());await p.waitForFunction(()=>!document.getElementById('ebay-print-scan').disabled);assert.deepEqual(p.errors,[]);
+});

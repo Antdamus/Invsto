@@ -16,6 +16,8 @@
   const postShow = () => linked() && !!data.connection.broadcast_ended_at;
   const reviewReady = () => postShow() && !sessionError && Date.now()-lastRead<12000 && !data.connection.review_completed_at && !data.unmatched.some(o=>o.blocking ?? ['failed','cancelled','unknown'].includes(o.kind));
   const ready = a => linked() && !sessionError && Date.now()-lastRead<12000 && !data.connection.review_completed_at && a?.payment_state==='paid' && !a.closed_at && !a.resolved_at && (fresh() || verified(a) || reviewReady());
+  const printFeedback = new Map();
+  const printable = a => linked() && !sessionError && Date.now()-lastRead<12000 && a?.lot_id && a.payment_state==='paid' && !a.resolved_at;
   const closureBlocked = () => !data.post_show || ['open_paid_bags','payment_issues','unmatched_notifications','unlinked_bags'].some(k=>Number(data.post_show[k])>0) || Number(data.connection?.health?.pending||0)>0;
   const message = (text,error=false) => {const el=$('ebay-live-message');if(el){el.textContent=text;el.classList.toggle('is-error',error);}};
   function eventIdFromUrl(value) {
@@ -111,7 +113,7 @@
       const needsBagCheck=['failed','review','cancelled'].includes(a.payment_state)&&a.lot_id&&!a.resolved_at;
       const state=a.resolved_at?'Resolved':needsBagCheck?'STOP · check this bag':a.closed_at&&a.payment_state==='paid'?'Paid · bag closed':({waiting:'Waiting for payment',paid:'Payment confirmed',failed:'Payment failed',cancelled:'Cancelled',review:'Payment needs review'}[a.payment_state]);
       const time=a.stream_offset_seconds==null?'':` · approx. stream ${Math.floor(a.stream_offset_seconds/60)}:${String(a.stream_offset_seconds%60).padStart(2,'0')}`;
-      return `<article class="ebay-auction ${needsBagCheck?'needs-review':''}" data-attempt="${escape(a.id)}"><div class="ebay-auction-head"><strong>${escape(a.listing_title)}</strong><b>${money(a.amount)}</b></div><p>${escape(a.buyer)} · Sold by ${escape(a.seller_name||'Unassigned seller')}</p><span class="ebay-state">${escape(state)}</span><small>${escape(a.win_time_label||'Time not captured')}${escape(time)} · Listing ${escape(a.listing_id)}</small>${a.review_note?`<p>${escape(a.review_note)}</p>`:''}${a.lot_id?`<p>${Number(a.units||0)} inventory units · Minimum ${money(a.minimum_total)}${held?' · Claimed by another scanner':''}</p>`:''}${marginCents(a)!=null?`<p class="${marginClass(marginCents(a))}"><b>${signedMoney(marginCents(a))} vs break-even</b>${a.closed_at?'':' · Open bag, provisional'}</p>`:''}<div class="button-row">${!a.resolved_at&&!a.closed_at&&a.payment_state==='paid'?`<button type="button" data-action="scan" ${!ready(a)||held?'disabled':''}>${mine?'Continue scanning':'Scan sold item'}</button>`:''}${a.closed_at&&a.payment_state==='paid'&&!a.resolved_at?'<button type="button" data-action="reopen" class="secondary-btn">Reopen to check / add items</button><button type="button" data-action="print">Print bag label</button>':''}${!a.resolved_at?'<button type="button" class="secondary-btn" data-action="review">Payment / bag review</button>':''}</div></article>`;
+      return `<article class="ebay-auction ${needsBagCheck?'needs-review':''}" data-attempt="${escape(a.id)}"><div class="ebay-auction-head"><strong>${escape(a.listing_title)}</strong><b>${money(a.amount)}</b></div><p>${escape(a.buyer)} · Sold by ${escape(a.seller_name||'Unassigned seller')}</p><span class="ebay-state">${escape(state)}</span><small>${escape(a.win_time_label||'Time not captured')}${escape(time)} · Listing ${escape(a.listing_id)}</small>${a.review_note?`<p>${escape(a.review_note)}</p>`:''}${a.lot_id?`<p>${Number(a.units||0)} inventory units · Minimum ${money(a.minimum_total)}${held?' · Claimed by another scanner':''}</p>`:''}${marginCents(a)!=null?`<p class="${marginClass(marginCents(a))}"><b>${signedMoney(marginCents(a))} vs break-even</b>${a.closed_at?'':' · Open bag, provisional'}</p>`:''}<div class="button-row">${!a.resolved_at&&!a.closed_at&&a.payment_state==='paid'?`<button type="button" data-action="scan" ${!ready(a)||held?'disabled':''}>${mine?'Continue scanning':'Scan sold item'}</button>`:''}${a.closed_at&&a.payment_state==='paid'&&!a.resolved_at?'<button type="button" data-action="reopen" class="secondary-btn">Reopen to check / add items</button>':''}${a.lot_id&&a.payment_state==='paid'&&!a.resolved_at?`<button type="button" data-action="print" ${busy||!printable(a)?'disabled':''}>${printFeedback.get(a.id)?.completed?'Reprint bag label':'Print bag label'}</button>`:''}${!a.resolved_at?'<button type="button" class="secondary-btn" data-action="review">Payment / bag review</button>':''}</div></article>`;
     }).join('')||`<div class="ebay-empty"><strong>${filter==='ready'?(postShow()?'All paid bags are closed':'Waiting for a paid auction'):'No auctions in this view'}</strong><p>${filter==='ready'?(postShow()?'Check all auctions and finish the final checklist before closing this session.':'Auction wins appear automatically. Scanning becomes available after payment is confirmed.'):'Use the filter to view other auctions.'}</p></div>`;
     // Do not replace controls under a finger every two seconds.
     if($('ebay-live-queue').dataset.rendered!==html){$('ebay-live-queue').innerHTML=html;$('ebay-live-queue').dataset.rendered=html;}
@@ -121,8 +123,8 @@
     const unknownHtml=data.unmatched.map((o,i)=>`<article class="ebay-auction"><strong>${escape(o.listing_title||'Unrecognized notification')}</strong><p>${escape(o.evidence||o.kind)}</p><button type="button" data-observation="${i}">Review notification</button></article>`).join('');
     if($('ebay-live-unmatched-list').dataset.rendered!==unknownHtml){$('ebay-live-unmatched-list').innerHTML=unknownHtml;$('ebay-live-unmatched-list').dataset.rendered=unknownHtml;}
     const receipt=rows.find(a=>a.id===lastClosedId);
-    $('ebay-closed-receipt').hidden=!receipt;
-    if(receipt){$('ebay-closed-description').textContent=`${receipt.listing_title} | ${receipt.buyer} | ${money(receipt.amount)}`;$('ebay-print-last').disabled=receipt.payment_state!=='paid'||!!receipt.resolved_at;$('ebay-closed-heading').textContent=receipt.payment_state==='paid'?(postShow()?'Bag closed. Continue the post-show checks.':'Bag closed. Ready for the next sale.'):'Closed bag needs payment review.';}
+    $('ebay-closed-receipt').hidden=!receipt||!!current();
+    if(receipt){$('ebay-closed-description').textContent=`${receipt.listing_title} | ${receipt.buyer} | ${money(receipt.amount)}`;$('ebay-print-last').disabled=receipt.payment_state!=='paid'||!!receipt.resolved_at;$('ebay-closed-heading').textContent=receipt.payment_state==='paid'?(printFeedback.get(receipt.id)?.completed?`Bag closed — ${printFeedback.get(receipt.id).completed}`:'Bag closed — print its label'):'Closed bag needs payment review.';}
     const active=current();$('ebay-live-current').hidden=!active;
     $('ebay-live-current').textContent=active?`${active.payment_state==='paid'?'Scanning':'STOP — payment needs review'}: ${active.listing_title} · ${active.buyer} · ${money(active.amount)}`:'';
   }
@@ -148,6 +150,16 @@
     const connected=linked();
     document.body.classList.toggle('ebay-live-linked',connected);
     const selected=current();
+    for(const [prefix,a] of [['scan',selected],['review',selected],['last',data.attempts.find(a=>a.id===lastClosedId)]]) {
+      const button=$('ebay-print-'+prefix),feedback=$('ebay-print-'+prefix+'-status');
+      if(!button)continue;
+      button.hidden=!connected||!a?.lot_id;
+      button.disabled=busy||api.state.busy||!printable(a);
+      const saved=printFeedback.get(a?.id);
+      button.textContent=saved?.completed?'Reprint bag label':'Print bag label';
+      if(feedback){feedback.textContent=saved?.text||'';feedback.classList.toggle('is-error',!!saved?.error);}
+    }
+    document.querySelectorAll('#ebay-live-queue [data-action="print"]').forEach(button=>{button.disabled=busy||api.state.busy||!printable(data.attempts.find(a=>a.id===button.closest('[data-attempt]').dataset.attempt));});
     document.body.classList.toggle('ebay-has-bag',!!selected);
     document.body.classList.toggle('ebay-browsing',browsing);
     $('ebay-return-to-bag').hidden=!selected||!browsing;
@@ -159,7 +171,7 @@
     if($('cancel-lot'))$('cancel-lot').textContent=connected?'Payment / bag review':'Cancel Bag';
     if(connected&&selected&&api.state.flowStep==='label')$('lot-status-pill').textContent=ready(selected)?'Ready to close':'Payment needs review';
     const labelHeading=$('bag-review-heading');if(labelHeading)labelHeading.textContent=connected?'Review sold item and close bag':'Confirm auction number';
-    const reviewCopy=document.querySelector('#bag-label-panel .step-copy');if(reviewCopy)reviewCopy.textContent=connected?'Check the winner and the items below. Close this bag when its contents are correct. You can print its label afterward.':'Review the auction number and items before printing the bag label.';
+    const reviewCopy=document.querySelector('#bag-label-panel .step-copy');if(reviewCopy)reviewCopy.textContent=connected?'Check the winner and the items below. Close this bag when its contents are correct. Print the label here or immediately after closing.':'Review the auction number and items before printing the bag label.';
     const manifestOwner=document.querySelector('#manifest-bag-meta>span:nth-child(2)');if(connected&&selected&&manifestOwner)manifestOwner.textContent='Sold by '+(selected.seller_name||'Unassigned seller');
     const manifestTitle=document.querySelector('#manifest-bag-meta>span');if(connected&&selected&&manifestTitle)manifestTitle.textContent=selected.listing_title;
     const reviewTitle=$('confirm-auction-number');if(connected&&selected&&reviewTitle)reviewTitle.textContent=selected.listing_title;
@@ -189,8 +201,23 @@
       const a=current();if(!a)throw Error('Choose a paid auction first.');
       await rpc('close_ebay_live_bag',{_attempt_id:a.id});
       lastClosedId=a.id;browsing=false;api.clearBag();$('ebay-live-filter').value='ready';message('Bag closed. Print its label or choose the next paid sale.');
-      await refresh();$('ebay-live-panel').scrollIntoView({block:'start',behavior:'smooth'});
+      await refresh();$('ebay-closed-receipt').scrollIntoView({block:'start',behavior:'smooth'});
     });return true;
+  }
+  async function printAttempt(id) {
+    if(!id)return;
+    printFeedback.delete(id);
+    try {
+      await refresh();
+      const a=data.attempts.find(a=>a.id===id);
+      if(!printable(a))throw Error('Refresh and check payment before printing this bag label.');
+      const result=await api.printBag(a.lot_id);
+      const text=result.mode==='remote-queue'?`Label queued for ${result.stationName}. Check Print stations for delivery status.`:'Label downloaded for the local helper.';
+      printFeedback.set(id,{text,completed:result.mode==='remote-queue'?'label queued':'label downloaded'});message(text);
+    } catch(error) {
+      printFeedback.set(id,{text:error.message||'Could not send the label.',error:true});
+      throw error;
+    } finally { api.updateGate(); }
   }
   async function action(fn) {if(busy)return;busy=true;api.updateGate();try{await fn();}catch(e){message(e.message,true);}finally{busy=false;render();api.updateGate();}}
   function showReview(a) {
@@ -214,6 +241,7 @@
       <p id="ebay-live-message" role="status"></p>
       <div id="ebay-live-setup"><p id="ebay-live-session-hint"></p><label>Connect the selected show to eBay<input id="ebay-live-url" type="url" placeholder="Paste the Stream Manager event URL"></label><button id="ebay-link" type="button">Connect selected show</button></div>
       <div id="ebay-live-connected" hidden>
+        <section id="ebay-closed-receipt" class="ebay-receipt" hidden><strong id="ebay-closed-heading"></strong><p id="ebay-closed-description"></p><button type="button" id="ebay-print-last">Print bag label</button><p id="ebay-print-last-status" class="ebay-print-status" role="status"></p></section>
         <div class="ebay-connection"><p id="ebay-live-health" role="status"></p><small id="ebay-capture-detail"></small><small id="ebay-capture-receiver" hidden>This computer is receiving capture data. Keep this tab open.</small></div>
         <section id="ebay-running-margin" class="ebay-running-margin" aria-label="Running result versus break-even">
           <div class="ebay-running-head"><span>Running vs break-even</span><strong id="ebay-running-total" aria-live="polite">—</strong></div>
@@ -236,7 +264,6 @@
         <nav class="ebay-workflow" aria-label="Bag workflow"><span>1. Paid sale</span><span>2. Scan item</span><span>3. Close bag</span></nav>
         <div class="ebay-work-nav"><button type="button" id="ebay-back-to-queue" class="secondary-btn" hidden>Back to auctions</button><button type="button" id="ebay-return-to-bag" hidden>Continue current bag</button></div>
         <p id="ebay-live-current" class="ebay-current" hidden></p>
-        <section id="ebay-closed-receipt" class="ebay-receipt" hidden><strong id="ebay-closed-heading"></strong><p id="ebay-closed-description"></p><button type="button" id="ebay-print-last">Print bag label</button></section>
         <div id="ebay-queue-area">
           <button type="button" id="ebay-attention-shortcut" class="secondary-btn" hidden></button>
           <details id="ebay-live-unmatched" hidden><summary id="ebay-live-unmatched-count"></summary><div id="ebay-live-unmatched-list"></div></details>
@@ -252,6 +279,10 @@
     document.querySelector('.live-summary-strip').after(section);
     const empty=document.createElement('section');empty.id='ebay-empty-workspace';empty.className='live-panel';empty.hidden=true;empty.innerHTML='<span class="eyebrow">Ready to scan</span><h2>Choose a paid auction</h2><p>Select a sale in the queue. Its winner and auction number are filled in automatically.</p><p>No starting bag number is needed.</p>';section.after(empty);
     const scanBanner=document.createElement('p');scanBanner.id='ebay-scan-payment-banner';scanBanner.className='ebay-current';scanBanner.hidden=true;scanBanner.setAttribute('role','status');$('scan-stage').prepend(scanBanner);
+    const scanPrint=document.createElement('div');scanPrint.className='ebay-bag-print-access';scanPrint.innerHTML='<button type="button" id="ebay-print-scan" class="secondary-btn" hidden>Print bag label</button><p id="ebay-print-scan-status" class="ebay-print-status" role="status"></p>';scanBanner.after(scanPrint);
+    const reviewPrint=document.createElement('div');reviewPrint.className='ebay-bag-print-access';reviewPrint.innerHTML='<button type="button" id="ebay-print-review" class="secondary-btn" hidden>Print bag label</button><p id="ebay-print-review-status" class="ebay-print-status" role="status"></p>';$('ebay-bag-seller').after(reviewPrint);
+    for(const id of ['ebay-print-scan','ebay-print-review'])$(id).onclick=()=>{const a=current();if(a)action(()=>printAttempt(a.id));};
+
     $('ebay-mark-ended').onclick=()=>action(async()=>{
       if(!window.confirm('Has the eBay broadcast ended? This starts bag review and keeps the session open for scanning.'))return;
       await rpc('mark_ebay_live_broadcast_ended',{_event_id:data.connection.event_id});browsing=true;await refresh();message('Broadcast ended. Finish the bags and payment review before closing the session.');
@@ -269,7 +300,7 @@
     $('ebay-back-to-queue').onclick=()=>{browsing=true;api.updateGate();$('ebay-live-panel').scrollIntoView({block:'start',behavior:'smooth'});};
     $('ebay-return-to-bag').onclick=()=>{browsing=false;api.updateGate();$(api.state.flowStep==='label'?'bag-label-panel':'scan-stage').scrollIntoView({block:'start',behavior:'smooth'});};
     $('ebay-attention-shortcut').onclick=()=>{$('ebay-live-filter').value='attention';render();};
-    $('ebay-print-last').onclick=()=>action(async()=>{const a=data.attempts.find(a=>a.id===lastClosedId);if(a)await api.printBag(a.lot_id);});
+    $('ebay-print-last').onclick=()=>action(()=>printAttempt(lastClosedId));
     $('ebay-live-refresh').onclick=()=>refresh();$('ebay-live-filter').onchange=render;
     $('ebay-link').onclick=()=>action(async()=>{
       const id=eventIdFromUrl($('ebay-live-url').value);
@@ -290,7 +321,7 @@
     $('ebay-save-settings').onclick=()=>action(async()=>{const val=id=>api.state.employee.role!=='admin'||$(id).value.trim()===''?null:Number($(id).value);await rpc('configure_ebay_live_event',{_event_id:data.connection.event_id,_seller_id:data.connection.active_seller_id,_fee_percent:val('ebay-fee-percent'),_fee_fixed:val('ebay-fee-fixed'),_shipping:val('ebay-shipping')});await refresh();message('Expense estimates saved.');});
     $('ebay-live-queue').onclick=e=>{const button=e.target.closest('[data-action]');if(!button)return;const a=data.attempts.find(a=>a.id===button.closest('[data-attempt]').dataset.attempt);if(!a)return;
       if(button.dataset.action==='review'){showReview(a);return;}
-      action(async()=>{if(button.dataset.action==='scan'){browsing=false;const lot=await rpc('claim_ebay_live_bag',{_attempt_id:a.id});await api.openBag(Array.isArray(lot)?lot[0]:lot);await refresh();message('Payment confirmed. Scan the item, review the bag, then close it.');$('scan-stage').scrollIntoView({block:'start',behavior:'smooth'});}else if(button.dataset.action==='reopen'){const lot=await rpc('reopen_ebay_live_bag',{_attempt_id:a.id});browsing=false;lastClosedId=null;await api.openBag(Array.isArray(lot)?lot[0]:lot);await refresh();message('Bag reopened. Check its contents, scan anything missing, then close it again.');$('scan-stage').scrollIntoView({block:'start',behavior:'smooth'});}else if(button.dataset.action==='print'){await api.printBag(a.lot_id);} });
+      action(async()=>{if(button.dataset.action==='scan'){browsing=false;const lot=await rpc('claim_ebay_live_bag',{_attempt_id:a.id});await api.openBag(Array.isArray(lot)?lot[0]:lot);await refresh();message('Payment confirmed. Scan the item, review the bag, then close it.');$('scan-stage').scrollIntoView({block:'start',behavior:'smooth'});}else if(button.dataset.action==='reopen'){const lot=await rpc('reopen_ebay_live_bag',{_attempt_id:a.id});browsing=false;lastClosedId=null;await api.openBag(Array.isArray(lot)?lot[0]:lot);await refresh();message('Bag reopened. Check its contents, scan anything missing, then close it again.');$('scan-stage').scrollIntoView({block:'start',behavior:'smooth'});}else if(button.dataset.action==='print'){await printAttempt(a.id);} });
     };
     $('ebay-live-unmatched-list').onclick=e=>{const b=e.target.closest('[data-observation]');if(!b)return;const o=data.unmatched[Number(b.dataset.observation)];showReview();$('ebay-live-review').dataset.observation=o.source_key;$('ebay-review-title').textContent=o.evidence||o.listing_title;$('ebay-review-action').innerHTML='<option value="notification">Record notification review</option>';$('ebay-review-match-label').hidden=false;$('ebay-review-check-label').hidden=true;$('ebay-review-match').innerHTML='<option value="">No auction affected (explain below)</option>'+data.attempts.filter(a=>!a.resolved_at).map(a=>`<option value="${escape(a.id)}">${escape(a.listing_title)} · ${escape(a.buyer)} · ${money(a.amount)}</option>`).join('');};
     $('ebay-review-cancel').onclick=()=>$('ebay-live-review').close();

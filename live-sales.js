@@ -2132,24 +2132,24 @@ function closeBagHistoryModal() {
   setTimeout(() => focusItemScanner(), 80);
 }
 
-async function printLiveSaleBagLabel(lotId) {
-  const lot = state.bagHistoryLots.find((entry) => String(entry.id) === String(lotId))
-    || (String(state.currentLot?.id || "") === String(lotId) ? state.currentLot : null);
-  if (!lot) {
-    setStatus("Could not find that auction bag.", "error");
-    return;
-  }
-
-  const { data: liveAuction, error: auctionError } = await supabase
-    .from("ebay_live_attempts").select("listing_title,buyer").eq("lot_id",lot.id).maybeSingle();
-  if (auctionError) { setStatus("Could not verify this bag label. Try again.", "error"); return; }
-  const identity = window.liveBagLabel.identity(lot, liveAuction);
-  const xml = window.liveBagLabel.build(identity);
-  const filename = `${getLiveSaleLabelBaseName(lot)}_Reprint_Copies_1.dymo`;
+async function printLiveSaleBagLabel(lotId, { throwOnError = false } = {}) {
   try {
+    const lot = state.bagHistoryLots.find((entry) => String(entry.id) === String(lotId))
+      || (String(state.currentLot?.id || "") === String(lotId) ? state.currentLot : null);
+    if (!lot) throw new Error("Could not find that auction bag.");
+    const { data: liveAuction, error: auctionError } = await supabase
+      .from("ebay_live_attempts").select("listing_title,buyer").eq("lot_id", lot.id).maybeSingle();
+    if (auctionError) throw new Error("Could not verify this bag label. Try again.");
+    const identity = window.liveBagLabel.identity(lot, liveAuction);
+    const xml = window.liveBagLabel.build(identity);
+    const filename = `${getLiveSaleLabelBaseName(lot)}_Reprint_Copies_1.dymo`;
     const result = await window.printStations.printLabel(xml, {filename,copies:1,title:identity.title,barcode:lot.lot_code});
     setStatus(result.mode === 'remote-queue' ? `Label queued for ${result.stationName}. View Print stations for status.` : 'Label downloaded for the local helper.', 'success');
-  } catch (error) { setStatus(error.message || 'Could not send the label.', 'error'); }
+    return result;
+  } catch (error) {
+    if (throwOnError) throw error;
+    setStatus(error.message || 'Could not send the label.', 'error');
+  }
 }
 
 function renderLabelReview() {
@@ -3630,7 +3630,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     clearBag() { state.currentLot=null; state.lotItems=[]; clearScan(); setFlowStep("scan"); renderAll(); },
     async openBag(lot) { state.currentLot=lot; rememberBagOwner(lot.owner_employee_id); clearScan(); await loadLotItems(); $("auction-number").value=lot.auction_number; $("label-free-text").value=lot.auction_number; setFlowStep("scan"); renderAll(); },
     async restoreBag(id) { const {data,error}=await supabase.from("live_sale_lots").select("*").eq("id",id).single();if(error)throw error;state.currentLot=data;await loadLotItems();$("auction-number").value=data.auction_number;setFlowStep("scan");renderAll(); },
-    async printBag(id) { const {data,error}=await supabase.from("live_sale_lots").select("*").eq("id",id).single(); if(error)throw error; state.bagHistoryLots=[...state.bagHistoryLots.filter(l=>l.id!==id),data]; await printLiveSaleBagLabel(id); }
+    async printBag(id) { const {data,error}=await supabase.from("live_sale_lots").select("*").eq("id",id).single(); if(error)throw error; state.bagHistoryLots=[...state.bagHistoryLots.filter(l=>l.id!==id),data]; return printLiveSaleBagLabel(id, {throwOnError:true}); }
   });
   await loadStores();
   await loadSessions({ keepSelection: false });
