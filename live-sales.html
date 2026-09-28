@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="live-sales.css" />
-  <link rel="stylesheet" href="ebay-live.css?v=20260928-flow4" />
+  <link rel="stylesheet" href="ebay-live.css?v=20260928-manual" />
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
@@ -195,6 +195,7 @@
               Small Label Text
               <input id="label-free-text" type="text" placeholder="Optional free text" autocomplete="off" />
             </label>
+            <p id="ebay-bag-seller" class="ebay-current" hidden></p>
             <section class="label-review-block" aria-label="Auction bag review">
               <div class="confirm-auction-card">
                 <span>Auction Number</span>
@@ -247,9 +248,9 @@
               <div class="manual-live-item-head">
                 <div>
                   <span class="eyebrow">No Inventory Item</span>
-                  <strong>Add General Item</strong>
+                  <strong>Add Manual Item</strong>
                 </div>
-                <span>Counts only</span>
+                <span>Manual item</span>
               </div>
               <div class="manual-live-item-grid">
                 <label>
@@ -261,19 +262,19 @@
                     <option value="Earring">Earring</option>
                     <option value="Ring">Ring</option>
                     <option value="Chain">Chain</option>
-                    <option value="Other">Other</option>
+                    <option value="Coin">Coin</option><option value="Other">Other</option>
                   </select>
                 </label>
                 <label>
                   Qty
-                  <input id="manual-live-item-quantity" type="number" min="1" step="1" value="1" disabled />
+                  <input id="manual-live-item-quantity" type="number" max="9999" required min="1" step="1" value="1" disabled />
                 </label>
               </div>
               <label>
                 Short description
-                <input id="manual-live-item-description" type="text" placeholder="Example: small silver pendant, no barcode yet" autocomplete="off" disabled />
+                <input id="manual-live-item-description" type="text" maxlength="1000" placeholder="Example: small silver pendant, no barcode yet" autocomplete="off" disabled />
               </label>
-              <button id="add-manual-live-item" type="button" class="secondary-btn manual-live-item-add" disabled>Add General Item</button>
+              <button id="add-manual-live-item" type="button" class="secondary-btn manual-live-item-add" disabled>Add Manual Item</button>
             </details>
             <div id="item-match-card" class="match-card empty">Scan an item after a bag is selected.</div>
             <div id="source-results" class="source-results"></div>
@@ -444,7 +445,8 @@
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js?v=20260927-print-stations"></script>
   <script src="print-stations.js?v=20260927-rolls"></script>
-  <script src="ebay-live.js?v=20260928-flow4"></script>
-  <script src="live-sales.js?v=20260928-flow4"></script>
+  <script src="live-manual-items.js?v=20260928-manual"></script>
+  <script src="ebay-live.js?v=20260928-manual"></script>
+  <script src="live-sales.js?v=20260928-manual"></script>
 </body>
 </html>

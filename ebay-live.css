@@ -87,3 +87,24 @@ body.ebay-live-linked:not(.ebay-has-bag) #scan-stage{display:none}
 
 /* The phone already has its own navigation header. */
 @media(max-width:768px){body.ebay-live-linked .main>.header{display:none}body.ebay-live-linked .main{padding-top:0}body.ebay-live-linked .live-hero>div:first-child{display:none}body.ebay-live-linked .live-sales-content{padding-top:12px}}
+
+.ebay-on-air{margin:14px 0;border:1px solid #d8b57760;border-radius:12px;padding:12px 14px;background:#b99b5f10}
+#ebay-on-air details{margin:8px 0 0;padding:0;border:0}
+#ebay-on-air p{font-size:.88rem;line-height:1.5}
+#ebay-on-air .ebay-checkbox{display:flex;align-items:flex-start;gap:10px}
+#ebay-on-air .ebay-checkbox input{width:22px;min-width:22px;min-height:22px;margin:0}
+#ebay-seller-error,#manual-edit-error{color:#ffaaa0}
+#manual-item-editor{width:min(580px,calc(100vw - 24px));max-height:88dvh;overflow:auto;box-sizing:border-box;border:1px solid #d0ae70;border-radius:18px;background:#211e1c;color:#f6f1ea;padding:22px}
+#manual-item-editor::backdrop{background:#000b}
+#manual-item-editor label{display:grid;gap:8px;margin:14px 0}
+#manual-item-editor input,#manual-item-editor select{width:100%;min-width:0;box-sizing:border-box;font-size:16px;min-height:48px}
+#manual-item-editor .button-row{display:flex;gap:10px;flex-wrap:wrap}
+#manual-item-editor button,.manual-photo-controls button,.label-review-actions button{min-height:46px;touch-action:manipulation}
+#manual-item-editor [hidden],.manual-photo-controls [hidden]{display:none!important}
+.manual-photo-controls{display:grid;gap:10px;margin:16px 0}
+.manual-photo-controls img{display:block;width:100%;height:170px;object-fit:contain;background:#080808;border-radius:12px}
+.manual-photo-controls p{font-size:.85rem;margin:0;overflow-wrap:anywhere}
+.manual-edit-grid{display:grid;grid-template-columns:1fr 1.3fr;gap:12px}
+.label-review-actions{display:grid;gap:12px;justify-items:stretch}
+#manual-break-even-summary{line-height:1.65}#manual-break-even-summary.is-loss{border-color:#ff947d;color:#ffc2b5}
+@media(max-width:600px){.label-review-actions{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between}.manual-photo-controls .button-row{display:flex;gap:8px;flex-wrap:wrap}.manual-photo-controls .button-row button{flex:1 1 110px}#manual-item-editor{padding:18px}.manual-edit-grid{grid-template-columns:1fr}}

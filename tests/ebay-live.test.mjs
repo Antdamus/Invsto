@@ -6,7 +6,7 @@ import {chromium,webkit} from '@playwright/test';
 import vm from 'node:vm';
 const root=new URL('../',import.meta.url);let server,browser,origin;
 before(async()=>{
- server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:ebay-live|live-sales)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
+ server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:ebay-live|live-sales|live-manual-items)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;
  browser=await(process.env.INVSTO_ITEM_BROWSER==='webkit'?webkit:chromium).launch();
 });
@@ -22,14 +22,22 @@ async function open(t,query='',resume=false){
  const context=await browser.newContext({viewport:{width:390,height:844}});t.after(()=>context.close());await context.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
  await context.addInitScript(({resume})=>{
   const user={id:'worker',email:'worker@example.invalid'},employee={id:'seller',user_id:'worker',display_name:'Test seller',active:true,role:'admin'};
-  window.lucide={createIcons(){}};window.calls=[];window.mockItems=[];window.mockLots=[];window.failDashboard=false;window.failClose=false;
+  window.lucide={createIcons(){}};window.calls=[];window.mockItems=[];window.mockManualItems=[];window.mockLots=[];window.failUpload=false;window.failManual=false;window.uploadedPhoto="";window.failDashboard=false;window.failClose=false;
   window.showSession={id:'show',session_code:'SHOW',title:'Test show',status:'active',store_id:'store',primary_seller_employee_id:'seller',started_at:new Date().toISOString()};
   window.dashboard={connection:{event_id:'EVENT123',session_id:'show',capture_ready:true,source_seen_at:new Date().toISOString(),active_seller_id:'seller',fee_percent:null,fee_fixed:null,shipping_per_sale:null},attempts:[{id:'sale',event_id:'EVENT123',listing_id:'123456789012',listing_title:'#001 - Test watch',buyer:'testbuyer',amount:100,payment_state:'paid',seller_id:'seller',seller_name:'Test seller',created_at:new Date().toISOString(),units:0}],unmatched:[]};
   window.printStations={printLabel:async(xml)=>{window.calls.push({name:'print',xml});return {mode:'remote-queue',stationName:'Test printer'};}};
-  window.supabase={auth:{getSession:async()=>({data:{session:{user}}})},storage:{from:()=>({createSignedUrl:async()=>({data:{signedUrl:''}})})},from(table){
-   let filters=[],limit=1000;const all=()=>table==='employees'?[employee]:table==='store_locations'?[{id:'store',name:'Showroom',active:true}]:table==='live_sale_sessions'?[window.showSession]:table==='ebay_live_attempts'?window.dashboard.attempts:table==='live_sale_lots'?window.mockLots:table==='live_sale_lot_items'?window.mockItems:[];
+  const nextSeller={id:'next-seller',display_name:'Sydney Miller',active:true,role:'employee'};
+  window.supabase={auth:{getSession:async()=>({data:{session:{user}}})},storage:{from:()=>({createSignedUrl:async()=>({data:{signedUrl:window.uploadedPhoto||''}}),upload:async(path,blob)=>{calls.push({name:'upload',path,type:blob.type});if(failUpload)return {error:{message:'Photo upload interrupted'}};uploadedPhoto=await new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.readAsDataURL(blob);});return {data:{path}};}})},from(table){
+   let filters=[],limit=1000;const all=()=>table==='employees'?[employee]:table==='store_locations'?[{id:'store',name:'Showroom',active:true}]:table==='live_sale_sessions'?[window.showSession]:table==='ebay_live_attempts'?window.dashboard.attempts:table==='live_sale_lots'?window.mockLots:table==='live_sale_lot_items'?window.mockItems:table==='live_sale_manual_lot_items'?window.mockManualItems:[];
    const q={select(){return q},eq(k,v){filters.push(r=>r[k]===v);return q},in(){return q},is(){return q},order(){return q},limit(n){limit=n;return q},maybeSingle:async()=>({data:all().find(r=>filters.every(f=>f(r)))||null}),single:async()=>({data:all().find(r=>filters.every(f=>f(r)))||null}),then(fn){return Promise.resolve({data:all().filter(r=>filters.every(f=>f(r))).slice(0,limit)}).then(fn)}};return q;
-  },rpc:async(name,args)=>{window.calls.push({name,args});if(name==='get_live_sale_seller_directory')return {data:[employee]};if(name==='get_ebay_live_dashboard')return window.failDashboard?{error:{message:'Network interrupted'}}:{data:structuredClone(window.dashboard)};
+  },rpc:async(name,args)=>{window.calls.push({name,args});if(name==='get_live_sale_seller_directory')return {data:[employee,nextSeller]};if(name==='get_ebay_live_dashboard')return window.failDashboard?{error:{message:'Network interrupted'}}:{data:structuredClone(window.dashboard)};
+   if(name==='save_live_sale_manual_item'){
+    if(failManual)return {error:{message:'Manual item save interrupted'}};
+    let row=mockManualItems.find(i=>i.id===args._item_id);if(row&&args._expected_revision!==row.edit_revision)return {error:{message:'This item changed. Reopen Edit to load the latest details'}};
+    const saved={id:args._item_id,lot_id:args._lot_id,item_category:args._category,item_description:args._description,quantity:args._quantity,live_unit_minimum:args._unit_minimum,photo_path:args._photo_path,edit_revision:(row?.edit_revision||0)+1,status:args._quantity===0?'released':'reserved',created_at:new Date().toISOString(),show_elapsed_seconds:120};
+    if(row)Object.assign(row,saved);else mockManualItems.push(saved);return {data:saved};
+   }
+   if(name==='set_ebay_live_seller'){dashboard.connection.active_seller_id=args._seller_id;dashboard.connection.active_seller_name=args._seller_id==='next-seller'?'Sydney Miller':'Test seller';if(args._correct_existing){for(const a of dashboard.attempts){a.seller_id=args._seller_id;a.seller_name=dashboard.connection.active_seller_name;}}return {data:args._correct_existing?dashboard.attempts.length:0};}
    if(name==='start_ebay_live_session'){window.showSession={...window.showSession,id:'newshow',workflow_mode:'ebay_live',title:args._title};window.dashboard.connection={...window.dashboard.connection,session_id:'newshow',event_id:args._event_id};return {data:window.showSession};}
    if(name==='claim_ebay_live_bag'){const a=window.dashboard.attempts.find(a=>a.id===args._attempt_id);a.claimed_by='worker';a.lot_id='lot';const lot={id:'lot',session_id:'show',auction_number:'EB-29-SALE',lot_code:'LIVE-TEST',status:'open',owner_employee_id:'seller'};window.mockLots=[lot];return {data:lot};}
    if(name==='close_ebay_live_bag'){if(window.failClose)return {error:{message:'Payment is not confirmed for this bag'}};window.dashboard.attempts[0].closed_at=new Date().toISOString();return {data:null};}
@@ -121,4 +129,36 @@ test('scanner refocus does not interrupt item notes or payment-review dialogs',a
  await p.locator('.manual-live-item-box > summary').click();await p.locator('#manual-live-item-description').fill('Gold watch with replacement strap');
  assert.equal(await p.evaluate(()=>shouldReturnFocusToScanner()),false);
  await p.locator('#cancel-lot').click();assert.equal(await p.locator('#ebay-live-review').isVisible(),true);assert.equal(await p.evaluate(()=>shouldReturnFocusToScanner()),false);
+});
+
+async function addManualPhoto(p,input='manual-live-item-photo'){
+ const base64=await p.evaluate(()=>{const c=document.createElement('canvas');c.width=40;c.height=30;const x=c.getContext('2d');x.fillStyle='gold';x.fillRect(0,0,40,30);return c.toDataURL('image/png').split(',')[1];});
+ await p.locator('#'+input).setInputFiles({name:'phone-photo.png',mimeType:'image/png',buffer:Buffer.from(base64,'base64')});
+ await p.locator('#'+(input.startsWith('manual-edit')?'manual-edit':'manual-live-item')+'-preview').waitFor({state:'visible'});
+}
+test('manual item photo and break-even can be added then edited directly in final review on a phone',async t=>{
+ const p=await open(t);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);
+ await p.locator('.manual-live-item-box > summary').click();await p.locator('#manual-live-item-category').selectOption('Chain');await p.locator('#manual-live-item-description').fill('Gold chain');await p.locator('#manual-live-item-quantity').fill('2');await p.locator('#manual-live-item-minimum').fill('40');
+ assert.equal(await p.locator('#manual-live-item-camera').getAttribute('capture'),'environment');await addManualPhoto(p);assert.equal(await p.locator('#add-manual-live-item').isEnabled(),true);await p.locator('#add-manual-live-item').click();await p.waitForFunction(()=>mockManualItems.length===1);
+ assert.equal(await p.evaluate(()=>calls.find(c=>c.name==='upload').type),'image/jpeg');assert.match(await p.evaluate(()=>mockManualItems[0].photo_path),/^live-manual\/lot\//);
+ await p.locator('#review-scanned-bag').click();assert.match(await p.locator('#manual-break-even-summary').innerText(),/Break-even \$80.00.*\$20.00/);await p.locator('[data-edit-manual]').click();
+ assert.equal(await p.locator('#manual-edit-minimum').inputValue(),'40');await p.locator('#manual-edit-quantity').fill('3');await p.locator('#manual-edit-minimum').fill('35');await p.locator('#manual-edit-description').fill('Gold chain, corrected');await p.locator('#manual-edit-save').click();await p.locator('#manual-item-editor').waitFor({state:'hidden'});
+ assert.equal(await p.locator('#bag-label-panel').isVisible(),true);assert.match(await p.locator('#label-review-manifest').innerText(),/Gold chain, corrected/);assert.match(await p.locator('#manual-break-even-summary').innerText(),/Break-even \$105.00.*-\$5.00/);
+ assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='upload').length),1);assert.equal(await p.evaluate(()=>mockManualItems[0].edit_revision),2);
+ await p.locator('[data-edit-manual]').click();await p.locator('#manual-edit-remove-photo').click();await p.locator('#manual-edit-save').click();await p.locator('#manual-item-editor').waitFor({state:'hidden'});assert.equal(await p.evaluate(()=>mockManualItems[0].photo_path),null);
+ assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.deepEqual(p.errors,[]);
+ await p.screenshot({path:new URL('../test-results/manual-item-review-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+});
+test('failed manual photo upload keeps the draft and does not create an item until retry succeeds',async t=>{
+ const p=await open(t);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);await p.locator('.manual-live-item-box > summary').click();await p.locator('#manual-live-item-description').fill('Keep this description');await addManualPhoto(p);
+ await p.evaluate(()=>{failUpload=true;});await p.locator('#add-manual-live-item').click();await p.waitForFunction(()=>document.getElementById('manual-live-item-photo-status').textContent.includes('interrupted'));
+ assert.equal(await p.evaluate(()=>mockManualItems.length),0);assert.equal(await p.locator('#manual-live-item-description').inputValue(),'Keep this description');assert.equal(await p.locator('#manual-live-item-preview').isVisible(),true);
+ await p.evaluate(()=>{failUpload=false;});await p.locator('#add-manual-live-item').click();await p.waitForFunction(()=>mockManualItems.length===1);assert.equal(await p.evaluate(()=>mockManualItems[0].live_unit_minimum),null);
+});
+test('on-air seller switch preserves previous sales; correcting the whole show is explicit',async t=>{
+ const p=await open(t);assert.match(await p.locator('#ebay-on-air-name').innerText(),/Test seller/);await p.locator('#ebay-seller-control > summary').click();await p.locator('#ebay-live-seller').selectOption('next-seller');await p.evaluate(()=>ebayLive.refresh());assert.equal(await p.locator('#ebay-live-seller').inputValue(),'next-seller');
+ await p.locator('#ebay-save-seller').click();await p.waitForFunction(()=>document.getElementById('ebay-on-air-name').textContent.includes('Sydney'));
+ assert.equal(await p.evaluate(()=>calls.find(c=>c.name==='set_ebay_live_seller').args._correct_existing),false);assert.match(await p.locator('#ebay-live-queue').innerText(),/Sold by Test seller/);
+ await p.locator('#ebay-seller-control > summary').click();await p.locator('#ebay-correct-existing').check();await p.locator('#ebay-save-seller').click();assert.match(await p.locator('#ebay-seller-error').innerText(),/Explain/);
+ await p.locator('#ebay-seller-reason').fill('All sales in this show were actually made by Sydney');await p.locator('#ebay-save-seller').click();await p.waitForFunction(()=>dashboard.attempts[0].seller_id==='next-seller');assert.match(await p.locator('#ebay-live-queue').innerText(),/Sold by Sydney Miller/);assert.deepEqual(p.errors,[]);
 });

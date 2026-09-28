@@ -219,8 +219,8 @@ function normalizeManualLiveSaleItem(row = {}) {
       title: description || category,
       description,
       barcode: "Manual",
-      photos: [],
-      photo_url: "",
+      photos: row.photo_path ? [row.photo_path] : [],
+      photo_url: row.photo_path || "",
     },
     source_location: {
       id: "",
@@ -592,6 +592,7 @@ function renderCurrentLot() {
 function updateScanGate() {
   const enabled = Boolean(
     state.currentSession
+      && !state.busy
       && state.currentLot
       && state.currentLot.status !== "packed"
       && state.flowStep !== "label"
@@ -602,7 +603,7 @@ function updateScanGate() {
   $("manual-live-item-quantity")?.toggleAttribute("disabled", !enabled);
   $("manual-live-item-description")?.toggleAttribute("disabled", !enabled);
   $("add-manual-live-item")?.toggleAttribute("disabled", !enabled || state.busy);
-  $("generate-live-label")?.toggleAttribute("disabled", !state.currentLot || !getManifestGroups().length);
+  $("generate-live-label")?.toggleAttribute("disabled", state.busy || !state.currentLot || !getManifestGroups().length);
   $("cancel-lot")?.toggleAttribute("disabled", !state.currentLot || state.currentLot.status === "packed");
   $("open-bag-history")?.toggleAttribute("disabled", !state.currentSession || state.busy);
   $("cancel-session")?.toggleAttribute("disabled", !state.currentSession || state.busy);
@@ -611,6 +612,7 @@ function updateScanGate() {
   $("label-bag-owner-select")?.toggleAttribute("disabled", !ownerEnabled);
   $("review-scanned-bag")?.toggleAttribute("disabled",!state.currentLot || !getManifestGroups().length || state.busy);
   window.ebayLive?.applyGate();
+  window.liveManualItems?.sync();
 }
 
 function renderAll() {
@@ -894,6 +896,7 @@ function renderManifest() {
         <strong>${escapeHtml(item.title || "Untitled item")}</strong>
         <span>${renderManifestSourceSummary(group)}</span>
         ${renderManifestTimeNote(group)}
+        ${group.isManual ? `<span>${escapeHtml(window.liveManualItems?.priceText(group)||"")}</span>` : ""}
         ${renderManifestSourceBreakdown(group)}
       </div>
       <div class="manifest-actions">
@@ -903,7 +906,7 @@ function renderManifest() {
           <button type="button" class="tiny-btn" data-qty-action="increase" data-group-key="${escapeHtml(group.key)}" ${canIncrease ? "" : "disabled"}>+</button>
         </div>
         <small class="manifest-max-note">${group.isManual ? "Counts only" : `Max ${maxQuantity.toLocaleString()}`}</small>
-        ${group.isManual ? "" : `<button type="button" class="tiny-btn" data-edit-group="${escapeHtml(group.key)}">Edit</button>`}
+        <button type="button" class="tiny-btn" data-edit-group="${escapeHtml(group.key)}">Edit</button>
         <button type="button" class="tiny-btn" data-release-group="${escapeHtml(group.key)}">Release</button>
       </div>
     `;
@@ -967,7 +970,7 @@ function renderManifest() {
   list.querySelectorAll("[data-edit-group]").forEach((button) => {
     button.addEventListener("click", () => {
       const group = getManifestGroupByKey(button.getAttribute("data-edit-group"));
-      if (group) openEditBagItemModal(group);
+      if (group) group.isManual ? window.liveManualItems.open(group) : openEditBagItemModal(group);
     });
   });
 }
@@ -980,7 +983,7 @@ function getManifestGroups() {
       if (entry.is_manual) {
         const category = String(entry.item_category || "General").trim() || "General";
         const description = String(entry.item_description || "").trim();
-        const key = `manual:${category.toLowerCase()}::${description.toLowerCase()}`;
+        const key = `manual:${entry.id}`;
         const quantity = Number(entry.quantity || 0);
         const elapsed = Number(entry.show_elapsed_seconds ?? 0);
         if (!groups.has(key)) {
@@ -988,6 +991,10 @@ function getManifestGroups() {
             key,
             itemId: "",
             isManual: true,
+            manualId: entry.id,
+            manualRevision: entry.edit_revision ?? 1,
+            unitMinimum: entry.live_unit_minimum ?? null,
+            manualPhoto: entry.photo_path || null,
             manualCategory: category,
             manualDescription: description,
             item: entry.item || { title: description || category, barcode: "Manual" },
@@ -1229,6 +1236,7 @@ function renderEditBagCurrent() {
     <strong>${escapeHtml(item.title || "Untitled item")}</strong>
     <span>${renderManifestSourceSummary(group)}</span>
     ${renderManifestTimeNote(group)}
+        ${group.isManual ? `<span>${escapeHtml(window.liveManualItems?.priceText(group)||"")}</span>` : ""}
     ${renderManifestSourceBreakdown(group)}
     <small>Current quantity ${Number(group.quantity || 0).toLocaleString()} / max ${Number(group.maxQuantity || group.quantity || 0).toLocaleString()}</small>
   `;
@@ -1878,6 +1886,7 @@ function renderBagHistoryDetail() {
         <strong>${escapeHtml(item.title || "Untitled item")}</strong>
         <span>${renderManifestSourceSummary(group)}</span>
         ${renderManifestTimeNote(group)}
+        ${group.isManual ? `<span>${escapeHtml(window.liveManualItems?.priceText(group)||"")}</span>` : ""}
         ${renderManifestSourceBreakdown(group, { showMax: false })}
         <small>${escapeHtml(group.status || "reserved")}</small>
       </div>
@@ -2156,6 +2165,7 @@ async function printLiveSaleBagLabel(lotId) {
 }
 
 function renderLabelReview() {
+  window.liveManualItems?.summary();
   const numberEl = $("confirm-auction-number");
   const list = $("label-review-manifest");
   const countEl = $("label-review-count");
@@ -2192,11 +2202,13 @@ function renderLabelReview() {
         <strong>${escapeHtml(item.title || "Untitled item")}</strong>
         <span>${renderManifestSourceSummary(group)}</span>
         ${renderManifestTimeNote(group)}
+        ${group.isManual ? `<span>${escapeHtml(window.liveManualItems?.priceText(group)||"")}</span>` : ""}
         ${renderManifestSourceBreakdown(group)}
       </div>
-      <div class="label-review-qty">Qty ${Number(group.quantity || 0).toLocaleString()}</div>
+      <div class="label-review-actions"><div class="label-review-qty">Qty ${Number(group.quantity || 0).toLocaleString()}</div>${group.isManual ? `<button type="button" class="secondary-btn" data-edit-manual>Edit item</button>` : ""}</div>
     `;
     list.appendChild(row);
+    row.querySelector("[data-edit-manual]")?.addEventListener("click",()=>window.liveManualItems.open(group));
 
     resolvePhotoUrl(firstItemPhoto(item)).then((url) => {
       if (!url || !row.isConnected) return;
@@ -2226,7 +2238,7 @@ async function startSession() {
     try { eventId = window.ebayLive.eventIdFromUrl($("session-ebay-url").value); }
     catch(error) { setStatus(error.message,"error"); $("session-ebay-url").focus(); return; }
   }
-  const primarySellerId = $("session-primary-seller")?.value || state.employee?.id || null;
+  const primarySellerId = $("session-primary-seller")?.value || null;
   const coSellerIds = getSelectedCoSellerIds();
 
   if (!storeId) {
@@ -2998,46 +3010,7 @@ function resetManualLiveItemForm() {
   if (description) description.value = "";
 }
 
-async function addManualLiveSaleItem() {
-  if (state.busy) return;
-  if (!state.currentLot) {
-    setStatus("Create or load an auction bag before adding a general item.", "error");
-    return;
-  }
-
-  const category = String($("manual-live-item-category")?.value || "Other").trim() || "Other";
-  const description = String($("manual-live-item-description")?.value || "").trim();
-  const quantity = Math.max(1, parseInt(String($("manual-live-item-quantity")?.value || "1"), 10) || 1);
-
-  try {
-    state.busy = true;
-    updateScanGate();
-    setStatus("Adding general item to this auction bag...");
-    const { error } = await supabase.rpc("add_live_sale_manual_lot_item", {
-      _lot_id: state.currentLot.id,
-      _category: category,
-      _description: description || null,
-      _quantity: quantity,
-      _signed_by_email: state.user?.email || null,
-      _notes: "Added from live sale manual item control",
-    });
-    if (error) throw error;
-
-    if ($("manual-live-item-description")) $("manual-live-item-description").value = "";
-    if ($("manual-live-item-quantity")) $("manual-live-item-quantity").value = "1";
-    await reloadCurrentLot();
-    await loadLotItems();
-    setFlowStep("scan");
-    setStatus(`Added ${quantity.toLocaleString()} ${category.toLowerCase()}${quantity === 1 ? "" : "s"} to this bag.`, "success");
-    setTimeout(() => focusItemScanner(), 80);
-  } catch (error) {
-    console.error("Add manual live sale item failed:", error);
-    setStatus(error.message || "Could not add that general item.", "error");
-  } finally {
-    state.busy = false;
-    updateScanGate();
-  }
-}
+async function addManualLiveSaleItem() { await window.liveManualItems.add(); }
 
 function populateEmployeeSelect(select, {
   selectedValue = "",
@@ -3089,7 +3062,7 @@ function renderSellerControls() {
   const coSellerSelect = $("session-co-sellers");
   const bagOwnerSelect = $("bag-owner-select");
   const labelBagOwnerSelect = $("label-bag-owner-select");
-  const primaryId = state.currentSession?.primary_seller_employee_id || primarySelect?.value || state.employee?.id || "";
+  const primaryId = primarySelect?.value || state.currentSession?.primary_seller_employee_id || "";
   const coSellerIds = Array.isArray(state.currentSession?.co_seller_employee_ids)
     ? state.currentSession.co_seller_employee_ids
     : [...(coSellerSelect?.selectedOptions || [])].map((option) => option.value).filter(Boolean);
@@ -3099,14 +3072,14 @@ function renderSellerControls() {
     selectedValue: primaryId,
     placeholder: state.employees.length ? "Select main seller" : "No sellers found",
   });
-  if (primarySelect) primarySelect.disabled = activeSession || state.busy;
+  if (primarySelect) primarySelect.disabled = state.busy;
 
   populateEmployeeSelect(coSellerSelect, {
     excludeIds: [primarySelect?.value || primaryId],
     allowEmpty: false,
     multipleValues: coSellerIds,
   });
-  if (coSellerSelect) coSellerSelect.disabled = activeSession || state.busy;
+  if (coSellerSelect) coSellerSelect.disabled = state.busy;
 
   [bagOwnerSelect, labelBagOwnerSelect].forEach((select) => {
     populateEmployeeSelect(select, {
@@ -3129,13 +3102,11 @@ async function saveManifestGroupQuantity(group, quantity, note = "Updated quanti
   const nextQuantity = Math.max(0, parseInt(String(quantity), 10) || 0);
   if (group.isManual) {
     if (nextQuantity === Number(group.quantity || 0)) return false;
-    const { error } = await supabase.rpc("set_live_sale_manual_lot_item_group_quantity", {
-      _lot_id: lot.id,
-      _category: group.manualCategory || "General",
-      _description: group.manualDescription || null,
-      _quantity: nextQuantity,
-      _signed_by_email: state.user?.email || null,
-      _notes: note,
+    const { error } = await supabase.rpc("save_live_sale_manual_item", {
+      _lot_id: lot.id, _item_id: group.manualId, _category: group.manualCategory || "General",
+      _description: group.manualDescription || null, _quantity: nextQuantity,
+      _unit_minimum: group.unitMinimum, _photo_path: group.manualPhoto,
+      _expected_revision: group.manualRevision,
     });
     if (error) throw error;
     return true;
@@ -3780,6 +3751,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     titleInput.dataset.autoTitle = "true";
   }
   await loadSellerDirectory();
+  window.liveManualItems?.init({state,status:setStatus,gate:updateScanGate,photo:resolvePhotoUrl,async reload(){await reloadCurrentLot();await loadLotItems();}});
   await window.ebayLive?.init({
     state, updateGate: updateScanGate,
     finishScan: finishBagScanning,
