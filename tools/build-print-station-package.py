@@ -6,7 +6,8 @@ import zipfile
 
 root = Path(__file__).resolve().parents[1]
 files = ('Install-Print-Station.cmd', 'install-print-station.ps1', 'print-station-agent.cjs',
-         'dymo-web-service-print.js', 'station-public-config.json', 'PRINT-STATION-README.txt')
+         'dymo-web-service-print.js', 'station-public-config.json', 'PRINT-STATION-README.txt',
+         'Diagnose-Print-Station.cmd')
 config = json.loads((root / 'tools/station-public-config.json').read_text(encoding='utf-8-sig'))
 # Only the site's existing public browser configuration belongs in the download.
 import base64

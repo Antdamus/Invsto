@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const { execFileSync, spawn } = require('node:child_process');
 const readline = require('node:readline/promises');
 const dymo = require('./dymo-web-service-print.js');
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function writeDurable(file, value) {
@@ -85,10 +85,30 @@ async function recoverPrintJob(entry, { api, save }) {
   save(null);
 }
 async function readPrinter(printerName) {
-  const base = await dymo.firstReachableService();
-  const printers = dymo.parsePrinters(await dymo.requestText(base, 'GET', '/GetPrinters'));
-  const printer = printers.find(value => value.name === printerName);
-  return { base, printer, printers };
+  return dymo.readPrinter(printerName);
+}
+function printerConnectionError(local, printerName) {
+  if (local.printer?.isConnected) return '';
+  const connected = local.printers.filter(printer => printer.isConnected).map(printer => printer.name);
+  if (!local.printer) return `DYMO's web service cannot find the paired printer "${printerName}". ${connected.length ? 'Connected: ' + connected.join(', ') + '. ' : ''}Run Diagnose Invsto Printer on this computer.`;
+  return `DYMO's web service reports "${printerName}" disconnected (port ${new URL(local.base).port}). If DYMO Connect can print, run Diagnose Invsto Printer on this computer.`;
+}
+async function diagnose(dataDir, { discover = dymo.discoverPrinterServices, output = console.log } = {}) {
+  // Read only the saved printer name. Never decrypt a token, contact the queue, or print.
+  const config = readJson(path.join(dataDir, 'station.json'), null);
+  output(`INVSTO PRINTER DIAGNOSTIC ${VERSION}\nNo labels will be sent by this diagnostic.\nPaired printer: ${config?.printerName || '(not paired)'}`);
+  const services = await discover();
+  if (!services.length) output('No DYMO web service answered on ports 41951-41960. Open DYMO Connect Web Service.');
+  for (const service of services) {
+    output(`\nService: ${service.base}`);
+    if (!service.printers.length) output('  No LabelWriter printers returned.');
+    for (const printer of service.printers) output(`  ${printer.name} | ${printer.isConnected ? 'CONNECTED' : 'DISCONNECTED'} | ${printer.isLocal ? 'local' : 'not local'}${printer.name === config?.printerName ? ' | PAIRED PRINTER' : ''}`);
+  }
+  if (services.length && config?.printerName) {
+    const local = dymo.selectPrinterService(services, config.printerName);
+    output('\n' + (printerConnectionError(local, config.printerName) || `Ready: paired printer found on port ${new URL(local.base).port}.`));
+  }
+  output('\nYou can share this diagnostic text; it contains no pairing credentials.');
 }
 async function setup(dataDir, publicConfig) {
   if (readJson(path.join(dataDir, 'active-job.json'), null)) throw new Error('The previous station has an unconfirmed print result. Start the existing helper while online so it can report that result before pairing again.');
@@ -97,7 +117,8 @@ async function setup(dataDir, publicConfig) {
     console.log('\nINVSTO PRINT STATION\nOpen Print stations in Invsto on your phone, add this computer, then enter its pairing code here.\n');
     const { printers } = await readPrinter('');
     if (!printers.length) throw new Error('No DYMO LabelWriter is installed. Install DYMO Connect and your printer, then run setup again.');
-    printers.forEach((printer, index) => console.log(`${index + 1}. ${printer.name}${printer.isConnected ? '' : ' (currently disconnected)'}`));
+    printers.sort((a, b) => Number(b.isConnected) - Number(a.isConnected));
+    printers.forEach((printer, index) => console.log(`${index + 1}. ${printer.name} (${printer.isConnected ? 'CONNECTED' : 'currently disconnected'})`));
     const answer = printers.length === 1 ? '1' : await rl.question('Printer number: ');
     const printer = printers[Number(answer.trim()) - 1];
     if (!printer) throw new Error('Choose a listed printer number.');
@@ -151,8 +172,8 @@ async function run(dataDir, publicConfig) {
       const outstanding = readJson(journal, null);
       if (outstanding) await recoverPrintJob(outstanding, { api, save });
       let local, error = '';
-      try { local = await readPrinter(config.printerName);if (!local.printer?.isConnected) error = 'Selected printer is disconnected. Turn it on and check its USB connection.'; }
-      catch { error = 'DYMO Connect is unavailable. Open DYMO Connect on this computer.'; }
+      try { local = await readPrinter(config.printerName);error = printerConnectionError(local, config.printerName); }
+      catch { error = 'DYMO Connect Web Service is unavailable on ports 41951-41960. Open it on this computer, or run Diagnose Invsto Printer.'; }
       const job = await api.poll(Boolean(local?.printer?.isConnected), error);
       if (job) {
         const result = await processPrintJob(job, { api, printerName: config.printerName, isTwinTurbo: local?.printer?.isTwinTurbo, save,
@@ -175,6 +196,7 @@ async function run(dataDir, publicConfig) {
 async function main() {
   const dataDir = process.env.INVSTO_PRINT_DATA || path.join(process.env.LOCALAPPDATA || os.homedir(), 'InvstoPrintStation');
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  if (process.argv.includes('--diagnose')) return diagnose(dataDir);
   if (process.argv.includes('--stop')) { fs.writeFileSync(path.join(dataDir, 'stop.request'), 'stop');return; }
   const publicConfig = readJson(path.join(__dirname, 'station-public-config.json'), null);
   if (!publicConfig) throw new Error('The station public configuration is missing. Download the complete setup package.');
@@ -185,4 +207,4 @@ async function main() {
   return run(dataDir, publicConfig);
 }
 if (require.main === module) main().catch(error => { console.error(error.message);process.exitCode = 1; });
-module.exports = { processPrintJob, recoverPrintJob, validateJob, writeDurable, acquireLock, makeApi };
+module.exports = { processPrintJob, recoverPrintJob, validateJob, writeDurable, acquireLock, makeApi, diagnose, printerConnectionError };

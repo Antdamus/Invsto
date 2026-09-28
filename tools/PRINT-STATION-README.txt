@@ -1,4 +1,4 @@
-INVSTO PRINT STATION 1.1.0 - WINDOWS
+INVSTO PRINT STATION 1.1.1 - WINDOWS
 
 1. Install DYMO Connect and confirm your LabelWriter appears there.
 2. Extract all files from this ZIP into a folder.
@@ -37,7 +37,21 @@ window. Left/right mean as you face the front of the printer. Load matching labe
 stock on that side. Jobs and reprints keep the chosen roll even after defaults change.
 
 Older helpers cannot accept a roll-specific job. After this update, wait until
-Invsto shows the station online, refresh the page and send one test label.
+Invsto shows the station online and refresh the page. If no label is already
+queued, send one test label.
+
+DYMO CONNECTED IN THE APP, BUT DISCONNECTED IN INVSTO
+This update discovers DYMO's supported ports 41951 through 41960 automatically.
+Leave DYMO's "Use single port" setting as it is. The helper keeps your exact
+paired printer name and does not substitute another printer or a "Copy 1" entry.
+Your existing queued labels can print automatically when the connection returns.
+Do not send duplicate requests while troubleshooting.
+
+If it still says disconnected, double-click Diagnose Invsto Printer on the desktop,
+or Diagnose-Print-Station.cmd in this download after installing the update.
+It shows the saved printer name and every DYMO service's printer connection status.
+The diagnostic does not print, claim jobs, or display pairing credentials.
+Send a photo of that window for troubleshooting. Do not send station.json.
 
 To intentionally replace an existing pairing, run install-print-station.ps1 with
 -PairAgain. Normal updates keep the current pairing and any unacknowledged journal.

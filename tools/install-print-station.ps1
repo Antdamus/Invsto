@@ -65,10 +65,25 @@ try {
   $startShortcut.TargetPath = $startupShortcut.TargetPath;$startShortcut.Arguments = $startupShortcut.Arguments;$startShortcut.Save()
   $stopShortcut = $shell.CreateShortcut((Join-Path $desktop 'Stop Invsto Printer.lnk'))
   $stopShortcut.TargetPath = $nodeExe;$stopShortcut.Arguments = '"' + $agentPath + '" --stop';$stopShortcut.WindowStyle = 7;$stopShortcut.Save()
+  $diagnosePath = Join-Path $stationHome 'Diagnose Print Station.ps1'
+  $diagnoseScript = @(
+    '$ErrorActionPreference = ''Stop'''
+    'try {'
+    ("  & '{0}' '{1}' --diagnose" -f $nodeExe.Replace("'","''"),$agentPath.Replace("'","''"))
+    '} catch { Write-Host $_.Exception.Message -ForegroundColor Red }'
+    'Read-Host ''Press Enter to close diagnostic'''
+  )
+  Set-Content -LiteralPath $diagnosePath -Value $diagnoseScript -Encoding UTF8
+  $diagnoseShortcut = $shell.CreateShortcut((Join-Path $desktop 'Diagnose Invsto Printer.lnk'))
+  $diagnoseShortcut.TargetPath = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $diagnoseShortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $diagnosePath + '"'
+  $diagnoseShortcut.WorkingDirectory = $stationHome
+  $diagnoseShortcut.Save()
   & $nodeExe $agentPath --background
   Write-Host ''
   Write-Host 'Setup complete. The helper is running in the background.' -ForegroundColor Green
   Write-Host 'Your station should show Online in Invsto shortly. Keep this computer awake and the printer connected.'
+  Write-Host 'If DYMO can print but Invsto cannot, open the Diagnose Invsto Printer desktop shortcut.'
   Write-Host ('Logs and configuration: ' + $stationHome)
   Read-Host 'Press Enter to close setup'
 } catch {

@@ -29,7 +29,7 @@ The print dialog offers Left and Right for a paired Twin Turbo, identified by th
 
 Administrators can open **Roll settings** on Print Stations to name the stock on each side and set a default, or choose each time. For example, name Left "30299 jewelry tags" and Right "Address labels" only if that is what is physically loaded. These names are reminders, not automatic media sensing or label-size validation. The print dialog still allows an explicit override. Changing settings never changes a waiting job, and reprints retain the original roll. Job history shows the roll.
 
-Install helper **1.1.0** on each printing computer for this feature: download the new ZIP, extract all files and run `Install-Print-Station.cmd` again. The installer waits for the old helper to finish, updates its files, preserves `station.json` and the protected pairing credential, and restarts it. An outstanding journal is recovered by acknowledgement only. No new pairing code is needed. Intentional re-pairing remains available by running `install-print-station.ps1 -PairAgain`; normal updates keep pairing.
+Install helper **1.1.1** on each printing computer for this feature: download the new ZIP, extract all files and run `Install-Print-Station.cmd` again. The installer waits for the old helper to finish, updates its files, preserves `station.json` and the protected pairing credential, and restarts it. An outstanding journal is recovered by acknowledgement only. No new pairing code is needed. Intentional re-pairing remains available by running `install-print-station.ps1 -PairAgain`; normal updates keep pairing.
 
 The page enables roll selection after the updated helper checks in. The server never gives a roll-specific job to an older or unrecognized helper version; it waits for an update. Existing jobs created before roll support retain their old printer-default behavior. New Twin Turbo jobs need an explicit roll or saved station default. Already paired helpers are not remotely updated by publishing the website.
 
@@ -54,6 +54,12 @@ Jobs and label XML are retained in the database in this initial release; recent-
 
 ## Troubleshooting
 
+Helper **1.1.1** searches the official DYMO loopback range 41951–41960 on 127.0.0.1 and localhost, using bounded parallel read-only probes. It prefers a service that reports the exact paired printer connected, then rechecks that service before every print. If the service moves or loses the printer, it rediscovers. A connected Copy 1 or differently named printer is never substituted. No changes to DYMO's single-port setting are needed for that supported range.
+
+After updating, open **Diagnose Invsto Printer** on the desktop (or `Diagnose-Print-Station.cmd` in the extracted download). It lists each responding service, printer names and DYMO connection flags, including the saved paired name. It never decrypts credentials, polls/claims jobs, submits labels, or changes the journal. Share its output instead of `station.json`. Normal queued jobs can resume automatically when the helper finds its printer again.
+
+Discovery reference: [DYMO framework service constants](https://github.com/dymosoftware/dymo-connect-framework/blob/master/dymo.connect.framework.full.js), `WS_START_PORT`, `WS_END_PORT`, `WS_SVC_HOST`, and `WS_SVC_HOST_LEGACY`.
+
 - **Not paired:** run the installer on the named computer and enter its current code.
 - **Computer offline:** check internet, Windows sign-in/sleep and the Start Invsto Printer shortcut.
 - **Printer disconnected:** open DYMO Connect and check the selected printer's USB connection, power and driver. Renaming/removing it does not redirect jobs to another printer.
@@ -64,7 +70,7 @@ Jobs and label XML are retained in the database in this initial release; recent-
 
 ## Build and verification
 
-`python tools/build-print-station-package.py` creates a deterministic ZIP from a six-file allowlist and verifies it contains the existing public anon key only. Commit the ZIP alongside its sources. Publish the frontend after applying the database migration.
+`python tools/build-print-station-package.py` creates a deterministic ZIP from a seven-file allowlist and verifies it contains the existing public anon key only. Commit the ZIP alongside its sources. Publish the frontend after applying the database migration.
 
 `npm run test:print-stations` covers the worker's interrupted submissions, durable acknowledgments, wrong-printer protection, and the real destination UI with mocked services. Use `INVSTO_ITEM_BROWSER=webkit` for the phone browser engine. `npm run test:add-item` checks intake regressions. Tests do not print physical labels.
 

@@ -10,8 +10,9 @@
 <section id="print-setup" hidden><h2>Add a printing computer</h2>
 <ol><li>Name the computer below, for example “Florida counter.”</li><li>On that Windows computer, download the helper, extract the ZIP, and double-click <strong>Install-Print-Station.cmd</strong>.</li><li>Choose its DYMO printer and enter the pairing code shown here. Leave the computer awake and the printer connected.</li></ol>
 <p>The helper starts with Windows sign-in. DYMO Connect must be installed on the printing computer. If Windows asks whether to run the downloaded helper, check that it came from this Invsto page.</p>
-<p><a class="print-download-link" href="downloads/Invsto-Print-Station-Windows.zip?v=1.1.0" download>Download Windows helper</a> · <a href="https://www.dymo.com/support?cfid=software-downloads">DYMO software</a></p>
+<p><a class="print-download-link" href="downloads/Invsto-Print-Station-Windows.zip?v=1.1.1" download>Download Windows helper</a> · <a href="https://www.dymo.com/support?cfid=software-downloads">DYMO software</a></p>
 <p>Already paired? Run the new installer to update the helper; it keeps your existing station. Twin Turbo printers can use Left or Right for each job. Use <strong>Roll settings</strong> above to name each roll and save a default.</p>
+<p>Helper 1.1.1 improves printer detection. If DYMO can print but Invsto says disconnected, update the helper on that computer, then open the <strong>Diagnose Invsto Printer</strong> desktop shortcut if needed. Existing queued labels may print when the connection returns.</p>
 <form id="print-register-form"><label for="print-station-name">Computer name</label><input id="print-station-name" required maxlength="80" placeholder="e.g. Florida counter"><button type="submit">Create pairing code</button></form>
 <div id="print-pairing" hidden><h3>Pair this computer</h3><code id="print-pair-code"></code><p id="print-pair-expiry"></p><button type="button" id="print-copy-code">Copy code</button></div>
 </section>

@@ -4,10 +4,9 @@ const fs = require("fs");
 const https = require("https");
 const { URLSearchParams } = require("url");
 
-const SERVICE_HOSTS = [
-  "https://localhost:41951/DYMO/DLS/Printing",
-  "https://127.0.0.1:41951/DYMO/DLS/Printing",
-];
+// Match DYMO's supported discovery range when "Use single port" is unchecked.
+const SERVICE_HOSTS = Array.from({ length: 10 }, (_, index) => 41951 + index)
+  .flatMap(port => ['127.0.0.1', 'localhost'].map(host => `https://${host}:${port}/DYMO/DLS/Printing`));
 
 const agent = new https.Agent({ rejectUnauthorized: false });
 
@@ -79,7 +78,7 @@ function parsePrinters(xml) {
   }).filter((printer) => printer.name);
 }
 
-function requestText(baseUrl, method, route, body = "", headers = {}) {
+function requestText(baseUrl, method, route, body = "", headers = {}, timeoutMs = 12000) {
   return new Promise((resolve, reject) => {
     const url = new URL(`${baseUrl}${route}`);
     const request = https.request({
@@ -89,7 +88,7 @@ function requestText(baseUrl, method, route, body = "", headers = {}) {
       path: url.pathname,
       method,
       agent,
-      timeout: 12000,
+      timeout: timeoutMs,
       headers: {
         ...headers,
         "Content-Length": Buffer.byteLength(body),
@@ -107,9 +106,10 @@ function requestText(baseUrl, method, route, body = "", headers = {}) {
       });
     });
 
-    request.on("timeout", () => {
-      request.destroy(new Error(`${method} ${route} timed out.`));
-    });
+    // Bound the entire request, including DNS/TLS and a response that never ends.
+    const timer = setTimeout(() => request.destroy(new Error(`${method} ${route} timed out.`)), timeoutMs);
+    request.on('close', () => clearTimeout(timer));
+    request.on("timeout", () => request.destroy(new Error(`${method} ${route} timed out.`)));
     request.on("error", reject);
     if (body) {
       request.write(body);
@@ -118,23 +118,51 @@ function requestText(baseUrl, method, route, body = "", headers = {}) {
   });
 }
 
-async function firstReachableService() {
-  const errors = [];
-
-  for (const baseUrl of SERVICE_HOSTS) {
-    try {
-      const status = await requestText(baseUrl, "GET", "/StatusConnected");
-      if (/true/i.test(status)) {
-        return baseUrl;
-      }
-      errors.push(`${baseUrl}: StatusConnected returned ${status}`);
-    } catch (error) {
-      errors.push(`${baseUrl}: ${error.message}`);
-    }
-  }
-
-  throw new Error(`DYMO web service is not reachable. ${errors.join(" | ")}`);
+async function discoverPrinterServices(send = requestText) {
+  // All probes are read-only and run together so unused ports cannot block a heartbeat.
+  const results = await Promise.allSettled(SERVICE_HOSTS.map(async base => {
+    const status = await send(base, 'GET', '/StatusConnected', '', {}, 3000);
+    if (!/true/i.test(status)) throw new Error('Service is not ready');
+    const printers = parsePrinters(await send(base, 'GET', '/GetPrinters', '', {}, 5000));
+    return { base, printers };
+  }));
+  return results.filter(result => result.status === 'fulfilled').map(result => result.value);
 }
+
+function selectPrinterService(services, printerName) {
+  const exactPrinter = service => service.printers.find(printer => printer.name === printerName && printer.isConnected)
+    || service.printers.find(printer => printer.name === printerName);
+  const selected = (printerName && (services.find(service => exactPrinter(service)?.isConnected)
+    || services.find(service => exactPrinter(service))))
+    || services.find(service => service.printers.some(printer => printer.isConnected)) || services[0];
+  // Setup may see different printer lists from two installed DYMO services.
+  const names = new Map();
+  for (const service of services) for (const printer of service.printers) {
+    if (!names.has(printer.name) || printer.isConnected) names.set(printer.name, printer);
+  }
+  return { base: selected?.base, printer: selected && exactPrinter(selected), printers: [...names.values()], services };
+}
+
+function createPrinterReader({ send = requestText } = {}) {
+  let cachedBase;
+  return async printerName => {
+    if (cachedBase && printerName) {
+      try {
+        const printers = parsePrinters(await send(cachedBase, 'GET', '/GetPrinters', '', {}, 5000));
+        const result = selectPrinterService([{ base: cachedBase, printers }], printerName);
+        if (result.printer?.isConnected) return result;
+      } catch { /* Rediscover if DYMO restarted, moved ports, or lost the printer. */ }
+    }
+    const services = await discoverPrinterServices(send);
+    if (!services.length) throw new Error('DYMO web service is not reachable on ports 41951-41960. Open DYMO Connect Web Service.');
+    const result = selectPrinterService(services, printerName);
+    cachedBase = result.base;
+    return result;
+  };
+}
+
+const readPrinter = createPrinterReader();
+async function firstReachableService() { return (await readPrinter('')).base; }
 
 function choosePrinter(printers, preferredPrinterName) {
   const preferred = String(preferredPrinterName || "").trim().toLowerCase();
@@ -175,10 +203,9 @@ async function printLabel(baseUrl, printerName, labelXml, copyIndex, totalCopies
 
 async function main() {
   const args = parseArgs(process.argv);
-  const baseUrl = await firstReachableService();
-  const printersXml = await requestText(baseUrl, "GET", "/GetPrinters");
-  const printers = parsePrinters(printersXml);
-  const printer = choosePrinter(printers, args.printer);
+  const discovered = await readPrinter('');
+  const printer = choosePrinter(discovered.printers, args.printer);
+  const baseUrl = selectPrinterService(discovered.services, printer?.name).base;
 
   if (!printer) {
     throw new Error("DYMO web service is reachable, but no LabelWriter printers were returned.");
@@ -209,4 +236,5 @@ if (require.main === module) main().catch((error) => {
   process.exitCode = 1;
 });
 
-module.exports = { firstReachableService, requestText, parsePrinters, printLabel };
+module.exports = { firstReachableService, requestText, parsePrinters, printLabel, readPrinter,
+  discoverPrinterServices, selectPrinterService, createPrinterReader };
