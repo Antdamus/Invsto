@@ -607,6 +607,7 @@ function updateScanGate() {
   const ownerEnabled = Boolean(state.currentLot && state.currentLot.status !== "packed" && !state.busy);
   $("bag-owner-select")?.toggleAttribute("disabled", !ownerEnabled);
   $("label-bag-owner-select")?.toggleAttribute("disabled", !ownerEnabled);
+  window.ebayLive?.applyGate();
 }
 
 function renderAll() {
@@ -2135,10 +2136,14 @@ async function printLiveSaleBagLabel(lotId) {
     return;
   }
 
+  const { data: liveAuction, error: auctionError } = await supabase
+    .from("ebay_live_attempts").select("listing_title,buyer").eq("lot_id",lot.id).maybeSingle();
+  if (auctionError) { setStatus("Could not verify this bag label. Try again.", "error"); return; }
+  const auctionReference = liveAuction?.listing_title?.match(/^#([A-Za-z0-9_-]+)/)?.[1];
   const xml = buildLiveAuctionDymoXml({
-    auctionNumber: lot.auction_number,
+    auctionNumber: auctionReference || lot.auction_number,
     lotCode: lot.lot_code,
-    freeText: lot.auction_number,
+    freeText: liveAuction?.buyer || lot.auction_number,
   });
   const filename = `${getLiveSaleLabelBaseName(lot)}_Reprint_Copies_1.dymo`;
   try {
@@ -2409,6 +2414,7 @@ async function submitCancelSession() {
 }
 
 async function createOrLoadLot(options = {}) {
+  if (window.ebayLive?.linked()) { setStatus("Select a paid eBay auction from the queue.", "error"); return null; }
   if (state.busy && !options.force) return;
   if (!state.currentSession) {
     setStatus("Start or select a live sale session first.", "error");
@@ -2525,6 +2531,7 @@ async function getNextAuctionNumber() {
 }
 
 async function prepareNextBag() {
+  if (await window.ebayLive?.prepare()) return;
   if (!state.currentSession || state.currentLot?.status === "open" || state.currentLot?.status === "reserved") {
     if (state.currentLot && state.flowStep !== "label") {
       setFlowStep("scan");
@@ -2588,6 +2595,7 @@ function focusItemScanner() {
 }
 
 function shouldReturnFocusToScanner() {
+  if (document.activeElement?.closest("#ebay-live-panel")) return false;
   const scanner = $("item-scan");
   if (!scanner || scanner.disabled) return false;
   if (!state.currentSession || !state.currentLot || state.flowStep !== "scan") return false;
@@ -3177,6 +3185,7 @@ async function setManifestGroupQuantity(group, quantity, note = "Updated quantit
 }
 
 async function cancelCurrentLot() {
+  if (window.ebayLive?.linked()) { window.ebayLive.reviewCurrent(); return; }
   if (!state.currentLot) return;
   const note = window.prompt("Why is this auction bag being canceled?");
   if (!note || note.trim().length < 3) {
@@ -3451,10 +3460,11 @@ function finishBagScanning() {
     }, 80);
   }
   renderLabelReview();
-  setStatus("Confirm the auction number. Press Enter to generate the DYMO label and start the next bag.", "success");
+  setStatus(window.ebayLive?.linked() ? "Review the items and close this paid bag. Printing is available afterward." : "Confirm the auction number. Press Enter to generate the DYMO label and start the next bag.", "success");
 }
 
 async function finalizeCurrentBag() {
+  if (await window.ebayLive?.closeCurrent()) return;
   if (!state.currentLot || state.busy) return;
   if (!getManifestGroups().length) {
     setStatus("This bag has no items yet.", "error");
@@ -3755,6 +3765,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     titleInput.dataset.autoTitle = "true";
   }
   await loadSellerDirectory();
+  await window.ebayLive?.init({
+    state, updateGate: updateScanGate,
+    clearBag() { state.currentLot=null; state.lotItems=[]; clearScan(); setFlowStep("scan"); renderAll(); },
+    async openBag(lot) { state.currentLot=lot; rememberBagOwner(lot.owner_employee_id); clearScan(); await loadLotItems(); $("auction-number").value=lot.auction_number; $("label-free-text").value=lot.auction_number; setFlowStep("scan"); renderAll(); },
+    async printBag(id) { const {data,error}=await supabase.from("live_sale_lots").select("*").eq("id",id).single(); if(error)throw error; state.bagHistoryLots=[...state.bagHistoryLots.filter(l=>l.id!==id),data]; await printLiveSaleBagLabel(id); }
+  });
   await loadStores();
   await loadSessions({ keepSelection: false });
   if (state.currentSession) await prepareNextBag();

@@ -10,7 +10,8 @@
     "serve:email-triage": "python3 -m http.server 4173",
     "test:barcode": "node --test tests/barcode-scanner.test.mjs",
     "test:print-stations": "node --test tests/print-station-agent.test.mjs tests/print-stations-ui.test.mjs",
-    "test:add-inventory": "node --test tests/inventory-receiving.test.mjs"
+    "test:add-inventory": "node --test tests/inventory-receiving.test.mjs",
+    "test:ebay-live": "node --test tests/ebay-live.test.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
