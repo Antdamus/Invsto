@@ -45,7 +45,8 @@ async function open(t,query='',resume=false,drafts=false){
    if(name==='reopen_ebay_live_bag'){const a=dashboard.attempts.find(a=>a.id===args._attempt_id);a.closed_at=null;a.claimed_by='worker';const lot=mockLots.find(l=>l.id===a.lot_id);lot.closed_at=null;return {data:lot};}
    if(name==='set_live_sale_session_draft'){if(window.failDraft)return {error:{message:'Draft save interrupted'}};const s=(window.showSessions||[showSession]).find(s=>s.id===args._session_id);if(!s||s.status!=='active')return {error:{message:'This show is already closed or unavailable'}};s.saved_for_later_at=args._saved?new Date().toISOString():null;s.saved_for_later_by=args._saved?'worker':null;return {data:structuredClone(s)};}
    if(name==='start_ebay_live_session'){window.showSession={...window.showSession,id:'newshow',workflow_mode:'ebay_live',title:args._title};window.dashboard.connection={...window.dashboard.connection,session_id:'newshow',event_id:args._event_id};if(window.showSessions)window.showSessions.push(window.showSession);if(window.dashboardByShow){window.dashboard.attempts=[];window.dashboardByShow[window.showSession.id]=window.dashboard;}return {data:window.showSession};}
-   if(name==='claim_ebay_live_bag'){const a=window.dashboard.attempts.find(a=>a.id===args._attempt_id);a.claimed_by='worker';a.lot_id='lot';const lot={id:'lot',session_id:'show',auction_number:'EB-29-SALE',lot_code:'LIVE-TEST',status:'open',owner_employee_id:'seller'};window.mockLots=[lot];return {data:lot};}
+   if(name==='prepare_ebay_live_bag_label'){const a=window.dashboard.attempts.find(a=>a.id===args._attempt_id);if(window.failPrepare||a?.payment_state!=='paid'||a.resolved_at)return {error:{message:'Payment is not confirmed for this bag'}};let lot=mockLots.find(l=>l.id===a.lot_id);if(!lot){lot={id:'label-'+a.id,session_id:'show',auction_number:'EB-001-SALE',lot_code:'LIVE-LABEL',status:'open',owner_employee_id:a.seller_id};mockLots.push(lot);a.lot_id=lot.id;}return {data:lot};}
+   if(name==='claim_ebay_live_bag'){const a=window.dashboard.attempts.find(a=>a.id===args._attempt_id);a.claimed_by='worker';let lot=mockLots.find(l=>l.id===a.lot_id);if(!lot){a.lot_id='lot';lot={id:'lot',session_id:'show',auction_number:'EB-29-SALE',lot_code:'LIVE-TEST',status:'open',owner_employee_id:'seller'};window.mockLots.push(lot);}return {data:lot};}
    if(name==='close_ebay_live_bag'){if(window.failClose)return {error:{message:'Payment is not confirmed for this bag'}};window.dashboard.attempts[0].closed_at=new Date().toISOString();return {data:null};}
    if(name==='resolve_ebay_live_attempt'){const a=window.dashboard.attempts.find(a=>a.id===args._attempt_id);if(args._action==='cancel_release'){a.resolved_at=new Date().toISOString();a.payment_state='cancelled';}return {data:null};}
    if(name==='create_live_sale_lot'){const l={id:'ordinary',session_id:'show',auction_number:args._auction_number,status:'open'};window.mockLots=[l];return {data:l};}
@@ -252,7 +253,7 @@ test('phone bag lookup entry stays visible during a linked show and reprints ide
 
 
 test('print is one tap from scanning and final review without closing the current bag',async t=>{
- const p=await open(t);assert.equal(await p.locator('[data-action=print]').count(),0);
+ const p=await open(t);assert.equal(await p.locator('[data-action=print]').count(),1);
  await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);
  assert.equal(await p.locator('#ebay-print-scan').isVisible(),true);await p.locator('#ebay-print-scan').click();
  await p.waitForFunction(()=>document.getElementById('ebay-print-scan-status').textContent.includes('Label queued for Test printer'));
@@ -362,4 +363,20 @@ test('refresh never carries the previous show bag into another unfinished show',
  });await p.setViewportSize({width:1280,height:900});await p.locator('#refresh-live-sales').click();
  await p.waitForFunction(()=>document.getElementById('show-current-name').textContent.includes('Other show'));
  assert.equal(await p.evaluate(()=>ebayLive.current()?.lot_id||null),null);assert.equal(await p.locator('#lot-manifest [data-item-id]').count(),0);assert.deepEqual(p.errors,[]);
+});
+
+
+test('paid auction can print its label before scanning, keep its QR on retry, and claim the same bag later',async t=>{
+ const p=await open(t);await p.locator('[data-action=print]').click();await p.waitForFunction(()=>calls.some(c=>c.name==='print'));
+ assert.equal(await p.evaluate(()=>dashboard.attempts[0].claimed_by||null),null);assert.equal(await p.evaluate(()=>dashboard.attempts[0].closed_at||null),null);
+ assert.equal(await p.evaluate(()=>calls.some(c=>['claim_ebay_live_bag','close_ebay_live_bag','reserve_live_sale_item','save_live_sale_manual_item'].includes(c.name))),false);
+ assert.match(await p.locator('#ebay-live-queue').innerText(),/Label queued for Test printer/);assert.match(await p.evaluate(()=>calls.find(c=>c.name==='print').xml),/LIVE-LABEL/);
+ await p.locator('[data-action=print]').click();await p.waitForFunction(()=>calls.filter(c=>c.name==='print').length===2);assert.equal(await p.evaluate(()=>mockLots.length),1);
+ await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);assert.equal(await p.evaluate(()=>ebayLive.current().lot_id),'label-sale');assert.equal(await p.evaluate(()=>mockLots.length),1);assert.deepEqual(p.errors,[]);
+});
+
+test('server payment rejection prevents an early label and leaves a retry beside the sale',async t=>{
+ const p=await open(t);await p.evaluate(()=>failPrepare=true);await p.locator('[data-action=print]').click();await p.waitForFunction(()=>document.getElementById('ebay-live-queue').textContent.includes('Payment is not confirmed'));
+ assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='print')),false);assert.equal(await p.evaluate(()=>mockLots.length),0);assert.equal(await p.locator('[data-action=print]').isEnabled(),true);
+ await p.evaluate(()=>{failPrepare=false;dashboard.attempts[0].payment_state='failed';});await p.locator('#ebay-live-refresh').click();await p.locator('#ebay-live-filter').selectOption('attention');assert.equal(await p.locator('[data-action=print]').count(),0);assert.deepEqual(p.errors,[]);
 });

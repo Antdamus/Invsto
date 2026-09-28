@@ -17,7 +17,7 @@
   const reviewReady = () => postShow() && !sessionError && Date.now()-lastRead<12000 && !data.connection.review_completed_at && !data.unmatched.some(o=>o.blocking ?? ['failed','cancelled','unknown'].includes(o.kind));
   const ready = a => linked() && !sessionError && Date.now()-lastRead<12000 && !data.connection.review_completed_at && a?.payment_state==='paid' && !a.closed_at && !a.resolved_at && (fresh() || verified(a) || reviewReady());
   const printFeedback = new Map();
-  const printable = a => linked() && !sessionError && Date.now()-lastRead<12000 && a?.lot_id && a.payment_state==='paid' && !a.resolved_at;
+  const printable = a => linked() && !sessionError && Date.now()-lastRead<12000 && a?.payment_state==='paid' && !a.resolved_at;
   const closureBlocked = () => !data.post_show || ['open_paid_bags','payment_issues','unmatched_notifications','unlinked_bags'].some(k=>Number(data.post_show[k])>0) || Number(data.connection?.health?.pending||0)>0;
   const message = (text,error=false) => {const el=$('ebay-live-message');if(el){el.textContent=text;el.classList.toggle('is-error',error);}};
   function eventIdFromUrl(value) {
@@ -114,7 +114,7 @@
       const needsBagCheck=['failed','review','cancelled'].includes(a.payment_state)&&a.lot_id&&!a.resolved_at;
       const state=a.resolved_at?'Resolved':needsBagCheck?'STOP · check this bag':a.closed_at&&a.payment_state==='paid'?'Paid · bag closed':({waiting:'Waiting for payment',paid:'Payment confirmed',failed:'Payment failed',cancelled:'Cancelled',review:'Payment needs review'}[a.payment_state]);
       const time=a.stream_offset_seconds==null?'':` · approx. stream ${Math.floor(a.stream_offset_seconds/60)}:${String(a.stream_offset_seconds%60).padStart(2,'0')}`;
-      return `<article class="ebay-auction ${needsBagCheck?'needs-review':''}" data-attempt="${escape(a.id)}"><div class="ebay-auction-head"><strong>${escape(a.listing_title)}</strong><b>${money(a.amount)}</b></div><p>${escape(a.buyer)} · Sold by ${escape(a.seller_name||'Unassigned seller')}</p><span class="ebay-state">${escape(state)}</span><small>${escape(a.win_time_label||'Time not captured')}${escape(time)} · Listing ${escape(a.listing_id)}</small>${a.review_note?`<p>${escape(a.review_note)}</p>`:''}${a.lot_id?`<p>${Number(a.units||0)} inventory units · Minimum ${money(a.minimum_total)}${held?' · Claimed by another scanner':''}</p>`:''}${marginCents(a)!=null?`<p class="${marginClass(marginCents(a))}"><b>${signedMoney(marginCents(a))} vs break-even</b>${a.closed_at?'':' · Open bag, provisional'}</p>`:''}<div class="button-row">${!a.resolved_at&&!a.closed_at&&a.payment_state==='paid'?`<button type="button" data-action="scan" ${!ready(a)||held?'disabled':''}>${mine?'Continue scanning':'Scan sold item'}</button>`:''}${a.closed_at&&a.payment_state==='paid'&&!a.resolved_at?'<button type="button" data-action="reopen" class="secondary-btn">Reopen to check / add items</button>':''}${a.lot_id&&a.payment_state==='paid'&&!a.resolved_at?`<button type="button" data-action="print" ${busy||!printable(a)?'disabled':''}>${printFeedback.get(a.id)?.completed?'Reprint bag label':'Print bag label'}</button>`:''}${!a.resolved_at?'<button type="button" class="secondary-btn" data-action="review">Payment / bag review</button>':''}</div></article>`;
+      return `<article class="ebay-auction ${needsBagCheck?'needs-review':''}" data-attempt="${escape(a.id)}"><div class="ebay-auction-head"><strong>${escape(a.listing_title)}</strong><b>${money(a.amount)}</b></div><p>${escape(a.buyer)} · Sold by ${escape(a.seller_name||'Unassigned seller')}</p><span class="ebay-state">${escape(state)}</span><small>${escape(a.win_time_label||'Time not captured')}${escape(time)} · Listing ${escape(a.listing_id)}</small>${a.review_note?`<p>${escape(a.review_note)}</p>`:''}${a.lot_id?`<p>${Number(a.units||0)} inventory units · Minimum ${money(a.minimum_total)}${held?' · Claimed by another scanner':''}</p>`:''}${marginCents(a)!=null?`<p class="${marginClass(marginCents(a))}"><b>${signedMoney(marginCents(a))} vs break-even</b>${a.closed_at?'':' · Open bag, provisional'}</p>`:''}<div class="button-row">${!a.resolved_at&&!a.closed_at&&a.payment_state==='paid'?`<button type="button" data-action="scan" ${!ready(a)||held?'disabled':''}>${mine?'Continue scanning':'Scan sold item'}</button>`:''}${a.closed_at&&a.payment_state==='paid'&&!a.resolved_at?'<button type="button" data-action="reopen" class="secondary-btn">Reopen to check / add items</button>':''}${a.payment_state==='paid'&&!a.resolved_at?`<button type="button" data-action="print" ${busy||!printable(a)?'disabled':''}>${printFeedback.get(a.id)?.completed?'Reprint bag label':'Print bag label'}</button>`:''}${!a.resolved_at?'<button type="button" class="secondary-btn" data-action="review">Payment / bag review</button>':''}</div>${printFeedback.get(a.id)?.text?`<p class="ebay-print-status ${printFeedback.get(a.id).error?'is-error':''}" role="status">${escape(printFeedback.get(a.id).text)}</p>`:''}</article>`;
     }).join('')||`<div class="ebay-empty"><strong>${filter==='ready'?(postShow()?'All paid bags are closed':'Waiting for a paid auction'):'No auctions in this view'}</strong><p>${filter==='ready'?(postShow()?'Check all auctions and finish the final checklist before closing this session.':'Auction wins appear automatically. Scanning becomes available after payment is confirmed.'):'Use the filter to view other auctions.'}</p></div>`;
     // Do not replace controls under a finger every two seconds.
     if($('ebay-live-queue').dataset.rendered!==html){$('ebay-live-queue').innerHTML=html;$('ebay-live-queue').dataset.rendered=html;}
@@ -210,9 +210,13 @@
     printFeedback.delete(id);
     try {
       await refresh();
-      const a=data.attempts.find(a=>a.id===id);
+      let a=data.attempts.find(a=>a.id===id);
       if(!printable(a))throw Error('Refresh and check payment before printing this bag label.');
-      const result=await api.printBag(a.lot_id);
+      const prepared=await rpc('prepare_ebay_live_bag_label',{_attempt_id:id});
+      const lot=Array.isArray(prepared)?prepared[0]:prepared;
+      await refresh();a=data.attempts.find(a=>a.id===id);
+      if(!printable(a)||!lot?.id)throw Error('Refresh and check payment before printing this bag label.');
+      const result=await api.printBag(lot.id);
       const text=result.mode==='remote-queue'?`Label queued for ${result.stationName}. Check Print stations for delivery status.`:'Label downloaded for the local helper.';
       printFeedback.set(id,{text,completed:result.mode==='remote-queue'?'label queued':'label downloaded'});message(text);
     } catch(error) {
