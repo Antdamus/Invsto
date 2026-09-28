@@ -76,7 +76,7 @@
     $('ebay-attention-shortcut').hidden=!counts.attention;
     $('ebay-attention-shortcut').textContent=`Review ${counts.attention} payment ${counts.attention===1?'issue':'issues'}`;
     const filter=$('ebay-live-filter').value;
-    const visible=rows.filter(a=> filter==='all' || (filter==='ready'&&a.payment_state==='paid'&&!a.closed_at&&!a.resolved_at) || (filter==='waiting'&&a.payment_state==='waiting'&&!a.resolved_at) || (filter==='attention'&&['failed','review','cancelled'].includes(a.payment_state)&&!a.resolved_at) || (filter==='closed'&&(a.closed_at||a.resolved_at))).sort((a,b)=> (a.claimed_by===api.state.user.id&&!a.closed_at ? -1:0)-(b.claimed_by===api.state.user.id&&!b.closed_at ? -1:0) || new Date(a.created_at)-new Date(b.created_at));
+    const visible=rows.filter(a=> filter==='all' || (filter==='ready'&&a.payment_state==='paid'&&!a.closed_at&&!a.resolved_at) || (filter==='waiting'&&a.payment_state==='waiting'&&!a.resolved_at) || (filter==='attention'&&['failed','review','cancelled'].includes(a.payment_state)&&!a.resolved_at) || (filter==='closed'&&(a.closed_at||a.resolved_at))).sort((a,b)=> (a.claimed_by===api.state.user.id&&!a.closed_at ? -1:0)-(b.claimed_by===api.state.user.id&&!b.closed_at ? -1:0) || new Date(b.created_at)-new Date(a.created_at));
     const html=visible.map(a=>{
       const mine=a.claimed_by===api.state.user.id,held=a.claimed_by&&!mine;
       const needsBagCheck=['failed','review','cancelled'].includes(a.payment_state)&&a.lot_id&&!a.resolved_at;

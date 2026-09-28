@@ -110,3 +110,8 @@ test('phone can review and close a scanned bag using touch buttons, then stays o
  await p.locator('#ebay-closed-receipt').waitFor();assert.equal(await p.locator('#ebay-live-filter').inputValue(),'ready');assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='print')),false);
  assert.deepEqual(p.errors,[]);
 });
+
+test('newly captured paid sales appear first so the next winner is easy to find',async t=>{
+ const p=await open(t);await p.evaluate(()=>{dashboard.attempts.push({...dashboard.attempts[0],id:'new-sale',listing_title:'#002 - Latest sale',created_at:new Date(Date.now()+1000).toISOString()});});
+ await p.locator('#ebay-live-refresh').click();assert.equal(await p.locator('#ebay-live-queue article').first().getAttribute('data-attempt'),'new-sale');
+});
