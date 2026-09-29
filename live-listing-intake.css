@@ -8,8 +8,11 @@
 #live-intake-existing{display:block;font-size:.9rem;line-height:1.5;margin:12px 0}#live-intake-existing input{display:inline-block;width:22px;height:22px;min-height:22px;vertical-align:middle}
 #live-intake-send{width:100%}#live-intake-description{white-space:pre-wrap;overflow-wrap:anywhere}
 #live-intake-jobs article{display:grid;gap:7px;padding:12px 0;border-top:1px solid #887b6455;margin-top:12px;overflow-wrap:anywhere}#live-intake-jobs span,#live-intake-jobs small{font-size:.82rem;color:#d3c9b7}#live-intake-status.is-error{color:#ffaaa0}
-@media(max-width:400px){.live-intake-prices{grid-template-columns:1fr}}
+@media(max-width:360px){.live-intake-prices{grid-template-columns:1fr}}
 
 .live-intake a{color:#efcc87}
 .live-intake-destination{padding:12px 0;border-bottom:1px solid #887b6455;margin-bottom:12px}
 #live-intake-event-status{overflow-wrap:anywhere;font-weight:650}
+.live-intake .live-intake-auto{display:flex;flex-direction:row;gap:10px;align-items:center;margin:12px 0;font-size:.9rem}
+.live-intake-auto input{width:22px;height:22px;min-height:22px;flex:none}
+#live-intake-event-settings>summary{cursor:pointer;min-height:36px}

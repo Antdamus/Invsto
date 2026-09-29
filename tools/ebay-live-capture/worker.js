@@ -16,7 +16,7 @@ function selectCaptureHealth(data,event_id){
   const sort=(a,b)=>Number(!!b.health.ready)-Number(!!a.health.ready)||b.receivedAt-a.receivedAt;
   const source=automatic.sort(sort)[0]||current.sort((a,b)=>b.receivedAt-a.receivedAt)[0]||all.sort((a,b)=>b.receivedAt-a.receivedAt)[0];
   const ended=!!(data.health[event_id]?.broadcast_ended||all.some(s=>s.health.broadcast_ended));
-  data.health[event_id]={...source.health,ready:!ended&&current.includes(source)&&source.health.mode!=='working'&&source.health.running!==false&&!!source.health.ready&&Object.keys(data.events).length<=10000,broadcast_ended:ended,pending:Object.values(data.events).filter(e=>e.event_id===event_id).length,version:'1.1.2'};
+  data.health[event_id]={...source.health,ready:!ended&&current.includes(source)&&source.health.mode!=='working'&&source.health.running!==false&&!!source.health.ready&&Object.keys(data.events).length<=10000,broadcast_ended:ended,pending:Object.values(data.events).filter(e=>e.event_id===event_id).length,version:'1.1.3'};
 }
 async function deliver(data) {
   const receivers = receiverEntries(data);
@@ -44,18 +44,42 @@ async function deliver(data) {
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   const url = sender.tab?.url || sender.url || '';
   if (sender.id !== chrome.runtime.id) return;
+  if(message.type==='INVSTO_LISTING_HELLO'||message.type==='INVSTO_LISTING_DISCOVER'){
+    const listingPage=/^https:\/\/www\.ebay\.com\/ebaylive\/host\/events\//.test(url);
+    const invstoPage=/^https:\/\/antdamus\.github\.io\/Invsto\/live-sales\.html(?:\?|$)/.test(url);
+    if(message.type==='INVSTO_LISTING_HELLO'?!listingPage:!invstoPage)return;
+    enqueue(async()=>{
+      const data=await read();data.listingSources||={};
+      for(const [tab,source] of Object.entries(data.listingSources))if(Date.now()-source.seen>120000)delete data.listingSources[tab];
+      if(listingPage){
+        const event_id=new URL(url).pathname.split('/')[4];
+        if(!/^[A-Za-z0-9_-]{6,100}$/.test(event_id))return {ok:false};
+        for(const [event,owner] of Object.entries(data.listingOwners||{}))if(owner===sender.tab.id&&event!==event_id)delete data.listingOwners[event];
+        data.listingSources[sender.tab.id]={event_id,seen:Date.now()};
+      }
+      await save(data);return {ok:true,events:[...new Set(Object.values(data.listingSources).map(source=>source.event_id))]};
+    }).then(reply,error=>reply({ok:false,error:error.message}));return true;
+  }
   if(message.type==='INVSTO_LISTING_COMMAND'){
     if(!/^https:\/\/www\.ebay\.com\/ebaylive\/host\/events\//.test(url))return;
     const event_id=new URL(url).pathname.split('/')[4];
     if(message.command?.event_id!==event_id)return;
     // Photo preparation must not block the separate payment-capture outbox.
     (async()=>{
-      const data=await read();
-      const receivers=receiverEntries(data);
+      const receivers=await enqueue(async()=>{
+        const data=await read();data.listingOwners||={};
+        const owner=data.listingOwners[event_id];
+        if(owner!==undefined&&owner!==sender.tab.id)throw Error('This event is being prepared in another eBay tab. Finish there or close that tab first.');
+        data.listingOwners[event_id]=sender.tab.id;await save(data);return receiverEntries(data);
+      });
+      let result;
       for(const [tab] of receivers){
-        try{return await chrome.tabs.sendMessage(Number(tab),{type:'INVSTO_LISTING_BRIDGE',command:message.command});}catch{}
+        try{result=await chrome.tabs.sendMessage(Number(tab),{type:'INVSTO_LISTING_BRIDGE',command:message.command});break;}catch{}
       }
-      return {ok:false,error:'Open the signed-in Invsto capture receiver in this browser.'};
+      if(!result||result.ok&&(message.command.action==='next'&&!result.job||['created','failed'].includes(message.command.action))){
+        await enqueue(async()=>{const data=await read();if(data.listingOwners?.[event_id]===sender.tab.id){delete data.listingOwners[event_id];await save(data);}});
+      }
+      return result||{ok:false,error:'Open the signed-in Invsto capture receiver in this browser.'};
     })().then(reply,error=>reply({ok:false,error:error.message}));
     return true;
   }
@@ -85,3 +109,9 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
 });
 chrome.alarms.create('retry-live',{periodInMinutes:0.5});
 chrome.alarms.onAlarm.addListener(()=>enqueue(async()=>{const d=await read();await deliver(d);await save(d);}));
+chrome.tabs.onRemoved?.addListener(tab=>enqueue(async()=>{
+  const data=await read();if(data.listingSources)delete data.listingSources[tab];
+  for(const [event,owner] of Object.entries(data.listingOwners||{}))if(owner===tab)delete data.listingOwners[event];
+  await save(data);
+}));
+chrome.runtime.onStartup?.addListener(()=>enqueue(async()=>{const data=await read();data.listingSources={};data.listingOwners={};await save(data);}));

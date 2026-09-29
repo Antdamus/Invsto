@@ -1,5 +1,10 @@
 'use strict';
 // No eBay cookies or Supabase credentials cross this bridge.
+const discoverListings=()=>chrome.runtime.sendMessage({type:'INVSTO_LISTING_DISCOVER'}).then(result=>{
+  if(result?.ok)window.postMessage({type:'INVSTO_LISTING_EVENTS',events:result.events},location.origin);
+}).catch(()=>{});
+window.addEventListener('message',event=>{if(event.source===window&&event.origin===location.origin&&event.data?.type==='INVSTO_LISTING_DISCOVER')discoverListings();});
+discoverListings();setInterval(discoverListings,5000);
 if (new URL(location.href).searchParams.get('capture') === '1') {
   const pending = new Map();
   const listingPending = new Map();
