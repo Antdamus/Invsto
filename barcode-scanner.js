@@ -146,9 +146,11 @@
       && !/^(?:[a-z][a-z\d+.-]*:|\/\/|www\.)/i.test(code);
   }
 
-  async function decodeCanvas(library, canvas) {
+  async function decodeCanvas(library, canvas, mode = 'inventory') {
     const context = canvas.getContext('2d', { willReadFrequently: true });
-    const results = await library.readBarcodes(context.getImageData(0, 0, canvas.width, canvas.height), readOptions);
+    const certificate = mode === 'certificate';
+    const options = certificate ? { ...readOptions, formats: ['QRCode'] } : readOptions;
+    const results = await library.readBarcodes(context.getImageData(0, 0, canvas.width, canvas.height), options);
     // A label can include both an item code and a website QR. Prefer the item code.
     const valid = results.filter(result => result.isValid && !result.error).map(result => {
       // ZXing-C++ reports UPC-A as EAN-13 with a padding zero. Match the
@@ -156,7 +158,8 @@
       if (result.format === 'EAN13' && /^0\d{12}$/.test(result.text)) return { ...result, text: result.text.slice(1) };
       return result;
     });
-    return { result: valid.find(result => isInventoryCode(result.text)) || valid[0], detected: results.length > 0 };
+    return { result: certificate ? valid.find(result => result.format === 'QRCode')
+      : valid.find(result => isInventoryCode(result.text)) || valid[0], detected: results.length > 0 };
   }
 
   function scanVideo(library, session, token) {
@@ -190,7 +193,7 @@
         // Decode exactly the center crop shown in the preview, retaining its original pixels.
         context.drawImage(video, (video.videoWidth - sourceWidth) / 2, (video.videoHeight - sourceHeight) / 2,
           sourceWidth, sourceHeight, 0, 0, width, height);
-        const { result, detected } = await decodeCanvas(library, canvas);
+        const { result, detected } = await decodeCanvas(library, canvas, session.mode);
         if (!current()) return;
         if (result) { receive(result.text, token); return; }
         if (detected) message('A code is visible but not clear enough to read. Hold steady, reduce glare, or choose a barcode photo.');
@@ -247,12 +250,14 @@
     ui.retry.hidden = false;
     // Labels often include a website QR beside the inventory barcode.
     // Never treat a URL as a stock identifier or navigate to scanned content.
-    if (/^(?:[a-z][a-z\d+.-]*:|\/\/|www\.)/i.test(code)) {
+    const certificate = active.mode === 'certificate';
+    if (!certificate && /^(?:[a-z][a-z\d+.-]*:|\/\/|www\.)/i.test(code)) {
       message('This QR code opens a website or app. Scan the striped item barcode, or a QR code containing just the inventory code.');
       return;
     }
-    if (!code || code.length > 128 || /[^\x20-\x7e]/.test(code)) {
-      message('This code is not a supported inventory identifier. Scan the item or location label, or enter its code manually.');
+    if (!code || (certificate ? code.length > 2048 || /[\x00-\x1f\x7f]/.test(code) : code.length > 128 || /[^\x20-\x7e]/.test(code))) {
+      message(certificate ? 'This QR could not be used. Paste the certificate QR contents on one line (up to 2,048 characters).'
+        : 'This code is not a supported inventory identifier. Scan the item or location label, or enter its code manually.');
       return;
     }
     active.code = code;
@@ -362,7 +367,7 @@
       context.fillStyle = '#fff';
       context.fillRect(0, 0, canvas.width, canvas.height);
       context.drawImage(photo, 0, 0, canvas.width, canvas.height);
-      const { result } = await decodeCanvas(library, canvas);
+      const { result } = await decodeCanvas(library, canvas, session.mode);
       if (!result) throw new Error('unreadable');
       receive(result.text, token);
     } catch (error) {
@@ -457,7 +462,13 @@
     if (!target || target.disabled || target.readOnly) return;
     createDialog();
     if (active) finish();
-    active = { target, trigger, code: '' };
+    const certificate = trigger.dataset.scanMode === 'certificate';
+    active = { target, trigger, code: '', mode: certificate ? 'certificate' : 'inventory' };
+    dialog.querySelector('#camera-scanner-title').textContent = certificate ? 'Scan a certificate QR' : 'Scan a barcode';
+    dialog.querySelector('.camera-scanner-help').textContent = certificate
+      ? 'Scan the QR on the CGL certificate or choose a clear photo of it.'
+      : 'Scan a striped barcode or an inventory QR code.';
+    ui.use.textContent = certificate ? 'Use QR contents' : 'Use code';
     ui.hint.textContent = trigger.dataset.scanHint || 'Use this code in the selected barcode field.';
     ui.photo.value = '';
     dialog.showModal();

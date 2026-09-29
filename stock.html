@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="stock-transferstock.css" />
   <link rel="stylesheet" href="stock-transfer-modal.css" />
   <link rel="stylesheet" href="stock-storage-transfer.css" />
+  <link rel="stylesheet" href="stock-cgl-label.css?v=20260929-cgl" />
 
 
   <!-- 🅰️ Google Fonts: Display Serif Font -->
@@ -24,7 +25,7 @@
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
-  <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
+  <script src="barcode-scanner.js?v=20260929-certificate" defer></script>
 </head>
 
 <body class="stock-body stock-access-loading">
@@ -118,6 +119,10 @@
 
         <button type="button" id="open-store-transfer" class="storage-transfer-top-btn" title="Move stock from one store to another">
           Store Transfer
+        </button>
+
+        <button type="button" id="open-cgl-label" class="storage-transfer-top-btn" title="Print a one-off CGL certificate label">
+          CGL label
         </button>
 
         <button type="button" id="open-ebay-sync-console" class="storage-transfer-top-btn" title="Run eBay sync and review item-level results">
@@ -314,7 +319,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
   <script src="print-stations.js?v=20260929-shipping"></script>
-  <script src="additem-dymolabel.js?v=20260927-all-labels"></script>
+  <script src="additem-dymolabel.js?v=20260929-cgl"></script>
+  <script src="stock-cgl-label.js?v=20260929-cgl" defer></script>
   <link rel="stylesheet" href="coin-ebay.css?v=20260926-coins-ebay" />
   <script type="module" src="coin-ebay.js?v=20260926-fast-intake"></script>
   <script src="stock-editcards.js?v=20260927-all-labels"></script>
@@ -327,6 +333,25 @@
   <!-- 📢 Toast + Loading Spinner Containers -->
   <div id="toast-container"></div>
   <div id="loading-overlay"><div class="spinner"></div></div>
+
+  <dialog id="cgl-label-dialog" class="cgl-label-dialog" aria-labelledby="cgl-label-title" aria-describedby="cgl-label-description">
+    <div class="cgl-label-heading">
+      <div><p class="cgl-label-eyebrow">One-off label</p><h2 id="cgl-label-title">Print a CGL label</h2></div>
+      <button type="button" id="close-cgl-label" aria-label="Close CGL label">Close</button>
+    </div>
+    <p id="cgl-label-description">Use your stock jewelry-label template with the CGL certificate QR on both ends.</p>
+    <form id="cgl-label-form">
+      <fieldset id="cgl-label-fields">
+        <label for="cgl-label-qr">CGL certificate QR contents</label>
+        <input id="cgl-label-qr" name="qr" type="text" required maxlength="2048" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the certificate link or scan its QR" aria-describedby="cgl-label-qr-help" autofocus>
+        <button type="button" class="camera-scan-button" data-scan-target="cgl-label-qr" data-scan-mode="certificate" data-scan-hint="Use these exact QR contents on your CGL label.">Scan QR / choose photo</button>
+        <p id="cgl-label-qr-help" class="cgl-label-help">Paste the full contents of the certificate QR, or use a camera or QR photo. A report number alone will print as text inside the QR.</p>
+        <p class="cgl-label-note">Prints a separate label. No stock item is created or changed.</p>
+        <button id="print-cgl-label" type="submit">Choose printer &amp; print</button>
+      </fieldset>
+      <p id="cgl-label-status" role="status" aria-live="polite"></p>
+    </form>
+  </dialog>
 
   <!--modal for putting password on pressing delete-->
   <div id="password-confirm-modal" class="modal hidden">

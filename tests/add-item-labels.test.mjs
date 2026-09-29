@@ -24,6 +24,21 @@ test('deferred certificate labels retain their certificate QR fallback',async()=
  const {api}=labels();const {templateXml}=await api.prepareSavedItemLabel({id:'cert-item',barcode:'ABC123',qr_type:'CGL ID'});
  assert.match(templateXml,/https:\/\/ogjewelry.store\/auth\?id=ABC123/);
 });
+
+test('one-off CGL labels reuse the jewelry layout without inventory or staged-label state',()=>{
+ const window={latestDymoXml:'pending stock label',latestDymoUrl:'labels/pending.dymo',latestDymoBarcode:'OG123'};
+ const context={window}; // No database client: a print-only label must work without it.
+ vm.createContext(context);vm.runInContext(read('additem-dymolabel.js'),context);
+ const api=window.dymoModule;
+ const xml=api.buildCglLabelXml({qr:' https://certificate.example/report?id=00123&name="A<B>" '});
+ assert.match(xml,/<LabelName>Jewelry30299<\/LabelName>/);
+ assert.equal((xml.match(/<DataString>https:\/\/certificate\.example\/report\?id=00123&amp;name=&quot;A&lt;B&gt;&quot;<\/DataString>/g)||[]).length,4);
+ assert.equal((xml.match(/<Text>CGL ID<\/Text>/g)||[]).length,4);
+ assert.doesNotMatch(xml,/<Text>barcode<\/Text>|<Text>[^<]*g<\/Text>|OG123/);
+ assert.equal(window.latestDymoXml,'pending stock label');assert.equal(window.latestDymoUrl,'labels/pending.dymo');assert.equal(window.latestDymoBarcode,'OG123');
+ assert.match(api.buildCglLabelXml({qr:'0000123'}),/<DataString>0000123<\/DataString>/);
+ for(const qr of ['', '   ', 'x'.repeat(2049), 'https://example.test/\u0000bad', 'line\nbreak'])assert.throws(()=>api.buildCglLabelXml({qr}),/CGL QR contents/);
+});
 test('label storage or attachment failures propagate for retry without marking a label prepared',async()=>{
  for(const failure of [{uploadError:true},{updateError:true}]){
   const {api,writes}=labels(failure),item={id:'saved',barcode:'OG123'};

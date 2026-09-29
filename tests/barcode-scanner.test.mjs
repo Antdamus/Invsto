@@ -96,6 +96,33 @@ test('website QR is rejected without navigation; unreadable photos and denied ca
   assert.ok(size.x >= 0 && size.width <= 390 && size.height <= 844);
 });
 
+test('certificate scanning accepts the full QR URL without inventory lookup or navigation', async t => {
+  const page = await pageFor(t, 'stock.html');
+  await deniedCamera(page);
+  const code = 'https://certificate.example/report?id=000123&token=' + 'a'.repeat(140);
+  const photo = await fixture(page, 'QR', code);
+  await page.evaluate(() => document.getElementById('cgl-label-dialog').showModal());
+  const trigger = page.locator('[data-scan-target="cgl-label-qr"]');
+  await trigger.click();
+  await page.locator('[data-camera="photo"]').setInputFiles(photo);
+  await page.waitForFunction(() => !document.querySelector('[data-camera="use"]').disabled);
+  assert.equal(await page.locator('[data-camera="value"]').textContent(), code);
+  assert.equal(await page.locator('#cgl-label-qr').inputValue(), '');
+  await page.locator('[data-camera="use"]').click();
+  assert.equal(await page.locator('#cgl-label-qr').inputValue(), code);
+  assert.equal(page.url(), `${origin}/stock.html`);
+  assert.equal(await page.locator('#stock-barcode-search').inputValue(), '');
+  assert.equal(await page.locator('#cgl-label-dialog').isVisible(), true);
+
+  // A striped inventory barcode on a certificate must not be selected in this mode.
+  await trigger.click();
+  await page.locator('[data-camera="photo"]').setInputFiles(await fixture(page, 'CODE128', 'OG-WRONG-CODE'));
+  await page.waitForFunction(() => document.querySelector('[data-camera="status"]').textContent.includes('No readable barcode'));
+  assert.equal(await page.locator('[data-camera="use"]').isDisabled(), true);
+  await page.locator('[data-camera="cancel"]').click();
+  assert.equal(await page.locator('#cgl-label-qr').inputValue(), code);
+});
+
 test('real video decoder waits through blank frames, reads a barcode, and stops the video track', async t => {
   const page = await pageFor(t);
   const photo = await fixture(page, 'CODE128', 'OG-CAMERA-00012');
@@ -270,6 +297,8 @@ test('barcode entry fields across the app have one adjacent camera control, incl
   for (const name of pages) {
     const page = await pageFor(t, name);
     const fields = await page.locator('input').evaluateAll(inputs => inputs
+      // The certificate QR flow has its own explicit control and acceptance test.
+      .filter(input => !document.querySelector(`[data-scan-target="${input.id}"][data-scan-mode="certificate"]`))
       .filter(input => ['text', 'search'].includes(input.type) && !input.readOnly && input.id !== 'manual-live-item-description' && /barcode|scan|tracking/i.test(`${input.id} ${input.placeholder}`))
       .map(input => ({ id: input.id, marked: input.hasAttribute('data-camera-scan'), adjacent: input.parentElement.classList.contains('camera-scan-field'), buttons: [...input.parentElement.querySelectorAll('[data-scan-target]')].filter(button => button.dataset.scanTarget === input.id).length, disabled: input.disabled, buttonDisabled: input.nextElementSibling?.disabled })));
     for (const field of fields) {

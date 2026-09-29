@@ -36,10 +36,12 @@ window.dymoModule = (function () {
         return !!data; // true if label exists
     }
 
-    //generate the dymo label
-    async function generateAndUploadDymoLabel({ barcode, qr, price, typeqr }) {
+    // Keep one layout for saved stock labels and one-off certificate labels.
+    function buildDymoLabelXml({ barcode, qr, price, typeqr, barcodeCaption = "barcode", showWeight = true }) {
         const xmlValue = value => String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-        barcode=xmlValue(barcode);qr=xmlValue(qr);price=xmlValue(price);typeqr=xmlValue(typeqr);
+        const weightText = showWeight ? xmlValue(`${price ?? ''}g`) : '';
+        barcode=xmlValue(barcode);qr=xmlValue(qr);typeqr=xmlValue(typeqr);
+        barcodeCaption=xmlValue(barcodeCaption);
         // generate XML,this rewrites the actual file
         const templateXml = `<?xml version="1.0" encoding="utf-8"?>
         <DesktopLabel Version="1">
@@ -219,7 +221,7 @@ window.dymoModule = (function () {
                     <IsVertical>False</IsVertical>
                     <LineTextSpan>
                     <TextSpan>
-                        <Text>${price}g</Text>
+                        <Text>${weightText}</Text>
                         <FontInfo>
                         <FontName>Segoe UI</FontName>
                         <FontSize>6</FontSize>
@@ -288,7 +290,7 @@ window.dymoModule = (function () {
                     <IsVertical>False</IsVertical>
                     <LineTextSpan>
                     <TextSpan>
-                        <Text>${price}g</Text>
+                        <Text>${weightText}</Text>
                         <FontInfo>
                         <FontName>Segoe UI</FontName>
                         <FontSize>6</FontSize>
@@ -601,7 +603,7 @@ window.dymoModule = (function () {
                     <IsVertical>False</IsVertical>
                     <LineTextSpan>
                     <TextSpan>
-                        <Text>barcode</Text>
+                        <Text>${barcodeCaption}</Text>
                         <FontInfo>
                         <FontName>Segoe UI</FontName>
                         <FontSize>4</FontSize>
@@ -670,7 +672,7 @@ window.dymoModule = (function () {
                     <IsVertical>False</IsVertical>
                     <LineTextSpan>
                     <TextSpan>
-                        <Text>barcode</Text>
+                        <Text>${barcodeCaption}</Text>
                         <FontInfo>
                         <FontName>Segoe UI</FontName>
                         <FontSize>4</FontSize>
@@ -706,6 +708,23 @@ window.dymoModule = (function () {
             <Rows></Rows>
         </DataTable>
         </DesktopLabel>`;
+
+        return templateXml;
+    }
+
+    function buildCglLabelXml({ qr } = {}) {
+        const value = String(qr ?? '').trim();
+        if (!value || value.length > 2048 || /[\x00-\x1f\x7f]/.test(value)) {
+            throw new Error('Paste or scan the CGL QR contents (up to 2,048 characters on one line).');
+        }
+        // Every QR on this one-off label points to the supplied certificate.
+        // No inventory identity, label upload, or pending item-edit state is involved.
+        return buildDymoLabelXml({ barcode: value, qr: value,
+            typeqr: 'CGL ID', barcodeCaption: 'CGL ID', showWeight: false });
+    }
+
+    async function generateAndUploadDymoLabel(values) {
+        const templateXml = buildDymoLabelXml(values);
 
         //create the label path
         const labelPath = `labels/${Date.now()}_OGJewelryLabel.dymo`;
@@ -1147,6 +1166,7 @@ window.dymoModule = (function () {
   }
 
   return { 
+    buildCglLabelXml,
     prepareSavedItemLabel,
     generateAndUploadDymoLabel, 
     generateDymoLabelFromForm,
