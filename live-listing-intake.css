@@ -11,3 +11,5 @@
 @media(max-width:400px){.live-intake-prices{grid-template-columns:1fr}}
 
 .live-intake a{color:#efcc87}
+.live-intake-destination{padding:12px 0;border-bottom:1px solid #887b6455;margin-bottom:12px}
+#live-intake-event-status{overflow-wrap:anywhere;font-weight:650}

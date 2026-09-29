@@ -13,8 +13,8 @@ before(async()=>{
  browser=await(process.env.INVSTO_ITEM_BROWSER==='webkit'?webkit:chromium).launch();
 });
 after(async()=>{await browser.close();await new Promise(r=>server.close(r));});
-async function phone(t,receiver=false){
- const p=await browser.newPage({viewport:{width:390,height:844}});t.after(()=>p.close());await p.goto(origin+(receiver?'/?capture=1':'/'));p.errors=[];p.on('pageerror',e=>p.errors.push(e.message));
+async function phone(t,receiver=false,query=''){
+ const p=await browser.newPage({viewport:{width:390,height:844}});t.after(()=>p.close());await p.goto(origin+(receiver?'/?capture=1':'/?')+query);p.errors=[];p.on('pageerror',e=>p.errors.push(e.message));
  await p.evaluate(()=>{
   window.calls=[];window.jobs=[];window.stock={id:'item',barcode:'OG123',title:'Saved watch',description:'A steel watch with replacement strap',photos:['stock.jpg'],available:1,existing_listing_id:null};
   window.supabase={storage:{from:()=>({createSignedUrl:async()=>({data:{signedUrl:location.origin+'/photo.png'}})})},rpc:async(name,args)=>{
@@ -45,7 +45,54 @@ test('missing photos block queue and existing listing needs explicit quantity re
  const p=await phone(t);await p.evaluate(()=>stock.photos=[]);await p.locator('#live-intake-barcode').fill('OG123');await p.locator('#live-intake-find').click();await p.locator('#live-intake-preview').waitFor();assert.equal(await p.locator('#live-intake-send').isDisabled(),true);
  await p.evaluate(()=>{stock.photos=['stock.jpg'];stock.existing_listing_id='123456789012';});await p.locator('#live-intake-find').click();await p.locator('#live-intake-existing').waitFor();await p.locator('#live-intake-bid').fill('10');await p.locator('#live-intake-send').click();assert.match(await p.locator('#live-intake-status').innerText(),/existing eBay/);
  await p.locator('#live-intake-existing-check').check();await p.locator('#live-intake-send').click();await p.waitForFunction(()=>jobs.length===1);
- await p.evaluate(()=>liveListingIntake.sync({event_id:'OTHER123',broadcast_ended_at:'now'}));assert.equal(await p.locator('#live-intake').isVisible(),false);
+ await p.evaluate(()=>liveListingIntake.sync({event_id:'OTHER123',broadcast_ended_at:'now'}));assert.equal(await p.locator('#live-intake').isVisible(),true);
+ assert.equal(await p.locator('#live-intake-preview').isVisible(),false);
+});
+
+test('listing preparation works without a sales session and keeps the explicit destination',async t=>{
+ const p=await phone(t);await p.evaluate(()=>liveListingIntake.sync(null));
+ assert.equal(await p.locator('#live-intake').isVisible(),true);
+ await p.locator('#live-intake-find').click();assert.match(await p.locator('#live-intake-status').innerText(),/Choose the eBay event/);
+ await p.locator('#live-intake-event-url').fill('https://www.ebay.com/ebaylive/host/events/UPCOMING123');await p.locator('#live-intake-use-event').click();
+ await p.evaluate(()=>liveListingIntake.sync({event_id:'OTHER123',review_completed_at:'now'}));
+ assert.match(await p.locator('#live-intake-event-status').innerText(),/UPCOMING123/);
+ await p.locator('#live-intake-barcode').fill('OG123');await p.locator('#live-intake-find').click();await p.locator('#live-intake-preview').waitFor();
+ await p.locator('#live-intake-bid').fill('5');await p.locator('#live-intake-send').click();await p.waitForFunction(()=>jobs.length===1);
+ assert.equal(await p.evaluate(()=>calls.find(c=>c.name==='queue_live_listing').args._event_id),'UPCOMING123');
+ assert.equal(await p.evaluate(()=>calls.some(c=>/start_.*session|link_ebay_live_event|ingest_ebay_live/.test(c.name))),false);
+ await p.locator('#live-intake-use-show').click();assert.match(await p.locator('#live-intake-event-status').innerText(),/OTHER123/);
+ assert.equal(await p.locator('#live-intake-preview').isVisible(),false);
+ assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+});
+
+test('ended and completed shows can send stock while event edits invalidate the old preview',async t=>{
+ const p=await phone(t);await p.evaluate(()=>liveListingIntake.sync({event_id:'EVENT123',broadcast_ended_at:'now',review_completed_at:'now'}));
+ assert.equal(await p.locator('#live-intake').isVisible(),true);
+ await p.locator('#live-intake-barcode').fill('OG123');await p.locator('#live-intake-find').click();await p.locator('#live-intake-preview').waitFor();
+ await p.locator('#live-intake-bid').fill('5');await p.locator('#live-intake-send').click();await p.waitForFunction(()=>jobs.length===1);
+ await p.locator('#live-intake-find').click();await p.locator('#live-intake-preview').waitFor();
+ await p.locator('#live-intake-event-url').fill('https://example.invalid/ebaylive/host/events/WRONG123');
+ assert.equal(await p.locator('#live-intake-preview').isVisible(),false);
+ await p.locator('#live-intake-use-event').click();assert.match(await p.locator('#live-intake-status').innerText(),/Paste the eBay/);
+ assert.equal(await p.evaluate(()=>jobs.length),1);
+});
+
+test('receiver link selects its event without linking or reopening any sales session',async t=>{
+ const p=await phone(t,true,'&listing_event=UPCOMING123');
+ assert.match(await p.locator('#live-intake-event-status').innerText(),/UPCOMING123/);
+ await p.evaluate(()=>liveListingIntake.sync(null));
+ assert.match(await p.locator('#live-intake-event-url').inputValue(),/UPCOMING123$/);
+ assert.equal(await p.locator('#live-intake').isVisible(),true);
+});
+
+test('changing event during stock lookup cannot send a stale item to the new event',async t=>{
+ const p=await phone(t);await p.evaluate(()=>{const original=supabase.rpc;supabase.rpc=(name,args)=>name==='lookup_live_listing_item'?new Promise(resolve=>window.finishLookup=()=>resolve({data:stock})):original(name,args);});
+ await p.locator('#live-intake-barcode').fill('OG123');await p.locator('#live-intake-find').click();
+ await p.locator('#live-intake-event-url').fill('https://www.ebay.com/ebaylive/host/events/NEW12345');await p.locator('#live-intake-use-event').click();
+ await p.evaluate(()=>finishLookup());
+ assert.equal(await p.locator('#live-intake-preview').isVisible(),false);
+ assert.equal(await p.locator('#live-intake-send').isDisabled(),true);
+ assert.equal(await p.evaluate(()=>jobs.length),0);
 });
 test('receiver transfers photos and public description without costs or minimum prices',async t=>{
  const p=await phone(t,true);await p.evaluate(()=>{window.replies=[];window.addEventListener('message',e=>{if(e.data?.type==='INVSTO_LISTING_RESPONSE')replies.push(e.data);});window.postMessage({type:'INVSTO_LISTING_REQUEST',id:'request',command:{event_id:'EVENT123',action:'next'}},location.origin);});await p.waitForFunction(()=>replies.length);
@@ -64,7 +111,7 @@ async function form(t){
  await p.addScriptTag({path:path('tools/ebay-live-capture/listing.js')});await p.locator('#invsto-listing-helper summary').click();await p.locator('[data-next]').click();return p;
 }
 test('helper replaces template content and photos but waits for the human Create action',async t=>{
- const p=await form(t);await p.locator('[data-fill]').click();await p.waitForFunction(()=>calls.some(c=>c.action==='ready'));
+ const p=await form(t);assert.match(await p.locator('#invsto-listing-helper a').getAttribute('href'),/listing_event=EVENT123/);await p.locator('[data-fill]').click();await p.waitForFunction(()=>calls.some(c=>c.action==='ready'));
  for(const [field,value] of [['title','Saved watch [OG123]'],['bidPrice','8.50'],['inStreamDurationSec','30'],['duplicate','1'],['sequenceNumber','43']])assert.equal(await p.locator(`input[name="${field}"]`).inputValue(),value);
  assert.equal(await p.locator('img[alt="Listing photo"]').count(),2);assert.equal(await p.locator('input[type=file]').evaluate(e=>e.files.length),2);
  assert.match(await p.frameLocator('iframe').locator('[contenteditable]').innerText(),/Saved description/);assert.equal(await p.evaluate(()=>creates+starts),0);assert.equal(await p.locator('[data-release]').isVisible(),false);

@@ -47,9 +47,9 @@ Replace the extracted folder's files with the new download, click Reload on the 
 
 The extension runs only on eBay host-event pages and Invsto Live Sales. It stores the capture outbox/health, receiver tab IDs, and the current listing preparation ID/status locally. Supabase authentication stays in the signed-in Invsto page. No browser cookies, passwords, payment card details, shipping addresses or private eBay API tokens are collected.
 
-## Scan stock into an auction (1.1.1)
+## Scan stock into an auction (1.1.2)
 
-1. On your phone, choose the current show in Live Sales and open **Scan stock → add an auction**.
+1. In Live Sales, open **Scan stock → add an auction**. Paste the destination eBay Stream Manager URL and click **Use this event**, or use the selected show's event. This works without an Invsto sales session and before, during, or after a show; eBay controls whether that event's form accepts the listing. The helper's **Open Invsto receiver** link selects its own event automatically.
 2. Scan the inventory barcode/QR. Review the saved item and photos, enter the starting bid and duration, then **Send to show computer**. The starting bid is explicit; minimum prices and costs stay internal.
 3. On Stream Manager, open **Invsto · Add a stock item** in the bottom-right corner and click **Prepare next item**.
 4. In **Add listings → From template**, choose a template with the correct category, condition, item specifics, shipping, and return settings. If no appropriate template exists, create or correct it on eBay first; the Live form inherits those settings.
@@ -57,6 +57,8 @@ The extension runs only on eBay host-event pages and Invsto Live Sales. It store
 6. Invsto records the new item ID when it sees the exact title appear. If the Sold tab or a long list hides it, switch to All and find the new listing, or enter its numeric eBay item ID in the helper and click **Record created listing**. Do not create it again because confirmation is delayed.
 
 This first release prepares one unit of a stock item per show. Duplicate scans reuse the same request. Existing online listings are not changed; verify their available quantity before offering another unit. Preparing does not reserve or deduct inventory. Continue the paid-bag scanning workflow after a sale.
+
+Listing preparation does not start capture, create a sales session, reopen a completed show, or alter payment and bag-review status. Keep capture linked to the correct Invsto show when you want to record payments and prepare bags.
 
 During preparation, capture keeps reading visible payment evidence but stops changing tabs and scrolling lists. Once the listing is recorded, normal capture sweeps resume. Keep Activity visible and check captured payments against eBay. If preparation fails before submitting, close the unfinished template, release it in the helper, and retry from the phone. Once ready/submitted, inspect eBay before retrying; there is no automatic resubmission.
 
