@@ -28,3 +28,7 @@
 .print-destination-picker[open] { display:flex; flex-direction:column; overflow:hidden; }
 .print-destination-picker .print-dialog-body { min-height:0; overflow:auto; overscroll-behavior:contain; padding-right:4px; }
 .print-destination-picker .print-dialog-actions { position:static; flex-shrink:0; margin-top:10px; border-top:1px solid #514638; }
+
+.print-station-dialog { color-scheme:dark; }
+.print-station-dialog select { appearance:none; -webkit-appearance:none; padding-right:32px; background-image:linear-gradient(45deg,transparent 50%,#edc994 50%),linear-gradient(135deg,#edc994 50%,transparent 50%); background-position:right 18px top 50%,right 13px top 50%; background-size:5px 5px; background-repeat:no-repeat; }
+.print-destination-picker .print-dialog-body { padding-bottom:8px; }

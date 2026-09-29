@@ -2,7 +2,7 @@
   'use strict';
   const PREF = 'invsto.print.destination.v1';
   const PENDING = 'invsto.print.pending.v1.';
-  const styles = document.createElement('link');styles.rel='stylesheet';styles.href='print-stations.css?v=20260929-shipping';document.head.append(styles);
+  const styles = document.createElement('link');styles.rel='stylesheet';styles.href='print-stations.css?v=20260929-shipping2';document.head.append(styles);
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const cancelled = () => Object.assign(new Error('Printing cancelled. No new print request was sent.'), {cancelled:true});
   async function rpc(name, args={}) {
