@@ -17,7 +17,7 @@
   async function tick() {
     if(busy || (!active&&!stopping&&(endReported||!InvstoLiveParser.hasEnded(document)))) return;busy=true;
     try {
-      if (active) {
+      if (active && !window.InvstoListingPreparing) {
         choose(tab('Activity'));choose(disabled(tab('Sold'))?tab('All'):tab('Sold'));
         const all=[...document.querySelectorAll('#activity-panel [aria-label="Filter activity"] button')].find(b=>b.textContent.trim()==='All');
         if(all && all.getAttribute('aria-pressed')!=='true') all.click();
@@ -46,7 +46,7 @@
       const statusText=reason+' · '+(result?.status||result?.error||'Waiting for receiver');
       if(note.textContent!==statusText)note.textContent=statusText;
       // The Activity feed is virtualized. Sweep it so failures below the fold are read too.
-      if(active && parsed.supported && parsed.panelPresent && activitySelected && listingsReady && Date.now()-pageAt>1500) {
+      if(active && !window.InvstoListingPreparing && parsed.supported && parsed.panelPresent && activitySelected && listingsReady && Date.now()-pageAt>1500) {
         const scrollers=new Set([document.querySelector('#activity-panel [class*="_list_"]')]);
         let parent=document.querySelector('[data-testid="listing-tile"]')?.parentElement;
         while(parent && parent!==document.body) { if(parent.className?.includes('_list_') && parent.scrollHeight>parent.clientHeight){scrollers.add(parent);break;}parent=parent.parentElement; }

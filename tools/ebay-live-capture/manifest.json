@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Invsto Live Capture",
-  "version": "1.0.3",
-  "description": "Send visible eBay Live wins and payment evidence to your signed-in Invsto Live Sales screen.",
+  "version": "1.1.0",
+  "description": "Capture eBay Live payments and prepare stock items in auction forms for review.",
   "permissions": ["storage", "alarms"],
   "background": {"service_worker": "worker.js"},
   "content_scripts": [
-    {"matches": ["https://www.ebay.com/ebaylive/host/events/*"], "js": ["parser.js", "capture.js"]},
+    {"matches": ["https://www.ebay.com/ebaylive/host/events/*"], "js": ["parser.js", "capture.js", "listing.js"]},
     {"matches": ["https://antdamus.github.io/Invsto/live-sales.html*"], "js": ["receiver.js"]}
   ]
 }

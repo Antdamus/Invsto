@@ -1,6 +1,6 @@
-# Invsto Live Capture (1.0.3)
+# Invsto Live Capture (1.1.0)
 
-This helper copies visible eBay Stream Manager auction and payment evidence into Invsto. It does not start auctions, bid, change listings, charge buyers, or cancel eBay orders.
+This helper copies visible eBay Stream Manager auction and payment evidence into Invsto. It can also prepare a new auction form from an inventory item you explicitly queue. It never clicks Create listing or Start, bids, charges buyers, or cancels eBay orders.
 
 ## Dedicated computer setup
 
@@ -45,4 +45,17 @@ Replace the extracted folder's files with the new download, click Reload on the 
 
 ## Data access
 
-The extension runs only on eBay host-event pages and Invsto Live Sales. It stores only the capture outbox/health and receiver tab IDs locally. Supabase authentication stays in the signed-in Invsto page. No browser cookies, passwords, payment card details, shipping addresses or private eBay API tokens are collected.
+The extension runs only on eBay host-event pages and Invsto Live Sales. It stores the capture outbox/health, receiver tab IDs, and the current listing preparation ID/status locally. Supabase authentication stays in the signed-in Invsto page. No browser cookies, passwords, payment card details, shipping addresses or private eBay API tokens are collected.
+
+## Scan stock into an auction (1.1.0)
+
+1. On your phone, choose the current show in Live Sales and open **Scan stock → add an auction**.
+2. Scan the inventory barcode/QR. Review the saved item and photos, enter the starting bid and duration, then **Send to show computer**. The starting bid is explicit; minimum prices and costs stay internal.
+3. On Stream Manager, open **Invsto · Add a stock item** in the bottom-right corner and click **Prepare next item**.
+4. In **Add listings → From template**, choose a template with the correct category, condition, item specifics, shipping, and return settings. If no appropriate template exists, create or correct it on eBay first; the Live form inherits those settings.
+5. Click **Fill selected template** in the helper. It replaces the template title, description and photos, sets the bid and duration, and keeps the duplicate count at one. Review the actual form, then click eBay's **Create listing** yourself. This does not start the auction.
+6. Invsto records the new item ID when it sees the exact title appear. If the Sold tab or a long list hides it, switch to All and find the new listing, or enter its numeric eBay item ID in the helper and click **Record created listing**. Do not create it again because confirmation is delayed.
+
+This first release prepares one unit of a stock item per show. Duplicate scans reuse the same request. Existing online listings are not changed; verify their available quantity before offering another unit. Preparing does not reserve or deduct inventory. Continue the paid-bag scanning workflow after a sale.
+
+During preparation, capture keeps reading visible payment evidence but stops changing tabs and scrolling lists. Once the listing is recorded, normal capture sweeps resume. Keep Activity visible and check captured payments against eBay. If preparation fails before submitting, close the unfinished template, release it in the helper, and retry from the phone. Once ready/submitted, inspect eBay before retrying; there is no automatic resubmission.

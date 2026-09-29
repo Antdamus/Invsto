@@ -28,6 +28,21 @@ async function deliver(data) {
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   const url = sender.tab?.url || sender.url || '';
   if (sender.id !== chrome.runtime.id) return;
+  if(message.type==='INVSTO_LISTING_COMMAND'){
+    if(!/^https:\/\/www\.ebay\.com\/ebaylive\/host\/events\//.test(url))return;
+    const event_id=new URL(url).pathname.split('/')[4];
+    if(message.command?.event_id!==event_id)return;
+    // Photo preparation must not block the separate payment-capture outbox.
+    (async()=>{
+      const data=await read();
+      const receivers=Object.entries(data.receivers).filter(([,time])=>Date.now()-time<20000).sort((a,b)=>b[1]-a[1]);
+      for(const [tab] of receivers){
+        try{return await chrome.tabs.sendMessage(Number(tab),{type:'INVSTO_LISTING_BRIDGE',command:message.command});}catch{}
+      }
+      return {ok:false,error:'Open the signed-in Invsto capture receiver in this browser.'};
+    })().then(reply,error=>reply({ok:false,error:error.message}));
+    return true;
+  }
   enqueue(async()=>{
     const data = await read();
     if (message.type==='INVSTO_RECEIVER' && /^https:\/\/antdamus\.github\.io\/Invsto\/live-sales\.html(?:\?|$)/.test(url)) {
@@ -40,7 +55,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
         const id=event_id+'|'+event.key;
         data.events[id]={id,event_id,event};
       }
-      data.health[event_id]={...message.health,broadcast_ended:!!(data.health[event_id]?.broadcast_ended||message.health?.broadcast_ended),pending:Object.keys(data.events).length,version:'1.0.3'};
+      data.health[event_id]={...message.health,broadcast_ended:!!(data.health[event_id]?.broadcast_ended||message.health?.broadcast_ended),pending:Object.keys(data.events).length,version:'1.1.0'};
       if (Object.keys(data.events).length>10000) {data.health[event_id].ready=false;data.status='Capture backlog is full. Reconnect Invsto before continuing.';}
     } else return {ok:false};
     // Persist first: a browser crash or network outage must not drop a payment failure.

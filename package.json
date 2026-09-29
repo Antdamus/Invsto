@@ -12,7 +12,7 @@
     "test:print-stations": "node --test tests/print-station-agent.test.mjs tests/print-station-discovery.test.mjs tests/print-stations-ui.test.mjs tests/shipping-pdf.test.mjs tests/ebay-label-capture.test.mjs",
     "test:add-inventory": "node --test tests/inventory-receiving.test.mjs",
     "test:bags": "node --test tests/bag-lookup.test.mjs",
-    "test:ebay-live": "node --test tests/ebay-live.test.mjs"
+    "test:ebay-live": "node --test tests/ebay-live.test.mjs tests/live-listing-intake.test.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

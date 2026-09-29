@@ -6,7 +6,7 @@ import {chromium,webkit} from '@playwright/test';
 import vm from 'node:vm';
 const root=new URL('../',import.meta.url);let server,browser,origin;
 before(async()=>{
- server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:ebay-live|live-sales|live-manual-items|live-bag-label|live-show-drafts)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
+ server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:ebay-live|live-sales|live-manual-items|live-bag-label|live-show-drafts|live-listing-intake)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;
  browser=await(process.env.INVSTO_ITEM_BROWSER==='webkit'?webkit:chromium).launch();
 });
@@ -411,4 +411,15 @@ test('server payment rejection prevents an early label and leaves a retry beside
  const p=await open(t);await p.evaluate(()=>failPrepare=true);await p.locator('[data-action=print]').click();await p.waitForFunction(()=>document.getElementById('ebay-live-queue').textContent.includes('Payment is not confirmed'));
  assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='print')),false);assert.equal(await p.evaluate(()=>mockLots.length),0);assert.equal(await p.locator('[data-action=print]').isEnabled(),true);
  await p.evaluate(()=>{failPrepare=false;dashboard.attempts[0].payment_state='failed';});await p.locator('#ebay-live-refresh').click();await p.locator('#ebay-live-filter').selectOption('attention');assert.equal(await p.locator('[data-action=print]').count(),0);assert.deepEqual(p.errors,[]);
+});
+
+
+test('stock-to-auction intake fits the existing phone screen and keeps scanner focus out of its fields',async t=>{
+ const p=await open(t);await p.locator('#live-intake > summary').click();
+ await p.locator('#live-intake-barcode').fill('OG123');
+ assert.equal(await p.evaluate(()=>shouldReturnFocusToScanner()),false);
+ assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ await p.locator('#live-intake').scrollIntoViewIfNeeded();
+ await p.screenshot({path:new URL('../test-results/live-intake-integrated-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+ assert.deepEqual(p.errors,[]);
 });
