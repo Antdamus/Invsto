@@ -4984,7 +4984,7 @@ function renderExtraLabelEvents(orderNumbers = []) {
               <span>Tracker: ${escapeHtml(trackingText || "Not captured yet")}</span>
               <span>${evidenceCount} forgotten-item photo${evidenceCount === 1 ? "" : "s"}</span>
             </div>
-            <button type="button" class="secondary-btn history-label-open-btn" data-history-extra-label-open="${escapeHtml(event.id)}">Open Extra Label</button>
+            <button type="button" class="secondary-btn history-label-open-btn" data-history-extra-label-open="${escapeHtml(event.id)}">Open Extra Label</button> <button type="button" class="secondary-btn history-label-open-btn" data-history-extra-label-print="${escapeHtml(event.id)}">Print extra label</button>
           </article>
         `;
       }).join("")}
@@ -5070,7 +5070,7 @@ function renderGroupLabelControl(group, orders = []) {
           ${labelPath ? `<small class="history-label-tracker-inline">Tracker: <b>${escapeHtml(trackingText || "Not captured yet")}</b></small>` : ""}
         </div>
         <div>
-          ${labelPath ? `<button type="button" class="secondary-btn history-label-open-btn" data-history-label-open-group="${encodedOrderNumbers}">Open Label</button>` : ""}
+          ${labelPath ? `<button type="button" class="secondary-btn history-label-open-btn" data-history-label-open-group="${encodedOrderNumbers}">Open Label</button> <button type="button" class="secondary-btn history-label-open-btn" data-history-label-print-group="${encodedOrderNumbers}">Print shipping label</button>` : ""}
           <button type="button" class="secondary-btn history-label-btn" data-history-label-group="${encodedOrderNumbers}">${labelPath ? "Replace Label" : "Add Label"}</button>
           ${labelPath ? `<button type="button" class="secondary-btn history-label-btn" data-history-label-extra-group="${encodedOrderNumbers}">Add Extra Label</button>` : ""}
         </div>
@@ -9046,6 +9046,8 @@ function renderHistoryLabelDetails(target = state.awaitingLabelGroup) {
   const orderWord = orderCount === 1 ? "order" : "orders";
   preview?.classList.toggle("hidden", !labelPath);
   preview?.toggleAttribute("disabled", !labelPath);
+  $('print-history-label')?.classList.toggle('hidden', !labelPath);
+  $('print-history-label')?.toggleAttribute('disabled', !labelPath);
   details.innerHTML = labelPath
     ? `
       <span><strong>Orders:</strong> ${escapeHtml(orderNumbers.join(", ") || order?.order_number || "-")}</span>
@@ -11569,6 +11571,16 @@ function setupListeners() {
   $("add-extra-history-label")?.addEventListener("click", confirmHistoryExtraLabel);
   $("history-extra-label-photo")?.addEventListener("change", renderHistoryExtraLabelPhotoList);
   $("preview-history-label")?.addEventListener("click", previewHistoryLabel);
+  document.addEventListener('click', event => {
+    const button=event.target.closest('[data-history-label-print-group],[data-history-extra-label-print],#print-history-label');
+    if(!button)return;
+    let order;
+    if(button.dataset.historyExtraLabelPrint)order=state.labelEvents.find(row=>row.id===button.dataset.historyExtraLabelPrint);
+    else if(button.id==='print-history-label')order=getAwaitingHistoryLabelOrder(state.awaitingLabelGroup);
+    else order=getAttachedHistoryOrder(getHistoryLabelTarget(button.dataset.historyLabelPrintGroup)?.orders||[]);
+    if(!order?.label_file_path){window.alert('No saved shipping PDF is attached.');return;}
+    void window.shippingLabelPrint.run(button,{bucket:order.label_storage_bucket||EBAY_LABEL_BUCKET,path:order.label_file_path,title:`Shipping label ${order.order_number||''}`});
+  });
   $("history-label-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "history-label-modal") closeHistoryLabelModal();
   });

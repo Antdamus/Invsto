@@ -96,7 +96,7 @@ test('diagnostic shows service/printer states without decrypting credentials or 
       {base: base(41958), printers: [{name, isConnected: true, isLocal: true}]},
     ]});
     const text = lines.join('\n');
-    assert.match(text, /1\.1\.1/);
+    assert.match(text, /1\.2\.0/);
     assert.match(text, /DISCONNECTED/);
     assert.match(text, /CONNECTED \| local \| PAIRED PRINTER/);
     assert.match(text, /Ready: paired printer found on port 41958/);

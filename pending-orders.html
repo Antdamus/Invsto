@@ -417,6 +417,7 @@
               <div class="fulfill-actions">
                 <button id="open-ebay-label-page" type="button" class="secondary-btn">Open eBay Label Page</button>
                 <button id="preview-ebay-label" type="button" class="secondary-btn hidden">Preview Label</button>
+        <button id="print-ebay-label" type="button" class="secondary-btn hidden">Print shipping label</button>
               </div>
             </section>
 
@@ -589,6 +590,7 @@
         <div id="worker-no-inventory-label-details" class="ebay-label-details"></div>
         <div class="no-inventory-label-actions">
           <button id="preview-worker-ebay-label" type="button" class="secondary-btn hidden">Preview Label</button>
+        <button id="print-worker-ebay-label" type="button" class="secondary-btn hidden">Print shipping label</button>
         </div>
       </section>
       <section class="no-inventory-evidence" aria-label="Optional evidence photos">
@@ -956,6 +958,10 @@
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
   <script src="ebay-buyer-insights.js"></script>
-  <script src="pending-orders.js?v=20260928-bag-lookup"></script>
+  <script src="vendor/pdf-lib/pdf-lib.min.js?v=1.17.1"></script>
+<script src="shipping-pdf.js?v=20260929"></script>
+<script src="print-stations.js?v=20260929-shipping"></script>
+<script src="shipping-label-print.js?v=20260929"></script>
+<script src="pending-orders.js?v=20260929-shipping"></script>
 </body>
 </html>

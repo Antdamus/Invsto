@@ -7,7 +7,9 @@ import zipfile
 root = Path(__file__).resolve().parents[1]
 files = ('Install-Print-Station.cmd', 'install-print-station.ps1', 'print-station-agent.cjs',
          'dymo-web-service-print.js', 'station-public-config.json', 'PRINT-STATION-README.txt',
-         'Diagnose-Print-Station.cmd')
+         'Diagnose-Print-Station.cmd', 'Add-Printer.cmd', 'shipping-pdf-print.cjs', 'pdf-engine.json')
+sources = {name: root / 'tools' / name for name in files}
+sources.update({name: root / name for name in ('shipping-pdf.js', 'vendor/pdf-lib/pdf-lib.min.js', 'vendor/pdf-lib/LICENSE.md')})
 config = json.loads((root / 'tools/station-public-config.json').read_text(encoding='utf-8-sig'))
 # Only the site's existing public browser configuration belongs in the download.
 import base64
@@ -18,15 +20,15 @@ assert config['url'] == 'https://byhytmarmigalvawkedi.supabase.co'
 target = root / 'downloads/Invsto-Print-Station-Windows.zip'
 target.parent.mkdir(exist_ok=True)
 with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-    for name in files:
-        data = (root / 'tools' / name).read_bytes()
+    for name in sources:
+        data = sources[name].read_bytes()
         info = zipfile.ZipInfo(name, date_time=(2026, 9, 27, 0, 0, 0))
         info.compress_type = zipfile.ZIP_DEFLATED
         info.external_attr = 0o644 << 16
         archive.writestr(info, data)
 with zipfile.ZipFile(target) as archive:
-    assert set(archive.namelist()) == set(files)
+    assert set(archive.namelist()) == set(sources)
     assert archive.testzip() is None
-    for name in files:
-        assert archive.read(name) == (root / 'tools' / name).read_bytes()
+    for name in sources:
+        assert archive.read(name) == sources[name].read_bytes()
 print(f'{target.name}: {target.stat().st_size} bytes; SHA256 {hashlib.sha256(target.read_bytes()).hexdigest()}')

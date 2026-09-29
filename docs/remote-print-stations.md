@@ -81,3 +81,33 @@ Verified for this release: 27 database checks passed through the authenticated C
 Coverage follow-up: 21 print-station/helper/browser checks and 44 Add Item regressions passed after routing the older label actions through the shared picker. The Windows helper and database did not change; an existing paired station needs no reinstall.
 
 Roll release verification: 28 helper/browser checks, 4 WebKit roll-flow checks, and 51 transactional database assertions passed. The database preflight exercised the new migration and rolled it back along with all test data before deployment. The additional pgTAP suite is `supabase/tests/print_station_rolls_test.sql` (24 checks). Physical left/right printing still requires a test on the destination Twin Turbo.
+
+
+## Helper 1.2.0: multiple printers and shipping PDFs
+
+Run the normal installer to preserve existing pairings. Use `Add-Printer.cmd` and a
+new Print stations pairing code for each additional printer on the same Windows
+account. The original station stays in the root; additional profiles live under
+`profiles/<uuid>`, with independent DPAPI credentials, locks and submission journals.
+Startup and Start/Stop shortcuts cover every profile. A selected queue never falls
+back to another printer.
+
+Pending Orders and Order History (including extra labels) offer shipping printing
+for saved private `ebay-labels` PDFs. The shared picker lists 5XL stations for PDFs
+and keeps the inventory-label preference separate. Select pages explicitly for bulk
+PDFs. Only approximately 4 x 6 inch pages are accepted; the browser normalizes selected
+pages, and the worker checks dimensions, count and SHA256 again before submission.
+Letter/A4 layouts need re-export from eBay. A request is capped at 10 MB/100 labels.
+
+The restricted queue holds an immutable PDF snapshot. RPCs require inventory access;
+the browser never receives station tokens or exposes signed PDF URLs to the helper.
+Old helpers leave PDF jobs queued. PDF jobs use the same claim/lease, idempotency,
+manual retry and no-automatic-replay protections as DYMO jobs. One submitted copy is
+one full set of selected PDF pages; an interrupted set is uncertain, never replayed.
+
+The installer verifies and installs the official SumatraPDF portable 3.6.1 engine
+without changing default file associations. Its matching Windows queue (not the
+DYMO web service) controls PDF readiness. The engine auto-detects page paper size;
+`shrink,monochrome,simplex,1x` fits printable bounds and submits only one copy per
+journaled operation. Physical printing and driver/media fit still need a test on
+the destination computer. No shipping status or order fulfillment data is changed.

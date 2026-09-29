@@ -1,0 +1,5 @@
+{
+  "version": "3.6.1",
+  "x64": {"url":"https://www.sumatrapdfreader.org/dl/rel/3.6.1/SumatraPDF-3.6.1-64.zip","zipSha256":"98b33a518d42986856d225064b0cd2d3643ecf78cbf84ab873d26cc51877a544","exeName":"SumatraPDF-3.6.1-64.exe","exeSha256":"719f689b34f47be8ca105ce8484948474dafde0e106bab599e4a89326070c3d0"},
+  "arm64": {"url":"https://www.sumatrapdfreader.org/dl/rel/3.6.1/SumatraPDF-3.6.1-arm64.zip","zipSha256":"f21091ca6741e4049b0ca375121708a7959803d39336f0468084808943667ffe","exeName":"SumatraPDF-3.6.1-arm64.exe","exeSha256":"869103a157d235efa73b6712f17a7b71e1e9769d2bffd71c0b3417c1c0e522b8"}
+}

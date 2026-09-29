@@ -4808,6 +4808,10 @@ function renderEbayLabelPanel() {
   const panel = $("ebay-label-panel");
   if (!state.selectedLine) return;
   const label = getSelectedOrderLabelData();
+  for (const id of ['print-ebay-label','print-worker-ebay-label']) {
+    $(id)?.classList.toggle('hidden', !label.path);
+    $(id)?.toggleAttribute('disabled', !label.path);
+  }
   const metadata = label.metadata || {};
   const sizeText = formatFileSize(metadata.size);
   const trackingText = getLabelTrackingDisplay(metadata);
@@ -11630,6 +11634,10 @@ function setupListeners() {
   $("fulfill-seller")?.addEventListener("change", persistSelectedLineSeller);
   $("clear-selection")?.addEventListener("click", clearSelection);
   $("preview-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
+  for (const id of ['print-ebay-label','print-worker-ebay-label']) $(id)?.addEventListener('click', event => {
+    const label=getSelectedOrderLabelData();
+    void window.shippingLabelPrint.run(event.currentTarget,{bucket:label.bucket,path:label.path,title:`Shipping label ${state.selectedLine?.order?.order_number || ''}`});
+  });
   $("preview-worker-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
   $("open-ebay-label-page")?.addEventListener("click", openSelectedEbayLabelPage);
   $("assign-order-task")?.addEventListener("click", handleSelectedOrderTaskButtonClick);

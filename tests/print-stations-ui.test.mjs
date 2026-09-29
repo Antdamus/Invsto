@@ -9,8 +9,8 @@ const label='<DesktopLabel Version="1"></DesktopLabel>';
 before(async()=>{
  server=createServer(async(req,res)=>{
   const name=req.url.split('?')[0].slice(1);
-  if(name==='fixture.html'){res.setHeader('Content-Type','text/html');res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><button id="start">Print</button><script src="print-stations.js"></script><script src="additem-dymolabel.js"></script>');return;}
-  if(!/^[a-z0-9.-]+$/i.test(name)){res.writeHead(404).end();return;}
+  if(name==='fixture.html'){res.setHeader('Content-Type','text/html');res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><button id="start">Print</button><script src="print-stations.js"></script><script src="additem-dymolabel.js"></script>');return;}
+  if(name!=='vendor/pdf-lib/pdf-lib.min.js'&&!/^[a-z0-9.-]+$/i.test(name)){res.writeHead(404).end();return;}
   try{let content=await readFile(new URL(name,root),'utf8');if(name.endsWith('.html'))content=content.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,tag=>tag.includes('src="print-stations.js')?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));origin=`http://127.0.0.1:${server.address().port}`;
@@ -31,7 +31,7 @@ async function openPage(t,admin=true,path='fixture.html'){
    if(name==='can_manage_print_stations')return {data:window.testAdmin};
    if(name==='list_print_stations')return window.testListError?{error:{message:'Connection unavailable'}}:{data:window.testStations};
    if(name==='list_label_print_jobs')return {data:window.testJobs};
-   if(name==='enqueue_label_print')return window.testSendError?{error:{message:'Connection lost'}}:{data:{id:'job-1',status:'queued'}};
+   if(name==='enqueue_label_print'||name==='enqueue_shipping_label_print')return window.testSendError?{error:{message:'Connection lost'}}:{data:{id:'job-1',status:'queued'}};
    if(name==='retry_label_print')return window.testRetryError?{error:{message:'Connection lost'}}:{data:{id:'job-2',status:'queued'}};
    if(name==='configure_print_station_rolls'){Object.assign(window.testStations.find(s=>s.id===args._station_id),{default_roll:args._default_roll,left_roll_label:args._left_label,right_roll_label:args._right_label});return {data:null};}
    if(name==='register_print_station')return {data:{station_id:'c',code:'1234567890ABCDEF',expires_at:new Date(Date.now()+900000).toISOString()}};
@@ -164,4 +164,45 @@ test('bag capture rejects negative tare and quantities below one unit',async t=>
  await page.locator('#bulk-tare').fill('1');await page.locator('#bulk-gross').fill('1.5');assert.equal(await page.locator('#bulk-save').isDisabled(),true);
  await page.locator('#bulk-gross').fill('6');assert.equal(await page.locator('#bulk-save').isEnabled(),true);
  await page.locator('#bulk-tare').fill('0');await page.locator('#bulk-gross').fill('0.3');await page.locator('#bulk-unit-override').fill('0.1');assert.equal(await page.locator('#bulk-estimated-qty').innerText(),'3');
+});
+
+async function setupShipping(page){
+ await page.addScriptTag({url:origin+'/vendor/pdf-lib/pdf-lib.min.js'});
+ await page.addScriptTag({url:origin+'/shipping-pdf.js'});
+ await page.addScriptTag({url:origin+'/shipping-label-print.js'});
+ await page.evaluate(async()=>{
+  window.testStations.push({id:'pdf',name:'Sandra shipping',paired:true,online:true,printer_connected:true,printer_name:'DYMO LabelWriter 5XL',pdf_print_ready:true});
+  window.testStations.push({id:'old-pdf',name:'Old shipping helper',paired:true,online:true,printer_connected:true,printer_name:'DYMO LabelWriter 5XL',pdf_print_ready:false});
+  const doc=await PDFLib.PDFDocument.create();doc.addPage([288,432]);doc.addPage([288,432]);
+  window.pdfBytes=await doc.save();
+  window.supabase.storage.from=()=>({createSignedUrl:async()=>({data:{signedUrl:URL.createObjectURL(new Blob([window.pdfBytes],{type:'application/pdf'}))}})});
+ });
+}
+async function beginShipping(page){
+ await page.evaluate(()=>{
+  window.testResult=null;window.testError=null;
+  window.shippingLabelPrint.printSaved({path:'test/label.pdf',title:'Order shipping label'}).then(value=>window.testResult=value).catch(error=>window.testError={message:error.message,cancelled:error.cancelled});
+ });
+ await page.locator('[data-destination]:enabled').waitFor();
+}
+test('mobile shipping PDF picker isolates 5XL, requires pages and preserves page/copy selection',async t=>{
+ const page=await openPage(t);await setupShipping(page);await beginShipping(page);
+ const options=await page.locator('[data-destination] option').allTextContents();assert.equal(options.length,3);assert.equal(options.some(text=>text.includes('Florida')||text.includes('local helper')),false);
+ await page.locator('[data-destination]').selectOption('old-pdf');assert.equal(await page.locator('[data-send]').isDisabled(),true);assert.match(await page.locator('[data-destination-status]').innerText(),/Update/);
+ await page.locator('[data-destination]').selectOption('pdf');await page.locator('[data-send]').click();assert.match(await page.locator('[data-message]').innerText(),/Choose.*page/);
+ await page.locator('[data-pages]').fill('2');await page.locator('[data-copies]').fill('2');
+ await page.setViewportSize({width:320,height:640});assert.ok(await page.locator('dialog').evaluate(el=>el.getBoundingClientRect().width<=innerWidth));
+ await page.screenshot({path:new URL('../test-results/shipping-print-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1'),fullPage:true});
+ await page.locator('[data-send]').click();await page.waitForFunction(()=>window.testResult||window.testError);
+ const result=await page.evaluate(()=>({error:window.testError,result:window.testResult,call:window.calls.find(c=>c.name==='enqueue_shipping_label_print')}));
+ assert.equal(result.error,null);assert.deepEqual(result.call.args._source_pages,[2]);assert.equal(result.call.args._copies,2);assert.equal(result.call.args._station_id,'pdf');assert.match(result.call.args._pdf_base64,/^JVBER/);assert.match(result.result.message,/2 shipping/);
+});
+test('shipping PDF lost acknowledgement uses the same request on retry and rejects unsupported sheets',async t=>{
+ const page=await openPage(t);await setupShipping(page);await page.evaluate(()=>window.testSendError=true);await beginShipping(page);await page.locator('[data-pages]').fill('1');await send(page,'pdf');
+ const first=await page.evaluate(()=>window.calls.find(c=>c.name==='enqueue_shipping_label_print').args._request_id);
+ await page.evaluate(()=>window.testSendError=false);await beginShipping(page);await page.locator('[data-pages]').fill('1');await send(page,'pdf');
+ assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.name==='enqueue_shipping_label_print')[1].args._request_id),first);
+ await page.evaluate(async()=>{const doc=await PDFLib.PDFDocument.create();doc.addPage([612,792]);window.pdfBytes=await doc.save();});
+ await beginShipping(page);await send(page,'pdf');assert.match(await page.evaluate(()=>window.testError.message),/4 × 6/);
+ assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.name==='enqueue_shipping_label_print').length),2);
 });

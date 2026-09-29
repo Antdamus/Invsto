@@ -24,3 +24,7 @@
 @media(max-width:600px) { .print-stations-page { padding:12px; } .print-stations-page section { padding:14px; } .print-station-dialog { padding:16px; } }
 
 .print-station-dialog .print-dialog-actions { position:sticky; bottom:0; padding:12px 0 2px; background:#211e20; }
+
+.print-destination-picker[open] { display:flex; flex-direction:column; overflow:hidden; }
+.print-destination-picker .print-dialog-body { min-height:0; overflow:auto; overscroll-behavior:contain; padding-right:4px; }
+.print-destination-picker .print-dialog-actions { position:static; flex-shrink:0; margin-top:10px; border-top:1px solid #514638; }

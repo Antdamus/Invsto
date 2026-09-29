@@ -1,20 +1,20 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Print stations · Invsto</title>
-<link rel="stylesheet" href="add-item.css"><link rel="stylesheet" href="print-stations.css?v=20260927-rolls">
+<link rel="stylesheet" href="add-item.css"><link rel="stylesheet" href="print-stations.css?v=20260929-shipping">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head><body class="add-body"><header class="header"><h1>Invsto</h1></header>
 <main id="print-stations-page" class="print-stations-page">
 <h1>Print stations</h1><p>Send your labels to a named computer, even when you are in another location.</p>
 <p id="print-page-status" role="status">Loading your print stations…</p><button id="print-refresh" type="button">Refresh status</button>
-<section><h2>Your computers</h2><div id="print-station-list"></div></section>
-<section id="print-setup" hidden><h2>Add a printing computer</h2>
-<ol><li>Name the computer below, for example “Florida counter.”</li><li>On that Windows computer, download the helper, extract the ZIP, and double-click <strong>Install-Print-Station.cmd</strong>.</li><li>Choose its DYMO printer and enter the pairing code shown here. Leave the computer awake and the printer connected.</li></ol>
+<section><h2>Your printers</h2><div id="print-station-list"></div></section>
+<section id="print-setup" hidden><h2>Add a printer</h2>
+<ol><li>Name this printer below, for example “Sandra — shipping 5XL.”</li><li>On that Windows computer, download the helper, extract the ZIP, and double-click <strong>Install-Print-Station.cmd</strong>.</li><li>Choose its DYMO printer and enter the pairing code shown here. Leave the computer awake and the printer connected.</li></ol>
 <p>The helper starts with Windows sign-in. DYMO Connect must be installed on the printing computer. If Windows asks whether to run the downloaded helper, check that it came from this Invsto page.</p>
-<p><a class="print-download-link" href="downloads/Invsto-Print-Station-Windows.zip?v=1.1.1" download>Download Windows helper</a> · <a href="https://www.dymo.com/support?cfid=software-downloads">DYMO software</a></p>
+<p><a class="print-download-link" href="downloads/Invsto-Print-Station-Windows.zip?v=1.2.0" download>Download Windows helper</a> · <a href="https://www.dymo.com/support?cfid=software-downloads">DYMO software</a></p>
 <p>Already paired? Run the new installer to update the helper; it keeps your existing station. Twin Turbo printers can use Left or Right for each job. Use <strong>Roll settings</strong> above to name each roll and save a default.</p>
-<p>Helper 1.1.1 improves printer detection. If DYMO can print but Invsto says disconnected, update the helper on that computer, then open the <strong>Diagnose Invsto Printer</strong> desktop shortcut if needed. Existing queued labels may print when the connection returns.</p>
-<form id="print-register-form"><label for="print-station-name">Computer name</label><input id="print-station-name" required maxlength="80" placeholder="e.g. Florida counter"><button type="submit">Create pairing code</button></form>
+<p><strong>Two printers on one computer?</strong> Create a separate pairing code for the second printer, then run <strong>Add-Printer.cmd</strong> from the extracted download. Choose the 5XL for shipping PDFs; the Twin Turbo pairing stays in place.</p><p>Helper 1.2.0 supports saved 4 × 6 shipping PDFs from Pending Orders and Order History. It installs a verified portable PDF print engine. Both printer helpers start when you sign into Windows.</p><p> If DYMO can print but Invsto says disconnected, update the helper on that computer, then open the <strong>Diagnose Invsto Printer</strong> desktop shortcut if needed. Existing queued labels may print when the connection returns.</p>
+<form id="print-register-form"><label for="print-station-name">Printer station name</label><input id="print-station-name" required maxlength="80" placeholder="e.g. Sandra — shipping 5XL"><button type="submit">Create pairing code</button></form>
 <div id="print-pairing" hidden><h3>Pair this computer</h3><code id="print-pair-code"></code><p id="print-pair-expiry"></p><button type="button" id="print-copy-code">Copy code</button></div>
 </section>
-<section><h2>Recent print jobs</h2><p>“Sent to printer” means DYMO accepted the request. Check the printer for the physical labels. An interrupted job is never automatically reprinted.</p><div id="print-job-list"></div></section>
-</main><script src="initSupabase.js"></script><script src="admin-nav.js?v=20260927-print-stations"></script><script src="print-stations.js?v=20260927-rolls"></script></body></html>
+<section><h2>Recent print jobs</h2><p>“Sent to printer” means the printer software accepted the request. Check the printer for the physical labels. An interrupted job is never automatically reprinted.</p><div id="print-job-list"></div></section>
+</main><script src="initSupabase.js"></script><script src="admin-nav.js?v=20260927-print-stations"></script><script src="print-stations.js?v=20260929-shipping"></script></body></html>

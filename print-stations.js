@@ -2,7 +2,7 @@
   'use strict';
   const PREF = 'invsto.print.destination.v1';
   const PENDING = 'invsto.print.pending.v1.';
-  const styles = document.createElement('link');styles.rel='stylesheet';styles.href='print-stations.css?v=20260927-rolls';document.head.append(styles);
+  const styles = document.createElement('link');styles.rel='stylesheet';styles.href='print-stations.css?v=20260929-shipping';document.head.append(styles);
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const cancelled = () => Object.assign(new Error('Printing cancelled. No new print request was sent.'), {cancelled:true});
   async function rpc(name, args={}) {
@@ -19,11 +19,14 @@
   const rollName = roll => roll==='Left'?'Left roll':roll==='Right'?'Right roll':'Printer default';
   const rollOptions = station => ['Left','Right'].map(roll=>`<option value="${roll}">${rollName(roll)}${station[roll.toLowerCase()+'_roll_label']?' - '+escape(station[roll.toLowerCase()+'_roll_label']):''}</option>`).join('');
   let choosing=false;
-  async function chooseDestination({copies=1,labelCount=1}={}) {
+  async function chooseDestination({copies=1,labelCount=1,documentType='dymo',pageCount=1}={}) {
     if (choosing) throw new Error('Choose the destination in the open print window.');
+    const pdf=documentType==='pdf', preference=pdf?PREF+'.pdf':PREF;
     choosing=true;
-    const dialog=document.createElement('dialog');dialog.className='print-station-dialog';
-    dialog.innerHTML=`<form method="dialog"><div class="print-dialog-head"><h2>Print labels</h2><button value="cancel" aria-label="Close print destination">×</button></div></form><p>Choose the computer and printer that should receive these labels.</p><p role="status" data-message>Loading print stations…</p><label>Send to<select data-destination disabled></select></label><div data-roll-section hidden><label>Label roll<select data-roll><option value="">Choose a roll...</option></select></label><p>Left and right as you face the front of the printer. Choose the roll loaded with labels that match this label’s size.</p><p data-roll-update hidden>Update the Windows helper on this computer to enable roll selection. <a href="downloads/Invsto-Print-Station-Windows.zip?v=1.1.0" download>Download helper update</a>. Extract it and run Install-Print-Station.cmd; your pairing is kept.</p></div><label>Copies per label<input data-copies type="number" min="1" max="100" value="${Math.max(1,Math.min(100,Number(copies)||1))}"></label><p>${labelCount>1?`${labelCount} item labels. `:''}<span data-destination-status></span></p><a href="print-stations.html">Set up a computer or view print jobs</a><div class="print-dialog-actions"><button type="button" data-cancel>Cancel</button><button type="button" data-send disabled>Send labels</button></div>`;
+    const dialog=document.createElement('dialog');dialog.className='print-station-dialog print-destination-picker';
+    dialog.innerHTML=`<form method="dialog"><div class="print-dialog-head"><h2>${pdf?'Print shipping label':'Print labels'}</h2><button value="cancel" aria-label="Close print destination">×</button></div></form><p>Choose the printer that should receive these labels.</p><p role="status" data-message>Loading print stations…</p><label>Send to<select data-destination disabled></select></label><div data-roll-section hidden><label>Label roll<select data-roll><option value="">Choose a roll...</option></select></label><p>Left and right as you face the front of the printer. Choose the roll loaded with labels that match this label’s size.</p><p data-roll-update hidden>Update the Windows helper on this computer to enable roll selection. <a href="downloads/Invsto-Print-Station-Windows.zip?v=1.2.0" download>Download helper update</a>. Extract it and run Install-Print-Station.cmd; your pairing is kept.</p></div>${pdf?`<p>This saved PDF contains <strong>${pageCount} page${pageCount===1?'':'s'}</strong>. Load 4 × 6 shipping labels in the 5XL.</p><label>Pages to print<input data-pages placeholder="e.g. 1, 3-5, or all" value="${pageCount===1?'1':''}" inputmode="text"></label><p>Check the PDF preview to match pages to this order. A bulk PDF may contain other orders.</p>`:''}<label>${pdf?'Copies of selected pages':'Copies per label'}<input data-copies type="number" min="1" max="100" value="${Math.max(1,Math.min(100,Number(copies)||1))}"></label><p>${labelCount>1?`${labelCount} item labels. `:''}<span data-destination-status></span></p><a href="print-stations.html">Set up a computer or view print jobs</a><div class="print-dialog-actions"><button type="button" data-cancel>Cancel</button><button type="button" data-send disabled>Send labels</button></div>`;
+    const dialogBody=document.createElement('div');dialogBody.className='print-dialog-body';
+    const actions=dialog.querySelector('.print-dialog-actions');for(const child of [...dialog.children])if(child!==actions)dialogBody.append(child);dialog.prepend(dialogBody);
     const previousFocus=document.activeElement;document.body.append(dialog);dialog.showModal();
     return new Promise((resolve,reject)=>{
       let finished=false, stations=[];
@@ -35,26 +38,30 @@
       const rollSelect=dialog.querySelector('[data-roll]');
       const update=(resetRoll=false)=>{
         const station=stations.find(row=>row.id===select.value);
-        const twin=isTwin(station);
+        const twin=!pdf&&isTwin(station);
         dialog.querySelector('[data-roll-section]').hidden=!twin;
         dialog.querySelector('[data-roll-update]').hidden=!twin||station.roll_selection_ready;
         if(resetRoll){rollSelect.innerHTML='<option value="">Choose a roll...</option>'+(twin?rollOptions(station):'');rollSelect.value=station?.default_roll||'';}
-        status.textContent=station?`${station.printer_name || 'DYMO'} · ${stationStatus(station)}. Labels stay assigned to this computer.`:select.value==='local'?'Downloads a label file on this device for the existing local helper.':'Choose a print station.';
-        send.disabled=(!station && select.value!=='local')||(twin&&(!rollSelect.value||!station.roll_selection_ready));send.textContent=select.value==='local'?'Download label file':'Send labels';
+        status.textContent=pdf&&station&&!station.pdf_print_ready?'Update this computer to Windows helper 1.2.0 before sending shipping PDFs.':station?`${station.printer_name || 'DYMO'} · ${stationStatus(station)}. Labels stay assigned to this computer.`:select.value==='local'?'Downloads a label file on this device for the existing local helper.':'Choose a print station.';
+        send.disabled=(pdf&&(!station||!station.pdf_print_ready))||(!station && select.value!=='local')||(twin&&(!rollSelect.value||!station.roll_selection_ready));send.textContent=select.value==='local'?'Download label file':'Send labels';
+        if(pdf){try{const pages=window.shippingPdf.parsePages(dialog.querySelector('[data-pages]').value,pageCount),amount=Number(dialog.querySelector('[data-copies]').value);if(Number.isInteger(amount)&&amount>0)send.textContent=`Send ${pages.length*amount} label${pages.length*amount===1?'':'s'}`;}catch{}}
       };
       select.onchange=()=>update(true);rollSelect.onchange=()=>update();
+      if(pdf){for(const input of dialog.querySelectorAll('[data-pages],[data-copies]'))input.oninput=()=>{dialog.querySelector('[data-message]').textContent='';update();};}
       send.onclick=()=>{
         const amount=Number(dialog.querySelector('[data-copies]').value);
         if(!Number.isInteger(amount)||amount<1||amount>100){dialog.querySelector('[data-message]').textContent='Choose 1–100 copies per label.';return;}
         const station=stations.find(row=>row.id===select.value);if((!station&&select.value!=='local')||(isTwin(station)&&(!['Left','Right'].includes(rollSelect.value)||!station.roll_selection_ready)))return;
-        localStorage.setItem(PREF,select.value);finish({stationId:station?.id || null,name:station?.name || 'This device',copies:amount,roll:isTwin(station)?rollSelect.value:'default',local:!station});
+        let pages;
+        if(pdf){try {pages=window.shippingPdf.parsePages(dialog.querySelector('[data-pages]').value,pageCount);if(amount*pages.length>100)throw new Error('Send up to 100 shipping labels per request.');}catch(error){dialog.querySelector('[data-message]').textContent=error.message;return;}if(!station?.pdf_print_ready)return;}
+        localStorage.setItem(preference,select.value);finish({stationId:station?.id || null,name:station?.name || 'This device',copies:amount,roll:isTwin(station)?rollSelect.value:'default',local:!station,pages});
       };
       rpc('list_print_stations').then(rows=>{
-        if(finished)return;stations=(rows||[]).filter(row=>row.paired);
-        select.innerHTML='<option value="">Select a computer…</option>'+stations.map(station=>`<option value="${escape(station.id)}">${escape(station.name)} — ${escape(stationStatus(station))}</option>`).join('')+'<option value="local">Download on this device (local helper)</option>';
-        const preferred=localStorage.getItem(PREF);if(preferred==='local'||stations.some(row=>row.id===preferred))select.value=preferred;
-        select.disabled=false;dialog.querySelector('[data-message]').textContent=stations.length?'Each job goes only to the computer you select.':'No paired computers yet. Open “Set up a computer” below on your phone, and download the helper on the printing computer.';update(true);
-      }).catch(error=>{if(finished)return;dialog.querySelector('[data-message]').textContent=error.message || 'Could not load print stations.';select.innerHTML='<option value="">Choose an option…</option><option value="local">Download on this device (local helper)</option>';select.disabled=false;update();});
+        if(finished)return;stations=(rows||[]).filter(row=>row.paired&&(pdf?/\b5XL\b/i.test(`${row.printer_name||''} ${row.printer_model||''}`):!/\b5XL\b/i.test(`${row.printer_name||''} ${row.printer_model||''}`)));
+        select.innerHTML='<option value="">Select a computer…</option>'+stations.map(station=>`<option value="${escape(station.id)}">${escape(station.name)} — ${escape(stationStatus(station))}</option>`).join('')+(pdf?'':'<option value="local">Download on this device (local helper)</option>');
+        const preferred=localStorage.getItem(preference);if((preferred==='local'&&!pdf)||stations.some(row=>row.id===preferred))select.value=preferred;
+        select.disabled=false;dialog.querySelector('[data-message]').textContent=stations.length?'Each job goes only to the computer you select.':(pdf?'No paired 5XL shipping printer yet. Add it in Print stations using Add-Printer.cmd on the computer.':'No paired computers yet. Open “Set up a computer” below on your phone, and download the helper on the printing computer.');update(true);
+      }).catch(error=>{if(finished)return;dialog.querySelector('[data-message]').textContent=error.message || 'Could not load print stations.';select.innerHTML='<option value="">Choose an option…</option><option value="local">Download on this device (local helper)</option>';if(pdf)select.innerHTML='<option value="">Could not load shipping printers</option>';select.disabled=false;update();});
     });
   }
   async function enqueueLabel(labelXml, options={}) {
@@ -133,8 +140,8 @@
       try{
         const [stations,jobs]=await Promise.all([rpc('list_print_stations'),rpc('list_label_print_jobs')]);
         currentStations=stations;
-        stationList.innerHTML=stations.length?stations.map(station=>`<article class="print-station-card"><h3>${escape(station.name)}</h3><strong>${escape(stationStatus(station))}</strong><p>${escape(station.printer_name || 'Complete pairing to choose the printer')}${station.computer_name?` · ${escape(station.computer_name)}`:''}</p>${isTwin(station)?`<p>Left: ${escape(station.left_roll_label||'Label type not named')} / Right: ${escape(station.right_roll_label||'Label type not named')}</p><p>Default: ${station.default_roll?rollName(station.default_roll):'Choose each time'}</p>${station.roll_selection_ready?'':`<p>Helper update required for roll selection. Download the Windows helper below and run its installer again; your pairing is kept.</p>`}`:''}${station.last_error?`<p>${escape(station.last_error)}</p>`:''}${admin?`<div class="print-card-actions">${station.paired&&isTwin(station)?`<button data-configure-rolls="${escape(station.id)}">Roll settings</button>`:''}${!station.paired?`<button data-renew="${escape(station.id)}">Get new pairing code</button>`:''}<button data-disconnect="${escape(station.id)}">Disconnect station</button></div>`:''}</article>`).join(''):'<p>No print stations yet. Add your first computer below.</p>';
-        jobsList.innerHTML=jobs.length?jobs.map(job=>`<article class="print-job-card"><h3>${escape(job.title || job.barcode || 'Label')}</h3><strong>${escape(jobStatus(job.status))}</strong><p>${escape(job.station_name)} · ${escape(job.printer_name)} · ${rollName(job.printer_roll)} · ${job.submitted_copies}/${job.copies} copies submitted</p><p>${escape(new Date(job.created_at).toLocaleString())}${job.barcode?` · ${escape(job.barcode)}`:''}</p>${job.detail?`<p>${escape(job.detail)}</p>`:''}${job.status==='queued'?`<button data-cancel-job="${escape(job.id)}">Cancel queued job</button>`:['submitted','failed','uncertain','cancelled'].includes(job.status)?`<button data-retry-job="${escape(job.id)}" data-job-status="${escape(job.status)}">${job.status==='submitted'?'Print again':'Send a new request'}</button>`:''}</article>`).join(''):'<p>No print jobs yet. Use Print labels in Add Item, Add Inventory, or Stock.</p>';
+        stationList.innerHTML=stations.length?stations.map(station=>`<article class="print-station-card"><h3>${escape(station.name)}</h3><strong>${escape(stationStatus(station))}</strong><p>${escape(station.printer_name || 'Complete pairing to choose the printer')}${station.computer_name?` · ${escape(station.computer_name)}`:''}</p>${/\b5XL\b/i.test(`${station.printer_name||''} ${station.printer_model||''}`)?`<p>Shipping PDFs · 4 × 6 labels${station.pdf_print_ready?'':' · Update this computer to helper 1.2.0'}</p>`:''}${isTwin(station)?`<p>Left: ${escape(station.left_roll_label||'Label type not named')} / Right: ${escape(station.right_roll_label||'Label type not named')}</p><p>Default: ${station.default_roll?rollName(station.default_roll):'Choose each time'}</p>${station.roll_selection_ready?'':`<p>Helper update required for roll selection. Download the Windows helper below and run its installer again; your pairing is kept.</p>`}`:''}${station.last_error?`<p>${escape(station.last_error)}</p>`:''}${admin?`<div class="print-card-actions">${station.paired&&isTwin(station)?`<button data-configure-rolls="${escape(station.id)}">Roll settings</button>`:''}${!station.paired?`<button data-renew="${escape(station.id)}">Get new pairing code</button>`:''}<button data-disconnect="${escape(station.id)}">Disconnect station</button></div>`:''}</article>`).join(''):'<p>No print stations yet. Add your first computer below.</p>';
+        jobsList.innerHTML=jobs.length?jobs.map(job=>`<article class="print-job-card"><h3>${escape(job.title || job.barcode || 'Label')}</h3><strong>${escape(jobStatus(job.status))}</strong><p>${escape(job.station_name)} · ${escape(job.printer_name)} · ${job.document_type==='pdf'?`${job.pdf_page_count} PDF page(s), source pages ${(job.source_pages||[]).join(', ')}`:rollName(job.printer_roll)} · ${job.submitted_copies}/${job.copies} copies submitted</p><p>${escape(new Date(job.created_at).toLocaleString())}${job.barcode?` · ${escape(job.barcode)}`:''}</p>${job.detail?`<p>${escape(job.detail)}</p>`:''}${job.status==='queued'?`<button data-cancel-job="${escape(job.id)}">Cancel queued job</button>`:['submitted','failed','uncertain','cancelled'].includes(job.status)?`<button data-retry-job="${escape(job.id)}" data-job-status="${escape(job.status)}">${job.status==='submitted'?'Print again':'Send a new request'}</button>`:''}</article>`).join(''):'<p>No print jobs yet. Print item labels from inventory or shipping labels from Pending Orders and Order History.</p>';
       }catch(error){report(error);}finally{refreshing=false;}
     }
     root.addEventListener('click',async event=>{
@@ -160,6 +167,6 @@
     try{admin=Boolean(await rpc('can_manage_print_stations'));document.getElementById('print-setup').hidden=!admin;message.textContent=admin?'Ready. Pair a computer or review your print jobs.':'Choose an existing station when printing. An administrator can pair additional computers.';}catch(error){report(error);}
     await refresh();setInterval(()=>{if(!document.hidden)void refresh();},5000);
   }
-  window.printStations={chooseDestination,enqueueLabel,printLabel,stationStatus,jobStatus,deliveryMessage,mountLabelButton};
+  window.printStations={rpc,chooseDestination,enqueueLabel,printLabel,stationStatus,jobStatus,deliveryMessage,mountLabelButton};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initPage);else void initPage();
 })();

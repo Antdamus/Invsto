@@ -1,4 +1,4 @@
-INVSTO PRINT STATION 1.1.1 - WINDOWS
+INVSTO PRINT STATION 1.2.0 - WINDOWS
 
 1. Install DYMO Connect and confirm your LabelWriter appears there.
 2. Extract all files from this ZIP into a folder.
@@ -18,12 +18,11 @@ to start or stop the helper. Stop finishes its current job before exiting.
 Configuration and logs: %LOCALAPPDATA%\InvstoPrintStation
 The pairing credential is protected with Windows DPAPI for this Windows user.
 
-In Invsto, choose the station when printing. "Sent to printer" means DYMO accepted
+In Invsto, choose the station when printing. "Sent to printer" means the printer software accepted
 the request. Check the physical printer. An interrupted or ambiguous result needs
 review before you explicitly send a new print request; the helper does not replay it.
 
-This package handles Invsto DYMO label files. PDF/general document printing is not
-included. Disconnect a station from Invsto to revoke its access and cancel queued jobs.
+This package handles Invsto DYMO labels and saved eBay 4 x 6 shipping PDFs on a 5XL. Disconnect a station from Invsto to revoke its access and cancel queued jobs.
 
 UPDATING AN EXISTING STATION
 Extract the new ZIP and run Install-Print-Station.cmd again. The installer waits
@@ -55,3 +54,26 @@ Send a photo of that window for troubleshooting. Do not send station.json.
 
 To intentionally replace an existing pairing, run install-print-station.ps1 with
 -PairAgain. Normal updates keep the current pairing and any unacknowledged journal.
+
+TWO PRINTERS ON THE SAME COMPUTER
+Keep the existing pairing. In Invsto > Print stations, create another station named
+for the second printer, for example "Sandra - shipping 5XL". In the extracted ZIP,
+run Add-Printer.cmd, choose the 5XL and enter the new pairing code. Each printer has
+its own protected credential, queue, journal and log. Start/Stop desktop shortcuts
+control all paired printers. Startup starts all of them after Windows sign-in.
+
+SHIPPING PDFs
+In Pending Orders or Order History, use Print shipping label beside Preview/Open
+Label. Extra shipping labels have their own Print extra label button. Select the
+5XL station, pages, and copies. For a bulk PDF, preview it first to identify this
+order's pages; page selection is required. Load matching 4 x 6 shipping labels.
+Letter/A4 PDFs are rejected; attach eBay's 4 x 6 thermal layout instead. No automatic
+cropping or resizing from letter-size sheets is performed.
+
+The installer downloads SumatraPDF portable 3.6.1 from its official website, checks
+the pinned ZIP and executable SHA256, and saves it in the helper's pdf-engine folder.
+It does not change your default PDF app. Source/license: https://www.sumatrapdfreader.org/
+The PDF helper checks the exact Windows printer queue, independently of DYMO's web
+service. It never uses the Windows default printer or another connected printer.
+"Sent to printer" does not confirm physical output. Check the printer, especially
+before requesting another copy after an interruption.

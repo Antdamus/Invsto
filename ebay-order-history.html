@@ -354,6 +354,7 @@
       </div>
       <div class="history-modal-actions">
         <button id="preview-history-label" type="button" class="secondary-btn hidden">Preview Label</button>
+        <button id="print-history-label" type="button" class="secondary-btn hidden">Print shipping label</button>
         <button id="replace-history-label" type="button" class="primary-btn hidden">Replace Label</button>
         <button id="add-extra-history-label" type="button" class="primary-btn hidden" disabled>Add Extra Label</button>
         <button id="done-history-label" type="button" class="primary-btn">Done</button>
@@ -639,6 +640,10 @@
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
   <script src="ebay-buyer-insights.js"></script>
-  <script src="ebay-order-history.js?v=history-media-evidence-20260827"></script>
+  <script src="vendor/pdf-lib/pdf-lib.min.js?v=1.17.1"></script>
+<script src="shipping-pdf.js?v=20260929"></script>
+<script src="print-stations.js?v=20260929-shipping"></script>
+<script src="shipping-label-print.js?v=20260929"></script>
+<script src="ebay-order-history.js?v=20260929-shipping"></script>
 </body>
 </html>
