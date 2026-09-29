@@ -3319,6 +3319,7 @@
         if (event.source !== window || event.data?.type !== LABEL_EVENT_TYPE) return;
         const payload = event.data.payload || {};
         if (!payload.base64 && !payload.url) return;
+        if(payload.base64){try{const bytes=atob(payload.base64);if(!bytes.slice(0,1024).includes('%PDF-')||!bytes.slice(-4096).includes('%%EOF'))return;}catch{return;}}
         window.clearTimeout(timer);
         window.removeEventListener("message", onMessage);
         resolve(payload);
@@ -3374,6 +3375,8 @@
     if (!response.ok) throw new Error(`Label URL returned HTTP ${response.status}.`);
     const blob = await response.blob();
     const buffer = await blob.arrayBuffer();
+    const pdfBytes=new Uint8Array(buffer);
+    if(!new TextDecoder('latin1').decode(pdfBytes.subarray(0,1024)).includes('%PDF-')||!new TextDecoder('latin1').decode(pdfBytes.subarray(Math.max(0,pdfBytes.length-4096))).includes('%%EOF'))throw new Error('The eBay download returned an incomplete PDF. Download the full label and send it again.');
     return {
       source: "content-fetch",
       url: response.url || url,

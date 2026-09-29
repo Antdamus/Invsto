@@ -10116,6 +10116,7 @@ async function attachEbayLabelToOrder(transferPayload) {
   }
 
   const blob = base64ToBlob(label.base64, label.mimeType || "application/pdf");
+  await window.shippingLabelPrint.assertComplete(blob);
   const shipmentSegment = safeStorageSegment(metadata.shipmentId || transferPayload.transferId || crypto.randomUUID(), "shipment");
   const destinationPath = targetOrderNumbers.length > 1
     ? [

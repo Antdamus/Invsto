@@ -9511,6 +9511,7 @@ async function attachHistoryLabelToOrder(transferPayload) {
   if (!label.base64) throw new Error("The extension did not send a readable PDF payload.");
 
   const blob = base64ToBlob(label.base64, label.mimeType || "application/pdf");
+  await window.shippingLabelPrint.assertComplete(blob);
   const shipmentSegment = safeStorageSegment(metadata.shipmentId || transferPayload.transferId || crypto.randomUUID(), "shipment");
   const destinationPath = awaiting.orderNumbers.length > 1
     ? [
@@ -9625,6 +9626,7 @@ async function attachHistoryExtraLabelToOrder(transferPayload) {
 
   const evidencePhotos = await uploadHistoryExtraLabelEvidencePhotos(files, awaiting.orderNumbers, transferPayload.transferId || "");
   const blob = base64ToBlob(label.base64, label.mimeType || "application/pdf");
+  await window.shippingLabelPrint.assertComplete(blob);
   const destinationPath = [
     "extra-labels",
     `${safeStorageSegment(metadata.labelId || metadata.shipmentId || transferPayload.transferId || crypto.randomUUID(), "extra-label")}.pdf`,

@@ -1745,6 +1745,8 @@
 
     const blob = await response.blob();
     const buffer = await blob.arrayBuffer();
+    const pdfBytes=new Uint8Array(buffer);
+    if(!new TextDecoder('latin1').decode(pdfBytes.subarray(0,1024)).includes('%PDF-')||!new TextDecoder('latin1').decode(pdfBytes.subarray(Math.max(0,pdfBytes.length-4096))).includes('%%EOF'))throw new Error('The eBay download returned an incomplete PDF. Download the full label and send it again.');
     const mimeType = blob.type || item?.mime || "application/pdf";
     if (!/pdf/i.test(mimeType) && !/\.pdf(?:$|[?#])/i.test(url)) {
       throw new Error(`The captured download was not a PDF (${mimeType || "unknown type"}).`);

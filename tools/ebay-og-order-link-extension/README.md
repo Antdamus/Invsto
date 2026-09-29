@@ -112,3 +112,10 @@ The extension still does not read arbitrary local files from disk. It captures t
 ## Multi-item shipping box reminder
 
 On eBay shipping-label pages, the extension watches for label workflows with 3 or more detected items/orders. When triggered, it shows an OG reminder to change the package dimensions before buying the label, with `4 x 4 x 4 in` shown only as an example size. If eBay's package dimension inputs are visible, the reminder includes a `Set 4 x 4 x 4` button that fills length, width, and height.
+
+
+Version 1.0.1 rejects partial PDF captures and fetches a complete document when the
+PDF viewer requests byte ranges. Existing incomplete attachments cannot be repaired
+from missing bytes: use Replace Label in Invsto and Send Label to OG with the full
+original eBay PDF. To update an unpacked install, replace its folder's files, click
+Reload on the extension card, then refresh the eBay and Invsto tabs.

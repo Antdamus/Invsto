@@ -3,6 +3,12 @@
   'use strict';
   let busy=false;
   const hex=buffer=>Array.from(new Uint8Array(buffer),n=>n.toString(16).padStart(2,'0')).join('');
+  async function assertComplete(blobOrBytes){
+    const bytes=blobOrBytes instanceof Uint8Array?blobOrBytes:new Uint8Array(await blobOrBytes.arrayBuffer());
+    const head=new TextDecoder('latin1').decode(bytes.subarray(0,1024));
+    const tail=new TextDecoder('latin1').decode(bytes.subarray(Math.max(0,bytes.length-4096)));
+    if(!head.includes('%PDF-')||!tail.includes('%%EOF'))throw new Error('This saved PDF is incomplete. Download the full shipping label from eBay and use Replace Label / Send Label to OG to attach it again. No print request was sent.');
+  }
   async function printSaved({bucket='ebay-labels',path,title='Shipping label'}){
     if(busy)throw new Error('Finish the open shipping print request first.');
     if(bucket!=='ebay-labels'||!path)throw new Error('Attach an eBay shipping PDF before printing.');
@@ -13,7 +19,9 @@
       const response=await fetch(data.signedUrl,{cache:'no-store',signal:AbortSignal.timeout(30000)});
       if(!response.ok)throw new Error('Could not download the saved shipping PDF. Try again.');
       if(Number(response.headers.get('content-length'))>window.shippingPdf.MAX_BYTES)throw new Error('Shipping PDFs must be smaller than 10 MB.');
-      const bytes=new Uint8Array(await response.arrayBuffer()), info=await window.shippingPdf.inspect(bytes);
+      const bytes=new Uint8Array(await response.arrayBuffer());
+      await assertComplete(bytes);
+      let info;try{info=await window.shippingPdf.inspect(bytes);}catch{throw new Error('This saved PDF cannot be read. Open Label to check it, then replace it with a fresh, unencrypted eBay shipping PDF. No print request was sent.');}
       const destination=await window.printStations.chooseDestination({documentType:'pdf',pageCount:info.count});
       const prepared=await window.shippingPdf.prepare(bytes,destination.pages.join(','));
       let binary='';for(let offset=0;offset<prepared.bytes.length;offset+=32768)binary+=String.fromCharCode(...prepared.bytes.subarray(offset,offset+32768));
@@ -36,5 +44,5 @@
     catch(error){if(!error.cancelled)window.alert(error.message||'Could not send the shipping label.');}
     finally {if(button){button.disabled=false;button.textContent=original;}}
   }
-  window.shippingLabelPrint={printSaved,run};
+  window.shippingLabelPrint={printSaved,run,assertComplete};
 })();

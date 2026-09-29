@@ -206,3 +206,11 @@ test('shipping PDF lost acknowledgement uses the same request on retry and rejec
  await beginShipping(page);await send(page,'pdf');assert.match(await page.evaluate(()=>window.testError.message),/4 × 6/);
  assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.name==='enqueue_shipping_label_print').length),2);
 });
+
+test('incomplete saved or newly captured shipping PDFs are rejected before a print request or upload',async t=>{
+ const page=await openPage(t);await setupShipping(page);
+ await page.evaluate(()=>{window.pdfBytes=window.pdfBytes.subarray(0,Math.floor(window.pdfBytes.length/2));window.testResult=null;window.testError=null;window.shippingLabelPrint.printSaved({path:'truncated.pdf'}).catch(error=>window.testError=error.message);});
+ await page.waitForFunction(()=>window.testError);assert.match(await page.evaluate(()=>window.testError),/incomplete.*Replace Label/);
+ assert.equal(await page.locator('dialog').count(),0);assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.name==='enqueue_shipping_label_print').length),0);
+ assert.match(await page.evaluate(async()=>{try{await window.shippingLabelPrint.assertComplete(new Blob([window.pdfBytes]));return '';}catch(error){return error.message;}}),/incomplete/);
+});
