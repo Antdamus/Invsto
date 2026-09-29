@@ -41,7 +41,7 @@ begin
  insert into post_tap_results select is(m.quantity,2,'worker can correct quantity after reopening');
  perform public.close_ebay_live_bag(a);
  perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"unidentified","kind":"failed","listing_id":null,"buyer":""}'),jsonb_build_object('ready',false));
- insert into post_tap_results select throws_ok(format('select public.reopen_ebay_live_bag(%L)',a),'22023','Verify payment before reopening this bag','unidentified payment failure blocks post-show scans');
+ insert into post_tap_results select throws_ok(format('select public.reopen_ebay_live_bag(%L)',a),'22023','Verify payment before reopening this bag','matching payment failure holds that post-show bag');
  insert into post_tap_results select throws_ok(format('select public.complete_ebay_live_session(%L,true,true)',show.id),'22023','Finish all paid bags and resolve outstanding payments, notifications and unlinked bags before closing','unmatched payment evidence blocks final closure');
  perform public.resolve_ebay_live_observation(event,'unidentified',null,'Test notification checked against final eBay record');
  perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"second-win","listing_id":"777777777772","buyer":"secondbuyer"}'),jsonb_build_object('ready',false));

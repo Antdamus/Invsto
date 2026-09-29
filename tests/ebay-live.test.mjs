@@ -218,9 +218,40 @@ test('correcting the seller refreshes the already open bag without crediting the
 test('post-show allows missing item scans without a live clock but never bypasses payment or connection failures',async t=>{
  const p=await open(t);await p.evaluate(()=>{dashboard.connection.broadcast_ended_at=new Date().toISOString();dashboard.connection.capture_ready=false;dashboard.connection.source_seen_at='2020-01-01';});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>!document.querySelector('[data-action=scan]').disabled);
  assert.match(await p.locator('#ebay-live-health').innerText(),/Broadcast ended/);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);
- await p.evaluate(()=>{dashboard.unmatched=[{kind:'failed',blocking:true,evidence:'Unmatched failure'}];});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('item-scan').disabled);
+ await p.evaluate(()=>{dashboard.unmatched=[{kind:'failed',blocking:true,evidence:'Unmatched failure'}];dashboard.attempts[0].payment_hold=true;});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('item-scan').disabled);
+ assert.match(await p.locator('#ebay-scan-payment-banner').innerText(),/notification needs review for this sale/);
  await p.evaluate(()=>{dashboard.unmatched=[];dashboard.attempts[0].payment_state='failed';});await p.locator('#ebay-live-refresh').click();assert.equal(await p.locator('#item-scan').isDisabled(),true);
  await p.evaluate(()=>{dashboard.attempts[0].payment_state='paid';failDashboard=true;});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-live-message').textContent.includes('Network interrupted'));assert.equal(await p.locator('#item-scan').isDisabled(),true);assert.deepEqual(p.errors,[]);
+});
+
+test('payment holds affect only their sale while other paid bags stay scannable after the show',async t=>{
+ const p=await open(t);await p.evaluate(()=>{
+  dashboard.connection.broadcast_ended_at=new Date().toISOString();dashboard.connection.capture_ready=false;dashboard.connection.source_seen_at='2020-01-01';
+  dashboard.attempts[0].payment_hold=false;
+  dashboard.attempts.push({...dashboard.attempts[0],id:'held-sale',listing_title:'#002 - Review watch',payment_hold:true});
+  dashboard.unmatched=[{source_key:'unmatched-failure',kind:'failed',blocking:true,evidence:'Payment failed for another sale'}];
+  dashboard.post_show={open_paid_bags:2,payment_issues:0,unmatched_notifications:1,unlinked_bags:0,paid_bags:2,closed_bags:0};
+ });await p.locator('#ebay-live-refresh').click();
+ const paid=p.locator('[data-attempt="sale"]'),held=p.locator('[data-attempt="held-sale"]');
+ await p.waitForFunction(()=>document.querySelector('[data-attempt="held-sale"]'));
+ assert.equal(await paid.locator('[data-action=scan]').isEnabled(),true);
+ assert.equal(await held.locator('[data-action=scan]').isDisabled(),true);
+ assert.match(await held.innerText(),/Scanning is on hold for this sale/);
+ await held.locator('[data-action=notification]').click();assert.equal(await p.locator('#ebay-live-unmatched').getAttribute('open'),'');
+ await paid.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);
+ assert.equal(await p.locator('#ebay-complete-show').isDisabled(),true);
+ await p.evaluate(()=>{dashboard.attempts[0].payment_hold=true;dashboard.attempts[0].verified_at=new Date().toISOString();dashboard.connection.capture_ready=true;dashboard.connection.source_seen_at=new Date().toISOString();});
+ await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('item-scan').disabled);
+ assert.match(await p.locator('#ebay-scan-payment-banner').innerText(),/notification needs review for this sale/);
+ assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.deepEqual(p.errors,[]);
+});
+
+test('unscoped payment notices stay reviewable without disabling paid bags during or after the show',async t=>{
+ const p=await open(t);await p.evaluate(()=>{dashboard.unmatched=[{source_key:'unknown',kind:'unknown',blocking:true,evidence:'Unreadable notification'}];dashboard.attempts[0].payment_hold=false;});
+ await p.locator('#ebay-live-refresh').click();assert.equal(await p.locator('[data-action=scan]').isEnabled(),true);
+ await p.evaluate(()=>{dashboard.connection.broadcast_ended_at=new Date().toISOString();dashboard.connection.capture_ready=false;});await p.locator('#ebay-live-refresh').click();
+ assert.equal(await p.locator('[data-action=scan]').isEnabled(),true);assert.equal(await p.locator('#ebay-live-unmatched').isVisible(),true);
+ assert.equal(await p.locator('#ebay-complete-show').isDisabled(),true);assert.deepEqual(p.errors,[]);
 });
 
 test('post-show completion requires finished bags, physical checks and a successful server recheck',async t=>{

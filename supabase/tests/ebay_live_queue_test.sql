@@ -75,7 +75,7 @@ begin
  update public.ebay_live_attempts set verified_at=now()-interval '3 minutes' where id=b;
  insert into live_tap_results select throws_ok(format('select public.claim_ebay_live_bag(%L)',b),'22023','Capture is disconnected. Verify payment on eBay first','expired verification cannot override stale capture');
  perform public.ingest_ebay_live_events(event,jsonb_build_array('{"key":"unknown","kind":"unknown","source":"activity","evidence":"unrecognized payment event"}'::jsonb),health);
- insert into live_tap_results select ok((select not capture_ready from public.ebay_live_connections where event_id=event),'unrecognized evidence pauses automatic scans');
+ insert into live_tap_results select ok((select capture_ready from public.ebay_live_connections where event_id=event),'unscoped evidence does not pause capture');
  perform public.resolve_ebay_live_observation(event,'unknown',null,'Checked eBay: unrelated notification, no auction affected');
  perform public.ingest_ebay_live_events(event,'[]',health);
  insert into live_tap_results select ok((select capture_ready from public.ebay_live_connections where event_id=event),'reviewed notifications allow capture to resume');
@@ -132,9 +132,9 @@ begin
  perform public.reconcile_ebay_live_orders(event);
  insert into live_tap_results select ok((select order_line_id=line and payment_state='paid' from public.ebay_live_attempts where id=b),'merged artifact does not prevent official reconciliation');
  insert into live_tap_results select is((select count(*)::int from jsonb_array_elements(public.get_ebay_live_dashboard(sid)->'attempts') x where x->>'listing_id'='444444444444'),1,'merged duplicate is hidden from queue');
- -- A notification with missing identity blocks the whole automatic queue, not a guessed buyer.
+ -- A missing buyer holds candidate sales without changing capture health.
  perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"failure-without-buyer","kind":"failed","buyer":""}'),health);
- insert into live_tap_results select ok((select not capture_ready from public.ebay_live_connections where event_id=event),'payment failure missing its buyer stops auto scanning');
+ insert into live_tap_results select ok((select capture_ready from public.ebay_live_connections where event_id=event),'missing buyer does not pause capture for unrelated sales');
  -- Fixture a completed session; public completion validation has its own tests.
  update public.ebay_live_connections set broadcast_ended_at=now(),review_completed_at=now(),review_completed_by=actor where event_id=event;
  update public.live_sale_sessions set status='ended',ended_at=now() where id=sid;

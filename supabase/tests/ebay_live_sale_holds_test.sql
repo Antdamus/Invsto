@@ -1,0 +1,76 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+create temp table sale_hold_results(result text);
+
+do $checks$
+declare
+ actor uuid:=(select user_id from public.employees where role='admin' and active is distinct from false limit 1);
+ seller uuid:=(select id from public.employees where user_id=actor limit 1);
+ event text:='HOLDS-'||replace(gen_random_uuid()::text,'-','');
+ show public.live_sale_sessions;l public.live_sale_lots;m public.live_sale_manual_lot_items;
+ a public.ebay_live_attempts;b public.ebay_live_attempts;o public.ebay_live_observations;
+ obs jsonb;health jsonb:=jsonb_build_object('observed_at',now(),'ready',true);dash jsonb;
+begin
+ insert into sale_hold_results select no_plan();
+ perform set_config('request.jwt.claim.sub',actor::text,true);
+ insert into sale_hold_results select ok(not has_function_privilege('anon','public.ebay_live_has_payment_hold(public.ebay_live_attempts)','EXECUTE'),'payment holds are internal, not an anonymous data endpoint');
+ show:=public.start_ebay_live_session('__sale_hold_test',null,event,seller);
+ obs:=jsonb_build_object('key','paid-a','kind','paid','listing_id','888888888821','title','#021 - Silver','buyer','paidwinner','amount',106,'currency','USD','source','listing');
+ perform public.ingest_ebay_live_events(event,jsonb_build_array(obs,obs||'{"key":"paid-b","listing_id":"888888888820","title":"#020 - Jewelry","buyer":"otherwinner","amount":141}'),health);
+ select * into a from public.ebay_live_attempts where event_id=event and buyer='paidwinner';
+ select * into b from public.ebay_live_attempts where event_id=event and buyer='otherwinner';
+ perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"failed-prior-buyer","kind":"failed","listing_id":null,"buyer":"priorbuyer","amount":97,"source":"activity"}'),health);
+ insert into sale_hold_results select ok((select capture_ready from public.ebay_live_connections where event_id=event),'unmatched failures do not replace capture health');
+ insert into sale_hold_results select ok(not public.ebay_live_has_payment_hold(a),'different buyer and price on a rerun do not hold its paid winner');
+ insert into sale_hold_results select lives_ok(format('select public.claim_ebay_live_bag(%L)',a.id),'paid rerun can scan during the broadcast');
+ insert into sale_hold_results select lives_ok(format('select public.claim_ebay_live_bag(%L)',b.id),'unrelated paid sale can scan during the broadcast');
+ perform public.mark_ebay_live_broadcast_ended(event);
+ insert into sale_hold_results select lives_ok(format('select public.claim_ebay_live_bag(%L)',a.id),'paid rerun remains scannable after the broadcast');
+ perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"candidate-a","kind":"failed","listing_id":null,"buyer":"","source":"activity"}'),health||'{"ready":false}');
+ insert into sale_hold_results select ok(public.ebay_live_has_payment_hold(a),'missing buyer holds the sale with matching title and amount');
+ insert into sale_hold_results select ok(not public.ebay_live_has_payment_hold(b),'missing buyer does not hold a different listing');
+ insert into sale_hold_results select throws_ok(format('select public.claim_ebay_live_bag(%L)',a.id),'22023','Capture is disconnected. Verify payment on eBay first','direct RPC cannot bypass a relevant payment hold');
+ dash:=public.get_ebay_live_dashboard(show.id);
+ insert into sale_hold_results select ok(exists(select 1 from jsonb_array_elements(dash->'attempts') x where x->>'id'=a.id::text and x->>'payment_hold'='true'),'dashboard exposes the affected sale hold');
+ insert into sale_hold_results select ok(exists(select 1 from jsonb_array_elements(dash->'attempts') x where x->>'id'=b.id::text and x->>'payment_hold'='false'),'dashboard leaves unrelated sale available');
+ l:=public.claim_ebay_live_bag(b.id);
+ m:=public.save_live_sale_manual_item(l.id,gen_random_uuid(),'Watch','Unrelated paid bag',1,80,null,null);
+ insert into sale_hold_results select ok(m.id is not null,'unrelated manual item can be saved during a payment hold');
+ insert into sale_hold_results select lives_ok(format('select public.close_ebay_live_bag(%L)',b.id),'unrelated paid bag can close during a payment hold');
+ insert into sale_hold_results select lives_ok(format('select public.reopen_ebay_live_bag(%L)',b.id),'unrelated paid bag can reopen during a payment hold');
+ -- Comparison cases use a fixture record; none alter actual payment facts.
+ select * into o from public.ebay_live_observations where event_id=event and source_key='candidate-a';
+ o.listing_title:='  #021  - SILVER  ';
+ insert into sale_hold_results select ok(public.ebay_live_observation_affects_attempt(o,a),'title comparison ignores case and whitespace');
+ o.buyer:='anotherbuyer';
+ insert into sale_hold_results select ok(not public.ebay_live_observation_affects_attempt(o,a),'known different buyer excludes a sale');
+ o.buyer:='';o.amount:=97;
+ insert into sale_hold_results select ok(not public.ebay_live_observation_affects_attempt(o,a),'known different amount excludes a sale');
+ o.amount:=106;o.listing_id:=b.listing_id;
+ insert into sale_hold_results select ok(not public.ebay_live_observation_affects_attempt(o,a),'known different listing ID excludes even a matching title');
+ o.listing_id:=a.listing_id;o.listing_title:='Old title';
+ insert into sale_hold_results select ok(public.ebay_live_observation_affects_attempt(o,a),'exact listing ID survives title changes');
+ o.listing_id:=null;o.listing_title:=null;o.buyer:='PAIDWINNER';
+ insert into sale_hold_results select ok(public.ebay_live_observation_affects_attempt(o,a),'buyer-only evidence holds that buyer candidate');
+ o.buyer:=null;
+ insert into sale_hold_results select ok(not public.ebay_live_observation_affects_attempt(o,a),'amount alone cannot hold arbitrary paid bags');
+ o.buyer:=a.buyer;o.event_id:='OTHER-EVENT';
+ insert into sale_hold_results select ok(not public.ebay_live_observation_affects_attempt(o,a),'holds never cross shows');
+ -- Fresh capture or a recent verification cannot bypass newly unresolved evidence.
+ update public.ebay_live_attempts set verified_at=now() where id=a.id;
+ perform public.ingest_ebay_live_events(event,'[]',health);
+ insert into sale_hold_results select throws_ok(format('select public.claim_ebay_live_bag(%L)',a.id),'22023','Capture is disconnected. Verify payment on eBay first','fresh capture and verification do not override a scoped hold');
+ select * into a from public.ebay_live_attempts where id=a.id;
+ insert into sale_hold_results select throws_ok(format('select public.save_live_sale_manual_item(%L,%L,''Watch'',''Held bag'',1,80,null,null)',a.lot_id,gen_random_uuid()),'22023','Capture is disconnected. Recheck payment before editing','held sale rejects direct manual item edits');
+ perform public.resolve_ebay_live_observation(event,'candidate-a',a.id,'Fixture payment evidence needs review for this sale');
+ insert into sale_hold_results select throws_ok(format('select public.claim_ebay_live_bag(%L)',a.id),'22023','Only a paid, open auction can be scanned','matching a notice does not falsely mark its sale paid');
+ perform public.ingest_ebay_live_events(event,'[{"key":"unscoped","kind":"unknown","source":"activity","evidence":"Unreadable payment notice"}]',health);
+ insert into sale_hold_results select lives_ok(format('select public.claim_ebay_live_bag(%L)',b.id),'notice without identity stays on checklist without freezing the show');
+ insert into sale_hold_results select is((public.ebay_live_post_show_check(event)->>'unmatched_notifications')::int,2,'unmatched notifications remain in the final review');
+ insert into sale_hold_results select throws_ok(format('select public.complete_ebay_live_session(%L,true,true)',show.id),'22023','Finish all paid bags and resolve outstanding payments, notifications and unlinked bags before closing','session completion still requires all reviews');
+ insert into sale_hold_results select is((select payment_state from public.ebay_live_attempts where id=b.id),'paid','unrelated payment remains unchanged');
+ insert into sale_hold_results select * from finish();
+end $checks$;
+select * from sale_hold_results;
+rollback;
