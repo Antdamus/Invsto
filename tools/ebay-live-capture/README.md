@@ -1,4 +1,4 @@
-# Invsto Live Capture (1.1.0)
+# Invsto Live Capture (1.1.1)
 
 This helper copies visible eBay Stream Manager auction and payment evidence into Invsto. It can also prepare a new auction form from an inventory item you explicitly queue. It never clicks Create listing or Start, bids, charges buyers, or cancels eBay orders.
 
@@ -47,7 +47,7 @@ Replace the extracted folder's files with the new download, click Reload on the 
 
 The extension runs only on eBay host-event pages and Invsto Live Sales. It stores the capture outbox/health, receiver tab IDs, and the current listing preparation ID/status locally. Supabase authentication stays in the signed-in Invsto page. No browser cookies, passwords, payment card details, shipping addresses or private eBay API tokens are collected.
 
-## Scan stock into an auction (1.1.0)
+## Scan stock into an auction (1.1.1)
 
 1. On your phone, choose the current show in Live Sales and open **Scan stock → add an auction**.
 2. Scan the inventory barcode/QR. Review the saved item and photos, enter the starting bid and duration, then **Send to show computer**. The starting bid is explicit; minimum prices and costs stay internal.
@@ -59,3 +59,11 @@ The extension runs only on eBay host-event pages and Invsto Live Sales. It store
 This first release prepares one unit of a stock item per show. Duplicate scans reuse the same request. Existing online listings are not changed; verify their available quantity before offering another unit. Preparing does not reserve or deduct inventory. Continue the paid-bag scanning workflow after a sale.
 
 During preparation, capture keeps reading visible payment evidence but stops changing tabs and scrolling lists. Once the listing is recorded, normal capture sweeps resume. Keep Activity visible and check captured payments against eBay. If preparation fails before submitting, close the unfinished template, release it in the helper, and retry from the phone. Once ready/submitted, inspect eBay before retrying; there is no automatic resubmission.
+
+## Working without moving lists (1.1.1)
+
+Capture does not reload Stream Manager. Its automatic mode scrolls the virtualized Activity and Sold lists to find payment evidence that is not currently rendered. Opening the stock-item helper or an eBay dialog now suspends that movement, including before a request is claimed. Typing, clicking, or scrolling also suspends it for fifteen seconds; focused fields remain protected.
+
+Choose **Keep page still** to hold the lists until you click **Resume automatic capture**. This mode still records visible evidence, but does not claim complete capture readiness. Keep another Stream Manager tab in automatic capture for uninterrupted bag scanning while you work. A working or stopped tab no longer replaces the fresh health of another automatic capture tab for the same show.
+
+Both helper panels link directly to **Open Invsto receiver**. Keep that signed-in tab open; its title identifies it as the capture receiver. The worker now tries registered receivers even when their background heartbeat timer is delayed. Reload the receiver after updating the extension.

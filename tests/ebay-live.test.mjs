@@ -423,3 +423,35 @@ test('stock-to-auction intake fits the existing phone screen and keeps scanner f
  await p.screenshot({path:new URL('../test-results/live-intake-integrated-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
  assert.deepEqual(p.errors,[]);
 });
+
+test('capture leaves dialogs and item helper still, supports manual hold, and resumes only when free',async t=>{
+ const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123');
+ await p.setContent('<button role="tab" aria-selected="false">Activity</button><button role="tab" aria-selected="false">Sold (1)</button><div id="activity-panel"><div aria-label="Filter activity"><button aria-pressed="true">All</button></div><div class="_list_" style="height:80px;overflow:auto"><div style="height:900px">'+row()+'</div></div></div>'+tile()+'<div role="dialog">Add listings</div>');
+ await p.evaluate(()=>{window.packets=[];window.clicks=0;window.fakeNow=Date.now();Date.now=()=>fakeNow;document.querySelectorAll('[role=tab]').forEach(el=>el.onclick=()=>{clicks++;el.setAttribute('aria-selected','true');});document.querySelector('._list_').scrollTop=45;window.chrome={runtime:{sendMessage:async m=>{packets.push(m);return {ok:true,status:'Connected'}}}};});
+ for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+ await p.getByRole('button',{name:'Start Invsto capture',exact:true}).click();await p.waitForFunction(()=>packets.length>0);
+ assert.equal(await p.evaluate(()=>packets.at(-1).health.mode),'working');assert.equal(await p.evaluate(()=>packets.at(-1).health.ready),false);assert.equal(await p.evaluate(()=>clicks),0);assert.equal(await p.locator('._list_').evaluate(e=>e.scrollTop),45);assert.ok(await p.evaluate(()=>packets[0].events.some(e=>e.kind==='paid')));
+ await p.evaluate(()=>{document.querySelector('[role=dialog]').remove();const d=document.createElement('details');d.id='invsto-listing-helper';d.open=true;document.body.append(d);fakeNow+=16000;});
+ await p.getByRole('button',{name:'Keep page still',exact:true}).click();assert.equal(await p.evaluate(()=>clicks),0);
+ await p.evaluate(()=>document.getElementById('invsto-listing-helper').remove());await p.getByRole('button',{name:'Resume automatic capture',exact:true}).click();await p.waitForFunction(()=>packets.at(-1).health.ready);
+ assert.ok(await p.evaluate(()=>clicks>=2));assert.equal(await p.evaluate(()=>packets.at(-1).health.mode),'automatic');
+ assert.match(await p.getByRole('link',{name:'Open Invsto receiver',exact:true}).getAttribute('href'),/capture=1/);
+ await p.evaluate(()=>{const i=document.createElement('input');i.id='working-input';document.body.append(i);});await p.locator('#working-input').fill('editing an auction');await p.waitForFunction(()=>packets.at(-1).health.mode==='working');
+ const count=await p.evaluate(()=>clicks);await p.evaluate(()=>fakeNow+=16000);await p.waitForFunction(()=>packets.at(-1).health.ready===false);assert.equal(await p.evaluate(()=>clicks),count);
+});
+
+test('working and stopped tabs cannot replace a fresh dedicated capture; quiet receivers stay reachable',async()=>{
+ const source=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');let now=Date.now(),stored={capture:{events:{},health:{},receivers:{9:now-120000}}},handler,deliveries=[];
+ class Clock extends Date{static now(){return now;}}
+ const chrome={storage:{local:{get:async()=>structuredClone(stored),set:async v=>Object.assign(stored,structuredClone(v))}},runtime:{id:'extension',onMessage:{addListener:fn=>handler=fn}},alarms:{create(){},onAlarm:{addListener(){}}},tabs:{sendMessage:async(tab,msg)=>{deliveries.push(msg);return {ok:true,job:null}}}};
+ vm.runInNewContext(source,{chrome,URL,Date:Clock,Promise,Error,Object,Number,String});
+ const send=(id,health)=>new Promise(r=>handler({type:'INVSTO_CAPTURE',event_id:'EVENT123',events:[],health},{id:'extension',tab:{id,url:'https://www.ebay.com/ebaylive/host/events/EVENT123'}},r));
+ await send(1,{ready:true,running:true,mode:'automatic'});assert.equal(deliveries.at(-1).payload.health.ready,true,'throttled receiver still receives data');
+ now+=1000;await send(2,{ready:false,running:true,mode:'working'});assert.equal(deliveries.at(-1).payload.health.ready,true,'working tab cannot pause healthy capture');
+ await send(2,{ready:false,running:false,mode:'automatic'});assert.equal(deliveries.at(-1).payload.health.ready,true,'stopped second tab cannot pause first');
+ now+=21000;await send(2,{ready:false,running:true,mode:'working'});assert.equal(deliveries.at(-1).payload.health.ready,false,'stale dedicated tab cannot retain ready state');
+ await send(1,{ready:true,running:true,mode:'automatic'});assert.equal(deliveries.at(-1).payload.health.ready,true);
+ await send(1,{ready:false,running:false,mode:'automatic'});assert.equal(deliveries.at(-1).payload.health.ready,false,'stopping the only dedicated capture takes effect');
+ const result=await new Promise(r=>handler({type:'INVSTO_LISTING_COMMAND',command:{event_id:'EVENT123',action:'next'}},{id:'extension',tab:{id:2,url:'https://www.ebay.com/ebaylive/host/events/EVENT123'}},r));assert.equal(result.ok,true,'listing preparation also reaches the quiet receiver');
+ await send(1,{ready:false,running:true,mode:'automatic',broadcast_ended:true});await send(2,{ready:true,running:true,mode:'automatic'});assert.equal(deliveries.at(-1).payload.health.broadcast_ended,true);assert.equal(deliveries.at(-1).payload.health.ready,false,'another tab cannot undo explicit end evidence');
+});

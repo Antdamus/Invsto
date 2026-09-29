@@ -2,11 +2,22 @@
 (() => {
   const event_id=location.pathname.split('/')[4];
   if (!/^[\w-]{6,100}$/.test(event_id||'')) return;
-  const box=document.createElement('div');
+  const box=document.createElement('div');box.id='invsto-capture-helper';
   box.style.cssText='position:fixed;bottom:12px;left:12px;z-index:2147483647;background:#18251f;color:white;border:1px solid #98ba8b;border-radius:12px;padding:12px;max-width:330px;font:14px/1.4 system-ui;box-shadow:0 3px 15px #0008';
   const button=document.createElement('button');button.textContent='Start Invsto capture';button.style.cssText='font:inherit;padding:8px 14px;border-radius:8px;cursor:pointer';
-  const note=document.createElement('div');note.textContent='Use a dedicated Stream Manager window. Capture reads Activity and Sold items.';
-  box.append(button,note);document.body.append(box);
+  const movement=document.createElement('button');movement.textContent='Keep page still';movement.style.cssText=button.style.cssText;
+  const receiver=document.createElement('a');receiver.textContent='Open Invsto receiver';receiver.href='https://antdamus.github.io/Invsto/live-sales.html?capture=1&v=1.1.1';receiver.target='_blank';receiver.rel='noopener';receiver.style.cssText='display:block;color:#efd69b;margin-top:8px';
+  const note=document.createElement('div');note.textContent='Automatic capture checks Activity and Sold. Use a separate tab for uninterrupted capture while editing.';
+  box.append(button,movement,note,receiver);document.body.append(box);
+  let holdMovement=false,lastInteraction=0;
+  const usingPage=()=>{
+    const focused=document.activeElement;
+    return holdMovement||window.InvstoListingPreparing||document.querySelector('#invsto-listing-helper[open]')||
+      [...document.querySelectorAll('[role="dialog"],dialog')].some(el=>el.getClientRects().length&&el.getAttribute('aria-hidden')!=='true')||
+      (focused&&!box.contains(focused)&&focused.matches('input,textarea,select,[contenteditable=true],iframe'))||Date.now()-lastInteraction<15000;
+  };
+  for(const type of ['pointerdown','keydown','wheel','touchstart'])document.addEventListener(type,e=>{if(e.isTrusted&&!box.contains(e.target))lastInteraction=Date.now();},{capture:true,passive:true});
+  movement.onclick=()=>{holdMovement=!holdMovement;lastInteraction=0;movement.textContent=holdMovement?'Resume automatic capture':'Keep page still';tick();};
   let active=false,busy=false,cache={},sent=new Map(),pageAt=0,stopping=false,latestNext=true,endReported=false;
   const sweepPositions=new WeakMap();
   let lastClock=null,clockChangedAt=0,clockWasAdvancing=false;
@@ -17,7 +28,8 @@
   async function tick() {
     if(busy || (!active&&!stopping&&(endReported||!InvstoLiveParser.hasEnded(document)))) return;busy=true;
     try {
-      if (active && !window.InvstoListingPreparing) {
+      const working=!!usingPage();
+      if (active && !working) {
         choose(tab('Activity'));choose(disabled(tab('Sold'))?tab('All'):tab('Sold'));
         const all=[...document.querySelectorAll('#activity-panel [aria-label="Filter activity"] button')].find(b=>b.textContent.trim()==='All');
         if(all && all.getAttribute('aria-pressed')!=='true') all.click();
@@ -32,21 +44,21 @@
       if(parsed.elapsed!==null && parsed.elapsed!==lastClock){clockWasAdvancing=lastClock!==null;lastClock=parsed.elapsed;clockChangedAt=Date.now();}
       const advancing=clockWasAdvancing && Date.now()-clockChangedAt<20000;
       const clockReady=document.visibilityState==='visible' || advancing;
-      const ready=active && !parsed.broadcastEnded && parsed.supported && parsed.panelPresent && activitySelected && listingsReady && navigator.onLine && clockReady;
-      const reason=parsed.broadcastEnded?'Broadcast ended. Finish the bag review in Invsto.':!active?'Capture stopped':!navigator.onLine?'Capture computer is offline':!parsed.supported?'Stream Manager layout is not recognized; verify payment manually':!activitySelected||!parsed.panelPresent?'Waiting for the Activity panel to load':!listingsReady?'Waiting for the Sold or All listings panel':!clockReady?'Bring Stream Manager forward; its clock must keep updating':waitingForSales?'Watching Activity; waiting for the first sale':'Reading Activity and Sold items';
+      const ready=active && !working && !parsed.broadcastEnded && parsed.supported && parsed.panelPresent && activitySelected && listingsReady && navigator.onLine && clockReady;
+      const reason=parsed.broadcastEnded?'Broadcast ended. Finish the bag review in Invsto.':!active?'Capture stopped':working?'Page stays still while you work. Close open panels and leave fields to resume full capture, or use a separate capture tab.':!navigator.onLine?'Capture computer is offline':!parsed.supported?'Stream Manager layout is not recognized; verify payment manually':!activitySelected||!parsed.panelPresent?'Waiting for the Activity panel to load':!listingsReady?'Waiting for the Sold or All listings panel':!clockReady?'Bring Stream Manager forward; its clock must keep updating':waitingForSales?'Watching Activity; waiting for the first sale':'Reading Activity and Sold items';
       const events=[];
       if(active) for(const event of parsed.events) {
         const signature=JSON.stringify([event.listing_id,event.kind,event.buyer,event.amount]);
         if(sent.get(event.key)!==signature) {if(events.length<100)events.push(event);}
       }
-      const result=await chrome.runtime.sendMessage({type:'INVSTO_CAPTURE',event_id,events,health:{observed_at:new Date().toISOString(),ready,broadcast_ended:parsed.broadcastEnded,message:reason}});
+      const result=await chrome.runtime.sendMessage({type:'INVSTO_CAPTURE',event_id,events,health:{observed_at:new Date().toISOString(),ready,running:active,mode:working?'working':'automatic',broadcast_ended:parsed.broadcastEnded,message:reason}});
       if(result?.ok&&parsed.broadcastEnded)endReported=true;
       if(!active&&result?.ok)stopping=false;
       if(result?.ok) for(const e of events) sent.set(e.key,JSON.stringify([e.listing_id,e.kind,e.buyer,e.amount]));
       const statusText=reason+' · '+(result?.status||result?.error||'Waiting for receiver');
       if(note.textContent!==statusText)note.textContent=statusText;
       // The Activity feed is virtualized. Sweep it so failures below the fold are read too.
-      if(active && !window.InvstoListingPreparing && parsed.supported && parsed.panelPresent && activitySelected && listingsReady && Date.now()-pageAt>1500) {
+      if(active && !working && parsed.supported && parsed.panelPresent && activitySelected && listingsReady && Date.now()-pageAt>1500) {
         const scrollers=new Set([document.querySelector('#activity-panel [class*="_list_"]')]);
         let parent=document.querySelector('[data-testid="listing-tile"]')?.parentElement;
         while(parent && parent!==document.body) { if(parent.className?.includes('_list_') && parent.scrollHeight>parent.clientHeight){scrollers.add(parent);break;}parent=parent.parentElement; }
