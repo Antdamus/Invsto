@@ -50,6 +50,23 @@
     try{await loading;}finally{loading=null;}
   }
   function totals(rows,field) {const known=rows.filter(a=>a[field]!=null);return {sum:known.reduce((v,a)=>v+Number(a[field]),0),missing:rows.length-known.length};}
+  function newestAuctions(rows) {
+    let streamStart=Infinity;
+    const entries=rows.map(row=>{
+      const captured=Date.parse(row.created_at);
+      const offset=row.stream_offset_seconds;
+      const hasOffset=offset!=null&&offset!==''&&Number.isFinite(Number(offset))&&Number(offset)>=0;
+      if(hasOffset&&Number.isFinite(captured))streamStart=Math.min(streamStart,captured-Number(offset)*1000);
+      const ordinal=String(row.ordinal||'').match(/^\d+$/)?.[0]||String(row.listing_title||'').match(/^#(\d+)\b/)?.[1];
+      return {row,captured:Number.isFinite(captured)?captured:0,offset:hasOffset?Number(offset)*1000:null,ordinal:Number(ordinal)||0};
+    });
+    // Captures can import old wins together or arrive late. Order by the stream
+    // timeline; use capture time only until a win's stream time is available.
+    // The earliest inferred start minimizes capture delay when aligning the two.
+    if(!Number.isFinite(streamStart))streamStart=0;
+    for(const entry of entries)entry.time=entry.offset==null?entry.captured:streamStart+entry.offset;
+    return entries.sort((a,b)=>b.time-a.time||b.ordinal-a.ordinal||b.captured-a.captured||String(b.row.id).localeCompare(String(a.row.id))).map(entry=>entry.row);
+  }
   function renderRunningTotals(){
     if(!api||!$('ebay-running-total')||!linked())return;
     const paid=data.attempts.filter(a=>a.payment_state==='paid'&&!a.resolved_at);
@@ -108,7 +125,7 @@
     $('ebay-attention-shortcut').hidden=!counts.attention;
     $('ebay-attention-shortcut').textContent=`Review ${counts.attention} payment ${counts.attention===1?'issue':'issues'}`;
     const filter=$('ebay-live-filter').value;
-    const visible=rows.filter(a=> filter==='all' || (filter==='ready'&&a.payment_state==='paid'&&!a.closed_at&&!a.resolved_at) || (filter==='waiting'&&a.payment_state==='waiting'&&!a.resolved_at) || (filter==='attention'&&['failed','review','cancelled'].includes(a.payment_state)&&!a.resolved_at) || (filter==='closed'&&(a.closed_at||a.resolved_at))).sort((a,b)=> (a.claimed_by===api.state.user.id&&!a.closed_at ? -1:0)-(b.claimed_by===api.state.user.id&&!b.closed_at ? -1:0) || new Date(b.created_at)-new Date(a.created_at));
+    const visible=newestAuctions(rows).filter(a=> filter==='all' || (filter==='ready'&&a.payment_state==='paid'&&!a.closed_at&&!a.resolved_at) || (filter==='waiting'&&a.payment_state==='waiting'&&!a.resolved_at) || (filter==='attention'&&['failed','review','cancelled'].includes(a.payment_state)&&!a.resolved_at) || (filter==='closed'&&(a.closed_at||a.resolved_at)));
     const html=visible.map(a=>{
       const mine=a.claimed_by===api.state.user.id,held=a.claimed_by&&!mine;
       const needsBagCheck=['failed','review','cancelled'].includes(a.payment_state)&&a.lot_id&&!a.resolved_at;
@@ -272,7 +289,7 @@
         <div id="ebay-queue-area">
           <button type="button" id="ebay-attention-shortcut" class="secondary-btn" hidden></button>
           <details id="ebay-live-unmatched" hidden><summary id="ebay-live-unmatched-count"></summary><div id="ebay-live-unmatched-list"></div></details>
-          <label class="ebay-filter-label">Show auctions<select id="ebay-live-filter"><option value="ready">Paid / ready</option><option value="attention">Failed / needs review</option><option value="waiting">Waiting for payment</option><option value="closed">Closed / resolved</option><option value="all">All auctions</option></select></label>
+          <label class="ebay-filter-label">Show auctions · Newest first<select id="ebay-live-filter"><option value="ready">Paid / ready</option><option value="attention">Failed / needs review</option><option value="waiting">Waiting for payment</option><option value="closed">Closed / resolved</option><option value="all">All auctions</option></select></label>
           <div id="ebay-live-queue"></div>
         </div>
         <details id="ebay-show-totals"><summary id="ebay-totals-summary">Show totals</summary><div id="ebay-live-totals" class="ebay-live-totals"></div><p class="ebay-help">Paid, closed bags only. Above minimum is not net profit. Estimated profit subtracts recorded cost and expense estimates. Missing data is excluded, not treated as zero.</p><div id="ebay-live-seller-totals"></div></details>

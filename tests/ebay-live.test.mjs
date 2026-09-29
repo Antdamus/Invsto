@@ -127,8 +127,40 @@ test('phone can review and close a scanned bag using touch buttons, then stays o
  assert.deepEqual(p.errors,[]);
 });
 
-test('newly captured paid sales appear first so the next winner is easy to find',async t=>{
- const p=await open(t);await p.evaluate(()=>{dashboard.attempts.push({...dashboard.attempts[0],id:'new-sale',listing_title:'#002 - Latest sale',created_at:new Date(Date.now()+1000).toISOString()});});
+test('live queue keeps sale chronology across batch capture, claimed bags, filters and new arrivals',async t=>{
+ const p=await open(t);
+ await p.evaluate(()=>{
+  const base=dashboard.attempts[0];
+  dashboard.attempts=[
+   {...base,id:'six',ordinal:'6',stream_offset_seconds:1832,claimed_by:'worker'},
+   {...base,id:'seven',ordinal:'7',stream_offset_seconds:2012},
+   {...base,id:'one',ordinal:'1',stream_offset_seconds:120,created_at:new Date(Date.parse(base.created_at)+5000).toISOString()},
+   {...base,id:'eight',ordinal:'8',stream_offset_seconds:2012}
+  ];
+ });
+ const ids=()=>p.locator('#ebay-live-queue article').evaluateAll(rows=>rows.map(row=>row.dataset.attempt));
+ await p.locator('#ebay-live-refresh').click();
+ assert.deepEqual(await ids(),['eight','seven','six','one']);
+ // A different RPC row order or payment update must not reshuffle tied captures.
+ await p.evaluate(()=>{dashboard.attempts.reverse();dashboard.attempts.find(a=>a.id==='one').updated_at=new Date().toISOString();});
+ await p.locator('#ebay-live-refresh').click();
+ assert.deepEqual(await ids(),['eight','seven','six','one']);
+ for(const filter of ['waiting','attention','closed','all','ready']){
+  await p.evaluate(filter=>{for(const a of dashboard.attempts){a.payment_state=filter==='waiting'?'waiting':filter==='attention'?'failed':'paid';a.closed_at=filter==='closed'?new Date().toISOString():null;}},filter);
+  await p.evaluate(()=>ebayLive.refresh());await p.locator('#ebay-live-filter').selectOption(filter);
+  assert.deepEqual(await ids(),['eight','seven','six','one']);
+ }
+ // With no stream time yet, a newly received sale still appears above earlier sales.
+ await p.evaluate(()=>{dashboard.attempts.push({...dashboard.attempts.find(a=>a.id==='seven'),id:'new-sale',ordinal:'9',stream_offset_seconds:null,created_at:new Date(Date.now()+10000).toISOString()});});
+ await p.waitForFunction(()=>document.querySelector('#ebay-live-queue article')?.dataset.attempt==='new-sale');
+ assert.deepEqual(await ids(),['new-sale','eight','seven','six','one']);
+ await p.setViewportSize({width:1440,height:1000});await p.evaluate(()=>ebayLive.refresh());
+ assert.deepEqual(await ids(),['new-sale','eight','seven','six','one']);
+ assert.deepEqual(p.errors,[]);
+});
+
+test('live queue falls back to capture time when stream times are unavailable',async t=>{
+ const p=await open(t);await p.evaluate(()=>{dashboard.attempts[0].claimed_by='worker';dashboard.attempts.push({...dashboard.attempts[0],id:'new-sale',claimed_by:null,created_at:new Date(Date.now()+1000).toISOString()});});
  await p.locator('#ebay-live-refresh').click();assert.equal(await p.locator('#ebay-live-queue article').first().getAttribute('data-attempt'),'new-sale');
 });
 
