@@ -1536,7 +1536,7 @@ function normalizeVideoReceiptUrlForLine(url = "", line = {}) {
     return "";
   }
   if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port
-    || !/(^|\.)ebay\.com$/i.test(parsed.hostname) || !/^\/ebaylive\/events\/[^/]+\/?$/i.test(parsed.pathname)) return "";
+    || !/(^|\.)ebay\.com$/i.test(parsed.hostname) || !/^\/ebaylive\/events\/[^/]+(?:\/stream)?\/?$/i.test(parsed.pathname)) return "";
 
   const itemNumber = String(line.item_number || line.itemNumber || "").trim();
   if (!itemNumber) return parsed.toString();

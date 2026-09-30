@@ -5,7 +5,7 @@ import {test, before, after} from 'node:test';
 import {chromium, webkit} from '@playwright/test';
 
 const root = new URL('../', import.meta.url);
-const receiptUrl = 'https://www.ebay.com/ebaylive/events/fixture-event?selectedItemId=123456789012&playback=true';
+const receiptUrl = 'https://www.ebay.com/ebaylive/events/fixture-event/stream?selectedItemId=123456789012&playback=true';
 let server, browser, origin;
 before(async () => {
   server = createServer(async (req, res) => {

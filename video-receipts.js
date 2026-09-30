@@ -9,7 +9,7 @@
     catch (_) { return ""; }
     if (url.protocol !== "https:" || url.username || url.password || url.port
       || !/(^|\.)ebay\.com$/i.test(url.hostname)
-      || !/^\/ebaylive\/events\/[^/]+\/?$/i.test(url.pathname)) return "";
+      || !/^\/ebaylive\/events\/[^/]+(?:\/stream)?\/?$/i.test(url.pathname)) return "";
     const item = String(receipt.itemNumber || receipt.item_number || "").trim();
     if (!item) return "";
     if (url.searchParams.get("selectedItemId") !== item) {
