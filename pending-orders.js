@@ -3894,7 +3894,7 @@ function renderOrders() {
       ${isExpanded ? `
         <div class="buyer-card-expanded">
           <div class="buyer-card-expanded-actions">
-            <button type="button" class="buyer-card-complete-btn primary-btn" data-buyer-complete-key="${escapeHtml(group.key)}" ${group.lines.some(isOpenOrderLine) ? "" : "disabled"}>Complete From Inventory</button>
+            <button type="button" class="buyer-card-complete-btn primary-btn" data-buyer-complete-key="${escapeHtml(group.key)}" ${group.lines.some(isOpenOrderLine) ? "" : "disabled"}>Mixed Checkout</button>
             <button type="button" class="secondary-btn buyer-card-order-video-btn task-video-action-btn" data-buyer-order-video-key="${escapeHtml(group.key)}" ${group.lines.some((line) => line.order_id) ? "" : "disabled"}>Add order video</button>
             <button type="button" class="secondary-btn buyer-card-order-video-btn task-video-action-btn" data-buyer-view-order-videos-key="${escapeHtml(group.key)}" ${group.lines.some((line) => line.order_id) ? "" : "disabled"}>View order videos</button>
             <button type="button" class="buyer-card-no-inventory-btn secondary-btn caution-btn" data-buyer-no-inventory-key="${escapeHtml(group.key)}" ${getNoInventoryLineIdsForGroupAction(group).length ? "" : "disabled"}>Complete Without Inventory</button>
