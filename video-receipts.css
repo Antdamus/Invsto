@@ -1,0 +1,50 @@
+.video-receipt-dialog {
+  box-sizing: border-box;
+  width: min(540px, calc(100vw - 28px));
+  max-height: calc(100dvh - 40px);
+  margin: auto;
+  padding: 26px;
+  overflow-y: auto;
+  border: 1px solid #806d4e;
+  border-radius: 20px;
+  background: #211d1b;
+  color: #f4eee4;
+  box-shadow: 0 24px 90px #0009;
+  font: 16px/1.5 Manrope, system-ui, sans-serif;
+  text-align: left;
+}
+.video-receipt-dialog::backdrop { background: #000b; }
+.video-receipt-dialog h2 { margin: 0 42px 12px 0; font-size: 24px; color: #f4eee4; }
+.video-receipt-dialog p { margin: 12px 0; }
+.video-receipt-dialog .video-receipt-context { color: #c2b8ab; font-size: 14px; overflow-wrap: anywhere; }
+.video-receipt-dialog .video-receipt-help { color: #d0c5b7; font-size: 14px; }
+.video-receipt-dialog button, .video-receipt-dialog a {
+  box-sizing: border-box;
+  min-height: 44px;
+  border: 1px solid #88724f;
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: #443727;
+  color: #ffe2a5;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+.video-receipt-dialog a { display: block; margin-top: 12px; text-align: center; }
+.video-receipt-dialog [hidden] { display: none !important; }
+.video-receipt-dialog .video-receipt-direct { background: #f3d391; color: #211d1b; }
+.video-receipt-dialog .video-receipt-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 44px;
+  padding: 0;
+  font-size: 26px;
+  background: transparent;
+}
+.video-receipt-dialog .video-receipt-desktop { margin-top: 20px; padding-top: 14px; border-top: 1px solid #54493b; font-size: 14px; }
+.video-receipt-dialog summary { cursor: pointer; padding: 8px 0; }
+.video-receipt-dialog button:disabled { opacity: .6; cursor: wait; }
+.video-receipt-dialog :focus-visible { outline: 2px solid #ffe2a5; outline-offset: 3px; }
+@media (max-width: 480px) { .video-receipt-dialog { padding: 20px; } }

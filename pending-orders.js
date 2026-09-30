@@ -1535,7 +1535,8 @@ function normalizeVideoReceiptUrlForLine(url = "", line = {}) {
   } catch (_) {
     return "";
   }
-  if (!/(^|\.)ebay\.com$/i.test(parsed.hostname) || !/\/ebaylive\/events\//i.test(parsed.pathname)) return "";
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port
+    || !/(^|\.)ebay\.com$/i.test(parsed.hostname) || !/^\/ebaylive\/events\/[^/]+\/?$/i.test(parsed.pathname)) return "";
 
   const itemNumber = String(line.item_number || line.itemNumber || "").trim();
   if (!itemNumber) return parsed.toString();
@@ -1588,6 +1589,7 @@ function getOrderVideoReceiptLink(line = {}) {
   const directUrl = getOrderVideoReceiptUrl(line);
   return {
     url: directUrl,
+    orderId: line.order_id || order.id || "",
     orderNumber: order.order_number || "",
     orderDetailsUrl: buildEbayOrderDetailsUrl(order.order_number),
     itemNumber: line.item_number || "",
@@ -1597,86 +1599,12 @@ function getOrderVideoReceiptLink(line = {}) {
     direct: Boolean(directUrl),
     title: directUrl
       ? "Open the captured eBay Live video receipt"
-      : "Resolve and open the eBay Live video receipt",
+      : "View receipt options and open the order on eBay",
   };
 }
 
-function requestExtensionVideoReceiptOpen(payload = {}) {
-  const requestId = crypto.randomUUID();
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (result) => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timer);
-      window.removeEventListener("message", onMessage);
-      resolve(result || null);
-    };
-    const timer = window.setTimeout(() => finish({ ok: false, error: "The eBay extension did not answer." }), 20000);
-    const onMessage = (event) => {
-      if (event.source !== window || event.origin !== window.location.origin) return;
-      if (event.data?.type !== "OG_EBAY_VIDEO_RECEIPT_OPEN_RESPONSE") return;
-      if (event.data?.requestId !== requestId) return;
-      finish(event.data.payload || null);
-    };
-    window.addEventListener("message", onMessage);
-    window.postMessage({
-      type: "OG_EBAY_VIDEO_RECEIPT_OPEN_REQUEST",
-      requestId,
-      payload,
-    }, window.location.origin);
-  });
-}
-
-function setVideoReceiptOpenStatus(message = "", type = "info") {
-  if (!$("worker-no-inventory-modal")?.classList.contains("hidden")) {
-    setNoInventoryPhotoStatus(message, type);
-    return;
-  }
-  setStatus(message, type);
-}
-
-function getVideoReceiptOpenFailureMessage(result = {}, receiptLink = {}) {
-  const raw = String(result?.error || result?.message || "").trim();
-  const orderText = receiptLink.orderNumber ? ` for order ${receiptLink.orderNumber}` : "";
-  const itemText = receiptLink.itemNumber ? ` / item ${receiptLink.itemNumber}` : "";
-  if (/could not match a video receipt|no ebay live video receipt|video receipt.*not.*found|no video receipt/i.test(raw)) {
-    return `No eBay Live video receipt was found${orderText}${itemText}. If eBay does not expose one, add the receipt manually.`;
-  }
-  return raw || "Could not open the eBay video receipt. Make sure the OG eBay extension is enabled and you are signed in to eBay.";
-}
-
-async function openVideoReceiptLink(event, receiptLink = {}) {
-  if (!receiptLink.url && !receiptLink.orderNumber) {
-    setVideoReceiptOpenStatus("This line does not have enough eBay information to find a video receipt.", "error");
-    return { ok: false, error: "missing_receipt_context" };
-  }
-  event?.preventDefault?.();
-  event?.stopPropagation?.();
-  if (receiptLink.direct && receiptLink.url) {
-    window.open(receiptLink.url, "_blank", "noopener,noreferrer");
-    setVideoReceiptOpenStatus("Opening eBay video receipt...", "info");
-    return { ok: true, direct: true };
-  }
-  if (!receiptLink.orderNumber) {
-    setVideoReceiptOpenStatus("This order does not have an eBay order number to resolve the video receipt.", "error");
-    return { ok: false, error: "missing_order_number" };
-  }
-  setVideoReceiptOpenStatus("Opening eBay video receipt through the extension...", "info");
-  const result = await requestExtensionVideoReceiptOpen({
-    orderNumber: receiptLink.orderNumber,
-    orderDetailsUrl: receiptLink.orderDetailsUrl,
-    itemNumber: receiptLink.itemNumber,
-    transactionId: receiptLink.transactionId,
-    itemTitle: receiptLink.itemTitle,
-    itemUrl: receiptLink.itemUrl,
-  });
-  if (!result?.ok) {
-    setVideoReceiptOpenStatus(getVideoReceiptOpenFailureMessage(result, receiptLink), "error");
-  } else {
-    setVideoReceiptOpenStatus("eBay video receipt opened.", "success");
-  }
-  return result;
+function openVideoReceiptLink(event, receiptLink = {}) {
+  return window.OGVideoReceipts.open(event, receiptLink);
 }
 
 function parseCsv(text) {

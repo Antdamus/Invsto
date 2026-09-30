@@ -13,6 +13,7 @@
     "test:print-stations": "node --test tests/print-station-agent.test.mjs tests/print-station-discovery.test.mjs tests/print-stations-ui.test.mjs tests/shipping-pdf.test.mjs tests/ebay-label-capture.test.mjs",
     "test:add-inventory": "node --test tests/inventory-receiving.test.mjs",
     "test:checkout": "node --test tests/pending-checkout.test.mjs",
+    "test:video-receipts": "node --test tests/video-receipts.test.mjs",
     "test:bags": "node --test tests/bag-lookup.test.mjs tests/pending-bag-orders.test.mjs",
     "test:ebay-live": "node --test tests/ebay-live.test.mjs tests/live-listing-intake.test.mjs"
   },

@@ -628,7 +628,8 @@ function normalizeVideoReceiptUrlForLine(url = "", line = {}) {
   } catch (_) {
     return "";
   }
-  if (!/(^|\.)ebay\.com$/i.test(parsed.hostname) || !/\/ebaylive\/events\//i.test(parsed.pathname)) return "";
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port
+    || !/(^|\.)ebay\.com$/i.test(parsed.hostname) || !/^\/ebaylive\/events\/[^/]+\/?$/i.test(parsed.pathname)) return "";
 
   const itemNumber = String(line.item_number || line.itemNumber || "").trim();
   if (!itemNumber) return parsed.toString();
@@ -670,6 +671,7 @@ function getReturnLineVideoReceiptLink(line = {}) {
   const directUrl = getReturnLineVideoReceiptUrl(line);
   return {
     url: directUrl,
+    orderId: line.order_id || order.id || "",
     orderNumber: order.order_number || "",
     orderDetailsUrl: buildEbayOrderDetailsUrl(order.order_number),
     itemNumber: line.item_number || "",
@@ -679,66 +681,12 @@ function getReturnLineVideoReceiptLink(line = {}) {
     direct: Boolean(directUrl),
     title: directUrl
       ? "Open the captured eBay Live video receipt"
-      : "Resolve and open the eBay Live video receipt",
+      : "View receipt options and open the order on eBay",
   };
 }
 
-function requestExtensionVideoReceiptOpen(payload = {}) {
-  const requestId = crypto.randomUUID();
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (result) => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timer);
-      window.removeEventListener("message", onMessage);
-      resolve(result || null);
-    };
-    const timer = window.setTimeout(() => finish({ ok: false, error: "The eBay extension did not answer." }), 4000);
-    const onMessage = (event) => {
-      if (event.source !== window || event.origin !== window.location.origin) return;
-      if (event.data?.type !== "OG_EBAY_VIDEO_RECEIPT_OPEN_RESPONSE") return;
-      if (event.data?.requestId !== requestId) return;
-      finish(event.data.payload || null);
-    };
-    window.addEventListener("message", onMessage);
-    window.postMessage({
-      type: "OG_EBAY_VIDEO_RECEIPT_OPEN_REQUEST",
-      requestId,
-      payload,
-    }, window.location.origin);
-  });
-}
-
-function setReturnVideoReceiptOpenStatus(message = "", type = "info") {
-  if (isModalOpen("return-intake-modal")) {
-    setReturnIntakeStatus(message, type);
-  } else {
-    setReturnTaskSaveStatus(message, type);
-  }
-}
-
-async function openReturnVideoReceiptLink(event, receiptLink = {}) {
-  if (receiptLink.direct || !receiptLink.orderNumber) return;
-  event.preventDefault();
-  event.stopPropagation();
-  setReturnVideoReceiptOpenStatus("Opening eBay video receipt...", "info");
-  const result = await requestExtensionVideoReceiptOpen({
-    orderNumber: receiptLink.orderNumber,
-    orderDetailsUrl: receiptLink.orderDetailsUrl,
-    itemNumber: receiptLink.itemNumber,
-    transactionId: receiptLink.transactionId,
-    itemTitle: receiptLink.itemTitle,
-    itemUrl: receiptLink.itemUrl,
-  });
-  if (!result?.ok) {
-    setReturnVideoReceiptOpenStatus(
-      result?.error || "Could not open the eBay video receipt. Make sure the OG eBay extension is enabled and you are signed in to eBay.",
-      "error"
-    );
-  } else {
-    setReturnVideoReceiptOpenStatus("eBay video receipt opened.", "success");
-  }
+function openReturnVideoReceiptLink(event, receiptLink = {}) {
+  return window.OGVideoReceipts.open(event, receiptLink);
 }
 
 function formatFileSize(bytes) {
@@ -5270,6 +5218,7 @@ function renderReturnLineVideoReceiptPanel(line = {}, options = {}) {
             rel="noopener"
             title="${escapeHtml(receiptLink.title)}"
             data-return-video-receipt-link="1"
+            data-order-id="${escapeHtml(receiptLink.orderId)}"
             data-direct="${receiptLink.direct ? "1" : "0"}"
             data-order-number="${escapeHtml(receiptLink.orderNumber)}"
             data-order-details-url="${escapeHtml(receiptLink.orderDetailsUrl)}"
@@ -6022,6 +5971,7 @@ function bindReturnVideoReceiptLinks(root = document) {
     link.addEventListener("click", (event) => {
       const receiptLink = {
         url: link.getAttribute("href") || "",
+        orderId: link.dataset.orderId || "",
         orderNumber: link.dataset.orderNumber || "",
         orderDetailsUrl: link.dataset.orderDetailsUrl || "",
         itemNumber: link.dataset.itemNumber || "",
