@@ -9280,6 +9280,13 @@ function getPendingCheckoutRequestId(payload) {
   return requestId;
 }
 
+function forgetPendingCheckoutRequest(payload) {
+  state.checkoutRequests.delete(JSON.stringify(payload));
+  try {
+    sessionStorage.setItem(`pending-checkout-requests:${state.user?.id || ""}`, JSON.stringify([...state.checkoutRequests]));
+  } catch (_) { /* Stale order quantities still guard a lost storage update. */ }
+}
+
 async function fulfillSelectedOrder({ skipReview = false } = {}) {
   if (state.busy || !requireCheckoutStore()) return;
   let committed = false;
@@ -9350,6 +9357,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
       const requestId = getPendingCheckoutRequestId(payload);
       const { error } = await supabase.rpc("fulfill_pending_checkout_bundle", { ...payload, _request_id: requestId });
       if (error) throw error;
+      forgetPendingCheckoutRequest(payload);
       staged.forEach(entry => { if (entry.mode !== "without_inventory") changedItemIds.push(entry.item.id); });
     }
 

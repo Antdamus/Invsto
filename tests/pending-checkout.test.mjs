@@ -166,6 +166,7 @@ test('lost-response retry keeps the same request and cannot remove stock again',
   await p.locator('#fulfill-order').click();await p.locator('#confirm-bundle-review').click();await p.waitForFunction(()=>!state.busy);
   const ids=await p.evaluate(()=>calls.filter(c=>c.name==='fulfill_pending_checkout_bundle').map(c=>c.args._request_id));
   assert.equal(ids.length,2);assert.equal(ids[0],ids[1]);assert.equal(await p.evaluate(()=>stockQuantity),4);
+  assert.equal(await p.evaluate(()=>state.checkoutRequests.size),0,'acknowledged receipts must not block a deliberately reopened order');
 });
 
 test('refresh failure after save leaves no staged items to accidentally resubmit',async t=>{
