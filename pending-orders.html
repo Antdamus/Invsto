@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=selected-closeout-20260824" />
+  <link rel="stylesheet" href="pending-orders.css?v=20260930-mixed-checkout" />
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -162,7 +162,7 @@
           <div>
             <span class="eyebrow">Packing Store</span>
             <h2>Checkout Location</h2>
-            <p>Select where this checkout is happening. Only tray stock checked into this store will be available for packing.</p>
+            <p>Select where this checkout is happening. Available tray, container, and storage stock in this store can be used for packing.</p>
           </div>
           <label>
             Store
@@ -460,7 +460,7 @@
                 <span>1</span>
                 <div>
                   <h3>Scan or Find Inventory Item</h3>
-                  <p>Use the internal barcode whenever possible. Mystery box orders can be matched manually.</p>
+                  <p>Scan an item or bulk-bag barcode. If the physical item is not in inventory yet, use Stage Without Inventory below.</p>
                 </div>
               </div>
               <div class="scan-row">
@@ -474,12 +474,12 @@
               <div class="step-head">
                 <span>2</span>
                 <div>
-                  <h3>Confirm Source Tray</h3>
-                  <p>After item selection, the tray is auto-selected when it is the only valid tray in the checkout store.</p>
+                  <h3>Confirm Source Location</h3>
+                  <p>A single available source is selected automatically. When there are several, choose the exact tray, container, or bag.</p>
                 </div>
               </div>
               <div class="scan-row">
-                <input id="location-scan" data-camera-scan type="search" placeholder="Scan tray barcode if more than one source appears" autocomplete="off" />
+                <input id="location-scan" data-camera-scan type="search" placeholder="Scan location or bag barcode when several sources appear" autocomplete="off" />
                 <button id="find-location" type="button" class="secondary-btn">Find</button>
               </div>
               <div id="location-results" class="result-list"></div>
@@ -493,8 +493,8 @@
               <div class="step-head">
                 <span>3</span>
                 <div>
-                  <h3>Confirm and Remove Stock</h3>
-                  <p>The removal will be tied to the signed-in account, order, item, and exact tray/location.</p>
+                  <h3>Stage and Review Checkout</h3>
+                  <p>Mix inventory and without-inventory lines in one bundle. Only scanned inventory lines remove stock. Stage Without Inventory includes all remaining units on this line.</p>
                 </div>
               </div>
               <div class="sign-grid">
@@ -521,7 +521,8 @@
               <p id="fulfill-status" class="fulfill-status"></p>
               <div class="fulfill-actions">
                 <button id="clear-selection" type="button" class="secondary-btn">Clear</button>
-                <button id="stage-current-line" type="button" class="secondary-btn">Stage Item</button>
+                <button id="stage-current-line" type="button" class="secondary-btn">Stage Inventory Item</button>
+                <button id="stage-without-inventory" type="button" class="secondary-btn">Stage Without Inventory</button>
                 <button id="fulfill-order" type="button" class="primary-btn">Confirm Packed Bundle</button>
               </div>
             </section>
@@ -964,6 +965,6 @@
 <script src="print-stations.js?v=20260929-shipping"></script>
 <script src="shipping-label-print.js?v=20260929-complete"></script>
 <script src="bag-order-links.js?v=20260930"></script>
-<script src="pending-orders.js?v=20260930-bag-order-links"></script>
+<script src="pending-orders.js?v=20260930-mixed-checkout"></script>
 </body>
 </html>

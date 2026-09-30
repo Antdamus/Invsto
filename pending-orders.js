@@ -23,6 +23,8 @@ const state = {
   itemSearchTimer: null,
   locationSearchTimer: null,
   quantityAutoTimer: null,
+  inventoryLookupGeneration: 0,
+  checkoutRequests: new Map(),
   liveLotSearchTimer: null,
   selectedLiveLot: null,
   selectedLiveLotItems: [],
@@ -1310,11 +1312,14 @@ function updateCheckoutStoreGate() {
   $("location-scan")?.toggleAttribute("disabled", !hasStore);
   $("find-location")?.toggleAttribute("disabled", !hasStore);
   $("stage-current-line")?.toggleAttribute("disabled", !hasStore);
+  $("stage-without-inventory")?.toggleAttribute("disabled", !hasStore);
   $("fulfill-order")?.toggleAttribute("disabled", !hasStore);
   $("complete-no-inventory")?.toggleAttribute("disabled", !hasStore);
 }
 
 async function handleCheckoutStoreChange() {
+  if (state.busy) { $("checkout-store-select").value = state.checkoutStoreId; return; }
+  invalidateInventoryLookup();
   const nextStoreId = $("checkout-store-select")?.value || "";
   state.checkoutStoreId = nextStoreId;
   saveCheckoutStoreId(nextStoreId);
@@ -4249,6 +4254,8 @@ function renderOrders() {
 }
 
 function selectOrderLine(lineId, options = {}) {
+  if (state.busy && !options.allowBusy) return;
+  invalidateInventoryLookup();
   const shouldOpenDetail = options.openDetail !== false;
   const line = state.orders.find((entry) => entry.id === lineId);
   if (!line) return;
@@ -4311,6 +4318,7 @@ function openMobileOrderDetail() {
 }
 
 function closeMobileOrderDetail() {
+  if (state.busy) return;
   clearSelection();
 }
 
@@ -6529,7 +6537,7 @@ function renderSelectionSummary() {
 
   const item = state.selectedItem;
   const row = state.selectedStockRow;
-  const sourceLabel = row?.locationLabel || (state.checkoutStoreId ? `Choose tray in ${getCheckoutStoreName()}` : "Select checkout store");
+  const sourceLabel = row?.locationLabel || (state.checkoutStoreId ? `Choose source in ${getCheckoutStoreName()}` : "Select checkout store");
   summary.innerHTML = `
     <strong>${escapeHtml(item.title || "Untitled inventory item")}</strong>
     <div class="selection-grid">
@@ -6551,7 +6559,7 @@ function renderItemResults(items, message = "No matching inventory items.") {
     return;
   }
 
-  items.slice(0, 12).forEach((item) => {
+  items.forEach((item) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `result-btn ${state.selectedItem?.id === item.id ? "is-selected" : ""}`;
@@ -6580,7 +6588,7 @@ function renderLocationResults(rows, message = "No source locations loaded yet."
     button.className = `result-btn ${state.selectedStockRow?.id === row.id ? "is-selected" : ""}`;
     button.innerHTML = `
       <strong>${escapeHtml(row.locationLabel)}</strong>
-      <span>${Number(row.quantity || 0).toLocaleString()} available${Number(row.reserved_quantity || 0) > 0 ? ` - ${Number(row.reserved_quantity || 0).toLocaleString()} reserved live` : ""}${row.location_code ? ` - ${escapeHtml(row.location_code)}` : ""}</span>
+      <span>${Number(row.quantity || 0).toLocaleString()} available${Number(row.reserved_quantity || 0) > 0 ? ` - ${Number(row.reserved_quantity || 0).toLocaleString()} reserved total` : ""}${row.location_code ? ` - ${escapeHtml(row.location_code)}` : ""}</span>
     `;
     button.addEventListener("click", () => selectStockRow(row));
     container.appendChild(button);
@@ -6627,70 +6635,40 @@ function sanitizeSearchTerm(term) {
 }
 
 async function searchInventoryItems() {
-  if (!requireCheckoutStore()) return;
-
-  const term = sanitizeSearchTerm($("item-scan")?.value || "");
-  if (!term) {
-    setStatus("Scan a barcode or search by item name / description.", "error");
-    return;
-  }
-
+  if (!requireCheckoutStore() || !state.selectedLine || state.busy) return;
+  const term = String($("item-scan")?.value || "").trim();
+  invalidateInventoryLookup();
+  const generation = state.inventoryLookupGeneration;
+  const lineId = state.selectedLine.id;
+  const storeId = state.checkoutStoreId;
+  const current = () => generation === state.inventoryLookupGeneration
+    && state.selectedLine?.id === lineId && state.checkoutStoreId === storeId;
+  state.selectedItem = null;
+  state.selectedStockRow = null;
+  state.stockRows = [];
+  renderItemResults([]);
+  renderLocationResults([]);
+  renderSelectionSummary();
+  if (!term) return setStatus("Scan a barcode or search by item name / description.", "error");
   setStatus("Searching inventory...");
-
-  let exact = await supabase
-    .from("item_types")
-    .select("id,title,description,barcode,sale_price,photo_url,photos,categories,weight")
-    .eq("barcode", term)
-    .is("deleted_at", null)
-    .limit(1);
-
-  if (exact.error && /deleted_at/i.test(exact.error.message || "")) {
-    exact = await supabase
-      .from("item_types")
-      .select("id,title,description,barcode,sale_price,photo_url,photos,categories,weight")
-      .eq("barcode", term)
-      .limit(1);
-  }
-
-  if (!exact.error && exact.data?.length === 1) {
-    await openItemConfirmModal(exact.data[0]);
-    return;
-  }
-
-  const pattern = `%${term}%`;
-  let { data, error } = await supabase
-    .from("item_types")
-    .select("id,title,description,barcode,sale_price,photo_url,photos,categories,weight")
-    .or(`barcode.ilike.${pattern},title.ilike.${pattern},description.ilike.${pattern}`)
-    .is("deleted_at", null)
-    .limit(25);
-
-  if (error && /deleted_at/i.test(error.message || "")) {
-    const retry = await supabase
-      .from("item_types")
-      .select("id,title,description,barcode,sale_price,photo_url,photos,categories,weight")
-      .or(`barcode.ilike.${pattern},title.ilike.${pattern},description.ilike.${pattern}`)
-      .limit(25);
-    data = retry.data;
-    error = retry.error;
-  }
-
-  if (error) {
-    console.error("Inventory search failed:", error);
-    setStatus(error.message || "Could not search inventory.", "error");
-    return;
-  }
-
-  const items = data || [];
-  if (items.length === 1) await openItemConfirmModal(items[0]);
+  let data, error;
+  try {
+    ({ data, error } = await supabase.rpc("lookup_pending_checkout_items", { _term: term }));
+  } catch (failure) { error = failure; }
+  if (!current()) return;
+  if (error) return setStatus(error.message || "Could not search inventory.", "error");
+  const items = data?.items || [];
+  if (items.length === 1 && data.exact) await selectInventoryItem(items[0]);
+  else if (items.length === 1) await openItemConfirmModal(items[0]);
   else {
-    renderItemResults(items, "No item found. Try scanning the internal barcode.");
-    setStatus(items.length ? `${items.length} item matches. Choose the exact item being shipped.` : "No item found.", items.length ? "info" : "error");
+    renderItemResults(items, "No item found. Check the barcode or stage this line without inventory.");
+    setStatus(items.length ? `${items.length} matches. Choose the exact item being shipped.` : "No item found. You can stage this line without inventory if the physical item is present.", items.length ? "info" : "error");
   }
 }
 
 async function selectInventoryItem(item) {
-  if (!requireCheckoutStore()) return;
+  if (!requireCheckoutStore() || !state.selectedLine || state.busy) return;
+  invalidateInventoryLookup();
   state.selectedItem = item;
   state.selectedStockRow = null;
   renderItemResults([item]);
@@ -6701,11 +6679,11 @@ async function selectInventoryItem(item) {
 function normalizeStockRow(row) {
   const loc = row.location || {};
   const isTray = loc.is_tray || loc.location_role === "tray";
-  const storeId = isTray ? (loc.tray_current_store_id || loc.store_id || "") : (loc.store_id || "");
+  const storeId = row.checkout_store_id || (isTray ? (loc.tray_current_store_id || loc.store_id || "") : (loc.store_id || ""));
   const storeName = getCheckoutStoreName(storeId);
   const trayLabel = isTray
     ? (loc.tray_status === "checked_out" ? "Checked out tray" : "Tray")
-    : loc.parent_location_id ? "Container" : "Location";
+    : loc.parent_location_id || loc.location_role === "container" ? "Container" : "Location";
   return {
     ...row,
     isTray,
@@ -6714,95 +6692,73 @@ function normalizeStockRow(row) {
     location_id: row.location_id || loc.id,
     location_name: loc.location_name || "",
     location_code: loc.location_code || "",
-    locationLabel: `${loc.location_name || "Unnamed location"}${loc.location_code ? ` (${loc.location_code})` : ""} - ${trayLabel}${storeName ? ` - ${storeName}` : ""}`,
+    locationLabel: `${loc.location_name || "Unnamed location"}${loc.location_code ? ` (${loc.location_code})` : ""} - ${trayLabel}${storeName ? ` - ${storeName}` : ""}${row.bag_barcode ? ` - Bag ${row.bag_barcode}` : row.batch_id ? " - Bulk bag" : " - Loose stock"}`,
   };
 }
 
 async function loadStockRowsForItem(itemId) {
-  if (!requireCheckoutStore()) {
-    state.stockRows = [];
-    renderLocationResults([], "Select a checkout store before loading source trays.");
-    return;
-  }
-
+  if (!requireCheckoutStore() || !state.selectedLine) return;
+  const generation = state.inventoryLookupGeneration;
+  const lineId = state.selectedLine.id;
+  const storeId = state.checkoutStoreId;
   const storeName = getCheckoutStore()?.name || "the selected store";
-  setStatus(`Loading source trays in ${storeName}...`);
-  const [{ data, error }, { data: reservations, error: reservationError }] = await Promise.all([
-    supabase
-      .from("item_stock_locations")
-      .select("id,item_id,location_id,quantity,location:location_id(*)")
-      .eq("item_id", itemId)
-      .eq("condition_status", "good")
-      .gt("quantity", 0),
-    supabase
-      .from("active_stock_reservations")
-      .select("stock_location_row_id,reserved_quantity")
-      .eq("item_id", itemId),
-  ]);
-
+  setStatus(`Loading available stock in ${storeName}...`);
+  let data, error;
+  try {
+    ({ data, error } = await supabase.rpc("get_pending_checkout_stock", {
+      _item_id: itemId, _order_line_id: lineId, _checkout_store_id: storeId,
+    }));
+  } catch (failure) { error = failure; }
+  if (generation !== state.inventoryLookupGeneration || state.selectedLine?.id !== lineId
+    || state.checkoutStoreId !== storeId || state.selectedItem?.id !== itemId) return;
   if (error) {
-    console.error("Source location load failed:", error);
     state.stockRows = [];
-    renderLocationResults([], "Could not load source locations.");
-    setStatus(error.message || "Could not load source locations.", "error");
-    return;
+    renderLocationResults([], "Could not verify available stock. Try scanning again.");
+    return setStatus(error.message || "Could not load source locations.", "error");
   }
-
-  if (reservationError) {
-    console.warn("Could not load active reservations for pending checkout:", reservationError);
-  }
-
-  const reservationMap = new Map((reservations || []).map((entry) => [
-    entry.stock_location_row_id,
-    Number(entry.reserved_quantity || 0),
-  ]));
-
   state.stockRows = (data || [])
-    .map((row) => {
-      const reserved = reservationMap.get(row.id) || 0;
-      return {
-        ...row,
-        physical_quantity: Number(row.quantity || 0),
-        reserved_quantity: reserved,
-        quantity: Math.max(0, Number(row.quantity || 0) - reserved),
-      };
-    })
+    .filter(row => !state.selectedItem.checkout_batch_ids?.length || state.selectedItem.checkout_batch_ids.includes(row.batch_id))
+    .map(row => ({ ...row, server_quantity: Number(row.quantity), checkout_store_id: storeId }))
     .map(normalizeStockRow)
-    .filter((row) => {
-      return row.isTray
-        && row.store_id === state.checkoutStoreId
-        && row.tray_status !== "checked_out"
-        && Number(row.quantity || 0) > 0;
-    });
+    .map(row => ({ ...row, quantity: getSourceQuantityForStaging(row, lineId) }))
+    .filter(row => row.quantity > 0);
+  renderLocationResults(state.stockRows, `No available stock at ${storeName}. Check the source or use Stage Without Inventory.`);
+  if (!state.stockRows.length) return setStatus(`No available stock at ${storeName}. Check the source or use Stage Without Inventory.`, "error");
+  if (state.stockRows.length === 1) return selectStockRow(state.stockRows[0], { automatic: true });
+  setStatus(`${state.stockRows.length} sources in ${storeName}. Scan the location or bag label, or choose one.`, "info");
+  setTimeout(() => { if (generation === state.inventoryLookupGeneration) $("location-scan")?.focus(); }, 80);
+}
 
-  renderLocationResults(state.stockRows, `This item is not available in any checked-in tray at ${storeName}.`);
+function invalidateInventoryLookup() {
+  ++state.inventoryLookupGeneration;
+  clearQuantityAutoStage();
+  clearItemSearchTimer();
+  clearLocationSearchTimer();
+  state.pendingItemCandidate = null;
+  closeModal("item-confirm-modal");
+}
 
-  if (!state.stockRows.length) {
-    setStatus(`No checked-in tray at ${storeName} currently holds this item.`, "error");
-    return;
-  }
-
-  if (state.stockRows.length === 1) {
-    selectStockRow(state.stockRows[0], { automatic: true });
-    return;
-  }
-
-  setStatus(`${state.stockRows.length} source trays in ${storeName}. Scan the tray label or choose one.`, "info");
-  setTimeout(() => $("location-scan")?.focus(), 80);
+function getSourceQuantityForStaging(row, lineId) {
+  // Other staged lines spend only their unreserved portion of this shared source.
+  const stagedFree = [...state.stagedFulfillments.values()].reduce((sum, entry) =>
+    entry.line.id !== lineId && entry.mode !== "without_inventory" && entry.row.id === row.id
+      ? sum + Math.max(0, entry.qty - Number(entry.row.own_reserved_quantity || 0)) : sum, 0);
+  return Math.max(0, Number(row.server_quantity ?? row.quantity) - stagedFree);
 }
 
 function selectStockRow(row, { automatic = false } = {}) {
+  if (state.busy) return;
   state.selectedStockRow = row;
   $("location-scan").value = row.location_code || row.location_name || "";
   const qtyInput = $("fulfill-quantity");
   if (qtyInput) {
     qtyInput.value = "1";
-    qtyInput.max = String(Math.max(1, Number(row.quantity || 1)));
+    qtyInput.max = String(Math.min(getRemainingLineQuantity(state.selectedLine), Number(row.quantity || 0)));
   }
   renderLocationResults(state.stockRows);
   renderSelectionSummary();
   setStatus(automatic
-    ? "Only one valid tray was found in this store. It was selected automatically; staging in 1 second unless quantity changes."
+    ? "Only one available source was found in this store. It was selected automatically; staging in 1 second unless quantity changes."
     : "Source selected. Quantity is ready; staging automatically in 1 second.");
   setTimeout(() => {
     qtyInput?.focus();
@@ -6849,6 +6805,13 @@ function clearLiveLotSearchTimer() {
 
 function scheduleItemSearch() {
   clearItemSearchTimer();
+  invalidateInventoryLookup();
+  state.selectedItem = null;
+  state.selectedStockRow = null;
+  state.stockRows = [];
+  renderItemResults([]);
+  renderLocationResults([]);
+  renderSelectionSummary();
   const term = sanitizeSearchTerm($("item-scan")?.value || "");
   if (!term || !$("item-confirm-modal")?.classList.contains("hidden")) return;
 
@@ -6862,6 +6825,9 @@ function scheduleItemSearch() {
 
 function scheduleSourceLocationSearch() {
   clearLocationSearchTimer();
+  clearQuantityAutoStage();
+  state.selectedStockRow = null;
+  renderSelectionSummary();
   const term = String($("location-scan")?.value || "").trim();
   if (!term) return;
 
@@ -6892,6 +6858,9 @@ function scheduleLiveLotSearch(inputId = "live-lot-scan") {
 
 function searchSourceLocation() {
   clearLocationSearchTimer();
+  clearQuantityAutoStage();
+  state.selectedStockRow = null;
+  renderSelectionSummary();
   if (!requireCheckoutStore()) return;
 
   const term = String($("location-scan")?.value || "").trim().toLowerCase();
@@ -6900,11 +6869,12 @@ function searchSourceLocation() {
       selectStockRow(state.stockRows[0], { automatic: true });
       return;
     }
-    setStatus("Scan or type a tray barcode.", "error");
+    setStatus("Scan or type a location or bulk-bag barcode.", "error");
     return;
   }
 
   const matches = state.stockRows.filter((row) =>
+    String(row.bag_barcode || "").toLowerCase() === term ||
     String(row.id || "").toLowerCase() === term ||
     String(row.location_id || "").toLowerCase() === term ||
     String(row.location_code || "").toLowerCase() === term ||
@@ -6914,8 +6884,8 @@ function searchSourceLocation() {
 
   if (matches.length === 1) selectStockRow(matches[0]);
   else {
-    renderLocationResults(matches, "That tray does not currently hold this item in the selected store.");
-    setStatus(matches.length ? `${matches.length} source tray matches. Choose one.` : "No matching source tray for this item in the selected store.", matches.length ? "info" : "error");
+    renderLocationResults(matches, "That source does not currently hold available stock for this item in the selected store.");
+    setStatus(matches.length ? `${matches.length} source matches. Choose one.` : "No matching source for this item in the selected store.", matches.length ? "info" : "error");
   }
 }
 
@@ -7163,25 +7133,30 @@ async function bumpInventoryVersion(changedIds = []) {
 }
 
 function stageCurrentLine({ autoAdvance = false, autoReview = false } = {}) {
+  if (state.busy) return;
   clearQuantityAutoStage();
   const line = state.selectedLine;
   const item = state.selectedItem;
   const row = state.selectedStockRow;
-  const qty = Math.max(1, parseInt($("fulfill-quantity")?.value || "1", 10) || 1);
+  const qty = Number($("fulfill-quantity")?.value);
   const remainingLineQty = getRemainingLineQuantity(line);
 
   if (!line) return setStatus("Select an eBay order first.", "error");
   if (!state.checkoutStoreId) return setStatus("Select the checkout store first.", "error");
   if (!item) return setStatus("Scan or select the inventory item first.", "error");
-  if (!row) return setStatus("Scan or select the source tray.", "error");
-  if (!row.isTray || row.store_id !== state.checkoutStoreId || row.tray_status === "checked_out") {
-    return setStatus("The selected source must be a checked-in tray in the checkout store.", "error");
+  if (!row) return setStatus("Scan or select the source location.", "error");
+  if (row.store_id !== state.checkoutStoreId || (row.isTray && row.tray_status === "checked_out")) {
+    return setStatus("The selected source must be available in the checkout store.", "error");
   }
+  if (!Number.isSafeInteger(qty) || qty < 1) return setStatus("Enter a positive whole quantity.", "error");
+  row.quantity = getSourceQuantityForStaging(row, line.id);
   if (remainingLineQty <= 0) return setStatus("This eBay line is already fulfilled.", "error");
   if (qty > remainingLineQty) return setStatus(`Only ${remainingLineQty} unit(s) remain on that eBay line.`, "error");
   if (qty > Number(row.quantity || 0)) return setStatus(`Only ${row.quantity} available at that source.`, "error");
 
   state.stagedFulfillments.set(line.id, {
+    mode: "inventory",
+    expectedFulfilledQuantity: Number(line.fulfilled_quantity || 0),
     line,
     item,
     row,
@@ -7190,6 +7165,31 @@ function stageCurrentLine({ autoAdvance = false, autoReview = false } = {}) {
     payout: null,
   });
 
+  finishStagingLine(line, { autoAdvance, autoReview });
+}
+
+function stageLineWithoutInventory() {
+  if (state.busy || !requireCheckoutStore()) return;
+  const line = state.selectedLine;
+  if (!line || !isOpenOrderLine(line) || getRemainingLineQuantity(line) <= 0) {
+    return setStatus("Select a pending order line first.", "error");
+  }
+  invalidateInventoryLookup();
+  state.selectedItem = null;
+  state.selectedStockRow = null;
+  state.stockRows = [];
+  renderItemResults([]);
+  renderLocationResults([]);
+  state.stagedFulfillments.set(line.id, {
+    mode: "without_inventory", line, qty: getRemainingLineQuantity(line),
+    expectedFulfilledQuantity: Number(line.fulfilled_quantity || 0),
+    item: { title: line.item_title, barcode: line.custom_label },
+    row: { locationLabel: "Without inventory — no stock removed" },
+  });
+  finishStagingLine(line, { autoAdvance: true, autoReview: true });
+}
+
+function finishStagingLine(line, { autoAdvance = false, autoReview = false } = {}) {
   renderOrders();
   renderBuyerBundlePanel();
   renderSelectionSummary();
@@ -7197,7 +7197,7 @@ function stageCurrentLine({ autoAdvance = false, autoReview = false } = {}) {
   const nextLine = getNextPackableLine(getBuyerKey(line), line.id);
   if (autoAdvance && nextLine) {
     selectOrderLine(nextLine.id);
-    setStatus("Item staged. Scan the next item for this buyer.");
+    setStatus("Line staged. Scan the next item or stage it without inventory.");
     return;
   }
 
@@ -9186,13 +9186,14 @@ async function renderBundleReviewList(staged) {
   list.replaceChildren();
   staged.forEach((entry) => {
     const card = document.createElement("article");
-    card.className = "bundle-review-item";
+    card.className = `bundle-review-item ${entry.mode === "without_inventory" ? "is-without-inventory" : ""}`;
     card.innerHTML = `
-      <div class="bundle-review-thumb"><span>No photo</span></div>
+      ${entry.mode === "without_inventory" ? "" : '<div class="bundle-review-thumb"><span>No photo</span></div>'}
       <div class="bundle-review-copy">
         <strong>${escapeHtml(entry.item.title || entry.line.item_title || "Untitled item")}</strong>
+        <b>${entry.mode === "without_inventory" ? "Without inventory — no stock removed" : "Inventory — remove scanned stock"}</b>
         <span>${escapeHtml(entry.item.barcode || entry.line.custom_label || entry.line.item_number || "No barcode")}</span>
-        <small>${escapeHtml(entry.row.locationLabel)} - Qty ${Number(entry.qty || 1).toLocaleString()}</small>
+        <small>${entry.mode === "without_inventory" ? "" : `${escapeHtml(entry.row.locationLabel)} — `}Qty ${Number(entry.qty || 1).toLocaleString()}</small>
       </div>
     `;
     list.appendChild(card);
@@ -9258,15 +9259,31 @@ function openBundleReviewModal() {
     renderLiveLotBundleReviewList(liveItems);
   } else {
     const totalQty = staged.reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
-    $("bundle-review-subtitle").textContent = `${buyer} - ${staged.length} line(s), ${totalQty} total unit(s). Press Enter to confirm after review.`;
+    const inventoryQty = staged.filter(entry => entry.mode !== "without_inventory").reduce((sum, entry) => sum + entry.qty, 0);
+    $("bundle-review-subtitle").textContent = `${buyer} — ${totalQty} units: ${inventoryQty} from inventory, ${totalQty - inventoryQty} without inventory. Review each line before confirming.`;
     renderBundleReviewList(staged);
   }
   openModal("bundle-review-modal");
   setTimeout(() => $("confirm-bundle-review")?.focus(), 80);
 }
 
+function getPendingCheckoutRequestId(payload) {
+  const key = JSON.stringify(payload);
+  const storageKey = `pending-checkout-requests:${state.user?.id || ""}`;
+  if (!state.checkoutRequests.size) {
+    try { state.checkoutRequests = new Map(JSON.parse(sessionStorage.getItem(storageKey) || "[]")); } catch (_) { /* Storage may be unavailable. */ }
+  }
+  if (!state.checkoutRequests.has(key)) state.checkoutRequests.set(key, crypto.randomUUID());
+  const requestId = state.checkoutRequests.get(key);
+  while (state.checkoutRequests.size > 20) state.checkoutRequests.delete(state.checkoutRequests.keys().next().value);
+  try { sessionStorage.setItem(storageKey, JSON.stringify([...state.checkoutRequests])); } catch (_) { /* Expected quantities still guard stale retries. */ }
+  return requestId;
+}
+
 async function fulfillSelectedOrder({ skipReview = false } = {}) {
-  if (state.busy) return;
+  if (state.busy || !requireCheckoutStore()) return;
+  let committed = false;
+  clearQuantityAutoStage();
   const notes = String($("fulfill-notes")?.value || "").trim();
   const staged = getActiveStagedFulfillments();
   const liveItems = getActiveLiveLotReservedItems();
@@ -9283,7 +9300,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
   $("stage-current-line").disabled = true;
   setStatus(liveItems.length && !staged.length
     ? `Confirming live-sale bag and removing ${liveItems.length} reserved item type(s)...`
-    : `Confirming and removing ${staged.length} packed item(s)...`);
+    : `Confirming ${staged.length} packed line(s)...`);
 
   try {
     const completedLineIds = [...new Set((liveItems.length && !staged.length
@@ -9301,11 +9318,6 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
       .filter(Boolean))];
     const completedLineCount = liveItems.length && !staged.length ? 1 : staged.length;
     const changedItemIds = [];
-    const selectedSellerId = getSelectedPackingSellerId();
-    if (selectedSellerId && !(liveItems.length && !staged.length)) {
-      await assignSellerToOrderLines(completedLineIds, selectedSellerId);
-    }
-
     if (liveItems.length && !staged.length) {
       if (!state.selectedLine) throw new Error("Select the eBay order line before confirming the live-sale bag.");
       const { error } = await supabase.rpc("fulfill_ebay_order_line_with_live_lot_for_store", {
@@ -9321,25 +9333,35 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
       });
       clearLiveLotSelection({ render: true });
     } else {
-      for (const entry of staged) {
-        const { error } = await supabase.rpc("fulfill_ebay_order_line_for_store", {
-          _order_line_id: entry.line.id,
-          _item_id: entry.item.id,
-          _stock_location_row_id: entry.row.id,
-          _quantity: entry.qty,
-          _sold_price: entry.soldPrice,
-          _net_payout: entry.payout,
-          _notes: notes || null,
-          _signed_by_email: state.user.email,
-          _checkout_store_id: state.checkoutStoreId,
-        });
-
-        if (error) throw error;
-        changedItemIds.push(entry.item.id);
-      }
+      const payload = {
+        _checkout_store_id: state.checkoutStoreId,
+        _notes: notes || null,
+        _seller_employee_id: getSelectedPackingSellerId() || null,
+        _lines: staged.map(entry => ({
+          mode: entry.mode || "inventory",
+          order_line_id: entry.line.id,
+          item_id: entry.mode === "without_inventory" ? null : entry.item.id,
+          stock_location_row_id: entry.mode === "without_inventory" ? null : entry.row.id,
+          quantity: entry.qty,
+          expected_fulfilled_quantity: entry.expectedFulfilledQuantity ?? Number(entry.line.fulfilled_quantity || 0),
+          sold_price: entry.soldPrice ?? null,
+        })).sort((a, b) => a.order_line_id.localeCompare(b.order_line_id)),
+      };
+      const requestId = getPendingCheckoutRequestId(payload);
+      const { error } = await supabase.rpc("fulfill_pending_checkout_bundle", { ...payload, _request_id: requestId });
+      if (error) throw error;
+      staged.forEach(entry => { if (entry.mode !== "without_inventory") changedItemIds.push(entry.item.id); });
     }
 
-    await bumpInventoryVersion([...new Set(changedItemIds)]);
+    // The server has committed. Clear staging before any optional refresh can fail.
+    committed = true;
+    state.stagedFulfillments.clear();
+    invalidateInventoryLookup();
+    state.selectedItem = null;
+    state.selectedStockRow = null;
+    state.stockRows = [];
+    if (liveItems.length && !staged.length) await bumpInventoryVersion([...new Set(changedItemIds)]);
+
     const completedTaskCount = await completeFulfilledShippingTasksForLines({
       lineIds: completedLineIds,
       orderIds: completedOrderIds,
@@ -9347,7 +9369,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
     state.stagedFulfillments.clear();
     setStatus(completedTaskCount
       ? "Packed bundle confirmed. Shipment task moved to history."
-      : "Packed bundle confirmed. Stock was removed and signed.", "info");
+      : "Packed bundle confirmed. Inventory was updated for scanned lines; other lines were recorded without stock removal.", "info");
     await loadOrders();
     postEbayPendingQueueChanged({
       action: liveItems.length && !staged.length ? "live_lot_fulfillment" : "inventory_fulfillment",
@@ -9358,7 +9380,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
 
     const nextBuyerLine = getNextPackableLine(state.activeBuyerKey);
     if (nextBuyerLine) {
-      selectOrderLine(nextBuyerLine.id);
+      selectOrderLine(nextBuyerLine.id, { allowBusy: true });
       setStatus("Bundle partially done. Next pending item for this buyer is ready.");
       return;
     }
@@ -9366,11 +9388,12 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
     clearSelection();
   } catch (error) {
     console.error("Pending order fulfillment failed:", error);
-    setStatus(error.message || "Could not fulfill this order.", "error");
+    setStatus(committed
+      ? "Checkout was saved. Refresh the queue to see the updated orders."
+      : `${error.message || "Could not confirm checkout."} Retry the same bundle safely or refresh to review current quantities.`, "error");
   } finally {
     state.busy = false;
-    $("fulfill-order").disabled = false;
-    $("stage-current-line").disabled = false;
+    updateCheckoutStoreGate();
   }
 }
 
@@ -9413,11 +9436,18 @@ async function completeFulfilledShippingTasksForLines({ lineIds = [], orderIds =
       addTasks(data);
     }
 
+    if (!taskMap.size) return 0;
+    const taskOrderIds = [...new Set([...fulfilledOrderIds, ...[...taskMap.values()].map(task => task.order_id)].filter(Boolean))];
+    const { data: currentLines, error: lineError } = await supabase.from("ebay_order_lines")
+      .select("id,order_id,line_status").in("order_id", taskOrderIds);
+    if (lineError) throw lineError;
+    const closedIds = new Set((currentLines || []).filter(line => !isOpenOrderLine(line)).map(line => line.id));
     const matchingTasks = [...taskMap.values()].filter((task) => {
       if (!isAdminUser() && task.assigned_to_user_id && task.assigned_to_user_id !== state.user?.id) return false;
       const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
-      if (taskLineIds.length) return taskLineIds.every((lineId) => fulfilledLineIds.has(lineId));
-      return Boolean(task.order_id && fulfilledOrderIds.has(task.order_id));
+      if (taskLineIds.length) return taskLineIds.every(lineId => closedIds.has(lineId));
+      const orderLines = (currentLines || []).filter(line => line.order_id === task.order_id);
+      return orderLines.length > 0 && orderLines.every(line => closedIds.has(line.id));
     });
 
     let completedCount = 0;
@@ -9443,6 +9473,7 @@ async function completeFulfilledShippingTasksForLines({ lineIds = [], orderIds =
 }
 
 function clearSelection() {
+  invalidateInventoryLookup();
   clearItemSearchTimer();
   clearLocationSearchTimer();
   clearQuantityAutoStage();
@@ -11429,10 +11460,11 @@ function setupListeners() {
   $("find-location")?.addEventListener("click", searchSourceLocation);
   $("stage-current-line")?.addEventListener("click", () => stageCurrentLine({ autoAdvance: true }));
   $("cancel-pending-order")?.addEventListener("click", () => openWorkerCancelOrderModal({ openEbayCancel: true }));
+  $("stage-without-inventory")?.addEventListener("click", stageLineWithoutInventory);
   $("complete-no-inventory")?.addEventListener("click", openWorkerNoInventoryModal);
   $("fulfill-order")?.addEventListener("click", fulfillSelectedOrder);
   $("fulfill-seller")?.addEventListener("change", persistSelectedLineSeller);
-  $("clear-selection")?.addEventListener("click", clearSelection);
+  $("clear-selection")?.addEventListener("click", () => { if (!state.busy) clearSelection(); });
   $("preview-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
   for (const id of ['print-ebay-label','print-worker-ebay-label']) $(id)?.addEventListener('click', event => {
     const label=getSelectedOrderLabelData();

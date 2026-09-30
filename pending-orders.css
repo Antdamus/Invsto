@@ -5001,3 +5001,6 @@ a.buyer-line-finance-pill:hover {
     text-align: left;
   }
 }
+
+.bundle-review-item.is-without-inventory { grid-template-columns: 1fr; }
+.bundle-review-copy small { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
