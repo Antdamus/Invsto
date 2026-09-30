@@ -6,10 +6,10 @@
   box.style.cssText='position:fixed;bottom:12px;left:12px;z-index:2147483647;background:#18251f;color:white;border:1px solid #98ba8b;border-radius:12px;padding:12px;max-width:330px;font:14px/1.4 system-ui;box-shadow:0 3px 15px #0008';
   const button=document.createElement('button');button.textContent='Start Invsto capture';button.style.cssText='font:inherit;padding:8px 14px;border-radius:8px;cursor:pointer';
   const movement=document.createElement('button');movement.textContent='Keep page still';movement.style.cssText=button.style.cssText;
-  const receiver=document.createElement('a');receiver.textContent='Open Invsto receiver';receiver.href='https://antdamus.github.io/Invsto/live-sales.html?capture=1&v=1.1.3';receiver.target='_blank';receiver.rel='noopener';receiver.style.cssText='display:block;color:#efd69b;margin-top:8px';
+  const receiver=document.createElement('a');receiver.textContent='Open Invsto receiver';receiver.href='https://antdamus.github.io/Invsto/live-sales.html?capture=1&v=1.2.0';receiver.target='_blank';receiver.rel='noopener';receiver.style.cssText='display:block;color:#efd69b;margin-top:8px';
   const note=document.createElement('div');note.textContent='Automatic capture checks Activity and Sold. Use a separate tab for uninterrupted capture while editing.';
   box.append(button,movement,note,receiver);document.body.append(box);
-  receiver.href+='&listing_event='+encodeURIComponent(event_id);
+  receiver.href+='&capture_event='+encodeURIComponent(event_id);
   let holdMovement=false,lastInteraction=0;
   const usingPage=()=>{
     const focused=document.activeElement;
@@ -20,12 +20,23 @@
   for(const type of ['pointerdown','keydown','wheel','touchstart'])document.addEventListener(type,e=>{if(e.isTrusted&&!box.contains(e.target))lastInteraction=Date.now();},{capture:true,passive:true});
   movement.onclick=()=>{holdMovement=!holdMovement;lastInteraction=0;movement.textContent=holdMovement?'Resume automatic capture':'Keep page still';tick();};
   let active=false,busy=false,cache={},sent=new Map(),pageAt=0,stopping=false,latestNext=true,endReported=false;
+  chrome.runtime.onMessage?.addListener((message,sender,reply)=>{
+    if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_CAPTURE_STATUS')reply({ok:message.event_id===event_id&&active});
+  });
   const sweepPositions=new WeakMap();
   let lastClock=null,clockChangedAt=0,clockWasAdvancing=false;
   const tab = name => [...document.querySelectorAll('[role="tab"]')].find(el=>new RegExp('^'+name+'(?:\\s|\\(|$)','i').test(el.textContent.trim()));
   const disabled = el => !!el && (el.disabled || el.getAttribute('aria-disabled')==='true');
   const choose = el => {if(el && !disabled(el) && el.getAttribute('aria-selected')!=='true') el.click();};
-  button.onclick=()=>{active=!active;button.textContent=active?'Stop Invsto capture':'Start Invsto capture';sent.clear();stopping=!active;tick();};
+  button.onclick=async()=>{
+    active=!active;button.textContent=active?'Stop Invsto capture':'Start Invsto capture';sent.clear();stopping=!active;
+    // Begin buffering immediately, even while the seller form is being filled.
+    tick();
+    if(active){
+      try{const result=await chrome.runtime.sendMessage({type:'INVSTO_START_CAPTURE',event_id});if(!result?.ok)throw Error(result?.error||'Could not open Invsto');}
+      catch(error){note.textContent=error.message+'. Use Open Invsto receiver below to choose sellers.';}
+    }
+  };
   async function tick() {
     if(busy || (!active&&!stopping&&(endReported||!InvstoLiveParser.hasEnded(document)))) return;busy=true;
     try {

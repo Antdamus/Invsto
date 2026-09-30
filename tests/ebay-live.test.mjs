@@ -6,7 +6,7 @@ import {chromium,webkit} from '@playwright/test';
 import vm from 'node:vm';
 const root=new URL('../',import.meta.url);let server,browser,origin;
 before(async()=>{
- server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:ebay-live|live-sales|live-manual-items|live-bag-label|live-show-drafts|live-listing-intake)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
+ server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:ebay-live|live-sales|live-manual-items|live-bag-label|live-show-drafts|live-listing-intake|live-capture-setup)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;
  browser=await(process.env.INVSTO_ITEM_BROWSER==='webkit'?webkit:chromium).launch();
 });
@@ -44,7 +44,7 @@ async function open(t,query='',resume=false,drafts=false){
    if(name==='complete_ebay_live_session'){if(window.failComplete)return {error:{message:'A payment changed; review the outstanding issue'}};showSession.status='ended';return {data:null};}
    if(name==='reopen_ebay_live_bag'){const a=dashboard.attempts.find(a=>a.id===args._attempt_id);a.closed_at=null;a.claimed_by='worker';const lot=mockLots.find(l=>l.id===a.lot_id);lot.closed_at=null;return {data:lot};}
    if(name==='set_live_sale_session_draft'){if(window.failDraft)return {error:{message:'Draft save interrupted'}};const s=(window.showSessions||[showSession]).find(s=>s.id===args._session_id);if(!s||s.status!=='active')return {error:{message:'This show is already closed or unavailable'}};s.saved_for_later_at=args._saved?new Date().toISOString():null;s.saved_for_later_by=args._saved?'worker':null;return {data:structuredClone(s)};}
-   if(name==='start_ebay_live_session'){window.showSession={...window.showSession,id:'newshow',workflow_mode:'ebay_live',title:args._title};window.dashboard.connection={...window.dashboard.connection,session_id:'newshow',event_id:args._event_id};if(window.showSessions)window.showSessions.push(window.showSession);if(window.dashboardByShow){window.dashboard.attempts=[];window.dashboardByShow[window.showSession.id]=window.dashboard;}return {data:window.showSession};}
+   if(name==='start_ebay_live_session'||name==='start_ebay_live_capture'){if(window.failCaptureStart)return {error:{message:'Connection interrupted'}};window.showSession={...window.showSession,id:'newshow',workflow_mode:'ebay_live',title:args._title||'Captured show',store_id:args._store_id||null,primary_seller_employee_id:args._primary_seller_employee_id,co_seller_employee_ids:args._co_seller_employee_ids};window.dashboard.connection={...window.dashboard.connection,session_id:'newshow',event_id:args._event_id};if(window.showSessions)window.showSessions.push(window.showSession);if(window.dashboardByShow){window.dashboard.attempts=[];window.dashboardByShow[window.showSession.id]=window.dashboard;}return {data:window.showSession};}
    if(name==='prepare_ebay_live_bag_label'){const a=window.dashboard.attempts.find(a=>a.id===args._attempt_id);if(window.failPrepare||a?.payment_state!=='paid'||a.resolved_at)return {error:{message:'Payment is not confirmed for this bag'}};let lot=mockLots.find(l=>l.id===a.lot_id);if(!lot){lot={id:'label-'+a.id,session_id:'show',auction_number:'EB-001-SALE',lot_code:'LIVE-LABEL',status:'open',owner_employee_id:a.seller_id};mockLots.push(lot);a.lot_id=lot.id;}return {data:lot};}
    if(name==='claim_ebay_live_bag'){const a=window.dashboard.attempts.find(a=>a.id===args._attempt_id);a.claimed_by='worker';let lot=mockLots.find(l=>l.id===a.lot_id);if(!lot){a.lot_id='lot';lot={id:'lot',session_id:'show',auction_number:'EB-29-SALE',lot_code:'LIVE-TEST',status:'open',owner_employee_id:'seller'};window.mockLots.push(lot);}return {data:lot};}
    if(name==='close_ebay_live_bag'){if(window.failClose)return {error:{message:'Payment is not confirmed for this bag'}};window.dashboard.attempts[0].closed_at=new Date().toISOString();return {data:null};}
@@ -75,7 +75,7 @@ test('extension outbox persists failures until receiver commit and retries after
 });
 test('capture sends explicit payment evidence and emits a stopped heartbeat',async t=>{
  const page=await browser.newPage();t.after(()=>page.close());await page.goto(origin+'/ebaylive/host/events/EVENT123');await page.setContent('<button role="tab" aria-selected="true">Activity</button><button role="tab" aria-selected="true">Sold (1)</button>'+tile()+'<div id="activity-panel"><div aria-label="Filter activity"><button aria-pressed="true">All</button></div>'+row()+'</div>');
- await page.evaluate(()=>{window.packets=[];window.chrome={runtime:{sendMessage:async m=>{packets.push(m);return {ok:true,status:'Connected'}}}};});
+ await page.evaluate(()=>{window.packets=[];window.chrome={runtime:{sendMessage:async m=>{if(m.type==='INVSTO_CAPTURE')packets.push(m);return {ok:true,status:'Connected'}}}};});
  for(const name of ['parser','capture'])await page.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
  assert.equal(await page.evaluate(()=>packets.length),0);await page.getByRole('button',{name:'Start Invsto capture',exact:true}).click();await page.waitForFunction(()=>packets.some(p=>p.health.ready));const first=await page.evaluate(()=>packets[0]);assert.equal(first.event_id,'EVENT123');assert.deepEqual(first.events.map(e=>e.kind),['paid','won']);await page.getByRole('button',{name:'Stop Invsto capture',exact:true}).click();await page.waitForFunction(()=>packets.some(p=>!p.health.ready));
 });
@@ -87,7 +87,7 @@ test('automatic show setup needs an event URL and no starting number; manual mod
  await p.locator('#session-workflow').selectOption('manual');assert.equal(await p.locator('#session-start-auction-number').isVisible(),true);
  await p.locator('#session-workflow').selectOption('ebay_live');await p.locator('#session-ebay-url').fill('https://example.com/ebaylive/host/events/OTHER12');await p.locator('#start-session').click();
  assert.match(await p.locator('#session-feedback').innerText(),/event URL/);assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='start_ebay_live_session')),false);
- await p.locator('#session-ebay-url').fill('https://www.ebay.com/ebaylive/host/events/NEW1234?tab=dashboard');await p.locator('#session-store-select').selectOption('store');await p.locator('#start-session').click();
+ await p.locator('#session-ebay-url').fill('https://www.ebay.com/ebaylive/host/events/NEW1234?tab=dashboard');assert.equal(await p.locator('#session-store-select').isVisible(),false);await p.locator('#start-session').click();
  await p.waitForFunction(()=>calls.some(c=>c.name==='start_ebay_live_session'));
  assert.equal(await p.evaluate(()=>calls.find(c=>c.name==='start_ebay_live_session').args._event_id),'NEW1234');
  assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='create_live_sale_lot')),false);assert.deepEqual(p.errors,[]);
@@ -110,7 +110,7 @@ test('nonblocking metadata does not disable paid auctions or steal button focus 
 test('background capture requires an advancing stream clock and pauses again when it stalls',async t=>{
  const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123');
  await p.setContent('<button role="tab" aria-selected="true">Activity</button><button role="tab" aria-selected="true">Sold (1)</button><span id="metric-elapsed-time-value">00:01:00</span>'+tile()+'<div id="activity-panel"><div aria-label="Filter activity"><button aria-pressed="true">All</button></div>'+row()+'</div>');
- await p.evaluate(()=>{window.packets=[];window.fakeNow=Date.now();Date.now=()=>window.fakeNow;Object.defineProperty(document,'visibilityState',{value:'hidden',configurable:true});window.chrome={runtime:{sendMessage:async m=>{packets.push(m);return {ok:true,status:'Connected'}}}};});
+ await p.evaluate(()=>{window.packets=[];window.fakeNow=Date.now();Date.now=()=>window.fakeNow;Object.defineProperty(document,'visibilityState',{value:'hidden',configurable:true});window.chrome={runtime:{sendMessage:async m=>{if(m.type==='INVSTO_CAPTURE')packets.push(m);return {ok:true,status:'Connected'}}}};});
  for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
  await p.getByRole('button',{name:'Start Invsto capture',exact:true}).click();await p.waitForFunction(()=>packets.length);assert.equal(await p.evaluate(()=>packets.at(-1).health.ready),false);
  await p.locator('#metric-elapsed-time-value').evaluate(e=>{e.textContent='00:01:01'});await p.waitForFunction(()=>packets.at(-1).health.ready);
@@ -273,7 +273,7 @@ test('end detection requires the explicit terminal control and ignores a reset c
 });
 
 test('a stopped helper still reports the explicit ended event without inventing auction payments',async t=>{
- const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123');await p.setContent('<button disabled>Event ended</button>');await p.evaluate(()=>{window.packets=[];window.chrome={runtime:{sendMessage:async m=>{packets.push(m);return {ok:true,status:'Connected'}}}};});
+ const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123');await p.setContent('<button disabled>Event ended</button>');await p.evaluate(()=>{window.packets=[];window.chrome={runtime:{sendMessage:async m=>{if(m.type==='INVSTO_CAPTURE')packets.push(m);return {ok:true,status:'Connected'}}}};});
  for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});await p.waitForFunction(()=>packets.length>0);const result=await p.evaluate(()=>packets[0]);assert.equal(result.health.broadcast_ended,true);assert.equal(result.health.ready,false);assert.deepEqual(result.events,[]);
 });
 
@@ -370,7 +370,7 @@ test('save a show draft, start the next show, then restore the original bag and 
  assert.equal(await p.evaluate(()=>showSessions[0].status),'active');assert.equal(await p.evaluate(()=>mockManualItems[0].status),'reserved');
  assert.equal(await p.evaluate(()=>calls.some(c=>['end_live_sale_session','complete_ebay_live_session','cancel_live_sale_lot'].includes(c.name))),false);
  await p.locator('#show-list-new').click();assert.equal(await p.locator('#session-setup-panel').isVisible(),true);assert.equal(await p.locator('#session-ebay-url').inputValue(),'');
- await p.locator('#session-store-select').selectOption('store');await p.locator('#session-primary-seller').selectOption('next-seller');await p.locator('#session-ebay-url').fill('https://www.ebay.com/ebaylive/host/events/SECOND123');await p.locator('#session-title').fill('Second show today');await p.locator('#start-session').click();
+ assert.equal(await p.locator('#session-store-select').isVisible(),false);await p.locator('#session-primary-seller').selectOption('next-seller');await p.locator('#session-ebay-url').fill('https://www.ebay.com/ebaylive/host/events/SECOND123');await p.locator('#session-title').fill('Second show today');await p.locator('#start-session').click();
  await p.waitForFunction(()=>document.getElementById('show-current-name').textContent.includes('Second show today'));
  assert.match(await p.locator('#ebay-live-event').innerText(),/SECOND123/);assert.equal(await p.evaluate(()=>showSessions.length),2);
  await p.locator('#show-drafts-open').click();await p.locator('[data-resume-show="show"]').click();await p.waitForFunction(()=>document.getElementById('ebay-live-event').textContent.includes('EVENT123')&&!document.getElementById('item-scan').disabled);
@@ -406,7 +406,7 @@ test('capture waits before the first sale and automatically moves from disabled 
  const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123');
  await p.setContent('<button role="tab" aria-selected="true">Activity</button><button role="tab" aria-selected="true" id="all-listings">All (57)</button><button role="tab" aria-selected="false" id="sold-listings" disabled>Sold</button><span id="metric-elapsed-time-value">00:25:42</span><div id="listings"></div><div id="activity-panel"><div aria-label="Filter activity"><button aria-pressed="true">All</button></div><p>No activity found</p></div>');
  await p.evaluate(()=>{
-  window.packets=[];window.disabledClicks=0;window.chrome={runtime:{sendMessage:async m=>{packets.push(m);return {ok:true,status:'Connected · 0 pending'}}}};
+  window.packets=[];window.disabledClicks=0;window.chrome={runtime:{sendMessage:async m=>{if(m.type==='INVSTO_CAPTURE')packets.push(m);return {ok:true,status:'Connected · 0 pending'}}}};
   document.getElementById('sold-listings').onclick=e=>{if(e.currentTarget.disabled)disabledClicks++;else{e.currentTarget.setAttribute('aria-selected','true');document.getElementById('all-listings').setAttribute('aria-selected','false');}};
  });
  for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
@@ -458,7 +458,7 @@ test('stock-to-auction intake fits the existing phone screen and keeps scanner f
 test('capture leaves dialogs and item helper still, supports manual hold, and resumes only when free',async t=>{
  const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123');
  await p.setContent('<button role="tab" aria-selected="false">Activity</button><button role="tab" aria-selected="false">Sold (1)</button><div id="activity-panel"><div aria-label="Filter activity"><button aria-pressed="true">All</button></div><div class="_list_" style="height:80px;overflow:auto"><div style="height:900px">'+row()+'</div></div></div>'+tile()+'<div role="dialog">Add listings</div>');
- await p.evaluate(()=>{window.packets=[];window.clicks=0;window.fakeNow=Date.now();Date.now=()=>fakeNow;document.querySelectorAll('[role=tab]').forEach(el=>el.onclick=()=>{clicks++;el.setAttribute('aria-selected','true');});document.querySelector('._list_').scrollTop=45;window.chrome={runtime:{sendMessage:async m=>{packets.push(m);return {ok:true,status:'Connected'}}}};});
+ await p.evaluate(()=>{window.packets=[];window.clicks=0;window.fakeNow=Date.now();Date.now=()=>fakeNow;document.querySelectorAll('[role=tab]').forEach(el=>el.onclick=()=>{clicks++;el.setAttribute('aria-selected','true');});document.querySelector('._list_').scrollTop=45;window.chrome={runtime:{sendMessage:async m=>{if(m.type==='INVSTO_CAPTURE')packets.push(m);return {ok:true,status:'Connected'}}}};});
  for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
  await p.getByRole('button',{name:'Start Invsto capture',exact:true}).click();await p.waitForFunction(()=>packets.length>0);
  assert.equal(await p.evaluate(()=>packets.at(-1).health.mode),'working');assert.equal(await p.evaluate(()=>packets.at(-1).health.ready),false);assert.equal(await p.evaluate(()=>clicks),0);assert.equal(await p.locator('._list_').evaluate(e=>e.scrollTop),45);assert.ok(await p.evaluate(()=>packets[0].events.some(e=>e.kind==='paid')));
@@ -485,4 +485,101 @@ test('working and stopped tabs cannot replace a fresh dedicated capture; quiet r
  await send(1,{ready:false,running:false,mode:'automatic'});assert.equal(deliveries.at(-1).payload.health.ready,false,'stopping the only dedicated capture takes effect');
  const result=await new Promise(r=>handler({type:'INVSTO_LISTING_COMMAND',command:{event_id:'EVENT123',action:'next'}},{id:'extension',tab:{id:2,url:'https://www.ebay.com/ebaylive/host/events/EVENT123'}},r));assert.equal(result.ok,true,'listing preparation also reaches the quiet receiver');
  await send(1,{ready:false,running:true,mode:'automatic',broadcast_ended:true});await send(2,{ready:true,running:true,mode:'automatic'});assert.equal(deliveries.at(-1).payload.health.broadcast_ended,true);assert.equal(deliveries.at(-1).payload.health.ready,false,'another tab cannot undo explicit end evidence');
+});
+
+
+test('capture supplies its event and asks only for sellers before creating the show',async t=>{
+ const p=await open(t,'?capture=1&capture_event=NEXTSHOW123');
+ await p.locator('#capture-main-seller:enabled').waitFor();
+ assert.equal(await p.locator('#live-capture-setup').isVisible(),true);
+ assert.match(await p.locator('#capture-setup-event').textContent(),/NEXTSHOW123/);
+ assert.equal(await p.locator('#live-capture-setup input[type=url]').count(),0);
+ assert.equal(await p.locator('#capture-main-seller').inputValue(),'');
+ assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='start_ebay_live_capture')),false);
+ await p.locator('#capture-main-seller').selectOption('seller');
+ await p.locator('#capture-additional summary').click();
+ assert.equal(await p.locator('[name=capture-co-seller][value=seller]').isDisabled(),true);
+ await p.locator('[name=capture-co-seller][value=next-seller]').check();
+ await p.screenshot({path:'test-results/live-capture-sellers.png'});
+ await p.locator('#capture-start-show').click();
+ await p.locator('#live-capture-setup').waitFor({state:'hidden'});
+ const args=await p.evaluate(()=>calls.find(c=>c.name==='start_ebay_live_capture').args);
+ assert.deepEqual(args,{_event_id:'NEXTSHOW123',_primary_seller_employee_id:'seller',_co_seller_employee_ids:['next-seller']});
+ assert.equal(await p.evaluate(()=>state.currentSession.store_id),null);
+ assert.equal(await p.evaluate(()=>state.currentSession.id),'newshow');
+ assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='create_live_sale_lot')),false);
+ assert.deepEqual(p.errors,[]);
+});
+
+test('capture reconnects to an existing show without asking again or changing its sellers',async t=>{
+ const p=await open(t,'?capture=1&capture_event=EVENT123');
+ await p.locator('#live-capture-setup').waitFor({state:'hidden'});
+ assert.equal(await p.evaluate(()=>state.currentSession.id),'show');
+ assert.equal(await p.evaluate(()=>calls.some(c=>/^start_/.test(c.name))),false);
+ assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='set_ebay_live_seller')),false);
+ assert.deepEqual(p.errors,[]);
+});
+
+test('failed capture setup retains seller selection and ignores repeated setup requests',async t=>{
+ const p=await open(t,'?capture=1&capture_event=NEXTSHOW123');
+ await p.locator('#capture-main-seller:enabled').waitFor();
+ await p.locator('#capture-main-seller').selectOption('next-seller');
+ await p.evaluate(()=>{failCaptureStart=true;window.postMessage({type:'INVSTO_CAPTURE_SETUP',event_id:'NEXTSHOW123'},location.origin);});
+ assert.equal(await p.locator('#capture-main-seller').inputValue(),'next-seller');
+ await p.locator('#capture-start-show').click();
+ await p.waitForFunction(()=>document.querySelector('#capture-setup-status').textContent.includes('Connection interrupted'));
+ assert.equal(await p.locator('#capture-main-seller').inputValue(),'next-seller');
+ await p.evaluate(()=>{failCaptureStart=false;});
+ await p.locator('#capture-start-show').click();await p.locator('#live-capture-setup').waitFor({state:'hidden'});
+ assert.equal(await p.evaluate(()=>state.currentSession.primary_seller_employee_id),'next-seller');
+ assert.deepEqual(p.errors,[]);
+});
+
+test('extension opens setup for the exact source event once and returns to the capture tab',async()=>{
+ const source=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');
+ let stored={},handler,created=[],updated=[],alive=true;
+ const chrome={storage:{local:{get:async()=>structuredClone(stored),set:async v=>{stored=structuredClone(v)}}},runtime:{id:'extension',onMessage:{addListener:fn=>{handler=fn}}},alarms:{create(){},onAlarm:{addListener(){}}},tabs:{create:async opts=>{created.push(opts);return {id:9};},update:async(id,opts)=>{updated.push({id,...opts});},sendMessage:async()=>({ok:alive})}};
+ vm.runInNewContext(source,{chrome,URL,Date,Promise,Error,Object,Number,String,encodeURIComponent});
+ const send=(message,url,id=1)=>new Promise(resolve=>handler(message,{id:'extension',tab:{id,url}},resolve));
+ const url='https://www.ebay.com/ebaylive/host/events/EVENT123?tab=dashboard';
+ assert.equal((await send({type:'INVSTO_START_CAPTURE',event_id:'WRONG123'},url)).ok,false);assert.equal(created.length,0);
+ await Promise.all([send({type:'INVSTO_START_CAPTURE',event_id:'EVENT123'},url),send({type:'INVSTO_START_CAPTURE',event_id:'EVENT123'},url)]);
+ assert.equal(created.length,1);assert.equal(new URL(created[0].url).searchParams.get('capture_event'),'EVENT123');
+ assert.equal(created[0].active,true);assert.equal(updated.at(-1).id,9);
+ await send({type:'INVSTO_CAPTURE_CONNECTED',event_id:'EVENT123'},created[0].url,9);
+ assert.equal(updated.at(-1).id,1);
+ alive=false;await send({type:'INVSTO_START_CAPTURE',event_id:'EVENT123'},url);assert.equal(created.length,2);
+});
+
+
+test('capture setup rejects invalid events, leaves closed shows closed and prevents double submission',async t=>{
+ const p=await open(t,'?capture=1');
+ await p.evaluate(()=>liveCaptureSetup.request('bad'));
+ assert.equal(await p.locator('#live-capture-setup').count(),0);
+ await p.evaluate(()=>{showSession.status='ended';});
+ await p.evaluate(()=>liveCaptureSetup.request('EVENT123'));
+ assert.match(await p.locator('#capture-setup-status').textContent(),/already closed/);
+ assert.equal(await p.evaluate(()=>calls.some(c=>/^start_/.test(c.name))),false);
+ await p.locator('#capture-setup-cancel').click();
+ await p.evaluate(()=>liveCaptureSetup.request('NEXT1234'));
+ await p.locator('#capture-main-seller').selectOption('seller');
+ await p.evaluate(()=>{const original=supabase.rpc;supabase.rpc=async(name,args)=>{if(name==='start_ebay_live_capture')await new Promise(r=>setTimeout(r,250));return original(name,args);};});
+ await p.locator('#capture-start-show').click();
+ assert.equal(await p.locator('#capture-start-show').isDisabled(),true);
+ await p.evaluate(()=>{liveCaptureSetup.request('OTHER1234');document.querySelector('#capture-seller-form').dispatchEvent(new Event('submit',{cancelable:true}));});
+ assert.match(await p.locator('#capture-setup-event').textContent(),/NEXT1234/);
+ await p.locator('#live-capture-setup').waitFor({state:'hidden'});
+ assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='start_ebay_live_capture').length),1);
+ assert.deepEqual(p.errors,[]);
+});
+
+test('signed-out capture keeps its receiver open while offering sign-in in another tab',async t=>{
+ const p=await open(t,'?capture=1');
+ await p.evaluate(async()=>{supabase.auth.getSession=async()=>({data:{session:null}});await loadCurrentWorker();});
+ assert.equal(await p.getByRole('heading',{name:'Sign in to start capture'}).isVisible(),true);
+ assert.match(p.url(),/live-sales.html\?capture=1/);
+ assert.equal(await p.locator('#live-capture-setup a').getAttribute('href'),'index.html');
+ assert.equal(await p.locator('#live-capture-setup a').getAttribute('target'),'_blank');
+ assert.equal(await p.evaluate(()=>calls.some(c=>/^start_/.test(c.name))),false);
+ assert.deepEqual(p.errors,[]);
 });

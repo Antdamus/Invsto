@@ -4,11 +4,22 @@ const discoverListings=()=>chrome.runtime.sendMessage({type:'INVSTO_LISTING_DISC
   if(result?.ok)window.postMessage({type:'INVSTO_LISTING_EVENTS',events:result.events},location.origin);
 }).catch(()=>{});
 window.addEventListener('message',event=>{if(event.source===window&&event.origin===location.origin&&event.data?.type==='INVSTO_LISTING_DISCOVER')discoverListings();});
+window.addEventListener('message',event=>{
+  if(event.source===window&&event.origin===location.origin&&event.data?.type==='INVSTO_CAPTURE_CONNECTED'){
+    const requested=new URL(location.href).searchParams.get('capture_event');
+    if(requested===event.data.event_id&&/^[A-Za-z0-9_-]{6,100}$/.test(requested||''))chrome.runtime.sendMessage({type:'INVSTO_CAPTURE_CONNECTED',event_id:requested}).catch(()=>{});
+  }
+});
 discoverListings();setInterval(discoverListings,5000);
 if (new URL(location.href).searchParams.get('capture') === '1') {
   const pending = new Map();
   const listingPending = new Map();
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
+    if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_OPEN_CAPTURE_SETUP'){
+      if(!/^[A-Za-z0-9_-]{6,100}$/.test(message.event_id||'')){reply({ok:false});return;}
+      window.postMessage({type:'INVSTO_CAPTURE_SETUP',event_id:message.event_id},location.origin);
+      reply({ok:true});return;
+    }
     if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_LISTING_BRIDGE'){
       const id=crypto.randomUUID();
       const timer=setTimeout(()=>{listingPending.delete(id);reply({ok:false,error:'Preparation timed out. Check the receiver and the saved request before retrying.'});},180000);

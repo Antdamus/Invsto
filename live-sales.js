@@ -319,6 +319,10 @@ function canManageLiveSales() {
 async function loadCurrentWorker() {
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   if (sessionError || !sessionData?.session) {
+    if (new URL(location.href).searchParams.get("capture") === "1" && window.liveCaptureSetup) {
+      window.liveCaptureSetup.showSignIn();
+      return false;
+    }
     window.location.href = "index.html";
     return false;
   }
@@ -2224,7 +2228,7 @@ async function startSession() {
   const primarySellerId = $("session-primary-seller")?.value || null;
   const coSellerIds = getSelectedCoSellerIds();
 
-  if (!storeId) {
+  if (!automatic && !storeId) {
     setStatus("Select the store where the live sale is happening.", "error");
     $("session-store-select")?.focus();
     return;
@@ -2243,11 +2247,11 @@ async function startSession() {
   }
 
   try {
-    saveStoreId(storeId);
+    if (!automatic) saveStoreId(storeId);
     state.pendingStartAuctionNumber = automatic ? "" : startAuctionNumber;
     state.busy = true;
     setStatus("Starting live sale session...");
-    const args = {_title:title,_store_id:storeId,_notes:notes,_primary_seller_employee_id:primarySellerId,_co_seller_employee_ids:coSellerIds};
+    const args = {_title:title,_store_id:automatic ? null : storeId,_notes:notes,_primary_seller_employee_id:primarySellerId,_co_seller_employee_ids:coSellerIds};
     if (automatic) args._event_id=eventId;
     else args._signed_by_email=state.user?.email||null;
     const { data, error } = await supabase.rpc(automatic ? "start_ebay_live_session" : "start_live_sale_session",args);
@@ -3373,7 +3377,7 @@ function scheduleItemSearch() {
 
 function setupListeners() {
   $("manage-live-show")?.addEventListener("click",()=>{document.body.classList.toggle("live-setup-open");if(document.body.classList.contains("live-setup-open"))$("session-setup-panel").scrollIntoView({block:"start",behavior:"smooth"});});
-  $("session-workflow")?.addEventListener("change",()=>{const automatic=$("session-workflow").value==="ebay_live";$("session-ebay-url-field").hidden=!automatic;document.querySelector(".session-start-auction-field").hidden=automatic;});
+  $("session-workflow")?.addEventListener("change",()=>{const automatic=$("session-workflow").value==="ebay_live";$("session-ebay-url-field").hidden=!automatic;$("session-store-field").hidden=automatic;document.querySelector(".session-start-auction-field").hidden=automatic;});
   $("review-scanned-bag")?.addEventListener("click",finishBagScanning);
   $("session-store-select")?.addEventListener("change", (event) => {
     saveStoreId(event.target.value || "");
@@ -3667,7 +3671,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   await loadStores();
   await loadSessions({ keepSelection: false });
-  if (state.currentSession) await prepareNextBag();
+  const captureSetupRequested = /^[A-Za-z0-9_-]{6,100}$/.test(new URL(location.href).searchParams.get("capture_event") || "");
+  // A capture link must choose its exact event before preparing any bags in a
+  // previously selected manual show on this browser.
+  if (state.currentSession && !captureSetupRequested) await prepareNextBag();
   renderAll();
   if (window.lucide) window.lucide.createIcons();
+  await window.liveCaptureSetup?.init({state, async connected(row) {
+    await loadSessions({keepSelection:true});
+    if (!state.sessions.some(session => session.id === row.id)) state.sessions.push(row);
+    await selectLiveSession(row.id);
+    setStatus("Show connected. Keep this receiver open; capture will fill the auction queue automatically.", "success");
+  }});
 });

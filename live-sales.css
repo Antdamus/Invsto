@@ -1719,3 +1719,28 @@ body.live-label-step #current-lot-card {
     justify-self: start;
   }
 }
+/* The capture setup asks only for the seller roster. */
+#live-capture-setup {
+  box-sizing: border-box;
+  width: min(480px, calc(100% - 24px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid #7c6844;
+  border-radius: 20px;
+  background: #211d1b;
+  color: #f7efdf;
+}
+#live-capture-setup::backdrop { background: #000b; }
+#live-capture-setup h2 { margin: 0 0 12px; }
+#live-capture-setup p { line-height: 1.5; }
+#capture-setup-event { color: #b9ad9d; font-size: .8rem; overflow-wrap: anywhere; }
+#capture-seller-form > label { display: grid; gap: 8px; }
+#capture-main-seller { width: 100%; min-height: 48px; font-size: 16px; }
+#capture-additional { margin: 20px 0; }
+#capture-additional summary { cursor: pointer; padding: 8px 0; }
+#capture-co-sellers label { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+#capture-co-sellers input { width: 20px; height: 20px; }
+#capture-setup-status.is-error { color: #ffb5ad; }
+#live-capture-setup .button-row { margin-top: 20px; }
+#session-store-field[hidden] { display: none; }

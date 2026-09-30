@@ -1,4 +1,4 @@
-# Invsto Live Capture (1.1.1)
+# Invsto Live Capture (1.2.0)
 
 This helper copies visible eBay Stream Manager auction and payment evidence into Invsto. It can also prepare a new auction form from an inventory item you explicitly queue. It never clicks Create listing or Start, bids, charges buyers, or cancels eBay orders.
 
@@ -6,9 +6,9 @@ This helper copies visible eBay Stream Manager auction and payment evidence into
 
 1. Download **Invsto Live Capture** from Live Sales → Capture setup and connection help. Extract the ZIP into a permanent folder.
 2. In Microsoft Edge open **Extensions → Manage extensions**. Enable **Developer mode**, choose **Load unpacked**, then select the extracted folder containing `manifest.json`. Chrome supports the same steps.
-3. Sign in to Invsto and open **Live Sales**. Choose the eBay Live workflow, select its seller/store, paste the event URL, and start the show. No starting auction number is required. Use a new session for each event.
-4. Open the **capture receiver** link on that page in the same browser profile. Keep it signed in and open. It receives notifications for every linked, unfinished show, including saved drafts.
-5. Open the event's Stream Manager in a separate visible browser window. Click **Start Invsto capture** in the bottom-left corner. The helper selects Activity → All and Sold, and scrolls those lists. Before the first sale, eBay disables Sold; the helper watches All listings until Sold becomes available. Use another window if you need to operate the broadcast.
+3. Open the event's eBay Stream Manager dashboard and click **Start Invsto capture** in the bottom-left corner. Invsto opens automatically with that exact event. Sign in if needed.
+4. Choose the **First seller**, optionally check **Additional sellers**, and tap **Start show**. No store, URL, title or starting auction number is required. Invsto creates and links the session, then returns to the eBay capture tab. Repeating capture for the same unfinished event reconnects to its existing session and keeps its sellers. A completed show cannot be reopened by capture.
+5. Keep the automatically opened **capture receiver** signed in and open. Observations are buffered while seller setup is pending and saved after the show is linked. The helper selects Activity → All and Sold, and scrolls those lists. Before the first sale, it watches All listings until Sold becomes available. Use another window if you need to operate the broadcast.
 6. Keep the computer awake. Allow these two pages to stay active in the browser's sleeping-tabs / memory-saver settings. The receiver can be behind the Stream Manager window; the Stream Manager tab may remain in the background while its elapsed clock continues updating. If the clock stops, bring it forward. Click Start again after reloading it.
 7. On each phone, sign in to Invsto, open Live Sales, and select the same show. Wait for **Connected - auctions update automatically**, then choose **Scan sold item** on a paid auction. Scan the inventory barcode/QR, review the manifest, and **Close paid bag**. Printing is optional afterward and supports your existing print stations.
 
