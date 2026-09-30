@@ -1,4 +1,4 @@
-# Invsto Live Capture (1.2.0)
+# Invsto Live Capture (1.3.0)
 
 This helper copies visible eBay Stream Manager auction and payment evidence into Invsto. It can also prepare a new auction form from an inventory item you explicitly queue. It never clicks Create listing or Start, bids, charges buyers, or cancels eBay orders.
 
@@ -6,13 +6,13 @@ This helper copies visible eBay Stream Manager auction and payment evidence into
 
 1. Download **Invsto Live Capture** from Live Sales → Capture setup and connection help. Extract the ZIP into a permanent folder.
 2. In Microsoft Edge open **Extensions → Manage extensions**. Enable **Developer mode**, choose **Load unpacked**, then select the extracted folder containing `manifest.json`. Chrome supports the same steps.
-3. Open the event's eBay Stream Manager dashboard and click **Start Invsto capture** in the bottom-left corner. Invsto opens automatically with that exact event. Sign in if needed.
+3. Open the event's eBay Stream Manager dashboard and click **Start Invsto capture** in the bottom-left corner. The helper reads the saved date, timezone and title from Event information in a temporary background tab, then closes that tab. Your broadcasting tab stays on Stream Manager. It does not update the eBay event. Invsto opens automatically with that exact event and original date. Sign in if needed.
 4. Choose the **First seller**, optionally check **Additional sellers**, and tap **Start show**. No store, URL, title or starting auction number is required. Invsto creates and links the session, then returns to the eBay capture tab. Repeating capture for the same unfinished event reconnects to its existing session and keeps its sellers. A completed show cannot be reopened by capture.
 5. Keep the automatically opened **capture receiver** signed in and open. Observations are buffered while seller setup is pending and saved after the show is linked. The helper selects Activity → All and Sold, and scrolls those lists. Before the first sale, it watches All listings until Sold becomes available. Use another window if you need to operate the broadcast.
 6. Keep the computer awake. Allow these two pages to stay active in the browser's sleeping-tabs / memory-saver settings. The receiver can be behind the Stream Manager window; the Stream Manager tab may remain in the background while its elapsed clock continues updating. If the clock stops, bring it forward. Click Start again after reloading it.
 7. On each phone, sign in to Invsto, open Live Sales, and select the same show. Wait for **Connected - auctions update automatically**, then choose **Scan sold item** on a paid auction. Scan the inventory barcode/QR, review the manifest, and **Close paid bag**. Printing is optional afterward and supports your existing print stations.
 
-Start capture before the first auction. A late start can backfill rendered auction cards, but seller attribution reflects the seller selected at capture time. Set the active seller when the on-air seller changes.
+Start capture before the first auction when possible. A finished eBay event can backfill the Activity and Sold history that eBay still exposes. The original saved event date is the show start; the import time stays separate. Recovered history defaults to the first seller selected, because eBay does not identify your on-air employees. Admins can use Change seller on one sale, select several sales for a correction, or correct all earlier sales under Change seller. Each correction also updates its bag. Set the on-air seller during a running show for new auctions.
 
 ## Payment and recovery behavior
 
@@ -37,7 +37,7 @@ Compare the complete auction list against the final eBay orders, including any s
 
 Totals include only paid, closed bags. Above minimum = auction price − captured inventory minimum prices. Estimated profit also subtracts captured item costs and the admin's explicit fee/shipping estimates per auction. Unknown values stay missing; they are excluded from the displayed partial total. These are USD estimates, not final payouts, tax accounting or realized profit after returns.
 
-eBay's activity clock has minute precision. Stream offsets are approximate and can be unavailable; they are not exact replay timestamps. Capture and phone refresh target a few seconds while connected, but browser rendering, long history sweeps and network delays can increase latency. Treat this first release as a supervised pilot and compare it with eBay during a real show.
+eBay's Activity clock has minute precision. Invsto combines it with the event's saved date and the capture browser timezone, including overnight sales. It uses a single-day window from two hours before the scheduled start through 22 hours afterward; multi-day broadcasts cannot be uniquely dated from a clock alone. Ambiguous or nonexistent daylight-saving times remain unverified. Capture computers for one event must use the same timezone to avoid interpreting the same clock differently. Official order timestamps fill missing sale times when a unique order matches; order matching uses a date range, not an exact timestamp. The saved scheduled start is not proof of the exact second the broadcast began. Stream offsets are approximate and can be unavailable; they are not exact replay timestamps. Capture and phone refresh target a few seconds while connected, but browser rendering, long history sweeps and network delays can increase latency. Treat this first release as a supervised pilot and compare it with eBay during a real show.
 
 ## Updating
 

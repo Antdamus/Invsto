@@ -11,6 +11,9 @@ before(async()=>{
  browser=await(process.env.INVSTO_ITEM_BROWSER==='webkit'?webkit:chromium).launch();
 });
 after(async()=>{await browser.close();await new Promise(r=>{server.close(r);server.closeAllConnections();});});
+const historyStream={source:'ebay_event_information',start_local:'2026-09-30T14:05',timezone_label:'EDT',title:'Original eBay show',activity_timezone:'America/New_York'};
+const streamQuery='&stream='+encodeURIComponent(JSON.stringify(historyStream));
+async function streamFixture(page){await page.evaluate(metadata=>{const original=window.chrome?.runtime?.sendMessage;if(original)window.chrome.runtime.sendMessage=async message=>message.type==='INVSTO_READ_STREAM'?{ok:true,stream:metadata}:original(message);document.body.insertAdjacentHTML('beforeend','<button role="tab" aria-selected="true">Stream manager</button><button role="tab">Event information</button><div hidden><input id="startDate" type="datetime-local" value="2026-09-30T14:05"><input id="timezone" value="EDT"><input id="title" value="Original eBay show"></div>');},historyStream);}
 const tile=(id='123456789012',status='Paid',title='#001 - Watch',buyer='testbuyer')=>`<div data-testid="listing-tile"><input data-testid="checkbox-${id}" type="checkbox"><span class="_statusPill_hash_1">${status}</span><input data-testid="ordinal-id" value="29"><button data-testid="inline-edit-title"><span>${title}</span></button><span class="_price_hash_1">$100.00</span><span class="_soldLabel_hash_1" title="${buyer}">${buyer}</span><span class="_statusText_hash_1">${status}</span></div>`;
 const row=(action='won the auction',buyer='testbuyer',title='#001 - Watch')=>`<div class="_rowContent_hash_1"><div class="_messageLine_hash_1"><span class="_username_hash_1">${buyer}</span><span class="_actionSuccess_hash_1">${action}</span><span class="_timestamp_hash_1">10:03 AM</span></div><div class="_itemSummary_hash_1"><span>$100.00</span><span class="_listingTitle_hash_1">${title}</span></div></div>`;
 async function parser(t,html){const page=await browser.newPage();t.after(()=>page.close());await page.setContent(html);await page.addScriptTag({path:new URL('../tools/ebay-live-capture/parser.js',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});return page;}
@@ -39,12 +42,13 @@ async function open(t,query='',resume=false,drafts=false){
     const attempt=dashboard.attempts.find(a=>a.lot_id===args._lot_id);if(attempt){const entries=[...mockItems,...mockManualItems].filter(i=>i.lot_id===args._lot_id&&['reserved','packed'].includes(i.status));attempt.units=entries.reduce((n,i)=>n+i.quantity,0);attempt.minimum_total=entries.length&&entries.every(i=>i.live_unit_minimum!=null)?entries.reduce((n,i)=>n+i.quantity*Number(i.live_unit_minimum),0):null;}
     return {data:saved};
    }
+   if(name==='correct_ebay_live_sale_sellers'){if(window.failSellerCorrection)return {error:{message:'Seller correction interrupted'}};for(const a of dashboard.attempts)if(args._attempt_ids.includes(a.id)){a.seller_id=args._seller_id;a.seller_name=args._seller_id==='next-seller'?'Sydney Miller':'Test seller';const lot=mockLots.find(l=>l.id===a.lot_id);if(lot)lot.owner_employee_id=args._seller_id;}return {data:args._attempt_ids.length};}
    if(name==='set_ebay_live_seller'){dashboard.connection.active_seller_id=args._seller_id;dashboard.connection.active_seller_name=args._seller_id==='next-seller'?'Sydney Miller':'Test seller';if(args._correct_existing){for(const l of mockLots)l.owner_employee_id=args._seller_id;for(const a of dashboard.attempts){a.seller_id=args._seller_id;a.seller_name=dashboard.connection.active_seller_name;}}return {data:args._correct_existing?dashboard.attempts.length:0};}
    if(name==='mark_ebay_live_broadcast_ended'){dashboard.connection.broadcast_ended_at=new Date().toISOString();dashboard.connection.capture_ready=false;return {data:null};}
    if(name==='complete_ebay_live_session'){if(window.failComplete)return {error:{message:'A payment changed; review the outstanding issue'}};showSession.status='ended';return {data:null};}
    if(name==='reopen_ebay_live_bag'){const a=dashboard.attempts.find(a=>a.id===args._attempt_id);a.closed_at=null;a.claimed_by='worker';const lot=mockLots.find(l=>l.id===a.lot_id);lot.closed_at=null;return {data:lot};}
    if(name==='set_live_sale_session_draft'){if(window.failDraft)return {error:{message:'Draft save interrupted'}};const s=(window.showSessions||[showSession]).find(s=>s.id===args._session_id);if(!s||s.status!=='active')return {error:{message:'This show is already closed or unavailable'}};s.saved_for_later_at=args._saved?new Date().toISOString():null;s.saved_for_later_by=args._saved?'worker':null;return {data:structuredClone(s)};}
-   if(name==='start_ebay_live_session'||name==='start_ebay_live_capture'){if(window.failCaptureStart)return {error:{message:'Connection interrupted'}};window.showSession={...window.showSession,id:'newshow',workflow_mode:'ebay_live',title:args._title||'Captured show',store_id:args._store_id||null,primary_seller_employee_id:args._primary_seller_employee_id,co_seller_employee_ids:args._co_seller_employee_ids};window.dashboard.connection={...window.dashboard.connection,session_id:'newshow',event_id:args._event_id};if(window.showSessions)window.showSessions.push(window.showSession);if(window.dashboardByShow){window.dashboard.attempts=[];window.dashboardByShow[window.showSession.id]=window.dashboard;}return {data:window.showSession};}
+   if(name==='start_ebay_live_session'||name==='start_ebay_live_capture_from_stream'){if(window.failCaptureStart)return {error:{message:'Connection interrupted'}};window.showSession={...window.showSession,id:'newshow',workflow_mode:'ebay_live',title:args._title||'Captured show',store_id:args._store_id||null,primary_seller_employee_id:args._primary_seller_employee_id,co_seller_employee_ids:args._co_seller_employee_ids};window.dashboard.connection={...window.dashboard.connection,session_id:'newshow',event_id:args._event_id};if(window.showSessions)window.showSessions.push(window.showSession);if(window.dashboardByShow){window.dashboard.attempts=[];window.dashboardByShow[window.showSession.id]=window.dashboard;}return {data:window.showSession};}
    if(name==='prepare_ebay_live_bag_label'){const a=window.dashboard.attempts.find(a=>a.id===args._attempt_id);if(window.failPrepare||a?.payment_state!=='paid'||a.resolved_at)return {error:{message:'Payment is not confirmed for this bag'}};let lot=mockLots.find(l=>l.id===a.lot_id);if(!lot){lot={id:'label-'+a.id,session_id:'show',auction_number:'EB-001-SALE',lot_code:'LIVE-LABEL',status:'open',owner_employee_id:a.seller_id};mockLots.push(lot);a.lot_id=lot.id;}return {data:lot};}
    if(name==='claim_ebay_live_bag'){const a=window.dashboard.attempts.find(a=>a.id===args._attempt_id);a.claimed_by='worker';let lot=mockLots.find(l=>l.id===a.lot_id);if(!lot){a.lot_id='lot';lot={id:'lot',session_id:'show',auction_number:'EB-29-SALE',lot_code:'LIVE-TEST',status:'open',owner_employee_id:'seller'};window.mockLots.push(lot);}return {data:lot};}
    if(name==='close_ebay_live_bag'){if(window.failClose)return {error:{message:'Payment is not confirmed for this bag'}};window.dashboard.attempts[0].closed_at=new Date().toISOString();return {data:null};}
@@ -76,7 +80,7 @@ test('extension outbox persists failures until receiver commit and retries after
 test('capture sends explicit payment evidence and emits a stopped heartbeat',async t=>{
  const page=await browser.newPage();t.after(()=>page.close());await page.goto(origin+'/ebaylive/host/events/EVENT123');await page.setContent('<button role="tab" aria-selected="true">Activity</button><button role="tab" aria-selected="true">Sold (1)</button>'+tile()+'<div id="activity-panel"><div aria-label="Filter activity"><button aria-pressed="true">All</button></div>'+row()+'</div>');
  await page.evaluate(()=>{window.packets=[];window.chrome={runtime:{sendMessage:async m=>{if(m.type==='INVSTO_CAPTURE')packets.push(m);return {ok:true,status:'Connected'}}}};});
- for(const name of ['parser','capture'])await page.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+ await streamFixture(page);for(const name of ['parser','capture'])await page.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
  assert.equal(await page.evaluate(()=>packets.length),0);await page.getByRole('button',{name:'Start Invsto capture',exact:true}).click();await page.waitForFunction(()=>packets.some(p=>p.health.ready));const first=await page.evaluate(()=>packets[0]);assert.equal(first.event_id,'EVENT123');assert.deepEqual(first.events.map(e=>e.kind),['paid','won']);await page.getByRole('button',{name:'Stop Invsto capture',exact:true}).click();await page.waitForFunction(()=>packets.some(p=>!p.health.ready));
 });
 test('ordinary unlinked sessions retain the manual bag workflow',async t=>{const p=await open(t);await p.evaluate(async()=>{dashboard.connection=null;dashboard.attempts=[];await prepareNextBag();});assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='create_live_sale_lot')),true);assert.equal(await p.locator('#auction-number').getAttribute('readonly'),null);assert.equal(await p.locator('#item-scan').isDisabled(),false);assert.deepEqual(p.errors,[]);});
@@ -111,7 +115,7 @@ test('background capture requires an advancing stream clock and pauses again whe
  const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123');
  await p.setContent('<button role="tab" aria-selected="true">Activity</button><button role="tab" aria-selected="true">Sold (1)</button><span id="metric-elapsed-time-value">00:01:00</span>'+tile()+'<div id="activity-panel"><div aria-label="Filter activity"><button aria-pressed="true">All</button></div>'+row()+'</div>');
  await p.evaluate(()=>{window.packets=[];window.fakeNow=Date.now();Date.now=()=>window.fakeNow;Object.defineProperty(document,'visibilityState',{value:'hidden',configurable:true});window.chrome={runtime:{sendMessage:async m=>{if(m.type==='INVSTO_CAPTURE')packets.push(m);return {ok:true,status:'Connected'}}}};});
- for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+ await streamFixture(p);for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
  await p.getByRole('button',{name:'Start Invsto capture',exact:true}).click();await p.waitForFunction(()=>packets.length);assert.equal(await p.evaluate(()=>packets.at(-1).health.ready),false);
  await p.locator('#metric-elapsed-time-value').evaluate(e=>{e.textContent='00:01:01'});await p.waitForFunction(()=>packets.at(-1).health.ready);
  await p.evaluate(()=>{fakeNow+=21000;});await p.waitForFunction(()=>!packets.at(-1).health.ready);
@@ -274,7 +278,7 @@ test('end detection requires the explicit terminal control and ignores a reset c
 
 test('a stopped helper still reports the explicit ended event without inventing auction payments',async t=>{
  const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123');await p.setContent('<button disabled>Event ended</button>');await p.evaluate(()=>{window.packets=[];window.chrome={runtime:{sendMessage:async m=>{if(m.type==='INVSTO_CAPTURE')packets.push(m);return {ok:true,status:'Connected'}}}};});
- for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});await p.waitForFunction(()=>packets.length>0);const result=await p.evaluate(()=>packets[0]);assert.equal(result.health.broadcast_ended,true);assert.equal(result.health.ready,false);assert.deepEqual(result.events,[]);
+ await streamFixture(p);for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});await p.waitForFunction(()=>packets.length>0);const result=await p.evaluate(()=>packets[0]);assert.equal(result.health.broadcast_ended,true);assert.equal(result.health.ready,false);assert.deepEqual(result.events,[]);
 });
 
 test('running counter includes priced open bags, separates closed results, and excludes unpaid or incomplete bags',async t=>{
@@ -409,7 +413,7 @@ test('capture waits before the first sale and automatically moves from disabled 
   window.packets=[];window.disabledClicks=0;window.chrome={runtime:{sendMessage:async m=>{if(m.type==='INVSTO_CAPTURE')packets.push(m);return {ok:true,status:'Connected · 0 pending'}}}};
   document.getElementById('sold-listings').onclick=e=>{if(e.currentTarget.disabled)disabledClicks++;else{e.currentTarget.setAttribute('aria-selected','true');document.getElementById('all-listings').setAttribute('aria-selected','false');}};
  });
- for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+ await streamFixture(p);for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
  await p.getByRole('button',{name:'Start Invsto capture',exact:true}).click();await p.waitForFunction(()=>packets.length);
  assert.equal(await p.evaluate(()=>packets.at(-1).health.ready),true);assert.match(await p.evaluate(()=>packets.at(-1).health.message),/waiting for the first sale/);assert.equal(await p.evaluate(()=>packets.at(-1).events.length),0);assert.equal(await p.evaluate(()=>disabledClicks),0);
  await p.evaluate(({listing,activity})=>{document.getElementById('sold-listings').disabled=false;document.getElementById('listings').innerHTML=listing;document.getElementById('activity-panel').insertAdjacentHTML('beforeend',activity);},{listing:tile(),activity:row()});
@@ -459,8 +463,10 @@ test('capture leaves dialogs and item helper still, supports manual hold, and re
  const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123');
  await p.setContent('<button role="tab" aria-selected="false">Activity</button><button role="tab" aria-selected="false">Sold (1)</button><div id="activity-panel"><div aria-label="Filter activity"><button aria-pressed="true">All</button></div><div class="_list_" style="height:80px;overflow:auto"><div style="height:900px">'+row()+'</div></div></div>'+tile()+'<div role="dialog">Add listings</div>');
  await p.evaluate(()=>{window.packets=[];window.clicks=0;window.fakeNow=Date.now();Date.now=()=>fakeNow;document.querySelectorAll('[role=tab]').forEach(el=>el.onclick=()=>{clicks++;el.setAttribute('aria-selected','true');});document.querySelector('._list_').scrollTop=45;window.chrome={runtime:{sendMessage:async m=>{if(m.type==='INVSTO_CAPTURE')packets.push(m);return {ok:true,status:'Connected'}}}};});
- for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
- await p.getByRole('button',{name:'Start Invsto capture',exact:true}).click();await p.waitForFunction(()=>packets.length>0);
+ await streamFixture(p);for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+ await p.getByRole('button',{name:'Start Invsto capture',exact:true}).click();assert.equal(await p.evaluate(()=>packets.length),0);assert.match(await p.locator('#invsto-capture-helper').innerText(),/Finish editing/);
+ await p.evaluate(()=>document.querySelector('[role=dialog]').remove());await p.getByRole('button',{name:'Start Invsto capture',exact:true}).click();await p.waitForFunction(()=>packets.length>0);
+ await p.evaluate(()=>{document.body.insertAdjacentHTML('beforeend','<div role="dialog">Add listings</div>');clicks=0;document.querySelectorAll('[role=tab]').forEach(el=>{if(/^(Activity|Sold)/.test(el.textContent))el.setAttribute('aria-selected','false');});document.querySelector('._list_').scrollTop=45;});await p.waitForFunction(()=>packets.at(-1).health.mode==='working');
  assert.equal(await p.evaluate(()=>packets.at(-1).health.mode),'working');assert.equal(await p.evaluate(()=>packets.at(-1).health.ready),false);assert.equal(await p.evaluate(()=>clicks),0);assert.equal(await p.locator('._list_').evaluate(e=>e.scrollTop),45);assert.ok(await p.evaluate(()=>packets[0].events.some(e=>e.kind==='paid')));
  await p.evaluate(()=>{document.querySelector('[role=dialog]').remove();const d=document.createElement('details');d.id='invsto-listing-helper';d.open=true;document.body.append(d);fakeNow+=16000;});
  await p.getByRole('button',{name:'Keep page still',exact:true}).click();assert.equal(await p.evaluate(()=>clicks),0);
@@ -489,13 +495,13 @@ test('working and stopped tabs cannot replace a fresh dedicated capture; quiet r
 
 
 test('capture supplies its event and asks only for sellers before creating the show',async t=>{
- const p=await open(t,'?capture=1&capture_event=NEXTSHOW123');
+ const p=await open(t,'?capture=1&capture_event=NEXTSHOW123'+streamQuery);
  await p.locator('#capture-main-seller:enabled').waitFor();
  assert.equal(await p.locator('#live-capture-setup').isVisible(),true);
- assert.match(await p.locator('#capture-setup-event').textContent(),/NEXTSHOW123/);
+ assert.match(await p.locator('#capture-setup-event').textContent(),/Original eBay show/);
  assert.equal(await p.locator('#live-capture-setup input[type=url]').count(),0);
  assert.equal(await p.locator('#capture-main-seller').inputValue(),'');
- assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='start_ebay_live_capture')),false);
+ assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='start_ebay_live_capture_from_stream')),false);
  await p.locator('#capture-main-seller').selectOption('seller');
  await p.locator('#capture-additional summary').click();
  assert.equal(await p.locator('[name=capture-co-seller][value=seller]').isDisabled(),true);
@@ -503,8 +509,8 @@ test('capture supplies its event and asks only for sellers before creating the s
  await p.screenshot({path:'test-results/live-capture-sellers.png'});
  await p.locator('#capture-start-show').click();
  await p.locator('#live-capture-setup').waitFor({state:'hidden'});
- const args=await p.evaluate(()=>calls.find(c=>c.name==='start_ebay_live_capture').args);
- assert.deepEqual(args,{_event_id:'NEXTSHOW123',_primary_seller_employee_id:'seller',_co_seller_employee_ids:['next-seller']});
+ const args=await p.evaluate(()=>calls.find(c=>c.name==='start_ebay_live_capture_from_stream').args);
+ assert.deepEqual(args,{_event_id:'NEXTSHOW123',_primary_seller_employee_id:'seller',_co_seller_employee_ids:['next-seller'],_stream:historyStream});
  assert.equal(await p.evaluate(()=>state.currentSession.store_id),null);
  assert.equal(await p.evaluate(()=>state.currentSession.id),'newshow');
  assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='create_live_sale_lot')),false);
@@ -521,7 +527,7 @@ test('capture reconnects to an existing show without asking again or changing it
 });
 
 test('failed capture setup retains seller selection and ignores repeated setup requests',async t=>{
- const p=await open(t,'?capture=1&capture_event=NEXTSHOW123');
+ const p=await open(t,'?capture=1&capture_event=NEXTSHOW123'+streamQuery);
  await p.locator('#capture-main-seller:enabled').waitFor();
  await p.locator('#capture-main-seller').selectOption('next-seller');
  await p.evaluate(()=>{failCaptureStart=true;window.postMessage({type:'INVSTO_CAPTURE_SETUP',event_id:'NEXTSHOW123'},location.origin);});
@@ -561,15 +567,15 @@ test('capture setup rejects invalid events, leaves closed shows closed and preve
  assert.match(await p.locator('#capture-setup-status').textContent(),/already closed/);
  assert.equal(await p.evaluate(()=>calls.some(c=>/^start_/.test(c.name))),false);
  await p.locator('#capture-setup-cancel').click();
- await p.evaluate(()=>liveCaptureSetup.request('NEXT1234'));
+ await p.evaluate(metadata=>liveCaptureSetup.request('NEXT1234',metadata),historyStream);
  await p.locator('#capture-main-seller').selectOption('seller');
- await p.evaluate(()=>{const original=supabase.rpc;supabase.rpc=async(name,args)=>{if(name==='start_ebay_live_capture')await new Promise(r=>setTimeout(r,250));return original(name,args);};});
+ await p.evaluate(()=>{const original=supabase.rpc;supabase.rpc=async(name,args)=>{if(name==='start_ebay_live_capture_from_stream')await new Promise(r=>setTimeout(r,250));return original(name,args);};});
  await p.locator('#capture-start-show').click();
  assert.equal(await p.locator('#capture-start-show').isDisabled(),true);
  await p.evaluate(()=>{liveCaptureSetup.request('OTHER1234');document.querySelector('#capture-seller-form').dispatchEvent(new Event('submit',{cancelable:true}));});
- assert.match(await p.locator('#capture-setup-event').textContent(),/NEXT1234/);
+ assert.match(await p.locator('#capture-setup-event').textContent(),/Original eBay show/);
  await p.locator('#live-capture-setup').waitFor({state:'hidden'});
- assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='start_ebay_live_capture').length),1);
+ assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='start_ebay_live_capture_from_stream').length),1);
  assert.deepEqual(p.errors,[]);
 });
 
@@ -582,4 +588,61 @@ test('signed-out capture keeps its receiver open while offering sign-in in anoth
  assert.equal(await p.locator('#live-capture-setup a').getAttribute('target'),'_blank');
  assert.equal(await p.evaluate(()=>calls.some(c=>/^start_/.test(c.name))),false);
  assert.deepEqual(p.errors,[]);
+});
+
+test('capture reads saved Event information before seller setup, ignores hidden dialogs and never updates eBay',async t=>{
+ const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123?invsto_metadata=reader-test');
+ await p.setContent('<button role="tab" id="manager" aria-selected="true">Stream manager</button><button role="tab" id="info" aria-selected="false">Event information</button><div role="dialog" hidden>Chat settings</div><div id="fields"></div>');
+ await p.evaluate(()=>{
+  window.messages=[];window.updated=false;window.chrome={runtime:{sendMessage:async m=>{messages.push(m);return {ok:true}}}};
+  document.getElementById('info').onclick=()=>{document.getElementById('info').setAttribute('aria-selected','true');document.getElementById('manager').setAttribute('aria-selected','false');document.getElementById('fields').innerHTML='<input id="startDate" type="datetime-local" value="2026-08-23T23:30"><input id="timezone" value="EDT"><input id="title" value="Old show"><button id="update">Update</button>';document.getElementById('update').onclick=()=>updated=true;};
+  document.getElementById('manager').onclick=()=>{document.getElementById('manager').setAttribute('aria-selected','true');document.getElementById('info').setAttribute('aria-selected','false');document.getElementById('fields').replaceChildren();};
+ });
+ for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+ await p.waitForFunction(()=>messages.some(m=>m.type==='INVSTO_STREAM_METADATA'));
+ const result=await p.evaluate(()=>messages.find(m=>m.type==='INVSTO_STREAM_METADATA'));
+ assert.equal(result.stream.start_local,'2026-08-23T23:30');assert.equal(result.stream.timezone_label,'EDT');assert.equal(result.stream.source,'ebay_event_information');assert.equal(await p.evaluate(()=>updated),false);assert.equal(await p.locator('#info').getAttribute('aria-selected'),'true');
+ assert.equal(await p.evaluate(()=>messages.some(m=>m.type==='INVSTO_CAPTURE')),false);assert.equal(await p.locator('#invsto-capture-helper').count(),0);
+});
+
+test('capture refuses unsaved event changes and missing original dates',async t=>{
+ const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123');await p.setContent('');await streamFixture(p);
+ await p.evaluate(()=>{document.querySelector('#startDate').parentElement.hidden=false;window.messages=[];window.chrome={runtime:{sendMessage:async m=>{messages.push(m);return {ok:true,stream:{source:'ebay_event_information',start_local:'2026-09-30T14:05',timezone_label:'EDT',title:'Original eBay show',activity_timezone:'America/New_York'}}}}};});
+ for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+ await p.locator('#title').fill('Unsaved title');await p.getByRole('button',{name:'Start Invsto capture',exact:true}).click();assert.match(await p.locator('#invsto-capture-helper').innerText(),/Save your Event information/);assert.equal(await p.evaluate(()=>messages.length),0);
+ const q=await open(t,'?capture=1&capture_event=NO_DATE123');await q.locator('#capture-main-seller:enabled').waitFor();await q.locator('#capture-main-seller').selectOption('seller');await q.locator('#capture-start-show').click();assert.match(await q.locator('#capture-setup-status').innerText(),/original show date/);assert.equal(await q.evaluate(()=>calls.some(c=>c.name.startsWith('start_'))),false);
+});
+
+test('sale chronology and displayed dates use eBay times instead of recovery dates',async t=>{
+ const p=await open(t);await p.evaluate(metadata=>{
+  dashboard.connection.stream_start_at='2026-08-24T03:30:00Z';dashboard.connection.stream_metadata=metadata;
+  const a=dashboard.attempts[0];Object.assign(a,{sold_at:'2026-08-24T04:15:00Z',sale_time_source:'ebay_activity',sale_time_precision:'minute',win_time_label:'12:15 AM',created_at:'2026-09-30T20:00:00Z'});
+  dashboard.attempts.push({...a,id:'later',listing_title:'#002 - Later sale',sold_at:'2026-08-24T04:20:00Z',created_at:'2026-09-30T19:00:00Z'});
+ },historyStream);await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.querySelector('[data-attempt]')?.dataset.attempt==='later');
+ assert.match(await p.locator('[data-attempt=sale] small').first().innerText(),/Aug 24, 2026.*12:15 AM EDT.*minute precision/);assert.doesNotMatch(await p.locator('[data-attempt=sale] small').first().innerText(),/Sep 30/);assert.deepEqual(p.errors,[]);
+});
+
+test('selected seller corrections on a phone survive errors and update only selected sales',async t=>{
+ const p=await open(t);await p.evaluate(()=>{dashboard.attempts.push({...dashboard.attempts[0],id:'sale-2',listing_title:'#002 - Another sale'},{...dashboard.attempts[0],id:'sale-3',listing_title:'#003 - Untouched sale'});});await p.locator('#ebay-live-refresh').click();await p.locator('[data-seller-select=sale-2]').waitFor();
+ await p.locator('[data-seller-select=sale]').check();await p.locator('[data-seller-select=sale-2]').check();await p.locator('#ebay-change-selected-seller').click();
+ await p.locator('#ebay-selected-seller').selectOption('next-seller');await p.locator('#ebay-selected-seller-reason').fill('Sydney sold these two historical bags.');assert.equal(await p.evaluate(()=>shouldReturnFocusToScanner()),false);
+ await p.evaluate(()=>failSellerCorrection=true);await p.locator('#ebay-selected-seller-save').click();await p.waitForFunction(()=>document.getElementById('ebay-selected-seller-error').textContent.includes('interrupted'));
+ assert.equal(await p.locator('#ebay-selected-seller').inputValue(),'next-seller');await p.screenshot({path:'test-results/live-selected-seller-phone.png'});
+ await p.evaluate(()=>failSellerCorrection=false);await p.locator('#ebay-selected-seller-save').click();await p.locator('#ebay-selected-seller-dialog').waitFor({state:'hidden'});
+ assert.deepEqual(await p.evaluate(()=>dashboard.attempts.map(a=>a.seller_id)),['next-seller','next-seller','seller']);assert.equal(await p.evaluate(()=>dashboard.connection.active_seller_id),'seller');assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.deepEqual(p.errors,[]);
+ await p.locator('[data-attempt=sale-3] [data-action=seller]').click();assert.match(await p.locator('#ebay-selected-seller-summary').innerText(),/1 selected sale/);await p.locator('#ebay-selected-seller-cancel').click();
+});
+
+test('background date lookup keeps broadcasting tab and payment capture available, then closes only its reader',async()=>{
+ const source=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');let handler,stored={},created=[],removed=[];
+ const chrome={storage:{local:{get:async()=>structuredClone(stored),set:async v=>{stored=structuredClone(v)}}},runtime:{id:'extension',onMessage:{addListener:fn=>{handler=fn}}},alarms:{create(){},onAlarm:{addListener(){}}},tabs:{create:async opts=>{created.push(opts);return {id:40}},remove:async id=>removed.push(id)}};
+ vm.runInNewContext(source,{chrome,crypto:{randomUUID:()=> 'metadata-task'},setTimeout,clearTimeout,URL,Date,Promise,Error,Object,Number,String,encodeURIComponent});
+ const send=(message,url,id=1)=>new Promise(resolve=>handler(message,{id:'extension',tab:{id,url}},resolve));
+ const url='https://www.ebay.com/ebaylive/host/events/EVENT123?tab=dashboard';
+ const reading=send({type:'INVSTO_READ_STREAM',event_id:'EVENT123'},url);
+ assert.equal((await send({type:'INVSTO_CAPTURE',event_id:'EVENT123',events:[{key:'win'}],health:{ready:true}},url)).ok,true);
+ assert.equal(created.length,1);assert.equal(created[0].active,false);assert.equal(new URL(created[0].url).searchParams.get('tab'),'information');assert.equal(Object.keys(stored.capture.events).length,1);
+ assert.equal((await send({type:'INVSTO_STREAM_METADATA',event_id:'WRONG123',task:'metadata-task',stream:historyStream},created[0].url,40)).ok,false);
+ assert.equal((await send({type:'INVSTO_STREAM_METADATA',event_id:'EVENT123',task:'metadata-task',stream:historyStream},url,40)).ok,true);
+ assert.deepEqual((await reading).stream,historyStream);assert.deepEqual(removed,[40]);
 });

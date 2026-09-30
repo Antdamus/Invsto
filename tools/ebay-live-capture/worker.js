@@ -1,20 +1,36 @@
 'use strict';
 let serial = Promise.resolve();
+const streamReaders=new Map();
+async function readStreamInBackground(url,event_id){
+  const task=crypto.randomUUID();let tab;
+  const result=new Promise(resolve=>{
+    const timer=setTimeout(()=>{streamReaders.delete(task);resolve({ok:false,error:'Could not read Event information. Keep eBay signed in and try capture again.'});},20000);
+    streamReaders.set(task,{event_id,resolve:value=>{clearTimeout(timer);streamReaders.delete(task);resolve(value);}});
+  });
+  try{
+    const target=new URL(url);target.searchParams.set('tab','information');target.searchParams.set('invsto_metadata',task);
+    tab=await chrome.tabs.create({url:target.href,active:false});
+    const reader=streamReaders.get(task);if(reader)reader.tab=tab.id;
+    return await result;
+  }catch(error){streamReaders.get(task)?.resolve({ok:false,error:error.message});return await result;}
+  finally{if(tab?.id!==undefined)try{await chrome.tabs.remove(tab.id);}catch{}}
+}
+
 const enqueue = fn => { const task = serial.then(fn); serial = task.catch(()=>{}); return task; };
 async function read() { return (await chrome.storage.local.get('capture')).capture || {events:{},health:{},receivers:{},status:'Waiting for Invsto receiver'}; }
 async function save(data) { await chrome.storage.local.set({capture:data}); }
-async function openCaptureSetup(event_id, sourceTab) {
+async function openCaptureSetup(event_id, sourceTab, stream) {
   const data = await read(); data.setupTabs ||= {};
   data.captureTabs ||= {}; data.captureTabs[event_id] = sourceTab;
   await save(data);
   const previous = data.setupTabs[event_id];
   if (previous !== undefined) {
     try {
-      const response = await chrome.tabs.sendMessage(previous,{type:'INVSTO_OPEN_CAPTURE_SETUP',event_id});
+      const response = await chrome.tabs.sendMessage(previous,{type:'INVSTO_OPEN_CAPTURE_SETUP',event_id,stream});
       if (response?.ok) { await chrome.tabs.update(previous,{active:true}); return; }
     } catch {}
   }
-  const tab = await chrome.tabs.create({url:'https://antdamus.github.io/Invsto/live-sales.html?capture=1&capture_event='+encodeURIComponent(event_id)+'&v=1.2.0',active:true});
+  const tab = await chrome.tabs.create({url:'https://antdamus.github.io/Invsto/live-sales.html?capture=1&capture_event='+encodeURIComponent(event_id)+'&v=1.3.0'+(stream?'&stream='+encodeURIComponent(JSON.stringify(stream)):''),active:true});
   data.setupTabs[event_id] = tab.id; await save(data);
 }
 function receiverEntries(data){
@@ -30,7 +46,7 @@ function selectCaptureHealth(data,event_id){
   const sort=(a,b)=>Number(!!b.health.ready)-Number(!!a.health.ready)||b.receivedAt-a.receivedAt;
   const source=automatic.sort(sort)[0]||current.sort((a,b)=>b.receivedAt-a.receivedAt)[0]||all.sort((a,b)=>b.receivedAt-a.receivedAt)[0];
   const ended=!!(data.health[event_id]?.broadcast_ended||all.some(s=>s.health.broadcast_ended));
-  data.health[event_id]={...source.health,ready:!ended&&current.includes(source)&&source.health.mode!=='working'&&source.health.running!==false&&!!source.health.ready&&Object.keys(data.events).length<=10000,broadcast_ended:ended,pending:Object.values(data.events).filter(e=>e.event_id===event_id).length,version:'1.2.0'};
+  data.health[event_id]={...source.health,ready:!ended&&current.includes(source)&&source.health.mode!=='working'&&source.health.running!==false&&!!source.health.ready&&Object.keys(data.events).length<=10000,broadcast_ended:ended,pending:Object.values(data.events).filter(e=>e.event_id===event_id).length,version:'1.3.0'};
 }
 async function deliver(data) {
   const receivers = receiverEntries(data);
@@ -58,11 +74,23 @@ async function deliver(data) {
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   const url = sender.tab?.url || sender.url || '';
   if (sender.id !== chrome.runtime.id) return;
+  if(message.type==='INVSTO_READ_STREAM'||message.type==='INVSTO_STREAM_METADATA'){
+    if(!/^https:\/\/www\.ebay\.com\/ebaylive\/host\/events\//.test(url))return;
+    const event_id=new URL(url).pathname.split('/')[4];
+    if(event_id!==message.event_id || !/^[A-Za-z0-9_-]{6,100}$/.test(event_id)){reply({ok:false,error:'Event mismatch'});return;}
+    if(message.type==='INVSTO_READ_STREAM'){
+      // Independent from the serialized outbox: loading metadata must not delay payments.
+      readStreamInBackground(url,event_id).then(reply,error=>reply({ok:false,error:error.message}));return true;
+    }
+    const reader=streamReaders.get(message.task);
+    if(!reader || reader.event_id!==event_id || (reader.tab!==undefined && reader.tab!==sender.tab.id)){reply({ok:false});return;}
+    reader.resolve(message.error?{ok:false,error:message.error}:{ok:true,stream:message.stream});reply({ok:true});return;
+  }
   if (message.type==='INVSTO_START_CAPTURE') {
     if (!/^https:\/\/www\.ebay\.com\/ebaylive\/host\/events\//.test(url)) return;
     const event_id=new URL(url).pathname.split('/')[4];
     if (event_id!==message.event_id || !/^[A-Za-z0-9_-]{6,100}$/.test(event_id)) {reply({ok:false,error:'Event mismatch'});return;}
-    enqueue(()=>openCaptureSetup(event_id,sender.tab.id)).then(()=>reply({ok:true,status:'Choose your sellers in Invsto.'}),error=>reply({ok:false,error:error.message}));
+    enqueue(()=>openCaptureSetup(event_id,sender.tab.id,message.stream)).then(()=>reply({ok:true,status:'Choose your sellers in Invsto.'}),error=>reply({ok:false,error:error.message}));
     return true;
   }
   if (message.type==='INVSTO_CAPTURE_CONNECTED') {

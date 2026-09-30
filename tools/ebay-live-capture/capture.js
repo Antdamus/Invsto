@@ -2,15 +2,39 @@
 (() => {
   const event_id=location.pathname.split('/')[4];
   if (!/^[\w-]{6,100}$/.test(event_id||'')) return;
+  const tab = name => [...document.querySelectorAll('[role="tab"]')].find(el=>new RegExp('^'+name+'(?:\\s|\\(|$)','i').test(el.textContent.trim()));
+  const disabled = el => !!el && (el.disabled || el.getAttribute('aria-disabled')==='true');
+  const choose = el => {if(el && !disabled(el) && el.getAttribute('aria-selected')!=='true') el.click();};
+  async function readStream() {
+    for(let attempt=0;attempt<54 && (!tab('Event information')||!tab('Stream manager'));attempt++)await new Promise(resolve=>setTimeout(resolve,150));
+    const info=tab('Event information'), manager=tab('Stream manager');
+    if(!info || !manager) throw Error('Open the eBay event dashboard so capture can read its original date');
+    // Do not navigate away from an open listing editor or unsaved event fields.
+    if([...document.querySelectorAll('[role="dialog"],dialog[open]')].some(el=>el.getClientRects().length&&el.getAttribute('aria-hidden')!=='true') || document.querySelector('#invsto-listing-helper[open]') || window.InvstoListingPreparing) throw Error('Finish editing this event before starting capture');
+    let result=InvstoLiveParser.streamMetadata(document);
+    if(!result) {
+      choose(info);
+      for(let attempt=0;attempt<54 && !(result=InvstoLiveParser.streamMetadata(document));attempt++) await new Promise(resolve=>setTimeout(resolve,150));
+    }
+    if(!result) throw Error('The saved date and timezone could not be read. Open Event information and try capture again');
+    return result;
+  }
+  const metadataTask=new URL(location.href).searchParams.get('invsto_metadata');
+  if(metadataTask){
+    // Read in a temporary background tab; never navigate the broadcasting tab.
+    void readStream().then(stream=>chrome.runtime.sendMessage({type:'INVSTO_STREAM_METADATA',event_id,task:metadataTask,stream}),error=>chrome.runtime.sendMessage({type:'INVSTO_STREAM_METADATA',event_id,task:metadataTask,error:error.message}));
+    return;
+  }
   const box=document.createElement('div');box.id='invsto-capture-helper';
   box.style.cssText='position:fixed;bottom:12px;left:12px;z-index:2147483647;background:#18251f;color:white;border:1px solid #98ba8b;border-radius:12px;padding:12px;max-width:330px;font:14px/1.4 system-ui;box-shadow:0 3px 15px #0008';
   const button=document.createElement('button');button.textContent='Start Invsto capture';button.style.cssText='font:inherit;padding:8px 14px;border-radius:8px;cursor:pointer';
   const movement=document.createElement('button');movement.textContent='Keep page still';movement.style.cssText=button.style.cssText;
-  const receiver=document.createElement('a');receiver.textContent='Open Invsto receiver';receiver.href='https://antdamus.github.io/Invsto/live-sales.html?capture=1&v=1.2.0';receiver.target='_blank';receiver.rel='noopener';receiver.style.cssText='display:block;color:#efd69b;margin-top:8px';
+  const receiver=document.createElement('a');receiver.textContent='Open Invsto receiver';receiver.href='https://antdamus.github.io/Invsto/live-sales.html?capture=1&v=1.3.0';receiver.target='_blank';receiver.rel='noopener';receiver.style.cssText='display:block;color:#efd69b;margin-top:8px';
   const note=document.createElement('div');note.textContent='Automatic capture checks Activity and Sold. Use a separate tab for uninterrupted capture while editing.';
   box.append(button,movement,note,receiver);document.body.append(box);
   receiver.href+='&capture_event='+encodeURIComponent(event_id);
-  let holdMovement=false,lastInteraction=0;
+  let holdMovement=false,lastInteraction=0,eventInfoDirty=false;
+  document.addEventListener('input',e=>{if(e.isTrusted && e.target.matches('input#startDate,input#timezone,input#title'))eventInfoDirty=true;},true);
   const usingPage=()=>{
     const focused=document.activeElement;
     return holdMovement||window.InvstoListingPreparing||document.querySelector('#invsto-listing-helper[open]')||
@@ -19,26 +43,36 @@
   };
   for(const type of ['pointerdown','keydown','wheel','touchstart'])document.addEventListener(type,e=>{if(e.isTrusted&&!box.contains(e.target))lastInteraction=Date.now();},{capture:true,passive:true});
   movement.onclick=()=>{holdMovement=!holdMovement;lastInteraction=0;movement.textContent=holdMovement?'Resume automatic capture':'Keep page still';tick();};
-  let active=false,busy=false,cache={},sent=new Map(),pageAt=0,stopping=false,latestNext=true,endReported=false;
+  let active=false,busy=false,cache={},sent=new Map(),pageAt=0,stopping=false,latestNext=true,endReported=false,stream=null,readingStream=false;
   chrome.runtime.onMessage?.addListener((message,sender,reply)=>{
     if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_CAPTURE_STATUS')reply({ok:message.event_id===event_id&&active});
   });
   const sweepPositions=new WeakMap();
   let lastClock=null,clockChangedAt=0,clockWasAdvancing=false;
-  const tab = name => [...document.querySelectorAll('[role="tab"]')].find(el=>new RegExp('^'+name+'(?:\\s|\\(|$)','i').test(el.textContent.trim()));
-  const disabled = el => !!el && (el.disabled || el.getAttribute('aria-disabled')==='true');
-  const choose = el => {if(el && !disabled(el) && el.getAttribute('aria-selected')!=='true') el.click();};
   button.onclick=async()=>{
+    if(readingStream)return;
+    if(!active){
+      readingStream=true;button.disabled=true;note.textContent='Reading the original show date from eBay…';
+      try {
+        if(eventInfoDirty)throw Error('Save your Event information changes and reload eBay before starting capture');
+        if([...document.querySelectorAll('[role="dialog"],dialog[open]')].some(el=>el.getClientRects().length&&el.getAttribute('aria-hidden')!=='true') || document.querySelector('#invsto-listing-helper[open]') || window.InvstoListingPreparing)throw Error('Finish editing this event before starting capture');
+        const result=await chrome.runtime.sendMessage({type:'INVSTO_READ_STREAM',event_id});
+        if(!result?.ok || !result.stream)throw Error(result?.error||'Could not read the saved event date. Try capture again');
+        stream=result.stream;
+        const url=new URL(receiver.href);url.searchParams.set('stream',JSON.stringify(stream));receiver.href=url.href;
+      }catch(error){note.textContent=error.message;return;}
+      finally{readingStream=false;button.disabled=false;}
+    }
     active=!active;button.textContent=active?'Stop Invsto capture':'Start Invsto capture';sent.clear();stopping=!active;
     // Begin buffering immediately, even while the seller form is being filled.
     tick();
     if(active){
-      try{const result=await chrome.runtime.sendMessage({type:'INVSTO_START_CAPTURE',event_id});if(!result?.ok)throw Error(result?.error||'Could not open Invsto');}
+      try{const result=await chrome.runtime.sendMessage({type:'INVSTO_START_CAPTURE',event_id,stream});if(!result?.ok)throw Error(result?.error||'Could not open Invsto');}
       catch(error){note.textContent=error.message+'. Use Open Invsto receiver below to choose sellers.';}
     }
   };
   async function tick() {
-    if(busy || (!active&&!stopping&&(endReported||!InvstoLiveParser.hasEnded(document)))) return;busy=true;
+    if(busy || readingStream || (!active&&!stopping&&(endReported||!InvstoLiveParser.hasEnded(document)))) return;busy=true;
     try {
       const working=!!usingPage();
       if (active && !working) {
@@ -63,7 +97,7 @@
         const signature=JSON.stringify([event.listing_id,event.kind,event.buyer,event.amount]);
         if(sent.get(event.key)!==signature) {if(events.length<100)events.push(event);}
       }
-      const result=await chrome.runtime.sendMessage({type:'INVSTO_CAPTURE',event_id,events,health:{observed_at:new Date().toISOString(),ready,running:active,mode:working?'working':'automatic',broadcast_ended:parsed.broadcastEnded,message:reason}});
+      const result=await chrome.runtime.sendMessage({type:'INVSTO_CAPTURE',event_id,events,health:{observed_at:new Date().toISOString(),ready,running:active,mode:working?'working':'automatic',broadcast_ended:parsed.broadcastEnded,message:reason,...(stream?{stream}:{})}});
       if(result?.ok&&parsed.broadcastEnded)endReported=true;
       if(!active&&result?.ok)stopping=false;
       if(result?.ok) for(const e of events) sent.set(e.key,JSON.stringify([e.listing_id,e.kind,e.buyer,e.amount]));

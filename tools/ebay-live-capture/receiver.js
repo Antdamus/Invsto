@@ -17,7 +17,10 @@ if (new URL(location.href).searchParams.get('capture') === '1') {
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
     if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_OPEN_CAPTURE_SETUP'){
       if(!/^[A-Za-z0-9_-]{6,100}$/.test(message.event_id||'')){reply({ok:false});return;}
-      window.postMessage({type:'INVSTO_CAPTURE_SETUP',event_id:message.event_id},location.origin);
+      const url=new URL(location.href);url.searchParams.set('capture_event',message.event_id);
+      if(message.stream)url.searchParams.set('stream',JSON.stringify(message.stream));else url.searchParams.delete('stream');
+      history.replaceState(null,'',url.href);
+      window.postMessage({type:'INVSTO_CAPTURE_SETUP',event_id:message.event_id,stream:message.stream},location.origin);
       reply({ok:true});return;
     }
     if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_LISTING_BRIDGE'){

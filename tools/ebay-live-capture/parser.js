@@ -71,5 +71,12 @@
     for(const [k,count] of counts)if(count>1)events.push({key:'ambiguous|'+k,kind:'unknown',source:'activity',observed_at,evidence:'Identical auction notifications cannot be distinguished. Verify each auction attempt on eBay.'});
     return {events, cache, supported, panelPresent: !!panel, elapsed, broadcastEnded};
   }
-  root.InvstoLiveParser = {parse,status,money,key,hasEnded};
+  function streamMetadata(doc) {
+    const start=doc.querySelector('input#startDate'), zone=doc.querySelector('input#timezone'), title=doc.querySelector('input#title');
+    if (!start || !zone || !title) return null;
+    if ([start,zone,title].some(input=>input.defaultValue && input.defaultValue!==input.value)) throw Error('Save or discard your Event information edits before starting capture');
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(start.value) || !zone.value.trim()) return null;
+    return {source:'ebay_event_information',start_local:start.value,timezone_label:zone.value.trim(),title:title.value.trim().slice(0,200),activity_timezone:Intl.DateTimeFormat().resolvedOptions().timeZone};
+  }
+  root.InvstoLiveParser = {parse,status,money,key,hasEnded,streamMetadata};
 })(typeof globalThis !== 'undefined' ? globalThis : window);
