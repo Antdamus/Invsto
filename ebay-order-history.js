@@ -1170,6 +1170,12 @@ function evidencePhotoMatchesLine(photo = {}, event = {}, line = {}) {
   const itemNumber = normalizeEvidenceItemNumber(line.item_number);
   const lineIds = getEventLineIds(event);
   const eventIncludesLine = Boolean(line.id && lineIds.includes(line.id));
+  const attachmentLineIds = [
+    ...(Array.isArray(photo.order_line_ids) ? photo.order_line_ids : []),
+    ...(Array.isArray(photo.metadata?.order_line_ids) ? photo.metadata.order_line_ids : []),
+  ];
+  if (attachmentLineIds.length && !attachmentLineIds.includes(line.id)) return false;
+  if (lineIds.length && !eventIncludesLine) return false;
 
   const explicitItemNumbers = getEvidencePhotoExplicitItemNumbers(photo);
   if (explicitItemNumbers.length) return Boolean(itemNumber && explicitItemNumbers.includes(itemNumber));

@@ -30,7 +30,7 @@ after(async () => {
 async function open(t, {pageName = 'pending-orders', saved = '', button = false} = {}) {
   const context = await browser.newContext({viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true});
   t.after(() => context.close());
-  await context.route('**/*', route => route.request().url().startsWith(origin) ? route.continue()
+  await context.route('**/*', route => [origin, `blob:${origin}`, 'data:'].some(prefix => route.request().url().startsWith(prefix)) ? route.continue()
     : route.request().isNavigationRequest() ? route.fulfill({body: '<h1>eBay navigation fixture</h1>', contentType: 'text/html'}) : route.abort());
   const p = await context.newPage();
   const errors = [];
@@ -233,3 +233,220 @@ for (const pageName of ['ebay-order-history', 'ebay-returns']) {
     assert.equal(await p.locator('.video-receipt-order').isVisible(), true);
   });
 }
+
+async function screenshotPage(t) {
+  const p = await open(t);
+  await p.evaluate(() => {
+    window.uploads = []; window.notes = []; window.uploadFailure = false; window.noteFailure = false;
+    window.uploadDelay = 0; window.refreshFailure = false;
+    const canvas = document.createElement('canvas'); canvas.width = 280; canvas.height = 600;
+    const ctx = canvas.getContext('2d'); ctx.fillStyle = '#202526'; ctx.fillRect(0, 0, 280, 600);
+    ctx.fillStyle = '#ffe1a2'; ctx.font = '18px sans-serif'; ctx.fillText('Receipt screenshot fixture', 16, 70);
+    window.testScreenshot = canvas.toDataURL('image/png');
+    const originalFrom = supabase.from;
+    supabase.from = table => {
+      if (table === 'ebay_orders') return originalFrom(table);
+      const q = {select() {return q;}, in() {return q;}, order() {return q;}, then(resolve) {
+        const data = table === 'ebay_order_tasks'
+          ? notes.map((note, i) => ({id: `task-${i}`, order_id: 'order-one', order_line_ids: [note._order_line_id], status: 'resolved', metadata: {source: 'pending_order_line_note'}}))
+          : notes.map((note, i) => ({id: `event-${i}`, task_id: `task-${i}`, photo_attachments: note._photo_attachments, notes: note._note}));
+        return Promise.resolve({data}).then(resolve);
+      }}; return q;
+    };
+    supabase.storage = {from(bucket) {return {
+      async upload(path, blob, options) {
+        uploads.push({bucket, path, type: blob.type, size: blob.size, options});
+        if (uploadDelay) await new Promise(resolve => setTimeout(resolve, uploadDelay));
+        return uploadFailure ? {error: {message: 'Upload unavailable'}} : {data: {path}};
+      },
+      async createSignedUrl() {return {data: {signedUrl: testScreenshot}};},
+    };}};
+    supabase.rpc = async (name, args) => {
+      assertRpc(name); // Reject accidental fulfillment or broad-order actions.
+      if (noteFailure) return {error: {message: 'Could not save receipt note'}};
+      notes.push(structuredClone(args));
+      return {data: {id: 'saved-note', photo_attachments: args._photo_attachments}};
+    };
+    window.assertRpc = name => {if (name !== 'add_pending_order_line_note') throw new Error(`Unexpected write ${name}`);};
+    state.user = {id: 'staff-fixture', email: 'staff@example.test'};
+    // Another line has the same eBay listing; the screenshot must keep its line identity.
+    state.orders.push({...structuredClone(fixtureLine), id: 'line-two', transaction_id: 'txn-two'});
+    loadSelectedOrderTasks = async () => {if (refreshFailure) throw new Error('Refresh unavailable');};
+    hydrateSelectedOrderDetails = async () => {};
+    setupListeners();
+  });
+  return p;
+}
+
+async function chooseScreenshot(p, locator = p.locator('[data-upload-receipt-screenshot="line-one"]').first()) {
+  const [picker] = await Promise.all([p.waitForEvent('filechooser'), locator.click()]);
+  const buffer = Buffer.from(await p.evaluate(() => testScreenshot.split(',')[1]), 'base64');
+  await picker.setFiles({name: 'IMG_Receipt.PNG', mimeType: 'image/png', buffer});
+  try {
+    await p.locator('#manual-video-receipt-preview').waitFor({state: 'visible', timeout: 5000});
+  } catch (error) {
+    const details = await p.evaluate(() => {
+      const img = document.querySelector('#manual-video-receipt-preview');
+      const ancestors = []; let node = img;
+      while (node) {
+        const s = getComputedStyle(node), box = node.getBoundingClientRect();
+        ancestors.push({tag: node.tagName, id: node.id, className: node.className, display: s.display,
+          visibility: s.visibility, width: box.width, height: box.height});
+        node = node.parentElement;
+      }
+      return {complete: img.complete, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight, ancestors};
+    });
+    throw new Error(`Screenshot preview unavailable: ${JSON.stringify(details)}`, {cause: error});
+  }
+}
+
+test('phone screenshot upload opens Photos, previews, and saves receipt evidence only for the chosen item', async t => {
+  const p = await screenshotPage(t);
+  await chooseScreenshot(p);
+  assert.equal(await p.locator('#manual-video-receipt-file').getAttribute('accept'), 'image/*');
+  assert.equal(await p.locator('#manual-video-receipt-file').getAttribute('capture'), null);
+  assert.match(await p.locator('#manual-video-receipt-context').textContent(), /123456789012/);
+  assert.equal(await p.locator('#manual-video-receipt-note').inputValue(), 'Video receipt screenshot uploaded manually.');
+  await p.locator('#manual-video-receipt-note-section summary').click();
+  await p.locator('#manual-video-receipt-note').fill('');
+  await p.locator('#save-manual-video-receipt').click();
+  await p.locator('#manual-video-receipt-modal').waitFor({state: 'hidden'});
+  const result = await p.evaluate(() => ({notes, uploads, count: getLineVideoReceiptPhotoCount(fixtureLine),
+    secondCount: getLineVideoReceiptPhotoCount(state.orders[1]), lineStatus: fixtureLine.line_status}));
+  assert.equal(result.notes.length, 1);
+  assert.equal(result.notes[0]._order_line_id, 'line-one');
+  const photo = result.notes[0]._photo_attachments[0];
+  assert.match(photo.path, /^video-receipts\/manual\//);
+  assert.equal(photo.label, 'Video receipt - 123456789012');
+  assert.equal(photo.media_type, 'image');
+  assert.equal(photo.metadata.source, 'manual_video_receipt_screenshot');
+  assert.deepEqual(photo.order_line_ids, ['line-one']);
+  assert.equal(photo.signed_by_email, 'staff@example.test');
+  assert.ok(photo.preview_path && photo.thumbnail_path, 'derivatives generated for queue thumbnails');
+  assert.equal(result.uploads[0].type, 'image/png');
+  assert.equal(result.count, 1);
+  assert.equal(result.secondCount, 0);
+  assert.equal(result.lineStatus, 'pending');
+  await p.locator('[data-queue-video-evidence="line-one"] img').waitFor({state: 'visible'});
+  // Rehydrate from saved events after losing all in-memory receipt caches.
+  await p.evaluate(async () => {
+    state.videoReceiptEvidenceByLineId.clear(); state.selectedOrderTasks = []; state.queueVideoReceiptTasks = [];
+    state.queueVideoReceiptTaskEvents.clear(); state.queueVideoReceiptLoadedOrderIds.clear();
+    await ensureQueueVideoReceiptTasksLoaded(state.orders);
+  });
+  assert.deepEqual(await p.evaluate(() => state.orders.map(getLineVideoReceiptPhotoCount)), [1, 0]);
+});
+
+test('receipt panel screenshot action closes the panel and preserves the original item', async t => {
+  const p = await screenshotPage(t);
+  await trigger(p).click();
+  await chooseScreenshot(p, p.locator('.video-receipt-upload'));
+  assert.equal(await dialog(p).count(), 0);
+  assert.equal(await p.evaluate(() => state.manualVideoReceiptLineId), 'line-one');
+  const bounds = await p.locator('.manual-video-receipt-card').boundingBox();
+  assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 390);
+  await p.screenshot({path: `test-results/receipt-screenshot-upload-${process.env.INVSTO_RECEIPT_BROWSER || 'chromium'}.png`});
+  await p.locator('#cancel-manual-video-receipt').click();
+  assert.deepEqual(await p.evaluate(() => [uploads.length, notes.length]), [0, 0]);
+});
+
+test('screenshot mode rejects video and cancelled selection never attaches the previous image', async t => {
+  const p = await screenshotPage(t);
+  await chooseScreenshot(p);
+  await p.locator('#cancel-manual-video-receipt').click();
+  const [picker] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-upload-receipt-screenshot="line-one"]').first().click()]);
+  assert.equal(await p.locator('#save-manual-video-receipt').isEnabled(), false);
+  await picker.setFiles({name: 'screen-recording.mp4', mimeType: 'video/mp4', buffer: Buffer.from('test video')});
+  assert.match(await p.locator('#manual-video-receipt-error').textContent(), /Choose a screenshot/);
+  assert.equal(await p.locator('#save-manual-video-receipt').isEnabled(), false);
+  assert.deepEqual(await p.evaluate(() => [uploads.length, notes.length]), [0, 0]);
+});
+
+test('upload failures keep the selected screenshot available for retry', async t => {
+  const p = await screenshotPage(t);
+  await chooseScreenshot(p);
+  await p.evaluate(() => {uploadFailure = true;});
+  await p.locator('#save-manual-video-receipt').click();
+  await p.waitForFunction(() => document.querySelector('#manual-video-receipt-error').textContent === 'Upload unavailable');
+  assert.equal(await p.locator('#save-manual-video-receipt').isEnabled(), true);
+  assert.equal(await p.evaluate(() => notes.length), 0);
+  await p.evaluate(() => {uploadFailure = false;});
+  await p.locator('#save-manual-video-receipt').click();
+  await p.locator('#manual-video-receipt-modal').waitFor({state: 'hidden'});
+  assert.equal(await p.evaluate(() => notes.length), 1);
+});
+
+test('saving blocks double submission, close and switching the target line', async t => {
+  const p = await screenshotPage(t);
+  await chooseScreenshot(p);
+  await p.evaluate(() => {uploadDelay = 200;});
+  await p.locator('#save-manual-video-receipt').click();
+  await p.evaluate(() => {
+    saveManualVideoReceipt(); closeManualVideoReceiptModal();
+    openManualVideoReceiptModal('line-two', {mode: 'screenshot'});
+  });
+  assert.equal(await p.evaluate(() => state.manualVideoReceiptLineId), 'line-one');
+  assert.equal(await p.locator('#cancel-manual-video-receipt').isEnabled(), false);
+  await p.locator('#manual-video-receipt-modal').waitFor({state: 'hidden'});
+  assert.deepEqual(await p.evaluate(() => notes.map(note => note._order_line_id)), ['line-one']);
+});
+
+test('a refresh failure after successful save does not leave the screenshot ready to submit twice', async t => {
+  const p = await screenshotPage(t);
+  await chooseScreenshot(p);
+  await p.evaluate(() => {refreshFailure = true;});
+  await p.locator('#save-manual-video-receipt').click();
+  await p.locator('#manual-video-receipt-modal').waitFor({state: 'hidden'});
+  assert.deepEqual(await p.evaluate(() => [notes.length, state.manualVideoReceiptPhoto]), [1, null]);
+  assert.equal(await p.locator('#save-manual-video-receipt').isEnabled(), false);
+});
+
+test('ordinary item videos keep their existing media picker and are not classified as receipt screenshots', async t => {
+  const p = await screenshotPage(t);
+  await chooseScreenshot(p);
+  await p.locator('#cancel-manual-video-receipt').click();
+  const [picker] = await Promise.all([p.waitForEvent('filechooser'), p.getByRole('button', {name: 'Add item video', exact: true}).click()]);
+  assert.equal(await p.locator('#manual-video-receipt-file').getAttribute('accept'), 'image/*,video/*');
+  await picker.setFiles({name: 'evidence.png', mimeType: 'image/png', buffer: Buffer.from(await p.evaluate(() => testScreenshot.split(',')[1]), 'base64')});
+  await p.locator('#manual-video-receipt-note').fill('Original item condition.');
+  await p.locator('#save-manual-video-receipt').click();
+  await p.locator('#manual-video-receipt-modal').waitFor({state: 'hidden'});
+  assert.equal(await p.evaluate(() => notes[0]._photo_attachments[0].metadata.source), 'standalone_order_evidence');
+  assert.equal(await p.evaluate(() => isVideoReceiptEvidencePhoto(notes[0]._photo_attachments[0])), false);
+});
+
+test('selected item detail offers the same screenshot picker', async t => {
+  const p = await screenshotPage(t);
+  await p.evaluate(() => {renderSelectedVideoReceipt(fixtureLine); document.querySelector('#fulfillment-workflow').classList.remove('hidden');});
+  await chooseScreenshot(p, p.locator('#selected-video-receipt [data-upload-receipt-screenshot]'));
+  assert.equal(await p.evaluate(() => state.manualVideoReceiptLineId), 'line-one');
+});
+
+test('uploading from without-inventory review does not toggle or fulfill its selected lines', async t => {
+  const p = await screenshotPage(t);
+  await p.evaluate(() => {
+    state.workerNoInventoryCandidates = state.orders;
+    state.workerNoInventoryLineIds.add('line-one');
+    renderWorkerNoInventoryList(); openModal('worker-no-inventory-modal');
+  });
+  await chooseScreenshot(p, p.locator('#worker-no-inventory-list [data-upload-receipt-screenshot="line-two"]'));
+  assert.equal(await p.evaluate(() => state.manualVideoReceiptLineId), 'line-two');
+  assert.deepEqual(await p.evaluate(() => [...state.workerNoInventoryLineIds]), ['line-one']);
+  await p.locator('#save-manual-video-receipt').click();
+  await p.locator('#manual-video-receipt-modal').waitFor({state: 'hidden'});
+  assert.equal(await p.locator('#worker-no-inventory-modal').isVisible(), true);
+  assert.deepEqual(await p.evaluate(() => [notes[0]._order_line_id, [...state.workerNoInventoryLineIds], state.orders.map(line => line.line_status)]),
+    ['line-two', ['line-one'], ['pending', 'pending']]);
+});
+
+test('order history recognizes phone screenshots and respects item-line identity before shared listing numbers', async t => {
+  const p = await open(t, {pageName: 'ebay-order-history'});
+  const result = await p.evaluate(() => {
+    const photo = {bucket: 'order-evidence-photos', path: 'video-receipts/manual/fixture.png', label: 'Video receipt - 123456789012',
+      order_line_ids: ['line-one'], metadata: {source: 'manual_video_receipt_screenshot', itemNumber: '123456789012'}};
+    const event = {photo_attachments: [photo], payload: {source: 'pending_order_line_note', order_line_ids: ['line-one']}};
+    return [getHistoryLineVideoReceiptPhotos(fixtureLine, [event]).length,
+      getHistoryLineVideoReceiptPhotos({...fixtureLine, id: 'line-two'}, [event]).length];
+  });
+  assert.deepEqual(result, [1, 0]);
+});

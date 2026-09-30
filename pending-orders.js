@@ -92,6 +92,7 @@ const state = {
   manualVideoReceiptLineId: "",
   manualVideoReceiptLineIds: [],
   manualVideoReceiptScope: "line",
+  manualVideoReceiptMode: "evidence",
   manualVideoReceiptPhoto: null,
   manualVideoReceiptPreviewUrl: "",
   manualVideoReceiptBusy: false,
@@ -1590,6 +1591,7 @@ function getOrderVideoReceiptLink(line = {}) {
   return {
     url: directUrl,
     orderId: line.order_id || order.id || "",
+    onUploadScreenshot: line.id ? () => openManualVideoReceiptModal(line.id, { mode: "screenshot" }) : null,
     orderNumber: order.order_number || "",
     orderDetailsUrl: buildEbayOrderDetailsUrl(order.order_number),
     itemNumber: line.item_number || "",
@@ -1605,6 +1607,16 @@ function getOrderVideoReceiptLink(line = {}) {
 
 function openVideoReceiptLink(event, receiptLink = {}) {
   return window.OGVideoReceipts.open(event, receiptLink);
+}
+
+function bindReceiptScreenshotButtons(root) {
+  root.querySelectorAll("[data-upload-receipt-screenshot]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openManualVideoReceiptModal(button.dataset.uploadReceiptScreenshot, { mode: "screenshot" });
+    });
+  });
 }
 
 function parseCsv(text) {
@@ -4073,6 +4085,7 @@ function renderOrders() {
           </span>
           <span class="buyer-line-receipt-actions">
             ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Open video receipt</a>` : ""}
+            <button type="button" class="receipt-screenshot-upload" data-upload-receipt-screenshot="${escapeHtml(line.id)}">Upload receipt screenshot</button>
             <button type="button" class="buyer-line-note-btn" data-line-add-note="${escapeHtml(line.id)}">Add note</button>
             ${lineNoteCountMarkup}
             ${lineNotePreviewMarkup}
@@ -4084,6 +4097,7 @@ function renderOrders() {
         <b>${escapeHtml(line.line_status || "pending")}</b>
       `;
       const lineCheckbox = button.querySelector("[data-admin-line-select]");
+      bindReceiptScreenshotButtons(button);
       lineCheckbox?.addEventListener("click", (event) => event.stopPropagation());
       lineCheckbox?.addEventListener("change", (event) => setAdminLineSelection(line.id, event.target.checked));
       button.querySelectorAll(".buyer-line-receipt").forEach((link) => {
@@ -4407,8 +4421,10 @@ function renderSelectedVideoReceipt(line = state.selectedLine) {
   panel.innerHTML = receiptLink.url || receiptLink.orderNumber
     ? `
       <a href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Video receipt</a>
+      <button type="button" class="receipt-screenshot-upload" data-upload-receipt-screenshot="${escapeHtml(line.id)}">Upload receipt screenshot</button>
     `
     : "";
+  bindReceiptScreenshotButtons(panel);
   panel.querySelector("a")?.addEventListener("click", async (event) => {
     const link = event.currentTarget;
     const originalText = link.textContent;
@@ -8367,6 +8383,7 @@ function renderWorkerNoInventoryList() {
           </div>
           <small>Qty ${Number(getRemainingLineQuantity(line) || line?.quantity || 1).toLocaleString()} - ${escapeHtml(storeName)} - no stock row will be removed</small>
           ${receiptLink.url || receiptLink.orderNumber ? `<button type="button" class="buyer-line-receipt no-inventory-video-receipt" title="${escapeHtml(receiptLink.title)}">View video receipt</button>` : ""}
+          <button type="button" class="receipt-screenshot-upload" data-upload-receipt-screenshot="${escapeHtml(line.id)}">Upload receipt screenshot</button>
           <div class="no-inventory-video-receipt-evidence" data-no-inventory-video-evidence="${escapeHtml(line.id)}">
           ${receiptEvidence?.thumbnailUrl || receiptEvidence?.previewUrl ? `
             <button type="button" class="video-receipt-evidence-thumb" data-video-receipt-evidence-line="${escapeHtml(line.id)}" title="Open video receipt screenshot">
@@ -8392,6 +8409,7 @@ function renderWorkerNoInventoryList() {
       setWorkerNoInventoryLineSelection(lineId, !state.workerNoInventoryLineIds.has(lineId));
     });
   });
+  bindReceiptScreenshotButtons(list);
   list.querySelectorAll(".no-inventory-video-receipt").forEach((button) => {
     button.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -10240,6 +10258,7 @@ function setManualVideoReceiptError(message = "", type = "error") {
 }
 
 function clearManualVideoReceiptPhoto() {
+  if (state.manualVideoReceiptBusy) return;
   if (state.manualVideoReceiptPreviewUrl?.startsWith("blob:")) {
     URL.revokeObjectURL(state.manualVideoReceiptPreviewUrl);
   }
@@ -10262,7 +10281,12 @@ function clearManualVideoReceiptPhoto() {
 }
 
 function setManualVideoReceiptPhoto(blob, metadata = {}) {
+  if (state.manualVideoReceiptBusy || !state.manualVideoReceiptLineId) return;
   const mediaType = getEvidenceMediaType({ ...metadata, mime_type: blob?.type || metadata.type || "" });
+  if (state.manualVideoReceiptMode === "screenshot" && (mediaType !== "image" || !isAcceptedEvidenceFile({name: metadata.name, type: blob?.type}))) {
+    setManualVideoReceiptError("Choose a screenshot or photo from Photos. Videos can be uploaded with Add item video.");
+    return;
+  }
   if (!(blob instanceof Blob) || !/^(image|video)\//i.test(blob.type || "") && !["image", "video"].includes(mediaType)) {
     setManualVideoReceiptError("Choose a video or photo file for this evidence.");
     return;
@@ -10316,10 +10340,12 @@ function handleManualVideoReceiptFile(event) {
 }
 
 function closeManualVideoReceiptModal() {
+  if (state.manualVideoReceiptBusy) return;
   clearManualVideoReceiptPhoto();
   state.manualVideoReceiptLineId = "";
   state.manualVideoReceiptLineIds = [];
   state.manualVideoReceiptScope = "line";
+  state.manualVideoReceiptMode = "evidence";
   state.manualVideoReceiptBusy = false;
   setManualVideoReceiptError("");
   closeModal("manual-video-receipt-modal");
@@ -10444,33 +10470,48 @@ function openSavedEvidenceVideosModal(lineId, options = {}) {
 }
 
 function openManualVideoReceiptModal(lineId, options = {}) {
+  if (state.manualVideoReceiptBusy) return;
   const line = state.orders.find((entry) => entry.id === lineId);
   if (!line?.id || !line.order_id) {
     setStatus("Select a pending eBay order line before adding video evidence.", "error");
     return;
   }
-  const scope = options.scope === "order" ? "order" : "line";
+  const isScreenshot = options.mode === "screenshot";
+  const scope = !isScreenshot && options.scope === "order" ? "order" : "line";
   const scopedLines = scope === "order"
     ? state.orders.filter((entry) => entry.order_id === line.order_id)
     : [line];
   state.manualVideoReceiptLineId = line.id;
   state.manualVideoReceiptLineIds = scopedLines.map((entry) => entry.id).filter(Boolean);
   state.manualVideoReceiptScope = scope;
+  state.manualVideoReceiptMode = isScreenshot ? "screenshot" : "evidence";
   clearManualVideoReceiptPhoto();
   setManualVideoReceiptError("");
   const order = getOrderFromLine(line);
-  $("manual-video-receipt-title").textContent = scope === "order" ? "Add video to full order" : "Add video to item line";
-  $("manual-video-receipt-subtitle").textContent = scope === "order"
+  $("manual-video-receipt-modal").classList.toggle("is-screenshot-upload", isScreenshot);
+  $("manual-video-receipt-title").textContent = isScreenshot ? "Upload receipt screenshot" : scope === "order" ? "Add video to full order" : "Add video to item line";
+  $("manual-video-receipt-subtitle").textContent = isScreenshot
+    ? "Choose your screenshot from Photos, check the preview, then save it to this item."
+    : scope === "order"
     ? "This video or photo will save to the full order audit trail without creating a task."
     : "This video or photo will save to this item line audit trail without creating a task.";
-  $("manual-video-receipt-note").value = "";
+  $("manual-video-receipt-note").value = isScreenshot ? "Video receipt screenshot uploaded manually." : "";
+  $("manual-video-receipt-note-label").textContent = isScreenshot ? "Note (optional)" : "Audit Note";
+  $("manual-video-receipt-note-section").open = !isScreenshot;
+  $("manual-video-receipt-file").accept = isScreenshot ? "image/*" : "image/*,video/*";
+  $("manual-video-receipt-file").value = "";
+  $("manual-video-receipt-picker-label").textContent = isScreenshot ? "Choose screenshot" : "Choose Video / Photo";
+  $("manual-video-receipt-empty").querySelector("strong").textContent = isScreenshot ? "Choose a receipt screenshot" : "Add video or photo";
+  $("manual-video-receipt-empty").querySelector("span").textContent = isScreenshot ? "Select the screenshot you took on your phone. You can also paste an image." : "Choose a recorded video from this device, or paste a photo with Ctrl+V.";
+  $("save-manual-video-receipt").textContent = isScreenshot ? "Save screenshot" : "Save Evidence";
   $("manual-video-receipt-context").innerHTML = `
     <strong>${escapeHtml(order.order_number || "eBay order")} - ${escapeHtml(order.buyer_username || "unknown buyer")}</strong>
     <span>${scope === "order" ? `${scopedLines.length.toLocaleString()} item line${scopedLines.length === 1 ? "" : "s"}` : escapeHtml(line.item_title || "Untitled item")}</span>
     <small>${scope === "order" ? "Applies to the whole order" : `${escapeHtml(line.item_number || "No item number")} - Qty ${Number(line.quantity || 1).toLocaleString()}`}</small>
   `;
   openModal("manual-video-receipt-modal");
-  setTimeout(() => $("manual-video-receipt-file")?.click(), 80);
+  // Stay inside the tap's user activation so iPhone Safari opens the photo picker.
+  $("manual-video-receipt-file")?.click();
 }
 
 async function saveManualVideoReceipt() {
@@ -10481,13 +10522,17 @@ async function saveManualVideoReceipt() {
   if (!targetLines.length) return setManualVideoReceiptError("No order lines are available for this evidence.");
   if (!photo?.blob) return setManualVideoReceiptError("Choose a video or photo before saving.");
 
-  const note = String($("manual-video-receipt-note")?.value || "").trim();
+  const isScreenshot = state.manualVideoReceiptMode === "screenshot";
+  if (isScreenshot && photo.media_type !== "image") return setManualVideoReceiptError("Choose a screenshot or photo before saving.");
+  const note = String($("manual-video-receipt-note")?.value || "").trim()
+    || (isScreenshot ? "Video receipt screenshot uploaded manually." : "");
   if (!note) return setManualVideoReceiptError("Write an audit note before saving this evidence.");
   if (state.manualVideoReceiptBusy) return;
 
   const button = $("save-manual-video-receipt");
   state.manualVideoReceiptBusy = true;
   button?.toggleAttribute("disabled", true);
+  ["manual-video-receipt-file", "manual-video-receipt-note", "clear-manual-video-receipt-photo", "close-manual-video-receipt", "cancel-manual-video-receipt"].forEach((id) => $(id)?.toggleAttribute("disabled", true));
   setManualVideoReceiptError("Saving order evidence...", "info");
 
   try {
@@ -10499,7 +10544,7 @@ async function saveManualVideoReceipt() {
     const mediaType = getEvidenceMediaType({ media_type: photo.media_type, mime_type: photo.type, path: photo.name });
     const extension = getNoInventoryEvidenceFileExtension({ path: photo.name, mime_type: photo.type }, photo.blob);
     const destinationPath = [
-      "standalone-order-evidence",
+      isScreenshot ? "video-receipts" : "standalone-order-evidence",
       "manual",
       dateFolder,
       orderSegment,
@@ -10524,10 +10569,10 @@ async function saveManualVideoReceipt() {
       path: destinationPath,
       ...derivativeData,
       source_bucket: null,
-      source_path: "manual-paste",
+      source_path: isScreenshot ? getOrderVideoReceiptUrl(line) || "manual-video-receipt-screenshot" : "manual-paste",
       capture_job_id: null,
       sort_order: 0,
-      label: `${isWholeOrder ? "Order" : "Item"} evidence ${mediaType === "video" ? "video" : "photo"} - ${isWholeOrder ? order.order_number || "order" : line.item_number || "item"}`,
+      label: isScreenshot ? `Video receipt - ${line.item_number || "item"}` : `${isWholeOrder ? "Order" : "Item"} evidence ${mediaType === "video" ? "video" : "photo"} - ${isWholeOrder ? order.order_number || "order" : line.item_number || "item"}`,
       mime_type: photo.type || photo.blob.type || (mediaType === "video" ? "video/mp4" : "image/png"),
       media_type: mediaType,
       size_bytes: photo.blob.size || photo.size || 0,
@@ -10536,7 +10581,8 @@ async function saveManualVideoReceipt() {
       order_line_ids: targetLines.map((entry) => entry.id).filter(Boolean),
       attachment_scope: isWholeOrder ? "order" : "line",
       metadata: {
-        source: "standalone_order_evidence",
+        source: isScreenshot ? "manual_video_receipt_screenshot" : "standalone_order_evidence",
+        ...(isScreenshot ? { videoReceiptUrl: getOrderVideoReceiptUrl(line), selectedItemId: line.item_number || "" } : {}),
         manual: true,
         capturedAt: nowIso,
         scope: isWholeOrder ? "order" : "line",
@@ -10548,7 +10594,7 @@ async function saveManualVideoReceipt() {
     };
 
     const auditNote = [
-      `${mediaType === "video" ? "Video" : "Photo"} evidence added manually for ${isWholeOrder ? "the full order" : `eBay item ${line.item_number || "item"}`}.`,
+      isScreenshot ? `Video receipt screenshot uploaded for eBay item ${line.item_number || "item"}.` : `${mediaType === "video" ? "Video" : "Photo"} evidence added manually for ${isWholeOrder ? "the full order" : `eBay item ${line.item_number || "item"}`}.`,
       note,
     ].filter(Boolean).join("\n");
 
@@ -10573,12 +10619,34 @@ async function saveManualVideoReceipt() {
     }
 
     state.queueVideoReceiptLoadedOrderIds.delete(line.order_id);
+    if (isScreenshot) {
+      await rememberVideoReceiptPhotoForQueue(line, savedPhoto, savedPhoto.metadata);
+      // The write is complete. A failed refresh must not leave Save enabled for
+      // the same screenshot and encourage attaching it a second time.
+      try {
+        if (state.selectedLine?.order_id === line.order_id) {
+          await loadSelectedOrderTasks();
+          await renderSelectedVideoReceiptEvidence();
+        }
+      } catch (refreshError) {
+        console.warn("Receipt screenshot saved; preview refresh failed:", refreshError);
+      }
+      state.manualVideoReceiptBusy = false;
+      closeManualVideoReceiptModal();
+      setBuyerGroupExpanded(getBuyerKey(line), true, { render: false });
+      renderOrders();
+      renderWorkerNoInventoryList();
+      hydrateQueueVideoReceiptEvidenceThumbnails(state.filteredOrders).catch((error) => console.warn("Could not refresh saved receipt thumbnails:", error));
+      setStatus("Receipt screenshot saved to this item.", "success");
+      return;
+    }
     if (state.selectedLine?.id === line.id || state.selectedLine?.order_id === line.order_id) {
       await loadSelectedOrderTasks();
       await renderSelectedVideoReceiptEvidence();
     }
 
     const savedScope = isWholeOrder ? "order" : "line";
+    state.manualVideoReceiptBusy = false;
     closeManualVideoReceiptModal();
     renderOrders();
     setStatus(`${mediaType === "video" ? "Video" : "Photo"} evidence saved to the ${isWholeOrder ? "order" : "item line"} audit trail.`, "success");
@@ -10591,6 +10659,7 @@ async function saveManualVideoReceipt() {
   } finally {
     state.manualVideoReceiptBusy = false;
     button?.toggleAttribute("disabled", !state.manualVideoReceiptPhoto);
+    ["manual-video-receipt-file", "manual-video-receipt-note", "clear-manual-video-receipt-photo", "close-manual-video-receipt", "cancel-manual-video-receipt"].forEach((id) => $(id)?.toggleAttribute("disabled", false));
   }
 }
 

@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20260930-mixed-checkout" />
+  <link rel="stylesheet" href="pending-orders.css?v=20260930-screenshots" />
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
@@ -854,15 +854,18 @@
       </div>
       <div class="manual-video-receipt-actions">
         <label class="secondary-btn folder-photo-picker">
-          Choose Video / Photo
+          <span id="manual-video-receipt-picker-label">Choose Video / Photo</span>
           <input id="manual-video-receipt-file" type="file" accept="image/*,video/*" />
         </label>
         <button id="clear-manual-video-receipt-photo" type="button" class="secondary-btn">Clear Media</button>
       </div>
-      <label class="modal-field">
-        Audit Note
-        <textarea id="manual-video-receipt-note" rows="3" placeholder="Explain what this video or photo shows."></textarea>
-      </label>
+      <details id="manual-video-receipt-note-section" open>
+        <summary>Add or edit a note (optional)</summary>
+        <label class="modal-field">
+          <span id="manual-video-receipt-note-label">Audit Note</span>
+          <textarea id="manual-video-receipt-note" rows="3" placeholder="Explain what this video or photo shows."></textarea>
+        </label>
+      </details>
       <p id="manual-video-receipt-error" class="fulfill-status is-error"></p>
       <div class="modal-actions">
         <button id="cancel-manual-video-receipt" type="button" class="secondary-btn">Cancel</button>
@@ -966,7 +969,7 @@
 <script src="print-stations.js?v=20260929-shipping"></script>
 <script src="shipping-label-print.js?v=20260929-complete"></script>
 <script src="bag-order-links.js?v=20260930"></script>
-<script src="video-receipts.js?v=20260930-stream"></script>
-<script src="pending-orders.js?v=20260930-video-receipts2"></script>
+<script src="video-receipts.js?v=20260930-screenshots"></script>
+<script src="pending-orders.js?v=20260930-screenshots"></script>
 </body>
 </html>

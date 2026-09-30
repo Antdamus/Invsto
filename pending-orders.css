@@ -376,6 +376,51 @@ button.task-action-btn.is-assigned:hover,
   margin-top: 4px;
 }
 
+.receipt-screenshot-upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid rgba(125, 240, 178, 0.35);
+  border-radius: 999px;
+  background: rgba(125, 240, 178, 0.08);
+  color: #a8f7c7;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.receipt-screenshot-upload:focus-visible {
+  outline: 2px solid #a8f7c7;
+  outline-offset: 3px;
+}
+
+.selected-video-receipt { flex-wrap: wrap; }
+
+.is-screenshot-upload .manual-video-receipt-card { width: min(560px, 100%); }
+.is-screenshot-upload .manual-video-receipt-dropzone { min-height: 140px; padding: 12px; }
+.is-screenshot-upload #manual-video-receipt-preview { max-height: 28vh; }
+.is-screenshot-upload .manual-video-receipt-actions { justify-content: flex-start; }
+.is-screenshot-upload #manual-video-receipt-note { min-height: 60px; }
+#manual-video-receipt-note-section > summary { display: none; }
+.is-screenshot-upload #manual-video-receipt-note-section > summary {
+  display: list-item;
+  margin: 10px 0;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.is-screenshot-upload .modal-actions {
+  position: sticky;
+  bottom: -1px;
+  padding: 10px 0;
+  background: #211d1b;
+  z-index: 1;
+}
+
 .buyer-line-manual-receipt {
   display: inline-flex;
   align-items: center;

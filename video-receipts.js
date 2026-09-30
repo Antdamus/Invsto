@@ -115,6 +115,7 @@
       <a class="video-receipt-direct" target="_blank" rel="noopener noreferrer" hidden>Open video receipt</a>
       <a class="video-receipt-order" target="_blank" rel="noopener noreferrer">Open eBay order</a>
       <p class="video-receipt-help">On eBay, sign in to the seller account, then tap the item's image with the Live icon to open its video receipt. No extension is needed for this route.</p>
+      <button type="button" class="video-receipt-upload" hidden>Upload receipt screenshot</button>
       <details class="video-receipt-desktop">
         <summary>Using the desktop extension?</summary>
         <p>If the OG eBay extension is installed on this browser, it can find and open the receipt.</p>
@@ -158,6 +159,13 @@
       if (trigger?.isConnected) trigger.focus();
     };
     activeDialog = {element: dialog, close};
+    if (typeof receipt.onUploadScreenshot === "function") {
+      find(".video-receipt-upload").hidden = false;
+      find(".video-receipt-upload").addEventListener("click", () => {
+        close();
+        receipt.onUploadScreenshot();
+      });
+    }
     find(".video-receipt-close").addEventListener("click", close);
     dialog.addEventListener("cancel", e => { e.preventDefault(); close(); });
     document.addEventListener("keydown", onKey, true);
