@@ -12,7 +12,7 @@ before(async()=>{
     if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();
     try {
       let content=await readFile(new URL(name,root));
-      if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:bag-lookup|live-bag-label|barcode-scanner)\.js/.test(tag)?tag:'');
+      if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:bag-lookup|live-bag-label|barcode-scanner|bag-order-links)\.js/.test(tag)?tag:'');
       res.setHeader('Content-Type',name.endsWith('.wasm')?'application/wasm':name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);
     }catch{res.writeHead(404).end();}
   });
@@ -25,7 +25,7 @@ async function open(t,{query='?bag=LIVE-AAAAAAAAAA',signedIn=true}={}){
   const context=await browser.newContext({viewport:{width:390,height:844}});t.after(()=>context.close());
   await context.route('**/*',r=>[origin,'blob:'+origin,'data:image/'].some(prefix=>r.request().url().startsWith(prefix))?r.continue():r.abort());
   await context.addInitScript(({signedIn})=>{
-    window.signedIn=signedIn;window.calls=[];window.failItems=false;window.delayA=0;
+    window.signedIn=signedIn;window.calls=[];window.failItems=false;window.delayA=0;window.failMatches=false;window.failSave=false;window.savedLinks={};window.matchDelay=0;window.orderMatches=[];
     const stamp='2026-09-28T17:00:00Z';
     window.lots=[{id:'lot-a',lot_code:'LIVE-AAAAAAAAAA',auction_number:'EB-010-A',status:'reserved',closed_at:stamp,created_at:stamp,owner_employee_id:'seller',owner_snapshot:{display_name:'Sydney Miller'},session:{id:'show-a',title:'Monday show',session_code:'LS-A',status:'ended',started_at:stamp}},{id:'lot-b',lot_code:'LIVE-BBBBBBBBBB',auction_number:'EB-010-B',status:'open',owner_employee_id:'seller',session:{id:'show-b',title:'Tuesday show',session_code:'LS-B',status:'active',started_at:stamp}}];
     window.auctions=[{id:'auction-a',lot_id:'lot-a',listing_title:'#010 - Cuban Chain',buyer:'long-winner-name-123456789',amount:100,payment_state:'paid',seller_id:'seller',closed_at:stamp,stream_offset_seconds:65,time_estimated:true,win_time_label:'1:01 PM',listing_id:'123'},{id:'auction-b',lot_id:'lot-b',listing_title:'#010 - Watch',buyer:'different-winner',amount:200,payment_state:'paid',seller_id:'seller'}];
@@ -40,7 +40,23 @@ async function open(t,{query='?bag=LIVE-AAAAAAAAAA',signedIn=true}={}){
         return table==='live_sale_lot_items'&&window.failItems?{error:{message:'Connection interrupted'}}:{data:single?data[0]||null:data};
       };
       const q={select(){return q},eq(k,v){filters.push([k,v]);return q},order(){return q},maybeSingle:()=>result(true),then:fn=>result(false).then(fn)};return q;
-    },rpc:async name=>{calls.push({rpc:name});if(name!=='get_live_sale_seller_directory')throw new Error('Unexpected mutation');return {data:[{id:'seller',display_name:'Sydney Miller'}]};}};
+    },rpc:async(name,args)=>{
+      calls.push({rpc:name,args});
+      if(name==='get_live_bag_order_matches'){
+        if(window.matchDelay)await new Promise(r=>setTimeout(r,window.matchDelay));
+        if(window.failMatches)return {error:{message:'Order lookup unavailable'}};
+        const saved=savedLinks[args._lot_id]||null;
+        const matches=orderMatches.filter(m=>m.line.id===saved||!args._search||JSON.stringify(m.line).toLowerCase().includes(args._search.toLowerCase())).map(m=>({...m,linked:m.line.id===saved}));
+        matches.sort((a,b)=>Number(b.linked)-Number(a.linked));
+        return {data:{saved_line_id:saved,linked_line_id:saved,link_source:saved?'Saved link':null,editable:true,date_window_start:'2026-09-21T17:00:00Z',date_window_end:'2026-10-28T17:00:00Z',matches}};
+      }
+      if(name==='set_live_bag_order_link'){
+        if(window.failSave)return {error:{message:'The bag link changed. Refresh before trying again'}};
+        savedLinks[args._lot_id]=args._order_line_id;return {data:null};
+      }
+      if(name!=='get_live_sale_seller_directory')throw new Error('Unexpected mutation');
+      return {data:[{id:'seller',display_name:'Sydney Miller'}]};
+    }};
     window.printStations={printLabel:async(xml,options)=>{calls.push({print:xml,options});return {mode:'remote-queue',stationName:'Main show printer'};}};
   },{signedIn});
   const p=await context.newPage();p.errors=[];p.on('pageerror',e=>p.errors.push(e.message));t.after(()=>assert.deepEqual(p.errors,[]));
@@ -69,7 +85,7 @@ test('staff scan loads full winner, seller, manual photos and signed negative re
   assert.equal(await p.locator('[data-photo="manual-a"]').isEnabled(),true);await p.locator('[data-photo="manual-a"]').click();
   assert.equal(await p.locator('#bag-photo-dialog').isVisible(),true);await p.locator('#bag-photo-close').click();
   await p.getByText('Show and timing',{exact:true}).click();assert.match(await p.locator('#bag-result').innerText(),/Monday show.*LS-A · ended/s);
-  assert.equal(await p.evaluate(()=>calls.some(c=>c.rpc&&c.rpc!=='get_live_sale_seller_directory')),false);
+  assert.equal(await p.evaluate(()=>calls.some(c=>c.rpc&&!['get_live_sale_seller_directory','get_live_bag_order_matches'].includes(c.rpc))),false);
 });
 
 test('scan resolves exact bag across repeated auctions and old auction-only QR is rejected',async t=>{
@@ -100,7 +116,7 @@ test('racing scans never replace the latest selected bag',async t=>{
 test('printing rechecks identity, uses chosen-station flow, and does not close or modify a bag',async t=>{
   const p=await open(t);await p.evaluate(()=>{auctions[0].buyer='corrected-buyer';});await p.locator('#bag-print').click();await p.waitForFunction(()=>calls.some(c=>c.print));
   const job=await p.evaluate(()=>calls.find(c=>c.print));assert.match(job.print,/CORRECTED-BUYER/);assert.match(job.print,/<Text>#010<\/Text>/);assert.equal(job.options.barcode,'LIVE-AAAAAAAAAA');assert.match(await p.locator('#bag-status').innerText(),/Main show printer/);
-  assert.equal(await p.evaluate(()=>calls.some(c=>c.rpc&&c.rpc!=='get_live_sale_seller_directory')),false);
+  assert.equal(await p.evaluate(()=>calls.some(c=>c.rpc&&!['get_live_sale_seller_directory','get_live_bag_order_matches'].includes(c.rpc))),false);
   await p.evaluate(()=>{lots[0].status='cancelled';});await p.locator('#bag-print').click();await p.waitForFunction(()=>document.getElementById('bag-status').textContent.includes('cancelled or released'));
   assert.equal(await p.evaluate(()=>calls.filter(c=>c.print).length),1);assert.equal(await p.locator('#bag-print').isDisabled(),true);
 });
@@ -148,4 +164,91 @@ test('past-show reprints use the same eBay reference and buyer as current labels
  vm.runInContext(await readFile(new URL('../past-live-sales.js',import.meta.url),'utf8'),context);
  await vm.runInContext(`state.user={email:'fixture@example.invalid'};state.lots=[{id:'lot',session_id:'show',lot_code:'LIVE-AAAAAAAAAA',auction_number:'EB-WRONG'}];state.sessions=[{id:'show',title:'Old show'}];setStatus=()=>{};loadPastLiveSales=async()=>{};printLiveSaleBagLabel('lot');`,context);
  assert.match(printed,/<Text>#010<\/Text>/);assert.match(printed,/CORRECT-WINNER/);assert.doesNotMatch(printed,/EB-WRONG/);
+});
+
+async function addOrderMatches(p) {
+  await p.evaluate(()=>{
+    lots[0].closed_at=null;lots[0].status='open';auctions[0].closed_at=null;items=[];manual=[];
+    orderMatches=[{score:200,reasons:['Buyer username','Sale amount'],line:{id:'order-line-a',order_id:'order-a',item_title:'#010 - Chain',sold_for:100,quantity:1,fulfilled_quantity:0,line_status:'pending',order:{id:'order-a',order_number:'12-345-678',buyer_username:'long-winner-name-123456789',status:'pending',sale_date:'2026-09-28T17:00:00Z'}}},
+      {score:100,reasons:['Manual search result'],line:{id:'order-line-b',order_id:'order-b',item_title:'A different watch',sold_for:300,quantity:1,fulfilled_quantity:0,line_status:'pending',order:{id:'order-b',order_number:'98-765-432',buyer_username:'another-buyer',status:'pending'}}}];
+  });
+  await p.locator('#bag-refresh').click();
+  await p.locator('.bag-order-card').first().waitFor();
+}
+
+test('empty open bag links to a pending order, survives refresh and can be unlinked without closing',async t=>{
+  const p=await open(t);await addOrderMatches(p);
+  assert.match(await p.locator('.bag-order-date-range').innerText(),/Suggested date range:.*Search below checks all pending orders/);
+  assert.equal(await p.getByLabel('Search all pending orders',{exact:true}).count(),1);
+  assert.match(await p.locator('#bag-result').innerText(),/Open · being filled/);
+  assert.match(await p.locator('#bag-result').innerText(),/No items saved/);
+  await p.getByRole('button',{name:'Link bag',exact:true}).first().click();
+  await p.waitForFunction(()=>document.querySelector('.bag-order-status').textContent.includes('Bag linked'));
+  assert.match(await p.locator('.bag-order-card.is-linked').innerText(),/12-345-678/);
+  assert.match(await p.locator('.bag-order-card.is-linked a').getAttribute('href'),/pending-orders.html\?bag=LIVE-AAAAAAAAAA&bagLine=order-line-a/);
+  const before=await p.evaluate(()=>({lot:lots[0],line:orderMatches[0].line}));
+  assert.equal(before.lot.status,'open');assert.equal(before.lot.closed_at,null);assert.equal(before.line.line_status,'pending');
+  await p.locator('#bag-refresh').click();await p.locator('.bag-order-card.is-linked').waitFor();
+  await p.getByRole('button',{name:'Remove saved link'}).click();
+  await p.waitForFunction(()=>document.querySelector('.bag-order-status').textContent.includes('Saved link removed'));
+  assert.equal(await p.locator('.bag-order-card.is-linked').count(),0);
+  const writes=await p.evaluate(()=>calls.filter(c=>c.rpc==='set_live_bag_order_link'));
+  assert.deepEqual(writes.map(c=>c.args),[{_lot_id:'lot-a',_order_line_id:'order-line-a',_expected_order_line_id:null},{_lot_id:'lot-a',_order_line_id:null,_expected_order_line_id:'order-line-a'}]);
+});
+
+test('manual order search handles no matches, stale save conflicts, read failures and recovery',async t=>{
+  const p=await open(t);await addOrderMatches(p);
+  await p.locator('.bag-order-search input').fill('another-buyer');await p.getByRole('button',{name:'Search orders',exact:true}).click();
+  await p.waitForFunction(()=>document.querySelectorAll('.bag-order-card').length===1);
+  assert.match(await p.locator('.bag-order-card').innerText(),/98-765-432/);
+  await p.evaluate(()=>failSave=true);await p.getByRole('button',{name:'Link bag',exact:true}).click();
+  await p.waitForFunction(()=>document.querySelector('.bag-order-status').textContent.includes('link changed'));
+  assert.equal(await p.locator('.bag-order-card.is-linked').count(),0);
+  await p.evaluate(()=>{failSave=false;failMatches=true;});await p.getByRole('button',{name:'Search orders',exact:true}).click();
+  await p.waitForFunction(()=>document.querySelector('.bag-order-status').textContent.includes('unavailable'));
+  assert.equal(await p.locator('.bag-order-card').count(),0);
+  assert.equal(await p.locator('#bag-print').isVisible(),true);
+  await p.evaluate(()=>failMatches=false);await p.locator('.bag-order-search input').fill('not-a-match');await p.getByRole('button',{name:'Search orders',exact:true}).click();
+  await p.waitForFunction(()=>document.querySelector('.bag-order-status').textContent.includes('No matching pending'));
+  await p.locator('.bag-order-search input').fill('');await p.getByRole('button',{name:'Search orders',exact:true}).click();
+  await p.waitForFunction(()=>document.querySelectorAll('.bag-order-card').length===2);
+});
+
+test('closed linked orders show history; hostile order text stays text and mobile cards fit',async t=>{
+  const p=await open(t);await addOrderMatches(p);
+  await p.evaluate(()=>{savedLinks['lot-a']='order-line-a';orderMatches[0].line.line_status='fulfilled';orderMatches[0].line.order.buyer_username='<img src=x onerror="window.injected=true">'+'B'.repeat(70);});
+  await p.locator('#bag-refresh').click();await p.getByRole('link',{name:'View Order History'}).waitFor();
+  assert.equal(await p.locator('.bag-order-card.is-linked').getByRole('link',{name:'Open in Pending Orders'}).count(),0);
+  assert.equal(await p.evaluate(()=>!!window.injected),false);
+  for(const width of [320,1280]){
+    await p.setViewportSize({width,height:900});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    await p.screenshot({path:new URL(`../test-results/bag-order-links-${width}.png`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1'),fullPage:true});
+  }
+});
+
+test('Pending Orders displays the shared connection controls and saves links on phone and desktop',async t=>{
+  const p=await open(t);
+  await p.goto(origin+'/pending-orders.html');
+  await p.addScriptTag({url:origin+'/pending-orders.js'});
+  await p.evaluate(()=>{
+    // Keep the bag scanner and its real DOM rendering; omit unrelated queue enrichment.
+    renderBuyerBundlePanel=renderSelectionSummary=renderItemResults=renderLocationResults=()=>{};
+    applyOrderFilters=()=>renderLiveLotOrderMatches();
+    window.viewedLine=null;selectOrderLine=id=>{window.viewedLine=id;};normalizeLine=line=>line;
+    items=[];manual=[];
+    orderMatches=[{score:200,reasons:['Buyer username','Sale amount'],line:{id:'order-line-a',order_id:'order-a',item_title:'#010 - Chain',sold_for:100,quantity:1,fulfilled_quantity:0,line_status:'pending',order:{id:'order-a',order_number:'12-345-678',buyer_username:'long-winner-name-123456789',status:'pending',sale_date:'2026-09-28T17:00:00Z'}}}];
+    updateCheckoutStoreGate();
+    return loadLiveLotByScan('LIVE-AAAAAAAAAA');
+  });
+  assert.equal(await p.locator('#global-live-lot-scan').isEnabled(),true);
+  assert.equal(await p.locator('#live-lot-order-matches .bag-order-card').count(),1);
+  await p.getByRole('button',{name:'View order',exact:true}).click();
+  assert.equal(await p.evaluate(()=>viewedLine),'order-line-a');
+  await p.getByRole('button',{name:'Link bag',exact:true}).click();
+  await p.waitForFunction(()=>document.querySelector('.bag-order-status').textContent.includes('Bag linked'));
+  for(const width of [390,1280]){
+    await p.setViewportSize({width,height:900});
+    assert.equal(await p.locator('.bag-order-links').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+    await p.locator('.bag-lookup-panel').screenshot({path:new URL(`../test-results/pending-bag-links-${width}.png`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+  }
 });

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Scan bag label · Invsto</title>
   <link rel="stylesheet" href="bag-lookup.css?v=20260928-bag-lookup">
+  <link rel="stylesheet" href="bag-order-links.css?v=20260930">
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup">
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
 </head>
@@ -12,7 +13,7 @@
   <main class="bag-page">
     <nav aria-label="Bag navigation"><a href="live-sales.html">Live Sales</a><a href="pending-orders.html">Pending Orders</a></nav>
     <h1>Scan bag label</h1>
-    <p>See the winner and everything saved in a bag, including past shows.</p>
+    <p>See the winner, bag contents and connected pending order, even while the bag is still open.</p>
     <form id="bag-search">
       <label for="bag-code">Bag ID</label>
       <div class="bag-search-row"><input id="bag-code" type="search" placeholder="LIVE-…" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="80" disabled><button id="bag-find" type="submit" disabled>Find bag</button></div>
@@ -29,6 +30,7 @@
   <script src="initSupabase.js"></script>
   <script src="live-bag-label.js?v=20260928-bag-lookup"></script>
   <script src="print-stations.js?v=20260929-shipping"></script>
-  <script src="bag-lookup.js?v=20260928-bag-lookup"></script>
+  <script src="bag-order-links.js?v=20260930"></script>
+  <script src="bag-lookup.js?v=20260930-order-links"></script>
 </body>
 </html>

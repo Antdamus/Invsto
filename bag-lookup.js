@@ -7,10 +7,10 @@
   const elapsed = value => value == null ? 'Not recorded' : `${Math.floor(Number(value)/60)}:${String(Number(value)%60).padStart(2,'0')}`;
   const one = value => Array.isArray(value) ? value[0] : value;
   const active = row => ['reserved','packed'].includes(row.status) && Number(row.quantity)>0;
-  let sb, current = null, generation = 0, printing = false;
+  let sb, current = null, generation = 0, printing = false, orderConnections = null;
 
   function status(text, error = false) { $('bag-status').textContent=text; $('bag-status').classList.toggle('is-error',error); }
-  function clear() { current=null; $('bag-result').hidden=true; $('bag-result').replaceChildren(); $('bag-photo-dialog').close(); $('bag-photo').removeAttribute('src'); }
+  function clear() { orderConnections?.dispose(); orderConnections=null; current=null; $('bag-result').hidden=true; $('bag-result').replaceChildren(); $('bag-photo-dialog').close(); $('bag-photo').removeAttribute('src'); }
   function controls(enabled) { for(const id of ['bag-code','bag-find','bag-camera']) $(id).disabled=!enabled; }
   async function checked(query) { const {data,error}=await query; if(error)throw error; return data; }
   async function authorize() {
@@ -51,6 +51,11 @@
     const bagState=['cancelled','released','packed'].includes(lot.status)?lot.status:closed?'Closed':'Open · being filled';
     $('bag-result').innerHTML=`<section class="bag-card"><p class="bag-eyebrow">${auction?'eBay auction':'Auction bag'}</p><h2>${identity.auctionNumber?`#${escape(identity.auctionNumber)}`:'Auction number not captured'}</h2><p>${escape(identity.title)}</p><p class="bag-winner">Winner: <strong>${escape(auction?.buyer||'Not recorded')}</strong></p><div class="bag-tags"><span>${escape(bagState)}</span><span>${escape(payment)}</span>${auction?.resolved_at?'<span>Resolved · excluded from running result</span>':''}</div><dl><div><dt>Bag ID</dt><dd>${escape(lot.lot_code)}</dd></div><div><dt>Sold by</dt><dd>${escape(sellerName)}</dd></div><div><dt>Sale price</dt><dd>${escape(money(auction?.amount))}</dd></div><div><dt>Total break-even</dt><dd>${minimum==null?'Not complete':money(minimum/100)}</dd></div><div><dt>Above / below break-even</dt><dd class="${margin==null?'':margin<0?'negative':'positive'}">${margin==null?'Not available':`${margin<0?'-':'+'}${money(Math.abs(margin)/100)}`}</dd></div><div><dt>Contents</dt><dd>${units} unit${units===1?'':'s'} · ${contents.length} entr${contents.length===1?'y':'ies'}</dd></div></dl><p>${missing?`${missing} item entr${missing===1?'y is':'ies are'} missing a minimum price. `:''}${!contents.length?'No items saved in this bag. ':''}${!closed?'Open-bag results are provisional. ':''}Result compares the sale price with saved minimums; fees are not deducted separately.</p><details><summary>Show and timing</summary><dl><div><dt>Show</dt><dd>${escape(session.title||session.session_code||'Not recorded')}</dd></div><div><dt>Session</dt><dd>${escape(session.session_code||'Not recorded')} · ${escape(session.status||'')}</dd></div><div><dt>Show started</dt><dd>${escape(date(session.started_at))}</dd></div><div><dt>Auction time</dt><dd>${escape(auction?.win_time_label||'Not captured')}</dd></div><div><dt>Stream minute</dt><dd>${escape(elapsed(auction?.stream_offset_seconds))}${auction?.stream_offset_seconds!=null&&auction.time_estimated?' (estimated)':''}</dd></div><div><dt>Bag created</dt><dd>${escape(date(lot.created_at))}</dd></div><div><dt>Bag closed</dt><dd>${escape(date(closed))}</dd></div><div><dt>eBay listing</dt><dd>${escape(auction?.listing_id||'Not linked')}</dd></div></dl>${lot.notes?`<p>${escape(lot.notes)}</p>`:''}${auction?.review_note?`<p>Payment review: ${escape(auction.review_note)}</p>`:''}</details><div class="bag-actions"><button id="bag-print" type="button" ${['cancelled','released'].includes(lot.status)?'disabled':''}>Print bag label</button></div><small>DYMO 30299 · choose the computer and matching label roll. The label shows the auction number and a shortened winner name. Both QR codes identify this bag.</small></section><section class="bag-card"><h3>Bag contents</h3>${contents.length?contents.map(itemCard).join(''):'<p>No items saved yet.</p>'}</section>${removed.length?`<details class="bag-card"><summary>Removed / released items (${removed.length})</summary><p>These entries are outside the current bag contents and totals.</p>${removed.map(itemCard).join('')}</details>`:''}`;
     $('bag-result').hidden=false;
+    const connections=document.createElement('section');
+    connections.className='bag-card';
+    $('bag-result').children[0].after(connections);
+    orderConnections=window.bagOrderLinks.mount({container:connections,client:sb,lot});
+    orderConnections.load();
     $('bag-print').onclick=print;
     for(const row of rows) {
       const button=$('bag-result').querySelector(`[data-photo="${CSS.escape(row.id)}"]`);

@@ -26,6 +26,9 @@ const state = {
   liveLotSearchTimer: null,
   selectedLiveLot: null,
   selectedLiveLotItems: [],
+  liveBagConnection: null,
+  liveBagConnectionsUI: null,
+  liveBagLoadGeneration: 0,
   liveLotMatchedLineIds: new Set(),
   liveLotOrderMatches: [],
   ebayLaunchOrderNumbers: new Set(),
@@ -1301,8 +1304,9 @@ function updateCheckoutStoreGate() {
   const hasStore = Boolean(state.checkoutStoreId);
   $("item-scan")?.toggleAttribute("disabled", !hasStore);
   $("find-item")?.toggleAttribute("disabled", !hasStore);
-  $("global-live-lot-scan")?.toggleAttribute("disabled", !hasStore);
-  $("global-find-live-lot")?.toggleAttribute("disabled", !hasStore);
+  // Reading and linking a bag does not require selecting an inventory checkout store.
+  $("global-live-lot-scan")?.removeAttribute("disabled");
+  $("global-find-live-lot")?.removeAttribute("disabled");
   $("location-scan")?.toggleAttribute("disabled", !hasStore);
   $("find-location")?.toggleAttribute("disabled", !hasStore);
   $("stage-current-line")?.toggleAttribute("disabled", !hasStore);
@@ -2970,7 +2974,7 @@ async function loadOrders() {
   state.orders = data.map(normalizeLine);
   logPendingOrderPerf("loadOrders normalize", normalizeStartedAt, { rows: state.orders.length });
   if (state.selectedLiveLot) {
-    setLiveLotOrderMatches(calculateLiveLotOrderMatches(state.selectedLiveLot, state.selectedLiveLotItems));
+    await state.liveBagConnectionsUI?.load();
   }
   const filterStartedAt = nowMs();
   applyOrderFilters();
@@ -6917,6 +6921,10 @@ function searchSourceLocation() {
 
 function clearLiveLotSelection({ render = true } = {}) {
   clearLiveLotSearchTimer();
+  ++state.liveBagLoadGeneration;
+  state.liveBagConnectionsUI?.dispose();
+  state.liveBagConnectionsUI = null;
+  state.liveBagConnection = null;
   state.selectedLiveLot = null;
   state.selectedLiveLotItems = [];
   state.liveLotMatchedLineIds = new Set();
@@ -6944,188 +6952,8 @@ async function loadLiveLotItems(lotId) {
   return data || [];
 }
 
-function normalizeMatchText(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s_-]+/g, "");
-}
-
-function normalizeAuctionToken(value) {
-  return String(value || "")
-    .trim()
-    .replace(/^#+/, "")
-    .replace(/[^a-z0-9]+/gi, "")
-    .toLowerCase();
-}
-
-function extractAuctionTokens(value) {
-  const text = String(value || "");
-  const tokens = new Set();
-  if (!text.trim()) return tokens;
-
-  const exact = normalizeAuctionToken(text);
-  if (exact && /^#?[a-z0-9-]+$/i.test(text.trim())) tokens.add(exact);
-
-  const hashPattern = /#\s*([a-z0-9][a-z0-9-]*)/gi;
-  let match = hashPattern.exec(text);
-  while (match) {
-    const token = normalizeAuctionToken(match[1]);
-    if (token) tokens.add(token);
-    match = hashPattern.exec(text);
-  }
-
-  const contextPattern = /\b(?:auction|auc|lot|bag)\s*(?:number|num|no\.?|#)?\s*[:.-]?\s*#?\s*([a-z0-9][a-z0-9-]*)/gi;
-  match = contextPattern.exec(text);
-  while (match) {
-    const token = normalizeAuctionToken(match[1]);
-    if (token) tokens.add(token);
-    match = contextPattern.exec(text);
-  }
-
-  return tokens;
-}
-
-function lineHasAuctionNumber(line, lot) {
-  const expected = normalizeAuctionToken(lot?.auction_number);
-  if (!expected) return false;
-  const fields = [
-    line.item_title,
-    line.custom_label,
-  ];
-  return fields.some((field) => extractAuctionTokens(field).has(expected));
-}
-
-function getLiveLotReferenceDate(lot) {
-  return lot?.created_at || lot?.session?.started_at || lot?.live_sale_sessions?.started_at || null;
-}
-
-function getOrderReferenceDate(order) {
-  return order?.sale_date || order?.paid_on_date || null;
-}
-
-function getLocalDayDistance(a, b) {
-  if (!a || !b) return Number.POSITIVE_INFINITY;
-  const first = startOfLocalDay(a);
-  const second = startOfLocalDay(b);
-  const firstTime = first.getTime();
-  const secondTime = second.getTime();
-  if (Number.isNaN(firstTime) || Number.isNaN(secondTime)) return Number.POSITIVE_INFINITY;
-  return Math.round(Math.abs(firstTime - secondTime) / 86400000);
-}
-
-function lineDateFitsLiveLot(line, lot) {
-  return getLocalDayDistance(getLiveLotReferenceDate(lot), getOrderReferenceDate(line.order)) <= 1;
-}
-
-function getLiveLotOrderHardMatch(line, lot) {
-  return {
-    auctionMatches: lineHasAuctionNumber(line, lot),
-    dateMatches: lineDateFitsLiveLot(line, lot),
-  };
-}
-
-function getLiveLotItemGroups(items = state.selectedLiveLotItems) {
-  const groups = new Map();
-  getPackableLiveLotItems(items).forEach((entry) => {
-    const item = entry.item || {};
-    const barcode = String(item.barcode || "").trim();
-    const key = item.id || barcode || item.title || entry.id;
-    if (!groups.has(key)) {
-      groups.set(key, {
-        item,
-        quantity: 0,
-        statuses: new Set(),
-      });
-    }
-    const group = groups.get(key);
-    group.quantity += Number(entry.quantity || 0);
-    if (entry.status) group.statuses.add(entry.status);
-  });
-  return Array.from(groups.values());
-}
-
 function getPackableLiveLotItems(items = state.selectedLiveLotItems) {
   return (items || []).filter((entry) => entry.status === "reserved");
-}
-
-function scoreOrderLineForLiveLot(line, lot = state.selectedLiveLot, items = state.selectedLiveLotItems) {
-  const reasons = [];
-  let score = 0;
-  const hardMatch = getLiveLotOrderHardMatch(line, lot);
-  if (!hardMatch.auctionMatches || !hardMatch.dateMatches) {
-    return {
-      line,
-      score: 0,
-      reasons,
-    };
-  }
-
-  const searchText = line.searchText || "";
-  const lineNeedle = normalizeMatchText([
-    line.item_title,
-    line.item_number,
-    line.custom_label,
-    line.order?.order_number,
-    line.order?.sales_record_number,
-    line.order?.buyer_username,
-  ].filter(Boolean).join(" "));
-  score += 120;
-  reasons.push("auction number");
-  score += 18;
-  reasons.push("sale date");
-
-  const groups = getLiveLotItemGroups(items);
-  const totalQty = groups.reduce((sum, group) => sum + Number(group.quantity || 0), 0);
-  const remainingQty = getRemainingLineQuantity(line) || Number(line.quantity || 0);
-
-  groups.forEach((group) => {
-    const item = group.item || {};
-    const barcode = normalizeMatchText(item.barcode);
-    const title = normalizeMatchText(item.title);
-    if (barcode && lineNeedle.includes(barcode)) {
-      score += 70;
-      reasons.push("item barcode");
-    }
-    if (title && title.length > 8 && lineNeedle.includes(title.slice(0, Math.min(title.length, 30)))) {
-      score += 28;
-      reasons.push("item title");
-    }
-    const titleTokens = String(item.title || "").toLowerCase().split(/\W+/).filter((token) => token.length > 3);
-    const sharedTokens = titleTokens.filter((token) => searchText.includes(token)).slice(0, 5);
-    if (sharedTokens.length) {
-      score += Math.min(22, sharedTokens.length * 5);
-      reasons.push("description words");
-    }
-  });
-
-  if (totalQty && remainingQty && totalQty === remainingQty) {
-    score += 18;
-    reasons.push("quantity match");
-  }
-
-  const urgency = getOrderUrgency(line.order?.ship_by_date);
-  if (urgency?.level === "overdue") score += 4;
-  if (urgency?.level === "today") score += 3;
-  if (urgency?.level === "tomorrow") score += 1;
-
-  return {
-    line,
-    score,
-    reasons: [...new Set(reasons)].slice(0, 4),
-  };
-}
-
-function calculateLiveLotOrderMatches(lot = state.selectedLiveLot, items = state.selectedLiveLotItems) {
-  if (!lot) return [];
-  const packableItems = getPackableLiveLotItems(items);
-  if (!packableItems.length) return [];
-  return state.orders
-    .filter(isOpenOrderLine)
-    .map((line) => scoreOrderLineForLiveLot(line, lot, packableItems))
-    .filter((match) => match.score > 0)
-    .sort((a, b) => b.score - a.score || getShipTimestamp(a.line.order?.ship_by_date) - getShipTimestamp(b.line.order?.ship_by_date))
-    .slice(0, 12);
 }
 
 function setLiveLotOrderMatches(matches = []) {
@@ -7143,58 +6971,38 @@ function syncBagLookupPanelState() {
 
 function renderLiveLotOrderMatches() {
   syncBagLookupPanelState();
-  const list = $("live-lot-order-matches");
-  const count = $("bag-match-count");
-  if (!list) return;
-
-  if (!state.selectedLiveLot) {
-    if (count) count.textContent = "0";
-    list.innerHTML = `<div class="empty-state">Scan a bag to see likely eBay orders.</div>`;
-    return;
+  if ($("bag-match-count")) $("bag-match-count").textContent = String(state.liveLotOrderMatches.length);
+  if (!state.selectedLiveLot && $("live-lot-order-matches")) {
+    $("live-lot-order-matches").innerHTML = '<div class="empty-state">Scan a bag to find or link its pending order.</div>';
   }
+}
 
-  const matches = state.liveLotOrderMatches || [];
-  if (count) count.textContent = String(matches.length);
+async function selectBagOrderLine(line) {
+  if (!window.bagOrderLinks.isOpen(line)) return;
+  // Matches are read independently of queue filters, including the first 1,000 rows.
+  if (!state.orders.some(entry => entry.id === line.id)) state.orders.push(normalizeLine(line));
+  state.liveLotMatchedLineIds.add(line.id);
+  applyOrderFilters();
+  selectOrderLine(line.id);
+  setStatus("Order selected. Review its details and use Link bag to save the connection.", "info");
+}
 
-  if (!matches.length) {
-    list.innerHTML = `
-      <div class="empty-state">
-        No pending order has the same auction number and a sale date within one day of this bag. Clear the bag lookup or search the queue manually if this needs review.
-      </div>
-    `;
-    return;
+async function openRequestedBagOrder(params) {
+  const lineId = params.get("bagLine");
+  const lotId = state.selectedLiveLot?.id;
+  if (!lineId || !lotId) return;
+  let line = state.liveBagConnection?.matches?.find(match => match.line.id === lineId)?.line;
+  if (!line) {
+    // A manual search result may not be among the default suggestions on this page.
+    const {data, error} = await supabase.from("ebay_order_lines")
+      .select("id,order_id,item_number,item_title,custom_label,quantity,fulfilled_quantity,line_status,sold_for,total_price,created_at,order:ebay_orders(id,order_number,buyer_username,buyer_name,sale_date,paid_on_date,ship_by_date,status)")
+      .eq("id", lineId).maybeSingle();
+    if (state.selectedLiveLot?.id !== lotId) return;
+    if (error) { setStatus("Could not open the requested bag order. Search for it below.", "error"); return; }
+    line = data;
   }
-
-  list.replaceChildren();
-  matches.forEach((match, index) => {
-    const line = match.line;
-    const order = line.order || {};
-    const urgency = getOrderUrgency(order.ship_by_date);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `bag-match-card ${state.selectedLine?.id === line.id ? "is-selected" : ""}`;
-    button.innerHTML = `
-      <span class="match-rank">${index + 1}</span>
-      <span class="match-copy">
-        <strong>${escapeHtml(order.buyer_username || "No buyer username")}</strong>
-        <small>${escapeHtml(order.order_number || "No order")} - ${escapeHtml(line.item_title || "Untitled eBay item")}</small>
-        <em>${escapeHtml((match.reasons || []).join(" + ") || "possible text match")}</em>
-      </span>
-      <span class="match-meta">
-        ${urgency ? `<b class="urgency-pill urgency-${urgency.level}"><i data-lucide="${urgency.icon}"></i>${escapeHtml(urgency.label)}</b>` : ""}
-        <b>Qty ${Number(getRemainingLineQuantity(line) || line.quantity || 1).toLocaleString()}</b>
-        <b>${formatMoney(line.total_price || line.sold_for || 0)}</b>
-      </span>
-    `;
-    button.addEventListener("click", () => {
-      selectOrderLine(line.id);
-      setStatus("Suggested eBay order selected. Review the bag contents, then confirm the packed bundle.", "info");
-      setTimeout(() => $("fulfill-order")?.focus(), 80);
-    });
-    list.appendChild(button);
-  });
-
-  if (window.lucide) window.lucide.createIcons();
+  if (line && window.bagOrderLinks.isOpen(line)) await selectBagOrderLine(line);
+  else setStatus("That order is no longer pending. Review its status in Order History.", "info");
 }
 
 function clearOrderLineSelectionForBagLookup() {
@@ -7218,74 +7026,64 @@ function clearOrderLineSelectionForBagLookup() {
   renderLocationResults([]);
 }
 
-function selectLikelyLineForLiveLot(lot) {
-  if (!lot || state.selectedLine) return;
-  const strongMatches = state.liveLotOrderMatches.filter((match) => match.score >= 85);
-  if (strongMatches.length === 1) selectOrderLine(strongMatches[0].line.id);
-}
-
-async function loadLiveLotByScan(rawTerm = "") {
-  if (!requireCheckoutStore()) return;
+async function loadLiveLotByScan(rawTerm = "", {search = ""} = {}) {
   const term = String(rawTerm || $("global-live-lot-scan")?.value || $("live-lot-scan")?.value || "").trim();
-  if (!term) {
-    setStatus("Scan the auction number or live bag ID first.", "error");
-    return;
-  }
-
+  clearLiveLotSelection({ render: true });
+  clearOrderLineSelectionForBagLookup();
+  const generation = state.liveBagLoadGeneration;
+  if (!term) { setStatus("Scan the unique LIVE bag ID first.", "error"); return; }
+  syncLiveLotScanInputs(term);
   try {
     clearEbayLaunchFilter({ apply: false });
     setStatus("Loading live-sale bag...");
-    let result = await supabase
-      .from("live_sale_lots")
+    let result = await supabase.from("live_sale_lots")
       .select("*, live_sale_sessions(id,session_code,title,store_id,started_at,status)")
-      .eq("lot_code", term)
-      .maybeSingle();
-
+      .eq("lot_code", term.toUpperCase()).maybeSingle();
     if (result.error) throw result.error;
-
     let lot = result.data;
     if (!lot) {
-      result = await supabase
-        .from("live_sale_lots")
+      result = await supabase.from("live_sale_lots")
         .select("*, live_sale_sessions(id,session_code,title,store_id,started_at,status)")
-        .eq("auction_number", term)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .eq("auction_number", term).limit(2);
       if (result.error) throw result.error;
-      lot = result.data;
+      if (result.data?.length > 1) throw new Error("That auction number appears on multiple bags. Scan the unique LIVE bag ID.");
+      lot = result.data?.[0];
     }
-
-    if (!lot) {
-      clearLiveLotSelection({ render: true });
-      setStatus("No live-sale bag matched that scan.", "error");
-      return;
-    }
-
+    if (!lot) throw new Error("No live-sale bag matched that scan.");
     const session = Array.isArray(lot.live_sale_sessions) ? lot.live_sale_sessions[0] : lot.live_sale_sessions;
-    if (session?.store_id && session.store_id !== state.checkoutStoreId) {
+    if (session?.store_id && state.checkoutStoreId && session.store_id !== state.checkoutStoreId) {
       throw new Error("This bag belongs to a different live-sale store than the selected checkout store.");
     }
-
+    const items = await loadLiveLotItems(lot.id);
+    if (generation !== state.liveBagLoadGeneration) return;
     state.selectedLiveLot = { ...lot, session };
-    state.selectedLiveLotItems = await loadLiveLotItems(lot.id);
-    syncLiveLotScanInputs(term);
-    setLiveLotOrderMatches(calculateLiveLotOrderMatches(state.selectedLiveLot, state.selectedLiveLotItems));
-    if (
-      state.selectedLine
-      && state.liveLotOrderMatches.length
-      && !state.liveLotMatchedLineIds.has(state.selectedLine.id)
-    ) {
-      clearOrderLineSelectionForBagLookup();
-    }
+    state.selectedLiveLotItems = items;
+    syncLiveLotScanInputs(lot.lot_code);
     renderLiveLotPanel();
-    applyOrderFilters();
-    selectLikelyLineForLiveLot(state.selectedLiveLot);
-    setStatus(state.liveLotOrderMatches.length
-      ? "Live-sale bag loaded. Suggested eBay order matches are shown first."
-      : "Live-sale bag loaded. No pending order matched both auction number and sale date.", "info");
+    state.liveBagConnectionsUI = window.bagOrderLinks.mount({
+      container: $("live-lot-order-matches"), client: supabase, lot,
+      initialSearch: search,
+      onSelect: selectBagOrderLine,
+      onChange(data) {
+        if (generation !== state.liveBagLoadGeneration) return;
+        if (!data || (state.selectedLine && data.linked_line_id && state.selectedLine.id !== data.linked_line_id)) {
+          clearOrderLineSelectionForBagLookup();
+        }
+        state.liveBagConnection = data;
+        setLiveLotOrderMatches((data?.matches || []).filter(match => window.bagOrderLinks.isOpen(match.line)));
+        renderLiveLotPanel();
+        applyOrderFilters();
+      },
+    });
+    const data = await state.liveBagConnectionsUI.load();
+    if (generation !== state.liveBagLoadGeneration) return;
+    // Only a saved/verified relationship opens automatically; suggestions require review.
+    const linked = data?.matches?.find(match => match.linked && window.bagOrderLinks.isOpen(match.line));
+    if (linked) await selectBagOrderLine(linked.line);
+    setStatus(data ? "Bag loaded. Review or save its pending order connection below." : "Bag loaded, but order connections could not be retrieved. Try the search again.", data ? "info" : "error");
   } catch (error) {
-    console.error("Live-sale bag load failed:", error);
+    if (generation !== state.liveBagLoadGeneration) return;
+    clearLiveLotSelection({ render: true });
     setStatus(error.message || "Could not load that live-sale bag.", "error");
   }
 }
@@ -7312,7 +7110,8 @@ function renderLiveLotPanelInto(panel, { global = false } = {}) {
   panel.innerHTML = `
     <div class="live-lot-head">
       <div>
-        <strong>Auction ${escapeHtml(lot.auction_number || "-")}</strong>
+        <strong>${escapeHtml(state.liveBagConnection?.title || `Auction ${lot.auction_number || "-"}`)}</strong>
+        ${state.liveBagConnection?.buyer ? `<small>Winner: ${escapeHtml(state.liveBagConnection.buyer)} · ${formatMoney(state.liveBagConnection.amount)}</small>` : ""}
         <a href="bag-lookup.html?bag=${encodeURIComponent(lot.lot_code)}" target="_blank" rel="noopener">Winner, prices and full bag details</a>
         <small>Bag ${escapeHtml(lot.lot_code || "-")} - ${escapeHtml(lot.session?.session_code || "No session")}${escapeHtml(sessionStatus)} - Started ${escapeHtml(formatDate(lot.session?.started_at))}</small>
       </div>
@@ -12007,6 +11806,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   clearOrderSearch({ apply: false });
   clearOrderCreatedDateFilter({ apply: false });
   await loadOrders();
+  const bagParams = new URLSearchParams(window.location.search);
+  if (bagParams.get("bag")) {
+    await loadLiveLotByScan(bagParams.get("bag"), {search:bagParams.get("bagSearch") || ""});
+    await openRequestedBagOrder(bagParams);
+  }
   const openedTask = await openRequestedOrderTask();
   if (!openedTask) {
     const requestedOrders = getRequestedEbayOrderNumbers();
