@@ -22,7 +22,7 @@
   function saleTime(a){return a.sold_at ? originalTime(a.sold_at,data.connection?.stream_metadata?.activity_timezone)+ (a.sale_time_source==='ebay_activity'?' · eBay Activity (minute precision)':' · eBay order') : (a.win_time_label ? a.win_time_label+' · eBay Activity; date not verified' : 'Sale time not available');}
 
   const printable = a => linked() && !sessionError && Date.now()-lastRead<12000 && a?.payment_state==='paid' && !a.resolved_at;
-  const closureBlocked = () => !data.post_show || ['open_paid_bags','payment_issues','unmatched_notifications','unlinked_bags'].some(k=>Number(data.post_show[k])>0) || Number(data.connection?.health?.pending||0)>0;
+  const closureBlocked = () => data.recovery?.can_close===false || !data.post_show || ['open_paid_bags','payment_issues','unmatched_notifications','unlinked_bags'].some(k=>Number(data.post_show[k])>0) || Number(data.connection?.health?.pending||0)>0;
   const message = (text,error=false) => {const el=$('ebay-live-message');if(el){el.textContent=text;el.classList.toggle('is-error',error);}};
   function eventIdFromUrl(value) {
     try {const url=new URL(value.trim());const id=url.hostname==='www.ebay.com'&&url.protocol==='https:'&&url.pathname.match(/^\/ebaylive\/(?:host\/)?events\/([\w-]{6,100})\/?$/)?.[1];if(id)return id;}catch{}
@@ -110,7 +110,7 @@
     health.textContent=c.review_completed_at?'Session closed - review complete':postShow()?(blocked?'Broadcast ended - review payment notifications':'Broadcast ended - finish checking the bags'):fresh()?(blocked?'Connected - review payment notifications; other paid bags remain available':'Connected - auctions update automatically'):`Capture paused - ${c.health?.message || 'keep the eBay helper running'}`;
     $('ebay-capture-detail').textContent=c.source_seen_at ? `Last capture ${new Date(c.source_seen_at).toLocaleTimeString()}${c.health?.version ? ' | Helper '+c.health.version : ''}` : 'Waiting for the capture computer.';
     health.classList.toggle('is-error',blocked||(!postShow()&&!fresh()));
-    renderPostShow();
+    renderRecovery();renderPostShow();
     $('ebay-live-event').textContent='Event '+c.event_id;
     $('ebay-stream-date').textContent=c.stream_start_at?'eBay show: '+originalTime(c.stream_start_at,c.stream_metadata?.activity_timezone)+' · saved event start':'Original show date not captured. Update Live Capture and start it from eBay.';
     if(sellerSelectionEvent!==c.event_id){selectedSellerSales.clear();sellerSelectionEvent=c.event_id;}
@@ -157,6 +157,17 @@
     const active=current();$('ebay-live-current').hidden=!active;
     $('ebay-live-current').textContent=active?`${active.payment_state==='paid'?'Scanning':'STOP — payment needs review'}: ${active.listing_title} · ${active.buyer} · ${money(active.amount)}`:'';
   }
+  function renderRecovery(){
+    const r=data.recovery,phase=r?.phase||'unknown';
+    const labels={live:'Live capture',reading:'Reading show history…',syncing:'Saving captured history…',read:'Available history read',paused:'History reading paused',needs_review:'History needs review',unknown:'History coverage not verified'};
+    $('ebay-history-phase').textContent=labels[phase]||labels.unknown;
+    $('ebay-history-phase').classList.toggle('is-error',['paused','needs_review'].includes(phase));
+    $('ebay-history-counts').textContent=r?`${r.saved_auctions} auction attempts saved · ${r.paid_auctions} paid · ${r.payment_issues} payment issues · ${r.unmatched_notifications} notifications to match`:'Start the updated helper to check the available eBay history.';
+    $('ebay-history-coverage').textContent=r?.sold_expected!=null?`eBay Sold: ${r.sold_seen||0} of ${r.sold_expected} listings read.`:'eBay’s Sold listing count has not been verified.';
+    const detail={live:'Capture resumes for this show after an eBay refresh. After the broadcast, it checks Activity and Sold history.',reading:'Keep capture running while it reads Activity and Sold. Synced data does not mean the history scan has finished.',syncing:'Keep the Invsto receiver signed in while the remaining notifications are saved.',read:'Compare the saved auctions and totals with the final eBay orders before closing.',paused:'Resume capture on the show computer. If automatic reading is unavailable, compare the complete eBay history and record a manual check below.',needs_review:'The available page history or listing counts could not be fully matched. Keep capture running, review the missing records against eBay, and account for them before closing.',unknown:'Compare the complete eBay auction history before closing this show.'};
+    $('ebay-history-detail').textContent=detail[phase]||detail.unknown;
+    $('ebay-history-sync').textContent=Number(r?.pending||0)>0?`${r.pending} notifications still syncing.`:'Captured data saved. This alone does not confirm complete history.';
+  }
   function renderPostShow() {
     const ended=postShow(),checks=data.post_show;
     $('ebay-mark-ended').hidden=ended;
@@ -164,8 +175,11 @@
     $('ebay-phase-heading').textContent=ended?'Post-show review':'Paid auctions';
     $('ebay-post-summary').textContent=checks?`${checks.closed_bags} of ${checks.paid_bags} paid bags closed. ${checks.open_paid_bags} still need items or closing. ${checks.payment_issues} payment issues. ${checks.unmatched_notifications} unmatched notifications.${checks.unlinked_bags?' '+checks.unlinked_bags+' unlinked bags to review.':''}`:'Loading the final checklist…';
     const canClose=ended&&!data.connection.review_completed_at&&!closureBlocked()&&!sessionError&&!busy&&!api.state.busy;
-    $('ebay-complete-show').disabled=!canClose||!$('ebay-final-bags').checked||!$('ebay-final-payments').checked;
+    $('ebay-history-note-label').hidden=!data.recovery?.requires_manual_note;
+    $('ebay-complete-show').disabled=!canClose||!$('ebay-final-bags').checked||!$('ebay-final-payments').checked||(data.recovery?.requires_manual_note&&$('ebay-history-note').value.trim().length<10);
     $('ebay-post-blocker').textContent=closureBlocked()?'Finish the outstanding checks below before closing the session.': 'All recorded auctions are accounted for. Confirm the physical bags and final payments below.';
+    if(data.recovery?.can_close===false)$('ebay-post-blocker').textContent='Wait for the history scan and sync to finish before closing. You can keep checking bags while it runs.';
+    if(data.recovery?.requires_manual_note)$('ebay-post-blocker').textContent+=' Automatic history coverage is unverified. Compare the full eBay history and record what you checked below.';
     if(Number(data.connection?.health?.pending||0)>0)$('ebay-post-blocker').textContent+=' The helper still has notifications waiting to sync.';
   }
   function showPostShow() {
@@ -275,7 +289,7 @@
       <div id="ebay-live-setup"><p id="ebay-live-session-hint"></p><label>Connect the selected show to eBay<input id="ebay-live-url" type="url" placeholder="Paste the Stream Manager event URL"></label><button id="ebay-link" type="button">Connect selected show</button></div>
       <div id="ebay-live-connected" hidden>
         <section id="ebay-closed-receipt" class="ebay-receipt" hidden><strong id="ebay-closed-heading"></strong><p id="ebay-closed-description"></p><button type="button" id="ebay-print-last">Print bag label</button><p id="ebay-print-last-status" class="ebay-print-status" role="status"></p></section>
-        <div class="ebay-connection"><p id="ebay-live-health" role="status"></p><small id="ebay-capture-detail"></small><small id="ebay-capture-receiver" hidden>This computer receives capture data for all linked, unfinished shows. Keep this tab open.</small><a id="ebay-open-receiver" href="live-sales.html?capture=1&amp;v=1.3.0" target="_blank" rel="noopener" hidden>On the capture computer: open the receiver</a></div>
+        <div class="ebay-connection"><p id="ebay-live-health" role="status"></p><small id="ebay-capture-detail"></small><small id="ebay-capture-receiver" hidden>This computer receives capture data for all linked, unfinished shows. Keep this tab open.</small><a id="ebay-open-receiver" href="live-sales.html?capture=1&amp;v=1.4.0" target="_blank" rel="noopener" hidden>On the capture computer: open the receiver</a></div>
         <section id="ebay-running-margin" class="ebay-running-margin" aria-label="Running result versus break-even">
           <div class="ebay-running-head"><span>Running vs break-even</span><strong id="ebay-running-total" aria-live="polite">—</strong></div>
           <small id="ebay-running-coverage"></small>
@@ -284,14 +298,14 @@
           <details><summary>By seller and calculation</summary><div id="ebay-running-sellers"></div><p>Sale price minus break-even × quantity for each saved item. Open bags can change as more items are added. This includes fees only if your break-even prices include them. Unpaid, failed and cancelled sales are excluded.</p></details>
           <small id="ebay-running-freshness"></small>
         </section>
-        <button type="button" id="ebay-mark-ended" class="secondary-btn">Stream ended? Start bag review</button>
+        <section id="ebay-history-recovery" class="ebay-history-recovery" aria-labelledby="ebay-history-phase"><h3 id="ebay-history-phase" role="status"></h3><p id="ebay-history-counts"></p><p id="ebay-history-coverage"></p><p id="ebay-history-detail" class="ebay-help"></p><small id="ebay-history-sync"></small></section><button type="button" id="ebay-mark-ended" class="secondary-btn">Stream ended? Start bag review</button>
         <section id="ebay-post-show" class="ebay-post-show" hidden aria-labelledby="ebay-post-heading">
           <h3 id="ebay-post-heading">Finish this show</h3><p>The broadcast is over. The session stays open while you check bags, scan missing items and resolve payments.</p>
           <p id="ebay-post-summary" role="status"></p><div class="button-row"><button type="button" id="ebay-post-open">Finish paid bags</button><button type="button" id="ebay-post-all" class="secondary-btn">Check all auctions</button></div>
           <details id="ebay-final-checklist"><summary>Final checks and close session</summary><p id="ebay-post-blocker"></p>
           <label class="ebay-final-check"><input type="checkbox" id="ebay-final-bags">I checked every physical bag: the winner, auction, items, quantities and label are correct.</label>
           <label class="ebay-final-check"><input type="checkbox" id="ebay-final-payments">I compared all sales with the final eBay orders and payments. Missing captures and payment issues are resolved.</label>
-          <button type="button" id="ebay-complete-show" disabled>Close reviewed session</button><p id="ebay-complete-error" role="alert"></p></details>
+          <label id="ebay-history-note-label" hidden>Manual history check<textarea id="ebay-history-note" rows="3" maxlength="2000" placeholder="Explain how you compared all eBay sales and accounted for missing captures. This does not import missing sales."></textarea></label><button type="button" id="ebay-complete-show" disabled>Close reviewed session</button><p id="ebay-complete-error" role="alert"></p></details>
         </section>
         <p id="ebay-stream-date" class="ebay-help"></p><section id="ebay-on-air" class="ebay-on-air"><strong id="ebay-on-air-name"></strong><details id="ebay-seller-control"><summary>Change seller</summary><label>Seller on air<select id="ebay-live-seller"></select></label><p>New incoming auctions will belong to this seller. Scanning an older sale keeps its original seller.</p><label id="ebay-correct-existing-label" class="ebay-checkbox"><input id="ebay-correct-existing" type="checkbox">Also correct all earlier sales in this show</label><label id="ebay-seller-reason-label" hidden>Reason for correcting earlier sales<textarea id="ebay-seller-reason" rows="2" placeholder="Explain who actually sold these items"></textarea></label><button type="button" id="ebay-save-seller">Use for next auctions</button><p id="ebay-seller-error" role="alert"></p></details></section>
         <nav class="ebay-workflow" aria-label="Bag workflow"><span>1. Paid sale</span><span>2. Scan item</span><span>3. Close bag</span></nav>
@@ -307,7 +321,7 @@
         <details id="ebay-live-settings"><summary>Expense estimates</summary><div id="ebay-expenses"><label>Estimated eBay fee (%)<input id="ebay-fee-percent" type="number" min="0" max="100" step="0.01"></label><label>Fixed fee per auction ($)<input id="ebay-fee-fixed" type="number" min="0" step="0.01"></label><label>Shipping cost per auction ($)<input id="ebay-shipping" type="number" min="0" step="0.01"></label><p>Estimates per auction, not final payouts. Enter 0 explicitly where appropriate.</p></div><button type="button" id="ebay-save-settings">Save settings</button></details>
         <small id="ebay-live-event"></small>
       </div>
-      <details id="ebay-capture-help"><summary>Capture setup and connection help</summary><ol><li><a href="downloads/Invsto-Live-Capture.zip?v=1.3.0" download>Download Invsto Live Capture 1.3.0</a> on the capture computer and extract the ZIP.</li><li>In Edge or Chrome, open Manage extensions. Enable Developer mode and Load unpacked, selecting the extracted folder containing manifest.json.</li><li>Already installed? Replace the files in the folder you loaded, click Reload on its extension card, then refresh Stream Manager.</li><li>On eBay Stream Manager, click Start Invsto capture. Invsto opens with the event already selected. Choose the first seller and any additional sellers, then tap Start show. No store or pasted URL is needed.</li><li>Keep the automatically opened Invsto receiver signed in and open. The helper reads Activity and Sold. It can keep capturing in a background tab while the stream clock is updating. Keep the computer awake and exclude these pages from sleeping tabs.</li><li>On your phone, open Live Sales and choose the same show. Select a paid auction to create its bag automatically.</li></ol><p>If capture pauses, bring Stream Manager forward and check its connection. Unknown payment evidence requires review. The helper never cancels eBay orders or makes payments.</p></details>
+      <details id="ebay-capture-help"><summary>Capture setup and connection help</summary><ol><li><a href="downloads/Invsto-Live-Capture.zip?v=1.4.0" download>Download Invsto Live Capture 1.4.0</a> on the capture computer and extract the ZIP.</li><li>In Edge or Chrome, open Manage extensions. Enable Developer mode and Load unpacked, selecting the extracted folder containing manifest.json.</li><li>Already installed? Replace the files in the folder you loaded, click Reload on its extension card, then refresh Stream Manager.</li><li>On eBay Stream Manager, click Start Invsto capture. Invsto opens with the event already selected. Choose the first seller and any additional sellers, then tap Start show. No store or pasted URL is needed.</li><li>Keep the automatically opened Invsto receiver signed in and open. The helper reads Activity and Sold. It can keep capturing in a background tab while the stream clock is updating. Keep the computer awake and exclude these pages from sleeping tabs.</li><li>On your phone, open Live Sales and choose the same show. Select a paid auction to create its bag automatically.</li></ol><p>If capture pauses, bring Stream Manager forward and check its connection. Unknown payment evidence requires review. The helper never cancels eBay orders or makes payments.</p></details>
       <dialog id="ebay-selected-seller-dialog"><h2>Correct seller</h2><p id="ebay-selected-seller-summary"></p><label>Seller<select id="ebay-selected-seller"></select></label><label>Reason<textarea id="ebay-selected-seller-reason" rows="2" placeholder="Who actually sold these items?"></textarea></label><p id="ebay-selected-seller-error" role="alert"></p><div class="button-row"><button type="button" id="ebay-selected-seller-save">Save seller</button><button type="button" id="ebay-selected-seller-cancel" class="secondary-btn">Back</button></div></dialog><dialog id="ebay-live-review"><h2 id="ebay-review-title"></h2><p>Confirm the latest payment in eBay. Resolving here does not cancel an eBay order. Remove items from the physical bag before releasing inventory.</p><label>Action<select id="ebay-review-action"></select></label><label id="ebay-review-match-label" hidden>Affected auction<select id="ebay-review-match"></select></label><label>Evidence / reason<textarea id="ebay-review-note" rows="3" minlength="10" placeholder="What did you verify on eBay or check in the bag?"></textarea></label><label id="ebay-review-check-label"><input id="ebay-review-physical" type="checkbox"> I checked the bag and removed any items being released.</label><p id="ebay-review-error" role="alert"></p><div class="button-row"><button type="button" id="ebay-review-save">Save review</button><button type="button" id="ebay-review-cancel" class="secondary-btn">Back</button></div></dialog>`;
     document.querySelector('.live-summary-strip').after(section);
     const empty=document.createElement('section');empty.id='ebay-empty-workspace';empty.className='live-panel';empty.hidden=true;empty.innerHTML='<span class="eyebrow">Ready to scan</span><h2>Choose a paid auction</h2><p>Select a sale in the queue. Its winner and auction number are filled in automatically.</p><p>No starting bag number is needed.</p>';section.after(empty);
@@ -322,9 +336,11 @@
     });
     for(const [id,filter] of [['ebay-post-open','ready'],['ebay-post-all','all']])$(id).onclick=()=>{browsing=true;$('ebay-live-filter').value=filter;render();api.updateGate();$('ebay-queue-area').scrollIntoView({block:'start',behavior:'smooth'});};
     for(const id of ['ebay-final-bags','ebay-final-payments'])$(id).onchange=()=>renderPostShow();
+    $('ebay-history-note').oninput=renderPostShow;
     $('ebay-complete-show').onclick=()=>action(async()=>{
       $('ebay-complete-error').textContent='';
-      try {await rpc('complete_ebay_live_session',{_session_id:session(),_bags_checked:$('ebay-final-bags').checked,_payments_checked:$('ebay-final-payments').checked});
+      try {await rpc('complete_ebay_live_session',{_session_id:session(),_bags_checked:$('ebay-final-bags').checked,_payments_checked:$('ebay-final-payments').checked,_history_note:data.recovery?.requires_manual_note?$('ebay-history-note').value.trim():null});
+        window.postMessage({type:'INVSTO_CAPTURE_FINISHED',event_id:data.connection.event_id},location.origin);
         browsing=false;lastClosedId=null;restoredSession=null;data={connection:null,attempts:[],unmatched:[]};loadedSession=null;
         await api.sessionClosed();await refresh();message('Session closed. The completed show is available in Past Live Sales.');
       }catch(error){$('ebay-complete-error').textContent=error.message;await refresh();throw error;}
@@ -400,9 +416,9 @@
         }
         await rpc('ingest_ebay_live_events',{_event_id:payload.event_id,_events:payload.events,_health:payload.health});
         window.postMessage({type:'INVSTO_LIVE_ACK',id,ok:true},location.origin);if(data.connection?.event_id===payload.event_id)await refresh();
-      }catch(error){window.postMessage({type:'INVSTO_LIVE_ACK',id,ok:false,error:error.message},location.origin);message(error.message,true);}
+      }catch(error){window.postMessage({type:'INVSTO_LIVE_ACK',id,ok:false,error:error.message,state:/This show (?:has ended|is already closed)/.test(error.message)?'closed':undefined},location.origin);message(error.message,true);}
     });
     setInterval(()=>refresh(),2000);
   }
-  window.ebayLive={init,prepare,refresh,isBusy:()=>busy,resetSelection(){browsing=false;lastClosedId=null;restoredSession=null;$('ebay-final-bags').checked=false;$('ebay-final-payments').checked=false;},linked,applyGate,eventIdFromUrl,closeCurrent,current,showPostShow,reviewCurrent:()=>{const a=current();if(a)showReview(a);else message('Choose an eBay auction to review.',true);}};
+  window.ebayLive={init,prepare,refresh,isBusy:()=>busy,resetSelection(){browsing=false;lastClosedId=null;restoredSession=null;$('ebay-final-bags').checked=false;$('ebay-final-payments').checked=false;$('ebay-history-note').value='';},linked,applyGate,eventIdFromUrl,closeCurrent,current,showPostShow,reviewCurrent:()=>{const a=current();if(a)showReview(a);else message('Choose an eBay auction to review.',true);}};
 })();

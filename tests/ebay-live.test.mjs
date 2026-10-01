@@ -609,7 +609,7 @@ test('capture refuses unsaved event changes and missing original dates',async t=
  const p=await browser.newPage();t.after(()=>p.close());await p.goto(origin+'/ebaylive/host/events/EVENT123');await p.setContent('');await streamFixture(p);
  await p.evaluate(()=>{document.querySelector('#startDate').parentElement.hidden=false;window.messages=[];window.chrome={runtime:{sendMessage:async m=>{messages.push(m);return {ok:true,stream:{source:'ebay_event_information',start_local:'2026-09-30T14:05',timezone_label:'EDT',title:'Original eBay show',activity_timezone:'America/New_York'}}}}};});
  for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
- await p.locator('#title').fill('Unsaved title');await p.getByRole('button',{name:'Start Invsto capture',exact:true}).click();assert.match(await p.locator('#invsto-capture-helper').innerText(),/Save your Event information/);assert.equal(await p.evaluate(()=>messages.length),0);
+ await p.locator('#title').fill('Unsaved title');await p.getByRole('button',{name:'Start Invsto capture',exact:true}).click();assert.match(await p.locator('#invsto-capture-helper').innerText(),/Save your Event information/);assert.equal(await p.evaluate(()=>messages.filter(m=>m.type!=="INVSTO_RESUME_CAPTURE").length),0);
  const q=await open(t,'?capture=1&capture_event=NO_DATE123');await q.locator('#capture-main-seller:enabled').waitFor();await q.locator('#capture-main-seller').selectOption('seller');await q.locator('#capture-start-show').click();assert.match(await q.locator('#capture-setup-status').innerText(),/original show date/);assert.equal(await q.evaluate(()=>calls.some(c=>c.name.startsWith('start_'))),false);
 });
 
@@ -645,4 +645,106 @@ test('background date lookup keeps broadcasting tab and payment capture availabl
  assert.equal((await send({type:'INVSTO_STREAM_METADATA',event_id:'WRONG123',task:'metadata-task',stream:historyStream},created[0].url,40)).ok,false);
  assert.equal((await send({type:'INVSTO_STREAM_METADATA',event_id:'EVENT123',task:'metadata-task',stream:historyStream},url,40)).ok,true);
  assert.deepEqual((await reading).stream,historyStream);assert.deepEqual(removed,[40]);
+});
+
+test('history recovery reads every settled viewport twice and separates listings from rerun attempts',async t=>{
+ const p=await parser(t,'<button role="tab" aria-selected="true">Sold (3)</button><div class="_list_tiles" id="sold"></div><div id="activity-panel"><div class="_list_activity" id="activity"></div></div>');
+ const result=await p.evaluate(()=>{
+  const nodes=[document.getElementById('sold'),document.getElementById('activity')];
+  for(const node of nodes){Object.defineProperty(node,'clientHeight',{value:100});Object.defineProperty(node,'scrollHeight',{value:300,configurable:true});let top=0;Object.defineProperty(node,'scrollTop',{get:()=>top,set:v=>{top=v;},configurable:true});}
+  const seen=new Set(),tracker=InvstoLiveParser.createHistoryTracker('12345678-1234-1234-1234-123456789012');let now=10000,cache={},status;
+  const sample=()=>{
+   const slot=Math.min(2,Math.floor(nodes[0].scrollTop/100));seen.add(slot);
+   nodes[0].innerHTML=`<div data-testid="listing-tile"><input data-testid="checkbox-${123456789012+slot}"></div>`;
+   const index=Math.min(2,Math.floor(nodes[1].scrollTop/100));
+   const events=[{key:'win-'+index,kind:'won',source:'activity',listing_id:String(123456789012+index),buyer:'buyer',amount:100},...(index===1?[{key:'rerun',kind:'won',source:'activity',listing_id:'123456789013',buyer:'other',amount:120}]:[])];
+   now+=1300;return tracker.observe(document,{broadcastEnded:true,events},{canRead:true,now});
+  };
+  const first=sample();for(let i=0;i<90;i++)status=sample();
+  const complete=structuredClone(status);for(let i=0;i<10;i++)sample();
+  const paused=tracker.observe(document,{broadcastEnded:true,events:[]},{canRead:false,reason:'working',now:now+1300});
+  Object.defineProperty(nodes[1],'scrollHeight',{value:400,configurable:true});const resized=sample();
+  return {first,complete,paused,resized,seen:[...seen]};
+ });
+ assert.equal(result.first.phase,'reading');assert.equal(result.first.activity_passes,0);assert.equal(result.complete.phase,'read');assert.equal(result.complete.sold_seen,3);assert.equal(result.complete.observed_wins,4);assert.deepEqual(result.seen,[0,1,2]);assert.equal(result.paused.phase,'read');assert.equal(result.resized.phase,'reading');assert.equal(result.resized.activity_passes,0);
+});
+
+test('history recovery refuses missing layout and count mismatch and invalidates completion on new evidence',async t=>{
+ const p=await parser(t,'<section><div role="tablist"><button role="tab" aria-selected="true">Sold (2)</button></div><div class="_list_tiles" id="sold">'+tile()+'</div></section><div id="activity-panel"><div class="_list_activity" id="activity"></div></div>');
+ const result=await p.evaluate(()=>{
+  for(const id of ['sold','activity'])for(const key of ['clientHeight','scrollHeight'])Object.defineProperty(document.getElementById(id),key,{value:100});
+  const tracker=InvstoLiveParser.createHistoryTracker('12345678-1234-1234-1234-123456789012');let now=10000;const parsed={broadcastEnded:true,events:[{key:'first',kind:'won',source:'activity'}]};
+  const step=()=>tracker.observe(document,parsed,{canRead:true,now:now+=1300});let state;for(let i=0;i<25;i++)state=step();const mismatch=state;
+  document.querySelector('[role=tab]').textContent='Sold (1)';const changed=step();for(let i=0;i<25;i++)state=step();const complete=state;
+  parsed.events.push({key:'late-failure',kind:'failed',source:'activity'});const late=step();
+  const top=document.getElementById('activity').scrollTop;const paused=tracker.observe(document,parsed,{canRead:false,reason:'working',now:now+=1300});
+  document.getElementById('activity').remove();const layout=step();
+  return {mismatch,changed,complete,late,paused,layout,top};
+ });
+ assert.equal(result.mismatch.phase,'needs_review');assert.equal(result.mismatch.reason,'counts');assert.equal(result.changed.phase,'reading');assert.equal(result.complete.phase,'read');assert.equal(result.late.phase,'reading');assert.equal(result.late.activity_passes,0);assert.equal(result.paused.phase,'paused');assert.equal(result.layout.reason,'layout');assert.equal(result.layout.phase,'needs_review');
+});
+
+async function recoveryWorker(){
+ const source=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');let stored={},handler,checkState='active',checkHook=null;const opened=[],sent=[],focused=[];
+ const chrome={storage:{local:{get:async()=>structuredClone(stored),set:async v=>{stored=structuredClone(v)}}},runtime:{id:'extension',onMessage:{addListener:fn=>{handler=fn}}},alarms:{create(){},onAlarm:{addListener(){}}},tabs:{create:async v=>{opened.push(v);return {id:9};},update:async(id,v)=>{focused.push({id,...v});},sendMessage:async(id,msg)=>{sent.push({id,...msg});if(msg.type==='INVSTO_CHECK_CAPTURE'){if(checkHook)return checkHook();if(checkState==='missing')throw Error('Tab closed');return {ok:true,state:checkState};}return {ok:true};}}};
+ const boot=()=>vm.runInNewContext(source,{chrome,URL,Date,Promise,Error,Object,Number,String});boot();
+ const send=(message,url='https://www.ebay.com/ebaylive/host/events/EVENT123',id=1)=>new Promise(resolve=>handler(message,{id:'extension',tab:{id,url}},resolve));
+ return {send,boot,opened,sent,focused,get data(){return stored.capture;},setState(v){checkState=v;},setHook(v){checkHook=v;}};
+}
+
+test('refresh resumes only the saved unfinished event without seller setup, and Stop survives worker restart',async()=>{
+ const w=await recoveryWorker();await w.send({type:'INVSTO_START_CAPTURE',event_id:'EVENT123',stream:historyStream});assert.equal(w.opened.length,1);w.boot();
+ const resumed=await w.send({type:'INVSTO_RESUME_CAPTURE',event_id:'EVENT123'});assert.equal(resumed.resume,true);assert.deepEqual(resumed.stream,historyStream);assert.equal(w.opened.length,1);assert.equal(w.focused.length,0);
+ assert.equal((await w.send({type:'INVSTO_RESUME_CAPTURE',event_id:'OTHER123'},'https://www.ebay.com/ebaylive/host/events/OTHER123')).resume,false);
+ assert.equal((await w.send({type:'INVSTO_RESUME_CAPTURE',event_id:'EVENT123'},undefined,4)).resume,false);
+ await w.send({type:'INVSTO_STOP_CAPTURE',event_id:'EVENT123'});w.boot();assert.equal((await w.send({type:'INVSTO_RESUME_CAPTURE',event_id:'EVENT123'})).resume,false);assert.equal(w.data.captureRuns[1].enabled,false);
+});
+
+test('closed shows stop saved capture; signed-out and missing receivers never open seller setup',async()=>{
+ const w=await recoveryWorker();await w.send({type:'INVSTO_START_CAPTURE',event_id:'EVENT123',stream:historyStream});
+ w.setState('signed_out');assert.equal((await w.send({type:'INVSTO_RESUME_CAPTURE',event_id:'EVENT123'})).retry,true);assert.equal(w.opened.length,1);
+ w.setState('missing');assert.equal((await w.send({type:'INVSTO_RESUME_CAPTURE',event_id:'EVENT123'})).retry,true);assert.equal(w.opened.length,2);assert.equal(w.opened[1].active,false);assert.match(w.opened[1].url,/resume_event=EVENT123/);assert.doesNotMatch(w.opened[1].url,/capture_event/);
+ await w.send({type:'INVSTO_RESUME_CAPTURE',event_id:'EVENT123'});assert.equal(w.opened.length,2);
+ w.setState('closed');const closed=await w.send({type:'INVSTO_RESUME_CAPTURE',event_id:'EVENT123'});assert.equal(closed.closed,true);assert.equal(w.data.captureRuns[1].enabled,false);assert.equal(w.sent.at(-1).type,'INVSTO_STOP_CAPTURE');
+ assert.equal((await w.send({type:'INVSTO_START_CAPTURE',event_id:'EVENT123',stream:historyStream})).closed,true);assert.equal(w.opened.length,2);
+});
+
+test('Stop racing a resume status check wins without restarting the show',async()=>{
+ const w=await recoveryWorker();await w.send({type:'INVSTO_START_CAPTURE',event_id:'EVENT123',stream:historyStream});
+ let release,started;const checking=new Promise(r=>{started=r;});w.setHook(()=>{started();return new Promise(r=>{release=r;});});
+ const pending=w.send({type:'INVSTO_RESUME_CAPTURE',event_id:'EVENT123'});await checking;await w.send({type:'INVSTO_STOP_CAPTURE',event_id:'EVENT123'});release({ok:true,state:'active'});assert.equal((await pending).resume,false);
+});
+
+test('capture reload resumes without rereading metadata, while explicit Stop remains stopped on refresh',async t=>{
+ const p=await browser.newPage();t.after(()=>p.close());await p.addInitScript(metadata=>{
+  window.messages=[];window.chrome={runtime:{sendMessage:async m=>{messages.push(m);return m.type==='INVSTO_RESUME_CAPTURE'?{ok:true,resume:true,stream:metadata}:{ok:true};}}};
+ },historyStream);
+ const load=async()=>{await p.setContent('<button role="tab" aria-selected="true">Activity</button><button role="tab" aria-selected="true">Sold (1)</button>'+tile()+'<div id="activity-panel"><div aria-label="Filter activity"><button aria-pressed="true">All</button></div>'+row()+'</div>');for(const name of ['parser','capture'])await p.addScriptTag({path:new URL(`../tools/ebay-live-capture/${name}.js`,import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});};
+ await p.goto(origin+'/ebaylive/host/events/EVENT123');await load();await p.getByRole('button',{name:'Stop Invsto capture',exact:true}).waitFor();await p.waitForFunction(()=>messages.some(m=>m.type==='INVSTO_CAPTURE'));
+ assert.equal(await p.evaluate(()=>messages.some(m=>['INVSTO_START_CAPTURE','INVSTO_READ_STREAM'].includes(m.type))),false);
+ await p.reload();await load();await p.getByRole('button',{name:'Stop Invsto capture',exact:true}).waitFor();
+ await p.getByRole('button',{name:'Stop Invsto capture',exact:true}).click();await p.reload();await load();await p.waitForFunction(()=>messages.some(m=>m.type==='INVSTO_STOP_CAPTURE'));
+ assert.equal(await p.getByRole('button',{name:'Start Invsto capture',exact:true}).count(),1);assert.equal(await p.evaluate(()=>messages.some(m=>['INVSTO_RESUME_CAPTURE','INVSTO_START_CAPTURE','INVSTO_CAPTURE'].includes(m.type))),false);
+});
+
+test('receiver resume checks existing shows without opening seller setup or changing sellers',async t=>{
+ const p=await open(t,'?capture=1&resume_event=EVENT123');assert.equal(await p.locator('#live-capture-setup[open]').count(),0);
+ await p.evaluate(()=>{window.captureChecks=[];window.addEventListener('message',e=>{if(e.data?.type==='INVSTO_CAPTURE_CHECK_RESULT')captureChecks.push(e.data);});});
+ const check=async(id,event_id='EVENT123')=>{await p.evaluate(({id,event_id})=>window.postMessage({type:'INVSTO_CAPTURE_CHECK',id,event_id},location.origin),{id,event_id});await p.waitForFunction(id=>captureChecks.some(c=>c.id===id),id);return p.evaluate(id=>captureChecks.find(c=>c.id===id).state,id);};
+ assert.equal(await check('active'),'active');assert.equal(await check('unlinked','MISSING123'),'unlinked');await p.evaluate(()=>showSession.status='ended');assert.equal(await check('closed'),'closed');await p.evaluate(()=>supabase.auth.getSession=async()=>({data:{session:null}}));assert.equal(await check('signedout'),'signed_out');
+ assert.equal(await p.evaluate(()=>calls.some(c=>/start_ebay_live|set_ebay_live_seller|apply_ebay_live_stream_metadata/.test(c.name))),false);assert.equal(await p.evaluate(()=>dashboard.connection.active_seller_id),'seller');
+});
+
+test('phone recovery progress separates reading from sync and requires a manual comparison when paused',async t=>{
+ const p=await open(t);await p.setViewportSize({width:320,height:740});await p.evaluate(()=>{
+  dashboard.connection.broadcast_ended_at=new Date().toISOString();dashboard.connection.health={pending:0};dashboard.post_show={open_paid_bags:0,payment_issues:0,unmatched_notifications:0,unlinked_bags:0,paid_bags:2,closed_bags:2};
+  dashboard.recovery={phase:'reading',can_close:false,requires_manual_note:false,saved_auctions:3,paid_auctions:2,payment_issues:0,unmatched_notifications:0,sold_seen:2,sold_expected:3,pending:0};
+ });await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-history-phase').textContent==='Reading show history…');
+ assert.match(await p.locator('#ebay-history-counts').innerText(),/3 auction attempts saved · 2 paid/);assert.match(await p.locator('#ebay-history-coverage').innerText(),/2 of 3 listings/);assert.match(await p.locator('#ebay-history-sync').innerText(),/does not confirm complete history/);
+ await p.locator('#ebay-final-checklist>summary').click();await p.locator('#ebay-final-bags').check();await p.locator('#ebay-final-payments').check();assert.equal(await p.locator('#ebay-complete-show').isDisabled(),true);
+ await p.evaluate(()=>Object.assign(dashboard.recovery,{phase:'paused',can_close:true,requires_manual_note:true}));await p.locator('#ebay-live-refresh').click();await p.locator('#ebay-history-note:visible').waitFor();assert.equal(await p.locator('#ebay-complete-show').isDisabled(),true);
+ await p.locator('#ebay-history-note').fill('Compared all eBay orders and accounted for the missing auction.');await p.waitForFunction(()=>!document.getElementById('ebay-complete-show').disabled);assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ await p.locator('#ebay-history-recovery').scrollIntoViewIfNeeded();await p.screenshot({path:'test-results/live-recovery-phone.png'});
+ await p.evaluate(()=>{window.finished=[];window.addEventListener('message',e=>{if(e.data?.type==='INVSTO_CAPTURE_FINISHED')finished.push(e.data);});});await p.locator('#ebay-complete-show').click();await p.waitForFunction(()=>finished.length===1);
+ assert.equal(await p.evaluate(()=>finished[0].event_id),'EVENT123');assert.match(await p.evaluate(()=>calls.find(c=>c.name==='complete_ebay_live_session').args._history_note),/Compared all eBay orders/);assert.deepEqual(p.errors,[]);
 });

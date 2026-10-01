@@ -78,5 +78,60 @@
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(start.value) || !zone.value.trim()) return null;
     return {source:'ebay_event_information',start_local:start.value,timezone_label:zone.value.trim(),title:title.value.trim().slice(0,200),activity_timezone:Intl.DateTimeFormat().resolvedOptions().timeZone};
   }
-  root.InvstoLiveParser = {parse,status,money,key,hasEnded,streamMetadata};
+  // A pass means every viewport was read after it settled, not just that a list
+  // was scrolled to its bottom. Counts describe listings, not auction attempts.
+  function createHistoryTracker(runId) {
+    const sold=new Set(),wins=new Set(),evidence=new Map(),states={};let expected=null,lastNew=0,lastPhase='reading',ended=false;
+    const reset=()=>{for(const state of Object.values(states)){state.passes=0;state.target=0;state.signature=null;state.changed=0;state.moved=false;}};
+    function advance(name,node,signature,now) {
+      if(!node || node.clientHeight<=0)return false;
+      let state=states[name];
+      if(!state || state.node!==node || state.height!==node.scrollHeight || state.viewport!==node.clientHeight){
+        state=states[name]={node,height:node.scrollHeight,viewport:node.clientHeight,passes:0,target:0,signature:null,changed:now,moved:false};
+      }
+      if(!state.moved || Math.abs(node.scrollTop-state.target)>3){node.scrollTop=state.target;state.moved=true;state.signature=null;state.changed=now;return true;}
+      if(state.signature!==signature){state.signature=signature;state.changed=now;return true;}
+      if(now-state.changed<1200)return true;
+      const bottom=Math.max(0,node.scrollHeight-node.clientHeight);
+      if(state.target>=bottom-3){state.passes=Math.min(2,state.passes+1);state.target=0;}
+      else state.target=Math.min(bottom,state.target+node.clientHeight*0.65);
+      node.scrollTop=state.target;state.signature=null;state.changed=now;
+      return true;
+    }
+    function observe(doc,parsed,{canRead,reason='waiting',now=Date.now()}={}) {
+      const soldTab=[...doc.querySelectorAll('[role="tab"]')].find(el=>/^Sold(?:\s|\(|$)/i.test(text(el)));
+      const count=text(soldTab).match(/^Sold\s*\(([\d,]+)\)$/i);
+      const total=count?Number(count[1].replace(/,/g,'')):null;
+      if(parsed.broadcastEnded&&!ended){ended=true;sold.clear();wins.clear();reset();lastNew=now;}
+      let added=expected!==total;
+      if(added){expected=total;sold.clear();reset();lastNew=now;}
+      const tileIds=[...doc.querySelectorAll('[data-testid="listing-tile"]')].map(tile=>tile.querySelector('[data-testid^="checkbox-"]')?.dataset.testid?.match(/^checkbox-(\d{8,20})$/)?.[1]).filter(Boolean);
+      const soldSelected=soldTab?.getAttribute('aria-selected')==='true';
+      if(soldSelected)for(const id of tileIds)if(!sold.has(id)){sold.add(id);added=true;}
+      for(const event of parsed.events)if(event.kind==='won'&&!wins.has(event.key)){wins.add(event.key);added=true;}
+      for(const event of parsed.events){const signature=JSON.stringify([event.listing_id,event.kind,event.buyer,event.amount]);if(evidence.get(event.key)!==signature){evidence.set(event.key,signature);added=true;}}
+      if(added){lastNew=now;if(lastPhase==='read'||lastPhase==='needs_review')reset();}
+      let layout=true;
+      if(ended&&canRead){
+        const activity=doc.querySelector('#activity-panel [class*="_list_"]');
+        const activitySignature=JSON.stringify(parsed.events.filter(e=>e.source==='activity').map(e=>[e.key,e.listing_id]));
+        layout=advance('activity',activity,activitySignature,now);
+        let list=doc.querySelector('[data-testid="listing-tile"]')?.parentElement;
+        while(list&&list!==doc.body&&!String(list.className).includes('_list_'))list=list.parentElement;
+        const listingSignature=JSON.stringify(parsed.events.filter(e=>e.source==='listing').map(e=>[e.key,e.listing_id]))+tileIds.join('|');
+        if(list&&list!==doc.body)layout=advance('listings',list,listingSignature,now)&&layout;
+        else if(soldSelected&&expected!==null&&tileIds.length===expected){
+          // All Sold listings fit without a scrolling container.
+          const panel=soldTab.closest('[role="tablist"]')?.parentElement;
+          layout=advance('listings',panel,listingSignature,now)&&layout;
+        }else layout=false;
+      }
+      const activityPasses=states.activity?.passes||0,listingPasses=states.listings?.passes||0;
+      let phase=!ended?'live':!canRead?(lastPhase==='read'&&!added?'read':'paused'):!layout?'needs_review':activityPasses<2||listingPasses<2||now-lastNew<5000?'reading':expected===null||sold.size!==expected?'needs_review':'read';
+      lastPhase=phase;
+      return {protocol:1,run_id:runId,phase,sold_expected:expected,sold_seen:sold.size,observed_wins:wins.size,activity_passes:activityPasses,listing_passes:listingPasses,reason:!canRead?reason:!layout?'layout':phase==='needs_review'?'counts':null};
+    }
+    return {observe};
+  }
+  root.InvstoLiveParser = {parse,status,money,key,hasEnded,streamMetadata,createHistoryTracker};
 })(typeof globalThis !== 'undefined' ? globalThis : window);

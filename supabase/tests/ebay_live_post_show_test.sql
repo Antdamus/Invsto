@@ -12,7 +12,7 @@ declare
 begin
  insert into post_tap_results select no_plan();
  perform set_config('request.jwt.claim.sub',actor::text,true);
- insert into post_tap_results select ok(not has_function_privilege('anon','public.complete_ebay_live_session(uuid,boolean,boolean)','EXECUTE'),'anonymous cannot close a session');
+ insert into post_tap_results select ok(not has_function_privilege('anon','public.complete_ebay_live_session(uuid,boolean,boolean,text)','EXECUTE'),'anonymous cannot close a session');
  insert into post_tap_results select ok(not has_table_privilege('authenticated','public.ebay_live_connections','UPDATE'),'clients cannot forge review completion');
  show:=public.start_ebay_live_session('__post_show_test',null,event,seller);
  obs:=jsonb_build_object('key','won','kind','won','listing_id','777777777771','title','Post-show watch','buyer','reviewbuyer','amount',150,'currency','USD','time_label','12:00 PM','source','activity','observed_at',clock_timestamp());

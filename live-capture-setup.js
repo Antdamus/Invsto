@@ -35,7 +35,7 @@
     const result = await window.supabase.from('live_sale_sessions').select('*').eq('id', connection.data.session_id).maybeSingle();
     if (result.error) throw Error(result.error.message);
     if (!result.data) throw Error('The linked show could not be loaded. Refresh and try again.');
-    if (result.data.status !== 'active') throw Error('This show is already closed. Open the current eBay event to start a new show.');
+    if (result.data.status !== 'active') throw Object.assign(Error('This show is already closed. Open the current eBay event to start a new show.'),{captureState:'closed'});
     return result.data;
   }
 
@@ -94,7 +94,7 @@
   async function save(e) {
     e.preventDefault(); if (busy) return;
     const primary = $('capture-main-seller').value;
-    if (!stream) { status('Click Start Invsto capture on eBay with Live Capture 1.3.0 to read the original show date.', true); return; }
+    if (!stream) { status('Click Start Invsto capture on eBay with Live Capture 1.4.0 to read the original show date.', true); return; }
     if (!primary) { status('Choose who is selling first.', true); return; }
     const id = eventId;
     const others = [...dialog.querySelectorAll('[name="capture-co-seller"]:checked')].map(input => input.value).filter(value => value !== primary);
@@ -125,8 +125,20 @@
       if (e.source === window && e.origin === location.origin && e.data?.type === 'INVSTO_CAPTURE_SETUP') void request(e.data.event_id,e.data.stream);
     });
     const params = new URL(location.href).searchParams;
+    if(params.get('capture')==='1'&&valid(params.get('resume_event'))){
+      try{const row=await existing(params.get('resume_event'));if(row)await api.connected(row);}catch{}
+    }
     let metadata=null;try{metadata=JSON.parse(params.get('stream'));}catch{}
     if (params.get('capture') === '1' && valid(params.get('capture_event'))) await request(params.get('capture_event'),metadata);
   }
+  // Read-only status checks let a refreshed eBay tab resume an existing show
+  // without submitting seller setup or opening a completed session.
+  window.addEventListener('message',async e=>{
+    if(e.source!==window||e.origin!==location.origin||e.data?.type!=='INVSTO_CAPTURE_CHECK'||!valid(e.data.event_id))return;
+    let state='unavailable';
+    try{const session=await window.supabase.auth.getSession();if(!session.data?.session)state='signed_out';else state=await existing(e.data.event_id)?'active':'unlinked';}
+    catch(error){state=error.captureState||'unavailable';}
+    window.postMessage({type:'INVSTO_CAPTURE_CHECK_RESULT',id:e.data.id,state},location.origin);
+  });
   window.liveCaptureSetup = {init, request, showSignIn};
 })();

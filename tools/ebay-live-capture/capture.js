@@ -29,7 +29,7 @@
   box.style.cssText='position:fixed;bottom:12px;left:12px;z-index:2147483647;background:#18251f;color:white;border:1px solid #98ba8b;border-radius:12px;padding:12px;max-width:330px;font:14px/1.4 system-ui;box-shadow:0 3px 15px #0008';
   const button=document.createElement('button');button.textContent='Start Invsto capture';button.style.cssText='font:inherit;padding:8px 14px;border-radius:8px;cursor:pointer';
   const movement=document.createElement('button');movement.textContent='Keep page still';movement.style.cssText=button.style.cssText;
-  const receiver=document.createElement('a');receiver.textContent='Open Invsto receiver';receiver.href='https://antdamus.github.io/Invsto/live-sales.html?capture=1&v=1.3.0';receiver.target='_blank';receiver.rel='noopener';receiver.style.cssText='display:block;color:#efd69b;margin-top:8px';
+  const receiver=document.createElement('a');receiver.textContent='Open Invsto receiver';receiver.href='https://antdamus.github.io/Invsto/live-sales.html?capture=1&v=1.4.0';receiver.target='_blank';receiver.rel='noopener';receiver.style.cssText='display:block;color:#efd69b;margin-top:8px';
   const note=document.createElement('div');note.textContent='Automatic capture checks Activity and Sold. Use a separate tab for uninterrupted capture while editing.';
   box.append(button,movement,note,receiver);document.body.append(box);
   receiver.href+='&capture_event='+encodeURIComponent(event_id);
@@ -43,14 +43,36 @@
   };
   for(const type of ['pointerdown','keydown','wheel','touchstart'])document.addEventListener(type,e=>{if(e.isTrusted&&!box.contains(e.target))lastInteraction=Date.now();},{capture:true,passive:true});
   movement.onclick=()=>{holdMovement=!holdMovement;lastInteraction=0;movement.textContent=holdMovement?'Resume automatic capture':'Keep page still';tick();};
-  let active=false,busy=false,cache={},sent=new Map(),pageAt=0,stopping=false,latestNext=true,endReported=false,stream=null,readingStream=false;
+  let active=false,busy=false,cache={},sent=new Map(),pageAt=0,stopping=false,latestNext=true,endReported=false,stream=null,readingStream=false,history=null,resumePending=true,checkingResume=false;
   chrome.runtime.onMessage?.addListener((message,sender,reply)=>{
     if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_CAPTURE_STATUS')reply({ok:message.event_id===event_id&&active});
+    if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_STOP_CAPTURE'&&message.event_id===event_id){active=false;resumePending=false;stopping=false;endReported=true;button.textContent='Start Invsto capture';note.textContent='This Invsto show is closed. Capture will not restart it.';reply({ok:true});}
   });
   const sweepPositions=new WeakMap();
   let lastClock=null,clockChangedAt=0,clockWasAdvancing=false;
+  const stopKey='invsto-capture-stopped:'+event_id;
+  const stoppedHere=()=>{try{return sessionStorage.getItem(stopKey)==='1';}catch{return false;}};
+  function activate(metadata){
+    try{sessionStorage.removeItem(stopKey);}catch{}
+    stream=metadata;history=InvstoLiveParser.createHistoryTracker(crypto.randomUUID());
+    const url=new URL(receiver.href);url.searchParams.set('stream',JSON.stringify(stream));receiver.href=url.href;
+    active=true;resumePending=false;sent.clear();stopping=false;button.textContent='Stop Invsto capture';tick();
+  }
+  async function restoreCapture(){
+    if(!resumePending||active||readingStream||checkingResume)return;checkingResume=true;
+    try{
+      if(stoppedHere()){resumePending=false;await chrome.runtime.sendMessage({type:'INVSTO_STOP_CAPTURE',event_id});return;}
+      const result=await chrome.runtime.sendMessage({type:'INVSTO_RESUME_CAPTURE',event_id});
+      if(!resumePending||active||readingStream)return;
+      if(result?.resume&&result.stream){activate(result.stream);note.textContent='Capture resumed for the same show. Sellers are unchanged.';}
+      else if(result?.retry){note.textContent=result.error||'Reconnecting saved capture. Keep the Invsto receiver signed in.';}
+      else{resumePending=false;if(result?.closed)note.textContent='This Invsto show is closed. Capture will not restart it.';else if(result?.error)note.textContent=result.error;}
+    }catch{note.textContent='Reconnecting saved capture…';}
+    finally{checkingResume=false;}
+  }
   button.onclick=async()=>{
     if(readingStream)return;
+    resumePending=false;
     if(!active){
       readingStream=true;button.disabled=true;note.textContent='Reading the original show date from eBay…';
       try {
@@ -63,12 +85,15 @@
       }catch(error){note.textContent=error.message;return;}
       finally{readingStream=false;button.disabled=false;}
     }
-    active=!active;button.textContent=active?'Stop Invsto capture':'Start Invsto capture';sent.clear();stopping=!active;
-    // Begin buffering immediately, even while the seller form is being filled.
-    tick();
-    if(active){
-      try{const result=await chrome.runtime.sendMessage({type:'INVSTO_START_CAPTURE',event_id,stream});if(!result?.ok)throw Error(result?.error||'Could not open Invsto');}
+    if(!active){
+      activate(stream);
+      try{const result=await chrome.runtime.sendMessage({type:'INVSTO_START_CAPTURE',event_id,stream});if(result?.closed){active=false;stopping=false;endReported=true;button.textContent='Start Invsto capture';note.textContent=result.error;return;}if(!result?.ok)throw Error(result?.error||'Could not open Invsto');}
       catch(error){note.textContent=error.message+'. Use Open Invsto receiver below to choose sellers.';}
+    }else{
+      try{sessionStorage.setItem(stopKey,'1');}catch{}
+      active=false;stopping=true;button.textContent='Start Invsto capture';
+      try{await chrome.runtime.sendMessage({type:'INVSTO_STOP_CAPTURE',event_id});}catch(error){note.textContent='Could not save Stop. Try again before refreshing: '+error.message;}
+      tick();
     }
   };
   async function tick() {
@@ -91,20 +116,25 @@
       const advancing=clockWasAdvancing && Date.now()-clockChangedAt<20000;
       const clockReady=document.visibilityState==='visible' || advancing;
       const ready=active && !working && !parsed.broadcastEnded && parsed.supported && parsed.panelPresent && activitySelected && listingsReady && navigator.onLine && clockReady;
-      const reason=parsed.broadcastEnded?'Broadcast ended. Finish the bag review in Invsto.':!active?'Capture stopped':working?'Page stays still while you work. Close open panels and leave fields to resume full capture, or use a separate capture tab.':!navigator.onLine?'Capture computer is offline':!parsed.supported?'Stream Manager layout is not recognized; verify payment manually':!activitySelected||!parsed.panelPresent?'Waiting for the Activity panel to load':!listingsReady?'Waiting for the Sold or All listings panel':!clockReady?'Bring Stream Manager forward; its clock must keep updating':waitingForSales?'Watching Activity; waiting for the first sale':'Reading Activity and Sold items';
+      const filtered=[...document.querySelectorAll('#activity-panel [aria-label="Filter activity"] button')].some(b=>b.textContent.trim()==='All'&&b.getAttribute('aria-pressed')==='true');
+      const canRead=active&&!working&&navigator.onLine&&parsed.supported&&parsed.panelPresent&&activitySelected&&listingsReady&&filtered&&!document.querySelector('[aria-busy="true"],[role="progressbar"]');
+      const recovery=history?.observe(document,parsed,{canRead,reason:!active?'stopped':working?'working':!navigator.onLine?'offline':'waiting'});
+      const recoveryText=recovery?.phase==='read'?'Available history read. Compare the recovered sales with eBay.':recovery?.phase==='needs_review'?'History needs review. Check the recovery details in Invsto.':recovery?.phase==='paused'?'History reading paused. Resume capture to finish.':'Reading finished-show history…';
+      const reason=parsed.broadcastEnded?recoveryText:!active?'Capture stopped':working?'Page stays still while you work. Close open panels and leave fields to resume full capture, or use a separate capture tab.':!navigator.onLine?'Capture computer is offline':!parsed.supported?'Stream Manager layout is not recognized; verify payment manually':!activitySelected||!parsed.panelPresent?'Waiting for the Activity panel to load':!listingsReady?'Waiting for the Sold or All listings panel':!clockReady?'Bring Stream Manager forward; its clock must keep updating':waitingForSales?'Watching Activity; waiting for the first sale':'Reading Activity and Sold items';
       const events=[];
       if(active) for(const event of parsed.events) {
         const signature=JSON.stringify([event.listing_id,event.kind,event.buyer,event.amount]);
         if(sent.get(event.key)!==signature) {if(events.length<100)events.push(event);}
       }
-      const result=await chrome.runtime.sendMessage({type:'INVSTO_CAPTURE',event_id,events,health:{observed_at:new Date().toISOString(),ready,running:active,mode:working?'working':'automatic',broadcast_ended:parsed.broadcastEnded,message:reason,...(stream?{stream}:{})}});
+      const result=await chrome.runtime.sendMessage({type:'INVSTO_CAPTURE',event_id,events,health:{observed_at:new Date().toISOString(),ready,running:active,mode:working?'working':'automatic',broadcast_ended:parsed.broadcastEnded,message:reason,...(stream?{stream}:{}),...(recovery?{recovery}:{})}});
+      if(result?.closed){active=false;resumePending=false;stopping=false;endReported=true;button.textContent='Start Invsto capture';note.textContent='This Invsto show is closed. Capture stopped.';return;}
       if(result?.ok&&parsed.broadcastEnded)endReported=true;
       if(!active&&result?.ok)stopping=false;
       if(result?.ok) for(const e of events) sent.set(e.key,JSON.stringify([e.listing_id,e.kind,e.buyer,e.amount]));
       const statusText=reason+' · '+(result?.status||result?.error||'Waiting for receiver');
       if(note.textContent!==statusText)note.textContent=statusText;
       // The Activity feed is virtualized. Sweep it so failures below the fold are read too.
-      if(active && !working && parsed.supported && parsed.panelPresent && activitySelected && listingsReady && Date.now()-pageAt>1500) {
+      if(active && !parsed.broadcastEnded && !working && parsed.supported && parsed.panelPresent && activitySelected && listingsReady && Date.now()-pageAt>1500) {
         const scrollers=new Set([document.querySelector('#activity-panel [class*="_list_"]')]);
         let parent=document.querySelector('[data-testid="listing-tile"]')?.parentElement;
         while(parent && parent!==document.body) { if(parent.className?.includes('_list_') && parent.scrollHeight>parent.clientHeight){scrollers.add(parent);break;}parent=parent.parentElement; }
@@ -119,5 +149,6 @@
     finally {busy=false;}
   }
   setInterval(tick,1200);
+  void restoreCapture();setInterval(restoreCapture,10000);
   let timer;new MutationObserver(()=>{clearTimeout(timer);timer=setTimeout(()=>active&&tick(),250);}).observe(document.querySelector('#activity-panel')||document.body,{childList:true,subtree:true,characterData:true});
 })();

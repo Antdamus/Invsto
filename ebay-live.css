@@ -155,3 +155,6 @@ body.ebay-live-linked:not(.ebay-has-bag) #scan-stage{display:none}
 #show-drafts-dialog .button-row{display:flex;flex-wrap:wrap;gap:8px}#show-drafts-dialog button{min-height:46px}#show-list-status{color:#e7c796}
 @media(min-width:1050px){body.ebay-live-linked #show-draft-toolbar{grid-row:2;margin:0}body.ebay-live-linked #ebay-live-panel,body.ebay-live-linked #scan-stage,body.ebay-live-linked .live-grid,body.ebay-live-linked #ebay-empty-workspace{grid-row:3}body.ebay-live-linked.live-setup-open #ebay-live-panel{grid-row:4}}
 @media(max-width:540px){.show-draft-card{flex-direction:column;align-items:stretch}.show-draft-card button{width:100%}#show-drafts-dialog .button-row button{flex:1 1 100%}#show-draft-toolbar{margin:10px 0}}
+
+.ebay-history-recovery{border:1px solid #8f815766;border-radius:12px;padding:14px;margin:14px 0;overflow-wrap:anywhere}
+.ebay-history-recovery h3{margin:0 0 10px}.ebay-history-recovery p{margin:8px 0}.ebay-history-recovery small{display:block;opacity:.8}

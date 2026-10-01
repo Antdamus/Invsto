@@ -1,4 +1,4 @@
-# Invsto Live Capture (1.3.0)
+# Invsto Live Capture (1.4.0)
 
 This helper copies visible eBay Stream Manager auction and payment evidence into Invsto. It can also prepare a new auction form from an inventory item you explicitly queue. It never clicks Create listing or Start, bids, charges buyers, or cancels eBay orders.
 
@@ -9,7 +9,7 @@ This helper copies visible eBay Stream Manager auction and payment evidence into
 3. Open the event's eBay Stream Manager dashboard and click **Start Invsto capture** in the bottom-left corner. The helper reads the saved date, timezone and title from Event information in a temporary background tab, then closes that tab. Your broadcasting tab stays on Stream Manager. It does not update the eBay event. Invsto opens automatically with that exact event and original date. Sign in if needed.
 4. Choose the **First seller**, optionally check **Additional sellers**, and tap **Start show**. No store, URL, title or starting auction number is required. Invsto creates and links the session, then returns to the eBay capture tab. Repeating capture for the same unfinished event reconnects to its existing session and keeps its sellers. A completed show cannot be reopened by capture.
 5. Keep the automatically opened **capture receiver** signed in and open. Observations are buffered while seller setup is pending and saved after the show is linked. The helper selects Activity → All and Sold, and scrolls those lists. Before the first sale, it watches All listings until Sold becomes available. Use another window if you need to operate the broadcast.
-6. Keep the computer awake. Allow these two pages to stay active in the browser's sleeping-tabs / memory-saver settings. The receiver can be behind the Stream Manager window; the Stream Manager tab may remain in the background while its elapsed clock continues updating. If the clock stops, bring it forward. Click Start again after reloading it.
+6. Keep the computer awake. Allow these two pages to stay active in the browser's sleeping-tabs / memory-saver settings. The receiver can be behind the Stream Manager window; the Stream Manager tab may remain in the background while its elapsed clock continues updating. If the clock stops, bring it forward. Refreshing the same eBay tab resumes its saved capture after Invsto confirms that show is still unfinished. Sellers stay unchanged. An explicit Stop stays stopped after refresh. Closing the tab or restarting the browser requires starting capture again. If the receiver was closed, the helper opens a replacement in the background; sign in there if needed.
 7. On each phone, sign in to Invsto, open Live Sales, and select the same show. Wait for **Connected - auctions update automatically**, then choose **Scan sold item** on a paid auction. Scan the inventory barcode/QR, review the manifest, and **Close paid bag**. Printing is optional afterward and supports your existing print stations.
 
 Start capture before the first auction when possible. A finished eBay event can backfill the Activity and Sold history that eBay still exposes. The original saved event date is the show start; the import time stays separate. Recovered history defaults to the first seller selected, because eBay does not identify your on-air employees. Admins can use Change seller on one sale, select several sales for a correction, or correct all earlier sales under Change seller. Each correction also updates its bag. Set the on-air seller during a running show for new auctions.
@@ -29,6 +29,10 @@ Start capture before the first auction when possible. A finished eBay event can 
 
 The helper detects eBay's explicit **Event ended** control and moves Invsto into **Post-show review**. A frozen clock or zero viewers never ends a show. With an older helper or if capture is stopped, use **Stream ended? Start bag review** in Invsto.
 
+Live Sales separates **Reading show history** from **Saving captured history**. It shows saved auction attempts, paid attempts, payment issues, unmatched notifications, and how many eBay Sold listings have been read. Listings and auction attempts can differ because an item can be rerun. An empty sync queue alone never marks history complete.
+
+For a finished event, the helper reads each settled viewport in both Activity and Sold twice and checks the Sold count. **Available history read** means the history currently exposed by those panels has been read; compare it against the final eBay orders. New evidence or a changed list restarts the relevant checks. Keep both pages active while reading. If reading pauses or the layout/count cannot be verified, resume capture or compare the complete history and document a **Manual history check** in the final checklist. That note does not import missing sales and cannot bypass pending data, unresolved payment issues, or unfinished bags. Closing the reviewed session disables automatic capture resume for that event.
+
 The inventory session stays open. Finish every paid bag, scan missing items, and use **Reopen to check / add items** to correct a closed bag. Payment failures, waiting payments and unmatched notifications still require review. A bag already in packing must be checked in Pending Orders.
 
 Compare the complete auction list against the final eBay orders, including any sales capture missed. When all recorded paid bags are closed and outstanding payment/notification issues are resolved, confirm the physical bag and payment checkboxes and choose **Close reviewed session**. Ending the broadcast never automatically closes bags, cancels orders or releases inventory.
@@ -45,7 +49,7 @@ Replace the extracted folder's files with the new download, click Reload on the 
 
 ## Data access
 
-The extension runs only on eBay host-event pages and Invsto Live Sales. It stores the capture outbox/health, receiver tab IDs, and the current listing preparation ID/status locally. Supabase authentication stays in the signed-in Invsto page. No browser cookies, passwords, payment card details, shipping addresses or private eBay API tokens are collected.
+The extension runs only on eBay host-event pages and Invsto Live Sales. It stores the capture outbox/health, receiver tab IDs, per-tab capture event/date metadata and resume state, and the current listing preparation ID/status locally. Supabase authentication stays in the signed-in Invsto page. No browser cookies, passwords, payment card details, shipping addresses or private eBay API tokens are collected.
 
 ## Scan stock into an auction (1.1.3)
 

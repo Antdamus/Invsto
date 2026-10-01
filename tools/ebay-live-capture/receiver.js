@@ -5,6 +5,7 @@ const discoverListings=()=>chrome.runtime.sendMessage({type:'INVSTO_LISTING_DISC
 }).catch(()=>{});
 window.addEventListener('message',event=>{if(event.source===window&&event.origin===location.origin&&event.data?.type==='INVSTO_LISTING_DISCOVER')discoverListings();});
 window.addEventListener('message',event=>{
+  if(event.source===window&&event.origin===location.origin&&event.data?.type==='INVSTO_CAPTURE_FINISHED')chrome.runtime.sendMessage({type:'INVSTO_CAPTURE_FINISHED',event_id:event.data.event_id}).catch(()=>{});
   if(event.source===window&&event.origin===location.origin&&event.data?.type==='INVSTO_CAPTURE_CONNECTED'){
     const requested=new URL(location.href).searchParams.get('capture_event');
     if(requested===event.data.event_id&&/^[A-Za-z0-9_-]{6,100}$/.test(requested||''))chrome.runtime.sendMessage({type:'INVSTO_CAPTURE_CONNECTED',event_id:requested}).catch(()=>{});
@@ -13,8 +14,15 @@ window.addEventListener('message',event=>{
 discoverListings();setInterval(discoverListings,5000);
 if (new URL(location.href).searchParams.get('capture') === '1') {
   const pending = new Map();
+  const captureChecks = new Map();
   const listingPending = new Map();
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
+    if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_CHECK_CAPTURE'){
+      if(!/^[A-Za-z0-9_-]{6,100}$/.test(message.event_id||'')){reply({ok:false});return;}
+      const id=crypto.randomUUID();const timer=setTimeout(()=>{captureChecks.delete(id);reply({ok:false,state:'unavailable'});},8000);
+      captureChecks.set(id,result=>{clearTimeout(timer);reply(result);});
+      window.postMessage({type:'INVSTO_CAPTURE_CHECK',id,event_id:message.event_id},location.origin);return true;
+    }
     if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_OPEN_CAPTURE_SETUP'){
       if(!/^[A-Za-z0-9_-]{6,100}$/.test(message.event_id||'')){reply({ok:false});return;}
       const url=new URL(location.href);url.searchParams.set('capture_event',message.event_id);
@@ -37,12 +45,15 @@ if (new URL(location.href).searchParams.get('capture') === '1') {
     return true;
   });
   window.addEventListener('message', event => {
+    if(event.source===window&&event.origin===location.origin&&event.data?.type==='INVSTO_CAPTURE_CHECK_RESULT'){
+      const respond=captureChecks.get(event.data.id);if(respond){captureChecks.delete(event.data.id);respond({ok:true,state:event.data.state});}return;
+    }
     if(event.source===window&&event.origin===location.origin&&event.data?.type==='INVSTO_LISTING_RESPONSE'){
       const respond=listingPending.get(event.data.id);if(respond){listingPending.delete(event.data.id);respond({ok:event.data.ok===true,error:event.data.error,job:event.data.job});}return;
     }
     if (event.source !== window || event.origin !== location.origin || event.data?.type !== 'INVSTO_LIVE_ACK') return;
     const reply = pending.get(event.data.id);
-    if (reply) {pending.delete(event.data.id);reply({ok:event.data.ok===true,error:String(event.data.error||'').slice(0,250)});}
+    if (reply) {pending.delete(event.data.id);reply({ok:event.data.ok===true,error:String(event.data.error||'').slice(0,250),state:event.data.state});}
   });
   const announce = () => chrome.runtime.sendMessage({type:'INVSTO_RECEIVER'}).catch(()=>{});
   announce(); setInterval(announce,5000);
