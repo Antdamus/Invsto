@@ -1345,8 +1345,8 @@ async function handleCheckoutStoreChange() {
     return;
   }
 
-  setStatus(`Checkout store set to ${getCheckoutStoreName(nextStoreId)}. Scan an auction bag or select an order to begin.`, "info");
-  setTimeout(() => $("global-live-lot-scan")?.focus(), 80);
+  setStatus(`Checkout store set to ${getCheckoutStoreName(nextStoreId)}. Select an order and scan item barcodes. A bag label is optional.`, "info");
+  setTimeout(() => (state.selectedLine ? $("item-scan") : $("order-search"))?.focus(), 80);
 }
 
 function setupDashboardShell() {
@@ -3533,6 +3533,7 @@ function openBuyerGroupNoInventoryModal(group) {
 }
 
 function openBuyerGroupInventoryCompletion(group) {
+  if (state.busy) return;
   const selectedLines = group.lines.filter((line) => state.adminSelectedLineIds.has(line.id) && isOpenOrderLine(line));
   const nextLine = selectedLines[0]
     || group.lines.find((line) => isOpenOrderLine(line) && !state.stagedFulfillments.has(line.id))
@@ -3541,7 +3542,26 @@ function openBuyerGroupInventoryCompletion(group) {
     setStatus("No open pending line in this card can be completed from inventory.", "error");
     return;
   }
+  clearLiveLotSelection({ render: true });
   selectOrderLine(nextLine.id, { openDetail: true });
+  focusItemCheckout();
+}
+
+function focusItemCheckout() {
+  if ($("optional-live-bag")) $("optional-live-bag").open = false;
+  setStatus("Scan item barcodes to remove inventory. A bag label is optional.", "info");
+  setTimeout(() => {
+    if (!state.selectedLine || state.busy) return;
+    if (!state.checkoutStoreId) { $("checkout-store-select")?.focus(); return; }
+    $("checkout-item-scan")?.scrollIntoView({ block: "start" });
+    $("item-scan")?.focus({ preventScroll: true });
+  }, 100);
+}
+
+function useItemCheckout() {
+  if (state.busy) return;
+  clearLiveLotSelection({ render: true });
+  focusItemCheckout();
 }
 
 function pruneAdminSelection() {
@@ -6581,6 +6601,9 @@ function sanitizeSearchTerm(term) {
 async function searchInventoryItems() {
   if (!requireCheckoutStore() || !state.selectedLine || state.busy) return;
   const term = String($("item-scan")?.value || "").trim();
+  // An item scan explicitly chooses direct checkout; a previously loaded bag
+  // must never become an implicit fallback if the scan cannot be staged.
+  if (term && state.selectedLiveLot) clearLiveLotSelection({ render: true });
   invalidateInventoryLookup();
   const generation = state.inventoryLookupGeneration;
   const lineId = state.selectedLine.id;
@@ -7062,6 +7085,7 @@ function renderLiveLotPanelInto(panel, { global = false } = {}) {
 }
 
 function renderLiveLotPanel() {
+  if ($("optional-live-bag")) $("optional-live-bag").open = Boolean(state.selectedLiveLot);
   renderLiveLotPanelInto($("live-lot-panel"));
   renderLiveLotPanelInto($("bag-lookup-live-lot-panel"), { global: true });
   syncBagLookupPanelState();
@@ -11449,6 +11473,7 @@ function setupListeners() {
     clearItemSearchTimer();
     searchInventoryItems();
   });
+  $("use-item-checkout")?.addEventListener("click", useItemCheckout);
   $("find-live-lot")?.addEventListener("click", () => {
     clearLiveLotSearchTimer();
     loadLiveLotByScan();

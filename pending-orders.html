@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20260930-screenshots" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261002-optional-bag" />
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
@@ -177,9 +177,9 @@
           <div class="bag-lookup-head">
             <div>
               <span class="eyebrow">Auction Bag Lookup</span>
-              <h2>Scan Bag Before Packing</h2>
+              <h2>Find an Order by Bag (Optional)</h2>
               <a href="bag-lookup.html" target="_blank" rel="noopener">Scan bag label / view details</a>
-              <p>Scan a LIVE bag ID to find or link its pending order, even before the bag is closed. Review matches by buyer, listing, sale amount and auction details.</p>
+              <p>Optional shortcut: scan a LIVE bag ID to find its pending order. Without a printed bag label, choose Mixed Checkout on the buyer card and scan item barcodes.</p>
             </div>
             <span id="bag-lookup-status" class="count-pill">No bag loaded</span>
           </div>
@@ -407,44 +407,28 @@
               <div id="buyer-bundle-panel" class="buyer-bundle-panel"></div>
             </section>
 
-            <section id="ebay-label-panel" class="scan-card ebay-label-panel">
+            <section id="checkout-item-scan" class="scan-card">
               <div class="step-head">
-                <span>PDF</span>
+                <span>1</span>
                 <div>
-                  <h3>Shipping Label</h3>
-                  <p id="ebay-label-summary">Waiting for a label from the eBay extension.</p>
+                  <h3>Scan Item Barcodes</h3>
+                  <p>No bag label required. Scan each inventory item, or search by name. Use Stage Without Inventory for items that are not in inventory yet.</p>
                 </div>
               </div>
-              <div id="ebay-label-details" class="ebay-label-details"></div>
-              <div class="fulfill-actions">
-                <button id="open-ebay-label-page" type="button" class="secondary-btn">Open eBay Label Page</button>
-                <button id="preview-ebay-label" type="button" class="secondary-btn hidden">Preview Label</button>
-        <button id="print-ebay-label" type="button" class="secondary-btn hidden">Print shipping label</button>
+              <div class="scan-row">
+                <input id="item-scan" data-camera-scan type="search" placeholder="Scan barcode or search item name / description" autocomplete="off" />
+                <button id="find-item" type="button" class="secondary-btn">Find</button>
               </div>
+              <div id="item-results" class="result-list"></div>
             </section>
 
-            <section id="order-task-panel" class="scan-card order-task-panel">
-              <div class="step-head">
-                <span>Task</span>
-                <div>
-                  <h3>Order Coordination</h3>
-                  <p id="order-task-summary">Assign questions or special handling notes to admins or workers.</p>
-                </div>
-              </div>
-              <div id="order-task-list" class="order-task-list">
-                <div class="empty-state">No coordination tasks for this order.</div>
-              </div>
-              <div class="fulfill-actions">
-                <button id="open-order-task-modal" type="button" class="secondary-btn task-action-btn">Assign Task to This Order</button>
-              </div>
-            </section>
-
-            <section class="scan-card live-bag-card">
+            <details id="optional-live-bag" class="scan-card live-bag-card">
+              <summary>Use a live bag label (optional)</summary>
               <div class="step-head">
                 <span>Bag</span>
                 <div>
-                  <h3>Scan Live Auction Label</h3>
-                  <p>Scan the auction number or bag ID. If the bag is correct, confirm it against this eBay order.</p>
+                  <h3>Load a Printed Bag</h3>
+                  <p>Have a printed label? Scan it to load the saved bag. Otherwise, scan item barcodes directly.</p>
                 </div>
               </div>
               <div class="scan-row">
@@ -454,22 +438,8 @@
               <div id="live-lot-panel" class="live-lot-panel">
                 No live auction bag loaded.
               </div>
-            </section>
-
-            <section class="scan-card">
-              <div class="step-head">
-                <span>1</span>
-                <div>
-                  <h3>Scan or Find Inventory Item</h3>
-                  <p>Scan an item or bulk-bag barcode. If the physical item is not in inventory yet, use Stage Without Inventory below.</p>
-                </div>
-              </div>
-              <div class="scan-row">
-                <input id="item-scan" data-camera-scan type="search" placeholder="Scan barcode or search item name / description" autocomplete="off" />
-                <button id="find-item" type="button" class="secondary-btn">Find</button>
-              </div>
-              <div id="item-results" class="result-list"></div>
-            </section>
+              <button id="use-item-checkout" type="button" class="secondary-btn">Continue with item barcodes</button>
+            </details>
 
             <section class="scan-card">
               <div class="step-head">
@@ -527,6 +497,38 @@
                 <button id="fulfill-order" type="button" class="primary-btn">Confirm Packed Bundle</button>
               </div>
             </section>
+            <section id="ebay-label-panel" class="scan-card ebay-label-panel">
+              <div class="step-head">
+                <span>PDF</span>
+                <div>
+                  <h3>Shipping Label</h3>
+                  <p id="ebay-label-summary">Waiting for a label from the eBay extension.</p>
+                </div>
+              </div>
+              <div id="ebay-label-details" class="ebay-label-details"></div>
+              <div class="fulfill-actions">
+                <button id="open-ebay-label-page" type="button" class="secondary-btn">Open eBay Label Page</button>
+                <button id="preview-ebay-label" type="button" class="secondary-btn hidden">Preview Label</button>
+        <button id="print-ebay-label" type="button" class="secondary-btn hidden">Print shipping label</button>
+              </div>
+            </section>
+
+            <section id="order-task-panel" class="scan-card order-task-panel">
+              <div class="step-head">
+                <span>Task</span>
+                <div>
+                  <h3>Order Coordination</h3>
+                  <p id="order-task-summary">Assign questions or special handling notes to admins or workers.</p>
+                </div>
+              </div>
+              <div id="order-task-list" class="order-task-list">
+                <div class="empty-state">No coordination tasks for this order.</div>
+              </div>
+              <div class="fulfill-actions">
+                <button id="open-order-task-modal" type="button" class="secondary-btn task-action-btn">Assign Task to This Order</button>
+              </div>
+            </section>
+
           </div>
         </section>
       </section>
@@ -970,6 +972,6 @@
 <script src="shipping-label-print.js?v=20260929-complete"></script>
 <script src="bag-order-links.js?v=20260930"></script>
 <script src="video-receipts.js?v=20260930-screenshots"></script>
-<script src="pending-orders.js?v=20260930-screenshots"></script>
+<script src="pending-orders.js?v=20261002-optional-bag"></script>
 </body>
 </html>

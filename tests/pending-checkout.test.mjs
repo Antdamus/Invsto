@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile, mkdir} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {test,before,after} from 'node:test';
-import {chromium} from '@playwright/test';
+import {chromium,webkit} from '@playwright/test';
 
 const root=new URL('../',import.meta.url);let server,browser,origin;
 before(async()=>{
@@ -16,7 +16,7 @@ before(async()=>{
     }catch{res.writeHead(404).end();}
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));origin=`http://127.0.0.1:${server.address().port}`;
-  browser=await chromium.launch();
+  browser=await (process.env.INVSTO_ITEM_BROWSER==='webkit'?webkit:chromium).launch();
 });
 after(async()=>{await browser.close();await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});});
 
@@ -220,4 +220,53 @@ test('manual staging cancels delayed barcode lookup and changing source cancels 
   await p.locator('#location-scan').fill('NOT-THIS-LOCATION');await p.waitForTimeout(1150);
   assert.equal(await p.evaluate(()=>state.selectedStockRow),null);
   assert.equal(await p.evaluate(()=>state.stagedFulfillments.size),0);
+});
+
+test('Mixed Checkout opens item scanning with no bag and clears any previously loaded bag',async t=>{
+  const p=await open(t,{width:390});await p.evaluate(()=>{
+    state.selectedLiveLot={id:'old-bag',lot_code:'LIVE-OLD',auction_number:'019'};
+    state.selectedLiveLotItems=[{id:'old-item',item_id:'item-a',quantity:1,status:'reserved'}];
+    state.liveLotMatchedLineIds=new Set(['line-a']);
+    document.getElementById('optional-live-bag').open=true;
+    state.busy=true;openBuyerGroupInventoryCompletion({lines:state.orders});
+  });
+  assert.equal(await p.evaluate(()=>state.selectedLiveLot.id),'old-bag');
+  await p.evaluate(()=>{
+    state.busy=false;openBuyerGroupInventoryCompletion({lines:state.orders});
+  });
+  await p.waitForFunction(()=>document.activeElement?.id==='item-scan');
+  assert.equal(await p.evaluate(()=>state.selectedLiveLot),null);
+  assert.equal(await p.evaluate(()=>document.getElementById('optional-live-bag').open),false);
+  assert.match(await p.locator('#checkout-item-scan').innerText(),/No bag label required/);
+  await scan(p);await p.waitForFunction(()=>state.stagedFulfillments.size===1);
+  assert.equal(await p.evaluate(()=>state.stagedFulfillments.get('line-a').row.id),'stock-a');
+  await p.locator('#stage-without-inventory').click();await p.locator('#bundle-review-modal').waitFor({state:'visible'});
+  await p.locator('#confirm-bundle-review').click();await p.waitForFunction(()=>!state.busy);
+  assert.equal(await p.evaluate(()=>stockQuantity),4);
+  assert.equal(await p.evaluate(()=>databaseLines.every(l=>l.line_status==='fulfilled')),true);
+  assert.equal(await p.evaluate(()=>calls.some(c=>/live_lot|bag/.test(c.name))),false);
+});
+
+test('an unsuccessful item scan cannot fall back to packing a previously loaded bag',async t=>{
+  const p=await open(t);await p.evaluate(()=>{
+    state.selectedLiveLot={id:'old-bag',lot_code:'LIVE-OLD',auction_number:'019'};
+    state.selectedLiveLotItems=[{id:'old-item',item_id:'item-a',quantity:1,status:'reserved'}];matches=[];
+  });await scan(p,'MISSING');
+  await p.waitForFunction(()=>document.getElementById('fulfill-status').textContent.includes('No item found'));
+  await p.locator('#fulfill-order').click();
+  assert.match(await p.locator('#fulfill-status').innerText(),/Stage at least one/);
+  assert.equal(await p.locator('#bundle-review-modal').isVisible(),false);
+  assert.equal(await p.evaluate(()=>calls.some(c=>c.name.startsWith('fulfill_'))),false);
+  assert.equal(await p.evaluate(()=>state.selectedLiveLot),null);
+});
+
+test('optional bag controls return to item checkout without losing the order or staged lines',async t=>{
+  const p=await open(t,{width:390});await scan(p);await p.waitForFunction(()=>state.stagedFulfillments.size===1);
+  await p.locator('#optional-live-bag > summary').click();assert.equal(await p.locator('#live-lot-scan').isVisible(),true);
+  await p.evaluate(()=>{state.selectedLiveLot={id:'old-bag'};});await p.locator('#use-item-checkout').click();
+  await p.waitForFunction(()=>document.activeElement?.id==='item-scan');
+  assert.equal(await p.evaluate(()=>state.selectedLine.id),'line-b');assert.equal(await p.evaluate(()=>state.stagedFulfillments.size),1);
+  assert.equal(await p.evaluate(()=>state.selectedLiveLot),null);assert.equal(await p.locator('#live-lot-scan').isVisible(),false);
+  assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await p.screenshot({path:'test-results/optional-bag-checkout-phone.png'});
 });

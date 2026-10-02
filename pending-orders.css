@@ -5049,3 +5049,8 @@ a.buyer-line-finance-pill:hover {
 
 .bundle-review-item.is-without-inventory { grid-template-columns: 1fr; }
 .bundle-review-copy small { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+
+#optional-live-bag > summary { cursor: pointer; font-weight: 700; }
+#optional-live-bag[open] > summary { margin-bottom: 16px; }
+#optional-live-bag > button { margin-top: 12px; }
+#checkout-item-scan { scroll-margin-top: 16px; }
