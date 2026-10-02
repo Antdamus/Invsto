@@ -27,8 +27,8 @@ after(async () => {
   await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
 });
 
-async function open(t, {pageName = 'pending-orders', saved = '', button = false} = {}) {
-  const context = await browser.newContext({viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true});
+async function open(t, {pageName = 'pending-orders', saved = '', button = false, desktop = false, width} = {}) {
+  const context = await browser.newContext({viewport: {width: width || (desktop ? 1280 : 390), height: 844}, isMobile: !desktop, hasTouch: !desktop});
   t.after(() => context.close());
   await context.route('**/*', route => [origin, `blob:${origin}`, 'data:'].some(prefix => route.request().url().startsWith(prefix)) ? route.continue()
     : route.request().isNavigationRequest() ? route.fulfill({body: '<h1>eBay navigation fixture</h1>', contentType: 'text/html'}) : route.abort());
@@ -67,6 +67,7 @@ async function open(t, {pageName = 'pending-orders', saved = '', button = false}
     });
     // Exercise the actual pending queue link and its Opening... wrapper.
     if (pageName === 'pending-orders' && !button) {
+      window.originalScheduleReceiptHydration = scheduleQueueVideoReceiptEvidenceHydration;
       scheduleQueueVideoReceiptEvidenceHydration = () => {};
       state.employee = {active: true, role: 'admin'};
       state.orders = [fixtureLine]; state.filteredOrders = [fixtureLine]; state.selectedLine = fixtureLine;
@@ -234,8 +235,8 @@ for (const pageName of ['ebay-order-history', 'ebay-returns']) {
   });
 }
 
-async function screenshotPage(t) {
-  const p = await open(t);
+async function screenshotPage(t, options = {}) {
+  const p = await open(t, options);
   await p.evaluate(() => {
     window.uploads = []; window.notes = []; window.uploadFailure = false; window.noteFailure = false;
     window.uploadDelay = 0; window.refreshFailure = false;
@@ -449,4 +450,62 @@ test('order history recognizes phone screenshots and respects item-line identity
       getHistoryLineVideoReceiptPhotos({...fixtureLine, id: 'line-two'}, [event]).length];
   });
   assert.deepEqual(result, [1, 0]);
+});
+
+test('desktop receipt opens through the extension on the first click and closes options before return', async t => {
+  const p = await open(t, {desktop: true});await trigger(p).click();
+  await p.waitForFunction(() => extensionRequests.length === 1);
+  assert.equal(await p.locator('.video-receipt-desktop').evaluate(el=>el.open), true);
+  assert.equal(await p.locator('.video-receipt-find').isDisabled(), true);
+  const payload = await p.evaluate(() => extensionRequests[0].payload);
+  assert.equal(payload.orderNumber, '11-22222-33333');assert.equal(payload.itemNumber, '123456789012');assert.equal(payload.transactionId, 'txn-one');
+  // Repeated action while the worker is still opening cannot create another request.
+  await p.evaluate(()=>OGVideoReceipts.open(null,getOrderVideoReceiptLink(fixtureLine)));
+  assert.equal(await p.evaluate(()=>extensionRequests.length),1);
+  await p.evaluate(url=>window.postMessage({type:'OG_EBAY_VIDEO_RECEIPT_OPEN_RESPONSE',requestId:extensionRequests[0].requestId,payload:{ok:true,openedUrl:url}},location.origin),receiptUrl);
+  await dialog(p).waitFor({state:'detached'});assert.equal(await trigger(p).textContent(),'Open video receipt');
+});
+
+test('desktop saved links keep using extension capture without an extra native tab', async t => {
+  const p = await open(t,{desktop:true,saved:receiptUrl});await trigger(p).click();
+  await p.waitForFunction(()=>extensionRequests.length===1);
+  assert.equal(await p.evaluate(()=>extensionRequests[0].payload.videoReceiptUrl),receiptUrl);
+  assert.equal(p.context().pages().length,1);assert.equal(await p.evaluate(()=>dbCalls.length),0);
+  await p.evaluate(url=>window.postMessage({type:'OG_EBAY_VIDEO_RECEIPT_OPEN_RESPONSE',requestId:extensionRequests[0].requestId,payload:{ok:true,openedUrl:url}},location.origin),receiptUrl);
+  await dialog(p).waitFor({state:'detached'});await trigger(p).click();await p.waitForFunction(()=>extensionRequests.length===2);
+  assert.equal(await p.evaluate(()=>extensionRequests[1].payload.videoReceiptUrl),receiptUrl);
+});
+
+test('narrow desktop windows still open automatically and missing extensions leave usable fallback and retry', async t => {
+  const p=await open(t,{desktop:true,width:390});await p.clock.install();await trigger(p).click();
+  await p.waitForFunction(()=>extensionRequests.length===1);assert.equal(await p.locator('.video-receipt-order').isVisible(),true);
+  await p.clock.fastForward(20100);assert.match(await p.locator('.video-receipt-extension-status').textContent(),/did not respond/);
+  assert.equal(await p.locator('.video-receipt-find').isEnabled(),true);await p.locator('.video-receipt-find').click();
+  await p.waitForFunction(()=>extensionRequests.length===2);
+  await p.evaluate(()=>window.postMessage({type:'OG_EBAY_VIDEO_RECEIPT_OPEN_RESPONSE',requestId:extensionRequests[1].requestId,payload:{ok:false,error:'Sign in to eBay first.'}},location.origin));
+  await p.waitForFunction(()=>document.querySelector('.video-receipt-extension-status').textContent==='Sign in to eBay first.');
+  assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+});
+
+test('desktop capture transfer attaches once to its item and returns to the pending queue', async t => {
+  const p=await screenshotPage(t,{desktop:true});await p.evaluate(()=>{
+    scheduleQueueVideoReceiptEvidenceHydration=originalScheduleReceiptHydration;
+    state.ebayTransferReceiverReady=true;window.captureAcks=[];window.savedCaptures=[];
+    supabase.rpc=async(name,args)=>{
+      if(name!=='create_ebay_order_coordination_task')throw Error('Unexpected receipt write '+name);
+      savedCaptures.push(structuredClone(args));return {data:{id:'captured-task'}};
+    };
+    setupEbayLabelReceiver();
+    window.addEventListener('message',event=>{if(event.data?.type==='OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER_STATUS')captureAcks.push(event.data.payload);});
+    window.transfer={transferId:'desktop-fixture',metadata:{itemNumber:fixtureLine.item_number,transactionId:fixtureLine.transaction_id,orderNumber:fixtureLine.order.order_number,videoReceiptUrl:'https://www.ebay.com/ebaylive/events/fixture-event/stream?selectedItemId=123456789012&playback=true'},screenshot:{mimeType:'image/png',base64:testScreenshot.split(',')[1]}};
+    window.postMessage({type:'OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER',payload:transfer},location.origin);
+    window.postMessage({type:'OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER',payload:transfer},location.origin);
+  });
+  await p.waitForFunction(()=>captureAcks.some(ack=>ack.ok===true));
+  assert.deepEqual(await p.evaluate(()=>savedCaptures.map(c=>c._order_line_ids)),[['line-one']]);
+  assert.equal(await p.evaluate(()=>savedCaptures[0]._photo_attachments[0].label),'Video receipt - 123456789012');
+  assert.deepEqual(await p.evaluate(()=>[getLineVideoReceiptPhotoCount(fixtureLine),getLineVideoReceiptPhotoCount(state.orders[1])]),[1,0]);
+  assert.equal(await p.evaluate(()=>state.selectedLine),null);assert.equal(await p.locator('#manual-video-receipt-modal').isVisible(),false);
+  assert.equal(await p.evaluate(()=>fixtureLine.line_status),'pending');
+  await p.locator('[data-queue-video-evidence="line-one"] img').waitFor({state:'visible'});
 });

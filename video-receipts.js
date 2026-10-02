@@ -82,6 +82,7 @@
       window.addEventListener("message", onMessage);
       signal.addEventListener("abort", onAbort, {once: true});
       window.postMessage({type: "OG_EBAY_VIDEO_RECEIPT_OPEN_REQUEST", requestId, payload: {
+        videoReceiptUrl: normalizeUrl(receipt.url, receipt) || resolvedLinks.get(cacheKey(receipt)) || "",
         orderNumber: receipt.orderNumber,
         orderDetailsUrl: orderUrl(receipt),
         itemNumber: receipt.itemNumber,
@@ -95,11 +96,16 @@
   function open(event, receipt = {}) {
     event?.stopPropagation?.();
     const direct = normalizeUrl(receipt.url, receipt) || resolvedLinks.get(cacheKey(receipt));
-    if (direct) {
+    // Input capabilities keep narrow desktop windows on the extension path,
+    // while touch-only phones retain native links and screenshot upload.
+    const desktop = window.matchMedia?.("(any-hover: hover) and (any-pointer: fine)").matches === true;
+    const modifiedClick = event?.metaKey || event?.ctrlKey || event?.shiftKey || event?.altKey;
+    if (direct && (!desktop || modifiedClick)) {
       navigate(direct, event);
       return {ok: true, direct: true};
     }
     event?.preventDefault?.();
+    if (activeDialog?.key === cacheKey(receipt) && activeDialog.opening) return {ok: true, opening: true};
     activeDialog?.close();
     const trigger = event?.currentTarget || document.activeElement;
     const controller = new AbortController();
@@ -158,7 +164,7 @@
       if (activeDialog?.element === dialog) activeDialog = null;
       if (trigger?.isConnected) trigger.focus();
     };
-    activeDialog = {element: dialog, close};
+    activeDialog = {element: dialog, close, key: cacheKey(receipt), opening: false};
     if (typeof receipt.onUploadScreenshot === "function") {
       find(".video-receipt-upload").hidden = false;
       find(".video-receipt-upload").addEventListener("click", () => {
@@ -174,7 +180,8 @@
 
     // The queue deliberately omits large metadata. Read only this order on demand;
     // the eBay fallback stays usable even if this lookup is slow or unavailable.
-    (async () => {
+    if (direct) showReceipt(direct);
+    else (async () => {
       const timer = setTimeout(() => lookupController.abort(), 8000);
       try {
         if (!receipt.orderId || !window.supabase?.from) {
@@ -194,9 +201,10 @@
       } finally { clearTimeout(timer); }
     })();
 
-    extensionButton.addEventListener("click", async () => {
-      if (extensionButton.disabled) return;
+    async function openWithExtension(automatic = false) {
+      if (extensionButton.disabled || controller.signal.aborted) return;
       extensionButton.disabled = true;
+      if (activeDialog?.element === dialog) activeDialog.opening = true;
       const status = find(".video-receipt-extension-status");
       status.textContent = "Looking for the receipt with the desktop extension… You can also open the eBay order above.";
       try {
@@ -206,14 +214,27 @@
         if (url) {
           showReceipt(url);
           lookupStatus.textContent = "Receipt found for this item.";
-          status.textContent = "The extension opened the receipt. You can reopen it using the link above.";
+          status.textContent = "The extension opened the receipt. Capture the item photo there to save it and return to Pending Orders.";
+          if (automatic) close();
         } else {
           status.textContent = result?.error || "The extension couldn't find a matching receipt. Open the eBay order above to check it.";
         }
       } catch (_) {
         if (!controller.signal.aborted) status.textContent = "Couldn't reach the extension. Open the eBay order above to view the receipt.";
-      } finally { extensionButton.disabled = false; }
-    });
+      } finally {
+        extensionButton.disabled = false;
+        if (activeDialog?.element === dialog) activeDialog.opening = false;
+      }
+    }
+    extensionButton.addEventListener("click", () => openWithExtension(desktop));
+    if (desktop && (ebayOrderUrl || direct)) {
+      find(".video-receipt-desktop").hidden = false;
+      find(".video-receipt-desktop").open = true;
+      find(".video-receipt-desktop summary").textContent = "Desktop capture";
+      extensionButton.textContent = "Retry opening with extension";
+      find(".video-receipt-help").textContent = "The extension opens the receipt automatically. On eBay, click Capture item photo; it saves to the order and returns you to Pending Orders. If the extension is unavailable, use the links here.";
+      void openWithExtension(true);
+    }
     return {ok: true, dialog: true};
   }
 
