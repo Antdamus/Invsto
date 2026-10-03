@@ -21,6 +21,7 @@ const state = {
   adminCloseoutAction: "",
   adminCloseoutScope: "selected",
   orderSort: "created_asc",
+  orderDueFilter: "all",
   pendingItemCandidate: null,
   itemSearchTimer: null,
   locationSearchTimer: null,
@@ -3031,9 +3032,13 @@ function clearOrderCreatedDateFilter({ apply = true } = {}) {
 
 function expandSearchMatchesToBuyerBundles(lines = [], term = "") {
   if (!term) return lines;
+  return filterBuyerBundles(lines, line => (line.searchText || "").includes(term));
+}
+
+function filterBuyerBundles(lines, matches) {
   const matchingBuyerKeys = new Set(
     lines
-      .filter((line) => (line.searchText || "").includes(term))
+      .filter(matches)
       .map(getBuyerKey)
       .filter(Boolean)
   );
@@ -3041,28 +3046,46 @@ function expandSearchMatchesToBuyerBundles(lines = [], term = "") {
   return lines.filter((line) => matchingBuyerKeys.has(getBuyerKey(line)));
 }
 
+function renderOrderDueFilters() {
+  const fulfilled = $("order-status-filter")?.value === "fulfilled";
+  if (fulfilled) state.orderDueFilter = "all";
+  document.querySelectorAll("[data-order-due-filter]").forEach(button => {
+    button.setAttribute("aria-pressed", String(button.dataset.orderDueFilter === state.orderDueFilter));
+    button.disabled = fulfilled && button.dataset.orderDueFilter !== "all";
+  });
+}
+
 function applyOrderFilters() {
   const term = String($("order-search")?.value || "").trim().toLowerCase();
   const createdDate = $("order-created-date-filter")?.value || "";
   const statusMode = $("order-status-filter")?.value || "pending";
+  renderOrderDueFilters();
+  const keepBuyerGroups = ["overdue", "today", "tomorrow"].includes(state.orderDueFilter);
   let filtered = [...state.orders];
 
   if (isCancellationReviewMode(statusMode)) {
-    filtered = filtered.filter(isActiveCancellationReviewLine);
+    filtered = keepBuyerGroups ? filterBuyerBundles(filtered, isActiveCancellationReviewLine) : filtered.filter(isActiveCancellationReviewLine);
   }
 
   if (createdDate) {
-    filtered = filtered.filter((line) => toLocalDateInputValue(line.orderCreatedAt || getOrderCreatedAt(line)) === createdDate);
+    filtered = filterBuyerBundles(filtered, line => toLocalDateInputValue(line.orderCreatedAt || getOrderCreatedAt(line)) === createdDate);
+  }
+
+  if (keepBuyerGroups) {
+    filtered = filterBuyerBundles(filtered, line => isOpenOrderLine(line)
+      && getOrderUrgency(line.order?.ship_by_date)?.level === state.orderDueFilter);
   }
 
   if (state.selectedLiveLot) {
-    filtered = filtered.filter((line) => state.liveLotMatchedLineIds.has(line.id));
+    const matchesBag = line => state.liveLotMatchedLineIds.has(line.id);
+    filtered = keepBuyerGroups ? filterBuyerBundles(filtered, matchesBag) : filtered.filter(matchesBag);
   }
 
   if (state.ebayLaunchBuyerKeys.size) {
     filtered = filtered.filter((line) => state.ebayLaunchBuyerKeys.has(getBuyerKey(line)));
   } else if (state.ebayLaunchOrderNumbers.size) {
-    filtered = filtered.filter((line) => state.ebayLaunchOrderNumbers.has(normalizeEbayOrderNumber(getOrderFromLine(line).order_number)));
+    const matchesLaunch = line => state.ebayLaunchOrderNumbers.has(normalizeEbayOrderNumber(getOrderFromLine(line).order_number));
+    filtered = keepBuyerGroups ? filterBuyerBundles(filtered, matchesLaunch) : filtered.filter(matchesLaunch);
   }
 
   filtered = expandSearchMatchesToBuyerBundles(filtered, term);
@@ -3089,6 +3112,7 @@ function clearEbayLaunchFilter({ apply = true } = {}) {
 async function applyEbayLaunchOrderSelection() {
   const orderNumbers = getRequestedEbayOrderNumbers();
   if (!orderNumbers.length) return;
+  state.orderDueFilter = "all";
 
   state.ebayLaunchSnapshot = getRequestedEbayOrderSnapshot();
   state.ebayLaunchOrderNumbers = new Set(orderNumbers);
@@ -3244,10 +3268,13 @@ function renderSummaryStrip() {
   };
 
   openGroups.forEach((group) => {
-    const bucket = getOrderUrgency(group.nextShipBy)?.level;
-    if (!urgencyCounts[bucket]) return;
-    urgencyCounts[bucket].groups += 1;
-    urgencyCounts[bucket].lines += group.lines.filter(isOpenOrderLine).length;
+    const lines = group.lines.filter(isOpenOrderLine);
+    const buckets = new Set(lines.map(line => getOrderUrgency(line.order?.ship_by_date)?.level));
+    for (const bucket of buckets) {
+      if (!urgencyCounts[bucket]) continue;
+      urgencyCounts[bucket].groups += 1;
+      urgencyCounts[bucket].lines += lines.length;
+    }
   });
 
   $("summary-pending").textContent = `${openOrderCount.toLocaleString()} order${openOrderCount === 1 ? "" : "s"}`;
@@ -10247,6 +10274,7 @@ async function openPendingNoInventorySessionForLabel(orderNumbers, options = {})
   const openMatch = candidates.find((line) => line.id === state.selectedLine?.id) || candidates[0];
   if (!openMatch) return false;
 
+  state.orderDueFilter = "all";
   state.ebayLaunchOrderNumbers = new Set(getUniqueOrderNumbersForLines(batchLines));
   state.ebayLaunchBuyerKeys = new Set(batchLines.map(getBuyerKey).filter(Boolean));
   state.ebayLaunchAllOrderNumbers = new Set(state.ebayLaunchOrderNumbers);
@@ -12033,6 +12061,13 @@ function setupListeners() {
     applyOrderFilters();
   });
   $("order-status-filter")?.addEventListener("change", loadOrders);
+  document.querySelectorAll("[data-order-due-filter]").forEach(button => {
+    button.addEventListener("click", () => {
+      state.orderDueFilter = button.dataset.orderDueFilter;
+      clearEbayLaunchFilter({ apply: false });
+      applyOrderFilters();
+    });
+  });
   $("cancellation-review-toggle")?.addEventListener("click", async () => {
     const select = $("order-status-filter");
     if (!select) return;

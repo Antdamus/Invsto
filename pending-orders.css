@@ -1181,6 +1181,39 @@ button.task-action-btn.is-assigned:hover,
   flex: 1 1 160px;
 }
 
+.buyer-due-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 6px;
+}
+
+.buyer-due-filters > span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  margin-right: 4px;
+}
+
+.buyer-due-filters .secondary-btn {
+  min-height: 40px;
+  padding: 8px 13px;
+  font-size: 0.82rem;
+}
+
+.buyer-due-filters [aria-pressed="true"] {
+  border-color: var(--gold-strong);
+  background: rgba(227, 189, 119, 0.18);
+  color: var(--gold-strong);
+}
+
+.buyer-due-filter-help {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .orders-panel .filter-row input,
 .orders-panel .filter-row select {
   min-height: 40px;

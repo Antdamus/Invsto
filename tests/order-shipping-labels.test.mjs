@@ -556,3 +556,90 @@ test('API-refreshed CSV orders show exact local timestamps and timezone, includi
   assert.match(result.sale,/Oct 1.*4:17 PM EDT/);assert.match(result.due,/Oct 6.*2:59 AM EDT/);
   assert.match(result.noon,/Oct 1.*8:00 AM EDT/);assert.doesNotMatch(result.noon,/not provided/);
 });
+
+async function prepareDueGroups(page){
+  await page.clock.setFixedTime(new Date('2026-10-03T16:00:00Z'));
+  await page.evaluate(()=>{
+    const rows=[
+      ['a-old','client-a','2026-10-02','2026-10-01','Overdue ring'],
+      ['a-today','client-a','2026-10-03','2026-10-02','Today chain'],
+      ['a-tomorrow','client-a','2026-10-04','2026-10-02','Tomorrow necklace'],
+      ['a-later','client-a','2026-10-09','2026-10-03','Later bracelet'],
+      ['a-no-date','client-a',null,'2026-10-03','No deadline'],
+      ['b-today','client-b','2026-10-03','2026-10-01','Today watch'],
+      ['b-later','client-b','2026-10-09','2026-10-02','Later watch'],
+      ['c-closed','client-c','2026-10-01','2026-10-01','Closed ring','fulfilled'],
+      ['c-later','client-c','2026-10-09','2026-10-02','Pending ring'],
+      ['d-tomorrow','client-d','2026-10-04','2026-10-02','Tomorrow watch'],
+      ['unknown-old','','2026-10-02','2026-10-01','Unknown customer ring'],
+      ['unknown-later','','2026-10-09','2026-10-02','Other unknown customer'],
+    ];
+    state.orders=rows.map(([id,buyer,due,sold,title,status='pending'])=>normalizeLine({id,order_id:id,item_title:title,
+      line_status:status,quantity:1,fulfilled_quantity:status==='fulfilled'?1:0,
+      order:{id,order_number:id,buyer_username:buyer,buyer_name:buyer,ship_by_date:due&&due+'T21:00:00Z',sale_date:sold+'T20:00:00Z'}}));
+    state.selectedLine=null;state.expandedBuyerKeys.add('client-a');applyOrderFilters();
+  });
+}
+const aLines=['a-old','a-today','a-tomorrow','a-later','a-no-date'];
+const visibleIds=page=>page.evaluate(()=>state.filteredOrders.map(line=>line.id));
+
+test('due filters match any pending item and retain every order for the same customer',async t=>{
+  const page=await open(t,database());await prepareDueGroups(page);
+  const filters=page.getByRole('group',{name:'Shipping due date'});
+  await filters.getByRole('button',{name:'Overdue',exact:true}).click();
+  assert.deepEqual(await visibleIds(page),[...aLines,'unknown-old']);
+  await expect(page.locator('#order-count-pill')).toHaveText('6 lines / 2 buyers');
+  await expect(filters.getByRole('button',{name:'Overdue',exact:true})).toHaveAttribute('aria-pressed','true');
+  assert.equal(await page.locator('.buyer-order-card[data-buyer-key="client-a"] [data-line-id]').count(),5);
+  await expect(page.locator('#summary-overdue-orders')).toHaveText('2 groups');
+  await expect(page.locator('#summary-overdue-lines')).toContainText('6 item lines');
+  await expect(page.locator('#summary-today-orders')).toHaveText('2 groups');
+  await expect(page.locator('#summary-tomorrow-orders')).toHaveText('2 groups');
+  await page.evaluate(()=>{
+    state.selectedLiveLot={id:'fixture-bag'};state.liveLotMatchedLineIds=new Set(['a-later']);applyOrderFilters();
+  });
+  assert.deepEqual(await visibleIds(page),aLines,'a bag match must not split the customer when a due filter is active');
+  await page.evaluate(()=>{state.selectedLiveLot=null;state.liveLotMatchedLineIds.clear();applyOrderFilters();});
+
+  await filters.getByRole('button',{name:'Due today',exact:true}).click();
+  assert.deepEqual(await visibleIds(page),[...aLines,'b-today','b-later']);
+  await filters.getByRole('button',{name:'Due tomorrow',exact:true}).click();
+  assert.deepEqual(await visibleIds(page),[...aLines,'d-tomorrow']);
+  await filters.getByRole('button',{name:'All due dates',exact:true}).click();
+  assert.equal((await visibleIds(page)).length,12);
+});
+
+test('search and sale dates keep matching buyer bundles intact; finishing the matching item updates the filter',async t=>{
+  const page=await open(t,database());await prepareDueGroups(page);
+  await page.locator('[data-order-due-filter="overdue"]').click();
+  await page.locator('#order-search').fill('later bracelet');
+  await page.locator('#order-created-date-filter').fill('2026-10-03');
+  assert.deepEqual(await visibleIds(page),aLines);
+  await page.evaluate(()=>{applyOrderFilters();}); // Queue redraws preserve the selected due filter.
+  await expect(page.locator('[data-order-due-filter="overdue"]')).toHaveAttribute('aria-pressed','true');
+  await page.evaluate(()=>{state.orders.find(line=>line.id==='a-old').line_status='fulfilled';applyOrderFilters();});
+  assert.deepEqual(await visibleIds(page),[]);
+  await page.locator('[data-order-due-filter="all"]').click();
+  assert.deepEqual(await visibleIds(page),aLines);
+  await page.setViewportSize({width:390,height:900});
+  assert.equal(await page.locator('.buyer-due-filters').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+  await mkdir(new URL('../test-results',import.meta.url),{recursive:true});
+  await page.locator('.buyer-due-filters').screenshot({path:'test-results/pending-due-filters-phone.png'});
+  await page.setViewportSize({width:1440,height:950});
+  await page.locator('.buyer-due-filters').screenshot({path:'test-results/pending-due-filters-desktop.png'});
+});
+
+test('fulfilled view clears pending due filters and label handoff opens its entire batch despite a previous filter',async t=>{
+  const page=await open(t,database());await prepareDueGroups(page);
+  await page.locator('[data-order-due-filter="today"]').click();
+  await page.evaluate(()=>{$('order-status-filter').value='fulfilled';applyOrderFilters();});
+  await expect(page.locator('[data-order-due-filter="today"]')).toBeDisabled();
+  await expect(page.locator('[data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
+  await page.evaluate(async()=>{
+    $('order-status-filter').value='pending';state.orderDueFilter='overdue';
+    await openPendingNoInventorySessionForLabel(['b-today'],{batchLines:state.orders.filter(line=>getBuyerKey(line)==='client-b')});
+  });
+  assert.deepEqual(await visibleIds(page),['b-today','b-later']);
+  await expect(page.locator('[data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
+  assert.deepEqual(await page.evaluate(()=>[...state.workerNoInventoryLineIds]),['b-today','b-later']);
+});

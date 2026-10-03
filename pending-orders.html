@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261003-checkout-customer" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261003-buyer-due-filters" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
   <script src="extension-updates.js?v=20261003" defer></script>
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
@@ -413,6 +413,15 @@
               <option value="buyer_desc">Username Z to A</option>
             </select>
           </div>
+
+          <div class="buyer-due-filters" role="group" aria-label="Shipping due date">
+            <span>Shipping due</span>
+            <button type="button" class="secondary-btn" data-order-due-filter="all" aria-pressed="true">All due dates</button>
+            <button type="button" class="secondary-btn" data-order-due-filter="overdue" aria-pressed="false">Overdue</button>
+            <button type="button" class="secondary-btn" data-order-due-filter="today" aria-pressed="false">Due today</button>
+            <button type="button" class="secondary-btn" data-order-due-filter="tomorrow" aria-pressed="false">Due tomorrow</button>
+          </div>
+          <p class="buyer-due-filter-help">Matches any pending item and keeps that customer's orders together.</p>
 
           <div id="orders-list" class="orders-list">
             <div class="empty-state">Loading pending orders...</div>
@@ -1146,6 +1155,6 @@
 <script src="phone-camera.js?v=20261003-photo-order-context"></script>
 <script src="shipping-label-reader.js?v=20261003-label-pdfs"></script>
 <script src="order-shipping-labels.js?v=20261003-direct-print"></script>
-<script src="pending-orders.js?v=20261003-order-date-precision"></script>
+<script src="pending-orders.js?v=20261003-buyer-due-filters"></script>
 </body>
 </html>
