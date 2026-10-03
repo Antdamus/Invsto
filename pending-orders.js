@@ -8939,7 +8939,12 @@ async function openWorkerNoInventoryModal(options = {}) {
   const requestedLineIds = Array.isArray(options.lineIds)
     ? options.lineIds.filter(Boolean)
     : [];
-  const candidates = requestedLineIds.length
+  const batchCandidateIds = Array.isArray(options.batchCandidateIds)
+    ? new Set(options.batchCandidateIds)
+    : null;
+  const candidates = batchCandidateIds
+    ? state.orders.filter((entry) => batchCandidateIds.has(entry.id) && isNoInventoryCompletionLine(entry))
+    : requestedLineIds.length
     ? getBuyerLines(getBuyerKey(line)).filter(isNoInventoryCompletionLine)
     : getNoInventoryCandidateLines(line);
   if (!candidates.length) {
@@ -10110,21 +10115,27 @@ async function loadPendingOrderLinesForExtensionMatch(options = {}) {
     .filter(Boolean))];
   const itemNumber = String(options.itemNumber || options.itemId || "").trim();
   const transactionId = String(options.transactionId || options.txnId || "").trim();
-  if (!orderNumbers.length && !itemNumber && !transactionId) return [];
+  const buyerUsernames = [...new Set((options.buyerUsernames || []).map(String).filter(Boolean))];
+  if (!orderNumbers.length && !buyerUsernames.length && !itemNumber && !transactionId) return [];
 
   const admin = isAdminUser();
   const rows = [];
-  if (orderNumbers.length) {
-    for (let index = 0; index < orderNumbers.length; index += 50) {
-      const chunk = orderNumbers.slice(index, index + 50);
-      let query = buildOrderLineQueueQuery("pending", admin)
-        .in("ebay_orders.order_number", chunk)
-        .limit(ORDER_QUEUE_PAGE_SIZE);
-      if (itemNumber) query = query.eq("item_number", itemNumber);
-      if (transactionId) query = query.eq("transaction_id", transactionId);
-      const { data, error } = await query;
-      if (error) throw new Error(error.message || "Could not look up pending eBay cancellation/order lines.");
-      rows.push(...(data || []));
+  if (orderNumbers.length || buyerUsernames.length) {
+    const values = orderNumbers.length ? orderNumbers : buyerUsernames;
+    const field = orderNumbers.length ? "ebay_orders.order_number" : "ebay_orders.buyer_username";
+    for (let index = 0; index < values.length; index += 50) {
+      const chunk = values.slice(index, index + 50);
+      for (let from = 0; ; from += ORDER_QUEUE_PAGE_SIZE) {
+        let query = buildOrderLineQueueQuery("pending", admin)
+          .in(field, chunk)
+          .range(from, from + ORDER_QUEUE_PAGE_SIZE - 1);
+        if (itemNumber) query = query.eq("item_number", itemNumber);
+        if (transactionId) query = query.eq("transaction_id", transactionId);
+        const { data, error } = await query;
+        if (error) throw new Error(error.message || "Could not look up the complete pending eBay order batch.");
+        rows.push(...(data || []));
+        if (!data || data.length < ORDER_QUEUE_PAGE_SIZE) break;
+      }
     }
   } else {
     let query = buildOrderLineQueueQuery("pending", admin).limit(100);
@@ -10159,12 +10170,13 @@ async function ensureExtensionOrderLinesLoaded(options = {}) {
   });
   const foundOrderNumbers = new Set(matches.map((line) => normalizeEbayOrderNumber(getOrderFromLine(line).order_number)).filter(Boolean));
   const missingOrderNumbers = orderNumbers.filter((orderNumber) => !foundOrderNumbers.has(orderNumber));
-  if (missingOrderNumbers.length || (!matches.length && (itemNumber || transactionId))) {
-    await loadPendingOrderLinesForExtensionMatch({
-      orderNumbers: missingOrderNumbers.length ? missingOrderNumbers : orderNumbers,
+  if (options.refresh || missingOrderNumbers.length || (!matches.length && (itemNumber || transactionId))) {
+    const loaded = await loadPendingOrderLinesForExtensionMatch({
+      orderNumbers: options.refresh ? orderNumbers : missingOrderNumbers.length ? missingOrderNumbers : orderNumbers,
       itemNumber,
       transactionId,
     });
+    if (options.refresh) return loaded;
     matches = state.orders.filter((line) => {
       const order = getOrderFromLine(line);
       if (orderNumbers.length && !orderNumbers.includes(normalizeEbayOrderNumber(order.order_number))) return false;
@@ -10176,27 +10188,48 @@ async function ensureExtensionOrderLinesLoaded(options = {}) {
   return matches;
 }
 
-async function openPendingNoInventorySessionForLabel(orderNumber) {
-  const normalizedOrderNumber = normalizeEbayOrderNumber(orderNumber);
-  const matchingLines = await ensureExtensionOrderLinesLoaded({ orderNumbers: [normalizedOrderNumber] });
+async function loadPendingLabelBuyerBatch(matchingLines) {
+  const buyerUsernames = [...new Set(matchingLines.map((line) => getOrderFromLine(line).buyer_username).filter(Boolean))];
+  const buyerKeys = new Set(matchingLines.map(getBuyerKey));
+  const buyerLines = buyerUsernames.length
+    ? await loadPendingOrderLinesForExtensionMatch({ buyerUsernames })
+    : [];
+  // Orders without a username stay scoped to their own order number.
+  return [...buyerLines, ...matchingLines.filter((line) => !getOrderFromLine(line).buyer_username)]
+    .filter((line) => buyerKeys.has(getBuyerKey(line)) && isOpenOrderLine(line));
+}
 
-  const openMatch = matchingLines.find(isOpenOrderLine);
+async function openPendingNoInventorySessionForLabel(orderNumbers, options = {}) {
+  const numbers = (Array.isArray(orderNumbers) ? orderNumbers : [orderNumbers]).map(normalizeEbayOrderNumber).filter(Boolean);
+  const batchLines = options.batchLines || await loadPendingLabelBuyerBatch(
+    await ensureExtensionOrderLinesLoaded({ orderNumbers: numbers, refresh: true })
+  );
+  const candidates = batchLines.filter(isNoInventoryCompletionLine);
+  const openMatch = candidates.find((line) => line.id === state.selectedLine?.id) || candidates[0];
   if (!openMatch) return false;
 
-  state.ebayLaunchOrderNumbers = new Set([normalizedOrderNumber]);
-  state.ebayLaunchBuyerKeys = new Set(matchingLines.map(getBuyerKey).filter(Boolean));
+  state.ebayLaunchOrderNumbers = new Set(getUniqueOrderNumbersForLines(batchLines));
+  state.ebayLaunchBuyerKeys = new Set(batchLines.map(getBuyerKey).filter(Boolean));
+  state.ebayLaunchAllOrderNumbers = new Set(state.ebayLaunchOrderNumbers);
+  state.ebayLaunchSelectedCount = state.ebayLaunchTotalCount = candidates.length;
+  state.adminSelectedLineIds = new Set(candidates.map((line) => line.id));
   clearLiveLotSelection({ render: false });
   applyOrderFilters();
 
   if (state.selectedLine?.id !== openMatch.id) {
     selectOrderLine(openMatch.id);
   } else {
+    state.selectedLine = openMatch;
     renderSelectedOrder();
   }
 
   if (!isWorkerNoInventoryModalOpen()) {
-    setTimeout(() => openWorkerNoInventoryModal({ autoRequestPhoto: true }), 250);
+    const lineIds = candidates.map((line) => line.id);
+    await openWorkerNoInventoryModal({ autoRequestPhoto: true, lineIds, batchCandidateIds: lineIds });
   } else {
+    // Apply the same Select All default to an already-open checkout, preserving notes/photos.
+    state.workerNoInventoryCandidates = candidates;
+    setAllWorkerNoInventoryLines(true);
     renderEbayLabelPanel();
   }
   return true;
@@ -10309,11 +10342,7 @@ async function attachEbayLabelToOrder(transferPayload) {
   const metadataOrderNumber = normalizeEbayOrderNumber(metadata.orderId);
   let targetOrderNumbers = metadataOrderNumber ? [metadataOrderNumber] : [];
   if (metadata.source === "ebay-bulk-label-confirmation") {
-    if (selectedOrderNumber && (!metadataOrderNumbers.length || metadataOrderNumbers.includes(selectedOrderNumber) || metadataOrderNumber === selectedOrderNumber)) {
-      targetOrderNumbers = [selectedOrderNumber];
-    } else if (metadataOrderNumbers.length) {
-      targetOrderNumbers = metadataOrderNumbers;
-    }
+    targetOrderNumbers = [...targetOrderNumbers, ...metadataOrderNumbers];
   }
   targetOrderNumbers = [...new Set(targetOrderNumbers.map(normalizeEbayOrderNumber).filter(Boolean))];
   if (!targetOrderNumbers.length) throw new Error("The label transfer did not include a usable eBay order number.");
@@ -10323,7 +10352,7 @@ async function attachEbayLabelToOrder(transferPayload) {
     throw new Error(`This eBay label is for ${targetOrderNumbers.join(", ")}, but the open OG session is ${selectedOrderNumber}. Open the matching OG order/session before sending this label.`);
   }
 
-  const matchingLines = await ensureExtensionOrderLinesLoaded({ orderNumbers: targetOrderNumbers });
+  const matchingLines = await ensureExtensionOrderLinesLoaded({ orderNumbers: targetOrderNumbers, refresh: true });
 
   const directOrders = await loadEbayOrdersForLabels(targetOrderNumbers);
   const directOrderByNumber = new Map(directOrders.map((order) => [order.order_number, order]));
@@ -10348,6 +10377,9 @@ async function attachEbayLabelToOrder(transferPayload) {
   if (closedOrderNumbers.length) {
     throw createLabelRouteError("history", `Order ${closedOrderNumbers.join(", ")} ${closedOrderNumbers.length === 1 ? "is" : "are"} already closed in the pending queue. Opening order history to attach the label.`);
   }
+
+  // Resolve the whole buyer batch before saving, so a failed lookup cannot silently select a subset.
+  const batchLines = await loadPendingLabelBuyerBatch(matchingLines);
 
   const blob = base64ToBlob(label.base64, label.mimeType || "application/pdf");
   await window.shippingLabelPrint.assertComplete(blob);
@@ -10393,7 +10425,7 @@ async function attachEbayLabelToOrder(transferPayload) {
   if (orderError) throw new Error(orderError.message || "Could not update and audit the eBay order label status.");
 
   const savedOrders = new Map((savedLabel?.order_labels || []).map(order => [order.id, order]));
-  matchingLines.forEach((line) => {
+  state.orders.filter((line) => orderIds.includes(line.order_id)).forEach((line) => {
     const order = savedOrders.get(line.order_id);
     if (!order) return;
     for (const key of ["ebay_shipment_id", "label_status", "label_storage_bucket", "label_file_path", "label_uploaded_at", "label_metadata"]) {
@@ -10420,7 +10452,7 @@ async function attachEbayLabelToOrder(transferPayload) {
     orderNumber: primaryOrderNumber,
     orderNumbers: targetOrderNumbers,
   };
-  await openPendingNoInventorySessionForLabel(primaryOrderNumber);
+  await openPendingNoInventorySessionForLabel(targetOrderNumbers, { batchLines });
   const trackingText = getLabelTrackingDisplay(labelMetadata);
   const trackingClause = trackingText ? ` Tracker: ${trackingText}.` : " Tracker was not captured.";
   const attachedMessage = matchingLines.length

@@ -40,6 +40,9 @@ function database() {
     buyer_username:'lore2526',label_metadata:{}})), events:[], uploads:[], calls:[], requests:new Set(), failUpload:0, loseResponse:false};
 }
 async function open(t, db, mobile = false) {
+  db.lines ||= db.orders.map((order, i) => ({id:`line-${i?'b':'a'}`,order_id:order.id,item_title:i?'Silver ring':'Gold chain',quantity:1,fulfilled_quantity:0,
+    total_price:i?30:1485,line_status:'pending',order}));
+  db.reads ||= [];
   const context = await browser.newContext({viewport:{width:mobile ? 390:1440,height:950},isMobile:mobile,hasTouch:mobile});
   t.after(() => context.close());
   await context.route('**/*', r => [origin, `blob:${origin}`, 'data:'].some(s => r.request().url().startsWith(s)) ? r.continue():r.abort());
@@ -47,9 +50,15 @@ async function open(t, db, mobile = false) {
   const errors=[]; page.on('pageerror', e => errors.push(e.message)); t.after(() => assert.deepEqual(errors,[]));
   await page.exposeFunction('labelDb', async ({op,...args}) => {
     if (op === 'read') {
-      let rows = structuredClone(args.table === 'ebay_orders' ? db.orders : db.events);
-      for (const [kind,key,values] of args.filters) rows = rows.filter(row => kind === 'in' ? values.includes(row[key]) : row[key].some(v => values.includes(v)));
-      if (args.fields) rows = rows.map(row => Object.fromEntries(args.fields.split(',').map(key => key.trim()).map(key => [key,row[key] ?? null])));
+      db.reads.push(args);
+      if (db.failBuyerBatch && args.filters.some(([,key])=>key==='ebay_orders.buyer_username')) return {error:{message:'Could not load full buyer batch'}};
+      let rows = structuredClone(args.table === 'ebay_order_lines' ? db.lines.map(line=>({...line,ebay_orders:db.orders.find(order=>order.id===line.order_id)}))
+        : args.table === 'ebay_orders' ? db.orders : args.table === 'ebay_order_label_events' ? db.events : []);
+      for (const [kind,key,values] of args.filters) rows = rows.filter(row => {
+        const value=key.split('.').reduce((value,part)=>value?.[part],row);
+        return kind==='eq' ? value===values : kind === 'in' ? values.includes(value) : value?.some(v => values.includes(v));
+      });
+      if (args.fields && args.table !== 'ebay_order_lines') rows = rows.map(row => Object.fromEntries(args.fields.split(',').map(key => key.trim()).map(key => [key,row[key] ?? null])));
       return {data:rows.slice(args.start,args.end+1)};
     }
     if (op === 'upload') {
@@ -59,6 +68,11 @@ async function open(t, db, mobile = false) {
     }
     if (op === 'rpc') {
       db.calls.push(args);
+      if (args.name === 'complete_ebay_order_lines_without_inventory_evidence') {
+        const ids=args.args._order_line_ids;
+        db.lines.filter(line=>ids.includes(line.id)).forEach(line=>Object.assign(line,{line_status:'fulfilled',fulfilled_quantity:line.quantity}));
+        return {data:[{updated_lines:ids.length}]};
+      }
       if (args.name === 'append_ebay_shipping_label') {
         const a=args.args,orders=db.orders.filter(order=>a._order_ids.includes(order.id));
         for (const order of orders) {
@@ -98,6 +112,7 @@ async function open(t, db, mobile = false) {
       from(table) {
         const filters=[];let start=0,end=499,fields;
         const q={select(value){fields=value;return q;},in(k,v){filters.push(['in',k,v]);return q;},overlaps(k,v){filters.push(['overlaps',k,v]);return q;},
+          eq(k,v){filters.push(['eq',k,v]);return q;},limit(n){end=n-1;return q;},
           order(){return q;},range(a,b){start=a;end=b;return q;},then(resolve,reject){return labelDb({op:'read',table,filters,start,end,fields}).then(resolve,reject);}};
         return q;
       },
@@ -123,6 +138,119 @@ async function save(page) {
   await page.locator('#save-order-labels').click();
   await expect(page.locator('#order-label-upload-status')).toContainText('Labels saved');
 }
+
+async function prepareLabelBatch(page) {
+  await page.evaluate(() => {
+    hydratePendingOrderExtrasInBackground=()=>{};
+    hydrateNoInventoryVideoReceiptEvidenceThumbnails=async()=>{};
+    loadSelectedOrderTasks=hydrateSelectedOrderDetails=async()=>{};
+    requestNoInventoryEvidencePhoto=async()=>{};
+    state.activeBuyerKey=getBuyerKey(state.selectedLine);
+    loadOrders=async()=>{
+      const {data}=await supabase.from('ebay_order_lines').select('*').in('line_status',['pending','partially_fulfilled']);
+      state.orders=data.map(normalizeLine);applyOrderFilters();
+    };
+  });
+}
+
+async function injectLabel(page, metadata, transferId='batch-label') {
+  const base64=(await pdf()).toString('base64');
+  return page.evaluate(({metadata,base64,transferId})=>attachEbayLabelToOrder({
+    transferId,metadata,label:{base64,mimeType:'application/pdf'},
+  }),{metadata,base64,transferId});
+}
+
+test('injected label selects the full buyer batch in an open modal and completion sends every eligible line',async t=>{
+  const db=database(),page=await open(t,db);
+  await prepareLabelBatch(page);
+  db.orders.push({id:'order-c',order_number:'22-33333-55555',buyer_username:'different-buyer',label_metadata:{}});
+  db.lines.push({...db.lines[0],id:'line-a2'}, {...db.lines[1],id:'line-b2'},
+    {...db.lines[1],id:'closed',line_status:'fulfilled',fulfilled_quantity:1},
+    {...db.lines[1],id:'cancelled',line_status:'cancelled'},
+    {...db.lines[1],id:'partial',line_status:'partially_fulfilled',quantity:2,fulfilled_quantity:1},
+    {...db.lines[0],id:'unrelated',order_id:'order-c',order:db.orders[2]});
+  await page.evaluate(async()=>{
+    state.adminSelectedLineIds=new Set(['line-a']);
+    state.ebayLaunchOrderNumbers=new Set([lines[0].order.order_number]);
+    state.filteredOrders=[lines[0]];
+    await openWorkerNoInventoryModal({lineIds:['line-a']});
+    document.querySelector('#worker-no-inventory-note').value='Keep this packing note';
+    state.noInventoryEvidencePhotos=[{bucket:'test',path:'existing-photo.jpg'}];
+  });
+  await expect(page.locator('#worker-no-inventory-count')).toHaveText('1 of 2 selected');
+  await injectLabel(page,{orderId:db.orders[0].order_number});
+  await expect(page.locator('#worker-no-inventory-count')).toHaveText('4 of 4 selected');
+  await expect(page.locator('[data-no-inventory-line]:checked')).toHaveCount(4);
+  assert.deepEqual(await page.evaluate(()=>[...state.workerNoInventoryLineIds].sort()),['line-a','line-a2','line-b','line-b2']);
+  assert.deepEqual(await page.evaluate(()=>[...state.adminSelectedLineIds].sort()),['line-a','line-a2','line-b','line-b2']);
+  assert.equal(await page.evaluate(()=>state.noInventoryEvidencePhotos[0].path),'existing-photo.jpg');
+  await expect(page.locator('#worker-no-inventory-note')).toHaveValue('Keep this packing note');
+  assert.ok(db.reads.some(read=>read.filters.some(([,key])=>key==='ebay_orders.buyer_username')),'associated orders are loaded from the database, even if not in the current view');
+  await page.locator('#confirm-worker-no-inventory').click();
+  await expect(page.locator('#worker-no-inventory-modal')).toBeHidden();
+  const completion=db.calls.find(call=>call.name==='complete_ebay_order_lines_without_inventory_evidence');
+  assert.deepEqual([...completion.args._order_line_ids].sort(),['line-a','line-a2','line-b','line-b2']);
+  assert.equal(completion.args._notes,'Keep this packing note');
+  assert.equal(db.lines.find(line=>line.id==='unrelated').line_status,'pending');
+  assert.equal(db.lines.find(line=>line.id==='partial').fulfilled_quantity,1);
+});
+
+test('bulk label keeps every declared order and opens a fresh checkout with all associated buyer lines selected',async t=>{
+  const db=database();db.orders[1].buyer_username='second-buyer';
+  const page=await open(t,db);await prepareLabelBatch(page);
+  db.lines.push({...db.lines[0],id:'line-a2'},{...db.lines[1],id:'line-b2'});
+  await page.evaluate(()=>{state.adminSelectedLineIds=new Set(['line-a']);});
+  const result=await injectLabel(page,{source:'ebay-bulk-label-confirmation',orderIds:db.orders.map(order=>order.order_number)});
+  assert.deepEqual(result.orderNumbers,db.orders.map(order=>order.order_number));
+  const attachment=db.calls.find(call=>call.name==='append_ebay_shipping_label');
+  assert.deepEqual(attachment.args._order_ids.sort(),['order-a','order-b']);
+  await expect(page.locator('#worker-no-inventory-count')).toHaveText('4 of 4 selected');
+  await expect(page.locator('[data-no-inventory-line]:checked')).toHaveCount(4);
+  // Select All is a default, not a forced selection after staff review.
+  await page.locator('[data-no-inventory-line="line-b2"]').uncheck();
+  await expect(page.locator('#worker-no-inventory-count')).toHaveText('3 of 4 selected');
+  await page.locator('#select-all-worker-no-inventory').click();
+  await expect(page.locator('[data-no-inventory-line]:checked')).toHaveCount(4);
+  await page.locator('[data-no-inventory-line="line-b2"]').uncheck();
+  await page.locator('#confirm-worker-no-inventory').click();
+  await expect(page.locator('#worker-no-inventory-modal')).toBeHidden();
+  assert.deepEqual(db.calls.find(call=>call.name==='complete_ebay_order_lines_without_inventory_evidence').args._order_line_ids.sort(),['line-a','line-a2','line-b']);
+  assert.equal(db.lines.find(line=>line.id==='line-b2').line_status,'pending');
+});
+
+test('a missing buyer username never selects unrelated unnamed orders',async t=>{
+  const db=database();db.orders.forEach(order=>order.buyer_username='');
+  const page=await open(t,db);await prepareLabelBatch(page);
+  db.lines.push({...db.lines[0],id:'line-a2'});
+  await injectLabel(page,{orderId:db.orders[0].order_number});
+  await expect(page.locator('#worker-no-inventory-count')).toHaveText('2 of 2 selected');
+  assert.deepEqual(await page.evaluate(()=>[...state.workerNoInventoryLineIds].sort()),['line-a','line-a2']);
+});
+
+test('failed full-batch lookup stops the handoff instead of saving a label with a partial default selection',async t=>{
+  const db=database(),page=await open(t,db);await prepareLabelBatch(page);
+  db.failBuyerBatch=true;
+  await assert.rejects(injectLabel(page,{orderId:db.orders[0].order_number}),/Could not load full buyer batch/);
+  assert.equal(db.uploads.length,0);
+  assert.equal(db.calls.filter(call=>call.name==='append_ebay_shipping_label').length,0);
+  await expect(page.locator('#worker-no-inventory-modal')).toBeHidden();
+});
+
+test('batch lookup reads every database page rather than stopping at the first page',async t=>{
+  const db=database(),page=await open(t,db);await prepareLabelBatch(page);
+  const size=await page.evaluate(()=>ORDER_QUEUE_PAGE_SIZE);
+  db.lines=Array.from({length:size+1},(_,i)=>({...db.lines[0],id:`page-line-${i}`}));
+  const loaded=await page.evaluate(async()=>{
+    const matches=await ensureExtensionOrderLinesLoaded({orderNumbers:[lines[0].order.order_number],refresh:true});
+    const batch=await loadPendingLabelBuyerBatch(matches);
+    return {matches:matches.length,batch:batch.length};
+  });
+  assert.deepEqual(loaded,{matches:size+1,batch:size+1});
+  for (const field of ['ebay_orders.order_number','ebay_orders.buyer_username']) {
+    const requests=db.reads.filter(read=>read.filters.some(([,key])=>key===field));
+    assert.deepEqual(requests.map(read=>read.start),[0,size]);
+  }
+});
 
 test('saved shipping label marks the whole group, including filtered lines; tracking alone does not',async t=>{
   const db=database();
@@ -175,6 +303,7 @@ test('extension imports append multiple PDFs in checkout, preserve old labels, a
   const original=structuredClone(db.orders[0]),page=await open(t,db);
   await page.evaluate(async()=>{
     ensureExtensionOrderLinesLoaded=async({orderNumbers})=>lines.filter(line=>orderNumbers.includes(line.order.order_number));
+    loadPendingLabelBuyerBatch=async matching=>matching;
     openPendingNoInventorySessionForLabel=async()=>true;
     await openWorkerNoInventoryModal({lineIds:['line-a']});
     window.prints=[];shippingLabelPrint.run=(button,options)=>prints.push(options);
