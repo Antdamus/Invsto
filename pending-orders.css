@@ -5213,3 +5213,25 @@ a.buyer-line-finance-pill:hover {
 #optional-live-bag[open] > summary { margin-bottom: 16px; }
 #optional-live-bag > button { margin-top: 12px; }
 #checkout-item-scan { scroll-margin-top: 16px; }
+
+#order-shipping-labels-modal { z-index: 6500; }
+#order-label-pending { display: grid; gap: 14px; margin-top: 16px; }
+.order-label-upload-card, .order-saved-label {
+  border: 1px solid rgba(212,175,55,.25); border-radius: 16px;
+  padding: 16px; background: rgba(255,255,255,.035); min-width: 0;
+  overflow-wrap: anywhere;
+}
+.order-label-upload-head, .order-saved-label {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+}
+.order-label-upload-head strong { flex: 1; min-width: 0; }
+.order-label-preview { display: block; max-width: 220px; width: 100%; max-height: 320px; object-fit: contain; margin: 16px auto; }
+.order-label-upload-card > label { display: grid; gap: 8px; margin-top: 14px; }
+.order-label-upload-card input[data-label-tracking] { width: 100%; min-width: 0; box-sizing: border-box; }
+.order-label-upload-card fieldset { border: 1px solid rgba(255,255,255,.18); border-radius: 12px; margin: 14px 0 0; min-width: 0; }
+.order-label-order-choice { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.order-label-order-choice input { width: auto; flex: 0 0 auto; }
+.order-saved-label { margin-top: 12px; }
+.order-saved-label > div:first-child { display: grid; gap: 5px; min-width: 0; flex: 1 1 230px; }
+.order-saved-label small, .order-label-upload-card legend { color: #bdb8b0; }
+#order-shipping-labels-modal .is-error { color: #ff9c9c; }

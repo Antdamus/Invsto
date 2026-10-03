@@ -386,6 +386,7 @@ function closeModal(id) {
     !$("item-confirm-modal")?.classList.contains("hidden")
     || !$("bundle-review-modal")?.classList.contains("hidden")
     || !$("completion-photos-modal")?.classList.contains("hidden")
+    || !$("order-shipping-labels-modal")?.classList.contains("hidden")
     || !$("worker-no-inventory-modal")?.classList.contains("hidden")
     || !$("worker-cancel-order-modal")?.classList.contains("hidden")
     || !$("no-inventory-photo-viewer-modal")?.classList.contains("hidden")
@@ -3918,6 +3919,7 @@ function renderOrders() {
           <span class="buyer-card-value">${formatMoney(group.totalValue)}</span>
           ${taskControlMarkup}
           <button type="button" class="buyer-card-expand-btn buyer-card-completion-photos" data-buyer-completion-photos>Completion photos</button>
+          <button type="button" class="buyer-card-expand-btn" data-buyer-shipping-labels>Shipping labels</button>
           <span class="status-badge">${group.pendingCount} pending</span>
           <button type="button" class="buyer-card-expand-btn" data-buyer-expand-key="${escapeHtml(group.key)}" aria-expanded="${isExpanded ? "true" : "false"}">
             <i data-lucide="${isExpanded ? "chevron-up" : "chevron-down"}"></i>
@@ -3962,6 +3964,10 @@ function renderOrders() {
     card.querySelector("[data-buyer-completion-photos]")?.addEventListener("click", event => {
       event.stopPropagation();
       openCompletionPhotos(group.lines);
+    });
+    card.querySelector("[data-buyer-shipping-labels]")?.addEventListener("click", event => {
+      event.stopPropagation();
+      openOrderShippingLabels(group.lines);
     });
     const lineList = card.querySelector(".buyer-line-list");
     const buyerLabelButton = card.querySelector("[data-buyer-label-key]");
@@ -4919,7 +4925,7 @@ function renderEbayLabelPanel() {
   const trackingText = getLabelTrackingDisplay(metadata);
   const summaryText = label.path
     ? `Label attached${label.uploadedAt ? ` ${formatDate(label.uploadedAt)}` : ""}${sizeText ? ` - ${sizeText}` : ""}${trackingText ? ` - tracker ${trackingText}` : ""}. Preview before final confirmation.`
-    : "Waiting for a label from the eBay extension.";
+    : "Upload a label PDF or send a label from eBay.";
   const detailsHtml = label.path
     ? `
       <div class="label-tracking-confirmation">
@@ -4933,7 +4939,7 @@ function renderEbayLabelPanel() {
         <span><small>Cost</small><b>${escapeHtml(metadata.labelCost ? formatMoney(metadata.labelCost) : "-")}</b></span>
       </div>
     `
-    : `<div class="empty-state">Click Send Label to OG on the eBay label-ready page after this order is packed.</div>`;
+    : `<div class="empty-state">Upload your shipping label PDF, or click Send Label to OG on the eBay label-ready page.</div>`;
 
   if (panel) {
     const summary = $("ebay-label-summary");
@@ -7301,6 +7307,7 @@ function getActiveStagedFulfillments() {
 
 function closeBundleReviewModal(options = {}) {
   stopCompletionPhotoWatch("bundle");
+  stopOrderShippingLabelWatch("bundle");
   closeModal("bundle-review-modal");
   returnToOrdersAfterMobileModalClose(options);
   setTimeout(() => $("fulfill-order")?.focus(), 80);
@@ -7836,6 +7843,55 @@ function getNoInventoryEvidenceSourceLabel() {
 
 let completionPhotoController = null;
 const completionPhotoWatches = new Map();
+
+let orderShippingLabelController = null;
+const orderShippingLabelWatches = new Map();
+
+function getOrderShippingLabelController() {
+  if (!orderShippingLabelController && window.OGOrderShippingLabels) {
+    orderShippingLabelController = window.OGOrderShippingLabels.create({
+      getClient: () => supabase, escapeHtml, trackingDisplay: getLabelTrackingDisplay,
+      reportError: message => setStatus(message, "error"),
+      onOpen: () => openModal("order-shipping-labels-modal"),
+      onClose: () => closeModal("order-shipping-labels-modal"),
+      onOrdersLoaded: orders => {
+        const byId = new Map(orders.map(order => [order.id, order]));
+        const lines = new Set([...state.orders, state.selectedLine,
+          ...state.workerNoInventoryCandidates, ...getActiveStagedFulfillments().map(entry => entry.line)]);
+        for (const line of lines) {
+          const order = byId.get(line?.order_id);
+          if (!order) continue;
+          for (const key of ["label_status", "label_storage_bucket", "label_file_path", "label_uploaded_at", "label_metadata"]) {
+            line[key] = order[key];
+            getOrderFromLine(line)[key] = order[key];
+          }
+          line.searchText = normalizeLine(line).searchText;
+        }
+        renderEbayLabelPanel();
+      },
+    });
+  }
+  return orderShippingLabelController;
+}
+
+function openOrderShippingLabels(lines) {
+  if (state.busy) return;
+  if (!lines.length) return setStatus("Select an order for the shipping labels.", "error");
+  getOrderShippingLabelController()?.open(lines);
+}
+
+function stopOrderShippingLabelWatch(source) {
+  orderShippingLabelWatches.get(source)?.();
+  orderShippingLabelWatches.delete(source);
+}
+
+function watchOrderShippingLabels(source) {
+  stopOrderShippingLabelWatch(source);
+  const controller = getOrderShippingLabelController();
+  if (!controller) return;
+  orderShippingLabelWatches.set(source, controller.watch(getCompletionPhotoLines(source),
+    $(`${source}-shipping-labels`), $(`${source}-shipping-label-status`)));
+}
 
 function getCompletionPhotoController() {
   if (!completionPhotoController && window.OGCompletionPhotos) {
@@ -8534,6 +8590,7 @@ function setWorkerNoInventoryGpsStatus(message, tone = "warn") {
 
 function closeWorkerNoInventoryModal(options = {}) {
   stopCompletionPhotoWatch("no-inventory");
+  stopOrderShippingLabelWatch("no-inventory");
   if (!options.suppressEbayReturn) {
     postEbayLabelExitReturnToQueue();
   }
@@ -8561,6 +8618,7 @@ function setWorkerNoInventoryLineSelection(lineId, checked) {
   else state.workerNoInventoryLineIds.delete(lineId);
   renderWorkerNoInventoryList();
   watchCompletionPhotos("no-inventory");
+  watchOrderShippingLabels("no-inventory");
 }
 
 function setAllWorkerNoInventoryLines(checked) {
@@ -8570,6 +8628,7 @@ function setAllWorkerNoInventoryLines(checked) {
   }
   renderWorkerNoInventoryList();
   watchCompletionPhotos("no-inventory");
+  watchOrderShippingLabels("no-inventory");
 }
 
 function renderWorkerNoInventoryList() {
@@ -8740,6 +8799,7 @@ async function openWorkerNoInventoryModal(options = {}) {
   setWorkerNoInventoryGpsStatus("Requesting GPS for the audit trail...", "warn");
   openModal("worker-no-inventory-modal");
   watchCompletionPhotos("no-inventory");
+  watchOrderShippingLabels("no-inventory");
   setTimeout(() => (autoRequestPhoto ? $("request-no-inventory-photo") : $("confirm-worker-no-inventory"))?.focus(), 80);
 
   const stationPromise = loadNoInventoryCaptureStations({ silent: true }).catch((error) => {
@@ -8774,6 +8834,10 @@ async function openWorkerNoInventoryModal(options = {}) {
 
 async function confirmWorkerNoInventoryCompletion() {
   if (state.busy) return;
+  if (orderShippingLabelController?.hasPending) {
+    openModal("order-shipping-labels-modal");
+    return;
+  }
   if (completionPhotoController?.hasPending) {
     openModal("completion-photos-modal");
     return;
@@ -9432,6 +9496,7 @@ function openBundleReviewModal() {
   }
   openModal("bundle-review-modal");
   watchCompletionPhotos("bundle");
+  watchOrderShippingLabels("bundle");
   setTimeout(() => $("confirm-bundle-review")?.focus(), 80);
 }
 
@@ -9457,6 +9522,10 @@ function forgetPendingCheckoutRequest(payload) {
 
 async function fulfillSelectedOrder({ skipReview = false } = {}) {
   if (state.busy || !requireCheckoutStore()) return;
+  if (orderShippingLabelController?.hasPending) {
+    openModal("order-shipping-labels-modal");
+    return;
+  }
   if (completionPhotoController?.hasPending) {
     openModal("completion-photos-modal");
     return;
@@ -9475,6 +9544,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
 
   state.busy = true;
   stopCompletionPhotoWatch("bundle");
+  stopOrderShippingLabelWatch("bundle");
   closeModal("bundle-review-modal");
   $("fulfill-order").disabled = true;
   $("stage-current-line").disabled = true;
@@ -9715,7 +9785,7 @@ function safeStorageSegment(value, fallback = "value") {
 }
 
 function setEbayLabelTransferStatus(message = "", type = "info") {
-  const text = message || "Waiting for a label from the eBay extension.";
+  const text = message || "Upload a label PDF or send a label from eBay.";
   const modalSummary = $("worker-no-inventory-label-summary");
   const pageSummary = $("ebay-label-summary");
   const modalError = $("worker-no-inventory-error");
@@ -11889,6 +11959,12 @@ function setupListeners() {
       getCompletionPhotoLines(button.dataset.completionSource), button.dataset.completionPicker || ""
     ));
   });
+  document.querySelectorAll("[data-order-label-source]").forEach(button => {
+    button.addEventListener("click", () => openOrderShippingLabels(
+      button.dataset.orderLabelSource === "selected" ? [state.selectedLine].filter(Boolean)
+        : getCompletionPhotoLines(button.dataset.orderLabelSource)
+    ));
+  });
   $("select-all-no-inventory-photos")?.addEventListener("click", () => setAllNoInventoryEvidencePhotosSelected(true));
   $("deselect-all-no-inventory-photos")?.addEventListener("click", () => setAllNoInventoryEvidencePhotosSelected(false));
 
@@ -12024,6 +12100,15 @@ function setupListeners() {
       if (event.key === "Enter" || event.key === "Escape") {
         event.preventDefault();
         closeNoInventoryEvidencePhotoViewer();
+      }
+      return;
+    }
+
+    if (!$("order-shipping-labels-modal")?.classList.contains("hidden")) {
+      if (document.querySelector("dialog[open]")) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        getOrderShippingLabelController()?.close();
       }
       return;
     }

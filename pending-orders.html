@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261003-photo-corrections" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261003-label-pdfs" />
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
@@ -502,11 +502,12 @@
                 <span>PDF</span>
                 <div>
                   <h3>Shipping Label</h3>
-                  <p id="ebay-label-summary">Waiting for a label from the eBay extension.</p>
+                  <p id="ebay-label-summary">Upload a label PDF or send a label from eBay.</p>
                 </div>
               </div>
               <div id="ebay-label-details" class="ebay-label-details"></div>
               <div class="fulfill-actions">
+                <button type="button" class="secondary-btn" data-order-label-source="selected">Upload / view label PDFs</button>
                 <button id="open-ebay-label-page" type="button" class="secondary-btn">Open eBay Label Page</button>
                 <button id="preview-ebay-label" type="button" class="secondary-btn hidden">Preview Label</button>
         <button id="print-ebay-label" type="button" class="secondary-btn hidden">Print shipping label</button>
@@ -565,6 +566,12 @@
       <h2 id="bundle-review-title">Confirm packed bundle</h2>
       <p id="bundle-review-subtitle">Review the selected items before stock is removed.</p>
       <div id="bundle-review-list" class="bundle-review-list"></div>
+      <section class="no-inventory-label" aria-label="Shipping labels">
+        <h3>Shipping labels</h3>
+        <button type="button" class="secondary-btn" data-order-label-source="bundle">Upload / view label PDFs</button>
+        <p id="bundle-shipping-label-status" class="fulfill-status" role="status"></p>
+        <div id="bundle-shipping-labels"></div>
+      </section>
       <section class="no-inventory-evidence" aria-label="Completion photos">
         <h3>Completion photos</h3>
         <p>Optional photos saved with this order. Photos added from a phone appear here automatically.</p>
@@ -600,14 +607,17 @@
       <section class="no-inventory-label" aria-label="Shipping label attachment">
         <div>
           <span class="eyebrow">Shipping Label</span>
-          <h3>eBay Label</h3>
-          <p id="worker-no-inventory-label-summary">Waiting for a label from the eBay extension.</p>
+          <h3>Shipping labels</h3>
+          <p id="worker-no-inventory-label-summary">Upload a label PDF or send a label from eBay.</p>
         </div>
         <div id="worker-no-inventory-label-details" class="ebay-label-details"></div>
         <div class="no-inventory-label-actions">
+          <button type="button" class="secondary-btn" data-order-label-source="no-inventory">Upload / view label PDFs</button>
           <button id="preview-worker-ebay-label" type="button" class="secondary-btn hidden">Preview Label</button>
         <button id="print-worker-ebay-label" type="button" class="secondary-btn hidden">Print shipping label</button>
         </div>
+        <p id="no-inventory-shipping-label-status" class="fulfill-status" role="status"></p>
+        <div id="no-inventory-shipping-labels"></div>
       </section>
       <section class="no-inventory-evidence" aria-label="Optional evidence photos">
         <div>
@@ -988,6 +998,33 @@
     </div>
   </div>
 
+  <div id="order-shipping-labels-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="order-shipping-labels-title">
+    <div class="packing-modal-card bundle-review-card">
+      <button id="close-order-labels" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Order documents</span>
+      <h2 id="order-shipping-labels-title">Shipping labels</h2>
+      <p id="order-label-context"></p>
+      <p>Add label PDFs from any shipping provider. We’ll try to read the tracking numbers. Review them, or scan or type them, before saving.</p>
+      <label class="secondary-btn folder-photo-picker">Choose label PDFs
+        <input id="order-label-files" type="file" accept="application/pdf,.pdf" multiple />
+      </label>
+      <p class="completion-photo-help">You can add several PDFs and choose which orders each covers. Saved labels appear during checkout and in Order History. Up to 20 PDFs per upload, 10 MB each.</p>
+      <div id="order-label-pending"></div>
+      <p id="order-label-upload-status" class="fulfill-status" role="status" aria-live="polite"></p>
+      <div class="modal-actions">
+        <button id="save-order-labels" type="button" class="primary-btn" disabled>Save labels to orders</button>
+        <button id="clear-order-label-selection" type="button" class="secondary-btn" disabled>Clear selection</button>
+        <button id="done-order-labels" type="button" class="secondary-btn">Done</button>
+      </div>
+      <div class="completion-photo-actions completion-photo-saved-heading">
+        <h3>Saved shipping labels</h3>
+        <button id="refresh-order-labels" type="button" class="secondary-btn">Refresh</button>
+      </div>
+      <p id="order-label-refresh-status" class="fulfill-status" role="status"></p>
+      <div id="order-label-saved"></div>
+    </div>
+  </div>
+
   <div id="completion-photos-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="completion-photos-title">
     <div class="packing-modal-card bundle-review-card completion-photos-card">
       <button id="close-completion-photos" class="modal-close-btn" type="button" aria-label="Close">x</button>
@@ -1032,6 +1069,8 @@
 <script src="bag-order-links.js?v=20260930"></script>
 <script src="video-receipts.js?v=20261002-desktop-capture"></script>
 <script src="completion-photos.js?v=20261003-photo-corrections"></script>
-<script src="pending-orders.js?v=20261003-photo-corrections"></script>
+<script src="shipping-label-reader.js?v=20261003-label-pdfs"></script>
+<script src="order-shipping-labels.js?v=20261003-label-pdfs"></script>
+<script src="pending-orders.js?v=20261003-label-pdfs"></script>
 </body>
 </html>
