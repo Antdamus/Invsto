@@ -218,6 +218,48 @@ test('bulk label keeps every declared order and opens a fresh checkout with all 
   assert.equal(db.lines.find(line=>line.id==='line-b2').line_status,'pending');
 });
 
+test('label checkout confirms its checked batch even when the main-page focused line is lost',async t=>{
+  const db=database(),page=await open(t,db);await prepareLabelBatch(page);
+  db.lines.push({...db.lines[0],id:'line-a2'});
+  await injectLabel(page,{orderId:db.orders[0].order_number});
+  await expect(page.locator('#worker-no-inventory-count')).toHaveText('3 of 3 selected');
+  await page.locator('[data-no-inventory-line="line-b"]').uncheck();
+  await page.locator('#worker-no-inventory-note').fill('Reviewed batch');
+  // The modal remains the user's reviewed selection when the underlying page loses focus.
+  await page.evaluate(()=>{state.selectedLine=null;state.activeBuyerKey='';});
+  await expect(page.locator('[data-no-inventory-line]:checked')).toHaveCount(2);
+  await page.locator('#confirm-worker-no-inventory').click();
+  await expect(page.locator('#worker-no-inventory-error')).toHaveText('');
+  await expect(page.locator('#worker-no-inventory-modal')).toBeHidden();
+  const completion=db.calls.find(call=>call.name==='complete_ebay_order_lines_without_inventory_evidence');
+  assert.deepEqual(completion.args._order_line_ids.sort(),['line-a','line-a2']);
+  assert.equal(completion.args._notes,'Reviewed batch');
+  assert.equal(db.lines.find(line=>line.id==='line-b').line_status,'pending');
+  assert.equal(await page.evaluate(()=>state.selectedLine?.id),'line-b','remaining work is selected from the confirmed buyer');
+});
+
+test('confirmation stays scoped to checked modal lines and never substitutes the page selection',async t=>{
+  const db=database(),page=await open(t,db);await prepareLabelBatch(page);
+  await injectLabel(page,{orderId:db.orders[0].order_number});
+  await page.locator('#deselect-all-worker-no-inventory').click();
+  // A focused page line must not silently become a selected completion line.
+  await page.evaluate(()=>confirmWorkerNoInventoryCompletion());
+  await expect(page.locator('#worker-no-inventory-error')).toHaveText('Select at least one pending line to complete.');
+  assert.equal(db.calls.filter(call=>call.name==='complete_ebay_order_lines_without_inventory_evidence').length,0);
+  await page.locator('[data-no-inventory-line="line-a"]').check();
+  await page.evaluate(()=>{
+    state.selectedLine={id:'unrelated',order_id:'other-order',order:{buyer_username:'someone-else'}};
+    state.activeBuyerKey='someone-else';
+  });
+  await page.locator('#confirm-worker-no-inventory').click();
+  await expect(page.locator('#worker-no-inventory-modal')).toBeHidden();
+  assert.deepEqual(db.calls.find(call=>call.name==='complete_ebay_order_lines_without_inventory_evidence').args._order_line_ids,['line-a']);
+  assert.equal(await page.evaluate(()=>state.selectedLine?.id),'line-b');
+  // A late handler after the modal has closed cannot repeat or redirect the save.
+  await page.evaluate(()=>confirmWorkerNoInventoryCompletion());
+  assert.equal(db.calls.filter(call=>call.name==='complete_ebay_order_lines_without_inventory_evidence').length,1);
+});
+
 test('a missing buyer username never selects unrelated unnamed orders',async t=>{
   const db=database();db.orders.forEach(order=>order.buyer_username='');
   const page=await open(t,db);await prepareLabelBatch(page);

@@ -9009,7 +9009,7 @@ async function openWorkerNoInventoryModal(options = {}) {
 }
 
 async function confirmWorkerNoInventoryCompletion() {
-  if (state.busy) return;
+  if (state.busy || !isWorkerNoInventoryModalOpen()) return;
   if (orderShippingLabelController?.hasPending) {
     openModal("order-shipping-labels-modal");
     return;
@@ -9018,18 +9018,13 @@ async function confirmWorkerNoInventoryCompletion() {
     openModal("completion-photos-modal");
     return;
   }
-  const line = state.selectedLine;
   const errorEl = $("worker-no-inventory-error");
   const confirmButton = $("confirm-worker-no-inventory");
   const note = String($("worker-no-inventory-note")?.value || "").trim();
   const gps = state.workerNoInventoryGps || { status: "not_finished" };
-  const validCandidateIds = new Set(state.workerNoInventoryCandidates.map((entry) => entry.id));
-  const selectedLineIds = [...state.workerNoInventoryLineIds].filter((lineId) => validCandidateIds.has(lineId));
-
-  if (!line) {
-    if (errorEl) errorEl.textContent = "Select an eBay order line first.";
-    return;
-  }
+  // The reviewed modal batch owns this save; the page's focused line can change during a handoff.
+  const selectedLines = state.workerNoInventoryCandidates.filter((entry) => state.workerNoInventoryLineIds.has(entry.id));
+  const selectedLineIds = [...new Set(selectedLines.map((entry) => entry.id).filter(Boolean))];
   if (!requireCheckoutStore()) return;
   if (!selectedLineIds.length) {
     if (errorEl) errorEl.textContent = "Select at least one pending line to complete.";
@@ -9040,7 +9035,7 @@ async function confirmWorkerNoInventoryCompletion() {
     state.busy = true;
     if (errorEl) errorEl.textContent = "";
     if (confirmButton) confirmButton.disabled = true;
-    const currentBuyerKey = state.activeBuyerKey;
+    const currentBuyerKey = getBuyerKey(selectedLines[0]);
     const selectedPhotoCount = getSelectedNoInventoryEvidencePhotos().length;
     setNoInventoryPhotoStatus(
       selectedPhotoCount
