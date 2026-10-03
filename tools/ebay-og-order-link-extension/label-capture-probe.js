@@ -101,10 +101,21 @@
     return objectUrl;
   };
 
-  document.addEventListener("click", (event) => {
-    const anchor = event.target?.closest?.("a[href]");
+  function captureAnchor(anchor) {
     if (!anchor) return;
     const href = anchor.href || "";
+    // eBay can download a PDF already held in memory using a detached anchor.
+    // Read the complete data URL here, before browser download metadata can truncate it.
+    const dataPdf = href.match(/^data:application\/pdf(?:;[^,]*)?,/i);
+    if (dataPdf) {
+      try {
+        const encoded = href.slice(dataPdf[0].length);
+        const binary = /;base64,/i.test(dataPdf[0]) ? atob(decodeURIComponent(encoded)) : decodeURIComponent(encoded);
+        const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+        void postPdf("data-url", "", new Blob([bytes], {type: "application/pdf"})).catch(() => {});
+      } catch (_) {}
+      return;
+    }
     if (/\.pdf(?:$|[?#])|label|download|shipping/i.test(href)) {
       window.postMessage({
         type: LABEL_EVENT_TYPE,
@@ -118,6 +129,20 @@
         },
       }, "*");
     }
+  }
+
+  const activeAnchorClicks = new WeakSet();
+  const originalAnchorClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function (...args) {
+    activeAnchorClicks.add(this);
+    try {
+      captureAnchor(this);
+      return originalAnchorClick.apply(this, args);
+    } finally { activeAnchorClicks.delete(this); }
+  };
+  document.addEventListener("click", (event) => {
+    const anchor = event.target?.closest?.("a[href]");
+    if (anchor && !activeAnchorClicks.has(anchor)) captureAnchor(anchor);
   }, true);
 
   postReady();

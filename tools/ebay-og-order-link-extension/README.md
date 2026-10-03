@@ -119,3 +119,8 @@ PDF viewer requests byte ranges. Existing incomplete attachments cannot be repai
 from missing bytes: use Replace Label in Invsto and Send Label to OG with the full
 original eBay PDF. To update an unpacked install, replace its folder's files, click
 Reload on the extension card, then refresh the eBay and Invsto tabs.
+
+Version 1.0.2 also captures embedded PDF downloads (`data:application/pdf`) from
+eBay's label-ready page, including links clicked before they are added to the
+document. The complete PDF is captured before browser download metadata can
+truncate its URL; the existing checks against incomplete PDFs still apply.

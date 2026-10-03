@@ -7,10 +7,16 @@ function probe(fetch){
  const messages=[];
  class FileReader{readAsDataURL(blob){blob.arrayBuffer().then(buffer=>{this.result='data:application/pdf;base64,'+Buffer.from(buffer).toString('base64');this.onload();});}}
  class XHR{open(){}send(){}addEventListener(){}}
+ const listeners = new Map();
+ class Anchor {
+  constructor(href, attached = false){this.href=href;this.attached=attached;this.clicks=0;}
+  closest(){return this;}
+  click(){this.clicks++;if(this.attached)listeners.get('click')?.({target:this});return 'native-click';}
+ }
  const URLmock={createObjectURL:()=> 'blob:test'};
  const window={fetch,postMessage:message=>messages.push(message)};
- vm.runInNewContext(source,{window,document:{addEventListener(){}},XMLHttpRequest:XHR,FileReader,URL:URLmock,Blob,ArrayBuffer,Date,Set});
- return {window,messages,URLmock};
+ vm.runInNewContext(source,{window,document:{addEventListener:(type,listener)=>listeners.set(type,listener)},XMLHttpRequest:XHR,HTMLAnchorElement:Anchor,FileReader,URL:URLmock,Blob,ArrayBuffer,Date,Set,WeakSet,Uint8Array,atob});
+ return {window,messages,URLmock,Anchor,listeners};
 }
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 test('eBay PDF range responses are replaced with a full GET before capture',async()=>{
@@ -28,4 +34,28 @@ test('incomplete object URLs do not win over a later complete shipping PDF',asyn
  for(let i=0;i<5;i++)await tick();assert.equal(context.messages.filter(m=>m.payload?.base64).length,0);
  context.URLmock.createObjectURL(new Blob(['%PDF-1.4 full bytes\n%%EOF'],{type:'application/pdf'}));
  for(let i=0;i<30&&!context.messages.some(m=>m.payload?.base64);i++)await tick();assert.equal(context.messages.filter(m=>m.payload?.base64).length,1);
+});
+
+test('detached and attached PDF data downloads retain the complete binary PDF and the native click',async()=>{
+ for(const attached of [false,true]){
+  const context=probe(async()=>{throw new Error('Embedded PDFs must not need another network request');});
+  const pdf=Buffer.concat([Buffer.from('%PDF-1.4\n'),Buffer.from([0,128,255]),Buffer.alloc(50000,65),Buffer.from('\n%%EOF\n')]);
+  const anchor=new context.Anchor(`data:application/pdf;base64,${pdf.toString('base64')}`,attached);
+  assert.equal(anchor.click(),'native-click');assert.equal(anchor.clicks,1);
+  for(let i=0;i<30&&!context.messages.some(m=>m.payload?.base64);i++)await tick();
+  const captures=context.messages.filter(m=>m.payload?.base64);
+  assert.equal(captures.length,1);assert.deepEqual(Buffer.from(captures[0].payload.base64,'base64'),pdf);
+  assert.equal(captures[0].payload.source,'data-url');assert.equal(captures[0].payload.url,'');
+ }
+});
+
+test('user-clicked PDF data links are captured, while malformed and incomplete downloads are rejected',async()=>{
+ const context=probe(async()=>{throw new Error('Unexpected fetch');});
+ for(const href of ['data:application/pdf;base64,not-valid!',`data:application/pdf;base64,${Buffer.from('%PDF-1.4 truncated').toString('base64')}`,'data:text/plain;base64,aGVsbG8='])new context.Anchor(href).click();
+ for(let i=0;i<5;i++)await tick();
+ assert.equal(context.messages.filter(m=>m.payload?.base64).length,0);
+ const pdf='%PDF-1.4\ncomplete user-clicked PDF\n%%EOF';
+ context.listeners.get('click')({target:new context.Anchor(`data:application/pdf;base64,${Buffer.from(pdf).toString('base64')}`,true)});
+ for(let i=0;i<30&&!context.messages.some(m=>m.payload?.base64);i++)await tick();
+ assert.equal(Buffer.from(context.messages.find(m=>m.payload?.base64).payload.base64,'base64').toString(),pdf);
 });
