@@ -3810,6 +3810,10 @@ function renderOrders() {
   state.orderRenderRunId = renderRunId;
 
   const groups = groupLinesByBuyer(state.filteredOrders);
+  const completionPhotoGroups = new Map(groups.map(group => [group.key, []]));
+  state.orders.forEach(line => completionPhotoGroups.get(getBuyerKey(line))?.push(line));
+  groups.forEach(group => {if (!completionPhotoGroups.get(group.key).length) completionPhotoGroups.set(group.key, group.lines);});
+  watchQueueCompletionPhotos([...completionPhotoGroups.values()].flat());
   const groupsByKey = new Map(groups.map((group) => [group.key, group]));
   state.orderNotesObserver = typeof IntersectionObserver === "function"
     ? new IntersectionObserver((entries, observer) => {
@@ -3930,6 +3934,7 @@ function renderOrders() {
         </div>
       </div>
       <div class="buyer-card-meta">
+        ${renderQueueCompletionPhotoMarker(completionPhotoGroups.get(group.key))}
         <span class="buyer-card-meta-pill">Placed ${escapeHtml(getCompactQueueDate(group.earliestPendingOrderCreatedAt))}</span>
         <span class="buyer-card-meta-pill">Ship ${escapeHtml(getCompactQueueDate(group.nextShipBy))}</span>
         <span class="buyer-card-meta-pill buyer-card-receipt-pill ${receiptCoverageClass}" title="${escapeHtml(receiptCoverageTitle)}">${escapeHtml(receiptCoverageLabel)}</span>
@@ -7848,8 +7853,51 @@ function getNoInventoryEvidenceSourceLabel() {
 
 let completionPhotoController = null;
 const completionPhotoWatches = new Map();
+let queueCompletionPhotoWatch = null, queueCompletionPhotoScope = "";
+let queueCompletionPhotoCoverage = new Map();
 let phoneCameraDesktop = null;
 let phoneCameraReceiver = null;
+
+function getQueueCompletionPhotoStatus(ids) {
+  const values = ids.map(id => queueCompletionPhotoCoverage.get(id));
+  if (values.includes("error")) return {tone: "unknown", label: "Completion photos unavailable", title: "Could not check saved completion photos. Retrying automatically."};
+  if (!values.length || values.includes(undefined)) return {tone: "checking", label: "Checking completion photos…", title: "Checking saved completion photos for this group."};
+  return values.some(value => value === true)
+    ? {tone: "added", label: "✓ Completion photo added", title: "This group has saved completion photos."}
+    : {tone: "empty", label: "No completion photos", title: "This group has no saved completion photos."};
+}
+
+function renderQueueCompletionPhotoMarker(lines) {
+  const ids = [...new Set(lines.map(line => line.id).filter(Boolean))];
+  const status = getQueueCompletionPhotoStatus(ids);
+  return `<span class="queue-completion-photo-marker is-${status.tone}" data-completion-photo-lines="${escapeHtml(JSON.stringify(ids))}" title="${escapeHtml(status.title)}">${escapeHtml(status.label)}</span>`;
+}
+
+function updateQueueCompletionPhotoMarkers() {
+  document.querySelectorAll("[data-completion-photo-lines]").forEach(marker => {
+    const status = getQueueCompletionPhotoStatus(JSON.parse(marker.dataset.completionPhotoLines));
+    marker.className = `queue-completion-photo-marker is-${status.tone}`;
+    marker.textContent = status.label;
+    marker.title = status.title;
+  });
+}
+
+function watchQueueCompletionPhotos(lines) {
+  const scope = lines.filter(line => line?.id && line.order_id).map(line => ({id: line.id, order_id: line.order_id}));
+  const signature = JSON.stringify(scope.map(line => `${line.order_id}:${line.id}`).sort());
+  if (signature === queueCompletionPhotoScope) return;
+  queueCompletionPhotoWatch?.(); queueCompletionPhotoWatch = null;
+  queueCompletionPhotoScope = signature;
+  queueCompletionPhotoCoverage = new Map();
+  if (!scope.length) return;
+  queueCompletionPhotoWatch = getCompletionPhotoController()?.watchCoverage(scope, coverage => {
+    queueCompletionPhotoCoverage = coverage;
+    updateQueueCompletionPhotoMarkers();
+  }, () => {
+    queueCompletionPhotoCoverage = new Map(scope.map(line => [line.id, "error"]));
+    updateQueueCompletionPhotoMarkers();
+  });
+}
 
 function sendOrderToPhone(lines) {
   if (state.busy || !lines.length || !window.OGPhoneCamera) return;

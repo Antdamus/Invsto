@@ -104,7 +104,33 @@
         }));
     }
 
-    function watch(lines, onChange, onError = () => {}) {
+    async function readCoverage(lines) {
+      const orders = targets(lines);
+      const coverage = new Map(lines.map(line => [line.id, false]));
+      const orderIds = [...orders.keys()];
+      // Only read attachment metadata, in batches; the queue does not need signed image URLs.
+      for (let index = 0; index < orderIds.length; index += 100) {
+        for (let offset = 0; ; offset += 500) {
+          const {data, error} = await config.getClient().from("ebay_order_task_events")
+            .select("id,order_id,payload,photo_attachments")
+            .in("order_id", orderIds.slice(index, index + 100)).eq("payload->>proof_type", "completion_photo")
+            .order("id", {ascending: true}).range(offset, offset + 499);
+          if (error) throw error;
+          for (const event of data || []) {
+            if (event.payload?.history_removed || !Array.isArray(event.photo_attachments)
+              || !event.photo_attachments.some(photo => photo?.bucket && photo?.path)) continue;
+            const lineIds = Array.isArray(event.payload?.order_line_ids) ? event.payload.order_line_ids : [];
+            for (const id of lineIds) {
+              if (orders.get(event.order_id)?.includes(id)) coverage.set(id, true);
+            }
+          }
+          if ((data || []).length < 500) break;
+        }
+      }
+      return coverage;
+    }
+
+    function watch(lines, onChange, onError = () => {}, readData = read, pollMs = config.pollMs || 5000) {
       let active = true, loading = false, rerun = false;
       async function refresh() {
         if (!active) return;
@@ -112,7 +138,7 @@
         loading = true;
         const startedAtRevision = revision;
         try {
-          const photos = await read(lines);
+          const photos = await readData(lines);
           if (active && !saving && startedAtRevision === revision) onChange(photos);
           else if (active) rerun = true;
         } catch (error) { if (active && !saving && startedAtRevision === revision) onError(error); }
@@ -121,7 +147,7 @@
           if (rerun && active && !saving) { rerun = false; refresh(); }
         }
       }
-      const interval = setInterval(() => { if (!document.hidden) refresh(); }, config.pollMs || 5000);
+      const interval = setInterval(() => { if (!document.hidden) refresh(); }, pollMs);
       const onVisible = () => { if (!document.hidden) refresh(); };
       document.addEventListener("visibilitychange", onVisible);
       watchers.add(refresh);
@@ -378,7 +404,9 @@
     window.addEventListener("beforeunload", event => {
       if (saving || pending.length) { event.preventDefault(); event.returnValue = ""; }
     });
-    return {open, close, watch, renderGrid, get lines() {return scope.map(line => ({...line}));},
+    return {open, close, watch, renderGrid,
+      watchCoverage: (lines, onChange, onError) => watch(lines, onChange, onError, readCoverage, config.pollMs || 15000),
+      get lines() {return scope.map(line => ({...line}));},
       get hasPending() { return saving || pending.length > 0; }};
   }
 

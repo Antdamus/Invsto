@@ -48,7 +48,7 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com'} = {})
     if (op === 'read') {
       db.reads.push(args);
       const rows = structuredClone(db.events).filter(row => args.filters.every(([key, value]) =>
-        (key === 'payload->>proof_type' ? row.payload?.proof_type : row[key]) === value));
+        Array.isArray(value) ? value.includes(row[key]) : (key === 'payload->>proof_type' ? row.payload?.proof_type : row[key]) === value));
       if (db.delayRead) await new Promise(r => setTimeout(r, db.delayRead));
       return db.failRead ? {error: {message: 'Read unavailable'}} : {data: rows.slice(args.start, args.end + 1)};
     }
@@ -104,7 +104,7 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com'} = {})
         const filters = [];
         let start = 0, end = 499;
         const q = {
-          select() {return q;}, eq(k, v) {filters.push([k, v]); return q;}, order() {return q;},
+          select() {return q;}, eq(k, v) {filters.push([k, v]); return q;}, in(k,v) {filters.push([k,v]);return q;}, order() {return q;},
           range(a, b) {start = a; end = b; return q;},
           then(resolve, reject) {return photoDb({op: 'read', table, filters, start, end}).then(resolve, reject);},
         };
@@ -190,6 +190,66 @@ test('phone card offers camera and library, saves audited photos for the display
   await expect(page.locator('#completion-photos-modal')).toBeHidden();
 });
 
+test('one completion photo marks the whole buyer group, including when filtering its lines',async t=>{
+  const db=database();
+  db.events=[evidence({proof:'receipt_screenshot'}),evidence({proof:'line_note',path:'note.png'}),
+    {...evidence({path:'removed.png'}),payload:{proof_type:'completion_photo',order_line_ids:['line-a'],history_removed:true}},
+    evidence({order:'order-b',line:'line-a',path:'wrong-order.png'})];
+  const desktop=await open(t,db),phone=await open(t,db,{mobile:true,actor:'phone@example.com'});
+  await desktop.evaluate(()=>{
+    lines.push({...lines[0],id:'line-c',item_title:'Another item in the same order'});
+    state.selectedLine=null;state.collapsedBuyerKeys.add('lore2526');renderOrders();
+    document.querySelector('.buyer-order-card').dataset.testIdentity='same-card';
+  });
+  const group=desktop.locator('.buyer-card-meta [data-completion-photo-lines]');
+  await expect(group).toHaveText('No completion photos');
+  await phone.evaluate(()=>openCompletionPhotos([lines[0]]));await pick(phone);await save(phone);
+  await expect(group).toHaveText('✓ Completion photo added');
+  await expect(desktop.locator('.buyer-order-card')).toHaveAttribute('data-test-identity','same-card');
+  await desktop.locator('[data-buyer-expand-key]').click();
+  await expect(desktop.locator('.buyer-line-btn [data-completion-photo-lines]')).toHaveCount(0);
+  await desktop.evaluate(()=>{state.filteredOrders=[lines[1]];renderOrders();});
+  await expect(group).toHaveText('✓ Completion photo added');
+  await desktop.evaluate(()=>{state.filteredOrders=lines;renderOrders();});
+  await pick(phone,'completion-photo-files','second-photo.png');await save(phone);
+  await phone.locator('#completion-photo-saved [data-remove-saved-photo]').first().click();
+  await expect(phone.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(1);
+  await expect(group).toHaveText('✓ Completion photo added');
+  await desktop.locator('[data-buyer-expand-key]').click();
+  await expect(group).toHaveText('✓ Completion photo added');
+  await mkdir(new URL('../test-results',import.meta.url),{recursive:true});
+  await desktop.screenshot({path:'test-results/completion-photo-queue-markers.png'});
+  await phone.locator('#done-completion-photos').click();
+  await expect(phone.locator('.buyer-card-meta [data-completion-photo-lines]')).toHaveText('✓ Completion photo added');
+  assert.equal(await phone.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await phone.screenshot({path:'test-results/completion-photo-queue-markers-phone.png'});
+  await phone.evaluate(()=>openCompletionPhotos([lines[0]]));
+  await phone.locator('#completion-photo-saved [data-remove-saved-photo]').click();
+  await expect(group).toHaveText('No completion photos');
+});
+
+test('queue photo coverage paginates, distinguishes read failures, and ignores results for an old filter',async t=>{
+  const db=database();
+  db.events=Array.from({length:500},(_,i)=>evidence({order:'order-b',line:'line-b',path:`${i}.png`}));
+  db.events.push(evidence({path:'last-page.png'}));
+  const page=await open(t,db),badge=page.locator('.buyer-card-meta [data-completion-photo-lines]');
+  await page.evaluate(()=>{lines[1].order={...lines[1].order,buyer_username:'another-buyer'};renderOrders();});
+  await expect(badge).toHaveText(['✓ Completion photo added','✓ Completion photo added']);
+  assert.ok(db.reads.some(r=>r.start===500&&r.filters.some(([,v])=>Array.isArray(v))));
+  db.failRead=true;
+  await expect(badge).toHaveText(['Completion photos unavailable','Completion photos unavailable']);
+  db.failRead=false;
+  await expect(badge).toHaveText(['✓ Completion photo added','✓ Completion photo added']);
+  db.delayRead=400;
+  await page.evaluate(()=>{state.filteredOrders=[lines[0]];renderOrders();});
+  await expect.poll(()=>db.reads.some(r=>r.filters.some(([k,v])=>k==='order_id'&&Array.isArray(v)&&v.length===1&&v[0]==='order-a'))).toBe(true);
+  db.delayRead=0;db.events=[];
+  await page.evaluate(()=>{state.filteredOrders=[lines[1]];renderOrders();});
+  await expect(badge).toHaveText('No completion photos');
+  await page.waitForTimeout(500);
+  await expect(badge).toHaveText('No completion photos');
+});
+
 test('phone uploads appear automatically in open desktop without-inventory and mixed inventory review screens', async t => {
   const db = database();
   const desktop = await open(t, db), mixed = await open(t, db), phone = await open(t, db, {mobile: true, actor: 'phone@example.com'});
@@ -228,10 +288,11 @@ test('line selection filters shared photos, ignores notes and receipts, and drop
   await expect(page.locator('#no-inventory-completion-photo-grid img')).toHaveAttribute('alt', 'ring.png');
   await page.waitForTimeout(300);
   await expect(page.locator('#no-inventory-completion-photo-grid img')).toHaveAttribute('alt', 'ring.png');
-  const queryCount = db.reads.length;
+  const modalReadCount=()=>db.reads.filter(r=>r.filters.some(([k,v])=>k==='order_id'&&!Array.isArray(v))).length;
+  const queryCount = modalReadCount();
   await page.evaluate(() => closeWorkerNoInventoryModal({suppressEbayReturn: true, keepMobileDetail: true}));
   await page.waitForTimeout(450);
-  assert.ok(db.reads.length <= queryCount + 1, 'closing stops polling');
+  assert.ok(modalReadCount() <= queryCount + 1, 'closing stops modal polling while queue coverage can keep refreshing');
   assert.equal(await page.evaluate(event => isWrittenLineNote(event, {metadata: {source: 'order_history_extra_photo'}}), db.events[0]), false);
 });
 
@@ -305,7 +366,8 @@ test('read errors are visible and recover on refresh, with paginated order-scope
   await page.locator('#refresh-completion-photos').click();
   await expect(page.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(501);
   assert.ok(db.reads.some(r => r.start === 500));
-  assert.ok(db.reads.every(r => r.filters.some(([k, v]) => k === 'order_id' && v === 'order-a')));
+  assert.ok(db.reads.filter(r=>!r.filters.some(([,v])=>Array.isArray(v)))
+    .every(r => r.filters.some(([k, v]) => k === 'order_id' && v === 'order-a')));
 });
 
 test('saved completion photos survive both final completion paths and appear as proof in Order History', async t => {

@@ -54,7 +54,7 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com', phone
     if (op === 'read') {
       db.reads.push(args);
       const rows = structuredClone(db.events).filter(row => args.filters.every(([key, value]) =>
-        (key === 'payload->>proof_type' ? row.payload?.proof_type : row[key]) === value));
+        Array.isArray(value) ? value.includes(row[key]) : (key === 'payload->>proof_type' ? row.payload?.proof_type : row[key]) === value));
       if (db.delayRead) await new Promise(r => setTimeout(r, db.delayRead));
       return db.failRead ? {error: {message: 'Read unavailable'}} : {data: rows.slice(args.start, args.end + 1)};
     }
@@ -142,7 +142,7 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com', phone
         const filters = [];
         let start = 0, end = 499;
         const q = {
-          select() {return q;}, eq(k, v) {filters.push([k, v]); return q;}, order() {return q;},
+          select() {return q;}, eq(k, v) {filters.push([k, v]); return q;}, in(k,v) {filters.push([k,v]);return q;}, order() {return q;},
           range(a, b) {start = a; end = b; return q;},
           then(resolve, reject) {return photoDb({op: 'read', table, filters, start, end}).then(resolve, reject);},
         };
