@@ -183,6 +183,23 @@
     }
   }
 
+  async function reportExtensionVersion(requestId) {
+    if (typeof requestId !== "string" || !requestId || requestId.length > 100) return;
+    try {
+      // Allow the public OG page to check versions even if its saved URL needs fixing.
+      const publicOgPage = window.location.origin === "https://antdamus.github.io"
+        && window.location.pathname === "/Invsto/pending-orders.html";
+      if (!publicOgPage && !sameOgAppOrigin(await getConfiguredAppUrl())) return;
+      window.postMessage({
+        type: "OG_EBAY_EXTENSION_VERSION_RESPONSE",
+        requestId,
+        version: chrome.runtime.getManifest().version,
+      }, window.location.origin);
+    } catch (_) {
+      // A reloaded/disabled extension cannot confirm its version until the tab refreshes.
+    }
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "OG_EBAY_LABEL_TRANSFER") {
       postToOgApp(message.payload);
@@ -251,6 +268,10 @@
 
   window.addEventListener("message", (event) => {
     if (event.source !== window || event.origin !== window.location.origin) return;
+    if (event.data?.type === "OG_EBAY_EXTENSION_VERSION_REQUEST") {
+      reportExtensionVersion(event.data.requestId);
+      return;
+    }
     if (event.data?.type === "OG_EBAY_LABEL_TRANSFER_STATUS") {
       relayOgStatusToExtension(event.data.payload || {});
       return;

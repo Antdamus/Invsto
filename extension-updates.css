@@ -1,0 +1,53 @@
+.extension-updates {
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--panel-soft);
+  color: var(--text);
+  scroll-margin-top: 24px;
+}
+.extension-updates > summary {
+  padding: 14px 18px;
+  cursor: pointer;
+  font-weight: 800;
+}
+#extension-update-badge {
+  display: inline-block;
+  margin-left: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 3px 10px;
+  color: var(--muted);
+  font-size: .8rem;
+  vertical-align: middle;
+}
+.extension-updates[data-state="current"] #extension-update-badge {
+  color: var(--green);
+  background: rgba(125, 240, 178, .09);
+  border-color: rgba(125, 240, 178, .4);
+}
+.extension-updates[data-state="outdated"] #extension-update-badge,
+.extension-updates[data-state="unknown"] #extension-update-badge {
+  color: var(--gold-strong);
+  border-color: rgba(227, 189, 119, .4);
+}
+.extension-update-body { padding: 0 18px 18px; }
+.extension-update-body p, .extension-update-body li { color: var(--muted); line-height: 1.6; }
+.extension-update-body p { margin-bottom: 12px; }
+.extension-update-body h3 { margin: 20px 0 10px; color: var(--text); font: 800 1rem "Manrope", system-ui, sans-serif; }
+.extension-update-body strong { color: var(--text); }
+.extension-update-body code { color: var(--gold-strong); overflow-wrap: anywhere; }
+.extension-update-body ol { padding-left: 24px; }
+.extension-update-body li + li { margin-top: 8px; }
+.extension-update-versions { display: flex; flex-wrap: wrap; gap: 16px 48px; margin-bottom: 14px; }
+.extension-update-versions dt { color: var(--muted); font-size: .8rem; font-weight: 600; }
+.extension-update-versions dd { margin: 3px 0 0; color: var(--text); font-weight: 800; }
+.extension-update-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.extension-install-help { border-top: 1px solid var(--line); padding-top: 12px; }
+.extension-install-help summary { cursor: pointer; font-weight: 700; }
+.extension-install-help[open] summary { margin-bottom: 12px; }
+@media (max-width: 540px) {
+  .extension-updates { scroll-margin-top: 80px; }
+  #extension-update-badge { margin-left: 5px; padding: 3px 6px; }
+  .extension-updates > summary { padding: 12px; font-size: .9rem; }
+  .extension-update-body { padding: 0 12px 14px; }
+}

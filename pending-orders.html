@@ -8,6 +8,8 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="pending-orders.css?v=20261003-checkout-customer" />
+  <link rel="stylesheet" href="extension-updates.css?v=20261003" />
+  <script src="extension-updates.js?v=20261003" defer></script>
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
@@ -150,6 +152,35 @@
           </a>
         </div>
         </section>
+
+      <details id="extension-updates" class="extension-updates">
+        <summary>Extension updates <span id="extension-update-badge" role="status">Checking…</span></summary>
+        <div class="extension-update-body">
+          <p>OG eBay Order Link · Checks this browser on this computer. Open this section on each computer you use.</p>
+          <dl class="extension-update-versions">
+            <div><dt>Installed here</dt><dd id="extension-installed-version">Checking…</dd></div>
+            <div><dt>Latest available</dt><dd id="extension-latest-version">Checking…</dd></div>
+          </dl>
+          <p id="extension-update-message" aria-live="polite">Checking the installed extension and latest release…</p>
+          <div class="extension-update-actions">
+            <a id="extension-download" class="primary-btn" href="downloads/OG-eBay-Order-Link.zip" download>Download extension ZIP</a>
+            <button id="extension-check" class="secondary-btn" type="button">Check again</button>
+          </div>
+          <h3>Update this computer</h3>
+          <ol>
+            <li>Download the ZIP and extract its files into the <strong>same folder</strong> you used to install OG eBay Order Link. Replace the existing files.</li>
+            <li>Open <code>edge://extensions</code> in Edge or <code>chrome://extensions</code> in Chrome. Turn on <strong>Developer mode</strong> if needed, then click <strong>Reload</strong> on the OG eBay Order Link card.</li>
+            <li>Refresh your eBay and OG tabs, then check the version here.</li>
+          </ol>
+          <p>Updates are installed on each computer separately. Keep the same extension folder to retain its settings.</p>
+          <details class="extension-install-help">
+            <summary>First install or version not detected?</summary>
+            <p>Versions before 1.0.3 cannot report their version. Update once using the steps above. If you already updated, make sure the extension is enabled, allow it on this site, and refresh this tab.</p>
+            <p>For a new computer: extract the ZIP to a permanent folder, open your browser’s extensions page, enable Developer mode, choose <strong>Load unpacked</strong>, and select the folder containing <code>manifest.json</code>.</p>
+            <p>In the extension’s settings, set the OG Pending Orders URL to <code>https://antdamus.github.io/Invsto/pending-orders.html</code> and click Save URL.</p>
+          </details>
+        </div>
+      </details>
 
       <section class="summary-strip" id="summary-strip">
         <div>

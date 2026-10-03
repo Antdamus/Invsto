@@ -4,6 +4,7 @@
   const STORAGE_KEY = "ogPendingOrdersUrl";
   const input = document.getElementById("app-url");
   const status = document.getElementById("status");
+  document.getElementById("installed-version").textContent = chrome.runtime.getManifest().version;
 
   function setStatus(message) {
     status.textContent = message || "";

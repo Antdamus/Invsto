@@ -10,7 +10,19 @@ This unpacked Chrome/Edge extension adds OG shortcuts to eBay pages that show bu
 4. Click Load unpacked.
 5. Select this folder: `tools/ebay-og-order-link-extension`.
 6. Click the extension icon and set the full OG Pending Orders URL, for example:
-   `https://your-site.com/pending-orders.html`
+   `https://antdamus.github.io/Invsto/pending-orders.html`
+
+## Check and distribute updates
+
+Open **Extension updates** near the top of OG Pending Orders on each computer, or follow the link in the extension popup. It compares the installed version in that browser with the published release and offers the latest ZIP. Checks run on page load, on request, and every five minutes while the page is visible.
+
+Versions before 1.0.3 need one manual update before OG can detect their version. An undetected version is not proof that the extension is missing or current.
+
+To update an existing installation, extract the ZIP files over the **same installed folder**, click **Reload** on its card in `edge://extensions` or `chrome://extensions`, and refresh eBay and OG tabs. Keep the folder path to preserve the extension's settings. Repeat on each computer/browser; unpacked extensions do not install these updates automatically.
+
+For future releases, increment `manifest.json`'s version and run `python tools/build-ebay-order-link-package.py`. Commit and deploy the source, `downloads/OG-eBay-Order-Link.zip`, and the generated `downloads/og-ebay-order-link-release.json` together. The release metadata comes from the packaged manifest and ZIP hash.
+
+Version 1.0.3 adds version reporting to OG and an updates link in the popup, without changing saved settings or requesting additional permissions.
 
 ## Use
 
