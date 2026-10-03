@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261003-label-markers" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261003-checkout-customer" />
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
@@ -612,6 +612,10 @@
       <button id="close-worker-no-inventory" class="modal-close-btn" type="button" aria-label="Close">x</button>
       <span class="eyebrow">Physical Item Present</span>
       <h2 id="worker-no-inventory-title">Complete without inventory removal?</h2>
+      <section class="checkout-customer-identity" aria-label="Customer verification">
+        <div><span>Customer</span><strong id="worker-no-inventory-customer-name">Name not saved</strong></div>
+        <div><span>eBay username</span><strong id="worker-no-inventory-buyer-username">No buyer username</strong></div>
+      </section>
       <p id="worker-no-inventory-subtitle">Use this only when the order is being shipped now, but the item was never entered into inventory.</p>
       <div class="no-inventory-toolbar">
         <span id="worker-no-inventory-count" class="count-pill">0 selected</span>
@@ -1117,6 +1121,6 @@
 <script src="phone-camera.js?v=20261003-photo-order-context"></script>
 <script src="shipping-label-reader.js?v=20261003-label-pdfs"></script>
 <script src="order-shipping-labels.js?v=20261003-append-labels"></script>
-<script src="pending-orders.js?v=20261003-append-labels"></script>
+<script src="pending-orders.js?v=20261003-checkout-customer"></script>
 </body>
 </html>

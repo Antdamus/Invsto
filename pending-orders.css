@@ -4170,6 +4170,16 @@ body.pending-order-detail-open .mobile-detail-close {
   background: rgba(15, 23, 42, 0.32);
 }
 
+.checkout-customer-identity {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 12px 24px; margin: 16px 0; padding: 14px 16px;
+  border: 1px solid rgba(212,175,55,.3); border-radius: 14px;
+  background: rgba(255,255,255,.035); overflow-wrap: anywhere;
+}
+.checkout-customer-identity > div { display: grid; gap: 4px; min-width: 0; }
+.checkout-customer-identity span { color: #bdb8b0; font-size: .8rem; }
+.checkout-customer-identity strong { color: #efd598; font-size: 1.1rem; }
+
 .buyer-card-notes-toggle {
   display: flex;
   align-items: center;

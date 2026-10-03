@@ -8792,9 +8792,19 @@ function setAllWorkerNoInventoryLines(checked) {
   watchOrderShippingLabels("no-inventory");
 }
 
+function renderWorkerNoInventoryCustomerIdentity() {
+  const selectedLines = state.workerNoInventoryCandidates.filter(line => state.workerNoInventoryLineIds.has(line.id));
+  const identityLines = selectedLines.length ? selectedLines : state.workerNoInventoryCandidates;
+  const names = [...new Set(identityLines.map(getLineCustomerName).filter(Boolean))];
+  const usernames = [...new Set(identityLines.map(line => String(getOrderFromLine(line).buyer_username || "").trim()).filter(Boolean))];
+  $("worker-no-inventory-customer-name").textContent = names.join(" / ") || "Name not saved";
+  $("worker-no-inventory-buyer-username").textContent = usernames.join(" / ") || "No buyer username";
+}
+
 function renderWorkerNoInventoryList() {
   const list = $("worker-no-inventory-list");
   if (!list) return;
+  renderWorkerNoInventoryCustomerIdentity();
   const storeName = getCheckoutStoreName() || "No checkout store selected";
   if (!state.workerNoInventoryCandidates.length) {
     list.innerHTML = `<div class="empty-state">No untouched pending lines are available for this buyer.</div>`;
@@ -10304,6 +10314,7 @@ async function hydrateSelectedOrderDetails(lineId) {
   Object.assign(line, normalized);
   state.selectedLine = line;
   renderSelectedOrder();
+  if (isWorkerNoInventoryModalOpen()) renderWorkerNoInventoryCustomerIdentity();
 }
 
 async function attachEbayLabelToOrder(transferPayload) {
