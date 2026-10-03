@@ -39,11 +39,11 @@ function database() {
   return {orders: ['a','b'].map(letter => ({id:`order-${letter}`,order_number:`11-22222-${letter === 'a' ? '33333':'44444'}`,
     buyer_username:'lore2526',label_metadata:{}})), events:[], uploads:[], calls:[], requests:new Set(), failUpload:0, loseResponse:false};
 }
-async function open(t, db, mobile = false) {
+async function open(t, db, mobile = false, timezoneId = 'America/New_York') {
   db.lines ||= db.orders.map((order, i) => ({id:`line-${i?'b':'a'}`,order_id:order.id,item_title:i?'Silver ring':'Gold chain',quantity:1,fulfilled_quantity:0,
     total_price:i?30:1485,line_status:'pending',order}));
   db.reads ||= [];
-  const context = await browser.newContext({viewport:{width:mobile ? 390:1440,height:950},isMobile:mobile,hasTouch:mobile});
+  const context = await browser.newContext({viewport:{width:mobile ? 390:1440,height:950},isMobile:mobile,hasTouch:mobile,timezoneId});
   t.after(() => context.close());
   await context.route('**/*', r => [origin, `blob:${origin}`, 'data:'].some(s => r.request().url().startsWith(s)) ? r.continue():r.abort());
   const page = await context.newPage(); page.setDefaultTimeout(15000);
@@ -517,4 +517,42 @@ test('phone label uploads appear in both open checkout modes and pending PDFs pr
   await expect(desktop.locator('#order-shipping-labels-modal')).toBeVisible();
   await mixed.locator('#clear-order-label-selection').click();await mixed.locator('#done-order-labels').click();
   await expect(mixed.locator('#bundle-review-modal')).toBeVisible();
+});
+
+test('CSV dates never display placeholder sale or due times, including opposite time zones',async t=>{
+  for(const zone of ['America/New_York','America/Los_Angeles','Pacific/Auckland']){
+    const db=database();
+    Object.assign(db.orders[0],{sale_date:'2026-10-01T12:00:00+00:00',ship_by_date:'2026-10-05T12:00:00+00:00',
+      raw_payload:{source:'ebay_orders_report_csv',first_row:{'Sale Date':'Oct-01-26','Ship By Date':'Oct-05-26'}}});
+    const page=await open(t,db,false,zone);
+    await page.evaluate(()=>{state.expandedBuyerKeys.add(getBuyerKey(lines[0]));renderOrders();});
+    await expect(page.locator('.buyer-card-meta')).toContainText('Placed Oct 1 · time not provided');
+    await expect(page.locator('.buyer-card-meta')).toContainText('Ship Oct 5');
+    await expect(page.locator('[data-line-id="line-a"]')).toContainText('Sale date Oct 1 · time not provided');
+    assert.doesNotMatch(await page.locator('.buyer-card-meta').innerText(),/\d:\d{2}/);
+    assert.doesNotMatch(await page.locator('[data-line-id="line-a"]').innerText(),/8:00|1:00/);
+    const result=await page.evaluate(()=>{
+      const row={'Order Number':'23-15215-33555','Item Title':'Ring','Sale Date':'Oct-01-26','Ship By Date':'2026-10-05'};
+      const order=buildOrderImportPayload([row])[0].order;
+      return {precision:order.raw_payload.date_precision,dates:[order.sale_date,order.ship_by_date],
+        parsed:['Oct-01-26','2026-10-01','10/01/2026'].map(parseEbayDate),invalid:parseEbayDate('Feb-31-26')};
+    });
+    assert.equal(result.precision.sale_date,'day');assert.equal(result.precision.ship_by_date,'day');
+    assert.deepEqual(result.dates,['2026-10-01T12:00:00.000Z','2026-10-05T12:00:00.000Z']);
+    assert.deepEqual(result.parsed,Array(3).fill('2026-10-01T12:00:00.000Z'));assert.equal(result.invalid,null);
+  }
+});
+
+test('API-refreshed CSV orders show exact local timestamps and timezone, including genuine 8 AM sales',async t=>{
+  const page=await open(t,database());
+  const result=await page.evaluate(()=>{
+    const order={sale_date:'2026-10-01T20:17:45Z',paid_on_date:'2026-10-01T20:20:00Z',ship_by_date:'2026-10-06T06:59:00Z',
+      raw_payload:{source:'ebay_orders_report_csv',first_row:{'Sale Date':'Oct-01-26','Ship By Date':'Oct-05-26'},
+        date_precision:{sale_date:'timestamp',paid_on_date:'timestamp',ship_by_date:'timestamp'}}};
+    const sale=formatOrderCreatedDate({order}),due=formatOrderDate(order,'ship_by_date');
+    order.sale_date='2026-10-01T12:00:00Z';
+    return {sale,due,noon:formatOrderDate(order,'sale_date')};
+  });
+  assert.match(result.sale,/Oct 1.*4:17 PM EDT/);assert.match(result.due,/Oct 6.*2:59 AM EDT/);
+  assert.match(result.noon,/Oct 1.*8:00 AM EDT/);assert.doesNotMatch(result.noon,/not provided/);
 });

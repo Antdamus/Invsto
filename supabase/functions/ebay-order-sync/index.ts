@@ -892,7 +892,27 @@ async function loadExistingOrders(supabase: any, orderNumbers: string[]): Promis
   return existing;
 }
 
-async function updateExistingOrderFinancePayloads(
+function existingOrderDetailsUpdate(entry: PreparedOrder, existing: any, now: string) {
+  const finance = entry.order.raw_payload?.ebayFinance;
+  const rawPayload = existing.raw_payload && typeof existing.raw_payload === "object" ? existing.raw_payload : {};
+  const dates = Object.fromEntries(["sale_date", "paid_on_date", "ship_by_date"]
+    .map(field => [field, toIsoDate(entry.order[field])]).filter(([, value]) => value));
+  if (!Object.keys(dates).length && !finance) return null;
+  return {
+    ...dates,
+    raw_payload: {
+      ...rawPayload,
+      ...(Object.keys(dates).length ? {
+        date_precision: {...(rawPayload.date_precision || {}), ...Object.fromEntries(Object.keys(dates).map(field => [field, "timestamp"]))},
+        ebay_order_dates: {source: "ebay_fulfillment_api", synced_at: now, ...dates},
+      } : {}),
+      ...(finance ? {ebayFinance: finance, last_ebay_finance_sync_at: now} : {}),
+    },
+    updated_at: now,
+  };
+}
+
+async function updateExistingOrderDetails(
   supabase: any,
   prepared: PreparedOrder[],
   existingOrders: Map<string, any>,
@@ -900,19 +920,12 @@ async function updateExistingOrderFinancePayloads(
   const now = new Date().toISOString();
   for (const entry of prepared) {
     const existing = existingOrders.get(entry.order.order_number);
-    const finance = entry.order.raw_payload?.ebayFinance;
-    if (!existing?.id || !finance) continue;
-    const rawPayload = existing.raw_payload && typeof existing.raw_payload === "object" ? existing.raw_payload : {};
+    if (!existing?.id) continue;
+    const update = existingOrderDetailsUpdate(entry, existing, now);
+    if (!update) continue;
     const { error } = await supabase
       .from("ebay_orders")
-      .update({
-        raw_payload: {
-          ...rawPayload,
-          ebayFinance: finance,
-          last_ebay_finance_sync_at: now,
-        },
-        updated_at: now,
-      })
+      .update(update)
       .eq("id", existing.id);
     if (error) throw error;
   }
@@ -1202,7 +1215,24 @@ Deno.serve(async (req) => {
     runId = run.id;
 
     const token = await getEbayAccessToken();
+    if (body.datesOnly === true && (!Array.isArray(body.orderIds) || !body.orderIds.length)) {
+      throw new Error("Choose explicit order IDs when refreshing order dates.");
+    }
     let rawOrders = await fetchOrders(token, body);
+    if (body.datesOnly === true) {
+      // Repair existing timestamps without importing lines, reserving stock,
+      // changing fulfillment status, or running cancellation/finance workflows.
+      const prepared = rawOrders.map(order => prepareOrder(order, new Map())).filter(Boolean) as PreparedOrder[];
+      const existing = await loadExistingOrders(supabase, prepared.map(entry => entry.order.order_number));
+      const preview = prepared.filter(entry => existing.has(entry.order.order_number)).map(entry => ({
+        orderNumber: entry.order.order_number, saleDate: entry.order.sale_date,
+        paidOnDate: entry.order.paid_on_date, shipByDate: entry.order.ship_by_date,
+      }));
+      if (!dryRun) await updateExistingOrderDetails(supabase, prepared, existing);
+      await supabase.from("ebay_order_sync_runs").update({status: "completed", orders_seen: rawOrders.length,
+        orders_imported: 0, lines_imported: 0, lines_reserved: 0, finished_at: new Date().toISOString()}).eq("id", runId);
+      return jsonResponse(200, {ok: true, runId, dryRun, datesOnly: true, ordersUpdated: dryRun ? 0 : preview.length, preview});
+    }
     const orderIdsRequested = Array.isArray(body.orderIds)
       ? unique(body.orderIds.map(toText).filter(Boolean)).slice(0, MAX_ORDER_LIMIT)
       : [];
@@ -1385,7 +1415,7 @@ Deno.serve(async (req) => {
       .filter(([orderNumber]) => cancellationOrderNumbers.has(orderNumber))
       .map(([, orderId]) => orderId));
 
-    await updateExistingOrderFinancePayloads(supabase, importable, existingOrders);
+    await updateExistingOrderDetails(supabase, importable, existingOrders);
 
     const orderIds = unique([...orderIdByNumber.values()].filter(Boolean));
     const existingLines = await loadExistingLines(supabase, orderIds);

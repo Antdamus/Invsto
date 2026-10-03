@@ -209,6 +209,47 @@ function formatDate(value) {
   return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+function isEbayDateOnly(value) {
+  return /^(?:[A-Za-z]{3}-\d{1,2}-\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4})$/.test(String(value || "").trim());
+}
+
+function getOrderDatePrecision(order, field) {
+  const raw = order?.raw_payload || {};
+  const precision = raw.date_precision?.[field];
+  if (precision === "day" || precision === "timestamp") return precision;
+  const columns = {sale_date: "Sale Date", paid_on_date: "Paid On Date", ship_by_date: "Ship By Date", shipped_on_date: "Shipped On Date"};
+  const csvValue = csvCell(raw.first_row || {}, columns[field] || "");
+  // Older CSV imports used noon UTC as a storage placeholder. Only hide the
+  // clock when its original date-only value still matches the saved value.
+  if (isEbayDateOnly(csvValue) && parseEbayDate(csvValue) === new Date(order[field]).toISOString()) return "day";
+  return isEbayDateOnly(order?.[field]) ? "day" : "timestamp";
+}
+
+function formatOrderDate(order, field) {
+  const value = order?.[field];
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  if (getOrderDatePrecision(order, field) === "day") {
+    const day = date.toLocaleDateString([], {month: "short", day: "numeric", timeZone: "UTC"});
+    return day + (field === "sale_date" || field === "paid_on_date" ? " · time not provided" : "");
+  }
+  return date.toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short"});
+}
+
+function formatOrderCreatedDate(line) {
+  const order = line?.order || getOrderFromLine(line);
+  const field = ["sale_date", "paid_on_date", "imported_at"].find(key => order?.[key]);
+  return field ? formatOrderDate(order, field) : formatDate(line?.created_at);
+}
+
+function formatGroupOrderDate(group, field) {
+  const value = field === "ship_by_date" ? group.nextShipBy : group.earliestPendingOrderCreatedAt;
+  const line = group.lines.find(line => (field === "ship_by_date" ? line.order?.ship_by_date : getOrderCreatedAt(line)) === value);
+  if (!line) return getCompactQueueDate(value);
+  return field === "ship_by_date" ? formatOrderDate(line.order, field) : formatOrderCreatedDate(line);
+}
+
 function toLocalDateInputValue(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -1427,7 +1468,7 @@ function normalizeLine(line) {
       order.sales_record_number,
       order.buyer_username,
       order.buyer_name,
-      formatDate(orderCreatedAt),
+      formatOrderCreatedDate({...line, order}),
       line.item_number,
       line.transaction_id,
       line.item_title,
@@ -1719,18 +1760,22 @@ function parseEbayDate(value) {
   if (!text) return null;
 
   const match = text.match(/^([A-Za-z]{3})-(\d{1,2})-(\d{2,4})$/);
-  if (match) {
+  const isoDay = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const slashDay = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (match || isoDay || slashDay) {
     const months = {
       jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
       jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
     };
-    const month = months[match[1].toLowerCase()];
-    const day = Number(match[2]);
-    const rawYear = Number(match[3]);
+    const month = match ? months[match[1].toLowerCase()] : Number(isoDay ? isoDay[2] : slashDay[1]) - 1;
+    const day = Number(match ? match[2] : isoDay ? isoDay[3] : slashDay[2]);
+    const rawYear = Number(match ? match[3] : isoDay ? isoDay[1] : slashDay[3]);
     const year = rawYear < 100 ? 2000 + rawYear : rawYear;
     if (month !== undefined && day > 0) {
-      return new Date(Date.UTC(year, month, day, 12, 0, 0)).toISOString();
+      const date = new Date(Date.UTC(year, month, day, 12, 0, 0));
+      return date.getUTCFullYear() === year && date.getUTCMonth() === month && date.getUTCDate() === day ? date.toISOString() : null;
     }
+    return null;
   }
 
   const date = new Date(text);
@@ -1808,7 +1853,11 @@ function buildOrderImportPayload(rows) {
         net_payout: orderTotals.payout || null,
         status: "pending",
         imported_by: state.user?.id || null,
-        raw_payload: { source: "ebay_orders_report_csv", first_row: first },
+        raw_payload: { source: "ebay_orders_report_csv", first_row: first,
+          date_precision: Object.fromEntries(Object.entries({sale_date: "Sale Date", paid_on_date: "Paid On Date",
+            ship_by_date: "Ship By Date", shipped_on_date: "Shipped On Date"}).map(([field, column]) =>
+            [field, isEbayDateOnly(csvCell(first, column)) ? "day" : "timestamp"])),
+        },
       },
       lines: group.lines.map((line) => ({
         item_number: csvCell(line, "Item Number"),
@@ -3938,8 +3987,8 @@ function renderOrders() {
       <div class="buyer-card-meta">
         ${renderQueueCompletionPhotoMarker(attachmentGroups.get(group.key))}
         ${renderQueueShippingLabelMarker(attachmentGroups.get(group.key))}
-        <span class="buyer-card-meta-pill">Placed ${escapeHtml(getCompactQueueDate(group.earliestPendingOrderCreatedAt))}</span>
-        <span class="buyer-card-meta-pill">Ship ${escapeHtml(getCompactQueueDate(group.nextShipBy))}</span>
+        <span class="buyer-card-meta-pill">Placed ${escapeHtml(formatGroupOrderDate(group, "sale_date"))}</span>
+        <span class="buyer-card-meta-pill">Ship ${escapeHtml(formatGroupOrderDate(group, "ship_by_date"))}</span>
         <span class="buyer-card-meta-pill buyer-card-receipt-pill ${receiptCoverageClass}" title="${escapeHtml(receiptCoverageTitle)}">${escapeHtml(receiptCoverageLabel)}</span>
       </div>
       <div data-buyer-shared-notes>${renderGroupSharedNotes(group.lines, group.key)}</div>
@@ -4121,11 +4170,11 @@ function renderOrders() {
       const transactionLabel = line.transaction_id ? `Txn ${line.transaction_id}` : "No transaction ID";
       const lineSource = getLineSourceLabel(line);
       const lineDueLabel = lineUrgency
-        ? `${lineUrgency.label} · ${formatDate(order.ship_by_date)}`
+        ? `${lineUrgency.label} · ${formatOrderDate(order, "ship_by_date")}`
         : order.ship_by_date
-          ? `Due ${formatDate(order.ship_by_date)}`
+          ? `Due ${formatOrderDate(order, "ship_by_date")}`
           : "No ship-by date";
-      const lineCreatedLabel = `${getOrderCreatedLabel(line)} ${formatDate(line.orderCreatedAt || getOrderCreatedAt(line))}`;
+      const lineCreatedLabel = `${getOrderCreatedLabel(line)} ${formatOrderCreatedDate(line)}`;
       const lineCustomerName = getOrderCustomerName(order);
       const assignedLineTask = getVisibleOrderTaskForLine(line);
       const assignedLineTaskAssignee = assignedLineTask ? getOrderTaskAssigneeName(assignedLineTask) : "";
@@ -4142,7 +4191,7 @@ function renderOrders() {
         : `<span class="buyer-line-order-copy is-missing"><span>Order</span><strong>No order number</strong></span>`;
       const isAdminSelected = state.adminSelectedLineIds.has(line.id);
       const visibleLineDueLabel = lineUrgency
-        ? `${lineUrgency.label} - ${formatDate(order.ship_by_date)}`
+        ? `${lineUrgency.label} - ${formatOrderDate(order, "ship_by_date")}`
         : lineDueLabel;
       const button = document.createElement("div");
       button.className = `buyer-line-btn ${isAdminUser() ? "has-admin-select" : ""} ${isAdminSelected ? "is-admin-selected" : ""} ${state.selectedLine?.id === line.id ? "is-selected" : ""}`;
@@ -4507,7 +4556,7 @@ function renderSelectedOrder() {
   const buyerClause = customerName
     ? `Buyer: ${order.buyer_username || "unknown"} - Customer: ${customerName}`
     : `Buyer: ${order.buyer_username || "unknown"}`;
-  $("selected-order-subtitle").textContent = `${line.item_title || "Untitled item"} - ${buyerClause} - ${getOrderCreatedLabel(line)} ${formatDate(line.orderCreatedAt || getOrderCreatedAt(line))} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${formatDate(order.ship_by_date)}`;
+  $("selected-order-subtitle").textContent = `${line.item_title || "Untitled item"} - ${buyerClause} - ${getOrderCreatedLabel(line)} ${formatOrderCreatedDate(line)} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${formatOrderDate(order, "ship_by_date")}`;
   $("selected-order-status").textContent = line.line_status || "pending";
   renderSelectedOrderTaskAssignment();
   $("cancel-pending-order")?.toggleAttribute("disabled", !isOpenOrderLine(line));

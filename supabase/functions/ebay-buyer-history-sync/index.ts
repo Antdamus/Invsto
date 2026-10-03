@@ -851,6 +851,13 @@ function prepareOrder(order: any, itemBySku: Map<string, any>, existingOrder: an
         orderCancelStatus: getOrderCancelStatus(order),
         ...(orderFinance ? { ebayFinance: orderFinance, last_ebay_finance_sync_at: new Date().toISOString() } : {}),
         order,
+        date_precision: {
+          ...(existingOrder?.raw_payload?.date_precision || {}),
+          ...(toIsoDate(order?.creationDate) ? {sale_date: "timestamp"} : {}),
+          ...(toIsoDate(payment?.paymentDate || order?.creationDate) ? {paid_on_date: "timestamp"} : {}),
+          ...(extractShipByDate(order) ? {ship_by_date: "timestamp"} : {}),
+          ...(shippedOnDate ? {shipped_on_date: "timestamp"} : {}),
+        },
       },
     },
     lines,
