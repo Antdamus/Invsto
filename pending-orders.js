@@ -4937,7 +4937,7 @@ function renderEbayLabelPanel() {
   const sizeText = formatFileSize(metadata.size);
   const trackingText = getLabelTrackingDisplay(metadata);
   const summaryText = label.path
-    ? `Label attached${label.uploadedAt ? ` ${formatDate(label.uploadedAt)}` : ""}${sizeText ? ` - ${sizeText}` : ""}${trackingText ? ` - tracker ${trackingText}` : ""}. Preview before final confirmation.`
+    ? `Label attached${label.uploadedAt ? ` ${formatDate(label.uploadedAt)}` : ""}${sizeText ? ` - ${sizeText}` : ""}${trackingText ? ` - tracker ${trackingText}` : ""}. New labels are added separately; earlier labels remain available.`
     : "Upload a label PDF or send a label from eBay.";
   const detailsHtml = label.path
     ? `
@@ -10359,24 +10359,23 @@ async function attachEbayLabelToOrder(transferPayload) {
 
   const blob = base64ToBlob(label.base64, label.mimeType || "application/pdf");
   await window.shippingLabelPrint.assertComplete(blob);
-  const shipmentSegment = safeStorageSegment(metadata.shipmentId || transferPayload.transferId || crypto.randomUUID(), "shipment");
-  const destinationPath = targetOrderNumbers.length > 1
-    ? [
-      "bulk-labels",
-      `${safeStorageSegment(metadata.labelId || metadata.shipmentId || transferPayload.transferId || crypto.randomUUID(), "bulk-label")}.pdf`,
-    ].join("/")
-    : [
-      safeStorageSegment(targetOrderNumbers[0], "order"),
-      `${shipmentSegment}.pdf`,
-    ].join("/");
+  // Immutable paths preserve different PDFs even when eBay reuses the shipment ID.
+  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+  const hash = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  const destinationPath = [targetOrderNumbers.length > 1 ? "bulk-labels" : safeStorageSegment(targetOrderNumbers[0], "order"),
+    `label-${hash}.pdf`].join("/");
 
   const { error: uploadError } = await supabase.storage
     .from(EBAY_LABEL_BUCKET)
     .upload(destinationPath, blob, {
       contentType: "application/pdf",
-      upsert: true,
+      upsert: false,
     });
-  if (uploadError) throw new Error(uploadError.message || "Could not upload the eBay label PDF.");
+  // An identical PDF already stored at its content hash is safe to attach/retry.
+  if (uploadError && String(uploadError.statusCode || uploadError.status) !== "409"
+      && !/^(Duplicate|ResourceAlreadyExists)$/.test(uploadError.error || uploadError.code || "")) {
+    throw new Error(uploadError.message || "Could not upload the eBay label PDF.");
+  }
 
   const orderIds = [...new Set([
     ...matchingLines.map((line) => line.order_id).filter(Boolean),
@@ -10393,35 +10392,26 @@ async function attachEbayLabelToOrder(transferPayload) {
   };
   const now = new Date().toISOString();
 
-  const { error: orderError } = await supabase.rpc("attach_ebay_shipping_label", {
+  const { data: savedLabel, error: orderError } = await supabase.rpc("append_ebay_shipping_label", {
     _order_ids: orderIds,
-    _order_line_ids: matchingLines.map((line) => line.id).filter(Boolean),
-    _order_numbers: targetOrderNumbers,
     _shipment_id: metadata.shipmentId || null,
-    _label_storage_bucket: EBAY_LABEL_BUCKET,
     _label_file_path: destinationPath,
     _label_metadata: labelMetadata,
-    _signed_by_email: state.user?.email || null,
   });
   if (orderError) throw new Error(orderError.message || "Could not update and audit the eBay order label status.");
 
+  const savedOrders = new Map((savedLabel?.order_labels || []).map(order => [order.id, order]));
   matchingLines.forEach((line) => {
-    line.label_status = "label_uploaded";
-    line.label_storage_bucket = EBAY_LABEL_BUCKET;
-    line.label_file_path = destinationPath;
-    line.label_uploaded_at = now;
-    line.label_metadata = labelMetadata;
-    if (line.order) {
-      line.order.ebay_shipment_id = metadata.shipmentId || null;
-      line.order.label_status = "label_uploaded";
-      line.order.label_storage_bucket = EBAY_LABEL_BUCKET;
-      line.order.label_file_path = destinationPath;
-      line.order.label_uploaded_at = now;
-      line.order.label_metadata = labelMetadata;
+    const order = savedOrders.get(line.order_id);
+    if (!order) return;
+    for (const key of ["ebay_shipment_id", "label_status", "label_storage_bucket", "label_file_path", "label_uploaded_at", "label_metadata"]) {
+      line[key] = order[key];
+      getOrderFromLine(line)[key] = order[key];
     }
     line.searchText = normalizeLine(line).searchText;
   });
   updateQueueShippingLabelMarkers();
+  getOrderShippingLabelController()?.refresh();
 
   if (transferPayload.transferId && window.chrome?.runtime?.sendMessage) {
     chrome.runtime.sendMessage({

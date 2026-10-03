@@ -4936,7 +4936,7 @@ function renderExtraLabelEvents(orderNumbers = []) {
               <strong>Extra label ${events.length - index}</strong>
               <span>${escapeHtml(formatDateTime(event.created_at))} - ${escapeHtml(event.signed_by_email || "Unknown user")}</span>
               <span>Tracker: ${escapeHtml(trackingText || "Not captured yet")}</span>
-              ${event.source === "manual-label-upload"
+              ${["manual-label-upload", "extension-append"].includes(event.source)
                 ? `<span>${escapeHtml(event.label_metadata?.fileName || "Uploaded label PDF")}</span>`
                 : `<span>${evidenceCount} forgotten-item photo${evidenceCount === 1 ? "" : "s"}</span>`}
             </div>

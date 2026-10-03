@@ -25,7 +25,7 @@
       for (let offset = 0; ; offset += 500) {
         const {data, error: eventError} = await client.from("ebay_order_label_events")
           .select("id,action,order_ids,order_numbers,label_storage_bucket,label_file_path,label_metadata,signed_by_email,created_at,source")
-          .overlaps("order_ids", ids).in("action", ["attached", "extra_label"])
+          .overlaps("order_ids", ids).in("action", ["attached", "replaced", "extra_label"])
           .order("created_at", {ascending: true}).order("id", {ascending: true}).range(offset, offset + 499);
         if (eventError) throw eventError;
         events.push(...(data || []));
@@ -39,15 +39,15 @@
           orderNumbers: [...new Set([...old.orderNumbers, ...label.orderNumbers])].sort(),
         } : label);
       }
-      for (const order of orders || []) add({bucket: order.label_storage_bucket || "ebay-labels",
-        path: order.label_file_path, metadata: order.label_metadata || {}, orderNumbers: [order.order_number],
-        createdAt: order.label_uploaded_at});
       for (const event of events) {
-        if (event.action !== "extra_label" && event.source !== "manual-label-upload") continue;
         add({bucket: event.label_storage_bucket || "ebay-labels", path: event.label_file_path,
           metadata: event.label_metadata || {}, orderNumbers: (orders || []).filter(o => event.order_ids.includes(o.id)).map(o => o.order_number),
           createdAt: event.created_at, author: event.signed_by_email});
       }
+      // The order may contain newer tracking metadata than its original audit event.
+      for (const order of orders || []) add({bucket: order.label_storage_bucket || "ebay-labels",
+        path: order.label_file_path, metadata: order.label_metadata || {}, orderNumbers: [order.order_number],
+        createdAt: order.label_uploaded_at});
       config.onOrdersLoaded?.(orders || []);
       return [...labels.values()];
     }
@@ -58,7 +58,7 @@
       container.dataset.labels = signature;
       container.innerHTML = labels.length ? labels.map((label, index) => `
         <article class="order-saved-label">
-          <div><strong>${esc(label.metadata.fileName || "Shipping label PDF")}</strong>
+          <div><strong>${esc(label.metadata.fileName || `Shipping label ${index + 1}`)}</strong>
           <span>${esc(config.trackingDisplay(label.metadata) || "No tracking number saved")}</span>
           <small>Order ${esc(label.orderNumbers.join(", "))}${label.author ? ` · ${esc(label.author)}` : ""}</small></div>
           <div class="completion-photo-actions">
@@ -260,7 +260,8 @@
     $("refresh-order-labels").addEventListener("click", () => watchers.forEach(refresh => refresh()));
     $("order-shipping-labels-modal").addEventListener("click", event => {if (event.target.id === "order-shipping-labels-modal") close();});
     window.addEventListener("beforeunload", event => {if (busy || pending.length) {event.preventDefault(); event.returnValue = "";}});
-    return {open, close, watch, watchOrderStatus, get hasPending() {return busy || pending.length > 0;}};
+    return {open, close, watch, watchOrderStatus, refresh: () => watchers.forEach(refresh => refresh()),
+      get hasPending() {return busy || pending.length > 0;}};
   }
   window.OGOrderShippingLabels = {create};
 })();

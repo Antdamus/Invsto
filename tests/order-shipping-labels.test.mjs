@@ -49,15 +49,30 @@ async function open(t, db, mobile = false) {
     if (op === 'read') {
       let rows = structuredClone(args.table === 'ebay_orders' ? db.orders : db.events);
       for (const [kind,key,values] of args.filters) rows = rows.filter(row => kind === 'in' ? values.includes(row[key]) : row[key].some(v => values.includes(v)));
-      if (args.fields) rows = rows.map(row => Object.fromEntries(args.fields.split(',').map(key => [key,row[key] ?? null])));
+      if (args.fields) rows = rows.map(row => Object.fromEntries(args.fields.split(',').map(key => key.trim()).map(key => [key,row[key] ?? null])));
       return {data:rows.slice(args.start,args.end+1)};
     }
     if (op === 'upload') {
       if (db.failUpload && db.uploads.length === db.failUpload-1) {db.failUpload=0; return {error:{message:'Upload interrupted'}};}
+      if (db.uploads.some(upload=>upload.path===args.path) && !args.options?.upsert) return {error:{statusCode:'409',message:'The resource already exists'}};
       db.uploads.push(args); return {data:{path:args.path}};
     }
     if (op === 'rpc') {
       db.calls.push(args);
+      if (args.name === 'append_ebay_shipping_label') {
+        const a=args.args,orders=db.orders.filter(order=>a._order_ids.includes(order.id));
+        for (const order of orders) {
+          if (!db.events.some(event=>event.order_ids.includes(order.id)&&event.label_file_path===a._label_file_path)) {
+            db.events.push({id:`event-${db.events.length}`,action:order.label_file_path?'extra_label':'attached',
+              order_ids:[order.id],order_numbers:[order.order_number],label_storage_bucket:'ebay-labels',label_file_path:a._label_file_path,
+              label_metadata:a._label_metadata,source:'extension-append',signed_by_email:'staff@example.com',created_at:'2026-10-03T18:00:00Z'});
+          }
+          if (!order.label_file_path) Object.assign(order,{label_storage_bucket:'ebay-labels',label_file_path:a._label_file_path,
+            label_metadata:a._label_metadata,label_status:'label_uploaded',ebay_shipment_id:a._shipment_id});
+        }
+        if (db.loseAppendResponse) {db.loseAppendResponse=false;return {error:{message:'Save response lost'}};}
+        return {data:{saved:true,order_labels:structuredClone(orders)}};
+      }
       if (args.name !== 'attach_manual_shipping_labels') return {data:{}};
       const a=args.args;
       if (db.requests.has(a._request_id)) return {data:{saved:true,already_saved:true}};
@@ -76,7 +91,7 @@ async function open(t, db, mobile = false) {
     throw Error(`Unknown operation ${op}`);
   });
   await page.goto(`${origin}/pending-orders.html`);
-  for (const script of ['shipping-label-reader.js','order-shipping-labels.js','barcode-scanner.js','pending-orders.js']) await page.addScriptTag({url:`${origin}/${script}`});
+  for (const script of ['shipping-label-reader.js','shipping-label-print.js','order-shipping-labels.js','barcode-scanner.js','pending-orders.js']) await page.addScriptTag({url:`${origin}/${script}`});
   await page.evaluate(orders => {
     const create=OGOrderShippingLabels.create; OGOrderShippingLabels.create=config=>create({...config,pollMs:150});
     window.supabase={
@@ -86,7 +101,7 @@ async function open(t, db, mobile = false) {
           order(){return q;},range(a,b){start=a;end=b;return q;},then(resolve,reject){return labelDb({op:'read',table,filters,start,end,fields}).then(resolve,reject);}};
         return q;
       },
-      storage:{from(bucket){return {upload:(path,file)=>labelDb({op:'upload',bucket,path,size:file.size}),createSignedUrl:async path=>({data:{signedUrl:`${location.origin}/${path}`}})};}},
+      storage:{from(bucket){return {upload:(path,file,options)=>labelDb({op:'upload',bucket,path,size:file.size,options}),createSignedUrl:async path=>({data:{signedUrl:`${location.origin}/${path}`}})};}},
       rpc:(name,args)=>labelDb({op:'rpc',name,args}),
     };
     window.lines=orders.map((order,i)=>({id:`line-${i?'b':'a'}`,order_id:order.id,item_title:i?'Silver ring':'Gold chain',quantity:1,fulfilled_quantity:0,
@@ -149,6 +164,47 @@ test('phone label upload updates the collapsed queue without opening labels or r
   await phone.screenshot({path:'test-results/shipping-label-queue-marker-phone.png'});
   for (const order of db.orders) order.label_file_path=null;
   await expect(badge).toBeHidden();
+});
+
+test('extension imports append multiple PDFs in checkout, preserve old labels, and retry without duplicates',async t=>{
+  const db=database();
+  Object.assign(db.orders[0],{label_file_path:'old/current.pdf',label_status:'label_uploaded',label_metadata:{trackingNumber:'111111111111'}});
+  db.events=['original','current'].map((name,i)=>({id:`legacy-${i}`,action:i?'replaced':'attached',order_ids:['order-a'],
+    order_numbers:[db.orders[0].order_number],label_storage_bucket:'ebay-labels',label_file_path:`old/${name}.pdf`,
+    label_metadata:i?{}:{trackingNumber:'000000000000'},source:'extension',created_at:`2026-10-02T1${i}:00:00Z`}));
+  const original=structuredClone(db.orders[0]),page=await open(t,db);
+  await page.evaluate(async()=>{
+    ensureExtensionOrderLinesLoaded=async({orderNumbers})=>lines.filter(line=>orderNumbers.includes(line.order.order_number));
+    openPendingNoInventorySessionForLabel=async()=>true;
+    await openWorkerNoInventoryModal({lineIds:['line-a']});
+    window.prints=[];shippingLabelPrint.run=(button,options)=>prints.push(options);
+  });
+  const saved=page.locator('#no-inventory-shipping-labels .order-saved-label');
+  await expect(saved).toHaveCount(2);
+  const firstPdf=(await pdf(['222222222222'])).toString('base64');
+  const secondPdf=(await pdf(['333333333333'])).toString('base64');
+  const send=(base64,tracking,transferId)=>page.evaluate(async args=>attachEbayLabelToOrder({
+    transferId:args.transferId,metadata:{orderId:lines[0].order.order_number,shipmentId:'reused-shipment',trackingNumber:args.tracking},
+    label:{base64:args.base64,mimeType:'application/pdf'},
+  }),{base64,tracking,transferId});
+  await send(firstPdf,'222222222222','send-1');await expect(saved).toHaveCount(3);
+  db.loseAppendResponse=true;
+  await assert.rejects(send(secondPdf,'333333333333','send-2'),/Save response lost/);
+  await send(secondPdf,'333333333333','retry-2');await expect(saved).toHaveCount(4);
+  await send(firstPdf,'222222222222','send-again');await expect(saved).toHaveCount(4);
+  assert.deepEqual(db.orders[0],original);
+  assert.equal(db.uploads.length,2);assert.notEqual(db.uploads[0].path,db.uploads[1].path);
+  assert.ok(db.uploads.every(upload=>upload.options.upsert===false));
+  assert.ok(db.calls.every(call=>call.name==='append_ebay_shipping_label'));
+  assert.equal(await page.evaluate(()=>lines[0].order.label_file_path),'old/current.pdf');
+  for (const tracking of ['000000000000','111111111111','222222222222','333333333333']) await expect(page.locator('#no-inventory-shipping-labels')).toContainText(tracking);
+  for (const button of await saved.locator('[data-print-saved-label]').all()) await button.click();
+  assert.equal(new Set(await page.evaluate(()=>prints.map(item=>item.path))).size,4);
+  await mkdir(new URL('../test-results',import.meta.url),{recursive:true});
+  await page.locator('#no-inventory-shipping-labels').screenshot({path:'test-results/extension-multiple-labels.png'});
+  await page.goto(`${origin}/ebay-order-history.html`);await page.addScriptTag({url:`${origin}/ebay-order-history.js`});
+  const history=await page.evaluate(events=>{state.labelEvents=events;state.relatedLabelEvents=[];return renderExtraLabelEvents(['11-22222-33333']);},db.events);
+  assert.match(history,/222222222222/);assert.match(history,/333333333333/);assert.doesNotMatch(history,/forgotten-item/);
 });
 
 test('real PDF reader reads multiple pages and tracking formats, with bounded file validation',async t=>{
