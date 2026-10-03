@@ -1202,7 +1202,27 @@ button.task-action-btn.is-assigned:hover,
   font-size: 0.82rem;
 }
 
-.buyer-due-filters [aria-pressed="true"] {
+.buyer-due-date-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+#order-due-date-filter {
+  width: 154px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 11px;
+  border-radius: 13px;
+  color-scheme: dark;
+}
+
+.buyer-due-filters [aria-pressed="true"],
+#order-due-date-filter.is-active {
   border-color: var(--gold-strong);
   background: rgba(227, 189, 119, 0.18);
   color: var(--gold-strong);

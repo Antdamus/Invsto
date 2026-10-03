@@ -645,20 +645,91 @@ test('search and sale dates keep matching buyer bundles intact; finishing the ma
   await page.locator('.buyer-due-filters').screenshot({path:'test-results/pending-due-filters-desktop.png'});
 });
 
+test('specific due dates retain whole customer groups, update counts, and switch cleanly with presets',async t=>{
+  const page=await open(t,database());await prepareDueGroups(page);
+  const date=page.getByLabel('Specific shipping due date');
+  const remaining=page.locator('#buyer-remaining-count');
+  await page.locator('[data-order-due-filter="overdue"]').click();
+  await date.fill('2026-10-09');
+  assert.deepEqual(await visibleIds(page),[...aLines,'b-today','b-later','c-closed','c-later','unknown-later']);
+  await expect(remaining).toHaveText('4 customers remaining');
+  assert.equal(await page.locator('[data-order-due-filter][aria-pressed="true"]').count(),0);
+  await page.evaluate(()=>applyOrderFilters());
+  await expect(date).toHaveValue('2026-10-09');
+  await page.setViewportSize({width:390,height:900});
+  assert.equal(await page.locator('.buyer-due-filters').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+  await mkdir(new URL('../test-results',import.meta.url),{recursive:true});
+  await page.locator('.buyer-due-filters').screenshot({path:'test-results/pending-specific-date-phone.png'});
+  await page.setViewportSize({width:1440,height:950});
+  await page.locator('.buyer-due-filters').screenshot({path:'test-results/pending-specific-date-desktop.png'});
+
+  await page.locator('#order-search').fill('later bracelet');
+  assert.deepEqual(await visibleIds(page),aLines);
+  await expect(remaining).toHaveText('1 customer remaining');
+  await page.evaluate(()=>{state.orders.find(line=>line.id==='a-later').line_status='fulfilled';applyOrderFilters();});
+  assert.deepEqual(await visibleIds(page),[]);
+  await expect(remaining).toHaveText('0 customers remaining');
+  await page.evaluate(()=>{state.orders.find(line=>line.id==='a-later').line_status='pending';});
+  await page.locator('#order-search').fill('');
+  await date.fill('2026-10-01'); // A completed line cannot qualify its customer's pending orders.
+  assert.deepEqual(await visibleIds(page),[]);
+  await date.fill('2026-10-05');
+  await expect(remaining).toHaveText('0 customers remaining');
+  await page.locator('[data-order-due-filter="today"]').click();
+  await expect(date).toHaveValue('');
+  assert.deepEqual(await visibleIds(page),[...aLines,'b-today','b-later']);
+  await date.fill('2026-10-09');
+  await page.locator('[data-order-due-filter="all"]').click();
+  await expect(date).toHaveValue('');
+  assert.equal((await visibleIds(page)).length,12);
+  await date.fill('2026-10-09');
+  await date.fill('');
+  await expect(page.locator('[data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
+  assert.equal((await visibleIds(page)).length,12);
+});
+
+test('specific due dates match the displayed local day and preserve date-only imports across timezones',async t=>{
+  for (const timezone of ['America/New_York','Pacific/Kiritimati']) {
+    const page=await open(t,database(),false,timezone);
+    await page.evaluate(()=>{
+      const rows=[
+        ['timestamp','2026-10-03T02:00:00Z','timestamp'],
+        ['calendar-day','2026-10-02T12:00:00Z','day'],
+        ['pure-date','2026-10-02',null],
+        ['invalid','invalid',null],
+        ['missing',null,null],
+      ];
+      state.orders=rows.map(([id,due,precision])=>normalizeLine({id,order_id:id,item_title:id,line_status:'pending',quantity:1,
+        order:{id,order_number:id,buyer_username:id,ship_by_date:due,raw_payload:{date_precision:{ship_by_date:precision}}}}));
+      state.selectedLine=null;applyOrderFilters();
+    });
+    await page.getByLabel('Specific shipping due date').fill('2026-10-02');
+    assert.deepEqual(await visibleIds(page),timezone==='America/New_York'
+      ? ['timestamp','calendar-day','pure-date'] : ['calendar-day','pure-date']);
+    await page.getByLabel('Specific shipping due date').fill('2026-10-03');
+    assert.deepEqual(await visibleIds(page),timezone==='America/New_York' ? [] : ['timestamp']);
+  }
+});
+
 test('fulfilled view clears pending due filters and label handoff opens its entire batch despite a previous filter',async t=>{
   const page=await open(t,database());await prepareDueGroups(page);
   await page.locator('[data-order-due-filter="today"]').click();
+  await page.getByLabel('Specific shipping due date').fill('2026-10-09');
   await page.evaluate(()=>{$('order-status-filter').value='fulfilled';applyOrderFilters();});
   await expect(page.locator('[data-order-due-filter="today"]')).toBeDisabled();
+  await expect(page.getByLabel('Specific shipping due date')).toBeDisabled();
+  await expect(page.getByLabel('Specific shipping due date')).toHaveValue('');
   await expect(page.locator('#buyer-remaining-count')).toBeHidden();
   await expect(page.locator('[data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
+  await page.evaluate(()=>{$('order-status-filter').value='pending';applyOrderFilters();});
+  await page.getByLabel('Specific shipping due date').fill('2026-10-02');
   await page.evaluate(async()=>{
-    $('order-status-filter').value='pending';state.orderDueFilter='overdue';
     await openPendingNoInventorySessionForLabel(['b-today'],{batchLines:state.orders.filter(line=>getBuyerKey(line)==='client-b')});
   });
   assert.deepEqual(await visibleIds(page),['b-today','b-later']);
   await expect(page.locator('#buyer-remaining-count')).toBeVisible();
   await expect(page.locator('#buyer-remaining-count')).toHaveText('1 customer remaining');
   await expect(page.locator('[data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
+  await expect(page.getByLabel('Specific shipping due date')).toHaveValue('');
   assert.deepEqual(await page.evaluate(()=>[...state.workerNoInventoryLineIds]),['b-today','b-later']);
 });
