@@ -2041,13 +2041,14 @@ textarea:focus {
   width: min(820px, 100%);
 }
 
-.queue-completion-photo-marker {
+.queue-completion-photo-marker, .queue-shipping-label-marker {
   display: inline-flex; align-items: center; flex: 0 0 auto; width: fit-content;
   padding: 3px 8px; border: 1px solid rgba(255,255,255,.16); border-radius: 999px;
   font-size: .72rem; font-weight: 800; line-height: 1.2; white-space: nowrap;
   color: #c4c0b9; background: rgba(255,255,255,.035);
 }
-.queue-completion-photo-marker.is-added { color: #aff6cf; border-color: rgba(119,236,169,.35); background: rgba(119,236,169,.1); }
+.queue-completion-photo-marker.is-added, .queue-shipping-label-marker.is-added { color: #aff6cf; border-color: rgba(119,236,169,.35); background: rgba(119,236,169,.1); }
+.queue-shipping-label-marker[hidden] { display: none; }
 .queue-completion-photo-marker.is-checking, .queue-completion-photo-marker.is-unknown { color: #cfe3ff; }
 
 .buyer-line-note-summary {

@@ -3810,10 +3810,12 @@ function renderOrders() {
   state.orderRenderRunId = renderRunId;
 
   const groups = groupLinesByBuyer(state.filteredOrders);
-  const completionPhotoGroups = new Map(groups.map(group => [group.key, []]));
-  state.orders.forEach(line => completionPhotoGroups.get(getBuyerKey(line))?.push(line));
-  groups.forEach(group => {if (!completionPhotoGroups.get(group.key).length) completionPhotoGroups.set(group.key, group.lines);});
-  watchQueueCompletionPhotos([...completionPhotoGroups.values()].flat());
+  const attachmentGroups = new Map(groups.map(group => [group.key, []]));
+  state.orders.forEach(line => attachmentGroups.get(getBuyerKey(line))?.push(line));
+  groups.forEach(group => {if (!attachmentGroups.get(group.key).length) attachmentGroups.set(group.key, group.lines);});
+  const attachmentLines = [...attachmentGroups.values()].flat();
+  watchQueueCompletionPhotos(attachmentLines);
+  watchQueueShippingLabels(attachmentLines);
   const groupsByKey = new Map(groups.map((group) => [group.key, group]));
   state.orderNotesObserver = typeof IntersectionObserver === "function"
     ? new IntersectionObserver((entries, observer) => {
@@ -3934,7 +3936,8 @@ function renderOrders() {
         </div>
       </div>
       <div class="buyer-card-meta">
-        ${renderQueueCompletionPhotoMarker(completionPhotoGroups.get(group.key))}
+        ${renderQueueCompletionPhotoMarker(attachmentGroups.get(group.key))}
+        ${renderQueueShippingLabelMarker(attachmentGroups.get(group.key))}
         <span class="buyer-card-meta-pill">Placed ${escapeHtml(getCompactQueueDate(group.earliestPendingOrderCreatedAt))}</span>
         <span class="buyer-card-meta-pill">Ship ${escapeHtml(getCompactQueueDate(group.nextShipBy))}</span>
         <span class="buyer-card-meta-pill buyer-card-receipt-pill ${receiptCoverageClass}" title="${escapeHtml(receiptCoverageTitle)}">${escapeHtml(receiptCoverageLabel)}</span>
@@ -7918,6 +7921,31 @@ function sendOrderToPhone(lines) {
 
 let orderShippingLabelController = null;
 const orderShippingLabelWatches = new Map();
+let queueShippingLabelWatch = null, queueShippingLabelScope = "";
+
+function hasSavedShippingLabel(line) {
+  return Boolean(String(line.label_file_path || getOrderFromLine(line).label_file_path || "").trim());
+}
+
+function renderQueueShippingLabelMarker(lines) {
+  const ids = [...new Set(lines.map(line => line.order_id).filter(Boolean))];
+  return `<span class="queue-shipping-label-marker is-added" data-shipping-label-orders="${escapeHtml(JSON.stringify(ids))}" title="This group has a saved shipping label." ${lines.some(hasSavedShippingLabel) ? "" : "hidden"}>✓ Shipping label added</span>`;
+}
+
+function updateQueueShippingLabelMarkers() {
+  const labeledOrders = new Set(state.orders.filter(hasSavedShippingLabel).map(line => line.order_id));
+  document.querySelectorAll("[data-shipping-label-orders]").forEach(marker => {
+    marker.hidden = !JSON.parse(marker.dataset.shippingLabelOrders).some(id => labeledOrders.has(id));
+  });
+}
+
+function watchQueueShippingLabels(lines) {
+  const signature = JSON.stringify([...new Set(lines.map(line => line.order_id).filter(Boolean))].sort());
+  if (signature === queueShippingLabelScope) return;
+  queueShippingLabelWatch?.(); queueShippingLabelWatch = null;
+  queueShippingLabelScope = signature;
+  if (lines.length) queueShippingLabelWatch = getOrderShippingLabelController()?.watchOrderStatus(lines);
+}
 
 function getOrderShippingLabelController() {
   if (!orderShippingLabelController && window.OGOrderShippingLabels) {
@@ -7934,11 +7962,13 @@ function getOrderShippingLabelController() {
           const order = byId.get(line?.order_id);
           if (!order) continue;
           for (const key of ["label_status", "label_storage_bucket", "label_file_path", "label_uploaded_at", "label_metadata"]) {
+            if (!(key in order)) continue;
             line[key] = order[key];
             getOrderFromLine(line)[key] = order[key];
           }
           line.searchText = normalizeLine(line).searchText;
         }
+        updateQueueShippingLabelMarkers();
         renderEbayLabelPanel();
       },
     });
@@ -10391,6 +10421,7 @@ async function attachEbayLabelToOrder(transferPayload) {
     }
     line.searchText = normalizeLine(line).searchText;
   });
+  updateQueueShippingLabelMarkers();
 
   if (transferPayload.transferId && window.chrome?.runtime?.sendMessage) {
     chrome.runtime.sendMessage({

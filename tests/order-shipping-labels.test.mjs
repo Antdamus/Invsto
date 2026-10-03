@@ -49,6 +49,7 @@ async function open(t, db, mobile = false) {
     if (op === 'read') {
       let rows = structuredClone(args.table === 'ebay_orders' ? db.orders : db.events);
       for (const [kind,key,values] of args.filters) rows = rows.filter(row => kind === 'in' ? values.includes(row[key]) : row[key].some(v => values.includes(v)));
+      if (args.fields) rows = rows.map(row => Object.fromEntries(args.fields.split(',').map(key => [key,row[key] ?? null])));
       return {data:rows.slice(args.start,args.end+1)};
     }
     if (op === 'upload') {
@@ -80,9 +81,9 @@ async function open(t, db, mobile = false) {
     const create=OGOrderShippingLabels.create; OGOrderShippingLabels.create=config=>create({...config,pollMs:150});
     window.supabase={
       from(table) {
-        const filters=[];let start=0,end=499;
-        const q={select(){return q;},in(k,v){filters.push(['in',k,v]);return q;},overlaps(k,v){filters.push(['overlaps',k,v]);return q;},
-          order(){return q;},range(a,b){start=a;end=b;return q;},then(resolve,reject){return labelDb({op:'read',table,filters,start,end}).then(resolve,reject);}};
+        const filters=[];let start=0,end=499,fields;
+        const q={select(value){fields=value;return q;},in(k,v){filters.push(['in',k,v]);return q;},overlaps(k,v){filters.push(['overlaps',k,v]);return q;},
+          order(){return q;},range(a,b){start=a;end=b;return q;},then(resolve,reject){return labelDb({op:'read',table,filters,start,end,fields}).then(resolve,reject);}};
         return q;
       },
       storage:{from(bucket){return {upload:(path,file)=>labelDb({op:'upload',bucket,path,size:file.size}),createSignedUrl:async path=>({data:{signedUrl:`${location.origin}/${path}`}})};}},
@@ -107,6 +108,48 @@ async function save(page) {
   await page.locator('#save-order-labels').click();
   await expect(page.locator('#order-label-upload-status')).toContainText('Labels saved');
 }
+
+test('saved shipping label marks the whole group, including filtered lines; tracking alone does not',async t=>{
+  const db=database();
+  Object.assign(db.orders[0],{label_file_path:'extension/saved.pdf',label_metadata:{trackingNumber:'111111111111'}});
+  Object.assign(db.orders[1],{label_status:'completed',label_metadata:{trackingNumber:'222222222222'}});
+  const page=await open(t,db),badge=page.locator('.buyer-card-meta [data-shipping-label-orders]');
+  await expect(badge).toHaveCount(1);await expect(badge).toBeVisible();
+  await expect(badge).toHaveText('✓ Shipping label added');
+  await expect(page.locator('.buyer-line-btn [data-shipping-label-orders]')).toHaveCount(0);
+  await page.evaluate(()=>{state.filteredOrders=[lines[1]];renderOrders();});
+  await expect(badge).toBeVisible();
+  await page.evaluate(()=>{lines[1].order.buyer_username='another-buyer';state.filteredOrders=lines;renderOrders();});
+  await expect(badge).toHaveCount(2);
+  await expect(page.locator('[data-shipping-label-orders*="order-a"]')).toBeVisible();
+  await expect(page.locator('[data-shipping-label-orders*="order-b"]')).toBeHidden();
+  await expect.poll(()=>page.evaluate(()=>lines[0].order.label_metadata.trackingNumber)).toBe('111111111111');
+});
+
+test('phone label upload updates the collapsed queue without opening labels or replacing the card',async t=>{
+  const db=database(),desktop=await open(t,db),phone=await open(t,db,true);
+  await desktop.evaluate(()=>{
+    state.selectedLine=null;state.collapsedBuyerKeys.add('lore2526');renderOrders();
+    document.querySelector('.buyer-order-card').dataset.testIdentity='same-card';
+  });
+  const badge=desktop.locator('.buyer-card-meta [data-shipping-label-orders]');
+  await expect(badge).toBeHidden();
+  await phone.locator('[data-buyer-shipping-labels]').tap();
+  await pick(phone,[['phone-label.pdf',await pdf()]]);
+  await expect(badge).toBeHidden();
+  await save(phone);
+  await expect(badge).toBeVisible();await expect(badge).toHaveText('✓ Shipping label added');
+  await expect(desktop.locator('.buyer-order-card')).toHaveAttribute('data-test-identity','same-card');
+  await expect(desktop.locator('.buyer-card-expanded')).toHaveCount(0);
+  await phone.locator('#done-order-labels').tap();
+  await expect(phone.locator('.buyer-card-meta [data-shipping-label-orders]')).toBeVisible();
+  assert.equal(await phone.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await mkdir(new URL('../test-results',import.meta.url),{recursive:true});
+  await desktop.screenshot({path:'test-results/shipping-label-queue-marker.png'});
+  await phone.screenshot({path:'test-results/shipping-label-queue-marker-phone.png'});
+  for (const order of db.orders) order.label_file_path=null;
+  await expect(badge).toBeHidden();
+});
 
 test('real PDF reader reads multiple pages and tracking formats, with bounded file validation',async t=>{
   const page=await open(t,database());

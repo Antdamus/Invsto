@@ -83,24 +83,45 @@
           title: label.metadata.fileName || "Shipping label"});
       }));
     }
-    function watch(lines, container, statusEl) {
+    function subscribe(readValue, onValue, onError, pollMs) {
       let active = true, loading = false, rerun = false;
       async function refresh() {
         if (!active) return;
         if (loading) {rerun = true; return;}
         loading = true;
         try {
-          const labels = await read(lines);
-          if (active) {renderSaved(container, labels); if (statusEl) statusEl.textContent = "";}
-        } catch (error) {if (active && statusEl) statusEl.textContent = `Could not refresh labels: ${error.message || "Try again."}`;}
+          const value = await readValue();
+          if (active) onValue(value);
+        } catch (error) {if (active) onError?.(error);}
         finally {loading = false; if (rerun && active) {rerun = false; refresh();}}
       }
-      if (container) {container.dataset.labels = ""; container.textContent = "Loading shipping labels…";}
-      const timer = setInterval(() => {if (!document.hidden) refresh();}, config.pollMs || 5000);
+      const timer = setInterval(() => {if (!document.hidden) refresh();}, pollMs);
       const visible = () => {if (!document.hidden) refresh();};
       document.addEventListener("visibilitychange", visible);
       watchers.add(refresh); refresh();
       return () => {active = false; clearInterval(timer); watchers.delete(refresh); document.removeEventListener("visibilitychange", visible);};
+    }
+    function watch(lines, container, statusEl) {
+      if (container) {container.dataset.labels = ""; container.textContent = "Loading shipping labels…";}
+      return subscribe(() => read(lines), labels => {
+        renderSaved(container, labels); if (statusEl) statusEl.textContent = "";
+      }, error => {
+        if (statusEl) statusEl.textContent = `Could not refresh labels: ${error.message || "Try again."}`;
+      }, config.pollMs || 5000);
+    }
+    function watchOrderStatus(lines) {
+      const ids = orderOptions(lines).map(order => order.id).sort();
+      // Only fetch the saved path for queue badges, without PDFs or label audit history.
+      return subscribe(async () => {
+        const orders = [];
+        for (let offset = 0; offset < ids.length; offset += 200) {
+          const {data, error} = await config.getClient().from("ebay_orders")
+            .select("id,label_file_path").in("id", ids.slice(offset, offset + 200));
+          if (error) throw error;
+          orders.push(...(data || []));
+        }
+        return orders;
+      }, orders => config.onOrdersLoaded?.(orders), null, config.pollMs || 15000);
     }
     function numbers(entry) {
       return [...new Set(entry.tracking.split(/[,;\n]+/).map(window.shippingLabelReader.clean).filter(Boolean))];
@@ -239,7 +260,7 @@
     $("refresh-order-labels").addEventListener("click", () => watchers.forEach(refresh => refresh()));
     $("order-shipping-labels-modal").addEventListener("click", event => {if (event.target.id === "order-shipping-labels-modal") close();});
     window.addEventListener("beforeunload", event => {if (busy || pending.length) {event.preventDefault(); event.returnValue = "";}});
-    return {open, close, watch, get hasPending() {return busy || pending.length > 0;}};
+    return {open, close, watch, watchOrderStatus, get hasPending() {return busy || pending.length > 0;}};
   }
   window.OGOrderShippingLabels = {create};
 })();
