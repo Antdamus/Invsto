@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261003-phone-photos" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261003-photo-corrections" />
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
@@ -1004,6 +1004,8 @@
           <input id="completion-photo-files" type="file" accept="image/*,.heic,.heif" multiple />
         </label>
       </div>
+      <p class="completion-photo-help">Select multiple photos at once, or keep taking photos before saving. You can add more later.</p>
+      <input id="completion-photo-replacement" class="hidden" type="file" accept="image/*,.heic,.heif" aria-label="Replacement photo" />
       <div id="completion-photo-pending" class="completion-photo-grid"></div>
       <p id="completion-photo-status" class="fulfill-status" role="status" aria-live="polite"></p>
       <div class="modal-actions">
@@ -1015,6 +1017,7 @@
         <button id="refresh-completion-photos" type="button" class="secondary-btn">Refresh</button>
       </div>
       <div id="completion-photo-saved" class="completion-photo-grid"></div>
+      <p class="completion-photo-help">Remove or replace a saved photo using its buttons. Changes apply to the photo’s orders in this view.</p>
     </div>
   </div>
 
@@ -1028,7 +1031,7 @@
 <script src="shipping-label-print.js?v=20260929-complete"></script>
 <script src="bag-order-links.js?v=20260930"></script>
 <script src="video-receipts.js?v=20261002-desktop-capture"></script>
-<script src="completion-photos.js?v=20261003-phone-photos"></script>
-<script src="pending-orders.js?v=20261003-phone-photos"></script>
+<script src="completion-photos.js?v=20261003-photo-corrections"></script>
+<script src="pending-orders.js?v=20261003-photo-corrections"></script>
 </body>
 </html>

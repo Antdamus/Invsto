@@ -30,7 +30,8 @@ after(async () => {
 
 function database() {
   return {events: [], uploads: [], calls: [], reads: [], failUpload: false, failRead: false,
-    loseResponse: false, failOrder: '', delayRead: 0};
+    loseResponse: false, failOrder: '', delayRead: 0, failCorrection: false,
+    loseCorrectionResponse: false, corrections: new Map()};
 }
 
 async function open(t, db, {mobile = false, actor = 'desktop@example.com'} = {}) {
@@ -58,6 +59,28 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com'} = {})
     }
     if (op === 'rpc') {
       db.calls.push(args);
+      if (args.name === 'correct_pending_order_completion_photo') {
+        const a = args.args;
+        if (db.failCorrection) return {error: {message: 'Photo correction unavailable'}};
+        if (db.corrections.has(a._request_id)) return {data: db.corrections.get(a._request_id)};
+        const rows = db.events.filter(e => a._event_ids.includes(e.id));
+        if (rows.length !== a._event_ids.length || rows.some(e => e.payload.proof_type !== 'completion_photo' ||
+          !e.photo_attachments.some(p => p.bucket === a._bucket && p.path === a._path))) {
+          return {error: {message: 'This photo has already changed. Refresh the photos and try again.'}};
+        }
+        rows.forEach(e => {
+          e.payload.completion_photo_changes ||= [];
+          e.payload.completion_photo_changes.push({request_id: a._request_id,
+            original: e.photo_attachments.filter(p => p.bucket === a._bucket && p.path === a._path),
+            replacement: a._replacement, signed_by_email: actor});
+          e.photo_attachments = e.photo_attachments.flatMap(p => p.bucket === a._bucket && p.path === a._path
+            ? (a._replacement ? [{...a._replacement, signed_by_email: actor}] : []) : [p]);
+        });
+        const result = {updated_events: rows.length};
+        db.corrections.set(a._request_id, result);
+        if (db.loseCorrectionResponse) {db.loseCorrectionResponse = false; return {error: {message: 'Correction response lost'}};}
+        return {data: result};
+      }
       if (args.name !== 'add_ebay_order_history_extra_photos') return {data: {}};
       const a = args.args;
       if (db.failOrder === a._order_id) return {error: {message: 'Order save unavailable'}};
@@ -307,4 +330,99 @@ test('saved completion photos survive both final completion paths and appear as 
     }, db.events);
     assert.deepEqual(result, [{path: db.events[0].photo_attachments[0].path, author: 'desktop@example.com'}]);
   }
+});
+
+test('multiple library selections, additional camera shots, and later additions all remain saved', async t => {
+  const db = database(), page = await open(t, db, {mobile: true});
+  await page.evaluate(() => openCompletionPhotos([lines[0]]));
+  await page.locator('#completion-photo-files').setInputFiles(['front.png', 'back.png'].map(name => ({name, mimeType: 'image/png', buffer: png})));
+  await pick(page, 'completion-photo-camera', 'detail.png');
+  await expect(page.locator('#completion-photo-pending .completion-photo-card')).toHaveCount(3);
+  await save(page);
+  await expect(page.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(3);
+  await pick(page, 'completion-photo-files', 'extra.png'); await save(page);
+  await expect(page.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(4);
+  assert.equal(db.events.length, 4);
+});
+
+test('removing a shared photo updates the desktop and only changes the orders in this view', async t => {
+  const db = database();
+  db.events = [evidence({path: 'completion-photos/shared.png'}),
+    {...evidence({order: 'order-b', line: 'line-b', path: 'completion-photos/shared.png'}), id: 'other-event'},
+    {...evidence({order: 'order-c', line: 'line-c', path: 'completion-photos/shared.png'}), id: 'outside-event'}];
+  const desktop = await open(t, db), phone = await open(t, db, {mobile: true, actor: 'other-staff@example.com'});
+  await desktop.evaluate(() => openWorkerNoInventoryModal({lineIds: ['line-a']}));
+  await phone.locator('[data-buyer-completion-photos]').tap();
+  await expect(phone.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(1);
+  await phone.locator('[data-remove-saved-photo]').tap();
+  await expect(phone.locator('#completion-photo-status')).toContainText('Photo removed');
+  await expect(phone.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(0);
+  await expect(desktop.locator('#no-inventory-completion-photo-grid .completion-photo-card')).toHaveCount(0);
+  assert.equal(db.events[0].photo_attachments.length, 0);
+  assert.equal(db.events[1].photo_attachments.length, 0);
+  assert.equal(db.events[2].photo_attachments.length, 1);
+  assert.equal(db.events[0].payload.completion_photo_changes[0].signed_by_email, 'other-staff@example.com');
+});
+
+async function replace(page, {camera = false, name = 'replacement.png'} = {}) {
+  await page.locator('[data-replace-saved-photo]').click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.locator(camera ? '[data-replacement-camera]' : '[data-replacement-file]').click();
+  await (await chooser).setFiles({name, mimeType: 'image/png', buffer: png});
+}
+
+test('replacement keeps the original through upload failure, then swaps and synchronizes after saving', async t => {
+  const db = database(); db.events = [evidence({path: 'completion-photos/original.png'})];
+  const desktop = await open(t, db), phone = await open(t, db, {mobile: true, actor: 'phone@example.com'});
+  await desktop.evaluate(() => openWorkerNoInventoryModal({lineIds: ['line-a']}));
+  await phone.evaluate(() => openCompletionPhotos([lines[0]]));
+  await replace(phone, {camera: true});
+  assert.equal(await phone.locator('#completion-photo-replacement').getAttribute('capture'), 'environment');
+  await expect(phone.locator('#completion-photo-pending')).toContainText('The original stays until you save.');
+  db.failUpload = true;
+  await phone.locator('#save-completion-photos').click();
+  await expect(phone.locator('#completion-photo-status')).toContainText('Upload unavailable');
+  assert.equal(db.events[0].photo_attachments[0].path, 'completion-photos/original.png');
+  db.failUpload = false; await save(phone);
+  await expect(desktop.locator('#no-inventory-completion-photo-grid img')).toHaveAttribute('alt', 'replacement.png');
+  assert.equal(db.events.length, 1);
+  assert.equal(db.events[0].photo_attachments.length, 1);
+  assert.equal(db.events[0].payload.completion_photo_changes[0].original[0].path, 'completion-photos/original.png');
+  await expect(phone.locator('#completion-photo-saved')).toContainText('phone@example.com');
+  await phone.screenshot({path: 'test-results/completion-photo-replace-mobile.png'});
+});
+
+test('replacement retries use one request and uploaded file after the server committed but the response was lost', async t => {
+  const db = database(); db.events = [evidence({path: 'completion-photos/original.png'})];
+  const page = await open(t, db);
+  await page.evaluate(() => openCompletionPhotos([lines[0]]));
+  await replace(page);
+  assert.equal(await page.locator('#completion-photo-replacement').getAttribute('capture'), null);
+  db.loseCorrectionResponse = true;
+  await page.locator('#save-completion-photos').click();
+  await expect(page.locator('#completion-photo-status')).toContainText('Correction response lost');
+  const uploadCount = db.uploads.length;
+  await save(page);
+  const calls = db.calls.filter(c => c.name === 'correct_pending_order_completion_photo');
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].args._request_id, calls[1].args._request_id);
+  assert.equal(db.uploads.length, uploadCount);
+  assert.equal(db.events[0].payload.completion_photo_changes.length, 1);
+});
+
+test('cancelling a replacement or a failed removal leaves the original photo available', async t => {
+  const db = database(); db.events = [evidence({path: 'completion-photos/original.png'})];
+  const page = await open(t, db);
+  await page.evaluate(() => openCompletionPhotos([lines[0]]));
+  await replace(page);
+  await page.locator('[data-remove-photo]').click();
+  await expect(page.locator('#completion-photo-saved img')).toHaveAttribute('alt', 'completion-photos/original.png');
+  db.failCorrection = true;
+  await page.locator('[data-remove-saved-photo]').click();
+  await expect(page.locator('#completion-photo-status')).toContainText('Photo correction unavailable');
+  assert.equal(db.events[0].photo_attachments.length, 1);
+  await expect(page.locator('[data-remove-saved-photo]')).toBeEnabled();
+  db.failCorrection = false;
+  await page.locator('[data-remove-saved-photo]').click();
+  await expect(page.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(0);
 });

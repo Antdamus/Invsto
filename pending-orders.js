@@ -4602,19 +4602,25 @@ function getVideoReceiptEvidencePhotosForLine(line = {}) {
         .filter((photo) => videoReceiptPhotoMatchesLine(photo, task, line))
         .forEach((photo) => photos.push({
           ...photo,
+          receiptEventId: event.id,
+          receiptOrderId: event.order_id || task.order_id,
           signed_by_email: photo.signed_by_email || event.signed_by_email || task.created_by_email || "",
           created_at: photo.created_at || event.created_at || task.created_at || "",
         }));
     });
   });
 
-  const seen = new Set();
-  return photos.filter((photo) => {
-    const key = getNoInventoryEvidencePhotoKey(photo);
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return Boolean(photo.path || photo.previewUrl);
-  });
+  const unique = new Map();
+  for (const photo of photos) {
+    const key = photo.bucket && photo.path ? `${photo.bucket}:${photo.path}` : getNoInventoryEvidencePhotoKey(photo);
+    if (!key || !(photo.path || photo.previewUrl)) continue;
+    const previous = unique.get(key);
+    unique.set(key, previous ? {...photo, ...previous,
+      receiptEventId: photo.receiptEventId || previous.receiptEventId,
+      receiptOrderId: photo.receiptOrderId || previous.receiptOrderId,
+    } : photo);
+  }
+  return [...unique.values()];
 }
 
 function getSavedEvidenceVideoScopeLines(line = {}, scope = "line") {
@@ -4786,6 +4792,7 @@ async function ensureEvidencePhotoPreviewUrls(photo = {}) {
 async function renderSelectedVideoReceiptEvidence() {
   const container = $("selected-video-receipt-evidence");
   if (!container) return;
+  const line = state.selectedLine;
   const photos = getSelectedVideoReceiptEvidencePhotos();
   if (!photos.length) {
     container.innerHTML = "";
@@ -4799,20 +4806,24 @@ async function renderSelectedVideoReceiptEvidence() {
   `).join("");
 
   const hydrated = await Promise.all(photos.map((photo) => ensureEvidencePhotoPreviewUrls(photo).catch(() => photo)));
-  if (!$("selected-video-receipt-evidence")) return;
+  if (!container.isConnected || state.selectedLine?.id !== line?.id) return;
 
   container.innerHTML = hydrated.map((photo, index) => {
     const actor = photo.signed_by_email || getVideoReceiptAuditActor();
     const capturedAt = photo.created_at || photo.metadata?.capturedAt || "";
     const auditText = photo.auditText || `Captured by ${actor}${capturedAt ? ` on ${formatDate(capturedAt)}` : ""}`;
     return `
+      <div class="receipt-photo-with-actions">
       <button type="button" class="video-receipt-evidence-thumb" data-selected-video-receipt-photo="${index}" title="Open video receipt screenshot">
         ${photo.thumbnailUrl || photo.previewUrl ? `<img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl)}" alt="${escapeHtml(photo.label || "Video receipt screenshot")}" />` : ""}
         <span>${escapeHtml(auditText)}</span>
       </button>
+      ${renderReceiptPhotoCorrectionActions(photo, index)}
+      </div>
     `;
   }).join("");
 
+  bindReceiptPhotoCorrectionActions(container, line, hydrated);
   container.querySelectorAll("[data-selected-video-receipt-photo]").forEach((button) => {
     button.addEventListener("click", () => {
       const photo = hydrated[Number(button.dataset.selectedVideoReceiptPhoto || 0)];
@@ -4822,6 +4833,51 @@ async function renderSelectedVideoReceiptEvidence() {
       }, "assign-order-task");
     });
   });
+}
+
+function renderReceiptPhotoCorrectionActions(photo, index) {
+  return `<div class="receipt-photo-correction-actions">
+    <button type="button" class="secondary-btn" data-recapture-receipt="${index}">Capture again</button>
+    <button type="button" class="secondary-btn" data-remove-receipt="${index}"
+      ${photo.receiptEventId ? "" : 'disabled title="The capture is still saving. Refresh to manage it."'}>Remove</button>
+  </div>`;
+}
+
+function bindReceiptPhotoCorrectionActions(container, line, photos) {
+  container.querySelectorAll("[data-recapture-receipt]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      openVideoReceiptLink(event, getOrderVideoReceiptLink(line));
+    });
+  });
+  container.querySelectorAll("[data-remove-receipt]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      const photo = photos[Number(button.dataset.removeReceipt)];
+      Object.assign(button.dataset, {eventId: photo.receiptEventId || "", orderId: photo.receiptOrderId || line.order_id,
+        bucket: photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET, path: photo.path || "", label: photo.label || "receipt screenshot"});
+      deleteVideoReceiptCapture(button);
+    });
+  });
+}
+
+function forgetReceiptCapture(orderId, bucket, path) {
+  const matches = photo => (photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET) === bucket && photo.path === path;
+  for (const [lineId, photo] of state.videoReceiptEvidenceByLineId) {
+    if (state.orders.some(line => line.id === lineId && line.order_id === orderId) && matches(photo)) {
+      state.videoReceiptEvidenceByLineId.delete(lineId);
+    }
+  }
+  for (const [tasks, eventMap] of [[state.selectedOrderTasks, state.selectedOrderTaskEvents],
+    [state.queueVideoReceiptTasks, state.queueVideoReceiptTaskEvents]]) {
+    for (const task of tasks.filter(task => task.order_id === orderId)) {
+      eventMap.set(task.id, (eventMap.get(task.id) || []).map(event => ({...event,
+        photo_attachments: (event.photo_attachments || []).filter(photo => !matches(photo)),
+      })));
+    }
+  }
+  state.queueVideoReceiptLoadedOrderIds.delete(orderId);
+  state.sharedOrderNoteHistory.delete(orderId);
 }
 
 function getSelectedOrderLabelData() {
@@ -5527,12 +5583,16 @@ async function hydrateQueueVideoReceiptEvidenceThumbnails(lines = [], options = 
       const capturedAt = photo.created_at || photo.metadata?.capturedAt || "";
       const auditText = photo.auditText || `Captured by ${actor}${capturedAt ? ` on ${formatDate(capturedAt)}` : ""}`;
       return `
+        <div class="receipt-photo-with-actions">
         <button type="button" class="video-receipt-evidence-thumb queue-video-receipt-thumb" data-queue-video-photo="${index}" title="Open video receipt screenshot">
           ${photo.thumbnailUrl || photo.previewUrl ? `<img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl)}" alt="${escapeHtml(photo.label || "Video receipt screenshot")}" />` : ""}
           <span>${escapeHtml(auditText)}</span>
         </button>
+        ${renderReceiptPhotoCorrectionActions(photo, index)}
+        </div>
       `;
     }).join("");
+    bindReceiptPhotoCorrectionActions(container, line, hydrated);
     container.querySelectorAll("[data-queue-video-photo]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.preventDefault();
@@ -5955,14 +6015,13 @@ async function openAssignedOrderTaskDetailsModal(taskId, options = {}) {
 }
 
 async function deleteVideoReceiptCapture(buttonEl) {
+  if (buttonEl?.disabled) return;
   const eventId = buttonEl?.dataset?.eventId || "";
   const bucket = buttonEl?.dataset?.bucket || NO_INVENTORY_EVIDENCE_BUCKET;
   const path = buttonEl?.dataset?.path || "";
-  const storagePaths = [...new Set([
-    path,
-    buttonEl?.dataset?.previewPath || "",
-    buttonEl?.dataset?.thumbnailPath || "",
-  ].filter(Boolean))];
+  const orderId = buttonEl?.dataset?.orderId || [...state.selectedOrderTasks, ...state.queueVideoReceiptTasks]
+    .find(task => [...(state.selectedOrderTaskEvents.get(task.id) || []), ...(state.queueVideoReceiptTaskEvents.get(task.id) || [])]
+      .some(event => event.id === eventId))?.order_id || state.selectedLine?.order_id;
   const label = buttonEl?.dataset?.label || "this video receipt capture";
   if (!eventId || !path) {
     setStatus("This video receipt capture is missing delete details.", "error");
@@ -5988,18 +6047,15 @@ async function deleteVideoReceiptCapture(buttonEl) {
       throw new Error("Supabase did not remove that capture. The stored path may not match the task photo.");
     }
 
-    const { error: storageError } = await supabase.storage.from(bucket).remove(storagePaths);
-    if (storageError) {
-      console.warn("Video receipt capture was removed from coordination, but storage cleanup failed:", storageError);
-    }
-    await loadSelectedOrderTasks();
+    // Detach the mistaken capture. The file may still be referenced by another order.
+    forgetReceiptCapture(orderId, bucket, path);
+    try { await loadSelectedOrderTasks(); } catch (refreshError) { console.warn("Capture removed; refresh failed:", refreshError); }
     if (state.selectedLine?.id) await renderSelectedVideoReceiptEvidence();
     if (state.workerNoInventoryLineIds.size) renderWorkerNoInventoryList();
+    renderOrders();
     setStatus(
-      storageError
-        ? `Video receipt capture removed from coordination. Storage cleanup needs admin review: ${storageError.message || "Storage API rejected deletion."}`
-        : `Video receipt capture deleted (${Number(data.removed_count).toLocaleString()} attachment${Number(data.removed_count) === 1 ? "" : "s"} removed).`,
-      storageError ? "error" : "success"
+      "Receipt capture removed. Use Capture again or Upload receipt screenshot to save the correct moment.",
+      "success"
     );
   } catch (error) {
     console.error("Could not delete video receipt capture:", error);

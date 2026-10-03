@@ -3178,7 +3178,22 @@ body.modal-open {
 .completion-photos-card p { overflow-wrap: anywhere; }
 .completion-photo-actions .folder-photo-picker { cursor: pointer; }
 .completion-photo-actions .folder-photo-picker:focus-within { outline: 2px solid #a3ccee; }
+.completion-photo-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.completion-photo-card .secondary-btn {
+  padding: 7px 10px;
+  border: 1px solid rgba(163, 204, 238, .3);
+  font-size: .8rem;
+}
+.completion-photo-card button:disabled { opacity: .45; cursor: default; }
+.completion-photo-replacement-options { display: grid; gap: 8px; }
 .buyer-card-completion-photos { white-space: nowrap; }
+.receipt-photo-with-actions { display: grid; align-content: start; gap: 6px; min-width: 0; }
+.receipt-photo-correction-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.receipt-photo-correction-actions .secondary-btn { font-size: .75rem; padding: 6px 9px; }
 
 .evidence-photo-viewer-modal {
   z-index: 7000;

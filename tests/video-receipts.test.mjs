@@ -94,6 +94,82 @@ async function open(t, {pageName = 'pending-orders', saved = '', button = false,
 const trigger = p => p.locator('.buyer-line-receipt, [data-return-video-receipt-link], #receipt-test-button').first();
 const dialog = p => p.locator('.video-receipt-dialog');
 
+async function savedCaptureFixture(t, options = {}) {
+  const p = await open(t, {saved: receiptUrl, ...options});
+  await p.evaluate(() => {
+    const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=';
+    window.capturePhoto = {bucket: 'order-evidence-photos', path: 'video-receipts/wrong.png', label: 'Video receipt - 123456789012'};
+    window.keepPhoto = {...capturePhoto, path: 'video-receipts/correct.png'};
+    const task = {id: 'receipt-task', order_id: 'order-one', order_line_ids: ['line-one'], status: 'resolved'};
+    const outsideTask = {...task, id: 'outside-task', order_id: 'outside-order', order_line_ids: ['outside-line']};
+    window.savedReceiptEvents = [{id: 'receipt-event', task_id: task.id, order_id: task.order_id,
+      photo_attachments: [capturePhoto, keepPhoto], signed_by_email: 'camera@example.com', created_at: '2026-10-03T16:30:00Z'}];
+    state.user = {id: 'staff', email: 'staff@example.com'};
+    state.orders.push({...fixtureLine, id: 'outside-line', order_id: 'outside-order'});
+    state.selectedOrderTasks = [task]; state.selectedOrderTaskEvents.set(task.id, structuredClone(savedReceiptEvents));
+    state.queueVideoReceiptTasks = [task, outsideTask];
+    state.queueVideoReceiptTaskEvents.set(task.id, structuredClone(savedReceiptEvents));
+    state.queueVideoReceiptTaskEvents.set(outsideTask.id, [{...savedReceiptEvents[0], id: 'outside-event', task_id: outsideTask.id, order_id: outsideTask.order_id}]);
+    state.queueVideoReceiptLoadedOrderIds = new Set(['order-one', 'outside-order']);
+    state.videoReceiptEvidenceByLineId.set('line-one', {...capturePhoto, previewUrl: image, thumbnailUrl: image});
+    state.videoReceiptEvidenceByLineId.set('outside-line', {...capturePhoto, previewUrl: image, thumbnailUrl: image});
+    ensureEvidencePhotoPreviewUrls = async photo => ({...photo, previewUrl: image, thumbnailUrl: image});
+    window.removeCalls = []; window.removeFails = false;
+    supabase.rpc = async (name, args) => {
+      if (name !== 'delete_ebay_video_receipt_capture') throw Error(`Unexpected RPC ${name}`);
+      removeCalls.push({name, args});
+      if (removeFails) return {error: {message: 'Removal unavailable'}};
+      savedReceiptEvents = savedReceiptEvents.map(e => ({...e, photo_attachments: e.photo_attachments.filter(p => p.path !== args._path)}));
+      return {data: {removed_count: 1}};
+    };
+    loadSelectedOrderTasks = async () => state.selectedOrderTaskEvents.set(task.id, structuredClone(savedReceiptEvents));
+    renderOrders();
+  });
+  await p.evaluate(() => hydrateQueueVideoReceiptEvidenceThumbnails([fixtureLine]));
+  return p;
+}
+
+test('saved receipt screenshots can be removed directly in the pending block without stale cached captures returning', async t => {
+  const p = await savedCaptureFixture(t);
+  p.on('dialog', d => d.accept());
+  const remove = p.locator('[data-queue-video-evidence="line-one"] [data-remove-receipt]').first();
+  assert.equal(await remove.isEnabled(), true, 'live preview is enriched with its saved event id');
+  await remove.click();
+  await p.waitForFunction(() => removeCalls.length === 1 && !state.videoReceiptEvidenceByLineId.has('line-one'));
+  const result = await p.evaluate(() => ({
+    calls: removeCalls,
+    selected: getVideoReceiptEvidencePhotosForLine(fixtureLine).map(p => p.path),
+    outside: state.queueVideoReceiptTaskEvents.get('outside-task')[0].photo_attachments.map(p => p.path),
+    outsideLive: state.videoReceiptEvidenceByLineId.has('outside-line'),
+  }));
+  assert.equal(result.calls[0].args._event_id, 'receipt-event');
+  assert.equal(result.calls[0].args._path, 'video-receipts/wrong.png');
+  assert.deepEqual(result.selected, ['video-receipts/correct.png']);
+  assert.ok(result.outside.includes('video-receipts/wrong.png'));
+  assert.equal(result.outsideLive, true);
+});
+
+test('receipt Capture again reopens the exact item through the desktop capture extension', async t => {
+  const p = await savedCaptureFixture(t, {desktop: true});
+  await p.locator('[data-queue-video-evidence="line-one"] [data-recapture-receipt]').first().click();
+  await p.waitForFunction(() => extensionRequests.length === 1);
+  assert.equal(await p.evaluate(() => removeCalls.length), 0, 'recapture retains the original until explicitly removed');
+});
+
+test('cancelled or failed receipt removal keeps the saved screenshot and permits retry', async t => {
+  const p = await savedCaptureFixture(t);
+  p.once('dialog', d => d.dismiss());
+  const remove = p.locator('[data-queue-video-evidence="line-one"] [data-remove-receipt]').first();
+  await remove.click();
+  assert.equal(await p.evaluate(() => removeCalls.length), 0);
+  await p.evaluate(() => removeFails = true);
+  p.on('dialog', d => d.accept());
+  await remove.click();
+  await p.waitForFunction(() => removeCalls.length === 1);
+  await p.waitForFunction(() => !document.querySelector('[data-queue-video-evidence="line-one"] [data-remove-receipt]').disabled);
+  assert.equal(await p.evaluate(() => getVideoReceiptEvidencePhotosForLine(fixtureLine).length), 2);
+});
+
 test('phone queue immediately offers a native eBay order link without requesting an extension', async t => {
   const p = await open(t);
   await trigger(p).click();
