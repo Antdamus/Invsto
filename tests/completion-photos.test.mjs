@@ -1,0 +1,310 @@
+import assert from 'node:assert/strict';
+import {readFile, mkdir} from 'node:fs/promises';
+import {createServer} from 'node:http';
+import {test, before, after} from 'node:test';
+import {chromium, expect} from '@playwright/test';
+
+const root = new URL('../', import.meta.url);
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=', 'base64');
+const imageUrl = `data:image/png;base64,${png.toString('base64')}`;
+let server, browser, origin;
+before(async () => {
+  server = createServer(async (req, res) => {
+    const name = new URL(req.url, 'http://localhost').pathname.slice(1);
+    if (!/^[\w./-]+$/.test(name) || name.includes('..')) return res.writeHead(404).end();
+    try {
+      let content = await readFile(new URL(name, root));
+      if (name.endsWith('.html')) content = content.toString().replace(/<script\b[\s\S]*?<\/script>/gi, '');
+      res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html');
+      res.end(content);
+    } catch { res.writeHead(404).end(); }
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  origin = `http://127.0.0.1:${server.address().port}`;
+  browser = await chromium.launch();
+});
+after(async () => {
+  await browser?.close();
+  await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
+});
+
+function database() {
+  return {events: [], uploads: [], calls: [], reads: [], failUpload: false, failRead: false,
+    loseResponse: false, failOrder: '', delayRead: 0};
+}
+
+async function open(t, db, {mobile = false, actor = 'desktop@example.com'} = {}) {
+  const context = await browser.newContext({viewport: {width: mobile ? 390 : 1440, height: 950},
+    isMobile: mobile, hasTouch: mobile});
+  t.after(() => context.close());
+  await context.route('**/*', r => r.request().url().startsWith(origin) ? r.continue() : r.abort());
+  const page = await context.newPage();
+  page.setDefaultTimeout(10000);
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  t.after(() => assert.deepEqual(errors, []));
+  await page.exposeFunction('photoDb', async ({op, ...args}) => {
+    if (op === 'read') {
+      db.reads.push(args);
+      const rows = structuredClone(db.events).filter(row => args.filters.every(([key, value]) =>
+        (key === 'payload->>proof_type' ? row.payload?.proof_type : row[key]) === value));
+      if (db.delayRead) await new Promise(r => setTimeout(r, db.delayRead));
+      return db.failRead ? {error: {message: 'Read unavailable'}} : {data: rows.slice(args.start, args.end + 1)};
+    }
+    if (op === 'upload') {
+      if (db.failUpload) return {error: {message: 'Upload unavailable'}};
+      db.uploads.push(args);
+      return {data: {path: args.path}};
+    }
+    if (op === 'rpc') {
+      db.calls.push(args);
+      if (args.name !== 'add_ebay_order_history_extra_photos') return {data: {}};
+      const a = args.args;
+      if (db.failOrder === a._order_id) return {error: {message: 'Order save unavailable'}};
+      db.events.unshift({id: `event-${db.events.length}`, order_id: a._order_id,
+        created_at: '2026-10-03T16:30:00Z', signed_by_email: a._signed_by_email,
+        action: 'history_extra_photo', photo_attachments: a._photo_attachments,
+        payload: {source: 'order_history_extra_photo', proof_type: a._proof_type, order_line_ids: a._order_line_ids}});
+      if (db.loseResponse) { db.loseResponse = false; return {error: {message: 'Response lost after saving'}}; }
+      return {data: db.events[0]};
+    }
+    throw Error(`Unknown operation ${op}`);
+  });
+  await page.goto(`${origin}/pending-orders.html`);
+  await page.addScriptTag({url: `${origin}/completion-photos.js`});
+  await page.addScriptTag({url: `${origin}/pending-orders.js`});
+  await page.evaluate(({actor, imageUrl}) => {
+    const create = OGCompletionPhotos.create;
+    OGCompletionPhotos.create = config => create({...config, pollMs: 150});
+    window.supabase = {
+      from(table) {
+        const filters = [];
+        let start = 0, end = 499;
+        const q = {
+          select() {return q;}, eq(k, v) {filters.push([k, v]); return q;}, order() {return q;},
+          range(a, b) {start = a; end = b; return q;},
+          then(resolve, reject) {return photoDb({op: 'read', table, filters, start, end}).then(resolve, reject);},
+        };
+        return q;
+      },
+      storage: {from(bucket) {return {
+        upload: (path, file) => photoDb({op: 'upload', bucket, path, size: file.size}),
+        createSignedUrl: async () => ({data: {signedUrl: imageUrl}}),
+      };}},
+      rpc: (name, args) => photoDb({op: 'rpc', name, args}),
+    };
+    window.lines = [
+      {id: 'line-a', order_id: 'order-a', item_title: 'Gold chain', quantity: 1, fulfilled_quantity: 0,
+        total_price: 1485, line_status: 'pending', order: {order_number: '11-22222-33333', buyer_username: 'lore2526'}},
+      {id: 'line-b', order_id: 'order-b', item_title: 'Silver ring', quantity: 1, fulfilled_quantity: 0,
+        total_price: 30, line_status: 'pending', order: {order_number: '11-22222-44444', buyer_username: 'lore2526'}},
+    ];
+    state.user = {id: actor, email: actor}; state.employee = {active: true, role: 'employee'};
+    state.orders = lines; state.filteredOrders = lines; state.selectedLine = lines[0];
+    state.checkoutStoreId = 'store-a'; state.stores = [{id: 'store-a', name: 'Main Store'}];
+    hydrateBuyerGroupNotes = () => {};
+    scheduleQueueVideoReceiptEvidenceHydration = () => {};
+    loadNoInventoryCaptureStations = async () => {};
+    captureAuditLocation = async () => ({status: 'granted', latitude: 25, longitude: -80});
+    renderEbayLabelPanel = () => {};
+    resolvePhotoUrl = async () => '';
+    setupListeners();
+    renderOrders();
+  }, {actor, imageUrl});
+  return page;
+}
+
+async function pick(page, input = 'completion-photo-files', name = 'packed-order.png') {
+  await page.locator(`#${input}`).setInputFiles({name, mimeType: 'image/png', buffer: png});
+}
+async function save(page) {
+  await page.locator('#save-completion-photos').click();
+  await expect(page.locator('#completion-photo-status')).toContainText('Saved to the order.');
+  await expect(page.locator('#completion-photo-pending .completion-photo-card')).toHaveCount(0);
+}
+function evidence({order = 'order-a', line = 'line-a', path = 'remote.png', proof = 'completion_photo'} = {}) {
+  return {id: path, order_id: order, created_at: '2026-10-03T16:30:00Z', signed_by_email: 'phone@example.com',
+    payload: {source: 'order_history_extra_photo', proof_type: proof, order_line_ids: [line]},
+    photo_attachments: [{bucket: 'order-evidence-photos', path, label: path}]};
+}
+
+test('phone card offers camera and library, saves audited photos for the displayed orders without expanding the card', async t => {
+  const db = database(), page = await open(t, db, {mobile: true, actor: 'phone@example.com'});
+  await page.evaluate(() => {state.selectedLine = null; renderOrders();});
+  await page.locator('[data-buyer-completion-photos]').tap();
+  await expect(page.locator('#completion-photos-modal')).toBeVisible();
+  await expect(page.locator('.buyer-card-expanded')).toHaveCount(0);
+  assert.equal(await page.locator('#completion-photo-camera').getAttribute('capture'), 'environment');
+  assert.equal(await page.locator('#completion-photo-files').getAttribute('capture'), null);
+  assert.notEqual(await page.locator('#completion-photo-files').getAttribute('multiple'), null);
+  await pick(page, 'completion-photo-camera');
+  await save(page);
+  assert.equal(db.events.length, 2);
+  assert.deepEqual(db.calls.map(c => c.args._order_line_ids).sort(), [['line-a'], ['line-b']]);
+  assert.equal(new Set(db.events.flatMap(e => e.photo_attachments.map(p => p.path))).size, 1);
+  assert.ok(db.events.every(e => e.signed_by_email === 'phone@example.com' && e.payload.proof_type === 'completion_photo'));
+  assert.equal(db.events[0].photo_attachments[0].metadata.source, 'pending_order_completion_photo');
+  await expect(page.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(1);
+  await expect(page.locator('#completion-photo-saved')).toContainText('phone@example.com');
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await mkdir(new URL('../test-results', import.meta.url), {recursive: true});
+  await page.screenshot({path: 'test-results/completion-photos-mobile.png'});
+  await page.locator('#done-completion-photos').tap();
+  await expect(page.locator('#completion-photos-modal')).toBeHidden();
+});
+
+test('phone uploads appear automatically in open desktop without-inventory and mixed inventory review screens', async t => {
+  const db = database();
+  const desktop = await open(t, db), mixed = await open(t, db), phone = await open(t, db, {mobile: true, actor: 'phone@example.com'});
+  await desktop.evaluate(() => openWorkerNoInventoryModal({lineIds: ['line-a']}));
+  await mixed.evaluate(() => {
+    state.activeBuyerKey = '';
+    state.stagedFulfillments.set('line-a', {line: lines[0], mode: 'inventory', qty: 1,
+      item: {id: 'item-a', title: 'Chain', photos: []}, row: {id: 'stock-a', locationLabel: 'Main'}});
+    state.stagedFulfillments.set('line-b', {line: lines[1], mode: 'without_inventory', qty: 1,
+      item: {title: 'Silver ring'}, row: {locationLabel: 'Without inventory'}});
+    openBundleReviewModal();
+  });
+  await phone.evaluate(() => openCompletionPhotos([lines[0]]));
+  await pick(phone); await save(phone);
+  await expect(desktop.locator('#no-inventory-completion-photo-grid .completion-photo-card')).toHaveCount(1);
+  await expect(mixed.locator('#bundle-completion-photo-grid .completion-photo-card')).toHaveCount(1);
+  assert.equal(await desktop.evaluate(() => getSelectedNoInventoryEvidencePhotos().length), 0);
+  assert.deepEqual(await desktop.evaluate(() => persistNoInventoryEvidencePhotos(['line-a'])), []);
+  await desktop.locator('#no-inventory-completion-photo-grid [data-completion-photo]').click();
+  await expect(desktop.locator('#no-inventory-photo-viewer-modal')).toBeVisible();
+  await desktop.locator('#dismiss-no-inventory-photo-viewer').click();
+  await expect(desktop.locator('#worker-no-inventory-modal')).toBeVisible();
+  await desktop.screenshot({path: 'test-results/completion-photos-desktop.png'});
+});
+
+test('line selection filters shared photos, ignores notes and receipts, and drops obsolete responses', async t => {
+  const db = database();
+  db.events.push(evidence(), evidence({order: 'order-b', line: 'line-b', path: 'ring.png'}),
+    evidence({path: 'receipt.png', proof: 'receipt_screenshot'}), evidence({path: 'note.png', proof: 'line_note'}));
+  const page = await open(t, db);
+  await page.evaluate(() => openWorkerNoInventoryModal({lineIds: ['line-a']}));
+  await expect(page.locator('#no-inventory-completion-photo-grid .completion-photo-card')).toHaveCount(1);
+  await expect(page.locator('#no-inventory-completion-photo-grid img')).toHaveAttribute('alt', 'remote.png');
+  db.delayRead = 200;
+  await page.evaluate(() => {setWorkerNoInventoryLineSelection('line-a', false); setWorkerNoInventoryLineSelection('line-b', true);});
+  await expect(page.locator('#no-inventory-completion-photo-grid img')).toHaveAttribute('alt', 'ring.png');
+  await page.waitForTimeout(300);
+  await expect(page.locator('#no-inventory-completion-photo-grid img')).toHaveAttribute('alt', 'ring.png');
+  const queryCount = db.reads.length;
+  await page.evaluate(() => closeWorkerNoInventoryModal({suppressEbayReturn: true, keepMobileDetail: true}));
+  await page.waitForTimeout(450);
+  assert.ok(db.reads.length <= queryCount + 1, 'closing stops polling');
+  assert.equal(await page.evaluate(event => isWrittenLineNote(event, {metadata: {source: 'order_history_extra_photo'}}), db.events[0]), false);
+});
+
+test('lost save response retries by reading the saved evidence and avoids duplicate uploads or events', async t => {
+  const db = database(), page = await open(t, db);
+  await page.evaluate(() => openCompletionPhotos([lines[0]]));
+  await pick(page); db.loseResponse = true;
+  await page.locator('#save-completion-photos').click();
+  await expect(page.locator('#completion-photo-status')).toContainText('Response lost');
+  assert.equal(db.events.length, 1);
+  const uploadCount = db.uploads.length;
+  await save(page);
+  assert.equal(db.events.length, 1);
+  assert.equal(db.calls.length, 1);
+  assert.equal(db.uploads.length, uploadCount);
+});
+
+test('partial multi-order save retries only the failed order with the original uploaded photo', async t => {
+  const db = database(), page = await open(t, db);
+  await page.locator('[data-buyer-completion-photos]').click();
+  await pick(page); db.failOrder = 'order-b';
+  await page.locator('#save-completion-photos').click();
+  await expect(page.locator('#completion-photo-status')).toContainText('Order save unavailable');
+  assert.deepEqual(db.events.map(e => e.order_id), ['order-a']);
+  const count = db.uploads.length;
+  db.failOrder = ''; await save(page);
+  assert.equal(db.events.length, 2);
+  assert.equal(db.calls.filter(c => c.args._order_id === 'order-a').length, 1);
+  assert.equal(db.uploads.length, count);
+});
+
+test('upload failures preserve selection, protect against accidental close, and allow remove or retry', async t => {
+  const db = database(), page = await open(t, db);
+  await page.evaluate(() => openCompletionPhotos([lines[0]]));
+  await pick(page); db.failUpload = true;
+  await page.locator('#save-completion-photos').click();
+  await expect(page.locator('#completion-photo-status')).toContainText('Upload unavailable');
+  await page.locator('#done-completion-photos').click();
+  await expect(page.locator('#completion-photos-modal')).toBeVisible();
+  await expect(page.locator('#completion-photo-status')).toContainText('Save or remove');
+  await page.evaluate(() => confirmWorkerNoInventoryCompletion());
+  assert.equal(db.calls.length, 0);
+  await page.locator('[data-remove-photo]').click();
+  await page.locator('#done-completion-photos').click();
+  await expect(page.locator('#completion-photos-modal')).toBeHidden();
+});
+
+test('completion-screen file and camera buttons invoke the picker and retain the selected line scope', async t => {
+  const db = database(), page = await open(t, db);
+  await page.evaluate(() => openWorkerNoInventoryModal({lineIds: ['line-a']}));
+  const chooser = page.waitForEvent('filechooser');
+  await page.locator('[data-completion-source="no-inventory"][data-completion-picker="files"]').click();
+  await (await chooser).setFiles({name: 'from-folder.png', mimeType: 'image/png', buffer: png});
+  await save(page);
+  assert.deepEqual(db.calls[0].args._order_line_ids, ['line-a']);
+  await page.locator('#done-completion-photos').click();
+  const camera = page.waitForEvent('filechooser');
+  await page.locator('[data-completion-source="no-inventory"][data-completion-picker="camera"]').click();
+  await (await camera).setFiles({name: 'camera.png', mimeType: 'image/png', buffer: png});
+  await save(page);
+  assert.equal(db.events.length, 2);
+});
+
+test('read errors are visible and recover on refresh, with paginated order-scoped evidence', async t => {
+  const db = database(), page = await open(t, db);
+  db.failRead = true;
+  await page.evaluate(() => openCompletionPhotos([lines[0]]));
+  await expect(page.locator('#completion-photo-status')).toContainText('Read unavailable');
+  db.failRead = false;
+  db.events = Array.from({length: 501}, (_, index) => evidence({path: `${index}.png`}));
+  await page.locator('#refresh-completion-photos').click();
+  await expect(page.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(501);
+  assert.ok(db.reads.some(r => r.start === 500));
+  assert.ok(db.reads.every(r => r.filters.some(([k, v]) => k === 'order_id' && v === 'order-a')));
+});
+
+test('saved completion photos survive both final completion paths and appear as proof in Order History', async t => {
+  for (const mode of ['without_inventory', 'inventory']) {
+    const db = database(), page = await open(t, db);
+    await page.evaluate(() => openCompletionPhotos([lines[0]]));
+    await pick(page); await save(page);
+    await page.locator('#done-completion-photos').click();
+    const uploadCount = db.uploads.length;
+    await page.evaluate(async mode => {
+      loadOrders = async () => {state.orders = [];};
+      clearSelection = () => {state.selectedLine = null; state.stagedFulfillments.clear();};
+      completeFulfilledShippingTasksForLines = async () => 0;
+      postEbayPendingQueueChanged = () => {};
+      if (mode === 'without_inventory') {
+        await openWorkerNoInventoryModal({lineIds: ['line-a']});
+        await confirmWorkerNoInventoryCompletion();
+      } else {
+        state.stagedFulfillments.set('line-a', {line: lines[0], mode, qty: 1,
+          item: {id: 'item-a', title: 'Chain', photos: []}, row: {id: 'stock-a', locationLabel: 'Main'}});
+        openBundleReviewModal();
+        await fulfillSelectedOrder({skipReview: true});
+      }
+    }, mode);
+    const complete = db.calls.find(c => c.name === (mode === 'inventory'
+      ? 'fulfill_pending_checkout_bundle' : 'complete_ebay_order_lines_without_inventory_evidence'));
+    assert.ok(complete, `${mode} was confirmed`);
+    if (mode === 'without_inventory') assert.deepEqual(complete.args._evidence_photos, []);
+    assert.equal(db.uploads.length, uploadCount, 'saved shared photos are not re-uploaded');
+    assert.equal(db.events.length, 1);
+    await page.goto(`${origin}/ebay-order-history.html`);
+    await page.addScriptTag({url: `${origin}/ebay-order-history.js`});
+    const result = await page.evaluate(events => {
+      const photos = getHistoryExtraOrderProofPhotos({events, lines: []});
+      return photos.map(p => ({path: p.path, author: p.signed_by_email}));
+    }, db.events);
+    assert.deepEqual(result, [{path: db.events[0].photo_attachments[0].path, author: 'desktop@example.com'}]);
+  }
+});

@@ -385,6 +385,7 @@ function closeModal(id) {
   if (
     !$("item-confirm-modal")?.classList.contains("hidden")
     || !$("bundle-review-modal")?.classList.contains("hidden")
+    || !$("completion-photos-modal")?.classList.contains("hidden")
     || !$("worker-no-inventory-modal")?.classList.contains("hidden")
     || !$("worker-cancel-order-modal")?.classList.contains("hidden")
     || !$("no-inventory-photo-viewer-modal")?.classList.contains("hidden")
@@ -3916,6 +3917,7 @@ function renderOrders() {
           ` : ""}
           <span class="buyer-card-value">${formatMoney(group.totalValue)}</span>
           ${taskControlMarkup}
+          <button type="button" class="buyer-card-expand-btn buyer-card-completion-photos" data-buyer-completion-photos>Completion photos</button>
           <span class="status-badge">${group.pendingCount} pending</span>
           <button type="button" class="buyer-card-expand-btn" data-buyer-expand-key="${escapeHtml(group.key)}" aria-expanded="${isExpanded ? "true" : "false"}">
             <i data-lucide="${isExpanded ? "chevron-up" : "chevron-down"}"></i>
@@ -3957,6 +3959,10 @@ function renderOrders() {
     `;
 
     const expandButton = card.querySelector("[data-buyer-expand-key]");
+    card.querySelector("[data-buyer-completion-photos]")?.addEventListener("click", event => {
+      event.stopPropagation();
+      openCompletionPhotos(group.lines);
+    });
     const lineList = card.querySelector(".buyer-line-list");
     const buyerLabelButton = card.querySelector("[data-buyer-label-key]");
     const groupCheckboxes = [...card.querySelectorAll("[data-admin-group-select]")];
@@ -7238,6 +7244,7 @@ function getActiveStagedFulfillments() {
 }
 
 function closeBundleReviewModal(options = {}) {
+  stopCompletionPhotoWatch("bundle");
   closeModal("bundle-review-modal");
   returnToOrdersAfterMobileModalClose(options);
   setTimeout(() => $("fulfill-order")?.focus(), 80);
@@ -7771,6 +7778,77 @@ function getNoInventoryEvidenceSourceLabel() {
   );
 }
 
+let completionPhotoController = null;
+const completionPhotoWatches = new Map();
+
+function getCompletionPhotoController() {
+  if (!completionPhotoController && window.OGCompletionPhotos) {
+    completionPhotoController = window.OGCompletionPhotos.create({
+      getClient: () => supabase,
+      getActor: () => state.user?.email || getVideoReceiptAuditActor(),
+      escapeHtml,
+      formatDate: value => new Date(value).toLocaleString(),
+      hydratePhoto: ensureEvidencePhotoPreviewUrls,
+      openPhoto: photo => openEvidencePhotoObjectViewer(photo, "done-completion-photos"),
+      uploadFile: uploadCompletionPhoto,
+      onOpen: () => openModal("completion-photos-modal"),
+      onClose: () => closeModal("completion-photos-modal"),
+    });
+  }
+  return completionPhotoController;
+}
+
+async function uploadCompletionPhoto(file) {
+  const extension = getNoInventoryEvidenceFileExtension({path: file.name, mime_type: file.type}, file);
+  const path = `completion-photos/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}.${extension}`;
+  const {error} = await supabase.storage.from(NO_INVENTORY_EVIDENCE_BUCKET)
+    .upload(path, file, {contentType: file.type || `image/${extension}`, upsert: false});
+  if (error) throw new Error(error.message || "Could not upload completion photo.");
+  const derivatives = await createAndUploadEvidenceDerivatives(file, NO_INVENTORY_EVIDENCE_BUCKET, path);
+  return {
+    bucket: NO_INVENTORY_EVIDENCE_BUCKET, path, ...derivatives,
+    label: file.name || "Completion photo", mime_type: file.type || `image/${extension}`,
+    size_bytes: file.size, created_at: new Date().toISOString(),
+    signed_by_email: state.user?.email || getVideoReceiptAuditActor(),
+    metadata: {source: "pending_order_completion_photo"},
+  };
+}
+
+function getCompletionPhotoLines(source) {
+  if (source === "no-inventory") {
+    return state.workerNoInventoryCandidates.filter(line => state.workerNoInventoryLineIds.has(line.id));
+  }
+  const staged = getActiveStagedFulfillments();
+  return staged.length ? staged.map(entry => entry.line) : [state.selectedLine].filter(Boolean);
+}
+
+function openCompletionPhotos(lines, picker = "") {
+  if (state.busy) return;
+  if (!lines.length) return setStatus("Select at least one order item for the completion photos.", "error");
+  getCompletionPhotoController()?.open(lines, picker);
+}
+
+function stopCompletionPhotoWatch(source) {
+  completionPhotoWatches.get(source)?.();
+  completionPhotoWatches.delete(source);
+}
+
+function watchCompletionPhotos(source) {
+  stopCompletionPhotoWatch(source);
+  const controller = getCompletionPhotoController();
+  if (!controller) return;
+  const grid = $(`${source}-completion-photo-grid`);
+  const status = $(`${source}-completion-photo-status`);
+  if (grid) { grid.dataset.photos = ""; grid.textContent = "Loading saved completion photos…"; }
+  if (status) status.textContent = "";
+  completionPhotoWatches.set(source, controller.watch(getCompletionPhotoLines(source), photos => {
+    controller.renderGrid(grid, photos);
+    if (status) status.textContent = photos.length ? `${photos.length} completion photo${photos.length === 1 ? "" : "s"} already saved to this order.` : "";
+  }, error => {
+    if (status) status.textContent = `Could not refresh saved completion photos: ${error.message || "Trying again…"}`;
+  }));
+}
+
 async function getEvidencePhotoBlob(photo, index = 0) {
   if ((typeof File !== "undefined" && photo?.file instanceof File) || (typeof Blob !== "undefined" && photo?.file instanceof Blob)) return photo.file;
   const response = await fetch(photo.previewUrl);
@@ -7835,6 +7913,7 @@ async function persistNoInventoryEvidencePhotos(selectedLineIds = []) {
 function renderNoInventoryEvidencePhotos() {
   const grid = $("no-inventory-photo-grid");
   if (!grid) return;
+  grid.classList.toggle("hidden", !state.noInventoryEvidencePhotos.length);
   const toolbar = document.querySelector(".no-inventory-photo-toolbar");
   toolbar?.classList.toggle("hidden", !state.noInventoryEvidencePhotos.length);
   if (!state.noInventoryEvidencePhotos.length) {
@@ -8398,6 +8477,7 @@ function setWorkerNoInventoryGpsStatus(message, tone = "warn") {
 }
 
 function closeWorkerNoInventoryModal(options = {}) {
+  stopCompletionPhotoWatch("no-inventory");
   if (!options.suppressEbayReturn) {
     postEbayLabelExitReturnToQueue();
   }
@@ -8424,6 +8504,7 @@ function setWorkerNoInventoryLineSelection(lineId, checked) {
   if (checked) state.workerNoInventoryLineIds.add(lineId);
   else state.workerNoInventoryLineIds.delete(lineId);
   renderWorkerNoInventoryList();
+  watchCompletionPhotos("no-inventory");
 }
 
 function setAllWorkerNoInventoryLines(checked) {
@@ -8432,6 +8513,7 @@ function setAllWorkerNoInventoryLines(checked) {
     state.workerNoInventoryCandidates.forEach((line) => state.workerNoInventoryLineIds.add(line.id));
   }
   renderWorkerNoInventoryList();
+  watchCompletionPhotos("no-inventory");
 }
 
 function renderWorkerNoInventoryList() {
@@ -8601,6 +8683,7 @@ async function openWorkerNoInventoryModal(options = {}) {
   renderNoInventoryEvidencePhotos();
   setWorkerNoInventoryGpsStatus("Requesting GPS for the audit trail...", "warn");
   openModal("worker-no-inventory-modal");
+  watchCompletionPhotos("no-inventory");
   setTimeout(() => (autoRequestPhoto ? $("request-no-inventory-photo") : $("confirm-worker-no-inventory"))?.focus(), 80);
 
   const stationPromise = loadNoInventoryCaptureStations({ silent: true }).catch((error) => {
@@ -8635,6 +8718,10 @@ async function openWorkerNoInventoryModal(options = {}) {
 
 async function confirmWorkerNoInventoryCompletion() {
   if (state.busy) return;
+  if (completionPhotoController?.hasPending) {
+    openModal("completion-photos-modal");
+    return;
+  }
   const line = state.selectedLine;
   const errorEl = $("worker-no-inventory-error");
   const confirmButton = $("confirm-worker-no-inventory");
@@ -9288,6 +9375,7 @@ function openBundleReviewModal() {
     renderBundleReviewList(staged);
   }
   openModal("bundle-review-modal");
+  watchCompletionPhotos("bundle");
   setTimeout(() => $("confirm-bundle-review")?.focus(), 80);
 }
 
@@ -9313,6 +9401,10 @@ function forgetPendingCheckoutRequest(payload) {
 
 async function fulfillSelectedOrder({ skipReview = false } = {}) {
   if (state.busy || !requireCheckoutStore()) return;
+  if (completionPhotoController?.hasPending) {
+    openModal("completion-photos-modal");
+    return;
+  }
   let committed = false;
   clearQuantityAutoStage();
   const notes = String($("fulfill-notes")?.value || "").trim();
@@ -9326,6 +9418,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
   }
 
   state.busy = true;
+  stopCompletionPhotoWatch("bundle");
   closeModal("bundle-review-modal");
   $("fulfill-order").disabled = true;
   $("stage-current-line").disabled = true;
@@ -11735,6 +11828,11 @@ function setupListeners() {
   });
   $("refresh-no-inventory-stations")?.addEventListener("click", () => loadNoInventoryCaptureStations());
   $("request-no-inventory-photo")?.addEventListener("click", requestNoInventoryEvidencePhoto);
+  document.querySelectorAll("[data-completion-source]").forEach(button => {
+    button.addEventListener("click", () => openCompletionPhotos(
+      getCompletionPhotoLines(button.dataset.completionSource), button.dataset.completionPicker || ""
+    ));
+  });
   $("select-all-no-inventory-photos")?.addEventListener("click", () => setAllNoInventoryEvidencePhotosSelected(true));
   $("deselect-all-no-inventory-photos")?.addEventListener("click", () => setAllNoInventoryEvidencePhotosSelected(false));
 
@@ -11870,6 +11968,14 @@ function setupListeners() {
       if (event.key === "Enter" || event.key === "Escape") {
         event.preventDefault();
         closeNoInventoryEvidencePhotoViewer();
+      }
+      return;
+    }
+
+    if (!$("completion-photos-modal")?.classList.contains("hidden")) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        getCompletionPhotoController()?.close();
       }
       return;
     }

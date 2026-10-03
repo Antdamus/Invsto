@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261003-written-notes" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261003-phone-photos" />
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
@@ -565,6 +565,17 @@
       <h2 id="bundle-review-title">Confirm packed bundle</h2>
       <p id="bundle-review-subtitle">Review the selected items before stock is removed.</p>
       <div id="bundle-review-list" class="bundle-review-list"></div>
+      <section class="no-inventory-evidence" aria-label="Completion photos">
+        <h3>Completion photos</h3>
+        <p>Optional photos saved with this order. Photos added from a phone appear here automatically.</p>
+        <div class="completion-photo-actions">
+          <button type="button" class="secondary-btn" data-completion-source="bundle" data-completion-picker="camera">Take photo</button>
+          <button type="button" class="secondary-btn" data-completion-source="bundle" data-completion-picker="files">Choose photos / files</button>
+          <button type="button" class="secondary-btn" data-completion-source="bundle">View completion photos</button>
+        </div>
+        <p id="bundle-completion-photo-status" class="fulfill-status" role="status"></p>
+        <div id="bundle-completion-photo-grid" class="completion-photo-grid"></div>
+      </section>
       <div class="modal-actions">
         <button id="cancel-bundle-review" type="button" class="secondary-btn">Keep Editing</button>
         <button id="confirm-bundle-review" type="button" class="primary-btn">Confirm Packed Bundle</button>
@@ -617,6 +628,14 @@
           </div>
         </div>
         <p id="no-inventory-photo-status" class="fulfill-status"></p>
+        <div class="completion-photo-actions">
+          <button type="button" class="secondary-btn" data-completion-source="no-inventory" data-completion-picker="camera">Take photo</button>
+          <button type="button" class="secondary-btn" data-completion-source="no-inventory" data-completion-picker="files">Choose photos / files</button>
+          <button type="button" class="secondary-btn" data-completion-source="no-inventory">View completion photos</button>
+        </div>
+        <p class="completion-photo-help">Photos saved from your phone appear here automatically and stay with the order.</p>
+        <p id="no-inventory-completion-photo-status" class="fulfill-status" role="status"></p>
+        <div id="no-inventory-completion-photo-grid" class="completion-photo-grid"></div>
         <div class="no-inventory-photo-toolbar hidden" aria-label="Evidence photo upload selection">
           <span id="no-inventory-photo-selection-summary"></span>
           <div>
@@ -969,6 +988,36 @@
     </div>
   </div>
 
+  <div id="completion-photos-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="completion-photos-title">
+    <div class="packing-modal-card bundle-review-card completion-photos-card">
+      <button id="close-completion-photos" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Order evidence</span>
+      <h2 id="completion-photos-title">Completion photos</h2>
+      <p id="completion-photo-context"></p>
+      <p id="completion-photo-items" class="completion-photo-help"></p>
+      <p>Working on a computer? Open this buyer’s <strong>Completion photos</strong> on your phone, take a photo, and save it. It appears automatically in the computer’s completion screen.</p>
+      <div class="completion-photo-actions">
+        <label class="secondary-btn folder-photo-picker">Take photo
+          <input id="completion-photo-camera" type="file" accept="image/*" capture="environment" />
+        </label>
+        <label class="secondary-btn folder-photo-picker">Choose photos / files
+          <input id="completion-photo-files" type="file" accept="image/*,.heic,.heif" multiple />
+        </label>
+      </div>
+      <div id="completion-photo-pending" class="completion-photo-grid"></div>
+      <p id="completion-photo-status" class="fulfill-status" role="status" aria-live="polite"></p>
+      <div class="modal-actions">
+        <button id="save-completion-photos" type="button" class="primary-btn" disabled>Save photos</button>
+        <button id="done-completion-photos" type="button" class="secondary-btn">Done</button>
+      </div>
+      <div class="completion-photo-actions completion-photo-saved-heading">
+        <h3>Saved completion photos</h3>
+        <button id="refresh-completion-photos" type="button" class="secondary-btn">Refresh</button>
+      </div>
+      <div id="completion-photo-saved" class="completion-photo-grid"></div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
@@ -979,6 +1028,7 @@
 <script src="shipping-label-print.js?v=20260929-complete"></script>
 <script src="bag-order-links.js?v=20260930"></script>
 <script src="video-receipts.js?v=20261002-desktop-capture"></script>
-<script src="pending-orders.js?v=20261003-written-notes"></script>
+<script src="completion-photos.js?v=20261003-phone-photos"></script>
+<script src="pending-orders.js?v=20261003-phone-photos"></script>
 </body>
 </html>
