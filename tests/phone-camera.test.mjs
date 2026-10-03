@@ -229,7 +229,7 @@ test('computer QR opens a focused phone view, preserves sign-in and shares photo
   assert.equal(db.sessions.size,1);
 });
 
-test('computer and phone show only customer names and the selected item titles',async t=>{
+test('computer and phone show customer names, eBay usernames, and selected item titles',async t=>{
   const db=database();
   db.lines[0].item_title='#023 - JEWELRY ITEM - AS SEEN ON SCREEN';
   db.lines.push({...structuredClone(db.lines[0]),id:'line-c',item_title:'#024 - Bracelet & matching earrings'});
@@ -246,7 +246,7 @@ test('computer and phone show only customer names and the selected item titles',
     await expect(customers.first().locator('li')).toHaveText([
       '#023 - JEWELRY ITEM - AS SEEN ON SCREEN','Silver ring','#024 - Bracelet & matching earrings']);
     await expect(context).not.toContainText('11-22222-33333');
-    await expect(context).not.toContainText('lore2526');
+    await expect(context.locator('.photo-order-username')).toHaveText(['eBay username: lore2526','eBay username: ana-shop']);
     await expect(context.locator('.photo-order-number, .photo-order-buyer')).toHaveCount(0);
     await expect(customers.last().locator('.photo-order-customer-name')).toHaveText('Ana & Family');
     await expect(customers.last().locator('li')).toHaveText('#025 - <Pendant> & chain');

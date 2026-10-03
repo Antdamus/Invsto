@@ -5250,6 +5250,7 @@ a.buyer-line-finance-pill:hover {
   background: rgba(255,255,255,.035); min-width: 0; overflow-wrap: anywhere;
 }
 .photo-order-context .photo-order-customer-name { margin: 0; font: inherit; font-size: 1.15rem; font-weight: 800; color: #efd598; }
+.photo-order-username { margin: 4px 0 8px; font-size: .9rem; color: var(--muted, #bdb8b0); }
 .photo-order-items { margin: 6px 0 0; padding-left: 20px; color: var(--text, #f5f1e9); font-weight: 600; }
 .photo-order-items li + li { margin-top: 6px; }
 #phone-pair-qr { background: #fff; width: 276px; max-width: 100%; padding: 10px; margin: 16px auto; border-radius: 12px; box-sizing: border-box; }

@@ -30,6 +30,7 @@
     for (const customer of groups) {
       const section = element("section", "photo-order-customer");
       section.append(element("h3", "photo-order-customer-name", customer.name || customer.username || "Customer"));
+      if (customer.username) section.append(element("p", "photo-order-username", `eBay username: ${customer.username}`));
       const items = element("ul", "photo-order-items");
       for (const title of customer.items) items.append(element("li", "", title));
       section.append(items);
