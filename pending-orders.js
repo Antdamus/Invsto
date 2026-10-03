@@ -2963,6 +2963,7 @@ async function loadOrders() {
   } catch (error) {
     console.error("Failed to load pending eBay orders:", error);
     if (list) list.innerHTML = `<div class="empty-state">Could not load eBay orders. Make sure the pending-order migration has been pushed.</div>`;
+    renderRemainingBuyerCount("Count unavailable");
     return;
   }
 
@@ -3240,7 +3241,16 @@ function getEbayFocusBuyerRequestKey(payload = {}) {
   ].filter(Boolean).join("|");
 }
 
+function renderRemainingBuyerCount(message = "") {
+  const counter = $("buyer-remaining-count");
+  if (!counter) return;
+  counter.hidden = $("order-status-filter")?.value === "fulfilled";
+  const count = new Set(state.filteredOrders.filter(isOpenOrderLine).map(getBuyerKey)).size;
+  counter.textContent = message || `${count.toLocaleString()} customer${count === 1 ? "" : "s"} remaining`;
+}
+
 function renderPendingOrderSummaryLoading() {
+  renderRemainingBuyerCount("Loading...");
   $("summary-pending").textContent = "Loading";
   $("summary-pending-lines").textContent = "Checking eBay queue...";
   $("summary-overdue-orders").textContent = "Loading";
@@ -3288,6 +3298,7 @@ function renderSummaryStrip() {
   const buyerGroupCount = groupLinesByBuyer(state.filteredOrders).length;
   const visibleLineCount = state.filteredOrders.length;
   $("order-count-pill").textContent = `${visibleLineCount.toLocaleString()} line${visibleLineCount === 1 ? "" : "s"} / ${buyerGroupCount.toLocaleString()} buyer${buyerGroupCount === 1 ? "" : "s"}`;
+  renderRemainingBuyerCount();
 }
 
 function renderCancellationReviewIndicator() {

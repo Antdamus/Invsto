@@ -586,9 +586,12 @@ const visibleIds=page=>page.evaluate(()=>state.filteredOrders.map(line=>line.id)
 test('due filters match any pending item and retain every order for the same customer',async t=>{
   const page=await open(t,database());await prepareDueGroups(page);
   const filters=page.getByRole('group',{name:'Shipping due date'});
+  const remaining=page.locator('#buyer-remaining-count');
+  await expect(remaining).toHaveText('6 customers remaining');
   await filters.getByRole('button',{name:'Overdue',exact:true}).click();
   assert.deepEqual(await visibleIds(page),[...aLines,'unknown-old']);
   await expect(page.locator('#order-count-pill')).toHaveText('6 lines / 2 buyers');
+  await expect(remaining).toHaveText('2 customers remaining');
   await expect(filters.getByRole('button',{name:'Overdue',exact:true})).toHaveAttribute('aria-pressed','true');
   assert.equal(await page.locator('.buyer-order-card[data-buyer-key="client-a"] [data-line-id]').count(),5);
   await expect(page.locator('#summary-overdue-orders')).toHaveText('2 groups');
@@ -599,14 +602,24 @@ test('due filters match any pending item and retain every order for the same cus
     state.selectedLiveLot={id:'fixture-bag'};state.liveLotMatchedLineIds=new Set(['a-later']);applyOrderFilters();
   });
   assert.deepEqual(await visibleIds(page),aLines,'a bag match must not split the customer when a due filter is active');
+  await expect(remaining).toHaveText('1 customer remaining');
   await page.evaluate(()=>{state.selectedLiveLot=null;state.liveLotMatchedLineIds.clear();applyOrderFilters();});
 
   await filters.getByRole('button',{name:'Due today',exact:true}).click();
   assert.deepEqual(await visibleIds(page),[...aLines,'b-today','b-later']);
+  await expect(remaining).toHaveText('2 customers remaining');
   await filters.getByRole('button',{name:'Due tomorrow',exact:true}).click();
   assert.deepEqual(await visibleIds(page),[...aLines,'d-tomorrow']);
+  await expect(remaining).toHaveText('2 customers remaining');
   await filters.getByRole('button',{name:'All due dates',exact:true}).click();
   assert.equal((await visibleIds(page)).length,12);
+  await expect(remaining).toHaveText('6 customers remaining');
+  await page.evaluate(()=>{state.orders.find(line=>line.id==='c-later').line_status='fulfilled';applyOrderFilters();});
+  await expect(remaining).toHaveText('5 customers remaining'); // Fully completed groups no longer count.
+  await page.evaluate(()=>renderPendingOrderSummaryLoading());
+  await expect(remaining).toHaveText('Loading...');
+  await page.evaluate(()=>applyOrderFilters());
+  await expect(remaining).toHaveText('5 customers remaining');
 });
 
 test('search and sale dates keep matching buyer bundles intact; finishing the matching item updates the filter',async t=>{
@@ -615,12 +628,15 @@ test('search and sale dates keep matching buyer bundles intact; finishing the ma
   await page.locator('#order-search').fill('later bracelet');
   await page.locator('#order-created-date-filter').fill('2026-10-03');
   assert.deepEqual(await visibleIds(page),aLines);
+  await expect(page.locator('#buyer-remaining-count')).toHaveText('1 customer remaining');
   await page.evaluate(()=>{applyOrderFilters();}); // Queue redraws preserve the selected due filter.
   await expect(page.locator('[data-order-due-filter="overdue"]')).toHaveAttribute('aria-pressed','true');
   await page.evaluate(()=>{state.orders.find(line=>line.id==='a-old').line_status='fulfilled';applyOrderFilters();});
   assert.deepEqual(await visibleIds(page),[]);
+  await expect(page.locator('#buyer-remaining-count')).toHaveText('0 customers remaining');
   await page.locator('[data-order-due-filter="all"]').click();
   assert.deepEqual(await visibleIds(page),aLines);
+  await expect(page.locator('#buyer-remaining-count')).toHaveText('1 customer remaining');
   await page.setViewportSize({width:390,height:900});
   assert.equal(await page.locator('.buyer-due-filters').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
   await mkdir(new URL('../test-results',import.meta.url),{recursive:true});
@@ -634,12 +650,15 @@ test('fulfilled view clears pending due filters and label handoff opens its enti
   await page.locator('[data-order-due-filter="today"]').click();
   await page.evaluate(()=>{$('order-status-filter').value='fulfilled';applyOrderFilters();});
   await expect(page.locator('[data-order-due-filter="today"]')).toBeDisabled();
+  await expect(page.locator('#buyer-remaining-count')).toBeHidden();
   await expect(page.locator('[data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
   await page.evaluate(async()=>{
     $('order-status-filter').value='pending';state.orderDueFilter='overdue';
     await openPendingNoInventorySessionForLabel(['b-today'],{batchLines:state.orders.filter(line=>getBuyerKey(line)==='client-b')});
   });
   assert.deepEqual(await visibleIds(page),['b-today','b-later']);
+  await expect(page.locator('#buyer-remaining-count')).toBeVisible();
+  await expect(page.locator('#buyer-remaining-count')).toHaveText('1 customer remaining');
   await expect(page.locator('[data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
   assert.deepEqual(await page.evaluate(()=>[...state.workerNoInventoryLineIds]),['b-today','b-later']);
 });
