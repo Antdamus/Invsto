@@ -371,6 +371,46 @@ async function replace(page, {camera = false, name = 'replacement.png'} = {}) {
   await (await chooser).setFiles({name, mimeType: 'image/png', buffer: png});
 }
 
+for (const [source,mobile] of [['no-inventory',true],['bundle',false]]) {
+  test(`${source} checkout removes saved photos inline, reports failures, and synchronizes only the displayed orders`,async t=>{
+    const db=database();
+    db.events=[evidence({path:'completion-photos/shared.png'}),
+      {...evidence({order:'order-b',line:'line-b',path:'completion-photos/shared.png'}),id:'outside-event'},
+      evidence({path:'completion-photos/keep.png'})];
+    const page=await open(t,db,{mobile}),otherDevice=await open(t,db,{mobile:!mobile,actor:'other@example.com'});
+    await otherDevice.evaluate(()=>openCompletionPhotos([lines[0]]));
+    await expect(otherDevice.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(2);
+    await page.evaluate(source=>{
+      if(source==='no-inventory')openWorkerNoInventoryModal({lineIds:['line-a']});
+      else {
+        state.activeBuyerKey='';
+        state.stagedFulfillments.set('line-a',{line:lines[0],mode:'inventory',qty:1,
+          item:{id:'item-a',title:'Chain',photos:[]},row:{id:'stock-a',locationLabel:'Main'}});
+        openBundleReviewModal();
+      }
+    },source);
+    const grid=page.locator(`#${source}-completion-photo-grid`);
+    const card=grid.locator('.completion-photo-card').filter({has:page.locator('img[alt="completion-photos/shared.png"]')});
+    await expect(grid.locator('[data-remove-saved-photo]')).toHaveCount(2);
+    await expect(page.locator('#completion-photos-modal')).toBeHidden();
+    db.failCorrection=true;
+    await card.getByRole('button',{name:'Remove',exact:true}).click();
+    await expect(card.getByRole('status')).toContainText('Photo correction unavailable');
+    await expect(card.getByRole('button',{name:'Remove',exact:true})).toBeEnabled();
+    assert.equal(db.events[0].photo_attachments.length,1);
+    db.failCorrection=false;
+    await card.getByRole('button',{name:'Remove',exact:true}).click();
+    await expect(card).toHaveCount(0);
+    await expect(grid.locator('.completion-photo-card')).toHaveCount(1);
+    await expect(otherDevice.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(1);
+    await expect(page.locator('#completion-photos-modal')).toBeHidden();
+    assert.equal(db.events[0].photo_attachments.length,0);
+    assert.equal(db.events[1].photo_attachments.length,1,'same photo on an order outside this checkout remains');
+    assert.equal(db.events[2].photo_attachments.length,1,'the other photo on this order remains');
+    assert.deepEqual(db.calls.filter(c=>c.name==='correct_pending_order_completion_photo').at(-1).args._event_ids,['completion-photos/shared.png']);
+  });
+}
+
 test('replacement keeps the original through upload failure, then swaps and synchronizes after saving', async t => {
   const db = database(); db.events = [evidence({path: 'completion-photos/original.png'})];
   const desktop = await open(t, db), phone = await open(t, db, {mobile: true, actor: 'phone@example.com'});

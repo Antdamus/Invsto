@@ -339,5 +339,13 @@ test('phone previews unsaved photos with zoom and pinch, then returns without lo
   await phone.locator('[data-completion-photo]').first().tap();await expect(viewer).toBeVisible();
   await phone.locator('#zoom-in-no-inventory-photo').tap();assert.equal(await phone.evaluate(()=>state.evidencePhotoViewerZoom),1.25);
   await phone.locator('#dismiss-no-inventory-photo-viewer').tap();
+  // The computer can remove a phone upload directly from the pairing panel.
+  await expect(desktop.locator('#phone-pair-photos [data-remove-saved-photo]')).toHaveCount(2);
+  await desktop.locator('#phone-pair-photos [data-remove-saved-photo]').first().click();
+  await expect(desktop.locator('#phone-pair-photos .completion-photo-card')).toHaveCount(1);
+  await expect(phone.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(1);
+  await phone.locator('#completion-photo-saved [data-remove-saved-photo]').tap();
+  await expect(phone.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(0);
+  await expect(desktop.locator('#phone-pair-photos .completion-photo-card')).toHaveCount(0);
 });
 

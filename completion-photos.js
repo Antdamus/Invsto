@@ -101,7 +101,7 @@
     function renderGrid(container, photos, editable = false) {
       if (!container) return;
       const disabled = saving || pending.length > 0;
-      const signature = JSON.stringify([editable && disabled, photos.map(p => [p.path, p.thumbnailUrl, p.auditText, p.eventIds])]);
+      const signature = JSON.stringify([editable, disabled, photos.map(p => [p.path, p.thumbnailUrl, p.auditText, p.eventIds])]);
       if (container.dataset.photos === signature) return;
       container.dataset.photos = signature;
       container.innerHTML = photos.length ? photos.map((photo, index) => `
@@ -111,22 +111,30 @@
             <span>Saved to order</span>
           </button>
           <small>${esc(photo.auditText || "")}</small>
+          ${editable ? `<small>${photo.orderIds.length} order${photo.orderIds.length === 1 ? "" : "s"} in this view</small>` : ""}
+          <div class="completion-photo-edit-actions">
+            ${editable ? `<button type="button" class="secondary-btn" data-replace-saved-photo="${index}" ${disabled ? "disabled" : ""}>Replace</button>` : ""}
+            <button type="button" class="secondary-btn" data-remove-saved-photo="${index}" ${disabled ? "disabled" : ""}>Remove</button>
+          </div>
           ${editable ? `
-            <small>${photo.orderIds.length} order${photo.orderIds.length === 1 ? "" : "s"} in this view</small>
-            <div class="completion-photo-edit-actions">
-              <button type="button" class="secondary-btn" data-replace-saved-photo="${index}" ${disabled ? "disabled" : ""}>Replace</button>
-              <button type="button" class="secondary-btn" data-remove-saved-photo="${index}" ${disabled ? "disabled" : ""}>Remove</button>
-            </div>
             <div class="completion-photo-replacement-options hidden" data-replacement-options="${index}">
               <button type="button" class="secondary-btn" data-replacement-camera="${index}" ${disabled ? "disabled" : ""}>Take new photo</button>
               <button type="button" class="secondary-btn" data-replacement-file="${index}" ${disabled ? "disabled" : ""}>Choose replacement</button>
-            </div>` : ""}
+            </div>` : '<p class="completion-photo-correction-status hidden" role="status" aria-live="polite"></p>'}
         </article>`).join("") : '<p class="completion-photo-empty">No completion photos saved yet.</p>';
       container.querySelectorAll("[data-completion-photo]").forEach(button => {
         button.addEventListener("click", () => config.openPhoto(photos[Number(button.dataset.completionPhoto)]));
       });
       container.querySelectorAll("[data-remove-saved-photo]").forEach(button => {
-        button.addEventListener("click", () => removeSavedPhoto(photos[Number(button.dataset.removeSavedPhoto)]));
+        button.addEventListener("click", () => {
+          const feedback = button.closest(".completion-photo-card").querySelector(".completion-photo-correction-status");
+          const report = editable ? status : (message, error = false) => {
+            feedback.textContent = message;
+            feedback.classList.remove("hidden");
+            feedback.classList.toggle("is-error", error);
+          };
+          removeSavedPhoto(photos[Number(button.dataset.removeSavedPhoto)], report);
+        });
       });
       container.querySelectorAll("[data-replace-saved-photo]").forEach(button => {
         button.addEventListener("click", () => {
@@ -158,17 +166,19 @@
       if (error) throw error;
     }
 
-    async function removeSavedPhoto(photo) {
+    async function removeSavedPhoto(photo, report = status) {
       if (saving || pending.length) return;
       saving = true; revision++;
       renderPending();
-      status("Removing completion photo…");
+      report("Removing completion photo…");
       try {
         await correctPhoto(photo, crypto.randomUUID());
-        savedPhotos = savedPhotos.filter(p => p.bucket !== photo.bucket || p.path !== photo.path);
-        status("Photo removed from the orders shown here. The other device will update automatically.");
+        // An inline checkout may show fewer orders than the photo management panel.
+        savedPhotos = savedPhotos.map(p => p.bucket !== photo.bucket || p.path !== photo.path ? p :
+          {...p, eventIds: p.eventIds.filter(id => !photo.eventIds.includes(id))}).filter(p => p.eventIds.length);
+        report("Photo removed from the orders shown here. The other device will update automatically.");
       } catch (error) {
-        status(`${error.message || "Could not remove this photo."} Refresh the saved photos before trying again.`, true);
+        report(`${error.message || "Could not remove this photo."} Try again or refresh the saved photos.`, true);
       } finally {
         saving = false; revision++;
         renderPending();
@@ -213,6 +223,9 @@
       $("close-completion-photos").disabled = saving;
       $("done-completion-photos").disabled = saving;
       refreshSaved();
+      // Keep correction buttons in checkout and phone-pairing grids in sync, too.
+      document.querySelectorAll("[data-remove-saved-photo], [data-replace-saved-photo], [data-replacement-camera], [data-replacement-file]")
+        .forEach(button => { button.disabled = saving || pending.length > 0; });
     }
 
     function chooseFiles(event) {

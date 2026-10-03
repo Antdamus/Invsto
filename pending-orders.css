@@ -3174,7 +3174,8 @@ body.modal-open {
 .completion-photo-empty { grid-column: 1 / -1; }
 .completion-photo-saved-heading { margin-top: 22px; }
 .completion-photo-actions h3 { margin: 0; color: inherit; }
-#completion-photo-status.is-error { color: #ffaaaa; }
+#completion-photo-status.is-error, .completion-photo-correction-status.is-error { color: #ffaaaa; }
+.completion-photo-correction-status { margin: 0; font-size: .8rem; }
 .completion-photos-card p { overflow-wrap: anywhere; }
 .completion-photo-actions .folder-photo-picker { cursor: pointer; }
 .completion-photo-actions .folder-photo-picker:focus-within { outline: 2px solid #a3ccee; }
