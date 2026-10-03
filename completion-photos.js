@@ -2,6 +2,41 @@
 (function () {
   "use strict";
 
+  function renderOrderContext(container, lines = [], getCustomerName = order => order.buyer_name) {
+    if (!container) return;
+    const customers = new Map();
+    for (const line of lines) {
+      const order = line.order || line.ebay_orders || {};
+      const username = String(order.buyer_username || "").trim();
+      const name = String(getCustomerName(order) || "").trim();
+      const orderKey = line.order_id || order.id || order.order_number || line.id;
+      const customerKey = `${username.toLowerCase() || name.toLowerCase() || orderKey}:${name.toLowerCase()}`;
+      if (!customers.has(customerKey)) customers.set(customerKey, {name, username, items: new Map()});
+      const customer = customers.get(customerKey);
+      customer.items.set(line.id || line.item_number,
+        line.item_title || line.item_number || "Item title unavailable");
+    }
+    const groups = [...customers.values()].map(customer => ({...customer, items: [...customer.items.values()]}));
+    const signature = JSON.stringify(groups);
+    if (container.dataset.orderContext === signature) return;
+    container.dataset.orderContext = signature;
+    container.replaceChildren();
+    function element(tag, className, text) {
+      const node = document.createElement(tag);
+      node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+    for (const customer of groups) {
+      const section = element("section", "photo-order-customer");
+      section.append(element("h3", "photo-order-customer-name", customer.name || customer.username || "Customer"));
+      const items = element("ul", "photo-order-items");
+      for (const title of customer.items) items.append(element("li", "", title));
+      section.append(items);
+      container.append(section);
+    }
+  }
+
   function create(config) {
     const $ = id => document.getElementById(id);
     const esc = config.escapeHtml;
@@ -299,12 +334,7 @@
       scope = lines.filter(line => line?.id && line.order_id).map(line => ({...line}));
       savedPhotos = []; replacementTarget = null;
       returnFocus = document.activeElement;
-      const orders = [...new Set(scope.map(line => {
-        const order = line.order || line.ebay_orders || {};
-        return `${order.buyer_username || "Buyer"} · ${order.order_number || "Order"}`;
-      }))];
-      $("completion-photo-context").textContent = `${orders.join(" / ")} — ${targets(scope).size} order(s), ${scope.length} item line(s). Photos apply to these items.`;
-      $("completion-photo-items").textContent = scope.map(line => line.item_title || line.item_number || "Item").join(" · ");
+      renderOrderContext($("completion-photo-context"), scope, config.getCustomerName);
       status("");
       renderPending();
       config.onOpen();
@@ -351,5 +381,5 @@
       get hasPending() { return saving || pending.length > 0; }};
   }
 
-  window.OGCompletionPhotos = {create};
+  window.OGCompletionPhotos = {create, renderOrderContext};
 })();

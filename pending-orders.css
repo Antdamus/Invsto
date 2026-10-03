@@ -5243,6 +5243,15 @@ a.buyer-line-finance-pill:hover {
 #order-shipping-labels-modal .is-error { color: #ff9c9c; }
 
 #phone-camera-pair-modal { z-index: 6700; }
+#phone-camera-pair-title { color: var(--text, #f5f1e9); }
+.photo-order-context { display: grid; gap: 12px; margin: 16px 0; min-width: 0; }
+.photo-order-customer {
+  padding: 14px 16px; border: 1px solid rgba(212,175,55,.25); border-radius: 14px;
+  background: rgba(255,255,255,.035); min-width: 0; overflow-wrap: anywhere;
+}
+.photo-order-context .photo-order-customer-name { margin: 0; font: inherit; font-size: 1.15rem; font-weight: 800; color: #efd598; }
+.photo-order-items { margin: 6px 0 0; padding-left: 20px; color: var(--text, #f5f1e9); font-weight: 600; }
+.photo-order-items li + li { margin-top: 6px; }
 #phone-pair-qr { background: #fff; width: 276px; max-width: 100%; padding: 10px; margin: 16px auto; border-radius: 12px; box-sizing: border-box; }
 #phone-pair-qr:empty { display: none; }
 #phone-pair-qr svg { display: block; width: 100%; height: auto; }
@@ -5267,4 +5276,3 @@ body.phone-camera-mode #done-completion-photos,
 body.phone-camera-mode [data-phone-camera],
 body.phone-camera-mode .completion-phone-instructions { display: none; }
 body.phone-camera-mode .completion-photo-actions .folder-photo-picker { flex: 1 1 130px; text-align: center; }
-body.phone-camera-mode #completion-photo-context { font-weight: 700; color: #efd598; }

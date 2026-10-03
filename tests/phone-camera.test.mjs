@@ -7,6 +7,12 @@ import {chromium, webkit, expect} from '@playwright/test';
 const root = new URL('../', import.meta.url);
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=', 'base64');
 const imageUrl = `data:image/png;base64,${png.toString('base64')}`;
+const orderLines = [
+  {id:'line-a',order_id:'order-a',item_title:'Gold chain',quantity:1,fulfilled_quantity:0,total_price:1485,line_status:'pending',
+    order:{order_number:'11-22222-33333',buyer_username:'lore2526',buyer_name:'JW1 C/O Lorena Hernandez'}},
+  {id:'line-b',order_id:'order-b',item_title:'Silver ring',quantity:1,fulfilled_quantity:0,total_price:30,line_status:'pending',
+    order:{order_number:'11-22222-44444',buyer_username:'lore2526',buyer_name:'JW1 C/O Lorena Hernandez'}},
+];
 let server, browser, origin;
 before(async () => {
   server = createServer(async (req, res) => {
@@ -29,7 +35,7 @@ after(async () => {
 });
 
 function database() {
-  return {sessions: new Map(), requests: new Map(), failSend: false, loseSendResponse: false, marks: [], events: [], uploads: [], calls: [], reads: [], failUpload: false, failRead: false,
+  return {lines:structuredClone(orderLines),sessions: new Map(), requests: new Map(), failSend: false, loseSendResponse: false, marks: [], events: [], uploads: [], calls: [], reads: [], failUpload: false, failRead: false,
     loseResponse: false, failOrder: '', delayRead: 0, failCorrection: false,
     loseCorrectionResponse: false, corrections: new Map()};
 }
@@ -66,8 +72,7 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com', phone
         if (!session) {session={id:a._session_id,owner_email:actor,phone_email:null,expires_at:'2099-01-01',request:null};db.sessions.set(session.id,session);}
         if (session.closed) return {error:{code:'P0002',message:'Pair this phone again'}};
         if (!db.requests.has(a._request_id)) {
-          session.request={id:a._request_id,lines:a._line_ids.map(id=>({id,order_id:id==='line-a'?'order-a':'order-b',item_title:id==='line-a'?'Gold chain':'Silver ring',
-            order:{order_number:id==='line-a'?'11-22222-33333':'11-22222-44444',buyer_username:'lore2526'}}))};
+          session.request={id:a._request_id,lines:a._line_ids.map(id=>structuredClone(db.lines.find(line=>line.id===id)))};
           db.requests.set(a._request_id,session.request);
         }
         if(db.loseSendResponse){db.loseSendResponse=false;return {error:{message:'Send response lost'}};}
@@ -123,7 +128,7 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com', phone
   await page.addScriptTag({url: `${origin}/completion-photos.js`});
   await page.addScriptTag({url: `${origin}/phone-camera.js`});
   await page.addScriptTag({url: `${origin}/pending-orders.js`});
-  await page.evaluate(({actor, imageUrl, phoneLink, loggedIn}) => {
+  await page.evaluate(({actor, imageUrl, phoneLink, loggedIn, lineFixtures}) => {
     const create = OGCompletionPhotos.create;
     OGCompletionPhotos.create = config => create({...config, pollMs: 150});
     const desktopCreate=OGPhoneCamera.createDesktop, receiverCreate=OGPhoneCamera.createReceiver;
@@ -149,12 +154,7 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com', phone
       };}},
       rpc: (name, args) => photoDb({op: 'rpc', name, args}),
     };
-    window.lines = [
-      {id: 'line-a', order_id: 'order-a', item_title: 'Gold chain', quantity: 1, fulfilled_quantity: 0,
-        total_price: 1485, line_status: 'pending', order: {order_number: '11-22222-33333', buyer_username: 'lore2526'}},
-      {id: 'line-b', order_id: 'order-b', item_title: 'Silver ring', quantity: 1, fulfilled_quantity: 0,
-        total_price: 30, line_status: 'pending', order: {order_number: '11-22222-44444', buyer_username: 'lore2526'}},
-    ];
+    window.lines = lineFixtures;
     state.user = {id: actor, email: actor}; state.employee = {active: true, role: 'employee'};
     state.orders = lines; state.filteredOrders = lines; state.selectedLine = lines[0];
     state.checkoutStoreId = 'store-a'; state.stores = [{id: 'store-a', name: 'Main Store'}];
@@ -166,7 +166,7 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com', phone
     resolvePhotoUrl = async () => '';
     if (phoneLink) document.dispatchEvent(new Event('DOMContentLoaded'));
     else {setupListeners();renderOrders();}
-  }, {actor, imageUrl, phoneLink, loggedIn});
+  }, {actor, imageUrl, phoneLink, loggedIn, lineFixtures:db.lines});
   return page;
 }
 
@@ -202,7 +202,9 @@ test('computer QR opens a focused phone view, preserves sign-in and shares photo
   await phone.locator('#phone-camera-password').fill('test-only-password');
   await phone.locator('#phone-camera-login-submit').tap();
   await expect(phone.locator('#completion-photos-modal')).toBeVisible();
-  await expect(phone.locator('#completion-photo-context')).toContainText('11-22222-33333');
+  await expect(phone.locator('#completion-photo-context')).toContainText('Gold chain');
+  await expect(phone.locator('#completion-photo-context .photo-order-customer-name')).toHaveText('JW1 C/O Lorena Hernandez');
+  await expect(desktop.locator('#phone-pair-order .photo-order-items li')).toHaveText(['Gold chain','Silver ring']);
   await expect(phone.locator('#orders-list')).toBeHidden();
   assert.equal(await phone.locator('#completion-photo-camera').getAttribute('capture'),'environment');
   await pick(phone);await save(phone);
@@ -223,8 +225,44 @@ test('computer QR opens a focused phone view, preserves sign-in and shares photo
   const sessionId=[...db.sessions.keys()][0];
   await resumed.evaluate(id=>localStorage.setItem(`og-order-phone:${state.user.id}`,id),sessionId);
   await resumed.evaluate(()=>sendOrderToPhone([lines[1]]));
-  await expect(resumed.locator('#phone-pair-order')).toContainText('11-22222-44444');
+  await expect(resumed.locator('#phone-pair-order')).toContainText('Silver ring');
   assert.equal(db.sessions.size,1);
+});
+
+test('computer and phone show only customer names and the selected item titles',async t=>{
+  const db=database();
+  db.lines[0].item_title='#023 - JEWELRY ITEM - AS SEEN ON SCREEN';
+  db.lines.push({...structuredClone(db.lines[0]),id:'line-c',item_title:'#024 - Bracelet & matching earrings'});
+  db.lines.push({...structuredClone(db.lines[1]),id:'line-d',order_id:'order-c',item_title:'#025 - <Pendant> & chain',
+    order:{order_number:'11-22222-55555',buyer_username:'ana-shop',buyer_name:'Ana & Family'}});
+  const desktop=await open(t,db);
+  await desktop.evaluate(()=>sendOrderToPhone(lines));
+  await expect(desktop.locator('#phone-pair-qr svg')).toBeVisible();
+  const phone=await open(t,db,{mobile:true,phoneLink:await desktop.locator('#phone-pair-link').inputValue()});
+  for(const [page,selector] of [[desktop,'#phone-pair-order'],[phone,'#completion-photo-context']]) {
+    const context=page.locator(selector),customers=context.locator('.photo-order-customer');
+    await expect(customers).toHaveCount(2);
+    await expect(customers.first().locator('.photo-order-customer-name')).toHaveText('JW1 C/O Lorena Hernandez');
+    await expect(customers.first().locator('li')).toHaveText([
+      '#023 - JEWELRY ITEM - AS SEEN ON SCREEN','Silver ring','#024 - Bracelet & matching earrings']);
+    await expect(context).not.toContainText('11-22222-33333');
+    await expect(context).not.toContainText('lore2526');
+    await expect(context.locator('.photo-order-number, .photo-order-buyer')).toHaveCount(0);
+    await expect(customers.last().locator('.photo-order-customer-name')).toHaveText('Ana & Family');
+    await expect(customers.last().locator('li')).toHaveText('#025 - <Pendant> & chain');
+    await expect(context.locator('pendant')).toHaveCount(0);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  }
+  await mkdir(new URL('../test-results',import.meta.url),{recursive:true});
+  await desktop.screenshot({path:'test-results/photo-order-context-desktop.png'});
+  await phone.screenshot({path:'test-results/photo-order-context-phone.png',fullPage:true});
+  // A failed next send must not leave the previous customer's items/photos in the panel.
+  db.failSend=true;
+  await desktop.evaluate(()=>sendOrderToPhone([lines[3]]));
+  await expect(desktop.locator('#phone-pair-status')).toContainText('Send unavailable');
+  await desktop.waitForTimeout(250); // Two mock poll cycles must not restore the previous customer.
+  await expect(desktop.locator('#phone-pair-order .photo-order-customer-name')).toHaveText('Ana & Family');
+  await expect(desktop.locator('#phone-pair-order')).not.toContainText('Lorena');
 });
 
 test('next order cannot steal unsaved photos; one phone tap opens its camera with the new scope',async t=>{
@@ -233,14 +271,14 @@ test('next order cannot steal unsaved photos; one phone tap opens its camera wit
   await expect(desktop.locator('#phone-pair-qr svg')).toBeVisible();
   const link=await desktop.locator('#phone-pair-link').inputValue();
   const phone=await open(t,db,{mobile:true,actor:'phone@example.com',phoneLink:link});
-  await expect(phone.locator('#completion-photo-context')).toContainText('11-22222-33333');
+  await expect(phone.locator('#completion-photo-context')).toContainText('Gold chain');
   await pick(phone,'completion-photo-camera','order-a.png');
   await desktop.evaluate(()=>sendOrderToPhone([lines[1]]));
   await expect(phone.locator('#phone-camera-next')).toBeVisible();
   await phone.locator('#phone-camera-open-next').tap();
   // Connection notices refresh in the background; verify the protected photo scope itself.
   await expect(phone.locator('#completion-photo-pending .completion-photo-card')).toHaveCount(1);
-  await expect(phone.locator('#completion-photo-context')).toContainText('11-22222-33333');
+  await expect(phone.locator('#completion-photo-context')).toContainText('Gold chain');
   db.failUpload=true;await phone.locator('#save-completion-photos').tap();
   await expect(phone.locator('#completion-photo-status')).toContainText('Upload unavailable');
   assert.equal(db.marks.some(m=>m._status==='saved'),false);
@@ -250,7 +288,7 @@ test('next order cannot steal unsaved photos; one phone tap opens its camera wit
   assert.ok(db.marks.some(m=>m._request_id===firstRequest.id&&m._status==='saved'));
   const chooser=phone.waitForEvent('filechooser');await phone.locator('#phone-camera-open-next').tap();
   await (await chooser).setFiles({name:'order-b.png',mimeType:'image/png',buffer:png});
-  await expect(phone.locator('#completion-photo-context')).toContainText('11-22222-44444');
+  await expect(phone.locator('#completion-photo-context')).toContainText('Silver ring');
   await save(phone);assert.equal(db.events[0].order_id,'order-b');
   assert.equal(db.sessions.size,1);assert.equal(db.requests.size,2);
 });
@@ -278,7 +316,7 @@ test('both checkout paths and the photo panel send exactly their selected items'
   const db=database(),page=await open(t,db);
   await page.evaluate(()=>openWorkerNoInventoryModal({lineIds:['line-b']}));
   await page.locator('[data-phone-camera="no-inventory"]').click();
-  await expect(page.locator('#phone-pair-order')).toContainText('11-22222-44444');
+  await expect(page.locator('#phone-pair-order')).toContainText('Silver ring');
   assert.deepEqual(db.calls.find(c=>c.name==='send_order_to_phone').args._line_ids,['line-b']);
   await page.locator('#done-phone-camera-pair').click();
   await page.evaluate(()=>{
@@ -287,12 +325,12 @@ test('both checkout paths and the photo panel send exactly their selected items'
     openBundleReviewModal();
   });
   await page.locator('[data-phone-camera="bundle"]').click();
-  await expect(page.locator('#phone-pair-order')).toContainText('11-22222-33333');
+  await expect(page.locator('#phone-pair-order')).toContainText('Gold chain');
   assert.deepEqual(db.calls.filter(c=>c.name==='send_order_to_phone').at(-1).args._line_ids,['line-a']);
   await page.locator('#done-phone-camera-pair').click();
   await page.evaluate(()=>{closeBundleReviewModal();openCompletionPhotos([lines[1]]);});
   await page.locator('[data-phone-camera="photos"]').click();
-  await expect(page.locator('#phone-pair-order')).toContainText('11-22222-44444');
+  await expect(page.locator('#phone-pair-order')).toContainText('Silver ring');
 });
 
 test('phone previews unsaved photos with zoom and pinch, then returns without losing or uploading them',async t=>{

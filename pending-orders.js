@@ -7855,6 +7855,7 @@ function sendOrderToPhone(lines) {
   if (state.busy || !lines.length || !window.OGPhoneCamera) return;
   phoneCameraDesktop ||= window.OGPhoneCamera.createDesktop({
     getClient: () => supabase, getUserId: () => state.user?.id,
+    getCustomerName: getOrderCustomerName,
     onOpen: () => openModal("phone-camera-pair-modal"),
     onClose: () => closeModal("phone-camera-pair-modal"),
     watchPhotos: (scope, grid) => {
@@ -7920,6 +7921,7 @@ function getCompletionPhotoController() {
   if (!completionPhotoController && window.OGCompletionPhotos) {
     completionPhotoController = window.OGCompletionPhotos.create({
       getClient: () => supabase,
+      getCustomerName: getOrderCustomerName,
       getActor: () => state.user?.email || getVideoReceiptAuditActor(),
       escapeHtml,
       formatDate: value => new Date(value).toLocaleString(),

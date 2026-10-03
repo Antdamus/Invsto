@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261003-inline-photo-remove" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261003-photo-order-context" />
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
@@ -1049,7 +1049,7 @@
       <button id="close-phone-camera-pair" class="modal-close-btn" type="button" aria-label="Close">x</button>
       <span class="eyebrow">Computer + phone</span>
       <h2 id="phone-camera-pair-title">Take photos with your phone</h2>
-      <p id="phone-pair-order"></p>
+      <div id="phone-pair-order" class="photo-order-context"></div>
       <p id="phone-pair-connection" role="status"></p>
       <details id="phone-pair-qr-section" open>
         <summary>Connect phone / show QR code</summary>
@@ -1075,8 +1075,7 @@
       <button id="close-completion-photos" class="modal-close-btn" type="button" aria-label="Close">x</button>
       <span class="eyebrow">Order evidence</span>
       <h2 id="completion-photos-title">Completion photos</h2>
-      <p id="completion-photo-context"></p>
-      <p id="completion-photo-items" class="completion-photo-help"></p>
+      <div id="completion-photo-context" class="photo-order-context"></div>
       <p class="completion-phone-instructions">Working on a computer? Use <strong>Use my phone</strong> to scan a QR code once, then send each next order to the same phone. Saved photos appear here automatically.</p>
       <div class="completion-photo-actions">
         <button type="button" class="secondary-btn" data-phone-camera="photos">Use my phone</button>
@@ -1114,10 +1113,10 @@
 <script src="shipping-label-print.js?v=20260929-complete"></script>
 <script src="bag-order-links.js?v=20260930"></script>
 <script src="video-receipts.js?v=20261002-desktop-capture"></script>
-<script src="completion-photos.js?v=20261003-inline-photo-remove"></script>
-<script src="phone-camera.js?v=20261003-phone-camera"></script>
+<script src="completion-photos.js?v=20261003-photo-order-context"></script>
+<script src="phone-camera.js?v=20261003-photo-order-context"></script>
 <script src="shipping-label-reader.js?v=20261003-label-pdfs"></script>
 <script src="order-shipping-labels.js?v=20261003-label-pdfs"></script>
-<script src="pending-orders.js?v=20261003-mouse-photo-zoom"></script>
+<script src="pending-orders.js?v=20261003-photo-order-context"></script>
 </body>
 </html>

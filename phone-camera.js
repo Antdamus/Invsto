@@ -10,7 +10,7 @@
     return UUID.test(id || "") ? id : "";
   }
   function label(lines = []) {
-    return [...new Set(lines.map(line => `${line.order?.buyer_username || "Buyer"} · ${line.order?.order_number || "Order"}`))].join(" / ");
+    return [...new Set(lines.map(line => `${line.order?.buyer_name || line.order?.buyer_username || "Customer"} · ${line.item_title || line.item_number || "Item"}`))].join(" / ");
   }
   async function rpc(client, name, args) {
     const {data, error} = await client.rpc(name, args);
@@ -43,14 +43,14 @@
       $("phone-pair-connection").textContent = data.phone_email
         ? `${recent ? "Phone connected" : "Phone paired — open its camera page"} · ${data.phone_email}`
         : "Waiting for your phone. Scan the QR code and sign in if needed.";
-      $("phone-pair-order").textContent = label(data.request?.lines);
+      window.OGCompletionPhotos.renderOrderContext($("phone-pair-order"), data.request?.lines, config.getCustomerName);
       $("phone-pair-progress").textContent = data.request?.saved_at ? "Photos saved on the phone. They appear below."
         : data.request?.opened_at ? "Order opened on the phone. Ready for photos." : "Order sent. Waiting for the phone to open it.";
       if (wasPaired !== Boolean(data.phone_email)) $("phone-pair-qr-section").open = !data.phone_email;
       document.querySelectorAll("[data-phone-camera]").forEach(button => {button.textContent = data.phone_email ? "Send to phone" : "Use my phone";});
     }
     async function refresh() {
-      if (!visible || !sessionId || busy || polling) return;
+      if (!visible || !sessionId || busy || polling || retryRequest) return;
       polling = true;
       const started = revision;
       try {
@@ -72,6 +72,10 @@
       revision++;
       $("retry-phone-send").disabled = true; $("disconnect-phone-camera").disabled = true;
       status("Sending order to your phone…");
+      window.OGCompletionPhotos.renderOrderContext($("phone-pair-order"), lines, config.getCustomerName);
+      $("phone-pair-progress").textContent = "Sending these order items…";
+      stopPhotos?.(); stopPhotos = null;
+      $("phone-pair-photos").textContent = "Waiting for the order to be sent…";
       const ids = [...new Set(lines.map(line => line.id).filter(Boolean))].sort();
       if (!retryRequest || JSON.stringify(ids) !== JSON.stringify(retryRequest.ids)) retryRequest = {id:crypto.randomUUID(),ids,lines};
       sessionId ||= stored() || crypto.randomUUID(); remember();

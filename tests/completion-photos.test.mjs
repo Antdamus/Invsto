@@ -140,6 +140,20 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com'} = {})
 async function pick(page, input = 'completion-photo-files', name = 'packed-order.png') {
   await page.locator(`#${input}`).setInputFiles({name, mimeType: 'image/png', buffer: png});
 }
+
+test('photo context uses the queue customer-name fallback and keeps unnamed customers identifiable',async t=>{
+  const page=await open(t,database());
+  await page.evaluate(()=>{
+    lines[0].order.raw_payload={fulfillmentStartInstructions:[{shippingStep:{shipTo:{fullName:'Customer from shipping'}}}]};
+    lines[0].item_title='#023 - JEWELRY ITEM - AS SEEN ON SCREEN';
+    lines[1].order.buyer_username='another-buyer';
+    openCompletionPhotos(lines);
+  });
+  const context=page.locator('#completion-photo-context');
+  await expect(context.locator('.photo-order-customer-name')).toHaveText(['Customer from shipping','another-buyer']);
+  await expect(context.locator('.photo-order-items').first()).toContainText('#023 - JEWELRY ITEM - AS SEEN ON SCREEN');
+  await expect(context).not.toContainText('11-22222-33333');
+});
 async function save(page) {
   await page.locator('#save-completion-photos').click();
   await expect(page.locator('#completion-photo-status')).toContainText('Saved to the order.');

@@ -17,7 +17,9 @@ begin
     and not has_table_privilege('authenticated','public.order_phone_camera_requests','insert'),'pairings cannot be enumerated or changed directly');
   perform pg_temp.verify(not has_function_privilege('authenticated','public.order_phone_camera_payload(uuid)','execute')
     and not has_function_privilege('anon','public.read_order_phone_camera(uuid,boolean)','execute'),'private payload and anonymous access denied');
-  insert into public.ebay_orders(id,order_number,buyer_username) values(test_order,'__phone_'||test_order,'phone-fixture');
+  insert into public.ebay_orders(id,order_number,buyer_username,buyer_name,raw_payload)
+    values(test_order,'__phone_'||test_order,'phone-fixture','Fixture Customer',
+      '{"fulfillmentStartInstructions":[{"shippingStep":{"shipTo":{"fullName":"Shipping Customer"}}}]}');
   insert into public.ebay_order_lines(id,order_id,item_number,transaction_id,item_title,quantity) values
     (line_a,test_order,'123456789001','phone-a','Fixture A',1),(line_b,test_order,'123456789002','phone-b','Fixture B',2);
   select jsonb_agg(to_jsonb(l) order by id) into before_lines from public.ebay_order_lines l where l.order_id=test_order;
@@ -31,6 +33,13 @@ begin
   result := public.send_order_to_phone(sid,req,array[line_a,line_a]);
   perform pg_temp.verify(result->>'owner_email'='computer@example.com' and result->'request'->>'id'=req::text
     and jsonb_array_length(result->'request'->'lines')=1,'sender identity and exact deduplicated item scope are saved');
+  perform pg_temp.verify(result #>> '{request,lines,0,order,buyer_name}'='Fixture Customer'
+    and result #>> '{request,lines,0,item_title}'='Fixture A','customer name and selected item title are available to both devices');
+  execute 'set local role postgres';
+  update public.ebay_orders set buyer_name=' ' where id=test_order;
+  execute 'set local role authenticated';
+  result := public.read_order_phone_camera(sid,false);
+  perform pg_temp.verify(result #>> '{request,lines,0,order,buyer_name}'='Shipping Customer','shipping recipient is used when customer name is blank');
   result := public.send_order_to_phone(sid,req2,array[line_b]);
   result := public.send_order_to_phone(sid,req,array[line_a]);
   perform pg_temp.verify(result->'request'->>'id'=req2::text,'late retry does not replace newer order');
