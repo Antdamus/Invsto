@@ -79,7 +79,7 @@
       }));
       container.querySelectorAll("[data-print-saved-label]").forEach(button => button.addEventListener("click", () => {
         const label = labels[Number(button.dataset.printSavedLabel)];
-        window.shippingLabelPrint.run(button, {bucket: label.bucket, path: label.path,
+        window.shippingLabelPrint.runLocal(button, {bucket: label.bucket, path: label.path,
           title: label.metadata.fileName || "Shipping label"});
       }));
     }

@@ -4929,10 +4929,8 @@ function renderEbayLabelPanel() {
   const panel = $("ebay-label-panel");
   if (!state.selectedLine) return;
   const label = getSelectedOrderLabelData();
-  for (const id of ['print-ebay-label','print-worker-ebay-label']) {
-    $(id)?.classList.toggle('hidden', !label.path);
-    $(id)?.toggleAttribute('disabled', !label.path);
-  }
+  $("print-ebay-label")?.classList.toggle("hidden", !label.path);
+  $("print-ebay-label")?.toggleAttribute("disabled", !label.path);
   const metadata = label.metadata || {};
   const sizeText = formatFileSize(metadata.size);
   const trackingText = getLabelTrackingDisplay(metadata);
@@ -4968,12 +4966,9 @@ function renderEbayLabelPanel() {
 
   const modalSummary = $("worker-no-inventory-label-summary");
   const modalDetails = $("worker-no-inventory-label-details");
-  const modalPreviewButton = $("preview-worker-ebay-label");
   if (modalSummary && modalDetails) {
     modalSummary.textContent = summaryText;
     modalDetails.innerHTML = detailsHtml;
-    modalPreviewButton?.classList.toggle("hidden", !label.path);
-    modalPreviewButton?.toggleAttribute("disabled", !label.path);
   }
 }
 
@@ -12042,11 +12037,10 @@ function setupListeners() {
   $("fulfill-seller")?.addEventListener("change", persistSelectedLineSeller);
   $("clear-selection")?.addEventListener("click", () => { if (!state.busy) clearSelection(); });
   $("preview-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
-  for (const id of ['print-ebay-label','print-worker-ebay-label']) $(id)?.addEventListener('click', event => {
+  $("print-ebay-label")?.addEventListener('click', event => {
     const label=getSelectedOrderLabelData();
     void window.shippingLabelPrint.run(event.currentTarget,{bucket:label.bucket,path:label.path,title:`Shipping label ${state.selectedLine?.order?.order_number || ''}`});
   });
-  $("preview-worker-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
   $("open-ebay-label-page")?.addEventListener("click", openSelectedEbayLabelPage);
   $("assign-order-task")?.addEventListener("click", handleSelectedOrderTaskButtonClick);
   $("open-order-task-modal")?.addEventListener("click", () => openOrderTaskModal({ scope: "order" }));

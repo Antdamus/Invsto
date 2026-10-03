@@ -348,7 +348,7 @@ test('extension imports append multiple PDFs in checkout, preserve old labels, a
     loadPendingLabelBuyerBatch=async matching=>matching;
     openPendingNoInventorySessionForLabel=async()=>true;
     await openWorkerNoInventoryModal({lineIds:['line-a']});
-    window.prints=[];shippingLabelPrint.run=(button,options)=>prints.push(options);
+    window.prints=[];shippingLabelPrint.runLocal=(button,options)=>prints.push(options);
   });
   const saved=page.locator('#no-inventory-shipping-labels .order-saved-label');
   await expect(saved).toHaveCount(2);
@@ -369,6 +369,8 @@ test('extension imports append multiple PDFs in checkout, preserve old labels, a
   assert.ok(db.calls.every(call=>call.name==='append_ebay_shipping_label'));
   assert.equal(await page.evaluate(()=>lines[0].order.label_file_path),'old/current.pdf');
   for (const tracking of ['000000000000','111111111111','222222222222','333333333333']) await expect(page.locator('#no-inventory-shipping-labels')).toContainText(tracking);
+  assert.deepEqual(await page.locator('#worker-no-inventory-modal .no-inventory-label button').allTextContents(),
+    Array.from({length:4},()=>['Open PDF','Print']).flat());
   for (const button of await saved.locator('[data-print-saved-label]').all()) await button.click();
   assert.equal(new Set(await page.evaluate(()=>prints.map(item=>item.path))).size,4);
   await mkdir(new URL('../test-results',import.meta.url),{recursive:true});
@@ -505,10 +507,12 @@ test('phone label uploads appear in both open checkout modes and pending PDFs pr
   await expect(desktop.locator('#no-inventory-shipping-labels')).toContainText('phone-label.pdf');
   await expect(mixed.locator('#bundle-shipping-labels')).toContainText('phone-label.pdf');
   assert.equal(await desktop.evaluate(()=>state.selectedLine.label_file_path),db.orders[0].label_file_path);
-  await mixed.locator('[data-order-label-source="bundle"]').click();await pick(mixed,[['not-saved.pdf',await pdf()]]);
+  assert.deepEqual(await mixed.locator('#bundle-review-modal .no-inventory-label button').allTextContents(),['Open PDF','Print']);
+  // Pending-upload safety remains enforced even when checkout is opened from another entry point.
+  await mixed.evaluate(()=>openOrderShippingLabels(getCompletionPhotoLines('bundle')));await pick(mixed,[['not-saved.pdf',await pdf()]]);
   const count=db.calls.length;
   await mixed.evaluate(()=>fulfillSelectedOrder({skipReview:true}));
-  await desktop.locator('[data-order-label-source="no-inventory"]').click();await pick(desktop,[['not-saved.pdf',await pdf()]]);
+  await desktop.evaluate(()=>openOrderShippingLabels(getCompletionPhotoLines('no-inventory')));await pick(desktop,[['not-saved.pdf',await pdf()]]);
   await desktop.evaluate(()=>confirmWorkerNoInventoryCompletion());assert.equal(db.calls.length,count);
   await expect(desktop.locator('#order-shipping-labels-modal')).toBeVisible();
   await mixed.locator('#clear-order-label-selection').click();await mixed.locator('#done-order-labels').click();

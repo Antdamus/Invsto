@@ -615,7 +615,6 @@
       <div id="bundle-review-list" class="bundle-review-list"></div>
       <section class="no-inventory-label" aria-label="Shipping labels">
         <h3>Shipping labels</h3>
-        <button type="button" class="secondary-btn" data-order-label-source="bundle">Upload / view label PDFs</button>
         <p id="bundle-shipping-label-status" class="fulfill-status" role="status"></p>
         <div id="bundle-shipping-labels"></div>
       </section>
@@ -663,11 +662,6 @@
           <p id="worker-no-inventory-label-summary">Upload a label PDF or send a label from eBay.</p>
         </div>
         <div id="worker-no-inventory-label-details" class="ebay-label-details"></div>
-        <div class="no-inventory-label-actions">
-          <button type="button" class="secondary-btn" data-order-label-source="no-inventory">Upload / view label PDFs</button>
-          <button id="preview-worker-ebay-label" type="button" class="secondary-btn hidden">Preview Label</button>
-        <button id="print-worker-ebay-label" type="button" class="secondary-btn hidden">Print shipping label</button>
-        </div>
         <p id="no-inventory-shipping-label-status" class="fulfill-status" role="status"></p>
         <div id="no-inventory-shipping-labels"></div>
       </section>
@@ -1145,13 +1139,13 @@
   <script src="vendor/pdf-lib/pdf-lib.min.js?v=1.17.1"></script>
 <script src="shipping-pdf.js?v=20260929"></script>
 <script src="print-stations.js?v=20260929-shipping"></script>
-<script src="shipping-label-print.js?v=20260929-complete"></script>
+<script src="shipping-label-print.js?v=20261003-direct-print"></script>
 <script src="bag-order-links.js?v=20260930"></script>
 <script src="video-receipts.js?v=20261002-desktop-capture"></script>
 <script src="completion-photos.js?v=20261003-photo-markers"></script>
 <script src="phone-camera.js?v=20261003-photo-order-context"></script>
 <script src="shipping-label-reader.js?v=20261003-label-pdfs"></script>
-<script src="order-shipping-labels.js?v=20261003-append-labels"></script>
-<script src="pending-orders.js?v=20261003-confirm-modal-batch"></script>
+<script src="order-shipping-labels.js?v=20261003-direct-print"></script>
+<script src="pending-orders.js?v=20261003-label-actions"></script>
 </body>
 </html>
