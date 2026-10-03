@@ -184,11 +184,21 @@
     function renderPending() {
       $("completion-photo-pending").innerHTML = pending.map((entry, index) => `
         <article class="completion-photo-card">
-          <img src="${esc(entry.url)}" alt="${esc(entry.file.name)}" />
+          <button type="button" id="completion-pending-${entry.requestId}" data-inspect-pending-photo="${index}" aria-label="Inspect ${esc(entry.file.name)}" ${saving ? "disabled" : ""}>
+            <img src="${esc(entry.url)}" alt="${esc(entry.file.name)}" />
+            <span>Tap to inspect</span>
+          </button>
           <small>${esc(entry.file.name)}</small>
           ${entry.replacement ? `<small>Replaces: ${esc(entry.replacement.label || "saved photo")}. The original stays until you save.</small>` : ""}
           <button type="button" class="secondary-btn" data-remove-photo="${index}" ${saving ? "disabled" : ""}>Remove</button>
         </article>`).join("");
+      $("completion-photo-pending").querySelectorAll("[data-inspect-pending-photo]").forEach(button => {
+        button.addEventListener("click", () => {
+          const entry = pending[Number(button.dataset.inspectPendingPhoto)];
+          if (!entry || saving) return;
+          config.openPhoto({previewUrl: entry.url, label: entry.file.name, mime_type: entry.file.type}, button.id);
+        });
+      });
       $("completion-photo-pending").querySelectorAll("[data-remove-photo]").forEach(button => {
         button.addEventListener("click", () => {
           const [entry] = pending.splice(Number(button.dataset.removePhoto), 1);

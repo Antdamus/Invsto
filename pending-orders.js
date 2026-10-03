@@ -7924,7 +7924,7 @@ function getCompletionPhotoController() {
       escapeHtml,
       formatDate: value => new Date(value).toLocaleString(),
       hydratePhoto: ensureEvidencePhotoPreviewUrls,
-      openPhoto: photo => openEvidencePhotoObjectViewer(photo, "done-completion-photos"),
+      openPhoto: (photo, returnFocusId = "done-completion-photos") => openEvidencePhotoObjectViewer(photo, returnFocusId),
       uploadFile: uploadCompletionPhoto,
       onOpen: () => openModal("completion-photos-modal"),
       onClose: () => closeModal("completion-photos-modal"),
@@ -8115,6 +8115,7 @@ function openNoInventoryEvidencePhotoViewer(index) {
 
 function openEvidencePhotoObjectViewer(photo, returnFocusId = "request-no-inventory-photo") {
   if (!photo?.previewUrl) return;
+  clearEvidencePhotoViewerPointers();
 
   const image = $("no-inventory-photo-viewer-image");
   const video = $("no-inventory-photo-viewer-video");
@@ -8198,6 +8199,7 @@ function openEvidencePhotoObjectViewer(photo, returnFocusId = "request-no-invent
 }
 
 function closeNoInventoryEvidencePhotoViewer() {
+  clearEvidencePhotoViewerPointers();
   const image = $("no-inventory-photo-viewer-image");
   const video = $("no-inventory-photo-viewer-video");
   state.evidencePhotoViewerLoadToken += 1;
@@ -8252,6 +8254,7 @@ function applyEvidencePhotoViewerTransform() {
 }
 
 function resetEvidencePhotoViewerTransform() {
+  clearEvidencePhotoViewerPointers();
   state.evidencePhotoViewerZoom = 1;
   state.evidencePhotoViewerPanX = 0;
   state.evidencePhotoViewerPanY = 0;
@@ -8260,36 +8263,65 @@ function resetEvidencePhotoViewerTransform() {
   applyEvidencePhotoViewerTransform();
 }
 
-function startEvidencePhotoPan(event) {
-  if ((state.evidencePhotoViewerZoom || 1) <= 1) return;
+const evidencePhotoViewerPointers = new Map();
+
+function clearEvidencePhotoViewerPointers() {
+  evidencePhotoViewerPointers.clear();
+  state.evidencePhotoViewerPanning = false;
+  state.evidencePhotoViewerPanStart = null;
+  $("no-inventory-photo-viewer-image")?.classList.remove("is-gesturing");
+}
+
+function rebaseEvidencePhotoGesture() {
   const image = $("no-inventory-photo-viewer-image");
-  if (!image?.src || image.classList.contains("hidden")) return;
-  state.evidencePhotoViewerPanning = true;
+  const points = [...evidencePhotoViewerPointers.values()];
+  image?.classList.toggle("is-gesturing", points.length > 0);
+  state.evidencePhotoViewerPanning = points.length > 0;
+  if (!points.length) {state.evidencePhotoViewerPanStart = null; return;}
+  const [a, b] = points, rect = image.getBoundingClientRect();
+  const panX = state.evidencePhotoViewerPanX || 0, panY = state.evidencePhotoViewerPanY || 0;
   state.evidencePhotoViewerPanStart = {
-    pointerId: event.pointerId,
-    x: event.clientX,
-    y: event.clientY,
-    panX: state.evidencePhotoViewerPanX || 0,
-    panY: state.evidencePhotoViewerPanY || 0,
+    x: b ? (a.x + b.x) / 2 : a.x, y: b ? (a.y + b.y) / 2 : a.y,
+    distance: b ? Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)) : 0,
+    zoom: state.evidencePhotoViewerZoom || 1, panX, panY,
+    originX: rect.left + rect.width / 2 - panX, originY: rect.top + rect.height / 2 - panY,
   };
-  image.setPointerCapture?.(event.pointerId);
+}
+
+function startEvidencePhotoPan(event) {
+  const image = $("no-inventory-photo-viewer-image");
+  if (!image?.src || image.classList.contains("hidden") || (event.pointerType === "mouse" && event.button !== 0)) return;
+  evidencePhotoViewerPointers.set(event.pointerId, {x: event.clientX, y: event.clientY});
+  rebaseEvidencePhotoGesture();
+  try {image.setPointerCapture?.(event.pointerId);} catch (_) { /* Pointer may already have been cancelled. */ }
   event.preventDefault();
 }
 
 function moveEvidencePhotoPan(event) {
-  if (!state.evidencePhotoViewerPanning || !state.evidencePhotoViewerPanStart) return;
-  state.evidencePhotoViewerPanX = state.evidencePhotoViewerPanStart.panX + (event.clientX - state.evidencePhotoViewerPanStart.x);
-  state.evidencePhotoViewerPanY = state.evidencePhotoViewerPanStart.panY + (event.clientY - state.evidencePhotoViewerPanStart.y);
+  if (!evidencePhotoViewerPointers.has(event.pointerId)) return;
+  evidencePhotoViewerPointers.set(event.pointerId, {x: event.clientX, y: event.clientY});
+  const start = state.evidencePhotoViewerPanStart;
+  if (!start) return;
+  const [a, b] = [...evidencePhotoViewerPointers.values()];
+  if (b && start.distance) {
+    const zoom = Math.min(4, Math.max(0.5, start.zoom * Math.hypot(b.x - a.x, b.y - a.y) / start.distance));
+    state.evidencePhotoViewerZoom = zoom;
+    // Keep the part of the image between the fingers anchored during the pinch.
+    state.evidencePhotoViewerPanX = zoom <= 1 ? 0 : (a.x + b.x) / 2 - start.originX - (start.x - start.originX - start.panX) * zoom / start.zoom;
+    state.evidencePhotoViewerPanY = zoom <= 1 ? 0 : (a.y + b.y) / 2 - start.originY - (start.y - start.originY - start.panY) * zoom / start.zoom;
+  } else if ((state.evidencePhotoViewerZoom || 1) > 1) {
+    state.evidencePhotoViewerPanX = start.panX + a.x - start.x;
+    state.evidencePhotoViewerPanY = start.panY + a.y - start.y;
+  }
   applyEvidencePhotoViewerTransform();
   event.preventDefault();
 }
 
 function endEvidencePhotoPan(event) {
-  if (!state.evidencePhotoViewerPanning) return;
+  if (!evidencePhotoViewerPointers.delete(event.pointerId)) return;
   const image = $("no-inventory-photo-viewer-image");
-  image?.releasePointerCapture?.(event.pointerId);
-  state.evidencePhotoViewerPanning = false;
-  state.evidencePhotoViewerPanStart = null;
+  if (image?.hasPointerCapture?.(event.pointerId)) image.releasePointerCapture(event.pointerId);
+  rebaseEvidencePhotoGesture();
 }
 
 function getSelectedWorkerCancelEvidencePhotos() {
@@ -11815,6 +11847,7 @@ function setupEvidencePhotoViewerListeners() {
   $("no-inventory-photo-viewer-image")?.addEventListener("pointermove", moveEvidencePhotoPan);
   $("no-inventory-photo-viewer-image")?.addEventListener("pointerup", endEvidencePhotoPan);
   $("no-inventory-photo-viewer-image")?.addEventListener("pointercancel", endEvidencePhotoPan);
+  $("no-inventory-photo-viewer-image")?.addEventListener("lostpointercapture", endEvidencePhotoPan);
 }
 
 function setupListeners() {

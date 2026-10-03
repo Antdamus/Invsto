@@ -238,7 +238,8 @@ test('next order cannot steal unsaved photos; one phone tap opens its camera wit
   await desktop.evaluate(()=>sendOrderToPhone([lines[1]]));
   await expect(phone.locator('#phone-camera-next')).toBeVisible();
   await phone.locator('#phone-camera-open-next').tap();
-  await expect(phone.locator('#phone-camera-status')).toContainText('Save or remove');
+  // Connection notices refresh in the background; verify the protected photo scope itself.
+  await expect(phone.locator('#completion-photo-pending .completion-photo-card')).toHaveCount(1);
   await expect(phone.locator('#completion-photo-context')).toContainText('11-22222-33333');
   db.failUpload=true;await phone.locator('#save-completion-photos').tap();
   await expect(phone.locator('#completion-photo-status')).toContainText('Upload unavailable');
@@ -292,5 +293,51 @@ test('both checkout paths and the photo panel send exactly their selected items'
   await page.evaluate(()=>{closeBundleReviewModal();openCompletionPhotos([lines[1]]);});
   await page.locator('[data-phone-camera="photos"]').click();
   await expect(page.locator('#phone-pair-order')).toContainText('11-22222-44444');
+});
+
+test('phone previews unsaved photos with zoom and pinch, then returns without losing or uploading them',async t=>{
+  const db=database(),desktop=await open(t,db);
+  await desktop.evaluate(()=>sendOrderToPhone([lines[0]]));
+  await expect(desktop.locator('#phone-pair-qr svg')).toBeVisible();
+  const phone=await open(t,db,{mobile:true,actor:'phone@example.com',phoneLink:await desktop.locator('#phone-pair-link').inputValue()});
+  await expect(phone.locator('#completion-photos-modal')).toBeVisible();
+  await phone.locator('#completion-photo-files').setInputFiles(['front.png','back.png'].map(name=>({name,mimeType:'image/png',buffer:png})));
+  const previews=phone.locator('[data-inspect-pending-photo]');
+  await expect(previews).toHaveCount(2);
+  const selectedUrl=await previews.nth(1).locator('img').getAttribute('src');
+  await previews.nth(1).tap();
+  const viewer=phone.locator('#no-inventory-photo-viewer-modal'), image=phone.locator('#no-inventory-photo-viewer-image');
+  await expect(viewer).toBeVisible();
+  await expect(image).toHaveAttribute('src',selectedUrl);
+  await expect(image).toHaveAttribute('alt','back.png');
+  await phone.locator('#zoom-in-no-inventory-photo').tap();
+  assert.equal(await phone.evaluate(()=>state.evidencePhotoViewerZoom),1.25);
+  await phone.locator('#reset-zoom-no-inventory-photo').tap();
+  // Exercise the browser's pointer listeners for a two-finger pinch and a following one-finger pan.
+  await image.dispatchEvent('pointerdown',{pointerId:11,pointerType:'touch',clientX:140,clientY:350,button:0});
+  await image.dispatchEvent('pointerdown',{pointerId:12,pointerType:'touch',clientX:240,clientY:350,button:0});
+  await image.dispatchEvent('pointermove',{pointerId:12,pointerType:'touch',clientX:340,clientY:350});
+  assert.equal(await phone.evaluate(()=>state.evidencePhotoViewerZoom),2);
+  await image.dispatchEvent('pointerup',{pointerId:12,pointerType:'touch',clientX:340,clientY:350});
+  const oldPan=await phone.evaluate(()=>state.evidencePhotoViewerPanX);
+  await image.dispatchEvent('pointermove',{pointerId:11,pointerType:'touch',clientX:170,clientY:350});
+  assert.equal(await phone.evaluate(()=>state.evidencePhotoViewerPanX),oldPan+30);
+  await image.dispatchEvent('pointercancel',{pointerId:11,pointerType:'touch'});
+  assert.equal(await phone.evaluate(()=>state.evidencePhotoViewerPanning),false);
+  await phone.locator('#reset-zoom-no-inventory-photo').tap();
+  await expect(image).toHaveCSS('transform','matrix(1, 0, 0, 1, 0, 0)');
+  await phone.locator('#dismiss-no-inventory-photo-viewer').tap();
+  await expect(viewer).toBeHidden();await expect(previews).toHaveCount(2);
+  assert.equal(db.uploads.length,0);assert.equal(db.events.length,0);
+  await previews.first().tap();await expect(image).toHaveAttribute('alt','front.png');
+  assert.equal(await phone.evaluate(()=>state.evidencePhotoViewerZoom),1);
+  await mkdir(new URL('../test-results',import.meta.url),{recursive:true});
+  await phone.screenshot({path:'test-results/phone-pending-photo-inspection.png'});
+  await phone.locator('#close-no-inventory-photo-viewer').tap();
+  await save(phone);assert.equal(db.events.length,2);
+  await expect(phone.locator('[data-completion-photo]')).toHaveCount(2);
+  await phone.locator('[data-completion-photo]').first().tap();await expect(viewer).toBeVisible();
+  await phone.locator('#zoom-in-no-inventory-photo').tap();assert.equal(await phone.evaluate(()=>state.evidencePhotoViewerZoom),1.25);
+  await phone.locator('#dismiss-no-inventory-photo-viewer').tap();
 });
 

@@ -426,3 +426,23 @@ test('cancelling a replacement or a failed removal leaves the original photo ava
   await page.locator('[data-remove-saved-photo]').click();
   await expect(page.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(0);
 });
+
+test('desktop can inspect an unsaved photo, zoom and drag it, then return to the same thumbnail', async t => {
+  const db=database(), page=await open(t,db);
+  await page.evaluate(()=>openCompletionPhotos([lines[0]]));
+  await pick(page);
+  const preview=page.locator('[data-inspect-pending-photo]');
+  await preview.focus();await preview.press('Enter');
+  await expect(page.locator('#no-inventory-photo-viewer-modal')).toBeVisible();
+  await page.locator('#zoom-in-no-inventory-photo').click();
+  const image=page.locator('#no-inventory-photo-viewer-image');
+  const box=await image.boundingBox();
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
+  await page.mouse.down();await page.mouse.move(box.x+box.width/2+40,box.y+box.height/2+20,{steps:4});await page.mouse.up();
+  assert.equal(await page.evaluate(()=>state.evidencePhotoViewerPanX),40);
+  assert.equal(await page.evaluate(()=>state.evidencePhotoViewerPanY),20);
+  await page.locator('#dismiss-no-inventory-photo-viewer').click();
+  await expect(preview).toBeFocused();
+  await expect(page.locator('#completion-photo-pending .completion-photo-card')).toHaveCount(1);
+  assert.equal(db.uploads.length,0);assert.equal(db.events.length,0);
+});

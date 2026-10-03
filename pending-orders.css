@@ -3238,6 +3238,8 @@ body.modal-open {
 .evidence-photo-viewer-frame img:active {
   cursor: grabbing;
 }
+.evidence-photo-viewer-frame img.is-gesturing { transition: none; }
+.completion-photos-card h2, .evidence-photo-viewer-card h2 { color: var(--text, #f5f1e9); }
 
 .evidence-photo-viewer-tools {
   display: flex;
