@@ -3,6 +3,7 @@ import {readFile, mkdir} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {test, before, after} from 'node:test';
 import {chromium, webkit, expect} from '@playwright/test';
+import {installLiveFixture} from './order-live-fixture.mjs';
 
 const root = new URL('../', import.meta.url);
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=', 'base64');
@@ -40,7 +41,7 @@ function database() {
     loseCorrectionResponse: false, corrections: new Map()};
 }
 
-async function open(t, db, {mobile = false, actor = 'desktop@example.com', phoneLink = '', loggedIn = true} = {}) {
+async function open(t, db, {mobile = false, actor = 'desktop@example.com', phoneLink = '', loggedIn = true, live = false} = {}) {
   const context = await browser.newContext({viewport: {width: mobile ? 390 : 1440, height: 950},
     isMobile: mobile, hasTouch: mobile});
   t.after(() => context.close());
@@ -125,15 +126,16 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com', phone
     throw Error(`Unknown operation ${op}`);
   });
   await page.goto(phoneLink || `${origin}/pending-orders.html`);
+  if (live) await installLiveFixture(page, origin);
   await page.addScriptTag({url: `${origin}/completion-photos.js`});
   await page.addScriptTag({url: `${origin}/phone-camera.js`});
   await page.addScriptTag({url: `${origin}/pending-orders.js`});
-  await page.evaluate(({actor, imageUrl, phoneLink, loggedIn, lineFixtures}) => {
+  await page.evaluate(({actor, imageUrl, phoneLink, loggedIn, lineFixtures, live}) => {
     const create = OGCompletionPhotos.create;
-    OGCompletionPhotos.create = config => create({...config, pollMs: 150});
+    OGCompletionPhotos.create = config => create({...config, pollMs: live ? 60000 : 150});
     const desktopCreate=OGPhoneCamera.createDesktop, receiverCreate=OGPhoneCamera.createReceiver;
-    OGPhoneCamera.createDesktop=config=>desktopCreate({...config,pollMs:100});
-    OGPhoneCamera.createReceiver=config=>receiverCreate({...config,pollMs:100});
+    OGPhoneCamera.createDesktop=config=>desktopCreate({...config,pollMs:live ? 60000 : 100});
+    OGPhoneCamera.createReceiver=config=>receiverCreate({...config,pollMs:live ? 60000 : 100});
     let signedIn=loggedIn;
     window.supabase = {
       auth:{getSession:async()=>({data:{session:signedIn?{user:{id:actor,email:actor}}:null}}),
@@ -154,6 +156,7 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com', phone
       };}},
       rpc: (name, args) => photoDb({op: 'rpc', name, args}),
     };
+    if (live) enableLiveFixture(supabase);
     window.lines = lineFixtures;
     state.user = {id: actor, email: actor}; state.employee = {active: true, role: 'employee'};
     state.orders = lines; state.filteredOrders = lines; state.selectedLine = lines[0];
@@ -166,7 +169,7 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com', phone
     resolvePhotoUrl = async () => '';
     if (phoneLink) document.dispatchEvent(new Event('DOMContentLoaded'));
     else {setupListeners();renderOrders();}
-  }, {actor, imageUrl, phoneLink, loggedIn, lineFixtures:db.lines});
+  }, {actor, imageUrl, phoneLink, loggedIn, lineFixtures:db.lines, live});
   return page;
 }
 
@@ -183,6 +186,35 @@ function evidence({order = 'order-a', line = 'line-a', path = 'remote.png', proo
     payload: {source: 'order_history_extra_photo', proof_type: proof, order_line_ids: [line]},
     photo_attachments: [{bucket: 'order-evidence-photos', path, label: path}]};
 }
+
+test('live phone notifications show the next order and saved status without waiting for polling', async t => {
+  const db=database(),desktop=await open(t,db,{live:true});
+  await desktop.evaluate(()=>sendOrderToPhone([lines[0]]));
+  await expect(desktop.locator('#phone-pair-qr svg')).toBeVisible();
+  const link=await desktop.locator('#phone-pair-link').inputValue();
+  const phone=await open(t,db,{live:true,mobile:true,actor:'phone@example.com',phoneLink:link});
+  await expect(phone.locator('#completion-photo-context')).toContainText('Gold chain');
+  await phone.waitForTimeout(200);
+  await pick(phone);
+  await desktop.evaluate(()=>sendOrderToPhone([lines[1]]));
+  const sessionId=[...db.sessions.keys()][0];
+  await phone.evaluate(session_id=>deliverOrderChange({kind:'phone_camera',session_id}),sessionId);
+  await expect(phone.locator('#phone-camera-next')).toBeVisible();
+  await expect(phone.locator('#phone-camera-next-label')).toContainText('Silver ring');
+  await phone.locator('#phone-camera-open-next').tap();
+  await expect(phone.locator('#completion-photo-context')).toContainText('Gold chain');
+  await save(phone);
+  await phone.locator('#phone-camera-open-next').tap();
+  await expect(phone.locator('#completion-photo-context')).toContainText('Silver ring');
+  await pick(phone,'completion-photo-files','ring.png');await save(phone);
+  await desktop.evaluate(session_id=>{
+    deliverOrderChange({kind:'phone_camera',session_id});
+    deliverOrderChange({kind:'completion_photo',order_id:'order-b'});
+  },sessionId);
+  await expect(desktop.locator('#phone-pair-progress')).toContainText('Photos saved');
+  await expect(desktop.locator('#phone-pair-photos .completion-photo-card')).toHaveCount(1);
+  assert.equal(await phone.evaluate(()=>liveChannels),1);
+});
 
 test('computer QR opens a focused phone view, preserves sign-in and shares photos automatically', async t => {
   const db=database(), desktop=await open(t,db);

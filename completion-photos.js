@@ -43,6 +43,7 @@
     const esc = config.escapeHtml;
     const watchers = new Set();
     const previews = new Map();
+    const orderReads = new Map();
     let scope = [], pending = [], saving = false, stopModalWatch = null, returnFocus = null;
     let savedPhotos = [], replacementTarget = null, revision = 0;
 
@@ -56,7 +57,14 @@
       return orders;
     }
 
-    async function readOrder(orderId) {
+    function readOrder(orderId) {
+      if (!orderReads.has(orderId)) {
+        const read = fetchOrder(orderId).finally(() => {if (orderReads.get(orderId) === read) orderReads.delete(orderId);});
+        orderReads.set(orderId, read);
+      }
+      return orderReads.get(orderId);
+    }
+    async function fetchOrder(orderId) {
       const rows = [];
       for (let offset = 0; ; offset += 500) {
         const {data, error} = await config.getClient().from("ebay_order_task_events")
@@ -131,11 +139,13 @@
     }
 
     function watch(lines, onChange, onError = () => {}, readData = read, pollMs = config.pollMs || 5000) {
-      let active = true, loading = false, rerun = false;
+      let active = true, loading = false, rerun = false, lastReadAt = 0, liveTimer;
+      const orderIds = new Set(lines.map(line => line.order_id));
       async function refresh() {
         if (!active) return;
         if (loading) { rerun = true; return; }
         loading = true;
+        lastReadAt = Date.now();
         const startedAtRevision = revision;
         try {
           const photos = await readData(lines);
@@ -147,7 +157,16 @@
           if (rerun && active && !saving) { rerun = false; refresh(); }
         }
       }
-      const interval = setInterval(() => { if (!document.hidden) refresh(); }, pollMs);
+      const stopLive = window.OGOrderLiveUpdates?.subscribe(config.getClient(), change => {
+        if (change.kind !== "reconnected" && (change.kind !== "completion_photo" || !orderIds.has(change.order_id))) return;
+        // A request started before this notification may still return the older snapshot.
+        for (const orderId of orderIds) orderReads.delete(orderId);
+        clearTimeout(liveTimer);
+        liveTimer = setTimeout(() => {if (!document.hidden) refresh();}, 80);
+      });
+      const interval = setInterval(() => {
+        if (!document.hidden && (!stopLive?.isConnected?.() || Date.now() - lastReadAt >= 30000)) refresh();
+      }, pollMs);
       const onVisible = () => { if (!document.hidden) refresh(); };
       document.addEventListener("visibilitychange", onVisible);
       watchers.add(refresh);
@@ -155,6 +174,7 @@
       return () => {
         active = false;
         clearInterval(interval);
+        clearTimeout(liveTimer); stopLive?.();
         watchers.delete(refresh);
         document.removeEventListener("visibilitychange", onVisible);
       };
@@ -316,30 +336,44 @@
       renderPending();
       status("Saving completion photos…");
       try {
-        for (const entry of [...pending]) {
-          if (!entry.uploaded) entry.uploaded = await config.uploadFile(entry.file);
-          if (entry.replacement) {
-            await correctPhoto(entry.replacement, entry.requestId, entry.uploaded);
-          } else for (const [orderId, lineIds] of targets(scope)) {
-            if (entry.saved.has(orderId)) continue;
-            // A lost response may have committed. Read before retrying the same photo.
-            if (entry.attempted.has(orderId)) {
-              const exists = (await readOrder(orderId)).some(event =>
-                lineIds.every(id => event.payload?.order_line_ids?.includes(id)) &&
-                event.photo_attachments?.some(p => p.path === entry.uploaded.path && p.bucket === entry.uploaded.bucket));
-              if (exists) { entry.saved.add(orderId); continue; }
-            }
-            entry.attempted.add(orderId);
-            const {error} = await config.getClient().rpc("add_ebay_order_history_extra_photos", {
-              _order_id: orderId, _order_line_ids: lineIds, _photo_attachments: [entry.uploaded],
-              _note: null, _proof_type: "completion_photo", _signed_by_email: config.getActor(),
-            });
-            if (error) throw error;
-            entry.saved.add(orderId);
+        const entries = [...pending];
+        let next = 0, failure, recordTail = Promise.resolve();
+        async function saveNext() {
+          while (!failure && next < entries.length) {
+            const entry = entries[next++];
+            try {
+              if (!entry.uploaded) entry.uploaded = await config.uploadFile(entry.file);
+              // Upload together, but serialize audit writes to each shared order task.
+              await (recordTail = recordTail.catch(() => {}).then(async () => {
+                if (entry.replacement) {
+                  await correctPhoto(entry.replacement, entry.requestId, entry.uploaded);
+                } else for (const [orderId, lineIds] of targets(scope)) {
+                  if (entry.saved.has(orderId)) continue;
+                  // A lost response may have committed. Read before retrying the same photo.
+                  if (entry.attempted.has(orderId)) {
+                    const exists = (await fetchOrder(orderId)).some(event =>
+                      lineIds.every(id => event.payload?.order_line_ids?.includes(id)) &&
+                      event.photo_attachments?.some(p => p.path === entry.uploaded.path && p.bucket === entry.uploaded.bucket));
+                    if (exists) { entry.saved.add(orderId); continue; }
+                  }
+                  entry.attempted.add(orderId);
+                  const {error} = await config.getClient().rpc("add_ebay_order_history_extra_photos", {
+                    _order_id: orderId, _order_line_ids: lineIds, _photo_attachments: [entry.uploaded],
+                    _note: null, _proof_type: "completion_photo", _signed_by_email: config.getActor(),
+                  });
+                  if (error) throw error;
+                  entry.saved.add(orderId);
+                }
+              }));
+              pending = pending.filter(p => p !== entry);
+              URL.revokeObjectURL(entry.url);
+              renderPending();
+            } catch (error) { failure ||= error; }
           }
-          pending = pending.filter(p => p !== entry);
-          URL.revokeObjectURL(entry.url);
         }
+        // Bound memory/network use on phones; wait for both workers before enabling Retry.
+        await Promise.all([saveNext(), saveNext()]);
+        if (failure) throw failure;
         status("Saved to the order. These photos also appear on the other device and in Order History.");
         config.onSaved?.();
       } catch (error) {

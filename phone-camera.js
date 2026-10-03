@@ -31,7 +31,7 @@
   }
 
   function createDesktop(config) {
-    let sessionId = "", data = null, busy = false, timer, stopPhotos, retryRequest = null, visible = false, polling = false, revision = 0;
+    let sessionId = "", data = null, busy = false, timer, stopPhotos, stopLive, liveTimer, retryRequest = null, visible = false, polling = false, revision = 0;
     const key = () => `og-order-phone:${config.getUserId()}`;
     function remember() {try {sessionId ? localStorage.setItem(key(), sessionId) : localStorage.removeItem(key());} catch (_) {}}
     function stored() {try {const id = localStorage.getItem(key()); return UUID.test(id || "") ? id : "";} catch (_) {return "";}}
@@ -64,11 +64,17 @@
       finally {polling = false;}
     }
     function close() {
-      visible = false; clearInterval(timer); stopPhotos?.(); stopPhotos = null; config.onClose();
+      visible = false; clearInterval(timer); clearTimeout(liveTimer); stopLive?.(); stopLive = null;
+      stopPhotos?.(); stopPhotos = null; config.onClose();
     }
     async function send(lines) {
       if (busy || !lines.length || !config.getUserId()) return;
       visible = true; config.onOpen(); busy = true;
+      stopLive ||= window.OGOrderLiveUpdates?.subscribe(config.getClient(), change => {
+        if (change.kind === "reconnected" || (change.kind === "phone_camera" && change.session_id === sessionId)) {
+          clearTimeout(liveTimer); liveTimer = setTimeout(refresh, 80);
+        }
+      });
       revision++;
       $("retry-phone-send").disabled = true; $("disconnect-phone-camera").disabled = true;
       status("Sending order to your phone…");
@@ -127,7 +133,7 @@
 
   function createReceiver(config) {
     const sessionId = config.sessionId;
-    let active = null, next = null, photos, timer, stopped = false, refreshing = false, authenticated = false;
+    let active = null, next = null, photos, timer, stopLive, liveTimer, stopped = false, refreshing = false, authenticated = false;
     const acknowledgements = new Map();
     function status(message, error = false) {$("phone-camera-status").textContent = message; $("phone-camera-status").classList.toggle("is-error", error);}
     function queueAck(id, value) {if (id) acknowledgements.set(id, value);}
@@ -163,7 +169,10 @@
         await flushAcks();
       } catch (error) {
         status(error.message || "Connection interrupted. Your photos stay here; we’ll retry.", true);
-        if (error.code === "P0002" || error.code === "42501") {stopped = true;clearInterval(timer);$("phone-camera-next").classList.add("hidden");}
+        if (error.code === "P0002" || error.code === "42501") {
+          stopped = true;clearInterval(timer);clearTimeout(liveTimer);stopLive?.();stopLive = null;
+          $("phone-camera-next").classList.add("hidden");
+        }
       } finally {refreshing = false;}
     }
     async function connect() {
@@ -174,6 +183,11 @@
       $("phone-camera-login").classList.add("hidden");
       $("phone-camera-account").textContent = `Signed in as ${data.session.user.email}`;
       photos ||= config.getPhotoController();
+      stopLive ||= window.OGOrderLiveUpdates?.subscribe(config.getClient(), change => {
+        if (change.kind === "reconnected" || (change.kind === "phone_camera" && change.session_id === sessionId)) {
+          clearTimeout(liveTimer); liveTimer = setTimeout(refresh, 80);
+        }
+      });
       await refresh();
       clearInterval(timer); if (!stopped) timer = setInterval(() => {if (!document.hidden) refresh();}, config.pollMs || 3000);
     }
@@ -193,7 +207,7 @@
     });
     $("leave-phone-camera").addEventListener("click", () => {
       if (photos?.hasPending) return status("Save or remove the current photos before leaving.", true);
-      stopped = true;clearInterval(timer);location.href = new URL("pending-orders.html", location.href).href;
+      stopped = true;clearInterval(timer);clearTimeout(liveTimer);stopLive?.();location.href = new URL("pending-orders.html", location.href).href;
     });
     document.addEventListener("visibilitychange", () => {if (!document.hidden) refresh();});
     return {

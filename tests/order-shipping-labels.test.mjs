@@ -35,6 +35,28 @@ async function pdf(texts = ['Tracking: 9400111899223856928499'], size = [288,432
   }
   return Buffer.from(await doc.save());
 }
+
+test('PDF validation tools load only when needed, retry a failed download, and share concurrent loads',async t=>{
+  const context=await browser.newContext();t.after(()=>context.close());
+  const page=await context.newPage();
+  await page.goto(`${origin}/pending-orders.html`);
+  let requests=0,fail=true;
+  await page.route('**/vendor/pdf-lib/pdf-lib.min.js',route=>{
+    requests++;return fail ? route.abort() : route.continue();
+  });
+  await page.addScriptTag({url:`${origin}/shipping-pdf.js`});
+  assert.equal(requests,0);assert.equal(await page.evaluate(()=>typeof PDFLib),'undefined');
+  const bytes=[...await pdf()];
+  const message=await page.evaluate(async bytes=>{
+    try{await shippingPdf.inspect(new Uint8Array(bytes));}catch(error){return error.message;}
+  },bytes);
+  assert.match(message,/could not load/);assert.equal(requests,1);fail=false;
+  const pages=await page.evaluate(async bytes=>{
+    const inspections=await Promise.all([shippingPdf.inspect(new Uint8Array(bytes)),shippingPdf.inspect(new Uint8Array(bytes))]);
+    return inspections.map(result=>result.count);
+  },bytes);
+  assert.deepEqual(pages,[1,1]);assert.equal(requests,2,'one successful download for two simultaneous users');
+});
 function database() {
   return {orders: ['a','b'].map(letter => ({id:`order-${letter}`,order_number:`11-22222-${letter === 'a' ? '33333':'44444'}`,
     buyer_username:'lore2526',label_metadata:{}})), events:[], uploads:[], calls:[], requests:new Set(), failUpload:0, loseResponse:false};

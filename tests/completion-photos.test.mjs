@@ -3,6 +3,7 @@ import {readFile, mkdir} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {test, before, after} from 'node:test';
 import {chromium, webkit, expect} from '@playwright/test';
+import {installLiveFixture} from './order-live-fixture.mjs';
 
 const root = new URL('../', import.meta.url);
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=', 'base64');
@@ -34,7 +35,7 @@ function database() {
     loseCorrectionResponse: false, corrections: new Map()};
 }
 
-async function open(t, db, {mobile = false, actor = 'desktop@example.com'} = {}) {
+async function open(t, db, {mobile = false, actor = 'desktop@example.com', live = false, pollMs = 150, deferRender = false} = {}) {
   const context = await browser.newContext({viewport: {width: mobile ? 390 : 1440, height: 950},
     isMobile: mobile, hasTouch: mobile});
   t.after(() => context.close());
@@ -94,11 +95,12 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com'} = {})
     throw Error(`Unknown operation ${op}`);
   });
   await page.goto(`${origin}/pending-orders.html`);
+  if (live) await installLiveFixture(page, origin);
   await page.addScriptTag({url: `${origin}/completion-photos.js`});
   await page.addScriptTag({url: `${origin}/pending-orders.js`});
-  await page.evaluate(({actor, imageUrl}) => {
+  await page.evaluate(({actor, imageUrl, live, pollMs, deferRender}) => {
     const create = OGCompletionPhotos.create;
-    OGCompletionPhotos.create = config => create({...config, pollMs: 150});
+    OGCompletionPhotos.create = config => create({...config, pollMs});
     window.supabase = {
       from(table) {
         const filters = [];
@@ -116,6 +118,7 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com'} = {})
       };}},
       rpc: (name, args) => photoDb({op: 'rpc', name, args}),
     };
+    if (live) enableLiveFixture(supabase);
     window.lines = [
       {id: 'line-a', order_id: 'order-a', item_title: 'Gold chain', quantity: 1, fulfilled_quantity: 0,
         total_price: 1485, line_status: 'pending', order: {order_number: '11-22222-33333', buyer_username: 'lore2526'}},
@@ -132,8 +135,8 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com'} = {})
     renderEbayLabelPanel = () => {};
     resolvePhotoUrl = async () => '';
     setupListeners();
-    renderOrders();
-  }, {actor, imageUrl});
+    if (!deferRender) renderOrders();
+  }, {actor, imageUrl, live, pollMs, deferRender});
   return page;
 }
 
@@ -164,6 +167,61 @@ function evidence({order = 'order-a', line = 'line-a', path = 'remote.png', proo
     payload: {source: 'order_history_extra_photo', proof_type: proof, order_line_ids: [line]},
     photo_attachments: [{bucket: 'order-evidence-photos', path, label: path}]};
 }
+
+test('live changes update photos and group indicators before the next poll, including reconnects and removals', async t => {
+  const db = database(), page = await open(t, db, {live:true, pollMs:60000});
+  await page.evaluate(() => openCompletionPhotos(lines));
+  await expect(page.locator('#completion-photo-saved')).toContainText('No completion photos');
+  await page.waitForTimeout(200); // Allow initial subscription recovery to finish.
+  const before = db.reads.length;
+  await page.evaluate(() => deliverOrderChange({kind:'completion_photo',order_id:'unrelated'}));
+  await page.waitForTimeout(150);
+  assert.equal(db.reads.length, before, 'unrelated orders do not refetch this view');
+  db.events.push(evidence());
+  await page.evaluate(() => deliverOrderChange({kind:'completion_photo',order_id:'order-a'}));
+  await expect(page.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(1);
+  await expect(page.locator('.buyer-card-meta [data-completion-photo-lines]')).toHaveText('✓ Completion photo added');
+  assert.equal(await page.evaluate(() => liveChannels), 1, 'modal and queue share their connection');
+  db.events = [];
+  await page.evaluate(() => {setLiveState('CHANNEL_ERROR');setLiveState('SUBSCRIBED');});
+  await expect(page.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(0);
+  await expect(page.locator('.buyer-card-meta [data-completion-photo-lines]')).toHaveText('No completion photos');
+  await page.locator('#done-completion-photos').click();
+  db.events.push(evidence());
+  await page.evaluate(() => deliverOrderChange({kind:'completion_photo',order_id:'order-a'}));
+  await expect(page.locator('.buyer-card-meta [data-completion-photo-lines]')).toHaveText('✓ Completion photo added');
+});
+
+test('two photo workers settle before retry and never upload an already saved photo twice', async t => {
+  const db = database(), page = await open(t, db, {deferRender:true});
+  assert.equal(await page.evaluate(() => completionPhotoController), null);
+  await page.evaluate(() => {
+    window.activeUploads = 0;window.peakUploads = 0;window.uploadAttempts = [];window.finishSlowUpload = null;
+    const create = OGCompletionPhotos.create;
+    OGCompletionPhotos.create = config => create({...config, uploadFile: async file => {
+      activeUploads++;peakUploads = Math.max(peakUploads,activeUploads);uploadAttempts.push(file.name);
+      try {
+        await Promise.resolve();
+        if (file.name === 'slow.png') await new Promise(resolve => finishSlowUpload = resolve);
+        if (file.name === 'fail.png' && uploadAttempts.filter(n => n === file.name).length === 1) throw Error('Temporary upload failure');
+        return {bucket:'order-evidence-photos',path:file.name,label:file.name};
+      } finally {activeUploads--;}
+    }});
+    openCompletionPhotos([lines[0]]);
+  });
+  await page.locator('#completion-photo-files').setInputFiles(['fail.png','slow.png','next.png'].map(name => ({name,mimeType:'image/png',buffer:png})));
+  await page.locator('#save-completion-photos').click();
+  await expect.poll(() => page.evaluate(() => activeUploads)).toBe(1);
+  await expect(page.locator('#save-completion-photos')).toBeDisabled();
+  assert.equal(await page.evaluate(() => peakUploads), 2);
+  await page.evaluate(() => finishSlowUpload());
+  await expect(page.locator('#completion-photo-status')).toContainText('Temporary upload failure');
+  await expect(page.locator('#completion-photo-pending .completion-photo-card')).toHaveCount(2);
+  await save(page);
+  assert.deepEqual(await page.evaluate(() => uploadAttempts), ['fail.png','slow.png','fail.png','next.png']);
+  assert.equal(db.events.length, 3);
+  assert.equal(new Set(db.events.flatMap(e => e.photo_attachments.map(p => p.path))).size, 3);
+});
 
 test('phone card offers camera and library, saves audited photos for the displayed orders without expanding the card', async t => {
   const db = database(), page = await open(t, db, {mobile: true, actor: 'phone@example.com'});

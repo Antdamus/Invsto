@@ -1,8 +1,22 @@
 /* Shared shipping PDF validation. Only selected 4 x 6 inch thermal label pages are queued. */
 (function(root,factory){
   if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/pdf-lib/pdf-lib.min.js'));
-  else root.shippingPdf=factory(root.PDFLib);
-})(typeof globalThis==='object'?globalThis:this,function(PDFLib){
+  else {
+    const base=new URL('.',document.currentScript.src);
+    let loading;
+    root.shippingPdf=factory(root.PDFLib,()=>{
+      if(root.PDFLib)return Promise.resolve(root.PDFLib);
+      return loading ||= new Promise((resolve,reject)=>{
+        const script=document.createElement('script');
+        const fail=()=>{clearTimeout(timer);script.remove();loading=null;reject(new Error('PDF tools could not load. Try again.'));};
+        const timer=setTimeout(fail,20000);
+        script.src=new URL('vendor/pdf-lib/pdf-lib.min.js',base).href;
+        script.onload=()=>{if(!root.PDFLib){fail();return;}clearTimeout(timer);resolve(root.PDFLib);};
+        script.onerror=fail;document.head.append(script);
+      });
+    });
+  }
+})(typeof globalThis==='object'?globalThis:this,function(PDFLib,loadPDFLib){
   'use strict';
   const MAX_BYTES=10*1024*1024, MAX_PAGES=100;
   function parsePages(value,count){
@@ -22,7 +36,7 @@
   }
   async function inspect(bytes){
     if(!bytes?.byteLength||bytes.byteLength>MAX_BYTES)throw new Error('Shipping PDFs must be smaller than 10 MB.');
-    if(!PDFLib)throw new Error('PDF tools did not load. Refresh this page and try again.');
+    if(!PDFLib)PDFLib=await loadPDFLib();
     let doc;
     try {doc=await PDFLib.PDFDocument.load(bytes,{updateMetadata:false});}
     catch {throw new Error('This PDF cannot be read. Use an unencrypted eBay shipping-label PDF.');}

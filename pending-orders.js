@@ -2701,11 +2701,13 @@ function normalizePendingOrderQueueRpcRow(row = {}) {
         },
       }
     : {};
-  const lineFinancePayload = row.line_finance_payload && typeof row.line_finance_payload === "object"
-    ? row.line_finance_payload
+  const lineFinancePayload = (row.line_raw_payload?.ebayFinance || row.line_finance_payload)
+    && typeof (row.line_raw_payload?.ebayFinance || row.line_finance_payload) === "object"
+    ? (row.line_raw_payload?.ebayFinance || row.line_finance_payload)
     : {};
-  const orderFinancePayload = row.order_finance_payload && typeof row.order_finance_payload === "object"
-    ? row.order_finance_payload
+  const orderFinancePayload = (row.order_raw_payload?.ebayFinance || row.order_finance_payload)
+    && typeof (row.order_raw_payload?.ebayFinance || row.order_finance_payload) === "object"
+    ? (row.order_raw_payload?.ebayFinance || row.order_finance_payload)
     : {};
   const lineFinance = {
     ...lineFinancePayload,
@@ -2726,10 +2728,12 @@ function normalizePendingOrderQueueRpcRow(row = {}) {
     memo: row.order_finance_memo || orderFinancePayload.memo || "",
   };
   const lineRawPayload = {
+    ...row.line_raw_payload,
     ...syncReviewPayload,
     ...(lineFinance.status ? { ebayFinance: lineFinance } : {}),
   };
   const orderRawPayload = {
+    ...row.order_raw_payload,
     ...syncReviewPayload,
     ...(orderFinance.status ? { ebayFinance: orderFinance } : {}),
   };
@@ -2809,18 +2813,25 @@ function isMissingPendingOrderQueueRpcError(error) {
     && (text.includes("schema cache") || text.includes("does not exist") || text.includes("not found"));
 }
 
+let pendingQueueRpc = "list_pending_ebay_order_queue_v2";
 async function fetchOrderLineQueueViaRpc(status, admin) {
   const startedAt = nowMs();
   const queueStatus = getQueueLoadStatus(status);
   const rows = [];
   for (let from = 0; ; from += ORDER_QUEUE_PAGE_SIZE) {
     const pageStartedAt = nowMs();
-    const { data, error } = await supabase.rpc("list_pending_ebay_order_queue", {
+    const args = {
       _status: queueStatus,
       _include_admin_fields: Boolean(admin),
       _limit: ORDER_QUEUE_PAGE_SIZE,
       _offset: from,
-    });
+    };
+    let result = await supabase.rpc(pendingQueueRpc, args);
+    if (result.error && pendingQueueRpc.endsWith("_v2") && isMissingPendingOrderQueueRpcError(result.error)) {
+      pendingQueueRpc = "list_pending_ebay_order_queue";
+      result = await supabase.rpc(pendingQueueRpc, args);
+    }
+    const {data, error} = result;
     if (error) throw error;
     const pageRows = (data || []).map(normalizePendingOrderQueueRpcRow);
     rows.push(...pageRows);
@@ -2832,7 +2843,7 @@ async function fetchOrderLineQueueViaRpc(status, admin) {
     });
     if (!data || data.length < ORDER_QUEUE_PAGE_SIZE) break;
   }
-  await hydrateFinancePayloadsForLines(rows);
+  if (!pendingQueueRpc.endsWith("_v2")) await hydrateFinancePayloadsForLines(rows);
   logPendingOrderPerf("fetchOrderLineQueue rpc total", startedAt, { admin, rows: rows.length, status: queueStatus });
   return rows;
 }
@@ -7843,14 +7854,14 @@ async function createAndUploadEvidenceDerivatives(sourceBlob, bucket, originalPa
     },
   };
 
-  const preview = await uploadEvidenceDerivative(bucket, originalPath, sourceBlob, "preview", {
-    maxDimension: EVIDENCE_PREVIEW_MAX_DIMENSION,
-    quality: EVIDENCE_PREVIEW_QUALITY,
-  });
-  const thumbnail = await uploadEvidenceDerivative(bucket, originalPath, sourceBlob, "thumbnail", {
-    maxDimension: EVIDENCE_THUMBNAIL_MAX_DIMENSION,
-    quality: EVIDENCE_THUMBNAIL_QUALITY,
-  });
+  const [preview, thumbnail] = await Promise.all([
+    uploadEvidenceDerivative(bucket, originalPath, sourceBlob, "preview", {
+      maxDimension: EVIDENCE_PREVIEW_MAX_DIMENSION, quality: EVIDENCE_PREVIEW_QUALITY,
+    }),
+    uploadEvidenceDerivative(bucket, originalPath, sourceBlob, "thumbnail", {
+      maxDimension: EVIDENCE_THUMBNAIL_MAX_DIMENSION, quality: EVIDENCE_THUMBNAIL_QUALITY,
+    }),
+  ]);
 
   const derivativeData = { variants };
   if (preview?.path) {
@@ -8134,10 +8145,12 @@ function getCompletionPhotoController() {
 async function uploadCompletionPhoto(file) {
   const extension = getNoInventoryEvidenceFileExtension({path: file.name, mime_type: file.type}, file);
   const path = `completion-photos/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}.${extension}`;
-  const {error} = await supabase.storage.from(NO_INVENTORY_EVIDENCE_BUCKET)
-    .upload(path, file, {contentType: file.type || `image/${extension}`, upsert: false});
+  const [{error}, derivatives] = await Promise.all([
+    supabase.storage.from(NO_INVENTORY_EVIDENCE_BUCKET)
+      .upload(path, file, {contentType: file.type || `image/${extension}`, upsert: false}),
+    createAndUploadEvidenceDerivatives(file, NO_INVENTORY_EVIDENCE_BUCKET, path),
+  ]);
   if (error) throw new Error(error.message || "Could not upload completion photo.");
-  const derivatives = await createAndUploadEvidenceDerivatives(file, NO_INVENTORY_EVIDENCE_BUCKET, path);
   return {
     bucket: NO_INVENTORY_EVIDENCE_BUCKET, path, ...derivatives,
     label: file.name || "Completion photo", mime_type: file.type || `image/${extension}`,
@@ -10257,9 +10270,8 @@ async function loadPendingOrderLinesForExtensionMatch(options = {}) {
     rows.push(...(data || []));
   }
 
-  await hydrateFinancePayloadsForLines(rows);
   const merged = mergePendingOrderLinesIntoState(rows);
-  if (merged.length) {
+  if (merged.length && !options.deferRender) {
     applyOrderFilters();
     hydratePendingOrderExtrasInBackground(state.orders);
   }
@@ -10286,6 +10298,7 @@ async function ensureExtensionOrderLinesLoaded(options = {}) {
       orderNumbers: options.refresh ? orderNumbers : missingOrderNumbers.length ? missingOrderNumbers : orderNumbers,
       itemNumber,
       transactionId,
+      deferRender: options.deferRender,
     });
     if (options.refresh) return loaded;
     matches = state.orders.filter((line) => {
@@ -10299,11 +10312,11 @@ async function ensureExtensionOrderLinesLoaded(options = {}) {
   return matches;
 }
 
-async function loadPendingLabelBuyerBatch(matchingLines) {
+async function loadPendingLabelBuyerBatch(matchingLines, options = {}) {
   const buyerUsernames = [...new Set(matchingLines.map((line) => getOrderFromLine(line).buyer_username).filter(Boolean))];
   const buyerKeys = new Set(matchingLines.map(getBuyerKey));
   const buyerLines = buyerUsernames.length
-    ? await loadPendingOrderLinesForExtensionMatch({ buyerUsernames })
+    ? await loadPendingOrderLinesForExtensionMatch({ buyerUsernames, deferRender: options.deferRender })
     : [];
   // Orders without a username stay scoped to their own order number.
   return [...buyerLines, ...matchingLines.filter((line) => !getOrderFromLine(line).buyer_username)]
@@ -10465,9 +10478,17 @@ async function attachEbayLabelToOrder(transferPayload) {
     throw new Error(`This eBay label is for ${targetOrderNumbers.join(", ")}, but the open OG session is ${selectedOrderNumber}. Open the matching OG order/session before sending this label.`);
   }
 
-  const matchingLines = await ensureExtensionOrderLinesLoaded({ orderNumbers: targetOrderNumbers, refresh: true });
-
-  const directOrders = await loadEbayOrdersForLabels(targetOrderNumbers);
+  const blob = base64ToBlob(label.base64, label.mimeType || "application/pdf");
+  const [matchingLines, digest] = await Promise.all([
+    ensureExtensionOrderLinesLoaded({ orderNumbers: targetOrderNumbers, refresh: true, deferRender: true }),
+    (async () => {
+      await window.shippingLabelPrint.assertComplete(blob);
+      return crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+    })(),
+  ]);
+  const foundNumbers = new Set(matchingLines.map(line => line.order?.order_number));
+  const missingNumbers = targetOrderNumbers.filter(number => !foundNumbers.has(number));
+  const directOrders = missingNumbers.length ? await loadEbayOrdersForLabels(missingNumbers) : [];
   const directOrderByNumber = new Map(directOrders.map((order) => [order.order_number, order]));
   matchingLines.forEach((line) => {
     if (line.order?.order_number && !directOrderByNumber.has(line.order.order_number)) {
@@ -10492,12 +10513,8 @@ async function attachEbayLabelToOrder(transferPayload) {
   }
 
   // Resolve the whole buyer batch before saving, so a failed lookup cannot silently select a subset.
-  const batchLines = await loadPendingLabelBuyerBatch(matchingLines);
-
-  const blob = base64ToBlob(label.base64, label.mimeType || "application/pdf");
-  await window.shippingLabelPrint.assertComplete(blob);
+  const batchLines = await loadPendingLabelBuyerBatch(matchingLines, {deferRender: true});
   // Immutable paths preserve different PDFs even when eBay reuses the shipment ID.
-  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
   const hash = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
   const destinationPath = [targetOrderNumbers.length > 1 ? "bulk-labels" : safeStorageSegment(targetOrderNumbers[0], "order"),
     `label-${hash}.pdf`].join("/");
@@ -10566,6 +10583,7 @@ async function attachEbayLabelToOrder(transferPayload) {
     orderNumbers: targetOrderNumbers,
   };
   await openPendingNoInventorySessionForLabel(targetOrderNumbers, { batchLines });
+  hydratePendingOrderExtrasInBackground(state.orders);
   const trackingText = getLabelTrackingDisplay(labelMetadata);
   const trackingClause = trackingText ? ` Tracker: ${trackingText}.` : " Tracker was not captured.";
   const attachedMessage = matchingLines.length
@@ -11903,6 +11921,7 @@ function getPendingLabelReceiverState() {
     hasOpenSession: Boolean(selectedOrderNumber),
     noInventoryModalOpen: isWorkerNoInventoryModalOpen(),
     receiverReady: state.ebayTransferReceiverReady,
+    supportsDirectLabelTransfer: true,
     canAutoRoute: !selectedOrderNumber,
   };
 }
@@ -12572,13 +12591,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupDashboardShell();
   setupImportVisibility();
   setupListeners();
-  await loadCheckoutStores();
   state.launchOrderTaskId = getRequestedOrderTaskId();
   loadOrderTaskAssignees().catch((error) => console.warn("Could not preload order task assignees:", error));
   loadPackingSellerDirectory().catch((error) => console.warn("Could not preload seller directory:", error));
   clearOrderSearch({ apply: false });
   clearOrderCreatedDateFilter({ apply: false });
-  await loadOrders();
+  await Promise.all([loadCheckoutStores(), loadOrders()]);
   const bagParams = new URLSearchParams(window.location.search);
   if (bagParams.get("bag")) {
     await loadLiveLotByScan(bagParams.get("bag"), {search:bagParams.get("bagSearch") || ""});

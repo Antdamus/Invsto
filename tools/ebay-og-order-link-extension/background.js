@@ -1165,6 +1165,10 @@
 
     const neutralPending = receiverStates.find((state) => isPendingOrdersState(state) && !stateHasActiveReceiver(state));
     if (neutralPending?.tab?.id) {
+      if (neutralPending.receiverReady && neutralPending.supportsDirectLabelTransfer && neutralPending.canAutoRoute) {
+        const ack = await deliverLabelToTab(neutralPending.tab, payload);
+        return finishRoutedTransfer(appUrl, payload, ack, {delivered: true, opened: false, reusedTab: true});
+      }
       const ack = await openTransferPageAndWait(appUrl, payload, "", neutralPending.tab);
       return finishRoutedTransfer(appUrl, payload, ack, {
         delivered: false,

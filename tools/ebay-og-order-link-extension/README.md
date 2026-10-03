@@ -22,7 +22,7 @@ To update an existing installation, extract the ZIP files over the **same instal
 
 For future releases, increment `manifest.json`'s version and run `python tools/build-ebay-order-link-package.py`. Commit and deploy the source, `downloads/OG-eBay-Order-Link.zip`, and the generated `downloads/og-ebay-order-link-release.json` together. The release metadata comes from the packaged manifest and ZIP hash.
 
-Version 1.0.3 adds version reporting to OG and an updates link in the popup, without changing saved settings or requesting additional permissions.
+Version 1.0.4 sends labels directly to a ready OG tab without reloading the queue. Older OG pages keep the existing reload fallback, and an unrelated open order still blocks automatic delivery. Version reporting and the updates link remain available; no additional permissions are required.
 
 ## Use
 
