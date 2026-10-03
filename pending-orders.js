@@ -14,6 +14,8 @@ const state = {
   expandedBuyerKeys: new Set(),
   collapsedBuyerKeys: new Set(),
   expandedBuyerNoteKeys: new Set(),
+  sharedOrderNoteHistory: new Map(),
+  orderNotesObserver: null,
   stagedFulfillments: new Map(),
   adminSelectedLineIds: new Set(),
   adminCloseoutAction: "",
@@ -101,6 +103,7 @@ const state = {
   savedEvidenceVideos: [],
   savedEvidenceVideoLoadToken: 0,
   lineNoteLineId: "",
+  lineNoteHistoryLoadToken: 0,
   lineNotePhotos: [],
   lineNoteBusy: false,
   queueVideoReceiptTasks: [],
@@ -2911,6 +2914,7 @@ async function loadOrders() {
   }
 
   state.queueVideoReceiptTasks = [];
+  state.sharedOrderNoteHistory = new Map();
   state.queueVideoReceiptTaskEvents = new Map();
   state.queueVideoReceiptLoadedOrderIds.clear();
   state.orderVideoReceipts.clear();
@@ -3321,24 +3325,105 @@ function getGroupLineNoteCount(entries = []) {
   return entries.reduce((sum, entry) => sum + Number(entry.noteCount || 0), 0);
 }
 
-function renderGroupLineNotePreview(entries = []) {
+function renderGroupSharedNotes(lines = [], groupKey = "") {
+  const entries = [];
+  const seen = new Set();
+  lines.forEach((line) => {
+    const history = state.sharedOrderNoteHistory.get(line.order_id)?.data;
+    if (!history) {
+      const note = String(line.latest_line_note || "").trim();
+      if (note) entries.push({ line, notes: note });
+      return;
+    }
+    getLineNoteHistoryEvents(line, history.tasks, history.events).forEach((event) => {
+      if (seen.has(event.id)) return;
+      seen.add(event.id);
+      entries.push({ ...event, line });
+    });
+  });
   if (!entries.length) return "";
-  const visibleEntries = entries.slice(0, 4);
-  const hiddenCount = entries.length - visibleEntries.length;
-  return `
-    <div class="buyer-card-note-preview">
-      ${visibleEntries.map((entry) => `
-        <button type="button" class="buyer-card-note-preview-item" data-group-note-line="${escapeHtml(entry.line.id)}">
-          <span>
-            <strong>${escapeHtml(entry.title)}</strong>
-            <small>${escapeHtml(entry.orderNumber || entry.itemNumber || entry.buyer || "Order line")}</small>
-          </span>
-          <em>${entry.note ? escapeHtml(entry.note) : `${entry.noteCount.toLocaleString()} saved note${entry.noteCount === 1 ? "" : "s"}`}</em>
-        </button>
-      `).join("")}
-      ${hiddenCount > 0 ? `<div class="buyer-card-note-preview-more">${hiddenCount.toLocaleString()} more noted line${hiddenCount === 1 ? "" : "s"}</div>` : ""}
+  entries.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  const expanded = state.expandedBuyerNoteKeys.has(groupKey);
+  const detailsId = `buyer-notes-${encodeURIComponent(groupKey)}`;
+  const allLoaded = lines.every((line) => state.sharedOrderNoteHistory.get(line.order_id)?.data);
+  const count = allLoaded ? entries.length : Math.max(entries.length, getGroupLineNoteCount(getGroupLineNoteEntries(lines)));
+  const preview = entries[0].notes || "Saved note attachments";
+  return `<section class="buyer-card-note-preview ${expanded ? "is-expanded" : ""}" aria-label="Notes from all users">
+    <button type="button" class="buyer-card-notes-toggle" data-toggle-group-notes aria-expanded="${expanded}" aria-controls="${escapeHtml(detailsId)}">
+      <strong>${count} note${count === 1 ? "" : "s"}</strong>
+      <span class="buyer-card-notes-summary">${escapeHtml(preview)}</span>
+      <span class="buyer-card-notes-action">${expanded ? "Collapse" : "Expand"}</span>
+    </button>
+    <div id="${escapeHtml(detailsId)}" class="buyer-card-note-details">
+      <strong class="buyer-card-notes-title">Notes from all users</strong>
+      ${entries.map((entry) => `<article class="buyer-card-note-preview-item">
+      <div class="buyer-card-note-author">
+        <strong>${escapeHtml(entry.signed_by_email || (entry.id ? "Author not recorded" : "Saved note"))}</strong>
+        ${entry.created_at ? `<small>${escapeHtml(formatDate(entry.created_at))}</small>` : ""}
+        ${lines.length > 1 ? `<small>${escapeHtml(getOrderFromLine(entry.line).order_number || "")} · ${escapeHtml(entry.line.item_title || entry.line.item_number || "Order item")}</small>` : ""}
+      </div>
+      <div class="buyer-card-note-body">
+        ${entry.notes ? `<p>${escapeHtml(entry.notes)}</p>` : ""}
+        ${entry.photo_attachments?.length ? `<button type="button" class="buyer-line-note-btn" data-group-note-line="${escapeHtml(entry.line.id)}">View ${entry.photo_attachments.length} attachment${entry.photo_attachments.length === 1 ? "" : "s"}</button>` : ""}
+      </div>
+      </article>`).join("")}
     </div>
-  `;
+  </section>`;
+}
+
+async function readSharedOrderNoteHistory(orderId) {
+  const readRows = async (table) => {
+    const rows = [];
+    const pageSize = 500;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await supabase.from(table)
+        .select("*")
+        .eq("order_id", orderId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+      if (error) throw error;
+      rows.push(...(data || []));
+      if (!data || data.length < pageSize) return rows;
+    }
+  };
+  const [tasks, events] = await Promise.all([
+    readRows("ebay_order_tasks"), readRows("ebay_order_task_events"),
+  ]);
+  return { tasks, events };
+}
+
+function loadSharedOrderNoteHistory(orderId) {
+  let entry = state.sharedOrderNoteHistory.get(orderId);
+  if (!entry) {
+    entry = {};
+    entry.promise = readSharedOrderNoteHistory(orderId).then((data) => {
+      entry.data = data;
+      return data;
+    }).catch((error) => {
+      if (state.sharedOrderNoteHistory.get(orderId) === entry) state.sharedOrderNoteHistory.delete(orderId);
+      throw error;
+    });
+    state.sharedOrderNoteHistory.set(orderId, entry);
+  }
+  return entry.promise;
+}
+
+async function hydrateBuyerGroupNotes(card, group) {
+  const container = card.querySelector("[data-buyer-shared-notes]");
+  if (!container) return;
+  const cache = state.sharedOrderNoteHistory;
+  try {
+    await Promise.all([...new Set(group.lines.map((line) => line.order_id).filter(Boolean))]
+      .map(loadSharedOrderNoteHistory));
+    if (!card.isConnected || cache !== state.sharedOrderNoteHistory) return;
+    container.innerHTML = renderGroupSharedNotes(group.lines, group.key);
+  } catch (error) {
+    if (!card.isConnected || cache !== state.sharedOrderNoteHistory) return;
+    console.warn("Could not load notes for this order block:", error);
+    container.innerHTML = renderGroupSharedNotes(group.lines, group.key)
+      + `<button type="button" class="buyer-line-note-btn" data-retry-group-notes>Could not load all notes. Retry</button>`;
+  }
 }
 
 function getGroupVideoReceiptCoverage(group = {}) {
@@ -3725,6 +3810,7 @@ function renderOrders() {
   const startedAt = nowMs();
   const list = $("orders-list");
   if (!list) return;
+  state.orderNotesObserver?.disconnect();
   if (state.orderRenderFrame) {
     window.cancelAnimationFrame(state.orderRenderFrame);
     state.orderRenderFrame = 0;
@@ -3733,6 +3819,16 @@ function renderOrders() {
   state.orderRenderRunId = renderRunId;
 
   const groups = groupLinesByBuyer(state.filteredOrders);
+  const groupsByKey = new Map(groups.map((group) => [group.key, group]));
+  state.orderNotesObserver = typeof IntersectionObserver === "function"
+    ? new IntersectionObserver((entries, observer) => {
+      entries.filter((entry) => entry.isIntersecting).forEach(({ target }) => {
+        observer.unobserve(target);
+        const group = groupsByKey.get(target.dataset.buyerKey);
+        if (group) hydrateBuyerGroupNotes(target, group);
+      });
+    }, { rootMargin: "300px" })
+    : null;
   if (!groups.length) {
     list.innerHTML = `<div class="empty-state">No orders match this view.</div>`;
     logPendingOrderPerf("renderOrders empty", startedAt, { rows: state.filteredOrders.length });
@@ -3749,9 +3845,6 @@ function renderOrders() {
     const assignedTask = approvalTask || getAssignedOrderTaskForGroup(group);
     const assignmentLabel = getGroupAssignmentLabel(group);
     const groupCustomerName = getGroupCustomerSummary(group);
-    const groupLineNoteEntries = getGroupLineNoteEntries(group.lines);
-    const groupLineNoteCount = getGroupLineNoteCount(groupLineNoteEntries);
-    const isNotePreviewOpen = state.expandedBuyerNoteKeys.has(group.key);
     const orderCountLabel = `${group.orderNumbers.size.toLocaleString()} order${group.orderNumbers.size === 1 ? "" : "s"}`;
     const lineCountLabel = `${group.lines.length.toLocaleString()} line${group.lines.length === 1 ? "" : "s"}`;
     const quantityLabel = `Qty ${Number(group.totalQuantity || 0).toLocaleString()}`;
@@ -3789,9 +3882,6 @@ function renderOrders() {
     const approvalActionMarkup = approvalTask
       ? `<button type="button" class="buyer-card-approval-btn is-pending" data-buyer-approval-task-id="${escapeHtml(approvalTask.id)}">Pending Admin Approval</button>`
       : `<button type="button" class="buyer-card-approval-btn" data-buyer-approval-key="${escapeHtml(group.key)}" ${getPendingOrderApprovalLinesForGroup(group).length ? "" : "disabled"}>Send for Approval</button>`;
-    const groupNoteMarkup = groupLineNoteEntries.length
-      ? `<button type="button" class="buyer-card-note-pill ${isNotePreviewOpen ? "is-open" : ""}" data-buyer-note-key="${escapeHtml(group.key)}" aria-expanded="${isNotePreviewOpen ? "true" : "false"}" title="Show notes saved on lines in this group"><i data-lucide="message-square"></i><span>${groupLineNoteCount.toLocaleString()} note${groupLineNoteCount === 1 ? "" : "s"}</span></button>`
-      : "";
     const card = document.createElement("article");
     const hasSelectedAdminLines = group.lines.some((line) => state.adminSelectedLineIds.has(line.id));
     const postOrderIssueStatus = getGroupPostOrderIssueStatus(group.lines);
@@ -3822,7 +3912,6 @@ function renderOrders() {
         </div>
         <div class="buyer-card-alerts">
           ${urgencyMarkup}
-          ${groupNoteMarkup}
           ${renderIssueBadgeMarkup(postOrderIssueStatus, "post-order-issue-pill")}
           ${renderFinanceBadgeMarkup(financeStatus, "buyer-card-finance-pill")}
           ${ebayApiStatus ? `
@@ -3851,6 +3940,7 @@ function renderOrders() {
         <span class="buyer-card-meta-pill">Ship ${escapeHtml(getCompactQueueDate(group.nextShipBy))}</span>
         <span class="buyer-card-meta-pill buyer-card-receipt-pill ${receiptCoverageClass}" title="${escapeHtml(receiptCoverageTitle)}">${escapeHtml(receiptCoverageLabel)}</span>
       </div>
+      <div data-buyer-shared-notes>${renderGroupSharedNotes(group.lines, group.key)}</div>
       ${isExpanded ? `
         <div class="buyer-card-expanded">
           <div class="buyer-card-expanded-actions">
@@ -3875,7 +3965,6 @@ function renderOrders() {
         <div class="buyer-card-collapsed-hint">
           <span>Open to inspect ${escapeHtml(lineCountLabel)} for labels, video receipts, photos, and line actions.</span>
         </div>
-        ${isNotePreviewOpen ? renderGroupLineNotePreview(groupLineNoteEntries) : ""}
       `}
     `;
 
@@ -3891,36 +3980,31 @@ function renderOrders() {
     const noInventoryButton = card.querySelector("[data-buyer-no-inventory-key]");
     const orderVideoButton = card.querySelector("[data-buyer-order-video-key]");
     const viewOrderVideosButton = card.querySelector("[data-buyer-view-order-videos-key]");
-    const groupNoteButton = card.querySelector("[data-buyer-note-key]");
     expandButton?.addEventListener("click", (event) => {
       event.stopPropagation();
       toggleBuyerGroupExpanded(group.key);
     });
-    groupNoteButton?.addEventListener("click", (event) => {
+    card.querySelector("[data-buyer-shared-notes]")?.addEventListener("click", (event) => {
       event.stopPropagation();
-      if (isBuyerGroupExpanded(group.key) && groupLineNoteEntries.length) {
-        const firstLineId = groupLineNoteEntries[0]?.line?.id;
-        if (!firstLineId) return;
-        selectOrderLine(firstLineId, { openDetail: false });
-        setTimeout(() => {
-          document.querySelector(`[data-line-id="${firstLineId}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
-        }, 120);
-        return;
+      if (event.target.closest("[data-toggle-group-notes]")) {
+        if (state.expandedBuyerNoteKeys.has(group.key)) state.expandedBuyerNoteKeys.delete(group.key);
+        else state.expandedBuyerNoteKeys.add(group.key);
+        const container = event.currentTarget;
+        container.innerHTML = renderGroupSharedNotes(group.lines, group.key);
+        container.querySelector("[data-toggle-group-notes]")?.focus({ preventScroll: true });
       }
-      toggleBuyerGroupNotePreview(group.key);
+      const lineId = event.target.closest("[data-group-note-line]")?.dataset.groupNoteLine;
+      if (lineId) openLineNoteModal(lineId, { focusInput: false });
+      if (event.target.closest("[data-retry-group-notes]")) hydrateBuyerGroupNotes(card, group);
     });
-    card.querySelectorAll("[data-group-note-line]").forEach((noteItem) => {
-      noteItem.addEventListener("click", (event) => {
-        event.stopPropagation();
-        const lineId = event.currentTarget.dataset.groupNoteLine;
-        if (!lineId) return;
-        state.expandedBuyerNoteKeys.delete(group.key);
-        setBuyerGroupExpanded(group.key, true, { render: false });
-        selectOrderLine(lineId, { openDetail: false });
-        setTimeout(() => {
-          document.querySelector(`[data-line-id="${lineId}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
-        }, 120);
-      });
+    card.querySelector("[data-buyer-shared-notes]")?.addEventListener("pointerover", (event) => {
+      if (event.pointerType === "touch") return;
+      const preview = event.target.closest(".buyer-card-note-preview");
+      if (!preview || preview.classList.contains("is-expanded")) return;
+      const rect = preview.getBoundingClientRect();
+      const height = Math.min(preview.querySelector(".buyer-card-note-details").scrollHeight, 440, window.innerHeight * 0.5);
+      const below = window.innerHeight - rect.bottom - 12;
+      preview.classList.toggle("opens-above", below < height && rect.top - 12 > below);
     });
     card.addEventListener("click", (event) => {
       if (event.target.closest("button,a,input,label,select,textarea,.buyer-card-expanded,.buyer-line-list,.buyer-card-note-preview")) return;
@@ -3995,6 +4079,8 @@ function renderOrders() {
 
     if (!lineList) {
       list.appendChild(card);
+      if (state.orderNotesObserver) state.orderNotesObserver.observe(card);
+      else hydrateBuyerGroupNotes(card, group);
       return;
     }
 
@@ -4048,7 +4134,7 @@ function renderOrders() {
       `;
       const lineNoteCount = getLineNoteCount(line);
       const lineNoteCountMarkup = lineNoteCount
-        ? `<span class="buyer-line-note-count" title="${lineNoteCount.toLocaleString()} audited item note${lineNoteCount === 1 ? "" : "s"}">${lineNoteCount.toLocaleString()} note${lineNoteCount === 1 ? "" : "s"}</span>`
+        ? `<button type="button" class="buyer-line-note-count" data-line-view-notes="${escapeHtml(line.id)}" title="Read notes from all users">View ${lineNoteCount.toLocaleString()} note${lineNoteCount === 1 ? "" : "s"}</button>`
         : "";
       const lineNotePreview = String(line.latest_line_note || "").trim();
       const lineNotePreviewMarkup = lineNotePreview
@@ -4106,7 +4192,7 @@ function renderOrders() {
           <span class="buyer-line-receipt-actions">
             ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Open video receipt</a>` : ""}
             <button type="button" class="receipt-screenshot-upload" data-upload-receipt-screenshot="${escapeHtml(line.id)}">Upload receipt screenshot</button>
-            <button type="button" class="buyer-line-note-btn" data-line-add-note="${escapeHtml(line.id)}">Add note</button>
+            <button type="button" class="buyer-line-note-btn" data-line-add-note="${escapeHtml(line.id)}">Notes / Add note</button>
             ${lineNoteCountMarkup}
             ${lineNotePreviewMarkup}
           </span>
@@ -4171,10 +4257,17 @@ function renderOrders() {
         event.stopPropagation();
         openLineNoteModal(line.id);
       });
+      button.querySelector("[data-line-view-notes]")?.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openLineNoteModal(line.id, { focusInput: false });
+      });
       lineList.appendChild(button);
     });
 
     list.appendChild(card);
+    if (state.orderNotesObserver) state.orderNotesObserver.observe(card);
+    else hydrateBuyerGroupNotes(card, group);
   };
 
   let renderedGroups = 0;
@@ -5078,17 +5171,6 @@ function toggleBuyerGroupExpanded(groupOrKey = "") {
   const key = getBuyerExpansionKey(groupOrKey);
   if (!key) return;
   setBuyerGroupExpanded(key, !isBuyerGroupExpanded(key));
-}
-
-function toggleBuyerGroupNotePreview(groupOrKey = "") {
-  const key = getBuyerExpansionKey(groupOrKey);
-  if (!key) return;
-  if (state.expandedBuyerNoteKeys.has(key)) {
-    state.expandedBuyerNoteKeys.delete(key);
-  } else {
-    state.expandedBuyerNoteKeys.add(key);
-  }
-  renderOrders();
 }
 
 function isClearedVideoReceiptCaptureTask(task = {}, events = []) {
@@ -6427,6 +6509,7 @@ async function submitOrderTask() {
       setStatus("Order task created and assigned.", "success");
     }
 
+    state.sharedOrderNoteHistory.delete(line.order_id);
     closeOrderTaskModal();
     await loadSelectedOrderTasks();
     await hydrateOrderTaskAssignments(state.orders);
@@ -10640,6 +10723,7 @@ async function saveManualVideoReceipt() {
       if (noteError) throw new Error(noteError.message || "Could not attach this evidence to the order audit trail.");
       targetLine.line_note_count = getLineNoteCount(targetLine) + 1;
       targetLine.latest_line_note = auditNote;
+      state.sharedOrderNoteHistory.delete(targetLine.order_id);
     }
 
     state.queueVideoReceiptLoadedOrderIds.delete(line.order_id);
@@ -10775,7 +10859,68 @@ function handleLineNotePaste(event) {
   });
 }
 
+function getLineNoteHistoryEvents(line, tasks = [], events = []) {
+  const tasksById = new Map(tasks
+    .filter((task) => task.order_id === line.order_id && !task.metadata?.history_removed_at)
+    .map((task) => [task.id, task]));
+  return events.filter((event) => {
+    const task = tasksById.get(event.task_id);
+    if (!task) return false;
+    // A specific event's scope takes precedence over its parent task's scope.
+    const eventLineIds = [
+      ...(Array.isArray(event.payload?.order_line_ids) ? event.payload.order_line_ids : []),
+      event.payload?.order_line_id,
+    ].filter(Boolean);
+    const lineIds = eventLineIds.length ? eventLineIds : task.order_line_ids || [];
+    if (lineIds.length && !lineIds.includes(line.id)) return false;
+    return Boolean(String(event.notes || "").trim() || event.photo_attachments?.length);
+  }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)
+    || String(b.id).localeCompare(String(a.id)));
+}
+
+async function loadLineNoteHistory() {
+  const line = getLineNoteLine();
+  const list = $("line-note-history");
+  if (!line?.order_id || !list) return;
+  const token = ++state.lineNoteHistoryLoadToken;
+  const isCurrent = () => token === state.lineNoteHistoryLoadToken && state.lineNoteLineId === line.id;
+  list.setAttribute("aria-busy", "true");
+  list.innerHTML = `<div class="empty-state">Loading notes from all users...</div>`;
+
+  try {
+    // Always refresh when explicitly opening history, including resolved notes.
+    const { tasks, events } = await readSharedOrderNoteHistory(line.order_id);
+    if (!isCurrent()) return;
+    const notes = getLineNoteHistoryEvents(line, tasks, events);
+    list.innerHTML = notes.length
+      ? notes.map(renderAssignedOrderTaskDetailEvent).join("")
+      : `<div class="empty-state">No notes yet. Add the first note below for everyone to see.</div>`;
+    list.scrollTop = 0;
+    list.querySelectorAll("[data-assigned-task-photo]").forEach((button) => {
+      button.addEventListener("click", () => openOrderTaskPhoto(button.dataset.bucket, button.dataset.path, {
+        label: button.dataset.label || "",
+        signedBy: button.dataset.signedBy || "",
+        createdAt: button.dataset.createdAt || "",
+        previewBucket: button.dataset.previewBucket || "",
+        previewPath: button.dataset.previewPath || "",
+        thumbnailBucket: button.dataset.thumbnailBucket || "",
+        thumbnailPath: button.dataset.thumbnailPath || "",
+        mediaType: button.dataset.mediaType || "",
+        returnFocusId: "line-note-history-title",
+      }));
+    });
+    hydrateOrderTaskVideoReceiptThumbnails();
+  } catch (error) {
+    if (!isCurrent()) return;
+    console.warn("Could not load shared item notes:", error);
+    list.innerHTML = `<div class="empty-state">Could not load notes. Use Refresh notes to try again.</div>`;
+  } finally {
+    if (isCurrent()) list.setAttribute("aria-busy", "false");
+  }
+}
+
 function closeLineNoteModal() {
+  state.lineNoteHistoryLoadToken += 1;
   clearLineNotePhotos();
   state.lineNoteLineId = "";
   state.lineNoteBusy = false;
@@ -10786,7 +10931,7 @@ function closeLineNoteModal() {
   returnToOrdersAfterMobileModalClose({ suppressMobileReturn: true });
 }
 
-function openLineNoteModal(lineId) {
+function openLineNoteModal(lineId, { focusInput = true } = {}) {
   const line = state.orders.find((entry) => entry.id === lineId);
   if (!line?.id || !line.order_id) {
     setStatus("Select a pending eBay order line before adding a note.", "error");
@@ -10805,7 +10950,11 @@ function openLineNoteModal(lineId) {
   `;
   renderLineNotePhotoList();
   openModal("line-note-modal");
-  setTimeout(() => $("line-note-text")?.focus(), 80);
+  loadLineNoteHistory();
+  setTimeout(() => {
+    if (state.lineNoteLineId !== line.id) return;
+    $(focusInput ? "line-note-text" : "line-note-history-title")?.focus();
+  }, 80);
 }
 
 async function uploadLineNotePhoto(line = {}, photo = {}, index = 0, note = "") {
@@ -10888,6 +11037,7 @@ async function saveLineNote() {
 
     line.line_note_count = getLineNoteCount(line) + 1;
     line.latest_line_note = note;
+    state.sharedOrderNoteHistory.delete(line.order_id);
     if (state.selectedLine?.id === line.id) {
       state.selectedLine.line_note_count = line.line_note_count;
       state.selectedLine.latest_line_note = note;
@@ -11554,6 +11704,7 @@ function setupListeners() {
   $("close-line-note")?.addEventListener("click", closeLineNoteModal);
   $("cancel-line-note")?.addEventListener("click", closeLineNoteModal);
   $("save-line-note")?.addEventListener("click", saveLineNote);
+  $("refresh-line-note-history")?.addEventListener("click", loadLineNoteHistory);
   $("line-note-photo-file")?.addEventListener("change", handleLineNoteFiles);
   $("line-note-dropzone")?.addEventListener("paste", handleLineNotePaste);
   $("line-note-modal")?.addEventListener("paste", handleLineNotePaste);

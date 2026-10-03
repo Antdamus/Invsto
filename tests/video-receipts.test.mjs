@@ -69,6 +69,8 @@ async function open(t, {pageName = 'pending-orders', saved = '', button = false,
     if (pageName === 'pending-orders' && !button) {
       window.originalScheduleReceiptHydration = scheduleQueueVideoReceiptEvidenceHydration;
       scheduleQueueVideoReceiptEvidenceHydration = () => {};
+      // Shared-note reads are covered separately; keep receipt lookup assertions scoped to receipts.
+      hydrateBuyerGroupNotes = () => {};
       state.employee = {active: true, role: 'admin'};
       state.orders = [fixtureLine]; state.filteredOrders = [fixtureLine]; state.selectedLine = fixtureLine;
       renderOrders();

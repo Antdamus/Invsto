@@ -684,6 +684,7 @@ button.task-action-btn.is-assigned:hover,
   border: 1px solid rgba(227, 189, 119, 0.32);
   background: rgba(227, 189, 119, 0.08);
   color: var(--gold-strong);
+  cursor: pointer;
 }
 
 .buyer-line-note-preview {
@@ -2038,6 +2039,29 @@ textarea:focus {
 
 .line-note-card {
   width: min(820px, 100%);
+}
+
+.line-note-history-section {
+  margin: 18px 0;
+}
+
+.line-note-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+#line-note-history {
+  max-height: 38vh;
+  overflow: auto;
+}
+
+#line-note-history .order-task-event p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .manual-video-receipt-dropzone {
@@ -4037,13 +4061,96 @@ body.pending-order-detail-open .mobile-detail-close {
 }
 
 .buyer-card-note-preview {
-  display: grid;
-  gap: 7px;
+  position: relative;
+  min-width: 0;
   margin-top: 6px;
-  padding: 8px;
   border: 1px solid rgba(96, 165, 250, 0.22);
   border-radius: 12px;
   background: rgba(15, 23, 42, 0.32);
+}
+
+.orders-list:has(.buyer-card-note-preview) {
+  overflow: visible;
+}
+
+.buyer-card-notes-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #bfdbfe;
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.buyer-card-notes-toggle strong,
+.buyer-card-notes-action {
+  flex-shrink: 0;
+}
+
+.buyer-card-notes-toggle:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.buyer-card-notes-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e5e7eb;
+}
+
+.buyer-card-note-details {
+  display: none;
+  max-height: min(440px, 50vh);
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid rgba(96, 165, 250, 0.36);
+  border-radius: 12px;
+  background: #17202e;
+  cursor: default;
+}
+
+.buyer-card-note-preview.is-expanded .buyer-card-note-details {
+  display: grid;
+  gap: 8px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .buyer-order-card:has(.buyer-card-note-preview:hover) {
+    position: relative;
+    z-index: 5;
+  }
+
+  .buyer-card-note-preview:not(.is-expanded):hover .buyer-card-note-details {
+    display: grid;
+    gap: 8px;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 30;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+  }
+
+  .buyer-card-note-preview.opens-above:not(.is-expanded):hover .buyer-card-note-details {
+    top: auto;
+    bottom: 100%;
+  }
+}
+
+.buyer-card-notes-title {
+  color: #bfdbfe;
+  font-size: 0.78rem;
 }
 
 .buyer-card-note-preview-item {
@@ -4056,28 +4163,20 @@ body.pending-order-detail-open .mobile-detail-close {
   border-radius: 10px;
   background: rgba(37, 99, 235, 0.08);
   color: var(--text);
-  cursor: pointer;
   text-align: left;
 }
 
-.buyer-card-note-preview-item:hover {
-  border-color: rgba(147, 197, 253, 0.48);
-  background: rgba(37, 99, 235, 0.14);
-}
-
-.buyer-card-note-preview-item span,
+.buyer-card-note-preview-item div,
 .buyer-card-note-preview-item strong,
 .buyer-card-note-preview-item small,
-.buyer-card-note-preview-item em {
+.buyer-card-note-preview-item p {
   min-width: 0;
 }
 
 .buyer-card-note-preview-item strong,
 .buyer-card-note-preview-item small {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .buyer-card-note-preview-item strong {
@@ -4091,12 +4190,14 @@ body.pending-order-detail-open .mobile-detail-close {
   font-size: 0.68rem;
 }
 
-.buyer-card-note-preview-item em {
+.buyer-card-note-preview-item p {
+  margin: 0;
   color: #e5e7eb;
   font-size: 0.78rem;
   font-style: normal;
   line-height: 1.25;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .buyer-card-note-preview-more {

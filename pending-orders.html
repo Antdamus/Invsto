@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261002-optional-bag" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261003-shared-notes" />
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
@@ -896,12 +896,19 @@
   <div id="line-note-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="line-note-title">
     <div class="packing-modal-card bundle-review-card no-inventory-card line-note-card">
       <button id="close-line-note" class="modal-close-btn" type="button" aria-label="Close">x</button>
-      <span class="eyebrow">Item Note</span>
-      <h2 id="line-note-title">Add item note</h2>
-      <p>Save a visible audit note for this exact order line. Add photos when the note needs proof.</p>
+      <span class="eyebrow">Shared Notes</span>
+      <h2 id="line-note-title">Item notes</h2>
+      <p>Everyone with access to Pending Orders can read these notes. Includes item notes and related order task updates.</p>
       <div id="line-note-context" class="order-task-context"></div>
+      <section class="line-note-history-section" aria-labelledby="line-note-history-title">
+        <div class="line-note-history-head">
+          <h3 id="line-note-history-title" tabindex="-1">Notes from all users</h3>
+          <button id="refresh-line-note-history" type="button" class="secondary-btn">Refresh notes</button>
+        </div>
+        <div id="line-note-history" class="order-task-events" aria-live="polite" aria-busy="false"></div>
+      </section>
       <label class="modal-field">
-        Note
+        Add a note for everyone
         <textarea id="line-note-text" rows="4" placeholder="Write what everyone should know about this item or packing decision."></textarea>
       </label>
       <section id="line-note-dropzone" class="line-note-dropzone" tabindex="0" aria-label="Paste item note photos here">
@@ -972,6 +979,6 @@
 <script src="shipping-label-print.js?v=20260929-complete"></script>
 <script src="bag-order-links.js?v=20260930"></script>
 <script src="video-receipts.js?v=20261002-desktop-capture"></script>
-<script src="pending-orders.js?v=20261002-optional-bag"></script>
+<script src="pending-orders.js?v=20261003-shared-notes"></script>
 </body>
 </html>
