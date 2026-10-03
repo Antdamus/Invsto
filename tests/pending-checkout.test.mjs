@@ -64,12 +64,13 @@ async function open(t,{width=1280}={}) {
     state.user={id:'worker',email:'fixture@example.test'};state.employee={role:'employee',active:true};
     state.stores=[{id:'store-a',name:'Main Store'},{id:'store-b',name:'Other Store'}];state.checkoutStoreId='store-a';
     state.orders=structuredClone(databaseLines);
+    window.realRenderOrders=renderOrders;
     renderOrders=renderSelectedOrder=renderLiveLotOrderMatches=renderOrderTaskPanel=renderSummaryStrip=()=>{};
     loadSelectedOrderTasks=hydrateSelectedOrderDetails=async()=>{};
     window.realCompleteShipping=completeFulfilledShippingTasksForLines;
     completeFulfilledShippingTasksForLines=async()=>0;
     loadOrders=async()=>{if(refreshError)throw new Error('Refresh failed');state.orders=structuredClone(databaseLines);};
-    postEbayPendingQueueChanged=()=>{};
+    window.realPostQueueChanged=postEbayPendingQueueChanged;postEbayPendingQueueChanged=()=>{};
     resolvePhotoUrl=async()=>'';
     window.realClearSelection=clearSelection;
     clearSelection=()=>{invalidateInventoryLookup();state.stagedFulfillments.clear();state.selectedLine=null;};
@@ -99,6 +100,54 @@ test('scanner plus manual line share one final review and one atomic request',as
   assert.equal(saved[0].args._lines[1].stock_location_row_id,null);
   assert.equal(await p.evaluate(()=>stockQuantity),4);
 });
+
+for (const mode of ['inventory','without_inventory']) {
+  test(`${mode} completion stays in OG, refreshes the buyer, and releases the launch filter for the next order`,async t=>{
+    const p=await open(t);
+    await p.evaluate(()=>{
+      window.ebayReturns=[];
+      window.addEventListener('message',event=>{
+        if(event.data?.type==='OG_EBAY_PENDING_QUEUE_CHANGED'||event.data?.payload?.returnToAwaiting)ebayReturns.push(event.data);
+      });
+      postEbayPendingQueueChanged=realPostQueueChanged;renderOrders=realRenderOrders;clearSelection=realClearSelection;
+      hydrateBuyerGroupNotes=()=>{};scheduleQueueVideoReceiptEvidenceHydration=()=>{};
+      hydrateNoInventoryVideoReceiptEvidenceThumbnails=async()=>{};
+      loadNoInventoryCaptureStations=async()=>{};captureAuditLocation=async()=>({status:'not_available'});
+      databaseLines.push({id:'line-next',order_id:'order-next',item_title:'Next buyer item',line_status:'pending',quantity:1,fulfilled_quantity:0,
+        order:{order_number:'22-33333-44444',buyer_username:'next-buyer'}});
+      const rpc=supabase.rpc;
+      supabase.rpc=async(name,args)=>{
+        if(name!=='complete_ebay_order_lines_without_inventory_evidence')return rpc(name,args);
+        calls.push({name,args});
+        args._order_line_ids.forEach(id=>{const line=databaseLines.find(line=>line.id===id);line.fulfilled_quantity=line.quantity;line.line_status='fulfilled';});
+        return {data:[{updated_lines:args._order_line_ids.length}]};
+      };
+      loadOrders=async()=>{state.orders=structuredClone(databaseLines).filter(isOpenOrderLine);applyOrderFilters();};
+      state.ebayLaunchOrderNumbers=new Set(['11-222-333']);state.ebayLaunchBuyerKeys=new Set(['fixture-buyer']);
+      state.ebayLabelReturnContext={transferId:'extension-label',orderNumber:'11-222-333'};
+      applyOrderFilters();
+    });
+    const complete=()=>p.evaluate(async mode=>{
+      if(mode==='without_inventory'){
+        await openWorkerNoInventoryModal({lineIds:[state.selectedLine.id]});await confirmWorkerNoInventoryCompletion();
+      }else{
+        state.stagedFulfillments.set(state.selectedLine.id,{line:state.selectedLine,mode,qty:1,item,row:rows[0]});
+        await fulfillSelectedOrder({skipReview:true});
+      }
+    },mode);
+    await complete();
+    assert.equal(await p.evaluate(()=>state.selectedLine?.id),'line-b','remaining line is ready after partial completion');
+    assert.equal(await p.evaluate(()=>state.ebayLabelReturnContext),null);
+    assert.deepEqual(await p.evaluate(()=>state.filteredOrders.map(line=>line.id)),['line-b']);
+    await complete();
+    await p.waitForFunction(()=>!state.busy&&state.selectedLine===null);
+    assert.deepEqual(await p.evaluate(()=>state.filteredOrders.map(line=>line.id)),['line-next']);
+    assert.match(await p.locator('#orders-list').innerText(),/next-buyer/);
+    assert.equal(await p.locator('#worker-no-inventory-modal').isVisible(),false);
+    assert.deepEqual(await p.evaluate(()=>ebayReturns),[],'completion never asks the installed extension to activate eBay');
+    assert.equal(p.url(),origin+'/pending-orders.html');
+  });
+}
 
 test('duplicate barcodes require an explicit item choice; exact punctuation is preserved',async t=>{
   const p=await open(t);await p.evaluate(()=>matches.push({...item,id:'item-b',title:'Other watch'}));await scan(p);

@@ -9036,10 +9036,6 @@ async function confirmWorkerNoInventoryCompletion() {
     if (errorEl) errorEl.textContent = "";
     if (confirmButton) confirmButton.disabled = true;
     const currentBuyerKey = state.activeBuyerKey;
-    const completedOrderNumbers = [...new Set(selectedLineIds
-      .map((lineId) => state.orders.find((entry) => entry.id === lineId)?.order?.order_number)
-      .map(normalizeEbayOrderNumber)
-      .filter(Boolean))];
     const selectedPhotoCount = getSelectedNoInventoryEvidencePhotos().length;
     setNoInventoryPhotoStatus(
       selectedPhotoCount
@@ -9070,18 +9066,13 @@ async function confirmWorkerNoInventoryCompletion() {
     closeWorkerNoInventoryModal({ suppressEbayReturn: true, suppressMobileReturn: true });
     setStatus(`${data?.[0]?.updated_lines || selectedLineIds.length} line(s) completed without inventory removal. The audit trail was recorded.`, "info");
     await loadOrders();
-    postEbayPendingQueueChanged({
-      action: "no_inventory_completion",
-      orderNumbers: completedOrderNumbers,
-      lineCount: selectedLineIds.length,
-      updatedLines: data?.[0]?.updated_lines || selectedLineIds.length,
-    });
-
+    // The extension's queue-changed message activates eBay; stay in the refreshed OG queue.
     const nextBuyerLine = getNextPackableLine(currentBuyerKey);
     if (nextBuyerLine) {
-      selectOrderLine(nextBuyerLine.id);
+      selectOrderLine(nextBuyerLine.id, { allowBusy: true });
       return;
     }
+    clearEbayLaunchFilter();
     clearSelection();
   } catch (error) {
     console.error("Worker no-inventory completion failed:", error);
@@ -9732,12 +9723,6 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
       ? [state.selectedLine?.order_id]
       : staged.map((entry) => entry.line?.order_id))
       .filter(Boolean))];
-    const completedOrderNumbers = [...new Set((liveItems.length && !staged.length
-      ? [state.selectedLine?.order?.order_number]
-      : staged.map((entry) => entry.line?.order?.order_number))
-      .map(normalizeEbayOrderNumber)
-      .filter(Boolean))];
-    const completedLineCount = liveItems.length && !staged.length ? 1 : staged.length;
     const changedItemIds = [];
     if (liveItems.length && !staged.length) {
       if (!state.selectedLine) throw new Error("Select the eBay order line before confirming the live-sale bag.");
@@ -9777,6 +9762,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
 
     // The server has committed. Clear staging before any optional refresh can fail.
     committed = true;
+    state.ebayLabelReturnContext = null;
     state.stagedFulfillments.clear();
     invalidateInventoryLookup();
     state.selectedItem = null;
@@ -9793,13 +9779,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
       ? "Packed bundle confirmed. Shipment task moved to history."
       : "Packed bundle confirmed. Inventory was updated for scanned lines; other lines were recorded without stock removal.", "info");
     await loadOrders();
-    postEbayPendingQueueChanged({
-      action: liveItems.length && !staged.length ? "live_lot_fulfillment" : "inventory_fulfillment",
-      orderNumbers: completedOrderNumbers,
-      lineCount: completedLineCount,
-      changedItemCount: [...new Set(changedItemIds)].length,
-    });
-
+    // Completing an order should not activate the extension's eBay awaiting-shipment tab.
     const nextBuyerLine = getNextPackableLine(state.activeBuyerKey);
     if (nextBuyerLine) {
       selectOrderLine(nextBuyerLine.id, { allowBusy: true });
@@ -9807,6 +9787,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
       return;
     }
 
+    clearEbayLaunchFilter();
     clearSelection();
   } catch (error) {
     console.error("Pending order fulfillment failed:", error);
