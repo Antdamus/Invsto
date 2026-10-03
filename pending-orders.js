@@ -387,6 +387,7 @@ function closeModal(id) {
     || !$("bundle-review-modal")?.classList.contains("hidden")
     || !$("completion-photos-modal")?.classList.contains("hidden")
     || !$("order-shipping-labels-modal")?.classList.contains("hidden")
+    || !$("phone-camera-pair-modal")?.classList.contains("hidden")
     || !$("worker-no-inventory-modal")?.classList.contains("hidden")
     || !$("worker-cancel-order-modal")?.classList.contains("hidden")
     || !$("no-inventory-photo-viewer-modal")?.classList.contains("hidden")
@@ -3919,6 +3920,7 @@ function renderOrders() {
           <span class="buyer-card-value">${formatMoney(group.totalValue)}</span>
           ${taskControlMarkup}
           <button type="button" class="buyer-card-expand-btn buyer-card-completion-photos" data-buyer-completion-photos>Completion photos</button>
+          <button type="button" class="buyer-card-expand-btn" data-phone-camera="buyer">${phoneCameraDesktop?.paired ? "Send to phone" : "Use my phone"}</button>
           <button type="button" class="buyer-card-expand-btn" data-buyer-shipping-labels>Shipping labels</button>
           <span class="status-badge">${group.pendingCount} pending</span>
           <button type="button" class="buyer-card-expand-btn" data-buyer-expand-key="${escapeHtml(group.key)}" aria-expanded="${isExpanded ? "true" : "false"}">
@@ -3964,6 +3966,9 @@ function renderOrders() {
     card.querySelector("[data-buyer-completion-photos]")?.addEventListener("click", event => {
       event.stopPropagation();
       openCompletionPhotos(group.lines);
+    });
+    card.querySelector('[data-phone-camera="buyer"]')?.addEventListener("click", event => {
+      event.stopPropagation(); sendOrderToPhone(group.lines);
     });
     card.querySelector("[data-buyer-shipping-labels]")?.addEventListener("click", event => {
       event.stopPropagation();
@@ -7843,6 +7848,24 @@ function getNoInventoryEvidenceSourceLabel() {
 
 let completionPhotoController = null;
 const completionPhotoWatches = new Map();
+let phoneCameraDesktop = null;
+let phoneCameraReceiver = null;
+
+function sendOrderToPhone(lines) {
+  if (state.busy || !lines.length || !window.OGPhoneCamera) return;
+  phoneCameraDesktop ||= window.OGPhoneCamera.createDesktop({
+    getClient: () => supabase, getUserId: () => state.user?.id,
+    onOpen: () => openModal("phone-camera-pair-modal"),
+    onClose: () => closeModal("phone-camera-pair-modal"),
+    watchPhotos: (scope, grid) => {
+      grid.dataset.photos = ""; grid.textContent = "Loading saved photos…";
+      const controller = getCompletionPhotoController();
+      return controller.watch(scope, photos => controller.renderGrid(grid, photos),
+        error => {grid.textContent = `Could not refresh photos: ${error.message || "Try again."}`;});
+    },
+  });
+  phoneCameraDesktop.send(lines);
+}
 
 let orderShippingLabelController = null;
 const orderShippingLabelWatches = new Map();
@@ -7905,6 +7928,8 @@ function getCompletionPhotoController() {
       uploadFile: uploadCompletionPhoto,
       onOpen: () => openModal("completion-photos-modal"),
       onClose: () => closeModal("completion-photos-modal"),
+      onSaved: () => phoneCameraReceiver?.saved(),
+      keepOpen: () => Boolean(phoneCameraReceiver),
     });
   }
   return completionPhotoController;
@@ -11777,6 +11802,21 @@ async function previewSelectedEbayLabel() {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
+function setupEvidencePhotoViewerListeners() {
+  $("no-inventory-photo-viewer-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "no-inventory-photo-viewer-modal") closeNoInventoryEvidencePhotoViewer();
+  });
+  $("close-no-inventory-photo-viewer")?.addEventListener("click", closeNoInventoryEvidencePhotoViewer);
+  $("dismiss-no-inventory-photo-viewer")?.addEventListener("click", closeNoInventoryEvidencePhotoViewer);
+  $("zoom-in-no-inventory-photo")?.addEventListener("click", () => adjustEvidencePhotoViewerZoom(0.25));
+  $("zoom-out-no-inventory-photo")?.addEventListener("click", () => adjustEvidencePhotoViewerZoom(-0.25));
+  $("reset-zoom-no-inventory-photo")?.addEventListener("click", resetEvidencePhotoViewerTransform);
+  $("no-inventory-photo-viewer-image")?.addEventListener("pointerdown", startEvidencePhotoPan);
+  $("no-inventory-photo-viewer-image")?.addEventListener("pointermove", moveEvidencePhotoPan);
+  $("no-inventory-photo-viewer-image")?.addEventListener("pointerup", endEvidencePhotoPan);
+  $("no-inventory-photo-viewer-image")?.addEventListener("pointercancel", endEvidencePhotoPan);
+}
+
 function setupListeners() {
   $("refresh-orders")?.addEventListener("click", async () => {
     clearEbayLaunchFilter({ apply: false });
@@ -11959,6 +11999,10 @@ function setupListeners() {
       getCompletionPhotoLines(button.dataset.completionSource), button.dataset.completionPicker || ""
     ));
   });
+  document.querySelectorAll('[data-phone-camera]:not([data-phone-camera="buyer"])').forEach(button => {
+    button.addEventListener("click", () => sendOrderToPhone(button.dataset.phoneCamera === "photos"
+      ? getCompletionPhotoController().lines : getCompletionPhotoLines(button.dataset.phoneCamera)));
+  });
   document.querySelectorAll("[data-order-label-source]").forEach(button => {
     button.addEventListener("click", () => openOrderShippingLabels(
       button.dataset.orderLabelSource === "selected" ? [state.selectedLine].filter(Boolean)
@@ -12060,18 +12104,7 @@ function setupListeners() {
     if (event.target.id === "line-note-modal") closeLineNoteModal();
   });
 
-  $("no-inventory-photo-viewer-modal")?.addEventListener("click", (event) => {
-    if (event.target.id === "no-inventory-photo-viewer-modal") closeNoInventoryEvidencePhotoViewer();
-  });
-  $("close-no-inventory-photo-viewer")?.addEventListener("click", closeNoInventoryEvidencePhotoViewer);
-  $("dismiss-no-inventory-photo-viewer")?.addEventListener("click", closeNoInventoryEvidencePhotoViewer);
-  $("zoom-in-no-inventory-photo")?.addEventListener("click", () => adjustEvidencePhotoViewerZoom(0.25));
-  $("zoom-out-no-inventory-photo")?.addEventListener("click", () => adjustEvidencePhotoViewerZoom(-0.25));
-  $("reset-zoom-no-inventory-photo")?.addEventListener("click", resetEvidencePhotoViewerTransform);
-  $("no-inventory-photo-viewer-image")?.addEventListener("pointerdown", startEvidencePhotoPan);
-  $("no-inventory-photo-viewer-image")?.addEventListener("pointermove", moveEvidencePhotoPan);
-  $("no-inventory-photo-viewer-image")?.addEventListener("pointerup", endEvidencePhotoPan);
-  $("no-inventory-photo-viewer-image")?.addEventListener("pointercancel", endEvidencePhotoPan);
+  setupEvidencePhotoViewerListeners();
 
   $("admin-order-closeout-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "admin-order-closeout-modal") closeAdminOrderCloseoutModal();
@@ -12096,6 +12129,10 @@ function setupListeners() {
   });
 
   document.addEventListener("keydown", (event) => {
+    if (!$("phone-camera-pair-modal")?.classList.contains("hidden")) {
+      if (event.key === "Escape") {event.preventDefault();phoneCameraDesktop?.close();}
+      return;
+    }
     if (!$("no-inventory-photo-viewer-modal")?.classList.contains("hidden")) {
       if (event.key === "Enter" || event.key === "Escape") {
         event.preventDefault();
@@ -12240,8 +12277,22 @@ function setupListeners() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  setupEbayLabelReceiver();
   await waitForSupabaseReady();
+  const phoneSession = window.OGPhoneCamera?.sessionIdFromUrl();
+  if (phoneSession) {
+    document.body.classList.add("phone-camera-mode");
+    $("phone-camera-home").classList.remove("hidden");
+    // A phone needs only its explicit order scope, never the entire packing queue.
+    phoneCameraReceiver = window.OGPhoneCamera.createReceiver({
+      sessionId: phoneSession, getClient: () => supabase,
+      onUser: user => {state.user = user;}, getPhotoController: getCompletionPhotoController,
+    });
+    // Photo previews use the same close controls as the full packing screen.
+    setupEvidencePhotoViewerListeners();
+    await phoneCameraReceiver.connect();
+    return;
+  }
+  setupEbayLabelReceiver();
   const ok = await loadCurrentWorker();
   if (!ok) return;
   setupDashboardShell();

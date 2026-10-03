@@ -5235,3 +5235,30 @@ a.buyer-line-finance-pill:hover {
 .order-saved-label > div:first-child { display: grid; gap: 5px; min-width: 0; flex: 1 1 230px; }
 .order-saved-label small, .order-label-upload-card legend { color: #bdb8b0; }
 #order-shipping-labels-modal .is-error { color: #ff9c9c; }
+
+#phone-camera-pair-modal { z-index: 6700; }
+#phone-pair-qr { background: #fff; width: 276px; max-width: 100%; padding: 10px; margin: 16px auto; border-radius: 12px; box-sizing: border-box; }
+#phone-pair-qr:empty { display: none; }
+#phone-pair-qr svg { display: block; width: 100%; height: auto; }
+#phone-pair-qr-section summary { cursor: pointer; font-weight: 700; }
+#phone-pair-link { display: block; width: 100%; min-width: 0; margin: 8px 0; }
+#phone-pair-status.is-error, #phone-camera-status.is-error { color: #ff9c9c; }
+#phone-pair-order, #phone-pair-connection, #phone-pair-status { overflow-wrap: anywhere; }
+body.phone-camera-mode { overflow: auto !important; padding: 0 !important; }
+body.phone-camera-mode > :not(#phone-camera-home):not(#completion-photos-modal):not(#no-inventory-photo-viewer-modal) { display: none !important; }
+#phone-camera-home { max-width: 780px; margin: 0 auto; padding: 18px; overflow-wrap: anywhere; }
+.phone-camera-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.phone-camera-heading h1 { font-size: 1.6rem; margin: 0; }
+#phone-camera-account, #phone-camera-next small { color: #bdb8b0; }
+#phone-camera-login { display: grid; gap: 16px; margin-top: 20px; }
+#phone-camera-login label { display: grid; gap: 8px; }
+#phone-camera-login input { width: 100%; min-width: 0; }
+#phone-camera-next { display: grid; gap: 10px; padding: 16px; margin-top: 14px; border-radius: 14px; background: #243b30; border: 1px solid #599d73; }
+body.phone-camera-mode #completion-photos-modal { position: static; padding: 0 12px 24px; background: none; }
+body.phone-camera-mode .completion-photos-card { width: 100%; max-width: 756px; max-height: none; margin: 0 auto; padding: 18px; overflow: visible; }
+body.phone-camera-mode #close-completion-photos,
+body.phone-camera-mode #done-completion-photos,
+body.phone-camera-mode [data-phone-camera],
+body.phone-camera-mode .completion-phone-instructions { display: none; }
+body.phone-camera-mode .completion-photo-actions .folder-photo-picker { flex: 1 1 130px; text-align: center; }
+body.phone-camera-mode #completion-photo-context { font-weight: 700; color: #efd598; }

@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261003-label-pdfs" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261003-phone-camera" />
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
@@ -16,6 +16,22 @@
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
 </head>
 <body>
+  <main id="phone-camera-home" class="hidden">
+    <div class="phone-camera-heading"><h1>Phone camera</h1><button id="leave-phone-camera" type="button" class="secondary-btn">Leave camera</button></div>
+    <p id="phone-camera-connected"></p>
+    <small id="phone-camera-account"></small>
+    <p id="phone-camera-status" role="status" aria-live="polite"></p>
+    <form id="phone-camera-login" class="hidden">
+      <label>Email<input id="phone-camera-email" type="email" autocomplete="username" required /></label>
+      <label>Password<input id="phone-camera-password" type="password" autocomplete="current-password" required /></label>
+      <button id="phone-camera-login-submit" type="submit" class="primary-btn">Sign in and connect phone</button>
+    </form>
+    <div id="phone-camera-next" class="hidden">
+      <strong id="phone-camera-next-label"></strong>
+      <button id="phone-camera-open-next" type="button" class="primary-btn">Next order: take photo</button>
+      <small>Save or remove any current photos first.</small>
+    </div>
+  </main>
   <div class="mobile-header">
     <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">
       <i data-lucide="menu"></i>
@@ -579,6 +595,7 @@
           <button type="button" class="secondary-btn" data-completion-source="bundle" data-completion-picker="camera">Take photo</button>
           <button type="button" class="secondary-btn" data-completion-source="bundle" data-completion-picker="files">Choose photos / files</button>
           <button type="button" class="secondary-btn" data-completion-source="bundle">View completion photos</button>
+          <button type="button" class="secondary-btn" data-phone-camera="bundle">Use my phone</button>
         </div>
         <p id="bundle-completion-photo-status" class="fulfill-status" role="status"></p>
         <div id="bundle-completion-photo-grid" class="completion-photo-grid"></div>
@@ -642,6 +659,7 @@
           <button type="button" class="secondary-btn" data-completion-source="no-inventory" data-completion-picker="camera">Take photo</button>
           <button type="button" class="secondary-btn" data-completion-source="no-inventory" data-completion-picker="files">Choose photos / files</button>
           <button type="button" class="secondary-btn" data-completion-source="no-inventory">View completion photos</button>
+          <button type="button" class="secondary-btn" data-phone-camera="no-inventory">Use my phone</button>
         </div>
         <p class="completion-photo-help">Photos saved from your phone appear here automatically and stay with the order.</p>
         <p id="no-inventory-completion-photo-status" class="fulfill-status" role="status"></p>
@@ -1025,6 +1043,32 @@
     </div>
   </div>
 
+  <div id="phone-camera-pair-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="phone-camera-pair-title">
+    <div class="packing-modal-card bundle-review-card">
+      <button id="close-phone-camera-pair" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Computer + phone</span>
+      <h2 id="phone-camera-pair-title">Take photos with your phone</h2>
+      <p id="phone-pair-order"></p>
+      <p id="phone-pair-connection" role="status"></p>
+      <details id="phone-pair-qr-section" open>
+        <summary>Connect phone / show QR code</summary>
+        <p>Scan this QR code with your phone’s camera. Sign in if asked, then leave the phone page open.</p>
+        <div id="phone-pair-qr" aria-label="Scan to connect your phone"></div>
+        <label>Phone link<input id="phone-pair-link" type="url" readonly /></label>
+        <button id="copy-phone-pair-link" type="button" class="secondary-btn">Copy phone link</button>
+      </details>
+      <p id="phone-pair-progress" role="status"></p>
+      <p id="phone-pair-status" role="status" aria-live="polite"></p>
+      <div class="modal-actions">
+        <button id="retry-phone-send" type="button" class="secondary-btn" disabled>Retry send</button>
+        <button id="disconnect-phone-camera" type="button" class="secondary-btn">Disconnect phone</button>
+        <button id="done-phone-camera-pair" type="button" class="primary-btn">Done</button>
+      </div>
+      <h3>Saved completion photos</h3>
+      <div id="phone-pair-photos" class="completion-photo-grid"></div>
+    </div>
+  </div>
+
   <div id="completion-photos-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="completion-photos-title">
     <div class="packing-modal-card bundle-review-card completion-photos-card">
       <button id="close-completion-photos" class="modal-close-btn" type="button" aria-label="Close">x</button>
@@ -1032,8 +1076,9 @@
       <h2 id="completion-photos-title">Completion photos</h2>
       <p id="completion-photo-context"></p>
       <p id="completion-photo-items" class="completion-photo-help"></p>
-      <p>Working on a computer? Open this buyer’s <strong>Completion photos</strong> on your phone, take a photo, and save it. It appears automatically in the computer’s completion screen.</p>
+      <p class="completion-phone-instructions">Working on a computer? Use <strong>Use my phone</strong> to scan a QR code once, then send each next order to the same phone. Saved photos appear here automatically.</p>
       <div class="completion-photo-actions">
+        <button type="button" class="secondary-btn" data-phone-camera="photos">Use my phone</button>
         <label class="secondary-btn folder-photo-picker">Take photo
           <input id="completion-photo-camera" type="file" accept="image/*" capture="environment" />
         </label>
@@ -1068,9 +1113,10 @@
 <script src="shipping-label-print.js?v=20260929-complete"></script>
 <script src="bag-order-links.js?v=20260930"></script>
 <script src="video-receipts.js?v=20261002-desktop-capture"></script>
-<script src="completion-photos.js?v=20261003-photo-corrections"></script>
+<script src="completion-photos.js?v=20261003-phone-camera"></script>
+<script src="phone-camera.js?v=20261003-phone-camera"></script>
 <script src="shipping-label-reader.js?v=20261003-label-pdfs"></script>
 <script src="order-shipping-labels.js?v=20261003-label-pdfs"></script>
-<script src="pending-orders.js?v=20261003-label-pdfs"></script>
+<script src="pending-orders.js?v=20261003-phone-camera"></script>
 </body>
 </html>

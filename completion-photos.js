@@ -256,6 +256,7 @@
           URL.revokeObjectURL(entry.url);
         }
         status("Saved to the order. These photos also appear on the other device and in Order History.");
+        config.onSaved?.();
       } catch (error) {
         status(`${error.message || "Could not save photos."} Your remaining photos are still here; tap Save to retry.`, true);
       } finally {
@@ -298,6 +299,7 @@
     }
 
     function close() {
+      if (config.keepOpen?.()) return false;
       if (saving || pending.length) {
         status("Save or remove the selected photos before closing.", true);
         return false;
@@ -322,7 +324,8 @@
     window.addEventListener("beforeunload", event => {
       if (saving || pending.length) { event.preventDefault(); event.returnValue = ""; }
     });
-    return {open, close, watch, renderGrid, get hasPending() { return saving || pending.length > 0; }};
+    return {open, close, watch, renderGrid, get lines() {return scope.map(line => ({...line}));},
+      get hasPending() { return saving || pending.length > 0; }};
   }
 
   window.OGCompletionPhotos = {create};
