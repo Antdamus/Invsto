@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile, mkdir} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {test, before, after} from 'node:test';
-import {chromium, expect} from '@playwright/test';
+import {chromium, webkit, expect} from '@playwright/test';
 
 const root = new URL('../', import.meta.url);
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=', 'base64');
@@ -21,7 +21,7 @@ before(async () => {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
-  browser = await chromium.launch();
+  browser = await (process.env.INVSTO_PHOTO_BROWSER === 'webkit' ? webkit : chromium).launch();
 });
 after(async () => {
   await browser?.close();
@@ -427,22 +427,81 @@ test('cancelling a replacement or a failed removal leaves the original photo ava
   await expect(page.locator('#completion-photo-saved .completion-photo-card')).toHaveCount(0);
 });
 
-test('desktop can inspect an unsaved photo, zoom and drag it, then return to the same thumbnail', async t => {
+test('desktop can inspect an unsaved photo, wheel zoom and left-drag at any scale without scrolling or saving', async t => {
   const db=database(), page=await open(t,db);
   await page.evaluate(()=>openCompletionPhotos([lines[0]]));
   await pick(page);
   const preview=page.locator('[data-inspect-pending-photo]');
   await preview.focus();await preview.press('Enter');
   await expect(page.locator('#no-inventory-photo-viewer-modal')).toBeVisible();
-  await page.locator('#zoom-in-no-inventory-photo').click();
+  await expect(page.locator('#dismiss-no-inventory-photo-viewer')).toBeFocused();
   const image=page.locator('#no-inventory-photo-viewer-image');
+  const frame=page.locator('#no-inventory-photo-viewer-frame');
+  await frame.scrollIntoViewIfNeeded();
+  await expect(image).toHaveJSProperty('complete',true);
   const box=await image.boundingBox();
+  // A photo can be grabbed immediately, without first pressing Zoom In.
   await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
   await page.mouse.down();await page.mouse.move(box.x+box.width/2+40,box.y+box.height/2+20,{steps:4});await page.mouse.up();
   assert.equal(await page.evaluate(()=>state.evidencePhotoViewerPanX),40);
   assert.equal(await page.evaluate(()=>state.evidencePhotoViewerPanY),20);
+  assert.equal(await page.evaluate(()=>state.evidencePhotoViewerZoom),1);
+  const bounds=await frame.boundingBox();
+  const pointer={x:Math.round(bounds.x+bounds.width/2+60),y:Math.round(bounds.y+bounds.height/2+30)};
+  const before=await image.boundingBox();
+  const scroll=()=>page.evaluate(()=>({page:scrollY,card:document.querySelector('.evidence-photo-viewer-card').scrollTop}));
+  const oldScroll=await scroll();
+  await page.mouse.move(pointer.x,pointer.y);
+  await page.mouse.wheel(0,-120);
+  await expect.poll(()=>page.evaluate(()=>state.evidencePhotoViewerZoom)).toBeGreaterThan(1);
+  const after=await image.boundingBox();
+  assert.ok(Math.abs((pointer.x-before.x)/before.width-(pointer.x-after.x)/after.width)<0.001,'horizontal detail stays under the cursor');
+  assert.ok(Math.abs((pointer.y-before.y)/before.height-(pointer.y-after.y)/after.height)<0.001,'vertical detail stays under the cursor');
+  assert.deepEqual(await scroll(),oldScroll,'wheel zoom does not scroll the modal or page');
+  await page.mouse.wheel(0,120);
+  await expect.poll(()=>page.evaluate(()=>state.evidencePhotoViewerZoom)).toBeCloseTo(1,6);
+  await page.mouse.wheel(0,-10000);
+  await expect.poll(()=>page.evaluate(()=>state.evidencePhotoViewerZoom)).toBe(4);
+  await page.mouse.wheel(0,10000);
+  await expect.poll(()=>page.evaluate(()=>state.evidencePhotoViewerZoom)).toBeLessThan(1);
+  await page.mouse.wheel(0,10000);
+  await expect.poll(()=>page.evaluate(()=>state.evidencePhotoViewerZoom)).toBe(0.5);
+  // The blank margin also works as a drag surface when the image is zoomed out.
+  const startPan=await page.evaluate(()=>({x:state.evidencePhotoViewerPanX,y:state.evidencePhotoViewerPanY}));
+  await page.mouse.move(bounds.x+20,bounds.y+bounds.height/2);
+  await page.mouse.down();await page.mouse.move(bounds.x+50,bounds.y+bounds.height/2+15,{steps:3});await page.mouse.up();
+  expect(await page.evaluate(()=>state.evidencePhotoViewerPanX)).toBeCloseTo(startPan.x+30,6);
+  expect(await page.evaluate(()=>state.evidencePhotoViewerPanY)).toBeCloseTo(startPan.y+15,6);
+  assert.equal(await page.evaluate(()=>state.evidencePhotoViewerPanning),false);
+  await page.locator('#reset-zoom-no-inventory-photo').click();
+  await expect(image).toHaveCSS('transform','matrix(1, 0, 0, 1, 0, 0)');
   await page.locator('#dismiss-no-inventory-photo-viewer').click();
   await expect(preview).toBeFocused();
   await expect(page.locator('#completion-photo-pending .completion-photo-card')).toHaveCount(1);
   assert.equal(db.uploads.length,0);assert.equal(db.events.length,0);
+});
+
+test('photo drag keeps pointer capture outside the frame and leaves video controls alone', async t => {
+  const db=database(),page=await open(t,db);
+  await page.evaluate(()=>openCompletionPhotos([lines[0]]));await pick(page);
+  await page.locator('[data-inspect-pending-photo]').click();
+  await expect(page.locator('#dismiss-no-inventory-photo-viewer')).toBeFocused();
+  const frame=page.locator('#no-inventory-photo-viewer-frame');
+  await frame.scrollIntoViewIfNeeded();
+  const box=await frame.boundingBox();
+  const x=Math.round(box.x+box.width-30),y=Math.round(box.y+box.height/2);
+  await page.mouse.move(x,y);await page.mouse.down();
+  await page.mouse.move(x+70,y+20,{steps:4});await page.mouse.up();
+  assert.equal(await page.evaluate(()=>state.evidencePhotoViewerPanX),70);
+  assert.equal(await page.evaluate(()=>state.evidencePhotoViewerPanning),false);
+  await page.mouse.move(x,y);
+  assert.equal(await page.evaluate(()=>state.evidencePhotoViewerPanX),70,'release outside the frame ends the drag');
+  await page.evaluate(()=>openEvidencePhotoObjectViewer({previewUrl:'data:video/mp4;base64,',mime_type:'video/mp4',label:'clip.mp4'}));
+  await expect(page.locator('#no-inventory-photo-viewer-video')).toBeVisible();
+  const prevented=await frame.evaluate(el=>{
+    const event=new WheelEvent('wheel',{deltaY:-100,bubbles:true,cancelable:true});
+    el.dispatchEvent(event);return event.defaultPrevented;
+  });
+  assert.equal(prevented,false,'video wheel events are not intercepted by photo gestures');
+  assert.equal(await page.evaluate(()=>state.evidencePhotoViewerZoom),1);
 });

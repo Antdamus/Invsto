@@ -3218,10 +3218,8 @@ body.modal-open {
   max-height: min(62vh, 620px);
   object-fit: contain;
   transform-origin: center;
-  transition: transform 140ms ease;
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
+  /* Apply gestures immediately so repeated wheel events keep the same focal point. */
+  transition: none;
 }
 
 .evidence-photo-viewer-frame video {
@@ -3235,10 +3233,15 @@ body.modal-open {
   filter: saturate(0.9) contrast(0.96);
 }
 
-.evidence-photo-viewer-frame img:active {
+.evidence-photo-viewer-frame:has(img:not(.hidden)) {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.evidence-photo-viewer-frame.is-gesturing {
   cursor: grabbing;
 }
-.evidence-photo-viewer-frame img.is-gesturing { transition: none; }
 .completion-photos-card h2, .evidence-photo-viewer-card h2 { color: var(--text, #f5f1e9); }
 
 .evidence-photo-viewer-tools {
