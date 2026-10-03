@@ -11673,7 +11673,7 @@ async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
     metadata.videoReceiptUrl || metadata.pageUrl ? `Receipt: ${metadata.videoReceiptUrl || metadata.pageUrl}` : "",
   ].filter(Boolean).join("\n");
 
-  const {data: task, error: taskError} = await supabase.rpc("create_ebay_order_coordination_task", {
+  const {data: taskData, error: taskError} = await supabase.rpc("create_ebay_order_coordination_task", {
     _order_id: line.order_id,
     _order_line_ids: [line.id],
     _assigned_to_user_id: null,
@@ -11684,6 +11684,7 @@ async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
     _signed_by_email: state.user?.email || state.employee?.display_name || "",
   });
   if (taskError) throw new Error(taskError.message || "Could not attach the video receipt photo to the order task.");
+  const task = Array.isArray(taskData) ? taskData[0] : taskData;
 
   // The captured bytes are already local. Do not wait for signed URLs or history reads to show them.
   // Only the persisted storage references above are written to the audit record.

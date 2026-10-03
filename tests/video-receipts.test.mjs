@@ -595,6 +595,7 @@ async function controlledCapturePage(t) {
     state.ebayTransferReceiverReady=true;
     window.captureAcks=[];window.receiptUploads=[];window.receiptWrites=[];window.receiptReads=[];
     window.failReceiptOriginal=false;window.failReceiptWrite=false;window.failReceiptDisplay=false;
+    window.receiptTaskArray=false;
     window.receiptEvents=[];window.receiptTasks=[];
     const uploadsReady=new Promise(resolve=>window.releaseReceiptUploads=resolve);
     const commitReady=new Promise(resolve=>window.releaseReceiptCommit=resolve);
@@ -616,7 +617,7 @@ async function controlledCapturePage(t) {
       const suffix=receiptWrites.length===1?'':`-${receiptWrites.length}`;
       const task={id:`new-receipt-task${suffix}`,order_id:fixtureLine.order_id,order_line_ids:args._order_line_ids,question:args._question,status:'open'};
       receiptTasks.push(task);receiptEvents.push({id:`new-receipt-event${suffix}`,task_id:task.id,order_id:task.order_id,photo_attachments:args._photo_attachments});
-      return {data:task};
+      return {data:receiptTaskArray?[task]:task};
     };
     supabase.from=table=>{
       const filters=[];
@@ -638,7 +639,10 @@ async function controlledCapturePage(t) {
 
 test('receipt capture uploads together and returns after durable save while its preview and history refresh are slow',async t=>{
   const p=await controlledCapturePage(t);
-  await p.evaluate(()=>window.postMessage({type:'OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER',payload:receiptTransfer},location.origin));
+  await p.evaluate(()=>{
+    receiptTaskArray=true; // PostgREST can encode a composite task row as a one-element array.
+    window.postMessage({type:'OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER',payload:receiptTransfer},location.origin);
+  });
   await p.waitForFunction(()=>receiptUploads.length===3);
   assert.equal(await p.evaluate(()=>receiptWrites.length),0);
   assert.equal(await p.evaluate(()=>captureAcks.some(ack=>ack.ok)),false);
