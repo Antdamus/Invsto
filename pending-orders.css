@@ -2041,6 +2041,10 @@ textarea:focus {
   width: min(820px, 100%);
 }
 
+.buyer-line-note-summary {
+  display: contents;
+}
+
 .line-note-history-section {
   margin: 18px 0;
 }
@@ -4069,10 +4073,6 @@ body.pending-order-detail-open .mobile-detail-close {
   background: rgba(15, 23, 42, 0.32);
 }
 
-.orders-list:has(.buyer-card-note-preview) {
-  overflow: visible;
-}
-
 .buyer-card-notes-toggle {
   display: flex;
   align-items: center;
@@ -4123,29 +4123,6 @@ body.pending-order-detail-open .mobile-detail-close {
 .buyer-card-note-preview.is-expanded .buyer-card-note-details {
   display: grid;
   gap: 8px;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .buyer-order-card:has(.buyer-card-note-preview:hover) {
-    position: relative;
-    z-index: 5;
-  }
-
-  .buyer-card-note-preview:not(.is-expanded):hover .buyer-card-note-details {
-    display: grid;
-    gap: 8px;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    z-index: 30;
-    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
-  }
-
-  .buyer-card-note-preview.opens-above:not(.is-expanded):hover .buyer-card-note-details {
-    top: auto;
-    bottom: 100%;
-  }
 }
 
 .buyer-card-notes-title {

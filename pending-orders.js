@@ -3301,41 +3301,25 @@ function getLineNoteCount(line = {}) {
   return Math.max(0, Number(line.line_note_count || 0));
 }
 
-function getGroupLineNoteEntries(lines = []) {
-  return (lines || [])
-    .map((line) => {
-      const note = String(line.latest_line_note || "").trim();
-      const noteCount = Math.max(getLineNoteCount(line), note ? 1 : 0);
-      if (!noteCount) return null;
-      const order = getOrderFromLine(line);
-      return {
-        line,
-        note,
-        noteCount,
-        title: line.item_title || "Untitled eBay item",
-        orderNumber: order.order_number || "",
-        buyer: order.buyer_username || getBuyerLabel(line),
-        itemNumber: line.item_number || "",
-      };
-    })
-    .filter(Boolean);
+function getSharedLineNotes(line) {
+  const history = state.sharedOrderNoteHistory.get(line.order_id)?.data;
+  // Queue summaries mix written notes with media uploads, so only display
+  // notes after their origin has been checked against the saved events.
+  return history ? getLineNoteHistoryEvents(line, history.tasks, history.events) : [];
 }
 
-function getGroupLineNoteCount(entries = []) {
-  return entries.reduce((sum, entry) => sum + Number(entry.noteCount || 0), 0);
+function renderLineNoteSummary(line) {
+  const notes = getSharedLineNotes(line);
+  if (!notes.length) return "";
+  return `<button type="button" class="buyer-line-note-count" data-line-view-notes="${escapeHtml(line.id)}" title="Read notes from all users">View ${notes.length.toLocaleString()} note${notes.length === 1 ? "" : "s"}</button>
+    <span class="buyer-line-note-preview">Note: ${escapeHtml(notes[0].notes)}</span>`;
 }
 
 function renderGroupSharedNotes(lines = [], groupKey = "") {
   const entries = [];
   const seen = new Set();
   lines.forEach((line) => {
-    const history = state.sharedOrderNoteHistory.get(line.order_id)?.data;
-    if (!history) {
-      const note = String(line.latest_line_note || "").trim();
-      if (note) entries.push({ line, notes: note });
-      return;
-    }
-    getLineNoteHistoryEvents(line, history.tasks, history.events).forEach((event) => {
+    getSharedLineNotes(line).forEach((event) => {
       if (seen.has(event.id)) return;
       seen.add(event.id);
       entries.push({ ...event, line });
@@ -3345,9 +3329,8 @@ function renderGroupSharedNotes(lines = [], groupKey = "") {
   entries.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
   const expanded = state.expandedBuyerNoteKeys.has(groupKey);
   const detailsId = `buyer-notes-${encodeURIComponent(groupKey)}`;
-  const allLoaded = lines.every((line) => state.sharedOrderNoteHistory.get(line.order_id)?.data);
-  const count = allLoaded ? entries.length : Math.max(entries.length, getGroupLineNoteCount(getGroupLineNoteEntries(lines)));
-  const preview = entries[0].notes || "Saved note attachments";
+  const count = entries.length;
+  const preview = entries[0].notes;
   return `<section class="buyer-card-note-preview ${expanded ? "is-expanded" : ""}" aria-label="Notes from all users">
     <button type="button" class="buyer-card-notes-toggle" data-toggle-group-notes aria-expanded="${expanded}" aria-controls="${escapeHtml(detailsId)}">
       <strong>${count} note${count === 1 ? "" : "s"}</strong>
@@ -3418,6 +3401,11 @@ async function hydrateBuyerGroupNotes(card, group) {
       .map(loadSharedOrderNoteHistory));
     if (!card.isConnected || cache !== state.sharedOrderNoteHistory) return;
     container.innerHTML = renderGroupSharedNotes(group.lines, group.key);
+    const linesById = new Map(group.lines.map((line) => [line.id, line]));
+    card.querySelectorAll("[data-line-note-summary]").forEach((summary) => {
+      const line = linesById.get(summary.dataset.lineNoteSummary);
+      if (line) summary.innerHTML = renderLineNoteSummary(line);
+    });
   } catch (error) {
     if (!card.isConnected || cache !== state.sharedOrderNoteHistory) return;
     console.warn("Could not load notes for this order block:", error);
@@ -3997,15 +3985,6 @@ function renderOrders() {
       if (lineId) openLineNoteModal(lineId, { focusInput: false });
       if (event.target.closest("[data-retry-group-notes]")) hydrateBuyerGroupNotes(card, group);
     });
-    card.querySelector("[data-buyer-shared-notes]")?.addEventListener("pointerover", (event) => {
-      if (event.pointerType === "touch") return;
-      const preview = event.target.closest(".buyer-card-note-preview");
-      if (!preview || preview.classList.contains("is-expanded")) return;
-      const rect = preview.getBoundingClientRect();
-      const height = Math.min(preview.querySelector(".buyer-card-note-details").scrollHeight, 440, window.innerHeight * 0.5);
-      const below = window.innerHeight - rect.bottom - 12;
-      preview.classList.toggle("opens-above", below < height && rect.top - 12 > below);
-    });
     card.addEventListener("click", (event) => {
       if (event.target.closest("button,a,input,label,select,textarea,.buyer-card-expanded,.buyer-line-list,.buyer-card-note-preview")) return;
       if (!event.target.closest(".buyer-card-head,.buyer-card-meta,.buyer-card-collapsed-hint")) return;
@@ -4132,14 +4111,6 @@ function renderOrders() {
         <button type="button" class="secondary-btn buyer-line-action-btn task-video-action-btn" data-line-add-video="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>Add item video</button>
         <button type="button" class="secondary-btn buyer-line-action-btn task-video-action-btn" data-line-view-videos="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>View saved videos</button>
       `;
-      const lineNoteCount = getLineNoteCount(line);
-      const lineNoteCountMarkup = lineNoteCount
-        ? `<button type="button" class="buyer-line-note-count" data-line-view-notes="${escapeHtml(line.id)}" title="Read notes from all users">View ${lineNoteCount.toLocaleString()} note${lineNoteCount === 1 ? "" : "s"}</button>`
-        : "";
-      const lineNotePreview = String(line.latest_line_note || "").trim();
-      const lineNotePreviewMarkup = lineNotePreview
-        ? `<span class="buyer-line-note-preview" title="${escapeHtml(lineNotePreview)}">Note: ${escapeHtml(lineNotePreview)}</span>`
-        : "";
       const orderNumber = String(order.order_number || "").trim();
       const orderNumberMarkup = orderNumber
         ? `<button type="button" class="buyer-line-order-copy" data-order-number-action data-order-number="${escapeHtml(orderNumber)}" title="Copy or open this eBay order"><span>Order</span><strong>${escapeHtml(orderNumber)}</strong></button>`
@@ -4193,8 +4164,7 @@ function renderOrders() {
             ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Open video receipt</a>` : ""}
             <button type="button" class="receipt-screenshot-upload" data-upload-receipt-screenshot="${escapeHtml(line.id)}">Upload receipt screenshot</button>
             <button type="button" class="buyer-line-note-btn" data-line-add-note="${escapeHtml(line.id)}">Notes / Add note</button>
-            ${lineNoteCountMarkup}
-            ${lineNotePreviewMarkup}
+            <span class="buyer-line-note-summary" data-line-note-summary="${escapeHtml(line.id)}">${renderLineNoteSummary(line)}</span>
           </span>
           <span class="queue-video-receipt-evidence" data-queue-video-evidence="${escapeHtml(line.id)}">
             <span class="queue-video-receipt-empty">Checking saved video receipt screenshot...</span>
@@ -4257,7 +4227,8 @@ function renderOrders() {
         event.stopPropagation();
         openLineNoteModal(line.id);
       });
-      button.querySelector("[data-line-view-notes]")?.addEventListener("click", (event) => {
+      button.querySelector("[data-line-note-summary]")?.addEventListener("click", (event) => {
+        if (!event.target.closest("[data-line-view-notes]")) return;
         event.preventDefault();
         event.stopPropagation();
         openLineNoteModal(line.id, { focusInput: false });
@@ -10859,13 +10830,30 @@ function handleLineNotePaste(event) {
   });
 }
 
+function isWrittenLineNote(event, task) {
+  const source = event.payload?.source || task.metadata?.source;
+  if (source !== "pending_order_line_note" || (event.action && event.action !== "commented")) return false;
+  const note = String(event.notes || "").trim();
+  if (!note) return false;
+  const photos = Array.isArray(event.photo_attachments) ? event.photo_attachments : [];
+  if (photos.length) {
+    // Photos attached through Notes have their own origin. Receipt and video
+    // uploads use this same RPC, but their attachment origins are different.
+    return photos.every((photo) => photo.metadata?.source === "pending_order_line_note"
+      || photo.source_path === "manual-line-note"
+      || String(photo.path || "").startsWith("line-notes/"));
+  }
+  // Deleted receipt photos leave the generated upload message in the event.
+  return !/^(?:Video receipt screenshot uploaded for eBay item [^\n]+\.\n|(?:Video|Photo) evidence added manually for (?:eBay item [^\n]+|the full order)\.\n)/.test(note);
+}
+
 function getLineNoteHistoryEvents(line, tasks = [], events = []) {
   const tasksById = new Map(tasks
     .filter((task) => task.order_id === line.order_id && !task.metadata?.history_removed_at)
     .map((task) => [task.id, task]));
   return events.filter((event) => {
     const task = tasksById.get(event.task_id);
-    if (!task) return false;
+    if (!task || !isWrittenLineNote(event, task)) return false;
     // A specific event's scope takes precedence over its parent task's scope.
     const eventLineIds = [
       ...(Array.isArray(event.payload?.order_line_ids) ? event.payload.order_line_ids : []),
@@ -10873,7 +10861,7 @@ function getLineNoteHistoryEvents(line, tasks = [], events = []) {
     ].filter(Boolean);
     const lineIds = eventLineIds.length ? eventLineIds : task.order_line_ids || [];
     if (lineIds.length && !lineIds.includes(line.id)) return false;
-    return Boolean(String(event.notes || "").trim() || event.photo_attachments?.length);
+    return true;
   }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)
     || String(b.id).localeCompare(String(a.id)));
 }
