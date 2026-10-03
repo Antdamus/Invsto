@@ -580,8 +580,10 @@
     const transferId = status.transferId || "";
     if (!transferId) return;
     if (status.phase === "started") return;
-    if (status.ok) await removePendingVideoReceiptPhoto(transferId);
-    if (status.ok && status.tabId) await focusTab(status.tabId);
+    if (status.ok) await Promise.all([
+      removePendingVideoReceiptPhoto(transferId),
+      status.tabId ? focusTab(status.tabId) : Promise.resolve(),
+    ]);
     const waiter = appVideoReceiptPhotoAcks.get(transferId);
     if (waiter) waiter.resolve(status);
   }
@@ -1405,9 +1407,10 @@
 
     const transferId = buildVideoReceiptPhotoTransferId(photoTransfer);
     const payload = { ...photoTransfer, transferId };
-    await storePendingVideoReceiptPhoto(transferId, payload);
-
-    const tabs = await findAppTabs(appUrl);
+    // Persist the retry copy before delivery while looking up the existing OG tab.
+    const [, tabs] = await Promise.all([
+      storePendingVideoReceiptPhoto(transferId, payload), findAppTabs(appUrl),
+    ]);
     const pendingTab = tabs.find((tab) => {
       const tabUrl = normalizeUrl(tab?.url);
       return tabUrl?.origin === appUrl.origin && /\/pending-orders\.html$/i.test(tabUrl.pathname);
@@ -1416,7 +1419,7 @@
     if (pendingTab?.id) {
       try {
         const ack = await deliverVideoReceiptPhotoToTab(pendingTab, payload);
-        if (ack?.ok) await focusTab(pendingTab.id);
+        // The saved acknowledgement already focuses its receiving tab.
         return { ...ack, transferId, delivered: true, opened: false };
       } catch (error) {
         const ack = await openVideoReceiptPhotoPageAndWait(appUrl, payload, pendingTab);
@@ -1573,7 +1576,6 @@
         source: "chrome-visible-tab",
         mimeType: "image/png",
         base64,
-        dataUrl,
         viewport: payload.viewport || null,
         videoRect: payload.videoRect || null,
         capturedAt: new Date().toISOString(),

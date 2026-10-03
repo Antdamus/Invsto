@@ -24,6 +24,8 @@ For future releases, increment `manifest.json`'s version and run `python tools/b
 
 Version 1.0.4 sends labels directly to a ready OG tab without reloading the queue. Older OG pages keep the existing reload fallback, and an unrelated open order still blocks automatic delivery. Version reporting and the updates link remain available; no additional permissions are required.
 
+Version 1.0.5 reduces receipt-capture transfer data by sending the original PNG once, overlaps retry storage with finding OG, and avoids switching to the saved receipt's OG tab twice. The page uploads the original and smaller previews together and returns after the screenshot and audit entry are saved; display details refresh in the background.
+
 ## Use
 
 On the eBay bulk label page, the extension looks for order links like:

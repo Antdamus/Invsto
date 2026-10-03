@@ -587,3 +587,138 @@ test('desktop capture transfer attaches once to its item and returns to the pend
   assert.equal(await p.evaluate(()=>fixtureLine.line_status),'pending');
   await p.locator('[data-queue-video-evidence="line-one"] img').waitFor({state:'visible'});
 });
+
+async function controlledCapturePage(t) {
+  const p=await screenshotPage(t,{desktop:true});
+  await p.evaluate(()=>{
+    scheduleQueueVideoReceiptEvidenceHydration=originalScheduleReceiptHydration;
+    state.ebayTransferReceiverReady=true;
+    window.captureAcks=[];window.receiptUploads=[];window.receiptWrites=[];window.receiptReads=[];
+    window.failReceiptOriginal=false;window.failReceiptWrite=false;window.failReceiptDisplay=false;
+    window.receiptEvents=[];window.receiptTasks=[];
+    const uploadsReady=new Promise(resolve=>window.releaseReceiptUploads=resolve);
+    const commitReady=new Promise(resolve=>window.releaseReceiptCommit=resolve);
+    const displayReady=new Promise(resolve=>window.releaseReceiptDisplay=resolve);
+    supabase.storage={from:bucket=>({
+      async upload(path,blob){
+        const original=!path.includes('/derivatives/');
+        receiptUploads.push({path,size:blob.size,original,bytes:original?[...new Uint8Array(await blob.arrayBuffer())]:[]});
+        await uploadsReady;
+        if(original&&failReceiptOriginal)throw Error('Original screenshot upload failed');
+        return {data:{path}};
+      },
+      async createSignedUrl(){await displayReady;return failReceiptDisplay?{error:{message:'Preview refresh unavailable'}}:{data:{signedUrl:testScreenshot}};},
+    })};
+    supabase.rpc=async(name,args)=>{
+      if(name!=='create_ebay_order_coordination_task')throw Error('Unexpected receipt write '+name);
+      receiptWrites.push(structuredClone(args));await commitReady;
+      if(failReceiptWrite)return {error:{message:'Receipt audit save failed'}};
+      const suffix=receiptWrites.length===1?'':`-${receiptWrites.length}`;
+      const task={id:`new-receipt-task${suffix}`,order_id:fixtureLine.order_id,order_line_ids:args._order_line_ids,question:args._question,status:'open'};
+      receiptTasks.push(task);receiptEvents.push({id:`new-receipt-event${suffix}`,task_id:task.id,order_id:task.order_id,photo_attachments:args._photo_attachments});
+      return {data:task};
+    };
+    supabase.from=table=>{
+      const filters=[];
+      const q={select(){return q;},eq(key,value){filters.push([key,value]);return q;},in(key,value){filters.push([key,value]);return q;},order(){return q;},
+        then(resolve,reject){receiptReads.push({table,filters});return displayReady.then(()=>
+          failReceiptDisplay?{error:{message:'History refresh unavailable'}}:{data:structuredClone((table==='ebay_order_tasks'?receiptTasks:receiptEvents)
+            .filter(row=>filters.every(([key,value])=>Array.isArray(value)?value.includes(row[key]):row[key]===value)))}).then(resolve,reject);}};
+      return q;
+    };
+    loadSelectedOrderTasks=async()=>{throw Error('Capture must not wait for the closing detail panel');};
+    setupEbayLabelReceiver();
+    window.addEventListener('message',event=>{if(event.data?.type==='OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER_STATUS')captureAcks.push(event.data.payload);});
+    window.receiptTransfer={transferId:'controlled-receipt',metadata:{itemNumber:fixtureLine.item_number,transactionId:fixtureLine.transaction_id,
+      orderNumber:fixtureLine.order.order_number,videoReceiptUrl:'https://www.ebay.com/ebaylive/events/fixture-event/stream?selectedItemId=123456789012&playback=true'},
+      screenshot:{mimeType:'image/png',base64:testScreenshot.split(',')[1]}};
+  });
+  return p;
+}
+
+test('receipt capture uploads together and returns after durable save while its preview and history refresh are slow',async t=>{
+  const p=await controlledCapturePage(t);
+  await p.evaluate(()=>window.postMessage({type:'OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER',payload:receiptTransfer},location.origin));
+  await p.waitForFunction(()=>receiptUploads.length===3);
+  assert.equal(await p.evaluate(()=>receiptWrites.length),0);
+  assert.equal(await p.evaluate(()=>captureAcks.some(ack=>ack.ok)),false);
+  assert.equal(await p.evaluate(()=>{
+    const original=receiptUploads.find(upload=>upload.original);
+    return btoa(String.fromCharCode(...original.bytes))===receiptTransfer.screenshot.base64;
+  }),true,'original PNG bytes remain unchanged');
+  await p.evaluate(()=>releaseReceiptUploads());
+  await p.waitForFunction(()=>receiptWrites.length===1);
+  assert.equal(await p.evaluate(()=>captureAcks.some(ack=>ack.ok)),false,'saving the audit record still gates the return');
+  await p.evaluate(()=>releaseReceiptCommit());
+  await p.waitForFunction(()=>captureAcks.some(ack=>ack.ok));
+  assert.equal(await p.evaluate(()=>state.selectedLine),null);
+  assert.equal(await p.evaluate(()=>receiptWrites[0]._photo_attachments[0].previewUrl),undefined,'transient previews are never saved in the database');
+  assert.deepEqual(await p.evaluate(()=>receiptWrites[0]._order_line_ids),['line-one']);
+  await p.locator('[data-queue-video-evidence="line-one"] img').waitFor({state:'visible'});
+  assert.equal(await p.locator('[data-queue-video-evidence="line-one"] img').getAttribute('src'),await p.evaluate(()=>testScreenshot));
+  assert.equal(await p.locator('[data-queue-video-evidence="line-one"] [data-remove-receipt]').isEnabled(),false);
+  await p.evaluate(()=>releaseReceiptDisplay());
+  await p.waitForFunction(()=>document.querySelector('[data-queue-video-evidence="line-one"] [data-remove-receipt]')?.disabled===false);
+  assert.equal(await p.evaluate(()=>getVideoReceiptEvidencePhotosForLine(fixtureLine)[0].receiptEventId),'new-receipt-event');
+  assert.equal(await p.evaluate(()=>receiptReads.some(read=>read.table==='ebay_order_task_events'&&read.filters.some(([key,value])=>key==='task_id'&&value==='new-receipt-task'))),true);
+});
+
+for(const failure of ['original','audit','display']){
+  test(`receipt ${failure} failure preserves the correct save status and order selection`,async t=>{
+    const p=await controlledCapturePage(t);
+    await p.evaluate(failure=>{
+      failReceiptOriginal=failure==='original';failReceiptWrite=failure==='audit';failReceiptDisplay=failure==='display';
+      releaseReceiptUploads();releaseReceiptCommit();releaseReceiptDisplay();
+      window.postMessage({type:'OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER',payload:receiptTransfer},location.origin);
+    },failure);
+    await p.waitForFunction(()=>captureAcks.some(ack=>typeof ack.ok==='boolean'));
+    const result=await p.evaluate(()=>({ack:captureAcks.find(ack=>typeof ack.ok==='boolean'),selected:state.selectedLine?.id,
+      writes:receiptWrites.length,hasPhoto:state.videoReceiptEvidenceByLineId.has('line-one')}));
+    assert.equal(result.ack.ok,failure==='display');assert.equal(result.hasPhoto,failure==='display');
+    assert.equal(result.selected,failure==='display'?undefined:'line-one');
+    assert.equal(result.writes,failure==='original'?0:1);
+    if(failure==='display')await p.locator('[data-queue-video-evidence="line-one"] img').waitFor({state:'visible'});
+  });
+}
+
+test('late receipt details cannot restore a removed capture or replace a newer one',async t=>{
+  const p=await controlledCapturePage(t);
+  await p.evaluate(()=>{
+    state.queueVideoReceiptLoadedOrderIds.add('order-one');
+    releaseReceiptUploads();releaseReceiptCommit();
+    window.postMessage({type:'OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER',payload:receiptTransfer},location.origin);
+  });
+  await p.waitForFunction(()=>captureAcks.some(ack=>ack.ok));
+  await p.evaluate(()=>{
+    const old=state.videoReceiptEvidenceByLineId.get('line-one');
+    window.newCapture={...old,path:'newer-capture.png',receiptEventId:'newer-event'};
+    state.videoReceiptEvidenceByLineId.set('line-one',newCapture);
+    window.detailRead=refreshCapturedReceiptDetails(fixtureLine,old,{id:'new-receipt-task'});
+    releaseReceiptDisplay();
+  });
+  await p.evaluate(()=>detailRead);
+  assert.equal(await p.evaluate(()=>state.videoReceiptEvidenceByLineId.get('line-one').path),'newer-capture.png');
+  await p.evaluate(async()=>{
+    const photo=state.videoReceiptEvidenceByLineId.get('line-one');
+    forgetReceiptCapture(fixtureLine.order_id,photo.bucket,photo.path);
+    await refreshCapturedReceiptDetails(fixtureLine,photo,{id:'new-receipt-task'});
+  });
+  assert.equal(await p.evaluate(()=>state.videoReceiptEvidenceByLineId.has('line-one')),false);
+});
+
+test('successive receipt captures remain visible and removable when earlier history reads finish later',async t=>{
+  const p=await controlledCapturePage(t);
+  await p.evaluate(()=>{
+    state.queueVideoReceiptLoadedOrderIds.add('order-one');
+    releaseReceiptUploads();releaseReceiptCommit();
+    window.postMessage({type:'OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER',payload:receiptTransfer},location.origin);
+  });
+  await p.waitForFunction(()=>captureAcks.some(ack=>ack.ok));
+  await p.evaluate(()=>window.postMessage({type:'OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER',payload:{...receiptTransfer,transferId:'second-capture'}},location.origin));
+  await p.waitForFunction(()=>captureAcks.filter(ack=>ack.ok).length===2);
+  assert.equal(await p.evaluate(()=>getVideoReceiptEvidencePhotosForLine(fixtureLine).length),2);
+  await p.evaluate(()=>releaseReceiptDisplay());
+  await p.waitForFunction(()=>getVideoReceiptEvidencePhotosForLine(fixtureLine).every(photo=>photo.receiptEventId));
+  assert.equal(await p.locator('[data-queue-video-evidence="line-one"] [data-remove-receipt]').count(),2);
+  assert.equal(await p.locator('[data-queue-video-evidence="line-one"] [data-remove-receipt]:disabled').count(),0);
+});

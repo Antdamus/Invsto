@@ -8,9 +8,12 @@ const receiptUrl = 'https://www.ebay.com/ebaylive/events/test/stream?selectedIte
 const appTab = {id: 8, windowId: 1, url: 'https://antdamus.github.io/Invsto/pending-orders.html'};
 const receiptTab = {id: 9, windowId: 1, url: receiptUrl};
 
-function worker(t) {
+function worker(t, {deferStorage = false} = {}) {
   let listener, delivered;
   const delivery = new Promise(resolve => { delivered = resolve; });
+  let releaseStorage, lookupStarted, deliveryCount = 0;
+  const storageWait = new Promise(resolve => { releaseStorage = resolve; });
+  const lookup = new Promise(resolve => { lookupStarted = resolve; });
   const stored = {}, focused = [], created = [], timers = new Set();
   t.after(() => { for (const timer of timers) clearTimeout(timer); });
   const chrome = {
@@ -18,13 +21,13 @@ function worker(t) {
     storage: {
       sync: {async get() { return {ogPendingOrdersUrl: appTab.url}; }},
       local: {
-        async set(values) { Object.assign(stored, values); },
+        async set(values) { if (deferStorage) await storageWait; Object.assign(stored, values); },
         async remove(key) { delete stored[key]; },
       },
     },
     windows: {async update() {}},
     tabs: {
-      async query() { return [appTab, receiptTab]; },
+      async query() { lookupStarted(); return [appTab, receiptTab]; },
       async get(id) { return id === appTab.id ? appTab : receiptTab; },
       async create(options) { created.push(options); return receiptTab; },
       async update(id, options) { focused.push({id, ...options}); },
@@ -36,7 +39,7 @@ function worker(t) {
       async sendMessage(id, message) {
         assert.equal(id, appTab.id);
         assert.equal(message.type, 'OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER');
-        delivered(message.payload);
+        deliveryCount++; delivered(message.payload);
         return {ok: true};
       },
     },
@@ -47,7 +50,7 @@ function worker(t) {
     clearTimeout(timer) { timers.delete(timer); clearTimeout(timer); },
     fetch() { throw new Error('Saved receipt should open without fetching eBay pages'); },
   });
-  return {stored, focused, created, delivery,
+  return {stored, focused, created, delivery, lookup, releaseStorage, get deliveryCount() {return deliveryCount;},
     send(type, payload, tab = appTab) {
       return new Promise(resolve => assert.equal(listener({type, payload}, {tab}, resolve), true));
     },
@@ -75,6 +78,7 @@ for (const success of [true, false]) {
     const storageKey = `ogPendingVideoReceiptPhoto:${payload.transferId}`;
     assert.equal(payload.metadata.itemNumber, '123456789012');
     assert.equal(payload.screenshot.base64, 'ZmFrZQ==');
+    assert.equal(payload.screenshot.dataUrl, undefined, 'send the original PNG once, without a duplicate data URL');
     assert.ok(w.stored[storageKey]);
     assert.equal(w.focused.length, 0);
     await w.send('OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER_STATUS', {transferId: payload.transferId, phase: 'started'});
@@ -84,8 +88,20 @@ for (const success of [true, false]) {
     assert.equal(result.ok, success);
     assert.equal(Boolean(w.stored[storageKey]), !success);
     if (success) {
-      assert.ok(w.focused.length > 0);
+      assert.equal(w.focused.length, 1, 'a saved capture focuses OG only once');
       assert.ok(w.focused.every(tab => tab.id === appTab.id && tab.active === true));
     } else assert.equal(w.focused.length, 0);
   });
 }
+
+test('receipt tab lookup overlaps retry storage, but delivery waits for the durable retry copy', {timeout:5000}, async t=>{
+  const w=worker(t,{deferStorage:true});
+  const capture=w.send('OG_EBAY_CAPTURE_VIDEO_RECEIPT_FRAME', {metadata:{itemNumber:'123456789012'}},receiptTab);
+  await w.lookup;
+  assert.equal(w.deliveryCount,0);assert.equal(Object.keys(w.stored).length,0);
+  w.releaseStorage();
+  const payload=await w.delivery;
+  assert.ok(w.stored[`ogPendingVideoReceiptPhoto:${payload.transferId}`]);
+  await w.send('OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER_STATUS',{transferId:payload.transferId,ok:true});
+  assert.equal((await capture).ok,true);
+});

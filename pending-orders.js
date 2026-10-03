@@ -5706,18 +5706,23 @@ async function hydrateQueueVideoReceiptEvidenceThumbnails(lines = [], options = 
   const containers = [...document.querySelectorAll("[data-queue-video-evidence]")];
   if (!containers.length) return;
 
-  try {
-    await ensureQueueVideoReceiptTasksLoaded(lines);
-  } catch (error) {
-    console.warn("Could not load video receipt screenshots for the queue:", error);
-    return;
+  if (!options.skipTaskLoad) {
+    const cachedLines = lines.filter(line => state.videoReceiptEvidenceByLineId.get(line.id)?.previewUrl);
+    if (cachedLines.length) await hydrateQueueVideoReceiptEvidenceThumbnails(cachedLines, {...options, skipTaskLoad: true, cachedOnly: true});
+    try {
+      await ensureQueueVideoReceiptTasksLoaded(lines);
+    } catch (error) {
+      console.warn("Could not load video receipt screenshots for the queue:", error);
+      return;
+    }
   }
 
   await Promise.all(containers.map(async (container) => {
     if (runId !== state.queueVideoReceiptHydrateRunId) return;
     const line = (lines || []).find((entry) => entry.id === container.dataset.queueVideoEvidence);
     if (!line?.id) return;
-    const photos = getVideoReceiptEvidencePhotosForLine(line);
+    const photos = getVideoReceiptEvidencePhotosForLine(line)
+      .filter(photo => !options.cachedOnly || (photo.previewUrl && photo.thumbnailUrl));
     if (!photos.length) {
       container.innerHTML = `<span class="queue-video-receipt-empty">No saved video receipt screenshot yet.</span>`;
       return;
@@ -10807,6 +10812,48 @@ async function rememberVideoReceiptPhotoForQueue(line = {}, savedPhoto = {}, met
   return photo;
 }
 
+async function refreshCapturedReceiptDetails(line, savedPhoto, task) {
+  const cachedEvents = state.queueVideoReceiptTaskEvents.get(task?.id);
+  const stillCached = () => cachedEvents && state.queueVideoReceiptTaskEvents.get(task.id) === cachedEvents;
+  const currentPhoto = () => {
+    const photo = state.videoReceiptEvidenceByLineId.get(line.id);
+    return photo?.bucket === savedPhoto.bucket && photo?.path === savedPhoto.path ? photo : null;
+  };
+  const repaint = () => hydrateQueueVideoReceiptEvidenceThumbnails([line], {skipTaskLoad: true});
+  await Promise.allSettled([
+    (async () => {
+      const hydrated = await ensureEvidencePhotoPreviewUrls(savedPhoto);
+      const current = currentPhoto();
+      if ((!current && !stillCached()) || !hydrated.previewUrl) return;
+      if (current) state.videoReceiptEvidenceByLineId.set(line.id, {...current, ...hydrated});
+      if (stillCached()) cachedEvents.forEach(event => {
+        event.photo_attachments = (event.photo_attachments || []).map(photo =>
+          photo.bucket === savedPhoto.bucket && photo.path === savedPhoto.path ? {...photo, ...hydrated} : photo);
+      });
+      await repaint();
+    })(),
+    (async () => {
+      if (!task?.id) return;
+      const {data: events, error} = await supabase.from("ebay_order_task_events")
+        .select("*").eq("task_id", task.id).order("created_at", {ascending: true});
+      if (error) {
+        state.queueVideoReceiptLoadedOrderIds.delete(line.order_id);
+        throw error;
+      }
+      const current = currentPhoto();
+      if (!stillCached()) return; // A removal or queue reload must not be overwritten by a late response.
+      const event = (events || []).find(entry => (entry.photo_attachments || [])
+        .some(photo => photo.bucket === savedPhoto.bucket && photo.path === savedPhoto.path));
+      if (!event) return;
+      state.queueVideoReceiptTaskEvents.set(task.id, events);
+      if (current) state.videoReceiptEvidenceByLineId.set(line.id, {...current, receiptEventId: event.id, receiptOrderId: line.order_id});
+      await repaint();
+    })(),
+  ]).then(results => results.forEach(result => {
+    if (result.status === "rejected") console.warn("Receipt saved; could not refresh its display details:", result.reason);
+  }));
+}
+
 async function showVideoReceiptPhotoInNoInventoryModal(line = {}, savedPhoto = {}, metadata = {}, screenshot = {}) {
   const modalHasLine = () => state.workerNoInventoryCandidates.some((entry) => entry.id === line.id);
   if (!isWorkerNoInventoryModalOpen() || !modalHasLine()) {
@@ -11591,15 +11638,14 @@ async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
     `${Date.now()}-${crypto.randomUUID()}-${itemSegment}.png`,
   ].join("/");
 
-  const { error: uploadError } = await supabase.storage
-    .from(NO_INVENTORY_EVIDENCE_BUCKET)
-    .upload(destinationPath, blob, {
-      contentType: blob.type || screenshot.mimeType || "image/png",
-      upsert: false,
-    });
+  const [{error: uploadError}, derivativeData] = await Promise.all([
+    supabase.storage.from(NO_INVENTORY_EVIDENCE_BUCKET).upload(destinationPath, blob, {
+      contentType: blob.type || screenshot.mimeType || "image/png", upsert: false,
+    }).catch(error => ({error})),
+    createAndUploadEvidenceDerivatives(blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath),
+  ]);
   if (uploadError) throw new Error(uploadError.message || "Could not save the video receipt screenshot.");
 
-  const derivativeData = await createAndUploadEvidenceDerivatives(blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath);
   const savedPhoto = {
     bucket: NO_INVENTORY_EVIDENCE_BUCKET,
     path: destinationPath,
@@ -11627,7 +11673,7 @@ async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
     metadata.videoReceiptUrl || metadata.pageUrl ? `Receipt: ${metadata.videoReceiptUrl || metadata.pageUrl}` : "",
   ].filter(Boolean).join("\n");
 
-  const { error: taskError } = await supabase.rpc("create_ebay_order_coordination_task", {
+  const {data: task, error: taskError} = await supabase.rpc("create_ebay_order_coordination_task", {
     _order_id: line.order_id,
     _order_line_ids: [line.id],
     _assigned_to_user_id: null,
@@ -11639,12 +11685,25 @@ async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
   });
   if (taskError) throw new Error(taskError.message || "Could not attach the video receipt photo to the order task.");
 
-  await rememberVideoReceiptPhotoForQueue(line, savedPhoto, metadata, screenshot);
-
-  if (state.selectedLine?.id === line.id || state.selectedLine?.order_id === line.order_id) {
-    await loadSelectedOrderTasks();
+  // The captured bytes are already local. Do not wait for signed URLs or history reads to show them.
+  // Only the persisted storage references above are written to the audit record.
+  const capturedUrl = screenshot.base64
+    ? `data:${blob.type || "image/png"};base64,${screenshot.base64}` : screenshot.dataUrl;
+  const queuePhoto = await rememberVideoReceiptPhotoForQueue(line, {
+    ...savedPhoto, previewUrl: capturedUrl, thumbnailUrl: capturedUrl,
+  }, metadata, screenshot);
+  if (task?.id) {
+    if (!state.queueVideoReceiptTasks.some(entry => entry.id === task.id)) {
+      state.queueVideoReceiptTasks.push({...task, order_id: line.order_id, order_line_ids: [line.id]});
+    }
+    // Keep every durably saved capture visible, even if another arrives before its event lookup.
+    // There is no event ID yet, so removal stays disabled until the real event is read.
+    state.queueVideoReceiptTaskEvents.set(task.id, [{task_id: task.id, order_id: line.order_id,
+      photo_attachments: [queuePhoto], created_at: savedPhoto.created_at, signed_by_email: savedPhoto.signed_by_email}]);
   }
   returnToPendingQueueAfterVideoReceiptCapture(line);
+  // Hydrate just this receipt's removal details and smaller previews after the durable save.
+  void refreshCapturedReceiptDetails(line, savedPhoto, task);
 
   return {
     lineId: line.id,
