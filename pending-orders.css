@@ -1181,15 +1181,19 @@ button.task-action-btn.is-assigned:hover,
   flex: 1 1 160px;
 }
 
-.buyer-due-filters {
+.buyer-due-filters,
+.buyer-shipping-due-options {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.buyer-due-filters {
   margin: 12px 0 6px;
 }
 
-.buyer-due-filters > span {
+.buyer-shipping-due-options > span {
   color: var(--muted);
   font-size: 0.82rem;
   font-weight: 800;
@@ -1202,8 +1206,9 @@ button.task-action-btn.is-assigned:hover,
   font-size: 0.82rem;
 }
 
-.buyer-due-date-picker {
+.buyer-purchase-date-picker {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   max-width: 100%;
@@ -1212,7 +1217,7 @@ button.task-action-btn.is-assigned:hover,
   font-weight: 800;
 }
 
-#order-due-date-filter {
+#order-created-date-filter {
   width: 154px;
   min-width: 0;
   min-height: 40px;
@@ -1222,7 +1227,7 @@ button.task-action-btn.is-assigned:hover,
 }
 
 .buyer-due-filters [aria-pressed="true"],
-#order-due-date-filter.is-active {
+#order-created-date-filter.is-active {
   border-color: var(--gold-strong);
   background: rgba(227, 189, 119, 0.18);
   color: var(--gold-strong);

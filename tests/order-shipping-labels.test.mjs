@@ -626,7 +626,7 @@ test('search and sale dates keep matching buyer bundles intact; finishing the ma
   const page=await open(t,database());await prepareDueGroups(page);
   await page.locator('[data-order-due-filter="overdue"]').click();
   await page.locator('#order-search').fill('later bracelet');
-  await page.locator('#order-created-date-filter').fill('2026-10-03');
+  await page.locator('#order-created-date-filter').fill('2026-10-01');
   assert.deepEqual(await visibleIds(page),aLines);
   await expect(page.locator('#buyer-remaining-count')).toHaveText('1 customer remaining');
   await page.evaluate(()=>{applyOrderFilters();}); // Queue redraws preserve the selected due filter.
@@ -635,6 +635,8 @@ test('search and sale dates keep matching buyer bundles intact; finishing the ma
   assert.deepEqual(await visibleIds(page),[]);
   await expect(page.locator('#buyer-remaining-count')).toHaveText('0 customers remaining');
   await page.locator('[data-order-due-filter="all"]').click();
+  assert.deepEqual(await visibleIds(page),[],'the purchase-date filter remains active when shipping urgency changes');
+  await page.locator('#order-created-date-filter').fill('2026-10-02');
   assert.deepEqual(await visibleIds(page),aLines);
   await expect(page.locator('#buyer-remaining-count')).toHaveText('1 customer remaining');
   await page.setViewportSize({width:390,height:900});
@@ -645,50 +647,69 @@ test('search and sale dates keep matching buyer bundles intact; finishing the ma
   await page.locator('.buyer-due-filters').screenshot({path:'test-results/pending-due-filters-desktop.png'});
 });
 
-test('specific due dates retain whole customer groups, update counts, and switch cleanly with presets',async t=>{
+test('earliest pending purchase dates retain whole customer groups and move forward after completion',async t=>{
   const page=await open(t,database());await prepareDueGroups(page);
-  const date=page.getByLabel('Specific shipping due date');
+  const date=page.getByLabel('Earliest pending purchase date');
   const remaining=page.locator('#buyer-remaining-count');
-  await page.locator('[data-order-due-filter="overdue"]').click();
-  await date.fill('2026-10-09');
-  assert.deepEqual(await visibleIds(page),[...aLines,'b-today','b-later','c-closed','c-later','unknown-later']);
-  await expect(remaining).toHaveText('4 customers remaining');
-  assert.equal(await page.locator('[data-order-due-filter][aria-pressed="true"]').count(),0);
+  await date.fill('2026-10-01');
+  assert.deepEqual(await visibleIds(page),[...aLines,'b-today','b-later','unknown-old']);
+  await expect(remaining).toHaveText('3 customers remaining');
   await page.evaluate(()=>applyOrderFilters());
-  await expect(date).toHaveValue('2026-10-09');
+  await expect(date).toHaveValue('2026-10-01');
   await page.setViewportSize({width:390,height:900});
   assert.equal(await page.locator('.buyer-due-filters').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
   await mkdir(new URL('../test-results',import.meta.url),{recursive:true});
-  await page.locator('.buyer-due-filters').screenshot({path:'test-results/pending-specific-date-phone.png'});
+  await page.locator('.buyer-due-filters').screenshot({path:'test-results/pending-purchase-date-phone.png'});
   await page.setViewportSize({width:1440,height:950});
-  await page.locator('.buyer-due-filters').screenshot({path:'test-results/pending-specific-date-desktop.png'});
+  await page.locator('.buyer-due-filters').screenshot({path:'test-results/pending-purchase-date-desktop.png'});
 
+  await date.fill('2026-10-02');
+  assert.deepEqual(await visibleIds(page),['c-closed','c-later','d-tomorrow','unknown-later'],
+    'later purchases must not qualify customers with an earlier pending purchase; older completed rows stay in their group');
+  await expect(remaining).toHaveText('3 customers remaining');
+  await date.fill('2026-10-03');
+  assert.deepEqual(await visibleIds(page),[]);
+  await date.fill('2026-10-01');
   await page.locator('#order-search').fill('later bracelet');
   assert.deepEqual(await visibleIds(page),aLines);
   await expect(remaining).toHaveText('1 customer remaining');
-  await page.evaluate(()=>{state.orders.find(line=>line.id==='a-later').line_status='fulfilled';applyOrderFilters();});
+  await page.evaluate(()=>{state.orders.find(line=>line.id==='a-old').line_status='fulfilled';applyOrderFilters();});
   assert.deepEqual(await visibleIds(page),[]);
   await expect(remaining).toHaveText('0 customers remaining');
-  await page.evaluate(()=>{state.orders.find(line=>line.id==='a-later').line_status='pending';});
+  await date.fill('2026-10-02');
+  assert.deepEqual(await visibleIds(page),aLines,'the group moves to its next pending purchase and retains its earlier and later rows');
+  await expect(remaining).toHaveText('1 customer remaining');
   await page.locator('#order-search').fill('');
-  await date.fill('2026-10-01'); // A completed line cannot qualify its customer's pending orders.
-  assert.deepEqual(await visibleIds(page),[]);
-  await date.fill('2026-10-05');
-  await expect(remaining).toHaveText('0 customers remaining');
+  await expect(remaining).toHaveText('4 customers remaining');
+  await page.evaluate(()=>{state.orders.find(line=>line.id==='a-old').line_status='pending';applyOrderFilters();});
+  await date.fill('2026-10-01');
   await page.locator('[data-order-due-filter="today"]').click();
-  await expect(date).toHaveValue('');
+  await expect(date).toHaveValue('2026-10-01');
   assert.deepEqual(await visibleIds(page),[...aLines,'b-today','b-later']);
-  await date.fill('2026-10-09');
+  await page.evaluate(()=>{state.selectedLiveLot={id:'fixture-bag'};state.liveLotMatchedLineIds=new Set(['a-later']);applyOrderFilters();});
+  assert.deepEqual(await visibleIds(page),aLines,'matching a later item must preserve the earliest date and the whole customer');
+  await page.evaluate(()=>{state.selectedLiveLot=null;state.liveLotMatchedLineIds.clear();applyOrderFilters();});
   await page.locator('[data-order-due-filter="all"]').click();
+  await expect(date).toHaveValue('2026-10-01');
+  await page.getByRole('button',{name:'Clear purchase date'}).click();
   await expect(date).toHaveValue('');
   assert.equal((await visibleIds(page)).length,12);
-  await date.fill('2026-10-09');
+  await date.fill('2026-10-01');
   await date.fill('');
   await expect(page.locator('[data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
   assert.equal((await visibleIds(page)).length,12);
+  await page.evaluate(()=>{
+    state.orders.push(normalizeLine({id:'a-earlier',order_id:'a-earlier',item_title:'Earlier purchase',line_status:'pending',quantity:1,
+      order:{id:'a-earlier',order_number:'a-earlier',buyer_username:'client-a',sale_date:'2026-09-30T20:00:00Z'}}));
+  });
+  await date.fill('2026-09-30');
+  assert.deepEqual(await visibleIds(page),[...aLines,'a-earlier'],'an earlier pending purchase brings the entire customer group with it');
+  await expect(remaining).toHaveText('1 customer remaining');
+  await date.fill('2026-10-01');
+  assert.deepEqual(await visibleIds(page),['b-today','b-later','unknown-old']);
 });
 
-test('specific due dates match the displayed local day and preserve date-only imports across timezones',async t=>{
+test('purchase dates match the local sale day and preserve date-only imports across timezones',async t=>{
   for (const timezone of ['America/New_York','Pacific/Kiritimati']) {
     const page=await open(t,database(),false,timezone);
     await page.evaluate(()=>{
@@ -699,14 +720,15 @@ test('specific due dates match the displayed local day and preserve date-only im
         ['invalid','invalid',null],
         ['missing',null,null],
       ];
-      state.orders=rows.map(([id,due,precision])=>normalizeLine({id,order_id:id,item_title:id,line_status:'pending',quantity:1,
-        order:{id,order_number:id,buyer_username:id,ship_by_date:due,raw_payload:{date_precision:{ship_by_date:precision}}}}));
+      state.orders=rows.map(([id,sold,precision])=>normalizeLine({id,order_id:id,item_title:id,line_status:'pending',quantity:1,
+        order:{id,order_number:id,buyer_username:id,sale_date:sold,ship_by_date:'2026-10-09T20:00:00Z',
+          imported_at:'2026-10-02T20:00:00Z',raw_payload:{date_precision:{sale_date:precision}}}}));
       state.selectedLine=null;applyOrderFilters();
     });
-    await page.getByLabel('Specific shipping due date').fill('2026-10-02');
+    await page.getByLabel('Earliest pending purchase date').fill('2026-10-02');
     assert.deepEqual(await visibleIds(page),timezone==='America/New_York'
       ? ['timestamp','calendar-day','pure-date'] : ['calendar-day','pure-date']);
-    await page.getByLabel('Specific shipping due date').fill('2026-10-03');
+    await page.getByLabel('Earliest pending purchase date').fill('2026-10-03');
     assert.deepEqual(await visibleIds(page),timezone==='America/New_York' ? [] : ['timestamp']);
   }
 });
@@ -714,15 +736,15 @@ test('specific due dates match the displayed local day and preserve date-only im
 test('fulfilled view clears pending due filters and label handoff opens its entire batch despite a previous filter',async t=>{
   const page=await open(t,database());await prepareDueGroups(page);
   await page.locator('[data-order-due-filter="today"]').click();
-  await page.getByLabel('Specific shipping due date').fill('2026-10-09');
+  await page.getByLabel('Earliest pending purchase date').fill('2026-10-01');
   await page.evaluate(()=>{$('order-status-filter').value='fulfilled';applyOrderFilters();});
   await expect(page.locator('[data-order-due-filter="today"]')).toBeDisabled();
-  await expect(page.getByLabel('Specific shipping due date')).toBeDisabled();
-  await expect(page.getByLabel('Specific shipping due date')).toHaveValue('');
+  await expect(page.getByLabel('Earliest pending purchase date')).toBeDisabled();
+  await expect(page.getByLabel('Earliest pending purchase date')).toHaveValue('');
   await expect(page.locator('#buyer-remaining-count')).toBeHidden();
   await expect(page.locator('[data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
   await page.evaluate(()=>{$('order-status-filter').value='pending';applyOrderFilters();});
-  await page.getByLabel('Specific shipping due date').fill('2026-10-02');
+  await page.getByLabel('Earliest pending purchase date').fill('2026-10-02');
   await page.evaluate(async()=>{
     await openPendingNoInventorySessionForLabel(['b-today'],{batchLines:state.orders.filter(line=>getBuyerKey(line)==='client-b')});
   });
@@ -730,6 +752,6 @@ test('fulfilled view clears pending due filters and label handoff opens its enti
   await expect(page.locator('#buyer-remaining-count')).toBeVisible();
   await expect(page.locator('#buyer-remaining-count')).toHaveText('1 customer remaining');
   await expect(page.locator('[data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
-  await expect(page.getByLabel('Specific shipping due date')).toHaveValue('');
+  await expect(page.getByLabel('Earliest pending purchase date')).toHaveValue('');
   assert.deepEqual(await page.evaluate(()=>[...state.workerNoInventoryLineIds]),['b-today','b-later']);
 });

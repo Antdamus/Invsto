@@ -22,7 +22,6 @@ const state = {
   adminCloseoutScope: "selected",
   orderSort: "created_asc",
   orderDueFilter: "all",
-  orderDueDate: "",
   pendingItemCandidate: null,
   itemSearchTimer: null,
   locationSearchTimer: null,
@@ -3058,16 +3057,32 @@ function filterBuyerBundles(lines, matches) {
   return lines.filter((line) => matchingBuyerKeys.has(getBuyerKey(line)));
 }
 
+function filterBuyersByEarliestPendingPurchase(lines, purchaseDate) {
+  const earliestDates = new Map();
+  for (const line of lines) {
+    if (!isOpenOrderLine(line)) continue;
+    const order = line.order || getOrderFromLine(line);
+    const field = ["sale_date", "paid_on_date"].find(key => order?.[key]);
+    const date = field ? toOrderDateInputValue(order, field) : "";
+    if (!date) continue;
+    const buyerKey = getBuyerKey(line);
+    if (!earliestDates.has(buyerKey) || date < earliestDates.get(buyerKey)) earliestDates.set(buyerKey, date);
+  }
+  return lines.filter(line => earliestDates.get(getBuyerKey(line)) === purchaseDate);
+}
+
 function renderOrderDueFilters() {
   const fulfilled = $("order-status-filter")?.value === "fulfilled";
-  if (fulfilled) state.orderDueFilter = "all";
-  if (state.orderDueFilter !== "date") state.orderDueDate = "";
-  const dateInput = $("order-due-date-filter");
-  if (dateInput) {
-    dateInput.value = state.orderDueDate;
-    dateInput.disabled = fulfilled;
-    dateInput.classList.toggle("is-active", state.orderDueFilter === "date");
+  if (fulfilled) {
+    state.orderDueFilter = "all";
+    clearOrderCreatedDateFilter({ apply: false });
   }
+  const dateInput = $("order-created-date-filter");
+  if (dateInput) {
+    dateInput.disabled = fulfilled;
+    dateInput.classList.toggle("is-active", Boolean(dateInput.value));
+  }
+  $("clear-order-created-date-filter")?.classList.toggle("hidden", !dateInput?.value);
   document.querySelectorAll("[data-order-due-filter]").forEach(button => {
     button.setAttribute("aria-pressed", String(button.dataset.orderDueFilter === state.orderDueFilter));
     button.disabled = fulfilled && button.dataset.orderDueFilter !== "all";
@@ -3076,25 +3091,23 @@ function renderOrderDueFilters() {
 
 function applyOrderFilters() {
   const term = String($("order-search")?.value || "").trim().toLowerCase();
-  const createdDate = $("order-created-date-filter")?.value || "";
   const statusMode = $("order-status-filter")?.value || "pending";
   renderOrderDueFilters();
-  const keepBuyerGroups = ["overdue", "today", "tomorrow", "date"].includes(state.orderDueFilter);
+  const createdDate = $("order-created-date-filter")?.value || "";
+  const filterByDue = ["overdue", "today", "tomorrow"].includes(state.orderDueFilter);
+  const keepBuyerGroups = Boolean(createdDate) || filterByDue;
   let filtered = [...state.orders];
+
+  // Determine each customer's oldest pending purchase before other filters can narrow the group.
+  if (createdDate) filtered = filterBuyersByEarliestPendingPurchase(filtered, createdDate);
 
   if (isCancellationReviewMode(statusMode)) {
     filtered = keepBuyerGroups ? filterBuyerBundles(filtered, isActiveCancellationReviewLine) : filtered.filter(isActiveCancellationReviewLine);
   }
 
-  if (createdDate) {
-    filtered = filterBuyerBundles(filtered, line => toLocalDateInputValue(line.orderCreatedAt || getOrderCreatedAt(line)) === createdDate);
-  }
-
-  if (keepBuyerGroups) {
+  if (filterByDue) {
     filtered = filterBuyerBundles(filtered, line => isOpenOrderLine(line)
-      && (state.orderDueFilter === "date"
-        ? toOrderDateInputValue(line.order, "ship_by_date") === state.orderDueDate
-        : getOrderUrgency(line.order?.ship_by_date)?.level === state.orderDueFilter));
+      && getOrderUrgency(line.order?.ship_by_date)?.level === state.orderDueFilter);
   }
 
   if (state.selectedLiveLot) {
@@ -3134,6 +3147,7 @@ async function applyEbayLaunchOrderSelection() {
   const orderNumbers = getRequestedEbayOrderNumbers();
   if (!orderNumbers.length) return;
   state.orderDueFilter = "all";
+  clearOrderCreatedDateFilter({ apply: false });
 
   state.ebayLaunchSnapshot = getRequestedEbayOrderSnapshot();
   state.ebayLaunchOrderNumbers = new Set(orderNumbers);
@@ -10306,6 +10320,7 @@ async function openPendingNoInventorySessionForLabel(orderNumbers, options = {})
   if (!openMatch) return false;
 
   state.orderDueFilter = "all";
+  clearOrderCreatedDateFilter({ apply: false });
   state.ebayLaunchOrderNumbers = new Set(getUniqueOrderNumbersForLines(batchLines));
   state.ebayLaunchBuyerKeys = new Set(batchLines.map(getBuyerKey).filter(Boolean));
   state.ebayLaunchAllOrderNumbers = new Set(state.ebayLaunchOrderNumbers);
@@ -12092,12 +12107,6 @@ function setupListeners() {
     applyOrderFilters();
   });
   $("order-status-filter")?.addEventListener("change", loadOrders);
-  $("order-due-date-filter")?.addEventListener("change", (event) => {
-    state.orderDueDate = event.target.value;
-    state.orderDueFilter = state.orderDueDate ? "date" : "all";
-    clearEbayLaunchFilter({ apply: false });
-    applyOrderFilters();
-  });
   document.querySelectorAll("[data-order-due-filter]").forEach(button => {
     button.addEventListener("click", () => {
       state.orderDueFilter = button.dataset.orderDueFilter;
@@ -12116,6 +12125,7 @@ function setupListeners() {
     clearEbayLaunchFilter({ apply: false });
     applyOrderFilters();
   });
+  $("clear-order-created-date-filter")?.addEventListener("click", () => clearOrderCreatedDateFilter());
   $("order-sort")?.addEventListener("change", (event) => {
     state.orderSort = event.target.value;
     applyOrderFilters();

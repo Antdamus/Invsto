@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261003-specific-due-date" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261003-earliest-purchase-date" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
   <script src="extension-updates.js?v=20261003" defer></script>
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
@@ -393,13 +393,6 @@
               <span>Cancellations</span>
               <strong id="cancellation-review-count">0</strong>
             </button>
-            <input
-              id="order-created-date-filter"
-              name="pending-orders-created-date"
-              type="date"
-              autocomplete="off"
-              aria-label="Order created date"
-            />
             <select id="order-sort" aria-label="Order queue sort">
               <option value="created_asc">Sale date oldest first</option>
               <option value="created_desc">Sale date newest first</option>
@@ -414,19 +407,22 @@
             </select>
           </div>
 
-          <div class="buyer-due-filters" role="group" aria-label="Shipping due date">
-            <span>Shipping due</span>
-            <button type="button" class="secondary-btn" data-order-due-filter="all" aria-pressed="true">All due dates</button>
-            <button type="button" class="secondary-btn" data-order-due-filter="overdue" aria-pressed="false">Overdue</button>
-            <button type="button" class="secondary-btn" data-order-due-filter="today" aria-pressed="false">Due today</button>
-            <button type="button" class="secondary-btn" data-order-due-filter="tomorrow" aria-pressed="false">Due tomorrow</button>
-            <label class="buyer-due-date-picker">
-              Specific date
-              <input id="order-due-date-filter" name="pending-orders-due-date" type="date" autocomplete="off" aria-label="Specific shipping due date" />
+          <div class="buyer-due-filters">
+            <div class="buyer-shipping-due-options" role="group" aria-label="Shipping due date">
+              <span>Shipping due</span>
+              <button type="button" class="secondary-btn" data-order-due-filter="all" aria-pressed="true">All due dates</button>
+              <button type="button" class="secondary-btn" data-order-due-filter="overdue" aria-pressed="false">Overdue</button>
+              <button type="button" class="secondary-btn" data-order-due-filter="today" aria-pressed="false">Due today</button>
+              <button type="button" class="secondary-btn" data-order-due-filter="tomorrow" aria-pressed="false">Due tomorrow</button>
+            </div>
+            <label class="buyer-purchase-date-picker">
+              Earliest pending purchase
+              <input id="order-created-date-filter" name="pending-orders-created-date" type="date" autocomplete="off" aria-label="Earliest pending purchase date" />
             </label>
+            <button id="clear-order-created-date-filter" type="button" class="secondary-btn hidden" aria-label="Clear purchase date">Clear date</button>
             <output id="buyer-remaining-count" class="count-pill" aria-live="polite" aria-atomic="true">Loading...</output>
           </div>
-          <p class="buyer-due-filter-help">Matches any pending item and keeps that customer's orders together.</p>
+          <p class="buyer-due-filter-help">Purchase date matches the customer's earliest pending purchase. All their orders stay together, regardless of date.</p>
 
           <div id="orders-list" class="orders-list">
             <div class="empty-state">Loading pending orders...</div>
@@ -1160,6 +1156,6 @@
 <script src="phone-camera.js?v=20261003-photo-order-context"></script>
 <script src="shipping-label-reader.js?v=20261003-label-pdfs"></script>
 <script src="order-shipping-labels.js?v=20261003-direct-print"></script>
-<script src="pending-orders.js?v=20261003-specific-due-date"></script>
+<script src="pending-orders.js?v=20261003-earliest-purchase-date"></script>
 </body>
 </html>
