@@ -78,6 +78,54 @@
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(start.value) || !zone.value.trim()) return null;
     return {source:'ebay_event_information',start_local:start.value,timezone_label:zone.value.trim(),title:title.value.trim().slice(0,200),activity_timezone:Intl.DateTimeFormat().resolvedOptions().timeZone};
   }
+  // The named list can be the tall inner virtualizer, not the element that
+  // actually scrolls. Find the overflow viewport before falling back to it.
+  function scrollContainer(node,boundary) {
+    let named=null,overflow=null;
+    for(let el=node;el&&el!==el.ownerDocument.body&&el!==el.ownerDocument.documentElement;el=el.parentElement){
+      if(el.clientHeight>0){
+        const style=el.ownerDocument.defaultView?.getComputedStyle(el);
+        if(/^(auto|scroll|overlay)$/.test(style?.overflowY||'')){
+          if(el.scrollHeight>el.clientHeight+3)return el;
+          overflow ||= el;
+        }
+        if(String(el.className).includes('_list_'))named ||= el;
+      }
+      if(el===boundary)break;
+    }
+    return overflow||named;
+  }
+  function historyContainers(doc) {
+    const activityPanel=doc.querySelector('#activity-panel');
+    const activity=scrollContainer(activityPanel?.querySelector('[class*="_rowContent_"]')?.parentElement||activityPanel?.querySelector('[class*="_list_"]')||activityPanel,activityPanel);
+    const listings=scrollContainer(doc.querySelector('[data-testid="listing-tile"]')?.parentElement);
+    return {activity,listings};
+  }
+  // Record only capture layout/scroll metadata, never page HTML, messages,
+  // input values, cookies or credentials. This also works when UI support is unavailable.
+  function captureDiagnostics(doc) {
+    const containers=historyContainers(doc);
+    const describe=(start,selected)=>{
+      const nodes=[];
+      for(let el=start;el&&el!==doc.body&&el!==doc.documentElement&&nodes.length<8;el=el.parentElement){
+        const style=doc.defaultView?.getComputedStyle(el);
+        nodes.push({tag:el.tagName.toLowerCase(),classes:String(el.className||'').slice(0,160),selected:el===selected,
+          top:Math.round(el.scrollTop),height:el.scrollHeight,viewport:el.clientHeight,overflow:style?.overflowY||''});
+      }
+      return nodes;
+    };
+    const panel=doc.querySelector('#activity-panel');
+    const tiles=[...doc.querySelectorAll('[data-testid="listing-tile"]')];
+    const controls=[...doc.querySelectorAll('button,[role="button"]')].filter(el=>el.getClientRects().length)
+      .map(el=>({label:text(el),disabled:el.disabled===true||el.getAttribute('aria-disabled')==='true'}))
+      .filter(el=>/^(?:[0-9]{1,3}|Next(?: page)?|Previous(?: page)?|Load more|Show more)$/i.test(el.label)).slice(0,12);
+    return {protocol:1,visibility:doc.visibilityState,
+      tile_ids:tiles.map(tile=>tile.querySelector('[data-testid^="checkbox-"]')?.dataset.testid?.match(/^checkbox-(\d{8,20})$/)?.[1]).filter(Boolean).slice(0,80),
+      activity_rows:panel?.querySelectorAll('[class*="_rowContent_"]').length||0,
+      search_active:[...doc.querySelectorAll('input[type="search"],input[placeholder*="search" i]')].some(el=>!!el.value.trim()),
+      listings:describe(tiles[0]?.parentElement,containers.listings),
+      activity:describe(panel?.querySelector('[class*="_rowContent_"]')?.parentElement||panel,containers.activity),controls};
+  }
   // A pass means every viewport was read after it settled, not just that a list
   // was scrolled to its bottom. Counts describe listings, not auction attempts.
   function createHistoryTracker(runId) {
@@ -86,8 +134,17 @@
     function advance(name,node,signature,now) {
       if(!node || node.clientHeight<=0)return false;
       let state=states[name];
-      if(!state || state.node!==node || state.height!==node.scrollHeight || state.viewport!==node.clientHeight){
-        state=states[name]={node,height:node.scrollHeight,viewport:node.clientHeight,passes:0,target:0,signature:null,changed:now,moved:false};
+      if(!state || state.node!==node){
+        state=states[name]={node,height:node.scrollHeight,maxHeight:node.scrollHeight,viewport:node.clientHeight,passes:0,target:0,signature:null,changed:now,moved:false};
+      }else if(state.height!==node.scrollHeight || state.viewport!==node.clientHeight){
+        // eBay remeasures virtual rows when buyer/payment details load. Keep
+        // moving forward instead of returning to the first cards on every resize.
+        // A new largest extent or viewport requires fresh complete passes;
+        // ordinary estimate fluctuations must not invalidate every later pass.
+        if(node.scrollHeight>state.maxHeight+3 || state.viewport!==node.clientHeight)state.passes=0;
+        state.height=node.scrollHeight;state.maxHeight=Math.max(state.maxHeight,node.scrollHeight);state.viewport=node.clientHeight;
+        state.target=Math.min(state.target,Math.max(0,node.scrollHeight-node.clientHeight));
+        state.signature=null;state.changed=now;
       }
       if(!state.moved || Math.abs(node.scrollTop-state.target)>3){node.scrollTop=state.target;state.moved=true;state.signature=null;state.changed=now;return true;}
       if(state.signature!==signature){state.signature=signature;state.changed=now;return true;}
@@ -113,11 +170,9 @@
       if(added){lastNew=now;if(lastPhase==='read'||lastPhase==='needs_review')reset();}
       let layout=true;
       if(ended&&canRead){
-        const activity=doc.querySelector('#activity-panel [class*="_list_"]');
+        const {activity,listings:list}=historyContainers(doc);
         const activitySignature=JSON.stringify(parsed.events.filter(e=>e.source==='activity').map(e=>[e.key,e.listing_id]));
         layout=advance('activity',activity,activitySignature,now);
-        let list=doc.querySelector('[data-testid="listing-tile"]')?.parentElement;
-        while(list&&list!==doc.body&&!String(list.className).includes('_list_'))list=list.parentElement;
         const listingSignature=JSON.stringify(parsed.events.filter(e=>e.source==='listing').map(e=>[e.key,e.listing_id]))+tileIds.join('|');
         if(list&&list!==doc.body)layout=advance('listings',list,listingSignature,now)&&layout;
         else if(soldSelected&&expected!==null&&tileIds.length===expected){
@@ -129,9 +184,9 @@
       const activityPasses=states.activity?.passes||0,listingPasses=states.listings?.passes||0;
       let phase=!ended?'live':!canRead?(lastPhase==='read'&&!added?'read':'paused'):!layout?'needs_review':activityPasses<2||listingPasses<2||now-lastNew<5000?'reading':expected===null||sold.size!==expected?'needs_review':'read';
       lastPhase=phase;
-      return {protocol:1,run_id:runId,phase,sold_expected:expected,sold_seen:sold.size,observed_wins:wins.size,activity_passes:activityPasses,listing_passes:listingPasses,reason:!canRead?reason:!layout?'layout':phase==='needs_review'?'counts':null};
+      return {protocol:1,run_id:runId,phase,sold_expected:expected,sold_seen:sold.size,observed_wins:wins.size,live_sales:money(text(doc.querySelector('#metric-live-sales-value'))),activity_passes:activityPasses,listing_passes:listingPasses,reason:!canRead?reason:!layout?'layout':phase==='needs_review'?'counts':null};
     }
     return {observe};
   }
-  root.InvstoLiveParser = {parse,status,money,key,hasEnded,streamMetadata,createHistoryTracker};
+  root.InvstoLiveParser = {parse,status,money,key,hasEnded,streamMetadata,createHistoryTracker,historyContainers,captureDiagnostics};
 })(typeof globalThis !== 'undefined' ? globalThis : window);

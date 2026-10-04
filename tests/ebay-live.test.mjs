@@ -68,6 +68,32 @@ test('bag closes without invoking a printer; rejected close keeps the selected b
 test('local cancellation requires physical bag confirmation and records the reason',async t=>{const p=await open(t);await p.locator('[data-action=review]').click();await p.locator('#ebay-review-action').selectOption('cancel_release');await p.locator('#ebay-review-note').fill('Checked eBay and removed the watch from the bag');await p.locator('#ebay-review-save').click();assert.match(await p.locator('#ebay-review-error').innerText(),/physical bag/);assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='resolve_ebay_live_attempt')),false);await p.locator('#ebay-review-physical').check();await p.locator('#ebay-review-save').click();await p.locator('#ebay-live-review').waitFor({state:'hidden'});assert.equal(await p.evaluate(()=>calls.find(c=>c.name==='resolve_ebay_live_attempt').args._action),'cancel_release');});
 test('phone layout fits, seller data is escaped, and missing prices stay explicit',async t=>{const p=await open(t);await p.setViewportSize({width:320,height:740});await p.evaluate(()=>{dashboard.attempts[0].listing_title='<img src=x onerror="window.injected=true">';dashboard.attempts[0].closed_at=new Date().toISOString();dashboard.attempts[0].minimum_total=null;dashboard.attempts[0].estimated_profit=null;});await p.locator('#ebay-live-refresh').click();await p.locator('#ebay-live-filter').selectOption('closed');assert.equal(await p.evaluate(()=>!!window.injected),false);await p.locator('#ebay-show-totals > summary').click();assert.match(await p.locator('#ebay-live-totals').innerText(),/1 bags missing/);assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),JSON.stringify(await p.evaluate(()=>[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth).slice(0,18).map(e=>({tag:e.tagName,id:e.id,cls:e.className,width:e.getBoundingClientRect().width,right:e.getBoundingClientRect().right})))));await mkdir(new URL('../test-results',import.meta.url),{recursive:true});await p.evaluate(()=>window.scrollTo(0,0));await p.screenshot({path:new URL('../test-results/ebay-live-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1'),fullPage:true});assert.deepEqual(p.errors,[]);});
 test('receiver acknowledges only the linked event after ingest succeeds',async t=>{const p=await open(t,'?capture=1');await p.evaluate(()=>{window.acks=[];window.addEventListener('message',e=>{if(e.data?.type==='INVSTO_LIVE_ACK')acks.push(e.data)});window.postMessage({type:'INVSTO_LIVE_BATCH',id:'wrong',payload:{event_id:'OTHER',events:[],health:{}}},location.origin);});await p.waitForFunction(()=>acks.length===1);assert.equal(await p.evaluate(()=>acks[0].ok),false);await p.evaluate(()=>window.postMessage({type:'INVSTO_LIVE_BATCH',id:'right',payload:{event_id:'EVENT123',events:[],health:{}}},location.origin));await p.waitForFunction(()=>acks.length===2);assert.equal(await p.evaluate(()=>acks[1].ok),true);assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='ingest_ebay_live_events').length),1);});
+test('receiver clears its recovered capture error without hiding later operator feedback',async t=>{
+ const p=await open(t,'?capture=1');
+ await p.evaluate(()=>{
+  window.acks=[];window.failCapture=true;
+  window.addEventListener('message',e=>{if(e.data?.type==='INVSTO_LIVE_ACK')acks.push(e.data);});
+  const original=supabase.rpc;supabase.rpc=async(name,args)=>name==='ingest_ebay_live_events'&&failCapture?{error:{message:'Capture connection interrupted'}}:original(name,args);
+ });
+ const send=async id=>{await p.evaluate(id=>window.postMessage({type:'INVSTO_LIVE_BATCH',id,payload:{event_id:'EVENT123',events:[],health:{}}},location.origin),id);await p.waitForFunction(id=>acks.some(a=>a.id===id),id);};
+ await send('failed');assert.match(await p.locator('#ebay-live-message').innerText(),/Capture connection interrupted/);
+ await p.evaluate(()=>{failCapture=false;});await send('recovered');assert.match(await p.locator('#ebay-live-message').innerText(),/Capture connected/);
+ assert.equal(await p.locator('#ebay-live-message').evaluate(el=>el.classList.contains('is-error')),false);
+ await p.evaluate(()=>{failCapture=true;});await send('failed-again');
+ await p.evaluate(()=>ebayLive.reviewCurrent());assert.match(await p.locator('#ebay-live-message').innerText(),/Choose an eBay auction/);
+ await p.evaluate(()=>{failCapture=false;});await send('recovered-again');assert.match(await p.locator('#ebay-live-message').innerText(),/Choose an eBay auction/);
+});
+test('a background event connection error is acknowledged without mislabelling the selected show',async t=>{
+ const p=await open(t,'?capture=1');const before=await p.locator('#ebay-live-message').innerText();
+ await p.evaluate(()=>{
+  window.acks=[];window.addEventListener('message',e=>{if(e.data?.type==='INVSTO_LIVE_ACK')acks.push(e.data);});
+  const original=supabase.from;supabase.from=table=>{const q=original(table);if(table==='ebay_live_connections')q.maybeSingle=async()=>({error:{message:'Network interrupted'}});return q;};
+  window.postMessage({type:'INVSTO_LIVE_BATCH',id:'background',payload:{event_id:'UNKNOWN123',events:[],health:{}}},location.origin);
+ });
+ await p.waitForFunction(()=>acks.length===1);assert.equal(await p.evaluate(()=>acks[0].ok),false);
+ assert.match(await p.evaluate(()=>acks[0].error),/Could not check the eBay connection: Network interrupted/);
+ assert.equal(await p.locator('#ebay-live-message').innerText(),before);
+});
 test('extension outbox persists failures until receiver commit and retries after worker restart',async()=>{
  const source=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');let stored={},handler,accept=false,received=[];
  const chrome={storage:{local:{get:async()=>structuredClone(stored),set:async v=>{stored=structuredClone(v)}}},runtime:{id:'extension',onMessage:{addListener:fn=>{handler=fn}}},alarms:{create(){},onAlarm:{addListener(){}}},tabs:{sendMessage:async(tab,msg)=>{received.push(msg);return {ok:accept,error:'Offline'}}}};
@@ -669,6 +695,40 @@ test('history recovery reads every settled viewport twice and separates listings
  assert.equal(result.first.phase,'reading');assert.equal(result.first.activity_passes,0);assert.equal(result.complete.phase,'read');assert.equal(result.complete.sold_seen,3);assert.equal(result.complete.observed_wins,4);assert.deepEqual(result.seen,[0,1,2]);assert.equal(result.paused.phase,'read');assert.equal(result.resized.phase,'reading');assert.equal(result.resized.activity_passes,0);
 });
 
+test('history recovery reports only the exact eBay Live sales metric for event scope checks',async t=>{
+ const p=await parser(t,'<div id="metric-live-sales-value"><span>$6,730.00</span></div><div>Unrelated total $8,083.00</div>');
+ const result=await p.evaluate(()=>{
+  const tracker=InvstoLiveParser.createHistoryTracker('12345678-1234-1234-1234-123456789012');
+  const read=()=>tracker.observe(document,{broadcastEnded:true,events:[]},{canRead:false}).live_sales;
+  const values=[read()];document.querySelector('#metric-live-sales-value').textContent='Unavailable';values.push(read());
+  document.querySelector('#metric-live-sales-value').textContent='$0.00';values.push(read());
+  document.querySelector('#metric-live-sales-value').remove();values.push(read());return values;
+ });
+ assert.deepEqual(result,[6730,null,0,null]);
+});
+
+test('history recovery scrolls the real viewport outside a named inner list and reads all 27 sold items',async t=>{
+ const p=await parser(t,'<button role="tab" aria-selected="true">Sold (27)</button><div id="sold-viewport" style="height:180px;overflow-y:auto"><div class="_list_tiles" id="sold"></div></div><div id="activity-panel"><div id="activity-viewport" style="height:120px;overflow-y:auto"><div class="_list_activity" id="activity"></div></div></div>');
+ const result=await p.evaluate(()=>{
+  const sold=document.getElementById('sold'),activity=document.getElementById('activity');
+  sold.innerHTML=Array.from({length:27},(_,i)=>`<div data-testid="listing-tile" style="height:60px"><input data-testid="checkbox-${123456789012+i}"></div>`).join('');
+  activity.innerHTML=Array.from({length:27},(_,i)=>`<div class="_rowContent_row" style="height:40px">${i}</div>`).join('');
+  const containers=InvstoLiveParser.historyContainers(document),tracker=InvstoLiveParser.createHistoryTracker('12345678-1234-1234-1234-123456789012');
+  const seen=new Set();let now=10000,status;
+  for(let i=0;i<400;i++){
+   const top=containers.listings.scrollTop;
+   for(const [index,tile] of [...sold.children].entries()){
+    const visible=index*60+60>top&&index*60<top+containers.listings.clientHeight;
+    tile.removeAttribute('data-testid');if(visible){tile.setAttribute('data-testid','listing-tile');seen.add(index);}
+   }
+   status=tracker.observe(document,{broadcastEnded:true,events:[]},{canRead:true,now:now+=1300});
+  }
+  return {containers:{activity:containers.activity.id,listings:containers.listings.id},status,seen:[...seen]};
+ });
+ assert.deepEqual(result.containers,{activity:'activity-viewport',listings:'sold-viewport'});
+ assert.equal(result.seen.length,27);assert.equal(result.status.sold_seen,27);assert.equal(result.status.phase,'read');
+});
+
 test('history recovery refuses missing layout and count mismatch and invalidates completion on new evidence',async t=>{
  const p=await parser(t,'<section><div role="tablist"><button role="tab" aria-selected="true">Sold (2)</button></div><div class="_list_tiles" id="sold">'+tile()+'</div></section><div id="activity-panel"><div class="_list_activity" id="activity"></div></div>');
  const result=await p.evaluate(()=>{
@@ -682,6 +742,39 @@ test('history recovery refuses missing layout and count mismatch and invalidates
   return {mismatch,changed,complete,late,paused,layout,top};
  });
  assert.equal(result.mismatch.phase,'needs_review');assert.equal(result.mismatch.reason,'counts');assert.equal(result.changed.phase,'reading');assert.equal(result.complete.phase,'read');assert.equal(result.late.phase,'reading');assert.equal(result.late.activity_passes,0);assert.equal(result.paused.phase,'paused');assert.equal(result.layout.reason,'layout');assert.equal(result.layout.phase,'needs_review');
+});
+
+test('history recovery completes when eBay remeasures virtual card heights at every viewport',async t=>{
+ const p=await parser(t,'<button role="tab" aria-selected="true">Sold (27)</button><div class="_list_tiles" id="sold"></div><div id="activity-panel"><div class="_list_activity" id="activity"></div></div>');
+ const result=await p.evaluate(()=>{
+  const sold=document.getElementById('sold'),activity=document.getElementById('activity');let top=0,height=4536,now=10000,state;
+  Object.defineProperties(sold,{clientHeight:{value:615},scrollHeight:{get:()=>height},scrollTop:{get:()=>top,set:v=>{top=Math.max(0,Math.min(v,height-615));}}});
+  Object.defineProperties(activity,{clientHeight:{value:792},scrollHeight:{value:792}});
+  const tracker=InvstoLiveParser.createHistoryTracker('12345678-1234-1234-1234-123456789012'),seen=new Set();
+  for(let tick=0;tick<250;tick++){
+   // React-window's estimate changes when a different group of cards is mounted.
+   height=4536-(Math.floor(top/350)%3)*5;
+   const first=Math.floor(top/168),last=Math.min(26,Math.floor((top+615)/168));
+   sold.innerHTML=Array.from({length:last-first+1},(_,i)=>{const n=first+i;seen.add(n);return `<div data-testid="listing-tile"><input data-testid="checkbox-${123456789012+n}"></div>`;}).join('');
+   state=tracker.observe(document,{broadcastEnded:true,events:[]},{canRead:true,now:now+=1300});
+  }
+  return {state,seen:seen.size};
+ });
+ assert.equal(result.seen,27);assert.equal(result.state.sold_seen,27);assert.equal(result.state.listing_passes,2);assert.equal(result.state.phase,'read');
+});
+
+test('capture diagnostics expose the actual viewport without collecting private page content or moving it',async t=>{
+ const p=await parser(t,'<input type="password" value="PRIVATE_PASSWORD"><input type="search" value="PRIVATE_SEARCH"><div id="sold-viewport" style="height:180px;overflow-y:auto"><div class="_list_tiles" style="height:800px">'+tile()+'</div></div><div id="activity-panel"><div class="_list_activity" style="height:100px;overflow-y:auto"><div class="_rowContent_row" style="height:500px">PRIVATE_CHAT</div></div></div><button>Next page</button><button>PRIVATE_BUTTON</button>');
+ const result=await p.evaluate(()=>{
+  const viewport=document.getElementById('sold-viewport');viewport.scrollTop=120;
+  const diagnostics=InvstoLiveParser.captureDiagnostics(document);
+  return {diagnostics,top:viewport.scrollTop};
+ });
+ assert.equal(result.top,120);assert.equal(result.diagnostics.search_active,true);assert.equal(result.diagnostics.activity_rows,1);
+ assert.ok(result.diagnostics.listings.some(n=>n.selected&&n.top===120&&n.viewport===180&&n.height>=800));
+ assert.ok(result.diagnostics.activity.some(n=>n.selected&&n.viewport===100));
+ assert.equal(result.diagnostics.tile_ids.length,1);assert.deepEqual(result.diagnostics.controls,[{label:'Next page',disabled:false}]);
+ assert.doesNotMatch(JSON.stringify(result.diagnostics),/PRIVATE_/);
 });
 
 async function recoveryWorker(){
@@ -741,6 +834,10 @@ test('phone recovery progress separates reading from sync and requires a manual 
   dashboard.recovery={phase:'reading',can_close:false,requires_manual_note:false,saved_auctions:3,paid_auctions:2,payment_issues:0,unmatched_notifications:0,sold_seen:2,sold_expected:3,pending:0};
  });await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-history-phase').textContent==='Reading show history…');
  assert.match(await p.locator('#ebay-history-counts').innerText(),/3 auction attempts saved · 2 paid/);assert.match(await p.locator('#ebay-history-coverage').innerText(),/2 of 3 listings/);assert.match(await p.locator('#ebay-history-sync').innerText(),/does not confirm complete history/);
+ await p.evaluate(()=>Object.assign(dashboard.recovery,{captured_total:200,live_sales:300,excluded_listings:1}));await p.locator('#ebay-live-refresh').click();
+ await p.waitForFunction(()=>document.getElementById('ebay-history-coverage').textContent.includes('$200.00'));
+ assert.match(await p.locator('#ebay-history-coverage').innerText(),/Captured item sales: \$200.00. eBay Live sales: \$300.00/);
+ assert.match(await p.locator('#ebay-history-counts').innerText(),/1 later-date listings excluded/);
  await p.locator('#ebay-final-checklist>summary').click();await p.locator('#ebay-final-bags').check();await p.locator('#ebay-final-payments').check();assert.equal(await p.locator('#ebay-complete-show').isDisabled(),true);
  await p.evaluate(()=>Object.assign(dashboard.recovery,{phase:'paused',can_close:true,requires_manual_note:true}));await p.locator('#ebay-live-refresh').click();await p.locator('#ebay-history-note:visible').waitFor();assert.equal(await p.locator('#ebay-complete-show').isDisabled(),true);
  await p.locator('#ebay-history-note').fill('Compared all eBay orders and accounted for the missing auction.');await p.waitForFunction(()=>!document.getElementById('ebay-complete-show').disabled);assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));

@@ -1,4 +1,4 @@
-# Invsto Live Capture (1.4.0)
+# Invsto Live Capture (1.4.4)
 
 This helper copies visible eBay Stream Manager auction and payment evidence into Invsto. It can also prepare a new auction form from an inventory item you explicitly queue. It never clicks Create listing or Start, bids, charges buyers, or cancels eBay orders.
 
@@ -15,6 +15,12 @@ This helper copies visible eBay Stream Manager auction and payment evidence into
 Start capture before the first auction when possible. A finished eBay event can backfill the Activity and Sold history that eBay still exposes. The original saved event date is the show start; the import time stays separate. Recovered history defaults to the first seller selected, because eBay does not identify your on-air employees. Admins can use Change seller on one sale, select several sales for a correction, or correct all earlier sales under Change seller. Each correction also updates its bag. Set the on-air seller during a running show for new auctions.
 
 ## Payment and recovery behavior
+
+- Completed history combines a payment-only duplicate with its single auction win only when the event totals match, a unique official paid order falls in that win's minute, all failures precede payment, and no staff work or conflicting evidence exists. The original record and notifications remain audited. The receiver displays captured item sales alongside eBay Live sales.
+- A finished event's Sold tab can include reused listings sold on a later day. Once both history passes finish, Invsto can exclude an untouched listing with no event Activity only when the dated auction wins exactly match eBay's Live sales total and its matched order belongs to a later day. The original capture and order link remain in audit evidence; the order is available to its actual show. New auction Activity reopens an exclusion for review.
+- If an imported order header lacks payment status, an official paid order line must also have a matching Paid tile and a payment time after every historical failure before that failure can clear. Refunds, cancellations, later failures, and manual reviews remain held.
+- Historical capture follows the actual scrolling viewport around eBay's virtualized lists. The Sold count must still match before history is considered read.
+- Old-event Activity dates such as `Oct 2, 3:09 PM` retain their calendar date. Exact official-order comparisons use the item price before shipping and tax. After a show, an exact unique order with a recorded later payment can resolve earlier failed-payment notifications; the correction is audited. A Paid badge alone cannot resolve conflicting evidence.
 
 - **Won** means waiting for payment. Only explicit Paid evidence, an exact official order match, or an audited staff verification enables a scan.
 - A failure, cancellation or refund stops new scans. Already scanned contents remain reserved until someone checks the physical bag. **Resolve locally and release bag contents** requires that check and a written reason. Cancel or refund the actual order separately in eBay when appropriate.
@@ -50,6 +56,8 @@ Replace the extracted folder's files with the new download, click Reload on the 
 ## Data access
 
 The extension runs only on eBay host-event pages and Invsto Live Sales. It stores the capture outbox/health, receiver tab IDs, per-tab capture event/date metadata and resume state, and the current listing preparation ID/status locally. Supabase authentication stays in the signed-in Invsto page. No browser cookies, passwords, payment card details, shipping addresses or private eBay API tokens are collected.
+
+Finished-show capture also reports bounded layout diagnostics every fifteen seconds: rendered item IDs, row counts, scroll-container sizes/positions and CSS classes, page visibility, whether a search is active, and recognized pagination controls. These help diagnose incomplete history scans. Diagnostics contain no page HTML, chat text or field values, do not move the page, and cannot change payment or sale records.
 
 ## Scan stock into an auction (1.1.3)
 
