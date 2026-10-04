@@ -3855,7 +3855,8 @@ function openEbayLabelPagesForOrderNumbers(orderNumbers = [], { selectedLineCoun
   if (url) window.open(url, "_blank", "noopener,noreferrer");
 
   const orderWord = unique.length === 1 ? "order" : "orders";
-  setStatus(`Opened ${useBulk ? "eBay bulk labels" : "the eBay shipping label page"} for ${unique.length} ${orderWord}: ${unique.join(", ")}.`, "info");
+  const selection = selectedLineCount > 0 ? `${selectedLineCount} selected item${selectedLineCount === 1 ? "" : "s"} across ` : "";
+  setStatus(`Opened ${useBulk ? "eBay bulk labels" : "the eBay shipping label page"} for ${selection}${unique.length} ${orderWord}: ${unique.join(", ")}.`, "info");
 }
 
 function openEbayLabelPagesForLines(lines = []) {
@@ -4337,7 +4338,8 @@ function renderOrders(options = {}) {
       });
       if (buyerLabelButton) {
         buyerLabelButton.disabled = selectedOrderNumbers.length === 0;
-        buyerLabelButton.textContent = selectedOrderNumbers.length > 1 ? `Get ${selectedOrderNumbers.length} Labels` : "Get Label";
+        buyerLabelButton.textContent = selected.length ? `Get labels (${selected.length} item${selected.length === 1 ? "" : "s"})` : "Get labels";
+        buyerLabelButton.title = `${selected.length} selected item lines across ${selectedOrderNumbers.length} eBay order${selectedOrderNumbers.length === 1 ? "" : "s"}. Items with the same order number stay grouped.`;
         buyerLabelButton.addEventListener("click", (event) => {
           event.stopPropagation();
           openBuyerGroupSelectedEbayLabelPages(group);
