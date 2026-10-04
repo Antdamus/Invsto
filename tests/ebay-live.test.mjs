@@ -843,6 +843,12 @@ test('finished capture checks official orders automatically without delaying the
  await p.evaluate(()=>{dashboard.recovery={phase:'checking_orders',order_check:{checked:8,total:55},can_close:false,saved_auctions:63,paid_auctions:57,payment_issues:6,unmatched_notifications:0};});
  await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-history-phase').textContent==='Checking current eBay orders…');
  assert.match(await p.locator('#ebay-history-sync').innerText(),/8 of 55 matching orders checked/);
+ await p.evaluate(()=>Object.assign(dashboard.recovery,{phase:'read',run_id:'run-a',order_check:{run_id:'run-a',state:'complete',checked:55,total:55}}));
+ await p.locator('#ebay-live-refresh').click();
+ await p.waitForFunction(()=>document.getElementById('ebay-history-sync').textContent.includes('Official order check complete (55 of 55 matching orders)'));
+ assert.equal(await p.locator('#ebay-history-phase').innerText(),'History read — payment review needed');
+ await p.evaluate(()=>dashboard.recovery.run_id='run-b');await p.locator('#ebay-live-refresh').click();
+ await p.waitForFunction(()=>!document.getElementById('ebay-history-sync').textContent.includes('Official order check complete'));
  assert.deepEqual(p.errors,[]);
 });
 
