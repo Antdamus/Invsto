@@ -766,7 +766,7 @@ test('receipt returns after original and audit save while preview uploads are bl
   await p.waitForFunction(()=>document.querySelector('[data-queue-video-evidence="line-one"] [data-remove-receipt]')?.disabled===false);
 });
 
-for(const desktop of [true,false])test(`item not found marks exactly one line, survives refresh, and another staff member can clear it (${desktop?'desktop':'phone'})`,async t=>{
+for(const desktop of [true,false])test(`item not found marks exactly one line, survives refresh, and another staff member can mark it found (${desktop?'desktop':'phone'})`,async t=>{
   const p=await screenshotPage(t,{desktop});
   await p.evaluate(()=>{
     state.filteredOrders=state.orders;renderOrders();
@@ -802,12 +802,120 @@ for(const desktop of [true,false])test(`item not found marks exactly one line, s
     itemSearchServer.get('line-two').updated_at=new Date(Date.now()+1000).toISOString();
     await refreshItemSearch(['line-two']);
   });
-  assert.equal(await p.locator('[data-item-search-status="line-two"]').textContent(),'');
+  assert.match(await p.locator('[data-item-search-status="line-two"]').textContent(),/Item found/);
+  assert.equal(await p.locator('[data-line-id="line-two"]').evaluate(row=>row.classList.contains('is-item-found')),true);
   assert.equal(await p.locator('[data-item-search="line-two"]').textContent(),'Item not found');
   assert.deepEqual(await p.evaluate(()=>state.orders.map(line=>line.line_status)),['pending','pending']);
   await p.evaluate(()=>itemSearchFail=true);await p.locator('[data-item-search="line-two"]').click();
   await p.waitForFunction(()=>!itemSearchBusy.has('line-two'));
-  assert.equal(await p.locator('[data-item-search-status="line-two"]').textContent(),'');
+  assert.match(await p.locator('[data-item-search-status="line-two"]').textContent(),/Item found/);
   assert.equal(await p.locator('[data-item-search="line-two"]').isEnabled(),true);
   assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+});
+
+async function foundItemsPage(t,desktop) {
+  const p=await screenshotPage(t,{desktop});
+  await p.evaluate(()=>{
+    state.orders=Array.from({length:100},(_,index)=>({...structuredClone(fixtureLine),id:`item-${index+1}`,item_title:`#${String(index+1).padStart(3,'0')} — Pending jewelry item`,transaction_id:`txn-${index}`}));
+    state.filteredOrders=state.orders;state.selectedLine=null;
+    state.expandedBuyerKeys.add(getBuyerKey(state.orders[0]));
+    state.adminSelectedLineIds=new Set(['item-1','item-18','item-72']);
+    window.itemFoundServer=new Map();window.itemFoundWrites=[];window.itemFoundFail=false;
+    window.itemFoundClock=Date.parse('2026-10-03T20:00:00Z');
+    supabase.rpc=async(name,args)=>{
+      if(name!=='set_pending_order_item_missing')throw Error(`Unexpected write ${name}`);
+      itemFoundWrites.push(args);if(itemFoundFail)return {error:{message:'Save unavailable'}};
+      const row={order_line_id:args._order_line_id,is_missing:args._is_missing,updated_by_email:'finder@example.test',updated_at:new Date(++itemFoundClock).toISOString()};
+      itemFoundServer.set(row.order_line_id,row);return {data:structuredClone(row)};
+    };
+    supabase.from=table=>({select(){return this;},async in(column,ids){
+      if(table!=='pending_order_item_search')throw Error(table);
+      return {data:structuredClone([...itemFoundServer.values()].filter(row=>ids.includes(row.order_line_id)))};
+    }});
+    renderOrders();
+  });
+  return p;
+}
+
+for(const desktop of [true,false])test(`found items turn green and the persistent jump returns to the latest saved item in a 100-line group (${desktop?'desktop':'phone'})`,async t=>{
+  const p=await foundItemsPage(t,desktop);
+  assert.equal(await p.locator('#jump-latest-found').isVisible(),false);
+  const normalColor=await p.locator('[data-line-id="item-18"]').evaluate(row=>getComputedStyle(row).backgroundImage);
+  await p.evaluate(()=>window.unchangedItemRow=document.querySelector('[data-line-id="item-1"]'));
+  await p.locator('[data-item-found="item-72"]').click();
+  await p.waitForFunction(()=>isItemFound(state.orders[71])&&!itemSearchBusy.size);
+  await p.locator('[data-item-found="item-18"]').click();
+  await p.waitForFunction(()=>isItemFound(state.orders[17])&&!itemSearchBusy.size);
+  assert.deepEqual(await p.evaluate(()=>itemFoundWrites),[
+    {_order_line_id:'item-72',_is_missing:false},{_order_line_id:'item-18',_is_missing:false},
+  ]);
+  assert.equal(await p.locator('.buyer-line-btn.is-item-found').count(),2);
+  assert.equal(await p.evaluate(()=>unchangedItemRow===document.querySelector('[data-line-id="item-1"]')),true,'saving a marker does not rebuild 100 item rows');
+  assert.equal(await p.locator('[data-item-found="item-18"]').isDisabled(),true);
+  assert.notEqual(await p.locator('[data-line-id="item-18"]').evaluate(row=>getComputedStyle(row).backgroundImage),normalColor);
+  assert.match(await p.locator('[data-group-item-search]').textContent(),/2 \/ 100 items found/);
+  assert.deepEqual(await p.evaluate(()=>[...state.adminSelectedLineIds]),['item-1','item-18','item-72']);
+  assert.equal(await p.evaluate(()=>state.orders.every(line=>line.line_status==='pending'&&line.fulfilled_quantity===0)),true);
+  // Rehydrate from the shared records, so the jump survives a queue reload.
+  await p.evaluate(async()=>{state.orders.forEach(line=>line.item_search=null);await refreshItemSearch();renderOrders();});
+  await p.locator('[data-line-id="item-100"]').scrollIntoViewIfNeeded();
+  assert.equal(await p.locator('#jump-latest-found').isVisible(),true);
+  await p.locator('#jump-latest-found').click();
+  await p.waitForFunction(()=>document.activeElement?.dataset.lineId==='item-18');
+  assert.ok(await p.locator('[data-line-id="item-18"]').evaluate(row=>{
+    const bounds=row.getBoundingClientRect();return bounds.top<innerHeight&&bounds.bottom>0;
+  }));
+  assert.equal(await p.evaluate(()=>state.selectedLine),null,'jump does not open checkout');
+  assert.deepEqual(await p.evaluate(()=>[...state.adminSelectedLineIds]),['item-1','item-18','item-72']);
+  assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await mkdir(new URL('test-results/',root),{recursive:true});
+  await p.screenshot({path:`test-results/item-found-${desktop?'desktop':'phone'}.png`});
+  await p.locator('[data-item-search="item-18"]').click();
+  await p.waitForFunction(()=>state.orders[17].item_search.is_missing&&!itemSearchBusy.size);
+  assert.equal(await p.locator('[data-line-id="item-18"]').evaluate(row=>row.classList.contains('is-item-found')),false);
+  assert.match(await p.locator('[data-group-item-search]').textContent(),/1 \/ 100 items found.*1 item not found/);
+  await p.locator('#jump-latest-found').click();
+  await p.waitForFunction(()=>document.activeElement?.dataset.lineId==='item-72');
+});
+
+test('found status respects save failures, shared updates, collapsed customer groups and active filters',async t=>{
+  const p=await foundItemsPage(t,true);
+  await p.evaluate(()=>itemFoundFail=true);
+  await p.locator('[data-item-found="item-5"]').click();
+  await p.waitForFunction(()=>itemFoundWrites.length===1&&!itemSearchBusy.size);
+  assert.equal(await p.locator('.is-item-found').count(),0);
+  assert.equal(await p.locator('[data-item-found="item-5"]').isEnabled(),true);
+  assert.equal(await p.locator('#jump-latest-found').isVisible(),false);
+  await p.evaluate(async()=>{
+    itemFoundServer.set('item-5',{order_line_id:'item-5',is_missing:false,updated_by_email:'other-staff@example.test',updated_at:'2026-10-03T21:00:00Z'});
+    await refreshItemSearch(['item-5']);
+    state.orders.push({...structuredClone(fixtureLine),id:'other-buyer-item',order_id:'other-order',order:{...fixtureLine.order,buyer_username:'other-buyer'},
+      item_search:{is_missing:false,updated_at:'2026-10-03T22:00:00Z',updated_by_email:'another@example.test'}});
+    state.filteredOrders=state.orders;
+    setBuyerGroupExpanded(getBuyerKey(state.orders[0]),false,{render:false});renderOrders();
+  });
+  assert.match(await p.locator('#jump-latest-found small').textContent(),/other-buyer/);
+  await p.locator('[data-jump-found-buyer="fixture-buyer"]').click();
+  await p.waitForFunction(()=>document.activeElement?.dataset.lineId==='item-5');
+  assert.match(await p.locator('[data-item-search-status="item-5"]').textContent(),/other-staff@example.test/);
+  // The queue-wide jump follows the current filter; it never exposes a filtered-out customer.
+  await p.evaluate(()=>{state.filteredOrders=state.orders.filter(line=>line.id!=='other-buyer-item');renderOrders();});
+  await p.locator('#jump-latest-found').click();
+  await p.waitForFunction(()=>document.activeElement?.dataset.lineId==='item-5');
+  await p.evaluate(()=>{state.orders[4].line_status='fulfilled';renderOrders();});
+  assert.equal(await p.locator('#jump-latest-found').isVisible(),false);
+});
+
+test('latest found can open a customer beyond the initial queue render chunk',async t=>{
+  const p=await foundItemsPage(t,true);
+  await p.evaluate(()=>{
+    state.orders=Array.from({length:240},(_,i)=>({...structuredClone(fixtureLine),id:`buyer-item-${i}`,order_id:`order-${i}`,
+      order:{...fixtureLine.order,buyer_username:`buyer-${i}`},
+      item_search:i===239?{is_missing:false,updated_at:'2026-10-03T22:00:00Z',updated_by_email:'finder@example.test'}:null}));
+    state.filteredOrders=state.orders;state.expandedBuyerKeys.clear();renderOrders();
+    jumpToLatestFoundItem();
+  });
+  await p.waitForFunction(()=>document.activeElement?.dataset.lineId==='buyer-item-239');
+  assert.ok(await p.locator('[data-line-id="buyer-item-239"]').evaluate(row=>row.getBoundingClientRect().top<innerHeight));
+  assert.equal(await p.evaluate(()=>state.selectedLine),null);
 });

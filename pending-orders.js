@@ -3439,28 +3439,93 @@ function getLineNoteCount(line = {}) {
 
 const itemSearchBusy = new Set();
 const itemSearchReadVersions = new Map();
+function isItemFound(line) {
+  return line.item_search?.is_missing === false;
+}
+function getLatestFoundItem(lines = state.filteredOrders) {
+  return lines.filter(line => isOpenOrderLine(line) && isItemFound(line)).reduce((latest, line) => {
+    return !latest || (Date.parse(line.item_search.updated_at) || 0) > (Date.parse(latest.item_search.updated_at) || 0) ? line : latest;
+  }, null);
+}
+function repaintLatestFoundButton() {
+  const button = $("jump-latest-found");
+  if (!button) return;
+  const line = getLatestFoundItem();
+  button.classList.toggle("hidden", !line);
+  button.disabled = !line;
+  const context = button.querySelector("small");
+  if (context) context.textContent = line ? `${line.order?.buyer_username || "Customer"} · ${line.item_title || "Item"}` : "";
+  button.title = line ? `Jump to latest found: ${line.order?.buyer_username || "Customer"} — ${line.item_title || "Item"}` : "";
+}
+let itemFoundJumpVersion = 0;
+function jumpToLatestFoundItem(buyerKey = "") {
+  const candidates = state.filteredOrders.filter(line => !buyerKey || getBuyerKey(line) === buyerKey);
+  const line = getLatestFoundItem(candidates);
+  if (!line) { repaintLatestFoundButton(); return; }
+  const key = getBuyerKey(line);
+  const version = ++itemFoundJumpVersion;
+  setBuyerGroupExpanded(key, true, {render: false});
+  const findTarget = () => [...document.querySelectorAll(".buyer-line-btn[data-line-id]")].find(row => row.dataset.lineId === line.id);
+  // Existing rows can be reached immediately. Expand a collapsed customer without
+  // opening checkout, changing selections, or rebuilding other customers.
+  if (!findTarget()) renderOrders({buyerKey: key});
+  let attempts = 0;
+  const scrollToLine = () => {
+    if (version !== itemFoundJumpVersion || !state.filteredOrders.some(row => row.id === line.id && isOpenOrderLine(row) && isItemFound(row))) return;
+    const target = findTarget();
+    if (!target) {
+      // Groups beyond the initial render chunk appear on subsequent frames.
+      if (++attempts < 120) window.requestAnimationFrame(scrollToLine);
+      return;
+    }
+    target.tabIndex = -1;
+    target.scrollIntoView({block: "center", behavior: "instant"});
+    target.focus({preventScroll: true});
+    target.classList.add("is-found-jump-target");
+    window.setTimeout(() => target.classList.remove("is-found-jump-target"), 1800);
+  };
+  scrollToLine();
+}
 function renderItemSearchStatus(line) {
   const search = line.item_search;
-  if (!search?.is_missing) return "";
-  return `<span class="item-search-status"><strong>Item not found — needs locating</strong><small>${escapeHtml(search.updated_by_email || "Staff")} · ${escapeHtml(formatDate(search.updated_at))}</small></span>`;
+  if (!search) return "";
+  const found = isItemFound(line);
+  return `<span class="item-search-status ${found ? "is-found" : ""}"><strong>${found ? "✓ Item found" : "Item not found — needs locating"}</strong><small>${escapeHtml(search.updated_by_email || "Staff")} · ${escapeHtml(formatDate(search.updated_at))}</small></span>`;
 }
 function renderGroupItemSearch(lines) {
-  const count = lines.filter(line => isOpenOrderLine(line) && line.item_search?.is_missing).length;
-  return count ? `<span class="buyer-card-meta-pill item-search-marker">${count} item${count === 1 ? "" : "s"} not found</span>` : "";
+  const pending = lines.filter(isOpenOrderLine);
+  const missing = pending.filter(line => line.item_search?.is_missing).length;
+  const found = pending.filter(isItemFound).length;
+  const latest = getLatestFoundItem(pending);
+  return (found ? `<button type="button" class="buyer-card-meta-pill item-found-marker" data-jump-found-buyer="${escapeHtml(getBuyerKey(latest))}" title="Jump to this customer's latest found item">✓ ${found} / ${pending.length} items found · Jump to latest</button>` : "")
+    + (missing ? `<span class="buyer-card-meta-pill item-search-marker">${missing} item${missing === 1 ? "" : "s"} not found</span>` : "");
+}
+function renderItemFoundActions(line) {
+  const busy = itemSearchBusy.has(line.id), found = isItemFound(line), missing = line.item_search?.is_missing === true;
+  const closed = !isOpenOrderLine(line);
+  return `<button type="button" class="secondary-btn buyer-line-action-btn item-found-btn" data-item-found="${escapeHtml(line.id)}" aria-pressed="${found}" ${busy || found || closed ? "disabled" : ""}>${busy ? "Saving..." : found ? "✓ Item found" : "Item found"}</button>
+    <button type="button" class="secondary-btn buyer-line-action-btn item-search-btn" data-item-search="${escapeHtml(line.id)}" aria-pressed="${missing}" ${busy || missing || closed ? "disabled" : ""}>Item not found</button>`;
 }
 function repaintItemSearch(lines) {
   const ids = new Set(lines.map(line => line.id));
   document.querySelectorAll("[data-item-search-status]").forEach(element => {
     if (!ids.has(element.dataset.itemSearchStatus)) return;
     const line = state.orders.find(row => row.id === element.dataset.itemSearchStatus);
-    if (line) element.innerHTML = renderItemSearchStatus(line);
+    if (line) {
+      element.innerHTML = renderItemSearchStatus(line);
+      element.closest(".buyer-line-btn")?.classList.toggle("is-item-found", isItemFound(line));
+    }
   });
-  document.querySelectorAll("[data-item-search]").forEach(button => {
-    if (!ids.has(button.dataset.itemSearch)) return;
-    const line = state.orders.find(row => row.id === button.dataset.itemSearch);
+  document.querySelectorAll("[data-item-search], [data-item-found]").forEach(button => {
+    const id = button.dataset.itemSearch || button.dataset.itemFound;
+    if (!ids.has(id)) return;
+    const line = state.orders.find(row => row.id === id);
     if (!line) return;
-    button.textContent = itemSearchBusy.has(line.id) ? "Saving..." : line.item_search?.is_missing ? "Mark item found" : "Item not found";
-    button.disabled = itemSearchBusy.has(line.id) || (!isOpenOrderLine(line) && !line.item_search?.is_missing);
+    const foundButton = Boolean(button.dataset.itemFound);
+    const pressed = foundButton ? isItemFound(line) : line.item_search?.is_missing === true;
+    button.textContent = itemSearchBusy.has(id) ? "Saving..." : foundButton ? (pressed ? "✓ Item found" : "Item found") : "Item not found";
+    button.setAttribute("aria-pressed", String(pressed));
+    button.disabled = itemSearchBusy.has(id) || pressed || !isOpenOrderLine(line);
   });
   const keys = new Set(lines.map(getBuyerKey));
   document.querySelectorAll(".buyer-order-card").forEach(card => {
@@ -3469,6 +3534,7 @@ function repaintItemSearch(lines) {
       if (host) host.innerHTML = renderGroupItemSearch(state.orders.filter(line => getBuyerKey(line) === card.dataset.buyerKey));
     }
   });
+  repaintLatestFoundButton();
 }
 async function setItemMissing(lineId, missing) {
   const line = state.orders.find(row => row.id === lineId);
@@ -4031,6 +4097,7 @@ function renderOrders(options = {}) {
   const startedAt = nowMs();
   const list = $("orders-list");
   if (!list) return;
+  repaintLatestFoundButton();
   const previousCard = options.buyerKey
     ? [...list.querySelectorAll(".buyer-order-card")].find(card => card.dataset.buyerKey === options.buyerKey) : null;
   const partial = Boolean(previousCard);
@@ -4247,6 +4314,12 @@ function renderOrders(options = {}) {
       if (event.target.closest("[data-retry-group-notes]")) hydrateBuyerGroupNotes(card, group);
     });
     card.addEventListener("click", (event) => {
+      const foundJump = event.target.closest("[data-jump-found-buyer]");
+      if (foundJump) {
+        event.stopPropagation();
+        jumpToLatestFoundItem(foundJump.dataset.jumpFoundBuyer);
+        return;
+      }
       if (event.target.closest("button,a,input,label,select,textarea,.buyer-card-expanded,.buyer-line-list,.buyer-card-note-preview")) return;
       if (!event.target.closest(".buyer-card-head,.buyer-card-meta,.buyer-card-collapsed-hint")) return;
       toggleBuyerGroupExpanded(group.key);
@@ -4381,7 +4454,7 @@ function renderOrders(options = {}) {
         ? `${lineUrgency.label} - ${formatOrderDate(order, "ship_by_date")}`
         : lineDueLabel;
       const button = document.createElement("div");
-      button.className = `buyer-line-btn ${isAdminUser() ? "has-admin-select" : ""} ${isAdminSelected ? "is-admin-selected" : ""} ${state.selectedLine?.id === line.id ? "is-selected" : ""}`;
+      button.className = `buyer-line-btn ${isAdminUser() ? "has-admin-select" : ""} ${isAdminSelected ? "is-admin-selected" : ""} ${state.selectedLine?.id === line.id ? "is-selected" : ""} ${isItemFound(line) ? "is-item-found" : ""}`;
       button.dataset.lineId = line.id;
       const adminSelect = isAdminUser() ? `
         <label class="admin-order-select" title="Select pending line">
@@ -4416,7 +4489,7 @@ function renderOrders(options = {}) {
           <span class="buyer-line-actions">
             <button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) ? "" : "disabled"}>Get Label</button>
             ${lineTaskActionMarkup}
-            <button type="button" class="secondary-btn buyer-line-action-btn item-search-btn" data-item-search="${escapeHtml(line.id)}" ${canActOnLine || line.item_search?.is_missing ? "" : "disabled"}>${line.item_search?.is_missing ? "Mark item found" : "Item not found"}</button>
+            ${renderItemFoundActions(line)}
             ${lineTaskVideoMarkup}
             ${lineCancellationDetailsActionMarkup}
             ${lineCancellationReviewActionMarkup}
@@ -4438,7 +4511,11 @@ function renderOrders(options = {}) {
       const lineCheckbox = button.querySelector("[data-admin-line-select]");
       button.querySelector("[data-item-search]")?.addEventListener("click", event => {
         event.stopPropagation();
-        void setItemMissing(line.id, !line.item_search?.is_missing);
+        void setItemMissing(line.id, true);
+      });
+      button.querySelector("[data-item-found]")?.addEventListener("click", event => {
+        event.stopPropagation();
+        void setItemMissing(line.id, false);
       });
       bindReceiptScreenshotButtons(button);
       lineCheckbox?.addEventListener("click", (event) => event.stopPropagation());
@@ -12319,6 +12396,7 @@ function setupEvidencePhotoViewerListeners() {
 }
 
 function setupListeners() {
+  $("jump-latest-found")?.addEventListener("click", () => jumpToLatestFoundItem());
   $("refresh-orders")?.addEventListener("click", async () => {
     clearEbayLaunchFilter({ apply: false });
     clearOrderSearch({ apply: false });

@@ -40,6 +40,20 @@ begin
   assert (select count(*) from public.pending_order_item_search_events)=count_before+2,'Found history missing';
   raise notice 'ok exact-line shared missing/found flags, actor history, idempotence, permissions, unchanged fulfillment';
 
+  -- Finding an untouched item does not require marking it missing first.
+  select to_jsonb(l) into before_line from public.ebay_order_lines l where l.id=sibling;
+  select * into saved from public.set_pending_order_item_missing(sibling,false);
+  assert saved.is_missing=false and saved.updated_by=coalesce(other_staff,staff),'Direct found mark or actor missing';
+  assert (select count(*) from public.pending_order_item_search_events)=count_before+3,'Direct found audit missing';
+  perform public.set_pending_order_item_missing(sibling,false);
+  assert (select updated_at from public.pending_order_item_search where order_line_id=sibling)=saved.updated_at,'Repeated found changed the latest-found time';
+  assert (select count(*) from public.pending_order_item_search_events)=count_before+3,'Repeated found duplicated history';
+  assert exists(select 1 from public.list_pending_ebay_order_queue_v2('pending',false,100000,0) q
+    where q->>'id'=sibling::text and q #>> '{item_search,is_missing}'='false'),'Shared queue omits direct found mark';
+  select to_jsonb(l) into after_line from public.ebay_order_lines l where l.id=sibling;
+  assert before_line=after_line,'Found mark changed fulfillment or imported order data';
+  raise notice 'ok direct item-found saves, shared queue, stable latest-found time and unchanged order line';
+
   perform set_config('request.jwt.claims',jsonb_build_object('sub',staff,'role','authenticated')::text,true);
   select t.id into task_id from public.ebay_order_tasks t where t.order_id=checks.order_id limit 1;
   if task_id is null then

@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261003-item-search" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261003-item-found" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
   <script src="extension-updates.js?v=20261003" defer></script>
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
@@ -427,6 +427,10 @@
           <div id="orders-list" class="orders-list">
             <div class="empty-state">Loading pending orders...</div>
           </div>
+          <button id="jump-latest-found" type="button" class="secondary-btn latest-found-jump hidden" disabled>
+            <span>Jump to latest found</span>
+            <small></small>
+          </button>
         </aside>
 
         <section class="fulfillment-panel">
@@ -1157,6 +1161,6 @@
 <script src="shipping-label-reader.js?v=20261003-label-pdfs"></script>
 <script src="order-shipping-labels.js?v=20261003-direct-print"></script>
 <script src="receipt-preview-jobs.js?v=20261003-receipt-speed"></script>
-<script src="pending-orders.js?v=20261003-multi-line-labels"></script>
+<script src="pending-orders.js?v=20261003-item-found"></script>
 </body>
 </html>

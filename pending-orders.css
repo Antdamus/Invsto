@@ -5370,6 +5370,40 @@ body.phone-camera-mode .completion-photo-actions .folder-photo-picker { flex: 1 
   border-color: rgba(255, 161, 94, .65);
 }
 .item-search-btn { border-color: rgba(255, 161, 94, .5); }
+.item-search-status.is-found { color: #91f0b7; }
+.item-search-status.is-found small { color: #c0d8c9; }
+.buyer-card-meta-pill.item-found-marker, .item-found-btn {
+  color: #a5f2c3;
+  border-color: rgba(109, 224, 154, .65);
+  background: rgba(40, 121, 74, .24);
+}
+[data-group-item-search] { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.buyer-order-card .buyer-line-btn.is-item-found {
+  background: linear-gradient(90deg, rgba(54, 151, 92, .24), rgba(25, 73, 45, .2));
+  border-color: rgba(109, 224, 154, .65);
+  box-shadow: inset 5px 0 0 #6de09a;
+}
+.buyer-line-btn.is-found-jump-target { outline: 3px solid #a5f2c3; outline-offset: 3px; }
+.latest-found-jump {
+  position: fixed;
+  right: 18px;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: min(330px, calc(100vw - 32px));
+  min-height: 52px;
+  padding: 12px 18px;
+  border-color: #6de09a;
+  background: #193d2a;
+  color: #d6ffe5;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .45);
+}
+.latest-found-jump small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .75rem; font-weight: 400; }
+.orders-panel:has(#jump-latest-found:not(.hidden)) { padding-bottom: 100px; }
+body.pending-order-detail-open #jump-latest-found { display: none; }
 [data-group-item-search]:empty, [data-item-search-status]:empty { display: none; }
 @media (max-width: 760px) {
   .buyer-line-btn, .buyer-line-btn.has-admin-select, .buyer-line-main, .buyer-line-copy {
