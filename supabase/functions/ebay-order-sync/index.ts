@@ -1205,6 +1205,37 @@ async function updateOrderSyncMismatchFlags(
   }
 }
 
+async function refreshCapturedShowOrders(supabase: any, req: Request, eventId: string) {
+  if (!/^[A-Za-z0-9_-]{6,100}$/.test(eventId)) throw Error("Invalid eBay event.");
+  const authorization = req.headers.get("Authorization") || "";
+  if (!authorization.startsWith("Bearer ")) return jsonResponse(401, {ok:false,error:"Sign in to check this show."});
+  const {data:identity,error:authError} = await supabase.auth.getUser(authorization.slice(7));
+  if (authError || !identity?.user) return jsonResponse(401, {ok:false,error:"Sign in to check this show."});
+  const caller = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth:{persistSession:false}, global:{headers:{Authorization:authorization}},
+  });
+  const {data:claim,error} = await caller.rpc("claim_ebay_live_order_check", {_event_id:eventId});
+  if (error) throw error;
+  if (!claim?.orders?.length) return jsonResponse(200, {ok:true,orderCheck:claim});
+  try {
+    const token = await getEbayAccessToken();
+    const orders = await fetchOrders(token, {orderIds:claim.orders});
+    // A partial or wrong response must never advance the checkpoint.
+    const returned = unique(orders.map(extractOrderNumber));
+    if (returned.length !== claim.orders.length || claim.orders.some((id:string)=>!returned.includes(id))) throw Error("Incomplete order response.");
+    const prepared = orders.map(order=>prepareOrder(order,new Map())).filter(Boolean) as PreparedOrder[];
+    const existing = await loadExistingOrders(supabase, claim.orders);
+    if (prepared.length !== claim.orders.length || claim.orders.some((id:string)=>!existing.has(id))) throw Error("Order evidence unavailable.");
+    await updateExistingOrderDetails(supabase, prepared, existing);
+    const {data:finished,error:finishError} = await supabase.rpc("finish_ebay_live_order_check", {_event_id:eventId,_token:claim.token,_ok:true});
+    if (finishError) throw finishError;
+    return jsonResponse(200, {ok:true,orderCheck:finished});
+  } catch (error) {
+    await supabase.rpc("finish_ebay_live_order_check", {_event_id:eventId,_token:claim.token,_ok:false});
+    throw error;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse(405, { ok: false, error: "Method not allowed" });
@@ -1218,6 +1249,7 @@ Deno.serve(async (req) => {
 
   try {
     body = await req.json().catch(() => ({}));
+    if (body.captureEventId) return await refreshCapturedShowOrders(supabase,req,toText(body.captureEventId));
     const responseDeadlineMs = getResponseDeadline(body);
     const dryRun = body.dryRun !== false;
     const shouldReserve = body.reserve !== false;

@@ -110,3 +110,26 @@ test('routine sync refreshes closed-order evidence without reopening or importin
  const patch=writes.find(w=>w.table==='ebay_orders')?.patch;assert.ok(patch);
  assert.equal(patch.status,undefined);assert.equal(patch.buyer_username,'new-name');assert.equal(patch.raw_payload.orderPaymentStatus,'FULLY_REFUNDED');
 });
+
+test('automatic capture check authenticates and uses only server-scoped order IDs',async()=>{
+ const ctx=backend(),calls=[],writes=[];
+ const client={auth:{getUser:async token=>({data:{user:token==='signed-in'?{id:'worker'}:null}})},rpc:async(name,args)=>{calls.push({name,args});return {data:{state:'complete'}};},from(table){assert.equal(table,'ebay_orders');return {update(patch){return {eq:async()=>{writes.push(plain(patch));return {};}};}};}};
+ ctx.createClient=(_url,_key,options)=>{assert.equal(options.global.headers.Authorization,'Bearer signed-in');return {rpc:async(name,args)=>{calls.push({name,args});return {data:{orders:[raw.orderId],token:'lease',state:'checking'}};}};};
+ ctx.getEbayAccessToken=async()=> 'api-token';ctx.fetchOrders=async(_token,body)=>{assert.deepEqual(plain(body),{orderIds:[raw.orderId]});return [{...raw,orderPaymentStatus:'PAID'}];};
+ ctx.loadExistingOrders=async()=>new Map([[raw.orderId,existing]]);
+ const unsigned=await ctx.refreshCapturedShowOrders(client,new Request('https://example.invalid'),'EVENT123');assert.equal(unsigned.status,401);assert.equal(calls.length,0);
+ const result=await ctx.refreshCapturedShowOrders(client,new Request('https://example.invalid',{headers:{Authorization:'Bearer signed-in'}}),'EVENT123');
+ assert.equal(result.status,200);assert.equal(writes.length,1);assert.equal(writes[0].status,undefined);
+ assert.deepEqual(calls.map(c=>c.name),['claim_ebay_live_order_check','finish_ebay_live_order_check']);assert.equal(calls[1].args._ok,true);
+ ctx.fetchOrders=async()=>[];writes.length=0;calls.length=0;
+ await assert.rejects(()=>ctx.refreshCapturedShowOrders(client,new Request('https://example.invalid',{headers:{Authorization:'Bearer signed-in'}}),'EVENT123'),/Incomplete order response/);
+ assert.equal(writes.length,0);assert.equal(calls.at(-1).args._ok,false);
+});
+
+test('automatic capture check does not call eBay when another receiver owns the batch',async()=>{
+ const ctx=backend();ctx.createClient=()=>({rpc:async()=>({data:{orders:[],state:'checking'}})});
+ ctx.getEbayAccessToken=async()=>{throw Error('Should not fetch eBay');};
+ const client={auth:{getUser:async()=>({data:{user:{id:'worker'}}})}};
+ const result=await ctx.refreshCapturedShowOrders(client,new Request('https://example.invalid',{headers:{Authorization:'Bearer signed-in'}}),'EVENT123');
+ assert.equal(result.status,200);assert.equal((await result.json()).orderCheck.state,'checking');
+});

@@ -9,7 +9,7 @@ declare actor uuid:=(select user_id from public.employees where role='admin' and
  stream jsonb:='{"source":"ebay_event_information","title":"Overnight buyer fixture","start_local":"2026-09-30T23:59","timezone_label":"EDT","activity_timezone":"America/New_York"}';
 begin
  perform set_config('request.jwt.claim.sub',actor::text,true);
- foreach mode in array array['normal','preexisting_alias','missing_alias','different_order','different_minute','second_win','claimed','manual','partial','refund','cancel'] loop
+ foreach mode in array array['normal','preexisting_alias','same_minute','triple_retry','missing_alias','different_order','different_minute','second_win','claimed','manual','partial','refund','cancel'] loop
   counter:=counter+1;event:='ALIAS-'||replace(gen_random_uuid()::text,'-','');item:=(800000003000+counter)::text;
   perform public.start_ebay_live_capture_from_stream(event,seller,'{}',stream);
   insert into public.ebay_orders(order_number,buyer_username,sale_date,paid_on_date,raw_payload)
@@ -21,12 +21,15 @@ begin
   end if;
   obs:=jsonb_build_object('key','win','kind','won','listing_id',item,'title','Renamed buyer sale','buyer','former-name','amount',55,'currency','USD','source','activity','time_label','Oct 1, 12:17 AM');
   health:=jsonb_build_object('stream',stream,'broadcast_ended',true,'observed_at',now(),'pending',0);
+  if mode='triple_retry' then perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"failure","kind":"failed","time_label":"Oct 1, 12:16 AM"}'),health);end if;
   perform public.ingest_ebay_live_events(event,jsonb_build_array(obs,obs||'{"key":"tile","kind":"paid","source":"listing","buyer":"current-name","time_label":null}'),health);
   select id into win from public.ebay_live_attempts where event_id=event and win_key='win';
-  select id into stub from public.ebay_live_attempts where event_id=event and win_key is null;
+  select id into stub from public.ebay_live_attempts where event_id=event and win_key is null and buyer='current-name';
+  if mode='same_minute' then perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"failure","kind":"failed"}'),health);end if;
   perform pg_temp.verify(win is not null and stub is not null,mode||': historical and current buyer names initially remain distinct');
   update public.ebay_orders set buyer_username='current-name',raw_payload=raw_payload||jsonb_build_object('ebay_buyer_identity',
    jsonb_build_object('source','ebay_fulfillment_api','order_number',order_number,'current_username','current-name','aliases',jsonb_build_array('former-name','current-name'))) where id=ord;
+  if mode in ('same_minute','triple_retry') then update public.ebay_orders set raw_payload=raw_payload||jsonb_build_object('ebay_order_evidence',jsonb_build_object('source','ebay_fulfillment_api','order_number',order_number,'checked_at',now())) where id=ord;end if;
   recovery:=jsonb_build_object('protocol',1,'run_id',gen_random_uuid(),'phase','read','sold_seen',1,'sold_expected',1,'observed_wins',1,'activity_passes',2,'listing_passes',2,'live_sales',55);
   if mode='missing_alias' then update public.ebay_orders set raw_payload=raw_payload-'ebay_buyer_identity' where id=ord;end if;
   if mode='different_order' then update public.ebay_orders set raw_payload=jsonb_set(raw_payload,'{ebay_buyer_identity,order_number}','"unrelated-order"') where id=ord;end if;
@@ -41,11 +44,11 @@ begin
   if mode='refund' then update public.ebay_order_lines set raw_payload=raw_payload||'{"orderPaymentStatus":"FULLY_REFUNDED"}' where id=line;end if;
   if mode='cancel' then update public.ebay_order_lines set raw_payload=raw_payload||'{"orderCancelStatus":"IN_PROGRESS"}' where id=line;end if;
   perform public.ingest_ebay_live_events(event,'[]',health||jsonb_build_object('recovery',recovery));
-  if mode in ('normal','preexisting_alias','refund','cancel') then
+  if mode in ('normal','preexisting_alias','same_minute','triple_retry','refund','cancel') then
    perform pg_temp.verify((select merged_into=win and resolved_at is not null from public.ebay_live_attempts where id=stub),mode||': same-order buyer change combines the duplicate without deleting it');
    perform pg_temp.verify((select buyer='current-name' and order_line_id=line from public.ebay_live_attempts where id=win),mode||': canonical buyer and exact order remain linked');
    perform pg_temp.verify((select buyer='former-name' and attempt_id=win from public.ebay_live_observations where event_id=event and source_key='win'),mode||': original Activity buyer remains in evidence');
-   perform pg_temp.verify((select payment_state=(case when mode in ('normal','preexisting_alias') then 'paid' when mode='cancel' then 'cancelled' else 'review' end) from public.ebay_live_attempts where id=win),mode||': latest negative line evidence overrides stale paid header');
+   perform pg_temp.verify((select payment_state=(case when mode in ('normal','preexisting_alias','same_minute','triple_retry') then 'paid' when mode='cancel' then 'cancelled' else 'review' end) from public.ebay_live_attempts where id=win),mode||': latest negative line evidence overrides stale paid header');
    perform public.reconcile_ebay_live_orders_internal(event);
    perform pg_temp.verify((select count(*)=1 from public.ebay_live_audit where event_id=event and action='buyer_alias_capture_combined'),mode||': replay is idempotent and audited');
   else

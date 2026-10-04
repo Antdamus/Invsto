@@ -30,6 +30,24 @@
     throw Error('Paste the eBay Stream Manager event URL.');
   }
   async function rpc(name,args) {const {data,error}=await window.supabase.rpc(name,args);if(error)throw Error(error.message);return data;}
+  const orderChecks=new Map();
+  function checkCapturedOrders(eventId,history){
+    if(new URL(location.href).searchParams.get('capture')!=='1'||history?.phase!=='read'||!history.run_id||!window.supabase.functions?.invoke)return;
+    const key=eventId+'|'+history.run_id,prior=orderChecks.get(key);
+    if(prior?.busy||prior?.done||prior?.next>Date.now())return;
+    if(data.connection?.event_id===eventId&&data.connection.order_check?.run_id===history.run_id&&data.connection.order_check.state==='complete')return;
+    const state={busy:true,done:false,next:Date.now()+10000};orderChecks.set(key,state);
+    // Saving observations is acknowledged independently; an API refresh must
+    // never delay the extension's ACK or make it resend already saved history.
+    void (async()=>{
+      try{
+        const result=await window.supabase.functions.invoke('ebay-order-sync',{body:{captureEventId:eventId}});
+        if(result.error||!result.data?.ok)throw Error('Current eBay orders could not be checked. Retrying automatically.');
+        state.done=result.data.orderCheck?.state==='complete';
+      }catch(error){state.next=Date.now()+60000;if(data.connection?.event_id===eventId)message(error.message,true);}
+      finally{state.busy=false;}
+    })();
+  }
   async function refresh() {
     if(!api || !session()) {loadedSession=null;data={connection:null,attempts:[],unmatched:[]};render();return;}
     if(loading) {await loading;if(loadedSession!==session())return refresh();return;}
@@ -50,6 +68,7 @@
         const selected=current();
         if(selected?.closed_at && !busy){lastClosedId=selected.id;api.clearBag();browsing=false;}
         render();api.updateGate();
+        if(data.connection?.broadcast_ended_at&&!data.connection.review_completed_at)checkCapturedOrders(data.connection.event_id,data.connection.history_recovery);
       } catch(error) {if(id!==session())return;sessionError=true;message('Live queue unavailable: '+error.message,true);renderRunningTotals();api.updateGate();}
     })();
     try{await loading;}finally{loading=null;}
@@ -160,7 +179,7 @@
   }
   function renderRecovery(){
     const r=data.recovery,phase=r?.phase||'unknown';
-    const labels={live:'Live capture',reading:'Reading show history…',syncing:'Saving captured history…',read:'Available history read',paused:'History reading paused',needs_review:'History needs review',unknown:'History coverage not verified'};
+    const labels={live:'Live capture',reading:'Reading show history…',syncing:'Saving captured history…',checking_orders:'Checking current eBay orders…',read:'Available history read',paused:'History reading paused',needs_review:'History needs review',unknown:'History coverage not verified'};
     const reviewAfterRead=phase==='read'&&(Number(r?.payment_issues)>0||Number(r?.unmatched_notifications)>0);
     $('ebay-history-phase').textContent=reviewAfterRead?(Number(r?.payment_issues)>0?'History read — payment review needed':'History read — notifications need review'):labels[phase]||labels.unknown;
     $('ebay-history-phase').classList.toggle('is-error',['paused','needs_review'].includes(phase)||reviewAfterRead);
@@ -168,7 +187,8 @@
     $('ebay-history-coverage').textContent=(r?.sold_expected!=null?`eBay Sold: ${r.sold_seen||0} of ${r.sold_expected} listings read.`:'eBay’s Sold listing count has not been verified.')+(r?.captured_total!=null&&r?.live_sales!=null?` Captured item sales: ${money(r.captured_total)}. eBay Live sales: ${money(r.live_sales)}.`:'')+(r?.failed_without_win?` ${r.failed_without_win} failed attempts without a win (${money(r.failed_without_win_total)}) are outside the sales total.`:'');
     const detail={live:'Capture resumes for this show after an eBay refresh. After the broadcast, it checks Activity and Sold history.',reading:'Keep capture running while it reads Activity and Sold. Synced data does not mean the history scan has finished.',syncing:'Keep the Invsto receiver signed in while the remaining notifications are saved.',read:'Compare the saved auctions and totals with the final eBay orders before closing.',paused:'Resume capture on the show computer. If automatic reading is unavailable, compare the complete eBay history and record a manual check below.',needs_review:'The available page history or listing counts could not be fully matched. Keep capture running, review the missing records against eBay, and account for them before closing.',unknown:'Compare the complete eBay auction history before closing this show.'};
     $('ebay-history-detail').textContent=(detail[phase]||detail.unknown)+(reviewAfterRead?' Matching history totals do not mean every buyer paid. Original auction totals include wins that were later cancelled or refunded; review their payment status before packing.':'');
-    $('ebay-history-sync').textContent=Number(r?.pending||0)>0?`${r.pending} notifications still syncing.`:'Captured data saved. This alone does not confirm complete history.';
+    $('ebay-history-sync').textContent=phase==='checking_orders'?`${r.order_check?.checked||0} of ${r.order_check?.total||0} matching orders checked. ${r.order_check?.error||'Refreshing buyer names and payment status automatically.'}`:Number(r?.pending||0)>0?`${r.pending} notifications still syncing.`:'Captured data saved. This alone does not confirm complete history.';
+    if(phase==='checking_orders')$('ebay-history-detail').textContent='The visible history has been saved. Keep this receiver open while Invsto compares it with current official orders.';
   }
   function renderPostShow() {
     const ended=postShow(),checks=data.post_show;
@@ -419,6 +439,7 @@
         }
         await rpc('ingest_ebay_live_events',{_event_id:payload.event_id,_events:payload.events,_health:payload.health});
         window.postMessage({type:'INVSTO_LIVE_ACK',id,ok:true},location.origin);
+        checkCapturedOrders(payload.event_id,payload.health?.recovery);
         if(captureError?.eventId===payload.event_id&&$('ebay-live-message')?.textContent===captureError.text)message('Capture connected. Received data saved.');
         if(data.connection?.event_id===payload.event_id)await refresh();
       }catch(error){

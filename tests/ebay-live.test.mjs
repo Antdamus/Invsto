@@ -828,6 +828,24 @@ test('receiver resume checks existing shows without opening seller setup or chan
  assert.equal(await p.evaluate(()=>calls.some(c=>/start_ebay_live|set_ebay_live_seller|apply_ebay_live_stream_metadata/.test(c.name))),false);assert.equal(await p.evaluate(()=>dashboard.connection.active_seller_id),'seller');
 });
 
+test('finished capture checks official orders automatically without delaying the save acknowledgement',async t=>{
+ const p=await open(t,'?capture=1');await p.evaluate(()=>{
+  window.orderCalls=[];window.acks=[];window.completeCheck=null;
+  supabase.functions={invoke:async(name,args)=>{orderCalls.push({name,args});return new Promise(resolve=>completeCheck=()=>resolve({data:{ok:true,orderCheck:{state:'complete'}}}));}};
+  window.addEventListener('message',e=>{if(e.data?.type==='INVSTO_LIVE_ACK')acks.push(e.data);});
+  for(const id of ['one','two'])window.postMessage({type:'INVSTO_LIVE_BATCH',id,payload:{event_id:'EVENT123',events:[],health:{recovery:{phase:'read',run_id:'run-a'}}}},location.origin);
+ });await p.waitForFunction(()=>acks.length===2&&orderCalls.length===1);
+ assert.equal(await p.evaluate(()=>acks.every(a=>a.ok)),true);
+ assert.deepEqual(await p.evaluate(()=>orderCalls[0]),{name:'ebay-order-sync',args:{body:{captureEventId:'EVENT123'}}});
+ await p.evaluate(()=>completeCheck());
+ await p.evaluate(()=>window.postMessage({type:'INVSTO_LIVE_BATCH',id:'three',payload:{event_id:'EVENT123',events:[],health:{recovery:{phase:'read',run_id:'run-a'}}}},location.origin));
+ await p.waitForFunction(()=>acks.length===3);assert.equal(await p.evaluate(()=>orderCalls.length),1);
+ await p.evaluate(()=>{dashboard.recovery={phase:'checking_orders',order_check:{checked:8,total:55},can_close:false,saved_auctions:63,paid_auctions:57,payment_issues:6,unmatched_notifications:0};});
+ await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-history-phase').textContent==='Checking current eBay orders…');
+ assert.match(await p.locator('#ebay-history-sync').innerText(),/8 of 55 matching orders checked/);
+ assert.deepEqual(p.errors,[]);
+});
+
 test('complete history keeps real payment holds visible and separates failed bids from sales',async t=>{
  const p=await open(t);await p.evaluate(()=>{
   dashboard.connection.broadcast_ended_at=new Date().toISOString();
