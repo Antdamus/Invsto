@@ -884,7 +884,7 @@ async function loadExistingOrders(supabase: any, orderNumbers: string[]): Promis
     const chunk = orderNumbers.slice(index, index + 100);
     const { data, error } = await supabase
       .from("ebay_orders")
-      .select("id,order_number,status,raw_payload")
+      .select("id,order_number,buyer_username,status,raw_payload")
       .in("order_number", chunk);
     if (error) throw error;
     (data || []).forEach((order: any) => existing.set(order.order_number, order));
@@ -892,16 +892,31 @@ async function loadExistingOrders(supabase: any, orderNumbers: string[]): Promis
   return existing;
 }
 
-function existingOrderDetailsUpdate(entry: PreparedOrder, existing: any, now: string) {
+function existingOrderDetailsUpdate(entry: PreparedOrder, existing: any, now: string, includeEvidence = true) {
   const finance = entry.order.raw_payload?.ebayFinance;
   const rawPayload = existing.raw_payload && typeof existing.raw_payload === "object" ? existing.raw_payload : {};
   const dates = Object.fromEntries(["sale_date", "paid_on_date", "ship_by_date"]
     .map(field => [field, toIsoDate(entry.order[field])]).filter(([, value]) => value));
-  if (!Object.keys(dates).length && !finance) return null;
+  const incoming = entry.order.raw_payload as any;
+  const evidence = includeEvidence && incoming?.source === "ebay_fulfillment_api";
+  const buyer = evidence ? toText(entry.order.buyer_username) : "";
+  const aliases = unique([
+    ...(Array.isArray(rawPayload.ebay_buyer_identity?.aliases) ? rawPayload.ebay_buyer_identity.aliases : []),
+    existing.buyer_username, rawPayload.order?.buyer?.username, buyer,
+  ].map(toText).filter(Boolean)).slice(-20);
+  if (!Object.keys(dates).length && !finance && !evidence) return null;
   return {
     ...dates,
+    ...(buyer ? {buyer_username: buyer} : {}),
     raw_payload: {
       ...rawPayload,
+      ...(evidence ? {
+        ...Object.fromEntries(["orderPaymentStatus", "orderFulfillmentStatus", "orderCancelStatus"]
+          .map(key => [key, toText(incoming[key])]).filter(([, value]) => value)),
+        ebay_order_evidence: {source: "ebay_fulfillment_api", checked_at: now, order_number: entry.order.order_number},
+        ...(buyer ? {ebay_buyer_identity: {source: "ebay_fulfillment_api", order_number: entry.order.order_number,
+          current_username: buyer, aliases, checked_at: now}} : {}),
+      } : {}),
       ...(Object.keys(dates).length ? {
         date_precision: {...(rawPayload.date_precision || {}), ...Object.fromEntries(Object.keys(dates).map(field => [field, "timestamp"]))},
         ebay_order_dates: {source: "ebay_fulfillment_api", synced_at: now, ...dates},
@@ -916,12 +931,13 @@ async function updateExistingOrderDetails(
   supabase: any,
   prepared: PreparedOrder[],
   existingOrders: Map<string, any>,
+  includeEvidence = true,
 ) {
   const now = new Date().toISOString();
   for (const entry of prepared) {
     const existing = existingOrders.get(entry.order.order_number);
     if (!existing?.id) continue;
-    const update = existingOrderDetailsUpdate(entry, existing, now);
+    const update = existingOrderDetailsUpdate(entry, existing, now, includeEvidence);
     if (!update) continue;
     const { error } = await supabase
       .from("ebay_orders")
@@ -1215,23 +1231,26 @@ Deno.serve(async (req) => {
     runId = run.id;
 
     const token = await getEbayAccessToken();
-    if (body.datesOnly === true && (!Array.isArray(body.orderIds) || !body.orderIds.length)) {
-      throw new Error("Choose explicit order IDs when refreshing order dates.");
+    if ((body.datesOnly === true || body.detailsOnly === true) && (!Array.isArray(body.orderIds) || !body.orderIds.length)) {
+      throw new Error("Choose explicit order IDs when refreshing order details.");
     }
     let rawOrders = await fetchOrders(token, body);
-    if (body.datesOnly === true) {
-      // Repair existing timestamps without importing lines, reserving stock,
+    if (body.datesOnly === true || body.detailsOnly === true) {
+      // Refresh existing dates/evidence without importing lines, reserving stock,
       // changing fulfillment status, or running cancellation/finance workflows.
       const prepared = rawOrders.map(order => prepareOrder(order, new Map())).filter(Boolean) as PreparedOrder[];
       const existing = await loadExistingOrders(supabase, prepared.map(entry => entry.order.order_number));
       const preview = prepared.filter(entry => existing.has(entry.order.order_number)).map(entry => ({
         orderNumber: entry.order.order_number, saleDate: entry.order.sale_date,
         paidOnDate: entry.order.paid_on_date, shipByDate: entry.order.ship_by_date,
+        ...(body.detailsOnly === true ? {buyer: entry.order.buyer_username, payment: getOrderPaymentStatus(entry.source),
+          cancellation: getOrderCancelStatus(entry.source)} : {}),
       }));
-      if (!dryRun) await updateExistingOrderDetails(supabase, prepared, existing);
+      if (!dryRun) await updateExistingOrderDetails(supabase, prepared, existing, body.detailsOnly === true);
       await supabase.from("ebay_order_sync_runs").update({status: "completed", orders_seen: rawOrders.length,
         orders_imported: 0, lines_imported: 0, lines_reserved: 0, finished_at: new Date().toISOString()}).eq("id", runId);
-      return jsonResponse(200, {ok: true, runId, dryRun, datesOnly: true, ordersUpdated: dryRun ? 0 : preview.length, preview});
+      return jsonResponse(200, {ok: true, runId, dryRun, datesOnly: body.datesOnly === true, detailsOnly: body.detailsOnly === true,
+        ordersUpdated: dryRun ? 0 : preview.length, preview});
     }
     const orderIdsRequested = Array.isArray(body.orderIds)
       ? unique(body.orderIds.map(toText).filter(Boolean)).slice(0, MAX_ORDER_LIMIT)
@@ -1323,7 +1342,12 @@ Deno.serve(async (req) => {
       .map((order) => prepareOrder(order, itemBySku, financeByOrderNumber.get(extractOrderNumber(order)) || []))
       .filter(Boolean) as PreparedOrder[];
 
-    const orderNumbers = prepared.map((entry) => entry.order.order_number);
+    // Existing fulfilled/archived orders still need current refund and buyer
+    // evidence. Keep their inventory/fulfillment records outside importable.
+    const evidencePrepared = rawOrders
+      .map(order => prepareOrder(order, itemBySku, financeByOrderNumber.get(extractOrderNumber(order)) || []))
+      .filter(Boolean) as PreparedOrder[];
+    const orderNumbers = evidencePrepared.map((entry) => entry.order.order_number);
     const existingOrders = await loadExistingOrders(supabase, orderNumbers);
     const importable = prepared.filter((entry) => !CLOSED_LOCAL_ORDER_STATUSES.has(String(existingOrders.get(entry.order.order_number)?.status || "").toLowerCase()));
     const skippedClosed = prepared.length - importable.length;
@@ -1415,7 +1439,7 @@ Deno.serve(async (req) => {
       .filter(([orderNumber]) => cancellationOrderNumbers.has(orderNumber))
       .map(([, orderId]) => orderId));
 
-    await updateExistingOrderDetails(supabase, importable, existingOrders);
+    await updateExistingOrderDetails(supabase, evidencePrepared, existingOrders);
 
     const orderIds = unique([...orderIdByNumber.values()].filter(Boolean));
     const existingLines = await loadExistingLines(supabase, orderIds);

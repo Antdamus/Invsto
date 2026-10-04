@@ -59,3 +59,54 @@ test('timestamp repair dry run is read-only for orders; apply updates dates with
     assert.ok(writes.filter(w=>w.table==='ebay_orders').every(w=>w.patch.status===undefined&&w.patch.fulfilled_quantity===undefined));
   }
 });
+
+test('routine sync refreshes official payment evidence and preserves old buyer names for the same order',()=>{
+ const ctx=backend();
+ const prior={...existing,buyer_username:'old-name',raw_payload:{...existing.raw_payload,orderPaymentStatus:'PAID'}};
+ const prepared=ctx.prepareOrder({...raw,buyer:{username:'new-name'},orderPaymentStatus:'FULLY_REFUNDED',cancelStatus:{cancelState:'CANCEL_COMPLETE'}},new Map());
+ const patch=plain(ctx.existingOrderDetailsUpdate(prepared,prior,'checked'));
+ assert.equal(patch.buyer_username,'new-name');assert.equal(patch.raw_payload.orderPaymentStatus,'FULLY_REFUNDED');
+ assert.equal(patch.raw_payload.orderCancelStatus,'CANCEL_COMPLETE');assert.equal(patch.status,undefined);
+ assert.deepEqual(patch.raw_payload.ebay_buyer_identity,{source:'ebay_fulfillment_api',order_number:raw.orderId,current_username:'new-name',aliases:['old-name','new-name'],checked_at:'checked'});
+ assert.deepEqual(patch.raw_payload.cancellation_review,existing.raw_payload.cancellation_review);
+ const again=plain(ctx.existingOrderDetailsUpdate(prepared,{...prior,...patch},'again'));
+ assert.deepEqual(again.raw_payload.ebay_buyer_identity.aliases,['old-name','new-name']);
+ const dates=plain(ctx.existingOrderDetailsUpdate(prepared,prior,'checked',false));
+ assert.equal(dates.buyer_username,undefined);assert.equal(dates.raw_payload.orderPaymentStatus,'PAID');assert.equal(dates.raw_payload.ebay_buyer_identity,undefined);
+});
+
+test('targeted order-detail refresh updates evidence without importing lines or reserving stock',async()=>{
+ const ctx=backend(),writes=[];
+ ctx.getEbayAccessToken=async()=> 'fixture-token';ctx.fetchOrders=async()=>[{...raw,orderPaymentStatus:'FULLY_REFUNDED',buyer:{username:'new-name'}}];
+ ctx.loadExistingOrders=async()=>new Map([[raw.orderId,{...existing,buyer_username:'old-name'}]]);
+ ctx.createClient=()=>({from(table){return {
+  insert(){assert.equal(table,'ebay_order_sync_runs');return {select(){return {single:async()=>({data:{id:'run-a'}})};}};},
+  update(patch){return {eq:async()=>{writes.push({table,patch:plain(patch)});return {};}};},
+ };}});
+ for(const dryRun of [true,false]){
+  writes.length=0;const response=await ctx.handler(new Request('https://example.invalid/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({detailsOnly:true,dryRun,orderIds:[raw.orderId]})}));
+  const result=await response.json();assert.equal(response.status,200);assert.equal(result.preview[0].buyer,'new-name');assert.equal(result.preview[0].payment,'FULLY_REFUNDED');
+  assert.equal(writes.filter(w=>w.table==='ebay_orders').length,dryRun?0:1);assert.ok(writes.every(w=>['ebay_orders','ebay_order_sync_runs'].includes(w.table)));
+  if(!dryRun){const patch=writes.find(w=>w.table==='ebay_orders').patch;assert.equal(patch.buyer_username,'new-name');assert.equal(patch.status,undefined);assert.equal(patch.raw_payload.orderPaymentStatus,'FULLY_REFUNDED');}
+ }
+});
+
+test('routine sync refreshes closed-order evidence without reopening or importing its lines',async()=>{
+ const ctx=backend(),writes=[];
+ ctx.getEbayAccessToken=async()=> 'fixture-token';
+ ctx.fetchOrders=async()=>[{...raw,orderPaymentStatus:'FULLY_REFUNDED',orderFulfillmentStatus:'FULFILLED',buyer:{username:'new-name'}}];
+ ctx.hydrateCancellationOrderDetails=async(_token,orders)=>({orders,warnings:[],checked:0});
+ ctx.loadExistingOrders=async(_client,numbers)=>{assert.deepEqual(plain(numbers),[raw.orderId]);return new Map([[raw.orderId,{...existing,status:'fulfilled',buyer_username:'old-name'}]]);};
+ ctx.updateOrderSyncMismatchFlags=async()=>{};ctx.loadItemMapBySku=async()=>new Map();
+ ctx.loadFinanceTransactionsByOrder=async()=>({byOrder:new Map(),warnings:[],stats:{}});
+ ctx.updateLocalOrderFinancePayloads=async()=>{};ctx.loadExistingLines=async(_client,ids)=>{assert.deepEqual(plain(ids),[]);return [];};
+ ctx.createClient=()=>({from(table){return {
+  insert(){assert.equal(table,'ebay_order_sync_runs');return {select(){return {single:async()=>({data:{id:'run-a'}})};}};},
+  update(patch){return {eq:async()=>{writes.push({table,patch:plain(patch)});return {};}};},
+ };}});
+ const response=await ctx.handler(new Request('https://example.invalid/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dryRun:false,orderIds:[raw.orderId],checkLocalMismatches:false,syncFinance:false})}));
+ const result=await response.json();assert.equal(response.status,200,JSON.stringify(result));
+ assert.equal(result.ordersImported,0);assert.equal(result.linesImported,0);assert.equal(result.linesReserved,0);
+ const patch=writes.find(w=>w.table==='ebay_orders')?.patch;assert.ok(patch);
+ assert.equal(patch.status,undefined);assert.equal(patch.buyer_username,'new-name');assert.equal(patch.raw_payload.orderPaymentStatus,'FULLY_REFUNDED');
+});

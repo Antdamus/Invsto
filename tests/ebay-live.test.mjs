@@ -828,6 +828,22 @@ test('receiver resume checks existing shows without opening seller setup or chan
  assert.equal(await p.evaluate(()=>calls.some(c=>/start_ebay_live|set_ebay_live_seller|apply_ebay_live_stream_metadata/.test(c.name))),false);assert.equal(await p.evaluate(()=>dashboard.connection.active_seller_id),'seller');
 });
 
+test('complete history keeps real payment holds visible and separates failed bids from sales',async t=>{
+ const p=await open(t);await p.evaluate(()=>{
+  dashboard.connection.broadcast_ended_at=new Date().toISOString();
+  dashboard.recovery={phase:'read',can_close:true,requires_manual_note:false,saved_auctions:14,observed_wins:10,paid_auctions:7,payment_issues:7,unmatched_notifications:0,sold_seen:14,sold_expected:14,pending:0,captured_total:6604,live_sales:6604,failed_without_win:4,failed_without_win_total:13032};
+ });await p.locator('#ebay-live-refresh').click();
+ await p.waitForFunction(()=>document.getElementById('ebay-history-phase').textContent==='History read — payment review needed');
+ assert.match(await p.locator('#ebay-history-counts').innerText(),/14 auction attempts saved · 10 auction wins · 7 paid · 7 payment issues/);
+ assert.match(await p.locator('#ebay-history-coverage').innerText(),/Captured item sales: \$6,604.00. eBay Live sales: \$6,604.00/);
+ assert.match(await p.locator('#ebay-history-coverage').innerText(),/4 failed attempts without a win \(\$13,032.00\) are outside the sales total/);
+ assert.match(await p.locator('#ebay-history-detail').innerText(),/later cancelled or refunded/);
+ assert.equal(await p.locator('#ebay-history-phase').evaluate(e=>e.classList.contains('is-error')),true);
+ await p.evaluate(()=>Object.assign(dashboard.recovery,{payment_issues:0,unmatched_notifications:1}));await p.locator('#ebay-live-refresh').click();
+ await p.waitForFunction(()=>document.getElementById('ebay-history-phase').textContent==='History read — notifications need review');
+ assert.deepEqual(p.errors,[]);
+});
+
 test('phone recovery progress separates reading from sync and requires a manual comparison when paused',async t=>{
  const p=await open(t);await p.setViewportSize({width:320,height:740});await p.evaluate(()=>{
   dashboard.connection.broadcast_ended_at=new Date().toISOString();dashboard.connection.health={pending:0};dashboard.post_show={open_paid_bags:0,payment_issues:0,unmatched_notifications:0,unlinked_bags:0,paid_bags:2,closed_bags:2};
