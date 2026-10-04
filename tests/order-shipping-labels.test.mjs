@@ -182,6 +182,57 @@ async function injectLabel(page, metadata, transferId='batch-label') {
   }),{metadata,base64,transferId});
 }
 
+test('Get Label keeps two checked lines in the bulk flow even when they share one order number',async t=>{
+  const page=await open(t,database());
+  await page.evaluate(()=>{
+    const first=state.orders[0];
+    state.orders[1].order=first.order;
+    state.orders[1].order_id=first.order_id;
+    state.selectedLine=null;
+    state.expandedBuyerKeys.add(getBuyerKey(first));
+    window.labelWindows=[];
+    window.open=(url,target,features)=>{labelWindows.push({url,target,features});return null;};
+    renderOrders();renderAdminOrderActions();
+  });
+  await page.locator('.buyer-card-expanded [data-admin-group-select]').check();
+  await expect(page.locator('[data-admin-line-select]:checked')).toHaveCount(2);
+  await page.locator('[data-buyer-label-key]').click();
+  assert.deepEqual(await page.evaluate(()=>labelWindows),[{
+    url:'https://www.ebay.com/ship/bulk?t=11-22222-33333',target:'_blank',features:'noopener,noreferrer',
+  }]);
+  await page.locator('#admin-open-ebay-labels').click();
+  assert.equal(await page.evaluate(()=>labelWindows.at(-1).url),'https://www.ebay.com/ship/bulk?t=11-22222-33333');
+  await expect(page.locator('[data-admin-line-select]:checked')).toHaveCount(2);
+  await page.locator('[data-admin-line-select="line-b"]').uncheck();
+  await page.locator('[data-buyer-label-key]').click();
+  assert.equal(await page.evaluate(()=>labelWindows.at(-1).url),'https://www.ebay.com/ship/single/11-22222-33333');
+  await page.locator('[data-admin-line-select="line-a"]').uncheck();
+  await expect(page.locator('[data-buyer-label-key]')).toBeDisabled();
+  await expect(page.locator('#admin-open-ebay-labels')).toBeDisabled();
+});
+
+test('label launch preserves all selected orders, stays within the clicked buyer, and rejects incomplete identities',async t=>{
+  const page=await open(t,database());
+  await page.evaluate(()=>{
+    const extra={...state.orders[0],id:'other-line',order_id:'other-order',order:{order_number:'22-33333-55555',buyer_username:'other-buyer'}};
+    state.orders.push(extra,{...extra,id:'closed-line',line_status:'fulfilled',order:{...extra.order,order_number:'33-44444-66666'}});
+    state.adminSelectedLineIds=new Set(state.orders.map(line=>line.id));
+    window.labelWindows=[];
+    window.open=url=>{labelWindows.push(url);return null;};
+    openBuyerGroupSelectedEbayLabelPages({lines:state.orders.slice(0,2)});
+    openAdminSelectedEbayLabelPages();
+  });
+  assert.deepEqual(await page.evaluate(()=>labelWindows),[
+    'https://www.ebay.com/ship/bulk?t=11-22222-33333,11-22222-44444',
+    'https://www.ebay.com/ship/bulk?t=11-22222-33333,11-22222-44444,22-33333-55555',
+  ]);
+  await page.evaluate(()=>{
+    state.orders[1].order.order_number='';
+    openBuyerGroupSelectedEbayLabelPages({lines:state.orders.slice(0,2)});
+  });
+  assert.equal(await page.evaluate(()=>labelWindows.length),2,'never open a partial batch when an order number is missing');
+});
+
 test('injected label selects the full buyer batch in an open modal and completion sends every eligible line',async t=>{
   const db=database(),page=await open(t,db);
   await prepareLabelBatch(page);

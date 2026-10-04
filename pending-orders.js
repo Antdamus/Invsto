@@ -3775,18 +3775,30 @@ function buildEbayBulkLabelUrl(orderNumbers = []) {
   return `${EBAY_BULK_LABEL_BASE_URL}?t=${unique.map(encodeURIComponent).join(",")}`;
 }
 
-function openEbayLabelPagesForOrderNumbers(orderNumbers = []) {
+function openEbayLabelPagesForOrderNumbers(orderNumbers = [], { selectedLineCount = 0 } = {}) {
   const unique = [...new Set((orderNumbers || []).map(normalizeEbayOrderNumber).filter(Boolean))];
   if (!unique.length) {
     setStatus("Select at least one eBay order with an order number before opening labels.", "error");
     return;
   }
 
-  const url = unique.length === 1 ? buildEbaySingleLabelUrl(unique[0]) : buildEbayBulkLabelUrl(unique);
+  // Multiple selected item lines can share an eBay order number. Keep that
+  // selection in the bulk-label flow instead of collapsing it to a single link.
+  const useBulk = selectedLineCount > 1 || unique.length > 1;
+  const url = useBulk ? buildEbayBulkLabelUrl(unique) : buildEbaySingleLabelUrl(unique[0]);
   if (url) window.open(url, "_blank", "noopener,noreferrer");
 
   const orderWord = unique.length === 1 ? "order" : "orders";
-  setStatus(`Opened ${unique.length === 1 ? "the eBay shipping label page" : "eBay bulk labels"} for ${unique.length} ${orderWord}: ${unique.join(", ")}.`, "info");
+  setStatus(`Opened ${useBulk ? "eBay bulk labels" : "the eBay shipping label page"} for ${unique.length} ${orderWord}: ${unique.join(", ")}.`, "info");
+}
+
+function openEbayLabelPagesForLines(lines = []) {
+  const selectedLines = [...new Map(lines.filter(Boolean).map(line => [line.id || line, line])).values()];
+  if (selectedLines.some(line => !normalizeEbayOrderNumber(line.order?.order_number))) {
+    setStatus("A selected item is missing its eBay order number. Refresh the orders before opening labels.", "error");
+    return;
+  }
+  openEbayLabelPagesForOrderNumbers(getUniqueOrderNumbersForLines(selectedLines), { selectedLineCount: selectedLines.length });
 }
 
 function openSelectedEbayLabelPage() {
@@ -3795,12 +3807,12 @@ function openSelectedEbayLabelPage() {
 }
 
 function openAdminSelectedEbayLabelPages() {
-  openEbayLabelPagesForOrderNumbers(getUniqueOrderNumbersForLines(getSelectedAdminLines()));
+  openEbayLabelPagesForLines(getSelectedAdminLines());
 }
 
 function openBuyerGroupSelectedEbayLabelPages(group) {
-  const selectedLines = group.lines.filter((line) => state.adminSelectedLineIds.has(line.id));
-  openEbayLabelPagesForOrderNumbers(getUniqueOrderNumbersForLines(selectedLines));
+  const selectedLines = group.lines.filter((line) => state.adminSelectedLineIds.has(line.id) && isAdminCloseoutSelectable(line));
+  openEbayLabelPagesForLines(selectedLines);
 }
 
 function getNoInventoryLineIdsForGroupAction(group) {
