@@ -90,6 +90,19 @@ async function open(t, db, mobile = false, timezoneId = 'America/New_York') {
     }
     if (op === 'rpc') {
       db.calls.push(args);
+      if (args.name === 'list_pending_ebay_order_matches') {
+        const a=args.args;
+        if (db.failBuyerBatch && a._buyer_usernames.length) return {error:{message:'Could not load full buyer batch'}};
+        if (db.failMatchOffset === a._offset) return {error:{message:'canceling statement due to statement timeout'}};
+        const orders=db.orders.filter(order=>a._order_numbers.length ? a._order_numbers.includes(order.order_number)
+          : !a._buyer_usernames.length || a._buyer_usernames.includes(order.buyer_username));
+        const rows=db.lines.filter(line=>orders.some(order=>order.id===line.order_id)
+          && ['pending','partially_fulfilled'].includes(line.line_status)
+          && (!a._item_number || line.item_number===a._item_number)
+          && (!a._transaction_id || line.transaction_id===a._transaction_id));
+        return {data:structuredClone(rows.slice(a._offset,a._offset+a._limit).map(line=>({...line,
+          ebay_orders:orders.find(order=>order.id===line.order_id)})))};
+      }
       if (args.name === 'complete_ebay_order_lines_without_inventory_evidence') {
         const ids=args.args._order_line_ids;
         db.lines.filter(line=>ids.includes(line.id)).forEach(line=>Object.assign(line,{line_status:'fulfilled',fulfilled_quantity:line.quantity}));
@@ -285,7 +298,7 @@ test('injected label selects the full buyer batch in an open modal and completio
   assert.deepEqual(await page.evaluate(()=>[...state.adminSelectedLineIds].sort()),['line-a','line-a2','line-b','line-b2']);
   assert.equal(await page.evaluate(()=>state.noInventoryEvidencePhotos[0].path),'existing-photo.jpg');
   await expect(page.locator('#worker-no-inventory-note')).toHaveValue('Keep this packing note');
-  assert.ok(db.reads.some(read=>read.filters.some(([,key])=>key==='ebay_orders.buyer_username')),'associated orders are loaded from the database, even if not in the current view');
+  assert.ok(db.calls.some(call=>call.name==='list_pending_ebay_order_matches'&&call.args._buyer_usernames.length),'associated orders are loaded from the database, even if not in the current view');
   await page.locator('#confirm-worker-no-inventory').click();
   await expect(page.locator('#worker-no-inventory-modal')).toBeHidden();
   const completion=db.calls.find(call=>call.name==='complete_ebay_order_lines_without_inventory_evidence');
@@ -388,10 +401,46 @@ test('batch lookup reads every database page rather than stopping at the first p
     return {matches:matches.length,batch:batch.length};
   });
   assert.deepEqual(loaded,{matches:size+1,batch:size+1});
-  for (const field of ['ebay_orders.order_number','ebay_orders.buyer_username']) {
-    const requests=db.reads.filter(read=>read.filters.some(([,key])=>key===field));
-    assert.deepEqual(requests.map(read=>read.start),[0,size]);
+  for (const field of ['_order_numbers','_buyer_usernames']) {
+    const requests=db.calls.filter(call=>call.name==='list_pending_ebay_order_matches'&&call.args[field].length);
+    assert.deepEqual(requests.map(call=>call.args._offset),[0,size]);
   }
+});
+
+test('eight-order combined label retries a failed acknowledgement and selects all eleven lines without duplicate PDFs',async t=>{
+  const db=database();
+  db.orders=Array.from({length:8},(_,i)=>({id:`bulk-order-${i}`,order_number:`11-22222-${30000+i}`,buyer_username:'bulk-buyer',label_metadata:{}}));
+  db.lines=db.orders.flatMap((order,i)=>Array.from({length:i===7?4:1},(_,j)=>({id:`bulk-line-${i}-${j}`,order_id:order.id,
+    item_title:`Item ${i}-${j}`,quantity:1,fulfilled_quantity:0,line_status:'pending',order,item_search:{is_missing:false}})));
+  const page=await open(t,db);await prepareLabelBatch(page);
+  await page.evaluate(rows=>{
+    state.orders=rows.map(normalizeLine);state.filteredOrders=state.orders;state.selectedLine=state.orders[0];renderOrders();
+    state.ebayTransferReceiverReady=true;window.deliveryStatuses=[];postEbayLabelTransferStatus=status=>deliveryStatuses.push(status);
+  },db.lines);
+  const payload={transferId:'bulk-retry',metadata:{source:'ebay-bulk-label-confirmation',orderIds:db.orders.map(order=>order.order_number)},
+    label:{base64:(await pdf()).toString('base64'),mimeType:'application/pdf'}};
+  db.loseAppendResponse=true;
+  await page.evaluate(payload=>handleEbayLabelTransfer(payload),payload);
+  assert.match(await page.evaluate(()=>deliveryStatuses.at(-1).error),/Could not save the shipping label.*Save response lost/);
+  assert.equal(await page.evaluate(()=>state.handledEbayLabelTransferIds.has('bulk-retry')),false);
+  await page.evaluate(payload=>handleEbayLabelTransfer(payload),payload);
+  assert.equal(await page.evaluate(()=>deliveryStatuses.at(-1).ok),true);
+  await expect(page.locator('#worker-no-inventory-count')).toHaveText('11 of 11 selected');
+  assert.deepEqual(await page.evaluate(()=>[...state.workerNoInventoryLineIds].sort()),db.lines.map(line=>line.id).sort());
+  assert.equal(db.events.length,8);assert.equal(db.uploads.length,1);
+  assert.ok(db.lines.every(line=>line.line_status==='pending'));
+  assert.equal(db.reads.filter(read=>read.table==='ebay_order_lines'&&read.filters.some(([,key])=>key.startsWith('ebay_orders.'))).length,0);
+});
+
+test('a later lookup page failure never merges a partial buyer batch or uploads its label',async t=>{
+  const db=database(),page=await open(t,db);await prepareLabelBatch(page);
+  const size=await page.evaluate(()=>ORDER_QUEUE_PAGE_SIZE);
+  db.lines=Array.from({length:size+1},(_,i)=>({...db.lines[0],id:`lookup-line-${i}`}));
+  db.failMatchOffset=size;
+  const before=await page.evaluate(()=>state.orders.map(line=>line.id));
+  await assert.rejects(injectLabel(page,{orderId:db.orders[0].order_number}),/complete pending order batch.*statement timeout/);
+  assert.deepEqual(await page.evaluate(()=>state.orders.map(line=>line.id)),before);
+  assert.equal(db.uploads.length,0);assert.equal(db.events.length,0);
 });
 
 test('saved shipping label marks the whole group, including filtered lines; tracking alone does not',async t=>{
@@ -466,7 +515,7 @@ test('extension imports append multiple PDFs in checkout, preserve old labels, a
   assert.deepEqual(db.orders[0],original);
   assert.equal(db.uploads.length,2);assert.notEqual(db.uploads[0].path,db.uploads[1].path);
   assert.ok(db.uploads.every(upload=>upload.options.upsert===false));
-  assert.ok(db.calls.every(call=>call.name==='append_ebay_shipping_label'));
+  assert.ok(db.calls.every(call=>['append_ebay_shipping_label','list_pending_ebay_order_matches'].includes(call.name)));
   assert.equal(await page.evaluate(()=>lines[0].order.label_file_path),'old/current.pdf');
   for (const tracking of ['000000000000','111111111111','222222222222','333333333333']) await expect(page.locator('#no-inventory-shipping-labels')).toContainText(tracking);
   assert.deepEqual(await page.locator('#worker-no-inventory-modal .no-inventory-label button').allTextContents(),

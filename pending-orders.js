@@ -10451,32 +10451,26 @@ async function loadPendingOrderLinesForExtensionMatch(options = {}) {
   const buyerUsernames = [...new Set((options.buyerUsernames || []).map(String).filter(Boolean))];
   if (!orderNumbers.length && !buyerUsernames.length && !itemNumber && !transactionId) return [];
 
-  const admin = isAdminUser();
   const rows = [];
-  if (orderNumbers.length || buyerUsernames.length) {
-    const values = orderNumbers.length ? orderNumbers : buyerUsernames;
-    const field = orderNumbers.length ? "ebay_orders.order_number" : "ebay_orders.buyer_username";
-    for (let index = 0; index < values.length; index += 50) {
-      const chunk = values.slice(index, index + 50);
-      for (let from = 0; ; from += ORDER_QUEUE_PAGE_SIZE) {
-        let query = buildOrderLineQueueQuery("pending", admin)
-          .in(field, chunk)
-          .range(from, from + ORDER_QUEUE_PAGE_SIZE - 1);
-        if (itemNumber) query = query.eq("item_number", itemNumber);
-        if (transactionId) query = query.eq("transaction_id", transactionId);
-        const { data, error } = await query;
-        if (error) throw new Error(error.message || "Could not look up the complete pending eBay order batch.");
-        rows.push(...(data || []));
-        if (!data || data.length < ORDER_QUEUE_PAGE_SIZE) break;
-      }
+  const values = orderNumbers.length ? orderNumbers : buyerUsernames;
+  // Resolve order IDs in the database first, without a nested REST filter that
+  // scans unrelated pending lines. Publish nothing until every page succeeds.
+  for (let index = 0; index < Math.max(values.length, 1); index += 50) {
+    const chunk = values.slice(index, index + 50);
+    for (let from = 0; ; from += ORDER_QUEUE_PAGE_SIZE) {
+      const { data, error } = await supabase.rpc("list_pending_ebay_order_matches", {
+        _order_numbers: orderNumbers.length ? chunk : [],
+        _buyer_usernames: orderNumbers.length ? [] : chunk,
+        _item_number: itemNumber || null,
+        _transaction_id: transactionId || null,
+        _include_admin_fields: isAdminUser(),
+        _limit: ORDER_QUEUE_PAGE_SIZE,
+        _offset: from,
+      });
+      if (error) throw new Error(`Could not load the complete pending order batch: ${error.message || "Database lookup failed."}`);
+      rows.push(...(data || []));
+      if (!data || data.length < ORDER_QUEUE_PAGE_SIZE) break;
     }
-  } else {
-    let query = buildOrderLineQueueQuery("pending", admin).limit(100);
-    if (itemNumber) query = query.eq("item_number", itemNumber);
-    if (transactionId) query = query.eq("transaction_id", transactionId);
-    const { data, error } = await query;
-    if (error) throw new Error(error.message || "Could not look up pending eBay cancellation/order lines.");
-    rows.push(...(data || []));
   }
 
   const merged = mergePendingOrderLinesIntoState(rows);
@@ -10761,7 +10755,7 @@ async function attachEbayLabelToOrder(transferPayload) {
     _label_file_path: destinationPath,
     _label_metadata: labelMetadata,
   });
-  if (orderError) throw new Error(orderError.message || "Could not update and audit the eBay order label status.");
+  if (orderError) throw new Error(`Could not save the shipping label to the order batch: ${orderError.message || "Database save failed."} You can send the label again safely.`);
 
   const savedOrders = new Map((savedLabel?.order_labels || []).map(order => [order.id, order]));
   state.orders.filter((line) => orderIds.includes(line.order_id)).forEach((line) => {
@@ -10837,6 +10831,8 @@ async function handleEbayLabelTransfer(payload) {
     });
   } catch (error) {
     console.error("eBay label transfer failed:", error);
+    // Failed deliveries must remain retryable with the same durable transfer ID.
+    if (transferId) state.handledEbayLabelTransferIds.delete(transferId);
     const message = error.message || "Could not attach the eBay label.";
     setEbayLabelTransferStatus(message, "error");
     postEbayLabelTransferStatus(error.route ? {
