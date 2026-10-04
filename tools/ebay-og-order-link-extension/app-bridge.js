@@ -1,6 +1,8 @@
 (function () {
   "use strict";
 
+  const receiptDeliveries = new Map();
+
   async function getConfiguredAppUrl() {
     const response = await chrome.runtime.sendMessage({ type: "OG_EBAY_GET_APP_URL" }).catch(() => null);
     return response?.appUrl || "";
@@ -17,6 +19,8 @@
   }
 
   function postToOgApp(payload, type = "OG_EBAY_LABEL_TRANSFER") {
+    const receiptId = type === "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER" ? payload?.transferId : "";
+    if (receiptId && receiptDeliveries.has(receiptId)) return;
     const message = {
       type,
       payload,
@@ -27,11 +31,23 @@
     const timer = window.setInterval(() => {
       attempts += 1;
       window.postMessage(message, window.location.origin);
-      if (attempts >= maxAttempts) window.clearInterval(timer);
+      if (attempts >= maxAttempts) {
+        window.clearInterval(timer);
+        if (receiptId) receiptDeliveries.delete(receiptId);
+      }
     }, 1000);
+    if (receiptId) receiptDeliveries.set(receiptId, timer);
   }
 
   function relayOgStatusToExtension(payload, type = "OG_EBAY_LABEL_TRANSFER_STATUS") {
+    // Receipt data only needs retransmission until OG accepts it. The background
+    // worker retains its durable retry copy until the final saved acknowledgement.
+    if (type === "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER_STATUS"
+      && (payload.phase === "started" || typeof payload.ok === "boolean")) {
+      const timer = receiptDeliveries.get(payload.transferId);
+      if (timer !== undefined) window.clearInterval(timer);
+      receiptDeliveries.delete(payload.transferId);
+    }
     chrome.runtime.sendMessage({
       type,
       payload,

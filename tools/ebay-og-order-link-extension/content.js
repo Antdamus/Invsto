@@ -6863,6 +6863,7 @@
   }
 
   async function captureVideoReceiptFrame(button) {
+    const captureStartedAt = Date.now();
     const metadata = getVideoReceiptPageMetadata();
     if (!metadata.itemNumber) {
       setVideoReceiptCaptureStatus(button, "No item id", "error");
@@ -6874,7 +6875,7 @@
       const response = await chrome.runtime.sendMessage({
         type: "OG_EBAY_CAPTURE_VIDEO_RECEIPT_FRAME",
         payload: {
-          metadata,
+          metadata: {...metadata, captureStartedAt},
           pageUrl: window.location.href,
           pageTitle: document.title || "",
           viewport: {

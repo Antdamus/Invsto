@@ -105,3 +105,29 @@ test('receipt tab lookup overlaps retry storage, but delivery waits for the dura
   await w.send('OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER_STATUS',{transferId:payload.transferId,ok:true});
   assert.equal((await capture).ok,true);
 });
+
+test('receipt bridge stops repeating captured bytes on acceptance while unrelated or foreign statuses cannot stop delivery', async()=>{
+  const code=await readFile(new URL('../tools/ebay-og-order-link-extension/app-bridge.js',import.meta.url),'utf8');
+  const intervals=new Map(), sent=[], relayed=[];let onTransfer,onStatus,nextTimer=0;
+  const window={location:{origin:'https://og.test',pathname:'/pending-orders.html'},
+    postMessage(message){sent.push(message);},
+    setInterval(callback){const id=++nextTimer;intervals.set(id,callback);return id;},
+    clearInterval(id){intervals.delete(id);},addEventListener(type,fn){if(type==='message')onStatus=fn;}};
+  const chrome={runtime:{onMessage:{addListener(fn){onTransfer=fn;}},
+    async sendMessage(message){relayed.push(message);return {};}}};
+  vm.runInNewContext(code,{window,chrome,console,URL,Map});
+  const type='OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER';
+  onTransfer({type,payload:{transferId:'capture-one',screenshot:{base64:'original'}}},null,()=>{});
+  assert.equal(intervals.size,1);[...intervals.values()][0]();assert.equal(sent.length,2);
+  const status=(id,source=window,origin=window.location.origin,extra={phase:'started'})=>onStatus({source,origin,
+    data:{type:type+'_STATUS',payload:{transferId:id,...extra}}});
+  status('other');status('capture-one',{},window.location.origin);status('capture-one',window,'https://foreign.test');
+  assert.equal(intervals.size,1);
+  status('capture-one');assert.equal(intervals.size,0);
+  assert.equal(relayed.at(-1).payload.phase,'started','the background worker still receives the acceptance');
+  onTransfer({type,payload:{transferId:'capture-two'}},null,()=>{});
+  status('capture-two',window,window.location.origin,{ok:false});assert.equal(intervals.size,0);
+  onTransfer({type,payload:{transferId:'no-receiver'}},null,()=>{});
+  const before=sent.length;while(intervals.size)[...intervals.values()][0]();
+  assert.equal(sent.length-before,60,'bounded retries remain when no page accepts the capture');
+});

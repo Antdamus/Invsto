@@ -26,6 +26,8 @@ Version 1.0.4 sends labels directly to a ready OG tab without reloading the queu
 
 Version 1.0.5 reduces receipt-capture transfer data by sending the original PNG once, overlaps retry storage with finding OG, and avoids switching to the saved receipt's OG tab twice. The page uploads the original and smaller previews together and returns after the screenshot and audit entry are saved; display details refresh in the background.
 
+Version 1.0.6 stops receipt screenshot retransmissions as soon as OG accepts the transfer, while retaining the extension's retry copy until OG confirms the original and audit entry are saved. The updated page finishes optional thumbnails afterward, retries interrupted preview work from saved metadata, and refreshes only the affected customer card. The save message includes elapsed capture time. Original PNG quality is unchanged.
+
 ## Use
 
 On the eBay bulk label page, the extension looks for order links like:

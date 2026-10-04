@@ -2761,6 +2761,7 @@ function normalizePendingOrderQueueRpcRow(row = {}) {
     total_price: row.total_price,
     net_payout: row.net_payout,
     line_status: row.line_status,
+    item_search: row.item_search || null,
     created_at: row.created_at,
     internal_item_id: row.internal_item_id,
     fulfilled_quantity: row.fulfilled_quantity,
@@ -3436,6 +3437,91 @@ function getLineNoteCount(line = {}) {
   return Math.max(0, Number(line.line_note_count || 0));
 }
 
+const itemSearchBusy = new Set();
+const itemSearchReadVersions = new Map();
+function renderItemSearchStatus(line) {
+  const search = line.item_search;
+  if (!search?.is_missing) return "";
+  return `<span class="item-search-status"><strong>Item not found — needs locating</strong><small>${escapeHtml(search.updated_by_email || "Staff")} · ${escapeHtml(formatDate(search.updated_at))}</small></span>`;
+}
+function renderGroupItemSearch(lines) {
+  const count = lines.filter(line => isOpenOrderLine(line) && line.item_search?.is_missing).length;
+  return count ? `<span class="buyer-card-meta-pill item-search-marker">${count} item${count === 1 ? "" : "s"} not found</span>` : "";
+}
+function repaintItemSearch(lines) {
+  const ids = new Set(lines.map(line => line.id));
+  document.querySelectorAll("[data-item-search-status]").forEach(element => {
+    if (!ids.has(element.dataset.itemSearchStatus)) return;
+    const line = state.orders.find(row => row.id === element.dataset.itemSearchStatus);
+    if (line) element.innerHTML = renderItemSearchStatus(line);
+  });
+  document.querySelectorAll("[data-item-search]").forEach(button => {
+    if (!ids.has(button.dataset.itemSearch)) return;
+    const line = state.orders.find(row => row.id === button.dataset.itemSearch);
+    if (!line) return;
+    button.textContent = itemSearchBusy.has(line.id) ? "Saving..." : line.item_search?.is_missing ? "Mark item found" : "Item not found";
+    button.disabled = itemSearchBusy.has(line.id) || (!isOpenOrderLine(line) && !line.item_search?.is_missing);
+  });
+  const keys = new Set(lines.map(getBuyerKey));
+  document.querySelectorAll(".buyer-order-card").forEach(card => {
+    if (keys.has(card.dataset.buyerKey)) {
+      const host = card.querySelector("[data-group-item-search]");
+      if (host) host.innerHTML = renderGroupItemSearch(state.orders.filter(line => getBuyerKey(line) === card.dataset.buyerKey));
+    }
+  });
+}
+async function setItemMissing(lineId, missing) {
+  const line = state.orders.find(row => row.id === lineId);
+  if (!line || itemSearchBusy.has(lineId)) return;
+  itemSearchBusy.add(lineId);
+  itemSearchReadVersions.set(lineId, (itemSearchReadVersions.get(lineId) || 0) + 1);
+  repaintItemSearch([line]);
+  try {
+    const {data, error} = await supabase.rpc("set_pending_order_item_missing", {_order_line_id: lineId, _is_missing: missing});
+    if (error) throw error;
+    const saved = Array.isArray(data) ? data[0] : data;
+    if (!saved || saved.order_line_id !== lineId) throw new Error("Could not confirm the item status. Please try again.");
+    // A queue refresh may have replaced the object while this save was pending.
+    for (const current of [line, ...state.orders.filter(row => row.id === lineId)]) current.item_search = saved;
+    setStatus(missing ? "Item marked not found. The team can see which item needs locating." : "Item marked found.", "success");
+  } catch (error) { setStatus(error.message || "Could not save the item status.", "error"); }
+  finally { itemSearchBusy.delete(lineId); repaintItemSearch([line]); }
+}
+async function refreshItemSearch(lineIds = state.orders.map(line => line.id)) {
+  const ids = [...new Set(lineIds)].filter(id => !itemSearchBusy.has(id));
+  for (let offset = 0; offset < ids.length; offset += 300) {
+    const chunk = ids.slice(offset, offset + 300);
+    const versions = new Map(chunk.map(id => {
+      const version = (itemSearchReadVersions.get(id) || 0) + 1;
+      itemSearchReadVersions.set(id, version); return [id, version];
+    }));
+    const {data, error} = await supabase.from("pending_order_item_search").select("*").in("order_line_id", chunk);
+    if (error) throw error;
+    const records = new Map((data || []).map(row => [row.order_line_id, row]));
+    const changed = [];
+    state.orders.forEach(line => {
+      if (!versions.has(line.id) || itemSearchBusy.has(line.id) || versions.get(line.id) !== itemSearchReadVersions.get(line.id)) return;
+      const next = records.get(line.id) || null;
+      if (next && line.item_search && new Date(next.updated_at) < new Date(line.item_search.updated_at)) return;
+      if (JSON.stringify(next) !== JSON.stringify(line.item_search || null)) { line.item_search = next; changed.push(line); }
+    });
+    if (changed.length) repaintItemSearch(changed);
+  }
+}
+function startItemSearchUpdates() {
+  if (!state.user?.id) return;
+  const refresh = ids => refreshItemSearch(ids).catch(error => console.warn("Could not refresh item search markers:", error));
+  window.OGOrderLiveUpdates?.subscribe(supabase, change => {
+    if (change.kind === "item_search" && state.orders.some(line => line.id === change.line_id)) void refresh([change.line_id]);
+    else if (change.kind === "reconnected") void refresh();
+  });
+  const resume = () => { if (document.visibilityState !== "hidden") void refresh(); };
+  window.setInterval(resume, 60000);
+  window.addEventListener("online", resume);
+  document.addEventListener("visibilitychange", resume);
+  resume();
+}
+
 function getSharedLineNotes(line) {
   const history = state.sharedOrderNoteHistory.get(line.order_id)?.data;
   // Queue summaries mix written notes with media uploads, so only display
@@ -3929,27 +4015,32 @@ async function markCancellationReviewKeepPending(lineId) {
   }
 }
 
-function renderOrders() {
+function renderOrders(options = {}) {
   const startedAt = nowMs();
   const list = $("orders-list");
   if (!list) return;
-  state.orderNotesObserver?.disconnect();
-  if (state.orderRenderFrame) {
+  const previousCard = options.buyerKey
+    ? [...list.querySelectorAll(".buyer-order-card")].find(card => card.dataset.buyerKey === options.buyerKey) : null;
+  const partial = Boolean(previousCard);
+  if (!partial) state.orderNotesObserver?.disconnect();
+  if (!partial && state.orderRenderFrame) {
     window.cancelAnimationFrame(state.orderRenderFrame);
     state.orderRenderFrame = 0;
   }
-  const renderRunId = state.orderRenderRunId + 1;
-  state.orderRenderRunId = renderRunId;
+  const renderRunId = state.orderRenderRunId + (partial ? 0 : 1);
+  if (!partial) state.orderRenderRunId = renderRunId;
 
   const groups = groupLinesByBuyer(state.filteredOrders);
   const attachmentGroups = new Map(groups.map(group => [group.key, []]));
   state.orders.forEach(line => attachmentGroups.get(getBuyerKey(line))?.push(line));
   groups.forEach(group => {if (!attachmentGroups.get(group.key).length) attachmentGroups.set(group.key, group.lines);});
   const attachmentLines = [...attachmentGroups.values()].flat();
-  watchQueueCompletionPhotos(attachmentLines);
-  watchQueueShippingLabels(attachmentLines);
+  if (!partial) {
+    watchQueueCompletionPhotos(attachmentLines);
+    watchQueueShippingLabels(attachmentLines);
+  }
   const groupsByKey = new Map(groups.map((group) => [group.key, group]));
-  state.orderNotesObserver = typeof IntersectionObserver === "function"
+  if (!partial) state.orderNotesObserver = typeof IntersectionObserver === "function"
     ? new IntersectionObserver((entries, observer) => {
       entries.filter((entry) => entry.isIntersecting).forEach(({ target }) => {
         observer.unobserve(target);
@@ -3964,7 +4055,7 @@ function renderOrders() {
     return;
   }
 
-  list.innerHTML = "";
+  if (!partial) list.innerHTML = "";
   const appendGroup = (group, groupIndex) => {
     const urgency = group.pendingCount ? getOrderUrgency(group.nextShipBy) : null;
     const urgencyClass = urgency?.level === "today" ? "is-due-today" : urgency ? `is-${urgency.level}` : "";
@@ -4068,6 +4159,7 @@ function renderOrders() {
         </div>
       </div>
       <div class="buyer-card-meta">
+        <span data-group-item-search>${renderGroupItemSearch(group.lines)}</span>
         ${renderQueueCompletionPhotoMarker(attachmentGroups.get(group.key))}
         ${renderQueueShippingLabelMarker(attachmentGroups.get(group.key))}
         <span class="buyer-card-meta-pill">Placed ${escapeHtml(formatGroupOrderDate(group, "sale_date"))}</span>
@@ -4289,6 +4381,7 @@ function renderOrders() {
         <span class="buyer-line-main">
           <span class="buyer-line-copy">
             <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+            <span data-item-search-status="${escapeHtml(line.id)}">${renderItemSearchStatus(line)}</span>
             <span class="buyer-line-order-details">
               ${orderNumberMarkup}
               <small class="buyer-line-item-meta">Item ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
@@ -4311,6 +4404,7 @@ function renderOrders() {
           <span class="buyer-line-actions">
             <button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) ? "" : "disabled"}>Get Label</button>
             ${lineTaskActionMarkup}
+            <button type="button" class="secondary-btn buyer-line-action-btn item-search-btn" data-item-search="${escapeHtml(line.id)}" ${canActOnLine || line.item_search?.is_missing ? "" : "disabled"}>${line.item_search?.is_missing ? "Mark item found" : "Item not found"}</button>
             ${lineTaskVideoMarkup}
             ${lineCancellationDetailsActionMarkup}
             ${lineCancellationReviewActionMarkup}
@@ -4330,6 +4424,10 @@ function renderOrders() {
         <b>${escapeHtml(line.line_status || "pending")}</b>
       `;
       const lineCheckbox = button.querySelector("[data-admin-line-select]");
+      button.querySelector("[data-item-search]")?.addEventListener("click", event => {
+        event.stopPropagation();
+        void setItemMissing(line.id, !line.item_search?.is_missing);
+      });
       bindReceiptScreenshotButtons(button);
       lineCheckbox?.addEventListener("click", (event) => event.stopPropagation());
       lineCheckbox?.addEventListener("change", (event) => setAdminLineSelection(line.id, event.target.checked));
@@ -4393,10 +4491,23 @@ function renderOrders() {
       lineList.appendChild(button);
     });
 
-    list.appendChild(card);
+    if (partial) {
+      state.orderNotesObserver?.unobserve(previousCard);
+      previousCard.replaceWith(card);
+    } else list.appendChild(card);
     if (state.orderNotesObserver) state.orderNotesObserver.observe(card);
     else hydrateBuyerGroupNotes(card, group);
   };
+
+  if (partial) {
+    const index = groups.findIndex(group => group.key === options.buyerKey);
+    if (index < 0) { previousCard.remove(); return; }
+    appendGroup(groups[index], index);
+    void hydrateQueueVideoReceiptEvidenceThumbnails(groups[index].lines, {skipTaskLoad: true});
+    if (window.lucide) window.lucide.createIcons();
+    logPendingOrderPerf("renderOrders customer only", startedAt, {rows: groups[index].lines.length});
+    return;
+  }
 
   let renderedGroups = 0;
   const renderChunk = (chunkSize) => {
@@ -7829,7 +7940,7 @@ async function uploadEvidenceDerivative(bucket, originalPath, sourceBlob, varian
         contentType: derivative.mime_type || EVIDENCE_DERIVATIVE_MIME_TYPE,
         upsert: false,
       });
-    if (error) {
+    if (error && !(options.reuseExisting && (String(error.statusCode || error.status) === "409" || error.error === "Duplicate"))) {
       console.warn(`Could not upload ${variant} evidence derivative:`, error);
       return null;
     }
@@ -7848,7 +7959,7 @@ async function uploadEvidenceDerivative(bucket, originalPath, sourceBlob, varian
   }
 }
 
-async function createAndUploadEvidenceDerivatives(sourceBlob, bucket, originalPath) {
+async function createAndUploadEvidenceDerivatives(sourceBlob, bucket, originalPath, options = {}) {
   if (!sourceBlob || !bucket || !originalPath || !/^image\//i.test(sourceBlob.type || "")) return {};
   const variants = {
     original: {
@@ -7861,9 +7972,11 @@ async function createAndUploadEvidenceDerivatives(sourceBlob, bucket, originalPa
 
   const [preview, thumbnail] = await Promise.all([
     uploadEvidenceDerivative(bucket, originalPath, sourceBlob, "preview", {
+      ...options,
       maxDimension: EVIDENCE_PREVIEW_MAX_DIMENSION, quality: EVIDENCE_PREVIEW_QUALITY,
     }),
     uploadEvidenceDerivative(bucket, originalPath, sourceBlob, "thumbnail", {
+      ...options,
       maxDimension: EVIDENCE_THUMBNAIL_MAX_DIMENSION, quality: EVIDENCE_THUMBNAIL_QUALITY,
     }),
   ]);
@@ -10812,6 +10925,19 @@ async function rememberVideoReceiptPhotoForQueue(line = {}, savedPhoto = {}, met
   return photo;
 }
 
+let receiptPreviewJobs;
+function getReceiptPreviewJobs() {
+  if (!window.OGReceiptPreviewJobs) return null;
+  if (!receiptPreviewJobs) receiptPreviewJobs = window.OGReceiptPreviewJobs.create({
+    client: supabase, createDerivatives: createAndUploadEvidenceDerivatives,
+    onUpdated: async (job, derivatives) => {
+      const line = state.orders.find(entry => entry.id === job.photo.metadata?.orderLineId);
+      if (line) await refreshCapturedReceiptDetails(line, {...job.photo, ...derivatives}, {id: job.task_id});
+    },
+  });
+  return receiptPreviewJobs;
+}
+
 async function refreshCapturedReceiptDetails(line, savedPhoto, task) {
   const cachedEvents = state.queueVideoReceiptTaskEvents.get(task?.id);
   const stillCached = () => cachedEvents && state.queueVideoReceiptTaskEvents.get(task.id) === cachedEvents;
@@ -10880,7 +11006,9 @@ function returnToPendingQueueAfterVideoReceiptCapture(line = {}) {
   state.selectedLine = null;
   state.activeBuyerKey = "";
   setBuyerGroupExpanded(getBuyerKey(line), true, { render: false });
-  renderOrders();
+  document.querySelectorAll(".buyer-order-card.is-selected, .buyer-line-btn.is-selected")
+    .forEach(element => element.classList.remove("is-selected"));
+  renderOrders({buyerKey: getBuyerKey(line)});
   window.setTimeout(() => {
     const card = line?.id
       ? [...document.querySelectorAll("[data-line-id]")].find((entry) => entry.dataset.lineId === line.id)
@@ -11618,6 +11746,7 @@ async function saveLineNote() {
 }
 
 async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
+  const startedAt = nowMs();
   const metadata = payload.metadata || {};
   const screenshot = payload.screenshot || {};
   const line = await findVideoReceiptPhotoLine(metadata);
@@ -11638,13 +11767,15 @@ async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
     `${Date.now()}-${crypto.randomUUID()}-${itemSegment}.png`,
   ].join("/");
 
+  const previewJobs = getReceiptPreviewJobs();
   const [{error: uploadError}, derivativeData] = await Promise.all([
     supabase.storage.from(NO_INVENTORY_EVIDENCE_BUCKET).upload(destinationPath, blob, {
       contentType: blob.type || screenshot.mimeType || "image/png", upsert: false,
     }).catch(error => ({error})),
-    createAndUploadEvidenceDerivatives(blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath),
+    previewJobs ? Promise.resolve({}) : createAndUploadEvidenceDerivatives(blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath),
   ]);
   if (uploadError) throw new Error(uploadError.message || "Could not save the video receipt screenshot.");
+  const uploadedAt = nowMs();
 
   const savedPhoto = {
     bucket: NO_INVENTORY_EVIDENCE_BUCKET,
@@ -11660,6 +11791,7 @@ async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
     created_at: new Date().toISOString(),
     signed_by_email: getVideoReceiptAuditActor(),
     metadata: {
+      ...(previewJobs ? {receipt_previews_pending: true, orderLineId: line.id} : {}),
       videoReceiptUrl: metadata.videoReceiptUrl || metadata.pageUrl || "",
       eventId: metadata.eventId || "",
       selectedItemId: metadata.selectedItemId || metadata.itemNumber || "",
@@ -11685,6 +11817,7 @@ async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
   });
   if (taskError) throw new Error(taskError.message || "Could not attach the video receipt photo to the order task.");
   const task = Array.isArray(taskData) ? taskData[0] : taskData;
+  const committedAt = nowMs();
 
   // The captured bytes are already local. Do not wait for signed URLs or history reads to show them.
   // Only the persisted storage references above are written to the audit record.
@@ -11703,8 +11836,14 @@ async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
       photo_attachments: [queuePhoto], created_at: savedPhoto.created_at, signed_by_email: savedPhoto.signed_by_email}]);
   }
   returnToPendingQueueAfterVideoReceiptCapture(line);
+  previewJobs?.add({task_id: task?.id, photo: savedPhoto, blob});
   // Hydrate just this receipt's removal details and smaller previews after the durable save.
   void refreshCapturedReceiptDetails(line, savedPhoto, task);
+  const timings = {uploadAndMatchMs: uploadedAt - startedAt, auditMs: committedAt - uploadedAt,
+    displayMs: nowMs() - committedAt, totalMs: nowMs() - startedAt};
+  // Local diagnostic samples contain durations only, never customer or image data.
+  window.OGReceiptCaptureTimings = [...(window.OGReceiptCaptureTimings || []).slice(-19), timings];
+  logPendingOrderPerf("receipt saved", startedAt, timings);
 
   return {
     lineId: line.id,
@@ -11713,6 +11852,7 @@ async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
     itemNumber: line.item_number || metadata.itemNumber || "",
     storagePath: destinationPath,
     photo: savedPhoto,
+    saveDurationMs: Math.round(timings.totalMs),
   };
 }
 
@@ -11733,7 +11873,10 @@ async function handleVideoReceiptPhotoTransfer(payload) {
 
   try {
     const attached = await attachVideoReceiptPhotoToPendingLine(payload);
-    const message = `Video receipt photo saved for item ${attached.itemNumber || "item"}.`;
+    const captureStartedAt = Number(payload.metadata?.captureStartedAt || 0);
+    const elapsed = captureStartedAt > 0 && Date.now() >= captureStartedAt && Date.now() - captureStartedAt < 120000
+      ? Date.now() - captureStartedAt : attached.saveDurationMs;
+    const message = `Video receipt photo saved for item ${attached.itemNumber || "item"} (${(elapsed / 1000).toFixed(1)}s).`;
     setVideoReceiptPhotoTransferStatus(message, "success");
     postVideoReceiptPhotoTransferStatus({
       transferId,
@@ -12669,5 +12812,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     else applyRequestedEbayBuyerSelection();
   }
   markEbayTransferReceiverReady();
+  startItemSearchUpdates();
+  getReceiptPreviewJobs()?.start();
   if (window.lucide) window.lucide.createIcons();
 });

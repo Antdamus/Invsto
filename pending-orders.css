@@ -5355,3 +5355,25 @@ body.phone-camera-mode #done-completion-photos,
 body.phone-camera-mode [data-phone-camera],
 body.phone-camera-mode .completion-phone-instructions { display: none; }
 body.phone-camera-mode .completion-photo-actions .folder-photo-picker { flex: 1 1 130px; text-align: center; }
+.item-search-status {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  margin: .4rem 0;
+  color: #ffbc90;
+  overflow-wrap: anywhere;
+}
+.item-search-status small { color: #dbc0ab; }
+.buyer-card-meta-pill.item-search-marker {
+  color: #ffd5b8;
+  background: rgba(205, 97, 29, .18);
+  border-color: rgba(255, 161, 94, .65);
+}
+.item-search-btn { border-color: rgba(255, 161, 94, .5); }
+[data-group-item-search]:empty, [data-item-search-status]:empty { display: none; }
+@media (max-width: 760px) {
+  .buyer-line-btn, .buyer-line-btn.has-admin-select, .buyer-line-main, .buyer-line-copy {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .buyer-line-actions, .buyer-line-receipt-actions { width: 100%; min-width: 0; }
+}

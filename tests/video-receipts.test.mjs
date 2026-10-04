@@ -726,3 +726,88 @@ test('successive receipt captures remain visible and removable when earlier hist
   assert.equal(await p.locator('[data-queue-video-evidence="line-one"] [data-remove-receipt]').count(),2);
   assert.equal(await p.locator('[data-queue-video-evidence="line-one"] [data-remove-receipt]:disabled').count(),0);
 });
+
+test('receipt returns after original and audit save while preview uploads are blocked, preserving unrelated customer DOM',async t=>{
+  const p=await controlledCapturePage(t);
+  await p.addScriptTag({url:origin+'/receipt-preview-jobs.js'});
+  await p.evaluate(()=>{
+    const unrelated={...fixtureLine,id:'unrelated-line',order_id:'unrelated-order',order:{...fixtureLine.order,buyer_username:'other-buyer'}};
+    state.orders.push(unrelated);state.filteredOrders=state.orders;renderOrders();
+    window.unaffectedCard=[...document.querySelectorAll('.buyer-order-card')].find(card=>card.dataset.buyerUsername==='other-buyer');
+    const upload=supabase.storage.from().upload;
+    const derivativeGate=new Promise(resolve=>window.releaseDerivatives=resolve);
+    window.derivativesStarted=0;window.derivativesFinished=0;
+    const storage=supabase.storage.from;
+    supabase.storage.from=bucket=>({...storage(bucket),async upload(path,blob){
+      if(path.includes('/derivatives/')){derivativesStarted++;await derivativeGate;}
+      return upload(path,blob);
+    }});
+    const rpc=supabase.rpc;
+    supabase.rpc=async(name,args)=>{
+      if(name==='finish_receipt_previews'){
+        derivativesFinished++;
+        receiptEvents.forEach(event=>event.photo_attachments=event.photo_attachments.map(photo=>({...photo,...args._derivatives})));
+        return {data:true};
+      }
+      return rpc(name,args);
+    };
+    releaseReceiptUploads();releaseReceiptCommit();
+    window.postMessage({type:'OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER',payload:receiptTransfer},location.origin);
+  });
+  await p.waitForFunction(()=>captureAcks.some(ack=>ack.ok));
+  await p.waitForFunction(()=>derivativesStarted===2);
+  assert.equal(await p.evaluate(()=>derivativesFinished),0);
+  assert.equal(await p.evaluate(()=>receiptWrites[0]._photo_attachments[0].metadata.receipt_previews_pending),true);
+  assert.equal(await p.evaluate(()=>unaffectedCard.isConnected),true,'only the captured customer is rebuilt');
+  assert.equal(await p.evaluate(()=>window.OGReceiptCaptureTimings.length),1);
+  await p.locator('[data-queue-video-evidence="line-one"] img').waitFor({state:'visible'});
+  await p.evaluate(()=>{releaseDerivatives();releaseReceiptDisplay();});
+  await p.waitForFunction(()=>derivativesFinished===1);
+  await p.waitForFunction(()=>document.querySelector('[data-queue-video-evidence="line-one"] [data-remove-receipt]')?.disabled===false);
+});
+
+for(const desktop of [true,false])test(`item not found marks exactly one line, survives refresh, and another staff member can clear it (${desktop?'desktop':'phone'})`,async t=>{
+  const p=await screenshotPage(t,{desktop});
+  await p.evaluate(()=>{
+    state.filteredOrders=state.orders;renderOrders();
+    window.itemSearchServer=new Map();window.itemSearchWrites=[];window.itemSearchFail=false;
+    supabase.rpc=async(name,args)=>{
+      if(name!=='set_pending_order_item_missing')throw Error(name);
+      itemSearchWrites.push(args);if(itemSearchFail)return {error:{message:'Save unavailable'}};
+      const row={order_line_id:args._order_line_id,is_missing:args._is_missing,updated_by_email:'reviewer@example.test',updated_at:new Date().toISOString()};
+      itemSearchServer.set(row.order_line_id,row);return {data:[structuredClone(row)]};
+    };
+    supabase.from=table=>({select(){return this;},async in(column,ids){
+      if(table!=='pending_order_item_search')throw Error(table);
+      return {data:structuredClone([...itemSearchServer.values()].filter(row=>ids.includes(row.order_line_id)))};
+    }});
+  });
+  await p.locator('[data-item-search="line-two"]').click();
+  await p.waitForFunction(()=>state.orders.find(line=>line.id==='line-two').item_search?.is_missing);
+  assert.deepEqual(await p.evaluate(()=>itemSearchWrites),[{_order_line_id:'line-two',_is_missing:true}]);
+  assert.equal(await p.locator('[data-item-search-status="line-one"]').textContent(),'');
+  assert.match(await p.locator('[data-item-search-status="line-two"]').textContent(),/Item not found.*reviewer@example.test/);
+  assert.match(await p.locator('[data-group-item-search]').textContent(),/1 item not found/);
+  assert.ok(await p.locator('[data-item-search="line-two"]').evaluate(button=>{
+    const row=button.closest('.buyer-line-btn').getBoundingClientRect(),box=button.getBoundingClientRect();
+    return box.left>=row.left && box.right<=row.right;
+  }),'the item action stays inside its line on narrow screens');
+  await mkdir(new URL('test-results/',root),{recursive:true});
+  await p.locator('.buyer-order-card').screenshot({path:`test-results/item-search-${desktop?'desktop':'phone'}.png`});
+  await p.evaluate(async()=>{state.orders.forEach(line=>line.item_search=null);await refreshItemSearch();renderOrders();});
+  assert.match(await p.locator('[data-item-search-status="line-two"]').textContent(),/needs locating/);
+  // A shared update from another reviewer is applied without altering line status or selection.
+  await p.evaluate(async()=>{
+    itemSearchServer.get('line-two').is_missing=false;
+    itemSearchServer.get('line-two').updated_at=new Date(Date.now()+1000).toISOString();
+    await refreshItemSearch(['line-two']);
+  });
+  assert.equal(await p.locator('[data-item-search-status="line-two"]').textContent(),'');
+  assert.equal(await p.locator('[data-item-search="line-two"]').textContent(),'Item not found');
+  assert.deepEqual(await p.evaluate(()=>state.orders.map(line=>line.line_status)),['pending','pending']);
+  await p.evaluate(()=>itemSearchFail=true);await p.locator('[data-item-search="line-two"]').click();
+  await p.waitForFunction(()=>!itemSearchBusy.has('line-two'));
+  assert.equal(await p.locator('[data-item-search-status="line-two"]').textContent(),'');
+  assert.equal(await p.locator('[data-item-search="line-two"]').isEnabled(),true);
+  assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+});
