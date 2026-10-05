@@ -79,3 +79,30 @@ test('a failed task lookup rejects instead of publishing incomplete task evidenc
   run(`fetchOverlappingRows=async()=>({data:[],error:new Error('Task lookup failed')});`);
   await assert.rejects(run(`loadOrderTaskDataForLines(['line'],[])`),/Task lookup failed/);
 });
+
+test('Proof Trail only loads photos near the viewport and bounds simultaneous events',async()=>{
+  const {run}=app();
+  run(`var photoObserver, observed=[], unloaded=[], photoStarts=[], finishPhoto=[];
+    var IntersectionObserver=class {
+      constructor(callback){this.callback=callback;photoObserver=this;}
+      observe(target){observed.push(target);}
+      unobserve(target){unloaded.push(target);}
+      disconnect(){}
+    };
+    var photoTargets=Array.from({length:100},(_,index)=>({dataset:{eventEvidenceIndex:String(index)}}));
+    list.querySelectorAll=()=>photoTargets;
+    hydrateEventEvidencePhotos=(events,version,indexes)=>{
+      photoStarts.push(indexes[0]);return new Promise(resolve=>finishPhoto.push(resolve));
+    };
+    openProofTrailModal();
+    observeEventEvidencePhotos(Array.from({length:100},()=>({})),proofTrailRenderVersion);`);
+  assert.equal(run('observed.length'),100);
+  assert.equal(run('photoStarts.length'),0,'offscreen photos must not trigger requests');
+  run(`photoObserver.callback(photoTargets.slice(0,3).map(target=>({target,isIntersecting:true})),photoObserver)`);
+  assert.equal(run('photoStarts.join(",")'),'0,1');
+  run('finishPhoto[0]()'); await new Promise(r=>setImmediate(r));
+  assert.equal(run('photoStarts.join(",")'),'0,1,2');
+  run(`photoObserver.callback([{target:photoTargets[3],isIntersecting:true}],photoObserver);closeProofTrailModal();finishPhoto[1]();finishPhoto[2]();`);
+  await new Promise(r=>setImmediate(r));
+  assert.equal(run('photoStarts.join(",")'),'0,1,2','closing cancels queued offscreen work');
+});

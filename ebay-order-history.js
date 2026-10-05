@@ -83,6 +83,7 @@ let evidencePhotoViewerReturnFocus = null;
 let historyTargetedSearchTimer = null;
 let historyNextScanReadyTimer = null;
 let proofTrailRenderVersion = 0;
+let proofTrailPhotoObserver = null;
 const evidencePhotoViewerState = {
   zoom: 1,
   panX: 0,
@@ -1591,6 +1592,8 @@ function openProofTrailModal() {
 
 function closeProofTrailModal() {
   proofTrailRenderVersion += 1;
+  proofTrailPhotoObserver?.disconnect();
+  proofTrailPhotoObserver = null;
   closeModal("proof-trail-modal");
 }
 
@@ -1599,8 +1602,8 @@ function isProofTrailOpen() {
   return Boolean(modal && !modal.classList.contains("hidden"));
 }
 
-async function hydrateEventEvidencePhotos(events, renderVersion = proofTrailRenderVersion) {
-  for (let eventIndex = 0; eventIndex < events.length; eventIndex += 1) {
+async function hydrateEventEvidencePhotos(events, renderVersion = proofTrailRenderVersion, indexes = events.map((_, index) => index)) {
+  for (const eventIndex of indexes) {
     if (!isProofTrailOpen() || renderVersion !== proofTrailRenderVersion) return;
     const event = events[eventIndex];
     const photos = getEventEvidencePhotos(event);
@@ -1640,6 +1643,45 @@ async function hydrateEventEvidencePhotos(events, renderVersion = proofTrailRend
       });
     });
   }
+}
+
+function observeEventEvidencePhotos(events, renderVersion) {
+  proofTrailPhotoObserver?.disconnect();
+  proofTrailPhotoObserver = null;
+  if (typeof IntersectionObserver === "undefined") {
+    hydrateEventEvidencePhotos(events, renderVersion).catch((error) => {
+      console.warn("Could not load event evidence photos:", error);
+    });
+    return;
+  }
+
+  const pending = [];
+  const queued = new Set();
+  let active = 0;
+  const loadVisible = () => {
+    if (!isProofTrailOpen() || renderVersion !== proofTrailRenderVersion) return;
+    while (active < 2 && pending.length) {
+      const index = pending.shift();
+      active += 1;
+      hydrateEventEvidencePhotos(events, renderVersion, [index])
+        .catch((error) => console.warn("Could not load event evidence photos:", error))
+        .finally(() => { active -= 1; loadVisible(); });
+    }
+  };
+  proofTrailPhotoObserver = new IntersectionObserver((entries, observer) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const index = Number(entry.target.dataset.eventEvidenceIndex);
+      observer.unobserve(entry.target);
+      if (!Number.isInteger(index) || !events[index] || queued.has(index)) continue;
+      queued.add(index);
+      pending.push(index);
+    }
+    loadVisible();
+  }, { rootMargin: "200px" });
+  $("event-list")?.querySelectorAll("[data-event-evidence-index]").forEach((container) => {
+    proofTrailPhotoObserver.observe(container);
+  });
 }
 
 async function checkHistoryAuth() {
@@ -6483,6 +6525,7 @@ function renderEventList() {
   const list = $("event-list");
   if (!list || !isProofTrailOpen()) return;
   const renderVersion = ++proofTrailRenderVersion;
+  proofTrailPhotoObserver?.disconnect();
 
   const events = getFilteredEvents().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   if (!events.length) {
@@ -6530,9 +6573,7 @@ function renderEventList() {
       </article>
     `;
   }).join("");
-  hydrateEventEvidencePhotos(events, renderVersion).catch((error) => {
-    console.warn("Could not load event evidence photos:", error);
-  });
+  observeEventEvidencePhotos(events, renderVersion);
 }
 
 function setHistoryOrderTaskError(message = "") {
