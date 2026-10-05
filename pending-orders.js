@@ -9123,7 +9123,8 @@ function setWorkerNoInventoryLineSelection(lineId, checked) {
 function setAllWorkerNoInventoryLines(checked) {
   state.workerNoInventoryLineIds.clear();
   if (checked) {
-    state.workerNoInventoryCandidates.forEach((line) => state.workerNoInventoryLineIds.add(line.id));
+    state.workerNoInventoryCandidates.filter((line) => getLineVideoReceiptPhotoCount(line) > 0)
+      .forEach((line) => state.workerNoInventoryLineIds.add(line.id));
   }
   renderWorkerNoInventoryList();
   watchCompletionPhotos("no-inventory");
@@ -9300,13 +9301,18 @@ async function openWorkerNoInventoryModal(options = {}) {
       .filter((entry) => state.ebayLaunchOrderNumbers.has(String(entry.order?.order_number || "")))
       .map((entry) => entry.id))
     : new Set(candidates.map((entry) => entry.id));
+  // Default bulk checkout to saved item receipts, not group completion photos.
+  // Individual checkboxes remain available for an intentional manual selection.
+  state.workerNoInventoryLineIds = new Set(candidates
+    .filter((entry) => state.workerNoInventoryLineIds.has(entry.id) && getLineVideoReceiptPhotoCount(entry) > 0)
+    .map((entry) => entry.id));
   state.noInventoryEvidencePhotos = [];
   state.noInventoryEvidencePhotoUploadKeys.clear();
   $("worker-no-inventory-note").value = "";
   $("worker-no-inventory-error").textContent = "";
   setNoInventoryPhotoStatus("");
   $("worker-no-inventory-subtitle").textContent =
-    `This closes the selected pending line(s) for ${getBuyerLabel(line)} without removing stock from inventory. Uncheck anything that should stay in the packing queue. It will be signed by your logged-in account at ${getCheckoutStoreName() || "the selected store"}.`;
+    `This closes the selected pending line(s) for ${getBuyerLabel(line)} without removing stock from inventory. Items without a saved receipt screenshot start unchecked; you can select them individually if needed. It will be signed by your logged-in account at ${getCheckoutStoreName() || "the selected store"}.`;
   renderWorkerNoInventoryList();
   renderEbayLabelPanel();
   renderNoInventoryEvidencePhotos();
@@ -9414,7 +9420,9 @@ async function confirmWorkerNoInventoryCompletion() {
     clearSelection();
   } catch (error) {
     console.error("Worker no-inventory completion failed:", error);
-    if (errorEl) errorEl.textContent = error.message || "Could not complete this order without inventory.";
+    if (errorEl) errorEl.textContent = error.code === "57014"
+      ? "The database took too long and canceled this completion. The selected items were not closed. Your saved photos are still attached. Please try again."
+      : error.message || "Could not complete this order without inventory.";
   } finally {
     state.busy = false;
     if (confirmButton) confirmButton.disabled = false;

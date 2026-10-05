@@ -63,6 +63,7 @@ async function open(t,{width=1280}={}) {
     }};
     state.user={id:'worker',email:'fixture@example.test'};state.employee={role:'employee',active:true};
     state.stores=[{id:'store-a',name:'Main Store'},{id:'store-b',name:'Other Store'}];state.checkoutStoreId='store-a';
+    databaseLines.forEach(line=>line.video_receipt_photo_count=1);
     state.orders=structuredClone(databaseLines);
     window.realRenderOrders=renderOrders;
     renderOrders=renderSelectedOrder=renderLiveLotOrderMatches=renderOrderTaskPanel=renderSummaryStrip=()=>{};
@@ -82,6 +83,65 @@ async function open(t,{width=1280}={}) {
 async function scan(p,value='OG%,001'){
   await p.locator('#item-scan').fill(value);await p.locator('#item-scan').press('Enter');
 }
+
+async function prepareNoInventoryReview(p) {
+  await p.evaluate(() => {
+    hydrateNoInventoryVideoReceiptEvidenceThumbnails = async () => {};
+    loadNoInventoryCaptureStations = async () => {};
+    captureAuditLocation = async () => ({status:'not_available'});
+    state.orders[1].video_receipt_photo_count = 0;
+    const cached = {...state.orders[1], id:'line-c', item_title:'Recently captured item'};
+    state.orders.push(cached);
+    state.videoReceiptEvidenceByLineId.set(cached.id, {bucket:'order-evidence-photos', path:'video-receipts/c.png'});
+    // Group completion evidence is not a receipt for the missing item.
+    state.noInventoryEvidencePhotos = [{bucket:'order-evidence-photos', path:'completion.png'}];
+  });
+}
+
+test('noninventory bulk review selects only items with saved receipt screenshots and respects the requested scope', async t => {
+  const p = await open(t);
+  await prepareNoInventoryReview(p);
+  await p.evaluate(() => openWorkerNoInventoryModal());
+  assert.deepEqual(await p.evaluate(() => [...state.workerNoInventoryLineIds]), ['line-a','line-c']);
+  assert.equal(await p.locator('[data-no-inventory-line="line-b"]').isChecked(), false);
+  await p.locator('[data-no-inventory-line="line-b"]').check();
+  assert.equal(await p.locator('[data-no-inventory-line="line-b"]').isChecked(), true, 'individual selection remains intentional');
+  await p.locator('#deselect-all-worker-no-inventory').click();
+  await p.locator('#select-all-worker-no-inventory').click();
+  assert.deepEqual(await p.evaluate(() => [...state.workerNoInventoryLineIds]), ['line-a','line-c']);
+  await p.evaluate(() => {closeWorkerNoInventoryModal();return openWorkerNoInventoryModal({lineIds:['line-b','line-c']});});
+  assert.deepEqual(await p.evaluate(() => [...state.workerNoInventoryLineIds]), ['line-c']);
+});
+
+test('noninventory review with no receipt screenshots starts empty and cannot accidentally submit', async t => {
+  const p = await open(t);
+  await prepareNoInventoryReview(p);
+  await p.evaluate(() => {
+    state.orders.forEach(line => line.video_receipt_photo_count = 0);
+    state.videoReceiptEvidenceByLineId.clear();
+    return openWorkerNoInventoryModal();
+  });
+  assert.equal(await p.locator('#confirm-worker-no-inventory').isDisabled(), true);
+  await p.evaluate(() => confirmWorkerNoInventoryCompletion());
+  assert.equal(await p.evaluate(() => calls.some(c => c.name === 'complete_ebay_order_lines_without_inventory_evidence')), false);
+});
+
+test('a noninventory timeout keeps the reviewed selection available and explains that it was not closed', async t => {
+  const p = await open(t);
+  await prepareNoInventoryReview(p);
+  await p.evaluate(async () => {
+    supabase.rpc = async (name,args) => {
+      calls.push({name,args});
+      return {error:{code:'57014',message:'canceling statement due to statement timeout'}};
+    };
+    await openWorkerNoInventoryModal();
+    await confirmWorkerNoInventoryCompletion();
+  });
+  assert.deepEqual(await p.evaluate(() => calls.at(-1).args._order_line_ids), ['line-a','line-c']);
+  assert.deepEqual(await p.evaluate(() => [...state.workerNoInventoryLineIds]), ['line-a','line-c']);
+  assert.match(await p.locator('#worker-no-inventory-error').innerText(), /selected items were not closed/);
+  assert.equal(await p.locator('#confirm-worker-no-inventory').isEnabled(), true);
+});
 
 test('scanner plus manual line share one final review and one atomic request',async t=>{
   const p=await open(t);await scan(p);

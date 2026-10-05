@@ -126,6 +126,7 @@ async function open(t, db, {mobile = false, actor = 'desktop@example.com', live 
         total_price: 30, line_status: 'pending', order: {order_number: '11-22222-44444', buyer_username: 'lore2526'}},
     ];
     state.user = {id: actor, email: actor}; state.employee = {active: true, role: 'employee'};
+    lines.forEach(line => line.video_receipt_photo_count = 1);
     state.orders = lines; state.filteredOrders = lines; state.selectedLine = lines[0];
     state.checkoutStoreId = 'store-a'; state.stores = [{id: 'store-a', name: 'Main Store'}];
     hydrateBuyerGroupNotes = () => {};
