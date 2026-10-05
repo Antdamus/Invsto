@@ -82,6 +82,7 @@ const state = {
 let evidencePhotoViewerReturnFocus = null;
 let historyTargetedSearchTimer = null;
 let historyNextScanReadyTimer = null;
+let proofTrailRenderVersion = 0;
 const evidencePhotoViewerState = {
   zoom: 1,
   panX: 0,
@@ -1584,15 +1585,23 @@ function closeEvidencePhotoViewer() {
 
 function openProofTrailModal() {
   openModal("proof-trail-modal");
+  renderEventList();
   setTimeout(() => $("close-proof-trail-modal")?.focus(), 80);
 }
 
 function closeProofTrailModal() {
+  proofTrailRenderVersion += 1;
   closeModal("proof-trail-modal");
 }
 
-async function hydrateEventEvidencePhotos(events) {
+function isProofTrailOpen() {
+  const modal = $("proof-trail-modal");
+  return Boolean(modal && !modal.classList.contains("hidden"));
+}
+
+async function hydrateEventEvidencePhotos(events, renderVersion = proofTrailRenderVersion) {
   for (let eventIndex = 0; eventIndex < events.length; eventIndex += 1) {
+    if (!isProofTrailOpen() || renderVersion !== proofTrailRenderVersion) return;
     const event = events[eventIndex];
     const photos = getEventEvidencePhotos(event);
     const container = document.querySelector(`[data-event-evidence-index="${eventIndex}"]`);
@@ -1606,6 +1615,7 @@ async function hydrateEventEvidencePhotos(events) {
       label: photo.label || `Evidence ${getHistoryEvidenceMediaType(photo) === "video" ? "video" : getHistoryEvidenceMediaType(photo) === "pdf" ? "PDF" : "photo"} ${index + 1}`,
     })));
     const visible = signed.filter((photo) => photo.thumbUrl || photo.fullUrl);
+    if (!isProofTrailOpen() || renderVersion !== proofTrailRenderVersion) return;
     if (!visible.length) continue;
 
     container.innerHTML = visible.map((photo) => `
@@ -6465,7 +6475,8 @@ function getFilteredEvents() {
 
 function renderEventList() {
   const list = $("event-list");
-  if (!list) return;
+  if (!list || !isProofTrailOpen()) return;
+  const renderVersion = ++proofTrailRenderVersion;
 
   const events = getFilteredEvents().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   if (!events.length) {
@@ -6513,7 +6524,7 @@ function renderEventList() {
       </article>
     `;
   }).join("");
-  hydrateEventEvidencePhotos(events).catch((error) => {
+  hydrateEventEvidencePhotos(events, renderVersion).catch((error) => {
     console.warn("Could not load event evidence photos:", error);
   });
 }
