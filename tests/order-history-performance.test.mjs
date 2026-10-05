@@ -48,3 +48,34 @@ for (const action of ['closeProofTrailModal()','renderEventList()']) {
     assert.equal(run('writes'),0); assert.equal(run('signed'),2,'do not start the next event');
   });
 }
+
+test('line and order task lookups overlap, then preserve deduplication and event context',async()=>{
+  const {run}=app();
+  run(`var started=[],releaseLines,releaseOrders,eventReads=0;
+    fetchOverlappingRows=()=>{started.push('lines');return new Promise(r=>releaseLines=r)};
+    var supabase={from:table=>{
+      var query={select:()=>query,in:()=>query,order:()=>query,limit:()=>{
+        if(table==='ebay_order_tasks'){started.push('orders');return new Promise(r=>releaseOrders=r)}
+        eventReads++;return Promise.resolve({data:[{id:'event',task_id:'order-task',signed_by_email:'worker@example.test'}]});
+      }};return query;
+    }};`);
+  const pending=run(`loadOrderTaskDataForLines(['line'],['order'],{lines:[{id:'line',order_id:'order'}]})`);
+  assert.equal(run('started.join(",")'),'lines,orders');
+  assert.equal(run('eventReads'),0);
+  run(`releaseOrders({data:[{id:'shared',order_id:'order',order_line_ids:['line']},{id:'order-task',order_id:'order',order_line_ids:[],title:'Check proof'}]})`);
+  await new Promise(r=>setImmediate(r));
+  assert.equal(run('eventReads'),0,'events must wait for both task scopes');
+  run(`releaseLines({data:[{id:'shared',order_id:'order',order_line_ids:['line']}],error:null})`);
+  const result=JSON.parse(JSON.stringify(await pending));
+  assert.equal(result.tasks.length,2);
+  assert.deepEqual(result.tasks[1].order_line_ids,['line']);
+  assert.equal(result.events[0].task_title,'Check proof');
+  assert.equal(result.events[0].created_by_email,'worker@example.test');
+  assert.deepEqual(result.events[0].order_line_ids,['line']);
+});
+
+test('a failed task lookup rejects instead of publishing incomplete task evidence',async()=>{
+  const {run}=app();
+  run(`fetchOverlappingRows=async()=>({data:[],error:new Error('Task lookup failed')});`);
+  await assert.rejects(run(`loadOrderTaskDataForLines(['line'],[])`),/Task lookup failed/);
+});

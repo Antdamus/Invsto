@@ -2510,27 +2510,33 @@ async function loadOrderTaskDataForLines(lineIds = [], orderIds = [], options = 
     lineIdsByOrderId.set(line.order_id, ids);
   });
 
-  const taskRows = [];
-  if (cleanLineIds.length) {
-    const { data, error } = await fetchOverlappingRows("ebay_order_tasks", "order_line_ids", cleanLineIds, {
-      select: ORDER_HISTORY_TASK_SELECT,
-      orderBy: "updated_at",
-      limitPerChunk: 1000,
-    });
-    if (error) throw error;
-    taskRows.push(...(data || []));
-  }
-
-  for (const chunk of chunkArray(cleanOrderIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
-    const { data, error } = await supabase
-      .from("ebay_order_tasks")
-      .select(ORDER_HISTORY_TASK_SELECT)
-      .in("order_id", chunk)
-      .order("updated_at", { ascending: false })
-      .limit(1000);
-    if (error) throw error;
-    taskRows.push(...(data || []));
-  }
+  // Line-scoped and order-scoped tasks are independent; only their events
+  // need to wait for both. Keep each branch's chunks bounded and sequential.
+  const [lineTasksResult, orderTasks] = await Promise.all([
+    cleanLineIds.length
+      ? fetchOverlappingRows("ebay_order_tasks", "order_line_ids", cleanLineIds, {
+        select: ORDER_HISTORY_TASK_SELECT,
+        orderBy: "updated_at",
+        limitPerChunk: 1000,
+      })
+      : Promise.resolve({ data: [], error: null }),
+    (async () => {
+      const rows = [];
+      for (const chunk of chunkArray(cleanOrderIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
+        const { data, error } = await supabase
+          .from("ebay_order_tasks")
+          .select(ORDER_HISTORY_TASK_SELECT)
+          .in("order_id", chunk)
+          .order("updated_at", { ascending: false })
+          .limit(1000);
+        if (error) throw error;
+        rows.push(...(data || []));
+      }
+      return rows;
+    })(),
+  ]);
+  if (lineTasksResult.error) throw lineTasksResult.error;
+  const taskRows = [...(lineTasksResult.data || []), ...orderTasks];
 
   const tasks = uniqueById(taskRows).map((task) => {
     const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
