@@ -51,6 +51,24 @@ test('stores and queue start together, and extension readiness waits for both',a
   run('releaseStores()');await boot;assert.equal(run('ready'),true);
 });
 
+test('a failed queue request clears loading indicators and provides a refresh action',async()=>{
+  const {run}=app();
+  run(`var elements=new Map();
+    document.getElementById=id=>{
+      if(!elements.has(id))elements.set(id,{textContent:'',innerHTML:'',value:'',classList:{remove(){}}});
+      return elements.get(id);
+    };
+    isAdminUser=()=>true;
+    fetchOrderLineQueue=async()=>{throw {code:'57014',message:'canceling statement due to statement timeout'}};
+    console={...console,error(){}};`);
+  await run('loadOrders()');
+  assert.match(run('elements.get("orders-list").innerHTML'),/Click Refresh to try again/);
+  assert.equal(run('elements.get("summary-pending").textContent'),'Unavailable');
+  assert.equal(run('elements.get("order-count-pill").textContent'),'Could not load orders');
+  assert.equal(run('elements.get("buyer-remaining-count").textContent'),'Count unavailable');
+  assert.equal(run('[...elements.values()].some(e=>/Loading|Checking/.test(e.textContent))'),false);
+});
+
 test('photo original, preview and thumbnail uploads overlap without publishing a failed original',async()=>{
   const {run}=app();
   run(`var active=0,peak=0,failOriginal=false;

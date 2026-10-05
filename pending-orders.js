@@ -2984,8 +2984,8 @@ async function loadOrders() {
     logPendingOrderPerf("loadOrders query", queryStartedAt, { admin, rows: data.length, status });
   } catch (error) {
     console.error("Failed to load pending eBay orders:", error);
-    if (list) list.innerHTML = `<div class="empty-state">Could not load eBay orders. Make sure the pending-order migration has been pushed.</div>`;
-    renderRemainingBuyerCount("Count unavailable");
+    if (list) list.innerHTML = `<div class="empty-state">Could not load pending orders. Click Refresh to try again.</div>`;
+    renderPendingOrderSummaryError();
     return;
   }
 
@@ -3309,6 +3309,17 @@ function renderPendingOrderSummaryLoading() {
   const cancellationCount = $("cancellation-review-count");
   if (cancellationCount) cancellationCount.textContent = "0";
   $("cancellation-review-toggle")?.classList.remove("has-cancellations");
+}
+
+function renderPendingOrderSummaryError() {
+  renderRemainingBuyerCount("Count unavailable");
+  for (const id of ["summary-pending", "summary-overdue-orders", "summary-today-orders", "summary-tomorrow-orders"]) {
+    $(id).textContent = "Unavailable";
+  }
+  for (const id of ["summary-pending-lines", "summary-overdue-lines", "summary-today-lines", "summary-tomorrow-lines"]) {
+    $(id).textContent = "Refresh to try again";
+  }
+  $("order-count-pill").textContent = "Could not load orders";
 }
 
 function renderSummaryStrip() {
