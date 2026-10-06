@@ -1,5 +1,6 @@
 .phone-workspace-only { display: none; }
 .stock-quick-search-label { display: grid; gap: 6px; font: inherit; }
+.stock-date-filter-label { display: grid; gap: 6px; font-size: 12px; }
 .phone-workspace-sheet:not([open]) { display: none; }
 
 @media (max-width: 760px) {
@@ -37,7 +38,7 @@
   .phone-workspace-context small { display: block; font-size: 9px; letter-spacing: .15em; color: var(--phone-muted); margin-bottom: 2px; }
   .phone-workspace-context strong { display: block; font-size: 15px; letter-spacing: -.02em; white-space: nowrap; }
   body[data-phone-page] #phone-workspace-refresh, body[data-phone-page] #phone-workspace-tools { min-width: 44px; padding: 0 10px; border: 1px solid var(--phone-line); border-radius: 12px; background: var(--phone-panel); color: #f7f4ed; font-size: 12px; font-weight: 700; }
-  body[data-phone-page] #phone-workspace-refresh { font-size: 26px; }
+  body[data-phone-page] #phone-workspace-refresh { display: grid; place-items: center; font: 26px/1 system-ui, sans-serif; }
   #phone-workspace-overview { padding: 18px 16px 0; margin: 0; }
   .phone-eyebrow { color: var(--phone-gold); font-size: 10px; letter-spacing: .16em; font-weight: 700; }
   #phone-workspace-overview h1 { color: #f7f4ed; font: 27px/1.2 Georgia, serif; letter-spacing: -.025em; margin: 7px 0 16px; }
@@ -86,7 +87,7 @@
   body[data-phone-page=history] .history-board { margin: 0; padding: 0 16px; border: 0; background: none; box-shadow: none; }
   body[data-phone-page=history] .history-board-head { display: flex; align-items: center; flex-direction: row; padding: 0 0 12px; margin: 0; gap: 8px; }
   body[data-phone-page=history] .history-board-head .eyebrow { display: none; }
-  body[data-phone-page=history] .history-board-head h2 { font: 600 14px system-ui,sans-serif; margin: 0; }
+  body[data-phone-page=history] .history-board-head h2 { font: 600 14px system-ui,sans-serif; margin: 0; color: #d8d0c3; }
   body[data-phone-page=history] #history-count { font-size: 11px; padding: 6px 10px; }
   body[data-phone-page=history] .history-list { gap: 12px; padding: 12px 0 0; }
   body[data-phone-page=history] .history-order-card { border: 1px solid #413b33; border-radius: 19px; padding: 0; overflow: hidden; background: linear-gradient(125deg,#262426,#1d1d20); }
