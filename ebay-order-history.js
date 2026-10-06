@@ -501,13 +501,17 @@ function getHistorySearchNeedles(value) {
   ]);
 }
 
-function buildHistorySearchText(values = []) {
+function getHistorySearchTextParts(values = []) {
   const chunks = (Array.isArray(values) ? values : [values])
     .flatMap(flattenLabelMetadataValues)
     .filter(Boolean)
     .map((value) => String(value || "").trim())
     .filter(Boolean);
-  return unique(chunks.flatMap(getHistorySearchNeedles)).join(" ");
+  return unique(chunks.flatMap(getHistorySearchNeedles));
+}
+
+function buildHistorySearchText(values = []) {
+  return getHistorySearchTextParts(values).join(" ");
 }
 
 function historySearchTextIncludes(haystack, term) {
@@ -563,28 +567,46 @@ function getLabelMetadataSearchText(...metadataObjects) {
   }));
 }
 
-function getLabelEventSearchTextForLine(line) {
-  const lineId = line?.id || "";
-  const orderNumber = normalizeEbayOrderNumber(line?.order?.order_number);
+let historyLabelSearchSnapshot = null;
+function getHistoryLabelSearchRows() {
+  const snapshot = historyLabelSearchSnapshot;
+  if (snapshot && snapshot.labels === state.labelEvents && snapshot.related === state.relatedLabelEvents
+    && snapshot.labelCount === state.labelEvents.length && snapshot.relatedCount === state.relatedLabelEvents.length) {
+    return snapshot.rows;
+  }
   const events = new Map();
   [...state.labelEvents, ...state.relatedLabelEvents].forEach((event) => {
     const key = event.id || `${event.label_file_path}:${event.created_at}`;
     if (!events.has(key)) events.set(key, event);
   });
-  return buildHistorySearchText([...events.values()]
-    .filter((event) =>
-      (lineId && (event.order_line_ids || []).includes(lineId))
-      || (orderNumber && (event.order_numbers || []).map(normalizeEbayOrderNumber).includes(orderNumber))
-    )
-    .flatMap((event) => [
+  const rows = [...events.values()].map((event, position) => ({
+    position,
+    order_line_ids: event.order_line_ids || [],
+    order_numbers: (event.order_numbers || []).map(normalizeEbayOrderNumber),
+    parts: getHistorySearchTextParts([
       event.action,
       event.shipment_id,
       event.label_file_path,
       event.signed_by_email,
       getLabelMetadataSearchText(event.label_metadata),
       ...(event.order_numbers || []),
-    ])
-    .filter(Boolean));
+    ]),
+  }));
+  historyLabelSearchSnapshot = {
+    labels: state.labelEvents, related: state.relatedLabelEvents,
+    labelCount: state.labelEvents.length, relatedCount: state.relatedLabelEvents.length, rows,
+  };
+  return rows;
+}
+
+function getLabelEventSearchTextForLine(line) {
+  const rows = getHistoryLabelSearchRows();
+  const matches = new Set([
+    ...getHistoryRowsByKeys(rows, "order_line_ids", [line?.id]),
+    ...getHistoryRowsByKeys(rows, "order_numbers", [normalizeEbayOrderNumber(line?.order?.order_number)]),
+  ]);
+  // Keep first-event precedence, source order, and the original search tokens.
+  return unique([...matches].sort((a, b) => a.position - b.position).flatMap((row) => row.parts)).join(" ");
 }
 
 function normalizeLabelMetadata(metadata = {}, additions = {}) {
@@ -6410,37 +6432,85 @@ async function hydrateHistoryGroupEvidencePhotos(groups) {
   }
 }
 
+let historyReceiptPhotoObserver = null;
+let historyReceiptPhotoQueue = [];
+let historyReceiptPhotosLoading = 0;
+const historyReceiptPhotoPending = new WeakSet();
+
+function drainHistoryReceiptPhotoQueue() {
+  while (historyReceiptPhotosLoading < 4 && historyReceiptPhotoQueue.length) {
+    const button = historyReceiptPhotoQueue.shift();
+    if (!button.isConnected || !button.getClientRects().length || button.dataset.loaded === "true"
+      || historyReceiptPhotoPending.has(button)) continue;
+    historyReceiptPhotosLoading += 1;
+    historyReceiptPhotoPending.add(button);
+    loadHistoryVideoReceiptThumbnail(button)
+      .catch((error) => console.warn("Could not load history receipt photo:", error))
+      .finally(() => {
+        historyReceiptPhotosLoading -= 1;
+        historyReceiptPhotoPending.delete(button);
+        drainHistoryReceiptPhotoQueue();
+      });
+  }
+}
+
 async function hydrateHistoryVideoReceiptThumbnails() {
-  const buttons = [...document.querySelectorAll("[data-history-video-receipt-photo]")];
-  await Promise.all(buttons.map(async (button) => {
-    if (button.dataset.loaded === "true") return;
-    const bucket = button.dataset.bucket || "";
-    const path = button.dataset.path || "";
-    if (!bucket || !path) return;
-
-    const photo = { bucket, path };
-    const [thumbUrl, fullUrl] = await Promise.all([
-      signEventEvidencePhoto(photo),
-      signEventEvidencePhoto(photo, { thumbnail: false }),
-    ]);
-    const url = fullUrl || thumbUrl;
-    if (!url) return;
-
-    button.dataset.evidencePhotoUrl = url;
-    button.dataset.loaded = "true";
-    const host = button.querySelector("[data-history-video-receipt-image]");
-    if (host) {
-      host.innerHTML = `<img src="${escapeHtml(thumbUrl || url)}" alt="${escapeHtml(button.dataset.label || "Video receipt screenshot")}" />`;
+  historyReceiptPhotoObserver?.disconnect();
+  historyReceiptPhotoQueue = [];
+  const buttons = [...document.querySelectorAll("[data-history-video-receipt-photo]")]
+    .filter((button) => button.dataset.loaded !== "true" && !historyReceiptPhotoPending.has(button));
+  const enqueue = (button) => {
+    if (!historyReceiptPhotoQueue.includes(button)) historyReceiptPhotoQueue.push(button);
+    drainHistoryReceiptPhotoQueue();
+  };
+  if (typeof IntersectionObserver === "undefined") {
+    buttons.forEach(enqueue);
+    return;
+  }
+  historyReceiptPhotoObserver = new IntersectionObserver((entries, observer) => {
+    entries.forEach(({ target, isIntersecting }) => {
+      if (!isIntersecting) return;
+      observer.unobserve(target);
+      enqueue(target);
+    });
+  }, { rootMargin: "200px" });
+  buttons.forEach((button) => {
+    historyReceiptPhotoObserver.observe(button);
+    // Keyboard users can reach a photo before the observer runs.
+    if (button.dataset.focusBound !== "true") {
+      button.dataset.focusBound = "true";
+      button.addEventListener("focus", () => enqueue(button));
     }
-    if (button.dataset.bound !== "true") {
-      button.dataset.bound = "true";
-      button.addEventListener("click", () => openEvidencePhotoViewer(
-        button.dataset.evidencePhotoUrl,
-        button.dataset.label || "Video receipt screenshot",
-        button.dataset.meta || `${bucket}/${path}`
-      ));
-    }
-  }));
+  });
+}
+
+async function loadHistoryVideoReceiptThumbnail(button) {
+  const bucket = button.dataset.bucket || "";
+  const path = button.dataset.path || "";
+  if (!bucket || !path) return;
+
+  const photo = { bucket, path };
+  const [thumbUrl, fullUrl] = await Promise.all([
+    signEventEvidencePhoto(photo),
+    signEventEvidencePhoto(photo, { thumbnail: false }),
+  ]);
+  const url = fullUrl || thumbUrl;
+  if (!url || !button.isConnected || !button.getClientRects().length) return;
+
+  button.dataset.evidencePhotoUrl = url;
+  button.dataset.loaded = "true";
+  const host = button.querySelector("[data-history-video-receipt-image]");
+  if (host) {
+    host.innerHTML = `<img src="${escapeHtml(thumbUrl || url)}" alt="${escapeHtml(button.dataset.label || "Video receipt screenshot")}" />`;
+  }
+  if (button.dataset.bound !== "true") {
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => openEvidencePhotoViewer(
+      button.dataset.evidencePhotoUrl,
+      button.dataset.label || "Video receipt screenshot",
+      button.dataset.meta || `${bucket}/${path}`
+    ));
+  }
 }
 
 async function deleteHistoryVideoReceiptCapture(button) {

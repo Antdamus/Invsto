@@ -578,7 +578,15 @@ test('order history large ledger preserves totals, buyer search, tasks, and rece
   assert.equal(await p.locator('.history-line-row').count(),6);
   assert.equal(await p.locator('[data-history-video-receipt-photo]').count(),6);
   assert.match(await p.locator('.history-order-task-list').first().textContent(),/Check packing 25[2-7]/);
-  await p.waitForFunction(()=>[...document.querySelectorAll('[data-history-video-receipt-photo]')].every(node=>node.dataset.loaded==='true'));
+  const receiptButtons=p.locator('[data-history-video-receipt-photo]');
+  await receiptButtons.first().scrollIntoViewIfNeeded();
+  await p.waitForFunction(()=>document.querySelector('[data-history-video-receipt-photo]')?.dataset.loaded==='true');
+  assert.ok(await p.evaluate(()=>photoReads)<12,'offscreen receipt photos must stay deferred');
+  await receiptButtons.first().click();
+  await p.locator('#evidence-photo-viewer-modal').waitFor({state:'visible'});
+  await p.evaluate(()=>closeEvidencePhotoViewer());
+  await receiptButtons.last().scrollIntoViewIfNeeded();
+  await p.waitForFunction(()=>[...document.querySelectorAll('[data-history-video-receipt-photo]')].at(-1)?.dataset.loaded==='true');
   await mkdir(new URL('../test-results/',import.meta.url),{recursive:true});
   await p.screenshot({path:new URL('../test-results/history-optimized-local-verification.png',import.meta.url).pathname.replace(/^\/(?=[A-Z]:)/i,''),fullPage:false});
   await p.locator('#history-search').fill('Packing note 999');

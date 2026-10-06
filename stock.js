@@ -1022,11 +1022,13 @@ function buildLocationChips(item) {
 
     const fragment = document.createDocumentFragment();
 
-    for (let index = 0; index < data.length; index++) {
-      const item = data[index];
-      const card = await renderStockCard(item, index);
+    // Photo signing is independent per card. Bound the work and retain the
+    // sorted order, while stopping old renders when filters or pages change.
+    for (let index = 0; index < data.length; index += 4) {
+      const cards = await Promise.all(data.slice(index, index + 4)
+        .map((item, offset) => renderStockCard(item, index + offset)));
       if (renderToken !== stockListRenderToken) return;
-      fragment.appendChild(card);
+      cards.forEach((card) => fragment.appendChild(card));
     }
 
     if (renderToken !== stockListRenderToken) return;

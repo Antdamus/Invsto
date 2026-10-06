@@ -115,6 +115,86 @@ test('reused formatters preserve currency, date, and invalid-value presentation'
   assert.equal(run(`formatMoney(NaN)`),'$0.00');
 });
 
+test('indexed label search preserves exact tokens, first-event precedence, and refreshed labels', () => {
+  const {run}=app();
+  run(`function referenceLabelSearch(line) {
+    const events=new Map();
+    [...state.labelEvents,...state.relatedLabelEvents].forEach(event=>{
+      const key=event.id||event.label_file_path+':'+event.created_at;
+      if(!events.has(key)) events.set(key,event);
+    });
+    const number=normalizeEbayOrderNumber(line.order?.order_number);
+    return buildHistorySearchText([...events.values()].filter(event=>
+      (line.id&&(event.order_line_ids||[]).includes(line.id))||
+      (number&&(event.order_numbers||[]).map(normalizeEbayOrderNumber).includes(number)))
+      .flatMap(event=>[event.action,event.shipment_id,event.label_file_path,event.signed_by_email,
+        getLabelMetadataSearchText(event.label_metadata),...(event.order_numbers||[])]).filter(Boolean));
+  }
+  state.labelEvents=[
+    {id:'duplicate',order_line_ids:['outside'],action:'first duplicate'},
+    {id:'line',order_line_ids:['line','second'],action:'Label attached',shipment_id:'ship-123456',
+      label_metadata:{trackingNumbers:['9400 1234 5678 9000 1234 56'],labelRows:[{provider:'Test shipping',code:'ABC-123456'}]}}
+  ];
+  state.relatedLabelEvents=[
+    {id:'duplicate',order_line_ids:['line'],action:'must be ignored'},
+    {id:'order',order_numbers:['11 22222 33333'],action:'replaced',label_file_path:'labels/a.pdf'},
+    {label_file_path:'labels/fallback.pdf',created_at:'2026-10-06',order_line_ids:['line'],action:'fallback'},
+    {label_file_path:'labels/fallback.pdf',created_at:'2026-10-06',order_line_ids:['line'],action:'ignored'}
+  ];
+  var searchLines=[{id:'line',order:{order_number:'11-22222-33333'}},{id:'second'},
+    {id:'outside'},{order:{order_number:'11-22222-33333'}},{id:'no-match'},{}];`);
+  for (let i=0;i<6;i++) assert.equal(run(`getLabelEventSearchTextForLine(searchLines[${i}])`),run(`referenceLabelSearch(searchLines[${i}])`));
+  run(`state.labelEvents.unshift({id:'new',order_line_ids:['line'],action:'new label'});`);
+  assert.equal(run('getLabelEventSearchTextForLine(searchLines[0])'),run('referenceLabelSearch(searchLines[0])'));
+  run(`state.relatedLabelEvents=[{id:'replacement',order_line_ids:['line'],action:'fresh lookup'}];`);
+  assert.equal(run('getLabelEventSearchTextForLine(searchLines[0])'),run('referenceLabelSearch(searchLines[0])'));
+});
+
+test('shared label metadata is normalized once per dataset rather than once per matching line', () => {
+  const {run}=app();
+  run(`var metadataReads=0;
+    state.labelEvents=Array.from({length:500},(_,i)=>({id:'label-'+i,
+      order_line_ids:['line-'+i,'line-'+(i+500)],order_numbers:['11-22222-'+String(10000+i)],
+      get label_metadata(){metadataReads++;return {trackingNumbers:['9400111899560000000000']};}
+    }));
+    for(let i=0;i<1000;i++) {
+      if(!getLabelEventSearchTextForLine({id:'line-'+i}).includes('9400111899560000000000')) throw Error('Missing label');
+    }`);
+  assert.equal(run('metadataReads'),500);
+});
+
+test('receipt photos wait for the viewport, bound requests, and cancel detached work', async () => {
+  const {run}=app();
+  run(`var receiptObserver, observedReceipts=[], finishReceipts=[], receiptStarts=[];
+    var IntersectionObserver=class {
+      constructor(callback){this.callback=callback;receiptObserver=this;}
+      observe(target){observedReceipts.push(target);}
+      unobserve(){} disconnect(){}
+    };
+    var receiptButtons=Array.from({length:100},(_,i)=>({
+      dataset:{bucket:'proof',path:i+'.png'},isConnected:true,getClientRects:()=>[{}],
+      addEventListener(){},querySelector:()=>null
+    }));
+    document.querySelectorAll=()=>receiptButtons;
+    signEventEvidencePhoto=photo=>{
+      receiptStarts.push(photo.path);return new Promise(resolve=>finishReceipts.push(()=>resolve('https://example.test/photo.jpg')));
+    };`);
+  await run('hydrateHistoryVideoReceiptThumbnails()');
+  assert.equal(run('observedReceipts.length'),100);
+  assert.equal(run('receiptStarts.length'),0);
+  run(`receiptObserver.callback(receiptButtons.slice(0,6).map(target=>({target,isIntersecting:true})),receiptObserver);`);
+  assert.equal(run('receiptStarts.length'),8,'at most four photos, two URLs each');
+  run('finishReceipts[0]();finishReceipts[1]()');
+  await new Promise(r=>setImmediate(r));
+  assert.equal(run('receiptStarts.length'),10,'the next visible photo starts when a slot frees');
+  run(`receiptButtons.forEach(button=>button.isConnected=false);finishReceipts.forEach(finish=>finish());`);
+  await new Promise(r=>setImmediate(r));
+  assert.equal(run('receiptStarts.length'),10,'detached queued photos must never start');
+  assert.equal(run(`receiptButtons.filter(button=>button.dataset.loaded==='true').length`),1,'detached in-flight photos must not update the old DOM');
+  run(`receiptButtons=[];hydrateHistoryVideoReceiptThumbnails();`);
+  assert.equal(run('historyReceiptPhotoQueue.length'),0);
+});
+
 test('task event chunks overlap with at most three reads and preserve result order', async () => {
   const {run}=app();
   run(`var pendingChunks=[],startedChunks=[];
