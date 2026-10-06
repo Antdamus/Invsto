@@ -16,7 +16,14 @@ if (new URL(location.href).searchParams.get('capture') === '1') {
   const pending = new Map();
   const captureChecks = new Map();
   const listingPending = new Map();
+  const bagPending = new Map();
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
+    if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_BAG_LABEL_BRIDGE'){
+      const id=crypto.randomUUID();
+      const timer=setTimeout(()=>{bagPending.delete(id);reply({ok:false,error:'The receiver did not confirm the request. Retry to check the same label send.'});},message.command?.action==='configure'?180000:30000);
+      bagPending.set(id,result=>{clearTimeout(timer);reply(result);});
+      window.postMessage({type:'INVSTO_BAG_PRINT_REQUEST',id,command:message.command},location.origin);return true;
+    }
     if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_CHECK_CAPTURE'){
       if(!/^[A-Za-z0-9_-]{6,100}$/.test(message.event_id||'')){reply({ok:false});return;}
       const id=crypto.randomUUID();const timer=setTimeout(()=>{captureChecks.delete(id);reply({ok:false,state:'unavailable'});},8000);
@@ -45,6 +52,9 @@ if (new URL(location.href).searchParams.get('capture') === '1') {
     return true;
   });
   window.addEventListener('message', event => {
+    if(event.source===window&&event.origin===location.origin&&event.data?.type==='INVSTO_BAG_PRINT_RESPONSE'){
+      const respond=bagPending.get(event.data.id);if(respond){bagPending.delete(event.data.id);const {type,id,...result}=event.data;respond(result);}return;
+    }
     if(event.source===window&&event.origin===location.origin&&event.data?.type==='INVSTO_CAPTURE_CHECK_RESULT'){
       const respond=captureChecks.get(event.data.id);if(respond){captureChecks.delete(event.data.id);respond({ok:true,state:event.data.state});}return;
     }

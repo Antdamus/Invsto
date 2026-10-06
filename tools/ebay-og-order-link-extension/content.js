@@ -1194,6 +1194,7 @@
   }
 
   function isEbayCancellationsPage() {
+    if (/^\/ebaylive\/host\/events\//.test(window.location.pathname)) return false;
     if (isCancelConfirmationDetailsPage()) return false;
     if (isEbayRequestsDisputesPage()) return false;
     const url = new URL(window.location.href);

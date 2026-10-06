@@ -6,7 +6,7 @@ import {chromium,webkit} from '@playwright/test';
 import vm from 'node:vm';
 const root=new URL('../',import.meta.url);let server,browser,origin;
 before(async()=>{
- server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:ebay-live|live-sales|live-manual-items|live-bag-label|live-show-drafts|live-listing-intake|live-capture-setup)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
+ server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:ebay-live|live-sales|live-manual-items|live-bag-label|live-bag-print-bridge|live-show-drafts|live-listing-intake|live-capture-setup)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;
  browser=await(process.env.INVSTO_ITEM_BROWSER==='webkit'?webkit:chromium).launch();
 });
@@ -28,7 +28,7 @@ async function open(t,query='',resume=false,drafts=false){
   window.lucide={createIcons(){}};window.calls=[];window.mockItems=[];window.mockManualItems=[];window.mockLots=[];window.failUpload=false;window.failManual=false;window.uploadedPhoto="";window.failDashboard=false;window.failClose=false;
   window.showSession={id:'show',session_code:'SHOW',title:'Test show',status:'active',store_id:'store',primary_seller_employee_id:'seller',started_at:new Date().toISOString()};
   window.dashboard={connection:{event_id:'EVENT123',session_id:'show',capture_ready:true,source_seen_at:new Date().toISOString(),active_seller_id:'seller',fee_percent:null,fee_fixed:null,shipping_per_sale:null},attempts:[{id:'sale',event_id:'EVENT123',listing_id:'123456789012',listing_title:'#001 - Test watch',buyer:'testbuyer',amount:100,payment_state:'paid',seller_id:'seller',seller_name:'Test seller',created_at:new Date().toISOString(),units:0}],unmatched:[]};
-  window.printStations={printLabel:async(xml)=>{window.calls.push({name:'print',xml});return {mode:'remote-queue',stationName:'Test printer'};}};
+  window.printStations={printLabel:async(xml,options)=>{window.calls.push({name:'print',xml,options});return {mode:'remote-queue',stationName:'Test printer'};}};
   const nextSeller={id:'next-seller',display_name:'Sydney Miller',active:true,role:'employee'};
   window.supabase={auth:{getSession:async()=>({data:{session:{user}}})},storage:{from:()=>({createSignedUrl:async()=>({data:{signedUrl:window.uploadedPhoto||''}}),upload:async(path,blob)=>{calls.push({name:'upload',path,type:blob.type});if(failUpload)return {error:{message:'Photo upload interrupted'}};uploadedPhoto=await new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.readAsDataURL(blob);});return {data:{path}};}})},from(table){
    let filters=[],limit=1000;const all=()=>table==='employees'?[employee]:table==='store_locations'?[{id:'store',name:'Showroom',active:true}]:table==='live_sale_sessions'?(window.showSessions||[window.showSession]):table==='ebay_live_connections'?(window.dashboardByShow?Object.values(window.dashboardByShow).map(d=>d.connection):[window.dashboard.connection]):table==='ebay_live_attempts'?window.dashboard.attempts:table==='live_sale_lots'?window.mockLots:table==='live_sale_lot_items'?window.mockItems:table==='live_sale_manual_lot_items'?window.mockManualItems:[];
@@ -466,6 +466,26 @@ test('paid auction can print its label before scanning, keep its QR on retry, an
  assert.match(await p.locator('#ebay-live-queue').innerText(),/Label queued for Test printer/);assert.match(await p.evaluate(()=>calls.find(c=>c.name==='print').xml),/LIVE-LABEL/);
  await p.locator('[data-action=print]').click();await p.waitForFunction(()=>calls.filter(c=>c.name==='print').length===2);assert.equal(await p.evaluate(()=>mockLots.length),1);
  await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);assert.equal(await p.evaluate(()=>ebayLive.current().lot_id),'label-sale');assert.equal(await p.evaluate(()=>mockLots.length),1);assert.deepEqual(p.errors,[]);
+});
+
+test('extension bag requests call the real Live Sales label action with the same saved bag and printer',async t=>{
+ const p=await open(t,'?capture=1');
+ await p.evaluate(()=>{
+  dashboard.attempts[0].id='00000000-0000-4000-8000-000000000011';
+  localStorage.setItem('invsto.print.destination.v1','station-a');
+  const original=supabase.rpc;supabase.rpc=(name,args)=>name==='list_print_stations'?Promise.resolve({data:[{id:'station-a',name:'Show printer',printer_name:'DYMO',paired:true,online:true,printer_connected:true}]}):original(name,args);
+ });
+ const result=await p.evaluate(()=>new Promise(resolve=>{
+  const id=crypto.randomUUID(),requestId=crypto.randomUUID();
+  const listener=e=>{if(e.data?.type==='INVSTO_BAG_PRINT_RESPONSE'&&e.data.id===id){window.removeEventListener('message',listener);resolve({...e.data,requestId});}};
+  window.addEventListener('message',listener);window.postMessage({type:'INVSTO_BAG_PRINT_REQUEST',id,command:{action:'print',event_id:'EVENT123',attemptId:dashboard.attempts[0].id,requestId}},location.origin);
+ }));
+ assert.equal(result.ok,true,result.error);assert.equal(result.lotCode,'LIVE-LABEL');
+ const printed=await p.evaluate(()=>calls.filter(c=>c.name==='print'));assert.equal(printed.length,1);
+ assert.match(printed[0].xml,/TESTBUYER/);assert.match(printed[0].xml,/LIVE-LABEL/);
+ assert.equal(printed[0].options.printDestination.stationId,'station-a');assert.equal(printed[0].options.requestId,result.requestId);
+ assert.equal(await p.evaluate(()=>calls.some(c=>['claim_ebay_live_bag','close_ebay_live_bag','reserve_live_sale_item'].includes(c.name))),false);
+ assert.deepEqual(p.errors,[]);
 });
 
 test('server payment rejection prevents an early label and leaves a retry beside the sale',async t=>{

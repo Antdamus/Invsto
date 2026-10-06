@@ -2131,7 +2131,7 @@ function closeBagHistoryModal() {
   setTimeout(() => focusItemScanner(), 80);
 }
 
-async function printLiveSaleBagLabel(lotId, { throwOnError = false } = {}) {
+async function printLiveSaleBagLabel(lotId, { throwOnError = false, printDestination, requestId } = {}) {
   try {
     const lot = state.bagHistoryLots.find((entry) => String(entry.id) === String(lotId))
       || (String(state.currentLot?.id || "") === String(lotId) ? state.currentLot : null);
@@ -2142,7 +2142,7 @@ async function printLiveSaleBagLabel(lotId, { throwOnError = false } = {}) {
     const identity = window.liveBagLabel.identity(lot, liveAuction);
     const xml = window.liveBagLabel.build(identity);
     const filename = `${getLiveSaleLabelBaseName(lot)}_Reprint_Copies_1.dymo`;
-    const result = await window.printStations.printLabel(xml, {filename,copies:1,title:identity.title,barcode:lot.lot_code});
+    const result = await window.printStations.printLabel(xml, {filename,copies:1,title:identity.title,barcode:lot.lot_code,printDestination,requestId});
     setStatus(result.mode === 'remote-queue' ? `Label queued for ${result.stationName}. View Print stations for status.` : 'Label downloaded for the local helper.', 'success');
     return result;
   } catch (error) {
@@ -3642,7 +3642,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     clearBag() { state.currentLot=null; state.lotItems=[]; clearScan(); setFlowStep("scan"); renderAll(); },
     async openBag(lot) { state.currentLot=lot; rememberBagOwner(lot.owner_employee_id); clearScan(); await loadLotItems(); $("auction-number").value=lot.auction_number; $("label-free-text").value=lot.auction_number; setFlowStep("scan"); renderAll(); },
     async restoreBag(id) { const {data,error}=await supabase.from("live_sale_lots").select("*").eq("id",id).single();if(error)throw error;state.currentLot=data;await loadLotItems();$("auction-number").value=data.auction_number;setFlowStep("scan");renderAll(); },
-    async printBag(id) { const {data,error}=await supabase.from("live_sale_lots").select("*").eq("id",id).single(); if(error)throw error; state.bagHistoryLots=[...state.bagHistoryLots.filter(l=>l.id!==id),data]; return printLiveSaleBagLabel(id, {throwOnError:true}); }
+    async printBag(id, options = {}) { const {data,error}=await supabase.from("live_sale_lots").select("*").eq("id",id).single(); if(error)throw error; state.bagHistoryLots=[...state.bagHistoryLots.filter(l=>l.id!==id),data]; return printLiveSaleBagLabel(id, {...options,throwOnError:true}); }
   });
   window.liveShowDrafts?.init({
     state,storeName:getStoreName,select:selectLiveSession,

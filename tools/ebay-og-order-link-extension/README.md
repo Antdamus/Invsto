@@ -30,6 +30,8 @@ Version 1.0.6 stops receipt screenshot retransmissions as soon as OG accepts the
 
 ## Use
 
+Version 1.0.7 keeps cancellation detection on order-management pages and excludes Live Stream Manager, where chat text can otherwise create a false cancellation banner.
+
 On the eBay bulk label page, the extension looks for order links like:
 
 ```html

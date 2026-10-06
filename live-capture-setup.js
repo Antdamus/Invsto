@@ -94,7 +94,7 @@
   async function save(e) {
     e.preventDefault(); if (busy) return;
     const primary = $('capture-main-seller').value;
-    if (!stream) { status('Click Start Invsto capture on eBay with Live Capture 1.4.4 to read the original show date.', true); return; }
+    if (!stream) { status('Click Start Invsto capture on eBay with Live Capture 1.5.0 to read the original show date.', true); return; }
     if (!primary) { status('Choose who is selling first.', true); return; }
     const id = eventId;
     const others = [...dialog.querySelectorAll('[name="capture-co-seller"]:checked')].map(input => input.value).filter(value => value !== primary);

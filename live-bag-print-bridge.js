@@ -1,0 +1,89 @@
+/* The eBay helper uses the same saved bag, label template and print queue as Live Sales. */
+(() => {
+  'use strict';
+  const one = value => Array.isArray(value) ? value[0] : value;
+  const uuid = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value || '');
+  const prefix = 'invsto.live.bagPrinter.v1.';
+  const requests = new Map();
+  let installed = false;
+  function install(api, sortAuctions, snapshot = () => null) {
+    if (installed || new URL(location.href).searchParams.get('capture') !== '1') return;
+    installed = true;
+    const rpc = async (name, args = {}) => {const {data,error}=await window.supabase.rpc(name,args);if(error)throw error;return data;};
+    async function user() {
+      const {data,error}=await window.supabase.auth.getSession();
+      if(error || !data?.session?.user?.id)throw Error('Sign in to the Invsto receiver.');
+      return data.session.user.id;
+    }
+    async function dashboard(eventId) {
+      const {data:connection,error}=await window.supabase.from('ebay_live_connections').select('event_id,session_id').eq('event_id',eventId).maybeSingle();
+      if(error)throw error;
+      if(!connection)throw Error('Start Invsto capture and choose the sellers for this show first.');
+      const result=await rpc('get_ebay_live_dashboard',{_session_id:connection.session_id});
+      if(result?.connection?.event_id!==eventId)throw Error('The receiver could not verify this eBay show.');
+      return result;
+    }
+    const eligible = sale => sale?.payment_state==='paid' && !sale.resolved_at && !sale.merged_into && !sale.payment_hold;
+    async function destination(userId, override) {
+      const saved=override || JSON.parse(localStorage.getItem(prefix+userId)||'null');
+      const stations=await rpc('list_print_stations');
+      const stationId=saved?.stationId || localStorage.getItem('invsto.print.destination.v1');
+      if(saved?.local || stationId==='local')return {local:true,name:'This computer · local helper',copies:1,roll:'default'};
+      const station=(stations||[]).find(s=>s.id===stationId && s.paired && !/\b5XL\b/i.test(s.printer_name+' '+s.printer_model));
+      if(!station)return null;
+      const twin=/twin\s*turbo/i.test(station.printer_name+' '+station.printer_model);
+      const roll=saved?.roll || station.default_roll || 'default';
+      if(twin && (!station.roll_selection_ready || !['Left','Right'].includes(roll)))return null;
+      return {stationId:station.id,name:station.name,printer:station.printer_name,local:false,copies:1,roll,
+        online:!!station.online,connected:!!station.printer_connected};
+    }
+    async function run(command) {
+      if(!/^[A-Za-z0-9_-]{6,100}$/.test(command?.event_id||''))throw Error('Invalid eBay show.');
+      const userId=await user();
+      if(command.action==='configure') {
+        const chosen=await window.printStations.chooseDestination({copies:1,configureOnly:true});
+        localStorage.setItem(prefix+userId,JSON.stringify({...chosen,copies:1}));
+        return {printer:await destination(userId)};
+      }
+      const data=command.action==='status'?(snapshot(command.event_id)||await dashboard(command.event_id)):await dashboard(command.event_id);
+      if(command.action==='status') {
+        const sales=sortAuctions(data.attempts||[]).filter(eligible).map(a=>({id:a.id,
+          number:window.liveBagLabel.identity({lot_code:''},a).auctionNumber,title:a.listing_title,
+          buyer:a.buyer,amount:a.amount,lotId:a.lot_id,time:a.sold_at||a.win_time_label||''}));
+        return {sales,printer:await destination(userId),show:data.connection.event_id};
+      }
+      if(command.action!=='print' || !uuid(command.requestId) || !uuid(command.attemptId))throw Error('Invalid bag print request.');
+      const sale=data.attempts.find(a=>a.id===command.attemptId);
+      if(!eligible(sale))throw Error('This sale is not cleared for a bag label. Check its payment in Live Sales.');
+      // Persist the exact sale and printer before sending. A missing acknowledgement
+      // retries the same server request, never a newly selected sale or printer.
+      const key=prefix+userId+'.request.'+command.requestId;
+      let saved=JSON.parse(localStorage.getItem(key)||'null');
+      if(saved && (saved.attemptId!==sale.id || saved.eventId!==command.event_id))throw Error('This print request belongs to another bag.');
+      if(saved?.result)return saved.result;
+      const printer=await destination(userId,saved?.printer);
+      if(!printer)throw Error('Choose the bag-label printer under Settings first.');
+      if(!saved){saved={attemptId:sale.id,eventId:command.event_id,printer};localStorage.setItem(key,JSON.stringify(saved));}
+      if(saved.localStarted)throw Error('A label file may already have downloaded. Check the local helper before requesting another copy.');
+      const lot=one(await rpc('prepare_ebay_live_bag_label',{_attempt_id:sale.id}));
+      if(!lot?.id || !lot.lot_code)throw Error('The saved bag could not be prepared. Try again.');
+      const fresh=await dashboard(command.event_id);
+      if(!eligible(fresh.attempts.find(a=>a.id===sale.id)))throw Error('Payment changed. Review this bag in Live Sales before printing.');
+      if(printer.local){saved.localStarted=true;localStorage.setItem(key,JSON.stringify(saved));}
+      const result=await api.printBag(lot.id,{printDestination:printer,requestId:command.requestId});
+      saved.result={result,lotCode:lot.lot_code,attemptId:sale.id};localStorage.setItem(key,JSON.stringify(saved));
+      return saved.result;
+    }
+    window.addEventListener('message',event=>{
+      if(event.source!==window || event.origin!==location.origin || event.data?.type!=='INVSTO_BAG_PRINT_REQUEST')return;
+      const {id,command}=event.data;
+      if(!uuid(id))return;
+      const key=command?.action==='print'?`${command.event_id}:${command.attemptId}:${command.requestId}`:null;
+      const operation=key&&requests.has(key)?requests.get(key):run(command);
+      if(key){requests.set(key,operation);operation.finally(()=>requests.delete(key)).catch(()=>{});}
+      operation.then(result=>window.postMessage({type:'INVSTO_BAG_PRINT_RESPONSE',id,ok:true,...result},location.origin),
+        error=>window.postMessage({type:'INVSTO_BAG_PRINT_RESPONSE',id,ok:false,error:error.message||'Could not reach the printer.',cancelled:!!error.cancelled},location.origin));
+    });
+  }
+  window.liveBagPrintBridge={install};
+})();

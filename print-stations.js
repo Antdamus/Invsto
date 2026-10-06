@@ -19,7 +19,7 @@
   const rollName = roll => roll==='Left'?'Left roll':roll==='Right'?'Right roll':'Printer default';
   const rollOptions = station => ['Left','Right'].map(roll=>`<option value="${roll}">${rollName(roll)}${station[roll.toLowerCase()+'_roll_label']?' - '+escape(station[roll.toLowerCase()+'_roll_label']):''}</option>`).join('');
   let choosing=false;
-  async function chooseDestination({copies=1,labelCount=1,documentType='dymo',pageCount=1}={}) {
+  async function chooseDestination({copies=1,labelCount=1,documentType='dymo',pageCount=1,configureOnly=false}={}) {
     if (choosing) throw new Error('Choose the destination in the open print window.');
     const pdf=documentType==='pdf', preference=pdf?PREF+'.pdf':PREF;
     choosing=true;
@@ -44,6 +44,7 @@
         if(resetRoll){rollSelect.innerHTML='<option value="">Choose a roll...</option>'+(twin?rollOptions(station):'');rollSelect.value=station?.default_roll||'';}
         status.textContent=pdf&&station&&!station.pdf_print_ready?'Update this computer to Windows helper 1.2.0 before sending shipping PDFs.':station?`${station.printer_name || 'DYMO'} · ${stationStatus(station)}. Labels stay assigned to this computer.`:select.value==='local'?'Downloads a label file on this device for the existing local helper.':'Choose a print station.';
         send.disabled=(pdf&&(!station||!station.pdf_print_ready))||(!station && select.value!=='local')||(twin&&(!rollSelect.value||!station.roll_selection_ready));send.textContent=select.value==='local'?'Download label file':'Send labels';
+        if(configureOnly)send.textContent='Use this printer';
         if(pdf){try{const pages=window.shippingPdf.parsePages(dialog.querySelector('[data-pages]').value,pageCount),amount=Number(dialog.querySelector('[data-copies]').value);if(Number.isInteger(amount)&&amount>0)send.textContent=`Send ${pages.length*amount} label${pages.length*amount===1?'':'s'}`;}catch{}}
       };
       select.onchange=()=>update(true);rollSelect.onchange=()=>update();
@@ -70,10 +71,11 @@
     const copies=destination.copies || options.copies || 1;
     const roll=destination.roll || 'default';
     const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(`${copies}\n${labelXml}`));
-    const key=PENDING+Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');
+    if(options.requestId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(options.requestId))throw new Error('Invalid print request.');
+    const key=PENDING+Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('')+(options.requestId?'.'+options.requestId:'');
     let pending=JSON.parse(localStorage.getItem(key)||'null');
     if(pending && (pending.stationId!==destination.stationId || (pending.roll||'default')!==roll))throw new Error('An earlier send needs confirmation at its original computer and roll. Check Print jobs, or choose that same station and roll to confirm it first.');
-    if(!pending){pending={requestId:crypto.randomUUID(),stationId:destination.stationId,roll};localStorage.setItem(key,JSON.stringify(pending));}
+    if(!pending){pending={requestId:options.requestId||crypto.randomUUID(),stationId:destination.stationId,roll};localStorage.setItem(key,JSON.stringify(pending));}
     let job;
     try {job=await rpc('enqueue_label_print',{_station_id:destination.stationId,_request_id:pending.requestId,_label_xml:labelXml,_copies:copies,_title:options.title || '',_barcode:options.barcode || '',_printer_roll:roll});}
     catch(error){if(/^(P0001|22023|42501|23514|23503)$/.test(error.code||''))localStorage.removeItem(key);throw error;}
