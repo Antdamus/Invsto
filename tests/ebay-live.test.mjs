@@ -72,10 +72,11 @@ async function addBagPhotos(page){
  await page.locator('#ebay-live-refresh').click();await page.waitForFunction(()=>document.querySelector('[data-auction-photos="sale"] [data-photo-count]')?.textContent==='2');
 }
 test('auction photos open from the queue, paginate the gallery, and never claim or print a bag',async t=>{
- const p=await open(t);await addBagPhotos(p);
+ const p=await open(t);await addBagPhotos(p);await p.addStyleTag({content:'h2,h3{color:#182433}'});
  await p.locator('#ebay-auction-search').fill('testbuyer');assert.equal(await p.locator('#ebay-live-queue article').count(),1);
  await p.locator('[data-action=photos]').click();await p.getByRole('button',{name:'View live photo 2',exact:true}).click();
  assert.match(await p.locator('#auction-photos-caption').innerText(),/2 of 2/);
+ assert.equal(await p.locator('#auction-photos-title').evaluate(el=>getComputedStyle(el).color),'rgb(238, 234, 222)');
  await p.getByRole('button',{name:'Previous photo',exact:true}).click();assert.match(await p.locator('#auction-photos-caption').innerText(),/1 of 2/);
  await p.getByRole('button',{name:'Next photo',exact:true}).click();assert.match(await p.locator('#auction-photos-caption').innerText(),/2 of 2/);
  await p.keyboard.press('Escape');assert.equal(await p.locator('#auction-photos-gallery').isVisible(),true);
