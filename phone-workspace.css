@@ -121,6 +121,7 @@
   body[data-phone-page=history] .history-summary-card small { font-size: 11px; }
   body[data-phone-page=history] .history-modal { padding: 10px; align-items: flex-start; overflow-y: auto; z-index: 2100; }
   body[data-phone-page=history] .history-modal-card { width: 100%; max-width: 100%; max-height: calc(100dvh - 20px); overflow: auto; margin: 0; padding: 24px 16px; border-radius: 19px; }
+  body[data-phone-page=history] .history-modal-card :is(h2,h3,h4) { color: #f7f4ed; }
   body[data-phone-page=history] .history-modal-actions { display: flex; flex-wrap: wrap; }
   body[data-phone-page=history] .history-modal-actions button { flex: 1 1 120px; }
 

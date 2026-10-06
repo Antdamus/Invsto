@@ -88,6 +88,8 @@
     if (page === 'history') {
       setText(byId('phone-range'), [byId('history-from')?.value, byId('history-to')?.value].filter(Boolean).map(value => new Date(`${value}T12:00:00`).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})).join(' – ') || 'Choose dates');
       ['shipped-orders', 'admin-closeouts', 'cancelled'].forEach(id => setText(document.querySelector(`[data-phone-stat="${id}"]`), byId(`summary-${id}`)?.textContent || '0'));
+      const orderLabel = byId('summary-shipped-orders')?.closest('.history-summary-card')?.querySelector('span')?.textContent;
+      if (orderLabel) setText(document.querySelector('[data-phone-stat="shipped-orders"]')?.nextElementSibling, orderLabel);
       const active = ['history-worker', 'history-status', 'history-label-filter', 'history-proof-filter', 'history-sort'].some(id => {
         const field = byId(id); return field && field.value !== field.options[0]?.value;
       });
