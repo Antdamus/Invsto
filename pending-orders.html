@@ -15,9 +15,16 @@
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
+  <link rel="stylesheet" href="pending-orders-mobile.css?v=20261006-phone-1" />
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
 </head>
 <body>
+  <header class="phone-orders-header phone-only" aria-label="Pending orders">
+    <button id="phone-orders-menu" type="button" class="phone-brand" aria-label="Open navigation" aria-expanded="false" aria-controls="mobile-menu">OG</button>
+    <div><span>FULFILLMENT</span><strong>Pending orders</strong></div>
+    <button id="phone-orders-refresh" type="button" class="phone-icon-button" aria-label="Refresh orders"><i data-lucide="refresh-cw"></i></button>
+    <button id="phone-orders-tools" type="button" class="phone-icon-button" aria-label="Open packing tools"><i data-lucide="sliders-horizontal"></i><span id="phone-selection-count" class="hidden"></span></button>
+  </header>
   <main id="phone-camera-home" class="hidden">
     <div class="phone-camera-heading"><h1>Phone camera</h1><button id="leave-phone-camera" type="button" class="secondary-btn">Leave camera</button></div>
     <p id="phone-camera-connected"></p>
@@ -135,6 +142,15 @@
       </header>
 
       <main class="content pending-content">
+        <section class="phone-queue-overview phone-only" aria-label="Queue overview">
+          <div class="phone-queue-heading"><div><span class="eyebrow">Your queue</span><h1>Let’s get packing.</h1></div><button id="phone-packing-store" type="button"><i data-lucide="map-pin"></i><span>Select store</span><i data-lucide="chevron-down"></i></button></div>
+          <div class="phone-queue-counts" role="group" aria-label="Filter buyers by shipping due date">
+            <button type="button" data-order-due-filter="all" aria-pressed="true"><strong data-phone-count="all">—</strong><span>All buyers</span></button>
+            <button type="button" data-order-due-filter="overdue" aria-pressed="false"><strong data-phone-count="overdue">—</strong><span>Overdue</span></button>
+            <button type="button" data-order-due-filter="today" aria-pressed="false"><strong data-phone-count="today">—</strong><span>Today</span></button>
+            <button type="button" data-order-due-filter="tomorrow" aria-pressed="false"><strong data-phone-count="tomorrow">—</strong><span>Tomorrow</span></button>
+          </div>
+        </section>
         <section class="pending-header">
         <div>
           <span class="eyebrow">Order Fulfillment</span>
@@ -375,7 +391,9 @@
               autocapitalize="off"
               autocorrect="off"
               spellcheck="false"
+              aria-label="Search pending orders"
             />
+            <button id="phone-order-filters" type="button" class="phone-only secondary-btn" aria-expanded="false" aria-controls="order-status-filter order-sort cancellation-review-toggle phone-queue-filter-options"><i data-lucide="list-filter"></i><span>Filters</span></button>
             <select id="order-status-filter" aria-label="Order status">
               <option value="pending">Pending</option>
               <option value="cancellations">Cancellations</option>
@@ -407,7 +425,7 @@
             </select>
           </div>
 
-          <div class="buyer-due-filters">
+          <div class="buyer-due-filters" id="phone-queue-filter-options">
             <div class="buyer-shipping-due-options" role="group" aria-label="Shipping due date">
               <span>Shipping due</span>
               <button type="button" class="secondary-btn" data-order-due-filter="all" aria-pressed="true">All due dates</button>
@@ -442,6 +460,7 @@
 
           <div id="fulfillment-workflow" class="hidden">
             <button id="close-mobile-order-detail" type="button" class="secondary-btn mobile-detail-close">Back to Orders</button>
+            <nav class="phone-packing-steps phone-only" aria-label="Packing steps"><button type="button" data-phone-packing-target="buyer-bundle-panel">1 · Items</button><button type="button" data-phone-packing-target="checkout-item-scan">2 · Scan</button><button type="button" data-phone-packing-target="checkout-review-section">3 · Review</button></nav>
             <section class="order-detail-card">
               <div class="detail-head">
                 <div>
@@ -521,7 +540,7 @@
               No item selected yet.
             </section>
 
-            <section class="sign-card">
+            <section class="sign-card" id="checkout-review-section">
               <div class="step-head">
                 <span>3</span>
                 <div>
@@ -596,6 +615,18 @@
       </section>
     </main>
   </div>
+  </div>
+
+  <div id="phone-packing-tools-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="phone-packing-tools-title">
+    <div class="packing-modal-card phone-tools-card">
+      <button id="phone-close-packing-tools" type="button" class="modal-close-btn" aria-label="Close packing tools">×</button>
+      <span class="eyebrow">Everything in one place</span><h2 id="phone-packing-tools-title">Packing tools</h2>
+      <div id="phone-packing-tools-content"></div>
+    </div>
+  </div>
+  <div id="phone-checkout-dock" class="phone-only hidden" aria-label="Current packing bundle">
+    <div><strong id="phone-checkout-count">No items staged</strong><span id="phone-checkout-buyer"></span></div>
+    <button id="phone-review-checkout" type="button" class="primary-btn">Review bundle <i data-lucide="arrow-right"></i></button>
   </div>
 
   <div id="item-confirm-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="item-confirm-title">
@@ -1161,6 +1192,7 @@
 <script src="shipping-label-reader.js?v=20261003-label-pdfs"></script>
 <script src="order-shipping-labels.js?v=20261003-direct-print"></script>
 <script src="receipt-preview-jobs.js?v=20261003-receipt-speed"></script>
-  <script src="pending-orders.js?v=20261005-queue-loading"></script>
+  <script src="pending-orders.js?v=20261006-phone-1"></script>
+  <script src="pending-orders-mobile.js?v=20261006-phone-1"></script>
 </body>
 </html>

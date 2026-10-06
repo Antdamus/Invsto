@@ -141,11 +141,11 @@ test('notes expand only on click and show all authors and timestamps without ope
   assert.ok((await page.evaluate(() => calls)).every(call => call.filters.every(([key]) => key === 'order_id')));
 });
 
-test('phone users can tap to expand and collapse notes without opening the order or overflowing', async t => {
+test('phone users can read every note in the queue without opening the order or a nested scroll area', async t => {
   const page = await open(t, {mobile: true});
   await loaded(page);
   const toggle = page.locator('.buyer-card-notes-toggle');
-  await toggle.tap();
+  assert.equal(await toggle.isVisible(), false);
   const details = page.locator('.buyer-card-note-details');
   await expect(details).toBeVisible();
   assert.match(await details.innerText(), /alex@example.com/);
@@ -155,8 +155,9 @@ test('phone users can tap to expand and collapse notes without opening the order
   await details.scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);
   await page.screenshot({path: 'test-results/pending-notes-mobile.png'});
-  await toggle.tap();
-  assert.equal(await details.isVisible(), false);
+  assert.equal(await details.evaluate(el => getComputedStyle(el).maxHeight), 'none');
+  assert.equal(await details.evaluate(el => getComputedStyle(el).overflowY), 'visible');
+  assert.match(await details.innerText(), /Use the blue box/);
 });
 
 test('written notes remain shared, deduplicated, and scoped to their lines', async t => {

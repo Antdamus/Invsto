@@ -343,7 +343,7 @@ test('Mixed Checkout opens item scanning with no bag and clears any previously l
   await p.evaluate(()=>{
     state.busy=false;openBuyerGroupInventoryCompletion({lines:state.orders});
   });
-  await p.waitForFunction(()=>document.activeElement?.id==='item-scan');
+  assert.notEqual(await p.evaluate(()=>document.activeElement?.id),'item-scan', 'opening phone checkout does not summon the keyboard');
   assert.equal(await p.evaluate(()=>state.selectedLiveLot),null);
   assert.equal(await p.evaluate(()=>document.getElementById('optional-live-bag').open),false);
   assert.match(await p.locator('#checkout-item-scan').innerText(),/No bag label required/);

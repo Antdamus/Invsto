@@ -1190,6 +1190,7 @@ function getCheckoutStoreName(storeId = state.checkoutStoreId) {
 function requireCheckoutStore() {
   if (state.checkoutStoreId) return true;
   setStatus("Select the checkout store before scanning items.", "error");
+  window.PendingOrdersMobile?.openTools();
   $("checkout-store-select")?.focus();
   return false;
 }
@@ -1404,7 +1405,7 @@ async function handleCheckoutStoreChange() {
   }
 
   setStatus(`Checkout store set to ${getCheckoutStoreName(nextStoreId)}. Select an order and scan item barcodes. A bag label is optional.`, "info");
-  setTimeout(() => (state.selectedLine ? $("item-scan") : $("order-search"))?.focus(), 80);
+  if (!isMobilePendingOrderLayout()) setTimeout(() => (state.selectedLine ? $("item-scan") : $("order-search"))?.focus(), 80);
 }
 
 function setupDashboardShell() {
@@ -3623,7 +3624,10 @@ function renderGroupSharedNotes(lines = [], groupKey = "") {
       entries.push({ ...event, line });
     });
   });
-  if (!entries.length) return "";
+  if (!entries.length) {
+    const loaded = lines.every(line => !line.order_id || state.sharedOrderNoteHistory.get(line.order_id)?.data);
+    return `<p class="phone-only phone-notes-empty">${loaded ? "No notes yet" : "Loading notes…"}</p>`;
+  }
   entries.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
   const expanded = state.expandedBuyerNoteKeys.has(groupKey);
   const detailsId = `buyer-notes-${encodeURIComponent(groupKey)}`;
@@ -3636,7 +3640,7 @@ function renderGroupSharedNotes(lines = [], groupKey = "") {
       <span class="buyer-card-notes-action">${expanded ? "Collapse" : "Expand"}</span>
     </button>
     <div id="${escapeHtml(detailsId)}" class="buyer-card-note-details">
-      <strong class="buyer-card-notes-title">Notes from all users</strong>
+      <strong class="buyer-card-notes-title">Notes from all users · ${count}</strong>
       ${entries.map((entry) => `<article class="buyer-card-note-preview-item">
       <div class="buyer-card-note-author">
         <strong>${escapeHtml(entry.signed_by_email || (entry.id ? "Author not recorded" : "Saved note"))}</strong>
@@ -3931,12 +3935,13 @@ function openBuyerGroupInventoryCompletion(group) {
   focusItemCheckout();
 }
 
-function focusItemCheckout() {
+function focusItemCheckout(options = {}) {
   if ($("optional-live-bag")) $("optional-live-bag").open = false;
   setStatus("Scan item barcodes to remove inventory. A bag label is optional.", "info");
   setTimeout(() => {
     if (!state.selectedLine || state.busy) return;
-    if (!state.checkoutStoreId) { $("checkout-store-select")?.focus(); return; }
+    if (!state.checkoutStoreId) { window.PendingOrdersMobile?.openTools(); $("checkout-store-select")?.focus(); return; }
+    if (isMobilePendingOrderLayout() && !options.focusInput) return;
     $("checkout-item-scan")?.scrollIntoView({ block: "start" });
     $("item-scan")?.focus({ preventScroll: true });
   }, 100);
@@ -3945,7 +3950,7 @@ function focusItemCheckout() {
 function useItemCheckout() {
   if (state.busy) return;
   clearLiveLotSelection({ render: true });
-  focusItemCheckout();
+  focusItemCheckout({ focusInput: true });
 }
 
 function pruneAdminSelection() {
@@ -4696,14 +4701,15 @@ function selectOrderLine(lineId, options = {}) {
   if (!shouldOpenDetail) return;
   if (!state.checkoutStoreId) {
     setStatus("Select the checkout store before scanning this order.", "error");
-    setTimeout(() => $("checkout-store-select")?.focus(), 80);
+    window.PendingOrdersMobile?.openTools();
+    if (!isMobilePendingOrderLayout()) setTimeout(() => $("checkout-store-select")?.focus(), 80);
     return;
   }
-  setTimeout(() => (state.selectedLiveLot ? $("fulfill-order") : $("item-scan"))?.focus(), 80);
+  if (!isMobilePendingOrderLayout()) setTimeout(() => (state.selectedLiveLot ? $("fulfill-order") : $("item-scan"))?.focus(), 80);
 }
 
 function isMobilePendingOrderLayout() {
-  return window.matchMedia?.("(max-width: 640px)")?.matches || false;
+  return window.matchMedia?.("(max-width: 760px)")?.matches || false;
 }
 
 function openMobileOrderDetail() {
@@ -4715,6 +4721,10 @@ function openMobileOrderDetail() {
 
 function closeMobileOrderDetail() {
   if (state.busy) return;
+  if (isMobilePendingOrderLayout() && window.PendingOrdersMobile) {
+    window.PendingOrdersMobile.dismissCheckout();
+    return;
+  }
   clearSelection();
 }
 
@@ -4744,7 +4754,10 @@ function returnToOrdersAfterMobileModalClose(options = {}) {
       "no-inventory-photo-viewer-modal",
     ];
     const anyModalOpen = modalIds.some((id) => !$(`${id}`)?.classList.contains("hidden"));
-    if (!anyModalOpen) clearSelection();
+    if (!anyModalOpen) {
+      if (state.stagedFulfillments.size && window.PendingOrdersMobile) window.PendingOrdersMobile.dismissCheckout();
+      else clearSelection();
+    }
   }, 0);
 }
 

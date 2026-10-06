@@ -1,0 +1,211 @@
+/* A phone-first queue; desktop keeps its existing workspace. */
+.phone-only { display: none; }
+
+@media (max-width: 760px) {
+  body { --phone-gold: #eed29b; --phone-ink: #f5f1e9; --phone-muted: #b9b5ae; background: #111313; color: var(--phone-ink); font-family: Manrope, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  body:not(.phone-camera-mode) .phone-only { display: flex; }
+  .phone-only.hidden { display: none !important; }
+  body:not(.phone-camera-mode) .mobile-header, .sidebar, .main > .header,
+  .pending-header, #summary-strip, .orders-panel > .panel-head { display: none; }
+  body:not(.phone-camera-mode) .page { display: block; min-width: 0; }
+  body:not(.phone-camera-mode) .main { margin: 0; padding: 0; width: 100%; min-width: 0; }
+  body:not(.phone-camera-mode) .pending-content { width: 100%; max-width: 680px; margin: 0 auto; padding: 86px 16px 100px; gap: 0; }
+  .pending-content h1, .pending-content h2, .pending-content h3, .packing-modal h2, .packing-modal h3 { color: var(--phone-ink); }
+  button, input, select, textarea { touch-action: manipulation; }
+  input:not([type=checkbox]):not([type=radio]), select, textarea { font-size: 16px !important; min-width: 0; max-width: 100%; }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--phone-gold); outline-offset: 3px; }
+  .primary-btn, .secondary-btn, .buyer-card-expand-btn, .buyer-line-note-btn { min-height: 44px; }
+  .phone-orders-header {
+    position: fixed; inset: 0 0 auto; z-index: 1000; align-items: center; gap: 12px;
+    padding: calc(10px + env(safe-area-inset-top)) 16px 10px; background: #111313f5;
+    border-bottom: 1px solid #ffffff12; backdrop-filter: blur(14px);
+  }
+  .phone-orders-header > div { flex: 1; min-width: 0; display: grid; gap: 3px; }
+  .phone-orders-header > div > span { font-size: 9px; letter-spacing: 2px; color: var(--phone-gold); font-weight: 800; }
+  .phone-orders-header strong { font-size: 16px; letter-spacing: -.3px; }
+  .phone-brand, .phone-icon-button { width: 44px; height: 44px; min-width: 44px; display: grid; place-items: center; padding: 0; border-radius: 14px; }
+  .phone-brand { color: #251e11; background: var(--phone-gold); border: 0; font: 24px 'DM Serif Display', Georgia, serif; letter-spacing: -2px; }
+  .phone-icon-button { position: relative; border: 1px solid #ffffff15; color: var(--phone-ink); background: #ffffff06; }
+  .phone-icon-button svg { width: 19px; height: 19px; }
+  #phone-selection-count { position: absolute; right: -4px; top: -4px; border-radius: 20px; background: var(--phone-gold); color: #211b12; padding: 2px 5px; font-size: 11px; }
+  .mobile-menu { position: fixed; top: calc(65px + env(safe-area-inset-top)); left: 0; right: 0; z-index: 1100; max-height: calc(100dvh - 80px); overflow: auto; background: #191b1b; }
+  .phone-queue-overview { flex-direction: column; gap: 20px; margin: 6px 0 22px; }
+  .phone-queue-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .phone-queue-heading .eyebrow { font-size: 10px; letter-spacing: 1.8px; color: var(--phone-muted); }
+  .phone-queue-heading h1 { font: 27px/1.15 'DM Serif Display', Georgia, serif; letter-spacing: -.5px; margin: 6px 0 0; }
+  #phone-packing-store { display: flex; align-items: center; gap: 4px; min-height: 44px; max-width: 130px; padding: 8px; color: var(--phone-gold); background: #eed29b0b; border: 1px solid #eed29b22; border-radius: 12px; font: 700 11px/1.4 Manrope, sans-serif; }
+  #phone-packing-store span { min-width: 0; overflow-wrap: anywhere; }
+  #phone-packing-store svg { width: 13px; height: 13px; flex-shrink: 0; }
+  .phone-queue-counts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+  .phone-queue-counts button { display: grid; gap: 6px; padding: 13px 5px; border: 1px solid #ffffff12; border-radius: 16px; color: var(--phone-ink); background: #1d2020; text-align: center; }
+  .phone-queue-counts strong { font: 700 24px/1 Manrope, sans-serif; }
+  .phone-queue-counts span { font: 600 10px Manrope, sans-serif; color: var(--phone-muted); }
+  .phone-queue-counts [data-order-due-filter=overdue] strong { color: #ffa28f; }
+  .phone-queue-counts [aria-pressed=true] { border-color: #eed29b99; background: #eed29b16; box-shadow: inset 0 -2px var(--phone-gold); }
+  .phone-queue-counts [aria-pressed=true] span { color: var(--phone-gold); }
+  .workspace-grid { display: block; margin: 0; }
+  .orders-panel { display: block; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; min-width: 0; }
+  .orders-panel .filter-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin: 0 0 12px; }
+  .orders-panel .filter-row #order-search { width: 100%; min-width: 0; height: 48px; padding: 12px 14px; border-radius: 14px; background: #1d2020; border: 1px solid #ffffff20; }
+  #phone-order-filters { align-items: center; gap: 6px; min-height: 48px; padding: 10px 12px; border-radius: 14px; font-size: 12px; background: #1d2020; }
+  #phone-order-filters svg { width: 16px; height: 16px; }
+  #phone-order-filters.is-active { color: var(--phone-gold); border-color: var(--phone-gold); }
+  .orders-panel:not(.phone-filters-open) .filter-row > select,
+  .orders-panel:not(.phone-filters-open) #cancellation-review-toggle,
+  .orders-panel:not(.phone-filters-open) .buyer-purchase-date-picker,
+  .orders-panel:not(.phone-filters-open) #clear-order-created-date-filter,
+  .orders-panel:not(.phone-filters-open) .buyer-due-filter-help { display: none; }
+  .phone-filters-open .filter-row > select, .phone-filters-open #cancellation-review-toggle { grid-column: 1 / -1; width: 100%; min-height: 46px; }
+  .buyer-due-filters { display: flex; flex-wrap: wrap; border: 0; background: none; padding: 0; margin: 0 0 14px; gap: 10px; }
+  .buyer-shipping-due-options { display: none; }
+  .buyer-purchase-date-picker { width: 100%; }
+  #buyer-remaining-count { display: block; width: 100%; padding: 0 2px; border: 0; background: none; color: var(--phone-muted); font-size: 11px; font-weight: 500; text-align: left; }
+  .buyer-due-filter-help { font-size: 12px; }
+  #orders-list { display: grid; gap: 14px; overflow: visible; max-height: none; height: auto; padding: 0; }
+  .orders-panel .buyer-order-card, .orders-panel .buyer-order-card.is-collapsed, .orders-panel .buyer-order-card.is-expanded {
+    position: relative; display: flex; flex-direction: column; gap: 12px; width: 100%; min-width: 0;
+    padding: 16px; border: 1px solid #ffffff18; border-radius: 20px; background: #1c1f1f;
+    box-shadow: 0 5px 18px #00000015; overflow: visible; scroll-margin-top: 82px;
+  }
+  .orders-panel .buyer-order-card.is-overdue { border-left: 3px solid #dc8d79; }
+  .orders-panel .buyer-order-card.is-selected { border-color: #eed29b88; }
+  .orders-panel .buyer-order-card .buyer-card-head { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 0; }
+  .orders-panel .buyer-order-card .buyer-card-primary { min-width: 0; gap: 4px; display: flex; flex-direction: column; align-items: flex-start; }
+  .orders-panel .buyer-order-card .buyer-kicker, .buyer-card-customer > span, .buyer-card-collapsed-hint { display: none; }
+  .orders-panel .buyer-order-card .buyer-card-title-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+  .orders-panel .buyer-order-card .buyer-card-buyer-name { font: 700 18px/1.35 Manrope, sans-serif; color: var(--phone-ink); max-width: 100%; min-height: 44px; padding: 5px 0; white-space: normal; overflow-wrap: anywhere; text-align: left; text-decoration: none; }
+  .orders-panel .buyer-order-card .buyer-card-compact-count { font-size: 11px; line-height: 1.5; white-space: normal; color: var(--phone-muted); }
+  .orders-panel .buyer-order-card .buyer-card-customer { padding: 0; gap: 0; min-height: 0; background: none; border: 0; font-size: 12px; line-height: 1.5; }
+  .orders-panel .buyer-order-card .buyer-card-customer strong { color: var(--phone-muted); font-weight: 500; white-space: normal; overflow: visible; }
+  .orders-panel .buyer-order-card .buyer-card-alerts { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 7px; width: 100%; }
+  .orders-panel .buyer-order-card .buyer-card-alerts > * { flex: 0 1 auto; width: auto; }
+  .orders-panel .buyer-order-card .buyer-card-value { min-width: 0; padding: 0; background: none; border: 0; color: var(--phone-ink); font-size: 13px; margin-right: auto; }
+  .orders-panel .buyer-order-card .urgency-pill { font-size: 10px; min-height: 27px; padding: 4px 8px; }
+  .orders-panel .buyer-order-card [data-buyer-expand-key] { margin-left: auto; min-height: 44px; padding: 9px 12px; font-size: 12px; border-radius: 12px; color: var(--phone-gold); border-color: #eed29b33; background: #eed29b0a; }
+  .buyer-card-alerts > .status-badge, .orders-panel .buyer-order-card .buyer-card-quick-select { display: none; }
+  .orders-panel .buyer-order-card:not(.phone-actions-open) .buyer-card-finance-pill.is-unknown { display: none; }
+  .orders-panel .buyer-order-card:not(.phone-actions-open) [data-buyer-completion-photos],
+  .orders-panel .buyer-order-card:not(.phone-actions-open) [data-phone-camera=buyer],
+  .orders-panel .buyer-order-card:not(.phone-actions-open) [data-buyer-shipping-labels],
+  .orders-panel .buyer-order-card:not(.phone-actions-open) .buyer-card-task-btn.is-clear { display: none; }
+  .orders-panel .buyer-order-card .buyer-card-meta { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; }
+  .orders-panel .buyer-order-card .buyer-card-meta-pill { max-width: 100%; min-height: 24px; padding: 3px 7px; font-size: 10px; white-space: normal; overflow: visible; line-height: 1.5; }
+  .orders-panel .buyer-order-card:not(.phone-actions-open) .buyer-card-meta > .buyer-card-meta-pill:not(.buyer-card-receipt-pill) { display: none; }
+  .orders-panel .buyer-order-card .buyer-card-receipt-pill { border-radius: 8px; }
+  /* Notes stay fully readable in the queue, with one page scroll and no clipping. */
+  .orders-panel .buyer-order-card [data-buyer-shared-notes] { min-width: 0; width: 100%; }
+  .orders-panel .buyer-order-card .buyer-card-note-preview { margin: 0; border: 1px solid #abc9bd25; border-radius: 13px; background: #aacbb90b; }
+  .buyer-card-note-preview .buyer-card-notes-toggle { display: none; }
+  .buyer-card-note-preview .buyer-card-note-details, .buyer-card-note-preview.is-expanded .buyer-card-note-details { display: grid; gap: 12px; padding: 12px; max-height: none; overflow: visible; background: none; border: 0; }
+  .buyer-card-notes-title { font-size: 10px; letter-spacing: 1.3px; text-transform: uppercase; color: #a7c8b9; }
+  .buyer-card-note-preview-item { display: flex; flex-direction: column-reverse; padding: 0; gap: 8px; border: 0; border-radius: 0; background: none; }
+  .buyer-card-note-preview-item + .buyer-card-note-preview-item { padding-top: 12px; border-top: 1px solid #ffffff12; }
+  .buyer-card-note-preview-item p { font-size: 15px; line-height: 1.65; color: #f1f2ec; white-space: pre-wrap; overflow: visible; }
+  .buyer-card-note-author { display: flex; flex-wrap: wrap; gap: 3px 8px; }
+  .buyer-card-note-author strong { color: #a7c8b9; font-size: 10px; font-weight: 600; }
+  .buyer-card-note-author small { color: #a5aaa7; font-size: 10px; margin: 0; }
+  .buyer-card-note-author small:last-child { overflow-wrap: anywhere; }
+  .phone-notes-empty { color: #aaa; font-size: 12px; margin: 0; padding: 2px 0; }
+  .orders-panel .buyer-order-card .buyer-card-expanded { display: grid; gap: 14px; padding: 0; }
+  .orders-panel .buyer-order-card .buyer-card-expanded-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .buyer-card-expanded-actions > button { min-width: 0; min-height: 48px; padding: 10px; font-size: 12px; border-radius: 12px; }
+  .phone-desktop-label { display: none; }
+  .buyer-card-expanded-actions .phone-only { justify-content: center; }
+  .orders-panel .buyer-order-card:not(.phone-actions-open) .buyer-card-order-video-btn,
+  .orders-panel .buyer-order-card:not(.phone-actions-open) .buyer-card-approval-btn:not(.is-pending),
+  .orders-panel .buyer-order-card:not(.phone-actions-open) .buyer-card-admin-row { display: none; }
+  .buyer-card-expanded-actions .phone-more-actions { grid-column: 1 / -1; align-items: center; color: var(--phone-muted); background: transparent; border: 1px solid #ffffff16; min-height: 44px; }
+  .buyer-line-list { gap: 12px; }
+  .orders-panel .buyer-order-card .buyer-line-btn, .orders-panel .buyer-order-card .buyer-line-btn.has-admin-select { display: flex; flex-direction: column; align-items: stretch; padding: 13px; border-radius: 14px; gap: 10px; background: #121515; }
+  .buyer-line-btn .buyer-line-main { display: flex !important; flex-direction: column; gap: 12px; }
+  .buyer-line-copy > strong { font-size: 14px; line-height: 1.55; }
+  .buyer-line-btn:not(.phone-line-open) > .admin-order-select,
+  .buyer-line-btn:not(.phone-line-open) .buyer-line-actions,
+  .buyer-line-btn:not(.phone-line-open) .buyer-line-customer,
+  .buyer-line-btn:not(.phone-line-open) .buyer-line-created,
+  .buyer-line-btn:not(.phone-line-open) .buyer-line-identity,
+  .buyer-line-btn:not(.phone-line-open) .buyer-line-receipt,
+  .buyer-line-btn:not(.phone-line-open) .receipt-screenshot-upload { display: none !important; }
+  .buyer-line-btn .buyer-line-order-details { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+  .buyer-line-order-copy { min-height: 44px; max-width: 100%; }
+  .buyer-line-btn .buyer-line-receipt-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .buyer-line-note-summary { width: 100%; }
+  .buyer-line-note-preview { display: block; white-space: normal; overflow: visible; font-size: 14px; line-height: 1.6; }
+  .phone-line-actions { gap: 8px; }
+  .phone-line-actions > button { flex: 1; padding: 10px 6px; font-size: 12px; }
+  .buyer-line-btn > b { align-self: flex-start; }
+  .buyer-line-actions { flex-wrap: wrap; }
+  .queue-video-receipt-evidence { max-width: 100%; }
+  .queue-video-receipt-evidence img { max-height: 170px; object-fit: contain; }
+  .fulfillment-panel { padding: 0; border: 0; background: none; }
+  #selected-order-empty { display: none; }
+  body.pending-order-detail-open #fulfillment-workflow:not(.hidden) {
+    position: fixed; inset: 0; transform: none; z-index: 4800; width: 100%; height: 100dvh; max-height: 100dvh; margin: 0;
+    padding: calc(12px + env(safe-area-inset-top)) 16px calc(110px + env(safe-area-inset-bottom));
+    background: #111313; border: 0; border-radius: 0; overflow: auto; overscroll-behavior: contain; gap: 14px;
+  }
+  body.pending-mobile-sheet-open #fulfillment-workflow::before { display: none; }
+  body.pending-mobile-sheet-open, body.phone-tools-open { overflow: hidden; }
+  #close-mobile-order-detail { display: block; position: sticky; top: -1px; z-index: 10; width: 100%; min-height: 48px; border-radius: 12px; background: #252929; color: var(--phone-ink); text-align: left; box-shadow: 0 -15px #111313; }
+  .phone-packing-steps { gap: 7px; }
+  .phone-packing-steps button { flex: 1; min-height: 44px; padding: 8px; border: 1px solid #eed29b30; border-radius: 10px; background: #eed29b0c; color: var(--phone-gold); font-size: 12px; }
+  #fulfillment-workflow > section, #fulfillment-workflow > details { padding: 16px; border-radius: 16px; min-width: 0; }
+  #fulfillment-workflow h2 { font-size: 20px; overflow-wrap: anywhere; }
+  #fulfillment-workflow h3 { font-size: 17px; }
+  #fulfillment-workflow .step-head p { font-size: 13px; line-height: 1.6; }
+  #fulfillment-workflow .money-grid { grid-template-columns: 1fr 1fr; }
+  #fulfillment-workflow .detail-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #fulfillment-workflow .detail-actions > button { padding: 9px; font-size: 11px; }
+  #fulfillment-workflow .scan-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  #fulfillment-workflow .scan-row input { flex: 1 1 180px; width: auto; }
+  #fulfillment-workflow .scan-row button { min-height: 48px; }
+  #fulfillment-workflow .sign-grid { grid-template-columns: 1fr; }
+  #fulfillment-workflow .fulfill-actions { display: grid; grid-template-columns: 1fr; }
+  #fulfillment-workflow .bundle-lines { max-height: none; overflow: visible; }
+  #fulfillment-workflow .bundle-line { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+  #buyer-bundle-panel, #checkout-item-scan, #checkout-review-section { scroll-margin-top: 64px; }
+  #phone-checkout-dock {
+    position: fixed; inset: auto 0 0; z-index: 4900; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); background: #202424fa; border-top: 1px solid #eed29b40; box-shadow: 0 -6px 25px #0003;
+  }
+  #phone-checkout-dock > div { display: grid; gap: 4px; min-width: 0; }
+  #phone-checkout-count { font-size: 13px; }
+  #phone-checkout-buyer { font-size: 11px; color: var(--phone-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #phone-review-checkout { flex-shrink: 0; min-height: 48px; padding: 12px; border-radius: 13px; font-size: 12px; }
+  #phone-review-checkout:disabled { opacity: .5; }
+  #jump-latest-found { bottom: 16px; min-height: 44px; width: auto; max-width: calc(100% - 32px); font-size: 12px; padding: 9px 12px; }
+  #jump-latest-found small { display: none; }
+  body.phone-has-checkout #jump-latest-found { bottom: 92px; }
+  .packing-modal { padding: 12px 0 0; align-items: flex-end; }
+  .packing-modal .packing-modal-card {
+    width: 100%; max-width: 680px; max-height: calc(100dvh - 12px); margin: 0 auto;
+    border-radius: 24px 24px 0 0; padding: 26px 18px calc(18px + env(safe-area-inset-bottom));
+    background: #1c1f1f; overscroll-behavior: contain; overflow-x: hidden;
+  }
+  .packing-modal-card > h2 { font: 27px/1.25 'DM Serif Display', Georgia, serif; padding-right: 30px; margin: 10px 0 20px; }
+  .packing-modal-card > p, .packing-modal-card section > p { font-size: 14px; line-height: 1.6; }
+  .packing-modal .modal-close-btn { min-width: 44px; min-height: 44px; top: 12px; right: 12px; font-size: 22px; }
+  .packing-modal .modal-actions { position: sticky; bottom: calc(-18px - env(safe-area-inset-bottom)); display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; padding: 14px 0 calc(14px + env(safe-area-inset-bottom)); background: #1c1f1ffa; z-index: 5; border-top: 1px solid #ffffff15; margin-top: 20px; }
+  .packing-modal .modal-actions > button { flex: 1 1 120px; min-height: 48px; padding: 12px; font-size: 13px; }
+  .packing-modal .bundle-review-item, .packing-modal .no-inventory-line { max-width: 100%; min-width: 0; }
+  #phone-packing-tools-modal { z-index: 6200; }
+  #phone-packing-tools-content { display: grid; gap: 16px; }
+  #phone-packing-tools-content .fulfillment-utility-strip { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  #phone-packing-tools-content .checkout-store-panel, #phone-packing-tools-content .bag-lookup-panel,
+  #phone-packing-tools-content #admin-order-actions-panel { margin: 0; padding: 16px; min-width: 0; border-radius: 16px; }
+  #phone-packing-tools-content .bag-lookup-row { display: flex; flex-wrap: wrap; }
+  #phone-packing-tools-content input, #phone-packing-tools-content select { width: 100%; }
+  #phone-packing-tools-content input[type=checkbox] { width: auto; }
+  #phone-packing-tools-content h2 { font: 700 17px Manrope, sans-serif; }
+  #phone-packing-tools-content p { font-size: 13px; line-height: 1.6; }
+  #phone-packing-tools-content #extension-updates { margin: 0; }
+  @media (max-width: 350px) {
+    .phone-orders-header { gap: 8px; padding-left: 12px; padding-right: 12px; }
+    .phone-orders-header strong { font-size: 14px; }
+    body:not(.phone-camera-mode) .pending-content { padding-left: 12px; padding-right: 12px; }
+    .phone-queue-heading h1 { font-size: 23px; }
+    #phone-packing-store { max-width: 100px; }
+    .orders-panel .buyer-order-card, .orders-panel .buyer-order-card.is-collapsed, .orders-panel .buyer-order-card.is-expanded { padding: 12px; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+}
