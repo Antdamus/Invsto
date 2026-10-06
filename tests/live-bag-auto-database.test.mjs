@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {test,before,after} from 'node:test';
+import {test,before,beforeEach,after} from 'node:test';
 import {PGlite} from '@electric-sql/pglite';
 let db;
 const attempt='00000000-0000-4000-8000-000000000001',station='00000000-0000-4000-8000-000000000002';
@@ -20,19 +20,17 @@ before(async()=>{
  insert into live_sale_lots values('${attempt}','open','LIVE-TEST');
  insert into ebay_live_attempts values('${attempt}','paid',null,null,'${attempt}','#001 Jewelry',false,'winner');
  insert into print_stations values('${station}','Show printer',true,now(),'Twin Turbo','DYMO Twin Turbo','Left');
+ alter table ebay_live_attempts add column event_id text default 'EVENT123';
+ alter table label_print_jobs add column submitted_copies integer default 0,add column updated_at timestamptz default now(),add column lease_until timestamptz,add column detail text;
  `);
  const source=await readFile(new URL('../supabase/migrations/20260927200000_print_station_roll_selection.sql',import.meta.url),'utf8');
  await db.exec(source.slice(source.indexOf('create or replace function public.enqueue_label_print'),source.indexOf('create or replace function public.poll_print_station')));
  await db.exec(await readFile(new URL('../supabase/migrations/20261006120000_ebay_live_auto_labels.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261006160000_ebay_live_bag_print_status.sql',import.meta.url),'utf8'));
 });
-after(async()=>db?.close());
-test('automatic sends across staff reuse one existing queue job and preserve its original destination',async()=>{
- const first=await send();await db.exec("set test.actor='00000000-0000-4000-8000-000000000011'");const again=await send();
- assert.equal(first.id,again.id);assert.equal(again.station_name,'Show printer');
- assert.equal((await db.query('select count(*)::int as count from label_print_jobs')).rows[0].count,1);
- const job=(await db.query('select * from label_print_jobs')).rows[0];assert.equal(job.request_id,attempt);assert.equal(job.copies,1);assert.equal(job.printer_roll,'Left');assert.equal(job.label_xml,xml);
-});
+beforeEach(async()=>db.exec("truncate label_print_jobs;set test.allowed='yes';set test.actor='00000000-0000-4000-8000-000000000010'"));
 test('a manually printed bag is not printed again by an automatic send',async()=>{
+ await send();
  await db.exec("update label_print_jobs set request_id=gen_random_uuid(),status='submitted'");
  const first=(await db.query('select id from label_print_jobs')).rows[0].id;assert.equal((await send()).id,first);
  assert.equal((await db.query('select count(*)::int as count from label_print_jobs')).rows[0].count,1);
@@ -44,4 +42,29 @@ test('automatic printing rejects unpaid, held, resolved and mismatched bags and 
  await assert.rejects(db.query('select enqueue_ebay_live_auto_label($1,$2,$3,$4)',[attempt,station,'<DesktopLabel>WRONG</DesktopLabel>','Left']),/does not identify/);
  await db.exec("set test.allowed='no'");await assert.rejects(send,/Inventory access required/);await db.exec("set test.allowed='yes'");
  assert.equal((await db.query("select has_function_privilege('anon','public.enqueue_ebay_live_auto_label(uuid,uuid,text,text)','execute') allowed")).rows[0].allowed,false);
+});
+test('bag receipts include old manual jobs, track the latest reprint, and stay scoped to the show without queue mutations',async()=>{
+ await send();
+ const receipts=async event=>(await db.query('select get_ebay_live_bag_print_status($1) as receipts',[event])).rows[0].receipts;
+ await db.exec("update label_print_jobs set created_at=now()-interval '2 days',status='submitted',submitted_copies=1");
+ await db.exec(`insert into label_print_jobs(station_id,requested_by,request_id,barcode,status) select '${station}',auth.uid(),gen_random_uuid(),'OTHER-'||n,'submitted' from generate_series(1,120) n`);
+ let rows=await receipts('EVENT123');assert.equal(rows.length,1);assert.equal(rows[0].attempt_id,attempt);assert.equal(rows[0].status,'submitted');assert.equal(rows[0].station_name,'Show printer');assert.equal(rows[0].submitted_copies,1);
+ assert.equal('label_xml' in rows[0],false);assert.equal('requested_by' in rows[0],false);
+ assert.deepEqual(await receipts('OTHER123'),[]);
+ const job=(await db.query(`insert into label_print_jobs(station_id,requested_by,request_id,barcode,status) values('${station}',auth.uid(),gen_random_uuid(),'LIVE-TEST','queued') returning id`)).rows[0];
+ rows=await receipts('EVENT123');assert.equal(rows.length,1);assert.equal(rows[0].job_id,job.id);assert.equal(rows[0].status,'queued');
+ await db.query("update label_print_jobs set status='claimed',lease_until=now()-interval '1 second' where id=$1",[job.id]);
+ rows=await receipts('EVENT123');assert.equal(rows[0].status,'uncertain');assert.match(rows[0].detail,/Check the printer/);
+ assert.equal((await db.query('select status from label_print_jobs where id=$1',[job.id])).rows[0].status,'claimed','receipt reads do not mutate the queue');
+ assert.equal((await db.query('select count(*)::int n from label_print_jobs')).rows[0].n,122);
+ await db.exec("set test.allowed='no'");await assert.rejects(receipts('EVENT123'),/Inventory access required/);await db.exec("set test.allowed='yes'");
+ assert.equal((await db.query("select has_function_privilege('anon','public.get_ebay_live_bag_print_status(text)','execute') allowed")).rows[0].allowed,false);
+ await assert.rejects(receipts('bad!'),/Invalid eBay show/);
+});
+after(async()=>db?.close());
+test('automatic sends across staff reuse one existing queue job and preserve its original destination',async()=>{
+ const first=await send();await db.exec("set test.actor='00000000-0000-4000-8000-000000000011'");const again=await send();
+ assert.equal(first.id,again.id);assert.equal(again.station_name,'Show printer');
+ assert.equal((await db.query('select count(*)::int as count from label_print_jobs')).rows[0].count,1);
+ const job=(await db.query('select * from label_print_jobs')).rows[0];assert.equal(job.request_id,attempt);assert.equal(job.copies,1);assert.equal(job.printer_roll,'Left');assert.equal(job.label_xml,xml);
 });

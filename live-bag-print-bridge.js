@@ -61,7 +61,7 @@
           if(!eligible(sale)){state.pending.shift();state.done[next.id]='payment changed';}
           else try{
             const sent=await run({action:'print',event_id:eventId,attemptId:next.id,requestId:next.id,automatic:true});
-            state.pending.shift();state.done[next.id]='sent';state.last={number:next.number,...sent.result};
+            state.pending.shift();state.done[next.id]='sent';state.last={number:next.number,attemptId:next.id,...sent.result};
             if(['failed','uncertain','cancelled'].includes(sent.result?.status))state.error='Check Print Stations before reprinting the last bag.';
           }catch(error){state.error=error.message||'Automatic print is waiting for the receiver.';}
         }
@@ -96,7 +96,24 @@
           buyer:a.buyer,amount:a.amount,lotId:a.lot_id,time:a.sold_at||a.win_time_label||''}));
         const printer=await destination(userId);
         const auto=command.action==='auto'?await automatic(userId,command.event_id,data,printer,command.enabled):autoView(loadAuto(userId,command.event_id));
-        return {sales,printer,automatic:auto,show:data.connection.event_id};
+        // An enqueue acknowledgement is not the printer acknowledgement. Read
+        // current receipts without creating bags or sending any additional jobs.
+        let printStatusAvailable=false;
+        try {
+          const receipts=await rpc('get_ebay_live_bag_print_status',{_event_id:command.event_id});
+          if(!Array.isArray(receipts))throw Error('Print status unavailable');
+          const byAttempt=new Map(receipts.map(j=>[j.attempt_id,j]));
+          for(const sale of sales)sale.printJob=byAttempt.get(sale.id)||null;
+          if(auto?.last){
+            const current=receipts.find(j=>j.job_id===auto.last.jobId || j.attempt_id===auto.last.attemptId);
+            if(current)auto.last={...auto.last,status:current.status,stationName:current.station_name,updatedAt:current.updated_at};
+          }
+          printStatusAvailable=true;
+        } catch {
+          // Receipt failures must not interrupt automatic printing or claim a
+          // previously queued job was sent. The panel reports status unavailable.
+        }
+        return {sales,printer,automatic:auto,printStatusAvailable,show:data.connection.event_id};
       }
       if(command.action!=='print' || !uuid(command.requestId) || !uuid(command.attemptId))throw Error('Invalid bag print request.');
       const sale=data.attempts.find(a=>a.id===command.attemptId);

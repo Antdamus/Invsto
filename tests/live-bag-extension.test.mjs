@@ -34,6 +34,13 @@ async function open(t,{configured=true,sharedContext,seed}={}){
       calls.push({name,args});
       if(name==='list_print_stations')return {data:stations};
       if(name==='get_ebay_live_dashboard')return {data:{server_time:new Date().toISOString(),connection:{event_id:args._session_id.replace('session-',''),broadcast_ended_at:ended?'2026-10-06':null},attempts:sales.filter(s=>args._session_id==='session-'+s.event_id)}};
+      if(name==='get_ebay_live_bag_print_status'){
+        if(window.receiptsUnavailable)return {error:{message:'Status temporarily unavailable'}};
+        return {data:sales.filter(s=>s.event_id===args._event_id).flatMap(s=>{
+          const lot=lots.find(l=>l.id===s.lot_id),job=lot&&jobs.findLast(j=>j.args._label_xml?.includes(lot.lot_code));
+          return job?[{attempt_id:s.id,job_id:job.id,status:job.status,station_name:'Show computer',printer_roll:job.args._printer_roll,copies:1,submitted_copies:job.status==='submitted'?1:0,updated_at:job.updated_at}]:[];
+        })};
+      }
       if(name==='prepare_ebay_live_bag_label'){
         const sale=sales.find(s=>s.id===args._attempt_id);if(!sale||sale.payment_state!=='paid')return {error:{message:'Payment not confirmed'}};
         let lot=lots.find(l=>l.id===sale.lot_id);if(!lot){lot={id:'lot-'+sale.id,lot_code:'LIVE-'+sale.id.slice(-8),auction_number:'EB-12-TEST'};lots.push(lot);sale.lot_id=lot.id;}return {data:lot};
@@ -42,7 +49,7 @@ async function open(t,{configured=true,sharedContext,seed}={}){
       if(name==='enqueue_label_print'||name==='enqueue_ebay_live_auto_label'){
         let job=jobs.find(j=>j.requestId===args._request_id);
         if(job){if(JSON.stringify(job.args)!==JSON.stringify(args))return {error:{message:'Request changed'}};return {data:job};}
-        job={id:'job-'+jobs.length,status:'queued',requestId:args._request_id,args};jobs.push(job);
+        job={id:'job-'+jobs.length,status:'queued',requestId:args._request_id,args,updated_at:new Date().toISOString()};jobs.push(job);
         if(delayedPrint)await new Promise(resolve=>window.finishPrint=resolve);
         if(failAfterQueue){failAfterQueue=false;return {error:{message:'Acknowledgement lost'}};}
         return {data:job};
@@ -73,7 +80,7 @@ test('compact panel prints the exact saved paid bag through the existing queue a
   assert.equal(await page.locator('[data-bag-choice] option').count(),3,'waiting and held sales are not printable');
   assert.equal(await page.evaluate(()=>calls.some(c=>/prepare|enqueue|claim/.test(c.name))),false,'viewing the panel does not create a bag or print');
   await page.getByRole('button',{name:'Print label',exact:true}).click();
-  await expect(page.locator('[data-bag-status]')).toContainText('Label queued');
+  await expect(page.locator('[data-bag-receipt]')).toContainText('Waiting for printer');
   const result=await page.evaluate(()=>({jobs,lots,calls}));assert.equal(result.jobs.length,1);
   assert.equal(result.calls.filter(c=>c.name==='existing-live-sales-print').length,1);
   assert.equal(result.jobs[0].args._station_id,'station-a');assert.equal(result.jobs[0].args._printer_roll,'Left');
@@ -81,6 +88,9 @@ test('compact panel prints the exact saved paid bag through the existing queue a
   assert.ok(result.jobs[0].args._label_xml.includes(result.lots[0].lot_code));
   assert.equal(result.calls.some(c=>/claim_ebay|close_ebay|inventory/.test(c.name)),false);
   await mkdir(new URL('../test-results',import.meta.url),{recursive:true});await page.locator('#invsto-capture-helper').screenshot({path:'test-results/live-bag-extension.png'});
+  await expect(page.locator('[data-bag-print]')).toBeDisabled();
+  await page.evaluate(()=>{jobs[0].status='submitted';});
+  await expect(page.locator('[data-bag-receipt]')).toContainText('Sent to printer');
   await page.getByRole('button',{name:'Reprint label',exact:true}).click();await expect.poll(()=>page.evaluate(()=>jobs.length)).toBe(2);
   assert.notEqual((await page.evaluate(()=>jobs))[0].requestId,(await page.evaluate(()=>jobs))[1].requestId);
 });
@@ -92,7 +102,7 @@ test('printer setup uses the existing picker once, then an interrupted send retr
   await expect(page.locator('[data-bag-print]')).toHaveText('Print label');assert.equal(await page.evaluate(()=>jobs.length),0);
   await page.evaluate(()=>{failAfterQueue=true;});await page.locator('[data-bag-print]').click();
   await expect(page.locator('[data-bag-print]')).toHaveText('Retry send');assert.equal(await page.evaluate(()=>jobs.length),1);
-  await page.locator('[data-bag-print]').click();await expect(page.locator('[data-bag-status]')).toContainText('Label queued');
+  await page.locator('[data-bag-print]').click();await expect(page.locator('[data-bag-receipt]')).toContainText('Waiting for printer');
   const jobs=await page.evaluate(()=>window.jobs);assert.equal(jobs.length,1);assert.equal(jobs[0].args._printer_roll,'Right');
   assert.equal(await page.locator('.print-destination-picker').count(),0);
 });
@@ -109,7 +119,7 @@ test('the visible dropdown prints an earlier bag even after many newer sales and
   assert.equal(await page.evaluate(()=>jobs.length),0,'selection alone does not send a label');
   await page.evaluate(()=>{sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000099',listing_title:'#099 - Pendant',buyer:'latest-winner',sold_at:'2026-10-06T17:00:00Z',lot_id:null});});
   await expect(choice.locator('option')).toHaveCount(40,{timeout:8000});await expect(page.locator('.bag-number')).toHaveText('#004');
-  await page.getByRole('button',{name:'Print label',exact:true}).click();await expect(page.locator('[data-bag-status]')).toContainText('Label queued · #004');
+  await page.getByRole('button',{name:'Print label',exact:true}).click();await expect(page.locator('[data-bag-receipt]')).toContainText('Waiting for printer');
   const job=await page.evaluate(()=>jobs[0]);assert.match(job.args._label_xml,/#004/);assert.match(job.args._label_xml,/EARLIER-WINNER/);
   assert.doesNotMatch(job.args._label_xml,/LATEST-WINNER/);
   await mkdir(new URL('../test-results',import.meta.url),{recursive:true});await page.locator('#invsto-capture-helper').screenshot({path:'test-results/live-bag-extension-previous.png'});
@@ -119,7 +129,7 @@ test('a sale arriving during print cannot replace the bag being sent and stale p
   const page=await open(t);await page.evaluate(()=>{delayedPrint=true;});await page.locator('[data-bag-print]').click();
   await expect.poll(()=>page.evaluate(()=>jobs.length)).toBe(1);
   await page.evaluate(()=>{sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000009',listing_title:'#020 - Ring',buyer:'new-winner',sold_at:'2026-10-06T16:00:00Z',lot_id:null});finishPrint();});
-  await expect(page.locator('[data-bag-status]')).toContainText('Label queued');
+  await expect(page.locator('[data-bag-receipt]')).toContainText('Waiting for printer');
   assert.match(await page.evaluate(()=>jobs[0].args._label_xml),/CURRENT-WINNER/);
   await expect(page.locator('.bag-number')).toHaveText('#020',{timeout:8000});
   await page.evaluate(()=>{sales.at(-1).payment_state='failed';});await page.locator('[data-bag-print]').click();
@@ -141,7 +151,7 @@ test('new paid sales print automatically, retain the earlier-bag selection, and 
   await expect(page.locator('.bag-number')).toHaveText('#004');
   const seed=await page.evaluate(()=>({sales,jobs,lots}));
   const reloaded=await open(t,{sharedContext:page.context(),seed});
-  await expect(reloaded.locator('[data-bag-auto-status]')).toContainText('Label queued');
+  await expect(reloaded.locator('[data-bag-receipt]')).toContainText('Waiting for printer');
   assert.equal(await reloaded.evaluate(()=>calls.some(c=>c.name==='enqueue_ebay_live_auto_label')),false);
   assert.equal(await reloaded.evaluate(()=>jobs.length),2);
   await reloaded.locator('#invsto-capture-helper').screenshot({path:'test-results/live-bag-extension-auto.png'});
@@ -149,7 +159,8 @@ test('new paid sales print automatically, retain the earlier-bag selection, and 
 test('automatic retries reuse the same job after a lost acknowledgement and ignore historical backfills',async t=>{
   const page=await open(t);await page.evaluate(()=>{failAfterQueue=true;sales[2].payment_state='paid';sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000070',listing_title:'#070 - History',sold_at:'2026-01-01T00:00:00Z'});});
   await expect(page.locator('[data-bag-auto-status]')).toContainText('Acknowledgement lost',{timeout:8000});
-  await expect(page.locator('[data-bag-auto-status]')).toContainText('Label queued',{timeout:8000});
+  await expect(page.locator('[data-bag-auto-status]')).toBeHidden({timeout:8000});
+  await expect(page.locator('[data-bag-receipt]')).toContainText('Waiting for printer');
   assert.equal(await page.evaluate(()=>jobs.length),1);assert.equal(await page.evaluate(()=>jobs[0].requestId), '00000000-0000-4000-8000-000000000003');
 });
 test('auto pause, resume and completed shows do not dump old sales into the printer',async t=>{
@@ -177,6 +188,39 @@ test('two receiver tabs share automatic sends and missing printers wait without 
   assert.equal(await page.evaluate(()=>jobs.length),0);
   const seed=await page.evaluate(()=>({sales,jobs,lots})),other=await open(t,{sharedContext:page.context(),seed,configured:true});
   await expect.poll(async()=>await page.evaluate(()=>jobs.length)+await other.evaluate(()=>jobs.length),{timeout:8000}).toBe(1);
+});
+test('receipts follow the real queue through submission and failures, including previous bags and a fresh receiver',async t=>{
+  const page=await open(t);await page.locator('[data-bag-print]').click();
+  await expect(page.locator('[data-bag-receipt]')).toContainText('Waiting for printer');
+  const states={claimed:'Sending to printer',submitted:'Sent to printer',failed:'Print failed',uncertain:'Check printer',cancelled:'Print cancelled'};
+  for(const [state,label] of Object.entries(states)){
+    await page.evaluate(state=>{jobs[0].status=state;jobs[0].updated_at='2026-10-06T19:08:00Z';},state);
+    await expect(page.locator('[data-bag-receipt]')).toContainText(label,{timeout:8000});
+    await expect(page.locator('[data-bag-choice] option').filter({hasText:'#012'})).toContainText(label);
+  }
+  await page.evaluate(()=>{jobs[0].status='submitted';});
+  await expect(page.locator('[data-bag-receipt]')).toContainText('Left roll');
+  const seed=await page.evaluate(()=>({sales,jobs,lots}));
+  const fresh=await open(t,{seed});
+  await expect(fresh.locator('[data-bag-receipt]')).toContainText('Sent to printer');
+  await expect(fresh.locator('[data-bag-print]')).toHaveText('Reprint label');
+  await expect(fresh.locator('[data-bag-status]')).toHaveText('');
+  await fresh.getByRole('combobox',{name:'Choose a bag to print'}).selectOption('00000000-0000-4000-8000-000000000001');
+  await expect(fresh.locator('[data-bag-receipt]')).toContainText('Not sent yet');
+  await fresh.getByRole('combobox',{name:'Choose a bag to print'}).selectOption('00000000-0000-4000-8000-000000000002');
+  await expect(fresh.locator('[data-bag-receipt]')).toContainText('Sent to printer');
+  assert.equal(await fresh.evaluate(()=>calls.some(c=>/enqueue|prepare/.test(c.name))),false,'checking receipts never prints or prepares a bag');
+  await fresh.locator('#invsto-capture-helper').screenshot({path:'test-results/live-bag-extension-status.png'});
+});
+test('missing receipts cannot claim a bag was sent and do not stop automatic printing',async t=>{
+  const page=await open(t);await page.evaluate(()=>{window.receiptsUnavailable=true;sales[2].payment_state='paid';});
+  await expect(page.locator('[data-bag-receipt]')).toContainText('Print status unavailable',{timeout:8000});
+  assert.equal(await page.evaluate(()=>jobs.length),1);
+  await page.evaluate(()=>{jobs[0].status='submitted';window.receiptsUnavailable=false;});
+  await expect(page.locator('[data-bag-receipt]')).toContainText('Sent to printer',{timeout:8000});
+  const result=await page.evaluate(()=>chrome.runtime.sendMessage({type:'INVSTO_BAG_LABEL_COMMAND',command:{action:'status',event_id:'EVENT123'}}));
+  assert.equal(result.automatic.last.status,'submitted','older installed panels also receive the current automatic receipt');
+  assert.equal(await page.evaluate(()=>jobs.length),1);
 });
 test('worker binds bag requests to their eBay event and does not automatically duplicate a disconnected print',async()=>{
   const source=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');let handler,sent=[],focused=[],fail=false;
