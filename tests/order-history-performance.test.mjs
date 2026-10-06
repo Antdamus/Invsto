@@ -231,6 +231,34 @@ test('failed concurrent task event reads reject the load', async () => {
   await assert.rejects(run(`loadOrderTaskDataForLines(['line'],[])`),/Events unavailable/);
 });
 
+test('related dataset reads overlap in pairs, preserve duplicate precedence, and stop on errors', async () => {
+  const {run}=app();
+  run(`var chunkStarts=[],finishChunks=[];
+    var readChunk=ids=>{
+      chunkStarts.push(ids);return new Promise(resolve=>finishChunks.push(resolve));
+    };`);
+  const pending=run(`fetchHistoryRowsInChunks(['a','a',null,'b','c','d','e'],readChunk,1)`);
+  assert.equal(run('chunkStarts.length'),2);
+  run(`finishChunks[1]({data:[{id:'same',value:'second'}]})`);
+  await new Promise(r=>setImmediate(r));
+  assert.equal(run('chunkStarts.length'),2);
+  run(`finishChunks[0]({data:[{id:'same',value:'first'}]})`);
+  await new Promise(r=>setImmediate(r));
+  assert.equal(run('chunkStarts.length'),4);
+  run(`finishChunks[2]({data:[{id:'third'}]});finishChunks[3]({data:[{id:'fourth'}]})`);
+  await new Promise(r=>setImmediate(r));
+  assert.equal(run('chunkStarts.length'),5);
+  run(`finishChunks[4]({data:[]})`);
+  const result=JSON.parse(JSON.stringify(await pending));
+  assert.deepEqual(result,{data:[{id:'same',value:'first'},{id:'third'},{id:'fourth'}],error:null});
+  run('chunkStarts=[];finishChunks=[]');
+  const failed=run(`fetchHistoryRowsInChunks(['a','b','c','d'],readChunk,1)`);
+  run(`finishChunks[0]({data:[{id:'good'}]});finishChunks[1]({error:'Unavailable'})`);
+  assert.deepEqual(JSON.parse(JSON.stringify(await failed)),{data:[{id:'good'}],error:'Unavailable'});
+  assert.equal(run('chunkStarts.length'),2,'do not start additional requests after a failed batch');
+  assert.deepEqual(JSON.parse(JSON.stringify(await run('fetchHistoryRowsInChunks([],readChunk)'))),{data:[],error:null});
+});
+
 test('closed Proof Trail does no rendering or evidence signing; opening renders current filters',async()=>{
   const {run}=app();
   run('renderEventList()');

@@ -2355,12 +2355,23 @@ async function fetchAllDateOrderHistoryLines(searchTerm) {
   };
 }
 
-async function fetchOverlappingRows(tableName, columnName, ids = [], options = {}) {
-  const cleanIds = [...new Set(ids.filter(Boolean))];
-  if (!cleanIds.length) return { data: [], error: null };
-
+async function fetchHistoryRowsInChunks(ids, readChunk, chunkSize = ORDER_HISTORY_RELATED_ID_CHUNK_SIZE) {
+  const chunks = chunkArray([...new Set(ids.filter(Boolean))], chunkSize);
   const rows = [];
-  for (const chunk of chunkArray(cleanIds, options.chunkSize || ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
+  // Overlap a small pair of independent reads per dataset. Consume results in
+  // source order so duplicates and errors keep their existing precedence.
+  for (let start = 0; start < chunks.length; start += 2) {
+    const results = await Promise.all(chunks.slice(start, start + 2).map(readChunk));
+    for (const { data, error } of results) {
+      if (error) return { data: rows, error };
+      rows.push(...(data || []));
+    }
+  }
+  return { data: uniqueById(rows), error: null };
+}
+
+async function fetchOverlappingRows(tableName, columnName, ids = [], options = {}) {
+  return fetchHistoryRowsInChunks(ids, (chunk) => {
     let query = supabase
       .from(tableName)
       .select(options.select || "*")
@@ -2370,32 +2381,17 @@ async function fetchOverlappingRows(tableName, columnName, ids = [], options = {
       query = query.order(options.orderBy, { ascending: options.ascending ?? false });
     }
 
-    const { data, error } = await query.limit(options.limitPerChunk || 500);
-    if (error) return { data: rows, error };
-    rows.push(...(data || []));
-  }
-
-  return { data: uniqueById(rows), error: null };
+    return query.limit(options.limitPerChunk || 500);
+  }, options.chunkSize || ORDER_HISTORY_RELATED_ID_CHUNK_SIZE);
 }
 
 async function fetchReturnCasesForOrders(orderIds = []) {
-  const cleanOrderIds = [...new Set(orderIds.filter(Boolean))];
-  if (!cleanOrderIds.length) return { data: [], error: null };
-
-  const rows = [];
-  for (const chunk of chunkArray(cleanOrderIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
-    const { data, error } = await supabase
+  return fetchHistoryRowsInChunks(orderIds, (chunk) => supabase
       .from("ebay_return_cases")
       .select("*, ebay_return_items(*)")
       .in("order_id", chunk)
       .order("opened_at", { ascending: false })
-      .limit(500);
-
-    if (error) return { data: rows, error };
-    rows.push(...(data || []));
-  }
-
-  return { data: uniqueById(rows), error: null };
+      .limit(500));
 }
 
 async function loadOrderHistory() {
@@ -2606,7 +2602,7 @@ async function loadOrderTaskDataForLines(lineIds = [], orderIds = [], options = 
   });
 
   // Line-scoped and order-scoped tasks are independent; only their events
-  // need to wait for both. Keep each branch's chunks bounded and sequential.
+  // need to wait for both. Keep each branch's chunks bounded.
   const [lineTasksResult, orderTasks] = await Promise.all([
     cleanLineIds.length
       ? fetchOverlappingRows("ebay_order_tasks", "order_line_ids", cleanLineIds, {
@@ -2616,18 +2612,14 @@ async function loadOrderTaskDataForLines(lineIds = [], orderIds = [], options = 
       })
       : Promise.resolve({ data: [], error: null }),
     (async () => {
-      const rows = [];
-      for (const chunk of chunkArray(cleanOrderIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
-        const { data, error } = await supabase
+      const { data, error } = await fetchHistoryRowsInChunks(cleanOrderIds, (chunk) => supabase
           .from("ebay_order_tasks")
           .select(ORDER_HISTORY_TASK_SELECT)
           .in("order_id", chunk)
           .order("updated_at", { ascending: false })
-          .limit(1000);
-        if (error) throw error;
-        rows.push(...(data || []));
-      }
-      return rows;
+          .limit(1000));
+      if (error) throw error;
+      return data;
     })(),
   ]);
   if (lineTasksResult.error) throw lineTasksResult.error;
