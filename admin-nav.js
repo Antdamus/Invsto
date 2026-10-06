@@ -273,7 +273,7 @@
       }
 
       const clickedMenu = event.target.closest?.("#mobile-menu");
-      const clickedHeader = event.target.closest?.(".mobile-header");
+      const clickedHeader = event.target.closest?.(".mobile-header, .phone-orders-header");
       if (!clickedMenu && !clickedHeader) setMobileMenuOpen(false);
     }, true);
 

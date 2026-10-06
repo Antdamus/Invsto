@@ -7,6 +7,7 @@
   .phone-only.hidden { display: none !important; }
   body:not(.phone-camera-mode) .mobile-header, .sidebar, .main > .header,
   .pending-header, #summary-strip, .orders-panel > .panel-head { display: none; }
+  body.admin-unified-nav:not(.phone-camera-mode) .mobile-header { display: none; }
   body:not(.phone-camera-mode) .page { display: block; min-width: 0; }
   body:not(.phone-camera-mode) .main { margin: 0; padding: 0; width: 100%; min-width: 0; }
   body:not(.phone-camera-mode) .pending-content { width: 100%; max-width: 680px; margin: 0 auto; padding: 86px 16px 100px; gap: 0; }
@@ -199,6 +200,7 @@
   #phone-packing-tools-content h2 { font: 700 17px Manrope, sans-serif; }
   #phone-packing-tools-content p { font-size: 13px; line-height: 1.6; }
   #phone-packing-tools-content #extension-updates { margin: 0; }
+  #phone-packing-tools-content #jump-latest-found { position: static; width: 100%; max-width: 100%; margin: 0; }
   @media (max-width: 350px) {
     .phone-orders-header { gap: 8px; padding-left: 12px; padding-right: 12px; }
     .phone-orders-header strong { font-size: 14px; }

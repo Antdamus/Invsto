@@ -15,6 +15,7 @@
 
   function openTools() {
     if (!isPhone()) return;
+    if (!byId('phone-packing-tools-modal')?.classList.contains('hidden')) return;
     returnFocus = document.activeElement;
     byId('phone-packing-tools-modal')?.classList.remove('hidden');
     document.body.classList.add('phone-tools-open');
@@ -111,7 +112,7 @@
 
   function init() {
     if (!byId('phone-orders-tools') || document.body.classList.contains('phone-camera-mode')) return;
-    ['.fulfillment-utility-strip', '#order-import-panel', '#admin-order-actions-panel', '#extension-updates'].forEach(selector => {
+    ['.fulfillment-utility-strip', '#jump-latest-found', '#order-import-panel', '#admin-order-actions-panel', '#extension-updates'].forEach(selector => {
       const element = document.querySelector(selector);
       if (!element) return;
       const anchor = document.createComment('Desktop packing tools position');
@@ -121,10 +122,9 @@
     byId('phone-packing-store').addEventListener('click', openTools);
     byId('phone-close-packing-tools').addEventListener('click', () => closeTools());
     byId('phone-orders-refresh').addEventListener('click', () => byId('refresh-orders')?.click());
-    byId('phone-orders-menu').addEventListener('click', event => {
-      const open = byId('mobile-menu').classList.toggle('show');
-      event.currentTarget.setAttribute('aria-expanded', String(open));
-    });
+    byId('phone-orders-menu').addEventListener('click', () => byId('menu-toggle')?.click());
+    new MutationObserver(() => byId('phone-orders-menu').setAttribute('aria-expanded', String(byId('mobile-menu').classList.contains('show'))))
+      .observe(byId('mobile-menu'), {attributes: true, attributeFilter: ['class']});
     byId('phone-order-filters').addEventListener('click', event => {
       const open = document.querySelector('.orders-panel').classList.toggle('phone-filters-open');
       event.currentTarget.setAttribute('aria-expanded', String(open));
@@ -145,7 +145,7 @@
     });
     // Let the existing admin buttons open their own dialogs above the queue.
     byId('phone-packing-tools-content').addEventListener('click', event => {
-      if (event.target.closest('#admin-mark-packed-no-stock, #admin-mark-cancelled')) closeTools({restoreFocus: false});
+      if (event.target.closest('#admin-mark-packed-no-stock, #admin-mark-cancelled, #jump-latest-found')) closeTools({restoreFocus: false});
     }, true);
     byId('phone-packing-tools-modal').addEventListener('keydown', event => {
       if (event.key === 'Escape') { event.preventDefault(); closeTools(); }

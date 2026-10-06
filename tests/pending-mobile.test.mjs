@@ -65,6 +65,8 @@ async function open(t, {width = 390, admin = false} = {}) {
     if (admin) document.getElementById('admin-order-actions-panel').classList.remove('hidden');
   }, admin);
   await page.addScriptTag({url: origin + '/pending-orders-mobile.js'});
+  await page.addScriptTag({url: origin + '/admin-nav.js'});
+  await page.evaluate(admin => OGRoleNavigation.render(admin ? 'admin' : 'worker'), admin);
   await expect(page.locator('.buyer-order-card')).toHaveCount(7);
   return page;
 }
@@ -72,6 +74,8 @@ async function open(t, {width = 390, admin = false} = {}) {
 for (const width of [320, 390, 430, 760]) {
   test(`${width}px: queue comes first, all notes are readable, tools and expanded cards fit`, async t => {
     const page = await open(t, {width});
+    await expect(page.locator('.mobile-header')).toBeHidden();
+    await expect(page.locator('.phone-orders-header')).toBeVisible();
     const card = page.locator('.buyer-order-card').first();
     const box = await card.boundingBox(); assert.ok(box.y < 440, `first buyer starts at ${box.y}px`);
     await expect(card.locator('.buyer-card-note-body p')).toHaveCount(2);
@@ -102,6 +106,7 @@ test('filters work, navigation opens, and desktop restores the original tools', 
   await page.locator('#phone-orders-menu').click();
   await expect(page.locator('#mobile-menu')).toBeVisible();
   await page.locator('#phone-orders-menu').click();
+  await expect(page.locator('#mobile-menu')).toBeHidden();
   await expect(page.locator('#order-sort')).toBeHidden();
   await page.locator('#phone-order-filters').click();
   await expect(page.locator('#order-sort')).toBeVisible();
@@ -151,5 +156,20 @@ test('no-inventory review keeps screenshot eligibility and fits the phone', asyn
   await expect(page.locator('[data-no-inventory-line="line-1"]')).not.toBeChecked();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   await page.screenshot({path: 'test-results/pending-mobile-no-inventory.png'});
+  assert.deepEqual(await page.evaluate(() => databaseWrites), []);
+});
+
+test('missing checkout store opens tools and choosing the store enables packing', async t => {
+  const page = await open(t);
+  await page.evaluate(() => {state.checkoutStoreId = ''; renderCheckoutStoreSelect();});
+  await page.locator('[data-buyer-expand-key]').first().click();
+  await page.locator('[data-buyer-complete-key]').first().click();
+  await expect(page.locator('#phone-packing-tools-modal')).toBeVisible();
+  await page.locator('#checkout-store-select').selectOption('main');
+  await page.locator('#phone-close-packing-tools').click();
+  await expect(page.locator('#fulfillment-workflow')).toBeVisible();
+  await expect(page.locator('#phone-review-checkout')).toHaveText('Find an item →');
+  await page.locator('#phone-review-checkout').click();
+  await expect(page.locator('#item-scan')).toBeFocused();
   assert.deepEqual(await page.evaluate(() => databaseWrites), []);
 });
