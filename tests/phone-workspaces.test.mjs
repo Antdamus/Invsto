@@ -94,7 +94,13 @@ for (const width of [320, 390, 430, 760]) {
     await page.locator('#phone-filter-button').click();
     await expect(page.locator('#phone-filters-sheet')).toBeVisible(); assert.equal(await overflow(page), false);
     if (kind === 'history') await expect(page.locator('#history-from')).toBeVisible();
-    else { await expect(page.locator('#sort-select')).toBeVisible(); await expect(page.locator('#filter-form input[name=title]')).toBeVisible(); }
+    else {
+      await expect(page.locator('#sort-select')).toBeVisible();
+      await page.locator('#filter-form input[name=title]').click();
+      await page.locator('.filter-tab-btn[data-tab=range]').click();
+      await expect(page.locator('#filter-form input[name=weightMin]')).toBeVisible();
+      await page.locator('.filter-tab-btn[data-tab=basic]').click();
+    }
     await page.locator('#phone-filters-sheet [data-close-sheet]').first().click();
     if (kind === 'stock') {
       await card.locator('.phone-stock-details-toggle').click();

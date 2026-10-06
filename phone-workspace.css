@@ -183,7 +183,8 @@
   body[data-phone-page=stock] .phone-stock-select { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin: 0; }
   body[data-phone-page=stock] .stock-card:not(.phone-stock-expanded) .stock-content > .card-float-controls { display: none; }
   body[data-phone-page=stock] .stock-content > .stock-count, body[data-phone-page=stock] .stock-sensitive-legacy { display: none; }
-  body[data-phone-page=stock] #filter-section { display: block !important; position: static; inset: auto; width: 100%; max-height: none; padding: 0; margin: 0; box-shadow: none; background: none; border: 0; overflow: visible; transform: none; opacity: 1; }
+  body[data-phone-page=stock] #filter-section { display: block !important; position: static; inset: auto; width: 100%; max-height: none; padding: 0; margin: 0; box-shadow: none; background: none; border: 0; overflow: visible; transform: none; opacity: 1; pointer-events: auto; visibility: visible; }
+  body[data-phone-page=stock] .phone-sheet-content input::placeholder { color: #a9a49c; opacity: 1; }
   body[data-phone-page=stock] .filter-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
   body[data-phone-page=stock] .filter-tab-btn { flex: 1 1 100px; font-size: 11px; padding: 8px; background: #302d29; color: #f0d6ae; border-color: #50473b; }
   body[data-phone-page=stock] .filter-tab-btn svg { display: none; }
