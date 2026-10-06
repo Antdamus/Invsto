@@ -5294,7 +5294,7 @@ function renderEbayLabelPanel() {
   const trackingText = getLabelTrackingDisplay(metadata);
   const summaryText = label.path
     ? `Label attached${label.uploadedAt ? ` ${formatDate(label.uploadedAt)}` : ""}${sizeText ? ` - ${sizeText}` : ""}${trackingText ? ` - tracker ${trackingText}` : ""}. New labels are added separately; earlier labels remain available.`
-    : "Upload a label PDF or send a label from eBay.";
+    : "Upload a PDF, take a label photo, or send a label from eBay.";
   const detailsHtml = label.path
     ? `
       <div class="label-tracking-confirmation">
@@ -5308,7 +5308,7 @@ function renderEbayLabelPanel() {
         <span><small>Cost</small><b>${escapeHtml(metadata.labelCost ? formatMoney(metadata.labelCost) : "-")}</b></span>
       </div>
     `
-    : `<div class="empty-state">Upload your shipping label PDF, or click Send Label to OG on the eBay label-ready page.</div>`;
+    : `<div class="empty-state">Upload a label PDF or photo below, or click Send Label to OG on the eBay label-ready page.</div>`;
 
   if (panel) {
     const summary = $("ebay-label-summary");
@@ -8336,10 +8336,10 @@ function getOrderShippingLabelController() {
   return orderShippingLabelController;
 }
 
-function openOrderShippingLabels(lines) {
+function openOrderShippingLabels(lines, picker = "") {
   if (state.busy) return;
   if (!lines.length) return setStatus("Select an order for the shipping labels.", "error");
-  getOrderShippingLabelController()?.open(lines);
+  getOrderShippingLabelController()?.open(lines, picker);
 }
 
 function stopOrderShippingLabelWatch(source) {
@@ -10307,7 +10307,7 @@ function safeStorageSegment(value, fallback = "value") {
 }
 
 function setEbayLabelTransferStatus(message = "", type = "info") {
-  const text = message || "Upload a label PDF or send a label from eBay.";
+  const text = message || "Upload a PDF, take a label photo, or send a label from eBay.";
   const modalSummary = $("worker-no-inventory-label-summary");
   const pageSummary = $("ebay-label-summary");
   const modalError = $("worker-no-inventory-error");
@@ -12620,10 +12620,13 @@ function setupListeners() {
       ? getCompletionPhotoController().lines : getCompletionPhotoLines(button.dataset.phoneCamera)));
   });
   document.querySelectorAll("[data-order-label-source]").forEach(button => {
-    button.addEventListener("click", () => openOrderShippingLabels(
-      button.dataset.orderLabelSource === "selected" ? [state.selectedLine].filter(Boolean)
-        : getCompletionPhotoLines(button.dataset.orderLabelSource)
-    ));
+    button.addEventListener("click", () => {
+      const source = button.dataset.orderLabelSource;
+      const lines = source === "selected" ? [state.selectedLine].filter(Boolean) : getCompletionPhotoLines(source);
+      const status = $(`${source}-shipping-label-status`);
+      if (status) status.textContent = lines.length ? "" : "Select at least one order item before adding its shipping label.";
+      openOrderShippingLabels(lines, button.dataset.orderLabelPicker || "");
+    });
   });
   $("select-all-no-inventory-photos")?.addEventListener("click", () => setAllNoInventoryEvidencePhotosSelected(true));
   $("deselect-all-no-inventory-photos")?.addEventListener("click", () => setAllNoInventoryEvidencePhotosSelected(false));

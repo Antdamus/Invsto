@@ -87,7 +87,6 @@
   .orders-panel .buyer-order-card:not(.phone-actions-open) .buyer-card-finance-pill.is-unknown { display: none; }
   .orders-panel .buyer-order-card:not(.phone-actions-open) [data-buyer-completion-photos],
   .orders-panel .buyer-order-card:not(.phone-actions-open) [data-phone-camera=buyer],
-  .orders-panel .buyer-order-card:not(.phone-actions-open) [data-buyer-shipping-labels],
   .orders-panel .buyer-order-card:not(.phone-actions-open) .buyer-card-task-btn.is-clear { display: none; }
   .orders-panel .buyer-order-card .buyer-card-meta { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; }
   .orders-panel .buyer-order-card .buyer-card-meta-pill { max-width: 100%; min-height: 24px; padding: 3px 7px; font-size: 10px; white-space: normal; overflow: visible; line-height: 1.5; }

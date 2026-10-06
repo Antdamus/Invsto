@@ -34,6 +34,53 @@
     ];
     return [...new Set(found.map(trackingFromBarcode).filter(Boolean))];
   }
+  // Keep photo labels on the same PDF storage/printing path as carrier PDFs.
+  // The complete, correctly oriented image is fitted onto a page without cropping.
+  async function prepareFile(file, {onProgress = () => {}, signal} = {}) {
+    if (!file?.size || file.size > 10 * 1024 * 1024) throw Error("Choose a label PDF or photo smaller than 10 MB.");
+    const cancelled = () => {if (signal?.aborted) throw new DOMException("Reading cancelled", "AbortError");};
+    cancelled();
+    if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) return file;
+    if (!/^image\/(jpeg|png|webp|heic|heif)$/i.test(file.type) && !/\.(jpe?g|png|webp|heic|heif)$/i.test(file.name)) {
+      throw Error("Choose a PDF, JPEG, PNG, WebP or phone photo of the label.");
+    }
+    onProgress("Preparing label photo…");
+    const url = URL.createObjectURL(file), image = new Image(), canvas = document.createElement("canvas");
+    try {
+      await new Promise((resolve, reject) => {
+        const abort = () => {cleanup(); reject(new DOMException("Reading cancelled", "AbortError"));};
+        const cleanup = () => {image.onload = image.onerror = null; signal?.removeEventListener("abort", abort);};
+        image.onload = () => {cleanup(); resolve();};
+        image.onerror = () => {cleanup(); reject(Error("This photo could not be opened. Take another photo, or choose a JPEG, PNG or PDF copy."));};
+        signal?.addEventListener("abort", abort, {once: true});
+        image.src = url;
+      });
+      cancelled();
+      if (!image.naturalWidth || !image.naturalHeight) throw Error("This photo is empty. Choose another label photo.");
+      const scale = Math.min(1, 2400 / Math.max(image.naturalWidth, image.naturalHeight));
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#fff"; context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const jpeg = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", .95));
+      if (!jpeg) throw Error("Could not prepare this photo. Take another photo or choose the label PDF.");
+      await script("vendor/pdf-lib/pdf-lib.min.js", () => Boolean(window.PDFLib?.PDFDocument));
+      cancelled();
+      const doc = await window.PDFLib.PDFDocument.create();
+      const embedded = await doc.embedJpg(await jpeg.arrayBuffer());
+      const [width, height] = canvas.width > canvas.height ? [432, 288] : [288, 432];
+      const fit = Math.min(width / embedded.width, height / embedded.height);
+      doc.addPage([width, height]).drawImage(embedded, {
+        x: (width - embedded.width * fit) / 2, y: (height - embedded.height * fit) / 2,
+        width: embedded.width * fit, height: embedded.height * fit,
+      });
+      const bytes = await doc.save();
+      cancelled();
+      if (bytes.byteLength > 10 * 1024 * 1024) throw Error("The label photo is too large. Choose a smaller photo or the original PDF.");
+      return new File([bytes], `${file.name.replace(/\.[^.]+$/, "") || "label-photo"}.pdf`, {type: "application/pdf"});
+    } finally {URL.revokeObjectURL(url); image.src = ""; canvas.width = canvas.height = 0;}
+  }
   async function read(file, {onProgress = () => {}, signal} = {}) {
     if (!file?.size || file.size > 10 * 1024 * 1024) throw Error("Choose a PDF smaller than 10 MB.");
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -113,5 +160,5 @@
       throw error;
     } finally {await task.destroy();}
   }
-  window.shippingLabelReader = {read, clean, trackingFromText, trackingFromBarcode};
+  window.shippingLabelReader = {read, prepareFile, clean, trackingFromText, trackingFromBarcode};
 })();

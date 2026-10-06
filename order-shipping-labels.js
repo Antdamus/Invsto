@@ -132,7 +132,7 @@
           <div class="order-label-upload-head"><strong>${esc(entry.file.name)}</strong>
             <button type="button" class="secondary-btn" data-remove-label="${entry.id}" ${busy || batch ? "disabled" : ""}>Remove</button></div>
           ${entry.result?.previewUrl ? `<img class="order-label-preview" src="${esc(entry.result.previewUrl)}" alt="First page of ${esc(entry.file.name)}" />` : ""}
-          <a href="${esc(entry.url)}" target="_blank" rel="noopener" class="secondary-btn">Preview PDF</a>
+          <a href="${esc(entry.url)}" target="_blank" rel="noopener" class="secondary-btn">Preview label</a>
           <p data-label-progress="${entry.id}" class="completion-photo-help">${esc(entry.progress)}</p>
           ${entry.error ? `<p class="is-error">${esc(entry.error)}</p>` : ""}
           <label>Tracking / barcode numbers
@@ -140,7 +140,7 @@
               aria-label="Tracking or barcode numbers for ${esc(entry.file.name)}" value="${esc(entry.tracking)}"
               placeholder="Scan or type; separate multiple numbers with commas" ${busy || batch || !entry.result ? "disabled" : ""} />
           </label>
-          <fieldset ${busy || batch ? "disabled" : ""}><legend>This PDF covers</legend>
+          <fieldset ${busy || batch ? "disabled" : ""}><legend>This label covers</legend>
             ${orderOptions().map(order => `<label class="order-label-order-choice"><input type="checkbox" data-label-order="${entry.id}" value="${esc(order.id)}" ${entry.orders.has(order.id) ? "checked" : ""} /> ${esc(order.buyer)} · ${esc(order.number)}</label>`).join("")}
           </fieldset>
         </article>`).join("");
@@ -161,6 +161,7 @@
       $("save-order-labels").disabled = busy || !pending.length || pending.some(p => !p.result || p.error);
       $("save-order-labels").textContent = busy ? "Saving labels…" : batch ? "Retry save" : "Save labels to orders";
       $("order-label-files").disabled = busy || Boolean(batch);
+      if ($("order-label-camera")) $("order-label-camera").disabled = busy || Boolean(batch);
       $("clear-order-label-selection").disabled = busy || !pending.length;
       $("close-order-labels").disabled = busy;
       $("done-order-labels").disabled = busy;
@@ -168,23 +169,32 @@
     async function choose(event) {
       const files = Array.from(event.target.files || []); event.target.value = "";
       if (busy || batch) return;
-      if (files.length + pending.length > 20) return status("Choose up to 20 PDFs at a time.", true);
+      if (files.length + pending.length > 20) return status("Choose up to 20 label PDFs or photos at a time.", true);
+      status("");
       const added = [];
       for (const file of files) {
-        if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) {status("Choose PDF documents only.", true); continue;}
         const entry = {id: crypto.randomUUID(), file, url: URL.createObjectURL(file), abort: new AbortController(),
-          orders: new Set(orderOptions().map(o => o.id)), tracking: "", progress: "Waiting to read PDF…", result: null};
+          originalFileName: file.name, originalMimeType: file.type,
+          inputSource: event.target.id === "order-label-camera" ? "camera" : "file",
+          orders: new Set(orderOptions().map(o => o.id)), tracking: "", progress: "Waiting to read label…", result: null};
         pending.push(entry); added.push(entry);
       }
       renderPending();
       for (const entry of added) {
         try {
+          const onProgress = message => {entry.progress = message; const el = document.querySelector(`[data-label-progress="${entry.id}"]`); if (el) el.textContent = message;};
+          const prepared = await window.shippingLabelReader.prepareFile(entry.file, {signal: entry.abort.signal, onProgress});
+          if (entry.abort.signal.aborted) continue;
+          if (prepared !== entry.file) {
+            entry.isPhoto = true; entry.file = prepared;
+            URL.revokeObjectURL(entry.url); entry.url = URL.createObjectURL(prepared);
+          }
           entry.result = await window.shippingLabelReader.read(entry.file, {signal: entry.abort.signal,
-            onProgress: message => {entry.progress = message; const el = document.querySelector(`[data-label-progress="${entry.id}"]`); if (el) el.textContent = message;}});
+            onProgress});
           if (entry.abort.signal.aborted) continue;
           entry.tracking = entry.result.trackingNumbers.join(", ");
-          entry.progress = `${entry.result.pageCount} page(s). ${entry.tracking ? "Check the detected numbers below." : "No tracking number was read automatically. Scan or enter it below."}${entry.result.allThermal ? "" : " For Letter/A4 pages, use Open PDF and your document printer."}`;
-        } catch (error) {if (!entry.abort.signal.aborted) entry.error = error.message || "Could not read this PDF.";}
+          entry.progress = `${entry.isPhoto ? "Photo ready. Check that the entire label and barcode are clear in the preview. " : `${entry.result.pageCount} page(s). `}${entry.tracking ? "Check the detected numbers below." : "No tracking number was read automatically. Scan or enter it below."}${entry.result.allThermal ? "" : " For Letter/A4 pages, use Open PDF and your document printer."}`;
+        } catch (error) {if (!entry.abort.signal.aborted) entry.error = error.message || "Could not read this label.";}
         if (!entry.abort.signal.aborted) renderPending();
       }
     }
@@ -221,12 +231,14 @@
               tracking.includes(code) || tracking.includes(window.shippingLabelReader.trackingFromBarcode(code)));
             labels.push({path: entry.path, order_ids: [...entry.orders].sort(), metadata: {
               fileName: entry.file.name, mimeType: "application/pdf", size: entry.file.size,
+              originalFileName: entry.originalFileName, originalMimeType: entry.originalMimeType,
+              labelInputType: entry.isPhoto ? "photo" : "pdf", labelInputSource: entry.inputSource,
               pageCount: entry.result.pageCount, allThermal: entry.result.allThermal,
               trackingNumber: tracking[0], trackingNumbers: tracking,
               shippingBarcodeNumber: tracking[0], shippingBarcodeNumbers: [...new Set([...tracking, ...approvedBarcodes])],
               barcodeValues: entry.result.barcodeValues, pdfDetectedPages: entry.result.pages,
               lookupKeys: [...new Set([...tracking, ...approvedBarcodes])],
-              trackingSource: "pdf-read-and-user-reviewed",
+              trackingSource: entry.isPhoto ? "photo-read-and-user-reviewed" : "pdf-read-and-user-reviewed",
             }});
           }
           batch = {id: crypto.randomUUID(), labels};
@@ -238,21 +250,23 @@
       } catch (error) {status(`${error.message || "Could not save labels."} Your selection is still here; retry saving.`, true);}
       finally {busy = false; renderPending(); watchers.forEach(refresh => refresh());}
     }
-    function open(lines) {
-      if (busy || pending.length) {config.onOpen(); status("Save or clear the selected PDFs before switching orders.", true); return;}
+    function open(lines, picker = "") {
+      if (busy || pending.length) {config.onOpen(); status("Save or clear the selected labels before switching orders.", true); return;}
       if (!orderOptions(lines).length) return;
       scope = lines; focusBack = document.activeElement;
       $("order-label-context").textContent = orderOptions().map(order => `${order.buyer} · ${order.number}`).join(" / ");
       status(""); renderPending(); config.onOpen(); stopModalWatch?.();
       stopModalWatch = watch(scope, $("order-label-saved"), $("order-label-refresh-status"));
       $("done-order-labels").focus();
+      if (picker) $(picker === "camera" ? "order-label-camera" : "order-label-files")?.click();
     }
     function close() {
-      if (busy || pending.length) {status("Save or clear the selected PDFs before closing.", true); return false;}
+      if (busy || pending.length) {status("Save or clear the selected labels before closing.", true); return false;}
       stopModalWatch?.(); stopModalWatch = null; config.onClose();
       if (focusBack?.isConnected) focusBack.focus(); return true;
     }
     $("order-label-files").addEventListener("change", choose);
+    $("order-label-camera")?.addEventListener("change", choose);
     $("save-order-labels").addEventListener("click", save);
     $("clear-order-label-selection").addEventListener("click", clear);
     $("close-order-labels").addEventListener("click", close);

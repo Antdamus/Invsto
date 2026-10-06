@@ -3,7 +3,7 @@ import {readFile, mkdir} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {createRequire} from 'node:module';
 import {test, before, after} from 'node:test';
-import {chromium, expect} from '@playwright/test';
+import {chromium, webkit, expect} from '@playwright/test';
 
 const require = createRequire(import.meta.url);
 const {PDFDocument} = require('../vendor/pdf-lib/pdf-lib.min.js');
@@ -22,7 +22,7 @@ before(async () => {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
-  browser = await chromium.launch();
+  browser = await (process.env.INVSTO_LABEL_BROWSER === 'webkit' ? webkit : chromium).launch();
 });
 after(async () => {await browser?.close(); await new Promise(resolve => {server.close(resolve); server.closeAllConnections();});});
 
@@ -64,6 +64,9 @@ function database() {
 async function open(t, db, mobile = false, timezoneId = 'America/New_York') {
   db.lines ||= db.orders.map((order, i) => ({id:`line-${i?'b':'a'}`,order_id:order.id,item_title:i?'Silver ring':'Gold chain',quantity:1,fulfilled_quantity:0,
     total_price:i?30:1485,line_status:'pending',order}));
+  // These label-scope fixtures represent items ready for checkout. Items without
+  // saved receipts are intentionally excluded by the bulk-selection rule.
+  db.lines.forEach(line => {line.video_receipt_photo_count ??= 1;});
   db.reads ||= [];
   const context = await browser.newContext({viewport:{width:mobile ? 390:1440,height:950},isMobile:mobile,hasTouch:mobile,timezoneId});
   t.after(() => context.close());
@@ -155,7 +158,7 @@ async function open(t, db, mobile = false, timezoneId = 'America/New_York') {
       rpc:(name,args)=>labelDb({op:'rpc',name,args}),
     };
     window.lines=orders.map((order,i)=>({id:`line-${i?'b':'a'}`,order_id:order.id,item_title:i?'Silver ring':'Gold chain',quantity:1,fulfilled_quantity:0,
-      total_price:i?30:1485,line_status:'pending',order}));
+      total_price:i?30:1485,line_status:'pending',video_receipt_photo_count:1,order}));
     state.user={id:'staff',email:'staff@example.com'};state.employee={active:true,role:'employee'};
     state.orders=lines;state.filteredOrders=lines;state.selectedLine=lines[0];
     state.checkoutStoreId='store-a';state.stores=[{id:'store-a',name:'Main Store'}];
@@ -518,7 +521,7 @@ test('extension imports append multiple PDFs in checkout, preserve old labels, a
   assert.ok(db.calls.every(call=>['append_ebay_shipping_label','list_pending_ebay_order_matches'].includes(call.name)));
   assert.equal(await page.evaluate(()=>lines[0].order.label_file_path),'old/current.pdf');
   for (const tracking of ['000000000000','111111111111','222222222222','333333333333']) await expect(page.locator('#no-inventory-shipping-labels')).toContainText(tracking);
-  assert.deepEqual(await page.locator('#worker-no-inventory-modal .no-inventory-label button').allTextContents(),
+  assert.deepEqual(await page.locator('#no-inventory-shipping-labels button').allTextContents(),
     Array.from({length:4},()=>['Open PDF','Print']).flat());
   for (const button of await saved.locator('[data-print-saved-label]').all()) await button.click();
   assert.equal(new Set(await page.evaluate(()=>prints.map(item=>item.path))).size,4);
@@ -553,6 +556,115 @@ test('real PDF reader reads multiple pages and tracking formats, with bounded fi
     catch(error){return error.message;}
   },[...bytes]);
   assert.match(passwordError,/password protected/);
+});
+
+async function labelPhoto(page, barcode = '001234567890', landscape = false) {
+  await page.addScriptTag({url:`${origin}/node_modules/jsbarcode/dist/JsBarcode.all.min.js`});
+  const url = await page.evaluate(({barcode, landscape}) => {
+    const canvas = document.createElement('canvas'); canvas.width = landscape ? 1200 : 800; canvas.height = landscape ? 800 : 1200;
+    const context = canvas.getContext('2d'); context.fillStyle = '#fff'; context.fillRect(0,0,canvas.width,canvas.height);
+    context.fillStyle = '#000'; context.font = '32px sans-serif'; context.fillText('EXTERNAL SHIPPING LABEL',30,70);
+    const code = document.createElement('canvas'); JsBarcode(code,barcode,{format:'CODE128',width:3,height:180,margin:30,displayValue:true});
+    context.drawImage(code,30,160,Math.min(code.width,canvas.width-60),250);
+    return canvas.toDataURL('image/png');
+  }, {barcode, landscape});
+  return {name: 'outside-label.png', mimeType: 'image/png', buffer: Buffer.from(url.split(',')[1], 'base64')};
+}
+
+test('label photos become complete printable PDFs with detected barcodes and preserved orientation',async t=>{
+  const page=await open(t,database());
+  for (const landscape of [false,true]) {
+    const photo=await labelPhoto(page,'001234567890',landscape);
+    const result=await page.evaluate(async bytes=>{
+      const input=new File([new Uint8Array(bytes)],'label.png',{type:'image/png'});
+      const output=await shippingLabelReader.prepareFile(input);
+      const doc=await PDFLib.PDFDocument.load(await output.arrayBuffer());
+      const page=doc.getPage(0);
+      const scan=await shippingLabelReader.read(output);
+      return {name:output.name,type:output.type,width:page.getWidth(),height:page.getHeight(),...scan};
+    },[...photo.buffer]);
+    assert.equal(result.name,'label.pdf');assert.equal(result.type,'application/pdf');
+    assert.deepEqual([result.width,result.height],landscape?[432,288]:[288,432]);
+    assert.deepEqual(result.trackingNumbers,['001234567890']);assert.equal(result.allThermal,true);
+  }
+  const invalid=await page.evaluate(async()=>{
+    const errors=[];
+    for (const file of [new File(['broken'],'label.png',{type:'image/png'}),new File(['hello'],'label.txt'),new File([new Uint8Array(10485761)],'big.jpg',{type:'image/jpeg'})]) {
+      try {await shippingLabelReader.prepareFile(file);} catch(error){errors.push(error.message);}
+    }
+    const controller=new AbortController();controller.abort();
+    try {await shippingLabelReader.prepareFile(new File(['x'],'label.png'),{signal:controller.signal});} catch(error){errors.push(error.name);}
+    return errors;
+  });
+  assert.match(invalid[0],/could not be opened/);assert.match(invalid[1],/Choose a PDF/);
+  assert.match(invalid[2],/10 MB/);assert.equal(invalid[3],'AbortError');
+});
+
+test('no-inventory checkout directly uploads outside PDFs and camera photos only to its checked orders',async t=>{
+  const db=database(), page=await open(t,db,true);
+  await page.addScriptTag({url:`${origin}/pending-orders-mobile.js`});
+  await page.evaluate(()=>{
+    state.workerNoInventoryCandidates=[...lines];state.workerNoInventoryLineIds=new Set(['line-a']);
+    state.selectedLine=lines[1];openModal('worker-no-inventory-modal');
+  });
+  const pdfPicker=page.waitForEvent('filechooser');
+  await page.locator('[data-order-label-source="no-inventory"][data-order-label-picker="files"]').click();
+  await (await pdfPicker).setFiles({name:'outside.pdf',mimeType:'application/pdf',buffer:await pdf()});
+  await expect(page.locator('#save-order-labels')).toBeEnabled();
+  await expect(page.locator('[data-label-order]')).toHaveCount(1);
+  await save(page);
+  assert.deepEqual(db.calls.at(-1).args._labels[0].order_ids,['order-a']);
+  await page.locator('#done-order-labels').click();
+  await expect(page.locator('#worker-no-inventory-modal')).toBeVisible();
+  const photo=await labelPhoto(page);
+  const cameraPicker=page.waitForEvent('filechooser');
+  await page.locator('[data-order-label-source="no-inventory"][data-order-label-picker="camera"]').click();
+  const camera=await cameraPicker;assert.equal(camera.isMultiple(),false);
+  await camera.setFiles(photo);
+  await expect(page.locator('#save-order-labels')).toBeEnabled();
+  await expect(page.locator('[data-label-tracking]')).toHaveValue('001234567890');
+  await expect(page.locator('#order-label-camera')).toHaveAttribute('capture','environment');
+  await expect(page.locator('.order-label-upload-card')).toContainText('Photo ready');
+  const before=db.calls.length;
+  await page.evaluate(()=>confirmWorkerNoInventoryCompletion());
+  assert.equal(db.calls.length,before,'a draft label must not close the order');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await mkdir(new URL('../test-results',import.meta.url),{recursive:true});
+  await page.screenshot({path:'test-results/label-photo-phone.png'});
+  await save(page);
+  const saved=db.calls.at(-1).args._labels[0];
+  assert.deepEqual(saved.order_ids,['order-a']);assert.equal(saved.metadata.labelInputType,'photo');
+  assert.equal(saved.metadata.labelInputSource,'camera');assert.equal(saved.metadata.originalFileName,'outside-label.png');
+  assert.equal(saved.metadata.mimeType,'application/pdf');assert.equal(saved.metadata.fileName,'outside-label.pdf');
+  assert.equal(db.uploads.at(-1).options.contentType,'application/pdf');
+  assert.match(db.orders[0].label_file_path,/\.pdf$/);assert.equal(db.orders[1].label_file_path,undefined);
+  await expect(page.locator('#order-label-saved .order-saved-label')).toHaveCount(2);
+});
+
+test('bundle and regular label steps expose upload, camera and saved-label controls without changing checkout scope',async t=>{
+  const db=database(), page=await open(t,db,true);
+  await page.addScriptTag({url:`${origin}/pending-orders-mobile.js`});
+  await page.evaluate(()=>{
+    state.stagedFulfillments.set('line-a',{line:lines[0],mode:'inventory',qty:1,item:{id:'item-a',title:'Chain',photos:[]},row:{id:'stock-a',locationLabel:'Main'}});
+    state.stagedFulfillments.set('line-b',{line:lines[1],mode:'without_inventory',qty:1,item:{title:'Ring'},row:{locationLabel:'Without inventory'}});
+    openBundleReviewModal();
+  });
+  await expect(page.locator('[data-order-label-source="bundle"][data-order-label-picker="camera"]')).toBeVisible();
+  const picker=page.waitForEvent('filechooser');
+  await page.locator('[data-order-label-source="bundle"][data-order-label-picker="files"]').click();
+  await (await picker).setFiles(await labelPhoto(page));
+  await expect(page.locator('#save-order-labels')).toBeEnabled();
+  await expect(page.locator('[data-label-order]:checked')).toHaveCount(2);
+  await save(page);assert.deepEqual(db.calls.at(-1).args._labels[0].order_ids,['order-a','order-b']);
+  assert.equal(await page.evaluate(()=>state.stagedFulfillments.size),2);
+  await page.locator('#done-order-labels').click();await expect(page.locator('#bundle-review-modal')).toBeVisible();
+  await page.evaluate(()=>{closeModal('bundle-review-modal');openOrderShippingLabels([state.selectedLine]);});
+  await page.locator('#order-label-files').setInputFiles({name:'broken.png',mimeType:'image/png',buffer:Buffer.from('broken')});
+  await expect(page.locator('.order-label-upload-card .is-error')).toContainText('could not be opened');
+  await expect(page.locator('#save-order-labels')).toBeDisabled();
+  await page.locator('[data-remove-label]').click();await page.locator('#done-order-labels').click();
+  const controls=page.locator('#ebay-label-panel [data-order-label-source="selected"]');
+  assert.equal(await controls.count(),3);
 });
 
 test('real image-only PDF barcode decoding preserves leading zeros',async t=>{
@@ -656,7 +768,7 @@ test('phone label uploads appear in both open checkout modes and pending PDFs pr
   await expect(desktop.locator('#no-inventory-shipping-labels')).toContainText('phone-label.pdf');
   await expect(mixed.locator('#bundle-shipping-labels')).toContainText('phone-label.pdf');
   assert.equal(await desktop.evaluate(()=>state.selectedLine.label_file_path),db.orders[0].label_file_path);
-  assert.deepEqual(await mixed.locator('#bundle-review-modal .no-inventory-label button').allTextContents(),['Open PDF','Print']);
+  assert.deepEqual(await mixed.locator('#bundle-shipping-labels button').allTextContents(),['Open PDF','Print']);
   // Pending-upload safety remains enforced even when checkout is opened from another entry point.
   await mixed.evaluate(()=>openOrderShippingLabels(getCompletionPhotoLines('bundle')));await pick(mixed,[['not-saved.pdf',await pdf()]]);
   const count=db.calls.length;
@@ -724,7 +836,7 @@ async function prepareDueGroups(page){
       ['unknown-later','','2026-10-09','2026-10-02','Other unknown customer'],
     ];
     state.orders=rows.map(([id,buyer,due,sold,title,status='pending'])=>normalizeLine({id,order_id:id,item_title:title,
-      line_status:status,quantity:1,fulfilled_quantity:status==='fulfilled'?1:0,
+      line_status:status,quantity:1,fulfilled_quantity:status==='fulfilled'?1:0,video_receipt_photo_count:1,
       order:{id,order_number:id,buyer_username:buyer,buyer_name:buyer,ship_by_date:due&&due+'T21:00:00Z',sale_date:sold+'T20:00:00Z'}}));
     state.selectedLine=null;state.expandedBuyerKeys.add('client-a');applyOrderFilters();
   });
@@ -773,17 +885,17 @@ test('due filters match any pending item and retain every order for the same cus
 
 test('search and sale dates keep matching buyer bundles intact; finishing the matching item updates the filter',async t=>{
   const page=await open(t,database());await prepareDueGroups(page);
-  await page.locator('[data-order-due-filter="overdue"]').click();
+  await page.locator('#phone-queue-filter-options [data-order-due-filter="overdue"]').click();
   await page.locator('#order-search').fill('later bracelet');
   await page.locator('#order-created-date-filter').fill('2026-10-01');
   assert.deepEqual(await visibleIds(page),aLines);
   await expect(page.locator('#buyer-remaining-count')).toHaveText('1 customer remaining');
   await page.evaluate(()=>{applyOrderFilters();}); // Queue redraws preserve the selected due filter.
-  await expect(page.locator('[data-order-due-filter="overdue"]')).toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('#phone-queue-filter-options [data-order-due-filter="overdue"]')).toHaveAttribute('aria-pressed','true');
   await page.evaluate(()=>{state.orders.find(line=>line.id==='a-old').line_status='fulfilled';applyOrderFilters();});
   assert.deepEqual(await visibleIds(page),[]);
   await expect(page.locator('#buyer-remaining-count')).toHaveText('0 customers remaining');
-  await page.locator('[data-order-due-filter="all"]').click();
+  await page.locator('#phone-queue-filter-options [data-order-due-filter="all"]').click();
   assert.deepEqual(await visibleIds(page),[],'the purchase-date filter remains active when shipping urgency changes');
   await page.locator('#order-created-date-filter').fill('2026-10-02');
   assert.deepEqual(await visibleIds(page),aLines);
@@ -832,20 +944,20 @@ test('earliest pending purchase dates retain whole customer groups and move forw
   await expect(remaining).toHaveText('4 customers remaining');
   await page.evaluate(()=>{state.orders.find(line=>line.id==='a-old').line_status='pending';applyOrderFilters();});
   await date.fill('2026-10-01');
-  await page.locator('[data-order-due-filter="today"]').click();
+  await page.locator('#phone-queue-filter-options [data-order-due-filter="today"]').click();
   await expect(date).toHaveValue('2026-10-01');
   assert.deepEqual(await visibleIds(page),[...aLines,'b-today','b-later']);
   await page.evaluate(()=>{state.selectedLiveLot={id:'fixture-bag'};state.liveLotMatchedLineIds=new Set(['a-later']);applyOrderFilters();});
   assert.deepEqual(await visibleIds(page),aLines,'matching a later item must preserve the earliest date and the whole customer');
   await page.evaluate(()=>{state.selectedLiveLot=null;state.liveLotMatchedLineIds.clear();applyOrderFilters();});
-  await page.locator('[data-order-due-filter="all"]').click();
+  await page.locator('#phone-queue-filter-options [data-order-due-filter="all"]').click();
   await expect(date).toHaveValue('2026-10-01');
   await page.getByRole('button',{name:'Clear purchase date'}).click();
   await expect(date).toHaveValue('');
   assert.equal((await visibleIds(page)).length,12);
   await date.fill('2026-10-01');
   await date.fill('');
-  await expect(page.locator('[data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('#phone-queue-filter-options [data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
   assert.equal((await visibleIds(page)).length,12);
   await page.evaluate(()=>{
     state.orders.push(normalizeLine({id:'a-earlier',order_id:'a-earlier',item_title:'Earlier purchase',line_status:'pending',quantity:1,
@@ -884,14 +996,14 @@ test('purchase dates match the local sale day and preserve date-only imports acr
 
 test('fulfilled view clears pending due filters and label handoff opens its entire batch despite a previous filter',async t=>{
   const page=await open(t,database());await prepareDueGroups(page);
-  await page.locator('[data-order-due-filter="today"]').click();
+  await page.locator('#phone-queue-filter-options [data-order-due-filter="today"]').click();
   await page.getByLabel('Earliest pending purchase date').fill('2026-10-01');
   await page.evaluate(()=>{$('order-status-filter').value='fulfilled';applyOrderFilters();});
-  await expect(page.locator('[data-order-due-filter="today"]')).toBeDisabled();
+  await expect(page.locator('#phone-queue-filter-options [data-order-due-filter="today"]')).toBeDisabled();
   await expect(page.getByLabel('Earliest pending purchase date')).toBeDisabled();
   await expect(page.getByLabel('Earliest pending purchase date')).toHaveValue('');
   await expect(page.locator('#buyer-remaining-count')).toBeHidden();
-  await expect(page.locator('[data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('#phone-queue-filter-options [data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
   await page.evaluate(()=>{$('order-status-filter').value='pending';applyOrderFilters();});
   await page.getByLabel('Earliest pending purchase date').fill('2026-10-02');
   await page.evaluate(async()=>{
@@ -900,7 +1012,7 @@ test('fulfilled view clears pending due filters and label handoff opens its enti
   assert.deepEqual(await visibleIds(page),['b-today','b-later']);
   await expect(page.locator('#buyer-remaining-count')).toBeVisible();
   await expect(page.locator('#buyer-remaining-count')).toHaveText('1 customer remaining');
-  await expect(page.locator('[data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('#phone-queue-filter-options [data-order-due-filter="all"]')).toHaveAttribute('aria-pressed','true');
   await expect(page.getByLabel('Earliest pending purchase date')).toHaveValue('');
   assert.deepEqual(await page.evaluate(()=>[...state.workerNoInventoryLineIds]),['b-today','b-later']);
 });

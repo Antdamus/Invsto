@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261003-item-found" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261006-label-photos" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
   <script src="extension-updates.js?v=20261003" defer></script>
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
-  <link rel="stylesheet" href="pending-orders-mobile.css?v=20261006-phone-2" />
+  <link rel="stylesheet" href="pending-orders-mobile.css?v=20261006-label-photos" />
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
 </head>
 <body>
@@ -582,12 +582,14 @@
                 <span>PDF</span>
                 <div>
                   <h3>Shipping Label</h3>
-                  <p id="ebay-label-summary">Upload a label PDF or send a label from eBay.</p>
+                  <p id="ebay-label-summary">Upload a PDF, take a label photo, or send a label from eBay.</p>
                 </div>
               </div>
               <div id="ebay-label-details" class="ebay-label-details"></div>
               <div class="fulfill-actions">
-                <button type="button" class="secondary-btn" data-order-label-source="selected">Upload / view label PDFs</button>
+                <button type="button" class="secondary-btn" data-order-label-source="selected" data-order-label-picker="files">Upload label PDF / photo</button>
+                <button type="button" class="secondary-btn" data-order-label-source="selected" data-order-label-picker="camera">Take label photo</button>
+                <button type="button" class="secondary-btn" data-order-label-source="selected">View saved labels</button>
                 <button id="open-ebay-label-page" type="button" class="secondary-btn">Open eBay Label Page</button>
                 <button id="preview-ebay-label" type="button" class="secondary-btn hidden">Preview Label</button>
         <button id="print-ebay-label" type="button" class="secondary-btn hidden">Print shipping label</button>
@@ -660,6 +662,11 @@
       <div id="bundle-review-list" class="bundle-review-list"></div>
       <section class="no-inventory-label" aria-label="Shipping labels">
         <h3>Shipping labels</h3>
+        <div class="order-label-source-actions">
+          <button type="button" class="secondary-btn" data-order-label-source="bundle" data-order-label-picker="files">Upload label PDF / photo</button>
+          <button type="button" class="secondary-btn" data-order-label-source="bundle" data-order-label-picker="camera">Take label photo</button>
+          <button type="button" class="secondary-btn" data-order-label-source="bundle">View saved labels</button>
+        </div>
         <p id="bundle-shipping-label-status" class="fulfill-status" role="status"></p>
         <div id="bundle-shipping-labels"></div>
       </section>
@@ -704,7 +711,12 @@
         <div>
           <span class="eyebrow">Shipping Label</span>
           <h3>Shipping labels</h3>
-          <p id="worker-no-inventory-label-summary">Upload a label PDF or send a label from eBay.</p>
+          <p id="worker-no-inventory-label-summary">Upload a PDF, take a label photo, or send a label from eBay.</p>
+        </div>
+        <div class="order-label-source-actions">
+          <button type="button" class="secondary-btn" data-order-label-source="no-inventory" data-order-label-picker="files">Upload label PDF / photo</button>
+          <button type="button" class="secondary-btn" data-order-label-source="no-inventory" data-order-label-picker="camera">Take label photo</button>
+          <button type="button" class="secondary-btn" data-order-label-source="no-inventory">View saved labels</button>
         </div>
         <div id="worker-no-inventory-label-details" class="ebay-label-details"></div>
         <p id="no-inventory-shipping-label-status" class="fulfill-status" role="status"></p>
@@ -1097,11 +1109,16 @@
       <span class="eyebrow">Order documents</span>
       <h2 id="order-shipping-labels-title">Shipping labels</h2>
       <p id="order-label-context"></p>
-      <p>Add label PDFs from any shipping provider. We’ll try to read the tracking numbers. Review them, or scan or type them, before saving.</p>
-      <label class="secondary-btn folder-photo-picker">Choose label PDFs
-        <input id="order-label-files" type="file" accept="application/pdf,.pdf" multiple />
-      </label>
-      <p class="completion-photo-help">You can add several PDFs and choose which orders each covers. Saved labels appear during checkout and in Order History. Up to 20 PDFs per upload, 10 MB each.</p>
+      <p>Add a label from any shipping provider. Upload its PDF or photo, or take a picture. Review the tracking numbers, or scan or type them, before saving.</p>
+      <div class="order-label-source-actions">
+        <label class="secondary-btn folder-photo-picker">Choose label PDFs / photos
+          <input id="order-label-files" type="file" accept="application/pdf,.pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" multiple />
+        </label>
+        <label class="secondary-btn folder-photo-picker">Take label photo
+          <input id="order-label-camera" type="file" accept="image/*" capture="environment" />
+        </label>
+      </div>
+      <p class="completion-photo-help">Keep the entire label and barcode clear in the photo. Photos are saved as PDFs. Choose which orders each label covers; saved labels appear during checkout and in Order History. Up to 20 labels per upload, 10 MB each.</p>
       <div id="order-label-pending"></div>
       <p id="order-label-upload-status" class="fulfill-status" role="status" aria-live="polite"></p>
       <div class="modal-actions">
@@ -1189,10 +1206,10 @@
 <script src="order-live-updates.js?v=20261003-performance"></script>
 <script src="completion-photos.js?v=20261003-performance"></script>
 <script src="phone-camera.js?v=20261003-performance"></script>
-<script src="shipping-label-reader.js?v=20261003-label-pdfs"></script>
-<script src="order-shipping-labels.js?v=20261003-direct-print"></script>
+<script src="shipping-label-reader.js?v=20261006-label-photos"></script>
+<script src="order-shipping-labels.js?v=20261006-label-photos"></script>
 <script src="receipt-preview-jobs.js?v=20261003-receipt-speed"></script>
-  <script src="pending-orders.js?v=20261006-phone-1"></script>
+  <script src="pending-orders.js?v=20261006-label-photos"></script>
   <script src="pending-orders-mobile.js?v=20261006-phone-2"></script>
 </body>
 </html>
