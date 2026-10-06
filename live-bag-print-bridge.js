@@ -27,7 +27,7 @@
     const autoKey=(userId,eventId)=>prefix+userId+'.auto.'+eventId;
     const loadAuto=(userId,eventId)=>JSON.parse(localStorage.getItem(autoKey(userId,eventId))||'null');
     const saveAuto=(userId,eventId,state)=>localStorage.setItem(autoKey(userId,eventId),JSON.stringify(state));
-    const autoView=state=>state?{enabled:state.enabled,pending:state.pending.length,last:state.last,error:state.error,completed:Object.keys(state.done).filter(id=>state.done[id]==='sent')}:null;
+    const autoView=state=>state?{enabled:state.enabled,pending:state.pending.length+Object.values(state.seen).filter(value=>value==='waiting-for-time').length,last:state.last,error:state.error,completed:Object.keys(state.done).filter(id=>state.done[id]==='sent')}:null;
     async function automatic(userId,eventId,data,printer,enabled) {
       // Web Locks serialize multiple receiver tabs. The server also deduplicates
       // automatic sends across users/computers using the original attempt ID.
@@ -43,10 +43,15 @@
         }
         const active=!data.connection.broadcast_ended_at&&!data.connection.review_completed_at;
         for(const a of [...sortAuctions(rows)].reverse()){
-          const paid=eligible(a),known=Object.hasOwn(state.seen,a.id);
-          const recent=Date.parse(a.sold_at)>=state.since;
-          if(paid&&!state.seen[a.id]&&!state.done[a.id]&&!state.pending.some(p=>p.id===a.id)){
-            if(state.enabled&&active&&!a.closed_at&&(known||recent))state.pending.push({id:a.id,number:window.liveBagLabel.identity({lot_code:''},a).auctionNumber});
+          const paid=eligible(a),soldAt=Date.parse(a.sold_at);
+          const witnessedPayment=state.seen[a.id]===false,recent=soldAt>=state.since;
+          if(paid&&state.seen[a.id]!==true&&!state.done[a.id]&&!state.pending.some(p=>p.id===a.id)){
+            // Sold cards can arrive paid before Activity supplies the win time.
+            // Keep checking that sale; absence of a timestamp is not old history.
+            if(state.enabled&&active&&!a.closed_at&&!witnessedPayment&&!Number.isFinite(soldAt)){
+              state.seen[a.id]='waiting-for-time';continue;
+            }
+            if(state.enabled&&active&&!a.closed_at&&(witnessedPayment||recent))state.pending.push({id:a.id,number:window.liveBagLabel.identity({lot_code:''},a).auctionNumber});
             else state.done[a.id]='earlier';
           }
           state.seen[a.id]=paid;

@@ -163,6 +163,35 @@ test('automatic retries reuse the same job after a lost acknowledgement and igno
   await expect(page.locator('[data-bag-receipt]')).toContainText('Waiting for printer');
   assert.equal(await page.evaluate(()=>jobs.length),1);assert.equal(await page.evaluate(()=>jobs[0].requestId), '00000000-0000-4000-8000-000000000003');
 });
+test('a Paid card waits for its later auction time across reloads, then prints exactly once',async t=>{
+  const page=await open(t);
+  await page.evaluate(()=>{sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000088',listing_title:'#088 - Paid before Activity',sold_at:null,lot_id:null});});
+  await expect(page.locator('[data-bag-auto-status]')).toContainText('1 bag label waiting for auto print',{timeout:8000});
+  assert.equal(await page.evaluate(()=>jobs.length),0);
+  const seed=await page.evaluate(()=>({sales,jobs,lots}));await page.close();
+  const resumed=await open(t,{sharedContext:page.context(),seed});
+  await expect(resumed.locator('[data-bag-auto-status]')).toContainText('1 bag label waiting for auto print');
+  assert.equal(await resumed.evaluate(()=>jobs.length),0,'polling an unknown timestamp must not mistake it for a witnessed payment transition');
+  await resumed.evaluate(()=>{sales.at(-1).sold_at=new Date().toISOString();});
+  await expect.poll(()=>resumed.evaluate(()=>jobs.length),{timeout:8000}).toBe(1);
+  assert.equal(await resumed.evaluate(()=>jobs[0].requestId),'00000000-0000-4000-8000-000000000088');
+  await resumed.evaluate(()=>{jobs[0].status='submitted';});await expect(resumed.locator('[data-bag-receipt]')).toContainText('Sent to printer');
+  assert.equal(await resumed.evaluate(()=>jobs.length),1);
+});
+test('late timestamps for historical or paused paid cards never backfill automatic labels',async t=>{
+  const page=await open(t);
+  const add=async id=>page.evaluate(id=>{sales.push({...sales[1],id,listing_title:'#089 - Unknown time',sold_at:null,lot_id:null});},id);
+  await add('00000000-0000-4000-8000-000000000089');
+  await expect(page.locator('[data-bag-auto-status]')).toContainText('1 bag label waiting for auto print');
+  await page.evaluate(()=>{sales.at(-1).sold_at='2026-01-01T00:00:00Z';});
+  await expect(page.locator('[data-bag-auto-status]')).toBeHidden();assert.equal(await page.evaluate(()=>jobs.length),0);
+  await add('00000000-0000-4000-8000-000000000090');
+  await expect(page.locator('[data-bag-auto-status]')).toContainText('1 bag label waiting for auto print');
+  await page.getByRole('button',{name:'Pause automatic printing'}).click();
+  await page.evaluate(()=>{sales.at(-1).sold_at=new Date().toISOString();});
+  await page.getByRole('button',{name:'Resume automatic printing'}).click();
+  await expect(page.locator('[data-bag-auto-status]')).toBeHidden();assert.equal(await page.evaluate(()=>jobs.length),0);
+});
 test('auto pause, resume and completed shows do not dump old sales into the printer',async t=>{
   const page=await open(t);await page.getByRole('button',{name:'Pause automatic printing'}).click();
   await expect(page.locator('[data-bag-auto-state]')).toHaveText('Auto print paused');
