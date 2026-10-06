@@ -3572,6 +3572,7 @@ function setupListeners() {
   $("item-scan")?.addEventListener("input", scheduleItemSearch);
 
   document.addEventListener("keydown", (event) => {
+    if (document.querySelector("#live-auction-photos[open]")) return;
     if (!$("live-photo-modal")?.hidden) {
       if (event.key === "Escape" || event.key === "Enter") {
         event.preventDefault();

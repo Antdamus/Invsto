@@ -6,7 +6,7 @@ import {chromium,webkit} from '@playwright/test';
 import vm from 'node:vm';
 const root=new URL('../',import.meta.url);let server,browser,origin;
 before(async()=>{
- server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:ebay-live|live-sales|live-manual-items|live-bag-label|live-bag-print-bridge|live-show-drafts|live-listing-intake|live-capture-setup)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
+ server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:ebay-live|live-sales|live-manual-items|live-bag-label|live-bag-photos|live-auction-photos|live-bag-print-bridge|live-show-drafts|live-listing-intake|live-capture-setup)\.js/.test(tag)?tag:'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;
  browser=await(process.env.INVSTO_ITEM_BROWSER==='webkit'?webkit:chromium).launch();
 });
@@ -25,14 +25,14 @@ async function open(t,query='',resume=false,drafts=false){
  const context=await browser.newContext({viewport:{width:390,height:844}});t.after(()=>context.close());await context.route('**/*',r=>(r.request().url().startsWith(origin)||r.request().url().startsWith('blob:'+origin)||r.request().url().startsWith('data:image/'))?r.continue():r.abort());
  await context.addInitScript(({resume,drafts})=>{
   const user={id:'worker',email:'worker@example.invalid'},employee={id:'seller',user_id:'worker',display_name:'Test seller',active:true,role:'admin'};
-  window.lucide={createIcons(){}};window.calls=[];window.mockItems=[];window.mockManualItems=[];window.mockLots=[];window.failUpload=false;window.failManual=false;window.uploadedPhoto="";window.failDashboard=false;window.failClose=false;
+  window.lucide={createIcons(){}};window.calls=[];window.mockItems=[];window.mockManualItems=[];window.mockLots=[];window.mockBagPhotos=[];window.failBagPhotos=false;window.photoDelay=0;window.failUpload=false;window.failManual=false;window.uploadedPhoto="";window.failDashboard=false;window.failClose=false;
   window.showSession={id:'show',session_code:'SHOW',title:'Test show',status:'active',store_id:'store',primary_seller_employee_id:'seller',started_at:new Date().toISOString()};
   window.dashboard={connection:{event_id:'EVENT123',session_id:'show',capture_ready:true,source_seen_at:new Date().toISOString(),active_seller_id:'seller',fee_percent:null,fee_fixed:null,shipping_per_sale:null},attempts:[{id:'sale',event_id:'EVENT123',listing_id:'123456789012',listing_title:'#001 - Test watch',buyer:'testbuyer',amount:100,payment_state:'paid',seller_id:'seller',seller_name:'Test seller',created_at:new Date().toISOString(),units:0}],unmatched:[]};
   window.printStations={printLabel:async(xml,options)=>{window.calls.push({name:'print',xml,options});return {mode:'remote-queue',stationName:'Test printer'};}};
   const nextSeller={id:'next-seller',display_name:'Sydney Miller',active:true,role:'employee'};
-  window.supabase={auth:{getSession:async()=>({data:{session:{user}}})},storage:{from:()=>({createSignedUrl:async()=>({data:{signedUrl:window.uploadedPhoto||''}}),upload:async(path,blob)=>{calls.push({name:'upload',path,type:blob.type});if(failUpload)return {error:{message:'Photo upload interrupted'}};uploadedPhoto=await new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.readAsDataURL(blob);});return {data:{path}};}})},from(table){
-   let filters=[],limit=1000;const all=()=>table==='employees'?[employee]:table==='store_locations'?[{id:'store',name:'Showroom',active:true}]:table==='live_sale_sessions'?(window.showSessions||[window.showSession]):table==='ebay_live_connections'?(window.dashboardByShow?Object.values(window.dashboardByShow).map(d=>d.connection):[window.dashboard.connection]):table==='ebay_live_attempts'?window.dashboard.attempts:table==='live_sale_lots'?window.mockLots:table==='live_sale_lot_items'?window.mockItems:table==='live_sale_manual_lot_items'?window.mockManualItems:[];
-   const q={select(){return q},eq(k,v){filters.push(r=>r[k]===v);return q},in(){return q},is(){return q},order(){return q},limit(n){limit=n;return q},maybeSingle:async()=>({data:all().find(r=>filters.every(f=>f(r)))||null}),single:async()=>({data:all().find(r=>filters.every(f=>f(r)))||null}),then(fn){return Promise.resolve({data:all().filter(r=>filters.every(f=>f(r))).slice(0,limit)}).then(fn)}};return q;
+  window.supabase={auth:{getSession:async()=>({data:{session:{user}}})},storage:{from:()=>({createSignedUrl:async(path)=>{calls.push({name:'sign-photo',path});return {data:{signedUrl:window.photoUrls?.[path]||window.uploadedPhoto||''}};},upload:async(path,blob)=>{calls.push({name:'upload',path,type:blob.type});if(failUpload)return {error:{message:'Photo upload interrupted'}};uploadedPhoto=await new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.readAsDataURL(blob);});return {data:{path}};}})},from(table){
+   let filters=[],limit=1000,offset=0;const all=()=>table==='employees'?[employee]:table==='store_locations'?[{id:'store',name:'Showroom',active:true}]:table==='live_sale_sessions'?(window.showSessions||[window.showSession]):table==='ebay_live_connections'?(window.dashboardByShow?Object.values(window.dashboardByShow).map(d=>d.connection):[window.dashboard.connection]):table==='ebay_live_attempts'?window.dashboard.attempts:table==='live_sale_lots'?window.mockLots:table==='live_sale_lot_items'?window.mockItems:table==='live_sale_manual_lot_items'?window.mockManualItems:table==='live_sale_bag_photos'?window.mockBagPhotos:[];
+   const q={select(){return q},eq(k,v){filters.push(r=>r[k]===v);return q},in(k,values){filters.push(r=>values.includes(r[k]));return q},range(start,end){offset=start;limit=end-start+1;return q},is(){return q},order(){return q},limit(n){limit=n;return q},maybeSingle:async()=>({data:all().find(r=>filters.every(f=>f(r)))||null}),single:async()=>({data:all().find(r=>filters.every(f=>f(r)))||null}),then(fn){const result=table==='live_sale_bag_photos'&&window.failBagPhotos?{error:{message:'Photo read interrupted'}}:{data:structuredClone(all().filter(r=>filters.every(f=>f(r))).slice(offset,offset+limit))};if(table==='live_sale_bag_photos')calls.push({name:'read-photos',offset,limit});return new Promise(resolve=>setTimeout(()=>resolve(result),table==='live_sale_bag_photos'?window.photoDelay:0)).then(fn)}};return q;
   },rpc:async(name,args)=>{window.calls.push({name,args});if(name==='get_live_sale_seller_directory')return {data:[employee,nextSeller]};if(name==='get_ebay_live_dashboard')return window.failDashboard?{error:{message:'Network interrupted'}}:{data:structuredClone(window.dashboardByShow?.[args._session_id]||window.dashboard)};
    if(name==='save_live_sale_manual_item'){
     if(failManual)return {error:{message:'Manual item save interrupted'}};
@@ -61,6 +61,73 @@ async function open(t,query='',resume=false,drafts=false){
  },{resume,drafts});
  const page=await context.newPage();page.errors=[];page.on('pageerror',e=>page.errors.push(e.message));await page.goto(origin+'/live-sales.html'+query);if(drafts){await page.waitForFunction(()=>document.getElementById('show-drafts-open')?.textContent.includes('(26)'));return page;}await page.locator('#ebay-live-connected:visible').waitFor();if(resume)await page.waitForFunction(()=>!document.getElementById('item-scan').disabled);else await page.locator('[data-action="scan"]').waitFor();return page;
 }
+async function addBagPhotos(page){
+ await page.evaluate(()=>{
+  const sample=color=>'data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="360" height="640"><rect width="360" height="640" fill="${color}"/><path d="M80 150 Q180 420 280 150" fill="none" stroke="#e4be6e" stroke-width="16"/><text x="180" y="540" text-anchor="middle" fill="#ddd" font-size="22">Sample bag photo</text></svg>`);
+  photoUrls={'one.jpg':sample('#232b23'),'two.jpg':sample('#34312a'),'three.jpg':sample('#182933')};
+  dashboard.attempts[0].lot_id='photo-lot';dashboard.attempts[0].listing_title='#020 - Gold chain';
+  dashboard.attempts.push({...dashboard.attempts[0],id:'other',lot_id:'other-lot',listing_title:'#019 - Bracelet',buyer:'otherbuyer'});
+  mockBagPhotos=[{id:'photo1',lot_id:'photo-lot',photo_path:'one.jpg',captured_at:'2026-10-06T20:45:00Z'},{id:'photo2',lot_id:'photo-lot',photo_path:'two.jpg',captured_at:'2026-10-06T20:46:00Z'}];
+ });
+ await page.locator('#ebay-live-refresh').click();await page.waitForFunction(()=>document.querySelector('[data-auction-photos="sale"] [data-photo-count]')?.textContent==='2');
+}
+test('auction photos open from the queue, paginate the gallery, and never claim or print a bag',async t=>{
+ const p=await open(t);await addBagPhotos(p);
+ await p.locator('#ebay-auction-search').fill('testbuyer');assert.equal(await p.locator('#ebay-live-queue article').count(),1);
+ await p.locator('[data-action=photos]').click();await p.getByRole('button',{name:'View live photo 2',exact:true}).click();
+ assert.match(await p.locator('#auction-photos-caption').innerText(),/2 of 2/);
+ await p.getByRole('button',{name:'Previous photo',exact:true}).click();assert.match(await p.locator('#auction-photos-caption').innerText(),/1 of 2/);
+ await p.getByRole('button',{name:'Next photo',exact:true}).click();assert.match(await p.locator('#auction-photos-caption').innerText(),/2 of 2/);
+ await p.keyboard.press('Escape');assert.equal(await p.locator('#auction-photos-gallery').isVisible(),true);
+ await p.getByRole('button',{name:'Close bag photos',exact:true}).click();
+ await p.locator('[data-action=photos]').click();await p.getByRole('button',{name:'View live photo 1',exact:true}).waitFor();
+ assert.equal(await p.evaluate(()=>calls.some(c=>['claim_ebay_live_bag','prepare_ebay_live_bag_label','close_ebay_live_bag','print'].includes(c.name))),false);
+ assert.deepEqual(p.errors,[]);
+});
+test('auction photos update across devices without flicker, recover from errors and fit phone and desktop',async t=>{
+ const p=await open(t);await addBagPhotos(p);await p.locator('[data-auction-photos=sale]').click();await p.getByRole('button',{name:'View live photo 2',exact:true}).waitFor();
+ await p.evaluate(()=>{document.querySelector('#auction-photos-gallery img').dataset.retained='yes';});
+ await p.getByRole('button',{name:'Refresh photos',exact:true}).click();await p.waitForTimeout(150);
+ assert.equal(await p.locator('#auction-photos-gallery img').first().getAttribute('data-retained'),'yes');
+ await p.evaluate(()=>mockBagPhotos.push({id:'photo3',lot_id:'photo-lot',photo_path:'three.jpg',captured_at:'2026-10-06T20:47:00Z'}));
+ await p.getByRole('button',{name:'View live photo 3',exact:true}).waitFor({timeout:8000});
+ for(const width of [320,390,1280]){
+  await p.setViewportSize({width,height:850});assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  const box=await p.locator('#live-auction-photos').boundingBox();assert.ok(box.x>=0&&box.x+box.width<=width);
+ }
+ await mkdir(new URL('../test-results',import.meta.url),{recursive:true});
+ await p.locator('#live-auction-photos').screenshot({path:new URL('../test-results/live-sales-photos-desktop.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+ await p.setViewportSize({width:390,height:844});await p.screenshot({path:new URL('../test-results/live-sales-photos-phone.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+ await p.evaluate(()=>failBagPhotos=true);await p.getByRole('button',{name:'Refresh photos',exact:true}).click();await p.getByRole('button',{name:'Try again',exact:true}).waitFor();
+ await p.evaluate(()=>failBagPhotos=false);await p.getByRole('button',{name:'Try again',exact:true}).click();await p.getByRole('button',{name:'View live photo 3',exact:true}).waitFor();
+ await p.getByRole('button',{name:'Close bag photos',exact:true}).click();await p.locator('#ebay-auction-search').fill('020');
+ const checkbox=await p.locator('[data-seller-select]').boundingBox();assert.ok(checkbox.width<=24&&checkbox.height<=24);
+ await p.locator('#ebay-queue-area').screenshot({path:new URL('../test-results/live-sales-photo-access.png',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')});
+ await p.locator('#ebay-auction-search').fill('does-not-exist');assert.match(await p.locator('#ebay-live-queue').innerText(),/No matching auctions/);
+ assert.deepEqual(p.errors,[]);
+});
+test('auction photos isolate bags during delayed requests and show useful empty states',async t=>{
+ const p=await open(t);await addBagPhotos(p);await p.evaluate(()=>photoDelay=600);await p.locator('[data-auction-photos=sale]').click();
+ await p.getByRole('button',{name:'Close bag photos',exact:true}).click();await p.locator('[data-auction-photos=other]').click();
+ await p.getByText(/No live photos saved yet/).waitFor();assert.equal(await p.locator('#auction-photos-gallery img').count(),0);assert.match(await p.locator('#auction-photos-buyer').innerText(),/otherbuyer/);
+ await p.getByRole('button',{name:'Close bag photos',exact:true}).click();await p.evaluate(()=>{dashboard.attempts[1].lot_id=null;photoDelay=0;});await p.locator('#ebay-live-refresh').click();await p.locator('[data-auction-photos=other]').click();
+ await p.getByText(/Once payment is confirmed/).waitFor();assert.equal(await p.locator('#auction-photos-gallery img').count(),0);assert.deepEqual(p.errors,[]);
+});
+test('auction photo counts page through results and reuse one summary across queue refreshes',async t=>{
+ const p=await open(t);
+ await p.evaluate(()=>{
+  dashboard.attempts[0].lot_id='many-photos';
+  mockBagPhotos=Array.from({length:1001},(_,i)=>({id:'photo-'+i,lot_id:'many-photos'}));
+ });
+ await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.querySelector('[data-auction-photos="sale"] [data-photo-count]')?.textContent==='1001');
+ const reads=await p.evaluate(()=>calls.filter(c=>c.name==='read-photos').length);
+ assert.equal(reads,2);
+ await p.evaluate(()=>{for(let i=0;i<10;i++)liveAuctionPhotos.sync(dashboard.attempts,'show');});
+ assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='read-photos').length),reads);
+ await p.evaluate(()=>{photoDelay=600;liveAuctionPhotos.open(dashboard.attempts[0]);liveAuctionPhotos.sync([],'different-show');});
+ assert.equal(await p.locator('#live-auction-photos').isVisible(),false);assert.deepEqual(p.errors,[]);
+});
+
 test('linked show waits for paid selection and claims a bag through existing scan UI',async t=>{const p=await open(t);assert.equal(await p.locator('#item-scan').isDisabled(),true);assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='create_live_sale_lot')),false);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);assert.equal(await p.locator('#auction-number').getAttribute('readonly'),'');assert.match(await p.locator('#ebay-live-current').innerText(),/testbuyer.*\$100/);assert.deepEqual(p.errors,[]);});
 test('late failure disables active phone scanner and removes the sale from completed totals',async t=>{const p=await open(t);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);await p.evaluate(()=>{dashboard.attempts[0].payment_state='failed';});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('item-scan').disabled);await p.locator('#ebay-back-to-queue').click();await p.locator('#ebay-live-filter').selectOption('attention');assert.match(await p.locator('#ebay-live-queue').innerText(),/STOP.*check this bag/);assert.equal(await p.locator('[data-action=scan]').count(),0);await p.locator('#ebay-show-totals > summary').click();assert.match(await p.locator('#ebay-live-totals').innerText(),/0 \/ \$0.00/);});
 test('stale capture and network failure block new scans',async t=>{const p=await open(t);await p.evaluate(()=>{dashboard.connection.source_seen_at=new Date(Date.now()-60000).toISOString();});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.querySelector('[data-action=scan]').disabled);assert.match(await p.locator('#ebay-live-health').innerText(),/Capture paused/);await p.evaluate(()=>{dashboard.connection.source_seen_at=new Date().toISOString();failDashboard=true;});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-live-message').textContent.includes('Network interrupted'));assert.equal(await p.locator('#item-scan').isDisabled(),true);});
