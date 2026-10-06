@@ -20,7 +20,7 @@ if (new URL(location.href).searchParams.get('capture') === '1') {
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
     if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_BAG_LABEL_BRIDGE'){
       const id=crypto.randomUUID();
-      const timer=setTimeout(()=>{bagPending.delete(id);reply({ok:false,error:'The receiver did not confirm the request. Retry to check the same label send.'});},message.command?.action==='configure'?180000:30000);
+      const timer=setTimeout(()=>{bagPending.delete(id);reply({ok:false,error:message.command?.action==='photo'?'The receiver did not confirm the photo. Click the camera to retry the same photo.':'The receiver did not confirm the request. Retry to check the same label send.'});},message.command?.action==='configure'?180000:30000);
       bagPending.set(id,result=>{clearTimeout(timer);reply(result);});
       window.postMessage({type:'INVSTO_BAG_PRINT_REQUEST',id,command:message.command},location.origin);return true;
     }

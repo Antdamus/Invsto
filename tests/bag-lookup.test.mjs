@@ -12,7 +12,7 @@ before(async()=>{
     if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();
     try {
       let content=await readFile(new URL(name,root));
-      if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:bag-lookup|live-bag-label|barcode-scanner|bag-order-links)\.js/.test(tag)?tag:'');
+      if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,tag=>/src="(?:bag-lookup|live-bag-label|live-bag-photos|barcode-scanner|bag-order-links)\.js/.test(tag)?tag:'');
       res.setHeader('Content-Type',name.endsWith('.wasm')?'application/wasm':name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);
     }catch{res.writeHead(404).end();}
   });
@@ -25,7 +25,7 @@ async function open(t,{query='?bag=LIVE-AAAAAAAAAA',signedIn=true}={}){
   const context=await browser.newContext({viewport:{width:390,height:844}});t.after(()=>context.close());
   await context.route('**/*',r=>[origin,'blob:'+origin,'data:image/'].some(prefix=>r.request().url().startsWith(prefix))?r.continue():r.abort());
   await context.addInitScript(({signedIn})=>{
-    window.signedIn=signedIn;window.calls=[];window.failItems=false;window.delayA=0;window.failMatches=false;window.failSave=false;window.savedLinks={};window.matchDelay=0;window.orderMatches=[];
+    window.signedIn=signedIn;window.calls=[];window.failItems=false;window.delayA=0;window.failMatches=false;window.failSave=false;window.savedLinks={};window.matchDelay=0;window.orderMatches=[];window.livePhotos=[];window.failPhotos=false;
     const stamp='2026-09-28T17:00:00Z';
     window.lots=[{id:'lot-a',lot_code:'LIVE-AAAAAAAAAA',auction_number:'EB-010-A',status:'reserved',closed_at:stamp,created_at:stamp,owner_employee_id:'seller',owner_snapshot:{display_name:'Sydney Miller'},session:{id:'show-a',title:'Monday show',session_code:'LS-A',status:'ended',started_at:stamp}},{id:'lot-b',lot_code:'LIVE-BBBBBBBBBB',auction_number:'EB-010-B',status:'open',owner_employee_id:'seller',session:{id:'show-b',title:'Tuesday show',session_code:'LS-B',status:'active',started_at:stamp}}];
     window.auctions=[{id:'auction-a',lot_id:'lot-a',listing_title:'#010 - Cuban Chain',buyer:'long-winner-name-123456789',amount:100,payment_state:'paid',seller_id:'seller',closed_at:stamp,stream_offset_seconds:65,time_estimated:true,win_time_label:'1:01 PM',listing_id:'123'},{id:'auction-b',lot_id:'lot-b',listing_title:'#010 - Watch',buyer:'different-winner',amount:200,payment_state:'paid',seller_id:'seller'}];
@@ -33,11 +33,11 @@ async function open(t,{query='?bag=LIVE-AAAAAAAAAA',signedIn=true}={}){
     window.manual=[{id:'manual-a',lot_id:'lot-a',status:'packed',quantity:1,live_unit_minimum:50,item_category:'Pendant',item_description:'Hand-entered pendant',photo_path:'live-manual/fixture.jpg',show_elapsed_seconds:65,created_at:stamp},{id:'removed',lot_id:'lot-a',status:'released',quantity:4,live_unit_minimum:1000,item_category:'Removed ring'}];
     window.supabase={auth:{getSession:async()=>({data:{session:window.signedIn?{user:{id:'worker'}}:null}}),onAuthStateChange(fn){window.authChange=fn;}},storage:{from:()=>({createSignedUrl:async(path)=>{calls.push({signed:path});return {data:{signedUrl:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='}};}})},from(table){
       calls.push({table});let filters=[];
-      const all=()=>table==='employees'?[{id:'employee',user_id:'worker',active:true}]:table==='live_sale_lots'?lots:table==='ebay_live_attempts'?auctions:table==='live_sale_lot_items'?items:table==='live_sale_manual_lot_items'?manual:[];
+      const all=()=>table==='employees'?[{id:'employee',user_id:'worker',active:true}]:table==='live_sale_lots'?lots:table==='ebay_live_attempts'?auctions:table==='live_sale_lot_items'?items:table==='live_sale_manual_lot_items'?manual:table==='live_sale_bag_photos'?livePhotos:[];
       const result=async single=>{
         const data=structuredClone(all().filter(row=>filters.every(([k,v])=>row[k]===v)));
         if(table==='live_sale_lots'&&data[0]?.id==='lot-a'&&window.delayA)await new Promise(r=>setTimeout(r,window.delayA));
-        return table==='live_sale_lot_items'&&window.failItems?{error:{message:'Connection interrupted'}}:{data:single?data[0]||null:data};
+        return (table==='live_sale_lot_items'&&window.failItems)||(table==='live_sale_bag_photos'&&window.failPhotos)?{error:{message:'Connection interrupted'}}:{data:single?data[0]||null:data};
       };
       const q={select(){return q},eq(k,v){filters.push([k,v]);return q},order(){return q},maybeSingle:()=>result(true),then:fn=>result(false).then(fn)};return q;
     },rpc:async(name,args)=>{
@@ -88,6 +88,19 @@ test('staff scan loads full winner, seller, manual photos and signed negative re
   assert.equal(await p.evaluate(()=>calls.some(c=>c.rpc&&!['get_live_sale_seller_directory','get_live_bag_order_matches'].includes(c.rpc))),false);
 });
 
+test('livestream photos open from the exact scanned bag, survive item-free bags, and recover from storage errors',async t=>{
+  const p=await open(t);
+  await p.evaluate(()=>{items=[];manual=[];livePhotos=[{id:'photo-a',lot_id:'lot-a',photo_path:'live-bags/lot-a/photo.jpg',captured_at:'2026-10-06T20:00:00Z',width:720,height:1280}];});
+  await p.locator('#bag-refresh').click();await p.getByRole('button',{name:'View live photo 1',exact:true}).click();
+  assert.equal(await p.locator('#bag-photo-dialog').isVisible(),true);assert.match(await p.locator('#bag-photo-title').innerText(),/Live photo/);await p.locator('#bag-photo-close').click();
+  assert.equal(await p.evaluate(()=>calls.some(c=>c.signed==='live-bags/lot-a/photo.jpg')),true);
+  await p.locator('#bag-code').fill('LIVE-BBBBBBBBBB');await p.locator('#bag-find').click();await p.waitForFunction(()=>document.querySelector('.bag-winner')?.textContent.includes('different-winner'));
+  assert.equal(await p.locator('.live-bag-photo-grid').count(),0,'the previous bag photo is cleared on a new scan');
+  await p.evaluate(()=>{failPhotos=true;});await p.locator('#bag-code').fill('LIVE-AAAAAAAAAA');await p.locator('#bag-find').click();
+  await p.getByRole('button',{name:'Try again',exact:true}).waitFor();assert.match(await p.locator('.bag-winner').innerText(),/long-winner/);
+  await p.evaluate(()=>{failPhotos=false;});await p.getByRole('button',{name:'Try again',exact:true}).click();
+  await p.getByRole('button',{name:'View live photo 1',exact:true}).waitFor();
+});
 test('scan resolves exact bag across repeated auctions and old auction-only QR is rejected',async t=>{
   const p=await open(t);await p.locator('#bag-code').fill('010');await p.locator('#bag-find').click();
   await p.waitForFunction(()=>document.getElementById('bag-result').hidden);assert.match(await p.locator('#bag-status').innerText(),/other QR/);

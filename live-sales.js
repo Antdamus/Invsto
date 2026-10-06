@@ -546,7 +546,11 @@ function renderSummary() {
   ), 0));
 }
 
+window.addEventListener('live-bag-photo-saved',event=>{
+  if(event.detail?.lotId===state.currentLot?.id)window.liveBagPhotos?.load($("live-bag-photos"),state.currentLot.id,openLivePhotoModal,{force:true});
+});
 function renderCurrentLot() {
+  window.liveBagPhotos?.load($("live-bag-photos"),state.currentLot?.id,openLivePhotoModal);
   const card = $("current-lot-card");
   const pill = $("lot-status-pill");
   if (!card || !pill) return;
@@ -1839,6 +1843,8 @@ function renderBagHistoryDetail() {
     ${lot.notes ? `<p class="subtle-text">${escapeHtml(lot.notes)}</p>` : ""}
   `;
   detail.appendChild(header);
+  const livePhotos=document.createElement("section");livePhotos.hidden=true;detail.append(livePhotos);
+  window.liveBagPhotos?.load(livePhotos,lot.id,openLivePhotoModal);
   header.querySelector("[data-print-live-label]")?.addEventListener("click", async (event) => {
     const button = event.currentTarget;
     button.disabled = true;

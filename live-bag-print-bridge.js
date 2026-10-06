@@ -120,9 +120,26 @@
         }
         return {sales,printer,automatic:auto,printStatusAvailable,show:data.connection.event_id};
       }
-      if(command.action!=='print' || !uuid(command.requestId) || !uuid(command.attemptId))throw Error('Invalid bag print request.');
+      if(!['print','photo'].includes(command.action) || !uuid(command.requestId) || !uuid(command.attemptId))throw Error('Invalid bag request.');
       const sale=data.attempts.find(a=>a.id===command.attemptId);
       if(!eligible(sale))throw Error('This sale is not cleared for a bag label. Check its payment in Live Sales.');
+      if(command.action==='photo'){
+        const image=command.image;
+        if(!image||typeof image.dataUrl!=='string'||image.dataUrl.length>4000000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(image.dataUrl)||!Number.isFinite(Date.parse(image.capturedAt)))throw Error('The live photo is invalid. Take another photo.');
+        const bytes=Uint8Array.from(atob(image.dataUrl.split(',')[1]),c=>c.charCodeAt(0));
+        if(bytes.length>3000000||bytes[0]!==255||bytes[1]!==216)throw Error('The live photo is invalid.');
+        const blob=new Blob([bytes],{type:'image/jpeg'}),decoded=await createImageBitmap(blob);
+        const valid=decoded.width===image.width&&decoded.height===image.height&&image.width>=160&&image.height>=160&&image.width<=1600&&image.height<=1600;decoded.close();
+        if(!valid)throw Error('The live photo dimensions are invalid.');
+        const lot=one(await rpc('prepare_ebay_live_bag_label',{_attempt_id:sale.id}));
+        if(!lot?.id||!lot.lot_code)throw Error('The bag could not be prepared for its photo.');
+        const path=`live-bags/${lot.id}/${userId}/${command.requestId}.jpg`;
+        const {error}=await window.supabase.storage.from('photos').upload(path,blob,{contentType:'image/jpeg',upsert:false});
+        if(error&&String(error.statusCode||error.status)!=='409'&&error.error!=='Duplicate')throw error;
+        const photo=one(await rpc('attach_ebay_live_bag_photo',{_attempt_id:sale.id,_photo_id:command.requestId,_photo_path:path,_width:image.width,_height:image.height,_captured_at:image.capturedAt}));
+        window.dispatchEvent(new CustomEvent('live-bag-photo-saved',{detail:{lotId:lot.id}}));
+        return {photoId:photo.id,lotId:lot.id,lotCode:lot.lot_code};
+      }
       // Persist the exact sale and printer before sending. A missing acknowledgement
       // retries the same server request, never a newly selected sale or printer.
       const key=prefix+userId+'.request.'+command.requestId;
@@ -147,7 +164,7 @@
       if(event.source!==window || event.origin!==location.origin || event.data?.type!=='INVSTO_BAG_PRINT_REQUEST')return;
       const {id,command}=event.data;
       if(!uuid(id))return;
-      const key=command?.action==='print'?`${command.event_id}:${command.attemptId}:${command.requestId}`:null;
+      const key=['print','photo'].includes(command?.action)?`${command.action}:${command.event_id}:${command.attemptId}:${command.requestId}`:null;
       const operation=key&&requests.has(key)?requests.get(key):run(command);
       if(key){requests.set(key,operation);operation.finally(()=>requests.delete(key)).catch(()=>{});}
       operation.then(result=>window.postMessage({type:'INVSTO_BAG_PRINT_RESPONSE',id,ok:true,...result},location.origin),

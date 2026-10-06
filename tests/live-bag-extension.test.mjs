@@ -20,7 +20,7 @@ async function open(t,{configured=true,sharedContext,seed}={}){
   const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
   await page.goto(origin+'/ebaylive/host/events/EVENT123?capture=1');
   await page.evaluate(({configured,seed})=>{
-    window.calls=[];window.jobs=[];window.ended=false;window.failAfterQueue=false;window.delayedPrint=false;window.runtimeListeners=[];
+    window.calls=[];window.jobs=[];window.ended=false;window.failAfterQueue=false;window.delayedPrint=false;window.runtimeListeners=[];window.photoFiles={};window.photos=[];window.captureCount=0;
     window.sales=[
       {id:'00000000-0000-4000-8000-000000000001',listing_title:'#004 - Gold chain',buyer:'earlier-winner',payment_state:'paid',sold_at:'2026-10-06T15:01:00Z',event_id:'EVENT123'},
       {id:'00000000-0000-4000-8000-000000000002',listing_title:'#012 - Silver bracelet',buyer:'current-winner',payment_state:'paid',sold_at:'2026-10-06T15:03:00Z',event_id:'EVENT123'},
@@ -28,11 +28,21 @@ async function open(t,{configured=true,sharedContext,seed}={}){
       {id:'00000000-0000-4000-8000-000000000004',listing_title:'#014 - Watch',buyer:'held-winner',payment_state:'paid',payment_hold:true,sold_at:'2026-10-06T15:05:00Z',event_id:'EVENT123'}];
     window.lots=[];window.stations=[{id:'station-a',name:'Show computer',printer_name:'DYMO LabelWriter 450 Twin Turbo',paired:true,online:true,printer_connected:true,roll_selection_ready:true,default_roll:'Left'}];
     if(configured)localStorage.setItem('invsto.print.destination.v1','station-a');
-    window.supabase={auth:{getSession:async()=>({data:{session:{user:{id:'staff-a'}}}})},from(table){let selected;
+    window.supabase={auth:{getSession:async()=>({data:{session:{user:{id:'staff-a'}}}})},storage:{from:()=>({upload:async(path,blob,options)=>{
+      calls.push({name:'upload-bag-photo',path,size:blob.size,options});
+      if(photoFiles[path])return {error:{statusCode:'409'}};photoFiles[path]=await blob.text();return {data:{path}};
+    }})},from(table){let selected;
       const q={select(){return q},eq(key,value){selected=value;return q},maybeSingle:async()=>({data:table==='ebay_live_connections'?{event_id:selected,session_id:'session-'+selected}:null})};return q;
     },rpc:async(name,args)=>{
       calls.push({name,args});
       if(name==='list_print_stations')return {data:stations};
+      if(name==='attach_ebay_live_bag_photo'){
+        const sale=sales.find(s=>s.id===args._attempt_id);if(sale?.payment_state!=='paid')return {error:{message:'Payment is not confirmed'}};
+        let photo=photos.find(p=>p.id===args._photo_id);if(!photo){photo={id:args._photo_id,...args};photos.push(photo);}
+        if(window.delayedPhoto)await new Promise(resolve=>window.finishPhoto=resolve);
+        if(window.failPhotoAck){window.failPhotoAck=false;return {error:{message:'Photo confirmation lost'}};}
+        return {data:photo};
+      }
       if(name==='get_ebay_live_dashboard')return {data:{server_time:new Date().toISOString(),connection:{event_id:args._session_id.replace('session-',''),broadcast_ended_at:ended?'2026-10-06':null},attempts:sales.filter(s=>args._session_id==='session-'+s.event_id)}};
       if(name==='get_ebay_live_bag_print_status'){
         if(window.receiptsUnavailable)return {error:{message:'Status temporarily unavailable'}};
@@ -57,6 +67,11 @@ async function open(t,{configured=true,sharedContext,seed}={}){
     }};
     window.chrome={runtime:{id:'fixture',onMessage:{addListener:fn=>runtimeListeners.push(fn)},sendMessage:async message=>{
       if(message.type!=='INVSTO_BAG_LABEL_COMMAND')return {ok:true,events:[]};
+      if(message.command.action==='capture'){
+        captureCount++;if(window.failFrame)return {ok:false,error:'Video is not playing'};
+        const canvas=document.createElement('canvas');canvas.width=360;canvas.height=640;const ctx=canvas.getContext('2d');ctx.fillStyle=window.frameColor||'#bf9558';ctx.fillRect(0,0,360,640);
+        return {ok:true,image:{dataUrl:canvas.toDataURL('image/jpeg',.9),width:360,height:640,capturedAt:new Date().toISOString()}};
+      }
       return new Promise(resolve=>runtimeListeners.forEach(fn=>fn({type:'INVSTO_BAG_LABEL_BRIDGE',command:message.command},{id:'fixture'},resolve)));
     }}};
     if(seed){sales=seed.sales;jobs=seed.jobs;lots=seed.lots;}
@@ -250,6 +265,33 @@ test('missing receipts cannot claim a bag was sent and do not stop automatic pri
   const result=await page.evaluate(()=>chrome.runtime.sendMessage({type:'INVSTO_BAG_LABEL_COMMAND',command:{action:'status',event_id:'EVENT123'}}));
   assert.equal(result.automatic.last.status,'submitted','older installed panels also receive the current automatic receipt');
   assert.equal(await page.evaluate(()=>jobs.length),1);
+});
+test('one camera click saves only the selected paid bag and retries the original photo after a lost confirmation',async t=>{
+  const page=await open(t),camera=page.locator('[data-bag-camera]');
+  await page.getByRole('combobox',{name:'Choose a bag to print'}).selectOption('00000000-0000-4000-8000-000000000001');
+  await page.evaluate(()=>{window.failPhotoAck=true;});await camera.click();
+  await expect(page.locator('[data-bag-status]')).toContainText('Photo confirmation lost');
+  await expect(camera).toHaveAttribute('aria-label','Retry saving photo to bag #004');
+  await page.evaluate(()=>{window.frameColor='#00ff00';sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000099',listing_title:'#099 - Newer bag',sold_at:'2026-10-06T18:00:00Z'});});
+  await camera.click();await expect(page.locator('[data-bag-status]')).toContainText('Photo saved to #004');
+  const saved=await page.evaluate(()=>({photos,captureCount,uploads:calls.filter(c=>c.name==='upload-bag-photo'),jobs}));
+  assert.equal(saved.captureCount,1);assert.equal(saved.photos.length,1);assert.equal(saved.photos[0]._attempt_id,'00000000-0000-4000-8000-000000000001');
+  assert.equal(saved.uploads[0].path,saved.uploads[1].path);assert.equal(saved.jobs.length,0,'photos neither print nor add inventory');
+  await camera.click();await expect.poll(()=>page.evaluate(()=>photos.length)).toBe(2);
+  assert.equal(await page.evaluate(()=>captureCount),2,'a deliberate second photo gets a new capture');
+  await page.locator('#invsto-capture-helper').screenshot({path:'test-results/live-bag-camera.png'});
+});
+test('the selected bag is frozen during a photo save, while failed capture and changed payment cannot attach a photo',async t=>{
+  const page=await open(t);await page.evaluate(()=>{window.failFrame=true;});await page.locator('[data-bag-camera]').click();
+  await expect(page.locator('[data-bag-status]')).toContainText('Video is not playing');assert.equal(await page.evaluate(()=>photos.length),0);
+  await page.evaluate(()=>{window.failFrame=false;window.delayedPhoto=true;});await page.locator('[data-bag-camera]').click();
+  await expect.poll(()=>page.evaluate(()=>photos.length)).toBe(1);
+  await page.evaluate(()=>{sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000099',listing_title:'#099 - Newer bag',sold_at:'2026-10-06T18:00:00Z'});});
+  await expect(page.locator('.bag-number')).toHaveText('#012');await expect(page.locator('[data-bag-choice]')).toBeDisabled();
+  await page.evaluate(()=>{window.delayedPhoto=false;finishPhoto();});await expect(page.locator('[data-bag-status]')).toContainText('Photo saved to #012');
+  await expect(page.locator('.bag-number')).toHaveText('#099',{timeout:8000});
+  await page.evaluate(()=>{sales.at(-1).payment_state='failed';});await page.locator('[data-bag-camera]').click();
+  await expect(page.locator('[data-bag-status]')).toContainText('not cleared');assert.equal(await page.evaluate(()=>photos.length),1);
 });
 test('worker binds bag requests to their eBay event and does not automatically duplicate a disconnected print',async()=>{
   const source=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');let handler,sent=[],focused=[],fail=false;

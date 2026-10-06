@@ -2,6 +2,7 @@
 (() => {
   const eventId=location.pathname.split('/')[4];
   const key='invsto-bag-label-request:'+eventId;
+  const photoKey='invsto-bag-photo-request:'+eventId;
   function mount(box) {
     const style=document.createElement('style');
     style.textContent=`#invsto-capture-helper{position:fixed;bottom:12px;left:12px;z-index:2147483646;background:#18251f;color:#f8f6ee;border:1px solid #526454;border-radius:16px;padding:12px;width:340px;max-width:calc(100vw - 48px);font:13px/1.4 system-ui;box-shadow:0 8px 30px #0004}#invsto-capture-helper *{box-sizing:border-box}#invsto-capture-helper .bag-bar{display:flex;align-items:center;gap:12px}#invsto-capture-helper .bag-identity{flex:1;min-width:0}#invsto-capture-helper .bag-identity small{display:block;text-transform:uppercase;letter-spacing:.12em;font-size:9px;color:#b6c1b7}#invsto-capture-helper .bag-number{display:block;font-size:24px;line-height:1.2;font-weight:750}#invsto-capture-helper .bag-buyer{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#d7ded7}#invsto-capture-helper button,#invsto-capture-helper select{font:inherit;border:1px solid #546356;border-radius:10px;padding:9px 11px;background:#29372e;color:inherit;cursor:pointer}#invsto-capture-helper button:disabled{opacity:.45;cursor:default}#invsto-capture-helper [data-bag-print]{background:#efd295;color:#19241d;border:0;font-weight:750;min-height:42px;white-space:nowrap}#invsto-capture-helper details{margin-top:8px}#invsto-capture-helper summary{cursor:pointer;color:#bfcabe;font-size:11px;width:fit-content}#invsto-capture-helper .bag-settings{display:grid;gap:8px;padding-top:10px;max-height:45vh;overflow:auto}#invsto-capture-helper .bag-settings label{display:grid;gap:4px}#invsto-capture-helper select{width:100%;min-width:0}#invsto-capture-helper [data-bag-status]{margin:6px 0 0;font-size:11px;color:#c5d9c0}#invsto-capture-helper [data-bag-status]:empty{display:none}#invsto-capture-helper [data-bag-status].error{color:#ffb8aa}#og-ebay-cancellation-panel{display:none!important}`;
@@ -10,17 +11,20 @@
     box.removeAttribute('style');
     box.innerHTML='<div class="bag-bar"><div class="bag-identity"><small data-bag-heading>Latest paid bag</small><strong class="bag-number">—</strong><span class="bag-buyer">Connecting to Invsto…</span></div><button type="button" data-bag-print disabled>Print label</button></div><select data-bag-choice aria-label="Choose a bag to print" style="margin-top:10px"><option value="">Latest paid bag · automatic</option></select><div class="bag-auto" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px"><small data-bag-auto-state role="status">Connecting auto print…</small><button type="button" data-bag-auto-toggle style="padding:4px 8px;font-size:11px" disabled>Pause</button></div><p data-bag-auto-status role="status" style="font-size:11px;margin:5px 0 0" hidden></p><p data-bag-status role="status" aria-live="polite"></p><details><summary>Settings</summary><div class="bag-settings"><button type="button" data-bag-printer>Choose printer</button><small data-bag-printer-name></small><div data-capture-settings></div></div></details>';
     const $=s=>box.querySelector(s),print=$('[data-bag-print]'),choice=$('[data-bag-choice]'),configure=$('[data-bag-printer]');
+    const camera=document.createElement('button');camera.type='button';camera.dataset.bagCamera='';camera.style.cssText='padding:9px;min-width:40px;height:42px;flex:none;display:grid;place-items:center';camera.innerHTML='<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 5l1.5-2h5L16 5h4a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V7a2 2 0 012-2z"/><circle cx="12" cy="13" r="4"/></svg>';print.before(camera);
     const receipt=document.createElement('div');receipt.dataset.bagReceipt='';receipt.setAttribute('role','status');receipt.setAttribute('aria-live','polite');receipt.innerHTML='<strong></strong><small></small>';choice.before(receipt);
     const clear=document.createElement('button');clear.type='button';clear.textContent='Clear pending send';clear.hidden=true;$('.bag-settings').append(clear);
     let sales=[],printer=null,automatic=null,chosen='',busy=false,loading=false,ready=false,pending=null,completed=new Set(),printStatusAvailable=false;
+    let photoPending=null,photoTaking=false,photoSale=null;
     try{pending=JSON.parse(sessionStorage.getItem(key)||'null');}catch{}
+    try{photoPending=JSON.parse(sessionStorage.getItem(photoKey)||'null');}catch{}
     const status=(text,error=false)=>{$('[data-bag-status]').textContent=text;$('[data-bag-status]').classList.toggle('error',error);};
     const command=async(action,extra={})=>{
       const result=await chrome.runtime.sendMessage({type:'INVSTO_BAG_LABEL_COMMAND',command:{action,event_id:eventId,...extra}});
       if(!result?.ok)throw Object.assign(Error(result?.error||'Open the signed-in Invsto receiver to print bags.'),{cancelled:result?.cancelled});
       return result;
     };
-    const selected=()=>sales.find(s=>s.id===(pending?.attemptId||chosen))||pending?.sale||(!chosen&&!pending?sales[0]:null);
+    const selected=()=>sales.find(s=>s.id===(pending?.attemptId||photoPending?.attemptId||photoSale?.id||chosen))||pending?.sale||photoPending?.sale||photoSale||(!chosen&&!pending?sales[0]:null);
     const jobText=state=>({queued:'Waiting for printer',claimed:'Sending to printer',submitted:'Sent to printer',failed:'Print failed',uncertain:'Check printer',cancelled:'Print cancelled'})[state]||'Not sent yet';
     const sentTime=value=>{const date=new Date(value);return Number.isFinite(date.getTime())?date.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'';};
     function render() {
@@ -29,10 +33,13 @@
       $('.bag-number').textContent=sale?.number?'#'+sale.number:sale?'Bag label':'—';
       $('.bag-buyer').textContent=sale?.buyer||(pending?'Previous send needs checking':ready?'Waiting for a paid sale':'Connect Invsto in Settings');
       $('.bag-identity').title=sale?.title||'';
-      print.disabled=busy||!!automatic?.busy||!ready||!sale||!!(activeJob&&!pending);
-      print.textContent=busy?'Sending…':pending?'Retry send':activeJob?'Label queued':!printer?'Choose printer':(job||completed.has(sale?.id)||automatic?.completed?.includes(sale?.id))?'Reprint label':'Print label';
-      choice.disabled=busy||!!pending;configure.disabled=busy||!!pending;
-      clear.hidden=!pending;clear.disabled=busy;
+      print.disabled=busy||!!photoPending||!!automatic?.busy||!ready||!sale||!!(activeJob&&!pending);
+      print.textContent=busy&&!photoTaking?'Sending…':pending?'Retry send':activeJob?'Label queued':!printer?'Choose printer':(job||completed.has(sale?.id)||automatic?.completed?.includes(sale?.id))?'Reprint label':'Print label';
+      camera.disabled=busy||!!pending||!ready||!sale;
+      camera.title=photoTaking?'Saving photo…':`${photoPending?'Retry saving photo':'Save live photo'} to bag ${sale?.number?'#'+sale.number:''}`;
+      camera.setAttribute('aria-label',camera.title);
+      choice.disabled=busy||!!pending||!!photoPending;configure.disabled=busy||!!pending||!!photoPending;
+      clear.hidden=!pending&&!photoPending;clear.disabled=busy;clear.textContent=photoPending?'Discard pending photo':'Clear pending send';
       const signature=JSON.stringify([printStatusAvailable,sales.map(s=>[s.id,s.number,s.buyer,s.printJob?.status])]);
       if(choice.dataset.sales!==signature){choice.dataset.sales=signature;choice.replaceChildren(new Option('Latest paid bag · automatic',''),...sales.map(s=>new Option(`${s.number?'#'+s.number+' · ':''}${s.buyer} · ${printStatusAvailable?jobText(s.printJob?.status):'Status unavailable'}`,s.id)));}
       choice.value=chosen;
@@ -59,12 +66,12 @@
     }
     async function refresh() {
       if(loading||busy)return;loading=true;
-      try{const result=await command('auto');sales=result.sales||[];printer=result.printer;automatic=result.automatic;printStatusAvailable=result.printStatusAvailable===true;const wasReady=ready;ready=true;if(!wasReady)status(pending?'A previous send needs confirmation. Retry uses the same request.':'');render();}
+      try{const result=await command('auto');sales=result.sales||[];printer=result.printer;automatic=result.automatic;printStatusAvailable=result.printStatusAvailable===true;const wasReady=ready;ready=true;if(!wasReady)status(photoPending?'Click the camera to finish saving this photo.':pending?'A previous send needs confirmation. Retry uses the same request.':'');render();}
       catch(error){ready=false;status(error.message,true);render();}
       finally{loading=false;}
     }
     async function settings() {
-      if(busy||pending)return;busy=true;render();status('Choose the printer in the Invsto print window.');
+      if(busy||pending||photoPending)return;busy=true;render();status('Choose the printer in the Invsto print window.');
       try{const result=await command('configure');printer=result.printer;status(printer?'Printer saved. Ready for bag labels.':'Choose a printer before printing.');}
       catch(error){status(error.cancelled?'Printer choice cancelled.':error.message,!error.cancelled);}
       finally{busy=false;render();refresh();}
@@ -76,10 +83,29 @@
       catch(error){status(error.message,true);}
       finally{busy=false;render();}
     };
-    clear.onclick=()=>{if(!pending||busy||!confirm('This label may already have been sent. Check the printer or Print Stations before clearing it. A later print will request a new copy. Clear this pending send?'))return;pending=null;sessionStorage.removeItem(key);status('Pending send cleared. Check the earlier job before printing another copy.');render();};
+    clear.onclick=()=>{
+      if(busy)return;
+      if(photoPending){if(!confirm('Discard this pending photo? It may already be saved to the bag if the confirmation was lost.'))return;photoPending=null;sessionStorage.removeItem(photoKey);status('Pending photo cleared.');render();return;}
+      if(!pending||!confirm('This label may already have been sent. Check the printer or Print Stations before clearing it. A later print will request a new copy. Clear this pending send?'))return;pending=null;sessionStorage.removeItem(key);status('Pending send cleared. Check the earlier job before printing another copy.');render();
+    };
     choice.onchange=()=>{chosen=choice.value;status('');render();};
+    camera.onclick=async()=>{
+      const sale=selected();if(busy||pending||!ready||!sale)return;
+      busy=true;photoTaking=true;photoSale=sale;render();status(`Saving live photo to #${sale.number||'bag'}…`);
+      try{
+        if(!photoPending){
+          const result=await command('capture');
+          if(!result.image)throw Error('No video frame was received. Try the camera again.');
+          photoPending={attemptId:sale.id,requestId:crypto.randomUUID(),sale,image:result.image};
+          sessionStorage.setItem(photoKey,JSON.stringify(photoPending));
+        }
+        await command('photo',photoPending);
+        photoPending=null;sessionStorage.removeItem(photoKey);status(`✓ Photo saved to #${sale.number||'bag'}.`);
+      }catch(error){status(`${error.message}${photoPending?' Click the camera to retry this same photo.':''}`,true);}
+      finally{photoTaking=false;photoSale=null;busy=false;render();}
+    };
     print.onclick=async()=>{
-      const sale=selected();if(busy||!ready||!sale)return;
+      const sale=selected();if(busy||photoPending||!ready||!sale)return;
       if(!printer&&!pending)return settings();
       busy=true;
       if(!pending){pending={attemptId:sale.id,requestId:crypto.randomUUID(),sale};sessionStorage.setItem(key,JSON.stringify(pending));}

@@ -46,7 +46,7 @@ async function resumeCapture(event_id,tabId){
   if(!reachable)await enqueue(async()=>{
     const latest=await read();if(!latest.captureRuns?.[tabId]?.enabled)return;
     latest.resumeOpenedAt||={};if(Date.now()-(latest.resumeOpenedAt[event_id]||0)<30000)return;
-    const tab=await chrome.tabs.create({url:'https://antdamus.github.io/Invsto/live-sales.html?capture=1&resume_event='+encodeURIComponent(event_id)+'&v=1.6.1',active:false});
+    const tab=await chrome.tabs.create({url:'https://antdamus.github.io/Invsto/live-sales.html?capture=1&resume_event='+encodeURIComponent(event_id)+'&v=1.7.0',active:false});
     latest.setupTabs||={};latest.setupTabs[event_id]=tab.id;latest.resumeOpenedAt[event_id]=Date.now();await save(latest);
   });
   return {ok:true,retry:true,error:'Reconnecting saved capture. Keep the Invsto receiver signed in; sellers will stay unchanged.'};
@@ -64,7 +64,7 @@ async function openCaptureSetup(event_id, sourceTab, stream) {
       if (response?.ok) { await chrome.tabs.update(previous,{active:true}); return {ok:true,status:'Choose your sellers in Invsto.'}; }
     } catch {}
   }
-  const tab = await chrome.tabs.create({url:'https://antdamus.github.io/Invsto/live-sales.html?capture=1&capture_event='+encodeURIComponent(event_id)+'&v=1.6.1'+(stream?'&stream='+encodeURIComponent(JSON.stringify(stream)):''),active:true});
+  const tab = await chrome.tabs.create({url:'https://antdamus.github.io/Invsto/live-sales.html?capture=1&capture_event='+encodeURIComponent(event_id)+'&v=1.7.0'+(stream?'&stream='+encodeURIComponent(JSON.stringify(stream)):''),active:true});
   data.setupTabs[event_id] = tab.id; await save(data);
   return {ok:true,status:'Choose your sellers in Invsto.'};
 }
@@ -82,7 +82,7 @@ function selectCaptureHealth(data,event_id){
   const sort=(a,b)=>Number(!!b.health.ready)-Number(!!a.health.ready)||rank(b)-rank(a)||b.receivedAt-a.receivedAt;
   const source=automatic.sort(sort)[0]||current.sort((a,b)=>b.receivedAt-a.receivedAt)[0]||all.sort((a,b)=>b.receivedAt-a.receivedAt)[0];
   const ended=!!(data.health[event_id]?.broadcast_ended||all.some(s=>s.health.broadcast_ended));
-  data.health[event_id]={...source.health,ready:!ended&&current.includes(source)&&source.health.mode!=='working'&&source.health.running!==false&&!!source.health.ready&&Object.keys(data.events).length<=10000,broadcast_ended:ended,pending:Object.values(data.events).filter(e=>e.event_id===event_id).length,version:'1.6.1'};
+  data.health[event_id]={...source.health,ready:!ended&&current.includes(source)&&source.health.mode!=='working'&&source.health.running!==false&&!!source.health.ready&&Object.keys(data.events).length<=10000,broadcast_ended:ended,pending:Object.values(data.events).filter(e=>e.event_id===event_id).length,version:'1.7.0'};
 }
 async function deliver(data) {
   const receivers = receiverEntries(data);
@@ -116,12 +116,22 @@ async function deliver(data) {
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   const url = sender.tab?.url || sender.url || '';
   if (sender.id !== chrome.runtime.id) return;
+  if(message.type==='INVSTO_STREAM_FRAME'){
+    if(!/^https:\/\/ir\.ebaystatic\.com\/cr\/ebaylivepubweb\/liveassets\/shoplive\/[^/]+\/player\.html(?:\?|$)/.test(sender.url||'')||!/^https:\/\/www\.ebay\.com\/ebaylive\/host\/events\//.test(url)||!sender.frameId)return;
+    enqueue(async()=>{const data=await read();data.streamFrames||={};data.streamFrames[sender.tab.id]={frameId:sender.frameId,documentId:sender.documentId,eventId:new URL(url).pathname.split('/')[4],seen:Date.now()};await save(data);return {ok:true};}).then(reply);return true;
+  }
   if(message.type==='INVSTO_BAG_LABEL_COMMAND'){
     if(!/^https:\/\/www\.ebay\.com\/ebaylive\/host\/events\//.test(url))return;
     const eventId=new URL(url).pathname.split('/')[4],command=message.command;
-    if(!/^[A-Za-z0-9_-]{6,100}$/.test(eventId)||command?.event_id!==eventId||!['status','auto','print','configure'].includes(command.action)||new URL(url).searchParams.has('invsto_metadata')){reply({ok:false,error:'Invalid bag-label request.'});return;}
+    if(!/^[A-Za-z0-9_-]{6,100}$/.test(eventId)||command?.event_id!==eventId||!['status','auto','print','configure','capture','photo'].includes(command.action)||new URL(url).searchParams.has('invsto_metadata')){reply({ok:false,error:'Invalid bag-label request.'});return;}
     (async()=>{
       const data=await enqueue(()=>read()),receivers=receiverEntries(data);
+      if(command.action==='capture'){
+        const frame=data.streamFrames?.[sender.tab.id];
+        if(!frame||frame.eventId!==eventId||Date.now()-frame.seen>60000)return {ok:false,error:'Open the live video preview and let it play, then try the camera. Refresh eBay after updating the extension.'};
+        try{return await chrome.tabs.sendMessage(sender.tab.id,{type:'INVSTO_CAPTURE_STREAM_PHOTO'},{frameId:frame.frameId,...(frame.documentId?{documentId:frame.documentId}:{})});}
+        catch{return {ok:false,error:'The video preview reconnected. Wait a moment and try the camera again.'};}
+      }
       if(!receivers.length)return {ok:false,error:'Open the Invsto receiver in this browser and keep it signed in.'};
       for(const [tab] of receivers){
         try{
@@ -132,7 +142,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
         }catch(error){
           // Printing may already have reached the queue. Do not repeat a print
           // automatically on another receiver after losing its acknowledgement.
-          if(command.action!=='status')return {ok:false,error:'The receiver disconnected. Reopen it and retry the same label send.'};
+          if(command.action!=='status')return {ok:false,error:command.action==='photo'?'The receiver disconnected. Reopen it and click the camera to retry this same photo.':'The receiver disconnected. Reopen it and retry the same label send.'};
         }
       }
       return {ok:false,error:'Refresh the Invsto receiver to enable bag-label printing.'};
@@ -248,6 +258,7 @@ chrome.alarms.create('retry-live',{periodInMinutes:0.5});
 chrome.alarms.onAlarm.addListener(()=>enqueue(async()=>{const d=await read();await deliver(d);await save(d);}));
 chrome.tabs.onRemoved?.addListener(tab=>enqueue(async()=>{
   const data=await read();if(data.listingSources)delete data.listingSources[tab];
+  if(data.streamFrames)delete data.streamFrames[tab];
   if(data.captureRuns)delete data.captureRuns[tab];
   for(const [event,id] of Object.entries(data.setupTabs||{}))if(id===tab)delete data.setupTabs[event];
   for(const [event,id] of Object.entries(data.captureTabs||{}))if(id===tab)delete data.captureTabs[event];

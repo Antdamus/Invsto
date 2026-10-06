@@ -1,8 +1,8 @@
-# Invsto Live Capture (1.6.1)
+# Invsto Live Capture (1.7.0)
 
 This helper copies visible eBay Stream Manager auction and payment evidence into Invsto. Its compact bag-label panel shows the latest confirmed paid sale, the bag number from its listing title, and the winner. It never bids, charges buyers, or cancels eBay orders.
 
-## Bag labels from Stream Manager (1.6.1)
+## Bag labels from Stream Manager (1.7.0)
 
 Keep the signed-in Invsto capture receiver open. **Print label** uses Live Sales' existing saved bag, 30299 label template and print system. Its QR identifies the unique bag, including the precise auction attempt; shipping can scan it to find the buyer and linked order lines. Printing does not close the bag, claim a scanner, or remove inventory. Only a paid, unresolved sale without a payment hold can print.
 
@@ -13,6 +13,16 @@ Automatic sends retain their queue identity across reloads and interrupted respo
 Under **Settings**, choose the printer once using Invsto's existing print dialog. Later clicks reuse that computer and label roll. The previously selected Live Sales destination is used when its roll is already configured. This is the configured Invsto print destination, not automatic detection of the operating system's default printer. The local-helper option downloads the same label file for an already-running helper; a download alone does not confirm a physical print. Paired computers use the existing print queue, including when offline.
 
 The panel follows the latest paid sale automatically. The dropdown directly below the bag and Print button lists all eligible paid bags from this show by number and winner, newest first. Select a previous bag, check the displayed winner, and click **Print label**. A newer sale does not change your selection. Choose **Latest paid bag · automatic** to resume following sales. **Reprint label** deliberately requests another copy. A lost acknowledgement retains the same request ID when retried, so the print queue does not duplicate it. The selected bag and every dropdown entry show the current queue status: Waiting for printer, Sending to printer, Sent to printer, or a problem that needs checking. Sent to printer means the printer software accepted the job; it is not proof that a physical label emerged. The receipt includes the acknowledgement time and destination/roll. These receipts include manual jobs, other staff computers, and older bags outside the latest 100 jobs. Active queued/sending labels cannot be sent again from the panel. If status cannot be read, the panel says Print status unavailable and keeps checking without sending extra copies. Capture start/stop, connection detail and movement controls are in Settings. The stock-listing helper is not loaded in this release, and the unrelated cancellation banner is hidden on Stream Manager.
+
+## One-click live photos (1.7.0)
+
+The small camera button beside Print saves a JPEG frame from the live video to the selected paid bag. The original video frame excludes chat, controls and dashboard content. Put the sold item in view, check the bag number/winner, then click the camera once. A saved message confirms the exact bag. The dropdown can select an earlier paid bag. This does not print a label, add an inventory item, or close the bag.
+
+Photos appear in Live Sales for the selected bag and bag history, and under Live photos when shipping scans its unique bag QR. Tap a thumbnail for the full image. Signed URLs use the existing private photos storage and staff access.
+
+The image and bag are fixed at the click. If a save loses its confirmation, click the camera again to retry the same photo, even after a receiver or eBay reload. The same request cannot attach duplicate photos. An intentional later click takes a new photo. Pending photos stay in that tab's session storage until saved or discarded under Settings; closing that tab before a successful save can lose the pending capture.
+
+This release adds a content script scoped to eBay's embedded media player at `ir.ebaystatic.com/cr/ebaylivepubweb/liveassets/shoplive/*/player.html`. It does not request desktop capture, camera access, or access to unrelated tabs. It reads a playing frame only after the camera button is clicked. Keep the live preview playing. Install/reload 1.7.0 and refresh eBay and the signed-in receiver to activate the new button.
 
 ## Dedicated computer setup
 
