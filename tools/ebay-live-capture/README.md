@@ -1,10 +1,14 @@
-# Invsto Live Capture (1.5.0)
+# Invsto Live Capture (1.6.0)
 
 This helper copies visible eBay Stream Manager auction and payment evidence into Invsto. Its compact bag-label panel shows the latest confirmed paid sale, the bag number from its listing title, and the winner. It never bids, charges buyers, or cancels eBay orders.
 
-## Bag labels from Stream Manager (1.5.0)
+## Bag labels from Stream Manager (1.6.0)
 
 Keep the signed-in Invsto capture receiver open. **Print label** uses Live Sales' existing saved bag, 30299 label template and print system. Its QR identifies the unique bag, including the precise auction attempt; shipping can scan it to find the buyer and linked order lines. Printing does not close the bag, claim a scanner, or remove inventory. Only a paid, unresolved sale without a payment hold can print.
+
+**Automatic printing (1.6.0):** new paid sales with a winner go straight to the saved paired print station, without clicking Print. The panel checks every two seconds while the receiver is connected; the existing station helper then prints the queued label. **Pause / Resume** is visible on the panel. Selecting an earlier bag does not interrupt automatic printing. Opening a show for the first time, resuming after a pause, or reading finished-show history does not print earlier sales. Earlier bags remain in the dropdown for manual printing. Unknown older wins without a verified sale time also stay manual.
+
+Automatic sends retain their queue identity across reloads and interrupted responses. The database reuses the same bag's existing print job across receiver tabs, staff and computers; failed or uncertain jobs require checking Print Stations before requesting another copy. A missing printer holds newly observed sales until one is chosen. Automatic mode needs a paired print station; the legacy local-file download option remains available for manual printing. Keep both Stream Manager and the signed-in receiver open.
 
 Under **Settings**, choose the printer once using Invsto's existing print dialog. Later clicks reuse that computer and label roll. The previously selected Live Sales destination is used when its roll is already configured. This is the configured Invsto print destination, not automatic detection of the operating system's default printer. The local-helper option downloads the same label file for an already-running helper; a download alone does not confirm a physical print. Paired computers use the existing print queue, including when offline.
 

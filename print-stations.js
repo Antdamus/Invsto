@@ -77,11 +77,13 @@
     if(pending && (pending.stationId!==destination.stationId || (pending.roll||'default')!==roll))throw new Error('An earlier send needs confirmation at its original computer and roll. Check Print jobs, or choose that same station and roll to confirm it first.');
     if(!pending){pending={requestId:options.requestId||crypto.randomUUID(),stationId:destination.stationId,roll};localStorage.setItem(key,JSON.stringify(pending));}
     let job;
-    try {job=await rpc('enqueue_label_print',{_station_id:destination.stationId,_request_id:pending.requestId,_label_xml:labelXml,_copies:copies,_title:options.title || '',_barcode:options.barcode || '',_printer_roll:roll});}
+    try {job=options.automaticAttemptId
+      ?await rpc('enqueue_ebay_live_auto_label',{_attempt_id:options.automaticAttemptId,_station_id:destination.stationId,_label_xml:labelXml,_printer_roll:roll})
+      :await rpc('enqueue_label_print',{_station_id:destination.stationId,_request_id:pending.requestId,_label_xml:labelXml,_copies:copies,_title:options.title || '',_barcode:options.barcode || '',_printer_roll:roll});}
     catch(error){if(/^(P0001|22023|42501|23514|23503)$/.test(error.code||''))localStorage.removeItem(key);throw error;}
     localStorage.removeItem(key);
     options.onProgress?.(copies,copies,{name:destination.name});
-    return {mode:'remote-queue',jobId:job.id,stationName:destination.name,copies,roll,status:job.status};
+    return {mode:'remote-queue',jobId:job.id,stationName:job.station_name||destination.name,copies,roll,status:job.status};
   }
   async function printLabel(labelXml,options={}) {
     const destination=options.printDestination || await chooseDestination(options);

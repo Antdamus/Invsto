@@ -478,12 +478,13 @@ test('extension bag requests call the real Live Sales label action with the same
  const result=await p.evaluate(()=>new Promise(resolve=>{
   const id=crypto.randomUUID(),requestId=crypto.randomUUID();
   const listener=e=>{if(e.data?.type==='INVSTO_BAG_PRINT_RESPONSE'&&e.data.id===id){window.removeEventListener('message',listener);resolve({...e.data,requestId});}};
-  window.addEventListener('message',listener);window.postMessage({type:'INVSTO_BAG_PRINT_REQUEST',id,command:{action:'print',event_id:'EVENT123',attemptId:dashboard.attempts[0].id,requestId}},location.origin);
+  window.addEventListener('message',listener);window.postMessage({type:'INVSTO_BAG_PRINT_REQUEST',id,command:{action:'print',event_id:'EVENT123',attemptId:dashboard.attempts[0].id,requestId,automatic:true}},location.origin);
  }));
  assert.equal(result.ok,true,result.error);assert.equal(result.lotCode,'LIVE-LABEL');
  const printed=await p.evaluate(()=>calls.filter(c=>c.name==='print'));assert.equal(printed.length,1);
  assert.match(printed[0].xml,/TESTBUYER/);assert.match(printed[0].xml,/LIVE-LABEL/);
  assert.equal(printed[0].options.printDestination.stationId,'station-a');assert.equal(printed[0].options.requestId,result.requestId);
+ assert.equal(printed[0].options.automaticAttemptId,'00000000-0000-4000-8000-000000000011');
  assert.equal(await p.evaluate(()=>calls.some(c=>['claim_ebay_live_bag','close_ebay_live_bag','reserve_live_sale_item'].includes(c.name))),false);
  assert.deepEqual(p.errors,[]);
 });

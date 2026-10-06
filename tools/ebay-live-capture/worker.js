@@ -46,7 +46,7 @@ async function resumeCapture(event_id,tabId){
   if(!reachable)await enqueue(async()=>{
     const latest=await read();if(!latest.captureRuns?.[tabId]?.enabled)return;
     latest.resumeOpenedAt||={};if(Date.now()-(latest.resumeOpenedAt[event_id]||0)<30000)return;
-    const tab=await chrome.tabs.create({url:'https://antdamus.github.io/Invsto/live-sales.html?capture=1&resume_event='+encodeURIComponent(event_id)+'&v=1.5.0',active:false});
+    const tab=await chrome.tabs.create({url:'https://antdamus.github.io/Invsto/live-sales.html?capture=1&resume_event='+encodeURIComponent(event_id)+'&v=1.6.0',active:false});
     latest.setupTabs||={};latest.setupTabs[event_id]=tab.id;latest.resumeOpenedAt[event_id]=Date.now();await save(latest);
   });
   return {ok:true,retry:true,error:'Reconnecting saved capture. Keep the Invsto receiver signed in; sellers will stay unchanged.'};
@@ -64,7 +64,7 @@ async function openCaptureSetup(event_id, sourceTab, stream) {
       if (response?.ok) { await chrome.tabs.update(previous,{active:true}); return {ok:true,status:'Choose your sellers in Invsto.'}; }
     } catch {}
   }
-  const tab = await chrome.tabs.create({url:'https://antdamus.github.io/Invsto/live-sales.html?capture=1&capture_event='+encodeURIComponent(event_id)+'&v=1.5.0'+(stream?'&stream='+encodeURIComponent(JSON.stringify(stream)):''),active:true});
+  const tab = await chrome.tabs.create({url:'https://antdamus.github.io/Invsto/live-sales.html?capture=1&capture_event='+encodeURIComponent(event_id)+'&v=1.6.0'+(stream?'&stream='+encodeURIComponent(JSON.stringify(stream)):''),active:true});
   data.setupTabs[event_id] = tab.id; await save(data);
   return {ok:true,status:'Choose your sellers in Invsto.'};
 }
@@ -82,7 +82,7 @@ function selectCaptureHealth(data,event_id){
   const sort=(a,b)=>Number(!!b.health.ready)-Number(!!a.health.ready)||rank(b)-rank(a)||b.receivedAt-a.receivedAt;
   const source=automatic.sort(sort)[0]||current.sort((a,b)=>b.receivedAt-a.receivedAt)[0]||all.sort((a,b)=>b.receivedAt-a.receivedAt)[0];
   const ended=!!(data.health[event_id]?.broadcast_ended||all.some(s=>s.health.broadcast_ended));
-  data.health[event_id]={...source.health,ready:!ended&&current.includes(source)&&source.health.mode!=='working'&&source.health.running!==false&&!!source.health.ready&&Object.keys(data.events).length<=10000,broadcast_ended:ended,pending:Object.values(data.events).filter(e=>e.event_id===event_id).length,version:'1.5.0'};
+  data.health[event_id]={...source.health,ready:!ended&&current.includes(source)&&source.health.mode!=='working'&&source.health.running!==false&&!!source.health.ready&&Object.keys(data.events).length<=10000,broadcast_ended:ended,pending:Object.values(data.events).filter(e=>e.event_id===event_id).length,version:'1.6.0'};
 }
 async function deliver(data) {
   const receivers = receiverEntries(data);
@@ -119,7 +119,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   if(message.type==='INVSTO_BAG_LABEL_COMMAND'){
     if(!/^https:\/\/www\.ebay\.com\/ebaylive\/host\/events\//.test(url))return;
     const eventId=new URL(url).pathname.split('/')[4],command=message.command;
-    if(!/^[A-Za-z0-9_-]{6,100}$/.test(eventId)||command?.event_id!==eventId||!['status','print','configure'].includes(command.action)||new URL(url).searchParams.has('invsto_metadata')){reply({ok:false,error:'Invalid bag-label request.'});return;}
+    if(!/^[A-Za-z0-9_-]{6,100}$/.test(eventId)||command?.event_id!==eventId||!['status','auto','print','configure'].includes(command.action)||new URL(url).searchParams.has('invsto_metadata')){reply({ok:false,error:'Invalid bag-label request.'});return;}
     (async()=>{
       const data=await enqueue(()=>read()),receivers=receiverEntries(data);
       if(!receivers.length)return {ok:false,error:'Open the Invsto receiver in this browser and keep it signed in.'};

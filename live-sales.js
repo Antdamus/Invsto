@@ -2131,7 +2131,7 @@ function closeBagHistoryModal() {
   setTimeout(() => focusItemScanner(), 80);
 }
 
-async function printLiveSaleBagLabel(lotId, { throwOnError = false, printDestination, requestId } = {}) {
+async function printLiveSaleBagLabel(lotId, { throwOnError = false, printDestination, requestId, automaticAttemptId } = {}) {
   try {
     const lot = state.bagHistoryLots.find((entry) => String(entry.id) === String(lotId))
       || (String(state.currentLot?.id || "") === String(lotId) ? state.currentLot : null);
@@ -2142,7 +2142,7 @@ async function printLiveSaleBagLabel(lotId, { throwOnError = false, printDestina
     const identity = window.liveBagLabel.identity(lot, liveAuction);
     const xml = window.liveBagLabel.build(identity);
     const filename = `${getLiveSaleLabelBaseName(lot)}_Reprint_Copies_1.dymo`;
-    const result = await window.printStations.printLabel(xml, {filename,copies:1,title:identity.title,barcode:lot.lot_code,printDestination,requestId});
+    const result = await window.printStations.printLabel(xml, {filename,copies:1,title:identity.title,barcode:lot.lot_code,printDestination,requestId,automaticAttemptId});
     setStatus(result.mode === 'remote-queue' ? `Label queued for ${result.stationName}. View Print stations for status.` : 'Label downloaded for the local helper.', 'success');
     return result;
   } catch (error) {

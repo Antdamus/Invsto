@@ -14,13 +14,13 @@ before(async()=>{
   });await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));origin=`http://127.0.0.1:${server.address().port}`;browser=await chromium.launch();
 });
 after(async()=>{await browser?.close();await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});});
-async function open(t,{configured=true}={}){
-  const context=await browser.newContext({viewport:{width:1280,height:760}});t.after(()=>context.close());
+async function open(t,{configured=true,sharedContext,seed}={}){
+  const context=sharedContext||await browser.newContext({viewport:{width:1280,height:760}});if(!sharedContext)t.after(()=>context.close());
   await context.route('**/*',route=>route.request().url().startsWith(origin)?route.continue():route.abort());
   const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
   await page.goto(origin+'/ebaylive/host/events/EVENT123?capture=1');
-  await page.evaluate(configured=>{
-    window.calls=[];window.jobs=[];window.failAfterQueue=false;window.delayedPrint=false;window.runtimeListeners=[];
+  await page.evaluate(({configured,seed})=>{
+    window.calls=[];window.jobs=[];window.ended=false;window.failAfterQueue=false;window.delayedPrint=false;window.runtimeListeners=[];
     window.sales=[
       {id:'00000000-0000-4000-8000-000000000001',listing_title:'#004 - Gold chain',buyer:'earlier-winner',payment_state:'paid',sold_at:'2026-10-06T15:01:00Z',event_id:'EVENT123'},
       {id:'00000000-0000-4000-8000-000000000002',listing_title:'#012 - Silver bracelet',buyer:'current-winner',payment_state:'paid',sold_at:'2026-10-06T15:03:00Z',event_id:'EVENT123'},
@@ -33,12 +33,13 @@ async function open(t,{configured=true}={}){
     },rpc:async(name,args)=>{
       calls.push({name,args});
       if(name==='list_print_stations')return {data:stations};
-      if(name==='get_ebay_live_dashboard')return {data:{connection:{event_id:args._session_id.replace('session-','')},attempts:sales.filter(s=>args._session_id==='session-'+s.event_id)}};
+      if(name==='get_ebay_live_dashboard')return {data:{server_time:new Date().toISOString(),connection:{event_id:args._session_id.replace('session-',''),broadcast_ended_at:ended?'2026-10-06':null},attempts:sales.filter(s=>args._session_id==='session-'+s.event_id)}};
       if(name==='prepare_ebay_live_bag_label'){
         const sale=sales.find(s=>s.id===args._attempt_id);if(!sale||sale.payment_state!=='paid')return {error:{message:'Payment not confirmed'}};
         let lot=lots.find(l=>l.id===sale.lot_id);if(!lot){lot={id:'lot-'+sale.id,lot_code:'LIVE-'+sale.id.slice(-8),auction_number:'EB-12-TEST'};lots.push(lot);sale.lot_id=lot.id;}return {data:lot};
       }
-      if(name==='enqueue_label_print'){
+      if(name==='enqueue_ebay_live_auto_label'){const prior=jobs.find(j=>j.requestId===args._attempt_id);if(prior)return {data:prior};args={...args,_request_id:args._attempt_id};}
+      if(name==='enqueue_label_print'||name==='enqueue_ebay_live_auto_label'){
         let job=jobs.find(j=>j.requestId===args._request_id);
         if(job){if(JSON.stringify(job.args)!==JSON.stringify(args))return {error:{message:'Request changed'}};return {data:job};}
         job={id:'job-'+jobs.length,status:'queued',requestId:args._request_id,args};jobs.push(job);
@@ -51,7 +52,8 @@ async function open(t,{configured=true}={}){
       if(message.type!=='INVSTO_BAG_LABEL_COMMAND')return {ok:true,events:[]};
       return new Promise(resolve=>runtimeListeners.forEach(fn=>fn({type:'INVSTO_BAG_LABEL_BRIDGE',command:message.command},{id:'fixture'},resolve)));
     }}};
-  },configured);
+    if(seed){sales=seed.sales;jobs=seed.jobs;lots=seed.lots;}
+  },{configured,seed});
   for(const script of ['live-bag-label.js','print-stations.js','live-bag-print-bridge.js','tools/ebay-live-capture/receiver.js','tools/ebay-live-capture/bag-label.js'])await page.addScriptTag({url:origin+'/'+script});
   await page.evaluate(()=>{
     liveBagPrintBridge.install({async printBag(id,options){
@@ -61,7 +63,7 @@ async function open(t,{configured=true}={}){
     }},rows=>rows.toSorted((a,b)=>Date.parse(b.sold_at)-Date.parse(a.sold_at)));
     const box=document.createElement('div');box.id='invsto-capture-helper';document.body.append(box);InvstoBagLabelPanel.mount(box);
   });
-  await expect(page.locator('.bag-number')).toHaveText('#012');return page;
+  await expect(page.locator('.bag-number')).not.toHaveText('—');return page;
 }
 test('compact panel prints the exact saved paid bag through the existing queue and preserves QR identity',async t=>{
   const page=await open(t);
@@ -129,6 +131,52 @@ test('receiver requests are scoped to the supplied event, never the selected sho
     const requestId=crypto.randomUUID();
     return chrome.runtime.sendMessage({type:'INVSTO_BAG_LABEL_COMMAND',command:{action:'print',event_id:'OTHER123',attemptId:sales[1].id,requestId}});
   });assert.equal(result.ok,false);assert.match(result.error,/not cleared/);assert.equal(await page.evaluate(()=>jobs.length),0);
+});
+test('new paid sales print automatically, retain the earlier-bag selection, and survive receiver reloads without duplicates',async t=>{
+  const page=await open(t);await expect(page.locator('[data-bag-auto-state]')).toContainText('Auto print on');
+  await page.getByRole('combobox',{name:'Choose a bag to print'}).selectOption('00000000-0000-4000-8000-000000000001');
+  await page.evaluate(()=>{sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000080',listing_title:'#080 - Pendant',buyer:'auto-winner',sold_at:new Date().toISOString(),lot_id:null});sales[2].payment_state='paid';});
+  await expect.poll(()=>page.evaluate(()=>jobs.length),{timeout:10000}).toBe(2);
+  const sent=await page.evaluate(()=>jobs);assert.ok(sent.every(j=>j.args._attempt_id));assert.ok(sent.some(j=>j.args._label_xml.includes('AUTO-WINNER')));
+  await expect(page.locator('.bag-number')).toHaveText('#004');
+  const seed=await page.evaluate(()=>({sales,jobs,lots}));
+  const reloaded=await open(t,{sharedContext:page.context(),seed});
+  await expect(reloaded.locator('[data-bag-auto-status]')).toContainText('Label queued');
+  assert.equal(await reloaded.evaluate(()=>calls.some(c=>c.name==='enqueue_ebay_live_auto_label')),false);
+  assert.equal(await reloaded.evaluate(()=>jobs.length),2);
+  await reloaded.locator('#invsto-capture-helper').screenshot({path:'test-results/live-bag-extension-auto.png'});
+});
+test('automatic retries reuse the same job after a lost acknowledgement and ignore historical backfills',async t=>{
+  const page=await open(t);await page.evaluate(()=>{failAfterQueue=true;sales[2].payment_state='paid';sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000070',listing_title:'#070 - History',sold_at:'2026-01-01T00:00:00Z'});});
+  await expect(page.locator('[data-bag-auto-status]')).toContainText('Acknowledgement lost',{timeout:8000});
+  await expect(page.locator('[data-bag-auto-status]')).toContainText('Label queued',{timeout:8000});
+  assert.equal(await page.evaluate(()=>jobs.length),1);assert.equal(await page.evaluate(()=>jobs[0].requestId), '00000000-0000-4000-8000-000000000003');
+});
+test('auto pause, resume and completed shows do not dump old sales into the printer',async t=>{
+  const page=await open(t);await page.getByRole('button',{name:'Pause automatic printing'}).click();
+  await expect(page.locator('[data-bag-auto-state]')).toHaveText('Auto print paused');
+  await page.evaluate(()=>{sales[2].payment_state='paid';});
+  await expect(page.locator('[data-bag-choice] option')).toHaveCount(4,{timeout:8000});
+  assert.equal(await page.evaluate(()=>jobs.length),0);
+  await page.getByRole('button',{name:'Resume automatic printing'}).click();
+  assert.equal(await page.evaluate(()=>jobs.length),0);
+  await page.evaluate(()=>{ended=true;sales[3].payment_hold=false;});
+  await expect(page.locator('[data-bag-choice] option')).toHaveCount(5,{timeout:8000});assert.equal(await page.evaluate(()=>jobs.length),0);
+});
+test('pausing during an in-flight automatic send is retained before the next bag',async t=>{
+  const page=await open(t);await page.evaluate(()=>{delayedPrint=true;sales[2].payment_state='paid';});
+  await expect.poll(()=>page.evaluate(()=>jobs.length),{timeout:8000}).toBe(1);
+  await page.getByRole('button',{name:'Pause automatic printing'}).click();
+  await page.evaluate(()=>{sales[3].payment_hold=false;finishPrint();});
+  await expect(page.locator('[data-bag-auto-state]')).toHaveText('Auto print paused',{timeout:8000});
+  await expect(page.locator('[data-bag-choice] option')).toHaveCount(5,{timeout:8000});assert.equal(await page.evaluate(()=>jobs.length),1);
+});
+test('two receiver tabs share automatic sends and missing printers wait without downloading files',async t=>{
+  const page=await open(t,{configured:false});await expect(page.locator('[data-bag-auto-status]')).toContainText('Choose a paired printer');
+  await page.evaluate(()=>{sales[2].payment_state='paid';});await expect(page.locator('[data-bag-choice] option')).toHaveCount(4,{timeout:8000});
+  assert.equal(await page.evaluate(()=>jobs.length),0);
+  const seed=await page.evaluate(()=>({sales,jobs,lots})),other=await open(t,{sharedContext:page.context(),seed,configured:true});
+  await expect.poll(async()=>await page.evaluate(()=>jobs.length)+await other.evaluate(()=>jobs.length),{timeout:8000}).toBe(1);
 });
 test('worker binds bag requests to their eBay event and does not automatically duplicate a disconnected print',async()=>{
   const source=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');let handler,sent=[],focused=[],fail=false;

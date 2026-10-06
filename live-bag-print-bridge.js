@@ -23,7 +23,51 @@
       if(result?.connection?.event_id!==eventId)throw Error('The receiver could not verify this eBay show.');
       return result;
     }
-    const eligible = sale => sale?.payment_state==='paid' && !sale.resolved_at && !sale.merged_into && !sale.payment_hold;
+    const eligible = sale => sale?.payment_state==='paid' && !!String(sale.buyer||'').trim() && !sale.resolved_at && !sale.merged_into && !sale.payment_hold;
+    const autoKey=(userId,eventId)=>prefix+userId+'.auto.'+eventId;
+    const loadAuto=(userId,eventId)=>JSON.parse(localStorage.getItem(autoKey(userId,eventId))||'null');
+    const saveAuto=(userId,eventId,state)=>localStorage.setItem(autoKey(userId,eventId),JSON.stringify(state));
+    const autoView=state=>state?{enabled:state.enabled,pending:state.pending.length,last:state.last,error:state.error,completed:Object.keys(state.done).filter(id=>state.done[id]==='sent')}:null;
+    async function automatic(userId,eventId,data,printer,enabled) {
+      // Web Locks serialize multiple receiver tabs. The server also deduplicates
+      // automatic sends across users/computers using the original attempt ID.
+      return navigator.locks.request(autoKey(userId,eventId),typeof enabled==='boolean'?{}:{ifAvailable:true},async lock=>{
+        let state=loadAuto(userId,eventId);
+        if(!lock)return {...autoView(state),busy:true};
+        const rows=data.attempts||[],now=Date.parse(data.server_time)||Date.now();
+        if(!state){state={enabled:true,since:Math.floor(now/60000)*60000,seen:{},done:{},pending:[],last:null,error:''};for(const a of rows){state.seen[a.id]=eligible(a);if(eligible(a))state.done[a.id]='earlier';}}
+        if(typeof enabled==='boolean'){
+          state.enabled=enabled;
+          // Resuming starts with new sales; it never backfills a paused show.
+          for(const a of rows){state.seen[a.id]=eligible(a);if(eligible(a)&&!state.pending.some(p=>p.id===a.id))state.done[a.id]||='paused';}
+        }
+        const active=!data.connection.broadcast_ended_at&&!data.connection.review_completed_at;
+        for(const a of [...sortAuctions(rows)].reverse()){
+          const paid=eligible(a),known=Object.hasOwn(state.seen,a.id);
+          const recent=Date.parse(a.sold_at)>=state.since;
+          if(paid&&!state.seen[a.id]&&!state.done[a.id]&&!state.pending.some(p=>p.id===a.id)){
+            if(state.enabled&&active&&!a.closed_at&&(known||recent))state.pending.push({id:a.id,number:window.liveBagLabel.identity({lot_code:''},a).auctionNumber});
+            else state.done[a.id]='earlier';
+          }
+          state.seen[a.id]=paid;
+        }
+        saveAuto(userId,eventId,state);
+        if(!state.enabled)return autoView(state);
+        if(!printer?.stationId){state.error='Choose a paired printer in Settings for automatic printing.';saveAuto(userId,eventId,state);return autoView(state);}
+        state.error=['failed','uncertain','cancelled'].includes(state.last?.status)?'Check Print Stations before reprinting the last bag.':'';
+        const next=state.pending[0];
+        if(next){
+          const sale=rows.find(a=>a.id===next.id);
+          if(!eligible(sale)){state.pending.shift();state.done[next.id]='payment changed';}
+          else try{
+            const sent=await run({action:'print',event_id:eventId,attemptId:next.id,requestId:next.id,automatic:true});
+            state.pending.shift();state.done[next.id]='sent';state.last={number:next.number,...sent.result};
+            if(['failed','uncertain','cancelled'].includes(sent.result?.status))state.error='Check Print Stations before reprinting the last bag.';
+          }catch(error){state.error=error.message||'Automatic print is waiting for the receiver.';}
+        }
+        saveAuto(userId,eventId,state);return autoView(state);
+      });
+    }
     async function destination(userId, override) {
       const saved=override || JSON.parse(localStorage.getItem(prefix+userId)||'null');
       const stations=await rpc('list_print_stations');
@@ -45,12 +89,14 @@
         localStorage.setItem(prefix+userId,JSON.stringify({...chosen,copies:1}));
         return {printer:await destination(userId)};
       }
-      const data=command.action==='status'?(snapshot(command.event_id)||await dashboard(command.event_id)):await dashboard(command.event_id);
-      if(command.action==='status') {
+      const data=['status','auto'].includes(command.action)?(snapshot(command.event_id)||await dashboard(command.event_id)):await dashboard(command.event_id);
+      if(['status','auto'].includes(command.action)) {
         const sales=sortAuctions(data.attempts||[]).filter(eligible).map(a=>({id:a.id,
           number:window.liveBagLabel.identity({lot_code:''},a).auctionNumber,title:a.listing_title,
           buyer:a.buyer,amount:a.amount,lotId:a.lot_id,time:a.sold_at||a.win_time_label||''}));
-        return {sales,printer:await destination(userId),show:data.connection.event_id};
+        const printer=await destination(userId);
+        const auto=command.action==='auto'?await automatic(userId,command.event_id,data,printer,command.enabled):autoView(loadAuto(userId,command.event_id));
+        return {sales,printer,automatic:auto,show:data.connection.event_id};
       }
       if(command.action!=='print' || !uuid(command.requestId) || !uuid(command.attemptId))throw Error('Invalid bag print request.');
       const sale=data.attempts.find(a=>a.id===command.attemptId);
@@ -63,6 +109,7 @@
       if(saved?.result)return saved.result;
       const printer=await destination(userId,saved?.printer);
       if(!printer)throw Error('Choose the bag-label printer under Settings first.');
+      if(command.automatic&&!printer.stationId)throw Error('Choose a paired printer for automatic printing.');
       if(!saved){saved={attemptId:sale.id,eventId:command.event_id,printer};localStorage.setItem(key,JSON.stringify(saved));}
       if(saved.localStarted)throw Error('A label file may already have downloaded. Check the local helper before requesting another copy.');
       const lot=one(await rpc('prepare_ebay_live_bag_label',{_attempt_id:sale.id}));
@@ -70,7 +117,7 @@
       const fresh=await dashboard(command.event_id);
       if(!eligible(fresh.attempts.find(a=>a.id===sale.id)))throw Error('Payment changed. Review this bag in Live Sales before printing.');
       if(printer.local){saved.localStarted=true;localStorage.setItem(key,JSON.stringify(saved));}
-      const result=await api.printBag(lot.id,{printDestination:printer,requestId:command.requestId});
+      const result=await api.printBag(lot.id,{printDestination:printer,requestId:command.requestId,automaticAttemptId:command.automatic?sale.id:undefined});
       saved.result={result,lotCode:lot.lot_code,attemptId:sale.id};localStorage.setItem(key,JSON.stringify(saved));
       return saved.result;
     }
