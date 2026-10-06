@@ -161,6 +161,12 @@ test('shared label metadata is normalized once per dataset rather than once per 
       if(!getLabelEventSearchTextForLine({id:'line-'+i}).includes('9400111899560000000000')) throw Error('Missing label');
     }`);
   assert.equal(run('metadataReads'),500);
+  run(`metadataReads=0;
+    state.relatedLabelEvents=[{id:'unrelated',order_line_ids:['unrelated'],
+      get label_metadata(){throw Error('Buyer search must not normalize unrelated label metadata');}}];
+    getLabelEventSearchTextForLine({id:'line-2'});
+    getLabelEventSearchTextForLine({id:'line-502'});`);
+  assert.equal(run('metadataReads'),1,'only matching labels need their text prepared, once per shared event');
 });
 
 test('receipt photos wait for the viewport, bound requests, and cancel detached work', async () => {

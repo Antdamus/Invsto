@@ -580,23 +580,28 @@ function getHistoryLabelSearchRows() {
     if (!events.has(key)) events.set(key, event);
   });
   const rows = [...events.values()].map((event, position) => ({
+    event,
     position,
     order_line_ids: event.order_line_ids || [],
     order_numbers: (event.order_numbers || []).map(normalizeEbayOrderNumber),
-    parts: getHistorySearchTextParts([
-      event.action,
-      event.shipment_id,
-      event.label_file_path,
-      event.signed_by_email,
-      getLabelMetadataSearchText(event.label_metadata),
-      ...(event.order_numbers || []),
-    ]),
+    parts: null,
   }));
   historyLabelSearchSnapshot = {
     labels: state.labelEvents, related: state.relatedLabelEvents,
     labelCount: state.labelEvents.length, relatedCount: state.relatedLabelEvents.length, rows,
   };
   return rows;
+}
+
+function getHistoryLabelSearchParts(row) {
+  if (!row.parts) {
+    const { event } = row;
+    row.parts = getHistorySearchTextParts([
+      event.action, event.shipment_id, event.label_file_path, event.signed_by_email,
+      getLabelMetadataSearchText(event.label_metadata), ...(event.order_numbers || []),
+    ]);
+  }
+  return row.parts;
 }
 
 function getLabelEventSearchTextForLine(line) {
@@ -606,7 +611,7 @@ function getLabelEventSearchTextForLine(line) {
     ...getHistoryRowsByKeys(rows, "order_numbers", [normalizeEbayOrderNumber(line?.order?.order_number)]),
   ]);
   // Keep first-event precedence, source order, and the original search tokens.
-  return unique([...matches].sort((a, b) => a.position - b.position).flatMap((row) => row.parts)).join(" ");
+  return unique([...matches].sort((a, b) => a.position - b.position).flatMap(getHistoryLabelSearchParts)).join(" ");
 }
 
 function normalizeLabelMetadata(metadata = {}, additions = {}) {
