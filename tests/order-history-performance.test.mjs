@@ -16,6 +16,7 @@ function app() {
     document.getElementById=id=>id==='proof-trail-modal'?modal:id==='event-list'?list:null;
     document.body={classList:{add(){},remove(){}}};
     document.querySelector=()=>container;
+    var realGetFilteredEvents=getFilteredEvents;
     getFilteredEvents=()=>[];
     getEventEvidencePhotos=event=>event.photos;
     signEventEvidencePhoto=async()=>{signed++;return 'https://example.test/photo.jpg'};`);
@@ -167,6 +168,31 @@ test('shared label metadata is normalized once per dataset rather than once per 
     getLabelEventSearchTextForLine({id:'line-2'});
     getLabelEventSearchTextForLine({id:'line-502'});`);
   assert.equal(run('metadataReads'),1,'only matching labels need their text prepared, once per shared event');
+});
+
+test('completion grouping keeps event filters while skipping search work for unrelated event categories', () => {
+  const {run}=app();
+  run(`getFilteredEvents=realGetFilteredEvents;
+    var filterValues={'history-search':'buyer-one','history-worker':'worker@example.test','history-status':'all'};
+    document.getElementById=id=>({value:filterValues[id]});
+    state.lines=[{id:'line',searchText:'buyer-one',fulfilled_by_email:'worker@example.test',order:{buyer_username:'buyer-one'}}];
+    state.adminEvents=[{id:'completion',action:'fulfilled_no_inventory',order_line_ids:['line'],label_metadata:{kind:'admin'}}];
+    state.labelEvents=[{id:'label',action:'attached',order_line_ids:['line'],label_metadata:{kind:'label'}}];
+    state.relatedOrderTaskEvents=[{id:'task',action:'completed',order_line_ids:['line'],label_metadata:{kind:'task'}}];
+    var metadataKinds=[];
+    getLabelMetadataSearchText=metadata=>{metadataKinds.push(metadata.kind);return '';};
+    getEventEvidencePhotos=()=>[];`);
+  assert.equal(run(`getFilteredEvents({category:'admin'}).map(e=>e.id).join(',')`),'completion');
+  assert.equal(run('metadataKinds.join(",")'),'admin','hidden label and receipt search text must not be built for grouping');
+  assert.equal(run(`getFilteredEvents().map(e=>e.id).join(',')`),'completion,label,task','the full Proof Trail must still include all categories');
+  for (const status of ['all','fulfilled','cancelled','admin_closeout','reverted','returns']) {
+    run(`filterValues['history-status']='${status}'`);
+    assert.equal(run(`getFilteredEvents({category:'admin'}).map(e=>e.id).join(',')`),run(`getFilteredEvents().filter(e=>e.category==='admin').map(e=>e.id).join(',')`));
+  }
+  run(`filterValues['history-status']='all';filterValues['history-worker']='other@example.test'`);
+  assert.equal(run(`getFilteredEvents({category:'admin'}).length`),0);
+  run(`filterValues['history-worker']='';filterValues['history-search']='no-match'`);
+  assert.equal(run(`getFilteredEvents({category:'admin'}).length`),0);
 });
 
 test('receipt photos wait for the viewport, bound requests, and cancel detached work', async () => {

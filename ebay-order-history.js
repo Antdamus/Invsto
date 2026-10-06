@@ -4915,7 +4915,7 @@ function buildHistoryGroups(lines) {
   const lineById = getLineByIdMap(lines);
   const coveredLineIds = new Set();
   const groups = [];
-  const completionEvents = getFilteredEvents()
+  const completionEvents = getFilteredEvents({ category: "admin" })
     .filter((event) =>
       event.category === "admin"
       && getEventLineIds(event).some((lineId) => lineById.has(lineId))
@@ -6548,7 +6548,7 @@ async function deleteHistoryVideoReceiptCapture(button) {
   }
 }
 
-function getFilteredEvents() {
+function getFilteredEvents({ category = "" } = {}) {
   const term = String($("history-search")?.value || "").trim();
   const worker = $("history-worker")?.value || "";
   const status = $("history-status")?.value || "all";
@@ -6562,6 +6562,9 @@ function getFilteredEvents() {
   ];
 
   return events.filter((event) => {
+    // Grouping uses completion events only. Do not build search text for the
+    // label and receipt trail until that trail is actually requested.
+    if (category && event.category !== category) return false;
     if (status === "fulfilled" && event.action !== "fulfilled_no_inventory") return false;
     if (status === "cancelled" && event.action !== "cancelled") return false;
     if (status === "admin_closeout" && event.category !== "admin") return false;
