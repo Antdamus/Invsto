@@ -127,6 +127,19 @@ test('auction photo counts page through results and reuse one summary across que
  await p.evaluate(()=>{photoDelay=600;liveAuctionPhotos.open(dashboard.attempts[0]);liveAuctionPhotos.sync([],'different-show');});
  assert.equal(await p.locator('#live-auction-photos').isVisible(),false);assert.deepEqual(p.errors,[]);
 });
+test('phone overview keeps bag controls accessible and expands the full show details on demand',async t=>{
+ const p=await open(t);
+ assert.equal(await p.locator('#ebay-show-insights').getAttribute('open'),null);
+ assert.equal(await p.locator('#ebay-running-margin').isVisible(),false);
+ assert.equal(await p.locator('#ebay-live-health').isVisible(),true);
+ await p.evaluate(()=>{dashboard.attempts[0].units=1;dashboard.attempts[0].minimum_total=80;});await p.locator('#ebay-live-refresh').click();
+ await p.waitForFunction(()=>document.getElementById('ebay-insights-total').textContent==='+$20.00');
+ await p.locator('#ebay-show-insights > summary').click();assert.equal(await p.locator('#ebay-running-margin').isVisible(),true);assert.equal(await p.locator('#ebay-history-recovery').isVisible(),true);
+ await p.locator('#ebay-show-insights > summary').click();await p.setViewportSize({width:320,height:740});
+ assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ await p.locator('#ebay-auction-search').fill('001');await p.locator('[data-action=photos]').click();await p.getByText(/No live photos saved yet/).waitFor();
+ assert.deepEqual(p.errors,[]);
+});
 
 test('linked show waits for paid selection and claims a bag through existing scan UI',async t=>{const p=await open(t);assert.equal(await p.locator('#item-scan').isDisabled(),true);assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='create_live_sale_lot')),false);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);assert.equal(await p.locator('#auction-number').getAttribute('readonly'),'');assert.match(await p.locator('#ebay-live-current').innerText(),/testbuyer.*\$100/);assert.deepEqual(p.errors,[]);});
 test('late failure disables active phone scanner and removes the sale from completed totals',async t=>{const p=await open(t);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);await p.evaluate(()=>{dashboard.attempts[0].payment_state='failed';});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('item-scan').disabled);await p.locator('#ebay-back-to-queue').click();await p.locator('#ebay-live-filter').selectOption('attention');assert.match(await p.locator('#ebay-live-queue').innerText(),/STOP.*check this bag/);assert.equal(await p.locator('[data-action=scan]').count(),0);await p.locator('#ebay-show-totals > summary').click();assert.match(await p.locator('#ebay-live-totals').innerText(),/0 \/ \$0.00/);});
@@ -277,7 +290,7 @@ async function addManualPhoto(p,input='manual-live-item-photo'){
  await p.locator('#'+prefix+'-preview').waitFor({state:'visible'});
 }
 test('manual item photo and break-even can be added then edited directly in final review on a phone',async t=>{
- const p=await open(t);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);
+ const p=await open(t);await p.locator('#ebay-show-insights > summary').click();await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);
  await p.locator('.manual-live-item-box > summary').click();await p.locator('#manual-live-item-category').selectOption('Chain');await p.locator('#manual-live-item-description').fill('Gold chain');await p.locator('#manual-live-item-quantity').fill('2');await p.locator('#manual-live-item-minimum').fill('40');
  assert.equal(await p.locator('#manual-live-item-camera').getAttribute('capture'),'environment');await addManualPhoto(p);assert.equal(await p.locator('#add-manual-live-item').isEnabled(),true);await p.locator('#add-manual-live-item').click();await p.waitForFunction(()=>mockManualItems.length===1);
  assert.equal(await p.evaluate(()=>calls.find(c=>c.name==='upload').type),'image/jpeg');assert.match(await p.evaluate(()=>mockManualItems[0].photo_path),/^live-manual\/lot\//);
@@ -375,7 +388,7 @@ test('a stopped helper still reports the explicit ended event without inventing 
 });
 
 test('running counter includes priced open bags, separates closed results, and excludes unpaid or incomplete bags',async t=>{
- const p=await open(t);
+ const p=await open(t);await p.locator('#ebay-show-insights > summary').click();
  await p.evaluate(()=>{const a=dashboard.attempts[0];Object.assign(a,{units:1,minimum_total:80});dashboard.attempts=[a,
  {...a,id:'closed-loss',seller_id:'next-seller',seller_name:'Sydney Miller',amount:50,minimum_total:70,closed_at:new Date().toISOString()},
  {...a,id:'free-cost',amount:40,minimum_total:0},
