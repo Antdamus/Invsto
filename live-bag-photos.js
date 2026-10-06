@@ -9,10 +9,10 @@
   async function load(container,lotId,openPhoto,{force=false}={}){
     if(!container)return;
     const previous=hosts.get(container);
-    if(!force&&previous?.lotId===lotId&&(previous.loading||Date.now()-previous.at<15000))return;
+    if(!force&&previous&&previous.lotId===lotId&&(previous.loading||Date.now()-previous.at<15000))return;
     const state={lotId,at:Date.now(),loading:true};hosts.set(container,state);
     container.replaceChildren();container.hidden=true;
-    if(!lotId)return;
+    if(!lotId){state.loading=false;return;}
     styles();container.classList.add('live-bag-photos');
     const current=()=>hosts.get(container)===state&&container.isConnected;
     try{

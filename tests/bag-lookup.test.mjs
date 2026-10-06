@@ -88,6 +88,23 @@ test('staff scan loads full winner, seller, manual photos and signed negative re
   assert.equal(await p.evaluate(()=>calls.some(c=>c.rpc&&!['get_live_sale_seller_directory','get_live_bag_order_matches'].includes(c.rpc))),false);
 });
 
+test('photo gallery starts with no selected bag and loads after a bag is selected',async t=>{
+  const p=await open(t,{query:''});
+  const result=await p.evaluate(async()=>{
+    const host=document.createElement('section');document.body.append(host);
+    await liveBagPhotos.load(host,undefined,()=>{});
+    await liveBagPhotos.load(host,undefined,()=>{});
+    const emptyHidden=host.hidden;
+    const emptyQueries=calls.filter(c=>c.table==='live_sale_bag_photos').length;
+    livePhotos=[{id:'photo-a',lot_id:'lot-a',photo_path:'live-bags/lot-a/photo.jpg',captured_at:'2026-10-06T20:00:00Z'}];
+    await liveBagPhotos.load(host,'lot-a',()=>{});
+    const loaded=host.querySelectorAll('img').length;
+    await liveBagPhotos.load(host,undefined,()=>{});
+    return {emptyHidden,emptyQueries,loaded,cleared:host.hidden&&host.childElementCount===0};
+  });
+  assert.deepEqual(result,{emptyHidden:true,emptyQueries:0,loaded:1,cleared:true});
+});
+
 test('livestream photos open from the exact scanned bag, survive item-free bags, and recover from storage errors',async t=>{
   const p=await open(t);
   await p.evaluate(()=>{items=[];manual=[];livePhotos=[{id:'photo-a',lot_id:'lot-a',photo_path:'live-bags/lot-a/photo.jpg',captured_at:'2026-10-06T20:00:00Z',width:720,height:1280}];});
