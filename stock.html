@@ -4,7 +4,8 @@
   <!-- 🔤 Character encoding -->
   <meta charset="UTF-8" />
   <!-- 📱 Responsive design support -->
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <meta name="theme-color" content="#141416" />
   <!-- 🪪 Page title -->
   <title>OG Jewelry Stock</title>
 
@@ -20,15 +21,21 @@
 
 
   <!-- 🅰️ Google Fonts: Display Serif Font -->
-  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
   <!-- 🧱 Google Icons: Outlined and Filled -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
   <script src="barcode-scanner.js?v=20260929-certificate" defer></script>
+  <link rel="stylesheet" href="phone-workspace.css?v=20261006-1" />
+  <script src="phone-workspace.js?v=20261006-1" defer></script>
 </head>
 
-<body class="stock-body stock-access-loading">
+<body class="stock-body stock-access-loading" data-phone-page="stock">
+  <div class="mobile-header">
+    <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">☰</button>
+    <span class="mobile-title">Stock</span>
+  </div>
 
   <!-- Home Button -->
   <button id="toggle-controller" class="toggle-controller-btn" title="Show/Hide Controls" aria-label="Toggle Controls">
@@ -161,6 +168,9 @@
         <!-- 🔍 Basic Search Panel -->
         <div class="filter-tab-content active" id="tab-basic">
           <div class="filter-grid">
+            <label class="stock-quick-search-label">Search stock
+              <input type="search" id="stock-quick-search" name="query" form="filter-form" placeholder="Name, description or barcode" autocomplete="off" autocapitalize="off" />
+            </label>
             <input type="text" name="title" placeholder="Search title..." />
             <input type="text" name="description" placeholder="Search description..." />
             <input type="text" id="stock-barcode-search" data-camera-scan name="barcode" placeholder="Search barcode..." />
@@ -328,7 +338,7 @@
   <script src="stock-checkout.js"></script>
   <script src="stock-transferstock.js"></script>
   <script src="stock-storage-transfer.js"></script>
-  <script src="stock.js?v=20261006-parallel-cards"></script>
+  <script src="stock.js?v=20261006-phone"></script>
 
   <!-- 📢 Toast + Loading Spinner Containers -->
   <div id="toast-container"></div>

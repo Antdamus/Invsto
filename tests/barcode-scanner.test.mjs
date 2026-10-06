@@ -12,7 +12,7 @@ before(async () => {
     if (!/^[a-z\d_/.-]+$/i.test(name) || name.includes('..')) return res.writeHead(404).end();
     try {
       let content = await readFile(new URL(name, root));
-      if (name.endsWith('.html')) content = content.toString().replace(/<script\b[\s\S]*?<\/script>/gi, tag => tag.includes('src="barcode-scanner.js') ? tag : '');
+      if (name.endsWith('.html')) content = content.toString().replace(/<script\b[\s\S]*?<\/script>/gi, tag => /src="(?:barcode-scanner|phone-workspace)\.js/.test(tag) ? tag : '');
       res.setHeader('Content-Type', name.endsWith('.wasm') ? 'application/wasm' : name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html');
       res.end(content);
     } catch { res.writeHead(404).end(); }
@@ -260,7 +260,7 @@ test('stock scan clears search filters and returns the matching item through rea
     applySortAndRender = items => { window.filteredCodes = items.map(item => item.barcode); };
     updateFilterChips = () => {}; updateURLFromForm = () => {}; showToast = () => {};
     setupDynamicFilters('filter-form'); setupClearFilters();
-    document.querySelector('[name="title"]').value = 'Watch';
+    document.querySelector('#filter-form [name="title"]').value = 'Watch';
     showOnlyFavorites = true;
     document.querySelector('#show-favorites-only').checked = true;
     const location = document.createElement('span');
@@ -299,6 +299,9 @@ test('barcode entry fields across the app have one adjacent camera control, incl
     const fields = await page.locator('input').evaluateAll(inputs => inputs
       // The certificate QR flow has its own explicit control and acceptance test.
       .filter(input => !document.querySelector(`[data-scan-target="${input.id}"][data-scan-mode="certificate"]`))
+      // Stock's unified text search uses the adjacent Scan item action, which
+      // clears filters and sends the accepted code to the dedicated barcode field.
+      .filter(input => input.id !== 'stock-quick-search')
       .filter(input => ['text', 'search'].includes(input.type) && !input.readOnly && input.id !== 'manual-live-item-description' && /barcode|scan|tracking/i.test(`${input.id} ${input.placeholder}`))
       .map(input => ({ id: input.id, marked: input.hasAttribute('data-camera-scan'), adjacent: input.parentElement.classList.contains('camera-scan-field'), buttons: [...input.parentElement.querySelectorAll('[data-scan-target]')].filter(button => button.dataset.scanTarget === input.id).length, disabled: input.disabled, buttonDisabled: input.nextElementSibling?.disabled })));
     for (const field of fields) {
@@ -331,8 +334,7 @@ test('the Stock barcode filter has a visible mobile camera button and keeps the 
   const page = await pageFor(t, 'stock.html');
   await page.addScriptTag({ url: `${origin}/stock.js` });
   await page.evaluate(() => {
-    setupToggleBehavior('toggle-filters', 'filter-section', 'Hide Filters', 'Show Filters');
-    document.getElementById('toggle-filters').click();
+    document.getElementById('phone-filter-button').click();
     allItems = [{ id: 'one', barcode: '000123', title: 'Coin' }, { id: 'two', barcode: '456', title: 'Watch' }];
     applySortAndRender = items => { window.filteredCodes = items.map(item => item.barcode); };
     updateFilterChips = () => {}; updateURLFromForm = () => {}; showToast = () => {};

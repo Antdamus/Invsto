@@ -1298,6 +1298,7 @@ function buildLocationChips(item) {
       const showSensitive = canViewSensitiveStockData();
 
       return {
+        query: String(formData.get("query") || "").trim().toLowerCase(),
         title: formData.get("title")?.toLowerCase(),
         description: formData.get("description")?.toLowerCase(),
         barcode: formData.get("barcode")?.toLowerCase(),
@@ -1377,6 +1378,8 @@ function buildLocationChips(item) {
             : filters.categories.some(fCat => (item.categories || []).includes(fCat));
 
         return (
+          (!filters.query || item.title?.toLowerCase().includes(filters.query) ||
+            item.description?.toLowerCase().includes(filters.query) || matchesStockBarcode(item, filters.query)) &&
           (!filters.title || item.title?.toLowerCase().includes(filters.title)) &&
           (!filters.description || item.description?.toLowerCase().includes(filters.description)) &&
           (!filters.barcode || matchesStockBarcode(item, filters.barcode)) &&
@@ -1757,7 +1760,7 @@ function buildLocationChips(item) {
     
       // ✅ Now repopulate form inputs from URL
       for (const [key, value] of Object.entries(params)) {
-        const input = form.querySelector(`[name="${key}"]`);
+        const input = form.elements.namedItem(key);
         if (input) input.value = value;
       }
     
@@ -1919,8 +1922,18 @@ function buildLocationChips(item) {
     };
 
     // 🔁 Attach event listeners to all <input> and <select> elements inside the form
-    const inputs = form.querySelectorAll("input, select");
+    const inputs = [...form.elements].filter(input => input.matches("input, select"));
     inputs.forEach(input => {
+      if (input.id === "stock-quick-search") {
+        let searchTimer;
+        input.addEventListener("input", () => {
+          clearTimeout(searchTimer);
+          searchTimer = setTimeout(handleFilterChange, 250);
+        });
+        input.addEventListener("change", () => { clearTimeout(searchTimer); handleFilterChange(); });
+        form.addEventListener("reset", () => clearTimeout(searchTimer));
+        return;
+      }
       input.addEventListener("input", handleFilterChange); // 👂 Live re-filtering on any input change
     });
 
@@ -2154,7 +2167,7 @@ function buildLocationChips(item) {
   });
 
         } else {
-          const input = document.querySelector(`[name="${key}"]`);
+          const input = document.getElementById("filter-form")?.elements.namedItem(key);
           if (input) input.value = "";
         }
         syncHiddenInputsWithDropdowns()
@@ -2240,6 +2253,7 @@ function buildLocationChips(item) {
           continue; // skip the rest of loop for this key
 
         // ✅ Handle all other known keys with a single-value label
+        case "query":        label = `Search: "${value}"`; break;
         case "title":        label = `Title: "${value}"`; break;
         case "description":  label = `Description: "${value}"`; break;
         case "barcode":      label = `Barcode: ${value}`; break;
