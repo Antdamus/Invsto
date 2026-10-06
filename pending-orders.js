@@ -2068,8 +2068,43 @@ function parseAwaitingSummaryTotal(value) {
   return Number.isFinite(total) ? total : 0;
 }
 
+function isVerifiedAwaitingShipmentReportUrl(value) {
+  try {
+    const url = new URL(value);
+    const filters = url.searchParams.getAll("filter");
+    const statuses = (filters[0] || "").split(",").filter(part => part.startsWith("status:"));
+    return url.protocol === "https:" && url.hostname === "www.ebay.com"
+      && /^\/sh\/ord\/?$/.test(url.pathname) && filters.length === 1
+      && statuses.length === 1 && statuses[0] === "status:AWAITING_SHIPMENT";
+  } catch { return false; }
+}
+
+function validatePendingOrderReport(rows, metadata = {}) {
+  const sourceUrl = String(metadata.pageUrl || metadata.sourcePageUrl || "").trim();
+  if ((sourceUrl || metadata.source === "ebay-awaiting-shipment-report")
+      && !isVerifiedAwaitingShipmentReportUrl(sourceUrl)) {
+    throw new Error("Report not imported. Open eBay Orders, select Awaiting shipment, then send a new report. All orders and unverified report pages cannot be imported into Pending Orders.");
+  }
+  const historical = rows.filter(row => csvCell(row, "Order Number") && csvCell(row, "Item Title")
+    && pendingReportRowIsNotAwaiting(row));
+  if (historical.length) {
+    throw new Error(`Report not imported: ${historical.length} row(s) already show shipment, cancellation, refund, or unpaid status. Download a fresh Awaiting shipment report. No orders were changed.`);
+  }
+}
+
+function pendingReportRowIsNotAwaiting(row) {
+  const shipped = csvCell(row, "Shipped On Date");
+  // A malformed but nonempty date must not silently turn a shipped order pending.
+  if (shipped && !/^(?:--?|-{3}|n\/a|none|null)$/i.test(shipped)) return true;
+  return ["Order Status", "Payment Status", "Fulfillment Status"].some(header =>
+    /^(?:shipped|delivered|fulfilled|completed|cancelled|canceled|refunded|fully refunded|fully_refunded|unpaid|awaiting payment)$/i.test(csvCell(row, header)));
+}
+
 async function importEbayPendingOrdersReport(text, metadata = {}) {
   const rows = rowsFromEbayCsv(text);
+  // Validate the whole file before any reads or writes: never partially import a
+  // historical report, including a transfer from an older extension.
+  validatePendingOrderReport(rows, metadata);
   const payload = buildOrderImportPayload(rows).map((entry) => ({
     ...entry,
     order: {

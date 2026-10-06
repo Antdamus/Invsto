@@ -654,11 +654,12 @@
 
   function isAwaitingShipmentTab(tab) {
     const tabUrl = normalizeUrl(tab?.url);
-    if (!tabUrl || !/(^|\.)ebay\.com$/i.test(tabUrl.hostname)) return false;
+    if (!tabUrl || tabUrl.protocol !== "https:" || tabUrl.hostname !== "www.ebay.com") return false;
     const path = tabUrl.pathname.replace(/\/+$/, "");
     if (path !== "/sh/ord") return false;
-    const sample = `${tabUrl.search} ${tabUrl.hash} ${tab?.title || ""}`;
-    return /AWAITING_SHIPMENT|awaiting shipment/i.test(sample);
+    const filters = tabUrl.searchParams.getAll("filter");
+    const statuses = (filters[0] || "").split(",").filter(part => part.startsWith("status:"));
+    return filters.length === 1 && statuses.length === 1 && statuses[0] === "status:AWAITING_SHIPMENT";
   }
 
   function waitForTabComplete(tabId, timeoutMs = 25000, options = {}) {
@@ -1211,6 +1212,9 @@
   }
 
   async function relayAwaitingReportToApp(reportTransfer) {
+    if (!isAwaitingShipmentTab({url: reportTransfer?.metadata?.pageUrl})) {
+      throw new Error("Report not sent. Select Awaiting shipment in eBay Orders and download a new report.");
+    }
     const appUrl = await getAppUrl();
     if (!appUrl) throw new Error("Set the OG Pending Orders URL in the extension options first.");
 

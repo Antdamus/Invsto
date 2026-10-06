@@ -722,14 +722,14 @@
   }
 
   function isAwaitingShipmentOrdersPage() {
-    const sample = getPageTextSample();
     const url = new URL(window.location.href);
-    const pathLooksRight = /\/sh\/ord\/?$/i.test(url.pathname);
-    const filterLooksRight = /AWAITING_SHIPMENT|awaiting[_\s-]*shipment/i.test(`${url.search} ${url.hash} ${sample}`);
-    const pageLooksRight = /awaiting shipment|ready to ship|manage orders/i.test(sample);
-    return pathLooksRight
-      && filterLooksRight
-      && pageLooksRight
+    const filters = url.searchParams.getAll("filter");
+    const statuses = (filters[0] || "").split(",").filter(part => part.startsWith("status:"));
+    // Every Orders page contains "Awaiting shipment" in its navigation. Only
+    // the actual selected URL filter identifies the report being downloaded.
+    return url.protocol === "https:" && url.hostname === "www.ebay.com"
+      && /^\/sh\/ord\/?$/.test(url.pathname)
+      && filters.length === 1 && statuses.length === 1 && statuses[0] === "status:AWAITING_SHIPMENT"
       && Boolean(getDownloadReportButton());
   }
 
