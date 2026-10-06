@@ -530,6 +530,62 @@ test('order history recognizes phone screenshots and respects item-line identity
   assert.deepEqual(result, [1, 0]);
 });
 
+test('order history large ledger preserves totals, buyer search, tasks, and receipt details', async t => {
+  const p = await open(t, {pageName:'ebay-order-history', desktop:true});
+  const result = await p.evaluate(() => {
+    document.getElementById('receipt-test-host')?.remove();
+    state.employee={role:'admin'};
+    document.getElementById('history-from').value='2026-09-07';
+    document.getElementById('history-to').value='2026-10-06';
+    const rows=Array.from({length:1000},(_,i)=>({
+      id:'line-'+i,order_id:'order-'+i,item_number:String(123456789000+i),item_title:'Test silver jewelry '+i,
+      line_status:'fulfilled',stock_transaction_id:'stock-'+i,quantity:1,fulfilled_quantity:1,total_price:25,
+      fulfilled_at:'2026-10-06T14:00:00Z',fulfilled_by_email:'test@example.test',
+      ebay_orders:{id:'order-'+i,order_number:'11-22222-'+String(10000+i),buyer_username:'test-buyer-'+Math.floor(i/6),
+        label_metadata:{trackingNumbers:['9400111899560000000000']}}
+    }));
+    state.relatedOrderTasks=rows.flatMap((line,i)=>[
+      {id:'task-'+i,order_line_ids:[line.id],title:'Check packing '+i,status:'open'},
+      {id:'receipt-'+i,order_line_ids:[line.id],title:'Video receipt screenshot captured',status:'resolved'},
+    ]);
+    state.relatedOrderTaskEvents=rows.flatMap((line,i)=>[
+      {id:'task-event-'+i,task_id:'task-'+i,order_line_ids:[line.id],category:'task',action:'created',created_at:'2026-10-06T14:00:00Z',notes:'Packing note '+i},
+      {id:'receipt-event-'+i,task_id:'receipt-'+i,order_line_ids:[line.id],category:'task',action:'completed',created_at:'2026-10-06T14:00:00Z',
+        photo_attachments:[{bucket:'proof',path:'video-receipts/'+line.item_number+'.png',label:'Video receipt - '+line.item_number}]}
+    ]);
+    window.photoReads=0;
+    signEventEvidencePhoto=async()=>{photoReads++;return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=';};
+    const start=performance.now();
+    state.lines=rows.map(normalizeLine);
+    rebuildHistoryLineSearchIndex();
+    applyFilters();
+    return {ms:performance.now()-start,groups:document.querySelectorAll('.history-order-card').length,
+      lines:document.getElementById('summary-shipped-lines').textContent,gross:document.getElementById('summary-gross').textContent,
+      taskCounts:getVisibleHistoryGroups().map(group=>getHistoryGroupTaskSummary(group).totalCount),photoReads};
+  });
+  t.diagnostic(`1,000-line ledger normalization, search indexing, grouping, totals, and DOM render: ${result.ms.toFixed(1)} ms`);
+  assert.equal(result.groups,167);
+  assert.equal(result.lines,'1000');
+  assert.equal(result.gross,'$25,000.00');
+  assert.equal(result.taskCounts.reduce((a,b)=>a+b,0),1000);
+  assert.equal(result.photoReads,0,'collapsed groups must not request photos');
+  await p.locator('#history-search').fill('test-buyer-42');
+  await p.evaluate(()=>applyFilters());
+  assert.equal(await p.locator('.history-order-card').count(),1);
+  assert.equal(await p.locator('#summary-shipped-lines').textContent(),'6');
+  assert.equal(await p.locator('#summary-gross').textContent(),'$150.00');
+  await p.locator('.history-group-toggle').click();
+  assert.equal(await p.locator('.history-line-row').count(),6);
+  assert.equal(await p.locator('[data-history-video-receipt-photo]').count(),6);
+  assert.match(await p.locator('.history-order-task-list').first().textContent(),/Check packing 25[2-7]/);
+  await p.waitForFunction(()=>[...document.querySelectorAll('[data-history-video-receipt-photo]')].every(node=>node.dataset.loaded==='true'));
+  await mkdir(new URL('../test-results/',import.meta.url),{recursive:true});
+  await p.screenshot({path:new URL('../test-results/history-optimized-local-verification.png',import.meta.url).pathname.replace(/^\/(?=[A-Z]:)/i,''),fullPage:false});
+  await p.locator('#history-search').fill('Packing note 999');
+  await p.evaluate(()=>applyFilters());
+  assert.equal(await p.locator('#summary-shipped-lines').textContent(),'1','task notes remain searchable');
+});
+
 test('desktop receipt opens through the extension on the first click and closes options before return', async t => {
   const p = await open(t, {desktop: true});await trigger(p).click();
   await p.waitForFunction(() => extensionRequests.length === 1);

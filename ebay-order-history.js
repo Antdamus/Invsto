@@ -200,10 +200,18 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+const historyMoneyFormatter = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
+const historyDateTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+});
+const historyDateOnlyFormatter = new Intl.DateTimeFormat(undefined, {
+  month: "short", day: "numeric", year: "numeric",
+});
+
 function formatMoney(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "$0.00";
-  return number.toLocaleString(undefined, { style: "currency", currency: "USD" });
+  return historyMoneyFormatter.format(number);
 }
 
 function parseMoney(value) {
@@ -215,23 +223,14 @@ function formatDateTime(value) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return historyDateTimeFormatter.format(date);
 }
 
 function formatDateOnly(value) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return historyDateOnlyFormatter.format(date);
 }
 
 function toDateInputValue(date = new Date()) {
@@ -275,6 +274,34 @@ function uniqueById(rows = []) {
     if (key && !byId.has(key)) byId.set(key, row);
   });
   return [...byId.values()];
+}
+
+// History datasets are replaced after each load. Index their relationships once
+// instead of scanning every task/event for every line and buyer group. Keep row
+// order and duplicates intact; callers own their existing deduplication rules.
+const historyRowIndexes = new WeakMap();
+function getHistoryRowsByKeys(rows, field, keys = []) {
+  const wanted = keys.filter(Boolean);
+  if (!wanted.length || !rows.length) return [];
+  let indexes = historyRowIndexes.get(rows);
+  if (!indexes || indexes.length !== rows.length) {
+    indexes = { length: rows.length, fields: new Map() };
+    historyRowIndexes.set(rows, indexes);
+  }
+  let index = indexes.fields.get(field);
+  if (!index) {
+    index = new Map();
+    rows.forEach((row, position) => {
+      const values = Array.isArray(row[field]) ? row[field] : [row[field]];
+      new Set(values.filter(Boolean)).forEach((value) => {
+        if (!index.has(value)) index.set(value, []);
+        index.get(value).push(position);
+      });
+    });
+    indexes.fields.set(field, index);
+  }
+  const positions = new Set(wanted.flatMap((key) => index.get(key) || []));
+  return [...positions].sort((a, b) => a - b).map((position) => rows[position]);
 }
 
 function getOrderFromLine(line) {
@@ -1189,6 +1216,10 @@ function evidencePhotoMatchesLine(photo = {}, event = {}, line = {}) {
 function getHistoryLineVideoReceiptPhotos(line = {}, events = []) {
   const seen = new Set();
   return events
+    .filter((event) => {
+      const lineIds = getEventLineIds(event);
+      return !lineIds.length || lineIds.includes(line.id);
+    })
     .flatMap((event) => getEventEvidencePhotos(event)
       .filter(isVideoReceiptEvidencePhoto)
       .filter((photo) => evidencePhotoMatchesLine(photo, event, line))
@@ -2593,15 +2624,20 @@ async function loadOrderTaskDataForLines(lineIds = [], orderIds = [], options = 
   if (!taskIds.length) return { tasks: [], events: [] };
 
   const events = [];
-  for (const chunk of chunkArray(taskIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
-    const { data, error: eventError } = await supabase
+  const eventChunks = chunkArray(taskIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE);
+  // These reads are independent. Bound the batch so large date ranges do not
+  // start a request for every chunk at once, and preserve the original row order.
+  for (let start = 0; start < eventChunks.length; start += 3) {
+    const results = await Promise.all(eventChunks.slice(start, start + 3).map((chunk) => supabase
       .from("ebay_order_task_events")
       .select("*")
       .in("task_id", chunk)
       .order("created_at", { ascending: false })
-      .limit(1000);
-    if (eventError) throw eventError;
-    events.push(...(data || []));
+      .limit(1000)));
+    for (const { data, error: eventError } of results) {
+      if (eventError) throw eventError;
+      events.push(...(data || []));
+    }
   }
 
   const enrichedEvents = uniqueById(events).map((event) => {
@@ -4736,21 +4772,28 @@ function getEventOrderNumbers(event, lines = []) {
 }
 
 function getRelatedEventsForLineIds(lineIds = []) {
-  const wanted = new Set(lineIds);
-  return [
-    ...state.relatedAdminEvents.map((event) => ({ ...event, category: "admin" })),
-    ...state.relatedRevertEvents.map((event) => ({ ...event, category: "revert", action: "reverted" })),
-    ...state.relatedLabelEvents.map((event) => ({ ...event, category: "label" })),
-    ...state.relatedReturnEvents.map((event) => ({ ...event, category: "return" })),
-    ...state.relatedOrderTaskEvents.map((event) => ({ ...event, category: "task" })),
-    ...state.adminEvents.map((event) => ({ ...event, category: "admin" })),
-    ...state.revertEvents.map((event) => ({ ...event, category: "revert", action: "reverted" })),
-    ...state.labelEvents.map((event) => ({ ...event, category: "label" })),
-    ...state.returnEvents.map((event) => ({ ...event, category: "return" })),
-  ]
-    .filter((event) => getEventLineIds(event).some((lineId) => wanted.has(lineId)))
-    .filter((event, index, array) => array.findIndex((entry) => entry.id === event.id && entry.category === event.category) === index)
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  const seenByCategory = new Map();
+  const events = [];
+  [
+    [state.relatedAdminEvents, "admin"],
+    [state.relatedRevertEvents, "revert"],
+    [state.relatedLabelEvents, "label"],
+    [state.relatedReturnEvents, "return"],
+    [state.relatedOrderTaskEvents, "task"],
+    [state.adminEvents, "admin"],
+    [state.revertEvents, "revert"],
+    [state.labelEvents, "label"],
+    [state.returnEvents, "return"],
+  ].forEach(([rows, category]) => {
+    if (!seenByCategory.has(category)) seenByCategory.set(category, new Set());
+    const seen = seenByCategory.get(category);
+    getHistoryRowsByKeys(rows, "order_line_ids", lineIds).forEach((event) => {
+      if (seen.has(event.id)) return;
+      seen.add(event.id);
+      events.push(category === "revert" ? { ...event, category, action: "reverted" } : { ...event, category });
+    });
+  });
+  return events.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 }
 
 function getEventLabel(event) {
@@ -5029,12 +5072,14 @@ function getVisibleHistoryGroups() {
   const sort = $("history-sort")?.value || "date_desc";
   const groups = buildHistoryGroups(state.filteredLines)
     .filter((group) => {
+      if (labelFilter === "all") return true;
       const hasLabel = historyGroupHasAttachedLabel(group);
       if (labelFilter === "missing") return !hasLabel;
       if (labelFilter === "attached") return hasLabel;
       return true;
     })
     .filter((group) => {
+      if (proofFilter === "all") return true;
       const extraProofCount = getHistoryExtraOrderProofPhotos(group).length;
       if (proofFilter === "extra_photos") return extraProofCount > 0;
       if (proofFilter === "missing_extra_photos") return extraProofCount === 0;
@@ -5379,17 +5424,12 @@ function getHistoryOrderTaskStatusLabel(status) {
 }
 
 function getHistoryTaskEventsForLineIds(lineIds = []) {
-  const wanted = new Set(lineIds.filter(Boolean));
-  if (!wanted.size) return [];
-  return state.relatedOrderTaskEvents.filter((event) => (
-    (event.order_line_ids || []).some((lineId) => wanted.has(lineId))
-  ));
+  return getHistoryRowsByKeys(state.relatedOrderTaskEvents, "order_line_ids", lineIds);
 }
 
 function getHistoryTaskEventsForTaskId(taskId = "") {
   if (!taskId) return [];
-  return state.relatedOrderTaskEvents
-    .filter((event) => event.task_id === taskId)
+  return getHistoryRowsByKeys(state.relatedOrderTaskEvents, "task_id", [taskId])
     .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 }
 
@@ -5471,15 +5511,9 @@ function getHistoryOrderTaskScopeLabelFromTask(task = {}) {
 }
 
 function getHistoryOrderTasksForLineIds(lineIds = [], options = {}) {
-  const wanted = new Set(lineIds.filter(Boolean));
-  if (!wanted.size) return [];
-  return state.relatedOrderTasks
-    .filter((task) => !isHiddenHistoryOrderTask(task))
+  return getHistoryRowsByKeys(state.relatedOrderTasks, "order_line_ids", lineIds)
     .filter((task) => options.includeWholeOrderTasks !== false || getHistoryOrderTaskScopeFromTask(task) === "line")
-    .filter((task) => {
-      const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
-      return taskLineIds.some((lineId) => wanted.has(lineId));
-    });
+    .filter((task) => !isHiddenHistoryOrderTask(task));
 }
 
 function summarizeHistoryOrderTask(task = {}) {
@@ -6022,7 +6056,7 @@ function getHistoryGroupSummaryBadges({ group, primaryStatus, statusClass, hasAt
   }
   const financeStatus = getLinesFinanceStatus(group.lines || []);
   if (financeStatus) badges.push(renderFinanceBadgeMarkup(financeStatus, "history-line-finance-pill"));
-  const extraProofCount = getHistoryExtraOrderProofPhotos(group).length;
+  const extraProofCount = groupPhotos.filter(isHistoryExtraOrderProofPhoto).length;
   if (extraProofCount) badges.push(`<span class="history-proof-pill is-extra">${extraProofCount} extra proof</span>`);
   if (groupPhotos.length) badges.push(`<span class="history-proof-pill">${groupPhotos.length} photo${groupPhotos.length === 1 ? "" : "s"}</span>`);
   if (receiptCount) badges.push(`<span class="history-proof-pill is-video">${receiptCount} receipt${receiptCount === 1 ? "" : "s"}</span>`);
@@ -6337,9 +6371,10 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
 
 async function hydrateHistoryGroupEvidencePhotos(groups) {
   for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
-    const photos = getHistoryGroupEvidencePhotos(groups[groupIndex]);
     const container = document.querySelector(`[data-group-evidence-index="${groupIndex}"]`);
-    if (!container || !photos.length) continue;
+    if (!container) continue;
+    const photos = getHistoryGroupEvidencePhotos(groups[groupIndex]);
+    if (!photos.length) continue;
 
     const signed = await Promise.all(photos.map(async (photo, index) => ({
       ...photo,

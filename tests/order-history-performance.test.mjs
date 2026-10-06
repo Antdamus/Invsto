@@ -22,6 +22,135 @@ function app() {
   return {run};
 }
 
+test('task lookups preserve visibility, scope, latest updates, and refreshed data', () => {
+  const {run}=app();
+  run(`state.relatedOrderTasks=[
+    {id:'outside',order_line_ids:['other'],title:'Other order'},
+    {id:'visible',order_line_ids:['line'],title:'Check packing',status:'open'},
+    {id:'whole',order_line_ids:['line','second'],title:'Whole order',metadata:{task_scope:'order'}},
+    {id:'hidden',order_line_ids:['line'],metadata:{hidden_from_task_board:true}},
+    {id:'receipt',order_line_ids:['line'],title:'Video receipt screenshot captured'},
+    {id:'note',order_line_ids:['line'],metadata:{source:'pending_order_line_note'}},
+    {id:'cancelled',order_line_ids:['line'],title:'Assignment cancelled'},
+    {id:'assigned',order_line_ids:['line'],title:'Assignment cancelled',assigned_to_email:'staff@example.test'}
+  ];
+  state.relatedOrderTaskEvents=[
+    {id:'old',task_id:'visible',order_line_ids:['line'],created_at:'2026-10-05T12:00:00Z',notes:'Old note'},
+    {id:'new',task_id:'visible',order_line_ids:['line'],created_at:'2026-10-06T12:00:00Z',notes:'New note'},
+    {id:'outside-event',task_id:'outside',order_line_ids:['other'],created_at:'2026-10-06T12:00:00Z'}
+  ];`);
+  assert.equal(run(`getHistoryOrderTasksForLineIds(['line','second']).map(t=>t.id).join(',')`),'visible,whole,assigned');
+  assert.equal(run(`getHistoryOrderTasksForLineIds(['line'],{includeWholeOrderTasks:false}).map(t=>t.id).join(',')`),'visible,assigned');
+  assert.equal(run(`getHistoryTaskSummaryForLineIds(['line']).tasks.find(t=>t.id==='visible').latestEvent.notes`),'New note');
+  assert.equal(run(`getHistoryTaskEventsForLineIds(['second','line']).map(e=>e.id).join(',')`),'old,new');
+  run(`state.relatedOrderTaskEvents=[{id:'refreshed',task_id:'visible',order_line_ids:['line']}];`);
+  assert.equal(run(`getHistoryTaskEventsForTaskId('visible')[0].id`),'refreshed');
+  run(`state.relatedOrderTaskEvents.unshift({id:'added',task_id:'visible',order_line_ids:['second']});`);
+  assert.equal(run(`getHistoryTaskEventsForLineIds(['second'])[0].id`),'added');
+});
+
+test('large history lookups index events once and inspect only the matching tasks', () => {
+  const {run}=app();
+  run(`var taskReads=0,lineReads=0,visibilityChecks=0;
+    state.relatedOrderTasks=Array.from({length:1000},(_,i)=>({id:'task-'+i,order_line_ids:['line-'+i]}));
+    state.relatedOrderTaskEvents=Array.from({length:4000},(_,i)=>({id:'event-'+i,
+      get task_id(){taskReads++;return 'task-'+(i%1000)},
+      get order_line_ids(){lineReads++;return ['line-'+(i%1000)]}
+    }));
+    isHiddenHistoryOrderTask=()=>{visibilityChecks++;return false;};
+    for(let i=0;i<1000;i++) {
+      if(getHistoryTaskEventsForTaskId('task-'+i).length!==4) throw Error('Lost task events');
+      if(getHistoryTaskEventsForLineIds(['line-'+i]).length!==4) throw Error('Lost line events');
+      if(getHistoryOrderTasksForLineIds(['line-'+i]).length!==1) throw Error('Lost task');
+    }`);
+  assert.ok(run('taskReads')<=8000,'task reads must grow with events, not groups multiplied by events');
+  assert.ok(run('lineReads')<=8000,'line reads must grow with events, not lines multiplied by events');
+  assert.equal(run('visibilityChecks'),1000,'unrelated tasks must not be reclassified for each group');
+});
+
+test('related audit events keep category, first matching duplicate, and date ordering', () => {
+  const {run}=app();
+  run(`state.relatedAdminEvents=[
+    {id:'same',order_line_ids:['outside'],notes:'Wrong line'},
+    {id:'same',order_line_ids:['line'],notes:'First match',created_at:'2026-10-05T12:00:00Z'}
+  ];
+  state.adminEvents=[{id:'same',order_line_ids:['line'],notes:'Duplicate',created_at:'2026-10-06T12:00:00Z'}];
+  state.relatedLabelEvents=[{id:'same',order_line_ids:['line','second'],created_at:'2026-10-06T12:00:00Z'}];
+  state.revertEvents=[{id:'revert',order_line_ids:['line'],action:'old',created_at:'2026-10-07T12:00:00Z'}];`);
+  const result=JSON.parse(run(`JSON.stringify(getRelatedEventsForLineIds(['second','line']))`));
+  assert.deepEqual(result.map(e=>e.category),['revert','label','admin']);
+  assert.equal(result[0].action,'reverted');
+  assert.equal(result[2].notes,'First match');
+  assert.equal(run(`getRelatedEventsForLineIds([]).length`),0);
+  run(`state.labelEvents.unshift({id:'added',order_line_ids:['line'],created_at:'2026-10-08T12:00:00Z'});`);
+  assert.equal(run(`getRelatedEventsForLineIds(['line'])[0].id`),'added');
+});
+
+test('receipt lookup skips unrelated evidence but keeps shared, explicit item matches and deduplication', () => {
+  const {run}=app();
+  run(`var inspected=[];
+    getEventEvidencePhotos=event=>{inspected.push(event.id);return event.photos;};
+    var photo={bucket:'proof',path:'video-receipts/123456789012.png',label:'Video receipt - 123456789012'};
+    var receiptEvents=[
+      {id:'outside',order_line_ids:['other'],photos:[photo]},
+      {id:'line',order_line_ids:['line'],photos:[photo]},
+      {id:'shared',order_line_ids:[],photos:[{...photo,path:'video-receipts/shared.png'}]},
+      {id:'duplicate',order_line_ids:['line'],photos:[photo]},
+      {id:'wrong-item',order_line_ids:['line'],photos:[{...photo,path:'video-receipts/999999999999.png',label:'Video receipt - 999999999999'}]}
+    ];
+    var receipts=getHistoryLineVideoReceiptPhotos({id:'line',item_number:'123456789012'},receiptEvents);`);
+  assert.equal(run(`receipts.map(p=>p.event.id).join(',')`),'line,shared');
+  assert.equal(run(`inspected.includes('outside')`),false);
+});
+
+test('reused formatters preserve currency, date, and invalid-value presentation', () => {
+  const {run}=app();
+  for (const amount of [0,12.34,-12.34,123456.78]) {
+    assert.equal(run(`formatMoney(${amount})`),amount.toLocaleString(undefined,{style:'currency',currency:'USD'}));
+  }
+  const date='2026-10-06T13:45:00Z';
+  assert.equal(run(`formatDateTime('${date}')`),new Date(date).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}));
+  assert.equal(run(`formatDateOnly('${date}')`),new Date(date).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}));
+  assert.equal(run(`formatDateTime('invalid')`),'-');
+  assert.equal(run(`formatMoney(NaN)`),'$0.00');
+});
+
+test('task event chunks overlap with at most three reads and preserve result order', async () => {
+  const {run}=app();
+  run(`var pendingChunks=[],startedChunks=[];
+    fetchOverlappingRows=async()=>({data:Array.from({length:600},(_,i)=>({id:'task-'+i,order_line_ids:['line']}))});
+    var supabase={from:()=>{
+      var ids;
+      var query={select:()=>query,in:(_,values)=>{ids=values;return query;},order:()=>query,limit:()=>{
+        startedChunks.push(ids[0]);return new Promise(resolve=>pendingChunks.push(()=>resolve({data:[{id:ids[0],task_id:ids[0]}]})));
+      }};return query;
+    }};`);
+  const pending=run(`loadOrderTaskDataForLines(['line'],[])`);
+  await new Promise(r=>setImmediate(r));
+  assert.equal(run('startedChunks.length'),3);
+  run('pendingChunks[2]();pendingChunks[0]()');
+  await new Promise(r=>setImmediate(r));
+  assert.equal(run('startedChunks.length'),3,'the next batch waits for the current batch');
+  run('pendingChunks[1]()');
+  await new Promise(r=>setImmediate(r));
+  assert.equal(run('startedChunks.length'),4);
+  run('pendingChunks[3]()');
+  const result=await pending;
+  assert.equal(result.events.map(e=>e.id).join(','),'task-0,task-150,task-300,task-450');
+});
+
+test('failed concurrent task event reads reject the load', async () => {
+  const {run}=app();
+  run(`fetchOverlappingRows=async()=>({data:Array.from({length:450},(_,i)=>({id:'task-'+i,order_line_ids:['line']}))});
+    var supabase={from:()=>{
+      var ids;
+      var query={select:()=>query,in:(_,values)=>{ids=values;return query;},order:()=>query,
+        limit:async()=>ids[0]==='task-150'?{error:new Error('Events unavailable')}:{data:[]}};
+      return query;
+    }};`);
+  await assert.rejects(run(`loadOrderTaskDataForLines(['line'],[])`),/Events unavailable/);
+});
+
 test('closed Proof Trail does no rendering or evidence signing; opening renders current filters',async()=>{
   const {run}=app();
   run('renderEventList()');
