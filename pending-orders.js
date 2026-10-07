@@ -4507,7 +4507,7 @@ function renderOrders(options = {}) {
         ? `${lineUrgency.label} - ${formatOrderDate(order, "ship_by_date")}`
         : lineDueLabel;
       const button = document.createElement("div");
-      button.className = `buyer-line-btn ${isAdminUser() ? "has-admin-select" : ""} ${isAdminSelected ? "is-admin-selected" : ""} ${state.selectedLine?.id === line.id ? "is-selected" : ""} ${isItemFound(line) ? "is-item-found" : ""}`;
+      button.className = `buyer-line-btn ${isAdminUser() ? "has-admin-select" : ""} ${isAdminSelected ? "is-admin-selected" : ""} ${state.selectedLine?.id === line.id ? "is-selected" : ""} ${isItemFound(line) ? "is-item-found" : ""} ${state.bagScanLineId === line.id ? "is-bag-scan-target" : ""}`;
       button.dataset.lineId = line.id;
       const adminSelect = isAdminUser() ? `
         <label class="admin-order-select" title="Select pending line">
@@ -7443,6 +7443,7 @@ function renderLiveLotOrderMatches() {
 }
 
 async function selectBagOrderLine(line) {
+  if (window.PendingBagScan) return window.PendingBagScan.openLine(line);
   if (!window.bagOrderLinks.isOpen(line)) return;
   // Matches are read independently of queue filters, including the first 1,000 rows.
   if (!state.orders.some(entry => entry.id === line.id)) state.orders.push(normalizeLine(line));
@@ -12461,6 +12462,7 @@ function setupEvidencePhotoViewerListeners() {
 }
 
 function setupListeners() {
+  window.PendingBagScan?.init();
   $("jump-latest-found")?.addEventListener("click", () => jumpToLatestFoundItem());
   $("refresh-orders")?.addEventListener("click", async () => {
     clearEbayLaunchFilter({ apply: false });
@@ -12529,9 +12531,11 @@ function setupListeners() {
   });
   $("global-find-live-lot")?.addEventListener("click", () => {
     clearLiveLotSearchTimer();
+    if (window.PendingBagScan) return window.PendingBagScan.enqueue($("global-live-lot-scan")?.value);
     loadLiveLotByScan($("global-live-lot-scan")?.value);
   });
   $("global-clear-live-lot")?.addEventListener("click", () => {
+    if (window.PendingBagScan) return window.PendingBagScan.reset();
     clearLiveLotSelection({ render: true });
     setStatus("Auction bag lookup cleared. Scan the next bag when ready.", "info");
     setTimeout(() => $("global-live-lot-scan")?.focus(), 80);
@@ -12689,10 +12693,16 @@ function setupListeners() {
     if (event.key === "Enter") {
       event.preventDefault();
       clearLiveLotSearchTimer();
+      if (window.PendingBagScan) return window.PendingBagScan.enqueue($("global-live-lot-scan")?.value);
       loadLiveLotByScan($("global-live-lot-scan")?.value);
     }
   });
-  $("global-live-lot-scan")?.addEventListener("input", () => scheduleLiveLotSearch("global-live-lot-scan"));
+  $("global-live-lot-scan")?.addEventListener("input", () => {
+    if (!window.PendingBagScan) return scheduleLiveLotSearch("global-live-lot-scan");
+    clearLiveLotSearchTimer();
+    const term = $("global-live-lot-scan")?.value;
+    if (term?.trim()) state.liveLotSearchTimer = setTimeout(() => window.PendingBagScan.enqueue(term), 700);
+  });
 
   $("location-scan")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -12960,8 +12970,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   await Promise.all([loadCheckoutStores(), loadOrders()]);
   const bagParams = new URLSearchParams(window.location.search);
   if (bagParams.get("bag")) {
-    await loadLiveLotByScan(bagParams.get("bag"), {search:bagParams.get("bagSearch") || ""});
-    await openRequestedBagOrder(bagParams);
+    if (window.PendingBagScan && !bagParams.get("bagLine")) await window.PendingBagScan.enqueue(bagParams.get("bag"));
+    else {
+      await loadLiveLotByScan(bagParams.get("bag"), {search:bagParams.get("bagSearch") || ""});
+      await openRequestedBagOrder(bagParams);
+    }
   }
   const openedTask = await openRequestedOrderTask();
   if (!openedTask) {

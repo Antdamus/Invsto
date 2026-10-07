@@ -16,6 +16,7 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
   <link rel="stylesheet" href="pending-orders-mobile.css?v=20261006-label-photos" />
+  <link rel="stylesheet" href="pending-bag-scan.css?v=20261007-bag-scan" />
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
 </head>
 <body>
@@ -380,6 +381,15 @@
             </div>
             <span id="order-count-pill" class="count-pill">0</span>
           </div>
+
+          <section class="bag-scan-bar" aria-label="Find an order by scanning its bag">
+            <form id="bag-scan-form" class="bag-scan-form">
+              <input id="pending-bag-scan" type="search" placeholder="Scan bag or enter #" aria-label="Scan bag or enter bag number" data-camera-scan autocomplete="off" autocapitalize="off" spellcheck="false" />
+              <button type="submit" class="primary-btn">Find bag</button>
+            </form>
+            <div class="bag-scan-meta"><p id="bag-scan-status" role="status">Scan a bag to open its order.</p><span id="bag-scan-queued"></span></div>
+            <select id="bag-scan-recent" class="hidden" aria-label="Recently scanned bags"><option value="">Recent scans</option></select>
+          </section>
 
           <div class="filter-row">
             <input
@@ -1194,6 +1204,16 @@
     </div>
   </div>
 
+  <aside id="bag-scan-dock" class="bag-scan-dock hidden" aria-label="Scanned item">
+    <div class="bag-scan-dock-copy"><strong id="bag-scan-current"></strong><span id="bag-scan-dock-status" role="status"></span></div>
+    <div class="bag-scan-dock-actions"><button id="bag-scan-found" type="button" class="primary-btn">Item found</button><button id="bag-scan-next" type="button" class="secondary-btn">Scan next</button><button id="bag-scan-close" type="button" class="secondary-btn" aria-label="Close bag scanner">×</button></div>
+  </aside>
+  <dialog id="bag-scan-choice" class="bag-scan-dialog" aria-labelledby="bag-scan-choice-title" aria-describedby="bag-scan-choice-help">
+    <header><div><span class="eyebrow">Verify the item</span><h2 id="bag-scan-choice-title">Choose an order</h2></div><button id="bag-scan-choice-cancel" type="button" class="secondary-btn">Cancel</button></header>
+    <p id="bag-scan-choice-help"></p>
+    <div id="bag-scan-choices"></div>
+  </dialog>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js?v=20261006-phone"></script>
@@ -1209,7 +1229,8 @@
 <script src="shipping-label-reader.js?v=20261006-label-photos"></script>
 <script src="order-shipping-labels.js?v=20261006-label-photos"></script>
 <script src="receipt-preview-jobs.js?v=20261003-receipt-speed"></script>
-  <script src="pending-orders.js?v=20261006-report-guard"></script>
-  <script src="pending-orders-mobile.js?v=20261006-phone-2"></script>
+  <script src="pending-orders.js?v=20261007-bag-scan"></script>
+  <script src="pending-bag-scan.js?v=20261007-bag-scan"></script>
+  <script src="pending-orders-mobile.js?v=20261007-bag-scan"></script>
 </body>
 </html>

@@ -166,7 +166,7 @@
     media.addEventListener('change', syncLayout);
     decorateCards(); syncLayout();
   }
-  window.PendingOrdersMobile = {openTools, dismissCheckout, sync: scheduleSync};
+  window.PendingOrdersMobile = {openTools, closeTools, dismissCheckout, sync: scheduleSync};
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();
