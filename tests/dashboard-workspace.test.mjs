@@ -37,6 +37,7 @@ async function open(t, width = 390, {ready = true} = {}) {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   t.after(() => assert.deepEqual(errors, []));
   await page.goto(`${origin}/dashboard.html`);
+  await page.addScriptTag({url: `${origin}/task-workflow.js`});
   await page.addScriptTag({url: `${origin}/dashboard.js`});
   await page.evaluate(() => {
     const date = delta => {const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + delta); return d.toISOString();};
@@ -54,7 +55,7 @@ async function open(t, width = 390, {ready = true} = {}) {
       item_types: [{id:'i1',categories:['Chains','Gold'],cost:50,sale_price:150,deleted_at:null},{id:'i2',categories:['testcard'],cost:100,sale_price:1000,deleted_at:null},{id:'i3',categories:['Rings'],cost:30,sale_price:90,deleted_at:'2026-01-01'}],
       item_stock_locations: [{id:'s1',item_id:'i1',quantity:2},{id:'s2',item_id:'i1',quantity:3},{id:'s3',item_id:'i2',quantity:10},{id:'s4',item_id:'i3',quantity:4}],
       get_dashboard_buyer_snapshot: [{buyer_username:'collector',gross_sales:23000,net_payout:20000,order_count:10,open_return_count:1}],
-      list_team_task_assignees: [{user_id:'me',display_name:'Alex Rivers',email:'alex@example.test'},{user_id:'colleague',display_name:'Sandra',email:'sandra@example.test'}],
+      list_team_task_assignees: [{user_id:'me',role:'admin',display_name:'Alex Rivers',email:'alex@example.test'},{user_id:'colleague',role:'employee',display_name:'Sandra',email:'sandra@example.test'}],
     };
     window.reads = []; window.failures = []; window.waiters = {};
     window.supabase = {
@@ -96,8 +97,8 @@ for (const width of [320,390,430,768,1366]) test(`Dashboard at ${width}px: usabl
   assert.equal(await overflow(),false);
   await expect(page.locator('#stat-orders')).toHaveText('8');
   await expect(page.locator('#stat-overdue')).toHaveText('4');
-  await expect(page.locator('#stat-tasks')).toHaveText('8');
-  await expect(page.locator('#stat-review')).toHaveText('4');
+  await expect(page.locator('#stat-tasks')).toHaveText('4');
+  await expect(page.locator('#stat-review')).toHaveText('3');
   await expect(page.locator('.dash-order-row')).toHaveCount(4);
   await expect(page.locator('.dash-task-row')).toHaveCount(4);
   const first = await page.locator('.dash-order-row').first().boundingBox();
@@ -139,7 +140,7 @@ test('queries run independently, refreshes coalesce, and reports/media stay off 
     waiters.ebay_order_lines = new Promise(resolve=>window.releaseOrders=resolve);
     window.refreshOne = refreshDashboard(); window.sameRefresh = refreshOne === refreshDashboard();
   });
-  await expect(page.locator('#stat-tasks')).toHaveText('8');
+  await expect(page.locator('#stat-tasks')).toHaveText('4');
   await expect(page.locator('#stat-orders')).toHaveText('—');
   assert.equal(await page.evaluate(() => sameRefresh),true);
   let names = await page.evaluate(() => reads.map(row=>row.table));
@@ -167,7 +168,7 @@ test('failure never masquerades as zero or a partial task total; retry recovers'
   await page.evaluate(() => {failures=[];});
   await page.locator('#dashboard-orders [data-retry]').click();
   await expect(page.locator('#stat-orders')).toHaveText('8');
-  await expect(page.locator('#stat-tasks')).toHaveText('8');
+  await expect(page.locator('#stat-tasks')).toHaveText('4');
   await expect(page.locator('#dashboard-status')).toBeHidden();
 });
 
@@ -203,6 +204,6 @@ test('task deadlines match the Tasks page, display names resolve, and return lin
   });
   await expect(page.locator('#stat-tasks-detail')).toHaveText('1 overdue · 0 need help');
   await expect(page.locator('.dash-task-row')).toContainText('Sandra');
-  await expect(page.locator('.dash-task-row')).toHaveAttribute('href','ebay-returns.html?returnTaskId=return-1#return-work-queue');
+  await expect(page.locator('.dash-task-row')).toHaveAttribute('href','team-tasks.html?taskId=return-1');
 });
 

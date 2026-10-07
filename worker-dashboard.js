@@ -474,7 +474,7 @@ function getWorkerOrderTaskLabel(task = {}) {
 
 async function fetchWorkerOrderTasks(userId) {
   const dashboardQuery = await window.supabase.rpc("list_my_ebay_order_tasks", { _limit: 6 });
-  if (!dashboardQuery.error) return dashboardQuery.data || [];
+  if (!dashboardQuery.error) return (dashboardQuery.data || []).filter(task => !["completed_by_employee", "ready_for_admin_approval", "pending_admin_review", "waiting_on_subtasks"].includes(task.status));
 
   console.warn("Worker order task RPC failed, falling back to direct query:", dashboardQuery.error);
   const { data, error } = await window.supabase

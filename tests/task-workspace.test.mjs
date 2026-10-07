@@ -41,6 +41,7 @@ async function open(t, width = 390, {admin = true, direct = false, ready = true}
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   t.after(() => assert.deepEqual(errors, []));
   await page.goto(`${origin}/team-tasks.html${direct ? '?taskId=00000000-0000-4000-8000-000000000001' : ''}`);
+  await page.addScriptTag({url: `${origin}/task-workflow.js`});
   await page.addScriptTag({url: `${origin}/team-tasks.js`});
   await page.evaluate(({admin, ready, direct}) => {
     window.writes = [];
@@ -62,6 +63,7 @@ async function open(t, width = 390, {admin = true, direct = false, ready = true}
     }));
     state.eventsByTask.set('team:task-0', [{id: 'update-0', task_id: 'task-0', action: 'progress', new_status: 'in_progress', notes: 'Certificate is still missing. Sandra has the watch ready. Waiting for the matching card before this can ship.', signed_by_email: 'sandra@example.test', created_at: '2026-10-06T14:00:00Z'}]);
     if (ready) state.tasks.forEach(task => state.taskEvidenceLoads.set(getUnifiedTaskKey(task), {status: 'ready', promise: Promise.resolve()}));
+    loadTaskFollowers = async () => [];
     loadCaptureStations = async () => [];
     setupListeners(); renderAssigneeSelect(); updateTaskScopeChrome(); renderTasks();
   }, {admin, ready, direct});
@@ -91,6 +93,7 @@ for (const width of [320, 390, 430, 768, 1366]) test(`Tasks at ${width}px: reada
   await page.getByRole('button', {name: 'Filters', exact: true}).click();
   await card.locator('[data-team-task-toggle]').click();
   await expect(card.locator('.team-task-card-details')).toBeVisible();
+  await card.locator('.team-task-action-menu summary').click();
   await expect(card.locator('[data-team-task-progress]')).toBeVisible();
   assert.equal(await overflow(), false);
   await card.locator('[data-team-task-progress]').click();
@@ -104,25 +107,20 @@ for (const width of [320, 390, 430, 768, 1366]) test(`Tasks at ${width}px: reada
   assert.deepEqual(await page.evaluate(() => writes), []);
 });
 
-test('search finds notes and update text across all buckets, filters compose and reset, and list pages', async t => {
-  const page = await open(t);
-  await page.locator('[data-task-owner-filter=created]').click();
-  await page.locator('#task-search').fill('matching card');
-  await expect(page.locator('.team-task-card')).toHaveCount(1);
-  await page.locator('#task-search').fill('Review the bracelet');
-  await expect(page.locator('.team-task-card')).toHaveCount(1);
-  await expect(page.locator('.team-task-card')).toContainText('Needs acceptance');
-  await page.locator('#task-search').fill('nothing matches 987');
-  await page.getByRole('button', {name: 'Reset filters', exact: true}).click();
-  await expect(page.locator('.team-task-card')).toHaveCount(20);
-  await page.locator('#task-load-more').click(); await expect(page.locator('.team-task-card')).toHaveCount(40);
-  await page.locator('[data-task-focus=overdue]').click(); await expect(page.locator('.team-task-card')).toHaveCount(1);
-  await page.locator('[data-task-focus=review]').click(); await expect(page.locator('.team-task-card')).toHaveCount(1);
-  await page.locator('[data-task-focus=blocked]').click(); await expect(page.locator('.team-task-card')).toHaveCount(1);
-  await page.locator('[data-task-focus=today]').click(); await expect(page.locator('.team-task-card')).toHaveCount(1);
-  await page.locator('.task-quick-views [data-task-focus=all]').click();
-  await expect(page.locator('.team-task-card')).toHaveCount(20);
-  assert.deepEqual(await page.evaluate(() => writes), []);
+test('search and status filters compose, reset, and page within the selected inbox', async t => {
+ const page=await open(t);
+ await page.locator('#task-search').fill('matching card');await expect(page.locator('.team-task-card')).toHaveCount(1);
+ await page.locator('#task-search').fill('nothing matches 987');
+ await page.getByRole('button',{name:'Reset filters',exact:true}).click();
+ await expect(page.locator('.team-task-card')).toHaveCount(20);
+ await page.locator('#task-load-more').click();await expect(page.locator('.team-task-card')).toHaveCount(24);
+ await page.locator('[data-task-focus=overdue]').click();await expect(page.locator('.team-task-card')).toHaveCount(1);
+ await page.locator('[data-task-focus=blocked]').click();await expect(page.locator('.team-task-card')).toHaveCount(1);
+ await page.locator('[data-task-owner-filter=following]').click();
+ await expect(page.locator('[data-task-focus=blocked]')).toHaveAttribute('aria-pressed','false');
+ await page.locator('#task-search').fill('Review the bracelet');await expect(page.locator('.team-task-card')).toHaveCount(0);
+ await page.locator('[data-task-owner-filter=approvals]').click();await expect(page.locator('.team-task-card')).toHaveCount(1);
+ assert.deepEqual(await page.evaluate(()=>writes),[]);
 });
 
 test('evidence is loaded only on demand, reused, and detail buttons are keyboard accessible', async t => {
@@ -137,7 +135,7 @@ test('evidence is loaded only on demand, reused, and detail buttons are keyboard
   });
   const toggle = page.locator('[data-team-task-toggle="team:task-0"]');
   await toggle.focus(); await page.keyboard.press('Enter');
-  await expect(page.locator('[data-team-task-progress="task-0"]')).toBeVisible();
+  await expect(page.locator('[data-task-next="complete"]')).toBeVisible();
   await expect(page.locator('#task-details-team-task-0')).toBeVisible();
   assert.deepEqual(await page.evaluate(() => ({...mediaReads})), {photos: 1, returns: 1, receipts: 1, events: 1});
   await toggle.click(); await toggle.click();
@@ -176,7 +174,7 @@ test('worker view and admin worker preview preserve permissions', async t => {
     state.employee.role = 'admin'; state.viewedWorkerUserId = 'teammate'; updateTaskScopeChrome(); renderTasks();
   });
   await expect(page.locator('#new-team-task')).toBeDisabled();
-  await page.locator('[data-team-task-toggle="team:task-1"]').click();
+  await page.locator('[data-team-task-toggle="team:task-3"]').click();
   await expect(page.locator('[data-task-assignment-action]')).toHaveCount(0);
   assert.deepEqual(await page.evaluate(() => writes), []);
 });
@@ -207,7 +205,7 @@ test('initial loading renders work without signing or requesting evidence for cl
   await expect(page.locator('.team-task-card')).toHaveCount(20);
   assert.equal(await page.evaluate(() => mediaCalls), 0);
   await page.locator('[data-team-task-toggle="team:task-0"]').click();
-  await expect(page.locator('[data-team-task-progress="task-0"]')).toBeVisible();
+  await expect(page.locator('[data-task-next="complete"]')).toBeVisible();
   assert.equal(await page.evaluate(() => mediaCalls), 2);
 });
 
@@ -220,7 +218,7 @@ test('order approval keeps item decisions, evidence and workflow actions on a ph
       ebay_orders: {order_number: '11-22222-33333', buyer_username: 'buyer_42', buyer_name: 'Test Buyer', status: 'pending', total_price: 125, raw_payload: {orderPaymentStatus: 'PAID'}},
     });
     task.lineDetails = [{id: 'line-1', order_id: 'order-1', item_number: '123456789012', item_title: 'Gold bracelet', quantity: 1, line_status: 'pending', total_price: 125}];
-    state.tasks = [task]; state.taskEvidenceLoads.set('order:review-order', {status: 'ready'}); renderTasks();
+    state.tasks = [task]; state.taskOwnerFilter = 'approvals'; state.taskEvidenceLoads.set('order:review-order', {status: 'ready'}); renderTasks();
     state.eventsByTask.set('order:review-order', [{id: 'evidence-1', action: 'progress', notes: 'Bracelet photographed', photo_attachments: [{bucket: 'team-task-evidence', path: 'bracelet.png', label: 'Bracelet close-up', url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4boAAAAASUVORK5CYII='}]}]);
   });
   await page.locator('[data-team-task-toggle]').click();
@@ -240,6 +238,7 @@ test('order approval keeps item decisions, evidence and workflow actions on a ph
 test('saving a progress note retains the existing status-update contract', async t => {
   const page = await open(t, 390);
   await page.locator('[data-team-task-toggle="team:task-0"]').click();
+  await page.locator('.team-task-action-menu summary').click();
   await page.locator('[data-team-task-progress="task-0"]').click();
   await page.locator('#team-task-note').fill('Waiting for the matching certificate; recheck tomorrow.');
   await page.locator('#team-task-status-input').selectOption('blocked');
@@ -255,60 +254,44 @@ test('saving a progress note retains the existing status-update contract', async
   assert.match(writes[0][1]._note, /matching certificate/);
 });
 
-test('responsibility inboxes include acceptance work and keep overdue counts scoped', async t => {
-  const page = await open(t);
-  await page.evaluate(() => {
-    const base = state.tasks[0];
-    const task = (id, values) => ({...base, id, title: id, metadata: {}, ...values});
-    state.tasks = [
-      task('my work', {assigned_by: 'boss', created_by: 'boss', created_by_email: '', status: 'waiting_on_admin'}),
-      task('my completed work', {assigned_by: 'boss', created_by: 'boss', created_by_email: '', status: 'completed_by_employee', due_at: ''}),
-      task('delegated review', {assigned_to_user_id: 'teammate', assigned_to_email: '', assigned_by: 'me', status: 'completed_by_employee'}),
-      task('other admin work', {assigned_to_user_id: 'boss', assigned_to_email: '', assigned_by: 'boss', created_by: 'boss', created_by_email: '', status: 'waiting_on_admin'}),
-      task('reassigned by someone else', {assigned_to_user_id: 'teammate', assigned_to_email: '', assigned_by: 'boss', status: 'in_progress'}),
-      task('unassigned review', {assigned_to_user_id: null, assigned_to_email: '', assigned_by: 'boss', created_by: 'boss', created_by_email: '', status: 'ready_for_admin_approval'}),
-      task('automatic photo capture record', {assigned_to_user_id: null, assigned_to_email: null, assigned_by: 'me', status: 'open'}),
-    ];
-    state.eventsByTask.clear(); renderTasks();
-  });
-  await expect(page.locator('.team-task-card')).toHaveCount(2);
-  await expect(page.locator('[data-task-stat=overdue]')).toHaveText('1');
-  await page.locator('[data-task-focus=overdue]').click();
-  await expect(page.locator('.team-task-card')).toHaveCount(1);
-  await page.locator('[data-task-owner-filter=created]').click();
-  await expect(page.locator('.team-task-card')).toHaveCount(1);
-  await expect(page.locator('.team-task-card')).toContainText('delegated review');
-  await expect(page.locator('[data-task-focus=overdue]')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('[data-task-stat=all]')).toHaveText('1');
-  await page.locator('[data-task-owner-filter=approvals]').click();
-  await expect(page.locator('.team-task-card')).toHaveCount(3);
-  await expect(page.locator('#team-task-list')).not.toContainText('other admin work');
-  await page.locator('.task-quick-views [data-task-focus=all]').click();
-  await expect(page.locator('.team-task-card')).toHaveCount(4);
-  await page.evaluate(() => {
-    state.tasks.push({...state.tasks[2], id: 'delegated-order-approval', source: 'order', task_type: 'pending_admin_review', status: 'ready_for_admin_approval', metadata: {workflow_type: 'pending_order_approval'}});
-    renderTasks();
-  });
-  await expect(page.locator('.team-task-card')).toHaveCount(5);
-  await expect(page.locator('[data-team-task-card="delegated-order-approval"]')).toBeVisible();
-  assert.deepEqual(await page.evaluate(() => writes), []);
+test('next-action queues are exclusive; completion and informational replies do not inflate my workload', async t => {
+ const page=await open(t);
+ await page.evaluate(()=>{
+   state.assignees.push({user_id:'boss',display_name:'Boss',active:true,role:'admin'});
+   const base=state.tasks[0];const task=(id,values)=>({...base,id,title:id,metadata:{},...values});
+   state.tasks=[
+    task('my work',{assigned_by:'boss',created_by:'boss',created_by_email:'',status:'assigned'}),
+    task('my completed work',{assigned_by:'boss',created_by:'boss',created_by_email:'',status:'completed_by_employee'}),
+    task('delegated review',{assigned_to_user_id:'teammate',assigned_to_email:'',assigned_by:'me',status:'completed_by_employee'}),
+    task('other admin work',{assigned_to_user_id:'boss',assigned_to_email:'',assigned_by:'boss',created_by:'boss',created_by_email:'',status:'waiting_on_admin'}),
+    task('delegated active work',{assigned_to_user_id:'teammate',assigned_by:'me',status:'assigned'}),
+    task('my decision',{assigned_by:'boss',status:'waiting_on_admin'}),
+   ];
+   state.eventsByTask.clear();
+   state.eventsByTask.set('team:my work',[{action:'commented',signed_by:'me',notes:'Still working.',created_at:new Date().toISOString()}]);
+   renderTasks();
+ });
+ await expect(page.locator('.team-task-card')).toHaveCount(1);
+ await expect(page.locator('[data-task-stat=overdue]')).toHaveText('1');
+ await expect(page.locator('.team-task-card')).toContainText('my work');
+ await page.locator('[data-task-owner-filter=following]').click();await expect(page.locator('.team-task-card')).toHaveCount(2);
+ await expect(page.locator('[data-team-task-card="my completed work"] .task-card-owner')).toHaveText('Review: Boss');
+ await expect(page.locator('[data-team-task-card="my completed work"]')).not.toContainText('Overdue');
+ await page.locator('[data-task-owner-filter=approvals]').click();await expect(page.locator('.team-task-card')).toHaveCount(2);
+ await expect(page.locator('[data-task-stat=overdue]')).toHaveText('0');
+ await expect(page.locator('#team-task-list')).not.toContainText('other admin work');
+ assert.deepEqual(await page.evaluate(()=>writes),[]);
 });
 
-test('switching to history retains the assigned-by inbox and shows delegated closed work', async t => {
-  const page = await open(t);
-  await page.locator('[data-task-owner-filter=created]').click();
-  await page.evaluate(() => {
-    loadTasks = async () => {
-      state.tasks = state.tasks.slice(0, 2).map(task => ({...task, status: 'resolved', resolved_by: 'me', assigned_by: 'me'}));
-      renderTasks();
-    };
-  });
-  await page.getByRole('button', {name: 'History', exact: true}).click();
-  await expect(page.locator('[data-task-owner-filter=created]')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('.team-task-card')).toHaveCount(2);
-  await expect(page.locator('#team-task-list-title')).toHaveText('Assigned by me · History');
-  await page.locator('[data-task-owner-filter=approvals]').click();
-  await expect(page.locator('.team-task-card')).toHaveCount(2);
+test('History is a single section containing finished work from every relationship',async t=>{
+ const page=await open(t);
+ await page.evaluate(()=>{loadTasks=async()=>{state.tasks=state.tasks.slice(0,2).map(task=>({...task,status:'resolved',resolved_by:'me',assigned_by:'me'}));renderTasks();};});
+ await page.getByRole('button',{name:'History',exact:true}).click();
+ await expect(page.locator('[data-task-owner-filter=history]')).toHaveAttribute('aria-pressed','true');
+ await expect(page.locator('.team-task-card')).toHaveCount(2);
+ await expect(page.locator('#team-task-list-title')).toHaveText('History');
+ await expect(page.locator('[data-task-view]')).toHaveCount(0);
+ await expect(page.locator('#task-overview')).toBeHidden();
 });
 
 test('task loading includes delegated and reviewed records and reads beyond one page', async t => {
@@ -326,7 +309,7 @@ test('task loading includes delegated and reviewed records and reads beyond one 
   });
   assert.match(result.activeFilter, /assigned_by.eq.me/);
   assert.match(result.activeFilter, /or\(assigned_to_user_id.not.is.null,assigned_to_email.not.is.null\)/);
-  assert.match(result.activeFilter, /assigned_to_user_id.is.null,assigned_to_email.is.null/);
+  assert.match(result.activeFilter, /status.in.\(waiting_on_admin,completed_by_employee/);
   assert.match(result.historyFilter, /resolved_by.eq.me/);
   assert.deepEqual(result.pages, [[0,199],[200,399]]);
   assert.equal(result.length, 205);
@@ -357,7 +340,8 @@ test('cards show the latest assignment date in both inboxes, with an honest lega
   });
   await expect(page.locator('.task-card-assigned time')).toHaveAttribute('datetime', '2026-10-06T14:30:00.000Z');
   await expect(page.locator('.task-card-assigned')).toContainText('Assigned');
-  await page.locator('[data-task-owner-filter=created]').click();
+  await page.evaluate(()=>{state.tasks[0].assigned_to_user_id='teammate';state.tasks[0].assigned_to_email='sandra@example.test';state.tasks[0].assigned_by='me';state.eventsByTask.get('team:task-0').forEach(event=>{if(event.action==='assigned')event.new_assigned_to_user_id='teammate';});renderTasks();});
+  await page.locator('[data-task-owner-filter=following]').click();
   await expect(page.locator('.task-card-assigned time')).toHaveAttribute('datetime', '2026-10-06T14:30:00.000Z');
   await page.evaluate(() => {state.eventsByTask.clear(); renderTasks();});
   await expect(page.locator('.task-card-assigned')).toContainText('Created');
@@ -397,7 +381,7 @@ test('pending order links target the order queue, while closed orders keep their
 async function replyFixture(page, source='team') {
   await page.evaluate(source => {
     state.assignees.forEach(employee => {employee.display_name = employee.name; employee.active = true;});
-    const task = {...state.tasks[0], source, status:'waiting_on_admin', task_type:source==='order'?'coordination':'general',
+    const task = {...state.tasks[0], source, status:'assigned', task_type:source==='order'?'coordination':'general',
       assigned_by:'teammate', assigned_by_email:'sandra@example.test', created_by:'teammate', created_by_email:'sandra@example.test'};
     state.tasks=[task];state.taskEvidenceLoads.set(getUnifiedTaskKey(task),{status:'ready'});
     state.eventsByTask.clear(); loadTasks=async()=>renderTasks(); renderTasks();
@@ -407,11 +391,11 @@ async function replyFixture(page, source='team') {
 
 for(const width of [320,390,1366]) test(`reply and handoff form is clear and fits at ${width}px`,async t=>{
   const page=await open(t,width,{admin:false});await replyFixture(page);
-  await page.getByRole('button',{name:'Reply / Add update',exact:true}).click();
-  await expect(page.getByRole('radio',{name:/Just an update/})).toBeChecked();
-  await expect(page.locator('#task-response-summary')).toContainText('Alex stays responsible');
+  await page.getByRole('button',{name:'Add update',exact:true}).click();
+  await expect(page.getByRole('radio',{name:/Add update/})).toBeChecked();
+  await expect(page.locator('#task-response-summary')).toContainText('Next: You. Responsibility stays the same');
   await expect(page.locator('#team-task-assignee')).toBeHidden();await expect(page.locator('.task-attachments')).toBeHidden();
-  await page.getByRole('radio',{name:/Hand back to assigner/}).check();
+  await page.getByRole('radio',{name:/Send instructions & hand back/}).check();
   await expect(page.locator('#task-response-summary')).toContainText('Sandra will be responsible next');
   await expect(page.getByRole('button',{name:'Send & hand back'})).toBeVisible();
   await page.locator('#team-task-note').fill('Please locate the CGL certificate and attach a photo so I can continue.');
@@ -420,6 +404,7 @@ for(const width of [320,390,1366]) test(`reply and handoff form is clear and fit
   if(width===1366)await page.screenshot({path:'test-results/task-reply-handoff-desktop.png'});
   await page.keyboard.press('Escape');await expect(page.locator('#team-task-modal')).toBeHidden();
   assert.deepEqual(await page.evaluate(()=>writes),[]);
+  await page.locator('.team-task-action-menu summary').click();
   await page.locator('[data-team-task-progress]').click();
   await expect(page.locator('#task-response-options')).toBeHidden();
   await expect(page.locator('.task-attachments')).toBeVisible();
@@ -427,7 +412,7 @@ for(const width of [320,390,1366]) test(`reply and handoff form is clear and fit
 
 for(const source of ['team','order','return'])test(`${source} replies send a note only; handoff explicitly changes responsibility`,async t=>{
   const page=await open(t,390,{admin:false});await replyFixture(page,source);
-  await page.getByRole('button',{name:'Reply / Add update',exact:true}).click();
+  await page.getByRole('button',{name:'Add update',exact:true}).click();
   await page.getByRole('button',{name:'Send update',exact:true}).click();
   await expect(page.locator('#team-task-modal-error')).toContainText('Write an update');
   await page.locator('#team-task-note').fill('I checked the order and still need the certificate.');
@@ -436,12 +421,12 @@ for(const source of ['team','order','return'])test(`${source} replies send a not
   let writes=await page.evaluate(()=>window.writes);
   assert.equal(writes.length,1);assert.equal(writes[0][0],'reply_to_task');
   assert.deepEqual(writes[0][1],{_task_source:source,_task_id:'task-0',_note:'I checked the order and still need the certificate.',_request_action:false,_expected_assignee:'me',_expected_assigner:'teammate'});
-  await page.getByRole('button',{name:'Hand back to assigner',exact:true}).click();
+  await page.getByRole('button',{name:'Send instructions & hand back',exact:true}).click();
   await page.locator('#team-task-note').fill('Please locate the certificate so I can continue.');
   await page.evaluate(()=>{supabase.rpc=async(...args)=>{writes.push(args);const task=state.tasks[0];task.assigned_to_user_id='teammate';task.assigned_to_email='sandra@example.test';task.assigned_by='me';task.assigned_by_email='alex@example.test';task.status='assigned';return {data:{},error:null};};});
   await page.getByRole('button',{name:'Send & hand back',exact:true}).click();
   await expect(page.locator('#team-task-modal')).toBeHidden();
-  await expect(page.locator('[data-task-owner-filter=created]')).toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('[data-task-owner-filter=following]')).toHaveAttribute('aria-pressed','true');
   await expect(page.locator('.team-task-card')).toHaveCount(1);
   await expect(page.locator('.task-card-owner')).toContainText('Sandra');
   writes=await page.evaluate(()=>window.writes);assert.equal(writes.length,2);assert.equal(writes[1][1]._request_action,true);
@@ -449,7 +434,7 @@ for(const source of ['team','order','return'])test(`${source} replies send a not
 
 test('failed reply keeps the draft and owner; completion review cannot be handed off',async t=>{
   const page=await open(t,390,{admin:false});await replyFixture(page);
-  await page.getByRole('button',{name:'Hand back to assigner',exact:true}).click();
+  await page.getByRole('button',{name:'Send instructions & hand back',exact:true}).click();
   await page.locator('#team-task-note').fill('Need the certificate.');
   await page.evaluate(()=>{supabase.rpc=async()=>({error:{message:'The assignment changed. Refresh the task before replying.'}});});
   await page.getByRole('button',{name:'Send & hand back',exact:true}).click();
@@ -457,8 +442,78 @@ test('failed reply keeps the draft and owner; completion review cannot be handed
   await expect(page.locator('#team-task-note')).toHaveValue('Need the certificate.');
   assert.equal(await page.evaluate(()=>state.tasks[0].assigned_to_user_id),'me');
   await page.keyboard.press('Escape');
-  await page.evaluate(()=>{state.tasks[0].status='completed_by_employee';renderTasks();});
-  await expect(page.getByRole('button',{name:'Hand back to assigner',exact:true})).toHaveCount(0);
-  await page.getByRole('button',{name:'Reply / Add update',exact:true}).click();
+  await page.evaluate(()=>{state.tasks[0].status='completed_by_employee';state.taskOwnerFilter='following';renderTasks();});
+  await expect(page.getByRole('button',{name:'Send instructions & hand back',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Add update',exact:true}).click();
   await expect(page.locator('#task-response-handoff-option')).toBeHidden();
+});
+
+for (const source of ['team','order','return']) test(source + ': Complete my part shows the reviewer, moves to Following, and acceptance finishes only the task', async t => {
+ const page=await open(t,390,{admin:false});await replyFixture(page,source);
+ await expect(page.getByRole('button',{name:'Complete my part',exact:true})).toHaveCount(1);
+ await expect(page.getByRole('button',{name:'Add update',exact:true})).toHaveCount(1);
+ await page.getByRole('button',{name:'Complete my part',exact:true}).click();
+ await expect(page.locator('#team-task-modal-subtitle')).toContainText('Sandra will review your work');
+ await expect(page.locator('#team-task-modal-subtitle')).toContainText('does not close the order');
+ await expect(page.locator('#team-task-assignee')).toBeHidden();
+ await expect(page.locator('#task-response-options')).toBeHidden();
+ await page.locator('#team-task-note').fill('Certificate verified. Please review.');
+ await page.evaluate(()=>{supabase.rpc=async(...args)=>{writes.push(args);const task=state.tasks[0];task.status='completed_by_employee';task.metadata.task_workflow={reviewer_user_id:'teammate',completed_by:'me'};return {data:{task},error:null};};});
+ await page.locator('#submit-team-task').click();
+ await expect(page.locator('[data-task-owner-filter=following]')).toHaveAttribute('aria-pressed','true');
+ await expect(page.locator('.task-card-owner')).toHaveText('Review: Sandra');
+ await expect(page.locator('[data-task-stat=overdue]')).toHaveText('0');
+ await expect(page.getByRole('button',{name:'Complete my part',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Accept & finish',exact:true})).toHaveCount(0);
+ const call=await page.evaluate(()=>writes[0]);assert.equal(call[0],'advance_task_workflow');assert.equal(call[1]._source,source);assert.equal(call[1]._action,'complete');assert.equal(call[1]._expected_assignee,'me');assert.equal(call[1]._expected_status,'assigned');
+ await page.evaluate(()=>{state.user={id:'teammate',email:'sandra@example.test'};state.employee={user_id:'teammate',role:'employee'};state.taskOwnerFilter='approvals';renderTasks();});
+ await expect(page.getByRole('button',{name:'Accept & finish',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Request changes',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Accept & finish',exact:true}).click();
+ await expect(page.locator('#team-task-modal-subtitle')).toContainText('order stays unchanged');
+ await page.locator('#team-task-note').fill('Verified and accepted.');
+ await page.evaluate(()=>{supabase.rpc=async(...args)=>{writes.push(args);state.tasks[0].status='resolved';return {data:{},error:null};};});
+ await page.locator('#submit-team-task').click();await expect(page.locator('.team-task-card')).toHaveCount(0);
+ assert.equal((await page.evaluate(()=>writes[1]))[1]._action,'accept');
+});
+
+test('a stale completion keeps the draft open without claiming it moved queues',async t=>{
+ const page=await open(t);await replyFixture(page);
+ await page.getByRole('button',{name:'Complete my part',exact:true}).click();await page.locator('#team-task-note').fill('Checked the certificate.');
+ await page.evaluate(()=>{supabase.rpc=async()=>({error:{message:'This task changed. Refresh it before taking the next step.'}});});
+ await page.locator('#submit-team-task').click();await expect(page.locator('#team-task-modal-error')).toContainText('task changed');
+ await expect(page.locator('#team-task-note')).toHaveValue('Checked the certificate.');assert.equal(await page.evaluate(()=>state.tasks[0].status),'assigned');
+});
+
+test('source loaders include former participants in bounded requests without fetching finished work',async t=>{
+ const page=await open(t);
+ const result=await page.evaluate(async()=>{
+  const rows=Array.from({length:160},(_,i)=>({id:'follow-'+i,title:'Follow-up',status:'assigned',assigned_to_user_id:'teammate',assigned_by:'someone-else',metadata:{}}));
+  rows.push({...rows[0],id:'finished',status:'resolved'});
+  state.followingTasks=rows.map(task=>({source:'team',task_id:task.id}));
+  const requests=[];
+  supabase.from=()=>{
+   let ids=null,statuses=[],scoped=false;
+   const q={select:()=>q,order:()=>q,or:()=>{scoped=true;return q;},in:(field,values)=>{if(field==='id')ids=values;else statuses=values;return q;},range:async(start,end)=>{
+    requests.push({ids,scoped});return {data:(scoped?[]:rows.filter(row=>ids.includes(row.id)&&statuses.includes(row.status))).slice(start,end+1),error:null};
+   }};return q;
+  };
+  const loaded=await loadTeamTaskRecords();return {count:loaded.length,finished:loaded.some(row=>row.id==='finished'),sizes:requests.filter(r=>r.ids).map(r=>r.ids.length)};
+ });
+ assert.equal(result.count,160);assert.equal(result.finished,false);assert.deepEqual(result.sizes,[75,75,11]);
+});
+
+test('an admin decision has one clear handback action even when the worker remains the assignee',async t=>{
+ const page=await open(t);
+ await page.evaluate(()=>{
+  const task=state.tasks[0];task.assigned_to_user_id='teammate';task.assigned_to_email='sandra@example.test';task.assigned_by='me';task.status='waiting_on_admin';
+  state.tasks=[task];state.taskOwnerFilter='approvals';state.eventsByTask.clear();renderTasks();
+ });
+ await page.locator('[data-team-task-toggle]').click();
+ await expect(page.getByRole('button',{name:'Send instructions & hand back',exact:true})).toHaveCount(1);
+ await expect(page.getByRole('button',{name:'Complete my part',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Send instructions & hand back',exact:true}).click();
+ await expect(page.locator('#team-task-modal-subtitle')).toContainText('responsible for carrying out these instructions');
+ await expect(page.locator('#team-task-assignee')).toBeHidden();
+ assert.deepEqual(await page.evaluate(()=>writes),[]);
 });

@@ -8,7 +8,7 @@ const DASH_PAGE_SIZE = 500;
 const DASH_PREVIEW_SIZE = 4;
 // Keep these states and the personal/admin scope aligned with team-tasks.js.
 const DASH_ACTIVE_TASK_STATUSES = ["open", "assigned", "in_progress", "waiting_on_admin", "waiting_on_worker", "blocked", "deferred", "pending_admin_review", "needs_subtasks", "waiting_on_subtasks", "ready_for_admin_approval", "assigned_for_shipping", "completed_by_employee", "sent_back_for_rework"];
-const DASH_RETURN_TASK_STATUSES = ["open", "assigned", "in_progress", "blocked", "deferred"];
+const DASH_RETURN_TASK_STATUSES = ["open", "assigned", "in_progress", "blocked", "deferred", "completed_by_employee", "sent_back_for_rework"];
 const DASH_REVIEW_STATUSES = new Set(["waiting_on_admin", "pending_admin_review", "ready_for_admin_approval", "completed_by_employee"]);
 const DASH_PARENT_TYPES = new Set(["coordination", "admin_review", "pending_admin_review", "worker_follow_up", "special_order"]);
 const dashEl = id => document.getElementById(id);
@@ -151,13 +151,13 @@ function normalizeDashboardTask(task, source) {
 }
 async function loadDashboardTasks() {
   const userId = dashboardState.user.id;
-  const personal = `assigned_to_user_id.eq.${userId},status.eq.waiting_on_admin,and(assigned_by.eq.${userId},assigned_to_user_id.not.is.null)`;
+  const personal = `assigned_to_user_id.eq.${userId},created_by.eq.${userId},assigned_by.eq.${userId},status.in.(waiting_on_admin,completed_by_employee,pending_admin_review,ready_for_admin_approval)`;
   const orderScope = `${personal},status.eq.ready_for_admin_approval`;
-  const common = "id,title,status,priority,assigned_to_email,assigned_to_user_id,due_at,created_at,metadata,task_type";
+  const common = "id,title,status,priority,assigned_to_email,assigned_to_user_id,assigned_by,created_by,due_at,created_at,metadata,task_type";
   const results = await Promise.allSettled([
     dashboardPages(() => supabase.from("team_tasks").select(`${common},description,latest_note`).in("status", DASH_ACTIVE_TASK_STATUSES).or(personal)),
     dashboardPages(() => supabase.from("ebay_order_tasks").select(`${common},question,latest_note,ebay_orders(order_number,buyer_username,ship_by_date)`).in("status", DASH_ACTIVE_TASK_STATUSES).or(orderScope)),
-    dashboardPages(() => supabase.from("ebay_return_tasks").select(`${common},question,ebay_return_cases(order_number,buyer_username,return_reason)`).in("status", DASH_RETURN_TASK_STATUSES).eq("assigned_to_user_id", userId)),
+    dashboardPages(() => supabase.from("ebay_return_tasks").select(`${common},question,latest_note,ebay_return_cases(order_number,buyer_username,return_reason)`).in("status", DASH_RETURN_TASK_STATUSES).or(personal)),
     dashboardQuery(supabase.rpc("list_team_task_assignees")),
   ]);
   // Never present a partial sum as the user's complete workload.
@@ -165,11 +165,12 @@ async function loadDashboardTasks() {
   const failed = sourceResults.find(result => result.status === "rejected");
   if (failed) throw failed.reason;
   dashboardState.assignees = results[3].status === "fulfilled" ? results[3].value.data || [] : [];
-  dashboardState.tasks = sourceResults.flatMap((result, index) => result.value.map(task => normalizeDashboardTask(task, ["team", "order", "return"][index]))).filter(visibleDashboardTask);
+  dashboardState.tasks = sourceResults.flatMap((result, index) => result.value.map(task => normalizeDashboardTask(task, ["team", "order", "return"][index]))).filter(visibleDashboardTask)
+    .filter(task => ['assigned','approvals'].includes(OGTaskWorkflow.bucket(task, userId, dashboardState.assignees)));
   renderDashboardTasks();
 }
-function isDashboardReview(task) { return DASH_REVIEW_STATUSES.has(task.status); }
-function isDashboardTaskLate(task, now = Date.now()) { const due = Date.parse(task.due); return Number.isFinite(due) && due < now; }
+function isDashboardReview(task) { return OGTaskWorkflow.bucket(task, dashboardState.user?.id, dashboardState.assignees) === 'approvals'; }
+function isDashboardTaskLate(task, now = Date.now()) { const due = Date.parse(task.due); return OGTaskWorkflow.next(task, dashboardState.assignees).kind === 'work' && Number.isFinite(due) && due < now; }
 function dashboardTaskNeedsHelp(task) { return ["blocked", "sent_back_for_rework"].includes(task.status); }
 function sortDashboardTasks(tasks) {
   const priorities = {urgent: 0, high: 1, normal: 2, low: 3};
@@ -183,7 +184,7 @@ function renderDashboardTasks() {
   const review = tasks.filter(isDashboardReview).length;
   const overdue = tasks.filter(task => isDashboardTaskLate(task)).length;
   const blocked = tasks.filter(dashboardTaskNeedsHelp).length;
-  dashText("stat-tasks", dashCount(tasks.length));
+  dashText("stat-tasks", dashCount(tasks.length - review));
   dashText("stat-tasks-detail", `${dashCount(overdue)} overdue · ${dashCount(blocked)} need help`);
   dashText("stat-review", dashCount(review));
   dashText("stat-review-detail", "Approvals & admin follow-ups");
@@ -196,10 +197,10 @@ function renderDashboardTasks() {
   host.innerHTML = preview.length ? preview.map(task => {
     const mine = task.assigned_to_user_id === dashboardState.user.id;
     const employee = dashboardState.assignees.find(person => person.user_id === task.assigned_to_user_id || (person.email && task.assigned_to_email && person.email.toLowerCase() === task.assigned_to_email.toLowerCase()));
-    const owner = mine ? "You" : employee?.display_name || employee?.name || task.assigned_to_email || (task.assigned_to_user_id ? "Assigned teammate" : "Unassigned");
+    const owner = OGTaskWorkflow.label(task, dashboardState.assignees, dashboardState.user.id);
     const status = statuses[task.status] || String(task.status).replace(/_/g, " ");
     const overdueTask = isDashboardTaskLate(task);
-    const href = task.source === "return" ? `ebay-returns.html?returnTaskId=${encodeURIComponent(task.id)}#return-work-queue` : `team-tasks.html?taskId=${encodeURIComponent(task.id)}`;
+    const href = `team-tasks.html?taskId=${encodeURIComponent(task.id)}`;
     return `<a class="dash-row dash-task-row" href="${href}">
       <div class="dash-row-top"><strong class="dash-row-title">${escapeHtml(task.title)}</strong><span class="dash-tag ${isDashboardReview(task) ? "is-review" : task.priority === "urgent" ? "is-urgent" : ""}">${escapeHtml(status)}</span></div>
       <span class="dash-row-sub">${escapeHtml(task.sourceLabel)}${task.buyer ? ` · ${escapeHtml(task.buyer)}` : ""}${["urgent", "high"].includes(task.priority) ? ` · ${escapeHtml(task.priority)} priority` : ""}</span>

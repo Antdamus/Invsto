@@ -249,3 +249,11 @@ body[data-page="team-tasks"] .task-response-options input { width: 20px; height:
 @media (prefers-reduced-motion: reduce) {
   body[data-page="team-tasks"] *, body[data-page="team-tasks"] *::before, body[data-page="team-tasks"] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* One responsibility switcher; no duplicate Active / History controls. */
+.task-inbox-tabs { grid-template-columns: repeat(4,minmax(0,1fr)); }
+.task-overview { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.task-inbox-tabs b:empty { display:none; }
+body[data-page="team-tasks"] .task-card-owner { color:#ead39d; font-weight:600; }
+body[data-page="team-tasks"] .team-task-action-menu-body { display:grid; gap:8px; }
+@media(max-width:520px) { .task-inbox-tabs button { min-height:62px; font-size:11px; } }

@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="team-tasks.css?v=workspace-20261007-assigned" />
-  <link rel="stylesheet" href="team-tasks-workspace.css?v=workspace-20261007-reply" />
+  <link rel="stylesheet" href="team-tasks-workspace.css?v=workspace-20261007-next-action" />
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body data-page="team-tasks">
@@ -75,15 +75,16 @@
         <section class="task-inboxes" id="task-inboxes" aria-label="Task inbox">
           <div class="task-inbox-tabs" role="group" aria-label="Task responsibility">
             <button type="button" data-task-owner-filter="assigned" aria-pressed="true"><span>Assigned to me</span><b data-inbox-count>—</b></button>
-            <button type="button" data-task-owner-filter="created" aria-pressed="false"><span>Assigned by me</span><b data-inbox-count>—</b></button>
+            <button type="button" data-task-owner-filter="following" aria-pressed="false"><span>Following</span><b data-inbox-count>—</b></button>
             <button type="button" data-task-owner-filter="approvals" aria-pressed="false"><span>Approvals</span><b data-inbox-count>—</b></button>
+            <button type="button" data-task-owner-filter="history" aria-pressed="false"><span>History</span></button>
           </div>
-          <p id="task-inbox-description">Your assignments, including work awaiting review.</p>
+          <p id="task-inbox-description">Your next steps. Work waiting on someone else is in Following.</p>
         </section>
         <section class="task-overview" id="task-overview" aria-label="Work overview for selected inbox">
           <button type="button" class="task-overview-item is-active" data-task-focus="all" aria-pressed="true"><span class="task-overview-icon"><i data-lucide="layers"></i></span><span><small>Open tasks</small><strong data-task-stat="all">—</strong></span><span class="task-overview-hint">Your work at a glance</span></button>
           <button type="button" class="task-overview-item task-overview-overdue" data-task-focus="overdue" aria-pressed="false"><span class="task-overview-icon"><i data-lucide="clock-3"></i></span><span><small>Overdue</small><strong data-task-stat="overdue">—</strong></span><span class="task-overview-hint">Needs a next step</span></button>
-          <button type="button" class="task-overview-item task-overview-review" data-task-focus="review" aria-pressed="false"><span class="task-overview-icon"><i data-lucide="clipboard-check"></i></span><span><small>Awaiting review</small><strong data-task-stat="review">—</strong></span><span class="task-overview-hint">Ready for a decision</span></button>
+
         </section>
 
         <section class="team-task-board">
@@ -92,10 +93,7 @@
               <h2 id="team-task-list-title">All open tasks</h2>
               <span id="team-task-count" class="team-task-count" aria-live="polite">Loading your work…</span>
             </div>
-              <div class="team-task-view-toggle" role="group" aria-label="Task view">
-                <button id="team-task-active-tab" type="button" class="team-task-view-btn is-active" data-task-view="active" aria-pressed="true">Active</button>
-                <button id="team-task-history-tab" type="button" class="team-task-view-btn" data-task-view="history" aria-pressed="false">History</button>
-              </div>
+
           </div>
           <div class="task-search-row">
             <label class="task-search"><i data-lucide="search" aria-hidden="true"></i><span class="task-sr-only">Search tasks</span><input id="task-search" type="search" placeholder="Search tasks, notes, buyers, or orders" autocomplete="off" /></label>
@@ -106,7 +104,6 @@
             <button type="button" data-task-focus="progress" aria-pressed="false">In progress</button>
             <button type="button" data-task-focus="today" aria-pressed="false">Due today</button>
             <button type="button" data-task-focus="blocked" aria-pressed="false">Needs help</button>
-            <button type="button" data-task-focus="waiting" aria-pressed="false">Awaiting reply</button>
           </div>
           <section id="task-filters-panel" class="task-filters-panel hidden" aria-label="Task filters">
             <div class="task-filter-panel-heading"><strong>Refine this inbox</strong><button type="button" id="task-clear-filters" class="secondary-btn">Reset filters</button></div>
@@ -196,8 +193,8 @@
 
       <fieldset id="task-response-options" class="task-response-options hidden">
         <legend>What happens next?</legend>
-        <label><input type="radio" name="task-response-mode" value="update" checked /><span><strong>Just an update</strong><small>Keep the current responsibility</small></span></label>
-        <label id="task-response-handoff-option"><input type="radio" name="task-response-mode" value="handoff" /><span><strong>Hand back to assigner</strong><small id="task-response-recipient"></small></span></label>
+        <label><input type="radio" name="task-response-mode" value="update" checked /><span><strong>Add update</strong><small>Keep the current responsibility</small></span></label>
+        <label id="task-response-handoff-option"><input type="radio" name="task-response-mode" value="handoff" /><span><strong>Send instructions &amp; hand back</strong><small id="task-response-recipient"></small></span></label>
       </fieldset>
       <p id="task-response-summary" class="task-response-summary hidden" role="status"></p>
 
@@ -319,6 +316,7 @@
   <script src="initSupabase.js"></script>
   <script src="task-notifications.js?v=20261007" defer></script>
   <script src="admin-nav.js"></script>
-  <script src="team-tasks.js?v=workspace-20261007-notifications"></script>
+  <script src="task-workflow.js?v=20261007-next-action"></script>
+  <script src="team-tasks.js?v=workspace-20261007-next-action"></script>
 </body>
 </html>

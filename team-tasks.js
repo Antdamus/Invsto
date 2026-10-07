@@ -78,7 +78,7 @@ const ACTIVE_TASK_STATUSES = [
   "sent_back_for_rework",
 ];
 const HISTORY_TASK_STATUSES = ["resolved", "cancelled", "approved_by_admin", "approved_for_shipping", "shipped_completed", "closed"];
-const ACTIVE_RETURN_TASK_STATUSES = ["open", "assigned", "in_progress", "blocked", "deferred"];
+const ACTIVE_RETURN_TASK_STATUSES = ["open", "assigned", "in_progress", "blocked", "deferred", "completed_by_employee", "sent_back_for_rework"];
 const HISTORY_RETURN_TASK_STATUSES = ["resolved", "cancelled"];
 const ACCEPTANCE_PENDING_TASK_STATUSES = new Set(["completed_by_employee", "pending_admin_review", "ready_for_admin_approval"]);
 const ORDER_PARENT_TASK_TYPES = new Set(["coordination", "admin_review", "pending_admin_review", "worker_follow_up", "special_order"]);
@@ -191,7 +191,7 @@ function getTaskLateAgeLabel(task = {}) {
 }
 
 function isTaskLate(task = {}, options = {}) {
-  if (options.canceled) return false;
+  if (options.canceled || OGTaskWorkflow.next(task, state.assignees).kind !== "work") return false;
   const status = String(task.status || "").toLowerCase();
   if (HISTORY_TASK_STATUSES.includes(status) || HISTORY_RETURN_TASK_STATUSES.includes(status)) return false;
   const dueValue = getTaskDueValue(task);
@@ -801,15 +801,15 @@ function isTaskReviewStatus(task = {}) {
   return ["completed_by_employee", "pending_admin_review", "ready_for_admin_approval", "waiting_on_admin"].includes(task.status);
 }
 
-function isTaskInApprovalInbox(task = {}) {
-  if (isTaskViewAsWorkerMode()) return false;
-  if (isHistoricalTaskView()) {
-    return Boolean((getTaskViewerUserId() && task.resolved_by === getTaskViewerUserId()) || userEmailMatchesTaskViewer(task.resolved_by_email));
-  }
-  if (!isTaskReviewStatus(task)) return false;
-  if (isTaskPendingAcceptance(task) && isTaskCreatedByCurrentUser(task)) return true;
-  return canUseAdminTaskControls() && (isTaskAssignedToCurrentUser(task) || isTaskAssignedByCurrentUser(task) || (!task.assigned_to_user_id && !task.assigned_to_email));
+function getTaskResponsibility(task) {
+  return OGTaskWorkflow.bucket(task, getTaskViewerUserId(), state.assignees, state.followingTasks || []);
 }
+function isTaskInApprovalInbox(task = {}) {
+  return !isTaskViewAsWorkerMode() && getTaskResponsibility(task) === 'approvals';
+}
+function isTaskMyNextAction(task) { return getTaskResponsibility(task) === 'assigned'; }
+function isTaskFollowing(task) { return getTaskResponsibility(task) === 'following'; }
+function getTaskResponsibilityLabel(task) { return OGTaskWorkflow.label(task, state.assignees, getTaskViewerUserId()); }
 
 function isTaskPendingAcceptance(task = {}) {
   if (isTaskHistoryView()) return false;
@@ -827,11 +827,7 @@ function isTaskAcceptanceVisibleToViewer(task = {}) {
 }
 
 function canReviewTaskAcceptance(task = {}) {
-  if (!isTaskPendingAcceptance(task)) return false;
-  return Boolean(
-    canUseAdminTaskControls()
-    || isTaskCreatedByCurrentUser(task)
-  );
+  return !isTaskViewAsWorkerMode() && isTaskPendingAcceptance(task) && isTaskInApprovalInbox(task);
 }
 
 function eventSignedByTaskAssignee(task = {}, event = {}) {
@@ -854,14 +850,7 @@ function getLatestTaskReplyEvent(task = {}) {
 }
 
 function isTaskRespondedAwaitingReply(task = {}) {
-  if (isTaskHistoryView()) return false;
-  if (isTaskPendingAcceptance(task) || isOrderPendingApprovalTask(task)) return false;
-  const status = String(task.status || "").toLowerCase();
-  if (HISTORY_TASK_STATUSES.includes(status) || HISTORY_RETURN_TASK_STATUSES.includes(status)) return false;
-  if (!task.assigned_to_user_id && !task.assigned_to_email) return false;
-  const latestEvent = getLatestTaskReplyEvent(task);
-  if (!latestEvent) return false;
-  return eventSignedByTaskAssignee(task, latestEvent);
+  return getTaskResponsibility(task) === 'following';
 }
 
 function getDefaultActiveTasks(tasks = []) {
@@ -914,8 +903,9 @@ function getTaskSourceCounts(tasks = []) {
 function getTasksForOwnerFilter(tasks = []) {
   if (state.taskOwnerFilter === "everything") return tasks;
   if (state.taskOwnerFilter === "approvals") return tasks.filter(isTaskInApprovalInbox);
-  if (state.taskOwnerFilter === "assigned") return tasks.filter(isTaskAssignedToCurrentUser);
-  if (state.taskOwnerFilter === "created") return tasks.filter(isTaskAssignedByCurrentUser);
+  if (isHistoricalTaskView()) return tasks.filter(task => OGTaskWorkflow.related(task, getTaskViewerUserId(), state.followingTasks || []));
+  if (state.taskOwnerFilter === "assigned") return tasks.filter(isTaskMyNextAction);
+  if (["created", "following"].includes(state.taskOwnerFilter)) return tasks.filter(isTaskFollowing);
   if (state.taskOwnerFilter === "order_approval") return tasks.filter((task) => isOrderPendingApprovalTask(task) && canUseAdminTaskControls());
   if (state.taskOwnerFilter === "acceptance") return tasks.filter(isTaskAcceptanceVisibleToViewer);
   if (state.taskOwnerFilter === "responded") return tasks.filter(isTaskRespondedAwaitingReply);
@@ -940,13 +930,13 @@ function getVisibleTasksForCurrentFilters(tasks = []) {
 
 function matchesTaskFocus(task, focus = state.taskFocus) {
   if (isHistoricalTaskView()) return true;
-  if (focus === "mine") return isTaskAssignedToCurrentUser(task);
+  if (focus === "mine") return isTaskMyNextAction(task);
   if (focus === "progress") return ["assigned", "in_progress", "assigned_for_shipping"].includes(task.status);
   if (focus === "overdue") return isTaskLate(task);
   if (focus === "today") return startOfLocalDayTimestamp(getTaskDueValue(task)) === startOfLocalDayTimestamp();
-  if (focus === "review") return isTaskReviewStatus(task);
+  if (focus === "review") return isTaskInApprovalInbox(task);
   if (focus === "blocked") return ["blocked", "sent_back_for_rework"].includes(task.status);
-  if (focus === "waiting") return isTaskRespondedAwaitingReply(task) || ["waiting_on_worker", "deferred"].includes(task.status);
+  if (focus === "waiting") return task.status === "deferred" || task.status === "waiting_on_subtasks";
   return true;
 }
 
@@ -1003,10 +993,10 @@ function renderTaskWorkspaceChrome(visibleTasks = []) {
     applied.classList.toggle("hidden", !filterLabels.length && !state.taskSearch);
     applied.textContent = [...filterLabels, state.taskSearch ? `Search: ${state.taskSearch}` : ""].filter(Boolean).join(" · ");
   }
-  const inboxTitle = ({assigned: "Assigned to me", created: "Assigned by me", approvals: history ? "Reviewed by me" : "Approvals", everything: "Team tasks"})[state.taskOwnerFilter] || "Tasks";
+  const inboxTitle = ({assigned: "Assigned to me", created: "Following", following: "Following", history: "History", approvals: "Approvals", everything: "Team tasks"})[state.taskOwnerFilter] || "Tasks";
   const focusTitle = ({overdue: "Overdue", review: "Awaiting review", today: "Due today", progress: "In progress", blocked: "Needs help", waiting: "Awaiting reply"})[state.taskFocus];
-  if (!isViewingWorkerTasks() && $("team-task-list-title")) $("team-task-list-title").textContent = `${inboxTitle}${history ? " · History" : focusTitle ? ` · ${focusTitle}` : ""}`;
-  if ($("task-inbox-description")) $("task-inbox-description").textContent = ({assigned: "Your assignments, including work awaiting review.", created: "Track the work you delegated and your team's latest updates.", approvals: history ? "Tasks you reviewed and closed." : "Decisions waiting for you, plus unassigned admin reviews."})[state.taskOwnerFilter] || "Team workspace";
+  if (!isViewingWorkerTasks() && $("team-task-list-title")) $("team-task-list-title").textContent = `${history ? "History" : inboxTitle}${!history && focusTitle ? ` · ${focusTitle}` : ""}`;
+  if ($("task-inbox-description")) $("task-inbox-description").textContent = ({assigned: "Your next steps. Work waiting on someone else is in Following.", created: "Work you assigned, handed back, or finished. Someone else acts next.", following: "Work you assigned, handed back, or finished. Someone else acts next.", approvals: "Work waiting for your acceptance or decision.", history: "Finished and accepted tasks, with their full trail."})[state.taskOwnerFilter] || "Team workspace";
   if ($("team-task-count")) $("team-task-count").textContent = `${visibleTasks.length} task${visibleTasks.length === 1 ? "" : "s"}${isViewingWorkerTasks() ? " · Read-only preview" : ""}`;
   const signature = JSON.stringify([state.taskSearch, state.taskFocus, state.taskOwnerFilter, state.taskReadFilter, state.taskSourceFilter, state.taskView, state.taskScope, state.viewedWorkerUserId, state.taskSort, state.taskHistorySort]);
   if (signature !== state.taskRenderSignature) { state.visibleTaskLimit = 20; state.taskRenderSignature = signature; }
@@ -1041,7 +1031,7 @@ async function loadTaskEvidence(task) {
 }
 
 function renderTaskOwnerFilterChrome(tasks = []) {
-  const counts = {assigned: tasks.filter(isTaskAssignedToCurrentUser).length, created: tasks.filter(isTaskAssignedByCurrentUser).length, approvals: tasks.filter(isTaskInApprovalInbox).length};
+  const counts = {assigned: tasks.filter(isTaskMyNextAction).length, following: tasks.filter(isTaskFollowing).length, approvals: tasks.filter(isTaskInApprovalInbox).length};
   const viewerLabel = getTaskViewerShortLabel();
   document.querySelectorAll("[data-task-owner-filter]").forEach((button) => {
     const filter = button.dataset.taskOwnerFilter || "all";
@@ -1050,7 +1040,8 @@ function renderTaskOwnerFilterChrome(tasks = []) {
       everything: `All tasks ${tasks.length}`,
       all: `Active work ${counts.all}`,
       assigned: `${isViewingWorkerTasks() ? `Assigned to ${viewerLabel}` : "Assigned to me"} ${counts.assigned}`,
-      created: `${isViewingWorkerTasks() ? `Assigned by ${viewerLabel}` : "Assigned by me"} ${counts.created}`,
+      following: `Following ${counts.following}`,
+      history: "History",
       approvals: `${isHistoricalTaskView() ? "Reviewed by me" : "Approvals"} ${counts.approvals}`,
       responded: `Responded / awaiting reply ${counts.responded}`,
       order_approval: `Orders pending approval ${counts.orderApproval}`,
@@ -1060,10 +1051,10 @@ function renderTaskOwnerFilterChrome(tasks = []) {
     button.setAttribute("aria-label", label);
     if (button.querySelector("[data-inbox-count]")) {
       button.querySelector("span").textContent = label.replace(/\s+\d+$/, "");
-      button.querySelector("[data-inbox-count]").textContent = counts[filter];
+      button.querySelector("[data-inbox-count]").textContent = isHistoricalTaskView() ? "" : counts[filter];
     } else button.textContent = label;
-    button.classList.toggle("is-active", state.taskOwnerFilter === filter);
-    button.setAttribute("aria-pressed", String(state.taskOwnerFilter === filter));
+    button.classList.toggle("is-active", isHistoricalTaskView() ? filter === "history" : state.taskOwnerFilter === filter);
+    button.setAttribute("aria-pressed", String(isHistoricalTaskView() ? filter === "history" : state.taskOwnerFilter === filter));
   });
 }
 
@@ -1179,6 +1170,7 @@ function isAssignmentEvent(event = {}) {
   const newAssignee = event.new_assigned_to_user_id || payload.new_assigned_to_user_id || payload.assigned_to_user_id;
 
   if (assignmentAction === "cancel_assignment") return false;
+  if (payload.source === "task_next_action" && payload.action === "return") return Boolean(newAssignee);
   if (action === "created") return Boolean(newAssignee);
   if (TASK_ASSIGNMENT_EVENT_ACTIONS.has(action) || assignmentAction === "reassign") return Boolean(newAssignee);
   return Boolean(newAssignee && event.old_assigned_to_user_id && event.old_assigned_to_user_id !== newAssignee);
@@ -1435,6 +1427,7 @@ async function performTaskLoad() {
   setStatus("");
   state.childTasksByParent = new Map();
 
+  state.followingTasks = await loadTaskFollowers();
   const results = await Promise.allSettled([
     loadTeamTaskRecords(),
     loadOrderTaskRecords(),
@@ -1640,14 +1633,18 @@ function setupTaskNotificationRealtime() {
     .subscribe();
 }
 
-function getTaskLoadVisibilityFilter() {
+function getTaskLoadVisibilityFilter(source) {
   const viewer = getTaskViewerUserId();
   if (!viewer) return "id.is.null";
   if ((isTeamWideTaskScope() && !isViewingWorkerTasks()) || isCanceledTaskScope()) return "";
   const parts = [`assigned_to_user_id.eq.${viewer}`, `and(or(assigned_by.eq.${viewer},created_by.eq.${viewer}),or(assigned_to_user_id.not.is.null,assigned_to_email.not.is.null))`];
   if (isHistoricalTaskView()) parts.push(`resolved_by.eq.${viewer}`);
-  else if (canUseAdminTaskControls()) parts.push("and(assigned_to_user_id.is.null,assigned_to_email.is.null,status.in.(waiting_on_admin,completed_by_employee,pending_admin_review,ready_for_admin_approval))");
+  else if (canUseAdminTaskControls()) parts.push("status.in.(waiting_on_admin,completed_by_employee,pending_admin_review,ready_for_admin_approval)");
   return parts.join(",");
+}
+
+async function loadTaskFollowers() {
+  return readTaskPages(supabase.rpc("list_followed_tasks", {_viewer: getTaskViewerUserId(), _history: isHistoricalTaskView()}).order("task_id"));
 }
 
 async function readTaskPages(query) {
@@ -1661,27 +1658,35 @@ async function readTaskPages(query) {
   }
 }
 
+async function readTaskInbox(makeQuery, source) {
+  let query = makeQuery();
+  const visibility = getTaskLoadVisibilityFilter(source);
+  if (visibility) query = query.or(visibility);
+  const rows = await readTaskPages(query);
+  if (!visibility) return rows;
+  const loaded = new Set(rows.map(task => task.id));
+  const missing = (state.followingTasks || []).filter(row => row.source === source && !loaded.has(row.task_id)).map(row => row.task_id);
+  for (let offset = 0; offset < missing.length; offset += 75) rows.push(...await readTaskPages(makeQuery().in('id', missing.slice(offset, offset + 75))));
+  return rows;
+}
+
 async function loadTeamTaskRecords() {
-  let query = supabase.from("team_tasks").select("*")
+  const makeQuery = () => supabase.from("team_tasks").select("*")
     .in("status", isHistoricalTaskView() ? HISTORY_TASK_STATUSES : ACTIVE_TASK_STATUSES)
     .order(isHistoricalTaskView() ? "updated_at" : "created_at", {ascending: !isHistoricalTaskView()})
     .order("id", {ascending: true});
-  const visibility = getTaskLoadVisibilityFilter();
-  if (visibility) query = query.or(visibility);
-  return (await readTaskPages(query)).map(normalizeTeamTask);
+  return (await readTaskInbox(makeQuery, "team")).map(normalizeTeamTask);
 }
 
 async function loadOrderTaskRecords() {
   const statuses = isHistoricalTaskView() ? HISTORY_TASK_STATUSES : ACTIVE_TASK_STATUSES;
-  let query = supabase
+  const makeQuery = () => supabase
     .from("ebay_order_tasks")
     .select(`id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, created_at, updated_at, completed_at, resolved_at, resolved_by, resolved_by_email, latest_note, latest_photo_count, created_by, created_by_email, metadata, ebay_orders(${ORDER_TASK_ORDER_SELECT})`)
     .in("status", statuses)
     .order(isHistoricalTaskView() ? "updated_at" : "created_at", { ascending: !isHistoricalTaskView() })
     .order("id", {ascending: true});
-  const visibility = getTaskLoadVisibilityFilter();
-  if (visibility) query = query.or(visibility);
-  return (await readTaskPages(query))
+  return (await readTaskInbox(makeQuery, "order"))
     .map(normalizeOrderTask)
     .filter((task) => (
       isHistoricalTaskView()
@@ -1692,15 +1697,13 @@ async function loadOrderTaskRecords() {
 
 async function loadReturnTaskRecords() {
   const statuses = isHistoricalTaskView() ? HISTORY_RETURN_TASK_STATUSES : ACTIVE_RETURN_TASK_STATUSES;
-  let query = supabase
+  const makeQuery = () => supabase
     .from("ebay_return_tasks")
-    .select("id, return_case_id, order_id, order_line_ids, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, resolved_at, resolved_by, resolved_by_email, created_at, updated_at, created_by, created_by_email, metadata, ebay_return_cases(id, order_id, order_number, ebay_return_id, buyer_username, return_reason, status, opened_at, notes, raw_payload)")
+    .select("id, return_case_id, order_id, order_line_ids, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, resolved_at, resolved_by, resolved_by_email, created_at, updated_at, created_by, created_by_email, latest_note, metadata, ebay_return_cases(id, order_id, order_number, ebay_return_id, buyer_username, return_reason, status, opened_at, notes, raw_payload)")
     .in("status", statuses)
     .order("created_at", { ascending: !isHistoricalTaskView() })
     .order("id", {ascending: true});
-  const visibility = getTaskLoadVisibilityFilter();
-  if (visibility) query = query.or(visibility);
-  return (await readTaskPages(query)).map(normalizeReturnTask);
+  return (await readTaskInbox(makeQuery, "return")).map(normalizeReturnTask);
 }
 
 function normalizeTeamTask(task = {}) {
@@ -4302,7 +4305,7 @@ function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
           <summary>Extra eBay status, photos, and audit details</summary>
           ${renderPendingOrderStatusSnapshot(task)}
           ${isHistoryTask ? "" : renderPendingOrderEvidencePanel(task, events)}
-          <p class="team-task-next-step"><strong>Next step</strong><span>${escapeHtml(getTaskNextStepLabel(task))}</span></p>
+          <p class="team-task-next-step"><strong>Next step</strong><span>${escapeHtml(getTaskResponsibilityLabel(task))}</span></p>
           ${hasDifferentOriginal ? `
             <article class="team-task-instruction">
               <small>Original assignment</small>
@@ -4425,7 +4428,7 @@ function renderTaskCard(task = {}, options = {}) {
   const sourceLabel = getTaskSourceLabel(task);
   const statusLabel = canceled ? "Canceled" : getTaskStatusLabel(task.status);
   const due = getTaskDueValue(task);
-  const dueText = late ? `Overdue · ${getTaskLateAgeLabel(task)}` : due ? `Due ${getTaskDueLabel(task)}` : "No due date";
+  const dueText = OGTaskWorkflow.next(task, state.assignees).kind === "approval" ? "Awaiting decision" : late ? `Overdue · ${getTaskLateAgeLabel(task)}` : due ? `Due ${getTaskDueLabel(task)}` : "No due date";
   const priority = ["high", "urgent"].includes(task.priority) ? formatTaskTag(task.priority) : "";
   const latestNote = [...events].reverse().find(event => event.notes)?.notes;
   const preview = canceled ? getTaskCardPreview(task, true) : latestNote || getTaskCardPreview(task);
@@ -4443,7 +4446,6 @@ function renderTaskCard(task = {}, options = {}) {
       ${evidence?.status === "error" ? `<div class="task-evidence-loading" role="status">Some evidence could not load. <button type="button" class="secondary-btn" data-task-evidence-retry="${escapeHtml(taskKey)}">Retry photos</button></div>` : ""}
       ${!isOrderHistoryTask(task) && getPendingOrderBriefEvidencePhotos(task, events).length ? renderPendingOrderEvidencePanel(task, events) : ""}
       ${renderAdminReassignRequestNotice(task)}
-      ${!resolved && !canceled ? renderTaskReplyActions(task) : ""}
       ${actionHtml}
       ${renderTaskContext(task)}
       ${renderTaskUpdateTrail(task, events, {collapsed: true})}
@@ -4460,7 +4462,7 @@ function renderTaskCard(task = {}, options = {}) {
         <span class="team-task-summary-facts">
           <span class="team-task-status-chip">${escapeHtml(statusLabel)}</span>
           ${priority ? `<span class="task-card-priority">${escapeHtml(priority)} priority</span>` : ""}
-          <span class="task-card-owner">${escapeHtml(getTaskAssigneeLabel(task))}</span>
+          <span class="task-card-owner">${escapeHtml(getTaskResponsibilityLabel(task))}</span>
           <span class="${late ? "team-task-overdue-pill" : ""}">${escapeHtml(dueText)}</span>
           ${renderTaskAssignmentDate(task)}
         </span>
@@ -4472,6 +4474,7 @@ function renderTaskCard(task = {}, options = {}) {
 }
 
 function attachTaskCardInteractions(root = document) {
+  root.querySelectorAll("[data-task-next]").forEach(button => button.addEventListener("click", () => openTaskNextAction(getTaskByUnifiedKey(button.dataset.taskKey), button.dataset.taskNext)));
   root.querySelectorAll('[data-task-reply]').forEach(button => button.addEventListener('click', () => {
     openTaskReply(getTaskByUnifiedKey(button.dataset.taskReply), button.dataset.handoff === 'true');
   }));
@@ -4705,17 +4708,23 @@ function renderRemovedHistoryTasks() {
 const TASK_HANDOFF_STATUSES = new Set(['open','assigned','in_progress','waiting_on_admin','waiting_on_worker','blocked','deferred','sent_back_for_rework','needs_subtasks','waiting_on_subtasks']);
 
 function canReplyToTask(task = {}) {
-  return !isTaskViewAsWorkerMode() && !isTaskHistoryView() && !task.resolved_at
+  return !isTaskViewAsWorkerMode() && !isTaskHistoryView() && (!task.resolved_at || task.status === "completed_by_employee")
     && !['resolved','cancelled','shipped_completed','closed','approved_by_admin'].includes(task.status)
     && (canUseAdminTaskControls() || isTaskAssignedToCurrentUser(task) || isTaskCreatedByCurrentUser(task));
 }
 
 document.addEventListener('og-task-notifications-changed', event => {
   const snapshot = event.detail;
+  const oldIds = new Set(state.notifications.map(entry => entry.id));
   if (!state.user?.id || snapshot?.userId !== state.user.id) return;
   state.notifications = snapshot.notifications;
   renderTaskNotifications();
-  if ($('team-task-list') && state.tasks.length) renderTasks();
+  if ($('team-task-list') && state.tasks.length) {
+    renderTasks();
+    if (snapshot.notifications.some(entry => !oldIds.has(entry.id)) && !$('team-task-modal')?.matches(':not(.hidden)')) {
+      clearTimeout(state.notificationRefreshTimer); state.notificationRefreshTimer = setTimeout(loadTasks, 800);
+    }
+  }
 });
 
 function canHandTaskBack(task = {}) {
@@ -4728,7 +4737,7 @@ function canHandTaskBack(task = {}) {
 function renderTaskReplyActions(task) {
   if (!canReplyToTask(task)) return '';
   const key = escapeHtml(getUnifiedTaskKey(task));
-  return `<section class="task-reply-actions" aria-label="Reply to task"><div><strong>Reply & next step</strong><p>Share an update${canHandTaskBack(task) ? ` or ask ${escapeHtml(getTaskAssignerLabel(task))} to take the next step` : ' in this task’s history'}.</p></div><div class="team-task-actions"><button type="button" class="primary-btn" data-task-reply="${key}">Reply / Add update</button>${canHandTaskBack(task) ? `<button type="button" class="secondary-btn" data-task-reply="${key}" data-handoff="true">Hand back to assigner</button>` : ''}</div></section>`;
+  return `<section class="task-reply-actions" aria-label="Reply to task"><div><strong>Reply & next step</strong><p>Share an update${canHandTaskBack(task) ? ` or ask ${escapeHtml(getTaskAssignerLabel(task))} to take the next step` : ' in this task’s history'}.</p></div><div class="team-task-actions"><button type="button" class="primary-btn" data-task-reply="${key}">Add update</button>${canHandTaskBack(task) ? `<button type="button" class="secondary-btn" data-task-reply="${key}" data-handoff="true">Send instructions & hand back</button>` : ''}</div></section>`;
 }
 
 function openTaskReply(task, handoff = false) {
@@ -4747,7 +4756,7 @@ function openTaskReply(task, handoff = false) {
   document.querySelector('[name="task-response-mode"][value="handoff"]').checked = handoff && canHandTaskBack(task);
   configureModalAdminFields({assignee:false,category:false,priority:false,due:false,status:false});
   updateTaskReplySummary(); openModal();
-  setTimeout(() => $('team-task-note')?.focus(), 80);
+  $('team-task-note')?.focus();
 }
 
 function updateTaskReplySummary() {
@@ -4755,8 +4764,8 @@ function updateTaskReplySummary() {
   if (state.mode !== 'task-response' || !task) return;
   const handoff = document.querySelector('[name="task-response-mode"]:checked')?.value === 'handoff';
   $('task-response-summary').textContent = handoff
-    ? `${getTaskAssignerLabel(task)} will be responsible next. You can follow this same task under Assigned by me.`
-    : `${getTaskAssigneeLabel(task)} stays responsible. Your update is added to this task’s history.`;
+    ? `${getTaskAssignerLabel(task)} will be responsible next. You can follow this same task under Following.`
+    : `${getTaskResponsibilityLabel(task)}. Responsibility stays the same; your update is saved in the task’s history.`;
   $('team-task-note').placeholder = handoff ? 'What do you need them to do before you can continue?' : 'Write your answer, update, or question…';
   $('submit-team-task').textContent = handoff ? 'Send & hand back' : 'Send update';
 }
@@ -4777,14 +4786,92 @@ async function submitTaskReply() {
     });
     if (error) throw error;
     closeModal();
-    if (handoff) { state.taskOwnerFilter = 'created'; state.taskFocus = 'all'; }
-    setStatus(handoff ? `Handed back to ${getTaskAssignerLabel(task)}. Follow it under Assigned by me.` : 'Update saved. Responsibility stays the same.', 'success');
+    if (handoff) { state.taskOwnerFilter = 'following'; state.taskFocus = 'all'; if (getRequestedTaskId()) history.replaceState(null, '', 'team-tasks.html'); }
     await loadTasks();
+    setStatus(handoff ? `Handed back to ${getTaskAssignerLabel(task)}. Follow it under Following.` : 'Update saved. Responsibility stays the same.', 'success');
   } catch (error) { setModalError(error?.message || 'Could not send your reply. Your note is still here.'); }
   finally { state.replySaving = false; $('submit-team-task').disabled = false; }
 }
 
 function renderTaskActions(task = {}, resolved = false) {
+  if (resolved) return renderAdminHistoryActions(task);
+  if (isTaskViewAsWorkerMode()) return '';
+  const key = escapeHtml(getUnifiedTaskKey(task));
+  const buttons = [];
+  if (task.actionHref) buttons.push('<a class="secondary-btn" href="'+escapeHtml(task.actionHref)+'">'+(task.source === 'order' ? 'Open order' : 'Open return')+'</a>');
+  if (canReplyToTask(task)) buttons.push('<button type="button" class="secondary-btn" data-task-reply="'+key+'">Add update</button>');
+  if (canHandTaskBack(task)) buttons.push('<button type="button" class="secondary-btn" data-task-reply="'+key+'" data-handoff="true">Send instructions &amp; hand back</button>');
+  if (task.status === 'completed_by_employee' && canReviewTaskAcceptance(task)) {
+    buttons.push('<button type="button" class="secondary-btn" data-task-next="return" data-task-key="'+key+'">Request changes</button>');
+    buttons.push('<button type="button" class="primary-btn" data-task-next="accept" data-task-key="'+key+'">Accept &amp; finish</button>');
+  } else if (isTaskInApprovalInbox(task) && task.assigned_to_user_id !== state.user?.id && ['waiting_on_admin','pending_admin_review'].includes(task.status)) {
+    buttons.push('<button type="button" class="primary-btn" data-task-next="return" data-task-key="'+key+'">Send instructions &amp; hand back</button>');
+  } else if (task.assigned_to_user_id === state.user?.id && (TASK_HANDOFF_STATUSES.has(task.status) || task.status === 'pending_admin_review') && task.status !== 'waiting_on_subtasks' && !isShippingFulfillmentTask(task)) {
+    buttons.push('<button type="button" class="primary-btn" data-task-next="complete" data-task-key="'+key+'">Complete my part</button>');
+  }
+  if (isOrderPendingApprovalTask(task) && isTaskInApprovalInbox(task)) {
+    buttons.push('<button type="button" class="primary-btn" data-order-workflow-action="assign-shipping" data-task-id="'+escapeHtml(task.id)+'">Approve &amp; assign shipping</button>');
+    buttons.push('<button type="button" class="secondary-btn" data-order-workflow-action="send-back-order" data-task-id="'+escapeHtml(task.id)+'">Request changes</button>');
+  }
+  const more = [];
+  if (task.source === 'order') {
+    const temporary = document.createElement('div'); temporary.innerHTML = renderOrderTaskActions(task, false);
+    temporary.querySelectorAll('[data-order-workflow-action], [data-task-assignment-action]').forEach(button => {
+      const action = button.dataset.orderWorkflowAction;
+      if (['task-complete','subtask-complete','approve-subtask','send-back-subtask','send-back-order','task-progress','subtask-progress'].includes(action)) return;
+      if (button.disabled) return;
+      if (action === 'assign-shipping') return;
+      more.push(button.outerHTML);
+    });
+  } else {
+    if (task.source === 'team' && isTaskMyNextAction(task)) more.push('<button type="button" class="secondary-btn" data-team-task-progress="'+escapeHtml(task.id)+'">Change status / due date</button>');
+    more.push(...getAdminAssignmentActionButtons(task));
+  }
+  return renderTaskActionGroup(buttons, more);
+}
+
+function openTaskNextAction(task, action) {
+  if (!task || isTaskViewAsWorkerMode()) return;
+  state.mode = 'next-action'; state.activeTaskSource = task.source; state.activeTaskId = task.id;
+  state.nextAction = action; state.replySnapshot = {...task};
+  resetPhotos(); resetLineReviewPanel(); setModalError('');
+  const labels = {complete:'Complete my part',accept:'Accept & finish',return: task.status === 'completed_by_employee' ? 'Request changes' : 'Send instructions & hand back'};
+  $('team-task-modal-title').textContent = labels[action];
+  const reviewerId = OGTaskWorkflow.reviewer({...task,status:'completed_by_employee'}, state.assignees);
+  const reviewer = state.assignees.find(p => p.user_id === reviewerId);
+  const name = reviewer?.display_name || reviewer?.name || reviewer?.email || 'the reviewer';
+  $('team-task-modal-subtitle').textContent = action === 'complete'
+    ? name + ' will review your work. You can track it in Following. This does not close the order.'
+    : action === 'accept' ? 'Finish this task and move it to History. The order stays unchanged.'
+    : getTaskAssigneeLabel(task) + ' will be responsible for carrying out these instructions.';
+  $('team-task-title-field').classList.add('hidden'); $('team-task-note').value = '';
+  $('team-task-note').placeholder = action === 'return' ? 'What needs to be changed or finished?' : 'Summarize what was completed…';
+  configureModalAdminFields({assignee:false,category:false,priority:false,due:false,status:false});
+  $('submit-team-task').textContent = labels[action]; openModal();
+}
+
+async function submitTaskNextAction() {
+  if (state.replySaving || isTaskViewAsWorkerMode()) return;
+  const task = state.replySnapshot, note = $('team-task-note').value.trim();
+  if (!note) return setModalError('Add a note so the next person knows what happened.');
+  if (note.length > 10000) return setModalError('Please keep the note under 10,000 characters.');
+  state.replySaving = true; $('submit-team-task').disabled = true;
+  try {
+    const photos = await uploadPhotos(task.title);
+    const action = state.nextAction;
+    const {error} = await supabase.rpc('advance_task_workflow', {_source:task.source,_task_id:task.id,_action:action,_note:note,
+      _expected_status:task.status,_expected_assignee:task.assigned_to_user_id || null,_expected_updated_at:task.updated_at || null,_photos:photos});
+    if (error) throw error;
+    closeModal();
+    if (getRequestedTaskId()) history.replaceState(null, '', 'team-tasks.html');
+    state.taskOwnerFilter = action === 'accept' ? 'approvals' : 'following'; state.taskFocus = 'all';
+    await loadTasks();
+    setStatus(action === 'accept' ? 'Task accepted. It is now in History.' : action === 'return' ? 'Instructions sent. Follow the next person’s progress in Following.' : 'Your part is complete. Track acceptance in Following.', 'success');
+  } catch(error) {setModalError(error?.message || 'Could not save. Your note is still here.');}
+  finally {state.replySaving=false; $('submit-team-task').disabled=false;}
+}
+
+function renderLegacyTaskActions(task = {}, resolved = false) {
   const actionAttrs = getViewAsActionAttrs();
   if (task.source !== "team") {
     if (task.source === "order") return renderOrderTaskActions(task, resolved);
@@ -5860,7 +5947,7 @@ function configureOrderWorkflowModal(task, options = {}) {
   configureOrderLineReviewPanel(task, mode);
 
   openModal();
-  setTimeout(() => (isSubtaskCreate ? $("team-task-title-input") : $("team-task-note"))?.focus(), 80);
+  (isSubtaskCreate ? $("team-task-title-input") : $("team-task-note"))?.focus();
   loadCaptureStations({ silent: true }).catch((error) => {
     console.warn("Could not load team task capture stations:", error);
     setPhotoStatus(error?.message || "Could not load capture stations.", "error");
@@ -5963,7 +6050,7 @@ function openAdminAssignmentModal({ taskSource = "", taskId = "", action = "" } 
   });
 
   openModal();
-  setTimeout(() => (isReassign ? $("team-task-assignee") : $("team-task-note"))?.focus(), 80);
+  (isReassign ? $("team-task-assignee") : $("team-task-note"))?.focus();
 }
 
 async function saveAdminAssignmentAction({
@@ -6160,7 +6247,7 @@ async function openTaskModal(options = {}) {
   });
 
   openModal();
-  setTimeout(() => (task ? $("team-task-note") : $("team-task-title-input"))?.focus(), 80);
+  (task ? $("team-task-note") : $("team-task-title-input"))?.focus();
   loadCaptureStations({ silent: true }).catch((error) => {
     console.warn("Could not load team task capture stations:", error);
     setPhotoStatus(error?.message || "Could not load capture stations.", "error");
@@ -6478,6 +6565,7 @@ async function submitAdminAssignmentAction() {
 }
 
 async function submitTask() {
+  if (state.mode === 'next-action') return submitTaskNextAction();
   if (state.mode === 'task-response') return submitTaskReply();
   if (String(state.mode || "").startsWith("assignment-")) return submitAdminAssignmentAction();
   if (String(state.mode || "").startsWith("order-")) return submitOrderWorkflowTask();
@@ -6627,12 +6715,14 @@ function setupListeners() {
     state.taskReadFilter = ["all", "unread", "read"].includes(event.target.value) ? event.target.value : "all";
     renderTasks();
   });
-  document.querySelectorAll("[data-task-owner-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.taskOwnerFilter = ["everything", "all", "assigned", "created", "approvals", "responded", "acceptance", "order_approval"].includes(button.dataset.taskOwnerFilter)
-        ? button.dataset.taskOwnerFilter
-        : "all";
-      renderTasks();
+  document.querySelectorAll('[data-task-owner-filter]').forEach(button => {
+    button.addEventListener('click', async () => {
+      const next = button.dataset.taskOwnerFilter;
+      const newView = next === 'history' ? 'history' : 'active';
+      const reload = state.taskView !== newView;
+      state.taskOwnerFilter = next; state.taskView = newView; state.taskFocus = 'all';
+      updateTaskScopeChrome();
+      if (reload) await loadTasks(); else renderTasks();
     });
   });
   $("task-source-filter")?.addEventListener("change", event => {
