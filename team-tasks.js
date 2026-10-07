@@ -1747,7 +1747,9 @@ function isAdminCancelledAssignmentTask(task = {}) {
 
 function isTaskHiddenFromTaskPage(task = {}) {
   const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
-  return isTruthyMetadataFlag(metadata.hidden_from_task_board) || isAdminCancelledAssignmentTask(task);
+  const receiptRecord = task.source === "order" && !task.assigned_to_user_id && !task.assigned_to_email
+    && /^Video receipt screenshot (?:captured(?: manually)?|uploaded) for eBay item\b/i.test(String(task.question || "").trim());
+  return receiptRecord || isTruthyMetadataFlag(metadata.hidden_from_task_board) || isAdminCancelledAssignmentTask(task);
 }
 
 function isTaskRemovedFromActiveView(task = {}) {
@@ -4603,7 +4605,10 @@ function renderTasks() {
   renderTaskWorkspaceChrome(visibleTasks);
 
   if (!visibleTasks.length) {
-    list.innerHTML = `<div class="task-empty"><strong>No matching tasks</strong><p>Try another search or reset your filters to see all your work.</p><button id="task-reset-empty" type="button" class="secondary-btn">Reset filters</button></div>`;
+    const filtered = Boolean(state.taskSearch || state.taskFocus !== "all" || state.taskSourceFilter !== "all" || state.taskReadFilter !== "all");
+    const approvals = state.tasks.filter(isTaskInApprovalInbox).length;
+    const empty = ({assigned: ["You're caught up", approvals ? `${approvals} decision${approvals === 1 ? " is" : "s are"} waiting in Approvals.` : "No work needs your next step."], following: ["Nothing waiting on someone else", "Work you hand back or complete will appear here until it is finished."], approvals: ["No decisions waiting", "Work needing your acceptance will appear here."], history: ["No finished tasks yet", "Accepted and finished work will appear here."]})[state.taskOwnerFilter] || ["No tasks here", "There is no work in this view."];
+    list.innerHTML = `<div class="task-empty"><strong>${filtered ? "No matching tasks" : escapeHtml(empty[0])}</strong><p>${filtered ? "Try another search or reset your filters to see all your work." : escapeHtml(empty[1])}</p>${filtered ? '<button id="task-reset-empty" type="button" class="secondary-btn">Reset filters</button>' : ""}</div>`;
     $("task-reset-empty")?.addEventListener("click", resetTaskWorkspaceFilters);
     return;
   }

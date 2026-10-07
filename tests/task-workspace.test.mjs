@@ -517,3 +517,16 @@ test('an admin decision has one clear handback action even when the worker remai
  await expect(page.locator('#team-task-assignee')).toBeHidden();
  assert.deepEqual(await page.evaluate(()=>writes),[]);
 });
+
+test('saved receipt records stay evidence, while assigned photo work remains a task; an empty inbox has no redundant reset',async t=>{
+ const page=await open(t);
+ const result=await page.evaluate(()=>{
+  const receipt={source:'order',question:'Video receipt screenshot captured manually for eBay item 287370877729.',metadata:{},status:'open'};
+  state.tasks=state.tasks.filter(task=>task.assigned_to_user_id!=='me');renderTasks();
+  return [isTaskHiddenFromTaskPage(receipt),isTaskHiddenFromTaskPage({...receipt,assigned_to_user_id:'me'}),isTaskHiddenFromTaskPage({...receipt,question:'Please capture a video receipt screenshot.'})];
+ });
+ assert.deepEqual(result,[true,false,false]);
+ await expect(page.locator('.task-empty')).toContainText("You're caught up");
+ await expect(page.locator('.task-empty')).toContainText('Approvals');
+ await expect(page.locator('#task-reset-empty')).toHaveCount(0);
+});
