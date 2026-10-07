@@ -4244,6 +4244,13 @@ function renderOrders(options = {}) {
   const previousCard = options.buyerKey
     ? [...list.querySelectorAll(".buyer-order-card")].find(card => card.dataset.buyerKey === options.buyerKey) : null;
   const partial = Boolean(previousCard);
+  // Keep the scanned item in place when background evidence refreshes rebuild
+  // the queue. Otherwise clearing a long list clamps the scroll position.
+  const scannedRow = !partial && state.bagScanLineId
+    ? [...list.querySelectorAll('[data-line-id]')].find(row => row.dataset.lineId === state.bagScanLineId) : null;
+  const scannedRect = scannedRow?.getBoundingClientRect();
+  const scanAnchor = scannedRect && scannedRect.bottom > 70 && scannedRect.top < innerHeight
+    ? {id: state.bagScanLineId, top: scannedRect.top} : null;
   if (!partial) state.orderNotesObserver?.disconnect();
   if (!partial && state.orderRenderFrame) {
     window.cancelAnimationFrame(state.orderRenderFrame);
@@ -4772,6 +4779,13 @@ function renderOrders(options = {}) {
     }
 
     state.orderRenderFrame = 0;
+    if (scanAnchor && state.bagScanLineId === scanAnchor.id) {
+      window.requestAnimationFrame(() => {
+        if (renderRunId !== state.orderRenderRunId || state.bagScanLineId !== scanAnchor.id) return;
+        const row = [...list.querySelectorAll('[data-line-id]')].find(row => row.dataset.lineId === scanAnchor.id);
+        if (row) window.scrollBy({top: row.getBoundingClientRect().top - scanAnchor.top, behavior: 'instant'});
+      });
+    }
     scheduleQueueVideoReceiptEvidenceHydration(state.filteredOrders);
     logPendingOrderPerf("renderOrders complete", startedAt, {
       groups: groups.length,

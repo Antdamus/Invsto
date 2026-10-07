@@ -256,6 +256,11 @@ for(const width of [320,390,1280])test(`${width}px: bag photos are reviewed inli
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await expect(page.locator('#fulfillment-workflow')).toBeHidden();
   if(width===390)await page.screenshot({path:'test-results/bag-photo-review-phone.png'});
+  const beforeRefresh=await page.locator('[data-bag-review]').boundingBox();
+  await page.evaluate(async()=>{renderOrders();await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
+  await expect(page.locator('#bag-scan-found')).toBeEnabled();
+  const afterRefresh=await page.locator('[data-bag-review]').boundingBox();
+  assert.ok(Math.abs(beforeRefresh.y-afterRefresh.y)<3,`Background refresh preserves the visible scanned order (${beforeRefresh.y} → ${afterRefresh.y})`);
   await page.locator('#bag-scan-found').click();
   await expect(page.locator('#bag-scan-found')).toHaveText('✓ Item found');
   await expect(page.locator('[data-bag-review]')).toContainText('already attached');
