@@ -42,6 +42,7 @@ before(async()=>{
  const clock=await read('20260930220000_ebay_live_original_times.sql');
  await db.exec(clock.slice(clock.indexOf('create function public.ebay_live_activity_time'),clock.indexOf('create function public.apply_ebay_live_stream_metadata')));
  await db.exec(await read('20261007170000_ebay_live_paid_retry.sql'));
+ await db.exec(await read('20261007173000_ebay_live_paid_retry_badges.sql'));
  day=(await db.query("select to_char(now()-interval '1 day','YYYY-MM-DD') as day")).rows[0].day;
  observed=day+'T11:58:15Z';
 });
@@ -107,4 +108,24 @@ test('retry repair remains internal and capture retains its permission check',as
  assert.equal((await db.query("select has_function_privilege('authenticated','reconcile_ebay_live_paid_retry_internal(text)','execute') allowed")).rows[0].allowed,false);
  assert.equal((await db.query("select has_function_privilege('anon','reconcile_ebay_live_paid_retry_internal(text)','execute') allowed")).rows[0].allowed,false);
  await db.exec("set test.allowed='no'");await assert.rejects(ingest([observation('paid')]),/Inventory access required/);
+});
+
+test('019: earlier failed listing and Activity, then Paid and a win in the same minute',async()=>{
+ const failedBadge=observation('failed',{key:'failed-listing',source:'listing',time_label:null,observed_at:day+'T11:56:01Z'});
+ const paid=observation('paid',{observed_at:day+'T11:57:08Z'});
+ await ingest([failedBadge,observation('failed')]);
+ await ingest([paid]);
+ assert.notEqual((await attempts())[0].payment_state,'paid','Paid alone does not clear the failed payment');
+ await ingest([observation('won',{observed_at:day+'T11:57:10Z'})]);
+ const rows=await attempts();assert.equal(rows.length,1);assert.equal(rows[0].payment_state,'paid');
+ assert.equal((await db.query('select count(*)::int n from ebay_live_observations where attempt_id=$1',[rows[0].id])).rows[0].n,4);
+ await ingest([failedBadge,paid]);assert.equal((await attempts())[0].payment_state,'paid','old observations remain idempotent');
+ await ingest([observation('failed',{key:'new-failed-badge',source:'listing',time_label:null,observed_at:day+'T12:00:00Z'})]);
+ assert.equal((await attempts())[0].payment_state,'failed','a new Failed card still holds the sale');
+});
+
+for(const at of ['11:57:00','11:58:00']) test(`failed listing read at ${at} cannot be treated as historical`,async()=>{
+ await ingest([observation('failed',{key:'failed-listing',source:'listing',time_label:null,observed_at:day+'T'+at+'Z'}),
+  observation('failed'),observation('paid'),observation('won')]);
+ assert.ok((await attempts()).every(row=>row.payment_state!=='paid'));
 });
