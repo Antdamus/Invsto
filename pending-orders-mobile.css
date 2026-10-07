@@ -128,11 +128,11 @@
   .buyer-line-btn:not(.phone-line-open) > .admin-order-select,
   .buyer-line-btn:not(.phone-line-open) .buyer-line-actions,
   .buyer-line-btn:not(.phone-line-open) .buyer-line-customer,
-  .buyer-line-btn:not(.phone-line-open) .buyer-line-created,
   .buyer-line-btn:not(.phone-line-open) .buyer-line-identity,
   .buyer-line-btn:not(.phone-line-open) .buyer-line-receipt,
   .buyer-line-btn:not(.phone-line-open) .receipt-screenshot-upload { display: none !important; }
   .buyer-line-btn .buyer-line-order-details { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+  .buyer-line-btn .buyer-line-created { flex-basis: 100%; width: auto; padding: 2px 0; border: 0; border-radius: 0; background: transparent; color: var(--phone-muted); font-size: 13px; font-weight: 600; line-height: 1.5; }
   .buyer-line-order-copy { min-height: 44px; max-width: 100%; }
   .buyer-line-btn .buyer-line-receipt-actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .buyer-line-note-summary { width: 100%; }
