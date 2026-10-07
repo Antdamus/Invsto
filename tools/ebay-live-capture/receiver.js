@@ -65,6 +65,12 @@ if (new URL(location.href).searchParams.get('capture') === '1') {
     const reply = pending.get(event.data.id);
     if (reply) {pending.delete(event.data.id);reply({ok:event.data.ok===true,error:String(event.data.error||'').slice(0,250),state:event.data.state});}
   });
-  const announce = () => chrome.runtime.sendMessage({type:'INVSTO_RECEIVER'}).catch(()=>{});
+  // Do not stack heartbeats behind a delivery waiting for this page to wake up.
+  let announcing=false;
+  const announce = async () => {
+    if(announcing)return;announcing=true;
+    try{await chrome.runtime.sendMessage({type:'INVSTO_RECEIVER'});}catch{}
+    finally{announcing=false;}
+  };
   announce(); setInterval(announce,5000);
 }

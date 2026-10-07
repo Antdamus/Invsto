@@ -1,4 +1,10 @@
-# Invsto Live Capture (1.7.0)
+# Invsto Live Capture (1.7.1)
+
+## Receiver recovery (1.7.1)
+
+A suspended receiver can no longer leave the shared capture queue waiting indefinitely: the extension worker stops waiting after eight seconds and keeps unacknowledged sales in its saved outbox for retry. Receiver heartbeats wait for the previous check to finish instead of accumulating behind it. Bag-label requests also have a worker deadline; uncertain manual sends retain their original request ID for safe retry.
+
+This does not override Edge's sleeping-tab or background scheduling settings. Add `www.ebay.com` and `antdamus.github.io` to **Always keep these sites active**, keep the computer awake, and leave both the capture and receiver tabs open and signed in. Replace the installed extension files, reload its extension card, and refresh the capture tab and receiver to use this release. Refresh resumes the same unfinished show; do not start a new show.
 
 This helper copies visible eBay Stream Manager auction and payment evidence into Invsto. Its compact bag-label panel shows the latest confirmed paid sale, the bag number from its listing title, and the winner. It never bids, charges buyers, or cancels eBay orders.
 

@@ -177,7 +177,7 @@ test('automatic preparation pauses on a form error and resumes after a successfu
 test('event discovery and preparation ownership keep multiple open eBay tabs separate',async()=>{
  let stored={capture:{events:{},health:{},receivers:{9:Date.now()}}},handler,removed,resolvePhotos,bridges=0;
  const chrome={storage:{local:{get:async()=>structuredClone(stored),set:async value=>Object.assign(stored,structuredClone(value))}},runtime:{id:'extension',onMessage:{addListener:fn=>handler=fn}},alarms:{create(){},onAlarm:{addListener(){}}},tabs:{onRemoved:{addListener:fn=>removed=fn},sendMessage:async(tab,message)=>{bridges++;return message.command.action==='next'?new Promise(resolve=>resolvePhotos=resolve):{ok:true};}}};
- vm.runInNewContext(await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8'),{chrome,URL,Date,Promise,Error,Object,Number,String});
+ vm.runInNewContext(await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8'),{chrome,URL,Date,Promise,Error,Object,Number,String,setTimeout,clearTimeout});
  const send=(message,tab=1,url='https://www.ebay.com/ebaylive/host/events/EVENT123')=>new Promise(resolve=>handler(message,{id:'extension',tab:{id:tab,url}},resolve));
  await send({type:'INVSTO_LISTING_HELLO'});await send({type:'INVSTO_LISTING_HELLO'},2,'https://www.ebay.com/ebaylive/host/events/OTHER123');
  const discovery=await send({type:'INVSTO_LISTING_DISCOVER'},9,'https://antdamus.github.io/Invsto/live-sales.html');assert.deepEqual(Array.from(discovery.events).sort(),['EVENT123','OTHER123']);
@@ -191,7 +191,7 @@ test('event discovery and preparation ownership keep multiple open eBay tabs sep
 test('slow photo transfer does not block payment capture delivery',async()=>{
  let stored={capture:{events:{},health:{},receivers:{2:Date.now()}}},handler,resolvePhotos;
  const chrome={storage:{local:{get:async()=>structuredClone(stored),set:async v=>Object.assign(stored,structuredClone(v))}},runtime:{id:'extension',onMessage:{addListener:fn=>handler=fn}},alarms:{create(){},onAlarm:{addListener(){}}},tabs:{sendMessage:async(tab,msg)=>msg.type==='INVSTO_LISTING_BRIDGE'?new Promise(r=>resolvePhotos=r):{ok:true}}};
- vm.runInNewContext(await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8'),{chrome,URL,Date,Promise,Error,Object,Number,String});
+ vm.runInNewContext(await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8'),{chrome,URL,Date,Promise,Error,Object,Number,String,setTimeout,clearTimeout});
  const send=msg=>new Promise(r=>handler(msg,{id:'extension',tab:{id:1,url:'https://www.ebay.com/ebaylive/host/events/EVENT123'}},r));
  const listing=send({type:'INVSTO_LISTING_COMMAND',command:{event_id:'EVENT123',action:'next'}});await Promise.resolve();
  const capture=await send({type:'INVSTO_CAPTURE',event_id:'EVENT123',events:[{key:'payment',kind:'paid'}],health:{ready:true}});assert.equal(capture.ok,true);assert.equal(Object.keys(stored.capture.events).length,0);resolvePhotos({ok:true,job:{id:'job'}});assert.equal((await listing).ok,true);

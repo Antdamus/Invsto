@@ -1,5 +1,14 @@
 'use strict';
 let serial = Promise.resolve();
+// A receiver's own timer stops when Edge suspends that page. Keep the deadline
+// in the worker so one unanswered message cannot hold the persisted outbox lock.
+async function sendToTab(tab,message,timeout=8000){
+  let timer;
+  try{return await Promise.race([
+    chrome.tabs.sendMessage(tab,message),
+    new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('The Invsto receiver is not responding. Capture is saved; bring the receiver forward.')),timeout);})
+  ]);}finally{clearTimeout(timer);}
+}
 const streamReaders=new Map();
 async function readStreamInBackground(url,event_id){
   const task=crypto.randomUUID();let tab;
@@ -25,7 +34,7 @@ async function finishCapture(event_id){
     const ids=[];for(const [id,run] of Object.entries(data.captureRuns||{}))if(run.event_id===event_id){run.enabled=false;ids.push(Number(id));}
     await save(data);return ids;
   });
-  await Promise.allSettled(tabs.map(id=>chrome.tabs.sendMessage(id,{type:'INVSTO_STOP_CAPTURE',event_id})));
+  await Promise.allSettled(tabs.map(id=>sendToTab(id,{type:'INVSTO_STOP_CAPTURE',event_id})));
 }
 async function resumeCapture(event_id,tabId){
   const data=await enqueue(()=>read()),run=data.captureRuns?.[tabId];
@@ -34,7 +43,7 @@ async function resumeCapture(event_id,tabId){
   const ids=[...new Set([...receiverEntries(data).map(([id])=>Number(id)),data.setupTabs?.[event_id]].filter(id=>id!==undefined))];
   for(const id of ids){
     try{
-      const response=await chrome.tabs.sendMessage(id,{type:'INVSTO_CHECK_CAPTURE',event_id});reachable=true;
+      const response=await sendToTab(id,{type:'INVSTO_CHECK_CAPTURE',event_id});reachable=true;
       if(response?.state==='closed'){await finishCapture(event_id);return {ok:true,resume:false,closed:true};}
       if(response?.state==='active')return enqueue(async()=>{
         const latest=await read(),saved=latest.captureRuns?.[tabId];
@@ -46,7 +55,7 @@ async function resumeCapture(event_id,tabId){
   if(!reachable)await enqueue(async()=>{
     const latest=await read();if(!latest.captureRuns?.[tabId]?.enabled)return;
     latest.resumeOpenedAt||={};if(Date.now()-(latest.resumeOpenedAt[event_id]||0)<30000)return;
-    const tab=await chrome.tabs.create({url:'https://antdamus.github.io/Invsto/live-sales.html?capture=1&resume_event='+encodeURIComponent(event_id)+'&v=1.7.0',active:false});
+    const tab=await chrome.tabs.create({url:'https://antdamus.github.io/Invsto/live-sales.html?capture=1&resume_event='+encodeURIComponent(event_id)+'&v=1.7.1',active:false});
     latest.setupTabs||={};latest.setupTabs[event_id]=tab.id;latest.resumeOpenedAt[event_id]=Date.now();await save(latest);
   });
   return {ok:true,retry:true,error:'Reconnecting saved capture. Keep the Invsto receiver signed in; sellers will stay unchanged.'};
@@ -60,11 +69,11 @@ async function openCaptureSetup(event_id, sourceTab, stream) {
   const previous = data.setupTabs[event_id];
   if (previous !== undefined) {
     try {
-      const response = await chrome.tabs.sendMessage(previous,{type:'INVSTO_OPEN_CAPTURE_SETUP',event_id,stream});
+      const response = await sendToTab(previous,{type:'INVSTO_OPEN_CAPTURE_SETUP',event_id,stream});
       if (response?.ok) { await chrome.tabs.update(previous,{active:true}); return {ok:true,status:'Choose your sellers in Invsto.'}; }
     } catch {}
   }
-  const tab = await chrome.tabs.create({url:'https://antdamus.github.io/Invsto/live-sales.html?capture=1&capture_event='+encodeURIComponent(event_id)+'&v=1.7.0'+(stream?'&stream='+encodeURIComponent(JSON.stringify(stream)):''),active:true});
+  const tab = await chrome.tabs.create({url:'https://antdamus.github.io/Invsto/live-sales.html?capture=1&capture_event='+encodeURIComponent(event_id)+'&v=1.7.1'+(stream?'&stream='+encodeURIComponent(JSON.stringify(stream)):''),active:true});
   data.setupTabs[event_id] = tab.id; await save(data);
   return {ok:true,status:'Choose your sellers in Invsto.'};
 }
@@ -82,7 +91,7 @@ function selectCaptureHealth(data,event_id){
   const sort=(a,b)=>Number(!!b.health.ready)-Number(!!a.health.ready)||rank(b)-rank(a)||b.receivedAt-a.receivedAt;
   const source=automatic.sort(sort)[0]||current.sort((a,b)=>b.receivedAt-a.receivedAt)[0]||all.sort((a,b)=>b.receivedAt-a.receivedAt)[0];
   const ended=!!(data.health[event_id]?.broadcast_ended||all.some(s=>s.health.broadcast_ended));
-  data.health[event_id]={...source.health,ready:!ended&&current.includes(source)&&source.health.mode!=='working'&&source.health.running!==false&&!!source.health.ready&&Object.keys(data.events).length<=10000,broadcast_ended:ended,pending:Object.values(data.events).filter(e=>e.event_id===event_id).length,version:'1.7.0'};
+  data.health[event_id]={...source.health,ready:!ended&&current.includes(source)&&source.health.mode!=='working'&&source.health.running!==false&&!!source.health.ready&&Object.keys(data.events).length<=10000,broadcast_ended:ended,pending:Object.values(data.events).filter(e=>e.event_id===event_id).length,version:'1.7.1'};
 }
 async function deliver(data) {
   const receivers = receiverEntries(data);
@@ -96,7 +105,7 @@ async function deliver(data) {
     let accepted = false;
     for (const [tab] of receivers) {
       try {
-        const reply = await chrome.tabs.sendMessage(Number(tab),{type:'INVSTO_DELIVER',payload:{event_id,events:batch.map(e=>e.event),health:data.health[event_id]}});
+        const reply = await sendToTab(Number(tab),{type:'INVSTO_DELIVER',payload:{event_id,events:batch.map(e=>e.event),health:data.health[event_id]}});
         if (reply?.ok) {accepted=true;break;}
         if(reply?.state==='closed'){
           data.closedEvents||={};data.closedEvents[event_id]=true;
@@ -104,7 +113,7 @@ async function deliver(data) {
           data.status='Show closed. Unsent notifications are retained for review.';break;
         }
         data.status=reply?.error||'Invsto has not accepted the data yet';
-      } catch {delete data.receivers[tab];}
+      } catch(error) {delete data.receivers[tab];data.status=error.message;}
     }
     if (accepted) {
       for (const entry of batch) delete data.events[entry.id];
@@ -136,7 +145,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
       for(const [tab] of receivers){
         try{
           if(command.action==='configure')await chrome.tabs.update(Number(tab),{active:true});
-          const result=await chrome.tabs.sendMessage(Number(tab),{type:'INVSTO_BAG_LABEL_BRIDGE',command});
+          const result=await sendToTab(Number(tab),{type:'INVSTO_BAG_LABEL_BRIDGE',command},command.action==='configure'?185000:32000);
           if(command.action==='configure')await chrome.tabs.update(sender.tab.id,{active:true});
           if(result)return result;
         }catch(error){
@@ -183,7 +192,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     enqueue(async()=>{
       const data=await read(),tab=data.captureTabs?.[message.event_id];
       if(tab!==undefined){
-        try{const result=await chrome.tabs.sendMessage(tab,{type:'INVSTO_CAPTURE_STATUS',event_id:message.event_id});if(result?.ok)await chrome.tabs.update(tab,{active:true});}catch{}
+        try{const result=await sendToTab(tab,{type:'INVSTO_CAPTURE_STATUS',event_id:message.event_id});if(result?.ok)await chrome.tabs.update(tab,{active:true});}catch{}
       }
       return {ok:true};
     }).then(reply,error=>reply({ok:false,error:error.message}));return true;

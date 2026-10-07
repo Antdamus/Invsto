@@ -178,7 +178,7 @@ test('a background event connection error is acknowledged without mislabelling t
 test('extension outbox persists failures until receiver commit and retries after worker restart',async()=>{
  const source=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');let stored={},handler,accept=false,received=[];
  const chrome={storage:{local:{get:async()=>structuredClone(stored),set:async v=>{stored=structuredClone(v)}}},runtime:{id:'extension',onMessage:{addListener:fn=>{handler=fn}}},alarms:{create(){},onAlarm:{addListener(){}}},tabs:{sendMessage:async(tab,msg)=>{received.push(msg);return {ok:accept,error:'Offline'}}}};
- const boot=()=>vm.runInNewContext(source,{chrome,URL,Date,Promise,Error,Object,Number,String});boot();
+ const boot=()=>vm.runInNewContext(source,{chrome,URL,Date,Promise,Error,Object,Number,String,setTimeout,clearTimeout});boot();
  const send=(message,url,id=1)=>new Promise(resolve=>handler(message,{id:'extension',tab:{id,url}},resolve));
  await send({type:'INVSTO_CAPTURE',event_id:'EVENT123',events:[{key:'failure',kind:'failed'}],health:{ready:true}},'https://www.ebay.com/ebaylive/host/events/EVENT123');assert.equal(Object.keys(stored.capture.events).length,1);
  await send({type:'INVSTO_RECEIVER'},'https://antdamus.github.io/Invsto/live-sales.html?capture=1',2);assert.equal(Object.keys(stored.capture.events).length,1);
@@ -408,7 +408,7 @@ test('running counter includes priced open bags, separates closed results, and e
 });
 
 test('running counter shows missing data rather than inventing zero profit and uses exact cents',async t=>{
- const p=await open(t);assert.equal(await p.locator('#ebay-running-total').innerText(),'—');assert.match(await p.locator('#ebay-running-coverage').innerText(),/0 priced paid bags.*1 missing/);
+ const p=await open(t);await p.locator('#ebay-show-insights>summary').click();assert.equal(await p.locator('#ebay-running-total').innerText(),'—');assert.match(await p.locator('#ebay-running-coverage').innerText(),/0 priced paid bags.*1 missing/);
  await p.evaluate(()=>{const a=dashboard.attempts[0];Object.assign(a,{units:1,amount:1,minimum_total:.9});dashboard.attempts=[a,{...a,id:'two',minimum_total:.8},{...a,id:'three',minimum_total:1.3}];});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-running-total').textContent==='$0.00');assert.doesNotMatch(await p.locator('#ebay-running-total').getAttribute('class')||'',/is-loss|is-gain/);
  await p.evaluate(()=>{dashboard.attempts[0].minimum_total=1.9;});await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-running-total').textContent==='-$1.00');assert.match(await p.locator('#ebay-running-total').getAttribute('class'),/is-loss/);assert.deepEqual(p.errors,[]);
 });
@@ -485,7 +485,7 @@ test('save a show draft, start the next show, then restore the original bag and 
  await p.waitForFunction(()=>document.getElementById('show-current-name').textContent.includes('Second show today'));
  assert.match(await p.locator('#ebay-live-event').innerText(),/SECOND123/);assert.equal(await p.evaluate(()=>showSessions.length),2);
  await p.locator('#show-drafts-open').click();await p.locator('[data-resume-show="show"]').click();await p.waitForFunction(()=>document.getElementById('ebay-live-event').textContent.includes('EVENT123')&&!document.getElementById('item-scan').disabled);
- assert.equal(await p.evaluate(()=>ebayLive.current().lot_id),'lot');assert.match(await p.locator('#lot-manifest').innerText(),/First show watch/);assert.match(await p.locator('#ebay-running-total').innerText(),/30.00/);
+ await p.locator('#ebay-show-insights>summary').click();assert.equal(await p.evaluate(()=>ebayLive.current().lot_id),'lot');assert.match(await p.locator('#lot-manifest').innerText(),/First show watch/);assert.match(await p.locator('#ebay-running-total').innerText(),/30.00/);
  assert.equal(await p.evaluate(()=>showSessions[0].saved_for_later_at),null);assert.ok(await p.evaluate(()=>showSessions[1].saved_for_later_at));assert.equal(await p.evaluate(()=>mockManualItems[0].photo_path),'live-manual/saved.jpg');assert.deepEqual(p.errors,[]);
 });
 
@@ -609,7 +609,7 @@ test('working and stopped tabs cannot replace a fresh dedicated capture; quiet r
  const source=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');let now=Date.now(),stored={capture:{events:{},health:{},receivers:{9:now-120000}}},handler,deliveries=[];
  class Clock extends Date{static now(){return now;}}
  const chrome={storage:{local:{get:async()=>structuredClone(stored),set:async v=>Object.assign(stored,structuredClone(v))}},runtime:{id:'extension',onMessage:{addListener:fn=>handler=fn}},alarms:{create(){},onAlarm:{addListener(){}}},tabs:{sendMessage:async(tab,msg)=>{deliveries.push(msg);return {ok:true,job:null}}}};
- vm.runInNewContext(source,{chrome,URL,Date:Clock,Promise,Error,Object,Number,String});
+ vm.runInNewContext(source,{chrome,URL,Date:Clock,Promise,Error,Object,Number,String,setTimeout,clearTimeout});
  const send=(id,health)=>new Promise(r=>handler({type:'INVSTO_CAPTURE',event_id:'EVENT123',events:[],health},{id:'extension',tab:{id,url:'https://www.ebay.com/ebaylive/host/events/EVENT123'}},r));
  await send(1,{ready:true,running:true,mode:'automatic'});assert.equal(deliveries.at(-1).payload.health.ready,true,'throttled receiver still receives data');
  now+=1000;await send(2,{ready:false,running:true,mode:'working'});assert.equal(deliveries.at(-1).payload.health.ready,true,'working tab cannot pause healthy capture');
@@ -673,7 +673,7 @@ test('extension opens setup for the exact source event once and returns to the c
  const source=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');
  let stored={},handler,created=[],updated=[],alive=true;
  const chrome={storage:{local:{get:async()=>structuredClone(stored),set:async v=>{stored=structuredClone(v)}}},runtime:{id:'extension',onMessage:{addListener:fn=>{handler=fn}}},alarms:{create(){},onAlarm:{addListener(){}}},tabs:{create:async opts=>{created.push(opts);return {id:9};},update:async(id,opts)=>{updated.push({id,...opts});},sendMessage:async()=>({ok:alive})}};
- vm.runInNewContext(source,{chrome,URL,Date,Promise,Error,Object,Number,String,encodeURIComponent});
+ vm.runInNewContext(source,{chrome,URL,Date,Promise,Error,Object,Number,String,encodeURIComponent,setTimeout,clearTimeout});
  const send=(message,url,id=1)=>new Promise(resolve=>handler(message,{id:'extension',tab:{id,url}},resolve));
  const url='https://www.ebay.com/ebaylive/host/events/EVENT123?tab=dashboard';
  assert.equal((await send({type:'INVSTO_START_CAPTURE',event_id:'WRONG123'},url)).ok,false);assert.equal(created.length,0);
@@ -882,7 +882,7 @@ test('capture diagnostics expose the actual viewport without collecting private 
 async function recoveryWorker(){
  const source=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');let stored={},handler,checkState='active',checkHook=null;const opened=[],sent=[],focused=[];
  const chrome={storage:{local:{get:async()=>structuredClone(stored),set:async v=>{stored=structuredClone(v)}}},runtime:{id:'extension',onMessage:{addListener:fn=>{handler=fn}}},alarms:{create(){},onAlarm:{addListener(){}}},tabs:{create:async v=>{opened.push(v);return {id:9};},update:async(id,v)=>{focused.push({id,...v});},sendMessage:async(id,msg)=>{sent.push({id,...msg});if(msg.type==='INVSTO_CHECK_CAPTURE'){if(checkHook)return checkHook();if(checkState==='missing')throw Error('Tab closed');return {ok:true,state:checkState};}return {ok:true};}}};
- const boot=()=>vm.runInNewContext(source,{chrome,URL,Date,Promise,Error,Object,Number,String});boot();
+ const boot=()=>vm.runInNewContext(source,{chrome,URL,Date,Promise,Error,Object,Number,String,setTimeout,clearTimeout});boot();
  const send=(message,url='https://www.ebay.com/ebaylive/host/events/EVENT123',id=1)=>new Promise(resolve=>handler(message,{id:'extension',tab:{id,url}},resolve));
  return {send,boot,opened,sent,focused,get data(){return stored.capture;},setState(v){checkState=v;},setHook(v){checkHook=v;}};
 }
@@ -931,7 +931,7 @@ test('receiver resume checks existing shows without opening seller setup or chan
 });
 
 test('finished capture checks official orders automatically without delaying the save acknowledgement',async t=>{
- const p=await open(t,'?capture=1');await p.evaluate(()=>{
+ const p=await open(t,'?capture=1');await p.locator('#ebay-show-insights>summary').click();await p.evaluate(()=>{
   window.orderCalls=[];window.acks=[];window.completeCheck=null;
   supabase.functions={invoke:async(name,args)=>{orderCalls.push({name,args});return new Promise(resolve=>completeCheck=()=>resolve({data:{ok:true,orderCheck:{state:'complete'}}}));}};
   window.addEventListener('message',e=>{if(e.data?.type==='INVSTO_LIVE_ACK')acks.push(e.data);});
@@ -955,7 +955,7 @@ test('finished capture checks official orders automatically without delaying the
 });
 
 test('complete history keeps real payment holds visible and separates failed bids from sales',async t=>{
- const p=await open(t);await p.evaluate(()=>{
+ const p=await open(t);await p.locator('#ebay-show-insights>summary').click();await p.evaluate(()=>{
   dashboard.connection.broadcast_ended_at=new Date().toISOString();
   dashboard.recovery={phase:'read',can_close:true,requires_manual_note:false,saved_auctions:14,observed_wins:10,paid_auctions:7,payment_issues:7,unmatched_notifications:0,sold_seen:14,sold_expected:14,pending:0,captured_total:6604,live_sales:6604,failed_without_win:4,failed_without_win_total:13032};
  });await p.locator('#ebay-live-refresh').click();
@@ -971,7 +971,7 @@ test('complete history keeps real payment holds visible and separates failed bid
 });
 
 test('phone recovery progress separates reading from sync and requires a manual comparison when paused',async t=>{
- const p=await open(t);await p.setViewportSize({width:320,height:740});await p.evaluate(()=>{
+ const p=await open(t);await p.locator('#ebay-show-insights>summary').click();await p.setViewportSize({width:320,height:740});await p.evaluate(()=>{
   dashboard.connection.broadcast_ended_at=new Date().toISOString();dashboard.connection.health={pending:0};dashboard.post_show={open_paid_bags:0,payment_issues:0,unmatched_notifications:0,unlinked_bags:0,paid_bags:2,closed_bags:2};
   dashboard.recovery={phase:'reading',can_close:false,requires_manual_note:false,saved_auctions:3,paid_auctions:2,payment_issues:0,unmatched_notifications:0,sold_seen:2,sold_expected:3,pending:0};
  });await p.locator('#ebay-live-refresh').click();await p.waitForFunction(()=>document.getElementById('ebay-history-phase').textContent==='Reading show history…');
