@@ -393,3 +393,72 @@ test('pending order links target the order queue, while closed orders keep their
   assert.equal(links[0], 'pending-orders.html?orderTaskId=task-123#orders-list');
   assert.match(links[1], /^ebay-order-history.html\?historySearch=20-15235-74943/);
 });
+
+async function replyFixture(page, source='team') {
+  await page.evaluate(source => {
+    state.assignees.forEach(employee => {employee.display_name = employee.name; employee.active = true;});
+    const task = {...state.tasks[0], source, status:'waiting_on_admin', task_type:source==='order'?'coordination':'general',
+      assigned_by:'teammate', assigned_by_email:'sandra@example.test', created_by:'teammate', created_by_email:'sandra@example.test'};
+    state.tasks=[task];state.taskEvidenceLoads.set(getUnifiedTaskKey(task),{status:'ready'});
+    state.eventsByTask.clear(); loadTasks=async()=>renderTasks(); renderTasks();
+  },source);
+  await page.locator('[data-team-task-toggle]').click();
+}
+
+for(const width of [320,390,1366]) test(`reply and handoff form is clear and fits at ${width}px`,async t=>{
+  const page=await open(t,width,{admin:false});await replyFixture(page);
+  await page.getByRole('button',{name:'Reply / Add update',exact:true}).click();
+  await expect(page.getByRole('radio',{name:/Just an update/})).toBeChecked();
+  await expect(page.locator('#task-response-summary')).toContainText('Alex stays responsible');
+  await expect(page.locator('#team-task-assignee')).toBeHidden();await expect(page.locator('.task-attachments')).toBeHidden();
+  await page.getByRole('radio',{name:/Hand back to assigner/}).check();
+  await expect(page.locator('#task-response-summary')).toContainText('Sandra will be responsible next');
+  await expect(page.getByRole('button',{name:'Send & hand back'})).toBeVisible();
+  await page.locator('#team-task-note').fill('Please locate the CGL certificate and attach a photo so I can continue.');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  if(width===390)await page.screenshot({path:'test-results/task-reply-handoff-phone.png'});
+  if(width===1366)await page.screenshot({path:'test-results/task-reply-handoff-desktop.png'});
+  await page.keyboard.press('Escape');await expect(page.locator('#team-task-modal')).toBeHidden();
+  assert.deepEqual(await page.evaluate(()=>writes),[]);
+  await page.locator('[data-team-task-progress]').click();
+  await expect(page.locator('#task-response-options')).toBeHidden();
+  await expect(page.locator('.task-attachments')).toBeVisible();
+});
+
+for(const source of ['team','order','return'])test(`${source} replies send a note only; handoff explicitly changes responsibility`,async t=>{
+  const page=await open(t,390,{admin:false});await replyFixture(page,source);
+  await page.getByRole('button',{name:'Reply / Add update',exact:true}).click();
+  await page.getByRole('button',{name:'Send update',exact:true}).click();
+  await expect(page.locator('#team-task-modal-error')).toContainText('Write an update');
+  await page.locator('#team-task-note').fill('I checked the order and still need the certificate.');
+  await page.getByRole('button',{name:'Send update',exact:true}).click();
+  await expect(page.locator('#team-task-modal')).toBeHidden();
+  let writes=await page.evaluate(()=>window.writes);
+  assert.equal(writes.length,1);assert.equal(writes[0][0],'reply_to_task');
+  assert.deepEqual(writes[0][1],{_task_source:source,_task_id:'task-0',_note:'I checked the order and still need the certificate.',_request_action:false,_expected_assignee:'me',_expected_assigner:'teammate'});
+  await page.getByRole('button',{name:'Hand back to assigner',exact:true}).click();
+  await page.locator('#team-task-note').fill('Please locate the certificate so I can continue.');
+  await page.evaluate(()=>{supabase.rpc=async(...args)=>{writes.push(args);const task=state.tasks[0];task.assigned_to_user_id='teammate';task.assigned_to_email='sandra@example.test';task.assigned_by='me';task.assigned_by_email='alex@example.test';task.status='assigned';return {data:{},error:null};};});
+  await page.getByRole('button',{name:'Send & hand back',exact:true}).click();
+  await expect(page.locator('#team-task-modal')).toBeHidden();
+  await expect(page.locator('[data-task-owner-filter=created]')).toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('.team-task-card')).toHaveCount(1);
+  await expect(page.locator('.task-card-owner')).toContainText('Sandra');
+  writes=await page.evaluate(()=>window.writes);assert.equal(writes.length,2);assert.equal(writes[1][1]._request_action,true);
+});
+
+test('failed reply keeps the draft and owner; completion review cannot be handed off',async t=>{
+  const page=await open(t,390,{admin:false});await replyFixture(page);
+  await page.getByRole('button',{name:'Hand back to assigner',exact:true}).click();
+  await page.locator('#team-task-note').fill('Need the certificate.');
+  await page.evaluate(()=>{supabase.rpc=async()=>({error:{message:'The assignment changed. Refresh the task before replying.'}});});
+  await page.getByRole('button',{name:'Send & hand back',exact:true}).click();
+  await expect(page.locator('#team-task-modal-error')).toContainText('assignment changed');
+  await expect(page.locator('#team-task-note')).toHaveValue('Need the certificate.');
+  assert.equal(await page.evaluate(()=>state.tasks[0].assigned_to_user_id),'me');
+  await page.keyboard.press('Escape');
+  await page.evaluate(()=>{state.tasks[0].status='completed_by_employee';renderTasks();});
+  await expect(page.getByRole('button',{name:'Hand back to assigner',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Reply / Add update',exact:true}).click();
+  await expect(page.locator('#task-response-handoff-option')).toBeHidden();
+});

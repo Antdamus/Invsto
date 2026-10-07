@@ -227,6 +227,25 @@ body[data-page="team-tasks"].team-task-direct-mode .task-filters-panel { display
   body[data-page="team-tasks"].team-task-direct-mode .content.team-task-page { padding: 10px 12px 28px; }
   .task-empty { padding: 32px 18px; }
 }
+.task-reply-actions { padding: 18px; border: 1px solid rgba(228,199,135,.3); background: rgba(228,199,135,.045); border-radius: 16px; display: grid; gap: 14px; }
+.task-reply-actions strong { font-size: 16px; color: #ebd49b; }
+.task-reply-actions p { margin: 6px 0 0; color: #b9c3b9; line-height: 1.5; font-size: 13px; overflow-wrap: anywhere; }
+.task-reply-actions .team-task-actions { margin: 0; display: flex; flex-wrap: wrap; gap: 10px; }
+.task-reply-actions .team-task-actions > button { flex: 1 1 180px; min-height: 48px; }
+.task-response-options { border: 0; padding: 0; margin: 22px 0 14px; display: grid; gap: 10px; }
+.task-response-options legend { color: #c5cec5; margin-bottom: 10px; font-size: 13px; }
+.task-response-options label { display: flex; align-items: center; gap: 12px; border: 1px solid #39483d; border-radius: 14px; padding: 14px; cursor: pointer; }
+.task-response-options label:has(input:checked) { border-color: #dec58b; background: rgba(222,197,139,.09); }
+body[data-page="team-tasks"] .task-response-options input { width: 20px; height: 20px; flex: 0 0 20px; margin: 0; accent-color: #dec58b; }
+.task-response-options span { display: grid; gap: 4px; min-width: 0; }
+.task-response-options strong { font-size: 14px; }
+.task-response-options small { color: #aebcae; overflow-wrap: anywhere; font-size: 12px; }
+.task-response-summary { border-left: 3px solid #dec58b; padding: 10px 14px; color: #d1dbd0; background: rgba(160,183,155,.06); line-height: 1.55; font-size: 13px; }
+.is-task-response .task-attachments, .is-task-response .team-task-form-grid { display: none; }
+.is-task-response #team-task-modal-subtitle { overflow-wrap: anywhere; }
+.is-task-response #team-task-note { min-height: 120px; font-size: 16px; }
+.task-handoff-owner { color: #ebd49b; font-weight: 600; }
+@media (max-width: 520px) { .task-reply-actions { padding: 14px; } }
 @media (prefers-reduced-motion: reduce) {
   body[data-page="team-tasks"] *, body[data-page="team-tasks"] *::before, body[data-page="team-tasks"] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }

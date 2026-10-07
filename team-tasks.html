@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="team-tasks.css?v=workspace-20261007-assigned" />
-  <link rel="stylesheet" href="team-tasks-workspace.css?v=workspace-20261007-assigned" />
+  <link rel="stylesheet" href="team-tasks-workspace.css?v=workspace-20261007-reply" />
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body data-page="team-tasks">
@@ -194,6 +194,13 @@
       <h2 id="team-task-modal-title">Create team task</h2>
       <p id="team-task-modal-subtitle">Assign a task and save the instructions in the audit trail.</p>
 
+      <fieldset id="task-response-options" class="task-response-options hidden">
+        <legend>What happens next?</legend>
+        <label><input type="radio" name="task-response-mode" value="update" checked /><span><strong>Just an update</strong><small>Keep the current responsibility</small></span></label>
+        <label id="task-response-handoff-option"><input type="radio" name="task-response-mode" value="handoff" /><span><strong>Hand back to assigner</strong><small id="task-response-recipient"></small></span></label>
+      </fieldset>
+      <p id="task-response-summary" class="task-response-summary hidden" role="status"></p>
+
       <label id="team-task-title-field" class="team-task-field">
         Title
         <input id="team-task-title-input" type="text" placeholder="Short task title" autocomplete="off" />
@@ -311,6 +318,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
-  <script src="team-tasks.js?v=workspace-20261007-assigned"></script>
+  <script src="team-tasks.js?v=workspace-20261007-reply"></script>
 </body>
 </html>

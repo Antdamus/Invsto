@@ -1398,7 +1398,7 @@ function getTaskAssigneeLabel(task = {}) {
 }
 
 function getTaskAssignerLabel(task = {}) {
-  const assigner = state.assignees.find((employee) => employee.user_id === task.assigned_by);
+  const assigner = state.assignees.find((employee) => employee.user_id === (task.assigned_by || task.created_by));
   if (assigner) return assigner.display_name || assigner.email || "Team member";
   return task.assigned_by_email || task.created_by_email || task.metadata?.submitted_by_email || "Not recorded";
 }
@@ -4424,6 +4424,7 @@ function renderTaskCard(task = {}, options = {}) {
       ${evidence?.status === "error" ? `<div class="task-evidence-loading" role="status">Some evidence could not load. <button type="button" class="secondary-btn" data-task-evidence-retry="${escapeHtml(taskKey)}">Retry photos</button></div>` : ""}
       ${!isOrderHistoryTask(task) && getPendingOrderBriefEvidencePhotos(task, events).length ? renderPendingOrderEvidencePanel(task, events) : ""}
       ${renderAdminReassignRequestNotice(task)}
+      ${!resolved && !canceled ? renderTaskReplyActions(task) : ""}
       ${actionHtml}
       ${renderTaskContext(task)}
       ${renderTaskUpdateTrail(task, events, {collapsed: true})}
@@ -4452,6 +4453,9 @@ function renderTaskCard(task = {}, options = {}) {
 }
 
 function attachTaskCardInteractions(root = document) {
+  root.querySelectorAll('[data-task-reply]').forEach(button => button.addEventListener('click', () => {
+    openTaskReply(getTaskByUnifiedKey(button.dataset.taskReply), button.dataset.handoff === 'true');
+  }));
   root.querySelectorAll('[data-task-evidence-retry]').forEach(button => button.addEventListener('click', () => {
     const task = getTaskByUnifiedKey(button.dataset.taskEvidenceRetry);
     if (task) { loadTaskEvidence(task); renderTasks(); }
@@ -4677,6 +4681,80 @@ function renderRemovedHistoryTasks() {
       action: button.dataset.taskHistoryAction,
     }));
   });
+}
+
+const TASK_HANDOFF_STATUSES = new Set(['open','assigned','in_progress','waiting_on_admin','waiting_on_worker','blocked','deferred','sent_back_for_rework','needs_subtasks','waiting_on_subtasks']);
+
+function canReplyToTask(task = {}) {
+  return !isTaskViewAsWorkerMode() && !isTaskHistoryView() && !task.resolved_at
+    && !['resolved','cancelled','shipped_completed','closed','approved_by_admin'].includes(task.status)
+    && (canUseAdminTaskControls() || isTaskAssignedToCurrentUser(task) || isTaskCreatedByCurrentUser(task));
+}
+
+function canHandTaskBack(task = {}) {
+  const assignerId = task.assigned_by || task.created_by;
+  return canReplyToTask(task) && task.assigned_to_user_id === state.user?.id
+    && assignerId && assignerId !== state.user?.id && TASK_HANDOFF_STATUSES.has(task.status)
+    && state.assignees.some(employee => employee.user_id === assignerId && employee.active !== false);
+}
+
+function renderTaskReplyActions(task) {
+  if (!canReplyToTask(task)) return '';
+  const key = escapeHtml(getUnifiedTaskKey(task));
+  return `<section class="task-reply-actions" aria-label="Reply to task"><div><strong>Reply & next step</strong><p>Share an update${canHandTaskBack(task) ? ` or ask ${escapeHtml(getTaskAssignerLabel(task))} to take the next step` : ' in this task’s history'}.</p></div><div class="team-task-actions"><button type="button" class="primary-btn" data-task-reply="${key}">Reply / Add update</button>${canHandTaskBack(task) ? `<button type="button" class="secondary-btn" data-task-reply="${key}" data-handoff="true">Hand back to assigner</button>` : ''}</div></section>`;
+}
+
+function openTaskReply(task, handoff = false) {
+  if (!task || !canReplyToTask(task)) return;
+  state.mode = 'task-response'; state.activeTaskId = task.id; state.activeTaskSource = task.source;
+  // Keep the ownership shown when opening the form; the server detects changes.
+  state.replySnapshot = {...task};
+  resetPhotos(); resetLineReviewPanel(); setModalError(''); setPhotoStatus('');
+  $('team-task-modal-title').textContent = 'Reply to task';
+  $('team-task-modal-subtitle').textContent = getTaskSummaryTitle(task);
+  $('team-task-title-field').classList.add('hidden');
+  $('team-task-note').value = '';
+  $('task-response-handoff-option').classList.toggle('hidden', !canHandTaskBack(task));
+  $('task-response-recipient').textContent = getTaskAssignerLabel(task);
+  document.querySelector('[name="task-response-mode"][value="update"]').checked = !handoff || !canHandTaskBack(task);
+  document.querySelector('[name="task-response-mode"][value="handoff"]').checked = handoff && canHandTaskBack(task);
+  configureModalAdminFields({assignee:false,category:false,priority:false,due:false,status:false});
+  updateTaskReplySummary(); openModal();
+  setTimeout(() => $('team-task-note')?.focus(), 80);
+}
+
+function updateTaskReplySummary() {
+  const task = state.replySnapshot;
+  if (state.mode !== 'task-response' || !task) return;
+  const handoff = document.querySelector('[name="task-response-mode"]:checked')?.value === 'handoff';
+  $('task-response-summary').textContent = handoff
+    ? `${getTaskAssignerLabel(task)} will be responsible next. You can follow this same task under Assigned by me.`
+    : `${getTaskAssigneeLabel(task)} stays responsible. Your update is added to this task’s history.`;
+  $('team-task-note').placeholder = handoff ? 'What do you need them to do before you can continue?' : 'Write your answer, update, or question…';
+  $('submit-team-task').textContent = handoff ? 'Send & hand back' : 'Send update';
+}
+
+async function submitTaskReply() {
+  if (state.replySaving || isTaskViewAsWorkerMode()) return;
+  const task = state.replySnapshot;
+  const note = $('team-task-note').value.trim();
+  const handoff = document.querySelector('[name="task-response-mode"]:checked')?.value === 'handoff';
+  if (!task || !note) return setModalError(handoff ? 'Explain what you need the assigner to do.' : 'Write an update before sending.');
+  if (note.length > 10000) return setModalError('Please keep the update under 10,000 characters.');
+  if (handoff && !canHandTaskBack(task)) return setModalError('This task cannot be handed back. Refresh to check its assignment.');
+  state.replySaving = true; $('submit-team-task').disabled = true; setModalError('');
+  try {
+    const {error} = await supabase.rpc('reply_to_task', {
+      _task_source: task.source, _task_id: task.id, _note: note, _request_action: handoff,
+      _expected_assignee: task.assigned_to_user_id || null, _expected_assigner: task.assigned_by || task.created_by || null,
+    });
+    if (error) throw error;
+    closeModal();
+    if (handoff) { state.taskOwnerFilter = 'created'; state.taskFocus = 'all'; }
+    setStatus(handoff ? `Handed back to ${getTaskAssignerLabel(task)}. Follow it under Assigned by me.` : 'Update saved. Responsibility stays the same.', 'success');
+    await loadTasks();
+  } catch (error) { setModalError(error?.message || 'Could not send your reply. Your note is still here.'); }
+  finally { state.replySaving = false; $('submit-team-task').disabled = false; }
 }
 
 function renderTaskActions(task = {}, resolved = false) {
@@ -4923,7 +5001,7 @@ function renderTaskEventLineReviews(event = {}) {
 
 function renderTaskEvent(event = {}) {
   const photos = Array.isArray(event.photo_attachments) ? event.photo_attachments : [];
-  const actionLabel = formatTaskTag(event.action || "commented") || "Commented";
+  const actionLabel = event.payload?.response_kind === 'handoff' ? 'Handed back · next step requested' : event.payload?.response_kind === 'update' ? 'Update' : formatTaskTag(event.action || "commented") || "Commented";
   const statusLabel = getTaskStatusLabel(event.new_status || event.old_status || "");
   const actorLabel = event.signed_by_email || "logged-in user";
   const lineReviewHtml = renderTaskEventLineReviews(event);
@@ -4963,6 +5041,7 @@ function renderTaskEvent(event = {}) {
         <span>${escapeHtml(formatDate(event.created_at))}</span>
       </div>
       ${event.notes ? `<p>${escapeHtml(event.notes)}</p>` : ""}
+      ${event.payload?.response_kind === 'handoff' ? `<p class="task-handoff-owner">Now responsible: ${escapeHtml(event.payload.next_assignee_email || 'Previous assigner')}</p>` : ''}
       ${lineReviewHtml}
       <div class="team-task-event-signature">
         <span>Signed by ${escapeHtml(actorLabel)}</span>
@@ -5530,6 +5609,10 @@ function openModal() {
   state.modalReturnFocus = document.activeElement;
   const attachments = document.querySelector("#team-task-modal .task-attachments");
   if (attachments) attachments.open = false;
+  const responseMode = state.mode === 'task-response';
+  $('task-response-options')?.classList.toggle('hidden', !responseMode);
+  $('task-response-summary')?.classList.toggle('hidden', !responseMode);
+  $('team-task-modal')?.classList.toggle('is-task-response', responseMode);
   $("team-task-modal")?.classList.remove("hidden");
   document.body.classList.add("modal-open");
 }
@@ -6368,6 +6451,7 @@ async function submitAdminAssignmentAction() {
 }
 
 async function submitTask() {
+  if (state.mode === 'task-response') return submitTaskReply();
   if (String(state.mode || "").startsWith("assignment-")) return submitAdminAssignmentAction();
   if (String(state.mode || "").startsWith("order-")) return submitOrderWorkflowTask();
   if (isTaskViewAsWorkerMode()) return setModalError("Worker display is read-only. Switch back to your admin view to make changes.");
@@ -6476,6 +6560,7 @@ async function openTaskPhoto(bucket, path, options = {}) {
 }
 
 function setupListeners() {
+  document.querySelectorAll('[name="task-response-mode"]').forEach(input => input.addEventListener('change', updateTaskReplySummary));
   $("task-search")?.addEventListener("input", event => { state.taskSearch = event.target.value; renderTasks(); });
   $("task-filters-toggle")?.addEventListener("click", () => {
     const panel = $("task-filters-panel");
