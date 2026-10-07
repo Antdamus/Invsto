@@ -396,7 +396,7 @@ async function fetchWorkerReturnTasks(userId) {
     .from("ebay_return_tasks")
     .select("id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, metadata, ebay_return_cases(id, order_number, ebay_return_id, buyer_username, return_reason, return_tracking_number, status, opened_at, notes, raw_payload, case_type)")
     .eq("assigned_to_user_id", userId)
-    .in("status", ["open", "assigned", "in_progress", "blocked", "deferred"])
+    .in("status", ["open", "assigned", "in_progress", "blocked", "deferred", "sent_back_for_rework"])
     .order("created_at", { ascending: true })
     .limit(6);
 
@@ -473,15 +473,13 @@ function getWorkerOrderTaskLabel(task = {}) {
 }
 
 async function fetchWorkerOrderTasks(userId) {
-  const dashboardQuery = await window.supabase.rpc("list_my_ebay_order_tasks", { _limit: 6 });
-  if (!dashboardQuery.error) return (dashboardQuery.data || []).filter(task => !["completed_by_employee", "ready_for_admin_approval", "pending_admin_review", "waiting_on_subtasks"].includes(task.status));
-
-  console.warn("Worker order task RPC failed, falling back to direct query:", dashboardQuery.error);
+  // Filter responsibility before limiting the preview, so completed work cannot
+  // occupy the six slots and conceal assignments farther down the queue.
   const { data, error } = await window.supabase
     .from("ebay_order_tasks")
     .select("id, task_type, title, question, status, priority, assigned_to_email, due_at, created_at, latest_note, latest_photo_count, ebay_orders(order_number, buyer_username, ship_by_date)")
     .eq("assigned_to_user_id", userId)
-    .in("status", ["open", "assigned", "in_progress", "waiting_on_admin", "waiting_on_worker", "blocked", "deferred", "assigned_for_shipping"])
+    .in("status", ["open", "assigned", "in_progress", "waiting_on_worker", "blocked", "deferred", "assigned_for_shipping", "sent_back_for_rework", "needs_subtasks"])
     .order("created_at", { ascending: true })
     .limit(6);
 
@@ -564,7 +562,7 @@ async function loadWorkerTeamTasks(userId) {
     .from("team_tasks")
     .select("id, task_type, title, description, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, latest_note, latest_photo_count, created_by_email")
     .eq("assigned_to_user_id", userId)
-    .in("status", ["open", "assigned", "in_progress", "waiting_on_admin", "waiting_on_worker", "blocked", "deferred"])
+    .in("status", ["open", "assigned", "in_progress", "waiting_on_worker", "blocked", "deferred", "sent_back_for_rework"])
     .order("created_at", { ascending: true })
     .limit(6);
   if (error) {
