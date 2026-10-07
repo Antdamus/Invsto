@@ -2,7 +2,7 @@
 const dashboardState = {
   user: null, employee: null, orders: null, tasks: null,
   orderFilter: "overdue", taskFilter: "all", orderFilterChosen: false,
-  refreshing: null, updatedAt: 0, reports: new Map(),
+  refreshing: null, updatedAt: 0, reports: new Map(), assignees: [],
 };
 const DASH_PAGE_SIZE = 500;
 const DASH_PREVIEW_SIZE = 4;
@@ -158,14 +158,19 @@ async function loadDashboardTasks() {
     dashboardPages(() => supabase.from("team_tasks").select(`${common},description,latest_note`).in("status", DASH_ACTIVE_TASK_STATUSES).or(personal)),
     dashboardPages(() => supabase.from("ebay_order_tasks").select(`${common},question,latest_note,ebay_orders(order_number,buyer_username,ship_by_date)`).in("status", DASH_ACTIVE_TASK_STATUSES).or(orderScope)),
     dashboardPages(() => supabase.from("ebay_return_tasks").select(`${common},question,ebay_return_cases(order_number,buyer_username,return_reason)`).in("status", DASH_RETURN_TASK_STATUSES).eq("assigned_to_user_id", userId)),
+    dashboardQuery(supabase.rpc("list_team_task_assignees")),
   ]);
   // Never present a partial sum as the user's complete workload.
-  const failed = results.find(result => result.status === "rejected");
+  const sourceResults = results.slice(0, 3);
+  const failed = sourceResults.find(result => result.status === "rejected");
   if (failed) throw failed.reason;
-  dashboardState.tasks = results.flatMap((result, index) => result.value.map(task => normalizeDashboardTask(task, ["team", "order", "return"][index]))).filter(visibleDashboardTask);
+  dashboardState.assignees = results[3].status === "fulfilled" ? results[3].value.data || [] : [];
+  dashboardState.tasks = sourceResults.flatMap((result, index) => result.value.map(task => normalizeDashboardTask(task, ["team", "order", "return"][index]))).filter(visibleDashboardTask);
   renderDashboardTasks();
 }
 function isDashboardReview(task) { return DASH_REVIEW_STATUSES.has(task.status); }
+function isDashboardTaskLate(task, now = Date.now()) { const due = Date.parse(task.due); return Number.isFinite(due) && due < now; }
+function dashboardTaskNeedsHelp(task) { return ["blocked", "sent_back_for_rework"].includes(task.status); }
 function sortDashboardTasks(tasks) {
   const priorities = {urgent: 0, high: 1, normal: 2, low: 3};
   return [...tasks].sort((a, b) => (priorities[a.priority] ?? 2) - (priorities[b.priority] ?? 2)
@@ -176,24 +181,26 @@ function renderDashboardTasks() {
   const tasks = dashboardState.tasks;
   if (!tasks) return;
   const review = tasks.filter(isDashboardReview).length;
-  const overdue = tasks.filter(task => deadlineBucket(task.due) === "overdue").length;
-  const blocked = tasks.filter(task => ["blocked", "deferred", "sent_back_for_rework"].includes(task.status)).length;
+  const overdue = tasks.filter(task => isDashboardTaskLate(task)).length;
+  const blocked = tasks.filter(dashboardTaskNeedsHelp).length;
   dashText("stat-tasks", dashCount(tasks.length));
   dashText("stat-tasks-detail", `${dashCount(overdue)} overdue · ${dashCount(blocked)} need help`);
   dashText("stat-review", dashCount(review));
   dashText("stat-review-detail", "Approvals & admin follow-ups");
   document.querySelectorAll("[data-task-filter]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.taskFilter === dashboardState.taskFilter)));
-  const filtered = sortDashboardTasks(tasks.filter(task => dashboardState.taskFilter === "review" ? isDashboardReview(task) : dashboardState.taskFilter === "blocked" ? ["blocked", "deferred", "sent_back_for_rework"].includes(task.status) : true));
+  const filtered = sortDashboardTasks(tasks.filter(task => dashboardState.taskFilter === "review" ? isDashboardReview(task) : dashboardState.taskFilter === "blocked" ? dashboardTaskNeedsHelp(task) : true));
   const preview = filtered.slice(0, DASH_PREVIEW_SIZE);
   dashText("tasks-showing", filtered.length ? `${preview.length} of ${dashWords(filtered.length, "task")}` : "");
   const host = dashEl("dashboard-tasks"); host.setAttribute("aria-busy", "false");
   const statuses = {completed_by_employee: "Needs acceptance", ready_for_admin_approval: "Ready for approval", pending_admin_review: "Needs review", waiting_on_admin: "Admin follow-up", sent_back_for_rework: "Needs rework"};
   host.innerHTML = preview.length ? preview.map(task => {
     const mine = task.assigned_to_user_id === dashboardState.user.id;
-    const owner = mine ? "You" : task.assigned_to_email || (task.assigned_to_user_id ? "Assigned teammate" : "Unassigned");
+    const employee = dashboardState.assignees.find(person => person.user_id === task.assigned_to_user_id || (person.email && task.assigned_to_email && person.email.toLowerCase() === task.assigned_to_email.toLowerCase()));
+    const owner = mine ? "You" : employee?.display_name || employee?.name || task.assigned_to_email || (task.assigned_to_user_id ? "Assigned teammate" : "Unassigned");
     const status = statuses[task.status] || String(task.status).replace(/_/g, " ");
-    const overdueTask = deadlineBucket(task.due) === "overdue";
-    return `<a class="dash-row dash-task-row" href="team-tasks.html?taskId=${encodeURIComponent(task.id)}">
+    const overdueTask = isDashboardTaskLate(task);
+    const href = task.source === "return" ? `ebay-returns.html?returnTaskId=${encodeURIComponent(task.id)}#return-work-queue` : `team-tasks.html?taskId=${encodeURIComponent(task.id)}`;
+    return `<a class="dash-row dash-task-row" href="${href}">
       <div class="dash-row-top"><strong class="dash-row-title">${escapeHtml(task.title)}</strong><span class="dash-tag ${isDashboardReview(task) ? "is-review" : task.priority === "urgent" ? "is-urgent" : ""}">${escapeHtml(status)}</span></div>
       <span class="dash-row-sub">${escapeHtml(task.sourceLabel)}${task.buyer ? ` · ${escapeHtml(task.buyer)}` : ""}${["urgent", "high"].includes(task.priority) ? ` · ${escapeHtml(task.priority)} priority` : ""}</span>
       ${task.note ? `<p class="dash-row-note is-note">${escapeHtml(task.note)}</p>` : ""}

@@ -54,6 +54,7 @@ async function open(t, width = 390, {ready = true} = {}) {
       item_types: [{id:'i1',categories:['Chains','Gold'],cost:50,sale_price:150,deleted_at:null},{id:'i2',categories:['testcard'],cost:100,sale_price:1000,deleted_at:null},{id:'i3',categories:['Rings'],cost:30,sale_price:90,deleted_at:'2026-01-01'}],
       item_stock_locations: [{id:'s1',item_id:'i1',quantity:2},{id:'s2',item_id:'i1',quantity:3},{id:'s3',item_id:'i2',quantity:10},{id:'s4',item_id:'i3',quantity:4}],
       get_dashboard_buyer_snapshot: [{buyer_username:'collector',gross_sales:23000,net_payout:20000,order_count:10,open_return_count:1}],
+      list_team_task_assignees: [{user_id:'me',display_name:'Alex Rivers',email:'alex@example.test'},{user_id:'colleague',display_name:'Sandra',email:'sandra@example.test'}],
     };
     window.reads = []; window.failures = []; window.waiters = {};
     window.supabase = {
@@ -192,5 +193,16 @@ test('notes and names are escaped; local-day deadlines survive daylight-saving c
   assert.deepEqual(result,['today','tomorrow','undated']);
   await expect(page.locator('#dashboard-tasks img,#dashboard-tasks script')).toHaveCount(0);
   await expect(page.locator('#dashboard-tasks')).toContainText('<img src=x onerror=alert(1)>');
+});
+
+test('task deadlines match the Tasks page, display names resolve, and return links open their work queue', async t => {
+  const page = await open(t);
+  await page.evaluate(() => {
+    dashboardState.tasks = [{id:'return-1',source:'return',sourceLabel:'Return',title:'Inspect the returned bracelet',note:'Photograph the clasp.',assigned_to_user_id:'colleague',assigned_to_email:'sandra@example.test',due:new Date(Date.now()-60000).toISOString(),status:'open',priority:'urgent'}];
+    renderDashboardTasks();
+  });
+  await expect(page.locator('#stat-tasks-detail')).toHaveText('1 overdue · 0 need help');
+  await expect(page.locator('.dash-task-row')).toContainText('Sandra');
+  await expect(page.locator('.dash-task-row')).toHaveAttribute('href','ebay-returns.html?returnTaskId=return-1#return-work-queue');
 });
 
