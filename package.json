@@ -1,7 +1,7 @@
 {
   "scripts": {
     "test:dashboard": "node --test tests/dashboard-workspace.test.mjs tests/dashboard-database.test.mjs",
-    "test:tasks": "node --test tests/task-workspace.test.mjs tests/task-notification-links.test.mjs",
+    "test:tasks": "node --test tests/task-workspace.test.mjs tests/task-notification-links.test.mjs tests/task-notifications.test.mjs",
     "test:coin-ebay": "node --test tests/coin-ebay.test.mjs",
     "test:inventory-prices": "node --test tests/inventory-prices-ebay.test.mjs",
     "test:add-item": "node --test tests/add-item-wizard.test.mjs tests/add-item-watch-copy.test.mjs tests/add-item-labels.test.mjs",

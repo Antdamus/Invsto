@@ -1520,6 +1520,15 @@ function getTaskNotificationTypeLabel(type = "") {
 
 async function loadTaskNotifications({ silent = false } = {}) {
   if (!state.user?.id) return;
+  if (window.OGTaskNotifications) {
+    await window.OGTaskNotifications.ready;
+    const snapshot = window.OGTaskNotifications.snapshot();
+    if (snapshot.userId === state.user.id) {
+      state.notifications = snapshot.notifications;
+      renderTaskNotifications();
+    }
+    return;
+  }
   try {
     const { data, error } = await supabase
       .from("task_notifications")
@@ -1540,7 +1549,9 @@ async function loadTaskNotifications({ silent = false } = {}) {
 function renderTaskNotifications() {
   const count = $("team-task-notification-count");
   const list = $("team-task-notification-list");
-  const unreadCount = state.notifications.filter((entry) => !entry.read_at).length;
+  const globalSnapshot = window.OGTaskNotifications?.snapshot();
+  const unreadCount = globalSnapshot?.userId === state.user?.id
+    ? globalSnapshot.unreadCount : state.notifications.filter((entry) => !entry.read_at).length;
   if (count) {
     count.textContent = String(unreadCount);
     count.classList.toggle("hidden", unreadCount === 0);
@@ -1578,6 +1589,7 @@ async function markTaskNotificationsRead(ids = null) {
     ? ids.filter(Boolean)
     : state.notifications.filter((entry) => !entry.read_at).map((entry) => entry.id);
   if (!selectedIds.length) return;
+  if (window.OGTaskNotifications) return window.OGTaskNotifications.markRead(selectedIds);
 
   const readAt = new Date().toISOString();
   const { error } = await supabase
@@ -1596,12 +1608,19 @@ async function markTaskNotificationsRead(ids = null) {
 }
 
 function setTaskNotificationPanelOpen(open) {
+  if (open && window.OGTaskNotifications) {
+    state.notificationsOpen = false;
+    $("team-task-notification-panel")?.classList.add("hidden");
+    window.OGTaskNotifications.open();
+    return;
+  }
   state.notificationsOpen = Boolean(open);
   $("team-task-notification-panel")?.classList.toggle("hidden", !state.notificationsOpen);
   $("team-task-notification-toggle")?.setAttribute("aria-expanded", state.notificationsOpen ? "true" : "false");
 }
 
 function setupTaskNotificationRealtime() {
+  if (window.OGTaskNotifications) return;
   if (!state.user?.id || typeof supabase.channel !== "function") return;
   if (state.notificationChannel) supabase.removeChannel(state.notificationChannel);
   state.notificationChannel = supabase
@@ -4690,6 +4709,14 @@ function canReplyToTask(task = {}) {
     && !['resolved','cancelled','shipped_completed','closed','approved_by_admin'].includes(task.status)
     && (canUseAdminTaskControls() || isTaskAssignedToCurrentUser(task) || isTaskCreatedByCurrentUser(task));
 }
+
+document.addEventListener('og-task-notifications-changed', event => {
+  const snapshot = event.detail;
+  if (!state.user?.id || snapshot?.userId !== state.user.id) return;
+  state.notifications = snapshot.notifications;
+  renderTaskNotifications();
+  if ($('team-task-list') && state.tasks.length) renderTasks();
+});
 
 function canHandTaskBack(task = {}) {
   const assignerId = task.assigned_by || task.created_by;

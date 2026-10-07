@@ -1,0 +1,52 @@
+#og-task-updates { --tu-bg: #17201d; --tu-border: #a7c8b930; --tu-gold: #eed29b; --tu-text: #f4f1e9; --tu-muted: #b8c3bd; position: relative; z-index: 19000; font-family: Manrope, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: var(--tu-text); line-height: 1.5; }
+#og-task-updates *, #og-task-updates *::before, #og-task-updates *::after { box-sizing: border-box; }
+#og-task-updates [hidden] { display: none !important; }
+#og-task-updates button, #og-task-updates a { font: inherit; font-size: 13px; touch-action: manipulation; }
+#og-task-updates button { cursor: pointer; color: inherit; border: 1px solid var(--tu-border); background: #ffffff08; border-radius: 12px; padding: 10px 14px; margin: 0; min-height: 44px; }
+#og-task-updates button:disabled { cursor: wait; opacity: .65; }
+#og-task-updates a { color: var(--tu-gold); text-decoration: none; }
+#og-task-updates :is(button,a):focus-visible { outline: 2px solid var(--tu-gold); outline-offset: 3px; }
+#og-task-updates :is(h2,h3,p) { margin: 0; color: inherit; font-family: inherit; }
+#og-task-updates .og-tu-launcher { position: fixed; right: 20px; bottom: 22px; display: flex; align-items: center; gap: 9px; border-radius: 999px; background: var(--tu-bg); box-shadow: 0 8px 32px #0006; font-weight: 650; }
+#og-task-updates .og-tu-count { border-radius: 999px; min-width: 25px; padding: 2px 6px; text-align: center; background: var(--tu-gold); color: #26251f; }
+#og-task-updates .og-tu-alert { position: fixed; right: 20px; bottom: 82px; width: 330px; max-width: calc(100vw - 24px); background: var(--tu-bg); border: 1px solid #d9bb7d70; border-radius: 18px; padding: 13px 16px 16px; box-shadow: 0 16px 48px #0007; }
+#og-task-updates .og-tu-alert-head { display: flex; align-items: center; justify-content: space-between; color: var(--tu-gold); font-size: 12px; letter-spacing: .02em; }
+#og-task-updates .og-tu-alert-head button { width: 44px; padding: 0; border: 0; font-size: 23px; background: transparent; }
+#og-task-updates .og-tu-alert-title { font-size: 14px; font-weight: 650; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+#og-task-updates .og-tu-alert-body { margin-top: 5px; color: var(--tu-muted); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+#og-task-updates .og-tu-primary { background: var(--tu-gold); color: #25241e; border-color: transparent; font-weight: 700; width: 100%; margin-top: 13px; }
+#og-task-updates .og-tu-panel { position: fixed; right: 20px; bottom: 22px; width: 410px; max-width: calc(100vw - 24px); height: min(700px, calc(100dvh - 48px)); display: flex; flex-direction: column; border-radius: 22px; border: 1px solid var(--tu-border); background: var(--tu-bg); box-shadow: 0 20px 70px #0009; overflow: hidden; }
+#og-task-updates .og-tu-panel header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 20px 20px 12px; }
+#og-task-updates .og-tu-eyebrow { color: var(--tu-gold); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+#og-task-updates h2 { font-size: 23px; font-weight: 650; letter-spacing: -.5px; }
+#og-task-updates .og-tu-summary { color: var(--tu-muted); font-size: 12px; margin-top: 3px; }
+#og-task-updates [data-tu-close] { width: 44px; flex: 0 0 44px; padding: 0; font-size: 25px; }
+#og-task-updates .og-tu-tabs { display: flex; gap: 6px; padding: 0 20px 14px; }
+#og-task-updates .og-tu-tabs button { flex: 1; }
+#og-task-updates .og-tu-tabs [aria-pressed=true] { background: #d9bb7d20; color: var(--tu-gold); border-color: #d9bb7d60; }
+#og-task-updates .og-tu-list { overflow-y: auto; overscroll-behavior: contain; min-height: 0; flex: 1; padding: 0 14px 10px; scrollbar-width: thin; }
+#og-task-updates .og-tu-entry { border: 1px solid var(--tu-border); border-radius: 14px; padding: 14px; margin-bottom: 10px; background: #ffffff04; overflow-wrap: anywhere; }
+#og-task-updates .og-tu-entry.is-unread { border-left: 3px solid var(--tu-gold); }
+#og-task-updates .og-tu-entry-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 3px 10px; color: var(--tu-muted); font-size: 10px; margin-bottom: 7px; }
+#og-task-updates .og-tu-entry-meta span { color: var(--tu-gold); }
+#og-task-updates h3 { font-size: 14px; font-weight: 650; line-height: 1.5; }
+#og-task-updates .og-tu-actor { display: block; color: var(--tu-muted); font-size: 10px; margin-top: 3px; }
+#og-task-updates .og-tu-entry p { font-size: 14px; white-space: pre-wrap; line-height: 1.65; margin-top: 10px; }
+#og-task-updates .og-tu-entry-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+#og-task-updates .og-tu-entry-actions a { border-radius: 10px; border: 1px solid #d9bb7d50; background: #d9bb7d10; padding: 10px 14px; min-height: 44px; display: inline-flex; align-items: center; }
+#og-task-updates .og-tu-entry-actions span { color: var(--tu-muted); font-size: 12px; }
+#og-task-updates .og-tu-error { padding: 10px 20px; font-size: 12px; color: #f1c5a9; display: flex; align-items: center; gap: 8px; }
+#og-task-updates .og-tu-empty { padding: 24px 12px; font-size: 14px; color: var(--tu-muted); }
+#og-task-updates footer { display: grid; gap: 7px; padding: 12px 20px 16px; border-top: 1px solid var(--tu-border); }
+#og-task-updates footer a { min-height: 36px; display: flex; align-items: center; }
+#og-task-updates footer small { color: var(--tu-muted); font-size: 10px; }
+#og-task-updates .og-tu-announce { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 760px) {
+  #og-task-updates .og-tu-launcher { bottom: calc(86px + env(safe-area-inset-bottom)); right: 12px; padding: 9px 12px; }
+  #og-task-updates .og-tu-alert { bottom: calc(145px + env(safe-area-inset-bottom)); right: 12px; width: 330px; }
+  #og-task-updates .og-tu-panel { right: 0; bottom: 0; width: 100%; max-width: 100%; height: min(78dvh, 740px); border-radius: 22px 22px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  #og-task-updates .og-tu-panel header { padding: 17px 16px 12px; }
+  #og-task-updates .og-tu-tabs { padding-left: 16px; padding-right: 16px; }
+  #og-task-updates .og-tu-entry p { font-size: 15px; }
+}
+@media print { #og-task-updates { display: none !important; } }
