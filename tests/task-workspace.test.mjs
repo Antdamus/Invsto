@@ -75,11 +75,16 @@ for (const width of [320, 390, 430, 768, 1366]) test(`Tasks at ${width}px: reada
   const overflow = () => page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
   assert.equal(await overflow(), false);
   const card = page.locator('.team-task-card').first();
-  assert.ok((await card.boundingBox()).y < (width < 800 ? 530 : 620), 'work visible without scrolling past controls');
+  if (width < 900) {
+    const header = await page.locator('.mobile-header').boundingBox();
+    const hero = await page.locator('.team-task-hero').boundingBox();
+    assert.ok(hero.y >= header.y + header.height, 'Tasks heading and New task must be below the phone header');
+  }
+  if ([320, 390, 1366].includes(width)) await page.screenshot({path: `test-results/tasks-${width}-local.png`});
+  assert.ok((await card.boundingBox()).y < 630, 'work visible in the first screen below the inbox and status controls');
   await expect(page.locator('.team-task-card')).toHaveCount(20);
   await expect(page.locator('.team-task-card-details > *')).toHaveCount(0);
   await expect(card.locator('.team-task-summary-preview')).toContainText('Certificate is still missing');
-  if (width === 390 || width === 1366) await page.screenshot({path: `test-results/tasks-${width}-local.png`});
   await page.getByRole('button', {name: 'Filters', exact: true}).click();
   await expect(page.locator('#task-filters-panel')).toBeVisible();
   assert.equal(await overflow(), false);
@@ -101,6 +106,7 @@ for (const width of [320, 390, 430, 768, 1366]) test(`Tasks at ${width}px: reada
 
 test('search finds notes and update text across all buckets, filters compose and reset, and list pages', async t => {
   const page = await open(t);
+  await page.locator('[data-task-owner-filter=created]').click();
   await page.locator('#task-search').fill('matching card');
   await expect(page.locator('.team-task-card')).toHaveCount(1);
   await page.locator('#task-search').fill('Review the bracelet');
@@ -165,12 +171,12 @@ test('worker view and admin worker preview preserve permissions', async t => {
   const page = await open(t, 390, {admin: false});
   await page.getByRole('button', {name: 'Filters', exact: true}).click();
   await expect(page.locator('#team-task-scope-control')).toBeHidden();
-  await expect(page.locator('[data-task-owner-filter=order_approval]')).toBeHidden();
+  await expect(page.locator('[data-task-owner-filter=approvals]')).toBeVisible();
   await page.evaluate(() => {
     state.employee.role = 'admin'; state.viewedWorkerUserId = 'teammate'; updateTaskScopeChrome(); renderTasks();
   });
   await expect(page.locator('#new-team-task')).toBeDisabled();
-  await page.locator('[data-team-task-toggle="team:task-0"]').click();
+  await page.locator('[data-team-task-toggle="team:task-1"]').click();
   await expect(page.locator('[data-task-assignment-action]')).toHaveCount(0);
   assert.deepEqual(await page.evaluate(() => writes), []);
 });
@@ -247,4 +253,91 @@ test('saving a progress note retains the existing status-update contract', async
   assert.equal(writes[0][1]._task_id, 'task-0');
   assert.equal(writes[0][1]._assigned_to_user_id, null);
   assert.match(writes[0][1]._note, /matching certificate/);
+});
+
+test('responsibility inboxes include acceptance work and keep overdue counts scoped', async t => {
+  const page = await open(t);
+  await page.evaluate(() => {
+    const base = state.tasks[0];
+    const task = (id, values) => ({...base, id, title: id, metadata: {}, ...values});
+    state.tasks = [
+      task('my work', {assigned_by: 'boss', created_by: 'boss', created_by_email: '', status: 'waiting_on_admin'}),
+      task('my completed work', {assigned_by: 'boss', created_by: 'boss', created_by_email: '', status: 'completed_by_employee', due_at: ''}),
+      task('delegated review', {assigned_to_user_id: 'teammate', assigned_to_email: '', assigned_by: 'me', status: 'completed_by_employee'}),
+      task('other admin work', {assigned_to_user_id: 'boss', assigned_to_email: '', assigned_by: 'boss', created_by: 'boss', created_by_email: '', status: 'waiting_on_admin'}),
+      task('reassigned by someone else', {assigned_to_user_id: 'teammate', assigned_to_email: '', assigned_by: 'boss', status: 'in_progress'}),
+      task('unassigned review', {assigned_to_user_id: null, assigned_to_email: '', assigned_by: 'boss', created_by: 'boss', created_by_email: '', status: 'ready_for_admin_approval'}),
+    ];
+    state.eventsByTask.clear(); renderTasks();
+  });
+  await expect(page.locator('.team-task-card')).toHaveCount(2);
+  await expect(page.locator('[data-task-stat=overdue]')).toHaveText('1');
+  await page.locator('[data-task-focus=overdue]').click();
+  await expect(page.locator('.team-task-card')).toHaveCount(1);
+  await page.locator('[data-task-owner-filter=created]').click();
+  await expect(page.locator('.team-task-card')).toHaveCount(1);
+  await expect(page.locator('.team-task-card')).toContainText('delegated review');
+  await expect(page.locator('[data-task-focus=overdue]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-task-stat=all]')).toHaveText('1');
+  await page.locator('[data-task-owner-filter=approvals]').click();
+  await expect(page.locator('.team-task-card')).toHaveCount(3);
+  await expect(page.locator('#team-task-list')).not.toContainText('other admin work');
+  await page.locator('.task-quick-views [data-task-focus=all]').click();
+  await expect(page.locator('.team-task-card')).toHaveCount(4);
+  await page.evaluate(() => {
+    state.tasks.push({...state.tasks[2], id: 'delegated-order-approval', source: 'order', task_type: 'pending_admin_review', status: 'ready_for_admin_approval', metadata: {workflow_type: 'pending_order_approval'}});
+    renderTasks();
+  });
+  await expect(page.locator('.team-task-card')).toHaveCount(5);
+  await expect(page.locator('[data-team-task-card="delegated-order-approval"]')).toBeVisible();
+  assert.deepEqual(await page.evaluate(() => writes), []);
+});
+
+test('switching to history retains the assigned-by inbox and shows delegated closed work', async t => {
+  const page = await open(t);
+  await page.locator('[data-task-owner-filter=created]').click();
+  await page.evaluate(() => {
+    loadTasks = async () => {
+      state.tasks = state.tasks.slice(0, 2).map(task => ({...task, status: 'resolved', resolved_by: 'me', assigned_by: 'me'}));
+      renderTasks();
+    };
+  });
+  await page.getByRole('button', {name: 'History', exact: true}).click();
+  await expect(page.locator('[data-task-owner-filter=created]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.team-task-card')).toHaveCount(2);
+  await expect(page.locator('#team-task-list-title')).toHaveText('Assigned by me · History');
+  await page.locator('[data-task-owner-filter=approvals]').click();
+  await expect(page.locator('.team-task-card')).toHaveCount(2);
+});
+
+test('task loading includes delegated and reviewed records and reads beyond one page', async t => {
+  const page = await open(t);
+  const result = await page.evaluate(async () => {
+    const activeFilter = getTaskLoadVisibilityFilter();
+    state.taskView = 'history';
+    const historyFilter = getTaskLoadVisibilityFilter();
+    const pages = [];
+    const rows = await readTaskPages({range: async (start, end) => {
+      pages.push([start, end]);
+      return {data: Array.from({length: Math.min(200, 205 - start)}, (_, i) => ({id: start+i})), error: null};
+    }});
+    return {activeFilter, historyFilter, pages, length: rows.length};
+  });
+  assert.match(result.activeFilter, /assigned_by.eq.me/);
+  assert.match(result.activeFilter, /assigned_to_user_id.is.null,assigned_to_email.is.null/);
+  assert.match(result.historyFilter, /resolved_by.eq.me/);
+  assert.deepEqual(result.pages, [[0,199],[200,399]]);
+  assert.equal(result.length, 205);
+});
+
+test('order groups have a short summary while retaining all order numbers in detail', async t => {
+  const page = await open(t);
+  await page.evaluate(() => {
+    state.tasks = [{...state.tasks[0], source: 'order', task_type: 'admin_review',
+      title: 'Closed order group 01-11111-11111, 02-22222-22222 - buyer_42', buyer_username: 'buyer_42',
+      metadata: {source: 'order_history', order_numbers: ['01-11111-11111','02-22222-22222']}}];
+    renderTasks();
+  });
+  await expect(page.locator('.team-task-summary-title-row')).toHaveText('buyer_42 · 2 orders');
+  await expect(page.locator('[data-team-task-toggle]')).toHaveAttribute('aria-label', /01-11111-11111, 02-22222-22222/);
 });

@@ -8,8 +8,8 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="team-tasks.css?v=workspace-20261006b" />
-  <link rel="stylesheet" href="team-tasks-workspace.css?v=workspace-20261006b" />
+  <link rel="stylesheet" href="team-tasks.css?v=workspace-20261007-inboxes" />
+  <link rel="stylesheet" href="team-tasks-workspace.css?v=workspace-20261007-inboxes" />
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body data-page="team-tasks">
@@ -72,7 +72,15 @@
         <p id="team-task-status" class="team-task-status" role="status" aria-live="polite"></p>
 
         <a class="task-back-link hidden" id="task-back-to-list" href="team-tasks.html">← All tasks</a>
-        <section class="task-overview" id="task-overview" aria-label="Work overview">
+        <section class="task-inboxes" id="task-inboxes" aria-label="Task inbox">
+          <div class="task-inbox-tabs" role="group" aria-label="Task responsibility">
+            <button type="button" data-task-owner-filter="assigned" aria-pressed="true"><span>Assigned to me</span><b data-inbox-count>—</b></button>
+            <button type="button" data-task-owner-filter="created" aria-pressed="false"><span>Assigned by me</span><b data-inbox-count>—</b></button>
+            <button type="button" data-task-owner-filter="approvals" aria-pressed="false"><span>Approvals</span><b data-inbox-count>—</b></button>
+          </div>
+          <p id="task-inbox-description">Your assignments, including work awaiting review.</p>
+        </section>
+        <section class="task-overview" id="task-overview" aria-label="Work overview for selected inbox">
           <button type="button" class="task-overview-item is-active" data-task-focus="all" aria-pressed="true"><span class="task-overview-icon"><i data-lucide="layers"></i></span><span><small>Open tasks</small><strong data-task-stat="all">—</strong></span><span class="task-overview-hint">Your work at a glance</span></button>
           <button type="button" class="task-overview-item task-overview-overdue" data-task-focus="overdue" aria-pressed="false"><span class="task-overview-icon"><i data-lucide="clock-3"></i></span><span><small>Overdue</small><strong data-task-stat="overdue">—</strong></span><span class="task-overview-hint">Needs a next step</span></button>
           <button type="button" class="task-overview-item task-overview-review" data-task-focus="review" aria-pressed="false"><span class="task-overview-icon"><i data-lucide="clipboard-check"></i></span><span><small>Awaiting review</small><strong data-task-stat="review">—</strong></span><span class="task-overview-hint">Ready for a decision</span></button>
@@ -94,8 +102,8 @@
             <button id="task-filters-toggle" class="secondary-btn" type="button" aria-expanded="false" aria-controls="task-filters-panel"><i data-lucide="sliders-horizontal"></i>Filters<span id="task-filter-count" class="hidden">0</span></button>
           </div>
           <div class="task-quick-views" role="group" aria-label="Quick task views">
-            <button type="button" data-task-focus="all" class="is-active" aria-pressed="true">All tasks</button>
-            <button type="button" data-task-focus="mine" aria-pressed="false">Assigned to me</button>
+            <button type="button" data-task-focus="all" class="is-active" aria-pressed="true">All statuses</button>
+            <button type="button" data-task-focus="progress" aria-pressed="false">In progress</button>
             <button type="button" data-task-focus="today" aria-pressed="false">Due today</button>
             <button type="button" data-task-focus="blocked" aria-pressed="false">Needs help</button>
             <button type="button" data-task-focus="waiting" aria-pressed="false">Awaiting reply</button>
@@ -107,15 +115,6 @@
                 <button type="button" class="team-task-read-filter-btn is-active" data-task-read-filter="all">All 0</button>
                 <button type="button" class="team-task-read-filter-btn" data-task-read-filter="unread">New 0</button>
                 <button type="button" class="team-task-read-filter-btn" data-task-read-filter="read">Read 0</button>
-              </div></div>
-              <div class="task-filter-group"><span>Relationship</span><div class="team-task-owner-filter" role="group" aria-label="Task relationship">
-                <button type="button" class="team-task-filter-btn is-active" data-task-owner-filter="everything">All tasks 0</button>
-                <button type="button" class="team-task-filter-btn" data-task-owner-filter="all">Active work 0</button>
-                <button type="button" class="team-task-filter-btn" data-task-owner-filter="assigned">Assigned to me 0</button>
-                <button type="button" class="team-task-filter-btn" data-task-owner-filter="created">Created by me 0</button>
-                <button type="button" class="team-task-filter-btn" data-task-owner-filter="responded">Responded / awaiting reply 0</button>
-                <button type="button" class="team-task-filter-btn team-task-order-approval-filter-btn" data-task-owner-filter="order_approval">Orders pending approval 0</button>
-                <button type="button" class="team-task-filter-btn team-task-acceptance-filter-btn" data-task-owner-filter="acceptance">Needs acceptance 0</button>
               </div></div>
               <div class="task-filter-group"><span>Source</span><div class="team-task-source-filter" role="group" aria-label="Task source">
                 <button type="button" class="team-task-filter-btn is-active" data-task-source-filter="all">All sources 0</button>
@@ -310,6 +309,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
-  <script src="team-tasks.js?v=workspace-20261006b"></script>
+  <script src="team-tasks.js?v=workspace-20261007-inboxes"></script>
 </body>
 </html>
