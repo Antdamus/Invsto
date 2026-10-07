@@ -5305,6 +5305,19 @@ a.buyer-line-finance-pill:hover {
   padding: 16px; background: rgba(255,255,255,.035); min-width: 0;
   overflow-wrap: anywhere;
 }
+
+.buyer-card-task-preview-item { border-color: #d7b97940; background: #d7b97908; }
+.buyer-card-task-heading, .buyer-card-task-links, .buyer-card-task-files { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.buyer-card-task-heading { margin-bottom: 8px; color: #efd598; font-size: .72rem; }
+.buyer-card-task-heading > span:first-child { text-transform: uppercase; font-weight: 800; letter-spacing: .08em; }
+.buyer-card-task-heading > span:last-child { border: 1px solid #d7b97940; border-radius: 6px; padding: 3px 7px; }
+.buyer-card-task-preview-item.is-complete .buyer-card-task-heading { color: #b4c7bd; }
+.buyer-card-task-update { margin-top: 12px; padding-left: 10px; border-left: 2px solid #d7b97960; }
+.buyer-card-task-update small { margin-bottom: 5px; }
+.buyer-card-task-links, .buyer-card-task-files { margin-top: 10px; }
+.buyer-card-task-links a { text-decoration: none; }
+.buyer-card-task-file-count { color: #b9b5ae; font-size: .72rem; }
+.buyer-card-task-files button { white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .order-label-upload-head, .order-saved-label {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
 }

@@ -3649,6 +3649,94 @@ function renderLineNoteSummary(line) {
     <span class="buyer-line-note-preview">Note: ${escapeHtml(notes[0].notes)}</span>`;
 }
 
+function getQueueTaskAssigneeName(task) {
+  const employee = state.orderTaskAssignees.find(person =>
+    (person.user_id && person.user_id === task.assigned_to_user_id)
+    || (person.id && person.id === task.assigned_to_employee_id));
+  return employee?.display_name || employee?.email || task.assigned_to_email
+    || (isPendingOrderApprovalTask(task) ? "Admin reviewer" : "Assignee not recorded");
+}
+
+function getGroupSharedTasks(lines = []) {
+  const entries = new Map();
+  for (const orderId of new Set(lines.map(line => line.order_id))) {
+    const history = state.sharedOrderNoteHistory.get(orderId)?.data;
+    if (!history) continue;
+    const eventsByTask = new Map();
+    for (const event of history.events) {
+      if (!eventsByTask.has(event.task_id)) eventsByTask.set(event.task_id, []);
+      eventsByTask.get(event.task_id).push(event);
+    }
+    for (const task of history.tasks) {
+      if (!task.id || entries.has(task.id) || task.order_id !== orderId) continue;
+      const line = lines.find(line => line.order_id === orderId && orderTaskMatchesLine(task, line));
+      if (!line) continue;
+      const events = (eventsByTask.get(task.id) || [])
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+      if (isHiddenOrderCoordinationTask(task, events) || isVideoReceiptCaptureOrderTask(task)
+        || task.metadata?.source === "pending_order_line_note") continue;
+      if (!(task.assigned_to_user_id || task.assigned_to_employee_id || task.assigned_to_email
+        || isPendingOrderApprovalTask(task) || events.some(event => event.new_assigned_to_user_id))) continue;
+      const attachments = new Map();
+      for (const event of events) {
+        for (const photo of Array.isArray(event.photo_attachments) ? event.photo_attachments : []) {
+          if (!photo?.path) continue;
+          const key = `${photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET}:${photo.path}`;
+          if (!attachments.has(key)) attachments.set(key, { ...photo,
+            signed_by_email: photo.signed_by_email || event.signed_by_email,
+            created_at: photo.created_at || event.created_at });
+        }
+      }
+      const latestUpdate = events.find(event => String(event.notes || "").trim() === String(task.latest_note || "").trim());
+      entries.set(task.id, { kind: "task", task, line, created_at: task.created_at,
+        notes: task.question || task.latest_note || task.title || "Order task",
+        latestUpdate, photo_attachments: [...attachments.values()] });
+    }
+  }
+  return [...entries.values()];
+}
+
+function renderQueueTaskEntry(entry, lines) {
+  const { task, line, notes, latestUpdate, photo_attachments: photos } = entry;
+  const updatedNote = String(task.latest_note || "").trim();
+  const context = (task.order_line_ids || []).length === 1
+    ? line.item_title || line.item_number || "Order item"
+    : (task.order_line_ids || []).length > 1 ? `${task.order_line_ids.length} items` : "Whole order";
+  return `<article class="buyer-card-note-preview-item buyer-card-task-preview-item ${isActiveOrderTask(task) ? "" : "is-complete"}" data-queue-task="${escapeHtml(task.id)}">
+    <div class="buyer-card-note-author">
+      <strong data-queue-task-assignee="${escapeHtml(task.id)}">Assigned to ${escapeHtml(getQueueTaskAssigneeName(task))}</strong>
+      <small>Created ${escapeHtml(formatDate(task.created_at))}</small>
+      ${task.created_by_email ? `<small>By ${escapeHtml(task.created_by_email)}</small>` : ""}
+      <small>${lines.length > 1 ? `${escapeHtml(getOrderFromLine(line).order_number || "")} · ` : ""}${escapeHtml(context)}</small>
+    </div>
+    <div class="buyer-card-note-body">
+      <div class="buyer-card-task-heading"><span>Task</span><span>${escapeHtml(getOrderTaskStatusLabel(task.status))}</span></div>
+      <p>${escapeHtml(notes)}</p>
+      ${updatedNote && updatedNote !== String(notes).trim() ? `<div class="buyer-card-task-update"><small>Latest update${latestUpdate?.created_at ? ` · ${escapeHtml(formatDate(latestUpdate.created_at))}` : ""}${latestUpdate?.signed_by_email ? ` · ${escapeHtml(latestUpdate.signed_by_email)}` : ""}</small><p>${escapeHtml(updatedNote)}</p></div>` : ""}
+      <div class="buyer-card-task-links">
+        <a class="buyer-line-note-btn" href="team-tasks.html?taskId=${encodeURIComponent(task.id)}">Open task</a>
+        ${photos.length ? `<span class="buyer-card-task-file-count">${photos.length} attachment${photos.length === 1 ? "" : "s"}</span>` : '<span class="buyer-card-task-file-count">No attachments</span>'}
+      </div>
+      ${photos.length ? `<div class="buyer-card-task-files">${photos.map((photo, index) => `<button type="button" class="buyer-line-note-btn" data-queue-task-photo="${escapeHtml(task.id)}" data-order-id="${escapeHtml(line.order_id)}" data-photo-index="${index}">${escapeHtml(photo.label || `${getEvidenceMediaType(photo) === "video" ? "Video" : "Photo"} ${index + 1}`)}</button>`).join("")}</div>` : ""}
+    </div>
+  </article>`;
+}
+
+function openQueueTaskPhoto(button, lines) {
+  const entry = getGroupSharedTasks(lines).find(entry => entry.task.id === button.dataset.queueTaskPhoto
+    && entry.task.order_id === button.dataset.orderId);
+  const photo = entry?.photo_attachments[Number(button.dataset.photoIndex)];
+  if (!photo) return;
+  const preview = getEvidencePhotoVariantRef(photo, "preview") || {};
+  const thumbnail = getEvidencePhotoVariantRef(photo, "thumbnail") || {};
+  return openOrderTaskPhoto(photo.bucket, photo.path, {
+    label: photo.label || "Task photo", signedBy: photo.signed_by_email, createdAt: photo.created_at,
+    previewBucket: preview.bucket, previewPath: preview.path,
+    thumbnailBucket: thumbnail.bucket, thumbnailPath: thumbnail.path,
+    mediaType: getEvidenceMediaType(photo), returnFocusId: "orders-list",
+  });
+}
+
 function renderGroupSharedNotes(lines = [], groupKey = "") {
   const entries = [];
   const seen = new Set();
@@ -3659,24 +3747,27 @@ function renderGroupSharedNotes(lines = [], groupKey = "") {
       entries.push({ ...event, line });
     });
   });
+  const noteCount = entries.length;
+  const tasks = getGroupSharedTasks(lines);
+  entries.push(...tasks);
   if (!entries.length) {
     const loaded = lines.every(line => !line.order_id || state.sharedOrderNoteHistory.get(line.order_id)?.data);
-    return `<p class="phone-only phone-notes-empty">${loaded ? "No notes yet" : "Loading notes…"}</p>`;
+    return `<p class="phone-only phone-notes-empty">${loaded ? "No notes or tasks yet" : "Loading notes & tasks…"}</p>`;
   }
   entries.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
   const expanded = state.expandedBuyerNoteKeys.has(groupKey);
   const detailsId = `buyer-notes-${encodeURIComponent(groupKey)}`;
-  const count = entries.length;
+  const counts = [noteCount ? `${noteCount} note${noteCount === 1 ? "" : "s"}` : "", tasks.length ? `${tasks.length} task${tasks.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
   const preview = entries[0].notes;
-  return `<section class="buyer-card-note-preview ${expanded ? "is-expanded" : ""}" aria-label="Notes from all users">
+  return `<section class="buyer-card-note-preview ${expanded ? "is-expanded" : ""}" aria-label="Notes & tasks">
     <button type="button" class="buyer-card-notes-toggle" data-toggle-group-notes aria-expanded="${expanded}" aria-controls="${escapeHtml(detailsId)}">
-      <strong>${count} note${count === 1 ? "" : "s"}</strong>
+      <strong>${counts}</strong>
       <span class="buyer-card-notes-summary">${escapeHtml(preview)}</span>
       <span class="buyer-card-notes-action">${expanded ? "Collapse" : "Expand"}</span>
     </button>
     <div id="${escapeHtml(detailsId)}" class="buyer-card-note-details">
-      <strong class="buyer-card-notes-title">Notes from all users · ${count}</strong>
-      ${entries.map((entry) => `<article class="buyer-card-note-preview-item">
+      <strong class="buyer-card-notes-title">Notes & tasks · ${counts}</strong>
+      ${entries.map((entry) => entry.kind === "task" ? renderQueueTaskEntry(entry, lines) : `<article class="buyer-card-note-preview-item">
       <div class="buyer-card-note-author">
         <strong>${escapeHtml(entry.signed_by_email || (entry.id ? "Author not recorded" : "Saved note"))}</strong>
         ${entry.created_at ? `<small>${escapeHtml(formatDate(entry.created_at))}</small>` : ""}
@@ -3747,7 +3838,7 @@ async function hydrateBuyerGroupNotes(card, group) {
     if (!card.isConnected || cache !== state.sharedOrderNoteHistory) return;
     console.warn("Could not load notes for this order block:", error);
     container.innerHTML = renderGroupSharedNotes(group.lines, group.key)
-      + `<button type="button" class="buyer-line-note-btn" data-retry-group-notes>Could not load all notes. Retry</button>`;
+      + `<button type="button" class="buyer-line-note-btn" data-retry-group-notes>Could not load all notes & tasks. Retry</button>`;
   }
 }
 
@@ -4363,6 +4454,8 @@ function renderOrders(options = {}) {
       }
       const lineId = event.target.closest("[data-group-note-line]")?.dataset.groupNoteLine;
       if (lineId) openLineNoteModal(lineId, { focusInput: false });
+      const taskPhoto = event.target.closest("[data-queue-task-photo]");
+      if (taskPhoto) void openQueueTaskPhoto(taskPhoto, group.lines);
       if (event.target.closest("[data-retry-group-notes]")) hydrateBuyerGroupNotes(card, group);
     });
     card.addEventListener("click", (event) => {
@@ -5817,6 +5910,12 @@ async function loadOrderTaskAssignees(options = {}) {
   }
 
   renderOrderTaskAssigneeSelect(options);
+  const cachedTasks = new Map([...state.sharedOrderNoteHistory.values()]
+    .flatMap(entry => entry.data?.tasks || []).map(task => [task.id, task]));
+  document.querySelectorAll("[data-queue-task-assignee]").forEach(label => {
+    const task = cachedTasks.get(label.dataset.queueTaskAssignee);
+    if (task) label.textContent = `Assigned to ${getQueueTaskAssigneeName(task)}`;
+  });
   return state.orderTaskAssignees;
 }
 

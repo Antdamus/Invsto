@@ -105,6 +105,12 @@
   .buyer-card-note-author strong { color: #a7c8b9; font-size: 10px; font-weight: 600; }
   .buyer-card-note-author small { color: #a5aaa7; font-size: 10px; margin: 0; }
   .buyer-card-note-author small:last-child { overflow-wrap: anywhere; }
+  .buyer-card-task-preview-item { flex-direction: column; }
+  .buyer-card-task-preview-item .buyer-card-note-author strong { flex-basis: 100%; color: #eed29b; font-size: 12px; }
+  .buyer-card-task-preview-item .buyer-card-note-author small { font-size: 11px; line-height: 1.5; }
+  .buyer-card-task-heading { font-size: 11px; }
+  .buyer-card-task-update small { font-size: 11px; line-height: 1.5; }
+  .buyer-card-task-files .buyer-line-note-btn, .buyer-card-task-links .buyer-line-note-btn { min-height: 44px; font-size: 12px; }
   .phone-notes-empty { color: #aaa; font-size: 12px; margin: 0; padding: 2px 0; }
   .orders-panel .buyer-order-card .buyer-card-expanded { display: grid; gap: 14px; padding: 0; }
   .orders-panel .buyer-order-card .buyer-card-expanded-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile, mkdir} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {test, before, after} from 'node:test';
-import {chromium, expect} from '@playwright/test';
+import {chromium, webkit, expect} from '@playwright/test';
 
 const root = new URL('../', import.meta.url);
 let server, browser, origin;
@@ -19,7 +19,7 @@ before(async () => {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
-  browser = await chromium.launch();
+  browser = await (process.env.INVSTO_ITEM_BROWSER === 'webkit' ? webkit : chromium).launch();
 });
 after(async () => {
   await browser?.close();
@@ -227,7 +227,7 @@ test('failed history reads do not expose unfiltered queue summaries and retry lo
   assert.equal(await page.locator('[data-retry-group-notes]').count(), 0);
 });
 
-test('written notes and their photos are included, while screenshots, videos, and task updates are excluded everywhere', async t => {
+test('written note counts exclude media uploads and unassigned task events', async t => {
   const page = await open(t, {render: false});
   await page.evaluate(() => {
     const base = {task_id: 'notes-a', order_id: 'order-a', action: 'commented', signed_by_email: 'alex@example.com',
@@ -293,4 +293,99 @@ test('a late history response cannot overwrite a newly opened item', async t => 
   await page.waitForFunction(() => document.getElementById('line-note-history').getAttribute('aria-busy') === 'false');
   assert.match(await page.locator('#line-note-history').innerText(), /No notes yet/);
   assert.doesNotMatch(await page.locator('#line-note-history').innerText(), /alex@example.com/);
+});
+
+async function addAssignedTask(page) {
+  await page.evaluate(() => {
+    state.orderTaskAssignees = [{user_id: 'jose', display_name: 'Jose Munoz'}, {user_id: 'sandra', display_name: 'Sandra'}];
+    tasks.push({id: 'assigned-task', order_id: 'order-a', order_line_ids: ['line-a'], status: 'waiting_on_admin',
+      assigned_to_user_id: 'jose', assigned_to_email: 'jose@example.com', created_by_email: 'sandra@example.com',
+      question: 'Pending CGL. Customer paid extra for fast shipping.\nPlease check the clasp <before packing>.',
+      latest_note: 'Certificate requested. Waiting for the supplier.', created_at: '2026-10-07T15:02:00Z'});
+    const photo = {bucket: 'proof', path: 'tasks/clasp.jpg', label: 'Clasp photo', media_type: 'image',
+      preview_bucket: 'proof', preview_path: 'tasks/clasp-preview.jpg'};
+    events.push({id: 'task-created', task_id: 'assigned-task', order_id: 'order-a', action: 'created',
+      notes: tasks.at(-1).question, created_at: tasks.at(-1).created_at, signed_by_email: 'sandra@example.com', photo_attachments: [photo]});
+    events.push({id: 'task-reply', task_id: 'assigned-task', order_id: 'order-a', action: 'commented',
+      notes: tasks.at(-1).latest_note, created_at: '2026-10-07T16:00:00Z', signed_by_email: 'jose@example.com', photo_attachments: [photo]});
+    window.openedTaskPhotos = [];
+    openOrderTaskPhoto = async (bucket, path, options) => openedTaskPhotos.push({bucket, path, options});
+    renderOrders();
+  });
+}
+
+for (const width of [320, 390, 1440]) {
+  test(`${width}px: assigned tasks and notes are readable together with ownership, dates, updates and photos`, async t => {
+    const page = await open(t, {mobile: width < 760, render: false});
+    await page.setViewportSize({width, height: 900});
+    await addAssignedTask(page);
+    await loaded(page, 3);
+    if (width >= 760) await page.locator('.buyer-card-notes-toggle').click();
+    const task = page.locator('[data-queue-task="assigned-task"]');
+    await expect(task).toBeVisible();
+    const text = await task.innerText();
+    assert.match(text, /Assigned to Jose Munoz/);
+    assert.match(text, /Created Oct 7, 11:02 AM/);
+    assert.match(text, /Waiting on admin/);
+    assert.match(text, /Pending CGL.*Customer paid extra/s);
+    assert.match(text, /<before packing>/);
+    assert.equal(await task.locator('before').count(), 0);
+    assert.match(text, /Latest update.*Oct 7.*12:00 PM.*jose@example.com/s);
+    assert.match(text, /Certificate requested/);
+    assert.match(text, /1 attachment/);
+    await expect(task.getByRole('link', {name: 'Open task'})).toHaveAttribute('href', 'team-tasks.html?taskId=assigned-task');
+    await task.getByRole('button', {name: 'Clasp photo'}).click();
+    const opened = await page.evaluate(() => openedTaskPhotos);
+    assert.equal(opened.length, 1);
+    assert.equal(opened[0].path, 'tasks/clasp.jpg');
+    assert.equal(opened[0].bucket, 'proof');
+    assert.equal(await page.locator('.buyer-card-expanded').count(), 0);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    // The same two existing history requests supply both notes and tasks.
+    assert.equal((await page.evaluate(() => calls)).length, 2);
+    await task.scrollIntoViewIfNeeded();
+    if (width !== 320) await page.screenshot({path: `test-results/pending-notes-tasks-${width}.png`});
+  });
+}
+
+test('tasks are scoped and deduplicated across lines, with completed status and no hidden audit tasks', async t => {
+  const page = await open(t, {mobile: true, render: false});
+  await page.evaluate(() => {
+    const base = {order_id: 'order-a', assigned_to_user_id: 'jose', assigned_to_email: 'jose@example.com',
+      created_at: '2026-10-07T15:00:00Z', question: 'Find the missing bracelet', status: 'assigned'};
+    tasks.push({...base, id: 'whole-order', order_line_ids: []});
+    tasks.push({...base, id: 'multi-line', order_line_ids: ['line-a', 'line-b'], status: 'resolved'});
+    tasks.push({...base, id: 'closed-line', order_line_ids: ['line-closed']});
+    tasks.push({...base, id: 'hidden', metadata: {hidden_from_task_board: true}});
+    tasks.push({...base, id: 'removed', metadata: {history_removed_at: '2026-10-07'}});
+    tasks.push({...base, id: 'cancelled', status: 'cancelled'});
+    tasks.push({...base, id: 'receipt', title: 'Video receipt screenshot captured'});
+    tasks.push({...base, id: 'note-record', metadata: {source: 'pending_order_line_note'}});
+    tasks.push({...base, id: 'other-order', order_id: 'order-b'});
+    state.orders.push({...line, id: 'line-b', item_title: 'Silver bracelet'});
+    state.filteredOrders = state.orders;
+    renderOrders();
+  });
+  await loaded(page, 4);
+  assert.deepEqual(await page.locator('[data-queue-task]').evaluateAll(elements => elements.map(el => el.dataset.queueTask).sort()), ['multi-line', 'whole-order']);
+  await expect(page.locator('[data-queue-task="multi-line"]')).toContainText('Resolved');
+  await expect(page.locator('[data-queue-task="whole-order"]')).toContainText('No attachments');
+  await expect(page.locator('[data-queue-task="whole-order"]')).toContainText('Whole order');
+  assert.equal((await page.evaluate(() => calls)).length, 2);
+});
+
+test('task-only orders show current handoff ownership even without note counters', async t => {
+  const page = await open(t, {mobile: true, render: false});
+  await page.evaluate(() => { tasks = []; events = []; line.line_note_count = 0; line.latest_line_note = ''; });
+  await addAssignedTask(page);
+  await page.locator('.buyer-order-card').scrollIntoViewIfNeeded();
+  await expect(page.locator('[data-queue-task="assigned-task"]')).toBeVisible();
+  await expect(page.locator('.buyer-card-notes-title')).toHaveText('Notes & tasks · 1 task');
+  await page.evaluate(async () => {
+    tasks[0].assigned_to_user_id = 'sandra'; tasks[0].assigned_to_email = 'sandra@example.com';
+    state.sharedOrderNoteHistory.delete('order-a');
+    renderOrders();
+  });
+  await expect(page.locator('[data-queue-task="assigned-task"]')).toContainText('Assigned to Sandra');
+  assert.equal(await page.locator('[data-line-view-notes]').count(), 0);
 });
