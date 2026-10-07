@@ -8,7 +8,8 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="team-tasks.css?v=chat-focused-task-20260824" />
+  <link rel="stylesheet" href="team-tasks.css?v=workspace-20261006" />
+  <link rel="stylesheet" href="team-tasks-workspace.css?v=workspace-20261006" />
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body data-page="team-tasks">
@@ -25,11 +26,10 @@
         <div class="header-inner">
           <div class="greeting">
             <strong id="team-task-greeting">Tasks</strong>
-            <div class="sub">Pending-order tasks, return tasks, and independent assignments in one work list</div>
+            <div class="sub">Team workspace</div>
           </div>
           <div class="header-pills">
-            <div class="pill">Scope: <b>Internal</b></div>
-            <div class="pill">Mode: <b id="team-task-mode">Tasks</b></div>
+            <div class="pill"><b id="team-task-mode">Tasks</b></div>
           </div>
         </div>
       </header>
@@ -37,15 +37,15 @@
       <main class="content team-task-page">
         <section class="team-task-hero">
           <div>
-            <span class="eyebrow">Unified Work Queue</span>
+            <span class="eyebrow">Your work, in focus</span>
             <h1>Tasks</h1>
-            <p>See assigned pending-order tasks, return follow-ups, and independent team work in one place.</p>
+            <p>Know what needs attention. Keep the next step moving.</p>
           </div>
           <div class="team-task-actions">
             <div class="team-task-notifications" id="team-task-notifications">
               <button id="team-task-notification-toggle" type="button" class="secondary-btn team-task-notification-toggle" aria-expanded="false" aria-controls="team-task-notification-panel">
                 <i data-lucide="bell"></i>
-                Notifications
+                <span class="task-notification-label">Updates</span>
                 <span id="team-task-notification-count" class="team-task-notification-count hidden">0</span>
               </button>
               <div id="team-task-notification-panel" class="team-task-notification-panel hidden">
@@ -60,49 +60,71 @@
             </div>
             <button id="new-team-task" type="button" class="primary-btn">
               <i data-lucide="plus"></i>
-              New Independent Task
+              New task
             </button>
             <button id="refresh-team-tasks" type="button" class="secondary-btn">
               <i data-lucide="refresh-cw"></i>
-              Refresh
+              <span>Refresh</span>
             </button>
           </div>
         </section>
 
-        <p id="team-task-status" class="team-task-status" aria-live="polite"></p>
+        <p id="team-task-status" class="team-task-status" role="status" aria-live="polite"></p>
+
+        <a class="task-back-link hidden" id="task-back-to-list" href="team-tasks.html">← All tasks</a>
+        <section class="task-overview" id="task-overview" aria-label="Work overview">
+          <button type="button" class="task-overview-item is-active" data-task-focus="all" aria-pressed="true"><span class="task-overview-icon"><i data-lucide="layers"></i></span><span><small>Open tasks</small><strong data-task-stat="all">—</strong></span><span class="task-overview-hint">Your work at a glance</span></button>
+          <button type="button" class="task-overview-item task-overview-overdue" data-task-focus="overdue" aria-pressed="false"><span class="task-overview-icon"><i data-lucide="clock-3"></i></span><span><small>Overdue</small><strong data-task-stat="overdue">—</strong></span><span class="task-overview-hint">Needs a next step</span></button>
+          <button type="button" class="task-overview-item task-overview-review" data-task-focus="review" aria-pressed="false"><span class="task-overview-icon"><i data-lucide="clipboard-check"></i></span><span><small>Awaiting review</small><strong data-task-stat="review">—</strong></span><span class="task-overview-hint">Ready for a decision</span></button>
+        </section>
 
         <section class="team-task-board">
           <div class="team-task-board-head">
             <div>
-              <span class="eyebrow">Active Tasks</span>
-              <h2 id="team-task-list-title">My Assigned Tasks</h2>
+              <h2 id="team-task-list-title">All open tasks</h2>
+              <span id="team-task-count" class="team-task-count" aria-live="polite">Loading your work…</span>
             </div>
-            <div class="team-task-board-tools">
-              <div class="team-task-view-toggle" role="tablist" aria-label="Task view">
-                <button id="team-task-active-tab" type="button" class="team-task-view-btn is-active" data-task-view="active">Active</button>
-                <button id="team-task-history-tab" type="button" class="team-task-view-btn" data-task-view="history">Task History</button>
+              <div class="team-task-view-toggle" role="group" aria-label="Task view">
+                <button id="team-task-active-tab" type="button" class="team-task-view-btn is-active" data-task-view="active" aria-pressed="true">Active</button>
+                <button id="team-task-history-tab" type="button" class="team-task-view-btn" data-task-view="history" aria-pressed="false">History</button>
               </div>
-              <div class="team-task-read-filter" role="tablist" aria-label="Task read status">
+          </div>
+          <div class="task-search-row">
+            <label class="task-search"><i data-lucide="search" aria-hidden="true"></i><span class="task-sr-only">Search tasks</span><input id="task-search" type="search" placeholder="Search tasks, notes, buyers, or orders" autocomplete="off" /></label>
+            <button id="task-filters-toggle" class="secondary-btn" type="button" aria-expanded="false" aria-controls="task-filters-panel"><i data-lucide="sliders-horizontal"></i>Filters<span id="task-filter-count" class="hidden">0</span></button>
+          </div>
+          <div class="task-quick-views" role="group" aria-label="Quick task views">
+            <button type="button" data-task-focus="all" class="is-active" aria-pressed="true">All tasks</button>
+            <button type="button" data-task-focus="mine" aria-pressed="false">Assigned to me</button>
+            <button type="button" data-task-focus="today" aria-pressed="false">Due today</button>
+            <button type="button" data-task-focus="blocked" aria-pressed="false">Needs help</button>
+            <button type="button" data-task-focus="waiting" aria-pressed="false">Awaiting reply</button>
+          </div>
+          <section id="task-filters-panel" class="task-filters-panel hidden" aria-label="Task filters">
+            <div class="task-filter-panel-heading"><strong>Refine your view</strong><button type="button" id="task-panel-refresh" class="secondary-btn">Refresh tasks</button><button type="button" id="task-clear-filters" class="secondary-btn">Reset filters</button></div>
+            <div class="team-task-board-tools">
+              <div class="task-filter-group"><span>Read status</span><div class="team-task-read-filter" role="group" aria-label="Task read status">
                 <button type="button" class="team-task-read-filter-btn is-active" data-task-read-filter="all">All 0</button>
                 <button type="button" class="team-task-read-filter-btn" data-task-read-filter="unread">New 0</button>
                 <button type="button" class="team-task-read-filter-btn" data-task-read-filter="read">Read 0</button>
-              </div>
-              <div class="team-task-owner-filter" role="tablist" aria-label="Task relationship">
-                <button type="button" class="team-task-filter-btn is-active" data-task-owner-filter="all">Active work 0</button>
+              </div></div>
+              <div class="task-filter-group"><span>Relationship</span><div class="team-task-owner-filter" role="group" aria-label="Task relationship">
+                <button type="button" class="team-task-filter-btn is-active" data-task-owner-filter="everything">All tasks 0</button>
+                <button type="button" class="team-task-filter-btn" data-task-owner-filter="all">Active work 0</button>
                 <button type="button" class="team-task-filter-btn" data-task-owner-filter="assigned">Assigned to me 0</button>
                 <button type="button" class="team-task-filter-btn" data-task-owner-filter="created">Created by me 0</button>
                 <button type="button" class="team-task-filter-btn" data-task-owner-filter="responded">Responded / awaiting reply 0</button>
                 <button type="button" class="team-task-filter-btn team-task-order-approval-filter-btn" data-task-owner-filter="order_approval">Orders pending approval 0</button>
                 <button type="button" class="team-task-filter-btn team-task-acceptance-filter-btn" data-task-owner-filter="acceptance">Needs acceptance 0</button>
-              </div>
-              <div class="team-task-source-filter" role="tablist" aria-label="Task source">
+              </div></div>
+              <div class="task-filter-group"><span>Source</span><div class="team-task-source-filter" role="group" aria-label="Task source">
                 <button type="button" class="team-task-filter-btn is-active" data-task-source-filter="all">All sources 0</button>
                 <button type="button" class="team-task-filter-btn" data-task-source-filter="independent">Independent 0</button>
                 <button type="button" class="team-task-filter-btn" data-task-source-filter="order">Pending orders 0</button>
                 <button type="button" class="team-task-filter-btn" data-task-source-filter="order_history">Order history 0</button>
                 <button type="button" class="team-task-filter-btn" data-task-source-filter="ebay_triage">eBay triage 0</button>
                 <button type="button" class="team-task-filter-btn" data-task-source-filter="return">Returns 0</button>
-              </div>
+              </div></div>
               <label id="team-task-scope-control" class="team-task-scope hidden">
                 View
                 <select id="team-task-scope">
@@ -112,7 +134,7 @@
                 </select>
               </label>
               <label id="team-task-worker-view-control" class="team-task-worker-view hidden">
-                Worker display
+                Preview worker view
                 <select id="team-task-worker-view">
                   <option value="">Use View scope</option>
                 </select>
@@ -120,6 +142,7 @@
               <label id="team-task-active-sort-control" class="team-task-sort">
                 Sort
                 <select id="team-task-active-sort">
+                  <option value="priority">Priority &amp; due date</option>
                   <option value="recent">Recent updates</option>
                   <option value="assigned_desc">Assigned newest first</option>
                   <option value="assigned_asc">Assigned oldest first</option>
@@ -141,12 +164,13 @@
                   <option value="az">A to Z</option>
                 </select>
               </label>
-              <span id="team-task-count" class="team-task-count">0 tasks</span>
             </div>
-          </div>
+          </section>
+          <div id="task-applied-filters" class="task-applied-filters hidden"></div>
           <div id="team-task-list" class="team-task-list">
-            <div class="empty-state">Loading tasks...</div>
+            <div class="task-loading" role="status"><span></span><span></span><span></span><p>Gathering your tasks…</p></div>
           </div>
+          <div id="task-list-footer" class="task-list-footer hidden"><span id="task-page-count"></span><button id="task-load-more" class="secondary-btn" type="button">Show more tasks</button></div>
           <section id="team-task-canceled-section" class="team-task-canceled-section hidden" aria-label="Canceled tasks">
             <div class="team-task-canceled-head">
               <div>
@@ -172,6 +196,11 @@
       <label id="team-task-title-field" class="team-task-field">
         Title
         <input id="team-task-title-input" type="text" placeholder="Short task title" autocomplete="off" />
+      </label>
+
+      <label class="team-task-field">
+        Instructions or update
+        <textarea id="team-task-note" rows="4" placeholder="What needs to happen next? Add the details your teammate needs."></textarea>
       </label>
 
       <div class="team-task-form-grid">
@@ -220,13 +249,10 @@
         </label>
       </div>
 
-      <label class="team-task-field">
-        Note
-        <textarea id="team-task-note" rows="4" placeholder="Write the instructions, answer, or completion note."></textarea>
-      </label>
-
       <section id="team-task-line-review-panel" class="team-task-line-review-panel hidden" aria-label="Item review decisions"></section>
 
+      <details class="task-attachments">
+      <summary>Add photos or videos <span>Optional</span></summary>
       <section class="team-task-photos">
         <div class="team-task-photo-head">
           <div>
@@ -250,6 +276,7 @@
           <div class="empty-state">No task evidence added.</div>
         </div>
       </section>
+      </details>
 
       <p id="team-task-modal-error" class="team-task-status is-error"></p>
       <div class="team-task-modal-actions">
@@ -283,6 +310,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
-  <script src="team-tasks.js?v=chat-focused-task-20260824"></script>
+  <script src="team-tasks.js?v=workspace-20261006"></script>
 </body>
 </html>

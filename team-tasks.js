@@ -8,9 +8,17 @@ const state = {
   taskReadStates: new Map(),
   taskReadStateSyncAvailable: true,
   taskReadFilter: "all",
-  taskOwnerFilter: "all",
+  taskOwnerFilter: "everything",
   taskSourceFilter: "all",
-  taskSort: "recent",
+  taskSort: "priority",
+  taskSearch: "",
+  taskFocus: "all",
+  visibleTaskLimit: 20,
+  taskRenderSignature: "",
+  taskEvidenceLoads: new Map(),
+  taskLoadGeneration: 0,
+  tasksLoading: false,
+  modalReturnFocus: null,
   activeTaskId: "",
   activeTaskSource: "",
   mode: "create",
@@ -885,6 +893,7 @@ function getTaskSourceCounts(tasks = []) {
 }
 
 function getTasksForOwnerFilter(tasks = []) {
+  if (state.taskOwnerFilter === "everything") return tasks;
   if (state.taskOwnerFilter === "order_approval") return tasks.filter((task) => isOrderPendingApprovalTask(task) && canUseAdminTaskControls());
   if (state.taskOwnerFilter === "acceptance") return tasks.filter(isTaskAcceptanceVisibleToViewer);
   if (state.taskOwnerFilter === "responded") return tasks.filter(isTaskRespondedAwaitingReply);
@@ -905,8 +914,106 @@ function getVisibleTasksForCurrentFilters(tasks = []) {
     const focusedTask = tasks.find((task) => task.id === requested);
     if (focusedTask) return [focusedTask];
   }
-  const filtered = getTasksForSourceFilter(getTasksForOwnerFilter(getTasksForReadFilter(tasks)));
+  const filtered = filterTaskWorkspace(getTasksForSourceFilter(getTasksForOwnerFilter(getTasksForReadFilter(tasks))));
   return isTaskHistoryView() ? sortHistoryTasks(filtered) : sortUnifiedTasks(filtered);
+}
+
+function matchesTaskFocus(task, focus = state.taskFocus) {
+  if (isHistoricalTaskView()) return true;
+  if (focus === "mine") return isTaskAssignedToCurrentUser(task);
+  if (focus === "overdue") return isTaskLate(task);
+  if (focus === "today") return startOfLocalDayTimestamp(getTaskDueValue(task)) === startOfLocalDayTimestamp();
+  if (focus === "review") return isTaskAcceptanceVisibleToViewer(task) || (canUseAdminTaskControls() && (isOrderPendingApprovalTask(task) || task.status === "waiting_on_admin"));
+  if (focus === "blocked") return ["blocked", "sent_back_for_rework"].includes(task.status);
+  if (focus === "waiting") return isTaskRespondedAwaitingReply(task) || ["waiting_on_worker", "deferred"].includes(task.status);
+  return true;
+}
+
+function filterTaskWorkspace(tasks) {
+  const terms = normalizeLookup(state.taskSearch).split(/\s+/).filter(Boolean);
+  return tasks.filter(task => {
+    if (!matchesTaskFocus(task)) return false;
+    if (!terms.length) return true;
+    const events = state.eventsByTask.get(getUnifiedTaskKey(task)) || [];
+    const haystack = normalizeLookup([
+      task.title, task.description, task.question, task.latest_note, task.order_number,
+      task.buyer_username, task.buyer_name, getTaskAssigneeLabel(task), task.assigned_to_email,
+      getTaskStatusLabel(task.status), getTaskSourceLabel(task), ...getOrderHistoryTaskOrderNumbers(task),
+      ...events.map(event => event.notes), ...(task.lineDetails || []).map(line => `${line.item_title || ""} ${line.item_number || ""} ${line.notes || ""}`),
+    ].filter(Boolean).join(" "));
+    return terms.every(term => haystack.includes(term));
+  });
+}
+
+function resetTaskWorkspaceFilters() {
+  state.taskSearch = "";
+  state.taskFocus = "all";
+  state.taskOwnerFilter = "everything";
+  state.taskSourceFilter = "all";
+  state.taskReadFilter = "all";
+  if ($("task-search")) $("task-search").value = "";
+  renderTasks();
+}
+
+function renderTaskWorkspaceChrome(visibleTasks = []) {
+  const history = isHistoricalTaskView();
+  const direct = Boolean(getRequestedTaskId());
+  document.body.classList.toggle("team-task-direct-mode", direct);
+  $("task-back-to-list")?.classList.toggle("hidden", !direct);
+  $("task-overview")?.classList.toggle("hidden", history || direct);
+  document.querySelector(".task-quick-views")?.classList.toggle("hidden", history || direct);
+  document.querySelectorAll("[data-task-stat]").forEach(el => {
+    el.textContent = state.tasks.filter(task => matchesTaskFocus(task, el.dataset.taskStat)).length.toLocaleString();
+  });
+  document.querySelectorAll("[data-task-focus]").forEach(button => {
+    button.classList.toggle("is-active", button.dataset.taskFocus === state.taskFocus);
+    button.setAttribute("aria-pressed", String(button.dataset.taskFocus === state.taskFocus));
+  });
+  document.querySelectorAll("[data-task-view]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.taskView === state.taskView)));
+  const filterLabels = [];
+  if (state.taskReadFilter !== "all") filterLabels.push(state.taskReadFilter === "unread" ? "Unread" : "Read");
+  if (state.taskSourceFilter !== "all") filterLabels.push(({independent: "Independent", order: "Pending orders", order_history: "Order history", ebay_triage: "eBay triage", return: "Returns"})[state.taskSourceFilter]);
+  if (state.taskOwnerFilter !== "everything") filterLabels.push(({all: "Active work", assigned: "Assigned to me", created: "Created by me", responded: "Awaiting reply", acceptance: "Needs acceptance", order_approval: "Order approval"})[state.taskOwnerFilter]);
+  const filterCount = $("task-filter-count");
+  if (filterCount) { filterCount.textContent = filterLabels.length; filterCount.classList.toggle("hidden", !filterLabels.length); }
+  const applied = $("task-applied-filters");
+  if (applied) {
+    applied.classList.toggle("hidden", !filterLabels.length && !state.taskSearch);
+    applied.textContent = [...filterLabels, state.taskSearch ? `Search: ${state.taskSearch}` : ""].filter(Boolean).join(" · ");
+  }
+  const titles = {all: "All open tasks", mine: "Assigned to me", overdue: "Overdue tasks", review: "Awaiting review", today: "Due today", blocked: "Tasks that need help", waiting: "Awaiting reply"};
+  if (!history && !isViewingWorkerTasks() && $("team-task-list-title")) $("team-task-list-title").textContent = state.taskFocus === "all" && !isTeamWideTaskScope() ? "Your open tasks" : titles[state.taskFocus] || titles.all;
+  if ($("team-task-count")) $("team-task-count").textContent = `${visibleTasks.length} task${visibleTasks.length === 1 ? "" : "s"}${isViewingWorkerTasks() ? " · Read-only preview" : ""}`;
+  const signature = JSON.stringify([state.taskSearch, state.taskFocus, state.taskOwnerFilter, state.taskReadFilter, state.taskSourceFilter, state.taskView, state.taskScope, state.viewedWorkerUserId, state.taskSort, state.taskHistorySort]);
+  if (signature !== state.taskRenderSignature) { state.visibleTaskLimit = 20; state.taskRenderSignature = signature; }
+  $("task-list-footer")?.classList.toggle("hidden", visibleTasks.length <= 20);
+  if ($("task-page-count")) $("task-page-count").textContent = `Showing ${Math.min(state.visibleTaskLimit, visibleTasks.length)} of ${visibleTasks.length}`;
+  $("task-load-more")?.classList.toggle("hidden", visibleTasks.length <= state.visibleTaskLimit);
+}
+
+async function loadTaskEvidence(task) {
+  if (!task) return;
+  const key = getUnifiedTaskKey(task);
+  const existing = state.taskEvidenceLoads.get(key);
+  if (existing && existing.status !== "error") return existing.promise;
+  const generation = state.taskLoadGeneration;
+  const entry = {status: "loading", promise: null};
+  state.taskEvidenceLoads.set(key, entry);
+  entry.promise = Promise.all([
+    hydrateReturnComplaintImages([task]), hydrateReturnMessages([task]),
+    hydrateOrderVideoReceiptEvidence([task]),
+    hydrateEventPhotoUrls([task, ...getOrderWorkflowChildren(task)]),
+  ]).then(() => { entry.status = "ready"; }).catch(error => {
+    entry.status = "error";
+    console.warn("Could not load task evidence:", error);
+  }).finally(() => {
+    if (generation === state.taskLoadGeneration && state.expandedTaskKeys.has(key)) {
+      const restoreFocus = document.activeElement?.dataset.teamTaskToggle === key;
+      renderTasks();
+      if (restoreFocus) document.querySelector(`[data-team-task-toggle="${CSS.escape(key)}"]`)?.focus({preventScroll: true});
+    }
+  });
+  return entry.promise;
 }
 
 function renderTaskOwnerFilterChrome(tasks = []) {
@@ -919,6 +1026,7 @@ function renderTaskOwnerFilterChrome(tasks = []) {
       if (!canUseAdminTaskControls() && state.taskOwnerFilter === "order_approval") state.taskOwnerFilter = "all";
     }
     const labels = {
+      everything: `All tasks ${tasks.length}`,
       all: `Active work ${counts.all}`,
       assigned: `${isViewingWorkerTasks() ? `Assigned to ${viewerLabel}` : "Assigned to me"} ${counts.assigned}`,
       created: `${isViewingWorkerTasks() ? `Created by ${viewerLabel}` : "Created by me"} ${counts.created}`,
@@ -928,6 +1036,7 @@ function renderTaskOwnerFilterChrome(tasks = []) {
     };
     button.textContent = labels[filter] || formatTaskTag(filter);
     button.classList.toggle("is-active", state.taskOwnerFilter === filter);
+    button.setAttribute("aria-pressed", String(state.taskOwnerFilter === filter));
   });
 }
 
@@ -1114,6 +1223,7 @@ function sortUnifiedTasks(tasks = [], requestedSort = state.taskSort || "recent"
     if (requestedSort === "due_desc") return byDueDesc() || byPriority() || byRecent() || byCreatedDesc();
     if (requestedSort === "amount_desc") return byMoneyDesc() || byUrgency() || byDueAsc() || byRecent() || byCreatedDesc();
     if (requestedSort === "amount_asc") return byMoneyAsc() || byUrgency() || byDueAsc() || byRecent() || byCreatedDesc();
+    if (requestedSort === "priority") return byPriority() || byUrgency() || byDueAsc() || byRecent() || byCreatedDesc();
 
     return byRecent() || byDueAsc() || byPriority() || byCreatedDesc();
   });
@@ -1251,9 +1361,9 @@ function configureStatusOptionsForProgress(selectId, progressMode = false) {
 }
 
 function getTaskAssigneeLabel(task = {}) {
-  if (task.assigned_to_email) return task.assigned_to_email;
-  const assignee = state.assignees.find((employee) => employee.user_id === task.assigned_to_user_id);
+  const assignee = state.assignees.find((employee) => (task.assigned_to_user_id && employee.user_id === task.assigned_to_user_id) || (task.assigned_to_email && normalizeLookup(employee.email) === normalizeLookup(task.assigned_to_email)));
   if (assignee) return assignee.display_name || assignee.email || "Assigned team member";
+  if (task.assigned_to_email) return task.assigned_to_email;
   const viewerUserId = getTaskViewerUserId();
   if (task.assigned_to_user_id && task.assigned_to_user_id === viewerUserId) {
     return isTaskViewAsWorkerMode()
@@ -1279,8 +1389,25 @@ async function loadAssignees() {
 }
 
 async function loadTasks() {
+  if (state.tasksLoading) { state.taskReloadRequested = true; return; }
+  state.tasksLoading = true;
+  state.taskLoadGeneration += 1;
+  state.taskEvidenceLoads = new Map();
+  state.orderVideoReceiptPhotosByLineId = new Map();
+  const refresh = $("refresh-team-tasks");
+  if (refresh) refresh.disabled = true;
+  try { await performTaskLoad(); }
+  catch (error) { console.warn("Task load failed:", error); setStatus("Could not load all tasks. Use Refresh to try again.", "error"); }
+  finally {
+    state.tasksLoading = false;
+    if (refresh) refresh.disabled = false;
+    if (state.taskReloadRequested) { state.taskReloadRequested = false; loadTasks(); }
+  }
+}
+
+async function performTaskLoad() {
   const list = $("team-task-list");
-  if (list) list.innerHTML = `<div class="empty-state">Loading ${isHistoricalTaskView() ? "task history" : "tasks"}...</div>`;
+  if (list) list.innerHTML = `<div class="task-loading" role="status"><span></span><span></span><span></span><p>Loading ${isHistoricalTaskView() ? "task history" : "your tasks"}…</p></div>`;
   setStatus("");
   state.childTasksByParent = new Map();
 
@@ -1296,7 +1423,7 @@ async function loadTasks() {
 
   failures.forEach((failure) => console.warn("Could not load one task source:", failure.reason));
   if (!tasks.length && failures.length === results.length) {
-    if (list) list.innerHTML = `<div class="empty-state">Could not load tasks. Make sure the latest task migrations are pushed.</div>`;
+    if (list) list.innerHTML = `<div class="empty-state">Could not load tasks. Check your connection and use Refresh to try again.</div>`;
     return;
   }
 
@@ -1305,8 +1432,7 @@ async function loadTasks() {
   state.tasks = isCanceledTaskScope() ? removedHistoryTasks : activeHistoryTasks;
   state.removedTasks = [];
   const visibleTasks = state.tasks;
-  await enrichTasksWithDetails(visibleTasks);
-  await hydrateOrderWorkflowChildren(visibleTasks);
+  await Promise.all([hydrateTaskLines(visibleTasks), hydrateOrderWorkflowChildren(visibleTasks)]);
   const requested = getRequestedTaskId();
   if (requested && !state.tasks.some((task) => task.id === requested)) {
     const { data: requestedTask, error: requestedError } = await supabase
@@ -1329,7 +1455,7 @@ async function loadTasks() {
       const normalized = normalizeOrderTask(requestedOrderTask);
       if (!isTaskHiddenFromTaskPage(normalized)) {
         state.tasks.unshift(normalized);
-        await enrichTasksWithDetails([normalized]);
+        await hydrateTaskLines([normalized]);
         await hydrateOrderWorkflowChildren([normalized]);
       }
     }
@@ -1340,10 +1466,11 @@ async function loadTasks() {
     const requestedVisibleTask = state.tasks.find((task) => task.id === requested);
     if (requestedVisibleTask) state.expandedTaskKeys.add(getUnifiedTaskKey(requestedVisibleTask));
   }
-  await loadEventsForTasks();
-  await hydrateEventPhotoUrls();
-  await loadTaskReadStates();
+  await Promise.all([loadEventsForTasks(), loadTaskReadStates()]);
+  if (state.taskReloadRequested) return;
   renderTasks();
+  if (failures.length) setStatus("Some task sources could not load. Refresh to try again; the available tasks are shown below.", "error");
+  state.tasks.filter(task => state.expandedTaskKeys.has(getUnifiedTaskKey(task))).forEach(loadTaskEvidence);
 
   if (requested) {
     const card = document.querySelector(`[data-team-task-card="${CSS.escape(requested)}"]`);
@@ -1742,7 +1869,8 @@ async function createTaskSignedImageUrl(bucket, path) {
   const { data, error } = await supabase.storage
     .from(bucket)
     .createSignedUrl(path, TEAM_TASK_SIGNED_URL_TTL_SECONDS);
-  if (error || !data?.signedUrl) return "";
+  if (error) throw error;
+  if (!data?.signedUrl) throw new Error("Could not load the attached photo.");
   state.signedUrls.set(key, data.signedUrl);
   return data.signedUrl;
 }
@@ -2153,7 +2281,7 @@ async function openTaskLineVideoReceipt(button) {
 }
 
 async function hydrateOrderVideoReceiptEvidence(tasks = []) {
-  state.orderVideoReceiptPhotosByLineId = new Map();
+  const generation = state.taskLoadGeneration;
   const lines = tasks.flatMap((task) => Array.isArray(task.lineDetails) ? task.lineDetails : []);
   const lineIds = unique(lines.map((line) => line.id));
   const orderIds = unique(lines.map((line) => line.order_id));
@@ -2169,7 +2297,7 @@ async function hydrateOrderVideoReceiptEvidence(tasks = []) {
       .limit(500);
     if (error) {
       console.warn("Could not load order video receipt capture tasks:", error);
-      return;
+      throw error;
     }
     (data || []).forEach((task) => taskById.set(task.id, task));
   }
@@ -2182,7 +2310,7 @@ async function hydrateOrderVideoReceiptEvidence(tasks = []) {
       .limit(500);
     if (error) {
       console.warn("Could not load order video receipt capture tasks by order:", error);
-      return;
+      throw error;
     }
     (data || []).forEach((task) => taskById.set(task.id, task));
   }
@@ -2200,7 +2328,7 @@ async function hydrateOrderVideoReceiptEvidence(tasks = []) {
       .limit(1000);
     if (error) {
       console.warn("Could not load order video receipt capture events:", error);
-      return;
+      throw error;
     }
     events.push(...(data || []));
   }
@@ -2252,7 +2380,7 @@ async function hydrateOrderVideoReceiptEvidence(tasks = []) {
       seen.add(key);
       return Boolean(photo.previewUrl || photo.thumbnailUrl);
     }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-    if (deduped.length) state.orderVideoReceiptPhotosByLineId.set(lineId, deduped);
+    if (deduped.length && generation === state.taskLoadGeneration) state.orderVideoReceiptPhotosByLineId.set(lineId, deduped);
   });
 }
 
@@ -2339,9 +2467,11 @@ async function loadEventsForTasks() {
   }));
 }
 
-async function hydrateEventPhotoUrls() {
+async function hydrateEventPhotoUrls(tasks = []) {
   const photos = [];
-  state.eventsByTask.forEach((events) => {
+  const keys = new Set(tasks.map(getUnifiedTaskKey));
+  state.eventsByTask.forEach((events, key) => {
+    if (!keys.has(key)) return;
     events.forEach((event) => {
       (Array.isArray(event.photo_attachments) ? event.photo_attachments : []).forEach((photo) => {
         if (photo?.path || photo?.storage_path) photos.push(photo);
@@ -2397,7 +2527,7 @@ function getTaskStatusLabel(value) {
     shipping_ready_for_packaging: "Ready for packaging",
     shipped_completed: "Shipped",
     closed: "Closed",
-    completed_by_employee: "Completed by employee",
+    completed_by_employee: "Needs acceptance",
     sent_back_for_rework: "Sent back for rework",
     approved_by_admin: "Approved by admin",
   };
@@ -4070,6 +4200,10 @@ function getTaskNextStepLabel(task = {}) {
     blocked: "Needs help before this can move forward.",
     waiting_on_admin: "Admin decision or approval is needed.",
     waiting_on_worker: "Assigned worker needs to respond or complete the next step.",
+    completed_by_employee: "Review the completed work and accept it or send it back.",
+    ready_for_admin_approval: "Review the items before approving the next step.",
+    pending_admin_review: "An admin needs to review the completed work.",
+    sent_back_for_rework: "Check the feedback, make the correction, and post an update.",
     resolved: "Completed. Keep the trail for reference.",
     cancelled: "Canceled. No active work needed.",
   };
@@ -4258,127 +4392,66 @@ function renderTaskUpdateTrail(task = {}, events = [], options = {}) {
 }
 
 function renderTaskCard(task = {}, options = {}) {
-  const events = state.eventsByTask.get(getUnifiedTaskKey(task)) || [];
+  const taskKey = getUnifiedTaskKey(task);
+  const events = state.eventsByTask.get(taskKey) || [];
   const canceled = Boolean(options.canceled);
   const late = isTaskLate(task, { canceled });
-  const urgent = late
-    || ["urgent", "high"].includes(String(task.priority || "").toLowerCase())
-    || ["blocked", "deferred"].includes(String(task.status || "").toLowerCase());
   const resolved = HISTORY_TASK_STATUSES.includes(String(task.status || "").toLowerCase());
-  const chatLinked = hasEbayConversationTaskContext(task);
-  const taskKey = getUnifiedTaskKey(task);
   const expanded = state.expandedTaskKeys.has(taskKey);
   const readInfo = getTaskReadInfo(task);
   const detailsId = `task-details-${getSafeDomId(taskKey)}`;
-  const statusLabel = canceled ? "Canceled" : getTaskStatusLabel(task.status);
   const sourceLabel = getTaskSourceLabel(task);
-  const assigneeLabel = getTaskAssigneeLabel(task);
-  const moneyLabel = getTaskMoneyLabel(task);
-  const eventCountLabel = `${events.length} update${events.length === 1 ? "" : "s"}`;
-  const lateAge = getTaskLateAgeLabel(task);
-  const dueLabel = getTaskDueLabel(task);
-  const preview = getTaskCardPreview(task, canceled);
-  const historyOrderNumbers = isOrderHistoryTask(task) ? getOrderHistoryTaskOrderNumbers(task) : [];
-  const contextLine = [
-    task.buyer_username ? `Buyer ${task.buyer_username}` : "",
-    historyOrderNumbers.length > 1 ? `Orders ${historyOrderNumbers.join(", ")}` : task.order_number ? `Order ${task.order_number}` : "",
-    task.source === "team" && task.metadata?.task_tag ? formatTaskTag(task.metadata.task_tag) : "",
-  ].filter(Boolean).join(" - ");
-  const orderMiniStatus = getTaskOrderMiniStatus(task);
-  const summaryFactsHtml = chatLinked
-    ? [
-        moneyLabel ? `<span>${escapeHtml(moneyLabel)}</span>` : "",
-        `<span class="${late ? "team-task-overdue-pill" : ""}">${escapeHtml(late ? `Overdue ${lateAge || ""}`.trim() : `Due ${dueLabel}`)}${late ? ` - Due ${escapeHtml(dueLabel)}` : ""}</span>`,
-        `<span>${escapeHtml(assigneeLabel)}</span>`,
-        `<span>${escapeHtml(eventCountLabel)}</span>`,
-        canceled ? `<span>Removed ${escapeHtml(formatDate(task.metadata?.history_removed_at))}</span>` : "",
-      ].filter(Boolean).join("")
-    : `
-          <span>${escapeHtml(sourceLabel)}</span>
-          ${renderTaskOrderSummaryStatusChip(task)}
-          <span>${escapeHtml(formatTaskTag(task.task_type || "general"))}</span>
-          <span class="team-task-priority-chip">${escapeHtml(formatTaskTag(task.priority || "normal"))}</span>
-          ${moneyLabel ? `<span>${escapeHtml(moneyLabel)}</span>` : ""}
-          <span class="${late ? "team-task-overdue-pill" : ""}">${escapeHtml(late ? `Overdue ${lateAge || ""}`.trim() : `Due ${dueLabel}`)}${late ? ` - Due ${escapeHtml(dueLabel)}` : ""}</span>
-          <span>${escapeHtml(assigneeLabel)}</span>
-          <span>${escapeHtml(eventCountLabel)}</span>
-          ${canceled ? `<span>Removed ${escapeHtml(formatDate(task.metadata?.history_removed_at))}</span>` : ""}
-        `;
-  const readActionHtml = readInfo.status === "read" ? `
-              <span
-                role="button"
-                tabindex="0"
-                class="team-task-mark-read-chip is-unread-action"
-                data-team-task-mark-unread="${escapeHtml(taskKey)}"
-                title="Mark this task unread"
-              >Mark unread</span>
-            ` : `
-              <span
-                role="button"
-                tabindex="0"
-                class="team-task-mark-read-chip"
-                data-team-task-mark-read="${escapeHtml(taskKey)}"
-                title="Mark this task read"
-              >Mark read</span>
-            `;
-  const actionHtml = canceled ? `
-    <div class="team-task-actions">
-      <button type="button" class="secondary-btn" data-task-history-action="reopen" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Reopen Task</button>
+  const statusLabel = canceled ? "Canceled" : getTaskStatusLabel(task.status);
+  const due = getTaskDueValue(task);
+  const dueText = late ? `Overdue · ${getTaskLateAgeLabel(task)}` : due ? `Due ${getTaskDueLabel(task)}` : "No due date";
+  const priority = ["high", "urgent"].includes(task.priority) ? formatTaskTag(task.priority) : "";
+  const latestNote = [...events].reverse().find(event => event.notes)?.notes;
+  const preview = canceled ? getTaskCardPreview(task, true) : latestNote || getTaskCardPreview(task);
+  const unread = readInfo.status !== "read";
+  const actionHtml = canceled ? `<div class="team-task-actions"><button type="button" class="secondary-btn" data-task-history-action="reopen" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Reopen Task</button></div>` : renderTaskActions(task, resolved);
+  const evidence = state.taskEvidenceLoads.get(taskKey);
+  const evidenceLoading = expanded && (!evidence || evidence.status === "loading");
+  const photoCount = events.reduce((total, event) => total + (event.photo_attachments?.length || 0), 0);
+  const detailsHtml = !expanded ? "" : `
+    <div class="task-detail-toolbar"><span>${escapeHtml(getTaskNextStepLabel(task))}</span>
+      <button type="button" class="team-task-mark-read-chip" data-team-task-mark-${unread ? "read" : "unread"}="${escapeHtml(taskKey)}">Mark ${unread ? "read" : "unread"}</button>
     </div>
-  ` : renderTaskActions(task, resolved);
-  const detailsHtml = task.source === "order"
-    ? chatLinked
-      ? `
-          ${renderTeamTaskBrief(task, events, canceled)}
-          ${renderTaskContext(task)}
-          ${renderAdminReassignRequestNotice(task)}
-          ${actionHtml}
-          ${renderTaskUpdateTrail(task, events, { collapsed: true })}
-        `
-      : `
-          ${renderTeamTaskBrief(task, events, canceled)}
-          ${renderAdminReassignRequestNotice(task)}
-          ${actionHtml}
-          ${renderTaskContext(task)}
-          ${renderTaskUpdateTrail(task, events, { collapsed: true })}
-        `
-    : `
-        ${renderTeamTaskBrief(task, events, canceled)}
-        ${renderTaskContext(task)}
-        ${renderAdminReassignRequestNotice(task)}
-        ${actionHtml}
-        ${renderTaskUpdateTrail(task, events)}
-      `;
-
+    ${renderTeamTaskBrief(task, events, canceled)}
+    ${evidenceLoading ? '<div class="task-evidence-loading" role="status">Loading photos and task details…</div>' : `
+      ${evidence?.status === "error" ? `<div class="task-evidence-loading" role="status">Some evidence could not load. <button type="button" class="secondary-btn" data-task-evidence-retry="${escapeHtml(taskKey)}">Retry photos</button></div>` : ""}
+      ${!isOrderHistoryTask(task) && getPendingOrderBriefEvidencePhotos(task, events).length ? renderPendingOrderEvidencePanel(task, events) : ""}
+      ${renderAdminReassignRequestNotice(task)}
+      ${actionHtml}
+      ${renderTaskContext(task)}
+      ${renderTaskUpdateTrail(task, events, {collapsed: true})}
+    `}
+  `;
   return `
-    <article class="team-task-card is-${escapeHtml(task.source || "team")}-task-card ${chatLinked ? "has-chat-context" : ""} ${urgent ? "is-urgent" : ""} ${late ? "is-overdue" : ""} ${resolved ? "is-resolved" : ""} ${task.id === getRequestedTaskId() ? "is-direct-focus" : ""} ${expanded ? "is-expanded" : "is-collapsed"} ${escapeHtml(readInfo.className)}" data-team-task-card="${escapeHtml(task.id)}" data-team-task-card-key="${escapeHtml(taskKey)}">
-      <button type="button" class="team-task-card-summary" data-team-task-toggle="${escapeHtml(taskKey)}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="${escapeHtml(detailsId)}">
-        <span class="team-task-source-dot">${escapeHtml(sourceLabel.slice(0, 2).toUpperCase())}</span>
+    <article class="team-task-card is-${escapeHtml(task.source || "team")}-task-card ${hasEbayConversationTaskContext(task) ? "has-chat-context" : ""} ${late ? "is-overdue" : ""} ${resolved ? "is-resolved" : ""} ${task.id === getRequestedTaskId() ? "is-direct-focus" : ""} ${expanded ? "is-expanded" : "is-collapsed"} ${escapeHtml(readInfo.className)}" data-team-task-card="${escapeHtml(task.id)}" data-team-task-card-key="${escapeHtml(taskKey)}">
+      <button type="button" class="team-task-card-summary" data-team-task-toggle="${escapeHtml(taskKey)}" aria-expanded="${expanded}" aria-controls="${escapeHtml(detailsId)}" aria-label="${expanded ? "Close" : "Open"} task: ${escapeHtml(task.title || "Team task")}">
         <span class="team-task-summary-main">
-          <span class="team-task-summary-title-row">
-            <strong>${escapeHtml(task.title || "Team task")}</strong>
-            <span class="team-task-chip team-task-status-chip">${escapeHtml(statusLabel)}</span>
-            <span class="team-task-read-chip">${escapeHtml(readInfo.label)}</span>
-            ${readActionHtml}
-          </span>
+          <span class="task-card-kicker">${unread ? '<span class="task-unread-indicator" aria-hidden="true"></span>' : ""}${escapeHtml(sourceLabel)}${unread ? ` · ${escapeHtml(readInfo.label)}` : ""}${photoCount ? ` · ${photoCount} file${photoCount === 1 ? "" : "s"}` : ""}</span>
+          <span class="team-task-summary-title-row"><strong>${escapeHtml(task.title || "Team task")}</strong></span>
           <span class="team-task-summary-preview">${escapeHtml(preview)}</span>
-          ${orderMiniStatus || contextLine ? `<span class="team-task-summary-context">${escapeHtml(orderMiniStatus || contextLine)}</span>` : ""}
         </span>
         <span class="team-task-summary-facts">
-          ${summaryFactsHtml}
+          <span class="team-task-status-chip">${escapeHtml(statusLabel)}</span>
+          ${priority ? `<span class="task-card-priority">${escapeHtml(priority)} priority</span>` : ""}
+          <span class="task-card-owner">${escapeHtml(getTaskAssigneeLabel(task))}</span>
+          <span class="${late ? "team-task-overdue-pill" : ""}">${escapeHtml(dueText)}</span>
         </span>
-        <span class="team-task-expand-pill">
-          ${expanded ? "Close" : "Open"}
-        </span>
+        <span class="task-expand-icon" aria-hidden="true">${expanded ? "−" : "+"}</span>
       </button>
-      <div id="${escapeHtml(detailsId)}" class="team-task-card-details ${expanded ? "" : "hidden"}">
-        ${detailsHtml}
-      </div>
+      <div id="${escapeHtml(detailsId)}" class="team-task-card-details ${expanded ? "" : "hidden"}">${detailsHtml}</div>
     </article>
   `;
 }
 
 function attachTaskCardInteractions(root = document) {
+  root.querySelectorAll('[data-task-evidence-retry]').forEach(button => button.addEventListener('click', () => {
+    const task = getTaskByUnifiedKey(button.dataset.taskEvidenceRetry);
+    if (task) { loadTaskEvidence(task); renderTasks(); }
+  }));
   root.querySelectorAll("[data-team-task-toggle]").forEach((button) => {
     button.addEventListener("click", () => {
       const key = button.dataset.teamTaskToggle || "";
@@ -4389,9 +4462,10 @@ function attachTaskCardInteractions(root = document) {
       } else {
         state.expandedTaskKeys.add(key);
       }
+      if (opening) loadTaskEvidence(getTaskByUnifiedKey(key));
       renderTasks();
       requestAnimationFrame(() => {
-        document.querySelector(`[data-team-task-card-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "nearest" });
+        document.querySelector(`[data-team-task-card-key="${CSS.escape(key)}"]`)?.querySelector("[data-team-task-toggle]")?.focus({ preventScroll: true });
       });
     });
   });
@@ -4483,6 +4557,7 @@ function renderTasks() {
 
   if (!state.tasks.length) {
     renderTaskFilterChrome([]);
+    renderTaskWorkspaceChrome([]);
     list.innerHTML = `<div class="empty-state">${
       isCanceledTaskScope()
         ? "No canceled tasks."
@@ -4495,22 +4570,15 @@ function renderTasks() {
 
   const visibleTasks = getVisibleTasksForCurrentFilters(state.tasks);
   renderTaskFilterChrome(state.tasks);
-  if (count) {
-    count.textContent = (
-      state.taskReadFilter === "all"
-      && state.taskOwnerFilter === "all"
-      && state.taskSourceFilter === "all"
-    )
-      ? `${visibleTasks.length} active task${visibleTasks.length === 1 ? "" : "s"}`
-      : `${visibleTasks.length} of ${state.tasks.length} tasks`;
-  }
+  renderTaskWorkspaceChrome(visibleTasks);
 
   if (!visibleTasks.length) {
-    list.innerHTML = `<div class="empty-state">No tasks match the selected filters.</div>`;
+    list.innerHTML = `<div class="task-empty"><strong>No matching tasks</strong><p>Try another search or reset your filters to see all your work.</p><button id="task-reset-empty" type="button" class="secondary-btn">Reset filters</button></div>`;
+    $("task-reset-empty")?.addEventListener("click", resetTaskWorkspaceFilters);
     return;
   }
 
-  list.innerHTML = visibleTasks.map((task) => renderTaskCard(task, { canceled: isCanceledTaskScope() })).join("");
+  list.innerHTML = visibleTasks.slice(0, state.visibleTaskLimit).map((task) => renderTaskCard(task, { canceled: isCanceledTaskScope() })).join("");
 
   attachTaskCardInteractions(list);
   setupInlineLineReviewControls(list);
@@ -5455,6 +5523,9 @@ function localDateTimeToIso(value) {
 }
 
 function openModal() {
+  state.modalReturnFocus = document.activeElement;
+  const attachments = document.querySelector("#team-task-modal .task-attachments");
+  if (attachments) attachments.open = false;
   $("team-task-modal")?.classList.remove("hidden");
   document.body.classList.add("modal-open");
 }
@@ -5469,6 +5540,8 @@ function closeModal() {
   resetLineReviewPanel();
   setModalError("");
   setPhotoStatus("");
+  state.modalReturnFocus?.focus?.({preventScroll: true});
+  state.modalReturnFocus = null;
 }
 
 function findOrderTaskById(taskId = "") {
@@ -6399,6 +6472,26 @@ async function openTaskPhoto(bucket, path, options = {}) {
 }
 
 function setupListeners() {
+  $("task-panel-refresh")?.addEventListener("click", loadTasks);
+  $("task-search")?.addEventListener("input", event => { state.taskSearch = event.target.value; renderTasks(); });
+  $("task-filters-toggle")?.addEventListener("click", () => {
+    const panel = $("task-filters-panel");
+    const open = panel.classList.contains("hidden");
+    panel.classList.toggle("hidden", !open);
+    $("task-filters-toggle").setAttribute("aria-expanded", String(open));
+  });
+  $("task-clear-filters")?.addEventListener("click", resetTaskWorkspaceFilters);
+  $("task-load-more")?.addEventListener("click", () => {
+    const oldCount = $("team-task-list").querySelectorAll(".team-task-card").length;
+    state.visibleTaskLimit += 20;
+    renderTasks();
+    $("team-task-list").querySelectorAll("[data-team-task-toggle]")[oldCount]?.focus({preventScroll: true});
+  });
+  document.querySelectorAll("[data-task-focus]").forEach(button => button.addEventListener("click", () => {
+    state.taskFocus = button.dataset.taskFocus;
+    state.taskOwnerFilter = "everything";
+    renderTasks();
+  }));
   $("new-team-task")?.addEventListener("click", () => openTaskModal());
   $("refresh-team-tasks")?.addEventListener("click", loadTasks);
   $("team-task-notification-toggle")?.addEventListener("click", () => {
@@ -6410,8 +6503,9 @@ function setupListeners() {
   document.querySelectorAll("[data-task-view]").forEach((button) => {
     button.addEventListener("click", async () => {
       state.taskView = button.dataset.taskView === "history" ? "history" : "active";
+      state.taskFocus = "all";
       if (state.taskView === "active" && isCanceledTaskScope()) state.taskScope = "mine";
-      if (state.taskView === "history" && ["acceptance", "order_approval", "responded"].includes(state.taskOwnerFilter)) state.taskOwnerFilter = "all";
+      if (state.taskView === "history") state.taskOwnerFilter = "everything";
       updateTaskScopeChrome();
       await loadTasks();
     });
@@ -6426,7 +6520,7 @@ function setupListeners() {
   });
   document.querySelectorAll("[data-task-owner-filter]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.taskOwnerFilter = ["all", "assigned", "created", "responded", "acceptance", "order_approval"].includes(button.dataset.taskOwnerFilter)
+      state.taskOwnerFilter = ["everything", "all", "assigned", "created", "responded", "acceptance", "order_approval"].includes(button.dataset.taskOwnerFilter)
         ? button.dataset.taskOwnerFilter
         : "all";
       renderTasks();
@@ -6496,6 +6590,13 @@ function setupListeners() {
   });
 
   document.addEventListener("keydown", (event) => {
+    const activeModal = !$("team-task-photo-viewer-modal")?.classList.contains("hidden") ? $("team-task-photo-viewer-modal") : !$("team-task-modal")?.classList.contains("hidden") ? $("team-task-modal") : null;
+    if (event.key === "Tab" && activeModal) {
+      const focusable = [...activeModal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]')].filter(el => el.getClientRects().length);
+      const first = focusable[0], last = focusable.at(-1);
+      if (event.shiftKey && (document.activeElement === first || !activeModal.contains(document.activeElement))) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || !activeModal.contains(document.activeElement))) { event.preventDefault(); first?.focus(); }
+    }
     if (state.notificationsOpen && event.key === "Escape") {
       event.preventDefault();
       setTaskNotificationPanelOpen(false);
@@ -6523,9 +6624,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   const ok = await loadCurrentUser();
   if (!ok) return;
   setupListeners();
-  await loadAssignees();
-  await loadTaskNotifications({ silent: true });
+  await Promise.all([loadAssignees().catch(error => console.warn("Could not load team names:", error)), loadTaskNotifications({ silent: true }), loadTasks()]);
   setupTaskNotificationRealtime();
-  await loadTasks();
+  if (state.tasks.length) renderTasks();
   if (window.lucide) window.lucide.createIcons();
 });
