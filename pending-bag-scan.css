@@ -19,6 +19,8 @@
 #bag-scan-found { background: #b7dbc5; color: #14251c; border-color: #b7dbc5; }
 #bag-scan-close { font-size: 24px; min-width: 44px; padding: 6px; }
 .has-bag-scan #phone-checkout-dock { display: none !important; }
+.has-bag-scan #og-task-updates .og-tu-launcher { bottom: calc(164px + env(safe-area-inset-bottom)); }
+.has-bag-scan #og-task-updates .og-tu-alert { bottom: calc(224px + env(safe-area-inset-bottom)); }
 .has-bag-scan .pending-content { padding-bottom: 190px; }
 .orders-panel .buyer-order-card .buyer-line-btn.is-bag-scan-target { border: 2px solid #b7dbc5; box-shadow: 0 0 0 4px #b7dbc515; scroll-margin-block: 110px 190px; }
 .is-bag-scan-target .item-found-btn { border-color: #b7dbc5; color: #b7dbc5; }
