@@ -31,6 +31,9 @@
   function bucket(task, userId, people = [], following = []) {
     const action = next(task, people);
     if (action.kind === 'history') return related(task, userId, following) ? 'history' : null;
+    // Unassigned drafts/audit records have not been delegated to another person.
+    // Admins can still find and assign them in Team oversight.
+    if (action.kind === 'work' && !action.userId) return null;
     if (action.userId === userId) return action.kind === 'approval' ? 'approvals' : 'assigned';
     return related(task, userId, following) ? 'following' : null;
   }

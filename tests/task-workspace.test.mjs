@@ -523,9 +523,9 @@ test('saved receipt records stay evidence, while assigned photo work remains a t
  const result=await page.evaluate(()=>{
   const receipt={source:'order',question:'Video receipt screenshot captured manually for eBay item 287370877729.',metadata:{},status:'open'};
   state.tasks=state.tasks.filter(task=>task.assigned_to_user_id!=='me');renderTasks();
-  return [isTaskHiddenFromTaskPage(receipt),isTaskHiddenFromTaskPage({...receipt,assigned_to_user_id:'me'}),isTaskHiddenFromTaskPage({...receipt,question:'Please capture a video receipt screenshot.'})];
+  return [isTaskHiddenFromTaskPage(receipt),isTaskHiddenFromTaskPage({...receipt,assigned_to_user_id:'me'}),isTaskHiddenFromTaskPage({...receipt,question:'Please capture a video receipt screenshot.'}), getTaskResponsibility({...receipt,id:'draft',created_by:'me',question:'Unassigned draft'})];
  });
- assert.deepEqual(result,[true,false,false]);
+ assert.deepEqual(result,[true,false,false,null]);
  await expect(page.locator('.task-empty')).toContainText("You're caught up");
  await expect(page.locator('.task-empty')).toContainText('Approvals');
  await expect(page.locator('#task-reset-empty')).toHaveCount(0);
