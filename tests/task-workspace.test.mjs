@@ -267,6 +267,7 @@ test('responsibility inboxes include acceptance work and keep overdue counts sco
       task('other admin work', {assigned_to_user_id: 'boss', assigned_to_email: '', assigned_by: 'boss', created_by: 'boss', created_by_email: '', status: 'waiting_on_admin'}),
       task('reassigned by someone else', {assigned_to_user_id: 'teammate', assigned_to_email: '', assigned_by: 'boss', status: 'in_progress'}),
       task('unassigned review', {assigned_to_user_id: null, assigned_to_email: '', assigned_by: 'boss', created_by: 'boss', created_by_email: '', status: 'ready_for_admin_approval'}),
+      task('automatic photo capture record', {assigned_to_user_id: null, assigned_to_email: null, assigned_by: 'me', status: 'open'}),
     ];
     state.eventsByTask.clear(); renderTasks();
   });
@@ -324,6 +325,7 @@ test('task loading includes delegated and reviewed records and reads beyond one 
     return {activeFilter, historyFilter, pages, length: rows.length};
   });
   assert.match(result.activeFilter, /assigned_by.eq.me/);
+  assert.match(result.activeFilter, /or\(assigned_to_user_id.not.is.null,assigned_to_email.not.is.null\)/);
   assert.match(result.activeFilter, /assigned_to_user_id.is.null,assigned_to_email.is.null/);
   assert.match(result.historyFilter, /resolved_by.eq.me/);
   assert.deepEqual(result.pages, [[0,199],[200,399]]);

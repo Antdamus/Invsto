@@ -793,13 +793,13 @@ function isTaskCreatedByCurrentUser(task = {}) {
 }
 
 function isTaskAssignedByCurrentUser(task = {}) {
+  if (!task.assigned_to_user_id && !task.assigned_to_email) return false;
   const viewer = getTaskViewerUserId();
   if (task.assigned_by || task.assigned_by_email) {
     return Boolean((viewer && task.assigned_by === viewer) || userEmailMatchesTaskViewer(task.assigned_by_email));
   }
   // Older assignments recorded only their creator.
-  return Boolean((task.assigned_to_user_id || task.assigned_to_email) &&
-    ((viewer && task.created_by === viewer) || userEmailMatchesTaskViewer(task.created_by_email)));
+  return Boolean((viewer && task.created_by === viewer) || userEmailMatchesTaskViewer(task.created_by_email));
 }
 
 function isTaskReviewStatus(task = {}) {
@@ -1633,7 +1633,7 @@ function getTaskLoadVisibilityFilter() {
   const viewer = getTaskViewerUserId();
   if (!viewer) return "id.is.null";
   if ((isTeamWideTaskScope() && !isViewingWorkerTasks()) || isCanceledTaskScope()) return "";
-  const parts = [`assigned_to_user_id.eq.${viewer}`, `assigned_by.eq.${viewer}`, `created_by.eq.${viewer}`];
+  const parts = [`assigned_to_user_id.eq.${viewer}`, `and(or(assigned_by.eq.${viewer},created_by.eq.${viewer}),or(assigned_to_user_id.not.is.null,assigned_to_email.not.is.null))`];
   if (isHistoricalTaskView()) parts.push(`resolved_by.eq.${viewer}`);
   else if (canUseAdminTaskControls()) parts.push("and(assigned_to_user_id.is.null,assigned_to_email.is.null,status.in.(waiting_on_admin,completed_by_employee,pending_admin_review,ready_for_admin_approval))");
   return parts.join(",");
