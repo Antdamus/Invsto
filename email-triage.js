@@ -4732,6 +4732,7 @@
             </div>
           ` : ""}
           ${renderEbayConversationTaskTargetPicker(state, conversation)}
+          <fieldset id="message-task-request-kind" class="task-request-kind"><legend>What do you need?</legend><label><input type="radio" name="message-task-request-kind" value="work" ${modal.requestKind !== "decision" ? "checked" : ""} /><span><strong>Work</strong><small>I need them to do something.</small></span></label><label><input type="radio" name="message-task-request-kind" value="decision" ${modal.requestKind === "decision" ? "checked" : ""} /><span><strong>Decision</strong><small>I need approval or instructions.</small></span></label></fieldset>
           <label class="ebay-draft-field">
             <span>Title</span>
             <input name="taskTitle" type="text" value="${escapeHtml(modal.title || "")}" required />
@@ -4835,6 +4836,7 @@
       title: String(formData.get("taskTitle") || "").trim(),
       description: String(formData.get("taskDescription") || "").trim(),
       assignedToUserId: String(formData.get("assignedToUserId") || "").trim(),
+      requestKind: String(formData.get("message-task-request-kind") || "work"),
       priority: String(formData.get("priority") || "normal"),
       dueAt: combineTaskDueDateTime(dueDate, dueTime) || "",
       dueDate,
@@ -4852,6 +4854,7 @@
     const title = String(formData.get("taskTitle") || "").trim();
     const description = String(formData.get("taskDescription") || "").trim();
     const assignedToUserId = String(formData.get("assignedToUserId") || "").trim();
+    const requestKind = String(formData.get("message-task-request-kind") || "work");
     const priority = String(formData.get("priority") || "normal");
     const dueDate = String(formData.get("dueDate") || "").trim();
     const dueTime = String(formData.get("dueTime") || "").trim();
@@ -4869,6 +4872,7 @@
       title,
       description,
       assignedToUserId,
+      requestKind,
       priority,
       dueAt,
       dueDate,
@@ -4926,6 +4930,7 @@
         messageId,
         title,
         description,
+        requestKind,
         assignedToUserId: assignedToUserId || null,
         priority,
         dueAt: localDateTimeToIso(dueAt),

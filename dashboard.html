@@ -29,7 +29,7 @@
           <a class="dash-stat" href="#orders-panel" data-jump-orders="all"><span class="dash-stat-label">Pending orders <span aria-hidden="true">↗</span></span><strong id="stat-orders">—</strong><small id="stat-orders-detail">Loading your queue…</small></a>
           <a class="dash-stat dash-stat-alert" href="#orders-panel" data-jump-orders="overdue"><span class="dash-stat-label">Overdue orders <span aria-hidden="true">↗</span></span><strong id="stat-overdue">—</strong><small id="stat-overdue-detail">Checking ship-by dates…</small></a>
           <a class="dash-stat" href="#tasks-panel" data-jump-tasks="all"><span class="dash-stat-label">Your tasks <span aria-hidden="true">↗</span></span><strong id="stat-tasks">—</strong><small id="stat-tasks-detail">Work &amp; reviews…</small></a>
-          <a class="dash-stat dash-stat-review" href="#tasks-panel" data-jump-tasks="review"><span class="dash-stat-label">Needs review <span aria-hidden="true">↗</span></span><strong id="stat-review">—</strong><small id="stat-review-detail">Checking approvals…</small></a>
+          <a class="dash-stat dash-stat-review" href="#tasks-panel" data-jump-tasks="review"><span class="dash-stat-label">Decisions <span aria-hidden="true">↗</span></span><strong id="stat-review">—</strong><small id="stat-review-detail">Checking decisions…</small></a>
         </section>
         <nav class="dash-jumps" aria-label="Dashboard sections"><a href="#orders-panel">Orders</a><a href="#tasks-panel">Tasks</a><a href="#operations-panel">Operations</a><a href="#reports-panel">Reports</a></nav>
         <div class="dash-work-grid">
@@ -46,8 +46,8 @@
             <div class="dash-panel-foot"><span id="orders-showing"></span><a href="pending-orders.html">View all pending orders →</a></div>
           </section>
           <section class="dash-panel" id="tasks-panel" aria-labelledby="tasks-heading">
-            <header class="dash-panel-head"><div><span class="dash-eyebrow">FOCUS &amp; FOLLOW THROUGH</span><h2 id="tasks-heading">Your work &amp; reviews</h2></div><a class="dash-text-link" href="team-tasks.html">Open tasks <span aria-hidden="true">↗</span></a></header>
-            <p class="dash-panel-caption">Assigned to you, work you delegated, and admin reviews.</p>
+            <header class="dash-panel-head"><div><span class="dash-eyebrow">FOCUS &amp; FOLLOW THROUGH</span><h2 id="tasks-heading">Your work &amp; decisions</h2></div><a class="dash-text-link" href="team-tasks.html">Open tasks <span aria-hidden="true">↗</span></a></header>
+            <p class="dash-panel-caption">Work and decisions that need your next step.</p>
             <div class="dash-task-filters" aria-label="Filter task preview"><button data-task-filter="all" aria-pressed="true">Priority first</button><button data-task-filter="review" aria-pressed="false">Needs review</button><button data-task-filter="blocked" aria-pressed="false">Needs help</button></div>
             <div class="dash-list" id="dashboard-tasks" aria-live="polite" aria-busy="true"><div class="dash-loading">Loading your tasks…</div></div>
             <div class="dash-panel-foot"><span id="tasks-showing"></span><a href="team-tasks.html">View all tasks →</a></div>
@@ -77,7 +77,7 @@
   <script src="initSupabase.js"></script>
   <script src="task-notifications.js?v=20261007" defer></script>
   <script src="admin-nav.js"></script>
-  <script src="task-workflow.js?v=20261007-next-action-2"></script>
-  <script src="dashboard.js?v=20261007-next-action-2"></script>
+  <script src="task-workflow.js?v=20261007-request-intent"></script>
+  <script src="dashboard.js?v=20261007-request-intent"></script>
 </body>
 </html>

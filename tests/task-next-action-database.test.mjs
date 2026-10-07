@@ -39,6 +39,17 @@ before(async()=>{
   await db.exec(`create function ${name}() returns trigger language plpgsql as $$begin insert into public.legacy_notifications values('${name}');return new;end$$`);
  }
  await db.exec(await readFile(new URL('../supabase/migrations/20261007220000_task_next_action_workflow.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261007233000_task_request_intent.sql',import.meta.url),'utf8'));
+ for(const table of ['team_tasks','ebay_order_tasks']) await db.exec(`alter table ${table} alter column id set default gen_random_uuid();
+ alter table ${table} add column description text,add column question text,add column created_by_email text,add column order_line_ids uuid[];`);
+ for(const table of ['team_task_events','ebay_order_task_events']) await db.exec(`alter table ${table} drop constraint ${table}_action_check;`);
+ await db.exec('alter table ebay_orders add column order_number text,add column buyer_username text,add column buyer_name text,add column total_price numeric,add column net_payout numeric;alter table ebay_order_lines add column order_id uuid;');
+ const historySql=await readFile(new URL('../supabase/migrations/20260714193000_order_history_group_tasks.sql',import.meta.url),'utf8');
+ await db.exec(historySql.slice(historySql.indexOf('create or replace function public.create_ebay_order_history_task('),historySql.indexOf('$;',historySql.indexOf('create or replace function public.create_ebay_order_history_task('))+3));
+ for(const [file,name,next] of [['20260522113000_team_independent_tasks.sql','create_team_task','respond_team_task'],['20260522103000_ebay_order_coordination_tasks.sql','create_ebay_order_coordination_task','respond_ebay_order_coordination_task']]) {
+  const sql=await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8');
+  await db.exec(sql.slice(sql.indexOf('create or replace function public.'+name+'('),sql.indexOf('create or replace function public.'+next+'(')));
+ }
  for(const source of ['team','order'])await db.exec(`create trigger assignment_guard before update on ${tables[source]} for each row execute function prevent_non_admin_task_reassignment()`);
  await db.exec(`create trigger completion_notify after update of status on ebay_order_tasks for each row execute function notify_admins_ebay_subtask_completed()`);
 });
@@ -47,8 +58,8 @@ beforeEach(async()=>{
  for(const n of [1,2,3,4])await db.query('insert into employees values($1,$1,$2,$3,true)',[id(n),`person${n}@example.test`,n===4?'admin':'employee']);
  for(const table of Object.values(tables))await db.query(`insert into ${table}(id,assigned_to_user_id,assigned_to_employee_id,assigned_to_email,assigned_by,assigned_by_email,created_by,status,task_type,due_at,priority,title,metadata,latest_note,order_id)
  values($1,$2,$2,'person1@example.test',$3,'person2@example.test',$3,'assigned','general','2026-10-10T10:00:00Z','high','Certificate needed','{"evidence":"kept"}','Original instructions',$4)`,[id(100),id(1),id(2),id(500)]);
- await db.query("insert into ebay_orders values($1,'pending')",[id(500)]);
- await db.query('insert into ebay_order_lines values($1,0)',[id(500)]);
+ await db.query("insert into ebay_orders(id,status) values($1,'pending')",[id(500)]);
+ await db.query('insert into ebay_order_lines(id,fulfilled_quantity,order_id) values($1,0,$1)',[id(500)]);
 });
 after(async()=>db?.close());
 for(const source of Object.keys(tables)) {
@@ -138,4 +149,52 @@ test('an admin decision hands responsibility back to the worker and follows it t
 test('an admin completing their own assigned work sends it to the assigner, not themselves',async()=>{
  await db.exec(`set test.actor='${id(4)}'`);await db.query('update team_tasks set assigned_to_user_id=$1',[id(4)]);
  const result=await advance('team','complete',{actor:4});assert.equal(result.task.metadata.task_workflow.reviewer_user_id,id(2));
+});
+
+for(const source of ['team','order','history']) for(const kind of ['work','decision']) test(source+': explicit '+kind+' uses intent rather than recipient role, including the creation audit',async()=>{
+ await db.exec(`set test.actor='${id(1)}'`);
+ const owner=kind==='work'?4:2;
+ const details={_title:'Check the certificate',_question:'What should happen next?',_description:'What should happen next?',_order_id:id(500),_assigned_to_user_id:id(owner),_photo_attachments:[{path:'proof.jpg'}]};
+ const task=(await db.query('select create_task_request($1,$2,$3) task',[source,kind,JSON.stringify(details)])).rows[0].task;
+ assert.equal(task.status,'assigned');assert.equal(task.metadata.request_kind,kind);assert.equal(task.assigned_to_user_id,id(owner));
+ const event=(await db.query(`select * from ${events[source==='history'?'order':source]} where task_id=$1`,[task.id])).rows[0];
+ assert.equal(event.new_status,'assigned');assert.equal(event.new_assigned_to_user_id,id(owner));assert.deepEqual(event.photo_attachments,details._photo_attachments);
+ assert.equal((await db.query("select current_setting('invsto.task_request_kind',true) kind")).rows[0].kind,'');
+ assert.equal((await db.query('select status from ebay_orders')).rows[0].status,'pending');
+});
+test('creation rejects missing recipients, invalid intent, inactive staff, and preserves source validation',async()=>{
+ await db.exec(`set test.actor='${id(1)}'`);
+ const args={_title:'Work',_assigned_to_user_id:id(4)};
+ for(const [source,kind,details,pattern] of [['team','work',{_title:'No owner'},/person responsible/],['team','bad',args,/Work or Decision/],['bad','work',args,/Invalid task source/],['order','work',{...args,_order_id:id(999),_question:'Need help'},/order not found/]]){
+  await assert.rejects(db.query('select create_task_request($1,$2,$3)',[source,kind,JSON.stringify(details)]),pattern);
+ }
+ await db.query('update employees set active=false where user_id=$1',[id(1)]);
+ await assert.rejects(db.query('select create_task_request($1,$2,$3)',['team','work',JSON.stringify(args)]),/Active staff/);
+ assert.equal((await db.query("select has_function_privilege('anon','create_task_request(text,text,jsonb)','execute') allowed")).rows[0].allowed,false);
+});
+const respond=async(source,mode,actor,note='Please decide the next step.',override={})=>{
+ await db.exec(`set test.actor='${id(actor)}'`);
+ const t=(await db.query(`select * from ${tables[source]} where id=$1`,[id(100)])).rows[0];
+ return (await db.query('select respond_task_request($1,$2,$3,$4,$5,$6,$7) result',[source,id(100),note,mode,t.assigned_to_user_id,t.assigned_by,override.updated||t.updated_at])).rows[0].result;
+};
+for(const source of ['team','order','return'])test(source+': work to decision to instructions to completion to acceptance stays one task',async()=>{
+ const result=await respond(source,'decision',1);
+ assert.equal(result.task.assigned_to_user_id,id(2));assert.equal(result.task.metadata.request_kind,'decision');
+ await assert.rejects(advance(source,'complete',{actor:2}),/Record the decision/);
+ const updated=await respond(source,'update',2,'Checking with the supplier.');
+ assert.equal(updated.task.assigned_to_user_id,id(2));assert.equal(updated.task.metadata.request_kind,'decision');
+ await assert.rejects(respond(source,'work',3),/participants|assignee/);
+ await assert.rejects(respond(source,'work',2,'Proceed.',{updated:'2000-01-01T00:00:00Z'}),/task changed/);
+ const back=await respond(source,'work',2,'Attach the confirmed certificate.');
+ assert.equal(back.task.assigned_to_user_id,id(1));assert.equal(back.task.metadata.request_kind,'work');
+ await advance(source,'complete');await advance(source,'accept',{actor:2});
+ assert.equal((await db.query(`select count(*)::int n from ${tables[source]}`)).rows[0].n,1);
+ assert.equal((await db.query('select status from ebay_orders')).rows[0].status,'pending');
+});
+for(const source of ['team','order','return'])test(source+': decision recipient may explicitly finish; updates never do',async()=>{
+ await respond(source,'decision',1);
+ await assert.rejects(advance(source,'decide',{actor:1}),/responsible person/);
+ const result=await advance(source,'decide',{actor:2,note:'Confirmed: no action is necessary.'});
+ assert.equal(result.task.status,'resolved');assert.equal(result.task.resolved_by,id(2));
+ assert.equal((await db.query('select status from ebay_orders')).rows[0].status,'pending');
 });

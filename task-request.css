@@ -1,0 +1,10 @@
+/* A shared, compact choice for tasks created from any workspace. */
+.task-request-kind { border: 0; padding: 0; margin: 16px 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; min-width: 0; }
+.task-request-kind legend { color: #c6cec8; font-size: 13px; font-weight: 600; margin-bottom: 9px; }
+.task-request-kind label { display: flex; align-items: flex-start; gap: 9px; padding: 12px; border: 1px solid #ffffff25; border-radius: 12px; cursor: pointer; min-width: 0; }
+.task-request-kind label:has(input:checked) { background: #dec58b14; border-color: #dec58b; }
+.task-request-kind input[type=radio] { width: 18px; height: 18px; min-height: 18px; margin: 2px 0 0; flex: 0 0 18px; accent-color: #dec58b; padding: 0; }
+.task-request-kind span { display: grid; gap: 4px; min-width: 0; }
+.task-request-kind strong { color: #eee8dc; font-size: 14px; }
+.task-request-kind small { color: #bcc5be; font-size: 12px; line-height: 1.45; font-weight: 400; }
+@media (max-width: 360px) { .task-request-kind label { padding: 10px 8px; gap: 6px; } }

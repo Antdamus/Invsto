@@ -169,6 +169,7 @@ function formatDate(value) {
 
 function getTaskDueValue(task = {}) {
   if (task.due_at) return task.due_at;
+  if (task.metadata?.request_kind) return "";
   return task.source === "order" ? task.ship_by_date || "" : "";
 }
 
@@ -529,7 +530,7 @@ function updateTaskScopeChrome() {
     state.taskScope = "mine";
     state.viewedWorkerUserId = "";
   }
-  if (isTaskViewAsWorkerMode() && ["order_approval", "approvals"].includes(state.taskOwnerFilter)) {
+  if (isTaskViewAsWorkerMode() && state.taskOwnerFilter === "order_approval") {
     state.taskOwnerFilter = "assigned";
   }
   if (isCanceledTaskScope()) {
@@ -805,7 +806,7 @@ function getTaskResponsibility(task) {
   return OGTaskWorkflow.bucket(task, getTaskViewerUserId(), state.assignees, state.followingTasks || []);
 }
 function isTaskInApprovalInbox(task = {}) {
-  return !isTaskViewAsWorkerMode() && getTaskResponsibility(task) === 'approvals';
+  return getTaskResponsibility(task) === 'approvals';
 }
 function isTaskMyNextAction(task) { return getTaskResponsibility(task) === 'assigned'; }
 function isTaskFollowing(task) { return getTaskResponsibility(task) === 'following'; }
@@ -951,7 +952,7 @@ function matchesTaskSearch(task) {
   const haystack = normalizeLookup([
     task.title, task.description, task.question, task.latest_note, task.order_number,
     task.buyer_username, task.buyer_name, getTaskAssigneeLabel(task), task.assigned_to_email,
-    getTaskStatusLabel(task.status), getTaskSourceLabel(task), ...getOrderHistoryTaskOrderNumbers(task),
+    getTaskDisplayStatus(task), getTaskSourceLabel(task), ...getOrderHistoryTaskOrderNumbers(task),
     ...events.map(event => event.notes), ...(task.lineDetails || []).map(line => `${line.item_title || ""} ${line.item_number || ""} ${line.notes || ""}`),
   ].filter(Boolean).join(" "));
   return terms.every(term => haystack.includes(term));
@@ -993,10 +994,10 @@ function renderTaskWorkspaceChrome(visibleTasks = []) {
     applied.classList.toggle("hidden", !filterLabels.length && !state.taskSearch);
     applied.textContent = [...filterLabels, state.taskSearch ? `Search: ${state.taskSearch}` : ""].filter(Boolean).join(" · ");
   }
-  const inboxTitle = ({assigned: "Assigned to me", created: "Following", following: "Following", history: "History", approvals: "Approvals", everything: "Team tasks"})[state.taskOwnerFilter] || "Tasks";
+  const inboxTitle = ({assigned: "My work", created: "Following", following: "Following", history: "History", approvals: "Decisions", everything: "Team tasks"})[state.taskOwnerFilter] || "Tasks";
   const focusTitle = ({overdue: "Overdue", review: "Awaiting review", today: "Due today", progress: "In progress", blocked: "Needs help", waiting: "Awaiting reply"})[state.taskFocus];
   if (!isViewingWorkerTasks() && $("team-task-list-title")) $("team-task-list-title").textContent = `${history ? "History" : inboxTitle}${!history && focusTitle ? ` · ${focusTitle}` : ""}`;
-  if ($("task-inbox-description")) $("task-inbox-description").textContent = ({assigned: "Your next steps. Work waiting on someone else is in Following.", created: "Work you assigned, handed back, or finished. Someone else acts next.", following: "Work you assigned, handed back, or finished. Someone else acts next.", approvals: "Work waiting for your acceptance or decision.", history: "Finished and accepted tasks, with their full trail."})[state.taskOwnerFilter] || "Team workspace";
+  if ($("task-inbox-description")) $("task-inbox-description").textContent = ({assigned: "Work you need to do. Questions and approvals are in Decisions.", created: "Work you assigned, handed back, or finished. Someone else acts next.", following: "Work you assigned, handed back, or finished. Someone else acts next.", approvals: "Waiting for your decision.", history: "Finished and accepted tasks, with their full trail."})[state.taskOwnerFilter] || "Team workspace";
   if ($("team-task-count")) $("team-task-count").textContent = `${visibleTasks.length} task${visibleTasks.length === 1 ? "" : "s"}${isViewingWorkerTasks() ? " · Read-only preview" : ""}`;
   const signature = JSON.stringify([state.taskSearch, state.taskFocus, state.taskOwnerFilter, state.taskReadFilter, state.taskSourceFilter, state.taskView, state.taskScope, state.viewedWorkerUserId, state.taskSort, state.taskHistorySort]);
   if (signature !== state.taskRenderSignature) { state.visibleTaskLimit = 20; state.taskRenderSignature = signature; }
@@ -1035,14 +1036,14 @@ function renderTaskOwnerFilterChrome(tasks = []) {
   const viewerLabel = getTaskViewerShortLabel();
   document.querySelectorAll("[data-task-owner-filter]").forEach((button) => {
     const filter = button.dataset.taskOwnerFilter || "all";
-    button.hidden = filter === "approvals" && isTaskViewAsWorkerMode();
+    button.hidden = false;
     const labels = {
       everything: `All tasks ${tasks.length}`,
       all: `Active work ${counts.all}`,
-      assigned: `${isViewingWorkerTasks() ? `Assigned to ${viewerLabel}` : "Assigned to me"} ${counts.assigned}`,
+      assigned: `${isViewingWorkerTasks() ? `Assigned to ${viewerLabel}` : "My work"} ${counts.assigned}`,
       following: `Following ${counts.following}`,
       history: "History",
-      approvals: `${isHistoricalTaskView() ? "Reviewed by me" : "Approvals"} ${counts.approvals}`,
+      approvals: `${isHistoricalTaskView() ? "Reviewed by me" : "Decisions"} ${counts.approvals}`,
       responded: `Responded / awaiting reply ${counts.responded}`,
       order_approval: `Orders pending approval ${counts.orderApproval}`,
       acceptance: `Needs acceptance ${counts.acceptance}`,
@@ -1323,7 +1324,7 @@ function renderAssigneeSelect() {
   const select = $("team-task-assignee");
   if (!select) return;
   const current = select.value || "";
-  select.replaceChildren(new Option("Leave unassigned", ""));
+  select.replaceChildren(new Option("Choose a person", ""));
   state.assignees.forEach((employee) => {
     select.appendChild(new Option(getAssigneeOptionLabel(employee), employee.user_id || ""));
   });
@@ -2521,6 +2522,10 @@ async function hydrateEventPhotoUrls(tasks = []) {
   }));
 }
 
+function getTaskDisplayStatus(task) {
+  if (!OGTaskWorkflow.finished.has(task.status) && task.status !== 'completed_by_employee' && OGTaskWorkflow.next(task, state.assignees).kind === 'approval') return 'Needs decision';
+  return getTaskStatusLabel(task.status);
+}
 function getTaskStatusLabel(value) {
   const labels = {
     open: "Open",
@@ -4258,7 +4263,7 @@ function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
   ].filter(Boolean).join("");
   const advancedFacts = [
     ["Source", getTaskSourceLabel(task)],
-    ["Status", canceled ? "Canceled" : getTaskStatusLabel(task.status)],
+    ["Status", canceled ? "Canceled" : getTaskDisplayStatus(task)],
     ["Priority", formatTaskTag(task.priority || "normal")],
     ["Category", formatTaskTag(task.task_type || "general")],
     isHistoryTask && historyOrderNumbers.length ? ["Closed orders", historyOrderNumbers.join(", ")] : null,
@@ -4341,7 +4346,7 @@ function renderTeamTaskBrief(task = {}, events = [], canceled = false) {
           <span class="eyebrow">Task Brief</span>
           <strong>${escapeHtml(task.title || "Team task")}</strong>
         </div>
-        <span class="team-task-chip team-task-status-chip">${escapeHtml(canceled ? "Canceled" : getTaskStatusLabel(task.status))}</span>
+        <span class="team-task-chip team-task-status-chip">${escapeHtml(canceled ? "Canceled" : getTaskDisplayStatus(task))}</span>
       </div>
       <div class="team-task-instruction-grid">
         <article class="team-task-instruction is-current">
@@ -4390,7 +4395,7 @@ function renderTaskUpdateTrail(task = {}, events = [], options = {}) {
             <span class="eyebrow">Updates & Audit Trail</span>
             <strong>${events.length ? `${events.length} saved update${events.length === 1 ? "" : "s"}` : "No updates yet"}</strong>
           </span>
-          <em>${escapeHtml(latest ? `${formatTaskTag(latest.action || "update")} - ${formatDate(latest.created_at)}` : getTaskStatusLabel(task.status))}</em>
+          <em>${escapeHtml(latest ? `${formatTaskTag(latest.action || "update")} - ${formatDate(latest.created_at)}` : getTaskDisplayStatus(task))}</em>
         </summary>
         ${trailBody}
       </details>
@@ -4403,7 +4408,7 @@ function renderTaskUpdateTrail(task = {}, events = [], options = {}) {
           <span class="eyebrow">Updates & Audit Trail</span>
           <strong>${events.length ? `${events.length} saved update${events.length === 1 ? "" : "s"}` : "No updates yet"}</strong>
         </div>
-        <span>${escapeHtml(getTaskStatusLabel(task.status))}</span>
+        <span>${escapeHtml(getTaskDisplayStatus(task))}</span>
       </div>
       ${trailBody}
     </section>
@@ -4428,7 +4433,7 @@ function renderTaskCard(task = {}, options = {}) {
   const readInfo = getTaskReadInfo(task);
   const detailsId = `task-details-${getSafeDomId(taskKey)}`;
   const sourceLabel = getTaskSourceLabel(task);
-  const statusLabel = canceled ? "Canceled" : getTaskStatusLabel(task.status);
+  const statusLabel = canceled ? "Canceled" : getTaskDisplayStatus(task);
   const due = getTaskDueValue(task);
   const dueText = task.status === "completed_by_employee" ? "Awaiting decision" : late ? `Overdue · ${getTaskLateAgeLabel(task)}` : due ? `Due ${getTaskDueLabel(task)}` : "No due date";
   const priority = ["high", "urgent"].includes(task.priority) ? formatTaskTag(task.priority) : "";
@@ -4478,7 +4483,7 @@ function renderTaskCard(task = {}, options = {}) {
 function attachTaskCardInteractions(root = document) {
   root.querySelectorAll("[data-task-next]").forEach(button => button.addEventListener("click", () => openTaskNextAction(getTaskByUnifiedKey(button.dataset.taskKey), button.dataset.taskNext)));
   root.querySelectorAll('[data-task-reply]').forEach(button => button.addEventListener('click', () => {
-    openTaskReply(getTaskByUnifiedKey(button.dataset.taskReply), button.dataset.handoff === 'true');
+    openTaskReply(getTaskByUnifiedKey(button.dataset.taskReply), button.dataset.handoff === 'true', button.dataset.decision === 'true');
   }));
   root.querySelectorAll('[data-task-evidence-retry]').forEach(button => button.addEventListener('click', () => {
     const task = getTaskByUnifiedKey(button.dataset.taskEvidenceRetry);
@@ -4607,7 +4612,7 @@ function renderTasks() {
   if (!visibleTasks.length) {
     const filtered = Boolean(state.taskSearch || state.taskFocus !== "all" || state.taskSourceFilter !== "all" || state.taskReadFilter !== "all");
     const approvals = state.tasks.filter(isTaskInApprovalInbox).length;
-    const empty = ({assigned: ["You're caught up", approvals ? `${approvals} decision${approvals === 1 ? " is" : "s are"} waiting in Approvals.` : "No work needs your next step."], following: ["Nothing waiting on someone else", "Work you hand back or complete will appear here until it is finished."], approvals: ["No decisions waiting", "Work needing your acceptance will appear here."], history: ["No finished tasks yet", "Accepted and finished work will appear here."]})[state.taskOwnerFilter] || ["No tasks here", "There is no work in this view."];
+    const empty = ({assigned: ["You're caught up", approvals ? `${approvals} decision${approvals === 1 ? " is" : "s are"} waiting in Decisions.` : "No work needs your next step."], following: ["Nothing waiting on someone else", "Work you hand back or complete will appear here until it is finished."], approvals: ["No decisions waiting", "Work needing your acceptance will appear here."], history: ["No finished tasks yet", "Accepted and finished work will appear here."]})[state.taskOwnerFilter] || ["No tasks here", "There is no work in this view."];
     list.innerHTML = `<div class="task-empty"><strong>${filtered ? "No matching tasks" : escapeHtml(empty[0])}</strong><p>${filtered ? "Try another search or reset your filters to see all your work." : escapeHtml(empty[1])}</p>${filtered ? '<button id="task-reset-empty" type="button" class="secondary-btn">Reset filters</button>' : ""}</div>`;
     $("task-reset-empty")?.addEventListener("click", resetTaskWorkspaceFilters);
     return;
@@ -4745,7 +4750,7 @@ function renderTaskReplyActions(task) {
   return `<section class="task-reply-actions" aria-label="Reply to task"><div><strong>Reply & next step</strong><p>Share an update${canHandTaskBack(task) ? ` or ask ${escapeHtml(getTaskAssignerLabel(task))} to take the next step` : ' in this task’s history'}.</p></div><div class="team-task-actions"><button type="button" class="primary-btn" data-task-reply="${key}">Add update</button>${canHandTaskBack(task) ? `<button type="button" class="secondary-btn" data-task-reply="${key}" data-handoff="true">Send instructions & hand back</button>` : ''}</div></section>`;
 }
 
-function openTaskReply(task, handoff = false) {
+function openTaskReply(task, handoff = false, decision = false) {
   if (!task || !canReplyToTask(task)) return;
   state.mode = 'task-response'; state.activeTaskId = task.id; state.activeTaskSource = task.source;
   // Keep the ownership shown when opening the form; the server detects changes.
@@ -4757,8 +4762,11 @@ function openTaskReply(task, handoff = false) {
   $('team-task-note').value = '';
   $('task-response-handoff-option').classList.toggle('hidden', !canHandTaskBack(task));
   $('task-response-recipient').textContent = getTaskAssignerLabel(task);
-  document.querySelector('[name="task-response-mode"][value="update"]').checked = !handoff || !canHandTaskBack(task);
-  document.querySelector('[name="task-response-mode"][value="handoff"]').checked = handoff && canHandTaskBack(task);
+  $('task-response-decision-option').classList.toggle('hidden', !canHandTaskBack(task));
+  $('task-response-decision-recipient').textContent = getTaskAssignerLabel(task);
+  document.querySelector('[name="task-response-mode"][value="decision"]').checked = decision && canHandTaskBack(task);
+  document.querySelector('[name="task-response-mode"][value="update"]').checked = (!handoff && !decision) || !canHandTaskBack(task);
+  document.querySelector('[name="task-response-mode"][value="handoff"]').checked = handoff && !decision && canHandTaskBack(task);
   configureModalAdminFields({assignee:false,category:false,priority:false,due:false,status:false});
   updateTaskReplySummary(); openModal();
   $('team-task-note')?.focus();
@@ -4767,26 +4775,29 @@ function openTaskReply(task, handoff = false) {
 function updateTaskReplySummary() {
   const task = state.replySnapshot;
   if (state.mode !== 'task-response' || !task) return;
-  const handoff = document.querySelector('[name="task-response-mode"]:checked')?.value === 'handoff';
+  const mode = document.querySelector('[name="task-response-mode"]:checked')?.value || 'update';
+  const handoff = mode !== 'update';
   $('task-response-summary').textContent = handoff
-    ? `${getTaskAssignerLabel(task)} will be responsible next. You can follow this same task under Following.`
+    ? `${getTaskAssignerLabel(task)} will be responsible next, in ${mode === 'decision' ? 'Decisions' : 'My work'}. You can follow this same task under Following.`
     : `${getTaskResponsibilityLabel(task)}. Responsibility stays the same; your update is saved in the task’s history.`;
   $('team-task-note').placeholder = handoff ? 'What do you need them to do before you can continue?' : 'Write your answer, update, or question…';
-  $('submit-team-task').textContent = handoff ? 'Send & hand back' : 'Send update';
+  $('submit-team-task').textContent = mode === 'decision' ? 'Ask for decision' : handoff ? 'Send & hand back' : 'Send update';
 }
 
 async function submitTaskReply() {
   if (state.replySaving || isTaskViewAsWorkerMode()) return;
   const task = state.replySnapshot;
   const note = $('team-task-note').value.trim();
-  const handoff = document.querySelector('[name="task-response-mode"]:checked')?.value === 'handoff';
+  const mode = document.querySelector('[name="task-response-mode"]:checked')?.value || 'update';
+  const handoff = mode !== 'update';
   if (!task || !note) return setModalError(handoff ? 'Explain what you need the assigner to do.' : 'Write an update before sending.');
   if (note.length > 10000) return setModalError('Please keep the update under 10,000 characters.');
   if (handoff && !canHandTaskBack(task)) return setModalError('This task cannot be handed back. Refresh to check its assignment.');
   state.replySaving = true; $('submit-team-task').disabled = true; setModalError('');
   try {
-    const {error} = await supabase.rpc('reply_to_task', {
-      _task_source: task.source, _task_id: task.id, _note: note, _request_action: handoff,
+    const {error} = await supabase.rpc('respond_task_request', {
+      _source: task.source, _task_id: task.id, _note: note, _mode: mode === 'handoff' ? 'work' : mode,
+      _expected_updated_at: task.updated_at || null,
       _expected_assignee: task.assigned_to_user_id || null, _expected_assigner: task.assigned_by || task.created_by || null,
     });
     if (error) throw error;
@@ -4805,10 +4816,14 @@ function renderTaskActions(task = {}, resolved = false) {
   const buttons = [];
   if (task.actionHref) buttons.push('<a class="secondary-btn" href="'+escapeHtml(task.actionHref)+'">'+(task.source === 'order' ? 'Open order' : 'Open return')+'</a>');
   if (canReplyToTask(task)) buttons.push('<button type="button" class="secondary-btn" data-task-reply="'+key+'">Add update</button>');
-  if (canHandTaskBack(task)) buttons.push('<button type="button" class="secondary-btn" data-task-reply="'+key+'" data-handoff="true">Send instructions &amp; hand back</button>');
+  if (canHandTaskBack(task)) buttons.push(isTaskInApprovalInbox(task)
+    ? '<button type="button" class="primary-btn" data-task-reply="'+key+'" data-handoff="true">Send instructions &amp; hand back</button>'
+    : '<button type="button" class="secondary-btn" data-task-reply="'+key+'" data-decision="true">Ask for a decision</button>');
   if (task.status === 'completed_by_employee' && canReviewTaskAcceptance(task)) {
     buttons.push('<button type="button" class="secondary-btn" data-task-next="return" data-task-key="'+key+'">Request changes</button>');
     buttons.push('<button type="button" class="primary-btn" data-task-next="accept" data-task-key="'+key+'">Accept &amp; finish</button>');
+  } else if (isTaskInApprovalInbox(task) && task.assigned_to_user_id === state.user?.id && !isOrderPendingApprovalTask(task) && !isShippingFulfillmentTask(task) && task.task_type !== 'pending_subtask') {
+    buttons.push('<button type="button" class="secondary-btn" data-task-next="decide" data-task-key="'+key+'">Record decision &amp; finish</button>');
   } else if (isTaskInApprovalInbox(task) && task.assigned_to_user_id !== state.user?.id && ['waiting_on_admin','pending_admin_review'].includes(task.status)) {
     buttons.push('<button type="button" class="primary-btn" data-task-next="return" data-task-key="'+key+'">Send instructions &amp; hand back</button>');
   } else if (task.assigned_to_user_id === state.user?.id && (TASK_HANDOFF_STATUSES.has(task.status) || task.status === 'pending_admin_review') && task.status !== 'waiting_on_subtasks' && !isShippingFulfillmentTask(task)) {
@@ -4840,17 +4855,18 @@ function openTaskNextAction(task, action) {
   state.mode = 'next-action'; state.activeTaskSource = task.source; state.activeTaskId = task.id;
   state.nextAction = action; state.replySnapshot = {...task};
   resetPhotos(); resetLineReviewPanel(); setModalError('');
-  const labels = {complete:'Complete my part',accept:'Accept & finish',return: task.status === 'completed_by_employee' ? 'Request changes' : 'Send instructions & hand back'};
+  const labels = {complete:'Complete my part',accept:'Accept & finish',decide:'Record decision & finish',return: task.status === 'completed_by_employee' ? 'Request changes' : 'Send instructions & hand back'};
   $('team-task-modal-title').textContent = labels[action];
   const reviewerId = OGTaskWorkflow.reviewer({...task,status:'completed_by_employee'}, state.assignees);
   const reviewer = state.assignees.find(p => p.user_id === reviewerId);
   const name = reviewer?.display_name || reviewer?.name || reviewer?.email || 'the reviewer';
   $('team-task-modal-subtitle').textContent = action === 'complete'
     ? name + ' will review your work. You can track it in Following. This does not close the order.'
+    : action === 'decide' ? 'Record your answer and finish this task only if no further work is needed. Otherwise, send instructions and hand it back.'
     : action === 'accept' ? 'Finish this task and move it to History. The order stays unchanged.'
     : getTaskAssigneeLabel(task) + ' will be responsible for carrying out these instructions.';
   $('team-task-title-field').classList.add('hidden'); $('team-task-note').value = '';
-  $('team-task-note').placeholder = action === 'return' ? 'What needs to be changed or finished?' : 'Summarize what was completed…';
+  $('team-task-note').placeholder = action === 'return' ? 'What needs to be changed or finished?' : action === 'decide' ? 'What did you decide, and why is no further work needed?' : 'Summarize what was completed…';
   configureModalAdminFields({assignee:false,category:false,priority:false,due:false,status:false});
   $('submit-team-task').textContent = labels[action]; openModal();
 }
@@ -4869,9 +4885,9 @@ async function submitTaskNextAction() {
     if (error) throw error;
     closeModal();
     if (getRequestedTaskId()) history.replaceState(null, '', 'team-tasks.html');
-    state.taskOwnerFilter = action === 'accept' ? 'approvals' : 'following'; state.taskFocus = 'all';
+    state.taskOwnerFilter = ['accept','decide'].includes(action) ? 'approvals' : 'following'; state.taskFocus = 'all';
     await loadTasks();
-    setStatus(action === 'accept' ? 'Task accepted. It is now in History.' : action === 'return' ? 'Instructions sent. Follow the next person’s progress in Following.' : 'Your part is complete. Track acceptance in Following.', 'success');
+    setStatus(['accept','decide'].includes(action) ? 'Task finished. It is now in History.' : action === 'return' ? 'Instructions sent. Follow the next person’s progress in Following.' : 'Your part is complete. Track acceptance in Following.', 'success');
   } catch(error) {setModalError(error?.message || 'Could not save. Your note is still here.');}
   finally {state.replySaving=false; $('submit-team-task').disabled=false;}
 }
@@ -5728,6 +5744,7 @@ function openModal() {
   state.modalReturnFocus = document.activeElement;
   const attachments = document.querySelector("#team-task-modal .task-attachments");
   if (attachments) attachments.open = false;
+  $('team-task-request-kind')?.classList.toggle('hidden', state.mode !== 'create');
   const responseMode = state.mode === 'task-response';
   $('task-response-options')?.classList.toggle('hidden', !responseMode);
   $('task-response-summary')?.classList.toggle('hidden', !responseMode);
@@ -5913,6 +5930,7 @@ function configureOrderWorkflowModal(task, options = {}) {
             : "Save Update";
 
   $("team-task-title-input").value = "";
+  document.querySelector('[name="team-task-request-kind"][value="work"]').checked = true;
   $("team-task-note").value = "";
   $("team-task-note").placeholder = isSubtaskCreate
     ? "Write the instructions the employee must follow."
@@ -6184,7 +6202,7 @@ async function openTaskModal(options = {}) {
 
   $("team-task-modal-title").textContent = task
     ? options.reassignRequest ? "Request reassignment" : options.accept ? "Accept completed task" : options.sendBack ? "Send task back" : options.resolve ? "Complete task" : options.progress ? "Progress / delay update" : "Reply to team task"
-    : "Create independent task";
+    : "New task";
   $("team-task-modal-subtitle").textContent = task
     ? options.reassignRequest
       ? "Send a note to the admin asking them to move this task. The assignment will stay unchanged until an admin reviews it."
@@ -6197,7 +6215,7 @@ async function openTaskModal(options = {}) {
         : options.progress
       ? "Explain what happened, what is blocking completion, and when this should be checked again."
       : "Add the next note, reassign the work, or mark it completed."
-    : "Assign independent work and keep the documentation in one place.";
+    : "Choose Work or Decision, then tell the person what you need.";
   $("team-task-title-field")?.classList.toggle("hidden", Boolean(task));
   $("submit-team-task").textContent = task
     ? options.resolve
@@ -6213,6 +6231,7 @@ async function openTaskModal(options = {}) {
           : "Save Update"
     : "Save Task";
 
+  document.querySelector('[name="team-task-request-kind"][value="work"]').checked = true;
   $("team-task-title-input").value = "";
   $("team-task-note").value = "";
   $("team-task-note").placeholder = options.reassignRequest
@@ -6245,7 +6264,7 @@ async function openTaskModal(options = {}) {
   $("team-task-assignee").value = task?.assigned_to_user_id || "";
   configureModalAdminFields({
     assignee: !task || (canUseAdminTaskControls() && !options.progress && !options.resolve && !options.accept && !options.sendBack),
-    category: !task || (canUseAdminTaskControls() && !options.progress && !options.resolve && !options.reassignRequest && !options.accept && !options.sendBack),
+    category: Boolean(task) && (canUseAdminTaskControls() && !options.progress && !options.resolve && !options.reassignRequest && !options.accept && !options.sendBack),
     priority: !task || (canUseAdminTaskControls() && !options.progress && !options.resolve && !options.reassignRequest && !options.accept && !options.sendBack),
     due: !task || options.progress || options.sendBack || (canUseAdminTaskControls() && !options.resolve && !options.reassignRequest && !options.accept),
     status: Boolean(task) && (options.progress || canUseAdminTaskControls()) && !options.resolve && !options.reassignRequest && !options.accept && !options.sendBack,
@@ -6579,6 +6598,8 @@ async function submitTask() {
   const title = String($("team-task-title-input")?.value || "").trim();
   const note = String($("team-task-note")?.value || "").trim();
   if (state.mode === "create" && !title) return setModalError("Write a task title first.");
+  if (state.mode === "create" && !$("team-task-assignee").value) return setModalError("Choose who needs to take the next step.");
+  if (state.mode === "create" && !note) return setModalError("Describe the work or decision you need.");
   if (!note && ["reply", "progress", "resolve", "accept", "send_back", "reassign_request"].includes(state.mode)) return setModalError("Write a note before saving the update.");
 
   const submit = $("submit-team-task");
@@ -6631,7 +6652,7 @@ async function submitTask() {
         "success"
       );
     } else {
-      const { error } = await supabase.rpc("create_team_task", {
+      const { error } = await supabase.rpc("create_task_request", { _source: "team", _request_kind: document.querySelector('[name="team-task-request-kind"]:checked')?.value || "work", _details: {
         _title: title,
         _description: note || null,
         _task_type: $("team-task-type")?.value || "general",
@@ -6640,7 +6661,7 @@ async function submitTask() {
         _due_at: localDateTimeToIso($("team-task-due-at")?.value || ""),
         _photo_attachments: photos,
         _signed_by_email: signedByEmail,
-      });
+      }});
       if (error) throw error;
       setStatus("Team task created.", "success");
     }

@@ -97,7 +97,7 @@ for (const width of [320,390,430,768,1366]) test(`Dashboard at ${width}px: usabl
   assert.equal(await overflow(),false);
   await expect(page.locator('#stat-orders')).toHaveText('8');
   await expect(page.locator('#stat-overdue')).toHaveText('4');
-  await expect(page.locator('#stat-tasks')).toHaveText('4');
+  await expect(page.locator('#stat-tasks')).toHaveText('7');
   await expect(page.locator('#stat-review')).toHaveText('3');
   await expect(page.locator('.dash-order-row')).toHaveCount(4);
   await expect(page.locator('.dash-task-row')).toHaveCount(4);
@@ -140,7 +140,7 @@ test('queries run independently, refreshes coalesce, and reports/media stay off 
     waiters.ebay_order_lines = new Promise(resolve=>window.releaseOrders=resolve);
     window.refreshOne = refreshDashboard(); window.sameRefresh = refreshOne === refreshDashboard();
   });
-  await expect(page.locator('#stat-tasks')).toHaveText('4');
+  await expect(page.locator('#stat-tasks')).toHaveText('7');
   await expect(page.locator('#stat-orders')).toHaveText('—');
   assert.equal(await page.evaluate(() => sameRefresh),true);
   let names = await page.evaluate(() => reads.map(row=>row.table));
@@ -168,7 +168,7 @@ test('failure never masquerades as zero or a partial task total; retry recovers'
   await page.evaluate(() => {failures=[];});
   await page.locator('#dashboard-orders [data-retry]').click();
   await expect(page.locator('#stat-orders')).toHaveText('8');
-  await expect(page.locator('#stat-tasks')).toHaveText('4');
+  await expect(page.locator('#stat-tasks')).toHaveText('7');
   await expect(page.locator('#dashboard-status')).toBeHidden();
 });
 
@@ -202,7 +202,7 @@ test('task deadlines match the Tasks page, display names resolve, and return lin
     dashboardState.tasks = [{id:'return-1',source:'return',sourceLabel:'Return',title:'Inspect the returned bracelet',note:'Photograph the clasp.',assigned_to_user_id:'colleague',assigned_to_email:'sandra@example.test',due:new Date(Date.now()-60000).toISOString(),status:'open',priority:'urgent'}];
     renderDashboardTasks();
   });
-  await expect(page.locator('#stat-tasks-detail')).toHaveText('1 overdue · 0 need help');
+  await expect(page.locator('#stat-tasks-detail')).toHaveText('1 work · 0 decisions · 1 work overdue');
   await expect(page.locator('.dash-task-row')).toContainText('Sandra');
   await expect(page.locator('.dash-task-row')).toHaveAttribute('href','team-tasks.html?taskId=return-1');
 });

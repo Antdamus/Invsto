@@ -2012,7 +2012,7 @@
 
   async function createEbayConversationMessageTask(context, values = {}) {
     const session = await currentSession(context, "Create eBay conversation message task");
-    const { data, error } = await context.client.rpc("create_ebay_conversation_message_task", {
+    const { data, error } = await context.client.rpc("create_task_request", { _source: "message", _request_kind: values.requestKind || "work", _details: {
       _conversation_id: values.conversationId || null,
       _message_id: values.messageId || null,
       _title: String(values.title || "").trim(),
@@ -2023,7 +2023,7 @@
       _task_tag: values.taskTag || null,
       _refund_amount: values.refundAmount || null,
       _signed_by_email: session.user?.email || values.signedByEmail || null,
-    });
+    }});
     throwSupabaseReadError(error, "ebay_conversation_message_task_create_failed");
     return {
       ok: true,
@@ -2033,7 +2033,7 @@
 
   async function createEbayConversationLinkedOrderTask(context, values = {}) {
     const session = await currentSession(context, "Create eBay conversation linked order task");
-    const { data, error } = await context.client.rpc("create_ebay_conversation_linked_order_task", {
+    const { data, error } = await context.client.rpc("create_task_request", { _source: "linked_message", _request_kind: values.requestKind || "work", _details: {
       _conversation_id: values.conversationId || null,
       _message_id: values.messageId || null,
       _target_source: values.targetSource || "pending_order",
@@ -2050,7 +2050,7 @@
       _group_order_ids: Array.isArray(values.groupOrderIds) ? values.groupOrderIds : [],
       _group_order_numbers: Array.isArray(values.groupOrderNumbers) ? values.groupOrderNumbers : [],
       _signed_by_email: session.user?.email || values.signedByEmail || null,
-    });
+    }});
     throwSupabaseReadError(error, "ebay_conversation_linked_order_task_create_failed");
     return {
       ok: true,

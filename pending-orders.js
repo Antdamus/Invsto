@@ -6892,6 +6892,8 @@ async function openOrderTaskModal(options = {}) {
   const taskId = options.taskId || "";
   const task = taskId ? state.selectedOrderTasks.find((entry) => entry.id === taskId) || findOrderTaskInMemory(taskId) : null;
   state.activeOrderTaskId = task?.id || "";
+  $("order-task-request-kind")?.classList.toggle("hidden", isApprovalMode || Boolean(task));
+  document.querySelector('[name="order-task-request-kind"][value="work"]').checked = true;
   state.orderTaskMode = isApprovalMode ? "approval" : task ? options.progress ? "progress" : "reply" : "create";
   state.pendingApprovalOrderIds = isApprovalMode ? [...new Set(options.orderIds || state.pendingApprovalOrderIds || [])] : [];
   state.pendingApprovalLineIds = isApprovalMode ? [...new Set(options.lineIds || state.pendingApprovalLineIds || [])] : [];
@@ -6933,7 +6935,7 @@ async function openOrderTaskModal(options = {}) {
   $("order-task-priority").value = task?.priority || (isApprovalMode ? "high" : "normal");
   $("order-task-status").value = task ? options.progress ? "deferred" : "" : "";
   configureOrderTaskStatusOptionsForProgress(Boolean(options.progress));
-  $("order-task-due-at").value = toDateTimeLocalValue(task?.due_at || (isApprovalMode ? getEarliestShipByForLines(approvalLines) : !task ? line.order?.ship_by_date : ""));
+  $("order-task-due-at").value = toDateTimeLocalValue(task?.due_at || (isApprovalMode ? getEarliestShipByForLines(approvalLines) : ""));
   setOrderTaskFieldVisible("order-task-assignee", !options.progress && (isApprovalMode || !task || isRealAdminUser()));
   setOrderTaskFieldVisible("order-task-priority", !options.progress);
   setOrderTaskFieldVisible("order-task-due-at", true);
@@ -6998,10 +7000,10 @@ async function submitOrderTask() {
     const priority = isProgressUpdate ? null : $("order-task-priority")?.value || (isApprovalMode ? "high" : "normal");
     const signedByEmail = state.user?.email || state.employee?.display_name || "";
 
-    if (isApprovalMode) {
+    if (isApprovalMode || !isExistingTaskUpdate) {
       if (!assigneeUserId) {
         setOrderTaskPhotoStatus("");
-        setOrderTaskError("Choose the admin who should review this order before sending it for approval.");
+        setOrderTaskError("Choose who needs to take the next step.");
         return;
       }
     }
@@ -7039,16 +7041,16 @@ async function submitOrderTask() {
       if (error) throw error;
       setStatus("Order task update saved.", "success");
     } else {
-      const { error } = await supabase.rpc("create_ebay_order_coordination_task", {
+      const { error } = await supabase.rpc("create_task_request", { _source: "order", _request_kind: document.querySelector('[name="order-task-request-kind"]:checked')?.value || "work", _details: {
         _order_id: line.order_id,
         _order_line_ids: lineIds,
         _assigned_to_user_id: assigneeUserId,
         _priority: priority,
         _question: note,
-        _due_at: localDateTimeToIso($("order-task-due-at")?.value || "") || line.order?.ship_by_date || null,
+        _due_at: localDateTimeToIso($("order-task-due-at")?.value || "") || null,
         _photo_attachments: photos,
         _signed_by_email: signedByEmail,
-      });
+      }});
       if (error) throw error;
       setStatus("Order task created and assigned.", "success");
     }

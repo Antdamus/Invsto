@@ -389,3 +389,25 @@ test('task-only orders show current handoff ownership even without note counters
   await expect(page.locator('[data-queue-task="assigned-task"]')).toContainText('Assigned to Sandra');
   assert.equal(await page.locator('[data-line-view-notes]').count(), 0);
 });
+
+test('new phone order tasks choose intent and do not inherit an expired shipping deadline',async t=>{
+ const page=await open(t,{mobile:true,render:false});
+ await page.evaluate(async()=>{
+  state.selectedLine=line;state.selectedOrderTasks=[];window.taskWrites=[];
+  loadOrderTaskAssignees=async()=>{state.orderTaskAssignees=[{user_id:'admin',role:'admin',display_name:'Jose'}];document.getElementById('order-task-assignee').replaceChildren(new Option('Jose','admin'));};
+  loadNoInventoryCaptureStations=async()=>[];persistOrderTaskPhotos=async()=>[];
+  loadSelectedOrderTasks=hydrateOrderTaskAssignments=async()=>{};renderOrders=renderSelectedOrderTaskAssignment=()=>{};
+  supabase.rpc=async(name,args)=>{taskWrites.push({name,args});return {data:{},error:null};};
+  document.getElementById('submit-order-task').onclick=submitOrderTask;
+  await openOrderTaskModal();
+ });
+ await expect(page.locator('#order-task-request-kind input[value=work]')).toBeChecked();
+ await expect(page.locator('#order-task-due-at')).toHaveValue('');
+ await page.locator('#order-task-request-kind input[value=decision]').check();
+ await page.locator('#order-task-note').fill('May we proceed without the video?');
+ await page.locator('#order-task-assignee').selectOption('admin');
+ await page.locator('#submit-order-task').click();
+ await expect(page.locator('#order-task-modal')).toBeHidden();
+ const writes=await page.evaluate(()=>taskWrites);assert.equal(writes.length,1);assert.equal(writes[0].name,'create_task_request');
+ assert.equal(writes[0].args._request_kind,'decision');assert.equal(writes[0].args._source,'order');assert.equal(writes[0].args._details._due_at,null);
+});

@@ -463,6 +463,7 @@ async function loadWorkerReturnTasks(userId) {
 }
 
 function getWorkerOrderTaskLabel(task = {}) {
+  if (task.metadata?.request_kind === "decision") return "Decision needed";
   if (task.task_type === "pending_subtask") return "Subtask";
   if (task.task_type === "pending_shipping") return "Shipping Task";
   if (task.task_type === "pending_packaging") return "Packaging Task";
@@ -477,7 +478,7 @@ async function fetchWorkerOrderTasks(userId) {
   // occupy the six slots and conceal assignments farther down the queue.
   const { data, error } = await window.supabase
     .from("ebay_order_tasks")
-    .select("id, task_type, title, question, status, priority, assigned_to_email, due_at, created_at, latest_note, latest_photo_count, ebay_orders(order_number, buyer_username, ship_by_date)")
+    .select("id, task_type, title, question, status, priority, assigned_to_email, due_at, created_at, latest_note, latest_photo_count, metadata, ebay_orders(order_number, buyer_username, ship_by_date)")
     .eq("assigned_to_user_id", userId)
     .in("status", ["open", "assigned", "in_progress", "waiting_on_worker", "blocked", "deferred", "assigned_for_shipping", "sent_back_for_rework", "needs_subtasks"])
     .order("created_at", { ascending: true })
@@ -541,6 +542,7 @@ async function loadWorkerOrderTasks(userId) {
 }
 
 function getWorkerTeamTaskLabel(task = {}) {
+  if (task.metadata?.request_kind === "decision") return "Decision needed";
   if (task.task_type === "inventory") return "Inventory";
   if (task.task_type === "shipping") return "Shipping";
   if (task.task_type === "customer_service") return "Customer";
@@ -560,7 +562,7 @@ async function loadWorkerTeamTasks(userId) {
 
   const { data, error } = await window.supabase
     .from("team_tasks")
-    .select("id, task_type, title, description, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, latest_note, latest_photo_count, created_by_email")
+    .select("id, task_type, title, description, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, latest_note, latest_photo_count, metadata, created_by_email")
     .eq("assigned_to_user_id", userId)
     .in("status", ["open", "assigned", "in_progress", "waiting_on_worker", "blocked", "deferred", "sent_back_for_rework"])
     .order("created_at", { ascending: true })

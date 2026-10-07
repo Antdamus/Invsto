@@ -5,11 +5,13 @@
   const review = new Set(['completed_by_employee', 'pending_admin_review', 'ready_for_admin_approval', 'waiting_on_admin']);
   const owner = task => task.assigned_to_user_id || null;
   const person = (id, people) => people.find(p => p.user_id === id && p.active !== false);
+  const requestKind = task => ['work', 'decision'].includes(task.metadata?.request_kind) ? task.metadata.request_kind
+    : review.has(task.status) ? 'decision' : 'work';
   function reviewer(task, people = []) {
     const completedBy = owner(task);
     if (task.status !== 'completed_by_employee') {
       const assigned = person(owner(task), people);
-      if (assigned?.role === 'admin') return assigned.user_id;
+      if (assigned && (assigned.role === 'admin' || task.metadata?.request_kind === 'decision')) return assigned.user_id;
     }
     for (const id of [task.assigned_by, task.created_by]) {
       const employee = person(id, people);
@@ -20,8 +22,9 @@
   }
   function next(task, people = []) {
     if (finished.has(task.status)) return {kind: 'history', userId: null};
-    if (review.has(task.status)) return {kind: 'approval', userId: reviewer(task, people)};
+    if (task.status === 'completed_by_employee' || ['pending_admin_review', 'ready_for_admin_approval'].includes(task.status)) return {kind: 'approval', userId: reviewer(task, people)};
     if (task.status === 'waiting_on_subtasks') return {kind: 'subtasks', userId: null};
+    if (requestKind(task) === 'decision') return {kind: 'approval', userId: reviewer(task, people)};
     return {kind: 'work', userId: owner(task)};
   }
   function related(task, userId, following = []) {
@@ -44,7 +47,7 @@
     const employee = person(action.userId, people);
     const name = action.userId === userId ? 'You' : employee?.display_name || employee?.name || employee?.email
       || (action.kind === 'work' ? task.assigned_to_email : '') || (action.kind === 'approval' ? 'Reviewer needed' : 'Unassigned');
-    return `${action.kind === 'approval' ? 'Review' : 'Next'}: ${name}`;
+    return `${action.kind === 'approval' ? (task.status === 'completed_by_employee' ? 'Review' : 'Decision') : 'Next'}: ${name}`;
   }
-  root.OGTaskWorkflow = Object.freeze({finished, review, reviewer, next, related, bucket, label});
+  root.OGTaskWorkflow = Object.freeze({finished, review, requestKind, reviewer, next, related, bucket, label});
 })(globalThis);

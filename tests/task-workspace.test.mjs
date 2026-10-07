@@ -419,9 +419,10 @@ for(const source of ['team','order','return'])test(`${source} replies send a not
   await page.getByRole('button',{name:'Send update',exact:true}).click();
   await expect(page.locator('#team-task-modal')).toBeHidden();
   let writes=await page.evaluate(()=>window.writes);
-  assert.equal(writes.length,1);assert.equal(writes[0][0],'reply_to_task');
-  assert.deepEqual(writes[0][1],{_task_source:source,_task_id:'task-0',_note:'I checked the order and still need the certificate.',_request_action:false,_expected_assignee:'me',_expected_assigner:'teammate'});
-  await page.getByRole('button',{name:'Send instructions & hand back',exact:true}).click();
+  assert.equal(writes.length,1);assert.equal(writes[0][0],'respond_task_request');
+  assert.deepEqual(writes[0][1],{_source:source,_task_id:'task-0',_note:'I checked the order and still need the certificate.',_mode:'update',_expected_updated_at:'2026-10-06T13:00:00Z',_expected_assignee:'me',_expected_assigner:'teammate'});
+  await page.getByRole('button',{name:'Ask for a decision',exact:true}).click();
+  await page.locator('#task-response-handoff-option input').check();
   await page.locator('#team-task-note').fill('Please locate the certificate so I can continue.');
   await page.evaluate(()=>{supabase.rpc=async(...args)=>{writes.push(args);const task=state.tasks[0];task.assigned_to_user_id='teammate';task.assigned_to_email='sandra@example.test';task.assigned_by='me';task.assigned_by_email='alex@example.test';task.status='assigned';return {data:{},error:null};};});
   await page.getByRole('button',{name:'Send & hand back',exact:true}).click();
@@ -429,12 +430,13 @@ for(const source of ['team','order','return'])test(`${source} replies send a not
   await expect(page.locator('[data-task-owner-filter=following]')).toHaveAttribute('aria-pressed','true');
   await expect(page.locator('.team-task-card')).toHaveCount(1);
   await expect(page.locator('.task-card-owner')).toContainText('Sandra');
-  writes=await page.evaluate(()=>window.writes);assert.equal(writes.length,2);assert.equal(writes[1][1]._request_action,true);
+  writes=await page.evaluate(()=>window.writes);assert.equal(writes.length,2);assert.equal(writes[1][1]._mode,'work');
 });
 
 test('failed reply keeps the draft and owner; completion review cannot be handed off',async t=>{
   const page=await open(t,390,{admin:false});await replyFixture(page);
-  await page.getByRole('button',{name:'Send instructions & hand back',exact:true}).click();
+  await page.getByRole('button',{name:'Ask for a decision',exact:true}).click();
+  await page.locator('#task-response-handoff-option input').check();
   await page.locator('#team-task-note').fill('Need the certificate.');
   await page.evaluate(()=>{supabase.rpc=async()=>({error:{message:'The assignment changed. Refresh the task before replying.'}});});
   await page.getByRole('button',{name:'Send & hand back',exact:true}).click();
@@ -443,7 +445,7 @@ test('failed reply keeps the draft and owner; completion review cannot be handed
   assert.equal(await page.evaluate(()=>state.tasks[0].assigned_to_user_id),'me');
   await page.keyboard.press('Escape');
   await page.evaluate(()=>{state.tasks[0].status='completed_by_employee';state.taskOwnerFilter='following';renderTasks();});
-  await expect(page.getByRole('button',{name:'Send instructions & hand back',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Ask for a decision',exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Add update',exact:true}).click();
   await expect(page.locator('#task-response-handoff-option')).toBeHidden();
 });
@@ -527,6 +529,42 @@ test('saved receipt records stay evidence, while assigned photo work remains a t
  });
  assert.deepEqual(result,[true,false,false,null]);
  await expect(page.locator('.task-empty')).toContainText("You're caught up");
- await expect(page.locator('.task-empty')).toContainText('Approvals');
+ await expect(page.locator('.task-empty')).toContainText('Decisions');
  await expect(page.locator('#task-reset-empty')).toHaveCount(0);
+});
+
+for(const width of [320,390,1366]) test('explicit Work / Decision creation fits '+width+'px and saves the chosen intent',async t=>{
+ const page=await open(t,width);await page.evaluate(()=>{loadTasks=async()=>{};});
+ await page.getByRole('button',{name:'New task',exact:true}).click();
+ await expect(page.locator('#team-task-request-kind input[value=work]')).toBeChecked();
+ await expect(page.locator('#team-task-type')).toBeHidden();await expect(page.locator('#team-task-status-field')).toBeHidden();
+ await page.locator('#team-task-title-input').fill('Confirm certificate requirements');
+ await page.locator('#team-task-note').fill('Can we use the white certificate for this watch?');
+ await page.locator('#team-task-assignee').selectOption('teammate');
+ await page.locator('#team-task-request-kind input[value=decision]').check();
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ if(width===390)await page.screenshot({path:'test-results/task-request-phone-local.png'});
+ await page.locator('#submit-team-task').click();await expect(page.locator('#team-task-modal')).toBeHidden();
+ const writes=await page.evaluate(()=>window.writes);assert.equal(writes.length,1);assert.equal(writes[0][0],'create_task_request');
+ assert.equal(writes[0][1]._request_kind,'decision');assert.equal(writes[0][1]._source,'team');assert.equal(writes[0][1]._details._assigned_to_user_id,'teammate');
+ await page.getByRole('button',{name:'New task',exact:true}).click();await expect(page.locator('#team-task-request-kind input[value=work]')).toBeChecked();
+});
+test('decision inbox follows intent for workers and admins; completion always routes to a different reviewer',async t=>{
+ const page=await open(t);const buckets=await page.evaluate(()=>{
+ const people=[{user_id:'worker',role:'employee',active:true},{user_id:'admin',role:'admin',active:true}];
+ const task={id:'a',source:'team',status:'assigned',assigned_to_user_id:'admin',assigned_by:'worker',created_by:'worker',metadata:{request_kind:'work'}};
+ return [OGTaskWorkflow.bucket(task,'admin',people),OGTaskWorkflow.bucket({...task,assigned_to_user_id:'worker',assigned_by:'admin',metadata:{request_kind:'decision'}},'worker',people),OGTaskWorkflow.bucket({...task,status:'completed_by_employee'},'worker',people)];
+ });assert.deepEqual(buckets,['assigned','approvals','approvals']);
+});
+test('asking a decision explicitly hands off, while a decision shows answer/finish instead of complete work',async t=>{
+ const page=await open(t,390,{admin:false});await replyFixture(page);
+ await page.getByRole('button',{name:'Add update',exact:true}).click();
+ await page.locator('#task-response-decision-option input').check();
+ await expect(page.locator('#task-response-summary')).toContainText('Decisions');
+ await page.locator('#team-task-note').fill('Can we proceed without the card?');
+ await page.getByRole('button',{name:'Ask for decision',exact:true}).click();
+ const writes=await page.evaluate(()=>window.writes);assert.equal(writes[0][1]._mode,'decision');
+ await page.evaluate(()=>{state.tasks[0].metadata.request_kind='decision';state.taskOwnerFilter='approvals';renderTasks();});
+ await expect(page.getByRole('button',{name:'Complete my part',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Record decision & finish',exact:true})).toBeVisible();
 });

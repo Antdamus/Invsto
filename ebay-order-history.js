@@ -6781,6 +6781,7 @@ async function openHistoryOrderTaskModal(group = {}, groupKey = "") {
   state.activeHistoryOrderTaskGroupKey = groupKey;
   setHistoryOrderTaskError("");
   setHistoryOrderTaskStatus("Create a task tied to this closed order. The task will keep the order history source in the audit trail.", "info");
+  document.querySelector('[name="history-task-request-kind"][value="work"]').checked = true;
   $("history-order-task-note").value = "";
   $("history-order-task-priority").value = "normal";
   $("history-order-task-due-at").value = "";
@@ -6825,6 +6826,7 @@ async function submitHistoryOrderTask() {
     return;
   }
 
+  if (!$("history-order-task-assignee").value) return setHistoryOrderTaskError("Choose who needs to take the next step.");
   const button = $("create-history-order-task");
   const originalText = button?.textContent || "Create Task";
   button?.toggleAttribute("disabled", true);
@@ -6849,7 +6851,7 @@ async function submitHistoryOrderTask() {
     }
     const taskPhotos = uniqueHistoryTaskAttachments([...linkedEvidencePhotos, ...uploadedTaskPhotos]);
     setHistoryOrderTaskStatus("Saving closed-order task...", "info");
-    const { error } = await supabase.rpc("create_ebay_order_history_task", {
+    const { error } = await supabase.rpc("create_task_request", { _source: "history", _request_kind: document.querySelector('[name="history-task-request-kind"]:checked')?.value || "work", _details: {
       _order_id: option.id,
       _order_line_ids: lineIds,
       _assigned_to_user_id: $("history-order-task-assignee")?.value || null,
@@ -6861,7 +6863,7 @@ async function submitHistoryOrderTask() {
       _task_scope: selection.scope,
       _group_order_ids: selection.orderIds,
       _group_order_numbers: selection.orderNumbers,
-    });
+    }});
     if (error) throw error;
 
     const groupKey = state.activeHistoryOrderTaskGroupKey;

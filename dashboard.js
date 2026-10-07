@@ -145,7 +145,7 @@ function normalizeDashboardTask(task, source) {
     title: task.title || (source === "order" ? "Order follow-up" : source === "return" ? "Return follow-up" : "Team task"),
     note: task.latest_note || task.description || task.question || related.return_reason || "",
     buyer: related.buyer_username || metadata.buyer_username || metadata.buyerUsername || "",
-    due: task.due_at || related.ship_by_date || null,
+    due: task.due_at || (task.metadata?.request_kind ? null : related.ship_by_date) || null,
     sourceLabel: source === "return" ? "Return" : source === "order" ? (metadata.source === "order_history" ? "Order history" : "Order") : "Team",
   };
 }
@@ -184,8 +184,8 @@ function renderDashboardTasks() {
   const review = tasks.filter(isDashboardReview).length;
   const overdue = tasks.filter(task => !isDashboardReview(task) && isDashboardTaskLate(task)).length;
   const blocked = tasks.filter(dashboardTaskNeedsHelp).length;
-  dashText("stat-tasks", dashCount(tasks.length - review));
-  dashText("stat-tasks-detail", `${dashCount(overdue)} overdue · ${dashCount(blocked)} need help`);
+  dashText("stat-tasks", dashCount(tasks.length));
+  dashText("stat-tasks-detail", `${dashCount(tasks.length - review)} work · ${dashCount(review)} decisions · ${dashCount(overdue)} work overdue`);
   dashText("stat-review", dashCount(review));
   dashText("stat-review-detail", `${tasks.filter(task => isDashboardReview(task) && isDashboardTaskLate(task)).length} overdue · Decisions waiting for you`);
   document.querySelectorAll("[data-task-filter]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.taskFilter === dashboardState.taskFilter)));

@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="team-tasks.css?v=workspace-20261007-assigned" />
   <link rel="stylesheet" href="team-tasks-workspace.css?v=workspace-20261007-next-action" />
   <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="task-request.css?v=20261007-intent" />
 </head>
 <body data-page="team-tasks">
   <div class="page">
@@ -74,9 +75,9 @@
         <a class="task-back-link hidden" id="task-back-to-list" href="team-tasks.html">← All tasks</a>
         <section class="task-inboxes" id="task-inboxes" aria-label="Task inbox">
           <div class="task-inbox-tabs" role="group" aria-label="Task responsibility">
-            <button type="button" data-task-owner-filter="assigned" aria-pressed="true"><span>Assigned to me</span><b data-inbox-count>—</b></button>
+            <button type="button" data-task-owner-filter="assigned" aria-pressed="true"><span>My work</span><b data-inbox-count>—</b></button>
+            <button type="button" data-task-owner-filter="approvals" aria-pressed="false"><span>Decisions</span><b data-inbox-count>—</b></button>
             <button type="button" data-task-owner-filter="following" aria-pressed="false"><span>Following</span><b data-inbox-count>—</b></button>
-            <button type="button" data-task-owner-filter="approvals" aria-pressed="false"><span>Approvals</span><b data-inbox-count>—</b></button>
             <button type="button" data-task-owner-filter="history" aria-pressed="false"><span>History</span></button>
           </div>
           <p id="task-inbox-description">Your next steps. Work waiting on someone else is in Following.</p>
@@ -195,9 +196,11 @@
         <legend>What happens next?</legend>
         <label><input type="radio" name="task-response-mode" value="update" checked /><span><strong>Add update</strong><small>Keep the current responsibility</small></span></label>
         <label id="task-response-handoff-option"><input type="radio" name="task-response-mode" value="handoff" /><span><strong>Send instructions &amp; hand back</strong><small id="task-response-recipient"></small></span></label>
+        <label id="task-response-decision-option"><input type="radio" name="task-response-mode" value="decision" /><span><strong>Ask for a decision</strong><small id="task-response-decision-recipient"></small></span></label>
       </fieldset>
       <p id="task-response-summary" class="task-response-summary hidden" role="status"></p>
 
+      <fieldset id="team-task-request-kind" class="task-request-kind"><legend>What do you need?</legend><label><input type="radio" name="team-task-request-kind" value="work" checked /><span><strong>Work</strong><small>I need them to do something.</small></span></label><label><input type="radio" name="team-task-request-kind" value="decision" /><span><strong>Decision</strong><small>I need approval or instructions.</small></span></label></fieldset>
       <label id="team-task-title-field" class="team-task-field">
         Title
         <input id="team-task-title-input" type="text" placeholder="Short task title" autocomplete="off" />
@@ -316,7 +319,7 @@
   <script src="initSupabase.js"></script>
   <script src="task-notifications.js?v=20261007" defer></script>
   <script src="admin-nav.js"></script>
-  <script src="task-workflow.js?v=20261007-next-action-2"></script>
-  <script src="team-tasks.js?v=workspace-20261007-next-action-3"></script>
+  <script src="task-workflow.js?v=20261007-request-intent"></script>
+  <script src="team-tasks.js?v=workspace-20261007-request-intent"></script>
 </body>
 </html>
