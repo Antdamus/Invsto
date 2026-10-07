@@ -8,8 +8,8 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="team-tasks.css?v=workspace-20261007-inboxes2" />
-  <link rel="stylesheet" href="team-tasks-workspace.css?v=workspace-20261007-inboxes2" />
+  <link rel="stylesheet" href="team-tasks.css?v=workspace-20261007-assigned" />
+  <link rel="stylesheet" href="team-tasks-workspace.css?v=workspace-20261007-assigned" />
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body data-page="team-tasks">
@@ -62,7 +62,7 @@
               <i data-lucide="plus"></i>
               New task
             </button>
-            <button id="refresh-team-tasks" type="button" class="secondary-btn">
+            <button id="refresh-team-tasks" type="button" class="secondary-btn" aria-label="Refresh tasks">
               <i data-lucide="refresh-cw"></i>
               <span>Refresh</span>
             </button>
@@ -109,33 +109,23 @@
             <button type="button" data-task-focus="waiting" aria-pressed="false">Awaiting reply</button>
           </div>
           <section id="task-filters-panel" class="task-filters-panel hidden" aria-label="Task filters">
-            <div class="task-filter-panel-heading"><strong>Refine your view</strong><button type="button" id="task-panel-refresh" class="secondary-btn">Refresh tasks</button><button type="button" id="task-clear-filters" class="secondary-btn">Reset filters</button></div>
+            <div class="task-filter-panel-heading"><strong>Refine this inbox</strong><button type="button" id="task-clear-filters" class="secondary-btn">Reset filters</button></div>
             <div class="team-task-board-tools">
-              <div class="task-filter-group"><span>Read status</span><div class="team-task-read-filter" role="group" aria-label="Task read status">
-                <button type="button" class="team-task-read-filter-btn is-active" data-task-read-filter="all">All 0</button>
-                <button type="button" class="team-task-read-filter-btn" data-task-read-filter="unread">New 0</button>
-                <button type="button" class="team-task-read-filter-btn" data-task-read-filter="read">Read 0</button>
-              </div></div>
-              <div class="task-filter-group"><span>Source</span><div class="team-task-source-filter" role="group" aria-label="Task source">
-                <button type="button" class="team-task-filter-btn is-active" data-task-source-filter="all">All sources 0</button>
-                <button type="button" class="team-task-filter-btn" data-task-source-filter="independent">Independent 0</button>
-                <button type="button" class="team-task-filter-btn" data-task-source-filter="order">Pending orders 0</button>
-                <button type="button" class="team-task-filter-btn" data-task-source-filter="order_history">Order history 0</button>
-                <button type="button" class="team-task-filter-btn" data-task-source-filter="ebay_triage">eBay triage 0</button>
-                <button type="button" class="team-task-filter-btn" data-task-source-filter="return">Returns 0</button>
-              </div></div>
-              <label id="team-task-scope-control" class="team-task-scope hidden">
-                View
-                <select id="team-task-scope">
-                  <option value="mine">My tasks</option>
-                  <option value="all">Everyone's tasks</option>
-                  <option value="canceled">Canceled tasks</option>
+              <label class="team-task-sort">Source
+                <select id="task-source-filter" aria-label="Source">
+                  <option value="all">All sources</option>
+                  <option value="independent">Team tasks</option>
+                  <option value="order">Pending orders</option>
+                  <option value="order_history">Order history</option>
+                  <option value="ebay_triage">eBay messages</option>
+                  <option value="return">Returns</option>
                 </select>
               </label>
-              <label id="team-task-worker-view-control" class="team-task-worker-view hidden">
-                Preview worker view
-                <select id="team-task-worker-view">
-                  <option value="">Use View scope</option>
+              <label class="team-task-sort">Read status
+                <select id="task-read-filter" aria-label="Read status">
+                  <option value="all">All updates</option>
+                  <option value="unread">Unread updates</option>
+                  <option value="read">Read</option>
                 </select>
               </label>
               <label id="team-task-active-sort-control" class="team-task-sort">
@@ -145,11 +135,7 @@
                   <option value="recent">Recent updates</option>
                   <option value="assigned_desc">Assigned newest first</option>
                   <option value="assigned_asc">Assigned oldest first</option>
-                  <option value="order_urgency">Order urgency highest</option>
                   <option value="due_asc">Due date soonest</option>
-                  <option value="due_desc">Due date latest</option>
-                  <option value="amount_desc">Order amount high to low</option>
-                  <option value="amount_asc">Order amount low to high</option>
                 </select>
               </label>
               <label id="team-task-history-sort-control" class="team-task-sort hidden">
@@ -164,6 +150,22 @@
                 </select>
               </label>
             </div>
+            <details id="task-admin-tools" class="task-admin-tools hidden">
+              <summary>Team oversight</summary>
+              <p>Browse the whole team or preview a teammate’s inbox.</p>
+              <div class="task-admin-tools-grid">
+                <label id="team-task-scope-control" class="team-task-scope hidden">Workspace
+                  <select id="team-task-scope">
+                    <option value="mine">My inboxes</option>
+                    <option value="all">Everyone's tasks</option>
+                    <option value="canceled">Canceled tasks</option>
+                  </select>
+                </label>
+                <label id="team-task-worker-view-control" class="team-task-worker-view hidden">Preview teammate
+                  <select id="team-task-worker-view"><option value="">No preview</option></select>
+                </label>
+              </div>
+            </details>
           </section>
           <div id="task-applied-filters" class="task-applied-filters hidden"></div>
           <div id="team-task-list" class="team-task-list">
@@ -309,6 +311,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
-  <script src="team-tasks.js?v=workspace-20261007-inboxes2"></script>
+  <script src="team-tasks.js?v=workspace-20261007-assigned"></script>
 </body>
 </html>

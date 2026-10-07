@@ -343,3 +343,53 @@ test('order groups have a short summary while retaining all order numbers in det
   await expect(page.locator('.team-task-summary-title-row')).toHaveText('buyer_42 · 2 orders');
   await expect(page.locator('[data-team-task-toggle]')).toHaveAttribute('aria-label', /01-11111-11111, 02-22222-22222/);
 });
+
+test('cards show the latest assignment date in both inboxes, with an honest legacy fallback', async t => {
+  const page = await open(t);
+  await page.evaluate(() => {
+    state.tasks = [{...state.tasks[0], assigned_by: 'me', updated_at: '2026-10-07T18:00:00Z'}];
+    state.eventsByTask.set('team:task-0', [
+      {action: 'assigned', new_assigned_to_user_id: 'me', created_at: '2026-10-05T10:00:00Z'},
+      {action: 'progress', notes: 'Followed up', created_at: '2026-10-07T18:00:00Z'},
+      {action: 'assigned', new_assigned_to_user_id: 'me', created_at: '2026-10-06T14:30:00Z'},
+    ]);
+    renderTasks();
+  });
+  await expect(page.locator('.task-card-assigned time')).toHaveAttribute('datetime', '2026-10-06T14:30:00.000Z');
+  await expect(page.locator('.task-card-assigned')).toContainText('Assigned');
+  await page.locator('[data-task-owner-filter=created]').click();
+  await expect(page.locator('.task-card-assigned time')).toHaveAttribute('datetime', '2026-10-06T14:30:00.000Z');
+  await page.evaluate(() => {state.eventsByTask.clear(); renderTasks();});
+  await expect(page.locator('.task-card-assigned')).toContainText('Created');
+  await expect(page.locator('.task-card-assigned')).toHaveAttribute('title', /Assignment date not recorded/);
+});
+
+test('filters have three primary controls and keep team oversight collapsed', async t => {
+  const page = await open(t);
+  await page.getByRole('button', {name: 'Filters', exact: true}).click();
+  const filters = page.locator('#task-filters-panel');
+  await expect(filters.getByRole('combobox')).toHaveCount(3);
+  await expect(page.locator('#team-task-scope')).toBeHidden();
+  await expect(page.getByRole('button', {name: 'Refresh tasks', exact: true})).toHaveCount(1);
+  await filters.getByLabel('Source', {exact: true}).selectOption('order');
+  await expect(page.locator('.team-task-card')).toHaveCount(0);
+  await filters.getByLabel('Read status', {exact: true}).selectOption('unread');
+  await expect(page.locator('#task-filter-count')).toHaveText('2');
+  await filters.getByRole('button', {name: 'Reset filters', exact: true}).click();
+  await expect(filters.getByLabel('Source', {exact: true})).toHaveValue('all');
+  await expect(filters.getByLabel('Read status', {exact: true})).toHaveValue('all');
+  await expect(page.locator('[data-task-owner-filter=assigned]')).toHaveAttribute('aria-pressed', 'true');
+  await filters.getByText('Team oversight', {exact: true}).click();
+  await expect(page.locator('#team-task-scope')).toBeVisible();
+  await expect(page.locator('#team-task-worker-view')).toBeVisible();
+});
+
+test('pending order links target the order queue, while closed orders keep their history link', async t => {
+  const page = await open(t);
+  const links = await page.evaluate(() => {
+    const task = {id: 'task-123', order_id: 'order-1', ebay_orders: {order_number: '20-15235-74943'}};
+    return [normalizeOrderTask(task).actionHref, normalizeOrderTask({...task, metadata: {source: 'order_history'}}).actionHref];
+  });
+  assert.equal(links[0], 'pending-orders.html?orderTaskId=task-123#orders-list');
+  assert.match(links[1], /^ebay-order-history.html\?historySearch=20-15235-74943/);
+});

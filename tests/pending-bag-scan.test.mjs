@@ -73,6 +73,59 @@ async function open(t,width=390) {
 }
 async function scan(page,code) {await page.locator('#pending-bag-scan').fill(code);await page.locator('#pending-bag-scan').press('Enter');}
 
+for (const width of [390, 1280]) test(`${width}px: task link expands its order and notes without opening packing`, async t => {
+  const page = await open(t, width);
+  const result = await page.evaluate(async () => {
+    state.launchOrderTaskId = 'task-8';
+    state.checkoutStoreId = 'main';
+    state.stagedFulfillments.set('line-1', {lineId: 'line-1', quantity: 1});
+    state.orderDueFilter = 'overdue';
+    document.getElementById('order-search').value = 'no match';
+    document.getElementById('order-created-date-filter').value = '2020-01-01';
+    setBuyerGroupExpanded('buyer_8', false, {render: false});
+    const task = {id: 'task-8', order_id: 'order-8', order_line_ids: ['line-8'], ebay_orders: {order_number: '12-34567-89008'}};
+    supabase.from = table => {
+      if (table !== 'ebay_order_tasks') throw Error('Unexpected read: ' + table);
+      const query = {select: () => query, eq: () => query, maybeSingle: async () => ({data: task})}; return query;
+    };
+    const data = {tasks: [{id: 'note-8', order_id: 'order-8', order_line_ids: ['line-8'], metadata: {source: 'pending_order_line_note'}}],
+      events: [{id: 'event-8', task_id: 'note-8', order_id: 'order-8', notes: 'Keep the original certificate with this item.', signed_by_email: 'sam@example.test', created_at: '2026-10-07T15:00:00Z', payload: {order_line_id: 'line-8'}}]};
+    state.sharedOrderNoteHistory.set('order-8', {data, promise: Promise.resolve(data)});
+    return await openRequestedOrderTask();
+  });
+  assert.equal(result, true);
+  const card = page.locator('[data-buyer-key="buyer_8"]');
+  await expect(card.locator('[data-line-id="line-8"]')).toBeVisible();
+  await expect(card.locator('.buyer-card-note-details')).toBeVisible();
+  await expect(card.locator('.buyer-card-note-details')).toContainText('Keep the original certificate');
+  await expect(page.locator('#fulfillment-workflow')).toBeHidden();
+  await expect(page.locator('#phone-packing-tools-modal')).toBeHidden();
+  await expect(page.locator('.modal:not(.hidden), dialog[open]')).toHaveCount(0);
+  assert.equal(await page.evaluate(() => state.stagedFulfillments.size), 1);
+  assert.deepEqual(await page.evaluate(() => calls), []);
+  const box = await card.boundingBox(); assert.ok(box.y >= 0 && box.y < 300);
+  if (width === 390) await page.screenshot({path: 'test-results/task-order-link-phone.png'});
+});
+
+test('task link loads a missing pending order and never opens a closed order for packing', async t => {
+  const page = await open(t);
+  const result = await page.evaluate(async () => {
+    const wanted = state.orders[8]; state.orders = state.orders.slice(0, 8); state.launchOrderTaskId = 'task-8';
+    supabase.from = () => {
+      const query = {select: () => query, eq: () => query, maybeSingle: async () => ({data: {id: 'task-8', order_id: 'order-8', order_line_ids: ['line-8'], ebay_orders: {order_number: '12-34567-89008'}}})}; return query;
+    };
+    const lookups = [];
+    ensureExtensionOrderLinesLoaded = async options => {lookups.push(options.orderNumbers); if (lookups.length === 1) state.orders.push(wanted);};
+    const opened = await openRequestedOrderTask();
+    wanted.line_status = 'fulfilled'; wanted.fulfilled_quantity = 1;
+    const closed = await openRequestedOrderTask();
+    return {opened, closed, lookups};
+  });
+  assert.equal(result.opened, true); assert.equal(result.closed, false);
+  assert.deepEqual(result.lookups, [['12-34567-89008'], ['12-34567-89008']]);
+  await expect(page.locator('#fulfillment-workflow')).toBeHidden();
+});
+
 for(const width of [320,390,1280])test(`${width}px: scan opens the exact line, clears filters and preserves packing`,async t=>{
   const page=await open(t,width);
   await page.evaluate(()=>{

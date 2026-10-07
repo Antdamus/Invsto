@@ -541,6 +541,7 @@ function updateTaskScopeChrome() {
   const scopeSelect = $("team-task-scope");
   const workerControl = $("team-task-worker-view-control");
   const workerSelect = $("team-task-worker-view");
+  $("task-admin-tools")?.classList.toggle("hidden", !isAdminUser());
   scopeControl?.classList.toggle("hidden", !isAdminUser());
   if (scopeSelect) {
     scopeSelect.value = isCanceledTaskScope() ? "canceled" : isTeamWideTaskScope() ? "all" : "mine";
@@ -750,13 +751,7 @@ function getTasksForReadFilter(tasks = []) {
 }
 
 function renderTaskReadFilterChrome(tasks = []) {
-  const counts = getTaskReadCounts(tasks);
-  document.querySelectorAll("[data-task-read-filter]").forEach((button) => {
-    const filter = button.dataset.taskReadFilter || "all";
-    const label = filter === "read" ? `Read ${counts.read}` : filter === "unread" ? `New ${counts.unread}` : `All ${counts.all}`;
-    button.textContent = label;
-    button.classList.toggle("is-active", state.taskReadFilter === filter);
-  });
+  if ($("task-read-filter")) $("task-read-filter").value = state.taskReadFilter;
 }
 
 function userEmailMatches(value = "") {
@@ -1073,20 +1068,7 @@ function renderTaskOwnerFilterChrome(tasks = []) {
 }
 
 function renderTaskSourceFilterChrome(tasks = []) {
-  const counts = getTaskSourceCounts(tasks);
-  document.querySelectorAll("[data-task-source-filter]").forEach((button) => {
-    const filter = button.dataset.taskSourceFilter || "all";
-    const labels = {
-      all: `All sources ${counts.all}`,
-      independent: `Independent ${counts.independent}`,
-      order: `Pending orders ${counts.order}`,
-      order_history: `Order history ${counts.order_history}`,
-      ebay_triage: `eBay triage ${counts.ebay_triage}`,
-      return: `Returns ${counts.return}`,
-    };
-    button.textContent = labels[filter] || formatTaskTag(filter);
-    button.classList.toggle("is-active", state.taskSourceFilter === filter);
-  });
+  if ($("task-source-filter")) $("task-source-filter").value = state.taskSourceFilter;
 }
 
 function renderTaskFilterChrome(tasks = []) {
@@ -1202,21 +1184,31 @@ function isAssignmentEvent(event = {}) {
   return Boolean(newAssignee && event.old_assigned_to_user_id && event.old_assigned_to_user_id !== newAssignee);
 }
 
-function getTaskAssignedSortTime(task = {}) {
+const taskAssignmentDateFormatter = new Intl.DateTimeFormat(undefined, {month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit"});
+
+function getTaskAssignmentInfo(task = {}) {
+  if (!task.assigned_to_user_id && !task.assigned_to_email) return {time: 0, label: "Not assigned", recorded: false};
   const events = state.eventsByTask.get(getUnifiedTaskKey(task)) || [];
   const latestEventTime = events.reduce((latest, event) => {
     if (!isAssignmentEvent(event)) return latest;
+    const assignee = event.new_assigned_to_user_id || event.payload?.new_assigned_to_user_id || event.payload?.assigned_to_user_id;
+    if (task.assigned_to_user_id && assignee !== task.assigned_to_user_id) return latest;
     return Math.max(latest, parseTimestamp(event.created_at));
   }, 0);
-  if (latestEventTime) return latestEventTime;
+  const recordedTime = Math.max(latestEventTime, getTaskMetadataAssignedTime(task));
+  const time = recordedTime || parseTimestamp(task.created_at);
+  const date = time ? taskAssignmentDateFormatter.format(time) : "";
+  return {time, recorded: Boolean(recordedTime), label: date ? `${recordedTime ? "Assigned" : "Created"} ${date}` : "Assignment date not recorded"};
+}
 
-  const metadataTime = getTaskMetadataAssignedTime(task);
-  if (metadataTime) return metadataTime;
+function renderTaskAssignmentDate(task = {}) {
+  const info = getTaskAssignmentInfo(task);
+  const title = info.recorded ? "When this task was assigned to its current assignee" : "Assignment date not recorded; showing the task creation date when available";
+  return `<span class="task-card-assigned" title="${escapeHtml(title)}">${info.time ? `<time datetime="${new Date(info.time).toISOString()}">${escapeHtml(info.label)}</time>` : escapeHtml(info.label)}</span>`;
+}
 
-  if (task.assigned_to_user_id || task.assigned_to_email) {
-    return parseTimestamp(task.created_at) || Number.NaN;
-  }
-  return Number.NaN;
+function getTaskAssignedSortTime(task = {}) {
+  return getTaskAssignmentInfo(task).time || Number.NaN;
 }
 
 function compareFiniteNumber(aValue, bValue, direction = "asc") {
@@ -1800,7 +1792,7 @@ function normalizeOrderTask(task = {}) {
     ship_by_date: task.ship_by_date || order.ship_by_date || "",
     actionHref: isOrderHistoryTask
       ? `ebay-order-history.html?historySearch=${encodeURIComponent(orderNumber || buyer || "")}&allDates=1`
-      : `pending-orders.html?orderTaskId=${encodeURIComponent(task.id || "")}#order-task-panel`,
+      : `pending-orders.html?orderTaskId=${encodeURIComponent(task.id || "")}#orders-list`,
   };
 }
 
@@ -4251,6 +4243,7 @@ function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
     task.ship_by_date || order.ship_by_date ? ["Ship by", formatDate(task.ship_by_date || order.ship_by_date)] : null,
     order.sale_date ? ["Placed", formatDate(order.sale_date)] : null,
     task.assigned_to_email ? ["Assigned to", task.assigned_to_email] : null,
+    ["Assignment", getTaskAssignmentInfo(task).label],
     task.created_by_email ? ["Created by", task.created_by_email] : null,
     latestEvent ? ["Last update", `${formatTaskTag(latestEvent.action || "update")} - ${formatDate(latestEvent.created_at)}`] : null,
   ].filter(Boolean);
@@ -4341,6 +4334,7 @@ function renderTeamTaskBrief(task = {}, events = [], canceled = false) {
       <div class="team-task-brief-facts">
         <span><small>Source</small><b>${escapeHtml(sourceLabel)}</b></span>
         <span><small>Assigned to</small><b>${escapeHtml(getTaskAssigneeLabel(task))}</b></span>
+        <span><small>Assignment</small><b>${escapeHtml(getTaskAssignmentInfo(task).label)}</b></span>
         <span><small>Due</small><b>${escapeHtml(formatDate(task.due_at))}</b></span>
         <span><small>Priority</small><b>${escapeHtml(formatTaskTag(task.priority || "normal"))}</b></span>
         <span><small>Category</small><b>${escapeHtml(formatTaskTag(task.task_type || "general"))}</b></span>
@@ -4448,6 +4442,7 @@ function renderTaskCard(task = {}, options = {}) {
           ${priority ? `<span class="task-card-priority">${escapeHtml(priority)} priority</span>` : ""}
           <span class="task-card-owner">${escapeHtml(getTaskAssigneeLabel(task))}</span>
           <span class="${late ? "team-task-overdue-pill" : ""}">${escapeHtml(dueText)}</span>
+          ${renderTaskAssignmentDate(task)}
         </span>
         <span class="task-expand-icon" aria-hidden="true">${expanded ? "−" : "+"}</span>
       </button>
@@ -6481,7 +6476,6 @@ async function openTaskPhoto(bucket, path, options = {}) {
 }
 
 function setupListeners() {
-  $("task-panel-refresh")?.addEventListener("click", loadTasks);
   $("task-search")?.addEventListener("input", event => { state.taskSearch = event.target.value; renderTasks(); });
   $("task-filters-toggle")?.addEventListener("click", () => {
     const panel = $("task-filters-panel");
@@ -6517,13 +6511,9 @@ function setupListeners() {
       await loadTasks();
     });
   });
-  document.querySelectorAll("[data-task-read-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.taskReadFilter = ["all", "unread", "read"].includes(button.dataset.taskReadFilter)
-        ? button.dataset.taskReadFilter
-        : "all";
-      renderTasks();
-    });
+  $("task-read-filter")?.addEventListener("change", event => {
+    state.taskReadFilter = ["all", "unread", "read"].includes(event.target.value) ? event.target.value : "all";
+    renderTasks();
   });
   document.querySelectorAll("[data-task-owner-filter]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -6533,13 +6523,9 @@ function setupListeners() {
       renderTasks();
     });
   });
-  document.querySelectorAll("[data-task-source-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.taskSourceFilter = ["all", "independent", "order", "order_history", "ebay_triage", "return"].includes(button.dataset.taskSourceFilter)
-        ? button.dataset.taskSourceFilter
-        : "all";
-      renderTasks();
-    });
+  $("task-source-filter")?.addEventListener("change", event => {
+    state.taskSourceFilter = ["all", "independent", "order", "order_history", "ebay_triage", "return"].includes(event.target.value) ? event.target.value : "all";
+    renderTasks();
   });
   $("team-task-scope")?.addEventListener("change", async (event) => {
     state.taskScope = ["all", "canceled"].includes(event.target.value) && isAdminUser() ? event.target.value : "mine";

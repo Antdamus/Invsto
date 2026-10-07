@@ -6975,7 +6975,7 @@ async function openRequestedOrderTask() {
   try {
     const { data: task, error } = await supabase
       .from("ebay_order_tasks")
-      .select("id, order_id, order_line_ids")
+      .select("id, order_id, order_line_ids, ebay_orders(order_number)")
       .eq("id", state.launchOrderTaskId)
       .maybeSingle();
 
@@ -6989,27 +6989,50 @@ async function openRequestedOrderTask() {
       line.order_id === task.order_id
       || (Array.isArray(task.order_line_ids) && task.order_line_ids.includes(line.id))
     );
-    let line = state.orders.find(matchesTask);
-
+    const findPendingLine = () => state.orders.find(row => isOpenOrderLine(row) && task.order_line_ids?.includes(row.id))
+      || state.orders.find(row => isOpenOrderLine(row) && matchesTask(row));
+    let line = findPendingLine();
     if (!line) {
-      const filter = $("order-status-filter");
-      if (filter && filter.value !== "all") {
-        filter.value = "all";
-        await loadOrders();
-        line = state.orders.find(matchesTask);
-      }
+      const order = Array.isArray(task.ebay_orders) ? task.ebay_orders[0] : task.ebay_orders;
+      if (order?.order_number) await ensureExtensionOrderLinesLoaded({orderNumbers: [order.order_number], deferRender: true});
+      line = findPendingLine();
     }
 
     if (!line) {
-      setStatus("The task loaded, but its order line is not visible in the current queue.", "error");
+      setStatus("This task has no matching pending order items. Check Order History if the order has already been closed.", "error");
       return false;
     }
 
-    selectOrderLine(line.id);
-    state.activeOrderTaskId = task.id;
-    await loadSelectedOrderTasks();
-    $("order-task-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    setStatus("Opened the coordination task for this order.", "info");
+    // Inspect the order in the queue without selecting it for packing or opening a sheet.
+    const buyerKey = getBuyerKey(line);
+    clearEbayLaunchFilter({apply: false});
+    clearLiveLotSelection({render: false});
+    clearOrderCreatedDateFilter({apply: false});
+    state.orderDueFilter = "all";
+    $("order-status-filter").value = "pending";
+    $("order-search").value = getOrderFromLine(line).buyer_username || getOrderFromLine(line).order_number || "";
+    setBuyerGroupExpanded(buyerKey, true, {render: false});
+    state.expandedBuyerNoteKeys.add(buyerKey);
+    applyOrderFilters();
+    window.PendingOrdersMobile?.sync();
+    await new Promise(resolve => {
+      let attempts = 0;
+      const focusOrder = () => {
+        const card = [...document.querySelectorAll(".buyer-order-card")].find(node => node.dataset.buyerKey === buyerKey);
+        const row = card?.querySelector(`[data-line-id="${CSS.escape(line.id)}"]`);
+        if (!card && ++attempts < 120) return requestAnimationFrame(focusOrder);
+        if (card) {
+          card.style.scrollMarginTop = "90px";
+          card.tabIndex = -1;
+          card.scrollIntoView({behavior: "instant", block: "start"});
+          card.focus({preventScroll: true});
+          row?.classList.add("is-found-jump-target");
+        }
+        resolve();
+      };
+      focusOrder();
+    });
+    setStatus(`Opened order ${getOrderFromLine(line).order_number || ""}. Notes and items are expanded below.`, "info");
     return true;
   } catch (error) {
     console.warn("Could not open requested order task:", error);
