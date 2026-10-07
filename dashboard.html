@@ -3,338 +3,79 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#070708" />
-  <title>OG Jewelry Dashboard</title>
-
-  <!-- Core Styles -->
-  <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
+  <meta name="theme-color" content="#0d1110" />
+  <title>OG Jewelry · Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="dashboard-workspace.css?v=overview-20261006" />
 </head>
-
-<body>
-  <!-- Mobile Header -->
+<body data-page="dashboard">
+  <a class="dash-skip" href="#dashboard-main">Skip to dashboard</a>
   <div class="mobile-header">
-    <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">
-      <i data-lucide="menu"></i>
-    </button>
-    <span class="mobile-title">OG Dashboard</span>
+    <button class="menu-toggle" id="menu-toggle" aria-label="Open menu" aria-controls="mobile-menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <span class="mobile-title">OG Dashboard</span><a class="dash-mobile-tasks" href="team-tasks.html">Tasks ↗</a>
   </div>
-
-  <!-- Mobile Menu -->
-  <div class="mobile-menu" id="mobile-menu">
-    <nav class="mobile-nav-links">
-      <a href="dashboard.html">Dashboard</a>
-      <a href="locations.html">Locations</a>
-      <a href="add-item.html">Add Item</a>
-      <a href="add-inventory.html">Add Inventory</a>
-      <a href="inventory-activity.html">Daily Adds</a>
-      <a href="stock.html">Stock</a>
-      <a href="live-sales.html">Live Sales</a>
-      <a href="sms-marketing.html">SMS Alerts</a>
-      <a href="pending-orders.html">Pending Orders</a>
-      <a href="email-triage.html">Email Triage</a>
-      <a href="ebay-order-history.html">Order History</a>
-      <a href="timeclock.html">Timesheet</a>
-      <a href="team-responsibilities.html">Responsibilities</a>
-      <a href="admin.html">Admin</a>
-      <a href="#" id="logout-mobile">Logout</a>
-    </nav>
-  </div>
-
-  <!-- Desktop Sidebar + Main -->
+  <div class="mobile-menu" id="mobile-menu"><nav class="mobile-nav-links" aria-label="Mobile navigation"></nav></div>
   <div class="page">
-    <aside class="sidebar">
-      <div class="sidebar-inner">
-        <div class="logo">OG</div>
-
-        <nav class="nav-links">
-          <a class="nav-link" href="admin.html">
-            <i class="ti ti-settings"></i>
-            <span class="link-text">Admin</span>
-          </a>
-
-          <a class="nav-link" href="dashboard.html">
-            <i class="ti ti-layout-dashboard"></i>
-            <span class="link-text">Dashboard</span>
-          </a>
-
-          <a class="nav-link" href="locations.html">
-            <i class="ti ti-map-pin"></i>
-            <span class="link-text">Locations</span>
-          </a>
-
-          <a class="nav-link" href="add-item.html">
-            <i class="ti ti-plus"></i>
-            <span class="link-text">Add Item</span>
-          </a>
-
-          <a class="nav-link" href="add-inventory.html">
-            <i class="ti ti-box-seam"></i>
-            <span class="link-text">Add Inventory</span>
-          </a>
-
-          <a class="nav-link" href="inventory-activity.html">
-            <i class="ti ti-report-analytics"></i>
-            <span class="link-text">Daily Adds</span>
-          </a>
-
-          <a class="nav-link" href="stock.html">
-            <i class="ti ti-archive"></i>
-            <span class="link-text">Stock</span>
-          </a>
-
-          <a class="nav-link" href="live-sales.html">
-            <i class="ti ti-qrcode"></i>
-            <span class="link-text">Live Sales</span>
-          </a>
-
-          <a class="nav-link" href="sms-marketing.html">
-            <i class="ti ti-message-2"></i>
-            <span class="link-text">SMS Alerts</span>
-          </a>
-
-          <a class="nav-link" href="pending-orders.html">
-            <i class="ti ti-truck-delivery"></i>
-            <span class="link-text">Pending Orders</span>
-          </a>
-
-          <a class="nav-link" href="email-triage.html">
-            <i class="ti ti-mail"></i>
-            <span class="link-text">Email Triage</span>
-          </a>
-
-          <a class="nav-link" href="ebay-order-history.html">
-            <i class="ti ti-history"></i>
-            <span class="link-text">Order History</span>
-          </a>
-
-          <a class="nav-link" href="timeclock.html">
-            <i class="ti ti-clock"></i>
-            <span class="link-text">Timesheet</span>
-          </a>
-
-          <a class="nav-link" href="team-responsibilities.html">
-            <i class="ti ti-clipboard-list"></i>
-            <span class="link-text">Responsibilities</span>
-          </a>
-
-          <a class="nav-link" href="#" id="logout">
-            <i class="ti ti-logout"></i>
-            <span class="link-text">Logout</span>
-          </a>
-        </nav>
-      </div>
-    </aside>
-
+    <aside class="sidebar"><div class="sidebar-inner"><div class="logo">OG</div><nav class="nav-links" aria-label="Main navigation"></nav></div></aside>
     <div class="main">
-      <header class="header">
-        <div class="header-inner">
-          <div class="greeting">
-            <strong id="admin-greeting">Welcome, Admin</strong>
-            <div class="sub" id="header-subtitle">Inventory intelligence • Live snapshot</div>
-          </div>
-
-          <div class="header-pills" aria-label="Quick stats">
-            <div class="pill">Status: <b>Secure</b></div>
-            <div class="pill">Mode: <b>Admin</b></div>
-            <div class="pill" id="pill-date">Date: <b>—</b></div>
-          </div>
+      <main class="dash-workspace" id="dashboard-main">
+        <header class="dash-hero">
+          <div><div class="dash-eyebrow" id="dashboard-date">YOUR DAILY OVERVIEW</div><h1 id="admin-greeting">Your day, at a glance.</h1><p>Keep orders moving. Keep your team in sync.</p></div>
+          <div class="dash-hero-actions"><span id="dashboard-updated" role="status">Connecting…</span><button class="dash-button" id="dashboard-refresh" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-2L20 8M4 16l2.3 3A7 7 0 0 0 17.9 17"/></svg>Refresh</button></div>
+        </header>
+        <div id="dashboard-status" role="status" hidden></div>
+        <section class="dash-overview" aria-label="Work summary">
+          <a class="dash-stat" href="#orders-panel" data-jump-orders="all"><span class="dash-stat-label">Pending orders <span aria-hidden="true">↗</span></span><strong id="stat-orders">—</strong><small id="stat-orders-detail">Loading your queue…</small></a>
+          <a class="dash-stat dash-stat-alert" href="#orders-panel" data-jump-orders="overdue"><span class="dash-stat-label">Overdue orders <span aria-hidden="true">↗</span></span><strong id="stat-overdue">—</strong><small id="stat-overdue-detail">Checking ship-by dates…</small></a>
+          <a class="dash-stat" href="#tasks-panel" data-jump-tasks="all"><span class="dash-stat-label">Your tasks <span aria-hidden="true">↗</span></span><strong id="stat-tasks">—</strong><small id="stat-tasks-detail">Work &amp; reviews…</small></a>
+          <a class="dash-stat dash-stat-review" href="#tasks-panel" data-jump-tasks="review"><span class="dash-stat-label">Needs review <span aria-hidden="true">↗</span></span><strong id="stat-review">—</strong><small id="stat-review-detail">Checking approvals…</small></a>
+        </section>
+        <nav class="dash-jumps" aria-label="Dashboard sections"><a href="#orders-panel">Orders</a><a href="#tasks-panel">Tasks</a><a href="#operations-panel">Operations</a><a href="#reports-panel">Reports</a></nav>
+        <div class="dash-work-grid">
+          <section class="dash-panel" id="orders-panel" aria-labelledby="orders-heading">
+            <header class="dash-panel-head"><div><span class="dash-eyebrow">PACK &amp; SHIP</span><h2 id="orders-heading">Pending orders</h2></div><a class="dash-text-link" href="pending-orders.html">Open queue <span aria-hidden="true">↗</span></a></header>
+            <p class="dash-panel-caption" id="orders-summary">Unfinished work in Invsto, sorted by ship-by date.</p>
+            <div class="dash-deadlines" aria-label="Filter orders by ship-by date">
+              <button data-order-filter="overdue" aria-pressed="true"><span>Overdue</span><strong id="count-overdue">—</strong></button>
+              <button data-order-filter="today" aria-pressed="false"><span>Today</span><strong id="count-today">—</strong></button>
+              <button data-order-filter="tomorrow" aria-pressed="false"><span>Tomorrow</span><strong id="count-tomorrow">—</strong></button>
+              <button data-order-filter="all" aria-pressed="false"><span>All orders</span><strong id="count-all">—</strong></button>
+            </div>
+            <div class="dash-list" id="dashboard-orders" aria-live="polite" aria-busy="true"><div class="dash-loading">Loading pending orders…</div></div>
+            <div class="dash-panel-foot"><span id="orders-showing"></span><a href="pending-orders.html">View all pending orders →</a></div>
+          </section>
+          <section class="dash-panel" id="tasks-panel" aria-labelledby="tasks-heading">
+            <header class="dash-panel-head"><div><span class="dash-eyebrow">FOCUS &amp; FOLLOW THROUGH</span><h2 id="tasks-heading">Your work &amp; reviews</h2></div><a class="dash-text-link" href="team-tasks.html">Open tasks <span aria-hidden="true">↗</span></a></header>
+            <p class="dash-panel-caption">Assigned to you, work you delegated, and admin reviews.</p>
+            <div class="dash-task-filters" aria-label="Filter task preview"><button data-task-filter="all" aria-pressed="true">Priority first</button><button data-task-filter="review" aria-pressed="false">Needs review</button><button data-task-filter="blocked" aria-pressed="false">Needs help</button></div>
+            <div class="dash-list" id="dashboard-tasks" aria-live="polite" aria-busy="true"><div class="dash-loading">Loading your tasks…</div></div>
+            <div class="dash-panel-foot"><span id="tasks-showing"></span><a href="team-tasks.html">View all tasks →</a></div>
+          </section>
         </div>
-      </header>
-
-      <main class="content">
-        <section class="section urgent-orders-section">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">Urgent Orders</h3>
-              <div class="section-sub">eBay orders grouped by buyer, with item-line counts for each deadline</div>
-              <div id="urgent-due-breakdown" class="urgent-due-breakdown">
-                <span class="urgent-due-chip is-loading">Loading deadlines...</span>
-              </div>
-            </div>
-            <a class="urgent-orders-link" href="pending-orders.html">Open Pending Orders</a>
-          </div>
-          <div id="urgent-orders-container" class="urgent-orders-grid">
-            <div class="urgent-orders-empty">Loading urgent orders...</div>
+        <section id="operations-panel" aria-labelledby="operations-heading">
+          <div class="dash-section-head"><div><span class="dash-eyebrow">AROUND THE STORE</span><h2 id="operations-heading">Operations</h2></div><span class="dash-muted">A few things worth a look</span></div>
+          <div class="dash-operations">
+            <a class="dash-operation" href="store-transfers.html"><span class="dash-operation-symbol" aria-hidden="true">⇄</span><div><h3>Store transfers</h3><strong id="transfers-summary">Checking handoffs…</strong><p id="transfers-detail">Assigned to you for receiving</p></div><span aria-hidden="true">↗</span></a>
+            <a class="dash-operation" href="locations.html"><span class="dash-operation-symbol" aria-hidden="true">▦</span><div><h3>Tray watch</h3><strong id="trays-summary">Checking trays…</strong><p id="trays-detail">Checkouts, transfers &amp; weight flags</p></div><span aria-hidden="true">↗</span></a>
+            <a class="dash-operation" href="ebay-returns.html"><span class="dash-operation-symbol" aria-hidden="true">↩</span><div><h3>Returns &amp; requests</h3><strong id="returns-summary">Checking open cases…</strong><p id="returns-detail">Returns, cancellations &amp; disputes</p></div><span aria-hidden="true">↗</span></a>
           </div>
         </section>
-
-        <section class="section urgent-orders-section">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">Store Transfers</h3>
-              <div class="section-sub">Inter-store custody handoffs assigned to you for receipt or exception review</div>
-            </div>
-            <a class="urgent-orders-link" href="store-transfers.html">Open Store Transfers</a>
-          </div>
-          <div id="store-transfer-alerts-container" class="urgent-orders-grid">
-            <div class="urgent-orders-empty">Loading store transfers...</div>
+        <section class="dash-launchpad" aria-labelledby="launchpad-heading"><div><h2 id="launchpad-heading">Pick up where you need to.</h2><p>The tools you use every day.</p></div><nav aria-label="Quick access"><a href="live-sales.html">Live sales ↗</a><a href="stock.html">Stock ↗</a><a href="ebay-order-history.html">Order history ↗</a><a href="print-stations.html">Print stations ↗</a><a href="email-triage.html">Messages ↗</a><a href="admin.html">Admin ↗</a></nav></section>
+        <section id="reports-panel" aria-labelledby="reports-heading">
+          <div class="dash-section-head"><div><span class="dash-eyebrow">THE BIGGER PICTURE</span><h2 id="reports-heading">Business snapshot</h2></div><span class="dash-muted">Open a report to see the details</span></div>
+          <div class="dash-reports">
+            <details class="dash-report" id="inventory-report"><summary><span class="dash-report-icon" aria-hidden="true">◇</span><span><strong>Inventory at a glance</strong><small>Stock, cost &amp; estimated retail value</small></span><span class="dash-report-chevron" aria-hidden="true">+</span></summary><div id="inventory-report-body" class="dash-report-body"><p class="dash-loading">Loading inventory…</p></div></details>
+            <details class="dash-report" id="buyers-report"><summary><span class="dash-report-icon" aria-hidden="true">◎</span><span><strong>Top buyers</strong><small>Sales &amp; estimated payouts · last 90 days</small></span><span class="dash-report-chevron" aria-hidden="true">+</span></summary><div id="buyers-report-body" class="dash-report-body"><p class="dash-loading">Loading buyers…</p></div></details>
           </div>
         </section>
-
-        <section class="section urgent-orders-section">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">Order Tasks</h3>
-              <div class="section-sub">Pending packing questions, special handling requests, and handoffs assigned to you</div>
-            </div>
-            <a class="urgent-orders-link" href="pending-orders.html#order-task-panel">Open Pending Orders</a>
-          </div>
-          <div id="admin-order-tasks-container" class="urgent-orders-grid">
-            <div class="urgent-orders-empty">Loading order tasks...</div>
-          </div>
-        </section>
-
-        <section class="section urgent-orders-section">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">Tasks</h3>
-              <div class="section-sub">Independent task preview for work assigned to you</div>
-            </div>
-            <a class="urgent-orders-link" href="team-tasks.html">Open Tasks</a>
-          </div>
-          <div id="admin-team-tasks-container" class="urgent-orders-grid">
-            <div class="urgent-orders-empty">Loading team tasks...</div>
-          </div>
-        </section>
-
-        <section class="section urgent-orders-section">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">Return Tasks</h3>
-              <div class="section-sub">Pending eBay return intake, review questions, and follow-ups assigned to you</div>
-            </div>
-            <a class="urgent-orders-link" href="ebay-returns.html">Open Returns</a>
-          </div>
-          <div id="admin-return-tasks-container" class="urgent-orders-grid">
-            <div class="urgent-orders-empty">Loading return tasks...</div>
-          </div>
-        </section>
-
-        <section class="section buyer-profit-section">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">Buyer Profitability</h3>
-              <div class="section-sub">Top eBay buyers by synced order value, payout, returns, and recency</div>
-            </div>
-            <a class="urgent-orders-link" href="ebay-order-history.html">Open Order History</a>
-          </div>
-          <div id="buyer-profitability-summary" class="buyer-profit-summary">
-            <span>Loading buyer totals...</span>
-          </div>
-          <div id="buyer-profitability-container" class="buyer-profit-grid">
-            <div class="urgent-orders-empty">Loading buyer profitability...</div>
-          </div>
-        </section>
-
-        <section class="section dashboard-directory-section">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">Admin Directory</h3>
-              <div class="section-sub">Fast access to live sales, messaging, packing, and audit review</div>
-            </div>
-          </div>
-          <div class="dashboard-directory-grid">
-            <a class="dashboard-directory-card" href="live-sales.html">
-              <span>Reserve</span>
-              <strong>Live Sales</strong>
-              <small>Scan auction bags and print labels</small>
-            </a>
-            <a class="dashboard-directory-card" href="sms-marketing.html">
-              <span>Notify</span>
-              <strong>SMS Alerts</strong>
-              <small>Send live show texts to opted-in customers</small>
-            </a>
-            <a class="dashboard-directory-card" href="pending-orders.html">
-              <span>Pack</span>
-              <strong>Pending Orders</strong>
-              <small>Scan and confirm eBay bundles</small>
-            </a>
-            <a class="dashboard-directory-card" href="team-tasks.html">
-              <span>Assign</span>
-              <strong>Tasks</strong>
-              <small>Assigned order, return, and independent work trails</small>
-            </a>
-            <a class="dashboard-directory-card" href="store-transfers.html">
-              <span>Move</span>
-              <strong>Store Transfers</strong>
-              <small>Custody handoff, evidence photos, receiving, and exceptions</small>
-            </a>
-            <a class="dashboard-directory-card" href="ebay-order-history.html">
-              <span>Monitor</span>
-              <strong>Order History</strong>
-              <small>Shipped totals, cancellations, admin closeouts, and reversals</small>
-            </a>
-            <a class="dashboard-directory-card" href="ebay-returns.html">
-              <span>Review</span>
-              <strong>Returns</strong>
-              <small>Return intake, unmatched refunds, worker questions, and evidence photos</small>
-            </a>
-            <a class="dashboard-directory-card" href="admin.html">
-              <span>Audit</span>
-              <strong>Changes</strong>
-              <small>Review inventory edits and corrections</small>
-            </a>
-            <a class="dashboard-directory-card" href="team-responsibilities.html">
-              <span>Guide</span>
-              <strong>Team Responsibilities</strong>
-              <small>Sales, verification, shipping, and packing standards</small>
-            </a>
-          </div>
-        </section>
-
-        <h2 class="page-title">Inventory Summary</h2>
-
-        <!-- Metric Cards -->
-        <div class="metrics-grid" id="metric-cards"></div>
-
-        <section class="section tray-watch-section">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">Tray Watch</h3>
-              <div class="section-sub">Checked-out trays and weight mismatches that need attention</div>
-            </div>
-          </div>
-          <div id="tray-alerts-container" class="tray-alerts-container"></div>
-        </section>
-
-        <!-- Chart -->
-        <section class="section">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">Category Breakdown</h3>
-              <div class="section-sub">Value distribution by category</div>
-            </div>
-          </div>
-          <div class="chart-wrap">
-            <canvas id="category-chart" class="chart-canvas"></canvas>
-          </div>
-        </section>
-
-        <!-- Table -->
-        <section class="section">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">Category Details</h3>
-              <div class="section-sub">Quantity, cost, value, and markup by category</div>
-            </div>
-          </div>
-          <div class="table-wrap">
-            <div id="inventory-table-container" class="inventory-table"></div>
-          </div>
-        </section>
+        <footer class="dash-footer"><span>OG Jewelry · One place to keep things moving.</span><span>Ship-by dates shown in your local time.</span></footer>
       </main>
     </div>
   </div>
-
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
-  <script src="dashboard.js"></script>
+  <script src="dashboard.js?v=overview-20261006"></script>
 </body>
 </html>
