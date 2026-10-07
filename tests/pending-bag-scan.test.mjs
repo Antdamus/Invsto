@@ -43,6 +43,7 @@ async function open(t,width=390) {
       order:{id:'order-'+i,order_number:`12-34567-8900${i}`,buyer_username:'buyer_'+i,buyer_name:'Customer '+i,status:'pending',sale_date:'2026-10-06T12:00:00Z',ship_by_date:'2026-10-09T12:00:00Z'}}));
     state.orders.forEach(line=>{state.queueVideoReceiptLoadedOrderIds.add(line.order_id);state.sharedOrderNoteHistory.set(line.order_id,{data:{tasks:[],events:[]},promise:Promise.resolve({tasks:[],events:[]})});});
     window.calls=[];window.scanDelay=0;window.photoFailure=false;window.saveFailure=false;
+    window.bagPhotos=[];window.bagPhotoFailure=false;window.bagPhotoDelay=0;window.bagAmbiguous=false;
     window.supabase={rpc:async(name,args)=>{
       calls.push({name,args});
       if(name==='find_pending_order_bag'){
@@ -57,12 +58,25 @@ async function open(t,width=390) {
         if(saveFailure)return {error:{message:'Save failed'}};
         return {data:{order_line_id:args._order_line_id,is_missing:args._is_missing,updated_at:new Date().toISOString(),updated_by_email:'worker@example.test'}};
       }
+      if(name==='get_pending_bag_photo_review'){
+        const photos=structuredClone(bagPhotos);
+        if(bagPhotoDelay)await new Promise(r=>setTimeout(r,bagPhotoDelay));
+        if(bagPhotoFailure)return {error:{message:'Photos unavailable'}};
+        return {data:{bag:photos.length?{id:'bag-1',lot_code:args._scan}:null,photos,ambiguous:bagAmbiguous}};
+      }
+      if(name==='confirm_pending_bag_photos'){
+        if(saveFailure)return {error:{message:'Order changed. Scan again.'}};
+        bagPhotos.forEach(photo=>{photo.attached=true;});
+        return {data:{item_search:{is_missing:false},task:{id:'photo-task',order_id:'order-8',order_line_ids:['line-8'],metadata:{source:'pending_order_line_note'}},
+          event:{id:'photo-event',task_id:'photo-task',order_id:'order-8',notes:'Bag verified.',photo_attachments:bagPhotos.map(photo=>({bucket:'photos',path:photo.photo_path,label:'Live photo',metadata:{source:'live_bag_video_receipt'}}))}}};
+      }
       throw Error('Unexpected database operation: '+name);
     }};
     watchQueueCompletionPhotos=watchQueueShippingLabels=scheduleQueueVideoReceiptEvidenceHydration=()=>{};
     loadSelectedOrderTasks=hydrateSelectedOrderDetails=hydrateQueueVideoReceiptEvidenceThumbnails=async()=>{};
     ensureQueueVideoReceiptTasksLoaded=async()=>{if(photoFailure)throw Error('Photos offline');};
     const photo='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="200"><rect width="240" height="200" fill="#eee8dc"/><ellipse cx="120" cy="95" rx="60" ry="65" fill="none" stroke="#b59140" stroke-width="9"/><text x="120" y="186" text-anchor="middle" font-size="12">Test item screenshot</text></svg>');
+    supabase.storage={from:()=>({createSignedUrl:async()=>({data:{signedUrl:photo}})})};
     getVideoReceiptEvidencePhotosForLine=line=>line.id==='line-0'?[{previewUrl:photo,thumbnailUrl:photo}]:[];
     ensureEvidencePhotoPreviewUrls=async photo=>photo;
     setupListeners();renderCheckoutStoreSelect();applyOrderFilters();
@@ -142,7 +156,7 @@ for(const width of [320,390,1280])test(`${width}px: scan opens the exact line, c
   await expect(page.locator('#bag-scan-found')).toBeEnabled();
   const box=await target.boundingBox();assert.ok(box.y<844&&box.y+box.height>70);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  assert.equal(await page.evaluate(()=>calls.filter(c=>c.name!=='find_pending_order_bag').length),0);
+  assert.equal(await page.evaluate(()=>calls.filter(c=>!['find_pending_order_bag','get_pending_bag_photo_review'].includes(c.name)).length),0);
   if(width===390)await page.screenshot({path:'test-results/bag-scan-phone-found.png'});
   await page.locator('#bag-scan-found').click();
   await expect(page.locator('#bag-scan-found')).toHaveText('✓ Item found');
@@ -163,7 +177,7 @@ test('multiple matches show screenshots and identifying details; selection only 
   await page.locator('[data-bag-choice="1"]').click();
   await expect(page.locator('#bag-scan-choice')).toBeHidden();
   await expect(page.locator('[data-line-id="line-1"]')).toHaveClass(/is-bag-scan-target/);
-  assert.equal(await page.evaluate(()=>calls.length),1);
+  assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='find_pending_order_bag').length),1);
 });
 
 test('fast scans are queued in arrival order, with explicit found or next to advance',async t=>{
@@ -171,7 +185,7 @@ test('fast scans are queued in arrival order, with explicit found or next to adv
   await page.evaluate(()=>{scanDelay=200;void PendingBagScan.enqueue('LIVE-SLOW');void PendingBagScan.enqueue('LIVE-SLOW');void PendingBagScan.enqueue('LIVE-B');void PendingBagScan.enqueue('LIVE-C');});
   await expect(page.locator('#bag-scan-current')).toContainText('buyer_8');
   await expect(page.locator('#bag-scan-next')).toHaveText('Next bag (2) →');
-  assert.deepEqual(await page.evaluate(()=>calls.map(c=>c.args._scan)),['LIVE-SLOW']);
+  assert.deepEqual(await page.evaluate(()=>calls.filter(c=>c.name==='find_pending_order_bag').map(c=>c.args._scan)),['LIVE-SLOW']);
   await page.locator('#bag-scan-next').click();
   await expect(page.locator('#bag-scan-current')).toContainText('buyer_7');
   await page.locator('#bag-scan-found').click();
@@ -214,7 +228,7 @@ test('camera-style input and global bag lookup use the same flow; URLs are parse
   const page=await open(t);
   await page.locator('#pending-bag-scan').fill('https://example.test/bag-lookup.html?bag=LIVE-A');
   await expect(page.locator('#bag-scan-current')).toContainText('buyer_8');
-  assert.equal(await page.evaluate(()=>calls.length),1);
+  assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='find_pending_order_bag').length),1);
   await page.locator('#phone-orders-tools').click();
   await page.locator('#global-live-lot-scan').fill('LIVE-B');
   await page.locator('#global-live-lot-scan').press('Enter');
@@ -229,4 +243,58 @@ test('hardware scans continue from the focused order row without another tap',as
   await page.keyboard.type('LIVE-B');await page.keyboard.press('Enter');
   await expect(page.locator('#bag-scan-current')).toContainText('buyer_7');
   assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='find_pending_order_bag').length),2);
+});
+
+for(const width of [320,390,1280])test(`${width}px: bag photos are reviewed inline, attached once, and marked found without closing or packing`,async t=>{
+  const page=await open(t,width);
+  await page.evaluate(()=>{bagPhotos=[1,2].map(i=>({id:'photo-'+i,photo_path:'live-bags/bag-1/'+i+'.jpg',captured_at:'2026-10-07T16:00:00Z',attached:false}));});
+  await scan(page,'LIVE-A');
+  await expect(page.locator('[data-bag-review] img')).toHaveCount(2);
+  await expect(page.locator('#bag-scan-found')).toBeEnabled();
+  await expect(page.locator('#bag-scan-found')).toHaveText('Confirm & attach');
+  assert.equal(await page.evaluate(()=>calls.some(c=>c.name==='confirm_pending_bag_photos')),false);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await expect(page.locator('#fulfillment-workflow')).toBeHidden();
+  if(width===390)await page.screenshot({path:'test-results/bag-photo-review-phone.png'});
+  await page.locator('#bag-scan-found').click();
+  await expect(page.locator('#bag-scan-found')).toHaveText('✓ Item found');
+  await expect(page.locator('[data-bag-review]')).toContainText('already attached');
+  assert.deepEqual(await page.evaluate(()=>calls.filter(c=>c.name==='confirm_pending_bag_photos').map(c=>c.args)),
+    [{_scan:'LIVE-A',_lot_id:'bag-1',_order_line_id:'line-8',_photo_ids:['photo-1','photo-2']}]);
+  const result=await page.evaluate(()=>({status:state.orders[8].line_status,photos:state.queueVideoReceiptTaskEvents.get('photo-task')[0].photo_attachments.length,found:state.orders[8].item_search.is_missing,notes:state.orders[8].line_note_count}));
+  assert.deepEqual(result,{status:'pending',photos:2,found:false,notes:1});
+  await scan(page,'LIVE-A');
+  await expect(page.locator('#bag-scan-found')).toBeDisabled();
+  assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='confirm_pending_bag_photos').length),1);
+});
+
+test('bags without photos stay uncluttered; failed or ambiguous photo checks cannot confirm; retries and stale scans stay safe',async t=>{
+  const page=await open(t);
+  await scan(page,'LIVE-A');await expect(page.locator('#bag-scan-found')).toBeEnabled();
+  await expect(page.locator('[data-bag-review]')).toHaveCount(0);
+  await page.evaluate(()=>{bagPhotoFailure=true;});
+  await scan(page,'LIVE-B');await expect(page.getByRole('button',{name:'Retry photos'})).toBeVisible();
+  await expect(page.locator('#bag-scan-found')).toBeDisabled();
+  await page.evaluate(()=>{bagPhotoFailure=false;});
+  await page.getByRole('button',{name:'Retry photos'}).click();await expect(page.locator('#bag-scan-found')).toBeEnabled();
+  await page.evaluate(()=>{bagAmbiguous=true;});
+  await scan(page,'LIVE-C');await expect(page.locator('[data-bag-review]')).toContainText('unique LIVE code');
+  await expect(page.locator('#bag-scan-found')).toBeDisabled();
+  await page.evaluate(()=>{bagAmbiguous=false;bagPhotoDelay=300;bagPhotos=[{id:'old',photo_path:'old.jpg'}];void PendingBagScan.enqueue('LIVE-A');});
+  await expect(page.locator('[data-bag-review]')).toContainText('Checking');
+  await page.evaluate(()=>{bagPhotoDelay=0;bagPhotos=[];void PendingBagScan.enqueue('LIVE-B');});
+  await expect(page.locator('#bag-scan-current')).toContainText('buyer_7');
+  await expect(page.locator('#bag-scan-found')).toBeEnabled();await page.waitForTimeout(400);
+  await expect(page.locator('[data-bag-review]')).toHaveCount(0);
+});
+
+test('failed confirmation preserves photos and can retry; already-found items can still attach missing bag photos',async t=>{
+  const page=await open(t);
+  await page.evaluate(()=>{state.orders[8].item_search={is_missing:false};saveFailure=true;bagPhotos=[{id:'new',photo_path:'new.jpg',captured_at:'2026-10-07T16:00:00Z',attached:false}];});
+  await scan(page,'LIVE-A');await expect(page.locator('#bag-scan-found')).toBeEnabled();
+  await page.locator('#bag-scan-found').click();await expect(page.locator('#bag-scan-dock-status')).toContainText('Order changed');
+  await expect(page.locator('#bag-scan-found')).toBeEnabled();
+  assert.equal(await page.evaluate(()=>state.queueVideoReceiptTasks.length),0);
+  await page.evaluate(()=>{saveFailure=false;});await page.locator('#bag-scan-found').click();
+  await expect(page.locator('#bag-scan-found')).toHaveText('✓ Item found');
 });

@@ -34,10 +34,14 @@
     document.body.classList.toggle('has-bag-scan', visible);
     const line = current && state.orders.find(line => line.id === current.line.id);
     const found = isItemFound(line || {});
+    const review = current?.review;
+    const photos = review?.photos || [];
+    const attach = photos.some(photo => !photo.attached);
     const button = byId('bag-scan-found');
     if (button) {
-      button.disabled = !line || !isPending(line) || found || processing || saving || itemSearchBusy.has(line.id);
-      button.textContent = saving ? 'Saving…' : found ? '✓ Item found' : 'Item found';
+      button.disabled = !line || !isPending(line) || (found && !attach) || processing || saving || itemSearchBusy.has(line.id)
+        || current?.photoLoading || current?.photoError || review?.ambiguous || photos.some(photo => !photo.ready || photo.attached_elsewhere);
+      button.textContent = saving ? 'Saving…' : attach ? 'Confirm & attach' : found ? '✓ Item found' : 'Item found';
     }
     byId('bag-scan-current').textContent = current ? `${current.code} · ${getBuyerLabel(current.line)}` : processing ? 'Finding your bag…' : 'Bag lookup';
     const next = byId('bag-scan-next');
@@ -46,6 +50,100 @@
     byId('bag-scan-queued').textContent = queue.length ? `${queue.length} scan${queue.length === 1 ? '' : 's'} waiting` : '';
     byId('bag-scan-close').disabled = saving;
     byId('bag-scan-recent').disabled = processing || saving || waiting;
+    renderBagPhotos();
+  }
+
+  function renderBagPhotos() {
+    const entry = current;
+    const lineId = current?.line.id;
+    const row = [...document.querySelectorAll('.buyer-line-btn[data-line-id]')].find(row => row.dataset.lineId === lineId);
+    document.querySelectorAll('[data-bag-review]').forEach(panel => { if (panel.dataset.bagReview !== lineId) panel.remove(); });
+    if (!row || row.querySelector('[data-bag-review]')) return;
+    const review = current.review, photos = review?.photos || [];
+    if (!current.photoLoading && !current.photoError && !review?.ambiguous && !photos.length) return;
+    const panel = document.createElement('section'); panel.className = 'bag-photo-review'; panel.dataset.bagReview = lineId;
+    panel.setAttribute('aria-label', 'Scanned bag photos');
+    const heading = document.createElement('strong'); heading.textContent = 'Photos from this bag'; panel.append(heading);
+    const help = document.createElement('p'); panel.append(help);
+    if (current.photoLoading) help.textContent = 'Checking bag photos…';
+    else if (current.photoError) {
+      help.textContent = 'Bag photos could not load. Try again before confirming.';
+      const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'secondary-btn'; retry.textContent = 'Retry photos';
+      retry.onclick = () => loadBagPhotos(current, version); panel.append(retry);
+    } else if (review?.ambiguous) help.textContent = 'More than one bag has photos for this item. Scan the unique LIVE code on its label to choose the right bag.';
+    else {
+      heading.textContent = `Bag photos · ${photos.length}`;
+      help.textContent = photos.some(photo => photo.attached_elsewhere) ? 'A photo is attached to another order. Review that connection before confirming.'
+        : photos.every(photo => photo.attached) ? 'These photos are already attached to this order.'
+        : 'Check these photos against the item and order. Confirm & attach saves them here and marks the item found.';
+      const grid = document.createElement('div'); grid.className = 'bag-photo-review-grid'; panel.append(grid);
+      photos.forEach((photo, index) => {
+        const tile = document.createElement('button'); tile.type = 'button'; tile.className = 'bag-photo-review-tile';
+        tile.setAttribute('aria-label', `Enlarge bag photo ${index + 1}`);
+        const img = document.createElement('img'); img.alt = `Bag photo ${index + 1}`; img.src = photo.url;
+        img.onload = () => {if (current === entry && panel.isConnected) {photo.ready = true; refresh();}};
+        img.onerror = () => {if (current === entry && panel.isConnected) {photo.ready = false; entry.photoError = true; panel.remove(); refresh();}};
+        const caption = document.createElement('span'); caption.textContent = `${photo.attached ? '✓ Attached · ' : ''}${formatDate(photo.captured_at)}`;
+        tile.append(img, caption); tile.onclick = () => openEvidencePhotoObjectViewer({bucket:'photos',path:photo.photo_path,previewUrl:photo.url,
+          label:`Bag photo ${index + 1}`,auditText:`Live photo · ${formatDate(photo.captured_at)}`}, 'bag-scan-found'); grid.append(tile);
+      });
+    }
+    row.querySelector('.buyer-line-copy')?.append(panel);
+  }
+
+  async function loadBagPhotos(entry, run) {
+    if (!entry) return;
+    entry.photoLoading = true; entry.photoError = false; entry.review = null;
+    document.querySelectorAll('[data-bag-review]').forEach(panel => panel.remove()); refresh();
+    try {
+      const {data,error} = await supabase.rpc('get_pending_bag_photo_review', {_scan:entry.code,_order_line_id:entry.line.id});
+      if (error) throw error;
+      const photos = await Promise.all((data?.photos || []).map(async photo => {
+        const {data:signed,error} = await supabase.storage.from('photos').createSignedUrl(photo.photo_path,3600);
+        if (error || !signed?.signedUrl) throw error || Error('Photo unavailable');
+        return {...photo,url:signed.signedUrl,ready:false};
+      }));
+      if (run !== version || current !== entry) return;
+      entry.review = {...data,photos};
+    } catch {
+      if (run !== version || current !== entry) return;
+      entry.photoError = true;
+    } finally {
+      if (run === version && current === entry) {
+        entry.photoLoading = false; document.querySelectorAll('[data-bag-review]').forEach(panel => panel.remove()); refresh();
+        const panel = document.querySelector('[data-bag-review]');
+        if (panel) panel.scrollIntoView({block:'center',behavior:'instant'});
+      }
+    }
+  }
+
+  async function confirmBagPhotos(entry) {
+    const {data,error} = await supabase.rpc('confirm_pending_bag_photos', {_scan:entry.code,_lot_id:entry.review.bag.id,
+      _order_line_id:entry.line.id,_photo_ids:entry.review.photos.map(photo => photo.id)});
+    if (error) throw error;
+    const line = state.orders.find(line => line.id === entry.line.id);
+    if (line) line.item_search = data.item_search;
+    if (data.task && data.event) {
+      const taskIndex = state.queueVideoReceiptTasks.findIndex(task => task.id === data.task.id);
+      if (taskIndex < 0) state.queueVideoReceiptTasks.push(data.task); else state.queueVideoReceiptTasks[taskIndex] = data.task;
+      const photosByPath = new Map(entry.review.photos.map(photo => [photo.photo_path,photo]));
+      const event = {...data.event,photo_attachments:data.event.photo_attachments.map(photo => ({...photo,
+        previewUrl:photosByPath.get(photo.path)?.url,thumbnailUrl:photosByPath.get(photo.path)?.url}))};
+      const events = state.queueVideoReceiptTaskEvents.get(data.task.id) || [];
+      if (!events.some(saved => saved.id === event.id)) events.push(event);
+      state.queueVideoReceiptTaskEvents.set(data.task.id,events);
+      // The selected-task cache takes precedence over queue evidence for the same task.
+      const selected = state.selectedOrderTasks.findIndex(task => task.id === data.task.id);
+      if (selected >= 0) {state.selectedOrderTasks[selected]=data.task; state.selectedOrderTaskEvents.set(data.task.id,events);}
+      state.sharedOrderNoteHistory.delete(entry.line.order_id);
+      if (line) {line.line_note_count=getLineNoteCount(line)+1;line.latest_line_note=event.notes;}
+    }
+    entry.review.photos.forEach(photo => {photo.attached=true;});
+    state.sharedOrderNoteHistory.delete(entry.line.order_id);
+    if (!data.event) state.queueVideoReceiptLoadedOrderIds.delete(entry.line.order_id);
+    document.querySelectorAll('[data-bag-review]').forEach(panel => panel.remove());
+    renderOrders();
+    void hydrateQueueVideoReceiptEvidenceThumbnails([line],{skipTaskLoad:Boolean(data.event)});
   }
 
   function renderRecent() {
@@ -194,6 +292,7 @@
       recent.push(current); if (recent.length > 30) recent.shift();
       renderRecent();
       status(`Opened ${match.line.order?.order_number || 'order'} · ${match.line.item_title || 'Item'}`);
+      void loadBagPhotos(current, run);
     } catch (error) {
       if (run === version) status(error.message || 'Bag lookup failed. Try again.', true);
     } finally {
@@ -243,13 +342,19 @@
     byId('bag-scan-close').addEventListener('click', reset);
     byId('bag-scan-found').addEventListener('click', async () => {
       if (!current || processing || saving || state.busy || !isPending(state.orders.find(line => line.id === current.line.id))) return;
-      const id = current.line.id;
+      if (byId('bag-scan-found').disabled) return;
+      const id = current.line.id, entry = current;
       saving = true; refresh();
-      await setItemMissing(id, false);
+      try {
+        if (entry.review?.photos?.length) await confirmBagPhotos(entry);
+        else await setItemMissing(id, false);
+      } catch (error) {
+        saving = false; status(error.message || 'Could not save. Review and try again.', true); refresh(); return;
+      }
       saving = false;
       const saved = state.orders.find(line => line.id === id);
       if (isItemFound(saved || {})) {
-        status('✓ Item found. Ready for the next bag.');
+        status(entry.review?.photos?.length ? '✓ Photos attached · item found. Ready for the next bag.' : '✓ Item found. Ready for the next bag.');
         refresh();
         if (queue.length) void processNext();
       } else { status('Could not mark the item found. Please try again.', true); refresh(); }
@@ -262,6 +367,7 @@
       if (!isPending(line)) { status('This item is no longer pending.', true); return; }
       ++version; active = true; current = {...entry, line}; await navigate(line);
       status(`Opened ${line.order?.order_number || 'order'} · ${line.item_title}`); refresh();
+      void loadBagPhotos(current, version);
     });
     byId('bag-scan-choice-cancel').addEventListener('click', () => finishChoice(null));
     byId('bag-scan-choice').addEventListener('cancel', event => { event.preventDefault(); finishChoice(null); });
@@ -297,6 +403,7 @@
     await navigate(line);
     current = {code, line};
     status(`Opened ${line.order?.order_number || 'order'} · ${line.item_title || 'Item'}`); refresh();
+    void loadBagPhotos(current, version);
   }
   window.PendingBagScan = {init, enqueue, reset, normalize, openLine};
 })();
