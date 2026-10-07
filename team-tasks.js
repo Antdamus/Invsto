@@ -4267,16 +4267,19 @@ function renderPendingOrderTaskBrief(task = {}, events = [], canceled = false) {
       ` : ""}
       <div class="team-task-order-work-card">
         <div class="team-task-order-work-main">
+          <article class="team-task-instruction is-current team-task-order-instruction">
+            <small>What needs to be done</small>
+            <p>${escapeHtml(currentInstruction)}</p>
+          </article>
+          <details class="team-task-context-details task-order-facts">
+          <summary>Order &amp; shipping details</summary>
           <div class="team-task-order-work-toolbar">
             <div class="team-task-order-inline-meta">
               ${inlineMetaHtml}
             </div>
             ${chatLinked ? "" : renderPendingOrderCompactStatus(task)}
           </div>
-          <article class="team-task-instruction is-current team-task-order-instruction">
-            <small>What needs to be done</small>
-            <p>${escapeHtml(currentInstruction)}</p>
-          </article>
+          </details>
           ${showLineWorkPanel ? (isHistoryTask ? renderOrderHistoryTaskLines(task, events) : renderPendingOrderApprovalLines(task, events)) : ""}
           ${showHistoryEvidence ? renderPendingOrderEvidencePanel(task, events) : ""}
           ${hasLatestUpdate ? `

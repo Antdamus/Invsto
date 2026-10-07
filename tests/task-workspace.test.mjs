@@ -24,9 +24,10 @@ before(async () => {
   await mkdir(new URL('../test-results', import.meta.url), {recursive: true});
 });
 after(async () => {
-  await browser?.close();
-  let timer;
-  try {await Promise.race([browserServer?.close(), new Promise(resolve => {timer = setTimeout(() => browserServer?.kill().then(resolve), 5000);})]);}
+  // Windows WebKit occasionally leaves its close transport pending after every
+  // context has closed. Stop only the isolated process launched by this suite.
+  const timer = setTimeout(() => browserServer?.kill().catch(() => {}), 5000);
+  try {await browser?.close(); await browserServer?.close();}
   finally {clearTimeout(timer);}
   await new Promise(resolve => {server.close(resolve); server.closeAllConnections();});
 });
