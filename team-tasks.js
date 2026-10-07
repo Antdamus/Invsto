@@ -191,7 +191,7 @@ function getTaskLateAgeLabel(task = {}) {
 }
 
 function isTaskLate(task = {}, options = {}) {
-  if (options.canceled || OGTaskWorkflow.next(task, state.assignees).kind !== "work") return false;
+  if (options.canceled || ["completed_by_employee", "waiting_on_subtasks"].includes(task.status)) return false;
   const status = String(task.status || "").toLowerCase();
   if (HISTORY_TASK_STATUSES.includes(status) || HISTORY_RETURN_TASK_STATUSES.includes(status)) return false;
   const dueValue = getTaskDueValue(task);
@@ -4428,7 +4428,7 @@ function renderTaskCard(task = {}, options = {}) {
   const sourceLabel = getTaskSourceLabel(task);
   const statusLabel = canceled ? "Canceled" : getTaskStatusLabel(task.status);
   const due = getTaskDueValue(task);
-  const dueText = OGTaskWorkflow.next(task, state.assignees).kind === "approval" ? "Awaiting decision" : late ? `Overdue · ${getTaskLateAgeLabel(task)}` : due ? `Due ${getTaskDueLabel(task)}` : "No due date";
+  const dueText = task.status === "completed_by_employee" ? "Awaiting decision" : late ? `Overdue · ${getTaskLateAgeLabel(task)}` : due ? `Due ${getTaskDueLabel(task)}` : "No due date";
   const priority = ["high", "urgent"].includes(task.priority) ? formatTaskTag(task.priority) : "";
   const latestNote = [...events].reverse().find(event => event.notes)?.notes;
   const preview = canceled ? getTaskCardPreview(task, true) : latestNote || getTaskCardPreview(task);

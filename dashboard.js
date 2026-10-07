@@ -170,7 +170,7 @@ async function loadDashboardTasks() {
   renderDashboardTasks();
 }
 function isDashboardReview(task) { return OGTaskWorkflow.bucket(task, dashboardState.user?.id, dashboardState.assignees) === 'approvals'; }
-function isDashboardTaskLate(task, now = Date.now()) { const due = Date.parse(task.due); return OGTaskWorkflow.next(task, dashboardState.assignees).kind === 'work' && Number.isFinite(due) && due < now; }
+function isDashboardTaskLate(task, now = Date.now()) { const due = Date.parse(task.due); return !['completed_by_employee','waiting_on_subtasks'].includes(task.status) && !OGTaskWorkflow.finished.has(task.status) && Number.isFinite(due) && due < now; }
 function dashboardTaskNeedsHelp(task) { return ["blocked", "sent_back_for_rework"].includes(task.status); }
 function sortDashboardTasks(tasks) {
   const priorities = {urgent: 0, high: 1, normal: 2, low: 3};
@@ -182,12 +182,12 @@ function renderDashboardTasks() {
   const tasks = dashboardState.tasks;
   if (!tasks) return;
   const review = tasks.filter(isDashboardReview).length;
-  const overdue = tasks.filter(task => isDashboardTaskLate(task)).length;
+  const overdue = tasks.filter(task => !isDashboardReview(task) && isDashboardTaskLate(task)).length;
   const blocked = tasks.filter(dashboardTaskNeedsHelp).length;
   dashText("stat-tasks", dashCount(tasks.length - review));
   dashText("stat-tasks-detail", `${dashCount(overdue)} overdue · ${dashCount(blocked)} need help`);
   dashText("stat-review", dashCount(review));
-  dashText("stat-review-detail", "Approvals & admin follow-ups");
+  dashText("stat-review-detail", `${tasks.filter(task => isDashboardReview(task) && isDashboardTaskLate(task)).length} overdue · Decisions waiting for you`);
   document.querySelectorAll("[data-task-filter]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.taskFilter === dashboardState.taskFilter)));
   const filtered = sortDashboardTasks(tasks.filter(task => dashboardState.taskFilter === "review" ? isDashboardReview(task) : dashboardState.taskFilter === "blocked" ? dashboardTaskNeedsHelp(task) : true));
   const preview = filtered.slice(0, DASH_PREVIEW_SIZE);

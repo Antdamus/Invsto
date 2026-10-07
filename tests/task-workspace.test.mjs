@@ -278,7 +278,7 @@ test('next-action queues are exclusive; completion and informational replies do 
  await expect(page.locator('[data-team-task-card="my completed work"] .task-card-owner')).toHaveText('Review: Boss');
  await expect(page.locator('[data-team-task-card="my completed work"]')).not.toContainText('Overdue');
  await page.locator('[data-task-owner-filter=approvals]').click();await expect(page.locator('.team-task-card')).toHaveCount(2);
- await expect(page.locator('[data-task-stat=overdue]')).toHaveText('0');
+ await expect(page.locator('[data-task-stat=overdue]')).toHaveText('1');
  await expect(page.locator('#team-task-list')).not.toContainText('other admin work');
  assert.deepEqual(await page.evaluate(()=>writes),[]);
 });
