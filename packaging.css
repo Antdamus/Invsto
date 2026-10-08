@@ -1,5 +1,7 @@
 :root{--pk-bg:#101713;--pk-panel:#19231d;--pk-line:#354339;--pk-muted:#afbbb1;--pk-gold:#e6ca8d;--pk-text:#f3f1e8}
 body[data-page=packaging] .main{min-width:0;max-width:100%}body[data-page=packaging]::before{display:none}
+body[data-page=packaging] .menu-toggle i[data-lucide=menu]{display:block;position:relative;width:18px;height:14px;border-top:2px solid currentColor;border-bottom:2px solid currentColor}
+body[data-page=packaging] .menu-toggle i[data-lucide=menu]::after{content:"";position:absolute;left:0;right:0;top:4px;border-top:2px solid currentColor}
 .pack-upload-label{position:relative}.packaging-page input.pack-file{position:absolute;left:0;top:0;width:1px;height:1px;min-height:1px;padding:0;border:0;clip-path:inset(50%)}
 @media(max-width:900px){body[data-page=packaging] .main{margin-left:0;padding-top:72px}body[data-page=packaging] .sidebar{display:none}}
 body[data-page=packaging]{background:var(--pk-bg);color:var(--pk-text);font-family:Inter,system-ui,-apple-system,sans-serif}
