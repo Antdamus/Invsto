@@ -11,8 +11,10 @@ has just been reconciled.
   Duplicate IDs retain their original verified payload and successful status.
 - `invsto-message-recovery` runs every minute. A three-minute, single-use database
   lease prevents overlapping cron workers; no service key is stored in cron.
-  Each run retries up to three failed/stalled notifications, rechecks two recent
+  Each run retries up to ten failed/stalled notifications, rechecks two recent
   member conversations, and rotates through one older member conversation.
+  New failures take priority over the historical backlog; the worker also stops
+  starting batches after 70 seconds and lets unprocessed leases expire safely.
 - Every five minutes, recovery alternates the first member-conversation page
   with a continuing archive page. Unchanged recent details are skipped.
 - Failed notifications back off from two minutes to six hours. Unavailable old
@@ -48,7 +50,8 @@ buyer replies or enqueue historical staff SMS notifications.
    `20261009001000_ebay_message_recovery.sql`.
 2. Deploy `ebay-message-sync` and `ebay-message-notification`, preserving their
    existing JWT/signature configuration and the shared context module.
-3. Apply `20261009002000_ebay_message_recovery_schedule.sql`, then publish the
+3. Apply `20261009002000_ebay_message_recovery_schedule.sql` and
+   `20261009003000_ebay_message_recovery_priority.sql`, then publish the
    frontend. Inspect worker timestamps, recent sync runs, and retry counts.
 
 The worker table is private. Authorized staff can read only the safe health RPC.

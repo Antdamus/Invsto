@@ -16,6 +16,7 @@ before(async()=>{
  create function cron.schedule(text,text,text) returns bigint language sql as $$select 1::bigint$$;`);
  await db.exec(await read('20261009001000_ebay_message_recovery.sql'));
  await db.exec(await read('20261009002000_ebay_message_recovery_schedule.sql'));
+ await db.exec(await read('20261009003000_ebay_message_recovery_priority.sql'));
 });
 beforeEach(async()=>{
  await db.exec(`reset role;truncate ebay_message_notifications,ebay_conversations,ebay_conversation_messages,dispatches;
@@ -63,4 +64,11 @@ test('completed archive page advances cursor, failed page preserves it',async()=
  await db.query('select finish_ebay_message_recovery($1,$2)',[token,'provider temporarily unavailable']);
  row=(await db.query('select discovery_offset,last_error from ebay_message_recovery_worker')).rows[0];
  assert.equal(row.discovery_offset,50);assert.equal(row.last_error,'provider temporarily unavailable');
+});
+test('new failures take priority over the backlog and each claim stays bounded',async()=>{
+ await db.exec(`insert into ebay_message_notifications(signature_verified,processing_status,received_at,ebay_conversation_id,conversation_type,ebay_message_id,recovery_after)
+ select true,'sync_failed',now()-interval '30 days','old-'||g,'FROM_MEMBERS','old-'||g,now()-interval '1 hour' from generate_series(1,15)g;
+ insert into ebay_message_notifications(signature_verified,processing_status,received_at,ebay_conversation_id,conversation_type,ebay_message_id)
+ values(true,'sync_failed',now()-interval '3 minutes','current','FROM_MEMBERS','current');`);
+ const work=await claim();assert.equal(work.retries.length,10);assert.equal(work.retries[0].ebay_message_id,'current');
 });
