@@ -25,3 +25,5 @@ body[data-page=packaging]{background:var(--pk-bg);color:var(--pk-text);font-fami
 .pack-photo-viewer header>div{max-height:24dvh;overflow:auto}#pack-view-items{color:#f1e9d8;margin:4px 0}.pack-photo-thumb.has-photo-error{border:1px dashed #8f7150}
 
 .pack-gallery--item .pack-reference:not(:first-child) figcaption span,.pack-gallery--item .pack-reference:not(:first-child) figcaption small{display:none}
+
+.pack-choice>span{display:grid;gap:8px;min-width:0;overflow-wrap:anywhere}.pack-choice input[type=radio]{width:22px;min-height:22px;flex-shrink:0;accent-color:var(--pk-gold)}.pack-choice small{color:var(--pk-muted);font-size:12px}.pack-order-list summary{color:var(--pk-gold)}

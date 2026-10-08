@@ -16,6 +16,21 @@ part or cancelling a task does not release the hold. Resume requires a note and
 a fresh physical review. A cancelled blocking task should be reopened and properly
 resolved in Tasks if it was created in error.
 
+The To package queue has one entry per eBay username, showing ready order and
+remaining item counts. Search matches a buyer, any included order number or saved
+tracking number and retains the whole buyer group. Opening a buyer loads all their
+ready orders together, with line screenshots, completion photos and notes. Order
+numbers and saved labels are available under a compact disclosure. Blank usernames
+remain separate; display names are not used as identities. Only ready, unallocated
+orders qualify; orders still open or already being packed are excluded.
+
+Scanning a saved label offers the buyer's other ready orders in one package. When
+combining beyond the label's saved order association, the packer must confirm that
+all orders belong to the label's recipient. No labels are purchased, voided, or
+changed. The server rechecks the full buyer group, eligibility and active packing
+before starting; changes require a fresh review. Existing packages remain attached
+to their recorded tracking codes. Quantities remain protected across boxes.
+
 Combined saved labels resolve all associated order IDs. An ambiguous barcode asks
 the packer to choose its order group. An unknown external label can be associated
 only after opening an eligible order, checking its recipient/order numbers, and
@@ -66,6 +81,10 @@ handoffs, change claims, adjust stock, or dispatch packages.
 To pause **new handoffs** without deleting work, set `packaging_settings.enabled`
 to false. Retain the page and database functions so the department can finish its
 existing packages. Never undo this migration by dropping tables containing work.
+
+Apply `20261008230000_packaging_buyer_queue.sql` before the buyer-grouped interface.
+It updates queue/label reads and adds the validated combined-package start path;
+existing fulfillment, inventory, claims, proof and dispatch rules remain in force.
 
 ## Verification
 

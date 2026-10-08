@@ -18,10 +18,10 @@ async function open(t,width=390){const context=await browser.newContext({viewpor
   const image='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="360" height="240"><rect width="360" height="240" fill="#17261d"/><ellipse cx="180" cy="115" rx="75" ry="68" fill="none" stroke="#d9ba74" stroke-width="9"/><ellipse cx="180" cy="115" rx="75" ry="68" fill="none" stroke="#f8dea6" stroke-width="3" stroke-dasharray="5 6"/><text x="180" y="220" text-anchor="middle" font-family="sans-serif" fill="#c5ccb6">Packaging test photo</text></svg>');
   window.supabase={rpc:async(name,{_action:a,_args:args})=>{
    const d=fixtureDetail;
-   if(a==='queue'){const view=d.shipment?({ready:'sending',dispatched:'history'}[d.shipment.status]||d.shipment.status):'to_package';const rows=args.view===view?[{shipment_id:d.shipment?.id,order_id:d.shipment?null:order,title:d.shipment?.tracking_code||'12-15247-65265',subtitle:'jewelrybuyer',created_at:now}]:[];return{data:{enabled:true,user_id:me,is_admin:true,counts:{[view]:1},total:rows.length,rows}};}
-   if(a==='detail')return{data:structuredClone(d)};
+   if(a==='queue'){const view=d.shipment?({ready:'sending',dispatched:'history'}[d.shipment.status]||d.shipment.status):'to_package';const rows=args.view===view?[{shipment_id:d.shipment?.id,order_id:d.shipment?null:order,buyer_key:d.shipment?null:'buyer:jewelrybuyer',order_ids:d.orders.map(o=>o.id),title:d.shipment?.tracking_code||'jewelrybuyer',subtitle:d.shipment?'jewelrybuyer':d.orders.length+' orders · '+d.lines.reduce((n,l)=>n+l.quantity,0)+' items',created_at:now}]:[];return{data:{enabled:true,user_id:me,is_admin:true,counts:{[view]:1},total:rows.length,rows}};}
+   if(a==='detail'||a==='buyer')return{data:structuredClone(d)};
    if(a==='staff')return{data:[{user_id:me,name:'Jose'},{user_id:'00000000-0000-4000-8000-000000000101',name:'Sandra'}]};
-   if(a==='scan')return{data:{tracking:args.tracking,shipment_id:fixtureScanExisting?d.shipment?.id:null,matches:fixtureUnmatched?[]:[{order_ids:[order],orders:[{id:order,order_number:'12-15247-65265',buyer:'jewelrybuyer',ready:true}]}]}};
+   if(a==='scan')return{data:{tracking:args.tracking,shipment_id:fixtureScanExisting?d.shipment?.id:null,matches:fixtureUnmatched?[]:[{order_ids:[order],orders:[{id:order,order_number:'12-15247-65265',buyer:'jewelrybuyer',ready:true}],buyer_order_ids:d.orders.map(o=>o.id),buyer_orders:d.orders.map(o=>({id:o.id,order_number:o.order_number,buyer:o.buyer_username,ready:o.ready}))}]}};
    fixtureWrites.push({action:a,args});if(fixtureFailure===a){fixtureFailure=null;return{error:{message:'Connection interrupted. Retry safely.'}};}
    if(window.fixtureDelay===a)await new Promise(r=>window.releaseFixture=r);
    if(a==='start')d.shipment={id:'00000000-0000-4000-8000-000000000200',tracking_code:args.tracking,revision:1,status:'in_progress',claimed_by:me,claimed_until:new Date(Date.now()+900000).toISOString(),created_at:now};
@@ -117,4 +117,23 @@ test('the full-size viewer falls back to a saved preview when the original image
  await page.evaluate(()=>{const old=supabase.storage.from;supabase.storage.from=bucket=>{const store=old(bucket);return {...store,createSignedUrl:async path=>path==='reference.jpg'?{data:{signedUrl:'data:image/jpeg;base64,AA=='}}:store.createSignedUrl(path)};};});
  await page.locator('.pack-photo-thumb').click();await expect(page.locator('#pack-view-stage img')).toHaveAttribute('src',/^data:image\/svg/);
  await page.getByRole('button',{name:'Close photo viewer'}).click();assert.equal(await page.evaluate(()=>fixtureWrites.filter(w=>w.action!=='start').length),0);
+});
+
+for(const width of [320,390,1366])test(`Buyer package ${width}px: grouped order photos, full refresh and confirmed consolidation`,async t=>{
+ const page=await open(t,width);
+ await page.evaluate(()=>{
+  const d=fixtureDetail,second='00000000-0000-4000-8000-000000000002';
+  d.orders.push({...d.orders[0],id:second,order_number:'SECOND-ORDER',tracking_number:'9400100000000000000002'});
+  d.lines.push({...d.lines[0],id:'00000000-0000-4000-8000-000000000012',order_id:second,item_title:'Bag 050 · Silver bracelet',item_number:'item-two',quantity:1,fulfilled_quantity:1});
+  d.order_events.push({order_id:second,notes:'Second order note',photo_attachments:[{bucket:'photos',path:'second.jpg',label:'Bag 050 screenshot',media_type:'image'}]});
+ });
+ await page.getByRole('button',{name:'Refresh packaging'}).click();await expect(page.locator('#pack-list .pack-row')).toHaveCount(1);await expect(page.locator('#pack-total')).toHaveText('1 buyer');await expect(page.locator('#pack-list')).toContainText('2 orders · 3 items');
+ await page.locator('#pack-list .pack-row').click();await expect(page).toHaveURL(/buyer_order=/);await expect(page.locator('.pack-line')).toHaveCount(2);await expect(page.locator('.pack-detail-head h2')).toHaveText('jewelrybuyer');await expect(page.locator('.pack-detail-head')).toContainText('2 orders · 3 items');
+ await expect(page.locator('.pack-line').nth(1)).toContainText('Bag 050 screenshot');await expect(page.locator('.pack-order-list')).not.toHaveAttribute('open','');await noOverflow(page);
+ await page.getByText('View order numbers & shipping labels',{exact:true}).click();await expect(page.locator('.pack-order-list')).toContainText('SECOND-ORDER');await expect(page.locator('.pack-order-list')).toContainText('9400100000000000000002');
+ await page.screenshot({path:`test-results/packaging-buyer-${width}.png`,fullPage:true});
+ await page.getByRole('button',{name:'Scan buyer’s shipping label'}).click();await page.locator('#pack-barcode').fill('9400100000000000000001');await page.locator('#pack-barcode').press('Enter');
+ const dialog=page.getByRole('dialog',{name:'Check the label & orders'});await expect(dialog).toContainText('2 orders in this package');await expect(dialog).toContainText('SECOND-ORDER');await page.getByRole('button',{name:'Start packing',exact:true}).click();assert.equal((await page.evaluate(()=>fixtureWrites)).length,0);
+ await page.locator('[name=confirm_buyer]').check();await page.getByRole('button',{name:'Start packing',exact:true}).click();await expect(dialog).not.toBeVisible();
+ const req=await page.evaluate(()=>fixtureWrites.find(w=>w.action==='start'));assert.equal(req.args.order_ids.length,2);assert.equal(req.args.combine_buyer,true);assert.equal(req.args.confirm_buyer,true);await expect(page.locator('.pack-line')).toHaveCount(2);await noOverflow(page);
 });

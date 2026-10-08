@@ -34,6 +34,7 @@ before(async()=>{
  insert into employees(user_id,email,display_name,role,active) values('${id(100)}','admin@example.test','Jose','admin',true),('${id(101)}','worker@example.test','Sandra','employee',true);`);
  await db.exec(await readFile(new URL('../supabase/migrations/20261008020000_packaging_workspace.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261008220000_packaging_reference_photos.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261008230000_packaging_buyer_queue.sql',import.meta.url),'utf8'));
 });
 beforeEach(async()=>{
  await db.exec(`set test.allowed='yes';set test.actor='${id(100)}';truncate ebay_order_admin_events,ebay_live_attempts,shared_inventory_bag_links,live_sale_bag_photos,live_sale_lots,live_bag_order_links,packaging_events,packaging_issues,packaging_evidence,packaging_items,packaging_shipments,packaging_handoffs,ebay_order_task_events,ebay_order_tasks,ebay_order_label_events,ebay_order_lines,ebay_orders,storage.objects cascade;update packaging_settings set enabled=true,activated_at=now();`);
@@ -158,4 +159,66 @@ test('bag photos follow confirmed captured and shared inventory links, without m
  await db.query('insert into shared_inventory_bag_links values($1,$2)',[id(500),id(11)]);
  await db.query('insert into live_sale_bag_photos values($1,$2,now()),($3,$4,now())',[id(500),'correct.jpg',id(501),'wrong.jpg']);
  const d=await call('detail',{order_ids:[id(1)]});assert.equal(d.bag_photos.length,1);assert.deepEqual(d.bag_photos[0].order_line_ids,[id(11)]);assert.deepEqual(d.bag_photos[0].order_ids,[id(1)]);
+});
+
+test('buyer queue groups normalized usernames before search and opens all ready order lines',async()=>{
+ await db.exec("update ebay_orders set buyer_username=case when order_number='order-1' then ' BuyerOne ' else 'buyerone' end");
+ await close(1);await close(2);
+ const q=await call('queue');assert.equal(q.total,1);assert.equal(q.order_total,2);assert.equal(q.counts.to_package,1);assert.equal(q.rows[0].item_count,4);assert.deepEqual(q.rows[0].order_ids,[id(1),id(2)]);
+ const search=await call('queue',{search:'order-2'});assert.equal(search.total,1);assert.equal(search.rows[0].order_ids.length,2);
+ const tracking=await call('queue',{search:code});assert.equal(tracking.rows[0].order_ids.length,2);
+ const d=await call('buyer',{buyer_order_id:id(2)});assert.equal(d.orders.length,2);assert.equal(d.lines.length,2);
+ await db.query("update ebay_order_lines set line_status='pending',fulfilled_quantity=0 where order_id=$1",[id(2)]);
+ assert.deepEqual((await call('queue')).rows[0].order_ids,[id(1)]);
+ assert.equal((await call('buyer',{buyer_order_id:id(2)})).orders.length,1);
+ await db.query("update ebay_orders set tracking_number=null,label_metadata=$1 where id=$2",[JSON.stringify({pages:[{trackingNumbers:[code]}]}),id(1)]);
+ assert.equal((await call('queue',{search:']C142033101'+code})).total,1);
+});
+
+test('missing usernames and similar display names never merge unrelated customers',async()=>{
+ await db.exec("update ebay_orders set buyer_username=null,buyer_name='Same name'");await close(1);await close(2);
+ assert.equal((await call('queue')).total,2);assert.equal((await call('buyer',{buyer_order_id:id(1)})).orders.length,1);
+ await db.exec("update ebay_orders set buyer_username=case when order_number='order-1' then 'rahulp601' else 'rahulp602' end");
+ assert.equal((await call('queue')).total,2);
+ for(const fn of ['packaging_buyer_key(text,uuid)','packaging_ready_orders()','packaging_buyer_orders(uuid)'])assert.equal((await db.query("select has_function_privilege('authenticated',$1,'execute') ok",[fn])).rows[0].ok,false);
+ await db.exec("set test.allowed='no'");await assert.rejects(call('buyer',{buyer_order_id:id(1)}),/staff access/);
+});
+
+test('buyer groups span pagination and more than fifty orders without dropping any order',async()=>{
+ await db.exec(`insert into ebay_orders(id,order_number,buyer_username,status,sale_date) select gen_random_uuid(),'extra-'||n,case when n<=60 then 'wholesale' else 'separate-'||n end,'pending',now() from generate_series(1,101) n;
+ insert into ebay_order_lines(id,order_id,item_title,quantity,fulfilled_quantity,line_status) select gen_random_uuid(),id,'Ring',1,0,'pending' from ebay_orders where order_number like 'extra-%';
+ update ebay_order_lines set line_status='fulfilled',fulfilled_quantity=quantity,fulfilled_at=now(),fulfilled_by=auth.uid() where item_title='Ring';`);
+ const q=await call('queue');assert.equal(q.total,42);assert.equal(q.rows.length,40);
+ const q2=await call('queue',{offset:40});assert.equal(q2.rows.length,2);
+ const all=[...q.rows,...q2.rows];assert.equal(new Set(all.map(r=>r.buyer_key)).size,42);
+ const group=all.find(r=>r.title==='wholesale');assert.equal(group.order_ids.length,60);
+ assert.equal((await call('queue',{search:'extra-60'})).rows[0].order_ids.length,60);
+ assert.equal((await call('buyer',{buyer_order_id:group.order_id})).orders.length,60);
+});
+
+test('same buyer and tracking resolve one shipment even with separate PDF copies',async()=>{
+ await db.query("update ebay_orders set buyer_username='onebuyer',tracking_number=$1,label_storage_bucket='ebay-labels',label_file_path=order_number||'.pdf'",[code]);await close(1);await close(2);
+ const scan=await call('scan',{tracking:code});assert.equal(scan.matches.length,1);assert.deepEqual(scan.matches[0].order_ids,[id(1),id(2)]);
+ const d=await start(scan.matches[0].order_ids);assert.equal(d.orders.length,2);assert.equal((await call('queue')).total,0);
+ assert.equal((await start(scan.matches[0].order_ids)).shipment.id,d.shipment.id);
+});
+
+test('combine buyer requires recipient confirmation and creates one audited package without changing stock',async()=>{
+ await db.exec("update ebay_orders set buyer_username='onebuyer'");await close(1);await close(2);
+ const scan=await call('scan',{tracking:code});assert.deepEqual(scan.matches[0].order_ids,[id(1)]);assert.deepEqual(scan.matches[0].buyer_order_ids,[id(1),id(2)]);
+ const args={tracking:code,order_ids:[id(1),id(2)],combine_buyer:true,note:'Same recipient, one label'};
+ await assert.rejects(write('start',null,args),/Confirm that all buyer/);
+ const d=await write('start',null,{...args,confirm_buyer:true});assert.equal(d.orders.length,2);assert.equal(d.lines.length,2);assert.equal((await call('queue')).total,0);
+ assert.equal((await db.query('select sum(fulfilled_quantity)::int n from ebay_order_lines')).rows[0].n,4);
+ assert.equal((await db.query("select (payload->'request'->>'combine_buyer')::boolean ok from packaging_events where action='start'")).rows[0].ok,true);
+});
+
+test('combine buyer rejects mixed buyers, stale group and orders already being packed',async()=>{
+ await close(1);await close(2);const args={tracking:code,order_ids:[id(1),id(2)],combine_buyer:true,confirm_buyer:true};
+ await assert.rejects(write('start',null,args),/same eBay username/);
+ await db.exec("update ebay_orders set buyer_username='onebuyer'");
+ await assert.rejects(write('start',null,{...args,order_ids:[id(1)]}),/buyer group changed/);
+ await start([id(2)],'9400100000000000000002');
+ await assert.rejects(write('start',null,args),/already being packed/);
+ assert.equal((await db.query('select count(*)::int n from packaging_shipments')).rows[0].n,1);
 });
