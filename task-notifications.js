@@ -10,7 +10,7 @@
     task_ready_for_review: 'Ready for review', task_completed: 'Work completed', subtask_completed: 'Subtask completed',
     task_due_reminder: 'Task reminder', task_overdue: 'Overdue task'};
   let client, userId = '', generation = 0, channel, timer, flight, queued = false;
-  let root, unread = [], recent = [], unreadCount = 0, limit = PAGE_SIZE, view = 'unread', opened = false;
+  let root, launcher, launcherHost, unread = [], recent = [], unreadCount = 0, limit = PAGE_SIZE, view = 'unread', opened = false;
   let minimizedId = '', errorMessage = '', loading = false, busyIds = new Set(), returnFocus;
   let listSignature = '', publishedSignature = '', announcedId = '', resolveReady, readRevision = 0, authRevision = 0;
   const ready = new Promise(resolve => { resolveReady = resolve; });
@@ -41,7 +41,7 @@
     if (root) return;
     if (!document.getElementById('og-task-updates-style')) {
       const style = document.createElement('link');
-      style.id = 'og-task-updates-style'; style.rel = 'stylesheet'; style.href = 'task-notifications.css?v=20261007';
+      style.id = 'og-task-updates-style'; style.rel = 'stylesheet'; style.href = 'task-notifications.css?v=20261008-header-actions';
       document.head.append(style);
     }
     root = document.createElement('div');
@@ -50,7 +50,7 @@
       <div class="og-tu-announce" role="status" aria-live="polite" aria-atomic="true"></div>
       <button type="button" class="og-tu-launcher" aria-controls="og-tu-panel" aria-expanded="false" aria-label="Task updates">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
-        <span>Task updates</span><strong class="og-tu-count" hidden>0</strong>
+        <span class="og-tu-label-full">Task updates</span><span class="og-tu-label-short" aria-hidden="true">Updates</span><strong class="og-tu-count" hidden>0</strong>
       </button>
       <section class="og-tu-alert" aria-label="New task updates" hidden>
         <div class="og-tu-alert-head"><strong>Tasks & replies</strong><button type="button" data-tu-minimize aria-label="Minimize task alert">−</button></div>
@@ -66,7 +66,10 @@
         <footer><button type="button" data-tu-more hidden>Load more</button><a href="team-tasks.html">Go to Tasks →</a><small>Reading an update does not complete the task.</small></footer>
       </section>`;
     document.body.append(root);
-    root.querySelector('.og-tu-launcher').addEventListener('click', () => opened ? close() : open());
+    launcher = root.querySelector('.og-tu-launcher');
+    launcherHost = document.getElementById('task-updates-slot');
+    if (launcherHost) { launcherHost.append(launcher); root.classList.add('is-docked'); }
+    launcher.addEventListener('click', () => opened ? close() : open());
     root.querySelector('[data-tu-review]').addEventListener('click', open);
     root.querySelector('[data-tu-minimize]').addEventListener('click', minimize);
     root.querySelector('[data-tu-close]').addEventListener('click', close);
@@ -94,11 +97,11 @@
   function render() {
     if (!root || !userId) return;
     const latest = unread[0];
-    root.querySelector('.og-tu-launcher').setAttribute('aria-expanded', String(opened));
-    const badge = root.querySelector('.og-tu-count');
+    launcher.setAttribute('aria-expanded', String(opened));
+    const badge = launcher.querySelector('.og-tu-count');
     badge.hidden = !unreadCount; badge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
-    root.querySelector('.og-tu-launcher').setAttribute('aria-label', `Task updates, ${unreadCount} unread`);
-    root.querySelector('.og-tu-launcher').hidden = opened;
+    launcher.setAttribute('aria-label', `Task updates, ${unreadCount} unread`);
+    launcher.hidden = opened && !launcherHost;
     const alert = root.querySelector('.og-tu-alert');
     alert.hidden = opened || !latest || latest.id === minimizedId;
     root.querySelector('.og-tu-alert-title').textContent = latest?.title || 'Task update';
@@ -145,7 +148,7 @@
     root.querySelector('[data-tu-close]').focus({preventScroll: true});
     void refresh();
   }
-  function close() { minimize(); (returnFocus?.isConnected ? returnFocus : root?.querySelector('.og-tu-launcher'))?.focus({preventScroll: true}); }
+  function close() { minimize(); (launcherHost ? launcher : returnFocus?.isConnected ? returnFocus : launcher)?.focus({preventScroll: true}); }
 
   function refresh() {
     if (!client || !userId) return Promise.resolve();
@@ -210,6 +213,7 @@
     channel = null; clearInterval(timer); timer = null; flight = null; queued = false;
     userId = ''; unread = []; recent = []; unreadCount = 0; opened = false; loading = false;
     limit = PAGE_SIZE; view = 'unread'; minimizedId = ''; announcedId = ''; errorMessage = ''; listSignature = ''; busyIds = new Set();
+    launcher?.remove(); launcher = null; launcherHost = null;
     root?.remove(); root = null; publish();
   }
   async function changeUser(user) {
@@ -246,7 +250,7 @@
       if (revision === authRevision) await changeUser(data?.session?.user);
     } catch { resolveReady(); }
   }
-  window.OGTaskNotifications = {ready, open, refresh, markRead, snapshot};
+  window.OGTaskNotifications = {ready, open, dismiss: minimize, refresh, markRead, snapshot};
   window.addEventListener('storage', event => {
     if (!userId) return;
     if (event.key === key('changed')) void refresh();

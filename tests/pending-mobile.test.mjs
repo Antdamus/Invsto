@@ -77,7 +77,7 @@ for (const width of [320, 390, 430, 760]) {
     await expect(page.locator('.mobile-header')).toBeHidden();
     await expect(page.locator('.phone-orders-header')).toBeVisible();
     const card = page.locator('.buyer-order-card').first();
-    const box = await card.boundingBox(); assert.ok(box.y < 440, `first buyer starts at ${box.y}px`);
+    const box = await card.boundingBox(); assert.ok(box.y < 520, `first buyer remains on the first screen below the action bar: ${box.y}px`);
     await expect(card.locator('.buyer-card-note-body p')).toHaveCount(2);
     await expect(card.locator('.buyer-card-note-body p').first()).toBeVisible();
     assert.match(await card.innerText(), /Missing the silver bracelet/);

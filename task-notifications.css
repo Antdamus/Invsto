@@ -8,6 +8,7 @@
 #og-task-updates :is(button,a):focus-visible { outline: 2px solid var(--tu-gold); outline-offset: 3px; }
 #og-task-updates :is(h2,h3,p) { margin: 0; color: inherit; font-family: inherit; }
 #og-task-updates .og-tu-launcher { position: fixed; right: 20px; bottom: 22px; display: flex; align-items: center; gap: 9px; border-radius: 999px; background: var(--tu-bg); box-shadow: 0 8px 32px #0006; font-weight: 650; }
+#og-task-updates .og-tu-label-short { display: none; }
 #og-task-updates .og-tu-count { border-radius: 999px; min-width: 25px; padding: 2px 6px; text-align: center; background: var(--tu-gold); color: #26251f; }
 #og-task-updates .og-tu-alert { position: fixed; right: 20px; bottom: 82px; width: 330px; max-width: calc(100vw - 24px); background: var(--tu-bg); border: 1px solid #d9bb7d70; border-radius: 18px; padding: 13px 16px 16px; box-shadow: 0 16px 48px #0007; }
 #og-task-updates .og-tu-alert-head { display: flex; align-items: center; justify-content: space-between; color: var(--tu-gold); font-size: 12px; letter-spacing: .02em; }
@@ -49,4 +50,12 @@
   #og-task-updates .og-tu-tabs { padding-left: 16px; padding-right: 16px; }
   #og-task-updates .og-tu-entry p { font-size: 15px; }
 }
-@media print { #og-task-updates { display: none !important; } }
+/* Pages with a header slot keep one launcher there; panels stay in the body,
+   outside header clipping and stacking contexts. Other pages keep their dock. */
+#og-task-updates.is-docked .og-tu-alert { top: calc(var(--pending-header-height, 94px) + 8px); bottom: auto; max-height: calc(100dvh - var(--pending-header-height, 94px) - 24px); overflow-y: auto; }
+#og-task-updates.is-docked .og-tu-panel { top: calc(var(--pending-header-height, 94px) + 8px); bottom: auto; height: min(700px, calc(100dvh - var(--pending-header-height, 94px) - 24px)); }
+@media (max-width: 760px) {
+  #og-task-updates.is-docked .og-tu-alert { right: 12px; }
+  #og-task-updates.is-docked .og-tu-panel { right: 8px; width: calc(100% - 16px); max-width: none; border-radius: 18px; height: calc(100dvh - var(--pending-header-height, 132px) - 16px); }
+}
+@media print { #og-task-updates, #task-updates-slot { display: none !important; } }

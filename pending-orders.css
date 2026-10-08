@@ -5402,26 +5402,34 @@ body.phone-camera-mode .completion-photo-actions .folder-photo-picker { flex: 1 
   box-shadow: inset 5px 0 0 #6de09a;
 }
 .buyer-line-btn.is-found-jump-target { outline: 3px solid #a5f2c3; outline-offset: 3px; }
-.latest-found-jump {
-  position: fixed;
-  right: 18px;
-  bottom: max(18px, env(safe-area-inset-bottom));
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  width: min(330px, calc(100vw - 32px));
-  min-height: 52px;
-  padding: 12px 18px;
-  border-color: #6de09a;
-  background: #193d2a;
-  color: #d6ffe5;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, .45);
+.main > .header:has(#pending-desktop-actions) { position: sticky; top: 0; z-index: 1200; background: #111614f5; }
+#pending-desktop-actions { flex-shrink: 0; }
+#pending-quick-actions { display: flex; align-items: center; gap: 8px; font-family: Manrope, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+#pending-quick-actions :is(.pending-quick-action,.og-tu-launcher) {
+  position: static; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 48px; min-height: 44px; margin: 0; padding: 8px 14px; border: 1px solid #ffffff20;
+  border-radius: 13px; background: #ffffff06; color: #f3f1e9; font: 700 12px/1.25 Manrope, sans-serif;
+  text-decoration: none; cursor: pointer; white-space: nowrap; touch-action: manipulation; box-shadow: none;
 }
-.latest-found-jump small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .75rem; font-weight: 400; }
-.orders-panel:has(#jump-latest-found:not(.hidden)) { padding-bottom: 100px; }
-body.pending-order-detail-open #jump-latest-found { display: none; }
+#pending-quick-actions svg { width: 18px; height: 18px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#pending-quick-actions .is-primary { background: #eed29b; color: #252117; border-color: #eed29b; }
+#pending-quick-actions .latest-found-jump:not(:disabled) { color: #bce9d1; border-color: #89bc9f55; background: #304b3b40; }
+#pending-quick-actions button:hover:not(:disabled) { filter: brightness(1.13); }
+#pending-quick-actions button:disabled { opacity: .42; cursor: default; }
+#pending-quick-actions button:focus-visible { outline: 2px solid #eed29b; outline-offset: 3px; }
+#pending-quick-actions button[aria-expanded=true] { border-color: #eed29b; background: #eed29b18; }
+#pending-quick-actions .latest-found-jump > span { display: grid; text-align: left; gap: 3px; }
+#pending-quick-actions small { display: block; max-width: 155px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #acbdb2; font-size: 10px; font-weight: 400; }
+#pending-quick-actions small:empty, #pending-quick-actions .quick-label-short, #pending-quick-actions .og-tu-label-short { display: none; }
+#pending-quick-actions .og-tu-count { border-radius: 20px; padding: 3px 6px; min-width: 23px; text-align: center; background: #eed29b; color: #252117; font-size: 11px; }
+#pending-quick-actions [hidden] { display: none !important; }
+.bag-scan-bar { scroll-margin-top: calc(var(--pending-header-height, 94px) + 16px); }
+body.phone-camera-mode #pending-quick-actions { display: none; }
+@media (min-width: 761px) and (max-width: 1100px) {
+  .main > .header:has(#pending-desktop-actions) .header-inner { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .main > .header:has(#pending-desktop-actions) .greeting .sub { display: none; }
+}
+@media print { #pending-quick-actions { display: none !important; } }
 [data-group-item-search]:empty, [data-item-search-status]:empty { display: none; }
 @media (max-width: 760px) {
   .buyer-line-btn, .buyer-line-btn.has-admin-select, .buyer-line-main, .buyer-line-copy {

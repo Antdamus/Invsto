@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261008-finance-background" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261008-header-actions" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
   <script src="extension-updates.js?v=20261003" defer></script>
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
-  <link rel="stylesheet" href="pending-orders-mobile.css?v=20261007-order-date" />
+  <link rel="stylesheet" href="pending-orders-mobile.css?v=20261008-header-actions" />
   <link rel="stylesheet" href="pending-bag-scan.css?v=20261007-bag-photos-2" />
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
   <link rel="stylesheet" href="task-request.css?v=20261007-intent-2" />
@@ -136,9 +136,18 @@
             <strong id="pending-greeting">Pending eBay Orders</strong>
             <div class="sub">Order fulfillment - scan, pack, and confirm removals</div>
           </div>
-          <div class="header-pills" aria-label="Page context">
-            <div class="pill">Scope: <b>eBay</b></div>
-            <div class="pill">Mode: <b>Mixed Checkout</b></div>
+          <div id="pending-desktop-actions">
+            <nav id="pending-quick-actions" aria-label="Quick order actions">
+              <button id="pending-scan-next" type="button" class="pending-quick-action is-primary" aria-label="Scan next bag" title="Go to the bag scanner. Your staged items are kept.">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M7 8v8m4-8v8m3-8v8m3-8v8"/></svg>
+                <span class="quick-label-full">Scan next bag</span><span class="quick-label-short">Scan next</span>
+              </button>
+              <button id="jump-latest-found" type="button" class="pending-quick-action latest-found-jump" disabled aria-label="Jump to latest found" title="No found items in this view yet">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6M5 21h14"/></svg>
+                <span>Latest found<small></small></span>
+              </button>
+              <div id="task-updates-slot" class="pending-task-updates-slot"></div>
+            </nav>
           </div>
         </div>
       </header>
@@ -460,10 +469,6 @@
           <div id="orders-list" class="orders-list">
             <div class="empty-state">Loading pending orders...</div>
           </div>
-          <button id="jump-latest-found" type="button" class="secondary-btn latest-found-jump hidden" disabled>
-            <span>Jump to latest found</span>
-            <small></small>
-          </button>
         </aside>
 
         <section class="fulfillment-panel">
@@ -1222,7 +1227,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
-  <script src="task-notifications.js?v=20261007" defer></script>
+  <script src="task-notifications.js?v=20261008-header-actions" defer></script>
   <script src="admin-nav.js?v=packaging-20261008"></script>
   <script src="ebay-buyer-insights.js"></script>
 <script src="shipping-pdf.js?v=20261003-performance"></script>
@@ -1236,8 +1241,8 @@
 <script src="shipping-label-reader.js?v=20261006-label-photos"></script>
 <script src="order-shipping-labels.js?v=20261006-label-photos"></script>
 <script src="receipt-preview-jobs.js?v=20261003-receipt-speed"></script>
-  <script src="pending-orders.js?v=finance-background-20261008"></script>
-  <script src="pending-bag-scan.js?v=20261007-bag-photos"></script>
-  <script src="pending-orders-mobile.js?v=20261007-bag-scan"></script>
+  <script src="pending-orders.js?v=header-actions-20261008"></script>
+  <script src="pending-bag-scan.js?v=20261008-header-actions"></script>
+  <script src="pending-orders-mobile.js?v=20261008-header-actions"></script>
 </body>
 </html>

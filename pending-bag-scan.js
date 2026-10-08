@@ -47,6 +47,7 @@
     const next = byId('bag-scan-next');
     next.textContent = queue.length ? `Next bag (${queue.length}) →` : 'Scan next';
     next.disabled = processing || saving;
+    if (byId('pending-scan-next')) byId('pending-scan-next').disabled = processing || saving || state.busy;
     byId('bag-scan-queued').textContent = queue.length ? `${queue.length} scan${queue.length === 1 ? '' : 's'} waiting` : '';
     byId('bag-scan-close').disabled = saving;
     byId('bag-scan-recent').disabled = processing || saving || waiting;
@@ -314,8 +315,20 @@
   }
 
   function focusScanner() {
+    if (state.busy || saving || processing) return;
+    window.PendingOrdersMobile?.closeTools({restoreFocus: false});
+    // Navigation only: keep staged checkout items, bag photos and queued scans.
+    byId('fulfillment-workflow')?.classList.add('hidden');
+    document.body.classList.remove('pending-order-detail-open', 'pending-mobile-sheet-open');
+    window.PendingOrdersMobile?.sync();
     byId('pending-bag-scan').scrollIntoView({block: 'center', behavior: 'instant'});
     byId('pending-bag-scan').focus({preventScroll: true});
+  }
+
+  function nextBag() {
+    if (state.busy || saving || processing) return;
+    window.OGTaskNotifications?.dismiss();
+    return queue.length ? processNext() : focusScanner();
   }
 
   function reset() {
@@ -338,7 +351,8 @@
       const value = byId('pending-bag-scan').value.trim();
       if (value) inputTimer = setTimeout(() => enqueue(value), 700);
     });
-    byId('bag-scan-next').addEventListener('click', () => queue.length ? processNext() : focusScanner());
+    byId('bag-scan-next').addEventListener('click', nextBag);
+    byId('pending-scan-next')?.addEventListener('click', nextBag);
     byId('bag-scan-close').addEventListener('click', reset);
     byId('bag-scan-found').addEventListener('click', async () => {
       if (!current || processing || saving || state.busy || !isPending(state.orders.find(line => line.id === current.line.id))) return;
@@ -405,5 +419,5 @@
     status(`Opened ${line.order?.order_number || 'order'} · ${line.item_title || 'Item'}`); refresh();
     void loadBagPhotos(current, version);
   }
-  window.PendingBagScan = {init, enqueue, reset, normalize, openLine};
+  window.PendingBagScan = {init, enqueue, reset, normalize, openLine, nextBag};
 })();

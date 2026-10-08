@@ -243,6 +243,6 @@ test('the Tasks-page bell uses the shared inbox and the same read state without 
 test('staff pages include the shared inbox; public sign-in stays clear', async () => {
   const names = ['admin','dashboard','worker-dashboard','seller-dashboard','pending-orders','stock','team-tasks','live-sales','past-live-sales',
     'ebay-order-history','ebay-returns','email-triage','add-item','add-inventory','bag-lookup','inventory-activity','locations','print-stations','sms-marketing','store-transfers','timeclock'];
-  for (const name of names) assert.match(await readFile(new URL(`${name}.html`, root), 'utf8'), /task-notifications\.js\?v=20261007/);
+  for (const name of names) assert.match(await readFile(new URL(`${name}.html`, root), 'utf8'), /task-notifications\.js\?v=\d{8}/);
   for (const name of ['index','set-password']) assert.doesNotMatch(await readFile(new URL(`${name}.html`, root), 'utf8'), /task-notifications\.js/);
 });

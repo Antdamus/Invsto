@@ -898,16 +898,19 @@ async function foundItemsPage(t,desktop) {
     }});
     renderOrders();
   });
+  await p.addScriptTag({url:`${origin}/pending-orders-mobile.js`});
   return p;
 }
 
 for(const desktop of [true,false])test(`found items turn green and the persistent jump returns to the latest saved item in a 100-line group (${desktop?'desktop':'phone'})`,async t=>{
   const p=await foundItemsPage(t,desktop);
-  assert.equal(await p.locator('#jump-latest-found').isVisible(),false);
+  assert.equal(await p.locator('#jump-latest-found').isDisabled(),true);
   const normalColor=await p.locator('[data-line-id="item-18"]').evaluate(row=>getComputedStyle(row).backgroundImage);
   await p.evaluate(()=>window.unchangedItemRow=document.querySelector('[data-line-id="item-1"]'));
+  if(!desktop)await p.locator('[data-line-id="item-72"] .phone-line-actions button').last().click();
   await p.locator('[data-item-found="item-72"]').click();
   await p.waitForFunction(()=>isItemFound(state.orders[71])&&!itemSearchBusy.size);
+  if(!desktop)await p.locator('[data-line-id="item-18"] .phone-line-actions button').last().click();
   await p.locator('[data-item-found="item-18"]').click();
   await p.waitForFunction(()=>isItemFound(state.orders[17])&&!itemSearchBusy.size);
   assert.deepEqual(await p.evaluate(()=>itemFoundWrites),[
@@ -934,6 +937,7 @@ for(const desktop of [true,false])test(`found items turn green and the persisten
   assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await mkdir(new URL('test-results/',root),{recursive:true});
   await p.screenshot({path:`test-results/item-found-${desktop?'desktop':'phone'}.png`});
+  if(!desktop)await p.locator('[data-line-id="item-18"] .phone-line-actions button').last().click();
   await p.locator('[data-item-search="item-18"]').click();
   await p.waitForFunction(()=>state.orders[17].item_search.is_missing&&!itemSearchBusy.size);
   assert.equal(await p.locator('[data-line-id="item-18"]').evaluate(row=>row.classList.contains('is-item-found')),false);
@@ -949,7 +953,7 @@ test('found status respects save failures, shared updates, collapsed customer gr
   await p.waitForFunction(()=>itemFoundWrites.length===1&&!itemSearchBusy.size);
   assert.equal(await p.locator('.is-item-found').count(),0);
   assert.equal(await p.locator('[data-item-found="item-5"]').isEnabled(),true);
-  assert.equal(await p.locator('#jump-latest-found').isVisible(),false);
+  assert.equal(await p.locator('#jump-latest-found').isDisabled(),true);
   await p.evaluate(async()=>{
     itemFoundServer.set('item-5',{order_line_id:'item-5',is_missing:false,updated_by_email:'other-staff@example.test',updated_at:'2026-10-03T21:00:00Z'});
     await refreshItemSearch(['item-5']);
@@ -967,7 +971,7 @@ test('found status respects save failures, shared updates, collapsed customer gr
   await p.locator('#jump-latest-found').click();
   await p.waitForFunction(()=>document.activeElement?.dataset.lineId==='item-5');
   await p.evaluate(()=>{state.orders[4].line_status='fulfilled';renderOrders();});
-  assert.equal(await p.locator('#jump-latest-found').isVisible(),false);
+  assert.equal(await p.locator('#jump-latest-found').isDisabled(),true);
 });
 
 test('latest found can open a customer beyond the initial queue render chunk',async t=>{

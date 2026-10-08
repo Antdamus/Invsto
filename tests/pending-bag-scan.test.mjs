@@ -87,6 +87,71 @@ async function open(t,width=390) {
 }
 async function scan(page,code) {await page.locator('#pending-bag-scan').fill(code);await page.locator('#pending-bag-scan').press('Enter');}
 
+async function enableHeaderNotifications(page) {
+  await page.evaluate(() => {
+    window.noticeRows=[{id:'notice-1',recipient_user_id:'worker',task_id:'00000000-0000-4000-8000-000000000001',
+      title:'Reply: The certificate is ready',body:'Please include it with the bag before packing.',created_at:new Date().toISOString(),read_at:null,source:'order',notification_type:'task_progress_update'}];
+    supabase.auth={getSession:async()=>({data:{session:{user:{id:'worker'}}}}),onAuthStateChange:fn=>{window.noticeAuth=fn;}};
+    supabase.from=table=>{
+      if(table!=='task_notifications')throw Error('Unexpected table');
+      const q={select(){return q;},eq(){return q;},is(){return q;},order(){return q;},range(){return q;},limit(){return q;},
+        then(resolve){return Promise.resolve(resolve({data:structuredClone(noticeRows),count:noticeRows.length}));}};
+      return q;
+    };
+  });
+  await page.addScriptTag({url:origin+'/task-notifications.js'});
+  await page.evaluate(()=>OGTaskNotifications.ready);
+}
+
+for(const width of [320,390,820,1366]) test(`${width}px: header actions stay reachable, notifications do not overlap them, and scan next focuses the scanner`,async t=>{
+  const page=await open(t,width);
+  await page.evaluate(()=>{state.orders[8].item_search={is_missing:false,updated_at:new Date().toISOString()};repaintLatestFoundButton();});
+  await enableHeaderNotifications(page);
+  const actions=page.getByRole('navigation',{name:'Quick order actions'}),scanNext=page.getByRole('button',{name:'Scan next bag',exact:true});
+  const latest=page.getByRole('button',{name:'Jump to latest found',exact:true}),updates=page.getByRole('button',{name:'Task updates, 1 unread',exact:true});
+  await page.evaluate(()=>window.scrollTo(0,1800));
+  const boxes=await Promise.all([scanNext,latest,updates].map(el=>el.boundingBox()));
+  for(const box of boxes)assert.ok(box&&box.y>=0&&box.y+box.height<200&&box.x>=0&&box.x+box.width<=width+1,JSON.stringify(box));
+  for(let i=1;i<boxes.length;i++)assert.ok(boxes[i].x>=boxes[i-1].x+boxes[i-1].width,'actions have separate touch targets');
+  const alert=page.getByRole('region',{name:'New task updates'});
+  assert.ok((await alert.boundingBox()).y>=(await actions.boundingBox()).y+(await actions.boundingBox()).height);
+  await page.getByRole('button',{name:'Minimize task alert'}).click();
+  await updates.click();await expect(page.getByRole('region',{name:'Task updates inbox'})).toBeVisible();
+  await expect(updates).toBeVisible();
+  const inbox=await page.getByRole('region',{name:'Task updates inbox'}).boundingBox();
+  assert.ok(inbox.x>=0&&inbox.x+inbox.width<=width+1&&inbox.y>=boxes[2].y+boxes[2].height&&inbox.y+inbox.height<=844);
+  await page.getByRole('button',{name:'Close task updates'}).click();await expect(updates).toBeFocused();
+  assert.equal(await page.evaluate(()=>OGTaskNotifications.snapshot().unreadCount),1,'closing does not mark it read');
+  await scanNext.click();await expect(page.locator('#pending-bag-scan')).toBeFocused();
+  const input=await page.locator('#pending-bag-scan').boundingBox(),bar=await actions.boundingBox();
+  assert.ok(input.y>=bar.y+bar.height&&input.y+input.height<844,'scanner is visible below the header');
+  await latest.click();await expect(page.locator('[data-line-id="line-8"]').first()).toBeFocused();
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  assert.deepEqual(await page.evaluate(()=>calls.filter(c=>c.name==='set_pending_order_item_missing'||c.name==='confirm_pending_bag_photos')),[]);
+  if(width===390||width===1366)await page.screenshot({path:`test-results/pending-header-actions-${width}.png`});
+  await page.evaluate(()=>noticeAuth('SIGNED_OUT',null));await expect(page.locator('#task-updates-slot button')).toHaveCount(0);
+});
+
+test('Scan next bag preserves a staged checkout and advances queued scans in their existing order',async t=>{
+  const page=await open(t,390);
+  await page.evaluate(()=>{
+    state.checkoutStoreId='main';renderCheckoutStoreSelect();state.stagedFulfillments.set('line-0',{lineId:'line-0',quantity:1});
+    document.getElementById('fulfillment-workflow').classList.remove('hidden');
+    document.body.classList.add('pending-order-detail-open','pending-mobile-sheet-open');
+  });
+  await page.getByRole('button',{name:'Scan next bag',exact:true}).click();
+  await expect(page.locator('#fulfillment-workflow')).toBeHidden();await expect(page.locator('#pending-bag-scan')).toBeFocused();
+  assert.equal(await page.evaluate(()=>state.stagedFulfillments.size),1);
+  await page.evaluate(()=>{scanDelay=250;void PendingBagScan.enqueue('LIVE-SLOW');void PendingBagScan.enqueue('LIVE-B');});
+  await expect(page.locator('#bag-scan-current')).toContainText('LIVE-SLOW');
+  await expect(page.getByRole('button',{name:'Scan next bag',exact:true})).toBeEnabled();
+  await page.getByRole('button',{name:'Scan next bag',exact:true}).click();
+  await expect(page.locator('#bag-scan-current')).toContainText('LIVE-B');
+  assert.equal(await page.evaluate(()=>state.stagedFulfillments.size),1);
+  assert.deepEqual(await page.evaluate(()=>calls.filter(c=>c.name==='find_pending_order_bag').map(c=>c.args._scan)),['LIVE-SLOW','LIVE-B']);
+  assert.ok((await page.evaluate(()=>calls)).every(c=>!['set_pending_order_item_missing','confirm_pending_bag_photos'].includes(c.name)));
+});
+
 for (const width of [390, 1280]) test(`${width}px: task link expands its order and notes without opening packing`, async t => {
   const page = await open(t, width);
   const result = await page.evaluate(async () => {

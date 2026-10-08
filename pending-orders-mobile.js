@@ -106,13 +106,22 @@
       else anchor.after(element);
     });
     if (!isPhone()) closeTools({restoreFocus: false});
+    const actions = byId('pending-quick-actions');
+    if (actions) (isPhone() ? document.querySelector('.phone-orders-header') : byId('pending-desktop-actions'))?.append(actions);
+    syncHeaderHeight();
     byId('order-search').placeholder = isPhone() ? 'Search buyer, order or item…' : 'Search order, title, buyer, item number...';
     sync();
   }
 
+  function syncHeaderHeight() {
+    const header = document.querySelector(isPhone() ? '.phone-orders-header' : '.main > .header');
+    const height = Math.ceil(header?.getBoundingClientRect().height || 0);
+    document.documentElement.style.setProperty('--pending-header-height', `${height}px`);
+  }
+
   function init() {
     if (!byId('phone-orders-tools') || document.body.classList.contains('phone-camera-mode')) return;
-    ['.fulfillment-utility-strip', '#jump-latest-found', '#order-import-panel', '#admin-order-actions-panel', '#extension-updates'].forEach(selector => {
+    ['.fulfillment-utility-strip', '#order-import-panel', '#admin-order-actions-panel', '#extension-updates'].forEach(selector => {
       const element = document.querySelector(selector);
       if (!element) return;
       const anchor = document.createComment('Desktop packing tools position');
@@ -156,6 +165,8 @@
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     });
     const observer = new MutationObserver(scheduleSync);
+    const headerObserver = new ResizeObserver(syncHeaderHeight);
+    document.querySelectorAll('.phone-orders-header, .main > .header').forEach(header => headerObserver.observe(header));
     ['summary-strip', 'buyer-bundle-panel', 'checkout-store-select', 'admin-order-selected-count', 'buyer-remaining-count'].forEach(id => {
       if (byId(id)) observer.observe(byId(id), {childList: true, subtree: true, characterData: true});
     });

@@ -3561,17 +3561,23 @@ function repaintLatestFoundButton() {
   const button = $("jump-latest-found");
   if (!button) return;
   const line = getLatestFoundItem();
-  button.classList.toggle("hidden", !line);
+  button.classList.remove("hidden");
   button.disabled = !line;
   const context = button.querySelector("small");
   if (context) context.textContent = line ? `${line.order?.buyer_username || "Customer"} · ${line.item_title || "Item"}` : "";
-  button.title = line ? `Jump to latest found: ${line.order?.buyer_username || "Customer"} — ${line.item_title || "Item"}` : "";
+  button.title = line ? `Jump to latest found: ${line.order?.buyer_username || "Customer"} — ${line.item_title || "Item"}` : "No found items in this view yet";
 }
 let itemFoundJumpVersion = 0;
 function jumpToLatestFoundItem(buyerKey = "") {
+  if (state.busy) return;
   const candidates = state.filteredOrders.filter(line => !buyerKey || getBuyerKey(line) === buyerKey);
   const line = getLatestFoundItem(candidates);
   if (!line) { repaintLatestFoundButton(); return; }
+  window.PendingOrdersMobile?.closeTools({restoreFocus: false});
+  $("fulfillment-workflow")?.classList.add("hidden");
+  document.body.classList.remove("pending-order-detail-open", "pending-mobile-sheet-open");
+  window.PendingOrdersMobile?.sync();
+  window.OGTaskNotifications?.dismiss();
   const key = getBuyerKey(line);
   const version = ++itemFoundJumpVersion;
   setBuyerGroupExpanded(key, true, {render: false});
