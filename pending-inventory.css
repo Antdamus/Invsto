@@ -8,8 +8,8 @@
 .line-inventory-saved span span{font-size:12px;color:#b9c6bc}
 .line-inventory-saved img,#attach-inventory-selected img,.inventory-match img{width:58px;height:58px;object-fit:cover;flex-shrink:0;border-radius:12px}
 #attach-inventory-modal{z-index:7700}
-.attach-inventory-card{width:min(100%,550px);padding:26px;max-height:calc(100dvh - 32px);overflow-y:auto}
-.attach-inventory-card h2{margin:8px 35px 8px 0;font-size:25px}
+.attach-inventory-card{width:min(100%,550px);padding:26px;max-height:calc(100dvh - 32px);overflow-y:auto;background:#19211d;color:#f2eadc}
+.attach-inventory-card h2{margin:8px 35px 8px 0;font-size:25px;color:#f2eadc}
 .attach-inventory-card p{font-size:14px;color:#bcc9c0;line-height:1.5}
 .attach-inventory-card label{display:grid;gap:8px;font-size:13px;font-weight:600;color:#d5dfd7;margin:16px 0}
 .attach-inventory-card input,.attach-inventory-card select{width:100%;box-sizing:border-box;min-height:48px;padding:12px;border:1px solid #c0d0c138;border-radius:12px;background:#101713;color:#f5f1e6;font:inherit;font-size:16px}
