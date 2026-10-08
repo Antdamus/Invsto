@@ -378,6 +378,18 @@ test('pending order links target the order queue, while closed orders keep their
   assert.match(links[1], /^ebay-order-history.html\?historySearch=20-15235-74943/);
 });
 
+test('packaging tasks open their package and cannot use the older Mark Shipped shortcut',async t=>{
+  const page=await open(t);
+  const result=await page.evaluate(()=>{
+    const base={id:'task-pack',source:'order',order_id:'order-1',status:'in_progress',task_type:'pending_packaging',metadata:{packaging_order_handoff:true}};
+    const task=normalizeOrderTask(base);
+    const issue=normalizeOrderTask({...base,task_type:'coordination',metadata:{source:'order_history',packaging_shipment_id:'package-1'}});
+    return {href:task.actionHref,issueHref:issue.actionHref,actions:renderTaskActions(task,false),legacy:renderOrderTaskActions(task,false)};
+  });
+  assert.equal(result.href,'packaging.html?order=order-1');assert.equal(result.issueHref,'packaging.html?package=package-1');
+  assert.match(result.actions,/Open Packaging/);assert.doesNotMatch(result.actions+result.legacy,/shipping-complete|shipping-ready-packaging/);
+});
+
 async function replyFixture(page, source='team') {
   await page.evaluate(source => {
     state.assignees.forEach(employee => {employee.display_name = employee.name; employee.active = true;});

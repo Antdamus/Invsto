@@ -302,7 +302,7 @@ test('store changes invalidate stock and mixed controls fit phone and desktop',a
   }
 });
 
-test('shipment tasks wait for every line and quantity to finish',async t=>{
+test('checkout never completes shipping tasks before Packaging dispatch',async t=>{
   const p=await open(t);const counts=await p.evaluate(async()=>{
     let finished=0;
     const tasks=[{id:'task-a',order_id:'order-a',order_line_ids:[]}];
@@ -312,7 +312,7 @@ test('shipment tasks wait for every line and quantity to finish',async t=>{
     await realCompleteShipping({lineIds:['line-a'],orderIds:['order-a']});const before=finished;
     lines[1].line_status='fulfilled';await realCompleteShipping({lineIds:['line-b'],orderIds:['order-a']});
     return [before,finished];
-  });assert.deepEqual(counts,[0,1]);
+  });assert.deepEqual(counts,[0,0]);
 });
 
 test('manual staging cancels delayed barcode lookup and changing source cancels auto staging',async t=>{

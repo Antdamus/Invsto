@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+ <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+ <meta name="theme-color" content="#101713"><title>Packaging · OG Jewelry</title>
+ <link rel="stylesheet" href="dashboard.css"><link rel="stylesheet" href="packaging.css?v=20261008-1">
+ <link rel="stylesheet" href="barcode-scanner.css">
+</head>
+<body data-page="packaging">
+ <div class="page"><aside class="sidebar"><div class="sidebar-inner"><div class="logo">OG</div><nav class="nav-links"></nav></div></aside>
+ <div class="main"><main class="content packaging-page">
+  <header class="pack-hero"><div><span class="pack-eyebrow">FULFILLMENT · THE FINAL CHECK</span><h1>Packaging</h1><p>Every item checked. Every package accounted for.</p></div><button id="pack-refresh" class="pack-button" aria-label="Refresh packaging">↻ <span>Refresh</span></button></header>
+  <div id="pack-status" role="status" aria-live="polite"></div>
+  <form id="pack-scan-form" class="pack-scan"><label for="pack-barcode">Scan a shipping label</label><div><input id="pack-barcode" placeholder="Scan or enter tracking number" autocomplete="off" autocapitalize="characters" spellcheck="false"><button type="button" class="pack-button" data-scan-target="pack-barcode" data-scan-action="pack-find" data-scan-hint="Scan the tracking barcode on the shipping label." aria-label="Scan label with camera">▣ <span>Camera</span></button><button id="pack-find" class="pack-button primary">Find package <span aria-hidden="true">→</span></button></div></form>
+  <nav id="pack-tabs" class="pack-tabs" aria-label="Packaging queues"></nav>
+  <div class="pack-workspace">
+   <section id="pack-list-panel" class="pack-list-panel" aria-label="Packaging queue"><div class="pack-list-head"><h2 id="pack-queue-title">To package</h2><span id="pack-total"></span></div><label class="sr-only" for="pack-search">Search packages</label><input id="pack-search" type="search" placeholder="Buyer, order or tracking number"><div id="pack-list" aria-live="polite"><p class="pack-empty">Loading packaging…</p></div><div id="pack-pagination"></div></section>
+   <section id="pack-detail" class="pack-detail" aria-label="Package details"><div class="pack-welcome"><span class="pack-box" aria-hidden="true">▣</span><h2>Start with the shipping label</h2><p>Scan a label to bring up its orders, photos and instructions. Or choose an order from the queue.</p><div><span>01 · Check contents</span><span>02 · Add proof</span><span>03 · Send today</span></div></div></section>
+  </div>
+ </main></div></div>
+ <dialog id="pack-dialog" class="pack-dialog" aria-labelledby="pack-dialog-title"><form id="pack-dialog-form"><header><h2 id="pack-dialog-title"></h2><button type="button" data-dialog-close class="pack-button" aria-label="Close dialog">×</button></header><div id="pack-dialog-body"></div><p id="pack-dialog-error" role="alert"></p><footer><button type="button" data-dialog-close class="pack-button">Cancel</button><button id="pack-dialog-submit" class="pack-button primary">Save</button></footer></form></dialog>
+ <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script><script src="initSupabase.js?v=5f6p2b-20260608"></script>
+ <script src="admin-nav.js?v=packaging-20261008"></script><script src="task-notifications.js?v=20261007" defer></script>
+ <script src="barcode-scanner.js?v=20260926-closeup" defer></script><script src="packaging.js?v=20261008-1" defer></script>
+</body></html>

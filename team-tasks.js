@@ -1815,7 +1815,11 @@ function normalizeOrderTask(task = {}) {
     buyer_name: task.buyer_name || metadata.buyer_name || order.buyer_name || "",
     order_status: task.order_status || order.status || "",
     ship_by_date: task.ship_by_date || order.ship_by_date || "",
-    actionHref: isOrderHistoryTask
+    actionHref: metadata.packaging_shipment_id
+      ? `packaging.html?package=${encodeURIComponent(metadata.packaging_shipment_id)}`
+      : metadata.packaging_order_handoff
+      ? `packaging.html?order=${encodeURIComponent(task.order_id)}`
+      : isOrderHistoryTask
       ? `ebay-order-history.html?historySearch=${encodeURIComponent(orderNumber || buyer || "")}&allDates=1`
       : `pending-orders.html?orderTaskId=${encodeURIComponent(task.id || "")}#orders-list`,
   };
@@ -4814,7 +4818,7 @@ function renderTaskActions(task = {}, resolved = false) {
   if (isTaskViewAsWorkerMode()) return '';
   const key = escapeHtml(getUnifiedTaskKey(task));
   const buttons = [];
-  if (task.actionHref) buttons.push('<a class="secondary-btn" href="'+escapeHtml(task.actionHref)+'">'+(task.source === 'order' ? 'Open order' : 'Open return')+'</a>');
+  if (task.actionHref) buttons.push('<a class="secondary-btn" href="'+escapeHtml(task.actionHref)+'">'+(task.metadata?.packaging_shipment_id || task.metadata?.packaging_order_handoff ? 'Open Packaging' : task.source === 'order' ? 'Open order' : 'Open return')+'</a>');
   if (canReplyToTask(task)) buttons.push('<button type="button" class="secondary-btn" data-task-reply="'+key+'">Add update</button>');
   if (canHandTaskBack(task)) buttons.push(isTaskInApprovalInbox(task)
     ? '<button type="button" class="primary-btn" data-task-reply="'+key+'" data-handoff="true">Send instructions &amp; hand back</button>'
@@ -4959,6 +4963,9 @@ function isShippingTaskReadyForFulfillment(task = {}) {
 }
 
 function renderOrderTaskActions(task = {}, resolved = false, options = {}) {
+  if (task.metadata?.packaging_order_handoff && isShippingFulfillmentTask(task)) {
+    return `<div class="team-task-actions"><a class="primary-btn" href="packaging.html?order=${encodeURIComponent(task.order_id)}">Open Packaging</a></div>`;
+  }
   const compact = Boolean(options.compact);
   const chatLinked = hasEbayConversationTaskContext(task);
   const isParent = isOrderParentTask(task);

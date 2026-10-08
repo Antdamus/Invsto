@@ -10314,14 +10314,8 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
     state.stockRows = [];
     if (liveItems.length && !staged.length) await bumpInventoryVersion([...new Set(changedItemIds)]);
 
-    const completedTaskCount = await completeFulfilledShippingTasksForLines({
-      lineIds: completedLineIds,
-      orderIds: completedOrderIds,
-    });
     state.stagedFulfillments.clear();
-    setStatus(completedTaskCount
-      ? "Packed bundle confirmed. Shipment task moved to history."
-      : "Packed bundle confirmed. Inventory was updated for scanned lines; other lines were recorded without stock removal.", "info");
+    setStatus("Checkout saved. Completed orders move to Packaging for the final check and dispatch.", "info");
     await loadOrders();
     // Completing an order should not activate the extension's eBay awaiting-shipment tab.
     const nextBuyerLine = getNextPackableLine(state.activeBuyerKey);
@@ -10344,80 +10338,8 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
   }
 }
 
-async function completeFulfilledShippingTasksForLines({ lineIds = [], orderIds = [] } = {}) {
-  const fulfilledLineIds = new Set((lineIds || []).filter(Boolean));
-  const fulfilledOrderIds = new Set((orderIds || []).filter(Boolean));
-  if (!fulfilledLineIds.size && !fulfilledOrderIds.size) return 0;
-
-  const taskMap = new Map();
-  const selectFields = "id, order_id, order_line_ids, task_type, status, assigned_to_user_id, assigned_to_email, title";
-  const activeStatuses = ["assigned_for_shipping", "in_progress", "waiting_on_worker"];
-  const taskTypes = ["pending_shipping", "pending_packaging"];
-
-  const addTasks = (tasks = []) => {
-    tasks.forEach((task) => {
-      if (task?.id) taskMap.set(task.id, task);
-    });
-  };
-
-  try {
-    if (fulfilledLineIds.size) {
-      const { data, error } = await supabase
-        .from("ebay_order_tasks")
-        .select(selectFields)
-        .in("task_type", taskTypes)
-        .in("status", activeStatuses)
-        .overlaps("order_line_ids", [...fulfilledLineIds]);
-      if (error) throw error;
-      addTasks(data);
-    }
-
-    if (fulfilledOrderIds.size) {
-      const { data, error } = await supabase
-        .from("ebay_order_tasks")
-        .select(selectFields)
-        .in("task_type", taskTypes)
-        .in("status", activeStatuses)
-        .in("order_id", [...fulfilledOrderIds]);
-      if (error) throw error;
-      addTasks(data);
-    }
-
-    if (!taskMap.size) return 0;
-    const taskOrderIds = [...new Set([...fulfilledOrderIds, ...[...taskMap.values()].map(task => task.order_id)].filter(Boolean))];
-    const { data: currentLines, error: lineError } = await supabase.from("ebay_order_lines")
-      .select("id,order_id,line_status").in("order_id", taskOrderIds);
-    if (lineError) throw lineError;
-    const closedIds = new Set((currentLines || []).filter(line => !isOpenOrderLine(line)).map(line => line.id));
-    const matchingTasks = [...taskMap.values()].filter((task) => {
-      if (!isAdminUser() && task.assigned_to_user_id && task.assigned_to_user_id !== state.user?.id) return false;
-      const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
-      if (taskLineIds.length) return taskLineIds.every(lineId => closedIds.has(lineId));
-      const orderLines = (currentLines || []).filter(line => line.order_id === task.order_id);
-      return orderLines.length > 0 && orderLines.every(line => closedIds.has(line.id));
-    });
-
-    let completedCount = 0;
-    for (const task of matchingTasks) {
-      const { error } = await supabase.rpc("respond_ebay_order_coordination_task", {
-        _task_id: task.id,
-        _note: "Shipment fulfilled from Pending Orders.",
-        _assigned_to_user_id: null,
-        _status: "shipped_completed",
-        _priority: null,
-        _photo_attachments: [],
-        _signed_by_email: state.user?.email || state.employee?.display_name || "",
-        _due_at: null,
-      });
-      if (error) throw error;
-      completedCount += 1;
-    }
-    return completedCount;
-  } catch (error) {
-    console.warn("Could not close matching shipment task after fulfillment:", error);
-    return 0;
-  }
-}
+// Compatibility for older callers: shipping tasks finish only after Packaging dispatch.
+async function completeFulfilledShippingTasksForLines() { return 0; }
 
 function clearSelection() {
   invalidateInventoryLookup();
