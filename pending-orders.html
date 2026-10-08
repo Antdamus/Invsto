@@ -1241,7 +1241,7 @@
 <script src="shipping-label-reader.js?v=20261006-label-photos"></script>
 <script src="order-shipping-labels.js?v=20261006-label-photos"></script>
 <script src="receipt-preview-jobs.js?v=20261003-receipt-speed"></script>
-  <link rel="stylesheet" href="pending-inventory.css?v=20261008-shared-bag" />
+  <link rel="stylesheet" href="pending-inventory.css?v=20261008-shared-bag-2" />
   <div id="attach-inventory-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="attach-inventory-title">
     <div class="packing-modal-card attach-inventory-card">
       <button id="attach-inventory-close" type="button" class="modal-close-btn" aria-label="Close inventory attachment">×</button>
@@ -1255,13 +1255,13 @@
       <div id="attach-inventory-selected"></div>
       <div id="attach-inventory-sources"></div>
       <div id="attach-inventory-existing-bags"></div>
-      <label id="attach-inventory-quantity-wrap" hidden>Quantity to attach<input id="attach-inventory-quantity" type="number" min="1" step="1" inputmode="numeric" value="1" /><small id="attach-inventory-availability"></small></label>
+      <label id="attach-inventory-quantity-wrap" hidden><span id="attach-inventory-quantity-label">Quantity to attach</span><input id="attach-inventory-quantity" type="number" min="1" step="1" inputmode="numeric" value="1" /><small id="attach-inventory-availability"></small></label>
       <p id="attach-inventory-status" class="fulfill-status" role="status" aria-live="polite"></p>
       <div class="modal-actions"><button id="attach-inventory-remove" type="button" class="secondary-btn" hidden>Remove attachment</button><button id="attach-inventory-save" type="button" class="primary-btn" disabled>Attach & reserve</button></div>
     </div>
   </div>
   <script src="pending-orders.js?v=shared-inventory-20261008"></script>
-  <script src="pending-inventory.js?v=20261008-shared-bag"></script>
+  <script src="pending-inventory.js?v=20261008-shared-bag-2"></script>
   <script src="pending-bag-scan.js?v=20261008-shared-inventory"></script>
   <script src="pending-orders-mobile.js?v=20261008-inventory-attachments"></script>
 </body>

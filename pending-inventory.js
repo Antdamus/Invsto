@@ -44,6 +44,7 @@
   function controls() {
     byId('attach-inventory-save').disabled = busy || !item || !source || !!attachment?.conflict;
     byId('attach-inventory-remove').hidden = attachment?.kind==='bag' ? !bagItem() : attachment?.status !== 'reserved';
+    byId('attach-inventory-quantity-label').textContent=attachment?.kind==='bag'?'Quantity in bag':'Quantity to attach';
     byId('attach-inventory-save').textContent=attachment?.kind==='bag'?'Save bag quantity':'Attach & reserve';
     byId('attach-inventory-remove').textContent=attachment?.kind==='bag'?'Remove from bag':'Remove attachment';
     ['attach-inventory-close','attach-inventory-remove','attach-inventory-find','attach-inventory-store','attach-inventory-scan','attach-inventory-quantity'].forEach(id => byId(id).disabled=busy);
