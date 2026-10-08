@@ -18,6 +18,7 @@
     "test:checkout": "node --test tests/pending-checkout.test.mjs tests/noninventory-database.test.mjs",
     "test:pending-performance": "node --test tests/pending-performance.test.mjs tests/pending-queue-database.test.mjs",
     "test:pending-import": "node --test tests/pending-csv-import.test.mjs",
+    "test:order-sync": "node --test tests/order-sync-reconciliation-database.test.mjs tests/ebay-order-dates-sync.test.mjs tests/live-paid-retry-database.test.mjs tests/noninventory-database.test.mjs",
     "test:history-performance": "node --test tests/order-history-performance.test.mjs tests/order-history-database.test.mjs",
     "test:video-receipts": "node --test tests/video-receipts.test.mjs",
     "test:bags": "node --test tests/bag-lookup.test.mjs tests/pending-bag-orders.test.mjs tests/pending-bag-scan.test.mjs tests/pending-bag-scan-database.test.mjs tests/pending-bag-photos-database.test.mjs",
