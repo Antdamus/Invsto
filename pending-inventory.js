@@ -49,6 +49,7 @@
     if (state.busy || busy) return;
     line=state.orders.find(l=>l.id===id);
     if (!line || !isOpenOrderLine(line)) return;
+    invalidateInventoryLookup(); // Cancel an unfinished checkout scan, keeping saved/staged items intact.
     returnFocus=document.activeElement;
     const run=++generation;
     clearTimeout(timer); resetChoice(); attachment=null;
