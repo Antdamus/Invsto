@@ -62,3 +62,9 @@ test('pack and dispatch remain separate, duplicate submits are disabled, next sc
 test('external label linking requires opening the order and explicit confirmation',async t=>{
  const page=await open(t);await page.locator('.pack-row').click();await page.getByRole('button',{name:'Scan this order’s label'}).click();await page.evaluate(()=>fixtureUnmatched=true);await page.locator('#pack-barcode').fill('9400100000000000000099');await page.locator('#pack-barcode').press('Enter');await expect(page.getByRole('dialog',{name:'Link this external label'})).toBeVisible();assert.equal((await page.evaluate(()=>fixtureWrites)).length,0);await page.getByRole('checkbox').check();await page.locator('[name=note]').fill('Label purchased outside eBay');await page.getByRole('button',{name:'Link & start packing'}).click();await expect(page.getByRole('dialog')).not.toBeVisible();const saved=await page.evaluate(()=>fixtureWrites[0]);assert.equal(saved.args.confirm_link,true);
 });
+test('an in-flight upload prevents another capture or quantity edit from being silently discarded',async t=>{
+ const page=await open(t);await start(page);await page.locator('[data-line]').fill('2');await page.evaluate(()=>fixtureDelay='evidence');
+ await page.locator('#pack-files').setInputFiles({name:'packing.jpg',mimeType:'image/jpeg',buffer:Buffer.from('fixture')});
+ await expect(page.locator('#pack-upload-status')).toContainText('Saving evidence');await expect(page.locator('#pack-camera')).toBeDisabled();await expect(page.locator('[data-line]')).toBeDisabled();
+ await page.evaluate(()=>releaseFixture());await expect(page.locator('#pack-upload-status')).toBeEmpty();await expect(page.locator('#pack-camera')).toBeEnabled();await expect(page.locator('[data-line]')).toHaveValue('2');
+});
