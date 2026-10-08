@@ -242,10 +242,11 @@ async function ebayRequest(token: string, path: string): Promise<any> {
   return payload;
 }
 
-async function ebayFinanceRequest(token: string, path: string): Promise<any> {
+async function ebayFinanceRequest(token: string, path: string, deadlineMs = 0): Promise<any> {
+  if (deadlineMs && Date.now() >= deadlineMs) throw new Error("Finance batch time limit reached; saved for retry.");
   const res = await fetch(`${EBAY_FINANCES_API_BASE}${path}`, {
     method: "GET",
-    signal: AbortSignal.timeout(EBAY_FETCH_TIMEOUT_MS),
+    signal: AbortSignal.timeout(deadlineMs ? Math.max(1, Math.min(EBAY_FETCH_TIMEOUT_MS, deadlineMs - Date.now())) : EBAY_FETCH_TIMEOUT_MS),
     headers: {
       "Authorization": `Bearer ${token}`,
       "Accept": "application/json",
@@ -563,23 +564,24 @@ function summarizeFinanceTransactions(transactions: any[], orderNumber: string, 
   };
 }
 
-async function fetchFinanceTransactionsForOrder(token: string, orderNumber: string): Promise<any[]> {
+async function fetchFinanceTransactionsForOrder(token: string, orderNumber: string, deadlineMs = 0): Promise<any[]> {
   const transactions: any[] = [];
   let offset = 0;
   const limit = 100;
-  while (transactions.length < 500) {
+  while (offset < 500) {
     const params = new URLSearchParams({
       filter: `orderId:{${orderNumber}}`,
       limit: String(limit),
       offset: String(offset),
     });
-    const payload = await ebayFinanceRequest(token, `/sell/finances/v1/transaction?${params.toString()}`);
+    const payload = await ebayFinanceRequest(token, `/sell/finances/v1/transaction?${params.toString()}`, deadlineMs);
     const page = Array.isArray(payload?.transactions) ? payload.transactions : [];
     transactions.push(...page);
-    if (!payload?.next || page.length < limit) break;
+    if (!payload?.next) return transactions;
+    if (!page.length) throw new Error("Incomplete finance page; saved for retry.");
     offset += limit;
   }
-  return transactions;
+  throw new Error("Finance order exceeded the safe page limit; review required.");
 }
 
 async function fetchFundsOnHoldTransactions(token: string, maxTransactions = 1000, deadlineMs = 0): Promise<any[]> {
@@ -592,13 +594,14 @@ async function fetchFundsOnHoldTransactions(token: string, maxTransactions = 100
       limit: String(Math.min(limit, maxTransactions - transactions.length)),
       offset: String(offset),
     });
-    const payload = await ebayFinanceRequest(token, `/sell/finances/v1/transaction?${params.toString()}`);
+    const payload = await ebayFinanceRequest(token, `/sell/finances/v1/transaction?${params.toString()}`, deadlineMs);
     const page = Array.isArray(payload?.transactions) ? payload.transactions : [];
     transactions.push(...page);
-    if (!payload?.next || page.length < limit) break;
+    if (!payload?.next) return transactions;
+    if (!page.length) throw new Error("Incomplete finance page; saved for retry.");
     offset += limit;
   }
-  return transactions;
+  throw new Error("Finance hold lookup exceeded the safe page or time limit; saved for retry.");
 }
 
 async function loadFinanceTransactionsByOrder(token: string, orderNumbers: string[], syncFinance: boolean, deadlineMs = 0) {
@@ -761,7 +764,7 @@ function prepareOrder(order: any, itemBySku: Map<string, any>, financeTransactio
       item_country: getNestedText(shipTo?.contactAddress?.countryCode),
       payment_method: getNestedText(payment?.paymentMethod, payment?.paymentStatus),
       sale_date: toIsoDate(order?.creationDate),
-      paid_on_date: toIsoDate(payment?.paymentDate || order?.creationDate),
+      paid_on_date: toIsoDate(payment?.paymentDate),
       ship_by_date: extractShipByDate(order),
       shipped_on_date: null,
       tracking_number: "",
@@ -1236,6 +1239,56 @@ async function refreshCapturedShowOrders(supabase: any, req: Request, eventId: s
   }
 }
 
+async function processFinanceQueue(supabase: any, dispatchToken: unknown): Promise<Response> {
+  if (!/^[0-9a-f-]{36}$/i.test(toText(dispatchToken))) return jsonResponse(403, {ok:false, error:"Invalid finance worker lease."});
+  const {data:jobs, error:claimError} = await supabase.rpc("claim_ebay_finance_jobs", {_dispatch_token:dispatchToken});
+  if (claimError) throw claimError;
+  if (!Array.isArray(jobs)) return jsonResponse(403, {ok:false, error:"Finance worker lease expired or already used."});
+  const deadline = Date.now() + 45_000;
+  let completed = 0, retrying = 0;
+  try {
+    let token = "", tokenError = "";
+    try { token = await getEbayAccessToken(); } catch { tokenError = "Could not connect to eBay finance. Automatic retry scheduled."; }
+    // At most three lookups at once, independent of the browser or order sync.
+    await mapWithConcurrency(jobs, 3, 0, async (job: any) => {
+      let finance: any = null, lineFinances: any[] = [], discovered: string[] = [], failure: string | null = null;
+      try {
+        if (tokenError) throw new Error(tokenError);
+        if (!hasTimeBudget(deadline)) throw new Error("Finance batch time limit reached; saved for retry.");
+        if (!job.order_id) {
+          const held = await fetchFundsOnHoldTransactions(token, 1000, deadline);
+          discovered = unique(held.map(getFinanceOrderId).filter(Boolean));
+        } else {
+          const transactions = await fetchFinanceTransactionsForOrder(token, job.job_key, deadline);
+          finance = summarizeFinanceTransactions(transactions, job.job_key);
+          if (finance) {
+            const {data:lines, error} = await supabase.from("ebay_order_lines").select("id,transaction_id").eq("order_id",job.order_id);
+            if (error) throw error;
+            lineFinances = (lines || []).map((line: any) => ({id:line.id,finance:summarizeFinanceTransactions(transactions,job.job_key,line.transaction_id)}))
+              .filter((entry: any) => entry.finance);
+          }
+        }
+      } catch (error) {
+        // Save a useful bounded error without request headers or response bodies.
+        const message = compactError(error);
+        failure = /429|rate limit/i.test(message) ? "eBay finance rate limit; automatic retry scheduled."
+          : /401|403|invalid_grant/i.test(message) ? "eBay finance authorization needs attention."
+          : /page limit|Incomplete finance/i.test(message) ? "eBay returned incomplete finance pages; automatic retry scheduled."
+          : "Finance lookup did not finish; automatic retry scheduled.";
+      }
+      const {data:saved,error} = await supabase.rpc("finish_ebay_finance_job", {
+        _job_key:job.job_key,_lease_token:dispatchToken,_finance:finance,_line_finances:lineFinances,
+        _error:failure,_discovered_orders:discovered,
+      });
+      if (error) { retrying++; return; } // A durable lease recovers a failed save.
+      if (saved && !failure) completed++; else retrying++;
+    });
+  } finally {
+    await supabase.rpc("finish_ebay_finance_worker", {_dispatch_token:dispatchToken});
+  }
+  return jsonResponse(200, {ok:true,completed,retrying});
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse(405, { ok: false, error: "Method not allowed" });
@@ -1249,6 +1302,7 @@ Deno.serve(async (req) => {
 
   try {
     body = await req.json().catch(() => ({}));
+    if ("financeWorkerToken" in body) return await processFinanceQueue(supabase,body.financeWorkerToken);
     if (body.captureEventId) return await refreshCapturedShowOrders(supabase,req,toText(body.captureEventId));
     const responseDeadlineMs = getResponseDeadline(body);
     const dryRun = body.dryRun !== false;
@@ -1360,16 +1414,11 @@ Deno.serve(async (req) => {
       ...candidateOrders.map(extractOrderNumber),
       ...localPendingMismatches.map((entry) => entry.orderNumber),
     ].map(toText).filter(Boolean));
-    const {
-      byOrder: financeByOrderNumber,
-      warnings: financeWarnings,
-      stats: financeStats,
-    } = await loadFinanceTransactionsByOrder(
-      token,
-      financeOrderNumbers,
-      syncFinance,
-      responseDeadlineMs,
-    );
+    // The main request imports orders and reserves stock. Finance is durable
+    // background work and must never spend this request's time budget.
+    const financeByOrderNumber = new Map<string, any[]>();
+    const financeWarnings: JsonRecord[] = [];
+    const financeStats = {financeSyncEnabled:syncFinance,financeBackground:syncFinance,financeJobsQueued:0};
     const prepared = candidateOrders
       .map((order) => prepareOrder(order, itemBySku, financeByOrderNumber.get(extractOrderNumber(order)) || []))
       .filter(Boolean) as PreparedOrder[];
@@ -1446,8 +1495,6 @@ Deno.serve(async (req) => {
         preview,
       });
     }
-
-    await updateLocalOrderFinancePayloads(supabase, financeByOrderNumber);
 
     const freshOrders = importable.filter((entry) => !existingOrders.has(entry.order.order_number));
     let insertedOrders: any[] = [];
@@ -1559,6 +1606,11 @@ Deno.serve(async (req) => {
     const reserved = reservationResults.filter((entry) =>
       entry.ok && ["reserved", "already_reserved"].includes(String(entry.status || ""))
     ).length;
+    if (syncFinance) {
+      const {data:queued,error:queueError} = await supabase.rpc("enqueue_ebay_finance_jobs", {_order_numbers:financeOrderNumbers});
+      if (queueError) financeWarnings.push({reason:"ebay_finance_queue_failed",message:"Orders were saved, but finance updates could not be queued. Run Sync & Reserve again to retry."});
+      else financeStats.financeJobsQueued = Number(queued || 0);
+    }
     const warnings = [
       ...(skippedClosed ? [{ skippedClosed }] : []),
       ...(skippedUnpaid ? [{ skippedUnpaid, reason: "payment_not_paid" }] : []),

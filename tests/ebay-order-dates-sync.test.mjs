@@ -40,6 +40,64 @@ test('missing API dates never erase known dates or promote their precision',()=>
   assert.equal(patch.raw_payload.ebayFinance.status,'available');
 });
 
+test('missing or invalid eBay payment times never borrow the order creation time',()=>{
+ const ctx=backend();
+ for(const paymentDate of [undefined,null,'','bad-date']){
+  const prepared=ctx.prepareOrder({...raw,paymentSummary:{payments:[{paymentDate}]}},new Map());
+  assert.equal(prepared.order.sale_date,'2026-10-01T20:17:45.000Z');
+  assert.equal(prepared.order.paid_on_date,null);
+  const patch=ctx.existingOrderDetailsUpdate(prepared,existing,'now');
+  assert.equal(patch.paid_on_date,undefined,'an existing independently known payment date is preserved');
+  assert.equal(patch.raw_payload.date_precision.paid_on_date,undefined);
+ }
+ const prepared=ctx.prepareOrder(raw,new Map());
+ assert.equal(prepared.order.paid_on_date,'2026-10-01T20:20:00.000Z');
+});
+
+test('buyer history also leaves missing payment time empty and preserves a known older timestamp',()=>{
+ const history=vm.createContext({Deno:{env:{get:()=>''},serve(){}},console,URL,URLSearchParams,Response,Request,AbortSignal});
+ vm.runInContext(stripTypeScriptTypes(readFileSync(new URL('../supabase/functions/ebay-buyer-history-sync/index.ts',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'')),history);
+ const missing={...raw,paymentSummary:{payments:[]}};
+ assert.equal(history.prepareOrder(missing,new Map(),null).order.paid_on_date,null);
+ assert.equal(history.prepareOrder(missing,new Map(),{paid_on_date:'2026-10-01T20:20:00.000Z',raw_payload:{}}).order.paid_on_date,'2026-10-01T20:20:00.000Z');
+});
+
+test('finance worker rejects missing, invalid and replayed leases before contacting eBay',async()=>{
+ const ctx=backend();let claims=0;
+ ctx.getEbayAccessToken=async()=>{throw Error('must not contact eBay');};
+ const client={rpc:async()=>{claims++;return {data:null};}};
+ assert.equal((await ctx.processFinanceQueue(client,'bad')).status,403);assert.equal(claims,0);
+ assert.equal((await ctx.processFinanceQueue(client,'00000000-0000-4000-8000-000000000001')).status,403);assert.equal(claims,1);
+});
+
+test('background finance uses bounded concurrency, saves every job and keeps failures separate',async()=>{
+ const ctx=backend(),saved=[];let active=0,peak=0,finished=false;
+ ctx.getEbayAccessToken=async()=> 'fixture';
+ ctx.fetchFinanceTransactionsForOrder=async(_token,number)=>{active++;peak=Math.max(peak,active);
+  await new Promise(r=>setTimeout(r,5));active--;if(number==='order-2')throw Error('429 rate limit');
+  return number==='order-3'?[]:[{transactionId:'t-'+number,orderId:number,transactionStatus:'FUNDS_AVAILABLE'}];};
+ const jobs=Array.from({length:12},(_,i)=>({job_key:'order-'+i,order_id:'id-'+i}));
+ const client={rpc:async(name,args)=>{
+  if(name==='claim_ebay_finance_jobs')return {data:jobs};
+  if(name==='finish_ebay_finance_worker'){finished=true;return {};}
+  assert.equal(name,'finish_ebay_finance_job');saved.push(plain(args));return {data:true};
+ },from(table){assert.equal(table,'ebay_order_lines');return {select:()=>({eq:async()=>({data:[{id:'line',transaction_id:'t'}]})})};}};
+ const response=await ctx.processFinanceQueue(client,'00000000-0000-4000-8000-000000000001');
+ assert.equal(response.status,200);assert.equal(peak,3);assert.equal(saved.length,12);assert.equal(finished,true);
+ assert.equal(saved.find(s=>s._job_key==='order-3')._finance,null,'no transactions is not a failed payment');
+ assert.match(saved.find(s=>s._job_key==='order-2')._error,/rate limit/);
+ assert.equal(saved.filter(s=>s._finance?.status==='available').length,10);
+});
+
+test('finance pagination must finish before a job is treated as complete',async()=>{
+ const ctx=backend();let requests=0;
+ ctx.ebayFinanceRequest=async()=>({transactions:[{transactionId:String(++requests)}],next:'another-page'});
+ await assert.rejects(ctx.fetchFinanceTransactionsForOrder('fixture','order'),/safe page limit/);
+ assert.equal(requests,5,'each job has a bounded page count');
+ ctx.ebayFinanceRequest=async()=>({transactions:[],next:'another-page'});
+ await assert.rejects(ctx.fetchFinanceTransactionsForOrder('fixture','order'),/Incomplete finance/);
+});
+
 test('timestamp repair dry run is read-only for orders; apply updates dates without imports, reservations or closeout',async()=>{
   const ctx=backend(),writes=[];
   ctx.getEbayAccessToken=async()=> 'fixture-token';ctx.fetchOrders=async()=>[raw];
@@ -109,6 +167,29 @@ test('routine sync refreshes closed-order evidence without reopening or importin
  assert.equal(result.ordersImported,0);assert.equal(result.linesImported,0);assert.equal(result.linesReserved,0);
  const patch=writes.find(w=>w.table==='ebay_orders')?.patch;assert.ok(patch);
  assert.equal(patch.status,undefined);assert.equal(patch.buyer_username,'new-name');assert.equal(patch.raw_payload.orderPaymentStatus,'FULLY_REFUNDED');
+});
+
+test('normal sync saves order lines and queues finance without contacting the finance API; preview never queues',async()=>{
+ const ctx=backend(),queued=[],writes=[];
+ ctx.getEbayAccessToken=async()=> 'fixture-token';
+ ctx.fetchOrders=async()=>[{...raw,orderPaymentStatus:'PAID',orderFulfillmentStatus:'NOT_STARTED'}];
+ ctx.hydrateCancellationOrderDetails=async(_token,orders)=>({orders,warnings:[],checked:0});
+ ctx.loadExistingOrders=async()=>new Map([[raw.orderId,existing]]);
+ ctx.updateOrderSyncMismatchFlags=async()=>{};ctx.loadItemMapBySku=async()=>new Map();
+ ctx.loadExistingLines=async()=>({exact:new Map(),fallback:new Map()});
+ for(const name of ['loadFinanceTransactionsByOrder','updateLocalOrderFinancePayloads','ebayFinanceRequest'])
+  ctx[name]=async()=>{assert.fail('finance API must not block the main sync');};
+ ctx.createClient=()=>({rpc:async(name,args)=>{assert.equal(name,'enqueue_ebay_finance_jobs');queued.push(plain(args));return {data:2};},from(table){return {
+  insert(){assert.equal(table,'ebay_order_sync_runs');return {select(){return {single:async()=>({data:{id:'run-a'}})};}};},
+  update(patch){return {eq:async()=>{writes.push({table,patch:plain(patch)});return {};}};},
+  upsert(rows){assert.equal(table,'ebay_order_lines');writes.push({table,rows:plain(rows)});return {select:async()=>({data:rows.map(row=>({...row,id:'line-a'}))})};},
+ };}});
+ for(const dryRun of [true,false]){
+  const response=await ctx.handler(new Request('https://example.invalid/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dryRun,reserve:false,orderIds:[raw.orderId],checkLocalMismatches:false,syncFinance:true})}));
+  const result=await response.json();assert.equal(response.status,200,JSON.stringify(result));
+  assert.equal(result.financeStats.financeBackground,true);assert.equal(queued.length,dryRun?0:1);
+  if(!dryRun){assert.deepEqual(queued[0],{_order_numbers:[raw.orderId]});assert.ok(writes.some(w=>w.table==='ebay_order_lines'));assert.equal(result.financeStats.financeJobsQueued,2);}
+ }
 });
 
 test('automatic capture check authenticates and uses only server-scoped order IDs',async()=>{

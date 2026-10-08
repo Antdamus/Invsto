@@ -5429,3 +5429,10 @@ body.pending-order-detail-open #jump-latest-found { display: none; }
   }
   .buyer-line-actions, .buyer-line-receipt-actions { width: 100%; min-width: 0; }
 }
+
+.finance-sync-panel { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; margin:12px 0; border:1px solid rgba(125,185,153,.28); border-radius:14px; background:rgba(43,75,56,.15); color:#cbe5d3; }
+.finance-sync-panel[hidden], .finance-sync-panel button[hidden] { display:none; }
+.finance-sync-panel strong { font-size:.9rem; }
+.finance-sync-panel p { margin:5px 0 0; font-size:.86rem; line-height:1.5; }
+.finance-sync-panel button { flex-shrink:0; }
+@media(max-width:640px) { .finance-sync-panel { align-items:stretch; flex-direction:column; } .finance-sync-panel button { width:100%; min-height:44px; } }

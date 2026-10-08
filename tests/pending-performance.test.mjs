@@ -51,6 +51,31 @@ test('stores and queue start together, and extension readiness waits for both',a
   run('releaseStores()');await boot;assert.equal(run('ready'),true);
 });
 
+test('finance progress separates slow retries, missing transactions and failures from order processing',()=>{
+ const {run}=app();
+ let status=run('formatFinanceQueueStatus({queued:8,working:3,retrying:2,checked:10,without_transactions:1})');
+ assert.equal(status.remaining,13);assert.match(status.message,/close this page/);assert.match(status.message,/2 will retry automatically/);
+ assert.match(status.message,/no transaction data yet/);
+ status=run('formatFinanceQueueStatus({checked:10,failed:2})');
+ assert.doesNotMatch(status.message,/checks finished/);assert.match(status.message,/Orders can still be processed/);assert.equal(status.failed,2);
+ assert.equal(run('formatFinanceQueueStatus({}).message'),'');
+});
+
+test('finance status does not block page boot, avoids overlapping polls, and pauses while hidden',async()=>{
+ const {run}=app();
+ run(`var elements=new Map(),calls=0,releaseStatus,timers=[];
+  document.getElementById=id=>{if(!elements.has(id))elements.set(id,{hidden:true,textContent:'',addEventListener(){}});return elements.get(id);};
+  setTimeout=(fn,delay)=>{timers.push(delay);return timers.length};clearTimeout=()=>{};
+  var supabase={rpc:()=>{calls++;return new Promise(r=>releaseStatus=r)}};`);
+ run('startFinanceQueueStatus()');assert.equal(run('calls'),1);
+ await run('refreshFinanceQueueStatus()');assert.equal(run('calls'),1);
+ run('releaseStatus({data:{queued:3}})');await new Promise(r=>setImmediate(r));
+ assert.equal(run('elements.get("finance-sync-panel").hidden'),false);assert.equal(run('timers.at(-1)'),15000);
+ run('document.hidden=true');await run('refreshFinanceQueueStatus()');assert.equal(run('calls'),1);assert.equal(run('timers.at(-1)'),60000);
+ run('document.hidden=false;supabase.rpc=async()=>({error:{message:"offline"}})');await run('refreshFinanceQueueStatus()');
+ assert.match(run('elements.get("finance-sync-status").textContent'),/continue processing orders/);
+});
+
 test('a failed queue request clears loading indicators and provides a refresh action',async()=>{
   const {run}=app();
   run(`var elements=new Map();

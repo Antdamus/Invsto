@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261007-task-notes" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261008-finance-background" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
   <script src="extension-updates.js?v=20261003" defer></script>
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
@@ -310,6 +310,10 @@
           </button>
         </div>
         <p id="import-status" class="import-status"></p>
+        <div id="finance-sync-panel" class="finance-sync-panel" role="status" aria-live="polite" hidden>
+          <div><strong>Payout updates</strong><p id="finance-sync-status"></p></div>
+          <button id="finance-sync-retry" type="button" class="secondary-btn" hidden>Retry payout updates</button>
+        </div>
         <section class="ebay-reconciliation-panel" aria-label="eBay reconciliation">
           <div class="reconciliation-head">
             <div>
@@ -1232,7 +1236,7 @@
 <script src="shipping-label-reader.js?v=20261006-label-photos"></script>
 <script src="order-shipping-labels.js?v=20261006-label-photos"></script>
 <script src="receipt-preview-jobs.js?v=20261003-receipt-speed"></script>
-  <script src="pending-orders.js?v=packaging-20261008"></script>
+  <script src="pending-orders.js?v=finance-background-20261008"></script>
   <script src="pending-bag-scan.js?v=20261007-bag-photos"></script>
   <script src="pending-orders-mobile.js?v=20261007-bag-scan"></script>
 </body>

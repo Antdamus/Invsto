@@ -764,7 +764,7 @@ function prepareOrder(order: any, itemBySku: Map<string, any>, existingOrder: an
   const keepLocalClosed = ["fulfilled", "cancelled", "archived"].includes(String(existingOrder?.status || "").toLowerCase());
   const orderStatus = keepLocalClosed ? existingOrder.status : inferredStatus;
   const shippedOnDate = inferredStatus === "fulfilled" ? extractShippedDate(order) : null;
-  const purchasedAt = toIsoDate(payment?.paymentDate || order?.creationDate);
+  const purchasedAt = toIsoDate(payment?.paymentDate);
   const cancelledAt = toIsoDate(
     order?.cancelStatus?.cancelCloseDate
       || order?.cancelStatus?.cancelCompletedDate
@@ -828,7 +828,7 @@ function prepareOrder(order: any, itemBySku: Map<string, any>, existingOrder: an
       item_country: getNestedText(shipTo?.contactAddress?.countryCode),
       payment_method: getNestedText(payment?.paymentMethod, payment?.paymentStatus),
       sale_date: toIsoDate(order?.creationDate),
-      paid_on_date: toIsoDate(payment?.paymentDate || order?.creationDate),
+      paid_on_date: toIsoDate(payment?.paymentDate) || existingOrder?.paid_on_date || null,
       ship_by_date: extractShipByDate(order),
       shipped_on_date: shippedOnDate,
       tracking_number: "",
@@ -854,7 +854,7 @@ function prepareOrder(order: any, itemBySku: Map<string, any>, existingOrder: an
         date_precision: {
           ...(existingOrder?.raw_payload?.date_precision || {}),
           ...(toIsoDate(order?.creationDate) ? {sale_date: "timestamp"} : {}),
-          ...(toIsoDate(payment?.paymentDate || order?.creationDate) ? {paid_on_date: "timestamp"} : {}),
+          ...(toIsoDate(payment?.paymentDate) ? {paid_on_date: "timestamp"} : {}),
           ...(extractShipByDate(order) ? {ship_by_date: "timestamp"} : {}),
           ...(shippedOnDate ? {shipped_on_date: "timestamp"} : {}),
         },

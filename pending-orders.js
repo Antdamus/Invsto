@@ -2554,6 +2554,11 @@ function summarizeEbayOrderSyncResult(result, dryRun) {
 
 function summarizeEbayFinanceSyncStatus(result = {}) {
   const stats = result.financeStats || {};
+  const queueFailure = result.warnings?.find(entry => entry?.reason === "ebay_finance_queue_failed");
+  if (queueFailure) return ` ${queueFailure.message}`;
+  if (stats.financeBackground) return result.dryRun
+    ? " Payout details will update in the background when you sync."
+    : " Payout details update separately in the background. You can continue packing.";
   const warnings = Array.isArray(result.warnings)
     ? result.warnings.filter((entry) => entry?.reason === "ebay_finance_lookup_failed")
     : [];
@@ -2566,6 +2571,63 @@ function summarizeEbayFinanceSyncStatus(result = {}) {
     ? ` Finance warning: ${formatEbayOrderSyncError(warnings[0])}.`
     : "";
   return ` Finance checked ${checked.toLocaleString()} order${checked === 1 ? "" : "s"}: ${withTransactions.toLocaleString()} with transaction data, ${withoutTransactions.toLocaleString()} with none returned.${warningText}`;
+}
+
+let financeStatusTimer = null;
+let financeStatusLoading = false;
+function formatFinanceQueueStatus(data = {}) {
+  const waiting = Number(data.queued || 0) + Number(data.working || 0);
+  const retrying = Number(data.retrying || 0), failed = Number(data.failed || 0), checked = Number(data.checked || 0);
+  const remaining = waiting + retrying;
+  let message = remaining
+    ? `Updating in the background · ${checked} checked · ${remaining} remaining. You can keep working or close this page.`
+    : checked ? `${failed ? `${checked} payout checks completed` : "Payout checks finished"}${data.last_checked_at ? ` · ${formatDate(data.last_checked_at)}` : ""}. Refresh orders to see the latest details.` : "";
+  if (retrying) message += ` ${retrying} will retry automatically.`;
+  if (failed) message += ` ${failed} payout update${failed === 1 ? " needs" : "s need"} attention. Orders can still be processed.`;
+  if (Number(data.without_transactions || 0)) message += ` eBay has no transaction data yet for ${Number(data.without_transactions)} order(s).`;
+  return {message:message.trim(),remaining,failed};
+}
+
+async function refreshFinanceQueueStatus() {
+  const panel = document.getElementById?.("finance-sync-panel");
+  if (!panel || financeStatusLoading) return;
+  clearTimeout(financeStatusTimer);
+  if (document.hidden) { financeStatusTimer = setTimeout(refreshFinanceQueueStatus,60000); return; }
+  financeStatusLoading = true;
+  let delay = 60000;
+  try {
+    const {data,error} = await supabase.rpc("get_ebay_finance_sync_status");
+    if (error) throw error;
+    const status = formatFinanceQueueStatus(data || {});
+    panel.hidden = !status.message;
+    $("finance-sync-status").textContent = status.message;
+    $("finance-sync-retry").hidden = !status.failed;
+    if (status.remaining) delay = 15000;
+  } catch {
+    panel.hidden = false;
+    $("finance-sync-status").textContent = "Payout update status is temporarily unavailable. You can continue processing orders.";
+    $("finance-sync-retry").hidden = true;
+  } finally {
+    financeStatusLoading = false;
+    financeStatusTimer = setTimeout(refreshFinanceQueueStatus,delay);
+  }
+}
+
+function startFinanceQueueStatus() {
+  if (!document.getElementById?.("finance-sync-panel")) return;
+  $("finance-sync-retry").addEventListener("click",async () => {
+    const button = $("finance-sync-retry");button.disabled = true;
+    try {
+      const {error} = await supabase.rpc("retry_ebay_finance_sync");
+      if (error) throw error;
+      await refreshFinanceQueueStatus();
+    } catch { $("finance-sync-status").textContent = "Could not retry payout updates. Please try again."; }
+    finally { button.disabled = false; }
+  });
+  document.addEventListener("visibilitychange",() => { if (!document.hidden) refreshFinanceQueueStatus(); });
+  window.addEventListener("pagehide",() => clearTimeout(financeStatusTimer));
+  window.addEventListener("pageshow",event => { if (event.persisted) refreshFinanceQueueStatus(); });
+  refreshFinanceQueueStatus();
 }
 
 function formatEbayOrderSyncError(error) {
@@ -2630,6 +2692,7 @@ async function runEbayOrderApiSync(dryRun = true) {
       console.warn("eBay order sync warnings:", result.warnings);
     }
     if (!dryRun && result?.ok) {
+      refreshFinanceQueueStatus();
       clearEbayLaunchFilter({ apply: false });
       clearOrderSearch({ apply: false });
       await loadOrders();
@@ -13028,6 +13091,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   clearOrderSearch({ apply: false });
   clearOrderCreatedDateFilter({ apply: false });
   await Promise.all([loadCheckoutStores(), loadOrders()]);
+  startFinanceQueueStatus();
   const bagParams = new URLSearchParams(window.location.search);
   if (bagParams.get("bag")) {
     if (window.PendingBagScan && !bagParams.get("bagLine")) await window.PendingBagScan.enqueue(bagParams.get("bag"));
