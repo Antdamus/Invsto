@@ -18,13 +18,14 @@ before(async()=>{
  const start=intent.indexOf('create or replace function public.task_workflow_reviewer');await db.exec(intent.slice(start,intent.indexOf('$$;',start)+3));
  await db.exec(await readFile(new URL('../../supabase/migrations/20261008010000_email_triage_task_workspace.sql',import.meta.url),'utf8'));
  await db.exec(`create function public.get_ebay_canonical_mailbox_v2(integer,integer,text,text[],jsonb,jsonb) returns jsonb language sql as $$
- select to_jsonb(task_stats) from (select '00000000-0000-4000-8000-000000000050'::uuid id) c left join lateral (
+ with base as materialized (select task_stats.task_count,task_stats.pending_task_count from (select '00000000-0000-4000-8000-000000000050'::uuid id) c left join lateral (
  select count(*)::integer as task_count,
  count(*) filter (where t.status not in ('resolved', 'cancelled'))::integer as pending_task_count
  from public.team_tasks t where t.metadata ->> 'source' = 'ebay_conversation_message'
  and t.metadata ->> 'conversation_id' = c.id::text and t.metadata ->> 'history_removed_at' is null
- ) task_stats on true $$;`);
+ ) task_stats on true) select to_jsonb(base) from base $$;`);
  await db.exec(await readFile(new URL('../../supabase/migrations/20261008011000_email_triage_linked_task_counts.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../../supabase/migrations/20261008012000_email_triage_bulk_task_counts.sql',import.meta.url),'utf8'));
  for(const [n,name,role]of [[1,'Sandra','worker'],[2,'Jose','admin']])await db.query('insert into employees values($1,$1,$2,$3,$4,true)',[id(n),name+'@example.test',name,role]);
  await db.exec(`set test.actor='${id(2)}'`);
  for(const [n,table,status,kind]of [[10,'team_tasks','assigned','work'],[11,'ebay_order_tasks','assigned','decision'],[12,'team_tasks','completed_by_employee','work'],[13,'ebay_order_tasks','approved_for_shipping','work'],[14,'team_tasks','cancelled','work']]){
@@ -56,5 +57,7 @@ test('mailbox open-task filter includes linked orders and excludes finished work
 });
 test('anonymous and inactive staff cannot read message tasks',async()=>{
  await db.exec("set test.actor=''");assert.deepEqual(await list(),[]);
+ assert.deepEqual((await db.query('select * from public.list_email_triage_task_counts()')).rows,[]);
  await db.exec(`set test.actor='${id(99)}'`);assert.deepEqual(await list(),[]);
+ assert.deepEqual((await db.query('select * from public.list_email_triage_task_counts()')).rows,[]);
 });
