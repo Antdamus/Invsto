@@ -434,11 +434,12 @@ async function insertNotification(options: {
   if (!error) return data?.id || null;
 
   if (error.code === "23505" && options.fields.notificationId) {
+    // A duplicate (or invalid signature reusing an ID) must not overwrite the
+    // durable, verified notification or reset a successful delivery.
     const { data: updated, error: updateError } = await options.supabase
       .from("ebay_message_notifications")
-      .update(row)
-      .eq("notification_id", options.fields.notificationId)
       .select("id")
+      .eq("notification_id", options.fields.notificationId)
       .maybeSingle();
     if (updateError) console.warn("[ebay-message-notification] notification retry update failed", updateError.message);
     return updated?.id || null;
@@ -504,8 +505,8 @@ async function recordActivity(options: {
   if (error) console.warn("[ebay-message-notification] activity event failed", error.message);
 }
 
-async function requestTargetedSync(fields: ReturnType<typeof payloadFields>) {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !fields.ebayConversationId) return null;
+async function requestTargetedSync(fields: {ebayConversationId: string | null; conversationType?: string | null; ebayMessageId?: string | null}, silent = false) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !fields.ebayConversationId) throw new Error("targeted_sync_configuration_missing");
   const conversationType = String(fields.conversationType || "").toUpperCase();
   const conversationTypes = ["FROM_MEMBERS", "FROM_EBAY"].includes(conversationType)
     ? [conversationType]
@@ -513,6 +514,7 @@ async function requestTargetedSync(fields: ReturnType<typeof payloadFields>) {
 
   const res = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/functions/v1/ebay-message-sync`, {
     method: "POST",
+    signal: AbortSignal.timeout(55000),
     headers: {
       "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
       "Content-Type": "application/json",
@@ -527,14 +529,84 @@ async function requestTargetedSync(fields: ReturnType<typeof payloadFields>) {
       maxConversationPages: 1,
       maxDetailPagesPerConversation: 20,
       classificationMode: "none",
-      suppressConversationActivityEvents: false,
+      suppressConversationActivityEvents: silent,
+      syncRecentOrdersBeforeMessages: false,
     }),
   });
   const payload = await parseResponse(res);
   if (!res.ok || (payload as JsonRecord).ok === false) {
     throw new Error(`targeted_sync_failed:${res.status}:${text((payload as JsonRecord).error || (payload as JsonRecord).message)}`);
   }
+  if (fields.ebayMessageId) {
+    const client = supabaseClient();
+    if (!client) throw new Error("notification_verification_database_unavailable");
+    const { data, error } = await client.from("ebay_conversation_messages").select("id")
+      .eq("ebay_message_id", fields.ebayMessageId).eq("ebay_conversation_id", fields.ebayConversationId).limit(1);
+    if (error || !data?.length) throw new Error("notified_message_not_available_yet");
+  }
   return payload as JsonRecord;
+}
+
+async function runMessageRecovery(supabase: ServiceClient, token: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(token)) return json(403, {ok:false,error:"invalid_recovery_token"});
+  const {data: work, error} = await supabase.rpc("claim_ebay_message_recovery", {_token:token});
+  if (error || !work) return json(403, {ok:false,error:"invalid_recovery_token"});
+  const started = Date.now();
+  const failures: string[] = [];
+  let discovery: JsonRecord | null = null;
+  let recovered = 0;
+  try {
+    // Bounded concurrency and a DB lease keep cron invocations from piling up.
+    const jobs = [...(work.retries || []), ...(work.conversations || [])];
+    const seen = new Set<string>();
+    for (let i=0; i<jobs.length && Date.now()-started<70000; i+=3) {
+      await Promise.all(jobs.slice(i,i+3).map(async (job: any) => {
+        const key = `${job.conversation_type}:${job.ebay_conversation_id}`;
+        if (!job.id && seen.has(key)) return;
+        seen.add(key);
+        try {
+          const result = await requestTargetedSync({ebayConversationId:job.ebay_conversation_id,
+            conversationType:job.conversation_type,ebayMessageId:job.ebay_message_id}, true);
+          await supabase.from("ebay_conversations").update({message_recheck_after:null})
+            .eq("ebay_conversation_id",job.ebay_conversation_id);
+          if (job.id) {
+            await updateNotification({supabase,id:job.id,status:"sync_succeeded",syncRunId:text(result?.runId),syncResponse:result});
+            recovered++;
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message.slice(0,500) : "recovery_failed";
+          failures.push(message);
+          if (job.id) {
+            const delay = Math.min(360, Math.pow(2, Math.min(9, Number(job.recovery_attempts || 1))));
+            await supabase.from("ebay_message_notifications").update({processing_status:"sync_failed",
+              sync_response:{error:message},processed_at:new Date().toISOString(),
+              recovery_after:new Date(Date.now()+delay*60000).toISOString()}).eq("id",job.id);
+          }
+        }
+      }));
+    }
+    if (work.discovery && Date.now()-started<45000) {
+      const response = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/functions/v1/ebay-message-sync`, {
+        method:"POST",signal:AbortSignal.timeout(65000),
+        headers:{Authorization:`Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,"Content-Type":"application/json"},
+        body:JSON.stringify({runType:"scheduled",conversationTypes:["FROM_MEMBERS"],
+          conversationPageLimit:10,maxConversationPages:1,startOffset:work.discovery.offset,
+          messagePageLimit:50,classificationMode:"none",syncRecentOrdersBeforeMessages:false,
+          suppressConversationActivityEvents:true}),
+      });
+      const result = await parseResponse(response) as JsonRecord;
+      if (!response.ok || result.ok === false) throw new Error(`discovery_failed:${response.status}:${text(result.error)}`);
+      const types = (result.typeResults || result.conversationTypeResults || []) as JsonRecord[];
+      const total = Number(((result.counters as JsonRecord)?.totalsByConversationType as JsonRecord)?.FROM_MEMBERS);
+      discovery = {archive:work.discovery.archive,nextOffset:types[0]?.nextOffset ??
+        (Number.isFinite(total) && work.discovery.offset+10>=total ? 0 : work.discovery.offset+10)};
+    }
+  } catch (error) {
+    failures.push(error instanceof Error ? error.message.slice(0,500) : "recovery_failed");
+  } finally {
+    await supabase.rpc("finish_ebay_message_recovery",{_token:token,_error:failures.join("; ") || null,_discovery:discovery});
+  }
+  return json(200,{ok:failures.length===0,recovered,failures:failures.length});
 }
 
 Deno.serve(async (req) => {
@@ -557,6 +629,13 @@ Deno.serve(async (req) => {
     payload = JSON.parse(rawBody || "{}");
   } catch {
     payload = {};
+  }
+
+  // This branch only accepts a short-lived, single-use token minted inside the
+  // database. Normal eBay requests continue to require their verified signature.
+  if (payload.recoveryToken) {
+    if (!supabase) return json(503,{ok:false,error:"database_unavailable"});
+    return runMessageRecovery(supabase, text(payload.recoveryToken));
   }
 
   const fields = payloadFields(payload);
@@ -593,6 +672,10 @@ Deno.serve(async (req) => {
     });
     return json(412, { ok: false, error: "signature_verification_failed", detail: signature.error });
   }
+  if (!notificationId || !supabase) return json(503,{ok:false,error:"notification_not_persisted"});
+  const {data: existing} = await supabase.from("ebay_message_notifications").select("processing_status")
+    .eq("id",notificationId).maybeSingle();
+  if (existing?.processing_status === "sync_succeeded") return json(200,{ok:true,status:"already_synced"});
 
   if (String(fields.topic || "").toUpperCase() !== "NEW_MESSAGE" || !fields.ebayConversationId) {
     await updateNotification({ supabase, id: notificationId, status: "ignored" });

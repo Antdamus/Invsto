@@ -1886,6 +1886,8 @@
       }
       return payload;
     } catch (error) {
+      // A timeout/network failure must not fan out into the larger legacy sweep.
+      if (!["PGRST202", "42883"].includes(error.code)) throw error;
       console.warn("[email-triage] Canonical mailbox RPC failed; falling back to legacy mailbox mode:", error);
       if (ebayApiHasClientFilteredCriteria(values)) {
         return await fetchClientFilteredEbayConversations(context, values, "rpc_error_filter_guard");
@@ -1983,19 +1985,25 @@
       throw error;
     }
 
+    const messages = [];
+    for (let offset = 0; ; offset += 200) {
     const { data, error } = await context.client
       .from("ebay_conversation_messages")
       .select("id, conversation_id, ebay_message_id, sender_username, recipient_username, direction, direction_confidence, subject, message_body, message_body_preview, read_status, is_read, message_status, created_at_ebay, has_media, media_count, message_media, raw_message_metadata, created_at")
       .eq("conversation_id", conversationId)
       .order("created_at_ebay", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true })
-      .limit(200);
+      .order("id", { ascending: true })
+      .range(offset, offset + 199);
     throwSupabaseReadError(error, "ebay_conversation_messages_failed");
+    messages.push(...(data || []));
+    if ((data || []).length < 200) break;
+    }
 
     return {
       ok: true,
       conversation_id: conversationId,
-      messages: data || [],
+      messages,
       loaded_at: new Date().toISOString(),
     };
   }
@@ -2242,6 +2250,8 @@
         : 1,
       maxDetailPagesPerConversation: Number(values.maxDetailPagesPerConversation || 20),
       classificationMode: values.classificationMode || "none",
+      syncRecentOrdersBeforeMessages: values.syncRecentOrdersBeforeMessages === true,
+      suppressConversationActivityEvents: values.suppressConversationActivityEvents,
       resumeFromCheckpoint: values.resumeFromCheckpoint === true || undefined,
       resetCheckpoint: values.resetCheckpoint === true || undefined,
       checkpointScope: values.checkpointScope || undefined,

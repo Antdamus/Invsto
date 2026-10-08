@@ -28,7 +28,7 @@ test("returning to mobile inbox restores the previous scroll anchor", () => {
 
 test("mobile inbox switcher uses restore mode and ships with a fresh cache key", () => {
   assert.match(js, /restoreInboxScroll: button\.getAttribute\("data-ebay-mobile-view"\) === "inbox"/);
-  assert.match(html, /email-triage\.js\?v=workspace-20261008/);
+  assert.match(html, /email-triage\.js\?v=recovery-20261009/);
 });
 
 test("mobile eBay workspace stays compact and touch-friendly on phones", () => {
@@ -50,7 +50,7 @@ test("message timeline actions stay compact on mobile", () => {
 
 test("mobile message detail panels use compact controls instead of stacked blocks", () => {
   assert.match(js, /facts\.ogOrderLabel = facts\.isPendingOrder \? "Pending" : "History"/);
-  assert.match(js, /<i data-lucide="history"><\/i>History/);
+  assert.match(js, /data-ebay-conversation-task-status="[^"]+">View updates<\/button>/);
   assert.match(js, /isLoading \? "Refreshing" : "Refresh"/);
   assert.match(js, /<i data-lucide="mail-check"><\/i>\s*Sync/);
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.ebay-detail-actions\s*\{[\s\S]*?flex-direction:\s*row;[\s\S]*?overflow-x:\s*auto;/);
@@ -64,7 +64,7 @@ test("mobile message detail panels use compact controls instead of stacked block
 });
 
 test("mobile task composer renders as a compact phone sheet", () => {
-  assert.match(html, /email-triage-asset-version" content="workspace-20261008"/);
+  assert.match(html, /email-triage-asset-version" content="recovery-20261009"/);
   assert.match(js, /<h3 id="ebay-task-modal-title">Create task<\/h3>/);
   assert.match(js, /<legend>Target<\/legend>/);
   assert.match(js, /<span>Instructions<\/span>/);

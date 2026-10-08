@@ -394,6 +394,21 @@
   const ebaySentTimelineRefreshTimers = new Map();
   const ebayRealtimeMessageReloadTimers = new Map();
   const ebayComposerDraftCache = new Map();
+  const ebayMessageRequests = new Map();
+  const ebayMessageVersions = new Map();
+  const ebayMessageFreshness = new Map();
+  const ebayProviderRefreshes = new Map();
+  const ebaySavedCountRequests = new Map();
+  let ebayMailboxReloadStartedAt = 0;
+  let ebayRealtimeConnected = false;
+  let ebayRecoveryHealth = null;
+  let ebayRecoveryHealthAt = 0;
+  async function loadEbayRecoveryHealth(context) {
+    if (Date.now() - ebayRecoveryHealthAt < 55000) return;
+    ebayRecoveryHealthAt = Date.now();
+    const {data,error} = await context.client.rpc("get_ebay_message_recovery_health");
+    if (!error && data) { ebayRecoveryHealth = data; setEbayConversationState({}); }
+  }
   let ebayConversationReloadTimer = null;
   let ebayConversationRealtimeChannel = null;
   let ebayMobileWorkspaceView = getStoredEbayMobileWorkspaceView();
@@ -8127,7 +8142,7 @@
   function scheduleEbayRealtimeMessageReload(context, conversationId, delay = 700) {
     if (!context || !conversationId) return;
     if (ebayRealtimeMessageReloadTimers.has(conversationId)) {
-      window.clearTimeout(ebayRealtimeMessageReloadTimers.get(conversationId));
+      return;
     }
     const timer = window.setTimeout(() => {
       ebayRealtimeMessageReloadTimers.delete(conversationId);
@@ -8156,6 +8171,9 @@
   function mergeRealtimeEbayMessage(context, row = {}) {
     const conversationId = compactConversationText(row.conversation_id);
     if (!conversationId || !row.id) return;
+    // An older HTTP response must not erase a message delivered by realtime.
+    ebayMessageVersions.set(conversationId, (ebayMessageVersions.get(conversationId) || 0) + 1);
+    ebayMessageFreshness.delete(conversationId);
     const normalized = collapseEbayLocalSentPlaceholders(
       normalizeEbayMessagesForReadState(conversationId, [row]),
     )[0] || row;
@@ -8251,6 +8269,10 @@
         if (row.metadata?.conversation_id) handleEbayRealtimeTaskChange(context, row);
       })
       .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          if (ebayRealtimeConnected) refreshVisibleEbayMailbox(context);
+          ebayRealtimeConnected = true;
+        }
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.warn("[email-triage] eBay realtime channel status:", status);
         }
@@ -9210,7 +9232,10 @@
       } else if (state.ebayConversationLastLoadedAt) {
         const page = ebayMailboxPageInfo(state);
         const canonical = page.canonical_total === null ? "" : ` Canonical total: ${formatContextNumber(page.canonical_total)}.`;
-        els.ebayConversationStatus.textContent = `Updated ${formatDateTime(state.ebayConversationLastLoadedAt)}`;
+        const recovery = ebayRecoveryHealth;
+        const check = recovery?.last_check ? ` · Background check ${formatDateTime(recovery.last_check)}` : "";
+        const retries = recovery?.pending_retries > 0 ? ` · ${recovery.pending_retries} updates retrying` : "";
+        els.ebayConversationStatus.textContent = `Inbox loaded ${formatDateTime(state.ebayConversationLastLoadedAt)}${check}${retries}`;
       } else {
         els.ebayConversationStatus.textContent = "Your inbox is ready.";
       }
@@ -9276,7 +9301,15 @@
 
   async function loadEbayConversationMessages(context, conversationId, options = {}) {
     if (!conversationId) return;
-    if (!options.force && adminClassificationState.ebayConversationMessagesById?.[conversationId]) return;
+    const conversation = selectedEbayConversationById(conversationId, adminClassificationState);
+    const marker = conversation?.latest_message_id || conversation?.latest_message_created_at || "";
+    const fresh = ebayMessageFreshness.get(conversationId);
+    if (!options.force && fresh?.marker === marker && Date.now() - fresh.at < 30000) return;
+    const version = ebayMessageVersions.get(conversationId) || 0;
+    const pending = ebayMessageRequests.get(conversationId);
+    if (pending?.version === version) return pending.promise;
+    const request = { version, promise: null };
+    const work = async () => {
     setEbayConversationState({
       ebayConversationMessagesLoadingId: conversationId,
       ebayConversationMessageErrorsById: {
@@ -9287,11 +9320,13 @@
 
     try {
       const payload = await fetchEbayConversationMessages(context, conversationId);
+      if ((ebayMessageVersions.get(conversationId) || 0) !== version) return;
+      ebayMessageFreshness.set(conversationId, { marker, at: Date.now() });
       const normalizedMessages = collapseEbayLocalSentPlaceholders(
         normalizeEbayMessagesForReadState(conversationId, payload.messages),
       );
       setEbayConversationState({
-        ebayConversationMessagesLoadingId: null,
+        ebayConversationMessagesLoadingId: adminClassificationState.ebayConversationMessagesLoadingId === conversationId ? null : adminClassificationState.ebayConversationMessagesLoadingId,
         ebayConversations: enrichEbayConversationsIdentityFromMessages(
           adminClassificationState.ebayConversations,
           conversationId,
@@ -9308,15 +9343,61 @@
       });
       scrollRequestedEbayMessageIntoView(conversationId);
     } catch (error) {
+      if ((ebayMessageVersions.get(conversationId) || 0) !== version) return;
       const code = error.code || error.message || "ebay_conversation_messages_failed";
       setEbayConversationState({
-        ebayConversationMessagesLoadingId: null,
+        ebayConversationMessagesLoadingId: adminClassificationState.ebayConversationMessagesLoadingId === conversationId ? null : adminClassificationState.ebayConversationMessagesLoadingId,
         ebayConversationMessageErrorsById: {
           ...adminClassificationState.ebayConversationMessageErrorsById,
           [conversationId]: code,
         },
       });
       console.error("[email-triage] eBay conversation messages failed:", error);
+    } finally {
+      if (ebayMessageRequests.get(conversationId) === request) ebayMessageRequests.delete(conversationId);
+    }
+    };
+    request.promise = work();
+    ebayMessageRequests.set(conversationId, request);
+    return request.promise;
+  }
+
+  async function refreshEbayProviderInBackground(context, conversationId, { force = false } = {}) {
+    const conversation = selectedEbayConversationById(conversationId, adminClassificationState);
+    if (!conversation?.ebay_conversation_id || document.hidden) return;
+    const previous = ebayProviderRefreshes.get(conversationId);
+    if (previous?.pending || (!force && Date.now() - (previous?.at || Date.parse(conversation.last_detail_synced_at) || 0) < 60000)) return;
+    const request = { at: Date.now(), pending: true };
+    ebayProviderRefreshes.set(conversationId, request);
+    try {
+      await runEbayMessageSync(context, {
+        runType: "manual", conversationId: conversation.ebay_conversation_id,
+        conversationTypes: [ebayConversationTypeForSync(conversation) || "FROM_MEMBERS"],
+        classificationMode: "none", syncRecentOrdersBeforeMessages: false,
+        suppressConversationActivityEvents: true, messagePageLimit: 50,
+      });
+      ebayMessageVersions.set(conversationId, (ebayMessageVersions.get(conversationId) || 0) + 1);
+      await loadEbayConversationMessages(context, conversationId, { force: true });
+      scheduleEbayConversationListReload(context, { delay: 300 });
+    } catch (error) {
+      console.warn("[email-triage] Provider refresh failed; scheduled recovery will retry:", error);
+      setEbayConversationState({ ebayConversationMessageErrorsById: {
+        ...adminClassificationState.ebayConversationMessageErrorsById,
+        [conversationId]: "Could not check eBay for newer replies. Saved messages are shown; try Refresh again.",
+      } });
+    } finally {
+      request.pending = false;
+    }
+  }
+
+  function refreshVisibleEbayMailbox(context) {
+    if (document.hidden || !navigator.onLine || adminClassificationState.ebayConversationLoading) return;
+    scheduleEbayConversationListReload(context, { delay: 100, forceSelectionReload: true });
+    loadEbayRecoveryHealth(context).catch(() => null);
+    const id = adminClassificationState.selectedEbayConversationId;
+    if (id) {
+      loadEbayConversationMessages(context, id, { force: true });
+      refreshEbayProviderInBackground(context, id);
     }
   }
 
@@ -9740,6 +9821,7 @@
     loadEbayConversationMessages(context, conversationId);
     loadEbayConversationContext(context, conversationId);
     loadEbayConversationDrafts(context, conversationId);
+    refreshEbayProviderInBackground(context, conversationId);
   }
 
   async function loadEbayConversationList(context, options = {}) {
@@ -9808,7 +9890,7 @@
       });
       hydrateEbayConversationUserReadStates(context, conversations);
       if (selectedEbayConversationId && (!append || selectedEbayConversationId !== previousSelectedId || options.forceSelectionReload === true)) {
-        loadEbayConversationMessages(context, selectedEbayConversationId);
+        loadEbayConversationMessages(context, selectedEbayConversationId, { force: options.forceSelectionReload === true });
         loadEbayConversationContext(context, selectedEbayConversationId);
         loadEbayConversationDrafts(context, selectedEbayConversationId, { force: true });
       }
@@ -9827,6 +9909,7 @@
   }
 
   function scheduleEbayConversationListReload(context, options = {}) {
+    if (!ebayConversationReloadTimer) ebayMailboxReloadStartedAt = Date.now();
     if (ebayConversationReloadTimer) window.clearTimeout(ebayConversationReloadTimer);
     const delay = Number(options.delay || 0);
     ebayConversationReloadTimer = window.setTimeout(() => {
@@ -9835,7 +9918,7 @@
         limit: options.limit || 100,
         forceSelectionReload: options.forceSelectionReload === true,
       });
-    }, Math.max(delay, 0));
+    }, Math.max(0, Math.min(delay, 2000 - (Date.now() - ebayMailboxReloadStartedAt))));
   }
 
   async function loadEbaySavedViewExactCounts(context, views = ebaySavedViewsForState(adminClassificationState)) {
@@ -9848,7 +9931,14 @@
     try {
       const entries = await Promise.all(targets.map(async (view) => {
         try {
-          const payload = await fetchEbayConversations(context, ebayMailboxFetchValuesFromSavedView(view, { limit: 1, offset: 0 }));
+          const values = ebayMailboxFetchValuesFromSavedView(view, { limit: 1, offset: 0 });
+          const key = JSON.stringify(values);
+          let pending = ebaySavedCountRequests.get(key);
+          if (!pending) {
+            pending = fetchEbayConversations(context, values).finally(() => ebaySavedCountRequests.delete(key));
+            ebaySavedCountRequests.set(key, pending);
+          }
+          const payload = await pending;
           return [view.id, Number(payload.matching_total || 0)];
         } catch (error) {
           console.error("[email-triage] smart folder exact count failed:", view.name, error);
@@ -9857,7 +9947,7 @@
       }));
       const nextCounts = { ...(adminClassificationState.ebayConversationSavedViewCounts || {}) };
       entries.forEach(([viewId, count]) => {
-        if (!viewId || !Number.isFinite(Number(count))) return;
+        if (!viewId || count === null || !Number.isFinite(Number(count))) return;
         nextCounts[viewId] = Number(count);
       });
       setEbayConversationState({
@@ -10905,7 +10995,10 @@
   }
 
   function bindEbayConversationEvents(context) {
-    els.ebayConversationRefresh?.addEventListener("click", () => loadEbayConversationList(context, { limit: 100 }));
+    els.ebayConversationRefresh?.addEventListener("click", () => {
+      loadEbayConversationList(context, { limit: 100, forceSelectionReload: true });
+      refreshEbayProviderInBackground(context, adminClassificationState.selectedEbayConversationId, { force: true });
+    });
     els.ebayConversationLoadMore?.addEventListener("click", () => loadEbayConversationList(context, { append: true }));
     els.ebayConversationSync?.addEventListener("click", () => syncLatestEbayConversations(context));
     els.ebayConversationBackfill?.addEventListener("click", () => backfillEbayConversations(context, "none"));
@@ -12281,6 +12374,11 @@
     document.getElementById("triage-folder-select")?.addEventListener("change", event => applyEbaySavedView(context, event.target.value));
 
     setupEbayConversationRealtime(context);
+    loadEbayRecoveryHealth(context).catch(() => null);
+    document.addEventListener("visibilitychange", () => refreshVisibleEbayMailbox(context));
+    window.addEventListener("online", () => refreshVisibleEbayMailbox(context));
+    const refreshTimer = window.setInterval(() => refreshVisibleEbayMailbox(context), 60000);
+    window.addEventListener("beforeunload", () => window.clearInterval(refreshTimer), { once: true });
     window.addEventListener("beforeunload", () => cleanupEbayConversationRealtime(context), { once: true });
     applyEbayConversationDeepLinkState();
     renderEbayConversationInbox(adminClassificationState);

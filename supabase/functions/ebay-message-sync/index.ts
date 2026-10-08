@@ -108,6 +108,7 @@ type ExistingConversation = {
   ebay_conversation_id: string;
   unread_count: number;
   latest_message_id: string | null;
+  last_detail_synced_at: string | null;
   provider_read_state: string | null;
   local_read_state: string | null;
   pending_provider_update: boolean;
@@ -150,6 +151,8 @@ type CheckpointStart = {
   lastConversationTimestamp: string | null;
   messagesProcessed: number;
   alreadyComplete: boolean;
+  windowStart?: string | null;
+  windowEnd?: string | null;
 };
 
 type ConversationTypeSyncResult = {
@@ -361,7 +364,8 @@ async function parseInput(req: Request): Promise<SyncInput> {
     ? [...SUPPORTED_CONVERSATION_TYPES]
     : conversationTypesFrom(explicitConversationTypes, isBackfill ? [...SUPPORTED_CONVERSATION_TYPES] : ["FROM_MEMBERS"]);
   const isBatchOperation = !conversationId;
-  const shouldSyncRecentOrdersDefault = !["backfill", "replay"].includes(runType);
+  // Message delivery must never wait for order, inventory or finance lookups.
+  const shouldSyncRecentOrdersDefault = false;
   const defaultCheckpointScope = runType === "backfill"
     ? DEFAULT_BACKFILL_CHECKPOINT_SCOPE
     : runType === "incremental"
@@ -389,7 +393,7 @@ async function parseInput(req: Request): Promise<SyncInput> {
     referenceId: stringOrNull(getValue("referenceId")),
     conversationId,
     classificationMode,
-    resumeFromCheckpoint: booleanValue(getValue("resumeFromCheckpoint"), isBackfill),
+    resumeFromCheckpoint: booleanValue(getValue("resumeFromCheckpoint"), isBackfill || runType === "incremental"),
     resetCheckpoint: booleanValue(getValue("resetCheckpoint"), false),
     checkpointScope: stringOrNull(getValue("checkpointScope")) || defaultCheckpointScope,
     rateLimitPauseMs: boundedInteger(
@@ -950,7 +954,7 @@ async function existingConversationsById(
   if (!ids.length) return new Map<string, ExistingConversation>();
   const { data, error } = await supabase
     .from("ebay_conversations")
-    .select("id, ebay_conversation_id, unread_count, latest_message_id, provider_read_state, local_read_state, pending_provider_update, read_sync_status, read_sync_error")
+    .select("id, ebay_conversation_id, unread_count, latest_message_id, last_detail_synced_at, provider_read_state, local_read_state, pending_provider_update, read_sync_status, read_sync_error")
     .eq("seller_account_id", accountId)
     .eq("conversation_type", conversationType)
     .in("ebay_conversation_id", ids);
@@ -961,6 +965,7 @@ async function existingConversationsById(
       ebay_conversation_id: text(row.ebay_conversation_id),
       unread_count: Number(row.unread_count || 0),
       latest_message_id: text(row.latest_message_id) || null,
+      last_detail_synced_at: isoOrNull(row.last_detail_synced_at),
       provider_read_state: text(row.provider_read_state) || null,
       local_read_state: text(row.local_read_state) || null,
       pending_provider_update: row.pending_provider_update === true,
@@ -1316,11 +1321,13 @@ async function syncConversationDetail(options: {
   const persistedMessages: any[] = [];
 
   for (let page = 0; page < options.input.maxDetailPagesPerConversation; page += 1) {
-    const detail = await ebayGet(
+    // Targeted sync already fetched this first page to discover the conversation.
+    const prefetched = page === 0 && options.input.conversationId && Array.isArray(options.conversationPayload.messages);
+    const detail = prefetched ? options.conversationPayload : await ebayGet(
       options.token,
       conversationDetailPath(ebayConversationId, options.conversationType, options.input.messagePageLimit, offset),
     );
-    options.counters.detailPagesFetched += 1;
+    if (!prefetched) options.counters.detailPagesFetched += 1;
     const messages = (Array.isArray(detail.messages) ? detail.messages : []) as JsonRecord[];
     total = numberOrNull(detail.total);
     options.counters.messagesSeen += messages.length;
@@ -1589,7 +1596,8 @@ function newestTimestamp(left: string | null, right: string | null) {
 function latestSyncStartTime(input: SyncInput, checkpoint: CheckpointStart) {
   if (input.runType !== "incremental") return null;
   if (input.startTime) return input.startTime;
-  if (checkpoint.lastConversationTimestamp) return checkpoint.lastConversationTimestamp;
+  if (checkpoint.windowStart) return checkpoint.windowStart;
+  if (checkpoint.lastConversationTimestamp) return new Date(Date.parse(checkpoint.lastConversationTimestamp) - 5 * 60000).toISOString();
   return new Date(Date.now() - input.latestSyncLookbackDays * 24 * 60 * 60 * 1000).toISOString();
 }
 
@@ -1597,7 +1605,7 @@ function filterIncrementalConversations(input: SyncInput, conversations: JsonRec
   if (input.runType !== "incremental" || !cutoff) return conversations;
   return conversations.filter((conversation) => {
     const timestamp = latestConversationTimestamp(conversation);
-    return Boolean(timestamp && timestamp >= cutoff);
+    return !timestamp || timestamp >= cutoff;
   });
 }
 
@@ -1725,6 +1733,14 @@ async function beginCheckpoint(options: {
 
   const existingStatus = String(existing?.status || "") as CheckpointStatus;
   const existingMetadata = recordOrEmpty(existing?.metadata);
+  if (existingStatus === "running" && Date.now() - Date.parse(text(existingMetadata.started_at)) < 15 * 60000) {
+    throw new SyncError("sync_already_running", {status:409,phase:"checkpoint",message:"A mailbox catch-up is already running. Please wait for it to finish."});
+  }
+  const canResumeWindow = options.input.runType !== "incremental" ||
+    (existingMetadata.window_start && existingMetadata.window_end &&
+      Number(existingMetadata.page_limit) === options.input.conversationPageLimit &&
+      (!options.input.startTime || options.input.startTime === existingMetadata.window_start) &&
+      (!options.input.endTime || options.input.endTime === existingMetadata.window_end));
   const resetForClassificationModeChange = Boolean(existing?.id) &&
     options.input.runType === "backfill" &&
     options.input.classificationMode !== "none" &&
@@ -1750,7 +1766,7 @@ async function beginCheckpoint(options: {
     ? options.input.startOffset
     : resetCheckpoint
     ? 0
-    : options.input.resumeFromCheckpoint
+    : options.input.resumeFromCheckpoint && canResumeWindow
     ? Number(existing?.next_offset || 0)
     : 0;
   assertAlignedOffset(resumeOffset, options.input.conversationPageLimit);
@@ -1787,6 +1803,8 @@ async function beginCheckpoint(options: {
 
   return {
     resumeOffset,
+    windowStart: resumeOffset > 0 ? isoOrNull(existingMetadata.window_start) : null,
+    windowEnd: resumeOffset > 0 ? isoOrNull(existingMetadata.window_end) : null,
     lastConversationTimestamp: isoOrNull(existing?.last_conversation_timestamp) || null,
     messagesProcessed: resetCheckpoint ? 0 : Number(existing?.messages_processed || 0),
     alreadyComplete: false,
@@ -1848,12 +1866,16 @@ async function updateCheckpointProgress(options: {
         pending_read_sync_conversations: options.counters.pendingReadSyncConversations,
       },
       updated_at: new Date().toISOString(),
+      window_start: options.input.startTime,
+      window_end: options.input.endTime,
     },
   };
   if (options.exhausted && options.input.runType === "backfill") {
     update.last_full_backfill_at = new Date().toISOString();
   }
-  if (options.lastConversationTimestamp) {
+  if (options.input.runType === "incremental" && options.exhausted) {
+    update.last_conversation_timestamp = options.input.endTime || options.lastConversationTimestamp;
+  } else if (options.input.runType !== "incremental" && options.lastConversationTimestamp) {
     update.last_conversation_timestamp = options.lastConversationTimestamp;
   }
 
@@ -1955,12 +1977,7 @@ async function failRunningCheckpoints(
       last_run_id: runId,
       last_error_code: syncError?.code || "unknown_error",
       last_error_message: error instanceof Error ? error.message.slice(0, 1000) : String(error || "Unknown error").slice(0, 1000),
-      metadata: {
-        failed_at: new Date().toISOString(),
-        run_id: runId,
-        failure: failureDetails(error),
-        counters: counters || {},
-      },
+      // Keep the saved paging window and offset so a failed chunk can resume.
     })
     .eq("current_run_id", runId);
 }
@@ -2012,6 +2029,16 @@ async function processConversationPage(options: {
       options.counters.conversationIds.push(ebayConversationId);
     }
     const existingConversation = existing.get(ebayConversationId) || null;
+    const summaryLatest = latestMessage(conversation);
+    const summaryLatestId = firstText(summaryLatest.messageId, summaryLatest.id);
+    // Scheduled listing scans are cheap: revisit details only when changed or
+    // stale. Targeted refreshes and historical recovery always fetch details.
+    if (options.input.runType === "scheduled" && !options.input.conversationId &&
+      existingConversation && summaryLatestId && summaryLatestId === existingConversation.latest_message_id &&
+      Date.now() - Date.parse(existingConversation.last_detail_synced_at || "") < 15 * 60000) {
+      options.counters.conversationsUnchanged += 1;
+      continue;
+    }
     if (!existingConversation) options.counters.conversationsInserted += 1;
     const conversationRow = await upsertConversation(
       options.supabase,
@@ -2062,7 +2089,7 @@ async function processConversationPage(options: {
       reference_type: referenceType(conversation) || conversationRow.reference_type,
       other_party_username: otherPartyUsername(conversation) || conversationRow.other_party_username,
     });
-    await enqueueBuyerMessageSmsAfterLinking({
+    if (!options.input.suppressConversationActivityEvents) await enqueueBuyerMessageSmsAfterLinking({
       supabase: options.supabase,
       conversationRowId: conversationRow.id,
       ebayConversationId,
@@ -2220,14 +2247,14 @@ async function syncConversationType(options: {
       totalAvailable: null,
     };
   }
-  let offset = options.input.runType === "backfill"
+  let offset = ["backfill", "incremental"].includes(options.input.runType)
     ? checkpoint.resumeOffset
     : options.input.startOffset;
   const incrementalCutoff = latestSyncStartTime(options.input, checkpoint);
   const pathInput = options.input.runType === "incremental" &&
     options.conversationType === "FROM_MEMBERS" &&
     incrementalCutoff
-    ? { ...options.input, startTime: incrementalCutoff }
+    ? { ...options.input, startTime: incrementalCutoff, endTime: options.input.endTime || checkpoint.windowEnd || new Date().toISOString() }
     : options.input;
   let conversationsProcessed = 0;
   const messagesProcessedAtStart = options.counters.messagesSeen;
@@ -2266,8 +2293,8 @@ async function syncConversationType(options: {
     conversationsProcessed = Math.max(conversationsProcessed, offset + pageConversations.length);
     latestTimestamp = newestTimestamp(latestTimestamp, result.latestTimestamp);
 
-    const exhausted = !pageConversations.length ||
-      pageConversations.length < options.input.conversationPageLimit ||
+    const exhausted = !rawPageConversations.length ||
+      rawPageConversations.length < options.input.conversationPageLimit ||
       (typeof total === "number" && offset + options.input.conversationPageLimit >= total);
     const hitPageCap = options.input.maxConversationPages !== null && page + 1 >= options.input.maxConversationPages && !exhausted;
     const nextOffset = exhausted ? 0 : offset + options.input.conversationPageLimit;
@@ -2284,6 +2311,7 @@ async function syncConversationType(options: {
     if (["backfill", "incremental"].includes(options.input.runType)) {
       await updateCheckpointProgress({
         ...options,
+        input: pathInput,
         lastPageProcessed: pageIndex,
         nextOffset,
         totalAvailable: total,
@@ -2818,6 +2846,7 @@ serve(async (req) => {
       sellerUsernameConfigured: Boolean(account.seller_username),
       counters,
       backfillProgress,
+      typeResults,
       canonicalTotalConversations,
       unclassifiedBefore,
       unclassifiedAfter,
