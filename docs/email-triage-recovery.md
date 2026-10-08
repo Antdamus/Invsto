@@ -84,7 +84,7 @@ stock, fulfillment, or buyer messages. Context reads expire after 60 seconds,
 and an older in-flight read cannot overwrite a new operator selection.
 
 Live diagnosis on October 8: geraldo3700 had 16 stored orders and luilop_10 had
-13, but their unreferenced chats were ambiguous. cc-chope and el_8610 had no stored
+13 older purchases (the newest shown was February 16), so its recent chat had no recent match. geraldo3700 had multiple possible orders without a specific reference. cc-chope and el_8610 had no stored
 orders under those exact usernames. A missing local order is not proof that the
 buyer never purchased; it can also require an order import or identity check.
 Tests: order-linking.test.mjs and the Buyer order choices browser cases.
