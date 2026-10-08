@@ -513,6 +513,12 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/ebay-order-sync/index.ts"
 
+# Keep the existing direct browser history-sync transport on redeploy.
+[functions.ebay-buyer-history-sync]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ebay-buyer-history-sync/index.ts"
+
 [functions.ebay-account-deletion]
 enabled = true
 verify_jwt = false
