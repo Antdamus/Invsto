@@ -35,7 +35,7 @@ async function open(t,width=390){const context=await browser.newContext({viewpor
   },storage:{from:bucket=>({createSignedUrl:async path=>{fixtureStorage.push({type:'read',path});return{data:{signedUrl:image}};},upload:async(path,file)=>{fixtureStorage.push({type:'upload',path,name:file.name});if(window.fixtureUploadFailure){fixtureUploadFailure=false;return{error:{message:'Upload interrupted'}};}return{data:{path}};}})}};
   window.fixtureUnmatched=false;
  });
- await page.addScriptTag({url:origin+'/packaging.js'});await expect(page.locator('.pack-row')).toHaveCount(1);return page;
+ await page.addScriptTag({url:origin+'/packaging-media.js'});await page.addScriptTag({url:origin+'/packaging.js'});await expect(page.locator('.pack-row')).toHaveCount(1);return page;
 }
 const noOverflow=async page=>{const result=await page.evaluate(()=>({over:document.documentElement.scrollWidth>innerWidth,els:[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1&&getComputedStyle(e).position!=='fixed').slice(0,12).map(e=>e.tagName+'.'+e.className)}));assert.equal(result.over,false,JSON.stringify(result.els));};
 async function start(page){await page.locator('#pack-barcode').fill('9400100000000000000001');await page.locator('#pack-barcode').press('Enter');await expect(page.getByRole('dialog',{name:'Check the label & orders'})).toBeVisible();await page.getByRole('button',{name:'Start packing',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();await expect(page.getByRole('heading',{name:'9400100000000000000001',exact:true})).toBeVisible();}
@@ -43,7 +43,7 @@ for(const width of [320,390,768,1366,1920])test(`Packaging ${width}px: scan, rev
  const page=await open(t,width);await noOverflow(page);await page.screenshot({path:`test-results/packaging-${width}-queue.png`});await start(page);await noOverflow(page);await expect(page.locator('[data-line]')).toHaveValue('0');await page.locator('[data-line]').fill('2');
  await page.getByRole('button',{name:'Add note',exact:true}).click();await page.locator('[name=note]').fill('Keep both chains in their own bags.');await page.getByRole('button',{name:'Save note',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();await expect(page.locator('[data-line]')).toHaveValue('2');
  await page.getByRole('button',{name:'Save checked quantities'}).click();await expect(page.locator('#pack-status')).toContainText('quantities saved');
- await page.locator('#pack-order-proof summary').click();await expect(page.locator('[data-media-source=true] img')).toBeVisible();assert.equal(await page.locator('[data-media-source=false]').count(),0);
+ await page.locator('#pack-order-proof summary').click();await expect(page.locator('.pack-line-photos img')).toBeVisible();assert.equal(await page.locator('[data-media-source=false]').count(),0);
  await page.locator('#pack-files').setInputFiles({name:'packing.jpg',mimeType:'image/jpeg',buffer:Buffer.from('fixture-image')});await expect(page.locator('[data-media-source=false] img')).toHaveCount(1);
  await page.screenshot({path:`test-results/packaging-${width}-detail.png`,fullPage:true});await noOverflow(page);
  await page.getByRole('button',{name:'Report an issue'}).click();await page.locator('[name=owner]').selectOption('00000000-0000-4000-8000-000000000101');await page.locator('[name=note]').fill('Replace the defective clasp.');await page.locator('[name=due]').fill('2026-10-09T15:00');await page.screenshot({path:`test-results/packaging-${width}-issue.png`});await page.getByRole('button',{name:'Create task',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();await expect(page.getByRole('button',{name:'Issue resolved · Resume packing'})).toBeDisabled();await expect(page.locator('.pack-notice.error').first()).toContainText('Replace the defective clasp');await noOverflow(page);
@@ -67,4 +67,54 @@ test('an in-flight upload prevents another capture or quantity edit from being s
  await page.locator('#pack-files').setInputFiles({name:'packing.jpg',mimeType:'image/jpeg',buffer:Buffer.from('fixture')});
  await expect(page.locator('#pack-upload-status')).toContainText('Saving evidence');await expect(page.locator('#pack-camera')).toBeDisabled();await expect(page.locator('[data-line]')).toBeDisabled();
  await page.evaluate(()=>releaseFixture());await expect(page.locator('#pack-upload-status')).toBeEmpty();await expect(page.locator('#pack-camera')).toBeEnabled();await expect(page.locator('[data-line]')).toHaveValue('2');
+});
+
+for(const width of [320,390,1366])test(`${width}px: item screenshots and completion photos are visible, correctly scoped, enlargeable, and read-only`,async t=>{
+ const page=await open(t,width);
+ await page.evaluate(()=>{
+  const d=fixtureDetail,line=d.lines[0],other={...line,id:'other-line',item_title:'#050 · Silver bracelet',item_number:'287611495564'};d.lines.push(other);
+  d.reference_events=[{order_id:line.order_id,task_line_ids:[line.id,other.id],created_at:new Date().toISOString(),signed_by_email:'sandra@example.test',payload:{},photo_attachments:[
+   {bucket:'photos',path:'chain-front.jpg',label:'Chain front screenshot',metadata:{source:'video_receipt',order_line_ids:[line.id]},preview_path:'chain-front-preview.jpg'},
+   {bucket:'photos',path:'chain-detail.jpg',label:'Chain clasp screenshot',metadata:{source:'video_receipt',item_number:line.item_number}}]},
+   {order_id:line.order_id,created_at:new Date().toISOString(),payload:{proof_type:'completion_photo',order_line_ids:[line.id,other.id]},photo_attachments:[{bucket:'order-evidence-photos',path:'completion.jpg',label:'Order team completion photo'}]},
+   {order_id:line.order_id,payload:{},photo_attachments:[{bucket:'photos',path:'order-note.jpg',label:'Certificate reference'}]}];
+  d.bag_photos=[{bucket:'photos',path:'chain-front.jpg',label:'Chain front screenshot',order_ids:[line.order_id],order_line_ids:[line.id]}];
+ });
+ await page.locator('.pack-row').click();await noOverflow(page);
+ const first=page.locator('.pack-line').first(),second=page.locator('.pack-line').nth(1);
+ await expect(first.locator('.pack-reference')).toHaveCount(2);await expect(second).toContainText('No item screenshot saved');
+ await expect(page.locator('#pack-completion-photos .pack-reference')).toHaveCount(1);await expect(page.getByRole('heading',{name:'Other order references'})).toBeVisible();
+ await first.locator('.pack-photo-thumb').first().scrollIntoViewIfNeeded();await expect(first.locator('.pack-photo-thumb img')).toHaveCount(2);
+ await page.screenshot({path:`test-results/packaging-photos-${width}.png`,fullPage:true});
+ await first.locator('.pack-photo-thumb').first().click();const viewer=page.locator('#pack-photo-viewer');await expect(viewer).toBeVisible();await expect(page.locator('#pack-view-items')).toContainText('#049');await expect(page.locator('#pack-view-count')).toHaveText('1 / 2');
+ await page.getByRole('button',{name:'Zoom in',exact:true}).click();await expect(page.locator('#pack-view-stage')).toHaveClass(/is-zoomed/);await page.getByRole('button',{name:'Fit photo'}).click();
+ await page.getByRole('button',{name:'Next photo',exact:true}).click();await expect(page.locator('#pack-view-title')).toHaveText('Chain clasp screenshot');await expect(page.getByRole('button',{name:'Next photo',exact:true})).toBeDisabled();
+ await page.screenshot({path:`test-results/packaging-viewer-${width}.png`});await page.keyboard.press('ArrowLeft');await expect(page.locator('#pack-view-count')).toHaveText('1 / 2');await page.keyboard.press('Escape');await expect(viewer).not.toBeVisible();
+ await page.locator('#pack-completion-photos .pack-photo-thumb').click();await expect(page.locator('#pack-view-context')).toContainText('Order completion');await page.getByRole('button',{name:'Close photo viewer'}).click();
+ assert.deepEqual(await page.evaluate(()=>fixtureWrites),[]);assert.equal(await page.locator('[data-media-source=false]').count(),0);
+});
+test('unidentified or contradictory screenshot metadata never gets guessed onto an item',async t=>{
+ const page=await open(t);const result=await page.evaluate(()=>{
+  const d=structuredClone(fixtureDetail),a=d.lines[0],b={...a,id:'line-b',item_number:'second'};d.lines.push(b);
+  d.reference_events=[{order_id:a.order_id,task_line_ids:[a.id,b.id],photo_attachments:[{bucket:'photos',path:'one.jpg',metadata:{order_line_ids:[a.id],item_number:'second'}},{bucket:'photos',path:'two.jpg',metadata:{item_number:'unknown'}}]}];
+  return OGPackagingMedia.index(d).map(p=>p.order_line_ids);
+ });assert.deepEqual(result,[[],[]]);
+});
+test('unavailable media can retry without losing quantities or marking packaging complete',async t=>{
+ const page=await open(t);
+ await page.evaluate(()=>{fixtureDetail.order_events[0].photo_attachments[0].preview_path='reference-preview.jpg';});
+ await start(page);await page.locator('[data-line]').fill('1');await expect(page.locator('.pack-photo-thumb img')).toBeVisible();
+ await page.evaluate(()=>{const old=supabase.storage.from;let once=true;supabase.storage.from=bucket=>{const store=old(bucket);return {...store,createSignedUrl:async path=>{if(path==='reference.jpg'&&once){once=false;return {error:{message:'offline'}};}return store.createSignedUrl(path);}};};});
+ await page.locator('.pack-photo-thumb').first().click();await expect(page.getByRole('button',{name:'Retry photo'})).toBeVisible();
+ await page.getByRole('button',{name:'Retry photo'}).click();await expect(page.locator('#pack-view-stage img')).toBeVisible();
+ await page.getByRole('button',{name:'Close photo viewer'}).click();await expect(page.locator('[data-line]')).toHaveValue('1');
+ assert.equal(await page.evaluate(()=>fixtureWrites.filter(w=>w.action==='contents'||w.action==='pack').length),0);
+});
+
+test('the full-size viewer falls back to a saved preview when the original image format cannot display',async t=>{
+ const page=await open(t);await page.evaluate(()=>{fixtureDetail.order_events[0].photo_attachments[0].preview_path='reference-preview.jpg';});
+ await start(page);await expect(page.locator('.pack-photo-thumb img')).toBeVisible();
+ await page.evaluate(()=>{const old=supabase.storage.from;supabase.storage.from=bucket=>{const store=old(bucket);return {...store,createSignedUrl:async path=>path==='reference.jpg'?{data:{signedUrl:'data:image/jpeg;base64,AA=='}}:store.createSignedUrl(path)};};});
+ await page.locator('.pack-photo-thumb').click();await expect(page.locator('#pack-view-stage img')).toHaveAttribute('src',/^data:image\/svg/);
+ await page.getByRole('button',{name:'Close photo viewer'}).click();assert.equal(await page.evaluate(()=>fixtureWrites.filter(w=>w.action!=='start').length),0);
 });

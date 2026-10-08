@@ -46,7 +46,22 @@ their remaining work after activation.
 The old client shipping-task shortcut is guarded in the database. Shipping tasks
 for handed-off orders close only when every fulfilled quantity is dispatched.
 Order photos, notes, tasks and related boxes remain accessible from each package.
-The order reference section shows the latest 200 order events.
+The order notes section shows the latest 200 order events. Photo references are
+loaded independently of that notes window so older screenshots remain available.
+
+Item screenshots appear beside their saved order lines. Photos with no reliable
+item association appear under Other order references instead of being guessed onto
+an item. Completion photos have their own visible section and a shortcut at the
+package header. They remain reference evidence and never satisfy the requirement
+for a new packaging photo. Tap a photo to see it without cropping, zoom, browse the
+other photos in its group, or open the original. Arrow keys and Escape also work.
+Preview images load near the viewport, with a limit of four simultaneous reads;
+originals load when opened. Corrected/removed photos are excluded from legacy
+closeout snapshots. The reference query uses the existing inventory staff access.
+
+Apply `20261008220000_packaging_reference_photos.sql` before publishing the photo
+interface. This replaces only the read-only detail query; it does not create
+handoffs, change claims, adjust stock, or dispatch packages.
 
 To pause **new handoffs** without deleting work, set `packaging_settings.enabled`
 to false. Retain the page and database functions so the department can finish its

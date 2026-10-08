@@ -3,7 +3,7 @@
 <head>
  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
  <meta name="theme-color" content="#101713"><title>Packaging · OG Jewelry</title>
- <link rel="stylesheet" href="dashboard.css"><link rel="stylesheet" href="packaging.css?v=20261008-2">
+ <link rel="stylesheet" href="dashboard.css"><link rel="stylesheet" href="packaging.css?v=20261008-photos">
  <link rel="stylesheet" href="barcode-scanner.css">
 </head>
 <body data-page="packaging">
@@ -19,7 +19,12 @@
   </div>
  </main></div></div>
  <dialog id="pack-dialog" class="pack-dialog" aria-labelledby="pack-dialog-title"><form id="pack-dialog-form"><header><h2 id="pack-dialog-title"></h2><button type="button" data-dialog-close class="pack-button" aria-label="Close dialog">×</button></header><div id="pack-dialog-body"></div><p id="pack-dialog-error" role="alert"></p><footer><button type="button" data-dialog-close class="pack-button">Cancel</button><button id="pack-dialog-submit" class="pack-button primary">Save</button></footer></form></dialog>
+ <dialog id="pack-photo-viewer" class="pack-photo-viewer" aria-labelledby="pack-view-title">
+  <header><div><p id="pack-view-context"></p><h2 id="pack-view-title">Order photo</h2><p id="pack-view-items"></p><p id="pack-view-audit"></p></div><button type="button" id="pack-view-close" class="pack-button" aria-label="Close photo viewer">×</button></header>
+  <div id="pack-view-stage" class="pack-view-stage" aria-live="polite"></div>
+  <footer><div class="pack-view-paging"><button type="button" id="pack-view-prev" class="pack-button" aria-label="Previous photo">‹ Previous</button><span id="pack-view-count" aria-live="polite"></span><button type="button" id="pack-view-next" class="pack-button" aria-label="Next photo">Next ›</button></div><div class="pack-view-tools"><button type="button" id="pack-view-zoom" class="pack-button" aria-pressed="false">Zoom in</button><a id="pack-view-original" class="pack-button" href="#" target="_blank" rel="noopener">Open original ↗</a></div></footer>
+ </dialog>
  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script><script src="initSupabase.js?v=5f6p2b-20260608"></script>
  <script src="admin-nav.js?v=packaging-20261008"></script><script src="task-notifications.js?v=20261007" defer></script>
- <script src="barcode-scanner.js?v=20260926-closeup" defer></script><script src="packaging.js?v=20261008-2" defer></script>
+ <script src="barcode-scanner.js?v=20260926-closeup" defer></script><script src="packaging-media.js?v=20261008-photos" defer></script><script src="packaging.js?v=20261008-photos" defer></script>
 </body></html>

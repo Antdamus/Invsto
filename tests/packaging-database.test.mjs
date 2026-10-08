@@ -21,7 +21,10 @@ before(async()=>{
  create table live_sale_lots(id uuid primary key,lot_code text,auction_number text,matched_order_line_id uuid);
  create table live_bag_order_links(lot_id uuid,order_line_id uuid);
  create table live_sale_bag_photos(lot_id uuid,photo_path text,captured_at timestamptz);
- create table ebay_order_tasks(id uuid primary key default gen_random_uuid(),order_id uuid,title text,question text,latest_note text,status text,task_type text,assigned_to_email text,metadata jsonb default '{}',created_at timestamptz default now(),resolved_at timestamptz,resolved_by uuid,resolved_by_email text,resolution_notes text,updated_at timestamptz);
+ create table ebay_live_attempts(lot_id uuid,order_line_id uuid);
+ create table shared_inventory_bag_links(lot_id uuid,order_line_id uuid);
+ create table ebay_order_admin_events(id uuid default gen_random_uuid(),order_ids uuid[],order_line_ids uuid[],created_at timestamptz default now(),signed_by_email text,payload jsonb);
+ create table ebay_order_tasks(order_line_ids uuid[] default '{}',id uuid primary key default gen_random_uuid(),order_id uuid,title text,question text,latest_note text,status text,task_type text,assigned_to_email text,metadata jsonb default '{}',created_at timestamptz default now(),resolved_at timestamptz,resolved_by uuid,resolved_by_email text,resolution_notes text,updated_at timestamptz);
  create table ebay_order_task_events(id uuid,order_id uuid,task_id uuid,notes text,photo_attachments jsonb,signed_by_email text,created_at timestamptz,payload jsonb,action text,old_status text,new_status text,signed_by uuid);
  create table storage.objects(bucket_id text,name text,metadata jsonb,primary key(bucket_id,name));
  create function create_task_request(_source text,_kind text,_details jsonb) returns jsonb language plpgsql set search_path=public as $$declare t ebay_order_tasks;begin
@@ -30,9 +33,10 @@ before(async()=>{
  insert into ebay_order_tasks(order_id,title,question,status,task_type,assigned_to_email,metadata) values((_details->>'_order_id')::uuid,'Packaging issue',_details->>'_question','assigned','coordination','worker@example.test',jsonb_build_object('request_kind',_kind)) returning * into t;return to_jsonb(t);end$$;
  insert into employees(user_id,email,display_name,role,active) values('${id(100)}','admin@example.test','Jose','admin',true),('${id(101)}','worker@example.test','Sandra','employee',true);`);
  await db.exec(await readFile(new URL('../supabase/migrations/20261008020000_packaging_workspace.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261008220000_packaging_reference_photos.sql',import.meta.url),'utf8'));
 });
 beforeEach(async()=>{
- await db.exec(`set test.allowed='yes';set test.actor='${id(100)}';truncate packaging_events,packaging_issues,packaging_evidence,packaging_items,packaging_shipments,packaging_handoffs,ebay_order_task_events,ebay_order_tasks,ebay_order_label_events,ebay_order_lines,ebay_orders,storage.objects cascade;update packaging_settings set enabled=true,activated_at=now();`);
+ await db.exec(`set test.allowed='yes';set test.actor='${id(100)}';truncate ebay_order_admin_events,ebay_live_attempts,shared_inventory_bag_links,live_sale_bag_photos,live_sale_lots,live_bag_order_links,packaging_events,packaging_issues,packaging_evidence,packaging_items,packaging_shipments,packaging_handoffs,ebay_order_task_events,ebay_order_tasks,ebay_order_label_events,ebay_order_lines,ebay_orders,storage.objects cascade;update packaging_settings set enabled=true,activated_at=now();`);
  for(const n of [1,2]){await db.query("insert into ebay_orders(id,order_number,buyer_username,status,sale_date,tracking_number) values($1,$2,$3,'pending',now(),$4)",[id(n),`order-${n}`,`buyer${n}`,n===1?code:'9400100000000000000002']);await db.query("insert into ebay_order_lines(id,order_id,item_title,quantity,fulfilled_quantity,line_status) values($1,$2,'Gold chain',2,0,'pending')",[id(n+10),id(n)]);}
 });
 after(()=>db?.close());
@@ -131,4 +135,27 @@ test('combined label brings all linked orders and only their bag photos, without
  const scan=await call('scan',{tracking:code});assert.equal(scan.matches.length,1);assert.equal(scan.matches[0].order_ids.length,2);
  let d=await start([id(1),id(2)]);assert.equal(d.orders.length,2);assert.equal(d.lines.length,2);assert.equal(d.bag_photos.length,1);assert.equal(d.bag_photos[0].path,'our-bag.jpg');assert.equal(d.evidence.length,0);
  await db.exec('truncate live_sale_bag_photos,live_sale_lots');
+});
+
+test('all saved photo evidence survives a long notes history and hidden receipt tasks keep their exact line scope',async()=>{
+ await close();
+ await db.query("insert into ebay_order_tasks(id,order_id,order_line_ids,title,metadata) values($1,$2,$3,'Receipt',$4)",[id(301),id(1),[id(11)],JSON.stringify({hidden_from_task_board:true})]);
+ await db.query("insert into ebay_order_task_events(id,task_id,order_id,created_at,payload,photo_attachments) values($1,$2,$3,now()-interval '1 year','{}',$4)",[id(401),id(301),id(1),JSON.stringify([{bucket:'order-evidence-photos',path:'receipt.jpg',label:'Video receipt'}])]);
+ await db.query("insert into ebay_order_task_events(id,order_id,created_at,notes) select gen_random_uuid(),$1,now(),'Recent note' from generate_series(1,205)",[id(1)]);
+ const d=await call('detail',{order_ids:[id(1)]});assert.equal(d.order_events.length,200);assert.equal(d.reference_events.length,1);assert.deepEqual(d.reference_events[0].task_line_ids,[id(11)]);assert.equal(d.tasks.length,0);
+});
+test('removed completion photos never resurface from legacy closeout snapshots; unrelated orders remain excluded',async()=>{
+ const old={bucket:'order-evidence-photos',path:'completion-photos/old.jpg'},current={...old,path:'completion-photos/new.jpg'};
+ await db.query('insert into ebay_order_admin_events(order_ids,order_line_ids,payload) values($1,$2,$3)',[[id(1)],[id(11)],JSON.stringify({evidence_photos:[old]})]);
+ await db.query('insert into ebay_order_task_events(id,order_id,created_at,payload,photo_attachments) values($1,$2,now(),$3,$4)',[id(401),id(1),JSON.stringify({proof_type:'completion_photo',order_line_ids:[id(11)],completion_photo_changes:[{bucket:old.bucket,path:old.path}]}),JSON.stringify([current])]);
+ await db.query('insert into ebay_order_task_events(id,order_id,created_at,payload,photo_attachments) values($1,$2,now(),$3,$4)',[id(402),id(1),JSON.stringify({history_removed:true}),JSON.stringify([{...old,path:'removed.jpg'}])]);
+ await db.query('insert into ebay_order_admin_events(order_ids,order_line_ids,payload) values($1,$2,$3)',[[id(2)],[id(12)],JSON.stringify({evidence_photos:[{...old,path:'other-customer.jpg'}]})]);
+ const d=await call('detail',{order_ids:[id(1)]});assert.equal(d.completion_events.length,0);assert.equal(d.reference_events.length,1);assert.equal(d.reference_events[0].photo_attachments[0].path,current.path);
+});
+test('bag photos follow confirmed captured and shared inventory links, without matching bags by number',async()=>{
+ await db.query("insert into live_sale_lots values($1,'LIVE-049','049',null),($2,'LIVE-049-OTHER','049',null)",[id(500),id(501)]);
+ await db.query('insert into ebay_live_attempts values($1,$2)',[id(500),id(11)]);
+ await db.query('insert into shared_inventory_bag_links values($1,$2)',[id(500),id(11)]);
+ await db.query('insert into live_sale_bag_photos values($1,$2,now()),($3,$4,now())',[id(500),'correct.jpg',id(501),'wrong.jpg']);
+ const d=await call('detail',{order_ids:[id(1)]});assert.equal(d.bag_photos.length,1);assert.deepEqual(d.bag_photos[0].order_line_ids,[id(11)]);assert.deepEqual(d.bag_photos[0].order_ids,[id(1)]);
 });
