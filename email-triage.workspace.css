@@ -1,0 +1,183 @@
+/* Current messaging workspace. Keep legacy classification tooling available in Tools. */
+.triage-workspace { --triage-line: rgba(221,229,223,.12); --triage-muted: #aebbb5; background: #0b100e; font-family:system-ui,sans-serif; }
+.triage-workspace .email-triage-content { padding: 22px 24px 90px; gap: 16px; }
+.triage-workspace .ebay-conversation-section { padding: 0; border: 0; background: transparent; box-shadow: none; gap: 12px; }
+.triage-workspace .ebay-conversation-head { display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; justify-content:space-between; padding:0 0 8px; border:0; background:none; box-shadow:none; text-align:left; }
+.triage-workspace .ebay-conversation-head h2 { font: 400 32px/1.15 'DM Serif Display',Georgia,serif; margin:4px 0 6px; }
+.triage-workspace .eyebrow { color:#d9bd7d; font-size:10px; letter-spacing:.14em; font-weight:700; }
+.triage-workspace .section-sub { color:var(--triage-muted); font-size:14px; }
+.triage-workspace .primary-btn,.triage-workspace .secondary-btn { min-height:42px; border-radius:12px; font-size:13px; font-weight:600; gap:7px; }
+.triage-workspace button:focus-visible,.triage-workspace summary:focus-visible,.triage-workspace a:focus-visible { outline:2px solid #efd196; outline-offset:3px; }
+.triage-workspace .ebay-conversation-actions { display:flex; flex-direction:row; flex-wrap:nowrap; width:auto; gap:8px; }
+.triage-workspace .ebay-conversation-actions > .secondary-btn { width:auto; }
+.triage-tools { position:relative; }
+.triage-tools > summary { display:flex; list-style:none; cursor:pointer; }
+.triage-tools > summary::-webkit-details-marker { display:none; }
+.triage-tools-panel { position:absolute; right:0; top:calc(100% + 8px); width:min(360px,calc(100vw - 32px)); display:grid; gap:8px; padding:18px; border:1px solid var(--triage-line); border-radius:16px; background:#17201a; box-shadow:0 20px 60px #0009; z-index:80; max-height:75dvh; overflow:auto; }
+.triage-tools-panel > strong { font-size:14px; margin-bottom:4px; }
+.triage-tools-panel .primary-btn,.triage-tools-panel .secondary-btn { width:100%; justify-content:flex-start; }
+.triage-tools-panel .operational-dashboard-section { padding:8px; margin:0; }
+.triage-tools-panel .operational-dashboard-head { display:block; }
+.triage-tools-panel .operational-dashboard-head .eyebrow { display:none; }
+.triage-tools-panel .operational-dashboard-head h2 { font:600 14px/1.4 system-ui; }
+.triage-tools-panel .operational-dashboard-actions { display:grid; margin-top:8px; }
+.triage-search-toolbar { display:flex; align-items:flex-start; gap:10px; width:100%; }
+.triage-workspace .ebay-conversation-control-row { display:flex; flex:1; flex-direction:column-reverse; flex-wrap:nowrap; align-items:stretch; gap:8px; padding:0; background:none; border:0; box-shadow:none; min-width:0; }
+.triage-workspace .ebay-conversation-search { width:100%; max-width:none; min-height:48px; margin:0; border-radius:14px; background:#18211b; border:1px solid var(--triage-line); }
+.triage-workspace .ebay-conversation-search input { font-size:15px; font-weight:400; padding:8px 0; }
+.triage-workspace #ebay-conversation-filter-toggle { min-height:48px; width:auto; flex:0 0 auto; }
+.triage-workspace #ebay-conversation-status { flex:0 0 auto; justify-content:flex-start; text-align:left; font-size:12px; font-weight:400; color:var(--triage-muted); background:none; padding:0 4px; white-space:normal; }
+.triage-workspace .ebay-conversation-filter-strip { display:flex; min-height:0; border:0; box-shadow:none; background:none; padding:0; gap:8px; }
+.triage-workspace .ebay-conversation-active-filters { flex:1; min-width:0; }
+.triage-workspace .ebay-conversation-active-filters > span,.triage-workspace #ebay-conversation-clear-filters:disabled { display:none; }
+.triage-workspace .ebay-conversation-filter-strip .panel-toggle-btn { min-height:34px; font-size:12px; }
+.triage-quick-queues { display:flex; gap:8px; flex-wrap:wrap; }
+.triage-quick-queues button { display:flex; align-items:center; gap:9px; min-height:42px; padding:8px 14px; color:#c1ccc5; background:#141c17; border:1px solid var(--triage-line); border-radius:12px; font:600 13px/1.3 system-ui; }
+.triage-quick-queues button b { font-size:12px; background:#ffffff0b; padding:2px 6px; border-radius:6px; }
+.triage-quick-queues button[aria-pressed=true] { color:#f3d89f; background:#d4b67415; border-color:#d4b67465; }
+.triage-phone-folders { display:none; }
+.triage-workspace .ebay-conversation-shell { min-height:600px; height:calc(100dvh - 265px); border:1px solid var(--triage-line); border-radius:18px; background:#101713; grid-template-columns:var(--ebay-workspace-columns); }
+.triage-workspace .ebay-conversation-list-panel,.triage-workspace .ebay-conversation-detail-panel,.triage-workspace .ebay-conversation-context-panel { min-height:0; overflow:hidden; }
+.triage-workspace .ebay-conversation-list { overflow:auto; padding:8px; min-height:0; max-height:none; flex:1; scrollbar-width:thin; }
+.triage-workspace .ebay-conversation-detail,.triage-workspace .ebay-conversation-context { height:100%; max-height:none; overflow-y:auto; padding:20px; scrollbar-width:thin; }
+.triage-workspace .ebay-conversation-summary { padding:12px 14px; background:none; border:0; border-bottom:1px solid var(--triage-line); border-radius:0; font-size:12px; color:var(--triage-muted); }
+.triage-workspace .ebay-smart-folder-head { padding:16px 12px; font-size:11px; }
+.triage-workspace .ebay-conversation-sidebar-nav { overflow:auto; max-height:none; }
+.triage-workspace .ebay-smart-folder-section { padding:6px 8px 14px; }
+.triage-workspace .ebay-smart-folder-section h4 { font-size:10px; color:#8fa297; letter-spacing:.09em; padding:6px; }
+.triage-workspace .ebay-smart-folder-button { min-height:40px; font-size:12px; font-weight:500; }
+.triage-workspace .ebay-conversation-row,.triage-workspace .ebay-conversation-row.is-compact { display:block; width:100%; margin:0 0 5px; padding:15px 12px; background:transparent; border:1px solid transparent; border-bottom-color:var(--triage-line); border-radius:12px; min-height:100px; }
+.triage-workspace .ebay-conversation-row:hover { background:#ffffff05; }
+.triage-workspace .ebay-conversation-row.is-selected { border-color:#d9bd7d65; background:#d9bd7d0c; }
+.triage-workspace .ebay-conversation-party-copy strong { font-size:14px; font-weight:650; }
+.triage-workspace .ebay-conversation-avatar { width:30px; height:30px; background:#23382d; color:#c7d9cc; font-size:11px; }
+.triage-workspace .ebay-conversation-row-tools { flex-wrap:wrap; justify-content:flex-end; gap:6px; }
+.triage-workspace .ebay-conversation-row-tools time { font-size:11px; color:var(--triage-muted); white-space:nowrap; }
+.triage-workspace .ebay-conversation-row-ai-summary { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-size:13px; line-height:1.55; font-weight:400; color:#b9c7bd; margin-top:10px; }
+.triage-workspace .ebay-conversation-row-ai-summary > b { display:none; }
+.triage-workspace .ebay-conversation-read-action { display:none; }
+.triage-workspace .ebay-conversation-task-status { font-size:10px; min-height:26px; }
+.triage-workspace .ebay-detail-head { position:static; display:block; padding:0 0 16px; margin:0 0 16px; background:none; }
+.triage-workspace .ebay-detail-head h3 { font-size:22px; line-height:1.3; margin:5px 0 8px; }
+.triage-workspace .triage-title-copy::after { display:none; }
+.triage-workspace .selected-email-meta { font-size:12px; font-weight:400; color:var(--triage-muted); line-height:1.5; }
+.triage-workspace .ebay-detail-compact-meta { display:none; }
+.triage-workspace .ebay-detail-actions { display:flex; flex-direction:row; justify-content:flex-start; flex-wrap:wrap; gap:8px; overflow:visible; margin-top:14px; }
+.triage-workspace .ebay-detail-actions > .secondary-btn,.triage-workspace .ebay-detail-actions > .primary-btn { flex:0 0 auto; min-height:40px; }
+.triage-conversation-more { margin:12px 0; border:1px solid var(--triage-line); border-radius:12px; padding:0 12px; }
+.triage-conversation-more > summary { padding:13px 0; cursor:pointer; font-size:13px; color:#c1cfca; }
+.triage-conversation-more > .ebay-detail-actions { margin:0 0 14px; }
+.triage-conversation-more .ebay-detail-compact-meta { display:flex; }
+.triage-workspace .ebay-order-context-strip { padding:12px; margin:0 0 12px; background:#d9bd7d08; border-color:#d9bd7d30; border-radius:12px; }
+.triage-workspace .ebay-order-context-strip h4 { font-size:13px; }
+.triage-workspace .ebay-order-context-meta { font-size:11px; }
+.triage-task-strip { display:grid; gap:8px; margin:0 0 14px; padding:12px; background:#9ed4b408; border:1px solid #9ed4b430; border-radius:12px; }
+.triage-task-strip-head { display:flex; justify-content:space-between; gap:8px; align-items:center; font-size:13px; }
+.triage-task-strip-head button { background:none; border:0; color:#edd197; font:600 12px system-ui; padding:10px 4px; }
+.triage-task-row { display:grid; gap:4px; color:#e3e9e5; text-decoration:none; padding:8px 0; border-top:1px solid var(--triage-line); }
+.triage-task-row strong { font-size:13px; font-weight:500; overflow-wrap:anywhere; }
+.triage-task-row small { font-size:12px; color:#9fccb2; }
+.triage-workspace .ebay-chat-timeline { gap:16px; padding:8px 0; }
+.triage-workspace .ebay-message-bubble { font-size:14px; padding:14px; border-radius:15px; background:#1b2820; border-color:#ccd8ce16; }
+.triage-workspace .ebay-message-body,.triage-workspace .ebay-message-bubble pre { font:400 15px/1.65 system-ui; }
+.triage-workspace .ebay-message-head { font-size:12px; gap:6px; }
+.triage-workspace .ebay-message-meta { font-size:11px; }
+.triage-workspace .ebay-message-actions .secondary-btn { min-height:40px; font-size:12px; padding:8px 12px; }
+.triage-workspace .ebay-reply-composer { padding:16px; margin-top:16px; border:1px solid #d9bd7d40; background:#161f19; border-radius:15px; }
+.triage-workspace .ebay-draft-field textarea { font-size:16px; min-height:115px; line-height:1.6; background:#0d140f; }
+.triage-reply-options { grid-column:1/-1; }
+.triage-reply-options > summary { font-size:12px; color:var(--triage-muted); cursor:pointer; padding:8px 0; }
+.triage-reply-options[open] { display:grid; gap:10px; }
+.triage-workspace .ebay-draft-actions { justify-content:flex-end; }
+.triage-workspace .ebay-task-modal { z-index:2000; }
+.triage-workspace .ebay-task-modal-card { font-size:14px; grid-auto-rows:max-content; align-content:start; }
+.triage-workspace .ebay-task-source-summary { max-height:140px; overflow:auto; }
+.triage-workspace .ebay-task-modal-head h3 { font-size:24px; }
+.triage-workspace .ebay-task-modal-head > div { flex:1; min-width:0; }
+.triage-workspace .ebay-task-modal-head > button { flex:0 0 44px; width:44px; min-width:44px; min-height:44px; padding:8px; }
+.triage-workspace .ebay-task-target-card strong { font-size:14px; line-height:1.4; font-weight:600; }
+.triage-workspace .ebay-task-target-card small { font-size:12px; line-height:1.5; font-weight:400; }
+.triage-workspace .ebay-task-target-card { min-height:70px; padding:12px; }
+.triage-workspace .ebay-task-source-summary small,.triage-workspace .ebay-task-modal-head p { font-size:12px; line-height:1.5; font-weight:400; }
+.triage-workspace.has-ebay-task-modal #og-task-updates .og-tu-launcher,.triage-workspace.has-ebay-task-modal #og-task-updates .og-tu-alert { display:none; }
+.triage-workspace .ebay-task-modal-card label,.triage-workspace .ebay-task-modal-card legend { font-size:13px; }
+.triage-workspace .ebay-task-modal-card input,.triage-workspace .ebay-task-modal-card select,.triage-workspace .ebay-task-modal-card textarea { font-size:16px; min-height:44px; }
+.triage-workspace .ebay-task-modal-card input:not([type=radio]):not([type=checkbox]),.triage-workspace .ebay-task-modal-card select,.triage-workspace .ebay-task-modal-card textarea { color:#e3e9e5; background:#101712; border:1px solid var(--triage-line); }
+.triage-workspace .ebay-task-modal-card button { font-family:inherit; }
+.triage-workspace .ebay-task-target-picker legend { float:none; width:auto; }
+.triage-workspace .ebay-task-modal-actions .primary-btn,.triage-workspace .ebay-task-modal-actions .secondary-btn { min-height:46px; font-size:14px; }
+.triage-workspace .ebay-filter-modal { z-index:1201; }
+.triage-workspace .ebay-conversation-filter-panel.is-modal-open { z-index:1200; }
+.triage-workspace .ebay-filter-modal h3 { font-size:22px; }
+.triage-workspace .ebay-filter-modal input { font-size:16px; }
+.triage-workspace .ebay-filter-modal button { min-height:40px; }
+.triage-workspace .ebay-filter-modal label { font-size:13px; }
+@media (min-width:1021px) and (max-width:1599px) {
+  .triage-workspace .ebay-conversation-shell { grid-template-columns:174px 7px 310px 7px minmax(0,1fr); }
+  .triage-workspace .ebay-conversation-shell.is-folders-collapsed { grid-template-columns:310px 7px minmax(0,1fr); }
+  .triage-workspace .ebay-context-resize-handle { display:none; }
+  .triage-workspace .ebay-conversation-context-panel { position:fixed; right:20px; top:20px; bottom:20px; width:min(440px,calc(100vw - 40px)); background:#101a13; border:1px solid #d9bd7d50; border-radius:18px; box-shadow:0 0 0 100vmax #0008; z-index:90; }
+}
+@media (max-width:1020px) {
+  .triage-workspace .sidebar { display:none; }
+  .triage-workspace .mobile-header { display:flex; position:fixed; top:0; left:0; width:100%; height:calc(64px + env(safe-area-inset-top)); padding:8px 16px; padding-top:calc(8px + env(safe-area-inset-top)); background:#0b120ef5; z-index:100; }
+  .triage-workspace .main { margin:0!important; padding-top:calc(64px + env(safe-area-inset-top))!important; width:100%; }
+  .triage-workspace .email-triage-content { padding:18px 12px 100px; }
+  .triage-workspace .ebay-conversation-head { align-items:center; padding:0; margin:0 2px 4px; }
+  .triage-workspace .ebay-conversation-head h2 { font-size:29px; }
+  .triage-workspace .ebay-conversation-head .section-sub { display:none; }
+  .triage-workspace .ebay-conversation-head .eyebrow { font-size:9px; }
+  .triage-workspace .ebay-conversation-actions { display:flex; gap:6px; }
+  .triage-workspace #ebay-conversation-refresh { font-size:0; width:44px; min-width:44px; flex:0 0 44px; padding:0; }
+  .triage-workspace .ebay-conversation-actions > button svg { width:19px; height:19px; }
+  .triage-workspace .ebay-conversation-actions > button::after { content:none; }
+  .triage-workspace .triage-tools > summary { min-height:44px; font-size:13px; padding:0 12px; }
+  .triage-search-toolbar { gap:8px; }
+  .triage-workspace .ebay-conversation-search input { font-size:16px; }
+  .triage-workspace #ebay-conversation-filter-toggle { min-width:48px; padding:0 12px; }
+  .triage-workspace #ebay-conversation-filter-toggle svg { display:none; }
+  .triage-workspace .ebay-conversation-filter-strip .panel-toggle-btn { display:none; }
+  .triage-workspace .ebay-conversation-filter-strip:has(.ebay-conversation-active-filters:empty) { display:none; }
+  .triage-workspace .ebay-conversation-filter-strip { flex-wrap:wrap; }
+  .triage-quick-queues { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; }
+  .triage-quick-queues button { display:flex; flex-direction:column; gap:5px; padding:9px 2px; font-size:11px; min-height:60px; }
+  .triage-quick-queues button b { font-size:15px; font-weight:600; background:none; padding:0; }
+  .triage-phone-folders { display:flex; align-items:center; gap:12px; margin:0; font-size:12px; color:var(--triage-muted); }
+  .triage-phone-folders select { min-width:0; flex:1; height:44px; font:500 16px system-ui; color:#dce5dd; background:#18221b; border:1px solid var(--triage-line); border-radius:10px; padding:0 10px; }
+  .triage-workspace .ebay-mobile-workspace-switcher { display:grid!important; grid-template-columns:repeat(3,minmax(0,1fr))!important; position:sticky; top:calc(64px + env(safe-area-inset-top)); z-index:50; padding:5px; gap:5px; border:1px solid var(--triage-line); border-radius:13px; background:#142018f5; margin:0; }
+  .triage-workspace .ebay-mobile-workspace-switcher button { display:flex; justify-content:center; min-height:42px; padding:6px; font-size:12px; font-weight:600; }
+  .triage-workspace .ebay-mobile-workspace-switcher svg { display:none; }
+  .triage-workspace .ebay-conversation-shell { display:block!important; height:auto; min-height:0; overflow:visible; border:0; background:none; }
+  .triage-workspace .ebay-conversation-shell .ebay-smart-folder-panel,.triage-workspace .ebay-panel-resize-handle { display:none!important; }
+  .triage-workspace .ebay-conversation-list-panel,.triage-workspace .ebay-conversation-detail-panel,.triage-workspace .ebay-conversation-context-panel { display:none!important; width:100%; border:0; min-width:0; overflow:visible; }
+  .triage-workspace .ebay-conversation-shell[data-mobile-view=inbox] .ebay-conversation-list-panel,.triage-workspace .ebay-conversation-shell[data-mobile-view=message] .ebay-conversation-detail-panel,.triage-workspace .ebay-conversation-shell[data-mobile-view=context] .ebay-conversation-context-panel { display:block!important; }
+  .triage-workspace .ebay-conversation-list,.triage-workspace .ebay-conversation-detail,.triage-workspace .ebay-conversation-context { max-height:none; height:auto; overflow:visible; padding:0; }
+  .triage-workspace .ebay-conversation-summary { padding:6px 4px 12px; font-size:11px; }
+  .triage-workspace .ebay-conversation-row,.triage-workspace .ebay-conversation-row.is-compact { padding:16px 13px; background:#16221a; border:1px solid var(--triage-line); border-radius:14px; margin-bottom:9px; min-height:112px; }
+  .triage-workspace .ebay-conversation-row.is-selected { border-color:#d9bd7d70; }
+  .triage-workspace .ebay-conversation-party-copy strong { font-size:15px; }
+  .triage-workspace .ebay-conversation-row-ai-summary { font-size:14px; -webkit-line-clamp:3; }
+  .triage-workspace .ebay-conversation-section:not([data-mobile-view=inbox]) > .triage-search-toolbar,.triage-workspace .ebay-conversation-section:not([data-mobile-view=inbox]) > .ebay-conversation-filter-strip,.triage-workspace .ebay-conversation-section:not([data-mobile-view=inbox]) > .triage-quick-queues,.triage-workspace .ebay-conversation-section:not([data-mobile-view=inbox]) > .triage-phone-folders { display:none; }
+  .triage-workspace .ebay-detail-head { padding:14px 4px; margin:0 0 12px; }
+  .triage-workspace .ebay-detail-head h3 { font-size:23px; }
+  .triage-workspace .ebay-detail-actions { overflow:visible; flex-wrap:wrap; }
+  .triage-workspace .ebay-detail-actions > .secondary-btn,.triage-workspace .ebay-detail-actions > .primary-btn { min-height:44px; font-size:13px; padding:8px 12px; }
+  .triage-workspace .ebay-message-actions { flex-wrap:wrap; }
+  .triage-workspace .ebay-message-actions .secondary-btn { min-height:44px; font-size:12px; }
+  .triage-workspace .ebay-message-bubble { max-width:100%; padding:14px; }
+  .triage-workspace .ebay-message-body { font-size:16px; }
+  .triage-workspace .ebay-task-modal { height:var(--ebay-task-viewport-height,100dvh); padding:12px 0 0; align-items:flex-end; }
+  .triage-workspace .ebay-task-modal-card { height:calc(var(--ebay-task-viewport-height,100dvh) - 12px); max-height:none; width:100%; padding:18px 16px calc(16px + env(safe-area-inset-bottom)); border-radius:20px 20px 0 0; overflow:auto; }
+  .triage-workspace .ebay-task-modal-grid { grid-template-columns:1fr 1fr; }
+  .triage-workspace .ebay-task-due-picker { grid-template-columns:1fr 1fr; }
+  .triage-workspace .ebay-task-modal-actions { margin:0 -16px calc(-16px - env(safe-area-inset-bottom)); padding:12px 16px calc(12px + env(safe-area-inset-bottom)); }
+  .triage-workspace .ebay-task-assignment-panel p { display:block; font-size:12px; }
+  .triage-workspace .ebay-task-modal-card .ebay-draft-field textarea { min-height:110px; }
+  .triage-workspace .ebay-task-audit-facts { grid-template-columns:1fr; }
+  .triage-workspace .ebay-filter-modal { top:12px; bottom:0; width:100%; max-height:calc(100dvh - 12px); border-radius:20px 20px 0 0; }
+  .triage-workspace .ebay-filter-modal-body { grid-template-columns:1fr; }
+  .triage-workspace .ebay-conversation-section :is(input,select,textarea) { max-width:100%; }
+  .triage-workspace .ebay-conversation-section :is(p,strong,a,small) { overflow-wrap:anywhere; }
+  .triage-workspace #og-task-updates .og-tu-launcher { bottom:calc(12px + env(safe-area-inset-bottom)); }
+  .triage-workspace #og-task-updates .og-tu-alert { bottom:calc(70px + env(safe-area-inset-bottom)); }
+}

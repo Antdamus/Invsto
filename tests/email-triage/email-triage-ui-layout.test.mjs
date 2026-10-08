@@ -46,7 +46,7 @@ test("unclassified conversations use compact classify now CTAs", () => {
 });
 
 test("conversation list chooses AI summary or preview as the primary line", () => {
-  assert.match(js, /const primaryPreview = compactConversationText\(previewLines\.summary\) \|\| compactConversationText\(previewLines\.preview\)/);
+  assert.match(js, /const primaryPreview = window\.EmailTriageWorkspace\.cleanPreview\(compactConversationText\(previewLines\.summary\) \|\| compactConversationText\(previewLines\.preview\)\)/);
   assert.match(js, /const primaryPreviewLabel = compactConversationText\(previewLines\.summary\) \? previewLines\.summaryLabel : previewLines\.previewLabel/);
   assert.doesNotMatch(js, /No AI summary stored/);
 });

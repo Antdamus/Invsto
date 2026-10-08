@@ -6,7 +6,7 @@
   const EBAY_CONVERSATION_DENSITY_STORAGE_KEY = "og-ebay-conversation-density";
   const PANEL_WIDTHS_STORAGE_KEY = "og-email-triage-panel-widths";
   const EBAY_CONVERSATION_PANEL_WIDTHS_STORAGE_KEY = "og-ebay-conversation-panel-widths";
-  const EBAY_CONVERSATION_PANEL_VISIBILITY_STORAGE_KEY = "og-ebay-conversation-panel-visibility";
+  const EBAY_CONVERSATION_PANEL_VISIBILITY_STORAGE_KEY = "og-ebay-conversation-panel-visibility-v2";
   const PANEL_WIDTH_LIMITS = {
     category: { min: 150, max: 340, fallback: 220 },
     detail: { min: 300, max: 680, fallback: 420 },
@@ -126,7 +126,7 @@
     return {
       folders: source.folders !== false,
       list: true,
-      context: source.context !== false,
+      context: source.context === true,
     };
   }
 

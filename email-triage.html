@@ -4,18 +4,19 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#070708" />
-  <meta name="email-triage-asset-version" content="task-draft-stability-20260826-request-intent" />
+  <meta name="email-triage-asset-version" content="workspace-20261008" />
   <title>OG Jewelry - eBay Messaging</title>
 
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css?v=5f6p2b-20260608" />
-  <link rel="stylesheet" href="email-triage.css?v=task-draft-stability-20260826-request-intent" />
+  <link rel="stylesheet" href="email-triage.css?v=workspace-20261008" />
 
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="task-request.css?v=20261007-intent-2" />
+  <link rel="stylesheet" href="email-triage.workspace.css?v=workspace-20261008" />
 </head>
-<body>
+<body class="triage-workspace">
   <div class="mobile-header">
     <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">
       <i data-lucide="menu"></i>
@@ -40,66 +41,63 @@
         <div class="header-inner">
           <div class="greeting">
             <strong id="admin-greeting">eBay Messaging</strong>
-            <div class="sub">Canonical Commerce Message inbox</div>
+            <div class="sub">Customer conversations and team follow-up</div>
           </div>
 
           <div class="header-pills" aria-label="Connection context">
             <div class="pill">Scope: <b>eBay Messages</b></div>
-            <div class="pill">Mode: <b>Read-only</b></div>
+
           </div>
         </div>
       </header>
 
       <main class="content email-triage-content">
-        <section class="triage-disclosure operational-dashboard-section is-collapsed" aria-label="Operational dashboard">
-          <div class="operational-dashboard-head">
-            <div>
-              <span class="eyebrow">Operational Console</span>
-              <h2>Operations Dashboard</h2>
-            </div>
-            <div class="operational-dashboard-actions">
-              <button type="button" id="toggle-operational-dashboard" class="secondary-btn" aria-expanded="false" aria-controls="operational-dashboard-body">
-                <i data-lucide="chevron-down"></i>
-                Show Dashboard
-              </button>
-              <button type="button" id="refresh-operational-dashboard" class="secondary-btn">
-                <i data-lucide="refresh-cw"></i>
-                Refresh Dashboard
-              </button>
-            </div>
-          </div>
-          <div id="operational-dashboard-body" class="operational-dashboard-body" hidden>
-            <div id="operational-dashboard-status" class="workspace-status operational-dashboard-inline-status">Waiting for admin session.</div>
-            <div id="operational-dashboard" class="operational-dashboard" aria-live="polite"></div>
-          </div>
-        </section>
 
         <section class="ebay-conversation-section" data-mobile-view="inbox" aria-label="eBay Conversations">
           <div class="ebay-conversation-head">
             <div>
-              <span class="eyebrow">Canonical Inbox</span>
-              <h2>eBay Conversations</h2>
-              <div class="section-sub">Commerce Message API conversations stored in Supabase.</div>
+              <span class="eyebrow">Customer care</span>
+              <h2>Messages</h2>
+              <div class="section-sub">Conversations, orders and your team — together.</div>
             </div>
             <div class="ebay-conversation-actions">
               <button type="button" id="ebay-conversation-refresh" class="secondary-btn">
                 <i data-lucide="refresh-cw"></i>
                 Refresh
               </button>
-              <button type="button" id="ebay-conversation-classify-recent" class="secondary-btn">
-                <i data-lucide="sparkles"></i>
-                Classify new
-              </button>
-              <button type="button" id="ebay-conversation-sync" class="primary-btn" title="Recent incremental mailbox scan. Limited to latest Commerce Message pages; not a full archive refresh.">
-                <i data-lucide="cloud-download"></i>
-                Sync recent mailbox
-              </button>
-              <details class="ebay-maintenance-actions">
-                <summary class="secondary-btn">
-                  <i data-lucide="settings"></i>
-                  Advanced
-                </summary>
-                <div class="ebay-maintenance-action-menu">
+              <details class="triage-tools">
+                <summary class="secondary-btn"><i data-lucide="ellipsis"></i>Tools</summary>
+                <div class="triage-tools-panel">
+                  <strong>Mailbox tools</strong>
+                  <button type="button" id="ebay-conversation-save-view" class="secondary-btn">
+                    <i data-lucide="folder-plus"></i>
+                    <span>Create folder</span>
+                  </button>
+                  <button type="button" id="ebay-conversation-tag-help-toggle" class="secondary-btn" aria-expanded="false" aria-controls="ebay-conversation-tag-help">
+                    <i data-lucide="tags"></i>
+                    Available tags
+                  </button>
+                  <fieldset class="ebay-conversation-density-control" aria-label="Conversation list density">
+                    <legend>Density</legend>
+                    <div class="ebay-conversation-density-options">
+                      <label>
+                        <input type="radio" name="ebay-conversation-density" value="compact" checked />
+                        <span>Compact</span>
+                      </label>
+                      <label>
+                        <input type="radio" name="ebay-conversation-density" value="expanded" />
+                        <span>Expanded</span>
+                      </label>
+                    </div>
+                  </fieldset>
+                  <button type="button" id="ebay-conversation-sync" class="primary-btn" title="Recent incremental mailbox scan. Limited to latest Commerce Message pages; not a full archive refresh.">
+                    <i data-lucide="cloud-download"></i>
+                    Sync recent mailbox
+                  </button>
+                  <button type="button" id="ebay-conversation-classify-recent" class="secondary-btn">
+                    <i data-lucide="sparkles"></i>
+                    Classify new
+                  </button>
                   <button type="button" id="ebay-conversation-reclassify-all" class="secondary-btn" title="Reclassify the recent bounded maintenance set, up to 20 conversations.">
                     <i data-lucide="refresh-cw"></i>
                     Reclassify recent 20
@@ -116,56 +114,53 @@
                     <i data-lucide="refresh-cw"></i>
                     Backfill + reclassify all
                   </button>
+                  <section class="triage-disclosure operational-dashboard-section is-collapsed" aria-label="Operational dashboard">
+                    <div class="operational-dashboard-head">
+                      <div>
+                        <span class="eyebrow">Operational Console</span>
+                        <h2>Operations Dashboard</h2>
+                      </div>
+                      <div class="operational-dashboard-actions">
+                        <button type="button" id="toggle-operational-dashboard" class="secondary-btn" aria-expanded="false" aria-controls="operational-dashboard-body">
+                          <i data-lucide="chevron-down"></i>
+                          Show Dashboard
+                        </button>
+                        <button type="button" id="refresh-operational-dashboard" class="secondary-btn">
+                          <i data-lucide="refresh-cw"></i>
+                          Refresh Dashboard
+                        </button>
+                      </div>
+                    </div>
+                    <div id="operational-dashboard-body" class="operational-dashboard-body" hidden>
+                      <div id="operational-dashboard-status" class="workspace-status operational-dashboard-inline-status">Waiting for admin session.</div>
+                      <div id="operational-dashboard" class="operational-dashboard" aria-live="polite"></div>
+                    </div>
+                  </section>
                 </div>
               </details>
             </div>
           </div>
-
-          <div class="ebay-conversation-control-row">
-            <div id="ebay-conversation-status" class="workspace-status">Waiting for admin session.</div>
-            <label class="ebay-conversation-search" for="ebay-conversation-search">
-              <i data-lucide="search"></i>
-              <input id="ebay-conversation-search" type="search" placeholder="Search text or use tag:shipping_issue" autocomplete="off" spellcheck="false" aria-label="Search eBay conversations" />
-              <button type="button" id="ebay-conversation-search-clear" aria-label="Clear eBay conversation search" disabled>
-                <i data-lucide="x"></i>
-              </button>
-              <div id="ebay-conversation-tag-suggestions" class="ebay-conversation-tag-suggestions" hidden></div>
-            </label>
-            <fieldset class="ebay-conversation-density-control" aria-label="Conversation list density">
-              <legend>Density</legend>
-              <div class="ebay-conversation-density-options">
-                <label>
-                  <input type="radio" name="ebay-conversation-density" value="compact" checked />
-                  <span>Compact</span>
-                </label>
-                <label>
-                  <input type="radio" name="ebay-conversation-density" value="expanded" />
-                  <span>Expanded</span>
-                </label>
-              </div>
-            </fieldset>
-          </div>
-
-          <div class="ebay-conversation-filter-strip">
+          <div class="triage-search-toolbar">
+            <div class="ebay-conversation-control-row">
+              <div id="ebay-conversation-status" class="workspace-status">Waiting for admin session.</div>
+              <label class="ebay-conversation-search" for="ebay-conversation-search">
+                <i data-lucide="search"></i>
+                <input id="ebay-conversation-search" type="search" placeholder="Search buyer, order or message" autocomplete="off" spellcheck="false" aria-label="Search eBay conversations" />
+                <button type="button" id="ebay-conversation-search-clear" aria-label="Clear eBay conversation search" disabled>
+                  <i data-lucide="x"></i>
+                </button>
+                <div id="ebay-conversation-tag-suggestions" class="ebay-conversation-tag-suggestions" hidden></div>
+              </label>
+            </div>
             <button type="button" id="ebay-conversation-filter-toggle" class="secondary-btn" aria-expanded="false" aria-controls="ebay-conversation-filter-panel">
               <i data-lucide="filter"></i>
               <span id="ebay-conversation-filter-label">Classification filters</span>
             </button>
-            <button type="button" id="ebay-conversation-tag-help-toggle" class="secondary-btn" aria-expanded="false" aria-controls="ebay-conversation-tag-help">
-              <i data-lucide="tags"></i>
-              Available tags
-            </button>
-            <button type="button" id="ebay-conversation-save-view" class="secondary-btn">
-              <i data-lucide="folder-plus"></i>
-              <span>Create folder</span>
-            </button>
+          </div>
+          <div class="ebay-conversation-filter-strip">
             <button type="button" class="secondary-btn panel-toggle-btn" data-ebay-panel-toggle="folders" aria-pressed="false">
               <i data-lucide="panel-left-close"></i>
               Folders
-            </button>
-            <button type="button" class="secondary-btn panel-toggle-btn" data-ebay-panel-toggle="list" aria-pressed="false">
-              <i data-lucide="list"></i>
-              List
             </button>
             <button type="button" class="secondary-btn panel-toggle-btn" data-ebay-panel-toggle="context" aria-pressed="false">
               <i data-lucide="panel-right-close"></i>
@@ -194,10 +189,12 @@
             </button>
             <button type="button" data-ebay-mobile-view="context" aria-pressed="false">
               <i data-lucide="panel-right"></i>
-              <span>Context</span>
+              <span>Order details</span>
             </button>
           </nav>
 
+          <div id="triage-quick-queues" class="triage-quick-queues" aria-label="Message queues"></div>
+          <label class="triage-phone-folders"><span>Folder</span><select id="triage-folder-select" aria-label="Message folder"></select></label>
           <div id="ebay-conversation-shell" class="ebay-conversation-shell" data-mobile-view="inbox">
             <aside class="ebay-smart-folder-panel" aria-label="Smart folders">
               <div class="ebay-smart-folder-head">
@@ -254,16 +251,19 @@
     </div>
   </div>
 
+  <div id="triage-task-audit-root"></div>
+  <script src="task-workflow.js?v=20261007-intent-2"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js?v=5f6p2b-20260608"></script>
   <script src="task-notifications.js?v=20261007" defer></script>
   <script src="admin-nav.js?v=5f6p2b-20260608"></script>
-  <script src="email-triage.api.js?v=task-draft-stability-20260826-request-intent"></script>
+  <script src="email-triage.api.js?v=workspace-20261008"></script>
   <script src="email-triage.state.js?v=translate-message-20260625"></script>
-  <script src="email-triage.render-utils.js?v=listfix-20260625"></script>
+  <script src="email-triage.render-utils.js?v=workspace-20261008"></script>
   <script src="email-triage.classifications.js?v=taxonomy-20260625"></script>
   <script src="email-triage.diagnostics.js?v=5f6p2b-20260608"></script>
   <script src="email-triage.operations.js?v=5f6p2b-20260608"></script>
-  <script src="email-triage.js?v=task-draft-stability-20260826-request-intent"></script>
+  <script src="email-triage.workspace.js?v=workspace-20261008"></script>
+  <script src="email-triage.js?v=workspace-20261008"></script>
 </body>
 </html>

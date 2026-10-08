@@ -2058,7 +2058,7 @@
     };
   }
 
-  async function fetchEbayConversationTaskStatuses(context, conversationIds = []) {
+  async function fetchEbayConversationTaskStatuses(context, conversationIds = [], options = {}) {
     await currentSession(context, "eBay conversation task statuses");
     const ids = Array.from(new Set((Array.isArray(conversationIds) ? conversationIds : [])
       .map((value) => String(value || "").trim())
@@ -2070,8 +2070,9 @@
       };
     }
 
-    const { data, error } = await context.client.rpc("list_ebay_conversation_message_task_status", {
+    const { data, error } = await context.client.rpc("list_ebay_conversation_task_workspace", {
       _conversation_ids: ids,
+      _include_events: options.includeEvents === true,
     });
     throwSupabaseReadError(error, "ebay_conversation_task_status_failed");
     return {

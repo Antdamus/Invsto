@@ -30,6 +30,6 @@ test("successful replies mark the conversation waiting on the buyer", () => {
 });
 
 test("email triage cache busters include the read-state frontend update", () => {
-  assert.match(html, /email-triage\.api\.js\?v=task-draft-stability-20260826/);
-  assert.match(html, /email-triage\.js\?v=task-draft-stability-20260826/);
+  assert.match(html, /email-triage\.api\.js\?v=workspace-20261008/);
+  assert.match(html, /email-triage\.js\?v=workspace-20261008/);
 });
