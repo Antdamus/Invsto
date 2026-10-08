@@ -88,3 +88,12 @@ Live diagnosis on October 8: geraldo3700 had 16 stored orders and luilop_10 had
 orders under those exact usernames. A missing local order is not proof that the
 buyer never purchased; it can also require an order import or identity check.
 Tests: order-linking.test.mjs and the Buyer order choices browser cases.
+
+Deploy the current shared context source with ebay-conversation-context. Only the
+interactive endpoint requests buyer order choices. The existing sync, draft and
+classification deployments contain older shared bundles; preserve their other
+behavior with scripts/patch-deployed-order-selection.mjs until a full release of
+those functions. This narrow, idempotent patch gives operator selections precedence
+and keeps buyer/time-only matches suggested. Compatibility tests compare ordinary
+context before/after and verify manual selection against the actual deployment
+backups when available.

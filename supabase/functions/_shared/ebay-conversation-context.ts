@@ -1479,6 +1479,7 @@ export async function buildEbayConversationContext(
   supabase: EbayConversationContextClient,
   conversationId: string,
   rpcSupabase: EbayConversationContextClient = supabase,
+  options: { includeBuyerOrders?: boolean } = {},
 ) {
   const warnings: Array<Record<string, unknown>> = [];
   const conversation = await loadConversation(supabase, conversationId);
@@ -1636,7 +1637,7 @@ export async function buildEbayConversationContext(
   const resolution = contextResolution({ conversation, buyer, links, orders, lines, returns });
   let buyerOrderOptions: Array<Record<string, any>> = [];
   let buyerOrdersAvailable = false;
-  if (buyer.username && buyer.confidence === "confirmed" && conversation.conversation_type === "FROM_MEMBERS") {
+  if (options.includeBuyerOrders && buyer.username && buyer.confidence === "confirmed" && conversation.conversation_type === "FROM_MEMBERS") {
     try {
       const buyerOrders = await loadBuyerOrders(supabase, [buyer.username as string], 81);
       const choices = buyerOrders.slice(0, 80);

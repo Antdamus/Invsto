@@ -4,7 +4,7 @@ import {stripTypeScriptTypes} from 'node:module';
 import vm from 'node:vm';
 import {test} from 'node:test';
 const source=await readFile(new URL('../../supabase/functions/_shared/ebay-conversation-context.ts',import.meta.url),'utf8');
-function runtime(){const c=vm.createContext({console,Date});vm.runInContext(stripTypeScriptTypes(source.replace(/^export /gm,''),{mode:'transform'}),c);return c;}
+function runtime(input=source){const c=vm.createContext({console,Date});vm.runInContext(stripTypeScriptTypes(input.replace(/^export /gm,''),{mode:'transform'}),c);return c;}
 function database(tables){
  const writes=[],reads=[];let next=1;
  function from(table){const filters=[];let limit=Infinity,single=false,mutation=null;const q={
@@ -30,7 +30,7 @@ test('buyer lookup is case-insensitive and treats username wildcards literally',
 });
 test('ambiguous buyer orders are visible without inventing a chat/order link',async()=>{
  const c=runtime();c.db=database(fixture({ebay_orders:[order,{...order,id:'order-2'}],ebay_conversation_links:[{id:'buyer-link',conversation_id:'chat',link_type:'buyer_username',buyer_username:'Buyer_One',confidence:.88,status:'confirmed',match_method:'message_participant'}],ebay_order_lines:[{id:'line',order_id:'order-1',item_title:'Watch',quantity:1}]}));
- const result=await vm.runInContext("buildEbayConversationContext(db,'chat')",c);
+ const result=await vm.runInContext("buildEbayConversationContext(db,'chat',db,{includeBuyerOrders:true})",c);
  assert.equal(result.buyer_order_options.length,2);assert.equal(result.buyer_order_options[0].lines[0].item_title,'Watch');assert.equal(result.matched_orders.length,0);assert.equal(c.db.writes.length,0);assert.equal(result.buyer_orders_available,true);
 });
 test('manual selection validates buyer, persists, takes precedence, and can be removed',async()=>{
@@ -51,4 +51,16 @@ test('same-buyer proximity alone is never confirmed and ambiguity stays unlinked
 test('automatic relinking cannot overwrite an operator choice',async()=>{
  const c=runtime();c.db=database(fixture({ebay_conversation_links:[{id:'link',conversation_id:'chat',link_type:'ebay_order',link_key:'operator:order',match_method:'operator_selected_order',confidence:1,status:'confirmed'}]}));c.candidate={conversation_id:'chat',link_type:'ebay_order',link_key:'operator:order',confidence:.8,status:'suggested'};
  await vm.runInContext('upsertConversationLink(db,candidate)',c);assert.equal(c.db.writes.length,0);
+});
+
+for(const name of ['sync','draft','classify'])test(`deployed ${name} compatibility: unchanged ordinary context, selected order takes precedence`,async t=>{
+ const before=await readFile(new URL(`../../test-results/order-links-${name}-shared-before.ts`,import.meta.url),'utf8').catch(()=>null);
+ if(!before){t.skip('Live deployment backup not present');return;}
+ const {patchOrderSelection}=await import('../../scripts/patch-deployed-order-selection.mjs');
+ const after=patchOrderSelection(before);assert.equal(patchOrderSelection(after),after);
+ const baseTables=fixture({ebay_orders:[order,{...order,id:'old'}],ebay_conversation_links:[{id:'auto',conversation_id:'chat',link_type:'ebay_order',ebay_order_id:'old',status:'suggested',confidence:.68}]});
+ const run=async(src,tables)=>{const c=runtime(src);c.db=database(structuredClone(tables));return JSON.parse(JSON.stringify(await vm.runInContext("buildEbayConversationContext(db,'chat')",c)));};
+ assert.deepEqual(await run(before,baseTables),await run(after,baseTables));
+ baseTables.ebay_conversation_links.push({id:'manual',conversation_id:'chat',link_type:'ebay_order',ebay_order_id:'order-1',status:'confirmed',confidence:1,match_method:'operator_selected_order'});
+ const result=await run(after,baseTables);assert.deepEqual(result.matched_orders.map(o=>o.id),['order-1']);
 });

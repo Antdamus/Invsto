@@ -160,6 +160,7 @@ serve(async (req) => {
         supabase,
         conversation.id,
         operator.actorType !== "service_role" ? authenticatedClient(accessToken) : supabase,
+        { includeBuyerOrders: true },
       );
 
     return json(req, 200, {
