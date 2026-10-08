@@ -80,6 +80,7 @@
     syncEbayProviderReadState,
     processPendingEbayProviderReadState,
     fetchEbayConversationContext,
+    selectEbayConversationOrder,
     fetchEbayConversationDrafts,
     requestEbayConversationDraftAction,
     requestEbayMessageTranslation,
@@ -394,6 +395,9 @@
   const ebaySentTimelineRefreshTimers = new Map();
   const ebayRealtimeMessageReloadTimers = new Map();
   const ebayComposerDraftCache = new Map();
+  const ebayContextFreshness = new Map();
+  const ebayContextRequests = new Map();
+  const ebayContextVersions = new Map();
   const ebayMessageRequests = new Map();
   const ebayMessageVersions = new Map();
   const ebayMessageFreshness = new Map();
@@ -7121,6 +7125,9 @@
       returns,
       orderNumbers,
       buyer,
+      buyerOrders: safeArray(context?.buyer_order_options),
+      buyerOrdersAvailable: context?.buyer_orders_available === true,
+      orderConfirmed: safeArray(context?.links).some(link => link.ebay_order_id && link.status === "confirmed"),
       orderTotal: orderTotal ?? lineTotal,
       netPayout,
       firstItemTitle: compactConversationText(firstLine?.item_title),
@@ -7475,12 +7482,13 @@
       const ebayConversationHref = buildEbayConversationUrl(conversation);
       return `
         <div class="ebay-order-context-strip is-muted">
-          <span><i data-lucide="search"></i>No linked order yet</span>
+          <span><i data-lucide="search"></i>${escapeHtml(facts.buyerOrders.length ? `${facts.buyerOrders.length} buyer orders · Choose the related order` : facts.buyerOrdersAvailable ? "No stored orders for this buyer" : "No specific order identified")}</span>
+          ${facts.buyerOrders.length ? `<button type="button" class="secondary-btn" data-ebay-detail-action="open-order-choices">View buyer orders</button>` : ""}
           <a class="ebay-order-context-link is-primary" href="${escapeHtml(ebayConversationHref)}" target="_blank" rel="noopener noreferrer" title="Open this buyer conversation in eBay to verify order linkage directly.">
             <i data-lucide="external-link"></i>
             eBay chat
           </a>
-          <a class="ebay-order-context-link" href="${escapeHtml(facts.pendingHref)}">Pending queue</a>
+          <a class="ebay-order-context-link" href="${escapeHtml(facts.historyHref)}">Order history</a>
         </div>
       `;
     }
@@ -7491,7 +7499,7 @@
     const itemLabel = facts.firstItemTitle
       ? (facts.firstItemTitle.length > 58 ? `${facts.firstItemTitle.slice(0, 55)}...` : facts.firstItemTitle)
       : facts.lines.length ? `${facts.lines.length} item ${facts.lines.length === 1 ? "line" : "lines"}` : "";
-    const statusLabel = facts.isPendingOrder ? "Pending order" : "Order history";
+    const statusLabel = !facts.orderConfirmed ? "Possible order · Verify match" : facts.isPendingOrder ? "Pending order" : "Order history";
     return `
       <div class="ebay-purchase-context-header">
         <div class="ebay-purchase-context-main">
@@ -8919,6 +8927,49 @@
     `;
   }
 
+  function renderEbayBuyerOrderChoices(state, conversation, facts) {
+    if (!facts.buyerOrdersAvailable) return "";
+    const selected = safeArray(facts.context?.links).find(link => link.match_method === "operator_selected_order");
+    const saving = state.ebayOrderLinkSavingId === conversation.id;
+    const matched = new Set(facts.orders.map(order => String(order.id)));
+    const options = [...facts.buyerOrders].sort((a, b) => Number(matched.has(String(b.id))) - Number(matched.has(String(a.id))));
+    return `<section class="triage-buyer-orders" aria-label="Buyer orders">
+      <h4>Orders for ${escapeHtml(facts.buyer)}</h4>
+      <p>${options.length ? "Review the items and purchase date, then link the order this chat is about." : "No purchase is stored for this username. This may be a general inquiry or an order that has not been imported yet."}</p>
+      <div class="triage-buyer-order-list">${options.map(order => {
+        const lines = safeArray(order.lines);
+        const pending = orderContextIsPending({orders:[order],lines});
+        const href = pending ? buildPendingOrdersContextUrl({orderNumbers:[order.order_number],buyer:facts.buyer}) : buildOrderHistoryContextUrl({orderNumbers:[order.order_number],buyer:facts.buyer,orders:[order],lines});
+        const isSelected = selected?.ebay_order_id === order.id;
+        return `<article class="triage-buyer-order${isSelected ? " is-selected" : ""}">
+          <div><strong>${escapeHtml(order.order_number)}</strong><span>${escapeHtml(humanizeValue(order.status || "unknown"))}</span></div>
+          <small>${escapeHtml(formatContextDate(order.sale_date || order.paid_on_date))} · ${escapeHtml(formatContextMoney(order.total_price))}</small>
+          ${lines.length ? `<ul>${lines.map(line=>`<li>${escapeHtml(line.item_title || line.item_number || "Item")} <small>× ${escapeHtml(line.quantity || 1)}</small></li>`).join("")}</ul>` : ""}
+          <div class="triage-buyer-order-actions"><a class="secondary-btn" href="${escapeHtml(href)}">Open order</a>
+          <button type="button" class="secondary-btn" data-ebay-detail-action="select-order" data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-order-id="${escapeHtml(isSelected ? "" : order.id)}" ${saving ? "disabled" : ""}>${saving ? "Saving…" : isSelected ? "Remove selection" : "Link this order"}</button></div>
+        </article>`;
+      }).join("")}</div>
+      <a class="ebay-order-context-link" href="${escapeHtml(buildOrderHistoryContextUrl({buyer:facts.buyer,orderNumbers:[],orders:[],lines:[]}))}">View all buyer history</a>
+      ${state.ebayOrderLinkError?.conversationId === conversation.id ? `<p role="alert" class="is-error">${escapeHtml(state.ebayOrderLinkError.message)}</p>` : ""}
+    </section>`;
+  }
+
+  async function saveEbayConversationOrder(context, conversationId, orderId) {
+    if (adminClassificationState.ebayOrderLinkSavingId) return;
+    ebayContextVersions.set(conversationId, (ebayContextVersions.get(conversationId) || 0) + 1);
+    setEbayConversationState({ebayOrderLinkSavingId: conversationId, ebayOrderLinkError: null});
+    try {
+      const payload = await selectEbayConversationOrder(context, conversationId, orderId);
+      ebayContextFreshness.set(conversationId, Date.now());
+      setEbayConversationState({ebayOrderLinkSavingId:null, ebayConversationContextLoadingId:null,
+        ebayConversationContextsById:{...adminClassificationState.ebayConversationContextsById,[conversationId]:payload},
+        ebayConversationContextErrorsById:{...adminClassificationState.ebayConversationContextErrorsById,[conversationId]:null}});
+    } catch(error) {
+      setEbayConversationState({ebayOrderLinkSavingId:null, ebayConversationContextLoadingId:null,
+        ebayOrderLinkError:{conversationId,message:error.message || "Could not save the order link. Please try again."}});
+    }
+  }
+
   function renderEbayConversationContextPanel(state) {
     if (!els.ebayConversationContext) return;
     const conversation = selectedEbayConversationById(state.selectedEbayConversationId, state);
@@ -8939,13 +8990,13 @@
       <section class="context-card ebay-context-compact-summary">
         <div class="context-card-head">
           <h4>${copyableTextMarkup(identity.displayName, "buyer id", "triage-inline-copy")}</h4>
-          ${renderBadge(facts.orderNumbers.length ? "Order linked" : "Buyer linked", facts.orderNumbers.length ? "success" : "category")}
+          ${renderBadge(facts.orderNumbers.length ? (facts.orderConfirmed ? "Order linked" : "Verify order") : facts.buyerOrders.length ? "Choose order" : "Buyer identified", facts.orderNumbers.length ? "success" : "category")}
         </div>
         ${renderContextFactGrid([
-          { label: "Order", value: facts.orderNumbers.length ? facts.orderNumbers.join(", ") : "No exact order" },
+          { label: "Order", value: facts.orderNumbers.length ? facts.orderNumbers.join(", ") : facts.buyerOrders.length ? `${facts.buyerOrders.length} buyer orders available` : "No stored order identified" },
           { label: "Order value", value: facts.orderTotal === null ? "Unavailable" : formatContextMoney(facts.orderTotal) },
           { label: "Store net", value: facts.netPayout === null ? "Unavailable" : formatContextMoney(facts.netPayout) },
-          { label: "Link status", value: facts.orderNumbers.length ? "Order linked" : "Buyer linked" },
+          { label: "Link status", value: facts.orderNumbers.length ? (facts.orderConfirmed ? "Order linked" : "Verify order") : facts.buyerOrders.length ? "Choose order" : "Buyer identified" },
         ])}
         <div class="ebay-context-compact-actions">
           <a class="secondary-btn" href="${escapeHtml(ebayConversationHref)}" target="_blank" rel="noopener noreferrer"><i data-lucide="external-link"></i>eBay chat</a>
@@ -8975,6 +9026,7 @@
       ${isLoading && !context ? `<div class="classification-empty">Loading linked buyer and order context.</div>` : ""}
       ${context ? `
         ${compactSummary}
+        ${renderEbayBuyerOrderChoices(state, conversation, facts)}
         <details class="ebay-context-diagnostics">
           <summary class="context-card-head">
             <h4>Context Details</h4>
@@ -9510,7 +9562,12 @@
 
   async function loadEbayConversationContext(context, conversationId, options = {}) {
     if (!conversationId) return;
-    if (!options.force && adminClassificationState.ebayConversationContextsById?.[conversationId]) return;
+    if (adminClassificationState.ebayOrderLinkSavingId === conversationId) return;
+    if (!options.force && adminClassificationState.ebayConversationContextsById?.[conversationId] && Date.now() - (ebayContextFreshness.get(conversationId) || 0) < 60000) return;
+    if (ebayContextRequests.has(conversationId)) return;
+    const version = (ebayContextVersions.get(conversationId) || 0) + 1;
+    ebayContextVersions.set(conversationId, version);
+    ebayContextRequests.set(conversationId, true);
     const taskModalDraft = currentEbayConversationTaskModalDraft();
     setEbayConversationState({
       ebayConversationContextLoadingId: conversationId,
@@ -9523,6 +9580,8 @@
 
     try {
       const payload = await fetchEbayConversationContext(context, conversationId);
+      if (ebayContextVersions.get(conversationId) !== version) return;
+      ebayContextFreshness.set(conversationId, Date.now());
       const taskModalDraft = currentEbayConversationTaskModalDraft();
       setEbayConversationState({
         ebayConversationContextLoadingId: null,
@@ -9537,6 +9596,7 @@
         ...(taskModalDraft?.conversationId === conversationId ? { ebayConversationTaskModal: taskModalDraft } : {}),
       });
     } catch (error) {
+      if (ebayContextVersions.get(conversationId) !== version) return;
       const code = error.code || error.message || "ebay_conversation_context_failed";
       const taskModalDraft = currentEbayConversationTaskModalDraft();
       setEbayConversationState({
@@ -9548,6 +9608,8 @@
         ...(taskModalDraft?.conversationId === conversationId ? { ebayConversationTaskModal: taskModalDraft } : {}),
       });
       console.error("[email-triage] eBay conversation context failed:", error);
+    } finally {
+      ebayContextRequests.delete(conversationId);
     }
   }
 
@@ -11332,6 +11394,11 @@
         els.ebayConversationDetail.querySelector('[name="draftText"]')?.focus();
         return;
       }
+      if (quickAction === "open-order-choices") {
+        if (isEbayMobileWorkspace()) setEbayMobileWorkspaceView("context");
+        else setEbayConversationState({ebayConversationPanelVisibility:{...adminClassificationState.ebayConversationPanelVisibility,context:true}});
+        return;
+      }
       if (quickAction === "close-context") {
         if (isEbayMobileWorkspace()) setEbayMobileWorkspaceView("message");
         else {
@@ -11466,6 +11533,10 @@
         const readState = button.getAttribute("data-ebay-read-state") || "read";
         setEbayConversationState(ebayConversationStateWithPersonalRead(conversationId, readState, context));
         persistEbayConversationUserReadState(context, conversationId, readState);
+        return;
+      }
+      if (action === "select-order") {
+        saveEbayConversationOrder(context, conversationId, button.getAttribute("data-order-id") || null);
         return;
       }
       if (action === "refresh-context") {

@@ -18,14 +18,14 @@ before(async()=>{
  await mkdir(new URL('test-results/',root),{recursive:true});
 });
 after(async()=>{await browser?.close();await new Promise(r=>{server.close(r);server.closeAllConnections();});});
-async function open(t,width=390,{linked=true}={}){
+async function open(t,width=390,{linked=true,orderChoices=false}={}){
  const context=await browser.newContext({viewport:{width,height:844},hasTouch:width<1021});t.after(()=>context.close());
  await context.route('**/*',route=>route.request().url().startsWith(origin)?route.continue():route.abort());
  const page=await context.newPage();page.setDefaultTimeout(6500);
  const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
  await page.goto(`${origin}/email-triage.html`);
  for(const file of ['task-workflow.js','email-triage.api.js','email-triage.state.js','email-triage.render-utils.js','email-triage.classifications.js','email-triage.diagnostics.js','email-triage.operations.js','email-triage.workspace.js'])await page.addScriptTag({url:origin+'/'+file});
- await page.evaluate(linked=>{
+ await page.evaluate(({linked,orderChoices})=>{
   window.fixtureWrites=[];window.fixtureReads=[];window.fixtureTasks=[];window.fixtureFailSave=false;window.fixtureDelaySave=false;
   const now=new Date().toISOString();
   window.fixtureConversations=Array.from({length:32},(_,i)=>({id:`chat-${i}`,ebay_conversation_id:`ebay-${i}`,conversation_type:'FROM_MEMBERS',other_party_username:i===0?'jewelrybuyer':`buyer_${i}`,conversation_title:'Shipping update',latest_message_preview:'Could you check the certificate and let me know when my order will ship?',latest_message_created_at:now,unread_count:1,summary:{order_numbers:['12-34567-89012']}}));
@@ -63,11 +63,24 @@ async function open(t,width=390,{linked=true}={}){
   };
   api.fetchEbayConversationContext=async()=>({context:{buyer:{username:'jewelrybuyer'},matched_orders:[{id:'order-1',order_number:'12-34567-89012',status:'pending',total_price:305}],matched_order_lines:[{id:'line-1',order_id:'order-1',order_number:'12-34567-89012',line_status:'pending',item_title:'#008 — 10K solid gold chain',quantity:1,total_price:305}],links:[{ebay_order_id:'order-1',ebay_order_line_id:'line-1',status:'confirmed'}]}});
   if(!linked)api.fetchEbayConversationContext=async()=>({context:{buyer:{username:'jewelrybuyer'},matched_orders:[],matched_order_lines:[]}});
+  if(orderChoices){
+   window.fixtureSelectedOrder=null;window.fixtureOrderLinkFail=false;
+   const orders=[{id:'choice-1',order_number:'01-11111-11111',buyer_username:'jewelrybuyer',status:'fulfilled',sale_date:'2026-10-01T12:00:00Z',total_price:200,lines:[{id:'choice-line-1',order_id:'choice-1',line_status:'fulfilled',item_title:'Gold watch',quantity:1}]},{id:'choice-2',order_number:'02-22222-22222',buyer_username:'jewelrybuyer',status:'pending',sale_date:'2026-10-06T12:00:00Z',total_price:300,lines:[{id:'choice-line-2',order_id:'choice-2',line_status:'pending',item_title:'Diamond chain',quantity:1}]}];
+   api.fetchEbayConversationContext=async()=>{
+    const order=orders.find(o=>o.id===fixtureSelectedOrder);
+    return {context:{buyer:{username:'jewelrybuyer'},buyer_orders_available:true,buyer_order_options:orders,
+     matched_orders:order?[order]:[],matched_order_lines:order?order.lines:[],links:order?[{ebay_order_id:order.id,status:'confirmed',match_method:'operator_selected_order'}]:[]}};
+   };
+   api.selectEbayConversationOrder=async(_context,id,orderId)=>{
+    fixtureWrites.push({name:'select-order',id,orderId});if(fixtureOrderLinkFail)throw Error('Could not save. Try again.');
+    fixtureSelectedOrder=orderId;return api.fetchEbayConversationContext();
+   };
+  }
   api.fetchEbayConversationDrafts=async()=>({drafts:[]});
   api.fetchTeamTaskAssignees=async()=>({assignees:[{user_id:'me',display_name:'Jose',email:'manager@example.test',role:'admin'},{user_id:'worker',display_name:'Sandra',email:'worker@example.test',role:'worker'}]});
   api.fetchOperationalDashboard=async()=>{fixtureReads.push({name:'dashboard'});return {};};
   api.requestEbayConversationDraftAction=async()=>{throw Error('Sending is outside these tests');};
- },linked);
+ },{linked,orderChoices});
  await page.addScriptTag({url:origin+'/email-triage.js'});
  await expect(page.locator('.ebay-conversation-row')).toHaveCount(32);
  await expect(page.locator('[data-ebay-detail-action="reply"]')).toHaveCount(1);
@@ -206,4 +219,33 @@ test('Refresh checks eBay as well as saved data; repeated selection uses fresh c
  await page.locator('#ebay-conversation-refresh').click();
  await expect.poll(()=>page.evaluate(()=>fixtureReads.filter(r=>r.name==='provider-sync').length)).toBe(1);
  assert.equal(await page.evaluate(()=>fixtureReads.find(r=>r.name==='provider-sync').values.syncRecentOrdersBeforeMessages),false);
+});
+
+for(const width of [390,1366])test(`Buyer order choices ${width}px: review, link, task target and undo`,async t=>{
+ const page=await open(t,width,{linked:false,orderChoices:true});
+ if(width<1021)await page.locator('.ebay-conversation-row').first().click();
+ await expect(page.getByRole('button',{name:'View buyer orders',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'View buyer orders',exact:true}).click();
+ await expect(page.getByRole('region',{name:'Buyer orders'})).toBeVisible();await noOverflow(page);
+ const card=page.locator('.triage-buyer-order').filter({hasText:'Diamond chain'});
+ await expect(card).toContainText('Oct 06, 2026');
+ await card.getByRole('button',{name:'Link this order'}).click();
+ await expect(card.getByRole('button',{name:'Remove selection'})).toBeVisible();
+ await expect(page.locator('.ebay-context-compact-summary')).toContainText('Order linked');
+ assert.deepEqual(await page.evaluate(()=>fixtureWrites.filter(w=>w.name==='select-order').map(w=>w.orderId)),['choice-2']);
+ await page.screenshot({path:`test-results/triage-order-links-${width}.png`});
+ if(width<1021)await page.locator('[data-ebay-mobile-view="message"]').click();
+ await page.locator('[data-ebay-message-task-action="create"]').first().click();
+ const taskDialog=page.getByRole('dialog',{name:'Create task'});
+ await expect(taskDialog).toContainText('Entire pending order 02-22222-22222');await expect(taskDialog).not.toContainText('01-11111-11111');
+ await page.getByRole('button',{name:'Close task creator'}).click();
+ if(width<1021)await page.locator('[data-ebay-mobile-view="context"]').click();
+
+ await card.getByRole('button',{name:'Remove selection'}).click();
+ await expect(page.getByRole('button',{name:'Remove selection'})).toHaveCount(0);
+ await expect(page.locator('.ebay-context-compact-summary')).toContainText('2 buyer orders available');
+ await page.evaluate(()=>fixtureOrderLinkFail=true);
+ await card.getByRole('button',{name:'Link this order'}).click();
+ await expect(page.getByRole('alert')).toContainText('Could not save');
+ await expect(card.getByRole('button',{name:'Link this order'})).toBeEnabled();
 });

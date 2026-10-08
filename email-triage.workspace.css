@@ -182,3 +182,18 @@
   .triage-workspace #og-task-updates .og-tu-launcher { bottom:calc(12px + env(safe-area-inset-bottom)); }
   .triage-workspace #og-task-updates .og-tu-alert { bottom:calc(70px + env(safe-area-inset-bottom)); }
 }
+
+/* Buyer orders stay separate from confirmed chat links until an operator chooses. */
+.triage-buyer-orders { display:grid; gap:12px; margin:14px 0; padding:14px; background:#142018; border:1px solid var(--triage-line); border-radius:14px; min-width:0; }
+.triage-buyer-orders h4,.triage-buyer-orders p { margin:0; }
+.triage-buyer-orders p { color:var(--triage-muted); font-size:13px; line-height:1.5; }
+.triage-buyer-order-list { display:grid; gap:10px; max-height:520px; overflow:auto; overscroll-behavior:contain; }
+.triage-buyer-order { display:grid; gap:9px; padding:12px; background:#0e1711; border:1px solid var(--triage-line); border-radius:12px; overflow-wrap:anywhere; }
+.triage-buyer-order.is-selected { border-color:#e8cd96; }
+.triage-buyer-order > div:first-child { display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; font-size:13px; }
+.triage-buyer-order span,.triage-buyer-order small { color:var(--triage-muted); font-size:12px; }
+.triage-buyer-order ul { margin:0; padding-left:18px; font-size:13px; line-height:1.6; }
+.triage-buyer-order-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.triage-buyer-order-actions .secondary-btn { flex:1; min-height:44px; font-size:12px; text-align:center; justify-content:center; }
+.triage-buyer-orders .is-error { color:#ffb5ab; }
+@media(max-width:1020px) { .triage-buyer-order-list { max-height:none; overflow:visible; } }

@@ -7,7 +7,7 @@ const js = readFileSync(new URL("../../email-triage.js", import.meta.url), "utf8
 const ownerMigration = readFileSync(new URL("../../supabase/migrations/20260823133000_require_email_triage_task_owner.sql", import.meta.url), "utf8");
 
 test("conversation context loads every line for a matched order", () => {
-  assert.match(context, /const CONTEXT_VERSION = "ebay-conversation-context-v6"/);
+  assert.match(context, /const CONTEXT_VERSION = "ebay-conversation-context-v7"/);
   assert.match(context, /function mergeRowsById\(\.\.\.groups: Array<Array<Record<string, any>>>\)/);
   assert.match(context, /function compactOrderGroup\(/);
   assert.match(context, /const linkedLines = \(linkedLinesResult\.data \|\| \[\]\) as Array<Record<string, any>>;/);

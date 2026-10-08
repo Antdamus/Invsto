@@ -1,4 +1,4 @@
-const CONTEXT_VERSION = "ebay-conversation-context-v6";
+const CONTEXT_VERSION = "ebay-conversation-context-v7";
 const MAX_LINKS = 80;
 const MAX_MESSAGES = 100;
 const MAX_RETURNS = 20;
@@ -292,7 +292,7 @@ async function loadMessages(supabase: EbayConversationContextClient, conversatio
 async function upsertConversationLink(supabase: EbayConversationContextClient, candidate: LinkCandidate) {
   const { data: existingRows, error: lookupError } = await supabase
     .from("ebay_conversation_links")
-    .select("id, confidence, status, metadata")
+    .select("id, confidence, status, match_method, metadata")
     .eq("conversation_id", candidate.conversation_id)
     .eq("link_type", candidate.link_type)
     .eq("link_key", candidate.link_key)
@@ -301,6 +301,8 @@ async function upsertConversationLink(supabase: EbayConversationContextClient, c
 
   const existing = (existingRows || [])[0];
   if (existing?.id) {
+    // Automatic matching must not overwrite an operator-confirmed link.
+    if (existing.match_method === "operator_selected_order") return { created: 0, updated: 0, unchanged: 1 };
     const existingConfidence = Number(existing.confidence || 0);
     const shouldUpdate = candidate.confidence > existingConfidence ||
       (existing.status === "suggested" && candidate.status === "confirmed") ||
@@ -578,6 +580,24 @@ function bestLineByBuyerAndTime(lines: Array<Record<string, any>>, buyerUsername
   };
 }
 
+// Escape LIKE wildcards: underscores are literal parts of eBay usernames.
+function exactBuyerPattern(value: unknown) {
+  return text(value, 120).replace(/[\\%_*]/g, "\\$&");
+}
+
+async function loadBuyerOrders(supabase: EbayConversationContextClient, usernames: string[], limit = 80) {
+  const groups = await Promise.all(unique(usernames, 10).map(async (username) => {
+    const { data, error } = await supabase.from("ebay_orders")
+      .select("id, order_number, buyer_username, status, sale_date, paid_on_date, total_price")
+      .ilike("buyer_username", exactBuyerPattern(username))
+      .order("sale_date", { ascending: false, nullsFirst: false }).order("id")
+      .limit(limit);
+    if (error) throw new EbayConversationContextError("buyer_orders_lookup_failed", { phase: "buyer_orders", message: error.message });
+    return (data || []).filter((order: Record<string, any>) => buyerKey(order.buyer_username) === buyerKey(username));
+  }));
+  return mergeRowsById(...groups);
+}
+
 async function pushBuyerTitleOrderLineCandidates(
   supabase: EbayConversationContextClient,
   candidates: LinkCandidate[],
@@ -591,13 +611,7 @@ async function pushBuyerTitleOrderLineCandidates(
   const titleCandidates = conversationTitleCandidates(conversation, messages);
   if (!buyerUsernames.length || !titleCandidates.length) return;
 
-  const { data: orders, error: ordersError } = await supabase
-    .from("ebay_orders")
-    .select("id, order_number, buyer_username, buyer_name, buyer_email, status, sale_date, paid_on_date")
-    .in("buyer_username", buyerUsernames)
-    .order("sale_date", { ascending: false, nullsFirst: false })
-    .limit(80);
-  if (ordersError) throw new EbayConversationContextError("order_lookup_failed", { phase: "buyer_title_order_lookup", message: ordersError.message });
+  const orders = await loadBuyerOrders(supabase, buyerUsernames);
   const orderIds = uniqueIds((orders || []).map((order: Record<string, any>) => order.id), 80);
   if (!orderIds.length) return;
 
@@ -658,13 +672,7 @@ async function pushBuyerRecentOrderCandidates(
   const buyerUsernames = unique(identifiers.buyerUsernames, 10);
   if (!buyerUsernames.length || !targetTime) return;
 
-  const { data: orders, error } = await supabase
-    .from("ebay_orders")
-    .select("id, order_number, buyer_username, buyer_name, buyer_email, status, sale_date, paid_on_date")
-    .in("buyer_username", buyerUsernames)
-    .order("sale_date", { ascending: false, nullsFirst: false })
-    .limit(40);
-  if (error) throw new EbayConversationContextError("order_lookup_failed", { phase: "buyer_recent_order_lookup", message: error.message });
+  const orders = await loadBuyerOrders(supabase, buyerUsernames, 40);
 
   const scored = (orders || [])
     .map((order: Record<string, any>) => ({
@@ -684,7 +692,7 @@ async function pushBuyerRecentOrderCandidates(
     return;
   }
 
-  const status: LinkStatus = veryClose && uniqueByTime ? "confirmed" : "suggested";
+  const status: LinkStatus = "suggested";
   candidates.push(orderCandidateFrom(conversation, identifiers, best.order, {
     matchedValue: String(best.order.order_number || best.order.id),
     method: "buyer_recent_unique_order",
@@ -965,6 +973,39 @@ export async function linkEbayConversationContext(
     counters.links_unchanged += result.unchanged;
   }
   return counters;
+}
+
+export async function selectEbayConversationOrder(
+  supabase: EbayConversationContextClient, conversationId: string, orderId: string | null, actorId: string | null,
+) {
+  const conversation = await loadConversation(supabase, conversationId);
+  if (conversation.conversation_type !== "FROM_MEMBERS") throw new EbayConversationContextError("member_conversation_required", { status: 400 });
+  const linkKey = "operator:order";
+  if (!orderId) {
+    const { error } = await supabase.from("ebay_conversation_links").update({ status: "rejected" })
+      .eq("conversation_id", conversationId).eq("link_type", "ebay_order").eq("link_key", linkKey);
+    if (error) throw new EbayConversationContextError("order_link_save_failed", { message: error.message });
+    return;
+  }
+  const messages = await loadMessages(supabase, conversationId);
+  const identifiers = extractConversationIdentifiers(conversation, messages);
+  const participantLinks: LinkCandidate[] = [];
+  pushParticipantBuyerCandidates(participantLinks, conversation, identifiers);
+  const buyer = chooseBuyer({ conversation, links: participantLinks, orders: [], lineOrders: [], returns: [], warnings: [] });
+  const { data: order, error } = await supabase.from("ebay_orders")
+    .select("id, order_number, buyer_username").eq("id", orderId).maybeSingle();
+  if (error) throw new EbayConversationContextError("order_lookup_failed", { message: error.message });
+  if (!buyer.username || buyer.confidence !== "confirmed" || !order || buyerKey(order.buyer_username) !== buyerKey(buyer.username)) {
+    throw new EbayConversationContextError("order_buyer_mismatch", { status: 400, message: "Choose an order belonging to this chat's buyer." });
+  }
+  const candidate = orderCandidateFrom(conversation, identifiers, order, {
+    matchedValue: order.order_number, method: "operator_selected_order", confidence: 1, status: "confirmed",
+    extra: { selected_by: actorId, selected_at: new Date().toISOString() },
+  });
+  candidate.link_key = linkKey;
+  const { error: saveError } = await supabase.from("ebay_conversation_links")
+    .upsert(candidate, { onConflict: "conversation_id,link_type,link_key" });
+  if (saveError) throw new EbayConversationContextError("order_link_save_failed", { message: saveError.message });
 }
 
 function compactConversation(conversation: Record<string, any>) {
@@ -1450,7 +1491,11 @@ export async function buildEbayConversationContext(
     .order("confidence", { ascending: false, nullsFirst: false })
     .limit(MAX_LINKS);
   if (linksError) throw new EbayConversationContextError("link_lookup_failed", { phase: "link_lookup", message: linksError.message });
-  const links = (linksData || []) as Array<Record<string, any>>;
+  const activeLinks = (linksData || []) as Array<Record<string, any>>;
+  const selectedOrderLink = activeLinks.find((link) => link.match_method === "operator_selected_order");
+  const links = selectedOrderLink
+    ? activeLinks.filter((link) => !link.ebay_order_id || link.ebay_order_id === selectedOrderLink.ebay_order_id)
+    : activeLinks;
   if (!links.length) warnings.push(warning("no_conversation_links", "No active eBay conversation links exist yet.", "info"));
 
   const directOrderIds = uniqueIds(links.map((link) => link.ebay_order_id), MAX_LINKS);
@@ -1589,10 +1634,32 @@ export async function buildEbayConversationContext(
   const lineOrders = lines.map((line) => orderById.get(String(line.order_id))).filter(Boolean) as Array<Record<string, any>>;
   const buyer = chooseBuyer({ conversation, links, orders, lineOrders, returns, warnings });
   const resolution = contextResolution({ conversation, buyer, links, orders, lines, returns });
+  let buyerOrderOptions: Array<Record<string, any>> = [];
+  let buyerOrdersAvailable = false;
+  if (buyer.username && buyer.confidence === "confirmed" && conversation.conversation_type === "FROM_MEMBERS") {
+    try {
+      const buyerOrders = await loadBuyerOrders(supabase, [buyer.username as string], 81);
+      const choices = buyerOrders.slice(0, 80);
+      const { data: choiceLines, error: linesError } = choices.length
+        ? await supabase.from("ebay_order_lines")
+          .select("id, order_id, item_title, item_number, quantity, line_status")
+          .in("order_id", choices.map((order) => order.id)).order("id").limit(1000)
+        : { data: [], error: null };
+      if (linesError) warnings.push(warning("buyer_order_previews_partial", "Some item previews are unavailable. Open the order to inspect all items.", "info"));
+      buyerOrderOptions = choices.map((order) => ({ ...order,
+        lines: (choiceLines || []).filter((line: Record<string, any>) => line.order_id === order.id).slice(0, 4),
+      }));
+      buyerOrdersAvailable = true;
+      if (buyerOrders.length > 80) warnings.push(warning("buyer_orders_limited", "Showing the 80 most recent buyer orders. Use Order history for older purchases.", "info"));
+    } catch (_) {
+      warnings.push(warning("buyer_orders_unavailable", "Buyer orders could not be loaded. Refresh order details to try again.", "warning"));
+    }
+  }
+
   if (resolution.provider_detail_refresh_recommended) {
     warnings.push(warning(
       "provider_detail_refresh_recommended",
-      "Buyer was derived from message participants, but no exact order/listing reference is stored yet. Run a targeted provider detail refresh.",
+      "This chat identifies the buyer but not a specific purchase. Review the buyer orders and select the relevant order.",
       "info",
     ));
   }
@@ -1638,6 +1705,8 @@ export async function buildEbayConversationContext(
     messages: messages.map(compactMessage),
     links: links.map(compactLink),
     buyer,
+    buyer_order_options: buyerOrderOptions,
+    buyer_orders_available: buyerOrdersAvailable,
     matched_orders: orders.map(compactOrder),
     matched_order_lines: lines.map((line) => compactOrderLine(line, orderById.get(String(line.order_id)) || null)),
     matched_order_groups: matchedOrderGroups,

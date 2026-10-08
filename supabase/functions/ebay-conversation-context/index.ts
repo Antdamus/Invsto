@@ -5,16 +5,18 @@ import {
   EbayConversationContextError,
   linkEbayConversationContext,
   resolveEbayConversation,
+  selectEbayConversationOrder,
 } from "../_shared/ebay-conversation-context.ts";
 
 type ServiceClient = any;
-type Mode = "context" | "link_conversation" | "link_and_context";
+type Mode = "context" | "link_conversation" | "link_and_context" | "select_order";
 
 type Input = {
   mode: Mode;
   conversationId: string | null;
   ebayConversationId: string | null;
   conversationType: string | null;
+  orderId: string | null;
 };
 
 class FunctionError extends Error {
@@ -119,7 +121,7 @@ async function requireAdmin(req: Request, supabase: ServiceClient) {
 async function parseInput(req: Request): Promise<Input> {
   const body = await req.json().catch(() => ({}));
   const rawMode = stringOrNull(body?.mode) || "link_and_context";
-  const mode = ["context", "link_conversation", "link_and_context"].includes(rawMode) ? rawMode as Mode : null;
+  const mode = ["context", "link_conversation", "link_and_context", "select_order"].includes(rawMode) ? rawMode as Mode : null;
   if (!mode) throw new FunctionError("invalid_mode", { status: 400, phase: "input" });
   const conversationId = stringOrNull(body?.conversationId || body?.conversation_id);
   const ebayConversationId = stringOrNull(body?.ebayConversationId || body?.ebay_conversation_id);
@@ -129,6 +131,7 @@ async function parseInput(req: Request): Promise<Input> {
     conversationId,
     ebayConversationId,
     conversationType: stringOrNull(body?.conversationType || body?.conversation_type),
+    orderId: stringOrNull(body?.orderId),
   };
 }
 
@@ -147,7 +150,8 @@ serve(async (req) => {
       conversationType: input.conversationType,
     });
 
-    const linkResult = input.mode === "context"
+    if (input.mode === "select_order") await selectEbayConversationOrder(supabase, conversation.id, input.orderId, operator.userId);
+    const linkResult = input.mode === "context" || input.mode === "select_order"
       ? null
       : await linkEbayConversationContext(supabase, conversation.id);
     const context = input.mode === "link_conversation"

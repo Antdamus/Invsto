@@ -2193,6 +2193,14 @@
     }, TIMEOUTS.ebayConversationContext);
   }
 
+  async function selectEbayConversationOrder(context, conversationId, orderId) {
+    const session = await currentSession(context, "eBay order link");
+    return edgeFetchWithTimeout(EBAY_CONVERSATION_CONTEXT_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({ mode: "select_order", conversationId, orderId: orderId || null }),
+    }, TIMEOUTS.ebayConversationContext);
+  }
+
   async function fetchEbayConversationDrafts(context, conversationId) {
     const session = await currentSession(context, "eBay conversation drafts");
     return edgeFetchWithTimeout(EBAY_CONVERSATION_DRAFT_FUNCTION, session, {
@@ -2490,6 +2498,7 @@
     syncEbayProviderReadState,
     processPendingEbayProviderReadState,
     fetchEbayConversationContext,
+    selectEbayConversationOrder,
     fetchEbayConversationDrafts,
     requestEbayConversationDraftAction,
     requestEbayMessageTranslation,

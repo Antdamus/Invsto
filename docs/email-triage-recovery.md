@@ -66,3 +66,25 @@ Live validation on October 8, 2026: mailbox results were identical across six
 folder/search samples in a rolled-back comparison. The measured mailbox RPC
 fell from 4,283ms to 448ms after applying the database changes (single comparison;
 end-to-end loading also includes assets, selected messages, and context).
+
+
+## Chat order links
+
+The v7 conversation context shows up to 80 recent purchases for the identified
+buyer, with bounded item previews. These remain separate from chat matches and
+are not added to task targets until linked. Exact username lookup ignores case
+and escapes wildcard characters. Buyer/time proximity alone is a suggestion.
+
+Staff can select one buyer order through the existing authenticated context
+endpoint. The server checks the conversation participant against the order buyer,
+saves an operator selection, and gives it precedence over automated suggestions.
+Changing it replaces that selection; removing it marks the selection rejected
+and restores the automatic context. Neither operation modifies order status,
+stock, fulfillment, or buyer messages. Context reads expire after 60 seconds,
+and an older in-flight read cannot overwrite a new operator selection.
+
+Live diagnosis on October 8: geraldo3700 had 16 stored orders and luilop_10 had
+13, but their unreferenced chats were ambiguous. cc-chope and el_8610 had no stored
+orders under those exact usernames. A missing local order is not proof that the
+buyer never purchased; it can also require an order import or identity check.
+Tests: order-linking.test.mjs and the Buyer order choices browser cases.
