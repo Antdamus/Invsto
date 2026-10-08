@@ -435,6 +435,8 @@ function openModal(id) {
 function closeModal(id) {
   $(id)?.classList.add("hidden");
   if (
+    !$("attach-inventory-modal")?.classList.contains("hidden")
+    ||
     !$("item-confirm-modal")?.classList.contains("hidden")
     || !$("bundle-review-modal")?.classList.contains("hidden")
     || !$("completion-photos-modal")?.classList.contains("hidden")
@@ -3116,6 +3118,7 @@ function hydratePendingOrderExtrasInBackground(lines = []) {
   const startedAt = nowMs();
   const snapshot = [...lines];
   Promise.allSettled([
+    window.PendingInventory?.load(lines),
     hydrateOrderVideoReceipts(snapshot),
     hydrateOrderTaskAssignments(snapshot),
     hydrateQueueVideoReceiptCoverage(snapshot),
@@ -4471,7 +4474,7 @@ function renderOrders(options = {}) {
             <button type="button" class="buyer-card-complete-btn primary-btn" data-buyer-complete-key="${escapeHtml(group.key)}" ${group.lines.some(isOpenOrderLine) ? "" : "disabled"}>Mixed Checkout</button>
             <button type="button" class="secondary-btn buyer-card-order-video-btn task-video-action-btn" data-buyer-order-video-key="${escapeHtml(group.key)}" ${group.lines.some((line) => line.order_id) ? "" : "disabled"}>Add order video</button>
             <button type="button" class="secondary-btn buyer-card-order-video-btn task-video-action-btn" data-buyer-view-order-videos-key="${escapeHtml(group.key)}" ${group.lines.some((line) => line.order_id) ? "" : "disabled"}>View order videos</button>
-            <button type="button" class="buyer-card-no-inventory-btn secondary-btn caution-btn" data-buyer-no-inventory-key="${escapeHtml(group.key)}" ${getNoInventoryLineIdsForGroupAction(group).length ? "" : "disabled"}>Complete Without Inventory</button>
+            <button type="button" class="buyer-card-no-inventory-btn secondary-btn caution-btn" data-buyer-no-inventory-key="${escapeHtml(group.key)}" ${getNoInventoryLineIdsForGroupAction(group).length ? "" : "disabled"}>Complete order</button>
             ${approvalActionMarkup}
           </div>
           ${isAdminUser() ? `
@@ -4727,6 +4730,7 @@ function renderOrders(options = {}) {
           <span class="queue-video-receipt-evidence" data-queue-video-evidence="${escapeHtml(line.id)}">
             <span class="queue-video-receipt-empty">Checking saved video receipt screenshot...</span>
           </span>
+          <span data-line-inventory="${escapeHtml(line.id)}"></span>
         </span>
         <b>${escapeHtml(line.line_status || "pending")}</b>
       `;
@@ -7888,7 +7892,7 @@ function stageLineWithoutInventory() {
     mode: "without_inventory", line, qty: getRemainingLineQuantity(line),
     expectedFulfilledQuantity: Number(line.fulfilled_quantity || 0),
     item: { title: line.item_title, barcode: line.custom_label },
-    row: { locationLabel: "Without inventory — no stock removed" },
+    row: { locationLabel: window.PendingInventory?.summary(line.id) || "Without inventory — no stock removed" },
   });
   finishStagingLine(line, { autoAdvance: true, autoReview: true });
 }
@@ -9433,7 +9437,7 @@ function renderWorkerNoInventoryList() {
             <strong>${escapeHtml(line?.item_title || "Untitled eBay item")}</strong>
             <span>${escapeHtml(order.order_number || "No order")} - ${escapeHtml(order.buyer_username || "No buyer")}</span>
           </div>
-          <small>Qty ${Number(getRemainingLineQuantity(line) || line?.quantity || 1).toLocaleString()} - ${escapeHtml(storeName)} - no stock row will be removed</small>
+          <small>Qty ${Number(getRemainingLineQuantity(line) || line?.quantity || 1).toLocaleString()} - ${escapeHtml(storeName)} - ${escapeHtml(window.PendingInventory?.summary(line.id) || "No saved inventory attachment")}</small>
           ${receiptLink.url || receiptLink.orderNumber ? `<button type="button" class="buyer-line-receipt no-inventory-video-receipt" title="${escapeHtml(receiptLink.title)}">View video receipt</button>` : ""}
           <button type="button" class="receipt-screenshot-upload" data-upload-receipt-screenshot="${escapeHtml(line.id)}">Upload receipt screenshot</button>
           <div class="no-inventory-video-receipt-evidence" data-no-inventory-video-evidence="${escapeHtml(line.id)}">
@@ -9579,7 +9583,7 @@ async function openWorkerNoInventoryModal(options = {}) {
   $("worker-no-inventory-error").textContent = "";
   setNoInventoryPhotoStatus("");
   $("worker-no-inventory-subtitle").textContent =
-    `This closes the selected pending line(s) for ${getBuyerLabel(line)} without removing stock from inventory. Items without a saved receipt screenshot start unchecked; you can select them individually if needed. It will be signed by your logged-in account at ${getCheckoutStoreName() || "the selected store"}.`;
+    `This completes the selected items for ${getBuyerLabel(line)} and sends finished orders to Packaging. Saved inventory attachments are deducted automatically; items without an attachment do not remove stock. Items without a saved receipt screenshot start unchecked. Signed by your account at ${getCheckoutStoreName() || "the selected store"}.`;
   renderWorkerNoInventoryList();
   renderEbayLabelPanel();
   renderNoInventoryEvidencePhotos();
@@ -9675,7 +9679,7 @@ async function confirmWorkerNoInventoryCompletion() {
     selectedLineIds.forEach((lineId) => state.stagedFulfillments.delete(lineId));
     state.ebayLabelReturnContext = null;
     closeWorkerNoInventoryModal({ suppressEbayReturn: true, suppressMobileReturn: true });
-    setStatus(`${data?.[0]?.updated_lines || selectedLineIds.length} line(s) completed without inventory removal. The audit trail was recorded.`, "info");
+    setStatus(`${data?.[0]?.updated_lines || selectedLineIds.length} line(s) completed. Saved inventory attachments were deducted and the audit trail was recorded. Completed orders move to Packaging.`, "info");
     await loadOrders();
     // The extension's queue-changed message activates eBay; stay in the refreshed OG queue.
     const nextBuyerLine = getNextPackableLine(currentBuyerKey);
@@ -10197,7 +10201,7 @@ async function renderBundleReviewList(staged) {
       ${entry.mode === "without_inventory" ? "" : '<div class="bundle-review-thumb"><span>No photo</span></div>'}
       <div class="bundle-review-copy">
         <strong>${escapeHtml(entry.item.title || entry.line.item_title || "Untitled item")}</strong>
-        <b>${entry.mode === "without_inventory" ? "Without inventory — no stock removed" : "Inventory — remove scanned stock"}</b>
+        <b>${entry.mode === "without_inventory" ? escapeHtml(window.PendingInventory?.summary(entry.line.id) || "Without inventory — no stock removed") : "Inventory — remove scanned stock"}</b>
         <span>${escapeHtml(entry.item.barcode || entry.line.custom_label || entry.line.item_number || "No barcode")}</span>
         <small>${entry.mode === "without_inventory" ? "" : `${escapeHtml(entry.row.locationLabel)} — `}Qty ${Number(entry.qty || 1).toLocaleString()}</small>
       </div>
@@ -10265,7 +10269,7 @@ function openBundleReviewModal() {
     renderLiveLotBundleReviewList(liveItems);
   } else {
     const totalQty = staged.reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
-    const inventoryQty = staged.filter(entry => entry.mode !== "without_inventory").reduce((sum, entry) => sum + entry.qty, 0);
+    const inventoryQty = staged.reduce((sum, entry) => sum + (entry.mode !== "without_inventory" ? entry.qty : Math.min(entry.qty, window.PendingInventory?.active(entry.line.id)?.remaining_quantity || 0)), 0);
     $("bundle-review-subtitle").textContent = `${buyer} — ${totalQty} units: ${inventoryQty} from inventory, ${totalQty - inventoryQty} without inventory. Review each line before confirming.`;
     renderBundleReviewList(staged);
   }

@@ -76,7 +76,7 @@
         more.textContent = open ? 'Fewer actions' : 'More actions';
       });
       expanded.append(more);
-      [['[data-buyer-complete-key]', 'Pack order'], ['[data-buyer-no-inventory-key]', 'No inventory']].forEach(([selector, label]) => {
+      [['[data-buyer-complete-key]', 'Pack order'], ['[data-buyer-no-inventory-key]', 'Complete order']].forEach(([selector, label]) => {
         const button = card.querySelector(selector);
         if (!button) return;
         const original = document.createElement('span'); original.className = 'phone-desktop-label'; original.textContent = button.textContent;

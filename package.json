@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "test:pending-inventory": "node --test tests/pending-inventory-database.test.mjs tests/pending-inventory-browser.test.mjs",
     "test:packaging": "node --test tests/packaging-database.test.mjs tests/packaging-browser.test.mjs",
     "test:dashboard": "node --test tests/dashboard-workspace.test.mjs tests/dashboard-database.test.mjs",
     "test:tasks": "node --test tests/task-workspace.test.mjs tests/task-next-action-database.test.mjs tests/worker-task-workflow.test.mjs tests/task-reply-database.test.mjs tests/task-notification-links.test.mjs tests/task-notifications.test.mjs tests/task-request-entrypoints.test.mjs",

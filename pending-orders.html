@@ -493,7 +493,7 @@
                   <span id="selected-order-status" class="status-badge">Pending</span>
                   <button id="assign-order-task" type="button" class="secondary-btn task-action-btn">Assign Task</button>
                   <button id="cancel-pending-order" type="button" class="secondary-btn danger-btn">Mark Order Canceled</button>
-                  <button id="complete-no-inventory" type="button" class="secondary-btn caution-btn">Complete Without Inventory</button>
+                  <button id="complete-no-inventory" type="button" class="secondary-btn caution-btn">Complete order</button>
                 </div>
               </div>
 
@@ -713,7 +713,7 @@
     <div class="packing-modal-card bundle-review-card no-inventory-card">
       <button id="close-worker-no-inventory" class="modal-close-btn" type="button" aria-label="Close">x</button>
       <span class="eyebrow">Physical Item Present</span>
-      <h2 id="worker-no-inventory-title">Complete without inventory removal?</h2>
+      <h2 id="worker-no-inventory-title">Complete selected items?</h2>
       <section class="checkout-customer-identity" aria-label="Customer verification">
         <div><span>Customer</span><strong id="worker-no-inventory-customer-name">Name not saved</strong></div>
         <div><span>eBay username</span><strong id="worker-no-inventory-buyer-username">No buyer username</strong></div>
@@ -1241,8 +1241,26 @@
 <script src="shipping-label-reader.js?v=20261006-label-photos"></script>
 <script src="order-shipping-labels.js?v=20261006-label-photos"></script>
 <script src="receipt-preview-jobs.js?v=20261003-receipt-speed"></script>
-  <script src="pending-orders.js?v=header-actions-20261008"></script>
+  <link rel="stylesheet" href="pending-inventory.css?v=20261008-attachments" />
+  <div id="attach-inventory-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="attach-inventory-title">
+    <div class="packing-modal-card attach-inventory-card">
+      <button id="attach-inventory-close" type="button" class="modal-close-btn" aria-label="Close inventory attachment">×</button>
+      <span class="eyebrow">Match inventory to this item</span>
+      <h2 id="attach-inventory-title">Attach inventory</h2>
+      <p id="attach-inventory-order"></p>
+      <label>Packing store<select id="attach-inventory-store" aria-label="Inventory packing store"></select></label>
+      <div class="scan-row"><input id="attach-inventory-scan" type="search" data-camera-scan placeholder="Scan inventory barcode or search" aria-label="Inventory barcode" autocomplete="off" /><button id="attach-inventory-find" type="button" class="secondary-btn">Find</button></div>
+      <div id="attach-inventory-results"></div>
+      <div id="attach-inventory-selected"></div>
+      <div id="attach-inventory-sources"></div>
+      <label id="attach-inventory-quantity-wrap" hidden>Quantity to attach<input id="attach-inventory-quantity" type="number" min="1" step="1" inputmode="numeric" value="1" /><small id="attach-inventory-availability"></small></label>
+      <p id="attach-inventory-status" class="fulfill-status" role="status" aria-live="polite"></p>
+      <div class="modal-actions"><button id="attach-inventory-remove" type="button" class="secondary-btn" hidden>Remove attachment</button><button id="attach-inventory-save" type="button" class="primary-btn" disabled>Attach & reserve</button></div>
+    </div>
+  </div>
+  <script src="pending-orders.js?v=inventory-attachments-20261008"></script>
+  <script src="pending-inventory.js?v=20261008-attachments"></script>
   <script src="pending-bag-scan.js?v=20261008-header-actions"></script>
-  <script src="pending-orders-mobile.js?v=20261008-header-actions"></script>
+  <script src="pending-orders-mobile.js?v=20261008-inventory-attachments"></script>
 </body>
 </html>
