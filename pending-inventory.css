@@ -24,5 +24,8 @@
 #attach-inventory-status{min-height:40px}
 .attach-inventory-card .modal-actions{position:sticky;bottom:-26px;background:#1b241f;padding:14px 0;margin-bottom:-12px;gap:10px;display:flex;flex-wrap:wrap}
 #attach-inventory-save{flex:1}
+.shared-bag-summary{display:grid;gap:12px;width:100%;min-width:0}.shared-bag-summary>small{color:#8cdab2;font-size:11px;letter-spacing:.05em}.shared-bag-summary>strong{color:#ddd6c5;font-size:13px}
+.attach-inventory-card .separate-inventory-confirmation{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #8b764c;border-radius:12px}.attach-inventory-card .separate-inventory-confirmation input{width:24px;min-height:24px;flex:0 0 24px}
+#attach-inventory-bag .inventory-match{padding:12px}#attach-inventory-bag>.secondary-btn{margin:6px 8px 6px 0}#shared-inventory-review-note{display:block;box-sizing:border-box;width:100%;min-height:90px;background:#101713;color:#f2eadc;border:1px solid #739582;border-radius:12px;padding:12px;font:inherit;font-size:16px}
 .attach-inventory-card button:focus-visible{outline:3px solid #ead090;outline-offset:3px}
 @media(max-width:760px){.attach-inventory-card{padding:20px;border-radius:22px;max-height:calc(100dvh - 24px)}.attach-inventory-card .modal-actions{bottom:-20px}.line-inventory-saved{flex-basis:100%}[data-line-inventory]>.secondary-btn{width:100%}}

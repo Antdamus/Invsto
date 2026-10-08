@@ -79,8 +79,10 @@ async function open(t,{width=1280}={}) {
   });
   await p.addScriptTag({url:origin+'/pending-inventory.js'});
   await p.evaluate(()=>{PendingInventory.init();window.attachments=new Map();window.failAttach=false;const oldRpc=supabase.rpc;supabase.rpc=async(name,args)=>{
-    if(name==='get_pending_inventory_attachments')return {data:[...attachments.values()].filter(a=>args._order_line_ids.includes(a.order_line_id))};
-    if(name==='save_pending_inventory_attachment'){calls.push({name,args});if(failAttach)return {error:{message:'Stock changed. Scan again.'}};const a={order_line_id:args._order_line_id,item_id:args._item_id,stock_location_row_id:args._stock_location_row_id,checkout_store_id:args._checkout_store_id,quantity:args._quantity,remaining_quantity:args._quantity,status:args._quantity?'reserved':'released',revision:(attachments.get(args._order_line_id)?.revision||0)+1,item,location:{location_name:'Tray 4'},store_name:'Main Store'};attachments.set(a.order_line_id,a);return {data:[a]};}
+    if(name==='get_shared_pending_inventory')return {data:[...attachments.values()].filter(a=>args._order_line_ids.includes(a.order_line_id))};
+    if(name==='get_inventory_bag_candidates')return {data:window.candidateBags || []};
+    if(name==='save_shared_bag_inventory'){calls.push({name,args});const a=attachments.get('line-a');a.items.find(x=>x.item_id===args._item_id&&x.stock_location_row_id===args._stock_location_row_id).quantity=args._quantity;a.remaining_quantity=args._quantity;a.revision='new-revision';return {data:a};}
+    if(name==='save_pending_inventory_attachment_checked'){calls.push({name,args});if(failAttach)return {error:{message:'Stock changed. Scan again.'}};const a={order_line_id:args._order_line_id,item_id:args._item_id,stock_location_row_id:args._stock_location_row_id,checkout_store_id:args._checkout_store_id,quantity:args._quantity,remaining_quantity:args._quantity,status:args._quantity?'reserved':'released',revision:(attachments.get(args._order_line_id)?.revision||0)+1,item,location:{location_name:'Tray 4'},store_name:'Main Store'};attachments.set(a.order_line_id,a);return {data:[a]};}
     return oldRpc(name,args);
   }; document.getElementById('orders-list').innerHTML='<div data-line-inventory="line-a"></div><div data-line-inventory="line-b"></div>';PendingInventory.paint();});
   await p.evaluate(()=>{document.getElementById('fulfillment-workflow').classList.add('hidden');document.body.classList.remove('pending-order-detail-open','pending-mobile-sheet-open');});
@@ -97,14 +99,14 @@ for(const width of [320,390,1366]) test(`attach inventory at ${width}px saves on
  await p.locator('[data-attach-inventory="line-a"]').click();
  await p.locator('#attach-inventory-scan').fill('OG%,001');await p.locator('#attach-inventory-scan').press('Enter');
  await p.locator('#attach-inventory-quantity-wrap').waitFor({state:'visible'});
- assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='save_pending_inventory_attachment')),false);
+ assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='save_pending_inventory_attachment_checked')),false);
  await p.locator('#attach-inventory-quantity').fill('2');
  const layout=await p.evaluate(()=>{const modal=document.querySelector('.attach-inventory-card').getBoundingClientRect();return {left:modal.left,right:modal.right,width:innerWidth,overflow:document.documentElement.scrollWidth>innerWidth};});
  assert.ok(layout.left>=0&&layout.right<=layout.width,JSON.stringify(layout));assert.equal(layout.overflow,false);
  if(width===390||width===1366) await p.screenshot({path:`test-results/inventory-attach-${width}.png`});
  await p.locator('#attach-inventory-save').click();await p.locator('#attach-inventory-modal').waitFor({state:'hidden'});
  assert.match(await p.locator('[data-line-inventory="line-a"]').innerText(),/Qty 2/);
- const writes=await p.evaluate(()=>calls.filter(c=>c.name==='save_pending_inventory_attachment'));
+ const writes=await p.evaluate(()=>calls.filter(c=>c.name==='save_pending_inventory_attachment_checked'));
  assert.equal(writes.length,1);assert.equal(writes[0].args._order_line_id,'line-a');assert.equal(writes[0].args._quantity,2);
  assert.equal(await p.evaluate(()=>stockQuantity),5,'attachment does not call checkout');
  await p.locator('[data-attach-inventory="line-a"]').click();
@@ -123,7 +125,7 @@ test('duplicate inventory matches and multiple sources require an explicit choic
  assert.equal(await p.locator('#attach-inventory-save').isDisabled(),true);
  await p.locator('#attach-inventory-sources button').nth(1).click();await p.locator('#attach-inventory-save').click();
  await p.locator('#attach-inventory-modal').waitFor({state:'hidden'});
- assert.equal(await p.evaluate(()=>calls.find(c=>c.name==='save_pending_inventory_attachment').args._stock_location_row_id),'stock-b');
+ assert.equal(await p.evaluate(()=>calls.find(c=>c.name==='save_pending_inventory_attachment_checked').args._stock_location_row_id),'stock-b');
 });
 
 test('invalid quantity and failed saves stay open; closing does not change the draft bundle',async t=>{
@@ -131,7 +133,7 @@ test('invalid quantity and failed saves stay open; closing does not change the d
  await p.locator('[data-attach-inventory="line-a"]').click();await p.locator('#attach-inventory-scan').fill('OG%,001');await p.locator('#attach-inventory-scan').press('Enter');
  await p.locator('#attach-inventory-quantity-wrap').waitFor({state:'visible'});
  await p.locator('#attach-inventory-quantity').fill('9');await p.locator('#attach-inventory-save').click();
- assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='save_pending_inventory_attachment')),false);
+ assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='save_pending_inventory_attachment_checked')),false);
  await p.locator('#attach-inventory-quantity').fill('1');await p.evaluate(()=>failAttach=true);await p.locator('#attach-inventory-save').click();
  assert.match(await p.locator('#attach-inventory-status').innerText(),/Stock changed/);
  assert.equal(await p.locator('#attach-inventory-modal').isVisible(),true);
@@ -143,5 +145,43 @@ test('late scanner responses cannot attach inventory to a different item line',a
  await p.locator('[data-attach-inventory="line-a"]').click();await p.locator('#attach-inventory-scan').fill('OG%,001');await p.locator('#attach-inventory-scan').press('Enter');
  await p.locator('#attach-inventory-close').click();await p.locator('[data-attach-inventory="line-b"]').click();
  await p.waitForTimeout(250);assert.equal(await p.locator('#attach-inventory-save').isDisabled(),true);
- assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='save_pending_inventory_attachment')),false);
+ assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='save_pending_inventory_attachment_checked')),false);
+});
+
+for(const width of [390,1366]) test(`shared bag inventory at ${width}px displays all pieces and rescanning never adds quantity`,async t=>{
+ const p=await open(t,{width});
+ await p.evaluate(async()=>{
+  attachments.set('line-a',{kind:'bag',order_line_id:'line-a',lot_id:'bag-a',bag_number:'017',revision:'original-revision',status:'reserved',remaining_quantity:3,checkout_store_id:'store-a',
+   items:[{id:'bag-item-a',item_id:item.id,stock_location_row_id:'stock-a',quantity:2,status:'reserved',item,location:{location_name:'Tray 4'}},
+    {id:'bag-item-b',item_id:'item-b',stock_location_row_id:'stock-b',quantity:1,status:'reserved',item:{id:'item-b',title:'Second inventory piece',barcode:'SECOND'},location:{location_name:'Shelf B'}}]});
+  await PendingInventory.load(state.orders);
+ });
+ assert.match(await p.locator('[data-line-inventory="line-a"]').innerText(),/Second inventory piece/);
+ await p.getByRole('button',{name:'Manage bag inventory'}).click();
+ await p.locator('#attach-inventory-scan').fill('OG%,001');await p.locator('#attach-inventory-scan').press('Enter');
+ await p.locator('#attach-inventory-quantity-wrap').waitFor({state:'visible'});
+ assert.equal(await p.locator('#attach-inventory-quantity').inputValue(),'2');
+ assert.match(await p.locator('#attach-inventory-status').innerText(),/Already reserved.*Scanning added nothing/);
+ assert.equal(await p.evaluate(()=>calls.some(c=>c.name.startsWith('save_'))),false);
+ const box=await p.locator('.attach-inventory-card').boundingBox();assert.ok(box.x>=0&&box.x+box.width<=width);
+ await p.screenshot({path:`test-results/shared-inventory-${width}.png`});
+ await p.locator('#attach-inventory-quantity').fill('3');await p.getByRole('button',{name:'Save bag quantity'}).click();
+ await p.locator('#attach-inventory-modal').waitFor({state:'hidden'});
+ assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='save_shared_bag_inventory').length),1);
+ assert.equal(await p.evaluate(()=>calls.some(c=>c.name==='save_pending_inventory_attachment_checked')),false);
+});
+
+test('the last physical unit can be reused from an existing bag when no unreserved stock remains',async t=>{
+ const p=await open(t,{width:390});
+ await p.evaluate(()=>{
+  rows=[];candidateBags=[{lot_id:'bag-a',bag_number:'017',quantity:1,buyer:'fixture-buyer',title:'Bag watch',lot_code:'LIVE-17',show_date:'2026-10-08',revision:'r1'}];
+  const previous=supabase.rpc;supabase.rpc=async(name,args)=>{if(name!=='connect_existing_inventory_bag')return previous(name,args);calls.push({name,args});
+   const a={kind:'bag',order_line_id:args._order_line_id,lot_id:'bag-a',bag_number:'017',revision:'r2',status:'reserved',remaining_quantity:1,checkout_store_id:'store-a',
+    items:[{id:'bag-item-a',item_id:item.id,stock_location_row_id:'stock-a',quantity:1,status:'reserved',item,location:{location_name:'Tray 4'}}]};attachments.set('line-a',a);return {data:a};};
+ });
+ await p.locator('[data-attach-inventory="line-a"]').click();await p.locator('#attach-inventory-scan').fill('OG%,001');await p.locator('#attach-inventory-scan').press('Enter');
+ await p.getByRole('button',{name:/Use Bag 017/}).click();
+ await p.getByRole('button',{name:'Manage bag inventory'}).waitFor();
+ assert.match(await p.locator('#attach-inventory-status').innerText(),/no second hold/);
+ assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='save_pending_inventory_attachment_checked').length),0);
 });

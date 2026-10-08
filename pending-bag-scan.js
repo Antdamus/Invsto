@@ -37,11 +37,12 @@
     const review = current?.review;
     const photos = review?.photos || [];
     const attach = photos.some(photo => !photo.attached);
+    const connectInventory = current?.inventory?.bag && current.inventory.bag.order_line_id !== line?.id;
     const button = byId('bag-scan-found');
     if (button) {
-      button.disabled = !line || !isPending(line) || (found && !attach) || processing || saving || itemSearchBusy.has(line.id)
-        || current?.photoLoading || current?.photoError || review?.ambiguous || photos.some(photo => !photo.ready || photo.attached_elsewhere);
-      button.textContent = saving ? 'Saving…' : attach ? 'Confirm & attach' : found ? '✓ Item found' : 'Item found';
+      button.disabled = !line || !isPending(line) || (found && !attach && !connectInventory) || processing || saving || itemSearchBusy.has(line.id)
+        || current?.photoLoading || current?.photoError || review?.ambiguous || current?.inventory?.ambiguous || current?.inventory?.bag?.conflict || photos.some(photo => !photo.ready || photo.attached_elsewhere);
+      button.textContent = saving ? 'Saving…' : connectInventory ? 'Confirm bag & item found' : attach ? 'Confirm & attach' : found ? '✓ Item found' : 'Item found';
     }
     byId('bag-scan-current').textContent = current ? `${current.code} · ${getBuyerLabel(current.line)}` : processing ? 'Finding your bag…' : 'Bag lookup';
     const next = byId('bag-scan-next');
@@ -61,21 +62,22 @@
     document.querySelectorAll('[data-bag-review]').forEach(panel => { if (panel.dataset.bagReview !== lineId) panel.remove(); });
     if (!row || row.querySelector('[data-bag-review]')) return;
     const review = current.review, photos = review?.photos || [];
-    if (!current.photoLoading && !current.photoError && !review?.ambiguous && !photos.length) return;
+    const inventory=current.inventory;
+    if (!current.photoLoading && !current.photoError && !review?.ambiguous && !photos.length && !inventory?.bag && !inventory?.ambiguous) return;
     const panel = document.createElement('section'); panel.className = 'bag-photo-review'; panel.dataset.bagReview = lineId;
     panel.setAttribute('aria-label', 'Scanned bag photos');
     const heading = document.createElement('strong'); heading.textContent = 'Photos from this bag'; panel.append(heading);
     const help = document.createElement('p'); panel.append(help);
-    if (current.photoLoading) help.textContent = 'Checking bag photos…';
+    if (current.photoLoading) help.textContent = 'Checking bag details…';
     else if (current.photoError) {
-      help.textContent = 'Bag photos could not load. Try again before confirming.';
-      const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'secondary-btn'; retry.textContent = 'Retry photos';
+      help.textContent = 'Bag details could not load. Try again before confirming.';
+      const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'secondary-btn'; retry.textContent = 'Retry';
       retry.onclick = () => loadBagPhotos(current, version); panel.append(retry);
-    } else if (review?.ambiguous) help.textContent = 'More than one bag has photos for this item. Scan the unique LIVE code on its label to choose the right bag.';
+    } else if (review?.ambiguous || inventory?.ambiguous) help.textContent = 'More than one bag matches. Scan the unique LIVE code on its label to choose the right bag.';
     else {
-      heading.textContent = `Bag photos · ${photos.length}`;
+      heading.textContent = photos.length ? `Bag photos · ${photos.length}` : 'Inventory from this bag';
       help.textContent = photos.some(photo => photo.attached_elsewhere) ? 'A photo is attached to another order. Review that connection before confirming.'
-        : photos.every(photo => photo.attached) ? 'These photos are already attached to this order.'
+        : !photos.length ? 'Check the inventory below against the item and order.' : photos.every(photo => photo.attached) ? 'These photos are already attached to this order.'
         : 'Check these photos against the item and order. Confirm & attach saves them here and marks the item found.';
       const grid = document.createElement('div'); grid.className = 'bag-photo-review-grid'; panel.append(grid);
       photos.forEach((photo, index) => {
@@ -89,16 +91,24 @@
           label:`Bag photo ${index + 1}`,auditText:`Live photo · ${formatDate(photo.captured_at)}`}, 'bag-scan-found'); grid.append(tile);
       });
     }
+    if(inventory?.bag) {
+      const bag=inventory.bag,summary=document.createElement('p');summary.className='shared-bag-summary';
+      summary.textContent=bag.conflict || `Bag inventory: ${bag.items.filter(x=>x.status==='reserved').map(x=>`${x.item.title} × ${x.quantity}`).join(' · ')}. ${bag.order_line_id===lineId?'Already shared with this order.':'Check the contents, then confirm to reuse these reservations for this order.'}`;
+      panel.append(summary);
+    }
     row.querySelector('.buyer-line-copy')?.append(panel);
   }
 
   async function loadBagPhotos(entry, run) {
     if (!entry) return;
-    entry.photoLoading = true; entry.photoError = false; entry.review = null;
+    entry.photoLoading = true; entry.photoError = false; entry.review = null;entry.inventory=null;
     document.querySelectorAll('[data-bag-review]').forEach(panel => panel.remove()); refresh();
     try {
-      const {data,error} = await supabase.rpc('get_pending_bag_photo_review', {_scan:entry.code,_order_line_id:entry.line.id});
+      const [{data,error},inventory] = await Promise.all([
+        supabase.rpc('get_pending_bag_photo_review', {_scan:entry.code,_order_line_id:entry.line.id}),
+        supabase.rpc('get_pending_scanned_inventory', {_scan:entry.code,_order_line_id:entry.line.id})]);
       if (error) throw error;
+      if(inventory.error)throw inventory.error;
       const photos = await Promise.all((data?.photos || []).map(async photo => {
         const {data:signed,error} = await supabase.storage.from('photos').createSignedUrl(photo.photo_path,3600);
         if (error || !signed?.signedUrl) throw error || Error('Photo unavailable');
@@ -106,6 +116,7 @@
       }));
       if (run !== version || current !== entry) return;
       entry.review = {...data,photos};
+      entry.inventory=inventory.data;
     } catch {
       if (run !== version || current !== entry) return;
       entry.photoError = true;
@@ -360,6 +371,12 @@
       const id = current.line.id, entry = current;
       saving = true; refresh();
       try {
+        if(entry.inventory?.bag && entry.inventory.bag.order_line_id!==id) {
+          const {data,error}=await supabase.rpc('connect_existing_inventory_bag',{_lot_id:entry.inventory.bag.lot_id,_order_line_id:id,_expected_revision:entry.inventory.bag.revision});
+          if(error)throw error;
+          entry.inventory.bag=data;
+          await window.PendingInventory?.load(state.orders);
+        }
         if (entry.review?.photos?.length) await confirmBagPhotos(entry);
         else await setItemMissing(id, false);
       } catch (error) {

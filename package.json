@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "test:shared-inventory": "node --test tests/shared-inventory-database.test.mjs tests/pending-inventory-browser.test.mjs",
     "test:pending-inventory": "node --test tests/pending-inventory-database.test.mjs tests/pending-inventory-browser.test.mjs",
     "test:packaging": "node --test tests/packaging-database.test.mjs tests/packaging-browser.test.mjs",
     "test:dashboard": "node --test tests/dashboard-workspace.test.mjs tests/dashboard-database.test.mjs",

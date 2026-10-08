@@ -43,7 +43,7 @@ async function open(t,width=390) {
       order:{id:'order-'+i,order_number:`12-34567-8900${i}`,buyer_username:'buyer_'+i,buyer_name:'Customer '+i,status:'pending',sale_date:'2026-10-06T12:00:00Z',ship_by_date:'2026-10-09T12:00:00Z'}}));
     state.orders.forEach(line=>{state.queueVideoReceiptLoadedOrderIds.add(line.order_id);state.sharedOrderNoteHistory.set(line.order_id,{data:{tasks:[],events:[]},promise:Promise.resolve({tasks:[],events:[]})});});
     window.calls=[];window.scanDelay=0;window.photoFailure=false;window.saveFailure=false;
-    window.bagPhotos=[];window.bagPhotoFailure=false;window.bagPhotoDelay=0;window.bagAmbiguous=false;
+    window.scannedInventory=null;window.bagPhotos=[];window.bagPhotoFailure=false;window.bagPhotoDelay=0;window.bagAmbiguous=false;
     window.supabase={rpc:async(name,args)=>{
       calls.push({name,args});
       if(name==='find_pending_order_bag'){
@@ -58,6 +58,8 @@ async function open(t,width=390) {
         if(saveFailure)return {error:{message:'Save failed'}};
         return {data:{order_line_id:args._order_line_id,is_missing:args._is_missing,updated_at:new Date().toISOString(),updated_by_email:'worker@example.test'}};
       }
+      if(name==='get_pending_scanned_inventory')return {data:{bag:structuredClone(scannedInventory),ambiguous:false}};
+      if(name==='connect_existing_inventory_bag'){scannedInventory.order_line_id=args._order_line_id;return {data:structuredClone(scannedInventory)};}
       if(name==='get_pending_bag_photo_review'){
         const photos=structuredClone(bagPhotos);
         if(bagPhotoDelay)await new Promise(r=>setTimeout(r,bagPhotoDelay));
@@ -221,7 +223,7 @@ for(const width of [320,390,1280])test(`${width}px: scan opens the exact line, c
   await expect(page.locator('#bag-scan-found')).toBeEnabled();
   const box=await target.boundingBox();assert.ok(box.y<844&&box.y+box.height>70);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  assert.equal(await page.evaluate(()=>calls.filter(c=>!['find_pending_order_bag','get_pending_bag_photo_review'].includes(c.name)).length),0);
+  assert.equal(await page.evaluate(()=>calls.filter(c=>!['find_pending_order_bag','get_pending_bag_photo_review','get_pending_scanned_inventory'].includes(c.name)).length),0);
   if(width===390)await page.screenshot({path:'test-results/bag-scan-phone-found.png'});
   await page.locator('#bag-scan-found').click();
   await expect(page.locator('#bag-scan-found')).toHaveText('✓ Item found');
@@ -343,10 +345,10 @@ test('bags without photos stay uncluttered; failed or ambiguous photo checks can
   await scan(page,'LIVE-A');await expect(page.locator('#bag-scan-found')).toBeEnabled();
   await expect(page.locator('[data-bag-review]')).toHaveCount(0);
   await page.evaluate(()=>{bagPhotoFailure=true;});
-  await scan(page,'LIVE-B');await expect(page.getByRole('button',{name:'Retry photos'})).toBeVisible();
+  await scan(page,'LIVE-B');await expect(page.getByRole('button',{name:'Retry'})).toBeVisible();
   await expect(page.locator('#bag-scan-found')).toBeDisabled();
   await page.evaluate(()=>{bagPhotoFailure=false;});
-  await page.getByRole('button',{name:'Retry photos'}).click();await expect(page.locator('#bag-scan-found')).toBeEnabled();
+  await page.getByRole('button',{name:'Retry'}).click();await expect(page.locator('#bag-scan-found')).toBeEnabled();
   await page.evaluate(()=>{bagAmbiguous=true;});
   await scan(page,'LIVE-C');await expect(page.locator('[data-bag-review]')).toContainText('unique LIVE code');
   await expect(page.locator('#bag-scan-found')).toBeDisabled();
@@ -367,4 +369,17 @@ test('failed confirmation preserves photos and can retry; already-found items ca
   assert.equal(await page.evaluate(()=>state.queueVideoReceiptTasks.length),0);
   await page.evaluate(()=>{saveFailure=false;});await page.locator('#bag-scan-found').click();
   await expect(page.locator('#bag-scan-found')).toHaveText('✓ Item found');
+});
+
+for (const width of [390,1366]) test(`${width}px: confirming scanned bag shares existing inventory only after checking the order`,async t=>{
+ const page=await open(t,width);
+ await page.evaluate(()=>{window.scannedInventory={lot_id:'bag-1',bag_number:'018',revision:'r1',items:[{status:'reserved',quantity:2,item:{title:'Gold chain'}}]};});
+ await scan(page,'LIVE-A');
+ await expect(page.locator('#bag-scan-found')).toHaveText('Confirm bag & item found');
+ await expect(page.locator('[data-bag-review]')).toContainText('Gold chain × 2');
+ assert.equal(await page.evaluate(()=>calls.filter(c=>c.name==='connect_existing_inventory_bag').length),0);
+ await page.locator('#bag-scan-found').click();
+ await expect(page.locator('#bag-scan-found')).toHaveText('✓ Item found');
+ assert.deepEqual(await page.evaluate(()=>calls.filter(c=>c.name==='connect_existing_inventory_bag').map(c=>c.args)),[{_lot_id:'bag-1',_order_line_id:'line-8',_expected_revision:'r1'}]);
+ assert.equal(await page.evaluate(()=>calls.filter(c=>/reserve|complete|fulfill/.test(c.name)).length),0);
 });

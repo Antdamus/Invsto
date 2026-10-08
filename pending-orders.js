@@ -10269,7 +10269,10 @@ function openBundleReviewModal() {
     renderLiveLotBundleReviewList(liveItems);
   } else {
     const totalQty = staged.reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
-    const inventoryQty = staged.reduce((sum, entry) => sum + (entry.mode !== "without_inventory" ? entry.qty : Math.min(entry.qty, window.PendingInventory?.active(entry.line.id)?.remaining_quantity || 0)), 0);
+    const inventoryQty = staged.reduce((sum, entry) => {
+      const saved = window.PendingInventory?.active(entry.line.id);
+      return sum + (saved?.kind === 'bag' ? saved.remaining_quantity : entry.mode !== 'without_inventory' ? entry.qty : Math.min(entry.qty, saved?.remaining_quantity || 0));
+    }, 0);
     $("bundle-review-subtitle").textContent = `${buyer} — ${totalQty} units: ${inventoryQty} from inventory, ${totalQty - inventoryQty} without inventory. Review each line before confirming.`;
     renderBundleReviewList(staged);
   }

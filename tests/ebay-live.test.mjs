@@ -34,6 +34,7 @@ async function open(t,query='',resume=false,drafts=false){
    let filters=[],limit=1000,offset=0;const all=()=>table==='employees'?[employee]:table==='store_locations'?[{id:'store',name:'Showroom',active:true}]:table==='live_sale_sessions'?(window.showSessions||[window.showSession]):table==='ebay_live_connections'?(window.dashboardByShow?Object.values(window.dashboardByShow).map(d=>d.connection):[window.dashboard.connection]):table==='ebay_live_attempts'?window.dashboard.attempts:table==='live_sale_lots'?window.mockLots:table==='live_sale_lot_items'?window.mockItems:table==='live_sale_manual_lot_items'?window.mockManualItems:table==='live_sale_bag_photos'?window.mockBagPhotos:[];
    const q={select(){return q},eq(k,v){filters.push(r=>r[k]===v);return q},in(k,values){filters.push(r=>values.includes(r[k]));return q},range(start,end){offset=start;limit=end-start+1;return q},is(){return q},order(){return q},limit(n){limit=n;return q},maybeSingle:async()=>({data:all().find(r=>filters.every(f=>f(r)))||null}),single:async()=>({data:all().find(r=>filters.every(f=>f(r)))||null}),then(fn){const result=table==='live_sale_bag_photos'&&window.failBagPhotos?{error:{message:'Photo read interrupted'}}:{data:structuredClone(all().filter(r=>filters.every(f=>f(r))).slice(offset,offset+limit))};if(table==='live_sale_bag_photos')calls.push({name:'read-photos',offset,limit});return new Promise(resolve=>setTimeout(()=>resolve(result),table==='live_sale_bag_photos'?window.photoDelay:0)).then(fn)}};return q;
   },rpc:async(name,args)=>{window.calls.push({name,args});if(name==='get_live_sale_seller_directory')return {data:[employee,nextSeller]};if(name==='get_ebay_live_dashboard')return window.failDashboard?{error:{message:'Network interrupted'}}:{data:structuredClone(window.dashboardByShow?.[args._session_id]||window.dashboard)};
+   if(name==='get_shared_bag_inventory')return {data:{lot_id:args._lot_id,revision:JSON.stringify(mockItems),items:structuredClone(mockItems.filter(i=>i.lot_id===args._lot_id&&['reserved','packed'].includes(i.status))),checkout_store_id:'store'}};
    if(name==='save_live_sale_manual_item'){
     if(failManual)return {error:{message:'Manual item save interrupted'}};
     let row=mockManualItems.find(i=>i.id===args._item_id);if(row&&args._expected_revision!==row.edit_revision)return {error:{message:'This item changed. Reopen Edit to load the latest details'}};
@@ -71,6 +72,18 @@ async function addBagPhotos(page){
  });
  await page.locator('#ebay-live-refresh').click();await page.waitForFunction(()=>document.querySelector('[data-auction-photos="sale"] [data-photo-count]')?.textContent==='2');
 }
+
+test('shared inventory rescans verify the existing bag quantity without reserving another unit',async t=>{
+ const p=await open(t);await p.locator('[data-action=scan]').click();await p.waitForFunction(()=>!document.getElementById('item-scan').disabled);
+ await p.evaluate(async()=>{
+  const item={id:'shared-item',title:'Reserved watch',barcode:'WATCH-001',photos:[]};
+  mockItems=[{id:'shared-entry',lot_id:state.currentLot.id,item_id:item.id,quantity:2,status:'reserved',item,source_stock_location_row_id:'stock',source_location_id:'tray',source_location:{location_name:'Tray 1'}}];
+  state.selectedItem=item;await loadSourceRowsForItem(item);
+ });
+ assert.match(await p.locator('#live-status').innerText(),/Already reserved.*2.*Nothing was added/);
+ assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='reserve_live_sale_item').length),0);
+ assert.deepEqual(p.errors,[]);
+});
 test('auction photos open from the queue, paginate the gallery, and never claim or print a bag',async t=>{
  const p=await open(t);await addBagPhotos(p);await p.addStyleTag({content:'h2,h3{color:#182433}'});
  await p.locator('#ebay-auction-search').fill('testbuyer');assert.equal(await p.locator('#ebay-live-queue article').count(),1);

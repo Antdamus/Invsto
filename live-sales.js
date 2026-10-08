@@ -734,15 +734,7 @@ async function loadLotItems() {
   }
 
   const [inventoryResult, manualResult] = await Promise.all([
-    supabase
-      .from("live_sale_lot_items")
-      .select(`
-        *,
-        item:item_id(id,title,description,barcode,weight,sale_price,photos,photo_url),
-        source_location:source_location_id(id,location_name,location_code,store_id,tray_current_store_id,is_tray,location_role,type,parent_location_id)
-      `)
-      .eq("lot_id", state.currentLot.id)
-      .order("scanned_at", { ascending: true }),
+    supabase.rpc('get_shared_bag_inventory', {_lot_id:state.currentLot.id}),
     supabase
       .from("live_sale_manual_lot_items")
       .select("*")
@@ -755,8 +747,9 @@ async function loadLotItems() {
     state.lotItems = [];
     state.lotSourceAvailability = new Map();
   } else {
+    state.sharedInventoryBag=inventoryResult.data;
     state.lotItems = [
-      ...(inventoryResult.data || []),
+      ...(inventoryResult.data?.items || []),
       ...(manualResult.data || []).map(normalizeManualLiveSaleItem),
     ].sort((a, b) => new Date(a.scanned_at || a.created_at || 0) - new Date(b.scanned_at || b.created_at || 0));
     await loadLotSourceAvailability();
@@ -2802,6 +2795,17 @@ function renderSelectedItem() {
 
 async function loadSourceRowsForItem(item) {
   if (!item?.id) return;
+  const scanLotId=state.currentLot?.id;
+  const {data:shared,error:sharedError}=await supabase.rpc('get_shared_bag_inventory',{_lot_id:scanLotId});
+  if(scanLotId!==state.currentLot?.id || state.selectedItem?.id!==item.id)return;
+  if(sharedError || shared?.conflict) {setStatus(sharedError?.message || shared.conflict,'error');return;}
+  const existing=shared?.items?.filter(x=>x.item_id===item.id && x.status==='reserved') || [];
+  if(existing.length) {
+    const quantity=existing.reduce((sum,x)=>sum+Number(x.quantity),0);
+    clearScan();await loadLotItems();
+    setStatus(`Already reserved in this bag: ${item.title} × ${quantity}. Nothing was added. Use the quantity control in the bag contents to change it.`, 'success');
+    return;
+  }
   setStatus("Loading source stock for the scanned item...");
 
   const [{ data: rows, error: rowError }, { data: reservations, error: reservationError }] = await Promise.all([
@@ -2960,7 +2964,7 @@ async function reserveSelectedItem(options = {}) {
     await reloadCurrentLot();
     await loadLotItems();
     setFlowStep("scan");
-    setStatus("Item added. Scan the same barcode again for +1 quantity, scan another item, or press Enter on the empty scanner to print.", "success");
+    setStatus("Item is reserved in this bag. To add more of the same item, change its quantity in the bag contents. Scan another item or press Enter to print.", "success");
     setTimeout(() => focusItemScanner(), 80);
   } catch (error) {
     console.error("Live sale item reservation failed:", error);
@@ -3120,6 +3124,14 @@ async function saveManifestGroupQuantity(group, quantity, note = "Updated quanti
   }
 
   for (const source of quantityPlan) {
+    if(state.sharedInventoryBag?.lot_id===lot.id && state.sharedInventoryBag.order_line_id) {
+      const {data,error}=await supabase.rpc('save_shared_bag_inventory',{_lot_id:lot.id,_item_id:group.itemId,
+        _stock_location_row_id:source.sourceStockLocationRowId,_checkout_store_id:state.sharedInventoryBag.checkout_store_id,
+        _quantity:source.nextQuantity,_expected_revision:state.sharedInventoryBag.revision});
+      if(error)throw error;
+      state.sharedInventoryBag=data;
+      continue;
+    }
     const { error } = await supabase.rpc("set_live_sale_lot_group_quantity", {
       _lot_id: lot.id,
       _item_id: group.itemId,
