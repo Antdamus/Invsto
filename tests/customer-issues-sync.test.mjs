@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises';
 import {stripTypeScriptTypes} from 'node:module';
 import vm from 'node:vm';
 import {test} from 'node:test';
-import {detailPath,discoveryPath,pageRows,pageTotal,runWorker} from '../supabase/functions/ebay-return-sync/workspace.ts';
+import {detailPath,discoveryPath,pageRows,pageTotal,runWorker,queueRefresh} from '../supabase/functions/ebay-return-sync/workspace.ts';
 const raw=await readFile(new URL('../supabase/functions/ebay-return-sync/index.ts',import.meta.url),'utf8');
 let handler,client;
 const sandbox={console,URL,URLSearchParams,Response,Request,Headers,TextEncoder,crypto,AbortSignal,Map,Set,Date,fetch:()=>{throw Error('Unexpected provider call');},
@@ -65,6 +65,11 @@ test('successful jobs use a version guard so a newer refresh request cannot be d
  const db=fakeDb({jobs:[{lane:'inquiry',external_id:'r1',summary:{},attempts:0,updated_at:'v1'}]});let processed=0;
  await runWorker(db,{token:async()=>'',read:async()=>({status:'CLOSED'}),process:async()=>{processed++;}});
  assert.equal(processed,1);assert.ok(db.calls.find(c=>c.op==='delete').filters.some(([k,v])=>k==='updated_at'&&v==='v1'));
+});
+test('a requested case refresh jumps ahead of historical backfill',async()=>{
+ let queued;
+ const db={from:table=>table==='ebay_return_cases'?{select:()=>({eq:()=>({single:async()=>({data:{source_lane:'return',ebay_return_id:'r1'}})})})}:{upsert:async row=>{queued=row;return {};}}};
+ await queueRefresh(db,'case-1');assert.equal(queued.priority,-10);assert.equal(queued.external_id,'r1');
 });
 test('a missing payment-dispute permission does not block ordinary case refreshes',async()=>{
  const db=fakeDb({lane:{lane:'payment_dispute',cursor_offset:0,error_count:0},jobs:[{lane:'inquiry',external_id:'r1',summary:{},attempts:0,updated_at:'v1'}]});let processed=0;
