@@ -70,11 +70,12 @@ export async function queueRefresh(db:DB,caseId?:string){
   const row=checked(await db.from('ebay_return_cases').select('source_lane,ebay_return_id').eq('id',caseId).single());
   if(!row?.ebay_return_id)throw Error('This case has no eBay case ID. Link the correct case before refreshing.');
   checked(await db.from('ebay_issue_sync_jobs').upsert({lane:row.source_lane,external_id:row.ebay_return_id,summary:{},state:'queued',priority:-10,attempts:0,next_attempt_at:iso(),updated_at:iso()},{onConflict:'lane,external_id'}));
- }else checked(await db.from('ebay_issue_sync_lanes').update({next_run_at:iso()}).in('lane',[...lanes]));
+ }else checked(await db.rpc('retry_customer_issue_sync'));
 }
 
 export async function runWorker(db:DB,deps:Dependencies){
  const started=Date.now();
+ checked(await db.from('ebay_issue_worker').update({last_run_started_at:iso()}).eq('singleton',true));
  let ordinaryToken:Promise<string>|undefined,paymentToken:Promise<string>|undefined;
  const token=(lane:Lane)=>lane==='payment_dispute'
   ?(paymentToken??=deps.token('https://api.ebay.com/oauth/api_scope/sell.payment.dispute'))
@@ -97,13 +98,13 @@ export async function runWorker(db:DB,deps:Dependencies){
      const hash=await fingerprint(row),saved=known.find((r:any)=>r.ebay_return_id===idFor(row));
      if(saved?.provider_fingerprint===hash && (['closed','cancelled'].includes(saved.status)||saved.synced_at&&Date.parse(saved.synced_at)>Date.now()-10*60000))continue;
      const terminal=/(^|_)(CLOSED|CANCELLED|CANCELED|RESOLVED|SELLER_WON|SELLER_LOST|DISPUTE_REVERSED)($|_)/i.test(String(row.paymentDisputeStatus||row.caseStatusEnum||row.inquiryStatusEnum||row.status||row.state||''));
-     pending.push({lane,external_id:idFor(row),summary:{...row,__fingerprint:hash},state:'queued',priority:terminal&&(!saved||['closed','cancelled'].includes(saved.status))?20:0,attempts:0,next_attempt_at:iso(),updated_at:iso()});
+     pending.push({lane,external_id:idFor(row),summary:{...row,__fingerprint:hash},state:'queued',priority:terminal&&(!saved||['closed','cancelled'].includes(saved.status))?20:(!saved||saved.provider_fingerprint!==hash?-6:0),attempts:0,next_attempt_at:iso(),updated_at:iso()});
     }
-    if(pending.length)checked(await db.from('ebay_issue_sync_jobs').upsert(pending,{onConflict:'lane,external_id',ignoreDuplicates:true}));
+    if(pending.length)checked(await db.rpc('enqueue_customer_issue_jobs',{_jobs:pending}));
    }
    const more=total===null?!!payload.next||rows.length===100:laneRow.cursor_offset+rows.length<total;
    checked(await db.from('ebay_issue_sync_lanes').update({cursor_offset:more?laneRow.cursor_offset+rows.length:0,cycle_started_at:more?cycle:null,
-    fetched_entries:laneRow.cursor_offset+rows.length,total_entries:total,last_attempt_at:iso(),...(more?{}:{last_success_at:iso()}),
+    fetched_entries:laneRow.cursor_offset+rows.length,total_entries:total,last_attempt_at:iso(),last_progress_at:iso(),...(more?{}:{last_success_at:iso()}),
     next_run_at:iso(more?0:5*60000),status:more?'syncing':'ok',error:null,error_count:0}).eq('lane',lane));
   }catch(error){
    const text=message(error),access=failureKind(error)==='access';
@@ -111,15 +112,10 @@ export async function runWorker(db:DB,deps:Dependencies){
     next_run_at:iso(access?30*60000:Math.min(15*60000,60000*2**Math.min(4,laneRow.error_count)))}).eq('lane',lane));
   }
  }
- // Refresh known unresolved cases even when older than a discovery date window.
- const stale=checked(await db.from('ebay_return_cases').select('source_lane,ebay_return_id').not('ebay_return_id','is',null)
-  .not('status','in','(closed,cancelled)').or(`synced_at.is.null,synced_at.lt.${iso(-10*60000)}`).order('last_sync_attempt_at',{nullsFirst:true}).limit(12));
- if(stale?.length)checked(await db.from('ebay_issue_sync_jobs').upsert(stale.map((c:any)=>({lane:c.source_lane,external_id:c.ebay_return_id,summary:{},priority:0})),{onConflict:'lane,external_id',ignoreDuplicates:true}));
- // Give due retries a reserved share. Priority-zero refreshes must not starve
- // historical failures after a credential repair or a large initial import.
- const retries=checked(await db.from('ebay_issue_sync_jobs').select('*').eq('state','retry').lte('next_attempt_at',iso()).order('next_attempt_at').limit(3))||[];
- const queued=checked(await db.from('ebay_issue_sync_jobs').select('*').in('state',['queued','retry']).lte('next_attempt_at',iso()).order('priority').order('next_attempt_at').limit(12))||[];
- const jobs=[...new Map([...retries,...queued].map(j=>[`${j.lane}:${j.external_id}`,j])).values()].slice(0,12);
+ // Urgent deadlines refresh more often. The database promotes queued jobs
+ // atomically and reserves capacity for retries and older work.
+ checked(await db.rpc('schedule_customer_issue_refreshes'));
+ const jobs=checked(await db.rpc('customer_issue_job_batch'))||[];
  let processed=0;
  for(const job of jobs){
   if(Date.now()-started>42000)break;
@@ -143,5 +139,6 @@ export async function runWorker(db:DB,deps:Dependencies){
     next_attempt_at:iso(failure==='review'?6*3600000:Math.min(60*60000,60000*2**Math.min(6,job.attempts)))}).eq('lane',lane).eq('external_id',job.external_id).eq('updated_at',job.updated_at));
   }
  }
+ checked(await db.from('ebay_issue_worker').update({last_run_finished_at:iso()}).eq('singleton',true));
  return {processed};
 }

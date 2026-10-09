@@ -75,3 +75,22 @@ test('phone evidence downloads original files and selected messages without send
  assert.ok(await page.locator('#issues-detail').evaluate(e=>e.scrollWidth<=e.clientWidth+1));
  await page.screenshot({path:'test-results/customer-issues/evidence-phone.png'});
 });
+
+for(const width of [320,1366])test(`sync recovery at ${width}px explains the issue and retries without closing cases`,async t=>{
+ const page=await open(t,width);
+ await page.evaluate(()=>{window.fixtureHealth={lanes:[{lane:'payment_dispute',status:'needs_access',last_progress_at:new Date().toISOString()}],worker:{last_finished_at:new Date().toISOString()},problems:[{monitor_key:'payment_dispute',reason:'access'}],queued:3,retrying:1};});
+ await page.getByRole('button',{name:'Refresh customer issues'}).click();
+ await page.getByText('eBay updates need attention · view recovery steps',{exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Restore automatic updates'})).toBeVisible();
+ await expect(page.getByRole('link',{name:'Reconnect eBay ↗'})).toHaveAttribute('href','https://project.functions.supabase.co/ebay-oauth-callback');
+ await page.getByRole('button',{name:'Retry sync',exact:true}).click();
+ await expect(page.locator('#issues-feedback')).toContainText('Refresh queued');
+ assert.deepEqual((await page.evaluate(()=>fixtureCalls.filter(c=>c.invoke))).map(c=>c.args.body),[{action:'refresh'}]);
+ assert.equal((await page.evaluate(()=>fixtureWrites)).length,0);
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+ await page.screenshot({path:`test-results/customer-issues/sync-recovery-${width}.png`});
+ await page.evaluate(()=>{window.fixtureHealth={lanes:[{lane:'payment_dispute',status:'ok',last_progress_at:new Date().toISOString()}],worker:{last_finished_at:new Date().toISOString()},problems:[],queued:0,retrying:0};});
+ await page.getByRole('button',{name:'Refresh customer issues'}).click();
+ await expect(page.locator('#issues-health-summary')).toHaveText('eBay connected · background updates active');
+ await expect(page.getByRole('button',{name:'Retry sync',exact:true})).toHaveCount(0);
+});

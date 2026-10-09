@@ -51,3 +51,5 @@ body[data-page="ebay-returns"] {font-family:system-ui,-apple-system,"Segoe UI",s
 #task-updates-slot .og-tu-count {background:var(--issue-gold);color:#252415;border-radius:20px;padding:1px 6px}
 #task-updates-slot .og-tu-label-short {display:none}
 @media(max-width:900px){.issues-heading-actions{max-width:140px}#task-updates-slot .og-tu-label-full{display:none}#task-updates-slot .og-tu-label-short{display:inline}body[data-page="ebay-returns"]:has(.issues-columns.is-selected) #task-updates-slot{position:fixed;top:8px;left:68px;z-index:19001}body[data-page="ebay-returns"]:has(.issues-columns.is-selected) .mobile-title{font-size:16px}}
+
+.issue-sync-recovery{grid-column:1/-1;padding:14px;border:1px solid #c6a674;border-radius:12px;background:#3a3224}.issue-sync-recovery h3{margin:0;font-size:16px}.issue-sync-actions{display:flex;flex-wrap:wrap;gap:10px}.issue-sync-actions a{display:inline-flex;align-items:center;text-decoration:none}

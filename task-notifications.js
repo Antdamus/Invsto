@@ -8,7 +8,7 @@
   const labels = {task_assigned: 'New assignment', subtask_assigned: 'New subtask', shipment_assigned: 'Shipping assignment',
     packaging_assigned: 'Packaging assignment', return_task_assigned: 'Return assignment', task_progress_update: 'Reply / update',
     task_ready_for_review: 'Ready for review', task_completed: 'Work completed', subtask_completed: 'Subtask completed',
-    task_due_reminder: 'Task reminder', task_overdue: 'Overdue task',customer_issue_action:'eBay case update',customer_issue_deadline:'eBay deadline'};
+    task_due_reminder: 'Task reminder', task_overdue: 'Overdue task',customer_issue_sync:'eBay sync',customer_issue_action:'eBay case update',customer_issue_deadline:'eBay deadline'};
   let client, userId = '', generation = 0, channel, timer, flight, queued = false;
   let root, launcher, launcherHost, unread = [], recent = [], unreadCount = 0, limit = PAGE_SIZE, view = 'unread', opened = false;
   let minimizedId = '', errorMessage = '', loading = false, busyIds = new Set(), returnFocus;
@@ -21,7 +21,8 @@
     return Number.isNaN(date.getTime()) ? '' : date.toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
   };
   const issueAlert = entry => ['customer_issue_action','customer_issue_deadline'].includes(entry.notification_type) && /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(entry.metadata?.case_id || '');
-  const href = entry => issueAlert(entry) ? `ebay-returns.html?caseId=${encodeURIComponent(entry.metadata.case_id)}` : /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(entry.task_id || '')
+  const syncAlert = entry => entry.notification_type === 'customer_issue_sync';
+  const href = entry => syncAlert(entry) ? 'ebay-returns.html?syncHealth=1' : issueAlert(entry) ? `ebay-returns.html?caseId=${encodeURIComponent(entry.metadata.case_id)}` : /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(entry.task_id || '')
     ? `team-tasks.html?taskId=${encodeURIComponent(entry.task_id)}` : 'team-tasks.html';
   const snapshot = () => ({userId, notifications: [...new Map([...recent, ...unread].map(row => [row.id, row])).values()], unreadCount});
   function publish() {
@@ -126,7 +127,7 @@
         <h3>${escape(entry.title || 'Task update')}</h3>
         ${entry.actor_email ? `<small class="og-tu-actor">From ${escape(entry.actor_email)}</small>` : ''}
         <p>${escape(entry.body || 'Open the task to see the instructions.')}</p>
-        <div class="og-tu-entry-actions"><a href="${escape(href(entry))}" data-tu-open="${escape(entry.id)}">${issueAlert(entry)?'Open case':'Open task'}</a>
+        <div class="og-tu-entry-actions"><a href="${escape(href(entry))}" data-tu-open="${escape(entry.id)}">${syncAlert(entry)?'Open sync status':issueAlert(entry)?'Open case':'Open task'}</a>
         ${entry.read_at ? '<span>Read</span>' : `<button type="button" data-tu-read="${escape(entry.id)}" ${busyIds.has(entry.id) ? 'disabled' : ''}>${busyIds.has(entry.id) ? 'Saving…' : 'Mark read'}</button>`}</div>
       </article>`).join('') : `<div class="og-tu-empty">${loading ? 'Loading updates…' : view === 'unread' ? 'No unread updates. New assignments and replies will appear here.' : 'No recent updates.'}</div>`;
       list.scrollTop = scrollTop;

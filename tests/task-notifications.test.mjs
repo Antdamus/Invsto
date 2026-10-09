@@ -172,6 +172,15 @@ test('opening a notification goes directly to its task, ignoring arbitrary suppl
   await page.waitForURL('**/team-tasks.html?taskId=8794ebbb-3052-491a-ab49-1578e76701f0');
 });
 
+test('sync incidents open the fixed recovery page rather than a nonexistent task or supplied URL',async t=>{
+ const page=await open(t);
+ await page.evaluate(()=>{Object.assign(rows[0],{notification_type:'customer_issue_sync',title:'eBay sync needs attention',metadata:{open_url:'https://unexpected.example',incident_id:'bad-id'}});channels[0].callback({eventType:'UPDATE'});});
+ await page.getByRole('button',{name:'Review 2 updates'}).click();
+ const link=page.getByRole('link',{name:'Open sync status',exact:true});
+ await expect(link).toHaveAttribute('href','ebay-returns.html?syncHealth=1');
+ await expect(page.locator('.og-tu-entry').first()).toContainText('eBay sync');
+});
+
 test('failed reads and writes keep alerts visible, and retry recovers', async t => {
   const page = await open(t);
   await page.getByRole('button', {name: 'Review 2 updates'}).click();

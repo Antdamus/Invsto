@@ -66,7 +66,7 @@ test('anonymous callers and invalid dispatch tokens cannot run imports',async()=
  assert.equal((await handler(new Request('https://test',{method:'POST',headers:{Authorization:'Bearer expired'},body:'{"action":"refresh"}'}))).status,401);
 });
 function fakeDb({lane=null,jobs=[]}={}){
- const calls=[];return {calls,from(table){const call={table,op:'select',filters:[]};const q={
+ const calls=[];return {calls,async rpc(name,args){calls.push({rpc:name,args});return {data:name==='customer_issue_job_batch'?jobs:null};},from(table){const call={table,op:'select',filters:[]};const q={
  select(){return q;},update(row){call.op='update';call.row=row;return q;},upsert(row,options){call.op='upsert';call.row=row;call.options=options;return q;},delete(){call.op='delete';return q;},
  eq(k,v){call.filters.push([k,v]);return q;},lte(){return q;},not(){return q;},or(){return q;},in(){return q;},order(){return q;},limit(){return q;},maybeSingle(){return q;},
  then(resolve){calls.push(call);return Promise.resolve({data:call.op==='select'?(table==='ebay_issue_sync_lanes'?lane:table==='ebay_issue_sync_jobs'?jobs:[]):null}).then(resolve);}};return q;}};
@@ -108,10 +108,17 @@ test('authentication failures are distinguished from temporary failures and manu
  assert.equal(failureKind(Error('eBay GET failed (404): not found')),'review');
  assert.equal(failureKind(Error('eBay timeout')),'temporary');
 });
-test('overdue retries receive service ahead of an ongoing priority-zero backlog',async()=>{
- const calls=[],processed=[];
- const retry={lane:'return',external_id:'old',summary:{},attempts:1,updated_at:'v'};
- const db={from(table){let op='select',state;const q={select(){return q},eq(k,v){if(k==='state')state=v;return q},lte(){return q},not(){return q},or(){return q},in(){return q},order(){return q},limit(){return q},maybeSingle(){return q},upsert(){op='write';return q},update(){op='write';return q},delete(){op='write';return q},then(resolve){calls.push(table);return Promise.resolve({data:op!=='select'?null:table==='ebay_issue_sync_jobs'?(state==='retry'?[retry]:Array.from({length:12},(_,i)=>({...retry,external_id:'new'+i,attempts:0}))):table==='ebay_issue_sync_lanes'?null:[]}).then(resolve)}};return q}};
- await runWorker(db,{token:async()=>'',read:async()=>({}),process:async(_db,_lane,summary)=>processed.push(summary.returnId)});
- assert.equal(processed[0],'old');assert.equal(processed.length,12);assert.equal(new Set(processed).size,12);
+test('worker uses the database priority batch and records successful discovery progress and worker completion',async()=>{
+ const db=fakeDb({lane:{lane:'payment_dispute',cursor_offset:0,error_count:0},jobs:[{lane:'inquiry',external_id:'urgent',summary:{},attempts:0,updated_at:'v1'}]});
+ await runWorker(db,{token:async()=>'',read:async(_token,path)=>path.includes('summary')?{total:1,paymentDisputeSummaries:[{paymentDisputeId:'new',paymentDisputeStatus:'ACTION_NEEDED'}]}:{},process:async()=>{}});
+ assert.equal(db.calls.find(c=>c.rpc==='enqueue_customer_issue_jobs').args._jobs[0].priority,-6);
+ assert.ok(db.calls.find(c=>c.table==='ebay_issue_sync_lanes'&&c.row?.last_progress_at));
+ assert.ok(db.calls.find(c=>c.rpc==='schedule_customer_issue_refreshes'));
+ assert.ok(db.calls.find(c=>c.rpc==='customer_issue_job_batch'));
+ assert.ok(db.calls.find(c=>c.table==='ebay_issue_worker'&&c.row?.last_run_finished_at));
+});
+
+test('global recovery uses the rate-limited retry operation instead of clearing errors',async()=>{
+ const db=fakeDb();await queueRefresh(db);assert.equal(db.calls[0].rpc,'retry_customer_issue_sync');
+ assert.equal(db.calls.filter(c=>c.op==='update').length,0);
 });

@@ -8,7 +8,7 @@
  const kind=c=>['request','return','dispute'].includes(c.issue_kind)?c.issue_kind:'request';
  const closed=c=>/(^|_)(CLOSED|CANCELLED|CANCELED|RESOLVED|SELLER_WON|SELLER_LOST|DISPUTE_REVERSED)($|_)/i.test(c.ebay_status||'');
  const safeUrl=value=>{try{const u=new URL(value,location.href);return ['https:','http:'].includes(u.protocol)?u.href:'';}catch{return '';}};
- let ctx,db,ready=false,view='attention',scope='all',search='',offset=0,total=0,rows=[],counts={},people=[],selected=null,detail=null,version=0,listVersion=0,timer,poll,saving=false;
+ let ctx,db,ready=false,view='attention',scope='all',search='',offset=0,total=0,rows=[],counts={},people=[],selected=null,detail=null,version=0,listVersion=0,timer,poll,saving=false,syncing=false;
  const PAGE=30;
  const checked=r=>{if(r.error)throw r.error;return r.data;};
  const person=id=>id===ctx?.user?.id?'You':people.find(p=>p.user_id===id)?.display_name||people.find(p=>p.user_id===id)?.email||'Needs an owner';
@@ -56,22 +56,31 @@
  async function health(){
   try{
    const result=checked(await db.rpc('customer_issue_sync_health'));const lanes=result.lanes||[];
-   const broken=lanes.filter(l=>['needs_access','error'].includes(l.status)),pending=lanes.filter(l=>!l.last_success_at);
-   const stale=lanes.some(l=>!l.last_success_at||Date.parse(l.last_success_at)<Date.now()-30*60000);
-   const summary=$('issues-health-summary');summary.classList.toggle('is-warning',!!broken.length||stale);
-   summary.textContent=broken.length?`${broken.length} eBay connection${broken.length===1?' needs':'s need'} attention · details`
-    :result.queued||result.retrying?`Updating in the background · ${result.queued} queued${result.retrying?`, ${result.retrying} retrying`:''}`
-    :pending.length?'Connecting the eBay issue feeds · details':stale?'eBay data needs a refresh · details':'eBay connected · background updates active';
-   const labels={return:'Returns',inquiry:'Customer requests',case:'Escalated cases',payment_dispute:'Payment disputes'};
-   $('issues-health-detail').innerHTML=lanes.map(l=>`<p><b>${labels[l.lane]||escape(l.lane)}</b>${l.status==='needs_access'?'eBay authorization is needed for this feed.':escape(l.error||nice(l.status))}<br>Discovery checked: ${escape(date(l.last_success_at))}</p>`).join('')+
+   const problems=result.problems||[],broken=lanes.filter(l=>['needs_access','error'].includes(l.status));
+   const stale=lanes.some(l=>!l.last_progress_at&&!l.last_success_at||Date.parse(l.last_progress_at||l.last_success_at)<Date.now()-20*60000);
+   const summary=$('issues-health-summary');summary.classList.toggle('is-warning',!!problems.length||!!broken.length||stale);
+   summary.textContent=problems.length?'eBay updates need attention · view recovery steps':broken.length?'An eBay update failed · automatic retries active'
+    :result.queued||result.retrying?`Updating in the background · ${result.queued} queued${result.urgent?` · ${result.urgent} prioritized`:''}${result.retrying?` · ${result.retrying} retrying`:''}`
+    :stale?'eBay data needs a refresh · details':'eBay connected · background updates active';
+   const labels={worker:'Customer issues',return:'Returns',inquiry:'Customer requests',case:'Escalated cases',payment_dispute:'Payment disputes'};
+   const access=problems.some(p=>p.reason==='access')||lanes.some(l=>l.status==='needs_access');
+   let connect='';try{const url=new URL(root.SUPABASE_URL);if(/^https:$/.test(url.protocol)&&/^[a-z0-9]+\.supabase\.co$/.test(url.hostname))connect=`https://${url.hostname.split('.')[0]}.functions.supabase.co/ebay-oauth-callback`;}catch{}
+   const guidance={access:'eBay authorization needs attention. Reconnect eBay and save the replacement refresh token before retrying.',failures:'Updates have failed repeatedly. Inspect the errors below, correct the reported problem, then retry.',stalled:'No recent sync progress. Retry sync; if it remains stalled, check the scheduled worker in Supabase.',backlog:'Some updates have waited over 30 minutes. Urgent cases are prioritized while the queue catches up.'};
+   $('issues-health-detail').innerHTML=
+    (problems.length?`<section class="issue-sync-recovery"><h3>Restore automatic updates</h3>${problems.map(p=>`<p><b>${escape(labels[p.monitor_key]||p.monitor_key)}</b>${escape(guidance[p.reason]||'Check the latest sync status.')}</p>`).join('')}
+     ${ctx.employee.role==='admin'?`<div class="issue-sync-actions">${access&&connect?`<a class="secondary-btn" href="${escape(connect)}" target="_blank" rel="noopener">Reconnect eBay ↗</a>`:''}<button class="primary-btn" data-retry-sync ${syncing?'disabled':''}>Retry sync</button></div>`:'<p>Ask an administrator to restore the eBay connection.</p>'}<p class="issue-subtitle">The warning clears after successful recovery. Existing case information stays available.</p></section>`:'')+
+    `<p><b>Background worker</b>Last completed: ${escape(date(result.worker?.last_finished_at))}<br>New changes and urgent response deadlines are checked before routine work. Older retries retain a share of each batch.</p>`+
+    lanes.map(l=>`<p><b>${labels[l.lane]||escape(l.lane)}</b>${l.status==='needs_access'?'eBay authorization is needed for this feed.':escape(l.error||nice(l.status))}<br>Last progress: ${escape(date(l.last_progress_at||l.last_success_at))}</p>`).join('')+
     '<p>Each case keeps its last successful information while failed updates retry.</p>'+
     (result.failures?.length?`<section class="issue-sync-retries"><h3>Updates needing attention</h3>${result.failures.map(f=>`<article><b>${escape(labels[f.lane]||f.lane)} · ${escape(f.external_id)}</b>${f.failure_kind==='access'?'Check the eBay connection.':f.failure_kind==='review'?'Verify this case on eBay; it may need a manual correction.':'Temporary failure; an automatic retry is scheduled.'} Attempt ${escape(f.attempts)}. Next check: ${escape(date(f.next_attempt_at))}${f.case_id?` <button class="secondary-btn" data-case="${escape(f.case_id)}">Inspect case</button>`:''}<details><summary>Error details</summary>${escape(f.last_error||'No error details')}</details></article>`).join('')}</section>`:'');
   }catch(error){$('issues-health-summary').textContent='Connection status unavailable · refresh to retry';$('issues-health-summary').classList.add('is-warning');}
  }
  async function sync(caseId){
+  if(syncing)return;syncing=true;$('issues-sync').disabled=true;document.querySelectorAll('[data-retry-sync]').forEach(b=>b.disabled=true);
   feedback('Queuing a background refresh…');
   try{const result=checked(await db.functions.invoke('ebay-return-sync',{body:{action:'refresh',...(caseId?{caseId}:{})}}));feedback(result.message||'Refresh queued. You can keep working.');await health();}
   catch(error){feedback(error.message||'Could not queue the refresh.',true);}
+  finally{syncing=false;$('issues-sync').disabled=false;document.querySelectorAll('[data-retry-sync]').forEach(b=>b.disabled=false);}
  }
  function actions(task){
   const next=root.OGTaskWorkflow.next(task,people),mine=next.userId===ctx.user.id;
@@ -229,6 +238,7 @@
    else if(b.hasAttribute('data-close-case'))closeCase();
    else if(b.hasAttribute('data-retry-case'))openCase(selected);
    else if(b.hasAttribute('data-sync-case'))sync(selected);
+   else if(b.hasAttribute('data-retry-sync')&&ctx.employee.role==='admin')sync();
    else if(b.hasAttribute('data-receive'))receive();
    else if(b.dataset.taskAction)taskForm(b.dataset.task,b.dataset.taskAction);
    else if(b.dataset.followTask){const t=detail.tasks.find(t=>t.id===b.dataset.followTask);form('Reviewed · follow updates','<label>Review note<textarea name="note" required placeholder="What did you check? What are we waiting for?"></textarea></label>','Move to Following');$('issue-action-form').onsubmit=e=>submitForm(e,async f=>checked(await db.rpc('follow_customer_issue',{_task_id:t.id,_expected_updated_at:t.updated_at,_note:f.get('note')})));}
@@ -248,6 +258,7 @@
   const params=new URLSearchParams(location.search);let id=params.get('caseId');
   if(!id&&params.get('returnTaskId'))try{id=checked(await db.from('ebay_return_tasks').select('return_case_id').eq('id',params.get('returnTaskId')).single()).return_case_id;}catch{}
   if(id)await openCase(id);
+  if(params.get('syncHealth')==='1')document.querySelector('.issues-sync-health').open=true;
   poll=setInterval(()=>{if(!document.hidden&&!saving){health();if(!$('issue-action-form')&&!ctx.state.busy)refresh({detail:false});}},30000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!saving){health();refresh({detail:false});}});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&selected&&!document.querySelector('.history-modal:not(.hidden)'))closeCase();});

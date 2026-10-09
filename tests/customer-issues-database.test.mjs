@@ -51,11 +51,16 @@ before(async()=>{
  create table ebay_conversations(id uuid,other_party_username text,conversation_type text,reference_id text);
  create table ebay_conversation_messages(id uuid,conversation_id uuid,sender_username text,direction text,message_body text,created_at_ebay timestamptz);`);
  await db.exec(await sqlFile('20261009052000_customer_issue_evidence.sql'));
+ await db.exec(await sqlFile('20261009045000_customer_issue_refresh_priority.sql'));
+ await db.exec(await sqlFile('20261009054000_customer_issue_sync_priority.sql'));
+ await db.exec(await sqlFile('20261009055000_customer_issue_sync_alerts.sql'));
 });
 after(async()=>db?.close());
 beforeEach(async()=>{
  await db.exec(`reset role;select set_config('test.actor','${id(1)}',false);select set_config('test.access','yes',false);select set_config('test.admin','yes',false);
- truncate customer_return_receipts,ebay_return_task_events,ebay_return_tasks,ebay_return_events,ebay_return_items,ebay_return_cases,stock_transactions,item_stock_locations,ebay_order_lines,ebay_orders,task_notifications,task_followers cascade;
+ truncate customer_issue_sync_alert_recipients,customer_issue_sync_incidents,ebay_issue_sync_jobs,customer_return_receipts,ebay_return_task_events,ebay_return_tasks,ebay_return_events,ebay_return_items,ebay_return_cases,stock_transactions,item_stock_locations,ebay_order_lines,ebay_orders,task_notifications,task_followers cascade;
+ update ebay_issue_worker set monitoring_started_at=now(),last_run_finished_at=now(),last_manual_retry_at=null;
+ update ebay_issue_sync_lanes set status='ok',error_count=0,error=null,last_progress_at=now();
  insert into ebay_orders values('${id(10)}','01-12345-12345','buyer.one','fulfilled');
  insert into ebay_order_lines values('${id(11)}','${id(10)}','287000000001','Watch',2,2,'fulfilled','${id(20)}',null,null,null);
  insert into ebay_return_cases(id,order_id,order_number,ebay_return_id,status,source_lane,issue_kind,ebay_status,synced_at,ebay_due_at)
@@ -158,6 +163,80 @@ test('a bad second item rolls the entire receipt back',async()=>{
 
 const syncPayment=async(status='OPEN',due=null)=>db.query("update ebay_return_cases set source_lane='payment_dispute',issue_kind='dispute',ebay_status=$1,ebay_due_at=$2,synced_at=now(),sync_error=null where id=$3",[status,due,id(100)]);
 const autoTask=async(status='open',extra='{}')=>db.query("insert into ebay_return_tasks(id,return_case_id,order_id,title,task_type,status,metadata) values($1,$2,$3,'Review','return_review',$4,'{\"source\":\"ebay_return_api\",\"request_kind\":\"decision\"}'::jsonb||$5::jsonb)",[id(300),id(100),id(10),status,extra]);
+
+test('priority batches put urgent work first while preserving retries, older work, and backoff',async()=>{
+ await db.exec(`insert into ebay_issue_sync_jobs(lane,external_id,priority,state,attempts,next_attempt_at,enqueued_at)
+  select 'return','routine-'||n,0,'queued',0,now(),now() from generate_series(1,20)n;
+ insert into ebay_issue_sync_jobs(lane,external_id,priority,state,attempts,next_attempt_at,enqueued_at) values
+ ('return','manual',-10,'queued',0,now(),now()),('return','changed',-6,'queued',0,now(),now()),
+ ('return','retry',20,'retry',2,now(),now()),('return','old',20,'queued',0,now(),now()-interval '1 hour'),
+ ('return','cooldown',-10,'retry',3,now()+interval '1 hour',now());
+ update ebay_return_cases set ebay_due_at=now()+interval '1 hour';
+ insert into ebay_issue_sync_jobs(lane,external_id,priority) values('return','12345',0);`);
+ const jobs=(await db.query('select external_id from customer_issue_job_batch()')).rows.map(r=>r.external_id);
+ assert.equal(jobs[0],'manual');assert.equal(jobs[1],'retry');assert.ok(jobs.includes('old'));
+ assert.ok(jobs.indexOf('12345')<jobs.indexOf('changed'));assert.equal(jobs.length,12);assert.equal(new Set(jobs).size,12);assert.ok(!jobs.includes('cooldown'));
+});
+
+test('discovery promotion keeps the latest summary, retry errors, backoff, age and manual priority',async()=>{
+ await db.exec(`insert into ebay_issue_sync_jobs(lane,external_id,summary,priority,state,attempts,next_attempt_at,last_error,enqueued_at)
+ values('return','r1','{"version":1}',0,'retry',3,now()+interval '1 hour','timeout',now()-interval '1 hour');`);
+ const before=(await db.query("select * from ebay_issue_sync_jobs where external_id='r1'")).rows[0];
+ await scalar('select enqueue_customer_issue_jobs($1) v',[JSON.stringify([{lane:'return',external_id:'r1',summary:{version:2},priority:-6}])]);
+ const after=(await db.query("select * from ebay_issue_sync_jobs where external_id='r1'")).rows[0];
+ assert.equal(after.priority,-6);assert.deepEqual(after.summary,{version:2});assert.equal(after.attempts,3);assert.equal(after.last_error,'timeout');
+ assert.deepEqual(after.next_attempt_at,before.next_attempt_at);assert.deepEqual(after.enqueued_at,before.enqueued_at);assert.ok(after.updated_at.getTime()>=before.updated_at.getTime());
+ await db.exec("update ebay_issue_sync_jobs set priority=-10");
+ await scalar('select enqueue_customer_issue_jobs($1) v',[JSON.stringify([{lane:'return',external_id:'r1',summary:{version:3},priority:-6}])]);
+ assert.equal(await scalar('select priority v from ebay_issue_sync_jobs'),-10);
+});
+
+test('urgent cases refresh sooner than routine cases, and fresh or closed cases are not requeued',async()=>{
+ await db.exec("update ebay_return_cases set ebay_due_at=now()+interval '2 hours',synced_at=now()-interval '3 minutes'");
+ await scalar('select schedule_customer_issue_refreshes() v');assert.equal(await scalar('select priority v from ebay_issue_sync_jobs'),-8);
+ await db.exec("truncate ebay_issue_sync_jobs;update ebay_return_cases set ebay_due_at=now()+interval '20 days'");
+ await scalar('select schedule_customer_issue_refreshes() v');assert.equal(await scalar('select count(*)::int v from ebay_issue_sync_jobs'),0);
+ await db.exec("update ebay_return_cases set synced_at=now()-interval '12 minutes'");
+ await scalar('select schedule_customer_issue_refreshes() v');assert.equal(await scalar('select priority v from ebay_issue_sync_jobs'),0);
+ await db.exec("truncate ebay_issue_sync_jobs;update ebay_return_cases set status='closed'");
+ await scalar('select schedule_customer_issue_refreshes() v');assert.equal(await scalar('select count(*)::int v from ebay_issue_sync_jobs'),0);
+});
+
+test('recovery retries are rate limited and retain errors until provider success',async()=>{
+ await db.exec("insert into ebay_issue_sync_jobs(lane,external_id,state,attempts,last_error,next_attempt_at) values('return','r1','retry',3,'timeout',now()+interval '1 hour')");
+ await scalar('select retry_customer_issue_sync() v');assert.equal(await scalar('select next_attempt_at<=now() v from ebay_issue_sync_jobs'),true);
+ assert.equal(await scalar('select attempts v from ebay_issue_sync_jobs'),3);assert.equal(await scalar('select last_error v from ebay_issue_sync_jobs'),'timeout');
+ await assert.rejects(scalar('select retry_customer_issue_sync() v'),/just requested/);
+ assert.equal(await scalar("select has_function_privilege('authenticated','retry_customer_issue_sync()','execute') v"),false);
+});
+
+test('sync health alerts administrators once per outage, updates its reason and records recovery without closing work',async()=>{
+ await db.exec("update ebay_issue_sync_lanes set status='error',error_count=3 where lane='return'");
+ assert.equal(await scalar('select check_customer_issue_sync() v'),1);assert.equal(await scalar('select check_customer_issue_sync() v'),0);
+ assert.equal(await scalar('select recipient_user_id v from task_notifications'),id(2));
+ await db.exec("update ebay_issue_sync_lanes set status='needs_access' where lane='return'");
+ await scalar('select check_customer_issue_sync() v');assert.match(await scalar('select body v from task_notifications'),/reconnect eBay/);
+ await db.exec("update ebay_issue_sync_lanes set status='ok',error_count=0,last_progress_at=now()");await scalar('select check_customer_issue_sync() v');
+ assert.equal(await scalar('select title v from task_notifications'),'eBay sync restored');assert.equal(await scalar('select count(*)::int v from customer_issue_sync_incidents where resolved_at is null'),0);
+ assert.equal(await scalar('select status v from ebay_return_cases'),'open');assert.equal(await stock(),0);
+ await db.exec("update ebay_issue_sync_lanes set status='needs_access' where lane='return'");assert.equal(await scalar('select check_customer_issue_sync() v'),1);
+ assert.equal(await scalar('select count(*)::int v from task_notifications'),2);
+});
+
+test('independent health check detects a stopped worker without four duplicate feed alerts',async()=>{
+ await db.exec("update ebay_issue_worker set last_run_finished_at=now()-interval '15 minutes';update ebay_issue_sync_lanes set last_progress_at=now()-interval '1 hour'");
+ assert.deepEqual((await db.query('select * from customer_issue_sync_problems()')).rows,[{monitor_key:'worker',reason:'stalled'}]);
+ assert.equal(await scalar('select check_customer_issue_sync() v'),1);
+ assert.equal(await scalar("select has_function_privilege('authenticated','check_customer_issue_sync(timestamptz)','execute') v"),false);
+});
+
+test('healthy pagination is progress; transient failures do not alert, repeated detail failures and old queues do',async()=>{
+ await db.exec("update ebay_issue_sync_lanes set last_success_at=now()-interval '3 hours',last_progress_at=now(),status='syncing';insert into ebay_issue_sync_jobs(lane,external_id,state,attempts) values('return','r1','retry',1)");
+ assert.equal(await scalar('select check_customer_issue_sync() v'),0);
+ await db.exec("update ebay_issue_sync_jobs set attempts=3");assert.equal(await scalar('select check_customer_issue_sync() v'),1);
+ await db.exec("truncate ebay_issue_sync_jobs;insert into ebay_issue_sync_jobs(lane,external_id,enqueued_at) values('inquiry','i1',now()-interval '40 minutes')");
+ assert.ok((await db.query('select * from customer_issue_sync_problems()')).rows.some(r=>r.monitor_key==='inquiry'&&r.reason==='backlog'));
+});
 
 test('monitor-only imports move to Following without closing the case or changing inventory',async()=>{
  await autoTask();await syncPayment();
