@@ -24,6 +24,8 @@ before(async()=>{
  create table ebay_orders(id uuid primary key,order_number text,buyer_username text,status text);
  create table ebay_order_lines(id uuid primary key,order_id uuid,item_number text,item_title text,quantity int,fulfilled_quantity int,line_status text,internal_item_id uuid,stock_location_row_id uuid,location_id uuid,stock_transaction_id uuid);
  create function task_workflow_reviewer(t jsonb) returns uuid language sql stable as $$select '${id(2)}'::uuid$$;
+ revoke all on function task_workflow_reviewer(jsonb) from public,anon,authenticated;
+ grant usage on schema auth to authenticated;
  select set_config('test.actor','${id(1)}',false);select set_config('test.access','yes',false);select set_config('test.admin','yes',false);`);
  const original=await sqlFile('20260521123000_ebay_returns_workflow.sql');await db.exec(original.slice(original.indexOf('create table if not exists public.ebay_return_cases')));
  await db.exec(await sqlFile('20260521164500_ebay_return_task_queue.sql'));
@@ -32,6 +34,7 @@ before(async()=>{
  grant select on employees,ebay_orders,ebay_order_lines to authenticated;`);
  await db.exec(await sqlFile('20261009040000_customer_issues_workspace.sql'));
  await db.exec(await sqlFile('20261009041000_customer_return_safety.sql'));
+ await db.exec(await sqlFile('20261009044000_customer_issue_reviewer_access.sql'));
 });
 after(async()=>db?.close());
 beforeEach(async()=>{
@@ -78,6 +81,7 @@ test('new task statuses stay visible, provider deadlines remain separate and pag
  await db.exec(`insert into ebay_return_tasks(return_case_id,order_id,title,task_type,status,assigned_to_user_id,due_at)
  values('${id(100)}','${id(10)}','Review','return_review','completed_by_employee','${id(1)}','2026-10-20T19:00:00Z');
  insert into ebay_return_cases(order_id,order_number,status,source_lane,issue_kind) select '${id(10)}','01-12345-12345','open','inquiry','request' from generate_series(1,520);`);
+ await db.exec('set role authenticated');
  const result=await scalar("select list_customer_issues('return','all','',0,30) v");assert.equal(result.total,1);assert.equal(result.rows[0].open_tasks,1);
  assert.equal(result.rows[0].next_user,id(2));assert.notEqual(result.rows[0].ebay_due_at,result.rows[0].follow_up_at);
  const page=await scalar("select list_customer_issues('request','all','',510,30) v");assert.equal(page.total,520);assert.equal(page.rows.length,10);
