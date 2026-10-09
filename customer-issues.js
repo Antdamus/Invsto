@@ -21,6 +21,8 @@
   if(c.status==='partially_received'&&kind(c)==='return')return 'Check the remaining items';
   if(closed(c)&&c.open_tasks)return 'Finish internal follow-up';
   if(closed(c))return 'Review the case outcome';
+  if(kind(c)==='return'&&/READY_FOR_SHIPPING|ITEM_READY_TO_SHIP/.test(c.ebay_status||''))return 'Waiting for the buyer to ship';
+  if(kind(c)==='return'&&/^(ITEM_SHIPPED|RETURN_SHIPPED)$/.test(c.ebay_status||''))return 'Watch for the returned package';
   if(/WAITING.*BUYER|BUYER_RESPONSE/i.test(c.ebay_status||''))return 'Waiting on the buyer';
   if(c.ebay_action)return nice(c.ebay_action);
   return c.next_user?'Continue assigned work':'Choose the next person';
@@ -112,7 +114,7 @@
     ${!lines.length&&ctx.employee.role==='admin'?'<button class="primary-btn" data-match-order>Match order items</button>':''}</div>
    ${renderTasks()}
    <details class="issue-detail-section"><summary>Money &amp; payment</summary><p>Case amount: <strong>${escape(c.raw_payload?.apiExtractedDetails?.requestAmount||c.raw_payload?.requestAmount||c.raw_payload?.refundText||'Not provided by eBay')}</strong></p>${ctx.financeBadge?.(primary)||''}<p class="issue-subtitle">Payment information updates separately in the background. The case amount is not confirmation that a refund was issued. Check eBay before making a financial decision.</p></details>
-   <details class="issue-detail-section" open><summary>Order items &amp; saved photos</summary>${receipt||'<p class="issue-subtitle">No item screenshot is saved yet.</p>'}${lines.map(l=>`<div class="issue-line"><strong>${escape(l.item_title)}</strong><p>${escape(l.item_number||'')} · Shipped ${l.fulfilled_quantity||l.quantity||0}</p></div>`).join('')}
+   <details class="issue-detail-section" open><summary>Order items &amp; saved photos</summary>${receipt||'<p class="issue-subtitle">No item screenshot is saved yet.</p>'}${lines.map(l=>`<div class="issue-line"><strong>${escape(l.item_title)}</strong><p>${escape(l.item_number||'')} · Order qty ${l.quantity||0} · Fulfilled ${l.fulfilled_quantity||0}</p></div>`).join('')}
     ${items.map(i=>`<div class="issue-line"><strong>${escape(i.item_title)}</strong><p>Received ${i.received_quantity} of ${i.expected_quantity} · Restocked ${i.restocked_quantity||0} · ${escape(nice(i.disposition))}</p>${i.received_quantity>i.restocked_quantity&&!['closed','cancelled'].includes(c.status)?`<button class="secondary-btn" data-inspect="${i.id}">Inspect received item</button>`:''}</div>`).join('')}
     <h3 style="margin-top:20px">Return evidence</h3><div id="issue-return-evidence" class="issues-evidence-grid"></div></details>
    <details class="issue-detail-section"><summary>Buyer’s complaint &amp; eBay conversation</summary>${complaint||''}${messages||'<p class="issue-subtitle">No case messages were returned by eBay. Open Buyer chat or the eBay case to check the conversation.</p>'}</details>
