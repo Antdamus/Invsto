@@ -1387,6 +1387,7 @@ function renderCheckoutStoreSelect() {
 
 function updateCheckoutStoreGate() {
   const hasStore = Boolean(state.checkoutStoreId);
+  const blocked = Boolean(state.selectedLine && getLineFulfillmentBlock(state.selectedLine));
   $("item-scan")?.toggleAttribute("disabled", !hasStore);
   $("find-item")?.toggleAttribute("disabled", !hasStore);
   // Reading and linking a bag does not require selecting an inventory checkout store.
@@ -1394,10 +1395,10 @@ function updateCheckoutStoreGate() {
   $("global-find-live-lot")?.removeAttribute("disabled");
   $("location-scan")?.toggleAttribute("disabled", !hasStore);
   $("find-location")?.toggleAttribute("disabled", !hasStore);
-  $("stage-current-line")?.toggleAttribute("disabled", !hasStore);
-  $("stage-without-inventory")?.toggleAttribute("disabled", !hasStore);
-  $("fulfill-order")?.toggleAttribute("disabled", !hasStore);
-  $("complete-no-inventory")?.toggleAttribute("disabled", !hasStore);
+  $("stage-current-line")?.toggleAttribute("disabled", !hasStore || blocked);
+  $("stage-without-inventory")?.toggleAttribute("disabled", !hasStore || blocked);
+  $("fulfill-order")?.toggleAttribute("disabled", !hasStore || blocked);
+  $("complete-no-inventory")?.toggleAttribute("disabled", !hasStore || blocked);
 }
 
 async function handleCheckoutStoreChange() {
@@ -5598,15 +5599,19 @@ async function getEbayLabelPreviewUrl(bucket, path) {
 function renderEbayLabelPanel() {
   const panel = $("ebay-label-panel");
   if (!state.selectedLine) return;
+  const blockReason = getLineFulfillmentBlock(state.selectedLine);
   const label = getSelectedOrderLabelData();
   $("print-ebay-label")?.classList.toggle("hidden", !label.path);
-  $("print-ebay-label")?.toggleAttribute("disabled", !label.path);
+  $("print-ebay-label")?.toggleAttribute("disabled", !label.path || Boolean(blockReason));
+  document.querySelectorAll('[data-order-label-source="selected"][data-order-label-picker]').forEach(button => {
+    button.disabled = Boolean(blockReason);
+  });
   const metadata = label.metadata || {};
   const sizeText = formatFileSize(metadata.size);
   const trackingText = getLabelTrackingDisplay(metadata);
-  const summaryText = label.path
+  const summaryText = blockReason || (label.path
     ? `Label attached${label.uploadedAt ? ` ${formatDate(label.uploadedAt)}` : ""}${sizeText ? ` - ${sizeText}` : ""}${trackingText ? ` - tracker ${trackingText}` : ""}. New labels are added separately; earlier labels remain available.`
-    : "Upload a PDF, take a label photo, or send a label from eBay.";
+    : "Upload a PDF, take a label photo, or send a label from eBay.");
   const detailsHtml = label.path
     ? `
       <div class="label-tracking-confirmation">
@@ -5629,7 +5634,7 @@ function renderEbayLabelPanel() {
     const openLabelButton = $("open-ebay-label-page");
     summary.textContent = summaryText;
     details.innerHTML = detailsHtml;
-    openLabelButton?.toggleAttribute("disabled", !normalizeEbayOrderNumber(state.selectedLine?.order?.order_number));
+    openLabelButton?.toggleAttribute("disabled", Boolean(blockReason) || !normalizeEbayOrderNumber(state.selectedLine?.order?.order_number));
     previewButton?.classList.toggle("hidden", !label.path);
     previewButton?.toggleAttribute("disabled", !label.path);
   }

@@ -283,6 +283,17 @@ test('label opening rechecks the database when a cached card still says paid',as
  assert.equal(await p.evaluate(()=>calls.at(-1).name),'check_ebay_fulfillment_allowed');
 });
 
+test('refunded detail disables packing and new labels, then restores controls for a paid item',async t=>{
+ const p=await open(t);
+ await p.evaluate(()=>{state.selectedLine.order.raw_payload={orderPaymentStatus:'FULLY_REFUNDED'};updateCheckoutStoreGate();renderEbayLabelPanel();});
+ for(const id of ['stage-current-line','stage-without-inventory','fulfill-order','open-ebay-label-page']) assert.equal(await p.locator('#'+id).isDisabled(),true);
+ for(const button of await p.locator('[data-order-label-source="selected"][data-order-label-picker]').all()) assert.equal(await button.isDisabled(),true);
+ assert.match(await p.locator('#ebay-label-summary').innerText(),/Refund reported/);
+ await p.evaluate(()=>{state.selectedLine.order.raw_payload={orderPaymentStatus:'PAID',orderCancelStatus:'NONE_REQUESTED'};updateCheckoutStoreGate();renderEbayLabelPanel();});
+ for(const id of ['stage-current-line','stage-without-inventory','fulfill-order']) assert.equal(await p.locator('#'+id).isDisabled(),false);
+ for(const button of await p.locator('[data-order-label-source="selected"][data-order-label-picker]').all()) assert.equal(await button.isDisabled(),false);
+});
+
 test('own reserved stock is not subtracted again for another staged line',async t=>{
   const p=await open(t);await p.evaluate(()=>{
     state.stagedFulfillments.set('line-b',{line:state.orders[1],mode:'inventory',qty:2,row:{id:'stock-a',own_reserved_quantity:2}});
