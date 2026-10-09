@@ -214,7 +214,7 @@
    const url=new URL(location.href);url.searchParams.delete('returnTaskId');url.searchParams.set('caseId',id);history.replaceState(null,'',url);
   }catch(error){if(stamp===version){$('issues-detail').innerHTML=`<div class="issues-empty"><button class="secondary-btn" data-close-case>← Cases</button><h2>Couldn’t load this case</h2><p>${escape(error.message)}</p><button class="primary-btn" data-retry-case>Retry</button></div>`;}}
  }
- function closeCase(){if(saving)return;version++;selected=null;detail=null;document.querySelector('.issues-columns').classList.remove('is-selected');const url=new URL(location.href);url.searchParams.delete('caseId');history.replaceState(null,'',url);cards();}
+ function closeCase(){if(saving)return;version++;selected=null;detail=null;document.querySelector('.issues-columns').classList.remove('is-selected');$('issues-detail').innerHTML='<div class="issues-empty">Choose a case to see its order, evidence and next steps.</div>';const url=new URL(location.href);url.searchParams.delete('caseId');history.replaceState(null,'',url);cards();}
  function form(title,body,submit){
   $('issue-form-slot').innerHTML=`<form id="issue-action-form" class="issue-form"><h3>${escape(title)}</h3>${body}<p class="issue-form-error" role="alert"></p><div class="issue-actions"><button class="primary-btn" type="submit">${escape(submit)}</button><button class="secondary-btn" type="button" data-cancel-form>Cancel</button></div></form>`;
   $('issue-action-form').scrollIntoView({block:'nearest'});$('issue-action-form').querySelector('textarea,input,select')?.focus();
@@ -311,7 +311,7 @@
   if(params.get('syncHealth')==='1')document.querySelector('.issues-sync-health').open=true;
   poll=setInterval(()=>{if(!document.hidden&&!saving){health();if(!$('issue-action-form')&&!ctx.state.busy)refresh({detail:false});}},30000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!saving){health();refresh({detail:false});}});
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&selected&&!document.querySelector('.history-modal:not(.hidden)'))closeCase();});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!e.defaultPrevented&&selected&&!document.querySelector('.history-modal:not(.hidden), dialog[open]'))closeCase();});
  }
  function matchForm(){
   form('Find the exact order','<label>eBay order number<input name="order" required placeholder="00-00000-00000" pattern="[0-9]{2}-[0-9]{5}-[0-9]{5}" value="'+escape(detail.c.order_number||'')+'" /></label><div id="issue-match-results"></div>','Find order');
