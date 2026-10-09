@@ -4725,6 +4725,7 @@ function renderOrders(options = {}) {
             ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Open video receipt</a>` : ""}
             <button type="button" class="receipt-screenshot-upload" data-upload-receipt-screenshot="${escapeHtml(line.id)}">Upload receipt screenshot</button>
             <button type="button" class="buyer-line-note-btn" data-line-add-note="${escapeHtml(line.id)}">Notes / Add note</button>
+            <a class="buyer-line-note-btn order-chat-link" href="email-triage.html?orderLineId=${encodeURIComponent(line.id)}&from=pending" target="_blank" rel="noopener" aria-label="eBay chat for ${escapeHtml(line.item_title || 'this item')}">eBay chat ↗</a>
             <span class="buyer-line-note-summary" data-line-note-summary="${escapeHtml(line.id)}">${renderLineNoteSummary(line)}</span>
           </span>
           <span class="queue-video-receipt-evidence" data-queue-video-evidence="${escapeHtml(line.id)}">

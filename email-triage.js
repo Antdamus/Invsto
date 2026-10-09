@@ -12465,7 +12465,28 @@
     els.operationalDashboard?.addEventListener("click", handleOperationalDashboardClick);
     els.operationalDashboard?.addEventListener("keydown", handleOperationalDashboardKeydown);
     loadEbayConversationSavedViews(context);
-    loadEbayConversationList(context);
+    const orderRoute = await window.InvstoOrderChat?.init(context, {
+      openConversation: async (id, buyer) => {
+        const payload = await fetchEbayConversationById(context, id);
+        if (!payload.conversation?.id) throw new Error("This conversation could not be opened. Refresh and try again.");
+        const url = new URL(location.href);
+        url.searchParams.set("ebayConversationDbId", id);
+        url.searchParams.set("ebayBuyer", buyer);
+        history.replaceState(null, "", url);
+        setEbayConversationState({
+          ebayConversations: mergeEbayConversationPages([payload.conversation], adminClassificationState.ebayConversations),
+          selectedEbayConversationId: id,
+          ebayConversationSearchQuery: buyer,
+          ebayConversationFilter: "all",
+          ebayConversationClassificationFilters: ebayConversationDefaultClassificationFilters(),
+          selectedEbaySavedViewId: null,
+        });
+        await selectEbayConversation(context, id);
+        if (isEbayMobileWorkspace()) setEbayMobileWorkspaceView("message", {scroll:false});
+        loadEbayConversationList(context, {preserveSelectionId:id});
+      },
+    });
+    if (!orderRoute?.opened) loadEbayConversationList(context);
     renderOperationalDashboardPanel(adminClassificationState);
     if (!adminClassificationState.operationalDashboardCollapsed) loadOperationalDashboard(context, { keepPrevious: false });
 

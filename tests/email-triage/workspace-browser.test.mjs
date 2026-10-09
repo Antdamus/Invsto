@@ -18,14 +18,14 @@ before(async()=>{
  await mkdir(new URL('test-results/',root),{recursive:true});
 });
 after(async()=>{await browser?.close();await new Promise(r=>{server.close(r);server.closeAllConnections();});});
-async function open(t,width=390,{linked=true,orderChoices=false}={}){
+async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false}={}){
  const context=await browser.newContext({viewport:{width,height:844},hasTouch:width<1021});t.after(()=>context.close());
  await context.route('**/*',route=>route.request().url().startsWith(origin)?route.continue():route.abort());
  const page=await context.newPage();page.setDefaultTimeout(6500);
  const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
- await page.goto(`${origin}/email-triage.html`);
+ await page.goto(`${origin}/email-triage.html${orderEntry?'?orderLineId=11111111-1111-4111-8111-111111111111&from=pending':''}`);
  for(const file of ['task-workflow.js','email-triage.api.js','email-triage.state.js','email-triage.render-utils.js','email-triage.classifications.js','email-triage.diagnostics.js','email-triage.operations.js','email-triage.workspace.js'])await page.addScriptTag({url:origin+'/'+file});
- await page.evaluate(({linked,orderChoices})=>{
+ await page.evaluate(({linked,orderChoices,orderEntry})=>{
   window.fixtureWrites=[];window.fixtureReads=[];window.fixtureTasks=[];window.fixtureFailSave=false;window.fixtureDelaySave=false;
   const now=new Date().toISOString();
   window.fixtureConversations=Array.from({length:32},(_,i)=>({id:`chat-${i}`,ebay_conversation_id:`ebay-${i}`,conversation_type:'FROM_MEMBERS',other_party_username:i===0?'jewelrybuyer':`buyer_${i}`,conversation_title:'Shipping update',latest_message_preview:'Could you check the certificate and let me know when my order will ship?',latest_message_created_at:now,unread_count:1,summary:{order_numbers:['12-34567-89012']}}));
@@ -80,13 +80,23 @@ async function open(t,width=390,{linked=true,orderChoices=false}={}){
   api.fetchTeamTaskAssignees=async()=>({assignees:[{user_id:'me',display_name:'Jose',email:'manager@example.test',role:'admin'},{user_id:'worker',display_name:'Sandra',email:'worker@example.test',role:'worker'}]});
   api.fetchOperationalDashboard=async()=>{fixtureReads.push({name:'dashboard'});return {};};
   api.requestEbayConversationDraftAction=async()=>{throw Error('Sending is outside these tests');};
- },{linked,orderChoices});
+  if(orderEntry){
+   api.fetchEbayConversationById=async(_ctx,id)=>({conversation:fixtureConversations.find(c=>c.id===id)});
+   api.requestEbayConversationDraftAction=async(_ctx,args)=>{if(args.mode!=='order_chat_context')throw Error('No live sends');return {ok:true,line:{id:'11111111-1111-4111-8111-111111111111',item_title:'Gold chain',item_number:'287123456789',quantity:1},order:{id:'order-1',order_number:'12-34567-89012',buyer_username:'jewelrybuyer'},conversations:[{...fixtureConversations[0],match:'item'}],preferred_conversation_id:'chat-0'};};
+  }
+ },{linked,orderChoices,orderEntry});
+ await page.addScriptTag({url:origin+'/email-triage.order-chat.js'});
  await page.addScriptTag({url:origin+'/email-triage.js'});
- await expect(page.locator('.ebay-conversation-row')).toHaveCount(32);
+ await expect(page.locator('.ebay-conversation-row')).toHaveCount(orderEntry?1:32);
  await expect(page.locator('[data-ebay-detail-action="reply"]')).toHaveCount(1);
  return page;
 }
 const noOverflow=async page=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+for(const width of [390,1366])test(`Order entry ${width}px opens the correct chat inside the actual triage workspace`,async t=>{
+ const page=await open(t,width,{orderEntry:true});await expect(page.locator('#order-chat-entry')).toContainText('Gold chain');await expect(page.locator('.ebay-message-bubble')).toBeVisible();await expect(page.getByRole('button',{name:'Reply',exact:true})).toBeVisible();await noOverflow(page);
+ assert.ok(new URL(page.url()).searchParams.get('ebayConversationDbId')==='chat-0');assert.equal(await page.evaluate(()=>fixtureWrites.length),0);
+ await page.screenshot({path:`test-results/order-chat-${width}-integrated.png`});
+});
 for(const width of [320,390,768,1024,1366,1920])test(`Messaging ${width}px: inbox first, conversation, task and filters remain usable`,async t=>{
  const page=await open(t,width);await noOverflow(page);
  await page.screenshot({path:`test-results/triage-${width}-inbox-local.png`});

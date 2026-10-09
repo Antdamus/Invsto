@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { OrderChatError, orderChatContext, startOrderChat } from "../_shared/ebay-order-chat.ts";
 import {
   buildEbayConversationContext,
   EbayConversationContextError,
@@ -7,7 +8,7 @@ import {
 } from "../_shared/ebay-conversation-context.ts";
 
 type ServiceClient = any;
-type Mode = "view" | "generate" | "regenerate" | "improve" | "save_edit" | "discard" | "approve" | "unapprove" | "send" | "translate_message";
+type Mode = "view" | "generate" | "regenerate" | "improve" | "save_edit" | "discard" | "approve" | "unapprove" | "send" | "translate_message" | "order_chat_context" | "start_order_chat";
 
 type Input = {
   mode: Mode;
@@ -23,6 +24,8 @@ type Input = {
   manualComposer: boolean;
   sendConfirmed: boolean;
   messageText: string | null;
+  orderLineId: string | null;
+  requestId: string | null;
 };
 
 type GroundingFact = {
@@ -193,11 +196,13 @@ function stringOrNull(value: unknown, maxLength = 240) {
 async function parseInput(req: Request): Promise<Input> {
   const body = await req.json().catch(() => ({}));
   const rawMode = stringOrNull(body?.mode, 80) || "view";
-  if (!["view", "generate", "regenerate", "improve", "save_edit", "discard", "approve", "unapprove", "send", "translate_message"].includes(rawMode)) {
+  if (!["view", "generate", "regenerate", "improve", "save_edit", "discard", "approve", "unapprove", "send", "translate_message", "order_chat_context", "start_order_chat"].includes(rawMode)) {
     throw new DraftError("invalid_mode", { status: 400, phase: "input" });
   }
   return {
     mode: rawMode as Mode,
+    orderLineId: stringOrNull(body?.orderLineId, 120),
+    requestId: stringOrNull(body?.requestId, 120),
     conversationId: stringOrNull(body?.conversationId || body?.conversation_id, 120),
     ebayConversationId: stringOrNull(body?.ebayConversationId || body?.ebay_conversation_id, 180),
     conversationType: stringOrNull(body?.conversationType || body?.conversation_type, 80),
@@ -2910,7 +2915,7 @@ function safetyEnvelope(options: { sendsEnabled?: boolean; messagesSent?: number
 }
 
 function errorPayload(error: unknown) {
-  const known = error instanceof DraftError || error instanceof EbayConversationContextError ? error : null;
+  const known = error instanceof DraftError || error instanceof EbayConversationContextError || error instanceof OrderChatError ? error : null;
   return {
     status: known?.status || 500,
     body: {
@@ -2932,6 +2937,12 @@ serve(async (req) => {
   try {
     const admin = await requireAdmin(req, supabase);
     const input = await parseInput(req);
+    if (input.mode === "order_chat_context" || input.mode === "start_order_chat") {
+      const accountKey = optionalEnv("EBAY_SELLER_ACCOUNT_KEY") || `${ebayEnvironment()}:${optionalEnv("EBAY_SELLER_USERNAME", "EBAY_ACCOUNT_USERNAME") || "default"}`;
+      return json(req, 200, input.mode === "order_chat_context"
+        ? await orderChatContext(supabase, input.orderLineId || "", accountKey)
+        : await startOrderChat(supabase, input, admin, { accountKey, refreshEbayToken, ebayPost, sha256Hex, safeMessage }));
+    }
     const rpcSupabase = admin.actorType !== "service_role" ? authenticatedClient(admin.accessToken) : supabase;
 
     if (input.mode === "view") {

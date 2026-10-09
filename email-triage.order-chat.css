@@ -1,0 +1,43 @@
+.order-chat-entry { margin-bottom:18px; padding:24px; border:1px solid #756340; border-radius:22px; background:linear-gradient(135deg,#202a23,#131b17); color:#f3f0e8; }
+.order-chat-entry[hidden] { display:none; }
+.order-chat-choosing .ebay-conversation-section { display:none; }
+.order-chat-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:18px; }
+.order-chat-heading h2 { margin:4px 0; font-size:24px; overflow-wrap:anywhere; }
+.order-chat-heading p { margin:6px 0; font-weight:600; overflow-wrap:anywhere; }
+.order-chat-heading small, .order-chat-body p, .order-chat-choice small, .order-chat-compose-footer small { color:#b8c1b8; }
+.order-chat-heading > a { flex-shrink:0; text-decoration:none; }
+.order-chat-body { margin-top:24px; max-width:820px; }
+.order-chat-choices h3 { font-size:17px; }
+.order-chat-choice { display:flex; width:100%; gap:16px; justify-content:space-between; align-items:center; text-align:left; background:#101914; border:1px solid #405245; color:inherit; border-radius:14px; padding:16px; margin:10px 0; cursor:pointer; }
+.order-chat-choice > span { display:grid; gap:6px; min-width:0; }
+.order-chat-choice span { overflow-wrap:anywhere; }
+.order-chat-choice:hover { border-color:#dec28a; background:#243025; }
+.order-chat-body form { display:grid; gap:12px; margin:20px 0; }
+.order-chat-body label { font-weight:700; }
+.order-chat-body textarea { width:100%; box-sizing:border-box; resize:vertical; min-height:150px; border:1px solid #61705f; border-radius:14px; padding:16px; background:#0e1511; color:#f3f0e8; font:inherit; font-size:16px; }
+.order-chat-compose-footer, .order-chat-tools { display:flex; gap:16px; justify-content:space-between; align-items:center; flex-wrap:wrap; }
+.order-chat-tools { margin-top:20px; justify-content:flex-start; }
+.order-chat-tools a { color:#e6cc98; }
+.order-chat-entry button, .order-chat-entry .secondary-btn { min-height:44px; }
+.order-chat-entry [data-order-chat-change] { margin-top:14px; }
+.order-chat-entry [data-order-chat-status]:empty { display:none; }
+.order-chat-entry .is-error { color:#ffb7a8; }
+.order-chat-delivery { margin:20px 0; padding:16px; background:#314335; border-radius:12px; }
+.is-chat-open { padding:14px 18px; }
+.is-chat-open .eyebrow { display:none; }
+.is-chat-open .order-chat-heading h2 { font-size:18px; }
+.is-chat-open .order-chat-heading p { font-size:14px; margin:3px 0; }
+.is-chat-open .order-chat-heading small { font-size:11px; }
+.is-chat-open [data-order-chat-change] { margin-top:8px; font-size:12px; }
+@media(max-width:700px) {
+ .order-chat-entry { padding:18px; border-radius:18px; }
+ .order-chat-heading { flex-direction:column; gap:14px; }
+ .order-chat-heading h2 { font-size:22px; }
+ .order-chat-heading > a { width:100%; justify-content:center; }
+ .order-chat-compose-footer { align-items:stretch; flex-direction:column; }
+ .order-chat-compose-footer button { width:100%; }
+ .is-chat-open { padding:12px 14px; }
+ .is-chat-open .order-chat-heading { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; }
+ .is-chat-open .order-chat-heading > a { width:auto; max-width:90px; font-size:11px; padding:8px; text-align:center; }
+ .is-chat-open [data-order-chat-change] { width:auto; padding:6px 10px; min-height:44px; }
+}

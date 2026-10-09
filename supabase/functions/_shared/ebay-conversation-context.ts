@@ -696,7 +696,7 @@ async function pushBuyerRecentOrderCandidates(
   candidates.push(orderCandidateFrom(conversation, identifiers, best.order, {
     matchedValue: String(best.order.order_number || best.order.id),
     method: "buyer_recent_unique_order",
-    confidence: status === "confirmed" ? 0.82 : 0.68,
+    confidence: 0.68,
     status,
     extra: {
       buyer_matched: true,

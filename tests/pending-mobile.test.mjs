@@ -89,6 +89,12 @@ for (const width of [320, 390, 430, 760]) {
     if (width === 390) await page.screenshot({path: 'test-results/pending-mobile-queue.png'});
     await card.locator('[data-buyer-expand-key]').click();
     await expect(page.locator('.phone-line-actions')).toHaveCount(2);
+    const line = card.locator('.buyer-line-btn').first();
+    await expect(line.locator('.order-chat-link')).toBeVisible();
+    const chatUrl = new URL(await line.locator('.order-chat-link').getAttribute('href'), page.url());
+    assert.equal(chatUrl.searchParams.get('orderLineId'), await line.getAttribute('data-line-id'));
+    assert.equal(chatUrl.searchParams.get('from'), 'pending');
+    await expect(line.locator('.order-chat-link')).toHaveAttribute('target', '_blank');
     await expect(page.locator('[data-line-cancel]').first()).toBeHidden();
     await page.locator('.phone-line-actions button').nth(1).click();
     await expect(page.locator('[data-line-cancel]').first()).toBeVisible();

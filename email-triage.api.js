@@ -2219,6 +2219,8 @@
       body: JSON.stringify({
         mode: values.mode,
         conversationId: values.conversationId,
+        orderLineId: values.orderLineId || undefined,
+        requestId: values.requestId || undefined,
         targetMessageId: values.targetMessageId || undefined,
         draftId: values.draftId || undefined,
         draftText: typeof values.draftText === "string" ? values.draftText : undefined,
