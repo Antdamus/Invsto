@@ -20,6 +20,7 @@
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
   <link rel="stylesheet" href="task-request.css?v=20261007-intent-2" />
   <link rel="stylesheet" href="order-certificates.css?v=20261009">
+  <link rel="stylesheet" href="pending-order-chats.css?v=20261009">
   <script src="order-certificates.js?v=20261009" defer></script>
 </head>
 <body>
@@ -467,6 +468,8 @@
             <output id="buyer-remaining-count" class="count-pill" aria-live="polite" aria-atomic="true">Loading...</output>
           </div>
           <p class="buyer-due-filter-help">Purchase date matches the customer's earliest pending purchase. All their orders stay together, regardless of date.</p>
+          <p class="pending-chat-live" data-pending-chat-status>Checking buyer chats…</p>
+          <span class="pending-chat-sr-only" data-pending-chat-announcement role="status" aria-live="polite"></span>
 
           <div id="orders-list" class="orders-list">
             <div class="empty-state">Loading pending orders...</div>
@@ -681,6 +684,7 @@
       <span class="eyebrow">Final Review</span>
       <h2 id="bundle-review-title">Confirm packed bundle</h2>
       <p id="bundle-review-subtitle">Review the selected items before stock is removed.</p>
+      <section id="bundle-chat-review" class="pending-chat-review" aria-label="Buyer messages" hidden></section>
       <div id="bundle-review-list" class="bundle-review-list"></div>
       <section class="no-inventory-label" aria-label="Shipping labels">
         <h3>Shipping labels</h3>
@@ -721,6 +725,7 @@
         <div><span>eBay username</span><strong id="worker-no-inventory-buyer-username">No buyer username</strong></div>
       </section>
       <p id="worker-no-inventory-subtitle">Use this only when the order is being shipped now, but the item was never entered into inventory.</p>
+      <section id="no-inventory-chat-review" class="pending-chat-review" aria-label="Buyer messages" hidden></section>
       <div class="no-inventory-toolbar">
         <span id="worker-no-inventory-count" class="count-pill">0 selected</span>
         <div>
@@ -1096,6 +1101,7 @@
       <span class="eyebrow">Admin Signature</span>
       <h2 id="admin-order-closeout-title">Close selected orders</h2>
       <p id="admin-order-closeout-subtitle">A note and password are required.</p>
+      <section id="admin-chat-review" class="pending-chat-review" aria-label="Buyer messages" hidden></section>
       <div id="admin-order-closeout-list" class="bundle-review-list"></div>
       <label class="modal-field">
         Note
@@ -1262,7 +1268,8 @@
       <div class="modal-actions"><button id="attach-inventory-remove" type="button" class="secondary-btn" hidden>Remove attachment</button><button id="attach-inventory-save" type="button" class="primary-btn" disabled>Attach & reserve</button></div>
     </div>
   </div>
-  <script src="pending-orders.js?v=certificates-20261009"></script>
+  <script src="pending-order-chats.js?v=20261009"></script>
+  <script src="pending-orders.js?v=live-chats-20261009"></script>
   <script src="pending-inventory.js?v=20261008-shared-bag-2"></script>
   <script src="pending-bag-scan.js?v=20261008-shared-inventory"></script>
   <script src="pending-orders-mobile.js?v=20261008-inventory-attachments"></script>

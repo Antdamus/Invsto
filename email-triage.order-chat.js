@@ -43,7 +43,11 @@
           status('Checking the latest conversations in eBay…');
           await api.runEbayMessageSync(context, {otherPartyUsername:data.order.buyer_username,conversationTypes:['FROM_MEMBERS'],maxConversationPages:2,classificationMode:'none',suppressConversationActivityEvents:true});
         }
-        data=await call({mode:'order_chat_context'}); delivery=null; render(); if(autoOpen&&data.preferred_conversation_id) await openChat(data.preferred_conversation_id);
+        data=await call({mode:'order_chat_context'}); delivery=null; render();
+        // Only open a requested marker's chat after the server verifies this buyer.
+        const requested=params.get('conversationId');
+        const preferred=data.conversations.some(c=>c.id===requested)?requested:data.preferred_conversation_id;
+        if(autoOpen&&preferred) await openChat(preferred);
       }
       catch(e){status(e.message||'Could not load this order’s chats. Try again.',true);}
       finally{lock(false);}

@@ -1,0 +1,18 @@
+.pending-chat-badge{display:inline-flex;align-items:center;gap:7px;min-height:44px;max-width:100%;padding:9px 13px;border:1px solid #547d91;border-radius:18px;background:#172d38;color:#c5e7f8;font-size:13px;font-weight:700;line-height:1.35;text-decoration:none;box-sizing:border-box;white-space:normal}
+.pending-chat-badge svg{width:17px;height:17px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.7}
+.pending-chat-badge:hover,.pending-chat-badge:focus-visible{color:#fff;border-color:#d9b968;outline:2px solid #d9b968;outline-offset:2px}
+.pending-chat-badge.has-unread{background:#40341c;border-color:#d6ad56;color:#ffe3a0}
+.pending-chat-badge.has-unread svg{fill:#e9bd5733}
+.pending-chat-badge.is-empty,.pending-chat-badge.is-checking{background:#19221e;border-color:#45584d;color:#c7d3cb}
+.pending-chat-badge small{font-size:10px;max-width:68px;line-height:1.3}
+.buyer-line-btn.has-buyer-message{box-shadow:inset 3px 0 0 #e2b95f}
+.buyer-order-card.has-buyer-message .buyer-card-head{border-bottom-color:#bd9b57}
+[data-line-chat-marker],[data-buyer-chat-marker]{display:inline-flex;max-width:100%}
+[data-buyer-chat-marker]:empty{display:none}
+.pending-chat-review{padding:15px;border:1px solid #d6ad56;border-radius:16px;background:#302b1c;color:#ffe3a0;margin:12px 0;}
+.pending-chat-review[hidden]{display:none}
+.pending-chat-review strong{font-size:15px}.pending-chat-review p{font-size:13px;margin:5px 0 10px;color:#e4dbc5}
+.pending-chat-review>div{display:flex;flex-wrap:wrap;gap:8px}
+.pending-chat-live{font-size:11px;color:#9dbca9;margin:6px 0}.pending-chat-live.is-warning{color:#e9c880}
+.pending-chat-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(max-width:760px){.buyer-card-alerts [data-buyer-chat-marker]{flex-basis:100%}.pending-chat-badge{font-size:12px;min-height:44px}.pending-chat-review{padding:12px}.pending-chat-review>div{display:grid;grid-template-columns:1fr}}

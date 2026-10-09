@@ -4788,7 +4788,7 @@ function renderOrders(options = {}) {
             ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Open video receipt</a>` : ""}
             <button type="button" class="receipt-screenshot-upload" data-upload-receipt-screenshot="${escapeHtml(line.id)}">Upload receipt screenshot</button>
             <button type="button" class="buyer-line-note-btn" data-line-add-note="${escapeHtml(line.id)}">Notes / Add note</button>
-            <a class="buyer-line-note-btn order-chat-link" href="email-triage.html?orderLineId=${encodeURIComponent(line.id)}&from=pending" target="_blank" rel="noopener" aria-label="eBay chat for ${escapeHtml(line.item_title || 'this item')}">eBay chat ↗</a>
+            <span data-line-chat-marker="${escapeHtml(line.id)}"><a class="buyer-line-note-btn order-chat-link" href="email-triage.html?orderLineId=${encodeURIComponent(line.id)}&from=pending" target="_blank" rel="noopener" aria-label="eBay chat for ${escapeHtml(line.item_title || 'this item')}">eBay chat ↗</a></span>
             <button type="button" class="certificate-trigger" data-certificate-line="${escapeHtml(line.id)}" data-certificate-title="${escapeHtml((getOrderFromLine(line).order_number || '') + ' · ' + (line.item_title || 'Order item'))}">CGL certificate</button>
             <span class="buyer-line-note-summary" data-line-note-summary="${escapeHtml(line.id)}">${renderLineNoteSummary(line)}</span>
           </span>
@@ -4877,6 +4877,7 @@ function renderOrders(options = {}) {
     } else list.appendChild(card);
     if (state.orderNotesObserver) state.orderNotesObserver.observe(card);
     else hydrateBuyerGroupNotes(card, group);
+    window.PendingOrderChats?.rendered(card);
   };
 
   if (partial) {
@@ -9656,6 +9657,7 @@ async function openWorkerNoInventoryModal(options = {}) {
   renderNoInventoryEvidencePhotos();
   setWorkerNoInventoryGpsStatus("Requesting GPS for the audit trail...", "warn");
   openModal("worker-no-inventory-modal");
+  window.PendingOrderChats?.review($("no-inventory-chat-review"), state.workerNoInventoryCandidates);
   watchCompletionPhotos("no-inventory");
   watchOrderShippingLabels("no-inventory");
   setTimeout(() => (autoRequestPhoto ? $("request-no-inventory-photo") : $("confirm-worker-no-inventory"))?.focus(), 80);
@@ -10177,6 +10179,7 @@ function openAdminOrderCloseoutModal(action) {
   $("confirm-admin-order-closeout").textContent = copy.button;
   renderAdminCloseoutList(lines, { bulk: false, limit: lines.length });
   openModal("admin-order-closeout-modal");
+  window.PendingOrderChats?.review($("admin-chat-review"), lines);
   setTimeout(() => $("admin-order-closeout-note")?.focus(), 80);
 }
 
@@ -10344,6 +10347,7 @@ function openBundleReviewModal() {
     renderBundleReviewList(staged);
   }
   openModal("bundle-review-modal");
+  window.PendingOrderChats?.review($("bundle-chat-review"), staged.length ? staged.map(entry => entry.line) : getBuyerLines());
   watchCompletionPhotos("bundle");
   watchOrderShippingLabels("bundle");
   setTimeout(() => $("confirm-bundle-review")?.focus(), 80);
@@ -13172,6 +13176,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadPackingSellerDirectory().catch((error) => console.warn("Could not preload seller directory:", error));
   clearOrderSearch({ apply: false });
   clearOrderCreatedDateFilter({ apply: false });
+  window.PendingOrderChats?.start({client:supabase,userId:state.user.id,getLines:()=>state.orders});
   await Promise.all([loadCheckoutStores(), loadOrders()]);
   startFinanceQueueStatus();
   const bagParams = new URLSearchParams(window.location.search);

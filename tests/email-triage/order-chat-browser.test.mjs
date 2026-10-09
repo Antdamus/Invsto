@@ -11,11 +11,11 @@ before(async()=>{
  browser=await(process.env.INVSTO_ITEM_BROWSER==='webkit'?webkit:chromium).launch();await mkdir(new URL('test-results/',root),{recursive:true});
 });
 after(async()=>{await browser?.close();await new Promise(r=>{server.close(r);server.closeAllConnections();});});
-async function open(t,width,{chats=0,preferred=false,from='pending'}={}){
+async function open(t,width,{chats=0,preferred=false,from='pending',requested=''}={}){
  const context=await browser.newContext({viewport:{width,height:844}});t.after(()=>context.close());
  await context.route('**/*',route=>route.request().url().startsWith(origin)?route.continue():route.abort());
  const page=await context.newPage();page.setDefaultTimeout(6500);const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
- await page.goto(`${origin}/email-triage.html?orderLineId=${lineId}&from=${from}`);await page.addScriptTag({url:origin+'/email-triage.order-chat.js'});
+ await page.goto(`${origin}/email-triage.html?orderLineId=${lineId}&from=${from}&conversationId=${encodeURIComponent(requested)}`);await page.addScriptTag({url:origin+'/email-triage.order-chat.js'});
  await page.evaluate(async({chats,preferred,lineId})=>{
   window.calls=[];window.opened=[];window.sendResult={ok:true,delivery_status:'sent',conversation_id:'new-chat'};
   window.fixtureData={ok:true,line:{id:lineId,item_title:'#049 · 10K gold chain',quantity:1,item_number:'287611495563'},order:{id:'order',order_number:'12-12457-65265',buyer_username:'jewelrybuyer'},conversations:Array.from({length:chats},(_,i)=>({id:'chat-'+i,match:preferred?'listing':'buyer',conversation_title:i?'Certificate inquiry':'Shipping update',latest_message_preview:'Could you check the certificate for my chain?',latest_message_created_at:'2026-10-08T18:30:00Z'})),preferred_conversation_id:preferred?'chat-0':null};
@@ -24,6 +24,10 @@ async function open(t,width,{chats=0,preferred=false,from='pending'}={}){
  },{chats,preferred,lineId});return page;
 }
 const noOverflow=async page=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+test('pending chat marker opens only a server-verified buyer conversation',async t=>{
+ const page=await open(t,390,{chats:2,requested:'chat-1'});assert.deepEqual(await page.evaluate(()=>opened),[{id:'chat-1',buyer:'jewelrybuyer'}]);
+ const invalid=await open(t,390,{chats:2,requested:'someone-else-chat'});assert.deepEqual(await invalid.evaluate(()=>opened),[]);
+});
 for(const width of [320,390,1366])test(`${width}px: order context, existing chat choices and new composer are usable`,async t=>{
  const page=await open(t,width,{chats:2});await expect(page.getByRole('heading',{name:'jewelrybuyer'})).toBeVisible();await expect(page.locator('.order-chat-choice')).toHaveCount(2);await noOverflow(page);
  await page.screenshot({path:`test-results/order-chat-${width}-choices.png`});

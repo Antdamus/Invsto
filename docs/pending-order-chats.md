@@ -1,0 +1,11 @@
+# Pending-order chat indicators
+
+`pending-order-chats.js` decorates the existing line chat link and buyer summary without rebuilding cards, moving scroll, or changing checkout selections. Blue indicates an existing chat; amber indicates an inbound message unread by the current viewer. Generic buyer conversations are labelled Buyer chat; only verified line/order references are labelled Item/Order chat. Buyer-level signals include all that buyer's conversations so shipping instructions are not missed merely because eBay referenced an older item.
+
+The bounded `list_pending_order_chat_markers` RPC requires both existing inventory and Triage access. It returns compact summaries for at most 500 supplied line IDs. Buyer identities are exact and case insensitive, seller accounts are isolated, and uncertain account configuration produces an explicit error. Outbound messages do not create inbound alerts. The user's existing Triage read watermark clears the marker; opening Pending Orders itself never changes read status.
+
+One Supabase channel observes message, conversation, link and owner-only read-state changes. Reads are debounced, serialized, and scoped to affected buyers; visible-page polling every 20 seconds plus focus/online/reconnect catches missed events. Failed refreshes retain known unread markers and visibly show that updates are unavailable. This reflects messages received by Invsto's existing eBay sync/notifications, not buyer typing or a zero-latency guarantee from eBay.
+
+Final bundle, no-inventory and selected admin closeout reviews recheck chat summaries and show inline unread reminders that continue updating while open. They do not close orders, send messages, or block legitimate completion. The badge opens Triage with the original order context; Triage only honors the requested conversation after its existing server-side buyer validation.
+
+Deploy migration `20261009050000_pending_order_chat_markers.sql` before publishing the page assets. New realtime publications retain existing table/RLS permissions. Tests cover buyer/account isolation, personal read state, new arrivals, outbound replies, reconnect/error recovery, preserved in-progress work, phone layouts and safe deep links.
