@@ -12,11 +12,40 @@ before(async()=>{
  browser=await(process.env.INVSTO_ITEM_BROWSER==='webkit'?webkit:chromium).launch();await mkdir(new URL('../test-results/customer-issues',import.meta.url),{recursive:true});
 });
 after(async()=>{await browser?.close();await new Promise(r=>{server.close(r);server.closeAllConnections();});});
+
+for(const width of [390,1366])test(`return receiving ${width}px: scan, verify, inspect with media`,async t=>{
+ const page=await open(t,width);
+ await page.evaluate(()=>{fixtureLookup={matches:[{case_id:'case-0',order_number:'01-12345-12345',buyer:'alex.watches',status:'open'}]};fixtureItems=[{id:'return-1',order_line_id:'line-1',item_title:'Cartier Panthère',expected_quantity:1,received_quantity:1,restocked_quantity:0,disposition:'quarantine'}];});
+ await page.getByRole('button',{name:'Scan return package',exact:true}).click();
+ await page.getByRole('textbox',{name:'Tracking, order number or return ID'}).fill('9400123456789012345678');await page.getByRole('button',{name:'Find package',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'Find the returned package'})).not.toBeVisible();
+ assert.equal((await page.evaluate(()=>fixtureWrites)).length,0,'scanning does not save or change stock');
+ await page.getByRole('button',{name:'Inspect received item',exact:true}).click();
+ await page.locator('#inspection-files').setInputFiles([{name:'clasp.jpg',mimeType:'image/jpeg',buffer:Buffer.from('photo')},{name:'inspection.mp4',mimeType:'video/mp4',buffer:Buffer.from('video')}]);
+ await page.getByRole('textbox',{name:'Inspection notes',exact:true}).fill('Clasp damaged; keep on hold and request repair.');
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+ await page.screenshot({path:`test-results/customer-issues/receiving-inspection-${width}.png`});
+ await page.getByRole('button',{name:'Save inspection',exact:true}).click();
+ await expect(page.locator('#issues-feedback')).toContainText('Saved.');
+ const write=(await page.evaluate(()=>fixtureWrites))[0];assert.equal(write.name,'inspect_customer_return');assert.equal(write.args._evidence.length,2);assert.equal(write.args._disposition,'quarantine');
+});
+test('ambiguous package lookup requires explicit choice and unknown tracking is recoverable',async t=>{
+ const page=await open(t,390);await page.evaluate(()=>fixtureLookup={matches:[{case_id:'case-0',order_number:'01-12345-12345',buyer:'alex',status:'open'},{case_id:'case-3',order_number:'02-12345-12345',buyer:'bob',status:'closed'}]});
+ await page.getByRole('button',{name:'Scan return package',exact:true}).click();await page.getByRole('textbox',{name:'Tracking, order number or return ID'}).fill('TRACK123456');await page.getByRole('button',{name:'Find package',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Choose the correct return'})).toBeVisible();await expect(page.locator('.return-match')).toHaveCount(2);assert.equal((await page.evaluate(()=>fixtureWrites)).length,0);
+ await page.evaluate(()=>fixtureLookup={matches:[]});await page.getByRole('button',{name:'Find package',exact:true}).click();await expect(page.getByRole('heading',{name:'No saved label matches'})).toBeVisible();await expect(page.locator('#return-package-code')).toHaveValue('TRACK123456');
+});
+
+test('return follow-up routes work or a decision to the selected employee',async t=>{
+ const page=await open(t,390);await page.locator('.issue-card').first().click();await page.getByRole('button',{name:'Create a task',exact:true}).click();
+ await page.getByLabel('Person responsible').selectOption('staff');await page.getByLabel('They need to').selectOption('decision');await page.getByRole('textbox',{name:'Instructions',exact:true}).fill('Review the clasp damage and advise before restocking.');await page.getByRole('button',{name:'Assign task',exact:true}).click();
+ await expect(page.locator('#issues-feedback')).toContainText('Saved.');const write=(await page.evaluate(()=>fixtureWrites))[0];assert.equal(write.name,'request_customer_return_followup');assert.equal(write.args._case_id,'case-0');assert.equal(write.args._owner,'staff');assert.equal(write.args._kind,'decision');
+});
 async function open(t,width,integration=false){
  const context=await browser.newContext({viewport:{width,height:900},hasTouch:width<800});t.after(()=>context.close());
  await context.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
  const page=await context.newPage();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
- await page.goto(origin+'/ebay-returns.html'+(integration?'?integration=1':''));for(const file of ['task-workflow.js','customer-issue-evidence.js','customer-issues.js','tests/fixtures/customer-issues-fixture.js'])await page.addScriptTag({url:origin+'/'+file});
+ await page.goto(origin+'/ebay-returns.html'+(integration?'?integration=1':''));for(const file of ['task-workflow.js','customer-issue-evidence.js','return-receiving.js','customer-issues.js','tests/fixtures/customer-issues-fixture.js'])await page.addScriptTag({url:origin+'/'+file});
  await page.waitForFunction(()=>window.fixtureReady);if(integration){await page.addScriptTag({url:origin+'/ebay-order-history.js'});await page.evaluate(()=>document.dispatchEvent(new Event('DOMContentLoaded')));await page.waitForFunction(()=>window.OGCustomerIssues.ready);await expect(page.locator('.issue-card')).toHaveCount(30);}return page;
 }
 for(const width of [320,390,768,1440])test(`Customer issues ${width}px: queue, detail, evidence and forms fit`,async t=>{

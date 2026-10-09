@@ -5456,3 +5456,4 @@ body.phone-camera-mode #pending-quick-actions { display: none; }
 .finance-sync-panel p { margin:5px 0 0; font-size:.86rem; line-height:1.5; }
 .finance-sync-panel button { flex-shrink:0; }
 @media(max-width:640px) { .finance-sync-panel { align-items:stretch; flex-direction:column; } .finance-sync-panel button { width:100%; min-height:44px; } }
+.fulfillment-blocked{display:block;padding:9px 12px;border:1px solid #d9877977;border-radius:10px;color:#f7b5a8;background:#472724;font-size:12px;font-weight:600;line-height:1.5;overflow-wrap:anywhere}

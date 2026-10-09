@@ -7972,13 +7972,13 @@ function renderReturnLineList() {
               <option value="damaged">Damaged</option>
               <option value="missing_parts">Missing parts</option>
               <option value="wrong_item">Wrong item</option>
-              <option value="unknown">Unknown</option>
+              <option value="unknown" selected>Not inspected yet</option>
             </select>
           </label>
           <label>
-            Disposition
+            Outcome
             <select data-return-disposition="${escapeHtml(line.id)}">
-              <option value="quarantine">Quarantine / hold</option>
+              <option value="quarantine">Hold for inspection</option>
               ${hasInventoryItem ? `<option value="restock">Restock to selected location</option>` : ""}
               <option value="damaged">Damaged / do not restock</option>
               <option value="wrong_item">Wrong item</option>
@@ -7988,6 +7988,7 @@ function renderReturnLineList() {
             </select>
           </label>
         </div>
+        ${!hasInventoryItem ? `<p class="return-inventory-notice">No linked inventory item. Keep this return on hold and create a task for inventory review.</p>` : ""}
         <label class="return-line-note">
           Item note
           <input type="text" data-return-line-note="${escapeHtml(line.id)}" placeholder="Condition note for this returned item" />
@@ -8039,6 +8040,7 @@ function openReturnIntakeModal(lineIds = []) {
   $("return-reason").value = "";
   $("return-tracking").value = "";
   $("return-ebay-id").value = "";
+  $("return-ebay-id").readOnly = false;
   $("return-destination-scan").value = "";
   $("return-note").value = "";
   $("return-evidence-photo").value = "";
@@ -8942,6 +8944,14 @@ async function confirmReturnIntake() {
     };
   });
 
+  const generalNote = $("return-note")?.value.trim();
+  if (returnItems.some(item => (item.received_quantity === 0 || ["damaged","wrong_item","missing","admin_review","refund_only"].includes(item.disposition) || ["damaged","missing_parts","wrong_item"].includes(item.condition_received)) && !item.notes.trim() && !generalNote)) {
+    if (errorEl) errorEl.textContent = "Explain what is missing, damaged, incorrect or needs a decision in the item or package notes.";
+    $("return-note")?.focus(); return;
+  }
+  if (returnItems.some(item => item.disposition === "restock" && !["new","used_good"].includes(item.condition_received))) {
+    if (errorEl) errorEl.textContent = "Inspect each restock item and select Good / sellable or New / unopened first."; return;
+  }
   const needsRestockDestination = returnItems.some((item) => item.disposition === "restock");
   if (needsRestockDestination && !state.returnDestinationLocation?.id) {
     if (errorEl) errorEl.textContent = "Choose a restock destination before saving restocked items.";
@@ -8966,14 +8976,18 @@ async function confirmReturnIntake() {
     }
     const { data, error } = await supabase.rpc("receive_customer_return", {
       _request_id: state.returnIntakeRequestId, _case_id: state.returnIntakeCaseId,
-      _items: returnItems, _evidence: evidencePhotos, _notes: $("return-note")?.value || null, _tracking: $("return-tracking")?.value || null,
+      _items: returnItems, _evidence: evidencePhotos, _notes: [$("return-reason")?.value ? `Intake reason: ${$("return-reason").selectedOptions[0].textContent}` : "", generalNote].filter(Boolean).join("\n") || null, _tracking: $("return-tracking")?.value || null,
     });
     if (error) throw error;
     const result = Array.isArray(data) ? data[0] || {} : data || {};
     setReturnIntakeStatus(`Return saved. ${Number(result.restocked_units || 0).toLocaleString()} unit${Number(result.restocked_units || 0) === 1 ? "" : "s"} restocked.`, "success");
     closeReturnIntakeModal();
+    state.busy = false;
+    if (isReturnsWorkbenchPage()) await window.OGCustomerIssues?.openReceivedCase(state.returnIntakeCaseId);
     if (!isReturnsWorkbenchPage()) await loadOrderHistory();
     await loadReturnQueue();
+    const notice = document.getElementById("issues-feedback");
+    if (notice) { notice.textContent = `Return saved · ${Number(result.restocked_units || 0)} units restocked. Held items remain out of sellable stock. Create a task below if someone needs to act, or scan the next package.`; notice.classList.remove("is-error"); }
   } catch (error) {
     console.error("Return intake failed:", error);
     if (errorEl) errorEl.textContent = error.message || "Could not save this return.";
@@ -11855,7 +11869,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       evidenceReceipts: lines => lines.flatMap(line => getHistoryLineVideoReceiptPhotos(line, getReturnVideoReceiptEventsForLine(line))),
       bindReceipt: bindReturnVideoReceiptLinks, hydrateReceipts: hydrateHistoryVideoReceiptThumbnails,
       loadMessages: loadReturnMessagesForTask, hydrateComplaint: hydrateReturnComplaintImageUrls,
-      signEvidence: signEventEvidencePhoto, openEvidence: openEvidencePhotoViewer, openIntake: openReturnIntakeModal});
+      signEvidence: signEventEvidencePhoto, openEvidence: openEvidencePhotoViewer, openIntake: openReturnIntakeModal, uploadEvidence: uploadReturnEvidenceFiles, isEvidenceFile: isAcceptedHistoryEvidenceFile});
     else { await loadReturnQueue(); await loadLatestReturnSyncSummary(); }
     drainQueuedHistoryReturnTransfers();
     drainQueuedHistoryReturnMessageTransfers();

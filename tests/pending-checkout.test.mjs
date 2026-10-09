@@ -249,7 +249,10 @@ test('failed availability clears old source and allows explicit manual staging',
 });
 
 test('quantity validation and staged shared stock prevent overpacking',async t=>{
-  const p=await open(t);await p.evaluate(()=>{rows[0].quantity=2;databaseLines[0].quantity=3;state.orders[0].quantity=3;});
+  const p=await open(t);await p.evaluate(()=>{rows[0].quantity=2;databaseLines[0].quantity=3;state.orders[0].quantity=3;
+    // This test validates manual quantities; automatic staging is covered separately.
+    scheduleQuantityAutoStage=()=>{};
+  });
   await scan(p);await p.waitForFunction(()=>!!state.selectedStockRow);await p.evaluate(()=>clearQuantityAutoStage());
   await p.locator('#fulfill-quantity').fill('1.5');await p.locator('#stage-current-line').click();
   assert.match(await p.locator('#fulfill-status').innerText(),/positive whole quantity/);
@@ -257,6 +260,27 @@ test('quantity validation and staged shared stock prevent overpacking',async t=>
   await p.locator('#fulfill-quantity').fill('2');await p.locator('#stage-current-line').click();await scan(p);
   await p.waitForFunction(()=>document.querySelector('#fulfill-status').textContent.includes('No available stock'));
   assert.equal(await p.evaluate(()=>state.stockRows.length),0);
+});
+
+test('refunded and cancelled items cannot be staged, selected in bulk or included in labels',async t=>{
+ const p=await open(t);
+ await p.evaluate(()=>{
+  state.employee.role='admin';
+  state.orders[0].order.raw_payload={orderPaymentStatus:'FULLY_REFUNDED',orderCancelStatus:'NONE_REQUESTED'};
+  state.selectedLine=state.orders[0];
+ });
+ assert.equal(await p.evaluate(()=>isNoInventoryCompletionLine(state.orders[0])),false);
+ assert.equal(await p.evaluate(()=>isAdminCloseoutSelectable(state.orders[0])),false);
+ await p.evaluate(()=>stageLineWithoutInventory());assert.equal(await p.evaluate(()=>state.stagedFulfillments.size),0);
+ await assert.rejects(p.evaluate(()=>checkShippingLabelEligibility([state.orders[0]])),/Refund reported/);
+ await p.evaluate(()=>{state.orders[0].order.raw_payload={orderPaymentStatus:'PAID',orderCancelStatus:'IN_PROGRESS',cancellation_review:{decision:'keep_pending'}};stageLineWithoutInventory();});
+ assert.equal(await p.evaluate(()=>state.stagedFulfillments.size),0);assert.equal(await p.evaluate(()=>isActiveCancellationReviewLine(state.orders[0])),true);
+});
+
+test('label opening rechecks the database when a cached card still says paid',async t=>{
+ const p=await open(t);await p.evaluate(()=>{supabase.rpc=async(name,args)=>{calls.push({name,args});return {data:[{order_number:'01-12345-12345',reason:'Refund reported by eBay'}]};};});
+ await assert.rejects(p.evaluate(()=>checkShippingLabelEligibility([state.orders[0]])),/Do not ship.*Refund/);
+ assert.equal(await p.evaluate(()=>calls.at(-1).name),'check_ebay_fulfillment_allowed');
 });
 
 test('own reserved stock is not subtracted again for another staged line',async t=>{

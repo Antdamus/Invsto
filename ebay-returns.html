@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="ebay-order-history.css" />
-  <link rel="stylesheet" href="customer-issues.css?v=20261009-7" />
+  <link rel="stylesheet" href="customer-issues.css?v=20261009-8" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -81,7 +81,7 @@
 
       <main class="content issues-workspace" id="issues-workspace">
         <header class="issues-heading"><div><span class="eyebrow">CUSTOMER CARE</span><h1>Customer issues</h1><p>A clear next step for every customer.</p></div>
-          <div class="issues-heading-actions"><button type="button" id="issues-refresh" class="secondary-btn" aria-label="Refresh customer issues">&#8635; <span>Refresh</span></button><button type="button" id="issues-sync" class="primary-btn" data-admin-only="true">Sync eBay</button><div id="task-updates-slot"></div></div>
+          <div class="issues-heading-actions"><button type="button" id="scan-return-package" class="primary-btn">Scan return package</button><button type="button" id="issues-refresh" class="secondary-btn" aria-label="Refresh customer issues">&#8635; <span>Refresh</span></button><button type="button" id="issues-sync" class="primary-btn" data-admin-only="true">Sync eBay</button><div id="task-updates-slot"></div></div>
         </header>
         <div id="issues-feedback" role="status" aria-live="polite"></div>
         <details class="issues-sync-health"><summary id="issues-health-summary">Checking connection...</summary><div id="issues-health-detail"></div></details>
@@ -105,18 +105,28 @@
     </div>
   </div>
 
+  <dialog id="return-package-dialog" class="return-package-dialog" aria-labelledby="return-package-title">
+    <div class="return-package-heading"><span class="eyebrow">RETURN RECEIVING</span><button type="button" id="close-return-package" class="secondary-btn" aria-label="Close package lookup">Close</button></div>
+    <h2 id="return-package-title">Find the returned package</h2>
+    <p>Scan its label to open the original order and saved item photos.</p>
+    <form id="return-package-form"><label for="return-package-code">Tracking, order number or return ID</label><input id="return-package-code" data-camera-scan data-camera-action="find-return-package" autocomplete="off" required placeholder="Scan or enter the code" /><button type="submit" id="find-return-package" class="primary-btn">Find package</button></form>
+    <div id="return-package-results" aria-live="polite"></div>
+  </dialog>
   <div id="return-intake-modal" class="history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="return-intake-title">
     <div class="history-modal-card return-intake-modal-card">
       <button id="close-return-intake-modal" type="button" class="modal-close-btn" aria-label="Close">x</button>
       <span class="eyebrow">Return Intake</span>
-      <h2 id="return-intake-title">Start return</h2>
+      <h2 id="return-intake-title">Receive &amp; inspect</h2>
       <p id="return-intake-subtitle">Record what came back before anything is placed into sellable inventory.</p>
 
       <div id="return-intake-status" class="history-label-status">
         Select returned lines, attach evidence photos, and choose the disposition.
       </div>
 
-      <div class="return-intake-grid">
+      <ol class="return-workflow"><li><b>1</b> Verify the items</li><li><b>2</b> Add evidence</li><li><b>3</b> Restock or hold</li></ol>
+      <h3 class="return-step-heading">1 · Compare with the original items</h3><p>Check the photos, quantity and condition for each item. Only choose restock after inspecting it.</p>
+      <div id="return-line-list" class="return-line-list"></div>
+      <details class="return-package-details" open><summary>Package details &amp; restock location</summary><div class="return-intake-grid">
         <label class="modal-field">
           Return reason
           <select id="return-reason">
@@ -147,12 +157,12 @@
         <button id="find-return-destination" type="button" class="secondary-btn">Find Location</button>
         <div id="return-destination-summary" class="return-destination-summary">No restock destination selected.</div>
       </div>
-      <div id="return-location-results" class="return-location-results"></div>
+      <div id="return-location-results" class="return-location-results"></div></details>
 
       <section class="return-photo-panel" aria-label="Return evidence photos">
         <div>
-          <span class="eyebrow">Return Photos</span>
-          <h3>Evidence Media</h3>
+          <span class="eyebrow">2 · SAVE THE EVIDENCE</span>
+          <h3>Photos &amp; videos</h3>
           <p>Photograph the item, packaging and condition. Nothing enters sellable stock until you choose to restock it.</p>
         </div>
         <details class="issues-other-camera"><summary>Use a connected camera station</summary><div class="return-camera-row">
@@ -186,17 +196,16 @@
         <div id="return-evidence-photo-list" class="history-extra-label-photo-list"></div>
       </section>
 
-      <div id="return-line-list" class="return-line-list"></div>
-
+      <h3 class="return-step-heading">3 · Review &amp; save</h3><p>Restock adds only the inspected quantity to the selected location. Held items stay out of sellable stock.</p>
       <label class="modal-field">
-        Return note
-        <textarea id="return-note" rows="3" placeholder="Condition, packaging, refund notes, or anything unusual"></textarea>
+        Package / inspection notes
+        <textarea id="return-note" rows="3" placeholder="Required for damage, missing items or a decision. These notes are saved with every selected item."></textarea>
       </label>
 
       <p id="return-error" class="history-error"></p>
       <div class="history-modal-actions">
         <button id="cancel-return-intake" type="button" class="secondary-btn">Cancel</button>
-        <button id="confirm-return-intake" type="button" class="primary-btn">Save Return</button>
+        <button id="confirm-return-intake" type="button" class="primary-btn">Save return &amp; outcome</button>
       </div>
     </div>
   </div>
@@ -225,7 +234,8 @@
   <script src="video-receipts.js?v=20261002-desktop-capture"></script>
   <script src="task-workflow.js?v=20261009-issue-actions"></script>
   <script src="customer-issue-evidence.js?v=20261009-2"></script>
-  <script src="customer-issues.js?v=20261009-7"></script>
-  <script src="ebay-order-history.js?v=20261009-customer-issues-2"></script>
+  <script src="return-receiving.js?v=20261009-1"></script>
+  <script src="customer-issues.js?v=20261009-8"></script>
+  <script src="ebay-order-history.js?v=20261009-return-receiving-1"></script>
 </body>
 </html>

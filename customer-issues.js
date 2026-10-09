@@ -99,7 +99,7 @@
   return `<section class="issue-detail-section"><h3>Who acts next</h3>${tasks.length?tasks.map(t=>`<div class="issue-task"><strong>${escape(root.OGTaskWorkflow.label(t,people,ctx.user.id))}</strong><p>${escape(t.question||t.title||'Review this case')}</p>
    <span class="issue-tag">${escape(nice(t.status))}</span>${t.due_at?` <span class="issue-tag">Internal follow-up: ${escape(date(t.due_at))}</span>`:''}
    <div class="issue-actions">${actions(t)}<a class="secondary-btn" href="${taskLink(t)}">Full task</a>${ctx.employee.role==='admin'?`<button class="secondary-btn" data-assign="${t.id}">Assign next step</button>`:''}</div></div>`).join(''):'<p class="issue-subtitle">No open internal task. Assign work or a decision if someone needs to act.</p>'}
-   ${ctx.employee.role==='admin'?'<button class="secondary-btn" data-assign="">Create a task</button>':''}<div id="issue-form-slot"></div></section>`;
+   ${ctx.employee.role==='admin'||(kind(detail.c)==='return'&&!['closed','cancelled'].includes(detail.c.status))?'<button class="secondary-btn" data-assign="">Create a task</button>':''}<div id="issue-form-slot"></div></section>`;
  }
  function caseHref(c){
   const id=encodeURIComponent(c.ebay_return_id||'');
@@ -232,9 +232,9 @@
   });
  }
  function assignForm(id){
-  const task=detail.tasks.find(t=>t.id===id);
+  const task=detail.tasks.find(t=>t.id===id),request=crypto.randomUUID();
   form(task?'Assign the next step':'Create a task',`<label>Person responsible<select name="owner" required><option value="">Choose a person</option>${people.map(p=>`<option value="${p.user_id}" ${p.user_id===task?.assigned_to_user_id?'selected':''}>${escape(p.display_name||p.email)}</option>`).join('')}</select></label><label>They need to<select name="kind"><option value="work">Do work</option><option value="decision">Make a decision / give instructions</option></select></label><label>Instructions<textarea name="note" required maxlength="10000">${escape(task?.question||'')}</textarea></label><label>Internal follow-up (optional)<input type="datetime-local" name="followup" /></label>`,'Assign task');
-  $('issue-action-form').onsubmit=e=>submitForm(e,async f=>checked(await db.rpc('assign_customer_issue',{_case_id:selected,_task_id:task?.id||null,_owner:f.get('owner'),_kind:f.get('kind'),_note:f.get('note'),_follow_up:f.get('followup')?new Date(f.get('followup')).toISOString():null})));
+  $('issue-action-form').onsubmit=e=>submitForm(e,async f=>checked(await db.rpc(!task&&kind(detail.c)==='return'?'request_customer_return_followup':'assign_customer_issue',{_case_id:selected,...(!task&&kind(detail.c)==='return'?{_request_id:request}:{_task_id:task?.id||null}),_owner:f.get('owner'),_kind:f.get('kind'),_note:f.get('note'),_follow_up:f.get('followup')?new Date(f.get('followup')).toISOString():null})));
  }
  async function submitForm(event,operation){
   event.preventDefault();if(saving)return;const el=event.currentTarget;const f=new FormData(el);saving=true;el.querySelectorAll('button').forEach(b=>b.disabled=true);
@@ -245,17 +245,30 @@
  function inspectionForm(id){
   const item=detail.items.find(i=>i.id===id),key=crypto.randomUUID();
   form('Inspect received item',`<p class="issue-subtitle">${escape(item.item_title)} · ${item.received_quantity-item.restocked_quantity} units not restocked</p><label>Inspection outcome<select name="outcome"><option value="quarantine">Keep on hold</option>${item.internal_item_id?'<option value="restock">Inspected and sellable · restock</option>':''}<option value="damaged">Damaged · do not restock</option><option value="wrong_item">Wrong item · needs review</option><option value="admin_review">Needs a decision</option></select></label><label>Restock location code (only for restocking)<input name="location" placeholder="Scan the tray or location code" /></label><label>Inspection notes<textarea name="note" required></textarea></label>`,'Save inspection');
+  const note=$('issue-action-form').querySelector('[name="note"]');
+  note.closest('label').insertAdjacentHTML('afterend','<div class="inspection-evidence"><label>Inspection photos / videos<input id="inspection-files" type="file" accept="image/*,video/*" multiple /></label><button type="button" class="secondary-btn" id="inspection-camera">Take a photo</button><input id="inspection-camera-file" type="file" accept="image/*" capture="environment" hidden /><p id="inspection-file-summary" class="issue-subtitle">Add close-ups of any damage, the item and its packaging.</p></div>');
+  const location=$('issue-action-form').querySelector('[name="location"]');location.id='inspection-location';location.setAttribute('data-camera-scan','');
+  const outcome=$('issue-action-form').querySelector('[name="outcome"]');
+  const showLocation=()=>{location.closest('label').hidden=outcome.value!=='restock';location.required=outcome.value==='restock';};outcome.onchange=showLocation;showLocation();
+  let uploaded=null,uploadedFiles=[];
+  $('inspection-camera').onclick=()=>$('inspection-camera-file').click();
+  $('inspection-camera-file').onchange=()=>{const dt=new DataTransfer();[...$('inspection-files').files,...$('inspection-camera-file').files].forEach(f=>dt.items.add(f));$('inspection-files').files=dt.files;$('inspection-camera-file').value='';$('inspection-files').dispatchEvent(new Event('change'));};
+  $('inspection-files').onchange=()=>{$('inspection-file-summary').textContent=[...$('inspection-files').files].map(f=>f.name).join(' · ')||'No new files selected.';};
   $('issue-action-form').onsubmit=e=>submitForm(e,async f=>{
    let locationId=null;if(f.get('outcome')==='restock'){
     const choices=checked(await db.from('locations').select('id').eq('location_code',String(f.get('location')).trim()).eq('active',true).limit(2));
     if(choices.length!==1)throw Error('Scan one exact active location code.');locationId=choices[0].id;
    }
-   checked(await db.rpc('inspect_customer_return',{_request_id:key,_item_id:id,_disposition:f.get('outcome'),_location:locationId,_note:f.get('note')}));
+   const files=[...$('inspection-files').files];
+   if(files.length>30||files.some(f=>!ctx.isEvidenceFile(f)))throw Error('Choose up to 30 photos or videos.');
+   if(!uploaded||files.length!==uploadedFiles.length||files.some((f,i)=>f!==uploadedFiles[i])){uploaded=await ctx.uploadEvidence(files,[detail.c.order_number]);uploadedFiles=files;}
+   checked(await db.rpc('inspect_customer_return',{_request_id:key,_item_id:id,_disposition:f.get('outcome'),_location:locationId,_note:f.get('note'),_evidence:uploaded}));
   });
  }
  async function receive(){
   const ids=detail.lines.filter(l=>l.line_status==='fulfilled'&&(!detail.items.find(i=>i.order_line_id===l.id)||detail.items.some(i=>i.order_line_id===l.id&&i.received_quantity<i.expected_quantity))).map(l=>l.id);
   ctx.openIntake(ids);ctx.state.returnIntakeCaseId=selected;$('return-ebay-id').value=detail.c.ebay_return_id||'';$('return-tracking').value=detail.c.return_tracking_number||'';
+  $('return-ebay-id').readOnly=true;
  }
  async function media(index){
   const p=detail?.photos?.[index];if(!p)return;
@@ -264,6 +277,7 @@
  }
  async function init(context){
   ctx=context;db=ctx.supabase;ready=true;
+  root.OGReturnReceiving?.init({db,ctx,openCase,feedback});
   try{people=checked(await db.from('employees').select('user_id,email,display_name,role,active').eq('active',true).order('display_name')).filter(p=>p.user_id);}catch{people=[ctx.employee];}
   $('issues-workspace').addEventListener('click',e=>{
    const b=e.target.closest('button');if(!b||saving)return;
@@ -312,5 +326,5 @@
    }catch(error){target.textContent=error.message||'No exact order found.';}
   };
  }
- root.OGCustomerIssues={init,refresh,get ready(){return ready;},testing:{kind,nextText,closed,date,caseHref}};
+ root.OGCustomerIssues={init,refresh,openReceivedCase:id=>openCase(id),get ready(){return ready;},testing:{kind,nextText,closed,date,caseHref}};
 })(globalThis);

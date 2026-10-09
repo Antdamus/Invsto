@@ -21,7 +21,7 @@ before(async()=>{
  added_by uuid,confirmation_email text,confirmation_method text,confirmed_at timestamptz,last_updated timestamptz,locked_by uuid,locked_at timestamptz);
  create table stock_transactions(id uuid primary key default gen_random_uuid(),item_id uuid,location_id uuid,quantity int,action_type text,confirmed_at timestamptz,user_id uuid,email text,notes text,source_transaction_id uuid,method text,timestamp timestamptz);
  create table metadata(id text primary key,inventory_version text,changed_item_ids text[],updated_at timestamptz);insert into metadata(id) values('inventory');
- create table ebay_orders(id uuid primary key,order_number text,buyer_username text,status text);
+ create table ebay_orders(id uuid primary key,order_number text,buyer_username text,status text,tracking_number text,label_metadata jsonb);
  create table ebay_order_lines(id uuid primary key,order_id uuid,item_number text,item_title text,quantity int,fulfilled_quantity int,line_status text,internal_item_id uuid,stock_location_row_id uuid,location_id uuid,stock_transaction_id uuid,transaction_id text);
  create function task_workflow_reviewer(t jsonb) returns uuid language sql stable as $$select '${id(2)}'::uuid$$;
  revoke all on function task_workflow_reviewer(jsonb) from public,anon,authenticated;
@@ -56,6 +56,11 @@ before(async()=>{
  await db.exec(await sqlFile('20261009055000_customer_issue_sync_alerts.sql'));
  await db.exec(await sqlFile('20261009057000_customer_issue_order_links.sql'));
  await db.exec(await sqlFile('20261009058000_customer_issue_evidence_links.sql'));
+ const packaging=await sqlFile('20261008020000_packaging_workspace.sql');
+ await db.exec(packaging.slice(packaging.indexOf('create function public.packaging_normalize_tracking'),packaging.indexOf('create index packaging_orders_tracking_idx')));
+ await db.exec(`create table ebay_order_label_events(order_ids uuid[],action text,label_metadata jsonb);`);
+ await db.exec(await sqlFile('20261009059000_return_receiving_workflow.sql'));
+
 });
 after(async()=>db?.close());
 beforeEach(async()=>{
@@ -63,7 +68,7 @@ beforeEach(async()=>{
  truncate customer_issue_sync_alert_recipients,customer_issue_sync_incidents,ebay_issue_sync_jobs,customer_return_receipts,ebay_return_task_events,ebay_return_tasks,ebay_return_events,ebay_return_items,ebay_return_cases,stock_transactions,item_stock_locations,ebay_order_lines,ebay_orders,task_notifications,task_followers cascade;
  update ebay_issue_worker set monitoring_started_at=now(),last_run_finished_at=now(),last_manual_retry_at=null;
  update ebay_issue_sync_lanes set status='ok',error_count=0,error=null,last_progress_at=now();
- insert into ebay_orders values('${id(10)}','01-12345-12345','buyer.one','fulfilled');
+ insert into ebay_orders(id,order_number,buyer_username,status) values('${id(10)}','01-12345-12345','buyer.one','fulfilled');
  insert into ebay_order_lines values('${id(11)}','${id(10)}','287000000001','Watch',2,2,'fulfilled','${id(20)}',null,null,null,'local-tx');
  insert into ebay_return_cases(id,order_id,order_number,ebay_return_id,status,source_lane,issue_kind,ebay_status,synced_at,ebay_due_at)
  values('${id(100)}','${id(10)}','01-12345-12345','12345','open','return','return','OPEN',now(),'2026-10-15T18:00:00Z');
@@ -74,6 +79,49 @@ const receive=(key=200,qty=1,disposition='restock',caseId=100)=>scalar('select r
  id(key),id(caseId),JSON.stringify([{order_line_id:id(11),received_quantity:qty,condition_received:'used_good',disposition,destination_location_id:disposition==='restock'?id(30):null,notes:'Inspected'}]),
  '[{"bucket":"ebay-return-evidence","path":"test/photo.jpg"}]','Received carefully','TRACK1']);
 const stock=()=>scalar('select coalesce(sum(quantity),0)::int v from item_stock_locations');
+
+test('package scan matches exact return labels, original labels and order numbers; ambiguity is preserved',async()=>{
+ await db.exec(`update ebay_return_cases set return_tracking_number='9400123456789012345678';update ebay_orders set tracking_number='1Z1234567890123456'`);
+ let result=await scalar('select lookup_customer_return_package($1) v',['420123459400123456789012345678']);
+ assert.equal(result.matches[0].case_id,id(100));assert.equal(result.matches[0].matched_by,'return_tracking');
+ result=await scalar('select lookup_customer_return_package($1) v',['1Z1234567890123456']);assert.equal(result.matches.length,1);
+ await db.exec(`insert into ebay_return_cases(id,order_id,order_number,status,source_lane) values('${id(101)}','${id(10)}','01-12345-12345','closed','return')`);
+ result=await scalar('select lookup_customer_return_package($1) v',['01-12345-12345']);assert.equal(result.matches.length,2);
+ result=await scalar('select lookup_customer_return_package($1) v',['9400123456789012345678']);assert.equal(result.matches.length,1,'exact return label takes precedence');
+ assert.equal(await stock(),0);
+});
+test('unregistered return offers fulfilled original order; unknown code never creates a case',async()=>{
+ await db.exec('delete from ebay_return_items;delete from ebay_return_cases');
+ const result=await scalar('select lookup_customer_return_package($1) v',['01-12345-12345']);assert.equal(result.matches[0].case_id,null);assert.equal(result.matches[0].order_id,id(10));
+ assert.equal((await scalar('select lookup_customer_return_package($1) v',['NOTKNOWN'])).matches.length,0);
+ assert.equal(await scalar('select count(*)::int v from ebay_return_cases'),0);
+ await db.exec("select set_config('test.access','no',false)");await assert.rejects(scalar('select lookup_customer_return_package($1) v',['01-12345-12345']),/access required/);
+});
+test('package notes survive blank item notes; problem outcomes require an explanation',async()=>{
+ const payload=[{order_line_id:id(11),received_quantity:2,condition_received:'damaged',disposition:'damaged',notes:''}];
+ await assert.rejects(scalar('select receive_customer_return($1,$2,$3,$4,$5) v',[id(200),id(100),JSON.stringify(payload),'[{"path":"photo.jpg"}]','']),/Explain/);
+ await scalar('select receive_customer_return($1,$2,$3,$4,$5) v',[id(200),id(100),JSON.stringify(payload),'[{"path":"photo.jpg"}]','Clasp broken; do not sell']);
+ assert.equal(await scalar('select notes v from ebay_return_items'),'Clasp broken; do not sell');assert.equal(await scalar('select notes v from ebay_return_events'),'Clasp broken; do not sell');assert.equal(await stock(),0);
+ assert.equal(await scalar('select status v from ebay_return_cases'),'needs_review');
+});
+test('later inspection retains new photos and video, with idempotent restocking',async()=>{
+ await receive(200,1,'quarantine');const item=await scalar('select id v from ebay_return_items');
+ const evidence=[{bucket:'ebay-return-evidence',path:'inspection/photo.jpg'},{bucket:'ebay-return-evidence',path:'inspection/video.mp4',mime_type:'video/mp4'}];
+ const args=[id(201),item,'restock',id(30),'Verified serial and condition',JSON.stringify(evidence)];
+ await scalar('select inspect_customer_return($1,$2,$3,$4,$5,$6) v',args);await scalar('select inspect_customer_return($1,$2,$3,$4,$5,$6) v',args);
+ assert.equal(await stock(),1);assert.deepEqual(await scalar("select evidence_photos v from ebay_return_events where action='restocked'"),evidence);
+});
+
+test('receiving employee can request follow-up once, with the same case and order evidence',async()=>{
+ await db.exec("select set_config('test.admin','no',false)");
+ const args=[id(250),id(100),id(2),'decision','Please review the damaged clasp'];
+ const task=await scalar('select request_customer_return_followup($1,$2,$3,$4,$5) v',args);
+ assert.equal(await scalar('select request_customer_return_followup($1,$2,$3,$4,$5) v',args),task);
+ const saved=(await db.query('select * from ebay_return_tasks where id=$1',[task])).rows[0];
+ assert.equal(saved.assigned_to_user_id,id(2));assert.equal(saved.metadata.request_kind,'decision');assert.deepEqual(saved.order_line_ids,[id(11)]);
+ assert.equal(await scalar('select count(*)::int v from ebay_return_task_events'),1);assert.equal(await stock(),0);
+ await db.exec("select set_config('test.access','no',false)");await assert.rejects(scalar('select request_customer_return_followup($1,$2,$3,$4,$5) v',[id(251),...args.slice(1)]),/access required/);
+});
 
 test('order link repair connects unique listings, preserves work and stock, and audits once',async()=>{
  await db.exec(`delete from ebay_return_items;update ebay_return_cases set buyer_username='buyer.one',raw_payload='{"apiExtractedDetails":{"itemNumber":"287000000001","transactionId":"different-provider-tx","quantity":1}}';

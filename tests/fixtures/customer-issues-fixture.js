@@ -6,9 +6,9 @@
  const line={id:'line-1',item_title:'Cartier Panthère',item_number:'287000000001',quantity:1,fulfilled_quantity:1,line_status:'fulfilled'};
  window.fixtureCalls=[];window.fixtureWrites=[];window.fixtureHealth=null;window.SUPABASE_URL='https://project.supabase.co';
  window.fixtureUpdateCase=changes=>{rows[0]={...rows[0],...changes,updated_at:new Date(Date.now()+1000).toISOString()};};
- window.fixtureSetTasks=value=>{tasks=value;};window.fixtureEvidence=null;
+ window.fixtureSetTasks=value=>{tasks=value;};window.fixtureEvidence=null;window.fixtureLookup={matches:[]};window.fixtureItems=[];
  function query(table){let filters=[],one=false,lim=999;const q={select(){return q;},eq(k,v){filters.push([k,v]);return q;},in(){return q;},order(){return q;},overlaps(){return q;},contains(){return q;},or(){return q;},not(){return q;},range(){return q;},limit(n){lim=n;return q;},single(){one=true;return q;},maybeSingle(){one=true;return q;},then(resolve){
-  fixtureCalls.push({table});let data=table==='employees'?people:table==='ebay_return_cases'?rows:table==='ebay_return_tasks'?tasks:table==='ebay_order_lines'?[line]:table==='ebay_return_events'?[{id:'event-1',return_case_id:'case-0',action:'updated',notes:'The customer included the certificate. Inspect the clasp and compare with the original photos.',created_at:now,signed_by_email:'sandra@example.test',evidence_photos:[{bucket:'evidence',path:'watch.svg'}]}]:[];
+  fixtureCalls.push({table});let data=table==='employees'?people:table==='ebay_return_cases'?rows:table==='ebay_return_tasks'?tasks:table==='ebay_order_lines'?[line]:table==='ebay_return_items'?window.fixtureItems:table==='ebay_return_events'?[{id:'event-1',return_case_id:'case-0',action:'updated',notes:'The customer included the certificate. Inspect the clasp and compare with the original photos.',created_at:now,signed_by_email:'sandra@example.test',evidence_photos:[{bucket:'evidence',path:'watch.svg'}]}]:[];
   if(table==='employees'||table==='ebay_return_cases'||table==='ebay_return_tasks')data=data.filter(r=>filters.every(([k,v])=>r[k]===v));
   return Promise.resolve({data:one?data[0]:data.slice(0,lim),error:null}).then(resolve);
  }};return q;}
@@ -19,12 +19,13 @@
   }
   if(name==='customer_issue_sync_health')return {data:window.fixtureHealth||{lanes:['return','inquiry','case','payment_dispute'].map(lane=>({lane,status:'ok',last_success_at:now})),queued:0,retrying:0}};
   if(name==='customer_issue_evidence')return {data:window.fixtureEvidence||{case:rows[0],lines:[line],bag_photos:[{bucket:'evidence',path:'item.png'}],completion_events:[],packaging_photos:[],certificates:[],case_messages:[{direction:'inbound',message_body:'The clasp needs checking.',sent_at:now}],buyer_messages:[]}};
+  if(name==='lookup_customer_return_package')return {data:window.fixtureLookup};
   fixtureWrites.push({name,args});if(name==='advance_task_workflow')tasks[0].status='completed_by_employee';
   return {data:{ok:true}};
  }};
  const image='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="240"><rect fill="#d5d2b9" width="300" height="240"/><rect x="127" y="12" width="46" height="216" rx="20" fill="#969994"/><rect x="104" y="70" width="92" height="100" rx="20" fill="#dfdfd1" stroke="#747773" stroke-width="9"/><text x="150" y="126" text-anchor="middle" fill="#454d40" font-size="15">CARTIER</text></svg>');
  window.supabase=db;
  if(!location.search.includes('integration')) await OGCustomerIssues.init({supabase:db,user:{id:'me'},employee:people[0],state:{busy:false},lineSelect:'*',normalizeLine:x=>x,mergeLines:()=>{},loadOrderEvents:async()=>[],
- renderReceipt:()=>`<div class="return-task-video-receipt"><img src="${image}" alt="Original sold item screenshot" style="height:190px;max-width:100%;object-fit:contain"/><p>Original sold item · bag 017</p></div>`,renderComplaint:()=>'<p>Buyer says the clasp needs inspection.</p>',renderMessages:()=>'<p>Buyer: Please check the clasp.</p>',bindReceipt:()=>{},hydrateReceipts:async()=>{},loadMessages:async()=>{},hydrateComplaint:async()=>{},signEvidence:async()=>image,openEvidence:()=>{document.querySelector('#issues-feedback').textContent='Full evidence viewer opened';},openIntake:()=>{document.querySelector('#return-intake-modal').classList.remove('hidden');}});
+ renderReceipt:()=>`<div class="return-task-video-receipt"><img src="${image}" alt="Original sold item screenshot" style="height:190px;max-width:100%;object-fit:contain"/><p>Original sold item · bag 017</p></div>`,renderComplaint:()=>'<p>Buyer says the clasp needs inspection.</p>',renderMessages:()=>'<p>Buyer: Please check the clasp.</p>',bindReceipt:()=>{},hydrateReceipts:async()=>{},loadMessages:async()=>{},hydrateComplaint:async()=>{},signEvidence:async()=>image,openEvidence:()=>{document.querySelector('#issues-feedback').textContent='Full evidence viewer opened';},isEvidenceFile:f=>/^(image|video)\//.test(f.type),uploadEvidence:async files=>files.map(f=>({bucket:'ebay-return-evidence',path:'test/'+f.name,mime_type:f.type})),openIntake:()=>{document.querySelector('#return-intake-modal').classList.remove('hidden');}});
  window.fixtureReady=true;
 })();

@@ -639,8 +639,28 @@ function getLineCancellationSignal(line = {}) {
 
 function isActiveCancellationReviewLine(line = {}) {
   return isOpenOrderLine(line)
-    && Boolean(getLineCancellationSignal(line))
-    && !isCancellationReviewKeptPending(line);
+    && Boolean(getLineFulfillmentBlock(line));
+}
+
+function getLineFulfillmentBlock(line) {
+  if (!line) return "Select an order item.";
+  if (["cancelled","canceled","closed","archived","refunded"].includes(String(getOrderFromLine(line)?.status || "").toLowerCase())) return "Order cancelled or closed · do not ship";
+  if (["cancelled","canceled","closed","skipped","refunded"].includes(String(line.line_status || "").toLowerCase())) return "Item cancelled or closed · do not ship";
+  const status = getLineEbayApiStatus(line);
+  const finance = getFinancePayload(line);
+  if (Array.isArray(finance?.transactions) && finance.transactions.some(t => String(t.transactionType || "").toUpperCase() === "REFUND" && !["FAILED","CANCELLED","CANCELED","REJECTED"].includes(String(t.transactionStatus || "").toUpperCase()))) return "Refund recorded by eBay Finances · do not ship";
+  if (["REFUNDED","FULLY_REFUNDED","PARTIALLY_REFUNDED","REFUND_PENDING","PENDING_REFUND"].includes(status.paymentStatus)) return "Refund reported · completion and labels blocked";
+  if (status.cancelStatus && !["NONE_REQUESTED","NOT_REQUESTED","NO_CANCEL","NOT_CANCELLED","CANCEL_REJECTED","CANCEL_CLOSED_WITHOUT_REFUND"].includes(status.cancelStatus)) return "Cancellation reported · completion and labels blocked";
+  if (["UNPAID","PENDING","FAILED","PAYMENT_FAILED","PARTIALLY_PAID"].includes(status.paymentStatus)) return "Payment not confirmed · do not ship";
+  return "";
+}
+
+async function checkShippingLabelEligibility(lines) {
+  const blocked = lines.find(line => getLineFulfillmentBlock(line));
+  if (blocked) throw new Error(getLineFulfillmentBlock(blocked));
+  const {data,error} = await supabase.rpc("check_ebay_fulfillment_allowed", {_line_ids: [...new Set(lines.map(line => line.id))]});
+  if (error) throw error;
+  if (data?.length) throw new Error(`Do not ship ${data[0].order_number}: ${data[0].reason}. Refresh the queue to review this order.`);
 }
 
 function getActiveCancellationReviewLines(lines = state.orders) {
@@ -4063,6 +4083,7 @@ function isOpenOrderLine(line) {
 
 function isNoInventoryCompletionLine(line) {
   return isOpenOrderLine(line)
+    && !getLineFulfillmentBlock(line)
     && String(line.line_status || "pending").toLowerCase() === "pending"
     && Number(line.fulfilled_quantity || 0) === 0;
 }
@@ -4081,6 +4102,7 @@ function getCancelableOrderLines(line = state.selectedLine) {
 
 function isAdminCloseoutSelectable(line) {
   return isAdminUser()
+    && !getLineFulfillmentBlock(line)
     && isOpenOrderLine(line);
 }
 
@@ -4117,7 +4139,7 @@ function buildEbayBulkLabelUrl(orderNumbers = []) {
   return `${EBAY_BULK_LABEL_BASE_URL}?t=${unique.map(encodeURIComponent).join(",")}`;
 }
 
-function openEbayLabelPagesForOrderNumbers(orderNumbers = [], { selectedLineCount = 0 } = {}) {
+async function openEbayLabelPagesForOrderNumbers(orderNumbers = [], { selectedLineCount = 0 } = {}) {
   const unique = [...new Set((orderNumbers || []).map(normalizeEbayOrderNumber).filter(Boolean))];
   if (!unique.length) {
     setStatus("Select at least one eBay order with an order number before opening labels.", "error");
@@ -4128,7 +4150,15 @@ function openEbayLabelPagesForOrderNumbers(orderNumbers = [], { selectedLineCoun
   // selection in the bulk-label flow instead of collapsing it to a single link.
   const useBulk = selectedLineCount > 1 || unique.length > 1;
   const url = useBulk ? buildEbayBulkLabelUrl(unique) : buildEbaySingleLabelUrl(unique[0]);
-  if (url) window.open(url, "_blank", "noopener,noreferrer");
+  const lines = state.orders.filter(line => unique.includes(normalizeEbayOrderNumber(getOrderFromLine(line)?.order_number)));
+  if (!lines.length) return setStatus("Refresh and select the saved order before opening labels.", "error");
+  // Open from the user's click, then navigate only after the database approves.
+  const popup = window.open("about:blank", "_blank");
+  if (popup) popup.opener = null;
+  try { await checkShippingLabelEligibility(lines); }
+  catch (error) { popup?.close(); return setStatus(error.message || "Could not verify this order. Labels were not opened.", "error"); }
+  if (url && popup) popup.location.replace(url);
+  else if (!popup) return setStatus("Allow popups, then click the label button again.", "error");
 
   const orderWord = unique.length === 1 ? "order" : "orders";
   const selection = selectedLineCount > 0 ? `${selectedLineCount} selected item${selectedLineCount === 1 ? "" : "s"} across ` : "";
@@ -4706,9 +4736,8 @@ function renderOrders(options = {}) {
       const lineCancellationDetailsActionMarkup = lineCancellationDetailsUrl
         ? `<a class="secondary-btn buyer-line-action-btn cancellation-details-btn" href="${escapeHtml(lineCancellationDetailsUrl)}" target="_blank" rel="noopener" title="Open eBay cancellation details${lineCancellationCaseId ? ` for cancel ID ${escapeHtml(lineCancellationCaseId)}` : ""}">eBay cancel</a>`
         : "";
-      const lineCancellationReviewActionMarkup = isActiveCancellationReviewLine(line)
-        ? `<button type="button" class="secondary-btn buyer-line-action-btn cancellation-review-keep-btn" data-line-keep-pending="${escapeHtml(line.id)}" title="Mark this eBay cancellation state reviewed and keep the order in Pending Orders">Keep pending</button>`
-        : "";
+      const lineCancellationReviewActionMarkup = getLineFulfillmentBlock(line)
+        ? `<span class="fulfillment-blocked" role="status">${escapeHtml(getLineFulfillmentBlock(line))}</span>` : "";
       const lineUrgency = canActOnLine ? getOrderUrgency(order.ship_by_date) : null;
       const lineDueTone = lineUrgency?.level || "neutral";
       const orderLineKey = normalizeEbayOrderNumber(order.order_number) || order.order_number || order.id || line.order_id || line.id;
@@ -4773,15 +4802,15 @@ function renderOrders(options = {}) {
               ${renderFinanceBadgeMarkup(lineFinanceStatus, "buyer-line-finance-pill")}
               ${lineEbayApiStatus ? `<span class="buyer-line-sync-warning ${escapeHtml(lineEbayApiStatus.tone)}" title="${escapeHtml(lineEbayApiStatus.title)}"><i data-lucide="${escapeHtml(lineEbayApiStatus.icon)}"></i>${escapeHtml(lineEbayApiStatus.label)}</span>` : ""}
             </span>
+            ${lineCancellationReviewActionMarkup}
             <small class="buyer-line-price">Line total ${formatMoney(line.total_price || line.sold_for || 0)}</small>
           </span>
           <span class="buyer-line-actions">
-            <button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) ? "" : "disabled"}>Get Label</button>
+            <button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) && !getLineFulfillmentBlock(line) ? "" : "disabled"}>Get Label</button>
             ${lineTaskActionMarkup}
             ${renderItemFoundActions(line)}
             ${lineTaskVideoMarkup}
             ${lineCancellationDetailsActionMarkup}
-            ${lineCancellationReviewActionMarkup}
             <button type="button" class="secondary-btn buyer-line-action-btn refund-btn" data-line-refund="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Refunded</button>
             <button type="button" class="secondary-btn buyer-line-action-btn danger-btn" data-line-cancel="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Cancel</button>
           </span>
@@ -7919,6 +7948,7 @@ function stageCurrentLine({ autoAdvance = false, autoReview = false } = {}) {
   const remainingLineQty = getRemainingLineQuantity(line);
 
   if (!line) return setStatus("Select an eBay order first.", "error");
+  if (getLineFulfillmentBlock(line)) return setStatus(getLineFulfillmentBlock(line), "error");
   if (!state.checkoutStoreId) return setStatus("Select the checkout store first.", "error");
   if (!item) return setStatus("Scan or select the inventory item first.", "error");
   if (!row) return setStatus("Scan or select the source location.", "error");
@@ -7948,6 +7978,7 @@ function stageCurrentLine({ autoAdvance = false, autoReview = false } = {}) {
 function stageLineWithoutInventory() {
   if (state.busy || !requireCheckoutStore()) return;
   const line = state.selectedLine;
+  if (getLineFulfillmentBlock(line)) return setStatus(getLineFulfillmentBlock(line), "error");
   if (!line || !isOpenOrderLine(line) || getRemainingLineQuantity(line) <= 0) {
     return setStatus("Select a pending order line first.", "error");
   }
@@ -8652,9 +8683,11 @@ function getOrderShippingLabelController() {
   return orderShippingLabelController;
 }
 
-function openOrderShippingLabels(lines, picker = "") {
+async function openOrderShippingLabels(lines, picker = "") {
   if (state.busy) return;
   if (!lines.length) return setStatus("Select an order for the shipping labels.", "error");
+  try { await checkShippingLabelEligibility(lines); }
+  catch (error) { return setStatus(error.message || "Could not verify the order. Please retry.", "error"); }
   getOrderShippingLabelController()?.open(lines, picker);
 }
 
@@ -9610,6 +9643,7 @@ async function openWorkerNoInventoryModal(options = {}) {
     setStatus("Select an eBay order first.", "error");
     return;
   }
+  if (getLineFulfillmentBlock(line)) return setStatus(getLineFulfillmentBlock(line), "error");
   if (!requireCheckoutStore()) return;
   if (getRemainingLineQuantity(line) <= 0 || !isOpenOrderLine(line)) {
     setStatus("This eBay line is already closed.", "error");
@@ -9720,6 +9754,8 @@ async function confirmWorkerNoInventoryCompletion() {
     state.busy = true;
     if (errorEl) errorEl.textContent = "";
     if (confirmButton) confirmButton.disabled = true;
+    const blocked = selectedLines.find(getLineFulfillmentBlock);
+    if (blocked) throw new Error(getLineFulfillmentBlock(blocked));
     const currentBuyerKey = getBuyerKey(selectedLines[0]);
     const selectedPhotoCount = getSelectedNoInventoryEvidencePhotos().length;
     setNoInventoryPhotoStatus(
@@ -10415,6 +10451,8 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
       ? [state.selectedLine?.order_id]
       : staged.map((entry) => entry.line?.order_id))
       .filter(Boolean))];
+    const blocked = (staged.length ? staged.map(entry => entry.line) : [state.selectedLine]).find(getLineFulfillmentBlock);
+    if (blocked) throw new Error(getLineFulfillmentBlock(blocked));
     const changedItemIds = [];
     if (liveItems.length && !staged.length) {
       if (!state.selectedLine) throw new Error("Select the eBay order line before confirming the live-sale bag.");
