@@ -30,6 +30,8 @@ Version 1.0.6 stops receipt screenshot retransmissions as soon as OG accepts the
 
 ## Use
 
+Version 1.0.9 keeps Invsto in front after cancellation/refund closeout while refreshing an existing eBay queue in the background. Cancellation screenshots go to the matching Invsto order without resetting other forms. Captures reject a changed/hidden source tab, preserve the original PNG, and keep a browser recovery copy until the signed cancellation saves successfully. Reopening that order's cancellation form restores unfinished screenshot drafts. Multiple captures preserve earlier photos and the operator's note. “Proof ready” means staged in the form; **Sign and Mark Canceled** permanently stores the selected screenshots with the signed Order History audit. Update the website and extension together, reload the extension, and refresh both eBay and Invsto tabs.
+
 Version 1.0.8 only offers and forwards order reports when the selected eBay URL filter is Awaiting shipment. Navigation text on All orders no longer qualifies. The website also rejects reports from other pages and files containing already-shipped rows before importing anything; database guards protect older clients too.
 
 Version 1.0.7 keeps cancellation detection on order-management pages and excludes Live Stream Manager, where chat text can otherwise create a false cancellation banner.

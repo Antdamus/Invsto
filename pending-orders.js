@@ -9282,6 +9282,10 @@ async function persistWorkerCancelEvidencePhotos(selectedLineIds = []) {
 
   for (let index = 0; index < selectedPhotos.length; index += 1) {
     const photo = selectedPhotos[index];
+    if (photo.savedCancellationEvidence) {
+      savedPhotos.push({ ...photo.savedCancellationEvidence, sort_order: index });
+      continue;
+    }
     const blob = await getEvidencePhotoBlob(photo, index);
     const extension = getNoInventoryEvidenceFileExtension(photo, blob);
     const originalName = safeNoInventoryEvidenceSegment(String(photo.path || photo.label || "").split("/").pop(), `${evidenceLabel}-photo-${index + 1}`);
@@ -9302,7 +9306,7 @@ async function persistWorkerCancelEvidencePhotos(selectedLineIds = []) {
     if (error) throw new Error(error.message || `Could not save ${isRefund ? "refund" : "cancellation"} photo ${index + 1}.`);
 
     const derivativeData = await createAndUploadEvidenceDerivatives(blob, NO_INVENTORY_EVIDENCE_BUCKET, destinationPath);
-    savedPhotos.push({
+    const savedPhoto = {
       bucket: NO_INVENTORY_EVIDENCE_BUCKET,
       path: destinationPath,
       ...derivativeData,
@@ -9311,10 +9315,13 @@ async function persistWorkerCancelEvidencePhotos(selectedLineIds = []) {
       capture_job_id: photo.capture_job_id || null,
       sort_order: index,
       label: photo.label || `${isRefund ? "Refund" : "Cancellation"} photo ${index + 1}`,
+      metadata: { ...photo.metadata, transferId: photo.transferId || null },
       mime_type: blob.type || photo.mime_type || null,
       size_bytes: blob.size || photo.size_bytes || 0,
       created_at: new Date().toISOString(),
-    });
+    };
+    photo.savedCancellationEvidence = savedPhoto;
+    savedPhotos.push(savedPhoto);
   }
 
   return savedPhotos;
@@ -9901,7 +9908,12 @@ function buildEbayCancelStartUrl(orderNumber = "") {
 
 function openEbayCancelFlowForWorkerModal(options = {}) {
   const orderNumber = getWorkerCancelPrimaryOrderNumber();
-  const url = buildEbayCancelStartUrl(orderNumber);
+  const line = state.workerCancelCandidates.find((candidate) => normalizeEbayOrderNumber(candidate.order?.order_number) === orderNumber);
+  const detailsUrl = line ? getEbayCancellationDetailsUrl(line) : "";
+  const existingCancellation = Boolean(line && getLineCancellationSignal(line));
+  const url = detailsUrl || (existingCancellation && orderNumber
+    ? `https://www.ebay.com/mesh/ord/details?orderid=${encodeURIComponent(orderNumber)}`
+    : buildEbayCancelStartUrl(orderNumber));
   if (!url) {
     setWorkerCancelPhotoStatus("Could not find a valid eBay order number for this cancellation.", "error");
     return false;
@@ -9914,7 +9926,9 @@ function openEbayCancelFlowForWorkerModal(options = {}) {
 }
 
 function closeWorkerCancelOrderModal(options = {}) {
+  if (state.busy && !options.force) return;
   state.workerCancelEvidencePhotos.forEach((photo) => {
+    if (photo.transferId && !options.saved) state.handledEbayCancelProofTransferIds.delete(photo.transferId);
     if (photo?.localId && photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
   });
   state.workerCancelCandidates = [];
@@ -9934,6 +9948,7 @@ function closeWorkerCancelOrderModal(options = {}) {
 }
 
 function openWorkerCancelOrderModal(options = {}) {
+  if (state.busy) return;
   const line = state.selectedLine;
   const isRefund = options.mode === "refunded";
   if (!line) {
@@ -9989,6 +10004,7 @@ function openWorkerCancelOrderModal(options = {}) {
   renderWorkerCancelOrderList();
   renderWorkerCancelEvidencePhotos();
   openModal("worker-cancel-order-modal");
+  if (!isRefund) window.postMessage({ type: "OG_EBAY_REQUEST_CANCEL_PROOFS", orderNumber: normalizeEbayOrderNumber(order.order_number) }, window.location.origin);
   setTimeout(() => $("worker-cancel-order-note")?.focus(), 80);
   if (options.openEbayCancel && !isRefund) {
     openEbayCancelFlowForWorkerModal({ silent: true });
@@ -10070,7 +10086,8 @@ async function confirmWorkerCancelOrder() {
     const valid = await verifyCurrentUserPassword(password);
     if (!valid) throw new Error("Incorrect password. Please try again.");
 
-    const selectedPhotoCount = getSelectedWorkerCancelEvidencePhotos().length;
+    const selectedPhotos = getSelectedWorkerCancelEvidencePhotos();
+    const selectedPhotoCount = selectedPhotos.length;
     setWorkerCancelPhotoStatus(
       selectedPhotoCount
         ? `Saving selected ${isRefund ? "refund" : "cancellation"} photos into the order evidence repository...`
@@ -10114,8 +10131,11 @@ async function confirmWorkerCancelOrder() {
     }
     if (error) throw error;
 
+    selectedPhotos.filter((photo) => photo.transferId).forEach((photo) => {
+      postEbayCancelProofTransferStatus({ transferId: photo.transferId, ok: true, phase: "saved" });
+    });
     selectedLineIds.forEach((lineId) => state.stagedFulfillments.delete(lineId));
-    closeWorkerCancelOrderModal({ suppressMobileReturn: true });
+    closeWorkerCancelOrderModal({ suppressMobileReturn: true, force: true, saved: true });
     setStatus(`${data?.[0]?.updated_lines || selectedLineIds.length} line(s) marked ${isRefund ? "refunded" : "canceled"}. The signed audit trail was recorded.`, "info");
     await loadOrders();
     postEbayPendingQueueChanged({
@@ -10670,7 +10690,9 @@ function postEbayPendingQueueChanged(payload = {}) {
     .map(normalizeEbayOrderNumber)
     .filter(Boolean))];
   window.postMessage({
-    type: "OG_EBAY_PENDING_QUEUE_CHANGED",
+    // Older extensions interpret QUEUE_CHANGED as a request to leave Invsto.
+    type: ["worker_cancelled_order", "worker_refunded_order", "admin_cancelled", "admin_refunded"].includes(payload.action)
+      ? "OG_EBAY_PENDING_QUEUE_UPDATED" : "OG_EBAY_PENDING_QUEUE_CHANGED",
     payload: {
       source: "og-pending-orders",
       pageUrl: window.location.href,
@@ -12318,6 +12340,9 @@ function getEbayCancelProofLineMatches(metadata = {}) {
 }
 
 async function findEbayCancelProofLine(metadata = {}) {
+  if (!normalizeEbayOrderNumber(metadata.orderNumber || metadata.orderId || metadata.omsOrderId || "")) {
+    throw new Error("The cancellation screenshot needs an exact eBay order number. Capture the order's cancellation details page again.");
+  }
   let matches = getEbayCancelProofLineMatches(metadata);
   if (!matches.length) {
     const orderNumber = normalizeEbayOrderNumber(metadata.orderNumber || metadata.orderId || metadata.omsOrderId || "");
@@ -12377,24 +12402,33 @@ function applyEbayCancelProofNote(metadata = {}) {
 async function attachEbayCancelProofToWorkerModal(payload = {}) {
   const metadata = payload.metadata || {};
   const screenshot = payload.screenshot || {};
+  const blob = getVideoReceiptScreenshotBlob(screenshot);
+  if (!blob.size || !blob.type.startsWith("image/")) throw new Error("The cancellation screenshot is empty or unreadable. Please capture it again.");
   const line = await findEbayCancelProofLine(metadata);
   const orderNumber = normalizeEbayOrderNumber(metadata.orderNumber || metadata.orderId || metadata.omsOrderId || "");
   if (!line?.id) {
     throw new Error(`Could not find eBay order ${orderNumber || "from the cancellation page"} in the pending or cancellation queue. Import/sync pending orders, then try again.`);
   }
+  if (!isOpenOrderLine(line)) throw new Error(`Order ${orderNumber} is already closed. No cancellation was changed and no proof was attached.`);
+  if (state.busy) throw new Error("Wait for the current save to finish, then capture the cancellation proof again.");
+  const modalOpen = !$("worker-cancel-order-modal")?.classList.contains("hidden");
+  const sameCancellation = modalOpen && state.workerCancelMode === "cancelled"
+    && state.workerCancelCandidates.some((candidate) => candidate.order_id === line.order_id);
+  if (payload.restoreOnly && !sameCancellation) throw new Error("Cancellation form was closed before draft recovery finished.");
+  if (modalOpen && !sameCancellation) throw new Error("Another cancellation or refund is open. Finish or exit that form, then capture this order's proof again.");
 
-  if (state.selectedLine?.id !== line.id) {
-    selectOrderLine(line.id, { openDetail: false });
+  if (!sameCancellation) {
+    if (state.selectedLine?.id !== line.id) selectOrderLine(line.id, { openDetail: false });
+    openWorkerCancelOrderModal({ lineIds: [line.id], openEbayCancel: false });
   }
-  openWorkerCancelOrderModal({ lineIds: [line.id], openEbayCancel: false });
 
-  const blob = getVideoReceiptScreenshotBlob(screenshot);
   const photo = createLocalCancelProofPhoto(blob, metadata, screenshot);
+  photo.transferId = payload.transferId || "";
   state.workerCancelEvidencePhotos.unshift(photo);
   state.workerCancelEvidencePhotoUploadKeys.add(photo.localId);
   renderWorkerCancelEvidencePhotos();
   applyEbayCancelProofNote(metadata);
-  setEbayCancelProofTransferStatus("eBay cancellation proof attached. Add a short note, sign, and mark the order canceled in OG.", "success");
+  setEbayCancelProofTransferStatus("Screenshot ready. Sign and Mark Canceled to save it permanently with this order's history.", "success");
   $("worker-cancel-order-modal")?.classList.add("is-proof-attached");
   window.setTimeout(() => $("worker-cancel-order-note")?.focus(), 120);
 
@@ -12426,10 +12460,12 @@ async function handleEbayCancelProofTransfer(payload) {
     postEbayCancelProofTransferStatus({
       transferId,
       ok: true,
+      phase: "attached",
       message: `Cancellation proof attached for eBay order ${attached.orderNumber || "order"}.`,
       ...attached,
     });
   } catch (error) {
+    if (transferId) state.handledEbayCancelProofTransferIds.delete(transferId);
     console.error("eBay cancellation proof transfer failed:", error);
     const message = error.message || "Could not attach eBay cancellation proof.";
     setEbayCancelProofTransferStatus(message, "error");

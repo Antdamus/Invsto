@@ -4841,7 +4841,9 @@
     const url = new URL(window.location.href);
     const lines = getVisiblePageLines();
     const bodyText = lines.join("\n");
-    const orderNumber = normalizeOrderNumber(getValueAfterLabel(lines, "Order number") || bodyText);
+    const labeledOrder = normalizeOrderNumber(getValueAfterLabel(lines, "Order number"));
+    const visibleOrders = [...new Set(bodyText.match(/\b\d{2}-\d{5}-\d{5}\b/g) || [])];
+    const orderNumber = labeledOrder || (visibleOrders.length === 1 ? visibleOrders[0] : "");
     const itemIdMatch = bodyText.match(/\bItem ID:\s*([0-9]{8,15})\b/i);
     return {
       cancelId: String(url.searchParams.get("cancelId") || "").trim(),
@@ -4867,12 +4869,19 @@
   }
 
   async function captureCancelConfirmationProof(button = null) {
+    if (button?.disabled) return;
     setCancelProofButtonStatus(button, "Capturing proof...", "working");
+    const overlays = [...document.querySelectorAll('[id^="og-ebay-"]')];
+    const visibility = overlays.map((element) => [element, element.style.visibility]);
     try {
+      const metadata = getCancelConfirmationMetadata();
+      if (!metadata.orderNumber) throw new Error("Show the cancellation's order number on this page before capturing proof.");
+      overlays.forEach((element) => { element.style.visibility = "hidden"; });
+      await waitForNextPaint();
       const response = await chrome.runtime.sendMessage({
         type: "OG_EBAY_CAPTURE_CANCEL_CONFIRMATION",
         payload: {
-          metadata: getCancelConfirmationMetadata(),
+          metadata,
           pageUrl: window.location.href,
           pageTitle: document.title || "",
           viewport: {
@@ -4883,12 +4892,15 @@
         },
       });
       if (!response?.ok) throw new Error(response?.error || "OG did not accept the cancellation proof.");
-      setCancelProofButtonStatus(button, "Proof added to OG", "success");
+      setCancelProofButtonStatus(button, "Proof ready — finish in Invsto", "success");
       window.setTimeout(() => setCancelProofButtonStatus(button, "Capture cancellation proof"), 2600);
     } catch (error) {
       console.warn("[OG eBay Cancel] Could not capture cancellation proof:", error);
       setCancelProofButtonStatus(button, "Proof capture failed", "error");
+      if (button) button.title = error?.message || "Could not capture the cancellation proof. Try again.";
       window.setTimeout(() => setCancelProofButtonStatus(button, "Capture cancellation proof"), 3000);
+    } finally {
+      visibility.forEach(([element, previous]) => { element.style.visibility = previous; });
     }
   }
 

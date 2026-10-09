@@ -592,8 +592,10 @@
     const transferId = status.transferId || "";
     if (!transferId) return;
     if (status.phase === "started") return;
-    if (status.ok) await removePendingCancelProof(transferId);
-    if (status.ok && status.tabId) await focusTab(status.tabId);
+    // Attached is a draft, not a saved cancellation audit. Keep its retry copy
+    // until the signed database operation succeeds, including across reloads.
+    if (status.ok && status.phase === "saved") await removePendingCancelProof(transferId);
+    if (status.ok && status.phase !== "saved" && status.tabId) await focusTab(status.tabId);
     const waiter = appCancelProofAcks.get(transferId);
     if (waiter) waiter.resolve(status);
   }
@@ -795,6 +797,7 @@
   }
 
   async function refreshAwaitingShipmentQueue(payload = {}, sender = null) {
+    const backgroundOnly = payload.backgroundOnly === true;
     const priorityPromise = getPendingOrderPriorities({
       ...payload,
       useCache: false,
@@ -809,8 +812,10 @@
     let organizeResult = null;
     const forceReload = payload?.forceReload === true;
 
+    if (backgroundOnly && !targetTab?.id) return { ok: true, skipped: true, opened: false };
+
     if (targetTab?.id) {
-      await focusTab(targetTab.id);
+      if (!backgroundOnly) await focusTab(targetTab.id);
       if (!forceReload) {
         const priorityPayload = await priorityPromise;
         organizeResult = await askAwaitingTabToOrganize(targetTab.id, {
@@ -842,7 +847,7 @@
       opened = true;
     }
 
-    if (targetTab?.id) await focusTab(targetTab.id);
+    if (targetTab?.id && !backgroundOnly) await focusTab(targetTab.id);
     const completedTab = targetTab?.id
       ? await waitForTabComplete(targetTab.id, 25000, { allowAlreadyComplete: !reloaded })
       : null;
@@ -1471,37 +1476,41 @@
     await storePendingCancelProof(transferId, payload);
 
     const tabs = await findAppTabs(appUrl);
-    const pendingTab = tabs.find((tab) => {
+    const pendingTabs = tabs.filter((tab) => {
       const tabUrl = normalizeUrl(tab?.url);
       return tabUrl?.origin === appUrl.origin && /\/pending-orders\.html$/i.test(tabUrl.pathname);
     });
+    const states = await getReceiverStates(pendingTabs, payload);
+    const orderNumber = payload.metadata?.orderNumber || "";
+    const matching = states.find((state) => stateMatchesOrder(state, orderNumber));
+    const idle = states.find((state) => !stateHasActiveReceiver(state));
+    const pendingTab = (matching || idle)?.tab;
 
     if (pendingTab?.id) {
       try {
         const ack = await deliverCancelProofToTab(pendingTab, payload);
-        if (ack?.ok) await focusTab(pendingTab.id);
         return { ...ack, transferId, delivered: true, opened: false };
       } catch (error) {
-        const ack = await openCancelProofPageAndWait(appUrl, payload, pendingTab);
+        // Never reload a working order or discard its unsaved form on delivery failure.
+        const ack = await openCancelProofPageAndWait(appUrl, payload);
         return {
           ...ack,
           transferId,
           delivered: false,
           opened: true,
-          reusedTab: true,
+          reusedTab: false,
           recoveredFromMissingBridge: /receiving end|connection/i.test(error?.message || ""),
         };
       }
     }
 
-    const reusableTab = tabs[0] || null;
-    const ack = await openCancelProofPageAndWait(appUrl, payload, reusableTab);
+    const ack = await openCancelProofPageAndWait(appUrl, payload);
     return {
       ...ack,
       transferId,
       delivered: false,
       opened: true,
-      reusedTab: Boolean(reusableTab),
+      reusedTab: false,
     };
   }
 
@@ -1611,7 +1620,14 @@
   async function captureCancelConfirmationFrame(payload = {}, sender = null) {
     const tab = sender?.tab;
     if (!tab?.windowId) throw new Error("The eBay cancellation confirmation tab was not available for screenshot capture.");
+    if (!isEbayTab(tab) || !/^\d{2}-\d{5}-\d{5}$/.test(payload.metadata?.orderNumber || "")) {
+      throw new Error("Open the eBay cancellation details showing its order number before capturing proof.");
+    }
+    const isSourceActive = async () => (await chrome.tabs.query({active: true, windowId: tab.windowId}))
+      .some((active) => active.id === tab.id && active.url === tab.url);
+    if (!await isSourceActive()) throw new Error("Keep the cancellation confirmation tab visible while capturing proof, then try again.");
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+    if (!await isSourceActive()) throw new Error("The tab changed during capture. Return to the cancellation confirmation and try again.");
     if (!dataUrl) throw new Error("Chrome did not return a screenshot for the cancellation confirmation.");
     const base64 = String(dataUrl).split(",")[1] || "";
     if (!base64) throw new Error("The screenshot payload was empty.");
@@ -1627,7 +1643,6 @@
         source: "chrome-visible-tab",
         mimeType: "image/png",
         base64,
-        dataUrl,
         viewport: payload.viewport || null,
         capturedAt: new Date().toISOString(),
       },
@@ -2043,7 +2058,8 @@
     }
 
     if (message.type === "OG_EBAY_PENDING_QUEUE_CHANGED") {
-      refreshAwaitingShipmentQueue(message.payload || {}, _sender)
+      const backgroundOnly = ["worker_cancelled_order", "worker_refunded_order", "admin_cancelled", "admin_refunded"].includes(message.payload?.action);
+      refreshAwaitingShipmentQueue({ ...(message.payload || {}), backgroundOnly }, _sender)
         .then(sendResponse)
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;
@@ -2111,6 +2127,20 @@
       getPendingCancelProof(message.transferId)
         .then((payload) => sendResponse({ ok: true, payload }))
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_GET_PENDING_CANCEL_PROOFS_FOR_ORDER") {
+      (async () => {
+        const appUrl = await getAppUrl();
+        if (!isExactAppTab(_sender?.tab, appUrl)) throw new Error("Open Pending Orders to recover cancellation proof.");
+        const orderNumber = String(message.orderNumber || "");
+        if (!/^\d{2}-\d{5}-\d{5}$/.test(orderNumber)) return { ok: true, payloads: [] };
+        const stored = await chrome.storage.local.get(null);
+        return { ok: true, payloads: Object.entries(stored)
+          .filter(([key, value]) => key.startsWith(PENDING_CANCEL_PROOF_PREFIX) && value.metadata?.orderNumber === orderNumber)
+          .map(([, value]) => value) };
+      })().then(sendResponse).catch((error) => sendResponse({ ok: false, error: error.message }));
       return true;
     }
 

@@ -19,7 +19,7 @@
   }
 
   function postToOgApp(payload, type = "OG_EBAY_LABEL_TRANSFER") {
-    const receiptId = type === "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER" ? payload?.transferId : "";
+    const receiptId = ["OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER", "OG_EBAY_CANCEL_PROOF_TRANSFER"].includes(type) ? payload?.transferId : "";
     if (receiptId && receiptDeliveries.has(receiptId)) return;
     const message = {
       type,
@@ -42,7 +42,7 @@
   function relayOgStatusToExtension(payload, type = "OG_EBAY_LABEL_TRANSFER_STATUS") {
     // Receipt data only needs retransmission until OG accepts it. The background
     // worker retains its durable retry copy until the final saved acknowledgement.
-    if (type === "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER_STATUS"
+    if (["OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER_STATUS", "OG_EBAY_CANCEL_PROOF_TRANSFER_STATUS"].includes(type)
       && (payload.phase === "started" || typeof payload.ok === "boolean")) {
       const timer = receiptDeliveries.get(payload.transferId);
       if (timer !== undefined) window.clearInterval(timer);
@@ -312,11 +312,23 @@
       relayOgStatusToExtension(event.data.payload || {}, "OG_EBAY_CANCEL_PROOF_TRANSFER_STATUS");
       return;
     }
+    if (event.data?.type === "OG_EBAY_REQUEST_CANCEL_PROOFS") {
+      const orderNumber = event.data.orderNumber;
+      (async () => {
+        if (!sameOgAppOrigin(await getConfiguredAppUrl())) return;
+        const response = await chrome.runtime.sendMessage({ type: "OG_EBAY_GET_PENDING_CANCEL_PROOFS_FOR_ORDER", orderNumber });
+        for (const payload of response?.payloads || []) {
+          // Only restore into the form that requested these drafts, never reopen a closed form.
+          postToOgApp({ ...payload, restoreOnly: true }, "OG_EBAY_CANCEL_PROOF_TRANSFER");
+        }
+      })().catch(() => null);
+      return;
+    }
     if (event.data?.type === "OG_EBAY_CANCELLATION_PAGE_TRANSFER_STATUS") {
       relayOgStatusToExtension(event.data.payload || {}, "OG_EBAY_CANCELLATION_PAGE_TRANSFER_STATUS");
       return;
     }
-    if (event.data?.type === "OG_EBAY_PENDING_QUEUE_CHANGED") {
+    if (["OG_EBAY_PENDING_QUEUE_CHANGED", "OG_EBAY_PENDING_QUEUE_UPDATED"].includes(event.data?.type)) {
       relayOgStatusToExtension(event.data.payload || {}, "OG_EBAY_PENDING_QUEUE_CHANGED");
       return;
     }
