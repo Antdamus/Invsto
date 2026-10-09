@@ -32,6 +32,21 @@ test('full provider details control current status and seller deadline, not the 
  {inquiryId:'r1',status:'CLOSED',sellerResponseDue:{respondByDate:'2026-10-10T12:00:00Z'},buyerResponseDue:{respondByDate:'2026-10-20T12:00:00Z'},item:{itemId:'123'}},{},'inquiry');
  assert.equal(p.status,'CLOSED');assert.equal(p.dueAt,'2026-10-10T12:00:00.000Z');
 });
+test('terminal lifecycle wins over refund and escalation action status',()=>{
+ assert.equal(sandbox.providerIssueClosed({status:'ESCALATED',state:'CLOSED'}),true);
+ assert.equal(sandbox.providerIssueClosed({status:'REFUND_SENT',state:'CLOSED'}),true);
+ assert.equal(sandbox.providerIssueClosed({status:'UNRESOLVED',state:'OPEN'}),false);
+ assert.equal(sandbox.providerIssueClosed({status:'CS_CLOSED',state:''}),true);
+});
+test('closed lifecycle never reopens existing work and new historical cases go to history',async()=>{
+ for(const existing of [null,{id:'c1',status:'closed',ebay_status:'CLOSED',closed_at:'2026-07-01T00:00:00Z'},{id:'c2',status:'needs_review',ebay_status:'ESCALATED'}]){
+  let saved;
+  const db={from:()=>{const q={select:()=>q,eq:()=>q,order:()=>q,limit:()=>q,update:row=>{saved=row;return q;},insert:row=>{saved=row;return q;},single:async()=>({data:{id:'c',...saved}}),then:resolve=>Promise.resolve({data:existing?[existing]:[]}).then(resolve)};return q;}};
+  const result=await sandbox.upsertCase(db,{returnId:'r1',status:'ESCALATED',state:'CLOSED',payload:{postOrderIssueLane:'return'},requestedAt:'2026-07-01T00:00:00Z'},{order:null,lines:[]});
+  assert.equal(result.reopened||false,false);assert.equal(saved.ebay_status,'CLOSED_ESCALATED');
+  assert.equal(saved.status,existing?.status||'closed');
+ }
+});
 test('anonymous callers and invalid dispatch tokens cannot run imports',async()=>{
  let claims=0;client={rpc:async(name)=>{assert.equal(name,'claim_customer_issue_worker');claims++;return {data:false};}};
  assert.equal((await handler(new Request('https://test',{method:'POST',body:'{"action":"refresh"}'}))).status,401);

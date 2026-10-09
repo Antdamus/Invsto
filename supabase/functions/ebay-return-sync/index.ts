@@ -2472,8 +2472,11 @@ async function upsertCase(supabase:any,prepared:PreparedReturn,match:MatchResult
  const existing=await findExistingCase(supabase,prepared,match.order?.id||null);
  if(existing?.order_id&&match.order?.id&&existing.order_id!==match.order.id)throw Error('The eBay issue now points to a different order. The existing link was preserved for manual review.');
  const lane=preparedIssueLane(prepared),kind=lane==='return'?'return':lane==='inquiry'?'request':'dispute';
- const providerStatus=prepared.status||prepared.state||'UNKNOWN';
- const terminal=/(^|_)(CLOSED|CANCELLED|CANCELED|RESOLVED|SELLER_WON|SELLER_LOST|DISPUTE_REVERSED)($|_)/i.test(providerStatus);
+ const terminal=providerIssueClosed(prepared);
+ const statusText=prepared.status||prepared.state||'UNKNOWN';
+ // A return's CLOSED lifecycle remains terminal even when its last action is
+ // ESCALATED or REFUND_SENT. Keep the action visible without reopening it.
+ const providerStatus=terminal&&!terminalIssueToken(statusText)?`CLOSED_${statusText}`:statusText;
  const reopened=existing&&/(^|_)(CLOSED|CANCELLED|CANCELED|RESOLVED|SELLER_WON|SELLER_LOST|DISPUTE_REVERSED)($|_)/i.test(existing.ebay_status||'')&&!terminal&&providerStatus!=='UNKNOWN';
  const row={source_lane:lane,issue_kind:kind,ebay_status:providerStatus,ebay_action:prepared.sellerActionDue||prepared.buyerActionDue||prepared.actionDue||null,
   ebay_due_at:prepared.dueAt,item_title:prepared.itemTitle||existing?.item_title||null,item_image_url:prepared.itemImageUrl||existing?.item_image_url||null,
@@ -2481,8 +2484,8 @@ async function upsertCase(supabase:any,prepared:PreparedReturn,match:MatchResult
   case_type:match.order||existing?.order_id?'matched_order':'unmatched_legacy',ebay_return_id:prepared.returnId,
   buyer_username:prepared.buyerUsername||match.order?.buyer_username||existing?.buyer_username||null,
   return_reason:prepared.reason||existing?.return_reason||null,return_tracking_number:prepared.trackingNumber||existing?.return_tracking_number||null,
-  status:reopened?'open':existing?.status||(terminal&&kind!=='return'?'closed':'open'),
-  closed_at:reopened?null:existing?.closed_at||null,opened_at:existing?.opened_at||prepared.requestedAt||new Date().toISOString(),
+  status:reopened?'open':existing?.status||(terminal?'closed':'open'),
+  closed_at:reopened?null:existing?.closed_at||(!existing&&terminal?closureDateFor(prepared):null),opened_at:existing?.opened_at||prepared.requestedAt||new Date().toISOString(),
   raw_payload:{...(existing?.raw_payload||{}),...prepared.payload,ebayClosedOnEbay:terminal,physicalReturnExpected:kind==='return'&&preparedExpectsPhysicalReturn(prepared,Boolean(match.order)),reopenedOnEbay:Boolean(reopened)},
   updated_at:new Date().toISOString()};
  const q=existing?supabase.from('ebay_return_cases').update(row).eq('id',existing.id):supabase.from('ebay_return_cases').insert(row);
@@ -2528,7 +2531,7 @@ async function upsertTask(supabase: any, prepared: PreparedReturn, caseRow: any,
   const activeReturnTask = (existingTasks || []).find((task: any) => {
     const status = toText(task.status).toLowerCase();
     return ["return_intake", "return_review"].includes(toText(task.task_type))
-      && !["resolved", "cancelled"].includes(status);
+      && !["resolved", "cancelled", "closed", "approved_by_admin"].includes(status);
   });
   const sameTypeTask = caseRow.raw_payload?.reopenedOnEbay ? null : (existingTasks || []).find((task: any) => task.task_type === taskType) || null;
   const existing = activeReturnTask || sameTypeTask || null;
@@ -2541,7 +2544,7 @@ async function upsertTask(supabase: any, prepared: PreparedReturn, caseRow: any,
     returnShipmentStarted: returnShipmentStarted(prepared, matched),
     physicalReturnExpected: preparedExpectsPhysicalReturn(prepared, matched),
   };
-  const active = !existing || !["resolved", "cancelled"].includes(String(existing.status || ""));
+  const active = !existing || !["resolved", "cancelled", "closed", "approved_by_admin"].includes(String(existing.status || ""));
 
   if (existing && !active) {
     const { data, error } = await supabase
@@ -2928,6 +2931,12 @@ async function cleanupClosedReturnCases(
 }
 
 
+function terminalIssueToken(value:unknown):boolean {
+ return /(^|_)(CLOSED|CANCELLED|CANCELED|RESOLVED|SELLER_WON|SELLER_LOST|DISPUTE_REVERSED)($|_)/i.test(String(value||''));
+}
+function providerIssueClosed(prepared:PreparedReturn):boolean {
+ return terminalIssueToken(prepared.status)||terminalIssueToken(prepared.state);
+}
 function providerDetail(lane:Lane, summary:any, detail:any):any {
  if(lane==='payment_dispute'){
   const item=detail.lineItems?.[0]||summary.lineItems?.[0]||{};
@@ -2972,8 +2981,8 @@ async function saveCustomerIssue(db:any,lane:Lane,summary:any,detail:any,files:a
   apiExtractedDetails:{...prepared.apiExtractedDetails,detailsUrl:prepared.detailsUrl,status:prepared.status,dueAt:prepared.dueAt}};
  const {caseRow,reopened}=await upsertCase(db,prepared,match);
  await upsertReturnItems(db,prepared,caseRow,match);
- const terminal=/(^|_)(CLOSED|CANCELLED|CANCELED|RESOLVED|SELLER_WON|SELLER_LOST|DISPUTE_REVERSED)($|_)/i.test(prepared.status||prepared.state);
- if(!terminal||reopened||lane==='return'&&caseRow.status!=='closed')await upsertTask(db,prepared,caseRow,match);
+ const terminal=providerIssueClosed(prepared);
+ if(!terminal||reopened)await upsertTask(db,prepared,caseRow,match);
  await importMessages(db,prepared,caseRow,match);
  if(match.order?.order_number){
   const finance=await db.rpc('enqueue_ebay_finance_jobs',{_order_numbers:[match.order.order_number],_include_holds:true});
