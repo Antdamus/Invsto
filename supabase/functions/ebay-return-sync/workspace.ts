@@ -7,7 +7,11 @@ type Dependencies = {
  read:(token:string,path:string,payment?:boolean)=>Promise<any>;
  process:(db:DB,lane:Lane,summary:any,detail:any,files:any)=>Promise<void>;
 };
-export function externalId(row:any):string {
+export function externalId(row:any,lane?:Lane):string {
+ if(lane){
+  const key=lane==='case'?'caseId':lane==='inquiry'?'inquiryId':lane==='payment_dispute'?'paymentDisputeId':'returnId';
+  return String(row?.[key]||(lane==='inquiry'?row?.requestId:'')||'');
+ }
  return String(row?.paymentDisputeId||row?.returnId||row?.inquiryId||row?.caseId||row?.requestId||'');
 }
 export function detailPath(lane:Lane,id:string):string {
@@ -76,17 +80,18 @@ export async function runWorker(db:DB,deps:Dependencies){
   try{
    const payload=await deps.read(await token(lane),discoveryPath(lane,laneRow.cursor_offset,cycle),lane==='payment_dispute');
    const rows=pageRows(payload,lane);
-   if(rows.some(r=>!externalId(r)))throw Error('An eBay issue is missing its identity. Discovery was stopped safely.');
+   const idFor=(row:any)=>externalId(row,lane);
+   if(rows.some(r=>!idFor(r)))throw Error('An eBay issue is missing its identity. Discovery was stopped safely.');
    const total=pageTotal(payload,lane);
    if(!rows.length&&total!==null&&laneRow.cursor_offset<total)throw Error('eBay returned an incomplete page. Discovery will retry.');
    if(rows.length){
-    const known=checked(await db.from('ebay_return_cases').select('ebay_return_id,provider_fingerprint,synced_at,status').eq('source_lane',lane).in('ebay_return_id',rows.map(externalId)))||[];
+    const known=checked(await db.from('ebay_return_cases').select('ebay_return_id,provider_fingerprint,synced_at,status').eq('source_lane',lane).in('ebay_return_id',rows.map(idFor)))||[];
     const pending=[];
     for(const row of rows){
-     const hash=await fingerprint(row),saved=known.find((r:any)=>r.ebay_return_id===externalId(row));
+     const hash=await fingerprint(row),saved=known.find((r:any)=>r.ebay_return_id===idFor(row));
      if(saved?.provider_fingerprint===hash && (['closed','cancelled'].includes(saved.status)||saved.synced_at&&Date.parse(saved.synced_at)>Date.now()-10*60000))continue;
      const terminal=/(^|_)(CLOSED|CANCELLED|CANCELED|RESOLVED|SELLER_WON|SELLER_LOST|DISPUTE_REVERSED)($|_)/i.test(String(row.paymentDisputeStatus||row.caseStatusEnum||row.inquiryStatusEnum||row.status||row.state||''));
-     pending.push({lane,external_id:externalId(row),summary:{...row,__fingerprint:hash},state:'queued',priority:terminal&&(!saved||['closed','cancelled'].includes(saved.status))?20:0,attempts:0,next_attempt_at:iso(),updated_at:iso()});
+     pending.push({lane,external_id:idFor(row),summary:{...row,__fingerprint:hash},state:'queued',priority:terminal&&(!saved||['closed','cancelled'].includes(saved.status))?20:0,attempts:0,next_attempt_at:iso(),updated_at:iso()});
     }
     if(pending.length)checked(await db.from('ebay_issue_sync_jobs').upsert(pending,{onConflict:'lane,external_id',ignoreDuplicates:true}));
    }

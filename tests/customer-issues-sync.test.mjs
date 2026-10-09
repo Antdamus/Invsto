@@ -3,13 +3,23 @@ import {readFile} from 'node:fs/promises';
 import {stripTypeScriptTypes} from 'node:module';
 import vm from 'node:vm';
 import {test} from 'node:test';
-import {detailPath,discoveryPath,pageRows,pageTotal,runWorker,queueRefresh} from '../supabase/functions/ebay-return-sync/workspace.ts';
+import {detailPath,discoveryPath,pageRows,pageTotal,runWorker,queueRefresh,externalId} from '../supabase/functions/ebay-return-sync/workspace.ts';
 const raw=await readFile(new URL('../supabase/functions/ebay-return-sync/index.ts',import.meta.url),'utf8');
 let handler,client;
 const sandbox={console,URL,URLSearchParams,Response,Request,Headers,TextEncoder,crypto,AbortSignal,Map,Set,Date,fetch:()=>{throw Error('Unexpected provider call');},
  Deno:{env:{get:()=>undefined},serve:fn=>{handler=fn;}},createClient:()=>client,runWorker,queueRefresh:()=>{throw Error('Unexpected queue mutation');}};
 vm.createContext(sandbox);vm.runInContext(stripTypeScriptTypes(raw.replace(/^import .*;\r?\n/gm,'')),sandbox);
 const clean=x=>JSON.parse(JSON.stringify(x));
+
+test('case identity stays separate from the earlier return or inquiry it escalated from',()=>{
+ const references={caseId:'case-1',returnId:'return-1',inquiryId:'inquiry-1',paymentDisputeId:'payment-1'};
+ for(const [lane,id] of [['case','case-1'],['inquiry','inquiry-1'],['payment_dispute','payment-1']]){
+  assert.equal(externalId(references,lane),id);
+  assert.equal(sandbox.preparePostOrderIssue(references,{...references,status:'CS_CLOSED'},{},lane).returnId,id);
+ }
+ assert.equal(externalId({returnId:'return-1'},'case'),'');
+ assert.equal(sandbox.preparePostOrderIssue({returnId:'return-1'},{status:'CLOSED'},{},'case'),null);
+});
 test('provider endpoints and pagination reject incomplete data instead of reporting zero',()=>{
  assert.equal(detailPath('case','123'),'/post-order/v2/casemanagement/123');
  assert.ok(discoveryPath('case',200,'2026-10-09T12:00:00Z').includes('case_creation_date_range_from='));

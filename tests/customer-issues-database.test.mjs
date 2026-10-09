@@ -51,6 +51,20 @@ const receive=(key=200,qty=1,disposition='restock',caseId=100)=>scalar('select r
  id(key),id(caseId),JSON.stringify([{order_line_id:id(11),received_quantity:qty,condition_received:'used_good',disposition,destination_location_id:disposition==='restock'?id(30):null,notes:'Inspected'}]),
  '[{"bucket":"ebay-return-evidence","path":"test/photo.jpg"}]','Received carefully','TRACK1']);
 const stock=()=>scalar('select coalesce(sum(quantity),0)::int v from item_stock_locations');
+
+test('case identity recovery preserves work, audits the old ID and refuses collisions',async()=>{
+ await db.exec(`update ebay_return_cases set source_lane='case',ebay_return_id='111',raw_payload='{"ebaySummary":{"caseId":900},"ebayDetail":{"caseId":900}}' where id='${id(100)}';
+ insert into ebay_return_tasks(return_case_id,order_id,task_type,status,title) values('${id(100)}','${id(10)}','follow_up','open','Keep this work');
+ insert into ebay_issue_sync_jobs(lane,external_id) values('case','111');`);
+ const migration=await sqlFile('20261009047000_customer_issue_case_identity.sql');await db.exec(migration);
+ assert.equal(await scalar('select ebay_return_id v from ebay_return_cases where id=$1',[id(100)]),'900');
+ assert.equal(await scalar('select count(*)::int v from ebay_return_tasks where status=\'open\''),1);
+ assert.equal(await scalar('select state v from ebay_issue_sync_jobs where external_id=\'111\''),'superseded');
+ assert.equal(await scalar('select count(*)::int v from ebay_return_events where payload->>\'source\'=\'customer_issue_identity_correction\''),1);
+ await db.exec(migration);assert.equal(await scalar('select count(*)::int v from ebay_return_events'),1);
+ await db.exec(`insert into ebay_return_cases(id,order_id,source_lane,ebay_return_id,raw_payload) values('${id(101)}','${id(10)}','case','222','{"ebaySummary":{"caseId":900},"ebayDetail":{"caseId":900}}')`);
+ await db.exec(migration);assert.equal(await scalar('select ebay_return_id v from ebay_return_cases where id=$1',[id(101)]),'222');
+});
 test('imported placeholders receive partial parcels safely, retries return the same receipt, cumulative quantity is enforced',async()=>{
  const first=await receive();assert.equal(first.restocked_units,1);assert.equal(await stock(),1);
  assert.deepEqual(await receive(),first);assert.equal(await stock(),1);

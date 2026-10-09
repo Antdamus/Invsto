@@ -1062,9 +1062,15 @@ function firstArray(...values: unknown[]): any[] {
   return [];
 }
 
-function postOrderIssueId(summary: any, detailPayload: any = {}): string {
+function postOrderIssueId(summary: any, detailPayload: any = {}, lane?: PostOrderIssueLane): string {
   const detail = detailPayload?.detail || detailPayload || {};
   const sourceSummary = summary?.summary || summary || {};
+  // Escalated cases can also include the original return/inquiry ID.
+  // Those identifiers belong to separate API resources and must not alias.
+  if (lane) {
+    const key = lane === 'case' ? 'caseId' : lane === 'inquiry' ? 'inquiryId' : lane === 'payment_dispute' ? 'paymentDisputeId' : 'returnId';
+    return firstText(summary?.[key], sourceSummary?.[key], detail?.[key], lane === 'inquiry' ? detail?.requestId : '');
+  }
   return firstText(
     summary?.paymentDisputeId,
     detail?.paymentDisputeId,
@@ -1129,7 +1135,7 @@ function preparePostOrderIssue(
     ...getFilesFromPayload(detail),
   ]);
   const fileIds = unique(files.map(fileIdFrom).filter(Boolean));
-  const issueId = postOrderIssueId(summary, detailPayload);
+  const issueId = postOrderIssueId(summary, detailPayload, lane);
   if (!issueId) return null;
 
   const apiSources = [summary, detailPayload, detailSummary, sourceSummary, mergedSummary, detail, creation, item];
