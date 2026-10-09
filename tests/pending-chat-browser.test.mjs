@@ -50,6 +50,21 @@ test('personal read events clear the warning; failed refresh retains it and reco
  await page.evaluate(()=>{failChats=false;chatRows[0].unread_count=0;chatRows[0].unread_conversation_ids=[];chatEvents.ebay_conversation_user_read_states({new:{conversation_id:'chat-1',user_id:'user',read_state:'read'}});});await expect(badge).toContainText('Item chat');
  await page.evaluate(()=>chatConnection('CHANNEL_ERROR'));await expect(page.locator('[data-pending-chat-status]')).toContainText('periodically');await page.evaluate(()=>chatConnection('SUBSCRIBED'));await expect(page.locator('[data-pending-chat-status]')).toContainText('live');
 });
+
+test('collapsed buyer summaries keep cached chat markers immediately after filtering',async t=>{
+ const page=await open(t);
+ const result=await page.evaluate(()=>{
+  state.expandedBuyerKeys.clear();
+  applyOrderFilters();
+  const first=document.querySelector('[data-buyer-username="jewelrylover"]');
+  const before=first.querySelector('[data-buyer-chat-marker]')?.textContent;
+  document.getElementById('order-search').value='jewelrylover';
+  applyOrderFilters();
+  const filtered=document.querySelector('[data-buyer-username="jewelrylover"]');
+  return {before,after:filtered.querySelector('[data-buyer-chat-marker]')?.textContent,collapsed:filtered.classList.contains('is-collapsed')};
+ });
+ assert.match(result.before,/Item chat/);assert.match(result.after,/Item chat/);assert.equal(result.collapsed,true);
+});
 test('messages arriving while completion is open update its reminder without closing the dialog',async t=>{
  const page=await open(t);await page.evaluate(()=>{document.getElementById('bundle-review-modal').classList.remove('hidden');PendingOrderChats.review(document.getElementById('bundle-chat-review'),state.orders);chatRows[0].unread_count=1;chatRows[0].unread_conversation_ids=['chat-1'];chatEvents.ebay_conversation_messages({new:{conversation_id:'chat-1'}});});
  await expect(page.locator('#bundle-chat-review')).toBeVisible();await expect(page.locator('#bundle-chat-review')).toContainText('Review buyer messages before completing');await expect(page.locator('#bundle-review-modal')).toBeVisible();

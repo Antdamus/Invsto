@@ -4682,6 +4682,7 @@ function renderOrders(options = {}) {
       list.appendChild(card);
       if (state.orderNotesObserver) state.orderNotesObserver.observe(card);
       else hydrateBuyerGroupNotes(card, group);
+      window.PendingOrderChats?.rendered(card);
       return;
     }
 
