@@ -2,8 +2,7 @@ const EBAY_CLIENT_ID = (Deno.env.get("EBAY_CLIENT_ID") ?? "").trim();
 const EBAY_CLIENT_SECRET = (Deno.env.get("EBAY_CLIENT_SECRET") ?? "").trim();
 const EBAY_OAUTH_RUNAME = (Deno.env.get("EBAY_OAUTH_RUNAME") ?? "").trim();
 const EBAY_ENV = (Deno.env.get("EBAY_ENV") ?? "production").trim().toLowerCase();
-const CONFIGURED_OAUTH_SCOPES = (Deno.env.get("EBAY_OAUTH_SCOPES") ??
-  [
+const REQUIRED_OAUTH_SCOPES = [
     "https://api.ebay.com/oauth/api_scope",
     "https://api.ebay.com/oauth/api_scope/sell.inventory",
     "https://api.ebay.com/oauth/api_scope/sell.account.readonly",
@@ -12,10 +11,12 @@ const CONFIGURED_OAUTH_SCOPES = (Deno.env.get("EBAY_OAUTH_SCOPES") ??
     "https://api.ebay.com/oauth/api_scope/sell.finances",
     "https://api.ebay.com/oauth/api_scope/commerce.message",
     "https://api.ebay.com/oauth/api_scope/commerce.notification.subscription",
-  ].join(" ")).trim();
+  ];
+const CONFIGURED_OAUTH_SCOPES = (Deno.env.get("EBAY_OAUTH_SCOPES") ?? "").trim();
 // Keep existing scopes, including custom deployment scopes, when reconnecting.
 // The payment-dispute feed requires a new seller consent for this scope.
 const EBAY_OAUTH_SCOPES = [...new Set([
+  ...REQUIRED_OAUTH_SCOPES,
   ...CONFIGURED_OAUTH_SCOPES.split(/\s+/).filter(Boolean),
   "https://api.ebay.com/oauth/api_scope/sell.payment.dispute",
 ])].join(" ");

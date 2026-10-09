@@ -24,7 +24,9 @@ test('reconnect keeps every existing default permission and adds payment dispute
 });
 test('configured scopes survive reconnect and the dispute permission is not duplicated',async()=>{
  const url=await consent({EBAY_OAUTH_SCOPES:`${base}   ${base}/commerce.message\n${base}/sell.payment.dispute ${base}/sell.custom`});
- assert.deepEqual(url.searchParams.get('scope').split(' '),[base,base+'/commerce.message',base+'/sell.payment.dispute',base+'/sell.custom']);
+ const scopes=url.searchParams.get('scope').split(' ');
+ assert.equal(scopes.length,new Set(scopes).size);
+ for(const suffix of ['/commerce.message','/sell.fulfillment','/sell.finances','/commerce.notification.subscription','/sell.payment.dispute','/sell.custom']) assert.ok(scopes.includes(base+suffix),suffix);
 });
 test('sandbox authorization stays in sandbox',async()=>{
  assert.equal((await consent({EBAY_ENV:'sandbox'})).origin,'https://auth.sandbox.ebay.com');
