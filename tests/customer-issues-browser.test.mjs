@@ -1,0 +1,54 @@
+import assert from 'node:assert/strict';
+import {readFile,mkdir} from 'node:fs/promises';
+import {createServer} from 'node:http';
+import {test,before,after} from 'node:test';
+import {chromium,webkit,expect} from '@playwright/test';
+let server,browser,origin;
+const root=new URL('../',import.meta.url);
+before(async()=>{
+ server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();
+  try{let body=await readFile(new URL(name,root));if(name.endsWith('.html'))body=body.toString().replace(/<script\b[\s\S]*?<\/script>/gi,'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(body);}catch{res.writeHead(404).end();}});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;
+ browser=await(process.env.INVSTO_ITEM_BROWSER==='webkit'?webkit:chromium).launch();await mkdir(new URL('../test-results/customer-issues',import.meta.url),{recursive:true});
+});
+after(async()=>{await browser?.close();await new Promise(r=>{server.close(r);server.closeAllConnections();});});
+async function open(t,width,integration=false){
+ const context=await browser.newContext({viewport:{width,height:900},hasTouch:width<800});t.after(()=>context.close());
+ await context.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
+ const page=await context.newPage();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
+ await page.goto(origin+'/ebay-returns.html'+(integration?'?integration=1':''));for(const file of ['task-workflow.js','customer-issues.js','tests/fixtures/customer-issues-fixture.js'])await page.addScriptTag({url:origin+'/'+file});
+ await page.waitForFunction(()=>window.fixtureReady);if(integration){await page.addScriptTag({url:origin+'/ebay-order-history.js'});await page.evaluate(()=>document.dispatchEvent(new Event('DOMContentLoaded')));await page.waitForFunction(()=>window.OGCustomerIssues.ready);await expect(page.locator('.issue-card')).toHaveCount(30);}return page;
+}
+for(const width of [320,390,768,1440])test(`Customer issues ${width}px: queue, detail, evidence and forms fit`,async t=>{
+ const page=await open(t,width);await expect(page.locator('.issue-card')).toHaveCount(30);
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'page has no horizontal overflow');
+ const first=page.locator('.issue-card').first();await first.click();await expect(page.locator('#issues-detail').getByRole('heading',{name:'alex.watches',exact:true})).toBeVisible();
+ await expect(page.getByRole('img',{name:'Original sold item screenshot'})).toBeVisible();
+ assert.ok(await page.locator('#issues-detail').evaluate(e=>e.scrollWidth<=e.clientWidth+1),'case panel has no horizontal overflow');
+ await page.screenshot({path:`test-results/customer-issues/detail-${width}.png`});
+ await page.getByRole('button',{name:'Add update / hand back',exact:true}).click();await page.getByRole('textbox',{name:'Update / instructions'}).fill('Certificate checked. Please inspect the clasp.');
+ await page.getByRole('button',{name:'Save update',exact:true}).click();
+ assert.equal((await page.evaluate(()=>fixtureWrites))[0].args._mode,'update');
+ await page.getByRole('button',{name:'Complete my part',exact:true}).click();await page.getByRole('textbox',{name:'Update / instructions'}).fill('Inspection completed. Please review.');await page.getByRole('button',{name:'Confirm',exact:true}).click();
+ await expect(page.getByText('Review: Sandra',{exact:true})).toBeVisible();
+ if(width<=900){await page.getByRole('button',{name:'← Cases',exact:true}).click();await expect(first).toBeVisible();}
+});
+test('filters and paging stay server-side; full case data loads only on selection',async t=>{
+ const page=await open(t,1440);
+ assert.equal((await page.evaluate(()=>fixtureCalls)).filter(c=>c.table&&c.table!=='employees').length,0);
+ await page.getByRole('button',{name:'Next',exact:true}).click();await expect(page.locator('.issue-card')).toHaveCount(6);
+ await page.getByRole('button',{name:'Requests 12',exact:true}).click();await expect(page.locator('.issue-card')).toHaveCount(12);
+ await page.getByRole('button',{name:'All open 36',exact:true}).click();await page.getByRole('searchbox',{name:'Search customer issues'}).fill('alex.watches');await expect(page.locator('.issue-card')).toHaveCount(1);
+ await page.locator('.issue-card').click();await page.getByRole('button',{name:'View full photo',exact:true}).click();await expect(page.locator('#issues-feedback')).toHaveText('Full evidence viewer opened');
+});
+
+
+test('real order-history integration boots the new workspace and opens its reusable intake',async t=>{
+ const page=await open(t,390,true);await page.locator('.issue-card').first().click();
+ await expect(page.locator('#issues-detail').getByRole('heading',{name:'alex.watches',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Receive returned items',exact:true}).click();
+ await expect(page.locator('#return-intake-modal')).toBeVisible();
+ await expect(page.locator('#return-ebay-id')).toHaveValue('54001230');
+ await expect(page.locator('#return-line-list')).toContainText('Cartier');
+ assert.equal(await page.evaluate(()=>state.returnIntakeCaseId),'case-0');
+});

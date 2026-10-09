@@ -4,11 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#070708" />
-  <title>OG Jewelry - eBay Requests, Returns, and Disputes</title>
+  <title>OG Jewelry - Customer Issues</title>
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="ebay-order-history.css" />
+  <link rel="stylesheet" href="customer-issues.css?v=20261009-1" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -20,7 +21,7 @@
     <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">
       <i data-lucide="menu"></i>
     </button>
-    <span class="mobile-title">Requests, Returns & Disputes</span>
+    <span class="mobile-title">Customer Issues</span>
   </div>
 
   <div class="mobile-menu" id="mobile-menu">
@@ -28,7 +29,7 @@
       <a href="dashboard.html">Dashboard</a>
       <a href="pending-orders.html">Pending Orders</a>
       <a href="ebay-order-history.html">Order History</a>
-      <a href="ebay-returns.html" class="active">Requests, Returns & Disputes</a>
+      <a href="ebay-returns.html" class="active">Customer Issues</a>
       <a href="timeclock.html">Timesheet</a>
       <a href="#" id="logout-mobile">Logout</a>
     </nav>
@@ -53,7 +54,7 @@
           </a>
           <a class="nav-link active" href="ebay-returns.html">
             <i class="ti ti-rotate-clockwise"></i>
-            <span class="link-text">Requests, Returns & Disputes</span>
+            <span class="link-text">Customer Issues</span>
           </a>
           <a class="nav-link" href="#" id="logout">
             <i class="ti ti-logout"></i>
@@ -78,118 +79,28 @@
         </div>
       </header>
 
-      <main class="content order-history-content">
-        <section class="order-history-hero">
-          <div>
-            <span class="eyebrow">Post-Order Workbench</span>
-            <h1>eBay Requests, Returns, and Disputes</h1>
-            <p>Import visible eBay requests, assign questions, intake returned items with photos, and review old refunds that do not match OG order history.</p>
-          </div>
-          <div class="history-actions">
-            <button id="refresh-return-queue" type="button" class="secondary-btn">
-              <i data-lucide="refresh-cw"></i>
-              Refresh
-            </button>
-            <button id="check-ebay-return-api-sync" type="button" class="secondary-btn" data-admin-only="true">
-              <i data-lucide="search-check"></i>
-              Check eBay Issues
-            </button>
-            <button id="run-ebay-return-api-sync" type="button" class="primary-btn" data-admin-only="true">
-              <i data-lucide="cloud-download"></i>
-              Sync eBay Issues
-            </button>
-            <button id="clean-ebay-return-api-sync" type="button" class="secondary-btn" data-admin-only="true">
-              <i data-lucide="archive-check"></i>
-              Clean Closed Issues
-            </button>
-            <a href="ebay-order-history.html" class="secondary-btn">
-              <i data-lucide="history"></i>
-              Order History
-            </a>
-            <a href="pending-orders.html" class="secondary-btn">
-              <i data-lucide="truck"></i>
-              Pending Orders
-            </a>
-            <button id="clear-return-test-imports" type="button" class="secondary-btn danger-btn" data-admin-only="true">
-              <i data-lucide="trash-2"></i>
-              Clear Return Test Imports
-            </button>
-          </div>
+      <main class="content issues-workspace" id="issues-workspace">
+        <header class="issues-heading"><div><span class="eyebrow">CUSTOMER CARE</span><h1>Customer issues</h1><p>A clear next step for every customer.</p></div>
+          <div class="issues-heading-actions"><button type="button" id="issues-refresh" class="secondary-btn" aria-label="Refresh customer issues">&#8635; <span>Refresh</span></button><button type="button" id="issues-sync" class="primary-btn" data-admin-only="true">Sync eBay</button><div id="task-updates-slot"></div></div>
+        </header>
+        <div id="issues-feedback" role="status" aria-live="polite"></div>
+        <details class="issues-sync-health"><summary id="issues-health-summary">Checking connection...</summary><div id="issues-health-detail"></div></details>
+        <nav class="issues-tabs" aria-label="Customer issue views">
+          <button data-issue-view="attention" aria-pressed="true">All open <b>-</b></button>
+          <button data-issue-view="request" aria-pressed="false">Requests <b>-</b></button>
+          <button data-issue-view="return" aria-pressed="false">Returns <b>-</b></button>
+          <button data-issue-view="dispute" aria-pressed="false">Disputes <b>-</b></button>
+          <button data-issue-view="history" aria-pressed="false">History <b>-</b></button>
+        </nav>
+        <section class="issues-tools" aria-label="Find customer issues">
+          <label class="issues-search"><span class="sr-only">Search customer issues</span><input id="issues-search" type="search" placeholder="Buyer, order, case or tracking..." autocomplete="off" /></label>
+          <label><span class="sr-only">Responsibility</span><select id="issues-scope"><option value="all">Everyone</option><option value="mine">My next actions</option><option value="following">Following</option><option value="unassigned">Needs an owner</option></select></label>
         </section>
-
-        <section id="return-import-summary" class="history-board return-import-summary hidden" aria-live="polite">
-          <div class="history-board-head">
-            <div>
-              <span class="eyebrow">Issue Import Audit</span>
-              <h2>Last eBay Issue Sync</h2>
-            </div>
-            <span id="return-import-count" class="history-count">0 imported</span>
-          </div>
-          <div id="return-import-details" class="return-import-details"></div>
-        </section>
-
-        <section id="return-work-queue" class="history-board return-work-queue">
-          <div class="history-board-head">
-            <div>
-              <span class="eyebrow">Post-Order Work Queue</span>
-              <h2>Open Requests, Returns, and Disputes</h2>
-            </div>
-            <div class="return-queue-actions">
-              <span id="return-task-save-status" class="return-task-save-status" aria-live="polite"></span>
-              <span id="return-task-count" class="history-count">0 tasks</span>
-            </div>
-          </div>
-          <div class="return-queue-filters">
-            <label>
-              Task status
-              <select id="return-task-status-filter">
-                <option value="pending">Pending only</option>
-                <option value="mine">Assigned to me</option>
-                <option value="open">Open</option>
-                <option value="assigned">Assigned</option>
-                <option value="in_progress">In progress</option>
-                <option value="blocked">Blocked</option>
-                <option value="deferred">Deferred</option>
-                <option value="resolved">Resolved</option>
-                <option value="all">All tasks</option>
-              </select>
-            </label>
-            <label>
-              Issue type
-              <select id="return-task-issue-filter">
-                <option value="all">All issues</option>
-                <option value="request">Requests</option>
-                <option value="return">Returns</option>
-                <option value="dispute">Disputes</option>
-              </select>
-            </label>
-            <label>
-              Assignee
-              <select id="return-task-assignee-filter">
-                <option value="">All assignees</option>
-                <option value="unassigned">Unassigned</option>
-              </select>
-            </label>
-            <label>
-              Sort
-              <select id="return-task-sort">
-                <option value="newest">Newest first</option>
-                <option value="due_asc">Due soon first</option>
-                <option value="due_desc">Due latest first</option>
-                <option value="payout_desc">Payout high to low</option>
-                <option value="payout_asc">Payout low to high</option>
-              </select>
-            </label>
-            <label>
-              Search issues
-              <input id="return-task-search" type="search" placeholder="Buyer, return ID, order number, item, question..." />
-            </label>
-          </div>
-          <div id="return-queue-reconciliation" class="return-queue-reconciliation hidden"></div>
-          <div id="return-task-list" class="return-task-list">
-            <div class="history-empty">Loading return tasks...</div>
-          </div>
-        </section>
+        <div class="issues-list-caption"><span id="issues-count" aria-live="polite">Loading cases...</span><span>Response deadline first</span></div>
+        <div class="issues-columns">
+          <section id="issues-list-panel" aria-label="Customer cases"><div id="issues-list" class="issues-list" aria-busy="true"><div class="issues-empty">Loading your workspace...</div></div><div class="issues-paging"><button id="issues-prev" type="button" class="secondary-btn" disabled>Previous</button><span id="issues-page"></span><button id="issues-next" type="button" class="secondary-btn" disabled>Next</button></div></section>
+          <section id="issues-detail" class="issues-detail" aria-label="Selected case"><div class="issues-empty issues-detail-placeholder"><span class="issues-empty-symbol">&#9678;</span><h2>Every detail in one place</h2><p>Select a case to see its next action, order, photos and conversation.</p></div></section>
+        </div>
       </main>
     </div>
   </div>
@@ -242,9 +153,9 @@
         <div>
           <span class="eyebrow">Return Photos</span>
           <h3>Evidence Media</h3>
-          <p>Use the OG phone app to photograph the returned item, packaging, and condition before saving the return.</p>
+          <p>Photograph the item, packaging and condition. Nothing enters sellable stock until you choose to restock it.</p>
         </div>
-        <div class="return-camera-row">
+        <details class="issues-other-camera"><summary>Use a connected camera station</summary><div class="return-camera-row">
           <label>
             Camera Station
             <select id="return-capture-station">
@@ -256,7 +167,7 @@
             <button id="request-return-photo" type="button" class="secondary-btn">Take Photo With OG App</button>
           </div>
         </div>
-        <p id="return-photo-status" class="history-label-status"></p>
+        </details><p id="return-photo-status" class="history-label-status"></p>
         <div class="return-photo-toolbar hidden" aria-label="Return evidence photo upload selection">
           <span id="return-photo-selection-summary"></span>
           <div>
@@ -268,8 +179,9 @@
           <div class="history-empty">No return photos added.</div>
         </div>
         <label class="modal-field return-file-fallback">
-          Fallback file upload
+          Add photos or videos
           <input id="return-evidence-photo" type="file" accept="image/*,video/*" multiple />
+          <button id="return-phone-camera" type="button" class="secondary-btn">Take a photo</button><input id="return-camera-file" type="file" accept="image/*" capture="environment" hidden />
         </label>
         <div id="return-evidence-photo-list" class="history-extra-label-photo-list"></div>
       </section>
@@ -308,9 +220,11 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="task-notifications.js?v=20261007" defer></script>
-  <script src="admin-nav.js?v=packaging-20261008"></script>
+  <script src="admin-nav.js?v=customer-issues-20261009"></script>
   <script src="ebay-buyer-insights.js"></script>
   <script src="video-receipts.js?v=20261002-desktop-capture"></script>
-  <script src="ebay-order-history.js?v=20261006-history-performance-8"></script>
+  <script src="task-workflow.js?v=20261009"></script>
+  <script src="customer-issues.js?v=20261009-1"></script>
+  <script src="ebay-order-history.js?v=20261009-customer-issues-1"></script>
 </body>
 </html>

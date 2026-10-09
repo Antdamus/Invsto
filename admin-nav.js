@@ -18,7 +18,7 @@
     { href: "packaging.html", label: "Packaging", mark: "PK" },
     { href: "team-tasks.html", label: "Tasks", mark: "TS" },
     { href: "ebay-order-history.html", label: "Order History", mark: "OH" },
-    { href: "ebay-returns.html", label: "Requests, Returns & Disputes", mark: "RRD" },
+    { href: "ebay-returns.html", label: "Customer issues", mark: "CI" },
     { href: "email-triage.html", label: "Email Triage", mark: "ET" },
     { href: "timeclock.html", label: "Timesheet", mark: "T" },
   ];
@@ -37,7 +37,7 @@
     { href: "email-triage.html", label: "Email Triage", mark: "ET", requiresEmailTriageAccess: true },
     { href: "team-tasks.html", label: "Tasks", mark: "TS" },
     { href: "ebay-order-history.html", label: "Order History", mark: "OH" },
-    { href: "ebay-returns.html", label: "Requests, Returns & Disputes", mark: "RRD", requiresPostOrderIssueAccess: true },
+    { href: "ebay-returns.html", label: "Customer issues", mark: "CI", requiresPostOrderIssueAccess: true },
     { href: "locations.html", label: "Locations", mark: "L" },
     { href: "dashboard.html", label: "Admin Dashboard", mark: "AD" },
   ];

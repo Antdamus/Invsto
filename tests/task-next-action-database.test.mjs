@@ -17,7 +17,8 @@ before(async()=>{
  await db.exec(`create role anon;create role authenticated;create schema auth;
  create function auth.uid() returns uuid language sql as $$select nullif(current_setting('test.actor',true),'')::uuid$$;
  create table employees(id uuid,user_id uuid,email text,role text,active boolean);
- create function can_manage_inventory() returns boolean language sql as $$select exists(select 1 from public.employees where user_id=auth.uid() and active)$$;
+ create function can_manage_inventory() returns boolean language sql as $$select coalesce(current_setting('test.inventory',true),'yes')<>'no' and exists(select 1 from public.employees where user_id=auth.uid() and active)$$;
+ create function can_access_post_order_issues() returns boolean language sql as $$select exists(select 1 from public.employees where user_id=auth.uid() and active)$$;
  create function is_admin() returns boolean language sql as $$select exists(select 1 from public.employees where user_id=auth.uid() and active and role='admin')$$;
  create table task_notifications(id uuid default gen_random_uuid(),recipient_user_id uuid,source text,task_id uuid,event_id uuid);
  create function create_task_notification(uuid,text,text,uuid,uuid,text,text,text,text,timestamptz,jsonb,uuid,uuid,text) returns uuid language plpgsql as $$declare n uuid;begin
@@ -40,6 +41,7 @@ before(async()=>{
  }
  await db.exec(await readFile(new URL('../supabase/migrations/20261007220000_task_next_action_workflow.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261007233000_task_request_intent.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261009042000_customer_issue_task_access.sql',import.meta.url),'utf8'));
  for(const table of ['team_tasks','ebay_order_tasks']) await db.exec(`alter table ${table} alter column id set default gen_random_uuid();
  alter table ${table} add column description text,add column question text,add column created_by_email text,add column order_line_ids uuid[];`);
  for(const table of ['team_task_events','ebay_order_task_events']) await db.exec(`alter table ${table} drop constraint ${table}_action_check;`);
@@ -54,6 +56,7 @@ before(async()=>{
  await db.exec(`create trigger completion_notify after update of status on ebay_order_tasks for each row execute function notify_admins_ebay_subtask_completed()`);
 });
 beforeEach(async()=>{
+ await db.exec("set test.inventory='yes'");
  await db.exec('truncate legacy_notifications,employees,task_notifications,task_followers,ebay_orders,ebay_order_lines,'+Object.values(tables).join(',')+','+Object.values(events).join(','));
  for(const n of [1,2,3,4])await db.query('insert into employees values($1,$1,$2,$3,true)',[id(n),`person${n}@example.test`,n===4?'admin':'employee']);
  for(const table of Object.values(tables))await db.query(`insert into ${table}(id,assigned_to_user_id,assigned_to_employee_id,assigned_to_email,assigned_by,assigned_by_email,created_by,status,task_type,due_at,priority,title,metadata,latest_note,order_id)
@@ -197,4 +200,12 @@ for(const source of ['team','order','return'])test(source+': decision recipient 
  const result=await advance(source,'decide',{actor:2,note:'Confirmed: no action is necessary.'});
  assert.equal(result.task.status,'resolved');assert.equal(result.task.resolved_by,id(2));
  assert.equal((await db.query('select status from ebay_orders')).rows[0].status,'pending');
+});
+
+
+test('return-only staff can complete their case task without receiving inventory or team access',async()=>{
+ await db.exec("set test.inventory='no'");
+ await assert.rejects(advance('team','complete'),/staff access/);
+ await assert.rejects(advance('return','complete',{actor:3}),/assigned|next|owner|responsible/);
+ const result=await advance('return','complete');assert.equal(result.task.status,'completed_by_employee');
 });

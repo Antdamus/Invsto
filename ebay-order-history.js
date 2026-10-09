@@ -106,7 +106,7 @@ const HISTORY_EVIDENCE_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp",
 const HISTORY_EVIDENCE_VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "ogg"]);
 const HISTORY_EVIDENCE_DOCUMENT_EXTENSIONS = new Set(["pdf"]);
 const RETURN_EXTERNAL_NAV_RESTORE_KEY = "ogReturnExternalNavigationRestore";
-const RETURN_ACTIVE_TASK_STATUSES = new Set(["open", "assigned", "in_progress", "blocked", "deferred"]);
+const RETURN_ACTIVE_TASK_STATUSES = new Set(["open", "assigned", "in_progress", "blocked", "deferred", "completed_by_employee", "sent_back_for_rework"]);
 const RETURN_INACTIVE_TASK_STATUSES = new Set(["resolved", "closed", "cancelled"]);
 const TRACKING_NUMBER_PATTERN = /\b\d{20,30}\b/g;
 const FORMATTED_TRACKING_NUMBER_PATTERN = /\b\d{2,4}(?:[\s-]+\d{2,4}){4,8}\b/g;
@@ -1784,7 +1784,7 @@ async function checkHistoryAuth() {
   window.__ogPostOrderIssueAccess = hasPostOrderIssueAccess;
   const greeting = $("history-greeting");
   if (greeting) {
-    const pageTitle = isReturnsWorkbenchPage() ? "eBay Requests, Returns, and Disputes" : "eBay Order History";
+    const pageTitle = isReturnsWorkbenchPage() ? "Customer Issues" : "eBay Order History";
     greeting.textContent = `${pageTitle}${employee.display_name ? ` - ${employee.display_name}` : ""}`;
   }
   const subtitle = $("history-subtitle");
@@ -3097,6 +3097,8 @@ function getReturnTaskSearchText(task = {}) {
 }
 
 function getReturnTaskIssueKind(task = {}) {
+  const structuredCase = getReturnTaskCase(task);
+  if (["request", "return", "dispute"].includes(structuredCase.issue_kind)) return structuredCase.issue_kind;
   const metadata = getReturnTaskPayload(task);
   const returnCase = getReturnTaskCase(task);
   const displayInfo = getReturnTaskDisplayInfo(task);
@@ -3321,6 +3323,7 @@ async function loadReturnTaskEvents(tasks = []) {
 }
 
 async function loadReturnQueue() {
+  if (isReturnsWorkbenchPage() && window.OGCustomerIssues?.ready) return window.OGCustomerIssues.refresh();
   const list = $("return-task-list");
   if (list) list.innerHTML = `<div class="history-empty">Loading return tasks...</div>`;
 
@@ -4447,6 +4450,7 @@ function openReturnTaskIntake(taskId) {
   if (fetchedLines.length) mergeHistoryLines(fetchedLines);
   openReturnIntakeModal(lineIds);
   const returnCase = getReturnTaskCase(task);
+  state.returnIntakeCaseId = returnCase.id;
   $("return-ebay-id").value = returnCase.ebay_return_id || "";
   $("return-reason").value = mapEbayReturnReasonToValue(returnCase.return_reason);
   $("return-note").value = [
@@ -7942,6 +7946,8 @@ function renderReturnLineList() {
     const checked = state.returnSelectedLineIds.has(line.id);
     const hasInventoryItem = Boolean(line.internal_item_id);
     const priorReturns = getReturnItemsForLine(line.id);
+    const receivedAlready = priorReturns.reduce((sum, item) => sum + Number(item.received_quantity || 0), 0);
+    const remainingQuantity = Math.max(0, Number(line.fulfilled_quantity || line.quantity || 1) - receivedAlready);
     const orderNumber = line.order?.order_number || "No order";
     return `
       <article class="return-line-card ${checked ? "is-selected" : ""}" data-return-line-card="${escapeHtml(line.id)}">
@@ -7956,7 +7962,7 @@ function renderReturnLineList() {
         <div class="return-line-fields">
           <label>
             Qty received
-            <input type="number" min="0" max="${Number(line.fulfilled_quantity || line.quantity || 1)}" step="1" value="${Number(line.fulfilled_quantity || line.quantity || 1)}" data-return-qty="${escapeHtml(line.id)}" />
+            <input type="number" min="0" max="${Number(line.fulfilled_quantity || line.quantity || 1)}" step="1" value="${remainingQuantity}" data-return-qty="${escapeHtml(line.id)}" />
           </label>
           <label>
             Condition
@@ -7994,7 +8000,7 @@ function renderReturnLineList() {
     checkbox.addEventListener("change", () => {
       if (checkbox.checked) state.returnSelectedLineIds.add(checkbox.dataset.returnLineSelect);
       else state.returnSelectedLineIds.delete(checkbox.dataset.returnLineSelect);
-      renderReturnLineList();
+      checkbox.closest(".return-line-card")?.classList.toggle("is-selected", checkbox.checked);
     });
   });
   list.querySelectorAll("[data-return-condition]").forEach((select) => {
@@ -8018,6 +8024,8 @@ function renderReturnLineList() {
 function openReturnIntakeModal(lineIds = []) {
   const uniqueIds = [...new Set(lineIds.filter(Boolean))];
   if (!uniqueIds.length) return;
+  state.returnIntakeRequestId = crypto.randomUUID();
+  state.returnIntakeCaseId = null;
   state.returnModalLineIds = uniqueIds;
   state.returnSelectedLineIds = new Set(uniqueIds);
   state.returnDestinationLocation = null;
@@ -8392,9 +8400,9 @@ function getReturnTaskApiDetails(task = {}) {
     transactionId: metadata.transactionId || metadata.transaction_id || api.transactionId || firstLine.transaction_id || "",
     quantity: Number(metadata.returnQuantity || api.quantity || firstLine.quantity || 1),
     reason: returnCase.return_reason || metadata.returnReason || metadata.return_reason || api.reason || "",
-    status: metadata.returnStatus || metadata.returnState || api.status || api.state || returnCase.status || "",
+    status: returnCase.ebay_status || metadata.returnStatus || metadata.returnState || api.status || api.state || returnCase.status || "",
     actionDue: metadata.returnAction || api.actionDue || "",
-    dueAt: metadata.returnDueAt || api.dueAt || task.due_at || "",
+    dueAt: returnCase.ebay_due_at || metadata.returnDueAt || api.dueAt || "",
     requestedAt: metadata.returnInitiated || api.requestedAt || returnCase.opened_at || "",
     buyerComment: metadata.buyerComment || detail.buyerComment || api.buyerComment || "",
     requestAmount,
@@ -8951,28 +8959,17 @@ async function confirmReturnIntake() {
     const evidencePhotos = await persistReturnEvidencePhotos(files, orderNumbers);
 
     setReturnIntakeStatus("Saving return and inventory audit...");
-    const { data, error } = await supabase.rpc("receive_ebay_return", {
-      _return_items: returnItems,
-      _return_reason: $("return-reason")?.value || null,
-      _return_tracking_number: $("return-tracking")?.value || null,
-      _ebay_return_id: $("return-ebay-id")?.value || null,
-      _notes: $("return-note")?.value || null,
-      _evidence_photos: evidencePhotos,
-      _signed_by_email: state.user?.email || null,
+    if (!state.returnIntakeCaseId) {
+      const prepared = await supabase.rpc("prepare_customer_return", {_line_ids: selectedLines.map(line => line.id), _ebay_id: $("return-ebay-id")?.value || null, _reason: $("return-reason")?.value || null});
+      if (prepared.error) throw prepared.error;
+      state.returnIntakeCaseId = prepared.data;
+    }
+    const { data, error } = await supabase.rpc("receive_customer_return", {
+      _request_id: state.returnIntakeRequestId, _case_id: state.returnIntakeCaseId,
+      _items: returnItems, _evidence: evidencePhotos, _notes: $("return-note")?.value || null, _tracking: $("return-tracking")?.value || null,
     });
     if (error) throw error;
-
     const result = Array.isArray(data) ? data[0] || {} : data || {};
-    const returnCaseIds = Array.isArray(result.return_case_ids) ? result.return_case_ids : [];
-    if (returnCaseIds.length) {
-      await supabase.rpc("sync_ebay_return_tasks_after_intake", {
-        _return_case_ids: returnCaseIds,
-        _notes: "Return intake saved from OG.",
-        _signed_by_email: state.user?.email || null,
-      }).catch((syncError) => {
-        console.warn("Could not sync return task queue after intake:", syncError);
-      });
-    }
     setReturnIntakeStatus(`Return saved. ${Number(result.restocked_units || 0).toLocaleString()} unit${Number(result.restocked_units || 0) === 1 ? "" : "s"} restocked.`, "success");
     closeReturnIntakeModal();
     if (!isReturnsWorkbenchPage()) await loadOrderHistory();
@@ -11675,6 +11672,12 @@ function setupListeners() {
   $("confirm-return-intake")?.addEventListener("click", confirmReturnIntake);
   $("find-return-destination")?.addEventListener("click", searchReturnDestinationLocation);
   $("return-evidence-photo")?.addEventListener("change", renderReturnEvidencePhotoList);
+  $("return-phone-camera")?.addEventListener("click", () => $("return-camera-file")?.click());
+  $("return-camera-file")?.addEventListener("change", () => {
+    const collected = new DataTransfer();
+    [...($("return-evidence-photo")?.files || []), ...($("return-camera-file")?.files || [])].forEach(file => collected.items.add(file));
+    $("return-evidence-photo").files = collected.files; $("return-camera-file").value = ""; renderReturnEvidencePhotoList();
+  });
   $("return-capture-station")?.addEventListener("change", (event) => {
     setSelectedReturnCaptureStation(event.target.value);
   });
@@ -11845,8 +11848,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupListeners();
   if (isReturnsWorkbenchPage()) {
     state.historyLoaded = true;
-    await loadReturnQueue();
-    await loadLatestReturnSyncSummary();
+    if (window.OGCustomerIssues) await window.OGCustomerIssues.init({supabase, user: state.user, employee: state.employee, state,
+      lineSelect: ORDER_HISTORY_LINE_SELECT, normalizeLine, mergeLines: mergeHistoryLines, loadOrderEvents: loadOrderTaskEventsForLines,
+      financeBadge: task => renderFinanceBadgeMarkup(getLinesFinanceStatus(getReturnTaskLines(task))),
+      renderReceipt: renderReturnTaskVideoReceiptPanel, renderComplaint: renderReturnComplaintDetails, renderMessages: renderReturnMessageLog,
+      bindReceipt: bindReturnVideoReceiptLinks, hydrateReceipts: hydrateHistoryVideoReceiptThumbnails,
+      loadMessages: loadReturnMessagesForTask, hydrateComplaint: hydrateReturnComplaintImageUrls,
+      signEvidence: signEventEvidencePhoto, openEvidence: openEvidencePhotoViewer, openIntake: openReturnIntakeModal});
+    else { await loadReturnQueue(); await loadLatestReturnSyncSummary(); }
     drainQueuedHistoryReturnTransfers();
     drainQueuedHistoryReturnMessageTransfers();
   } else {
