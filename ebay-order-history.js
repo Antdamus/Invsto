@@ -11852,6 +11852,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       lineSelect: ORDER_HISTORY_LINE_SELECT, normalizeLine, mergeLines: mergeHistoryLines, loadOrderEvents: loadOrderTaskEventsForLines,
       financeBadge: task => renderFinanceBadgeMarkup(getLinesFinanceStatus(getReturnTaskLines(task))),
       renderReceipt: renderReturnTaskVideoReceiptPanel, renderComplaint: renderReturnComplaintDetails, renderMessages: renderReturnMessageLog,
+      evidenceReceipts: lines => lines.flatMap(line => getHistoryLineVideoReceiptPhotos(line, getReturnVideoReceiptEventsForLine(line))),
       bindReceipt: bindReturnVideoReceiptLinks, hydrateReceipts: hydrateHistoryVideoReceiptThumbnails,
       loadMessages: loadReturnMessagesForTask, hydrateComplaint: hydrateReturnComplaintImageUrls,
       signEvidence: signEventEvidencePhoto, openEvidence: openEvidencePhotoViewer, openIntake: openReturnIntakeModal});

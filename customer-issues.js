@@ -34,7 +34,7 @@
    <div class="issue-card-top"><span class="issue-kind is-${kind(c)}">${kind(c)==='request'?'Customer request':kind(c)==='return'?'Physical return':'Dispute'}</span><small>${escape(c.order_number||`Case ${c.ebay_return_id||'not linked'}`)}</small></div>
    <h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p>${escape(c.item_title||c.return_reason||'Open this case to review the order and next step.')}</p>
    <div class="issue-card-footer"><span class="issue-tag">${escape(nextText(c))}</span>${c.ebay_due_at&&!closed(c)?`<span class="issue-tag ${c.overdue?'is-overdue':''}">${c.overdue?'Response overdue':'Respond by'} ${escape(date(c.ebay_due_at))}</span>`:''}</div>
-   <div class="issue-card-top" style="margin:11px 0 0"><small>${escape(person(c.next_user))}${c.open_tasks?` · ${c.open_tasks} open task${c.open_tasks===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>`).join(''):
+   <div class="issue-card-top" style="margin:11px 0 0"><small>${c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>`).join(''):
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
   $('issues-count').textContent=`${total} ${view==='history'?'finished':'active'} case${total===1?'':'s'}`;
   $('issues-page').textContent=total?`${offset+1}–${Math.min(offset+PAGE,total)} of ${total}`:'0 cases';
@@ -49,7 +49,7 @@
    rows=result.rows||[];counts=result.counts||{};total=result.total||0;cards();
    if($('issues-feedback').classList.contains('is-error'))feedback('');
    const selectedChanged=detail&&rows.some(c=>c.id===selected&&c.updated_at!==detail.c.updated_at);
-   if((options.detail!==false||selectedChanged)&&selected&&!$('issue-action-form')&&!ctx.state.busy)await openCase(selected,{quiet:true});
+   if((options.detail!==false||selectedChanged)&&selected&&!$('issue-action-form')&&!ctx.state.busy&&!$('issue-evidence-package')?.dataset.ready)await openCase(selected,{quiet:true});
   }catch(error){if(request===listVersion)feedback(error.message||'Could not load customer issues. Please retry.',true);}
   finally{if(request===listVersion)$('issues-list').setAttribute('aria-busy','false');}
  }
@@ -64,7 +64,8 @@
     :pending.length?'Connecting the eBay issue feeds · details':stale?'eBay data needs a refresh · details':'eBay connected · background updates active';
    const labels={return:'Returns',inquiry:'Customer requests',case:'Escalated cases',payment_dispute:'Payment disputes'};
    $('issues-health-detail').innerHTML=lanes.map(l=>`<p><b>${labels[l.lane]||escape(l.lane)}</b>${l.status==='needs_access'?'eBay authorization is needed for this feed.':escape(l.error||nice(l.status))}<br>Discovery checked: ${escape(date(l.last_success_at))}</p>`).join('')+
-    '<p>Discovery finds cases. Each case shows its own last successful update. A failed feed never means there are zero cases.</p>';
+    '<p>Each case keeps its last successful information while failed updates retry.</p>'+
+    (result.failures?.length?`<section class="issue-sync-retries"><h3>Updates needing attention</h3>${result.failures.map(f=>`<article><b>${escape(labels[f.lane]||f.lane)} · ${escape(f.external_id)}</b>${f.failure_kind==='access'?'Check the eBay connection.':f.failure_kind==='review'?'Verify this case on eBay; it may need a manual correction.':'Temporary failure; an automatic retry is scheduled.'} Attempt ${escape(f.attempts)}. Next check: ${escape(date(f.next_attempt_at))}${f.case_id?` <button class="secondary-btn" data-case="${escape(f.case_id)}">Inspect case</button>`:''}<details><summary>Error details</summary>${escape(f.last_error||'No error details')}</details></article>`).join('')}</section>`:'');
   }catch(error){$('issues-health-summary').textContent='Connection status unavailable · refresh to retry';$('issues-health-summary').classList.add('is-warning');}
  }
  async function sync(caseId){
@@ -74,12 +75,14 @@
  }
  function actions(task){
   const next=root.OGTaskWorkflow.next(task,people),mine=next.userId===ctx.user.id;
+  if(next.kind==='monitoring')return '<span class="issue-subtitle">No seller response requested. A new request from eBay brings this back automatically.</span>';
   const participant=ctx.employee.role==='admin'||[task.assigned_to_user_id,task.created_by,task.assigned_by].includes(ctx.user.id);
   let buttons=participant&&!(mine&&next.kind==='approval'&&task.status!=='completed_by_employee')?`<button class="secondary-btn" data-task-action="update" data-task="${task.id}">Add update / hand back</button>`:'';
   if(mine&&next.kind==='work')buttons+=`<button class="primary-btn" data-task-action="complete" data-task="${task.id}">Complete my part</button>`;
   if(mine&&next.kind==='approval')buttons+=task.status==='completed_by_employee'
    ?`<button class="primary-btn" data-task-action="accept" data-task="${task.id}">Accept completed work</button><button class="secondary-btn" data-task-action="return" data-task="${task.id}">Request changes</button>`
    :`<button class="primary-btn" data-task-action="instructions" data-task="${task.id}">Update / give instructions</button><button class="secondary-btn" data-task-action="decide" data-task="${task.id}">Decision finishes this task</button>`;
+  if(mine&&task.task_type==='return_review'&&detail.c.source_lane==='payment_dispute'&&detail.c.ebay_status==='OPEN'&&task.status!=='completed_by_employee')buttons=`<button class="primary-btn" data-follow-task="${task.id}">Reviewed · follow updates</button>`+buttons;
   return buttons;
  }
  function renderTasks(){
@@ -114,6 +117,7 @@
     ${c.order_number?`<a class="secondary-btn" href="ebay-order-history.html?orderHistorySearch=${encodeURIComponent(c.order_number)}&historyAllDates=true">View order</a>`:''}
     ${lines[0]?`<a class="secondary-btn" href="email-triage.html?orderLineId=${encodeURIComponent(lines[0].id)}&from=returns" target="_blank" rel="noopener">Buyer chat ↗</a>`:''}
     ${!lines.length&&ctx.employee.role==='admin'?'<button class="primary-btn" data-match-order>Match order items</button>':''}</div>
+   <details class="issue-detail-section issue-evidence-package"><summary>Evidence package</summary><p class="issue-subtitle">Gather item photos, packing evidence, tracking, certificates and messages. Choose what belongs in the download.</p><button class="secondary-btn" data-prepare-evidence>Prepare evidence</button><div id="issue-evidence-package"></div></details>
    ${renderTasks()}
    <details class="issue-detail-section"><summary>Money &amp; payment</summary><p>Case amount: <strong>${escape(c.raw_payload?.apiExtractedDetails?.requestAmount||c.raw_payload?.requestAmount||c.raw_payload?.refundText||'Not provided by eBay')}</strong></p>${ctx.financeBadge?.(primary)||''}<p class="issue-subtitle">Payment information updates separately in the background. The case amount is not confirmation that a refund was issued. Check eBay before making a financial decision.</p></details>
    <details class="issue-detail-section" open><summary>Order items &amp; saved photos</summary>${receipt||'<p class="issue-subtitle">No item screenshot is saved yet.</p>'}${lines.map(l=>`<div class="issue-line"><strong>${escape(l.item_title)}</strong><p>${escape(l.item_number||'')} · Order qty ${l.quantity||0} · Fulfilled ${l.fulfilled_quantity||0}</p></div>`).join('')}
@@ -180,6 +184,7 @@
   form(titles[action],`${update?`<label>What happens next?<select name="mode"><option value="update">Add information · responsibility stays the same</option>${assignee&&assignee!==ctx.user.id?`<option value="work">Ask ${escape(person(assignee))} to do work</option><option value="decision">Ask ${escape(person(assignee))} for a decision</option>`:''}</select></label>`:'<p class="issue-subtitle">Only this task changes. The order and eBay case stay separate.</p>'}<label>Update / instructions<textarea name="note" required maxlength="10000" placeholder="What happened, and what should happen next?"></textarea></label>`,update?'Save update':'Confirm');
   $('issue-action-form').onsubmit=e=>submitForm(e,async f=>{
    if(update)checked(await db.rpc('respond_task_request',{_source:'return',_task_id:task.id,_note:f.get('note'),_mode:f.get('mode'),_expected_assignee:task.assigned_to_user_id||null,_expected_assigner:task.assigned_by||null,_expected_updated_at:task.updated_at,_photos:[]}));
+   else if(action==='decide'&&task.task_type==='return_review'&&!task.assigned_to_user_id)checked(await db.rpc('finish_customer_issue_review',{_task_id:task.id,_expected_updated_at:task.updated_at,_note:f.get('note')}));
    else checked(await db.rpc('advance_task_workflow',{_source:'return',_task_id:task.id,_action:action,_note:f.get('note'),_expected_status:task.status,_expected_assignee:task.assigned_to_user_id||null,_expected_updated_at:task.updated_at,_photos:[]}));
   });
  }
@@ -226,6 +231,8 @@
    else if(b.hasAttribute('data-sync-case'))sync(selected);
    else if(b.hasAttribute('data-receive'))receive();
    else if(b.dataset.taskAction)taskForm(b.dataset.task,b.dataset.taskAction);
+   else if(b.dataset.followTask){const t=detail.tasks.find(t=>t.id===b.dataset.followTask);form('Reviewed · follow updates','<label>Review note<textarea name="note" required placeholder="What did you check? What are we waiting for?"></textarea></label>','Move to Following');$('issue-action-form').onsubmit=e=>submitForm(e,async f=>checked(await db.rpc('follow_customer_issue',{_task_id:t.id,_expected_updated_at:t.updated_at,_note:f.get('note')})));}
+   else if(b.hasAttribute('data-prepare-evidence'))root.OGIssueEvidence.open({db,caseId:selected,target:$('issue-evidence-package'),sign:ctx.signEvidence,receipts:ctx.evidenceReceipts?ctx.evidenceReceipts(detail.lines):[],returnEvents:detail.events});
    else if(b.hasAttribute('data-assign'))assignForm(b.dataset.assign);
    else if(b.dataset.inspect)inspectionForm(b.dataset.inspect);
    else if(b.hasAttribute('data-media'))media(Number(b.dataset.media));

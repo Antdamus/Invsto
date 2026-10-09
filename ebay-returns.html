@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="ebay-order-history.css" />
-  <link rel="stylesheet" href="customer-issues.css?v=20261009-3" />
+  <link rel="stylesheet" href="customer-issues.css?v=20261009-5" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -94,7 +94,7 @@
         </nav>
         <section class="issues-tools" aria-label="Find customer issues">
           <label class="issues-search"><span class="sr-only">Search customer issues</span><input id="issues-search" type="search" placeholder="Buyer, order, case or tracking..." autocomplete="off" /></label>
-          <label><span class="sr-only">Responsibility</span><select id="issues-scope"><option value="all">Everyone</option><option value="mine">My next actions</option><option value="following">Following</option><option value="unassigned">Needs an owner</option></select></label>
+          <label><span class="sr-only">Responsibility</span><select id="issues-scope"><option value="all">Everyone</option><option value="mine">My next actions</option><option value="following">Following</option><option value="due">eBay deadline soon</option><option value="monitoring">Waiting on eBay</option><option value="unassigned">Needs an owner</option></select></label>
         </section>
         <div class="issues-list-caption"><span id="issues-count" aria-live="polite">Loading cases...</span><span>Response deadline first</span></div>
         <div class="issues-columns">
@@ -219,12 +219,13 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
-  <script src="task-notifications.js?v=20261007" defer></script>
+  <script src="task-notifications.js?v=20261009-issue-alerts" defer></script>
   <script src="admin-nav.js?v=customer-issues-20261009"></script>
   <script src="ebay-buyer-insights.js"></script>
   <script src="video-receipts.js?v=20261002-desktop-capture"></script>
-  <script src="task-workflow.js?v=20261009"></script>
-  <script src="customer-issues.js?v=20261009-4"></script>
-  <script src="ebay-order-history.js?v=20261009-customer-issues-1"></script>
+  <script src="task-workflow.js?v=20261009-issue-actions"></script>
+  <script src="customer-issue-evidence.js?v=20261009-1"></script>
+  <script src="customer-issues.js?v=20261009-5"></script>
+  <script src="ebay-order-history.js?v=20261009-customer-issues-2"></script>
 </body>
 </html>

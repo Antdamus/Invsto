@@ -35,11 +35,27 @@ before(async()=>{
  await db.exec(await sqlFile('20261009040000_customer_issues_workspace.sql'));
  await db.exec(await sqlFile('20261009041000_customer_return_safety.sql'));
  await db.exec(await sqlFile('20261009044000_customer_issue_reviewer_access.sql'));
+ await db.exec(`create table task_followers(source text,task_id uuid,user_id uuid,primary key(source,task_id,user_id));grant select on task_followers to authenticated;
+ create function notify_ebay_return_task_assignment() returns trigger language plpgsql as $$begin return new;end $$;
+ create trigger trg_notify_ebay_return_task_assignment after insert or update on ebay_return_tasks for each row execute function notify_ebay_return_task_assignment();
+ create table task_notifications(id uuid default gen_random_uuid(),recipient_user_id uuid,source text,task_id uuid,notification_type text constraint task_notifications_notification_type_check check(notification_type<>'invalid'),title text,body text,metadata jsonb);
+ create function create_task_notification(uuid,text,text,uuid,uuid,text,text,text,text,timestamptz,jsonb,uuid,uuid,text) returns uuid language plpgsql as $$declare n uuid:=gen_random_uuid();begin insert into public.task_notifications values(n,$1,$3,$4,$6,$7,$8,$11);return n;end $$;`);
+ await db.exec(await sqlFile('20261009050000_customer_issue_action_cycles.sql'));
+ await db.exec(await sqlFile('20261009051000_customer_issue_health_queue.sql'));
+ await db.exec(`alter table ebay_return_task_events add column photo_attachments jsonb default '[]';
+ create function packaging_detail(uuid,uuid[]) returns jsonb language sql as $$select '{"orders":[],"lines":[],"bag_photos":[],"completion_events":[]}'::jsonb$$;
+ create table packaging_shipments(id uuid,order_ids uuid[],tracking_code text,status text,updated_at timestamptz);
+ create table packaging_evidence(shipment_id uuid,bucket text,path text,mime_type text,media_type text,label text,created_at timestamptz,removed_at timestamptz);
+ create table ebay_order_line_certificates(order_line_id uuid,certificate_url text,report_number text,watch_serial text,attachments jsonb,voided_at timestamptz);
+ create table ebay_return_messages(return_case_id uuid,direction text,message_body text,sent_at timestamptz,message_status text);
+ create table ebay_conversations(id uuid,other_party_username text,conversation_type text,reference_id text);
+ create table ebay_conversation_messages(id uuid,conversation_id uuid,sender_username text,direction text,message_body text,created_at_ebay timestamptz);`);
+ await db.exec(await sqlFile('20261009052000_customer_issue_evidence.sql'));
 });
 after(async()=>db?.close());
 beforeEach(async()=>{
  await db.exec(`reset role;select set_config('test.actor','${id(1)}',false);select set_config('test.access','yes',false);select set_config('test.admin','yes',false);
- truncate customer_return_receipts,ebay_return_task_events,ebay_return_tasks,ebay_return_events,ebay_return_items,ebay_return_cases,stock_transactions,item_stock_locations,ebay_order_lines,ebay_orders cascade;
+ truncate customer_return_receipts,ebay_return_task_events,ebay_return_tasks,ebay_return_events,ebay_return_items,ebay_return_cases,stock_transactions,item_stock_locations,ebay_order_lines,ebay_orders,task_notifications,task_followers cascade;
  insert into ebay_orders values('${id(10)}','01-12345-12345','buyer.one','fulfilled');
  insert into ebay_order_lines values('${id(11)}','${id(10)}','287000000001','Watch',2,2,'fulfilled','${id(20)}',null,null,null);
  insert into ebay_return_cases(id,order_id,order_number,ebay_return_id,status,source_lane,issue_kind,ebay_status,synced_at,ebay_due_at)
@@ -138,4 +154,77 @@ test('a bad second item rolls the entire receipt back',async()=>{
  {order_line_id:id(999),received_quantity:1,condition_received:'used_good',disposition:'restock',destination_location_id:id(30)}];
  await assert.rejects(scalar('select receive_customer_return($1,$2,$3,$4,null,null) v',[id(240),id(100),JSON.stringify(entries),'[{"path":"photo.jpg"}]']),/belonging/);
  assert.equal(await stock(),0);assert.equal(await scalar('select count(*)::int v from customer_return_receipts'),0);
+});
+
+const syncPayment=async(status='OPEN',due=null)=>db.query("update ebay_return_cases set source_lane='payment_dispute',issue_kind='dispute',ebay_status=$1,ebay_due_at=$2,synced_at=now(),sync_error=null where id=$3",[status,due,id(100)]);
+const autoTask=async(status='open',extra='{}')=>db.query("insert into ebay_return_tasks(id,return_case_id,order_id,title,task_type,status,metadata) values($1,$2,$3,'Review','return_review',$4,'{\"source\":\"ebay_return_api\",\"request_kind\":\"decision\"}'::jsonb||$5::jsonb)",[id(300),id(100),id(10),status,extra]);
+
+test('monitor-only imports move to Following without closing the case or changing inventory',async()=>{
+ await autoTask();await syncPayment();
+ assert.equal(await scalar('select status v from ebay_return_tasks'),'deferred');
+ assert.equal(await scalar("select metadata->>'customer_issue_watch' v from ebay_return_tasks"),'true');
+ await db.exec("select set_config('test.actor','"+id(2)+"',false);set role authenticated");
+ assert.equal((await scalar("select list_customer_issues('dispute','mine') v")).total,0);
+ assert.equal((await scalar("select list_customer_issues('dispute','following') v")).total,1);
+ assert.equal((await scalar("select list_customer_issues('dispute','unassigned') v")).total,0);
+ await db.exec("reset role");assert.equal(await stock(),0);
+});
+test('monitoring resumes exactly once for a new response; completed reviews stay in history',async()=>{
+ await autoTask();await syncPayment();await syncPayment('ACTION_NEEDED','2026-10-14T06:59:59Z');
+ assert.equal(await scalar('select status v from ebay_return_tasks'),'open');
+ assert.equal(await scalar('select count(*)::int v from task_notifications'),1);
+ await syncPayment('ACTION_NEEDED','2026-10-14T06:59:59Z');assert.equal(await scalar('select count(*)::int v from task_notifications'),1);
+ await db.exec("update ebay_return_tasks set status='resolved' where id='"+id(300)+"'");
+ await syncPayment('OPEN');await syncPayment('ACTION_NEEDED','2026-10-16T06:59:59Z');
+ assert.equal(await scalar('select count(*)::int v from ebay_return_tasks'),2);
+ assert.equal(await scalar('select status v from ebay_return_tasks where id=$1',[id(300)]),'resolved');
+ assert.equal(await scalar('select count(*)::int v from task_notifications'),2);
+});
+test('assigned employee work and comments are never automatically parked',async()=>{
+ await autoTask();await db.exec("update ebay_return_tasks set assigned_to_user_id='"+id(1)+"',question='Inspect this clasp',due_at=now()+interval '1 day'");
+ await syncPayment();assert.equal(await scalar('select status v from ebay_return_tasks'),'open');
+ assert.equal(await scalar('select question v from ebay_return_tasks'),'Inspect this clasp');
+});
+
+test('only the current reviewer can finish an unassigned import, with an audit and attachments',async()=>{
+ await autoTask();const updated=await scalar('select updated_at::text v from ebay_return_tasks');
+ const finish=stamp=>scalar('select finish_customer_issue_review($1,$2,$3,$4) v',[id(300),stamp,'Outcome checked','[{"bucket":"ebay-return-evidence","path":"review.jpg"}]']);
+ await assert.rejects(finish(updated),/Only the current reviewer/);
+ await db.exec("select set_config('test.actor','"+id(2)+"',false);set role authenticated");
+ await assert.rejects(finish('2020-01-01T00:00:00Z'),/changed/);
+ await finish(updated);await db.exec('reset role');
+ assert.equal(await scalar('select status v from ebay_return_tasks'),'resolved');
+ assert.equal(await scalar("select photo_attachments->0->>'path' v from ebay_return_task_events where payload->>'reason'='review_completed'"),'review.jpg');
+ assert.equal(await scalar('select status v from ebay_return_cases'),'open');
+ assert.equal(await stock(),0);
+});
+test('eBay deadline stages deduplicate and use provider deadline independently of task due date',async()=>{
+ await autoTask();await syncPayment('ACTION_NEEDED','2026-10-14T06:00:00Z');
+ await db.exec("update ebay_return_tasks set due_at='2027-01-01T00:00:00Z'");
+ for(const now of ['2026-10-12T12:00:00Z','2026-10-12T12:05:00Z','2026-10-13T12:00:00Z','2026-10-14T03:00:00Z','2026-10-14T07:00:00Z'])await scalar('select enqueue_customer_issue_deadlines($1) v',[now]);
+ assert.equal(await scalar("select count(*)::int v from task_notifications where notification_type='customer_issue_deadline'"),4);
+ await syncPayment('CLOSED');await scalar('select enqueue_customer_issue_deadlines($1) v',['2026-10-15T00:00:00Z']);
+ assert.equal(await scalar("select count(*)::int v from task_notifications where notification_type='customer_issue_deadline'"),4);
+ assert.equal(await scalar("select has_function_privilege('authenticated','enqueue_customer_issue_deadlines(timestamptz)','execute') v"),false);
+});
+test('closing a followed provider case requests outcome review once',async()=>{
+ await autoTask();await syncPayment();await syncPayment('CLOSED');
+ assert.equal(await scalar('select status v from ebay_return_tasks'),'open');
+ assert.equal(await scalar('select count(*)::int v from task_notifications'),1);
+ await syncPayment('CLOSED');assert.equal(await scalar('select count(*)::int v from task_notifications'),1);
+});
+
+
+test('evidence excludes internal messages, voided certificates, removed packaging files and unrelated buyers',async()=>{
+ await db.exec(`update ebay_return_cases set buyer_username='buyer.one';
+ insert into ebay_order_line_certificates values('${id(11)}','https://certificate.example/1','123','serial','[{"bucket":"photos","path":"certificate.pdf"}]',null),('${id(11)}',null,'VOID','serial','[]',now());
+ insert into packaging_shipments values('${id(900)}',array['${id(10)}']::uuid[],'TRACK1','dispatched',now());
+ insert into packaging_evidence values('${id(900)}','photos','kept.jpg','image/jpeg','image','Package',now(),null),('${id(900)}','photos','removed.jpg','image/jpeg','image','Package',now(),now());
+ insert into ebay_return_messages values('${id(100)}','inbound','Buyer comment',now(),'imported'),('${id(100)}','internal','Private instruction',now(),'imported');
+ insert into ebay_conversations values('${id(901)}','buyer.one','FROM_MEMBERS','287000000001'),('${id(902)}','other.buyer','FROM_MEMBERS','287000000001'),('${id(903)}','buyer.one','FROM_MEMBERS','unrelated-item');
+ insert into ebay_conversation_messages values('${id(904)}','${id(901)}','buyer.one','inbound','Linked message',now()),('${id(905)}','${id(902)}','other.buyer','inbound','Other buyer',now()),('${id(906)}','${id(903)}','buyer.one','inbound','Different item',now());`);
+ const data=await scalar('select customer_issue_evidence($1) v',[id(100)]);
+ assert.equal(data.certificates.length,1);assert.equal(data.packaging_photos.length,1);assert.equal(data.case_messages.length,1);assert.equal(data.buyer_messages.length,1);
+ assert.equal(data.buyer_messages[0].message_body,'Linked message');
+ await db.exec("select set_config('test.access','no',false)");await assert.rejects(scalar('select customer_issue_evidence($1) v',[id(100)]),/access required/);
 });

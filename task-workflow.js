@@ -22,6 +22,7 @@
   }
   function next(task, people = []) {
     if (finished.has(task.status)) return {kind: 'history', userId: null};
+    if (task.status === 'deferred' && task.metadata?.customer_issue_watch === true) return {kind: 'monitoring', userId: null};
     if (task.status === 'completed_by_employee' || ['pending_admin_review', 'ready_for_admin_approval'].includes(task.status)) return {kind: 'approval', userId: reviewer(task, people)};
     if (task.status === 'waiting_on_subtasks') return {kind: 'subtasks', userId: null};
     if (requestKind(task) === 'decision') return {kind: 'approval', userId: reviewer(task, people)};
@@ -44,6 +45,7 @@
     const action = next(task, people);
     if (action.kind === 'history') return task.status === 'cancelled' ? 'Canceled' : 'Finished';
     if (action.kind === 'subtasks') return 'Waiting for subtasks';
+    if (action.kind === 'monitoring') return 'Following eBay updates';
     const employee = person(action.userId, people);
     const name = action.userId === userId ? 'You' : employee?.display_name || employee?.name || employee?.email
       || (action.kind === 'work' ? task.assigned_to_email : '') || (action.kind === 'approval' ? 'Reviewer needed' : 'Unassigned');

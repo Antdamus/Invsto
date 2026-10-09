@@ -4826,7 +4826,7 @@ function renderTaskActions(task = {}, resolved = false) {
   if (task.status === 'completed_by_employee' && canReviewTaskAcceptance(task)) {
     buttons.push('<button type="button" class="secondary-btn" data-task-next="return" data-task-key="'+key+'">Request changes</button>');
     buttons.push('<button type="button" class="primary-btn" data-task-next="accept" data-task-key="'+key+'">Accept &amp; finish</button>');
-  } else if (isTaskInApprovalInbox(task) && task.assigned_to_user_id === state.user?.id && !isOrderPendingApprovalTask(task) && !isShippingFulfillmentTask(task) && task.task_type !== 'pending_subtask') {
+  } else if (isTaskInApprovalInbox(task) && (task.assigned_to_user_id === state.user?.id || (task.source === 'return' && task.task_type === 'return_review' && !task.assigned_to_user_id)) && !isOrderPendingApprovalTask(task) && !isShippingFulfillmentTask(task) && task.task_type !== 'pending_subtask') {
     buttons.push('<button type="button" class="secondary-btn" data-task-next="decide" data-task-key="'+key+'">Record decision &amp; finish</button>');
   } else if (isTaskInApprovalInbox(task) && task.assigned_to_user_id !== state.user?.id && ['waiting_on_admin','pending_admin_review'].includes(task.status)) {
     buttons.push('<button type="button" class="primary-btn" data-task-next="return" data-task-key="'+key+'">Send instructions &amp; hand back</button>');
@@ -4884,7 +4884,9 @@ async function submitTaskNextAction() {
   try {
     const photos = await uploadPhotos(task.title);
     const action = state.nextAction;
-    const {error} = await supabase.rpc('advance_task_workflow', {_source:task.source,_task_id:task.id,_action:action,_note:note,
+    const {error} = action === 'decide' && task.source === 'return' && task.task_type === 'return_review' && !task.assigned_to_user_id
+      ? await supabase.rpc('finish_customer_issue_review', {_task_id:task.id,_expected_updated_at:task.updated_at || null,_note:note,_photos:photos})
+      : await supabase.rpc('advance_task_workflow', {_source:task.source,_task_id:task.id,_action:action,_note:note,
       _expected_status:task.status,_expected_assignee:task.assigned_to_user_id || null,_expected_updated_at:task.updated_at || null,_photos:photos});
     if (error) throw error;
     closeModal();

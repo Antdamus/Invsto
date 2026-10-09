@@ -16,7 +16,7 @@ async function open(t,width,integration=false){
  const context=await browser.newContext({viewport:{width,height:900},hasTouch:width<800});t.after(()=>context.close());
  await context.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
  const page=await context.newPage();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
- await page.goto(origin+'/ebay-returns.html'+(integration?'?integration=1':''));for(const file of ['task-workflow.js','customer-issues.js','tests/fixtures/customer-issues-fixture.js'])await page.addScriptTag({url:origin+'/'+file});
+ await page.goto(origin+'/ebay-returns.html'+(integration?'?integration=1':''));for(const file of ['task-workflow.js','customer-issue-evidence.js','customer-issues.js','tests/fixtures/customer-issues-fixture.js'])await page.addScriptTag({url:origin+'/'+file});
  await page.waitForFunction(()=>window.fixtureReady);if(integration){await page.addScriptTag({url:origin+'/ebay-order-history.js'});await page.evaluate(()=>document.dispatchEvent(new Event('DOMContentLoaded')));await page.waitForFunction(()=>window.OGCustomerIssues.ready);await expect(page.locator('.issue-card')).toHaveCount(30);}return page;
 }
 for(const width of [320,390,768,1440])test(`Customer issues ${width}px: queue, detail, evidence and forms fit`,async t=>{
@@ -61,4 +61,17 @@ test('real order-history integration boots the new workspace and opens its reusa
  await expect(page.locator('#return-ebay-id')).toHaveValue('54001230');
  await expect(page.locator('#return-line-list')).toContainText('Cartier');
  assert.equal(await page.evaluate(()=>state.returnIntakeCaseId),'case-0');
+});
+
+
+test('phone evidence downloads original files and selected messages without sending anything',async t=>{
+ const page=await open(t,390);await page.locator('.issue-card').first().click();
+ await page.getByText('Evidence package',{exact:true}).click();await page.getByRole('button',{name:'Prepare evidence',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Download evidence ZIP',exact:true})).toBeVisible();
+ await page.locator('.issue-evidence-group summary').click();await page.locator('[data-evidence-message]').check();
+ const downloadPromise=page.waitForEvent('download');await page.getByRole('button',{name:'Download evidence ZIP',exact:true}).click();const download=await downloadPromise;
+ assert.match(download.suggestedFilename(),/evidence.zip$/);await expect(page.locator('[data-evidence-status]')).toContainText('1 messages');
+ assert.equal((await page.evaluate(()=>fixtureWrites)).length,0);
+ assert.ok(await page.locator('#issues-detail').evaluate(e=>e.scrollWidth<=e.clientWidth+1));
+ await page.screenshot({path:'test-results/customer-issues/evidence-phone.png'});
 });

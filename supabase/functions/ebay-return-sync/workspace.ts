@@ -57,6 +57,12 @@ export function pageTotal(payload:any,lane:Lane):number|null {
 function checked(result:any){if(result.error)throw result.error;return result.data;}
 const message=(error:any)=>String(error?.message||error||'Sync failed').replace(/Bearer\s+\S+/gi,'[redacted]').slice(0,500);
 const iso=(delay=0)=>new Date(Date.now()+delay).toISOString();
+export function failureKind(error:unknown):string {
+ const value=message(error);
+ if(/invalid_grant|401|403|scope|access.denied|unauthorized|not.authorized/i.test(value))return 'access';
+ if(/404|not found|duplicate case identities|different order|could not be identified|missing.*identity/i.test(value))return 'review';
+ return 'temporary';
+}
 async function fingerprint(row:any){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(row))))).map(n=>n.toString(16).padStart(2,'0')).join('');}
 
 export async function queueRefresh(db:DB,caseId?:string){
@@ -100,7 +106,7 @@ export async function runWorker(db:DB,deps:Dependencies){
     fetched_entries:laneRow.cursor_offset+rows.length,total_entries:total,last_attempt_at:iso(),...(more?{}:{last_success_at:iso()}),
     next_run_at:iso(more?0:5*60000),status:more?'syncing':'ok',error:null,error_count:0}).eq('lane',lane));
   }catch(error){
-   const text=message(error),access=/401|403|scope|access.denied|unauthorized|not.authorized/i.test(text);
+   const text=message(error),access=failureKind(error)==='access';
    checked(await db.from('ebay_issue_sync_lanes').update({last_attempt_at:iso(),status:access?'needs_access':'error',error:text,error_count:laneRow.error_count+1,
     next_run_at:iso(access?30*60000:Math.min(15*60000,60000*2**Math.min(4,laneRow.error_count)))}).eq('lane',lane));
   }
@@ -109,7 +115,11 @@ export async function runWorker(db:DB,deps:Dependencies){
  const stale=checked(await db.from('ebay_return_cases').select('source_lane,ebay_return_id').not('ebay_return_id','is',null)
   .not('status','in','(closed,cancelled)').or(`synced_at.is.null,synced_at.lt.${iso(-10*60000)}`).order('last_sync_attempt_at',{nullsFirst:true}).limit(12));
  if(stale?.length)checked(await db.from('ebay_issue_sync_jobs').upsert(stale.map((c:any)=>({lane:c.source_lane,external_id:c.ebay_return_id,summary:{},priority:0})),{onConflict:'lane,external_id',ignoreDuplicates:true}));
- const jobs=checked(await db.from('ebay_issue_sync_jobs').select('*').in('state',['queued','retry']).lte('next_attempt_at',iso()).order('priority').order('next_attempt_at').limit(12))||[];
+ // Give due retries a reserved share. Priority-zero refreshes must not starve
+ // historical failures after a credential repair or a large initial import.
+ const retries=checked(await db.from('ebay_issue_sync_jobs').select('*').eq('state','retry').lte('next_attempt_at',iso()).order('next_attempt_at').limit(3))||[];
+ const queued=checked(await db.from('ebay_issue_sync_jobs').select('*').in('state',['queued','retry']).lte('next_attempt_at',iso()).order('priority').order('next_attempt_at').limit(12))||[];
+ const jobs=[...new Map([...retries,...queued].map(j=>[`${j.lane}:${j.external_id}`,j])).values()].slice(0,12);
  let processed=0;
  for(const job of jobs){
   if(Date.now()-started>42000)break;
@@ -128,8 +138,9 @@ export async function runWorker(db:DB,deps:Dependencies){
    processed++;
   }catch(error){
    checked(await db.from('ebay_return_cases').update({sync_error:message(error)}).eq('source_lane',lane).eq('ebay_return_id',job.external_id));
-   checked(await db.from('ebay_issue_sync_jobs').update({state:'retry',attempts:job.attempts+1,last_error:message(error),updated_at:iso(),
-    next_attempt_at:iso(Math.min(60*60000,60000*2**Math.min(6,job.attempts)))}).eq('lane',lane).eq('external_id',job.external_id).eq('updated_at',job.updated_at));
+   const failure=failureKind(error);
+   checked(await db.from('ebay_issue_sync_jobs').update({state:'retry',attempts:job.attempts+1,last_error:message(error),failure_kind:failure,updated_at:iso(),
+    next_attempt_at:iso(failure==='review'?6*3600000:Math.min(60*60000,60000*2**Math.min(6,job.attempts)))}).eq('lane',lane).eq('external_id',job.external_id).eq('updated_at',job.updated_at));
   }
  }
  return {processed};

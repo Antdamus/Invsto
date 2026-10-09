@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises';
 import {stripTypeScriptTypes} from 'node:module';
 import vm from 'node:vm';
 import {test} from 'node:test';
-import {detailPath,discoveryPath,pageRows,pageTotal,runWorker,queueRefresh,externalId} from '../supabase/functions/ebay-return-sync/workspace.ts';
+import {detailPath,discoveryPath,pageRows,pageTotal,runWorker,queueRefresh,externalId,failureKind} from '../supabase/functions/ebay-return-sync/workspace.ts';
 const raw=await readFile(new URL('../supabase/functions/ebay-return-sync/index.ts',import.meta.url),'utf8');
 let handler,client;
 const sandbox={console,URL,URLSearchParams,Response,Request,Headers,TextEncoder,crypto,AbortSignal,Map,Set,Date,fetch:()=>{throw Error('Unexpected provider call');},
@@ -100,4 +100,18 @@ test('a missing payment-dispute permission does not block ordinary case refreshe
  const db=fakeDb({lane:{lane:'payment_dispute',cursor_offset:0,error_count:0},jobs:[{lane:'inquiry',external_id:'r1',summary:{},attempts:0,updated_at:'v1'}]});let processed=0;
  await runWorker(db,{token:async(scope)=>{if(scope)throw Error('403 scope not authorized');return 'ordinary';},read:async()=>({status:'OPEN'}),process:async()=>{processed++;}});
  assert.equal(processed,1);assert.equal(db.calls.find(c=>c.table==='ebay_issue_sync_lanes'&&c.op==='update').row.status,'needs_access');
+});
+
+
+test('authentication failures are distinguished from temporary failures and manual review',()=>{
+ assert.equal(failureKind(Error('eBay OAuth refresh failed (400): invalid_grant')),'access');
+ assert.equal(failureKind(Error('eBay GET failed (404): not found')),'review');
+ assert.equal(failureKind(Error('eBay timeout')),'temporary');
+});
+test('overdue retries receive service ahead of an ongoing priority-zero backlog',async()=>{
+ const calls=[],processed=[];
+ const retry={lane:'return',external_id:'old',summary:{},attempts:1,updated_at:'v'};
+ const db={from(table){let op='select',state;const q={select(){return q},eq(k,v){if(k==='state')state=v;return q},lte(){return q},not(){return q},or(){return q},in(){return q},order(){return q},limit(){return q},maybeSingle(){return q},upsert(){op='write';return q},update(){op='write';return q},delete(){op='write';return q},then(resolve){calls.push(table);return Promise.resolve({data:op!=='select'?null:table==='ebay_issue_sync_jobs'?(state==='retry'?[retry]:Array.from({length:12},(_,i)=>({...retry,external_id:'new'+i,attempts:0}))):table==='ebay_issue_sync_lanes'?null:[]}).then(resolve)}};return q}};
+ await runWorker(db,{token:async()=>'',read:async()=>({}),process:async(_db,_lane,summary)=>processed.push(summary.returnId)});
+ assert.equal(processed[0],'old');assert.equal(processed.length,12);assert.equal(new Set(processed).size,12);
 });

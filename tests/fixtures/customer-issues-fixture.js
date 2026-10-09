@@ -11,12 +11,13 @@
   if(table==='employees'||table==='ebay_return_cases'||table==='ebay_return_tasks')data=data.filter(r=>filters.every(([k,v])=>r[k]===v));
   return Promise.resolve({data:one?data[0]:data.slice(0,lim),error:null}).then(resolve);
  }};return q;}
- const db={auth:{getSession:async()=>({data:{session:{user:{id:'me'}}}})},from:query,functions:{invoke:async()=>({data:{message:'Refresh queued. You can keep working.'}})},rpc:async(name,args={})=>{
+ const db={storage:{from:()=>({download:async()=>({data:new Blob(['test evidence bytes'],{type:'image/png'})})})},auth:{getSession:async()=>({data:{session:{user:{id:'me'}}}})},from:query,functions:{invoke:async()=>({data:{message:'Refresh queued. You can keep working.'}})},rpc:async(name,args={})=>{
   fixtureCalls.push({rpc:name,args});if(name==='can_access_post_order_issues')return {data:true};if(name==='list_customer_issues'){
    let found=rows.filter(r=>(args._view==='attention'||r.issue_kind===args._view)&&(!args._search||r.buyer_username.includes(args._search))&&(args._scope==='all'||r[args._scope]));
    return {data:{rows:found.slice(args._offset,args._offset+args._limit),total:found.length,counts:{attention:36,return:12,request:12,dispute:12,history:0}}};
   }
   if(name==='customer_issue_sync_health')return {data:{lanes:['return','inquiry','case','payment_dispute'].map(lane=>({lane,status:'ok',last_success_at:now})),queued:0,retrying:0}};
+  if(name==='customer_issue_evidence')return {data:{case:rows[0],lines:[line],bag_photos:[{bucket:'evidence',path:'item.png'}],completion_events:[],packaging_photos:[],certificates:[],case_messages:[{direction:'inbound',message_body:'The clasp needs checking.',sent_at:now}],buyer_messages:[]}};
   fixtureWrites.push({name,args});if(name==='advance_task_workflow')tasks[0].status='completed_by_employee';
   return {data:{ok:true}};
  }};
