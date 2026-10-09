@@ -6247,6 +6247,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
                 ${renderHistoryLineNoteEvents(line, group.events)}
               </div>
               <div class="history-line-actions">
+                ${!isEbayApiHistoryLine(line) ? `<button type="button" class="certificate-trigger" data-certificate-line="${escapeHtml(line.id)}" data-certificate-title="${escapeHtml((getOrderFromLine(line).order_number || '') + ' · ' + (line.item_title || 'Order item'))}">CGL certificate</button>` : ""}
                 <span class="history-status ${getLineStatusClass(line)}">${escapeHtml(getLineStatusLabel(line))}</span>
                 ${isAdminUser() ? `<button type="button" class="secondary-btn revert-line-btn" data-revert-line="${escapeHtml(line.id)}">Revert Line</button>` : ""}
               </div>
