@@ -15,6 +15,7 @@ const state = {
   collapsedBuyerKeys: new Set(),
   expandedBuyerNoteKeys: new Set(),
   sharedOrderNoteHistory: new Map(),
+  customerTaskNotes: new Map(),
   orderNotesObserver: null,
   stagedFulfillments: new Map(),
   adminSelectedLineIds: new Set(),
@@ -3092,6 +3093,7 @@ async function loadOrders() {
 
   state.queueVideoReceiptTasks = [];
   state.sharedOrderNoteHistory = new Map();
+  state.customerTaskNotes = new Map();
   state.queueVideoReceiptTaskEvents = new Map();
   state.queueVideoReceiptLoadedOrderIds.clear();
   state.orderVideoReceipts.clear();
@@ -3725,7 +3727,7 @@ function getQueueTaskAssigneeName(task) {
   const employee = state.orderTaskAssignees.find(person =>
     (person.user_id && person.user_id === task.assigned_to_user_id)
     || (person.id && person.id === task.assigned_to_employee_id));
-  return employee?.display_name || employee?.email || task.assigned_to_email
+  return employee?.display_name || task.assignee_name || employee?.email || task.assigned_to_email
     || (isPendingOrderApprovalTask(task) ? "Admin reviewer" : "Assignee not recorded");
 }
 
@@ -3740,12 +3742,12 @@ function getGroupSharedTasks(lines = []) {
       eventsByTask.get(event.task_id).push(event);
     }
     for (const task of history.tasks) {
-      if (!task.id || entries.has(task.id) || task.order_id !== orderId) continue;
+      if (!task.id || entries.has(`order:${task.id}`) || task.order_id !== orderId) continue;
       const line = lines.find(line => line.order_id === orderId && orderTaskMatchesLine(task, line));
       if (!line) continue;
       const events = (eventsByTask.get(task.id) || [])
         .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-      if (isHiddenOrderCoordinationTask(task, events) || isVideoReceiptCaptureOrderTask(task)
+      if (!isActiveOrderTask(task) || isHiddenOrderCoordinationTask(task, events) || isVideoReceiptCaptureOrderTask(task)
         || task.metadata?.source === "pending_order_line_note") continue;
       if (!(task.assigned_to_user_id || task.assigned_to_employee_id || task.assigned_to_email
         || isPendingOrderApprovalTask(task) || events.some(event => event.new_assigned_to_user_id))) continue;
@@ -3760,9 +3762,20 @@ function getGroupSharedTasks(lines = []) {
         }
       }
       const latestUpdate = events.find(event => String(event.notes || "").trim() === String(task.latest_note || "").trim());
-      entries.set(task.id, { kind: "task", task, line, created_at: task.created_at,
+      entries.set(`order:${task.id}`, { kind: "task", task: {...task, source: "order"}, line, created_at: task.created_at,
         notes: task.question || task.latest_note || task.title || "Order task",
         latestUpdate, photo_attachments: [...attachments.values()] });
+    }
+  }
+  for (const buyer of getGroupCustomerTaskKeys(lines)) {
+    for (const task of state.customerTaskNotes.get(buyer)?.data || []) {
+      const key = `${task.source}:${task.id}`;
+      if (entries.has(key) || !isActiveOrderTask(task)) continue;
+      // An open task for another (even completed) item is still useful customer
+      // context, without making it part of this line's packing assignment.
+      const line = task.source === "order" && lines.find(line => line.order_id === task.order_id && orderTaskMatchesLine(task, line));
+      entries.set(key, {kind: "task", task, line, created_at: task.created_at,
+        notes: task.question || task.latest_note || task.title || "Customer task", photo_attachments: []});
     }
   }
   return [...entries.values()];
@@ -3771,26 +3784,27 @@ function getGroupSharedTasks(lines = []) {
 function renderQueueTaskEntry(entry, lines) {
   const { task, line, notes, latestUpdate, photo_attachments: photos } = entry;
   const updatedNote = String(task.latest_note || "").trim();
-  const context = (task.order_line_ids || []).length === 1
+  const context = !line ? "Customer task" : (task.order_line_ids || []).length === 1
     ? line.item_title || line.item_number || "Order item"
     : (task.order_line_ids || []).length > 1 ? `${task.order_line_ids.length} items` : "Whole order";
-  return `<article class="buyer-card-note-preview-item buyer-card-task-preview-item ${isActiveOrderTask(task) ? "" : "is-complete"}" data-queue-task="${escapeHtml(task.id)}">
+  const fileCount = Math.max(photos.length, Number(task.attachment_count) || 0);
+  return `<article class="buyer-card-note-preview-item buyer-card-task-preview-item" data-queue-task="${escapeHtml(task.id)}">
+    <div class="buyer-card-note-body"><p>${escapeHtml(notes)}</p></div>
     <div class="buyer-card-note-author">
       <strong data-queue-task-assignee="${escapeHtml(task.id)}">Assigned to ${escapeHtml(getQueueTaskAssigneeName(task))}</strong>
       <small>Created ${escapeHtml(formatDate(task.created_at))}</small>
-      ${task.created_by_email ? `<small>By ${escapeHtml(task.created_by_email)}</small>` : ""}
-      <small>${lines.length > 1 ? `${escapeHtml(getOrderFromLine(line).order_number || "")} · ` : ""}${escapeHtml(context)}</small>
     </div>
-    <div class="buyer-card-note-body">
-      <div class="buyer-card-task-heading"><span>Task</span><span>${escapeHtml(getOrderTaskStatusLabel(task.status))}</span></div>
-      <p>${escapeHtml(notes)}</p>
+    <details class="buyer-card-task-details">
+      <summary><span>Task · ${escapeHtml(getOrderTaskStatusLabel(task.status))}${fileCount ? ` · ${fileCount} file${fileCount === 1 ? "" : "s"}` : ""}</span><span>Details</span></summary>
+      <div class="buyer-card-note-body buyer-card-task-extra">
+      <small>${escapeHtml(context)}${task.created_by_email ? ` · By ${escapeHtml(task.created_by_email)}` : ""}</small>
       ${updatedNote && updatedNote !== String(notes).trim() ? `<div class="buyer-card-task-update"><small>Latest update${latestUpdate?.created_at ? ` · ${escapeHtml(formatDate(latestUpdate.created_at))}` : ""}${latestUpdate?.signed_by_email ? ` · ${escapeHtml(latestUpdate.signed_by_email)}` : ""}</small><p>${escapeHtml(updatedNote)}</p></div>` : ""}
       <div class="buyer-card-task-links">
-        <a class="buyer-line-note-btn" href="team-tasks.html?taskId=${encodeURIComponent(task.id)}">Open task</a>
-        ${photos.length ? `<span class="buyer-card-task-file-count">${photos.length} attachment${photos.length === 1 ? "" : "s"}</span>` : '<span class="buyer-card-task-file-count">No attachments</span>'}
+        <a class="buyer-line-note-btn" href="team-tasks.html?taskId=${encodeURIComponent(task.id)}">Open task${fileCount && !photos.length ? ` · ${fileCount} file${fileCount === 1 ? "" : "s"}` : ""} ↗</a>
       </div>
       ${photos.length ? `<div class="buyer-card-task-files">${photos.map((photo, index) => `<button type="button" class="buyer-line-note-btn" data-queue-task-photo="${escapeHtml(task.id)}" data-order-id="${escapeHtml(line.order_id)}" data-photo-index="${index}">${escapeHtml(photo.label || `${getEvidenceMediaType(photo) === "video" ? "Video" : "Photo"} ${index + 1}`)}</button>`).join("")}</div>` : ""}
-    </div>
+      </div>
+    </details>
   </article>`;
 }
 
@@ -3892,14 +3906,63 @@ function loadSharedOrderNoteHistory(orderId) {
   return entry.promise;
 }
 
+function getGroupCustomerTaskKeys(lines = []) {
+  return [...new Set(lines.map(line => String(getOrderFromLine(line).buyer_username || "").trim().toLowerCase()).filter(Boolean))];
+}
+
+let customerTaskNotesTimer = null;
+const pendingCustomerTaskNotes = [];
+async function flushCustomerTaskNotes() {
+  customerTaskNotesTimer = null;
+  const pending = pendingCustomerTaskNotes.splice(0);
+  pending.forEach(([, entry]) => { entry.started = true; });
+  for (let start = 0; start < pending.length; start += 50) {
+    const batch = pending.slice(start, start + 50);
+    try {
+      const rows = [];
+      for (let offset = 0; ; offset += 500) {
+        const {data, error} = await supabase.rpc("list_pending_customer_task_notes", {_buyers: batch.map(([buyer]) => buyer)})
+          .range(offset, offset + 499);
+        if (error) throw error;
+        rows.push(...(data || []));
+        if (!data || data.length < 500) break;
+      }
+      for (const [buyer, entry] of batch) {
+        entry.data = rows.filter(task => task.buyer_username === buyer);
+        entry.resolve(entry.data);
+      }
+    } catch (error) {
+      for (const [buyer, entry] of batch) {
+        if (entry.cache.get(buyer) === entry) entry.cache.delete(buyer);
+        entry.reject(error);
+      }
+    }
+  }
+}
+
+function loadCustomerTaskNotes(lines) {
+  return Promise.all(getGroupCustomerTaskKeys(lines).map(buyer => {
+    let entry = state.customerTaskNotes.get(buyer);
+    if (!entry) {
+      entry = {cache: state.customerTaskNotes};
+      entry.promise = new Promise((resolve, reject) => { entry.resolve = resolve; entry.reject = reject; });
+      state.customerTaskNotes.set(buyer, entry);
+      pendingCustomerTaskNotes.push([buyer, entry]);
+    }
+    if (!entry.started && customerTaskNotesTimer === null) customerTaskNotesTimer = setTimeout(flushCustomerTaskNotes, 25);
+    return entry.promise;
+  }));
+}
+
 async function hydrateBuyerGroupNotes(card, group) {
   const container = card.querySelector("[data-buyer-shared-notes]");
   if (!container) return;
   const cache = state.sharedOrderNoteHistory;
+  const customerCache = state.customerTaskNotes;
   try {
-    await Promise.all([...new Set(group.lines.map((line) => line.order_id).filter(Boolean))]
-      .map(loadSharedOrderNoteHistory));
-    if (!card.isConnected || cache !== state.sharedOrderNoteHistory) return;
+    await Promise.all([loadCustomerTaskNotes(group.lines), ...[...new Set(group.lines.map((line) => line.order_id).filter(Boolean))]
+      .map(loadSharedOrderNoteHistory)]);
+    if (!card.isConnected || cache !== state.sharedOrderNoteHistory || customerCache !== state.customerTaskNotes) return;
     container.innerHTML = renderGroupSharedNotes(group.lines, group.key);
     const linesById = new Map(group.lines.map((line) => [line.id, line]));
     card.querySelectorAll("[data-line-note-summary]").forEach((summary) => {
@@ -3907,7 +3970,7 @@ async function hydrateBuyerGroupNotes(card, group) {
       if (line) summary.innerHTML = renderLineNoteSummary(line);
     });
   } catch (error) {
-    if (!card.isConnected || cache !== state.sharedOrderNoteHistory) return;
+    if (!card.isConnected || cache !== state.sharedOrderNoteHistory || customerCache !== state.customerTaskNotes) return;
     console.warn("Could not load notes for this order block:", error);
     container.innerHTML = renderGroupSharedNotes(group.lines, group.key)
       + `<button type="button" class="buyer-line-note-btn" data-retry-group-notes>Could not load all notes & tasks. Retry</button>`;
@@ -5471,6 +5534,7 @@ function forgetReceiptCapture(orderId, bucket, path) {
   }
   state.queueVideoReceiptLoadedOrderIds.delete(orderId);
   state.sharedOrderNoteHistory.delete(orderId);
+  state.customerTaskNotes = new Map();
 }
 
 function getSelectedOrderLabelData() {
@@ -7144,6 +7208,7 @@ async function submitOrderTask() {
     }
 
     state.sharedOrderNoteHistory.delete(line.order_id);
+    state.customerTaskNotes = new Map();
     closeOrderTaskModal();
     await loadSelectedOrderTasks();
     await hydrateOrderTaskAssignments(state.orders);
@@ -11688,6 +11753,7 @@ async function saveManualVideoReceipt() {
       targetLine.line_note_count = getLineNoteCount(targetLine) + 1;
       targetLine.latest_line_note = auditNote;
       state.sharedOrderNoteHistory.delete(targetLine.order_id);
+      state.customerTaskNotes = new Map();
     }
 
     state.queueVideoReceiptLoadedOrderIds.delete(line.order_id);
@@ -12019,6 +12085,7 @@ async function saveLineNote() {
     line.line_note_count = getLineNoteCount(line) + 1;
     line.latest_line_note = note;
     state.sharedOrderNoteHistory.delete(line.order_id);
+    state.customerTaskNotes = new Map();
     if (state.selectedLine?.id === line.id) {
       state.selectedLine.line_note_count = line.line_note_count;
       state.selectedLine.latest_line_note = note;

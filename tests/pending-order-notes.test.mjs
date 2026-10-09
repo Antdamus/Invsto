@@ -42,6 +42,9 @@ async function open(t, {mobile = false, render = true} = {}) {
     window.calls = [];
     window.failNotes = false;
     window.noteDelay = 0;
+    window.customerTasks = [];
+    window.customerCalls = [];
+    window.failCustomerTasks = false;
     window.tasks = [{id: 'notes-a', order_id: 'order-a', order_line_ids: ['line-a'], status: 'resolved',
       created_by: 'user-other', metadata: {source: 'pending_order_line_note', hidden_from_task_board: true}}];
     window.events = [
@@ -83,7 +86,12 @@ async function open(t, {mobile = false, render = true} = {}) {
         };
         return query;
       },
-      async rpc(name, args) {
+      rpc(name, args) {
+        if (name === 'list_pending_customer_task_notes') return {async range(start, end) {
+          customerCalls.push({buyers: args._buyers, start, end});
+          return failCustomerTasks ? {error: {message: 'Customer tasks unavailable'}} :
+            {data: customerTasks.filter(task => args._buyers.includes(task.buyer_username)).slice(start, end + 1)};
+        }};
         assertNoteRpc(name);
         events.push({id: 'event-new', task_id: 'notes-a', order_id: 'order-a', notes: args._note,
           signed_by: state.user.id, signed_by_email: args._signed_by_email, created_at: '2026-10-03T16:00:00Z',
@@ -330,10 +338,15 @@ for (const width of [320, 390, 1440]) {
     assert.match(text, /Pending CGL.*Customer paid extra/s);
     assert.match(text, /<before packing>/);
     assert.equal(await task.locator('before').count(), 0);
-    assert.match(text, /Latest update.*Oct 7.*12:00 PM.*jose@example.com/s);
-    assert.match(text, /Certificate requested/);
-    assert.match(text, /1 attachment/);
-    await expect(task.getByRole('link', {name: 'Open task'})).toHaveAttribute('href', 'team-tasks.html?taskId=assigned-task');
+    assert.doesNotMatch(text, /Certificate requested|Clasp photo/);
+    const compactHeight = (await task.boundingBox()).height;
+    assert.ok(compactHeight < (width === 320 ? 260 : 230), `Task preview too tall: ${compactHeight}`);
+    await task.locator('summary').click();
+    const expandedText = await task.innerText();
+    assert.match(expandedText, /Latest update.*Oct 7.*12:00 PM.*jose@example.com/s);
+    assert.match(expandedText, /Certificate requested/);
+    assert.match(text, /1 file/);
+    await expect(task.getByRole('link', {name: 'Open task ↗'})).toHaveAttribute('href', 'team-tasks.html?taskId=assigned-task');
     await task.getByRole('button', {name: 'Clasp photo'}).click();
     const opened = await page.evaluate(() => openedTaskPhotos);
     assert.equal(opened.length, 1);
@@ -343,12 +356,13 @@ for (const width of [320, 390, 1440]) {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     // The same two existing history requests supply both notes and tasks.
     assert.equal((await page.evaluate(() => calls)).length, 2);
+    await task.locator('summary').click();
     await task.scrollIntoViewIfNeeded();
     if (width !== 320) await page.screenshot({path: `test-results/pending-notes-tasks-${width}.png`});
   });
 }
 
-test('tasks are scoped and deduplicated across lines, with completed status and no hidden audit tasks', async t => {
+test('only open tasks appear, scoped and deduplicated across lines with no hidden audit tasks', async t => {
   const page = await open(t, {mobile: true, render: false});
   await page.evaluate(() => {
     const base = {order_id: 'order-a', assigned_to_user_id: 'jose', assigned_to_email: 'jose@example.com',
@@ -366,11 +380,9 @@ test('tasks are scoped and deduplicated across lines, with completed status and 
     state.filteredOrders = state.orders;
     renderOrders();
   });
-  await loaded(page, 4);
-  assert.deepEqual(await page.locator('[data-queue-task]').evaluateAll(elements => elements.map(el => el.dataset.queueTask).sort()), ['multi-line', 'whole-order']);
-  await expect(page.locator('[data-queue-task="multi-line"]')).toContainText('Resolved');
-  await expect(page.locator('[data-queue-task="whole-order"]')).toContainText('No attachments');
-  await expect(page.locator('[data-queue-task="whole-order"]')).toContainText('Whole order');
+  await loaded(page, 3);
+  assert.deepEqual(await page.locator('[data-queue-task]').evaluateAll(elements => elements.map(el => el.dataset.queueTask).sort()), ['whole-order']);
+  assert.doesNotMatch(await page.locator('[data-queue-task="whole-order"]').innerText(), /No attachments/);
   assert.equal((await page.evaluate(() => calls)).length, 2);
 });
 
@@ -388,6 +400,93 @@ test('task-only orders show current handoff ownership even without note counters
   });
   await expect(page.locator('[data-queue-task="assigned-task"]')).toContainText('Assigned to Sandra');
   assert.equal(await page.locator('[data-line-view-notes]').count(), 0);
+});
+
+test('customer tasks join existing notes once, with compact phone details and exact customer scope', async t => {
+  const page = await open(t, {mobile: true, render: false});
+  await page.evaluate(() => {
+    customerTasks = [
+      {id: 'customer-team', source: 'team', buyer_username: 'lore2526', status: 'assigned', question: 'Call the customer before shipping.',
+        assigned_to_email: 'sandra@example.com', assignee_name: 'Sandra', created_at: '2026-10-09T13:30:00Z', attachment_count: 3},
+      {id: 'old-order-task', source: 'order', order_id: 'previous-order', buyer_username: 'lore2526', status: 'in_progress',
+        question: 'Include the replacement clasp.', created_at: '2026-10-08T13:30:00Z'},
+      {id: 'different-buyer', source: 'team', buyer_username: 'lore2526-other', status: 'assigned', question: 'Wrong customer'},
+    ];
+    state.orders.push({...line, id: 'line-b', item_title: 'Silver bracelet'});
+    state.filteredOrders = state.orders;
+    renderOrders();
+  });
+  await loaded(page, 4);
+  const task = page.locator('[data-queue-task="customer-team"]');
+  await expect(task).toContainText('Assigned to Sandra');
+  await expect(task).toContainText('Created Oct 9, 9:30 AM');
+  assert.equal(await task.locator('details').getAttribute('open'), null);
+  assert.ok((await task.boundingBox()).height < 190);
+  assert.equal(await page.locator('[data-queue-task="different-buyer"]').count(), 0);
+  assert.equal(await page.locator('[data-queue-task="old-order-task"]').count(), 1);
+  assert.equal((await page.evaluate(() => customerCalls)).length, 1);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await task.scrollIntoViewIfNeeded();
+  await page.screenshot({path: 'test-results/pending-customer-task-notes-mobile.png'});
+  await task.locator('summary').click();
+  await expect(task.getByRole('link', {name: 'Open task · 3 files ↗'})).toHaveAttribute('href','team-tasks.html?taskId=customer-team');
+});
+
+test('customer summaries deduplicate the same order task and retry without losing notes', async t => {
+  const page = await open(t, {mobile: true, render: false});
+  await page.evaluate(() => { failCustomerTasks = true; });
+  await addAssignedTask(page);
+  await page.locator('.buyer-order-card').scrollIntoViewIfNeeded();
+  await page.locator('[data-retry-group-notes]').waitFor();
+  await page.evaluate(() => {
+    failCustomerTasks = false;
+    customerTasks = [{...tasks.at(-1),source:'order',buyer_username:'lore2526'}];
+  });
+  await page.locator('[data-retry-group-notes]').click();
+  await loaded(page, 3);
+  assert.equal(await page.locator('[data-queue-task="assigned-task"]').count(),1);
+  await expect(page.locator('[data-retry-group-notes]')).toHaveCount(0);
+});
+
+test('an open task for an already packed line stays visible as customer context', async t => {
+ const page = await open(t,{mobile:true,render:false});
+ await page.evaluate(() => {
+  customerTasks = [{id:'packed-item-task',source:'order',order_id:'order-a',order_line_ids:['packed-line'],
+   buyer_username:'lore2526',status:'assigned',question:'Call before shipping the remaining items.'}];
+  renderOrders();
+ });
+ await loaded(page,3);
+ const task=page.locator('[data-queue-task="packed-item-task"]');
+ await expect(task).toContainText('Call before shipping');
+ await task.locator('summary').click();
+ await expect(task).toContainText('Customer task');
+});
+
+test('visible customer lookups batch, paginate and reuse results without loading unrelated customers', async t => {
+  const page = await open(t, {render: false});
+  const result = await page.evaluate(async () => {
+    customerTasks = Array.from({length:501}, (_,i)=>({id:`task-${i}`,source:'team',buyer_username:'lore2526',status:'assigned'}));
+    const other = {...line,order:{...line.order,buyer_username:'buyer.two'}};
+    await Promise.all([loadCustomerTaskNotes([line]),loadCustomerTaskNotes([other]),loadCustomerTaskNotes([line])]);
+    await loadCustomerTaskNotes([line]);
+    return {calls:customerCalls,count:state.customerTaskNotes.get('lore2526').data.length};
+  });
+  assert.equal(result.calls.length,2);
+  assert.deepEqual(result.calls[0].buyers,['lore2526','buyer.two']);
+  assert.equal(result.calls[1].start,500);
+  assert.equal(result.count,501);
+});
+
+test('refreshing the cache before the batch starts still settles previous requests', async t => {
+  const page = await open(t, {render: false});
+  const result = await page.evaluate(async () => {
+    const old = loadCustomerTaskNotes([line]);
+    state.customerTaskNotes = new Map();
+    const current = loadCustomerTaskNotes([line]);
+    await Promise.all([old,current]);
+    return state.customerTaskNotes.get('lore2526').data;
+  });
+  assert.deepEqual(result,[]);
 });
 
 test('new phone order tasks choose intent and do not inherit an expired shipping deadline',async t=>{

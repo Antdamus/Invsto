@@ -38,7 +38,7 @@ async function open(t, {width = 390, admin = false} = {}) {
     isAdminUser = () => admin;
     state.stores = [{id: 'main', name: 'Main Store'}]; state.checkoutStoreId = 'main';
     window.databaseWrites = [];
-    window.supabase = {rpc: async (name, args) => {databaseWrites.push({name, args}); throw Error('Unexpected write');}};
+    window.supabase = {rpc: (name, args) => {if (name === 'list_pending_customer_task_notes') return {range: async () => ({data: []})}; databaseWrites.push({name, args}); throw Error('Unexpected write');}};
     const note = 'Missing the silver bracelet.\nThe gold chain is ready in tray 4. Check the clasp before packing.';
     state.orders = Array.from({length: 8}, (_, i) => ({
       id: `line-${i}`, order_id: `order-${i}`, item_title: i === 0 ? 'Sterling silver bracelet with a heart charm' : 'Gold chain, 18 inch',
