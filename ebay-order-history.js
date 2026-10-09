@@ -7979,6 +7979,7 @@ function renderReturnLineList() {
             Outcome
             <select data-return-disposition="${escapeHtml(line.id)}">
               <option value="quarantine">Hold for inspection</option>
+              <option value="received_no_restock">Received · no restocking</option>
               ${hasInventoryItem ? `<option value="restock">Restock to selected location</option>` : ""}
               <option value="damaged">Damaged / do not restock</option>
               <option value="wrong_item">Wrong item</option>
@@ -7988,7 +7989,7 @@ function renderReturnLineList() {
             </select>
           </label>
         </div>
-        ${!hasInventoryItem ? `<p class="return-inventory-notice">No linked inventory item. Keep this return on hold and create a task for inventory review.</p>` : ""}
+        <p class="return-inventory-notice">${!hasInventoryItem ? "This item is outside inventory. After checking its condition, choose Received · no restocking. Photos and notes stay with this return." : "Receiving does not require restocking. Choose Restock only when the inspected item should go back into sellable stock."}</p>
         <label class="return-line-note">
           Item note
           <input type="text" data-return-line-note="${escapeHtml(line.id)}" placeholder="Condition note for this returned item" />
@@ -8002,6 +8003,7 @@ function renderReturnLineList() {
       if (checkbox.checked) state.returnSelectedLineIds.add(checkbox.dataset.returnLineSelect);
       else state.returnSelectedLineIds.delete(checkbox.dataset.returnLineSelect);
       checkbox.closest(".return-line-card")?.classList.toggle("is-selected", checkbox.checked);
+      updateReturnRestockFields();
     });
   });
   list.querySelectorAll("[data-return-condition]").forEach((select) => {
@@ -8014,12 +8016,24 @@ function renderReturnLineList() {
       } else if (["damaged", "missing_parts"].includes(select.value) && !["wrong_item", "missing"].includes(disposition.value)) {
         disposition.value = "admin_review";
       }
+      updateReturnRestockFields();
     });
   });
+  list.querySelectorAll("[data-return-disposition]").forEach(select => select.addEventListener("change", updateReturnRestockFields));
+  updateReturnRestockFields();
   bindReturnVideoReceiptLinks(list);
   hydrateHistoryVideoReceiptThumbnails().catch((error) => {
     console.warn("Could not load return intake video receipt screenshots:", error);
   });
+}
+
+function updateReturnRestockFields() {
+  const needsLocation = [...state.returnSelectedLineIds].some(id => getReturnLineField("data-return-disposition", id)?.value === "restock");
+  const locationField = $("return-destination-scan")?.closest("label");
+  if (locationField) locationField.hidden = !needsLocation;
+  const actions = $("find-return-destination")?.closest(".return-location-actions");
+  if (actions) actions.hidden = !needsLocation;
+  if ($("return-location-results")) $("return-location-results").hidden = !needsLocation;
 }
 
 function openReturnIntakeModal(lineIds = []) {
@@ -8036,7 +8050,7 @@ function openReturnIntakeModal(lineIds = []) {
   const lines = getReturnModalLines();
   const orderNumbers = [...new Set(lines.map((line) => line.order?.order_number).filter(Boolean))];
   $("return-intake-title").textContent = orderNumbers.length === 1 ? `Return ${orderNumbers[0]}` : "Start grouped return";
-  $("return-intake-subtitle").textContent = `${lines.length} shipped line${lines.length === 1 ? "" : "s"} available. Restock only after photo proof and inspection.`;
+  $("return-intake-subtitle").textContent = `${lines.length} shipped line${lines.length === 1 ? "" : "s"} available. Save photos and receipt without restocking, or restock after inspection.`;
   $("return-reason").value = "";
   $("return-tracking").value = "";
   $("return-ebay-id").value = "";
@@ -8047,7 +8061,7 @@ function openReturnIntakeModal(lineIds = []) {
   $("return-error").textContent = "";
   $("return-location-results").innerHTML = "";
   setReturnIntakeStatus("Select returned lines, attach evidence photos, and choose the disposition.");
-  setReturnPhotoStatus("Choose a station, then take photos with the OG app.");
+  setReturnPhotoStatus("Take a photo or add photos and videos below. A camera station is optional.");
   renderReturnDestinationSummary();
   renderReturnCaptureStations();
   renderReturnEvidencePhotos();
@@ -8949,8 +8963,8 @@ async function confirmReturnIntake() {
     if (errorEl) errorEl.textContent = "Explain what is missing, damaged, incorrect or needs a decision in the item or package notes.";
     $("return-note")?.focus(); return;
   }
-  if (returnItems.some(item => item.disposition === "restock" && !["new","used_good"].includes(item.condition_received))) {
-    if (errorEl) errorEl.textContent = "Inspect each restock item and select Good / sellable or New / unopened first."; return;
+  if (returnItems.some(item => ["restock","received_no_restock"].includes(item.disposition) && !["new","used_good"].includes(item.condition_received))) {
+    if (errorEl) errorEl.textContent = "Confirm Good / sellable or New / unopened for inspected items. If you have not checked the item yet, choose Hold for inspection."; return;
   }
   const needsRestockDestination = returnItems.some((item) => item.disposition === "restock");
   if (needsRestockDestination && !state.returnDestinationLocation?.id) {
@@ -8987,7 +9001,7 @@ async function confirmReturnIntake() {
     if (!isReturnsWorkbenchPage()) await loadOrderHistory();
     await loadReturnQueue();
     const notice = document.getElementById("issues-feedback");
-    if (notice) { notice.textContent = `Return saved · ${Number(result.restocked_units || 0)} units restocked. Held items remain out of sellable stock. Create a task below if someone needs to act, or scan the next package.`; notice.classList.remove("is-error"); }
+    if (notice) { notice.textContent = `Return and evidence saved. ${Number(result.restocked_units || 0) ? `${Number(result.restocked_units)} units restocked.` : "Inventory unchanged."} Create a task below if someone needs to act, or scan the next package.`; notice.classList.remove("is-error"); }
   } catch (error) {
     console.error("Return intake failed:", error);
     if (errorEl) errorEl.textContent = error.message || "Could not save this return.";

@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="ebay-order-history.css" />
-  <link rel="stylesheet" href="customer-issues.css?v=20261009-8" />
+  <link rel="stylesheet" href="customer-issues.css?v=20261009-9" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -108,7 +108,7 @@
   <dialog id="return-package-dialog" class="return-package-dialog" aria-labelledby="return-package-title">
     <div class="return-package-heading"><span class="eyebrow">RETURN RECEIVING</span><button type="button" id="close-return-package" class="secondary-btn" aria-label="Close package lookup">Close</button></div>
     <h2 id="return-package-title">Find the returned package</h2>
-    <p>Scan its label to open the original order and saved item photos.</p>
+    <p>Scan its label to open the original order and saved item photos. For FedEx, scan the long barcode or enter the printed TRK number.</p>
     <form id="return-package-form"><label for="return-package-code">Tracking, order number or return ID</label><input id="return-package-code" data-camera-scan data-camera-action="find-return-package" autocomplete="off" required placeholder="Scan or enter the code" /><button type="submit" id="find-return-package" class="primary-btn">Find package</button></form>
     <div id="return-package-results" aria-live="polite"></div>
   </dialog>
@@ -123,10 +123,10 @@
         Select returned lines, attach evidence photos, and choose the disposition.
       </div>
 
-      <ol class="return-workflow"><li><b>1</b> Verify the items</li><li><b>2</b> Add evidence</li><li><b>3</b> Restock or hold</li></ol>
+      <ol class="return-workflow"><li><b>1</b> Verify the items</li><li><b>2</b> Add evidence</li><li><b>3</b> Save receipt &amp; outcome</li></ol>
       <h3 class="return-step-heading">1 · Compare with the original items</h3><p>Check the photos, quantity and condition for each item. Only choose restock after inspecting it.</p>
       <div id="return-line-list" class="return-line-list"></div>
-      <details class="return-package-details" open><summary>Package details &amp; restock location</summary><div class="return-intake-grid">
+      <details class="return-package-details" open><summary>Package details</summary><div class="return-intake-grid">
         <label class="modal-field">
           Return reason
           <select id="return-reason">
@@ -196,7 +196,7 @@
         <div id="return-evidence-photo-list" class="history-extra-label-photo-list"></div>
       </section>
 
-      <h3 class="return-step-heading">3 · Review &amp; save</h3><p>Restock adds only the inspected quantity to the selected location. Held items stay out of sellable stock.</p>
+      <h3 class="return-step-heading">3 · Review &amp; save</h3><p>Received without restocking saves the item, photos and notes with inventory unchanged. Hold keeps it awaiting inspection. Only Restock adds stock to the selected location.</p>
       <label class="modal-field">
         Package / inspection notes
         <textarea id="return-note" rows="3" placeholder="Required for damage, missing items or a decision. These notes are saved with every selected item."></textarea>
@@ -234,8 +234,8 @@
   <script src="video-receipts.js?v=20261002-desktop-capture"></script>
   <script src="task-workflow.js?v=20261009-issue-actions"></script>
   <script src="customer-issue-evidence.js?v=20261009-2"></script>
-  <script src="return-receiving.js?v=20261009-1"></script>
-  <script src="customer-issues.js?v=20261009-8"></script>
-  <script src="ebay-order-history.js?v=20261009-return-receiving-1"></script>
+  <script src="return-receiving.js?v=20261009-2"></script>
+  <script src="customer-issues.js?v=20261009-9"></script>
+  <script src="ebay-order-history.js?v=20261009-return-receiving-2"></script>
 </body>
 </html>

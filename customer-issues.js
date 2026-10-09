@@ -3,7 +3,7 @@
  'use strict';
  const $=id=>document.getElementById(id),escape=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const finish=new Set(['resolved','cancelled','closed','approved_by_admin']);
- const nice=v=>String(v||'Not reported').replace(/_/g,' ').toLowerCase().replace(/^./,x=>x.toUpperCase());
+ const nice=v=>v==='received_no_restock'?'Received · not added to inventory':String(v||'Not reported').replace(/_/g,' ').toLowerCase().replace(/^./,x=>x.toUpperCase());
  const date=v=>v&&!Number.isNaN(Date.parse(v))?new Date(v).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}):'Not provided';
  const kind=c=>['request','return','dispute'].includes(c.issue_kind)?c.issue_kind:'request';
  const closed=c=>/(^|_)(CLOSED|CANCELLED|CANCELED|RESOLVED|SELLER_WON|SELLER_LOST|DISPUTE_REVERSED)($|_)/i.test(c.ebay_status||'');
@@ -244,7 +244,7 @@
  }
  function inspectionForm(id){
   const item=detail.items.find(i=>i.id===id),key=crypto.randomUUID();
-  form('Inspect received item',`<p class="issue-subtitle">${escape(item.item_title)} · ${item.received_quantity-item.restocked_quantity} units not restocked</p><label>Inspection outcome<select name="outcome"><option value="quarantine">Keep on hold</option>${item.internal_item_id?'<option value="restock">Inspected and sellable · restock</option>':''}<option value="damaged">Damaged · do not restock</option><option value="wrong_item">Wrong item · needs review</option><option value="admin_review">Needs a decision</option></select></label><label>Restock location code (only for restocking)<input name="location" placeholder="Scan the tray or location code" /></label><label>Inspection notes<textarea name="note" required></textarea></label>`,'Save inspection');
+  form('Inspect received item',`<p class="issue-subtitle">${escape(item.item_title)} · ${item.received_quantity-item.restocked_quantity} units not restocked</p><label>Inspection outcome<select name="outcome"><option value="quarantine">Keep on hold</option><option value="received_no_restock">Inspected, good · received without restocking</option>${item.internal_item_id?'<option value="restock">Inspected and sellable · restock</option>':''}<option value="damaged">Damaged · do not restock</option><option value="wrong_item">Wrong item · needs review</option><option value="admin_review">Needs a decision</option></select></label><p class="issue-subtitle">Received without restocking saves the inspection and evidence. It does not create an inventory item or change stock.</p><label>Restock location code (only for restocking)<input name="location" placeholder="Scan the tray or location code" /></label><label>Inspection notes<textarea name="note" required></textarea></label>`,'Save inspection');
   const note=$('issue-action-form').querySelector('[name="note"]');
   note.closest('label').insertAdjacentHTML('afterend','<div class="inspection-evidence"><label>Inspection photos / videos<input id="inspection-files" type="file" accept="image/*,video/*" multiple /></label><button type="button" class="secondary-btn" id="inspection-camera">Take a photo</button><input id="inspection-camera-file" type="file" accept="image/*" capture="environment" hidden /><p id="inspection-file-summary" class="issue-subtitle">Add close-ups of any damage, the item and its packaging.</p></div>');
   const location=$('issue-action-form').querySelector('[name="location"]');location.id='inspection-location';location.setAttribute('data-camera-scan','');

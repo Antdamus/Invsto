@@ -60,6 +60,7 @@ before(async()=>{
  await db.exec(packaging.slice(packaging.indexOf('create function public.packaging_normalize_tracking'),packaging.indexOf('create index packaging_orders_tracking_idx')));
  await db.exec(`create table ebay_order_label_events(order_ids uuid[],action text,label_metadata jsonb);`);
  await db.exec(await sqlFile('20261009059000_return_receiving_workflow.sql'));
+ await db.exec(await sqlFile('20261009062000_return_barcode_no_restock.sql'));
 
 });
 after(async()=>db?.close());
@@ -79,6 +80,59 @@ const receive=(key=200,qty=1,disposition='restock',caseId=100)=>scalar('select r
  id(key),id(caseId),JSON.stringify([{order_line_id:id(11),received_quantity:qty,condition_received:'used_good',disposition,destination_location_id:disposition==='restock'?id(30):null,notes:'Inspected'}]),
  '[{"bucket":"ebay-return-evidence","path":"test/photo.jpg"}]','Received carefully','TRACK1']);
 const stock=()=>scalar('select coalesce(sum(quantity),0)::int v from item_stock_locations');
+
+// Decoded directly from the user's FedEx Ground label, not a guessed suffix.
+const fedexBarcode='9632001520534711760300878065496736',fedexTracking='878065496736';
+test('FedEx full barcode and printed tracking resolve the same return without suffix guesses',async()=>{
+ await db.query('update ebay_return_cases set return_tracking_number=$1',[fedexTracking]);
+ for(const scan of [fedexTracking,'8780 6549 6736',fedexBarcode,']C0'+fedexBarcode+'\r\n',fedexBarcode.slice(0,9)+'('+fedexBarcode.slice(9,18)+')'+fedexBarcode.slice(18)]){
+  const result=await scalar('select lookup_customer_return_package($1) v',[scan]);
+  assert.equal(result.tracking_number,fedexTracking);assert.equal(result.matches[0].case_id,id(100));
+ }
+ for(const scan of ['65496736','1234567890'+fedexTracking,'95'+fedexBarcode.slice(2)])assert.equal((await scalar('select lookup_customer_return_package($1) v',[scan])).matches.length,0);
+ await db.query('update ebay_return_cases set return_tracking_number=$1',[fedexBarcode]);
+ assert.equal((await scalar('select lookup_customer_return_package($1) v',[fedexTracking])).matches[0].case_id,id(100),'legacy saved full barcode can be found by TRK number');
+ await db.query("insert into ebay_return_cases(id,order_id,order_number,source_lane,return_tracking_number) values($1,$2,'02-12345-12345','return',$3)",[id(101),id(10),fedexTracking]);
+ assert.equal((await scalar('select lookup_customer_return_package($1) v',[fedexBarcode])).matches.length,2,'ambiguous tracking must retain both cases');
+ assert.equal(await stock(),0);
+});
+
+test('FedEx keeps real 14-digit tracking and does not strip leading digits from short tracking',async()=>{
+ assert.equal(await scalar('select customer_return_tracking_number($1) v',['96'+'0'.repeat(18)+'12345678901234']),'12345678901234');
+ assert.equal(await scalar('select customer_return_tracking_number($1) v',['001234567890']),'001234567890');
+});
+
+test('outside-inventory receipt saves evidence and tracking with no stock or catalog changes; retry is idempotent',async()=>{
+ await db.exec('update ebay_order_lines set internal_item_id=null;update ebay_return_items set internal_item_id=null');
+ const args=[id(200),id(100),JSON.stringify([{order_line_id:id(11),received_quantity:2,condition_received:'used_good',disposition:'received_no_restock'}]),JSON.stringify([{path:'return/item.jpg'},{path:'return/opening.mp4'}]),'Received and inspected; not in inventory',fedexBarcode];
+ const result=await scalar('select receive_customer_return($1,$2,$3,$4,$5,$6) v',args);
+ assert.equal(result.restocked_units,0);await scalar('select receive_customer_return($1,$2,$3,$4,$5,$6) v',args);
+ assert.equal(await stock(),0);assert.equal(await scalar('select count(*)::int v from stock_transactions'),0);assert.equal(await scalar('select count(*)::int v from item_types'),1);
+ assert.equal(await scalar('select received_quantity v from ebay_return_items'),2);assert.equal(await scalar('select disposition v from ebay_return_items'),'received_no_restock');
+ assert.equal(await scalar('select return_tracking_number v from ebay_return_cases'),fedexTracking);assert.equal(await scalar('select status v from ebay_return_cases'),'received');
+ assert.equal(await scalar("select payload->>'tracking_scan' v from ebay_return_events"),fedexBarcode);
+ assert.equal(await scalar('select jsonb_array_length(evidence_photos) v from ebay_return_events'),2);
+ await assert.rejects(receive(201,1,'received_no_restock'),/more than was shipped/);
+ await assert.rejects(scalar('select finish_customer_issue($1,$2) v',[id(100),'Received']),/eBay case is still open/);
+ await db.exec("update ebay_return_cases set ebay_status='CLOSED'");await scalar('select finish_customer_issue($1,$2) v',[id(100),'All work finished, no inventory intake required']);
+ assert.equal(await scalar('select status v from ebay_return_cases'),'closed');
+});
+
+test('uninspected or missing evidence cannot become a completed non-restock receipt',async()=>{
+ const args=[id(200),id(100),JSON.stringify([{order_line_id:id(11),received_quantity:1,condition_received:'unknown',disposition:'received_no_restock'}]),'[{}]'];
+ await assert.rejects(scalar('select receive_customer_return($1,$2,$3,$4) v',args),/Inspect the item/);
+ args[2]=args[2].replace('unknown','used_good');args[3]='[]';
+ await assert.rejects(scalar('select receive_customer_return($1,$2,$3,$4) v',args),/photo or video/);assert.equal(await stock(),0);
+});
+
+test('a previously held outside-inventory item can finish inspection without receiving or restocking it twice',async()=>{
+ await db.exec('update ebay_order_lines set internal_item_id=null;update ebay_return_items set internal_item_id=null');
+ await receive(200,2,'quarantine');const item=await scalar('select id v from ebay_return_items');
+ const args=[id(201),item,'received_no_restock',null,'Inspected and good; item is outside inventory','[{"path":"inspection.jpg"}]'];
+ await scalar('select inspect_customer_return($1,$2,$3,$4,$5,$6) v',args);await scalar('select inspect_customer_return($1,$2,$3,$4,$5,$6) v',args);
+ assert.equal(await scalar('select received_quantity v from ebay_return_items'),2);assert.equal(await scalar('select status v from ebay_return_cases'),'received');assert.equal(await stock(),0);
+ await assert.rejects(scalar('select inspect_customer_return($1,$2,$3,$4,$5) v',[id(202),item,'restock',id(30),'Ready']),/no verified inventory link/);
+});
 
 test('package scan matches exact return labels, original labels and order numbers; ambiguity is preserved',async()=>{
  await db.exec(`update ebay_return_cases set return_tracking_number='9400123456789012345678';update ebay_orders set tracking_number='1Z1234567890123456'`);
