@@ -10008,7 +10008,7 @@ function openWorkerCancelOrderModal(options = {}) {
   setTimeout(() => $("worker-cancel-order-note")?.focus(), 80);
   if (options.openEbayCancel && !isRefund) {
     openEbayCancelFlowForWorkerModal({ silent: true });
-    setWorkerCancelPhotoStatus("eBay cancellation opened. After eBay confirms it, use the OG proof button on the eBay confirmation page.", "info");
+    setWorkerCancelPhotoStatus('On eBay, click “Export cancellation + screenshot to OG” on the canceled order or its cancellation details. The screenshot will appear here; review and sign to save it.', "info");
   }
 
   loadNoInventoryCaptureStations({ silent: true }).catch((error) => {

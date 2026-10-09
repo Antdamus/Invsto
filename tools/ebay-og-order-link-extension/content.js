@@ -25,6 +25,7 @@
   const VIDEO_RECEIPT_CONTROLLER_COLLAPSED_KEY = "ogEbayVideoReceiptControllerCollapsed";
   const VIDEO_RECEIPT_HOTKEYS_KEY = "ogEbayVideoReceiptHotkeysV1";
   const CANCEL_CONFIRM_CAPTURE_ID = "og-ebay-capture-cancel-confirmation";
+  const CANCEL_PROOF_EXPORT_LABEL = "Export cancellation + screenshot to OG";
   const VIDEO_RECEIPT_BUTTON_CLASS = "og-ebay-video-receipt";
   const VIDEO_RECEIPT_AUTO_PARAM = "ogOpenVideoReceipt";
   const PRIORITIZE_DUE_ORDERS_ID = "og-ebay-prioritize-due-orders";
@@ -1195,7 +1196,8 @@
 
   function isEbayCancellationsPage() {
     if (/^\/ebaylive\/host\/events\//.test(window.location.pathname)) return false;
-    if (isCancelConfirmationDetailsPage()) return false;
+    if (isCancellationProofPage()) return false;
+    if (/\/mesh\/ord\/details\/?$/i.test(window.location.pathname)) return false;
     if (isEbayRequestsDisputesPage()) return false;
     const url = new URL(window.location.href);
     const sample = getPageTextSample();
@@ -3771,6 +3773,9 @@
   }
 
   async function sendCancellationBatchToOg(cancellations = [], button = null) {
+    // A single-order confirmation needs evidence in the open cancellation form,
+    // not the list importer, which only flags order statuses and has no photo.
+    if (isCancellationProofPage()) return captureCancelConfirmationProof(button);
     if (ogCancellationBatchExportInProgress) return;
     ogCancellationBatchExportInProgress = true;
     try {
@@ -4816,10 +4821,19 @@
   function isCancelConfirmationDetailsPage() {
     try {
       const url = new URL(window.location.href);
-      return /\/Cancel\/Details$/i.test(url.pathname) && Boolean(url.searchParams.get("cancelId"));
+      // eBay also links here with itemId + transId, without a cancelId.
+      return /\/Cancel\/Details\/?$/i.test(url.pathname);
     } catch (_) {
       return false;
     }
+  }
+
+  function isCancellationProofPage() {
+    if (isCancelConfirmationDetailsPage()) return true;
+    const url = new URL(window.location.href);
+    if (!/\/mesh\/ord\/details\/?$/i.test(url.pathname)) return false;
+    // The ordinary "Cancel order" action is not evidence of a cancellation.
+    return /\bthis order (?:is|was) cancel(?:ed|led)\b/i.test(document.body?.innerText || "");
   }
 
   function getVisiblePageLines() {
@@ -4831,7 +4845,10 @@
 
   function getValueAfterLabel(lines, label) {
     const normalizedLabel = String(label || "").toLowerCase();
-    const index = lines.findIndex((line) => line.toLowerCase() === normalizedLabel);
+    const index = lines.findIndex((line) => {
+      const value = line.toLowerCase();
+      return value === normalizedLabel || value === `${normalizedLabel} ${normalizedLabel}`;
+    });
     if (index >= 0 && lines[index + 1]) return lines[index + 1];
     const inline = lines.find((line) => line.toLowerCase().startsWith(`${normalizedLabel} `));
     return inline ? inline.slice(label.length).trim() : "";
@@ -4843,14 +4860,17 @@
     const bodyText = lines.join("\n");
     const labeledOrder = normalizeOrderNumber(getValueAfterLabel(lines, "Order number"));
     const visibleOrders = [...new Set(bodyText.match(/\b\d{2}-\d{5}-\d{5}\b/g) || [])];
-    const orderNumber = labeledOrder || (visibleOrders.length === 1 ? visibleOrders[0] : "");
-    const itemIdMatch = bodyText.match(/\bItem ID:\s*([0-9]{8,15})\b/i);
+    const urlOrder = normalizeOrderNumber(url.searchParams.get("orderid") || url.searchParams.get("orderId") || "");
+    const visibleOrder = labeledOrder || (visibleOrders.length === 1 ? visibleOrders[0] : "");
+    const orderNumber = urlOrder && urlOrder !== visibleOrder ? "" : visibleOrder;
+    const itemIdMatch = bodyText.match(/\b(?:Item ID:\s*)+([0-9]{8,15})\b/i);
     return {
       cancelId: String(url.searchParams.get("cancelId") || "").trim(),
       orderNumber,
       orderId: orderNumber,
       omsOrderId: orderNumber,
-      itemNumber: itemIdMatch?.[1] || "",
+      itemNumber: itemIdMatch?.[1] || url.searchParams.get("itemId") || "",
+      transactionId: url.searchParams.get("transId") || "",
       buyerUsername: getValueAfterLabel(lines, "Buyer"),
       orderTotal: getValueAfterLabel(lines, "Order total"),
       totalRefund: getValueAfterLabel(lines, "Total refund"),
@@ -4874,6 +4894,8 @@
     const overlays = [...document.querySelectorAll('[id^="og-ebay-"]')];
     const visibility = overlays.map((element) => [element, element.style.visibility]);
     try {
+      assertExtensionContextActive();
+      if (!isCancellationProofPage()) throw new Error("Open the canceled order or its cancellation details before exporting a screenshot.");
       const metadata = getCancelConfirmationMetadata();
       if (!metadata.orderNumber) throw new Error("Show the cancellation's order number on this page before capturing proof.");
       overlays.forEach((element) => { element.style.visibility = "hidden"; });
@@ -4893,12 +4915,13 @@
       });
       if (!response?.ok) throw new Error(response?.error || "OG did not accept the cancellation proof.");
       setCancelProofButtonStatus(button, "Proof ready — finish in Invsto", "success");
-      window.setTimeout(() => setCancelProofButtonStatus(button, "Capture cancellation proof"), 2600);
+      window.setTimeout(() => setCancelProofButtonStatus(button, CANCEL_PROOF_EXPORT_LABEL), 4000);
     } catch (error) {
       console.warn("[OG eBay Cancel] Could not capture cancellation proof:", error);
       setCancelProofButtonStatus(button, "Proof capture failed", "error");
       if (button) button.title = error?.message || "Could not capture the cancellation proof. Try again.";
-      window.setTimeout(() => setCancelProofButtonStatus(button, "Capture cancellation proof"), 3000);
+      window.alert(error?.message || "Could not export the screenshot to OG. Try again.");
+      window.setTimeout(() => setCancelProofButtonStatus(button, CANCEL_PROOF_EXPORT_LABEL), 4000);
     } finally {
       visibility.forEach(([element, previous]) => { element.style.visibility = previous; });
     }
@@ -4906,7 +4929,7 @@
 
   function injectCancelConfirmationProofButton() {
     const existing = document.getElementById(CANCEL_CONFIRM_CAPTURE_ID);
-    if (!isCancelConfirmationDetailsPage()) {
+    if (!isCancellationProofPage()) {
       existing?.remove();
       return;
     }
@@ -4915,8 +4938,8 @@
     const button = document.createElement("button");
     button.type = "button";
     button.id = CANCEL_CONFIRM_CAPTURE_ID;
-    button.textContent = "Capture cancellation proof";
-    button.title = "Take a screenshot of this eBay cancellation confirmation and attach it to the OG cancellation modal.";
+    button.textContent = CANCEL_PROOF_EXPORT_LABEL;
+    button.title = "Attach a screenshot to this order's cancellation form in Invsto. Review and sign there to save it with Order History.";
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
