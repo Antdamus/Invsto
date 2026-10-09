@@ -1997,12 +1997,18 @@ function findMatches(prepared: PreparedReturn,indexes:any):MatchResult{
  const order=indexes.orders.get(prepared.orderNumber)||null;
  const item=normalizeLookup(prepared.itemNumber),tx=normalizeLookup(prepared.transactionId);
  const buyer=normalizeLookup(prepared.buyerUsername);
+ if(order&&buyer&&normalizeLookup(order.buyer_username)!==buyer)return {order:null,lines:[]};
  const pool=order?(indexes.linesByOrderId?.get(order.id)||[]):(indexes.linesByItemNumber.get(item)||[]);
- const candidates=[...new Map(pool.map((line:any)=>[line.id,line])).values()].filter((line:any)=>(!item||normalizeLookup(line.item_number)===item)&&(!tx||normalizeLookup(line.transaction_id)===tx)
-  &&(order||buyer&&normalizeLookup(line.order?.buyer_username)===buyer));
- // Missing item identity or ambiguous candidates require human matching.
- if((!item&&!tx)||candidates.length!==1)return {order,lines:[]};
- const line=candidates[0];return {order:order||line.order||indexes.ordersById.get(line.order_id)||null,lines:[line]};
+ const candidates=[...new Map(pool.map((line:any)=>[line.id,line])).values()].filter((line:any)=>(!item||normalizeLookup(line.item_number)===item)
+  &&(order||buyer&&normalizeLookup(line.order?.buyer_username)===buyer)
+  &&(!prepared.orderNumber||order||line.order?.order_number===prepared.orderNumber));
+ // A unique listing within the exact order is sufficient. Post-order APIs can
+ // expose a different transaction reference than the fulfillment order line.
+ // Use transaction identity to distinguish repeated listings, never to guess.
+ const exact=tx?candidates.filter((line:any)=>normalizeLookup(line.transaction_id)===tx):[];
+ const chosen=exact.length===1?exact:item&&candidates.length===1?candidates:[];
+ if(!chosen.length)return {order,lines:[]};
+ const line=chosen[0];return {order:order||line.order||indexes.ordersById.get(line.order_id)||null,lines:[line]};
 }
 
 async function updateLocalOrderFinancePayloads(
@@ -2477,6 +2483,8 @@ async function getLocalClosureBlock(supabase: any, caseRow: any): Promise<{ bloc
 async function upsertCase(supabase:any,prepared:PreparedReturn,match:MatchResult):Promise<any>{
  const existing=await findExistingCase(supabase,prepared,match.order?.id||null);
  if(existing?.order_id&&match.order?.id&&existing.order_id!==match.order.id)throw Error('The eBay issue now points to a different order. The existing link was preserved for manual review.');
+ const verified=existing?.raw_payload?.manualOrderMatch?.line_ids;
+ if(verified?.length&&match.lines.some((line:any)=>!verified.includes(line.id)))throw Error('The eBay item differs from the manually verified order items. The saved match was preserved for review.');
  const lane=preparedIssueLane(prepared),kind=lane==='return'?'return':lane==='inquiry'?'request':'dispute';
  const terminal=providerIssueClosed(prepared);
  const statusText=prepared.status||prepared.state||'UNKNOWN';
@@ -2492,7 +2500,9 @@ async function upsertCase(supabase:any,prepared:PreparedReturn,match:MatchResult
   return_reason:prepared.reason||existing?.return_reason||null,return_tracking_number:prepared.trackingNumber||existing?.return_tracking_number||null,
   status:reopened?'open':existing?.status||(terminal?'closed':'open'),
   closed_at:reopened?null:existing?.closed_at||(!existing&&terminal?closureDateFor(prepared):null),opened_at:existing?.opened_at||prepared.requestedAt||new Date().toISOString(),
-  raw_payload:{...(existing?.raw_payload||{}),...prepared.payload,ebayClosedOnEbay:terminal,physicalReturnExpected:kind==='return'&&preparedExpectsPhysicalReturn(prepared,Boolean(match.order)),reopenedOnEbay:Boolean(reopened)},
+  raw_payload:{...(existing?.raw_payload||{}),...prepared.payload,
+   ...(match.lines.length&&!verified?.length?{automaticOrderMatch:{order_id:match.order.id,line_ids:match.lines.map((l:any)=>l.id),source:'order_listing_identity',item_number:prepared.itemNumber,provider_transaction_id:prepared.transactionId}}:{}),
+   ebayClosedOnEbay:terminal,physicalReturnExpected:kind==='return'&&preparedExpectsPhysicalReturn(prepared,Boolean(match.order)),reopenedOnEbay:Boolean(reopened)},
   updated_at:new Date().toISOString()};
  const q=existing?supabase.from('ebay_return_cases').update(row).eq('id',existing.id):supabase.from('ebay_return_cases').insert(row);
  const {data,error}=await q.select('*').single();if(error)throw error;
@@ -2572,7 +2582,7 @@ async function upsertTask(supabase: any, prepared: PreparedReturn, caseRow: any,
     order_line_ids: match.lines.length ? match.lines.map((line: any) => line.id) : existing?.order_line_ids || caseRow.raw_payload?.manualOrderMatch?.line_ids || [],
     task_type: taskType,
     title: existing?.title || taskTitleFor(prepared, matched),
-    question: existing?.question || questionFor(prepared, matched),
+    question: matched&&[questionFor(prepared,false)].includes(existing?.question) ? questionFor(prepared,true) : existing?.question || questionFor(prepared, matched),
     status: existing?.status || "open",
     priority: existing?.priority && ["high", "urgent"].includes(existing.priority) ? existing.priority : priorityFor(prepared, matched),
     ...(existing ? {} : {due_at: null}),

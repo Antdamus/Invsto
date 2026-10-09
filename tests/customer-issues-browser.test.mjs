@@ -76,6 +76,29 @@ test('phone evidence downloads original files and selected messages without send
  await page.screenshot({path:'test-results/customer-issues/evidence-phone.png'});
 });
 
+for(const width of [390,1366])test(`original order evidence opens automatically at ${width}px, even without a task`,async t=>{
+ const page=await open(t,width);
+ await page.evaluate(()=>{
+  fixtureSetTasks([]);fixtureUpdateCase({raw_payload:{automaticOrderMatch:{line_ids:['line-1']}}});
+  window.fixtureEvidence={bag_photos:[{bucket:'photos',path:'bag.jpg',label:'Bag 016'}],completion_events:[{photo_attachments:[{bucket:'photos',path:'completion.jpg',label:'Completed order'}]}],packaging_photos:[{bucket:'photos',path:'packing.jpg',label:'Packed contents'},{bucket:'photos',path:'packing.mp4',label:'Packaging recording',mime_type:'video/mp4'}],certificates:[],packages:[{status:'sent',tracking_code:'TRACK123'}]};
+ });
+ await page.locator('.issue-card').first().click();
+ await expect(page.locator('.issue-original-order')).toContainText('01-12345-12345');
+ await expect(page.locator('.issue-original-order')).toContainText('1 linked item');
+ await expect(page.getByRole('link',{name:'Open full order ↗'})).toHaveAttribute('href',/orderHistorySearch=01-12345-12345/);
+ await expect(page.getByRole('img',{name:'Bag 016',exact:true})).toBeVisible();
+ await expect(page.getByRole('img',{name:'Completed order',exact:true})).toBeVisible();
+ await expect(page.getByRole('img',{name:'Packed contents',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Play packaging video',exact:true}).click();
+ await expect(page.locator('#issues-feedback')).toHaveText('Full evidence viewer opened');
+ await expect(page.getByRole('button',{name:'Match order items'})).toHaveCount(0);
+ assert.ok(await page.locator('#issues-detail').evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+ assert.equal((await page.evaluate(()=>fixtureWrites)).length,0);
+ await page.screenshot({path:`test-results/customer-issues/original-evidence-${width}.png`});
+ await page.getByText('Evidence package',{exact:true}).click();await page.getByRole('button',{name:'Prepare evidence',exact:true}).click();
+ assert.equal((await page.evaluate(()=>fixtureCalls.filter(c=>c.rpc==='customer_issue_evidence'))).length,1,'archive reuses loaded case evidence');
+});
+
 for(const width of [320,1366])test(`sync recovery at ${width}px explains the issue and retries without closing cases`,async t=>{
  const page=await open(t,width);
  await page.evaluate(()=>{window.fixtureHealth={lanes:[{lane:'payment_dispute',status:'needs_access',last_progress_at:new Date().toISOString()}],worker:{last_finished_at:new Date().toISOString()},problems:[{monitor_key:'payment_dispute',reason:'access'}],queued:3,retrying:1};});

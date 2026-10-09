@@ -59,10 +59,10 @@
   <h2>Selected files</h2>${files.map(f=>`<article><b>${esc(groups[f.group])}</b> · ${esc(f.label)}<br><small>${esc(f.created_at||'Capture date unavailable')}</small><p><a href="${esc(f.filename)}">Open original file</a></p>${/\.(png|jpe?g|webp|gif)$/i.test(f.filename)?`<img src="${esc(f.filename)}" alt="${esc(f.label)}">`:''}</article>`).join('')||'<p>No files selected.</p>'}
   <h2>Selected messages</h2>${messages.map(m=>`<article><small>${esc(date(m.sent_at||m.created_at_ebay))} · ${esc(m.sender_username||m.direction)}</small><pre>${esc(m.message_body||'')}</pre></article>`).join('')||'<p>No messages selected.</p>'}</html>`;
  }
- async function open({db,caseId,target,sign,receipts=[],returnEvents=[]}){
+ async function open({db,caseId,target,sign,receipts=[],returnEvents=[],data:loadedData}){
   if(target.dataset.loading==='true')return;target.dataset.loading='true';target.innerHTML='<p role="status">Gathering saved evidence…</p>';
   try{
-   const result=await db.rpc('customer_issue_evidence',{_case_id:caseId});if(result.error)throw result.error;if(!target.isConnected)return;
+   const result=loadedData?{data:loadedData}:await db.rpc('customer_issue_evidence',{_case_id:caseId});if(result.error)throw result.error;if(!target.isConnected)return;
    const data=result.data,files=collect(data,receipts,returnEvents),messages=[...(data.case_messages||[]),...(data.buyer_messages||[])];
    const truncated=(data.case_messages||[]).length>500||(data.buyer_messages||[]).length>500;
    target.innerHTML=`<p class="issue-subtitle">Choose the files and messages to include. The ZIP contains original files and a printable report.</p>${Object.entries(groups).map(([key,label])=>{const matches=files.map((f,i)=>({...f,i})).filter(f=>f.group===key);return `<section class="issue-evidence-group"><h3>${label} <small>${matches.length}</small></h3>${matches.length?matches.map(f=>`<label class="issue-evidence-option"><input type="checkbox" data-evidence-file="${f.i}" ${f.video?'':'checked'}><span>${esc(f.label)}${f.video?' · Video':''}<small>${esc(date(f.created_at))}</small></span><button type="button" class="secondary-btn" data-evidence-preview="${f.i}">View</button></label>`).join(''):'<p class="issue-subtitle">Not saved for this case.</p>'}</section>`;}).join('')}
@@ -95,5 +95,5 @@
   }catch(error){target.innerHTML=`<p class="issue-form-error">${esc(error.message||'Could not gather evidence. Retry Prepare evidence.')}</p>`;}
   finally{delete target.dataset.loading;}
  }
- root.OGIssueEvidence={open,testing:{collect,zip,report,crc}};
+ root.OGIssueEvidence={open,collect,testing:{collect,zip,report,crc}};
 })(globalThis);

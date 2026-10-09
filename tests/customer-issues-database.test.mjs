@@ -22,7 +22,7 @@ before(async()=>{
  create table stock_transactions(id uuid primary key default gen_random_uuid(),item_id uuid,location_id uuid,quantity int,action_type text,confirmed_at timestamptz,user_id uuid,email text,notes text,source_transaction_id uuid,method text,timestamp timestamptz);
  create table metadata(id text primary key,inventory_version text,changed_item_ids text[],updated_at timestamptz);insert into metadata(id) values('inventory');
  create table ebay_orders(id uuid primary key,order_number text,buyer_username text,status text);
- create table ebay_order_lines(id uuid primary key,order_id uuid,item_number text,item_title text,quantity int,fulfilled_quantity int,line_status text,internal_item_id uuid,stock_location_row_id uuid,location_id uuid,stock_transaction_id uuid);
+ create table ebay_order_lines(id uuid primary key,order_id uuid,item_number text,item_title text,quantity int,fulfilled_quantity int,line_status text,internal_item_id uuid,stock_location_row_id uuid,location_id uuid,stock_transaction_id uuid,transaction_id text);
  create function task_workflow_reviewer(t jsonb) returns uuid language sql stable as $$select '${id(2)}'::uuid$$;
  revoke all on function task_workflow_reviewer(jsonb) from public,anon,authenticated;
  grant usage on schema auth to authenticated;
@@ -54,6 +54,8 @@ before(async()=>{
  await db.exec(await sqlFile('20261009045000_customer_issue_refresh_priority.sql'));
  await db.exec(await sqlFile('20261009054000_customer_issue_sync_priority.sql'));
  await db.exec(await sqlFile('20261009055000_customer_issue_sync_alerts.sql'));
+ await db.exec(await sqlFile('20261009057000_customer_issue_order_links.sql'));
+ await db.exec(await sqlFile('20261009058000_customer_issue_evidence_links.sql'));
 });
 after(async()=>db?.close());
 beforeEach(async()=>{
@@ -62,7 +64,7 @@ beforeEach(async()=>{
  update ebay_issue_worker set monitoring_started_at=now(),last_run_finished_at=now(),last_manual_retry_at=null;
  update ebay_issue_sync_lanes set status='ok',error_count=0,error=null,last_progress_at=now();
  insert into ebay_orders values('${id(10)}','01-12345-12345','buyer.one','fulfilled');
- insert into ebay_order_lines values('${id(11)}','${id(10)}','287000000001','Watch',2,2,'fulfilled','${id(20)}',null,null,null);
+ insert into ebay_order_lines values('${id(11)}','${id(10)}','287000000001','Watch',2,2,'fulfilled','${id(20)}',null,null,null,'local-tx');
  insert into ebay_return_cases(id,order_id,order_number,ebay_return_id,status,source_lane,issue_kind,ebay_status,synced_at,ebay_due_at)
  values('${id(100)}','${id(10)}','01-12345-12345','12345','open','return','return','OPEN',now(),'2026-10-15T18:00:00Z');
  insert into ebay_return_items(return_case_id,order_id,order_line_id,internal_item_id,item_title,expected_quantity)
@@ -72,6 +74,43 @@ const receive=(key=200,qty=1,disposition='restock',caseId=100)=>scalar('select r
  id(key),id(caseId),JSON.stringify([{order_line_id:id(11),received_quantity:qty,condition_received:'used_good',disposition,destination_location_id:disposition==='restock'?id(30):null,notes:'Inspected'}]),
  '[{"bucket":"ebay-return-evidence","path":"test/photo.jpg"}]','Received carefully','TRACK1']);
 const stock=()=>scalar('select coalesce(sum(quantity),0)::int v from item_stock_locations');
+
+test('order link repair connects unique listings, preserves work and stock, and audits once',async()=>{
+ await db.exec(`delete from ebay_return_items;update ebay_return_cases set buyer_username='buyer.one',raw_payload='{"apiExtractedDetails":{"itemNumber":"287000000001","transactionId":"different-provider-tx","quantity":1}}';
+ insert into ebay_return_tasks(id,return_case_id,order_id,task_type,status,title,question,order_line_ids) values('${id(201)}','${id(100)}','${id(10)}','return_review','waiting_on_admin','Keep my title','Employee instructions','{}');`);
+ assert.equal(await scalar('select repair_customer_issue_order_links() v'),1);
+ assert.deepEqual(await scalar('select customer_issue_order_line_ids($1) v',[id(100)]),[id(11)]);
+ assert.equal(await scalar('select repair_customer_issue_order_links() v'),0);
+ assert.equal(await scalar('select count(*)::int v from ebay_return_events'),1);
+ assert.equal(await scalar('select received_quantity v from ebay_return_items'),0);
+ assert.equal(await stock(),0);
+ const task=(await db.query('select status,title,question from ebay_return_tasks')).rows[0];
+ assert.deepEqual(task,{status:'waiting_on_admin',title:'Keep my title',question:'Employee instructions'});
+ assert.equal(await scalar('select status v from ebay_orders'),'fulfilled');
+});
+test('order repair rejects ambiguities, conflicting buyers and manually verified cases',async()=>{
+ await db.exec(`delete from ebay_return_items;update ebay_return_cases set buyer_username='other',raw_payload='{"apiExtractedDetails":{"itemNumber":"287000000001","transactionId":"different"}}';`);
+ assert.equal(await scalar('select repair_customer_issue_order_links() v'),0);
+ await db.exec(`update ebay_return_cases set buyer_username='buyer.one';insert into ebay_order_lines(id,order_id,item_number,transaction_id,quantity) values('${id(12)}','${id(10)}','287000000001','second',1);`);
+ assert.equal(await scalar('select repair_customer_issue_order_links() v'),0);
+ await db.exec(`update ebay_return_cases set raw_payload=jsonb_set(raw_payload,'{apiExtractedDetails,transactionId}','"second"');`);
+ assert.equal(await scalar('select repair_customer_issue_order_links() v'),1);
+ assert.deepEqual(await scalar('select customer_issue_order_line_ids($1) v',[id(100)]),[id(12)]);
+ await db.exec(`delete from ebay_return_items;delete from ebay_return_events;update ebay_return_cases set raw_payload='{"manualOrderMatch":{"line_ids":[]},"apiExtractedDetails":{"itemNumber":"287000000001"}}';`);
+ assert.equal(await scalar('select repair_customer_issue_order_links() v'),0);
+});
+test('closed disputes gain evidence identity without a new task or inventory intake',async()=>{
+ await db.exec(`delete from ebay_return_items;update ebay_return_cases set order_id=null,order_number=null,buyer_username='buyer.one',source_lane='case',status='closed',closed_at=now(),raw_payload='{"apiExtractedDetails":{"itemNumber":"287000000001","transactionId":"different"}}';`);
+ assert.equal(await scalar('select repair_customer_issue_order_links() v'),1);
+ assert.equal(await scalar('select status v from ebay_return_cases'),'closed');
+ assert.equal(await scalar('select count(*)::int v from ebay_return_tasks'),0);
+ assert.equal(await scalar('select count(*)::int v from ebay_return_items'),0);
+ assert.deepEqual(await scalar('select customer_issue_order_line_ids($1) v',[id(100)]),[id(11)]);
+ // A malformed reference to an unrelated order cannot expose that order's evidence.
+ await db.exec(`update ebay_return_cases set order_id='${id(10)}',raw_payload='{"automaticOrderMatch":{"line_ids":["${id(12)}"]}}';`);
+ assert.deepEqual(await scalar('select customer_issue_order_line_ids($1) v',[id(100)]),[]);
+ await db.exec('set role authenticated');await assert.rejects(scalar('select repair_customer_issue_order_links() v'),/permission denied/);
+});
 
 test('case identity recovery preserves work, audits the old ID and refuses collisions',async()=>{
  await db.exec(`update ebay_return_cases set source_lane='case',ebay_return_id='111',raw_payload='{"ebaySummary":{"caseId":900},"ebayDetail":{"caseId":900}}' where id='${id(100)}';

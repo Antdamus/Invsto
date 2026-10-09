@@ -37,6 +37,24 @@ test('item matching deduplicates repeated indexes but refuses genuinely ambiguou
  indexes.linesByOrderId.set('o',[line,{...line,id:'other'}]);assert.equal(sandbox.findMatches(prepared,indexes).lines.length,0);
  assert.equal(sandbox.findMatches({...prepared,orderNumber:'',buyerUsername:'wrongbuyer'},indexes).lines.length,0);
 });
+test('unique original order and listing survive different provider transaction references',()=>{
+ const order={id:'o',order_number:'12-15202-25511',buyer_username:'hey_bubu'},line={id:'l',order_id:'o',item_number:'287604134400',transaction_id:'10085161182512',order};
+ const indexes={orders:new Map([[order.order_number,order]]),ordersById:new Map([['o',order]]),linesByOrderId:new Map([['o',[line]]]),linesByItemNumber:new Map([[line.item_number,[line]]])};
+ const p={orderNumber:order.order_number,itemNumber:line.item_number,transactionId:'10085161181912',buyerUsername:'hey_bubu'};
+ assert.equal(sandbox.findMatches(p,indexes).lines[0].id,'l');
+ assert.equal(sandbox.findMatches({...p,buyerUsername:'anotherbuyer'},indexes).lines.length,0);
+ assert.equal(sandbox.findMatches({...p,orderNumber:'99-99999-99999'},indexes).lines.length,0);
+ assert.equal(sandbox.findMatches({...p,orderNumber:''},indexes).lines[0].id,'l');
+ indexes.linesByOrderId.set('o',[line,{...line,id:'other',transaction_id:'second'}]);
+ assert.equal(sandbox.findMatches(p,indexes).lines.length,0);
+ assert.equal(sandbox.findMatches({...p,transactionId:'second'},indexes).lines[0].id,'other');
+ assert.equal(sandbox.findMatches({...p,itemNumber:'',transactionId:''},indexes).lines.length,0);
+});
+test('case saves preserve exact evidence links even when no active task remains',async()=>{
+ let saved;const db={from:()=>{const q={select:()=>q,eq:()=>q,order:()=>q,limit:()=>q,insert:row=>{saved=row;return q;},single:async()=>({data:{id:'c',...saved}}),then:resolve=>Promise.resolve({data:[]}).then(resolve)};return q;}};
+ await sandbox.upsertCase(db,{returnId:'r',status:'CLOSED',state:'CLOSED',payload:{postOrderIssueLane:'case'},itemNumber:'123',transactionId:'other'}, {order:{id:'o',order_number:'01-12345-12345'},lines:[{id:'l'}]});
+ assert.deepEqual(clean(saved.raw_payload.automaticOrderMatch.line_ids),['l']);assert.equal(saved.status,'closed');
+});
 test('full provider details control current status and seller deadline, not the buyer deadline or old summary',()=>{
  const p=sandbox.preparePostOrderIssue({inquiryId:'r1',status:'OPEN',sellerResponseDue:{respondByDate:'2026-10-01T00:00:00Z'}},
  {inquiryId:'r1',status:'CLOSED',sellerResponseDue:{respondByDate:'2026-10-10T12:00:00Z'},buyerResponseDue:{respondByDate:'2026-10-20T12:00:00Z'},item:{itemId:'123'}},{},'inquiry');
