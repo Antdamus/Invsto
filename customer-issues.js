@@ -21,10 +21,12 @@
   if(c.status==='partially_received'&&kind(c)==='return')return 'Check the remaining items';
   if(closed(c)&&c.open_tasks)return 'Finish internal follow-up';
   if(closed(c))return 'Review the case outcome';
+  if(c.source_lane==='payment_dispute'&&c.ebay_status==='ACTION_NEEDED')return 'Respond to the payment dispute';
+  if(c.source_lane==='payment_dispute'&&c.ebay_status==='OPEN')return 'Monitor payment-dispute updates';
   if(kind(c)==='return'&&/READY_FOR_SHIPPING|ITEM_READY_TO_SHIP/.test(c.ebay_status||''))return 'Waiting for the buyer to ship';
   if(kind(c)==='return'&&/^(ITEM_SHIPPED|RETURN_SHIPPED)$/.test(c.ebay_status||''))return 'Watch for the returned package';
   if(/WAITING.*BUYER|BUYER_RESPONSE/i.test(c.ebay_status||''))return 'Waiting on the buyer';
-  if(c.ebay_action)return nice(c.ebay_action);
+  if(c.ebay_action&&!/^\d{4}-\d{2}-\d{2}T/i.test(c.ebay_action))return nice(c.ebay_action);
   return c.next_user?'Continue assigned work':'Choose the next person';
  }
  function cards(){
