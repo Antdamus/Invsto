@@ -41,6 +41,16 @@ test('filters and paging stay server-side; full case data loads only on selectio
  await page.getByRole('button',{name:'All open 36',exact:true}).click();await page.getByRole('searchbox',{name:'Search customer issues'}).fill('alex.watches');await expect(page.locator('.issue-card')).toHaveCount(1);
  await page.locator('.issue-card').click();await page.getByRole('button',{name:'View full photo',exact:true}).click();await expect(page.locator('#issues-feedback')).toHaveText('Full evidence viewer opened');
 });
+test('background case changes keep expanded details and never erase an unsaved reply',async t=>{
+ const page=await open(t,1440);await page.locator('.issue-card').first().click();
+ await page.getByText('Buyer’s complaint & eBay conversation',{exact:true}).click();
+ await page.evaluate(async()=>{fixtureUpdateCase({ebay_status:'ITEM_DELIVERED'});await OGCustomerIssues.refresh({detail:false});});
+ await expect(page.getByText('Item delivered',{exact:true})).toBeVisible();
+ await expect(page.getByText('Buyer says the clasp needs inspection.',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Add update / hand back',exact:true}).click();await page.getByRole('textbox',{name:'Update / instructions'}).fill('Unsaved inspection note');
+ await page.evaluate(async()=>{fixtureUpdateCase({ebay_status:'CLOSED'});await OGCustomerIssues.refresh({detail:false});});
+ await expect(page.getByRole('textbox',{name:'Update / instructions'})).toHaveValue('Unsaved inspection note');
+});
 
 
 test('real order-history integration boots the new workspace and opens its reusable intake',async t=>{

@@ -16,8 +16,9 @@
  function feedback(message,error=false){$('issues-feedback').textContent=message;$('issues-feedback').classList.toggle('is-error',error);}
  function nextText(c){
   if(!c.order_id)return 'Match the order';
-  if(c.status==='needs_review')return 'Inspect returned items';
-  if(c.status==='partially_received')return 'Check the remaining items';
+  if(c.status==='needs_review'&&kind(c)==='return')return 'Inspect returned items';
+  if(c.status==='needs_review')return 'Review the customer request';
+  if(c.status==='partially_received'&&kind(c)==='return')return 'Check the remaining items';
   if(closed(c)&&c.open_tasks)return 'Finish internal follow-up';
   if(closed(c))return 'Review the case outcome';
   if(/WAITING.*BUYER|BUYER_RESPONSE/i.test(c.ebay_status||''))return 'Waiting on the buyer';
@@ -42,7 +43,9 @@
    const result=checked(await db.rpc('list_customer_issues',{_view:view,_scope:scope,_search:search,_offset:offset,_limit:PAGE}));
    if(request!==listVersion)return;
    rows=result.rows||[];counts=result.counts||{};total=result.total||0;cards();
-   if(options.detail!==false&&selected&&!$('issue-action-form'))await openCase(selected,{quiet:true});
+   if($('issues-feedback').classList.contains('is-error'))feedback('');
+   const selectedChanged=detail&&rows.some(c=>c.id===selected&&c.updated_at!==detail.c.updated_at);
+   if((options.detail!==false||selectedChanged)&&selected&&!$('issue-action-form')&&!ctx.state.busy)await openCase(selected,{quiet:true});
   }catch(error){if(request===listVersion)feedback(error.message||'Could not load customer issues. Please retry.',true);}
   finally{if(request===listVersion)$('issues-list').setAttribute('aria-busy','false');}
  }
@@ -133,6 +136,9 @@
   }));if(stamp!==version)return;}
  }
  async function openCase(id,{quiet=false}={}){
+  const initialForm=$('issue-action-form');
+  const scroll=quiet?$('issues-detail').scrollTop:0;
+  const expanded=quiet?new Set(Array.from($('issues-detail').querySelectorAll('details[open]>summary'),el=>el.textContent)):null;
   if(saving)return;selected=id;const stamp=++version;document.querySelector('.issues-columns').classList.add('is-selected');cards();
   if(!quiet)$('issues-detail').innerHTML='<div class="issues-empty">Loading the case and its evidence…</div>';
   try{
@@ -151,8 +157,9 @@
    ctx.state.returnTaskEvents=taskEvents;ctx.state.returnAssignees=people;ctx.mergeLines(lines);
    if(tasks[0])await Promise.all([ctx.loadMessages(tasks[0]),ctx.hydrateComplaint(tasks)]);
    if(stamp!==version)return;
+   if(quiet&&(($('issue-action-form')&&$('issue-action-form')!==initialForm)||ctx.state.busy))return;
    detail={c,tasks,items,lines,events:[...caseEvents,...taskEvents].sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at)),moreEvents:caseEvents.length===50||taskEvents.length===50};
-   renderDetail();if(!quiet)$('issues-detail').scrollTop=0;
+   renderDetail();if(expanded)$('issues-detail').querySelectorAll('details').forEach(el=>el.open=expanded.has(el.querySelector('summary')?.textContent));$('issues-detail').scrollTop=scroll;
    const url=new URL(location.href);url.searchParams.delete('returnTaskId');url.searchParams.set('caseId',id);history.replaceState(null,'',url);
   }catch(error){if(stamp===version){$('issues-detail').innerHTML=`<div class="issues-empty"><button class="secondary-btn" data-close-case>← Cases</button><h2>Couldn’t load this case</h2><p>${escape(error.message)}</p><button class="primary-btn" data-retry-case>Retry</button></div>`;}}
  }
