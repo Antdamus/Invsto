@@ -26,18 +26,24 @@ export async function orderChatContext(db: Db, lineId: string, accountKey: strin
   const buyer = clean(order.buyer_username);
   if (!buyer) throw new OrderChatError('order_buyer_missing', 'This order has no eBay buyer username. Add it before opening a chat.', 409);
   const columns = 'id,seller_account_id,conversation_type,ebay_conversation_id,other_party_username,reference_id,reference_type,conversation_title,latest_message_preview,latest_message_created_at';
-  const [buyerChats, itemChats, links, starts] = await Promise.all([
+  const [buyerChats, itemChats, links, starts, buyerLinks, legacyBuyerLinks] = await Promise.all([
     read(db.from('ebay_conversations').select(columns).eq('seller_account_id', account.id).eq('conversation_type', 'FROM_MEMBERS').ilike('other_party_username', exactPattern(buyer)).order('latest_message_created_at', { ascending: false }).limit(101)),
     line.item_number ? read(db.from('ebay_conversations').select(columns).eq('seller_account_id', account.id).eq('conversation_type', 'FROM_MEMBERS').eq('reference_id', line.item_number).limit(101)) : [],
     read(db.from('ebay_conversation_links').select('conversation_id,ebay_order_id,ebay_order_line_id,status,match_method').eq('seller_account_id', account.id).eq('ebay_order_id', order.id).eq('status', 'confirmed').limit(201)),
     read(db.from('ebay_order_chat_starts').select('id,status,conversation_id,error_message,created_at').eq('order_line_id', lineId).in('status', ['sending','sent','unknown']).limit(1)),
+    read(db.from('ebay_conversation_links').select('conversation_id,buyer_username,matched_value,match_method').eq('seller_account_id', account.id).eq('link_type', 'buyer_username').eq('status', 'confirmed').ilike('buyer_username', exactPattern(buyer)).limit(201)),
+    read(db.from('ebay_conversation_links').select('conversation_id,buyer_username,matched_value,match_method').eq('seller_account_id', account.id).eq('link_type', 'buyer_username').eq('status', 'confirmed').ilike('matched_value', exactPattern(buyer)).limit(201)),
   ]);
-  const ids = [...new Set([...links.map((l: any) => l.conversation_id), ...starts.map((s: any) => s.conversation_id).filter(Boolean)])];
+  const verifiedBuyerIds = new Set([...buyerLinks, ...legacyBuyerLinks].filter((l: any) =>
+    normalized(l.buyer_username || l.matched_value) === normalized(buyer)
+  ).map((l: any) => l.conversation_id));
+  const ids = [...new Set([...verifiedBuyerIds, ...links.map((l: any) => l.conversation_id), ...starts.map((s: any) => s.conversation_id).filter(Boolean)])];
   const linkedChats = ids.length ? await read(db.from('ebay_conversations').select(columns).eq('seller_account_id', account.id).eq('conversation_type', 'FROM_MEMBERS').in('id', ids).limit(202)) : [];
   const all = [...new Map([...buyerChats, ...itemChats, ...linkedChats].map((c: any) => [c.id, c])).values()] as any[];
   // A listing/order reference alone never authorizes crossing buyer identities.
   const rank: Record<string, number> = {item:0,order:1,listing:2,buyer:3};
-  const chats = all.filter(c => normalized(c.other_party_username) === normalized(buyer)).map(c => {
+  const chats = all.filter(c => normalized(c.other_party_username) === normalized(buyer)
+    || (!clean(c.other_party_username) && verifiedBuyerIds.has(c.id))).map(c => {
     // Older imports may have marked a time-proximity guess as confirmed.
     const direct = links.filter((l: any) => l.conversation_id === c.id && l.match_method !== 'buyer_recent_unique_order');
     const match = direct.some((l: any) => l.ebay_order_line_id === lineId) ? 'item'
@@ -45,7 +51,7 @@ export async function orderChatContext(db: Db, lineId: string, accountKey: strin
     return { ...c, match };
   }).sort((a,b) => (rank[a.match] - rank[b.match]) || clean(b.latest_message_created_at).localeCompare(clean(a.latest_message_created_at)));
   const exact = chats.filter(c => c.match !== 'buyer');
-  const truncated = buyerChats.length > 100 || itemChats.length > 100 || links.length > 200;
+  const truncated = buyerChats.length > 100 || itemChats.length > 100 || links.length > 200 || buyerLinks.length > 200 || legacyBuyerLinks.length > 200 || ids.length > 202;
   return { ok: true, line, order, account, conversations: chats, preferred_conversation_id: !truncated && exact.length === 1 ? exact[0].id : null, has_more: truncated, start: starts[0] || null };
 }
 

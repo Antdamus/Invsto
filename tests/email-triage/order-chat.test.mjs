@@ -38,6 +38,9 @@ test('two matches require a choice, suggested links do not become exact matches'
 test('a historical buyer/time guess never opens as an exact order match',async()=>{
  const f=fixture({ebay_conversations:[chat('old')],ebay_conversation_links:[{seller_account_id:'seller',conversation_id:'old',ebay_order_id:'order',status:'confirmed',match_method:'buyer_recent_unique_order'}]});const r=await f.context();assert.equal(r.preferred_conversation_id,null);assert.equal(r.conversations[0].match,'buyer');
 });
+test('legacy verified participant links find a chat with no main username, never override a conflicting username',async()=>{
+ const f=fixture({ebay_conversations:[chat('legacy',{other_party_username:null,reference_id:'287123456789'}),chat('conflict',{other_party_username:'someone_else',reference_id:'287123456789'})],ebay_conversation_links:['legacy','conflict'].map(id=>({seller_account_id:'seller',conversation_id:id,link_type:'buyer_username',buyer_username:'BUYER_ONE',matched_value:'BUYER_ONE',status:'confirmed',match_method:'message_participant'}))});const r=await f.context();assert.equal(r.preferred_conversation_id,'legacy');assert.deepEqual(Array.from(r.conversations,c=>c.id),['legacy']);assert.equal(f.writes.length,0);
+});
 test('missing buyer, nonexistent line, and wrong seller account fail closed',async()=>{
  const f=fixture();f.tables.ebay_orders[0].buyer_username='';await assert.rejects(f.context(),{code:'order_buyer_missing'});f.tables.ebay_orders[0].buyer_username='buyer';f.tables.ebay_seller_accounts=[];await assert.rejects(f.context(),{code:'seller_account_unavailable'});f.tables.ebay_order_lines=[];await assert.rejects(f.context(),{code:'order_line_not_found'});assert.equal(f.c.calls.length,0);
 });
