@@ -2,7 +2,7 @@ const EBAY_CLIENT_ID = (Deno.env.get("EBAY_CLIENT_ID") ?? "").trim();
 const EBAY_CLIENT_SECRET = (Deno.env.get("EBAY_CLIENT_SECRET") ?? "").trim();
 const EBAY_OAUTH_RUNAME = (Deno.env.get("EBAY_OAUTH_RUNAME") ?? "").trim();
 const EBAY_ENV = (Deno.env.get("EBAY_ENV") ?? "production").trim().toLowerCase();
-const EBAY_OAUTH_SCOPES = (Deno.env.get("EBAY_OAUTH_SCOPES") ??
+const CONFIGURED_OAUTH_SCOPES = (Deno.env.get("EBAY_OAUTH_SCOPES") ??
   [
     "https://api.ebay.com/oauth/api_scope",
     "https://api.ebay.com/oauth/api_scope/sell.inventory",
@@ -13,6 +13,12 @@ const EBAY_OAUTH_SCOPES = (Deno.env.get("EBAY_OAUTH_SCOPES") ??
     "https://api.ebay.com/oauth/api_scope/commerce.message",
     "https://api.ebay.com/oauth/api_scope/commerce.notification.subscription",
   ].join(" ")).trim();
+// Keep existing scopes, including custom deployment scopes, when reconnecting.
+// The payment-dispute feed requires a new seller consent for this scope.
+const EBAY_OAUTH_SCOPES = [...new Set([
+  ...CONFIGURED_OAUTH_SCOPES.split(/\s+/).filter(Boolean),
+  "https://api.ebay.com/oauth/api_scope/sell.payment.dispute",
+])].join(" ");
 
 const EBAY_API_BASE = EBAY_ENV === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
 const EBAY_AUTH_BASE = EBAY_ENV === "sandbox" ? "https://auth.sandbox.ebay.com" : "https://auth.ebay.com";
@@ -112,7 +118,7 @@ Deno.serve(async (req) => {
       <p>This endpoint receives eBay OAuth authorization codes.</p>
       <p>Use this as the eBay Auth accepted URL:</p>
       <code>https://byhytmarmigalvawkedi.functions.supabase.co/ebay-oauth-callback</code>
-      ${consentUrl ? `<p>Use this link to reconnect eBay with inventory, account policy, messaging, and notification subscription access:</p><p><a href="${escapeHtml(consentUrl)}">Connect eBay OAuth</a></p><code>${escapeHtml(consentUrl)}</code>` : ""}`);
+      ${consentUrl ? `<p>Reconnect eBay with the existing permissions plus payment-dispute access. Invsto uses the dispute feed to import cases and their updates.</p><p><a href="${escapeHtml(consentUrl)}">Connect eBay OAuth</a></p><code>${escapeHtml(consentUrl)}</code>` : ""}`);
   }
 
   try {
