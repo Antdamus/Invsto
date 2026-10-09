@@ -1,4 +1,8 @@
-# Invsto Live Capture (1.7.1)
+# Invsto Live Capture (1.7.2)
+
+## Current payment capture (1.7.2)
+
+Current listing payment changes are resent even when a status appeared earlier. A current Paid card recovers an earlier failed payment. Cards without Paid remain excluded. Visible listing payment snapshots refresh every 30 seconds while capture runs. The server ignores older snapshots.
 
 ## Receiver recovery (1.7.1)
 

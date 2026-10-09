@@ -297,7 +297,7 @@ test('worker binds bag requests to their eBay event and does not automatically d
   const source=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');let handler,sent=[],focused=[],fail=false;
   const stored={capture:{events:{},health:{},receivers:{8:2,9:1}}};
   const chrome={storage:{local:{get:async()=>structuredClone(stored),set:async v=>Object.assign(stored,v)}},runtime:{id:'extension',onMessage:{addListener:fn=>handler=fn}},alarms:{create(){},onAlarm:{addListener(){}}},tabs:{update:async(id)=>focused.push(id),sendMessage:async(id,message)=>{sent.push({id,message});if(fail)throw Error('Closed');return {ok:true,printer:{name:'Show printer'}};}}};
-  vm.runInNewContext(source,{chrome,URL,Date,Promise,Error,Object,Number,String});
+  vm.runInNewContext(source,{chrome,URL,Date,Promise,Error,Object,Number,String,setTimeout,clearTimeout});
   const send=command=>new Promise(resolve=>handler({type:'INVSTO_BAG_LABEL_COMMAND',command},{id:'extension',tab:{id:3,url:'https://www.ebay.com/ebaylive/host/events/EVENT123'}},resolve));
   assert.equal((await send({action:'status',event_id:'WRONG123'})).ok,false);assert.equal(sent.length,0);
   assert.equal((await send({action:'configure',event_id:'EVENT123'})).ok,true);assert.deepEqual(focused,[8,3]);

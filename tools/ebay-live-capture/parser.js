@@ -38,9 +38,9 @@
       const statuses = [text(part(tile, 'statusPill')), text(part(tile, 'statusText'))].filter(Boolean);
       const kinds = statuses.map(status).filter(k => k !== 'unknown');
       const distinct = [...new Set(kinds)];
-      if (distinct.length && ((buyer && amount !== null) || distinct.some(k=>k==='failed'||k==='cancelled'))) {
+      if (amount !== null || distinct.some(k=>k==='failed'||k==='cancelled')) {
         const kind = distinct.length === 1 ? distinct[0] : 'unknown';
-        events.push({key:key(['listing',listing_id,buyer,amount,kind]),source:'listing',kind,listing_id,title,ordinal,buyer,amount,currency:'USD',observed_at,evidence:statuses.join(' / ')});
+        events.push({key:key(['listing',listing_id,buyer,amount,kind]),source:'listing',kind,payment_snapshot:true,listing_id,title,ordinal,buyer,amount,currency:'USD',observed_at,evidence:statuses.join(' / ')});
       }
     }
     const panel = doc.querySelector('#activity-panel');

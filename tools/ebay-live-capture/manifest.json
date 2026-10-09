@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Invsto Live Capture",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "Capture eBay Live sales and print saved bag labels from Stream Manager.",
   "permissions": ["storage", "alarms"],
   "background": {"service_worker": "worker.js"},

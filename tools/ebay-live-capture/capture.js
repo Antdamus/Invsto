@@ -29,7 +29,7 @@
   box.style.cssText='position:fixed;bottom:12px;left:12px;z-index:2147483647;background:#18251f;color:white;border:1px solid #98ba8b;border-radius:12px;padding:12px;max-width:330px;font:14px/1.4 system-ui;box-shadow:0 3px 15px #0008';
   const button=document.createElement('button');button.textContent='Start Invsto capture';button.style.cssText='font:inherit;padding:8px 14px;border-radius:8px;cursor:pointer';
   const movement=document.createElement('button');movement.textContent='Keep page still';movement.style.cssText=button.style.cssText;
-  const receiver=document.createElement('a');receiver.textContent='Open Invsto receiver';receiver.href='https://antdamus.github.io/Invsto/live-sales.html?capture=1&v=1.7.1';receiver.target='_blank';receiver.rel='noopener';receiver.style.cssText='display:block;color:#efd69b;margin-top:8px';
+  const receiver=document.createElement('a');receiver.textContent='Open Invsto receiver';receiver.href='https://antdamus.github.io/Invsto/live-sales.html?capture=1&v=1.7.2';receiver.target='_blank';receiver.rel='noopener';receiver.style.cssText='display:block;color:#efd69b;margin-top:8px';
   const note=document.createElement('div');note.textContent='Automatic capture checks Activity and Sold. Use a separate tab for uninterrupted capture while editing.';
   const bagPanel=window.InvstoBagLabelPanel?.mount(box);
   (bagPanel?.settings||box).append(button,movement,note,receiver);document.body.append(box);
@@ -44,7 +44,7 @@
   };
   for(const type of ['pointerdown','keydown','wheel','touchstart'])document.addEventListener(type,e=>{if(e.isTrusted&&!box.contains(e.target))lastInteraction=Date.now();},{capture:true,passive:true});
   movement.onclick=()=>{holdMovement=!holdMovement;lastInteraction=0;movement.textContent=holdMovement?'Resume automatic capture':'Keep page still';tick();};
-  let active=false,busy=false,cache={},sent=new Map(),pageAt=0,stopping=false,latestNext=true,endReported=false,stream=null,readingStream=false,history=null,resumePending=true,checkingResume=false;
+  let active=false,busy=false,cache={},sent=new Map(),listingSent=new Map(),pageAt=0,stopping=false,latestNext=true,endReported=false,stream=null,readingStream=false,history=null,resumePending=true,checkingResume=false;
   chrome.runtime.onMessage?.addListener((message,sender,reply)=>{
     if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_CAPTURE_STATUS')reply({ok:message.event_id===event_id&&active});
     if(sender.id===chrome.runtime.id&&message?.type==='INVSTO_STOP_CAPTURE'&&message.event_id===event_id){active=false;resumePending=false;stopping=false;endReported=true;button.textContent='Start Invsto capture';note.textContent='This Invsto show is closed. Capture will not restart it.';reply({ok:true});}
@@ -58,7 +58,7 @@
     try{sessionStorage.removeItem(stopKey);}catch{}
     stream=metadata;history=InvstoLiveParser.createHistoryTracker(crypto.randomUUID());
     const url=new URL(receiver.href);url.searchParams.set('stream',JSON.stringify(stream));receiver.href=url.href;
-    active=true;resumePending=false;sent.clear();stopping=false;button.textContent='Stop Invsto capture';tick();
+    active=true;resumePending=false;sent.clear();listingSent.clear();stopping=false;button.textContent='Stop Invsto capture';tick();
   }
   async function restoreCapture(){
     if(!resumePending||active||readingStream||checkingResume)return;checkingResume=true;
@@ -130,13 +130,15 @@
       const events=[];
       if(active) for(const event of parsed.events) {
         const signature=JSON.stringify([event.listing_id,event.kind,event.buyer,event.amount]);
-        if(sent.get(event.key)!==signature) {if(events.length<100)events.push(event);}
+        const previous=listingSent.get(event.listing_id);
+        const changed=event.source==='listing'?previous?.signature!==signature||Date.now()-previous.at>=30000:sent.get(event.key)!==signature;
+        if(changed && events.length<100)events.push(event);
       }
       const result=await chrome.runtime.sendMessage({type:'INVSTO_CAPTURE',event_id,events,health:{observed_at:new Date().toISOString(),ready,running:active,mode:working?'working':'automatic',broadcast_ended:parsed.broadcastEnded,message:reason,...(stream?{stream}:{}),...(recovery?{recovery}:{}),...(diagnostics?{diagnostics}:{})}});
       if(result?.closed){active=false;resumePending=false;stopping=false;endReported=true;button.textContent='Start Invsto capture';note.textContent='This Invsto show is closed. Capture stopped.';return;}
       if(result?.ok&&parsed.broadcastEnded)endReported=true;
       if(!active&&result?.ok)stopping=false;
-      if(result?.ok) for(const e of events) sent.set(e.key,JSON.stringify([e.listing_id,e.kind,e.buyer,e.amount]));
+      if(result?.ok) for(const e of events){const signature=JSON.stringify([e.listing_id,e.kind,e.buyer,e.amount]);sent.set(e.key,signature);if(e.source==='listing')listingSent.set(e.listing_id,{signature,at:Date.now()});}
       const statusText=reason+' · '+(result?.status||result?.error||'Waiting for receiver');
       if(note.textContent!==statusText)note.textContent=statusText;
       // The Activity feed is virtualized. Sweep it so failures below the fold are read too.
