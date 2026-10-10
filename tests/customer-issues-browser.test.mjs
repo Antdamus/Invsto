@@ -154,8 +154,8 @@ for(const width of [390,1366])test(`quick case review ${width}px: global sort, c
  await page.getByRole('combobox',{name:'Sort by',exact:true}).selectOption('value_highest');await expect(page.locator('.issue-card').first()).toContainText('buyer.35');
  await page.getByRole('button',{name:'Returns 12',exact:true}).click();await expect(page.getByRole('combobox',{name:'Sort by',exact:true})).toHaveValue('value_highest');await expect(page.locator('.issue-card').first()).toContainText('buyer.33');
  await page.getByRole('combobox',{name:'Sort by',exact:true}).selectOption('newest');await page.locator('.issue-card').first().click();
- await expect(page.locator('.issue-chat-message')).toHaveCount(3);await expect(page.locator('.issue-chat-message').first()).toContainText('The clasp needs checking');
- await page.getByRole('button',{name:'Show older messages (6 more)'}).click();await expect(page.locator('.issue-chat-message')).toHaveCount(9);
+ await expect(page.locator('.issue-chat-message')).toHaveCount(5);await expect(page.locator('.issue-chat-message').first()).toContainText('The clasp needs checking');
+ await page.getByRole('button',{name:'Show older messages (4 more)'}).click();await expect(page.locator('.issue-chat-message')).toHaveCount(9);
  assert.ok(await page.locator('#issues-detail').evaluate(e=>e.scrollWidth<=e.clientWidth+1));
 });
 

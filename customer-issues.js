@@ -19,18 +19,16 @@
    item_value:lines.length&&currencies.size===1&&lines.every(l=>Number(l.sold_for)>0)?lines.reduce((sum,l)=>sum+Number(l.sold_for)*Number(l.quantity),0):null};
  }
  function cardFacts(c){return `<div class="issue-card-facts"><div><small>${c.linked_line_count>1?'Linked items value':'Item value'}</small><strong>${escape(money(c))}</strong></div><div><small>Order placed</small><span>${escape(c.order_placed_at?new Date(c.order_placed_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'Not provided')}</span></div></div><div class="issue-card-opened">Case opened ${escape(date(c.opened_at))}</div>`;}
- function conversationRows(data){
-  return [...(data.case_messages||[]).map(m=>({...m,channel:'eBay case',when:m.sent_at})),...(data.buyer_messages||[]).map(m=>({...m,channel:'Buyer chat',when:m.created_at_ebay}))]
-   .filter(m=>m.direction!=='internal'&&(!m.message_status||['sent','imported'].includes(m.message_status)))
-   .sort((a,b)=>(Date.parse(b.when)||0)-(Date.parse(a.when)||0));
- }
+ function conversationRows(data){return root.OGIssueEvidence.conversation(data).map(m=>({...m,when:m.sent_at}));}
  function renderConversation(){
   const target=$('issue-conversation');if(!target||!detail?.originalEvidence)return;
-  const data=detail.originalEvidence,messages=conversationRows(data),limit=detail.conversationLimit||3;
-  const truncated=(data.case_messages||[]).length>500||(data.buyer_messages||[]).length>500;
-  target.innerHTML=`<div class="issue-conversation-heading"><h3>Conversation <span>${messages.length}${truncated?'+':''}</span></h3><small>Latest first</small></div><p class="issue-subtitle">Messages linked to this case or its original order/item.</p>`+
-   (messages.length?messages.slice(0,limit).map(m=>`<article class="issue-chat-message ${m.direction==='outbound'?'is-outbound':''}"><header><b>${escape(m.direction==='outbound'?'Our reply':m.sender_username||detail.c.buyer_username||'Buyer')}</b><small>${escape(m.channel)} · ${escape(date(m.when))}</small></header><p>${escape(m.message_body||'Message has no saved text. Open Buyer chat to review attachments.')}</p></article>`).join(''):'<p class="issue-subtitle">No linked conversation has been saved yet. Use Buyer chat or Open eBay case to check for other messages.</p>')+
-   (messages.length>limit?`<button type="button" class="secondary-btn" data-more-messages>Show older messages (${messages.length-limit} more)</button>`:'')+
+  const data=detail.originalEvidence,messages=conversationRows(data),limit=detail.conversationLimit||5;
+  const system=messages.filter(m=>m.provider_actor==='SYSTEM'),visible=messages.filter(m=>m.provider_actor!=='SYSTEM');
+  const truncated=(data.case_messages||[]).length>500||(data.buyer_messages||[]).length>500||(data.case_history||[]).length>500;
+  target.innerHTML=`<div class="issue-conversation-heading"><h3>Conversation <span>${visible.length}${truncated?'+':''}</span></h3><small>Latest first</small></div><p class="issue-subtitle">Messages linked to this case or its original order/item.</p>`+
+   (visible.length?visible.slice(0,limit).map(m=>`<article class="issue-chat-message ${m.entry_type==='event'?'is-event':m.direction==='outbound'?'is-outbound':''}"><header><b>${escape(m.entry_type==='event'?'Case update':m.sender_username||(m.direction==='outbound'?'Our reply':detail.c.buyer_username||'Buyer'))}</b><small>${escape(m.channel)} · ${escape(date(m.when))}</small></header><p>${escape(m.message_body||'Message has no saved text. Open Buyer chat to review attachments.')}</p></article>`).join(''):'<p class="issue-subtitle">No linked conversation has been saved yet. Use Buyer chat or Open eBay case to check for other messages.</p>')+
+   (visible.length>limit?`<button type="button" class="secondary-btn" data-more-messages>Show older messages (${visible.length-limit} more)</button>`:'')+
+   (system.length?`<details class="issue-system-history"><summary>eBay system activity (${system.length})</summary>${system.map(m=>`<div class="issue-chat-message is-event"><small>${escape(date(m.when))}</small><p>${escape(m.message_body)}</p></div>`).join('')}</details>`:'')+
    (truncated?'<p class="issue-subtitle">More history may be available in Buyer chat or the eBay case.</p>':'');
  }
 
@@ -141,9 +139,13 @@
   if(!detail||detail.c.id!==selected)return;
   const {c,tasks,items,lines,events}=detail,summary=rows.find(r=>r.id===c.id)||{...c,...lineFacts(lines),open_tasks:tasks.filter(t=>!finish.has(t.status)).length};
   const primary={...(tasks.find(t=>!finish.has(t.status))||{id:'',metadata:c.raw_payload}),order_line_ids:lines.map(l=>l.id),ebay_return_cases:c};
+  const provider=root.OGIssueEvidence.providerContext(c),overrides={};
+  if(provider.buyerComment)overrides.buyerComment=provider.buyerComment;
+  if(provider.requestAmount)overrides.requestAmount=provider.requestAmount;
+  primary.ebay_return_cases={...c,raw_payload:{...c.raw_payload,...overrides}};
   const receipt=ctx.renderReceipt(primary),complaint=ctx.renderComplaint(primary,{compact:true});
   const url=caseHref(c),remaining=items.some(i=>i.received_quantity<i.expected_quantity)||!items.length;
-  const reason=/^(CLOSED|OPEN|WAITING_.*)$/i.test(c.return_reason||'')?'No customer reason captured':nice(c.return_reason);
+  const reason=c.source_lane==='inquiry'?'Item not received':/^(CLOSED|OPEN|WAITING_.*)$/i.test(c.return_reason||'')?'No customer reason captured':nice(c.return_reason);
   $('issues-detail').innerHTML=`<div class="issue-detail-bar"><button type="button" class="secondary-btn issue-back" data-close-case>← Cases</button><span>${escape(c.ebay_return_id?`Case ${c.ebay_return_id}`:'Internal return')}</span>${c.ebay_return_id?'<button type="button" class="secondary-btn" data-sync-case>Refresh case</button>':''}</div>
    <div class="issue-detail-content"><span class="issue-kind is-${kind(c)}">${kind(c)==='dispute'?(c.source_lane==='payment_dispute'?'Payment dispute':'Escalated eBay case'):nice(kind(c))}</span><h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p class="issue-subtitle">${escape(c.item_title||summary.item_title||lines[0]?.item_title||'Review the linked order items below')}</p>
    <section class="issue-original-order"><div><small>ORIGINAL ORDER</small><strong>${escape(c.order_number||'Not identified yet')}</strong><span>${c.order_id?`${lines.length} linked item${lines.length===1?'':'s'} · Saved in Invsto`:c.order_number?'Not found in saved orders yet':'Match the original order to see its evidence'}</span></div>${c.order_number?`<a class="secondary-btn" href="ebay-order-history.html?orderHistorySearch=${encodeURIComponent(c.order_number)}&historyAllDates=true">Open full order ↗</a>`:''}</section>
@@ -162,7 +164,7 @@
     ${items.map(i=>`<div class="issue-line"><strong>${escape(i.item_title)}</strong><p>Received ${i.received_quantity} of ${i.expected_quantity} · Restocked ${i.restocked_quantity||0} · ${escape(nice(i.disposition))}</p>${i.received_quantity>i.restocked_quantity&&!['closed','cancelled'].includes(c.status)?`<button class="secondary-btn" data-inspect="${i.id}">Inspect received item</button>`:''}</div>`).join('')}
     <div id="issue-original-evidence"><p class="issue-subtitle">Loading saved order evidence…</p></div><h3 style="margin-top:20px">Return evidence</h3><div id="issue-return-evidence" class="issues-evidence-grid"></div></details>
    <details class="issue-detail-section issue-evidence-package"><summary>Evidence package</summary><p class="issue-subtitle">Gather item photos, packing evidence, tracking, certificates and messages. Choose what belongs in the download.</p><button class="secondary-btn" data-prepare-evidence>Prepare evidence</button><div id="issue-evidence-package"></div></details>
-   <details class="issue-detail-section"><summary>Money &amp; payment</summary><p>Case amount: <strong>${escape(c.raw_payload?.apiExtractedDetails?.requestAmount||c.raw_payload?.requestAmount||c.raw_payload?.refundText||'Not provided by eBay')}</strong></p>${ctx.financeBadge?.(primary)||''}<p class="issue-subtitle">Payment information updates separately in the background. The case amount is not confirmation that a refund was issued. Check eBay before making a financial decision.</p></details>
+   <details class="issue-detail-section"><summary>Money &amp; payment</summary><p>Case amount: <strong>${escape(provider.requestAmount||c.raw_payload?.apiExtractedDetails?.requestAmount||c.raw_payload?.requestAmount||c.raw_payload?.refundText||'Not provided by eBay')}</strong></p>${ctx.financeBadge?.(primary)||''}<p class="issue-subtitle">Payment information updates separately in the background. The case amount is not confirmation that a refund was issued. Check eBay before making a financial decision.</p></details>
    <details class="issue-detail-section"><summary>Activity &amp; internal updates</summary>${events.length?events.map(e=>`<div class="issue-update"><small>${escape(date(e.created_at))} · ${escape(e.signed_by_email||'eBay / system')}</small><p>${escape(e.notes||nice(e.action))}</p></div>`).join(''):'<p class="issue-subtitle">No recorded updates yet.</p>'}${detail.moreEvents?'<p class="issue-subtitle">Showing the latest 50 events from each source. Open Full task for its complete work history.</p>':''}</details>
    </div>`;
   ctx.bindReceipt($('issues-detail'));ctx.hydrateReceipts().catch(()=>{});
@@ -339,7 +341,7 @@
    else if(b.dataset.inspect)inspectionForm(b.dataset.inspect);
    else if(b.hasAttribute('data-media'))media(Number(b.dataset.media));
    else if(b.hasAttribute('data-original-media'))originalMedia(Number(b.dataset.originalMedia));
-   else if(b.hasAttribute('data-more-messages')){detail.conversationLimit=(detail.conversationLimit||3)+12;renderConversation();}
+   else if(b.hasAttribute('data-more-messages')){detail.conversationLimit=(detail.conversationLimit||5)+12;renderConversation();}
    else if(b.hasAttribute('data-more-original')){detail.originalLimits[b.dataset.moreOriginal]=(detail.originalLimits[b.dataset.moreOriginal]||6)+6;renderOriginalEvidence(version);}
    else if(b.hasAttribute('data-cancel-form'))$('issue-action-form')?.remove();
    else if(b.hasAttribute('data-match-order'))matchForm();

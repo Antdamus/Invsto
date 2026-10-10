@@ -18,6 +18,34 @@
    const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}return bytes;
   }finally{clearTimeout(timeout);}
  }
+ // The same normalized conversation powers the case view and evidence export.
+ function conversation(data={}){
+  const history=(Array.isArray(data.case_history)?data.case_history:[]).map((e,index)=>{
+   const actor=String(e.actor||'UNKNOWN').toUpperCase(),body=typeof e.description==='string'?e.description.trim():'',action=typeof e.action==='string'?e.action.trim():'';
+   return {id:`case-history-${index}`,direction:actor==='SELLER'?'outbound':actor==='BUYER'?'inbound':'system',
+    sender_username:actor==='SELLER'?'Our reply':actor==='BUYER'?(data.case?.buyer_username||'Buyer'):actor==='CSR'?'eBay support':actor==='SYSTEM'?'eBay system':'eBay · unknown author',
+    message_body:body||action,sent_at:typeof e.date==='string'?e.date:e.date?.value,channel:'eBay case history',message_status:'imported',entry_type:body?'message':'event',event_action:action,provider_actor:actor};
+  }).filter(e=>e.message_body);
+  const all=[...history,...(data.case_messages||[]).map(m=>({...m,channel:'eBay case'})),...(data.buyer_messages||[]).map(m=>({...m,channel:'Buyer chat',sent_at:m.created_at_ebay}))]
+   .filter(m=>m.direction!=='internal'&&(!m.message_status||['sent','imported'].includes(m.message_status)));
+  const seen=new Map();
+  return all.filter(m=>{
+   // Only merge copies across sources; repeated real messages retain their dates.
+   const body=String(m.message_body||'').trim().replace(/\s+/g,' '),time=Date.parse(m.sent_at),key=JSON.stringify([m.direction,body,Number.isNaN(time)?m.sent_at||null:time]);
+   const prior=seen.get(key);if(prior&&prior!==m.channel)return false;seen.set(key,m.channel);return true;
+  }).sort((a,b)=>(Date.parse(b.sent_at)||0)-(Date.parse(a.sent_at)||0));
+ }
+ function providerContext(c={}){
+  const d=c.raw_payload?.ebayDetail||{},field=c.source_lane==='inquiry'?'inquiryHistoryDetails':c.source_lane==='case'?'caseHistoryDetails':null;
+  const id=c.source_lane==='inquiry'?d.inquiryId:d.caseId;
+  if(!field||String(id||'')!==String(c.ebay_return_id||'')||!id)return {};
+  const history=d[field]||{},amount=d.claimAmount,value=amount?.value;
+  let requestAmount='';
+  if(value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value))&&/^[A-Z]{3}$/.test(amount.currency||'')){
+   try{requestAmount=new Intl.NumberFormat(undefined,{style:'currency',currency:amount.currency}).format(Number(value));}catch{}
+  }
+  return {buyerComment:typeof history.additionalInfo==='string'?history.additionalInfo.trim():'',requestAmount};
+ }
  function collect(data,receipts=[],returnEvents=[]){
   const files=[],seen=new Set();
   const add=(rows,group)=>{for(const p of rows||[]){const bucket=p.bucket||p.storage_bucket,path=p.path||p.storage_path;
@@ -57,16 +85,16 @@
   <h2>Tracking</h2>${[...(data.orders||[]).map(o=>({code:o.tracking_number,status:'Order tracking'})),...(data.packages||[]).map(p=>({code:p.tracking_code,status:p.status}))].filter(p=>p.code).map(p=>`<p>${esc(p.code)} · ${esc(p.status)}</p>`).join('')||'<p>No saved tracking.</p>'}
   <h2>Certificates</h2>${(data.certificates||[]).map(c=>`<p>Report ${esc(c.report_number)} · Serial ${esc(c.watch_serial)}${safe(c.certificate_url)?` · <a href="${esc(safe(c.certificate_url))}">Certificate link</a>`:''}</p>`).join('')||'<p>No saved certificates.</p>'}
   <h2>Selected files</h2>${files.map(f=>`<article><b>${esc(groups[f.group])}</b> · ${esc(f.label)}<br><small>${esc(f.created_at||'Capture date unavailable')}</small><p><a href="${esc(f.filename)}">Open original file</a></p>${/\.(png|jpe?g|webp|gif)$/i.test(f.filename)?`<img src="${esc(f.filename)}" alt="${esc(f.label)}">`:''}</article>`).join('')||'<p>No files selected.</p>'}
-  <h2>Selected messages</h2>${messages.map(m=>`<article><small>${esc(date(m.sent_at||m.created_at_ebay))} · ${esc(m.sender_username||m.direction)}</small><pre>${esc(m.message_body||'')}</pre></article>`).join('')||'<p>No messages selected.</p>'}</html>`;
+  <h2>Selected messages</h2>${messages.map(m=>`<article><small>${esc(date(m.sent_at||m.created_at_ebay))} · ${esc(m.sender_username||(m.direction==='outbound'?'Our reply':m.direction==='inbound'?'Buyer':m.direction))}</small><pre>${esc(m.message_body||'')}</pre></article>`).join('')||'<p>No messages selected.</p>'}</html>`;
  }
  async function open({db,caseId,target,sign,receipts=[],returnEvents=[],data:loadedData}){
   if(target.dataset.loading==='true')return;target.dataset.loading='true';target.innerHTML='<p role="status">Gathering saved evidence…</p>';
   try{
    const result=loadedData?{data:loadedData}:await db.rpc('customer_issue_evidence',{_case_id:caseId});if(result.error)throw result.error;if(!target.isConnected)return;
-   const data=result.data,files=collect(data,receipts,returnEvents),messages=[...(data.case_messages||[]),...(data.buyer_messages||[])];
-   const truncated=(data.case_messages||[]).length>500||(data.buyer_messages||[]).length>500;
+   const data=result.data,files=collect(data,receipts,returnEvents),messages=conversation(data);
+   const truncated=(data.case_messages||[]).length>500||(data.buyer_messages||[]).length>500||(data.case_history||[]).length>500;
    target.innerHTML=`<p class="issue-subtitle">Choose the files and messages to include. The ZIP contains original files and a printable report.</p>${Object.entries(groups).map(([key,label])=>{const matches=files.map((f,i)=>({...f,i})).filter(f=>f.group===key);return `<section class="issue-evidence-group"><h3>${label} <small>${matches.length}</small></h3>${matches.length?matches.map(f=>`<label class="issue-evidence-option"><input type="checkbox" data-evidence-file="${f.i}" ${f.video?'':'checked'}><span>${esc(f.label)}${f.video?' · Video':''}<small>${esc(date(f.created_at))}</small></span><button type="button" class="secondary-btn" data-evidence-preview="${f.i}">View</button></label>`).join(''):'<p class="issue-subtitle">Not saved for this case.</p>'}</section>`;}).join('')}
-    <details class="issue-evidence-group"><summary>Messages · ${messages.length} available</summary><p class="issue-subtitle">Only messages linked to this case or its exact order/item are listed. Select the relevant messages.</p>${truncated?'<p class="issue-form-error">Showing a limited message history. Use Buyer chat for older messages.</p>':''}${messages.map((m,i)=>`<label class="issue-evidence-message"><input type="checkbox" data-evidence-message="${i}"><span><small>${esc(date(m.sent_at||m.created_at_ebay))} · ${esc(m.sender_username||m.direction)}</small><span>${esc(m.message_body||'')}</span></span></label>`).join('')}</details>
+    <details class="issue-evidence-group"><summary>Conversation &amp; case activity · ${messages.length} available</summary><p class="issue-subtitle">Only messages linked to this case or its exact order/item are listed. Select the relevant messages.</p>${truncated?'<p class="issue-form-error">Showing a limited message history. Use Buyer chat for older messages.</p>':''}${messages.map((m,i)=>`<label class="issue-evidence-message"><input type="checkbox" data-evidence-message="${i}"><span><small>${esc(date(m.sent_at||m.created_at_ebay))} · ${esc(m.sender_username||(m.direction==='outbound'?'Our reply':m.direction==='inbound'?'Buyer':m.direction))}</small><span>${esc(m.message_body||'')}</span></span></label>`).join('')}</details>
     <p class="issue-subtitle">Tracking and saved certificate links are included in the report. Internal staff notes are excluded.</p><div class="issue-actions"><button type="button" class="primary-btn" data-evidence-download>Download evidence ZIP</button></div><p role="status" data-evidence-status></p><div data-evidence-preview-panel></div>`;
    target.dataset.ready='true';
    target.onclick=async event=>{
@@ -95,5 +123,5 @@
   }catch(error){target.innerHTML=`<p class="issue-form-error">${esc(error.message||'Could not gather evidence. Retry Prepare evidence.')}</p>`;}
   finally{delete target.dataset.loading;}
  }
- root.OGIssueEvidence={open,collect,testing:{collect,zip,report,crc}};
+ root.OGIssueEvidence={open,collect,conversation,providerContext,testing:{collect,zip,report,crc,conversation,providerContext}};
 })(globalThis);

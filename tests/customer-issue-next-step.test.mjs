@@ -3,6 +3,7 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import {test} from 'node:test';
 const sandbox={};
+vm.runInNewContext(await readFile(new URL('../customer-issue-evidence.js',import.meta.url),'utf8'),sandbox);
 vm.runInNewContext(await readFile(new URL('../customer-issues.js',import.meta.url),'utf8'),sandbox);
 const {nextText}=sandbox.OGCustomerIssues.testing;
 const payment={source_lane:'payment_dispute',issue_kind:'dispute',order_id:'order',status:'open',next_user:'admin',open_tasks:1,ebay_action:'2026-10-14T06:59:59.000Z'};

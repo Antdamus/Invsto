@@ -63,6 +63,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261009062000_return_barcode_no_restock.sql'));
  await db.exec(await sqlFile('20261009065000_customer_issue_card_sorting.sql'));
  await db.exec(await sqlFile('20261009066000_customer_issue_direct_close.sql'));
+ await db.exec(await sqlFile('20261009067000_customer_issue_saved_conversation.sql'));
 
 });
 after(async()=>db?.close());
@@ -562,4 +563,34 @@ test('direct close does not recreate follow-ups on terminal refresh; a new provi
  assert.equal(await scalar("select count(*)::int v from ebay_return_tasks where status not in ('resolved','cancelled')"),0);
  await db.exec("update ebay_return_cases set status='open',closed_at=null,ebay_status='SELLER_ACTION_REQUIRED',ebay_action='Respond to buyer',synced_at=now()");
  assert.ok(await scalar("select count(*)::int v from ebay_return_tasks where status not in ('resolved','cancelled')")>0);
+});
+
+
+test('case evidence projects saved inquiry history for existing and future syncs without rewriting tasks',async()=>{
+ const history=[{actor:'BUYER',action:'Case created',description:'Original complaint',date:{value:'2026-10-01T03:16:26Z'}},
+ {actor:'SELLER',action:'Seller replied',description:'Mailbox reply',date:{value:'2026-10-04T17:57:18Z'}},
+ {actor:'SELLER',action:'Tracking provided',date:{value:'2026-10-04T18:52:52Z'}},
+ {actor:'SYSTEM',action:'Reminder',date:{value:'2026-10-03T07:00:54Z'}}];
+ const payload={ebayDetail:{inquiryId:'12345',inquiryHistoryDetails:{history},privateToken:'must not project',caseHistoryDetails:{history:[{description:'Unrelated case history'}]}}};
+ await db.query("update ebay_return_cases set source_lane='inquiry',raw_payload=$1",[JSON.stringify(payload)]);
+ let result=await scalar('select customer_issue_evidence($1) v',[id(100)]);
+ assert.equal(result.case_history.length,4);assert.equal(result.case_history[0].action,'Tracking provided');assert.equal(result.case_history[1].description,'Mailbox reply');
+ assert.ok(!JSON.stringify(result).includes('must not project'));assert.ok(!JSON.stringify(result).includes('Unrelated case history'));
+ payload.ebayDetail.inquiryHistoryDetails.history.push({actor:'BUYER',description:'Latest response',date:{value:'2026-10-06T12:00:00Z'}});
+ await db.query('update ebay_return_cases set raw_payload=$1',[JSON.stringify(payload)]);
+ result=await scalar('select customer_issue_evidence($1) v',[id(100)]);assert.equal(result.case_history[0].description,'Latest response');
+ assert.equal(await scalar('select count(*)::int v from ebay_return_tasks'),0);assert.equal(await stock(),0);
+});
+
+test('escalated case history is scoped to provider identity, with malformed and missing history safe',async()=>{
+ for(const history of [null,{},'bad',[]]){
+  await db.query("update ebay_return_cases set source_lane='case',raw_payload=$1",[JSON.stringify({ebayDetail:{caseId:'12345',caseHistoryDetails:{history}}})]);
+  assert.equal((await scalar('select customer_issue_evidence($1) v',[id(100)])).case_history.length,0);
+ }
+ const payload={ebayDetail:{caseId:'12345',caseHistoryDetails:{history:[{actor:'CSR',description:'Support reply',date:{value:'2026-10-05T12:00:00Z'}}]}}};
+ await db.query('update ebay_return_cases set raw_payload=$1',[JSON.stringify(payload)]);
+ assert.equal((await scalar('select customer_issue_evidence($1) v',[id(100)])).case_history[0].actor,'CSR');
+ payload.ebayDetail.caseId='different';await db.query('update ebay_return_cases set raw_payload=$1',[JSON.stringify(payload)]);
+ assert.equal((await scalar('select customer_issue_evidence($1) v',[id(100)])).case_history.length,0);
+ await db.exec("select set_config('test.access','no',false)");await assert.rejects(scalar('select customer_issue_evidence($1) v',[id(100)]),/access required/);
 });
