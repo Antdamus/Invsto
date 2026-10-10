@@ -7,6 +7,26 @@ vm.runInNewContext(await readFile(new URL('../customer-issue-evidence.js',import
 vm.runInNewContext(await readFile(new URL('../customer-issues.js',import.meta.url),'utf8'),sandbox);
 const {nextText}=sandbox.OGCustomerIssues.testing;
 const payment={source_lane:'payment_dispute',issue_kind:'dispute',order_id:'order',status:'open',next_user:'admin',open_tasks:1,ebay_action:'2026-10-14T06:59:59.000Z'};
+test('return badges distinguish provider delivery from confirmed local receipt and preserve closed-case actions',()=>{
+ const {returnBadge,cardStatus}=sandbox.OGCustomerIssues.testing,c={...payment,source_lane:'return',issue_kind:'return',ebay_status:'ITEM_DELIVERED',return_stage:'delivered'};
+ assert.ok(returnBadge(c).includes('Delivered · eBay'));assert.ok(!returnBadge(c).includes('Received'));
+ assert.equal(nextText(c),'Confirm receipt and inspect the returned items');
+ assert.equal(nextText({...c,status:'closed',open_tasks:0}),'Closed · saved in History');
+ assert.ok(returnBadge({...c,return_stage:'received'}).includes('Received in Invsto'));
+ assert.ok(returnBadge({...c,return_stage:'in_transit'}).includes('In transit'));
+ assert.ok(returnBadge({...c,return_stage:'awaiting_shipment'}).includes('Awaiting buyer shipment'));
+ assert.ok(returnBadge({...c,return_stage:'<img>'}).includes('Shipment not reported'));
+ assert.equal(returnBadge({...c,issue_kind:'dispute'}),'');
+ assert.ok(cardStatus({...c,ebay_due_at:'2026-10-11T10:00:00Z',overdue:true}).includes('eBay deadline overdue'),'shipping badge does not suppress an actionable deadline');
+});
+test('customer names stay distinct from usernames; return addresses retain recipient, unit and postal code safely',()=>{
+ const {customerContact}=sandbox.OGCustomerIssues.testing,c={issue_kind:'return',order_id:'order',customer_name:'Alex <Taylor>',shipping_name:'Robin Taylor',shipping_address:{line1:'123 Example Lane',line2:'Apt 4 & 5',city:'Boston',state:'MA',postal_code:'02108',country:'US'}};
+ const html=customerContact(c);assert.ok(html.includes('Alex &lt;Taylor&gt;'));assert.ok(html.includes('Recipient: Robin Taylor'));assert.ok(html.includes('Apt 4 &amp; 5'));assert.ok(html.includes('Boston, MA 02108'));assert.ok(html.includes('Original shipping address'));
+ const same=customerContact({...c,shipping_name:c.customer_name});assert.ok(!same.includes('Recipient:'));
+ for(const issue_kind of ['request','dispute']){const html=customerContact({...c,issue_kind});assert.ok(html.includes('Alex &lt;Taylor&gt;'));assert.ok(!html.includes('123 Example Lane'));}
+ const missing=customerContact({issue_kind:'return',order_id:'order',buyer_username:'username-only'});assert.ok(missing.includes('Name not saved'));assert.ok(missing.includes('Address not saved'));assert.ok(!missing.includes('undefined'));
+ assert.ok(customerContact({issue_kind:'return'}).includes('Link the original order'));
+});
 test('payment response deadlines do not become next-step instructions',()=>{
  assert.equal(nextText({...payment,ebay_status:'ACTION_NEEDED'}),'Respond to the payment dispute');
  assert.equal(nextText({...payment,ebay_status:'OPEN'}),'Monitor payment-dispute updates');

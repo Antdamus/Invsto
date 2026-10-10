@@ -116,3 +116,19 @@ body[data-page="ebay-returns"] {font-family:system-ui,-apple-system,"Segoe UI",s
 .issue-tag.issue-response-badge{font-weight:700;padding:8px 10px;border:1px solid;line-height:1.5;white-space:normal;text-align:left}
 .issue-response-badge.is-waiting{background:#183a31;border-color:#4a9a7a;color:#b9efd8}
 .issue-response-badge.is-action{background:#442c21;border-color:#cb9257;color:#ffdcad}
+.issue-tag.issue-return-badge{font-weight:700;padding:8px 10px;border:1px solid;line-height:1.5;white-space:normal;text-align:left}
+.issue-return-badge.is-waiting{background:#28332d;border-color:#829985;color:#e0eade}
+.issue-return-badge.is-transit{background:#203541;border-color:#6899b8;color:#c7e9ff}
+.issue-return-badge.is-action{background:#442c21;border-color:#cb9257;color:#ffdcad}
+.issue-return-badge.is-received{background:#183a31;border-color:#4a9a7a;color:#b9efd8}
+.issue-return-badge.is-unknown{background:#252d29;border-color:#69756c;color:#ccd4ce}
+.issues-return-filter{display:flex;align-items:center;gap:12px;margin:14px 0 0;color:var(--issue-muted);font-size:13px}
+.issues-return-filter[hidden]{display:none}
+.issues-return-filter select{min-height:46px;max-width:100%;padding:10px 32px 10px 12px;background:#141d18;color:#f1f4ea;border:1px solid var(--issue-border);border-radius:12px;font-size:14px}
+.issue-return-summary{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:16px 0}.issue-return-summary small{color:var(--issue-muted)}
+@media(max-width:900px){.issues-return-filter{display:grid;gap:6px}.issues-return-filter select{width:100%;min-width:0;font-size:16px;min-height:48px}}
+.issue-customer-name{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;margin:6px 0 10px;line-height:1.45;overflow-wrap:anywhere}
+.issue-customer-name small,.issue-customer-address>small{font-size:11px;color:var(--issue-muted);font-weight:400}
+.issue-customer-name strong{font-size:14px;color:#edf1e9;font-weight:600}
+.issue-customer-address{display:grid;gap:1px;margin:0 0 12px;padding:9px 12px;border-left:2px solid #c4b17770;border-radius:0 8px 8px 0;background:#0c151433;color:#dbe5dc;font-size:13px;line-height:1.5;overflow-wrap:anywhere;text-align:left}
+.issue-customer-address>small{margin-bottom:3px}.issue-address-recipient{font-weight:600}.issue-contact-missing{color:var(--issue-muted)}

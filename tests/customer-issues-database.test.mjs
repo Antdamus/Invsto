@@ -21,7 +21,7 @@ before(async()=>{
  added_by uuid,confirmation_email text,confirmation_method text,confirmed_at timestamptz,last_updated timestamptz,locked_by uuid,locked_at timestamptz);
  create table stock_transactions(id uuid primary key default gen_random_uuid(),item_id uuid,location_id uuid,quantity int,action_type text,confirmed_at timestamptz,user_id uuid,email text,notes text,source_transaction_id uuid,method text,timestamp timestamptz);
  create table metadata(id text primary key,inventory_version text,changed_item_ids text[],updated_at timestamptz);insert into metadata(id) values('inventory');
- create table ebay_orders(id uuid primary key,order_number text,buyer_username text,status text,tracking_number text,label_metadata jsonb,sale_date timestamptz);
+ create table ebay_orders(id uuid primary key,order_number text,buyer_username text,buyer_name text,raw_payload jsonb default '{}',status text,tracking_number text,label_metadata jsonb,sale_date timestamptz);
  create table ebay_order_lines(id uuid primary key,order_id uuid,item_number text,item_title text,quantity int,fulfilled_quantity int,line_status text,internal_item_id uuid,stock_location_row_id uuid,location_id uuid,stock_transaction_id uuid,transaction_id text,sold_for numeric,total_price numeric,raw_payload jsonb default '{}');
  create function task_workflow_reviewer(t jsonb) returns uuid language sql stable as $$select '${id(2)}'::uuid$$;
  revoke all on function task_workflow_reviewer(jsonb) from public,anon,authenticated;
@@ -66,6 +66,8 @@ before(async()=>{
  await db.exec(await sqlFile('20261009067000_customer_issue_saved_conversation.sql'));
  await db.exec(await sqlFile('20261010010000_customer_issue_notes.sql'));
  await db.exec(await sqlFile('20261010020000_customer_issue_response_badges.sql'));
+ await db.exec(await sqlFile('20261010030000_customer_issue_customer_cards.sql'));
+ await db.exec(await sqlFile('20261010040000_customer_issue_return_stages.sql'));
 
 });
 after(async()=>db?.close());
@@ -491,6 +493,52 @@ test('evidence excludes internal messages, voided certificates, removed packagin
 
 
 const listIssues=(sort='newest',view='attention',offset=0,limit=30)=>scalar('select list_customer_issues($1,$2,$3,$4,$5,$6) v',[view,'all','',offset,limit,sort]);
+test('return progress uses current return evidence and never invents transit from a label or replacement',async()=>{
+ const stage=(status='OPEN',raw={},local='open',kind='return')=>scalar('select customer_issue_return_stage($1,$2,$3,$4) v',[kind,local,status,JSON.stringify(raw)]);
+ assert.equal(await stage('READY_FOR_SHIPPING',{returnState:'ITEM_READY_TO_SHIP',returnTrackingNumber:'LABEL-ONLY',returnLifecycleStage:'shipped'}),'awaiting_shipment');
+ assert.equal(await stage('OPEN',{returnTrackingNumber:'LABEL-ONLY',returnLifecycleStage:'shipped'}),'unknown');
+ assert.equal(await stage('RETURN_REQUESTED'),'requested');
+ assert.equal(await stage('ITEM_SHIPPED'),'in_transit');assert.equal(await stage('ITEM_DELIVERED'),'delivered');
+ const raw=deliveryStatus=>({ebayDetail:{returnShipmentInfo:{shipmentTracking:{deliveryStatus,active:true}}}});
+ assert.equal(await stage('CLOSED',raw('DELIVERED')),'delivered','provider closure does not erase shipment evidence');
+ assert.equal(await stage('OPEN',raw('IN_TRANSIT')),'in_transit');assert.equal(await stage('OPEN',raw('CREATED')),'unknown');
+ assert.equal(await stage('OPEN',{ebayDetail:{replacementShipmentInfo:{shipmentTracking:{deliveryStatus:'DELIVERED'}},responseHistory:[{toState:'ITEM_DELIVERED'}]},sellerActionDue:'SELLER_MARK_AS_RECEIVED'}),'unknown');
+ assert.equal(await stage('OPEN',{ebayDetail:{returnShipmentInfo:{shipmentTracking:{deliveryStatus:'DELIVERED',active:false}}}}),'unknown');
+ for(const local of ['received','partially_received','needs_review'])assert.equal(await stage('ITEM_DELIVERED',raw('DELIVERED'),local),local);
+ assert.equal(await stage('ITEM_DELIVERED',raw('DELIVERED'),'open','request'),null);
+});
+test('return filters apply before pagination and update after provider or local receiving changes',async()=>{
+ await db.exec(`insert into ebay_return_cases(id,status,source_lane,issue_kind,ebay_status,opened_at)
+ select gen_random_uuid(),'open','return','return','ITEM_SHIPPED',now()-i*interval '1 minute' from generate_series(1,35) i;
+ update ebay_return_cases set ebay_status='ITEM_DELIVERED',opened_at=now()-interval '1 year' where id='${id(100)}';`);
+ const filtered=(stage,offset=0)=>scalar("select list_customer_issues('return','all','',$1,30,'newest',$2) v",[offset,stage]);
+ let result=await filtered('delivered');assert.equal(result.total,1);assert.equal(result.rows[0].id,id(100));assert.equal(result.rows[0].return_stage,'delivered');assert.equal(result.counts.return,36);
+ result=await filtered('in_transit',30);assert.equal(result.total,35);assert.equal(result.rows.length,5);
+ await db.exec(`update ebay_return_cases set status='received' where id='${id(100)}'`);
+ assert.equal((await filtered('delivered')).total,0);assert.equal((await filtered('received')).total,1);
+ assert.equal((await listIssues()).total,36,'cached six-argument clients remain unfiltered');
+ assert.equal((await scalar("select list_customer_issues('attention','all','',0,30,'newest','delivered') v")).total,36,'return filter does not hide other tabs');
+ await db.exec("select set_config('test.access','no',false)");assert.equal((await filtered('in_transit')).total,0);
+});
+test('customer cards use only their linked order, with name search and return-only shipping fields',async()=>{
+ const payload={order:{fulfillmentStartInstructions:[{shippingStep:{shipTo:{fullName:'Robin Taylor',contactAddress:{addressLine1:'123 Example Lane',addressLine2:'Apt 4',city:'Boston',stateOrProvince:'MA',postalCode:'02108',countryCode:'US'},primaryPhone:{phoneNumber:'PRIVATE'}}}}],buyer:{buyerRegistrationAddress:{fullName:'Other name',contactAddress:{addressLine1:'WRONG REGISTRATION'}}}},returnAddress:{addressLine1:'WRONG SELLER'}};
+ await db.query('update ebay_orders set buyer_name=$1,raw_payload=$2 where id=$3',['Alex Taylor',JSON.stringify(payload),id(10)]);
+ await db.exec(`insert into ebay_orders(id,order_number,buyer_username,buyer_name) values('${id(19)}','other','buyer.one','Wrong unrelated name')`);
+ let row=(await listIssues()).rows[0];assert.equal(row.customer_name,'Alex Taylor');assert.equal(row.shipping_name,'Robin Taylor');assert.equal(row.shipping_address.line2,'Apt 4');assert.equal(row.shipping_address.postal_code,'02108');assert.equal(row.raw_payload,undefined);assert.ok(!JSON.stringify(row).includes('PRIVATE'));assert.ok(!JSON.stringify(row).includes('WRONG'));
+ assert.equal((await scalar("select list_customer_issues('attention','all','alex taylor',0,30,'newest') v")).total,1);
+ await db.exec(`update ebay_return_cases set issue_kind='dispute',source_lane='payment_dispute'`);
+ row=(await listIssues()).rows[0];assert.equal(row.customer_name,'Alex Taylor');assert.equal(row.shipping_address,null);assert.equal(row.shipping_name,null);
+ await db.exec('update ebay_return_cases set order_id=null');row=(await listIssues()).rows[0];assert.equal(row.customer_name,null,'never borrow from another order by username');
+});
+test('contact projection supports CSV and flat API snapshots without mixing registration and shipping addresses',async()=>{
+ const contact=raw=>scalar('select customer_issue_order_contact(null,$1) v',[JSON.stringify(raw)]);
+ let p=await contact({first_row:{'Buyer Name':'  Alex Taylor ','Ship To Name':'Robin Taylor','Ship To Address 1':'10 Sample Street','Ship To Address 2':'Unit 2','Ship To City':'Boston','Ship To State':'MA','Ship To Zip':'02108','Ship To Country':'US','Buyer Address 1':'NOT SHIPPING'}});
+ assert.equal(p.customer_name,'Alex Taylor');assert.equal(p.shipping_name,'Robin Taylor');assert.equal(p.shipping_address.line1,'10 Sample Street');assert.equal(p.shipping_address.postal_code,'02108');
+ p=await contact({fulfillmentStartInstructions:[{shippingStep:{shipTo:{fullName:'Legacy Name',contactAddress:{addressLine1:'12 Legacy Road',city:'London',postalCode:'SW1A 1AA',countryCode:'GB'}}}}]});assert.equal(p.customer_name,'Legacy Name');assert.equal(p.shipping_address.postal_code,'SW1A 1AA');
+ p=await contact({order:{fulfillmentStartInstructions:[{shippingStep:{shipTo:{contactAddress:{addressLine1:'Only this street'}}}}]},first_row:{'Ship To City':'Wrong other city'}});assert.equal(p.shipping_address.line1,'Only this street');assert.equal(p.shipping_address.city,undefined);
+ p=await contact({order:{buyer:{buyerRegistrationAddress:{fullName:'Name only',contactAddress:{addressLine1:'Registration street'}}}}});assert.equal(p.customer_name,'Name only');assert.equal(p.shipping_address,null);
+ p=await contact({order:{fulfillmentStartInstructions:[{shippingStep:{shipTo:{contactAddress:'malformed'}}}]}});assert.equal(p.shipping_address,null);
+});
 test('summary exposes only the matching dispute response and picks up renewed action without sending raw evidence',async()=>{
  await db.exec(`insert into ebay_return_cases(id,source_lane,issue_kind,ebay_return_id,status,ebay_status,raw_payload) values
  ('${id(101)}','payment_dispute','dispute','5010603112','open','OPEN','{"ebayDetail":{"paymentDisputeId":"5010603112","sellerResponse":"SELLER_CONTEST","note":"Private response"}}');`);
