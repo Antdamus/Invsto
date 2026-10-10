@@ -1015,6 +1015,9 @@ async function loadTaskEvidence(task) {
   const entry = {status: "loading", promise: null};
   state.taskEvidenceLoads.set(key, entry);
   entry.promise = Promise.all([
+    loadTaskConversationOrders(task).then(() => {
+      if (generation === state.taskLoadGeneration && state.expandedTaskKeys.has(key)) renderTasks();
+    }),
     hydrateReturnComplaintImages([task]), hydrateReturnMessages([task]),
     hydrateOrderVideoReceiptEvidence([task]),
     hydrateEventPhotoUrls([task, ...getOrderWorkflowChildren(task)]),
@@ -4102,6 +4105,116 @@ function hasEbayConversationTaskContext(task = {}) {
   return Boolean(getEbayConversationTaskContext(task));
 }
 
+function taskConversationOrderTarget(order = {}) {
+  const closed = new Set(["fulfilled", "successful", "success", "completed", "complete", "closed", "cancelled", "canceled", "refunded", "skipped", "shipped", "delivered", "archived"]);
+  const lines = Array.isArray(order.ebay_order_lines) ? order.ebay_order_lines : [];
+  const pending = lines.length
+    ? lines.some(line => !closed.has(String(line.line_status || "").toLowerCase())
+      && !(Number(line.quantity) > 0 && Number(line.fulfilled_quantity) >= Number(line.quantity)))
+    : !closed.has(String(order.status || "").toLowerCase());
+  const params = new URLSearchParams(pending
+    ? {orderId: order.order_number}
+    : {historySearch: order.order_number, allDates: "1"});
+  return {pending, label: pending ? "Pending order" : "Order history",
+    href: (pending ? "pending-orders.html?" : "ebay-order-history.html?") + params};
+}
+
+async function loadTaskConversationOrders(task) {
+  const context = getEbayConversationTaskContext(task);
+  if (!context) return;
+  task.conversationOrdersState = "loading";
+  task.conversationOrders = [];
+  task.conversationOrdersKind = "linked";
+  task.conversationOrdersTotal = 0;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  const orderSelect = "id, order_number, buyer_username, buyer_name, sale_date, status, ebay_order_lines(line_status, quantity, fulfilled_quantity)";
+  try {
+    // Resolve this exact conversation. A username alone is never a confirmed order link.
+    let conversation = null;
+    if (context.conversationId || context.ebayConversationId) {
+      const {data, error} = await supabase.from("ebay_conversations")
+        .select("id, other_party_username")
+        .eq(context.conversationId ? "id" : "ebay_conversation_id", context.conversationId || context.ebayConversationId)
+        .limit(2).abortSignal(controller.signal);
+      if (error) throw error;
+      if (data?.length > 1) throw new Error("Conversation identity is ambiguous");
+      conversation = data?.[0];
+    }
+    const metadata = task.metadata || {};
+    const orderMatches = new Map();
+    [task.order_id, metadata.order_id, metadata.primary_order_id, ...(Array.isArray(metadata.order_ids) ? metadata.order_ids : [])]
+      .filter(Boolean).forEach(id => orderMatches.set(id, "confirmed"));
+    if (conversation) {
+      const {data, error} = await supabase.from("ebay_conversation_links")
+        .select("ebay_order_id, status, match_method, line:ebay_order_lines(order_id), return_case:ebay_return_cases(order_id)")
+        .eq("conversation_id", conversation.id).in("status", ["confirmed", "suggested"])
+        .limit(100).abortSignal(controller.signal);
+      if (error) throw error;
+      const links = data || [];
+      const orderId = link => link.ebay_order_id || getEmbeddedOne(link.line)?.order_id || getEmbeddedOne(link.return_case)?.order_id;
+      const selected = links.find(link => link.match_method === "operator_selected_order" && link.status === "confirmed");
+      links.filter(link => !selected || orderId(link) === orderId(selected)).forEach(link => {
+        const id = orderId(link);
+        if (id && orderMatches.get(id) !== "confirmed") orderMatches.set(id, link.status);
+      });
+    }
+    let result;
+    if (orderMatches.size) {
+      result = await supabase.from("ebay_orders").select(orderSelect)
+        .in("id", [...orderMatches.keys()]).order("sale_date", {ascending: false})
+        .limit(100).abortSignal(controller.signal);
+    } else {
+      const buyer = String(conversation?.other_party_username || context.buyer || "").trim();
+      task.conversationOrdersKind = "buyer";
+      if (!buyer) { task.conversationOrdersState = "ready"; return; }
+      // Escape LIKE metacharacters: eBay usernames can contain underscores.
+      const exactBuyer = buyer.replace(/[\\%_]/g, "\\$&");
+      result = await supabase.from("ebay_orders").select(orderSelect, {count: "exact"})
+        .ilike("buyer_username", exactBuyer).order("sale_date", {ascending: false})
+        .limit(12).abortSignal(controller.signal);
+    }
+    if (result.error) throw result.error;
+    task.conversationOrders = (result.data || []).filter(order => order.order_number)
+      .map(order => ({...order, linkStatus: orderMatches.get(order.id) || "buyer"}));
+    task.conversationOrdersTotal = result.count ?? task.conversationOrders.length;
+    task.conversationOrdersState = "ready";
+  } catch (error) {
+    task.conversationOrdersState = "error";
+    console.warn("Could not load conversation task orders:", error);
+  } finally { clearTimeout(timer); }
+}
+
+function renderTaskConversationOrders(task, context) {
+  const orders = task.conversationOrders || [];
+  const status = task.conversationOrdersState;
+  const buyerChoices = task.conversationOrdersKind === "buyer";
+  let content;
+  if (status === "error") {
+    content = '<p role="status">Could not load the orders. Your task is still available.</p><button type="button" class="secondary-btn" data-task-orders-retry="' + escapeHtml(getUnifiedTaskKey(task)) + '">Retry order links</button>';
+  } else if (status !== "ready") {
+    content = '<p role="status">Loading the conversation’s orders…</p>';
+  } else if (!orders.length) {
+    content = '<p>No order link is available yet. Open the conversation to choose the related order.</p>';
+  } else {
+    content = (buyerChoices ? '<p>No order is selected for this conversation. These are the customer’s recent orders; open one to inspect it.</p>' : '')
+      + orders.map(order => {
+        const target = taskConversationOrderTarget(order);
+        const customer = [order.buyer_name, order.buyer_username ? "@" + order.buyer_username : ""].filter(Boolean).join(" · ");
+        const detail = [customer, order.sale_date ? "Placed " + formatDate(order.sale_date) : ""].filter(Boolean).join(" · ");
+        return '<article class="task-conversation-order"><div><strong>Order ' + escapeHtml(order.order_number) + '</strong><span>'
+          + escapeHtml(detail) + '</span><small>' + escapeHtml(target.label)
+          + (order.linkStatus === "suggested" ? ' · Possible match — verify in conversation' : '')
+          + '</small></div><a class="secondary-btn" href="' + escapeHtml(target.href)
+          + '" aria-label="Open order ' + escapeHtml(order.order_number) + '">Open order ↗</a></article>';
+      }).join("")
+      + (task.conversationOrdersTotal > orders.length ? '<p>Showing the latest ' + orders.length + ' of ' + task.conversationOrdersTotal + ' customer orders. The conversation has the full list.</p>' : '');
+  }
+  return '<section class="task-conversation-orders" aria-label="Conversation orders"><div class="team-task-context-head"><strong>'
+    + (buyerChoices ? "Customer orders" : "Linked orders") + (orders.length ? " (" + orders.length + ")" : "")
+    + '</strong><a href="' + escapeHtml(context.href) + '">Review order links ↗</a></div>' + content + '</section>';
+}
+
 function renderEbayConversationTeamTaskContext(task = {}) {
   const context = getEbayConversationTaskContext(task);
   if (!context) return "";
@@ -4121,6 +4234,7 @@ function renderEbayConversationTeamTaskContext(task = {}) {
         </div>
         <a class="team-task-context-open-link" href="${escapeHtml(context.href)}">Open eBay Conversation</a>
       </div>
+      ${renderTaskConversationOrders(task, context)}
       <div class="team-task-ebay-snapshot">
         ${context.buyer ? `<span><small>Buyer</small><b>${escapeHtml(context.buyer)}</b></span>` : ""}
         ${context.taskTag ? `<span class="team-task-refund-fact"><small>Tag</small><b>${escapeHtml(formatTaskTag(context.taskTag))}</b></span>` : ""}
@@ -4498,6 +4612,14 @@ function renderTaskCard(task = {}, options = {}) {
 }
 
 function attachTaskCardInteractions(root = document) {
+  root.querySelectorAll('[data-task-orders-retry]').forEach(button => button.addEventListener('click', () => {
+    const task = getTaskByUnifiedKey(button.dataset.taskOrdersRetry);
+    if (!task || task.conversationOrdersState === "loading") return;
+    const generation = state.taskLoadGeneration;
+    const pending = loadTaskConversationOrders(task);
+    renderTasks();
+    pending.finally(() => { if (generation === state.taskLoadGeneration) renderTasks(); });
+  }));
   root.querySelectorAll("[data-task-next]").forEach(button => button.addEventListener("click", () => openTaskNextAction(getTaskByUnifiedKey(button.dataset.taskKey), button.dataset.taskNext)));
   root.querySelectorAll('[data-task-reply]').forEach(button => button.addEventListener('click', () => {
     openTaskReply(getTaskByUnifiedKey(button.dataset.taskReply), button.dataset.handoff === 'true', button.dataset.decision === 'true');
@@ -4831,7 +4953,7 @@ function renderTaskActions(task = {}, resolved = false) {
   if (isTaskViewAsWorkerMode()) return '';
   const key = escapeHtml(getUnifiedTaskKey(task));
   const buttons = [];
-  if (task.actionHref) buttons.push('<a class="secondary-btn" href="'+escapeHtml(task.actionHref)+'">'+(task.metadata?.packaging_shipment_id || task.metadata?.packaging_order_handoff ? 'Open Packaging' : task.source === 'order' ? 'Open order' : 'Open return')+'</a>');
+  if (task.actionHref && task.source !== 'team') buttons.push('<a class="secondary-btn" href="'+escapeHtml(task.actionHref)+'">'+(task.metadata?.packaging_shipment_id || task.metadata?.packaging_order_handoff ? 'Open Packaging' : task.source === 'order' ? 'Open order' : 'Open return')+'</a>');
   if (canReplyToTask(task)) buttons.push('<button type="button" class="secondary-btn" data-task-reply="'+key+'">Add update</button>');
   if (canHandTaskBack(task)) buttons.push(isTaskInApprovalInbox(task)
     ? '<button type="button" class="primary-btn" data-task-reply="'+key+'" data-handoff="true">Send instructions &amp; hand back</button>'
