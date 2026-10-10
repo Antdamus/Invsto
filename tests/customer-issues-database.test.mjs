@@ -64,6 +64,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261009065000_customer_issue_card_sorting.sql'));
  await db.exec(await sqlFile('20261009066000_customer_issue_direct_close.sql'));
  await db.exec(await sqlFile('20261009067000_customer_issue_saved_conversation.sql'));
+ await db.exec(await sqlFile('20261010010000_customer_issue_notes.sql'));
 
 });
 after(async()=>db?.close());
@@ -83,6 +84,41 @@ const receive=(key=200,qty=1,disposition='restock',caseId=100)=>scalar('select r
  id(key),id(caseId),JSON.stringify([{order_line_id:id(11),received_quantity:qty,condition_received:'used_good',disposition,destination_location_id:disposition==='restock'?id(30):null,notes:'Inspected'}]),
  '[{"bucket":"ebay-return-evidence","path":"test/photo.jpg"}]','Received carefully','TRACK1']);
 const stock=()=>scalar('select coalesce(sum(quantity),0)::int v from item_stock_locations');
+
+test('case notes preserve status, ownership, stock and provider data and retry only once',async()=>{
+ const before=await scalar('select to_jsonb(c) v from ebay_return_cases c');
+ const args=[id(301),id(100),'  Reviewed shipping proof. Waiting for eBay.  '];
+ const note=await scalar('select add_customer_issue_note($1,$2,$3) v',args);
+ assert.equal(note.notes,'Reviewed shipping proof. Waiting for eBay.');assert.equal(note.signed_by,id(1));assert.equal(note.signed_by_email,'operator@example.test');assert.equal(note.note_count,1);
+ assert.deepEqual(await scalar('select add_customer_issue_note($1,$2,$3) v',args),note);
+ assert.equal(await scalar('select count(*)::int v from ebay_return_events'),1);
+ assert.deepEqual(await scalar('select to_jsonb(c) v from ebay_return_cases c'),before);
+ assert.equal(await scalar('select count(*)::int v from ebay_return_tasks'),0);assert.equal(await stock(),0);
+ await assert.rejects(scalar('select add_customer_issue_note($1,$2,$3) v',[id(301),id(100),'Different note']),/already used/);
+});
+
+test('notes work across case types and History; previews and history are paginated and isolated',async()=>{
+ for(const [i,lane] of ['return','inquiry','case','payment_dispute'].entries()){
+  await db.query('update ebay_return_cases set source_lane=$1,status=$2',[lane,i===3?'closed':'open']);
+  await scalar('select add_customer_issue_note($1,$2,$3) v',[id(310+i),id(100),'Note '+i]);
+ }
+ await db.exec(`update ebay_return_events set created_at='2026-10-10'::timestamptz;insert into ebay_return_cases(id,source_lane,status) values('${id(101)}','return','open')`);
+ const preview=await scalar('select customer_issue_notes($1) v',[[id(100),id(101)]]);
+ assert.equal(preview.find(r=>r.case_id===id(100)).note_count,4);assert.equal(preview.find(r=>r.case_id===id(100)).notes.length,1);
+ assert.equal(preview.find(r=>r.case_id===id(100)).notes[0].notes,'Note 3');assert.equal(preview.find(r=>r.case_id===id(101)).note_count,0);
+ const page=await scalar('select customer_issue_notes($1,$2,$3) v',[[id(100)],2,2]);
+ assert.deepEqual(page[0].notes.map(n=>n.notes),['Note 1','Note 0']);assert.equal(page[0].note_count,4);
+});
+
+test('case notes reject blank, overlong, missing cases and unauthorized writers/readers',async()=>{
+ for(const note of ['','   ','x'.repeat(10001)])await assert.rejects(scalar('select add_customer_issue_note($1,$2,$3) v',[id(301),id(100),note]),/Enter a note/);
+ await assert.rejects(scalar('select add_customer_issue_note($1,$2,$3) v',[id(301),id(999),'Missing']),/Case not found/);
+ await db.exec("select set_config('test.access','no',false)");
+ await assert.rejects(scalar('select add_customer_issue_note($1,$2,$3) v',[id(301),id(100),'Denied']),/access required/);
+ assert.deepEqual(await scalar('select customer_issue_notes($1) v',[[id(100)]]),[]);
+ await db.exec("select set_config('test.access','yes',false);select set_config('test.actor','',false)");
+ await assert.rejects(scalar('select add_customer_issue_note($1,$2,$3) v',[id(301),id(100),'Denied']),/access required/);
+});
 
 // Decoded directly from the user's FedEx Ground label, not a guessed suffix.
 const fedexBarcode='9632001520534711760300878065496736',fedexTracking='878065496736';

@@ -105,7 +105,7 @@
    <h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p>${escape(c.item_title||c.return_reason||'Open this case to review the order and next step.')}</p>
    ${cardFacts(c)}
    <div class="issue-card-footer"><span class="issue-tag">${escape(nextText(c))}</span>${c.ebay_due_at&&!closed(c)?`<span class="issue-tag ${c.overdue?'is-overdue':''}">${c.overdue?'eBay deadline overdue':'eBay deadline'} ${escape(date(c.ebay_due_at))}</span>`:!closed(c)?'<span class="issue-tag">eBay deadline not provided</span>':''}</div>
-   <div class="issue-card-top" style="margin:11px 0 0"><small>${['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button></div>`).join(''):
+   <div class="issue-card-top" style="margin:11px 0 0"><small>${['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
   $('issues-count').textContent=`${total} ${view==='history'?'finished':'active'} case${total===1?'':'s'}`;
   $('issues-sort-caption').textContent=sortLabels[sort]+(sort.startsWith('value_')?' · grouped by currency':'');
@@ -185,10 +185,11 @@
    if(request!==listVersion)return;
    rows=result.rows||[];counts=result.counts||{};total=result.total||0;
    if(offset>0&&offset>=total){offset=Math.max(0,Math.floor((total-1)/PAGE)*PAGE);return refresh(options);}
+   await root.OGCaseNotes?.load(rows.map(c=>c.id));if(request!==listVersion)return;
    cards();
    if($('issues-feedback').classList.contains('is-error'))feedback('');
    const selectedChanged=detail&&rows.some(c=>c.id===selected&&c.updated_at!==detail.c.updated_at);
-   if((options.detail!==false||selectedChanged)&&selected&&!$('issue-action-form')&&!ctx.state.busy&&!$('issue-evidence-package')?.dataset.ready)await openCase(selected,{quiet:true});
+   if(!root.OGCaseNotes?.isOpen&&(options.detail!==false||selectedChanged)&&selected&&!$('issue-action-form')&&!ctx.state.busy&&!$('issue-evidence-package')?.dataset.ready)await openCase(selected,{quiet:true});
   }catch(error){if(request===listVersion)feedback(error.message||'Could not load customer issues. Please retry.',true);}
   finally{if(request===listVersion)$('issues-list').setAttribute('aria-busy','false');}
  }
@@ -268,6 +269,7 @@
   $('issues-detail').innerHTML=`<div class="issue-detail-bar"><button type="button" class="secondary-btn issue-back" data-close-case>← Cases</button><span>${escape(c.ebay_return_id?`Case ${c.ebay_return_id}`:'Internal return')}</span>${c.ebay_return_id?'<button type="button" class="secondary-btn" data-sync-case>Refresh case</button>':''}</div>
    <div class="issue-detail-content"><span class="issue-kind is-${kind(c)}">${kind(c)==='dispute'?(c.source_lane==='payment_dispute'?'Payment dispute':'Escalated eBay case'):nice(kind(c))}</span><h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p class="issue-subtitle">${escape(c.item_title||summary.item_title||lines[0]?.item_title||'Review the linked order items below')}</p>
    <section class="issue-original-order"><div><small>ORIGINAL ORDER</small><strong>${escape(c.order_number||'Not identified yet')}</strong><span>${c.order_id?`${lines.length} linked item${lines.length===1?'':'s'} · Saved in Invsto`:c.order_number?'Not found in saved orders yet':'Match the original order to see its evidence'}</span></div>${c.order_number?`<a class="secondary-btn" href="ebay-order-history.html?orderHistorySearch=${encodeURIComponent(c.order_number)}&historyAllDates=true">Open full order ↗</a>`:''}</section>
+   <section id="issue-case-notes" class="issue-case-notes">${root.OGCaseNotes?.section(c)||''}</section>
    <div class="issue-next"><span>NEXT STEP</span><strong>${escape(nextText(summary))}</strong><p>${['closed','cancelled'].includes(c.status)&&!summary.open_tasks?'This record is saved in History. Its evidence and activity are preserved.':closed(c)?'eBay has closed its case. If everything is resolved, mark it closed to move it to History.':'Keep the case open until the customer issue and your internal work are both handled.'}</p></div>
    <div class="issue-facts"><div><small>Item value</small><b>${escape(money(summary))}</b></div><div><small>Order placed</small><b>${escape(summary.order_placed_at?new Date(summary.order_placed_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'Not provided')}</b></div><div><small>eBay status</small><b>${escape(nice(c.ebay_status))}</b></div><div><small>eBay deadline</small><b>${escape(date(c.ebay_due_at))}</b></div></div>
    <p class="issue-review-meta">Opened ${escape(date(c.opened_at))}<br>Last eBay update ${escape(date(c.synced_at))} · Internal status: ${escape(nice(c.status))}</p>
@@ -354,12 +356,12 @@
     db.from('ebay_return_task_events').select('*').eq('return_case_id',id).order('created_at',{ascending:false}).limit(50)]).then(rs=>rs.map(checked));
    if(stamp!==version)return;
    const lines=rawLines.filter(l=>!l.order_id||l.order_id===c.order_id).map(ctx.normalizeLine);tasks.forEach(t=>t.ebay_return_cases=c);
-   const orderEvents=await ctx.loadOrderEvents(ids);if(stamp!==version)return;
+   const [orderEvents]=await Promise.all([ctx.loadOrderEvents(ids),root.OGCaseNotes?.load([id])]);if(stamp!==version)return;
    ctx.state.returnTasks=tasks;ctx.state.returnTaskLines=new Map(lines.map(l=>[l.id,l]));ctx.state.returnTaskOrderEvents=orderEvents;ctx.state.returnCases=[{...c,ebay_return_items:items}];
    ctx.state.returnTaskEvents=taskEvents;ctx.state.returnAssignees=people;ctx.mergeLines(lines);
    if(tasks[0])await ctx.hydrateComplaint(tasks);
    if(stamp!==version)return;
-   if(quiet&&(($('issue-action-form')&&$('issue-action-form')!==initialForm)||ctx.state.busy))return;
+   if(quiet&&(root.OGCaseNotes?.isOpen||($('issue-action-form')&&$('issue-action-form')!==initialForm)||ctx.state.busy))return;
    detail={c,tasks,items,lines,conversationLimit,events:[...caseEvents,...taskEvents].sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at)),moreEvents:caseEvents.length===50||taskEvents.length===50};
    renderDetail();if(expanded)$('issues-detail').querySelectorAll('details').forEach(el=>el.open=expanded.has(el.querySelector('summary')?.textContent));$('issues-detail').scrollTop=scroll;
    const url=new URL(location.href);url.searchParams.delete('returnTaskId');url.searchParams.set('caseId',id);history.replaceState(null,'',url);
@@ -442,6 +444,7 @@
   ctx=context;db=ctx.supabase;ready=true;
   root.OGReturnReceiving?.init({db,ctx,openCase,feedback});
   try{people=checked(await db.from('employees').select('user_id,email,display_name,role,active').eq('active',true).order('display_name')).filter(p=>p.user_id);}catch{people=[ctx.employee];}
+  root.OGCaseNotes?.init({db,user:ctx.user,people,onChange:()=>{cards();if(detail&&$('issue-case-notes'))$('issue-case-notes').innerHTML=root.OGCaseNotes.section(detail.c);}});
   $('issues-workspace').addEventListener('click',e=>{
    const b=e.target.closest('button');if(!b||saving)return;
    if(b.dataset.issueView){clearBulk();view=b.dataset.issueView;offset=0;closeCase();refresh({detail:false});}
@@ -452,6 +455,7 @@
    else if(b.hasAttribute('data-bulk-review'))reviewBulk();
    else if(b.hasAttribute('data-bulk-cancel'))closeBulkDialog();
    else if(b.hasAttribute('data-bulk-history')){closeBulkDialog();clearBulk();clearTimeout(timer);view='history';scope='all';search='';offset=0;$('issues-search').value='';$('issues-scope').value='all';closeCase();refresh({detail:false});}
+   else if(b.dataset.caseNotes){const id=b.dataset.caseNotes,c=rows.find(c=>c.id===id)||(detail?.c.id===id?detail.c:null);if(c){const position=b.closest('.issue-card-notes')?captureListPosition(c.id):null;root.OGCaseNotes.open(c,()=>{if(position)restoreListPosition(position);else $('issue-case-notes')?.querySelector('button')?.focus({preventScroll:true});});}}
    else if(b.dataset.case)openCase(b.dataset.case);
    else if(b.hasAttribute('data-close-case'))closeCase();
    else if(b.hasAttribute('data-retry-case'))openCase(selected);
@@ -490,8 +494,8 @@
   if(!id&&params.get('returnTaskId'))try{id=checked(await db.from('ebay_return_tasks').select('return_case_id').eq('id',params.get('returnTaskId')).single()).return_case_id;}catch{}
   if(id)await openCase(id);
   if(params.get('syncHealth')==='1')document.querySelector('.issues-sync-health').open=true;
-  poll=setInterval(()=>{if(!document.hidden&&!saving){health();if(!$('issue-action-form')&&!ctx.state.busy&&!$('issues-bulk-dialog').open)refresh({detail:false});}},30000);
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!saving&&!$('issues-bulk-dialog').open){health();refresh({detail:false});}});
+  poll=setInterval(()=>{if(!document.hidden&&!saving&&!root.OGCaseNotes?.isOpen){health();if(!$('issue-action-form')&&!ctx.state.busy&&!$('issues-bulk-dialog').open)refresh({detail:false});}},30000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!saving&&!root.OGCaseNotes?.isOpen&&!$('issues-bulk-dialog').open){health();refresh({detail:false});}});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!e.defaultPrevented&&selected&&!document.querySelector('.history-modal:not(.hidden), dialog[open]'))closeCase();});
  }
  function matchForm(){
