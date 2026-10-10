@@ -7,6 +7,28 @@ vm.runInNewContext(await readFile(new URL('../customer-issue-evidence.js',import
 vm.runInNewContext(await readFile(new URL('../customer-issues.js',import.meta.url),'utf8'),sandbox);
 const {nextText}=sandbox.OGCustomerIssues.testing;
 const payment={source_lane:'payment_dispute',issue_kind:'dispute',order_id:'order',status:'open',next_user:'admin',open_tasks:1,ebay_action:'2026-10-14T06:59:59.000Z'};
+
+test('escalated cases distinguish eBay review from an unknown or actionable open case',()=>{
+ const {escalatedBadge,cardStatus,cardKind}=sandbox.OGCustomerIssues.testing;
+ const c={...payment,source_lane:'case',ebay_return_id:'5388233234',ebay_status:'OPEN',ebay_action:null,provider_case:{caseId:'5388233234',caseType:'RETURN',nextSteps:[],sellerResponseDue:{},caseContentOnHold:false}};
+ assert.equal(escalatedBadge(c).label,'eBay reviewing · no response needed');assert.equal(nextText(c),'Waiting for eBay’s decision');assert.equal(cardKind(c),'eBay case');
+ const html=cardStatus(c);assert.ok(html.includes('eBay reviewing · no response needed'));assert.ok(!html.includes('Continue assigned work'));assert.ok(!html.includes('deadline not provided'));
+ assert.equal(escalatedBadge({...c,provider_case:undefined}).label,'eBay case opened','OPEN alone cannot confirm no response needed');
+ assert.equal(escalatedBadge({...c,provider_case:{...c.provider_case,caseId:'different'}}).label,'eBay case opened');
+ assert.equal(escalatedBadge({...c,provider_case:{...c.provider_case,nextSteps:['SELLER_PROVIDE_INFO']}}).kind,'case_open');
+ assert.equal(escalatedBadge({...c,ebay_due_at:'2026-10-11'}).kind,'case_open');
+ assert.equal(escalatedBadge({...c,ebay_action:'SELLER_PROVIDE_INFO'}).kind,'case_open');
+ assert.equal(escalatedBadge({...c,ebay_status:'ACTION_NEEDED'}).label,'eBay case · response required');
+ assert.equal(escalatedBadge({...c,ebay_status:'REFUND_AGREED_BUT_FAILED'}).label,'Refund failed · review required');
+ assert.equal(escalatedBadge({...c,ebay_status:'ON_HOLD'}).label,'eBay case · on hold');
+ assert.equal(escalatedBadge({...c,provider_case:{...c.provider_case,caseContentOnHold:true}}).label,'eBay case · on hold');
+ assert.equal(escalatedBadge({...c,ebay_status:'WAITING_DELIVERY'}).label,'eBay case · awaiting delivery');
+ assert.equal(escalatedBadge({...c,ebay_status:'OTHER'}).label,'eBay case · check status');
+ assert.equal(escalatedBadge({...c,ebay_status:'WAITING_CS'}).kind,'reviewing');
+ assert.equal(escalatedBadge({...c,ebay_status:'CS_CLOSED'}),null);assert.ok(cardStatus({...c,ebay_status:'CS_CLOSED'}).includes('Closed on eBay'));
+ assert.equal(escalatedBadge({...c,source_lane:'payment_dispute'}),null);assert.equal(c.status,'open');
+ const detail={...c,provider_case:undefined,raw_payload:{ebayDetail:c.provider_case}};assert.equal(escalatedBadge(detail).kind,'reviewing');
+});
 test('return badges distinguish provider delivery from confirmed local receipt and preserve closed-case actions',()=>{
  const {returnBadge,cardStatus}=sandbox.OGCustomerIssues.testing,c={...payment,source_lane:'return',issue_kind:'return',ebay_status:'ITEM_DELIVERED',return_stage:'delivered'};
  assert.ok(returnBadge(c).includes('Delivered · eBay'));assert.ok(!returnBadge(c).includes('Received'));
@@ -38,7 +60,7 @@ test('closed disputes preserve internal follow-up and outcome review',()=>{
 test('unlinked orders and ordinary return actions keep their existing priority',()=>{
  assert.equal(nextText({...payment,ebay_status:'ACTION_NEEDED',order_id:null}),'Match the order');
  assert.equal(nextText({...payment,source_lane:'return',issue_kind:'return',ebay_status:'OPEN',ebay_action:'SELLER_ISSUE_REFUND'}),'Seller issue refund');
- assert.equal(nextText({...payment,source_lane:'case',ebay_status:'OPEN'}),'Continue assigned work');
+ assert.equal(nextText({...payment,source_lane:'case',ebay_status:'OPEN'}),'Review the eBay case');
 });
 
 test('quick review keeps unknown prices distinct from zero and escapes buyer-provided values',()=>{

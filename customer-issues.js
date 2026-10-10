@@ -8,6 +8,27 @@
  const kind=c=>['request','return','dispute'].includes(c.issue_kind)?c.issue_kind:'request';
  const closed=c=>/(^|_)(CLOSED|CANCELLED|CANCELED|RESOLVED|SELLER_WON|SELLER_LOST|DISPUTE_REVERSED)($|_)/i.test(c.ebay_status||'');
  const safeUrl=value=>{try{const u=new URL(value,location.href);return ['https:','http:'].includes(u.protocol)?u.href:'';}catch{return '';}};
+ function escalatedData(c){
+  if(c.source_lane!=='case')return null;
+  for(const d of [c.raw_payload?.ebayDetail,c.provider_case])if(d?.caseId&&String(d.caseId)===String(c.ebay_return_id))return d;
+  return null;
+ }
+ function escalatedBadge(c){
+  if(c.source_lane!=='case'||closed(c))return null;
+  const status=String(c.ebay_status||'').toUpperCase(),d=escalatedData(c);
+  if(status==='REFUND_AGREED_BUT_FAILED')return {kind:'action',label:'Refund failed · review required'};
+  if(status==='ACTION_NEEDED')return {kind:'action',label:'eBay case · response required'};
+  if(status==='ON_HOLD'||d?.caseContentOnHold===true)return {kind:'partial',label:'eBay case · on hold'};
+  if(status==='WAITING_DELIVERY')return {kind:'case_waiting',label:'eBay case · awaiting delivery'};
+  const noSteps=Array.isArray(d?.nextSteps)&&d.nextSteps.length===0;
+  const noDue=!c.ebay_due_at&&(!d?.sellerResponseDue||Object.keys(d.sellerResponseDue).length===0);
+  // OPEN alone does not establish who acts next. Require eBay's explicit
+  // empty nextSteps before saying the seller has no response to make.
+  if((status==='OPEN'&&noSteps||status==='WAITING_CS'&&(!d?.nextSteps||noSteps))&&noDue&&!c.ebay_action)return {kind:'reviewing',label:'eBay reviewing · no response needed'};
+  if(status==='OPEN'||status==='WAITING_CS')return {kind:'case_open',label:'eBay case opened'};
+  return {kind:'case_open',label:'eBay case · check status'};
+ }
+ const cardKind=c=>c.source_lane==='case'?'eBay case':kind(c)==='request'?'Customer request':kind(c)==='return'?'Physical return':'Dispute';
  let ctx,db,ready=false,view='attention',scope='all',sort='newest',returnStage='all',search='',offset=0,total=0,rows=[],counts={},people=[],selected=null,detail=null,version=0,listVersion=0,timer,poll,saving=false,syncing=false;
  const PAGE=30;
  const BULK_LIMIT=60;
@@ -114,6 +135,7 @@
   if(c.status==='partially_received'&&kind(c)==='return')return 'Check the remaining items';
   if(closed(c)&&c.open_tasks)return 'Finish internal follow-up';
   if(closed(c))return 'Review the case outcome';
+  if(c.source_lane==='case')return escalatedBadge(c)?.kind==='reviewing'?'Waiting for eBay’s decision':escalatedBadge(c)?.label==='eBay case opened'?'Review the eBay case':escalatedBadge(c)?.label||'Review the eBay case';
   if(c.source_lane==='payment_dispute'&&c.ebay_status==='ACTION_NEEDED')return 'Respond to the payment dispute';
   if(root.OGDisputeResponse?.badge(c)?.kind==='waiting')return 'Response submitted · awaiting outcome';
   if(root.OGDisputeResponse?.badge(c)?.kind==='protected')return 'Awaiting outcome';
@@ -129,7 +151,7 @@
   if(c.ebay_action&&!/^\d{4}-\d{2}-\d{2}T/i.test(c.ebay_action))return nice(c.ebay_action);
   return c.next_user?'Continue assigned work':'Choose the next person';
  }
- function providerBadge(c){return root.OGDisputeResponse?.badge(c)||(closed(c)?{kind:'closed',label:'Closed on eBay'}:null);}
+ function providerBadge(c){return root.OGDisputeResponse?.badge(c)||escalatedBadge(c)||(closed(c)?{kind:'closed',label:'Closed on eBay'}:null);}
  function providerBadgeHtml(c){
   const badge=providerBadge(c),protection=root.OGDisputeResponse?.protection(c);
   return (badge?`<span class="issue-tag issue-response-badge is-${badge.kind}">${escape(badge.label)}</span>`:'')+
@@ -138,13 +160,13 @@
  function cardStatus(c){
   const badge=providerBadge(c),next=nextText(c);
   const state=providerBadgeHtml(c);
-  const nextTag=badge&&(next===badge.label||next==='Respond to the payment dispute')?'':`<span class="issue-tag">${escape(next)}</span>`;
-  const deadline=['waiting','protected','no_response'].includes(badge?.kind)||closed(c)?'':c.ebay_due_at?`<span class="issue-tag ${c.overdue?'is-overdue':''}">${c.overdue?'eBay deadline overdue':'eBay deadline'} ${escape(date(c.ebay_due_at))}</span>`:'<span class="issue-tag">eBay deadline not provided</span>';
+  const nextTag=badge&&(next===badge.label||next==='Respond to the payment dispute'||badge.kind==='reviewing'&&next==='Waiting for eBay’s decision')?'':`<span class="issue-tag">${escape(next)}</span>`;
+  const deadline=['waiting','protected','no_response','reviewing'].includes(badge?.kind)||closed(c)?'':c.ebay_due_at?`<span class="issue-tag ${c.overdue?'is-overdue':''}">${c.overdue?'eBay deadline overdue':'eBay deadline'} ${escape(date(c.ebay_due_at))}</span>`:'<span class="issue-tag">eBay deadline not provided</span>';
   return returnBadge(c)+state+nextTag+deadline;
  }
  function cards(){
   $('issues-list').innerHTML=rows.length?rows.map(c=>`<div class="issue-card-row ${selecting?'is-selecting':''} ${bulkSelection.has(c.id)?'is-checked':''}">${selecting?`<label class="issue-select"><input type="checkbox" data-select-case="${escape(c.id)}" aria-label="Select ${escape(c.buyer_username||'buyer')}, case ${escape(c.ebay_return_id||c.id)}" ${bulkSelection.has(c.id)?'checked':''} ${closeBlock(c)?'disabled':''}/><span>${escape(closeBlock(c)||'Select case')}</span></label>`:''}<button type="button" class="issue-card" data-case="${escape(c.id)}" aria-current="${selected===c.id}">
-   <div class="issue-card-top"><span class="issue-kind is-${kind(c)}">${kind(c)==='request'?'Customer request':kind(c)==='return'?'Physical return':'Dispute'}</span><small>${escape(c.order_number||`Case ${c.ebay_return_id||'not linked'}`)}</small></div>
+   <div class="issue-card-top"><span class="issue-kind is-${kind(c)}">${cardKind(c)}</span><small>${escape(c.order_number||`Case ${c.ebay_return_id||'not linked'}`)}</small></div>
    <h2>${escape(c.buyer_username||'Buyer not identified')}</h2>${customerContact(c)}<p>${escape(c.item_title||c.return_reason||'Open this case to review the order and next step.')}</p>
    ${cardFacts(c)}
    <div class="issue-card-footer">${cardStatus(c)}</div>
@@ -291,12 +313,14 @@
   if(c.source_lane==='return'&&id)return `https://www.ebay.com/rtn/Return/ReturnsDetail?returnId=${id}`;
   if(c.source_lane==='inquiry'&&id)return `https://www.ebay.com/res/ItemNotReceived/ViewRequest?id=${id}`;
   if(c.source_lane==='payment_dispute'&&id)return `https://pmtdispute.ebay.com/dispute/${id}`;
+  if(c.source_lane==='case'&&id&&escalatedData(c)?.caseType==='RETURN')return `https://www.ebay.com/ReturnCase/${id}`;
   const raw=c.raw_payload||{},url=safeUrl(raw.detailsUrl||raw.apiExtractedDetails?.detailsUrl||'');
   if(url){const u=new URL(url);if(/(^|\.)ebay\.com$/.test(u.hostname)&&!/(ViewItem|\/itm\/)/i.test(url))return url;}
   return c.order_number?`https://www.ebay.com/mesh/ord/details?orderid=${encodeURIComponent(c.order_number)}`:'';
  }
  function caseLinkLabel(c,url){
   if(c.source_lane==='payment_dispute'&&url.startsWith('https://pmtdispute.ebay.com/dispute/'))return 'Open eBay dispute';
+  if(c.source_lane==='case'&&url.startsWith('https://www.ebay.com/ReturnCase/'))return 'Open eBay case';
   return c.source_lane==='case'||c.source_lane==='payment_dispute'?'Open eBay order / case':'Open eBay case';
  }
  function renderDetail(){
@@ -315,9 +339,9 @@
    <section class="issue-original-order"><div><small>ORIGINAL ORDER</small><strong>${escape(c.order_number||'Not identified yet')}</strong><span>${c.order_id?`${lines.length} linked item${lines.length===1?'':'s'} · Saved in Invsto`:c.order_number?'Not found in saved orders yet':'Match the original order to see its evidence'}</span></div>${c.order_number?`<a class="secondary-btn" href="ebay-order-history.html?orderHistorySearch=${encodeURIComponent(c.order_number)}&historyAllDates=true">Open full order ↗</a>`:''}</section>
    ${kind(c)==='return'&&summary.return_stage?`<div class="issue-return-summary">${returnBadge(summary)}<small>eBay delivery is separate from receipt and inspection in Invsto.</small></div>`:''}
    <section id="issue-case-notes" class="issue-case-notes">${root.OGCaseNotes?.section(c)||''}</section>
-   <div class="issue-next">${providerBadge(c)?`<div class="issue-provider-outcome">${providerBadgeHtml(c)}</div>`:''}<span>NEXT STEP</span><strong>${escape(nextText({...summary,raw_payload:c.raw_payload}))}</strong><p>${['closed','cancelled'].includes(c.status)&&!summary.open_tasks?'This record is saved in History. Its evidence and activity are preserved.':closed(c)?'eBay has closed its case. Keep it here while internal work remains, or finish and archive it when everything is handled.':['protected','no_response'].includes(providerBadge(c)?.kind)?'No response is currently requested by eBay. This dispute is still awaiting an outcome; updates continue automatically. Any internal tasks remain separate.':'Keep the case open until the customer issue and your internal work are both handled.'}</p></div>
+   <div class="issue-next">${providerBadge(c)?`<div class="issue-provider-outcome">${providerBadgeHtml(c)}</div>`:''}<span>NEXT STEP</span><strong>${escape(nextText({...summary,raw_payload:c.raw_payload}))}</strong><p>${['closed','cancelled'].includes(c.status)&&!summary.open_tasks?'This record is saved in History. Its evidence and activity are preserved.':closed(c)?'eBay has closed its case. Keep it here while internal work remains, or finish and archive it when everything is handled.':providerBadge(c)?.kind==='reviewing'?'eBay is reviewing this escalated case. No response is currently requested. Keep it open until eBay decides the outcome; any internal work remains separate.':['protected','no_response'].includes(providerBadge(c)?.kind)?'No response is currently requested by eBay. This dispute is still awaiting an outcome; updates continue automatically. Any internal tasks remain separate.':'Keep the case open until the customer issue and your internal work are both handled.'}</p></div>
    ${ctx.employee.role==='admin'&&(closed(c)||!c.ebay_return_id)&&(!['closed','cancelled'].includes(c.status)||tasks.some(t=>!finish.has(t.status)))?'<section class="issue-closeout"><div><strong>All internal work finished?</strong><p>Save the case and its evidence in History. No new task is needed.</p></div><button type="button" class="primary-btn" data-finish-case>Finish &amp; archive</button></section>':''}<div id="issue-close-form-slot"></div>
-   <div class="issue-facts"><div><small>Item value</small><b>${escape(money(summary))}</b></div><div><small>Order placed</small><b>${escape(summary.order_placed_at?new Date(summary.order_placed_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'Not provided')}</b></div><div><small>eBay status</small><b>${escape(root.OGDisputeResponse?.response(c)?.waiting?'Open · response submitted':nice(c.ebay_status))}</b></div><div><small>eBay deadline</small><b>${escape(closed(c)||['waiting','protected','no_response'].includes(providerBadge(c)?.kind)?'No current response deadline':date(c.ebay_due_at))}</b></div></div>
+   <div class="issue-facts"><div><small>Item value</small><b>${escape(money(summary))}</b></div><div><small>Order placed</small><b>${escape(summary.order_placed_at?new Date(summary.order_placed_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'Not provided')}</b></div><div><small>eBay status</small><b>${escape(root.OGDisputeResponse?.response(c)?.waiting?'Open · response submitted':nice(c.ebay_status))}</b></div><div><small>eBay deadline</small><b>${escape(closed(c)||['waiting','protected','no_response','reviewing'].includes(providerBadge(c)?.kind)?'No current response deadline':date(c.ebay_due_at))}</b></div></div>
    <p class="issue-review-meta">Opened ${escape(date(c.opened_at))}<br>Last eBay update ${escape(date(c.synced_at))} · Internal status: ${escape(nice(c.status))}</p>
    ${c.sync_error?`<p class="issue-tag is-stale">Update failed. The previous case information was kept. ${escape(c.sync_error)}</p>`:''}
    <div class="issue-actions">${c.issue_kind==='return'&&remaining&&lines.some(l=>l.line_status==='fulfilled')&&!['closed','cancelled'].includes(c.status)?'<button class="primary-btn" data-receive>Receive returned items</button>':''}
@@ -558,5 +582,5 @@
    }catch(error){target.textContent=error.message||'No exact order found.';}
   };
  }
- root.OGCustomerIssues={init,refresh,openReceivedCase:id=>openCase(id),get ready(){return ready;},testing:{kind,nextText,cardStatus,returnBadge,customerContact,closed,date,caseHref,caseLinkLabel,money,cardFacts,conversationRows,lineFacts,closeBlock,runCloseBatch}};
+ root.OGCustomerIssues={init,refresh,openReceivedCase:id=>openCase(id),get ready(){return ready;},testing:{kind,escalatedBadge,cardKind,nextText,cardStatus,returnBadge,customerContact,closed,date,caseHref,caseLinkLabel,money,cardFacts,conversationRows,lineFacts,closeBlock,runCloseBatch}};
 })(globalThis);

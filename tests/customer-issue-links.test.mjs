@@ -39,3 +39,12 @@ test('returns and item-not-received requests keep their dedicated eBay destinati
  assert.equal(caseLinkLabel({source_lane:'return'},''),'Open eBay case');
  assert.equal(caseLinkLabel({source_lane:'inquiry'},''),'Open eBay case');
 });
+
+test('escalated return case uses its case ID, not the original return or order link',()=>{
+ const c={source_lane:'case',ebay_return_id:'5388233234',order_number:'21-15173-31396',raw_payload:{detailsUrl:'https://www.ebay.com/mesh/ord/details?orderid=21-15173-31396',ebayDetail:{caseId:'5388233234',caseType:'RETURN',returnId:'5330107061'}}};
+ assert.equal(caseHref(c),'https://www.ebay.com/ReturnCase/5388233234');assert.equal(caseLinkLabel(c,caseHref(c)),'Open eBay case');
+ assert.equal(caseHref({...c,raw_payload:undefined,provider_case:c.raw_payload.ebayDetail}),caseHref(c));
+ const fallback='https://www.ebay.com/mesh/ord/details?orderid=21-15173-31396';
+ assert.equal(caseHref({...c,raw_payload:{ebayDetail:{caseId:'other',caseType:'RETURN'}}}),fallback);
+ assert.equal(caseHref({...c,raw_payload:{ebayDetail:{caseId:c.ebay_return_id,caseType:'ITEM_NOT_RECEIVED'}}}),fallback,'do not invent a ReturnCase destination for another case type');
+});

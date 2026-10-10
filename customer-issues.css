@@ -140,3 +140,6 @@ body[data-page="ebay-returns"] {font-family:system-ui,-apple-system,"Segoe UI",s
 .issue-response-badge.is-protected,.issue-response-badge.is-no_response{background:#173b3b;border-color:#549899;color:#b4eeec}
 .issue-response-badge.is-partial{background:#3a3320;border-color:#ad944a;color:#f4dea7}
 .issue-provider-outcome{display:flex;flex-wrap:wrap;gap:8px}
+
+.issue-response-badge.is-reviewing,.issue-response-badge.is-case_waiting{background:#24364b;border-color:#6d95bd;color:#d1e7ff}
+.issue-response-badge.is-case_open{background:#403526;border-color:#b2955d;color:#f5dcac}

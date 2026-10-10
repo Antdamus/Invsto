@@ -69,6 +69,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261010030000_customer_issue_customer_cards.sql'));
  await db.exec(await sqlFile('20261010040000_customer_issue_return_stages.sql'));
  await db.exec(await sqlFile('20261010050000_customer_issue_closed_outcomes.sql'));
+ await db.exec(await sqlFile('20261010060000_customer_issue_escalated_badges.sql'));
 
 });
 after(async()=>db?.close());
@@ -494,6 +495,12 @@ test('evidence excludes internal messages, voided certificates, removed packagin
 
 
 const listIssues=(sort='newest',view='attention',offset=0,limit=30)=>scalar('select list_customer_issues($1,$2,$3,$4,$5,$6) v',[view,'all','',offset,limit,sort]);
+test('escalation summary projects exact case type and actions without leaking complaint or evidence payloads',async()=>{
+ await db.exec(`update ebay_return_cases set source_lane='case',issue_kind='dispute',ebay_due_at=null,raw_payload='{"ebayDetail":{"caseId":"12345","caseType":"RETURN","nextSteps":[],"sellerResponseDue":{},"caseContentOnHold":false,"caseHistoryDetails":{"private":"do not project"}}}'`);
+ let row=(await listIssues()).rows[0];assert.deepEqual(row.provider_case,{caseId:'12345',caseType:'RETURN',nextSteps:[],sellerResponseDue:{},caseContentOnHold:false});assert.equal(row.status,'open');assert.equal(row.active,true);assert.equal(row.raw_payload,undefined);
+ await db.exec("update ebay_return_cases set raw_payload=jsonb_set(raw_payload,'{ebayDetail,nextSteps}','[\"SELLER_PROVIDE_INFO\"]')");row=(await listIssues()).rows[0];assert.deepEqual(row.provider_case.nextSteps,['SELLER_PROVIDE_INFO']);
+ await db.exec("update ebay_return_cases set raw_payload=jsonb_set(raw_payload,'{ebayDetail,caseId}','\"other\"')");assert.equal((await listIssues()).rows[0].provider_case,null);
+});
 test('closed dispute outcome is projected only for its exact provider identity and stays active until archived',async()=>{
  await db.exec(`update ebay_return_cases set source_lane='payment_dispute',issue_kind='dispute',ebay_status='CLOSED',raw_payload='{"ebayDetail":{"paymentDisputeId":"12345","resolution":{"reasonForClosure":"SELLER_WON","protectedAmount":{"value":"167.00"}}}}'`);
  let row=(await listIssues()).rows[0];assert.equal(row.resolution_reason,'SELLER_WON');assert.equal(row.status,'open');assert.equal(row.active,true);assert.equal(row.raw_payload,undefined);

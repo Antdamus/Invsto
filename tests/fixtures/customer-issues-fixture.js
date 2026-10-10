@@ -10,6 +10,10 @@
   rows[5].protection_status='FULLY_PROTECTED';rows[5].raw_payload.ebayDetail.resolution={protectionStatus:'FULLY_PROTECTED'};
   rows[11].protection_status='FULLY_PROTECTED';rows[11].ebay_status='ACTION_NEEDED';
  }
+ if(location.search.includes('escalatedFixture')){
+  const r=rows[2];r.source_lane='case';r.ebay_return_id='5388233234';r.ebay_due_at=null;r.buyer_username='return.case.preview';r.customer_name='Example Customer';
+  r.provider_case={caseId:r.ebay_return_id,caseType:'RETURN',nextSteps:[],sellerResponseDue:{},caseContentOnHold:false};r.raw_payload={ebayDetail:r.provider_case};
+ }
  const caseNotes=JSON.parse(sessionStorage.getItem('fixtureCaseNotes')||'[]');
  if(location.search.includes('contactFixture'))for(const r of rows){r.customer_name='Alexandra Taylor';if(r.issue_kind==='return'){r.shipping_name='Alexandra Taylor';r.shipping_address={line1:'123 Example Avenue',line2:'Building B · Apartment 204',city:'Boston',state:'MA',postal_code:'02108',country:'US'};}}
  if(location.search.includes('disputeFixture')){rows[2].seller_response='SELLER_CONTEST';rows[5].seller_response='SELLER_CONTEST';rows[5].ebay_status='ACTION_NEEDED';}
