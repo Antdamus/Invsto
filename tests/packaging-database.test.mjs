@@ -35,12 +35,28 @@ before(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261008020000_packaging_workspace.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261008220000_packaging_reference_photos.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261008230000_packaging_buyer_queue.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261009064000_packaging_prior_dispatch_history.sql',import.meta.url),'utf8'));
 });
 beforeEach(async()=>{
  await db.exec(`set test.allowed='yes';set test.actor='${id(100)}';truncate ebay_order_admin_events,ebay_live_attempts,shared_inventory_bag_links,live_sale_bag_photos,live_sale_lots,live_bag_order_links,packaging_events,packaging_issues,packaging_evidence,packaging_items,packaging_shipments,packaging_handoffs,ebay_order_task_events,ebay_order_tasks,ebay_order_label_events,ebay_order_lines,ebay_orders,storage.objects cascade;update packaging_settings set enabled=true,activated_at=now();`);
  for(const n of [1,2]){await db.query("insert into ebay_orders(id,order_number,buyer_username,status,sale_date,tracking_number) values($1,$2,$3,'pending',now(),$4)",[id(n),`order-${n}`,`buyer${n}`,n===1?code:'9400100000000000000002']);await db.query("insert into ebay_order_lines(id,order_id,item_title,quantity,fulfilled_quantity,line_status) values($1,$2,'Gold chain',2,0,'pending')",[id(n+10),id(n)]);}
 });
 after(()=>db?.close());
+
+test('owner-confirmed prior dispatch leaves the active queue with no invented tracking, dates or evidence',async()=>{
+ await close();const before=(await db.query('select * from ebay_order_lines where id=$1',[id(11)])).rows[0];
+ await db.query("insert into packaging_shipments(id,order_ids,status,created_by,prior_dispatch) values($1,$2,'dispatched',$3,true)",[id(900),[id(1)],id(100)]);
+ await db.query('insert into packaging_items values($1,$2,2)',[id(900),id(11)]);
+ await db.query("insert into packaging_events(shipment_id,request_id,action,notes,created_by) values($1,$2,'prior_dispatch_closeout','Owner confirmed already sent before adoption.',$3)",[id(900),id(901),id(100)]);
+ assert.equal((await call('queue')).total,0);
+ const history=await call('queue',{view:'history'});assert.equal(history.total,1);assert.equal(history.rows[0].title,'Already sent · prior to rollout');
+ const detail=await call('detail',{shipment_id:id(900)});assert.equal(detail.shipment.tracking_code,null);assert.equal(detail.shipment.dispatched_at,null);assert.equal(detail.shipment.packed_at,null);assert.equal(detail.evidence.length,0);assert.equal(detail.lines[0].packed_quantity,2);
+ assert.deepEqual((await db.query('select * from ebay_order_lines where id=$1',[id(11)])).rows[0],before);
+ await assert.rejects(write('reopen',detail.shipment,{note:'Reopen'}),/historical closeout/);
+ await close(2);assert.equal((await call('queue')).total,1,'newly completed orders still enter Packaging');
+ await db.query("insert into ebay_order_lines(id,order_id,item_title,quantity,fulfilled_quantity,line_status) values($1,$2,'New item',1,0,'pending')",[id(15),id(1)]);
+ await close();const ready=await call('queue');assert.equal(ready.total,2);assert.equal(ready.rows.find(r=>r.order_id===id(1)).item_count,1,'only the new item appears, already sent quantities are excluded');
+});
 test('activation cutoff, real local closure and provider updates never backfill historical orders',async()=>{
  await db.exec('update packaging_settings set enabled=false');await close();assert.equal((await call('queue')).total,0);
  await db.exec('update packaging_settings set enabled=true');await db.exec("update ebay_orders set tracking_number='9400100000000000000009',status='fulfilled' where order_number='order-1'");assert.equal((await call('queue')).total,0);
