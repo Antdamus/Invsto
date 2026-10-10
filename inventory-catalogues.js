@@ -1,6 +1,6 @@
 (() => {
  'use strict';
- const C=window.Catalogue,$=id=>document.getElementById(id),images=new Map(),inventory=new Map();
+ const C=window.Catalogue,$=id=>document.getElementById(id),images=new Map(),imageExpiry=new Map(),inventory=new Map();
  let client,record=null,chosen=[],catalogues=[],page=[],total=0,offset=0,tab='browse',dirty=false,busy=false,search='',queryVersion=0,previewWindow=null;
  const paths=i=>[...new Set([...(Array.isArray(i.photos)?i.photos:[]),i.photo_url].filter(p=>typeof p==='string' && p.trim()))];
  const eligible=i=>i && i.pricing_status!=='pending' && Number.isFinite(Number(i.sale_price)) && Number(i.sale_price)>0 && paths(i).length;
@@ -17,12 +17,12 @@
  async function signPhotos(items){
   const sign=new Map();
   for(const i of items)for(const path of paths(i)){
-   if(images.has(path))continue;
+   if(images.has(path) && imageExpiry.get(path)>Date.now())continue;
    if(/^https:\/\//i.test(path)){
-    try{const u=new URL(path);const match=u.pathname.match(/^\/storage\/v1\/object\/(?:sign|public|authenticated)\/photos\/(.+)$/);if(u.origin===window.SUPABASE_URL && match)sign.set(path,decodeURIComponent(match[1]));else images.set(path,C.safeImage(path));}catch{}
+    try{const u=new URL(path);const match=u.pathname.match(/^\/storage\/v1\/object\/(?:sign|public|authenticated)\/photos\/(.+)$/);if(u.origin===window.SUPABASE_URL && match)sign.set(path,decodeURIComponent(match[1]));else{images.set(path,C.safeImage(path));imageExpiry.set(path,Infinity);}}catch{}
    }else sign.set(path,path.replace(/^\/+/,''));
   }
-  if(sign.size){const{data,error}=await client.storage.from('photos').createSignedUrls([...new Set(sign.values())],1800);if(error)throw new Error('Item photos could not load. Try searching again.');const urls=new Map((data||[]).map(row=>[row.path,row.signedUrl]));for(const[path,key]of sign)if(urls.get(key))images.set(path,urls.get(key));}
+  if(sign.size){const{data,error}=await client.storage.from('photos').createSignedUrls([...new Set(sign.values())],1800);if(error)throw new Error('Item photos could not load. Try searching again.');const urls=new Map((data||[]).map(row=>[row.path,row.signedUrl]));for(const[path,key]of sign)if(urls.get(key)){images.set(path,urls.get(key));imageExpiry.set(path,Date.now()+20*60*1000);}}
  }
  function renderList(){
   $('catalogue-list').innerHTML=catalogues.length?catalogues.map(c=>`<button class="saved-card" data-open="${C.escape(c.id)}" aria-current="${record?.id===c.id}"><strong>${C.escape(c.title)}</strong><small>${c.status==='published'?'● Live link':'○ Private draft'} · ${c.items.length} pieces</small><small>Updated ${new Date(c.updated_at).toLocaleDateString()}</small></button>`).join(''):'<p class="manager-empty">Your saved catalogues will appear here.</p>';
