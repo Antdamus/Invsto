@@ -125,7 +125,8 @@
  function returnBadge(c){
   if(kind(c)!=='return')return '';
   const stage=returnStages[c.return_stage]||returnStages.unknown;
-  return `<span class="issue-tag issue-return-badge is-${stage.tone}">${escape(stage.label)}</span>`;
+  const refund=({refunded:{label:'Refunded · eBay',tone:'received'},partial:{label:'Partially refunded · eBay',tone:'waiting'},pending:{label:'Refund pending · eBay',tone:'waiting'},failed:{label:'Refund failed · eBay',tone:'action'}})[c.return_refund];
+  return `<span class="issue-tag issue-return-badge is-${stage.tone}">${escape(stage.label)}</span>`+(refund?`<span class="issue-tag issue-return-badge is-${refund.tone}">${escape(refund.label)}</span>`:'');
  }
  function nextText(c){
   if(['closed','cancelled'].includes(c.status)&&!c.open_tasks)return 'Closed · saved in History';
@@ -135,6 +136,7 @@
   if(c.status==='partially_received'&&kind(c)==='return')return 'Check the remaining items';
   if(closed(c)&&c.open_tasks)return 'Finish internal follow-up';
   if(closed(c))return 'Review the case outcome';
+  if(kind(c)==='return'&&c.return_refund==='failed')return 'Review the failed refund on eBay';
   if(c.source_lane==='case')return escalatedBadge(c)?.kind==='reviewing'?'Waiting for eBay’s decision':escalatedBadge(c)?.label==='eBay case opened'?'Review the eBay case':escalatedBadge(c)?.label||'Review the eBay case';
   if(c.source_lane==='payment_dispute'&&c.ebay_status==='ACTION_NEEDED')return 'Respond to the payment dispute';
   if(root.OGDisputeResponse?.badge(c)?.kind==='waiting')return 'Response submitted · awaiting outcome';
@@ -145,6 +147,8 @@
   if(kind(c)==='return'&&c.return_stage==='received')return 'Receipt saved · review the remaining case work';
   if(kind(c)==='return'&&c.return_stage==='awaiting_shipment')return 'Waiting for the buyer to ship';
   if(kind(c)==='return'&&c.return_stage==='in_transit')return 'Watch for the returned package';
+  if(kind(c)==='return'&&c.return_refund==='refunded')return 'Refund saved · review the remaining case work';
+  if(kind(c)==='return'&&c.return_refund==='pending')return 'Waiting for refund confirmation';
   if(kind(c)==='return'&&/READY_FOR_SHIPPING|ITEM_READY_TO_SHIP/.test(c.ebay_status||''))return 'Waiting for the buyer to ship';
   if(kind(c)==='return'&&/^(ITEM_SHIPPED|RETURN_SHIPPED)$/.test(c.ebay_status||''))return 'Watch for the returned package';
   if(/WAITING.*BUYER|BUYER_RESPONSE/i.test(c.ebay_status||''))return 'Waiting on the buyer';

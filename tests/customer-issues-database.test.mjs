@@ -70,6 +70,8 @@ before(async()=>{
  await db.exec(await sqlFile('20261010040000_customer_issue_return_stages.sql'));
  await db.exec(await sqlFile('20261010050000_customer_issue_closed_outcomes.sql'));
  await db.exec(await sqlFile('20261010060000_customer_issue_escalated_badges.sql'));
+ await db.exec(await sqlFile('20261010070000_customer_issue_task_notes.sql'));
+ await db.exec(await sqlFile('20261010080000_customer_issue_refund_badges.sql'));
 
 });
 after(async()=>db?.close());
@@ -89,6 +91,68 @@ const receive=(key=200,qty=1,disposition='restock',caseId=100)=>scalar('select r
  id(key),id(caseId),JSON.stringify([{order_line_id:id(11),received_quantity:qty,condition_received:'used_good',disposition,destination_location_id:disposition==='restock'?id(30):null,notes:'Inspected'}]),
  '[{"bucket":"ebay-return-evidence","path":"test/photo.jpg"}]','Received carefully','TRACK1']);
 const stock=()=>scalar('select coalesce(sum(quantity),0)::int v from item_stock_locations');
+
+test('refund badges use actual eBay return refunds and stay independent of delivery and local case closure',async()=>{
+ const raw={ebayReturnId:'12345',returnState:'CLOSED',ebayDetail:{refundInfo:{actualRefundDetail:{refundStatus:'SUCCESS',actualRefund:{totalAmount:{value:120,currency:'USD'}},outstandingAmount:{value:0}}},returnShipmentInfo:{shipmentTracking:{active:true,deliveryStatus:'DELIVERED'}}}};
+ await db.query("update ebay_return_cases set ebay_status='CLOSED',raw_payload=$1",[JSON.stringify(raw)]);
+ let data=await scalar("select list_customer_issues('return','all','',0,30,'newest','all') v");
+ assert.equal(data.rows[0].return_refund,'refunded');assert.equal(data.rows[0].return_stage,'delivered');assert.equal(data.rows[0].status,'open');
+ assert.equal(await scalar('select count(*)::int v from ebay_return_events'),0);assert.equal(await stock(),0);
+ delete raw.ebayDetail.refundInfo.actualRefundDetail.refundStatus;
+ await db.query('update ebay_return_cases set raw_payload=$1',[JSON.stringify(raw)]);
+ data=await scalar("select list_customer_issues('return','all','',0,30,'newest','delivered') v");assert.equal(data.rows[0].return_refund,'refunded','legacy actual refund amount is sufficient when eBay omits the status');
+ await db.exec("update ebay_return_cases set status='closed'");data=await scalar("select list_customer_issues('history','all','',0,30,'newest','all') v");assert.equal(data.rows[0].return_refund,'refunded');
+});
+
+test('refund classification distinguishes partial, pending, failed, unknown and mismatched return data',async()=>{
+ const evaluate=(status,raw,lane='return')=>scalar('select customer_issue_return_refund($1,$2,$3,$4) v',[lane,'12345',status,JSON.stringify(raw)]);
+ const raw={ebayReturnId:'12345',ebayDetail:{refundInfo:{actualRefundDetail:{refundStatus:'SUCCESS',actualRefund:{totalAmount:{value:120}},outstandingAmount:{value:50}}}}};
+ assert.equal(await evaluate('OPEN',raw),'partial');
+ for(const [refundStatus,expected] of [['PENDING','pending'],['FAILED','failed'],['UNKNOWN',null],['REQUESTED',null]]){
+  raw.ebayDetail.refundInfo.actualRefundDetail.refundStatus=refundStatus;assert.equal(await evaluate('CLOSED',raw),expected);
+ }
+ for(const [returnState,expected] of [['LESS_THAN_A_FULL_REFUND_ISSUED','partial'],['PARTIAL_REFUNDED','partial'],['REFUND_INITIATED','pending'],['REFUND_SENT_PENDING_CONFIRMATION','pending'],['REFUND_FAILED','failed'],['CLOSED',null]])assert.equal(await evaluate('OPEN',{ebayReturnId:'12345',returnState}),expected);
+ for(const value of ['unknown','',0,-10])assert.equal(await evaluate('CLOSED',{ebayReturnId:'12345',ebayDetail:{refundInfo:{actualRefundDetail:{actualRefund:{totalAmount:{value}}}}}}),null);
+ const estimated={ebayReturnId:'12345',ebayDetail:{refundInfo:{estimatedRefundDetail:{totalAmount:{value:120}},provisionalRefund:{refundStatus:'SUCCESS'}}}};
+ assert.equal(await evaluate('CLOSED',estimated),null,'closed alone, estimated and provisional refunds are not proof');
+ raw.ebayDetail.refundInfo.actualRefundDetail.refundStatus='SUCCESS';
+ assert.equal(await evaluate('CLOSED',{...raw,ebayReturnId:'different'}),null);assert.equal(await evaluate('CLOSED',raw,'payment_dispute'),null);
+ raw.ebayDetail.returnId='different';assert.equal(await evaluate('CLOSED',raw),null);
+ assert.equal(await evaluate('PARTIAL_REFUND_FAILED',{}),'failed');
+});
+
+test('task notes use exact case links, paginate and retain current status and unique evidence without writing notes',async()=>{
+ await db.exec(`insert into ebay_return_cases(id,source_lane,status) values('${id(101)}','case','open');
+  insert into ebay_return_tasks(id,return_case_id,title,question,status,created_at,assigned_to_user_id,created_by) values
+  ('${id(201)}','${id(100)}','Review','Inspect condition','assigned','2026-10-10','${id(1)}','${id(2)}'),
+  ('${id(202)}','${id(100)}','Earlier','Inspect serial','resolved','2026-10-09','${id(2)}','${id(1)}'),
+  ('${id(203)}','${id(101)}','Other case','Do not include','assigned','2026-10-10','${id(1)}','${id(2)}');
+  insert into ebay_return_task_events(task_id,return_case_id,action,photo_attachments) values
+  ('${id(201)}','${id(100)}','created','[{"bucket":"evidence","path":"photo.jpg"},{"path":"clip.mp4"}]'),
+  ('${id(201)}','${id(100)}','commented','[{"bucket":"evidence","path":"photo.jpg"},{}]');`);
+ let data=await scalar('select customer_issue_task_notes($1,$2,$3) v',[[id(100)],1,0]);
+ assert.equal(data[0].task_count,2);assert.equal(data[0].tasks.length,1);assert.equal(data[0].tasks[0].id,id(201));assert.equal(data[0].tasks[0].attachment_count,2);
+ assert.equal(data[0].tasks[0].question,'Inspect condition');assert.equal(data[0].tasks[0].assigned_to_user_id,id(1));
+ data=await scalar('select customer_issue_task_notes($1,$2,$3) v',[[id(100)],1,1]);assert.equal(data[0].tasks[0].id,id(202));
+ await db.query("update ebay_return_tasks set status='completed_by_employee',latest_note='Finished inspection' where id=$1",[id(201)]);
+ data=await scalar('select customer_issue_task_notes($1) v',[[id(100)]]);assert.equal(data[0].tasks[0].status,'completed_by_employee');assert.equal(data[0].tasks[0].latest_note,'Finished inspection');
+ assert.equal(await scalar('select count(*)::int v from ebay_return_events'),0);assert.equal(await stock(),0);
+ await db.query("update ebay_return_tasks set metadata='{\"hidden_from_task_board\":true}' where id=$1",[id(202)]);
+ assert.equal((await scalar('select customer_issue_task_notes($1) v',[[id(100)]]))[0].task_count,1);
+});
+
+test('task notes preserve task/event RLS and require authenticated customer-issue access',async()=>{
+ await db.exec(`insert into ebay_return_tasks(id,return_case_id,title) values('${id(201)}','${id(100)}','Visible'),('${id(202)}','${id(100)}','Restricted');
+  insert into ebay_return_task_events(task_id,return_case_id,action,photo_attachments) values('${id(201)}','${id(100)}','created','[{"path":"private.jpg"}]');
+  create policy test_task_notes_restricted on ebay_return_tasks as restrictive for select to authenticated using(id<>'${id(202)}');
+  create policy test_task_notes_evidence_restricted on ebay_return_task_events as restrictive for select to authenticated using(false);
+  set role authenticated;`);
+ try{
+  const rows=await scalar('select customer_issue_task_notes($1) v',[[id(100)]]);assert.equal(rows[0].task_count,1);assert.equal(rows[0].tasks[0].attachment_count,0);
+  await db.exec("select set_config('test.access','no',false)");assert.deepEqual(await scalar('select customer_issue_task_notes($1) v',[[id(100)]]),[]);
+  await db.exec("select set_config('test.access','yes',false);select set_config('test.actor','',false)");assert.deepEqual(await scalar('select customer_issue_task_notes($1) v',[[id(100)]]),[]);
+ }finally{await db.exec('reset role;drop policy test_task_notes_restricted on ebay_return_tasks;drop policy test_task_notes_evidence_restricted on ebay_return_task_events');}
+});
 
 test('case notes preserve status, ownership, stock and provider data and retry only once',async()=>{
  const before=await scalar('select to_jsonb(c) v from ebay_return_cases c');

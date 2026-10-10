@@ -41,6 +41,18 @@ test('return badges distinguish provider delivery from confirmed local receipt a
  assert.equal(returnBadge({...c,issue_kind:'dispute'}),'');
  assert.ok(cardStatus({...c,ebay_due_at:'2026-10-11T10:00:00Z',overdue:true}).includes('eBay deadline overdue'),'shipping badge does not suppress an actionable deadline');
 });
+
+test('return refund badges coexist with delivery and do not claim pending or partial refunds are complete',()=>{
+ const {returnBadge}=sandbox.OGCustomerIssues.testing,c={...payment,source_lane:'return',issue_kind:'return',ebay_status:'ITEM_DELIVERED',return_stage:'delivered',return_refund:'refunded'};
+ assert.match(returnBadge(c),/Delivered · eBay/);assert.match(returnBadge(c),/Refunded · eBay/);
+ assert.equal(nextText(c),'Confirm receipt and inspect the returned items','refund does not bypass physical inspection');
+ for(const [return_refund,label] of [['partial','Partially refunded'],['pending','Refund pending'],['failed','Refund failed']]){
+  const html=returnBadge({...c,return_refund});assert.match(html,/Delivered · eBay/);assert.ok(html.includes(label));assert.ok(!html.includes('>Refunded ·'));
+ }
+ assert.ok(!returnBadge({...c,return_refund:null}).includes('Refund'));
+ assert.equal(returnBadge({...c,issue_kind:'dispute'}),'');
+ assert.equal(nextText({...c,return_stage:'unknown',ebay_action:'SELLER_ISSUE_REFUND'}),'Refund saved · review the remaining case work');
+});
 test('customer names stay distinct from usernames; return addresses retain recipient, unit and postal code safely',()=>{
  const {customerContact}=sandbox.OGCustomerIssues.testing,c={issue_kind:'return',order_id:'order',customer_name:'Alex <Taylor>',shipping_name:'Robin Taylor',shipping_address:{line1:'123 Example Lane',line2:'Apt 4 & 5',city:'Boston',state:'MA',postal_code:'02108',country:'US'}};
  const html=customerContact(c);assert.ok(html.includes('Alex &lt;Taylor&gt;'));assert.ok(html.includes('Recipient: Robin Taylor'));assert.ok(html.includes('Apt 4 &amp; 5'));assert.ok(html.includes('Boston, MA 02108'));assert.ok(html.includes('Original shipping address'));
