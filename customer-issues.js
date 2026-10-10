@@ -519,7 +519,7 @@
   ctx=context;db=ctx.supabase;ready=true;
   root.OGReturnReceiving?.init({db,ctx,openCase,feedback});
   try{people=checked(await db.from('employees').select('user_id,email,display_name,role,active').eq('active',true).order('display_name')).filter(p=>p.user_id);}catch{people=[ctx.employee];}
-  root.OGCaseNotes?.init({db,people});
+  root.OGCaseNotes?.init({db,people,userId:ctx.user.id});
   $('issues-workspace').addEventListener('click',e=>{
    const b=e.target.closest('button');if(!b||saving)return;
    if(b.dataset.issueView){clearBulk();view=b.dataset.issueView;offset=0;closeCase();refresh({detail:false});}

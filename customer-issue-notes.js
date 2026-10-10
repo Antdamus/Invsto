@@ -4,7 +4,7 @@
  const escape=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const date=v=>new Date(v).toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
  const checked=r=>{if(r.error)throw r.error;return r.data;};
- const states=new Map();let db,people=[],workspace;
+ const states=new Map();let db,people=[],workspace,userId='';
  const phone=()=>!!root.matchMedia?.('(max-width:900px)').matches;
  const author=n=>people.find(p=>p.user_id===n.signed_by)?.display_name||n.signed_by_email||'Staff';
  function state(id){if(!states.has(id))states.set(id,{notes:[],count:0,tasks:[],taskCount:0,taskError:'',tasksLoading:false,taskRevision:0,expanded:undefined,editing:false,draft:'',request:null,busy:false,loading:false,error:'',status:'',revision:0});return states.get(id);}
@@ -13,7 +13,7 @@
  function taskEntry(t,compact=false){
   const instructions=String(t.question||t.title||'Case follow-up').trim(),update=String(t.latest_note||'').trim();
   const status=({completed_by_employee:'Awaiting review',waiting_on_admin:'Decision needed',resolved:'Finished',cancelled:'Canceled'})[t.status]||String(t.status||'open').replace(/_/g,' ');
-  const responsible=root.OGTaskWorkflow?.label(t,people)||people.find(p=>p.user_id===t.assigned_to_user_id)?.display_name||t.assigned_to_email||'Unassigned';
+  const responsible=root.OGTaskWorkflow?.label(t,people,userId)||people.find(p=>p.user_id===t.assigned_to_user_id)?.display_name||t.assigned_to_email||'Unassigned';
   const creator=people.find(p=>p.user_id===t.created_by)?.display_name||t.created_by_email;
   return `<article class="issue-note-entry issue-task-note ${compact?'is-compact':''}" data-note-task="${escape(t.id)}"><header><strong>Task · ${escape(responsible)}</strong><span class="issue-task-note-status">${escape(status)}</span></header><p>${escape(instructions)}</p>${update&&update!==instructions?`<p class="issue-task-note-update"><b>Update:</b> ${escape(update)}</p>`:''}<footer><span>Created ${escape(date(t.created_at))}${creator?` · ${escape(creator)}`:''}</span><a href="team-tasks.html?taskId=${encodeURIComponent(t.id)}" aria-label="Open task: ${escape(instructions)}">${Number(t.attachment_count)>0?`${Number(t.attachment_count)} file${Number(t.attachment_count)===1?'':'s'} · `:''}Open task ↗</a></footer></article>`;
  }
@@ -88,7 +88,7 @@
   finally{s.busy=false;repaint(id);}
  }
  function init(options){
-  db=options.db;people=options.people||[];workspace=document.getElementById('issues-workspace');
+  db=options.db;people=options.people||[];userId=options.userId||'';workspace=document.getElementById('issues-workspace');
   workspace.addEventListener('click',e=>{
    const b=e.target.closest('button'),panel=b?.closest('[data-note-case]');if(!panel)return;
    const id=panel.dataset.noteCase,variant=panel.dataset.noteVariant,s=state(id);if(s.busy)return;

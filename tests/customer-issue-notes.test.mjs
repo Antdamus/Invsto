@@ -84,3 +84,8 @@ test('task loading errors do not hide manual notes or pretend that no tasks exis
  const notes=setup(async()=>({data:[{case_id:'case',note_count:1,notes:[{id:'n',notes:'Checked delivery'}]}]}),true,async()=>({error:{message:'Unavailable'}}));
  await notes.load(['case']);const html=notes.card({id:'case'});assert.match(html,/Checked delivery/);assert.match(html,/Tasks unavailable/);assert.match(html,/Retry loading tasks/);
 });
+
+test('unassigned tasks never imply that the current viewer is responsible',async()=>{
+ const notes=setup(async()=>({data:[]}),true,async()=>({data:[{case_id:'case',task_count:1,tasks:[{id:'task',question:'Inspect return',status:'open',created_at:'2026-10-10',assigned_to_user_id:null}]}]}));
+ await notes.load(['case']);const html=notes.card({id:'case'});assert.match(html,/Task · Next: Unassigned/);assert.ok(!html.includes('Next: You'));
+});
