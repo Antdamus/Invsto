@@ -3142,6 +3142,7 @@ function hydratePendingOrderExtrasInBackground(lines = []) {
   const snapshot = [...lines];
   Promise.allSettled([
     window.PendingInventory?.load(lines),
+    window.OGOrderWatches?.load(lines),
     hydrateOrderVideoReceipts(snapshot),
     hydrateOrderTaskAssignments(snapshot),
     hydrateQueueVideoReceiptCoverage(snapshot),
@@ -4605,6 +4606,7 @@ function renderOrders(options = {}) {
       </div>
       <div class="buyer-card-meta">
         <span data-group-item-search>${renderGroupItemSearch(group.lines)}</span>
+        <span data-watch-buyer="${escapeHtml(group.key)}">${window.OGOrderWatches?.summary(group.lines) || ""}</span>
         ${renderQueueCompletionPhotoMarker(attachmentGroups.get(group.key))}
         ${renderQueueShippingLabelMarker(attachmentGroups.get(group.key))}
         <span class="buyer-card-meta-pill">Placed ${escapeHtml(formatGroupOrderDate(group, "sale_date"))}</span>
@@ -4835,6 +4837,7 @@ function renderOrders(options = {}) {
         <span class="buyer-line-main">
           <span class="buyer-line-copy">
             <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+            <span class="line-watch-control" data-watch-line="${escapeHtml(line.id)}">${window.OGOrderWatches?.line(line) || ""}</span>
             <span data-item-search-status="${escapeHtml(line.id)}">${renderItemSearchStatus(line)}</span>
             <span class="buyer-line-order-details">
               ${orderNumberMarkup}
@@ -13336,6 +13339,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   markEbayTransferReceiverReady();
   startItemSearchUpdates();
+  window.OGOrderWatches?.start();
   getReceiptPreviewJobs()?.start();
   if (window.lucide) window.lucide.createIcons();
 });

@@ -3919,6 +3919,15 @@ body.pending-order-detail-open .mobile-detail-close {
   min-width: 0;
 }
 
+.line-watch-control{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0}
+.line-watch-toggle{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:9px 13px;border:1px solid #796c4c;border-radius:12px;background:#e9d0990b;color:#e9d099;font:inherit;font-size:13px;font-weight:650;cursor:pointer;max-width:100%;text-align:left}
+.line-watch-toggle[aria-pressed="true"]{background:#ead19824;border-color:#dfbb6a;color:#ffe0a2}
+.line-watch-toggle:hover:not(:disabled){background:#ead19835}
+.line-watch-toggle:focus-visible{outline:2px solid #ffe0a2;outline-offset:3px}
+.line-watch-toggle:disabled{opacity:.6;cursor:default}
+.line-watch-toggle svg,.watch-order-marker svg{flex-shrink:0}
+.watch-order-marker{display:inline-flex;align-items:center;gap:6px;border-color:#cfb575!important;background:#ead19820!important;color:#ffe0a2!important}
+.line-watch-error{color:#f2b4a8;font-size:12px;max-width:100%}.line-watch-error button{color:inherit;background:none;border:0;text-decoration:underline;cursor:pointer;min-height:44px;padding:6px 10px}
 .buyer-line-actions {
   display: flex !important;
   flex-wrap: wrap;
