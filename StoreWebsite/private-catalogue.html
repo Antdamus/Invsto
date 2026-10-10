@@ -4,7 +4,7 @@
 <head>
  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
  <meta name="theme-color" content="#14241f"><meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
- <title>A private selection · OG Jewelers</title><link rel="stylesheet" href="https://antdamus.github.io/Invsto/catalogue.css?v=20261010-2">
+ <title>A private selection · OG Jewelers</title><link rel="stylesheet" href="https://antdamus.github.io/Invsto/catalogue.css?v=20261010-requests">
 </head>
 <body class="client-catalogue">
  <header class="brand-header"><a class="brand" href="#" aria-label="OG Jewelers catalogue"><span class="brand-monogram">OG</span><span>OG JEWELERS<small>A PERSONAL SELECTION</small></span></a><button id="selection-open" disabled>Your selection <b id="selection-count">0</b></button></header>
@@ -22,6 +22,20 @@
  <footer class="catalogue-footer"><span class="brand-monogram">OG</span><p>Chosen with care. Made to be treasured.</p><small>A selection is not a purchase or reservation. Please contact the store to confirm availability and complete your purchase. Credit shown applies to this catalogue selection; it is not an account balance. Taxes and shipping, if applicable, are confirmed by the store.</small></footer>
  <aside id="selection-bar" class="selection-bar" hidden aria-label="Selection totals"><div><small>YOUR SELECTION</small><strong id="bar-total"></strong></div><div id="bar-credit-wrap" hidden><small>CREDIT REMAINING</small><strong id="bar-credit"></strong></div><div><small id="bar-due-label">TOTAL</small><strong id="bar-due"></strong></div><button id="review-selection">Review <span id="bar-count"></span> →</button></aside>
  <dialog id="piece-dialog" class="piece-dialog"><button class="dialog-close" data-close="piece-dialog" aria-label="Close item details">✕</button><div id="piece-detail"></div></dialog>
- <dialog id="selection-dialog" class="selection-dialog"><div class="dialog-heading"><h2>Your selection</h2><button class="dialog-close" data-close="selection-dialog" aria-label="Close selection">✕</button></div><p class="selection-explainer">Your favorite pieces, together. Share this selection with the store when you are ready.</p><div id="selection-items"></div><div id="selection-totals"></div><button id="copy-selection" class="dark-button">Copy selection for the store</button><p id="selection-message" role="status"></p><p class="selection-explainer">Copying does not send a message, place an order, reserve inventory, or redeem credit.</p></dialog>
- <script src="https://antdamus.github.io/Invsto/catalogue-core.js?v=20261010-2"></script><script src="https://antdamus.github.io/Invsto/catalogue-client.js?v=20261010-2"></script>
+ <dialog id="selection-dialog" class="selection-dialog" aria-labelledby="selection-heading">
+  <div class="dialog-heading"><div><p class="eyebrow">YOUR PERSONAL COLLECTION</p><h2 id="selection-heading">The pieces you love.</h2></div><button class="dialog-close" data-close="selection-dialog" aria-label="Close selection">✕</button></div>
+  <div class="selection-steps" aria-label="Selection steps"><span id="review-step" class="current">01 · Your selection</span><span id="contact-step">02 · A few details</span></div>
+  <div id="selection-review"><p class="selection-explainer">Review your favorites. Our team will personally confirm your selection and the next steps.</p><div id="selection-items"></div><div id="selection-totals"></div><button id="continue-selection" class="dark-button">Continue to your details →</button></div>
+  <form id="selection-form" hidden>
+   <p id="send-summary" class="send-summary"></p>
+   <label>Your name<input id="client-name" autocomplete="name" minlength="2" maxlength="120" required placeholder="Full name"></label>
+   <label>Email or phone number<input id="client-contact" autocomplete="email" minlength="5" maxlength="254" required placeholder="How can we reach you?"></label>
+   <label>How would you like to receive your pieces?<select id="client-delivery"><option value="discuss">Discuss with the team</option><option value="pickup">Collect in store</option><option value="shipping">Shipping</option></select></label>
+   <label>A note for us <span>Optional</span><textarea id="client-note" rows="3" maxlength="2000" placeholder="A question, a special occasion, or anything we should know…"></textarea></label>
+   <button id="send-selection" class="dark-button" type="submit">Send selection for approval</button><button id="back-selection" type="button" class="quiet-button">← Back to your pieces</button>
+  </form>
+  <p id="selection-message" role="status" aria-live="polite"></p><p class="selection-explainer">No payment is taken here. Availability, credit and any shipping or taxes are confirmed by the store before checkout.</p>
+ </dialog>
+ <dialog id="receipt-dialog" class="selection-dialog receipt-dialog" aria-labelledby="receipt-heading"><button class="dialog-close" data-close="receipt-dialog" aria-label="Close request status">✕</button><div class="receipt-seal" aria-hidden="true">OG</div><p class="eyebrow">YOUR PRIVATE REQUEST</p><h2 id="receipt-heading">Beautiful choices.</h2><p id="receipt-description"></p><div id="receipt-content"></div><p id="receipt-error" role="status"></p><div class="receipt-actions"><button id="edit-request" class="dark-button" hidden>Revise your selection →</button><button id="copy-status-link" class="dark-button">Copy your private status link</button><button id="refresh-request" class="quiet-button">Refresh status</button></div><p class="selection-explainer">Keep this private link to check our reply. Anyone with this link can view this request. We may also contact you using the details you provided.</p></dialog>
+ <script src="https://antdamus.github.io/Invsto/catalogue-core.js?v=20261010-requests"></script><script src="https://antdamus.github.io/Invsto/catalogue-client.js?v=20261010-requests2"></script>
 </body></html>
