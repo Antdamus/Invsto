@@ -68,6 +68,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261010020000_customer_issue_response_badges.sql'));
  await db.exec(await sqlFile('20261010030000_customer_issue_customer_cards.sql'));
  await db.exec(await sqlFile('20261010040000_customer_issue_return_stages.sql'));
+ await db.exec(await sqlFile('20261010050000_customer_issue_closed_outcomes.sql'));
 
 });
 after(async()=>db?.close());
@@ -493,6 +494,20 @@ test('evidence excludes internal messages, voided certificates, removed packagin
 
 
 const listIssues=(sort='newest',view='attention',offset=0,limit=30)=>scalar('select list_customer_issues($1,$2,$3,$4,$5,$6) v',[view,'all','',offset,limit,sort]);
+test('closed dispute outcome is projected only for its exact provider identity and stays active until archived',async()=>{
+ await db.exec(`update ebay_return_cases set source_lane='payment_dispute',issue_kind='dispute',ebay_status='CLOSED',raw_payload='{"ebayDetail":{"paymentDisputeId":"12345","resolution":{"reasonForClosure":"SELLER_WON","protectedAmount":{"value":"167.00"}}}}'`);
+ let row=(await listIssues()).rows[0];assert.equal(row.resolution_reason,'SELLER_WON');assert.equal(row.status,'open');assert.equal(row.active,true);assert.equal(row.raw_payload,undefined);
+ assert.equal((await listIssues('newest','history')).total,0);
+ await db.exec("update ebay_return_cases set raw_payload=jsonb_set(raw_payload,'{ebayDetail,paymentDisputeId}','\"another\"')");row=(await listIssues()).rows[0];assert.equal(row.resolution_reason,null);
+ await db.exec("update ebay_return_cases set status='closed'");assert.equal((await listIssues()).total,0);assert.equal((await listIssues('newest','history')).total,1);
+});
+test('dispute protection and no-response summary are scoped to exact provider detail and current status',async()=>{
+ await db.exec(`update ebay_return_cases set source_lane='payment_dispute',issue_kind='dispute',ebay_status='OPEN',raw_payload='{"ebayDetail":{"paymentDisputeId":"12345","availableChoices":[],"sellerResponseDue":{},"resolution":{"protectionStatus":"FULLY_PROTECTED"}}}'`);
+ let row=(await listIssues()).rows[0];assert.equal(row.protection_status,'FULLY_PROTECTED');assert.equal(row.dispute_no_response_needed,true);assert.equal(row.active,true);assert.equal(row.raw_payload,undefined);
+ await db.exec("update ebay_return_cases set ebay_status='ACTION_NEEDED'");row=(await listIssues()).rows[0];assert.equal(row.dispute_no_response_needed,false);
+ await db.exec("update ebay_return_cases set ebay_status='OPEN',raw_payload=jsonb_set(raw_payload,'{ebayDetail,sellerResponseDue}','{\"respondByDate\":\"2026-10-14\"}')");assert.equal((await listIssues()).rows[0].dispute_no_response_needed,false);
+ await db.exec("update ebay_return_cases set raw_payload=jsonb_set(raw_payload,'{ebayDetail,paymentDisputeId}','\"another\"')");row=(await listIssues()).rows[0];assert.equal(row.protection_status,null);assert.equal(row.dispute_no_response_needed,false);
+});
 test('return progress uses current return evidence and never invents transit from a label or replacement',async()=>{
  const stage=(status='OPEN',raw={},local='open',kind='return')=>scalar('select customer_issue_return_stage($1,$2,$3,$4) v',[kind,local,status,JSON.stringify(raw)]);
  assert.equal(await stage('READY_FOR_SHIPPING',{returnState:'ITEM_READY_TO_SHIP',returnTrackingNumber:'LABEL-ONLY',returnLifecycleStage:'shipped'}),'awaiting_shipment');

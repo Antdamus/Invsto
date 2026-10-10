@@ -164,7 +164,7 @@ test('closing a case archives it without redirecting or filtering the working li
  const page=await open(t,390);
  await page.evaluate(()=>fixtureUpdateCase({ebay_status:'CLOSED'}));
  await page.locator('.issue-card').first().click();
- await page.getByRole('button',{name:'Mark closed',exact:true}).click();
+ await page.getByRole('button',{name:'Finish & archive',exact:true}).click();
  await expect(page.getByRole('heading',{name:'Move to History',exact:true})).toBeVisible();
  await expect(page.getByRole('combobox',{name:'Person responsible'})).toHaveCount(0);
  await page.getByRole('button',{name:'Mark closed & move to History',exact:true}).click();
@@ -193,7 +193,7 @@ for(const width of [390,1366])test(`single close ${width}px keeps filters, secon
  await page.locator('[data-case="case-31"]').scrollIntoViewIfNeeded();
  const top=await page.locator('[data-case="case-31"]').evaluate(e=>e.getBoundingClientRect().top);
  await page.locator('[data-case="case-31"]').click();
- await page.getByRole('button',{name:'Mark closed',exact:true}).click();
+ await page.getByRole('button',{name:'Finish & archive',exact:true}).click();
  await page.getByRole('checkbox',{name:'Everything is resolved; no further follow-up is needed.'}).check();
  await page.getByRole('button',{name:'Mark closed & move to History',exact:true}).click();
  await expect(page.locator('#issues-feedback')).toContainText('Case saved in History.');

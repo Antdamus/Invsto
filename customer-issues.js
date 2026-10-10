@@ -116,6 +116,8 @@
   if(closed(c))return 'Review the case outcome';
   if(c.source_lane==='payment_dispute'&&c.ebay_status==='ACTION_NEEDED')return 'Respond to the payment dispute';
   if(root.OGDisputeResponse?.badge(c)?.kind==='waiting')return 'Response submitted · awaiting outcome';
+  if(root.OGDisputeResponse?.badge(c)?.kind==='protected')return 'Awaiting outcome';
+  if(root.OGDisputeResponse?.badge(c)?.kind==='no_response')return 'No response needed · awaiting outcome';
   if(c.source_lane==='payment_dispute'&&c.ebay_status==='OPEN')return 'Monitor payment-dispute updates';
   if(kind(c)==='return'&&c.return_stage==='delivered')return 'Confirm receipt and inspect the returned items';
   if(kind(c)==='return'&&c.return_stage==='received')return 'Receipt saved · review the remaining case work';
@@ -127,11 +129,17 @@
   if(c.ebay_action&&!/^\d{4}-\d{2}-\d{2}T/i.test(c.ebay_action))return nice(c.ebay_action);
   return c.next_user?'Continue assigned work':'Choose the next person';
  }
+ function providerBadge(c){return root.OGDisputeResponse?.badge(c)||(closed(c)?{kind:'closed',label:'Closed on eBay'}:null);}
+ function providerBadgeHtml(c){
+  const badge=providerBadge(c),protection=root.OGDisputeResponse?.protection(c);
+  return (badge?`<span class="issue-tag issue-response-badge is-${badge.kind}">${escape(badge.label)}</span>`:'')+
+   (protection&&badge?.kind!=='protected'&&badge?.kind!=='action'?`<span class="issue-tag issue-response-badge is-${protection.kind}">${escape(protection.label)}</span>`:'');
+ }
  function cardStatus(c){
-  const badge=root.OGDisputeResponse?.badge(c),next=nextText(c);
-  const state=badge?`<span class="issue-tag issue-response-badge is-${badge.kind}">${escape(badge.label)}</span>`:'';
+  const badge=providerBadge(c),next=nextText(c);
+  const state=providerBadgeHtml(c);
   const nextTag=badge&&(next===badge.label||next==='Respond to the payment dispute')?'':`<span class="issue-tag">${escape(next)}</span>`;
-  const deadline=badge?.kind==='waiting'||closed(c)?'':c.ebay_due_at?`<span class="issue-tag ${c.overdue?'is-overdue':''}">${c.overdue?'eBay deadline overdue':'eBay deadline'} ${escape(date(c.ebay_due_at))}</span>`:'<span class="issue-tag">eBay deadline not provided</span>';
+  const deadline=['waiting','protected','no_response'].includes(badge?.kind)||closed(c)?'':c.ebay_due_at?`<span class="issue-tag ${c.overdue?'is-overdue':''}">${c.overdue?'eBay deadline overdue':'eBay deadline'} ${escape(date(c.ebay_due_at))}</span>`:'<span class="issue-tag">eBay deadline not provided</span>';
   return returnBadge(c)+state+nextTag+deadline;
  }
  function cards(){
@@ -307,15 +315,15 @@
    <section class="issue-original-order"><div><small>ORIGINAL ORDER</small><strong>${escape(c.order_number||'Not identified yet')}</strong><span>${c.order_id?`${lines.length} linked item${lines.length===1?'':'s'} · Saved in Invsto`:c.order_number?'Not found in saved orders yet':'Match the original order to see its evidence'}</span></div>${c.order_number?`<a class="secondary-btn" href="ebay-order-history.html?orderHistorySearch=${encodeURIComponent(c.order_number)}&historyAllDates=true">Open full order ↗</a>`:''}</section>
    ${kind(c)==='return'&&summary.return_stage?`<div class="issue-return-summary">${returnBadge(summary)}<small>eBay delivery is separate from receipt and inspection in Invsto.</small></div>`:''}
    <section id="issue-case-notes" class="issue-case-notes">${root.OGCaseNotes?.section(c)||''}</section>
-   <div class="issue-next"><span>NEXT STEP</span><strong>${escape(nextText({...summary,raw_payload:c.raw_payload}))}</strong><p>${['closed','cancelled'].includes(c.status)&&!summary.open_tasks?'This record is saved in History. Its evidence and activity are preserved.':closed(c)?'eBay has closed its case. If everything is resolved, mark it closed to move it to History.':'Keep the case open until the customer issue and your internal work are both handled.'}</p></div>
-   <div class="issue-facts"><div><small>Item value</small><b>${escape(money(summary))}</b></div><div><small>Order placed</small><b>${escape(summary.order_placed_at?new Date(summary.order_placed_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'Not provided')}</b></div><div><small>eBay status</small><b>${escape(root.OGDisputeResponse?.response(c)?.waiting?'Open · response submitted':nice(c.ebay_status))}</b></div><div><small>eBay deadline</small><b>${escape(date(c.ebay_due_at))}</b></div></div>
+   <div class="issue-next">${providerBadge(c)?`<div class="issue-provider-outcome">${providerBadgeHtml(c)}</div>`:''}<span>NEXT STEP</span><strong>${escape(nextText({...summary,raw_payload:c.raw_payload}))}</strong><p>${['closed','cancelled'].includes(c.status)&&!summary.open_tasks?'This record is saved in History. Its evidence and activity are preserved.':closed(c)?'eBay has closed its case. Keep it here while internal work remains, or finish and archive it when everything is handled.':['protected','no_response'].includes(providerBadge(c)?.kind)?'No response is currently requested by eBay. This dispute is still awaiting an outcome; updates continue automatically. Any internal tasks remain separate.':'Keep the case open until the customer issue and your internal work are both handled.'}</p></div>
+   ${ctx.employee.role==='admin'&&(closed(c)||!c.ebay_return_id)&&(!['closed','cancelled'].includes(c.status)||tasks.some(t=>!finish.has(t.status)))?'<section class="issue-closeout"><div><strong>All internal work finished?</strong><p>Save the case and its evidence in History. No new task is needed.</p></div><button type="button" class="primary-btn" data-finish-case>Finish &amp; archive</button></section>':''}<div id="issue-close-form-slot"></div>
+   <div class="issue-facts"><div><small>Item value</small><b>${escape(money(summary))}</b></div><div><small>Order placed</small><b>${escape(summary.order_placed_at?new Date(summary.order_placed_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'Not provided')}</b></div><div><small>eBay status</small><b>${escape(root.OGDisputeResponse?.response(c)?.waiting?'Open · response submitted':nice(c.ebay_status))}</b></div><div><small>eBay deadline</small><b>${escape(closed(c)||['waiting','protected','no_response'].includes(providerBadge(c)?.kind)?'No current response deadline':date(c.ebay_due_at))}</b></div></div>
    <p class="issue-review-meta">Opened ${escape(date(c.opened_at))}<br>Last eBay update ${escape(date(c.synced_at))} · Internal status: ${escape(nice(c.status))}</p>
    ${c.sync_error?`<p class="issue-tag is-stale">Update failed. The previous case information was kept. ${escape(c.sync_error)}</p>`:''}
    <div class="issue-actions">${c.issue_kind==='return'&&remaining&&lines.some(l=>l.line_status==='fulfilled')&&!['closed','cancelled'].includes(c.status)?'<button class="primary-btn" data-receive>Receive returned items</button>':''}
     ${url?`<a class="secondary-btn" href="${escape(url)}" target="_blank" rel="noopener">${caseLinkLabel(c,url)} ↗</a>`:''}
     ${lines[0]||c.buyer_username?`<a class="secondary-btn" href="email-triage.html?${lines[0]?'orderLineId='+encodeURIComponent(lines[0].id):'ebayBuyer='+encodeURIComponent(c.buyer_username)}&from=returns" target="_blank" rel="noopener">Buyer chat ↗</a>`:''}
     ${!lines.length&&ctx.employee.role==='admin'?'<button class="primary-btn" data-match-order>Match order items</button>':''}</div>
-   ${ctx.employee.role==='admin'&&(closed(c)||!c.ebay_return_id)&&(!['closed','cancelled'].includes(c.status)||tasks.some(t=>!finish.has(t.status)))?'<section class="issue-closeout"><div><strong>Already resolved?</strong><p>Move this case to History without assigning anyone.</p></div><button type="button" class="primary-btn" data-finish-case>Mark closed</button></section>':''}<div id="issue-close-form-slot"></div>
    ${root.OGDisputeResponse?.section(c)||''}
    <section class="issue-detail-section issue-complaint-summary"><h3>Complaint &amp; conversation</h3><p class="issue-complaint-reason"><small>Customer’s reason</small><strong>${escape(reason)}</strong></p>${complaint||'<p class="issue-subtitle">No additional complaint details saved.</p>'}<div id="issue-conversation" aria-live="polite"><p class="issue-subtitle">Loading related conversation…</p></div></section>
    ${renderTasks()}

@@ -28,9 +28,48 @@ test('list badges follow current eBay status, overriding a previous response whe
  assert.equal(api.badge(action).label,'Response required');
  assert.equal(api.response({...c,ebay_status:'ACTION_NEEDED'}).waiting,false,'fresh status overrides old response detail');
  const needed=context.OGCustomerIssues.testing.cardStatus(action);assert.ok(needed.includes('Response required'));assert.ok(needed.includes('eBay deadline'));assert.ok(!needed.includes('awaiting outcome'));
- assert.equal(api.badge({...row,ebay_status:'CLOSED'}),null);assert.equal(api.badge({...row,status:'closed'}),null);
+ assert.equal(api.badge({...row,ebay_status:'CLOSED'}).label,'Closed on eBay');assert.equal(api.badge({...row,status:'closed'}),null);
  assert.equal(api.badge({...row,seller_response:null}),null);assert.equal(api.badge({...row,source_lane:'return'}),null);
  assert.equal(api.badge({...row,seller_response:'SELLER_ACCEPT'}),null,'acceptance is not a challenge awaiting outcome');
+});
+
+test('closed outcome is explicit and remains separate from archiving, seller protection, and reopening',()=>{
+ const winner={...c,ebay_status:'CLOSED',raw_payload:{ebayDetail:{paymentDisputeId:c.ebay_return_id,resolution:{reasonForClosure:'SELLER_WON'}}}};
+ assert.equal(api.badge(winner).label,'Closed on eBay · in our favor');
+ assert.equal(api.badge({...winner,status:'closed'}).kind,'won','History preserves the provider outcome');
+ assert.equal(api.badge({...winner,ebay_status:'ACTION_NEEDED'}).label,'Response required','new action supersedes the old win');
+ assert.equal(api.outcome({...winner,ebay_status:'OPEN'}),null);
+ assert.equal(api.badge({...winner,ebay_return_id:'different'}).label,'Closed on eBay','wrong dispute outcome is not reused');
+ assert.equal(api.badge({...winner,raw_payload:undefined,resolution_reason:'SELLER_LOST'}).label,'Closed on eBay · buyer’s favor');
+ assert.equal(api.badge({...winner,raw_payload:undefined,resolution_reason:'UNKNOWN_FUTURE_VALUE'}).label,'Closed on eBay');
+ assert.equal(api.badge({...winner,raw_payload:{ebayDetail:{paymentDisputeId:c.ebay_return_id,resolution:{protectionStatus:'FULLY_PROTECTED',protectedAmount:{value:'167.00'}}}}}).kind,'closed','seller protection is not a win');
+ const html=context.OGCustomerIssues.testing.cardStatus({...winner,open_tasks:1,ebay_due_at:'2026-10-01',overdue:true});
+ assert.ok(html.includes('Closed on eBay · in our favor'));assert.ok(html.includes('Finish internal follow-up'));assert.ok(!html.includes('eBay deadline'));
+ assert.equal(winner.status,'open','rendering does not archive');
+ assert.ok(context.OGCustomerIssues.testing.cardStatus({...winner,source_lane:'return',issue_kind:'return'}).includes('Closed on eBay'));
+});
+test('no-action and protection badges use explicit evidence and yield immediately to a new response request',()=>{
+ const idle={...c,raw_payload:{ebayDetail:{paymentDisputeId:c.ebay_return_id,paymentDisputeStatus:'OPEN',availableChoices:[],sellerResponseDue:{}}}};
+ assert.equal(api.badge(idle).label,'No response needed · awaiting outcome');
+ assert.equal(api.protection(idle),null,'an empty action list is not proof of protection');
+ assert.equal(api.section(idle),'','no misleading missing-response warning when none is needed');
+ assert.equal(api.badge({...idle,ebay_return_id:'other'}),null);
+ assert.equal(api.badge({...idle,raw_payload:undefined,dispute_no_response_needed:true}).kind,'no_response');
+ assert.equal(api.badge({...idle,raw_payload:undefined,dispute_no_response_needed:false}),null);
+ const covered={...idle,protection_status:'FULLY_PROTECTED'};
+ assert.equal(api.badge(covered).label,'Protected · no response needed');
+ assert.equal(api.outcome(covered),null,'protection does not mean the case is closed or won');
+ assert.equal(api.response(covered).waiting,false,'protection does not claim a response was submitted');
+ assert.equal(api.badge({...covered,ebay_status:'ACTION_NEEDED'}).label,'Response required');
+ const html=context.OGCustomerIssues.testing.cardStatus({...covered,ebay_due_at:'2026-10-01',overdue:true});
+ assert.ok(html.includes('Protected · no response needed'));assert.ok(html.includes('Awaiting outcome'));assert.ok(!html.includes('eBay deadline'));
+ const partial={...idle,protection_status:'PARTIALLY_PROTECTED'};
+ assert.equal(api.protection(partial).label,'Partially protected');assert.equal(api.badge(partial).kind,'no_response');
+ const lost={...covered,ebay_status:'CLOSED',resolution_reason:'SELLER_LOST'};
+ const lostHtml=context.OGCustomerIssues.testing.cardStatus(lost);assert.ok(lostHtml.includes('buyer’s favor'));assert.ok(lostHtml.includes('Seller protected'));
+ const future=structuredClone(idle);future.raw_payload.ebayDetail.sellerResponseDue={respondByDate:'2026-10-14'};assert.equal(api.badge(future),null);
+ const unknown=structuredClone(idle);delete unknown.raw_payload.ebayDetail.availableChoices;assert.equal(api.badge(unknown),null);
+ assert.equal(covered.status,'open');
 });
 test('evidence is scoped to the exact dispute and evidence set, with duplicate files removed',()=>{
  assert.equal(disputeFile(c,'ev-1','file-1').name,'Evidence.jpg');

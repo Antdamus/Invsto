@@ -4,13 +4,38 @@
  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const nice=v=>String(v||'').toLowerCase().replace(/_/g,' ').replace(/^./,c=>c.toUpperCase());
  const date=v=>v&&!Number.isNaN(Date.parse(v))?new Date(v).toLocaleString(undefined,{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}):'';
+ function protection(c){
+  if(c?.source_lane!=='payment_dispute')return null;
+  const d=c.raw_payload?.ebayDetail,valid=d?.paymentDisputeId&&String(d.paymentDisputeId)===String(c.ebay_return_id);
+  const value=c.protection_status||(valid?d.resolution?.protectionStatus:'');
+  if(value==='FULLY_PROTECTED')return {kind:'protected',label:'Seller protected'};
+  if(value==='PARTIALLY_PROTECTED')return {kind:'partial',label:'Partially protected'};
+  return null;
+ }
+ function outcome(c){
+  if(c?.source_lane!=='payment_dispute')return null;
+  const d=c.raw_payload?.ebayDetail,valid=d?.paymentDisputeId&&String(d.paymentDisputeId)===String(c.ebay_return_id);
+  const status=String(c.ebay_status||(valid?d.paymentDisputeStatus:'')||'').toUpperCase();
+  // A reopened case must not keep advertising its previous outcome. Protection
+  // or money returned to the seller alone does not mean the institution sided with us.
+  if(!/(^|_)(CLOSED|CANCELLED|CANCELED|RESOLVED|SELLER_WON|SELLER_LOST|DISPUTE_REVERSED)($|_)/.test(status))return null;
+  const reason=c.resolution_reason||(valid?d.resolution?.reasonForClosure:'')||status;
+  if(reason==='SELLER_WON'||status==='DISPUTE_REVERSED')return {kind:'won',label:'Closed on eBay · in our favor'};
+  if(reason==='SELLER_LOST')return {kind:'lost',label:'Closed on eBay · buyer’s favor'};
+  return {kind:'closed',label:'Closed on eBay'};
+ }
  function badge(c){
+  const result=outcome(c);if(result)return result;
   if(c?.source_lane!=='payment_dispute'||['closed','cancelled'].includes(c.status))return null;
   const d=c.raw_payload?.ebayDetail,valid=d?.paymentDisputeId&&String(d.paymentDisputeId)===String(c.ebay_return_id);
   const status=String(c.ebay_status||(valid?d.paymentDisputeStatus:'')||'').toUpperCase();
   // A new eBay action always supersedes a previously submitted response.
   if(status==='ACTION_NEEDED')return {kind:'action',label:'Response required'};
+  if(status==='OPEN'&&protection(c)?.kind==='protected')return {kind:'protected',label:'Protected · no response needed'};
   if(status==='OPEN'&&(c.seller_response||(valid?d.sellerResponse:''))==='SELLER_CONTEST')return {kind:'waiting',label:'Response submitted · awaiting outcome'};
+  // An explicit empty action list is not evidence of seller protection.
+  const noResponse=c.dispute_no_response_needed===true||(valid&&Array.isArray(d.availableChoices)&&d.availableChoices.length===0&&(!d.sellerResponseDue||Object.keys(d.sellerResponseDue).length===0));
+  if(status==='OPEN'&&noResponse)return {kind:'no_response',label:'No response needed · awaiting outcome'};
   return null;
  }
  function response(c){
@@ -26,6 +51,7 @@
  }
  function section(c){
   const r=response(c);if(!r)return '';
+  if(!r.decision&&!r.note&&!r.files.length&&!r.tracking.length&&['protected','no_response'].includes(badge(c)?.kind))return '';
   return `<section class="issue-dispute-response" id="issue-dispute-response"><div class="issue-response-heading"><div><small>EBAY PAYMENT DISPUTE</small><h3>${r.decision?'Submitted response':'Response & supporting documents'}</h3></div>${r.decision?`<span class="issue-tag">${esc(r.contested?'Challenged on eBay':nice(r.decision))}</span>`:''}</div>
    ${r.waiting?'<p class="issue-response-state">Response submitted · awaiting outcome</p>':r.decision?'<p class="issue-subtitle">Your response is recorded on eBay. The current case status is shown above.</p>':'<p class="issue-subtitle">eBay has not returned a submitted response. Saved evidence alone does not confirm submission.</p>'}
    ${r.note?`<div class="issue-response-note"><small>${r.contested?'Why you challenged this dispute':'Your response to eBay'}</small><p>${esc(r.note)}</p></div>`:r.decision?'<p class="issue-subtitle">eBay did not include the response text.</p>':''}
@@ -50,5 +76,5 @@
   // Bounded parallelism keeps a case with many files from flooding the server.
   for(let i=0;i<r.files.length;i+=2){if(!target.isConnected)return;await Promise.all(r.files.slice(i,i+2).map((_,j)=>load(i+j)));}
  }
- root.OGDisputeResponse={response,badge,section,hydrate};
+ root.OGDisputeResponse={response,badge,outcome,protection,section,hydrate};
 })(globalThis);
