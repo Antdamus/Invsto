@@ -16,7 +16,7 @@
   $('hero-piece-count').textContent=`${catalogue.items.length} carefully chosen ${catalogue.items.length===1?'piece':'pieces'}`;
   document.querySelector('.catalogue-hero').classList.toggle('without-feature',!item);
   if(!item)return;
-  const html=`<button class="featured-piece" data-details="${C.escape(item.id)}" aria-label="Explore ${C.escape(item.name)}"><span class="feature-topline"><span>IN YOUR COLLECTION</span><span aria-hidden="true">01 / ${String(catalogue.items.length).padStart(2,'0')}</span></span><span class="feature-image"><img src="${C.escape(C.safeImage(item.images[0]))}" alt="${C.escape(item.name)}" fetchpriority="high" decoding="async"></span><span class="feature-caption"><span><small>${C.escape(item.category)}</small><strong>${C.escape(item.name)}</strong></span><span class="feature-arrow" aria-hidden="true">↗</span></span></button>`;
+  const html=`<button class="featured-piece" data-details="${C.escape(item.id)}" data-photos="${C.escape(item.id)}" aria-label="View photos of ${C.escape(item.name)}"><span class="feature-topline"><span>IN YOUR COLLECTION</span><span aria-hidden="true">01 / ${String(catalogue.items.length).padStart(2,'0')}</span></span><span class="feature-image"><img src="${C.escape(C.safeImage(item.images[0]))}" alt="${C.escape(item.name)}" fetchpriority="high" decoding="async"></span><span class="feature-caption"><span><small>${C.escape(item.category)}</small><strong>${C.escape(item.name)}</strong></span><span class="feature-arrow" aria-hidden="true">↗</span></span></button>`;
   if($('hero-feature').innerHTML!==html)$('hero-feature').innerHTML=html;
  }
  function render(){
@@ -56,10 +56,14 @@
  function showDetails(id){
   const i=catalogue.items.find(i=>i.id===id);if(!i)return;detailId=id;
   const imgs=(i.images||[]).map(C.safeImage).filter(Boolean);
-  $('piece-detail').innerHTML=`<div class="piece-detail-layout"><div class="detail-gallery">${imgs.length?`<img class="detail-main-photo" id="detail-photo" src="${C.escape(imgs[0])}" alt="${C.escape(i.name)}"><div class="detail-thumbnails" aria-label="Piece photographs" ${imgs.length<2?'hidden':''}>${imgs.map((src,n)=>`<button data-photo="${n}" aria-label="Photo ${n+1}" aria-pressed="${n===0}"><img src="${C.escape(src)}" alt="" loading="lazy"></button>`).join('')}</div>`:'<p>Photo unavailable</p>'}</div><div class="detail-copy"><p class="eyebrow">${C.escape(i.category)} · THE PRIVATE EDIT</p><h2 id="piece-heading">${C.escape(i.name)}</h2><p class="detail-description">${C.escape(i.description)}</p><p class="detail-price">${C.money(i.retail_price)} <small>USD</small></p><button class="choose-piece ${selected.has(id)?'chosen':''}" data-select="${C.escape(id)}" aria-pressed="${selected.has(id)}">${selected.has(id)?'✓ In your selection':'＋ Select this piece'}</button><p class="selection-explainer">Yours to consider. Our team will confirm availability and help with the next steps.</p></div></div>`;
+  $('piece-detail').innerHTML=`<div class="piece-detail-layout"><div class="detail-gallery">${imgs.length?`<button class="detail-zoom" data-zoom="${C.escape(id)}" aria-label="Zoom into ${C.escape(i.name)}"><img class="detail-main-photo" id="detail-photo" src="${C.escape(imgs[0])}" alt="${C.escape(i.name)}"><span class="photo-hint">View full screen & zoom ↗</span></button><div class="detail-thumbnails" aria-label="Piece photographs" ${imgs.length<2?'hidden':''}>${imgs.map((src,n)=>`<button data-photo="${n}" aria-label="Photo ${n+1}" aria-pressed="${n===0}"><img src="${C.escape(src)}" alt="" loading="lazy"></button>`).join('')}</div>`:'<p>Photo unavailable</p>'}</div><div class="detail-copy"><p class="eyebrow">${C.escape(i.category)} · THE PRIVATE EDIT</p><h2 id="piece-heading">${C.escape(i.name)}</h2><p class="detail-description">${C.escape(i.description)}</p><p class="detail-price">${C.money(i.retail_price)} <small>USD</small></p><button class="choose-piece ${selected.has(id)?'chosen':''}" data-select="${C.escape(id)}" aria-pressed="${selected.has(id)}">${selected.has(id)?'✓ In your selection':'＋ Select this piece'}</button><p class="selection-explainer">Yours to consider. Our team will confirm availability and help with the next steps.</p></div></div>`;
   $('piece-dialog').setAttribute('aria-labelledby','piece-heading');
   if(receipt && !editing)$('piece-detail').querySelector('[data-select]').hidden=true;
   if(!$('piece-dialog').open)$('piece-dialog').showModal();
+ }
+ function showPhotos(id,trigger,start=0){
+  const item=catalogue?.items.find(i=>i.id===id);if(!item)return;
+  if(!window.CatalogueViewer?.open(item,start,trigger))showDetails(id);
  }
  function renderSelection(){
   const items=catalogue.items.filter(i=>selected.has(i.id)),t=C.totals(catalogue.items,selected,catalogue.credit),credit=catalogue.credit!==null && catalogue.credit!==undefined;
@@ -72,7 +76,7 @@
  function showSelection(){if(!receipt && !preview && receiptKey){void refreshReceipt().then(()=>{if(receipt)showReceipt();else openSelection();});return;}openSelection();}
  function openSelection(){if(receipt && !editing){showReceipt();return;}selectionStep(false);renderSelection();$('selection-message').textContent='';$('selection-dialog').showModal();}
  async function load(){
-  if(busy||preview||sending||$('selection-dialog').open)return;busy=true;
+  if(busy||preview||sending||$('selection-dialog').open||window.CatalogueViewer?.isOpen)return;busy=true;
   try{
    if(!/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(token))throw new Error('This catalogue link is incomplete. Please ask the store for the full link.');
    const response=await fetch(`${endpoint}?catalogue=${encodeURIComponent(token)}`,{cache:'no-store',credentials:'omit',referrerPolicy:'no-referrer',signal:AbortSignal.timeout(20000)});
@@ -88,7 +92,9 @@
  document.addEventListener('click',event=>{
   const b=event.target.closest('button');if(!b)return;
   if(b.dataset.select)toggle(b.dataset.select);
-  if(b.dataset.details)showDetails(b.dataset.details);
+  if(b.dataset.photos)showPhotos(b.dataset.photos,b);
+  if(b.dataset.zoom){const active=$('piece-detail').querySelector('[data-photo][aria-pressed="true"]');showPhotos(b.dataset.zoom,b,Number(active?.dataset.photo||0));}
+  if(b.dataset.details&&!b.dataset.photos)showDetails(b.dataset.details);
   if(b.hasAttribute('data-category')){category=b.dataset.category;render();}
   if(b.dataset.close)$(b.dataset.close).close();
   if(b.hasAttribute('data-photo')){const i=catalogue.items.find(i=>i.id===detailId);const src=(i?.images||[]).map(C.safeImage).filter(Boolean)[Number(b.dataset.photo)];if(src){$('detail-photo').src=src;$('piece-detail').querySelectorAll('[data-photo]').forEach(p=>p.setAttribute('aria-pressed',String(p===b)));}}
