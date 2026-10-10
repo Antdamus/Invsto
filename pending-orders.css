@@ -5365,6 +5365,8 @@ a.buyer-line-finance-pill:hover {
 .buyer-card-task-preview-item.is-complete .buyer-card-task-heading { color: #b4c7bd; }
 .buyer-card-task-update { margin-top: 12px; padding-left: 10px; border-left: 2px solid #d7b97960; }
 .buyer-card-task-update small { margin-bottom: 5px; }
+.buyer-card-task-current { border-left: 2px solid #8cddb7; padding-left: 10px; }
+.buyer-card-task-update-label { display: block; margin-bottom: 4px; color: #b5e9cf; font-size: .7rem; overflow-wrap: anywhere; }
 .buyer-card-task-links, .buyer-card-task-files { margin-top: 10px; }
 .buyer-card-task-links a { text-decoration: none; }
 .buyer-card-task-file-count { color: #b9b5ae; font-size: .72rem; }

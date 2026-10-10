@@ -3752,6 +3752,12 @@ function getQueueTaskAssigneeName(task) {
     || (isPendingOrderApprovalTask(task) ? "Admin reviewer" : "Assignee not recorded");
 }
 
+function getQueueTaskNote(task = {}) {
+  const original = String(task.question || task.description || task.title || "Customer task").trim();
+  const latest = String(task.latest_note || "").trim();
+  return { original, current: latest || original, hasUpdate: Boolean(latest && latest !== original) };
+}
+
 function getGroupSharedTasks(lines = []) {
   const entries = new Map();
   for (const orderId of new Set(lines.map(line => line.order_id))) {
@@ -3784,7 +3790,7 @@ function getGroupSharedTasks(lines = []) {
       }
       const latestUpdate = events.find(event => String(event.notes || "").trim() === String(task.latest_note || "").trim());
       entries.set(`order:${task.id}`, { kind: "task", task: {...task, source: "order"}, line, created_at: task.created_at,
-        notes: task.question || task.latest_note || task.title || "Order task",
+        notes: getQueueTaskNote(task).current,
         latestUpdate, photo_attachments: [...attachments.values()] });
     }
   }
@@ -3796,21 +3802,24 @@ function getGroupSharedTasks(lines = []) {
       // context, without making it part of this line's packing assignment.
       const line = task.source === "order" && lines.find(line => line.order_id === task.order_id && orderTaskMatchesLine(task, line));
       entries.set(key, {kind: "task", task, line, created_at: task.created_at,
-        notes: task.question || task.latest_note || task.title || "Customer task", photo_attachments: []});
+        notes: getQueueTaskNote(task).current, photo_attachments: []});
     }
   }
   return [...entries.values()];
 }
 
 function renderQueueTaskEntry(entry, lines) {
-  const { task, line, notes, latestUpdate, photo_attachments: photos } = entry;
-  const updatedNote = String(task.latest_note || "").trim();
+  const { task, line, latestUpdate, photo_attachments: photos } = entry;
+  const note = getQueueTaskNote(task);
   const context = !line ? "Customer task" : (task.order_line_ids || []).length === 1
     ? line.item_title || line.item_number || "Order item"
     : (task.order_line_ids || []).length > 1 ? `${task.order_line_ids.length} items` : "Whole order";
   const fileCount = Math.max(photos.length, Number(task.attachment_count) || 0);
   return `<article class="buyer-card-note-preview-item buyer-card-task-preview-item" data-queue-task="${escapeHtml(task.id)}">
-    <div class="buyer-card-note-body"><p>${escapeHtml(notes)}</p></div>
+    <div class="buyer-card-note-body${note.hasUpdate ? " buyer-card-task-current" : ""}">
+      ${note.hasUpdate ? `<small class="buyer-card-task-update-label">Latest update${latestUpdate?.created_at ? ` · ${escapeHtml(formatDate(latestUpdate.created_at))}` : ""}${latestUpdate?.signed_by_email ? ` · ${escapeHtml(latestUpdate.signed_by_email)}` : ""}</small>` : ""}
+      <p>${escapeHtml(note.current)}</p>
+    </div>
     <div class="buyer-card-note-author">
       <strong data-queue-task-assignee="${escapeHtml(task.id)}">Assigned to ${escapeHtml(getQueueTaskAssigneeName(task))}</strong>
       <small>Created ${escapeHtml(formatDate(task.created_at))}</small>
@@ -3819,7 +3828,7 @@ function renderQueueTaskEntry(entry, lines) {
       <summary><span>Task · ${escapeHtml(getOrderTaskStatusLabel(task.status))}${fileCount ? ` · ${fileCount} file${fileCount === 1 ? "" : "s"}` : ""}</span><span>Details</span></summary>
       <div class="buyer-card-note-body buyer-card-task-extra">
       <small>${escapeHtml(context)}${task.created_by_email ? ` · By ${escapeHtml(task.created_by_email)}` : ""}</small>
-      ${updatedNote && updatedNote !== String(notes).trim() ? `<div class="buyer-card-task-update"><small>Latest update${latestUpdate?.created_at ? ` · ${escapeHtml(formatDate(latestUpdate.created_at))}` : ""}${latestUpdate?.signed_by_email ? ` · ${escapeHtml(latestUpdate.signed_by_email)}` : ""}</small><p>${escapeHtml(updatedNote)}</p></div>` : ""}
+      ${note.hasUpdate ? `<div class="buyer-card-task-update"><small>Original assignment</small><p>${escapeHtml(note.original)}</p></div>` : ""}
       <div class="buyer-card-task-links">
         <a class="buyer-line-note-btn" href="team-tasks.html?taskId=${encodeURIComponent(task.id)}">Open task${fileCount && !photos.length ? ` · ${fileCount} file${fileCount === 1 ? "" : "s"}` : ""} ↗</a>
       </div>
