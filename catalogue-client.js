@@ -32,7 +32,7 @@
   if($('selection-dialog').open)renderSelection();
  }
  function toggle(id){
-  if(sending)return;
+  if(sending)return;if(receipt && !editing){showReceipt();return;}
   if(!catalogue?.items.some(i=>i.id===id))return;
   selected.has(id)?selected.delete(id):selected.add(id);reconcile();render();
   if($('piece-dialog').open && detailId===id){const b=$('piece-detail').querySelector('[data-select]');b.textContent=selected.has(id)?'✓ In your selection':'＋ Select this piece';b.setAttribute('aria-pressed',String(selected.has(id)));b.classList.toggle('chosen',selected.has(id));}
@@ -41,6 +41,7 @@
   const i=catalogue.items.find(i=>i.id===id);if(!i)return;detailId=id;
   const imgs=(i.images||[]).map(C.safeImage).filter(Boolean);
   $('piece-detail').innerHTML=`<div class="piece-detail-layout"><div>${imgs.length?`<img class="detail-main-photo" id="detail-photo" src="${C.escape(imgs[0])}" alt="${C.escape(i.name)}"><div class="detail-thumbnails">${imgs.map((src,n)=>`<button data-photo="${n}" aria-label="Photo ${n+1}"><img src="${C.escape(src)}" alt=""></button>`).join('')}</div>`:'<p>Photo unavailable</p>'}</div><div class="detail-copy"><p class="eyebrow">${C.escape(i.category)}</p><h2>${C.escape(i.name)}</h2><p>${C.escape(i.description)}</p><p class="detail-price">${C.money(i.retail_price)} <small>USD</small></p><button class="choose-piece ${selected.has(id)?'chosen':''}" data-select="${C.escape(id)}" aria-pressed="${selected.has(id)}">${selected.has(id)?'✓ In your selection':'＋ Select this piece'}</button><p class="selection-explainer">Select to see your total. Contact the store to confirm availability.</p></div></div>`;
+  if(receipt && !editing)$('piece-detail').querySelector('[data-select]').hidden=true;
   if(!$('piece-dialog').open)$('piece-dialog').showModal();
  }
  function renderSelection(){
@@ -97,6 +98,7 @@
   $('edit-request').hidden=receipt.status!=='changes_requested';$('copy-status-link').classList.toggle('dark-button',receipt.status!=='changes_requested');$('copy-status-link').classList.toggle('quiet-button',receipt.status==='changes_requested');
   $('selection-open').firstChild.textContent='Your request ↗ ';$('selection-count').hidden=true;$('selection-open').disabled=false;
   $('selection-bar').hidden=true;
+  if(!editing)document.querySelectorAll('[data-select]').forEach(b=>{b.hidden=true;});
  }
  function showReceipt(){renderReceipt();if(!$('receipt-dialog').open)$('receipt-dialog').showModal();void refreshReceipt();}
  async function refreshReceipt(){
@@ -141,5 +143,6 @@
   void (async()=>{await load();await refreshReceipt();if(receiptFromLink && receipt)showReceipt();})();setInterval(()=>{if(document.visibilityState==='visible'){load();refreshReceipt();}},60000);
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){load();refreshReceipt();}});
   window.addEventListener('online',load);
+  window.addEventListener('hashchange',()=>location.reload());
  }
 })();
