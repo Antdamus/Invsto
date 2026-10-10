@@ -45,7 +45,7 @@ async function open(t,width,integration=false){
  const context=await browser.newContext({viewport:{width,height:900},hasTouch:width<800});t.after(()=>context.close());
  await context.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
  const page=await context.newPage();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
- await page.goto(origin+'/ebay-returns.html'+(integration?'?integration=1':''));for(const file of ['task-workflow.js','customer-issue-evidence.js','return-receiving.js','customer-issues.js','tests/fixtures/customer-issues-fixture.js'])await page.addScriptTag({url:origin+'/'+file});
+ await page.goto(origin+'/ebay-returns.html'+(integration?'?integration=1':''));for(const file of ['task-workflow.js','customer-issue-evidence.js','return-receiving.js','customer-issue-chats.js','customer-issues.js','tests/fixtures/customer-issues-fixture.js'])await page.addScriptTag({url:origin+'/'+file});
  await page.waitForFunction(()=>window.fixtureReady);if(integration){await page.addScriptTag({url:origin+'/ebay-order-history.js'});await page.evaluate(()=>document.dispatchEvent(new Event('DOMContentLoaded')));await page.waitForFunction(()=>window.OGCustomerIssues.ready);await expect(page.locator('.issue-card')).toHaveCount(30);}return page;
 }
 for(const width of [320,390,768,1440])test(`Customer issues ${width}px: queue, detail, evidence and forms fit`,async t=>{

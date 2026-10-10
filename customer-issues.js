@@ -179,7 +179,7 @@
    <h2>${escape(c.buyer_username||'Buyer not identified')}</h2>${customerContact(c)}<p>${escape(c.item_title||c.return_reason||'Open this case to review the order and next step.')}</p>
    ${cardFacts(c)}
    <div class="issue-card-footer">${cardStatus(c)}</div>
-   <div class="issue-card-top" style="margin:11px 0 0"><small>${['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':!c.open_tasks?'No employee task':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
+   <div class="issue-card-top" style="margin:11px 0 0"><small>${['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':!c.open_tasks?'No employee task':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${root.OGIssueChats?.slot(c)||''}${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the customer name, buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
   $('issues-count').textContent=`${total} ${view==='history'?'finished':'active'} case${total===1?'':'s'}`;
   $('issues-return-filter').hidden=view!=='return';
@@ -261,7 +261,7 @@
    rows=result.rows||[];counts=result.counts||{};total=result.total||0;
    if(offset>0&&offset>=total){offset=Math.max(0,Math.floor((total-1)/PAGE)*PAGE);return refresh(options);}
    await root.OGCaseNotes?.load(rows.map(c=>c.id));if(request!==listVersion)return;
-   cards();
+   cards();root.OGIssueChats?.load(rows);
    if($('issues-feedback').classList.contains('is-error'))feedback('');
    const selectedChanged=detail&&rows.some(c=>c.id===selected&&c.updated_at!==detail.c.updated_at);
    if(!root.OGCaseNotes?.isEditing&&(options.detail!==false||selectedChanged)&&selected&&!$('issue-action-form')&&!ctx.state.busy&&!$('issue-evidence-package')?.dataset.ready)await openCase(selected,{quiet:true});
@@ -347,6 +347,7 @@
    <div class="issue-detail-content"><span class="issue-kind is-${kind(c)}">${kind(c)==='dispute'?(c.source_lane==='payment_dispute'?'Payment dispute':'Escalated eBay case'):nice(kind(c))}</span><h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p class="issue-subtitle">${escape(c.item_title||summary.item_title||lines[0]?.item_title||'Review the linked order items below')}</p>
    <section class="issue-original-order"><div><small>ORIGINAL ORDER</small><strong>${escape(c.order_number||'Not identified yet')}</strong><span>${c.order_id?`${lines.length} linked item${lines.length===1?'':'s'} · Saved in Invsto`:c.order_number?'Not found in saved orders yet':'Match the original order to see its evidence'}</span></div>${c.order_number?`<a class="secondary-btn" href="ebay-order-history.html?orderHistorySearch=${encodeURIComponent(c.order_number)}&historyAllDates=true">Open full order ↗</a>`:''}</section>
    ${kind(c)==='return'&&summary.return_stage?`<div class="issue-return-summary">${returnBadge(summary)}<small>eBay delivery is separate from receipt and inspection in Invsto.</small></div>`:''}
+   ${root.OGIssueChats?.slot(c)||''}
    <section id="issue-case-notes" class="issue-case-notes">${root.OGCaseNotes?.section(c)||''}</section>
    <div class="issue-next">${providerBadge(c)?`<div class="issue-provider-outcome">${providerBadgeHtml(c)}</div>`:''}<span>NEXT STEP</span><strong>${escape(nextText({...summary,raw_payload:c.raw_payload}))}</strong><p>${['closed','cancelled'].includes(c.status)&&!summary.open_tasks?'This record is saved in History. Its evidence and activity are preserved.':closed(c)?'eBay has closed its case. Keep it here while internal work remains, or finish and archive it when everything is handled.':providerBadge(c)?.kind==='reviewing'?'eBay is reviewing this escalated case. No response is currently requested. Keep it open until eBay decides the outcome; any internal work remains separate.':['protected','no_response'].includes(providerBadge(c)?.kind)?'No response is currently requested by eBay. This dispute is still awaiting an outcome; updates continue automatically. Any internal tasks remain separate.':'Keep the case open until the customer issue and your internal work are both handled.'}</p></div>
    ${ctx.employee.role==='admin'&&(closed(c)||!c.ebay_return_id)&&(!['closed','cancelled'].includes(c.status)||tasks.some(t=>!finish.has(t.status)))?'<section class="issue-closeout"><div><strong>All internal work finished?</strong><p>Save the case and its evidence in History. No new task is needed.</p></div><button type="button" class="primary-btn" data-finish-case>Finish &amp; archive</button></section>':''}<div id="issue-close-form-slot"></div>
@@ -355,7 +356,6 @@
    ${c.sync_error?`<p class="issue-tag is-stale">Update failed. The previous case information was kept. ${escape(c.sync_error)}</p>`:''}
    <div class="issue-actions">${c.issue_kind==='return'&&remaining&&lines.some(l=>l.line_status==='fulfilled')&&!['closed','cancelled'].includes(c.status)?'<button class="primary-btn" data-receive>Receive returned items</button>':''}
     ${url?`<a class="secondary-btn" href="${escape(url)}" target="_blank" rel="noopener">${caseLinkLabel(c,url)} ↗</a>`:''}
-    ${lines[0]||c.buyer_username?`<a class="secondary-btn" href="email-triage.html?${lines[0]?'orderLineId='+encodeURIComponent(lines[0].id):'ebayBuyer='+encodeURIComponent(c.buyer_username)}&from=returns" target="_blank" rel="noopener">Buyer chat ↗</a>`:''}
     ${!lines.length&&ctx.employee.role==='admin'?'<button class="primary-btn" data-match-order>Match order items</button>':''}</div>
    ${root.OGDisputeResponse?.section(c)||''}
    <section class="issue-detail-section issue-complaint-summary"><h3>Complaint &amp; conversation</h3><p class="issue-complaint-reason"><small>Customer’s reason</small><strong>${escape(reason)}</strong></p>${complaint||'<p class="issue-subtitle">No additional complaint details saved.</p>'}<div id="issue-conversation" aria-live="polite"><p class="issue-subtitle">Loading related conversation…</p></div></section>
@@ -443,7 +443,7 @@
    if(stamp!==version)return;
    if(quiet&&(root.OGCaseNotes?.isEditing||($('issue-action-form')&&$('issue-action-form')!==initialForm)||ctx.state.busy))return;
    detail={c,tasks,items,lines,conversationLimit,events:[...caseEvents,...taskEvents].sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at)),moreEvents:caseEvents.length===50||taskEvents.length===50};
-   renderDetail();if(expanded)$('issues-detail').querySelectorAll('details').forEach(el=>el.open=expanded.has(el.querySelector('summary')?.textContent));$('issues-detail').scrollTop=scroll;
+   renderDetail();root.OGIssueChats?.load(rows);if(expanded)$('issues-detail').querySelectorAll('details').forEach(el=>el.open=expanded.has(el.querySelector('summary')?.textContent));$('issues-detail').scrollTop=scroll;
    const url=new URL(location.href);url.searchParams.delete('returnTaskId');url.searchParams.set('caseId',id);history.replaceState(null,'',url);
   }catch(error){if(stamp===version){$('issues-detail').innerHTML=`<div class="issues-empty"><button class="secondary-btn" data-close-case>← Cases</button><h2>Couldn’t load this case</h2><p>${escape(error.message)}</p><button class="primary-btn" data-retry-case>Retry</button></div>`;}}
  }
@@ -525,6 +525,7 @@
   root.OGReturnReceiving?.init({db,ctx,openCase,feedback});
   try{people=checked(await db.from('employees').select('user_id,email,display_name,role,active').eq('active',true).order('display_name')).filter(p=>p.user_id);}catch{people=[ctx.employee];}
   root.OGCaseNotes?.init({db,people,userId:ctx.user.id});
+  root.OGIssueChats?.init(db);
   $('issues-workspace').addEventListener('click',e=>{
    const b=e.target.closest('button');if(!b||saving)return;
    if(b.dataset.issueView){clearBulk();view=b.dataset.issueView;offset=0;closeCase();refresh({detail:false});}

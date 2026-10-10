@@ -5,16 +5,21 @@
   const when = value => value && Number.isFinite(new Date(value).getTime()) ? new Date(value).toLocaleString([], {month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}) : 'No message date';
   async function init(context, {openConversation}) {
     const params = new URLSearchParams(location.search), lineId = params.get('orderLineId');
-    if (!lineId) return {opened:false};
     const panel = document.getElementById('order-chat-entry');
     if (!panel) return {opened:false};
+    const issueEntry=['issues','returns'].includes(params.get('from'));
+    const issueUrl='ebay-returns.html'+(params.get('caseId')?'?caseId='+encodeURIComponent(params.get('caseId')):'');
+    if (!lineId) {
+      if(issueEntry){panel.hidden=false;panel.classList.add('is-chat-open');panel.innerHTML=`<div class="order-chat-heading"><div><span class="eyebrow">Customer issue conversation</span><h2>${escape(params.get('ebayBuyer')||'Buyer chat')}</h2><p>Review the conversation and reply here.</p></div><a class="secondary-btn" href="${escape(issueUrl)}">← Back to customer issue</a></div>`;}
+      return {opened:false};
+    }
     const api = root.EmailTriageApi;
     let data, busy = false, opened = false, composing = false, draft = '', requestId = null, delivery = null;
     const call = values => api.requestEbayConversationDraftAction(context, {orderLineId:lineId, ...values});
     const controls = () => panel.querySelectorAll('button,textarea');
     function lock(value) { busy = value; controls().forEach(el => el.disabled = value); panel.setAttribute('aria-busy',String(value)); }
     function status(message, error = false) { const el=panel.querySelector('[data-order-chat-status]'); if(el){el.textContent=message;el.classList.toggle('is-error',error);} }
-    function returnUrl() { return params.get('from') === 'packaging' ? `packaging.html?buyer_order=${encodeURIComponent(data.order.id)}` : `pending-orders.html?orderId=${encodeURIComponent(data.order.order_number)}&buyerUsername=${encodeURIComponent(data.order.buyer_username)}`; }
+    function returnUrl() { return issueEntry ? issueUrl : params.get('from') === 'packaging' ? `packaging.html?buyer_order=${encodeURIComponent(data.order.id)}` : `pending-orders.html?orderId=${encodeURIComponent(data.order.order_number)}&buyerUsername=${encodeURIComponent(data.order.buyer_username)}`; }
     function render() {
       panel.hidden=false;
       panel.classList.toggle('is-chat-open', opened);
@@ -22,7 +27,7 @@
       if (!data) { panel.innerHTML='<p role="status">Finding this order’s eBay chat…</p><p data-order-chat-status role="status"></p><button type="button" class="secondary-btn" data-order-chat-reload>Try again</button>'; return; }
       const exact = data.conversations.filter(c=>c.match!=='buyer');
       const blocked = delivery || data.start?.status;
-      panel.innerHTML=`<div class="order-chat-heading"><div><span class="eyebrow">${opened?'Order conversation':'Message the buyer'}</span><h2>${escape(data.order.buyer_username)}</h2><p>${escape(data.line.item_title)}</p><small>Order ${escape(data.order.order_number)} · Item ${escape(data.line.item_number)} · Qty ${escape(data.line.quantity)}</small></div><a class="secondary-btn" href="${escape(returnUrl())}">← Back to ${params.get('from')==='packaging'?'packaging':'order'}</a></div>
+      panel.innerHTML=`<div class="order-chat-heading"><div><span class="eyebrow">${opened?'Order conversation':'Message the buyer'}</span><h2>${escape(data.order.buyer_username)}</h2><p>${escape(data.line.item_title)}</p><small>Order ${escape(data.order.order_number)} · Item ${escape(data.line.item_number)} · Qty ${escape(data.line.quantity)}</small></div><a class="secondary-btn" href="${escape(returnUrl())}">← Back to ${issueEntry?'customer issue':params.get('from')==='packaging'?'packaging':'order'}</a></div>
         ${opened?'<button type="button" class="secondary-btn" data-order-chat-change>Other chats for this buyer</button>':`
         <div class="order-chat-body">
         ${data.conversations.length?`<div class="order-chat-choices"><h3>${exact.length?'Conversations for this order':'Other conversations with this buyer'}</h3><p>Choose a conversation to read and reply.</p>${data.conversations.map(c=>`<button type="button" class="order-chat-choice" data-order-chat-open="${escape(c.id)}"><span><strong>${escape(c.conversation_title||'eBay conversation')}</strong><small>${({item:'This item',order:'This order',listing:'Same listing',buyer:'Same buyer · Check the conversation'})[c.match]} · ${escape(when(c.latest_message_created_at))}</small><span>${escape(c.latest_message_preview||'Open conversation')}</span></span><b aria-hidden="true">→</b></button>`).join('')}${data.has_more?'<p>Showing a limited set. Use the buyer’s inbox to see more.</p>':''}</div>`:'<p>No saved conversation for this item yet.</p>'}
