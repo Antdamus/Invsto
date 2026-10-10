@@ -28,7 +28,7 @@
   $('catalogue-list').innerHTML=catalogues.length?catalogues.map(c=>`<button class="saved-card" data-open="${C.escape(c.id)}" aria-current="${record?.id===c.id}"><strong>${C.escape(c.title)}</strong><small>${c.status==='published'?'● Live link':'○ Private draft'} · ${c.items.length} pieces</small><small>Updated ${new Date(c.updated_at).toLocaleDateString()}</small></button>`).join(''):'<p class="manager-empty">Your saved catalogues will appear here.</p>';
  }
  async function loadList(){const{data,error}=await client.from('inventory_catalogues').select('id,title,introduction,credit,status,share_token,items,revision,updated_at').order('updated_at',{ascending:false}).limit(200);if(error)throw error;catalogues=data||[];renderList();}
- function share(){const live=record?.status==='published';$('share-panel').hidden=!live;if(live){const url=new URL('catalogue.html',location.href).href+'#'+record.share_token;$('catalogue-link').value=url;$('open-client-link').href=url;}}
+ function share(){const live=record?.status==='published';$('share-panel').hidden=!live;if(live){const url='https://www.og-jewelers.com/private-catalogue#'+record.share_token;$('catalogue-link').value=url;$('open-client-link').href=url;}}
  async function open(c=null){
   if(dirty && !window.confirm('Discard your unsaved catalogue changes?'))return;
   record=c;chosen=JSON.parse(JSON.stringify(c?.items||[]));dirty=false;tab=chosen.length?'selected':'browse';offset=0;search='';$('inventory-search').value='';
