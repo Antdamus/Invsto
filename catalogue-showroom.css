@@ -325,3 +325,5 @@
 .catalogue-expand-icon { display: block; width: 20px; height: 20px; flex-shrink: 0; }
 .photo-hint { display: inline-flex; align-items: center; gap: 7px; }
 .photo-hint .catalogue-expand-icon { width: 12px; height: 12px; }
+#request-link-icon { display: inline-flex; vertical-align: middle; margin-left: 7px; }
+#request-link-icon .catalogue-expand-icon { width: 15px; height: 15px; }

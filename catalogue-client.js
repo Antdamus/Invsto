@@ -122,7 +122,8 @@
   $('receipt-heading').textContent=heading;$('receipt-description').textContent=description;
   $('receipt-content').innerHTML=`<p class="receipt-reference">REQUEST ${C.escape(receipt.reference)} · ${C.escape(new Date(receipt.updated_at).toLocaleDateString())}</p>${receipt.message?`<div class="concierge-message"><span class="eyebrow">FROM OG JEWELERS</span><p>${C.escape(receipt.message)}</p></div>`:''}<div class="receipt-pieces">${receipt.items.map(i=>`<div><span>${C.escape(i.name)}</span><strong>${C.money(i.retail_price)}</strong></div>`).join('')}</div><div class="total-row"><span>Selected pieces</span><span>${C.money(receipt.total)}</span></div><div class="total-row"><span>Catalogue credit</span><span>${C.money(receipt.credit_applied)}</span></div><div class="total-row"><span>Balance before shipping / tax</span><span>${C.money(receipt.balance)}</span></div>`;
   $('edit-request').hidden=receipt.status!=='changes_requested';$('copy-status-link').classList.toggle('dark-button',receipt.status!=='changes_requested');$('copy-status-link').classList.toggle('quiet-button',receipt.status==='changes_requested');
-  $('selection-open').firstChild.textContent='Your request ↗ ';$('selection-count').hidden=true;$('selection-open').disabled=false;
+  $('selection-open').firstChild.textContent='Your request';$('selection-count').hidden=true;$('selection-open').disabled=false;
+  if(!$('request-link-icon')){const icon=document.createElement('span');icon.id='request-link-icon';icon.innerHTML=C.expandIcon();$('selection-open').append(icon);}
   $('selection-bar').hidden=true;
   if(!editing)document.querySelectorAll('[data-select]').forEach(b=>{b.hidden=true;});
  }
