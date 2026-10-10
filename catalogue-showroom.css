@@ -25,7 +25,9 @@
 }
 .brand { font-size: 13px; letter-spacing: .18em; gap: 15px; }
 .brand small { font-size: 8px; letter-spacing: .21em; margin-top: 7px; }
-.brand-monogram { font-family: var(--serif); font-size: 33px; font-weight: 500; letter-spacing: -.14em; padding: 9px 13px 9px 8px; border-radius: 50% 50% 2px 2px; }
+/* The original logo includes generous transparent margins; frame the artwork without redrawing it. */
+.catalogue-logo { position: relative; display: inline-block; width: 68px; height: 68px; flex-shrink: 0; overflow: hidden; border-radius: 50%; background: #000; }
+.catalogue-logo img { position: absolute; width: 190%; height: 190%; max-width: none; top: 50%; left: 50%; transform: translate(-50%, -50%); object-fit: contain; }
 .header-caption { color: var(--muted); font: italic 19px var(--serif); }
 .brand-header button { border-color: #b5b9ad; border-radius: 0; padding: 12px 18px; font-size: 12px; }
 .brand-header button:hover:not(:disabled) { background: var(--cream); }
@@ -54,7 +56,7 @@
 .catalogue-hero.without-feature { grid-template-columns: 1fr; max-width: 850px; min-height: 350px; }
 .catalogue-credit { display: flex; align-items: center; justify-content: space-between; gap: 25px; border-block: 1px solid #cfc1a2; padding: 25px 0; }
 .credit-heading { display: flex; align-items: center; gap: 20px; }
-.credit-emblem { display: grid; place-items: center; width: 48px; height: 48px; flex-shrink: 0; font: 26px var(--serif); color: var(--gold); border: 1px solid #cfc1a2; border-radius: 50%; }
+.credit-emblem { width: 52px; height: 52px; }
 .credit-heading .eyebrow { margin: 0 0 4px; font-size: 9px; }
 .credit-heading p:last-child { font: 26px var(--serif); margin: 0; }
 .credit-value { display: grid; gap: 4px; text-align: right; flex-shrink: 0; }
@@ -103,7 +105,7 @@
 .concierge-steps > div > span { font: italic 24px var(--serif); color: #d4bf95; }
 .concierge-steps p { margin: 2px 0; font: 400 22px var(--serif); }
 .concierge-steps small { margin-top: 9px; font: 10px/1.9 Manrope,sans-serif; color: #bacabe; }
-.catalogue-footer .brand-monogram { color: #d4bf95; border-color: #927e59; }
+.catalogue-footer .footer-logo { width: 100px; height: 100px; }
 .catalogue-footer .footer-wordmark { font: 500 12px Manrope,sans-serif; letter-spacing: .22em; margin-block: 18px; }
 .catalogue-footer > small { color: #bacabe; font-size: 10px; max-width: 660px; }
 .selection-bar { max-width: 900px; padding: 19px 25px; background: #17392ff5; border: 1px solid #8c9c85; border-radius: 2px; box-shadow: 0 8px 40px #06150e30; backdrop-filter: blur(12px); gap: 32px; }
@@ -145,7 +147,7 @@
 .send-summary { border-radius: 0; }
 .total-row { font-size: 13px; }
 .receipt-dialog { padding: 38px; }
-.receipt-seal { border-radius: 50% 50% 2px 2px; margin-bottom: 28px; }
+.catalogue-logo.receipt-seal { width: 80px; height: 80px; border: 0; border-radius: 50%; margin-bottom: 28px; }
 .receipt-dialog h2 { font-size: 46px; font-weight: 400; }
 .concierge-message { background: #e9ecdf; }
 .empty-collection { font: 25px/1.5 var(--serif); border: 0; background: #f0ede5; }
@@ -206,7 +208,7 @@
 @media (max-width:560px) {
   .brand { font-size: 10px; gap: 11px; }
   .brand small { font-size: 6px; letter-spacing: .15em; }
-  .brand-monogram { font-size: 27px; padding: 7px 11px 7px 7px; }
+  .brand .catalogue-logo { width: 56px; height: 56px; }
   .brand-header button { font-size: 10px; padding: 10px; }
   .brand-header b { min-width: 20px; height: 20px; font-size: 9px; margin-left: 4px; }
   .catalogue-hero { padding: 34px 0; gap: 25px; }
@@ -269,6 +271,7 @@
   .receipt-dialog h2 { font-size: 41px; }
   .receipt-reference { font-size: 9px; }
 }
+@media (max-width:380px) { .brand-wordmark { display: none; } }
 @media (prefers-reduced-motion:reduce) {
   .client-catalogue *, .client-catalogue *::before, .client-catalogue *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
