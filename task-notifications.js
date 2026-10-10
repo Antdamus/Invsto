@@ -4,9 +4,9 @@
 
   const PAGE_SIZE = 30;
   const REFRESH_MS = 60000;
-  const categories = {all: 'All', tasks: 'Tasks', buyers: 'Buyer issues', returns: 'Returns', system: 'System'};
-  const descriptions = {all: 'Assignments, replies and eBay updates.', tasks: 'Your assignments, replies and approvals.', buyers: 'Buyer requests, disputes and eBay deadlines.', returns: 'Return case updates and eBay deadlines.', system: 'Connection and synchronization alerts.'};
-  const labels = {task_assigned: 'New assignment', subtask_assigned: 'New subtask', shipment_assigned: 'Shipping assignment',
+  const categories = {all: 'All', tasks: 'Tasks', buyers: 'Buyer issues', returns: 'Returns', system: 'System', catalogues: 'Catalogues'};
+  const descriptions = {all: 'Assignments, replies and eBay updates.', tasks: 'Your assignments, replies and approvals.', buyers: 'Buyer requests, disputes and eBay deadlines.', returns: 'Return case updates and eBay deadlines.', system: 'Connection and synchronization alerts.', catalogues: 'Client selections awaiting your review.'};
+  const labels = {catalogue_request: 'Client selection',task_assigned: 'New assignment', subtask_assigned: 'New subtask', shipment_assigned: 'Shipping assignment',
     packaging_assigned: 'Packaging assignment', return_task_assigned: 'Return assignment', task_progress_update: 'Reply / update',
     task_ready_for_review: 'Ready for review', task_completed: 'Work completed', subtask_completed: 'Subtask completed',
     task_due_reminder: 'Task reminder', task_overdue: 'Overdue task',customer_issue_sync:'eBay sync',customer_issue_action:'eBay case update',customer_issue_deadline:'eBay deadline'};
@@ -23,7 +23,8 @@
   };
   const issueAlert = entry => ['customer_issue_action','customer_issue_deadline'].includes(entry.notification_type) && /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(entry.metadata?.case_id || '');
   const syncAlert = entry => entry.notification_type === 'customer_issue_sync';
-  const href = entry => syncAlert(entry) ? 'ebay-returns.html?syncHealth=1' : issueAlert(entry) ? `ebay-returns.html?caseId=${encodeURIComponent(entry.metadata.case_id)}` : /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(entry.task_id || '')
+  const catalogueAlert = entry => entry.notification_type === 'catalogue_request' && /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(entry.metadata?.request_id || '');
+  const href = entry => catalogueAlert(entry) ? `catalogue-requests.html?requestId=${encodeURIComponent(entry.metadata.request_id)}` : syncAlert(entry) ? 'ebay-returns.html?syncHealth=1' : issueAlert(entry) ? `ebay-returns.html?caseId=${encodeURIComponent(entry.metadata.case_id)}` : /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(entry.task_id || '')
     ? `team-tasks.html?taskId=${encodeURIComponent(entry.task_id)}` : 'team-tasks.html';
   const snapshot = () => ({userId, notifications: [...new Map([...unread, ...entries].map(row => [row.id, row])).values()], unreadCount});
   function publish() {
@@ -133,8 +134,8 @@
     });
     root.querySelector('.og-tu-category-help').textContent = descriptions[category];
     const destination = root.querySelector('[data-tu-destination]');
-    destination.href = ['buyers','returns','system'].includes(category) ? `ebay-returns.html${category === 'system' ? '?syncHealth=1' : ''}` : 'team-tasks.html';
-    destination.textContent = category === 'system' ? 'View connection status →' : ['buyers','returns'].includes(category) ? 'Go to Customer Issues →' : 'Go to Tasks →';
+    destination.href = category === 'catalogues' ? 'catalogue-requests.html' : ['buyers','returns','system'].includes(category) ? `ebay-returns.html${category === 'system' ? '?syncHealth=1' : ''}` : 'team-tasks.html';
+    destination.textContent = category === 'catalogues' ? 'Review client selections →' : category === 'system' ? 'View connection status →' : ['buyers','returns'].includes(category) ? 'Go to Customer Issues →' : 'Go to Tasks →';
     root.querySelectorAll('[data-tu-view]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.tuView === view)));
     const error = root.querySelector('.og-tu-error');
     error.hidden = !errorMessage; error.querySelector('span').textContent = errorMessage;
@@ -151,7 +152,7 @@
         <h3>${escape(entry.title || 'Task update')}</h3>
         ${entry.actor_email ? `<small class="og-tu-actor">From ${escape(entry.actor_email)}</small>` : ''}
         <p>${escape(entry.body || 'Open the task to see the instructions.')}</p>
-        <div class="og-tu-entry-actions"><a href="${escape(href(entry))}" data-tu-open="${escape(entry.id)}">${syncAlert(entry)?'Open sync status':issueAlert(entry)?'Open case':'Open task'}</a>
+        <div class="og-tu-entry-actions"><a href="${escape(href(entry))}" data-tu-open="${escape(entry.id)}">${catalogueAlert(entry)?'Review selection':syncAlert(entry)?'Open sync status':issueAlert(entry)?'Open case':'Open task'}</a>
         ${entry.read_at ? '<span>Read</span>' : `<button type="button" data-tu-read="${escape(entry.id)}" ${busyIds.has(entry.id) ? 'disabled' : ''}>${busyIds.has(entry.id) ? 'Saving…' : 'Mark read'}</button>`}</div>
       </article>`).join('') : `<div class="og-tu-empty">${loading ? 'Loading updates…' : `No ${view === 'unread' ? 'unread' : 'recent'} ${category === 'all' ? 'updates' : categories[category].toLowerCase() + ' updates'}.${category !== 'all' && unreadCount ? ' Other updates are available under All.' : ''}`}</div>`;
       list.scrollTop = scrollTop;

@@ -4,7 +4,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
 function json(status: number, body: unknown) {
@@ -67,9 +67,17 @@ async function sharedCatalogue(client: any, token: string, projectUrl: string) {
   });
 }
 
+// Keep the receipt allowlist independent of staff records and future columns.
+function publicReceipt(data: any) {
+ return {reference:data.reference,title:data.title,status:data.status,revision:data.revision,message:data.message,
+  total:data.total,credit_applied:data.credit_applied,balance:data.balance,currency:"USD",delivery:data.delivery,
+  created_at:data.created_at,updated_at:data.updated_at,
+  items:(data.items || []).map((i:any)=>({id:i.id,name:i.name,retail_price:i.retail_price}))};
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  if (req.method !== "GET") return json(405, { error: "method_not_allowed" });
+  if (!["GET", "POST"].includes(req.method)) return json(405, { error: "method_not_allowed" });
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
   const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -81,8 +89,49 @@ Deno.serve(async (req) => {
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
 
   if (url.searchParams.has("catalogue")) {
-    return sharedCatalogue(supabase, url.searchParams.get("catalogue") || "", SUPABASE_URL);
+    const token = url.searchParams.get("catalogue") || "";
+    const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
+    if (!uuid.test(token)) return json(404, { error: "catalogue_unavailable" });
+    if (req.method === "POST") {
+      // Bound streamed bytes too: Content-Length alone is client controlled.
+      let input: any;
+      try {
+        const reader = req.body?.getReader(); let text = "", size = 0;
+        if (!reader) return json(400, { error: "invalid_request" });
+        const decoder = new TextDecoder();
+        while (true) { const {done,value} = await reader.read(); if (done) break; size += value.byteLength;
+          if (size > 24000) { await reader.cancel(); return json(413, {error:"request_too_large"}); }
+          text += decoder.decode(value,{stream:true}); }
+        input = JSON.parse(text + decoder.decode());
+      } catch { return json(400, {error:"invalid_request"}); }
+      if (!uuid.test(input?.receipt || "") || !Array.isArray(input.items) || input.items.length > 100 ||
+          typeof input.name !== "string" || typeof input.contact !== "string" || typeof input.delivery !== "string" ||
+          (input.note !== undefined && typeof input.note !== "string") ||
+          !input.items.every((i:any) => uuid.test(i?.id || "") && typeof i.retail_price === "number" && Number.isFinite(i.retail_price) && i.retail_price > 0) ||
+          !(input.credit === null || (typeof input.credit === "number" && Number.isFinite(input.credit) && input.credit >= 0)) ||
+          (input.revision !== null && input.revision !== undefined && !Number.isSafeInteger(input.revision))) return json(400,{error:"invalid_request"});
+      const {data,error} = await supabase.rpc("submit_catalogue_request", {
+        _token:token,_receipt:input.receipt,_revision:input.revision ?? null,
+        _name:input.name,_contact:input.contact,_delivery:input.delivery,_note:input.note || "",
+        _items:input.items.map((i:any)=>({id:i.id,retail_price:i.retail_price})),_expected_credit:input.credit,
+      });
+      if (error) {
+        const known = ["selection_changed","catalogue_unavailable","request_limit","invalid_selection","invalid_contact","invalid_request"];
+        const reason = known.includes(error.message) ? error.message : "request_temporarily_unavailable";
+        return json(reason === "request_limit" ? 429 : reason === "selection_changed" ? 409 : reason === "catalogue_unavailable" ? 404 : reason.startsWith("invalid_") ? 400 : 503,{error:reason});
+      }
+      return json(200, publicReceipt(data));
+    }
+    if (url.searchParams.has("receipt")) {
+      const receipt = url.searchParams.get("receipt") || "";
+      if (!uuid.test(receipt)) return json(404,{error:"request_unavailable"});
+      const {data,error} = await supabase.rpc("catalogue_request_receipt",{_token:token,_receipt:receipt});
+      if (error) return json(503,{error:"request_temporarily_unavailable"});
+      return data ? json(200,publicReceipt(data)) : json(404,{error:"request_unavailable"});
+    }
+    return sharedCatalogue(supabase, token, SUPABASE_URL);
   }
+  if (req.method !== "GET") return json(405, {error:"method_not_allowed"});
 
   // Settings (bucket + ttl)
   const { data: settings, error: settingsErr } = await supabase
