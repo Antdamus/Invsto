@@ -4,12 +4,36 @@
  const $=id=>document.getElementById(id),escape=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const finish=new Set(['resolved','cancelled','closed','approved_by_admin']);
  const nice=v=>v==='received_no_restock'?'Received · not added to inventory':String(v||'Not reported').replace(/_/g,' ').toLowerCase().replace(/^./,x=>x.toUpperCase());
- const date=v=>v&&!Number.isNaN(Date.parse(v))?new Date(v).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}):'Not provided';
+ const date=v=>v&&!Number.isNaN(Date.parse(v))?new Date(v).toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}):'Not provided';
  const kind=c=>['request','return','dispute'].includes(c.issue_kind)?c.issue_kind:'request';
  const closed=c=>/(^|_)(CLOSED|CANCELLED|CANCELED|RESOLVED|SELLER_WON|SELLER_LOST|DISPUTE_REVERSED)($|_)/i.test(c.ebay_status||'');
  const safeUrl=value=>{try{const u=new URL(value,location.href);return ['https:','http:'].includes(u.protocol)?u.href:'';}catch{return '';}};
- let ctx,db,ready=false,view='attention',scope='all',search='',offset=0,total=0,rows=[],counts={},people=[],selected=null,detail=null,version=0,listVersion=0,timer,poll,saving=false,syncing=false;
+ let ctx,db,ready=false,view='attention',scope='all',sort='newest',search='',offset=0,total=0,rows=[],counts={},people=[],selected=null,detail=null,version=0,listVersion=0,timer,poll,saving=false,syncing=false;
  const PAGE=30;
+ const sortLabels={newest:'Newest cases',oldest:'Oldest cases',order_newest:'Newest orders',order_oldest:'Oldest orders',due_soonest:'eBay deadline: soonest',due_latest:'eBay deadline: latest',value_highest:'Value: high to low',value_lowest:'Value: low to high'};
+ const money=c=>{if(c.item_value==null||!Number.isFinite(Number(c.item_value)))return 'Not available';try{return new Intl.NumberFormat(undefined,{style:'currency',currency:c.item_currency||'USD'}).format(Number(c.item_value));}catch{return `${c.item_currency||''} ${Number(c.item_value).toFixed(2)}`;}};
+ function lineFacts(lines){
+  const currencies=new Set(lines.map(l=>l.raw_payload?.line?.total?.currency||l.raw_payload?.line?.lineItemCost?.currency||'USD'));
+  const order=lines[0]?.order||lines[0]?.ebay_orders;
+  return {order_placed_at:(Array.isArray(order)?order[0]:order)?.sale_date,item_currency:currencies.size===1?[...currencies][0]:null,linked_line_count:lines.length,
+   item_value:lines.length&&currencies.size===1&&lines.every(l=>Number(l.sold_for)>0)?lines.reduce((sum,l)=>sum+Number(l.sold_for)*Number(l.quantity),0):null};
+ }
+ function cardFacts(c){return `<div class="issue-card-facts"><div><small>${c.linked_line_count>1?'Linked items value':'Item value'}</small><strong>${escape(money(c))}</strong></div><div><small>Order placed</small><span>${escape(c.order_placed_at?new Date(c.order_placed_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'Not provided')}</span></div></div><div class="issue-card-opened">Case opened ${escape(date(c.opened_at))}</div>`;}
+ function conversationRows(data){
+  return [...(data.case_messages||[]).map(m=>({...m,channel:'eBay case',when:m.sent_at})),...(data.buyer_messages||[]).map(m=>({...m,channel:'Buyer chat',when:m.created_at_ebay}))]
+   .filter(m=>m.direction!=='internal'&&(!m.message_status||['sent','imported'].includes(m.message_status)))
+   .sort((a,b)=>(Date.parse(b.when)||0)-(Date.parse(a.when)||0));
+ }
+ function renderConversation(){
+  const target=$('issue-conversation');if(!target||!detail?.originalEvidence)return;
+  const data=detail.originalEvidence,messages=conversationRows(data),limit=detail.conversationLimit||3;
+  const truncated=(data.case_messages||[]).length>500||(data.buyer_messages||[]).length>500;
+  target.innerHTML=`<div class="issue-conversation-heading"><h3>Conversation <span>${messages.length}${truncated?'+':''}</span></h3><small>Latest first</small></div><p class="issue-subtitle">Messages linked to this case or its original order/item.</p>`+
+   (messages.length?messages.slice(0,limit).map(m=>`<article class="issue-chat-message ${m.direction==='outbound'?'is-outbound':''}"><header><b>${escape(m.direction==='outbound'?'Our reply':m.sender_username||detail.c.buyer_username||'Buyer')}</b><small>${escape(m.channel)} · ${escape(date(m.when))}</small></header><p>${escape(m.message_body||'Message has no saved text. Open Buyer chat to review attachments.')}</p></article>`).join(''):'<p class="issue-subtitle">No linked conversation has been saved yet. Use Buyer chat or Open eBay case to check for other messages.</p>')+
+   (messages.length>limit?`<button type="button" class="secondary-btn" data-more-messages>Show older messages (${messages.length-limit} more)</button>`:'')+
+   (truncated?'<p class="issue-subtitle">More history may be available in Buyer chat or the eBay case.</p>':'');
+ }
+
  const checked=r=>{if(r.error)throw r.error;return r.data;};
  const person=id=>id===ctx?.user?.id?'You':people.find(p=>p.user_id===id)?.display_name||people.find(p=>p.user_id===id)?.email||'Needs an owner';
  const taskLink=t=>`team-tasks.html?taskId=${encodeURIComponent(t.id)}`;
@@ -33,10 +57,12 @@
   $('issues-list').innerHTML=rows.length?rows.map(c=>`<button type="button" class="issue-card" data-case="${escape(c.id)}" aria-current="${selected===c.id}">
    <div class="issue-card-top"><span class="issue-kind is-${kind(c)}">${kind(c)==='request'?'Customer request':kind(c)==='return'?'Physical return':'Dispute'}</span><small>${escape(c.order_number||`Case ${c.ebay_return_id||'not linked'}`)}</small></div>
    <h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p>${escape(c.item_title||c.return_reason||'Open this case to review the order and next step.')}</p>
-   <div class="issue-card-footer"><span class="issue-tag">${escape(nextText(c))}</span>${c.ebay_due_at&&!closed(c)?`<span class="issue-tag ${c.overdue?'is-overdue':''}">${c.overdue?'Response overdue':'Respond by'} ${escape(date(c.ebay_due_at))}</span>`:''}</div>
+   ${cardFacts(c)}
+   <div class="issue-card-footer"><span class="issue-tag">${escape(nextText(c))}</span>${c.ebay_due_at&&!closed(c)?`<span class="issue-tag ${c.overdue?'is-overdue':''}">${c.overdue?'eBay deadline overdue':'eBay deadline'} ${escape(date(c.ebay_due_at))}</span>`:!closed(c)?'<span class="issue-tag">eBay deadline not provided</span>':''}</div>
    <div class="issue-card-top" style="margin:11px 0 0"><small>${c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>`).join(''):
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
   $('issues-count').textContent=`${total} ${view==='history'?'finished':'active'} case${total===1?'':'s'}`;
+  $('issues-sort-caption').textContent=sortLabels[sort]+(sort.startsWith('value_')?' · grouped by currency':'');
   $('issues-page').textContent=total?`${offset+1}–${Math.min(offset+PAGE,total)} of ${total}`:'0 cases';
   $('issues-prev').disabled=offset===0;$('issues-next').disabled=offset+PAGE>=total;
   document.querySelectorAll('[data-issue-view]').forEach(b=>{b.setAttribute('aria-pressed',String(b.dataset.issueView===view));b.querySelector('b').textContent=counts[b.dataset.issueView]??'–';});
@@ -44,7 +70,7 @@
  async function refresh(options={}){
   const request=++listVersion;$('issues-list').setAttribute('aria-busy','true');
   try{
-   const result=checked(await db.rpc('list_customer_issues',{_view:view,_scope:scope,_search:search,_offset:offset,_limit:PAGE}));
+   const result=checked(await db.rpc('list_customer_issues',{_view:view,_scope:scope,_search:search,_offset:offset,_limit:PAGE,_sort:sort}));
    if(request!==listVersion)return;
    rows=result.rows||[];counts=result.counts||{};total=result.total||0;cards();
    if($('issues-feedback').classList.contains('is-error'))feedback('');
@@ -111,28 +137,29 @@
  }
  function renderDetail(){
   if(!detail||detail.c.id!==selected)return;
-  const {c,tasks,items,lines,events}=detail,summary=rows.find(r=>r.id===c.id)||{...c,open_tasks:tasks.filter(t=>!finish.has(t.status)).length};
+  const {c,tasks,items,lines,events}=detail,summary=rows.find(r=>r.id===c.id)||{...c,...lineFacts(lines),open_tasks:tasks.filter(t=>!finish.has(t.status)).length};
   const primary={...(tasks.find(t=>!finish.has(t.status))||{id:'',metadata:c.raw_payload}),order_line_ids:lines.map(l=>l.id),ebay_return_cases:c};
-  const receipt=ctx.renderReceipt(primary),complaint=ctx.renderComplaint(primary),messages=ctx.renderMessages(primary);
+  const receipt=ctx.renderReceipt(primary),complaint=ctx.renderComplaint(primary);
   const url=caseHref(c),remaining=items.some(i=>i.received_quantity<i.expected_quantity)||!items.length;
   const reason=/^(CLOSED|OPEN|WAITING_.*)$/i.test(c.return_reason||'')?'No customer reason captured':nice(c.return_reason);
   $('issues-detail').innerHTML=`<div class="issue-detail-bar"><button type="button" class="secondary-btn issue-back" data-close-case>← Cases</button><span>${escape(c.ebay_return_id?`Case ${c.ebay_return_id}`:'Internal return')}</span>${c.ebay_return_id?'<button type="button" class="secondary-btn" data-sync-case>Refresh case</button>':''}</div>
-   <div class="issue-detail-content"><span class="issue-kind is-${kind(c)}">${kind(c)==='dispute'?(c.source_lane==='payment_dispute'?'Payment dispute':'Escalated eBay case'):nice(kind(c))}</span><h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p class="issue-subtitle">${escape(c.item_title||'Review the linked order items below')}</p>
+   <div class="issue-detail-content"><span class="issue-kind is-${kind(c)}">${kind(c)==='dispute'?(c.source_lane==='payment_dispute'?'Payment dispute':'Escalated eBay case'):nice(kind(c))}</span><h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p class="issue-subtitle">${escape(c.item_title||summary.item_title||lines[0]?.item_title||'Review the linked order items below')}</p>
    <section class="issue-original-order"><div><small>ORIGINAL ORDER</small><strong>${escape(c.order_number||'Not identified yet')}</strong><span>${c.order_id?`${lines.length} linked item${lines.length===1?'':'s'} · Saved in Invsto`:c.order_number?'Not found in saved orders yet':'Match the original order to see its evidence'}</span></div>${c.order_number?`<a class="secondary-btn" href="ebay-order-history.html?orderHistorySearch=${encodeURIComponent(c.order_number)}&historyAllDates=true">Open full order ↗</a>`:''}</section>
    <div class="issue-next"><span>NEXT STEP</span><strong>${escape(nextText(summary))}</strong><p>${closed(c)?'eBay has closed its case. Internal tasks and returned inventory are tracked separately.':'Keep the case open until the customer issue and your internal work are both handled.'}</p></div>
-   <div class="issue-facts"><div><small>eBay status</small><b>${escape(nice(c.ebay_status))}</b></div><div><small>Our return / case status</small><b>${escape(nice(c.status))}</b></div><div><small>eBay response deadline</small><b>${escape(date(c.ebay_due_at))}</b></div><div><small>Last successful case update</small><b>${escape(date(c.synced_at))}${c.sync_error?' · Retry needed':''}</b></div><div><small>Opened</small><b>${escape(date(c.opened_at))}</b></div><div><small>Customer’s reason</small><b>${escape(reason)}</b></div></div>
+   <div class="issue-facts"><div><small>Item value</small><b>${escape(money(summary))}</b></div><div><small>Order placed</small><b>${escape(summary.order_placed_at?new Date(summary.order_placed_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'Not provided')}</b></div><div><small>eBay status</small><b>${escape(nice(c.ebay_status))}</b></div><div><small>eBay deadline</small><b>${escape(date(c.ebay_due_at))}</b></div></div>
+   <p class="issue-review-meta">Opened ${escape(date(c.opened_at))}<br>Last eBay update ${escape(date(c.synced_at))} · Internal status: ${escape(nice(c.status))}</p>
    ${c.sync_error?`<p class="issue-tag is-stale">Update failed. The previous case information was kept. ${escape(c.sync_error)}</p>`:''}
    <div class="issue-actions">${c.issue_kind==='return'&&remaining&&lines.some(l=>l.line_status==='fulfilled')&&!['closed','cancelled'].includes(c.status)?'<button class="primary-btn" data-receive>Receive returned items</button>':''}
     ${url?`<a class="secondary-btn" href="${escape(url)}" target="_blank" rel="noopener">${c.source_lane==='case'||c.source_lane==='payment_dispute'?'Open eBay order / case':'Open eBay case'} ↗</a>`:''}
-    ${lines[0]?`<a class="secondary-btn" href="email-triage.html?orderLineId=${encodeURIComponent(lines[0].id)}&from=returns" target="_blank" rel="noopener">Buyer chat ↗</a>`:''}
+    ${lines[0]||c.buyer_username?`<a class="secondary-btn" href="email-triage.html?${lines[0]?'orderLineId='+encodeURIComponent(lines[0].id):'ebayBuyer='+encodeURIComponent(c.buyer_username)}&from=returns" target="_blank" rel="noopener">Buyer chat ↗</a>`:''}
     ${!lines.length&&ctx.employee.role==='admin'?'<button class="primary-btn" data-match-order>Match order items</button>':''}</div>
+   <section class="issue-detail-section issue-complaint-summary"><h3>Complaint &amp; conversation</h3><p class="issue-complaint-reason"><small>Customer’s reason</small><strong>${escape(reason)}</strong></p>${complaint||'<p class="issue-subtitle">No additional complaint details saved.</p>'}<div id="issue-conversation" aria-live="polite"><p class="issue-subtitle">Loading related conversation…</p></div></section>
+   ${renderTasks()}
    <details class="issue-detail-section" open><summary>Order items &amp; saved photos</summary>${receipt||'<p class="issue-subtitle">No item screenshot is saved yet.</p>'}${lines.map(l=>`<div class="issue-line"><strong>${escape(l.item_title)}</strong><p>${escape(l.item_number||'')} · Order qty ${l.quantity||0} · Fulfilled ${l.fulfilled_quantity||0}</p></div>`).join('')}
     ${items.map(i=>`<div class="issue-line"><strong>${escape(i.item_title)}</strong><p>Received ${i.received_quantity} of ${i.expected_quantity} · Restocked ${i.restocked_quantity||0} · ${escape(nice(i.disposition))}</p>${i.received_quantity>i.restocked_quantity&&!['closed','cancelled'].includes(c.status)?`<button class="secondary-btn" data-inspect="${i.id}">Inspect received item</button>`:''}</div>`).join('')}
     <div id="issue-original-evidence"><p class="issue-subtitle">Loading saved order evidence…</p></div><h3 style="margin-top:20px">Return evidence</h3><div id="issue-return-evidence" class="issues-evidence-grid"></div></details>
    <details class="issue-detail-section issue-evidence-package"><summary>Evidence package</summary><p class="issue-subtitle">Gather item photos, packing evidence, tracking, certificates and messages. Choose what belongs in the download.</p><button class="secondary-btn" data-prepare-evidence>Prepare evidence</button><div id="issue-evidence-package"></div></details>
-   ${renderTasks()}
    <details class="issue-detail-section"><summary>Money &amp; payment</summary><p>Case amount: <strong>${escape(c.raw_payload?.apiExtractedDetails?.requestAmount||c.raw_payload?.requestAmount||c.raw_payload?.refundText||'Not provided by eBay')}</strong></p>${ctx.financeBadge?.(primary)||''}<p class="issue-subtitle">Payment information updates separately in the background. The case amount is not confirmation that a refund was issued. Check eBay before making a financial decision.</p></details>
-   <details class="issue-detail-section"><summary>Buyer’s complaint &amp; eBay conversation</summary>${complaint||''}${messages||'<p class="issue-subtitle">No case messages were returned by eBay. Open Buyer chat or the eBay case to check the conversation.</p>'}</details>
    <details class="issue-detail-section"><summary>Activity &amp; internal updates</summary>${events.length?events.map(e=>`<div class="issue-update"><small>${escape(date(e.created_at))} · ${escape(e.signed_by_email||'eBay / system')}</small><p>${escape(e.notes||nice(e.action))}</p></div>`).join(''):'<p class="issue-subtitle">No recorded updates yet.</p>'}${detail.moreEvents?'<p class="issue-subtitle">Showing the latest 50 events from each source. Open Full task for its complete work history.</p>':''}</details>
    ${ctx.employee.role==='admin'&&(closed(c)||!c.ebay_return_id)&&!['closed','cancelled'].includes(c.status)?'<details class="issue-detail-section"><summary>Finish this case</summary><p class="issue-subtitle">This finishes the internal case. It does not send a refund or change eBay. All tasks and inventory checks must be complete.</p><button class="secondary-btn" data-finish-case>Record final outcome</button></details>':''}</div>`;
   ctx.bindReceipt($('issues-detail'));ctx.hydrateReceipts().catch(()=>{});
@@ -154,17 +181,17 @@
  }
  async function loadOriginalEvidence(stamp){
   const target=$('issue-original-evidence');
-  if(!detail.c.order_id){target.innerHTML='<p class="issue-subtitle">Connect the original order to see its saved photos, video receipts and packaging evidence.</p>';return;}
   try{
    const data=checked(await db.rpc('customer_issue_evidence',{_case_id:detail.c.id}));if(stamp!==version||!target.isConnected)return;
-   detail.originalEvidence=data;detail.originalLimits={};
+   detail.originalEvidence=data;detail.originalLimits={};renderConversation();
    const receipts=ctx.evidenceReceipts?ctx.evidenceReceipts(detail.lines):[],shown=new Set(receipts.map(p=>`${p.bucket||p.storage_bucket}:${p.path||p.storage_path}`));
    detail.originalFiles=root.OGIssueEvidence.collect(data).filter(p=>p.group!=='returned'&&!shown.has(`${p.bucket}:${p.path}`));
    await renderOriginalEvidence(stamp);
-  }catch(error){if(stamp===version&&target.isConnected)target.innerHTML=`<p class="issue-form-error">Saved order evidence could not load: ${escape(error.message)}. Refresh this case to retry.</p>`;}
+  }catch(error){if(stamp===version&&target.isConnected){target.innerHTML=`<p class="issue-form-error">Saved order evidence could not load: ${escape(error.message)}. Refresh this case to retry.</p>`;if($('issue-conversation'))$('issue-conversation').innerHTML='<p class="issue-form-error">Conversation could not load. Refresh this case to retry.</p>';}}
  }
  async function renderOriginalEvidence(stamp){
   const target=$('issue-original-evidence'),data=detail.originalEvidence,files=detail.originalFiles;
+  if(!detail.c.order_id){target.innerHTML='<p class="issue-subtitle">Connect the original order to review its saved item and packaging evidence.</p>';return;}
   const groups={item:'Live bag photos',completion:'Order completion photos',packaging:'Packaging photos & videos',certificate:'Certificate copies'};
   target.innerHTML=`<p class="issue-subtitle">Evidence from original order ${escape(detail.c.order_number)}. Completion and packaging photos may include other items shipped in the same package.</p>`+
    Object.entries(groups).map(([key,title])=>{const found=files.map((p,i)=>({...p,i})).filter(p=>p.group===key),limit=detail.originalLimits[key]||6;
@@ -206,7 +233,7 @@
    const orderEvents=await ctx.loadOrderEvents(ids);if(stamp!==version)return;
    ctx.state.returnTasks=tasks;ctx.state.returnTaskLines=new Map(lines.map(l=>[l.id,l]));ctx.state.returnTaskOrderEvents=orderEvents;ctx.state.returnCases=[{...c,ebay_return_items:items}];
    ctx.state.returnTaskEvents=taskEvents;ctx.state.returnAssignees=people;ctx.mergeLines(lines);
-   if(tasks[0])await Promise.all([ctx.loadMessages(tasks[0]),ctx.hydrateComplaint(tasks)]);
+   if(tasks[0])await ctx.hydrateComplaint(tasks);
    if(stamp!==version)return;
    if(quiet&&(($('issue-action-form')&&$('issue-action-form')!==initialForm)||ctx.state.busy))return;
    detail={c,tasks,items,lines,events:[...caseEvents,...taskEvents].sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at)),moreEvents:caseEvents.length===50||taskEvents.length===50};
@@ -295,12 +322,14 @@
    else if(b.dataset.inspect)inspectionForm(b.dataset.inspect);
    else if(b.hasAttribute('data-media'))media(Number(b.dataset.media));
    else if(b.hasAttribute('data-original-media'))originalMedia(Number(b.dataset.originalMedia));
+   else if(b.hasAttribute('data-more-messages')){detail.conversationLimit=(detail.conversationLimit||3)+12;renderConversation();}
    else if(b.hasAttribute('data-more-original')){detail.originalLimits[b.dataset.moreOriginal]=(detail.originalLimits[b.dataset.moreOriginal]||6)+6;renderOriginalEvidence(version);}
    else if(b.hasAttribute('data-cancel-form'))$('issue-form-slot').innerHTML='';
    else if(b.hasAttribute('data-match-order'))matchForm();
    else if(b.hasAttribute('data-finish-case')){form('Record final outcome','<label>Outcome<textarea name="note" required placeholder="What was resolved and how?"></textarea></label>','Finish internal case');$('issue-action-form').onsubmit=e=>submitForm(e,async f=>checked(await db.rpc('finish_customer_issue',{_case_id:selected,_note:f.get('note')})));}
   });
   $('issues-search').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>{search=$('issues-search').value.trim();offset=0;refresh({detail:false});},280);});
+  $('issues-sort').onchange=()=>{sort=$('issues-sort').value;offset=0;refresh({detail:false});};
   $('issues-scope').onchange=()=>{scope=$('issues-scope').value;offset=0;refresh({detail:false});};
   $('issues-prev').onclick=()=>{offset=Math.max(0,offset-PAGE);refresh({detail:false});};$('issues-next').onclick=()=>{offset+=PAGE;refresh({detail:false});};
   $('issues-refresh').onclick=()=>{refresh();health();};$('issues-sync').onclick=()=>sync();
@@ -326,5 +355,5 @@
    }catch(error){target.textContent=error.message||'No exact order found.';}
   };
  }
- root.OGCustomerIssues={init,refresh,openReceivedCase:id=>openCase(id),get ready(){return ready;},testing:{kind,nextText,closed,date,caseHref}};
+ root.OGCustomerIssues={init,refresh,openReceivedCase:id=>openCase(id),get ready(){return ready;},testing:{kind,nextText,closed,date,caseHref,money,cardFacts,conversationRows,lineFacts}};
 })(globalThis);

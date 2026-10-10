@@ -72,7 +72,7 @@ test('filters and paging stay server-side; full case data loads only on selectio
 });
 test('background case changes keep expanded details and never erase an unsaved reply',async t=>{
  const page=await open(t,1440);await page.locator('.issue-card').first().click();
- await page.getByText('Buyer’s complaint & eBay conversation',{exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Complaint & conversation',exact:true})).toBeVisible();
  await page.evaluate(async()=>{fixtureUpdateCase({ebay_status:'ITEM_DELIVERED'});await OGCustomerIssues.refresh({detail:false});});
  await expect(page.getByText('Item delivered',{exact:true})).toBeVisible();
  await expect(page.getByText('Buyer says the clasp needs inspection.',{exact:true})).toBeVisible();
@@ -97,7 +97,7 @@ test('phone evidence downloads original files and selected messages without send
  const page=await open(t,390);await page.locator('.issue-card').first().click();
  await page.getByText('Evidence package',{exact:true}).click();await page.getByRole('button',{name:'Prepare evidence',exact:true}).click();
  await expect(page.getByRole('button',{name:'Download evidence ZIP',exact:true})).toBeVisible();
- await page.locator('.issue-evidence-group summary').click();await page.locator('[data-evidence-message]').check();
+ await page.locator('.issue-evidence-group summary').click();await page.locator('[data-evidence-message]').first().check();
  const downloadPromise=page.waitForEvent('download');await page.getByRole('button',{name:'Download evidence ZIP',exact:true}).click();const download=await downloadPromise;
  assert.match(download.suggestedFilename(),/evidence.zip$/);await expect(page.locator('[data-evidence-status]')).toContainText('1 messages');
  assert.equal((await page.evaluate(()=>fixtureWrites)).length,0);
@@ -145,4 +145,16 @@ for(const width of [320,1366])test(`sync recovery at ${width}px explains the iss
  await page.getByRole('button',{name:'Refresh customer issues'}).click();
  await expect(page.locator('#issues-health-summary')).toHaveText('eBay connected · background updates active');
  await expect(page.getByRole('button',{name:'Retry sync',exact:true})).toHaveCount(0);
+});
+
+for(const width of [390,1366])test(`quick case review ${width}px: global sort, card facts and inline conversation`,async t=>{
+ const page=await open(t,width);
+ await expect(page.locator('.issue-card').first()).toContainText('Item value');await expect(page.locator('.issue-card').first()).toContainText('$150.00');
+ await expect(page.locator('.issue-card').first()).toContainText('Order placed');await expect(page.locator('.issue-card').first()).toContainText('eBay deadline');
+ await page.getByRole('combobox',{name:'Sort by',exact:true}).selectOption('value_highest');await expect(page.locator('.issue-card').first()).toContainText('buyer.35');
+ await page.getByRole('button',{name:'Returns 12',exact:true}).click();await expect(page.getByRole('combobox',{name:'Sort by',exact:true})).toHaveValue('value_highest');await expect(page.locator('.issue-card').first()).toContainText('buyer.33');
+ await page.getByRole('combobox',{name:'Sort by',exact:true}).selectOption('newest');await page.locator('.issue-card').first().click();
+ await expect(page.locator('.issue-chat-message')).toHaveCount(3);await expect(page.locator('.issue-chat-message').first()).toContainText('The clasp needs checking');
+ await page.getByRole('button',{name:'Show older messages (6 more)'}).click();await expect(page.locator('.issue-chat-message')).toHaveCount(9);
+ assert.ok(await page.locator('#issues-detail').evaluate(e=>e.scrollWidth<=e.clientWidth+1));
 });

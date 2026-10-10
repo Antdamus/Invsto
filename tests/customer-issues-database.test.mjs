@@ -21,8 +21,8 @@ before(async()=>{
  added_by uuid,confirmation_email text,confirmation_method text,confirmed_at timestamptz,last_updated timestamptz,locked_by uuid,locked_at timestamptz);
  create table stock_transactions(id uuid primary key default gen_random_uuid(),item_id uuid,location_id uuid,quantity int,action_type text,confirmed_at timestamptz,user_id uuid,email text,notes text,source_transaction_id uuid,method text,timestamp timestamptz);
  create table metadata(id text primary key,inventory_version text,changed_item_ids text[],updated_at timestamptz);insert into metadata(id) values('inventory');
- create table ebay_orders(id uuid primary key,order_number text,buyer_username text,status text,tracking_number text,label_metadata jsonb);
- create table ebay_order_lines(id uuid primary key,order_id uuid,item_number text,item_title text,quantity int,fulfilled_quantity int,line_status text,internal_item_id uuid,stock_location_row_id uuid,location_id uuid,stock_transaction_id uuid,transaction_id text);
+ create table ebay_orders(id uuid primary key,order_number text,buyer_username text,status text,tracking_number text,label_metadata jsonb,sale_date timestamptz);
+ create table ebay_order_lines(id uuid primary key,order_id uuid,item_number text,item_title text,quantity int,fulfilled_quantity int,line_status text,internal_item_id uuid,stock_location_row_id uuid,location_id uuid,stock_transaction_id uuid,transaction_id text,sold_for numeric,total_price numeric,raw_payload jsonb default '{}');
  create function task_workflow_reviewer(t jsonb) returns uuid language sql stable as $$select '${id(2)}'::uuid$$;
  revoke all on function task_workflow_reviewer(jsonb) from public,anon,authenticated;
  grant usage on schema auth to authenticated;
@@ -61,16 +61,17 @@ before(async()=>{
  await db.exec(`create table ebay_order_label_events(order_ids uuid[],action text,label_metadata jsonb);`);
  await db.exec(await sqlFile('20261009059000_return_receiving_workflow.sql'));
  await db.exec(await sqlFile('20261009062000_return_barcode_no_restock.sql'));
+ await db.exec(await sqlFile('20261009065000_customer_issue_card_sorting.sql'));
 
 });
 after(async()=>db?.close());
 beforeEach(async()=>{
  await db.exec(`reset role;select set_config('test.actor','${id(1)}',false);select set_config('test.access','yes',false);select set_config('test.admin','yes',false);
- truncate customer_issue_sync_alert_recipients,customer_issue_sync_incidents,ebay_issue_sync_jobs,customer_return_receipts,ebay_return_task_events,ebay_return_tasks,ebay_return_events,ebay_return_items,ebay_return_cases,stock_transactions,item_stock_locations,ebay_order_lines,ebay_orders,task_notifications,task_followers cascade;
+ truncate ebay_return_messages,ebay_conversation_messages,ebay_conversations,customer_issue_sync_alert_recipients,customer_issue_sync_incidents,ebay_issue_sync_jobs,customer_return_receipts,ebay_return_task_events,ebay_return_tasks,ebay_return_events,ebay_return_items,ebay_return_cases,stock_transactions,item_stock_locations,ebay_order_lines,ebay_orders,task_notifications,task_followers cascade;
  update ebay_issue_worker set monitoring_started_at=now(),last_run_finished_at=now(),last_manual_retry_at=null;
  update ebay_issue_sync_lanes set status='ok',error_count=0,error=null,last_progress_at=now();
  insert into ebay_orders(id,order_number,buyer_username,status) values('${id(10)}','01-12345-12345','buyer.one','fulfilled');
- insert into ebay_order_lines values('${id(11)}','${id(10)}','287000000001','Watch',2,2,'fulfilled','${id(20)}',null,null,null,'local-tx');
+ insert into ebay_order_lines(id,order_id,item_number,item_title,quantity,fulfilled_quantity,line_status,internal_item_id,stock_location_row_id,location_id,stock_transaction_id,transaction_id) values('${id(11)}','${id(10)}','287000000001','Watch',2,2,'fulfilled','${id(20)}',null,null,null,'local-tx');
  insert into ebay_return_cases(id,order_id,order_number,ebay_return_id,status,source_lane,issue_kind,ebay_status,synced_at,ebay_due_at)
  values('${id(100)}','${id(10)}','01-12345-12345','12345','open','return','return','OPEN',now(),'2026-10-15T18:00:00Z');
  insert into ebay_return_items(return_case_id,order_id,order_line_id,internal_item_id,item_title,expected_quantity)
@@ -447,4 +448,42 @@ test('evidence excludes internal messages, voided certificates, removed packagin
  assert.equal(data.certificates.length,1);assert.equal(data.packaging_photos.length,1);assert.equal(data.case_messages.length,1);assert.equal(data.buyer_messages.length,1);
  assert.equal(data.buyer_messages[0].message_body,'Linked message');
  await db.exec("select set_config('test.access','no',false)");await assert.rejects(scalar('select customer_issue_evidence($1) v',[id(100)]),/access required/);
+});
+
+
+const listIssues=(sort='newest',view='attention',offset=0,limit=30)=>scalar('select list_customer_issues($1,$2,$3,$4,$5,$6) v',[view,'all','',offset,limit,sort]);
+test('cards use exact linked item sale values and original purchase date, never whole order or refund amount',async()=>{
+ await db.exec(`update ebay_orders set sale_date='2026-08-01T15:30:00Z';update ebay_order_lines set sold_for=70,total_price=160;
+ insert into ebay_order_lines(id,order_id,item_title,quantity,sold_for,total_price) values('${id(12)}','${id(10)}','Unrelated expensive item',1,9999,9999);
+ update ebay_return_cases set raw_payload='{"apiExtractedDetails":{"requestAmount":"USD 800.00"}}';
+ insert into ebay_return_tasks(return_case_id,order_id,order_line_ids,title,status) values('${id(100)}','${id(10)}',array['${id(11)}'::uuid],'Same line','assigned');`);
+ let c=(await listIssues()).rows[0];assert.equal(c.item_value,140);assert.equal(c.linked_line_count,1);assert.equal(c.item_currency,'USD');assert.equal(Date.parse(c.order_placed_at),Date.parse('2026-08-01T15:30:00Z'));assert.match(c.ebay_due_at,/2026-10-15/);
+ await db.exec("update ebay_order_lines set sold_for=null where item_title='Watch'");c=(await listIssues()).rows[0];assert.equal(c.item_value,null,'unknown item value is not replaced by tax-inclusive total or refund amount');
+});
+test('all lanes default newest first, user sorting spans pagination, and null values are last',async()=>{
+ await db.exec(`update ebay_return_cases set opened_at='2026-09-01',ebay_due_at='2026-10-20';update ebay_orders set sale_date='2026-08-01';update ebay_order_lines set sold_for=20;
+ insert into ebay_orders(id,order_number,sale_date) values('${id(15)}','02-12345-12345','2026-07-01');
+ insert into ebay_order_lines(id,order_id,item_title,quantity,sold_for) values('${id(16)}','${id(15)}','Earlier order',1,500);
+ insert into ebay_return_cases(id,order_id,opened_at,status,source_lane,issue_kind,ebay_status,ebay_due_at,raw_payload) values
+ ('${id(101)}','${id(15)}','2026-09-03','open','return','return','OPEN','2026-10-10','{"automaticOrderMatch":{"line_ids":["${id(16)}"]}}'),
+ ('${id(102)}',null,'2026-09-02','open','return','return','OPEN',null,'{}');`);
+ assert.deepEqual((await listIssues()).rows.map(x=>x.id),[id(101),id(102),id(100)]);
+ assert.equal((await scalar('select list_customer_issues() v')).rows[0].id,id(101),'old clients get newest first too');
+ for(const [sort,expected] of [['oldest',100],['order_newest',100],['order_oldest',101],['due_soonest',101],['due_latest',100],['value_highest',101],['value_lowest',100],['unknown',101]])assert.equal((await listIssues(sort)).rows[0].id,id(expected),sort);
+ assert.equal((await listIssues('oldest','return',2,1)).rows[0].id,id(101));
+ for(const lane of ['return','request','dispute']){await db.query('update ebay_return_cases set issue_kind=$1',[lane]);assert.equal((await listIssues('newest',lane)).rows[0].id,id(101));}
+ await db.exec("update ebay_return_cases set status='closed',ebay_status='CLOSED'");assert.equal((await listIssues('newest','history')).rows[0].id,id(101));
+});
+test('incomplete or mixed-currency linked items never show a misleading summed value',async()=>{
+ await db.exec(`update ebay_order_lines set sold_for=20;
+ insert into ebay_order_lines(id,order_id,item_title,quantity,sold_for,raw_payload) values('${id(12)}','${id(10)}','Other currency',1,99,'{"line":{"total":{"currency":"EUR"}}}');
+ insert into ebay_return_items(return_case_id,order_id,order_line_id,item_title,expected_quantity) values('${id(100)}','${id(10)}','${id(12)}','Other currency',1);`);
+ const c=(await listIssues()).rows[0];assert.equal(c.linked_line_count,2);assert.equal(c.item_value,null);assert.equal(c.item_currency,null);
+});
+test('case conversation evidence includes exact order/item messages and excludes unrelated buyers and staff notes',async()=>{
+ await db.exec(`update ebay_return_cases set buyer_username='buyer.one';
+ insert into ebay_return_messages values('${id(100)}','inbound','Case complaint','2026-10-01','imported'),('${id(100)}','internal','Private staff note','2026-10-02','sent');
+ insert into ebay_conversations values('${id(300)}','buyer.one','FROM_MEMBERS','01-12345-12345'),('${id(301)}','other.buyer','FROM_MEMBERS','01-12345-12345'),('${id(302)}','buyer.one','FROM_MEMBERS','unrelated');
+ insert into ebay_conversation_messages values('${id(310)}','${id(300)}','buyer.one','inbound','Matching buyer chat','2026-10-03'),('${id(311)}','${id(301)}','other.buyer','inbound','Wrong buyer','2026-10-03'),('${id(312)}','${id(302)}','buyer.one','inbound','Different item','2026-10-03');`);
+ const result=await scalar('select customer_issue_evidence($1) v',[id(100)]);assert.equal(result.case_messages.length,1);assert.equal(result.buyer_messages.length,1);assert.equal(result.buyer_messages[0].message_body,'Matching buyer chat');
 });
