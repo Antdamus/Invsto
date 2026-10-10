@@ -4134,7 +4134,7 @@ async function loadTaskConversationOrders(task) {
     let conversation = null;
     if (context.conversationId || context.ebayConversationId) {
       const {data, error} = await supabase.from("ebay_conversations")
-        .select("id, other_party_username")
+        .select("id, other_party_username, seller:ebay_seller_accounts(seller_username)")
         .eq(context.conversationId ? "id" : "ebay_conversation_id", context.conversationId || context.ebayConversationId)
         .limit(2).abortSignal(controller.signal);
       if (error) throw error;
@@ -4165,7 +4165,19 @@ async function loadTaskConversationOrders(task) {
         .in("id", [...orderMatches.keys()]).order("sale_date", {ascending: false})
         .limit(100).abortSignal(controller.signal);
     } else {
-      const buyer = String(conversation?.other_party_username || context.buyer || "").trim();
+      const seller = String(getEmbeddedOne(conversation?.seller)?.seller_username || "").trim().toLowerCase();
+      let messageBuyer = "";
+      if (conversation) {
+        const {data, error} = await supabase.from("ebay_conversation_messages")
+          .select("direction, sender_username, recipient_username")
+          .eq("conversation_id", conversation.id).in("direction", ["inbound", "outbound"])
+          .order("created_at_ebay", {ascending: false}).limit(50).abortSignal(controller.signal);
+        if (error) throw error;
+        messageBuyer = (data || []).map(message => message.direction === "inbound" ? message.sender_username : message.recipient_username)
+          .map(value => String(value || "").trim()).find(value => value && value.toLowerCase() !== seller) || "";
+      }
+      const buyer = [context.buyer, messageBuyer, conversation?.other_party_username]
+        .map(value => String(value || "").trim()).find(value => value && value.toLowerCase() !== seller) || "";
       task.conversationOrdersKind = "buyer";
       if (!buyer) { task.conversationOrdersState = "ready"; return; }
       // Escape LIKE metacharacters: eBay usernames can contain underscores.

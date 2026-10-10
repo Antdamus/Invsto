@@ -10,7 +10,7 @@ const order = {id: 'one', order_number: '01-12345-67890', buyer_name: 'Buyer Nam
   buyer_username: 'buyer_one', status: 'pending', sale_date: '2026-10-09T16:00:00Z',
   ebay_order_lines: [{line_status: 'pending', quantity: 1, fulfilled_quantity: 0}]};
 
-function fixture({links = [], orders = [order], conversation = {id:'conversation',other_party_username:'buyer_one'}, fail = ''} = {}) {
+function fixture({links = [], orders = [order], messages = [], conversation = {id:'conversation',other_party_username:'buyer_one'}, fail = ''} = {}) {
   const reads = [];
   const context = vm.createContext({URL, URLSearchParams, AbortController, setTimeout, clearTimeout,
     console: {warn(){}}, window: {addEventListener(){}, location: {href:'https://example.test/team-tasks.html',search:''}},
@@ -26,7 +26,7 @@ function fixture({links = [], orders = [order], conversation = {id:'conversation
         limit(value) {call.limit=value;return this;},
         abortSignal(signal) {call.signal=signal;return this;},
         then(resolve, reject) {
-          let data = table==='ebay_conversations' ? (conversation ? [conversation] : []) : table==='ebay_conversation_links' ? links : orders;
+          let data = table==='ebay_conversations' ? (conversation ? [conversation] : []) : table==='ebay_conversation_links' ? links : table==='ebay_conversation_messages' ? messages : orders;
           if (table==='ebay_orders' && call.in) data=data.filter(row=>call.in[1].includes(row.id));
           return Promise.resolve({data, error:fail===table ? {message:'Access denied'} : null, count:data.length}).then(resolve,reject);
         },
@@ -68,10 +68,29 @@ test('an unlinked conversation shows recent customer orders as choices, never co
   const f=fixture({orders:[order,{...order,id:'two',order_number:'02-12345-67890'}]});
   const task=await f.load();
   assert.equal(task.conversationOrdersKind,'buyer'); assert.equal(task.conversationOrders[0].linkStatus,'buyer');
-  assert.equal(f.reads[2].ilike[1],'buyer\\_one');assert.equal(f.reads[2].limit,12);
+  assert.equal(f.reads[3].ilike[1],'buyer\\_one');assert.equal(f.reads[3].limit,12);
   const html=f.context.renderTaskConversationOrders(task,f.context.getEbayConversationTaskContext(task));
   assert.match(html,/Customer orders \(2\)/);assert.match(html,/No order is selected/);
   assert.match(html,/Buyer Name · @buyer_one/);assert.match(html,/orderId=01-12345-67890/);
+});
+
+test('older tasks resolve the buyer from conversation messages when the API participant is blank or the seller', async () => {
+  for (const other_party_username of ['', 'ogjewelers']) {
+    const f=fixture({conversation:{id:'conversation',other_party_username,seller:{seller_username:'ogjewelers'}},
+      messages:[{direction:'inbound',sender_username:'buyer_one',recipient_username:'ogjewelers'}]});
+    const task=await f.load();
+    assert.equal(task.conversationOrders.length,1);
+    assert.equal(f.reads[3].ilike[1],'buyer\\_one');
+  }
+});
+
+test('seller replies resolve the recipient and a seller-only conversation never loads seller orders', async () => {
+  const f=fixture({conversation:{id:'conversation',other_party_username:'OGJewelers',seller:{seller_username:'ogjewelers'}},
+    messages:[{direction:'outbound',sender_username:'ogjewelers',recipient_username:'buyer_one'}]});
+  await f.load();assert.equal(f.reads[3].ilike[1],'buyer\\_one');
+  const sellerOnly=fixture({conversation:{id:'conversation',other_party_username:'OGJewelers',seller:{seller_username:'ogjewelers'}}});
+  assert.equal((await sellerOnly.load()).conversationOrders.length,0);
+  assert.equal(sellerOnly.reads.some(read=>read.table==='ebay_orders'),false);
 });
 
 test('suggested matches remain visibly unconfirmed', async () => {
