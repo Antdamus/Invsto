@@ -39,6 +39,7 @@
  const taskLink=t=>`team-tasks.html?taskId=${encodeURIComponent(t.id)}`;
  function feedback(message,error=false){$('issues-feedback').textContent=message;$('issues-feedback').classList.toggle('is-error',error);}
  function nextText(c){
+  if(['closed','cancelled'].includes(c.status)&&!c.open_tasks)return 'Closed · saved in History';
   if(!c.order_id)return 'Match the order';
   if(c.status==='needs_review'&&kind(c)==='return')return 'Inspect returned items';
   if(c.status==='needs_review')return 'Review the customer request';
@@ -59,7 +60,7 @@
    <h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p>${escape(c.item_title||c.return_reason||'Open this case to review the order and next step.')}</p>
    ${cardFacts(c)}
    <div class="issue-card-footer"><span class="issue-tag">${escape(nextText(c))}</span>${c.ebay_due_at&&!closed(c)?`<span class="issue-tag ${c.overdue?'is-overdue':''}">${c.overdue?'eBay deadline overdue':'eBay deadline'} ${escape(date(c.ebay_due_at))}</span>`:!closed(c)?'<span class="issue-tag">eBay deadline not provided</span>':''}</div>
-   <div class="issue-card-top" style="margin:11px 0 0"><small>${c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>`).join(''):
+   <div class="issue-card-top" style="margin:11px 0 0"><small>${['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>`).join(''):
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
   $('issues-count').textContent=`${total} ${view==='history'?'finished':'active'} case${total===1?'':'s'}`;
   $('issues-sort-caption').textContent=sortLabels[sort]+(sort.startsWith('value_')?' · grouped by currency':'');
@@ -122,6 +123,7 @@
  }
  function renderTasks(){
   const tasks=detail.tasks.filter(t=>!finish.has(t.status));
+  if(!tasks.length&&['closed','cancelled'].includes(detail.c.status))return '<section class="issue-detail-section"><h3>Case closed</h3><p class="issue-subtitle">No further work is assigned. Photos, messages and the closing record remain available below.</p><div id="issue-form-slot"></div></section>';
   return `<section class="issue-detail-section"><h3>Who acts next</h3>${tasks.length?tasks.map(t=>`<div class="issue-task"><strong>${escape(root.OGTaskWorkflow.label(t,people,ctx.user.id))}</strong><p>${escape(t.question||t.title||'Review this case')}</p>
    <span class="issue-tag">${escape(nice(t.status))}</span>${t.due_at?` <span class="issue-tag">Internal follow-up: ${escape(date(t.due_at))}</span>`:''}
    <div class="issue-actions">${actions(t)}<a class="secondary-btn" href="${taskLink(t)}">Full task</a>${ctx.employee.role==='admin'?`<button class="secondary-btn" data-assign="${t.id}">Assign next step</button>`:''}</div></div>`).join(''):'<p class="issue-subtitle">No open internal task. Assign work or a decision if someone needs to act.</p>'}
@@ -145,7 +147,7 @@
   $('issues-detail').innerHTML=`<div class="issue-detail-bar"><button type="button" class="secondary-btn issue-back" data-close-case>← Cases</button><span>${escape(c.ebay_return_id?`Case ${c.ebay_return_id}`:'Internal return')}</span>${c.ebay_return_id?'<button type="button" class="secondary-btn" data-sync-case>Refresh case</button>':''}</div>
    <div class="issue-detail-content"><span class="issue-kind is-${kind(c)}">${kind(c)==='dispute'?(c.source_lane==='payment_dispute'?'Payment dispute':'Escalated eBay case'):nice(kind(c))}</span><h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p class="issue-subtitle">${escape(c.item_title||summary.item_title||lines[0]?.item_title||'Review the linked order items below')}</p>
    <section class="issue-original-order"><div><small>ORIGINAL ORDER</small><strong>${escape(c.order_number||'Not identified yet')}</strong><span>${c.order_id?`${lines.length} linked item${lines.length===1?'':'s'} · Saved in Invsto`:c.order_number?'Not found in saved orders yet':'Match the original order to see its evidence'}</span></div>${c.order_number?`<a class="secondary-btn" href="ebay-order-history.html?orderHistorySearch=${encodeURIComponent(c.order_number)}&historyAllDates=true">Open full order ↗</a>`:''}</section>
-   <div class="issue-next"><span>NEXT STEP</span><strong>${escape(nextText(summary))}</strong><p>${closed(c)?'eBay has closed its case. Internal tasks and returned inventory are tracked separately.':'Keep the case open until the customer issue and your internal work are both handled.'}</p></div>
+   <div class="issue-next"><span>NEXT STEP</span><strong>${escape(nextText(summary))}</strong><p>${['closed','cancelled'].includes(c.status)&&!summary.open_tasks?'This record is saved in History. Its evidence and activity are preserved.':closed(c)?'eBay has closed its case. If everything is resolved, mark it closed to move it to History.':'Keep the case open until the customer issue and your internal work are both handled.'}</p></div>
    <div class="issue-facts"><div><small>Item value</small><b>${escape(money(summary))}</b></div><div><small>Order placed</small><b>${escape(summary.order_placed_at?new Date(summary.order_placed_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'Not provided')}</b></div><div><small>eBay status</small><b>${escape(nice(c.ebay_status))}</b></div><div><small>eBay deadline</small><b>${escape(date(c.ebay_due_at))}</b></div></div>
    <p class="issue-review-meta">Opened ${escape(date(c.opened_at))}<br>Last eBay update ${escape(date(c.synced_at))} · Internal status: ${escape(nice(c.status))}</p>
    ${c.sync_error?`<p class="issue-tag is-stale">Update failed. The previous case information was kept. ${escape(c.sync_error)}</p>`:''}
@@ -153,6 +155,7 @@
     ${url?`<a class="secondary-btn" href="${escape(url)}" target="_blank" rel="noopener">${c.source_lane==='case'||c.source_lane==='payment_dispute'?'Open eBay order / case':'Open eBay case'} ↗</a>`:''}
     ${lines[0]||c.buyer_username?`<a class="secondary-btn" href="email-triage.html?${lines[0]?'orderLineId='+encodeURIComponent(lines[0].id):'ebayBuyer='+encodeURIComponent(c.buyer_username)}&from=returns" target="_blank" rel="noopener">Buyer chat ↗</a>`:''}
     ${!lines.length&&ctx.employee.role==='admin'?'<button class="primary-btn" data-match-order>Match order items</button>':''}</div>
+   ${ctx.employee.role==='admin'&&(closed(c)||!c.ebay_return_id)&&(!['closed','cancelled'].includes(c.status)||tasks.some(t=>!finish.has(t.status)))?'<section class="issue-closeout"><div><strong>Already resolved?</strong><p>Move this case to History without assigning anyone.</p></div><button type="button" class="primary-btn" data-finish-case>Mark closed</button></section>':''}<div id="issue-close-form-slot"></div>
    <section class="issue-detail-section issue-complaint-summary"><h3>Complaint &amp; conversation</h3><p class="issue-complaint-reason"><small>Customer’s reason</small><strong>${escape(reason)}</strong></p>${complaint||'<p class="issue-subtitle">No additional complaint details saved.</p>'}<div id="issue-conversation" aria-live="polite"><p class="issue-subtitle">Loading related conversation…</p></div></section>
    ${renderTasks()}
    <details class="issue-detail-section" open><summary>Order items &amp; saved photos</summary>${receipt||'<p class="issue-subtitle">No item screenshot is saved yet.</p>'}${lines.map(l=>`<div class="issue-line"><strong>${escape(l.item_title)}</strong><p>${escape(l.item_number||'')} · Order qty ${l.quantity||0} · Fulfilled ${l.fulfilled_quantity||0}</p></div>`).join('')}
@@ -161,7 +164,7 @@
    <details class="issue-detail-section issue-evidence-package"><summary>Evidence package</summary><p class="issue-subtitle">Gather item photos, packing evidence, tracking, certificates and messages. Choose what belongs in the download.</p><button class="secondary-btn" data-prepare-evidence>Prepare evidence</button><div id="issue-evidence-package"></div></details>
    <details class="issue-detail-section"><summary>Money &amp; payment</summary><p>Case amount: <strong>${escape(c.raw_payload?.apiExtractedDetails?.requestAmount||c.raw_payload?.requestAmount||c.raw_payload?.refundText||'Not provided by eBay')}</strong></p>${ctx.financeBadge?.(primary)||''}<p class="issue-subtitle">Payment information updates separately in the background. The case amount is not confirmation that a refund was issued. Check eBay before making a financial decision.</p></details>
    <details class="issue-detail-section"><summary>Activity &amp; internal updates</summary>${events.length?events.map(e=>`<div class="issue-update"><small>${escape(date(e.created_at))} · ${escape(e.signed_by_email||'eBay / system')}</small><p>${escape(e.notes||nice(e.action))}</p></div>`).join(''):'<p class="issue-subtitle">No recorded updates yet.</p>'}${detail.moreEvents?'<p class="issue-subtitle">Showing the latest 50 events from each source. Open Full task for its complete work history.</p>':''}</details>
-   ${ctx.employee.role==='admin'&&(closed(c)||!c.ebay_return_id)&&!['closed','cancelled'].includes(c.status)?'<details class="issue-detail-section"><summary>Finish this case</summary><p class="issue-subtitle">This finishes the internal case. It does not send a refund or change eBay. All tasks and inventory checks must be complete.</p><button class="secondary-btn" data-finish-case>Record final outcome</button></details>':''}</div>`;
+   </div>`;
   ctx.bindReceipt($('issues-detail'));ctx.hydrateReceipts().catch(()=>{});
   loadEvidence(version);loadOriginalEvidence(version);
  }
@@ -242,8 +245,9 @@
   }catch(error){if(stamp===version){$('issues-detail').innerHTML=`<div class="issues-empty"><button class="secondary-btn" data-close-case>← Cases</button><h2>Couldn’t load this case</h2><p>${escape(error.message)}</p><button class="primary-btn" data-retry-case>Retry</button></div>`;}}
  }
  function closeCase(){if(saving)return;version++;selected=null;detail=null;document.querySelector('.issues-columns').classList.remove('is-selected');$('issues-detail').innerHTML='<div class="issues-empty">Choose a case to see its order, evidence and next steps.</div>';const url=new URL(location.href);url.searchParams.delete('caseId');history.replaceState(null,'',url);cards();}
- function form(title,body,submit){
-  $('issue-form-slot').innerHTML=`<form id="issue-action-form" class="issue-form"><h3>${escape(title)}</h3>${body}<p class="issue-form-error" role="alert"></p><div class="issue-actions"><button class="primary-btn" type="submit">${escape(submit)}</button><button class="secondary-btn" type="button" data-cancel-form>Cancel</button></div></form>`;
+ function form(title,body,submit,slot='issue-form-slot'){
+  $('issue-action-form')?.remove();
+  $(slot).innerHTML=`<form id="issue-action-form" class="issue-form"><h3>${escape(title)}</h3>${body}<p class="issue-form-error" role="alert"></p><div class="issue-actions"><button class="primary-btn" type="submit">${escape(submit)}</button><button class="secondary-btn" type="button" data-cancel-form>Cancel</button></div></form>`;
   $('issue-action-form').scrollIntoView({block:'nearest'});$('issue-action-form').querySelector('textarea,input,select')?.focus();
  }
  function taskForm(id,action){
@@ -263,11 +267,24 @@
   form(task?'Assign the next step':'Create a task',`<label>Person responsible<select name="owner" required><option value="">Choose a person</option>${people.map(p=>`<option value="${p.user_id}" ${p.user_id===task?.assigned_to_user_id?'selected':''}>${escape(p.display_name||p.email)}</option>`).join('')}</select></label><label>They need to<select name="kind"><option value="work">Do work</option><option value="decision">Make a decision / give instructions</option></select></label><label>Instructions<textarea name="note" required maxlength="10000">${escape(task?.question||'')}</textarea></label><label>Internal follow-up (optional)<input type="datetime-local" name="followup" /></label>`,'Assign task');
   $('issue-action-form').onsubmit=e=>submitForm(e,async f=>checked(await db.rpc(!task&&kind(detail.c)==='return'?'request_customer_return_followup':'assign_customer_issue',{_case_id:selected,...(!task&&kind(detail.c)==='return'?{_request_id:request}:{_task_id:task?.id||null}),_owner:f.get('owner'),_kind:f.get('kind'),_note:f.get('note'),_follow_up:f.get('followup')?new Date(f.get('followup')).toISOString():null})));
  }
- async function submitForm(event,operation){
+ async function submitForm(event,operation,onSaved){
   event.preventDefault();if(saving)return;const el=event.currentTarget;const f=new FormData(el);saving=true;el.querySelectorAll('button').forEach(b=>b.disabled=true);
-  try{await operation(f);saving=false;feedback('Saved. The next step and activity are updated.');await openCase(selected,{quiet:true});await refresh({detail:false});}
+  try{await operation(f);saving=false;if(onSaved){await onSaved();return;}feedback('Saved. The next step and activity are updated.');await openCase(selected,{quiet:true});await refresh({detail:false});}
   catch(error){el.querySelector('.issue-form-error').textContent=error.message||'Could not save. Your instructions are still here.';}
   finally{saving=false;el.querySelectorAll('button').forEach(b=>b.disabled=false);}
+ }
+ function closeResolvedForm(){
+  const c=detail.c,tasks=detail.tasks.filter(t=>!finish.has(t.status));
+  const snapshot=tasks.map(t=>({id:t.id,updated_at:t.updated_at}));
+  form('Move to History',`<p class="issue-subtitle"><strong>${escape(c.buyer_username||c.order_number||'This case')}</strong> · ${escape(c.ebay_return_id?'Case '+c.ebay_return_id:'Internal return')}</p><p>Keep all photos, messages and activity in the saved record.</p>${tasks.length?`<p>${tasks.length} remaining follow-up${tasks.length===1?'':'s'} will also be closed. Nobody will receive a new assignment.</p><details class="issue-close-followups"><summary>Review follow-ups (${tasks.length})</summary>${tasks.map(t=>`<p><strong>${escape(t.title||'Follow-up')}</strong><br>${escape(person(t.assigned_to_user_id))} · ${escape(nice(t.status))}</p>`).join('')}</details>`:'<p>No task needs to be created or assigned.</p>'}<label class="issue-close-confirm"><input name="confirmed" type="checkbox" required /><span>Everything is resolved; no further follow-up is needed.</span></label><label>Closing note (optional)<textarea name="note" maxlength="10000" placeholder="Anything useful for the record"></textarea></label><p class="issue-subtitle">This saves the internal closing record. It does not issue a refund or change inventory.</p>`,'Mark closed & move to History','issue-close-form-slot');
+  $('issue-action-form').onsubmit=e=>submitForm(e,async f=>checked(await db.rpc('close_resolved_customer_issue',{
+   _case_id:c.id,_expected_updated_at:c.updated_at,_expected_tasks:snapshot,_confirmed:f.get('confirmed')==='on',_note:f.get('note')||null
+  })),async()=>{
+   clearTimeout(timer);view='history';scope='all';search=c.ebay_return_id||c.order_number||c.buyer_username||'';offset=0;
+   $('issues-search').value=search;$('issues-scope').value=scope;
+   await refresh({detail:false});await openCase(c.id);
+   feedback('Case closed and saved in History. Photos, messages and activity are preserved.');
+  });
  }
  function inspectionForm(id){
   const item=detail.items.find(i=>i.id===id),key=crypto.randomUUID();
@@ -324,9 +341,9 @@
    else if(b.hasAttribute('data-original-media'))originalMedia(Number(b.dataset.originalMedia));
    else if(b.hasAttribute('data-more-messages')){detail.conversationLimit=(detail.conversationLimit||3)+12;renderConversation();}
    else if(b.hasAttribute('data-more-original')){detail.originalLimits[b.dataset.moreOriginal]=(detail.originalLimits[b.dataset.moreOriginal]||6)+6;renderOriginalEvidence(version);}
-   else if(b.hasAttribute('data-cancel-form'))$('issue-form-slot').innerHTML='';
+   else if(b.hasAttribute('data-cancel-form'))$('issue-action-form')?.remove();
    else if(b.hasAttribute('data-match-order'))matchForm();
-   else if(b.hasAttribute('data-finish-case')){form('Record final outcome','<label>Outcome<textarea name="note" required placeholder="What was resolved and how?"></textarea></label>','Finish internal case');$('issue-action-form').onsubmit=e=>submitForm(e,async f=>checked(await db.rpc('finish_customer_issue',{_case_id:selected,_note:f.get('note')})));}
+   else if(b.hasAttribute('data-finish-case'))closeResolvedForm();
   });
   $('issues-search').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>{search=$('issues-search').value.trim();offset=0;refresh({detail:false});},280);});
   $('issues-sort').onchange=()=>{sort=$('issues-sort').value;offset=0;refresh({detail:false});};

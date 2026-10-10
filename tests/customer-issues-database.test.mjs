@@ -62,6 +62,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261009059000_return_receiving_workflow.sql'));
  await db.exec(await sqlFile('20261009062000_return_barcode_no_restock.sql'));
  await db.exec(await sqlFile('20261009065000_customer_issue_card_sorting.sql'));
+ await db.exec(await sqlFile('20261009066000_customer_issue_direct_close.sql'));
 
 });
 after(async()=>db?.close());
@@ -486,4 +487,79 @@ test('case conversation evidence includes exact order/item messages and excludes
  insert into ebay_conversations values('${id(300)}','buyer.one','FROM_MEMBERS','01-12345-12345'),('${id(301)}','other.buyer','FROM_MEMBERS','01-12345-12345'),('${id(302)}','buyer.one','FROM_MEMBERS','unrelated');
  insert into ebay_conversation_messages values('${id(310)}','${id(300)}','buyer.one','inbound','Matching buyer chat','2026-10-03'),('${id(311)}','${id(301)}','other.buyer','inbound','Wrong buyer','2026-10-03'),('${id(312)}','${id(302)}','buyer.one','inbound','Different item','2026-10-03');`);
  const result=await scalar('select customer_issue_evidence($1) v',[id(100)]);assert.equal(result.case_messages.length,1);assert.equal(result.buyer_messages.length,1);assert.equal(result.buyer_messages[0].message_body,'Matching buyer chat');
+});
+
+async function closeSnapshot(){
+ return [id(100),await scalar('select updated_at v from ebay_return_cases where id=$1',[id(100)]),
+  JSON.stringify(await scalar("select coalesce(jsonb_agg(jsonb_build_object('id',id,'updated_at',updated_at)),'[]') v from ebay_return_tasks where return_case_id=$1 and status not in ('resolved','cancelled','closed','approved_by_admin')",[id(100)])),true,null];
+}
+const directClose=args=>scalar('select close_resolved_customer_issue($1,$2,$3,$4,$5) v',args);
+const terminalCase=()=>db.exec("update ebay_return_cases set ebay_status='CLOSED',synced_at=now()-interval '7 days'");
+
+test('direct close archives a resolved case with no tasks, stock changes or fabricated receipts',async()=>{
+ await terminalCase();const items=await scalar('select jsonb_agg(to_jsonb(i)) v from ebay_return_items i');
+ const args=await closeSnapshot(),result=await directClose(args);
+ assert.equal(result.status,'closed');assert.equal(result.closed_tasks,0);
+ assert.equal(await scalar('select count(*)::int v from ebay_return_tasks'),0);
+ assert.deepEqual(await scalar('select jsonb_agg(to_jsonb(i)) v from ebay_return_items i'),items);
+ assert.equal(await stock(),0);assert.equal(await scalar('select count(*)::int v from stock_transactions'),0);
+ const event=await scalar("select to_jsonb(e) v from ebay_return_events e where action='closed'");
+ assert.equal(event.signed_by,id(1));assert.equal(event.payload.confirmed_resolved,true);assert.equal(event.payload.inventory_changed,false);
+ assert.equal((await scalar("select list_customer_issues('history','all','',0,30) v")).total,1);
+ assert.equal((await scalar("select list_customer_issues('attention','all','',0,30) v")).total,0);
+ assert.equal((await directClose(args)).already_closed,true);assert.equal(await scalar('select count(*)::int v from ebay_return_events'),1);
+});
+
+const addCloseTasks=()=>db.exec(`insert into ebay_return_tasks(id,return_case_id,order_id,task_type,title,status,assigned_to_user_id,created_by,latest_note)
+ values('${id(301)}','${id(100)}','${id(10)}','return_review','Unassigned review','open',null,'${id(2)}','Keep this employee update'),
+ ('${id(302)}','${id(100)}','${id(10)}','follow_up','Assigned work','assigned','${id(2)}','${id(1)}','Photos checked'),
+ ('${id(303)}','${id(100)}','${id(10)}','follow_up','Old finished task','resolved','${id(2)}','${id(1)}','Earlier outcome');`);
+
+test('direct close cancels existing follow-ups without assignment, preserves evidence and audits previous task state',async()=>{
+ await terminalCase();await addCloseTasks();const previous=await scalar('select to_jsonb(t) v from ebay_return_tasks t where id=$1',[id(303)]);
+ await db.exec(`insert into ebay_return_task_events(task_id,return_case_id,action,notes,photo_attachments) values('${id(302)}','${id(100)}','commented','Photo attached','[{"path":"evidence.jpg"}]')`);
+ const args=await closeSnapshot();args[4]='Already handled with buyer';const result=await directClose(args);
+ assert.equal(result.closed_tasks,2);assert.equal(await scalar('select count(*)::int v from ebay_return_tasks'),3);
+ assert.equal(await scalar('select assigned_to_user_id v from ebay_return_tasks where id=$1',[id(301)]),null);
+ assert.equal(await scalar('select assigned_to_user_id v from ebay_return_tasks where id=$1',[id(302)]),id(2));
+ assert.deepEqual(await scalar('select to_jsonb(t) v from ebay_return_tasks t where id=$1',[id(303)]),previous);
+ assert.equal(await scalar('select latest_note v from ebay_return_tasks where id=$1',[id(301)]),'Keep this employee update');
+ assert.equal(await scalar("select payload->'previous_task'->>'status' v from ebay_return_task_events where task_id=$1 and action='cancelled'",[id(302)]),'assigned');
+ assert.equal(await scalar("select photo_attachments->0->>'path' v from ebay_return_task_events where action='commented'"),'evidence.jpg');
+ assert.equal(await scalar("select count(*)::int v from ebay_return_tasks where status='cancelled'"),2);
+ assert.equal((await scalar("select list_customer_issues('history','all','',0,30) v")).total,1);
+});
+
+test('direct close rejects provider-open cases, unconfirmed closeout and unauthorized users',async()=>{
+ let args=await closeSnapshot();await assert.rejects(directClose(args),/eBay still reports/);
+ await terminalCase();args=await closeSnapshot();args[3]=false;await assert.rejects(directClose(args),/Confirm that/);args[3]=true;
+ await db.exec("select set_config('test.admin','no',false)");await assert.rejects(directClose(args),/administrator/);
+ await db.exec("select set_config('test.admin','yes',false);select set_config('test.access','no',false)");await assert.rejects(directClose(args),/administrator/);
+ await db.exec("select set_config('test.access','yes',false);select set_config('test.actor','',false)");await assert.rejects(directClose(args),/administrator/);
+ assert.equal(await scalar('select status v from ebay_return_cases'),'open');
+});
+
+test('direct close detects new work and changed case or task before changing anything',async()=>{
+ await terminalCase();let args=await closeSnapshot();await addCloseTasks();await assert.rejects(directClose(args),/follow-ups changed/);
+ args=await closeSnapshot();await db.exec("update ebay_return_tasks set updated_at=now()+interval '1 minute' where status='assigned'");await assert.rejects(directClose(args),/follow-ups changed/);
+ args=await closeSnapshot();await db.exec("update ebay_return_cases set updated_at=now()+interval '2 minutes'");await assert.rejects(directClose(args),/case changed/);
+ assert.equal(await scalar("select count(*)::int v from ebay_return_tasks where status='cancelled'"),0);
+ assert.equal(await scalar("select count(*)::int v from ebay_return_events where action='closed'"),0);
+});
+
+test('direct close preserves unresolved received items until inspection, with no task requirement',async()=>{
+ await receive(200,1,'quarantine');await terminalCase();await assert.rejects(directClose(await closeSnapshot()),/Inspect the received items first/);
+ const item=await scalar('select id v from ebay_return_items');
+ await scalar('select inspect_customer_return($1,$2,$3,$4,$5,$6) v',[id(201),item,'received_no_restock',null,'Checked, outside stock','[{"path":"checked.jpg"}]']);
+ await directClose(await closeSnapshot());assert.equal(await stock(),0);
+ assert.equal(await scalar('select received_quantity v from ebay_return_items'),1);assert.equal(await scalar('select expected_quantity v from ebay_return_items'),2);
+ assert.equal(await scalar('select count(*)::int v from ebay_return_tasks'),0);
+});
+
+test('direct close does not recreate follow-ups on terminal refresh; a new provider action can resurface',async()=>{
+ await terminalCase();await addCloseTasks();await directClose(await closeSnapshot());
+ await db.exec("update ebay_return_cases set synced_at=now()");
+ assert.equal(await scalar("select count(*)::int v from ebay_return_tasks where status not in ('resolved','cancelled')"),0);
+ await db.exec("update ebay_return_cases set status='open',closed_at=null,ebay_status='SELLER_ACTION_REQUIRED',ebay_action='Respond to buyer',synced_at=now()");
+ assert.ok(await scalar("select count(*)::int v from ebay_return_tasks where status not in ('resolved','cancelled')")>0);
 });

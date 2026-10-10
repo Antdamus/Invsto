@@ -158,3 +158,23 @@ for(const width of [390,1366])test(`quick case review ${width}px: global sort, c
  await page.getByRole('button',{name:'Show older messages (6 more)'}).click();await expect(page.locator('.issue-chat-message')).toHaveCount(9);
  assert.ok(await page.locator('#issues-detail').evaluate(e=>e.scrollWidth<=e.clientWidth+1));
 });
+
+
+test('already resolved cases close directly into History without assignment on phone',async t=>{
+ const page=await open(t,390);
+ await page.evaluate(()=>fixtureUpdateCase({ebay_status:'CLOSED'}));
+ await page.locator('.issue-card').first().click();
+ await page.getByRole('button',{name:'Mark closed',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Move to History',exact:true})).toBeVisible();
+ await expect(page.getByRole('combobox',{name:'Person responsible'})).toHaveCount(0);
+ await page.getByRole('button',{name:'Mark closed & move to History',exact:true}).click();
+ assert.equal((await page.evaluate(()=>fixtureWrites)).length,0,'confirmation is required');
+ await page.getByRole('checkbox',{name:'Everything is resolved; no further follow-up is needed.'}).check();
+ await page.getByRole('textbox',{name:'Closing note (optional)'}).fill('Already handled with buyer');
+ await page.getByRole('button',{name:'Mark closed & move to History',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Case closed',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Create a task',exact:true})).toHaveCount(0);
+ const writes=await page.evaluate(()=>fixtureWrites);assert.equal(writes.length,1);assert.equal(writes[0].name,'close_resolved_customer_issue');assert.equal(writes[0].args._confirmed,true);
+ await expect(page.locator('[data-issue-view="history"]')).toHaveAttribute('aria-pressed','true');
+ assert.ok(await page.locator('#issues-detail').evaluate(e=>e.scrollWidth<=e.clientWidth+1));
+});
