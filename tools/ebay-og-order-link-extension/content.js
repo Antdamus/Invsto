@@ -4093,6 +4093,10 @@
   function normalizeVideoReceiptUrlForItem(value, itemNumber = "", baseUrl = window.location.href) {
     const url = normalizeEbayNavigationUrl(value, baseUrl);
     if (!url || !/\/ebaylive\/events\//i.test(url)) return "";
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:" || !/(^|\.)ebay\.com$/i.test(parsed.hostname)) return "";
+    } catch (_) { return ""; }
     if (!itemNumber) return url;
     try {
       const parsed = new URL(url);
@@ -4186,6 +4190,35 @@
   function findMoreActionsButton() {
     return [...document.querySelectorAll('button, [role="button"]')]
       .find((button) => /more\s+actions/i.test(getElementSearchText(button)));
+  }
+
+  const receiptLookupMenusOpened = new Set();
+  function findOrderVideoReceiptForOg(payload = {}) {
+    const pageUrl = window.location.href;
+    const current = new URL(pageUrl);
+    const expectedOrder = String(payload.orderNumber || "").trim();
+    const actualOrder = current.searchParams.get("orderid") || current.searchParams.get("orderId");
+    if (!isEbayOrderDetailsPage() || !expectedOrder || actualOrder !== expectedOrder) {
+      return { error: "The eBay tab is not showing the requested order. Return to Invsto and retry opening the receipt." };
+    }
+    const itemNumber = String(payload.itemNumber || payload.selectedItemId || "").trim();
+    if (!itemNumber) {
+      return { error: "This order line has no eBay item number to match safely. Choose the correct item's video receipt from the open eBay order." };
+    }
+    for (const link of document.querySelectorAll('a[href*="/ebaylive/events/"]')) {
+      const receiptUrl = normalizeVideoReceiptUrlForItem(link.getAttribute("href"), itemNumber);
+      if (receiptUrl) return { ok: true, receiptUrl, pageUrl };
+    }
+    const receiptUrl = findVideoReceiptUrlInText(document.documentElement?.innerHTML || "", pageUrl, { itemNumber });
+    if (receiptUrl) return { ok: true, receiptUrl, pageUrl };
+
+    // Some order pages only render the receipt link after opening this menu.
+    const moreActions = findMoreActionsButton();
+    if (moreActions && !receiptLookupMenusOpened.has(expectedOrder)) {
+      receiptLookupMenusOpened.add(expectedOrder);
+      if (moreActions.getAttribute("aria-expanded") !== "true") moreActions.click();
+    }
+    return { ok: false, pageUrl };
   }
 
   function setVideoReceiptStatus(button, text, tone = "") {
@@ -7527,6 +7560,12 @@
   }, true);
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "OG_EBAY_FIND_ORDER_VIDEO_RECEIPT") {
+      try { sendResponse(findOrderVideoReceiptForOg(message.payload || {})); }
+      catch (_) { sendResponse({ ok: false }); }
+      return false;
+    }
+
     if (message?.type === "OG_EBAY_CAPTURE_RETURN_DETAIL_PAGE") {
       captureCurrentReturnDetailForOg(message.payload || {})
         .then(sendResponse)

@@ -51,7 +51,7 @@
   function normalizeVideoReceiptUrlForPayload(value, payload = {}, baseUrl = "https://www.ebay.com/") {
     const normalized = normalizeEbayNavigationUrl(value, baseUrl);
     const parsed = normalizeUrl(normalized);
-    if (!parsed || !/(^|\.)ebay\.com$/i.test(parsed.hostname) || !/\/ebaylive\/events\//i.test(parsed.pathname)) {
+    if (!parsed || parsed.protocol !== "https:" || !/(^|\.)ebay\.com$/i.test(parsed.hostname) || !/\/ebaylive\/events\//i.test(parsed.pathname)) {
       return "";
     }
 
@@ -736,6 +736,56 @@
     }
   }
 
+  async function fetchVideoReceiptUrl(url, payload) {
+    const controller = new AbortController();
+    // Leave time for the visible-page fallback before Invsto's 20-second timeout.
+    const timer = setTimeout(() => controller.abort(), 2000);
+    try {
+      const response = await fetch(url, { credentials: "include", signal: controller.signal });
+      if (!response.ok) return "";
+      return resolveVideoReceiptUrlInText(await response.text(), payload, url);
+    } catch (_) {
+      return "";
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function requestReceiptFromTab(tabId, payload) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), 250);
+      chrome.tabs.sendMessage(tabId, { type: "OG_EBAY_FIND_ORDER_VIDEO_RECEIPT", payload })
+        .then(resolve, () => resolve(null))
+        .finally(() => clearTimeout(timer));
+    });
+  }
+
+  async function openVideoReceiptInOrderTab(detailsUrl, payload) {
+    // Use a fresh tab: an existing eBay tab may contain an unfinished shipping draft.
+    const tab = await chrome.tabs.create({ url: detailsUrl.toString(), active: true });
+    const lookupPayload = { ...payload, orderNumber: detailsUrl.searchParams.get("orderid") || payload.orderNumber };
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      if (attempt) await new Promise((resolve) => setTimeout(resolve, 250));
+      const response = await requestReceiptFromTab(tab.id, lookupPayload);
+      if (response?.error) throw new Error(response.error);
+      const receiptUrl = normalizeVideoReceiptUrlForPayload(response?.receiptUrl, lookupPayload);
+      if (!receiptUrl) continue;
+      const currentTab = await chrome.tabs.get(tab.id);
+      // Stop if the operator navigated away while the lookup was running.
+      if (currentTab.url !== response.pageUrl) {
+        throw new Error("The eBay tab changed. Return to Invsto and retry opening the receipt.");
+      }
+      await chrome.tabs.update(tab.id, { url: receiptUrl, active: true });
+      return { ok: true, openedUrl: receiptUrl, tabId: tab.id, direct: false, source: "order-tab" };
+    }
+    const currentTab = await chrome.tabs.get(tab.id).catch(() => null);
+    if (!currentTab) throw new Error("The eBay order tab was closed. Retry opening the receipt.");
+    if (/signin\.ebay\.com|\/signin(?:[/?]|$)/i.test(currentTab.url || "")) {
+      throw new Error("Sign in to eBay in the tab that opened, then return to Invsto and retry opening the receipt.");
+    }
+    throw new Error("The eBay order is open, but its matching video receipt is not available yet. Finish any eBay verification, then use More actions > View video receipt. If OG controls are missing, allow OG eBay Order Link on ebay.com and refresh that tab.");
+  }
+
   async function openVideoReceiptFromOrder(payload = {}) {
     const directUrl = normalizeVideoReceiptUrlForPayload(payload.videoReceiptUrl, payload);
     if (directUrl) {
@@ -744,31 +794,22 @@
     }
 
     const itemUrl = normalizeUrl(payload.itemUrl || (payload.itemNumber ? `https://www.ebay.com/itm/${encodeURIComponent(payload.itemNumber)}` : ""));
-    if (itemUrl && /(^|\.)ebay\.com$/i.test(itemUrl.hostname) && /\/itm\//i.test(itemUrl.pathname)) {
-      const itemResponse = await fetch(itemUrl.toString(), { credentials: "include" }).catch(() => null);
-      if (itemResponse?.ok) {
-        const itemHtml = await itemResponse.text();
-        const itemReceiptUrl = resolveVideoReceiptUrlInText(itemHtml, payload, itemUrl.toString());
-        if (itemReceiptUrl) {
-          const tab = await chrome.tabs.create({ url: itemReceiptUrl, active: true });
-          return { ok: true, openedUrl: itemReceiptUrl, tabId: tab.id || null, direct: false, source: "item" };
-        }
+    if (itemUrl && itemUrl.protocol === "https:" && /(^|\.)ebay\.com$/i.test(itemUrl.hostname) && /\/itm\//i.test(itemUrl.pathname)) {
+      const itemReceiptUrl = await fetchVideoReceiptUrl(itemUrl.toString(), payload);
+      if (itemReceiptUrl) {
+        const tab = await chrome.tabs.create({ url: itemReceiptUrl, active: true });
+        return { ok: true, openedUrl: itemReceiptUrl, tabId: tab.id || null, direct: false, source: "item" };
       }
     }
 
     const detailsUrl = normalizeUrl(payload.orderDetailsUrl || buildEbayOrderDetailsUrl(payload.orderNumber));
-    if (!detailsUrl || !/(^|\.)ebay\.com$/i.test(detailsUrl.hostname) || !/\/mesh\/ord\/details/i.test(detailsUrl.pathname)) {
+    if (!detailsUrl || detailsUrl.protocol !== "https:" || !/(^|\.)ebay\.com$/i.test(detailsUrl.hostname) || !/\/mesh\/ord\/details/i.test(detailsUrl.pathname)) {
       throw new Error("The eBay order details URL is missing or invalid.");
     }
 
-    const response = await fetch(detailsUrl.toString(), { credentials: "include" });
-    if (!response.ok) {
-      throw new Error(`eBay order details returned HTTP ${response.status}. Make sure you are signed in to eBay.`);
-    }
-    const html = await response.text();
-    const receiptUrl = resolveVideoReceiptUrlInText(html, payload, detailsUrl.toString());
+    const receiptUrl = await fetchVideoReceiptUrl(detailsUrl.toString(), payload);
     if (!receiptUrl) {
-      throw new Error("No eBay Live video receipt was found for this order or item.");
+      return openVideoReceiptInOrderTab(detailsUrl, payload);
     }
     const tab = await chrome.tabs.create({ url: receiptUrl, active: true });
     return { ok: true, openedUrl: receiptUrl, tabId: tab.id || null, direct: false };
