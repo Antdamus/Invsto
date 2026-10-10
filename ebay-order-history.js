@@ -3998,7 +3998,7 @@ function renderReturnMessageLog(task = {}) {
   `;
 }
 
-function renderReturnComplaintDetails(task = {}) {
+function renderReturnComplaintDetails(task = {}, { compact = false } = {}) {
   const detail = getReturnComplaintDetails(task);
   const returnCase = getReturnTaskCase(task);
   const apiDetails = getReturnTaskApiDetails(task);
@@ -4024,14 +4024,14 @@ function renderReturnComplaintDetails(task = {}) {
   const photoCount = detail.imageUrls.length || detail.returnFileIds.length || detail.blobUrls.length;
   return `
     <div class="return-complaint-details">
-      <div class="return-complaint-header">
+      ${compact ? "" : `<div class="return-complaint-header">
         <span class="eyebrow">eBay Complaint Detail</span>
         <div>
           ${detail.detailsUrl ? `<a href="${escapeHtml(detail.detailsUrl)}" target="_blank" rel="noopener" ${externalLinkAttrs}>Open eBay return</a>` : ""}
           ${detail.orderDetailsUrl ? `<a href="${escapeHtml(detail.orderDetailsUrl)}" target="_blank" rel="noopener" ${externalLinkAttrs}>Order details</a>` : ""}
           ${detail.videoReceiptUrl ? `<a href="${escapeHtml(detail.videoReceiptUrl)}" target="_blank" rel="noopener" ${externalLinkAttrs}>Video receipt</a>` : ""}
         </div>
-      </div>
+      </div>`}
       ${detail.buyerComment ? `
         <p class="return-complaint-comment">
           <strong>Buyer comment</strong>
@@ -4042,9 +4042,10 @@ function renderReturnComplaintDetails(task = {}) {
         ${detail.requestAmount ? `<span><small>Request amount</small><b>${escapeHtml(detail.requestAmount)}</b></span>` : ""}
         ${detail.onHoldAmount ? `<span><small>On hold</small><b>${escapeHtml(detail.onHoldAmount)}</b></span>` : ""}
         ${detail.trackingNumber ? `<span><small>Return tracking</small><b>${escapeHtml(detail.trackingNumber)}</b></span>` : ""}
-        ${detail.datePurchased ? `<span><small>Date purchased</small><b>${escapeHtml(detail.datePurchased)}</b></span>` : ""}
+        ${!compact && detail.datePurchased ? `<span><small>Date purchased</small><b>${escapeHtml(detail.datePurchased)}</b></span>` : ""}
         ${photoCount ? `<span><small>Buyer photos</small><b>${escapeHtml(`${photoCount} captured reference${photoCount === 1 ? "" : "s"}`)}</b></span>` : ""}
       </div>
+      ${compact && detail.videoReceiptUrl ? `<p><a href="${escapeHtml(detail.videoReceiptUrl)}" target="_blank" rel="noopener" ${externalLinkAttrs}>Video receipt</a></p>` : ""}
       ${detail.imageUrls.length ? `
         <div class="return-complaint-images">
           ${detail.imageUrls.slice(0, 8).map((url) => `

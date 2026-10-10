@@ -27,3 +27,11 @@ test('quick review keeps unknown prices distinct from zero and escapes buyer-pro
  const rows=conversationRows({case_messages:[{direction:'inbound',message_body:'Case question',sent_at:'2026-10-01'},{direction:'internal',message_body:'Staff note',sent_at:'2026-10-04'},{direction:'outbound',message_status:'failed',sent_at:'2026-10-05'}],buyer_messages:[{direction:'outbound',message_body:'New reply',created_at_ebay:'2026-10-03'}]});
  assert.equal(rows.length,2);assert.equal(rows[0].message_body,'New reply');assert.equal(rows[1].channel,'eBay case');
 });
+
+test('compact complaint review omits legacy purchase dates and duplicate navigation but keeps video evidence',async()=>{
+ const source=await readFile(new URL('../ebay-order-history.js',import.meta.url),'utf8'),start=source.indexOf('function renderReturnComplaintDetails('),end=source.indexOf('\nfunction ',start+10);
+ const context={getReturnComplaintDetails:()=>({buyerComment:'Clasp complaint',datePurchased:'2026-10-09',detailsUrl:'https://www.ebay.com/case',orderDetailsUrl:'https://www.ebay.com/order',videoReceiptUrl:'https://www.ebay.com/video',imageUrls:[],returnFileIds:[],blobUrls:[]}),getReturnTaskCase:()=>({}),getReturnTaskApiDetails:()=>({}),getReturnTaskPayload:()=>({}),escapeHtml:x=>String(x)};
+ vm.runInNewContext(source.slice(start,end),context);
+ const compact=context.renderReturnComplaintDetails({}, {compact:true});assert.ok(!compact.includes('Date purchased'));assert.ok(!compact.includes('Open eBay return'));assert.ok(compact.includes('https://www.ebay.com/video'));assert.ok(compact.includes('Clasp complaint'));
+ assert.ok(context.renderReturnComplaintDetails({}).includes('Date purchased'),'other uses keep their existing display');
+});

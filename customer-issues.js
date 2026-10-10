@@ -139,7 +139,7 @@
   if(!detail||detail.c.id!==selected)return;
   const {c,tasks,items,lines,events}=detail,summary=rows.find(r=>r.id===c.id)||{...c,...lineFacts(lines),open_tasks:tasks.filter(t=>!finish.has(t.status)).length};
   const primary={...(tasks.find(t=>!finish.has(t.status))||{id:'',metadata:c.raw_payload}),order_line_ids:lines.map(l=>l.id),ebay_return_cases:c};
-  const receipt=ctx.renderReceipt(primary),complaint=ctx.renderComplaint(primary);
+  const receipt=ctx.renderReceipt(primary),complaint=ctx.renderComplaint(primary,{compact:true});
   const url=caseHref(c),remaining=items.some(i=>i.received_quantity<i.expected_quantity)||!items.length;
   const reason=/^(CLOSED|OPEN|WAITING_.*)$/i.test(c.return_reason||'')?'No customer reason captured':nice(c.return_reason);
   $('issues-detail').innerHTML=`<div class="issue-detail-bar"><button type="button" class="secondary-btn issue-back" data-close-case>← Cases</button><span>${escape(c.ebay_return_id?`Case ${c.ebay_return_id}`:'Internal return')}</span>${c.ebay_return_id?'<button type="button" class="secondary-btn" data-sync-case>Refresh case</button>':''}</div>
@@ -215,7 +215,7 @@
  }
  async function openCase(id,{quiet=false}={}){
   const initialForm=$('issue-action-form');
-  const scroll=quiet?$('issues-detail').scrollTop:0;
+  const scroll=quiet?$('issues-detail').scrollTop:0,conversationLimit=quiet?detail?.conversationLimit:undefined;
   const expanded=quiet?new Set(Array.from($('issues-detail').querySelectorAll('details[open]>summary'),el=>el.textContent)):null;
   if(saving)return;selected=id;const stamp=++version;document.querySelector('.issues-columns').classList.add('is-selected');cards();
   if(!quiet)$('issues-detail').innerHTML='<div class="issues-empty">Loading the case and its evidence…</div>';
@@ -236,7 +236,7 @@
    if(tasks[0])await ctx.hydrateComplaint(tasks);
    if(stamp!==version)return;
    if(quiet&&(($('issue-action-form')&&$('issue-action-form')!==initialForm)||ctx.state.busy))return;
-   detail={c,tasks,items,lines,events:[...caseEvents,...taskEvents].sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at)),moreEvents:caseEvents.length===50||taskEvents.length===50};
+   detail={c,tasks,items,lines,conversationLimit,events:[...caseEvents,...taskEvents].sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at)),moreEvents:caseEvents.length===50||taskEvents.length===50};
    renderDetail();if(expanded)$('issues-detail').querySelectorAll('details').forEach(el=>el.open=expanded.has(el.querySelector('summary')?.textContent));$('issues-detail').scrollTop=scroll;
    const url=new URL(location.href);url.searchParams.delete('returnTaskId');url.searchParams.set('caseId',id);history.replaceState(null,'',url);
   }catch(error){if(stamp===version){$('issues-detail').innerHTML=`<div class="issues-empty"><button class="secondary-btn" data-close-case>← Cases</button><h2>Couldn’t load this case</h2><p>${escape(error.message)}</p><button class="primary-btn" data-retry-case>Retry</button></div>`;}}
