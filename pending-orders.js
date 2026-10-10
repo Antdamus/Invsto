@@ -4755,6 +4755,7 @@ function renderOrders(options = {}) {
           : "No ship-by date";
       const lineCreatedLabel = `${getOrderCreatedLabel(line)} ${formatOrderCreatedDate(line)}`;
       const lineCustomerName = getOrderCustomerName(order);
+      const lineBuyerUsername = String(order.buyer_username || "").trim();
       const assignedLineTask = getVisibleOrderTaskForLine(line);
       const assignedLineTaskAssignee = assignedLineTask ? getOrderTaskAssigneeName(assignedLineTask) : "";
       const lineTaskActionMarkup = assignedLineTask
@@ -4790,7 +4791,10 @@ function renderOrders(options = {}) {
               ${orderNumberMarkup}
               <small class="buyer-line-item-meta">Item ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
             </span>
-            ${lineCustomerName ? `<small class="buyer-line-customer">Customer ${escapeHtml(lineCustomerName)}</small>` : ""}
+            <span class="buyer-line-customer">
+              <span><small>Customer</small><strong>${escapeHtml(lineCustomerName || "Name not saved")}</strong></span>
+              <span><small>eBay username</small><strong>${escapeHtml(lineBuyerUsername || "Username not saved")}</strong></span>
+            </span>
             <span class="buyer-line-meta-row">
               <span class="buyer-line-created">${escapeHtml(lineCreatedLabel)}</span>
               <span class="buyer-line-identity">${escapeHtml(transactionLabel)} - ${escapeHtml(lineSource)}</span>

@@ -4859,16 +4859,40 @@ body.pending-order-detail-open .mobile-detail-close {
 }
 
 .buyer-line-customer {
-  display: inline-flex !important;
+  display: grid !important;
+  gap: 3px;
   width: fit-content;
   max-width: 100%;
   margin-top: 5px;
-  padding: 4px 8px;
+  padding: 7px 10px;
   border: 1px solid rgba(139, 190, 255, 0.18);
-  border-radius: 999px;
+  border-radius: 10px;
   background: rgba(139, 190, 255, 0.075);
   color: #d8e7ff !important;
-  font-weight: 900;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.buyer-line-customer > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 7px;
+  min-width: 0;
+}
+
+.buyer-line-customer > span > small {
+  color: #adc3d5;
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.buyer-line-customer > span > strong {
+  min-width: 0;
+  color: #d8e7ff;
+  font-size: 0.8rem;
+  font-weight: 700;
   overflow-wrap: anywhere;
 }
 
