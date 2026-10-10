@@ -49,6 +49,18 @@ async function open(t, {width = 1366, count = 2, signedIn = true, delay = 0} = {
         channels.push(channel); return channel;
       },
       removeChannel: async channel => removed.push(channel.name),
+      async rpc(name, args) {
+        if (name !== 'notification_inbox') throw Error('Unexpected RPC '+name);
+        calls.push({rpc:name,args,filters:[['recipient_user_id',user.id]]});
+        const all = structuredClone(rows.filter(row=>row.recipient_user_id===user.id)).map(row=>({...row,category:row.notification_type==='customer_issue_sync'?'system':['customer_issue_action','customer_issue_deadline'].includes(row.notification_type)?row.metadata?.issue_kind==='return'?'returns':'buyers':'tasks'}));
+        all.sort((a,b)=>b.created_at.localeCompare(a.created_at)||b.id.localeCompare(a.id));
+        const unread=all.filter(row=>!row.read_at), counts={all:unread.length,tasks:0,buyers:0,returns:0,system:0};
+        unread.forEach(row=>counts[row.category]++);
+        const visible=all.filter(row=>(args._view==='recent'||!row.read_at)&&(args._category==='all'||row.category===args._category));
+        const data={unread:unread.slice(0,30),unread_count:unread.length,counts,total:visible.length,entries:visible.slice(0,args._limit)};
+        if(readDelay)await new Promise(resolve=>setTimeout(resolve,readDelay));
+        return failReads?{error:{message:'Offline'}}:{data};
+      },
       from(table) {
         if (table !== 'task_notifications') throw Error(`Unexpected table ${table}`);
         const filters = [], orders = []; let update, start = 0, end = Infinity;
@@ -94,7 +106,7 @@ async function open(t, {width = 1366, count = 2, signedIn = true, delay = 0} = {
 for (const width of [320, 390, 1366]) {
   test(`${width}px: persistent alerts and full inbox fit without interrupting work`, async t => {
     const page = await open(t, {width});
-    const alert = page.getByRole('region', {name: 'New task updates'});
+    const alert = page.getByRole('region', {name: 'New updates'});
     await expect(alert).toBeVisible();
     assert.deepEqual(await page.evaluate(() => writes), []);
     await page.getByLabel('Scan bag').fill('LIVE-019');
@@ -106,8 +118,8 @@ for (const width of [320, 390, 1366]) {
     await expect(alert).toContainText('Use the blue box');
     assert.equal(await page.evaluate(() => document.activeElement.id), before);
     assert.equal(await alert.locator('img').count(), 0);
-    await page.getByRole('button', {name: 'Review 3 updates', exact: true}).click();
-    const panel = page.getByRole('region', {name: 'Task updates inbox'});
+    await page.getByRole('button', {name: 'Review updates', exact: true}).click();
+    const panel = page.getByRole('region', {name: 'Updates inbox'});
     await expect(panel).toBeVisible();
     await expect(panel).toContainText('Please wait for the CGL certificate');
     await page.getByRole('heading', {name: 'Pending orders', exact: true}).click();
@@ -117,28 +129,28 @@ for (const width of [320, 390, 1366]) {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     if (width !== 320) await page.screenshot({path: `test-results/task-notifications-${width}.png`});
     assert.deepEqual(await page.evaluate(() => writes), []);
-    await page.getByRole('button', {name: 'Close task updates', exact: true}).click();
+    await page.getByRole('button', {name: 'Close updates', exact: true}).click();
     await expect(panel).toBeHidden();
-    await expect(page.getByRole('button', {name: 'Task updates, 3 unread', exact: true})).toBeVisible();
+    await expect(page.getByRole('button', {name: 'Updates, 3 unread', exact: true})).toBeVisible();
   });
 }
 
 test('minimizing persists across pages and a new reply brings the alert back', async t => {
   const page = await open(t);
-  await page.getByRole('button', {name: 'Minimize task alert'}).click();
+  await page.getByRole('button', {name: 'Minimize update alert'}).click();
   await page.reload(); await page.evaluate(() => OGTaskNotifications.ready);
-  await expect(page.getByRole('region', {name: 'New task updates'})).toBeHidden();
+  await expect(page.getByRole('region', {name: 'New updates'})).toBeHidden();
   assert.equal(await page.evaluate(() => OGTaskNotifications.snapshot().unreadCount), 2);
   await page.evaluate(() => {
     rows.unshift({...rows[0], id: 'next', title: 'New reply after minimizing', created_at: '2026-10-07T20:00:00Z'});
     channels[0].callback({eventType: 'INSERT', new: rows[0]});
   });
-  await expect(page.getByRole('region', {name: 'New task updates'})).toContainText('New reply after minimizing');
+  await expect(page.getByRole('region', {name: 'New updates'})).toContainText('New reply after minimizing');
 });
 
 test('all unread alerts are counted and paginated beyond the recent-history limit', async t => {
   const page = await open(t, {count: 45});
-  await page.getByRole('button', {name: 'Review 45 updates'}).click();
+  await page.getByRole('button', {name: 'Review updates'}).click();
   await expect(page.locator('.og-tu-entry')).toHaveCount(30);
   await page.getByRole('button', {name: 'Load more', exact: true}).click();
   await expect(page.locator('.og-tu-entry')).toHaveCount(45);
@@ -149,7 +161,7 @@ test('all unread alerts are counted and paginated beyond the recent-history limi
 
 test('mark read only changes the selected recipient notification and syncs remote reads', async t => {
   const page = await open(t);
-  await page.getByRole('button', {name: 'Review 2 updates'}).click();
+  await page.getByRole('button', {name: 'Review updates'}).click();
   await page.locator('[data-tu-read="notice-0"]').click();
   await expect(page.locator('.og-tu-entry')).toHaveCount(1);
   const writes = await page.evaluate(() => window.writes);
@@ -165,7 +177,7 @@ test('mark read only changes the selected recipient notification and syncs remot
 test('opening a notification goes directly to its task, ignoring arbitrary supplied URLs', async t => {
   const page = await open(t);
   await page.evaluate(() => {rows[0].metadata = {open_url: 'https://unexpected.example'};});
-  await page.getByRole('button', {name: 'Review 2 updates'}).click();
+  await page.getByRole('button', {name: 'Review updates'}).click();
   const link = page.locator('[data-tu-open="notice-0"]');
   await expect(link).toHaveAttribute('href', 'team-tasks.html?taskId=8794ebbb-3052-491a-ab49-1578e76701f0');
   await link.click();
@@ -175,7 +187,7 @@ test('opening a notification goes directly to its task, ignoring arbitrary suppl
 test('sync incidents open the fixed recovery page rather than a nonexistent task or supplied URL',async t=>{
  const page=await open(t);
  await page.evaluate(()=>{Object.assign(rows[0],{notification_type:'customer_issue_sync',title:'eBay sync needs attention',metadata:{open_url:'https://unexpected.example',incident_id:'bad-id'}});channels[0].callback({eventType:'UPDATE'});});
- await page.getByRole('button',{name:'Review 2 updates'}).click();
+ await page.getByRole('button',{name:'Review updates'}).click();
  const link=page.getByRole('link',{name:'Open sync status',exact:true});
  await expect(link).toHaveAttribute('href','ebay-returns.html?syncHealth=1');
  await expect(page.locator('.og-tu-entry').first()).toContainText('eBay sync');
@@ -183,7 +195,7 @@ test('sync incidents open the fixed recovery page rather than a nonexistent task
 
 test('failed reads and writes keep alerts visible, and retry recovers', async t => {
   const page = await open(t);
-  await page.getByRole('button', {name: 'Review 2 updates'}).click();
+  await page.getByRole('button', {name: 'Review updates'}).click();
   await page.evaluate(() => {failWrites = true;});
   await page.locator('[data-tu-read="notice-0"]').click();
   await expect(page.locator('.og-tu-error')).toContainText('Could not mark');
@@ -207,7 +219,7 @@ test('sign-out clears private alerts and a late response cannot expose them to t
   });
   await expect(page.locator('#og-task-updates')).toHaveCount(0);
   await page.evaluate(() => {user = {id: 'worker-b'}; authHandler('SIGNED_IN', {user});});
-  await expect(page.getByRole('region', {name: 'New task updates'})).toContainText('Another employee private task');
+  await expect(page.getByRole('region', {name: 'New updates'})).toContainText('Another employee private task');
   assert.doesNotMatch(await page.locator('#og-task-updates').innerText(), /Certificate needed|Prepare bag/);
   assert.ok((await page.evaluate(() => removed)).length >= 1);
 });
@@ -217,7 +229,7 @@ test('read acknowledgments cannot be undone by an older in-flight refresh', asyn
   await page.evaluate(() => {readDelay = 180; void OGTaskNotifications.refresh();});
   assert.equal(await page.evaluate(() => OGTaskNotifications.markRead(['notice-0'])), true);
   await page.evaluate(() => OGTaskNotifications.refresh());
-  await expect(page.getByRole('button', {name: 'Task updates, 1 unread', exact: true})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Updates, 1 unread', exact: true})).toBeVisible();
   assert.equal(await page.evaluate(() => OGTaskNotifications.snapshot().notifications.some(row => row.id === 'notice-0' && !row.read_at)), false);
 });
 
@@ -241,9 +253,9 @@ test('the Tasks-page bell uses the shared inbox and the same read state without 
   });
   await expect(page.locator('#team-task-notification-count')).toHaveText('2');
   assert.equal(await page.evaluate(() => channels.length), 1);
-  await page.getByRole('button', {name: 'Minimize task alert'}).click();
+  await page.getByRole('button', {name: 'Minimize update alert'}).click();
   await page.getByRole('button', {name: 'Task page updates', exact: true}).click();
-  await expect(page.getByRole('region', {name: 'Task updates inbox'})).toBeVisible();
+  await expect(page.getByRole('region', {name: 'Updates inbox'})).toBeVisible();
   await page.evaluate(() => markTaskNotificationsRead(['notice-0']));
   await expect(page.locator('#team-task-notification-count')).toHaveText('1');
   assert.equal(await page.evaluate(() => state.notifications.some(row => row.id === 'notice-0' && !row.read_at)), false);
@@ -254,4 +266,43 @@ test('staff pages include the shared inbox; public sign-in stays clear', async (
     'ebay-order-history','ebay-returns','email-triage','add-item','add-inventory','bag-lookup','inventory-activity','locations','print-stations','sms-marketing','store-transfers','timeclock'];
   for (const name of names) assert.match(await readFile(new URL(`${name}.html`, root), 'utf8'), /task-notifications\.js\?v=\d{8}/);
   for (const name of ['index','set-password']) assert.doesNotMatch(await readFile(new URL(`${name}.html`, root), 'utf8'), /task-notifications\.js/);
+});
+
+test('categories find old unread work, retain reads, and do not change when other alerts arrive', async t => {
+  const page = await open(t, {count:45});
+  await page.evaluate(() => {
+    rows.filter(r=>r.recipient_user_id===user.id).forEach(r=>{r.notification_type='customer_issue_action';r.metadata={issue_kind:'return',case_id:'00000000-0000-4000-8000-000000000101'};});
+    rows.push({...rows[0],id:'old-task',notification_type:'task_progress_update',title:'Older employee reply',created_at:'2026-09-01T12:00:00Z'});
+    channels[0].callback({eventType:'INSERT'});
+  });
+  await page.getByRole('button',{name:'Review updates',exact:true}).click();
+  await page.getByRole('button',{name:'Tasks, 1 unread',exact:true}).click();
+  await expect(page.locator('.og-tu-entry')).toHaveCount(1);
+  await expect(page.locator('.og-tu-entry')).toContainText('Older employee reply');
+  await page.evaluate(()=>{rows.unshift({...rows[0],id:'buyer-reply',metadata:{issue_kind:'request'},title:'New buyer issue',created_at:'2026-10-09T12:00:00Z'});channels[0].callback({eventType:'INSERT'});});
+  await expect(page.getByRole('button',{name:'Buyer issues, 1 unread',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Tasks, 1 unread',exact:true})).toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('.og-tu-entry')).toHaveCount(1);
+  await page.locator('[data-tu-read="old-task"]').click();
+  await expect(page.locator('.og-tu-entry')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Returns, 45 unread',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Recent',exact:true}).click();
+  await expect(page.locator('.og-tu-entry')).toContainText('Older employee reply');
+  await page.getByRole('button',{name:'Returns, 45 unread',exact:true}).click();
+  await expect(page.locator('.og-tu-entry')).toHaveCount(30);
+  await page.getByRole('button',{name:'Load more',exact:true}).click();
+  await expect(page.locator('.og-tu-entry')).toHaveCount(45);
+});
+
+test('a slow previous filter cannot overwrite a newer filter and the preference survives navigation', async t => {
+  const page = await open(t);
+  await page.getByRole('button',{name:'Review updates',exact:true}).click();
+  await page.evaluate(()=>{readDelay=180;});
+  await page.getByRole('button',{name:'Tasks, 2 unread',exact:true}).click();
+  await page.getByRole('button',{name:'Returns, 0 unread',exact:true}).click();
+  await expect(page.locator('.og-tu-empty')).toContainText('No unread returns updates.');
+  await expect(page.locator('.og-tu-entry')).toHaveCount(0);
+  await page.reload();await page.evaluate(()=>OGTaskNotifications.ready);
+  await page.getByRole('button',{name:'Updates, 2 unread',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Returns, 0 unread',exact:true})).toHaveAttribute('aria-pressed','true');
 });
