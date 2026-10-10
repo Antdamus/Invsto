@@ -242,12 +242,17 @@
    ${ctx.employee.role==='admin'||(kind(detail.c)==='return'&&!['closed','cancelled'].includes(detail.c.status))?'<button class="secondary-btn" data-assign="">Create a task</button>':''}<div id="issue-form-slot"></div></section>`;
  }
  function caseHref(c){
-  const id=encodeURIComponent(c.ebay_return_id||'');
+  const id=encodeURIComponent(String(c.ebay_return_id||'').trim());
   if(c.source_lane==='return'&&id)return `https://www.ebay.com/rtn/Return/ReturnsDetail?returnId=${id}`;
   if(c.source_lane==='inquiry'&&id)return `https://www.ebay.com/res/ItemNotReceived/ViewRequest?id=${id}`;
+  if(c.source_lane==='payment_dispute'&&id)return `https://pmtdispute.ebay.com/dispute/${id}`;
   const raw=c.raw_payload||{},url=safeUrl(raw.detailsUrl||raw.apiExtractedDetails?.detailsUrl||'');
   if(url){const u=new URL(url);if(/(^|\.)ebay\.com$/.test(u.hostname)&&!/(ViewItem|\/itm\/)/i.test(url))return url;}
   return c.order_number?`https://www.ebay.com/mesh/ord/details?orderid=${encodeURIComponent(c.order_number)}`:'';
+ }
+ function caseLinkLabel(c,url){
+  if(c.source_lane==='payment_dispute'&&url.startsWith('https://pmtdispute.ebay.com/dispute/'))return 'Open eBay dispute';
+  return c.source_lane==='case'||c.source_lane==='payment_dispute'?'Open eBay order / case':'Open eBay case';
  }
  function renderDetail(){
   if(!detail||detail.c.id!==selected)return;
@@ -268,7 +273,7 @@
    <p class="issue-review-meta">Opened ${escape(date(c.opened_at))}<br>Last eBay update ${escape(date(c.synced_at))} · Internal status: ${escape(nice(c.status))}</p>
    ${c.sync_error?`<p class="issue-tag is-stale">Update failed. The previous case information was kept. ${escape(c.sync_error)}</p>`:''}
    <div class="issue-actions">${c.issue_kind==='return'&&remaining&&lines.some(l=>l.line_status==='fulfilled')&&!['closed','cancelled'].includes(c.status)?'<button class="primary-btn" data-receive>Receive returned items</button>':''}
-    ${url?`<a class="secondary-btn" href="${escape(url)}" target="_blank" rel="noopener">${c.source_lane==='case'||c.source_lane==='payment_dispute'?'Open eBay order / case':'Open eBay case'} ↗</a>`:''}
+    ${url?`<a class="secondary-btn" href="${escape(url)}" target="_blank" rel="noopener">${caseLinkLabel(c,url)} ↗</a>`:''}
     ${lines[0]||c.buyer_username?`<a class="secondary-btn" href="email-triage.html?${lines[0]?'orderLineId='+encodeURIComponent(lines[0].id):'ebayBuyer='+encodeURIComponent(c.buyer_username)}&from=returns" target="_blank" rel="noopener">Buyer chat ↗</a>`:''}
     ${!lines.length&&ctx.employee.role==='admin'?'<button class="primary-btn" data-match-order>Match order items</button>':''}</div>
    ${ctx.employee.role==='admin'&&(closed(c)||!c.ebay_return_id)&&(!['closed','cancelled'].includes(c.status)||tasks.some(t=>!finish.has(t.status)))?'<section class="issue-closeout"><div><strong>Already resolved?</strong><p>Move this case to History without assigning anyone.</p></div><button type="button" class="primary-btn" data-finish-case>Mark closed</button></section>':''}<div id="issue-close-form-slot"></div>
@@ -502,5 +507,5 @@
    }catch(error){target.textContent=error.message||'No exact order found.';}
   };
  }
- root.OGCustomerIssues={init,refresh,openReceivedCase:id=>openCase(id),get ready(){return ready;},testing:{kind,nextText,closed,date,caseHref,money,cardFacts,conversationRows,lineFacts,closeBlock,runCloseBatch}};
+ root.OGCustomerIssues={init,refresh,openReceivedCase:id=>openCase(id),get ready(){return ready;},testing:{kind,nextText,closed,date,caseHref,caseLinkLabel,money,cardFacts,conversationRows,lineFacts,closeBlock,runCloseBatch}};
 })(globalThis);
