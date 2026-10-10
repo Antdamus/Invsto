@@ -3037,7 +3037,7 @@ Deno.serve(async(req)=>{
    if(typeof body.caseId!=='string')return jsonResponse(400,{error:'Choose a payment dispute.'});
    const visible=await client.from('ebay_return_cases').select('id,source_lane,ebay_return_id,raw_payload').eq('id',body.caseId).maybeSingle();
    if(visible.error||!visible.data)return jsonResponse(404,{error:'Case not found.'});
-   const document=await resolveDisputeEvidence(db,visible.data,body.evidenceId,body.fileId,()=>getEbayAccessToken('https://api.ebay.com/oauth/api_scope/sell.payment.dispute'),EBAY_API_BASE);
+   const document=await resolveDisputeEvidence(db,visible.data,body.evidenceId,body.fileId,()=>getEbayAccessToken('https://api.ebay.com/oauth/api_scope/sell.payment.dispute'),EBAY_FINANCES_API_BASE);
    return jsonResponse(200,document);
   }
   if(body.action!=='refresh')return jsonResponse(400,{error:'Reload Customer Issues to use the background sync.'});

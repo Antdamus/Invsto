@@ -37,14 +37,19 @@ test('first view archives exact eBay bytes privately; repeat views reuse the fil
  let file,fetches=0,tokens=0,uploads=0;const bytes=Uint8Array.from([255,216,255,1,2,3]);
  const storage={list:async(_dir,args)=>({data:file?[{name:args.search,metadata:{mimetype:'image/jpeg'}}]:[]}),upload:async(path,value,options)=>{file={path};uploads++;assert.deepEqual(value,bytes);assert.equal(options.upsert,false);return {};},createSignedUrl:async(path,ttl)=>{assert.equal(ttl,3600);return {data:{signedUrl:'https://storage.example.test/'+path}};}};
  const db={storage:{from:bucket=>{assert.equal(bucket,'ebay-return-evidence');return storage;}}};
- const token=async()=>{tokens++;return 'server-only';},request=async(url,options)=>{fetches++;assert.equal(options.headers.Authorization,'Bearer server-only');assert.equal(options.redirect,'error');const u=new URL(url);assert.equal(u.pathname,'/sell/fulfillment/v1/payment_dispute/5010603112/fetch_evidence_content');assert.equal(u.searchParams.get('evidence_id'),'ev-1');assert.equal(u.searchParams.get('file_id'),'file-1');return new Response(bytes);};
- const first=await resolveDisputeEvidence(db,c,'ev-1','file-1',token,'https://api.ebay.com',request);
+ const token=async()=>{tokens++;return 'server-only';},request=async(url,options)=>{fetches++;assert.equal(options.headers.Authorization,'Bearer server-only');assert.equal(options.redirect,'error');const u=new URL(url);assert.equal(u.hostname,'apiz.ebay.com');assert.equal(u.pathname,'/sell/fulfillment/v1/payment_dispute/5010603112/fetch_evidence_content');assert.equal(u.searchParams.get('evidence_id'),'ev-1');assert.equal(u.searchParams.get('file_id'),'file-1');return new Response(bytes);};
+ const first=await resolveDisputeEvidence(db,c,'ev-1','file-1',token,'https://apiz.ebay.com',request);
  assert.equal(first.archived,true);assert.equal(first.mime_type,'image/jpeg');assert.ok(first.path.startsWith('payment-disputes/case-1/'));
- const second=await resolveDisputeEvidence(db,c,'ev-1','file-1',token,'https://api.ebay.com',request);assert.equal(first.path,second.path);assert.equal(fetches,1);assert.equal(tokens,1);assert.equal(uploads,1);
- await assert.rejects(resolveDisputeEvidence(db,c,'wrong','file-1',token,'https://api.ebay.com',request));assert.equal(fetches,1);
+ const second=await resolveDisputeEvidence(db,c,'ev-1','file-1',token,'https://apiz.ebay.com',request);assert.equal(first.path,second.path);assert.equal(fetches,1);assert.equal(tokens,1);assert.equal(uploads,1);
+ await assert.rejects(resolveDisputeEvidence(db,c,'wrong','file-1',token,'https://apiz.ebay.com',request));assert.equal(fetches,1);
 });
 test('failed document retrieval renders a retry instead of removing the supporting document',async()=>{
  const panel={dataset:{},innerHTML:''},target={isConnected:true,querySelector:()=>panel,addEventListener(){}};
  await api.hydrate({c,db:{functions:{invoke:async()=>({error:Error('Network')})}},target});
  assert.ok(panel.innerHTML.includes('Retry document'));assert.ok(panel.innerHTML.includes('could not load'));assert.equal(panel.dataset.busy,'false');
+});
+
+test('binary dispute evidence uses the apiz host required by eBay for this operation',async()=>{
+ const source=await readFile(new URL('../supabase/functions/ebay-return-sync/index.ts',import.meta.url),'utf8');
+ assert.match(source,/resolveDisputeEvidence\(db,visible.data,body.evidenceId,body.fileId,[^;]+EBAY_FINANCES_API_BASE\)/);
 });
