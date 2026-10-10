@@ -10,7 +10,7 @@
  function render(){
   if(!catalogue)return;
   $('catalogue-title').textContent=catalogue.title;$('catalogue-intro').textContent=catalogue.introduction||'Discover the pieces selected especially for you.';
-  document.title=`${catalogue.title} · OG Jewelry`;
+  document.title=`${catalogue.title} · OG Jewelers`;
   const credit=catalogue.credit!==null && catalogue.credit!==undefined;
   $('credit-panel').hidden=!credit;$('credit-amount').textContent=C.money(catalogue.credit);
   const categories=[...new Set(catalogue.items.map(i=>i.category))];if(!categories.includes(category))category='';
@@ -79,7 +79,7 @@
  $('copy-selection').addEventListener('click',async()=>{
   if(!preview && Date.now()-lastSuccess>60000)await load();if(!catalogue)return;
   const items=catalogue.items.filter(i=>selected.has(i.id)),t=C.totals(catalogue.items,selected,catalogue.credit);
-  const text=[catalogue.title,...items.map(i=>`${i.name} — ${C.money(i.retail_price)}`),`Retail total: ${C.money(t.total)}`,...(catalogue.credit!==null?[`Catalogue credit: ${C.money(catalogue.credit)}`,`Credit remaining: ${C.money(t.remaining)}`,`Amount above credit: ${C.money(t.due)}`]:[]),'Selection only; availability and final total to be confirmed by OG Jewelry.',...(preview?[]:[location.href])].join('\n');
+  const text=[catalogue.title,...items.map(i=>`${i.name} — ${C.money(i.retail_price)}`),`Retail total: ${C.money(t.total)}`,...(catalogue.credit!==null?[`Catalogue credit: ${C.money(catalogue.credit)}`,`Credit remaining: ${C.money(t.remaining)}`,`Amount above credit: ${C.money(t.due)}`]:[]),'Selection only; availability and final total to be confirmed by OG Jewelers.',...(preview?[]:[location.href])].join('\n');
   try{await navigator.clipboard.writeText(text);$('selection-message').textContent='Copied. You can paste this in your conversation with the store.';}catch{$('selection-message').textContent='Copying is unavailable in this browser. You can share a screenshot of your selection.';}
  });
  if(preview){
