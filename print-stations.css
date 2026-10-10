@@ -4,8 +4,9 @@
 .print-station-dialog * { box-sizing:border-box; }
 .print-dialog-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .print-dialog-head h2 { margin:0; }
-.print-station-dialog label { display:grid; gap:7px; margin:16px 0; font-weight:700; }
-.print-station-dialog select,.print-station-dialog input { width:100%; min-width:0; padding:12px; font:inherit; color:#f5efe6; background:#302b2d; border:1px solid #786747; border-radius:10px; }
+.print-document-title { overflow-wrap:anywhere; padding:10px 12px; border-radius:10px; background:#edc99412; color:#edc994; font-weight:700; }
+.print-station-dialog label { display:grid; grid-template-columns:minmax(0,1fr); min-width:0; gap:7px; margin:16px 0; font-weight:700; }
+.print-station-dialog select,.print-station-dialog input { width:100%; min-width:0; margin:0; padding:12px; font:inherit; color:#f5efe6; background:#302b2d; border:1px solid #786747; border-radius:10px; }
 .print-label-button,.print-station-dialog button,.print-stations-page button,.print-download-link { min-height:44px; border:1px solid #786747; border-radius:12px; padding:10px 16px; background:#302b2d; color:#f5efe6; font:700 15px/1.4 'Manrope',sans-serif; cursor:pointer; }
 .print-station-dialog button:disabled,.print-stations-page button:disabled { opacity:.5; cursor:default; }
 .print-station-dialog a,.print-stations-page a { color:#edc994; }

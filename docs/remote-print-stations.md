@@ -111,3 +111,14 @@ DYMO web service) controls PDF readiness. The engine auto-detects page paper siz
 `shrink,monochrome,simplex,1x` fits printable bounds and submits only one copy per
 journaled operation. Physical printing and driver/media fit still need a test on
 the destination computer. No shipping status or order fulfillment data is changed.
+
+## Shared shipping print window
+
+Every **Print shipping label** button in Pending Orders (including saved labels,
+checkout and extra labels) and Order History opens the same destination picker.
+Choose a registered 5XL to queue the selected 4 × 6 pages, or **This device — browser
+print dialog** to choose a local printer, pages and copies in the device's own
+dialog. The shipping destination is remembered separately from jewelry labels.
+The local option remains available if the station list cannot load and supports
+Letter/A4 PDFs at their original size. It does not create a remote print job.
+Opening or cancelling the picker never submits a label.

@@ -2,7 +2,7 @@
   'use strict';
   const PREF = 'invsto.print.destination.v1';
   const PENDING = 'invsto.print.pending.v1.';
-  const styles = document.createElement('link');styles.rel='stylesheet';styles.href='print-stations.css?v=20260929-shipping2';document.head.append(styles);
+  const styles = document.createElement('link');styles.rel='stylesheet';styles.href='print-stations.css?v=20261010-shipping-picker';document.head.append(styles);
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const cancelled = () => Object.assign(new Error('Printing cancelled. No new print request was sent.'), {cancelled:true});
   async function rpc(name, args={}) {
@@ -19,13 +19,22 @@
   const rollName = roll => roll==='Left'?'Left roll':roll==='Right'?'Right roll':'Printer default';
   const rollOptions = station => ['Left','Right'].map(roll=>`<option value="${roll}">${rollName(roll)}${station[roll.toLowerCase()+'_roll_label']?' - '+escape(station[roll.toLowerCase()+'_roll_label']):''}</option>`).join('');
   let choosing=false;
-  async function chooseDestination({copies=1,labelCount=1,documentType='dymo',pageCount=1,configureOnly=false}={}) {
+  async function chooseDestination({copies=1,labelCount=1,documentType='dymo',pageCount=1,configureOnly=false,allowBrowserPrint=false,documentTitle=''}={}) {
     if (choosing) throw new Error('Choose the destination in the open print window.');
     const pdf=documentType==='pdf', preference=pdf?PREF+'.pdf':PREF;
+    const browserPrint=pdf&&allowBrowserPrint;
     choosing=true;
     const dialog=document.createElement('dialog');dialog.className='print-station-dialog print-destination-picker';
-    dialog.innerHTML=`<form method="dialog"><div class="print-dialog-head"><h2>${pdf?'Print shipping label':'Print labels'}</h2><button value="cancel" aria-label="Close print destination">×</button></div></form><p>Choose the printer that should receive these labels.</p><p role="status" data-message>Loading print stations…</p><label>Send to<select data-destination disabled></select></label><div data-roll-section hidden><label>Label roll<select data-roll><option value="">Choose a roll...</option></select></label><p>Left and right as you face the front of the printer. Choose the roll loaded with labels that match this label’s size.</p><p data-roll-update hidden>Update the Windows helper on this computer to enable roll selection. <a href="downloads/Invsto-Print-Station-Windows.zip?v=1.2.0" download>Download helper update</a>. Extract it and run Install-Print-Station.cmd; your pairing is kept.</p></div>${pdf?`<p>This saved PDF contains <strong>${pageCount} page${pageCount===1?'':'s'}</strong>. Load 4 × 6 shipping labels in the 5XL.</p><label>Pages to print<input data-pages placeholder="e.g. 1, 3-5, or all" value="${pageCount===1?'1':''}" inputmode="text"></label><p>Check the PDF preview to match pages to this order. A bulk PDF may contain other orders.</p>`:''}<label>${pdf?'Copies of selected pages':'Copies per label'}<input data-copies type="number" min="1" max="100" value="${Math.max(1,Math.min(100,Number(copies)||1))}"></label><p>${labelCount>1?`${labelCount} item labels. `:''}<span data-destination-status></span></p><a href="print-stations.html">Set up a computer or view print jobs</a><div class="print-dialog-actions"><button type="button" data-cancel>Cancel</button><button type="button" data-send disabled>Send labels</button></div>`;
+    dialog.innerHTML=`<form method="dialog"><div class="print-dialog-head"><h2>${pdf?'Print shipping label':'Print labels'}</h2><button value="cancel" aria-label="Close print destination">×</button></div></form><p>Choose the printer that should receive these labels.</p><p role="status" data-message>Loading print stations…</p><label>Send to<select data-destination disabled></select></label><div data-roll-section hidden><label>Label roll<select data-roll><option value="">Choose a roll...</option></select></label><p>Left and right as you face the front of the printer. Choose the roll loaded with labels that match this label’s size.</p><p data-roll-update hidden>Update the Windows helper on this computer to enable roll selection. <a href="downloads/Invsto-Print-Station-Windows.zip?v=1.2.0" download>Download helper update</a>. Extract it and run Install-Print-Station.cmd; your pairing is kept.</p></div>${pdf?`<p data-shipping-paper-help>This saved PDF contains <strong>${pageCount} page${pageCount===1?'':'s'}</strong>. Load 4 × 6 shipping labels in the 5XL.</p><label>Pages to print<input data-pages placeholder="e.g. 1, 3-5, or all" value="${pageCount===1?'1':''}" inputmode="text"></label><p data-shipping-pages-help>Check the PDF preview to match pages to this order. A bulk PDF may contain other orders.</p>`:''}<label>${pdf?'Copies of selected pages':'Copies per label'}<input data-copies type="number" min="1" max="100" value="${Math.max(1,Math.min(100,Number(copies)||1))}"></label><p>${labelCount>1?`${labelCount} item labels. `:''}<span data-destination-status></span></p><a href="print-stations.html">Set up a computer or view print jobs</a><div class="print-dialog-actions"><button type="button" data-cancel>Cancel</button><button type="button" data-send disabled>Send labels</button></div>`;
     const dialogBody=document.createElement('div');dialogBody.className='print-dialog-body';
+    if(pdf&&documentTitle){const title=document.createElement('p');title.className='print-document-title';title.textContent=documentTitle;dialog.querySelector('form').after(title);}
+    if(browserPrint){
+      dialog.querySelector('[data-destination]').insertAdjacentHTML('beforeend','<option value="">Loading registered printers…</option><option value="browser">This device — browser print dialog</option>');
+      dialog.querySelector('[data-destination]').disabled=false;
+      const help=document.createElement('p');help.dataset.browserPrintHelp='';help.hidden=true;
+      help.textContent='Choose the printer, pages and copies in your device’s print dialog. No job is sent to a registered computer.';
+      dialog.querySelector('[data-copies]').closest('label').after(help);
+    }
     const actions=dialog.querySelector('.print-dialog-actions');for(const child of [...dialog.children])if(child!==actions)dialogBody.append(child);dialog.prepend(dialogBody);
     const previousFocus=document.activeElement;document.body.append(dialog);dialog.showModal();
     return new Promise((resolve,reject)=>{
@@ -38,6 +47,7 @@
       const rollSelect=dialog.querySelector('[data-roll]');
       const update=(resetRoll=false)=>{
         const station=stations.find(row=>row.id===select.value);
+        const localBrowser=browserPrint&&select.value==='browser';
         const twin=!pdf&&isTwin(station);
         dialog.querySelector('[data-roll-section]').hidden=!twin;
         dialog.querySelector('[data-roll-update]').hidden=!twin||station.roll_selection_ready;
@@ -46,10 +56,21 @@
         send.disabled=(pdf&&(!station||!station.pdf_print_ready))||(!station && select.value!=='local')||(twin&&(!rollSelect.value||!station.roll_selection_ready));send.textContent=select.value==='local'?'Download label file':'Send labels';
         if(configureOnly)send.textContent='Use this printer';
         if(pdf){try{const pages=window.shippingPdf.parsePages(dialog.querySelector('[data-pages]').value,pageCount),amount=Number(dialog.querySelector('[data-copies]').value);if(Number.isInteger(amount)&&amount>0)send.textContent=`Send ${pages.length*amount} label${pages.length*amount===1?'':'s'}`;}catch{}}
+        if(browserPrint){
+          dialog.querySelector('[data-pages]').closest('label').hidden=localBrowser;
+          dialog.querySelector('[data-copies]').closest('label').hidden=localBrowser;
+          dialog.querySelector('[data-shipping-paper-help]').hidden=localBrowser;
+          dialog.querySelector('[data-shipping-pages-help]').hidden=localBrowser;
+          dialog.querySelector('[data-browser-print-help]').hidden=!localBrowser;
+          if(localBrowser){status.textContent='Print from this phone or computer.';send.disabled=false;send.textContent='Open print dialog';}
+        }
       };
       select.onchange=()=>update(true);rollSelect.onchange=()=>update();
       if(pdf){for(const input of dialog.querySelectorAll('[data-pages],[data-copies]'))input.oninput=()=>{dialog.querySelector('[data-message]').textContent='';update();};}
       send.onclick=()=>{
+        if(browserPrint&&select.value==='browser'){
+          localStorage.setItem(preference,'browser');finish({local:true,browserPrint:true,name:'This device'});return;
+        }
         const amount=Number(dialog.querySelector('[data-copies]').value);
         if(!Number.isInteger(amount)||amount<1||amount>100){dialog.querySelector('[data-message]').textContent='Choose 1–100 copies per label.';return;}
         const station=stations.find(row=>row.id===select.value);if((!station&&select.value!=='local')||(isTwin(station)&&(!['Left','Right'].includes(rollSelect.value)||!station.roll_selection_ready)))return;
@@ -59,10 +80,11 @@
       };
       rpc('list_print_stations').then(rows=>{
         if(finished)return;stations=(rows||[]).filter(row=>row.paired&&(pdf?/\b5XL\b/i.test(`${row.printer_name||''} ${row.printer_model||''}`):!/\b5XL\b/i.test(`${row.printer_name||''} ${row.printer_model||''}`)));
-        select.innerHTML='<option value="">Select a computer…</option>'+stations.map(station=>`<option value="${escape(station.id)}">${escape(station.name)} — ${escape(stationStatus(station))}</option>`).join('')+(pdf?'':'<option value="local">Download on this device (local helper)</option>');
-        const preferred=localStorage.getItem(preference);if((preferred==='local'&&!pdf)||stations.some(row=>row.id===preferred))select.value=preferred;
+        const current=select.value;
+        select.innerHTML='<option value="">Choose a printer…</option>'+stations.map(station=>`<option value="${escape(station.id)}">${escape(station.name)} — ${escape(stationStatus(station))}</option>`).join('')+(browserPrint?'<option value="browser">This device — browser print dialog</option>':pdf?'':'<option value="local">Download on this device (local helper)</option>');
+        const preferred=current||localStorage.getItem(preference);if((preferred==='local'&&!pdf)||(preferred==='browser'&&browserPrint)||stations.some(row=>row.id===preferred))select.value=preferred;
         select.disabled=false;dialog.querySelector('[data-message]').textContent=stations.length?'Each job goes only to the computer you select.':(pdf?'No paired 5XL shipping printer yet. Add it in Print stations using Add-Printer.cmd on the computer.':'No paired computers yet. Open “Set up a computer” below on your phone, and download the helper on the printing computer.');update(true);
-      }).catch(error=>{if(finished)return;dialog.querySelector('[data-message]').textContent=error.message || 'Could not load print stations.';select.innerHTML='<option value="">Choose an option…</option><option value="local">Download on this device (local helper)</option>';if(pdf)select.innerHTML='<option value="">Could not load shipping printers</option>';select.disabled=false;update();});
+      }).catch(error=>{if(finished)return;dialog.querySelector('[data-message]').textContent=error.message || 'Could not load print stations.';const current=select.value;select.innerHTML='<option value="">Choose an option…</option><option value="local">Download on this device (local helper)</option>';if(pdf)select.innerHTML='<option value="">Could not load shipping printers</option>'+(browserPrint?'<option value="browser">This device — browser print dialog</option>':'');if(browserPrint&&current==='browser')select.value=current;select.disabled=false;update();});
     });
   }
   async function enqueueLabel(labelXml, options={}) {

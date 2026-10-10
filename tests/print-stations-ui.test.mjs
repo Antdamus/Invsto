@@ -187,7 +187,8 @@ async function beginShipping(page){
 }
 test('mobile shipping PDF picker isolates 5XL, requires pages and preserves page/copy selection',async t=>{
  const page=await openPage(t);await setupShipping(page);await beginShipping(page);
- const options=await page.locator('[data-destination] option').allTextContents();assert.equal(options.length,3);assert.equal(options.some(text=>text.includes('Florida')||text.includes('local helper')),false);
+ await page.locator('[data-destination] option[value=pdf]').waitFor({state:'attached'});
+ const options=await page.locator('[data-destination] option').allTextContents();assert.equal(options.length,4);assert.ok(options.some(text=>text.includes('browser print dialog')));assert.equal(options.some(text=>text.includes('Florida')||text.includes('local helper')),false);
  await page.locator('[data-destination]').selectOption('old-pdf');assert.equal(await page.locator('[data-send]').isDisabled(),true);assert.match(await page.locator('[data-destination-status]').innerText(),/Update/);
  await page.locator('[data-destination]').selectOption('pdf');await page.locator('[data-send]').click();assert.match(await page.locator('[data-message]').innerText(),/Choose.*page/);
  await page.locator('[data-pages]').fill('2');await page.locator('[data-copies]').fill('2');

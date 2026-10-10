@@ -25,7 +25,11 @@
       const bytes=new Uint8Array(await response.arrayBuffer());
       await assertComplete(bytes);
       let info;try{info=await window.shippingPdf.inspect(bytes);}catch{throw new Error('This saved PDF cannot be read. Open Label to check it, then replace it with a fresh, unencrypted eBay shipping PDF. No print request was sent.');}
-      const destination=await window.printStations.chooseDestination({documentType:'pdf',pageCount:info.count});
+      const destination=await window.printStations.chooseDestination({documentType:'pdf',pageCount:info.count,allowBrowserPrint:true,documentTitle:title});
+      if(destination.browserPrint){
+        await printLocal({bucket,path,title},bytes);
+        return {mode:'browser'};
+      }
       const prepared=await window.shippingPdf.prepare(bytes,destination.pages.join(','));
       let binary='';for(let offset=0;offset<prepared.bytes.length;offset+=32768)binary+=String.fromCharCode(...prepared.bytes.subarray(offset,offset+32768));
       const pdfBase64=btoa(binary), hash=hex(await crypto.subtle.digest('SHA-256',prepared.bytes));
@@ -43,7 +47,7 @@
   async function run(button,options){
     if(button?.disabled)return;
     const original=button?.textContent;if(button){button.disabled=true;button.textContent='Preparing PDF…';}
-    try {const result=await printSaved(options);window.alert(result.message);}
+    try {const result=await printSaved(options);if(result.message)window.alert(result.message);}
     catch(error){if(!error.cancelled)window.alert(error.message||'Could not send the shipping label.');}
     finally {if(button){button.disabled=false;button.textContent=original;}}
   }
@@ -75,7 +79,7 @@
     return bytes;
   }
 
-  async function printLocal({bucket='ebay-labels',path,title='Shipping label'}){
+  async function printLocal({bucket='ebay-labels',path,title='Shipping label'},savedBytes){
     if(localBusy)throw new Error('A shipping label is already being prepared for printing.');
     localBusy=true;
     // Keep the last frame alive until the dialog closes (or the next print starts).
@@ -84,7 +88,7 @@
     const urls=[];
     const cleanup=()=>{frame?.remove();urls.forEach(url=>URL.revokeObjectURL(url));if(releaseLocalPrint===cleanup)releaseLocalPrint=null;};
     try{
-      const [bytes,renderer]=await Promise.all([downloadForLocalPrint(bucket,path),loadRenderer()]);
+      const [bytes,renderer]=await Promise.all([savedBytes||downloadForLocalPrint(bucket,path),loadRenderer()]);
       renderer.GlobalWorkerOptions.workerSrc=new URL('pdf.worker.min.js',base).href;
       task=renderer.getDocument({data:bytes,isEvalSupported:false});
       let passwordRejected;

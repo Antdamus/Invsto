@@ -110,3 +110,48 @@ test('incomplete PDFs and failed downloads do not open print, and retry works wi
   await page.locator('#print').click();await page.waitForFunction(()=>printed.length===1);
   assert.equal(await page.evaluate(()=>alerts.length),2);assert.equal(await page.evaluate(()=>stationCalls),0);
 });
+
+async function unifiedPicker(page,{unavailable=false}={}){
+  await page.addScriptTag({url:origin+'/shipping-pdf.js'});
+  await page.addScriptTag({url:origin+'/print-stations.js'});
+  await page.evaluate(unavailable=>{
+    window.stationWrites=[];
+    window.supabase.auth={getSession:async()=>({data:{session:{user:{id:'test'}}}})};
+    window.supabase.rpc=async(name,args)=>{
+      if(name==='list_print_stations')return unavailable?{error:{message:'Printer service unavailable'}}:{data:[
+        {id:'5xl',name:'Shipping 5XL',paired:true,online:true,printer_connected:true,printer_name:'DYMO LabelWriter 5XL',pdf_print_ready:true},
+        {id:'jewelry',name:'Jewelry printer',paired:true,online:true,printer_connected:true,printer_name:'DYMO LabelWriter 450 Twin Turbo'},
+      ]};
+      stationWrites.push({name,args});return {data:{id:'test-job'}};
+    };
+    document.getElementById('print').onclick=event=>shippingLabelPrint.run(event.currentTarget,{path:'saved/first.pdf',title:'Shipping label'});
+  },unavailable);
+}
+
+test('the shared picker sends only to the chosen 5XL and restores that destination on the next print',async t=>{
+  const page=await open(t,await fixture());await unifiedPicker(page);
+  await page.locator('#print').click();await page.locator('[data-destination] option[value="5xl"]').waitFor({state:'attached'});
+  assert.equal(await page.locator('[data-destination] option[value="jewelry"]').count(),0);
+  assert.equal(await page.locator('[data-destination] option[value="browser"]').count(),1);
+  await page.locator('[data-destination]').selectOption('5xl');await page.locator('[data-copies]').fill('2');await page.locator('[data-send]').click();
+  await expect(page.locator('#print')).toBeEnabled();
+  const result=await page.evaluate(()=>({writes:stationWrites,printed,alerts}));
+  assert.equal(result.writes.length,1);assert.equal(result.writes[0].args._station_id,'5xl');assert.equal(result.writes[0].args._copies,2);
+  assert.deepEqual(result.writes[0].args._source_pages,[1]);assert.equal(result.printed.length,0);
+  await page.locator('#print').click();await expect(page.locator('[data-destination]')).toHaveValue('5xl');
+  await page.getByRole('button',{name:'Cancel',exact:true}).click();
+  assert.equal(await page.evaluate(()=>stationWrites.length),1);
+});
+
+test('current-device printing survives unavailable stations, preserves Letter dimensions, and does not enqueue',async t=>{
+  const page=await open(t,await fixture([[612,792]]));await unifiedPicker(page,{unavailable:true});
+  await page.locator('#print').click();await expect(page.locator('[data-message]')).toContainText('Printer service unavailable');
+  await page.locator('[data-destination]').selectOption('browser');
+  await expect(page.locator('[data-pages]')).toBeHidden();await expect(page.locator('[data-copies]')).toBeHidden();
+  await page.getByRole('button',{name:'Open print dialog',exact:true}).click();
+  await expect(page.locator('#print')).toBeEnabled();
+  const result=await page.evaluate(()=>({writes:stationWrites,printed,alerts,signed}));
+  assert.deepEqual(result.writes,[]);assert.deepEqual(result.alerts,[]);assert.equal(result.signed.length,1);
+  assert.equal(result.printed.length,1);assert.equal(result.printed[0].pages[0].sheetWidth,'612pt');
+  assert.equal(result.printed[0].pages[0].sheetHeight,'792pt');
+});

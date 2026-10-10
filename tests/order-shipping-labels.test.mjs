@@ -500,7 +500,7 @@ test('extension imports append multiple PDFs in checkout, preserve old labels, a
     loadPendingLabelBuyerBatch=async matching=>matching;
     openPendingNoInventorySessionForLabel=async()=>true;
     await openWorkerNoInventoryModal({lineIds:['line-a']});
-    window.prints=[];shippingLabelPrint.runLocal=(button,options)=>prints.push(options);
+    window.prints=[];shippingLabelPrint.run=(button,options)=>prints.push(options);
   });
   const saved=page.locator('#no-inventory-shipping-labels .order-saved-label');
   await expect(saved).toHaveCount(2);
@@ -522,7 +522,7 @@ test('extension imports append multiple PDFs in checkout, preserve old labels, a
   assert.equal(await page.evaluate(()=>lines[0].order.label_file_path),'old/current.pdf');
   for (const tracking of ['000000000000','111111111111','222222222222','333333333333']) await expect(page.locator('#no-inventory-shipping-labels')).toContainText(tracking);
   assert.deepEqual(await page.locator('#no-inventory-shipping-labels button').allTextContents(),
-    Array.from({length:4},()=>['Open PDF','Print']).flat());
+    Array.from({length:4},()=>['Open PDF','Print shipping label']).flat());
   for (const button of await saved.locator('[data-print-saved-label]').all()) await button.click();
   assert.equal(new Set(await page.evaluate(()=>prints.map(item=>item.path))).size,4);
   await mkdir(new URL('../test-results',import.meta.url),{recursive:true});

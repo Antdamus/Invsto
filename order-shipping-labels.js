@@ -63,7 +63,7 @@
           <small>Order ${esc(label.orderNumbers.join(", "))}${label.author ? ` · ${esc(label.author)}` : ""}</small></div>
           <div class="completion-photo-actions">
             <button type="button" class="secondary-btn" data-open-saved-label="${index}">Open PDF</button>
-            <button type="button" class="secondary-btn" data-print-saved-label="${index}">Print</button>
+            <button type="button" class="secondary-btn" data-print-saved-label="${index}">Print shipping label</button>
           </div>
         </article>`).join("") : '<p class="completion-photo-help">No shipping labels saved for these orders yet.</p>';
       container.querySelectorAll("[data-open-saved-label]").forEach(button => button.addEventListener("click", async () => {
@@ -79,7 +79,7 @@
       }));
       container.querySelectorAll("[data-print-saved-label]").forEach(button => button.addEventListener("click", () => {
         const label = labels[Number(button.dataset.printSavedLabel)];
-        window.shippingLabelPrint.runLocal(button, {bucket: label.bucket, path: label.path,
+        window.shippingLabelPrint.run(button, {bucket: label.bucket, path: label.path,
           title: label.metadata.fileName || "Shipping label"});
       }));
     }
