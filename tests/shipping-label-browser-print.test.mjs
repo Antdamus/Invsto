@@ -155,3 +155,15 @@ test('current-device printing survives unavailable stations, preserves Letter di
   assert.equal(result.printed.length,1);assert.equal(result.printed[0].pages[0].sheetWidth,'612pt');
   assert.equal(result.printed[0].pages[0].sheetHeight,'792pt');
 });
+
+test('cancelling after a phone-to-desktop resize releases the originating print button',async t=>{
+  const page=await open(t,await fixture());await unifiedPicker(page);
+  await page.locator('#print').click();await page.locator('[data-destination] option[value="5xl"]').waitFor({state:'attached'});
+  await page.locator('[data-destination]').selectOption('5xl');
+  await page.setViewportSize({width:320,height:640});await page.setViewportSize({width:1440,height:900});
+  await page.getByRole('button',{name:'Cancel',exact:true}).click();
+  await expect(page.locator('#print')).toHaveText('Print');await expect(page.locator('#print')).toBeEnabled();
+  assert.deepEqual(await page.evaluate(()=>({writes:stationWrites,printed,alerts})),{writes:[],printed:[],alerts:[]});
+  await page.locator('#print').click();await expect(page.locator('dialog')).toBeVisible();
+  await page.getByRole('button',{name:'Cancel',exact:true}).click();await expect(page.locator('#print')).toBeEnabled();
+});

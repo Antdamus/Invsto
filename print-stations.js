@@ -39,7 +39,13 @@
     const previousFocus=document.activeElement;document.body.append(dialog);dialog.showModal();
     return new Promise((resolve,reject)=>{
       let finished=false, stations=[];
-      const finish=(value,error)=>{if(finished)return;finished=true;choosing=false;dialog.close();dialog.remove();previousFocus?.focus?.();error?reject(error):resolve(value);};
+      const finish=(value,error)=>{
+        if(finished)return;finished=true;choosing=false;
+        // Release the caller before restoring focus across a responsive layout change.
+        error?reject(error):resolve(value);
+        dialog.close();dialog.remove();
+        if(previousFocus?.isConnected&&!previousFocus.disabled)previousFocus.focus({preventScroll:true});
+      };
       dialog.addEventListener('cancel',event=>{event.preventDefault();finish(null,cancelled());});
       dialog.addEventListener('close',()=>finish(null,cancelled()));
       dialog.querySelector('[data-cancel]').onclick=()=>finish(null,cancelled());
