@@ -29,7 +29,7 @@
    const f=r.files[index],panel=target.querySelector(`[data-dispute-preview="${index}"]`);if(!panel||panel.dataset.busy==='true')return;panel.dataset.busy='true';panel.innerHTML='<span role="status">Loading document…</span>';
    try{
     const result=await db.functions.invoke('ebay-return-sync',{body:{action:'dispute_evidence',caseId:c.id,evidenceId:f.evidenceId,fileId:f.fileId}});
-    if(result.error||result.data?.error)throw Error(result.data?.error||'Document could not load. Retry or open this case on eBay.');
+    if(result.error||result.data?.error){let message=result.data?.error;try{message||=(await result.error?.context?.clone().json())?.error;}catch{}throw Error(message||'Document could not load. Retry or open this case on eBay.');}
     const {url,mime_type}=result.data||{};if(!url||new URL(url,location.href).protocol!=='https:')throw Error('Document link is unavailable. Please retry.');
     if(!target.isConnected)return;
     panel.innerHTML=`<a href="${esc(url)}" target="_blank" rel="noopener" aria-label="Open ${esc(f.name||'supporting document')}">${/^image\/(jpeg|png|gif|webp)$/.test(mime_type)?`<img src="${esc(url)}" alt="${esc(f.name||'Submitted supporting document')}" loading="lazy" />`:'<span class="issue-response-pdf">PDF document</span>'}<span>Open full document ↗</span></a>`;
