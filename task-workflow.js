@@ -4,6 +4,10 @@
   const finished = new Set(['resolved', 'cancelled', 'approved_by_admin', 'approved_for_shipping', 'shipped_completed', 'closed']);
   const review = new Set(['completed_by_employee', 'pending_admin_review', 'ready_for_admin_approval', 'waiting_on_admin']);
   const owner = task => task.assigned_to_user_id || null;
+  const automaticCaseSources = new Set(['ebay_return_api', 'ebay_post_order_api', 'ebay_return_extension', 'customer_issue_action']);
+  // Keep in sync with customer_issue_is_employee_task. Importing a case while
+  // signed in does not turn its generated reminder into a staff-created task.
+  const isEmployeeTask = task => !automaticCaseSources.has(String(task.metadata?.source || '').trim().toLowerCase()) || Boolean(task.assigned_by);
   const person = (id, people) => people.find(p => p.user_id === id && p.active !== false);
   const requestKind = task => ['work', 'decision'].includes(task.metadata?.request_kind) ? task.metadata.request_kind
     : review.has(task.status) ? 'decision' : 'work';
@@ -33,6 +37,7 @@
       || following.some(f => f.source === task.source && f.task_id === task.id)));
   }
   function bucket(task, userId, people = [], following = []) {
+    if (!isEmployeeTask(task)) return null;
     const action = next(task, people);
     if (action.kind === 'history') return related(task, userId, following) ? 'history' : null;
     // Unassigned drafts/audit records have not been delegated to another person.
@@ -51,5 +56,5 @@
       || (action.kind === 'work' ? task.assigned_to_email : '') || (action.kind === 'approval' ? 'Reviewer needed' : 'Unassigned');
     return `${action.kind === 'approval' ? (task.status === 'completed_by_employee' ? 'Review' : 'Decision') : 'Next'}: ${name}`;
   }
-  root.OGTaskWorkflow = Object.freeze({finished, review, requestKind, reviewer, next, related, bucket, label});
+  root.OGTaskWorkflow = Object.freeze({finished, review, isEmployeeTask, requestKind, reviewer, next, related, bucket, label});
 })(globalThis);

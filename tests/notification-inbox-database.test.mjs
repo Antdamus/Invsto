@@ -4,18 +4,20 @@ import {before,after,beforeEach,test} from 'node:test';
 import {PGlite} from '@electric-sql/pglite';
 let db; const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 before(async()=>{
- db=new PGlite(); await db.exec(`create role authenticated; create role anon; create schema auth;
+ db=new PGlite(); await db.exec(`create role authenticated; create role anon; create role service_role; create schema auth;
  create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('test.user',true),'')::uuid$$;
  create table task_notifications(id uuid primary key,recipient_user_id uuid,source text,task_id uuid,notification_type text,title text,body text,actor_email text,priority text,read_at timestamptz,created_at timestamptz,metadata jsonb);
- create table ebay_return_tasks(id uuid primary key,return_case_id uuid);
+ create table ebay_return_tasks(id uuid primary key,return_case_id uuid,metadata jsonb default '{}',assigned_by uuid);
  create table ebay_return_cases(id uuid primary key,issue_kind text,source_lane text);
  alter table task_notifications enable row level security;
  insert into ebay_return_cases values('${id(101)}','return','return'),('${id(102)}','request','inquiry'),('${id(103)}','dispute','payment_dispute');
- insert into ebay_return_tasks values('${id(201)}','${id(101)}');`);
- await db.exec(await readFile(new URL('../supabase/migrations/20261009063000_notification_inbox_filters.sql',import.meta.url),'utf8'));
+ insert into ebay_return_tasks(id,return_case_id) values('${id(201)}','${id(101)}');`);
+ const cleanup=await readFile(new URL('../supabase/migrations/20261010110000_customer_issue_employee_tasks.sql',import.meta.url),'utf8');
+ await db.exec(cleanup.slice(cleanup.indexOf('create or replace function public.customer_issue_is_employee_task'),cleanup.indexOf('-- Filter before paging')));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261010112000_customer_issue_notification_cleanup.sql',import.meta.url),'utf8'));
 });
 after(()=>db?.close());
-beforeEach(async()=>{await db.exec(`reset role; truncate task_notifications; select set_config('test.user','${id(1)}',false);`);});
+beforeEach(async()=>{await db.exec(`reset role; truncate task_notifications; update ebay_return_tasks set metadata='{}',assigned_by=null; select set_config('test.user','${id(1)}',false);`);});
 const add=async(n,type='task_assigned',metadata={},options={})=>db.query(`insert into task_notifications values($1,$2,$3,$4,$5,$6,'Instructions','staff@example.test','high',$7,$8,$9)`,[
  id(n),id(options.user||1),options.source||'return',id(options.task||201),type,options.title||`Update ${n}`,options.read?'2026-10-09T16:00:00Z':null,options.created||`2026-10-09T15:00:00Z`,JSON.stringify(metadata)]);
 const inbox=async(category='all',view='unread',limit=30)=>(await db.query('select notification_inbox($1,$2,$3) data',[category,view,limit])).rows[0].data;
@@ -31,6 +33,16 @@ test('automatic case alerts separate from explicit work, including return-task r
  assert.deepEqual((await inbox('returns')).entries.map(n=>n.id),[id(12)]);
  assert.deepEqual((await inbox('buyers')).entries.map(n=>n.id),[id(14),id(13)]);
  assert.deepEqual((await inbox('system')).entries.map(n=>n.id),[id(15)]);
+});
+test('old generic task notices stay stored but stop crowding the inbox; case alerts remain',async()=>{
+ await db.exec(`update ebay_return_tasks set metadata='{"source":"ebay_return_extension"}'`);
+ await add(10,'return_task_assigned');await add(11,'task_overdue_assignee');await add(12,'customer_issue_action',{case_id:id(101)});
+ await add(13,'customer_issue_deadline',{case_id:id(101)});await add(14,'task_assigned',{}, {source:'team',task:999});
+ let result=await inbox();assert.deepEqual(result.counts,{all:3,tasks:1,returns:2,buyers:0,system:0});
+ assert.equal((await inbox('tasks')).entries[0].id,id(14));assert.equal((await inbox('all','recent')).total,3);
+ assert.equal((await db.query('select count(*)::int n from task_notifications')).rows[0].n,5);
+ await db.exec(`update ebay_return_tasks set assigned_by='${id(1)}'`);
+ result=await inbox();assert.equal(result.counts.tasks,3,'explicit staff assignments retain their notifications');
 });
 test('filters find older matches beyond the newest global page and paginate both views',async()=>{
  for(let i=10;i<55;i++)await add(i,'customer_issue_action',{case_id:id(101)});

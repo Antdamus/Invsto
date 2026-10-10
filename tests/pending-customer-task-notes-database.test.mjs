@@ -6,7 +6,7 @@ let db;
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 before(async () => {
  db = new PGlite();
- await db.exec(`create role anon; create role authenticated; create schema auth;
+ await db.exec(`create role anon; create role authenticated; create role service_role; create schema auth;
  create function auth.uid() returns uuid language sql as $$select nullif(current_setting('test.actor',true),'')::uuid$$;
  create function public.can_manage_inventory() returns boolean language sql as $$select coalesce(current_setting('test.staff',true),'')='yes'$$;
  create table employees(id uuid,user_id uuid,email text,display_name text);
@@ -25,7 +25,10 @@ before(async () => {
   await db.exec(`create table ${table}(task_id uuid,photo_attachments jsonb);`);
  }
  await db.exec(`grant usage on schema public,auth to authenticated;grant select on all tables in schema public to authenticated;`);
- await db.exec(await readFile(new URL('../supabase/migrations/20261009010000_pending_customer_task_notes.sql',import.meta.url),'utf8'));
+ const cleanup=await readFile(new URL('../supabase/migrations/20261010110000_customer_issue_employee_tasks.sql',import.meta.url),'utf8');
+ await db.exec(cleanup.slice(cleanup.indexOf('create or replace function public.customer_issue_is_employee_task'),cleanup.indexOf('-- Filter before paging')));
+ await db.exec(`create view employee_return_tasks with(security_invoker=true) as select t.* from ebay_return_tasks t where customer_issue_is_employee_task(to_jsonb(t));grant select on employee_return_tasks to authenticated;`);
+ await db.exec(await readFile(new URL('../supabase/migrations/20261010113000_pending_employee_case_tasks.sql',import.meta.url),'utf8'));
  await db.exec(`set test.actor='${id(1)}';set test.staff='yes';
  insert into employees values('${id(1)}','${id(1)}','sam@example.test','Sam');
  insert into ebay_orders values('${id(100)}','Buyer.ONE'),('${id(101)}','buyer.two');
@@ -57,6 +60,8 @@ before(async () => {
   ['team_tasks',18,'assigned',{conversation_id:id(302)},null,null],
   ['team_tasks',19,'assigned',{conversation_id:id(303)},null,null],
   ['team_tasks',20,'assigned',{conversation_id:'malformed'},null,null],
+  ['ebay_return_tasks',21,'open',{source:'ebay_return_api'},null,200],
+  ['ebay_return_tasks',22,'open',{source:'customer_issue_action'},null,200],
  ];
  for (const [table,n,status,metadata,order,ret] of fixtures) await db.query(`insert into ${table}
   (id,title,description,question,status,metadata,order_id,return_case_id,assigned_to_user_id) values($1,$2,'Customer message','Check this item',$3,$4,$5,$6,$7)`,

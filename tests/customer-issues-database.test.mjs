@@ -74,6 +74,9 @@ before(async()=>{
  await db.exec(await sqlFile('20261010080000_customer_issue_refund_badges.sql'));
  await db.exec(await sqlFile('20261010090000_customer_issue_refund_dates.sql'));
  await db.exec(await sqlFile('20261010100000_customer_issue_staff_task_notes.sql'));
+ await db.exec(await sqlFile('20261010110000_customer_issue_employee_tasks.sql'));
+ await db.exec(await sqlFile('20261010111000_customer_issue_employee_task_reads.sql'));
+
 
 });
 after(async()=>db?.close());
@@ -176,6 +179,7 @@ test('task notes preserve task/event RLS and require authenticated customer-issu
   set role authenticated;`);
  try{
   const rows=await scalar('select customer_issue_task_notes($1) v',[[id(100)]]);assert.equal(rows[0].task_count,1);assert.equal(rows[0].tasks[0].attachment_count,0);
+  assert.equal(await scalar('select count(*)::int v from employee_return_tasks'),1,'filtered view preserves task RLS');
   await db.exec("select set_config('test.access','no',false)");assert.deepEqual(await scalar('select customer_issue_task_notes($1) v',[[id(100)]]),[]);
   await db.exec("select set_config('test.access','yes',false);select set_config('test.actor','',false)");assert.deepEqual(await scalar('select customer_issue_task_notes($1) v',[[id(100)]]),[]);
  }finally{await db.exec('reset role;drop policy test_task_notes_restricted on ebay_return_tasks;drop policy test_task_notes_evidence_restricted on ebay_return_task_events');}
@@ -183,7 +187,7 @@ test('task notes preserve task/event RLS and require authenticated customer-issu
 
 test('case task notes exclude generic imports before counts and pagination while keeping staff work and all workflow records',async()=>{
  const sources=['ebay_return_api','ebay_post_order_api','ebay_return_extension','customer_issue_action'];
- for(const [i,source] of sources.entries())await db.query(`insert into ebay_return_tasks(id,return_case_id,title,question,created_by,assigned_by,assigned_to_user_id,metadata,created_at) values($1,$2,'Automatic reminder','eBay requests a response',$3,$3,$3,$4,'2026-10-10')`,[id(210+i),id(100),i%2?id(1):null,JSON.stringify({source})]);
+ for(const [i,source] of sources.entries())await db.query(`insert into ebay_return_tasks(id,return_case_id,title,question,created_by,assigned_by,assigned_to_user_id,metadata,created_at) values($1,$2,'Automatic reminder','eBay requests a response',$3,null,$3,$4,'2026-10-10')`,[id(210+i),id(100),i%2?id(1):null,JSON.stringify({source})]);
  await db.exec(`insert into ebay_return_tasks(id,return_case_id,title,question,created_by,created_by_email,metadata,created_at,status) values
   ('${id(220)}','${id(100)}','User task','Find the IFS return label','${id(1)}',null,'{"source":"return_receiving"}','2026-10-09','assigned'),
   ('${id(221)}','${id(100)}','User question','Check the watch serial','${id(2)}',null,'{"source":"og_return_queue"}','2026-10-08','resolved'),
@@ -200,6 +204,34 @@ test('case task notes exclude generic imports before counts and pagination while
  await db.exec(`delete from ebay_return_tasks where id in ('${id(220)}','${id(221)}','${id(222)}')`);
  const empty=(await scalar('select customer_issue_task_notes($1) v',[[id(100)]]))[0];assert.equal(empty.task_count,0);assert.deepEqual(empty.tasks,[]);
  assert.equal(await scalar('select count(*)::int v from ebay_return_events'),0);assert.equal(await stock(),0);
+});
+
+test('automatic case trackers do not inflate employee workload; explicit assignment preserves real work',async()=>{
+ await db.exec(`insert into ebay_return_tasks(id,return_case_id,title,question,assigned_to_user_id,metadata) values
+ ('${id(310)}','${id(100)}','Automatic review','Review this case','${id(2)}','{"source":"customer_issue_action","request_kind":"decision"}');`);
+ let row=(await scalar("select list_customer_issues('return','all') v")).rows[0];
+ assert.equal(row.open_tasks,0);assert.equal(row.mine,false);assert.equal(row.unassigned,false);
+ assert.equal(await scalar('select count(*)::int v from employee_return_tasks'),0);
+ const stockBefore=await stock();
+ await scalar('select assign_customer_issue($1,$2,$3,$4,$5) v',[id(100),id(310),id(1),'work','Check the serial number against the original receipt']);
+ row=(await scalar("select list_customer_issues('return','all') v")).rows[0];assert.equal(row.open_tasks,1);assert.equal(row.mine,true);
+ assert.equal(await scalar('select count(*)::int v from employee_return_tasks'),1);
+ const notes=(await scalar('select customer_issue_task_notes($1) v',[[id(100)]]))[0];assert.equal(notes.task_count,1);assert.match(notes.tasks[0].question,/serial number/);
+ assert.equal(await scalar('select status v from ebay_return_cases'),'open');assert.equal(await stock(),stockBefore);
+ await db.exec('set role authenticated');assert.equal(await scalar('select count(*)::int v from employee_return_tasks'),1);
+ await db.exec('reset role');
+});
+
+test('case alerts survive cleanup while generic assignment and overdue notices cannot be sent',async()=>{
+ await db.exec(`insert into ebay_return_tasks(id,return_case_id,title,metadata) values('${id(310)}','${id(100)}','Automatic review','{"source":"ebay_return_api"}');`);
+ for(const type of ['return_task_assigned','task_overdue_assignee','task_ready_for_review','customer_issue_action','customer_issue_deadline']) {
+  await db.query('insert into task_notifications(recipient_user_id,source,task_id,notification_type) values($1,\'return\',$2,$3)',[id(2),id(310),type]);
+ }
+ assert.deepEqual((await db.query('select notification_type from task_notifications order by notification_type')).rows.map(n=>n.notification_type),['customer_issue_action','customer_issue_deadline']);
+ await db.exec(`update ebay_return_tasks set assigned_by='${id(1)}' where id='${id(310)}'`);
+ await db.query('insert into task_notifications(recipient_user_id,source,task_id,notification_type) values($1,\'return\',$2,\'return_task_assigned\')',[id(2),id(310)]);
+ assert.equal(await scalar('select count(*)::int v from task_notifications'),3);
+ assert.equal(await scalar('select count(*)::int v from ebay_return_tasks'),1);
 });
 
 test('case notes preserve status, ownership, stock and provider data and retry only once',async()=>{

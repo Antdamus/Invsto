@@ -1479,6 +1479,19 @@ async function performTaskLoad() {
     }
   }
 
+  if (requested && !state.tasks.some((task) => task.id === requested)) {
+    const {data: requestedReturnTask, error} = await supabase.from("ebay_return_tasks")
+      .select("*, ebay_return_cases(id, order_number, buyer_username, return_reason, status)")
+      .eq("id", requested).maybeSingle();
+    if (!error && requestedReturnTask) {
+      if (!OGTaskWorkflow.isEmployeeTask(requestedReturnTask)) {
+        window.location.replace(`ebay-returns.html?caseId=${encodeURIComponent(requestedReturnTask.return_case_id)}`);
+        return;
+      }
+      const normalized = normalizeReturnTask(requestedReturnTask);
+      if (!isTaskHiddenFromTaskPage(normalized)) state.tasks.unshift(normalized);
+    }
+  }
   state.tasks = sortTasksForCurrentView(state.tasks);
   if (requested) {
     const requestedVisibleTask = state.tasks.find((task) => task.id === requested);
@@ -1699,7 +1712,7 @@ async function loadOrderTaskRecords() {
 async function loadReturnTaskRecords() {
   const statuses = isHistoricalTaskView() ? HISTORY_RETURN_TASK_STATUSES : ACTIVE_RETURN_TASK_STATUSES;
   const makeQuery = () => supabase
-    .from("ebay_return_tasks")
+    .from("employee_return_tasks")
     .select("id, return_case_id, order_id, order_line_ids, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, resolved_at, resolved_by, resolved_by_email, created_at, updated_at, created_by, created_by_email, latest_note, metadata, ebay_return_cases(id, order_id, order_number, ebay_return_id, buyer_username, return_reason, status, opened_at, notes, raw_payload)")
     .in("status", statuses)
     .order("created_at", { ascending: !isHistoricalTaskView() })
@@ -1750,7 +1763,7 @@ function isTaskHiddenFromTaskPage(task = {}) {
   const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata : {};
   const receiptRecord = task.source === "order" && !task.assigned_to_user_id && !task.assigned_to_email
     && /^Video receipt screenshot (?:captured(?: manually)?|uploaded) for eBay item\b/i.test(String(task.question || "").trim());
-  return receiptRecord || isTruthyMetadataFlag(metadata.hidden_from_task_board) || isAdminCancelledAssignmentTask(task);
+  return !OGTaskWorkflow.isEmployeeTask(task) || receiptRecord || isTruthyMetadataFlag(metadata.hidden_from_task_board) || isAdminCancelledAssignmentTask(task);
 }
 
 function isTaskRemovedFromActiveView(task = {}) {

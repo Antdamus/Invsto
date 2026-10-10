@@ -393,7 +393,7 @@ function getWorkerReturnActionText(task = {}) {
 
 async function fetchWorkerReturnTasks(userId) {
   const { data, error } = await window.supabase
-    .from("ebay_return_tasks")
+    .from("employee_return_tasks")
     .select("id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, metadata, ebay_return_cases(id, order_number, ebay_return_id, buyer_username, return_reason, return_tracking_number, status, opened_at, notes, raw_payload, case_type)")
     .eq("assigned_to_user_id", userId)
     .in("status", ["open", "assigned", "in_progress", "blocked", "deferred", "sent_back_for_rework"])

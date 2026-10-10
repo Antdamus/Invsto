@@ -132,6 +132,7 @@ function renderDashboardOrders() {
 }
 
 function visibleDashboardTask(task) {
+  if (!OGTaskWorkflow.isEmployeeTask(task)) return false;
   const metadata = task.metadata || {};
   if (["true", "1", "yes"].includes(String(metadata.hidden_from_task_board || "").toLowerCase().trim())) return false;
   if (metadata.history_removed_at || metadata.assignment_cancelled_at || metadata.assignment_canceled_at) return false;
@@ -157,7 +158,7 @@ async function loadDashboardTasks() {
   const results = await Promise.allSettled([
     dashboardPages(() => supabase.from("team_tasks").select(`${common},description,latest_note`).in("status", DASH_ACTIVE_TASK_STATUSES).or(personal)),
     dashboardPages(() => supabase.from("ebay_order_tasks").select(`${common},question,latest_note,ebay_orders(order_number,buyer_username,ship_by_date)`).in("status", DASH_ACTIVE_TASK_STATUSES).or(orderScope)),
-    dashboardPages(() => supabase.from("ebay_return_tasks").select(`${common},question,latest_note,ebay_return_cases(order_number,buyer_username,return_reason)`).in("status", DASH_RETURN_TASK_STATUSES).or(personal)),
+    dashboardPages(() => supabase.from("employee_return_tasks").select(`${common},question,latest_note,ebay_return_cases(order_number,buyer_username,return_reason)`).in("status", DASH_RETURN_TASK_STATUSES).or(personal)),
     dashboardQuery(supabase.rpc("list_team_task_assignees")),
   ]);
   // Never present a partial sum as the user's complete workload.

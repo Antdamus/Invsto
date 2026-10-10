@@ -111,6 +111,9 @@
  const checked=r=>{if(r.error)throw r.error;return r.data;};
  const person=id=>id===ctx?.user?.id?'You':people.find(p=>p.user_id===id)?.display_name||people.find(p=>p.user_id===id)?.email||'Needs an owner';
  const taskLink=t=>`team-tasks.html?taskId=${encodeURIComponent(t.id)}`;
+ // Closeout still checks every active record, including hidden case trackers.
+ // Only the human work is displayed in the confirmation's follow-up list.
+ const closeTaskSnapshot=tasks=>tasks.filter(t=>!finish.has(t.status)).map(t=>({id:t.id,updated_at:t.updated_at}));
  function feedback(message,error=false){$('issues-feedback').textContent=message;$('issues-feedback').classList.toggle('is-error',error);}
  const returnStages={
   requested:{label:'Return requested',tone:'action'},
@@ -155,7 +158,7 @@
   if(kind(c)==='return'&&/^(ITEM_SHIPPED|RETURN_SHIPPED)$/.test(c.ebay_status||''))return 'Watch for the returned package';
   if(/WAITING.*BUYER|BUYER_RESPONSE/i.test(c.ebay_status||''))return 'Waiting on the buyer';
   if(c.ebay_action&&!/^\d{4}-\d{2}-\d{2}T/i.test(c.ebay_action))return nice(c.ebay_action);
-  return c.next_user?'Continue assigned work':'Choose the next person';
+  return c.next_user?'Continue assigned work':'Review the current case status';
  }
  function providerBadge(c){return root.OGDisputeResponse?.badge(c)||escalatedBadge(c)||(closed(c)?{kind:'closed',label:'Closed on eBay'}:null);}
  function providerBadgeHtml(c){
@@ -176,7 +179,7 @@
    <h2>${escape(c.buyer_username||'Buyer not identified')}</h2>${customerContact(c)}<p>${escape(c.item_title||c.return_reason||'Open this case to review the order and next step.')}</p>
    ${cardFacts(c)}
    <div class="issue-card-footer">${cardStatus(c)}</div>
-   <div class="issue-card-top" style="margin:11px 0 0"><small>${['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
+   <div class="issue-card-top" style="margin:11px 0 0"><small>${['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':!c.open_tasks?'No employee task':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the customer name, buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
   $('issues-count').textContent=`${total} ${view==='history'?'finished':'active'} case${total===1?'':'s'}`;
   $('issues-return-filter').hidden=view!=='return';
@@ -209,11 +212,11 @@
     try{
      const [c,tasks,items]=await Promise.all([
       db.from('ebay_return_cases').select('id,order_number,buyer_username,item_title,ebay_return_id,ebay_status,status,updated_at').eq('id',summary.id).single(),
-      db.from('ebay_return_tasks').select('id,title,status,assigned_to_user_id,updated_at').eq('return_case_id',summary.id),
+      db.from('ebay_return_tasks').select('id,title,status,assigned_to_user_id,assigned_by,metadata,updated_at').eq('return_case_id',summary.id),
       db.from('ebay_return_items').select('received_quantity,restocked_quantity,disposition').eq('return_case_id',summary.id)
      ]).then(rs=>rs.map(checked));
-     const active=tasks.filter(t=>!finish.has(t.status));
-     return {c:{...c,open_tasks:active.length},tasks:active,blocked:closeBlock({...c,open_tasks:active.length},items)};
+     const active=tasks.filter(t=>root.OGTaskWorkflow.isEmployeeTask(t)&&!finish.has(t.status));
+     return {c:{...c,open_tasks:active.length},tasks:active,snapshot:closeTaskSnapshot(tasks),blocked:closeBlock({...c,open_tasks:active.length},items)};
     }catch(error){return {c:summary,tasks:[],blocked:error.message||'Could not check this case. Refresh and retry.'};}
    }));
    if(token!==bulkReviewVersion)return;bulkReview.push(...group);
@@ -228,7 +231,7 @@
    const completedIds=[];
    try{
     const results=await runCloseBatch(eligible,entry=>db.rpc('close_resolved_customer_issue',{
-     _case_id:entry.c.id,_expected_updated_at:entry.c.updated_at,_expected_tasks:entry.tasks.map(t=>({id:t.id,updated_at:t.updated_at})),_confirmed:true,_note:values.get('note')||null
+     _case_id:entry.c.id,_expected_updated_at:entry.c.updated_at,_expected_tasks:entry.snapshot,_confirmed:true,_note:values.get('note')||null
     }).then(checked),(result,count)=>{
      const index=bulkReview.findIndex(e=>e.c.id===result.id),target=$('bulk-case-result-'+index);
      target.textContent=result.ok?'Closed · saved in History':'Not confirmed: '+result.error;
@@ -307,11 +310,11 @@
   return buttons;
  }
  function renderTasks(){
-  const tasks=detail.tasks.filter(t=>!finish.has(t.status));
+  const tasks=detail.tasks.filter(t=>root.OGTaskWorkflow.isEmployeeTask(t)&&!finish.has(t.status));
   if(!tasks.length&&['closed','cancelled'].includes(detail.c.status))return '<section class="issue-detail-section"><h3>Case closed</h3><p class="issue-subtitle">No further work is assigned. Photos, messages and the closing record remain available below.</p><div id="issue-form-slot"></div></section>';
   return `<section class="issue-detail-section"><h3>Who acts next</h3>${tasks.length?tasks.map(t=>`<div class="issue-task"><strong>${escape(root.OGTaskWorkflow.label(t,people,ctx.user.id))}</strong><p>${escape(t.question||t.title||'Review this case')}</p>
    <span class="issue-tag">${escape(nice(t.status))}</span>${t.due_at?` <span class="issue-tag">Internal follow-up: ${escape(date(t.due_at))}</span>`:''}
-   <div class="issue-actions">${actions(t)}<a class="secondary-btn" href="${taskLink(t)}">Full task</a>${ctx.employee.role==='admin'?`<button class="secondary-btn" data-assign="${t.id}">Assign next step</button>`:''}</div></div>`).join(''):'<p class="issue-subtitle">No open internal task. Assign work or a decision if someone needs to act.</p>'}
+   <div class="issue-actions">${actions(t)}<a class="secondary-btn" href="${taskLink(t)}">Full task</a>${ctx.employee.role==='admin'?`<button class="secondary-btn" data-assign="${t.id}">Assign next step</button>`:''}</div></div>`).join(''):'<p class="issue-subtitle">No employee task. Case updates and eBay deadlines are tracked automatically. Create a task only when someone has specific work to do.</p>'}
    ${ctx.employee.role==='admin'||(kind(detail.c)==='return'&&!['closed','cancelled'].includes(detail.c.status))?'<button class="secondary-btn" data-assign="">Create a task</button>':''}<div id="issue-form-slot"></div></section>`;
  }
  function caseHref(c){
@@ -331,7 +334,7 @@
  }
  function renderDetail(){
   if(!detail||detail.c.id!==selected)return;
-  const {c,tasks,items,lines,events}=detail,summary=rows.find(r=>r.id===c.id)||{...c,...lineFacts(lines),open_tasks:tasks.filter(t=>!finish.has(t.status)).length};
+  const {c,tasks,items,lines,events}=detail,summary=rows.find(r=>r.id===c.id)||{...c,...lineFacts(lines),open_tasks:tasks.filter(t=>root.OGTaskWorkflow.isEmployeeTask(t)&&!finish.has(t.status)).length};
   const primary={...(tasks.find(t=>!finish.has(t.status))||{id:'',metadata:c.raw_payload}),order_line_ids:lines.map(l=>l.id),ebay_return_cases:c};
   const provider=root.OGIssueEvidence.providerContext(c),overrides={};
   if(provider.buyerComment)overrides.buyerComment=provider.buyerComment;
@@ -474,8 +477,8 @@
   finally{saving=false;el.querySelectorAll('button').forEach(b=>b.disabled=false);}
  }
  function closeResolvedForm(){
-  const c=detail.c,tasks=detail.tasks.filter(t=>!finish.has(t.status));
-  const snapshot=tasks.map(t=>({id:t.id,updated_at:t.updated_at}));
+  const c=detail.c,tasks=detail.tasks.filter(t=>root.OGTaskWorkflow.isEmployeeTask(t)&&!finish.has(t.status));
+  const snapshot=closeTaskSnapshot(detail.tasks);
   form('Move to History',`<p class="issue-subtitle"><strong>${escape(c.buyer_username||c.order_number||'This case')}</strong> · ${escape(c.ebay_return_id?'Case '+c.ebay_return_id:'Internal return')}</p><p>Keep all photos, messages and activity in the saved record.</p>${tasks.length?`<p>${tasks.length} remaining follow-up${tasks.length===1?'':'s'} will also be closed. Nobody will receive a new assignment.</p><details class="issue-close-followups"><summary>Review follow-ups (${tasks.length})</summary>${tasks.map(t=>`<p><strong>${escape(t.title||'Follow-up')}</strong><br>${escape(person(t.assigned_to_user_id))} · ${escape(nice(t.status))}</p>`).join('')}</details>`:'<p>No task needs to be created or assigned.</p>'}<label class="issue-close-confirm"><input name="confirmed" type="checkbox" required /><span>Everything is resolved; no further follow-up is needed.</span></label><label>Closing note (optional)<textarea name="note" maxlength="10000" placeholder="Anything useful for the record"></textarea></label><p class="issue-subtitle">This saves the internal closing record. It does not issue a refund or change inventory.</p>`,'Mark closed & move to History','issue-close-form-slot');
   $('issue-action-form').onsubmit=e=>submitForm(e,async f=>checked(await db.rpc('close_resolved_customer_issue',{
    _case_id:c.id,_expected_updated_at:c.updated_at,_expected_tasks:snapshot,_confirmed:f.get('confirmed')==='on',_note:f.get('note')||null
