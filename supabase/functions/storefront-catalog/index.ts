@@ -1,5 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "supabase";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,6 +27,46 @@ function normalizeKey(k: string) {
   return String(k || "").trim().replace(/^\/+/, "");
 }
 
+// Curated catalogues use a separate, service-only RPC. Never spread inventory
+// records into the public response or accept photo keys supplied in a request.
+async function sharedCatalogue(client: any, token: string, projectUrl: string) {
+  if (!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(token)) return json(404, { error: "catalogue_unavailable" });
+  const { data, error } = await client.rpc("shared_inventory_catalogue", { _token: token });
+  if (error) return json(503, { error: "catalogue_temporarily_unavailable" });
+  if (!data) return json(404, { error: "catalogue_unavailable" });
+  const keys = new Map<string, string>();
+  const external = new Map<string, string>();
+  for (const item of data.items || []) for (const photo of item.photos || []) {
+    if (typeof photo !== "string" || photo.length > 2000) continue;
+    if (/^https:\/\//i.test(photo)) {
+      try {
+        const u = new URL(photo);
+        const prefix = "/storage/v1/object/";
+        if (u.origin === new URL(projectUrl).origin && u.pathname.startsWith(prefix)) {
+          const path = u.pathname.slice(prefix.length).replace(/^(?:sign|public|authenticated)\/photos\//, "");
+          if (path !== u.pathname.slice(prefix.length)) keys.set(photo, decodeURIComponent(path));
+        } else if (!u.username && !u.password) external.set(photo, u.href);
+      } catch { /* Invalid photo is omitted, not reflected to the client. */ }
+    } else if (!photo.includes(":") && !photo.split("/").includes("..")) keys.set(photo, normalizeKey(photo));
+  }
+  const signed = new Map<string, string>();
+  const paths = uniq([...keys.values()]);
+  if (paths.length) {
+    const { data: urls, error: signingError } = await client.storage.from("photos").createSignedUrls(paths, 300);
+    if (signingError) return json(503, { error: "photos_temporarily_unavailable" });
+    for (const row of urls || []) if (row.path && row.signedUrl) signed.set(row.path, row.signedUrl);
+  }
+  return json(200, {
+    title: data.title, introduction: data.introduction, credit: data.credit, currency: "USD",
+    items: (data.items || []).map((item: any) => ({
+      id: item.id, name: item.name, description: item.description,
+      retail_price: item.retail_price, category: item.category,
+      images: (item.photos || []).map((p: string) => signed.get(keys.get(p) || "") || external.get(p)).filter(Boolean),
+    })),
+    expires_in: 300,
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "GET") return json(405, { error: "method_not_allowed" });
@@ -39,6 +79,10 @@ Deno.serve(async (req) => {
   const channel = (url.searchParams.get("channel") || "og_main").trim();
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
+
+  if (url.searchParams.has("catalogue")) {
+    return sharedCatalogue(supabase, url.searchParams.get("catalogue") || "", SUPABASE_URL);
+  }
 
   // Settings (bucket + ttl)
   const { data: settings, error: settingsErr } = await supabase

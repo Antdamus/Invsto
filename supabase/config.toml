@@ -396,7 +396,9 @@ entrypoint = "./functions/storefront-sign-photos/index.ts"
 
 [functions.storefront-catalog]
 enabled = true
-verify_jwt = true
+# Public storefront / unguessable curated links. Matches deployed configuration.
+# Catalogue data is restricted to selected retail fields by a service-only RPC.
+verify_jwt = false
 import_map = "./functions/storefront-catalog/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
