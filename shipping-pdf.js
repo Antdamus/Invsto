@@ -34,12 +34,18 @@
     }
     return [...pages].sort((a,b)=>a-b);
   }
-  async function inspect(bytes){
+  async function inspect(bytes,{geometryOnly=false}={}){
     if(!bytes?.byteLength||bytes.byteLength>MAX_BYTES)throw new Error('Shipping PDFs must be smaller than 10 MB.');
     if(!PDFLib)PDFLib=await loadPDFLib();
     let doc;
-    try {doc=await PDFLib.PDFDocument.load(bytes,{updateMetadata:false});}
-    catch {throw new Error('This PDF cannot be read. Use an unencrypted eBay shipping-label PDF.');}
+    // Geometry-only access never copies encrypted content into a print job.
+    try {doc=await PDFLib.PDFDocument.load(bytes,{updateMetadata:false,ignoreEncryption:geometryOnly});}
+    catch(cause) {
+      const error=new Error('This PDF cannot be read. Open Label to inspect it or attach a fresh eBay shipping PDF.');
+      // The bundled ES5 build returns Error instances rather than its subclass.
+      if(cause instanceof PDFLib.EncryptedPDFError||cause?.message===new PDFLib.EncryptedPDFError().message)error.code='PDF_ENCRYPTED';
+      throw error;
+    }
     const count=doc.getPageCount();
     if(count<1||count>MAX_PAGES)throw new Error('Choose a PDF with 1–100 pages.');
     return {doc,count};
@@ -64,11 +70,31 @@
     if(result.byteLength>MAX_BYTES)throw new Error('Selected pages exceed the 10 MB print limit.');
     return {bytes:result,pages,pageCount:pages.length,totalPages:count};
   }
+  async function prepareRendered(bytes,selection,renderPage){
+    const {doc,count}=await inspect(bytes,{geometryOnly:true}),pages=parsePages(selection,count);
+    // Check the original sheet, including its MediaBox, before rasterizing anything.
+    for(const number of pages)validatePage(doc.getPage(number-1),number);
+    const output=await PDFLib.PDFDocument.create();
+    output.setCreationDate(new Date('2026-01-01T00:00:00Z'));output.setModificationDate(new Date('2026-01-01T00:00:00Z'));
+    let imageBytes=0;
+    for(const number of pages){
+      const rendered=await renderPage(number,count);
+      const sizes=[rendered.width,rendered.height].sort((a,b)=>a-b);
+      if(!sizes.every(Number.isFinite)||Math.abs(sizes[0]-288)>8||Math.abs(sizes[1]-432)>8)throw new Error('The rendered label dimensions do not match a 4 × 6 shipping label.');
+      imageBytes+=rendered.png.byteLength;
+      if(imageBytes>MAX_BYTES)throw new Error('Selected pages exceed the 10 MB print limit. Print fewer pages at a time.');
+      const image=await output.embedPng(rendered.png),page=output.addPage([rendered.width,rendered.height]);
+      page.drawImage(image,{x:0,y:0,width:rendered.width,height:rendered.height});
+    }
+    const result=await output.save({useObjectStreams:false});
+    if(result.byteLength>MAX_BYTES)throw new Error('Selected pages exceed the 10 MB print limit.');
+    return {bytes:result,pages,pageCount:pages.length,totalPages:count};
+  }
   async function validate(bytes,expectedPages){
     const {doc,count}=await inspect(bytes);
     if(count!==expectedPages)throw new Error('The shipping PDF page count does not match the print request.');
     doc.getPages().forEach((page,i)=>validatePage(page,i+1));
     return count;
   }
-  return {MAX_BYTES,MAX_PAGES,parsePages,inspect,prepare,validate};
+  return {MAX_BYTES,MAX_PAGES,parsePages,inspect,prepare,prepareRendered,validate};
 });

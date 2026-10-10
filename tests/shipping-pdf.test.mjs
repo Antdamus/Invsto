@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createRequire} from 'node:module';
-import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -27,6 +27,18 @@ test('letter-sized sheets cannot sneak through a 4x6 crop',async()=>{
  await assert.rejects(pdf.prepare(await doc.save(),'1'),/4 × 6/);
  await assert.rejects(pdf.inspect(new TextEncoder().encode('not a PDF')),/cannot be read/);
  await assert.rejects(pdf.inspect(new Uint8Array(pdf.MAX_BYTES+1)),/10 MB/);
+});
+
+test('restricted PDFs stay rejected for direct submission; geometry inspection never decrypts/copies their content',async()=>{
+ const source=readFileSync(new URL('./fixtures/shipping-pdf/printable-restricted.pdf',import.meta.url));
+ await assert.rejects(pdf.inspect(source),error=>error.code==='PDF_ENCRYPTED');
+ await assert.rejects(pdf.validate(source,2),error=>error.code==='PDF_ENCRYPTED');
+ const info=await pdf.inspect(source,{geometryOnly:true});assert.equal(info.count,2);assert.equal(info.doc.isEncrypted,true);
+});
+
+test('protected-letter crop still fails before any page is rendered',async()=>{
+ const source=readFileSync(new URL('./fixtures/shipping-pdf/letter-cropped.pdf',import.meta.url));let rendered=0;
+ await assert.rejects(pdf.prepareRendered(source,'1',()=>{rendered++;}),/4 × 6/);assert.equal(rendered,0);
 });
 test('Windows PDF readiness uses exact queue without selecting a duplicate or default',async()=>{
  const run=async()=>({stdout:JSON.stringify([{Name:'5XL (Copy 1)',WorkOffline:true,PrinterStatus:7},{Name:'5XL',WorkOffline:false,PrinterStatus:3}])});

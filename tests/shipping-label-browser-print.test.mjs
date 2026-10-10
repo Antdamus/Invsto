@@ -167,3 +167,48 @@ test('cancelling after a phone-to-desktop resize releases the originating print 
   await page.locator('#print').click();await expect(page.locator('dialog')).toBeVisible();
   await page.getByRole('button',{name:'Cancel',exact:true}).click();await expect(page.locator('#print')).toBeEnabled();
 });
+
+async function protectedFixture(name){return [...await readFile(new URL('./fixtures/shipping-pdf/'+name,import.meta.url))];}
+
+test('printable restricted labels reach the picker and selected pages become exact-size printable PDFs',async t=>{
+  const bytes=await protectedFixture('printable-restricted.pdf'),page=await open(t,bytes);await unifiedPicker(page);
+  await page.locator('#print').click();await page.locator('[data-destination]').selectOption('5xl');
+  await page.locator('[data-pages]').fill('2');await page.locator('[data-send]').click();
+  await expect(page.locator('#print')).toBeEnabled();
+  const result=await page.evaluate(()=>({writes:stationWrites,alerts,original:[...window.bytes]}));
+  assert.equal(result.writes.length,1);assert.deepEqual(result.original,bytes);
+  const output=await PDFDocument.load(Buffer.from(result.writes[0].args._pdf_base64,'base64'));
+  assert.equal(output.isEncrypted,false);assert.equal(output.getPageCount(),1);
+  assert.deepEqual(output.getPage(0).getSize(),{width:432,height:288});
+  assert.deepEqual(result.writes[0].args._source_pages,[2]);
+  assert.match(result.alerts[0],/Queued 1 shipping label/);
+});
+
+test('restricted labels also support this-device printing without queueing or detaching the source',async t=>{
+  const bytes=await protectedFixture('printable-restricted.pdf'),page=await open(t,bytes);await unifiedPicker(page);
+  await page.locator('#print').click();await page.locator('[data-destination]').selectOption('browser');await page.locator('[data-send]').click();
+  await expect(page.locator('#print')).toBeEnabled();
+  const result=await page.evaluate(()=>({writes:stationWrites,printed,alerts,original:[...window.bytes]}));
+  assert.deepEqual(result.writes,[]);assert.deepEqual(result.alerts,[]);assert.deepEqual(result.original,bytes);
+  assert.equal(result.printed.length,1);assert.equal(result.printed[0].pages.length,2);
+});
+
+test('real passwords and disabled printing stop before choosing a station, and release retry',async t=>{
+  for(const [file,message] of [['password-required.pdf',/requires a password/],['printing-disabled.pdf',/does not permit printing/]]){
+    const page=await open(t,await protectedFixture(file));await unifiedPicker(page);
+    await page.locator('#print').click();await expect(page.locator('#print')).toBeEnabled();
+    const result=await page.evaluate(()=>({writes:stationWrites,printed,alerts}));
+    assert.deepEqual(result.writes,[]);assert.deepEqual(result.printed,[]);assert.match(result.alerts[0],message);
+    assert.equal(await page.locator('dialog').count(),0);
+  }
+});
+
+test('restricted letter crops and low-quality-only files never enter the 5XL queue',async t=>{
+  for(const [file,message] of [['letter-cropped.pdf',/4 × 6/],['low-resolution-only.pdf',/low-resolution/]]){
+    const page=await open(t,await protectedFixture(file));await unifiedPicker(page);
+    await page.locator('#print').click();await page.locator('[data-destination]').selectOption('5xl');await page.locator('[data-pages]').fill('1');await page.locator('[data-send]').click();
+    await expect(page.locator('#print')).toBeEnabled();
+    const result=await page.evaluate(()=>({writes:stationWrites,printed,alerts}));
+    assert.deepEqual(result.writes,[]);assert.deepEqual(result.printed,[]);assert.match(result.alerts[0],message);
+  }
+});

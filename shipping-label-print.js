@@ -24,13 +24,22 @@
       if(Number(response.headers.get('content-length'))>window.shippingPdf.MAX_BYTES)throw new Error('Shipping PDFs must be smaller than 10 MB.');
       const bytes=new Uint8Array(await response.arrayBuffer());
       await assertComplete(bytes);
-      let info;try{info=await window.shippingPdf.inspect(bytes);}catch{throw new Error('This saved PDF cannot be read. Open Label to check it, then replace it with a fresh, unencrypted eBay shipping PDF. No print request was sent.');}
+      let info,renderRequired=false;
+      try{info=await window.shippingPdf.inspect(bytes);}
+      catch(error){
+        if(error.code!=='PDF_ENCRYPTED')throw error;
+        const opened=await openPrintablePdf(bytes);
+        try{info={count:opened.pdf.numPages};renderRequired=true;}
+        finally{await opened.task.destroy();}
+      }
       const destination=await window.printStations.chooseDestination({documentType:'pdf',pageCount:info.count,allowBrowserPrint:true,documentTitle:title});
       if(destination.browserPrint){
         await printLocal({bucket,path,title},bytes);
         return {mode:'browser'};
       }
-      const prepared=await window.shippingPdf.prepare(bytes,destination.pages.join(','));
+      const prepared=renderRequired
+        ? await prepareProtectedLabel(bytes,destination.pages.join(','))
+        : await window.shippingPdf.prepare(bytes,destination.pages.join(','));
       let binary='';for(let offset=0;offset<prepared.bytes.length;offset+=32768)binary+=String.fromCharCode(...prepared.bytes.subarray(offset,offset+32768));
       const pdfBase64=btoa(binary), hash=hex(await crypto.subtle.digest('SHA-256',prepared.bytes));
       const key='invsto.print.shipping.pending.'+hex(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(`${path}\n${hash}\n${destination.pages.join(',')}\n${destination.copies}`)));
@@ -66,6 +75,43 @@
     return rendererPromise;
   }
 
+  async function openPrintablePdf(bytes){
+    const renderer=await loadRenderer();
+    renderer.GlobalWorkerOptions.workerSrc=new URL('pdf.worker.min.js',base).href;
+    // The worker may transfer the input buffer. Keep the saved original intact for retries.
+    const task=renderer.getDocument({data:bytes.slice(),isEvalSupported:false});
+    let rejectPassword;
+    const passwordFailure=new Promise((_,reject)=>{rejectPassword=reject;});
+    task.onPassword=()=>rejectPassword(new Error('This label requires a password to open. Use Open Label or attach a label that opens without a password. No print request was sent.'));
+    try{
+      const pdf=await Promise.race([task.promise,passwordFailure]);
+      if(!pdf.numPages||pdf.numPages>100)throw new Error('Choose a PDF with 1–100 pages.');
+      const permissions=await pdf.getPermissions(),flags=renderer.PermissionFlag;
+      const allowed=flag=>permissions===null||Array.from(permissions).includes(flag);
+      if(!allowed(flags.PRINT)&&!allowed(flags.PRINT_HIGH_QUALITY))throw new Error('This PDF does not permit printing. Open Label to check its permissions or attach a printable label. No print request was sent.');
+      return {task,pdf,dpi:allowed(flags.PRINT_HIGH_QUALITY)?300:150};
+    }catch(error){await task.destroy().catch(()=>{});throw error;}
+  }
+
+  async function prepareProtectedLabel(bytes,selection){
+    const opened=await openPrintablePdf(bytes);
+    try{
+      if(opened.dpi<300)throw new Error('This PDF only permits low-resolution printing. Use This device to open the print dialog, or attach a label that permits high-quality printing. No print request was sent.');
+      return await window.shippingPdf.prepareRendered(bytes,selection,async(number,count)=>{
+        if(count!==opened.pdf.numPages)throw new Error('The PDF page count could not be verified. Open Label to inspect it.');
+        const page=await opened.pdf.getPage(number),size=page.getViewport({scale:1});
+        const viewport=page.getViewport({scale:300/72}),canvas=document.createElement('canvas');
+        canvas.width=Math.round(viewport.width);canvas.height=Math.round(viewport.height);
+        try{
+          await page.render({canvasContext:canvas.getContext('2d'),viewport,intent:'print',background:'rgb(255,255,255)'}).promise;
+          const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+          if(!blob)throw new Error('Could not prepare this shipping label. Try Print again.');
+          return {png:new Uint8Array(await blob.arrayBuffer()),width:size.width,height:size.height};
+        }finally{canvas.width=canvas.height=0;page.cleanup();}
+      });
+    }finally{await opened.task.destroy();}
+  }
+
   async function downloadForLocalPrint(bucket,path){
     if(bucket!=='ebay-labels'||!path)throw new Error('Attach a shipping PDF before printing.');
     const {data,error}=await window.supabase.storage.from(bucket).createSignedUrl(path,120);
@@ -88,14 +134,8 @@
     const urls=[];
     const cleanup=()=>{frame?.remove();urls.forEach(url=>URL.revokeObjectURL(url));if(releaseLocalPrint===cleanup)releaseLocalPrint=null;};
     try{
-      const [bytes,renderer]=await Promise.all([savedBytes||downloadForLocalPrint(bucket,path),loadRenderer()]);
-      renderer.GlobalWorkerOptions.workerSrc=new URL('pdf.worker.min.js',base).href;
-      task=renderer.getDocument({data:bytes,isEvalSupported:false});
-      let passwordRejected;
-      const passwordFailure=new Promise((_,reject)=>{passwordRejected=reject;});
-      task.onPassword=()=>passwordRejected(new Error('This PDF is password protected. Attach an unencrypted label before printing.'));
-      const pdf=await Promise.race([task.promise,passwordFailure]);
-      if(!pdf.numPages||pdf.numPages>100)throw new Error('Choose a PDF with 1–100 pages.');
+      const bytes=savedBytes||await downloadForLocalPrint(bucket,path);
+      const opened=await openPrintablePdf(bytes),pdf=opened.pdf;task=opened.task;
       frame=document.createElement('iframe');
       frame.title='Shipping label print document';frame.setAttribute('aria-hidden','true');frame.tabIndex=-1;
       frame.style.cssText='position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none';
@@ -109,7 +149,7 @@
         const page=await pdf.getPage(number),size=page.getViewport({scale:1});
         if(!Number.isFinite(size.width)||!Number.isFinite(size.height)||size.width<=0||size.height<=0)throw new Error('This PDF has an invalid page size. Open PDF to inspect it.');
         // Render at 300 DPI for barcode detail, with bounded memory for oversized sheets.
-        const scale=Math.min(300/72,Math.sqrt(20000000/(size.width*size.height)));
+        const scale=Math.min(opened.dpi/72,Math.sqrt(20000000/(size.width*size.height)));
         const viewport=page.getViewport({scale}),canvas=document.createElement('canvas');
         canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
         try{
