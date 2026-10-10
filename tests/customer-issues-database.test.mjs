@@ -73,6 +73,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261010070000_customer_issue_task_notes.sql'));
  await db.exec(await sqlFile('20261010080000_customer_issue_refund_badges.sql'));
  await db.exec(await sqlFile('20261010090000_customer_issue_refund_dates.sql'));
+ await db.exec(await sqlFile('20261010100000_customer_issue_staff_task_notes.sql'));
 
 });
 after(async()=>db?.close());
@@ -168,7 +169,7 @@ test('task notes use exact case links, paginate and retain current status and un
 });
 
 test('task notes preserve task/event RLS and require authenticated customer-issue access',async()=>{
- await db.exec(`insert into ebay_return_tasks(id,return_case_id,title) values('${id(201)}','${id(100)}','Visible'),('${id(202)}','${id(100)}','Restricted');
+ await db.exec(`insert into ebay_return_tasks(id,return_case_id,title,created_by) values('${id(201)}','${id(100)}','Visible','${id(1)}'),('${id(202)}','${id(100)}','Restricted','${id(1)}');
   insert into ebay_return_task_events(task_id,return_case_id,action,photo_attachments) values('${id(201)}','${id(100)}','created','[{"path":"private.jpg"}]');
   create policy test_task_notes_restricted on ebay_return_tasks as restrictive for select to authenticated using(id<>'${id(202)}');
   create policy test_task_notes_evidence_restricted on ebay_return_task_events as restrictive for select to authenticated using(false);
@@ -178,6 +179,27 @@ test('task notes preserve task/event RLS and require authenticated customer-issu
   await db.exec("select set_config('test.access','no',false)");assert.deepEqual(await scalar('select customer_issue_task_notes($1) v',[[id(100)]]),[]);
   await db.exec("select set_config('test.access','yes',false);select set_config('test.actor','',false)");assert.deepEqual(await scalar('select customer_issue_task_notes($1) v',[[id(100)]]),[]);
  }finally{await db.exec('reset role;drop policy test_task_notes_restricted on ebay_return_tasks;drop policy test_task_notes_evidence_restricted on ebay_return_task_events');}
+});
+
+test('case task notes exclude generic imports before counts and pagination while keeping staff work and all workflow records',async()=>{
+ const sources=['ebay_return_api','ebay_post_order_api','ebay_return_extension','customer_issue_action'];
+ for(const [i,source] of sources.entries())await db.query(`insert into ebay_return_tasks(id,return_case_id,title,question,created_by,assigned_by,assigned_to_user_id,metadata,created_at) values($1,$2,'Automatic reminder','eBay requests a response',$3,$3,$3,$4,'2026-10-10')`,[id(210+i),id(100),i%2?id(1):null,JSON.stringify({source})]);
+ await db.exec(`insert into ebay_return_tasks(id,return_case_id,title,question,created_by,created_by_email,metadata,created_at,status) values
+  ('${id(220)}','${id(100)}','User task','Find the IFS return label','${id(1)}',null,'{"source":"return_receiving"}','2026-10-09','assigned'),
+  ('${id(221)}','${id(100)}','User question','Check the watch serial','${id(2)}',null,'{"source":"og_return_queue"}','2026-10-08','resolved'),
+  ('${id(222)}','${id(100)}','Older staff task','Keep these instructions',null,'former@example.test','{}','2026-10-07','open'),
+  ('${id(223)}','${id(100)}','Unknown creator','No staff author',null,null,'{}','2026-10-06','open');`);
+ const tasksBefore=await scalar('select jsonb_agg(to_jsonb(t) order by id) v from ebay_return_tasks t');
+ const listBefore=await scalar("select list_customer_issues('return','all','',0,30,'newest','all') v");
+ const first=(await scalar('select customer_issue_task_notes($1,$2,$3) v',[[id(100)],2,0]))[0];
+ assert.equal(first.task_count,3);assert.deepEqual(first.tasks.map(t=>t.id),[id(220),id(221)]);
+ const second=(await scalar('select customer_issue_task_notes($1,$2,$3) v',[[id(100)],2,2]))[0];
+ assert.equal(second.task_count,3);assert.deepEqual(second.tasks.map(t=>t.id),[id(222)]);
+ assert.deepEqual(await scalar('select jsonb_agg(to_jsonb(t) order by id) v from ebay_return_tasks t'),tasksBefore);
+ assert.deepEqual(await scalar("select list_customer_issues('return','all','',0,30,'newest','all') v"),listBefore,'responsibility and workflow counts stay intact');
+ await db.exec(`delete from ebay_return_tasks where id in ('${id(220)}','${id(221)}','${id(222)}')`);
+ const empty=(await scalar('select customer_issue_task_notes($1) v',[[id(100)]]))[0];assert.equal(empty.task_count,0);assert.deepEqual(empty.tasks,[]);
+ assert.equal(await scalar('select count(*)::int v from ebay_return_events'),0);assert.equal(await stock(),0);
 });
 
 test('case notes preserve status, ownership, stock and provider data and retry only once',async()=>{
