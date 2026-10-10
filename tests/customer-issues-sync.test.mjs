@@ -61,6 +61,19 @@ test('full provider details control current status and seller deadline, not the 
  {inquiryId:'r1',status:'CLOSED',sellerResponseDue:{respondByDate:'2026-10-10T12:00:00Z'},buyerResponseDue:{respondByDate:'2026-10-20T12:00:00Z'},item:{itemId:'123'}},{},'inquiry');
  assert.equal(p.status,'CLOSED');assert.equal(p.dueAt,'2026-10-10T12:00:00.000Z');
 });
+
+test('case discovery deadlines never become seller deadlines or alternate on routine refresh',()=>{
+ const detail={caseId:'c1',status:'OPEN',nextSteps:[],sellerResponseDue:{},itemId:'123'};
+ const summary={caseId:'c1',respondByDate:{value:'2026-11-10T07:00:00Z'}};
+ for(const discovery of [summary,{},summary]){
+  const normalized=sandbox.providerDetail('case',discovery,detail);
+  const p=sandbox.preparePostOrderIssue({...discovery,__ogIssueLane:'case'},normalized,{},'case');
+  assert.equal(p.dueAt,null);assert.equal(p.sellerActionDue,'');
+ }
+ const actionable={...detail,sellerResponseDue:{activityDue:'SELLER_PROVIDE_INFO',respondByDate:{value:'2026-10-12T18:00:00Z'}}};
+ const p=sandbox.preparePostOrderIssue(summary,sandbox.providerDetail('case',summary,actionable),{},'case');
+ assert.equal(p.dueAt,'2026-10-12T18:00:00.000Z');assert.equal(p.sellerActionDue,'SELLER_PROVIDE_INFO');
+});
 test('terminal lifecycle wins over refund and escalation action status',()=>{
  assert.equal(sandbox.providerIssueClosed({status:'ESCALATED',state:'CLOSED'}),true);
  assert.equal(sandbox.providerIssueClosed({status:'REFUND_SENT',state:'CLOSED'}),true);

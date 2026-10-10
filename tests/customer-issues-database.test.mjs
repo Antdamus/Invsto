@@ -38,8 +38,8 @@ before(async()=>{
  await db.exec(`create table task_followers(source text,task_id uuid,user_id uuid,primary key(source,task_id,user_id));grant select on task_followers to authenticated;
  create function notify_ebay_return_task_assignment() returns trigger language plpgsql as $$begin return new;end $$;
  create trigger trg_notify_ebay_return_task_assignment after insert or update on ebay_return_tasks for each row execute function notify_ebay_return_task_assignment();
- create table task_notifications(id uuid default gen_random_uuid(),recipient_user_id uuid,source text,task_id uuid,notification_type text constraint task_notifications_notification_type_check check(notification_type<>'invalid'),title text,body text,metadata jsonb);
- create function create_task_notification(uuid,text,text,uuid,uuid,text,text,text,text,timestamptz,jsonb,uuid,uuid,text) returns uuid language plpgsql as $$declare n uuid:=gen_random_uuid();begin insert into public.task_notifications values(n,$1,$3,$4,$6,$7,$8,$11);return n;end $$;`);
+ create table task_notifications(id uuid default gen_random_uuid(),recipient_user_id uuid,source text,task_id uuid,notification_type text constraint task_notifications_notification_type_check check(notification_type<>'invalid'),title text,body text,metadata jsonb,read_at timestamptz,created_at timestamptz default now());
+ create function create_task_notification(uuid,text,text,uuid,uuid,text,text,text,text,timestamptz,jsonb,uuid,uuid,text) returns uuid language plpgsql as $$declare n uuid:=gen_random_uuid();begin insert into public.task_notifications(id,recipient_user_id,source,task_id,notification_type,title,body,metadata) values(n,$1,$3,$4,$6,$7,$8,$11);return n;end $$;`);
  await db.exec(await sqlFile('20261009050000_customer_issue_action_cycles.sql'));
  await db.exec(await sqlFile('20261009051000_customer_issue_health_queue.sql'));
  await db.exec(`alter table ebay_return_task_events add column photo_attachments jsonb default '[]';
@@ -76,6 +76,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261010100000_customer_issue_staff_task_notes.sql'));
  await db.exec(await sqlFile('20261010110000_customer_issue_employee_tasks.sql'));
  await db.exec(await sqlFile('20261010111000_customer_issue_employee_task_reads.sql'));
+ await db.exec(await sqlFile('20261010193000_customer_issue_review_navigation.sql'));
 
 
 });
@@ -96,6 +97,69 @@ const receive=(key=200,qty=1,disposition='restock',caseId=100)=>scalar('select r
  id(key),id(caseId),JSON.stringify([{order_line_id:id(11),received_quantity:qty,condition_received:'used_good',disposition,destination_location_id:disposition==='restock'?id(30):null,notes:'Inspected'}]),
  '[{"bucket":"ebay-return-evidence","path":"test/photo.jpg"}]','Received carefully','TRACK1']);
 const stock=()=>scalar('select coalesce(sum(quantity),0)::int v from item_stock_locations');
+
+test('notification links locate the correct sorted page without narrowing the queue',async()=>{
+ await db.exec(`insert into ebay_return_cases(id,order_number,ebay_return_id,status,source_lane,issue_kind,ebay_status,opened_at)
+ select ('00000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'02-12345-'||n,n::text,'open','case','dispute','OPEN','2026-10-10T12:00:00Z'::timestamptz-(n-1000)*interval '1 hour' from generate_series(1000,1064)n;`);
+ for(const [sort,target,page] of [['newest',1046,30],['oldest',1000,60]]){
+  const result=await scalar("select list_customer_issues('dispute','all','',0,30,$1,'all',$2) v",[sort,id(target)]);
+  assert.equal(result.focus_offset,page);assert.equal(result.total,65);assert.ok(result.rows.some(c=>c.id===id(target)));
+  assert.equal(result.rows.length,page===60?5:30);assert.equal(result.rows[0].focus_position,undefined);
+ }
+ const missing=await scalar("select list_customer_issues('return','all','',0,30,'newest','all',$1) v",[id(1046)]);
+ assert.equal(missing.focus_offset,0);assert.equal(missing.total,1,'a dispute cannot leak into Returns');
+ await db.exec(`update ebay_return_cases set status='closed' where id='${id(1046)}'`);
+ const history=await scalar("select list_customer_issues('history','all','',0,30,'newest','all',$1) v",[id(1046)]);
+ assert.equal(history.rows[0].id,id(1046));assert.equal(history.total,1);
+});
+
+test('case review snapshots only this user’s existing alerts and preserves later arrivals and task replies',async()=>{
+ await db.exec(`insert into task_notifications(id,recipient_user_id,source,notification_type,metadata) values
+ ('${id(800)}','${id(1)}','return','customer_issue_action','{"case_id":"${id(100)}"}'),
+ ('${id(801)}','${id(1)}','return','customer_issue_deadline','{"case_id":"${id(100)}"}'),
+ ('${id(802)}','${id(2)}','return','customer_issue_action','{"case_id":"${id(100)}"}'),
+ ('${id(803)}','${id(1)}','return','customer_issue_action','{"case_id":"${id(101)}"}'),
+ ('${id(804)}','${id(1)}','team','task_progress_update','{"case_id":"${id(100)}"}');`);
+ const snapshot=await scalar('select customer_issue_notification_ids($1) v',[id(100)]);
+ assert.deepEqual(snapshot.sort(),[id(800),id(801)]);
+ await db.exec(`insert into task_notifications(id,recipient_user_id,source,notification_type,metadata) values
+ ('${id(805)}','${id(1)}','return','customer_issue_action','{"case_id":"${id(100)}"}');`);
+ await db.query('update task_notifications set read_at=now() where id=any($1::uuid[])',[snapshot]);
+ assert.deepEqual(await scalar('select customer_issue_notification_ids($1) v',[id(100)]),[id(805)]);
+ assert.equal(await scalar('select count(*)::int v from task_notifications where read_at is null'),4);
+ await db.exec("select set_config('test.access','no',false)");assert.deepEqual(await scalar('select customer_issue_notification_ids($1) v',[id(100)]),[]);
+ await db.exec('set role anon');await assert.rejects(scalar('select customer_issue_notification_ids($1) v',[id(100)]),/permission denied/);
+});
+
+test('same deadline under different database time zones never creates a new response cycle',async()=>{
+ await db.exec(`set timezone='UTC';select reconcile_customer_issue_action('${id(100)}');`);
+ const version=await scalar(`select provider_action_version v from ebay_return_cases where id='${id(100)}'`);
+ await db.exec(`set timezone='America/New_York';select reconcile_customer_issue_action('${id(100)}');set timezone='UTC';`);
+ assert.equal(await scalar(`select provider_action_version v from ebay_return_cases where id='${id(100)}'`),version);
+ await db.exec(`update ebay_return_cases set ebay_due_at=ebay_due_at+interval '1 hour',synced_at=now() where id='${id(100)}'`);
+ assert.equal(await scalar(`select provider_action_version v from ebay_return_cases where id='${id(100)}'`),version+1,'genuine changed deadlines still alert');
+});
+
+test('repair retires misleading deadline alerts and older reviewed alerts, retaining newer unseen work and audit data',async()=>{
+ const payload={ebayDetail:{nextSteps:[],sellerResponseDue:{respondByDate:{value:'2026-11-10T07:00:00Z'}}},ebaySummary:{respondByDate:{value:'2026-11-10T07:00:00Z'}}};
+ await db.query(`update ebay_return_cases set source_lane='case',issue_kind='dispute',ebay_status='OPEN',ebay_action=null,ebay_due_at='2026-11-10T07:00:00Z',raw_payload=$1 where id=$2`,[JSON.stringify(payload),id(100)]);
+ await db.exec(`insert into task_notifications(id,recipient_user_id,source,notification_type,title,metadata,created_at,read_at) values
+ ('${id(810)}','${id(1)}','return','customer_issue_action','eBay response needed: Buyer','{"case_id":"${id(100)}"}','2026-10-10T10:00:00Z',null),
+ ('${id(811)}','${id(1)}','return','customer_issue_action','eBay outcome ready: Buyer','{"case_id":"${id(100)}"}','2026-10-10T11:00:00Z',null),
+ ('${id(812)}','${id(1)}','return','customer_issue_action','Old','{"case_id":"${id(101)}"}','2026-10-10T10:00:00Z',null),
+ ('${id(813)}','${id(1)}','return','customer_issue_action','Reviewed','{"case_id":"${id(101)}"}','2026-10-10T11:00:00Z',now()),
+ ('${id(814)}','${id(1)}','return','customer_issue_action','New','{"case_id":"${id(101)}"}','2026-10-10T12:00:00Z',null),
+ ('${id(815)}','${id(2)}','return','customer_issue_action','Other employee','{"case_id":"${id(101)}"}','2026-10-10T10:00:00Z',null);`);
+ const sql=await sqlFile('20261010193000_customer_issue_review_navigation.sql');
+ await db.exec(sql.slice(sql.indexOf('with repaired as ('),sql.indexOf("notify pgrst")));
+ const c=await scalar(`select to_jsonb(c) v from ebay_return_cases c where id='${id(100)}'`);
+ assert.equal(c.ebay_due_at,null);assert.equal(c.provider_action_required,false);assert.equal(c.status,'open');
+ assert.equal(c.raw_payload.notificationDeadlineRepair.reason,'general_case_deadline_not_seller_response');
+ const notices=(await db.query('select id,read_at,metadata from task_notifications order by id')).rows;
+ assert.ok(notices.find(n=>n.id===id(810)).read_at);assert.ok(notices.find(n=>n.id===id(812)).read_at);
+ for(const n of [811,814,815])assert.equal(notices.find(row=>row.id===id(n)).read_at,null);
+ assert.equal(notices.length,6,'all records remain in audit data');
+});
 
 test('refund badges use actual eBay return refunds and stay independent of delivery and local case closure',async()=>{
  const raw={ebayReturnId:'12345',returnState:'CLOSED',ebayDetail:{refundInfo:{actualRefundDetail:{refundStatus:'SUCCESS',actualRefund:{totalAmount:{value:120,currency:'USD'}},outstandingAmount:{value:0}}},returnShipmentInfo:{shipmentTracking:{active:true,deliveryStatus:'DELIVERED'}}}};

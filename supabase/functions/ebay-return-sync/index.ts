@@ -2969,7 +2969,10 @@ function providerDetail(lane:Lane, summary:any, detail:any):any {
   const base={...summary,...(detail.caseSummary||{}),...detail};
   return {...base,buyerLoginName:base.buyer,status:detail.status||base.caseStatusEnum||base.status,
    creationDate:detail.caseDetails?.creationDate||base.creationDate,
-   sellerResponseDue:{respondByDate:base.respondByDate},amount:base.claimAmount,
+   // Search.respondByDate may belong to the buyer. Only the full case's
+   // sellerResponseDue identifies a seller deadline; an empty container is
+   // authoritative too. Never alternate it with the discovery summary.
+   sellerResponseDue:detail.sellerResponseDue||{},amount:base.claimAmount,
    item:{itemId:base.itemId,transactionId:base.transactionId,title:base.itemTitle}};
  }
  return detail;

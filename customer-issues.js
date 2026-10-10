@@ -256,14 +256,15 @@
  async function refresh(options={}){
   const request=++listVersion;$('issues-list').setAttribute('aria-busy','true');
   try{
-   const result=checked(await db.rpc('list_customer_issues',{_view:view,_scope:scope,_search:search,_offset:offset,_limit:PAGE,_sort:sort,_return_stage:view==='return'?returnStage:'all'}));
+   const result=checked(await db.rpc('list_customer_issues',{_view:view,_scope:scope,_search:search,_offset:offset,_limit:PAGE,_sort:sort,_return_stage:view==='return'?returnStage:'all',...(options.focusCase?{_focus_case_id:options.focusCase}:{})}));
    if(request!==listVersion)return;
    rows=result.rows||[];counts=result.counts||{};total=result.total||0;
+   if(options.focusCase&&Number.isInteger(result.focus_offset))offset=result.focus_offset;
    if(offset>0&&offset>=total){offset=Math.max(0,Math.floor((total-1)/PAGE)*PAGE);return refresh(options);}
    await root.OGCaseNotes?.load(rows.map(c=>c.id));if(request!==listVersion)return;
    cards();root.OGIssueChats?.load(rows);
    if($('issues-feedback').classList.contains('is-error'))feedback('');
-   const selectedChanged=detail&&rows.some(c=>c.id===selected&&c.updated_at!==detail.c.updated_at);
+   const selectedChanged=detail&&detail.c.id===selected&&rows.some(c=>c.id===selected&&c.updated_at!==detail.c.updated_at);
    if(!root.OGCaseNotes?.isEditing&&(options.detail!==false||selectedChanged)&&selected&&!$('issue-action-form')&&!ctx.state.busy&&!$('issue-evidence-package')?.dataset.ready)await openCase(selected,{quiet:true});
   }catch(error){if(request===listVersion)feedback(error.message||'Could not load customer issues. Please retry.',true);}
   finally{if(request===listVersion)$('issues-list').setAttribute('aria-busy','false');}
@@ -419,11 +420,15 @@
   try{const url=await ctx.signEvidence(p,{thumbnail:false});if(!url)throw Error('File unavailable');ctx.openEvidence(url,p.label,p.path,p.video?'video':'image');}
   catch{feedback('Could not open this saved file. Please retry.',true);}
  }
- async function openCase(id,{quiet=false}={}){
+ async function openCase(id,{quiet=false,reveal=false}={}){
   const initialForm=$('issue-action-form');
   const scroll=quiet?$('issues-detail').scrollTop:0,conversationLimit=quiet?detail?.conversationLimit:undefined;
   const expanded=quiet?new Set(Array.from($('issues-detail').querySelectorAll('details[open]>summary'),el=>el.textContent)):null;
-  if(saving)return;if(!quiet&&selected!==id)listReturnPosition=captureListPosition(id);selected=id;const stamp=++version;document.querySelector('.issues-columns').classList.add('is-selected');cards();
+  if(saving)return;
+  const locate=!quiet&&!rows.some(c=>c.id===id);
+  if(!quiet&&selected!==id)listReturnPosition=captureListPosition(id);selected=id;const stamp=++version;document.querySelector('.issues-columns').classList.add('is-selected');cards();
+  // Snapshot before loading; a new alert that arrives during review stays unread.
+  const notices=!quiet?db.rpc('customer_issue_notification_ids',{_case_id:id}).then(checked).catch(()=>null):Promise.resolve([]);
   if(!quiet)$('issues-detail').innerHTML='<div class="issues-empty">Loading the case and its evidence…</div>';
   try{
    const [c,tasks,items,caseEvents]=await Promise.all([
@@ -431,6 +436,14 @@
     db.from('ebay_return_items').select('*').eq('return_case_id',id),db.from('ebay_return_events').select('*').eq('return_case_id',id).order('created_at',{ascending:false}).limit(50)
    ]).then(rs=>rs.map(checked));
    if(stamp!==version)return;
+   if(locate){
+    clearBulk();clearTimeout(timer);scope='all';search='';returnStage='all';offset=0;
+    const active=!['closed','cancelled'].includes(c.status)||tasks.some(t=>root.OGTaskWorkflow.isEmployeeTask(t)&&!finish.has(t.status));
+    view=active?kind(c):'history';$('issues-search').value='';$('issues-scope').value='all';$('issues-return-stage').value='all';
+    await refresh({detail:false,focusCase:id});if(stamp!==version)return;
+    if(!rows.some(row=>row.id===id))throw new Error('Could not locate this case in the list. Refresh and retry.');
+    listReturnPosition=captureListPosition(id);
+   }
    const ids=[...new Set([...tasks.flatMap(t=>t.order_line_ids||[]),...items.map(i=>i.order_line_id),...(c.raw_payload?.manualOrderMatch?.line_ids||c.raw_payload?.automaticOrderMatch?.line_ids||[])])].filter(Boolean);
    const [rawLines,taskEvents]=await Promise.all([ids.length?db.from('ebay_order_lines').select(ctx.lineSelect).in('id',ids):{data:[]},
     db.from('ebay_return_task_events').select('*').eq('return_case_id',id).order('created_at',{ascending:false}).limit(50)]).then(rs=>rs.map(checked));
@@ -444,7 +457,19 @@
    if(quiet&&(root.OGCaseNotes?.isEditing||($('issue-action-form')&&$('issue-action-form')!==initialForm)||ctx.state.busy))return;
    detail={c,tasks,items,lines,conversationLimit,events:[...caseEvents,...taskEvents].sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at)),moreEvents:caseEvents.length===50||taskEvents.length===50};
    renderDetail();root.OGIssueChats?.load(rows);if(expanded)$('issues-detail').querySelectorAll('details').forEach(el=>el.open=expanded.has(el.querySelector('summary')?.textContent));$('issues-detail').scrollTop=scroll;
+   if(locate||reveal){
+    const card=Array.from($('issues-list').querySelectorAll('[data-case]')).find(el=>el.dataset.case===id);
+    card?.scrollIntoView({block:'start',behavior:'instant'});listReturnPosition=captureListPosition(id);
+   }
    const url=new URL(location.href);url.searchParams.delete('returnTaskId');url.searchParams.set('caseId',id);history.replaceState(null,'',url);
+   if(!quiet){
+    const ids=await notices;if(stamp!==version||document.hidden)return;
+    if(ids===null)feedback('Case loaded, but its update alerts could not be marked read. Reopen it to retry.',true);
+    else if(ids.length&&root.OGTaskNotifications){
+     await root.OGTaskNotifications.ready;if(stamp!==version||document.hidden)return;
+     if(!await root.OGTaskNotifications.markRead(ids))feedback('Case loaded, but its update alerts could not be marked read. Reopen it to retry.',true);
+    }
+   }
   }catch(error){if(stamp===version){$('issues-detail').innerHTML=`<div class="issues-empty"><button class="secondary-btn" data-close-case>← Cases</button><h2>Couldn’t load this case</h2><p>${escape(error.message)}</p><button class="primary-btn" data-retry-case>Retry</button></div>`;}}
  }
  function closeCase(){if(saving)return;version++;selected=null;detail=null;document.querySelector('.issues-columns').classList.remove('is-selected');$('issues-detail').innerHTML='<div class="issues-empty">Choose a case to see its order, evidence and next steps.</div>';const url=new URL(location.href);url.searchParams.delete('caseId');history.replaceState(null,'',url);cards();}
@@ -573,7 +598,7 @@
   await Promise.all([refresh({detail:false}),health()]);
   const params=new URLSearchParams(location.search);let id=params.get('caseId');
   if(!id&&params.get('returnTaskId'))try{id=checked(await db.from('ebay_return_tasks').select('return_case_id').eq('id',params.get('returnTaskId')).single()).return_case_id;}catch{}
-  if(id)await openCase(id);
+  if(id)await openCase(id,{reveal:true});
   if(params.get('syncHealth')==='1')document.querySelector('.issues-sync-health').open=true;
   poll=setInterval(()=>{if(!document.hidden&&!saving&&!root.OGCaseNotes?.isEditing){health();if(!$('issue-action-form')&&!ctx.state.busy&&!$('issues-bulk-dialog').open)refresh({detail:false});}},30000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!saving&&!root.OGCaseNotes?.isEditing&&!$('issues-bulk-dialog').open){health();refresh({detail:false});}});

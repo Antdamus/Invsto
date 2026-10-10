@@ -57,6 +57,7 @@ body[data-page="ebay-returns"] .history-modal{z-index:1300}body[data-page="ebay-
 .issue-evidence-message{align-items:flex-start}.issue-evidence-message span span{display:block;white-space:pre-wrap;max-height:190px;overflow:auto}
 [data-evidence-preview-panel] img,[data-evidence-preview-panel] video{display:block;max-width:100%;max-height:500px;margin:12px auto}
 .issue-sync-retries{grid-column:1/-1}.issue-sync-retries h3{font-size:14px}.issue-sync-retries article{padding:10px 0;overflow-wrap:anywhere}
+.issue-card{scroll-margin-top:82px}
 
 body[data-page="ebay-returns"] {font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
 .issues-workspace {display:block!important}
