@@ -76,6 +76,10 @@ before(async()=>{
  await db.exec(await sqlFile('20261010100000_customer_issue_staff_task_notes.sql'));
  await db.exec(await sqlFile('20261010110000_customer_issue_employee_tasks.sql'));
  await db.exec(await sqlFile('20261010111000_customer_issue_employee_task_reads.sql'));
+ // The production editor can preserve SQL as a single line. Migration guards
+ // must accept equivalent whitespace without depending on formatting.
+ const liveDefinition=await scalar("select pg_get_functiondef('public.list_customer_issues(text,text,text,integer,integer,text,text)'::regprocedure) v");
+ await db.exec(liveDefinition.replace(/\s+/g,' '));
  await db.exec(await sqlFile('20261010193000_customer_issue_review_navigation.sql'));
 
 

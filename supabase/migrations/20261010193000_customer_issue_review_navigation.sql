@@ -27,9 +27,9 @@ begin
  src:=pg_get_functiondef('public.list_customer_issues(text,text,text,integer,integer,text,text)'::regprocedure);
  original:=src;
  src:=replace(src,'_return_stage text)', '_return_stage text, _focus_case_id uuid)');
- src:=replace(src, '), page as ('||chr(10)||'  select * from filtered order by',
+ src:=regexp_replace(src, '\),\s*page as \(\s*select \* from filtered order by',
   '), ranked as ('||chr(10)||'  select *,row_number() over(order by');
- src:=replace(src, 'opened_at desc nulls last,id'||chr(10)||'  offset greatest(0,_offset) limit least(100,greatest(1,_limit))',
+ src:=regexp_replace(src, 'opened_at desc nulls last,id\s+offset greatest\(0,_offset\) limit least\(100,greatest\(1,_limit\)\)',
   'opened_at desc nulls last,id)-1 as focus_position from filtered'||chr(10)||
   ' ), position as (select coalesce((select (focus_position / least(100,greatest(1,_limit))) * least(100,greatest(1,_limit)) from ranked where id=_focus_case_id),greatest(0,_offset))::int as page_offset),'||chr(10)||
   ' page as (select * from ranked order by focus_position offset (select page_offset from position) limit least(100,greatest(1,_limit))');
