@@ -4,6 +4,7 @@
  const rows=Array.from({length:36},(_,i)=>({id:`case-${i}`,source_lane:i%3===0?'return':i%3===1?'inquiry':'payment_dispute',issue_kind:i%3===0?'return':i%3===1?'request':'dispute',ebay_return_id:`5400123${i}`,order_id:'order-1',order_number:'01-12345-12345',buyer_username:i===0?'alex.watches':`buyer.${i}`,item_title:i===0?'Cartier Panthère · certificate and bracelet inspection':'Jewelry item from the live sale',return_reason:'Item not as described',status:'open',ebay_status:'OPEN',synced_at:now,ebay_due_at:future,open_tasks:1,next_user:'me',opened_at:new Date(Date.now()-i*86400000).toISOString(),order_placed_at:new Date(Date.now()-(40-i)*86400000).toISOString(),item_value:150+i*100,item_currency:'USD',linked_line_count:1,updated_at:now,raw_payload:{},mine:i%2===0,following:i%2!==0}));
  let tasks=[{id:'task-1',return_case_id:'case-0',order_line_ids:['line-1'],title:'Inspect the returned watch',question:'Compare the watch, serial number and certificate with the original item photos. Record the condition before restocking.',status:'assigned',assigned_to_user_id:'me',assigned_by:'staff',created_by:'staff',metadata:{request_kind:'work'},updated_at:now}];
  if(location.search.includes('closeFixture')){rows[0].ebay_status='CLOSED';tasks[0].assigned_to_user_id=null;tasks[0].status='open';}
+ if(location.search.includes('bulkFixture'))for(const i of [0,1,2,30,31])rows[i].ebay_status='CLOSED';
  const historyFixture=location.search.includes('historyFixture');
  const savedHistory=[{actor:'BUYER',action:'A CPS case was created.',description:'The item shows delivered but I did not receive it.',date:'2026-10-01T03:16:26Z'},
  {actor:'SYSTEM',action:'Reminder sent',date:'2026-10-03T07:00:54Z'},
@@ -15,9 +16,10 @@
  window.fixtureCalls=[];window.fixtureWrites=[];window.fixtureHealth=null;window.SUPABASE_URL='https://project.supabase.co';
  window.fixtureUpdateCase=changes=>{rows[0]={...rows[0],...changes,updated_at:new Date(Date.now()+1000).toISOString()};};
  window.fixtureSetTasks=value=>{tasks=value;};window.fixtureEvidence=null;window.fixtureLookup={matches:[]};window.fixtureItems=[];
+ if(location.search.includes('bulkFixture'))window.fixtureItems=[{return_case_id:'case-2',received_quantity:1,restocked_quantity:0,disposition:'quarantine'}];
  function query(table){let filters=[],one=false,lim=999;const q={select(){return q;},eq(k,v){filters.push([k,v]);return q;},in(){return q;},order(){return q;},overlaps(){return q;},contains(){return q;},or(){return q;},not(){return q;},range(){return q;},limit(n){lim=n;return q;},single(){one=true;return q;},maybeSingle(){one=true;return q;},then(resolve){
   fixtureCalls.push({table});let data=table==='employees'?people:table==='ebay_return_cases'?rows:table==='ebay_return_tasks'?tasks:table==='ebay_order_lines'?[line]:table==='ebay_return_items'?window.fixtureItems:table==='ebay_return_events'?[{id:'event-1',return_case_id:'case-0',action:'updated',notes:'The customer included the certificate. Inspect the clasp and compare with the original photos.',created_at:now,signed_by_email:'sandra@example.test',evidence_photos:[{bucket:'evidence',path:'watch.svg'}]}]:[];
-  if(table==='employees'||table==='ebay_return_cases'||table==='ebay_return_tasks')data=data.filter(r=>filters.every(([k,v])=>r[k]===v));
+  if(table==='employees'||table==='ebay_return_cases'||table==='ebay_return_tasks'||(table==='ebay_return_items'&&location.search.includes('bulkFixture')))data=data.filter(r=>filters.every(([k,v])=>r[k]===v));
   return Promise.resolve({data:one?data[0]:data.slice(0,lim),error:null}).then(resolve);
  }};return q;}
  const db={storage:{from:()=>({download:async()=>({data:new Blob(['test evidence bytes'],{type:'image/png'})})})},auth:{getSession:async()=>({data:{session:{user:{id:'me'}}}})},from:query,functions:{invoke:async(name,args)=>{fixtureCalls.push({invoke:name,args});return {data:{message:'Refresh queued. You can keep working.'}};}},rpc:async(name,args={})=>{
@@ -30,7 +32,9 @@
   if(name==='customer_issue_evidence')return {data:window.fixtureEvidence||{case:rows[0],case_history:historyFixture?savedHistory:[],lines:[line],bag_photos:[{bucket:'evidence',path:'item.png'}],completion_events:[],packaging_photos:[],certificates:[],case_messages:historyFixture?[]:[{direction:'inbound',message_body:'The clasp needs checking. It does not stay closed when I wear it.',sent_at:now}],buyer_messages:historyFixture?[]:Array.from({length:8},(_,i)=>({id:'message-'+i,direction:i%2?'inbound':'outbound',message_body:i%2?'Can you compare it with the original item photos?':'We will review the original photos and inspect the returned clasp.',created_at_ebay:new Date(Date.now()-(i+1)*60000).toISOString()}))}};
   if(name==='lookup_customer_return_package')return {data:window.fixtureLookup};
   fixtureWrites.push({name,args});if(name==='advance_task_workflow')tasks[0].status='completed_by_employee';
-  if(name==='close_resolved_customer_issue'){const row=rows.find(r=>r.id===args._case_id);row.status='closed';row.open_tasks=0;row.updated_at=new Date().toISOString();tasks.filter(t=>t.return_case_id===row.id).forEach(t=>t.status='cancelled');}
+  if(name==='close_resolved_customer_issue'){
+   if(location.search.includes('bulkFailure')&&args._case_id==='case-1')return {error:{message:'This case changed. Refresh it and review the latest information before closing'}};
+   const row=rows.find(r=>r.id===args._case_id);row.status='closed';row.open_tasks=0;row.updated_at=new Date().toISOString();tasks.filter(t=>t.return_case_id===row.id).forEach(t=>t.status='cancelled');}
   return {data:{ok:true}};
  }};
  const image='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="240"><rect fill="#d5d2b9" width="300" height="240"/><rect x="127" y="12" width="46" height="216" rx="20" fill="#969994"/><rect x="104" y="70" width="92" height="100" rx="20" fill="#dfdfd1" stroke="#747773" stroke-width="9"/><text x="150" y="126" text-anchor="middle" fill="#454d40" font-size="15">CARTIER</text></svg>');

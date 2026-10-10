@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="ebay-order-history.css" />
-  <link rel="stylesheet" href="customer-issues.css?v=20261009-14" />
+  <link rel="stylesheet" href="customer-issues.css?v=20261010-15" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -99,9 +99,10 @@
         </section>
         <div class="issues-list-caption"><span id="issues-count" aria-live="polite">Loading cases...</span><span id="issues-sort-caption">Newest cases</span></div>
         <div class="issues-columns">
-          <section id="issues-list-panel" aria-label="Customer cases"><div id="issues-list" class="issues-list" aria-busy="true"><div class="issues-empty">Loading your workspace...</div></div><div class="issues-paging"><button id="issues-prev" type="button" class="secondary-btn" disabled>Previous</button><span id="issues-page"></span><button id="issues-next" type="button" class="secondary-btn" disabled>Next</button></div></section>
+          <section id="issues-list-panel" aria-label="Customer cases"><div id="issues-bulk-toolbar" class="issue-bulk-toolbar" hidden></div><div id="issues-list" class="issues-list" aria-busy="true"><div class="issues-empty">Loading your workspace...</div></div><div class="issues-paging"><button id="issues-prev" type="button" class="secondary-btn" disabled>Previous</button><span id="issues-page"></span><button id="issues-next" type="button" class="secondary-btn" disabled>Next</button></div></section>
           <section id="issues-detail" class="issues-detail" aria-label="Selected case"><div class="issues-empty issues-detail-placeholder"><span class="issues-empty-symbol">&#9678;</span><h2>Every detail in one place</h2><p>Select a case to see its next action, order, photos and conversation.</p></div></section>
         </div>
+        <dialog id="issues-bulk-dialog" class="issue-bulk-dialog" aria-labelledby="issues-bulk-title"></dialog>
       </main>
     </div>
   </div>
@@ -236,7 +237,7 @@
   <script src="task-workflow.js?v=20261009-issue-actions"></script>
   <script src="customer-issue-evidence.js?v=20261009-14"></script>
   <script src="return-receiving.js?v=20261009-2"></script>
-  <script src="customer-issues.js?v=20261009-14"></script>
+  <script src="customer-issues.js?v=20261010-15"></script>
   <script src="ebay-order-history.js?v=20261009-quick-review"></script>
 </body>
 </html>

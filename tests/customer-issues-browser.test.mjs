@@ -178,3 +178,29 @@ test('already resolved cases close directly into History without assignment on p
  await expect(page.locator('[data-issue-view="history"]')).toHaveAttribute('aria-pressed','true');
  assert.ok(await page.locator('#issues-detail').evaluate(e=>e.scrollWidth<=e.clientWidth+1));
 });
+
+for(const width of [390,1366])test(`bulk close ${width}px: cross-page selection, confirmation and saved History`,async t=>{
+ const page=await open(t,width);
+ await page.evaluate(()=>fixtureUpdateCase({ebay_status:'CLOSED'}));
+ await page.getByRole('button',{name:'Refresh customer issues'}).click();
+ await page.getByRole('button',{name:'Select cases',exact:true}).click();
+ await page.getByRole('button',{name:'Select eligible on this page',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Mark selected closed (1)',exact:true})).toBeVisible();
+ await expect(page.locator('[data-select-case="case-1"]')).toBeDisabled();
+ await page.getByRole('button',{name:'Next',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Mark selected closed (1)',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Mark selected closed (1)',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Close 1 case & move to History'})).toBeVisible();
+ await expect(page.getByRole('dialog')).toContainText('1 remaining follow-up');
+ await page.getByRole('button',{name:'Close 1 case',exact:true}).click();
+ assert.equal((await page.evaluate(()=>fixtureWrites)).length,0);
+ await page.getByRole('checkbox',{name:'These cases are resolved; no further follow-up is needed.'}).check();
+ await page.getByRole('button',{name:'Close 1 case',exact:true}).click();
+ await expect(page.getByRole('dialog')).toContainText('1 case saved in History.');
+ assert.equal((await page.evaluate(()=>fixtureWrites)).length,1);
+ assert.ok(await page.getByRole('dialog').evaluate(e=>e.scrollWidth<=e.clientWidth+1));
+ await page.getByRole('button',{name:'View History',exact:true}).click();
+ await expect(page.locator('[data-issue-view="history"]')).toHaveAttribute('aria-pressed','true');
+ await expect(page.locator('#issues-bulk-toolbar')).toBeHidden();
+ await expect(page.locator('.issue-card')).toHaveCount(1);
+});
