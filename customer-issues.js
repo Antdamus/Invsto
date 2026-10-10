@@ -126,7 +126,9 @@
   if(kind(c)!=='return')return '';
   const stage=returnStages[c.return_stage]||returnStages.unknown;
   const refund=({refunded:{label:'Refunded · eBay',tone:'received'},partial:{label:'Partially refunded · eBay',tone:'waiting'},pending:{label:'Refund pending · eBay',tone:'waiting'},failed:{label:'Refund failed · eBay',tone:'action'}})[c.return_refund];
-  return `<span class="issue-tag issue-return-badge is-${stage.tone}">${escape(stage.label)}</span>`+(refund?`<span class="issue-tag issue-return-badge is-${refund.tone}">${escape(refund.label)}</span>`:'');
+  const issued=['refunded','partial'].includes(c.return_refund),stamp=issued&&typeof c.return_refunded_at==='string'&&!Number.isNaN(Date.parse(c.return_refunded_at))?new Date(c.return_refunded_at):null;
+  const refundDate=issued?(stamp?`<time class="issue-refund-date" datetime="${escape(stamp.toISOString())}" title="${escape('Refund issued '+date(c.return_refunded_at))}">${escape(stamp.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}))}</time>`:'<span class="issue-refund-date">Date not provided</span>'):'';
+  return `<span class="issue-tag issue-return-badge is-${stage.tone}">${escape(stage.label)}</span>`+(refund?`<span class="issue-tag issue-return-badge issue-refund-badge is-${refund.tone}"><span>${escape(refund.label)}</span>${refundDate}</span>`:'');
  }
  function nextText(c){
   if(['closed','cancelled'].includes(c.status)&&!c.open_tasks)return 'Closed · saved in History';

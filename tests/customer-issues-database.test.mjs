@@ -72,6 +72,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261010060000_customer_issue_escalated_badges.sql'));
  await db.exec(await sqlFile('20261010070000_customer_issue_task_notes.sql'));
  await db.exec(await sqlFile('20261010080000_customer_issue_refund_badges.sql'));
+ await db.exec(await sqlFile('20261010090000_customer_issue_refund_dates.sql'));
 
 });
 after(async()=>db?.close());
@@ -102,6 +103,31 @@ test('refund badges use actual eBay return refunds and stay independent of deliv
  await db.query('update ebay_return_cases set raw_payload=$1',[JSON.stringify(raw)]);
  data=await scalar("select list_customer_issues('return','all','',0,30,'newest','delivered') v");assert.equal(data.rows[0].return_refund,'refunded','legacy actual refund amount is sufficient when eBay omits the status');
  await db.exec("update ebay_return_cases set status='closed'");data=await scalar("select list_customer_issues('history','all','',0,30,'newest','all') v");assert.equal(data.rows[0].return_refund,'refunded');
+});
+
+test('refund dates use the matching actual refund timestamp and preserve timezone without guessing missing dates',async()=>{
+ const raw={ebayReturnId:'12345',ebayDetail:{refundInfo:{actualRefundDetail:{refundStatus:'SUCCESS',refundIssuedDate:{value:'2026-09-01T20:07:01.000Z'}}}}};
+ const evaluate=(r=raw,status='CLOSED',lane='return')=>scalar('select customer_issue_return_refunded_at($1,$2,$3,$4) v',[lane,'12345',status,JSON.stringify(r)]);
+ assert.equal(new Date(await evaluate()).toISOString(),'2026-09-01T20:07:01.000Z');
+ await db.query("update ebay_return_cases set ebay_status='CLOSED',raw_payload=$1",[JSON.stringify(raw)]);
+ let c=(await scalar("select list_customer_issues('return','all','',0,30,'newest','all') v")).rows[0];
+ assert.equal(c.return_refund,'refunded');assert.equal(new Date(c.return_refunded_at).toISOString(),'2026-09-01T20:07:01.000Z');assert.equal(c.status,'open');
+ raw.ebayDetail.refundInfo.actualRefundDetail.refundIssuedDate.value='2026-09-01T16:07:01-04:00';
+ assert.equal(new Date(await evaluate()).toISOString(),'2026-09-01T20:07:01.000Z');
+ for(const value of ['',null,'not a date','2026-09-01','2026-09-01T20:07:01','2026-02-30T20:07:01Z','2026-13-01T20:07:01Z','infinity']){
+  raw.ebayDetail.refundInfo.actualRefundDetail.refundIssuedDate.value=value;assert.equal(await evaluate(),null,String(value));
+ }
+ raw.ebayDetail.refundInfo.actualRefundDetail.refundIssuedDate.value='2026-09-01T20:07:01.000Z';
+ assert.equal(await evaluate({...raw,ebayReturnId:'another'}),null);assert.equal(await evaluate({...raw,ebayDetail:{...raw.ebayDetail,returnId:'another'}}),null);
+ assert.equal(await evaluate(raw,'CLOSED','payment_dispute'),null);
+ for(const refundStatus of ['PENDING','FAILED','UNKNOWN','REQUESTED']){raw.ebayDetail.refundInfo.actualRefundDetail.refundStatus=refundStatus;assert.equal(await evaluate(),null,refundStatus);}
+ raw.ebayDetail.refundInfo.actualRefundDetail.refundStatus='SUCCESS';raw.ebayDetail.refundInfo.actualRefundDetail.outstandingAmount={value:5};
+ assert.equal(new Date(await evaluate()).toISOString(),'2026-09-01T20:07:01.000Z','partial refund retains its actual issue date');
+ assert.equal(await evaluate({ebayReturnId:'12345',ebayDetail:{refundInfo:{estimatedRefundDetail:{refundIssuedDate:{value:'2026-09-01T20:07:01.000Z'}}}}},'PARTIAL_REFUNDED'),null);
+ delete raw.ebayDetail.refundInfo.actualRefundDetail.refundIssuedDate;
+ await db.query("update ebay_return_cases set raw_payload=$1",[JSON.stringify(raw)]);
+ c=(await scalar("select list_customer_issues('return','all','',0,30,'newest','all') v")).rows[0];assert.equal(c.return_refund,'partial');assert.equal(c.return_refunded_at,null,'missing date is not replaced by sync/opened/closed date');
+ assert.equal(await scalar('select count(*)::int v from ebay_return_events'),0);assert.equal(await stock(),0);
 });
 
 test('refund classification distinguishes partial, pending, failed, unknown and mismatched return data',async()=>{

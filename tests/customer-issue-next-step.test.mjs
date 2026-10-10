@@ -53,6 +53,18 @@ test('return refund badges coexist with delivery and do not claim pending or par
  assert.equal(returnBadge({...c,issue_kind:'dispute'}),'');
  assert.equal(nextText({...c,return_stage:'unknown',ebay_action:'SELLER_ISSUE_REFUND'}),'Refund saved · review the remaining case work');
 });
+test('confirmed refund badges keep their local issue date attached and handle missing dates honestly',()=>{
+ const {returnBadge}=sandbox.OGCustomerIssues.testing,c={issue_kind:'return',return_stage:'delivered',return_refund:'refunded',return_refunded_at:'2026-09-01T20:07:01Z'};
+ const html=returnBadge(c);assert.match(html,/Delivered · eBay/);assert.match(html,/Refunded · eBay/);
+ assert.ok(html.includes(new Date(c.return_refunded_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})));
+ assert.match(html,/datetime="2026-09-01T20:07:01.000Z"/);assert.match(html,/title="Refund issued /);
+ assert.match(returnBadge({...c,return_refund:'partial'}),/issue-refund-date/);
+ for(const return_refunded_at of [null,undefined,'','invalid','<img src=x onerror=alert(1)>']){
+  const result=returnBadge({...c,return_refunded_at});assert.match(result,/Date not provided/);assert.doesNotMatch(result,/<time|Invalid Date|<img/);
+ }
+ for(const return_refund of ['pending','failed',null])assert.doesNotMatch(returnBadge({...c,return_refund}),/issue-refund-date|<time/);
+});
+
 test('customer names stay distinct from usernames; return addresses retain recipient, unit and postal code safely',()=>{
  const {customerContact}=sandbox.OGCustomerIssues.testing,c={issue_kind:'return',order_id:'order',customer_name:'Alex <Taylor>',shipping_name:'Robin Taylor',shipping_address:{line1:'123 Example Lane',line2:'Apt 4 & 5',city:'Boston',state:'MA',postal_code:'02108',country:'US'}};
  const html=customerContact(c);assert.ok(html.includes('Alex &lt;Taylor&gt;'));assert.ok(html.includes('Recipient: Robin Taylor'));assert.ok(html.includes('Apt 4 &amp; 5'));assert.ok(html.includes('Boston, MA 02108'));assert.ok(html.includes('Original shipping address'));
