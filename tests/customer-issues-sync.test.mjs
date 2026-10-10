@@ -4,10 +4,11 @@ import {stripTypeScriptTypes} from 'node:module';
 import vm from 'node:vm';
 import {test} from 'node:test';
 import {detailPath,discoveryPath,pageRows,pageTotal,runWorker,queueRefresh,externalId,failureKind} from '../supabase/functions/ebay-return-sync/workspace.ts';
+import {resolveDisputeEvidence} from '../supabase/functions/ebay-return-sync/payment-evidence.ts';
 const raw=await readFile(new URL('../supabase/functions/ebay-return-sync/index.ts',import.meta.url),'utf8');
 let handler,client;
 const sandbox={console,URL,URLSearchParams,Response,Request,Headers,TextEncoder,crypto,AbortSignal,Map,Set,Date,fetch:()=>{throw Error('Unexpected provider call');},
- Deno:{env:{get:()=>undefined},serve:fn=>{handler=fn;}},createClient:()=>client,runWorker,queueRefresh:()=>{throw Error('Unexpected queue mutation');}};
+ Deno:{env:{get:()=>undefined},serve:fn=>{handler=fn;}},createClient:()=>client,runWorker,resolveDisputeEvidence,queueRefresh:()=>{throw Error('Unexpected queue mutation');}};
 vm.createContext(sandbox);vm.runInContext(stripTypeScriptTypes(raw.replace(/^import .*;\r?\n/gm,'')),sandbox);
 const clean=x=>JSON.parse(JSON.stringify(x));
 
@@ -139,4 +140,16 @@ test('worker uses the database priority batch and records successful discovery p
 test('global recovery uses the rate-limited retry operation instead of clearing errors',async()=>{
  const db=fakeDb();await queueRefresh(db);assert.equal(db.calls[0].rpc,'retry_customer_issue_sync');
  assert.equal(db.calls.filter(c=>c.op==='update').length,0);
+});
+
+
+test('dispute files require authentication, workspace permission and a visible case before storage access',async()=>{
+ const request=()=>new Request('https://test',{method:'POST',headers:{Authorization:'Bearer user'},body:JSON.stringify({action:'dispute_evidence',caseId:'case',evidenceId:'set',fileId:'file'})});
+ client={auth:{getUser:async()=>({data:{user:{id:'employee'}}})},rpc:async()=>({data:false}),storage:{from:()=>{throw Error('Storage must not be reached');}}};
+ assert.equal((await handler(request())).status,403);
+ client.rpc=async()=>({data:true});client.from=()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:null})})})});
+ assert.equal((await handler(request())).status,404);
+ client.from=()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{id:'case',source_lane:'inquiry'}})})})});
+ assert.equal((await handler(request())).status,400);
+ assert.equal((await handler(new Request('https://test',{method:'POST',body:'{"action":"dispute_evidence"}'}))).status,401);
 });

@@ -1,4 +1,5 @@
 import {runWorker,queueRefresh,type Lane} from './workspace.ts';
+import {resolveDisputeEvidence} from './payment-evidence.ts';
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 type JsonRecord = Record<string, unknown>;
@@ -3032,6 +3033,13 @@ Deno.serve(async(req)=>{
   if(auth.error||!auth.data.user)return jsonResponse(401,{error:'Sign in to refresh customer issues.'});
   const access=await client.rpc('can_access_post_order_issues');
   if(access.error||access.data!==true)return jsonResponse(403,{error:'Customer issues access required.'});
+  if(body.action==='dispute_evidence'){
+   if(typeof body.caseId!=='string')return jsonResponse(400,{error:'Choose a payment dispute.'});
+   const visible=await client.from('ebay_return_cases').select('id,source_lane,ebay_return_id,raw_payload').eq('id',body.caseId).maybeSingle();
+   if(visible.error||!visible.data)return jsonResponse(404,{error:'Case not found.'});
+   const document=await resolveDisputeEvidence(db,visible.data,body.evidenceId,body.fileId,()=>getEbayAccessToken('https://api.ebay.com/oauth/api_scope/sell.payment.dispute'),EBAY_API_BASE);
+   return jsonResponse(200,document);
+  }
   if(body.action!=='refresh')return jsonResponse(400,{error:'Reload Customer Issues to use the background sync.'});
   if(body.caseId){
    const visible=await client.from('ebay_return_cases').select('id').eq('id',body.caseId).maybeSingle();
