@@ -52,7 +52,7 @@
 .feature-caption { display: flex; align-items: center; justify-content: space-between; gap: 22px; padding-top: 22px; }
 .feature-caption small { display: block; text-transform: uppercase; letter-spacing: .15em; font-size: 9px; color: #dbc9a7; margin-bottom: 7px; }
 .feature-caption strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font: 400 25px/1.15 var(--serif); overflow-wrap: anywhere; }
-.feature-arrow { flex-shrink: 0; display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid #809286; border-radius: 50%; font-size: 22px; }
+.feature-arrow { flex-shrink: 0; display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid #809286; border-radius: 50%; color: #eee8da; }
 .catalogue-hero.without-feature { grid-template-columns: 1fr; max-width: 850px; min-height: 350px; }
 .catalogue-credit { display: flex; align-items: center; justify-content: space-between; gap: 25px; border-block: 1px solid #cfc1a2; padding: 25px 0; }
 .credit-heading { display: flex; align-items: center; gap: 20px; }
@@ -224,7 +224,7 @@
   .feature-caption { padding-top: 17px; }
   .feature-caption small { font-size: 8px; }
   .feature-caption strong { font-size: 23px; }
-  .feature-arrow { width: 35px; height: 35px; font-size: 20px; }
+  .feature-arrow { width: 35px; height: 35px; }
   .catalogue-credit { padding-block: 20px; gap: 12px; }
   .credit-heading .eyebrow { display: none; }
   .credit-heading p:last-child { font-size: 23px; }
@@ -320,3 +320,8 @@
  .photo-viewer .viewer-thumbnails button { flex-basis: 44px; width: 44px; height: 44px; }
 }
 @media (max-height:500px) { .viewer-header { padding-block: 8px; } .viewer-header .eyebrow, #viewer-help, .viewer-thumbnails { display: none; } .viewer-header h2 { font-size: 22px; } .viewer-footer { padding-block: 8px; } }
+
+/* Vector arrows keep photo expansion controls consistent on iOS and desktop. */
+.catalogue-expand-icon { display: block; width: 20px; height: 20px; flex-shrink: 0; }
+.photo-hint { display: inline-flex; align-items: center; gap: 7px; }
+.photo-hint .catalogue-expand-icon { width: 12px; height: 12px; }

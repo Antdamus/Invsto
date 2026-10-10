@@ -3,6 +3,8 @@
   const categories=['Watches','Rings','Pendants','Chains','Necklaces','Bracelets','Earrings','Anklets','Brooches','Sets','Coins','Other'];
   const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(Number(value)||0);
+  // Draw this icon explicitly: iOS renders the text arrow as a blue emoji.
+  const expandIcon=()=>'<svg class="catalogue-expand-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 18 18 6M6 6h12v12"/></svg>';
   function totals(items,selected,credit){
     const cents=items.reduce((sum,i)=>sum+(selected.has(i.id)?Math.round(Number(i.retail_price)*100):0),0);
     const available=Math.max(0,Math.round(Number(credit||0)*100));
@@ -20,7 +22,7 @@
   function card(item,selected=false){
     const img=safeImage(item.images?.[0]);
     const photos=(item.images||[]).map(safeImage).filter(Boolean).length;
-    return `<article class="jewel-card ${selected?'is-selected':''}"><button class="jewel-photo" data-details="${escape(item.id)}" data-photos="${escape(item.id)}" aria-label="View ${escape(item.name)}">${img?`<img src="${escape(img)}" alt="${escape(item.name)}" loading="lazy" decoding="async">`:'<span>Photo unavailable</span>'}${selected?'<span class="selected-seal">✓ Selected</span>':''}<span class="photo-hint">${photos>1?`${photos} photographs · `:''}Zoom into piece ↗</span></button><div class="jewel-copy"><p class="eyebrow">${escape(item.category)}</p><button class="jewel-name" data-details="${escape(item.id)}">${escape(item.name)}</button><p class="jewel-description">${escape(item.description)}</p><div class="jewel-price"><span>${money(item.retail_price)}</span><small>Retail · USD</small></div><button class="choose-piece ${selected?'chosen':''}" data-select="${escape(item.id)}" aria-pressed="${selected}">${selected?'✓ In your selection':'＋ Select this piece'}</button></div></article>`;
+    return `<article class="jewel-card ${selected?'is-selected':''}"><button class="jewel-photo" data-details="${escape(item.id)}" data-photos="${escape(item.id)}" aria-label="View ${escape(item.name)}">${img?`<img src="${escape(img)}" alt="${escape(item.name)}" loading="lazy" decoding="async">`:'<span>Photo unavailable</span>'}${selected?'<span class="selected-seal">✓ Selected</span>':''}<span class="photo-hint">${photos>1?`${photos} photographs · `:''}Zoom into piece ${expandIcon()}</span></button><div class="jewel-copy"><p class="eyebrow">${escape(item.category)}</p><button class="jewel-name" data-details="${escape(item.id)}">${escape(item.name)}</button><p class="jewel-description">${escape(item.description)}</p><div class="jewel-price"><span>${money(item.retail_price)}</span><small>Retail · USD</small></div><button class="choose-piece ${selected?'chosen':''}" data-select="${escape(item.id)}" aria-pressed="${selected}">${selected?'✓ In your selection':'＋ Select this piece'}</button></div></article>`;
   }
   // Match the piece itself before broad inventory tags (a chain bracelet is a bracelet).
   // Keep these rules aligned with catalogue_piece_type in the database migration.
@@ -42,5 +44,5 @@
     const fine=Number((bp/10).toFixed(2));
     return `${fine}${metal==='silver'&&bp===9250?' sterling silver':metal?` ${metal}`:' fineness'}`;
   }
-  root.Catalogue={categories,escape,money,totals,filter,card,safeImage,categoryFor,clientCategory,purityLabel};
+  root.Catalogue={categories,escape,money,totals,filter,card,safeImage,categoryFor,clientCategory,purityLabel,expandIcon};
 })(typeof window==='undefined'?globalThis:window);
