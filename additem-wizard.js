@@ -133,6 +133,7 @@
       setCategory(watch ? "Watches" : coin ? "Coins" : "", { notify: !restoring });
     }
     rebuildRoute();
+    window.addItemPricing?.apply();
     renderReview();
   }
 
@@ -163,9 +164,10 @@
     const rows = [
       ['Item', value('title') || (getWatchDetails()?.name) || getCoinDetails()?.name || 'Not entered','information'],
       ['Category',value('category') || 'Not selected','information'],
-      ['Cost',value('cost') ? `$${value('cost')}` : 'Not entered','pricing'],
-      ['Minimum sale',value('minimum-sale-price') ? `$${value('minimum-sale-price')}` : 'Not set','pricing'],
-      ['Retail',value('sale-price') ? `$${value('sale-price')}` : 'Not entered','pricing'],
+      ...(window.addItemPricing?.deferred() ? [['Pricing',`Queued for ${window.addItemPricing.ownerName()} · cost and selling prices set later`,'pricing']] : [
+        ['Cost',value('cost') ? `$${value('cost')}` : 'Not entered','pricing'],
+        ['Minimum sale',value('minimum-sale-price') ? `$${value('minimum-sale-price')}` : 'Not set','pricing'],
+        ['Retail',value('sale-price') ? `$${value('sale-price')}` : 'Not entered','pricing']]),
       ['Barcode',value('scanned-barcode') || 'Generated when saving','information'],
       ['Stock',!document.getElementById('item-assign-stock').checked || document.getElementById('assignment-preview-box').classList.contains('hidden') ? 'Not assigned' : ['assignment-location','assignment-quantity'].map(id=>document.getElementById(id).textContent).join(' · '),'stock'],
       ['eBay',document.getElementById('ebay-sync-enabled').checked ? document.getElementById('ebay-category-id').selectedOptions[0]?.textContent || 'Choose category' : 'Inventory only','marketplace'],
@@ -254,11 +256,14 @@
     if (key === "information" && !value("category")) {
       return fail(index, document.getElementById("category-dropdown-toggle"), "Select or create an item category.");
     }
-    if (key === "pricing") {
+    if (key === 'pricing' && window.addItemPricing && !window.addItemPricing.validate()) {
+      return fail(index,document.getElementById('item-pricing-owner'),'Choose a pricing owner. If the list is unavailable, tap Retry pricing owners.');
+    }
+    if (key === "pricing" && !window.addItemPricing?.deferred()) {
       const price = Number(value("sale-price").replace(/,/g, ""));
       if (!Number.isFinite(price) || price <= 0) return fail(index, document.getElementById("sale-price"), "Enter a retail price greater than zero.");
     }
-    if (key === "pricing" && value("minimum-sale-price")) {
+    if (key === "pricing" && !window.addItemPricing?.deferred() && value("minimum-sale-price")) {
       const minimum = Number(value("minimum-sale-price"));
       const retail = Number(value("sale-price").replace(/,/g, ""));
       if (!Number.isFinite(minimum) || minimum < 0 || minimum > retail) return fail(index, document.getElementById("minimum-sale-price"), "Minimum sale price must be between zero and retail price.");
@@ -358,6 +363,7 @@
     descriptionForSave,
     getDraft: () => ({
       version: 2,
+      pricing: window.addItemPricing?.getDraft(),
       assignStock: document.getElementById("item-assign-stock").checked,
       autoCopy: document.getElementById("item-auto-copy").checked,
       step: steps[current].dataset.itemStep,
@@ -372,6 +378,7 @@
       jewelryAutoCost: usesDirectPricing() ? jewelryAutoCost : document.getElementById("auto-cost-checkbox").checked,
     }),
     restoreDraft: (draft = {}) => {
+      window.addItemPricing?.restore(draft.pricing);
       document.getElementById("item-assign-stock").checked = Boolean(draft.assignStock);
       document.getElementById("item-auto-copy").checked = draft.autoCopy !== false;
       document.getElementById("item-prepare-ebay").checked = document.getElementById("ebay-sync-enabled").checked;

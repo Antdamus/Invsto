@@ -92,6 +92,7 @@ const STOCK_WORKER_ITEM_SELECT = [
   "item_length",
   "sale_price",
   "minimum_sale_price",
+  "pricing_status",
   "watch_details",
   "coin_details",
   "barcode",
@@ -745,6 +746,7 @@ function buildLocationChips(item) {
             ${stockLabel}
           </div>
           <div class="ebay-card-badges">
+            ${item.pricing_status === 'pending' ? `<a class="ebay-sync-badge" href="inventory-pricing.html">Awaiting pricing ↗</a>` : ''}
             ${ebaySyncBadge}
             ${ebayCategoryBadge}
             ${ebayStatusBadge}
@@ -755,10 +757,10 @@ function buildLocationChips(item) {
           </div>
           <div class="stock-metric-grid">
             <span><small>Weight</small><strong>${Number(item.weight || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} g</strong></span>
-            <span><small>Retail</small><strong>${formatStockMoney(item.sale_price)}</strong></span>
+            <span><small>Retail</small><strong>${item.pricing_status === 'pending' ? 'Awaiting pricing' : formatStockMoney(item.sale_price)}</strong></span>
             <span><small>Minimum sale</small><strong>${item.minimum_sale_price == null ? "Not set" : formatStockMoney(item.minimum_sale_price)}</strong></span>
             <span><small>Barcode</small><button type="button" class="stock-barcode-btn" data-barcode="${escapeStockHtml(item.barcode || "")}">${escapeStockHtml(item.barcode || "-")}</button></span>
-            ${showSensitive ? `<span><small>Cost</small><strong>${formatStockMoney(item.cost)}</strong></span>` : ""}
+            ${showSensitive ? `<span><small>Cost</small><strong>${item.pricing_status === 'pending' ? 'Awaiting pricing' : formatStockMoney(item.cost)}</strong></span>` : ""}
           </div>
           <div class="stock-condition-summary">
             <span><small>Good</small><strong>${Number(stock || 0).toLocaleString()}</strong></span>

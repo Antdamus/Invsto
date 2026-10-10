@@ -177,3 +177,5 @@
 .intake-photo-navigation button:focus-visible { outline:2px solid var(--gold-strong); outline-offset:3px; }
 .intake-photo-navigation button:disabled { opacity:.45; cursor:default; }
 .intake-photo-navigation [role=status] { white-space:nowrap; color:var(--text-soft); font-size:.85rem; font-variant-numeric:tabular-nums; }
+#item-pricing-fields[hidden],#item-pricing-assignment[hidden]{display:none!important}
+.pricing-intake-choice{margin-bottom:24px}

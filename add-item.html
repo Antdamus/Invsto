@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="add-item.css?v=20260926-mobile" />
   <link rel="stylesheet" href="additembulk.css" />
   <link rel="stylesheet" href="additem-assisted.css" />
-  <link rel="stylesheet" href="additem-wizard.css?v=20260926-photo-navigation" />
+  <link rel="stylesheet" href="additem-wizard.css?v=20261010-pricing" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
@@ -448,13 +448,25 @@
                 <section class="form-section item-step" id="item-step-pricing" data-item-step="pricing" aria-labelledby="item-step-pricing-title" hidden>
           <div class="form-section-head">
             <p class="section-kicker">Pricing and Supplier</p>
-            <h2 class="section-title" id="item-step-pricing-title" tabindex="-1">Costing, Margin, and Source Details</h2>
+            <h2 class="section-title" id="item-step-pricing-title" tabindex="-1">Pricing and source</h2>
             <p class="section-copy">
-              Enter the item cost, minimum sale price, and retail price. Watches and coins use direct pricing; jewelry can use weight-based costing.
+              Save the item now and let the pricing owner set its cost and selling prices later.
             </p>
           </div>
 
-          <div class="form-grid form-grid-2">
+          <div class="form-grid form-grid-2 pricing-intake-choice">
+            <label class="form-field" for="item-pricing-mode"><span class="form-label">Pricing</span>
+              <select id="item-pricing-mode" class="add-input"><option value="later">Send to pricing queue (default)</option><option value="now">Set prices now</option></select>
+            </label>
+            <div id="item-pricing-assignment" class="form-field">
+              <label class="form-label" for="item-pricing-owner">Pricing owner</label>
+              <select id="item-pricing-owner" class="add-input" disabled required><option value="">Loading pricing owner…</option></select>
+              <span id="item-pricing-status" class="field-helper" role="status">Loading the default owner…</span>
+              <button type="button" id="item-pricing-retry" class="add-button-secondary" hidden>Retry pricing owners</button>
+              <a href="inventory-pricing.html" target="_blank" rel="noopener">Open pricing queue ↗</a>
+            </div>
+          </div>
+          <div id="item-pricing-fields" class="form-grid form-grid-2" hidden>
             <label class="form-field" for="price-per-weight">
               <span class="form-label">Price Per Weight</span>
               <input type="number" step="0.01" id="price-per-weight" placeholder="Price per Weight ($/g or $/ct)" class="add-input" />
@@ -484,7 +496,8 @@
               <span class="form-label">Retail price ($)</span>
               <input type="text" id="sale-price" placeholder="Enter retail price" inputmode="decimal" class="add-input" required />
             </label>
-
+          </div>
+          <div class="form-grid form-grid-2">
             <label class="form-field" for="distributor-name">
               <span class="form-label">Distributor Name</span>
               <input type="text" id="distributor-name" placeholder="Distributor Name (optional)" class="add-input" />
@@ -1019,16 +1032,17 @@
 
   <script src="initSupabase.js"></script>
   <script src="task-notifications.js?v=20261009-categories" defer></script>
-  <script src="admin-nav.js?v=packaging-20261008"></script>
+  <script src="admin-nav.js?v=20261010-pricing"></script>
   <script src="print-stations.js?v=20260929-shipping"></script>
   <script src="additem-dymolabel.js?v=20260927-all-labels"></script>
   <script src="additembulk.js?v=20260928-bulk-repair"></script>
   <link rel="stylesheet" href="coin-ebay.css?v=20260926-coins-ebay" />
   <script type="module" src="coin-ebay.js?v=20260926-fast-intake"></script>
   <script src="additem-layout.js?v=20260926-photo-navigation"></script>
-  <script src="additem-wizard.js?v=20260926-category-sync"></script>
-  <script src="additem.js?v=20260928-bulk-repair"></script>
+  <script src="additem-pricing.js?v=20261010-pricing"></script>
+  <script src="additem-wizard.js?v=20261010-pricing"></script>
+  <script src="additem.js?v=20261010-pricing"></script>
   <script src="additem-assisted.js?v=20260926-photo-navigation"></script>
-  <script src="additem-intake.js?v=20260928-bulk-repair"></script>
+  <script src="additem-intake.js?v=20261010-pricing"></script>
 </body>
 </html>

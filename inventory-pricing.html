@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0c1410"><title>Pricing · OG Inventory</title>
+  <link rel="stylesheet" href="dashboard.css"><link rel="stylesheet" href="inventory-pricing.css?v=20261010">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+</head>
+<body class="pricing-page">
+  <div class="page">
+  <main class="pricing-main">
+    <header class="pricing-heading"><div><p class="pricing-eyebrow">INVENTORY</p><h1>Pricing queue</h1><p>Set prices, or save an item for later.</p></div><a class="pricing-button" href="add-item.html">+ Add item</a></header>
+    <p id="pricing-message" role="status" aria-live="polite">Loading your queue…</p>
+    <div class="pricing-toolbar">
+      <label>Queue<select id="pricing-scope"><option value="mine">Assigned to me</option><option value="all">Everyone</option></select></label>
+      <label class="pricing-search">Find an item<input type="search" id="pricing-search" placeholder="Item name or barcode" maxlength="100"></label>
+      <button id="pricing-refresh" type="button">Refresh</button>
+    </div>
+    <nav class="pricing-tabs" aria-label="Pricing status">
+      <button type="button" data-pricing-status="waiting" aria-pressed="true">To price <b id="pricing-count-waiting">0</b></button>
+      <button type="button" data-pricing-status="skipped" aria-pressed="false">Skipped <b id="pricing-count-skipped">0</b></button>
+      <button type="button" data-pricing-status="priced" aria-pressed="false">Priced <b id="pricing-count-priced">0</b></button>
+    </nav>
+    <div class="pricing-workspace">
+      <section class="pricing-queue" aria-label="Items in queue">
+        <div class="pricing-queue-heading"><h2>In this queue</h2><span id="pricing-total"></span></div>
+        <label class="pricing-mobile-picker">Jump to an item<select id="pricing-picker"></select></label>
+        <div id="pricing-list"></div>
+        <div class="pricing-pagination"><button id="pricing-previous" type="button">Previous</button><span id="pricing-page"></span><button id="pricing-next" type="button">Next</button></div>
+      </section>
+      <section id="pricing-detail" class="pricing-detail" aria-label="Item to price"><div class="pricing-empty">Your items will appear here.</div></section>
+    </div>
+    <details id="pricing-settings" hidden><summary>Default pricing owner</summary><p>New items go to this person unless the employee chooses someone else. Existing assignments stay with their current owner.</p><form id="pricing-settings-form"><label>Default owner<select id="pricing-default-owner" required></select></label><button type="submit">Save default</button></form></details>
+  </main></div>
+  <dialog id="pricing-photo-dialog"><button type="button" id="pricing-photo-close" aria-label="Close full photo">Close ✕</button><img id="pricing-full-photo" alt="Full item photo"></dialog>
+  <script src="initSupabase.js"></script><script src="admin-nav.js?v=20261010-pricing"></script>
+  <script src="task-notifications.js?v=20261009-categories" defer></script>
+  <script src="inventory-pricing-core.js?v=20261010"></script><script src="inventory-pricing.js?v=20261010"></script>
+</body>
+</html>

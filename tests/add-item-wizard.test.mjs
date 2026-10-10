@@ -57,7 +57,7 @@ const mockServices = () => {
       }
       return { data: { images: [] } };
     } },
-    rpc:async(name,payload)=>{if(name==='set_item_label_print_preference')window.testLabelPreferences.push(payload);return {data:[]};},
+    rpc:async(name,payload)=>{if(name==='inventory_pricing_config')return {data:{default_owner:'pricing-owner',owners:[{user_id:'pricing-owner',name:'Otello Guillen'}]}};if(name==='set_item_label_print_preference')window.testLabelPreferences.push(payload);return {data:[]};},
     storage: { from: () => ({
       upload:async()=>window.testCopyFailure?{error:{message:'Storage offline'}}:{data:{}},
       download:async()=>({data:new Blob(['photo'])}),
@@ -114,7 +114,7 @@ before(async () => {
       let content = await readFile(new URL(name, root), "utf8");
       if (name.endsWith("html")) {
         content = content.replace(/<script src="([^"]+)"(?: defer)?><\/script>/g, (tag, src) =>
-          ["admin-nav.js", "additem-layout.js", "additem-wizard.js", "additem.js", "additem-assisted.js", "additem-intake.js", "barcode-scanner.js"].includes(src.split("?")[0]) ? tag : "");
+          ["admin-nav.js", "additem-layout.js", "additem-pricing.js", "additem-wizard.js", "additem.js", "additem-assisted.js", "additem-intake.js", "barcode-scanner.js"].includes(src.split("?")[0]) ? tag : "");
         content = content.replace("<head>", `<head><script>(${mockServices.toString()})();window.testCoinMetadata=${JSON.stringify(coinMetadata)};</script>`);
       }
       res.setHeader("Content-Type", name.endsWith("css") ? "text/css" : name.endsWith("js") ? "text/javascript" : "text/html");
@@ -130,7 +130,7 @@ after(async () => {
   await browser?.close();
 });
 
-async function pageFor(t, viewport = { width: 1365, height: 1000 }) {
+async function pageFor(t, viewport = { width: 1365, height: 1000 }, {deferred=false}={}) {
   const page = await browser.newPage({ viewport, isMobile: viewport.width <= 900, hasTouch: viewport.width <= 900 });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -141,11 +141,29 @@ async function pageFor(t, viewport = { width: 1365, height: 1000 }) {
   await page.waitForFunction(() => window.addItemIntake && document.getElementById("assisted-material").value);
   page.on("dialog",dialog=>dialog.dismiss());
   await page.locator("#item-auto-copy").uncheck();
+  if(!deferred)await page.evaluate(()=>window.addItemPricing.restore({mode:'now'}));
   t.after(async () => { await page.close(); assert.deepEqual(errors, []); });
   return page;
 }
 const step = (page) => page.locator("[data-item-step]:visible").getAttribute("data-item-step");
 const next = (page) => page.locator("#item-step-next").click();
+test('default deferred intake saves null prices with Otello assignment and retains it for similar items',async t=>{
+ const page=await pageFor(t,{width:390,height:844},{deferred:true});
+ await page.locator('[name="item-kind"][value="watch"]').check();
+ await page.locator('#watch-brand').fill('Cartier');await page.locator('#watch-model').fill('Santos');
+ await next(page);await next(page);
+ assert.equal(await page.locator('#item-pricing-mode').inputValue(),'later');
+ assert.equal(await page.locator('#item-pricing-owner').inputValue(),'pricing-owner');
+ assert.equal(await page.locator('#cost').isVisible(),false);
+ await next(page);await page.evaluate(()=>window.testSaveSuccess=true);
+ await page.getByRole('button',{name:'Save item',exact:true}).click();
+ await page.waitForFunction(()=>window.testWrites.length===1);
+ const saved=await page.evaluate(()=>window.testWrites[0]);
+ assert.equal(saved.cost,null);assert.equal(saved.sale_price,null);assert.equal(saved.minimum_sale_price,null);
+ assert.equal(saved.pricing_status,'pending');assert.equal(saved.pricing_owner,'pricing-owner');
+ await page.getByRole('button',{name:'Add similar item',exact:true}).click();
+ await next(page);await next(page);assert.equal(await page.locator('#item-pricing-mode').inputValue(),'later');
+});
 async function category(page, text) {
   await page.locator("#category-dropdown-toggle").click();
   await page.locator("#category-dropdown-search").fill(text);
@@ -161,7 +179,7 @@ async function prepareWatch(page,{auto=false}={}) {
  await next(page);
 }
 async function seed(page,{kind='coin',details={},main={},photos=[],step='information',assignStock=false}={}) {
- await page.evaluate(data=>localStorage.setItem('test-draft',JSON.stringify({payload:{activeWorkflow:'assisted',wizard:{version:2,step:data.step,furthest:6,itemKind:data.kind,autoCopy:false,assignStock:data.assignStock,coinDetails:{name:'Morgan dollar',year:'1881',metal:'Silver',fineness:'900',gradingStatus:'ungraded',...data.details},watchDetails:data.kind==='watch'?{brand:'Rolex',model:'126233',...data.details}:{}},mainFields:{category:data.kind==='watch'?'Watches':'Coins',title:'Collector item',description:'Known item details.',cost:'40',salePrice:'90',minimumSalePrice:'55',ebaySyncEnabled:false,...data.main},assistedFields:{material:'Silver',purity:'925'},recentUploadedImages:data.photos,saveSelectedUploadedImagePaths:data.photos.map(p=>p.path),aiSelectedUploadedImagePath:data.photos[0]?.path || ''}})),{kind,details,main,photos,step,assignStock});
+ await page.evaluate(data=>localStorage.setItem('test-draft',JSON.stringify({payload:{activeWorkflow:'assisted',wizard:{version:2,pricing:{mode:'now'},step:data.step,furthest:6,itemKind:data.kind,autoCopy:false,assignStock:data.assignStock,coinDetails:{name:'Morgan dollar',year:'1881',metal:'Silver',fineness:'900',gradingStatus:'ungraded',...data.details},watchDetails:data.kind==='watch'?{brand:'Rolex',model:'126233',...data.details}:{}},mainFields:{category:data.kind==='watch'?'Watches':'Coins',title:'Collector item',description:'Known item details.',cost:'40',salePrice:'90',minimumSalePrice:'55',ebaySyncEnabled:false,...data.main},assistedFields:{material:'Silver',purity:'925'},recentUploadedImages:data.photos,saveSelectedUploadedImagePaths:data.photos.map(p=>p.path),aiSelectedUploadedImagePath:data.photos[0]?.path || ''}})),{kind,details,main,photos,step,assignStock});
  await page.reload();await page.waitForFunction(()=>window.addItemIntake && window.addItemAssistedModule && document.getElementById('cost').value==='40');
 }
 const twoPhotos=[{path:'front.jpg',storageBucket:'photos',name:'Front',mimeType:'image/jpeg'},{path:'back.jpg',storageBucket:'photos',name:'Back',mimeType:'image/jpeg'}];

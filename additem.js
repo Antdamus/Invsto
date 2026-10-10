@@ -1334,6 +1334,7 @@ let uploadedImages = [];
 //#region functions needed to set the final sale cost of items
   //Cost & Sale Price Auto-Calculation
   function updateCostFromWeight() {
+    if (window.addItemPricing?.deferred()) return;
     if (window.addItemWizard?.usesDirectPricing()) return;
     if (!autoCostCheckbox?.checked) return;
     const weight = parseFloat(document.getElementById("weight")?.value || "0");
@@ -1379,6 +1380,7 @@ let uploadedImages = [];
     });
     pricePerWeightInput?.addEventListener('input', updateCostFromWeight);
     document.getElementById('cost')?.addEventListener('input', () => {
+      if (window.addItemPricing?.deferred()) return;
       if (window.addItemWizard?.usesDirectPricing()) {
         updateAddItemEbayReadiness();
         return;
@@ -3012,7 +3014,9 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const weight = weightInputValue ? parseFloat(weightInputValue) : null;
   const stone_type = coin_details ? null : document.getElementById("assisted-stone-type")?.value?.trim() || null;
   const item_length = coin_details ? null : document.getElementById("assisted-length")?.value?.trim() || null;
-  const price_per_weight = watch_details || coin_details ? null : parseFloat(pricePerWeightInput?.value || "0");
+  const deferredPricing = window.addItemPricing?.deferred() === true;
+  const pricingFields = window.addItemPricing?.fields() || {};
+  const price_per_weight = deferredPricing || watch_details || coin_details ? null : parseFloat(pricePerWeightInput?.value || "0");
   const materialPurity = getAssistedMaterialPurityForSave();
   const ebay_sync_enabled = document.getElementById("ebay-sync-enabled")?.checked !== false;
   const categories = [categoryValue];
@@ -3028,11 +3032,11 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
     releaseAddItemSubmit();
     return;
   }
-  const cost = parseFloat(document.getElementById("cost").value.replace(/,/g, ''));
-  const sale_price = parseFloat(document.getElementById("sale-price").value.replace(/,/g, ''));
+  const cost = deferredPricing ? null : Number(document.getElementById("cost").value.replace(/,/g, ''));
+  const sale_price = deferredPricing ? null : Number(document.getElementById("sale-price").value.replace(/,/g, ''));
   const minimumText = document.getElementById("minimum-sale-price").value.trim();
-  const minimum_sale_price = minimumText === "" ? null : Number(minimumText);
-  if (!Number.isFinite(sale_price) || sale_price <= 0 || (minimum_sale_price !== null && (!Number.isFinite(minimum_sale_price) || minimum_sale_price < 0 || minimum_sale_price > sale_price))) {
+  const minimum_sale_price = deferredPricing || minimumText === "" ? null : Number(minimumText);
+  if (!deferredPricing && (!document.getElementById('cost').value.trim() || !Number.isFinite(cost) || cost < 0 || !Number.isFinite(sale_price) || sale_price <= 0 || (minimum_sale_price !== null && (!Number.isFinite(minimum_sale_price) || minimum_sale_price < 0 || minimum_sale_price > sale_price)))) {
     showToast("Enter a positive retail price and a minimum sale price no higher than retail.");
     releaseAddItemSubmit();
     return;
@@ -3120,6 +3124,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const { data: insertedItems, error } = await supabase
     .from("item_types")
     .insert({
+      ...pricingFields,
       title,
       description,
       ...(watch_details ? { watch_details } : {}),

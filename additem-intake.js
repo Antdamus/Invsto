@@ -93,6 +93,7 @@
     $('item-save-success-barcode').textContent=`Barcode ${item.barcode}`;
     $('item-save-success-stock').textContent=options.stockSaved && options.stockInfo?`${options.stockInfo.quantity} units added to ${options.stockInfo.location_name}`:'No stock quantity assigned';
     $('item-save-success-copy').textContent=options.warnings.length?`Item saved. ${options.warnings.join(' ')}`:'Item and photos saved. You can print labels now or later from Stock.';
+    if(item.pricing_status==='pending')$('item-save-success-copy').textContent+=` Cost and selling prices are queued for ${window.addItemPricing?.ownerName() || 'the pricing owner'}.`;
     document.getElementById('item-retry-bag-save')?.remove();
     if(options.retryBulkBag){
       const retry=document.createElement('button');retry.id='item-retry-bag-save';retry.type='button';retry.className='add-button-secondary';retry.textContent='Retry bag save';

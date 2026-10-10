@@ -1,5 +1,7 @@
 # Add Item intake
 
+New items now default to deferred pricing: employees save facts/photos without cost or selling prices, and Otello receives them in the dedicated [Pricing queue](inventory-pricing.md). The owner is changeable per item; administrators can change the default. Set prices now retains the original immediate-pricing flow below.
+
 The normal path is **Identify → Photos → Pricing → Review**. Choosing “Assign location and quantity now” or “Prepare for eBay” adds those steps. Back, visited steps and Review's Edit buttons preserve entered values. Next validates the current step; saving validates the whole active route. Enter on earlier steps advances without saving.
 
 Watch intake asks for brand and reference once. Optional collection name, component materials, modifications, department and condition remain available. Watch and coin modes suggest inventory categories and use direct prices; jewelry retains weight-based cost calculation. Minimum sale price is internal, retail is the only listing price. Old missing minimum prices remain allowed.
