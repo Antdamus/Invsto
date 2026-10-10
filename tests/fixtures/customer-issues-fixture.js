@@ -14,7 +14,7 @@
  if(historyFixture){rows[0].source_lane='inquiry';rows[0].issue_kind='request';rows[0].raw_payload={ebayDetail:{inquiryId:rows[0].ebay_return_id,claimAmount:{value:97,currency:'USD'},inquiryHistoryDetails:{additionalInfo:savedHistory[0].description}}};}
  const line={id:'line-1',item_title:'Cartier Panthère',item_number:'287000000001',quantity:1,fulfilled_quantity:1,line_status:'fulfilled'};
  window.fixtureCalls=[];window.fixtureWrites=[];window.fixtureHealth=null;window.SUPABASE_URL='https://project.supabase.co';
- window.fixtureUpdateCase=changes=>{rows[0]={...rows[0],...changes,updated_at:new Date(Date.now()+1000).toISOString()};};
+ window.fixtureUpdateCase=(changes,index=0)=>{rows[index]={...rows[index],...changes,updated_at:new Date(Date.now()+1000).toISOString()};};
  window.fixtureSetTasks=value=>{tasks=value;};window.fixtureEvidence=null;window.fixtureLookup={matches:[]};window.fixtureItems=[];
  if(location.search.includes('bulkFixture'))window.fixtureItems=[{return_case_id:'case-2',received_quantity:1,restocked_quantity:0,disposition:'quarantine'}];
  function query(table){let filters=[],one=false,lim=999;const q={select(){return q;},eq(k,v){filters.push([k,v]);return q;},in(){return q;},order(){return q;},overlaps(){return q;},contains(){return q;},or(){return q;},not(){return q;},range(){return q;},limit(n){lim=n;return q;},single(){one=true;return q;},maybeSingle(){one=true;return q;},then(resolve){

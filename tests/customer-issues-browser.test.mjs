@@ -160,7 +160,7 @@ for(const width of [390,1366])test(`quick case review ${width}px: global sort, c
 });
 
 
-test('already resolved cases close directly into History without assignment on phone',async t=>{
+test('closing a case archives it without redirecting or filtering the working list on phone',async t=>{
  const page=await open(t,390);
  await page.evaluate(()=>fixtureUpdateCase({ebay_status:'CLOSED'}));
  await page.locator('.issue-card').first().click();
@@ -172,11 +172,39 @@ test('already resolved cases close directly into History without assignment on p
  await page.getByRole('checkbox',{name:'Everything is resolved; no further follow-up is needed.'}).check();
  await page.getByRole('textbox',{name:'Closing note (optional)'}).fill('Already handled with buyer');
  await page.getByRole('button',{name:'Mark closed & move to History',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Case closed',exact:true})).toBeVisible();
+ await expect(page.locator('#issues-feedback')).toContainText('Case saved in History.');
+ await expect(page.locator('[data-case="case-0"]')).toHaveCount(0);
+ await expect(page.locator('[data-case="case-1"]')).toBeVisible();
  await expect(page.getByRole('button',{name:'Create a task',exact:true})).toHaveCount(0);
  const writes=await page.evaluate(()=>fixtureWrites);assert.equal(writes.length,1);assert.equal(writes[0].name,'close_resolved_customer_issue');assert.equal(writes[0].args._confirmed,true);
- await expect(page.locator('[data-issue-view="history"]')).toHaveAttribute('aria-pressed','true');
- assert.ok(await page.locator('#issues-detail').evaluate(e=>e.scrollWidth<=e.clientWidth+1));
+ await expect(page.locator('[data-issue-view="attention"]')).toHaveAttribute('aria-pressed','true');
+ await expect(page.getByRole('searchbox',{name:'Search customer issues'})).toHaveValue('');
+ await expect(page.locator('.issues-columns')).not.toHaveClass(/is-selected/);
+ assert.ok(!new URL(page.url()).searchParams.has('caseId'));
+});
+
+for(const width of [390,1366])test(`single close ${width}px keeps filters, second page and the next card's position`,async t=>{
+ const page=await open(t,width);
+ await page.evaluate(()=>fixtureUpdateCase({ebay_status:'CLOSED'},31));
+ await page.getByRole('searchbox',{name:'Search customer issues'}).fill('buyer.');
+ await expect(page.locator('#issues-count')).toHaveText('35 active cases');
+ await page.getByRole('button',{name:'Next',exact:true}).click();
+ await expect(page.locator('[data-case="case-31"]')).toBeVisible();
+ await page.locator('[data-case="case-31"]').scrollIntoViewIfNeeded();
+ const top=await page.locator('[data-case="case-31"]').evaluate(e=>e.getBoundingClientRect().top);
+ await page.locator('[data-case="case-31"]').click();
+ await page.getByRole('button',{name:'Mark closed',exact:true}).click();
+ await page.getByRole('checkbox',{name:'Everything is resolved; no further follow-up is needed.'}).check();
+ await page.getByRole('button',{name:'Mark closed & move to History',exact:true}).click();
+ await expect(page.locator('#issues-feedback')).toContainText('Case saved in History.');
+ await expect(page.locator('[data-case="case-31"]')).toHaveCount(0);
+ await expect(page.locator('#issues-page')).toHaveText('31–34 of 34');
+ await expect(page.locator('[data-issue-view="attention"]')).toHaveAttribute('aria-pressed','true');
+ await expect(page.getByRole('searchbox',{name:'Search customer issues'})).toHaveValue('buyer.');
+ await expect(page.getByRole('combobox',{name:'Sort by',exact:true})).toHaveValue('newest');
+ await expect(page.getByRole('combobox',{name:'Responsibility'})).toHaveValue('all');
+ const afterTop=await page.locator('[data-case="case-32"]').evaluate(e=>e.getBoundingClientRect().top);
+ assert.ok(Math.abs(afterTop-top)<3,`next card moved ${afterTop-top}px`);
 });
 
 for(const width of [390,1366])test(`bulk close ${width}px: cross-page selection, confirmation and saved History`,async t=>{

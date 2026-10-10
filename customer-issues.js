@@ -12,6 +12,31 @@
  const PAGE=30;
  const BULK_LIMIT=60;
  let selecting=false,bulkSelection=new Map(),bulkReview=[],bulkReviewVersion=0;
+ let listReturnPosition=null,bulkReturnPosition=null;
+ const listContext=()=>JSON.stringify([view,scope,sort,search]);
+ function captureListPosition(id){
+  const cards=Array.from($('issues-list').querySelectorAll('[data-case]'));
+  const card=cards.find(el=>el.dataset.case===id)||cards.find(el=>el.getBoundingClientRect().bottom>80);
+  const index=Math.max(0,rows.findIndex(c=>c.id===card?.dataset.case));
+  const visibleTop=Math.max(root.matchMedia('(max-width:900px)').matches?76:16,($('issues-bulk-toolbar')?.getBoundingClientRect().bottom||0)+8);
+  return {context:listContext(),index,ids:[...rows.slice(index),...rows.slice(0,index).reverse()].map(c=>c.id),top:Math.max(visibleTop,card?.getBoundingClientRect().top??visibleTop),x:root.scrollX,y:root.scrollY};
+ }
+ function restoreListPosition(position){
+  if(!position||position.context!==listContext())return;
+  const cards=Array.from($('issues-list').querySelectorAll('[data-case]'));
+  const card=position.ids.map(id=>cards.find(el=>el.dataset.case===id)).find(Boolean)||cards[Math.min(position.index,cards.length-1)];
+  // Keep the next surviving card where the closed case was, even when the
+  // preceding rows disappeared or the last page became empty.
+  root.scrollTo({left:position.x,top:card?root.scrollY+card.getBoundingClientRect().top-position.top:position.y,behavior:'instant'});
+  card?.focus({preventScroll:true});
+ }
+ async function continueAfterClose(ids,position){
+  const removed=new Set(ids);rows=rows.filter(c=>!removed.has(c.id));
+  ids.forEach(id=>bulkSelection.delete(id));
+  closeCase();
+  await refresh({detail:false});
+  restoreListPosition(position);
+ }
  function closeBlock(c,items=[]){
   if(!c)return 'Case could not be loaded. Refresh and try again.';
   if(['closed','cancelled'].includes(c.status)&&!Number(c.open_tasks))return 'Already saved in History';
@@ -95,13 +120,14 @@
   bar.innerHTML=selecting?`<div class="issue-bulk-top"><strong aria-live="polite">${bulkSelection.size} selected</strong><button type="button" class="secondary-btn" data-bulk-done>Done selecting</button></div><div class="issue-bulk-actions"><button type="button" class="secondary-btn" data-bulk-page>Select eligible on this page</button><button type="button" class="secondary-btn" data-bulk-clear ${bulkSelection.size?'':'disabled'}>Clear</button><button type="button" class="primary-btn" data-bulk-review ${bulkSelection.size?'':'disabled'}>Mark selected closed (${bulkSelection.size})</button></div><p>Up to ${BULK_LIMIT} cases across pages. Only resolved cases can be closed.</p>`:'<button type="button" class="secondary-btn" data-bulk-start>Select cases</button>';
  }
  function clearBulk(){selecting=false;bulkSelection.clear();bulkToolbar();}
- function closeBulkDialog(){if(saving)return;bulkReviewVersion++;$('issues-bulk-dialog').close();}
+ function closeBulkDialog(){if(saving)return;bulkReviewVersion++;$('issues-bulk-dialog').close();restoreListPosition(bulkReturnPosition);bulkReturnPosition=null;}
  function bulkReviewRows(){
   return bulkReview.map((entry,index)=>`<li><strong>${escape(entry.c.buyer_username||'Buyer not identified')}</strong><span>${escape(entry.c.order_number||'Order not linked')} · Case ${escape(entry.c.ebay_return_id||'internal')}</span><p>${escape(entry.c.item_title||'')}</p><p id="bulk-case-result-${index}" class="${entry.blocked?'issue-form-error':'issue-subtitle'}">${escape(entry.blocked?'Stays open: '+entry.blocked:`Ready · ${entry.tasks.length} follow-up${entry.tasks.length===1?'':'s'} will also close`)}</p>${entry.tasks.length?`<details><summary>Review follow-ups (${entry.tasks.length})</summary>${entry.tasks.map(t=>`<p>${escape(t.title||'Follow-up')} · ${escape(person(t.assigned_to_user_id))} · ${escape(nice(t.status))}</p>`).join('')}</details>`:''}</li>`).join('');
  }
  async function reviewBulk(){
   if(ctx.employee.role!=='admin'||!bulkSelection.size||saving)return;
   clearTimeout(timer);const token=++bulkReviewVersion,cases=[...bulkSelection.values()];bulkReview=[];
+  bulkReturnPosition=captureListPosition();
   const dialog=$('issues-bulk-dialog');
   dialog.innerHTML='<h2 id="issues-bulk-title">Review selected cases</h2><p role="status">Checking current case status and follow-ups…</p><button type="button" class="secondary-btn" data-bulk-cancel>Cancel</button>';
   dialog.showModal();
@@ -127,6 +153,7 @@
    const values=new FormData(e.currentTarget);if(values.get('confirmed')!=='on')return;
    saving=true;dialog.querySelectorAll('button,input,textarea').forEach(el=>el.disabled=true);
    const progress=$('issue-bulk-progress');progress.textContent=`Closing 0 of ${eligible.length}… Keep this page open.`;
+   const completedIds=[];
    try{
     const results=await runCloseBatch(eligible,entry=>db.rpc('close_resolved_customer_issue',{
      _case_id:entry.c.id,_expected_updated_at:entry.c.updated_at,_expected_tasks:entry.tasks.map(t=>({id:t.id,updated_at:t.updated_at})),_confirmed:true,_note:values.get('note')||null
@@ -134,7 +161,7 @@
      const index=bulkReview.findIndex(e=>e.c.id===result.id),target=$('bulk-case-result-'+index);
      target.textContent=result.ok?'Closed · saved in History':'Not confirmed: '+result.error;
      target.classList.toggle('issue-form-error',!result.ok);
-     if(result.ok)bulkSelection.delete(result.id);
+     if(result.ok){bulkSelection.delete(result.id);completedIds.push(result.id);}
      progress.textContent=`Checked ${count} of ${eligible.length}… Keep this page open.`;
     });
     const completed=results.filter(r=>r.ok).length,failed=results.length-completed;
@@ -147,8 +174,7 @@
    }finally{
     saving=false;
     if(!bulkSelection.size)selecting=false;
-    closeCase();
-    await refresh({detail:false});
+    await continueAfterClose(completedIds,bulkReturnPosition);
    }
   };
  }
@@ -310,7 +336,7 @@
   const initialForm=$('issue-action-form');
   const scroll=quiet?$('issues-detail').scrollTop:0,conversationLimit=quiet?detail?.conversationLimit:undefined;
   const expanded=quiet?new Set(Array.from($('issues-detail').querySelectorAll('details[open]>summary'),el=>el.textContent)):null;
-  if(saving)return;selected=id;const stamp=++version;document.querySelector('.issues-columns').classList.add('is-selected');cards();
+  if(saving)return;if(!quiet&&selected!==id)listReturnPosition=captureListPosition(id);selected=id;const stamp=++version;document.querySelector('.issues-columns').classList.add('is-selected');cards();
   if(!quiet)$('issues-detail').innerHTML='<div class="issues-empty">Loading the case and its evidence…</div>';
   try{
    const [c,tasks,items,caseEvents]=await Promise.all([
@@ -370,10 +396,8 @@
   $('issue-action-form').onsubmit=e=>submitForm(e,async f=>checked(await db.rpc('close_resolved_customer_issue',{
    _case_id:c.id,_expected_updated_at:c.updated_at,_expected_tasks:snapshot,_confirmed:f.get('confirmed')==='on',_note:f.get('note')||null
   })),async()=>{
-   clearTimeout(timer);view='history';scope='all';search=c.ebay_return_id||c.order_number||c.buyer_username||'';offset=0;
-   $('issues-search').value=search;$('issues-scope').value=scope;
-   await refresh({detail:false});await openCase(c.id);
-   feedback('Case closed and saved in History. Photos, messages and activity are preserved.');
+   feedback('Case saved in History. Continue with the remaining cases here.');
+   await continueAfterClose([c.id],listReturnPosition);
   });
  }
  function inspectionForm(id){
