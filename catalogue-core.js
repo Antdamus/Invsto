@@ -26,7 +26,7 @@
   // Keep these rules aligned with catalogue_piece_type in the database migration.
   function categoryFor(item){
     if(categories.includes(item.piece_type))return item.piece_type;
-    const rules=[[/\b(watch|watches|wristwatch|wristwatches)\b/i,'Watches'],[/\b(earring|earrings|studs)\b/i,'Earrings'],[/\b(anklet|anklets)\b/i,'Anklets'],[/\b(bracelet|bracelets|bangle|bangles|cuff)\b/i,'Bracelets'],[/\b(pendant|pendants|charm|charms)\b/i,'Pendants'],[/\b(chain|chains)\b/i,'Chains'],[/\b(necklace|necklaces)\b/i,'Necklaces'],[/\b(ring|rings)\b/i,'Rings'],[/\b(brooch|brooches)\b/i,'Brooches'],[/\b(set|sets)\b/i,'Sets'],[/\b(coin|coins|bullion)\b/i,'Coins']];
+    const rules=[[/\b(pendant|pendants|charm|charms)\b/i,'Pendants'],[/\b(watch|watches|wristwatch|wristwatches)\b/i,'Watches'],[/\b(earring|earrings|studs)\b/i,'Earrings'],[/\b(anklet|anklets)\b/i,'Anklets'],[/\b(bracelet|bracelets|bangle|bangles|cuff)\b/i,'Bracelets'],[/\b(chain|chains)\b/i,'Chains'],[/\b(necklace|necklaces)\b/i,'Necklaces'],[/\b(ring|rings)\b/i,'Rings'],[/\b(brooch|brooches)\b/i,'Brooches'],[/\b(set|sets)\b/i,'Sets'],[/\b(coin|coins|bullion)\b/i,'Coins']];
     for(const text of [item.title||item.name||'',(item.categories||[]).join(' ')])for(const[pattern,type]of rules)if(pattern.test(text))return type;
     return 'Other';
   }

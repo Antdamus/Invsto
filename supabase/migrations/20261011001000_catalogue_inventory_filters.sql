@@ -5,11 +5,11 @@ returns text language plpgsql immutable set search_path=public as $$
 declare part text;
 begin
  foreach part in array array[coalesce(_title,''),array_to_string(coalesce(_categories,'{}'),' ')] loop
+  if part ~* '\m(pendant|pendants|charm|charms)\M' then return 'Pendants';end if;
   if part ~* '\m(watch|watches|wristwatch|wristwatches)\M' then return 'Watches';end if;
   if part ~* '\m(earring|earrings|studs)\M' then return 'Earrings';end if;
   if part ~* '\m(anklet|anklets)\M' then return 'Anklets';end if;
   if part ~* '\m(bracelet|bracelets|bangle|bangles|cuff)\M' then return 'Bracelets';end if;
-  if part ~* '\m(pendant|pendants|charm|charms)\M' then return 'Pendants';end if;
   if part ~* '\m(chain|chains)\M' then return 'Chains';end if;
   if part ~* '\m(necklace|necklaces)\M' then return 'Necklaces';end if;
   if part ~* '\m(ring|rings)\M' then return 'Rings';end if;

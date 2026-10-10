@@ -128,7 +128,7 @@ test('builder filters all inventory before pagination and combines metal, purity
 test('piece types distinguish chains and pendants, respect explicit titles, and do not use brand as watch proof',async()=>{
  const context={Intl,URL};vm.runInNewContext(await readFile(new URL('../catalogue-core.js',import.meta.url),'utf8'),context);const C=context.Catalogue;
  for(const [title,tags,want] of [
- ['Cartier Love ring',[],'Rings'],['Gold chain bracelet',['Chains'],'Bracelets'],['Diamond pendant with chain',['Necklaces'],'Pendants'],['10K Gold Curb Chain Necklace',[],'Chains'],['Pearl necklace',[],'Necklaces'],['Silver earrings',[],'Earrings'],['Datejust watch',[],'Watches'],['Unspecified piece',['Pendants'],'Pendants'],['Cartier',[],'Other']]){
+ ['Iced Watch Pendant with Crown Top in 925 Silver',['pendants'],'Pendants'],['Cartier Love ring',[],'Rings'],['Gold chain bracelet',['Chains'],'Bracelets'],['Diamond pendant with chain',['Necklaces'],'Pendants'],['10K Gold Curb Chain Necklace',[],'Chains'],['Pearl necklace',[],'Necklaces'],['Silver earrings',[],'Earrings'],['Datejust watch',[],'Watches'],['Unspecified piece',['Pendants'],'Pendants'],['Cartier',[],'Other']]){
   assert.equal(C.categoryFor({title,categories:tags}),want,title);
   assert.equal((await db.query('select catalogue_piece_type($1,$2) value',[title,tags])).rows[0].value,want,title);
  }
