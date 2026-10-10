@@ -1,4 +1,7 @@
 :root{--pk-bg:#101713;--pk-panel:#19231d;--pk-line:#354339;--pk-muted:#afbbb1;--pk-gold:#e6ca8d;--pk-text:#f3f1e8}
+.pack-hero .pack-queue-summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px;max-width:none}
+.pack-queue-summary strong{color:var(--pk-gold);font-size:1.2em;font-variant-numeric:tabular-nums}
+.pack-queue-summary span{font-size:.85em;color:var(--pk-muted)}
 body[data-page=packaging] .main{min-width:0;max-width:100%}body[data-page=packaging]::before{display:none}
 body[data-page=packaging] .menu-toggle i[data-lucide=menu]{display:block;position:relative;width:18px;height:14px;border-top:2px solid currentColor;border-bottom:2px solid currentColor}
 body[data-page=packaging] .menu-toggle i[data-lucide=menu]::after{content:"";position:absolute;left:0;right:0;top:4px;border-top:2px solid currentColor}

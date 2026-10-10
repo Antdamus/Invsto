@@ -36,6 +36,7 @@ before(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261008220000_packaging_reference_photos.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261008230000_packaging_buyer_queue.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261009064000_packaging_prior_dispatch_history.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261010185000_packaging_line_total.sql',import.meta.url),'utf8'));
 });
 beforeEach(async()=>{
  await db.exec(`set test.allowed='yes';set test.actor='${id(100)}';truncate ebay_order_admin_events,ebay_live_attempts,shared_inventory_bag_links,live_sale_bag_photos,live_sale_lots,live_bag_order_links,packaging_events,packaging_issues,packaging_evidence,packaging_items,packaging_shipments,packaging_handoffs,ebay_order_task_events,ebay_order_tasks,ebay_order_label_events,ebay_order_lines,ebay_orders,storage.objects cascade;update packaging_settings set enabled=true,activated_at=now();`);
@@ -204,12 +205,26 @@ test('buyer groups span pagination and more than fifty orders without dropping a
  await db.exec(`insert into ebay_orders(id,order_number,buyer_username,status,sale_date) select gen_random_uuid(),'extra-'||n,case when n<=60 then 'wholesale' else 'separate-'||n end,'pending',now() from generate_series(1,101) n;
  insert into ebay_order_lines(id,order_id,item_title,quantity,fulfilled_quantity,line_status) select gen_random_uuid(),id,'Ring',1,0,'pending' from ebay_orders where order_number like 'extra-%';
  update ebay_order_lines set line_status='fulfilled',fulfilled_quantity=quantity,fulfilled_at=now(),fulfilled_by=auth.uid() where item_title='Ring';`);
- const q=await call('queue');assert.equal(q.total,42);assert.equal(q.rows.length,40);
- const q2=await call('queue',{offset:40});assert.equal(q2.rows.length,2);
+ const q=await call('queue');assert.equal(q.total,42);assert.equal(q.rows.length,40);assert.equal(q.line_total,101);
+ const q2=await call('queue',{offset:40});assert.equal(q2.rows.length,2);assert.equal(q2.line_total,101);
  const all=[...q.rows,...q2.rows];assert.equal(new Set(all.map(r=>r.buyer_key)).size,42);
  const group=all.find(r=>r.title==='wholesale');assert.equal(group.order_ids.length,60);
  assert.equal((await call('queue',{search:'extra-60'})).rows[0].order_ids.length,60);
  assert.equal((await call('buyer',{buyer_order_id:group.order_id})).orders.length,60);
+ assert.equal((await call('queue',{search:'extra-60'})).line_total,60);
+});
+
+test('queue line total counts lines rather than units or orders and follows package status',async()=>{
+ await db.query("insert into ebay_order_lines(id,order_id,item_title,quantity,fulfilled_quantity,line_status) values($1,$2,'Bracelet',3,0,'pending')",[id(15),id(1)]);
+ await close();
+ const ready=await call('queue');assert.equal(ready.total,1);assert.equal(ready.order_total,1);assert.equal(ready.rows[0].item_count,5);assert.equal(ready.line_total,2);
+ assert.equal((await call('queue',{search:'no-match'})).line_total,0);
+ let d=await start();assert.equal((await call('queue')).line_total,0);assert.equal((await call('queue',{view:'in_progress'})).line_total,2);
+ d=await write('contents',d.shipment,{items:[{line_id:id(11),quantity:2}]});d=await proof(d);d=await write('pack',d.shipment,{confirm:true});
+ assert.equal((await call('queue',{view:'sending'})).line_total,1,'count only the line in the box');
+ assert.equal((await call('queue')).line_total,1,'unpacked line remains in the buyer queue');
+ d=await write('dispatch',d.shipment);assert.equal((await call('queue',{view:'history'})).line_total,1);
+ assert.equal((await call('queue')).line_total,1,'sent lines do not inflate remaining work');
 });
 
 test('same buyer and tracking resolve one shipment even with separate PDF copies',async()=>{

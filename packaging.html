@@ -3,7 +3,7 @@
 <head>
  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
  <meta name="theme-color" content="#101713"><title>Packaging · OG Jewelry</title>
- <link rel="stylesheet" href="dashboard.css"><link rel="stylesheet" href="packaging.css?v=20261008-buyers">
+ <link rel="stylesheet" href="dashboard.css"><link rel="stylesheet" href="packaging.css?v=20261010-line-total">
  <link rel="stylesheet" href="barcode-scanner.css">
   <link rel="stylesheet" href="order-certificates.css?v=20261009">
   <script src="order-certificates.js?v=20261009" defer></script>
@@ -11,7 +11,7 @@
 <body data-page="packaging">
  <div class="page"><aside class="sidebar"><div class="sidebar-inner"><div class="logo">OG</div><nav class="nav-links"></nav></div></aside>
  <div class="main"><main class="content packaging-page">
-  <header class="pack-hero"><div><span class="pack-eyebrow">FULFILLMENT · THE FINAL CHECK</span><h1>Packaging</h1><p>Every item checked. Every package accounted for.</p></div><button id="pack-refresh" class="pack-button" aria-label="Refresh packaging">↻ <span>Refresh</span></button></header>
+  <header class="pack-hero"><div><span class="pack-eyebrow">FULFILLMENT · THE FINAL CHECK</span><h1>Packaging</h1><p id="pack-queue-summary" class="pack-queue-summary" role="status" aria-live="polite">Loading order lines…</p></div><button id="pack-refresh" class="pack-button" aria-label="Refresh packaging">↻ <span>Refresh</span></button></header>
   <div id="pack-status" role="status" aria-live="polite"></div>
   <form id="pack-scan-form" class="pack-scan"><label for="pack-barcode">Scan a shipping label</label><div><input id="pack-barcode" placeholder="Scan or enter tracking number" autocomplete="off" autocapitalize="characters" spellcheck="false"><button type="button" class="pack-button" data-scan-target="pack-barcode" data-scan-action="pack-find" data-scan-hint="Scan the tracking barcode on the shipping label." aria-label="Scan label with camera">▣ <span>Camera</span></button><button id="pack-find" class="pack-button primary">Find package <span aria-hidden="true">→</span></button></div></form>
   <nav id="pack-tabs" class="pack-tabs" aria-label="Packaging queues"></nav>
@@ -28,5 +28,5 @@
  </dialog>
  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script><script src="initSupabase.js?v=5f6p2b-20260608"></script>
  <script src="admin-nav.js?v=packaging-20261008"></script><script src="task-notifications.js?v=20261009-categories" defer></script>
- <script src="barcode-scanner.js?v=20260926-closeup" defer></script><script src="packaging-media.js?v=20261008-buyers" defer></script><script src="packaging.js?v=prior-dispatch-20261009" defer></script>
+ <script src="barcode-scanner.js?v=20260926-closeup" defer></script><script src="packaging-media.js?v=20261008-buyers" defer></script><script src="packaging.js?v=20261010-line-total" defer></script>
 </body></html>
