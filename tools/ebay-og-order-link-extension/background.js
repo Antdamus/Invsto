@@ -1667,18 +1667,27 @@
     if (!appUrl) throw new Error("Set the OG Pending Orders URL in the extension options first.");
 
     const tabs = await findAppTabs(appUrl);
-    const pendingTab = tabs.find((tab) => {
+    const pendingTabs = tabs.filter((tab) => {
       const tabUrl = normalizeUrl(tab?.url);
       return tabUrl?.origin === appUrl.origin && /\/pending-orders\.html$/i.test(tabUrl.pathname);
     });
+    const pendingTab = pendingTabs[0];
     if (!pendingTab?.id) {
       throw new Error("Open OG Pending Orders in another tab, then click Prioritize OG Due Orders again.");
     }
 
-    const response = await chrome.tabs.sendMessage(pendingTab.id, {
-      type: "OG_EBAY_GET_PENDING_PRIORITIES",
-      payload,
-    });
+    let response;
+    // A second, older Invsto tab must not hide a ready updated queue from the
+    // shipping guard. This reads existing tabs without opening or focusing one.
+    for (const tab of payload.shippingSafetyCheck ? pendingTabs : [pendingTab]) {
+      try {
+        response = await chrome.tabs.sendMessage(tab.id, {type: "OG_EBAY_GET_PENDING_PRIORITIES", payload});
+        if (!payload.shippingSafetyCheck || (response?.ok && response.shippingCheckReady)) break;
+      } catch (error) {
+        if (!payload.shippingSafetyCheck) throw error;
+        response = {ok:false,error:error.message};
+      }
+    }
     if (!response?.ok) throw new Error(response?.error || "OG Pending Orders did not return due-order priorities.");
     pendingPriorityCache = response;
     pendingPriorityCacheAt = Date.now();

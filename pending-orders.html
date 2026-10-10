@@ -7,7 +7,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="pending-orders.css?v=line-customer-20261010" />
+  <link rel="stylesheet" href="pending-orders.css?v=combined-shipping-20261010" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
   <script src="extension-updates.js?v=20261003" defer></script>
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
@@ -382,7 +382,7 @@
         <div class="admin-order-actions-controls">
           <span id="admin-order-selected-count" class="count-pill">0 selected</span>
           <button id="admin-clear-order-selection" type="button" class="secondary-btn">Clear</button>
-          <button id="admin-open-ebay-labels" type="button" class="secondary-btn">Get eBay Labels</button>
+          <button id="admin-open-ebay-labels" type="button" class="secondary-btn">Create shipping labels</button>
           <button id="admin-mark-packed-no-stock" type="button" class="secondary-btn">Confirm Packed</button>
           <button id="admin-mark-cancelled" type="button" class="secondary-btn danger-btn">Close Selected</button>
           <button id="admin-select-visible-pending" type="button" class="secondary-btn">Select Visible</button>
@@ -615,7 +615,7 @@
                 <button type="button" class="secondary-btn" data-order-label-source="selected" data-order-label-picker="files">Upload label PDF / photo</button>
                 <button type="button" class="secondary-btn" data-order-label-source="selected" data-order-label-picker="camera">Take label photo</button>
                 <button type="button" class="secondary-btn" data-order-label-source="selected">View saved labels</button>
-                <button id="open-ebay-label-page" type="button" class="secondary-btn">Open eBay Label Page</button>
+                <button id="open-ebay-label-page" type="button" class="secondary-btn">Create shipping label</button>
                 <button id="preview-ebay-label" type="button" class="secondary-btn hidden">Preview Label</button>
         <button id="print-ebay-label" type="button" class="secondary-btn hidden">Print shipping label</button>
               </div>
@@ -1269,7 +1269,7 @@
     </div>
   </div>
   <script src="pending-order-chats.js?v=20261009"></script>
-  <script src="pending-orders.js?v=line-customer-20261010"></script>
+  <script src="pending-orders.js?v=combined-shipping-20261010"></script>
   <script src="pending-inventory.js?v=20261008-shared-bag-2"></script>
   <script src="pending-bag-scan.js?v=20261008-shared-inventory"></script>
   <script src="pending-orders-mobile.js?v=20261008-inventory-attachments"></script>

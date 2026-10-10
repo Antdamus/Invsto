@@ -198,7 +198,7 @@ async function injectLabel(page, metadata, transferId='batch-label') {
   }),{metadata,base64,transferId});
 }
 
-test('Get Label keeps two checked lines in the bulk flow even when they share one order number',async t=>{
+test('combined label stays available without selection and removes individual item label buttons',async t=>{
   const page=await open(t,database());
   await page.evaluate(()=>{
     const first=state.orders[0];
@@ -207,44 +207,47 @@ test('Get Label keeps two checked lines in the bulk flow even when they share on
     state.selectedLine=null;
     state.expandedBuyerKeys.add(getBuyerKey(first));
     window.labelWindows=[];
-    window.open=(url,target,features)=>{labelWindows.push({url,target,features});return null;};
+    window.open=()=>({location:{replace(url){labelWindows.push(url);}},close(){}});
     renderOrders();renderAdminOrderActions();
   });
+  await expect(page.locator('[data-line-open-label]')).toHaveCount(0);
+  await expect(page.locator('[data-buyer-label-key]')).toHaveText('Create combined label');
+  await expect(page.locator('[data-buyer-label-key]')).toBeEnabled();
   await page.locator('.buyer-card-expanded [data-admin-group-select]').check();
   await expect(page.locator('[data-admin-line-select]:checked')).toHaveCount(2);
   await page.locator('[data-buyer-label-key]').click();
-  assert.deepEqual(await page.evaluate(()=>labelWindows),[{
-    url:'https://www.ebay.com/ship/bulk?t=11-22222-33333',target:'_blank',features:'noopener,noreferrer',
-  }]);
+  await expect.poll(()=>page.evaluate(()=>labelWindows.length)).toBe(1);
+  assert.deepEqual(await page.evaluate(()=>labelWindows),['https://www.ebay.com/ship/bulk?t=11-22222-33333']);
   await page.locator('#admin-open-ebay-labels').click();
-  assert.equal(await page.evaluate(()=>labelWindows.at(-1).url),'https://www.ebay.com/ship/bulk?t=11-22222-33333');
+  await expect.poll(()=>page.evaluate(()=>labelWindows.length)).toBe(2);
   await expect(page.locator('[data-admin-line-select]:checked')).toHaveCount(2);
   await page.locator('[data-admin-line-select="line-b"]').uncheck();
   await page.locator('[data-buyer-label-key]').click();
-  assert.equal(await page.evaluate(()=>labelWindows.at(-1).url),'https://www.ebay.com/ship/single/11-22222-33333');
+  await expect.poll(()=>page.evaluate(()=>labelWindows.length)).toBe(3);
+  assert.equal(await page.evaluate(()=>labelWindows.at(-1)),'https://www.ebay.com/ship/bulk?t=11-22222-33333');
   await page.locator('[data-admin-line-select="line-a"]').uncheck();
-  await expect(page.locator('[data-buyer-label-key]')).toBeDisabled();
+  await expect(page.locator('[data-buyer-label-key]')).toBeEnabled();
   await expect(page.locator('#admin-open-ebay-labels')).toBeDisabled();
 });
 
 test('label launch preserves all selected orders, stays within the clicked buyer, and rejects incomplete identities',async t=>{
   const page=await open(t,database());
-  await page.evaluate(()=>{
+  await page.evaluate(async()=>{
     const extra={...state.orders[0],id:'other-line',order_id:'other-order',order:{order_number:'22-33333-55555',buyer_username:'other-buyer'}};
     state.orders.push(extra,{...extra,id:'closed-line',line_status:'fulfilled',order:{...extra.order,order_number:'33-44444-66666'}});
     state.adminSelectedLineIds=new Set(state.orders.map(line=>line.id));
     window.labelWindows=[];
-    window.open=url=>{labelWindows.push(url);return null;};
-    openBuyerGroupSelectedEbayLabelPages({lines:state.orders.slice(0,2)});
-    openAdminSelectedEbayLabelPages();
+    window.open=()=>({location:{replace(url){labelWindows.push(url);}},close(){}});
+    await openBuyerGroupSelectedEbayLabelPages({lines:state.orders.slice(0,2)});
+    await openAdminSelectedEbayLabelPages();
   });
   assert.deepEqual(await page.evaluate(()=>labelWindows),[
     'https://www.ebay.com/ship/bulk?t=11-22222-33333,11-22222-44444',
     'https://www.ebay.com/ship/bulk?t=11-22222-33333,11-22222-44444,22-33333-55555',
   ]);
-  await page.evaluate(()=>{
+  await page.evaluate(async()=>{
     state.orders[1].order.order_number='';
-    openBuyerGroupSelectedEbayLabelPages({lines:state.orders.slice(0,2)});
+    await openBuyerGroupSelectedEbayLabelPages({lines:state.orders.slice(0,2)});
   });
   assert.equal(await page.evaluate(()=>labelWindows.length),2,'never open a partial batch when an order number is missing');
 });
@@ -257,14 +260,15 @@ test('eleven selected items across eight orders show the item count and retain t
     state.orders=orders.flatMap((order,i)=>Array.from({length:i===7?4:1},(_,j)=>({...sample,order,order_id:order.id,id:`batch-line-${i}-${j}`,item_title:`Order ${i+1}, item ${j+1}`})));
     state.filteredOrders=state.orders;state.selectedLine=null;
     state.expandedBuyerKeys.add(getBuyerKey(state.orders[0]));
-    window.labelWindows=[];window.open=url=>{labelWindows.push(url);return null;};
+    window.labelWindows=[];window.open=()=>({location:{replace(url){labelWindows.push(url);}},close(){}});
     renderOrders();
   });
   await page.locator('.buyer-card-expanded [data-admin-group-select]').check();
   await expect(page.locator('[data-admin-line-select]:checked')).toHaveCount(11);
-  await expect(page.locator('[data-buyer-label-key]')).toHaveText('Get labels (11 items)');
-  await expect(page.locator('[data-buyer-label-key]')).toHaveAttribute('title',/11 selected item lines across 8 eBay orders/);
+  await expect(page.locator('[data-buyer-label-key]')).toHaveText('Create combined label');
+  await expect(page.locator('.buyer-combined-shipping')).toContainText('11 pending item lines');
   await page.locator('[data-buyer-label-key]').click();
+  await expect.poll(()=>page.evaluate(()=>labelWindows.length)).toBe(1);
   const address=new URL(await page.evaluate(()=>labelWindows[0]));
   assert.equal(address.pathname,'/ship/bulk');
   const sentOrders=address.searchParams.get('t').split(',');
@@ -273,7 +277,8 @@ test('eleven selected items across eight orders show the item count and retain t
   assert.equal(await page.evaluate(ids=>state.orders.filter(line=>ids.includes(line.order.order_number)).length,sentOrders),11);
   assert.equal(await page.evaluate(ids=>state.orders.filter(line=>line.order_id==='batch-order-7'&&ids.includes(line.order.order_number)).length,sentOrders),4);
   await page.locator('[data-admin-line-select="batch-line-7-3"]').uncheck();
-  await expect(page.locator('[data-buyer-label-key]')).toHaveText('Get labels (10 items)');
+  await expect(page.locator('[data-buyer-label-key]')).toHaveText('Create combined label');
+  await expect(page.locator('.buyer-combined-shipping')).toContainText('11 pending item lines');
 });
 
 test('injected label selects the full buyer batch in an open modal and completion sends every eligible line',async t=>{

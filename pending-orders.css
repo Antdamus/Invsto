@@ -1688,6 +1688,22 @@ textarea:focus {
   padding-inline: 18px;
 }
 
+.buyer-combined-shipping {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(231, 202, 133, .26);
+  border-radius: 14px;
+  background: rgba(231, 202, 133, .06);
+}
+.buyer-combined-shipping p { flex: 1 1 240px; margin: 0; color: #c9c4b8; font-size: .82rem; line-height: 1.5; }
+@media (max-width: 760px) {
+  .buyer-combined-shipping { gap: 8px; padding: 12px; }
+  .buyer-combined-shipping .buyer-card-label-btn { width: 100%; min-height: 44px; }
+}
+
 .buyer-line-btn:hover,
 .buyer-line-btn.is-selected {
   border-color: rgba(227, 189, 119, 0.4);
