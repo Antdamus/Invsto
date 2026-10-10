@@ -1,67 +1,77 @@
-/* Internal case notes, shared by the scrolling cards and case detail. */
+/* Internal notes expand in the case card; drafts survive list refreshes. */
 (function(root){
  'use strict';
  const escape=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const date=v=>new Date(v).toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
  const checked=r=>{if(r.error)throw r.error;return r.data;};
- let db,people=[],dialog,onChange,onClose,active=null,entries=[],count=0,busy=false,reading=false,request=null,epoch=0;
- const summaries=new Map();
+ const states=new Map();let db,people=[],workspace;
+ const phone=()=>!!root.matchMedia?.('(max-width:900px)').matches;
  const author=n=>people.find(p=>p.user_id===n.signed_by)?.display_name||n.signed_by_email||'Staff';
+ function state(id){if(!states.has(id))states.set(id,{notes:[],count:0,expanded:undefined,editing:false,draft:'',request:null,busy:false,loading:false,error:'',status:'',revision:0});return states.get(id);}
+ const expanded=s=>s.expanded??phone();
  function preview(n){return n?`<div class="issue-note-preview"><p>${escape(n.notes)}</p><small>${escape(author(n))} · ${escape(date(n.created_at))}</small></div>`:'';}
- function card(c){
-  const data=summaries.get(c.id);
-  return `<div class="issue-card-notes">${data?.error?'<small class="issue-notes-unavailable">Notes unavailable · open to retry</small>':preview(data?.notes?.[0])}<button type="button" class="issue-notes-button" data-case-notes="${escape(c.id)}" aria-label="${data?.note_count?'View notes':'Add a note'} for ${escape(c.buyer_username||c.order_number||'this case')}">${data?.note_count?`Notes (${data.note_count})`:'+ Add note'}</button></div>`;
+ function content(id,variant='card'){
+  const s=state(id),open=expanded(s),key=`case-notes-${variant}-${id}`,hasNotes=s.count>0;
+  return `<div class="issue-inline-notes ${open?'is-expanded':''}" data-note-case="${escape(id)}" data-note-variant="${variant}">
+   <div class="issue-notes-heading">${hasNotes?`<button type="button" class="issue-notes-button" data-note-toggle aria-expanded="${open}" aria-controls="${escape(key)}"><span aria-hidden="true">${open?'▾':'▸'}</span> Notes (${s.count})</button>`:variant==='detail'?'<h3>Internal notes</h3>':'<span></span>'}${!s.editing?`<button type="button" class="issue-notes-button" data-note-add ${s.loading?'disabled':''}>+ Add note</button>`:''}</div>
+   ${!open&&hasNotes?`<button type="button" class="issue-note-preview-button" data-note-toggle aria-expanded="false" aria-controls="${escape(key)}" aria-label="Expand case notes">${preview(s.notes[0])}</button>`:''}
+   <div id="${escape(key)}" ${open?'':'hidden'}>${s.notes.map(n=>`<article class="issue-note-entry"><header><strong>${escape(author(n))}</strong><time>${escape(date(n.created_at))}</time></header><p>${escape(n.notes)}</p></article>`).join('')}
+   ${s.count>s.notes.length?`<button type="button" class="issue-notes-button" data-note-more ${s.loading||s.editing?'disabled':''}>${s.loading?'Loading…':`Show older notes (${s.count-s.notes.length})`}</button>`:''}</div>
+   ${s.error?`<p class="issue-notes-unavailable" role="alert">${escape(s.error)}</p>${!s.editing?'<button type="button" class="issue-notes-button" data-note-retry>Retry loading notes</button>':''}`:''}
+   ${s.editing?`<form class="issue-inline-note-form" data-note-form><label for="${escape(key)}-draft">Add an internal note</label><textarea id="${escape(key)}-draft" maxlength="10000" rows="3" required placeholder="What did you check or do?" ${s.busy?'disabled':''}>${escape(s.draft)}</textarea><small>Visible to your team · not sent to the buyer or eBay.</small><div class="issue-notes-save"><button type="submit" class="primary-btn" ${s.busy||s.loading?'disabled':''}>${s.busy?'Saving…':'Save note'}</button><button type="button" class="secondary-btn" data-note-cancel ${s.busy?'disabled':''}>Cancel</button></div></form>`:''}
+   <span class="issue-note-status" role="status">${escape(s.status)}</span></div>`;
  }
- function section(c){return `<div class="issue-notes-heading"><h3>Internal notes</h3><button type="button" class="secondary-btn" data-case-notes="${escape(c.id)}">${summaries.get(c.id)?.note_count?'View / add notes':'+ Add note'}</button></div>${summaries.get(c.id)?.error?'<p class="issue-subtitle">Notes could not be loaded. Open Notes to retry.</p>':preview(summaries.get(c.id)?.notes?.[0])||'<p class="issue-subtitle">Keep a record of what you checked or did.</p>'}`;}
+ function card(c){return `<div class="issue-card-notes">${content(c.id)}</div>`;}
+ function section(c){return content(c.id,'detail');}
+ function panels(id){return Array.from(workspace?.querySelectorAll('[data-note-case]')||[]).filter(el=>el.dataset.noteCase===id);}
+ function repaint(id){for(const el of panels(id))el.outerHTML=content(id,el.dataset.noteVariant);}
+ function merge(s,row,append=false){
+  // Notes are append-only. Keep an expanded history when its head is unchanged;
+  // reset the page if another employee added notes, so offsets cannot skip any.
+  const sameHead=row.notes[0]?.id===s.notes[0]?.id;
+  const notes=append?[...s.notes,...row.notes]:sameHead&&s.notes.length>row.notes.length?s.notes:row.notes;
+  s.notes=[...new Map(notes.map(n=>[n.id,n])).values()];s.count=row.note_count;s.error='';
+ }
  async function load(ids){
-  if(!ids.length)return;
-  const stamp=epoch;
-  try{const data=checked(await db.rpc('customer_issue_notes',{_case_ids:ids,_limit:1,_offset:0}));if(stamp!==epoch)return;for(const row of data||[])summaries.set(row.case_id,row);}
-  catch{if(stamp===epoch)ids.forEach(id=>summaries.set(id,{...summaries.get(id),error:true}));}
- }
- function history(){
-  dialog.querySelector('[data-note-history]').innerHTML=entries.length?entries.map(n=>`<article class="issue-note-entry"><header><strong>${escape(author(n))}</strong><time>${escape(date(n.created_at))}</time></header><p>${escape(n.notes)}</p></article>`).join(''):'<p class="issue-subtitle">No internal notes yet.</p>';
-  const more=dialog.querySelector('[data-note-more]');more.hidden=entries.length>=count;more.disabled=false;
-  dialog.querySelector('[data-note-count]').textContent=`${count} note${count===1?'':'s'} · Latest first`;
- }
- async function readHistory(more=false){
-  if(busy||reading)return;reading=true;
-  const stamp=epoch,id=active.id,target=dialog.querySelector('[data-note-history-error]');target.textContent='';
-  dialog.querySelector('[type="submit"]').disabled=true;
-  dialog.querySelector('[data-note-more]').disabled=true;
+  if(!ids.length)return;const revisions=new Map(ids.map(id=>[id,state(id).revision]));
   try{
-   const result=checked(await db.rpc('customer_issue_notes',{_case_ids:[id],_limit:10,_offset:more?entries.length:0})),row=result?.[0];
-   if(stamp!==epoch)return;if(!row)throw Error('This case is no longer available.');
-   const merged=more?[...entries,...row.notes]:row.notes;entries=[...new Map(merged.map(n=>[n.id,n])).values()];count=row.note_count;
-   if(!more)summaries.set(id,{...row,notes:row.notes.slice(0,1)});
-   history();onChange?.(id);
-  }catch(error){if(stamp===epoch){target.textContent=error.message||'Could not load notes. Please retry.';dialog.querySelector('[data-note-more]').hidden=true;dialog.querySelector('[data-note-retry]').hidden=false;}}
-  finally{if(stamp===epoch){reading=false;dialog.querySelector('[type="submit"]').disabled=false;}}
+   const rows=checked(await db.rpc('customer_issue_notes',{_case_ids:ids,_limit:phone()?3:1,_offset:0}));
+   for(const row of rows||[]){const s=state(row.case_id);if(s.revision===revisions.get(row.case_id)&&!s.editing)merge(s,row);}
+  }catch{for(const id of ids){const s=state(id);if(s.revision===revisions.get(id)&&!s.editing)s.error='Notes unavailable. Please retry.';}}
  }
- function close(){if(busy)return;epoch++;dialog.close();onClose?.();}
- async function save(event){
-  event.preventDefault();if(busy||reading)return;
-  const input=dialog.querySelector('textarea'),body=input.value.trim(),status=dialog.querySelector('[data-note-status]');
-  if(!body){status.textContent='Write a note before saving.';input.focus();return;}
-  if(!request||request.note!==body)request={id:crypto.randomUUID(),note:body};
-  busy=true;dialog.querySelectorAll('button,textarea').forEach(el=>el.disabled=true);status.textContent='Saving…';
+ async function read(id,more=false){
+  const s=state(id);if(s.loading||s.busy)return;s.loading=true;s.error='';const revision=++s.revision;repaint(id);
   try{
-   const note=checked(await db.rpc('add_customer_issue_note',{_request_id:request.id,_case_id:active.id,_note:body}));
-   count=note.note_count??(count+(entries.some(n=>n.id===note.id)?0:1));
-   entries=[note,...entries.filter(n=>n.id!==note.id)];summaries.set(active.id,{case_id:active.id,note_count:count,notes:[note]});
-   request=null;input.value='';history();onChange?.(active.id);status.textContent='Note saved. Visible to your team.';
-  }catch(error){status.textContent=error.message||'Could not confirm the save. Your note is kept here; retry safely.';}
-  finally{busy=false;dialog.querySelectorAll('button,textarea').forEach(el=>el.disabled=false);}
+   const rows=checked(await db.rpc('customer_issue_notes',{_case_ids:[id],_limit:10,_offset:more?s.notes.length:0}));
+   if(revision!==s.revision)return;if(!rows?.[0])throw Error('This case is no longer available.');merge(s,rows[0],more);
+  }catch(error){if(revision===s.revision)s.error=error.message||'Could not load notes. Please retry.';}
+  finally{if(revision===s.revision){s.loading=false;repaint(id);}}
  }
- async function open(c,afterClose){
-  if(busy)return;active=c;onClose=afterClose;entries=[];count=0;request=null;reading=false;epoch++;
-  dialog.innerHTML=`<header class="issue-notes-dialog-heading"><div><h2 id="issue-notes-title">Case notes</h2><p>${escape(c.buyer_username||'Buyer')} · ${escape(c.order_number||'Order not linked')}</p><small>Case ${escape(c.ebay_return_id||'internal')}</small></div><button type="button" class="secondary-btn" data-note-close>Close</button></header><p class="issue-notes-private">Internal team notes · not sent to the buyer or eBay.</p><form><label for="issue-new-note">Add a note</label><textarea id="issue-new-note" maxlength="10000" rows="3" required placeholder="What did you check or do? What should the team know?"></textarea><div class="issue-notes-save"><span role="status" data-note-status></span><button type="submit" class="primary-btn">Save note</button></div></form><h3 data-note-count>Notes · Latest first</h3><p role="alert" class="issue-form-error" data-note-history-error></p><button type="button" class="secondary-btn" data-note-retry hidden>Retry loading notes</button><div data-note-history><p class="issue-subtitle">Loading notes…</p></div><button type="button" class="secondary-btn" data-note-more hidden>Show older notes</button>`;
-  dialog.querySelector('form').onsubmit=save;dialog.querySelector('[data-note-close]').onclick=close;
-  dialog.querySelector('[data-note-more]').onclick=()=>readHistory(true);
-  dialog.querySelector('[data-note-retry]').onclick=e=>{e.currentTarget.hidden=true;readHistory();};
-  dialog.showModal();dialog.querySelector('[data-note-close]').focus();
-  await readHistory();
+ async function save(id){
+  const s=state(id),body=s.draft.trim();if(s.busy||s.loading)return;
+  if(!body){s.status='Write a note before saving.';repaint(id);return;}
+  if(!s.request||s.request.note!==body)s.request={id:crypto.randomUUID(),note:body};
+  s.busy=true;s.error='';s.status='Saving…';s.revision++;repaint(id);
+  try{
+   const note=checked(await db.rpc('add_customer_issue_note',{_request_id:s.request.id,_case_id:id,_note:body}));
+   const expected=s.count+(s.notes.some(n=>n.id===note.id)?0:1);s.count=note.note_count??expected;s.notes=[note,...(s.count>expected?[]:s.notes.filter(n=>n.id!==note.id))];
+   s.request=null;s.draft='';s.editing=false;s.expanded=true;s.status='Note saved.';
+  }catch(error){s.error=error.message||'Could not confirm the save. Your note is kept here; retry safely.';s.status='';}
+  finally{s.busy=false;repaint(id);}
  }
- function init(options){db=options.db;people=options.people||[];onChange=options.onChange;dialog=document.getElementById('issue-notes-dialog');dialog.addEventListener('cancel',e=>{e.preventDefault();close();});}
- root.OGCaseNotes={init,load,card,section,open,get isOpen(){return !!dialog?.open;},testing:{preview}};
+ function init(options){
+  db=options.db;people=options.people||[];workspace=document.getElementById('issues-workspace');
+  workspace.addEventListener('click',e=>{
+   const b=e.target.closest('button'),panel=b?.closest('[data-note-case]');if(!panel)return;
+   const id=panel.dataset.noteCase,variant=panel.dataset.noteVariant,s=state(id);if(s.busy)return;
+   if(b.hasAttribute('data-note-toggle')){s.expanded=!expanded(s);repaint(id);if(s.expanded&&s.count>s.notes.length&&!s.loading)read(id);}
+   else if(b.hasAttribute('data-note-add')){s.editing=true;s.status='';repaint(id);panels(id).find(p=>p.dataset.noteVariant===variant)?.querySelector('textarea')?.focus({preventScroll:true});}
+   else if(b.hasAttribute('data-note-cancel')){s.editing=false;s.draft='';s.request=null;s.error='';s.status='';repaint(id);}
+   else if(b.hasAttribute('data-note-more'))read(id,true);
+   else if(b.hasAttribute('data-note-retry'))read(id);
+  });
+  workspace.addEventListener('input',e=>{const panel=e.target.closest('[data-note-case]');if(panel&&e.target.matches('textarea'))state(panel.dataset.noteCase).draft=e.target.value;});
+  workspace.addEventListener('submit',e=>{if(!e.target.matches('[data-note-form]'))return;e.preventDefault();const id=e.target.closest('[data-note-case]').dataset.noteCase;state(id).draft=e.target.querySelector('textarea').value;save(id);});
+ }
+ root.OGCaseNotes={init,load,card,section,get isEditing(){return [...states.values()].some(s=>s.editing||s.busy);},testing:{preview,state,expanded,read,save}};
 })(globalThis);
