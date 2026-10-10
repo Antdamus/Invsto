@@ -10,12 +10,13 @@ before(async()=>{
  create table auth.users(id uuid primary key);insert into auth.users values('${uid}');
  create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('test.uid',true),'')::uuid$$;
  create function public.can_manage_inventory() returns boolean language sql stable as $$select current_setting('test.staff',true)='yes'$$;
- create table item_types(id uuid primary key,title text,description text,sale_price numeric,pricing_status text,barcode text,photos text[],photo_url text,categories text[],created_at timestamptz default now(),deleted_at timestamptz,cost numeric,minimum_sale_price numeric,distributor_notes text);
+ create table item_types(id uuid primary key,title text,description text,sale_price numeric,pricing_status text,barcode text,photos text[],photo_url text,categories text[],metal text,purity_basis_points integer,created_at timestamptz default now(),deleted_at timestamptz,cost numeric,minimum_sale_price numeric,distributor_notes text);
  insert into item_types(id,title,description,sale_price,pricing_status,photos,cost,minimum_sale_price,distributor_notes) values
  ('${item}','Diamond watch','A beautiful watch',5210,'ready',array['watch/1.jpg','watch/2.jpg'],1800,2300,'PRIVATE'),
  ('${pending}','Unpriced ring','Ring',null,'pending',array['ring.jpg'],null,null,'PRIVATE');
  set test.uid='${uid}';set test.staff='yes';`);
  await db.exec(await readFile(new URL('../supabase/migrations/20261010210000_inventory_catalogues.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261011001000_catalogue_inventory_filters.sql',import.meta.url),'utf8'));
 });
 after(()=>db?.close());
 const selection=[{id:item,category:'Watches',photos:['watch/1.jpg']}];
@@ -97,4 +98,44 @@ test('Edge endpoint never exposes internal fields even if upstream returns them;
  assert.deepEqual(JSON.parse(JSON.stringify(requested)),[{bucket:'photos',paths:['watch/1.jpg']}]);
  assert.ok(!JSON.stringify(data).includes('SECRET'));assert.ok(!JSON.stringify(data).includes('cost'));
  const invalid=await handler(new Request('https://edge.example/?catalogue=bad'));assert.equal(invalid.status,404);
+});
+
+
+test('builder filters all inventory before pagination and combines metal, purity, type and search',async()=>{
+ await db.exec(`insert into item_types(id,title,metal,purity_basis_points,barcode,sale_price,photos,categories)
+ select gen_random_uuid(),'14K Gold Chain Bracelet '||n,'gold',5833,'FILTER-'||n,1200,array['test.jpg'],array['Chains'] from generate_series(1,30) n;
+ insert into item_types(id,title,metal,purity_basis_points,barcode,sale_price,photos,categories) values
+ (gen_random_uuid(),'925 Sterling Silver Pendant','silver',9250,'FILTER-P',250,array['test.jpg'],array['Necklaces']),
+ (gen_random_uuid(),'18K Gold Chain','gold',7500,'FILTER-C',2000,array['test.jpg'],array['Necklaces']),
+ (gen_random_uuid(),'Unspecified material bracelet',null,null,'FILTER-U',100,array['test.jpg'],'{}');`);
+ const browse=async(args=[])=>(await db.query('select browse_catalogue_inventory($1,$2,$3,$4,$5) result',args.length?args:['',0,'','',''])).rows[0].result;
+ const first=await browse(['FILTER',0,'gold','5833','Bracelets']);
+ assert.equal(first.total,30);assert.equal(first.items.length,24);
+ assert.ok(first.items.every(i=>i.material==='gold' && i.purity_basis_points===5833 && i.piece_type==='Bracelets'));
+ const second=await browse(['FILTER',24,'gold','5833','Bracelets']);assert.equal(second.items.length,6);
+ assert.equal(new Set([...first.items,...second.items].map(i=>i.id)).size,30);
+ assert.ok(first.facets.purities.every(p=>p.material==='gold'));
+ assert.equal((await browse(['FILTER',0,'silver','9250','Pendants'])).total,1);
+ assert.equal((await browse(['FILTER',0,'gold','7500','Chains'])).total,1);
+ assert.equal((await browse(['FILTER',0,'silver','9250','Chains'])).total,0);
+ assert.equal((await browse(['FILTER',0,'unspecified','unspecified','Bracelets'])).total,1);
+ assert.ok(!JSON.stringify(first).includes('cost'));
+ await db.exec("set role anon");await assert.rejects(browse(),/permission denied/);
+ await db.exec("reset role;set test.staff='no';set role authenticated");await assert.rejects(browse(),/staff access/);
+ await db.exec("reset role;set test.staff='yes'");
+});
+
+test('piece types distinguish chains and pendants, respect explicit titles, and do not use brand as watch proof',async()=>{
+ const context={Intl,URL};vm.runInNewContext(await readFile(new URL('../catalogue-core.js',import.meta.url),'utf8'),context);const C=context.Catalogue;
+ for(const [title,tags,want] of [
+ ['Cartier Love ring',[],'Rings'],['Gold chain bracelet',['Chains'],'Bracelets'],['Diamond pendant with chain',['Necklaces'],'Pendants'],['10K Gold Curb Chain Necklace',[],'Chains'],['Pearl necklace',[],'Necklaces'],['Silver earrings',[],'Earrings'],['Datejust watch',[],'Watches'],['Unspecified piece',['Pendants'],'Pendants'],['Cartier',[],'Other']]){
+  assert.equal(C.categoryFor({title,categories:tags}),want,title);
+  assert.equal((await db.query('select catalogue_piece_type($1,$2) value',[title,tags])).rows[0].value,want,title);
+ }
+ assert.equal(C.clientCategory({name:'14K pendant',category:'Necklaces'}),'Pendants');
+ assert.equal(C.clientCategory({name:'Chain bracelet',category:'Bracelets'}),'Bracelets');
+ for(const category of ['Chains','Pendants','Anklets','Coins']){
+  const saved=await save({items:[{...selection[0],category}],publish:true});
+  assert.equal((await shared(saved.share_token)).items[0].category,category);
+ }
 });

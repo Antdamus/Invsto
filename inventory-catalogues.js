@@ -1,7 +1,7 @@
 (() => {
  'use strict';
  const C=window.Catalogue,$=id=>document.getElementById(id),images=new Map(),imageExpiry=new Map(),inventory=new Map();
- let client,record=null,chosen=[],catalogues=[],page=[],total=0,offset=0,tab='browse',dirty=false,busy=false,search='',queryVersion=0,previewWindow=null;
+ let client,record=null,chosen=[],catalogues=[],page=[],total=0,offset=0,tab='browse',dirty=false,busy=false,search='',material='',purity='',pieceType='',queryVersion=0,previewWindow=null;
  const paths=i=>[...new Set([...(Array.isArray(i.photos)?i.photos:[]),i.photo_url].filter(p=>typeof p==='string' && p.trim()))];
  const eligible=i=>i && i.pricing_status!=='pending' && Number.isFinite(Number(i.sale_price)) && Number(i.sale_price)>0 && paths(i).length;
  function message(text,error=false){$('manager-message').textContent=text;$('manager-message').className=error?'error':'';}
@@ -31,7 +31,7 @@
  function share(){const live=record?.status==='published';$('share-panel').hidden=!live;if(live){const url='https://www.og-jewelers.com/private-catalogue#'+record.share_token;$('catalogue-link').value=url;$('open-client-link').href=url;}}
  async function open(c=null){
   if(dirty && !window.confirm('Discard your unsaved catalogue changes?'))return;
-  record=c;chosen=JSON.parse(JSON.stringify(c?.items||[]));dirty=false;tab=chosen.length?'selected':'browse';offset=0;search='';$('inventory-search').value='';
+  record=c;chosen=JSON.parse(JSON.stringify(c?.items||[]));dirty=false;tab=chosen.length?'selected':'browse';offset=0;search='';material='';purity='';pieceType='';for(const id of ['inventory-search','inventory-material','inventory-purity','inventory-type'])$(id).value='';
   $('catalogue-name').value=c?.title||'';$('catalogue-welcome').value=c?.introduction||'';$('catalogue-credit').value=c?.credit??'';
   $('editor-heading').textContent=c?'Edit catalogue':'New catalogue';$('catalogue-editor').hidden=false;share();renderList();summary();
   if(chosen.length){
@@ -40,18 +40,29 @@
   }else await browse();
  }
  async function browse(){
-  const version=++queryVersion;message('Loading inventory…');
-  try{const result=await rpc('catalogue_inventory',{_search:search,_offset:offset});if(version!==queryVersion)return;page=result.items;total=result.total;for(const i of page)inventory.set(i.id,i);await signPhotos(page);if(version!==queryVersion)return;renderInventory();message('');}catch(e){if(version===queryVersion)message(e.message,true);}
+  const version=++queryVersion;message('Loading inventory…');$('inventory-results').setAttribute('aria-busy','true');$('inventory-results').innerHTML='<p class="manager-empty">Finding matching pieces…</p>';$('inventory-previous').disabled=true;$('inventory-next').disabled=true;
+  try{const result=await rpc('browse_catalogue_inventory',{_search:search,_offset:offset,_material:material,_purity:purity,_type:pieceType});if(version!==queryVersion)return;page=result.items;total=result.total;renderFacets(result.facets||{});for(const i of page)inventory.set(i.id,i);await signPhotos(page);if(version!==queryVersion)return;renderInventory();message('');}catch(e){if(version===queryVersion){message(e.message,true);$('inventory-results').innerHTML='<p class="manager-empty">Inventory could not load. Try Search again.</p>';}}finally{if(version===queryVersion)$('inventory-results').removeAttribute('aria-busy');}
+ }
+ function renderFacets(facets){
+  const materialName=value=>value==='unspecified'?'Not specified':value.charAt(0).toUpperCase()+value.slice(1);
+  const options=(id,all,values,current)=>{const unique=new Map(values);if(current&&!unique.has(current))unique.set(current,current==='unspecified'?'Not specified':current);$(id).innerHTML='<option value="">'+all+'</option>'+[...unique].map(([v,label])=>`<option value="${C.escape(v)}">${C.escape(label)}</option>`).join('');$(id).value=current;};
+  options('inventory-material','All materials',(facets.materials||[]).map(v=>[v,materialName(v)]),material);
+  options('inventory-type','All types',C.categories.filter(v=>(facets.types||[]).includes(v)).map(v=>[v,v]),pieceType);
+  const purities=(facets.purities||[]).map(p=>[p.value,C.purityLabel(p.value,p.material==='unspecified'?'':p.material)]);
+  options('inventory-purity','All purities',purities,purity);
+  const active=[material&&materialName(material),purity&&$('inventory-purity').selectedOptions[0]?.textContent,pieceType].filter(Boolean);
+  $('inventory-filter-summary').textContent=`${total} matching ${total===1?'piece':'pieces'}${active.length?' · '+active.join(' · '):''}`;
+  $('inventory-clear-filters').disabled=!(search||material||purity||pieceType);
  }
  function priceEditor(s){return `<label class="custom-price-check"><input type="checkbox" data-custom-price="${C.escape(s.id)}" ${s.retail_override!=null?'checked':''}> Set a custom client price</label><label class="custom-price-input" ${s.retail_override==null?'hidden':''}>Client price · USD<input type="number" data-price-item="${C.escape(s.id)}" value="${C.escape(s.retail_override??'')}" min="0.01" max="99999999.99" step="0.01" inputmode="decimal"></label><p>${s.retail_override!=null?'Only this price is shown to clients. Inventory is unchanged.':'Uses the current inventory retail price.'}</p>`;}
  function itemCard(id){
   const i=inventory.get(id),s=chosen.find(c=>c.id===id),index=chosen.findIndex(c=>c.id===id),itemPhotos=i?paths(i):[];
   const src=images.get(s?.photos?.[0]||itemPhotos[0]),ready=eligible(i);
-  return `<article class="inventory-piece ${s?'chosen':''}">${src?`<img loading="lazy" src="${C.escape(src)}" alt="${C.escape(i?.title||'Item')}">`:'<div class="no-image">No photo</div>'}<div class="inventory-piece-body"><h3>${C.escape(i?.title||'Item no longer available')}</h3><small>${C.escape(i?.barcode||'')}</small><div class="retail"><strong>${i?.pricing_status==='pending'?'Pending pricing':Number(i?.sale_price)>0?C.money(i.sale_price):'Price needed'}</strong><span>Retail · USD</span></div>${!ready?`<p class="warning">${!i?'Remove this unavailable item.':!itemPhotos.length?'Add a photo in inventory first.':'Finish pricing before adding.'}</p>`:''}<button data-choose="${C.escape(id)}" ${!s && !ready?'disabled':''}>${s?'✓ Selected · Remove':'＋ Add to catalogue'}</button>${tab==='selected' && s?`<div class="piece-editor">${priceEditor(s)}<label>Client category<select data-category-item="${C.escape(id)}">${C.categories.map(c=>`<option ${c===s.category?'selected':''}>${c}</option>`).join('')}</select></label><label>Photos to share</label><p>The first chosen photo is the cover. Select up to eight.</p><div class="photo-choices">${itemPhotos.map((p,n)=>`<label class="photo-choice">${images.get(p)?`<img loading="lazy" src="${C.escape(images.get(p))}" alt="Photo ${n+1}">`:'<span>Photo</span>'}<input type="checkbox" data-item-photo="${C.escape(id)}" data-photo-index="${n}" aria-label="Share photo ${n+1} of ${C.escape(i.title)}" ${s.photos.includes(p)?'checked':''}></label>`).join('')}</div><div class="piece-order"><button data-move="${id}" data-direction="-1" ${index===0?'disabled':''} aria-label="Move ${C.escape(i?.title)} earlier">↑ Earlier</button><button data-move="${id}" data-direction="1" ${index===chosen.length-1?'disabled':''} aria-label="Move ${C.escape(i?.title)} later">↓ Later</button></div></div>`:''}</div></article>`;
+  return `<article class="inventory-piece ${s?'chosen':''}">${src?`<img loading="lazy" src="${C.escape(src)}" alt="${C.escape(i?.title||'Item')}">`:'<div class="no-image">No photo</div>'}<div class="inventory-piece-body"><h3>${C.escape(i?.title||'Item no longer available')}</h3><small>${C.escape(i?.barcode||'')}</small><div class="retail"><strong>${i?.pricing_status==='pending'?'Pending pricing':Number(i?.sale_price)>0?C.money(i.sale_price):'Price needed'}</strong><span>Retail · USD</span></div>${!ready?`<p class="warning">${!i?'Remove this unavailable item.':!itemPhotos.length?'Add a photo in inventory first.':'Finish pricing before adding.'}</p>`:''}<button data-choose="${C.escape(id)}" ${!s && !ready?'disabled':''}>${s?'✓ Selected · Remove':'＋ Add to catalogue'}</button>${tab==='selected' && s?`<div class="piece-editor">${priceEditor(s)}<label>Client piece type<select data-category-item="${C.escape(id)}">${C.categories.map(c=>`<option ${c===s.category?'selected':''}>${c}</option>`).join('')}</select></label><label>Photos to share</label><p>The first chosen photo is the cover. Select up to eight.</p><div class="photo-choices">${itemPhotos.map((p,n)=>`<label class="photo-choice">${images.get(p)?`<img loading="lazy" src="${C.escape(images.get(p))}" alt="Photo ${n+1}">`:'<span>Photo</span>'}<input type="checkbox" data-item-photo="${C.escape(id)}" data-photo-index="${n}" aria-label="Share photo ${n+1} of ${C.escape(i.title)}" ${s.photos.includes(p)?'checked':''}></label>`).join('')}</div><div class="piece-order"><button data-move="${id}" data-direction="-1" ${index===0?'disabled':''} aria-label="Move ${C.escape(i?.title)} earlier">↑ Earlier</button><button data-move="${id}" data-direction="1" ${index===chosen.length-1?'disabled':''} aria-label="Move ${C.escape(i?.title)} later">↓ Later</button></div></div>`:''}</div></article>`;
  }
  function renderInventory(){
   $('browse-tab').setAttribute('aria-pressed',String(tab==='browse'));$('selected-tab').setAttribute('aria-pressed',String(tab==='selected'));
-  $('inventory-search-bar').hidden=tab==='selected';$('inventory-pagination').hidden=tab==='selected';
+  $('inventory-browser-tools').hidden=tab==='selected';$('inventory-pagination').hidden=tab==='selected';
   const ids=tab==='selected'?chosen.map(i=>i.id):page.map(i=>i.id);
   $('inventory-results').innerHTML=ids.length?ids.map(itemCard).join(''):`<p class="manager-empty">${tab==='selected'?'Choose inventory to add your first piece.':'No inventory matches this search.'}</p>`;
   $('inventory-range').textContent=total?`${offset+1}–${Math.min(offset+24,total)} of ${total}`:'0 pieces';$('inventory-previous').disabled=offset===0;$('inventory-next').disabled=offset+24>=total;summary();
@@ -72,7 +83,7 @@
  async function previewData(){
   const args=payload(true);await signPhotos(chosen.map(s=>inventory.get(s.id)));
   // Same strict allowlist as the server. Never post full inventory records.
-  return{title:args._title,introduction:args._introduction,credit:args._credit,currency:'USD',items:chosen.map(s=>{const i=inventory.get(s.id);return{id:i.id,name:i.title,description:i.description||'',retail_price:s.retail_override??i.sale_price,category:s.category,images:s.photos.map(p=>images.get(p)).filter(Boolean)};})};
+  return{title:args._title,introduction:args._introduction,credit:args._credit,currency:'USD',items:chosen.map(s=>{const i=inventory.get(s.id);return{id:i.id,name:i.title,description:i.description||'',retail_price:s.retail_override??i.sale_price,category:C.clientCategory({...i,category:s.category}),images:s.photos.map(p=>images.get(p)).filter(Boolean)};})};
  }
  document.addEventListener('click',async event=>{
   const b=event.target.closest('button');if(!b||busy)return;
@@ -89,7 +100,9 @@
  for(const id of ['catalogue-name','catalogue-welcome','catalogue-credit'])$(id).addEventListener('input',markDirty);
  $('new-catalogue').addEventListener('click',()=>open());
  $('browse-tab').addEventListener('click',()=>{tab='browse';browse();});$('selected-tab').addEventListener('click',()=>{tab='selected';renderInventory();});
- const doSearch=()=>{offset=0;search=$('inventory-search').value.trim();browse();};$('inventory-search-button').addEventListener('click',doSearch);$('inventory-search').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
+ const doSearch=()=>{offset=0;search=$('inventory-search').value.trim();material=$('inventory-material').value;purity=$('inventory-purity').value;pieceType=$('inventory-type').value;browse();};$('inventory-search-button').addEventListener('click',doSearch);$('inventory-search').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
+ for(const id of ['inventory-material','inventory-purity','inventory-type'])$(id).addEventListener('change',()=>{if(id==='inventory-material')$('inventory-purity').value='';doSearch();});
+ $('inventory-clear-filters').addEventListener('click',()=>{for(const id of ['inventory-search','inventory-material','inventory-purity','inventory-type'])$(id).value='';doSearch();});
  $('inventory-previous').addEventListener('click',()=>{offset=Math.max(0,offset-24);browse();});$('inventory-next').addEventListener('click',()=>{offset+=24;browse();});
  $('save-catalogue').addEventListener('click',()=>save(record?.status==='published'));
  $('publish-catalogue').addEventListener('click',()=>{try{const p=payload(true);$('publish-summary').textContent=`${p._title} · ${chosen.length} pieces${p._credit!==null?` · ${C.money(p._credit)} client credit`:''}. Anyone with the link can view it.`;$('publish-dialog').showModal();}catch(e){message(e.message,true);}});

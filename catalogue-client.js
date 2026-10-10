@@ -21,6 +21,7 @@
  }
  function render(){
   if(!catalogue)return;
+  catalogue.items=catalogue.items.map(i=>({...i,category:C.clientCategory(i)}));
   const focus=document.activeElement,focusCategory=focus?.dataset?.category,focusSelection=focus?.dataset?.select;
   $('catalogue-title').textContent=catalogue.title;$('catalogue-intro').textContent=catalogue.introduction||'Discover the pieces selected especially for you.';
   document.title=`${catalogue.title} · OG Jewelers`;
