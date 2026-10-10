@@ -22,7 +22,12 @@ export function evidenceMime(bytes:Uint8Array) {
  throw Error('eBay did not return a supported image or PDF. Open the document on eBay.');
 }
 export async function boundedEvidence(response:Response) {
- if(!response.ok)throw Error(`eBay could not retrieve this document (${response.status}). Please retry or open it on eBay.`);
+ if(!response.ok){
+  // Include only the provider's numeric diagnostic, never its raw response body.
+  let code='';const reader=response.body?.getReader();
+  if(reader)try{let text='';while(text.length<4096){const part=await reader.read();if(part.done)break;text+=new TextDecoder().decode(part.value.slice(0,4096-text.length));}const error=JSON.parse(text)?.errors?.[0];if(/^\d{1,8}$/.test(String(error?.errorId||'')))code=` / eBay ${error.errorId}`;const reason=error?.parameters?.find((p:any)=>p.name==='code')?.value;if(/^\d{3}$/.test(String(reason||'')))code+=` / upstream ${reason}`;}catch{}finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
+  throw Error(`eBay could not retrieve this document (${response.status}${code}). Please retry or open it on eBay.`);
+ }
  if(Number(response.headers.get('Content-Length'))>MAX_BYTES){await response.body?.cancel();throw Error('Document exceeds the 10 MB preview limit. Open it on eBay.');}
  if(!response.body)throw Error('eBay returned an empty document.');
  const reader=response.body.getReader(),chunks:Uint8Array[]=[];let size=0;
@@ -39,7 +44,9 @@ export async function resolveDisputeEvidence(db:any,c:any,evidenceId:unknown,fil
  let mime=stored?.metadata?.mimetype;
  if(!stored){
   const token=await getToken(),query=new URLSearchParams({evidence_id:String(evidenceId),file_id:String(fileId)});
-  const response=await request(`${apiBase}/sell/fulfillment/v1/payment_dispute/${encodeURIComponent(c.ebay_return_id)}/fetch_evidence_content?${query}`,{headers:{Authorization:`Bearer ${token}`,Accept:'application/octet-stream'},signal:AbortSignal.timeout(20000),redirect:'error'});
+  // eBay can return the actual image MIME type; restricting Accept to octet-stream
+  // is rejected by its gateway as upstream 406, wrapped in error 2003 / HTTP 500.
+  const response=await request(`${apiBase}/sell/fulfillment/v1/payment_dispute/${encodeURIComponent(c.ebay_return_id)}/fetch_evidence_content?${query}`,{headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',Accept:'*/*'},signal:AbortSignal.timeout(20000),redirect:'error'});
   const bytes=await boundedEvidence(response);mime=evidenceMime(bytes);
   const upload=await storage.upload(path,bytes,{contentType:mime,upsert:false});
   // Concurrent viewers may archive the same immutable eBay file simultaneously.

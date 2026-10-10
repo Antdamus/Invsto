@@ -113,3 +113,6 @@ body[data-page="ebay-returns"] {font-family:system-ui,-apple-system,"Segoe UI",s
 @media(max-width:500px){.issue-closeout{align-items:stretch;flex-direction:column;gap:12px}.issue-closeout button{width:100%}#issue-close-form-slot .issue-actions{display:grid;grid-template-columns:minmax(0,1fr)}#issue-close-form-slot button{min-height:48px}}
 
 .issue-chat-message.is-event{padding:10px 12px;background:transparent;border-style:dashed}.issue-chat-message.is-event p{font-size:13px}.issue-system-history{margin-top:14px;color:var(--issue-muted);font-size:12px}.issue-system-history summary{cursor:pointer;min-height:36px;display:flex;align-items:center;gap:8px}.issue-system-history summary:before{content:"▸"}.issue-system-history[open] summary:before{content:"▾"}
+.issue-tag.issue-response-badge{font-weight:700;padding:8px 10px;border:1px solid;line-height:1.5;white-space:normal;text-align:left}
+.issue-response-badge.is-waiting{background:#183a31;border-color:#4a9a7a;color:#b9efd8}
+.issue-response-badge.is-action{background:#442c21;border-color:#cb9257;color:#ffdcad}

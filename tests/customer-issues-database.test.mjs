@@ -65,6 +65,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261009066000_customer_issue_direct_close.sql'));
  await db.exec(await sqlFile('20261009067000_customer_issue_saved_conversation.sql'));
  await db.exec(await sqlFile('20261010010000_customer_issue_notes.sql'));
+ await db.exec(await sqlFile('20261010020000_customer_issue_response_badges.sql'));
 
 });
 after(async()=>db?.close());
@@ -490,6 +491,15 @@ test('evidence excludes internal messages, voided certificates, removed packagin
 
 
 const listIssues=(sort='newest',view='attention',offset=0,limit=30)=>scalar('select list_customer_issues($1,$2,$3,$4,$5,$6) v',[view,'all','',offset,limit,sort]);
+test('summary exposes only the matching dispute response and picks up renewed action without sending raw evidence',async()=>{
+ await db.exec(`insert into ebay_return_cases(id,source_lane,issue_kind,ebay_return_id,status,ebay_status,raw_payload) values
+ ('${id(101)}','payment_dispute','dispute','5010603112','open','OPEN','{"ebayDetail":{"paymentDisputeId":"5010603112","sellerResponse":"SELLER_CONTEST","note":"Private response"}}');`);
+ let row=(await listIssues()).rows[0];assert.equal(row.seller_response,'SELLER_CONTEST');assert.equal(row.ebay_status,'OPEN');assert.equal(row.raw_payload,undefined);
+ await db.exec(`update ebay_return_cases set ebay_status='ACTION_NEEDED',ebay_due_at='2026-10-16T06:59:59Z' where id='${id(101)}'`);
+ row=(await listIssues()).rows[0];assert.equal(row.ebay_status,'ACTION_NEEDED');assert.equal(row.seller_response,'SELLER_CONTEST');assert.ok(row.ebay_due_at.startsWith('2026-10-16'));
+ await db.exec(`update ebay_return_cases set raw_payload=jsonb_set(raw_payload,'{ebayDetail,paymentDisputeId}','"different-case"') where id='${id(101)}'`);
+ assert.equal((await listIssues()).rows[0].seller_response,null);
+});
 test('cards use exact linked item sale values and original purchase date, never whole order or refund amount',async()=>{
  await db.exec(`update ebay_orders set sale_date='2026-08-01T15:30:00Z';update ebay_order_lines set sold_for=70,total_price=160;
  insert into ebay_order_lines(id,order_id,item_title,quantity,sold_for,total_price) values('${id(12)}','${id(10)}','Unrelated expensive item',1,9999,9999);

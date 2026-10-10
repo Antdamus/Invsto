@@ -4,6 +4,15 @@
  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const nice=v=>String(v||'').toLowerCase().replace(/_/g,' ').replace(/^./,c=>c.toUpperCase());
  const date=v=>v&&!Number.isNaN(Date.parse(v))?new Date(v).toLocaleString(undefined,{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}):'';
+ function badge(c){
+  if(c?.source_lane!=='payment_dispute'||['closed','cancelled'].includes(c.status))return null;
+  const d=c.raw_payload?.ebayDetail,valid=d?.paymentDisputeId&&String(d.paymentDisputeId)===String(c.ebay_return_id);
+  const status=String(c.ebay_status||(valid?d.paymentDisputeStatus:'')||'').toUpperCase();
+  // A new eBay action always supersedes a previously submitted response.
+  if(status==='ACTION_NEEDED')return {kind:'action',label:'Response required'};
+  if(status==='OPEN'&&(c.seller_response||(valid?d.sellerResponse:''))==='SELLER_CONTEST')return {kind:'waiting',label:'Response submitted · awaiting outcome'};
+  return null;
+ }
  function response(c){
   const d=c?.raw_payload?.ebayDetail;
   if(c?.source_lane!=='payment_dispute'||!d?.paymentDisputeId||String(d.paymentDisputeId)!==String(c.ebay_return_id))return null;
@@ -12,8 +21,8 @@
    for(const f of Array.isArray(e.files)?e.files:[]){const key=JSON.stringify([e.evidenceId,f.fileId]);if(!e.evidenceId||!f.fileId||seen.has(key))continue;seen.add(key);files.push({...f,evidenceId:e.evidenceId,evidenceType:e.evidenceType,providedDate:e.providedDate});}
    for(const t of Array.isArray(e.shipmentTracking)?e.shipmentTracking:[])tracking.push(t);
   }
-  const decision=typeof d.sellerResponse==='string'?d.sellerResponse:'',contested=decision==='SELLER_CONTEST',status=d.paymentDisputeStatus||c.ebay_status;
-  return {decision,contested,waiting:contested&&status==='OPEN',note:typeof d.note==='string'?d.note:'',files,tracking};
+  const decision=typeof d.sellerResponse==='string'?d.sellerResponse:'',contested=decision==='SELLER_CONTEST';
+  return {decision,contested,waiting:badge(c)?.kind==='waiting',note:typeof d.note==='string'?d.note:'',files,tracking};
  }
  function section(c){
   const r=response(c);if(!r)return '';
@@ -41,5 +50,5 @@
   // Bounded parallelism keeps a case with many files from flooding the server.
   for(let i=0;i<r.files.length;i+=2){if(!target.isConnected)return;await Promise.all(r.files.slice(i,i+2).map((_,j)=>load(i+j)));}
  }
- root.OGDisputeResponse={response,section,hydrate};
+ root.OGDisputeResponse={response,badge,section,hydrate};
 })(globalThis);

@@ -92,7 +92,7 @@
   if(closed(c)&&c.open_tasks)return 'Finish internal follow-up';
   if(closed(c))return 'Review the case outcome';
   if(c.source_lane==='payment_dispute'&&c.ebay_status==='ACTION_NEEDED')return 'Respond to the payment dispute';
-  if(root.OGDisputeResponse?.response(c)?.waiting)return 'Response submitted · awaiting outcome';
+  if(root.OGDisputeResponse?.badge(c)?.kind==='waiting')return 'Response submitted · awaiting outcome';
   if(c.source_lane==='payment_dispute'&&c.ebay_status==='OPEN')return 'Monitor payment-dispute updates';
   if(kind(c)==='return'&&/READY_FOR_SHIPPING|ITEM_READY_TO_SHIP/.test(c.ebay_status||''))return 'Waiting for the buyer to ship';
   if(kind(c)==='return'&&/^(ITEM_SHIPPED|RETURN_SHIPPED)$/.test(c.ebay_status||''))return 'Watch for the returned package';
@@ -100,12 +100,19 @@
   if(c.ebay_action&&!/^\d{4}-\d{2}-\d{2}T/i.test(c.ebay_action))return nice(c.ebay_action);
   return c.next_user?'Continue assigned work':'Choose the next person';
  }
+ function cardStatus(c){
+  const badge=root.OGDisputeResponse?.badge(c),next=nextText(c);
+  const state=badge?`<span class="issue-tag issue-response-badge is-${badge.kind}">${escape(badge.label)}</span>`:'';
+  const nextTag=badge&&(next===badge.label||next==='Respond to the payment dispute')?'':`<span class="issue-tag">${escape(next)}</span>`;
+  const deadline=badge?.kind==='waiting'||closed(c)?'':c.ebay_due_at?`<span class="issue-tag ${c.overdue?'is-overdue':''}">${c.overdue?'eBay deadline overdue':'eBay deadline'} ${escape(date(c.ebay_due_at))}</span>`:'<span class="issue-tag">eBay deadline not provided</span>';
+  return state+nextTag+deadline;
+ }
  function cards(){
   $('issues-list').innerHTML=rows.length?rows.map(c=>`<div class="issue-card-row ${selecting?'is-selecting':''} ${bulkSelection.has(c.id)?'is-checked':''}">${selecting?`<label class="issue-select"><input type="checkbox" data-select-case="${escape(c.id)}" aria-label="Select ${escape(c.buyer_username||'buyer')}, case ${escape(c.ebay_return_id||c.id)}" ${bulkSelection.has(c.id)?'checked':''} ${closeBlock(c)?'disabled':''}/><span>${escape(closeBlock(c)||'Select case')}</span></label>`:''}<button type="button" class="issue-card" data-case="${escape(c.id)}" aria-current="${selected===c.id}">
    <div class="issue-card-top"><span class="issue-kind is-${kind(c)}">${kind(c)==='request'?'Customer request':kind(c)==='return'?'Physical return':'Dispute'}</span><small>${escape(c.order_number||`Case ${c.ebay_return_id||'not linked'}`)}</small></div>
    <h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p>${escape(c.item_title||c.return_reason||'Open this case to review the order and next step.')}</p>
    ${cardFacts(c)}
-   <div class="issue-card-footer"><span class="issue-tag">${escape(nextText(c))}</span>${c.ebay_due_at&&!closed(c)?`<span class="issue-tag ${c.overdue?'is-overdue':''}">${c.overdue?'eBay deadline overdue':'eBay deadline'} ${escape(date(c.ebay_due_at))}</span>`:!closed(c)?'<span class="issue-tag">eBay deadline not provided</span>':''}</div>
+   <div class="issue-card-footer">${cardStatus(c)}</div>
    <div class="issue-card-top" style="margin:11px 0 0"><small>${['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
   $('issues-count').textContent=`${total} ${view==='history'?'finished':'active'} case${total===1?'':'s'}`;
@@ -513,5 +520,5 @@
    }catch(error){target.textContent=error.message||'No exact order found.';}
   };
  }
- root.OGCustomerIssues={init,refresh,openReceivedCase:id=>openCase(id),get ready(){return ready;},testing:{kind,nextText,closed,date,caseHref,caseLinkLabel,money,cardFacts,conversationRows,lineFacts,closeBlock,runCloseBatch}};
+ root.OGCustomerIssues={init,refresh,openReceivedCase:id=>openCase(id),get ready(){return ready;},testing:{kind,nextText,cardStatus,closed,date,caseHref,caseLinkLabel,money,cardFacts,conversationRows,lineFacts,closeBlock,runCloseBatch}};
 })(globalThis);
