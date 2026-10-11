@@ -2314,10 +2314,6 @@ function applyUsersFilterAndRender(){
   } 
 }
 
-
-const esc = escapeHtml;
-
-
 async function loadUsers(){
   const { data, error } = await supabaseClient
     .from('employees')
@@ -3252,7 +3248,23 @@ function setupOverview() {
 //* ============== Boot ============== */
 let adminBootStarted = false;
 
+function clearAdminBootWatchdog() {
+  if (window.__adminBootWatchdog) {
+    clearTimeout(window.__adminBootWatchdog);
+    window.__adminBootWatchdog = null;
+  }
+}
+
+function withAdminTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
 function showAdminBootError(err) {
+  clearAdminBootWatchdog();
   console.error("Admin boot failed:", err);
   const denied = qs("guardDenied");
   const title = denied?.querySelector("h2");
@@ -3309,11 +3321,16 @@ window.showToast = window.showToast || showToast;
   show(qs("guardDenied"), false);
   show(qs("adminApp"), false);
 
-  const ok = await ensureAdmin();
+  const ok = await withAdminTimeout(
+    ensureAdmin(),
+    12000,
+    "Timed out checking admin permissions. Please check your connection and refresh."
+  );
 
   show(qs("guardLoading"), false);
   show(qs("guardDenied"), !ok);
   show(qs("adminApp"), ok);
+  clearAdminBootWatchdog();
 
   if (!ok) return;
 
@@ -3367,6 +3384,9 @@ function scheduleAdminBoot() {
 }
 
 document.addEventListener("supabase-ready", scheduleAdminBoot);
+document.addEventListener("supabase-init-error", (event) => {
+  showAdminBootError(new Error(event?.detail?.message || "Supabase failed to initialize."));
+});
 
 
 // Kickoff if init already ran

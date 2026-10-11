@@ -1422,8 +1422,25 @@
   </div>
 
   <!-- Supabase + init -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
-  <script src="./initSupabase.js"></script>
+  <script>
+    window.__adminBootWatchdog = setTimeout(function () {
+      var loading = document.getElementById("guardLoading");
+      var denied = document.getElementById("guardDenied");
+      var app = document.getElementById("adminApp");
+      if (!loading || loading.classList.contains("hidden") || (app && !app.classList.contains("hidden"))) return;
+
+      var title = denied && denied.querySelector("h2");
+      var copy = denied && denied.querySelector("p");
+      if (title) title.textContent = "Admin page error";
+      if (copy) {
+        copy.textContent = "The admin page could not finish loading. Check your internet connection, refresh the page, or open it through the local server.";
+      }
+      loading.classList.add("hidden");
+      if (denied) denied.classList.remove("hidden");
+    }, 15000);
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="./initSupabase.js?v=20261011-admin-guard"></script>
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
   <script src="admin-nav.js?v=20261010-pricing"></script>
 
@@ -1436,7 +1453,7 @@
   <script src="admin-taxdocs.js?v=20261011-admin-boot"></script>
   <script src="admin-overview.js?v=20261011-admin-boot"></script>
   <script src="admin-stores.js?v=20261011-admin-boot"></script>
-  <script src="admin.js?v=20261011-admin-boot"></script>
+  <script src="admin.js?v=20261011-admin-guard"></script>
   <script src="admin-users.js?v=buyer-sms-thresholds-20260823" defer></script>
 
   

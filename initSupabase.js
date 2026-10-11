@@ -3,8 +3,16 @@ const SUPABASE_URL = 'https://byhytmarmigalvawkedi.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ5aHl0bWFybWlnYWx2YXdrZWRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ1MzI5MTcsImV4cCI6MjA2MDEwODkxN30.W5-2mXZ9FF9AVTkkhmH-UZUda4fU2rJB98vHDOWzGCQ';
 
 function initSupabaseClient() {
+  if (!window.supabase?.createClient) {
+    console.error("Supabase library did not load before initSupabase.js ran.");
+    document.dispatchEvent(new CustomEvent("supabase-init-error", {
+      detail: { message: "Supabase library did not load. Please refresh and check your connection." },
+    }));
+    return;
+  }
+
   // Create client once
-  window.supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  window.supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
