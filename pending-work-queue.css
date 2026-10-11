@@ -36,4 +36,10 @@
 .pending-work-check{display:flex!important;align-items:start;gap:10px;line-height:1.5}.pending-work-check input{width:20px;height:20px;flex-shrink:0;accent-color:#edcf94}
 #pending-work-message{line-height:1.5;font-size:14px;color:#bee6cf}#pending-work-message.is-error{color:#f5b5a7}
 #pending-work-form{border-top:1px solid #ffffff18;padding-top:8px;margin-top:18px}
+.pending-work-notice{position:fixed;top:calc(var(--pending-header-height,70px) + 10px);left:50%;transform:translateX(-50%);z-index:5300;box-sizing:border-box;width:min(560px,calc(100vw - 24px));display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid #cbb78685;border-radius:14px;background:#243c2df5;color:#f2eedc;box-shadow:0 8px 32px #0007}
+.pending-work-notice[hidden],.pending-work-notice button[hidden]{display:none}
+.pending-work-notice p{margin:0;flex:1;min-width:0;overflow-wrap:anywhere;font-size:13px;line-height:1.5}
+.pending-work-notice button{min-height:44px;min-width:44px;padding:9px 12px;border:1px solid #edcf9470;border-radius:10px;background:#edcf94;color:#252419;font:700 13px Manrope,sans-serif;cursor:pointer;flex-shrink:0}
+.pending-work-notice [data-work-dismiss]{background:transparent;color:#edcf94;padding:8px;font-size:20px}
+.pending-work-notice button:disabled{opacity:.55;cursor:wait}.pending-work-notice.is-error{background:#492d26;border-color:#e99b84}
 @media(max-width:760px){.pending-work-filters{display:grid;grid-template-columns:1fr 1fr auto;gap:6px}.pending-work-filters button{font-size:12px;padding:9px 8px}.pending-watch-filters{grid-column:1/-1;margin-left:0;gap:6px}.pending-work-dialog{padding:18px;max-height:calc(100dvh - 20px)}.pending-work-dialog h2{font-size:21px}.pending-work-summary{font-size:13px}.pending-work-dialog #pending-work-save{width:100%}}

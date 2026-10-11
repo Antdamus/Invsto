@@ -16,6 +16,13 @@ hold while its scoped items are still pending. Manual holds require an explicit
 release reason. Releasing one blocker never releases another one. Ordinary
 customer tasks remain compact notes without automatically holding a package.
 
+New waiting holds show a persistent **Undo** notice until dismissed or replaced
+by the next change. Undo releases only the hold just created, using its original
+revision; a changed CGL requirement cannot be accidentally undone. Later, open
+**Manage waiting → Remove from waiting** for a manual/task hold; a reason is
+optional and the release is audited. Linked tasks stay open, and other blockers
+still apply. CGL/missing-watch corrections keep their dedicated correction flows.
+
 **Watch → Set Pending CGL** records a requirement for that item. Save a certificate
 copy through the existing certificate panel, then explicitly confirm it belongs
 to the watch. Confirmation is available in Pending Orders, Packaging and History.

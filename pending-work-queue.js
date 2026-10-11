@@ -3,6 +3,7 @@
   const records = new Map(), known = new Set();
   let view = 'ready', watchFilter = '', failure = '', generation = 0, started = false, timer, filterRows = [];
   let dialog, context, requestId, saving = false, dialogRun = 0;
+  let notice, undoEntry = null, undoBusy = false;
   const esc = value => escapeHtml(String(value ?? ''));
   const openRows = rows => rows.filter(isOpenOrderLine);
   const forBuyer = key => [...records.values()].filter(b => b.buyer_key === key);
@@ -15,6 +16,43 @@
   const isKnown = key => known.has(key);
   const $ = id => document.getElementById(id);
   const stamp = value => formatDate(value);
+  function showNotice(text, entry=null, error=false) {
+    if(!notice){
+      notice=document.createElement('aside');notice.className='pending-work-notice';notice.setAttribute('aria-label','Waiting update');
+      notice.innerHTML='<p role="status" aria-live="polite"></p><button type="button" data-work-undo>Undo</button><button type="button" data-work-dismiss aria-label="Dismiss waiting update">×</button>';
+      document.body.append(notice);
+      notice.querySelector('[data-work-undo]').onclick=undoLast;
+      notice.querySelector('[data-work-dismiss]').onclick=()=>{if(!undoBusy){notice.hidden=true;undoEntry=null;}};
+    }
+    undoEntry=entry;notice.hidden=false;notice.classList.toggle('is-error',error);
+    notice.querySelector('p').textContent=text;
+    notice.querySelector('[data-work-undo]').hidden=!entry;
+    notice.querySelector('[data-work-undo]').disabled=undoBusy||saving;
+    notice.querySelector('[data-work-dismiss]').disabled=undoBusy;
+  }
+  const removalMessage = key => active(key).length
+    ? `Hold removed. This order is still Waiting on ${active(key).length} other ${active(key).length===1?'requirement':'requirements'}.`
+    : 'Removed from Waiting. The order is back in Ready to work.';
+  async function undoLast() {
+    if(!undoEntry||undoBusy||saving)return;
+    const entry=undoEntry;undoBusy=true;showNotice('Undoing the last waiting change…',entry);
+    try{
+      // Use the original revision. Never undo a later change by another employee.
+      const reason='Added to Waiting by mistake — undone by staff';
+      const result=entry.kind==='cgl'
+        ? await supabase.rpc('confirm_pending_cgl',{_id:entry.id,_expected_revision:entry.revision,_correction_reason:reason})
+        : await supabase.rpc('release_pending_order_work',{_id:entry.id,_expected_revision:entry.revision,_reason:reason});
+      if(result.error)throw result.error;
+      await load();
+      showNotice(failure?'Undone, but the queue could not refresh. Use Retry to check its status.':removalMessage(entry.key));
+      if(dialog?.open)await renderExisting();
+    }catch(error){
+      const changed=error.code==='40001';
+      showNotice(changed?'This hold changed after you added it. Open Manage waiting to review it.':error.message||'Could not undo. Try again.',changed?null:entry,true);
+    }finally{
+      undoBusy=false;notice.querySelectorAll('button').forEach(button=>button.disabled=false);
+    }
+  }
   function reset() { generation++; records.clear(); known.clear(); failure = ''; filterRows = []; }
   function snapshot() { return JSON.stringify([...records.values()].sort((a,b) => a.id.localeCompare(b.id))); }
   async function load(rows = state.orders, {paint = true} = {}) {
@@ -149,7 +187,7 @@
     };
   }
   function message(text,error=false){$('pending-work-message').textContent=text;$('pending-work-message').classList.toggle('is-error',error);}
-  function setBusy(value){saving=value;dialog.querySelectorAll('button,input,select,textarea').forEach(el=>el.disabled=value);}
+  function setBusy(value){saving=value;dialog?.querySelectorAll('button,input,select,textarea').forEach(el=>el.disabled=value);if(notice)notice.querySelector('[data-work-undo]').disabled=value||undoBusy;}
   async function show(key, {onlyCgl = null, onlyMissing = null} = {}) {
     createDialog();const group=groupLinesByBuyer(state.orders).find(g=>g.key===key);if(!group)return;
     context={group,onlyCgl,onlyMissing};requestId=crypto.randomUUID();const run=++dialogRun;
@@ -179,7 +217,7 @@
       const row=state.orders.find(r=>b.line_ids.includes(r.id));
       if(b.kind==='watch_missing')return `<article class="pending-work-entry"><h3>${esc(row?.item_title||'Watch')}</h3><strong class="missing-watch-badge">Watch missing</strong><p>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}</p><p>This buyer’s package stays in Waiting until this watch is found. Other requirements, including CGL, remain separate.</p><label class="pending-work-check"><input type="checkbox" id="found-${esc(b.id)}">I have located and checked this watch.</label><button type="button" class="primary-btn" data-work-found="${esc(b.id)}">Mark watch found</button><details><summary>Marked missing by mistake</summary><label for="release-${esc(b.id)}">Correction reason</label><textarea id="release-${esc(b.id)}" rows="2" maxlength="2000"></textarea><button type="button" data-work-release="${esc(b.id)}">Remove missing marker</button></details></article>`;
       if(b.kind==='cgl')return `<article class="pending-work-entry"><h3>${esc(row?.item_title||'Watch')}</h3><strong>${b.active?'Pending CGL':'CGL confirmed'}</strong><p>A saved copy must match this watch before its package can be completed.</p><button type="button" class="secondary-btn" data-certificate-line="${esc(row?.id)}" data-certificate-title="${esc(row?.item_title)}">Open / add certificate</button><div data-work-certificates="${esc(b.id)}">Loading saved certificates…</div><details><summary>CGL is not required / marked by mistake</summary><label for="correct-${esc(b.id)}">Correction reason</label><textarea id="correct-${esc(b.id)}" rows="2" maxlength="2000"></textarea><button type="button" data-work-correct="${esc(b.id)}">Remove requirement</button></details></article>`;
-      return `<article class="pending-work-entry"><strong>${esc(b.reason)}</strong><p>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}</p>${b.task_id?`<a href="team-tasks.html?taskId=${encodeURIComponent(b.task_id)}">Open linked task</a><p class="pending-work-hint">This clears automatically after acceptance. Releasing the hold here does not close the task.</p>`:''}<details><summary>No longer blocking shipping</summary><label for="release-${esc(b.id)}">What was resolved?</label><textarea id="release-${esc(b.id)}" rows="2" maxlength="2000"></textarea><button type="button" data-work-release="${esc(b.id)}">Release this hold</button></details></article>`;
+      return `<article class="pending-work-entry"><strong>${esc(b.reason)}</strong><p>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}</p>${b.task_id?`<a href="team-tasks.html?taskId=${encodeURIComponent(b.task_id)}">Open linked task</a><p class="pending-work-hint">Removing this hold leaves the task open.</p>`:''}<p class="pending-work-hint">Resolved or sent here by mistake? Remove this hold. Other requirements will still apply.</p><label for="release-${esc(b.id)}">Reason for removing (optional)</label><textarea id="release-${esc(b.id)}" rows="2" maxlength="2000" placeholder="For example: sent to Waiting by mistake"></textarea><button type="button" data-work-release="${esc(b.id)}">Remove from waiting</button></article>`;
     }).join('')||'<p class="pending-work-hint">No active blockers for this buyer.</p>';
     for(const b of entries.filter(b=>b.kind==='cgl')) {
       try{
@@ -190,10 +228,13 @@
       }catch{if(run===dialogRun){const host=dialog.querySelector(`[data-work-certificates="${b.id}"]`);if(host)host.textContent='Could not load saved certificates. Close and reopen to retry.';}}
     }
   }
-  async function mutate(operation, success, close=false) {
+  async function mutate(operation, success, close=false, undo=null) {
     if(saving)return;setBusy(true);message('Saving…');
-    try{const {error}=await operation();if(error)throw error;await load();if(failure)throw Error('Saved, but the queue could not refresh. Retry the status check.');
-      if(close){dialog.close();setStatus(success,'success');}else{await renderExisting();message(success);}
+    try{const {data,error}=await operation();if(error)throw error;
+      if(undo&&data===undo.id)showNotice(`Moved to Waiting · ${undo.buyer}`,undo);
+      await load();if(failure)throw Error('Saved, but the queue could not refresh. Retry the status check.');
+      const text=typeof success==='function'?success():success;
+      if(close){dialog.close();setStatus(text,'success');if(!undo)showNotice(text);}else{await renderExisting();message(text);}
     }catch(error){message(error.message||'Could not save. Retry.',true);}finally{setBusy(false);}
   }
   async function saveHold(event) {
@@ -201,11 +242,15 @@
     const reason=$('pending-work-reason').value.trim(),value=$('pending-work-task').value;
     if(!reason){message('Enter a waiting reason.',true);return;}
     const [source,id]=value.split(':');
-    await mutate(()=>supabase.rpc('create_pending_order_work',{_id:requestId,_line_ids:openRows(context.group.lines).map(r=>r.id),_kind:value?'task':'manual',_reason:reason,_task_source:source||null,_task_id:id||null}), 'Moved to Waiting. The rest of your queue is ready to work.',true);
+    const undo={id:requestId,kind:value?'task':'manual',revision:1,key:context.group.key,buyer:context.group.buyer};
+    await mutate(()=>supabase.rpc('create_pending_order_work',{_id:undo.id,_line_ids:openRows(context.group.lines).map(r=>r.id),_kind:undo.kind,_reason:reason,_task_source:source||null,_task_id:id||null}), 'Moved to Waiting.',true,undo);
   }
   async function releaseHold(id) {
-    const b=records.get(id),reason=$(`release-${id}`).value.trim();if(!b||!reason){message('Enter what was resolved.',true);return;}
-    await mutate(()=>supabase.rpc('release_pending_order_work',{_id:id,_expected_revision:b.revision,_reason:reason}),'Hold released. Any other blockers still apply.');
+    const b=records.get(id);if(!b)return;
+    const ordinary=['manual','task'].includes(b.kind);
+    const reason=$(`release-${id}`).value.trim()||(ordinary?'Waiting hold removed by staff — resolved or added by mistake':'');
+    if(!reason){message('Enter the correction reason.',true);return;}
+    await mutate(()=>supabase.rpc('release_pending_order_work',{_id:id,_expected_revision:b.revision,_reason:reason}),()=>removalMessage(b.buyer_key),ordinary);
   }
   async function confirmCgl(id) {
     const b=records.get(id);if(!b||!$(`verified-${id}`)?.checked){message('Check that the saved certificate belongs to this watch first.',true);return;}
@@ -220,12 +265,14 @@
     await mutate(()=>supabase.rpc('confirm_pending_cgl',{_id:id,_expected_revision:b.revision,_correction_reason:reason}),'CGL requirement removed; the correction is saved in history.');
   }
   async function addWatchHold(id,button,kind) {
-    const row=state.orders.find(r=>r.id===id);if(!row||button.disabled)return;
-    button.disabled=true;
+    const row=state.orders.find(r=>r.id===id);if(!row||button.disabled||saving)return;
+    button.disabled=true;setBusy(true);
     const label=kind==='cgl'?'Pending CGL':'Watch missing';
-    try{const {error}=await supabase.rpc('create_pending_order_work',{_id:crypto.randomUUID(),_line_ids:[id],_kind:kind,_reason:kind==='cgl'?'Pending CGL certificate':'Watch missing — locate before shipping'});if(error)throw error;
+    const undo={id:crypto.randomUUID(),kind,revision:1,key:getBuyerKey(row),buyer:getBuyerLabel(row)};
+    try{const {data,error}=await supabase.rpc('create_pending_order_work',{_id:undo.id,_line_ids:[id],_kind:kind,_reason:kind==='cgl'?'Pending CGL certificate':'Watch missing — locate before shipping'});if(error)throw error;
+      if(data===undo.id)showNotice(`${label} saved · ${undo.buyer}`,undo);
       await load();if(failure)throw Error('Saved, but the queue could not refresh. Retry the status check.');setStatus(`${label} saved. This buyer’s package is now Waiting.`,'success');
-    }catch(error){setStatus(error.message||`Could not set ${label}.`,'error');button.disabled=false;}
+    }catch(error){setStatus(error.message||`Could not set ${label}.`,'error');button.disabled=false;}finally{setBusy(false);}
   }
   async function assertReady(rows) {
     await load(state.orders);
@@ -238,7 +285,7 @@
     document.addEventListener('click',event=>{
       const b=event.target.closest('[data-work-view],[data-work-summary-view],[data-work-buyer],[data-work-cgl-add],[data-work-cgl-manage],[data-work-missing-add],[data-work-missing-manage],[data-work-retry],#pending-work-cgl,#pending-work-missing,#pending-work-not-found,#summary-cgl-button,#summary-missing-button');if(!b)return;
       event.preventDefault();event.stopPropagation();
-      if(b.disabled||saving)return;
+      if(b.disabled||saving||undoBusy)return;
       if(b.hasAttribute('data-work-retry')){void load();return;}
       if(b.dataset.workCglAdd){void addWatchHold(b.dataset.workCglAdd,b,'cgl');return;}
       if(b.dataset.workMissingAdd){void addWatchHold(b.dataset.workMissingAdd,b,'watch_missing');return;}
