@@ -46,8 +46,8 @@ test('drafts preserve the divisor and manual choice; legacy entered floors are n
   assert.equal(p.get('item-break-even-factor').value,'0.70');
 });
 
-function photos() {
-  const counters={inference:0,saves:0,uploads:0,fail:false};
+function photos(options={}) {
+  const counters={inference:0,saves:0,uploads:0,fail:false,preloads:[],runs:[]};
   const elements={bgStatus:{textContent:'',classList:{remove(){},add(){}}}};
   const window={supabase:{functions:{invoke:async()=>{
     if(counters.fail)return {error:{message:'Upload unavailable'}};
@@ -55,8 +55,8 @@ function photos() {
   }}},requestIdleCallback:fn=>fn()};
   const source=read('additem-assisted.js').replace('  document.addEventListener("DOMContentLoaded", init);', `
     loadBackgroundRemoval=async()=>({
-      preload:async(config)=>{counters.preloadConfig=config;},
-      removeBackground:async(blob,config)=>{counters.inference++;counters.inferenceConfig=config;return blob;}
+      preload:async(config)=>{counters.preloadConfig=config;counters.preloads.push(config.device);if(options.failPreload===config.device)throw Error('Cannot prepare');},
+      removeBackground:async(blob,config)=>{counters.inference++;counters.inferenceConfig=config;counters.runs.push(config.device);if(options.failInference===config.device)throw Error('Device lost');return blob;}
     });
     createScaledSourceBlobForBackgroundRemoval=async()=>new Blob(['cutout']);
     createCompositedBackgroundBlob=async blob=>blob;
@@ -66,9 +66,9 @@ function photos() {
     updateSaveSelectionSummary=()=>{};renderUploadedImages=()=>{};
     persistAddItemDraft=async()=>{counters.saves++;};
     getFunctionErrorDetail=async error=>error.message;
-    window.testPhotos={state,processImageBackgroundForImage,preloadBackgroundRemoval};
+    window.testPhotos={state,processImageBackgroundForImage,preloadBackgroundRemoval,prepareBackgroundProcessor};
   `);
-  vm.runInNewContext(source,{window,document:{addEventListener(){}},console:{error(){},warn(){}},Blob,counters});
+  vm.runInNewContext(source,{window,document:{addEventListener(){}},navigator:options.navigator||{},console:{error(){},warn(){}},Blob,counters,options});
   const a={path:'original-a',name:'Front',storageBucket:'InventoryUpload',previewUrl:'test:a'},b={path:'original-b',name:'Back',storageBucket:'InventoryUpload',previewUrl:'test:b'};
   const api=window.testPhotos;api.state.recentUploadedImages=[a,b];api.state.saveSelectedUploadedImagePaths=[a.path,b.path];
   return {api,counters,elements,a,b};
@@ -92,4 +92,32 @@ test('a failed processing upload preserves the original selection and retries wi
   assert.equal(p.counters.saves,0);
   p.counters.fail=false;await p.api.processImageBackgroundForImage(p.elements,p.a,'black');
   assert.equal(p.counters.inference,1);assert.equal(p.counters.saves,1);
+});
+
+test('supported acceleration keeps the same model, PNG output and warmed session',async()=>{
+  const p=photos({navigator:{gpu:{requestAdapter:async()=>({})}}});
+  const [one,two]=await Promise.all([p.api.prepareBackgroundProcessor(),p.api.prepareBackgroundProcessor()]);
+  assert.equal(one,two);assert.deepEqual(p.counters.preloads,['gpu']);
+  await p.api.processImageBackgroundForImage(p.elements,p.a,'black');
+  assert.deepEqual(p.counters.runs,['gpu']);
+  assert.equal(p.counters.inferenceConfig.model,'isnet_fp16');
+  assert.equal(p.counters.inferenceConfig.output.format,'image/png');
+  assert.equal(p.counters.inferenceConfig,p.counters.preloadConfig);
+});
+
+test('unavailable or rejected browser acceleration uses CPU without reducing model quality',async()=>{
+  for(const navigator of [{},{gpu:{requestAdapter:async()=>null}},{gpu:{requestAdapter:async()=>{throw Error('Unavailable');}}}]){
+    const p=photos({navigator});await p.api.processImageBackgroundForImage(p.elements,p.a,'black');
+    assert.deepEqual(p.counters.preloads,['cpu']);assert.deepEqual(p.counters.runs,['cpu']);
+    assert.equal(p.counters.inferenceConfig.model,'isnet_fp16');
+  }
+});
+
+for(const failure of ['failPreload','failInference'])test(`${failure}: failed acceleration retries on CPU and stays there for subsequent photos`,async()=>{
+  const p=photos({navigator:{gpu:{requestAdapter:async()=>({})}},[failure]:'gpu'});
+  assert.ok(await p.api.processImageBackgroundForImage(p.elements,p.a,'black'));
+  assert.ok(await p.api.processImageBackgroundForImage(p.elements,p.b,'black'));
+  assert.deepEqual(p.counters.preloads,['gpu','cpu']);
+  assert.deepEqual(p.counters.runs,failure==='failInference'?['gpu','cpu','cpu']:['cpu','cpu']);
+  assert.equal(p.counters.inferenceConfig.model,'isnet_fp16');
 });

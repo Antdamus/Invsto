@@ -73,6 +73,8 @@
   ];
   let backgroundRemovalModulePromise = null;
   let backgroundRemovalPreloadQueued = false;
+  let backgroundProcessorPromise = null;
+  let backgroundGpuDisabled = false;
   // Reuse exactly the same config so preload and processing share one model session.
   const backgroundRemovalConfig = {
     model: 'isnet_fp16',
@@ -2465,6 +2467,43 @@
     return backgroundRemovalModulePromise;
   }
 
+  async function prepareBackgroundProcessor() {
+    if (!backgroundProcessorPromise) {
+      backgroundProcessorPromise = (async () => {
+        const module = await loadBackgroundRemoval();
+        let device = 'cpu';
+        if (!backgroundGpuDisabled && navigator.gpu?.requestAdapter) {
+          try { if (await navigator.gpu.requestAdapter()) device = 'gpu'; } catch (_) {}
+        }
+        let config = { ...backgroundRemovalConfig, device };
+        try {
+          await module.preload(config);
+        } catch (error) {
+          if (device !== 'gpu') throw error;
+          // Some devices advertise WebGPU but cannot run this model. Keep the same model on CPU.
+          backgroundGpuDisabled = true;
+          config = { ...backgroundRemovalConfig, device: 'cpu' };
+          await module.preload(config);
+        }
+        return {module,config};
+      })().catch(error => { backgroundProcessorPromise = null; throw error; });
+    }
+    return backgroundProcessorPromise;
+  }
+
+  async function removePhotoBackground(sourceBlob, processor) {
+    try {
+      return await processor.module.removeBackground(sourceBlob, processor.config);
+    } catch (error) {
+      if (processor.config.device !== 'gpu') throw error;
+      // A device can be lost after preparation. Retry the photo once without changing quality.
+      backgroundGpuDisabled = true;
+      backgroundProcessorPromise = null;
+      const fallback = await prepareBackgroundProcessor();
+      return fallback.module.removeBackground(sourceBlob, fallback.config);
+    }
+  }
+
   function preloadBackgroundRemoval(elements) {
     if (backgroundRemovalPreloadQueued || state.isProcessingImage || state.isAutoBlackProcessing) {
       return;
@@ -2473,8 +2512,7 @@
     backgroundRemovalPreloadQueued = true;
 
     const runPreload = () => {
-      loadBackgroundRemoval()
-        .then(module => module.preload(backgroundRemovalConfig))
+      prepareBackgroundProcessor()
         .then(() => {
           if (!state.isProcessingImage && !state.isAutoBlackProcessing && elements.bgStatus) {
             const currentStatus = asTrimmedString(elements.bgStatus.textContent).toLowerCase();
@@ -2743,8 +2781,8 @@
         "is-waiting"
       );
     } else {
-      const [sourceBlob, module] = await Promise.all([
-        createScaledSourceBlobForBackgroundRemoval(selectedImage), loadBackgroundRemoval(),
+      const [sourceBlob, processor] = await Promise.all([
+        createScaledSourceBlobForBackgroundRemoval(selectedImage), prepareBackgroundProcessor(),
       ]);
 
       setInlineStatus(
@@ -2753,7 +2791,7 @@
         "is-waiting"
       );
 
-      cutoutBlob = await module.removeBackground(sourceBlob, backgroundRemovalConfig);
+      cutoutBlob = await removePhotoBackground(sourceBlob, processor);
       rememberBackgroundCutout(cacheKey, cutoutBlob);
     }
 
