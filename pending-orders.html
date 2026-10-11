@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="pending-orders.css?v=watch-markers-20261010" />
-  <link rel="stylesheet" href="pending-work-queue.css?v=20261011-2" />
+  <link rel="stylesheet" href="pending-work-queue.css?v=20261011-missing-watch" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
   <script src="extension-updates.js?v=20261003" defer></script>
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
@@ -239,6 +239,7 @@
           <small class="pending-work-totals" data-work-summary="tomorrow">Checking work status…</small>
         </div>
         <div><button type="button" id="summary-cgl-button"><span>Pending CGL</span><strong id="summary-pending-cgl">…</strong><small>Watch item lines · View waiting</small></button></div>
+        <div><button type="button" id="summary-missing-button"><span>Missing watches</span><strong id="summary-missing-watches">…</strong><small>Watch item lines · View waiting</small></button></div>
       </section>
 
       <div class="fulfillment-utility-strip">
@@ -478,7 +479,10 @@
             <button type="button" data-work-view="ready" aria-pressed="true">Ready to work <span data-work-count>…</span></button>
             <button type="button" data-work-view="waiting" aria-pressed="false">Waiting <span data-work-count>…</span></button>
             <button type="button" data-work-view="all" aria-pressed="false">All <span data-work-count>…</span></button>
-            <button type="button" id="pending-work-cgl" aria-pressed="false">Pending CGL <span>…</span></button>
+            <div class="pending-watch-filters">
+              <button type="button" id="pending-work-cgl" aria-pressed="false">Pending CGL <span>…</span></button>
+              <button type="button" id="pending-work-missing" aria-pressed="false">Missing watches <span>…</span></button>
+            </div>
           </div>
           <p id="pending-work-status" role="status">Checking which orders are ready…</p>
           <p class="pending-chat-live" data-pending-chat-status>Checking buyer chats…</p>
@@ -1283,7 +1287,7 @@
   </div>
   <script src="pending-order-chats.js?v=20261009"></script>
   <script src="pending-watch-flags.js?v=20261011"></script>
-  <script src="pending-work-queue.js?v=20261011"></script>
+  <script src="pending-work-queue.js?v=20261011-missing-watch"></script>
   <script src="pending-orders.js?v=work-queue-20261011"></script>
   <script src="pending-inventory.js?v=20261008-shared-bag-2"></script>
   <script src="pending-bag-scan.js?v=20261008-shared-inventory"></script>

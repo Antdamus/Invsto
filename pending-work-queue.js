@@ -1,7 +1,7 @@
 /* Explicit blockers decide the work queue; ordinary customer tasks remain notes. */
 (() => {
   const records = new Map(), known = new Set();
-  let view = 'ready', cglOnly = false, failure = '', generation = 0, started = false, timer;
+  let view = 'ready', watchFilter = '', failure = '', generation = 0, started = false, timer;
   let dialog, context, requestId, saving = false, dialogRun = 0;
   const esc = value => escapeHtml(String(value ?? ''));
   const openRows = rows => rows.filter(isOpenOrderLine);
@@ -9,6 +9,8 @@
   const active = key => forBuyer(key).filter(b => b.active);
   const cglFor = id => [...records.values()].find(b => b.kind === 'cgl' && b.line_ids.includes(id));
   const pendingCgl = key => active(key).filter(b => b.kind === 'cgl');
+  const missingWatches = key => active(key).filter(b => b.kind === 'watch_missing');
+  const missingFor = id => [...records.values()].find(b => b.kind === 'watch_missing' && b.active && b.line_ids.includes(id));
   const isKnown = key => known.has(key);
   const $ = id => document.getElementById(id);
   const stamp = value => formatDate(value);
@@ -61,27 +63,30 @@
   function filter(rows) {
     const groups=groupLinesByBuyer(rows), history=$('order-status-filter')?.value==='fulfilled';
     const searching=isSearch();
-    const counts={ready:0,waiting:0,all:groups.length,cgl:0,checking:0};
+    const counts={ready:0,waiting:0,all:groups.length,cgl:0,missing:0,checking:0};
     for(const g of groups){
       if(!g.lines.some(isOpenOrderLine))continue;
       if(!isKnown(g.key))counts.checking++;
       else counts[active(g.key).length?'waiting':'ready']++;
       counts.cgl+=pendingCgl(g.key).length;
+      counts.missing+=missingWatches(g.key).length;
     }
     document.querySelectorAll('[data-work-view]').forEach(b=>{
       b.setAttribute('aria-pressed',String(!searching&&b.dataset.workView===view));b.disabled=history||searching;
       const counter=b.querySelector('[data-work-count]');if(counter)counter.textContent=counts.checking?'…':String(counts[b.dataset.workView]);
     });
-    const cgl=$('pending-work-cgl');
-    if(cgl){cgl.setAttribute('aria-pressed',String(cglOnly));cgl.disabled=history||searching;cgl.querySelector('span').textContent=counts.checking?'…':String(counts.cgl);}
+    for(const kind of ['cgl','missing']){
+      const button=$(`pending-work-${kind}`);
+      if(button){button.setAttribute('aria-pressed',String(!searching&&watchFilter===kind));button.disabled=history||searching;button.querySelector('span').textContent=counts.checking?'…':String(counts[kind]);}
+    }
     const help=$('pending-work-status');
     if(help){help.innerHTML=failure?`${esc(failure)} <button type="button" data-work-retry>Retry</button>`
-      :history?'Completed orders are shown here.':searching?'Search and scans include ready and waiting orders.':counts.checking?'Checking which orders are ready…':'Waiting orders keep their shipping deadlines. Counts are buyer groups; CGL counts are item lines.';}
+      :history?'Completed orders are shown here.':searching?'Search and scans include ready and waiting orders.':counts.checking?'Checking which orders are ready…':'Waiting orders keep their shipping deadlines. Counts are buyer groups; watch filters count item lines.';}
     if(history||searching)return rows;
     const keys=new Set(groups.filter(g=>{
       if(!isKnown(g.key))return view==='all';
       const blockers=active(g.key);
-      return (view==='all'||(view==='waiting')===Boolean(blockers.length))&&(!cglOnly||pendingCgl(g.key).length);
+      return (view==='all'||(view==='waiting')===Boolean(blockers.length))&&(!watchFilter||(watchFilter==='cgl'?pendingCgl(g.key).length:missingWatches(g.key).length));
     }).map(g=>g.key));
     return rows.filter(r=>keys.has(getBuyerKey(r)));
   }
@@ -95,6 +100,7 @@
       host.innerHTML=matching.some(g=>!isKnown(g.key))?'Checking work status…':`<button type="button" data-work-summary-view="ready" data-work-due="${name}">${ready} ready</button><span> · </span><button type="button" data-work-summary-view="waiting" data-work-due="${name}">${waiting} waiting</button>`;
     }
     const total=$('summary-pending-cgl');if(total)total.textContent=groups.some(g=>!isKnown(g.key))?'…':String(groups.reduce((n,g)=>n+pendingCgl(g.key).length,0));
+    const missing=$('summary-missing-watches');if(missing)missing.textContent=groups.some(g=>!isKnown(g.key))?'…':String(groups.reduce((n,g)=>n+missingWatches(g.key).length,0));
   }
   function control(group) {
     if(!group.lines.some(isOpenOrderLine))return '';
@@ -103,15 +109,17 @@
   function summary(group) {
     const blockers=active(group.key);if(!blockers.length)return '';
     const cgl=blockers.filter(b=>b.kind==='cgl').length;
-    const ordinary=blockers.filter(b=>b.kind!=='cgl');
-    return `<div class="pending-work-summary" role="note"><div class="pending-work-badges"><strong>Waiting</strong>${cgl?`<button type="button" data-work-buyer="${esc(group.key)}">Pending CGL · ${cgl} ${cgl===1?'item':'items'}</button>`:''}${ordinary.length?`<span>${ordinary.length} ${ordinary.length===1?'blocker':'blockers'}</span>`:''}</div>${ordinary.slice(0,2).map(b=>`<p>${esc(b.reason)} <small>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}${b.task_id?` · <a href="team-tasks.html?taskId=${encodeURIComponent(b.task_id)}">Open task</a>`:''}</small></p>`).join('')}${ordinary.length>2?`<button type="button" data-work-buyer="${esc(group.key)}">View all ${ordinary.length} blockers</button>`:''}</div>`;
+    const missing=blockers.filter(b=>b.kind==='watch_missing').length;
+    const ordinary=blockers.filter(b=>!['cgl','watch_missing'].includes(b.kind));
+    return `<div class="pending-work-summary" role="note"><div class="pending-work-badges"><strong>Waiting</strong>${missing?`<button type="button" class="missing-watch-badge" data-work-buyer="${esc(group.key)}">Watch missing · ${missing} ${missing===1?'item':'items'}</button>`:''}${cgl?`<button type="button" data-work-buyer="${esc(group.key)}">Pending CGL · ${cgl} ${cgl===1?'item':'items'}</button>`:''}${ordinary.length?`<span>${ordinary.length} ${ordinary.length===1?'blocker':'blockers'}</span>`:''}</div>${ordinary.slice(0,2).map(b=>`<p>${esc(b.reason)} <small>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}${b.task_id?` · <a href="team-tasks.html?taskId=${encodeURIComponent(b.task_id)}">Open task</a>`:''}</small></p>`).join('')}${ordinary.length>2?`<button type="button" data-work-buyer="${esc(group.key)}">View all ${ordinary.length} blockers</button>`:''}</div>`;
   }
   function line(row) {
-    const cgl=cglFor(row.id);
     if(!isOpenOrderLine(row))return '';
-    if(cgl)return `<button type="button" class="line-cgl-toggle ${cgl.active?'is-pending':'is-confirmed'}" data-work-cgl-manage="${esc(row.id)}">${cgl.active?'Pending CGL':'CGL confirmed'}</button>`;
-    if(!window.OGOrderWatches?.marked(row.id))return '';
-    return `<button type="button" class="line-cgl-toggle" data-work-cgl-add="${esc(row.id)}" ${isKnown(getBuyerKey(row))?'':'disabled'}>Set Pending CGL</button>`;
+    const cgl=cglFor(row.id),missing=missingFor(row.id);
+    if(!cgl&&!missing&&!window.OGOrderWatches?.marked(row.id))return '';
+    const disabled=isKnown(getBuyerKey(row))?'':'disabled';
+    const certificate=cgl?`<button type="button" class="line-cgl-toggle ${cgl.active?'is-pending':'is-confirmed'}" data-work-cgl-manage="${esc(row.id)}">${cgl.active?'Pending CGL':'CGL confirmed'}</button>`:`<button type="button" class="line-cgl-toggle" data-work-cgl-add="${esc(row.id)}" ${disabled}>Set Pending CGL</button>`;
+    return certificate+`<button type="button" class="line-cgl-toggle line-missing-toggle ${missing?'is-missing':''}" ${missing?'data-work-missing-manage':'data-work-missing-add'}="${esc(row.id)}" ${disabled}>${missing?'Watch missing · Mark found':'Watch missing'}</button>`;
   }
   function createDialog() {
     if(dialog)return;
@@ -129,17 +137,18 @@
       const release=event.target.closest('[data-work-release]');if(release)void releaseHold(release.dataset.workRelease);
       const confirm=event.target.closest('[data-work-confirm]');if(confirm)void confirmCgl(confirm.dataset.workConfirm);
       const correction=event.target.closest('[data-work-correct]');if(correction)void correctCgl(correction.dataset.workCorrect);
+      const found=event.target.closest('[data-work-found]');if(found)void markWatchFound(found.dataset.workFound);
     };
   }
   function message(text,error=false){$('pending-work-message').textContent=text;$('pending-work-message').classList.toggle('is-error',error);}
   function setBusy(value){saving=value;dialog.querySelectorAll('button,input,select,textarea').forEach(el=>el.disabled=value);}
-  async function show(key, {onlyCgl = null} = {}) {
+  async function show(key, {onlyCgl = null, onlyMissing = null} = {}) {
     createDialog();const group=groupLinesByBuyer(state.orders).find(g=>g.key===key);if(!group)return;
-    context={group,onlyCgl};requestId=crypto.randomUUID();const run=++dialogRun;
+    context={group,onlyCgl,onlyMissing};requestId=crypto.randomUUID();const run=++dialogRun;
     $('pending-work-buyer').textContent=`${group.buyer} · ${openRows(group.lines).length} pending item lines`;
-    $('pending-work-form').hidden=Boolean(onlyCgl);$('pending-work-reason').value='';
+    $('pending-work-form').hidden=Boolean(onlyCgl||onlyMissing);$('pending-work-reason').value='';
     $('pending-work-task').innerHTML='<option value="">A waiting reason without a task</option>';
-    $('pending-work-title').textContent=onlyCgl?'Watch certificate':'Waiting on follow-up';
+    $('pending-work-title').textContent=onlyCgl?'Watch certificate':onlyMissing?'Missing watch':'Waiting on follow-up';
     message('Loading waiting details…');dialog.showModal();
     await load(state.orders);
     if(run!==dialogRun)return;
@@ -147,7 +156,7 @@
     await renderExisting(run);
     if(run!==dialogRun)return;
     message('');
-    if(!onlyCgl){try{
+    if(!onlyCgl&&!onlyMissing){try{
       // Fetch current choices; a task completed in another tab must not be offered.
       getGroupCustomerTaskKeys(group.lines).forEach(b=>state.customerTaskNotes.delete(b));
       const tasks=(await loadCustomerTaskNotes(group.lines)).flat();
@@ -157,9 +166,10 @@
   }
   async function renderExisting(run=dialogRun) {
     if(!context)return;
-    const entries=forBuyer(context.group.key).filter(b=>context.onlyCgl?b.kind==='cgl'&&b.line_ids.includes(context.onlyCgl):b.active);
+    const entries=forBuyer(context.group.key).filter(b=>context.onlyCgl?b.kind==='cgl'&&b.line_ids.includes(context.onlyCgl):context.onlyMissing?b.kind==='watch_missing'&&b.active&&b.line_ids.includes(context.onlyMissing):b.active);
     $('pending-work-existing').innerHTML=entries.map(b=>{
       const row=state.orders.find(r=>b.line_ids.includes(r.id));
+      if(b.kind==='watch_missing')return `<article class="pending-work-entry"><h3>${esc(row?.item_title||'Watch')}</h3><strong class="missing-watch-badge">Watch missing</strong><p>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}</p><p>This buyer’s package stays in Waiting until this watch is found. Other requirements, including CGL, remain separate.</p><label class="pending-work-check"><input type="checkbox" id="found-${esc(b.id)}">I have located and checked this watch.</label><button type="button" class="primary-btn" data-work-found="${esc(b.id)}">Mark watch found</button><details><summary>Marked missing by mistake</summary><label for="release-${esc(b.id)}">Correction reason</label><textarea id="release-${esc(b.id)}" rows="2" maxlength="2000"></textarea><button type="button" data-work-release="${esc(b.id)}">Remove missing marker</button></details></article>`;
       if(b.kind==='cgl')return `<article class="pending-work-entry"><h3>${esc(row?.item_title||'Watch')}</h3><strong>${b.active?'Pending CGL':'CGL confirmed'}</strong><p>A saved copy must match this watch before its package can be completed.</p><button type="button" class="secondary-btn" data-certificate-line="${esc(row?.id)}" data-certificate-title="${esc(row?.item_title)}">Open / add certificate</button><div data-work-certificates="${esc(b.id)}">Loading saved certificates…</div><details><summary>CGL is not required / marked by mistake</summary><label for="correct-${esc(b.id)}">Correction reason</label><textarea id="correct-${esc(b.id)}" rows="2" maxlength="2000"></textarea><button type="button" data-work-correct="${esc(b.id)}">Remove requirement</button></details></article>`;
       return `<article class="pending-work-entry"><strong>${esc(b.reason)}</strong><p>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}</p>${b.task_id?`<a href="team-tasks.html?taskId=${encodeURIComponent(b.task_id)}">Open linked task</a><p class="pending-work-hint">This clears automatically after acceptance. Releasing the hold here does not close the task.</p>`:''}<details><summary>No longer blocking shipping</summary><label for="release-${esc(b.id)}">What was resolved?</label><textarea id="release-${esc(b.id)}" rows="2" maxlength="2000"></textarea><button type="button" data-work-release="${esc(b.id)}">Release this hold</button></details></article>`;
     }).join('')||'<p class="pending-work-hint">No active blockers for this buyer.</p>';
@@ -193,16 +203,21 @@
     const b=records.get(id);if(!b||!$(`verified-${id}`)?.checked){message('Check that the saved certificate belongs to this watch first.',true);return;}
     await mutate(()=>supabase.rpc('confirm_pending_cgl',{_id:id,_expected_revision:b.revision,_certificate_id:$(`certificate-${id}`).value}),'Certificate confirmed. Any other blockers still apply.');
   }
+  async function markWatchFound(id) {
+    const b=records.get(id);if(!b||!$(`found-${id}`)?.checked){message('Confirm that you located and checked this watch first.',true);return;}
+    await mutate(()=>supabase.rpc('release_pending_order_work',{_id:id,_expected_revision:b.revision,_reason:'Watch found and checked'}),'Watch marked found. Any other blockers still apply.',Boolean(context.onlyMissing));
+  }
   async function correctCgl(id) {
     const b=records.get(id),reason=$(`correct-${id}`).value.trim();if(!b||!reason){message('Enter why CGL is not required.',true);return;}
     await mutate(()=>supabase.rpc('confirm_pending_cgl',{_id:id,_expected_revision:b.revision,_correction_reason:reason}),'CGL requirement removed; the correction is saved in history.');
   }
-  async function addCgl(id,button) {
+  async function addWatchHold(id,button,kind) {
     const row=state.orders.find(r=>r.id===id);if(!row||button.disabled)return;
     button.disabled=true;
-    try{const {error}=await supabase.rpc('create_pending_order_work',{_id:crypto.randomUUID(),_line_ids:[id],_kind:'cgl',_reason:'Pending CGL certificate'});if(error)throw error;
-      await load();setStatus('Pending CGL saved. This buyer’s package is now Waiting.','success');
-    }catch(error){setStatus(error.message||'Could not set Pending CGL.','error');button.disabled=false;}
+    const label=kind==='cgl'?'Pending CGL':'Watch missing';
+    try{const {error}=await supabase.rpc('create_pending_order_work',{_id:crypto.randomUUID(),_line_ids:[id],_kind:kind,_reason:kind==='cgl'?'Pending CGL certificate':'Watch missing — locate before shipping'});if(error)throw error;
+      await load();if(failure)throw Error('Saved, but the queue could not refresh. Retry the status check.');setStatus(`${label} saved. This buyer’s package is now Waiting.`,'success');
+    }catch(error){setStatus(error.message||`Could not set ${label}.`,'error');button.disabled=false;}
   }
   async function assertReady(rows) {
     await load(state.orders);
@@ -213,16 +228,18 @@
   function start() {
     if(started)return;started=true;
     document.addEventListener('click',event=>{
-      const b=event.target.closest('[data-work-view],[data-work-summary-view],[data-work-buyer],[data-work-cgl-add],[data-work-cgl-manage],[data-work-retry],#pending-work-cgl,#summary-cgl-button');if(!b)return;
+      const b=event.target.closest('[data-work-view],[data-work-summary-view],[data-work-buyer],[data-work-cgl-add],[data-work-cgl-manage],[data-work-missing-add],[data-work-missing-manage],[data-work-retry],#pending-work-cgl,#pending-work-missing,#summary-cgl-button,#summary-missing-button');if(!b)return;
       event.preventDefault();event.stopPropagation();
       if(b.disabled||saving)return;
       if(b.hasAttribute('data-work-retry')){void load();return;}
-      if(b.dataset.workCglAdd){void addCgl(b.dataset.workCglAdd,b);return;}
+      if(b.dataset.workCglAdd){void addWatchHold(b.dataset.workCglAdd,b,'cgl');return;}
+      if(b.dataset.workMissingAdd){void addWatchHold(b.dataset.workMissingAdd,b,'watch_missing');return;}
+      if(b.dataset.workMissingManage){const row=state.orders.find(r=>r.id===b.dataset.workMissingManage);if(row)void show(getBuyerKey(row),{onlyMissing:row.id});return;}
       if(b.dataset.workCglManage){const row=state.orders.find(r=>r.id===b.dataset.workCglManage);if(row)void show(getBuyerKey(row),{onlyCgl:row.id});return;}
       if(b.dataset.workBuyer){void show(b.dataset.workBuyer);return;}
-      if(b.id==='pending-work-cgl'){cglOnly=!cglOnly;if(cglOnly)view='waiting';}
-      else if(b.id==='summary-cgl-button'){cglOnly=true;view='waiting';state.orderDueFilter='all';clearOrderSearch({apply:false});}
-      else{view=b.dataset.workView||b.dataset.workSummaryView;cglOnly=false;if(b.dataset.workDue){state.orderDueFilter=b.dataset.workDue;clearOrderSearch({apply:false});}}
+      if(['pending-work-cgl','pending-work-missing'].includes(b.id)){const kind=b.id==='pending-work-cgl'?'cgl':'missing';watchFilter=watchFilter===kind?'':kind;if(watchFilter)view='waiting';}
+      else if(['summary-cgl-button','summary-missing-button'].includes(b.id)){watchFilter=b.id==='summary-cgl-button'?'cgl':'missing';view='waiting';state.orderDueFilter='all';clearOrderSearch({apply:false});}
+      else{view=b.dataset.workView||b.dataset.workSummaryView;watchFilter='';if(b.dataset.workDue){state.orderDueFilter=b.dataset.workDue;clearOrderSearch({apply:false});}}
       applyOrderFilters();
     },true);
     window.OGOrderLiveUpdates?.subscribe(supabase,change=>{if(['work_blocker','reconnected'].includes(change.kind))schedule();});
@@ -230,6 +247,6 @@
     window.addEventListener('order-certificate-changed',async()=>{await load();if(dialog?.open&&!saving)await renderExisting();});
     window.setInterval(schedule,60000);
   }
-  const emptyMessage=()=>failure?'Waiting status is unavailable. Use Retry above.':!known.size&&state.orders.some(isOpenOrderLine)?'Checking order work status…':view==='waiting'&&!isSearch()?cglOnly?'No watches are waiting for CGL in this view.':'No orders are waiting in this view. Choose Ready to work to continue.':'No orders match this view.';
+  const emptyMessage=()=>failure?'Waiting status is unavailable. Use Retry above.':!known.size&&state.orders.some(isOpenOrderLine)?'Checking order work status…':view==='waiting'&&!isSearch()?watchFilter==='missing'?'No watches are marked missing in this view.':watchFilter==='cgl'?'No watches are waiting for CGL in this view.':'No orders are waiting in this view. Choose Ready to work to continue.':'No orders match this view.';
   window.OGPendingWork={reset,load,filter,summaryCounts,control,summary,line,start,assertReady,emptyMessage};
 })();

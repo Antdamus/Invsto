@@ -14,7 +14,7 @@ function fixture(){
  document:{getElementById:id=>elements[id],querySelectorAll:()=>[],addEventListener:(event,fn)=>listeners[event]=fn},
  window:{OGOrderWatches:{marked:()=>true},scrollBy(){},addEventListener(){},setInterval(){}}};
  vm.runInNewContext(source,context);const api=context.window.OGPendingWork;api.start();
- const click=dataset=>listeners.click({target:{closest:()=>({dataset,hasAttribute:()=>false})},preventDefault(){},stopPropagation(){}});
+ const click=(dataset,id)=>listeners.click({target:{closest:()=>({dataset,id,hasAttribute:()=>false})},preventDefault(){},stopPropagation(){}});
  const load=async(data=[])=>{const promise=api.load(rows,{paint:false});reads.at(-1)({data});await promise;};
  return{api,load,reads,rows,click,elements};
 }
@@ -42,4 +42,19 @@ test('a failed read does not classify orders as ready and a late read cannot era
  assert.deepEqual(Array.from(f.api.filter(f.rows),r=>r.id),['c']);
  const failed=f.api.load(f.rows,{paint:false});f.reads[3]({error:Error('offline')});await failed;
  assert.equal(f.api.filter(f.rows).length,0);assert.match(f.api.control({key:'buyer',lines:f.rows}),/disabled/);
+});
+
+test('missing watch filter keeps the buyer together, counts lines, and is independent from CGL',async()=>{
+ const f=fixture();
+ const counter={textContent:''};f.elements['pending-work-missing']={setAttribute(){},querySelector:()=>counter};
+ await f.load([blocker({id:'missing',kind:'watch_missing',line_ids:['a'],task_id:null}),blocker({id:'cgl',kind:'cgl',line_ids:['a'],task_id:null})]);
+ assert.match(f.api.line(f.rows[0]),/Watch missing · Mark found/);
+ assert.match(f.api.line(f.rows[0]),/data-work-cgl-manage/);
+ assert.match(f.api.line(f.rows[1]),/data-work-missing-add/);
+ assert.match(f.api.summary({key:'buyer'}),/Watch missing · 1 item/);
+ f.click({},'pending-work-missing');assert.deepEqual(Array.from(f.api.filter(f.rows),r=>r.id),['a','b']);assert.equal(counter.textContent,'1');
+ await f.load([blocker({id:'cgl',kind:'cgl',line_ids:['a'],task_id:null})]);
+ assert.equal(f.api.filter(f.rows).length,0);assert.match(f.api.emptyMessage(),/No watches are marked missing/);
+ f.click({},'pending-work-cgl');assert.deepEqual(Array.from(f.api.filter(f.rows),r=>r.id),['a','b']);
+ f.click({workView:'ready'});assert.deepEqual(Array.from(f.api.filter(f.rows),r=>r.id),['c']);
 });

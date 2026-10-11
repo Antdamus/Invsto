@@ -22,6 +22,13 @@ to the watch. Confirmation is available in Pending Orders, Packaging and History
 A wrong/voided certificate reopens its requirement. Removing a requirement needs
 a correction reason; removing Watch cannot silently erase an existing requirement.
 
+**Watch → Watch missing** creates a separate hold for that item. The missing-watch
+filter and summary count watch item lines and keep the entire buyer package together.
+**Mark watch found** requires staff to confirm they located and checked the watch;
+its release is audited. A correction reason can clear a mistaken marker. Finding
+the watch does not clear CGL or other blockers. Apply migration
+`20261011012000_pending_missing_watches.sql` before publishing this control.
+
 Blockers are audited in `pending_order_work_events` and scoped to saved line IDs
 in `pending_order_work_blocker_lines`, with normalized buyer grouping. They do not
 follow later purchases after their original lines leave the pending queue.

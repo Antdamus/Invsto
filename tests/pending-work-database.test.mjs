@@ -30,6 +30,7 @@ before(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261010203000_order_line_watch_flags.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261011010000_pending_work_blockers.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261011011000_pending_work_responsibility.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261011012000_pending_missing_watches.sql',import.meta.url),'utf8'));
  await db.exec(`insert into ebay_orders values('${id(10)}','01-10000-10000','Buyer','pending'),('${id(11)}','02-10000-10000','BUYER','pending'),('${id(12)}','03-10000-10000','Someone','pending');
  insert into ebay_order_lines(id,order_id,line_status) values('${id(20)}','${id(10)}','pending'),('${id(21)}','${id(11)}','pending'),('${id(22)}','${id(12)}','pending');
  insert into ebay_order_tasks(id,order_id,status,assigned_to_email,created_by) values('${id(30)}','${id(10)}','assigned','staff@example.test','${id(1)}');
@@ -84,6 +85,29 @@ test('CGL requires Watch, a saved matching copy, explicit confirmation; voiding 
  assert.equal((await list()).length,0);
  assert.equal((await db.query("select count(*)::int n from pending_order_work_events where action='requirement_corrected'")).rows[0].n,1);
 });
+test('missing watches require a Watch line, share one hold per line, block the buyer and keep CGL independent',async()=>{
+ await assert.rejects(create(80,'watch_missing',[21]),/Mark this item Watch/);
+ await assert.rejects(create(80,'watch_missing',[20,21]),/Mark this item Watch/);
+ await create(80,'watch_missing',[20]);await create(81,'watch_missing',[20]);
+ assert.equal((await list()).filter(b=>b.kind==='watch_missing').length,1);
+ await assert.rejects(complete(21),/Package is waiting/);
+ await assert.rejects(db.query('select set_order_line_watch($1,false,1)',[id(20)]),/Watch missing/);
+ await db.query("insert into packaging_shipments values($1,$2,'packing')",[id(71),[id(10)]]);
+ await assert.rejects(db.query("update packaging_shipments set status='ready' where id=$1",[id(71)]),/Watch missing/);
+ await create(82,'cgl',[20]);
+ await assert.rejects(release(80,99),/changed/);
+ await db.query('select release_pending_order_work($1,1,$2)',[id(80),'Watch found and checked']);
+ assert.equal((await list()).filter(b=>b.kind==='watch_missing').length,0);
+ assert.equal((await list()).filter(b=>b.kind==='cgl'&&b.active).length,1);
+ await assert.rejects(complete(21),/Package is waiting/);
+ assert.equal((await db.query("select details->>'reason' reason from pending_order_work_events where blocker_id=$1 and action='released'",[id(80)])).rows[0].reason,'Watch found and checked');
+ await db.query('select confirm_pending_cgl($1,1,null,$2)',[id(82),'Certificate requirement marked by mistake']);
+ await db.query('select assert_pending_work_clear($1)',[[id(10)]]);
+ await create(83,'watch_missing',[20]);assert.equal((await list()).filter(b=>b.kind==='watch_missing').length,1);
+ await release(83);
+ await db.query("update packaging_shipments set status='ready' where id=$1",[id(71)]);
+});
+
 test('staff checks, RLS, private task visibility, exact customer matching, stale and closed lines',async()=>{
  await assert.rejects(create(60,'manual',[20,22]),/different buyers/);
  await db.exec("set test.admin='no'");
