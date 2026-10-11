@@ -26,12 +26,15 @@
   function toast(msg, type = "ok") {
     if (typeof window.toast === "function") return window.toast(msg, type);
     console[type === "err" ? "error" : "log"](msg);
-    if (type === "err") alert(msg);
+    const el = document.getElementById("prEmptyState") || document.getElementById("prStatus") || document.getElementById("panelPayroll");
+    if (el && type === "err") el.setAttribute("data-payroll-message", msg || "");
   }
 
   function showAdminError(title, message) {
     if (typeof window.showAdminError === "function") return window.showAdminError(title, message);
-    alert(`${title}\n\n${message}`);
+    console.error(`${title}: ${message}`);
+    const panel = document.getElementById("panelPayroll");
+    if (panel) panel.setAttribute("data-payroll-error", `${title}: ${message}`);
   }
 
   function fmtMoney(n) {
@@ -2420,9 +2423,5 @@ document.getElementById("prPeriodCreateConfirm")?.addEventListener("click", () =
     }
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
+  window.bootAdminPayroll = init;
 })();

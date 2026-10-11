@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#070708" />
   <title>OG Jewelry — Time Clock</title>
 
-  <link rel="stylesheet" href="timeclock.css" />
+  <link rel="stylesheet" href="timeclock.css?v=20261011-polish" />
 </head>
 <body>
   <header class="app-header">
@@ -20,33 +20,51 @@
   <main class="container">
     <!-- Clock UI -->
     <section id="clockSection" class="card hidden">
-      <h2>Welcome, <span id="displayName">—</span></h2>
-
-      <div class="status-row">
-        <div id="shiftStatus" class="status-pill">Not clocked in</div>
-        <div id="nowTime" class="now">—</div>
-      </div>
-
-      <div class="actions">
-        <button id="clockBtn" class="btn primary">Clock In</button>
-        <button id="breakBtn" class="btn">Start Break</button>
-      </div>
-      <div class="hint" id="breakBudgetHint">Paid break remaining today: —</div>
-
-      <div class="geo-row">Location: <span id="geoText">—</span></div>
-
-      <!-- Phase 4: store assignment + directions -->
-      <div class="store-row" id="storeRow">
-        <div class="store-left">
-          <div class="muted" style="font-size:13px;">Store for this shift</div>
-          <div id="storeContextText" class="store-line">—</div>
-          <div id="storeContextHint" class="muted" style="font-size:12px; margin-top:4px;"></div>
+      <div class="clock-hero">
+        <div class="clock-copy">
+          <div class="section-kicker">Time Clock</div>
+          <h2>Welcome, <span id="displayName">—</span></h2>
         </div>
-        <a id="storeDirectionsLink" class="pill pill-dir hidden" target="_blank" rel="noopener">Directions</a>
 
+        <div class="status-row">
+          <div id="shiftStatus" class="status-pill">Not clocked in</div>
+          <div id="nowTime" class="now">—</div>
+        </div>
+
+        <div class="actions">
+          <button id="clockBtn" class="btn primary">Clock In</button>
+          <button id="breakBtn" class="btn">Start Break</button>
+        </div>
+        <div class="hint" id="breakBudgetHint">Paid break remaining today: —</div>
       </div>
 
-      <h3>Today</h3>
+      <div class="verification-grid">
+        <div class="verification-panel">
+          <div class="panel-label">GPS verification</div>
+          <div class="geo-row">Location: <span id="geoText">—</span></div>
+          <div id="adminTestLocationRow" class="admin-test-location-row hidden">
+            <button id="adminTestLocationBtn" class="btn ghost" type="button">Allow this test location</button>
+            <span id="adminTestLocationStatus" class="hint"></span>
+          </div>
+        </div>
+
+        <!-- Phase 4: store assignment + directions -->
+        <div class="store-row" id="storeRow">
+          <div class="store-left">
+            <div class="panel-label">Store for this shift</div>
+            <div id="storeContextText" class="store-line">—</div>
+            <div id="storeContextHint" class="muted"></div>
+          </div>
+          <a id="storeDirectionsLink" class="pill pill-dir hidden" target="_blank" rel="noopener">Directions</a>
+        </div>
+      </div>
+
+      <div class="section-heading">
+        <div>
+          <div class="section-kicker">Today</div>
+          <h3>Worked time</h3>
+        </div>
+      </div>
 
       <!-- iPhone: Luxe “card list” (tables are clunky on mobile) -->
 <div id="todayCards" class="today-cards" aria-live="polite"></div>
@@ -57,7 +75,7 @@
             <th>Store</th>
             <th>Clock In</th>
             <th>Clock Out</th>
-            <th>Duration</th>
+            <th>Worked</th>
             <th>Photo In</th>
             <th>Photo Out</th>
             <th>Flags</th>
@@ -68,8 +86,11 @@
 
       <!-- Breaks Today (cards on iPhone, table on desktop) -->
 <div class="today-subhead">
-  <h3 style="margin:16px 0 8px;">Breaks today</h3>
-  <div class="hint" style="margin:0;">Start/end times, duration, and photos for each break.</div>
+  <div>
+    <div class="section-kicker">Breaks</div>
+    <h3>Breaks today</h3>
+  </div>
+  <div class="hint">Start/end times, duration, and photos for each break.</div>
 </div>
 
 <div id="breaksCards" class="breaks-cards" aria-live="polite"></div>
@@ -92,7 +113,10 @@
     <!-- Your Schedule (weekly calendar) -->
     <section id="schedSection" class="card hidden">
       <div class="status-row">
-        <h2 style="margin:0;">Your schedule</h2>
+        <div>
+          <div class="section-kicker">Schedule</div>
+          <h2>Your schedule</h2>
+        </div>
         <div id="wsWeekLabel" class="now">—</div>
       </div>
 
@@ -137,6 +161,6 @@
   <script src="initSupabase.js"></script>
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
   <script src="admin-nav.js?v=packaging-20261008"></script>
-  <script src="timeclock.js"></script>
+  <script src="timeclock.js?v=20261011-polish"></script>
 </body>
 </html>

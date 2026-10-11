@@ -17,8 +17,9 @@ let camKind = null;       // 'in' | 'out' | 'break_start' | 'break_end'
 let camEntryId = null;    // time_entries.id of the shift
 let camBlob = null;
 
-let breakCapMin = 30;            // default, will be fetched from SQL helper
+let breakCapMin = 30;            // first 30 minutes of break time are paid each day
 let breakUsedMsToday = 0;
+const ADMIN_TEST_STORE_KEY = 'ogTimeclockAdminTestStoreId';
 
 let breakActiveMs = 0;             // ticking while a break is open
 let breakTickTimer = null;         // setInterval handle
@@ -460,6 +461,7 @@ function openCamFor(kind){
   qs('camCaptureBtn').classList.remove('hidden');
   qs('camRetakeBtn').classList.add('hidden');
   qs('camUseBtn').classList.remove('hidden'); // we’ll intercept click
+  document.body.classList.add('modal-open');
   qs('camModal').classList.remove('hidden');
 }
 
@@ -538,6 +540,7 @@ async function openCamera(kind, entryId, breakId = null){
   try{
     camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
     qs('camVideo').srcObject = camStream;
+    document.body.classList.add('modal-open');
     qs('camModal').classList.remove('hidden');
   }catch(e){
     alert('Camera permission denied. You can add the photo later from Admin.');
@@ -550,6 +553,7 @@ function closeCamera(){
     camStream.getTracks().forEach(t => t.stop());
     camStream = null;
   }
+  document.body.classList.remove('modal-open');
   qs('camModal').classList.add('hidden');
 }
 
@@ -669,6 +673,7 @@ async function hydrate(){
 
     currentEmployee = emp;
     qs('displayName').textContent = emp.display_name;
+    updateAdminTestLocationControls();
     await enforceContractorAgreementGate(supabaseClient, "timeclock.html");
     show(qs('clockSection'), true);
 
@@ -677,7 +682,7 @@ async function hydrate(){
     await fetchTodayScheduleAndExceptions();
     // Default display: assigned store from schedule (if any)
     const assigned = todayScheduleRow?.store_id ? (storeById.get(todayScheduleRow.store_id) || null) : null;
-    renderStoreContextLine(assigned, assigned ? 'Assigned store (schedule)' : 'No store assigned today');
+    renderStoreContextLine(assigned, assigned ? 'Assigned shift store for verification' : 'No assigned shift today; GPS still records your location.');
 
     await refreshShiftStatus();
     await refreshBreakStatus();
@@ -714,23 +719,23 @@ async function refreshShiftStatus(){
     if (routeIdList(todayExceptionRow?.allowed_clock_out_store_ids).length) {
       const labels = routeStoreLabels(todayExceptionRow.allowed_clock_out_store_ids);
       const s = open.store_id ? (storeById.get(open.store_id) || null) : null;
-      renderStoreContextLine(s, labels ? `Clock-out allowed at: ${labels}` : 'Clock-out route: selected stores only');
+      renderStoreContextLine(s, labels ? `Assigned route: ${labels}` : 'Clock-out GPS will be recorded for review');
     } else if (todayExceptionRow?.allow_clock_out_any_store) {
       const s = open.store_id ? (storeById.get(open.store_id) || null) : null;
-      renderStoreContextLine(s, 'Clock-out allowed at any active store today');
+      renderStoreContextLine(s, 'Clock-out GPS will be recorded for review');
     } else if (todayExceptionRow?.clock_out_store_id) {
       const s = storeById.get(todayExceptionRow.clock_out_store_id) || null;
-      renderStoreContextLine(s, s ? 'Clock-out route store' : 'Clock-out route store unknown');
+      renderStoreContextLine(s, s ? 'Assigned clock-out store for verification' : 'Clock-out GPS will be recorded for review');
     } else if (routeIdList(todayScheduleRow?.allowed_clock_out_store_ids).length) {
       const labels = routeStoreLabels(todayScheduleRow.allowed_clock_out_store_ids);
       const s = open.store_id ? (storeById.get(open.store_id) || null) : null;
-      renderStoreContextLine(s, labels ? `Clock-out allowed at: ${labels}` : 'Clock-out route: selected schedule stores only');
+      renderStoreContextLine(s, labels ? `Assigned route: ${labels}` : 'Clock-out GPS will be recorded for review');
     } else if (todayScheduleRow?.allow_clock_out_any_store) {
       const s = open.store_id ? (storeById.get(open.store_id) || null) : null;
-      renderStoreContextLine(s, 'Clock-out allowed at any active store for this schedule');
+      renderStoreContextLine(s, 'Clock-out GPS will be recorded for review');
     } else {
       const s = open.store_id ? (storeById.get(open.store_id) || null) : (todayScheduleRow?.store_id ? (storeById.get(todayScheduleRow.store_id) || null) : null);
-      renderStoreContextLine(s, s ? 'Active shift store' : 'Active shift (store unknown)');
+      renderStoreContextLine(s, s ? 'Active shift store for verification' : 'Active shift; GPS still records your location.');
     }
   } else {
     pill.textContent = 'Not clocked in';
@@ -740,20 +745,20 @@ async function refreshShiftStatus(){
     // Phase 4: fall back to schedule assignment for today
     if (routeIdList(todayExceptionRow?.allowed_clock_in_store_ids).length) {
       const labels = routeStoreLabels(todayExceptionRow.allowed_clock_in_store_ids);
-      renderStoreContextLine(null, labels ? `Clock-in allowed at: ${labels}` : 'Clock-in route: selected stores only');
+      renderStoreContextLine(null, labels ? `Assigned route: ${labels}` : 'Clock-in GPS will be recorded for review');
     } else if (todayExceptionRow?.allow_clock_in_any_store) {
-      renderStoreContextLine(null, 'Clock-in allowed at any active store today');
+      renderStoreContextLine(null, 'Clock-in GPS will be recorded for review');
     } else if (todayExceptionRow?.clock_in_store_id) {
       const s = storeById.get(todayExceptionRow.clock_in_store_id) || null;
-      renderStoreContextLine(s, s ? 'Clock-in route store' : 'Clock-in route store unknown');
+      renderStoreContextLine(s, s ? 'Assigned clock-in store for verification' : 'Clock-in GPS will be recorded for review');
     } else if (routeIdList(todayScheduleRow?.allowed_clock_in_store_ids).length) {
       const labels = routeStoreLabels(todayScheduleRow.allowed_clock_in_store_ids);
-      renderStoreContextLine(null, labels ? `Clock-in allowed at: ${labels}` : 'Clock-in route: selected schedule stores only');
+      renderStoreContextLine(null, labels ? `Assigned route: ${labels}` : 'Clock-in GPS will be recorded for review');
     } else if (todayScheduleRow?.allow_clock_in_any_store) {
-      renderStoreContextLine(null, 'Clock-in allowed at any active store for this schedule');
+      renderStoreContextLine(null, 'Clock-in GPS will be recorded for review');
     } else {
       const assigned = todayScheduleRow?.store_id ? (storeById.get(todayScheduleRow.store_id) || null) : null;
-      renderStoreContextLine(assigned, assigned ? 'Assigned store (schedule)' : 'No store assigned today');
+      renderStoreContextLine(assigned, assigned ? 'Assigned shift store for verification' : 'No assigned shift today; GPS still records your location.');
     }
   }
 }
@@ -851,21 +856,27 @@ async function onClockAction(){
     // RPC
     let entry, err;
 
+    const adminTestStoreId = await adminTestStoreIdForGeo(geo);
+
     if (kind === 'in') {
       // The server is the source of truth for store selection. It resolves
       // schedules, route exceptions, active store GPS, and geofence validity.
-      ({ data: entry, error: err } = await supabaseClient.rpc('clock_in_now_geo', {
+      const payload = {
         _employee_id: currentEmployee.id,
         _lat: geo.lat, _lng: geo.lng, _accuracy_m: geo.accuracy,
         _photo_path: photoPath
-      }));
+      };
+      if (adminTestStoreId) payload._store_id = adminTestStoreId;
+      ({ data: entry, error: err } = await supabaseClient.rpc('clock_in_now_geo', payload));
     } else {
       // Clock OUT also lets the server validate against the active shift store.
-      ({ data: entry, error: err } = await supabaseClient.rpc('clock_out_now_geo', {
+      const payload = {
         _employee_id: currentEmployee.id,
         _lat: geo.lat, _lng: geo.lng, _accuracy_m: geo.accuracy,
         _photo_path: photoPath
-      }));
+      };
+      if (adminTestStoreId) payload._store_id = adminTestStoreId;
+      ({ data: entry, error: err } = await supabaseClient.rpc('clock_out_now_geo', payload));
     }
 
     if (err){ alert(err.message || 'Clock action blocked.'); return; }
@@ -1045,28 +1056,26 @@ if (nearest?.store && (nearest.distance_m <= (nearest.store.radius_m ?? 0))) {
     const hasOpenBreak = (openBreakList && openBreakList.length > 0);
     const phaseKind = hasOpenBreak ? 'break_end' : 'break_start';
 
-    if (!hasOpenBreak) {
-      const usedMin = Math.floor((breakUsedMsToday || 0) / 60000);
-      if (usedMin >= (breakCapMin || 30)) {
-        alert(`Heads up: you’ve already used ${usedMin}m of paid break time today.\nAdditional break time will be unpaid.`);
-      }
-    }
-
     const blob = await awaitPhoto(phaseKind);
     const photoPath = await uploadPhotoBlob(phaseKind, blob);
+    const adminTestStoreId = await adminTestStoreIdForGeo({ lat, lng, accuracy });
 
     // 4) Call RPC with required _photo_path
     let brkRow, rpcErr;
     if (!hasOpenBreak) {
-      ({ data: brkRow, error: rpcErr } = await supabaseClient.rpc('start_break_now_geo', {
+      const payload = {
         _employee_id: currentEmployee.id, _lat: lat, _lng: lng, _accuracy_m: accuracy,
         _photo_path: photoPath
-      }));
+      };
+      if (adminTestStoreId) payload._store_id = adminTestStoreId;
+      ({ data: brkRow, error: rpcErr } = await supabaseClient.rpc('start_break_now_geo', payload));
     } else {
-      ({ data: brkRow, error: rpcErr } = await supabaseClient.rpc('end_break_now_geo', {
+      const payload = {
         _employee_id: currentEmployee.id, _lat: lat, _lng: lng, _accuracy_m: accuracy,
         _photo_path: photoPath
-      }));
+      };
+      if (adminTestStoreId) payload._store_id = adminTestStoreId;
+      ({ data: brkRow, error: rpcErr } = await supabaseClient.rpc('end_break_now_geo', payload));
     }
     if (rpcErr){ alert(rpcErr.message); return; }
 
@@ -1109,7 +1118,25 @@ function el(tag, cls){
   return n;
 }
 
-async function renderTodayCards(rows, anomalyMap){
+function unpaidBreakMsByEntryId(breaks = []){
+  const byId = new Map();
+  let paidRemainingMs = Math.max(0, Number(breakCapMin || 30)) * 60000;
+  const ordered = [...(breaks || [])].sort((a, b) => new Date(a.started_at) - new Date(b.started_at));
+  for (const b of ordered){
+    const id = b.time_entry_id;
+    if (!id || !b.started_at) continue;
+    const start = new Date(b.started_at).getTime();
+    const end = b.ended_at ? new Date(b.ended_at).getTime() : Date.now();
+    const ms = Math.max(0, end - start);
+    const paidMs = Math.min(ms, paidRemainingMs);
+    paidRemainingMs = Math.max(0, paidRemainingMs - paidMs);
+    const unpaidMs = Math.max(0, ms - paidMs);
+    byId.set(id, (byId.get(id) || 0) + unpaidMs);
+  }
+  return byId;
+}
+
+async function renderTodayCards(rows, anomalyMap, unpaidBreakMsMap = new Map()){
   const wrap = qs('todayCards');
   if (!wrap) return;
 
@@ -1124,7 +1151,8 @@ async function renderTodayCards(rows, anomalyMap){
 
   for (const r of rows){
     const endTs = r.clock_out ? new Date(r.clock_out) : new Date();
-    const durMs = endTs - new Date(r.clock_in);
+    const grossMs = endTs - new Date(r.clock_in);
+    const durMs = Math.max(0, grossMs - (unpaidBreakMsMap.get(r.id) || 0));
 
     const storeObj = r.store_id ? (storeById.get(r.store_id) || null) : null;
     const storeName = storeObj?.name ? escHtml(storeObj.name) : '—';
@@ -1163,7 +1191,7 @@ async function renderTodayCards(rows, anomalyMap){
     const outBlock = el('div', 'tblock');
     outBlock.innerHTML = `<div class="tlabel">Out</div><div class="tvalue">${r.clock_out ? fmtTime(r.clock_out) : '—'}</div>`;
     const idBlock = el('div', 'tblock');
-    idBlock.innerHTML = `<div class="tlabel">Entry</div><div class="tvalue mono">${String(r.id).slice(0,8)}</div>`;
+    idBlock.innerHTML = `<div class="tlabel">Unpaid Break</div><div class="tvalue">${fmtDur(unpaidBreakMsMap.get(r.id) || 0)}</div>`;
     times.appendChild(inBlock);
     times.appendChild(outBlock);
     times.appendChild(idBlock);
@@ -1315,6 +1343,8 @@ async function loadToday(){
       todayBreaks = breaks || [];
     }
 
+    const unpaidBreakMsMap = unpaidBreakMsByEntryId(todayBreaks);
+
     // Aggregate ended breaks + detect an active one
     breakUsedMsToday = 0;
     let openBreakRow = null;
@@ -1353,7 +1383,9 @@ async function loadToday(){
       for (const r of rows){
         const tr = document.createElement('tr');
         const endTs = r.clock_out ? new Date(r.clock_out) : new Date();
-        const durMs = endTs - new Date(r.clock_in);
+        const grossMs = endTs - new Date(r.clock_in);
+        const unpaidBreakMs = unpaidBreakMsMap.get(r.id) || 0;
+        const durMs = Math.max(0, grossMs - unpaidBreakMs);
         const storeObj = r.store_id ? (storeById.get(r.store_id) || null) : null;
         const storeName = storeObj?.name ? escHtml(storeObj.name) : '—';
         const dirUrl = directionsUrlForStore(storeObj);
@@ -1402,7 +1434,7 @@ async function loadToday(){
       }
     }
     
-    await renderTodayCards(rows, anomalyMap);
+    await renderTodayCards(rows, anomalyMap, unpaidBreakMsMap);
     await renderBreaksCards(todayBreaks);
 
 
@@ -1491,9 +1523,144 @@ function getGeo(){
   });
 }
 
+function isCurrentAdmin(){
+  return String(currentEmployee?.role || '').toLowerCase() === 'admin';
+}
+
+function updateAdminTestLocationControls(){
+  const row = qs('adminTestLocationRow');
+  if (!row) return;
+  show(row, isCurrentAdmin());
+}
+
+function roundCoord(value){
+  return Number(Number(value).toFixed(6));
+}
+
+function rpcMissing(error){
+  const msg = String(error?.message || '');
+  return msg.includes('Could not find the function') || msg.includes('schema cache');
+}
+
+function adminTestStoreName(){
+  const label = currentEmployee?.display_name || currentUser?.email || currentUser?.id || 'Admin';
+  return `Admin Test Location - ${label}`;
+}
+
+async function saveAdminTestLocationAsStore(geo){
+  const name = adminTestStoreName();
+  const row = {
+    name,
+    lat: roundCoord(geo.lat),
+    lng: roundCoord(geo.lng),
+    radius_m: 150,
+    active: true,
+    timezone: 'America/New_York',
+    schedule_enforce: false,
+    paid_break_cap_min: 30
+  };
+
+  let id = localStorage.getItem(ADMIN_TEST_STORE_KEY);
+  if (id){
+    const { error: updateErr } = await supabaseClient
+      .from('store_locations')
+      .update(row)
+      .eq('id', id);
+    if (!updateErr){
+      await fetchActiveStores();
+      return id;
+    }
+    localStorage.removeItem(ADMIN_TEST_STORE_KEY);
+  }
+
+  const { data: existing, error: findErr } = await supabaseClient
+    .from('store_locations')
+    .select('id')
+    .eq('name', name)
+    .limit(1);
+  if (findErr) throw findErr;
+
+  if (existing?.[0]?.id){
+    id = existing[0].id;
+    const { error: updateErr } = await supabaseClient
+      .from('store_locations')
+      .update(row)
+      .eq('id', id);
+    if (updateErr) throw updateErr;
+  } else {
+    const { data: inserted, error: insertErr } = await supabaseClient
+      .from('store_locations')
+      .insert(row)
+      .select('id')
+      .single();
+    if (insertErr) throw insertErr;
+    id = inserted.id;
+  }
+
+  localStorage.setItem(ADMIN_TEST_STORE_KEY, id);
+  await fetchActiveStores();
+  return id;
+}
+
+async function adminTestStoreIdForGeo(geo){
+  if (!isCurrentAdmin()) return null;
+  const id = localStorage.getItem(ADMIN_TEST_STORE_KEY);
+  if (!id || !geo?.lat || !geo?.lng) return null;
+  if ((geo.accuracy ?? 9999) > 150) return null;
+  if (!storeById.has(id)) await fetchActiveStores();
+  const store = storeById.get(id);
+  if (!store?.active) return null;
+  const distance = haversineMeters(geo.lat, geo.lng, store.lat, store.lng);
+  return distance <= Number(store.radius_m || 0) ? id : null;
+}
+
+async function saveAdminTestLocation(){
+  if (!isCurrentAdmin()){
+    alert('Admin permissions are required.');
+    return;
+  }
+
+  const btn = qs('adminTestLocationBtn');
+  const status = qs('adminTestLocationStatus');
+  if (btn) btn.disabled = true;
+  if (status) status.textContent = 'Getting current location...';
+
+  try {
+    const geo = await getGeo();
+    if (!geo.ok){
+      if (status) status.textContent = 'Location permission is required.';
+      alert(geo.msg || 'Unable to get location.');
+      return;
+    }
+
+    const { error } = await supabaseClient.rpc('admin_set_my_timeclock_test_location', {
+      _lat: geo.lat,
+      _lng: geo.lng,
+      _accuracy_m: geo.accuracy,
+      _radius_m: 150
+    });
+
+    if (error) {
+      if (!rpcMissing(error)) throw error;
+      await saveAdminTestLocationAsStore(geo);
+      if (status) status.textContent = `Saved temporary test store here only (±${Math.round(geo.accuracy || 0)}m).`;
+    } else if (status) {
+      status.textContent = `Saved here only (±${Math.round(geo.accuracy || 0)}m).`;
+    }
+    qs('geoText').textContent = `${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)} (±${Math.round(geo.accuracy)}m)`;
+  } catch (err) {
+    console.error(err);
+    if (status) status.textContent = 'Could not save this location.';
+    alert(err?.message || 'Could not save this test location.');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 // ---- Bootstrap ----
 document.addEventListener('DOMContentLoaded', async () => {
   supabaseClient = window.supabase;
+  qs('adminTestLocationBtn')?.addEventListener('click', saveAdminTestLocation);
 
   // Auth state (debounced + ensures break cap fetched before hydrate)
   let hydrateTimer = null;
