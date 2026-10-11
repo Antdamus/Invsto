@@ -1,0 +1,45 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
+const source=await readFile(new URL('../pending-work-queue.js',import.meta.url),'utf8');
+function fixture(){
+ const rows=[{id:'a',key:'buyer'},{id:'b',key:'buyer'},{id:'c',key:'other'}];
+ const elements={'order-search':{value:''},'order-status-filter':{value:'pending'}}, listeners={},reads=[];
+ const context={state:{orders:rows},escapeHtml:s=>s.replaceAll('<','&lt;'),formatDate:s=>s,
+ isOpenOrderLine:()=>true,getBuyerKey:r=>r.key,
+ groupLinesByBuyer:rs=>[...new Set(rs.map(r=>r.key))].map(key=>({key,lines:rs.filter(r=>r.key===key)})),
+ applyOrderFilters(){},clearOrderSearch(){},requestAnimationFrame(){},setTimeout(){},clearTimeout(){},
+ console:{warn(){}},supabase:{rpc:()=>({range:()=>new Promise(resolve=>reads.push(resolve))})},
+ document:{getElementById:id=>elements[id],querySelectorAll:()=>[],addEventListener:(event,fn)=>listeners[event]=fn},
+ window:{OGOrderWatches:{marked:()=>true},scrollBy(){},addEventListener(){},setInterval(){}}};
+ vm.runInNewContext(source,context);const api=context.window.OGPendingWork;api.start();
+ const click=dataset=>listeners.click({target:{closest:()=>({dataset,hasAttribute:()=>false})},preventDefault(){},stopPropagation(){}});
+ const load=async(data=[])=>{const promise=api.load(rows,{paint:false});reads.at(-1)({data});await promise;};
+ return{api,load,reads,rows,click,elements};
+}
+const blocker=(override={})=>({id:'hold',buyer_key:'buyer',kind:'task',task_id:'task',task_source:'team',active:true,line_ids:['a','b'],reason:'Waiting for clasp',assignee:'Otello',created_at:'2026-10-10',...override});
+test('ready and waiting partition whole buyers; counts cannot imply unknown orders are ready; search bypasses hiding',async()=>{
+ const f=fixture();assert.equal(f.api.filter(f.rows).length,0);
+ await f.load([blocker()]);assert.deepEqual(Array.from(f.api.filter(f.rows),r=>r.id),['c']);
+ f.click({workView:'waiting'});assert.deepEqual(Array.from(f.api.filter(f.rows),r=>r.id),['a','b']);
+ f.elements['order-search'].value='buyer';assert.equal(f.api.filter(f.rows).length,3);
+ f.elements['order-search'].value='';await f.load([blocker({active:false})]);assert.equal(f.api.filter(f.rows).length,0);
+ f.click({workView:'ready'});assert.equal(f.api.filter(f.rows).length,3);
+});
+test('CGL is line-specific, HTML is escaped, ordinary customer tasks do not manufacture blockers',async()=>{
+ const f=fixture();await f.load();assert.match(f.api.line(f.rows[0]),/Set Pending CGL/);
+ assert.equal(f.api.summary({key:'buyer'}),'');
+ await f.load([blocker({kind:'cgl',line_ids:['a'],task_id:null})]);
+ assert.match(f.api.line(f.rows[0]),/Pending CGL/);assert.match(f.api.line(f.rows[1]),/Set Pending CGL/);
+ assert.match(f.api.summary({key:'buyer'}),/Pending CGL · 1 item/);
+ await f.load([blocker({reason:'<script>bad</script>'})]);assert.ok(!f.api.summary({key:'buyer'}).includes('<script>'));
+});
+test('a failed read does not classify orders as ready and a late read cannot erase a newer hold',async()=>{
+ const f=fixture();await f.load();
+ const earlier=f.api.load(f.rows,{paint:false});const later=f.api.load(f.rows,{paint:false});
+ f.reads[2]({data:[blocker()]});await later;f.reads[1]({data:[]});await earlier;
+ assert.deepEqual(Array.from(f.api.filter(f.rows),r=>r.id),['c']);
+ const failed=f.api.load(f.rows,{paint:false});f.reads[3]({error:Error('offline')});await failed;
+ assert.equal(f.api.filter(f.rows).length,0);assert.match(f.api.control({key:'buyer',lines:f.rows}),/disabled/);
+});

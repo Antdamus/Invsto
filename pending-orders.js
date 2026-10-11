@@ -3121,6 +3121,7 @@ async function loadOrders() {
   state.orderTaskAssignmentsByLineId.clear();
   const normalizeStartedAt = nowMs();
   state.orders = data.map(normalizeLine);
+  window.OGPendingWork?.reset();
   logPendingOrderPerf("loadOrders normalize", normalizeStartedAt, { rows: state.orders.length });
   if (state.selectedLiveLot) {
     await state.liveBagConnectionsUI?.load();
@@ -3143,6 +3144,7 @@ function hydratePendingOrderExtrasInBackground(lines = []) {
   Promise.allSettled([
     window.PendingInventory?.load(lines),
     window.OGOrderWatches?.load(lines),
+    window.OGPendingWork?.load(lines),
     hydrateOrderVideoReceipts(snapshot),
     hydrateOrderTaskAssignments(snapshot),
     hydrateQueueVideoReceiptCoverage(snapshot),
@@ -3262,7 +3264,7 @@ function applyOrderFilters() {
 
   filtered = expandSearchMatchesToBuyerBundles(filtered, term);
 
-  state.filteredOrders = filtered;
+  state.filteredOrders = window.OGPendingWork?.filter(filtered) || filtered;
   renderSummaryStrip();
   renderCancellationReviewIndicator();
   renderAdminOrderActions();
@@ -3482,6 +3484,7 @@ function renderSummaryStrip() {
   const visibleLineCount = state.filteredOrders.length;
   $("order-count-pill").textContent = `${visibleLineCount.toLocaleString()} line${visibleLineCount === 1 ? "" : "s"} / ${buyerGroupCount.toLocaleString()} buyer${buyerGroupCount === 1 ? "" : "s"}`;
   renderRemainingBuyerCount();
+  window.OGPendingWork?.summaryCounts();
 }
 
 function renderCancellationReviewIndicator() {
@@ -4495,7 +4498,7 @@ function renderOrders(options = {}) {
     }, { rootMargin: "300px" })
     : null;
   if (!groups.length) {
-    list.innerHTML = `<div class="empty-state">No orders match this view.</div>`;
+    list.innerHTML = `<div class="empty-state">${escapeHtml(window.OGPendingWork?.emptyMessage() || "No orders match this view.")}</div>`;
     logPendingOrderPerf("renderOrders empty", startedAt, { rows: state.filteredOrders.length });
     return;
   }
@@ -4594,6 +4597,7 @@ function renderOrders(options = {}) {
           ` : ""}
           <span class="buyer-card-value">${formatMoney(group.totalValue)}</span>
           ${taskControlMarkup}
+          ${window.OGPendingWork?.control(group) || ""}
           <button type="button" class="buyer-card-expand-btn buyer-card-completion-photos" data-buyer-completion-photos>Completion photos</button>
           <button type="button" class="buyer-card-expand-btn" data-phone-camera="buyer">${phoneCameraDesktop?.paired ? "Send to phone" : "Use my phone"}</button>
           <button type="button" class="buyer-card-expand-btn" data-buyer-shipping-labels>Shipping labels</button>
@@ -4613,6 +4617,7 @@ function renderOrders(options = {}) {
         <span class="buyer-card-meta-pill">Ship ${escapeHtml(formatGroupOrderDate(group, "ship_by_date"))}</span>
         <span class="buyer-card-meta-pill buyer-card-receipt-pill ${receiptCoverageClass}" title="${escapeHtml(receiptCoverageTitle)}">${escapeHtml(receiptCoverageLabel)}</span>
       </div>
+      ${window.OGPendingWork?.summary(group) || ""}
       <div data-buyer-shared-notes>${renderGroupSharedNotes(group.lines, group.key)}</div>
       ${isExpanded ? `
         <div class="buyer-card-expanded">
@@ -9829,6 +9834,7 @@ async function confirmWorkerNoInventoryCompletion() {
     if (confirmButton) confirmButton.disabled = true;
     const blocked = selectedLines.find(getLineFulfillmentBlock);
     if (blocked) throw new Error(getLineFulfillmentBlock(blocked));
+    await window.OGPendingWork?.assertReady(selectedLines);
     const currentBuyerKey = getBuyerKey(selectedLines[0]);
     const selectedPhotoCount = getSelectedNoInventoryEvidencePhotos().length;
     setNoInventoryPhotoStatus(
@@ -10350,6 +10356,7 @@ async function confirmAdminOrderCloseout() {
     const valid = await verifyCurrentUserPassword(password);
     if (!valid) throw new Error("Incorrect password. Please try again.");
 
+    if (action === "fulfilled_no_inventory") await window.OGPendingWork?.assertReady(lines);
     const { data, error } = await supabase.rpc("admin_close_ebay_order_lines", {
       _order_line_ids: lines.map((line) => line.id),
       _action: action,
@@ -10539,6 +10546,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
       .filter(Boolean))];
     const blocked = (staged.length ? staged.map(entry => entry.line) : [state.selectedLine]).find(getLineFulfillmentBlock);
     if (blocked) throw new Error(getLineFulfillmentBlock(blocked));
+    await window.OGPendingWork?.assertReady(staged.length ? staged.map(entry => entry.line) : [state.selectedLine]);
     const changedItemIds = [];
     if (liveItems.length && !staged.length) {
       if (!state.selectedLine) throw new Error("Select the eBay order line before confirming the live-sale bag.");
@@ -13340,6 +13348,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   markEbayTransferReceiverReady();
   startItemSearchUpdates();
   window.OGOrderWatches?.start();
+  window.OGPendingWork?.start();
   getReceiptPreviewJobs()?.start();
   if (window.lucide) window.lucide.createIcons();
 });

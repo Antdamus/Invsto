@@ -15,7 +15,7 @@
   function paint() {
     document.querySelectorAll('[data-watch-line]').forEach(host=>{
       const row=state.orders.find(row=>row.id===host.dataset.watchLine);
-      if(row){const html=line(row);if(host.innerHTML!==html)host.innerHTML=html;}
+      if(row){const html=window.OGOrderWatches.line(row);if(host.innerHTML!==html)host.innerHTML=html;}
     });
     document.querySelectorAll('[data-watch-buyer]').forEach(host=>{
       const html=summary(state.filteredOrders.filter(row=>getBuyerKey(row)===host.dataset.watchBuyer));
@@ -80,5 +80,6 @@
     const resume=()=>{if(document.visibilityState!=='hidden')void load();};
     window.setInterval(resume,60000);window.addEventListener('online',resume);document.addEventListener('visibilitychange',resume);
   }
-  window.OGOrderWatches={line,summary,load,start};
+  const watchLine=line;
+  window.OGOrderWatches={line:row=>watchLine(row)+(window.OGPendingWork?.line(row)||''),summary,load,start,marked};
 })();

@@ -26,3 +26,6 @@
 #certificate-status{font-size:13px;line-height:1.5;color:#b5e5cc;overflow-wrap:anywhere}#certificate-status.is-error{color:#ffc1ac}
 .certificate-footer{border-top:1px solid #ffffff20;padding-top:14px;display:flex;gap:14px;align-items:center;justify-content:space-between}.certificate-footer small{flex:1}#certificate-save{background:#eed29b;border-color:#eed29b;color:#17221b;flex-shrink:0}
 @media(max-width:600px){.certificate-dialog{padding:16px;border-radius:17px}.certificate-head h2{font-size:21px}.certificate-footer{flex-direction:column;align-items:stretch;gap:10px}.certificate-upload-actions>*{flex:1}.certificate-record-actions>*{flex:1 1 130px}.certificate-dialog input:not([type=file]),.certificate-dialog textarea{font-size:16px}}
+/* Keep verification usable beside saved copies on phones and desktops. */
+.certificate-dialog .certificate-verify-check{display:flex;align-items:start;gap:10px;line-height:1.5;margin:14px 0;color:#e7dfc8;font-size:14px}
+.certificate-dialog .certificate-verify-check input{width:20px;height:20px;min-height:20px;flex:0 0 20px;accent-color:#e8cf98}

@@ -5,7 +5,7 @@
  const $=id=>document.getElementById(id), esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const date=v=>new Date(v).toLocaleString(undefined,{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
  const client=()=>window.supabase;
- let dialog, lineId, trigger, requestId, userId, admin=false, busy=false, loading=true, readingFiles=false, files=[], records=[], generation=0;
+ let dialog, lineId, trigger, requestId, userId, requirement=null, admin=false, busy=false, loading=true, readingFiles=false, files=[], records=[], generation=0;
  const counts=new Map(),pending=new Set();let countTimer;
  const status=(text,error=false)=>{const el=$('certificate-status');el.textContent=text;el.classList.toggle('is-error',error);};
  function link(value){
@@ -62,13 +62,22 @@
   $('certificate-file-list').onclick=e=>{const b=e.target.closest('[data-remove-certificate-file]');if(b&&!busy){files.splice(Number(b.dataset.removeCertificateFile),1);renderFiles();}};
   $('certificate-form').onsubmit=save;
   $('certificate-saved').onclick=async e=>{
+   const confirm=e.target.closest('[data-certificate-verify]');
+   if(confirm){
+    if(busy||!requirement)return;
+    if(!confirm.closest('.certificate-record').querySelector('[data-certificate-checked]')?.checked){status('Check that this certificate belongs to the watch first.',true);return;}
+    setBusy(true);
+    try{const {error}=await client().rpc('confirm_pending_cgl',{_id:requirement.id,_expected_revision:requirement.revision,_certificate_id:confirm.dataset.certificateVerify});if(error)throw error;
+     await loadRecords();status('CGL confirmed for this watch. Other order blockers, if any, still apply.');window.dispatchEvent(new CustomEvent('order-certificate-changed',{detail:{lineId}}));
+    }catch(error){status(error.message||'Could not confirm the certificate.',true);}finally{setBusy(false);}return;
+   }
    const b=e.target.closest('[data-certificate-copy]');if(b){const record=records.find(r=>r.id===b.dataset.certificateCopy),file=record?.attachments[Number(b.dataset.fileIndex)];if(!file)return;
     b.disabled=true;try{const {data,error}=await client().storage.from(file.bucket).createSignedUrl(file.path,600);if(error)throw error;
      const a=document.createElement('a');a.href=data.signedUrl;a.target='_blank';a.rel='noopener noreferrer';a.textContent='Open saved copy ↗';a.className='certificate-button';b.replaceWith(a);a.click();
     }catch{b.disabled=false;status('Could not open the saved copy. Try again.',true);}return;}
    const correct=e.target.closest('[data-certificate-incorrect]');if(!correct||busy)return;
    const row=correct.closest('.certificate-record'),reason=row.querySelector('textarea').value.trim();if(!reason){status('Enter why this certificate is incorrect.',true);return;}
-   setBusy(true);try{const {error}=await client().rpc('void_order_line_certificate',{_id:correct.dataset.certificateIncorrect,_reason:reason});if(error)throw error;await loadRecords();status('Marked incorrect. The original copy remains in the history.');}
+   setBusy(true);try{const {error}=await client().rpc('void_order_line_certificate',{_id:correct.dataset.certificateIncorrect,_reason:reason});if(error)throw error;await loadRecords();status('Marked incorrect. The original copy remains in the history.');window.dispatchEvent(new CustomEvent('order-certificate-changed',{detail:{lineId}}));}
    catch(error){status(error.message||'Could not save the correction.',true);}finally{setBusy(false);}
   };
  }
@@ -79,15 +88,18 @@
    ${r.voided_at?`<p class="certificate-correction">${esc(r.void_reason)} · ${esc(date(r.voided_at))}</p>`:''}
    <div class="certificate-record-actions">${r.attachments.map((f,i)=>`<button type="button" data-certificate-copy="${esc(r.id)}" data-file-index="${i}">${r.attachments.length>1?`Copy ${i+1}`:'Open saved copy'} · ${f.mime_type==='application/pdf'?'PDF':'Photo'}</button>`).join('')}
    ${link(r.certificate_url)?`<a class="certificate-button" href="${esc(link(r.certificate_url))}" target="_blank" rel="noopener noreferrer">CGL website ↗</a>`:''}</div>
+   ${!r.voided_at&&requirement?requirement.certificate_id===r.id?'<p class="certificate-hint">CGL confirmed for shipping.</p>':`<label class="certificate-verify-check"><input type="checkbox" data-certificate-checked>I checked that this certificate belongs to this watch.</label><button type="button" data-certificate-verify="${esc(r.id)}">Confirm CGL for shipping</button>`:''}
    ${!r.voided_at&&(r.created_by===userId||admin)?`<details class="certificate-correction"><summary>Wrong certificate?</summary><p>Mark it incorrect and add the right certificate. The original stays in the audit history.</p><textarea maxlength="1000" aria-label="Correction reason" placeholder="Reason for correction"></textarea><button type="button" data-certificate-incorrect="${esc(r.id)}">Mark incorrect</button></details>`:''}</article>`).join(''):'<p class="certificate-empty">No certificate saved for this item yet.</p>';
  }
  function updateCounts(id,count){counts.set(id,count);document.querySelectorAll('[data-certificate-line]').forEach(b=>{if(b.dataset.certificateLine===id){b.textContent=count?`CGL certificate · ${count}`:'CGL certificate';b.classList.toggle('has-certificate',count>0);}});}
  async function loadRecords(){const run=generation,id=lineId;let rows=[];
   for(let offset=0;;offset+=100){const {data,error}=await client().from('ebay_order_line_certificates').select('*').eq('order_line_id',id).order('created_at',{ascending:false}).order('id',{ascending:false}).range(offset,offset+99);if(error)throw error;rows.push(...data);if(data.length<100)break;}
-  if(run!==generation)return;records=rows;renderRecords();updateCounts(id,rows.filter(r=>!r.voided_at).length);
+  const {data:requirements,error:requirementError}=await client().from('pending_order_work_blockers').select('id,revision,certificate_id,pending_order_work_blocker_lines!inner(order_line_id)').eq('kind','cgl').is('released_at',null).eq('pending_order_work_blocker_lines.order_line_id',id);
+  if(run!==generation)return;requirement=requirements?.[0]||null;records=rows;renderRecords();updateCounts(id,rows.filter(r=>!r.voided_at).length);
+  if(requirementError)status('Certificate copies loaded, but CGL shipping status could not be checked. Close and reopen to retry.',true);
  }
  async function open(button){
-  if(busy)return;create();trigger=button;lineId=button.dataset.certificateLine;generation++;requestId=crypto.randomUUID();files=[];records=[];loading=true;readingFiles=false;refreshControls();
+  if(busy)return;create();trigger=button;lineId=button.dataset.certificateLine;generation++;requestId=crypto.randomUUID();files=[];records=[];requirement=null;loading=true;readingFiles=false;refreshControls();
   $('certificate-form').reset();$('certificate-preview-link').hidden=true;renderFiles();status('');$('certificate-context').textContent=button.dataset.certificateTitle||'Selected order item';
   $('certificate-saved').textContent='Loading saved certificates…';window.OGTaskNotifications?.dismiss();dialog.showModal();$('certificate-close').focus();
   const run=generation;
@@ -120,6 +132,7 @@
    files=[];requestId=crypto.randomUUID();$('certificate-form').reset();$('certificate-preview-link').hidden=true;renderFiles();
    records=[result,...records.filter(r=>r.id!==result.id)];renderRecords();updateCounts(lineId,records.filter(r=>!r.voided_at).length);
    status('Certificate copy saved with this item. It stays available after shipping.');
+   window.dispatchEvent(new CustomEvent('order-certificate-changed',{detail:{lineId}}));
   }catch(error){status(error.message||'Could not save. Your certificate details are still here; retry.',true);}
   finally{setBusy(false);}
  }

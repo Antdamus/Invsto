@@ -8,6 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="pending-orders.css?v=watch-markers-20261010" />
+  <link rel="stylesheet" href="pending-work-queue.css?v=20261011" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
   <script src="extension-updates.js?v=20261003" defer></script>
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
@@ -19,9 +20,9 @@
   <link rel="stylesheet" href="pending-bag-scan.css?v=20261007-bag-photos-2" />
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
   <link rel="stylesheet" href="task-request.css?v=20261007-intent-2" />
-  <link rel="stylesheet" href="order-certificates.css?v=20261009">
+  <link rel="stylesheet" href="order-certificates.css?v=20261011-work">
   <link rel="stylesheet" href="pending-order-chats.css?v=20261009">
-  <script src="order-certificates.js?v=20261009" defer></script>
+  <script src="order-certificates.js?v=20261011-work" defer></script>
 </head>
 <body>
   <header class="phone-orders-header phone-only" aria-label="Pending orders">
@@ -217,22 +218,27 @@
           <span>Open Queue</span>
           <strong id="summary-pending">0 groups</strong>
           <small id="summary-pending-lines">0 item lines</small>
+          <small class="pending-work-totals" data-work-summary="all">Checking work status…</small>
         </div>
         <div class="summary-urgency is-overdue">
           <span>Overdue</span>
           <strong id="summary-overdue-orders">0 groups</strong>
           <small id="summary-overdue-lines">0 item lines</small>
+          <small class="pending-work-totals" data-work-summary="overdue">Checking work status…</small>
         </div>
         <div class="summary-urgency is-today">
           <span>Due Today</span>
           <strong id="summary-today-orders">0 groups</strong>
           <small id="summary-today-lines">0 item lines</small>
+          <small class="pending-work-totals" data-work-summary="today">Checking work status…</small>
         </div>
         <div class="summary-urgency is-tomorrow">
           <span>Due Tomorrow</span>
           <strong id="summary-tomorrow-orders">0 groups</strong>
           <small id="summary-tomorrow-lines">0 item lines</small>
+          <small class="pending-work-totals" data-work-summary="tomorrow">Checking work status…</small>
         </div>
+        <div><button type="button" id="summary-cgl-button"><span>Pending CGL</span><strong id="summary-pending-cgl">…</strong><small>Watch item lines · View waiting</small></button></div>
       </section>
 
       <div class="fulfillment-utility-strip">
@@ -468,6 +474,13 @@
             <output id="buyer-remaining-count" class="count-pill" aria-live="polite" aria-atomic="true">Loading...</output>
           </div>
           <p class="buyer-due-filter-help">Purchase date matches the customer's earliest pending purchase. All their orders stay together, regardless of date.</p>
+          <div class="pending-work-filters" role="group" aria-label="Order work status">
+            <button type="button" data-work-view="ready" aria-pressed="true">Ready to work <span data-work-count>…</span></button>
+            <button type="button" data-work-view="waiting" aria-pressed="false">Waiting <span data-work-count>…</span></button>
+            <button type="button" data-work-view="all" aria-pressed="false">All <span data-work-count>…</span></button>
+            <button type="button" id="pending-work-cgl" aria-pressed="false">Pending CGL <span>…</span></button>
+          </div>
+          <p id="pending-work-status" role="status">Checking which orders are ready…</p>
           <p class="pending-chat-live" data-pending-chat-status>Checking buyer chats…</p>
           <span class="pending-chat-sr-only" data-pending-chat-announcement role="status" aria-live="polite"></span>
 
@@ -1269,8 +1282,9 @@
     </div>
   </div>
   <script src="pending-order-chats.js?v=20261009"></script>
-  <script src="pending-watch-flags.js?v=20261010"></script>
-  <script src="pending-orders.js?v=watch-markers-20261010"></script>
+  <script src="pending-watch-flags.js?v=20261011"></script>
+  <script src="pending-work-queue.js?v=20261011"></script>
+  <script src="pending-orders.js?v=work-queue-20261011"></script>
   <script src="pending-inventory.js?v=20261008-shared-bag-2"></script>
   <script src="pending-bag-scan.js?v=20261008-shared-inventory"></script>
   <script src="pending-orders-mobile.js?v=20261008-inventory-attachments"></script>
