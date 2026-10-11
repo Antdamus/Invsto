@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="add-item.css?v=20260926-mobile" />
   <link rel="stylesheet" href="additembulk.css" />
   <link rel="stylesheet" href="additem-assisted.css" />
-  <link rel="stylesheet" href="additem-wizard.css?v=20261010-pricing" />
+  <link rel="stylesheet" href="additem-wizard.css?v=20261011-intake-refinements" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
@@ -159,43 +159,43 @@
                 <strong id="assisted-weight-display" class="assisted-result-value">--</strong>
                 <p class="assisted-result-note">The reading updates the Weight field for this item.</p>
               </div></details>
-          <details class="item-optional-details"><summary>Additional details and notes</summary>            <div class="assisted-grid assisted-grid-secondary">
+          <section class="intake-item-details" aria-labelledby="item-details-heading"><h3 id="item-details-heading">Measurements, stones and description details</h3><p class="field-helper">Check these details for every piece. Enter what you know; use “No stone” or “Not applicable” where appropriate.</p><div class="assisted-grid assisted-grid-secondary">
               <label class="assisted-field" for="assisted-stone-type">
-                <span class="assisted-label">Stone Type (optional)</span>
+                <span class="assisted-label">Diamonds / stone type</span>
                 <input
                   type="text"
                   id="assisted-stone-type"
                   class="assisted-input"
                   list="assisted-stone-type-options"
-                  placeholder="Diamond, ruby, no stone, or leave blank"
+                  placeholder="Natural diamond, lab diamond, ruby, or no stone"
                 />
                 <datalist id="assisted-stone-type-options"></datalist>
               </label>
 
               <label class="assisted-field" for="assisted-length">
-                <span class="assisted-label">Length (optional)</span>
+                <span class="assisted-label">Length / measurements</span>
                 <input
                   type="text"
                   id="assisted-length"
                   class="assisted-input"
                   list="assisted-length-options"
-                  placeholder="16 inch, 18 in, 7.5 inch, or leave blank"
+                  placeholder="e.g. 18 inches; include the unit"
                 />
                 <datalist id="assisted-length-options"></datalist>
               </label>
 
               <label class="assisted-field assisted-field-wide" for="assisted-notes">
-                <span class="assisted-label">Notes / Descriptors (optional)</span>
+                <span class="assisted-label">Description details / condition</span>
                 <textarea
                   id="assisted-notes"
                   class="assisted-textarea"
                   rows="3"
-                  placeholder="Add any reliable details you want the copy generator to respect."
+                  placeholder="Design, diamond carat weight and quality, dimensions, condition, and any other confirmed details."
                 ></textarea>
               </label>
             </div>
 
-</details>
+</section>
         </section>
         <section class="form-section item-step" id="item-step-photos" data-item-step="photos" aria-labelledby="item-step-photos-title" hidden>
           <div class="form-section-head"><h2 class="section-title" id="item-step-photos-title" tabindex="-1">Item photos</h2><p class="section-copy">Upload photos or capture them at a station, then choose the images to save.</p></div>
@@ -487,10 +487,15 @@
               <input type="number" step="0.01" id="cost" min="0" placeholder="Cost of Item ($)" class="add-input" required />
             </label>
 
+            <div class="form-field form-field-wide intake-break-even">
+              <label class="toggle-label" for="item-auto-minimum"><input type="checkbox" id="item-auto-minimum" checked /><span>Calculate break-even from cost</span></label>
+              <label class="form-field" for="item-break-even-factor"><span class="form-label">Break-even divisor</span><input type="number" id="item-break-even-factor" value="0.70" min="0.01" max="1" step="0.01" inputmode="decimal" class="add-input" /><span class="field-helper">Default: cost ÷ 0.70. Change the divisor or enter your own break-even price below.</span></label>
+              <p id="item-break-even-status" class="field-helper" role="status"></p>
+            </div>
             <label class="form-field" for="minimum-sale-price">
               <span class="form-label">Minimum sale / break-even price ($)</span>
               <input type="number" id="minimum-sale-price" min="0" step="0.01" inputmode="decimal" placeholder="Not set" class="add-input" />
-              <span class="field-helper">Your selling floor, visible to staff in Stock. Online listings use retail only. Leave blank if unknown.</span>
+              <span class="field-helper">Your internal selling floor. Editing this amount switches to manual pricing; turn calculation back on to use the divisor again. Clients and online listings see retail only.</span>
             </label>
             <label class="form-field" for="sale-price">
               <span class="form-label">Retail price ($)</span>
@@ -1038,11 +1043,11 @@
   <script src="additembulk.js?v=20260928-bulk-repair"></script>
   <link rel="stylesheet" href="coin-ebay.css?v=20260926-coins-ebay" />
   <script type="module" src="coin-ebay.js?v=20260926-fast-intake"></script>
-  <script src="additem-layout.js?v=20260926-photo-navigation"></script>
-  <script src="additem-pricing.js?v=20261010-pricing"></script>
-  <script src="additem-wizard.js?v=20261010-pricing"></script>
-  <script src="additem.js?v=20261010-pricing"></script>
-  <script src="additem-assisted.js?v=20260926-photo-navigation"></script>
-  <script src="additem-intake.js?v=20261010-pricing"></script>
+  <script src="additem-layout.js?v=20261011-intake-refinements"></script>
+  <script src="additem-pricing.js?v=20261011-intake-refinements"></script>
+  <script src="additem-wizard.js?v=20261011-intake-refinements"></script>
+  <script src="additem.js?v=20261011-intake-refinements"></script>
+  <script src="additem-assisted.js?v=20261011-intake-refinements"></script>
+  <script src="additem-intake.js?v=20261011-intake-refinements"></script>
 </body>
 </html>

@@ -1342,6 +1342,7 @@ let uploadedImages = [];
     if (weight > 0 && pricePerWeight > 0) {
       const newCost = weight * pricePerWeight;
       document.getElementById('cost').value = newCost.toFixed(2);
+      window.addItemPricing?.calculateMinimum();
 
       // New: round sale price up to nearest 10
       const salePrice = Math.ceil((newCost * 7.5) / 10) * 10;

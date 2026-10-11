@@ -73,6 +73,16 @@
   ];
   let backgroundRemovalModulePromise = null;
   let backgroundRemovalPreloadQueued = false;
+  // Reuse exactly the same config so preload and processing share one model session.
+  const backgroundRemovalConfig = {
+    model: 'isnet_fp16',
+    output: { format: 'image/png', quality: 0.95 },
+    progress(key, current, total) {
+      if (!state.isProcessingImage || !total) return;
+      const stages = {'compute:decode':'Preparing photo…','compute:inference':'Removing the background…','compute:mask':'Refining the edges…','compute:encode':'Preparing the finished image…'};
+      setInlineStatus(getElements().bgStatus, stages[key] || `Loading background tools: ${Math.round(current / total * 100)}%`, 'is-waiting');
+    },
+  };
   const MATERIAL_PURITY_OPTIONS = {
     Gold: ["10K", "14K", "18K", "22K", "24K"],
     Silver: ["925", "950", "Fine Silver"],
@@ -2446,7 +2456,6 @@
   async function loadBackgroundRemoval() {
     if (!backgroundRemovalModulePromise) {
       backgroundRemovalModulePromise = import(BACKGROUND_REMOVAL_MODULE_URL)
-        .then((module) => module.default || module.removeBackground || module)
         .catch((error) => {
           backgroundRemovalModulePromise = null;
           throw error;
@@ -2465,6 +2474,7 @@
 
     const runPreload = () => {
       loadBackgroundRemoval()
+        .then(module => module.preload(backgroundRemovalConfig))
         .then(() => {
           if (!state.isProcessingImage && !state.isAutoBlackProcessing && elements.bgStatus) {
             const currentStatus = asTrimmedString(elements.bgStatus.textContent).toLowerCase();
@@ -2733,8 +2743,9 @@
         "is-waiting"
       );
     } else {
-      const sourceBlob = await createScaledSourceBlobForBackgroundRemoval(selectedImage);
-      const removeBackground = await loadBackgroundRemoval();
+      const [sourceBlob, module] = await Promise.all([
+        createScaledSourceBlobForBackgroundRemoval(selectedImage), loadBackgroundRemoval(),
+      ]);
 
       setInlineStatus(
         elements.bgStatus,
@@ -2742,19 +2753,7 @@
         "is-waiting"
       );
 
-      cutoutBlob = await removeBackground(sourceBlob, {
-        model: "isnet_fp16",
-        output: {
-          format: "image/png",
-          quality: 0.95,
-          type: "foreground",
-        },
-        progress: (key, current, total) => {
-          if (!total) return;
-          const percent = Math.round((current / total) * 100);
-          setInlineStatus(elements.bgStatus, `Loading background removal assets: ${percent}%`, "is-waiting");
-        },
-      });
+      cutoutBlob = await module.removeBackground(sourceBlob, backgroundRemovalConfig);
       rememberBackgroundCutout(cacheKey, cutoutBlob);
     }
 
@@ -2804,6 +2803,7 @@
       const processedImagePayload = await createPixelPreservingBackgroundPayload(selectedImage, background, elements, {
         autoStraighten: state.autoStraightenBackground,
       });
+      setInlineStatus(elements.bgStatus, 'Saving the finished photo…', 'is-waiting');
       const { data, error } = await window.supabase.functions.invoke(IMAGE_PROCESS_FUNCTION_NAME, {
         body: {
           bucket,
@@ -2841,6 +2841,14 @@
         ...state.recentUploadedImages.filter((image) => image.path !== processedImage.path),
       ];
 
+      // Replace only the successfully processed photo. Keep its original available to reselect.
+      state.saveSelectedUploadedImagePaths = [...new Set([
+        ...state.saveSelectedUploadedImagePaths.map(path => path === imagePath ? processedImage.path : path),
+        ...(options.selectResult !== false ? [processedImage.path] : []),
+      ])];
+      // A black/white switch must reuse the transparent cutout, not run the model on a flattened result.
+      rememberBackgroundCutout(getBackgroundCutoutCacheKey(processedImage), state.backgroundCutoutCache.get(getBackgroundCutoutCacheKey(selectedImage)));
+
       if (options.selectResult !== false) {
         setAISelectedImage(elements, processedImage.path, {
           autoSelectForSave: true,
@@ -2852,7 +2860,7 @@
       await persistAddItemDraft(elements);
       setInlineStatus(
         elements.bgStatus,
-        `Processed image uploaded with a ${background} background. Review it in the preview and capture set.`,
+        `${background === 'black' ? 'Black' : 'White'} background saved. The processed photo replaces the original in this item; the original is still available to include again.`,
         "is-success"
       );
 
@@ -3747,7 +3755,7 @@
       });
     }
 
-    if (isAssisted) {
+    if (isAssisted && state.recentUploadedImages.length) {
       preloadBackgroundRemoval(elements);
     }
 
@@ -3916,6 +3924,9 @@
       }));
     });
     document.addEventListener("add-item:wizard-change", () => scheduleAddItemDraftSave(elements));
+    document.addEventListener('add-item:step-change', event => {
+      if (event.detail?.step === 'photos') preloadBackgroundRemoval(elements);
+    });
     document.addEventListener("add-item:mode-change", (event) => {
       updateCopyMode(elements);
       renderWatchReference();

@@ -7,6 +7,7 @@
   const snapshotFields=ids=>Object.fromEntries(ids.map(([key,id])=>[key,text(id)]));
   function captureSimilar() {
     const wizard=window.addItemWizard.getDraft();
+    if (wizard.pricing && !$('item-keep-prices').checked) wizard.pricing.autoMinimum = true;
     const watch=Object.fromEntries(['name','brand','model','department'].map(key=>[key,wizard.watchDetails[key] || '']));
     const coin=Object.fromEntries(['name','country','denomination','metal','fineness','fineMetalContent','composition','finish'].map(key=>[key,wizard.coinDetails[key] || '']));
     // Grade, year, mint, modifications, conditions, unique IDs and photos belong to the individual item.

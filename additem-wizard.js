@@ -164,6 +164,7 @@
     const rows = [
       ['Item', value('title') || (getWatchDetails()?.name) || getCoinDetails()?.name || 'Not entered','information'],
       ['Category',value('category') || 'Not selected','information'],
+      ...(!isCoin() ? [['Length / measurements',value('assisted-length') || 'Not entered — check this piece','information'],['Diamonds / stones',value('assisted-stone-type') || 'Not entered — check this piece','information']] : []),
       ...(window.addItemPricing?.deferred() ? [['Pricing',`Queued for ${window.addItemPricing.ownerName()} · cost and selling prices set later`,'pricing']] : [
         ['Cost',value('cost') ? `$${value('cost')}` : 'Not entered','pricing'],
         ['Minimum sale',value('minimum-sale-price') ? `$${value('minimum-sale-price')}` : 'Not set','pricing'],

@@ -32,7 +32,7 @@
   const watchName=byId('watch-name').closest('label');
   const watchModel=byId('watch-model').closest('label');
   byId('watch-fields').prepend(byId('watch-brand').closest('label'), watchModel);
-  byId('watch-fields').append(disclosure('Model name, materials and modifications', [watchName, byId('watch-materials').closest('label'),byId('watch-modifications').closest('label')]));
+  byId('watch-fields').append(watchName, byId('watch-materials').closest('label'),byId('watch-modifications').closest('label'));
   const referenceHelp=watchModel.querySelector('.field-helper');
   referenceHelp.textContent='Use the exact reference. A description draft will be prepared while you continue.';
   byId('watch-brand').closest('label').querySelector('.field-helper').textContent='Enter the brand once. Model lookup uses this brand and reference.';
@@ -48,6 +48,7 @@
   const copyTools=block('div','', 'intake-copy-tools');
   copyTools.append(byId('assisted-generate-copy'),byId('assisted-generate-status'),byId('watch-reference-results'));
   copyEditor.prepend(copyTools);
+  copyEditor.prepend(block('h3','Title and description'));
   const replace=byId('assisted-apply-copy');replace.textContent='Replace my edits with this AI draft';replace.hidden=true;copyTools.append(replace);
   aiPanel.hidden=true; oldCopy.hidden=true;
   document.querySelector('[data-item-step-target="description"]').closest('li').hidden=true;
