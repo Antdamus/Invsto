@@ -14,8 +14,35 @@
     return result.replace(/\(\s*\)/g, '').replace(/\s+/g, ' ').replace(/^[\s,;|/—–-]+|[\s,;|/—–-]+$/g, '').trim();
   }
   function hasAftermarket(watch = {}) {
-    const entered = [watch.modifications, watch.materials, watch.name].map(text).join('; ');
+    const entered = [watchModifications(watch), watch.materials, watch.name].map(text).join('; ');
     return /\bafter[ -]?market\b/i.test(entered.replace(/\b(?:no|not|without|sin)\s+(?:any\s+)?after[ -]?market\b/gi, ''));
+  }
+  function watchModifications(watch = {}) {
+    const presets = {
+      movement_only: `Only the ${text(watch.brand) || 'brand'} movement is original; all other parts are aftermarket`,
+      aftermarket_bezel: 'Aftermarket bezel', aftermarket_dial: 'Aftermarket dial',
+      aftermarket_bracelet: 'Aftermarket bracelet / strap', aftermarket_stones: 'Aftermarket stone setting',
+    };
+    const preset = presets[watch.modificationPreset] || '';
+    const notes = text(watch.modificationNotes ?? watch.modifications);
+    return preset && !notes.toLowerCase().includes(preset.toLowerCase()) ? [preset, notes].filter(Boolean).join('. ') : notes || preset;
+  }
+  function redactWatchSerial(value, watch = {}) {
+    // Preserve paragraphs while removing a separately recorded private serial.
+    let result = text(value).replace(serialPattern, '');
+    const serial = text(watch.serial);
+    if (serial) {
+      const escaped = serial.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      result = result.replace(new RegExp(`(^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, 'gi'), '$1');
+    }
+    return result.replace(/[ \t]{2,}/g, ' ').replace(/ *\n */g, '\n').trim();
+  }
+  function publicWatchDetails(watch = {}) {
+    const safe = Object.fromEntries(['name','brand','model','department','condition','materials','braceletFit'].map(key => [key, redactWatchSerial(watch[key], watch)]));
+    safe.modifications = redactWatchSerial(watchModifications(watch), watch);
+    safe.modificationNotes = redactWatchSerial(watch.modificationNotes ?? watch.modifications, watch);
+    safe.modificationPreset = text(watch.modificationPreset);
+    return safe;
   }
   function stoneCategories(value) {
     const s = text(value).toLowerCase();
@@ -35,6 +62,10 @@
     return [...new Set([text(primary), ...stoneCategories(stone), hasAftermarket(watch || {}) && 'Aftermarket'].filter(Boolean))];
   }
   function watchTitle(watch = {}, stone = '', enteredTitle = '') {
+    enteredTitle = redactWatchSerial(enteredTitle, watch);
+    // Keep legacy serial annotations available to strip bare serials in edited titles.
+    enteredTitle = withoutSerial(enteredTitle, [watch.name, watch.model, watch.materials, watch.modifications]);
+    watch = publicWatchDetails(watch);
     const sources = [watch.name, watch.model, watch.materials, watch.modifications];
     const brand = withoutSerial(watch.brand, sources);
     const name = withoutSerial(watch.name, sources);
@@ -56,7 +87,8 @@
   }
   function watchDescription(description, watch = {}, stone = '') {
     // Older saves added the same facts again in a trailing Watch details block.
-    let result = text(description).replace(/\n*Watch details:\s*\n[\s\S]*$/i, '').trim();
+    let result = redactWatchSerial(description, watch).replace(/\n*Watch details:\s*\n[\s\S]*$/i, '').trim();
+    watch = publicWatchDetails(watch);
     const normalized = value => text(value).toLowerCase().replace(/[\s.,;:—–-]+/g, ' ').trim();
     const missing = [];
     const contains = value => normalized([result, ...missing].join(' ')).includes(normalized(value));
@@ -65,8 +97,14 @@
       if (clean && !contains(clean)) missing.push(`${label}${clean}.`);
     };
     add(watch.materials, 'Materials: ');
-    const modifications = text(watch.modifications);
-    if (modifications) add(modifications, hasAftermarket({modifications}) ? '' : 'Modifications: ');
+    add(watch.braceletFit, 'Measured bracelet / wrist fit: ');
+    const preset = watchModifications({...watch, modificationNotes:''});
+    const modifications = text(watch.modificationNotes).replace(preset, '').replace(/^[.\s]+/, '');
+    const movementScopePresent = watch.modificationPreset === 'movement_only'
+      && /(?:original[^.!?;\n]{0,40}movement|movement[^.!?;\n]{0,20}original)/i.test(result)
+      && /all (?:the )?other (?:parts|components) (?:are )?after[ -]?market/i.test(result);
+    if (preset && !movementScopePresent) add(preset);
+    if (modifications) add(modifications, hasAftermarket({modifications}) || preset ? '' : 'Modifications: ');
     if (hasAftermarket(watch) && !/\bafter[ -]?market\b/i.test([result, ...missing].join(' '))) add('Aftermarket modifications');
     const stones = stoneCategories(stone);
     const alreadyDescribed = stoneCategories([result, ...missing].join(' '));
@@ -78,5 +116,5 @@
     const seen = new Set();
     return paragraphs.filter(p => {const key=normalized(p);if(seen.has(key))return false;seen.add(key);return true;}).join('\n\n');
   }
-  root.InventoryItemFacts = { stoneChoices, withoutSerial, hasAftermarket, stoneCategories, categories, watchTitle, watchDescription };
+  root.InventoryItemFacts = { stoneChoices, withoutSerial, hasAftermarket, stoneCategories, categories, watchModifications, redactWatchSerial, publicWatchDetails, watchTitle, watchDescription };
 })(globalThis);

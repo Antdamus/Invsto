@@ -81,6 +81,25 @@ const referenceOnlyWatch = {
   itemKind: "watch", watchDetails: { name: "Rolex", model: "126233", materials: "Steel case", modifications: "Aftermarket diamond bezel" },
 };
 
+test('movement-only watches retain disclosure but do not reuse factory exterior dimensions', async()=>{
+  const api=handler({ai:true,lookup:research({facts:[{label:'Case dimensions',value:'39.8 mm wide',sourceUrl},{label:'Movement',value:'Automatic',sourceUrl}]}),copy:{generatedTitle:'Watch',generatedDescription:'Custom watch.'}});
+  const result=await (await api.invoke({...referenceOnlyWatch,length:'18 inches stale jewelry length',watchDetails:{brand:'Cartier',name:'Santos',model:'126233',modificationPreset:'movement_only',modifications:'Custom dial',braceletFit:'7 inches'}})).json();
+  assert.match(result.generatedDescription,/Only the Cartier movement is original; all other parts are aftermarket/);
+  assert.match(result.generatedDescription,/7 inches/);
+  assert.match(result.generatedTitle,/Aftermarket/);
+  assert.equal(result.watchReference.facts[0].value,'39.8 mm wide','Factory research remains available, labeled separately');
+  const prompt=api.request().input[1].content[0].text;
+  assert.doesNotMatch(prompt,/39\.8|18 inches/);
+  assert.doesNotMatch(prompt,/Automatic/,'An original brand movement does not confirm the exact factory caliber');
+});
+
+test('private serial is not sent to either AI request or included in public copy',async()=>{
+  const api=handler({ai:true});
+  const result=await (await api.invoke({...referenceOnlyWatch,notes:'Serial: PRIVATE-123. Box included.',existingDescription:'PRIVATE-123',watchDetails:{...referenceOnlyWatch.watchDetails,serial:'PRIVATE-123',name:'Rolex PRIVATE-123'}})).json();
+  assert.doesNotMatch(JSON.stringify(api.requests),/PRIVATE-123/);
+  assert.doesNotMatch(result.generatedTitle+result.generatedDescription,/PRIVATE-123/);
+});
+
 test('generated watch titles exclude serials, keep model references and enforce aftermarket disclosure', async () => {
   const api = handler({ai:true,copy:{generatedTitle:'Cartier WSSA0007 SERIAL ABC12345',generatedDescription:'An elegant watch with a diamond bezel.'}});
   const result = await (await api.invoke({itemKind:'watch',imagePath:'watch.jpg',stoneType:'Earth-mined diamonds',watchDetails:{brand:'Cartier',name:'Santos Serial ABC12345',model:'WSSA0007',modifications:'Aftermarket diamond bezel'}})).json();

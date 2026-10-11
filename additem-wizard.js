@@ -20,7 +20,7 @@
   const back = document.getElementById("item-step-back");
   const next = document.getElementById("item-step-next");
   const error = document.getElementById("item-step-error");
-  const watchKeys = ["name", "brand", "model", "department", "condition", "materials", "modifications"];
+  const watchKeys = ["name", "brand", "model", "serial", "department", "condition", "materials", "modificationPreset", "modifications", "braceletFit"];
   const coinLabels = { name: "Name / series", year: "Year / date", country: "Issuing country", denomination: "Denomination", mint: "Mint / mint mark", metal: "Metal", fineness: "Purity (parts per 1,000)", condition: "Reported condition", variety: "Variety / reference", finish: "Strike / finish", fineMetalContent: "Fine metal content", composition: "Composition details", gradingStatus: "Grading status", grade: "Grade as stated", gradingService: "Grading service", certNumber: "Certification number", notes: "Condition notes / alterations" };
   const coinKeys = Object.keys(coinLabels);
   let current = 0;
@@ -67,6 +67,8 @@
     if (!isWatch()) return null;
     const details = Object.fromEntries(watchKeys.map((key) => [key, value(`watch-${key}`)]));
     details.name = details.name || details.brand;
+    details.modificationNotes = details.modifications;
+    details.modifications = window.InventoryItemFacts.watchModifications(details);
     const referenceLookup = window.addItemAssistedModule?.getWatchReferenceLookup?.();
     return referenceLookup ? { ...details, referenceLookup } : details;
   };
@@ -103,7 +105,14 @@
     document.getElementById("use-watch-details").hidden = !watch;
     document.getElementById("coin-description-note").hidden = !coin;
     document.getElementById("use-coin-details").hidden = !coin;
-    ["stone-type-choice", "assisted-stone-type", "assisted-length"].forEach((id) => { document.getElementById(id).closest("label").hidden = coin; });
+    const stoneGrid = watch ? document.querySelector('#watch-stones-section .form-grid') : document.getElementById('watch-stones-home').parentElement;
+    ['stone-type-choice','assisted-stone-type'].reverse().forEach(id => stoneGrid.prepend(document.getElementById(id).closest('label')));
+    document.getElementById('stone-type-choice').closest('label').hidden = coin;
+    document.getElementById('assisted-length').closest('label').hidden = directPricing;
+    document.getElementById('item-details-heading').textContent = watch ? 'Additional description details' : 'Measurements, stones and description details';
+    document.querySelector('.intake-item-details > .field-helper').textContent = watch ? 'Add any other confirmed details you want included in the description.' : 'Check these details for every piece. Enter what you know; use “No stone” or “Not applicable” where appropriate.';
+    syncStoneChoice();
+    updateWatchDisclosure();
 
     const autoCost = document.getElementById("auto-cost-checkbox");
     if (directPricing && !autoCost.disabled && !restoring) jewelryAutoCost = autoCost.checked;
@@ -156,7 +165,14 @@
     const rows = [
       ['Item', isWatch() ? window.InventoryItemFacts.watchTitle(getWatchDetails(), value('assisted-stone-type'), value('title')) || 'Not entered' : value('title') || getCoinDetails()?.name || 'Not entered','information'],
       ['Categories',window.InventoryItemFacts.categories(value('category'), isCoin() ? '' : value('assisted-stone-type'), getWatchDetails()).join(' · ') || 'Not selected','information'],
-      ...(!isCoin() ? [['Length / measurements',value('assisted-length') || 'Not entered — check this piece','information'],['Diamonds / stones',value('assisted-stone-type') || 'Not entered — check this piece','information']] : []),
+      ...(!usesDirectPricing() ? [['Length / measurements',value('assisted-length') || 'Not entered — check this piece','information']] : []),
+      ...(isWatch() ? [
+        ['Serial · internal',value('watch-serial') || 'Not entered','information'],
+        ['Modifications',getWatchDetails().modifications || 'Not specified','information'],
+        ['Factory dimensions', (getWatchDetails().referenceLookup?.facts || []).filter(fact=>/^Case (diameter|dimensions|width|thickness)$/i.test(fact.label)).map(fact=>fact.value).join(' · ') || 'Not confirmed from reference','information'],
+        ...(value('watch-braceletFit') ? [['Measured fit',value('watch-braceletFit'),'information']] : []),
+      ] : []),
+      ...(!isCoin() ? [['Diamonds / stones',value('assisted-stone-type') || 'Not entered — check this piece','information']] : []),
       ...(window.addItemPricing?.deferred() ? [['Pricing',`Queued for ${window.addItemPricing.ownerName()} · cost and selling prices set later`,'pricing']] : [
         ['Cost',value('cost') ? `$${value('cost')}` : 'Not entered','pricing'],
         ['Minimum sale',value('minimum-sale-price') ? `$${value('minimum-sale-price')}` : 'Not set','pricing'],
@@ -293,6 +309,15 @@
     title.dataset.watchTitle = title.value;
     title.dispatchEvent(new Event("input", { bubbles: true }));
   }
+
+  function updateWatchDisclosure() {
+    const preset = document.getElementById('watch-modificationPreset');
+    preset.querySelector('[value="movement_only"]').textContent = `Only original ${value('watch-brand') || 'brand'} movement; rest aftermarket`;
+    const preview = document.getElementById('watch-modifications-preview');
+    preview.textContent = getWatchDetails()?.modifications || '';
+    preview.hidden = !preview.textContent;
+  }
+  ['watch-brand','watch-modificationPreset','watch-modifications'].forEach(id => document.getElementById(id).addEventListener('input', updateWatchDisclosure));
 
   function syncStoneChoice() {
     const choice = document.getElementById('stone-type-choice');

@@ -29,13 +29,28 @@
   byId('item-step-labels').removeAttribute('data-item-step');
   byId('item-step-labels').hidden=true;
   document.querySelector('[data-item-step-target="labels"]').closest('li').hidden=true;
-  const watchName=byId('watch-name').closest('label');
-  const watchModel=byId('watch-model').closest('label');
-  byId('watch-fields').prepend(byId('watch-brand').closest('label'), watchModel);
-  byId('watch-fields').append(watchName, byId('watch-materials').closest('label'),byId('watch-modifications').closest('label'));
-  const referenceHelp=watchModel.querySelector('.field-helper');
-  referenceHelp.textContent='Enter the model reference, not the individual serial number.';
+  const watchFields=byId('watch-fields');
+  function watchSection(number, title, copy, ids) {
+    const section=block('section', `<header><span>${number}</span><div><h3>${title}</h3><p class="field-helper">${copy}</p></div></header>`, 'watch-intake-section');
+    const grid=block('div','', 'form-grid form-grid-2');
+    ids.forEach(id=>grid.append(byId(id).closest('label')));section.append(grid);watchFields.append(section);return section;
+  }
+  const identity=watchSection('01','Watch identity','Start with the brand and reference. The serial identifies this particular watch.', ['watch-brand','watch-model','watch-name','watch-serial']);
+  const dimensions=block('div','<div><strong>Factory case dimensions</strong><p id="watch-dimensions-status" role="status">Look up the reference to find published dimensions. No manual length is required.</p></div><button type="button" id="watch-lookup-model" class="add-button-secondary">Look up model</button><div id="watch-dimensions-results"></div>', 'watch-dimensions');
+  identity.append(dimensions);
+  watchSection('02','Materials & modifications','Describe the watch in front of you. These details take priority over the factory model.', ['watch-materials','watch-modificationPreset','watch-modifications']);
+  const modificationPreview=block('p','', 'watch-disclosure-preview');modificationPreview.id='watch-modifications-preview';modificationPreview.setAttribute('aria-live','polite');watchFields.lastElementChild.append(modificationPreview);
+  watchSection('04','Condition & fit','Record the actual condition. Bracelet fit is optional and cannot be determined from the reference.', ['watch-condition','watch-department','watch-braceletFit']);
+  const stones=watchSection('03','Diamonds & stones','Select only the origin you know. Simulated stones remain clearly labeled as simulated.', ['stone-type-choice','assisted-stone-type']);
+  stones.id='watch-stones-section';watchFields.insertBefore(stones,watchFields.querySelectorAll('.watch-intake-section')[2]);
+  const stoneHome=block('div','', 'watch-stones-home');stoneHome.hidden=true;document.querySelector('.intake-item-details .assisted-grid').prepend(stoneHome);stoneHome.id='watch-stones-home';
+  byId('watch-model').closest('label').querySelector('.field-helper').textContent='For example, WSSA0018 or 126233. Include the full reference if known.';
   byId('watch-brand').closest('label').querySelector('.field-helper').textContent='Enter the brand once. Model lookup uses this brand and reference.';
+  byId('watch-materials').closest('label').querySelector('.form-label').textContent='Special / added materials';
+  byId('watch-materials').placeholder='e.g. Added 18K yellow gold bezel; stainless steel replacement bracelet';
+  byId('watch-materials').closest('label').querySelector('.field-helper').textContent='Name the component and material. Leave blank when nothing is added or the material is unknown.';
+  byId('watch-modifications').closest('label').querySelector('.form-label').textContent='Modification details';
+  byId('watch-modifications').placeholder='Describe other changed parts, or enter your own full disclosure.';
   byId('item-step-information-title').textContent='Identify your item';
   byId('item-step-pricing-title').textContent='Pricing';
   const supplier=disclosure('Supplier details (optional)', ['distributor-name','distributor-phone','distributor-notes'].map(id=>byId(id).closest('label')));

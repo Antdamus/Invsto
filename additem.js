@@ -3015,7 +3015,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const weightInputValue = document.getElementById("weight").value.trim();
   const weight = weightInputValue ? parseFloat(weightInputValue) : null;
   const stone_type = coin_details ? null : document.getElementById("assisted-stone-type")?.value?.trim() || null;
-  const item_length = coin_details ? null : document.getElementById("assisted-length")?.value?.trim() || null;
+  const item_length = coin_details ? null : watch_details ? watch_details.braceletFit || null : document.getElementById("assisted-length")?.value?.trim() || null;
   const deferredPricing = window.addItemPricing?.deferred() === true;
   const pricingFields = window.addItemPricing?.fields() || {};
   const price_per_weight = deferredPricing || watch_details || coin_details ? null : parseFloat(pricePerWeightInput?.value || "0");

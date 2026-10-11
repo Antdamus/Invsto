@@ -10,7 +10,7 @@ The normal path is **Identify → Photos → Pricing → Review**. Choosing “A
 
 Watch intake asks for brand and reference once. Optional collection name, component materials, modifications, department and condition remain available. Watch and coin modes suggest inventory categories and use direct prices; jewelry retains weight-based cost calculation. Minimum sale price is internal, retail is the only listing price. Old missing minimum prices remain allowed.
 
-Automatic description drafting starts after usable facts/photos are entered and runs while the user continues. The single title/description editor is in Review. Trusted user edits are never replaced automatically; an explicit replacement button can accept a newer draft. Responses for changed inputs or saved/reset items are discarded. Changes to facts clear untouched old automatic copy and reference provenance. Automatic drafting can be disabled; manual entry is always available.
+Automatic description drafting starts after usable facts/photos are entered and runs while the user continues. The single title/description editor is in Review. Trusted user edits are never replaced automatically; an explicit replacement button can accept a newer draft. Responses for changed inputs or saved/reset items are discarded. Changes to facts clear untouched old automatic copy; changing watch identity also clears reference provenance. Automatic drafting can be disabled; manual entry is always available.
 
 ## Photos and eBay
 
@@ -57,10 +57,18 @@ Photo studio additionally deploys `item-photo-editor.js` and `item-photo-editor.
 
 Watch titles use the entered brand/name and full model reference; AI-recognized serial numbers are not used as titles. Labeled serial numbers are removed from manually entered titles as well. Entered aftermarket modifications produce an explicit **Aftermarket** title qualifier and disclosure in the saved description. Factory-reference research cannot override those modifications.
 
-The stone chooser offers Earth-mined diamonds, Lab-grown diamonds, Diamonds (origin unspecified), VVS simulated diamonds, Simulated diamonds, Moissanite, Cubic zirconia and No stone, with a free-text option for other/mixed stones. Confirmed selections add matching inventory categories beside the main item category. VVS simulated diamonds remain explicitly simulated in generated copy. Stone origin is not inferred from photos or carried over to a new item; cloud drafts and Add similar retain their entered details.
+The stone chooser offers Earth-mined diamonds, Lab-grown diamonds, Diamonds (origin unspecified), VVS simulated diamonds, Simulated diamonds, Moissanite, Cubic zirconia and No stone, with a free-text option for other/mixed stones. Confirmed selections add matching inventory categories beside the main item category. VVS simulated diamonds remain explicitly simulated in generated copy. Stone origin is not inferred from photos or carried over to a new item; cloud drafts retain their entered details, while Add similar clears the stone selection for the next piece.
 
 Regression checks: `node --test tests/inventory-item-facts.test.mjs tests/add-item-watch-copy.test.mjs`. The pure shared rules live in `inventory-item-facts.js` and are loaded by both the intake page and the copy-generation function.
 
 Watch descriptions retain the written copy and add only missing material, modification and stone details. Saving, editing, CSV export and direct eBay publishing share this rule instead of appending another Watch details block. Identical paragraphs are collapsed; distinct worker notes are retained. Existing inventory is not bulk-rewritten.
 
 Deploy `generate-inventory-copy` and `ebay-inventory-sync` along with the shared script and updated frontend assets. No database migration or extension update is required.
+
+## Watch intake sections
+
+Watch intake now groups identity, materials/modifications, diamonds/stones, and condition/fit into four numbered sections. Brand and full reference drive model lookup; the optional collection name improves identification. The serial is stored in `watch_details.serial`, restored in drafts, and available in the internal Stock editor. It is excluded from generated titles/descriptions and AI request metadata. Do not put private serials in photographs intended for customers.
+
+The modification chooser offers movement-only original parts (using the entered brand), aftermarket bezel, dial, bracelet/strap or stone setting, plus free text. `modificationPreset` and `modificationNotes` retain the selection while `modifications` carries the combined disclosure for existing consumers. The public title keeps Aftermarket; the description retains the full scope without duplicating it on repeat saves. Movement-only copy receives no factory technical specifications beyond the model identity; it does not assume the exact caliber from the reference.
+
+Look up model runs the existing sourced reference and description generation from Identify. Factory dimensions are shown with their source, saved with the reference lookup and summarized in Review. An absent/ambiguous reference leaves dimensions unconfirmed and does not block saving. Dimensions stay separate from an optional measured `braceletFit`; only measured fit populates `item_length` for watches. Jewelry length is never inherited by a watch. Serial, condition, fit and modifications are cleared by Add similar.

@@ -73,3 +73,34 @@ test('legacy description blocks and duplicate paragraphs do not accumulate',()=>
 test('aftermarket disclosure remains visible when entered in the watch name',()=>{
   assert.match(facts.watchDescription('A polished watch.',{name:'Aftermarket Santos',modifications:'Replacement bezel'}),/Aftermarket/);
 });
+
+test('movement-only preset follows the brand and remains explicit through repeated saves',()=>{
+  for (const brand of ['Cartier','Rolex']) {
+    const watch={brand,name:'Watch',model:'MODEL-123',modificationPreset:'movement_only',modifications:'Custom dial'};
+    const disclosure=`Only the ${brand} movement is original; all other parts are aftermarket`;
+    assert.match(facts.watchTitle(watch),/Aftermarket/);
+    const once=facts.watchDescription('Pre-owned watch.',watch);
+    assert.ok(once.includes(disclosure));
+    assert.equal(facts.watchDescription(once,watch),once);
+    const persisted={...watch,modificationNotes:watch.modifications,modifications:facts.watchModifications(watch)};
+    assert.equal(facts.watchModifications(persisted),`${disclosure}. Custom dial`);
+  }
+});
+
+test('separate serial remains private while reference, measured fit and paragraphs survive',()=>{
+  const watch={brand:'Cartier',name:'Santos',model:'WSSA0018',serial:'ABC-123',braceletFit:'7 inches',materials:'Steel bezel'};
+  assert.equal(facts.watchTitle(watch,'','Cartier Santos ABC-123'),'Cartier Santos WSSA0018');
+  const copy=facts.watchDescription('Box included.\n\nABC-123\n\nService receipt included.',watch);
+  assert.doesNotMatch(copy,/ABC-123/);
+  assert.match(copy,/Box included\.\n/);
+  assert.match(copy,/Measured bracelet \/ wrist fit: 7 inches/);
+  assert.equal(facts.publicWatchDetails(watch).serial,undefined);
+  assert.equal(watch.serial,'ABC-123','Internal source is not mutated');
+});
+
+test('a complete paraphrased movement-only disclosure is not repeated',()=>{
+  const watch={brand:'Cartier',modificationPreset:'movement_only',modifications:'Custom bracelet'};
+  const copy='Cartier Santos featuring the original Cartier movement, with all other parts aftermarket, including a custom bracelet.';
+  assert.equal(facts.watchDescription(copy,watch),copy);
+  assert.match(facts.watchDescription('A watch with an original Cartier movement and aftermarket bezel.',watch),/all other parts are aftermarket/,'Partial disclosure must still receive the full scope');
+});

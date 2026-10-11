@@ -108,6 +108,8 @@
     generatedCopyStale: false,
     generationFingerprint: "",
     watchReference: null,
+    watchReferenceKey: '',
+    watchLookupError: '',
     isProcessingImage: false,
     isAutoBlackProcessing: false,
     autoStraightenBackground: false,
@@ -594,6 +596,7 @@
         generatedCopyStale: state.generatedCopyStale,
         generationFingerprint: state.generationFingerprint,
         watchReference: state.watchReference,
+        watchReferenceKey: state.watchReferenceKey,
         copyEdited, lastAutoCopy,
       },
       mainFields: {
@@ -904,7 +907,8 @@
       state.generationFingerprint = payload.assistedFields?.generationFingerprint || "";
       state.generatedCopyStale = Boolean(payload.assistedFields?.generatedCopyStale)
         || Boolean(state.generationFingerprint && state.generationFingerprint !== generationFingerprint(elements));
-      state.watchReference = state.generatedCopyStale ? null : payload.assistedFields?.watchReference || null;
+      state.watchReferenceKey = payload.assistedFields?.watchReferenceKey || (!state.generatedCopyStale && payload.assistedFields?.watchReference ? watchReferenceKey() : '');
+      state.watchReference = state.watchReferenceKey === watchReferenceKey() ? payload.assistedFields?.watchReference || null : null;
       elements.applyCopyButton.disabled = state.generatedCopyStale;
       updateCopyMode(elements);
       renderWatchReference();
@@ -1923,7 +1927,7 @@
   function markGeneratedCopyNeedsRefresh(elements, reason) {
     if (state.isApplyingDraft || (state.generationFingerprint && state.generationFingerprint === generationFingerprint(elements))) return;
     state.generationRevision += 1;
-    state.watchReference = null;
+    if (state.watchReferenceKey !== watchReferenceKey()) { state.watchReference = null; state.watchLookupError = ''; }
     renderWatchReference();
     const hasGeneratedCopy = asTrimmedString(elements.generatedTitleInput?.value)
       || asTrimmedString(elements.generatedDescriptionInput?.value);
@@ -2256,7 +2260,9 @@
 
   function collectAssistedWorkflowGenerationInputs(elements) {
     const selectedImage = state.aiSelectedUploadedImage;
-    const watchDetails = window.addItemWizard?.getWatchDetails() || null;
+    const privateWatch = window.addItemWizard?.getWatchDetails() || null;
+    const watchDetails = privateWatch ? window.InventoryItemFacts.publicWatchDetails(privateWatch) : null;
+    const publicText = value => privateWatch ? window.InventoryItemFacts.redactWatchSerial(value, privateWatch) : asTrimmedString(value);
     const coinDetails = window.addItemWizard?.getCoinDetails() || null;
 
     return {
@@ -2269,12 +2275,12 @@
       purity: coinDetails ? coinDetails.fineness : watchDetails ? "" : asTrimmedString(elements.puritySelect?.value),
       weight: resolveCurrentWeight(elements),
       stoneType: coinDetails ? "" : asTrimmedString(elements.stoneTypeInput?.value),
-      length: coinDetails ? "" : asTrimmedString(elements.lengthInput?.value),
-      notes: asTrimmedString(elements.notesInput?.value),
+      length: coinDetails || watchDetails ? "" : asTrimmedString(elements.lengthInput?.value),
+      notes: publicText(elements.notesInput?.value),
       category: getCurrentCategory(elements),
       qrType: asTrimmedString(elements.qrTypeSelect?.value),
-      existingTitle: asTrimmedString(elements.mainTitleInput?.value),
-      existingDescription: asTrimmedString(elements.mainDescriptionInput?.value),
+      existingTitle: publicText(elements.mainTitleInput?.value),
+      existingDescription: publicText(elements.mainDescriptionInput?.value),
     };
   }
 
@@ -3213,7 +3219,7 @@
     const { existingTitle, existingDescription, qrType, watchDetails, coinDetails, ...inputs } = payload;
     const coinFacts = coinDetails ? Object.fromEntries(Object.entries(coinDetails).filter(([key])=>key!=="ebay")) : null;
     return JSON.stringify({ ...inputs, coinDetails:coinFacts, watchDetails: watchDetails ? Object.fromEntries(
-      ["name", "brand", "model", "department", "condition", "materials", "modifications"].map((key) => [key, watchDetails[key] || ""])
+      ["name", "brand", "model", "department", "condition", "materials", "modifications", "modificationPreset", "braceletFit"].map((key) => [key, watchDetails[key] || ""])
     ) : null });
   }
 
@@ -3240,11 +3246,31 @@
     }
   }
 
+  function watchReferenceKey() {
+    return ['watch-brand','watch-name','watch-model'].map(id => document.getElementById(id)?.value.trim().toLowerCase() || '').join('|');
+  }
+
   function renderWatchReference() {
+    const dimensionStatus = document.getElementById('watch-dimensions-status');
+    const dimensionResults = document.getElementById('watch-dimensions-results');
+    const button = document.getElementById('watch-lookup-model');
+    const currentLookup = state.watchReferenceKey === watchReferenceKey() ? state.watchReference : null;
+    if (button) {
+      button.disabled = state.isGeneratingCopy || !document.getElementById('watch-model').value.trim() || !document.getElementById('watch-brand').value.trim();
+      button.textContent = state.isGeneratingCopy ? 'Looking up…' : 'Look up model';
+      dimensionResults.replaceChildren();
+      const dimensions = currentLookup?.status === 'found' ? (currentLookup.facts || []).filter(fact => /^Case (diameter|dimensions|width|thickness)$/i.test(fact.label)) : [];
+      dimensionStatus.textContent = state.isGeneratingCopy ? 'Checking published specifications and preparing your description…' : state.watchLookupError || (dimensions.length ? 'Factory model only. Aftermarket case dimensions may differ; bracelet fit is not inferred.' : currentLookup ? 'Dimensions could not be confirmed for this reference. You can continue without them.' : 'Look up the reference to find published dimensions. No manual length is required.');
+      for (const fact of dimensions) {
+        let url; try { url = new URL(fact.sourceUrl); } catch { continue; }
+        if (url.protocol !== 'https:' || url.username || url.password) continue;
+        const link = document.createElement('a');link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';link.textContent=`${fact.label}: ${fact.value} · ${fact.sourceTitle || url.hostname}`;dimensionResults.append(link);
+      }
+    }
     const panel = document.getElementById("watch-reference-results");
     if (!panel) return;
     panel.replaceChildren();
-    const lookup = state.watchReference;
+    const lookup = currentLookup;
     panel.hidden = !lookup || !window.addItemWizard?.isWatch();
     if (panel.hidden) return;
     const heading = document.createElement("h4");
@@ -3325,6 +3351,8 @@
     }
 
     state.isGeneratingCopy = true;
+    state.watchLookupError = '';
+    renderWatchReference();
     const requestId = ++state.generationRequestId;
     const revision = state.generationRevision;
     const fingerprint = generationFingerprint(elements);
@@ -3362,6 +3390,7 @@
       state.generatedCopyStale = false;
       state.generationFingerprint = fingerprint;
       state.watchReference = payload.itemKind === "watch" ? response?.watchReference || null : null;
+      state.watchReferenceKey = watchReferenceKey();
       renderWatchReference();
       applyingCopy=true;
       for(const [key,input,generated] of [['title',elements.mainTitleInput,generatedTitle],['description',elements.mainDescriptionInput,generatedDescription]]) {
@@ -3391,6 +3420,7 @@
     } catch (error) {
       if (requestId !== state.generationRequestId) return;
       console.error("AI generation request failed:", error);
+      if (payload.itemKind === 'watch') state.watchLookupError = 'Model lookup could not finish. Try again, or continue without confirmed dimensions.';
       setInlineStatus(
         elements.generateStatus,
         `Could not generate title and description: ${error.message || error}`,
@@ -3402,6 +3432,7 @@
         const status = elements.generateStatus.textContent;
         const statusClass = elements.generateStatus.className;
         state.isGeneratingCopy = false;
+        renderWatchReference();
         if(backgroundStatus && backgroundStatus.textContent.startsWith("Preparing"))backgroundStatus.textContent="Description needs review. You can write it in Review.";
         setButtonBusy(elements.generateCopyButton, "Generating...", "Generate Title & Description", false);
         elements.applyCopyButton.disabled = state.generatedCopyStale;
@@ -3466,6 +3497,8 @@
     state.generatedCopyStale = false;
     state.generationFingerprint = "";
     state.watchReference = null;
+    state.watchReferenceKey = '';
+    state.watchLookupError = '';
     elements.applyCopyButton.disabled = false;
     elements.applyCopyButton.hidden = true;
     elements.generateCopyButton.disabled = false;
@@ -3695,15 +3728,20 @@
       "watch-model",
       "watch-materials",
       "watch-modifications",
+      "watch-modificationPreset",
+      "watch-braceletFit",
+      "watch-serial",
       ...Array.from(document.querySelectorAll("#coin-fields input, #coin-fields select, #coin-fields textarea"), (input) => input.id),
     ].forEach((id) => {
       const input = document.getElementById(id);
       input?.addEventListener("input", () => scheduleAddItemDraftSave(elements));
       input?.addEventListener("change", () => scheduleAddItemDraftSave(elements));
-      if (id.startsWith("watch-") || id.startsWith("coin-")) ["input", "change"].forEach((eventName) => input?.addEventListener(eventName, () => {
+      if (id !== 'watch-serial' && (id.startsWith("watch-") || id.startsWith("coin-"))) ["input", "change"].forEach((eventName) => input?.addEventListener(eventName, () => {
         markGeneratedCopyNeedsRefresh(elements, "Item details changed. Generate again to use the updated information.");
+        renderWatchReference();
       }));
     });
+    document.getElementById('watch-lookup-model')?.addEventListener('click', () => handleGenerateCopy(elements));
     document.addEventListener("add-item:wizard-change", () => scheduleAddItemDraftSave(elements));
     document.addEventListener('add-item:step-change', event => {
       if (event.detail?.step === 'photos') preloadBackgroundRemoval(elements);
@@ -3731,7 +3769,7 @@
 
   function exposeModule(elements) {
     window.addItemAssistedModule = {
-      getWatchReferenceLookup: () => state.generatedCopyStale ? null : state.watchReference,
+      getWatchReferenceLookup: () => state.watchReferenceKey === watchReferenceKey() ? state.watchReference : null,
       isPhotoBusy: () => Boolean(state.isCapturingPhotos || state.isProcessingImage || state.isAutoBlackProcessing || elements.localImageUploadInput?.disabled),
       getSelectedUploadedImagesForSave,
       getSelectedUploadedImagePathsForSave,
