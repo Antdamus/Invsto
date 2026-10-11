@@ -7,6 +7,7 @@
   <title>OG Jewelry — Time Clock</title>
 
   <link rel="stylesheet" href="timeclock.css?v=20261011-corrections" />
+  <link rel="stylesheet" href="offsite-work.css?v=20261011-outings" />
 </head>
 <body>
   <header class="app-header">
@@ -60,6 +61,7 @@
         </div>
       </div>
 
+      <section id="offsiteWorker" aria-label="Off-site work"></section>
       <div class="section-heading">
         <div>
           <div class="section-kicker">Today</div>
@@ -68,7 +70,7 @@
         <button id="refreshTimesheetBtn" class="btn ghost" type="button">Refresh</button>
       </div>
       <div id="timesheetSummary" class="timesheet-summary" aria-live="polite"></div>
-      <p class="timesheet-caption">Times shown in your device’s time zone. Unpaid breaks are deducted from worked time.</p>
+      <p class="timesheet-caption">Times shown in your device’s time zone. Unpaid breaks are deducted from worked time. Overnight assignments remain available under Off-site work.</p>
       <div id="timesheetError" class="timesheet-error hidden" role="alert"></div>
 
       <!-- iPhone: Luxe “card list” (tables are clunky on mobile) -->
@@ -168,6 +170,7 @@
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
   <script src="admin-nav.js?v=packaging-20261008"></script>
   <script src="time-correction-core.js?v=20261011-corrections"></script>
-  <script src="timeclock.js?v=20261011-corrections"></script>
+  <script src="offsite-work.js?v=20261011-outings"></script>
+  <script src="timeclock.js?v=20261011-outings"></script>
 </body>
 </html>

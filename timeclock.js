@@ -451,6 +451,7 @@ function randId(n=8){ return Math.random().toString(36).slice(2, 2+n); }
 function openCamFor(kind){
   camKind = kind; camEntryId = null; camBreakId = null; camBlob = null;
   qs('camTitle').textContent =
+    kind === 'outing_return' ? 'Take Return-to-Store Photo' :
     kind === 'in'           ? 'Take Clock-In Photo' :
     kind === 'out'          ? 'Take Clock-Out Photo' :
     kind === 'break_start'  ? 'Take Break Start Photo' :
@@ -812,6 +813,8 @@ async function maybeWarnSchedule(entryId){
 }
 
 async function onClockAction(){
+  if (OffsiteWork.busy()) return;
+  if (OffsiteWork.clockOut()) return;
   if (isPunching) return;
   isPunching = true;
 
@@ -1003,6 +1006,8 @@ async function loadMySchedule(){
 
 
 async function onBreakAction(){
+  if (OffsiteWork.busy()) return;
+  if (OffsiteWork.breakAction()) return;
   if (isPunching) return;
   if (!currentEmployee?.id) { alert('No employee loaded. Please sign in again.'); return; }
 
@@ -1162,6 +1167,7 @@ async function renderTodayCards(rows, anomalyMap, unpaidBreakMsMap = new Map()){
     const anomalies = Array.isArray(a.anomalies) ? a.anomalies : [];
 
     const flags = [];
+    if((r.schedule_codes||[]).includes('OFFSITE_CLOCK_OUT'))flags.push('<span class="badge warn">Off-site clock-out</span>');
     if (anomalies.length) flags.push(renderAnomalyBadges(anomalies));
     if (r.geo_ok_in === false || r.geo_ok_out === false) {
       flags.push(`<span class="badge bad" title="Geofence issue">Geo</span>`);
@@ -1427,6 +1433,7 @@ async function loadToday(){
         const anomalies = Array.isArray(a.anomalies) ? a.anomalies : [];
 
         const flags = [];
+        if((r.schedule_codes||[]).includes('OFFSITE_CLOCK_OUT'))flags.push('<span class="badge warn">Off-site clock-out</span>');
         if (anomalies.length) flags.push(renderAnomalyBadges(anomalies));
 
         if (r.geo_ok_in === false || r.geo_ok_out === false) {
@@ -1512,6 +1519,9 @@ if (openCard){
     show(qs('timesheetError'),true);
   } finally {
     isLoadingToday = false;
+    OffsiteWork.initWorker({db:()=>supabaseClient,employee:()=>currentEmployee,photo:awaitPhoto,uploadPhoto:uploadPhotoBlob,geo:getGeo,
+      lock:value=>{isPunching=value;},isLocked:()=>isPunching,changed:refreshTimesheet});
+    await OffsiteWork.loadWorker();
   }
 }
 

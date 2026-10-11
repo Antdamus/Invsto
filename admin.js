@@ -584,7 +584,7 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
 
   // 1) Fetch ALL shifts (closed + OPEN)
   const { data: entries, error } = await supabaseClient.from('time_entries')
-    .select('id, clock_in, clock_out, store_id, device_info, note, created_at, schedule_note, photo_in_path, photo_out_path')
+    .select('id, clock_in, clock_out, store_id, device_info, note, created_at, schedule_note, schedule_codes, photo_in_path, photo_out_path')
     .eq('employee_id', employeeId)
     .gte('clock_in', start.toISOString())
     .lt('clock_in', end.toISOString())
@@ -697,8 +697,8 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
       photo_in_url: inUrl,
       photo_out_url: outUrl,
       // anomalies + approvals
-      anomalies: Array.isArray(a.anomalies) ? a.anomalies : [],
-      has_anomaly: !!a.has_anomaly,
+      anomalies: [...new Set([...(Array.isArray(a.anomalies) ? a.anomalies : []),...(r.schedule_codes||[]).filter(c=>c.startsWith('OFFSITE_'))])],
+      has_anomaly: !!a.has_anomaly || (r.schedule_codes||[]).some(c=>c.startsWith('OFFSITE_')),
       approval_status: ap.status || a.approval_status || null,
       approval_note: ap.note ?? a.approval_note ?? null,
       approved_at: ap.approved_at || a.approved_at || null,
@@ -876,7 +876,7 @@ function renderDrawerList(shifts){
   const anomBadgesHTML = (s) => {
     const arr = Array.isArray(s.anomalies) ? s.anomalies : [];
     if (!arr.length) return '';
-    return arr.map(code => `<span class="badge warn">⚠︎ ${escapeHtml(code)}</span>`).join('');
+    return arr.map(code => `<span class="badge warn">${escapeHtml(TimeCorrection.label(code))}</span>`).join('');
   };
 
   const photoThumb = (url, label) => {
@@ -1768,6 +1768,12 @@ async function fetchLiveNow(){
     openBreaks = b || [];
   }
   const breakByEntry = new Map(openBreaks.map(b => [b.time_entry_id, b]));
+  let outingByEntry = new Map();
+  if(ids.length){
+    const {data:outings,error:outingError}=await supabaseClient.from('work_outings').select('id,time_entry_id,purpose,started_at,expected_return_at').in('time_entry_id',ids).is('ended_at',null);
+    if(outingError) throw outingError;
+    outingByEntry=new Map((outings||[]).map(w=>[w.time_entry_id,w]));
+  }
 
   // 3) names
   const emps = await getActiveEmployees();
@@ -1782,6 +1788,7 @@ async function fetchLiveNow(){
     out.push({
       entry_id: r.id,
       corrected: correctedIds.has(r.id),
+      outing: outingByEntry.get(r.id)||null,
       employee_id: r.employee_id,
       display_name: nameById.get(r.employee_id) || '(unknown)',
       clock_in: r.clock_in,

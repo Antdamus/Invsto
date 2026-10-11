@@ -448,7 +448,7 @@ async function loadSummary() {
 
     const pill = r.status === 'break'
       ? `<span class="pill break">On break ${fmtDurationHM(r.break_ms)}</span>`
-      : `<span class="pill work">Working</span>`;
+      : r.outing ? `<span class="pill work ow-live-pill">Working off-site · <span data-ow-timer="${escapeHtml(r.outing.started_at)}">${OffsiteWork.duration(r.outing.started_at)} away</span></span>` : `<span class="pill work">Working</span>`;
 
     const anomHtml = r.has_anomaly && r.anomalies?.length
       ? `<div class="live-anoms">${r.anomalies.map(a => `<span class="chip anom">${escapeHtml(TimeCorrection.label(a))}</span>`).join(' ')}</div>`
@@ -460,11 +460,13 @@ async function loadSummary() {
         <div>
           <div class="live-name">${escapeHtml(r.display_name || "Worker")}</div>
           <div class="live-times">since ${sinceStr} / ${durStr}</div>
+          ${r.outing ? `<div class="ow-live-purpose">${escapeHtml(r.outing.purpose)}</div>` : ''}
         </div>
       </div>
       <div class="live-status">${pill}${r.corrected ? '<span class="chip corrected">Time corrected</span>' : ''}</div>
       ${anomHtml}
       <div class="live-actions">
+        ${r.outing ? `<button class="btn small ghost" type="button" data-live-outing="${r.outing.id}">Outing & evidence</button>` : ''}
         ${r.photo_in_url ? `<a href="${escapeHtml(r.photo_in_url)}" target="_blank" rel="noopener">Photo In</a>` : ''}
         ${r.break_photo_url ? `<a href="${escapeHtml(r.break_photo_url)}" target="_blank" rel="noopener">Break Photo</a>` : ''}
         <button class="btn small ghost" type="button" data-live-details>Timesheet</button>
@@ -478,15 +480,19 @@ async function loadSummary() {
   if (typeof tickLiveNow === 'function') tickLiveNow();
 }
 
+let liveLoading=false;
 async function loadLiveNow(){
+  if(liveLoading)return;
+  liveLoading=true;
   try{
     const rows = await fetchLiveNow();
     renderLiveNow(rows);
+    await OffsiteWork.loadAdmin(supabaseClient);
   }catch(err){
     console.error(err);
     const list = qs('liveList');
     if (list) list.innerHTML = `<div class="muted">Failed to load live status.</div>`;
-  }
+  }finally{liveLoading=false;}
 }
 
 // Click a live card → open drawer for that worker (current month)
@@ -502,6 +508,8 @@ function wireLiveList(){
 
     const employeeId  = card.dataset.employeeId;
     const displayName = card.dataset.displayName || '-';
+    const outingButton=e.target.closest('[data-live-outing]');
+    if(outingButton){OffsiteWork.focus(outingButton.dataset.liveOuting);return;}
     if(e.target.closest('[data-live-correct]')){
       correctLiveTime(card.dataset.entryId,displayName); return;
     }
@@ -524,6 +532,8 @@ async function bootOverview() {
   wireLiveList();
   await loadLiveNow();
   startLiveTicker(30000);
+  setInterval(()=>{if(!document.hidden&&!OffsiteWork.busy())loadLiveNow();},60000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!OffsiteWork.busy())loadLiveNow();});
 
   // ✅ Monthly summary
   await loadSummary();
