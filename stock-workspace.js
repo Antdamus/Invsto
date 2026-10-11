@@ -8,7 +8,11 @@
   if(next.brand!==previous.brand || next.model!==previous.model) delete next.referenceLookup;
   return next;
  }
- const api={watchFields,watchDraft};root.StockWorkspace=api;
+ function descriptionNeedsReview(item){
+  const copy=String(item?.description||'').trim();
+  return !copy || (!!item?.watch_details && /\bmodel\s*\/\s*reference\b/i.test(copy));
+ }
+ const api={watchFields,watchDraft,descriptionNeedsReview};root.StockWorkspace=api;
  if(!root.document)return;
  let sections=[],nav,returnFocus;
  function field(id){

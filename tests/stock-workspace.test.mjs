@@ -6,6 +6,12 @@ const context={};
 vm.runInNewContext(await readFile(new URL('../inventory-item-facts.js',import.meta.url),'utf8'),context);
 vm.runInNewContext(await readFile(new URL('../stock-workspace.js',import.meta.url),'utf8'),context);
 const {watchDraft}=context.StockWorkspace;
+test('basic or empty descriptions need review without flagging concise written descriptions',()=>{
+ const review=context.StockWorkspace.descriptionNeedsReview;
+ assert.equal(review({description:''}),true);
+ assert.equal(review({watch_details:{model:'WSSA0062'},description:'Santos de Cartier, model / reference WSSA0062. Stones: Earth-mined diamonds.'}),true);
+ assert.equal(review({watch_details:{},description:'An iced-out square watch with red Roman numerals.'}),false);
+});
 test('editing a watch retains private metadata and regenerates changed modification disclosures',()=>{
  const before={brand:'Cartier',model:'WSSA0018',serial:'PRIVATE-1',modificationPreset:'movement_only',modificationNotes:'',modifications:'Only the Cartier movement is original; all other parts are aftermarket',stoneSetting:'aftermarket',referenceLookup:{facts:[]},customField:'preserved'};
  const next=watchDraft(before,{modificationPreset:'aftermarket_bracelet',modificationNotes:'Black replacement strap',stoneSetting:'factory',cardIncluded:'yes'},'Earth-mined diamonds');

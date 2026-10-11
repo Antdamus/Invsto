@@ -11,7 +11,7 @@ const corsHeaders = {
 };
 
 const DEFAULT_BUCKET = "InventoryUpload";
-const ALLOWED_BUCKETS = new Set(["InventoryUpload", "capture-photos"]);
+const ALLOWED_BUCKETS = new Set(["InventoryUpload", "capture-photos", "photos"]);
 
 const COIN_FIELDS = { name: 200, year: 80, country: 200, denomination: 100, mint: 150, metal: 100, fineness: 30, condition: 300, variety: 200, finish: 150, fineMetalContent: 150, composition: 500, gradingStatus: 30, grade: 100, gradingService: 100, certNumber: 150, notes: 4000 };
 type CoinDetails = Partial<Record<keyof typeof COIN_FIELDS, string>>;
@@ -312,7 +312,8 @@ async function tryGenerateWithOpenAI(
   body: RequestBody,
   signedImageUrl: string,
   fallback: CopyResult,
-  watchReference: WatchReferenceLookup | null = null
+  watchReference: WatchReferenceLookup | null = null,
+  correctionReasons: string[] = []
 ): Promise<{ result: CopyResult | null; debug: OpenAIDebugInfo }> {
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   const model = Deno.env.get("OPENAI_MODEL");
@@ -578,7 +579,7 @@ Return exactly this structure:
           {
             role: "user",
             content: [
-              { type: "input_text", text: userPrompt },
+              { type: "input_text", text: userPrompt + (correctionReasons.length ? `\nA previous draft conflicted with these confirmed facts: ${correctionReasons.join("; ")}. Write a fresh description based on the confirmed metadata and visible photo; omit unsupported claims.` : "") },
               ...(signedImageUrl ? [{ type: "input_image", image_url: signedImageUrl }] : []),
             ],
           },
@@ -722,13 +723,24 @@ serve(async (req) => {
         return json(500, { ok: false, error: "missing_supabase_service_credentials" });
       }
 
-      const supabase = createClient(supabaseUrl, serviceRoleKey);
+      // Stock photos must be accessible under the caller's existing storage policy.
+      // Never use service-role signing for an arbitrary saved-inventory path.
+      const authorization = req.headers.get("authorization") || "";
+      const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+      if (bucket === "photos" && (!authorization.startsWith("Bearer ") || !anonKey)) return json(401, {ok:false,error:"sign_in_required"});
+      const supabase = bucket === "photos"
+        ? createClient(supabaseUrl, anonKey!, {global:{headers:{Authorization:authorization}}})
+        : createClient(supabaseUrl, serviceRoleKey);
+      if (bucket === "photos") {
+        const {data, error} = await supabase.auth.getUser();
+        if (error || !data?.user) return json(401, {ok:false,error:"sign_in_required"});
+      }
       const { data: signedData, error: signedError } = await supabase.storage
         .from(bucket)
         .createSignedUrl(imagePath, 60 * 10);
 
       if (signedError || !signedData?.signedUrl) {
-        return json(500, {
+        return json(bucket === "photos" ? 403 : 500, {
           ok: false,
           error: "image_sign_failed",
           bucket,
@@ -774,6 +786,9 @@ serve(async (req) => {
       openAIDebug.openaiErrorSummary = summarizeError(error);
     }
 
+    function checkCopy(candidate: CopyResult) {
+      const generated = {...candidate};
+      const issues: string[] = [];
     if (isWatch) {
       // Titles are assembled from the entered identity, not numbers recognized in
       // a photo. Enforce disclosures even when the AI omits them.
@@ -789,27 +804,48 @@ serve(async (req) => {
       const noCardClaim = !!copy.match(negativeCardClaim);
       const hasCardClaim = /\b(?:with|includes?|including|accompanied by)\s+(?:an?\s+|the\s+)?(?:(?:original|brand|warranty)[\s/]+)*cards?\b|\bcards?\s+(?:is\s+)?included\b/i.test(copy.replace(negativeCardClaim, ''));
       const unsupportedCardClaim = (noCardClaim && cardStatus !== 'no') || (hasCardClaim && cardStatus !== 'yes');
-      const componentCopy = setting === 'factory' ? copy.replace(factoryStoneClaim, '') : copy;
+      const componentCopy = (setting === 'factory' ? copy.replace(factoryStoneClaim, '') : copy)
+        .replace(/Only the [^.\n;]+ movement is original[;,]\s*all other parts are aftermarket[.]?/gi, '');
       if (unsupportedCardClaim || unconfirmedSettingClaim || (itemFacts.hasAftermarket(watchDetails, body.stoneType) && /\b(?:factory[ -]?(?:set|original)?|original|oem)\b[^.!?;\n]{0,40}\b(?:diamonds?|bezel|dial|bracelet|parts?)\b/i.test(componentCopy))) {
-        generated.generatedDescription = fallback.generatedDescription;
+        issues.push("The draft conflicts with the confirmed stone, card or aftermarket details");
       }
     }
     if (!isCoin) {
       const enteredStones = itemFacts.stoneCategories(body.stoneType);
       const generatedStones = itemFacts.stoneCategories(generated.generatedDescription);
       if (generatedStones.some((category: string) => ['Earth-mined diamonds', 'Lab-grown diamonds'].includes(category) && !enteredStones.includes(category))) {
-        generated.generatedDescription = fallback.generatedDescription;
+        issues.push("The draft conflicts with the confirmed stone, card or aftermarket details");
       }
       if (enteredStones.some((category: string) => /simulated/i.test(category)) && /\bdiamonds?\b/i.test(generated.generatedDescription) && !/\bsimulated\b/i.test(generated.generatedDescription)) {
-        generated.generatedDescription = fallback.generatedDescription;
+        issues.push("The draft conflicts with the confirmed stone, card or aftermarket details");
       }
       if (!isWatch && enteredStones.some((category: string) => /simulated/i.test(category)) && !/\bsimulated\b/i.test(generated.generatedTitle)) generated.generatedTitle = fallback.generatedTitle;
-      if (isWatch) generated.generatedDescription = itemFacts.watchDescription(generated.generatedDescription, watchDetails, body.stoneType);
+
     }
+
+      return {copy: generated, issues: [...new Set(issues)]};
+    }
+    let checked = checkCopy(generated);
+    let copyRetried = false;
+    if (generated.mode === "openai" && checked.issues.length) {
+      copyRetried = true;
+      try {
+        const {result, debug} = await tryGenerateWithOpenAI(normalizedBody, signedImageUrl, fallback, watchReference, checked.issues);
+        openAIDebug = debug;
+        if (result?.mode === "openai") checked = checkCopy(result);
+      } catch (error) {
+        openAIDebug.openaiErrorSummary = summarizeError(error);
+      }
+    }
+    generated = checked.issues.length ? {...fallback} : checked.copy;
+    if (isWatch) generated.generatedDescription = itemFacts.watchDescription(generated.generatedDescription, watchDetails, body.stoneType);
 
     return json(200, {
       ok: true,
       mode: generated.mode,
+      copyStatus: generated.mode === "openai" ? "draft" : "needs_review",
+      copyWarnings: checked.issues,
+      copyRetried,
       generatedTitle: generated.generatedTitle,
       generatedDescription: generated.generatedDescription,
       watchReference,

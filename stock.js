@@ -746,6 +746,7 @@ function buildLocationChips(item) {
             ${stockLabel}
           </div>
           <div class="ebay-card-badges">
+            ${window.StockWorkspace?.descriptionNeedsReview(item) ? `<button type="button" class="edit-item-btn ebay-sync-badge stock-copy-review-badge" data-id="${item.id}">Description needs review</button>` : ''}
             ${item.watch_details ? `<span class="ebay-sync-badge">${window.InventoryItemFacts.watchCardLabel(item.watch_details)}</span>` : ''}
             ${item.pricing_status === 'pending' ? `<a class="ebay-sync-badge" href="inventory-pricing.html">Awaiting pricing ↗</a>` : ''}
             ${ebaySyncBadge}

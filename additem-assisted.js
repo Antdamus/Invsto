@@ -3398,7 +3398,7 @@
       }
       applyingCopy=false;
       elements.applyCopyButton.hidden=!(copyEdited.title || copyEdited.description);
-      if(backgroundStatus)backgroundStatus.textContent='Description draft ready to review.';
+      if(backgroundStatus)backgroundStatus.textContent=response?.mode === 'openai' ? 'Description draft ready to review.' : 'Basic description — needs review. Retry generation or edit it in Review.';
       window.addItemWizard?.renderReview();
       scheduleAddItemDraftSave(elements);
 
@@ -3413,7 +3413,9 @@
       } else {
         setInlineStatus(
           elements.generateStatus,
-          "AI writing is unavailable. A basic draft from your entered details is ready to edit; researched facts have not been added to this draft.",
+          response?.copyWarnings?.length
+            ? "The AI draft did not pass the checks against your confirmed details. A basic description is shown. Retry Generate Title & Description or write your description below."
+            : "AI writing is unavailable. A basic description is shown. Retry Generate Title & Description or write your description below.",
           "is-waiting"
         );
       }

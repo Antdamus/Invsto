@@ -280,6 +280,68 @@ window.editCardModule = (function () {
         }
     }
 
+    let copyReviewSession = 0;
+    function prepareCopyReview(item, paths, urls) {
+        const session = ++copyReviewSession;
+        document.getElementById('stock-copy-review')?.remove();
+        if (!item.watch_details) return;
+        const panel = document.createElement('details');
+        panel.id = 'stock-copy-review';
+        panel.className = 'stock-copy-review';
+        panel.open = window.StockWorkspace.descriptionNeedsReview(item);
+        panel.innerHTML = `<summary>Refresh description with AI</summary>
+          <p>Choose a clear photo of the watch face. Confirm the Watch fields and diamonds first. Review the new draft before replacing your description.</p>
+          <div class="stock-copy-photos" role="group" aria-label="Photo for description"></div>
+          <button type="button" class="stock-secondary-btn stock-copy-generate">Generate description</button>
+          <p class="stock-copy-status" role="status" aria-live="polite"></p>
+          <div class="stock-copy-result" hidden><label for="stock-copy-draft">New draft · review before using</label><textarea id="stock-copy-draft" rows="7"></textarea><button type="button" class="stock-secondary-btn stock-copy-apply">Use this description</button></div>`;
+        document.getElementById('edit-description').after(panel);
+        let selected = paths.findIndex((_,i)=>!!urls[i]);
+        let draftFingerprint = '', busy = false;
+        const status = panel.querySelector('.stock-copy-status');
+        const generate = panel.querySelector('.stock-copy-generate');
+        const result = panel.querySelector('.stock-copy-result');
+        const draft = panel.querySelector('textarea');
+        const apply = panel.querySelector('.stock-copy-apply');
+        const readPayload = () => {
+            const stone = document.getElementById('edit-stone-type').value.trim();
+            const values = canViewSensitiveStockFields() ? Object.fromEntries(window.StockWorkspace.watchFields.map(key=>[key,document.getElementById('edit-watch-'+key).value])) : item.watch_details;
+            const watch = window.StockWorkspace.watchDraft(item.watch_details,values,stone);
+            return {itemKind:'watch',watchDetails:window.InventoryItemFacts.publicWatchDetails(watch,stone),stoneType:stone,bucket:'photos',imagePath:paths[selected] || ''};
+        };
+        const fingerprint = () => JSON.stringify([readPayload(),document.getElementById('edit-description').value]);
+        paths.forEach((path,index)=>{
+            if(!urls[index])return;
+            const button=document.createElement('button');button.type='button';button.className='stock-copy-photo';button.setAttribute('aria-label',`Use photo ${index+1} for description`);button.setAttribute('aria-pressed',String(index===selected));
+            const img=document.createElement('img');img.src=urls[index];img.alt=`Watch photo ${index+1}`;button.append(img);
+            button.addEventListener('click',()=>{if(busy)return;selected=index;panel.querySelectorAll('.stock-copy-photo').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));result.hidden=true;});
+            panel.querySelector('.stock-copy-photos').append(button);
+        });
+        generate.disabled=selected<0;
+        if(selected<0)status.textContent='Add a watch photo in Photos, save the item, then reopen to generate a description.';
+        generate.addEventListener('click',async()=>{
+            if(busy)return;
+            const payload=readPayload();
+            if(!payload.watchDetails.name){status.textContent='Enter the watch name or collection in Watch first.';return;}
+            draftFingerprint=fingerprint();busy=true;generate.disabled=true;result.hidden=true;status.textContent='Preparing a draft from the selected photo and confirmed details…';
+            try {
+                const {data,error}=await supabase.functions.invoke('generate-inventory-copy',{body:payload});
+                if(session!==copyReviewSession || currentItemId!==item.id)return;
+                if(error || !data?.ok)throw new Error(error?.message || data?.error || 'No draft returned');
+                if(fingerprint()!==draftFingerprint){status.textContent='Details changed while generating. Generate again to use the latest information.';return;}
+                if(data.mode!=='openai' || data.copyStatus==='needs_review'){status.textContent='A complete AI draft was not available. Your description is unchanged. Try again or edit it directly.';return;}
+                draft.value=data.generatedDescription;result.hidden=false;status.textContent='Draft ready. Review the visible details and confirmed specifications before using it.';
+            } catch(error){if(session===copyReviewSession)status.textContent=`Could not generate the description. ${error.message}. Your description is unchanged.`;}
+            finally{if(session===copyReviewSession){busy=false;generate.disabled=false;}}
+        });
+        apply.addEventListener('click',()=>{
+            if(session!==copyReviewSession || fingerprint()!==draftFingerprint){result.hidden=true;status.textContent='Details changed. Generate again before applying the draft.';return;}
+            if(!draft.value.trim())return;
+            const input=document.getElementById('edit-description');input.value=draft.value.trim();input.dispatchEvent(new Event('input',{bubbles:true}));
+            result.hidden=true;status.textContent='Draft applied to the editor. Save changes to record it with your signature.';
+        });
+    }
+
     // 🔹 Show the edit modal prefilled with item data
     async function openEditModal(itemId) {
         console.log(`🔍 Fetching fresh item data for modal: ${itemId}`);
@@ -354,6 +416,8 @@ window.editCardModule = (function () {
             }
         }
 
+        prepareCopyReview(item,photoPaths,photoUrls);
+
         const modal = document.getElementById("editItemModal");
         if (modal) {
             modal.classList.remove("hidden");
@@ -365,6 +429,7 @@ window.editCardModule = (function () {
 
     // 🔹 Close the modal and clear state
     function closeEditModal() {
+    ++copyReviewSession;
     const modal = document.getElementById("editItemModal");
     if (modal) {
         modal.classList.add("hidden");

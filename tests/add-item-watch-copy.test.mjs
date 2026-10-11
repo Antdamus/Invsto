@@ -14,15 +14,16 @@ const research = (overrides = {}) => ({
   warnings: ["Confirm the dial and bracelet variant."], ...overrides,
 });
 
-function handler({ ai = false, lookup = research(), searchFails = false, copyFails = false, searchSources = [sourceUrl], copy = { generatedTitle: "Watch", generatedDescription: "Watch description" } } = {}) {
+function handler({ ai = false, lookup = research(), searchFails = false, copyFails = false, photoDenied = false, userValid = true, searchSources = [sourceUrl], copy = { generatedTitle: "Watch", generatedDescription: "Watch description" } } = {}) {
   let serveHandler, aiRequest;
   const requests = [];
-  let signCount = 0;
+  let signCount = 0, copyCount = 0;
+  const clients=[];
   const context = {
     Request, Response, AbortSignal, URL, console: { log() {}, error() {} },
-    Deno: { env: { get: (name) => ({ SUPABASE_URL: "https://example.invalid", SUPABASE_SERVICE_ROLE_KEY: "test", ...(ai ? { OPENAI_API_KEY: "test", OPENAI_MODEL: "test" } : {}) })[name] } },
+    Deno: { env: { get: (name) => ({ SUPABASE_URL: "https://example.invalid", SUPABASE_SERVICE_ROLE_KEY: "test", SUPABASE_ANON_KEY: "public", ...(ai ? { OPENAI_API_KEY: "test", OPENAI_MODEL: "test" } : {}) })[name] } },
     serve: (fn) => { serveHandler = fn; },
-    createClient: () => ({ storage: { from: () => ({ createSignedUrl: async () => { signCount++; return { data: { signedUrl: "https://example.invalid/photo.jpg" } }; } }) } }),
+    createClient: (...args) => {clients.push(args); return { auth:{getUser:async()=>({data:{user:userValid?{id:'worker'}:null}})}, storage: { from: () => ({ createSignedUrl: async () => { signCount++; return photoDenied?{error:{message:'Denied'}}:{ data: { signedUrl: "https://example.invalid/photo.jpg" } }; } }) } };},
     fetch: async (_url, options) => {
       aiRequest = JSON.parse(options.body);
       requests.push(aiRequest);
@@ -34,14 +35,40 @@ function handler({ ai = false, lookup = research(), searchFails = false, copyFai
         }));
       }
       if (copyFails) return new Response("Unavailable", { status: 503 });
-      return new Response(JSON.stringify({ output_text: JSON.stringify(copy) }));
+      return new Response(JSON.stringify({ output_text: JSON.stringify(Array.isArray(copy)?copy[Math.min(copyCount++,copy.length-1)]:copy) }));
     },
   };
   vm.createContext(context);
   vm.runInContext(readFileSync(new URL('../inventory-item-facts.js', import.meta.url), 'utf8'), context);
   vm.runInContext(stripTypeScriptTypes(source), context);
-  return { invoke: (body) => serveHandler(new Request("https://example.invalid", { method: "POST", body: JSON.stringify(body) })), request: () => aiRequest, requests, signCount: () => signCount };
+  return { invoke: (body,headers={}) => serveHandler(new Request("https://example.invalid", { method: "POST", headers, body: JSON.stringify(body) })), request: () => aiRequest, requests, clients, signCount: () => signCount };
 }
+
+test('rejected AI prose is explicitly basic after one bounded retry',async()=>{
+ const api=handler({ai:true,copy:{generatedTitle:'Watch',generatedDescription:'Factory diamonds on the original dial.'}});
+ const result=await(await api.invoke({...referenceOnlyWatch,stoneType:'Earth-mined diamonds'})).json();
+ assert.equal(result.mode,'placeholder');assert.equal(result.copyStatus,'needs_review');assert.equal(result.copyRetried,true);assert.ok(result.copyWarnings.length);
+ assert.equal(api.requests.filter(r=>!r.tools).length,2);assert.equal(api.requests.filter(r=>r.tools).length,1);
+ assert.doesNotMatch(result.generatedDescription,/Factory diamonds/);
+});
+test('corrected second draft retains polished prose and confirmed disclosures',async()=>{
+ const api=handler({ai:true,copy:[{generatedTitle:'Watch',generatedDescription:'Factory diamonds.'},{generatedTitle:'Watch',generatedDescription:'A square dial framed by aftermarket-set earth-mined diamonds.'}]});
+ const result=await(await api.invoke({...referenceOnlyWatch,stoneType:'Earth-mined diamonds'})).json();
+ assert.equal(result.mode,'openai');assert.equal(result.copyStatus,'draft');assert.equal(result.copyRetried,true);assert.deepEqual(result.copyWarnings,[]);assert.match(result.generatedDescription,/A square dial/);
+ assert.match(api.request().input[1].content[0].text,/previous draft conflicted/);
+});
+test('valid movement-only wording with a comma is not rejected as original exterior',async()=>{
+ const api=handler({ai:true,copy:{generatedTitle:'Watch',generatedDescription:'A striking square dial. Only the Cartier movement is original, all other parts are aftermarket.'}});
+ const result=await(await api.invoke({itemKind:'watch',watchDetails:{brand:'Cartier',name:'Santos de Cartier',model:'WSSA0062',modificationPreset:'movement_only'}})).json();
+ assert.equal(result.mode,'openai');assert.equal(result.copyRetried,false);assert.match(result.generatedDescription,/striking square dial/);
+});
+test('saved Stock photos use authenticated storage access, never service-role signing',async()=>{
+ const body={...referenceOnlyWatch,bucket:'photos',imagePath:'item_photos/watch.png'};
+ let api=handler();assert.equal((await api.invoke(body)).status,401);assert.equal(api.signCount(),0);
+ api=handler({userValid:false});assert.equal((await api.invoke(body,{Authorization:'Bearer worker'})).status,401);assert.equal(api.signCount(),0);
+ api=handler({photoDenied:true});assert.equal((await api.invoke(body,{Authorization:'Bearer worker'})).status,403);
+ api=handler();assert.equal((await api.invoke(body,{Authorization:'Bearer worker'})).status,200);assert.equal(api.clients[0][1],'public');assert.equal(api.clients[0][2].global.headers.Authorization,'Bearer worker');
+});
 
 test("watch copy accepts mixed materials and modifications without requiring metal, purity or weight", async () => {
   const api = handler();

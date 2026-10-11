@@ -138,3 +138,15 @@ body.stock-body { --stock-ink:#f4f0e6; --stock-muted:#b6c3b7; --stock-gold:#ead3
  #editItemModal .stock-edit-actions .save-edit-btn { flex:1; min-width:0; width:auto; padding-inline:12px; }
 }
 @media (prefers-reduced-motion:reduce) { #edit-item-form { scroll-behavior:auto; } .stock-body * { animation:none !important; transition:none !important; } }
+.stock-copy-review { margin-top:12px; padding:14px; border:1px solid #506247; border-radius:14px; background:#17271f; min-width:0; }
+.stock-copy-review summary { color:#ead197; cursor:pointer; font-weight:600; min-height:36px; align-content:center; }
+.stock-copy-review p { color:#bec8bf; font-size:14px; line-height:1.55; margin:10px 0; }
+.stock-copy-photos { display:flex; flex-wrap:wrap; gap:10px; margin:12px 0; }
+.stock-copy-photo { width:80px; height:90px; padding:4px; border:2px solid transparent; border-radius:10px; background:#000; cursor:pointer; }
+.stock-copy-photo[aria-pressed=true] { border-color:#ead197; box-shadow:0 0 0 2px #ead19744; }
+.stock-copy-photo img { width:100%; height:100%; object-fit:contain; }
+.stock-copy-review .stock-secondary-btn { min-height:44px; padding:10px 16px; border:1px solid #7e805b; border-radius:10px; background:#26372c; color:#f4e7c8; cursor:pointer; }
+.stock-copy-review button:disabled { opacity:.55; cursor:wait; }
+.stock-copy-review textarea { margin:10px 0; width:100%; box-sizing:border-box; }
+.stock-copy-review-badge { border-color:#cda967; color:#ead197; cursor:pointer; min-height:36px; }
+.stock-copy-result[hidden] { display:none; }
