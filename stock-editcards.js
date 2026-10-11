@@ -311,7 +311,9 @@ window.editCardModule = (function () {
         document.getElementById("edit-minimum-sale-price").value = item.minimum_sale_price ?? "";
         window.coinEbayStock?.open(item, canViewSensitiveStockFields());
         document.getElementById("edit-watch-details").hidden = !canViewSensitiveStockFields() || !item.watch_details;
-        for (const key of ["brand", "model", "serial", "department", "condition", "cardIncluded"]) document.getElementById(`edit-watch-${key}`).value = item.watch_details?.[key] || "";
+        for (const key of window.StockWorkspace.watchFields) document.getElementById(`edit-watch-${key}`).value = item.watch_details?.[key] || "";
+        document.getElementById('edit-watch-modificationNotes').value = item.watch_details?.modificationNotes ?? item.watch_details?.modifications ?? '';
+        document.getElementById('edit-watch-stoneSetting').value = item.watch_details?.stoneSetting || 'unknown';
         document.getElementById("edit-price-per-weight").value = item.price_per_weight || "";
         document.getElementById("edit-stock-batch").value = item.stock_batch_size_update || "";
         document.getElementById("edit-photos").value = ""; // clear file input
@@ -327,6 +329,7 @@ window.editCardModule = (function () {
         document.getElementById("edit-qr").value = item.qr_code || "";
 
         applyEditModalAccessMode();
+        window.StockWorkspace.refreshEdit(item, canViewSensitiveStockFields());
         loadEditDetailOptions();
 
         // 🔹 Inject current photos preview
@@ -336,16 +339,17 @@ window.editCardModule = (function () {
         const photoPaths = item.photos || [];
         console.log("🖼️ Fetched photoPaths:", photoPaths);
 
-        for (const path of photoPaths) {
-            const signedUrl = await getSignedUrl(path);
-            console.log("🔗 Signed URL:", signedUrl);
+        const photoUrls = await Promise.all(photoPaths.map(path => getSignedUrl(path)));
+        for (const [index, path] of photoPaths.entries()) {
+            const signedUrl = photoUrls[index];
             if (signedUrl) {
                 const div = document.createElement("div");
                 div.classList.add("photo-thumb-container");
                 div.innerHTML = `
-                    <img src="${signedUrl}" alt="Photo thumbnail">
-                    <button type="button" class="delete-photo-btn" data-path="${path}">&times;</button>
+                    <button type="button" class="edit-photo-preview" aria-label="Inspect photo ${index + 1}"><img src="${escapeEditHtml(signedUrl)}" alt="Photo thumbnail"></button>
+                    <button type="button" class="delete-photo-btn" data-path="${escapeEditHtml(path)}" aria-label="Remove photo ${index + 1}">&times;</button>
                 `;
+                div.querySelector('.edit-photo-preview').addEventListener('click', event => window.CatalogueViewer.open({name:item.title,images:photoUrls.filter(Boolean)},photoUrls.slice(0,index).filter(Boolean).length,event.currentTarget));
                 previewContainer.appendChild(div);
             }
         }
@@ -354,6 +358,7 @@ window.editCardModule = (function () {
         if (modal) {
             modal.classList.remove("hidden");
             document.body.classList.add("modal-open");
+            window.StockWorkspace.focusEdit();
         }
     }
 
@@ -831,11 +836,10 @@ window.editCardModule = (function () {
         console.log(`Keeping removed photo file for recovery: ${oldPath}`);
         }
 
-        const watchDetails = canViewSensitiveStockFields() && existingItem.watch_details ? {
-            ...existingItem.watch_details,
-            ...Object.fromEntries(["brand", "model", "serial", "department", "condition", "cardIncluded"].map(key => [key, document.getElementById(`edit-watch-${key}`).value.trim()]))
-        } : null;
-        let savedDescription = watchDetails ? window.InventoryItemFacts.watchDescription(description, watchDetails, existingItem.stone_type) : description;
+        const watchDetails = canViewSensitiveStockFields() && existingItem.watch_details ? window.StockWorkspace.watchDraft(existingItem.watch_details, Object.fromEntries(window.StockWorkspace.watchFields.map(key => [key, document.getElementById(`edit-watch-${key}`).value.trim()])), stoneType) : null;
+        const watchIdentityChanged = watchDetails && ['name','brand','model'].some(key => watchDetails[key] !== (existingItem.watch_details[key] || ''));
+        const titleSource = watchIdentityChanged && title === existingItem.title ? '' : title;
+        let savedDescription = watchDetails ? window.InventoryItemFacts.watchDescription(description, watchDetails, stoneType) : description;
         const coinDetails = canViewSensitiveStockFields() && existingItem.coin_details ? window.coinEbayStock?.getDetails() || existingItem.coin_details : null;
         if (coinDetails && window.CoinEbay) savedDescription = [
             description.replace(/\n*Coin details:\n[\s\S]*$/, "").trim(),
@@ -843,7 +847,7 @@ window.editCardModule = (function () {
         ].filter(Boolean).join("\n\n");
         const updates = {
             _item_id: currentItemId,
-            _title: watchDetails ? window.InventoryItemFacts.watchTitle(watchDetails, existingItem.stone_type, title) : title,
+            _title: watchDetails ? window.InventoryItemFacts.watchTitle(watchDetails, stoneType, titleSource) : title,
             _description: savedDescription,
             _weight: weight,
             _stone_type: stoneType,

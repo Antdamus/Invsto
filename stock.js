@@ -768,7 +768,9 @@ function buildLocationChips(item) {
             <span class="${defectStock > 0 ? "has-defects" : ""}"><small>Defective</small><strong>${Number(defectStock || 0).toLocaleString()}</strong></span>
             <span><small>Total</small><strong>${Number(totalPhysicalStock || 0).toLocaleString()}</strong></span>
           </div>
-          <div class="stock-location-section">
+          <div class="stock-location-chips">${buildLocationChips(item)}</div>
+          <details class="stock-location-section stock-operations">
+            <summary>Stock & location actions</summary>
             <div class="stock-section-row">
               <span>Locations</span>
               ${isDeleted ? `<span class="stock-deleted-lock">Deleted item</span>` : `
@@ -783,8 +785,7 @@ function buildLocationChips(item) {
                 </span>
               `}
             </div>
-            <div class="stock-location-chips">${buildLocationChips(item)}</div>
-          </div>
+          </details>
           <details class="stock-card-details">
             <summary>More details</summary>
             ${showSensitive ? `<p><strong>Distributor:</strong> ${escapeStockHtml(item.distributor_name || "-")}<br/>${escapeStockHtml(item.distributor_phone || "")}</p>` : ""}
@@ -904,7 +905,7 @@ function buildLocationChips(item) {
         <div class="carousel" id="carousel-${index}">
           <div class="carousel-track">
             ${signedUrls.map((url, i) => `
-              <img loading="lazy" src="${url}" class="carousel-photo stock-photo-open ${i === 0 ? 'active' : ''}" data-id="${item.id}" data-path="${escapeStockHtml(visiblePaths[i] || "")}" data-photo-index="${i}" alt="Item photo"/>
+              <button type="button" class="stock-photo-open stock-photo-trigger" data-id="${item.id}" data-path="${escapeStockHtml(visiblePaths[i] || "")}" data-photo-index="${i}" aria-label="View photos and zoom into ${escapeStockHtml(item.title || 'item')}"><img loading="lazy" decoding="async" src="${url}" class="carousel-photo ${i === 0 ? 'active' : ''}" alt="Item photo"/><span class="stock-photo-hint">View & zoom <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></span></button>
             `).join('')}
           </div>
           ${validPaths.length > 1 ? `<span class="stock-photo-count">+${validPaths.length - 1} photos</span>` : ""}
@@ -935,9 +936,10 @@ function buildLocationChips(item) {
 
     const editBtn = !deleted ? `
       <button class="edit-item-btn" data-id="${id}" title="Edit this item">
-        <svg xmlns="http://www.w3.org/2000/svg" class="lucide lucide-pencil-line" width="20" height="20" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg xmlns="http://www.w3.org/2000/svg" class="lucide lucide-pencil-line" width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
         </svg>
+        <span>Edit piece</span>
       </button>
     ` : "";
 
@@ -7373,7 +7375,9 @@ async function requestStockCameraCapture() {
   }
 }
 
+let stockPhotoViewerRequest = 0;
 async function openStockPhotoViewer(itemId, startPath = "") {
+  const request = ++stockPhotoViewerRequest;
   const item = getStockItemById(itemId);
   const paths = getStockItemPhotoPaths(item);
   if (!item || !paths.length) {
@@ -7388,43 +7392,25 @@ async function openStockPhotoViewer(itemId, startPath = "") {
     currentPath: "",
     currentUrl: "",
   };
-  document.getElementById("stock-photo-viewer-title").textContent = item.title || "Item Photos";
-  const modal = document.getElementById("stock-photo-viewer-modal");
-  const image = document.getElementById("stock-photo-viewer-image");
-  const thumbs = document.getElementById("stock-photo-viewer-thumbs");
-  thumbs.innerHTML = "";
-
   const signed = await Promise.all(paths.map(async (path) => ({
     path,
     url: await getSignedUrl(path),
   })));
-  stockMediaState.viewer.signed = signed.filter((entry) => entry.path && entry.url);
-
-  function showPath(path) {
-    const entry = signed.find((photo) => photo.path === path) || signed[0];
-    if (!entry?.url) return;
-    stockMediaState.viewer.currentPath = entry.path;
-    stockMediaState.viewer.currentUrl = entry.url;
-    image.src = entry.url;
-    thumbs.querySelectorAll("button").forEach((button) => {
-      button.classList.toggle("is-active", button.dataset.path === entry.path);
-    });
-  }
-
-  signed.forEach((entry) => {
-    if (!entry.url) return;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.path = entry.path;
-    button.innerHTML = `<img src="${entry.url}" alt="Item thumbnail">`;
-    button.addEventListener("click", () => showPath(entry.path));
-    thumbs.appendChild(button);
-  });
-
-  modal?.classList.remove("hidden");
-  modal?.classList.add("show");
-  document.body.classList.add("modal-open");
-  showPath(startPath || paths[0]);
+  if (request !== stockPhotoViewerRequest) return;
+  const photos = signed.filter((entry) => entry.path && entry.url);
+  stockMediaState.viewer.signed = photos;
+  if (!photos.length) { showToast("Photos could not load. Please try again."); return; }
+  window.CatalogueViewer.open({
+    name: item.title || "Item photos", images: photos.map(photo => photo.url),
+    onChange(index) {
+      stockMediaState.viewer.currentPath = photos[index].path;
+      stockMediaState.viewer.currentUrl = photos[index].url;
+    },
+    actions: isStockItemDeleted(item) ? [] : [
+      {label: 'Edit this photo', run: () => openStockPhotoEditorFromViewer()},
+      {label: 'Add photos', run: () => { closeStockPhotoViewer(); openStockPhotoManager(itemId); }}
+    ]
+  }, Math.max(0, photos.findIndex(photo => photo.path === startPath)));
 }
 
 async function openStockPhotoEditorFromViewer() {
@@ -7470,6 +7456,8 @@ async function openStockPhotoEditorFromViewer() {
 }
 
 function closeStockPhotoViewer() {
+  ++stockPhotoViewerRequest;
+  window.CatalogueViewer?.close();
   document.getElementById("stock-photo-viewer-modal")?.classList.add("hidden");
   document.getElementById("stock-photo-viewer-modal")?.classList.remove("show");
   document.body.classList.remove("modal-open");

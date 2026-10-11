@@ -29,6 +29,8 @@
   <script src="barcode-scanner.js?v=20260929-certificate" defer></script>
   <link rel="stylesheet" href="phone-workspace.css?v=20261006-4" />
   <script src="phone-workspace.js?v=20261006-2" defer></script>
+  <link rel="stylesheet" href="stock-workspace.css?v=20261011-polish" />
+  <link rel="stylesheet" href="photo-viewer.css?v=20261011-stock" />
 </head>
 
 <body class="stock-body stock-access-loading" data-phone-page="stock">
@@ -336,12 +338,15 @@
   <link rel="stylesheet" href="coin-ebay.css?v=20260926-coins-ebay" />
   <script type="module" src="coin-ebay.js?v=20260926-fast-intake"></script>
   <script src="inventory-item-facts.js?v=20261011-watch-card"></script>
-  <script src="stock-editcards.js?v=20261011-watch-card"></script>
+  <script src="catalogue-core.js?v=20261010-vector-arrows"></script>
+  <script src="catalogue-viewer.js?v=20261011-stock"></script>
+  <script src="stock-workspace.js?v=20261011-polish" defer></script>
+  <script src="stock-editcards.js?v=20261011-polish"></script>
   <script src="ebayExport.js?v=20261011-watch-facts"></script>
   <script src="stock-checkout.js"></script>
   <script src="stock-transferstock.js"></script>
   <script src="stock-storage-transfer.js"></script>
-  <script src="stock.js?v=20261011-watch-card"></script>
+  <script src="stock.js?v=20261011-polish"></script>
 
   <!-- 📢 Toast + Loading Spinner Containers -->
   <div id="toast-container"></div>
@@ -656,13 +661,13 @@
   </div>
 
   <!-- editing modal -->
-  <div id="editItemModal" class="modal hidden">
+  <div id="editItemModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="stock-edit-heading">
     <div class="modal-content stock-edit-modal-content">
-      <span class="close-modal" id="closeEditModal" title="Close">&times;</span>
+      <button type="button" class="close-modal" id="closeEditModal" title="Close" aria-label="Close item editor">&times;</button>
       <div class="stock-edit-hero">
         <div>
-          <span class="stock-edit-kicker">Inventory correction</span>
-          <h2>Edit Inventory Item</h2>
+          <span class="stock-edit-kicker">YOUR COLLECTION</span>
+          <h2 id="stock-edit-heading">Edit Inventory Item</h2>
           <p id="stock-edit-mode-note">Correct item details and sign the change before saving.</p>
         </div>
       </div>
@@ -708,10 +713,16 @@
           <fieldset id="edit-coin-details" class="coin-ebay-editor" hidden><legend>Coin and eBay listing details</legend></fieldset>
           <fieldset id="edit-watch-details" hidden>
             <legend>Watch listing details</legend>
+            <label for="edit-watch-name">Model / collection name</label><input id="edit-watch-name" maxlength="200" placeholder="e.g. Santos" />
             <label for="edit-watch-brand">Brand</label><input id="edit-watch-brand" maxlength="100" />
             <label for="edit-watch-model">Reference number</label><input id="edit-watch-model" maxlength="200" />
             <label for="edit-watch-serial">Serial number (internal)</label><input id="edit-watch-serial" maxlength="150" autocorrect="off" spellcheck="false" />
             <label for="edit-watch-cardIncluded">Watch card</label><select id="edit-watch-cardIncluded"><option value="">Not checked</option><option value="yes">Card included</option><option value="no">No card included</option></select><p class="field-helper">Brand / warranty card. A CGL report is a separate document.</p>
+            <label for="edit-watch-materials">Materials by component</label><textarea id="edit-watch-materials" maxlength="2000" placeholder="Case, bezel, bracelet or strap materials — only what is confirmed"></textarea>
+            <label for="edit-watch-modificationPreset">Modifications</label><select id="edit-watch-modificationPreset"><option value="">Describe below / not specified</option><option value="movement_only">Only brand movement original; all other parts aftermarket</option><option value="aftermarket_bezel">Aftermarket bezel</option><option value="aftermarket_dial">Aftermarket dial</option><option value="aftermarket_bracelet">Aftermarket bracelet / strap</option><option value="aftermarket_stones">Aftermarket stone setting</option></select>
+            <label for="edit-watch-modificationNotes">Modification details</label><textarea id="edit-watch-modificationNotes" maxlength="3000" placeholder="Add any other confirmed changes"></textarea>
+            <label for="edit-watch-stoneSetting">Stone setting origin</label><select id="edit-watch-stoneSetting"><option value="unknown">Not confirmed</option><option value="factory">Factory-set stones</option><option value="aftermarket">Aftermarket-set stones</option></select><p class="field-helper">Diamond type is recorded separately under Piece details. A movement-only or aftermarket-stone modification takes precedence over this selection.</p>
+            <label for="edit-watch-braceletFit">Measured bracelet / wrist fit</label><input id="edit-watch-braceletFit" maxlength="200" placeholder="Only if measured, e.g. up to 7 in" />
             <label for="edit-watch-department">Department</label><select id="edit-watch-department"><option value="">Choose department</option><option>Men</option><option>Women</option><option>Unisex Adults</option><option>Boys</option><option>Girls</option><option>Unisex Kids</option></select>
             <label for="edit-watch-condition">Condition</label><select id="edit-watch-condition"><option value="">Choose condition</option><option value="NEW">New with box and papers</option><option value="NEW_OTHER">New without box or papers</option><option value="NEW_WITH_DEFECTS">New with imperfections</option><option value="SELLER_REFURBISHED">Seller refurbished</option><option value="PRE_OWNED_EXCELLENT">Pre-owned - Excellent</option><option value="USED_EXCELLENT">Pre-owned - Good</option><option value="PRE_OWNED_FAIR">Pre-owned - Fair</option><option value="FOR_PARTS_OR_NOT_WORKING">For parts or not working</option></select>
           </fieldset>

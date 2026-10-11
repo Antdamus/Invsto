@@ -12,7 +12,7 @@
  root.CataloguePhotoGeometry={fit,bound,anchored,MAX_ZOOM};
  if(!root.document)return;
  const C=root.Catalogue;
- let dialog,stage,photo,controls,heading,counter,zoomLabel,thumbs,status,ready=false,origin=null,images=[],index=0;
+ let dialog,stage,photo,controls,heading,counter,zoomLabel,thumbs,status,ready=false,origin=null,images=[],index=0,options={};
  let state={scale:1,x:0,y:0},base={width:0,height:0},viewport={width:0,height:0},gesture=null,moved=false,multi=false,lastTap=null;
  const pointers=new Map();
  function paint(){
@@ -48,6 +48,7 @@
   controls.querySelector('[data-viewer="previous"]').disabled=index===0;
   controls.querySelector('[data-viewer="next"]').disabled=index===images.length-1;
   paint();photo.src=images[index];
+  options.onChange?.(index);
  }
  function create(){
   dialog=document.createElement('dialog');dialog.id='catalogue-photo-viewer';dialog.className='photo-viewer';
@@ -59,7 +60,7 @@
   photo.addEventListener('load',()=>{if(!dialog.open)return;ready=true;photo.hidden=false;status.hidden=true;stage.setAttribute('aria-busy','false');measure();});
   photo.addEventListener('error',()=>{if(!dialog.open)return;ready=false;photo.hidden=true;stage.setAttribute('aria-busy','false');status.hidden=false;status.textContent='This photograph could not load. Close the viewer and try again.';paint();});
   dialog.querySelector('.viewer-close').addEventListener('click',()=>dialog.close());
-  dialog.addEventListener('close',()=>{ready=false;clearGesture();photo.removeAttribute('src');document.body.classList.remove('photo-viewer-open');if(origin?.isConnected)origin.focus({preventScroll:true});});
+  dialog.addEventListener('close',()=>{ready=false;clearGesture();photo.removeAttribute('src');document.body.classList.remove('photo-viewer-open');if(origin?.isConnected)origin.focus({preventScroll:true});options.onClose?.();});
   controls.addEventListener('click',e=>{
    const action=e.target.closest('button')?.dataset.viewer;
    if(action==='in')zoom(state.scale*1.5);if(action==='out')zoom(state.scale/1.5);if(action==='fit')reset();
@@ -110,7 +111,13 @@
   close(){if(dialog?.open)dialog.close();},
   open(item,start=0,trigger=document.activeElement){
    const sources=(item.images||[]).map(C.safeImage).filter(Boolean);if(!sources.length)return false;
-   if(!dialog)create();origin=trigger;images=sources;heading.textContent=item.name;
+   if(!dialog)create();origin=trigger;images=sources;heading.textContent=item.name;options=item;
+   dialog.querySelector('.viewer-item-actions')?.remove();
+   if(item.actions?.length){
+    const actions=document.createElement('div');actions.className='viewer-item-actions';
+    for(const action of item.actions){const button=document.createElement('button');button.type='button';button.textContent=action.label;button.addEventListener('click',()=>action.run(index));actions.append(button);}
+    dialog.querySelector('.viewer-footer').prepend(actions);
+   }
    thumbs.innerHTML=images.map((src,n)=>`<button type="button" data-viewer-photo="${n}" aria-label="View photograph ${n+1}" aria-pressed="false"><img src="${C.escape(src)}" alt="" loading="lazy"></button>`).join('');
    thumbs.hidden=images.length<2;controls.querySelectorAll('[data-viewer="previous"],[data-viewer="next"]').forEach(b=>b.hidden=images.length<2);
    document.body.classList.add('photo-viewer-open');if(!dialog.open)dialog.showModal();showPhoto(start);return true;
