@@ -1,4 +1,5 @@
 /* Scoped studio layout: the photo and save action stay visible while tools scroll. */
+.assisted-photo-studio-launch { width: 100%; min-height: 48px; margin-top: 14px; border-color: #c7ad72; color: #e7ce93; }
 .add-body .assisted-editor-modal {
   --studio-border: rgba(232, 208, 156, .19);
   --studio-gold: #e7ce93;

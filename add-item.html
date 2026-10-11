@@ -12,9 +12,9 @@
 
   <link rel="stylesheet" href="add-item.css?v=20260926-mobile" />
   <link rel="stylesheet" href="additembulk.css" />
-  <link rel="stylesheet" href="additem-assisted.css?v=20261011-photo-studio" />
+  <link rel="stylesheet" href="additem-assisted.css?v=20261011-photo-studio2" />
   <link rel="stylesheet" href="additem-wizard.css?v=20261011-intake-refinements" />
-  <link rel="stylesheet" href="item-photo-editor.css?v=20261011-photo-studio" />
+  <link rel="stylesheet" href="item-photo-editor.css?v=20261011-photo-studio2" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
@@ -325,6 +325,7 @@
                       <strong id="assisted-selected-image-name">No AI image selected</strong>
                       <span id="assisted-selected-image-path">Refresh after the phone upload finishes.</span>
                     </div>
+                    <button type="button" id="assisted-open-image-editor" class="assisted-secondary-button assisted-photo-studio-launch">Edit photo</button>
                     <details class="item-optional-details"><summary>Edit selected photo</summary>
                     <div class="assisted-bg-tools" aria-label="Background processing">
                       <button type="button" id="assisted-bg-auto-align" class="assisted-secondary-button assisted-bg-tools-wide" aria-pressed="false">
@@ -335,9 +336,6 @@
                       </button>
                       <button type="button" id="assisted-bg-white" class="assisted-secondary-button">
                         White Background
-                      </button>
-                      <button type="button" id="assisted-open-image-editor" class="assisted-secondary-button assisted-bg-tools-wide">
-                        Edit photo
                       </button>
                     </div>
                     <p id="assisted-bg-status" class="assisted-inline-status" aria-live="polite">
@@ -1070,8 +1068,8 @@
   <script src="additem-pricing.js?v=20261011-intake-refinements"></script>
   <script src="additem-wizard.js?v=20261011-intake-refinements"></script>
   <script src="additem.js?v=20261011-intake-refinements"></script>
-  <script src="item-photo-editor.js?v=20261011-photo-studio"></script>
-  <script src="additem-assisted.js?v=20261011-photo-studio"></script>
+  <script src="item-photo-editor.js?v=20261011-photo-studio2"></script>
+  <script src="additem-assisted.js?v=20261011-photo-studio2"></script>
   <script src="additem-intake.js?v=20261011-intake-refinements"></script>
 </body>
 </html>
