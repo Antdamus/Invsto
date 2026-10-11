@@ -126,6 +126,36 @@ test('a photo or factory reference cannot supply an unconfirmed diamond origin',
   assert.doesNotMatch(result.generatedDescription,/natural diamonds/i);
   assert.match(result.generatedDescription,/origin unspecified/);
 });
+
+test('AI uses confirmed factory setting independently of unrelated aftermarket modifications',async()=>{
+  const description='Factory-set earth-mined diamonds. Aftermarket bracelet / strap.';
+  const api=handler({ai:true,copy:{generatedTitle:'Watch',generatedDescription:description}});
+  const result=await (await api.invoke({itemKind:'watch',stoneType:'Earth-mined diamonds',watchDetails:{brand:'Rolex',name:'Datejust',model:'126233',stoneSetting:'factory',modificationPreset:'aftermarket_bracelet'}})).json();
+  assert.equal(result.generatedDescription,description);
+  assert.match(result.generatedTitle,/Factory-set stones/);
+  assert.match(api.request().input[1].content[0].text,/Stone setting origin.*Factory-set stones/);
+});
+
+test('AI cannot fill in unknown stone setting from a factory reference or photo',async()=>{
+  for (const stoneSetting of [undefined,'unknown','aftermarket']) {
+    const api=handler({ai:true,copy:{generatedTitle:'Watch',generatedDescription:'Factory-set diamonds adorn this piece.'}});
+    const result=await (await api.invoke({itemKind:'watch',stoneType:'Earth-mined diamonds',watchDetails:{name:'Rolex',model:'126233',stoneSetting}})).json();
+    assert.doesNotMatch(result.generatedDescription,/Factory-set/i);
+    if(stoneSetting==='aftermarket') assert.match(result.generatedDescription,/Aftermarket stone setting/);
+  }
+});
+
+test('AI cannot relabel confirmed factory stones as aftermarket or override movement-only scope',async()=>{
+  const api=handler({ai:true,copy:{generatedTitle:'Watch',generatedDescription:'Aftermarket-set earth-mined diamonds.'}});
+  const result=await (await api.invoke({itemKind:'watch',stoneType:'Earth-mined diamonds',watchDetails:{name:'Rolex',model:'126233',stoneSetting:'factory'}})).json();
+  assert.match(result.generatedDescription,/Factory-set stones/);
+  assert.doesNotMatch(result.generatedDescription,/Aftermarket/i);
+  const scoped=handler({ai:true,copy:{generatedTitle:'Watch',generatedDescription:'Factory-set diamonds.'}});
+  const second=await (await scoped.invoke({itemKind:'watch',stoneType:'Earth-mined diamonds',watchDetails:{brand:'Cartier',name:'Santos',model:'WSSA0018',stoneSetting:'factory',modificationPreset:'movement_only'}})).json();
+  assert.doesNotMatch(second.generatedDescription,/Factory-set/i);
+  assert.match(second.generatedDescription,/all other parts are aftermarket/);
+  assert.match(second.generatedDescription,/Aftermarket stone setting/);
+});
 test('VVS simulated diamonds remain explicitly simulated even if generated copy drops the qualifier', async () => {
   const api=handler({ai:true,copy:{generatedTitle:'VVS diamond watch',generatedDescription:'An elegant watch with VVS diamonds.'}});
   const result=await (await api.invoke({...referenceOnlyWatch,stoneType:'VVS simulated diamonds'})).json();

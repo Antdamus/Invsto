@@ -104,3 +104,48 @@ test('a complete paraphrased movement-only disclosure is not repeated',()=>{
   assert.equal(facts.watchDescription(copy,watch),copy);
   assert.match(facts.watchDescription('A watch with an original Cartier movement and aftermarket bezel.',watch),/all other parts are aftermarket/,'Partial disclosure must still receive the full scope');
 });
+
+test('stone setting is independent of diamond origin and survives saves and public metadata',()=>{
+  const watch={brand:'Cartier',name:'Santos',model:'WSSA0018',stoneSetting:'aftermarket'};
+  const stone='Earth-mined diamonds';
+  const title=facts.watchTitle(watch,stone);
+  assert.equal(title,'Cartier Santos WSSA0018 — Aftermarket-set stones, Earth-mined diamonds');
+  assert.equal(facts.watchTitle(watch,stone,title),title);
+  const description=facts.watchDescription('Box included.',watch,stone);
+  assert.match(description,/Aftermarket stone setting/);
+  assert.match(description,/Earth-mined diamonds/);
+  assert.equal(facts.watchDescription(description,watch,stone),description);
+  assert.equal(facts.publicWatchDetails(watch,stone).stoneSetting,'aftermarket');
+  assert.deepEqual(plain(facts.categories('Watches',stone,watch)),['Watches','Earth-mined diamonds','Aftermarket']);
+});
+
+test('factory-set stones can coexist with an aftermarket bracelet, without repeated disclosures',()=>{
+  const watch={brand:'Rolex',model:'126233',stoneSetting:'factory',modificationPreset:'aftermarket_bracelet'};
+  const description='Factory-set earth-mined diamonds. Aftermarket bracelet / strap.';
+  assert.equal(facts.watchDescription(description,watch,'Earth-mined diamonds'),description);
+  assert.match(facts.watchTitle(watch,'Earth-mined diamonds'),/Aftermarket, Earth-mined diamonds, Factory-set stones/);
+  assert.equal(facts.watchStoneSetting(watch),'factory');
+});
+
+test('unknown settings stay unknown and no-stone items ignore stale setting metadata',()=>{
+  for (const watch of [{},{stoneSetting:'unknown'},{stoneSetting:'invented'},{modificationPreset:'aftermarket_bracelet'}]) {
+    assert.equal(facts.watchStoneSetting(watch,'Earth-mined diamonds'),'unknown');
+    assert.doesNotMatch(facts.watchDescription('Watch.',watch,'Earth-mined diamonds'),/Factory-set|Aftermarket stone setting/i);
+  }
+  const watch={brand:'Rolex',stoneSetting:'aftermarket'};
+  assert.equal(facts.watchStoneSetting(watch,'No stone'),'');
+  assert.equal(facts.watchTitle(watch,'No stone'),'Rolex');
+  assert.deepEqual(plain(facts.categories('Watches','No stone',watch)),['Watches','No stone']);
+  assert.doesNotMatch(facts.watchDescription('',watch,'No stone'),/aftermarket|setting/i);
+});
+
+test('explicit modification scopes override contradictory setting metadata',()=>{
+  for (const modificationPreset of ['movement_only','aftermarket_stones']) {
+    const watch={brand:'Cartier',stoneSetting:'factory',modificationPreset};
+    assert.equal(facts.watchStoneSetting(watch,'VVS simulated diamonds'),'aftermarket');
+    const copy=facts.watchDescription('',watch,'VVS simulated diamonds');
+    assert.doesNotMatch(copy,/factory-set/i);
+    assert.match(copy,/Aftermarket stone setting/i);
+    assert.equal((copy.match(/Aftermarket stone setting/gi)||[]).length,1);
+  }
+});

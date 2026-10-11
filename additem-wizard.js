@@ -20,7 +20,7 @@
   const back = document.getElementById("item-step-back");
   const next = document.getElementById("item-step-next");
   const error = document.getElementById("item-step-error");
-  const watchKeys = ["name", "brand", "model", "serial", "department", "condition", "materials", "modificationPreset", "modifications", "braceletFit"];
+  const watchKeys = ["name", "brand", "model", "serial", "department", "condition", "materials", "modificationPreset", "modifications", "braceletFit", "stoneSetting"];
   const coinLabels = { name: "Name / series", year: "Year / date", country: "Issuing country", denomination: "Denomination", mint: "Mint / mint mark", metal: "Metal", fineness: "Purity (parts per 1,000)", condition: "Reported condition", variety: "Variety / reference", finish: "Strike / finish", fineMetalContent: "Fine metal content", composition: "Composition details", gradingStatus: "Grading status", grade: "Grade as stated", gradingService: "Grading service", certNumber: "Certification number", notes: "Condition notes / alterations" };
   const coinKeys = Object.keys(coinLabels);
   let current = 0;
@@ -67,6 +67,7 @@
     if (!isWatch()) return null;
     const details = Object.fromEntries(watchKeys.map((key) => [key, value(`watch-${key}`)]));
     details.name = details.name || details.brand;
+    details.stoneSetting = window.InventoryItemFacts.watchStoneSetting(details, value('assisted-stone-type'));
     details.modificationNotes = details.modifications;
     details.modifications = window.InventoryItemFacts.watchModifications(details);
     const referenceLookup = window.addItemAssistedModule?.getWatchReferenceLookup?.();
@@ -173,6 +174,7 @@
         ...(value('watch-braceletFit') ? [['Measured fit',value('watch-braceletFit'),'information']] : []),
       ] : []),
       ...(!isCoin() ? [['Diamonds / stones',value('assisted-stone-type') || 'Not entered — check this piece','information']] : []),
+      ...(isWatch() && window.InventoryItemFacts.watchStoneSetting(getWatchDetails(),value('assisted-stone-type')) ? [['Stone setting',window.InventoryItemFacts.watchStoneSettingLabel(getWatchDetails(),value('assisted-stone-type')),'information']] : []),
       ...(window.addItemPricing?.deferred() ? [['Pricing',`Queued for ${window.addItemPricing.ownerName()} · cost and selling prices set later`,'pricing']] : [
         ['Cost',value('cost') ? `$${value('cost')}` : 'Not entered','pricing'],
         ['Minimum sale',value('minimum-sale-price') ? `$${value('minimum-sale-price')}` : 'Not set','pricing'],
@@ -311,6 +313,7 @@
   }
 
   function updateWatchDisclosure() {
+    syncWatchStoneSetting();
     const preset = document.getElementById('watch-modificationPreset');
     preset.querySelector('[value="movement_only"]').textContent = `Only original ${value('watch-brand') || 'brand'} movement; rest aftermarket`;
     const preview = document.getElementById('watch-modifications-preview');
@@ -319,11 +322,24 @@
   }
   ['watch-brand','watch-modificationPreset','watch-modifications'].forEach(id => document.getElementById(id).addEventListener('input', updateWatchDisclosure));
 
+  function syncWatchStoneSetting() {
+    const input = document.getElementById('watch-stoneSetting');
+    const noStones = !window.InventoryItemFacts.watchStoneSetting({}, value('assisted-stone-type'));
+    const forced = ['movement_only','aftermarket_stones'].includes(value('watch-modificationPreset'));
+    input.closest('label').hidden = !isWatch() || noStones;
+    input.disabled = !isWatch() || noStones || forced;
+    if (noStones) input.value = '';
+    else if (forced) input.value = 'aftermarket';
+    document.getElementById('watch-stone-setting-help').textContent = forced
+      ? 'Aftermarket-set is included in the modifications you selected. Change that selection above if it does not describe this watch.'
+      : 'Separate from stone type: earth-mined diamonds can be aftermarket-set. Choose factory-set only when confirmed.';
+  }
   function syncStoneChoice() {
     const choice = document.getElementById('stone-type-choice');
     const stone = value('assisted-stone-type');
     choice.value = !stone ? '' : window.InventoryItemFacts.stoneChoices.find(value => value.toLowerCase() === stone.toLowerCase()) || 'other';
     document.getElementById('assisted-stone-type').closest('label').hidden = isCoin() || choice.value !== 'other';
+    syncWatchStoneSetting();
   }
   document.getElementById('stone-type-choice').addEventListener('change', event => {
     const input = document.getElementById('assisted-stone-type');

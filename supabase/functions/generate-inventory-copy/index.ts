@@ -26,7 +26,7 @@ Keep unknown details unspecified. Without a photo, do not invent imagery, luster
 
 type RequestBody = {
   itemKind?: "jewelry" | "watch" | "coin";
-  watchDetails?: { name?: string; brand?: string; department?: string; condition?: string; model?: string; serial?: string; materials?: string; modifications?: string; modificationPreset?: string; modificationNotes?: string; braceletFit?: string };
+  watchDetails?: { name?: string; brand?: string; department?: string; condition?: string; model?: string; serial?: string; materials?: string; modifications?: string; modificationPreset?: string; modificationNotes?: string; braceletFit?: string; stoneSetting?: string };
   coinDetails?: CoinDetails;
   bucket?: string;
   imagePath?: string;
@@ -352,6 +352,7 @@ Known metadata:
 - Watch model / reference: ${body.watchDetails?.model || ""}
 - Watch materials by component: ${body.watchDetails?.materials || ""}
 - Watch modifications / customizations: ${body.watchDetails?.modifications || ""}
+- Stone setting origin (separate from diamond origin): ${itemFacts.watchStoneSettingLabel(body.watchDetails, body.stoneType)}
 - Measured bracelet / wrist fit (not factory case size): ${body.watchDetails?.braceletFit || "not supplied"}
 - Material: ${body.material ?? ""}
 - Purity: ${body.purity ?? ""}
@@ -523,6 +524,7 @@ Different parts may use different materials; never describe the entire watch as 
 Disclose supplied aftermarket parts and customizations in BOTH the title and description, using the literal word "Aftermarket". Never replace this disclosure with only "custom" or "modified".
 The watch title must use the model/reference, never the individual serial number. Do not copy serial numbers from photos, certificates, notes or existing copy into the title.
 Keep Earth-mined diamonds and Lab-grown diamonds distinct, using the entered stone type. Aftermarket describes a modification, not diamond origin: natural diamonds can still be aftermarket additions. Never infer either origin or factory installation from appearance.
+Use the separate stone setting origin as entered: factory-set means set by the watch brand, aftermarket-set means added later. State confirmed setting origin once alongside the stone type. Unknown means unconfirmed, never factory-set by default. An aftermarket bracelet alone does not make confirmed factory-set diamonds aftermarket. The movement-only and aftermarket-stone presets require aftermarket settings. Never use a reference's factory stone configuration to fill in an unknown setting origin for this piece.
 "VVS simulated diamonds" is a seller-entered simulated-stone type. Always keep "simulated" with that name; never shorten it to "VVS diamonds", describe it as natural/lab-grown diamond, or claim a verified diamond clarity grade.
 You may use ONLY the supplied researched specifications to describe the standard model. Never fill gaps from model memory.
 User-entered materials and modifications ALWAYS OVERRIDE stock specifications for the corresponding components. Do not describe a replaced part as if it were still factory original. If the scope of a modification is unclear, omit potentially conflicting stock facts.
@@ -655,7 +657,7 @@ serve(async (req) => {
       body.notes = itemFacts.redactWatchSerial(body.notes, privateWatch);
       body.existingTitle = itemFacts.redactWatchSerial(body.existingTitle, privateWatch);
       body.existingDescription = itemFacts.redactWatchSerial(body.existingDescription, privateWatch);
-      body.watchDetails = itemFacts.publicWatchDetails(privateWatch);
+      body.watchDetails = itemFacts.publicWatchDetails(privateWatch, body.stoneType);
     }
     const bucket = asTrimmedString(body.bucket || DEFAULT_BUCKET);
     const imagePath = normalizePath(body.imagePath || "");
@@ -686,6 +688,7 @@ serve(async (req) => {
       modificationNotes: asTrimmedString(body.watchDetails?.modificationNotes).slice(0, 4000),
       modificationPreset: asTrimmedString(body.watchDetails?.modificationPreset).slice(0, 80),
       braceletFit: asTrimmedString(body.watchDetails?.braceletFit).slice(0, 200),
+      stoneSetting: itemFacts.watchStoneSetting(body.watchDetails, body.stoneType),
     } : undefined;
 
     if (!ALLOWED_BUCKETS.has(bucket)) {
@@ -772,7 +775,14 @@ serve(async (req) => {
       // Titles are assembled from the entered identity, not numbers recognized in
       // a photo. Enforce disclosures even when the AI omits them.
       generated.generatedTitle = itemFacts.watchTitle(watchDetails, body.stoneType);
-      if (itemFacts.hasAftermarket(watchDetails) && /\b(?:factory[ -]?(?:set|original)?|original|oem)\b[^.!?;\n]{0,40}\b(?:diamonds?|bezel|dial|bracelet|parts?)\b/i.test(generated.generatedDescription)) {
+      const setting = itemFacts.watchStoneSetting(watchDetails, body.stoneType);
+      const factoryStoneClaim = /\b(?:factory(?:[ -](?:set|original))?|original|oem)\s+(?:(?:earth[ -]mined|natural|lab[ -]grown|simulated|vvs)\s+)*(?:diamonds?|stones?)\b|\b(?:diamonds?|stones?)\s+(?:are\s+)?factory[ -]set\b/gi;
+      const aftermarketStoneClaim = /\baftermarket[ -](?:set\s+)?(?:(?:earth[ -]mined|natural|lab[ -]grown|simulated|vvs)\s+)*(?:diamonds?|stones?|setting)\b|\b(?:diamonds?|stones?)\s+(?:are\s+)?aftermarket[ -]set\b/i;
+      const copy = generated.generatedDescription;
+      const unconfirmedSettingClaim = (setting !== 'factory' && !!copy.match(factoryStoneClaim))
+        || (setting === 'factory' && aftermarketStoneClaim.test(copy));
+      const componentCopy = setting === 'factory' ? copy.replace(factoryStoneClaim, '') : copy;
+      if (unconfirmedSettingClaim || (itemFacts.hasAftermarket(watchDetails, body.stoneType) && /\b(?:factory[ -]?(?:set|original)?|original|oem)\b[^.!?;\n]{0,40}\b(?:diamonds?|bezel|dial|bracelet|parts?)\b/i.test(componentCopy))) {
         generated.generatedDescription = fallback.generatedDescription;
       }
     }

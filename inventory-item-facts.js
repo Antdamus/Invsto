@@ -13,9 +13,18 @@
     }
     return result.replace(/\(\s*\)/g, '').replace(/\s+/g, ' ').replace(/^[\s,;|/—–-]+|[\s,;|/—–-]+$/g, '').trim();
   }
-  function hasAftermarket(watch = {}) {
+  function watchStoneSetting(watch = {}, stone = '') {
+    if (/^(?:no stones?|none|not applicable)$/i.test(text(stone))) return '';
+    // These explicit scopes include the setting, regardless of an older draft selection.
+    if (['movement_only', 'aftermarket_stones'].includes(watch.modificationPreset)) return 'aftermarket';
+    return ['factory', 'aftermarket'].includes(watch.stoneSetting) ? watch.stoneSetting : 'unknown';
+  }
+  function watchStoneSettingLabel(watch = {}, stone = '') {
+    return {factory:'Factory-set stones', aftermarket:'Aftermarket stone setting', unknown:'Setting origin not confirmed'}[watchStoneSetting(watch, stone)] || 'Not applicable';
+  }
+  function hasAftermarket(watch = {}, stone = '') {
     const entered = [watchModifications(watch), watch.materials, watch.name].map(text).join('; ');
-    return /\bafter[ -]?market\b/i.test(entered.replace(/\b(?:no|not|without|sin)\s+(?:any\s+)?after[ -]?market\b/gi, ''));
+    return watchStoneSetting(watch, stone) === 'aftermarket' || /\bafter[ -]?market\b/i.test(entered.replace(/\b(?:no|not|without|sin)\s+(?:any\s+)?after[ -]?market\b/gi, ''));
   }
   function watchModifications(watch = {}) {
     const presets = {
@@ -37,11 +46,12 @@
     }
     return result.replace(/[ \t]{2,}/g, ' ').replace(/ *\n */g, '\n').trim();
   }
-  function publicWatchDetails(watch = {}) {
+  function publicWatchDetails(watch = {}, stone = '') {
     const safe = Object.fromEntries(['name','brand','model','department','condition','materials','braceletFit'].map(key => [key, redactWatchSerial(watch[key], watch)]));
     safe.modifications = redactWatchSerial(watchModifications(watch), watch);
     safe.modificationNotes = redactWatchSerial(watch.modificationNotes ?? watch.modifications, watch);
     safe.modificationPreset = text(watch.modificationPreset);
+    safe.stoneSetting = watchStoneSetting(watch, stone);
     return safe;
   }
   function stoneCategories(value) {
@@ -59,13 +69,13 @@
     return categories;
   }
   function categories(primary, stone, watch) {
-    return [...new Set([text(primary), ...stoneCategories(stone), hasAftermarket(watch || {}) && 'Aftermarket'].filter(Boolean))];
+    return [...new Set([text(primary), ...stoneCategories(stone), hasAftermarket(watch || {}, stone) && 'Aftermarket'].filter(Boolean))];
   }
   function watchTitle(watch = {}, stone = '', enteredTitle = '') {
     enteredTitle = redactWatchSerial(enteredTitle, watch);
     // Keep legacy serial annotations available to strip bare serials in edited titles.
     enteredTitle = withoutSerial(enteredTitle, [watch.name, watch.model, watch.materials, watch.modifications]);
-    watch = publicWatchDetails(watch);
+    watch = publicWatchDetails(watch, stone);
     const sources = [watch.name, watch.model, watch.materials, watch.modifications];
     const brand = withoutSerial(watch.brand, sources);
     const name = withoutSerial(watch.name, sources);
@@ -73,22 +83,25 @@
     let entered = withoutSerial(enteredTitle, sources);
     // Rebuild our own suffix when stone type/modifications change in a draft.
     const suffix = entered.split(' — ');
-    const qualifiers = new Set(['aftermarket', ...stoneChoices.map(value => value.toLowerCase())]);
+    const qualifiers = new Set(['aftermarket', 'aftermarket-set stones', 'factory-set stones', ...stoneChoices.map(value => value.toLowerCase())]);
     if (suffix.length > 1 && suffix.at(-1).split(', ').every(value => qualifiers.has(value.toLowerCase()))) entered = suffix.slice(0, -1).join(' — ');
     let title = entered || (brand && !name.toLowerCase().startsWith(brand.toLowerCase()) ? [brand, name].filter(Boolean).join(' ') : name || brand);
     if (model && !title.toLowerCase().includes(model.toLowerCase())) title = [title, model].filter(Boolean).join(' ');
     const extra = [];
-    if (hasAftermarket(watch) && !/\bafter[ -]?market\b/i.test(title)) extra.push('Aftermarket');
+    const setting = watchStoneSetting(watch, stone);
+    if (setting === 'aftermarket' && stone && !/aftermarket[ -]set stones/i.test(title)) extra.push('Aftermarket-set stones');
+    else if (hasAftermarket(watch, stone) && !/\bafter[ -]?market\b/i.test(title)) extra.push('Aftermarket');
     for (const category of stoneCategories(stone)) {
       if (category === 'No stone' || category === stoneChoices[2]) continue;
       if (!title.toLowerCase().includes(category.toLowerCase())) extra.push(category);
     }
+    if (setting === 'factory' && stone && !/factory[ -]set stones/i.test(title)) extra.push('Factory-set stones');
     return [title, extra.join(', ')].filter(Boolean).join(' — ');
   }
   function watchDescription(description, watch = {}, stone = '') {
     // Older saves added the same facts again in a trailing Watch details block.
     let result = redactWatchSerial(description, watch).replace(/\n*Watch details:\s*\n[\s\S]*$/i, '').trim();
-    watch = publicWatchDetails(watch);
+    watch = publicWatchDetails(watch, stone);
     const normalized = value => text(value).toLowerCase().replace(/[\s.,;:—–-]+/g, ' ').trim();
     const missing = [];
     const contains = value => normalized([result, ...missing].join(' ')).includes(normalized(value));
@@ -105,7 +118,13 @@
       && /all (?:the )?other (?:parts|components) (?:are )?after[ -]?market/i.test(result);
     if (preset && !movementScopePresent) add(preset);
     if (modifications) add(modifications, hasAftermarket({modifications}) || preset ? '' : 'Modifications: ');
-    if (hasAftermarket(watch) && !/\bafter[ -]?market\b/i.test([result, ...missing].join(' '))) add('Aftermarket modifications');
+    const setting = watchStoneSetting(watch, stone);
+    const settingCopy = [result, ...missing].join(' ');
+    const settingDescribed = setting === 'factory'
+      ? /\bfactory[ -]set\s+(?:[\w-]+\s+){0,3}(?:diamonds?|stones?)\b|\b(?:diamonds?|stones?)\s+(?:are\s+)?factory[ -]set\b/i.test(settingCopy)
+      : /\baftermarket[ -](?:set\s+)?(?:[\w-]+\s+){0,3}(?:diamonds?|stones?|setting)\b|\b(?:diamonds?|stones?)\s+(?:are\s+)?aftermarket[ -]set\b/i.test(settingCopy);
+    if (['factory','aftermarket'].includes(setting) && !settingDescribed && !(watch.modificationPreset === 'movement_only' && !stone)) add(watchStoneSettingLabel(watch, stone));
+    if (hasAftermarket(watch, stone) && !/\bafter[ -]?market\b/i.test([result, ...missing].join(' '))) add('Aftermarket modifications');
     const stones = stoneCategories(stone);
     const alreadyDescribed = stoneCategories([result, ...missing].join(' '));
     const isPreset = stoneChoices.some(choice => normalized(choice) === normalized(stone));
@@ -116,5 +135,5 @@
     const seen = new Set();
     return paragraphs.filter(p => {const key=normalized(p);if(seen.has(key))return false;seen.add(key);return true;}).join('\n\n');
   }
-  root.InventoryItemFacts = { stoneChoices, withoutSerial, hasAftermarket, stoneCategories, categories, watchModifications, redactWatchSerial, publicWatchDetails, watchTitle, watchDescription };
+  root.InventoryItemFacts = { stoneChoices, withoutSerial, hasAftermarket, stoneCategories, categories, watchStoneSetting, watchStoneSettingLabel, watchModifications, redactWatchSerial, publicWatchDetails, watchTitle, watchDescription };
 })(globalThis);

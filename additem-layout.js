@@ -41,7 +41,7 @@
   watchSection('02','Materials & modifications','Describe the watch in front of you. These details take priority over the factory model.', ['watch-materials','watch-modificationPreset','watch-modifications']);
   const modificationPreview=block('p','', 'watch-disclosure-preview');modificationPreview.id='watch-modifications-preview';modificationPreview.setAttribute('aria-live','polite');watchFields.lastElementChild.append(modificationPreview);
   watchSection('04','Condition & fit','Record the actual condition. Bracelet fit is optional and cannot be determined from the reference.', ['watch-condition','watch-department','watch-braceletFit']);
-  const stones=watchSection('03','Diamonds & stones','Select only the origin you know. Simulated stones remain clearly labeled as simulated.', ['stone-type-choice','assisted-stone-type']);
+  const stones=watchSection('03','Diamonds & stones','Choose the stone type and who set it. A natural diamond can still be an aftermarket addition.', ['stone-type-choice','assisted-stone-type','watch-stoneSetting']);
   stones.id='watch-stones-section';watchFields.insertBefore(stones,watchFields.querySelectorAll('.watch-intake-section')[2]);
   const stoneHome=block('div','', 'watch-stones-home');stoneHome.hidden=true;document.querySelector('.intake-item-details .assisted-grid').prepend(stoneHome);stoneHome.id='watch-stones-home';
   byId('watch-model').closest('label').querySelector('.field-helper').textContent='For example, WSSA0018 or 126233. Include the full reference if known.';
