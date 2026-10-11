@@ -12,8 +12,9 @@
 
   <link rel="stylesheet" href="add-item.css?v=20260926-mobile" />
   <link rel="stylesheet" href="additembulk.css" />
-  <link rel="stylesheet" href="additem-assisted.css" />
+  <link rel="stylesheet" href="additem-assisted.css?v=20261011-photo-studio" />
   <link rel="stylesheet" href="additem-wizard.css?v=20261011-intake-refinements" />
+  <link rel="stylesheet" href="item-photo-editor.css?v=20261011-photo-studio" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
@@ -336,7 +337,7 @@
                         White Background
                       </button>
                       <button type="button" id="assisted-open-image-editor" class="assisted-secondary-button assisted-bg-tools-wide">
-                        Crop / Zoom
+                        Edit photo
                       </button>
                     </div>
                     <p id="assisted-bg-status" class="assisted-inline-status" aria-live="polite">
@@ -852,56 +853,78 @@
     <div class="assisted-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="assisted-editor-title">
       <div class="assisted-editor-header">
         <div>
-          <p class="assisted-editor-kicker">Final Image Framing</p>
-          <h2 id="assisted-editor-title" class="assisted-editor-title">Crop and Zoom Image</h2>
+          <p class="assisted-editor-kicker">Photo studio</p>
+          <h2 id="assisted-editor-title" class="assisted-editor-title">Make every detail shine</h2>
         </div>
-        <button type="button" id="assisted-editor-close" class="assisted-editor-close" aria-label="Close crop editor">X</button>
+        <button type="button" id="assisted-editor-close" class="assisted-editor-close" aria-label="Close photo editor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
       </div>
-
       <div class="assisted-editor-body">
-        <div class="assisted-editor-canvas-wrap">
-          <canvas id="assisted-editor-canvas" class="assisted-editor-canvas" width="900" height="900"></canvas>
+        <div class="assisted-editor-stage">
+          <div class="assisted-editor-canvas-wrap">
+            <canvas id="assisted-editor-canvas" class="assisted-editor-canvas" width="900" height="900" tabindex="0" aria-label="Photo framing preview" aria-describedby="assisted-editor-gesture-help"></canvas>
+            <div class="assisted-editor-guides" aria-hidden="true"></div>
+            <span id="assisted-editor-preview-label" class="assisted-editor-preview-label">Square crop</span>
+          </div>
+          <p id="assisted-editor-gesture-help" class="assisted-editor-hint">Drag to move · Pinch to zoom<br/><span>Keyboard: arrows to move, + / − to zoom</span></p>
         </div>
-
-        <div class="assisted-editor-controls">
-          <div class="assisted-editor-control-row">
-            <span class="assisted-editor-field-label">Canvas fill</span>
-            <div class="assisted-editor-button-grid">
-              <button type="button" id="assisted-editor-fill-black" class="assisted-secondary-button">Black</button>
-              <button type="button" id="assisted-editor-fill-white" class="assisted-secondary-button">White</button>
+        <div class="assisted-editor-toolbox">
+          <div class="assisted-editor-tabs" role="group" aria-label="Photo tools">
+            <button type="button" id="assisted-editor-tab-frame" aria-pressed="true" aria-controls="assisted-editor-panel-frame">Frame</button>
+            <button type="button" id="assisted-editor-tab-adjust" aria-pressed="false" aria-controls="assisted-editor-panel-adjust">Adjust</button>
+          </div>
+          <div class="assisted-editor-controls">
+            <div id="assisted-editor-panel-frame">
+              <div class="assisted-editor-quick-actions">
+                <button type="button" id="assisted-editor-center">Center</button>
+                <button type="button" id="assisted-editor-fit">Fit whole photo</button>
+              </div>
+              <label class="assisted-editor-slider-label" for="assisted-editor-zoom"><span>Zoom <output aria-live="off" id="assisted-editor-zoom-value">100%</output></span></label>
+              <div class="assisted-editor-zoom-row">
+                <button type="button" id="assisted-editor-zoom-out" aria-label="Zoom out"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+                <input type="range" id="assisted-editor-zoom" min="0.25" max="6" step="0.01" value="1" />
+                <button type="button" id="assisted-editor-zoom-in" aria-label="Zoom in"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14"/></svg></button>
+              </div>
+              <label class="assisted-editor-slider-label" for="assisted-editor-rotation"><span>Straighten <output aria-live="off" id="assisted-editor-rotation-value">0.0°</output></span>
+                <input type="range" id="assisted-editor-rotation" min="-45" max="45" step="0.1" value="0" />
+              </label>
+              <div class="assisted-editor-quick-actions assisted-editor-turns">
+                <button type="button" id="assisted-editor-rotate-left" aria-label="Rotate left 90 degrees"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9a8 8 0 1 1 0 6M4 4v5h5"/></svg><span>90° left</span></button>
+                <button type="button" id="assisted-editor-level">Level</button>
+                <button type="button" id="assisted-editor-rotate-right" aria-label="Rotate right 90 degrees"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 9a8 8 0 1 0 0 6M20 4v5h-5"/></svg><span>90° right</span></button>
+              </div>
+              <div class="assisted-editor-quick-actions">
+                <button type="button" id="assisted-editor-flip-horizontal" aria-pressed="false">Flip horizontal</button>
+                <button type="button" id="assisted-editor-flip-vertical" aria-pressed="false">Flip vertical</button>
+              </div>
+              <div class="assisted-editor-fill-row"><span>Background</span><div role="group" aria-label="Canvas background">
+                <button type="button" id="assisted-editor-fill-black" aria-pressed="true"><i class="editor-swatch editor-swatch-black" aria-hidden="true"></i>Black</button>
+                <button type="button" id="assisted-editor-fill-white" aria-pressed="false"><i class="editor-swatch editor-swatch-white" aria-hidden="true"></i>White</button>
+              </div></div>
+              <button type="button" id="assisted-editor-reset" class="assisted-editor-text-button">Reset framing</button>
+            </div>
+            <div id="assisted-editor-panel-adjust" hidden>
+              <p class="assisted-editor-adjust-hint">A light touch keeps metal and stone colors true to the piece.</p>
+              <label class="assisted-editor-slider-label" for="assisted-editor-brightness"><span>Brightness <output aria-live="off" id="assisted-editor-brightness-value">0</output></span><input type="range" id="assisted-editor-brightness" min="-30" max="30" step="1" value="0" /></label>
+              <label class="assisted-editor-slider-label" for="assisted-editor-contrast"><span>Contrast <output aria-live="off" id="assisted-editor-contrast-value">0</output></span><input type="range" id="assisted-editor-contrast" min="-30" max="30" step="1" value="0" /></label>
+              <label class="assisted-editor-slider-label" for="assisted-editor-saturation"><span>Color richness <output aria-live="off" id="assisted-editor-saturation-value">0</output></span><input type="range" id="assisted-editor-saturation" min="-30" max="30" step="1" value="0" /></label>
+              <label class="assisted-editor-slider-label" for="assisted-editor-warmth"><span>Warmth <output aria-live="off" id="assisted-editor-warmth-value">0</output></span><input type="range" id="assisted-editor-warmth" min="-20" max="20" step="1" value="0" /></label>
+              <label class="assisted-editor-slider-label" for="assisted-editor-sharpness"><span>Sharpness <output aria-live="off" id="assisted-editor-sharpness-value">0</output></span><input type="range" id="assisted-editor-sharpness" min="0" max="60" step="1" value="0" /></label>
+              <div class="assisted-editor-quick-actions">
+                <button type="button" id="assisted-editor-compare" aria-pressed="false">Compare original</button>
+                <button type="button" id="assisted-editor-reset-adjustments">Reset adjustments</button>
+              </div>
             </div>
           </div>
-
-          <div class="assisted-editor-control-row">
-            <button type="button" id="assisted-editor-zoom-out" class="assisted-secondary-button">Zoom Out</button>
-            <label class="assisted-editor-slider-label" for="assisted-editor-zoom">
-              <span>Zoom</span>
-              <input type="range" id="assisted-editor-zoom" min="1" max="4" step="0.01" value="1" />
-            </label>
-            <button type="button" id="assisted-editor-zoom-in" class="assisted-secondary-button">Zoom In</button>
+        </div>
+      </div>
+      <div class="assisted-editor-footer">
+        <p id="assisted-editor-status" class="assisted-inline-status" aria-live="polite">Your original photo stays in the gallery.</p>
+        <div class="assisted-editor-footer-actions">
+          <div class="assisted-editor-history" role="group" aria-label="Edit history">
+            <button type="button" id="assisted-editor-undo" aria-label="Undo edit" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5-5 5 5 5M4 10h9a6 6 0 0 1 0 12"/></svg></button>
+            <button type="button" id="assisted-editor-redo" aria-label="Redo edit" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 5 5-5 5M20 10h-9a6 6 0 0 0 0 12"/></svg></button>
           </div>
-
-          <div class="assisted-editor-control-row">
-            <label class="assisted-editor-slider-label" for="assisted-editor-rotation">
-              <span>Rotate</span>
-              <input type="range" id="assisted-editor-rotation" min="-45" max="45" step="0.5" value="0" />
-            </label>
-            <div class="assisted-editor-button-grid">
-              <button type="button" id="assisted-editor-rotate-left" class="assisted-secondary-button">Rotate Left</button>
-              <button type="button" id="assisted-editor-rotate-right" class="assisted-secondary-button">Rotate Right</button>
-              <button type="button" id="assisted-editor-flip-horizontal" class="assisted-secondary-button">Flip Horizontal</button>
-              <button type="button" id="assisted-editor-flip-vertical" class="assisted-secondary-button">Flip Vertical</button>
-            </div>
-          </div>
-
-          <div class="assisted-editor-control-row assisted-editor-control-row-actions">
-            <button type="button" id="assisted-editor-reset" class="assisted-secondary-button">Reset</button>
-            <button type="button" id="assisted-editor-save" class="assisted-read-button">Use This Crop</button>
-          </div>
-
-          <p id="assisted-editor-status" class="assisted-inline-status" aria-live="polite">
-            Drag the image to frame it, then save the crop as the final selected image.
-          </p>
+          <button type="button" id="assisted-editor-save" class="assisted-read-button">Use this photo</button>
         </div>
       </div>
     </div>
@@ -1047,7 +1070,8 @@
   <script src="additem-pricing.js?v=20261011-intake-refinements"></script>
   <script src="additem-wizard.js?v=20261011-intake-refinements"></script>
   <script src="additem.js?v=20261011-intake-refinements"></script>
-  <script src="additem-assisted.js?v=20261011-phone-processing"></script>
+  <script src="item-photo-editor.js?v=20261011-photo-studio"></script>
+  <script src="additem-assisted.js?v=20261011-photo-studio"></script>
   <script src="additem-intake.js?v=20261011-intake-refinements"></script>
 </body>
 </html>

@@ -36,6 +36,14 @@ Existing barcode lookup runs early and offers the existing Add Inventory quick-a
 
 ## Phone layout and verification
 
+Photo tools open **Photo studio**, with a persistent preview and save bar on phones and a two-column layout on desktop/landscape. Frame supports one-finger dragging, anchored two-finger pinch zoom (25–600%), Center, Fit whole photo, quarter-turns, fine straightening, flipping and black/white canvas fill. Touch capture ends safely on cancellation, lost capture, a hidden page or resize. Mouse dragging and keyboard arrows/+/- remain available. Undo/Redo records each gesture or slider adjustment as one edit.
+
+Adjust offers restrained brightness, contrast, color richness, warmth and sharpening, all initially neutral. Compare original shows the original colors in the same crop; saving always uses the chosen edits. Reset adjustments keeps framing, and Reset framing keeps adjustments. Processing runs locally with a cached preview and animation-frame updates; moving a photo does not reprocess its color pixels. Pixel processing avoids relying on Canvas.filter support in iPhone Safari. Sharpening preserves transparency and uses three source rows to limit memory.
+
+Export renders from the source photo into lossless PNG, not from the small preview. The square output follows the source's longest side, with the existing 1200px minimum and a 4096px maximum for phone memory. The existing server upload limit is 8 MB; oversized edits remain open with an explicit error rather than silently reducing quality. Successful saves replace only the edited photo in the selected set; the original remains available in the gallery. Failed uploads retain the original selection and editor for retry. Closing during loading cannot reopen a stale photo; saving disables conflicting actions and prevents duplicate submissions. Edits not yet saved are session-only.
+
+`node --test tests/item-photo-editor.test.mjs tests/add-item-refinements.test.mjs` checks gesture anchoring/cancellation, undo, color and alpha preservation, sharpening, export coordinates/resolution, save retry, duplicate saves and loading races. Responsive checks and touch-input verification use the connected browser with mocked storage; physical iPhone performance still requires a device check.
+
 Phone navigation follows the form, category menus expand above it, fields use at least 16px text, and controls use touch targets. Dialogs use the visual viewport when the keyboard reduces available height.
 
 Run `npm run test:add-item`, `npm run test:inventory-prices`, and `npm run test:coin-ebay`. Tests load the real form and handlers with mocked inventory, storage, AI and printer services. WebKit checks use `INVSTO_ITEM_BROWSER=webkit node --test tests/add-item-wizard.test.mjs` (PowerShell: set `$env:INVSTO_ITEM_BROWSER='webkit'` first). The suite covers 320px/390px portrait and 844px landscape, keyboard-sized dialogs, photo tools, changed AI inputs, drafts, optional steps, repeat entry, barcode matching, post-insert failures and label retry/batching. Real iPhone camera and printer hardware require device testing.
@@ -43,3 +51,5 @@ Run `npm run test:add-item`, `npm run test:inventory-prices`, and `npm run test:
 ## Deployment
 
 The original intake refinement is frontend-only. Remote printing additionally requires the migration and deployment documented in [remote print stations](remote-print-stations.md). Publish `add-item.html`, `additem-layout.js`, `additem-wizard.js`, `additem-wizard.css`, `additem-assisted.js`, `additem-intake.js`, `additem.js`, `additem-dymolabel.js`, `coin-ebay.js`, `stock.html` and `stock.js`. Keep the asset cache versions aligned. Existing watch/coin schemas and edge functions are reused; no new database migration is required. JWT verification settings are unchanged.
+
+Photo studio additionally deploys `item-photo-editor.js` and `item-photo-editor.css` with the matching `add-item.html` / `additem-assisted.js` cache versions. No database or extension update is needed.

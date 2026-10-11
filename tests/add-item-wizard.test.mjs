@@ -114,7 +114,7 @@ before(async () => {
       let content = await readFile(new URL(name, root), "utf8");
       if (name.endsWith("html")) {
         content = content.replace(/<script src="([^"]+)"(?: defer)?><\/script>/g, (tag, src) =>
-          ["admin-nav.js", "additem-layout.js", "additem-pricing.js", "additem-wizard.js", "additem.js", "additem-assisted.js", "additem-intake.js", "barcode-scanner.js"].includes(src.split("?")[0]) ? tag : "");
+          ["admin-nav.js", "additem-layout.js", "additem-pricing.js", "additem-wizard.js", "additem.js", "additem-assisted.js", "item-photo-editor.js", "additem-intake.js", "barcode-scanner.js"].includes(src.split("?")[0]) ? tag : "");
         content = content.replace("<head>", `<head><script>(${mockServices.toString()})();window.testCoinMetadata=${JSON.stringify(coinMetadata)};</script>`);
       }
       res.setHeader("Content-Type", name.endsWith("css") ? "text/css" : name.endsWith("js") ? "text/javascript" : "text/html");
@@ -692,7 +692,7 @@ test('preview navigation cycles included photos with the gallery collapsed and c
  assert.equal(await page.locator('#assisted-uploaded-image-strip').isVisible(),false);
  assert.equal(await page.locator('#assisted-open-image-editor').isVisible(),true,'Switching keeps the editing tools open');
  await page.locator('#assisted-open-image-editor').click();
- await page.waitForFunction(()=>document.getElementById('assisted-editor-status').textContent.startsWith('Drag the image'));
+ await page.waitForFunction(()=>document.getElementById('assisted-editor-status').textContent.startsWith('Your original photo'));
  await page.locator('#assisted-editor-save').click();await page.locator('.assisted-editor-dialog').waitFor({state:'hidden'});
  assert.deepEqual(await page.evaluate(()=>({path:window.testUploads[0].imagePath,action:window.testUploads[0].background})),{path:'back.jpg',action:'edited'},'The crop uses the photo selected with Next');
  assert.deepEqual(await page.evaluate(()=>window.addItemAssistedModule.getSelectedUploadedImagesForSave().map(photo=>photo.path)),['uploaded-1.jpg','front.jpg','side.jpg']);

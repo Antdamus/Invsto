@@ -17,7 +17,6 @@
   const CAPTURE_PHOTO_SETTLE_MS = 4500;
   const CAPTURE_FALLBACK_LOOKBACK_MS = 30000;
   const BACKGROUND_PROCESSING_MAX_SOURCE_SIDE = 1600;
-  const IMAGE_EDITOR_OUTPUT_SIZE = 1200;
   const LOCAL_UPLOAD_MAX_DIRECT_BYTES = 7 * 1024 * 1024;
   const LOCAL_UPLOAD_MAX_SIDE = 2200;
   const DEFAULT_RECENT_PHOTO_RELOAD_LIMIT = 5;
@@ -124,21 +123,8 @@
     latestCaptureJob: null,
     imageEditor: {
       image: null,
-      sourceUrl: "",
       sourceRevoke: null,
       imageElement: null,
-      zoom: 1,
-      rotation: 0,
-      flipX: false,
-      flipY: false,
-      backgroundFill: "black",
-      offsetX: 0,
-      offsetY: 0,
-      isDragging: false,
-      dragStartX: 0,
-      dragStartY: 0,
-      dragOriginX: 0,
-      dragOriginY: 0,
     },
   };
 
@@ -191,20 +177,6 @@
       openImageEditorButton: document.getElementById("assisted-open-image-editor"),
       bgStatus: document.getElementById("assisted-bg-status"),
       imageEditorModal: document.getElementById("assisted-image-editor-modal"),
-      imageEditorCanvas: document.getElementById("assisted-editor-canvas"),
-      imageEditorCanvasWrap: document.querySelector(".assisted-editor-canvas-wrap"),
-      imageEditorClose: document.getElementById("assisted-editor-close"),
-      imageEditorZoom: document.getElementById("assisted-editor-zoom"),
-      imageEditorZoomIn: document.getElementById("assisted-editor-zoom-in"),
-      imageEditorZoomOut: document.getElementById("assisted-editor-zoom-out"),
-      imageEditorRotation: document.getElementById("assisted-editor-rotation"),
-      imageEditorRotateLeft: document.getElementById("assisted-editor-rotate-left"),
-      imageEditorRotateRight: document.getElementById("assisted-editor-rotate-right"),
-      imageEditorFlipHorizontal: document.getElementById("assisted-editor-flip-horizontal"),
-      imageEditorFlipVertical: document.getElementById("assisted-editor-flip-vertical"),
-      imageEditorFillBlack: document.getElementById("assisted-editor-fill-black"),
-      imageEditorFillWhite: document.getElementById("assisted-editor-fill-white"),
-      imageEditorReset: document.getElementById("assisted-editor-reset"),
       imageEditorSave: document.getElementById("assisted-editor-save"),
       imageEditorStatus: document.getElementById("assisted-editor-status"),
       saveSelectionCount: document.getElementById("assisted-save-selection-count"),
@@ -2970,276 +2942,60 @@
     state.isProcessingImage = false;
   }
 
+  let photoEditor = null;
+  let editorLoadRevision = 0;
+  let editorSaving = false;
+  function getPhotoEditor(elements) {
+    if (!photoEditor) photoEditor = window.ItemPhotoEditor.mount(elements.imageEditorModal, {
+      onClose: () => closeImageEditor(elements),
+      onSave: () => saveImageEditorCrop(elements),
+    });
+    return photoEditor;
+  }
   function resetImageEditorState() {
-    if (typeof state.imageEditor.sourceRevoke === "function") {
-      try {
-        state.imageEditor.sourceRevoke();
-      } catch (_) {}
-    }
-
+    state.imageEditor.sourceRevoke?.();
     state.imageEditor.image = null;
-    state.imageEditor.sourceUrl = "";
-    state.imageEditor.sourceRevoke = null;
     state.imageEditor.imageElement = null;
-    state.imageEditor.zoom = 1;
-    state.imageEditor.rotation = 0;
-    state.imageEditor.flipX = false;
-    state.imageEditor.flipY = false;
-    state.imageEditor.backgroundFill = "black";
-    state.imageEditor.offsetX = 0;
-    state.imageEditor.offsetY = 0;
-    state.imageEditor.isDragging = false;
-    state.imageEditor.dragStartX = 0;
-    state.imageEditor.dragStartY = 0;
-    state.imageEditor.dragOriginX = 0;
-    state.imageEditor.dragOriginY = 0;
+    state.imageEditor.sourceRevoke = null;
   }
-
-  function getEditorCanvasSize(elements) {
-    const canvas = elements.imageEditorCanvas;
-    return {
-      width: canvas?.width || 900,
-      height: canvas?.height || 900,
-    };
-  }
-
-  function inferEditorBackgroundFill(image) {
-    const sourceType = asTrimmedString(image?.sourceType).toLowerCase();
-    const name = asTrimmedString(image?.name).toLowerCase();
-    const path = asTrimmedString(image?.path).toLowerCase();
-    const joined = `${sourceType} ${name} ${path}`;
-
-    if (joined.includes("white")) return "white";
-    if (joined.includes("black")) return "black";
-    return "black";
-  }
-
-  function getEditorBackgroundColor() {
-    return state.imageEditor.backgroundFill === "white" ? "#ffffff" : "#000000";
-  }
-
-  function updateEditorFillButtons(elements) {
-    const isWhite = state.imageEditor.backgroundFill === "white";
-    elements.imageEditorFillBlack?.classList.toggle("is-active", !isWhite);
-    elements.imageEditorFillWhite?.classList.toggle("is-active", isWhite);
-    elements.imageEditorFillBlack?.setAttribute("aria-pressed", String(!isWhite));
-    elements.imageEditorFillWhite?.setAttribute("aria-pressed", String(isWhite));
-  }
-
-  function setEditorBackgroundFill(elements, fill) {
-    state.imageEditor.backgroundFill = fill === "white" ? "white" : "black";
-    updateEditorFillButtons(elements);
-    drawImageEditor(elements);
-  }
-
-  function fillEditorCanvasBackground(context, width, height) {
-    context.save();
-    context.globalCompositeOperation = "source-over";
-    context.fillStyle = getEditorBackgroundColor();
-    context.fillRect(0, 0, width, height);
-    context.restore();
-  }
-
-  function getEditorDrawRect(width, height) {
-    const image = state.imageEditor.imageElement;
-    if (!image) return null;
-
-    const sourceWidth = image.naturalWidth || image.width;
-    const sourceHeight = image.naturalHeight || image.height;
-    if (!sourceWidth || !sourceHeight) return null;
-
-    const baseScale = Math.max(width / sourceWidth, height / sourceHeight);
-    const drawWidth = sourceWidth * baseScale * state.imageEditor.zoom;
-    const drawHeight = sourceHeight * baseScale * state.imageEditor.zoom;
-
-    return {
-      x: ((width - drawWidth) / 2) + state.imageEditor.offsetX,
-      y: ((height - drawHeight) / 2) + state.imageEditor.offsetY,
-      width: drawWidth,
-      height: drawHeight,
-    };
-  }
-
-  function drawTransformedEditorImage(context, image, rect, outputWidth, outputHeight) {
-    const centerX = rect.x + (rect.width / 2);
-    const centerY = rect.y + (rect.height / 2);
-    const rotation = (Number(state.imageEditor.rotation) || 0) * Math.PI / 180;
-    const flipScaleX = state.imageEditor.flipX ? -1 : 1;
-    const flipScaleY = state.imageEditor.flipY ? -1 : 1;
-
-    context.save();
-    context.translate(centerX, centerY);
-    context.rotate(rotation);
-    context.scale(flipScaleX, flipScaleY);
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = "high";
-    context.drawImage(image, -rect.width / 2, -rect.height / 2, rect.width, rect.height);
-    context.restore();
-  }
-
-  function drawImageEditor(elements) {
-    const canvas = elements.imageEditorCanvas;
-    const image = state.imageEditor.imageElement;
-    if (!canvas || !image) return;
-
-    const context = canvas.getContext("2d");
-    if (!context) return;
-
-    const width = canvas.width;
-    const height = canvas.height;
-    const rect = getEditorDrawRect(width, height);
-    fillEditorCanvasBackground(context, width, height);
-
-    if (!rect) return;
-    drawTransformedEditorImage(context, image, rect, width, height);
-  }
-
-  function setEditorZoom(elements, zoom) {
-    const nextZoom = Math.min(4, Math.max(1, Number(zoom) || 1));
-    state.imageEditor.zoom = nextZoom;
-
-    if (elements.imageEditorZoom) {
-      elements.imageEditorZoom.value = String(nextZoom);
-    }
-
-    drawImageEditor(elements);
-  }
-
-  function resetEditorFraming(elements) {
-    state.imageEditor.zoom = 1;
-    state.imageEditor.rotation = 0;
-    state.imageEditor.flipX = false;
-    state.imageEditor.flipY = false;
-    state.imageEditor.offsetX = 0;
-    state.imageEditor.offsetY = 0;
-
-    if (elements.imageEditorZoom) {
-      elements.imageEditorZoom.value = "1";
-    }
-
-    if (elements.imageEditorRotation) {
-      elements.imageEditorRotation.value = "0";
-    }
-
-    elements.imageEditorFlipHorizontal?.classList.remove("is-active");
-    elements.imageEditorFlipVertical?.classList.remove("is-active");
-    updateEditorFillButtons(elements);
-    drawImageEditor(elements);
-  }
-
-  function setEditorRotation(elements, degrees) {
-    const nextRotation = Math.min(45, Math.max(-45, Number(degrees) || 0));
-    state.imageEditor.rotation = nextRotation;
-
-    if (elements.imageEditorRotation) {
-      elements.imageEditorRotation.value = String(nextRotation);
-    }
-
-    drawImageEditor(elements);
-  }
-
-  function toggleEditorFlip(elements, axis) {
-    if (axis === "x") {
-      state.imageEditor.flipX = !state.imageEditor.flipX;
-      elements.imageEditorFlipHorizontal?.classList.toggle("is-active", state.imageEditor.flipX);
-    }
-
-    if (axis === "y") {
-      state.imageEditor.flipY = !state.imageEditor.flipY;
-      elements.imageEditorFlipVertical?.classList.toggle("is-active", state.imageEditor.flipY);
-    }
-
-    drawImageEditor(elements);
-  }
-
   async function openImageEditor(elements) {
     const selectedImage = state.aiSelectedUploadedImage;
-
     if (!selectedImage?.path || !selectedImage?.previewUrl) {
-      setInlineStatus(elements.bgStatus, "Select an image before opening the crop editor.", "is-error");
+      setInlineStatus(elements.bgStatus, "Select an image before opening the photo editor.", "is-error");
       return;
     }
-
+    const revision = ++editorLoadRevision;
     resetImageEditorState();
     state.imageEditor.image = selectedImage;
-    state.imageEditor.backgroundFill = inferEditorBackgroundFill(selectedImage);
-    updateEditorFillButtons(elements);
-    setInlineStatus(elements.imageEditorStatus, "Loading selected image...", "is-waiting");
-
-    elements.imageEditorModal?.classList.remove("hidden");
-    elements.imageEditorModal?.setAttribute("aria-hidden", "false");
-    document.body.classList.add("modal-open");
-
+    const editor = getPhotoEditor(elements);
+    elements.imageEditorModal.classList.remove('hidden');
+    elements.imageEditorModal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+    editor.open(/white/i.test(`${selectedImage.sourceType} ${selectedImage.name} ${selectedImage.path}`) ? 'white' : 'black');
+    setInlineStatus(elements.imageEditorStatus, 'Loading full photo…', 'is-waiting');
+    let objectUrl;
     try {
-      const objectUrl = await createObjectUrlForCanvas(selectedImage.previewUrl);
-      const imageElement = await loadImageElement(objectUrl.imageUrl);
-
-      state.imageEditor.sourceUrl = objectUrl.imageUrl;
+      objectUrl = await createObjectUrlForCanvas(selectedImage.previewUrl);
+      const image = await loadImageElement(objectUrl.imageUrl);
+      if (revision !== editorLoadRevision) { objectUrl.revoke?.(); return; }
+      state.imageEditor.imageElement = image;
       state.imageEditor.sourceRevoke = objectUrl.revoke;
-      state.imageEditor.imageElement = imageElement;
-      resetEditorFraming(elements);
-      setInlineStatus(
-        elements.imageEditorStatus,
-        "Drag the image to frame it, then save the crop as the final selected image.",
-        ""
-      );
+      editor.load(image);
+      setInlineStatus(elements.imageEditorStatus, 'Your original photo stays in the gallery.', '');
     } catch (error) {
-      console.error("Image editor failed to load:", error);
-      setInlineStatus(
-        elements.imageEditorStatus,
-        error?.message || "Could not load the image editor.",
-        "is-error"
-      );
+      objectUrl?.revoke?.();
+      if (revision !== editorLoadRevision) return;
+      setInlineStatus(elements.imageEditorStatus, error?.message || 'Could not load the photo. Close and try again.', 'is-error');
     }
   }
-
   function closeImageEditor(elements) {
-    elements.imageEditorModal?.classList.add("hidden");
-    elements.imageEditorModal?.setAttribute("aria-hidden", "true");
-    document.body.classList.remove("modal-open");
+    if (editorSaving) return;
+    ++editorLoadRevision;
+    elements.imageEditorModal.classList.add('hidden');
+    elements.imageEditorModal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('modal-open');
+    photoEditor?.close();
     resetImageEditorState();
-  }
-
-  function getEditorPointerPosition(event, elements) {
-    const canvas = elements.imageEditorCanvas;
-    const bounds = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / bounds.width;
-    const scaleY = canvas.height / bounds.height;
-
-    return {
-      x: (event.clientX - bounds.left) * scaleX,
-      y: (event.clientY - bounds.top) * scaleY,
-    };
-  }
-
-  function handleEditorPointerDown(event, elements) {
-    if (!state.imageEditor.imageElement || !elements.imageEditorCanvas) return;
-
-    const position = getEditorPointerPosition(event, elements);
-    state.imageEditor.isDragging = true;
-    state.imageEditor.dragStartX = position.x;
-    state.imageEditor.dragStartY = position.y;
-    state.imageEditor.dragOriginX = state.imageEditor.offsetX;
-    state.imageEditor.dragOriginY = state.imageEditor.offsetY;
-    elements.imageEditorCanvasWrap?.classList.add("is-dragging");
-    elements.imageEditorCanvas.setPointerCapture?.(event.pointerId);
-  }
-
-  function handleEditorPointerMove(event, elements) {
-    if (!state.imageEditor.isDragging) return;
-
-    const position = getEditorPointerPosition(event, elements);
-    state.imageEditor.offsetX = state.imageEditor.dragOriginX + (position.x - state.imageEditor.dragStartX);
-    state.imageEditor.offsetY = state.imageEditor.dragOriginY + (position.y - state.imageEditor.dragStartY);
-    drawImageEditor(elements);
-  }
-
-  function handleEditorPointerUp(event, elements) {
-    if (!state.imageEditor.isDragging) return;
-
-    state.imageEditor.isDragging = false;
-    elements.imageEditorCanvasWrap?.classList.remove("is-dragging");
-    elements.imageEditorCanvas?.releasePointerCapture?.(event.pointerId);
   }
 
   async function saveImageEditorCrop(elements) {
@@ -3252,40 +3008,21 @@
       return;
     }
 
-    setButtonBusy(elements.imageEditorSave, "Saving...", "Use This Crop", true);
+    if (editorSaving) return;
+    editorSaving = true;
+    photoEditor.setBusy(true);
+    setButtonBusy(elements.imageEditorSave, "Saving…", "Use this photo", true);
     setInlineStatus(elements.imageEditorStatus, "Uploading cropped final image...", "is-waiting");
 
     try {
-      const outputCanvas = document.createElement("canvas");
-      outputCanvas.width = IMAGE_EDITOR_OUTPUT_SIZE;
-      outputCanvas.height = IMAGE_EDITOR_OUTPUT_SIZE;
-
-      const { width: editorWidth, height: editorHeight } = getEditorCanvasSize(elements);
-      const scale = IMAGE_EDITOR_OUTPUT_SIZE / editorWidth;
-      const context = outputCanvas.getContext("2d");
-      const rect = getEditorDrawRect(editorWidth, editorHeight);
-
-      if (!context || !rect) {
-        throw new Error("Could not render the crop.");
-      }
-
-      context.imageSmoothingEnabled = true;
-      context.imageSmoothingQuality = "high";
-      fillEditorCanvasBackground(context, outputCanvas.width, outputCanvas.height);
-      drawTransformedEditorImage(
-        context,
-        state.imageEditor.imageElement,
-        {
-          x: rect.x * scale,
-          y: rect.y * scale,
-          width: rect.width * scale,
-          height: rect.height * scale,
-        },
-        outputCanvas.width,
-        outputCanvas.height
-      );
+      // Let the busy state paint before rendering the full-resolution export.
+      await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+      const outputCanvas = photoEditor.exportCanvas();
 
       const croppedBlob = await canvasToBlob(outputCanvas, "image/png", 0.95);
+      if (croppedBlob.size > 8 * 1024 * 1024) {
+        throw new Error('This edited photo exceeds the 8 MB upload limit. Your original and edits are kept. Try a smaller source photo.');
+      }
       const dataUrl = await readBlobAsDataUrl(croppedBlob);
       const processedImageBase64 = dataUrl.split(",")[1] || "";
 
@@ -3340,6 +3077,7 @@
       scheduleAddItemDraftSave(elements);
       await persistAddItemDraft(elements);
       setInlineStatus(elements.bgStatus, "Cropped final image uploaded and selected.", "is-success");
+      editorSaving = false;
       closeImageEditor(elements);
     } catch (error) {
       console.error("Image crop save failed:", error);
@@ -3349,7 +3087,9 @@
         "is-error"
       );
     } finally {
-      setButtonBusy(elements.imageEditorSave, "Saving...", "Use This Crop", false);
+      editorSaving = false;
+      photoEditor.setBusy(false);
+      setButtonBusy(elements.imageEditorSave, "Saving…", "Use this photo", false);
     }
   }
 
@@ -4063,53 +3803,7 @@
     elements.bgBlackButton?.addEventListener("click", () => processSelectedImageBackground(elements, "black"));
     elements.bgWhiteButton?.addEventListener("click", () => processSelectedImageBackground(elements, "white"));
     elements.openImageEditorButton?.addEventListener("click", () => openImageEditor(elements));
-    elements.imageEditorClose?.addEventListener("click", () => closeImageEditor(elements));
-    elements.imageEditorModal?.addEventListener("click", (event) => {
-      if (event.target === elements.imageEditorModal) {
-        closeImageEditor(elements);
-      }
-    });
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !elements.imageEditorModal?.classList.contains("hidden")) {
-        closeImageEditor(elements);
-      }
-    });
-    elements.imageEditorZoom?.addEventListener("input", () => {
-      setEditorZoom(elements, elements.imageEditorZoom.value);
-    });
-    elements.imageEditorZoomIn?.addEventListener("click", () => {
-      setEditorZoom(elements, state.imageEditor.zoom + 0.12);
-    });
-    elements.imageEditorZoomOut?.addEventListener("click", () => {
-      setEditorZoom(elements, state.imageEditor.zoom - 0.12);
-    });
-    elements.imageEditorRotation?.addEventListener("input", () => {
-      setEditorRotation(elements, elements.imageEditorRotation.value);
-    });
-    elements.imageEditorRotateLeft?.addEventListener("click", () => {
-      setEditorRotation(elements, state.imageEditor.rotation - 2.5);
-    });
-    elements.imageEditorRotateRight?.addEventListener("click", () => {
-      setEditorRotation(elements, state.imageEditor.rotation + 2.5);
-    });
-    elements.imageEditorFlipHorizontal?.addEventListener("click", () => {
-      toggleEditorFlip(elements, "x");
-    });
-    elements.imageEditorFlipVertical?.addEventListener("click", () => {
-      toggleEditorFlip(elements, "y");
-    });
-    elements.imageEditorFillBlack?.addEventListener("click", () => {
-      setEditorBackgroundFill(elements, "black");
-    });
-    elements.imageEditorFillWhite?.addEventListener("click", () => {
-      setEditorBackgroundFill(elements, "white");
-    });
-    elements.imageEditorReset?.addEventListener("click", () => resetEditorFraming(elements));
-    elements.imageEditorSave?.addEventListener("click", () => saveImageEditorCrop(elements));
-    elements.imageEditorCanvas?.addEventListener("pointerdown", (event) => handleEditorPointerDown(event, elements));
-    elements.imageEditorCanvas?.addEventListener("pointermove", (event) => handleEditorPointerMove(event, elements));
-    elements.imageEditorCanvas?.addEventListener("pointerup", (event) => handleEditorPointerUp(event, elements));
-    elements.imageEditorCanvas?.addEventListener("pointercancel", (event) => handleEditorPointerUp(event, elements));
+
     elements.generateCopyButton?.addEventListener("click", () => handleGenerateCopy(elements));
     document.getElementById('item-camera-photo')?.addEventListener('change',event=>handleLocalImageUpload(elements,event));
     for(const [key,input] of [['title',elements.mainTitleInput],['description',elements.mainDescriptionInput]])input.addEventListener('input',event=>{if(!applyingCopy && event.isTrusted)copyEdited[key]=true;});
