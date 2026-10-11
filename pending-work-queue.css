@@ -14,7 +14,7 @@
 .pending-work-summary p{margin:7px 0 0;overflow-wrap:anywhere;line-height:1.5;color:#eee9db}
 .pending-work-summary small{display:block;color:#adb5aa;font-size:11px}
 .pending-work-summary button{min-height:32px;text-decoration:none;padding:0}
-.pending-work-action{border-color:#b69b6955!important}
+.pending-work-action{border-color:#b69b6955!important;min-height:44px!important}
 .line-cgl-toggle{min-height:44px;display:inline-flex;align-items:center;border:1px solid #d6ab6560;border-radius:12px;padding:9px 13px;background:#d6ab650b;color:#e6c998;font:inherit;font-size:13px;cursor:pointer}
 .line-cgl-toggle.is-pending{background:#ce97452a;color:#ffe0a3;border-color:#ce974580}.line-cgl-toggle.is-confirmed{color:#b3e7d0;border-color:#b3e7d040}
 .pending-work-totals{font-size:12px!important}.pending-work-totals button{border:0;background:none;color:inherit;font:inherit;text-decoration:underline;text-underline-offset:3px;cursor:pointer;padding:8px 0;min-height:36px}

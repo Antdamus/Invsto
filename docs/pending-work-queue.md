@@ -37,7 +37,8 @@ Failed reads show an explicit retry state and never imply an unknown buyer is
 ready. Mutations are server-validated, audited, and use idempotent create IDs or
 revision checks. Read requests are batched and paginated.
 
-Deploy `20261011010000_pending_work_blockers.sql` before publishing the page and
+Deploy `20261011010000_pending_work_blockers.sql` and
+`20261011011000_pending_work_responsibility.sql` before publishing the page and
 shared certificate assets. Focused tests: `pending-work-database.test.mjs`,
 `pending-work-client.test.mjs`, `pending-watch-flags.test.mjs`, and the existing
 customer task-note tests. Responsive interaction QA uses the actual pending
