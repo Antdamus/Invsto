@@ -114,7 +114,7 @@ before(async () => {
       let content = await readFile(new URL(name, root), "utf8");
       if (name.endsWith("html")) {
         content = content.replace(/<script src="([^"]+)"(?: defer)?><\/script>/g, (tag, src) =>
-          ["admin-nav.js", "additem-layout.js", "additem-pricing.js", "additem-wizard.js", "additem.js", "additem-assisted.js", "item-photo-editor.js", "additem-intake.js", "barcode-scanner.js"].includes(src.split("?")[0]) ? tag : "");
+          ["inventory-item-facts.js", "admin-nav.js", "additem-layout.js", "additem-pricing.js", "additem-wizard.js", "additem.js", "additem-assisted.js", "item-photo-editor.js", "additem-intake.js", "barcode-scanner.js"].includes(src.split("?")[0]) ? tag : "");
         content = content.replace("<head>", `<head><script>(${mockServices.toString()})();window.testCoinMetadata=${JSON.stringify(coinMetadata)};</script>`);
       }
       res.setHeader("Content-Type", name.endsWith("css") ? "text/css" : name.endsWith("js") ? "text/javascript" : "text/html");

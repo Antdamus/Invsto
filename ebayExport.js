@@ -355,11 +355,7 @@ async function buildListingRows(items, headers, profile, options = {}) {
     if (coinListing && new Set(photoUrls.split("|").filter(Boolean)).size < 2) throw new Error(`${item.title || item.barcode}: both front and back photos must be available before exporting.`);
     setRowValue(row, indexes, "photoUrl", photoUrls);
     setRowValue(row, indexes, "condition", coinListing ? coinListing.conditionId : profile.type === "Wristwatch" ? WATCH_EXPORT_CONDITIONS[item.watch_details.condition] : profile.condition);
-    const watchLabels = { name: "Name", brand: "Brand", model: "Model / reference", department: "Department", materials: "Materials by component", modifications: "Modifications / customizations" };
-    const description = profile.type === "Wristwatch" ? [
-      String(item.description || "").replace(/\n*Watch details:\n[\s\S]*$/, "").trim(),
-      "Watch details:\n" + Object.entries(watchLabels).filter(([key]) => item.watch_details[key]).map(([key, label]) => `${label}: ${item.watch_details[key]}`).join("\n"),
-    ].filter(Boolean).join("\n\n") : item.description || "";
+    const description = profile.type === "Wristwatch" ? window.InventoryItemFacts.watchDescription(item.description, item.watch_details, item.stone_type) : item.description || "";
     setRowValue(row, indexes, "description", coinListing?.description || description);
     setRowValue(row, indexes, "format", "FixedPrice");
     setRowValue(row, indexes, "duration", "GTC");

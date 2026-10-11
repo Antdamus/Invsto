@@ -53,3 +53,14 @@ Run `npm run test:add-item`, `npm run test:inventory-prices`, and `npm run test:
 The original intake refinement is frontend-only. Remote printing additionally requires the migration and deployment documented in [remote print stations](remote-print-stations.md). Publish `add-item.html`, `additem-layout.js`, `additem-wizard.js`, `additem-wizard.css`, `additem-assisted.js`, `additem-intake.js`, `additem.js`, `additem-dymolabel.js`, `coin-ebay.js`, `stock.html` and `stock.js`. Keep the asset cache versions aligned. Existing watch/coin schemas and edge functions are reused; no new database migration is required. JWT verification settings are unchanged.
 
 Photo studio additionally deploys `item-photo-editor.js` and `item-photo-editor.css` with the matching `add-item.html` / `additem-assisted.js` cache versions. No database or extension update is needed.
+## Watch identity and stone categories
+
+Watch titles use the entered brand/name and full model reference; AI-recognized serial numbers are not used as titles. Labeled serial numbers are removed from manually entered titles as well. Entered aftermarket modifications produce an explicit **Aftermarket** title qualifier and disclosure in the saved description. Factory-reference research cannot override those modifications.
+
+The stone chooser offers Earth-mined diamonds, Lab-grown diamonds, Diamonds (origin unspecified), VVS simulated diamonds, Simulated diamonds, Moissanite, Cubic zirconia and No stone, with a free-text option for other/mixed stones. Confirmed selections add matching inventory categories beside the main item category. VVS simulated diamonds remain explicitly simulated in generated copy. Stone origin is not inferred from photos or carried over to a new item; cloud drafts and Add similar retain their entered details.
+
+Regression checks: `node --test tests/inventory-item-facts.test.mjs tests/add-item-watch-copy.test.mjs`. The pure shared rules live in `inventory-item-facts.js` and are loaded by both the intake page and the copy-generation function.
+
+Watch descriptions retain the written copy and add only missing material, modification and stone details. Saving, editing, CSV export and direct eBay publishing share this rule instead of appending another Watch details block. Identical paragraphs are collapsed; distinct worker notes are retained. Existing inventory is not bulk-rewritten.
+
+Deploy `generate-inventory-copy` and `ebay-inventory-sync` along with the shared script and updated frontend assets. No database migration or extension update is required.

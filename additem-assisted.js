@@ -386,6 +386,7 @@
       if (normalized) options.set(normalized.toLowerCase(), normalized);
     };
 
+    window.InventoryItemFacts.stoneChoices.forEach(addOption);
     getStoredStoneTypeHistory().forEach(addOption);
 
     (Array.isArray(rows) ? rows : []).forEach((item) => {
@@ -470,10 +471,12 @@
   }
 
   function applyLastStoneTypePreference(elements) {
-    const lastStoneType = getLastStoneTypePreference();
+    // Origin belongs to this piece, so never inherit the previous item's claim.
     if (elements.stoneTypeInput) {
-      elements.stoneTypeInput.value = lastStoneType;
+      elements.stoneTypeInput.value = '';
     }
+    const choice = document.getElementById('stone-type-choice');
+    if (choice) choice.value = '';
   }
 
   function addLengthOption(elements, value) {

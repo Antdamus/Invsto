@@ -14,7 +14,7 @@ const research = (overrides = {}) => ({
   warnings: ["Confirm the dial and bracelet variant."], ...overrides,
 });
 
-function handler({ ai = false, lookup = research(), searchFails = false, copyFails = false, searchSources = [sourceUrl] } = {}) {
+function handler({ ai = false, lookup = research(), searchFails = false, copyFails = false, searchSources = [sourceUrl], copy = { generatedTitle: "Watch", generatedDescription: "Watch description" } } = {}) {
   let serveHandler, aiRequest;
   const requests = [];
   let signCount = 0;
@@ -34,10 +34,12 @@ function handler({ ai = false, lookup = research(), searchFails = false, copyFai
         }));
       }
       if (copyFails) return new Response("Unavailable", { status: 503 });
-      return new Response(JSON.stringify({ output_text: JSON.stringify({ generatedTitle: "Watch", generatedDescription: "Watch description" }) }));
+      return new Response(JSON.stringify({ output_text: JSON.stringify(copy) }));
     },
   };
-  vm.runInNewContext(stripTypeScriptTypes(source), context);
+  vm.createContext(context);
+  vm.runInContext(readFileSync(new URL('../inventory-item-facts.js', import.meta.url), 'utf8'), context);
+  vm.runInContext(stripTypeScriptTypes(source), context);
   return { invoke: (body) => serveHandler(new Request("https://example.invalid", { method: "POST", body: JSON.stringify(body) })), request: () => aiRequest, requests, signCount: () => signCount };
 }
 
@@ -49,7 +51,7 @@ test("watch copy accepts mixed materials and modifications without requiring met
   });
   assert.equal(response.status, 200);
   const result = await response.json();
-  assert.equal(result.generatedTitle, "Rolex Datejust 126233");
+  assert.equal(result.generatedTitle, "Rolex Datejust 126233 — Aftermarket");
   assert.match(result.generatedDescription, /Steel case and gold bezel/);
   assert.match(result.generatedDescription, /Aftermarket diamonds/);
   assert.doesNotMatch(result.generatedDescription, /925|Silver|0\.00 g|unmodified/i);
@@ -78,6 +80,40 @@ test("AI request carries watch facts and removes stale single-material metadata"
 const referenceOnlyWatch = {
   itemKind: "watch", watchDetails: { name: "Rolex", model: "126233", materials: "Steel case", modifications: "Aftermarket diamond bezel" },
 };
+
+test('generated watch titles exclude serials, keep model references and enforce aftermarket disclosure', async () => {
+  const api = handler({ai:true,copy:{generatedTitle:'Cartier WSSA0007 SERIAL ABC12345',generatedDescription:'An elegant watch with a diamond bezel.'}});
+  const result = await (await api.invoke({itemKind:'watch',imagePath:'watch.jpg',stoneType:'Earth-mined diamonds',watchDetails:{brand:'Cartier',name:'Santos Serial ABC12345',model:'WSSA0007',modifications:'Aftermarket diamond bezel'}})).json();
+  assert.equal(result.generatedTitle,'Cartier Santos WSSA0007 — Aftermarket, Earth-mined diamonds');
+  assert.doesNotMatch(result.generatedTitle,/serial|ABC12345/i);
+  assert.match(result.generatedDescription,/Aftermarket diamond bezel/);
+  assert.match(result.generatedDescription,/Earth-mined diamonds/);
+  assert.doesNotMatch(api.requests[0].input[1].content,/ABC12345/);
+});
+
+test('AI cannot turn aftermarket diamonds into factory diamonds or change confirmed origin', async () => {
+  for (const description of ['This watch has factory-set diamonds.','An elegant watch set with lab-grown diamonds.']) {
+    const api = handler({ai:true,copy:{generatedTitle:'Watch',generatedDescription:description}});
+    const result = await (await api.invoke({...referenceOnlyWatch,stoneType:'Earth-mined diamonds'})).json();
+    assert.match(result.generatedDescription,/Aftermarket/);
+    assert.match(result.generatedDescription,/Earth-mined diamonds/);
+    assert.doesNotMatch(result.generatedDescription,/factory-set|lab-grown/i);
+  }
+});
+
+test('a photo or factory reference cannot supply an unconfirmed diamond origin', async () => {
+  const api = handler({ai:true,copy:{generatedTitle:'Natural diamond watch',generatedDescription:'The watch has natural diamonds.'}});
+  const result = await (await api.invoke({...referenceOnlyWatch,stoneType:'Diamonds (origin unspecified)'})).json();
+  assert.doesNotMatch(result.generatedDescription,/natural diamonds/i);
+  assert.match(result.generatedDescription,/origin unspecified/);
+});
+test('VVS simulated diamonds remain explicitly simulated even if generated copy drops the qualifier', async () => {
+  const api=handler({ai:true,copy:{generatedTitle:'VVS diamond watch',generatedDescription:'An elegant watch with VVS diamonds.'}});
+  const result=await (await api.invoke({...referenceOnlyWatch,stoneType:'VVS simulated diamonds'})).json();
+  assert.match(result.generatedTitle,/VVS simulated diamonds/);
+  assert.match(result.generatedDescription,/VVS simulated diamonds/);
+  assert.doesNotMatch(result.generatedDescription,/with VVS diamonds/);
+});
 
 test("coin drafts preserve identity, fineness, condition and fine content without requiring a photo or weight", async () => {
   const api = handler();

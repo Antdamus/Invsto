@@ -81,16 +81,7 @@
     }
     const watch = getWatchDetails();
     if (!watch) return description;
-    const details = [
-      "Watch details:",
-      `Name: ${watch.name}`,
-      watch.brand && `Brand: ${watch.brand}`,
-      watch.department && `Department: ${watch.department}`,
-      watch.model && `Model / reference: ${watch.model}`,
-      watch.materials && `Materials by component: ${watch.materials}`,
-      watch.modifications && `Modifications / customizations: ${watch.modifications}`,
-    ].filter(Boolean).join("\n");
-    return [description, details].filter(Boolean).join("\n\n");
+    return window.InventoryItemFacts.watchDescription(description, watch, value('assisted-stone-type'));
   }
 
   function updateMode({ restoring = false } = {}) {
@@ -112,7 +103,7 @@
     document.getElementById("use-watch-details").hidden = !watch;
     document.getElementById("coin-description-note").hidden = !coin;
     document.getElementById("use-coin-details").hidden = !coin;
-    ["assisted-stone-type", "assisted-length"].forEach((id) => { document.getElementById(id).closest("label").hidden = coin; });
+    ["stone-type-choice", "assisted-stone-type", "assisted-length"].forEach((id) => { document.getElementById(id).closest("label").hidden = coin; });
 
     const autoCost = document.getElementById("auto-cost-checkbox");
     if (directPricing && !autoCost.disabled && !restoring) jewelryAutoCost = autoCost.checked;
@@ -159,11 +150,12 @@
   }
 
   function renderReview() {
+    syncStoneChoice();
     const summary = document.getElementById('item-review-summary');
     const photos = window.addItemAssistedModule?.getSelectedUploadedImagesForSave?.() || [];
     const rows = [
-      ['Item', value('title') || (getWatchDetails()?.name) || getCoinDetails()?.name || 'Not entered','information'],
-      ['Category',value('category') || 'Not selected','information'],
+      ['Item', isWatch() ? window.InventoryItemFacts.watchTitle(getWatchDetails(), value('assisted-stone-type'), value('title')) || 'Not entered' : value('title') || getCoinDetails()?.name || 'Not entered','information'],
+      ['Categories',window.InventoryItemFacts.categories(value('category'), isCoin() ? '' : value('assisted-stone-type'), getWatchDetails()).join(' · ') || 'Not selected','information'],
       ...(!isCoin() ? [['Length / measurements',value('assisted-length') || 'Not entered — check this piece','information'],['Diamonds / stones',value('assisted-stone-type') || 'Not entered — check this piece','information']] : []),
       ...(window.addItemPricing?.deferred() ? [['Pricing',`Queued for ${window.addItemPricing.ownerName()} · cost and selling prices set later`,'pricing']] : [
         ['Cost',value('cost') ? `$${value('cost')}` : 'Not entered','pricing'],
@@ -297,11 +289,31 @@
     const watch = getWatchDetails();
     const title = document.getElementById("title");
     if (!watch || (!overwrite && value("title") && title.value !== title.dataset.watchTitle && title.value !== title.dataset.coinTitle)) return;
-    const name = watch.name.toLowerCase().startsWith(watch.brand.toLowerCase()) ? watch.name : [watch.brand,watch.name].filter(Boolean).join(" ");
-    title.value = [name, watch.model].filter(Boolean).join(" ");
+    title.value = window.InventoryItemFacts.watchTitle(watch, value('assisted-stone-type'));
     title.dataset.watchTitle = title.value;
     title.dispatchEvent(new Event("input", { bubbles: true }));
   }
+
+  function syncStoneChoice() {
+    const choice = document.getElementById('stone-type-choice');
+    const stone = value('assisted-stone-type');
+    choice.value = !stone ? '' : window.InventoryItemFacts.stoneChoices.find(value => value.toLowerCase() === stone.toLowerCase()) || 'other';
+    document.getElementById('assisted-stone-type').closest('label').hidden = isCoin() || choice.value !== 'other';
+  }
+  document.getElementById('stone-type-choice').addEventListener('change', event => {
+    const input = document.getElementById('assisted-stone-type');
+    const selected = event.target.value;
+    input.value = selected === 'other' ? '' : selected;
+    input.dispatchEvent(new Event('input', {bubbles:true}));
+    input.dispatchEvent(new Event('change', {bubbles:true}));
+    if (selected === 'other') { event.target.value = 'other'; input.closest('label').hidden = false; input.focus(); }
+  });
+  document.getElementById('assisted-stone-type').addEventListener('input', syncStoneChoice);
+  document.getElementById('title').addEventListener('blur', event => {
+    if (!isWatch()) return;
+    event.target.value = window.InventoryItemFacts.watchTitle(getWatchDetails(), value('assisted-stone-type'), event.target.value);
+    event.target.dispatchEvent(new Event('input', {bubbles:true}));
+  });
 
   function fillCoinTitle(overwrite = false) {
     const coin = getCoinDetails();

@@ -34,7 +34,7 @@
   byId('watch-fields').prepend(byId('watch-brand').closest('label'), watchModel);
   byId('watch-fields').append(watchName, byId('watch-materials').closest('label'),byId('watch-modifications').closest('label'));
   const referenceHelp=watchModel.querySelector('.field-helper');
-  referenceHelp.textContent='Use the exact reference. A description draft will be prepared while you continue.';
+  referenceHelp.textContent='Enter the model reference, not the individual serial number.';
   byId('watch-brand').closest('label').querySelector('.field-helper').textContent='Enter the brand once. Model lookup uses this brand and reference.';
   byId('item-step-information-title').textContent='Identify your item';
   byId('item-step-pricing-title').textContent='Pricing';

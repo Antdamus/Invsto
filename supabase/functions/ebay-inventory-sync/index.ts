@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 import { buildCoinListing } from "../../../coin-ebay-core.mjs";
+import "../../../inventory-item-facts.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -306,11 +307,7 @@ function watchAspects(item: ItemRow): Record<string, string[]> {
 
 function watchDescription(item: ItemRow): string {
   if (!isWatch(item)) return item.description || item.title || "";
-  const watch = item.watch_details || {};
-  const labels: Record<string, string> = { name: "Name", brand: "Brand", model: "Model / reference", department: "Department", materials: "Materials by component", modifications: "Modifications / customizations" };
-  const details = Object.entries(labels).flatMap(([key, label]) => firstText(watch[key]) ? [`${label}: ${firstText(watch[key])}`] : []);
-  const description = String(item.description || "").replace(/\n*Watch details:\n[\s\S]*$/, "").trim();
-  return [description, details.length ? `Watch details:\n${details.join("\n")}` : ""].filter(Boolean).join("\n\n");
+  return (globalThis as any).InventoryItemFacts.watchDescription(item.description, item.watch_details || {}, item.stone_type);
 }
 
 const WATCH_CONDITION_IDS: Record<string, string> = { NEW: "1000", NEW_OTHER: "1500", NEW_WITH_DEFECTS: "1750", SELLER_REFURBISHED: "2500", PRE_OWNED_EXCELLENT: "2990", USED_EXCELLENT: "3000", PRE_OWNED_FAIR: "3010", FOR_PARTS_OR_NOT_WORKING: "7000" };

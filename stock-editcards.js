@@ -835,11 +835,7 @@ window.editCardModule = (function () {
             ...existingItem.watch_details,
             ...Object.fromEntries(["brand", "model", "department", "condition"].map(key => [key, document.getElementById(`edit-watch-${key}`).value.trim()]))
         } : null;
-        const watchLabels = { name: "Name", brand: "Brand", model: "Model / reference", department: "Department", materials: "Materials by component", modifications: "Modifications / customizations" };
-        let savedDescription = watchDetails ? [
-            description.replace(/\n*Watch details:\n[\s\S]*$/, "").trim(),
-            "Watch details:\n" + Object.entries(watchLabels).filter(([key]) => watchDetails[key]).map(([key, label]) => `${label}: ${watchDetails[key]}`).join("\n"),
-        ].filter(Boolean).join("\n\n") : description;
+        let savedDescription = watchDetails ? window.InventoryItemFacts.watchDescription(description, watchDetails, existingItem.stone_type) : description;
         const coinDetails = canViewSensitiveStockFields() && existingItem.coin_details ? window.coinEbayStock?.getDetails() || existingItem.coin_details : null;
         if (coinDetails && window.CoinEbay) savedDescription = [
             description.replace(/\n*Coin details:\n[\s\S]*$/, "").trim(),

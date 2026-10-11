@@ -10,6 +10,7 @@ const source = read('supabase/functions/ebay-inventory-sync/index.ts').replace(/
 function backend() {
   const context = { buildCoinListing:coinCore.buildCoinListing, Deno: { env: { get: () => '' }, serve() {} }, console, TextEncoder, crypto: webcrypto, URL, URLSearchParams, Response, AbortSignal };
   vm.createContext(context);
+  vm.runInContext(read('inventory-item-facts.js'), context);
   vm.runInContext(stripTypeScriptTypes(source), context);
   return context;
 }
@@ -57,7 +58,7 @@ test('required eBay aspects and allowed condition values are checked',()=>{
 });
 function exporter(){
   const context={window:{CoinEbay:coinCore},console,setTimeout,clearTimeout};
-  vm.createContext(context);vm.runInContext(read('ebayExport.js'),context);
+  vm.createContext(context);vm.runInContext(read('inventory-item-facts.js'),context);context.window.InventoryItemFacts=context.InventoryItemFacts;vm.runInContext(read('ebayExport.js'),context);
   vm.runInContext('getQuantitiesByItemId = async () => ({watch:1,jewelry:2}); getPublicImageUrls = async () => "https://example.invalid/photo.jpg";',context);
   return context;
 }

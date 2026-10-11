@@ -1,5 +1,8 @@
 import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import "../../../inventory-item-facts.js";
+
+const itemFacts = (globalThis as any).InventoryItemFacts;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -219,14 +222,12 @@ function buildPlaceholderCopy(body: Required<Pick<RequestBody, "material" | "pur
     const watch = body.watchDetails || {};
     return {
       mode: "placeholder",
-      generatedTitle: [watch.name, watch.model].filter(Boolean).join(" "),
-      generatedDescription: [
+      generatedTitle: itemFacts.watchTitle(watch, body.stoneType),
+      generatedDescription: itemFacts.watchDescription([
         `${asTrimmedString(watch.name)}${watch.model ? `, model / reference ${watch.model}` : ""}.`,
-        watch.materials && `Materials by component: ${watch.materials}.`,
-        watch.modifications && `Modifications / customizations: ${watch.modifications}.`,
         Number(body.weight) > 0 && `Total weight: ${Number(body.weight).toFixed(2)} g.`,
         body.notes && `Additional details: ${body.notes}.`,
-      ].filter(Boolean).join(" "),
+      ].filter(Boolean).join(" "), watch, body.stoneType),
     };
   }
   const material = asTrimmedString(body.material);
@@ -446,6 +447,7 @@ The description should be:
 - natural and confident in tone
 - refined, not robotic
 - commercially appealing, not internal or technical
+- free of repeated facts: mention each specification once, without restating the title or adding a duplicate metadata block
 
 The description should focus on:
 - visible design
@@ -515,7 +517,10 @@ Do not replace them with guesses from the image.
 Watch mode rule:
 For a watch, preserve the supplied name, model/reference, component materials, and modifications.
 Different parts may use different materials; never describe the entire watch as one metal or purity.
-Disclose supplied aftermarket parts and customizations in the description.
+Disclose supplied aftermarket parts and customizations in BOTH the title and description, using the literal word "Aftermarket". Never replace this disclosure with only "custom" or "modified".
+The watch title must use the model/reference, never the individual serial number. Do not copy serial numbers from photos, certificates, notes or existing copy into the title.
+Keep Earth-mined diamonds and Lab-grown diamonds distinct, using the entered stone type. Aftermarket describes a modification, not diamond origin: natural diamonds can still be aftermarket additions. Never infer either origin or factory installation from appearance.
+"VVS simulated diamonds" is a seller-entered simulated-stone type. Always keep "simulated" with that name; never shorten it to "VVS diamonds", describe it as natural/lab-grown diamond, or claim a verified diamond clarity grade.
 You may use ONLY the supplied researched specifications to describe the standard model. Never fill gaps from model memory.
 User-entered materials and modifications ALWAYS OVERRIDE stock specifications for the corresponding components. Do not describe a replaced part as if it were still factory original. If the scope of a modification is unclear, omit potentially conflicting stock facts.
 Distinguish model specifications from this physical watch: introduce researched facts as "The standard reference features..." and describe the owner's supplied configuration separately. Avoid implying unverified components are factory original.
@@ -655,11 +660,11 @@ serve(async (req) => {
     const purity = isCoin ? coinDetails?.fineness || "" : isWatch ? "" : asTrimmedString(body.purity);
     const weight = body.weight == null ? null : Number(body.weight);
     const watchDetails = isWatch ? {
-      name: asTrimmedString(body.watchDetails?.name).slice(0, 200),
+      name: itemFacts.withoutSerial(asTrimmedString(body.watchDetails?.name)).slice(0, 200),
       ...(body.watchDetails?.brand ? { brand: asTrimmedString(body.watchDetails.brand).slice(0, 100) } : {}),
       ...(body.watchDetails?.department ? { department: asTrimmedString(body.watchDetails.department).slice(0, 100) } : {}),
       ...(body.watchDetails?.condition ? { condition: asTrimmedString(body.watchDetails.condition).slice(0, 100) } : {}),
-      model: asTrimmedString(body.watchDetails?.model).slice(0, 200),
+      model: itemFacts.withoutSerial(asTrimmedString(body.watchDetails?.model)).slice(0, 200),
       materials: asTrimmedString(body.watchDetails?.materials).slice(0, 4000),
       modifications: asTrimmedString(body.watchDetails?.modifications).slice(0, 4000),
     } : undefined;
@@ -742,6 +747,27 @@ serve(async (req) => {
       openAIDebug.openaiAttempted = true;
       openAIDebug.openaiStatus = "unexpected_wrapper_exception";
       openAIDebug.openaiErrorSummary = summarizeError(error);
+    }
+
+    if (isWatch) {
+      // Titles are assembled from the entered identity, not numbers recognized in
+      // a photo. Enforce disclosures even when the AI omits them.
+      generated.generatedTitle = itemFacts.watchTitle(watchDetails, body.stoneType);
+      if (itemFacts.hasAftermarket(watchDetails) && /\b(?:factory[ -]?(?:set|original)?|original|oem)\b[^.!?\n]{0,40}\b(?:diamonds?|bezel|dial|bracelet|parts?)\b/i.test(generated.generatedDescription)) {
+        generated.generatedDescription = fallback.generatedDescription;
+      }
+    }
+    if (!isCoin) {
+      const enteredStones = itemFacts.stoneCategories(body.stoneType);
+      const generatedStones = itemFacts.stoneCategories(generated.generatedDescription);
+      if (generatedStones.some((category: string) => ['Earth-mined diamonds', 'Lab-grown diamonds'].includes(category) && !enteredStones.includes(category))) {
+        generated.generatedDescription = fallback.generatedDescription;
+      }
+      if (enteredStones.some((category: string) => /simulated/i.test(category)) && /\bdiamonds?\b/i.test(generated.generatedDescription) && !/\bsimulated\b/i.test(generated.generatedDescription)) {
+        generated.generatedDescription = fallback.generatedDescription;
+      }
+      if (!isWatch && enteredStones.some((category: string) => /simulated/i.test(category)) && !/\bsimulated\b/i.test(generated.generatedTitle)) generated.generatedTitle = fallback.generatedTitle;
+      if (isWatch) generated.generatedDescription = itemFacts.watchDescription(generated.generatedDescription, watchDetails, body.stoneType);
     }
 
     return json(200, {
