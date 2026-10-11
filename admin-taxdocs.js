@@ -158,30 +158,30 @@ async function getAccessToken(supabase) {
 }
 
 // ====== EXPORTS (W-9 legacy) ======
-export async function uploadW9ViaEdge({ supabase, employeeId, file }) {
+async function uploadW9ViaEdge({ supabase, employeeId, file }) {
   return uploadDocMultipart({ supabase, employeeId, file, docType: "w9" });
 }
-export async function listW9ViaEdge({ invokeEdgeJson, employeeId }) {
+async function listW9ViaEdge({ invokeEdgeJson, employeeId }) {
   return listDocs({ invokeEdgeJson, employeeId, docType: "w9" });
 }
-export async function getW9SignedUrlViaEdge({ invokeEdgeJson, docId, expiresSeconds = 120 }) {
+async function getW9SignedUrlViaEdge({ invokeEdgeJson, docId, expiresSeconds = 120 }) {
   return getSignedUrl({ invokeEdgeJson, docId, docType: "w9", expiresSeconds });
 }
-export async function setW9StatusViaEdge({ invokeEdgeJson, docId, status, reason = "" }) {
+async function setW9StatusViaEdge({ invokeEdgeJson, docId, status, reason = "" }) {
   return setStatus({ invokeEdgeJson, docId, docType: "w9", status, reason });
 }
 
 // ====== EXPORTS (W-4 new) ======
-export async function uploadW4ViaEdge({ supabase, employeeId, file }) {
+async function uploadW4ViaEdge({ supabase, employeeId, file }) {
   return uploadDocMultipart({ supabase, employeeId, file, docType: "w4" });
 }
-export async function listW4ViaEdge({ invokeEdgeJson, employeeId }) {
+async function listW4ViaEdge({ invokeEdgeJson, employeeId }) {
   return listDocs({ invokeEdgeJson, employeeId, docType: "w4" });
 }
-export async function getW4SignedUrlViaEdge({ invokeEdgeJson, docId, expiresSeconds = 120 }) {
+async function getW4SignedUrlViaEdge({ invokeEdgeJson, docId, expiresSeconds = 120 }) {
   return getSignedUrl({ invokeEdgeJson, docId, docType: "w4", expiresSeconds });
 }
-export async function setW4StatusViaEdge({ invokeEdgeJson, docId, status, reason = "" }) {
+async function setW4StatusViaEdge({ invokeEdgeJson, docId, status, reason = "" }) {
   return setStatus({ invokeEdgeJson, docId, docType: "w4", status, reason });
 }
 
@@ -480,7 +480,7 @@ async function onTableClick(e, { supabase, invokeEdgeJson, showToast }){
 }
 
 // Public init that admin.js can call (or you can call via window.initTaxDocsTab)
-export async function initTaxDocsTab(){
+async function initTaxDocsTab(){
   if (_taxDocsWired) return;
   _taxDocsWired = true;
 
@@ -530,4 +530,12 @@ export async function initTaxDocsTab(){
   setMsg("Ready. Select a person.", "muted");
 }
 
+window.uploadW9ViaEdge = uploadW9ViaEdge;
+window.listW9ViaEdge = listW9ViaEdge;
+window.getW9SignedUrlViaEdge = getW9SignedUrlViaEdge;
+window.setW9StatusViaEdge = setW9StatusViaEdge;
+window.uploadW4ViaEdge = uploadW4ViaEdge;
+window.listW4ViaEdge = listW4ViaEdge;
+window.getW4SignedUrlViaEdge = getW4SignedUrlViaEdge;
+window.setW4StatusViaEdge = setW4StatusViaEdge;
 window.initTaxDocsTab = initTaxDocsTab;

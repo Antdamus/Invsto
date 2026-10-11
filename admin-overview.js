@@ -5,7 +5,7 @@
    - Mobile cards open the same drawer (via openWorkerDrawer callback)
    ========================================================= */
 
-export function initOverview(deps) {
+function initOverview(deps) {
   const {
     qs,
     debounce,
@@ -525,3 +525,5 @@ async function bootOverview() {
 
   return { bootOverview, loadSummary, loadLiveNow };
 }
+
+window.initOverview = initOverview;

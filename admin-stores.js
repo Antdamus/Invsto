@@ -6,7 +6,7 @@
    - Emergency exceptions modal (timeclock_store_exceptions)
    ========================================================= */
 
-export function initStores(deps) {
+function initStores(deps) {
   const {
     // DOM helpers
     qs,
@@ -568,3 +568,5 @@ export function initStores(deps) {
     storeDirectionsHref,
   };
 }
+
+window.initStores = initStores;

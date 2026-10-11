@@ -1,14 +1,3 @@
-import { initOverview } from "./admin-overview.js";
-import { initStores } from "./admin-stores.js";
-import {
-  uploadW9ViaEdge,
-  listW9ViaEdge,
-  getW9SignedUrlViaEdge,
-  setW9StatusViaEdge
-} from './admin-taxdocs.js';
-
-
-
 // admin.js — Overview + Drawer/Edit/Audit + Payroll Weekly + Period Lock/Unlock (Phase 3.3)
 let supabaseClient = null;
 let drawerOnlyAnoms = false;
@@ -392,7 +381,7 @@ async function ensureAdmin() {
     return false;
   }
 
-  const ok = !!emp && emp.active === true && emp.role === "admin";
+  const ok = !!emp && emp.active === true && String(emp.role || "").toLowerCase() === "admin";
   if (!ok) {
     window.location.href = `index.html?reason=${encodeURIComponent("Admin only")}`;
     return false;
@@ -3261,8 +3250,27 @@ function setupOverview() {
 }
 
 //* ============== Boot ============== */
-document.addEventListener("supabase-ready", async () => {
+let adminBootStarted = false;
+
+function showAdminBootError(err) {
+  console.error("Admin boot failed:", err);
+  const denied = qs("guardDenied");
+  const title = denied?.querySelector("h2");
+  const copy = denied?.querySelector("p");
+  if (title) title.textContent = "Admin page error";
+  if (copy) copy.textContent = err?.message || "The admin page could not finish loading. Please refresh and try again.";
+  show(qs("guardLoading"), false);
+  show(denied, true);
+  show(qs("adminApp"), false);
+}
+
+async function bootAdmin() {
+  if (adminBootStarted) return;
+  adminBootStarted = true;
+
+  try {
   supabaseClient = window.supabase;
+  if (!supabaseClient?.auth) throw new Error("Supabase client not initialized.");
 
   // =========================
 // Global bridge for non-module scripts (admin-schedule.js)
@@ -3319,6 +3327,8 @@ catch(e){ console.warn("ensureStoreNameCache failed:", e); }
   wireHeaderActions();
   wireTabs();
   activateTab("overview");
+  try { await window.bootAdminPayroll?.(); }
+  catch (e) { console.warn("Payroll failed to initialize; continuing admin boot:", e); }
 
   // Prefill month for Overview
   const now = new Date();
@@ -3330,7 +3340,8 @@ catch(e){ console.warn("ensureStoreNameCache failed:", e); }
   setupOverview();
   wireDrawer();
   wireEditModal();
-  await overviewApi.bootOverview();
+  try { await overviewApi.bootOverview(); }
+  catch (e) { console.warn("Overview failed to load; continuing admin boot:", e); }
 
 
 
@@ -3344,16 +3355,23 @@ catch(e){ console.warn("ensureStoreNameCache failed:", e); }
   wireUsersPanel();
   wireGlobalCalendar();
   if (!gcMonthStart) gcMonthStart = getMonthStart(new Date());
-});
+  } catch (err) {
+    showAdminBootError(err);
+  }
+}
+
+function scheduleAdminBoot() {
+  waitForSupabaseReady(12000)
+    .then(() => bootAdmin())
+    .catch(showAdminBootError);
+}
+
+document.addEventListener("supabase-ready", scheduleAdminBoot);
 
 
 // Kickoff if init already ran
-if (document.readyState === 'complete' || document.readyState === 'interactive') {
-  if (window.supabase) {
-    document.dispatchEvent(new Event('supabase-ready'));
-  } else {
-    setTimeout(() => {
-      if (window.supabase) document.dispatchEvent(new Event('supabase-ready'));
-    }, 0);
-  }
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", scheduleAdminBoot);
+} else {
+  scheduleAdminBoot();
 }
