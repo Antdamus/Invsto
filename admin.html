@@ -7,7 +7,7 @@
 
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="admin.css" />
-  <link rel="stylesheet" href="admin-overview-drawer.css" />
+  <link rel="stylesheet" href="admin-overview-drawer.css?v=20261011-corrections" />
   <link rel="stylesheet" href="admin-schedule.css?v=20260901-schedule-time-selects" />
   <link rel="stylesheet" href="admin-payroll.css" />
   <link rel="stylesheet" href="admin-taxdocs.css" />
@@ -1054,35 +1054,39 @@
   <!-- Edit Shift Modal -->
   <div id="editModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="editTitle">
     <header class="modal-header">
-      <h3 id="editTitle">Edit shift</h3>
+      <div><div class="correction-eyebrow">Admin correction</div><h3 id="editTitle">Correct worked time</h3></div>
       <button id="editCloseBtn" class="btn ghost" type="button" aria-label="Close">✕</button>
     </header>
 
     <section class="modal-body">
+      <div class="correction-context"><strong id="editWorker"></strong><span id="editZone"></span></div>
+      <div id="editOpenNotice" class="correction-notice hidden">Still clocked in. This changes the start time and keeps the shift running.</div>
+      <div class="correction-original"><span>Currently recorded</span><strong id="editOriginal"></strong></div>
       <div class="form-row">
         <label>
           <span>Clock-in</span>
           <input id="editIn" type="datetime-local" required />
         </label>
-        <label>
+        <label id="editOutField">
           <span>Clock-out</span>
           <input id="editOut" type="datetime-local" required />
         </label>
       </div>
 
-      <div class="hint">Duration: <strong id="editDuration">—</strong></div>
+      <div class="correction-preview" aria-live="polite"><span>Corrected shift duration</span><strong id="editDuration">—</strong><span id="editDifference"></span></div>
 
       <label class="reason">
         <span>Reason (required)</span>
-        <textarea id="editReason" rows="3" placeholder="Brief explanation (e.g., fixed missed punch)"></textarea>
+        <textarea id="editReason" rows="3" maxlength="2000" required placeholder="Example: Arrived at 9:45 AM; forgot to clock in. Arrival confirmed by supervisor."></textarea>
       </label>
+      <p class="correction-audit-note">Your name, the date, reason, and before/after times are saved in the audit trail. Original photos, location evidence, and breaks are preserved. Finished shifts return to review.</p>
 
       <div id="editError" class="error hidden" role="alert"></div>
     </section>
 
     <footer class="modal-footer">
       <button id="editCancelBtn" class="btn ghost" type="button">Cancel</button>
-      <button id="editSaveBtn" class="btn" type="button">Save</button>
+      <button id="editSaveBtn" class="btn" type="button">Save correction</button>
     </footer>
   </div>
 
@@ -1451,9 +1455,10 @@
   <script src="admin-schedule.js?v=20260901-schedule-time-selects"></script>
   <script src="admin-changes.js"></script>
   <script src="admin-taxdocs.js?v=20261011-admin-boot"></script>
-  <script src="admin-overview.js?v=20261011-admin-boot"></script>
+  <script src="admin-overview.js?v=20261011-corrections"></script>
   <script src="admin-stores.js?v=20261011-admin-boot"></script>
-  <script src="admin.js?v=20261011-admin-guard"></script>
+  <script src="time-correction-core.js?v=20261011-corrections"></script>
+  <script src="admin.js?v=20261011-corrections"></script>
   <script src="admin-users.js?v=buyer-sms-thresholds-20260823" defer></script>
 
   

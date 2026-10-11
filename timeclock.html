@@ -6,11 +6,11 @@
 <meta name="theme-color" content="#070708" />
   <title>OG Jewelry — Time Clock</title>
 
-  <link rel="stylesheet" href="timeclock.css?v=20261011-polish" />
+  <link rel="stylesheet" href="timeclock.css?v=20261011-corrections" />
 </head>
 <body>
   <header class="app-header">
-<h1>OG Time Clock</h1>
+<h1>OG · My timesheet</h1>
     <nav>
       <a href="dashboard.html" class="btn">Back to Dashboard</a>
       <button id="signOutBtn" class="btn ghost">Sign out</button>
@@ -42,6 +42,7 @@
         <div class="verification-panel">
           <div class="panel-label">GPS verification</div>
           <div class="geo-row">Location: <span id="geoText">—</span></div>
+          <div id="geoHelp" class="geo-help hidden"><p id="geoHelpText"></p><details><summary>Location help on iPhone</summary><p>In Safari, open the page menu → Website Settings → Location → Ask or Allow. Also check Settings → Privacy &amp; Security → Location Services → Safari Websites. If you use another browser, check its location permission there.</p></details><button id="geoRetryBtn" class="btn ghost" type="button">Try location again</button></div>
           <div id="adminTestLocationRow" class="admin-test-location-row hidden">
             <button id="adminTestLocationBtn" class="btn ghost" type="button">Allow this test location</button>
             <span id="adminTestLocationStatus" class="hint"></span>
@@ -62,9 +63,13 @@
       <div class="section-heading">
         <div>
           <div class="section-kicker">Today</div>
-          <h3>Worked time</h3>
+          <h3>Your working day</h3>
         </div>
+        <button id="refreshTimesheetBtn" class="btn ghost" type="button">Refresh</button>
       </div>
+      <div id="timesheetSummary" class="timesheet-summary" aria-live="polite"></div>
+      <p class="timesheet-caption">Times shown in your device’s time zone. Unpaid breaks are deducted from worked time.</p>
+      <div id="timesheetError" class="timesheet-error hidden" role="alert"></div>
 
       <!-- iPhone: Luxe “card list” (tables are clunky on mobile) -->
 <div id="todayCards" class="today-cards" aria-live="polite"></div>
@@ -83,6 +88,7 @@
         </thead>
         <tbody id="todayBody"></tbody>
       </table>
+      <div id="timeCorrectionHistory" class="time-corrections"></div>
 
       <!-- Breaks Today (cards on iPhone, table on desktop) -->
 <div class="today-subhead">
@@ -161,6 +167,7 @@
   <script src="initSupabase.js"></script>
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
   <script src="admin-nav.js?v=packaging-20261008"></script>
-  <script src="timeclock.js?v=20261011-polish"></script>
+  <script src="time-correction-core.js?v=20261011-corrections"></script>
+  <script src="timeclock.js?v=20261011-corrections"></script>
 </body>
 </html>

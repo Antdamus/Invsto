@@ -1189,7 +1189,7 @@ async function renderTodayCards(rows, anomalyMap, unpaidBreakMsMap = new Map()){
     const inBlock = el('div', 'tblock');
     inBlock.innerHTML = `<div class="tlabel">In</div><div class="tvalue">${fmtTime(r.clock_in)}</div>`;
     const outBlock = el('div', 'tblock');
-    outBlock.innerHTML = `<div class="tlabel">Out</div><div class="tvalue">${r.clock_out ? fmtTime(r.clock_out) : '—'}</div>`;
+    outBlock.innerHTML = `<div class="tlabel">Out</div><div class="tvalue">${r.clock_out ? fmtTime(r.clock_out) : 'Working'}</div>`;
     const idBlock = el('div', 'tblock');
     idBlock.innerHTML = `<div class="tlabel">Unpaid Break</div><div class="tvalue">${fmtDur(unpaidBreakMsMap.get(r.id) || 0)}</div>`;
     times.appendChild(inBlock);
@@ -1199,12 +1199,12 @@ async function renderTodayCards(rows, anomalyMap, unpaidBreakMsMap = new Map()){
     // Actions
     const actions = el('div', 'today-actions');
     const picIn = el('a', 'chiplink');
-    picIn.textContent = 'Pic In';
+    picIn.textContent = 'Clock-in photo';
     picIn.href = '#';
     picIn.setAttribute('aria-disabled', 'true');
 
     const picOut = el('a', 'chiplink');
-    picOut.textContent = 'Pic Out';
+    picOut.textContent = 'Clock-out photo';
     picOut.href = '#';
     picOut.setAttribute('aria-disabled', 'true');
 
@@ -1300,11 +1300,38 @@ async function renderBreaksCards(breaks){
 }
 
 
+function renderTimeCorrections(audits){
+  const host=qs('timeCorrectionHistory'); if(!host) return;
+  const wasOpen=host.querySelector('details')?.open;
+  if(!audits.length){host.innerHTML='';return;}
+  const format=iso=>iso ? new Date(iso).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : 'Still clocked in';
+  host.innerHTML=`<details ${wasOpen ? 'open' : ''}><summary>Corrected by admin · ${audits.length} ${audits.length===1 ? 'change' : 'changes'}</summary>${audits.map(a=>`
+    <article class="time-correction"><strong>${escHtml(a.editor_name || 'Administrator')}</strong> <small>· ${escHtml(format(a.edited_at))}</small>
+    <p>${escHtml(a.reason)}</p>
+    <div class="correction-pair"><span>Before</span><div>${escHtml(format(a.old_value?.clock_in))} → ${escHtml(format(a.old_value?.clock_out))}</div></div>
+    <div class="correction-pair"><span>After</span><div>${escHtml(format(a.new_value?.clock_in))} → ${escHtml(format(a.new_value?.clock_out))}</div></div></article>`).join('')}</details>`;
+}
+function renderTimesheetSummary(rows, unpaidMap){
+  const worked=rows.reduce((sum,r)=>sum+Math.max(0,(r.clock_out ? Date.parse(r.clock_out) : Date.now())-Date.parse(r.clock_in)-(unpaidMap.get(r.id)||0)),0);
+  const unpaid=[...unpaidMap.values()].reduce((a,b)=>a+b,0);
+  const metrics=[['Worked today',fmtDur(worked)],['Unpaid breaks',fmtDur(unpaid)],['Shifts today',String(rows.length)]];
+  qs('timesheetSummary').innerHTML=metrics.map(([label,value])=>`<div class="timesheet-metric"><span>${label}</span><strong>${escHtml(value)}</strong></div>`).join('');
+}
+let refreshingTimesheet=false;
+async function refreshTimesheet(){
+  if(refreshingTimesheet || isHydrating || isPunching || !currentEmployee?.id || document.hidden || !qs('camModal')?.classList.contains('hidden')) return;
+  refreshingTimesheet=true;
+  const btn=qs('refreshTimesheetBtn'); if(btn) btn.disabled=true;
+  try { await refreshShiftStatus(); await loadToday(); }
+  finally { refreshingTimesheet=false; if(btn) btn.disabled=false; }
+}
+
 async function loadToday(){
   if (isLoadingToday) return;
   if (!currentEmployee?.id) return;
 
   isLoadingToday = true;
+  show(qs('timesheetError'),false);
   const breakBtn = qs('breakBtn');
   const tbody = qs('todayBody');
 
@@ -1344,6 +1371,13 @@ async function loadToday(){
     }
 
     const unpaidBreakMsMap = unpaidBreakMsByEntryId(todayBreaks);
+    renderTimesheetSummary(rows,unpaidBreakMsMap);
+    if(ids.length){
+      const {data:corrections,error:correctionError}=await supabaseClient.rpc('get_my_time_corrections',{_entry_ids:ids});
+      if(correctionError){
+        qs('timeCorrectionHistory').textContent='Correction history is temporarily unavailable. Refresh to try again.';
+      } else renderTimeCorrections(corrections || []);
+    } else renderTimeCorrections([]);
 
     // Aggregate ended breaks + detect an active one
     breakUsedMsToday = 0;
@@ -1474,7 +1508,8 @@ if (openCard){
 
   } catch (err) {
     console.error(err);
-    if (breakBtn) { breakBtn.disabled = false; breakBtn.textContent = 'Start Break'; }
+    qs('timesheetError').textContent='We could not refresh your timesheet. Use Refresh to try again.';
+    show(qs('timesheetError'),true);
   } finally {
     isLoadingToday = false;
   }
@@ -1500,14 +1535,15 @@ async function renderPhotoCell(path){
   return container;
 }
 
-function tryGeo(){
-  if (!('geolocation' in navigator)) return;
-  navigator.geolocation.getCurrentPosition(pos => {
-    const { latitude:lat, longitude:lng, accuracy } = pos.coords;
-    qs('geoText').textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)} (±${Math.round(accuracy)}m)`;
-  }, () => {
-    qs('geoText').textContent = 'Location permission denied';
-  }, { enableHighAccuracy:true, maximumAge:0, timeout:5000 });
+async function tryGeo(){
+  const btn=qs('geoRetryBtn'); if(btn) btn.disabled=true;
+  qs('geoText').textContent='Checking location…';
+  try {
+    const result=await getGeo();
+    qs('geoText').textContent=result.ok ? `Ready · accurate to ${Math.round(result.accuracy)} m` : 'Needs attention';
+    show(qs('geoHelp'),!result.ok);
+    if(!result.ok) qs('geoHelpText').textContent=result.msg;
+  } finally { if(btn) btn.disabled=false; }
 }
 
 function getGeo(){
@@ -1518,7 +1554,7 @@ function getGeo(){
     navigator.geolocation.getCurrentPosition(pos => {
       resolve({ ok:true, lat:pos.coords.latitude, lng:pos.coords.longitude, accuracy:pos.coords.accuracy });
     }, err => {
-      resolve({ ok:false, msg: err?.message || 'Unable to get location.' });
+      resolve({ ok:false, code:err?.code, msg:TimeCorrection.geoError(err?.code) });
     }, { enableHighAccuracy:true, maximumAge:0, timeout:10000 });
   });
 }
@@ -1661,6 +1697,10 @@ async function saveAdminTestLocation(){
 document.addEventListener('DOMContentLoaded', async () => {
   supabaseClient = window.supabase;
   qs('adminTestLocationBtn')?.addEventListener('click', saveAdminTestLocation);
+  qs('geoRetryBtn')?.addEventListener('click',tryGeo);
+  qs('refreshTimesheetBtn')?.addEventListener('click',refreshTimesheet);
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden) refreshTimesheet(); });
+  setInterval(refreshTimesheet,60000);
 
   // Auth state (debounced + ensures break cap fetched before hydrate)
   let hydrateTimer = null;

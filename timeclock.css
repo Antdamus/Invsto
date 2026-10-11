@@ -1537,3 +1537,29 @@ body{
     text-align:center;
   }
 }
+
+/* A readable daily timesheet on a phone or a large display. */
+.timesheet-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0 10px;}
+.clock-hero .actions{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);align-items:stretch;}
+.clock-hero #clockBtn,.clock-hero #breakBtn{flex:none;min-height:56px;height:auto;}
+.timesheet-metric{background:linear-gradient(145deg,#24382d,#17251e);border:1px solid #435346;border-radius:18px;padding:18px;display:flex;flex-direction:column;gap:9px;}
+.timesheet-metric span{font-size:12px;color:#bcc7be;}.timesheet-metric strong{font-size:26px;color:#ebd394;font-variant-numeric:tabular-nums;}
+.timesheet-caption{color:#aeb8b1;font-size:12px;line-height:1.6;}
+.time-corrections>details{border:1px solid #506348;border-radius:16px;margin-top:18px;background:#1c2a22;padding:16px;}
+.time-corrections summary{cursor:pointer;font-weight:700;color:#e8d19a;min-height:28px;line-height:1.6;}
+.time-correction{border-top:1px solid #3c4d40;padding:14px 0;line-height:1.65;overflow-wrap:anywhere;}
+.time-correction p{white-space:pre-wrap;margin:7px 0;}.time-correction small{color:#b4c0b8;}
+.correction-pair{display:grid;grid-template-columns:60px 1fr;gap:6px;font-size:13px;}.correction-pair span{color:#aeb8b1;}
+.timesheet-error,.geo-help{padding:14px;border:1px solid #886d49;border-radius:14px;background:#2b281d;line-height:1.6;margin:12px 0;font-size:14px;}
+.geo-help p{margin:0 0 12px;}.geo-help summary{cursor:pointer;}.geo-help button{margin-top:12px;min-height:44px;}
+.today-card .tvalue{font-variant-numeric:tabular-nums;}.today-card .today-actions{border-top:1px solid #ffffff16;padding-top:12px;}
+.today-card .chiplink{min-height:44px;display:inline-flex;align-items:center;}
+@media(max-width:600px){
+ .clock-hero .actions{grid-template-columns:1fr;}
+ .app-header{padding-left:16px;padding-right:16px;gap:12px;}
+ .app-header h1{font-size:15px;}
+ .timesheet-summary{gap:8px;}.timesheet-metric{padding:14px 10px;border-radius:14px;}.timesheet-metric strong{font-size:20px;}.timesheet-metric span{font-size:11px;}
+ .section-heading{gap:12px;}.section-heading h3{font-size:23px;}.time-corrections>details{padding:14px;}
+ .time-correction{font-size:14px;}.timesheet-caption{font-size:11px;}
+}
+@media(max-width:350px){.timesheet-summary{grid-template-columns:1fr;}.timesheet-metric{flex-direction:row;justify-content:space-between;align-items:center;}}

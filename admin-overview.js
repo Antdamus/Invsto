@@ -17,6 +17,7 @@ function initOverview(deps) {
     fetchMonthlyPendingReviewCounts,
     fetchMonthlyExceptionCounts,
     fetchLiveNow,            // ✅ Live Now data fetcher (kept in admin.js for now)
+    correctLiveTime,
     openWorkerDrawer,        // ✅ only drawer API Overview should use
   } = deps;
 
@@ -387,7 +388,7 @@ async function loadSummary() {
       if (timesEl){
         const sinceStr = new Date(clockInMs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
         const durStr = fmtDurationHM(now - clockInMs);
-        timesEl.textContent = `since ${sinceStr} / ${durStr}`;
+        timesEl.textContent = `Started ${sinceStr} · ${durStr} elapsed`;
       }
 
       // if on break, update pill to show current break duration
@@ -436,6 +437,7 @@ async function loadSummary() {
     const div = document.createElement('div');
     div.className = 'live-card';
     div.dataset.employeeId  = r.employee_id;
+    div.dataset.entryId = r.entry_id;
     div.dataset.displayName  = r.display_name || '';
     div.dataset.clockInMs    = String(clockInMs);
     div.dataset.status       = r.status; // 'work' | 'break'
@@ -449,7 +451,7 @@ async function loadSummary() {
       : `<span class="pill work">Working</span>`;
 
     const anomHtml = r.has_anomaly && r.anomalies?.length
-      ? `<div class="live-anoms">${r.anomalies.map(a => `<span class="chip anom">Flagged: ${escapeHtml(a)}</span>`).join(' ')}</div>`
+      ? `<div class="live-anoms">${r.anomalies.map(a => `<span class="chip anom">${escapeHtml(TimeCorrection.label(a))}</span>`).join(' ')}</div>`
       : '';
 
     div.innerHTML = `
@@ -460,12 +462,13 @@ async function loadSummary() {
           <div class="live-times">since ${sinceStr} / ${durStr}</div>
         </div>
       </div>
-      <div class="live-status">${pill}</div>
+      <div class="live-status">${pill}${r.corrected ? '<span class="chip corrected">Time corrected</span>' : ''}</div>
       ${anomHtml}
       <div class="live-actions">
         ${r.photo_in_url ? `<a href="${escapeHtml(r.photo_in_url)}" target="_blank" rel="noopener">Photo In</a>` : ''}
         ${r.break_photo_url ? `<a href="${escapeHtml(r.break_photo_url)}" target="_blank" rel="noopener">Break Photo</a>` : ''}
-        <button class="btn small ghost" type="button">Details</button>
+        <button class="btn small ghost" type="button" data-live-details>Timesheet</button>
+        <button class="btn small live-correct" type="button" data-live-correct>Correct time</button>
       </div>
     `;
     list.appendChild(div);
@@ -499,8 +502,11 @@ function wireLiveList(){
 
     const employeeId  = card.dataset.employeeId;
     const displayName = card.dataset.displayName || '-';
-    const monthStart  = monthInputToStart();
-
+    if(e.target.closest('[data-live-correct]')){
+      correctLiveTime(card.dataset.entryId,displayName); return;
+    }
+    const clockDate=new Date(Number(card.dataset.clockInMs));
+    const monthStart=`${clockDate.getFullYear()}-${String(clockDate.getMonth()+1).padStart(2,'0')}-01`;
     openWorkerDrawer({ employeeId, monthStart, displayName });
   });
 }

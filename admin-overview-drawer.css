@@ -990,7 +990,7 @@
 }
 
 #editModal .hint::after{
-  content:" Saving a time change records an audit entry and returns the shift to review.";
+  content:none;
   display:block;
   margin-top:6px;
   color:rgba(231,190,106,.86);
@@ -1345,3 +1345,59 @@
     grid-template-columns:1fr;
   }
 }
+
+/* Attendance corrections: clear identity, store-local times and an explicit audit preview. */
+.live-card{gap:14px; padding:18px; flex-wrap:wrap;}
+.live-main{flex:1 1 240px; min-width:0;}
+.live-name{overflow-wrap:anywhere;}
+.live-times{margin-top:5px; font-variant-numeric:tabular-nums; line-height:1.5;}
+.live-anoms{display:flex; flex-wrap:wrap; gap:6px; max-width:360px;}
+.live-actions{display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
+.live-actions a,.live-actions button{min-height:44px; display:inline-flex; align-items:center; justify-content:center;}
+.live-actions .live-correct{background:#e8cd8c; color:#211c12; border-color:#e8cd8c; font-weight:750;}
+#editModal{width:min(620px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); display:flex; flex-direction:column; overflow:hidden; border:1px solid #6e6247; border-radius:24px; background:#151a17; box-shadow:0 24px 90px #0009;}
+#editModal.hidden{display:none;}
+#editModal .modal-header,#editModal .modal-footer{flex:none; padding:20px 24px;}
+#editModal .modal-body{overflow:auto; padding:0 24px 20px; overscroll-behavior:contain;}
+#editModal h3{margin:5px 0 0; font-size:24px;}
+.correction-eyebrow{color:#d7bd83; font-size:11px; letter-spacing:.14em; text-transform:uppercase;}
+.correction-context{display:flex; flex-direction:column; gap:5px; margin:8px 0 16px;}
+.correction-context strong{font-size:18px;}
+.correction-context span,.correction-audit-note{font-size:13px; line-height:1.6; color:#aebbb3;}
+.correction-notice{padding:12px 14px; background:#223c30; border:1px solid #416c55; border-radius:12px; color:#c7e7d5; line-height:1.5; margin-bottom:16px;}
+.correction-original,.correction-preview{display:flex; flex-direction:column; gap:7px; padding:15px 16px; border:1px solid #3d473f; border-radius:14px; margin:14px 0; background:#1c251f;}
+.correction-original>span,.correction-preview>span{font-size:12px; color:#bac5bb; line-height:1.5;}
+.correction-original strong{font-size:14px; line-height:1.5;}
+.correction-preview strong{font-size:24px; color:#efd698; font-variant-numeric:tabular-nums;}
+#editModal .form-row{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px;}
+#editModal label{min-width:0; display:flex; flex-direction:column; gap:8px; color:#ced5cf; font-size:14px;}
+#editModal input,#editModal textarea{width:100%; min-width:0; box-sizing:border-box; font-size:16px; padding:13px 12px; border-radius:12px; color:#f3f0e7; background:#101713; border:1px solid #57604d; color-scheme:dark;}
+#editModal input:focus,#editModal textarea:focus{outline:2px solid #d9bd7f; outline-offset:2px;}
+#editModal .modal-footer{border-top:1px solid #39443c; gap:12px;}
+#editModal button{min-height:44px;}
+#editSaveBtn{background:#e8cd8c; color:#211c12; font-weight:750;}
+#editModal .error{padding:12px; border:1px solid #c5796d; border-radius:10px; line-height:1.5;}
+@media(max-width:760px){
+  .live-card{display:grid; grid-template-columns:1fr auto; gap:12px; padding:16px; border-radius:18px;}
+  .live-main{min-width:0;}.live-status{align-self:start;}
+  .live-anoms{grid-column:1/-1; max-width:none;}
+  .live-actions{grid-column:1/-1; display:grid; grid-template-columns:repeat(2,minmax(0,1fr));}
+  .live-actions .live-correct{grid-column:2;}
+  .live-name{font-size:17px;}.live-times{font-size:13px;}
+  #editModal{max-height:calc(100dvh - 16px); width:calc(100vw - 16px); border-radius:20px;}
+  #editModal .modal-header,#editModal .modal-footer{padding:16px;}
+  #editModal .modal-body{padding:0 16px 16px;}
+  #editModal .form-row{grid-template-columns:1fr;}
+  #editModal .modal-footer{padding-bottom:max(16px,env(safe-area-inset-bottom));}
+  #editModal .modal-footer button{flex:1;}
+}
+
+body.time-correction-open{overflow:hidden;}
+#editModal{max-width:calc(100vw - 16px);}
+#editModal .modal-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+#editModal .modal-header>div{min-width:0;}
+#editModal .modal-header button{flex:none;}
+#editModal .modal-body{display:block;}
+#editModal .form-row:has(#editOutField.hidden){grid-template-columns:1fr;}
+.live-status{display:flex;flex-direction:column;align-items:flex-start;gap:7px;}
+.live-status .corrected{color:#c9dfcd;border-color:#638063;background:#29422f;}

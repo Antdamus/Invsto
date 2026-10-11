@@ -685,6 +685,7 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
     const ap = approvalById.get(r.id) || {};
     const rec = {
       id: r.id,
+      employee_id: employeeId,
       clock_in: r.clock_in,
       clock_out: r.clock_out,
       duration_ms: durMs,
@@ -992,11 +993,8 @@ function renderDrawerList(shifts){
       ` : ``}
     ` : ``;
 
-    const editBtn = s.is_deleted
-      ? ``
-      : s.is_open
-      ? `<button class="btn small ghost" type="button" disabled title="Open shifts can be adjusted after clock-out">Adjust time</button>`
-      : `<button class="btn small ghost" type="button" data-edit-id="${s.id}">Adjust time</button>`;
+    const editBtn = s.is_deleted ? ``
+      : `<button class="btn small ghost" type="button" data-edit-id="${s.id}">Correct time</button>`;
 
     const closeBtn = (s.is_open && !s.is_deleted)
       ? `<button class="btn small primary-action" type="button" data-close-id="${s.id}">Close shift</button>`
@@ -1124,7 +1122,8 @@ function renderDrawerList(shifts){
 
       <div class="shift-actions">
         <button class="btn small ghost" type="button" data-audit-id="${s.id}">Audit trail</button>
-        ${closeBtn || editBtn}
+        ${editBtn}
+        ${closeBtn}
         ${approvalBtns}
         ${deleteBtn}
       </div>
@@ -1208,8 +1207,8 @@ function renderAuditList(container, audits, shiftId){
     const fields=Array.isArray(a.fields_changed)?a.fields_changed:[];
     const oldIn=a.old_value?.clock_in, oldOut=a.old_value?.clock_out, newIn=a.new_value?.clock_in, newOut=a.new_value?.clock_out;
     const diffs=[];
-    if(fields.includes('clock_in')) diffs.push(`<div>Clock-in: <code>${escapeHtml(fmtLocal(oldIn))}</code> / <code>${escapeHtml(fmtLocal(newIn))}</code></div>`);
-    if(fields.includes('clock_out')) diffs.push(`<div>Clock-out: <code>${escapeHtml(fmtLocal(oldOut))}</code> / <code>${escapeHtml(fmtLocal(newOut))}</code></div>`);
+    if(fields.includes('clock_in')) diffs.push(`<div>Clock-in · Before <code>${escapeHtml(fmtLocal(oldIn))}</code> → After <code>${escapeHtml(fmtLocal(newIn))}</code></div>`);
+    if(fields.includes('clock_out')) diffs.push(`<div>Clock-out · Before <code>${escapeHtml(oldOut ? fmtLocal(oldOut) : 'Open')}</code> → After <code>${escapeHtml(newOut ? fmtLocal(newOut) : 'Open')}</code></div>`);
     const canRevert = !!(oldIn && oldOut && (fields.includes('clock_in') || fields.includes('clock_out')));
     const actionLabel = fields.find(f => String(f || '').startsWith('manual_')) || 'time_edit';
     return `
@@ -1334,35 +1333,118 @@ async function saveWaiveNote(){
 
 
 
-function openEditModal(shift){ editingShiftId=shift.id; qs('editIn').value=toDatetimeLocalValue(shift.clock_in); qs('editOut').value=toDatetimeLocalValue(shift.clock_out); qs('editReason').value=''; qs('editError').textContent=''; show(qs('editError'),false); updateEditDuration(); qs('editModal').classList.add('open'); qs('editModal').classList.remove('hidden'); qs('editModalBackdrop').classList.add('show'); qs('editModalBackdrop').classList.remove('hidden'); qs('editIn').focus(); }
-function closeEditModal(){ editingShiftId=null; saving=false; qs('editModal').classList.remove('open'); qs('editModalBackdrop').classList.remove('show'); setTimeout(()=>{ qs('editModal').classList.add('hidden'); qs('editModalBackdrop').classList.add('hidden'); },180); }
-function updateEditDuration(){ const a=qs('editIn').value, b=qs('editOut').value; if(!a||!b){ qs('editDuration').textContent='—'; return; } const diff=new Date(b)-new Date(a); qs('editDuration').textContent = diff>0? fmtDurationHM(diff):'—'; }
+let editingShift = null, editTimeZone = 'America/New_York', editReturnFocus = null;
+async function openLiveCorrection(entryId, displayName){
+  try {
+    await ensureStoresCache();
+    const {data, error} = await supabaseClient.from('time_entries').select('id,employee_id,store_id,clock_in,clock_out').eq('id',entryId).single();
+    if (error) throw error;
+    openEditModal({...data, display_name:displayName});
+  } catch(err){ showToast(err?.message || 'Could not load this shift.', 'err'); }
+}
+function openEditModal(shift){
+  editingShiftId=shift.id; editingShift={...shift}; editReturnFocus=document.activeElement;
+  document.body.classList.add('time-correction-open');
+  editTimeZone=storesById.get(shift.store_id)?.timezone || 'America/New_York';
+  qs('editWorker').textContent=shift.display_name || drawerContext.displayName || 'Employee';
+  qs('editZone').textContent=`${storeNameById(shift.store_id) || 'Store'} · Times in ${editTimeZone.replaceAll('_',' ')}`;
+  qs('editOriginal').textContent=`${formatCorrectionTime(shift.clock_in)} → ${shift.clock_out ? formatCorrectionTime(shift.clock_out) : 'Still clocked in'}`;
+  qs('editIn').value=TimeCorrection.localValue(shift.clock_in,editTimeZone);
+  qs('editOut').value=TimeCorrection.localValue(shift.clock_out,editTimeZone);
+  qs('editOut').disabled=!shift.clock_out;
+  qs('editOut').required=!!shift.clock_out;
+  show(qs('editOutField'),!!shift.clock_out); show(qs('editOpenNotice'),!shift.clock_out);
+  qs('editReason').value=''; setEditError(''); updateEditDuration();
+  qs('editModal').classList.add('open'); qs('editModal').classList.remove('hidden');
+  qs('editModalBackdrop').classList.add('show'); qs('editModalBackdrop').classList.remove('hidden');
+  qs('editIn').focus();
+}
+function formatCorrectionTime(value){
+  return new Date(value).toLocaleString([], {timeZone:editTimeZone, month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'});
+}
+function closeEditModal(){
+  if(saving) return;
+  editingShiftId=null; editingShift=null;
+  document.body.classList.remove('time-correction-open');
+  qs('editModal').classList.remove('open'); qs('editModalBackdrop').classList.remove('show');
+  qs('editModal').classList.add('hidden'); qs('editModalBackdrop').classList.add('hidden');
+  editReturnFocus?.focus();
+}
+function correctionValues(){
+  return {
+    start:TimeCorrection.toISO(qs('editIn').value,editTimeZone,editingShift.clock_in),
+    end:editingShift.clock_out ? TimeCorrection.toISO(qs('editOut').value,editTimeZone,editingShift.clock_out) : null
+  };
+}
+function updateEditDuration(){
+  if(!editingShift) return;
+  try {
+    const {start,end}=correctionValues();
+    const endMs=end ? Date.parse(end) : Date.now();
+    const diff=endMs-Date.parse(start);
+    const before=(editingShift.clock_out ? Date.parse(editingShift.clock_out) : endMs)-Date.parse(editingShift.clock_in);
+    qs('editDuration').textContent=diff>0 ? `${fmtDurationHM(diff)}${end ? '' : ' so far'}` : 'Check the times';
+    const delta=Math.round((diff-before)/60000);
+    qs('editDifference').textContent=delta ? `${delta>0 ? '+' : '−'}${fmtDurationHM(Math.abs(delta)*60000)} compared with the recorded shift` : 'No time change';
+  } catch(err){ qs('editDuration').textContent='Check the times'; qs('editDifference').textContent=err.message; }
+}
 function setEditError(msg){ const el=qs('editError'); el.textContent=msg||''; show(el,!!msg); }
 async function saveEdit(){
-  if(saving||!editingShiftId) return;
-  const iv=qs('editIn').value, ov=qs('editOut').value, reason=(qs('editReason').value||'').trim();
-  if(!iv||!ov) return setEditError('Both times are required.');
-  const s=new Date(iv), e=new Date(ov); if(isNaN(s)||isNaN(e)) return setEditError('Invalid date/time values.'); if(e<=s) return setEditError('Clock-out must be after clock-in.'); if(reason.length<3) return setEditError('Reason is required (min 3 characters).');
-  setEditError(''); saving=true; qs('editSaveBtn').disabled=true; qs('editSaveBtn').textContent='Saving…';
-  try{
-    const inISO=localInputToOffsetISO(iv), outISO=localInputToOffsetISO(ov);
-    const { error } = await supabaseClient.rpc('admin_update_shift_time', { _time_entry_id: editingShiftId, _new_clock_in: inISO, _new_clock_out: outISO, _reason: reason });
-    if (error) throw error;
-    showToast('Shift updated','ok'); closeEditModal();
-    auditCache.delete(editingShiftId);
-    const { employeeId, monthStart } = drawerContext;
-    const shifts=await fetchWorkerShifts(employeeId, monthStart); renderDrawerSummary(shifts); renderDrawerList(shifts); await refreshOverviewSummary();
-  }catch(err){ console.error(err); setEditError(err?.message||'Failed to save changes'); }
-  finally{ saving=false; qs('editSaveBtn').disabled=false; qs('editSaveBtn').textContent='Save'; }
+  if(saving||!editingShift) return;
+  const shift={...editingShift};
+  const reason=qs('editReason').value.trim();
+  let values;
+  try { values=correctionValues(); } catch(err){ return setEditError(err.message); }
+  const {start,end}=values;
+  if(Date.parse(start)>Date.now() || (end && Date.parse(end)>Date.now())) return setEditError('Worked times cannot be in the future.');
+  if(end && Date.parse(end)<=Date.parse(start)) return setEditError('Clock-out must be after clock-in.');
+  if(reason.length<3) { setEditError('Please explain why this time is being corrected.'); qs('editReason').focus(); return; }
+  if(Date.parse(start)===Date.parse(shift.clock_in) && (!end || Date.parse(end)===Date.parse(shift.clock_out))) return setEditError('Change a time before saving a correction.');
+  setEditError(''); saving=true;
+  ['editSaveBtn','editCloseBtn','editCancelBtn','editIn','editOut','editReason'].forEach(id=>qs(id).disabled=true);
+  qs('editSaveBtn').textContent='Saving…';
+  let saved=false;
+  try {
+    const {error}=await supabaseClient.rpc('admin_correct_shift_time', {
+      _time_entry_id:shift.id, _expected_clock_in:shift.clock_in, _expected_clock_out:shift.clock_out,
+      _new_clock_in:start, _new_clock_out:end, _reason:reason
+    });
+    if(error) throw error;
+    saved=true; auditCache.delete(shift.id);
+  } catch(err){ setEditError(err?.message || 'The correction could not be saved. Please try again.'); }
+  finally {
+    saving=false;
+    ['editSaveBtn','editCloseBtn','editCancelBtn','editIn','editReason'].forEach(id=>qs(id).disabled=false);
+    qs('editOut').disabled=!shift.clock_out; qs('editSaveBtn').textContent='Save correction';
+  }
+  if(!saved) return;
+  closeEditModal(); showToast('Time corrected. The reason and original times are saved in the audit trail.','ok');
+  try {
+    if(drawerContext.employeeId===shift.employee_id){
+      const shifts=await fetchWorkerShifts(drawerContext.employeeId,drawerContext.monthStart);
+      renderDrawerSummary(shifts); renderDrawerList(shifts);
+    }
+    await Promise.all([refreshOverviewSummary(),overviewApi?.loadLiveNow()]);
+  } catch(err){ console.warn(err); showToast('Correction saved. Refresh to reload the latest totals.','ok'); }
 }
 function wireEditModal(){
-  qs('editCloseBtn').addEventListener('click', closeEditModal);
-  qs('editCancelBtn').addEventListener('click', closeEditModal);
-  qs('editModalBackdrop').addEventListener('click', closeEditModal);
-  qs('editIn').addEventListener('input', updateEditDuration);
-  qs('editOut').addEventListener('input', updateEditDuration);
-  qs('editSaveBtn').addEventListener('click', saveEdit);
-  document.addEventListener('keydown',(e)=>{ const open=!qs('editModal').classList.contains('hidden'); if(!open) return; if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){ e.preventDefault(); const b=qs('editSaveBtn'); if(b&&!b.disabled) b.click(); }});
+  qs('editCloseBtn').addEventListener('click',closeEditModal);
+  qs('editCancelBtn').addEventListener('click',closeEditModal);
+  qs('editModalBackdrop').addEventListener('click',closeEditModal);
+  qs('editIn').addEventListener('input',updateEditDuration);
+  qs('editOut').addEventListener('input',updateEditDuration);
+  qs('editSaveBtn').addEventListener('click',saveEdit);
+  document.addEventListener('keydown',e=>{
+    if(qs('editModal').classList.contains('hidden')) return;
+    if(e.key==='Escape'){ e.preventDefault(); e.stopImmediatePropagation(); closeEditModal(); }
+    if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){ e.preventDefault(); saveEdit(); }
+    if(e.key==='Tab'){
+      const items=[...qs('editModal').querySelectorAll('button:not(:disabled),input:not(:disabled),textarea:not(:disabled)')].filter(el=>el.getClientRects().length);
+      const first=items[0],last=items[items.length-1];
+      if(e.shiftKey && document.activeElement===first){e.preventDefault();last?.focus();}
+      else if(!e.shiftKey && document.activeElement===last){e.preventDefault();first?.focus();}
+    }
+  },true);
 }
 
 let shiftAdminMode = null;
@@ -1668,6 +1750,11 @@ async function fetchLiveNow(){
   if (error) throw error;
   const rows = entries || [];
   const ids = rows.map(r => r.id);
+  const correctedIds=new Set();
+  if(ids.length){
+    const {data:corrections}=await supabaseClient.from('shift_adjustments').select('time_entry_id').in('time_entry_id',ids);
+    (corrections || []).forEach(a=>correctedIds.add(a.time_entry_id));
+  }
 
   // 2) open breaks for those shifts
   let openBreaks = [];
@@ -1694,6 +1781,7 @@ async function fetchLiveNow(){
     const codes = Array.isArray(r.schedule_codes) ? r.schedule_codes : [];
     out.push({
       entry_id: r.id,
+      corrected: correctedIds.has(r.id),
       employee_id: r.employee_id,
       display_name: nameById.get(r.employee_id) || '(unknown)',
       clock_in: r.clock_in,
@@ -2009,13 +2097,7 @@ if (shiftCard?.dataset?.employeeId && shiftCard?.dataset?.monthStart) {
       if (editBtn) {
 const id = editBtn.getAttribute('data-edit-id');
 
-// If we don't have it yet (because we just switched employee), fetch then open
-let shift = currentShiftsById.get(id);
-if (!shift && drawerContext?.employeeId && drawerContext?.monthStart) {
-  await fetchWorkerShifts(drawerContext.employeeId, drawerContext.monthStart);
-  shift = currentShiftsById.get(id);
-}
-if (shift) openEditModal(shift);
+await openLiveCorrection(id, drawerContext.displayName);
 return;
 
       }
@@ -3221,6 +3303,7 @@ function setupOverview() {
     fetchMonthlyPendingReviewCounts,
 
     // This is the bridge into your existing drawer system:
+    correctLiveTime: openLiveCorrection,
     openWorkerDrawer: ({ employeeId, monthStart, displayName }) => {
       // Reuse the exact drawer open flow you already have
       drawerContext = { employeeId, monthStart, displayName };
