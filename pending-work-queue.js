@@ -1,7 +1,7 @@
 /* Explicit blockers decide the work queue; ordinary customer tasks remain notes. */
 (() => {
   const records = new Map(), known = new Set();
-  let view = 'ready', watchFilter = '', failure = '', generation = 0, started = false, timer;
+  let view = 'ready', watchFilter = '', failure = '', generation = 0, started = false, timer, filterRows = [];
   let dialog, context, requestId, saving = false, dialogRun = 0;
   const esc = value => escapeHtml(String(value ?? ''));
   const openRows = rows => rows.filter(isOpenOrderLine);
@@ -11,10 +11,11 @@
   const pendingCgl = key => active(key).filter(b => b.kind === 'cgl');
   const missingWatches = key => active(key).filter(b => b.kind === 'watch_missing');
   const missingFor = id => [...records.values()].find(b => b.kind === 'watch_missing' && b.active && b.line_ids.includes(id));
+  const isNotFound = row => isOpenOrderLine(row) && row.item_search?.is_missing === true;
   const isKnown = key => known.has(key);
   const $ = id => document.getElementById(id);
   const stamp = value => formatDate(value);
-  function reset() { generation++; records.clear(); known.clear(); failure = ''; }
+  function reset() { generation++; records.clear(); known.clear(); failure = ''; filterRows = []; }
   function snapshot() { return JSON.stringify([...records.values()].sort((a,b) => a.id.localeCompare(b.id))); }
   async function load(rows = state.orders, {paint = true} = {}) {
     const run = ++generation, before = snapshot(), previous = new Map([...records].map(([id,b])=>[id,{key:b.buyer_key,value:JSON.stringify(b)}])), beforeKnown = [...known].sort().join(), beforeFailure = failure;
@@ -61,9 +62,10 @@
     return Boolean($('order-search')?.value.trim() || state.selectedLiveLot || state.ebayLaunchBuyerKeys?.size || state.ebayLaunchOrderNumbers?.size);
   }
   function filter(rows) {
+    filterRows=rows;
     const groups=groupLinesByBuyer(rows), history=$('order-status-filter')?.value==='fulfilled';
     const searching=isSearch();
-    const counts={ready:0,waiting:0,all:groups.length,cgl:0,missing:0,checking:0};
+    const counts={ready:0,waiting:0,all:groups.length,cgl:0,missing:0,'not-found':rows.filter(isNotFound).length,checking:0};
     for(const g of groups){
       if(!g.lines.some(isOpenOrderLine))continue;
       if(!isKnown(g.key))counts.checking++;
@@ -75,20 +77,26 @@
       b.setAttribute('aria-pressed',String(!searching&&b.dataset.workView===view));b.disabled=history||searching;
       const counter=b.querySelector('[data-work-count]');if(counter)counter.textContent=counts.checking?'…':String(counts[b.dataset.workView]);
     });
-    for(const kind of ['cgl','missing']){
+    for(const kind of ['cgl','missing','not-found']){
       const button=$(`pending-work-${kind}`);
-      if(button){button.setAttribute('aria-pressed',String(!searching&&watchFilter===kind));button.disabled=history||searching;button.querySelector('span').textContent=counts.checking?'…':String(counts[kind]);}
+      if(button){button.setAttribute('aria-pressed',String(!searching&&watchFilter===kind));button.disabled=history||searching;button.querySelector('span').textContent=counts.checking&&kind!=='not-found'?'…':String(counts[kind]);}
     }
     const help=$('pending-work-status');
     if(help){help.innerHTML=failure?`${esc(failure)} <button type="button" data-work-retry>Retry</button>`
-      :history?'Completed orders are shown here.':searching?'Search and scans include ready and waiting orders.':counts.checking?'Checking which orders are ready…':'Waiting orders keep their shipping deadlines. Counts are buyer groups; watch filters count item lines.';}
+      :history?'Completed orders are shown here.':searching?'Search and scans include ready and waiting orders.':counts.checking?'Checking which orders are ready…':watchFilter==='not-found'?'Items explicitly marked not found, across Ready and Waiting. Counts are item lines; each buyer’s package stays together.':'Waiting orders keep their shipping deadlines. Counts are buyer groups; item filters count lines.';}
     if(history||searching)return rows;
     const keys=new Set(groups.filter(g=>{
+      if(watchFilter==='not-found'&&!g.lines.some(isNotFound))return false;
       if(!isKnown(g.key))return view==='all';
       const blockers=active(g.key);
-      return (view==='all'||(view==='waiting')===Boolean(blockers.length))&&(!watchFilter||(watchFilter==='cgl'?pendingCgl(g.key).length:missingWatches(g.key).length));
+      return (view==='all'||(view==='waiting')===Boolean(blockers.length))&&(!watchFilter||watchFilter==='not-found'||(watchFilter==='cgl'?pendingCgl(g.key).length:missingWatches(g.key).length));
     }).map(g=>g.key));
     return rows.filter(r=>keys.has(getBuyerKey(r)));
+  }
+  function itemSearchChanged() {
+    // The existing item-search stream supplies changes; no extra reads or writes.
+    if(watchFilter==='not-found'&&!isSearch())refreshView();
+    else filter(filterRows);
   }
   function summaryCounts() {
     const groups=groupLinesByBuyer(openRows(state.orders));
@@ -228,7 +236,7 @@
   function start() {
     if(started)return;started=true;
     document.addEventListener('click',event=>{
-      const b=event.target.closest('[data-work-view],[data-work-summary-view],[data-work-buyer],[data-work-cgl-add],[data-work-cgl-manage],[data-work-missing-add],[data-work-missing-manage],[data-work-retry],#pending-work-cgl,#pending-work-missing,#summary-cgl-button,#summary-missing-button');if(!b)return;
+      const b=event.target.closest('[data-work-view],[data-work-summary-view],[data-work-buyer],[data-work-cgl-add],[data-work-cgl-manage],[data-work-missing-add],[data-work-missing-manage],[data-work-retry],#pending-work-cgl,#pending-work-missing,#pending-work-not-found,#summary-cgl-button,#summary-missing-button');if(!b)return;
       event.preventDefault();event.stopPropagation();
       if(b.disabled||saving)return;
       if(b.hasAttribute('data-work-retry')){void load();return;}
@@ -237,7 +245,7 @@
       if(b.dataset.workMissingManage){const row=state.orders.find(r=>r.id===b.dataset.workMissingManage);if(row)void show(getBuyerKey(row),{onlyMissing:row.id});return;}
       if(b.dataset.workCglManage){const row=state.orders.find(r=>r.id===b.dataset.workCglManage);if(row)void show(getBuyerKey(row),{onlyCgl:row.id});return;}
       if(b.dataset.workBuyer){void show(b.dataset.workBuyer);return;}
-      if(['pending-work-cgl','pending-work-missing'].includes(b.id)){const kind=b.id==='pending-work-cgl'?'cgl':'missing';watchFilter=watchFilter===kind?'':kind;if(watchFilter)view='waiting';}
+      if(['pending-work-cgl','pending-work-missing','pending-work-not-found'].includes(b.id)){const kind=b.id.slice('pending-work-'.length);watchFilter=watchFilter===kind?'':kind;if(watchFilter)view=kind==='not-found'?'all':'waiting';}
       else if(['summary-cgl-button','summary-missing-button'].includes(b.id)){watchFilter=b.id==='summary-cgl-button'?'cgl':'missing';view='waiting';state.orderDueFilter='all';clearOrderSearch({apply:false});}
       else{view=b.dataset.workView||b.dataset.workSummaryView;watchFilter='';if(b.dataset.workDue){state.orderDueFilter=b.dataset.workDue;clearOrderSearch({apply:false});}}
       applyOrderFilters();
@@ -247,6 +255,6 @@
     window.addEventListener('order-certificate-changed',async()=>{await load();if(dialog?.open&&!saving)await renderExisting();});
     window.setInterval(schedule,60000);
   }
-  const emptyMessage=()=>failure?'Waiting status is unavailable. Use Retry above.':!known.size&&state.orders.some(isOpenOrderLine)?'Checking order work status…':view==='waiting'&&!isSearch()?watchFilter==='missing'?'No watches are marked missing in this view.':watchFilter==='cgl'?'No watches are waiting for CGL in this view.':'No orders are waiting in this view. Choose Ready to work to continue.':'No orders match this view.';
-  window.OGPendingWork={reset,load,filter,summaryCounts,control,summary,line,start,assertReady,emptyMessage};
+  const emptyMessage=()=>watchFilter==='not-found'&&!isSearch()?'No pending items are marked not found in this view.':failure?'Waiting status is unavailable. Use Retry above.':!known.size&&state.orders.some(isOpenOrderLine)?'Checking order work status…':view==='waiting'&&!isSearch()?watchFilter==='missing'?'No watches are marked missing in this view.':watchFilter==='cgl'?'No watches are waiting for CGL in this view.':'No orders are waiting in this view. Choose Ready to work to continue.':'No orders match this view.';
+  window.OGPendingWork={reset,load,filter,summaryCounts,control,summary,line,start,assertReady,emptyMessage,itemSearchChanged};
 })();

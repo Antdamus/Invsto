@@ -29,6 +29,13 @@ its release is audited. A correction reason can clear a mistaken marker. Finding
 the watch does not clear CGL or other blockers. Apply migration
 `20261011012000_pending_missing_watches.sql` before publishing this control.
 
+**Item not found** filters the existing explicit not-found markers across Ready
+and Waiting. The count is pending item lines; buyer packages stay together. Items
+with no marker are not treated as missing. Marking an item found removes it from
+the count and removes its buyer from this view once no other items are missing.
+The existing item-search update stream keeps this filter current. This filter
+does not create tasks, holds, or new item statuses.
+
 Blockers are audited in `pending_order_work_events` and scoped to saved line IDs
 in `pending_order_work_blocker_lines`, with normalized buyer grouping. They do not
 follow later purchases after their original lines leave the pending queue.

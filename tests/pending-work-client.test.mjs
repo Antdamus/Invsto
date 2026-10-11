@@ -7,16 +7,16 @@ function fixture(){
  const rows=[{id:'a',key:'buyer'},{id:'b',key:'buyer'},{id:'c',key:'other'}];
  const elements={'order-search':{value:''},'order-status-filter':{value:'pending'}}, listeners={},reads=[];
  const context={state:{orders:rows},escapeHtml:s=>s.replaceAll('<','&lt;'),formatDate:s=>s,
- isOpenOrderLine:()=>true,getBuyerKey:r=>r.key,
+ isOpenOrderLine:r=>r.line_status!=='fulfilled',getBuyerKey:r=>r.key,
  groupLinesByBuyer:rs=>[...new Set(rs.map(r=>r.key))].map(key=>({key,lines:rs.filter(r=>r.key===key)})),
- applyOrderFilters(){},clearOrderSearch(){},requestAnimationFrame(){},setTimeout(){},clearTimeout(){},
+ applyOrderFilters(){context.state.filteredOrders=context.window.OGPendingWork.filter(rows);},clearOrderSearch(){},requestAnimationFrame(){},setTimeout(){},clearTimeout(){},
  console:{warn(){}},supabase:{rpc:()=>({range:()=>new Promise(resolve=>reads.push(resolve))})},
  document:{getElementById:id=>elements[id],querySelectorAll:()=>[],addEventListener:(event,fn)=>listeners[event]=fn},
  window:{OGOrderWatches:{marked:()=>true},scrollBy(){},addEventListener(){},setInterval(){}}};
  vm.runInNewContext(source,context);const api=context.window.OGPendingWork;api.start();
  const click=(dataset,id)=>listeners.click({target:{closest:()=>({dataset,id,hasAttribute:()=>false})},preventDefault(){},stopPropagation(){}});
  const load=async(data=[])=>{const promise=api.load(rows,{paint:false});reads.at(-1)({data});await promise;};
- return{api,load,reads,rows,click,elements};
+ return{api,load,reads,rows,click,elements,state:context.state};
 }
 const blocker=(override={})=>({id:'hold',buyer_key:'buyer',kind:'task',task_id:'task',task_source:'team',active:true,line_ids:['a','b'],reason:'Waiting for clasp',assignee:'Otello',created_at:'2026-10-10',...override});
 test('ready and waiting partition whole buyers; counts cannot imply unknown orders are ready; search bypasses hiding',async()=>{
@@ -57,4 +57,30 @@ test('missing watch filter keeps the buyer together, counts lines, and is indepe
  assert.equal(f.api.filter(f.rows).length,0);assert.match(f.api.emptyMessage(),/No watches are marked missing/);
  f.click({},'pending-work-cgl');assert.deepEqual(Array.from(f.api.filter(f.rows),r=>r.id),['a','b']);
  f.click({workView:'ready'});assert.deepEqual(Array.from(f.api.filter(f.rows),r=>r.id),['c']);
+});
+
+test('item not found includes ready and waiting buyers, excludes unmarked and completed lines, and follows found updates',async()=>{
+ const f=fixture(),counter={textContent:''};
+ f.elements['pending-work-not-found']={setAttribute(){},querySelector:()=>counter};
+ f.rows[0].item_search={is_missing:true};f.rows[2].item_search={is_missing:true};
+ await f.load([blocker()]);
+ f.click({},'pending-work-not-found');
+ assert.deepEqual(Array.from(f.state.filteredOrders,r=>r.id),['a','b','c']);assert.equal(counter.textContent,'2');
+ // One buyer is waiting and the other is ready; both must be visible.
+ f.rows[0].item_search={is_missing:false};f.api.itemSearchChanged();
+ assert.deepEqual(Array.from(f.state.filteredOrders,r=>r.id),['c']);assert.equal(counter.textContent,'1');
+ f.rows[2].line_status='fulfilled';f.api.itemSearchChanged();
+ assert.equal(f.state.filteredOrders.length,0);assert.equal(counter.textContent,'0');
+ assert.match(f.api.emptyMessage(),/No pending items are marked not found/);
+ f.rows[1].item_search={is_missing:true};f.api.itemSearchChanged();
+ assert.deepEqual(Array.from(f.state.filteredOrders,r=>r.id),['a','b']);
+ f.elements['order-search'].value='buyer';assert.equal(f.api.filter(f.rows).length,3);
+});
+
+test('item not found counts honor the date-filtered input and are independent of hold loading',()=>{
+ const f=fixture(),counter={textContent:''};
+ f.elements['pending-work-not-found']={setAttribute(){},querySelector:()=>counter};
+ f.rows[0].item_search={is_missing:true};f.rows[2].item_search={is_missing:true};
+ f.click({},'pending-work-not-found');
+ assert.deepEqual(Array.from(f.api.filter(f.rows.slice(0,2)),r=>r.id),['a','b']);assert.equal(counter.textContent,'1');
 });

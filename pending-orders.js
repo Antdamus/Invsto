@@ -3697,7 +3697,7 @@ async function setItemMissing(lineId, missing) {
     for (const current of [line, ...state.orders.filter(row => row.id === lineId)]) current.item_search = saved;
     setStatus(missing ? "Item marked not found. The team can see which item needs locating." : "Item marked found.", "success");
   } catch (error) { setStatus(error.message || "Could not save the item status.", "error"); }
-  finally { itemSearchBusy.delete(lineId); repaintItemSearch([line]); }
+  finally { itemSearchBusy.delete(lineId); repaintItemSearch([line]); window.OGPendingWork?.itemSearchChanged(); }
 }
 async function refreshItemSearch(lineIds = state.orders.map(line => line.id)) {
   const ids = [...new Set(lineIds)].filter(id => !itemSearchBusy.has(id));
@@ -3717,7 +3717,7 @@ async function refreshItemSearch(lineIds = state.orders.map(line => line.id)) {
       if (next && line.item_search && new Date(next.updated_at) < new Date(line.item_search.updated_at)) return;
       if (JSON.stringify(next) !== JSON.stringify(line.item_search || null)) { line.item_search = next; changed.push(line); }
     });
-    if (changed.length) repaintItemSearch(changed);
+    if (changed.length) { repaintItemSearch(changed); window.OGPendingWork?.itemSearchChanged(); }
   }
 }
 function startItemSearchUpdates() {
