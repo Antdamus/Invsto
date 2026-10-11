@@ -582,6 +582,10 @@ Return exactly this structure:
       status: response.status,
       ok: response.ok,
       model,
+      // Keep provider identity in private server logs; never return the API key.
+      organization: response.headers.get("openai-organization"),
+      requestId: response.headers.get("x-request-id"),
+      keySuffix: apiKey.slice(-4),
     });
 
     if (!response.ok) {
