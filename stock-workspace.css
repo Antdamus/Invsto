@@ -148,5 +148,6 @@ body.stock-body { --stock-ink:#f4f0e6; --stock-muted:#b6c3b7; --stock-gold:#ead3
 .stock-copy-review .stock-secondary-btn { min-height:44px; padding:10px 16px; border:1px solid #7e805b; border-radius:10px; background:#26372c; color:#f4e7c8; cursor:pointer; }
 .stock-copy-review button:disabled { opacity:.55; cursor:wait; }
 .stock-copy-review textarea { margin:10px 0; width:100%; box-sizing:border-box; }
-.stock-copy-review-badge { border-color:#cda967; color:#ead197; cursor:pointer; min-height:36px; }
+.stock-body .stock-copy-review-badge { width:auto; height:auto; min-height:36px; border-color:#cda967; color:#ead197; cursor:pointer; transform:none; }
+#edit-item-form .stock-copy-result label { color:#ead197; }
 .stock-copy-result[hidden] { display:none; }
