@@ -22,6 +22,12 @@
   function watchStoneSettingLabel(watch = {}, stone = '') {
     return {factory:'Factory-set stones', aftermarket:'Aftermarket stone setting', unknown:'Setting origin not confirmed'}[watchStoneSetting(watch, stone)] || 'Not applicable';
   }
+  function watchCardStatus(watch = {}) {
+    return ['yes','no'].includes(watch.cardIncluded) ? watch.cardIncluded : '';
+  }
+  function watchCardLabel(watch = {}) {
+    return {yes:'Card included',no:'No card included'}[watchCardStatus(watch)] || 'Card not checked';
+  }
   function hasAftermarket(watch = {}, stone = '') {
     const entered = [watchModifications(watch), watch.materials, watch.name].map(text).join('; ');
     return watchStoneSetting(watch, stone) === 'aftermarket' || /\bafter[ -]?market\b/i.test(entered.replace(/\b(?:no|not|without|sin)\s+(?:any\s+)?after[ -]?market\b/gi, ''));
@@ -52,6 +58,7 @@
     safe.modificationNotes = redactWatchSerial(watch.modificationNotes ?? watch.modifications, watch);
     safe.modificationPreset = text(watch.modificationPreset);
     safe.stoneSetting = watchStoneSetting(watch, stone);
+    safe.cardIncluded = watchCardStatus(watch);
     return safe;
   }
   function stoneCategories(value) {
@@ -111,6 +118,16 @@
     };
     add(watch.materials, 'Materials: ');
     add(watch.braceletFit, 'Measured bracelet / wrist fit: ');
+    // Keep the current physical item's choice authoritative, including common AI wording.
+    let cardDescribed = false;
+    result = result.replace(/\b(?:no|without)\s+(?:an?\s+|the\s+)?(?:(?:original|brand|warranty)[\s/]+)*cards?\b(?:\s+(?:is\s+)?included)?[.!]?\s*|\b(?:(?:original|brand|warranty)[\s/]+)*cards?\s+(?:is\s+)?(?:not )?included\b[.!]?\s*|\b(?:with|includes?|including|accompanied by)\s+(?:an?\s+|the\s+)?(?:(?:original|brand|warranty)[\s/]+)*cards?\b[.!]?\s*/gi, statement => {
+      const negative = /^(?:no|without)\b|\bnot included\b/i.test(statement);
+      const matching = negative ? watch.cardIncluded === 'no' : watch.cardIncluded === 'yes';
+      cardDescribed ||= matching;
+      return matching ? statement : '';
+    }).trim();
+    if (!cardDescribed && watch.cardIncluded === 'yes') add('Original brand / warranty card included');
+    if (!cardDescribed && watch.cardIncluded === 'no') add('No brand / warranty card included');
     const preset = watchModifications({...watch, modificationNotes:''});
     const modifications = text(watch.modificationNotes).replace(preset, '').replace(/^[.\s]+/, '');
     const movementScopePresent = watch.modificationPreset === 'movement_only'
@@ -135,5 +152,5 @@
     const seen = new Set();
     return paragraphs.filter(p => {const key=normalized(p);if(seen.has(key))return false;seen.add(key);return true;}).join('\n\n');
   }
-  root.InventoryItemFacts = { stoneChoices, withoutSerial, hasAftermarket, stoneCategories, categories, watchStoneSetting, watchStoneSettingLabel, watchModifications, redactWatchSerial, publicWatchDetails, watchTitle, watchDescription };
+  root.InventoryItemFacts = { stoneChoices, withoutSerial, hasAftermarket, stoneCategories, categories, watchStoneSetting, watchStoneSettingLabel, watchCardStatus, watchCardLabel, watchModifications, redactWatchSerial, publicWatchDetails, watchTitle, watchDescription };
 })(globalThis);

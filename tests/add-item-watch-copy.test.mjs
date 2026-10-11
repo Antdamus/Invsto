@@ -81,6 +81,30 @@ const referenceOnlyWatch = {
   itemKind: "watch", watchDetails: { name: "Rolex", model: "126233", materials: "Steel case", modifications: "Aftermarket diamond bezel" },
 };
 
+test('watch card choice reaches AI and unchecked cards never imply absence or inclusion',async()=>{
+  for(const cardIncluded of ['yes','no','']) {
+    const api=handler({ai:true,copy:{generatedTitle:'Watch',generatedDescription:'Polished case.'}});
+    const result=await (await api.invoke({...referenceOnlyWatch,watchDetails:{...referenceOnlyWatch.watchDetails,cardIncluded}})).json();
+    assert.match(api.request().input[1].content[0].text,new RegExp(cardIncluded==='yes'?'Card included':cardIncluded==='no'?'No card included':'Card not checked'));
+    assert.match(api.request().input[0].content[0].text,/does not establish an active warranty/);
+    if(cardIncluded==='yes') assert.match(result.generatedDescription,/Original brand \/ warranty card included/);
+    else if(cardIncluded==='no') assert.match(result.generatedDescription,/No brand \/ warranty card included/);
+    else assert.doesNotMatch(result.generatedDescription,/card/i);
+  }
+});
+
+test('AI cannot override card status, and a legitimate no-card statement is not a positive claim',async()=>{
+  for(const [cardIncluded,description] of [['','Includes a warranty card.'],['','No warranty card included.'],['no','Warranty card included.'],['yes','Without a warranty card.']]) {
+    const api=handler({ai:true,copy:{generatedTitle:'Watch',generatedDescription:description}});
+    const result=await (await api.invoke({...referenceOnlyWatch,watchDetails:{...referenceOnlyWatch.watchDetails,cardIncluded}})).json();
+    assert.ok(!result.generatedDescription.includes(description),'Unsupported claim must be rejected');
+  }
+  const api=handler({ai:true,copy:{generatedTitle:'Watch',generatedDescription:'Polished case. No warranty card included.'}});
+  const result=await (await api.invoke({...referenceOnlyWatch,watchDetails:{...referenceOnlyWatch.watchDetails,cardIncluded:'no'}})).json();
+  assert.match(result.generatedDescription,/Polished case/,'Valid descriptive prose is retained');
+  assert.equal((result.generatedDescription.match(/card included/gi)||[]).length,1);
+});
+
 test('movement-only watches retain disclosure but do not reuse factory exterior dimensions', async()=>{
   const api=handler({ai:true,lookup:research({facts:[{label:'Case dimensions',value:'39.8 mm wide',sourceUrl},{label:'Movement',value:'Automatic',sourceUrl}]}),copy:{generatedTitle:'Watch',generatedDescription:'Custom watch.'}});
   const result=await (await api.invoke({...referenceOnlyWatch,length:'18 inches stale jewelry length',watchDetails:{brand:'Cartier',name:'Santos',model:'126233',modificationPreset:'movement_only',modifications:'Custom dial',braceletFit:'7 inches'}})).json();

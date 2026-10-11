@@ -20,7 +20,7 @@
   const back = document.getElementById("item-step-back");
   const next = document.getElementById("item-step-next");
   const error = document.getElementById("item-step-error");
-  const watchKeys = ["name", "brand", "model", "serial", "department", "condition", "materials", "modificationPreset", "modifications", "braceletFit", "stoneSetting"];
+  const watchKeys = ["name", "brand", "model", "serial", "department", "condition", "materials", "modificationPreset", "modifications", "braceletFit", "stoneSetting", "cardIncluded"];
   const coinLabels = { name: "Name / series", year: "Year / date", country: "Issuing country", denomination: "Denomination", mint: "Mint / mint mark", metal: "Metal", fineness: "Purity (parts per 1,000)", condition: "Reported condition", variety: "Variety / reference", finish: "Strike / finish", fineMetalContent: "Fine metal content", composition: "Composition details", gradingStatus: "Grading status", grade: "Grade as stated", gradingService: "Grading service", certNumber: "Certification number", notes: "Condition notes / alterations" };
   const coinKeys = Object.keys(coinLabels);
   let current = 0;
@@ -169,6 +169,7 @@
       ...(!usesDirectPricing() ? [['Length / measurements',value('assisted-length') || 'Not entered — check this piece','information']] : []),
       ...(isWatch() ? [
         ['Serial · internal',value('watch-serial') || 'Not entered','information'],
+        ['Watch card',window.InventoryItemFacts.watchCardLabel(getWatchDetails()),'information'],
         ['Modifications',getWatchDetails().modifications || 'Not specified','information'],
         ['Factory dimensions', (getWatchDetails().referenceLookup?.facts || []).filter(fact=>/^Case (diameter|dimensions|width|thickness)$/i.test(fact.label)).map(fact=>fact.value).join(' · ') || 'Not confirmed from reference','information'],
         ...(value('watch-braceletFit') ? [['Measured fit',value('watch-braceletFit'),'information']] : []),

@@ -311,7 +311,7 @@ window.editCardModule = (function () {
         document.getElementById("edit-minimum-sale-price").value = item.minimum_sale_price ?? "";
         window.coinEbayStock?.open(item, canViewSensitiveStockFields());
         document.getElementById("edit-watch-details").hidden = !canViewSensitiveStockFields() || !item.watch_details;
-        for (const key of ["brand", "model", "serial", "department", "condition"]) document.getElementById(`edit-watch-${key}`).value = item.watch_details?.[key] || "";
+        for (const key of ["brand", "model", "serial", "department", "condition", "cardIncluded"]) document.getElementById(`edit-watch-${key}`).value = item.watch_details?.[key] || "";
         document.getElementById("edit-price-per-weight").value = item.price_per_weight || "";
         document.getElementById("edit-stock-batch").value = item.stock_batch_size_update || "";
         document.getElementById("edit-photos").value = ""; // clear file input
@@ -833,7 +833,7 @@ window.editCardModule = (function () {
 
         const watchDetails = canViewSensitiveStockFields() && existingItem.watch_details ? {
             ...existingItem.watch_details,
-            ...Object.fromEntries(["brand", "model", "serial", "department", "condition"].map(key => [key, document.getElementById(`edit-watch-${key}`).value.trim()]))
+            ...Object.fromEntries(["brand", "model", "serial", "department", "condition", "cardIncluded"].map(key => [key, document.getElementById(`edit-watch-${key}`).value.trim()]))
         } : null;
         let savedDescription = watchDetails ? window.InventoryItemFacts.watchDescription(description, watchDetails, existingItem.stone_type) : description;
         const coinDetails = canViewSensitiveStockFields() && existingItem.coin_details ? window.coinEbayStock?.getDetails() || existingItem.coin_details : null;

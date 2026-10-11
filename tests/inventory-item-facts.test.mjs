@@ -7,6 +7,49 @@ vm.runInContext(readFileSync(new URL('../inventory-item-facts.js',import.meta.ur
 const facts=context.InventoryItemFacts;
 const plain=value=>JSON.parse(JSON.stringify(value));
 
+test('watch cards distinguish confirmed presence, confirmed absence and unchecked legacy items',()=>{
+  for(const [value,label] of [['yes','Card included'],['no','No card included'],['','Card not checked'],[undefined,'Card not checked'],[true,'Card not checked']]) {
+    const watch={brand:'Cartier',model:'WSSA0018',serial:'PRIVATE-123',cardIncluded:value};
+    assert.equal(facts.watchCardLabel(watch),label);
+    assert.equal(facts.publicWatchDetails(watch).cardIncluded,['yes','no'].includes(value)?value:'');
+    assert.equal(facts.publicWatchDetails(watch).serial,undefined);
+    const copy=facts.watchDescription('A watch.',watch);
+    if(value==='yes') assert.match(copy,/Original brand \/ warranty card included/);
+    else if(value==='no') assert.match(copy,/No brand \/ warranty card included/);
+    else assert.doesNotMatch(copy,/card/i);
+    assert.equal(facts.watchDescription(copy,watch),copy,'Repeated saves are stable');
+  }
+});
+
+test('changing the watch card removes the previous automatic claim without losing other details',()=>{
+  const watch={brand:'Cartier',materials:'Steel case',modificationPreset:'aftermarket_bracelet'};
+  const included=facts.watchDescription('Service receipt included.',{...watch,cardIncluded:'yes'});
+  const absent=facts.watchDescription(included,{...watch,cardIncluded:'no'});
+  assert.doesNotMatch(absent,/Original brand \/ warranty card included/);
+  assert.match(absent,/No brand \/ warranty card included/);
+  const unchecked=facts.watchDescription(absent,watch);
+  assert.doesNotMatch(unchecked,/card included/i);
+  assert.match(unchecked,/Service receipt included/);
+  assert.match(unchecked,/Steel case/);
+  assert.match(unchecked,/Aftermarket bracelet/);
+  assert.equal(facts.watchDescription(unchecked,watch),unchecked);
+});
+
+test('changing the card choice also replaces common generated card statements',()=>{
+  for(const oldClaim of ['No warranty card included.','Without a warranty card.','Brand card is not included.']) {
+    const copy=facts.watchDescription(`Polished case. ${oldClaim}`,{cardIncluded:'yes'});
+    assert.match(copy,/Polished case/);
+    assert.ok(!copy.includes(oldClaim));
+    assert.match(copy,/Original brand \/ warranty card included/);
+  }
+  for(const oldClaim of ['Includes a warranty card.','Original warranty card included.','Accompanied by the brand card.']) {
+    const copy=facts.watchDescription(`Polished case. ${oldClaim}`,{cardIncluded:'no'});
+    assert.ok(!copy.includes(oldClaim));
+    assert.match(copy,/No brand \/ warranty card included/);
+    assert.doesNotMatch(facts.watchDescription(copy,{}),/card/i);
+  }
+});
+
 test('watch identity preserves full model variants while removing labeled serial numbers',()=>{
   for(const serial of ['Serial: 123ABC','Serial number 123ABC','S/N: 123ABC','Número de serie 123ABC']){
     assert.equal(facts.watchTitle({brand:'Rolex',name:`Datejust ${serial}`,model:'126233-0035'}),'Rolex Datejust 126233-0035');

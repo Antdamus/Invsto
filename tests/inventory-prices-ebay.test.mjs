@@ -81,12 +81,16 @@ test('Stock renders both prices for staff and treats old missing minimum as unse
   const start=stock.indexOf('    function buildCardContent(item)');
   const end=stock.indexOf('  //#endregion',start);
   const context={ getItemGoodStock:()=>1,getItemDefectStock:()=>0,canViewSensitiveStockData:()=>false,isStockItemDeleted:()=>false,getEffectiveEbayCategoryOption:()=>null,buildEbayStatusBadge:()=>'',buildLocationChips:()=>'',escapeStockHtml:String,formatStockMoney:value=>`$${Number(value).toFixed(2)}` };
-  vm.createContext(context);vm.runInContext(stock.slice(start,end),context);
+  context.window=context;
+  vm.createContext(context);vm.runInContext(read('inventory-item-facts.js'),context);vm.runInContext(stock.slice(start,end),context);
   const html=context.buildCardContent(item);
   const metrics=html.split('<div class="stock-metric-grid">')[1].split('</div>')[0];
   assert.match(metrics,/>Retail<.*6500\.00/s);assert.match(metrics,/>Minimum sale<.*4700\.00/s);assert.doesNotMatch(metrics,/>Cost</);
   assert.match(context.buildCardContent({...item,minimum_sale_price:null}),/>Not set</);
   assert.match(context.buildCardContent({...item,minimum_sale_price:0}),/>\$0\.00</);
+  assert.match(html,/>Card not checked</);
+  assert.match(context.buildCardContent({...item,watch_details:{...item.watch_details,cardIncluded:'yes'}}),/>Card included</);
+  assert.match(context.buildCardContent({...item,watch_details:{...item.watch_details,cardIncluded:'no'}}),/>No card included</);
 });
 
 

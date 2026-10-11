@@ -3219,7 +3219,7 @@
     const { existingTitle, existingDescription, qrType, watchDetails, coinDetails, ...inputs } = payload;
     const coinFacts = coinDetails ? Object.fromEntries(Object.entries(coinDetails).filter(([key])=>key!=="ebay")) : null;
     return JSON.stringify({ ...inputs, coinDetails:coinFacts, watchDetails: watchDetails ? Object.fromEntries(
-      ["name", "brand", "model", "department", "condition", "materials", "modifications", "modificationPreset", "braceletFit", "stoneSetting"].map((key) => [key, watchDetails[key] || ""])
+      ["name", "brand", "model", "department", "condition", "materials", "modifications", "modificationPreset", "braceletFit", "stoneSetting", "cardIncluded"].map((key) => [key, watchDetails[key] || ""])
     ) : null });
   }
 
@@ -3730,6 +3730,7 @@
       "watch-modifications",
       "watch-modificationPreset",
       "watch-stoneSetting",
+      "watch-cardIncluded",
       "watch-braceletFit",
       "watch-serial",
       ...Array.from(document.querySelectorAll("#coin-fields input, #coin-fields select, #coin-fields textarea"), (input) => input.id),
