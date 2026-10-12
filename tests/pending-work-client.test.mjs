@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 const source=await readFile(new URL('../pending-work-queue.js',import.meta.url),'utf8');
-function fixture(){
+function fixture({watch=true}={}){
  const rows=[{id:'a',key:'buyer'},{id:'b',key:'buyer'},{id:'c',key:'other'}];
  const elements={'order-search':{value:''},'order-status-filter':{value:'pending'}}, listeners={},reads=[];
  const context={state:{orders:rows},escapeHtml:s=>s.replaceAll('<','&lt;'),formatDate:s=>s,
@@ -12,7 +12,7 @@ function fixture(){
  applyOrderFilters(){context.state.filteredOrders=context.window.OGPendingWork.filter(rows);},clearOrderSearch(){},requestAnimationFrame(){},setTimeout(){},clearTimeout(){},
  console:{warn(){}},supabase:{rpc:()=>({range:()=>new Promise(resolve=>reads.push(resolve))})},
  document:{getElementById:id=>elements[id],querySelectorAll:()=>[],addEventListener:(event,fn)=>listeners[event]=fn},
- window:{OGOrderWatches:{marked:()=>true},scrollBy(){},addEventListener(){},setInterval(){}}};
+ window:{OGOrderWatches:{marked:()=>watch},scrollBy(){},addEventListener(){},setInterval(){}}};
  vm.runInNewContext(source,context);const api=context.window.OGPendingWork;api.start();
  const click=(dataset,id)=>listeners.click({target:{closest:()=>({dataset,id,hasAttribute:()=>false})},preventDefault(){},stopPropagation(){}});
  const load=async(data=[])=>{const promise=api.load(rows,{paint:false});reads.at(-1)({data});await promise;};
@@ -83,4 +83,23 @@ test('item not found counts honor the date-filtered input and are independent of
  f.rows[0].item_search={is_missing:true};f.rows[2].item_search={is_missing:true};
  f.click({},'pending-work-not-found');
  assert.deepEqual(Array.from(f.api.filter(f.rows.slice(0,2)),r=>r.id),['a','b']);assert.equal(counter.textContent,'1');
+});
+
+test('pending cancellation is available on ordinary lines, counted per line and keeps the buyer together',async()=>{
+ const f=fixture({watch:false}),counter={textContent:''};
+ f.elements['pending-work-cancel']={setAttribute(){},querySelector:()=>counter};
+ assert.match(f.api.line(f.rows[0]),/data-work-cancel-add=.*disabled/);
+ await f.load();assert.match(f.api.line(f.rows[0]),/data-work-cancel-add/);
+ assert.doesNotMatch(f.api.line(f.rows[0]),/data-work-cgl|disabled/);
+ await f.load([blocker({kind:'pending_cancel',line_ids:['a'],task_id:null})]);
+ assert.match(f.api.line(f.rows[0]),/data-work-cancel-clear="a" aria-pressed="true"/);
+ assert.match(f.api.line(f.rows[1]),/data-work-cancel-add="b"/);
+ assert.match(f.api.summary({key:'buyer'}),/Pending to cancel · 1 item/);
+ assert.doesNotMatch(f.api.summary({key:'buyer'}),/1 blocker/);
+ f.click({},'pending-work-cancel');assert.deepEqual(Array.from(f.state.filteredOrders,r=>r.id),['a','b']);
+ assert.equal(counter.textContent,'1');
+ await f.load();assert.equal(f.api.filter(f.rows).length,0);
+ assert.match(f.api.emptyMessage(),/No order lines are pending to cancel/);
+ f.click({workView:'ready'});assert.equal(f.api.filter(f.rows).length,3);
+ f.rows[0].line_status='fulfilled';assert.equal(f.api.line(f.rows[0]),'');
 });

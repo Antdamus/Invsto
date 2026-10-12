@@ -21,6 +21,9 @@
 .line-cgl-toggle{min-height:44px;display:inline-flex;align-items:center;border:1px solid #d6ab6560;border-radius:12px;padding:9px 13px;background:#d6ab650b;color:#e6c998;font:inherit;font-size:13px;cursor:pointer}
 .line-cgl-toggle.is-pending{background:#ce97452a;color:#ffe0a3;border-color:#ce974580}.line-cgl-toggle.is-confirmed{color:#b3e7d0;border-color:#b3e7d040}
 .line-missing-toggle{color:#e8beb3;border-color:#d28a7150}.line-missing-toggle.is-missing{background:#b95f4225;color:#ffd2c5;border-color:#d28a71a0}
+.line-cancel-toggle{color:#f0c3a4;border-color:#d39e7955}.line-cancel-toggle.is-pending-cancel{background:#bd71342b;color:#ffdbad;border-color:#e8ad73a0;font-weight:700}
+#pending-work-cancel,.pending-cancel-badge{color:#ffd2a5!important}#pending-work-cancel[aria-pressed=true]{background:#f0c292;color:#342519!important;border-color:#f0c292}
+.line-cgl-toggle:disabled{opacity:.55;cursor:wait}.line-cgl-toggle:focus-visible{outline:2px solid #edcf94;outline-offset:3px}
 .pending-work-totals{font-size:12px!important}.pending-work-totals button{border:0;background:none;color:inherit;font:inherit;text-decoration:underline;text-underline-offset:3px;cursor:pointer;padding:8px 0;min-height:36px}
 #summary-cgl-button,#summary-missing-button{border:0;background:none;color:#f5d392;padding:0;font:inherit;text-align:left;cursor:pointer;display:grid;gap:4px;min-height:60px}
 #summary-missing-button{color:#f4b6a7}

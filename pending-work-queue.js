@@ -12,6 +12,8 @@
   const pendingCgl = key => active(key).filter(b => b.kind === 'cgl');
   const missingWatches = key => active(key).filter(b => b.kind === 'watch_missing');
   const missingFor = id => [...records.values()].find(b => b.kind === 'watch_missing' && b.active && b.line_ids.includes(id));
+  const pendingCancellations = key => active(key).filter(b => b.kind === 'pending_cancel');
+  const cancellationFor = id => [...records.values()].find(b => b.kind === 'pending_cancel' && b.active && b.line_ids.includes(id));
   const isNotFound = row => isOpenOrderLine(row) && row.item_search?.is_missing === true;
   const isKnown = key => known.has(key);
   const $ = id => document.getElementById(id);
@@ -103,19 +105,20 @@
     filterRows=rows;
     const groups=groupLinesByBuyer(rows), history=$('order-status-filter')?.value==='fulfilled';
     const searching=isSearch();
-    const counts={ready:0,waiting:0,all:groups.length,cgl:0,missing:0,'not-found':rows.filter(isNotFound).length,checking:0};
+    const counts={ready:0,waiting:0,all:groups.length,cgl:0,missing:0,cancel:0,'not-found':rows.filter(isNotFound).length,checking:0};
     for(const g of groups){
       if(!g.lines.some(isOpenOrderLine))continue;
       if(!isKnown(g.key))counts.checking++;
       else counts[active(g.key).length?'waiting':'ready']++;
       counts.cgl+=pendingCgl(g.key).length;
       counts.missing+=missingWatches(g.key).length;
+      counts.cancel+=pendingCancellations(g.key).length;
     }
     document.querySelectorAll('[data-work-view]').forEach(b=>{
       b.setAttribute('aria-pressed',String(!searching&&b.dataset.workView===view));b.disabled=history||searching;
       const counter=b.querySelector('[data-work-count]');if(counter)counter.textContent=counts.checking?'…':String(counts[b.dataset.workView]);
     });
-    for(const kind of ['cgl','missing','not-found']){
+    for(const kind of ['cgl','missing','cancel','not-found']){
       const button=$(`pending-work-${kind}`);
       if(button){button.setAttribute('aria-pressed',String(!searching&&watchFilter===kind));button.disabled=history||searching;button.querySelector('span').textContent=counts.checking&&kind!=='not-found'?'…':String(counts[kind]);}
     }
@@ -127,7 +130,7 @@
       if(watchFilter==='not-found'&&!g.lines.some(isNotFound))return false;
       if(!isKnown(g.key))return view==='all';
       const blockers=active(g.key);
-      return (view==='all'||(view==='waiting')===Boolean(blockers.length))&&(!watchFilter||watchFilter==='not-found'||(watchFilter==='cgl'?pendingCgl(g.key).length:missingWatches(g.key).length));
+      return (view==='all'||(view==='waiting')===Boolean(blockers.length))&&(!watchFilter||watchFilter==='not-found'||(watchFilter==='cgl'?pendingCgl(g.key).length:watchFilter==='cancel'?pendingCancellations(g.key).length:missingWatches(g.key).length));
     }).map(g=>g.key));
     return rows.filter(r=>keys.has(getBuyerKey(r)));
   }
@@ -156,16 +159,18 @@
     const blockers=active(group.key);if(!blockers.length)return '';
     const cgl=blockers.filter(b=>b.kind==='cgl').length;
     const missing=blockers.filter(b=>b.kind==='watch_missing').length;
-    const ordinary=blockers.filter(b=>!['cgl','watch_missing'].includes(b.kind));
-    return `<div class="pending-work-summary" role="note"><div class="pending-work-badges"><strong>Waiting</strong>${missing?`<button type="button" class="missing-watch-badge" data-work-buyer="${esc(group.key)}">Watch missing · ${missing} ${missing===1?'item':'items'}</button>`:''}${cgl?`<button type="button" data-work-buyer="${esc(group.key)}">Pending CGL · ${cgl} ${cgl===1?'item':'items'}</button>`:''}${ordinary.length?`<span>${ordinary.length} ${ordinary.length===1?'blocker':'blockers'}</span>`:''}</div>${ordinary.slice(0,2).map(b=>`<p>${esc(b.reason)} <small>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}${b.task_id?` · <a href="team-tasks.html?taskId=${encodeURIComponent(b.task_id)}">Open task</a>`:''}</small></p>`).join('')}${ordinary.length>2?`<button type="button" data-work-buyer="${esc(group.key)}">View all ${ordinary.length} blockers</button>`:''}</div>`;
+    const cancellations=blockers.filter(b=>b.kind==='pending_cancel').length;
+    const ordinary=blockers.filter(b=>!['cgl','watch_missing','pending_cancel'].includes(b.kind));
+    return `<div class="pending-work-summary" role="note"><div class="pending-work-badges"><strong>Waiting</strong>${cancellations?`<button type="button" class="pending-cancel-badge" data-work-buyer="${esc(group.key)}">Pending to cancel · ${cancellations} ${cancellations===1?'item':'items'}</button>`:''}${missing?`<button type="button" class="missing-watch-badge" data-work-buyer="${esc(group.key)}">Watch missing · ${missing} ${missing===1?'item':'items'}</button>`:''}${cgl?`<button type="button" data-work-buyer="${esc(group.key)}">Pending CGL · ${cgl} ${cgl===1?'item':'items'}</button>`:''}${ordinary.length?`<span>${ordinary.length} ${ordinary.length===1?'blocker':'blockers'}</span>`:''}</div>${ordinary.slice(0,2).map(b=>`<p>${esc(b.reason)} <small>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}${b.task_id?` · <a href="team-tasks.html?taskId=${encodeURIComponent(b.task_id)}">Open task</a>`:''}</small></p>`).join('')}${ordinary.length>2?`<button type="button" data-work-buyer="${esc(group.key)}">View all ${ordinary.length} blockers</button>`:''}</div>`;
   }
   function line(row) {
     if(!isOpenOrderLine(row))return '';
-    const cgl=cglFor(row.id),missing=missingFor(row.id);
-    if(!cgl&&!missing&&!window.OGOrderWatches?.marked(row.id))return '';
+    const cgl=cglFor(row.id),missing=missingFor(row.id),cancellation=cancellationFor(row.id);
     const disabled=isKnown(getBuyerKey(row))?'':'disabled';
+    const cancel=`<button type="button" class="line-cgl-toggle line-cancel-toggle ${cancellation?'is-pending-cancel':''}" ${cancellation?'data-work-cancel-clear':'data-work-cancel-add'}="${esc(row.id)}" aria-pressed="${Boolean(cancellation)}" title="${cancellation?'Clear this reminder and keep the order open':'Mark for cancellation and move this buyer’s package to Waiting'}" ${disabled}>${cancellation?'Pending to cancel · Clear':'Pending to cancel'}</button>`;
+    if(!cgl&&!missing&&!window.OGOrderWatches?.marked(row.id))return cancel;
     const certificate=cgl?`<button type="button" class="line-cgl-toggle ${cgl.active?'is-pending':'is-confirmed'}" data-work-cgl-manage="${esc(row.id)}">${cgl.active?'Pending CGL':'CGL confirmed'}</button>`:`<button type="button" class="line-cgl-toggle" data-work-cgl-add="${esc(row.id)}" ${disabled}>Set Pending CGL</button>`;
-    return certificate+`<button type="button" class="line-cgl-toggle line-missing-toggle ${missing?'is-missing':''}" ${missing?'data-work-missing-manage':'data-work-missing-add'}="${esc(row.id)}" ${disabled}>${missing?'Watch missing · Mark found':'Watch missing'}</button>`;
+    return certificate+`<button type="button" class="line-cgl-toggle line-missing-toggle ${missing?'is-missing':''}" ${missing?'data-work-missing-manage':'data-work-missing-add'}="${esc(row.id)}" ${disabled}>${missing?'Watch missing · Mark found':'Watch missing'}</button>`+cancel;
   }
   function createDialog() {
     if(dialog)return;
@@ -215,6 +220,7 @@
     const entries=forBuyer(context.group.key).filter(b=>context.onlyCgl?b.kind==='cgl'&&b.line_ids.includes(context.onlyCgl):context.onlyMissing?b.kind==='watch_missing'&&b.active&&b.line_ids.includes(context.onlyMissing):b.active);
     $('pending-work-existing').innerHTML=entries.map(b=>{
       const row=state.orders.find(r=>b.line_ids.includes(r.id));
+      if(b.kind==='pending_cancel')return `<article class="pending-work-entry"><h3>${esc(row?.item_title||'Order item')}</h3><strong class="pending-cancel-badge">Pending to cancel</strong><p>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}</p><p>This is a reminder; the order has not been cancelled. Use the normal Cancel action when ready.</p><button type="button" data-work-cancel-clear="${esc(row?.id)}">Clear cancellation marker</button></article>`;
       if(b.kind==='watch_missing')return `<article class="pending-work-entry"><h3>${esc(row?.item_title||'Watch')}</h3><strong class="missing-watch-badge">Watch missing</strong><p>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}</p><p>This buyer’s package stays in Waiting until this watch is found. Other requirements, including CGL, remain separate.</p><label class="pending-work-check"><input type="checkbox" id="found-${esc(b.id)}">I have located and checked this watch.</label><button type="button" class="primary-btn" data-work-found="${esc(b.id)}">Mark watch found</button><details><summary>Marked missing by mistake</summary><label for="release-${esc(b.id)}">Correction reason</label><textarea id="release-${esc(b.id)}" rows="2" maxlength="2000"></textarea><button type="button" data-work-release="${esc(b.id)}">Remove missing marker</button></details></article>`;
       if(b.kind==='cgl')return `<article class="pending-work-entry"><h3>${esc(row?.item_title||'Watch')}</h3><strong>${b.active?'Pending CGL':'CGL confirmed'}</strong><p>A saved copy must match this watch before its package can be completed.</p><button type="button" class="secondary-btn" data-certificate-line="${esc(row?.id)}" data-certificate-title="${esc(row?.item_title)}">Open / add certificate</button><div data-work-certificates="${esc(b.id)}">Loading saved certificates…</div><details><summary>CGL is not required / marked by mistake</summary><label for="correct-${esc(b.id)}">Correction reason</label><textarea id="correct-${esc(b.id)}" rows="2" maxlength="2000"></textarea><button type="button" data-work-correct="${esc(b.id)}">Remove requirement</button></details></article>`;
       return `<article class="pending-work-entry"><strong>${esc(b.reason)}</strong><p>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}</p>${b.task_id?`<a href="team-tasks.html?taskId=${encodeURIComponent(b.task_id)}">Open linked task</a><p class="pending-work-hint">Removing this hold leaves the task open.</p>`:''}<p class="pending-work-hint">Resolved or sent here by mistake? Remove this hold. Other requirements will still apply.</p><label for="release-${esc(b.id)}">Reason for removing (optional)</label><textarea id="release-${esc(b.id)}" rows="2" maxlength="2000" placeholder="For example: sent to Waiting by mistake"></textarea><button type="button" data-work-release="${esc(b.id)}">Remove from waiting</button></article>`;
@@ -264,15 +270,30 @@
     const b=records.get(id),reason=$(`correct-${id}`).value.trim();if(!b||!reason){message('Enter why CGL is not required.',true);return;}
     await mutate(()=>supabase.rpc('confirm_pending_cgl',{_id:id,_expected_revision:b.revision,_correction_reason:reason}),'CGL requirement removed; the correction is saved in history.');
   }
-  async function addWatchHold(id,button,kind) {
+  async function addLineHold(id,button,kind) {
     const row=state.orders.find(r=>r.id===id);if(!row||button.disabled||saving)return;
     button.disabled=true;setBusy(true);
-    const label=kind==='cgl'?'Pending CGL':'Watch missing';
+    const label=kind==='cgl'?'Pending CGL':kind==='pending_cancel'?'Pending to cancel':'Watch missing';
     const undo={id:crypto.randomUUID(),kind,revision:1,key:getBuyerKey(row),buyer:getBuyerLabel(row)};
-    try{const {data,error}=await supabase.rpc('create_pending_order_work',{_id:undo.id,_line_ids:[id],_kind:kind,_reason:kind==='cgl'?'Pending CGL certificate':'Watch missing — locate before shipping'});if(error)throw error;
+    try{const {data,error}=await supabase.rpc('create_pending_order_work',{_id:undo.id,_line_ids:[id],_kind:kind,_reason:kind==='cgl'?'Pending CGL certificate':kind==='pending_cancel'?'Pending to cancel — cancellation not yet completed':'Watch missing — locate before shipping'});if(error)throw error;
       if(data===undo.id)showNotice(`${label} saved · ${undo.buyer}`,undo);
       await load();if(failure)throw Error('Saved, but the queue could not refresh. Retry the status check.');setStatus(`${label} saved. This buyer’s package is now Waiting.`,'success');
     }catch(error){setStatus(error.message||`Could not set ${label}.`,'error');button.disabled=false;}finally{setBusy(false);}
+  }
+  async function clearCancellation(id,button) {
+    const b=cancellationFor(id);if(!b||button.disabled||saving)return;
+    button.disabled=true;setBusy(true);
+    try{
+      const {error}=await supabase.rpc('release_pending_order_work',{_id:b.id,_expected_revision:b.revision,_reason:'Pending-to-cancel marker cleared by staff'});
+      if(error)throw error;
+      await load();
+      const text=failure?'Marker cleared, but the queue could not refresh. Use Retry to check its status.':`Cancellation marker cleared. ${removalMessage(b.buyer_key)}`;
+      showNotice(text);setStatus(text,failure?'error':'success');
+      if(dialog?.open)await renderExisting();
+    }catch(error){
+      const text=error.code==='40001'?'This marker changed. Refresh the queue and try again.':error.message||'Could not clear the marker. Try again.';
+      showNotice(text,null,true);setStatus(text,'error');button.disabled=false;
+    }finally{setBusy(false);}
   }
   async function assertReady(rows) {
     await load(state.orders);
@@ -283,16 +304,18 @@
   function start() {
     if(started)return;started=true;
     document.addEventListener('click',event=>{
-      const b=event.target.closest('[data-work-view],[data-work-summary-view],[data-work-buyer],[data-work-cgl-add],[data-work-cgl-manage],[data-work-missing-add],[data-work-missing-manage],[data-work-retry],#pending-work-cgl,#pending-work-missing,#pending-work-not-found,#summary-cgl-button,#summary-missing-button');if(!b)return;
+      const b=event.target.closest('[data-work-view],[data-work-summary-view],[data-work-buyer],[data-work-cgl-add],[data-work-cgl-manage],[data-work-missing-add],[data-work-missing-manage],[data-work-cancel-add],[data-work-cancel-clear],[data-work-retry],#pending-work-cgl,#pending-work-missing,#pending-work-cancel,#pending-work-not-found,#summary-cgl-button,#summary-missing-button');if(!b)return;
       event.preventDefault();event.stopPropagation();
       if(b.disabled||saving||undoBusy)return;
       if(b.hasAttribute('data-work-retry')){void load();return;}
-      if(b.dataset.workCglAdd){void addWatchHold(b.dataset.workCglAdd,b,'cgl');return;}
-      if(b.dataset.workMissingAdd){void addWatchHold(b.dataset.workMissingAdd,b,'watch_missing');return;}
+      if(b.dataset.workCglAdd){void addLineHold(b.dataset.workCglAdd,b,'cgl');return;}
+      if(b.dataset.workMissingAdd){void addLineHold(b.dataset.workMissingAdd,b,'watch_missing');return;}
+      if(b.dataset.workCancelAdd){void addLineHold(b.dataset.workCancelAdd,b,'pending_cancel');return;}
+      if(b.dataset.workCancelClear){void clearCancellation(b.dataset.workCancelClear,b);return;}
       if(b.dataset.workMissingManage){const row=state.orders.find(r=>r.id===b.dataset.workMissingManage);if(row)void show(getBuyerKey(row),{onlyMissing:row.id});return;}
       if(b.dataset.workCglManage){const row=state.orders.find(r=>r.id===b.dataset.workCglManage);if(row)void show(getBuyerKey(row),{onlyCgl:row.id});return;}
       if(b.dataset.workBuyer){void show(b.dataset.workBuyer);return;}
-      if(['pending-work-cgl','pending-work-missing','pending-work-not-found'].includes(b.id)){const kind=b.id.slice('pending-work-'.length);watchFilter=watchFilter===kind?'':kind;if(watchFilter)view=kind==='not-found'?'all':'waiting';}
+      if(['pending-work-cgl','pending-work-missing','pending-work-cancel','pending-work-not-found'].includes(b.id)){const kind=b.id.slice('pending-work-'.length);watchFilter=watchFilter===kind?'':kind;if(watchFilter)view=kind==='not-found'?'all':'waiting';}
       else if(['summary-cgl-button','summary-missing-button'].includes(b.id)){watchFilter=b.id==='summary-cgl-button'?'cgl':'missing';view='waiting';state.orderDueFilter='all';clearOrderSearch({apply:false});}
       else{view=b.dataset.workView||b.dataset.workSummaryView;watchFilter='';if(b.dataset.workDue){state.orderDueFilter=b.dataset.workDue;clearOrderSearch({apply:false});}}
       applyOrderFilters();
@@ -302,6 +325,6 @@
     window.addEventListener('order-certificate-changed',async()=>{await load();if(dialog?.open&&!saving)await renderExisting();});
     window.setInterval(schedule,60000);
   }
-  const emptyMessage=()=>watchFilter==='not-found'&&!isSearch()?'No pending items are marked not found in this view.':failure?'Waiting status is unavailable. Use Retry above.':!known.size&&state.orders.some(isOpenOrderLine)?'Checking order work status…':view==='waiting'&&!isSearch()?watchFilter==='missing'?'No watches are marked missing in this view.':watchFilter==='cgl'?'No watches are waiting for CGL in this view.':'No orders are waiting in this view. Choose Ready to work to continue.':'No orders match this view.';
+  const emptyMessage=()=>watchFilter==='not-found'&&!isSearch()?'No pending items are marked not found in this view.':failure?'Waiting status is unavailable. Use Retry above.':!known.size&&state.orders.some(isOpenOrderLine)?'Checking order work status…':view==='waiting'&&!isSearch()?watchFilter==='cancel'?'No order lines are pending to cancel in this view.':watchFilter==='missing'?'No watches are marked missing in this view.':watchFilter==='cgl'?'No watches are waiting for CGL in this view.':'No orders are waiting in this view. Choose Ready to work to continue.':'No orders match this view.';
   window.OGPendingWork={reset,load,filter,summaryCounts,control,summary,line,start,assertReady,emptyMessage,itemSearchChanged};
 })();

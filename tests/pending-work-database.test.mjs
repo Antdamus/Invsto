@@ -31,6 +31,7 @@ before(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261011010000_pending_work_blockers.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261011011000_pending_work_responsibility.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261011012000_pending_missing_watches.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261012190000_pending_order_cancellation_marker.sql',import.meta.url),'utf8'));
  await db.exec(`insert into ebay_orders values('${id(10)}','01-10000-10000','Buyer','pending'),('${id(11)}','02-10000-10000','BUYER','pending'),('${id(12)}','03-10000-10000','Someone','pending');
  insert into ebay_order_lines(id,order_id,line_status) values('${id(20)}','${id(10)}','pending'),('${id(21)}','${id(11)}','pending'),('${id(22)}','${id(12)}','pending');
  insert into ebay_order_tasks(id,order_id,status,assigned_to_email,created_by) values('${id(30)}','${id(10)}','assigned','staff@example.test','${id(1)}');
@@ -106,6 +107,44 @@ test('missing watches require a Watch line, share one hold per line, block the b
  await create(83,'watch_missing',[20]);assert.equal((await list()).filter(b=>b.kind==='watch_missing').length,1);
  await release(83);
  await db.query("update packaging_shipments set status='ready' where id=$1",[id(71)]);
+});
+
+test('pending cancellation is line scoped, retry-safe, and blocks completion/dispatch without cancelling or creating tasks',async()=>{
+ const before=(await db.query('select * from ebay_order_lines order by id')).rows;
+ const tasks=(await db.query('select * from ebay_order_tasks order by id')).rows;
+ await assert.rejects(create(90,'pending_cancel',[20,21]),/one order line/);
+ await create(90,'pending_cancel',[21]);await create(90,'pending_cancel',[21]);await create(91,'pending_cancel',[21]);
+ const holds=await list();assert.equal(holds.length,1);assert.equal(holds[0].kind,'pending_cancel');
+ assert.deepEqual(holds[0].line_ids,[id(21)]);
+ assert.deepEqual((await db.query('select * from ebay_order_lines order by id')).rows,before);
+ assert.deepEqual((await db.query('select * from ebay_order_tasks order by id')).rows,tasks);
+ assert.equal((await db.query('select count(*)::int n from team_tasks')).rows[0].n,2);
+ await assert.rejects(complete(20),/Package is waiting/);await assert.rejects(complete(21),/Package is waiting/);
+ await db.query('select assert_pending_work_clear($1)',[[id(12)]]);
+ await db.query("insert into packaging_shipments values($1,$2,'packing')",[id(72),[id(11)]]);
+ await assert.rejects(db.query("update packaging_shipments set status='ready' where id=$1",[id(72)]),/Pending to cancel/);
+ await assert.rejects(release(90,99),/changed/);
+ await create(92,'manual',[20]);await release(90);
+ assert.equal((await list()).length,1);await assert.rejects(complete(21),/Package is waiting/);
+ await release(92);await db.query('select assert_pending_work_clear($1)',[[id(11)]]);
+ await db.query("update packaging_shipments set status='ready' where id=$1",[id(72)]);
+ await create(93,'pending_cancel',[21]);
+ await assert.rejects(db.query("update packaging_shipments set status='dispatched' where id=$1",[id(72)]),/Pending to cancel/);
+ // Normal cancellation is allowed and clears only its own marker, with an audit entry.
+ await create(94,'manual',[20]);
+ await db.query("update ebay_order_lines set line_status='cancelled' where id=$1",[id(21)]);
+ assert.equal((await db.query('select released_at is not null closed,revision from pending_order_work_blockers where id=$1',[id(93)])).rows[0].closed,true);
+ assert.equal((await db.query("select count(*)::int n from pending_order_work_events where blocker_id=$1 and action='line_closed'",[id(93)])).rows[0].n,1);
+ await assert.rejects(create(95,'pending_cancel',[21]),/changed/);
+ await db.query("update ebay_order_lines set line_status='pending' where id=$1",[id(21)]);
+ assert.deepEqual((await list()).map(b=>b.kind),['manual']);await release(94);
+ // Imported facts also clear a marker without an interactive staff identity.
+ await create(96,'pending_cancel',[21]);await db.exec("set test.actor=''");
+ await db.query("update ebay_order_lines set line_status='fulfilled',fulfilled_quantity=1 where id=$1",[id(21)]);
+ await db.exec(`set test.actor='${id(1)}'`);
+ await db.query("update ebay_order_lines set line_status='pending',fulfilled_quantity=0 where id=$1",[id(21)]);
+ assert.deepEqual(await list(),[]);
+ await db.exec("set test.staff='no'");await assert.rejects(create(97,'pending_cancel',[21]),/staff access/);await db.exec("set test.staff='yes'");
 });
 
 test('staff checks, RLS, private task visibility, exact customer matching, stale and closed lines',async()=>{
