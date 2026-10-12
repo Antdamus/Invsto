@@ -98,6 +98,7 @@
           <label class="issues-filter-label"><span>Sort by</span><select id="issues-sort" autocomplete="off"><option value="newest" selected>Newest arrivals</option><option value="oldest">Oldest cases</option><option value="order_newest">Newest orders</option><option value="order_oldest">Oldest orders</option><option value="due_soonest">eBay deadline: soonest</option><option value="due_latest">eBay deadline: latest</option><option value="value_highest">Value: high to low</option><option value="value_lowest">Value: low to high</option></select></label>
         </section>
         <label id="issues-return-filter" class="issues-return-filter" hidden><span>Return progress</span><select id="issues-return-stage"><option value="all">All return stages</option><option value="requested">Return requested</option><option value="awaiting_shipment">Awaiting buyer shipment</option><option value="in_transit">In transit</option><option value="delivered">Delivered (eBay)</option><option value="partially_received">Partially received</option><option value="needs_review">Received · needs review</option><option value="received">Received in Invsto</option><option value="unknown">Shipment not reported</option></select></label>
+        <label id="issues-dispute-filter" class="issues-return-filter" hidden><span>Dispute status</span><select id="issues-dispute-state" autocomplete="off"><option value="all">All dispute states</option></select></label>
         <div class="issues-list-caption"><span id="issues-count" aria-live="polite">Loading cases...</span><span id="issues-sort-caption">Newest arrivals · case opened date</span></div>
         <div class="issues-columns">
           <section id="issues-list-panel" aria-label="Customer cases"><div id="issues-bulk-toolbar" class="issue-bulk-toolbar" hidden></div><div id="issues-list" class="issues-list" aria-busy="true"><div class="issues-empty">Loading your workspace...</div></div><div class="issues-paging"><button id="issues-prev" type="button" class="secondary-btn" disabled>Previous</button><span id="issues-page"></span><button id="issues-next" type="button" class="secondary-btn" disabled>Next</button></div></section>
@@ -241,7 +242,7 @@
   <script src="customer-issue-dispute.js?v=20261010-25"></script>
   <script src="customer-issue-notes.js?v=20261010-28"></script>
   <script src="customer-issue-chats.js?v=20261010-31"></script>
-  <script src="customer-issues.js?v=20261012-newest-arrivals"></script>
+  <script src="customer-issues.js?v=20261012-dispute-filters"></script>
   <script src="ebay-order-history.js?v=20261009-quick-review"></script>
 </body>
 </html>

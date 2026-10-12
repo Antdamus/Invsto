@@ -29,12 +29,12 @@
   return {kind:'case_open',label:'eBay case · check status'};
  }
  const cardKind=c=>c.source_lane==='case'?'eBay case':kind(c)==='request'?'Customer request':kind(c)==='return'?'Physical return':'Dispute';
- let ctx,db,ready=false,view='attention',scope='all',sort='newest',returnStage='all',search='',offset=0,total=0,rows=[],counts={},people=[],selected=null,detail=null,version=0,listVersion=0,timer,poll,saving=false,syncing=false;
+ let ctx,db,ready=false,view='attention',scope='all',sort='newest',returnStage='all',disputeState='all',disputeCounts={},search='',offset=0,total=0,rows=[],counts={},people=[],selected=null,detail=null,version=0,listVersion=0,timer,poll,saving=false,syncing=false;
  const PAGE=30;
  const BULK_LIMIT=60;
  let selecting=false,bulkSelection=new Map(),bulkReview=[],bulkReviewVersion=0;
  let listReturnPosition=null,bulkReturnPosition=null;
- const listContext=()=>JSON.stringify([view,scope,sort,search,view==='return'?returnStage:'all']);
+ const listContext=()=>JSON.stringify([view,scope,sort,search,view==='return'?returnStage:'all',view==='dispute'?disputeState:'all']);
  function captureListPosition(id){
   const cards=Array.from($('issues-list').querySelectorAll('[data-case]'));
   const card=cards.find(el=>el.dataset.case===id)||cards.find(el=>el.getBoundingClientRect().bottom>80);
@@ -130,6 +130,13 @@
   needs_review:{label:'Received · needs review',tone:'action'},
   unknown:{label:'Shipment not reported',tone:'unknown'}
  };
+ const disputeStates={all:'All dispute states',response_needed:'Response needed',awaiting_outcome:'Response submitted · awaiting outcome',protected:'Protected · no response needed',no_response:'No response needed · awaiting outcome',reviewing:'eBay reviewing',on_hold:'On hold',awaiting_delivery:'Awaiting delivery',open:'Open · check status',closed:'Closed on eBay · all outcomes',closed_won:'Closed · in our favor',closed_lost:'Closed · buyer’s favor',closed_other:'Closed · other outcome'};
+ function disputeFilters(){
+  $('issues-dispute-filter').hidden=view!=='dispute';
+  const all=Object.values(disputeCounts).reduce((sum,n)=>sum+Number(n),0),closedCount=['closed_won','closed_lost','closed_other'].reduce((sum,key)=>sum+Number(disputeCounts[key]||0),0);
+  $('issues-dispute-state').innerHTML=Object.entries(disputeStates).map(([key,label])=>`<option value="${key}">${escape(label)} (${key==='all'?all:key==='closed'?closedCount:disputeCounts[key]||0})</option>`).join('');
+  $('issues-dispute-state').value=disputeState;
+ }
  function returnBadge(c){
   if(kind(c)!=='return')return '';
   const stage=returnStages[c.return_stage]||returnStages.unknown;
@@ -188,6 +195,7 @@
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the customer name, buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
   $('issues-count').textContent=`${total} ${view==='history'?'finished':'active'} case${total===1?'':'s'}`;
   $('issues-return-filter').hidden=view!=='return';
+  disputeFilters();
   $('issues-sort').value=sort;
   $('issues-sort-caption').textContent=sortLabels[sort]+(sort.startsWith('value_')?' · grouped by currency':'');
   $('issues-page').textContent=total?`${offset+1}–${Math.min(offset+PAGE,total)} of ${total}`:'0 cases';
@@ -262,9 +270,9 @@
  async function refresh(options={}){
   const request=++listVersion;$('issues-list').setAttribute('aria-busy','true');
   try{
-   const result=checked(await db.rpc('list_customer_issues',{_view:view,_scope:scope,_search:search,_offset:offset,_limit:PAGE,_sort:sort,_return_stage:view==='return'?returnStage:'all',...(options.focusCase?{_focus_case_id:options.focusCase}:{})}));
+   const result=checked(await db.rpc('list_customer_issues',{_view:view,_scope:scope,_search:search,_offset:offset,_limit:PAGE,_sort:sort,_return_stage:view==='return'?returnStage:'all',...(view==='dispute'?{_dispute_state:disputeState,_focus_case_id:options.focusCase||null}:options.focusCase?{_focus_case_id:options.focusCase}:{})}));
    if(request!==listVersion)return;
-   rows=result.rows||[];counts=result.counts||{};total=result.total||0;
+   rows=result.rows||[];counts=result.counts||{};disputeCounts=result.dispute_states||{};total=result.total||0;
    if(options.focusCase&&Number.isInteger(result.focus_offset))offset=result.focus_offset;
    if(offset>0&&offset>=total){offset=Math.max(0,Math.floor((total-1)/PAGE)*PAGE);return refresh(options);}
    await root.OGCaseNotes?.load(rows.map(c=>c.id));if(request!==listVersion)return;
@@ -443,7 +451,7 @@
    ]).then(rs=>rs.map(checked));
    if(stamp!==version)return;
    if(locate){
-    clearBulk();clearTimeout(timer);scope='all';search='';returnStage='all';offset=0;
+    clearBulk();clearTimeout(timer);scope='all';search='';returnStage='all';disputeState='all';offset=0;
     const active=!['closed','cancelled'].includes(c.status)||tasks.some(t=>root.OGTaskWorkflow.isEmployeeTask(t)&&!finish.has(t.status));
     view=active?kind(c):'history';$('issues-search').value='';$('issues-scope').value='all';$('issues-return-stage').value='all';
     await refresh({detail:false,focusCase:id});if(stamp!==version)return;
@@ -600,6 +608,7 @@
   $('issues-sort').onchange=()=>{clearBulk();sort=$('issues-sort').value;offset=0;refresh({detail:false});};
   $('issues-scope').onchange=()=>{clearBulk();scope=$('issues-scope').value;offset=0;refresh({detail:false});};
   $('issues-return-stage').onchange=()=>{clearBulk();returnStage=$('issues-return-stage').value;offset=0;closeCase();refresh({detail:false});};
+  $('issues-dispute-state').onchange=()=>{clearBulk();disputeState=$('issues-dispute-state').value;offset=0;closeCase();refresh({detail:false});};
   $('issues-prev').onclick=()=>{offset=Math.max(0,offset-PAGE);refresh({detail:false});};$('issues-next').onclick=()=>{offset+=PAGE;refresh({detail:false});};
   $('issues-refresh').onclick=()=>{refresh();health();};$('issues-sync').onclick=()=>sync();
   await Promise.all([refresh({detail:false}),health()]);

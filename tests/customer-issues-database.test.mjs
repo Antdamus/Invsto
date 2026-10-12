@@ -81,6 +81,7 @@ before(async()=>{
  const liveDefinition=await scalar("select pg_get_functiondef('public.list_customer_issues(text,text,text,integer,integer,text,text)'::regprocedure) v");
  await db.exec(liveDefinition.replace(/\s+/g,' '));
  await db.exec(await sqlFile('20261010193000_customer_issue_review_navigation.sql'));
+ await db.exec(await sqlFile('20261012203000_customer_issue_dispute_filters.sql'));
 
 
 });
@@ -101,6 +102,48 @@ const receive=(key=200,qty=1,disposition='restock',caseId=100)=>scalar('select r
  id(key),id(caseId),JSON.stringify([{order_line_id:id(11),received_quantity:qty,condition_received:'used_good',disposition,destination_location_id:disposition==='restock'?id(30):null,notes:'Inspected'}]),
  '[{"bucket":"ebay-return-evidence","path":"test/photo.jpg"}]','Received carefully','TRACK1']);
 const stock=()=>scalar('select coalesce(sum(quantity),0)::int v from item_stock_locations');
+
+test('dispute states use current provider evidence, with new action and closure overriding old responses',async()=>{
+ const base={issue_kind:'dispute',source_lane:'payment_dispute',ebay_return_id:'dispute-1',ebay_status:'OPEN'};
+ const cases=[
+  [{},'open'],[{seller_response:'SELLER_CONTEST'},'awaiting_outcome'],
+  [{protection_status:'FULLY_PROTECTED',seller_response:'SELLER_CONTEST'},'protected'],
+  [{dispute_no_response_needed:true},'no_response'],
+  [{protection_status:'PARTIALLY_PROTECTED'},'open'],
+  [{ebay_status:'ACTION_NEEDED',seller_response:'SELLER_CONTEST',protection_status:'FULLY_PROTECTED'},'response_needed'],
+  [{ebay_status:'CLOSED',resolution_reason:'SELLER_WON'},'closed_won'],
+  [{ebay_status:'CLOSED',resolution_reason:'SELLER_LOST',protection_status:'FULLY_PROTECTED'},'closed_lost'],
+  [{ebay_status:'CLOSED'},'closed_other'],[{ebay_status:'DISPUTE_REVERSED'},'closed_won'],
+  [{resolution_reason:'SELLER_WON'},'open'],
+  [{source_lane:'case',provider_case:{caseId:'dispute-1',nextSteps:[],sellerResponseDue:{}}},'reviewing'],
+  [{source_lane:'case',provider_case:{caseId:'wrong-case',nextSteps:[]}},'open'],
+  [{source_lane:'case',ebay_status:'OPEN'},'open'],
+  [{source_lane:'case',ebay_status:'ON_HOLD'},'on_hold'],
+  [{source_lane:'case',ebay_status:'WAITING_DELIVERY'},'awaiting_delivery'],
+  [{source_lane:'case',ebay_status:'REFUND_AGREED_BUT_FAILED'},'response_needed'],
+  [{issue_kind:'return'},null]
+ ];
+ for(const [patch,expected] of cases)assert.equal(await scalar('select customer_issue_dispute_state($1) v',[JSON.stringify({...base,...patch})]),expected,JSON.stringify(patch));
+});
+
+test('dispute filtering and counts cover the whole queue before paging and retain deep-link positioning',async()=>{
+ await db.exec(`insert into ebay_return_cases(id,ebay_return_id,status,source_lane,issue_kind,ebay_status,opened_at,raw_payload)
+ select ('00000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,n::text,'open','payment_dispute','dispute',
+ case when n<1040 then 'ACTION_NEEDED' when n<1045 then 'OPEN' else 'CLOSED' end,
+ '2026-10-12T12:00:00Z'::timestamptz-(n-1000)*interval '1 hour',
+ jsonb_build_object('ebayDetail',jsonb_build_object('paymentDisputeId',n::text,'sellerResponse','SELLER_CONTEST','resolution',jsonb_build_object('reasonForClosure','SELLER_WON')))
+ from generate_series(1000,1049)n;`);
+ const list=(state,focus=null)=>scalar("select list_customer_issues('dispute','all','',0,30,'newest','all',$1,$2) v",[focus,state]);
+ const waiting=await list('awaiting_outcome');assert.equal(waiting.total,5);assert.equal(waiting.rows[0].id,id(1040));
+ assert.equal(waiting.dispute_states.response_needed,40);assert.equal(waiting.dispute_states.closed_won,5);assert.equal(waiting.counts.dispute,50);
+ const needed=await list('response_needed',id(1035));assert.equal(needed.focus_offset,30);assert.equal(needed.rows.length,10);assert.ok(needed.rows.some(c=>c.id===id(1035)));
+ assert.ok(needed.rows.every(c=>c.dispute_state==='response_needed'));assert.equal(needed.total,40);
+ assert.equal((await list('closed')).total,5);assert.equal((await list('closed_lost')).total,0);
+ // A fresh provider request immediately leaves the waiting filter.
+ await db.exec(`update ebay_return_cases set ebay_status='ACTION_NEEDED' where id='${id(1040)}'`);
+ assert.equal((await list('awaiting_outcome')).total,4);assert.equal((await list('response_needed')).total,41);
+ await db.exec("select set_config('test.access','no',false)");assert.equal((await list('all')).total,0);
+});
 
 test('notification links locate the correct sorted page without narrowing the queue',async()=>{
  await db.exec(`insert into ebay_return_cases(id,order_number,ebay_return_id,status,source_lane,issue_kind,ebay_status,opened_at)
