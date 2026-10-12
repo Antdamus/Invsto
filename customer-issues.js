@@ -78,7 +78,12 @@
   }
   return results;
  }
- const sortLabels={newest:'Newest cases',oldest:'Oldest cases',order_newest:'Newest orders',order_oldest:'Oldest orders',due_soonest:'eBay deadline: soonest',due_latest:'eBay deadline: latest',value_highest:'Value: high to low',value_lowest:'Value: low to high'};
+ const sortLabels={newest:'Newest arrivals · case opened date',oldest:'Oldest cases',order_newest:'Newest orders',order_oldest:'Oldest orders',due_soonest:'eBay deadline: soonest',due_latest:'eBay deadline: latest',value_highest:'Value: high to low',value_lowest:'Value: low to high'};
+ function resetSort(){
+  // Each category starts with the latest eBay cases. A manual sort remains
+  // active while filtering, paging and refreshing that category.
+  sort='newest';$('issues-sort').value=sort;
+ }
  const money=c=>{if(c.item_value==null||!Number.isFinite(Number(c.item_value)))return 'Not available';try{return new Intl.NumberFormat(undefined,{style:'currency',currency:c.item_currency||'USD'}).format(Number(c.item_value));}catch{return `${c.item_currency||''} ${Number(c.item_value).toFixed(2)}`;}};
  function lineFacts(lines){
   const currencies=new Set(lines.map(l=>l.raw_payload?.line?.total?.currency||l.raw_payload?.line?.lineItemCost?.currency||'USD'));
@@ -183,6 +188,7 @@
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the customer name, buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
   $('issues-count').textContent=`${total} ${view==='history'?'finished':'active'} case${total===1?'':'s'}`;
   $('issues-return-filter').hidden=view!=='return';
+  $('issues-sort').value=sort;
   $('issues-sort-caption').textContent=sortLabels[sort]+(sort.startsWith('value_')?' · grouped by currency':'');
   $('issues-page').textContent=total?`${offset+1}–${Math.min(offset+PAGE,total)} of ${total}`:'0 cases';
   $('issues-prev').disabled=offset===0;$('issues-next').disabled=offset+PAGE>=total;
@@ -547,20 +553,21 @@
  }
  async function init(context){
   ctx=context;db=ctx.supabase;ready=true;
+  resetSort();
   root.OGReturnReceiving?.init({db,ctx,openCase,feedback});
   try{people=checked(await db.from('employees').select('user_id,email,display_name,role,active').eq('active',true).order('display_name')).filter(p=>p.user_id);}catch{people=[ctx.employee];}
   root.OGCaseNotes?.init({db,people,userId:ctx.user.id});
   root.OGIssueChats?.init(db);
   $('issues-workspace').addEventListener('click',e=>{
    const b=e.target.closest('button');if(!b||saving)return;
-   if(b.dataset.issueView){clearBulk();view=b.dataset.issueView;offset=0;closeCase();refresh({detail:false});}
+   if(b.dataset.issueView){clearBulk();view=b.dataset.issueView;resetSort();offset=0;closeCase();refresh({detail:false});}
    else if(b.hasAttribute('data-bulk-start')&&ctx.employee.role==='admin'){selecting=true;closeCase();cards();}
    else if(b.hasAttribute('data-bulk-done')){clearBulk();cards();}
    else if(b.hasAttribute('data-bulk-clear')){bulkSelection.clear();cards();}
    else if(b.hasAttribute('data-bulk-page')){for(const c of rows){if(!closeBlock(c)&&bulkSelection.size<BULK_LIMIT)bulkSelection.set(c.id,c);}cards();}
    else if(b.hasAttribute('data-bulk-review'))reviewBulk();
    else if(b.hasAttribute('data-bulk-cancel'))closeBulkDialog();
-   else if(b.hasAttribute('data-bulk-history')){closeBulkDialog();clearBulk();clearTimeout(timer);view='history';scope='all';search='';offset=0;$('issues-search').value='';$('issues-scope').value='all';closeCase();refresh({detail:false});}
+   else if(b.hasAttribute('data-bulk-history')){closeBulkDialog();clearBulk();clearTimeout(timer);view='history';resetSort();scope='all';search='';offset=0;$('issues-search').value='';$('issues-scope').value='all';closeCase();refresh({detail:false});}
    else if(b.dataset.case)openCase(b.dataset.case);
    else if(b.hasAttribute('data-close-case'))closeCase();
    else if(b.hasAttribute('data-retry-case'))openCase(selected);
