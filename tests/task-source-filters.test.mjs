@@ -31,6 +31,11 @@ test('a task created from a message stays in Messages after being linked to an o
     assert.equal(app.getTaskSourceFilterValue(task), 'ebay_triage');
     assert.equal(app.getTaskSourceLabel(task), 'Message · Refund');
   }
+  for (const source of ['pending_order', 'order_history']) {
+    const task = {source: 'order', sourceLabel: 'Pending order', metadata: {source, created_from: 'email_triage', conversation_task: true, conversation_id: 'linked-chat'}};
+    assert.equal(app.getTaskSourceFilterValue(task), 'ebay_triage', 'linked-order conversation tasks retain their message origin');
+    assert.equal(app.getTaskSourceLabel(task), 'Message');
+  }
   assert.equal(app.getTaskSourceFilterValue({source: 'order', metadata: {conversation_id: 'context-only'}}), 'order', 'linked chat alone is not message origin');
 });
 

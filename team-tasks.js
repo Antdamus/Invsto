@@ -874,7 +874,7 @@ function getTaskCustomerIssueKind(task = {}) {
 
 function getTaskSourceFilterValue(task = {}) {
   // Conversation tasks keep their origin even when linked to an order/case.
-  if (task.metadata?.source === "ebay_conversation_message") return "ebay_triage";
+  if (task.metadata?.source === "ebay_conversation_message" || task.metadata?.conversation_task === true) return "ebay_triage";
   if (task.source === "order" && task.metadata?.source === "order_history") return "order_history";
   if (task.source === "order") return "order";
   if (task.source === "return") return getTaskCustomerIssueKind(task);
