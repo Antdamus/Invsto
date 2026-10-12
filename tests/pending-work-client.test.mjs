@@ -5,13 +5,17 @@ import vm from 'node:vm';
 const source=await readFile(new URL('../pending-work-queue.js',import.meta.url),'utf8');
 function fixture({watch=true}={}){
  const rows=[{id:'a',key:'buyer'},{id:'b',key:'buyer'},{id:'c',key:'other'}];
- const elements={'order-search':{value:''},'order-status-filter':{value:'pending'}}, listeners={},reads=[];
+ const elements={'order-search':{value:''},'order-status-filter':{value:'pending'},'order-created-date-filter':{value:''}}, listeners={},reads=[];
  const context={state:{orders:rows},escapeHtml:s=>s.replaceAll('<','&lt;'),formatDate:s=>s,
  isOpenOrderLine:r=>r.line_status!=='fulfilled',getBuyerKey:r=>r.key,
  groupLinesByBuyer:rs=>[...new Set(rs.map(r=>r.key))].map(key=>({key,lines:rs.filter(r=>r.key===key)})),
- applyOrderFilters(){context.state.filteredOrders=context.window.OGPendingWork.filter(rows);},clearOrderSearch(){},requestAnimationFrame(){},setTimeout(){},clearTimeout(){},
+ applyOrderFilters(){context.state.filteredOrders=context.window.OGPendingWork.filter(rows);},
+ clearOrderSearch(){elements['order-search'].value='';},clearOrderCreatedDateFilter(){elements['order-created-date-filter'].value='';},
+ clearEbayLaunchFilter(){context.state.ebayLaunchBuyerKeys=new Set();context.state.ebayLaunchOrderNumbers=new Set();},
+ clearLiveLotSelection(){context.state.selectedLiveLot=null;},renderLiveLotPanel(){},loadOrders:async()=>{context.state.reloads=(context.state.reloads||0)+1;},
+ getOrderUrgency:()=>null,requestAnimationFrame(){},setTimeout(){},clearTimeout(){},
  console:{warn(){}},supabase:{rpc:()=>({range:()=>new Promise(resolve=>reads.push(resolve))})},
- document:{getElementById:id=>elements[id],querySelectorAll:()=>[],addEventListener:(event,fn)=>listeners[event]=fn},
+ document:{getElementById:id=>elements[id],querySelector:()=>null,querySelectorAll:()=>[],addEventListener:(event,fn)=>listeners[event]=fn},
  window:{OGOrderWatches:{marked:()=>watch},scrollBy(){},addEventListener(){},setInterval(){}}};
  vm.runInNewContext(source,context);const api=context.window.OGPendingWork;api.start();
  const click=(dataset,id)=>listeners.click({target:{closest:()=>({dataset,id,hasAttribute:()=>false})},preventDefault(){},stopPropagation(){}});
@@ -102,4 +106,29 @@ test('pending cancellation is available on ordinary lines, counted per line and 
  assert.match(f.api.emptyMessage(),/No order lines are pending to cancel/);
  f.click({workView:'ready'});assert.equal(f.api.filter(f.rows).length,3);
  f.rows[0].line_status='fulfilled';assert.equal(f.api.line(f.rows[0]),'');
+});
+
+test('desktop and phone summary counters count marked lines, and their shortcuts open the complete cancellation queue',async()=>{
+ for(const buttonId of ['summary-cancel-button','phone-summary-cancel-button']){
+  const f=fixture();
+  f.elements['summary-pending-cancel']={textContent:''};f.elements['phone-summary-pending-cancel']={textContent:''};
+  f.api.summaryCounts();assert.equal(f.elements['summary-pending-cancel'].textContent,'…');
+  await f.load([blocker({id:'cancel-a',kind:'pending_cancel',line_ids:['a'],task_id:null}),blocker({id:'cancel-b',kind:'pending_cancel',line_ids:['b'],task_id:null})]);
+  f.api.summaryCounts();assert.equal(f.elements['summary-pending-cancel'].textContent,'2');assert.equal(f.elements['phone-summary-pending-cancel'].textContent,'2');
+  f.elements['order-search'].value='different buyer';f.elements['order-created-date-filter'].value='2026-10-12';f.elements['order-status-filter'].value='cancellations';
+  f.state.orderDueFilter='today';f.state.selectedLiveLot={id:'bag'};f.state.ebayLaunchBuyerKeys=new Set(['other']);
+  f.click({},buttonId);
+  assert.equal(f.elements['order-search'].value,'');assert.equal(f.elements['order-created-date-filter'].value,'');
+  assert.equal(f.elements['order-status-filter'].value,'pending');assert.equal(f.state.orderDueFilter,'all');
+  assert.equal(f.state.selectedLiveLot,null);assert.equal(f.state.ebayLaunchBuyerKeys.size,0);
+  assert.deepEqual(Array.from(f.state.filteredOrders,r=>r.id),['a','b']);
+  await f.load();f.api.summaryCounts();assert.equal(f.elements['summary-pending-cancel'].textContent,'0');
+  assert.equal(f.api.filter(f.rows).length,0);assert.match(f.api.emptyMessage(),/No order lines are pending to cancel/);
+ }
+});
+
+test('the cancellation summary returns from History by reloading pending orders',async()=>{
+ const f=fixture();await f.load();f.elements['order-status-filter'].value='fulfilled';
+ f.elements['summary-pending-cancel']={textContent:''};f.api.summaryCounts();assert.equal(f.elements['summary-pending-cancel'].textContent,'—');
+ f.click({},'summary-cancel-button');assert.equal(f.state.reloads,1);assert.equal(f.elements['order-status-filter'].value,'pending');
 });
