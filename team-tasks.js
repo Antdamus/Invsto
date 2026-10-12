@@ -10,7 +10,7 @@ const state = {
   taskReadFilter: "all",
   taskOwnerFilter: "assigned",
   taskSourceFilter: "all",
-  taskSort: "priority",
+  taskSort: "assigned_desc",
   taskSearch: "",
   taskFocus: "all",
   visibleTaskLimit: 20,
@@ -30,7 +30,7 @@ const state = {
   taskScope: "mine",
   viewedWorkerUserId: "",
   taskView: "active",
-  taskHistorySort: "recent",
+  taskHistorySort: "assigned_desc",
   childTasksByParent: new Map(),
   orderVideoReceiptPhotosByLineId: new Map(),
   lineReviewDecisions: new Map(),
@@ -565,9 +565,9 @@ function updateTaskScopeChrome() {
   $("team-task-active-sort-control")?.classList.toggle("hidden", isHistoricalTaskView());
   $("team-task-history-sort-control")?.classList.toggle("hidden", !isHistoricalTaskView());
   const activeSort = $("team-task-active-sort");
-  if (activeSort) activeSort.value = state.taskSort || "recent";
+  if (activeSort) activeSort.value = state.taskSort || "assigned_desc";
   const historySort = $("team-task-history-sort");
-  if (historySort) historySort.value = state.taskHistorySort || "recent";
+  if (historySort) historySort.value = state.taskHistorySort || "assigned_desc";
 
   const mode = $("team-task-mode");
   if (mode) {
@@ -1204,7 +1204,15 @@ function renderTaskAssignmentDate(task = {}) {
 }
 
 function getTaskAssignedSortTime(task = {}) {
-  return getTaskAssignmentInfo(task).time || Number.NaN;
+  // Tasks without an assignee still arrive when created. Routine edits do not
+  // change their place in the received queue.
+  return getTaskAssignmentInfo(task).time || parseTimestamp(task.created_at) || Number.NaN;
+}
+
+function compareTaskArrival(a, b, direction = "desc") {
+  return compareFiniteNumber(getTaskAssignedSortTime(a), getTaskAssignedSortTime(b), direction)
+    || compareFiniteNumber(parseTimestamp(a.created_at) || Number.NaN, parseTimestamp(b.created_at) || Number.NaN, direction)
+    || getUnifiedTaskKey(a).localeCompare(getUnifiedTaskKey(b));
 }
 
 function compareFiniteNumber(aValue, bValue, direction = "asc") {
@@ -1223,7 +1231,7 @@ function getTaskDueSortTime(task = {}) {
   return Number.isFinite(time) ? time : Number.NaN;
 }
 
-function sortUnifiedTasks(tasks = [], requestedSort = state.taskSort || "recent") {
+function sortUnifiedTasks(tasks = [], requestedSort = state.taskSort || "assigned_desc") {
   return [...tasks].sort((a, b) => {
     const byRecent = () => getTaskActiveTime(b) - getTaskActiveTime(a);
     const byDueAsc = () => compareFiniteNumber(getTaskDueSortTime(a), getTaskDueSortTime(b), "asc");
@@ -1233,11 +1241,9 @@ function sortUnifiedTasks(tasks = [], requestedSort = state.taskSort || "recent"
     const byUrgency = () => getTaskUrgencyRank(a) - getTaskUrgencyRank(b);
     const byPriority = () => priorityRank(a.priority) - priorityRank(b.priority);
     const byCreatedDesc = () => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
-    const byAssignedDesc = () => compareFiniteNumber(getTaskAssignedSortTime(a), getTaskAssignedSortTime(b), "desc");
-    const byAssignedAsc = () => compareFiniteNumber(getTaskAssignedSortTime(a), getTaskAssignedSortTime(b), "asc");
 
-    if (requestedSort === "assigned_desc") return byAssignedDesc() || byRecent() || byDueAsc() || byPriority() || byCreatedDesc();
-    if (requestedSort === "assigned_asc") return byAssignedAsc() || byDueAsc() || byPriority() || byRecent() || byCreatedDesc();
+    if (requestedSort === "assigned_desc") return compareTaskArrival(a, b);
+    if (requestedSort === "assigned_asc") return compareTaskArrival(a, b, "asc");
     if (requestedSort === "order_urgency") return byUrgency() || byDueAsc() || byMoneyDesc() || byPriority() || byRecent() || byCreatedDesc();
     if (requestedSort === "due_asc") return byDueAsc() || byUrgency() || byPriority() || byRecent() || byCreatedDesc();
     if (requestedSort === "due_desc") return byDueDesc() || byPriority() || byRecent() || byCreatedDesc();
@@ -1268,15 +1274,13 @@ function compareTaskText(a, b) {
 }
 
 function sortHistoryTasks(tasks = []) {
-  const sort = state.taskHistorySort || "recent";
+  const sort = state.taskHistorySort || "assigned_desc";
   return [...tasks].sort((a, b) => {
     if (sort === "assigned_desc") {
-      return compareFiniteNumber(getTaskAssignedSortTime(a), getTaskAssignedSortTime(b), "desc")
-        || getTaskHistoryTime(b) - getTaskHistoryTime(a);
+      return compareTaskArrival(a, b);
     }
     if (sort === "assigned_asc") {
-      return compareFiniteNumber(getTaskAssignedSortTime(a), getTaskAssignedSortTime(b), "asc")
-        || getTaskHistoryTime(b) - getTaskHistoryTime(a);
+      return compareTaskArrival(a, b, "asc");
     }
     if (sort === "oldest") return getTaskHistoryTime(a) - getTaskHistoryTime(b);
     if (sort === "user") {
@@ -6933,11 +6937,11 @@ function setupListeners() {
     if (viewingWorker) setStatus("Viewing that worker's task page in read-only mode.", "info");
   });
   $("team-task-active-sort")?.addEventListener("change", (event) => {
-    state.taskSort = event.target.value || "recent";
+    state.taskSort = event.target.value || "assigned_desc";
     renderTasks();
   });
   $("team-task-history-sort")?.addEventListener("change", (event) => {
-    state.taskHistorySort = event.target.value || "recent";
+    state.taskHistorySort = event.target.value || "assigned_desc";
     state.tasks = sortTasksForCurrentView(state.tasks);
     renderTasks();
   });

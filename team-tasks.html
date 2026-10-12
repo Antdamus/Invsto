@@ -128,20 +128,20 @@
               </label>
               <label id="team-task-active-sort-control" class="team-task-sort">
                 Sort
-                <select id="team-task-active-sort">
+                <select id="team-task-active-sort" autocomplete="off">
+                  <option value="assigned_desc" selected>Newest received</option>
                   <option value="priority">Priority &amp; due date</option>
                   <option value="recent">Recent updates</option>
-                  <option value="assigned_desc">Assigned newest first</option>
-                  <option value="assigned_asc">Assigned oldest first</option>
+                  <option value="assigned_asc">Oldest received</option>
                   <option value="due_asc">Due date soonest</option>
                 </select>
               </label>
               <label id="team-task-history-sort-control" class="team-task-sort hidden">
                 Sort
-                <select id="team-task-history-sort">
+                <select id="team-task-history-sort" autocomplete="off">
+                  <option value="assigned_desc" selected>Newest received</option>
                   <option value="recent">Most recent</option>
-                  <option value="assigned_desc">Assigned newest first</option>
-                  <option value="assigned_asc">Assigned oldest first</option>
+                  <option value="assigned_asc">Oldest received</option>
                   <option value="user">By user</option>
                   <option value="oldest">Oldest</option>
                   <option value="az">A to Z</option>
@@ -320,6 +320,6 @@
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
   <script src="admin-nav.js?v=packaging-20261008"></script>
   <script src="task-workflow.js?v=20261010-employee-tasks"></script>
-  <script src="team-tasks.js?v=employee-tasks-20261010-conversation-orders-2"></script>
+  <script src="team-tasks.js?v=20261012-newest-received"></script>
 </body>
 </html>
