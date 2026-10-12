@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="team-tasks.css?v=workspace-20261007-conversation-orders-20261010" />
-  <link rel="stylesheet" href="team-tasks-workspace.css?v=workspace-20261007-next-action" />
+  <link rel="stylesheet" href="team-tasks-workspace.css?v=20261012-source-filters" />
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="task-request.css?v=20261007-intent-2" />
 </head>
@@ -100,6 +100,15 @@
             <label class="task-search"><i data-lucide="search" aria-hidden="true"></i><span class="task-sr-only">Search tasks</span><input id="task-search" type="search" placeholder="Search tasks, notes, buyers, or orders" autocomplete="off" /></label>
             <button id="task-filters-toggle" class="secondary-btn" type="button" aria-expanded="false" aria-controls="task-filters-panel"><i data-lucide="sliders-horizontal"></i>Filters<span id="task-filter-count" class="hidden">0</span></button>
           </div>
+          <div id="task-source-shortcuts" class="task-source-shortcuts" role="group" aria-label="Filter tasks by source">
+            <button type="button" data-task-source="all" aria-pressed="true"><span>All sources</span><b data-source-count>—</b></button>
+            <button type="button" data-task-source="ebay_triage" aria-pressed="false"><span>Messages</span><b data-source-count>—</b></button>
+            <button type="button" data-task-source="return" aria-pressed="false"><span>Returns</span><b data-source-count>—</b></button>
+            <button type="button" data-task-source="dispute" aria-pressed="false" title="Payment disputes and escalated eBay cases"><span>Disputes</span><b data-source-count>—</b></button>
+            <button type="button" data-task-source="request" aria-pressed="false"><span>Requests</span><b data-source-count>—</b></button>
+            <button type="button" data-task-source="orders" aria-pressed="false"><span>Orders</span><b data-source-count>—</b></button>
+            <button type="button" data-task-source="independent" aria-pressed="false"><span>General</span><b data-source-count>—</b></button>
+          </div>
           <div class="task-quick-views" role="group" aria-label="Quick task views">
             <button type="button" data-task-focus="all" class="is-active" aria-pressed="true">All statuses</button>
             <button type="button" data-task-focus="progress" aria-pressed="false">In progress</button>
@@ -112,11 +121,14 @@
               <label class="team-task-sort">Source
                 <select id="task-source-filter" aria-label="Source">
                   <option value="all">All sources</option>
-                  <option value="independent">Team tasks</option>
+                  <option value="independent">General</option>
+                  <option value="orders">All order tasks</option>
                   <option value="order">Pending orders</option>
                   <option value="order_history">Order history</option>
                   <option value="ebay_triage">eBay messages</option>
                   <option value="return">Returns</option>
+                  <option value="dispute">Disputes &amp; eBay cases</option>
+                  <option value="request">Buyer requests</option>
                 </select>
               </label>
               <label class="team-task-sort">Read status
@@ -320,6 +332,6 @@
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
   <script src="admin-nav.js?v=packaging-20261008"></script>
   <script src="task-workflow.js?v=20261010-employee-tasks"></script>
-  <script src="team-tasks.js?v=20261012-newest-received"></script>
+  <script src="team-tasks.js?v=20261012-source-filters"></script>
 </body>
 </html>

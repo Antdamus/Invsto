@@ -862,11 +862,22 @@ function getDefaultActiveTasks(tasks = []) {
   ));
 }
 
+const TASK_SOURCE_LABELS = {all: "All sources", orders: "Orders", independent: "General", order: "Pending orders", order_history: "Order history", ebay_triage: "Messages", return: "Returns", dispute: "Disputes", request: "Buyer requests"};
+
+function getTaskCustomerIssueKind(task = {}) {
+  const issue = task.returnCase || getEmbeddedOne(task.ebay_return_cases);
+  if (["return", "dispute", "request"].includes(issue.issue_kind)) return issue.issue_kind;
+  const lane = issue.source_lane || issue.raw_payload?.postOrderIssueLane || issue.raw_payload?.apiExtractedDetails?.issueLane;
+  if (["payment_dispute", "case"].includes(lane)) return "dispute";
+  return lane === "inquiry" ? "request" : "return";
+}
+
 function getTaskSourceFilterValue(task = {}) {
+  // Conversation tasks keep their origin even when linked to an order/case.
+  if (task.metadata?.source === "ebay_conversation_message") return "ebay_triage";
   if (task.source === "order" && task.metadata?.source === "order_history") return "order_history";
   if (task.source === "order") return "order";
-  if (task.source === "return") return "return";
-  if (task.source === "team" && task.metadata?.source === "ebay_conversation_message") return "ebay_triage";
+  if (task.source === "return") return getTaskCustomerIssueKind(task);
   if (task.source === "team") return "independent";
   return "other";
 }
@@ -897,8 +908,9 @@ function getTaskSourceCounts(tasks = []) {
     counts.all += 1;
     const source = getTaskSourceFilterValue(task);
     counts[source] = (counts[source] || 0) + 1;
+    if (["order", "order_history"].includes(source)) counts.orders += 1;
     return counts;
-  }, { all: 0, independent: 0, order: 0, order_history: 0, ebay_triage: 0, return: 0, other: 0 });
+  }, { all: 0, orders: 0, independent: 0, order: 0, order_history: 0, ebay_triage: 0, return: 0, dispute: 0, request: 0, other: 0 });
 }
 
 function getTasksForOwnerFilter(tasks = []) {
@@ -916,6 +928,7 @@ function getTasksForOwnerFilter(tasks = []) {
 
 function getTasksForSourceFilter(tasks = []) {
   if (!state.taskSourceFilter || state.taskSourceFilter === "all") return tasks;
+  if (state.taskSourceFilter === "orders") return tasks.filter(task => ["order", "order_history"].includes(getTaskSourceFilterValue(task)));
   return tasks.filter((task) => getTaskSourceFilterValue(task) === state.taskSourceFilter);
 }
 
@@ -986,7 +999,7 @@ function renderTaskWorkspaceChrome(visibleTasks = []) {
   document.querySelectorAll("[data-task-view]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.taskView === state.taskView)));
   const filterLabels = [];
   if (state.taskReadFilter !== "all") filterLabels.push(state.taskReadFilter === "unread" ? "Unread" : "Read");
-  if (state.taskSourceFilter !== "all") filterLabels.push(({independent: "Independent", order: "Pending orders", order_history: "Order history", ebay_triage: "eBay triage", return: "Returns"})[state.taskSourceFilter]);
+  if (state.taskSourceFilter !== "all") filterLabels.push(TASK_SOURCE_LABELS[state.taskSourceFilter]);
   const filterCount = $("task-filter-count");
   if (filterCount) { filterCount.textContent = filterLabels.length; filterCount.classList.toggle("hidden", !filterLabels.length); }
   const applied = $("task-applied-filters");
@@ -1064,6 +1077,14 @@ function renderTaskOwnerFilterChrome(tasks = []) {
 
 function renderTaskSourceFilterChrome(tasks = []) {
   if ($("task-source-filter")) $("task-source-filter").value = state.taskSourceFilter;
+  $("task-source-shortcuts")?.classList.toggle("hidden", Boolean(getRequestedTaskId()));
+  const counts = getTaskSourceCounts(filterTaskWorkspace(tasks));
+  document.querySelectorAll("[data-task-source]").forEach(button => {
+    const source = button.dataset.taskSource;
+    const active = source === state.taskSourceFilter || (source === "orders" && ["order", "order_history"].includes(state.taskSourceFilter));
+    button.setAttribute("aria-pressed", String(active));
+    button.querySelector("[data-source-count]").textContent = counts[source] || 0;
+  });
 }
 
 function renderTaskFilterChrome(tasks = []) {
@@ -1488,7 +1509,7 @@ async function performTaskLoad() {
 
   if (requested && !state.tasks.some((task) => task.id === requested)) {
     const {data: requestedReturnTask, error} = await supabase.from("ebay_return_tasks")
-      .select("*, ebay_return_cases(id, order_number, buyer_username, return_reason, status)")
+      .select("*, ebay_return_cases(id, order_id, order_number, buyer_username, return_reason, status, issue_kind, source_lane)")
       .eq("id", requested).maybeSingle();
     if (!error && requestedReturnTask) {
       if (!OGTaskWorkflow.isEmployeeTask(requestedReturnTask)) {
@@ -1720,7 +1741,7 @@ async function loadReturnTaskRecords() {
   const statuses = isHistoricalTaskView() ? HISTORY_RETURN_TASK_STATUSES : ACTIVE_RETURN_TASK_STATUSES;
   const makeQuery = () => supabase
     .from("employee_return_tasks")
-    .select("id, return_case_id, order_id, order_line_ids, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, resolved_at, resolved_by, resolved_by_email, created_at, updated_at, created_by, created_by_email, latest_note, metadata, ebay_return_cases(id, order_id, order_number, ebay_return_id, buyer_username, return_reason, status, opened_at, notes, raw_payload)")
+    .select("id, return_case_id, order_id, order_line_ids, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, assigned_by, assigned_by_email, due_at, resolved_at, resolved_by, resolved_by_email, created_at, updated_at, created_by, created_by_email, latest_note, metadata, ebay_return_cases(id, order_id, order_number, ebay_return_id, buyer_username, return_reason, status, issue_kind, source_lane, opened_at, notes, raw_payload)")
     .in("status", statuses)
     .order("created_at", { ascending: !isHistoricalTaskView() })
     .order("id", {ascending: true});
@@ -1855,7 +1876,7 @@ function normalizeReturnTask(task = {}) {
     ...task,
     order_id: task.order_id || returnCase.order_id || "",
     source: "return",
-    sourceLabel: "Return",
+    sourceLabel: ({return: "Return", dispute: returnCase.source_lane === "case" ? "eBay case" : "Payment dispute", request: "Buyer request"})[getTaskCustomerIssueKind(task)],
     title: task.title || `Return ${returnId || orderNumber || ""}`.trim(),
     description: task.question || reason || "",
     latest_note: task.question || reason || "",
@@ -4043,7 +4064,7 @@ function renderReturnTaskContext(task = {}) {
   return `
     <section class="team-task-context return-task-context">
       <div class="team-task-context-head">
-        <span class="eyebrow">Return Context</span>
+        <span class="eyebrow">${escapeHtml(getTaskSourceLabel(task))} context</span>
         <strong>${escapeHtml(returnCase.ebay_return_id || task.ebay_return_id || "Return")}${task.buyer_username ? ` - ${escapeHtml(task.buyer_username)}` : ""}</strong>
       </div>
       <div class="team-task-facts">
@@ -4281,10 +4302,11 @@ function renderTaskContext(task = {}) {
 }
 
 function getTaskSourceLabel(task = {}) {
+  if (getTaskSourceFilterValue(task) === "ebay_triage") return task.metadata?.task_tag === "refunds" ? "Message · Refund" : "Message";
   if (task.sourceLabel) return task.sourceLabel;
   if (task.source === "order") return "Pending order";
   if (task.source === "return") return "Return";
-  return "Team";
+  return "General";
 }
 
 function getTaskCardPreview(task = {}, canceled = false) {
@@ -4969,7 +4991,7 @@ function renderTaskActions(task = {}, resolved = false) {
   if (isTaskViewAsWorkerMode()) return '';
   const key = escapeHtml(getUnifiedTaskKey(task));
   const buttons = [];
-  if (task.actionHref && task.source !== 'team') buttons.push('<a class="secondary-btn" href="'+escapeHtml(task.actionHref)+'">'+(task.metadata?.packaging_shipment_id || task.metadata?.packaging_order_handoff ? 'Open Packaging' : task.source === 'order' ? 'Open order' : 'Open return')+'</a>');
+  if (task.actionHref && task.source !== 'team') buttons.push('<a class="secondary-btn" href="'+escapeHtml(task.actionHref)+'">'+(task.metadata?.packaging_shipment_id || task.metadata?.packaging_order_handoff ? 'Open Packaging' : task.source === 'order' ? 'Open order' : ({return:'Open return',dispute:'Open dispute',request:'Open request'})[getTaskCustomerIssueKind(task)])+'</a>');
   if (canReplyToTask(task)) buttons.push('<button type="button" class="secondary-btn" data-task-reply="'+key+'">Add update</button>');
   if (canHandTaskBack(task)) buttons.push(isTaskInApprovalInbox(task)
     ? '<button type="button" class="primary-btn" data-task-reply="'+key+'" data-handoff="true">Send instructions &amp; hand back</button>'
@@ -6912,9 +6934,13 @@ function setupListeners() {
     });
   });
   $("task-source-filter")?.addEventListener("change", event => {
-    state.taskSourceFilter = ["all", "independent", "order", "order_history", "ebay_triage", "return"].includes(event.target.value) ? event.target.value : "all";
+    state.taskSourceFilter = Object.hasOwn(TASK_SOURCE_LABELS, event.target.value) ? event.target.value : "all";
     renderTasks();
   });
+  document.querySelectorAll("[data-task-source]").forEach(button => button.addEventListener("click", () => {
+    state.taskSourceFilter = button.dataset.taskSource;
+    renderTasks();
+  }));
   $("team-task-scope")?.addEventListener("change", async (event) => {
     state.taskScope = ["all", "canceled"].includes(event.target.value) && isAdminUser() ? event.target.value : "mine";
     state.viewedWorkerUserId = "";
