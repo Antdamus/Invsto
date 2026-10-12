@@ -2352,6 +2352,7 @@ a.history-line-finance-pill:hover {
 }
 
 .history-modal-card h2 {
+  color: var(--history-text);
   margin: 0 42px 8px 0;
   font-family: "DM Serif Display", serif;
   font-size: clamp(1.55rem, 4vw, 2.15rem);
@@ -2873,6 +2874,49 @@ a.history-line-finance-pill:hover {
   gap: 10px;
   margin-top: 18px;
   flex-wrap: wrap;
+}
+
+/* Keep the signed action and any error in view, even for a long selection. */
+#revert-order-modal .revert-modal-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-height: min(90dvh, 900px);
+  overflow: hidden;
+  padding: 0;
+}
+
+.revert-modal-header,
+.revert-modal-footer {
+  flex: 0 0 auto;
+  padding: 20px 24px;
+}
+
+.revert-modal-header p { margin-bottom: 0; }
+
+.revert-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 24px 12px;
+}
+
+.revert-modal-footer {
+  border-top: 1px solid var(--history-line);
+  background: #1c191a;
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
+}
+
+.revert-modal-footer .history-modal-actions { margin-top: 0; }
+.revert-modal-footer .history-error { color: var(--history-danger); margin: 0 0 12px; }
+.revert-modal-footer .history-error:empty { display: none; }
+
+@media (max-width: 600px) {
+  #revert-order-modal { padding: 12px; }
+  .revert-modal-header, .revert-modal-footer { padding: 16px; }
+  .revert-modal-body { padding: 0 16px 12px; }
+  .revert-modal-footer .history-modal-actions button { flex: 1 1 auto; }
+  .revert-modal-body input, .revert-modal-body textarea { font-size: 16px; }
 }
 
 .hidden {

@@ -8,7 +8,7 @@
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-  <link rel="stylesheet" href="ebay-order-history.css?v=history-media-evidence-20260827" />
+  <link rel="stylesheet" href="ebay-order-history.css?v=20261012-admin-reversal" />
   <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -319,11 +319,14 @@
   </div>
 
   <div id="revert-order-modal" class="history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="revert-order-title">
-    <div class="history-modal-card">
+    <div class="history-modal-card revert-modal-card">
+      <header class="revert-modal-header">
       <button id="close-revert-modal" type="button" class="modal-close-btn" aria-label="Close">x</button>
       <span class="eyebrow">Admin Reversal</span>
       <h2 id="revert-order-title">Revert order</h2>
       <p id="revert-order-subtitle">This will reopen the selected line(s) and restore stock when inventory was removed.</p>
+      </header>
+      <div class="revert-modal-body">
       <div id="revert-order-list" class="revert-order-list"></div>
       <label class="modal-field">
         Reversal Note
@@ -333,11 +336,14 @@
         Admin Password
         <input id="revert-password" type="password" autocomplete="current-password" placeholder="Sign this reversal" />
       </label>
-      <p id="revert-error" class="history-error"></p>
+      </div>
+      <footer class="revert-modal-footer">
+      <p id="revert-error" class="history-error" role="alert"></p>
       <div class="history-modal-actions">
         <button id="cancel-revert" type="button" class="secondary-btn">Cancel</button>
         <button id="confirm-revert" type="button" class="primary-btn">Sign and Revert</button>
       </div>
+      </footer>
     </div>
   </div>
 

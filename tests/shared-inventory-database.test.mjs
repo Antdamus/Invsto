@@ -16,6 +16,7 @@ before(async()=>{
  insert into auth.users values('${id(1)}','staff@example.test');
  create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
  create function can_manage_inventory() returns boolean language sql stable as $$select auth.uid() is not null and current_setting('test.allowed',true)='yes'$$;
+ create function is_admin() returns boolean language sql stable as $$select auth.uid() is not null and coalesce(current_setting('test.admin',true),'')='yes'$$;
  create table store_locations(id uuid primary key,name text,active boolean default true);
  create table locations(id uuid primary key,location_name text,location_code text,parent_location_id uuid,active boolean default true,
   is_tray boolean default false,location_role text default 'storage_location',tray_status text default 'checked_in',tray_current_store_id uuid,store_id uuid);
@@ -67,12 +68,21 @@ before(async()=>{
  await db.exec(oldLive.slice(oldLive.indexOf('create or replace function public.reserve_live_sale_item('),oldLive.indexOf('create or replace function public.fulfill_ebay_order_line_with_live_lot_for_store')));
  const oldLinks=await migration('20260930120000_live_bag_pending_order_links.sql');
  await db.exec(oldLinks.slice(oldLinks.indexOf('create function public.set_live_bag_order_link('),oldLinks.indexOf('create function public.get_live_bag_order_matches(')));
+ const revert=await migration('20260515133000_admin_ebay_order_reverts.sql');
+ await db.exec(revert.slice(0,revert.indexOf('create or replace function public.admin_revert_ebay_order_lines(')));
+ const liveRevert=await migration('20260515140000_live_sale_reserved_stock.sql');
+ await db.exec(liveRevert.slice(liveRevert.indexOf('create or replace function public.admin_revert_ebay_order_lines(')));
  await db.exec(await migration('20261008200000_shared_bag_inventory.sql'));
+ await db.exec('alter table ebay_orders add column shipped_on_date timestamptz');
+ await db.exec(await migration('20261006223000_guard_pending_csv_imports.sql'));
+ await db.exec(await migration('20261012180000_allow_audited_admin_order_reversal.sql'));
+ await db.exec('grant usage on schema auth to authenticated; grant select,update on ebay_orders,ebay_order_lines to authenticated');
  await db.exec('create trigger ebay_live_inventory_gate before insert or update on live_sale_lot_items for each row execute function guard_ebay_live_reservation(); create trigger ebay_live_manual_gate before insert or update on live_sale_manual_lot_items for each row execute function guard_ebay_live_reservation()');
 
 });
 beforeEach(async()=>{
- await db.exec(`set test.allowed='yes';select set_config('request.jwt.claim.sub','${id(1)}',false);
+ await db.exec(`reset role;set test.admin='yes';set test.allowed='yes';select set_config('request.jwt.claim.sub','${id(1)}',false);
+ truncate ebay_order_revert_events;
  truncate pending_inventory_attachment_events,pending_inventory_attachments,ebay_order_line_reservations,ebay_order_lines,ebay_orders,item_types,item_stock_locations,locations,store_locations,
  stock_transactions,sales,sale_items,sale_item_categories,sales_audit,ebay_order_admin_events,pending_checkout_receipts,live_sale_lot_items cascade;
  insert into store_locations values('${id(41)}','Main',true),('${id(42)}','Other',true);
@@ -97,6 +107,76 @@ const manifest=(bag=71)=>scalar('select get_shared_bag_inventory($1) v',[id(bag)
 const totalheld=()=>scalar('select coalesce(sum(reserved_quantity),0)::int v from active_stock_reservations');
 const physical=(source=31)=>scalar('select quantity v from item_stock_locations where id=$1',[id(source)]);
 const legacyBag=async(bag=71)=>{await db.exec('alter table live_sale_lot_items disable trigger a_shared_bag_inventory_guard');try{await bagscan(bag);}finally{await db.exec('alter table live_sale_lot_items enable trigger a_shared_bag_inventory_guard');}};
+
+const revertOrder=(lines=[11],note='Correct accidental closeout')=>db.query('select * from admin_revert_ebay_order_lines($1,$2,$3)',[lines.map(id),note,'staff@example.test']);
+const markCsv=()=>db.exec(`update ebay_orders set raw_payload='{"source":"ebay_orders_report_csv"}';
+ update ebay_order_lines set raw_payload='{"Order Number":"ORDER-A","Shipped On Date":""}';`);
+
+test('CSV-origin batch reversal reopens lines and parent orders with a signed audit, without creating stock',async()=>{
+ await markCsv();
+ await db.exec(`update ebay_order_lines set line_status='skipped',fulfilled_quantity=quantity,fulfilled_at=now();
+ update ebay_orders set status='fulfilled',shipped_on_date=now();`);
+ await db.exec(await migration('20261006223000_guard_pending_csv_imports.sql'));
+ await assert.rejects(revertOrder([11,12]),/CSV imports cannot reopen completed order lines/);
+ assert.equal(await scalar('select count(*)::int v from ebay_order_revert_events'),0);
+ await db.exec(await migration('20261012180000_allow_audited_admin_order_reversal.sql'));
+ await db.exec('set role authenticated');
+ assert.deepEqual((await revertOrder([11,12])).rows,[{reverted_lines:2,restored_units:0,updated_orders:1}]);
+ assert.equal(await scalar("select count(*)::int v from ebay_order_lines where line_status='pending' and fulfilled_quantity=0"),2);
+ assert.equal(await scalar('select status v from ebay_orders'),'pending');
+ await db.exec('reset role');
+ assert.equal(await physical(),5);
+ assert.equal(await scalar('select count(*)::int v from stock_transactions'),0);
+ const event=(await db.query('select * from ebay_order_revert_events')).rows[0];
+ assert.equal(event.signed_by,id(1));assert.equal(event.notes,'Correct accidental closeout');
+ assert.equal(event.payload.line_snapshots.length,2);
+ assert.equal(event.payload.line_snapshots[0].previous_status,'skipped');
+ await assert.rejects(revertOrder([11,12]),/No closed eBay order lines/);
+ assert.equal(await scalar('select count(*)::int v from ebay_order_revert_events'),1);
+});
+
+test('CSV guards still reject direct reopening, even with a client-set reversal flag',async()=>{
+ await markCsv();await db.exec("update ebay_order_lines set line_status='fulfilled';update ebay_orders set status='fulfilled';set role authenticated");
+ for(const flag of ['off','on']) {
+  await db.query("select set_config('app.ebay_admin_reversal',$1,false)",[flag]);
+  await assert.rejects(db.exec("update ebay_order_lines set line_status='pending'"),/CSV imports cannot reopen completed order lines/);
+  await assert.rejects(db.exec("update ebay_orders set status='pending'"),/CSV imports cannot reopen completed orders/);
+ }
+ await db.exec("reset app.ebay_admin_reversal;reset role;set test.admin='no'");
+ await assert.rejects(revertOrder(),/Only admins/);
+ await db.exec("set test.admin='yes'");
+ await assert.rejects(revertOrder([11],''),/note is required/);
+ assert.equal(await scalar('select count(*)::int v from ebay_order_revert_events'),0);
+ await db.exec('set role authenticated');
+ await assert.rejects(db.query('select * from admin_revert_ebay_order_lines_audited($1,$2,$3)',[[id(11)],'Attempt private call','staff@example.test']),/permission denied/);
+});
+
+test('reversal scope resets inside the same transaction, on both success and failure',async()=>{
+ await markCsv();await db.exec("update ebay_order_lines set line_status='skipped';update ebay_orders set status='fulfilled'");
+ await db.exec('begin');
+ await revertOrder();
+ assert.notEqual(await scalar("select current_setting('app.ebay_admin_reversal',true) v"),'on');
+ // Still running as the function owner: the scoped setting must be gone.
+ await db.exec('savepoint csv_check');
+ await assert.rejects(db.exec(`update ebay_order_lines set line_status='pending' where id='${id(12)}'`),/cannot reopen/);
+ await db.exec('rollback to savepoint csv_check');
+ await assert.rejects(revertOrder([11]),/No closed/);
+ await db.exec('rollback to savepoint csv_check');
+ assert.notEqual(await scalar("select current_setting('app.ebay_admin_reversal',true) v"),'on');
+ await db.exec('rollback');
+ assert.equal(await scalar('select count(*)::int v from ebay_order_revert_events'),0);
+});
+
+test('CSV-origin shared bag reversal restores stock exactly once and preserves its reservation',async()=>{
+ await bagscan();await link();await markCsv();await close();
+ assert.equal(await physical(),4);
+ assert.equal((await revertOrder()).rows[0].restored_units,1);
+ assert.equal(await physical(),5);assert.equal(await totalheld(),1);
+ assert.equal(await scalar("select count(*)::int v from stock_transactions where action_type='correction'"),1);
+ assert.equal((await manifest()).items[0].status,'reserved');
+ await assert.rejects(revertOrder(),/No closed/);
+ assert.equal(await physical(),5);
+});
 
 test('bag first shares one hold; old attachment clients cannot duplicate; every completion route deducts once',async()=>{
  await bagscan();await link();assert.equal(await totalheld(),1);
