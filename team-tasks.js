@@ -4311,6 +4311,7 @@ function getTaskSourceLabel(task = {}) {
 }
 
 function getTaskCardPreview(task = {}, canceled = false) {
+  if (!canceled && task.metadata?.source === 'buyer_followup' && task.description) return task.description;
   return canceled
     ? task.metadata?.history_removed_note || task.latest_note || "Canceled by admin."
     : task.latest_note || task.description || task.question || "No note yet.";
@@ -4375,6 +4376,7 @@ function getLatestTaskEvent(events = []) {
 }
 
 function getCurrentTaskInstruction(task = {}, events = []) {
+  if (task.metadata?.source === 'buyer_followup' && getTaskOriginalInstruction(task)) return getTaskOriginalInstruction(task);
   const latest = getLatestTaskEvent(events);
   return latest?.notes || task.latest_note || getTaskOriginalInstruction(task) || task.title || "No instruction entered yet.";
 }

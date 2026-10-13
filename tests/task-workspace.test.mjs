@@ -455,6 +455,19 @@ test('customer promise update uploads a photo and retains it when the update sav
  const result=await page.evaluate(()=>({uploads,writes}));assert.equal(result.uploads.length,1);assert.equal(result.writes[1][1]._photos[0].label,'certificate.png');assert.deepEqual(result.writes[0],result.writes[1]);
 });
 
+test('customer promise instructions stay prominent after a conversation link or photo update',async t=>{
+ const page=await open(t,390);await replyFixture(page);
+ await page.evaluate(()=>{
+  const task=state.tasks[0];task.metadata={source:'buyer_followup',buyer_username:'buyer.one'};
+  task.latest_note='Original conversation linked to this customer promise.';
+  state.eventsByTask.set(getUnifiedTaskKey(task),[{action:'commented',notes:task.latest_note,created_at:new Date().toISOString()}]);
+  renderTasks();
+ });
+ await expect(page.locator('.team-task-summary-preview')).toContainText('Check the certificate matches the serial number.');
+ await expect(page.locator('.team-task-instruction.is-current')).toContainText('Check the certificate matches the serial number.');
+ await expect(page.locator('.team-task-instruction.is-current')).not.toContainText('Original conversation linked');
+});
+
 test('failed reply keeps the draft and owner; completion review cannot be handed off',async t=>{
   const page=await open(t,390,{admin:false});await replyFixture(page);
   await page.getByRole('button',{name:'Ask for a decision',exact:true}).click();
