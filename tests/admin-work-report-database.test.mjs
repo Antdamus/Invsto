@@ -13,6 +13,7 @@ before(async()=>{
  create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('test.actor',true),'')::uuid$$;`);
  await db.exec(await readFile(new URL('fixtures/admin-work-report-schema.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261013170000_admin_employee_work_report.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261013180000_work_report_closed_orders.sql',import.meta.url),'utf8'));
 });
 beforeEach(async()=>{
  const tables=(await db.query("select tablename from pg_tables where schemaname='public'")).rows.map(r=>r.tablename);
@@ -23,6 +24,58 @@ beforeEach(async()=>{
  ('${id(3)}','${id(300)}','Other worker','other@example.test','employee',true);`);
 });
 after(()=>db?.close());
+
+test('order completions count whole orders once, preserve evidence after reopen, and credit the final signer',async()=>{
+ await db.exec(`insert into ebay_orders(id,order_number,buyer_username) values('${id(600)}','09-15269-87504','buyer');
+ insert into ebay_order_lines(id,order_id,item_title,quantity,fulfilled_quantity,line_status) values
+ ('${id(601)}','${id(600)}','First item',2,0,'pending'),('${id(602)}','${id(600)}','Second item',1,0,'pending');
+ set test.actor='${id(300)}';
+ update ebay_order_lines set fulfilled_quantity=1,line_status='partially_fulfilled',fulfilled_by=auth.uid(),fulfilled_at=now() where id='${id(601)}';`);
+ assert.equal((await db.query('select count(*)::int n from pending_order_completion_events')).rows[0].n,0);
+ await db.exec(`update ebay_order_lines set fulfilled_quantity=quantity,line_status='fulfilled',fulfilled_by=auth.uid(),fulfilled_at=now() where id='${id(601)}';`);
+ assert.equal((await db.query('select count(*)::int n from pending_order_completion_events')).rows[0].n,0);
+ await db.exec(`set test.actor='${id(200)}';update ebay_order_lines set fulfilled_quantity=quantity,line_status='fulfilled',fulfilled_by=auth.uid(),fulfilled_at=now() where id='${id(602)}';`);
+ const e=(await db.query('select * from pending_order_completion_events')).rows[0];
+ assert.equal(e.actor_user_id,id(200));assert.equal(e.order_number,'09-15269-87504');assert.equal(e.items.length,2);
+ await db.exec(`update ebay_order_lines set notes='Later note' where order_id='${id(600)}';
+ update ebay_order_lines set line_status='pending',fulfilled_quantity=0,fulfilled_by=null,fulfilled_at=null,item_title='Edited after closure' where id='${id(602)}';`);
+ assert.equal((await db.query('select count(*)::int n from pending_order_completion_events')).rows[0].n,1);
+ assert.equal((await db.query('select items from pending_order_completion_events')).rows[0].items[1].item_title,'Second item');
+ await db.exec(`set test.actor='${id(200)}';update ebay_order_lines set fulfilled_quantity=quantity,line_status='fulfilled',fulfilled_by=auth.uid(),fulfilled_at=now() where id='${id(602)}';
+ set test.actor='${id(100)}'; update pending_order_completion_events set occurred_at='2026-10-13T15:00Z';`);
+ const r=await report({worker:id(2),category:'closed_orders'});
+ assert.equal(r.total,2);assert.equal(r.workers[0].metrics.pending_orders_closed,1);assert.equal(r.events[0].details.order_number,'09-15269-87504');
+ const privileges=(await db.query("select has_table_privilege('authenticated','pending_order_completion_events','insert') writable,has_table_privilege('authenticated','pending_order_completion_events','select') readable")).rows[0];
+ assert.deepEqual(privileges,{writable:false,readable:false});
+});
+
+test('multi-order updates record each finished order, excluding partial, unsigned, imported and cancelled-only work',async()=>{
+ await db.exec(`insert into ebay_orders(id,order_number) select ('00000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'Order '||n from generate_series(700,704) n;
+ insert into ebay_order_lines(id,order_id,quantity,fulfilled_quantity,line_status)
+ select ('00000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,('00000000-0000-4000-8000-'||lpad((700+(n-710)/2)::text,12,'0'))::uuid,2,0,'pending' from generate_series(710,719) n;
+ set test.actor='${id(200)}';
+ update ebay_order_lines set fulfilled_quantity=2,line_status='fulfilled',fulfilled_by=auth.uid(),fulfilled_at=now() where order_id in('${id(700)}','${id(701)}');
+ update ebay_order_lines set fulfilled_quantity=1,line_status='partially_fulfilled',fulfilled_by=auth.uid(),fulfilled_at=now() where order_id='${id(702)}';
+ update ebay_order_lines set fulfilled_quantity=0,line_status='cancelled',fulfilled_by=auth.uid(),fulfilled_at=now() where order_id='${id(703)}';
+ set test.actor='';update ebay_order_lines set fulfilled_quantity=2,line_status='fulfilled',fulfilled_by='${id(200)}',fulfilled_at=now() where order_id='${id(704)}';`);
+ const rows=(await db.query('select order_id,items from pending_order_completion_events order by order_id')).rows;
+ assert.deepEqual(rows.map(r=>r.order_id),[id(700),id(701)]);assert.ok(rows.every(r=>r.items.length===2));
+});
+
+test('historical backfill requires matching signed evidence and never invents an actor for imported completion',async()=>{
+ await db.exec(`insert into ebay_orders(id,order_number) select ('00000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'Order '||n from generate_series(800,803) n;
+ insert into ebay_order_lines(id,order_id,quantity,fulfilled_quantity,line_status,fulfilled_at,fulfilled_by)
+ select ('00000000-0000-4000-8000-'||lpad((n+10)::text,12,'0'))::uuid,('00000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,1,1,'fulfilled','2026-10-13T15:00Z','${id(200)}' from generate_series(800,803) n;
+ insert into ebay_order_admin_events(id,action,signed_by,created_at,order_line_ids) values
+ ('${id(820)}','fulfilled_no_inventory','${id(200)}','2026-10-13T15:00Z',array['${id(810)}','${id(811)}','${id(812)}']::uuid[]);
+ update ebay_order_lines set fulfilled_quantity=0,line_status='pending' where id='${id(811)}';
+ update ebay_order_lines set fulfilled_by=null where id='${id(812)}';`);
+ const migration=await readFile(new URL('../supabase/migrations/20261013180000_work_report_closed_orders.sql',import.meta.url),'utf8');
+ const backfill=migration.slice(migration.indexOf('-- Recover only'),migration.indexOf('create or replace view'));
+ await db.exec(backfill);
+ const rows=(await db.query('select order_id,actor_user_id,record_basis from pending_order_completion_events')).rows;
+ assert.deepEqual(rows,[{order_id:id(800),actor_user_id:id(200),record_basis:'verified_historical_snapshot'}]);
+});
 
 test('admin-only RPC and private stream enforce permissions on the server',async()=>{
  const {rows:[p]}=await db.query("select has_table_privilege('authenticated','admin_work_event_stream','select') stream,has_function_privilege('anon','admin_employee_work_report(date,uuid,uuid,text,text,integer,integer,timestamptz)','execute') anonymous");

@@ -3,11 +3,13 @@ import {readFile,mkdir} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {test,before,after} from 'node:test';
 import {chromium,webkit,expect} from '@playwright/test';
-let server,browser,origin,tabCode;
+let server,browser,origin,tabCode,liveCode;
 const root=new URL('../',import.meta.url);
 before(async()=>{
  const admin=await readFile(new URL('admin.js',root),'utf8');
  tabCode=admin.slice(admin.indexOf('function activateTab(which)'),admin.indexOf('let rtChannel = null;'));
+ const overview=await readFile(new URL('admin-overview.js',root),'utf8');
+ liveCode=overview.slice(overview.indexOf('function wireLiveList()'),overview.indexOf('// ---------- public ----------'));
  server=createServer(async(req,res)=>{const path=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(path)||path.includes('..'))return res.writeHead(404).end();try{let body=await readFile(new URL(path,root));if(path.endsWith('.html'))body=body.toString().replace(/<script\b[\s\S]*?<\/script>/gi,'');res.setHeader('Content-Type',path.endsWith('.js')?'text/javascript':path.endsWith('.css')?'text/css':'text/html');res.end(body);}catch{res.writeHead(404).end();}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;
  browser=await(process.env.INVSTO_WORK_BROWSER==='webkit'?webkit:chromium).launch();await mkdir(new URL('test-results/',root),{recursive:true});
@@ -24,12 +26,15 @@ async function open(t,width=1366){
   window.calls=[];window.delays=[];window.failReport=false;window.hold=false;
   window.testWorker={id:id(2),display_name:'Sandra',email:'sandra@example.test',active:true,records:105,metrics:{tasks_completed:3,tasks_closed:2,units_checked_in:18,items_created:7,replies_sent:4,admin_closeouts:1},categories:{tasks:104,packaging:1},clocked_seconds:23400,break_seconds:1800,shifts:[{id:id(50),clock_in:'2026-10-13T12:00:00Z',clock_out:null,clocked_seconds:23400,break_seconds:1800,store:'Downtown',correction_count:0}]};
   window.testEvents=Array.from({length:105},(_,n)=>({event_key:'team_task_events:'+id(n+500),source:'team_task_events',actor_user_id:id(200),occurred_at:'2026-10-13T16:02:03Z',category:n===0?'packaging':'tasks',action:n===0?'admin_closeout':'completed_by_employee',title:n===0?'Package closed by admin':'Include certificate '+n,notes:n===1?'<img src=x onerror="window.injected=true"> Saved note':'A signed action.',quantity:0,details:n===0?{shipment_id:id(90),payload:{reason:'Owner requested administrative closeout'}}:{task_id:id(10),task_source:'team',old_status:'in_progress',new_status:'completed_by_employee',photo_attachments:[{bucket:'team-task-evidence',path:'reference.jpg'}],payload:{signature:'Sandra',before:{title:'Original'},after:{title:'Updated'}}}}));
+  testWorker.metrics.pending_orders_closed=2;testWorker.categories.closed_orders=2;testWorker.categories.tasks=102;
+  for(const n of [30,103]) testEvents[n]={...testEvents[n],category:'closed_orders',action:'pending_order_closed',title:`09-15269-${n===30?'87504':'87505'} · 777gmdi`,details:{order_number:`09-15269-${n===30?'87504':'87505'}`,buyer_username:'777gmdi',items:[{item_title:'#027 - $2 BILLS',fulfilled_quantity:1,status:'fulfilled'}]}};
+  testEvents.forEach((e,n)=>{if(n>=80)e.occurred_at='2026-10-13T11:00:00Z';});
   window.supabase={rpc:async(name,args)=>{
    calls.push({name,args:structuredClone(args)});
    if(failReport){failReport=false;return {error:{message:'Connection interrupted'}};}
    if(hold) await new Promise(r=>delays.push(r));
-   const events=testEvents.filter(e=>(!args._category||e.category===args._category)&&(!args._search||JSON.stringify(e).includes(args._search)));
-   const w=structuredClone(testWorker);if(args._shift_id)w.records=80;
+   const events=testEvents.filter(e=>(!args._shift_id||Date.parse(e.occurred_at)>=Date.parse('2026-10-13T12:00:00Z'))&&(!args._category||e.category===args._category)&&(!args._search||JSON.stringify(e).includes(args._search)));
+   const w=structuredClone(testWorker);if(args._shift_id){w.records=80;w.metrics.pending_orders_closed=1;w.categories.closed_orders=1;w.categories.tasks=78;}
    return {data:{day:args._day,time_zone:'America/New_York',as_of:'2026-10-13T18:30:00Z',start_at:args._shift_id?'2026-10-13T12:00:00Z':'2026-10-13T04:00:00Z',end_at:args._shift_id?'2026-10-13T18:30:00Z':'2026-10-14T04:00:00Z',shift_id:args._shift_id,unattributed_records:0,workers:args._employee_id?[w]:[w,{...w,id:id(3),display_name:'Alex',email:'alex@example.test',records:0,metrics:{},categories:{},shifts:[],clocked_seconds:0,break_seconds:0}],total:args._employee_id?events.length:0,events:args._employee_id?events.slice(args._offset||0,(args._offset||0)+(args._limit||50)):[]}};
   }};
  });
@@ -61,7 +66,7 @@ test('full pagination, category/search filtering, stable snapshot and separate s
  await card.getByRole('button',{name:'Load more actions'}).click();await expect(card.locator('.work-event')).toHaveCount(100);
  await card.getByRole('button',{name:'Load more actions'}).click();await expect(card.locator('.work-event')).toHaveCount(105);await expect(card.locator('.work-more')).not.toBeVisible();
  await card.locator('[data-work-category]').selectOption('packaging');await expect(card.locator('.work-event')).toHaveCount(1);await expect(card.locator('.work-stats')).toContainText('18');
- await card.locator('[data-work-category]').selectOption('tasks');await card.locator('[data-work-query]').fill('Include certificate 10');await card.getByRole('button',{name:'Search',exact:true}).click();await expect(card.locator('.work-event')).toHaveCount(6);
+ await card.locator('[data-work-category]').selectOption('tasks');await card.locator('[data-work-query]').fill('Include certificate 10');await card.getByRole('button',{name:'Search',exact:true}).click();await expect(card.locator('.work-event')).toHaveCount(5);
  const calls=await page.evaluate(()=>window.calls);assert.ok(calls.filter(c=>c.args._employee_id).every(c=>c.args._as_of==='2026-10-13T18:30:00Z'));
  assert.equal(calls.at(-1).args._search,'Include certificate 10');assert.equal(calls.at(-1).args._offset,0);
 });
@@ -85,10 +90,62 @@ test('changing shift while a request is running discards the stale response',asy
  await expect(card.locator('.work-window')).toContainText('end exclusive');await expect(card.locator('[data-work-shift]')).toHaveValue('');
 });
 
+test('opening a shift during a daily refresh prevents the late daily response from replacing it',async t=>{
+ const page=await open(t);await page.evaluate(()=>hold=true);
+ await page.getByRole('button',{name:'Refresh',exact:true}).click();
+ await page.waitForFunction(()=>delays.length===1);
+ await page.evaluate(()=>{window.shiftOpening=AdminWorkReport.openShift('00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000050','2026-10-13T12:00:00Z');});
+ await page.waitForFunction(()=>delays.length===2);await page.evaluate(()=>{hold=false;delays[1]();});
+ await expect(page.locator('.work-worker')).toHaveCount(1);await expect(worker(page).locator('.work-mini')).toContainText('80 records');
+ await page.evaluate(()=>delays[0]());await expect(page.locator('.work-worker')).toHaveCount(1);await expect(worker(page).locator('.work-mini')).toContainText('80 records');
+ await expect(page.locator('#workScope')).toBeVisible();await expect(page.locator('.work-toolbar')).not.toBeVisible();
+});
+
 test('View work opens the requested employee and full shift',async t=>{
  const page=await open(t);
  await page.evaluate(()=>AdminWorkReport.openShift('00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000050','2026-10-13T12:00:00Z'));
  await expect(worker(page)).toHaveAttribute('open','');await expect(worker(page).locator('.work-event')).toHaveCount(50);
  await expect(worker(page).locator('[data-work-shift]')).toHaveValue('00000000-0000-4000-8000-000000000050');
  await expect(worker(page).locator('.work-window')).not.toContainText('end exclusive');
+ await expect(page.locator('.work-worker')).toHaveCount(1);
+ await expect(page.locator('.work-toolbar')).not.toBeVisible();
+ await expect(worker(page).locator('[data-work-shift]')).not.toBeVisible();
+ await expect(worker(page).locator('.work-mini')).toContainText('80 records');
+ await expect(worker(page).locator('.work-mini')).toContainText('1 order closed');
+ await page.getByRole('button',{name:'Refresh',exact:true}).click();
+ await expect(worker(page).locator('.work-event')).toHaveCount(50);
+ const args=(await page.evaluate(()=>calls.at(-1))).args;assert.equal(args._shift_id,'00000000-0000-4000-8000-000000000050');
+ await worker(page).getByRole('button',{name:/Pending orders closed/}).click();
+ await expect(worker(page).locator('.work-event')).toHaveCount(1);
+ await expect(worker(page).locator('.work-event')).toContainText('87504');
+ await expect(worker(page).locator('.work-event')).not.toContainText('87505');
+ await page.getByRole('button',{name:'← Daily report',exact:true}).click();
+ await expect(page.locator('.work-worker')).toHaveCount(2);await expect(page.locator('.work-toolbar')).toBeVisible();
+ await expand(page);await expect(worker(page).locator('.work-mini')).toContainText('105 records');
+});
+
+for(const width of [320,390]) test(`${width}px closed order drilldown and focused shift stay readable without horizontal scrolling`,async t=>{
+ const page=await open(t,width);await page.evaluate(()=>AdminWorkReport.openShift('00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000050','2026-10-13T12:00:00Z'));
+ const card=worker(page);await expect(card.locator('.work-event')).toHaveCount(50);
+ await page.locator('#workScope').scrollIntoViewIfNeeded();await page.screenshot({path:`test-results/work-shift-phone-${width}.png`});
+ await card.getByRole('button',{name:/Pending orders closed/}).click();await expect(card.locator('.work-event')).toHaveCount(1);
+ await expect(card.getByRole('link',{name:'Open order history'})).toHaveAttribute('href','ebay-order-history.html?focusOrder=09-15269-87504');
+ await expect(card.locator('.work-order-items')).toContainText('#027 - $2 BILLS');await expect(card.locator('.work-completed-by')).toContainText('Sandra');
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ assert.ok((await card.getByRole('link',{name:'Open order history'}).boundingBox()).height>=44);
+ await card.locator('.work-detail-status').scrollIntoViewIfNeeded();await page.screenshot({path:`test-results/work-closed-phone-${width}.png`});
+});
+
+test('live worker profile and card open just that shift; explicit Timesheet retains the monthly drawer',async t=>{
+ const page=await open(t);
+ await page.evaluate(()=>{
+  document.getElementById('liveList').innerHTML='<div class="live-card" data-employee-id="00000000-0000-4000-8000-000000000002" data-entry-id="00000000-0000-4000-8000-000000000050" data-clock-in-ms="1791892800000" data-display-name="Sandra"><button data-live-work>Sandra</button><button data-live-details>Timesheet</button><span class="live-times">Open shift</span></div>';
+  window.drawerCalls=[];window.openWorkerDrawer=p=>drawerCalls.push(p);
+ });
+ await page.addScriptTag({content:liveCode});await page.evaluate(()=>wireLiveList());
+ await page.locator('#tabOverview').click();await page.locator('#liveList [data-live-work]').click();
+ await expect(page.locator('.work-worker')).toHaveCount(1);await expect(page.locator('#workScopeTitle')).toHaveText('Sandra · Shift work');
+ assert.equal(await page.evaluate(()=>drawerCalls.length),0);
+ await page.locator('#tabOverview').click();await page.locator('#liveList [data-live-details]').click();assert.equal(await page.evaluate(()=>drawerCalls.length),1);
+ await page.locator('#liveList .live-times').click();await expect(page.locator('#panelWorkReport')).toBeVisible();await expect(page.locator('.work-worker')).toHaveCount(1);
 });

@@ -458,7 +458,7 @@ async function loadSummary() {
       <div class="live-main">
         <span class="worker-avatar live-avatar" aria-hidden="true">${escapeHtml(getInitials(r.display_name))}</span>
         <div>
-          <div class="live-name">${escapeHtml(r.display_name || "Worker")}</div>
+          <button class="live-name live-profile" type="button" data-live-work aria-label="View ${escapeHtml(r.display_name || 'worker')}'s shift work">${escapeHtml(r.display_name || "Worker")}</button>
           <div class="live-times">since ${sinceStr} / ${durStr}</div>
           ${r.outing ? `<div class="ow-live-purpose">${escapeHtml(r.outing.purpose)}</div>` : ''}
         </div>
@@ -496,7 +496,7 @@ async function loadLiveNow(){
   }finally{liveLoading=false;}
 }
 
-// Click a live card → open drawer for that worker (current month)
+// A live worker opens only the current shift. Timesheet remains an explicit action.
 function wireLiveList(){
   const list = qs('liveList');
   if (!list) return;
@@ -516,6 +516,9 @@ function wireLiveList(){
     if(outingButton){OffsiteWork.focus(outingButton.dataset.liveOuting);return;}
     if(e.target.closest('[data-live-correct]')){
       correctLiveTime(card.dataset.entryId,displayName); return;
+    }
+    if(!e.target.closest('[data-live-details]')){
+      window.AdminWorkReport.openShift(employeeId,card.dataset.entryId,new Date(Number(card.dataset.clockInMs)).toISOString());return;
     }
     const clockDate=new Date(Number(card.dataset.clockInMs));
     const monthStart=`${clockDate.getFullYear()}-${String(clockDate.getMonth()+1).padStart(2,'0')}-01`;
