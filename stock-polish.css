@@ -9,7 +9,8 @@ body.stock-body[data-phone-page=stock] {
   font-family:Manrope,system-ui,-apple-system,sans-serif;
 }
 body.stock-body *,body.stock-body *::before,body.stock-body *::after { box-sizing:border-box; }
-body.stock-body .hidden { display:none !important; }
+/* The filter panel uses .show; its legacy .hidden class is not toggled. */
+body.stock-body .hidden:not(#filter-section) { display:none !important; }
 body.stock-body :is(button,a,input,select,textarea,summary) { -webkit-tap-highlight-color:transparent; }
 body.stock-body :is(button,select,summary) { touch-action:manipulation; }
 body.stock-body button:disabled { opacity:.45; cursor:not-allowed; }
@@ -188,6 +189,7 @@ body.stock-body #print-cgl-label { background:var(--stock-gold); color:#20291f; 
 }
 @media (min-width:761px) {
   body.stock-body .stock-desktop-search { display:block; }
+  body.stock-body #filter-section:not(.show) { display:none; }
 }
 @media (max-width:760px) {
   body.stock-body .stock-desktop-only { display:none; }
