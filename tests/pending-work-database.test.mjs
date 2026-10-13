@@ -25,6 +25,7 @@ before(async()=>{
  create table ebay_conversation_links(conversation_id uuid,link_type text,status text,buyer_username text,matched_value text);
  create table ebay_order_line_certificates(id uuid primary key,order_line_id uuid references ebay_order_lines(id),voided_at timestamptz);
  create table packaging_shipments(id uuid primary key,order_ids uuid[],status text);
+ create table packaging_items(shipment_id uuid,order_line_id uuid,quantity integer);
  set test.actor='${id(1)}';set test.staff='yes';set test.admin='yes';`);
  for(const table of ['team_tasks','ebay_order_tasks','ebay_return_tasks'])await db.exec(`create table ${table}(id uuid primary key,order_id uuid,return_case_id uuid,status text,assigned_to_user_id uuid,assigned_to_email text,created_by uuid,metadata jsonb default '{}');`);
  await db.exec(await readFile(new URL('../supabase/migrations/20261010203000_order_line_watch_flags.sql',import.meta.url),'utf8'));
@@ -32,6 +33,7 @@ before(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261011011000_pending_work_responsibility.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261011012000_pending_missing_watches.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261012190000_pending_order_cancellation_marker.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261013201000_partial_pending_watch_fulfillment.sql',import.meta.url),'utf8'));
  await db.exec(`insert into ebay_orders values('${id(10)}','01-10000-10000','Buyer','pending'),('${id(11)}','02-10000-10000','BUYER','pending'),('${id(12)}','03-10000-10000','Someone','pending');
  insert into ebay_order_lines(id,order_id,line_status) values('${id(20)}','${id(10)}','pending'),('${id(21)}','${id(11)}','pending'),('${id(22)}','${id(12)}','pending');
  insert into ebay_order_tasks(id,order_id,status,assigned_to_email,created_by) values('${id(30)}','${id(10)}','assigned','staff@example.test','${id(1)}');
@@ -86,12 +88,18 @@ test('CGL requires Watch, a saved matching copy, explicit confirmation; voiding 
  assert.equal((await list()).length,0);
  assert.equal((await db.query("select count(*)::int n from pending_order_work_events where action='requirement_corrected'")).rows[0].n,1);
 });
-test('missing watches require a Watch line, share one hold per line, block the buyer and keep CGL independent',async()=>{
+test('missing watches require a Watch line, block their own line, and keep other requirements independent',async()=>{
  await assert.rejects(create(80,'watch_missing',[21]),/Mark this item Watch/);
  await assert.rejects(create(80,'watch_missing',[20,21]),/Mark this item Watch/);
  await create(80,'watch_missing',[20]);await create(81,'watch_missing',[20]);
  assert.equal((await list()).filter(b=>b.kind==='watch_missing').length,1);
- await assert.rejects(complete(21),/Package is waiting/);
+ await assert.rejects(complete(20),/Watch missing/);
+ await assert.rejects(db.query('select assert_pending_work_clear($1)',[[id(10)]]),/Watch missing/);
+ await db.query('select assert_pending_work_clear($1)',[[id(11)]]);
+ await db.exec('begin');await complete(21);
+ await db.query("update ebay_orders set status='fulfilled' where id=$1",[id(11)]);
+ assert.equal((await list()).filter(b=>b.kind==='watch_missing').length,1,'shipping a different order does not release the watch');
+ await db.exec('rollback');
  await assert.rejects(db.query('select set_order_line_watch($1,false,1)',[id(20)]),/Watch missing/);
  await db.query("insert into packaging_shipments values($1,$2,'packing')",[id(71),[id(10)]]);
  await assert.rejects(db.query("update packaging_shipments set status='ready' where id=$1",[id(71)]),/Watch missing/);
@@ -162,4 +170,26 @@ test('imported fulfillment facts remain importable and old scoped holds never af
  await create(65,'manual',[21]);await db.exec("set test.actor=''");await complete(21);await db.exec(`set test.actor='${id(1)}'`);
  await db.exec(`insert into ebay_orders values('${id(13)}','04-10000-10000','buyer','pending');insert into ebay_order_lines(id,order_id,line_status) values('${id(23)}','${id(13)}','pending');`);
  assert.deepEqual(await list([23]),[]);await complete(23);
+});
+
+test('a partial order excludes its missing watch, rejects mixed batches atomically, and guards only actual package contents',async()=>{
+ await db.exec(`insert into ebay_orders values('${id(1000)}','05-10000-10000','partial-buyer','pending');
+ insert into ebay_order_lines(id,order_id,line_status) values('${id(1001)}','${id(1000)}','pending'),('${id(1002)}','${id(1000)}','pending');`);
+ await db.query('select set_order_line_watch($1,true,0)',[id(1001)]);await create(1005,'watch_missing',[1001]);
+ await assert.rejects(db.query("update ebay_order_lines set line_status='fulfilled',fulfilled_quantity=1 where id=any($1)",[[id(1002),id(1001)]]),/Watch missing/);
+ assert.deepEqual((await db.query('select line_status from ebay_order_lines where order_id=$1 order by id',[id(1000)])).rows.map(r=>r.line_status),['pending','pending']);
+ await complete(1002);
+ assert.equal((await db.query('select fulfilled_quantity from ebay_order_lines where id=$1',[id(1001)])).rows[0].fulfilled_quantity,0);
+ await assert.rejects(db.query("update ebay_orders set status='fulfilled' where id=$1",[id(1000)]),/Watch missing/);
+ await db.query("update ebay_orders set status='partially_fulfilled' where id=$1",[id(1000)]);
+ await db.query("insert into packaging_shipments values($1,$2,'packing')",[id(1006),[id(1000)]]);
+ await db.query('insert into packaging_items values($1,$2,1)',[id(1006),id(1002)]);
+ await db.query("update packaging_shipments set status='ready' where id=$1",[id(1006)]);
+ await db.query('insert into packaging_items values($1,$2,1)',[id(1006),id(1001)]);
+ await assert.rejects(db.query("update packaging_shipments set status='dispatched' where id=$1",[id(1006)]),/Watch missing/);
+ await db.query('delete from packaging_items where order_line_id=$1',[id(1001)]);
+ await db.query("update packaging_shipments set status='dispatched' where id=$1",[id(1006)]);
+ assert.equal((await list([1001])).filter(b=>b.active).length,1);
+ await assert.rejects(db.query('select assert_pending_work_clear($1)',[[id(1000)]]),/Watch missing/);
+ assert.equal((await db.query("select has_function_privilege('authenticated','assert_pending_work_scope_clear(uuid[],uuid[])','execute') allowed")).rows[0].allowed,false);
 });

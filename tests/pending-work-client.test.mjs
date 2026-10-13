@@ -132,3 +132,14 @@ test('the cancellation summary returns from History by reloading pending orders'
  f.elements['summary-pending-cancel']={textContent:''};f.api.summaryCounts();assert.equal(f.elements['summary-pending-cancel'].textContent,'—');
  f.click({},'summary-cancel-button');assert.equal(f.state.reloads,1);assert.equal(f.elements['order-status-filter'].value,'pending');
 });
+
+test('only selected missing-watch lines block partial completion; other holds and failed reads still block',async()=>{
+ const f=fixture(),missing=blocker({kind:'watch_missing',line_ids:['a'],task_id:null});
+ const check=async(rows,data,error)=>{const attempt=f.api.assertReady(rows);f.reads.at(-1)({data,error});return attempt;};
+ await check([f.rows[1]],[missing]);
+ await assert.rejects(check([f.rows[0],f.rows[1]],[missing]),/Watch missing.*unselected/);
+ assert.deepEqual(Array.from(f.api.filter(f.rows),r=>r.id),['c'],'buyer stays in Waiting');
+ for(const kind of ['manual','task','cgl','pending_cancel'])
+  await assert.rejects(check([f.rows[1]],[blocker({kind,line_ids:['a']})]),/Package is waiting/);
+ await assert.rejects(check([f.rows[1]],null,Error('Offline')),/could not be checked/);
+});

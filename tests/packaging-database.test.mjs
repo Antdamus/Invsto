@@ -37,6 +37,7 @@ before(async()=>{
  await db.exec(await readFile(new URL('../supabase/migrations/20261008230000_packaging_buyer_queue.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261009064000_packaging_prior_dispatch_history.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261010185000_packaging_line_total.sql',import.meta.url),'utf8'));
+ await db.exec(await readFile(new URL('../supabase/migrations/20261013202000_partial_order_packaging.sql',import.meta.url),'utf8'));
 });
 beforeEach(async()=>{
  await db.exec(`set test.allowed='yes';set test.actor='${id(100)}';truncate ebay_order_admin_events,ebay_live_attempts,shared_inventory_bag_links,live_sale_bag_photos,live_sale_lots,live_bag_order_links,packaging_events,packaging_issues,packaging_evidence,packaging_items,packaging_shipments,packaging_handoffs,ebay_order_task_events,ebay_order_tasks,ebay_order_label_events,ebay_order_lines,ebay_orders,storage.objects cascade;update packaging_settings set enabled=true,activated_at=now();`);
@@ -63,9 +64,10 @@ test('activation cutoff, real local closure and provider updates never backfill 
  await db.exec('update packaging_settings set enabled=true');await db.exec("update ebay_orders set tracking_number='9400100000000000000009',status='fulfilled' where order_number='order-1'");assert.equal((await call('queue')).total,0);
  await db.exec("set test.actor=''");await db.exec("update ebay_order_lines set line_status='fulfilled',fulfilled_quantity=quantity where order_id='"+id(2)+"'");await db.exec(`set test.actor='${id(100)}'`);assert.equal((await call('queue')).total,0);
 });
-test('local partial completion waits for every order line; retries enqueue exactly once',async()=>{
+test('completed lines enter Packaging while unchecked lines remain pending; retries enqueue exactly once',async()=>{
  await db.query("insert into ebay_order_lines(id,order_id,item_title,quantity,fulfilled_quantity,line_status) values($1,$2,'Ring',1,0,'pending')",[id(15),id(1)]);
- await db.query("update ebay_order_lines set line_status='fulfilled',fulfilled_quantity=quantity,fulfilled_at=clock_timestamp(),fulfilled_by=auth.uid() where id=$1",[id(11)]);assert.equal((await call('queue')).total,0);
+ await db.query("update ebay_order_lines set line_status='fulfilled',fulfilled_quantity=quantity,fulfilled_at=clock_timestamp(),fulfilled_by=auth.uid() where id=$1",[id(11)]);assert.equal((await call('queue')).total,1);
+ assert.equal((await db.query('select line_status from ebay_order_lines where id=$1',[id(15)])).rows[0].line_status,'pending');
  await close();await close();assert.equal((await call('queue')).total,1);assert.equal((await db.query('select count(*)::int n from packaging_handoffs')).rows[0].n,1);
 });
 test('tracking normalizes scanner prefixes and routed USPS codes; current multi-page and extra labels match',async()=>{
@@ -145,6 +147,24 @@ test('legacy shipping assignments close only when all split packages dispatch, w
  assert.equal((await db.query('select status from ebay_order_tasks')).rows[0].status,'in_progress');
  let b=await write('start',null,{tracking:'9400100000000000000099',order_ids:[id(1)],confirm_link:true,note:'Second box'});b=await write('contents',b.shipment,{items:[{line_id:id(11),quantity:1}]});b=await proof(b);b=await write('pack',b.shipment);b=await write('dispatch',b.shipment);
  assert.equal((await db.query('select status from ebay_order_tasks')).rows[0].status,'shipped_completed');assert.equal((await db.query("select count(*)::int n from ebay_order_task_events where payload->>'source'='packaging_dispatch'")).rows[0].n,1);
+});
+
+test('partial shipment preserves pending items and shipping tasks until the final items are dispatched',async()=>{
+ await db.query("insert into ebay_order_lines(id,order_id,item_title,quantity,fulfilled_quantity,line_status) values($1,$2,'Missing watch',1,0,'pending')",[id(15),id(1)]);
+ await db.query("insert into ebay_order_tasks(order_id,title,task_type,status) values($1,'Ship all items','pending_shipping','in_progress')",[id(1)]);
+ await db.query("update ebay_order_lines set line_status='fulfilled',fulfilled_quantity=quantity,fulfilled_at=clock_timestamp(),fulfilled_by=auth.uid() where id=$1",[id(11)]);
+ let a=await start();
+ await assert.rejects(write('contents',a.shipment,{items:[{line_id:id(15),quantity:1}]}),/not available/);
+ a=await write('contents',a.shipment,{items:[{line_id:id(11),quantity:2}]});a=await proof(a);a=await write('pack',a.shipment);a=await write('dispatch',a.shipment);
+ assert.equal(a.shipment.status,'dispatched');assert.equal((await call('queue')).total,0);
+ assert.equal((await db.query('select line_status from ebay_order_lines where id=$1',[id(15)])).rows[0].line_status,'pending');
+ assert.equal((await db.query('select status from ebay_order_tasks')).rows[0].status,'in_progress');
+ await assert.rejects(db.exec("update ebay_order_tasks set status='shipped_completed'"),/every remaining item/);
+ await close();const ready=await call('queue');assert.equal(ready.total,1);assert.equal(ready.rows[0].item_count,1);
+ let b=await write('start',null,{tracking:'9400100000000000000099',order_ids:[id(1)],confirm_link:true,note:'Remaining watch now ready'});
+ b=await write('contents',b.shipment,{items:[{line_id:id(15),quantity:1}]});b=await proof(b);b=await write('pack',b.shipment);b=await write('dispatch',b.shipment);
+ assert.equal((await db.query('select status from ebay_order_tasks')).rows[0].status,'shipped_completed');
+ assert.equal((await call('queue')).total,0);
 });
 test('combined label brings all linked orders and only their bag photos, without copying reference proof',async()=>{
  await close(1);await close(2);await db.query("update ebay_orders set tracking_number=null,label_storage_bucket='ebay-labels',label_file_path='combined.pdf',label_metadata=$1",[JSON.stringify({trackingNumbers:[code]})]);

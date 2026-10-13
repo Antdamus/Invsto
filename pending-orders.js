@@ -9565,7 +9565,7 @@ function updateWorkerNoInventorySelectionSummary() {
   const selectedQueueTotal = getBuyerLines(getBuyerKey(state.selectedLine)).filter(isNoInventoryCompletionLine).length;
   const total = Math.max(state.workerNoInventoryCandidates.length, selectedQueueTotal, state.ebayLaunchTotalCount || 0);
   const count = $("worker-no-inventory-count");
-  if (count) count.textContent = `${selected} of ${total} selected`;
+  if (count) count.textContent = `${selected} of ${total} selected${total > selected ? ` · ${total-selected} remain pending` : ''}`;
   $("confirm-worker-no-inventory")?.toggleAttribute("disabled", selected === 0);
 }
 
@@ -9580,7 +9580,7 @@ function setWorkerNoInventoryLineSelection(lineId, checked) {
 function setAllWorkerNoInventoryLines(checked) {
   state.workerNoInventoryLineIds.clear();
   if (checked) {
-    state.workerNoInventoryCandidates.filter((line) => getLineVideoReceiptPhotoCount(line) > 0)
+    state.workerNoInventoryCandidates.filter((line) => getLineVideoReceiptPhotoCount(line) > 0 && !window.OGPendingWork?.missingWatch?.(line.id))
       .forEach((line) => state.workerNoInventoryLineIds.add(line.id));
   }
   renderWorkerNoInventoryList();
@@ -9623,6 +9623,7 @@ function renderWorkerNoInventoryList() {
             <strong>${escapeHtml(line?.item_title || "Untitled eBay item")}</strong>
             <span>${escapeHtml(order.order_number || "No order")} - ${escapeHtml(order.buyer_username || "No buyer")}</span>
           </div>
+          ${window.OGPendingWork?.missingWatch?.(line.id) ? '<p class="missing-watch-badge">Watch missing · leave unchecked to ship the other items</p>' : ''}
           <small>Qty ${Number(getRemainingLineQuantity(line) || line?.quantity || 1).toLocaleString()} - ${escapeHtml(storeName)} - ${escapeHtml(window.PendingInventory?.summary(line.id) || "No saved inventory attachment")}</small>
           ${receiptLink.url || receiptLink.orderNumber ? `<button type="button" class="buyer-line-receipt no-inventory-video-receipt" title="${escapeHtml(receiptLink.title)}">View video receipt</button>` : ""}
           <button type="button" class="receipt-screenshot-upload" data-upload-receipt-screenshot="${escapeHtml(line.id)}">Upload receipt screenshot</button>
@@ -9762,7 +9763,7 @@ async function openWorkerNoInventoryModal(options = {}) {
   // Default bulk checkout to saved item receipts, not group completion photos.
   // Individual checkboxes remain available for an intentional manual selection.
   state.workerNoInventoryLineIds = new Set(candidates
-    .filter((entry) => state.workerNoInventoryLineIds.has(entry.id) && getLineVideoReceiptPhotoCount(entry) > 0)
+    .filter((entry) => state.workerNoInventoryLineIds.has(entry.id) && getLineVideoReceiptPhotoCount(entry) > 0 && !window.OGPendingWork?.missingWatch?.(entry.id))
     .map((entry) => entry.id));
   state.noInventoryEvidencePhotos = [];
   state.noInventoryEvidencePhotoUploadKeys.clear();
@@ -9770,7 +9771,7 @@ async function openWorkerNoInventoryModal(options = {}) {
   $("worker-no-inventory-error").textContent = "";
   setNoInventoryPhotoStatus("");
   $("worker-no-inventory-subtitle").textContent =
-    `This completes the selected items for ${getBuyerLabel(line)} and sends finished orders to Packaging. Saved inventory attachments are deducted automatically; items without an attachment do not remove stock. Items without a saved receipt screenshot start unchecked. Signed by your account at ${getCheckoutStoreName() || "the selected store"}.`;
+    `Complete only the items shipping now for ${getBuyerLabel(line)}. Unchecked items stay pending; leave missing watches unchecked to send a partial order. Selected items move to Packaging. Saved inventory attachments are deducted automatically; items without an attachment do not remove stock. Items without a saved receipt screenshot start unchecked. Signed by your account at ${getCheckoutStoreName() || "the selected store"}.`;
   renderWorkerNoInventoryList();
   renderEbayLabelPanel();
   renderNoInventoryEvidencePhotos();

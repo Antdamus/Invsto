@@ -224,7 +224,7 @@
     $('pending-work-existing').innerHTML=entries.map(b=>{
       const row=state.orders.find(r=>b.line_ids.includes(r.id));
       if(b.kind==='pending_cancel')return `<article class="pending-work-entry"><h3>${esc(row?.item_title||'Order item')}</h3><strong class="pending-cancel-badge">Pending to cancel</strong><p>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}</p><p>This is a reminder; the order has not been cancelled. Use the normal Cancel action when ready.</p><button type="button" data-work-cancel-clear="${esc(row?.id)}">Clear cancellation marker</button></article>`;
-      if(b.kind==='watch_missing')return `<article class="pending-work-entry"><h3>${esc(row?.item_title||'Watch')}</h3><strong class="missing-watch-badge">Watch missing</strong><p>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}</p><p>This buyer’s package stays in Waiting until this watch is found. Other requirements, including CGL, remain separate.</p><label class="pending-work-check"><input type="checkbox" id="found-${esc(b.id)}">I have located and checked this watch.</label><button type="button" class="primary-btn" data-work-found="${esc(b.id)}">Mark watch found</button><details><summary>Marked missing by mistake</summary><label for="release-${esc(b.id)}">Correction reason</label><textarea id="release-${esc(b.id)}" rows="2" maxlength="2000"></textarea><button type="button" data-work-release="${esc(b.id)}">Remove missing marker</button></details></article>`;
+      if(b.kind==='watch_missing')return `<article class="pending-work-entry"><h3>${esc(row?.item_title||'Watch')}</h3><strong class="missing-watch-badge">Watch missing</strong><p>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}</p><p>This watch stays in Waiting until it is found. Leave its line unchecked to complete and ship the available items as a partial order. Other requirements, including CGL, still apply.</p><label class="pending-work-check"><input type="checkbox" id="found-${esc(b.id)}">I have located and checked this watch.</label><button type="button" class="primary-btn" data-work-found="${esc(b.id)}">Mark watch found</button><details><summary>Marked missing by mistake</summary><label for="release-${esc(b.id)}">Correction reason</label><textarea id="release-${esc(b.id)}" rows="2" maxlength="2000"></textarea><button type="button" data-work-release="${esc(b.id)}">Remove missing marker</button></details></article>`;
       if(b.kind==='cgl')return `<article class="pending-work-entry"><h3>${esc(row?.item_title||'Watch')}</h3><strong>${b.active?'Pending CGL':'CGL confirmed'}</strong><p>A saved copy must match this watch before its package can be completed.</p><button type="button" class="secondary-btn" data-certificate-line="${esc(row?.id)}" data-certificate-title="${esc(row?.item_title)}">Open / add certificate</button><div data-work-certificates="${esc(b.id)}">Loading saved certificates…</div><details><summary>CGL is not required / marked by mistake</summary><label for="correct-${esc(b.id)}">Correction reason</label><textarea id="correct-${esc(b.id)}" rows="2" maxlength="2000"></textarea><button type="button" data-work-correct="${esc(b.id)}">Remove requirement</button></details></article>`;
       return `<article class="pending-work-entry"><strong>${esc(b.reason)}</strong><p>${esc(b.assignee)} · Since ${esc(stamp(b.created_at))}</p>${b.task_id?`<a href="team-tasks.html?taskId=${encodeURIComponent(b.task_id)}">Open linked task</a><p class="pending-work-hint">Removing this hold leaves the task open.</p>`:''}<p class="pending-work-hint">Resolved or sent here by mistake? Remove this hold. Other requirements will still apply.</p><label for="release-${esc(b.id)}">Reason for removing (optional)</label><textarea id="release-${esc(b.id)}" rows="2" maxlength="2000" placeholder="For example: sent to Waiting by mistake"></textarea><button type="button" data-work-release="${esc(b.id)}">Remove from waiting</button></article>`;
     }).join('')||'<p class="pending-work-hint">No active blockers for this buyer.</p>';
@@ -301,7 +301,13 @@
   async function assertReady(rows) {
     await load(state.orders);
     if(failure)throw Error(failure);
-    for(const row of rows){const key=getBuyerKey(row);if(!isKnown(key))throw Error('Waiting status has not loaded. Refresh Pending Orders.');const b=active(key)[0];if(b)throw Error(`Package is waiting: ${b.reason}. Open Manage waiting on the buyer summary.`);}
+    for(const row of rows){
+      const key=getBuyerKey(row);
+      if(!isKnown(key))throw Error('Waiting status has not loaded. Refresh Pending Orders.');
+      const b=active(key).find(b=>b.kind!=='watch_missing'||b.line_ids.includes(row.id));
+      if(b?.kind==='watch_missing')throw Error('Watch missing: leave this item unselected to ship the available items, or mark the watch found after checking it.');
+      if(b)throw Error(`Package is waiting: ${b.reason}. Open Manage waiting on the buyer summary.`);
+    }
   }
   function schedule(){clearTimeout(timer);timer=setTimeout(()=>{if(document.visibilityState!=='hidden')void load();},250);}
   async function showPendingCancellations() {
@@ -342,5 +348,5 @@
     window.setInterval(schedule,60000);
   }
   const emptyMessage=()=>watchFilter==='not-found'&&!isSearch()?'No pending items are marked not found in this view.':failure?'Waiting status is unavailable. Use Retry above.':!known.size&&state.orders.some(isOpenOrderLine)?'Checking order work status…':view==='waiting'&&!isSearch()?watchFilter==='cancel'?'No order lines are pending to cancel in this view.':watchFilter==='missing'?'No watches are marked missing in this view.':watchFilter==='cgl'?'No watches are waiting for CGL in this view.':'No orders are waiting in this view. Choose Ready to work to continue.':'No orders match this view.';
-  window.OGPendingWork={reset,load,filter,summaryCounts,control,summary,line,start,assertReady,emptyMessage,itemSearchChanged};
+  window.OGPendingWork={reset,load,filter,summaryCounts,control,summary,line,start,assertReady,emptyMessage,itemSearchChanged,missingWatch:id=>Boolean(missingFor(id))};
 })();

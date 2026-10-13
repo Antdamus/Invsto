@@ -46,9 +46,18 @@ does not create tasks, holds, or new item statuses.
 Blockers are audited in `pending_order_work_events` and scoped to saved line IDs
 in `pending_order_work_blocker_lines`, with normalized buyer grouping. They do not
 follow later purchases after their original lines leave the pending queue.
-Database triggers reject local full/partial completion anywhere in the buyer
-bundle while blockers remain, including older clients. Packaging also checks
-its own order IDs for invalidated CGL requirements before ready/dispatch. Service
+Missing-watch holds reject completion only for the marked lines. Staff can leave
+those lines unchecked and complete the available lines together, including lines
+from the same order. The missing watches and their holds remain pending; the buyer
+stays in Waiting until its requirements are cleared. Selecting a missing watch
+still rejects the save. Manual, task, CGL and pending-cancellation holds retain
+their existing buyer-wide completion checks, including for older clients.
+
+Completed lines enter Packaging even when other lines of the order are pending.
+Only completed lines can be added to the box; the package shows a partial-shipment
+notice. Missing-watch dispatch checks use the confirmed box contents. Shipping
+tasks stay open until every remaining item is completed and dispatched. Packaging
+also checks its order IDs for invalidated CGL requirements before ready/dispatch. Service
 imports can preserve fulfillment facts reported by eBay. No inventory, payment,
 task, or existing order data is backfilled or reclassified by this migration.
 
@@ -64,3 +73,7 @@ shared certificate assets. Focused tests: `pending-work-database.test.mjs`,
 `pending-work-client.test.mjs`, `pending-watch-flags.test.mjs`, and the existing
 customer task-note tests. Responsive interaction QA uses the actual pending
 page renderer with isolated fixture data, plus a read-only check of the live UI.
+
+Partial shipments require `20261013201000_partial_pending_watch_fulfillment.sql`
+and `20261013202000_partial_order_packaging.sql` before publishing the pending
+and packaging pages. No existing order, hold or package is completed by deployment.

@@ -143,6 +143,42 @@ test('a noninventory timeout keeps the reviewed selection available and explains
   assert.equal(await p.locator('#confirm-worker-no-inventory').isEnabled(), true);
 });
 
+for(const width of [390,1366])test(`partial completion at ${width}px saves only checked available items and leaves the missing watch pending`,async t=>{
+ const p=await open(t,{width});await prepareNoInventoryReview(p);
+ await p.evaluate(()=>{
+  const baseRpc=supabase.rpc;
+  window.fixtureMissingHold={id:'missing',buyer_key:getBuyerKey(state.orders[0]),kind:'watch_missing',line_ids:['line-b'],active:true,reason:'Watch missing'};
+  state.orders[1].video_receipt_photo_count=1;
+  supabase.rpc=(name,args)=>{
+   if(name==='list_pending_order_work')return{range:async()=>({data:[fixtureMissingHold]})};
+   if(name==='complete_ebay_order_lines_without_inventory_evidence'){
+    calls.push({name,args:structuredClone(args)});
+    return Promise.resolve({data:[{updated_lines:args._order_line_ids.length}]});
+   }
+   return baseRpc(name,args);
+  };
+ });
+ await p.addScriptTag({url:origin+'/pending-work-queue.js'});
+ await p.evaluate(async()=>{await OGPendingWork.load(state.orders,{paint:false});await openWorkerNoInventoryModal();});
+ assert.match(await p.locator('#worker-no-inventory-subtitle').innerText(),/Unchecked items stay pending/);
+ assert.match(await p.locator('#worker-no-inventory-count').innerText(),/2 of 3 selected.*1 remain pending/);
+ assert.match(await p.locator('[data-no-inventory-card="line-b"]').innerText(),/Watch missing.*leave unchecked/);
+ await p.locator('#select-all-worker-no-inventory').click();assert.equal(await p.locator('[data-no-inventory-line="line-b"]').isChecked(),false);
+ await p.locator('[data-no-inventory-line="line-b"]').check();
+ await p.locator('#confirm-worker-no-inventory').click();
+ await p.waitForFunction(()=>!state.busy);
+ assert.match(await p.locator('#worker-no-inventory-error').innerText(),/Watch missing.*unselected/);
+ assert.equal(await p.evaluate(()=>calls.filter(c=>c.name==='complete_ebay_order_lines_without_inventory_evidence').length),0);
+ await p.locator('[data-no-inventory-line="line-b"]').uncheck();
+ await p.screenshot({path:`test-results/partial-order-${width}.png`});
+ await p.locator('#confirm-worker-no-inventory').click();await p.waitForFunction(()=>!state.busy);
+ const writes=await p.evaluate(()=>calls.filter(c=>c.name==='complete_ebay_order_lines_without_inventory_evidence'));
+ assert.equal(writes.length,1);assert.deepEqual(writes[0].args._order_line_ids,['line-a','line-c']);
+ assert.equal(await p.evaluate(()=>fixtureMissingHold.active),true);
+ assert.equal(await p.evaluate(()=>databaseLines.find(l=>l.id==='line-b').line_status),'pending');
+ assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+});
+
 test('scanner plus manual line share one final review and one atomic request',async t=>{
   const p=await open(t);await scan(p);
   await p.waitForFunction(()=>state.selectedLine.id==='line-b');

@@ -50,6 +50,17 @@ for(const width of [320,390,768,1366,1920])test(`Packaging ${width}px: scan, rev
  await page.getByRole('button',{name:'Report an issue'}).click();await page.locator('[name=owner]').selectOption('00000000-0000-4000-8000-000000000101');await page.locator('[name=note]').fill('Replace the defective clasp.');await page.locator('[name=due]').fill('2026-10-09T15:00');await page.screenshot({path:`test-results/packaging-${width}-issue.png`});await page.getByRole('button',{name:'Create task',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();await expect(page.getByRole('button',{name:'Issue resolved · Resume packing'})).toBeDisabled();await expect(page.locator('.pack-notice.error').first()).toContainText('Replace the defective clasp');await noOverflow(page);
  const issue=await page.evaluate(()=>fixtureWrites.find(w=>w.action==='issue'));assert.equal(issue.args.blocking,true);assert.equal(issue.args.kind,'work');assert.equal(issue.args.order_id,'00000000-0000-4000-8000-000000000001');
 });
+test('partial package identifies pending items and submits only its completed contents on a phone',async t=>{
+ const page=await open(t);await page.evaluate(()=>fixtureDetail.lines.push({...fixtureDetail.lines[0],id:'missing-watch',item_title:'Watch still missing',quantity:1,fulfilled_quantity:0,line_status:'pending',packed_quantity:0,other_quantity:0}));
+ await start(page);await expect(page.getByRole('note')).toContainText('1 item line is still pending and excluded');
+ await expect(page.locator('[data-line="missing-watch"]')).toBeDisabled();
+ await page.locator('[data-line]').first().fill('2');await page.getByRole('button',{name:'Save checked quantities'}).click();
+ await expect(page.locator('#pack-status')).toContainText('Package quantities saved');
+ const saved=await page.evaluate(()=>fixtureWrites.find(w=>w.action==='contents'));
+ assert.equal(saved.args.items.length,1);assert.notEqual(saved.args.items[0].line_id,'missing-watch');
+ await noOverflow(page);await page.screenshot({path:'test-results/partial-packaging-phone.png'});
+});
+
 test('failed file upload and uncertain evidence save retain file and safe retry; quantity draft survives',async t=>{
  const page=await open(t);await start(page);await page.locator('[data-line]').fill('2');await page.evaluate(()=>fixtureUploadFailure=true);await page.locator('#pack-files').setInputFiles({name:'packing.jpg',mimeType:'image/jpeg',buffer:Buffer.from('fixture')});await expect(page.locator('#pack-upload-status')).toContainText('Upload interrupted');await expect(page.locator('[data-line]')).toHaveValue('2');
  await page.evaluate(()=>fixtureFailure='evidence');await page.getByRole('button',{name:'Retry',exact:true}).click();await expect(page.locator('#pack-upload-status')).toContainText('Connection interrupted');await page.getByRole('button',{name:'Retry',exact:true}).click();await expect(page.locator('[data-media-source=false] img')).toHaveCount(1);await expect(page.locator('#pack-upload-status')).toBeEmpty();await expect(page.locator('[data-line]')).toHaveValue('2');
