@@ -4610,7 +4610,7 @@ function renderTaskCard(task = {}, options = {}) {
   const dueText = task.status === "completed_by_employee" ? "Awaiting decision" : late ? `Overdue · ${getTaskLateAgeLabel(task)}` : due ? `Due ${getTaskDueLabel(task)}` : "No due date";
   const priority = ["high", "urgent"].includes(task.priority) ? formatTaskTag(task.priority) : "";
   const latestNote = [...events].reverse().find(event => event.notes)?.notes;
-  const preview = canceled ? getTaskCardPreview(task, true) : latestNote || getTaskCardPreview(task);
+  const preview = canceled || task.metadata?.source === 'buyer_followup' ? getTaskCardPreview(task, canceled) : latestNote || getTaskCardPreview(task);
   const unread = readInfo.status !== "read";
   const actionHtml = canceled ? `<div class="team-task-actions"><button type="button" class="secondary-btn" data-task-history-action="reopen" data-task-source="${escapeHtml(task.source)}" data-task-id="${escapeHtml(task.id)}">Reopen Task</button></div>` : renderTaskActions(task, resolved);
   const evidence = state.taskEvidenceLoads.get(taskKey);
