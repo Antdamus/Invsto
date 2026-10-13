@@ -6,7 +6,7 @@ let db;
 const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const sql=async name=>readFile(new URL('../supabase/migrations/'+name,import.meta.url),'utf8');
 const actor=async n=>db.exec(`set test.actor='${id(n)}'`);
-const create=async(buyer='Buyer.One',request=50)=> (await db.query('select create_buyer_followup_task($1,$2,$3) t',[buyer,{_title:'Replacement clasp',_description:'Include one silver clasp',_assigned_to_user_id:id(1),_signed_by_email:'forged@example.test'},id(request)])).rows[0].t;
+const create=async(buyer='Buyer.One',request=50,details={})=> (await db.query('select create_buyer_followup_task($1,$2,$3) t',[buyer,{_title:'Replacement clasp',_description:'Include one silver clasp',_assigned_to_user_id:id(1),_signed_by_email:'forged@example.test',...details},id(request)])).rows[0].t;
 const list=async(order=100)=>(await db.query('select list_buyer_promise_requirements($1) r',[[id(order)]])).rows.map(row=>row.r);
 const sign=async(task,{order=100,decision='certify',version,signature='Sam Person',reason='Clasp included'}={})=>db.query('select sign_buyer_promise($1,$2,$3,$4,$5,$6)',[task.id,id(order),decision,signature,reason,version || (await list(order)).find(row=>row.task_id===task.id).version]);
 const fulfill=async(line=110)=>db.query("update ebay_order_lines set fulfilled_quantity=quantity,line_status='fulfilled' where id=$1",[id(line)]);
@@ -17,11 +17,14 @@ before(async()=>{
  create function auth.uid() returns uuid language sql as $$select nullif(current_setting('test.actor',true),'')::uuid$$;
  create table employees(id uuid primary key,user_id uuid,email text,display_name text,role text,active boolean);
  create function can_manage_inventory() returns boolean language sql as $$select exists(select 1 from public.employees where user_id=auth.uid() and active)$$;
+ create function can_access_email_triage() returns boolean language sql as $$select public.can_manage_inventory()$$;
+ create function task_workflow_reviewer(jsonb) returns uuid language sql as $$select null::uuid$$;
  create function is_admin() returns boolean language sql as $$select exists(select 1 from public.employees where user_id=auth.uid() and active and role='admin')$$;
  create table ebay_orders(id uuid primary key,buyer_username text,order_number text,status text default 'pending');
  create table ebay_order_lines(id uuid primary key,order_id uuid,quantity int default 1,fulfilled_quantity int default 0,line_status text default 'pending');
  create table ebay_return_cases(id uuid,buyer_username text);
- create table ebay_conversations(id uuid,other_party_username text);
+ create table ebay_conversations(id uuid,other_party_username text,ebay_conversation_id text,conversation_title text);
+ create table ebay_conversation_messages(id uuid,conversation_id uuid,ebay_message_id text,message_body text,message_body_preview text,sender_username text,recipient_username text,direction text,created_at_ebay timestamptz,created_at timestamptz,subject text);
  create table ebay_conversation_links(conversation_id uuid,link_type text,status text,buyer_username text,matched_value text);`);
  const base=await sql('20260522113000_team_independent_tasks.sql');
  await db.exec(base.slice(base.indexOf('create table if not exists public.team_tasks'),base.indexOf('create or replace function public.respond_team_task')));
@@ -37,15 +40,18 @@ before(async()=>{
  await db.exec(await sql('20261010113000_pending_employee_case_tasks.sql'));
  await db.exec(await sql('20261013130000_buyer_followup_tasks.sql'));
  await db.exec(await sql('20261013140000_buyer_promise_fulfillment.sql'));
+ await db.exec(await sql('20261013150000_buyer_task_message_photos.sql'));
 });
 beforeEach(async()=>{
- await db.exec('reset role;truncate buyer_promise_order_signoffs,team_task_events,team_tasks,ebay_orders,ebay_order_lines,employees,auth.users cascade');
+ await db.exec('reset role;truncate buyer_promise_order_signoffs,team_task_events,team_tasks,ebay_orders,ebay_order_lines,employees,auth.users,ebay_conversations,ebay_conversation_messages cascade');
  for(const n of [1,2,3,4]) {
   await db.query('insert into auth.users values($1,$2)',[id(n),`person${n}@example.test`]);
   await db.query('insert into employees values($1,$1,$2,$3,$4,$5)',[id(n),`person${n}@example.test`,'Person '+n,n===3?'admin':'employee',n!==4]);
  }
  await db.query("insert into ebay_orders(id,buyer_username,order_number) values($1,'BUYER.ONE','ORDER-100'),($2,'buyer.one','ORDER-101'),($3,'buyer.two','ORDER-102')",[id(100),id(101),id(102)]);
  await db.query('insert into ebay_order_lines(id,order_id) values($1,$2),($3,$4),($5,$6)',[id(110),id(100),id(111),id(101),id(112),id(102)]);
+ await db.query("insert into ebay_conversations values($1,'Buyer.One','ebay-thread-1','Watch conversation'),($2,null,'ebay-thread-2','Legacy conversation')",[id(200),id(201)]);
+ await db.query("insert into ebay_conversation_messages(id,conversation_id,ebay_message_id,message_body,sender_username,recipient_username,direction,created_at) values($1,$2,'external-message','We will include a certificate next time','shop','buyer.one','outbound',now()),($3,$4,'external-legacy','Thank you','buyer.two','shop','inbound',now())",[id(210),id(200),id(211),id(201)]);
  await actor(1);await db.exec('set role authenticated');
 });
 after(async()=>db?.close());
@@ -123,4 +129,40 @@ test('reversing fulfillment reopens the promise and requires a fresh signature w
  assert.equal((await list())[0].decision,null);await assert.rejects(fulfill(),/signed certification/);
  assert.equal((await db.query("select count(*)::int n from team_task_events where payload->>'source'='buyer_promise_signoff'")).rows[0].n,1);
  await sign(task);await fulfill();assert.ok((await list())[0].consumed_at);
+});
+
+const photo={bucket:'team-task-evidence',path:'team-tasks/customer-promises/photo.jpg',mime_type:'image/jpeg',size_bytes:2048,label:'Watch photo',media_type:'image'};
+test('message customer tasks preserve server source context and photos, including retries and workspace visibility',async()=>{
+ const details={_conversation_id:id(200),_message_id:id(210),_photo_attachments:[photo],message_preview:'forged'};
+ const task=await create('Buyer.One',50,details);
+ assert.equal(task.metadata.source,'buyer_followup');assert.equal(task.metadata.message_id,id(210));
+ assert.equal(task.metadata.message_preview,'We will include a certificate next time');
+ assert.match(task.metadata.conversation_link,new RegExp('ebayMessageDbId='+id(210)));
+ assert.equal(task.latest_photo_count,1);
+ const event=(await db.query('select * from team_task_events where task_id=$1',[task.id])).rows[0];
+ assert.deepEqual(event.photo_attachments,[photo]);assert.equal(event.payload.conversation_id,id(200));
+ assert.equal((await create('buyer.one',50,details)).id,task.id);
+ await assert.rejects(create('buyer.one',50,{...details,_photo_attachments:[]}),/different task/);
+ const workspace=(await db.query('select list_ebay_conversation_task_workspace($1,false) t',[[id(200)]])).rows;
+ assert.equal(workspace.length,1);assert.equal(workspace[0].t.task_id,task.id);
+ await assert.rejects(fulfill(),/signed certification/);
+});
+test('rejects another buyer, mismatched message and invalid photos; supports legacy username from messages',async()=>{
+ await assert.rejects(create('other.buyer',50,{_conversation_id:id(200),_message_id:id(210)}),/exact customer/);
+ await assert.rejects(create('buyer.one',50,{_conversation_id:id(200),_message_id:id(211)}),/does not belong/);
+ await assert.rejects(create('buyer.one',50,{_photo_attachments:[{...photo,bucket:'other'}]}),/Invalid task photo/);
+ await assert.rejects(create('buyer.one',50,{_photo_attachments:Array(11).fill(photo)}),/10 photos/);
+ const legacy=await create('buyer.two',50,{_conversation_id:id(201),_message_id:id(211)});
+ assert.equal(legacy.metadata.buyer_username,'buyer.two');assert.equal(legacy.metadata.message_id,id(211));
+});
+test('linking an existing promise preserves ownership and signoff, audits once, and restricts updates',async()=>{
+ const task=await create();await sign(task);
+ const attach=()=>db.query('select attach_buyer_followup_message($1,$2,$3) t',[task.id,id(200),id(210)]);
+ await actor(2);await assert.rejects(attach(),/creator or an admin/);
+ await actor(1);const linked=(await attach()).rows[0].t;
+ assert.equal(linked.assigned_to_user_id,task.assigned_to_user_id);assert.equal(linked.status,task.status);
+ await attach();assert.equal((await list())[0].decision,'certify');
+ assert.equal((await db.query("select count(*)::int n from team_task_events where payload->>'source'='buyer_followup_message_link'")).rows[0].n,1);
+ await assert.rejects(db.query('select attach_buyer_followup_message($1,$2,null)',[task.id,id(200)]),/already has/);
+ await fulfill();assert.equal((await db.query('select status from team_tasks where id=$1',[task.id])).rows[0].status,'resolved');
 });

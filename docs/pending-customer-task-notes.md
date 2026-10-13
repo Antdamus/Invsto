@@ -41,6 +41,16 @@ prefill the username. An order does not have to exist yet. Saves are idempotent
 and a failed save retains the draft. These tasks are explicitly shared with
 inventory staff, without broadening access to unrelated tasks.
 
+The form also accepts up to ten photos (20 MB each), with previews and removal
+before saving. Upload and task-save retries reuse the same private evidence
+objects. Existing tasks accept photos through **Add update → Attachments**.
+Customer tasks created in Messages retain the original conversation and message,
+including a server-sourced preview and an **Open eBay Conversation** link. They
+also appear in that conversation's task list. For older promises, the creator or
+an admin can use **Link original conversation**; the server checks the exact
+customer and message, preserves ownership and fulfillment state, and audits the
+link. Migration: `20261013150000_buyer_task_message_photos.sql`.
+
 Customer promises appear first and expand in the buyer's notes. Their original
 instructions remain prominent even after later updates. **Review & sign customer
 promises** shows each promise and order separately. Staff must enter fulfillment

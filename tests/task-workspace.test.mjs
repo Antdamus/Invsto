@@ -406,7 +406,7 @@ for(const width of [320,390,1366]) test(`reply and handoff form is clear and fit
   await page.getByRole('button',{name:'Add update',exact:true}).click();
   await expect(page.getByRole('radio',{name:/Add update/})).toBeChecked();
   await expect(page.locator('#task-response-summary')).toContainText('Next: You. Responsibility stays the same');
-  await expect(page.locator('#team-task-assignee')).toBeHidden();await expect(page.locator('.task-attachments')).toBeHidden();
+  await expect(page.locator('#team-task-assignee')).toBeHidden();await expect(page.locator('.task-attachments')).toBeVisible();
   await page.getByRole('radio',{name:/Send instructions & hand back/}).check();
   await expect(page.locator('#task-response-summary')).toContainText('Sandra will be responsible next');
   await expect(page.getByRole('button',{name:'Send & hand back'})).toBeVisible();
@@ -432,7 +432,7 @@ for(const source of ['team','order','return'])test(`${source} replies send a not
   await expect(page.locator('#team-task-modal')).toBeHidden();
   let writes=await page.evaluate(()=>window.writes);
   assert.equal(writes.length,1);assert.equal(writes[0][0],'respond_task_request');
-  assert.deepEqual(writes[0][1],{_source:source,_task_id:'task-0',_note:'I checked the order and still need the certificate.',_mode:'update',_expected_updated_at:'2026-10-06T13:00:00Z',_expected_assignee:'me',_expected_assigner:'teammate'});
+  assert.deepEqual(writes[0][1],{_photos:[],_source:source,_task_id:'task-0',_note:'I checked the order and still need the certificate.',_mode:'update',_expected_updated_at:'2026-10-06T13:00:00Z',_expected_assignee:'me',_expected_assigner:'teammate'});
   await page.getByRole('button',{name:'Ask for a decision',exact:true}).click();
   await page.locator('#task-response-handoff-option input').check();
   await page.locator('#team-task-note').fill('Please locate the certificate so I can continue.');
@@ -443,6 +443,16 @@ for(const source of ['team','order','return'])test(`${source} replies send a not
   await expect(page.locator('.team-task-card')).toHaveCount(1);
   await expect(page.locator('.task-card-owner')).toContainText('Sandra');
   writes=await page.evaluate(()=>window.writes);assert.equal(writes.length,2);assert.equal(writes[1][1]._mode,'work');
+});
+
+test('customer promise update uploads a photo and retains it when the update save fails',async t=>{
+ const page=await open(t,390,{admin:false});await replyFixture(page);
+ await page.evaluate(()=>{state.tasks[0].metadata={source:'buyer_followup',buyer_username:'buyer.one'};window.uploads=[];window.failPhotoUpdate=true;supabase.storage={from:bucket=>({upload:async(path,blob)=>{uploads.push({bucket,path,size:blob.size});return {};}})};supabase.rpc=async(...args)=>{writes.push(args);return failPhotoUpdate?{error:{message:'Update unavailable'}}:{};};renderTasks();});
+ await page.getByRole('button',{name:'Add update',exact:true}).click();await page.locator('.task-attachments summary').click();
+ await page.locator('#team-task-photo-file').setInputFiles({name:'certificate.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFQAAAABJRU5ErkJggg==','base64')});
+ await page.locator('#team-task-note').fill('Certificate photo for the next order');await page.getByRole('button',{name:'Send update',exact:true}).click();
+ await expect(page.locator('#team-task-modal-error')).toContainText('Update unavailable');await page.evaluate(()=>failPhotoUpdate=false);await page.getByRole('button',{name:'Send update',exact:true}).click();await expect(page.locator('#team-task-modal')).toBeHidden();
+ const result=await page.evaluate(()=>({uploads,writes}));assert.equal(result.uploads.length,1);assert.equal(result.writes[1][1]._photos[0].label,'certificate.png');assert.deepEqual(result.writes[0],result.writes[1]);
 });
 
 test('failed reply keeps the draft and owner; completion review cannot be handed off',async t=>{

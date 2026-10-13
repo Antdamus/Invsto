@@ -8304,7 +8304,7 @@
       }, (payload) => {
         const row = payload.new || payload.old || {};
         const metadata = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
-        if (metadata.source !== "ebay_conversation_message") return;
+        if (!["ebay_conversation_message", "buyer_followup"].includes(metadata.source)) return;
         handleEbayRealtimeTaskChange(context, row);
       })
       .on("postgres_changes", {event: "*", schema: "public", table: "ebay_order_tasks"}, payload => {
@@ -8870,7 +8870,7 @@
         </div>
         <div class="ebay-detail-actions">
           ${!isPlatformConversation ? `<button type="button" class="primary-btn" data-ebay-detail-action="reply"><i data-lucide="reply"></i>Reply</button>` : ""}
-          ${!isPlatformConversation ? window.OGBuyerTasks?.button(identity.username || '') || '' : ''}
+          ${!isPlatformConversation ? window.OGBuyerTasks?.button(identity.username || '', 'Customer task', {conversationId:conversation.id,messageId:(latestInboundEbayMessage(messages) || messages[messages.length - 1])?.id}) || '' : ''}
           ${messages.length ? `<button type="button" class="secondary-btn" data-ebay-message-task-action="create" data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-ebay-message-id="${escapeHtml((latestInboundEbayMessage(messages) || messages[messages.length - 1]).id)}"><i data-lucide="clipboard-plus"></i>Create task</button>` : ""}
         </div>
       </div>

@@ -134,8 +134,13 @@ for(const width of [390,1366])test(`customer promise starts from message with ex
  await expect(page.getByRole('dialog').getByLabel('eBay username')).toHaveValue('jewelrybuyer');
  await expect(page.getByRole('dialog').getByLabel('Responsible person')).toHaveValue('me');
  await expect(page.getByRole('dialog').getByLabel('Task title')).toBeFocused();
- await page.getByRole('dialog').getByRole('button',{name:'Cancel',exact:true}).click();
- assert.equal(await page.evaluate(()=>fixtureWrites.length),0);
+ await expect(page.getByRole('dialog')).toContainText('original conversation and message');
+ await page.getByRole('dialog').getByLabel('Task title').fill('Include the certificate');
+ await page.getByRole('dialog').getByLabel('Promise / instructions').fill('Include the certificate with the next order');
+ await page.getByRole('dialog').getByRole('button',{name:'Save customer task',exact:true}).click();
+ await expect(page.getByRole('dialog')).toContainText('Customer task saved');
+ const saved=await page.evaluate(()=>fixtureWrites[0]);
+ assert.equal(saved.name,'create_buyer_followup_task');assert.equal(saved.args._details._conversation_id,'chat-0');assert.equal(saved.args._details._message_id,'message-chat-0');
 });
 for(const width of [390,1366])test(`Reply read receipts ${width}px refresh after successful sends without requiring realtime`,async t=>{
  const page=await open(t,width,{sendReply:true});

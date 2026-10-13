@@ -23,9 +23,9 @@ async function open(t,width=390,admin=false){
  await page.goto(origin+'/team-tasks.html');
  for(const file of ['buyer-tasks.js','buyer-promise-checkout.js'])await page.addScriptTag({url:origin+'/'+file});
  await page.evaluate(admin=>{
-  window.writes=[];window.failSave=false;window.failLoad=false;window.delaySave=false;
+  window.writes=[];window.uploads=[];window.failUpload=false;window.failSave=false;window.failLoad=false;window.delaySave=false;
   window.requirements=[{task_id:'task-1',order_id:'order-1',order_number:'12-34567-89012',buyer_username:'buyer.one',title:'Promised clasp',instructions:'Include <one> silver clasp',version:'v1',can_defer:admin}];
-  const client={rpc:async(name,args)=>{
+  const client={storage:{from:bucket=>({upload:async(path,file)=>{uploads.push({bucket,path,name:file.name});return failUpload?{error:{message:'Photo upload failed'}}:{};}})},rpc:async(name,args)=>{
    if(name==='list_team_task_assignees')return {data:[{user_id:'me',display_name:'Alex',email:'alex@example.test'}]};
    if(name==='list_buyer_promise_requirements')return failLoad?{error:{message:'Connection unavailable'}}:{data:requirements};
    writes.push({name,args});if(delaySave)await new Promise(resolve=>window.finishSave=resolve);
@@ -75,4 +75,27 @@ test('failed requirement lookup blocks fulfillment without making a business wri
  const page=await open(t);await page.evaluate(()=>failLoad=true);
  assert.match(await page.evaluate(async()=>{try{await OGBuyerPromiseCheckout.assertReady([{order_id:'order-1'}]);}catch(e){return e.message;}}),/Connection unavailable/);
  assert.equal(await page.evaluate(()=>writes.length),0);
+});
+const png={name:'watch.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFQAAAABJRU5ErkJggg==','base64')};
+for(const width of [390,1366])test(`customer photo attachment ${width}px previews, removes, and survives upload/save retries`,async t=>{
+ const page=await open(t,width);
+ await page.evaluate(()=>OGBuyerTasks.open('buyer.one',{conversationId:'conversation-original',messageId:'message-original'}));
+ const dialog=page.getByRole('dialog');await dialog.getByLabel('Task title').fill('Include certificate');await dialog.getByLabel('Promise / instructions').fill('Include this certificate on their next order');
+ await dialog.getByLabel('Add photos (optional)').setInputFiles([png,{...png,name:'extra.png'}]);
+ await expect(dialog.getByRole('img')).toHaveCount(2);await dialog.getByRole('button',{name:'Remove photo 2',exact:true}).click();await expect(dialog.getByRole('img')).toHaveCount(1);
+ await page.evaluate(()=>failUpload=true);await dialog.getByRole('button',{name:'Save customer task'}).click();
+ await expect(dialog.getByRole('status')).toContainText('Photo upload failed');assert.equal(await page.evaluate(()=>writes.length),0);
+ await page.evaluate(()=>{failUpload=false;failSave=true;});await dialog.getByRole('button',{name:'Save customer task'}).click();await expect(dialog.getByRole('status')).toContainText('Network unavailable');
+ await page.evaluate(()=>failSave=false);await dialog.getByRole('button',{name:'Save customer task'}).click();await expect(dialog).toContainText('Customer task saved');
+ const result=await page.evaluate(()=>({uploads,writes}));assert.equal(result.uploads.length,2);assert.equal(result.uploads[0].path,result.uploads[1].path);
+ assert.equal(result.writes[1].args._details._photo_attachments.length,1);assert.equal(result.writes[1].args._details._photo_attachments[0].label,'watch.png');
+ assert.deepEqual(result.writes[0].args,result.writes[1].args);assert.equal(result.writes[1].args._details._message_id,'message-original');
+});
+test('existing customer task can link its original message without creating another task',async t=>{
+ const page=await open(t);const conversation='00000000-0000-4000-8000-000000000200',message='00000000-0000-4000-8000-000000000210';
+ await page.evaluate(()=>{const button=document.createElement('button');button.dataset.buyerTaskLinkSource='existing-task';button.dataset.buyerUsername='buyer.one';button.textContent='Link original conversation';document.body.append(button);});
+ await page.getByRole('button',{name:'Link original conversation',exact:true}).click();const dialog=page.getByRole('dialog');
+ await dialog.getByLabel('Conversation link or ID').fill(`email-triage.html?ebayConversationDbId=${conversation}&ebayMessageDbId=${message}`);
+ await dialog.getByRole('button',{name:'Save conversation link'}).click();await expect(dialog).toHaveCount(0);
+ const write=await page.evaluate(()=>writes[0]);assert.equal(write.name,'attach_buyer_followup_message');assert.deepEqual(write.args,{_task_id:'existing-task',_conversation_id:conversation,_message_id:message});
 });

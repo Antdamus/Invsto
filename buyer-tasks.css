@@ -15,6 +15,10 @@
 .buyer-task-form :disabled { opacity:.6; cursor:wait; }
 .buyer-task-form [hidden] { display:none; }
 .buyer-task-form .buyer-task-error { color:#ffb4aa; }
+.buyer-task-photos { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:10px; }
+.buyer-task-photo { display:grid; gap:5px; min-width:0; font-size:12px; overflow-wrap:anywhere; }
+.buyer-task-photo img { width:100%; height:110px; object-fit:contain; border-radius:8px; background:#0d1510; }
+.buyer-task-source { color:#efd196; }
 .buyer-task-form :focus-visible,.buyer-task-launch:focus-visible { outline:2px solid #efd196; outline-offset:3px; }
 @media(max-width:480px) { .buyer-task-dialog { padding:16px; } .buyer-task-fields { grid-template-columns:1fr; } }
 .buyer-promise-tools { display:flex; justify-content:flex-end; margin:8px 0; }

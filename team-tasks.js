@@ -4973,8 +4973,10 @@ async function submitTaskReply() {
   if (handoff && !canHandTaskBack(task)) return setModalError('This task cannot be handed back. Refresh to check its assignment.');
   state.replySaving = true; $('submit-team-task').disabled = true; setModalError('');
   try {
+    const photos = await uploadPhotos(task.title);
     const {error} = await supabase.rpc('respond_task_request', {
       _source: task.source, _task_id: task.id, _note: note, _mode: mode === 'handoff' ? 'work' : mode,
+      _photos: photos,
       _expected_updated_at: task.updated_at || null,
       _expected_assignee: task.assigned_to_user_id || null, _expected_assigner: task.assigned_by || task.created_by || null,
     });
@@ -4995,6 +4997,7 @@ function renderTaskActions(task = {}, resolved = false) {
   if (task.actionHref && task.source !== 'team') buttons.push('<a class="secondary-btn" href="'+escapeHtml(task.actionHref)+'">'+(task.metadata?.packaging_shipment_id || task.metadata?.packaging_order_handoff ? 'Open Packaging' : task.source === 'order' ? 'Open order' : ({return:'Open return',dispute:'Open dispute',request:'Open request'})[getTaskCustomerIssueKind(task)])+'</a>');
   if (canReplyToTask(task)) buttons.push('<button type="button" class="secondary-btn" data-task-reply="'+key+'">Add update</button>');
   if (task.metadata?.source === 'buyer_followup') {
+    if (!getEbayConversationTaskContext(task) && (canUseAdminTaskControls() || isTaskCreatedByCurrentUser(task))) buttons.push('<button type="button" class="secondary-btn" data-buyer-task-link-source="'+escapeHtml(task.id)+'" data-buyer-username="'+escapeHtml(task.buyer_username || task.metadata.buyer_username)+'">Link original conversation</button>');
     buttons.push('<a class="primary-btn" href="pending-orders.html?ebayBuyer='+encodeURIComponent(task.buyer_username || task.metadata.buyer_username)+'">Certify in Pending Orders ↗</a>');
     return buttons.join('');
   }
@@ -5608,16 +5611,18 @@ async function uploadPhotos(title) {
 
   for (let index = 0; index < state.photos.length; index += 1) {
     const photo = state.photos[index];
+    if (photo.savedAttachment) { saved.push(photo.savedAttachment); continue; }
     const blob = await getTaskPhotoBlob(photo, index);
     const mediaType = getTaskAttachmentMediaType({ ...photo, mime_type: blob.type || photo.file?.type || photo.mime_type });
     const extension = getPhotoExtension(photo.file || photo);
     const originalName = safePathSegment(photo.label, `${mediaType}-${index + 1}`);
-    const path = [
+    const path = photo.uploadPath || [
       "team-tasks",
       dateFolder,
       taskFolder,
       `${Date.now()}-${crypto.randomUUID()}-${originalName}.${extension}`,
     ].join("/");
+    photo.uploadPath = path;
 
     const { error } = await supabase.storage
       .from(TEAM_TASK_BUCKET)
@@ -5626,9 +5631,9 @@ async function uploadPhotos(title) {
         upsert: false,
       });
 
-    if (error) throw new Error(error.message || `Could not upload task evidence ${index + 1}.`);
+    if (error && String(error.statusCode) !== '409' && error.error !== 'Duplicate') throw new Error(error.message || `Could not upload task evidence ${index + 1}.`);
 
-    saved.push({
+    photo.savedAttachment = {
       bucket: TEAM_TASK_BUCKET,
       path,
       label: photo.label || `Task ${mediaType === "video" ? "video" : "photo"} ${index + 1}`,
@@ -5639,7 +5644,8 @@ async function uploadPhotos(title) {
       media_type: mediaType,
       size_bytes: blob.size || photo.file?.size || 0,
       created_at: new Date().toISOString(),
-    });
+    };
+    saved.push(photo.savedAttachment);
   }
 
   return saved;

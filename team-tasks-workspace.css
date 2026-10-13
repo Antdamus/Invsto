@@ -251,7 +251,7 @@ body[data-page="team-tasks"] .task-response-options input { width: 20px; height:
 .task-response-options strong { font-size: 14px; }
 .task-response-options small { color: #aebcae; overflow-wrap: anywhere; font-size: 12px; }
 .task-response-summary { border-left: 3px solid #dec58b; padding: 10px 14px; color: #d1dbd0; background: rgba(160,183,155,.06); line-height: 1.55; font-size: 13px; }
-.is-task-response .task-attachments, .is-task-response .team-task-form-grid { display: none; }
+.is-task-response .team-task-form-grid { display: none; }
 .is-task-response #team-task-modal-subtitle { overflow-wrap: anywhere; }
 .is-task-response #team-task-note { min-height: 120px; font-size: 16px; }
 .task-handoff-owner { color: #ebd49b; font-weight: 600; }
