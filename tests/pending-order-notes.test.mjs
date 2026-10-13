@@ -37,6 +37,8 @@ async function open(t, {mobile = false, render = true} = {}) {
   page.on('pageerror', error => errors.push(error.message));
   t.after(() => assert.deepEqual(errors, []));
   await page.goto(`${origin}/pending-orders.html`);
+  await page.addScriptTag({url: `${origin}/buyer-tasks.js`});
+  await page.addScriptTag({url: `${origin}/buyer-promise-checkout.js`});
   await page.addScriptTag({url: `${origin}/pending-orders.js`});
   await page.evaluate(() => {
     window.calls = [];
@@ -118,6 +120,23 @@ async function loaded(page, count = 2) {
   await page.waitForFunction(count => document.querySelectorAll('[data-buyer-shared-notes] .buyer-card-note-preview-item').length === count
     && document.querySelector('[data-buyer-shared-notes]')?.textContent.includes('alex@example.com'), count);
 }
+
+test('customer promises are prominent in order notes and customer task creation prefills the exact buyer',async t=>{
+  const page=await open(t,{render:false});
+  await page.evaluate(()=>{
+    OGBuyerTasks.init({client:{rpc:async()=>({data:[{user_id:'user-current',display_name:'Sam'}]})},userId:'user-current'});
+    customerTasks=[{id:'promise',source:'team',buyer_username:'lore2526',buyer_followup:true,status:'assigned',
+      question:'Include the promised silver clasp',latest_note:'Clasp located in drawer 3',assigned_to_user_id:'user-current',created_at:'2026-10-01T12:00:00Z'}];
+    renderOrders();
+  });
+  await loaded(page,3);
+  const promise=page.locator('[data-queue-task="promise"]');
+  await expect(promise).toBeVisible();await expect(promise).toContainText('Include the promised silver clasp');
+  await expect(promise.getByRole('button',{name:'Review & sign customer promises'})).toBeVisible();
+  await page.getByRole('button',{name:'Customer task',exact:true}).click();
+  await expect(page.getByRole('dialog').getByLabel('eBay username')).toHaveValue('lore2526');
+  await expect(page.getByRole('dialog').getByLabel('Task title')).toBeFocused();
+});
 
 test('notes expand only on click and show all authors and timestamps without opening the order', async t => {
   const page = await open(t);

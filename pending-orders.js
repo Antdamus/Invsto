@@ -14,6 +14,7 @@ const state = {
   expandedBuyerKeys: new Set(),
   collapsedBuyerKeys: new Set(),
   expandedBuyerNoteKeys: new Set(),
+  buyerPromiseSignatures: new Map(),
   sharedOrderNoteHistory: new Map(),
   customerTaskNotes: new Map(),
   orderNotesObserver: null,
@@ -3759,7 +3760,7 @@ function getQueueTaskAssigneeName(task) {
 function getQueueTaskNote(task = {}) {
   const original = String(task.question || task.description || task.title || "Customer task").trim();
   const latest = String(task.latest_note || "").trim();
-  return { original, current: latest || original, hasUpdate: Boolean(latest && latest !== original) };
+  return { original, current: task.buyer_followup ? original : latest || original, hasUpdate: Boolean(latest && latest !== original) };
 }
 
 function getGroupSharedTasks(lines = []) {
@@ -3819,9 +3820,10 @@ function renderQueueTaskEntry(entry, lines) {
     ? line.item_title || line.item_number || "Order item"
     : (task.order_line_ids || []).length > 1 ? `${task.order_line_ids.length} items` : "Whole order";
   const fileCount = Math.max(photos.length, Number(task.attachment_count) || 0);
-  return `<article class="buyer-card-note-preview-item buyer-card-task-preview-item" data-queue-task="${escapeHtml(task.id)}">
+  return `<article class="buyer-card-note-preview-item buyer-card-task-preview-item ${task.buyer_followup ? 'buyer-promise-note' : ''}" data-queue-task="${escapeHtml(task.id)}">
+    ${task.buyer_followup ? `<strong class="buyer-promise-label">Customer promise · signature required</strong><p class="buyer-promise-hint">Certify fulfillment below, or have an admin defer this promise for this order.</p>${window.OGBuyerPromiseCheckout?.button(lines) || ''}` : ''}
     <div class="buyer-card-note-body${note.hasUpdate ? " buyer-card-task-current" : ""}">
-      ${note.hasUpdate ? `<small class="buyer-card-task-update-label">Latest update${latestUpdate?.created_at ? ` · ${escapeHtml(formatDate(latestUpdate.created_at))}` : ""}${latestUpdate?.signed_by_email ? ` · ${escapeHtml(latestUpdate.signed_by_email)}` : ""}</small>` : ""}
+      ${note.hasUpdate && !task.buyer_followup ? `<small class="buyer-card-task-update-label">Latest update${latestUpdate?.created_at ? ` · ${escapeHtml(formatDate(latestUpdate.created_at))}` : ""}${latestUpdate?.signed_by_email ? ` · ${escapeHtml(latestUpdate.signed_by_email)}` : ""}</small>` : ""}
       <p>${escapeHtml(note.current)}</p>
     </div>
     <div class="buyer-card-note-author">
@@ -3832,7 +3834,7 @@ function renderQueueTaskEntry(entry, lines) {
       <summary><span>Task · ${escapeHtml(getOrderTaskStatusLabel(task.status))}${fileCount ? ` · ${fileCount} file${fileCount === 1 ? "" : "s"}` : ""}</span><span>Details</span></summary>
       <div class="buyer-card-note-body buyer-card-task-extra">
       <small>${escapeHtml(context)}${task.created_by_email ? ` · By ${escapeHtml(task.created_by_email)}` : ""}</small>
-      ${note.hasUpdate ? `<div class="buyer-card-task-update"><small>Original assignment</small><p>${escapeHtml(note.original)}</p></div>` : ""}
+      ${note.hasUpdate ? `<div class="buyer-card-task-update"><small>${task.buyer_followup ? 'Latest update' : 'Original assignment'}</small><p>${escapeHtml(task.buyer_followup ? task.latest_note : note.original)}</p></div>` : ""}
       <div class="buyer-card-task-links">
         <a class="buyer-line-note-btn" href="team-tasks.html?taskId=${encodeURIComponent(task.id)}">Open task${fileCount && !photos.length ? ` · ${fileCount} file${fileCount === 1 ? "" : "s"}` : ""} ↗</a>
       </div>
@@ -3858,6 +3860,7 @@ function openQueueTaskPhoto(button, lines) {
 }
 
 function renderGroupSharedNotes(lines = [], groupKey = "") {
+  const createButton = `<div class="buyer-promise-tools">${window.OGBuyerTasks?.button(getGroupCustomerTaskKeys(lines)[0] || '') || ''}</div>`;
   const entries = [];
   const seen = new Set();
   lines.forEach((line) => {
@@ -3872,14 +3875,17 @@ function renderGroupSharedNotes(lines = [], groupKey = "") {
   entries.push(...tasks);
   if (!entries.length) {
     const loaded = lines.every(line => !line.order_id || state.sharedOrderNoteHistory.get(line.order_id)?.data);
-    return `<p class="phone-only phone-notes-empty">${loaded ? "No notes or tasks yet" : "Loading notes & tasks…"}</p>`;
+    return createButton + `<p class="phone-only phone-notes-empty">${loaded ? "No notes or tasks yet" : "Loading notes & tasks…"}</p>`;
   }
-  entries.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  entries.sort((a, b) => Number(Boolean(b.task?.buyer_followup)) - Number(Boolean(a.task?.buyer_followup)) || new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  const signature = tasks.filter(entry => entry.task.buyer_followup).map(entry => entry.task.id).sort().join(',');
+  if (signature && signature !== state.buyerPromiseSignatures.get(groupKey)) state.expandedBuyerNoteKeys.add(groupKey);
+  state.buyerPromiseSignatures.set(groupKey, signature);
   const expanded = state.expandedBuyerNoteKeys.has(groupKey);
   const detailsId = `buyer-notes-${encodeURIComponent(groupKey)}`;
   const counts = [noteCount ? `${noteCount} note${noteCount === 1 ? "" : "s"}` : "", tasks.length ? `${tasks.length} task${tasks.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
   const preview = entries[0].notes;
-  return `<section class="buyer-card-note-preview ${expanded ? "is-expanded" : ""}" aria-label="Notes & tasks">
+  return createButton + `<section class="buyer-card-note-preview ${expanded ? "is-expanded" : ""}" aria-label="Notes & tasks">
     <button type="button" class="buyer-card-notes-toggle" data-toggle-group-notes aria-expanded="${expanded}" aria-controls="${escapeHtml(detailsId)}">
       <strong>${counts}</strong>
       <span class="buyer-card-notes-summary">${escapeHtml(preview)}</span>
@@ -10356,7 +10362,10 @@ async function confirmAdminOrderCloseout() {
     const valid = await verifyCurrentUserPassword(password);
     if (!valid) throw new Error("Incorrect password. Please try again.");
 
-    if (action === "fulfilled_no_inventory") await window.OGPendingWork?.assertReady(lines);
+    if (action === "fulfilled_no_inventory") {
+      await window.OGBuyerPromiseCheckout?.assertReady(lines);
+      await window.OGPendingWork?.assertReady(lines);
+    }
     const { data, error } = await supabase.rpc("admin_close_ebay_order_lines", {
       _order_line_ids: lines.map((line) => line.id),
       _action: action,
@@ -10546,6 +10555,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
       .filter(Boolean))];
     const blocked = (staged.length ? staged.map(entry => entry.line) : [state.selectedLine]).find(getLineFulfillmentBlock);
     if (blocked) throw new Error(getLineFulfillmentBlock(blocked));
+    await window.OGBuyerPromiseCheckout?.assertReady(staged.length ? staged.map(entry => entry.line) : [state.selectedLine]);
     await window.OGPendingWork?.assertReady(staged.length ? staged.map(entry => entry.line) : [state.selectedLine]);
     const changedItemIds = [];
     if (liveItems.length && !staged.length) {
@@ -13320,6 +13330,23 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupEbayLabelReceiver();
   const ok = await loadCurrentWorker();
   if (!ok) return;
+  const refreshPromises = async () => {
+    if (document.hidden) return;
+    state.customerTaskNotes = new Map();
+    const groups = groupLinesByBuyer(state.filteredOrders);
+    await Promise.all([...document.querySelectorAll('.buyer-order-card')].map(card => {
+      const group = groups.find(group => group.key === card.dataset.buyerKey);
+      const rect = card.getBoundingClientRect();
+      if (state.orderNotesObserver && (rect.bottom < -300 || rect.top > window.innerHeight + 300)) {
+        state.orderNotesObserver.observe(card);
+        return;
+      }
+      return group && hydrateBuyerGroupNotes(card, group);
+    }));
+  };
+  window.OGBuyerTasks?.init({client:supabase,userId:state.user.id,onSaved:refreshPromises});
+  window.OGBuyerPromiseCheckout?.init({client:supabase,onSaved:refreshPromises});
+  window.addEventListener('focus', refreshPromises);
   setupDashboardShell();
   setupImportVisibility();
   setupListeners();

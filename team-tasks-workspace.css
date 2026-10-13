@@ -70,8 +70,8 @@ body[data-page="team-tasks"] .team-task-view-btn.is-active { background: #344237
 .task-source-shortcuts button[aria-pressed="true"] { background: #e5cd9720; border-color: #e5cd9770; color: var(--task-gold); }
 .task-source-shortcuts button[aria-pressed="true"] b { background: #e5cd971a; }
 @media (max-width: 540px) {
-  .task-source-shortcuts { gap: 5px; }
-  .task-source-shortcuts button { flex: 1 0 auto; gap: 6px; padding: 8px 10px; font-size: 11px; }
+  .task-source-shortcuts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; }
+  .task-source-shortcuts button { min-width:0; flex-direction:column; gap:1px; padding:4px; font-size:11px; }
 }
 .task-quick-views { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; padding-bottom: 4px; }
 .task-quick-views button { flex: 0 0 auto; min-height: 42px; background: none; border: 1px solid transparent; border-radius: 10px; color: var(--task-muted); font-size: 12px; font-weight: 700; padding: 8px 14px; }
@@ -267,3 +267,7 @@ body[data-page="team-tasks"] .task-response-options input { width: 20px; height:
 body[data-page="team-tasks"] .task-card-owner { color:#ead39d; font-weight:600; }
 body[data-page="team-tasks"] .team-task-action-menu-body { display:grid; gap:8px; }
 @media(max-width:520px) { .task-inbox-tabs button { min-height:62px; font-size:11px; } }
+@media(max-width:360px) {
+  .task-quick-views button { min-height:44px; padding:8px 5px; font-size:10px; }
+  body[data-page="team-tasks"] .team-task-board { gap:10px; }
+}

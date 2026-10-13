@@ -8870,6 +8870,7 @@
         </div>
         <div class="ebay-detail-actions">
           ${!isPlatformConversation ? `<button type="button" class="primary-btn" data-ebay-detail-action="reply"><i data-lucide="reply"></i>Reply</button>` : ""}
+          ${!isPlatformConversation ? window.OGBuyerTasks?.button(identity.username || '') || '' : ''}
           ${messages.length ? `<button type="button" class="secondary-btn" data-ebay-message-task-action="create" data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-ebay-message-id="${escapeHtml((latestInboundEbayMessage(messages) || messages[messages.length - 1]).id)}"><i data-lucide="clipboard-plus"></i>Create task</button>` : ""}
         </div>
       </div>
@@ -12480,6 +12481,7 @@
 
     const context = await requireAdmin({ greetingEl: els.greeting });
     if (!context) return;
+    window.OGBuyerTasks?.init({client:context.client,userId:context.session?.user?.id});
     window.EmailTriageReadTracking?.init({
       context,
       onChange: () => setEbayConversationState({}),

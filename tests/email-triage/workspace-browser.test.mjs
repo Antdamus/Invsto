@@ -35,6 +35,7 @@ async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false
   const teamStatus=id=>{const messageIds=[`message-${id}`,...(id==='chat-0'?(window.fixtureExtraMessages||[]).filter(m=>m.direction!=='outbound').map(m=>m.id):[])];const message_states=messageIds.map(message_id=>({message_id,...(fixtureReadReceipts[message_id]||{is_read:false})}));const last=message_states.find(m=>m.read_at);return {conversation_id:id,is_read:message_states.every(m=>m.is_read),read_by:last?.read_by||null,read_at:last?.read_at||null,message_states};};
   const channel={on:(_kind,filter,callback)=>{fixtureRealtime[filter.table]=callback;return channel;},subscribe:callback=>{window.fixtureSubscribe=callback;callback('SUBSCRIBED');return channel;}};
   const client={channel:()=>channel,removeChannel:()=>{},auth:{getSession:async()=>({data:{session}})},rpc:async(name,args)=>{
+   if(name==='list_team_task_assignees')return {data:[{user_id:'me',display_name:'Jose',email:'manager@example.test'}]};
    if(name==='get_ebay_team_read_status')return {data:args._conversation_ids.map(teamStatus)};
    if(name==='get_ebay_daily_read_activity'){
     const rows=fixtureConversations.filter(c=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(c.latest_message_created_at))===args._date).map(c=>({...c,...teamStatus(c.id),activity_at:c.latest_message_created_at}));
@@ -119,12 +120,23 @@ async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false
   }
  },{linked,orderChoices,orderEntry,sendReply});
  await page.addScriptTag({url:origin+'/email-triage.order-chat.js'});
+ await page.addScriptTag({url:origin+'/buyer-tasks.js'});
  await page.addScriptTag({url:origin+'/email-triage.js'});
  await expect(page.locator('.ebay-conversation-row')).toHaveCount(orderEntry?1:32);
  await expect(page.locator('[data-ebay-detail-action="reply"]')).toHaveCount(1);
  return page;
 }
 const noOverflow=async page=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+for(const width of [390,1366])test(`customer promise starts from message with exact username at ${width}px`,async t=>{
+ const page=await open(t,width);
+ await page.locator('.ebay-conversation-row').first().click();
+ await page.getByRole('button',{name:'Customer task',exact:true}).click();
+ await expect(page.getByRole('dialog').getByLabel('eBay username')).toHaveValue('jewelrybuyer');
+ await expect(page.getByRole('dialog').getByLabel('Responsible person')).toHaveValue('me');
+ await expect(page.getByRole('dialog').getByLabel('Task title')).toBeFocused();
+ await page.getByRole('dialog').getByRole('button',{name:'Cancel',exact:true}).click();
+ assert.equal(await page.evaluate(()=>fixtureWrites.length),0);
+});
 for(const width of [390,1366])test(`Reply read receipts ${width}px refresh after successful sends without requiring realtime`,async t=>{
  const page=await open(t,width,{sendReply:true});
  await page.locator('.ebay-conversation-row').first().click();

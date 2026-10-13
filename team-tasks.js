@@ -556,6 +556,7 @@ function updateTaskScopeChrome() {
     workerSelect.value = getViewedWorkerUserId();
   }
   const newTaskButton = $("new-team-task");
+  if ($("new-buyer-task")) $("new-buyer-task").disabled = isTaskViewAsWorkerMode();
   if (newTaskButton) {
     newTaskButton.disabled = isTaskViewAsWorkerMode();
     newTaskButton.title = isTaskViewAsWorkerMode()
@@ -1079,7 +1080,7 @@ function renderTaskSourceFilterChrome(tasks = []) {
   if ($("task-source-filter")) $("task-source-filter").value = state.taskSourceFilter;
   $("task-source-shortcuts")?.classList.toggle("hidden", Boolean(getRequestedTaskId()));
   const counts = getTaskSourceCounts(filterTaskWorkspace(tasks));
-  document.querySelectorAll("[data-task-source]").forEach(button => {
+  document.querySelectorAll("#task-source-shortcuts [data-task-source]").forEach(button => {
     const source = button.dataset.taskSource;
     const active = source === state.taskSourceFilter || (source === "orders" && ["order", "order_history"].includes(state.taskSourceFilter));
     button.setAttribute("aria-pressed", String(active));
@@ -4993,6 +4994,10 @@ function renderTaskActions(task = {}, resolved = false) {
   const buttons = [];
   if (task.actionHref && task.source !== 'team') buttons.push('<a class="secondary-btn" href="'+escapeHtml(task.actionHref)+'">'+(task.metadata?.packaging_shipment_id || task.metadata?.packaging_order_handoff ? 'Open Packaging' : task.source === 'order' ? 'Open order' : ({return:'Open return',dispute:'Open dispute',request:'Open request'})[getTaskCustomerIssueKind(task)])+'</a>');
   if (canReplyToTask(task)) buttons.push('<button type="button" class="secondary-btn" data-task-reply="'+key+'">Add update</button>');
+  if (task.metadata?.source === 'buyer_followup') {
+    buttons.push('<a class="primary-btn" href="pending-orders.html?ebayBuyer='+encodeURIComponent(task.buyer_username || task.metadata.buyer_username)+'">Certify in Pending Orders ↗</a>');
+    return buttons.join('');
+  }
   if (canHandTaskBack(task)) buttons.push(isTaskInApprovalInbox(task)
     ? '<button type="button" class="primary-btn" data-task-reply="'+key+'" data-handoff="true">Send instructions &amp; hand back</button>'
     : '<button type="button" class="secondary-btn" data-task-reply="'+key+'" data-decision="true">Ask for a decision</button>');
@@ -6937,7 +6942,7 @@ function setupListeners() {
     state.taskSourceFilter = Object.hasOwn(TASK_SOURCE_LABELS, event.target.value) ? event.target.value : "all";
     renderTasks();
   });
-  document.querySelectorAll("[data-task-source]").forEach(button => button.addEventListener("click", () => {
+  document.querySelectorAll("#task-source-shortcuts [data-task-source]").forEach(button => button.addEventListener("click", () => {
     state.taskSourceFilter = button.dataset.taskSource;
     renderTasks();
   }));
@@ -7031,6 +7036,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await waitForSupabaseReady();
   const ok = await loadCurrentUser();
   if (!ok) return;
+  window.OGBuyerTasks?.init({client:supabase,userId:state.user.id,onSaved:()=>loadTasks()});
   setupListeners();
   await Promise.all([loadAssignees().catch(error => console.warn("Could not load team names:", error)), loadTaskNotifications({ silent: true }), loadTasks()]);
   setupTaskNotificationRealtime();

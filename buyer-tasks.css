@@ -1,0 +1,38 @@
+.buyer-task-launch { min-height:44px; padding:8px 12px; border:1px solid #baa06a; border-radius:10px; background:#202a23; color:#f2d79e; font:inherit; font-size:13px; cursor:pointer; }
+.buyer-task-dialog { box-sizing:border-box; width:min(560px,calc(100vw - 24px)); max-height:min(90dvh,var(--buyer-task-height,90dvh)); padding:22px; border:1px solid #657164; border-radius:18px; background:#17201b; color:#f4f1e8; font:16px/1.45 system-ui,sans-serif; overflow:auto; overscroll-behavior:contain; color-scheme:dark; }
+.buyer-task-dialog::backdrop { background:#000a; }
+.buyer-task-form { display:grid; gap:12px; margin:0; }
+.buyer-task-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.buyer-task-heading h2 { margin:0; font:600 22px/1.3 system-ui,sans-serif; }
+.buyer-task-form p { margin:0; font-size:14px; }
+.buyer-task-form label { display:grid; gap:5px; font-weight:600; font-size:14px; }
+.buyer-task-form small { color:#b7c2b9; font-size:12px; }
+.buyer-task-form input,.buyer-task-form textarea,.buyer-task-form select { box-sizing:border-box; min-width:0; width:100%; min-height:44px; padding:10px; border:1px solid #667269; border-radius:9px; background:#0d1510; color:#f7f5ee; font:16px/1.4 system-ui,sans-serif; }
+.buyer-task-fields { display:grid; grid-template-columns:1fr 130px; gap:12px; }
+.buyer-task-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+.buyer-task-form button,.buyer-task-actions a { min-height:44px; display:inline-flex; align-items:center; justify-content:center; padding:8px 14px; border:1px solid #8e987f; border-radius:9px; background:#253229; color:#f9f5e9; font:600 14px system-ui,sans-serif; cursor:pointer; text-decoration:none; }
+.buyer-task-form [type=submit] { background:#ead296; color:#17201b; border-color:#ead296; }
+.buyer-task-form :disabled { opacity:.6; cursor:wait; }
+.buyer-task-form [hidden] { display:none; }
+.buyer-task-form .buyer-task-error { color:#ffb4aa; }
+.buyer-task-form :focus-visible,.buyer-task-launch:focus-visible { outline:2px solid #efd196; outline-offset:3px; }
+@media(max-width:480px) { .buyer-task-dialog { padding:16px; } .buyer-task-fields { grid-template-columns:1fr; } }
+.buyer-promise-tools { display:flex; justify-content:flex-end; margin:8px 0; }
+.buyer-promise-note { border-left:4px solid #efd196 !important; }
+.buyer-promise-label,.buyer-promise-hint { grid-column:1/-1; }
+.buyer-promise-label { color:#f1d395; }
+.buyer-promise-hint { font-size:13px; margin:0; }
+.buyer-promise-review { display:grid; gap:12px; padding:16px 0; border-bottom:1px solid #617062; }
+.buyer-promise-review h3 { margin:0; font-size:18px; }
+.buyer-promise-instructions { white-space:pre-wrap; overflow-wrap:anywhere; }
+.buyer-task-form .buyer-promise-certify { display:flex; gap:10px; align-items:flex-start; }
+.buyer-task-form .buyer-promise-certify input { width:24px; min-height:24px; flex:none; }
+.buyer-promise-signed { padding:10px; background:#29392c; border-radius:9px; overflow-wrap:anywhere; }
+@media(max-width:600px) {
+  body[data-page="team-tasks"] .team-task-hero h1 { font-size:28px; }
+  body[data-page="team-tasks"] .team-task-hero > .team-task-actions { gap:4px; }
+  body[data-page="team-tasks"] #new-buyer-task { width:68px; padding:6px; font-size:11px; line-height:1.2; flex:none; }
+  body[data-page="team-tasks"] #new-team-task { padding:8px 6px; font-size:11px; }
+  body[data-page="team-tasks"] #new-team-task :is(i,svg) { display:none; }
+  body[data-page="team-tasks"] #refresh-team-tasks { width:36px; min-width:36px; }
+}
