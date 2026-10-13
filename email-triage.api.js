@@ -1045,6 +1045,8 @@
   function normalizeEbayConversationRow(row = {}, summary = {}, classification = null) {
     return {
       id: row.id || null,
+      activity_at: row.activity_at || null,
+      team_read: row.team_read || null,
       seller_account_id: row.seller_account_id || null,
       ebay_conversation_id: row.ebay_conversation_id || "",
       conversation_type: row.conversation_type || "",
@@ -1184,6 +1186,7 @@
       rpc_version: data.rpc_version || null,
       canonical_total: canonicalTotal,
       matching_total: matchingTotal,
+      read_counts: data.read_counts || null,
       loaded_count: loadedCount,
       page_size: pageSize,
       offset,
@@ -1458,7 +1461,9 @@
     if (filter === "all") return true;
     if (filter === "members") return ebayLegacyConversationSource(conversation) === "member_message";
     if (filter === "ebay_notifications") return ebayLegacyConversationSource(conversation) === "platform_notification";
-    if (filter === "unread") return Number(conversation.unread_count || 0) > 0;
+    if (filter === "unread") return conversation.team_read
+      ? !conversation.team_read.is_read
+      : Number(conversation.unread_count || 0) > 0;
     if (filter === "unclassified") return !ebayLegacyClassification(conversation).id;
     if (filter === "returns") return summary.has_return_link === true || ebayApiIncludesAll(classification.topic_tags, ["return_request"]);
     if (filter === "shipping" || filter === "shipping_issues") return ebayApiHasAnyCanonical(classification.topic_tags, ["shipping_problem", "shipping_status_tracking", "missing_item"], "topics");
@@ -1880,13 +1885,17 @@
 
     try {
       const payload = await fetchEbayCanonicalMailboxRpc(context, values);
+      const scopedRead = Object.hasOwn(values.structuredFilters || {}, 'teamReadState');
+      if (scopedRead && !payload.read_counts) throw new Error('Date filters are updating. Refresh the page and try again.');
       if (ebayRpcPayloadNeedsClientFilteredFallback(payload, values)) {
+        if (scopedRead) throw new Error('These filters could not be applied. Refresh and try again.');
         console.warn("[email-triage] Canonical mailbox RPC returned rows outside the active tag filter; applying client filtered mailbox sweep.");
         return await fetchClientFilteredEbayConversations(context, values, "rpc_filter_guard");
       }
       return payload;
     } catch (error) {
       // A timeout/network failure must not fan out into the larger legacy sweep.
+      if (Object.hasOwn(values.structuredFilters || {}, 'teamReadState')) throw error;
       if (!["PGRST202", "42883"].includes(error.code)) throw error;
       console.warn("[email-triage] Canonical mailbox RPC failed; falling back to legacy mailbox mode:", error);
       if (ebayApiHasClientFilteredCriteria(values)) {

@@ -16,3 +16,19 @@ test('mailbox timeout is surfaced instead of launching a legacy full-mailbox sca
  let fallbackReads=0;const client={auth,rpc:async()=>({error:{code:'57014',message:'statement timeout'}}),from:()=>{fallbackReads++;throw Error('Unexpected fallback');}};
  await assert.rejects(api().fetchEbayConversations({client},{}),e=>e.code==='57014');assert.equal(fallbackReads,0);
 });
+
+test('date/read filters, full counts and explicit team receipts survive the mailbox API',async()=>{
+ const filters={activityDate:'2026-10-13',teamReadState:'unread',tags:['shipping_problem']};
+ const counts={all:12,read:5,unread:7};let request;
+ const client={auth,rpc:async(name,args)=>{request=args;return {data:{read_counts:counts,conversations:[{id:'conversation',unread_count:0,activity_at:'2026-10-13T15:00:00Z',team_read:{conversation_id:'conversation',is_read:false,read_by:'Sandra'},classification:{id:'classification',topic_tags:['shipping_problem']}}]}};},from:()=>{throw Error('Unexpected legacy query');}};
+ const result=await api().fetchEbayConversations({client},{structuredFilters:filters,systemFilter:'unread'});
+ assert.deepEqual(request._structured_filters,filters);assert.deepEqual(result.read_counts,counts);
+ assert.equal(result.conversations[0].team_read.is_read,false);assert.equal(result.conversations[0].team_read.read_by,'Sandra');assert.equal(result.conversations[0].activity_at,'2026-10-13T15:00:00Z');
+});
+
+test('missing date-filter support never falls back to an unfiltered inbox',async()=>{
+ for(const response of [{data:{conversations:[]}},{error:{code:'PGRST202',message:'Function unavailable'}}]){
+  let fallbackReads=0;const client={auth,rpc:async()=>response,from:()=>{fallbackReads++;throw Error('Unexpected legacy query');}};
+  await assert.rejects(api().fetchEbayConversations({client},{structuredFilters:{activityDate:'2026-10-13',teamReadState:'all'}}));assert.equal(fallbackReads,0);
+ }
+});

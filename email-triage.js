@@ -2922,7 +2922,7 @@
   }
 
   function ebayConversationTime(conversation) {
-    return conversation?.latest_message_created_at ||
+    return conversation?.activity_at || conversation?.latest_message_created_at ||
       conversation?.last_message_created_at ||
       conversation?.updated_at ||
       conversation?.created_at ||
@@ -4035,7 +4035,7 @@
       offset: Math.max(Number(options.offset || 0) || 0, 0),
       systemFilter: state.ebayConversationFilter || "all",
       searchTerms: search.terms,
-      structuredFilters: search.structured,
+      structuredFilters: {...search.structured,activityDate:state.ebayConversationActivityDate || null,teamReadState:state.ebayConversationTeamReadState || 'all'},
       classificationFilters: safeEbayClassificationFilters(state.ebayConversationClassificationFilters),
     };
   }
@@ -4066,6 +4066,7 @@
 
   function ebayMailboxStateFromPayload(payload = {}, conversations = []) {
     return {
+      ebayConversationReadCounts: payload.read_counts || null,
       ebayMailboxMode: payload.mailbox_mode || "rpc",
       ebayMailboxWarning: payload.warning || null,
       ebayMailboxPagination: {
@@ -9360,6 +9361,7 @@
 
     renderEbaySavedViews(state);
     renderEbayQuickQueues(state);
+    window.EmailTriageReadTracking?.renderFilters(state);
 
     const searchQuery = state.ebayConversationSearchQuery || "";
     if (els.ebayConversationSearch && document.activeElement !== els.ebayConversationSearch && els.ebayConversationSearch.value !== searchQuery) {
@@ -9962,17 +9964,22 @@
         : pageConversations;
       const deepLink = ebayConversationDeepLinkRequest();
       if (!append && deepLink.conversationDbId && !conversations.some((conversation) => conversation.id === deepLink.conversationDbId)) {
-        try {
-          const directPayload = await fetchEbayConversationById(context, deepLink.conversationDbId);
-          if (directPayload.conversation?.id) {
-            conversations = mergeEbayConversationPages([directPayload.conversation], conversations);
+        // A source link may load its original conversation, but an explicit date
+        // or read filter must never inject a conversation outside its results.
+        if (!currentState.ebayConversationActivityDate && (!currentState.ebayConversationTeamReadState || currentState.ebayConversationTeamReadState === 'all')) {
+          try {
+            const directPayload = await fetchEbayConversationById(context, deepLink.conversationDbId);
+            if (directPayload.conversation?.id) {
+              conversations = mergeEbayConversationPages([directPayload.conversation], conversations);
+            }
+          } catch (directError) {
+            console.warn("[email-triage] Deep-linked eBay conversation fetch failed:", directError);
           }
-        } catch (directError) {
-          console.warn("[email-triage] Deep-linked eBay conversation fetch failed:", directError);
         }
       }
       if (requestVersion !== ebayMailboxRequestVersion) return;
       const mailboxState = ebayMailboxStateFromPayload(payload, conversations);
+      window.EmailTriageReadTracking?.acceptConversations(pageConversations);
       const previousSelectedId = adminClassificationState.selectedEbayConversationId || options.preserveSelectionId || (!append ? deepLink.conversationDbId : null);
       const visibleRows = filteredEbayConversations({
         ...adminClassificationState,
@@ -12486,16 +12493,11 @@
     window.EmailTriageReadTracking?.init({
       context,
       onChange: () => setEbayConversationState({}),
-      onOpen: async id => {
-        if (!selectedEbayConversationById(id)) {
-          const payload = await fetchEbayConversationById(context, id);
-          if (!payload?.conversation) throw new Error('Could not load this conversation. Please retry.');
-          setEbayConversationState({ebayConversations:[payload.conversation,...adminClassificationState.ebayConversations]});
-        }
-        await selectEbayConversation(context, id);
-        if (isEbayMobileWorkspace()) setEbayMobileWorkspaceView('message');
-        els.ebayConversationDetail.scrollIntoView({block:'start',behavior:'smooth'});
+      onFilter: updates => {
+        applyEbayConversationListControls(context,updates);
+        if (isEbayMobileWorkspace()) setEbayMobileWorkspaceView('inbox',{scroll:false});
       },
+      onRefresh: () => scheduleEbayConversationListReload(context,{delay:150}),
     });
     setEbayConversationState({
       emailTriageViewerUserId: ebayConversationViewerId(context),

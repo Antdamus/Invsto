@@ -64,11 +64,16 @@ async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false
   api.requireAdmin=async()=>({client,session});
   api.fetchEbayConversations=async(_context,request)=>{
    fixtureReads.push({name:'mailbox',request});
+   if(window.fixtureFailMailbox){fixtureFailMailbox=false;throw Error('Mailbox connection interrupted');}
    if(window.fixtureDelayMailbox)await new Promise(r=>window.finishMailboxReload=r);
    const search=(request.searchTerms||[]).join(' ');
    if(search==='slow')await new Promise(r=>window.finishSlowSearch=r);
-   const conversations=search?fixtureConversations.filter(c=>c.other_party_username.includes(search)):fixtureConversations;
-   return {conversations,canonical_total:32,matching_total:conversations.length,loaded_at:now,mailbox_mode:'rpc',rpc_version:'v2',has_more:false,smart_folder_counts:{all:32,unread:28,needs_reply_today:8,pending_tasks:3}};
+   const date=request.structuredFilters?.activityDate,readState=request.structuredFilters?.teamReadState||'all';
+   const matching=fixtureConversations.filter(c=>(!search||c.other_party_username.includes(search))&&(!date||new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(c.latest_message_created_at))===date));
+   const filtered=matching.filter(c=>readState==='all'||teamStatus(c.id).is_read===(readState==='read'));
+   const start=request.offset||0,size=request.limit||100;
+   const conversations=filtered.slice(start,start+size).map(c=>({...c,team_read:teamStatus(c.id)}));
+   return {conversations,canonical_total:fixtureConversations.length,matching_total:filtered.length,read_counts:{all:matching.length,read:matching.filter(c=>teamStatus(c.id).is_read).length,unread:matching.filter(c=>!teamStatus(c.id).is_read).length},loaded_at:now,mailbox_mode:'rpc',rpc_version:'v2',has_more:start+size<filtered.length,page_size:size,next_offset:start+size<filtered.length?start+size:null,smart_folder_counts:{all:32,unread:28,needs_reply_today:8,pending_tasks:3}};
   };
   api.fetchEbayConversationSavedViews=async()=>({views:[]});
   api.fetchEbayConversationById=async(_ctx,id)=>({conversation:fixtureConversations.find(c=>c.id===id)});
@@ -152,7 +157,6 @@ for(const width of [390,1366])test(`customer promise starts from message with ex
 for(const width of [390,1366])test(`Reply read receipts ${width}px refresh after successful sends without requiring realtime`,async t=>{
  const page=await open(t,width,{sendReply:true});
  await page.locator('.ebay-conversation-row').first().click();
- await page.locator('#triage-read-tracking summary').click();
  await expect(page.locator('[data-read-filter="read"]')).toHaveText('Read 0');
  await page.getByRole('button',{name:'Reply',exact:true}).click();
  await page.locator('[name="draftText"]').fill('Your order will ship tomorrow.');
@@ -179,12 +183,14 @@ for(const width of [390,1366])test(`Team read tracking ${width}px requires an ex
  await expect(mark).toHaveText('Mark unread');
  await expect(page.locator('.ebay-message-actions')).toContainText('Read by Sandra');
  assert.equal((await page.evaluate(()=>fixtureWrites))[0].args._message_id,'message-chat-0');
- await page.locator('#triage-read-tracking summary').click();
+ if(width<1021)await page.locator('[data-ebay-mobile-view="inbox"]').click();
  await expect(page.locator('[data-read-filter="read"]')).toContainText('1');
  await expect(page.locator('[data-read-filter="unread"]')).toContainText('31');
- await page.locator('[data-read-filter="read"]').click();await expect(page.locator('.triage-read-day-row')).toHaveCount(1);
- await page.locator('[data-read-date]').fill('2020-01-01');await expect(page.locator('[data-read-results]')).toContainText('No conversations');
- await page.locator('#triage-read-tracking summary').click();
+ await page.locator('[data-read-filter="read"]').click();await expect(page.locator('.ebay-conversation-row')).toHaveCount(1);
+ await page.locator('[data-read-date]').fill('2020-01-01');await page.locator('[data-read-date]').press('Tab');await expect(page.locator('#ebay-conversation-list')).toContainText('No messages');
+ await expect(page.locator('[data-read-filter="all"] b')).toHaveText('0');
+ await page.locator('[data-read-all-dates]').click();await expect(page.locator('.ebay-conversation-row')).toHaveCount(1);
+ await page.locator('.ebay-conversation-row').click();
  await page.locator('[data-read-history]').click();await expect(page.getByRole('dialog',{name:'Read history',exact:true})).toContainText('Sandra');
  await page.getByRole('button',{name:'Close read history'}).click();
  await page.evaluate(()=>fixtureReadFail=true);await mark.click();
@@ -196,10 +202,14 @@ for(const width of [390,1366])test(`Team read tracking ${width}px requires an ex
   fixtureRealtime.ebay_conversation_messages({new:fixtureExtraMessages[0]});
   return new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(timestamp));
  });
- await expect(page.locator('.triage-read-summary [data-team-read]')).toHaveText('Mark read');
- await page.locator('#triage-read-tracking summary').click();await page.locator('[data-read-date]').fill(laterDay);
+ // The new unread reply leaves the active Read filter and returns the phone to
+ // the inbox. Wait for that refresh before choosing another date.
+ await expect(page.locator('[data-read-filter="read"] b')).toHaveText('0');
+ await expect(page.locator('.ebay-conversation-row')).toHaveCount(0);
+ await expect(page.locator('[data-read-date]')).toBeVisible();
+ await page.locator('[data-read-date]').fill(laterDay);await page.locator('[data-read-date]').press('Tab');
  await page.locator('[data-read-filter="unread"]').click();
- await expect(page.locator('.triage-read-day-row')).toHaveCount(1);await expect(page.locator('[data-read-filter="read"]')).toContainText('0');
+ await expect(page.locator('.ebay-conversation-row')).toHaveCount(1);await expect(page.locator('[data-read-filter="read"]')).toContainText('0');
  assert.equal(await page.evaluate(()=>fixtureWrites.length),2,'new replies and date navigation never mark read');
  await page.screenshot({path:`test-results/triage-${width}-read-tracking.png`});
  await noOverflow(page);
@@ -219,6 +229,38 @@ test('phone task typing preserves the live field, spaces and caret during backgr
  await page.locator('[data-ebay-message-task-form] button[type="submit"]').click();
  await expect(page.getByRole('dialog',{name:'Create task'})).toBeHidden();
  assert.equal((await page.evaluate(()=>fixtureWrites)).filter(w=>w.name==='create_task_request').length,1);
+});
+
+for(const width of [320,390,1366])test(`Date filter ${width}px replaces the main inbox, preserves filters when returning from a message, and supports day navigation`,async t=>{
+ const page=await open(t,width);
+ await page.evaluate(()=>{fixtureConversations[0].latest_message_created_at='2026-10-01T16:00:00Z';fixtureConversations[1].latest_message_created_at='2026-10-02T16:00:00Z';fixtureReadReceipts['message-chat-0']={is_read:true,read_by:'Sandra',read_at:'2026-10-01T17:00:00Z'};});
+ const date=page.locator('[data-read-date]');await date.fill('2026-10-01');await date.press('Tab');
+ await expect(page.locator('.ebay-conversation-row')).toHaveCount(1);await expect(page.locator('[data-read-filter="all"] b')).toHaveText('1');await expect(page.locator('[data-read-filter="read"] b')).toHaveText('1');
+ assert.equal(await page.locator('.triage-read-day-list').count(),0,'there is only the regular inbox');
+ await page.screenshot({path:`test-results/triage-date-filter-${width}.png`});await noOverflow(page);
+ await page.locator('.ebay-conversation-row').click();await expect(page.locator('.ebay-message-bubble')).toBeVisible();
+ if(width<1021){await expect(page.locator('#triage-read-tracking')).not.toBeVisible();await page.locator('[data-ebay-mobile-view="inbox"]').click();}
+ await expect(date).toHaveValue('2026-10-01');await expect(page.locator('.ebay-conversation-row')).toHaveCount(1);
+ await page.locator('[data-read-day="1"]').click();await expect(date).toHaveValue('2026-10-02');await expect(page.locator('.ebay-conversation-row')).toHaveCount(1);await expect(page.locator('[data-read-filter="unread"] b')).toHaveText('1');
+ await page.locator('[data-read-filter="read"]').click();await expect(page.locator('.ebay-conversation-row')).toHaveCount(0);await expect(page.locator('[data-read-filter="unread"] b')).toHaveText('1');
+ await page.locator('[data-read-day="-1"]').click();await expect(page.locator('.ebay-conversation-row')).toHaveCount(1);
+ await page.locator('[data-read-all-dates]').click();await expect(date).toHaveValue('');await expect(page.locator('[data-read-filter="read"]')).toHaveAttribute('aria-pressed','true');
+ await page.locator('[data-read-filter="all"]').click();await expect(page.locator('.ebay-conversation-row')).toHaveCount(32);
+ assert.equal(await page.evaluate(()=>fixtureWrites.length),0,'date changes and opening a message are read-only');
+});
+
+test('daily counts cover later pages and a stale date response cannot replace a newer selection',async t=>{
+ const page=await open(t,390);
+ await page.evaluate(()=>{
+  const sample=fixtureConversations[0];fixtureConversations=Array.from({length:135},(_,n)=>({...sample,id:`chat-${n}`,other_party_username:`buyer_${n}`,latest_message_created_at:'2026-10-01T16:00:00Z'}));
+ });
+ const date=page.locator('[data-read-date]');await date.fill('2026-10-01');await date.press('Tab');await expect(page.locator('.ebay-conversation-row')).toHaveCount(100);await expect(page.locator('[data-read-filter="all"] b')).toHaveText('135');
+ await page.locator('#ebay-conversation-load-more').click();await expect(page.locator('.ebay-conversation-row')).toHaveCount(135);await expect(page.locator('[data-read-filter="all"] b')).toHaveText('135');
+ await page.evaluate(()=>fixtureDelayMailbox=true);await date.fill('2026-10-02');await date.press('Tab');await page.waitForFunction(()=>typeof finishMailboxReload==='function');
+ await page.evaluate(()=>{window.oldDayRequest=finishMailboxReload;fixtureDelayMailbox=false;});await date.fill('2026-10-01');await date.press('Tab');await expect(page.locator('.ebay-conversation-row')).toHaveCount(100);
+ await page.evaluate(()=>oldDayRequest());await expect(page.locator('[data-read-filter="all"] b')).toHaveText('135');await expect(date).toHaveValue('2026-10-01');
+ await page.evaluate(()=>fixtureFailMailbox=true);await date.fill('2026-10-03');await date.press('Tab');await expect(page.locator('[data-read-results]')).toContainText('Could not load');await expect(page.locator('.ebay-conversation-row')).toHaveCount(0);await expect(page.locator('[data-read-filter="all"] b')).toHaveText('—');
+ await page.locator('#ebay-conversation-refresh').click();await expect(page.locator('[data-read-filter="all"] b')).toHaveText('0');await expect(page.locator('[data-read-results]')).toBeHidden();
 });
 for(const width of [390,1366])test(`Order entry ${width}px opens the correct chat inside the actual triage workspace`,async t=>{
  const page=await open(t,width,{orderEntry:true});await expect(page.locator('#order-chat-entry')).toContainText('Gold chain');await expect(page.locator('.ebay-message-bubble')).toBeVisible();await expect(page.getByRole('button',{name:'Reply',exact:true})).toBeVisible();await noOverflow(page);
