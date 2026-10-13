@@ -51,6 +51,7 @@
   // ---------- routing (bottom nav / sheets -> top tabs) ----------
   const TAB_TO_BTN_ID = {
     overview: "tabOverview",
+    workreport: "tabWorkReport",
     payroll: "tabPayroll",
     schedule: "tabSchedule",
     users: "tabUsers",

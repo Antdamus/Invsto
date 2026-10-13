@@ -1121,6 +1121,7 @@ function renderDrawerList(shifts){
       ${shiftPhotos ? `<div class="shift-photos">${shiftPhotos}</div>` : ``}
 
       <div class="shift-actions">
+        ${!s.is_deleted && !s._placeholder ? `<button class="btn small ghost" type="button" data-work-shift-id="${s.id}" data-work-employee="${escapeHtml(s.employee_id || s._employee_id || drawerContext.employeeId)}" data-work-clock-in="${escapeHtml(s.clock_in)}">View work</button>` : ''}
         <button class="btn small ghost" type="button" data-audit-id="${s.id}">Audit trail</button>
         ${editBtn}
         ${closeBtn}
@@ -2099,6 +2100,13 @@ if (shiftCard?.dataset?.employeeId && shiftCard?.dataset?.monthStart) {
         }
 
 
+      const workButton = t.closest('button[data-work-shift-id]');
+      if (workButton) {
+        closeDrawer();
+        await window.AdminWorkReport.openShift(workButton.dataset.workEmployee, workButton.dataset.workShiftId, workButton.dataset.workClockIn);
+        return;
+      }
+
       // Edit shift
       const editBtn = t.closest('button[data-edit-id]');
       if (editBtn) {
@@ -2185,6 +2193,7 @@ return;
 function activateTab(which){
   const tabs = [
     { key:'overview', btn:'tabOverview', panel:'panelOverview' },
+    { key:'workreport', btn:'tabWorkReport', panel:'panelWorkReport' },
     { key:'payroll',  btn:'tabPayroll',  panel:'panelPayroll' },
     { key:'schedule', btn:'tabSchedule', panel:'panelSchedule' },
     { key:'stores',   btn:'tabStores',   panel:'panelStores' },
@@ -2210,6 +2219,10 @@ let _payrollInitialized = false;
 let _changesInitialized = false;
 function wireTabs(){
   qs('tabOverview')?.addEventListener('click', ()=> activateTab('overview'));
+  qs('tabWorkReport')?.addEventListener('click', ()=> {
+    activateTab('workreport');
+    window.AdminWorkReport?.init();
+  });
   qs('tabPayroll')?.addEventListener('click', async ()=>{
     activateTab('payroll');
     if (!_payrollInitialized && typeof window.initPayrollTab === 'function') {

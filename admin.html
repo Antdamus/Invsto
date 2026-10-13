@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="admin-taxdocs.css" />
   <link rel="stylesheet" href="admin-users.css" />
   <link rel="stylesheet" href="admin-changes.css" />
+  <link rel="stylesheet" href="admin-work-report.css?v=20261013-work-report" />
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
   <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
 </head>
@@ -52,6 +53,7 @@
       <!-- Tabs -->
       <div class="tabs" role="tablist" aria-label="Admin sections">
         <button type="button" id="tabOverview" class="tab active" role="tab" aria-selected="true" aria-controls="panelOverview">Overview</button>
+        <button type="button" id="tabWorkReport" class="tab" role="tab" aria-selected="false" aria-controls="panelWorkReport">Employee work</button>
         <button type="button" id="tabPayroll" class="tab" role="tab" aria-selected="false" aria-controls="panelPayroll">Payroll (biweekly)</button>
         <button type="button" id="tabSchedule" class="tab" role="tab" aria-selected="false" aria-controls="panelSchedule">Schedule</button>
         <button type="button" id="tabStores" class="tab" role="tab" aria-selected="false" aria-controls="panelStores">Stores</button>
@@ -839,6 +841,25 @@
         </p>
       </section>
 
+      <section id="panelWorkReport" class="panel hidden" role="tabpanel" aria-labelledby="tabWorkReport">
+        <header class="work-head"><div><h2>Employee work</h2><p>Open a worker to review their day, select a shift, and inspect the actions behind each total.</p></div><button id="workRefresh" class="btn" type="button">Refresh</button></header>
+        <div class="work-toolbar">
+          <button class="btn" type="button" data-work-day-step="-1" aria-label="Previous work day">←</button>
+          <label>Work date · New York<input id="workDay" type="date" /></label>
+          <button class="btn" type="button" data-work-day-step="1" aria-label="Next work day">→</button>
+          <button id="workToday" class="btn" type="button">Today</button>
+          <label class="work-worker-search">Find a worker<input id="workWorkerSearch" type="search" placeholder="Name or email…" /></label>
+        </div>
+        <p id="workStatus" role="status">Open Employee work to load today's records.</p>
+        <details class="work-coverage"><summary>What the report counts</summary>
+          <p>Actions are attributed to the person recorded as performing or signing them, regardless of who is assigned the task. Daily periods use New York time; a selected shift includes its full time range, including overnight work. Use Refresh for the latest progress.</p>
+          <p>Task completions and closures count distinct tasks in the selected period. A completion submitted for review and an admin closing that task are separate actions. Stock units are gross check-ins, with later corrections shown separately. Package packing, dispatch, and administrative closeout are separate totals.</p>
+          <p>The timeline includes task updates and evidence records, inventory edits with before/after values, stock, trays, transfers, receiving, order checkout, labels, certificates, returns, packaging, explicit message reads and replies, pricing, sales, catalogues, off-site work, and time records. Related audit entries can describe the same operation; record totals are not a count of completed jobs. Automatic message synchronization is excluded.</p>
+          <p>Time entries reflect current recorded times; admin corrections have their own audit trail. Older workflows may not have complete history or a recorded actor. An empty report does not establish that no work was done. Source links open the current task, conversation, order, or package; the saved action details remain in this report.</p>
+        </details>
+        <div id="workWorkers"></div><p id="workNoWorkers" hidden>No workers match this search.</p>
+      </section>
+
       <!-- ===== Changes panel ===== -->
       <section id="panelChanges" class="panel hidden" role="tabpanel" aria-labelledby="tabChanges">
         <header class="panel-head changes-head">
@@ -977,6 +998,7 @@
       <div class="sheet-body">
         <a class="sheet-link admin-sheet-link" href="pending-orders.html">Pending Orders</a>
         <a class="sheet-link admin-sheet-link" href="team-responsibilities.html">Responsibilities</a>
+        <button class="sheet-link" type="button" data-tab="workreport">Employee work</button>
         <button class="sheet-link" type="button" data-tab="stores">🏬 Stores</button>
         <button class="sheet-link" type="button" data-tab="changes">Changes</button>
         <button class="sheet-link" type="button" data-tab="agreements">📝 Agreements</button>
@@ -1452,16 +1474,17 @@
   <!-- Admin logic -->
   <script src="admin-payroll.js?v=20261011-admin-boot"></script>
   <script src="admin-agreements.js"></script>
-  <script src="admin-shell.js" defer></script>
+  <script src="admin-shell.js?v=20261013-work-report" defer></script>
   <script src="admin-schedule.js?v=20260901-schedule-time-selects"></script>
   <script src="admin-changes.js"></script>
+  <script src="admin-work-report.js?v=20261013-work-report"></script>
   <script src="admin-taxdocs.js?v=20261011-admin-boot"></script>
   <link rel="stylesheet" href="offsite-work.css?v=20261011-outings" />
   <script src="offsite-work.js?v=20261011-outings"></script>
-  <script src="admin-overview.js?v=20261011-outings"></script>
+  <script src="admin-overview.js?v=20261013-work-report"></script>
   <script src="admin-stores.js?v=20261011-admin-boot"></script>
   <script src="time-correction-core.js?v=20261011-corrections"></script>
-  <script src="admin.js?v=20261011-outings"></script>
+  <script src="admin.js?v=20261013-work-report"></script>
   <script src="admin-users.js?v=buyer-sms-thresholds-20260823" defer></script>
 
   

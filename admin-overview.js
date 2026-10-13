@@ -470,6 +470,7 @@ async function loadSummary() {
         ${r.photo_in_url ? `<a href="${escapeHtml(r.photo_in_url)}" target="_blank" rel="noopener">Photo In</a>` : ''}
         ${r.break_photo_url ? `<a href="${escapeHtml(r.break_photo_url)}" target="_blank" rel="noopener">Break Photo</a>` : ''}
         <button class="btn small ghost" type="button" data-live-details>Timesheet</button>
+        <button class="btn small ghost" type="button" data-live-work>View work</button>
         <button class="btn small live-correct" type="button" data-live-correct>Correct time</button>
       </div>
     `;
@@ -508,6 +509,9 @@ function wireLiveList(){
 
     const employeeId  = card.dataset.employeeId;
     const displayName = card.dataset.displayName || '-';
+    if(e.target.closest('[data-live-work]')){
+      window.AdminWorkReport.openShift(employeeId,card.dataset.entryId,new Date(Number(card.dataset.clockInMs)).toISOString());return;
+    }
     const outingButton=e.target.closest('[data-live-outing]');
     if(outingButton){OffsiteWork.focus(outingButton.dataset.liveOuting);return;}
     if(e.target.closest('[data-live-correct]')){
