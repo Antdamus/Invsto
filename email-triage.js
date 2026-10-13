@@ -4211,6 +4211,7 @@
       ebayConversationFilter: "all",
       selectedEbaySavedViewId: null,
     });
+    if (request.conversationDbId && isEbayMobileWorkspace()) setEbayMobileWorkspaceView('message', {scroll:false});
   }
 
   function scrollRequestedEbayMessageIntoView(conversationId) {

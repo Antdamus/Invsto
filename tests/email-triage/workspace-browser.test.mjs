@@ -18,12 +18,12 @@ before(async()=>{
  await mkdir(new URL('test-results/',root),{recursive:true});
 });
 after(async()=>{await browser?.close();await new Promise(r=>{server.close(r);server.closeAllConnections();});});
-async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false,sendReply=false}={}){
+async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false,sendReply=false,sourceEntry=false}={}){
  const context=await browser.newContext({viewport:{width,height:844},hasTouch:width<1021});t.after(()=>context.close());
  await context.route('**/*',route=>route.request().url().startsWith(origin)?route.continue():route.abort());
  const page=await context.newPage();page.setDefaultTimeout(6500);
  const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
- await page.goto(`${origin}/email-triage.html${orderEntry?'?orderLineId=11111111-1111-4111-8111-111111111111&from=pending':''}`);
+ await page.goto(`${origin}/email-triage.html${sourceEntry?'?ebayConversationDbId=chat-0&ebayMessageDbId=message-chat-0':orderEntry?'?orderLineId=11111111-1111-4111-8111-111111111111&from=pending':''}`);
  for(const file of ['task-workflow.js','email-triage.api.js','email-triage.state.js','email-triage.render-utils.js','email-triage.classifications.js','email-triage.diagnostics.js','email-triage.operations.js','email-triage.workspace.js','email-triage.read-tracking.js'])await page.addScriptTag({url:origin+'/'+file});
  await page.evaluate(({linked,orderChoices,orderEntry,sendReply})=>{
   window.fixtureWrites=[];window.fixtureReads=[];window.fixtureTasks=[];window.fixtureFailSave=false;window.fixtureDelaySave=false;
@@ -127,6 +127,13 @@ async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false
  return page;
 }
 const noOverflow=async page=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+test('original task conversation link opens the message pane directly on a phone',async t=>{
+ const page=await open(t,390,{sourceEntry:true});
+ await expect(page.getByRole('button',{name:'Message',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(page.getByRole('region',{name:'Selected eBay conversation'})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Customer task',exact:true})).toBeVisible();
+ assert.equal(await page.evaluate(()=>fixtureWrites.length),0,'Opening a source message must not mark it read');
+});
 for(const width of [390,1366])test(`customer promise starts from message with exact username at ${width}px`,async t=>{
  const page=await open(t,width);
  await page.locator('.ebay-conversation-row').first().click();
