@@ -15,6 +15,11 @@
  const api={watchFields,watchDraft,descriptionNeedsReview};root.StockWorkspace=api;
  if(!root.document)return;
  let sections=[],nav,returnFocus;
+ const scrollBehavior=()=>root.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth';
+ function goToSection(el,button){
+  el.scrollIntoView({behavior:scrollBehavior(),block:'start'});
+  sections.forEach(section=>section.button.setAttribute('aria-current',String(section.button===button)));
+ }
  function field(id){
   const input=document.getElementById(id);if(!input)return null;
   const label=document.querySelector(`label[for="${id}"]`),wrap=document.createElement('div');wrap.className='stock-edit-field';
@@ -23,6 +28,10 @@
   if(label)wrap.append(label);wrap.append(input);if(helper)wrap.append(helper);return wrap;
  }
  function setup(){
+  const tools=document.querySelector('.stock-desktop-tools');
+  tools?.addEventListener('click',event=>{if(event.target.closest('button'))tools.open=false;});
+  document.addEventListener('click',event=>{if(tools?.open&&!tools.contains(event.target))tools.open=false;});
+  tools?.addEventListener('keydown',event=>{if(event.key==='Escape'){tools.open=false;tools.querySelector('summary').focus();}});
   const form=document.getElementById('edit-item-form');if(!form)return;
   const body=form.querySelector('.form-content-wrapper');
   nav=document.createElement('nav');nav.className='stock-edit-nav';nav.setAttribute('aria-label','Item editor sections');form.before(nav);
@@ -31,14 +40,14 @@
    if(!existing){const h=document.createElement('h3');h.textContent=title;el.append(h);}
    if(help){const p=document.createElement('p');p.className='stock-edit-help';p.textContent=help;el.append(p);}
    const grid=document.createElement('div');grid.className='stock-edit-grid';fields.map(field).filter(Boolean).forEach(f=>grid.append(f));el.append(grid);body.append(el);
-   const button=document.createElement('button');button.type='button';button.textContent=title;button.addEventListener('click',()=>{el.scrollIntoView({behavior:'smooth',block:'start'});el.querySelector('input,select,textarea,button')?.focus({preventScroll:true});});nav.append(button);
+   const button=document.createElement('button');button.type='button';button.textContent=title;button.setAttribute('aria-controls',id);button.addEventListener('click',()=>{goToSection(el,button);el.querySelector('input,select,textarea,button')?.focus({preventScroll:true});});nav.append(button);
    sections.push({el,button});return el;
   }
   section('stock-edit-identity','Piece details','The name and description are client-facing. Keep serial numbers in the internal watch field.',['edit-title','edit-description','edit-weight','edit-stone-type','edit-length']);
   section('edit-watch-details','Watch','Record only confirmed specifications and modifications.',watchFields.map(key=>'edit-watch-'+key),document.getElementById('edit-watch-details'));
   section('stock-edit-pricing','Pricing','Retail, minimum sale and cost remain separate. Pending pricing is completed in the pricing queue.',['edit-cost','edit-sale-price','edit-minimum-sale-price','edit-price-per-weight']);
   const photos=document.querySelector('#editItemModal .photos-section-wrapper');photos.id='stock-edit-photos';photos.classList.add('stock-edit-section');body.append(photos);
-  const photosButton=document.createElement('button');photosButton.type='button';photosButton.textContent='Photos';photosButton.addEventListener('click',()=>photos.scrollIntoView({behavior:'smooth',block:'start'}));nav.append(photosButton);sections.push({el:photos,button:photosButton});
+  const photosButton=document.createElement('button');photosButton.type='button';photosButton.textContent='Photos';photosButton.setAttribute('aria-controls',photos.id);photosButton.addEventListener('click',()=>goToSection(photos,photosButton));nav.append(photosButton);sections.push({el:photos,button:photosButton});
   const labels=section('stock-edit-labels','Labels & stock','Your barcode stays unchanged. Stock quantities are managed from the piece’s Stock & location actions.',['edit-barcode','edit-qr-type','edit-qr','edit-stock-batch']);
   labels.append(document.getElementById('generate-edit-dymo-label'));
   const coin=document.getElementById('edit-coin-details');body.append(coin);
@@ -46,6 +55,22 @@
   const footer=document.createElement('div');footer.className='stock-edit-actions';
   const cancel=document.createElement('button');cancel.type='button';cancel.className='stock-secondary-btn';cancel.textContent='Cancel';cancel.addEventListener('click',()=>document.getElementById('closeEditModal').click());
   footer.append(cancel,form.querySelector('.save-edit-btn'));form.append(footer);
+  let scrollFrame;
+  form.addEventListener('scroll',()=>{
+   if(scrollFrame)return;
+   scrollFrame=requestAnimationFrame(()=>{
+    scrollFrame=null;
+    const top=form.getBoundingClientRect().top+48;
+    const visible=sections.filter(({el})=>!el.hidden);
+    const current=visible.filter(({el})=>el.getBoundingClientRect().top<=top).at(-1)||visible[0];
+    sections.forEach(({button})=>button.setAttribute('aria-current',String(button===current?.button)));
+   });
+  },{passive:true});
+  document.querySelectorAll('.filter-grid > input[placeholder]').forEach(input=>{
+   const label=document.createElement('label');label.className='stock-filter-field';
+   label.append(document.createTextNode(input.placeholder.replace(/\.\.\.$/,'')));
+   input.before(label);label.append(input);
+  });
   document.getElementById('editItemModal').addEventListener('keydown',event=>{
    if(event.key==='Escape'){event.preventDefault();document.getElementById('closeEditModal').click();return;}
    if(event.key!=='Tab')return;
@@ -62,6 +87,6 @@
   for(const {el,button} of sections)button.hidden=el.hidden;
   returnFocus=document.activeElement;
  };
- api.focusEdit=()=>{document.getElementById('edit-item-form').scrollTop=0;document.getElementById('edit-title').focus({preventScroll:true});};
+ api.focusEdit=()=>{document.getElementById('edit-item-form').scrollTop=0;sections.forEach(({button},index)=>button.setAttribute('aria-current',String(index===0)));document.getElementById('edit-title').focus({preventScroll:true});};
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',setup,{once:true});else setup();
 })(typeof window==='undefined'?globalThis:window);

@@ -748,7 +748,7 @@ function buildLocationChips(item) {
           <div class="ebay-card-badges">
             ${window.StockWorkspace?.descriptionNeedsReview(item) ? `<button type="button" class="edit-item-btn ebay-sync-badge stock-copy-review-badge" data-id="${item.id}">Description needs review</button>` : ''}
             ${item.watch_details ? `<span class="ebay-sync-badge">${window.InventoryItemFacts.watchCardLabel(item.watch_details)}</span>` : ''}
-            ${item.pricing_status === 'pending' ? `<a class="ebay-sync-badge" href="inventory-pricing.html">Awaiting pricing ↗</a>` : ''}
+            ${item.pricing_status === 'pending' ? `<a class="ebay-sync-badge stock-pricing-pending" href="inventory-pricing.html">Awaiting pricing <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg></a>` : ''}
             ${ebaySyncBadge}
             ${ebayCategoryBadge}
             ${ebayStatusBadge}
@@ -792,7 +792,7 @@ function buildLocationChips(item) {
             ${showSensitive ? `<p><strong>Distributor:</strong> ${escapeStockHtml(item.distributor_name || "-")}<br/>${escapeStockHtml(item.distributor_phone || "")}</p>` : ""}
             ${showSensitive ? `<p><strong>Notes:</strong> ${escapeStockHtml(item.distributor_notes || "-")}</p>` : ""}
             <p><strong>QR Type:</strong> ${escapeStockHtml(item.qr_type || "-")}</p>
-            <p><strong>Last Updated:</strong> ${escapeStockHtml(new Date(item.created_at).toLocaleString())}</p>
+            <p><strong>Added:</strong> ${escapeStockHtml(new Date(item.created_at).toLocaleString())}</p>
             ${item.barcode ? `<p><a href="#" class="dymo-link" data-id="${escapeStockHtml(item.id || "")}" data-path="${escapeStockHtml(item.dymo_label_url)}" data-barcode="${escapeStockHtml(item.barcode || "")}" data-title="${escapeStockHtml(item.title || "")}">Print DYMO Label</a></p>` : ""}
           </details>
           <div class="stock-sensitive-legacy">
@@ -806,7 +806,6 @@ function buildLocationChips(item) {
           <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
           ${item.barcode ? `<p><a href="#" class="dymo-link" data-id="${escapeStockHtml(item.id || "")}" data-path="${escapeStockHtml(item.dymo_label_url)}" data-barcode="${escapeStockHtml(item.barcode || "")}" data-title="${escapeStockHtml(item.title || "")}">Print DYMO Label</a></p>` : ""}
           </div>
-          ${stockLabel}
           <p class="chip-section-label">Categories:</p>
           <div class="category-chips">
           ${categoryChips}

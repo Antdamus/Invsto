@@ -31,6 +31,7 @@
   <script src="phone-workspace.js?v=20261006-2" defer></script>
   <link rel="stylesheet" href="stock-workspace.css?v=20261011-copy-review" />
   <link rel="stylesheet" href="photo-viewer.css?v=20261011-stock" />
+  <link rel="stylesheet" href="stock-polish.css?v=20261012" />
 </head>
 
 <body class="stock-body stock-access-loading" data-phone-page="stock">
@@ -47,20 +48,18 @@
     </svg>
   </button>
 
-  <!-- Checkout Mode Toggle Floating Button -->
-  <button id="toggle-checkout-mode" class="floating-action-btn" title="Toggle Checkout Mode">
-    🛒
-  </button>
-
-  
-
-  <button id="manual-ebay-sale-btn" class="manual-ebay-sale-fab" title="Manual eBay Sale">
-    eBay Sale
-  </button>
-
   <div class="container sticky">
     <!-- 🔹 Unified Sticky Header Control Bar -->
     <header class="stock-header sticky">
+      <div class="stock-collection-heading">
+        <div><span class="stock-eyebrow">YOUR COLLECTION</span><h1>Stock</h1><p>Every piece, beautifully organized.</p></div>
+        <a href="add-item.html" class="stock-add-piece">+ Add a piece</a>
+      </div>
+      <div class="stock-desktop-search">
+        <label class="stock-quick-search-label">Search your collection
+          <input type="search" id="stock-quick-search" name="query" form="filter-form" placeholder="Name, description or barcode" autocomplete="off" autocapitalize="off" />
+        </label>
+      </div>
       <div class="top-controls">
         <a href="inventory-catalogues.html" class="back-button">Client catalogues</a>
         <button type="button" class="camera-scan-button" data-scan-target="stock-barcode-search" data-scan-clear-filters="clear-filters" data-scan-hint="Search stock using this code. Current search filters will be cleared.">Scan item</button>
@@ -72,7 +71,7 @@
         <!-- ⭐ Favorites Toggle Checkbox -->
         <label class="favorite-toggle">
           <input type="checkbox" id="show-favorites-only" title="Checkbox"/>
-          <i data-lucide="star" class="icon"></i> Show Only Favorites
+          <i data-lucide="star" class="icon"></i> Favorites
         </label>
 
         <!-- 🔽 Custom Sort Dropdown Menu -->
@@ -123,6 +122,9 @@
           <i data-lucide="x-circle" class="icon"></i> Clear
         </button>
 
+        <details class="stock-desktop-tools">
+          <summary>Inventory tools</summary>
+          <div class="stock-desktop-tools-menu">
         <button type="button" id="open-storage-transfer" class="storage-transfer-top-btn" title="Move stock between storage bags and trays">
           Tray Transfers
         </button>
@@ -138,6 +140,12 @@
         <button type="button" id="open-ebay-sync-console" class="storage-transfer-top-btn" title="Run eBay sync and review item-level results">
           eBay Sync
         </button>
+        <button type="button" id="manual-ebay-sale-btn" class="manual-ebay-sale-fab" title="Manual eBay Sale">eBay Sale</button>
+        <button type="button" id="toggle-checkout-mode" class="floating-action-btn" title="Toggle Checkout Mode" aria-label="Toggle checkout mode">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 3h2l3 12h11l2-9H6M9 21h.01M18 21h.01"/></svg><span class="stock-desktop-only">Checkout mode</span>
+        </button>
+          </div>
+        </details>
         
         <div id="filter-summary-wrapper">
           <div id="filter-summary" class="inline-filter-summary"></div>
@@ -171,9 +179,6 @@
         <!-- 🔍 Basic Search Panel -->
         <div class="filter-tab-content active" id="tab-basic">
           <div class="filter-grid">
-            <label class="stock-quick-search-label">Search stock
-              <input type="search" id="stock-quick-search" name="query" form="filter-form" placeholder="Name, description or barcode" autocomplete="off" autocapitalize="off" />
-            </label>
             <input type="text" name="title" placeholder="Search title..." />
             <input type="text" name="description" placeholder="Search description..." />
             <input type="text" id="stock-barcode-search" data-camera-scan name="barcode" placeholder="Search barcode..." />
@@ -340,13 +345,13 @@
   <script src="inventory-item-facts.js?v=20261011-watch-card"></script>
   <script src="catalogue-core.js?v=20261010-vector-arrows"></script>
   <script src="catalogue-viewer.js?v=20261011-stock"></script>
-  <script src="stock-workspace.js?v=20261011-copy-review" defer></script>
+  <script src="stock-workspace.js?v=20261012-polish" defer></script>
   <script src="stock-editcards.js?v=20261011-copy-review"></script>
   <script src="ebayExport.js?v=20261011-watch-facts"></script>
   <script src="stock-checkout.js"></script>
   <script src="stock-transferstock.js"></script>
   <script src="stock-storage-transfer.js"></script>
-  <script src="stock.js?v=20261011-copy-review"></script>
+  <script src="stock.js?v=20261012-polish"></script>
 
   <!-- 📢 Toast + Loading Spinner Containers -->
   <div id="toast-container"></div>
