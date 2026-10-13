@@ -29,7 +29,7 @@
   return {kind:'case_open',label:'eBay case · check status'};
  }
  const cardKind=c=>c.source_lane==='case'?'eBay case':kind(c)==='request'?'Customer request':kind(c)==='return'?'Physical return':'Dispute';
- let ctx,db,ready=false,view='attention',scope='all',sort='newest',returnStage='all',disputeState='all',disputeCounts={},search='',offset=0,total=0,rows=[],counts={},people=[],selected=null,detail=null,version=0,listVersion=0,timer,poll,saving=false,syncing=false;
+ let ctx,db,ready=false,view='attention',scope='all',sort='newest',returnStage='all',returnCounts=null,disputeState='all',disputeCounts={},search='',offset=0,total=0,rows=[],counts={},people=[],selected=null,detail=null,version=0,listVersion=0,timer,poll,saving=false,syncing=false;
  const PAGE=30;
  const BULK_LIMIT=60;
  let selecting=false,bulkSelection=new Map(),bulkReview=[],bulkReviewVersion=0;
@@ -130,6 +130,15 @@
   needs_review:{label:'Received · needs review',tone:'action'},
   unknown:{label:'Shipment not reported',tone:'unknown'}
  };
+ function returnFilters(){
+  $('issues-return-filter').hidden=view!=='return';
+  const all=Object.values(returnCounts||{}).reduce((sum,n)=>sum+Number(n),0);
+  for(const option of $('issues-return-stage').options){
+   option.dataset.label??=option.textContent;
+   option.textContent=option.dataset.label+(returnCounts?` (${option.value==='all'?all:returnCounts[option.value]||0})`:'');
+  }
+  $('issues-return-stage').value=returnStage;
+ }
  const disputeStates={all:'All dispute states',response_needed:'Response needed',awaiting_outcome:'Response submitted · awaiting outcome',protected:'Protected · no response needed',no_response:'No response needed · awaiting outcome',reviewing:'eBay reviewing',on_hold:'On hold',awaiting_delivery:'Awaiting delivery',open:'Open · check status',closed:'Closed on eBay · all outcomes',closed_won:'Closed · in our favor',closed_lost:'Closed · buyer’s favor',closed_other:'Closed · other outcome'};
  function disputeFilters(){
   $('issues-dispute-filter').hidden=view!=='dispute';
@@ -194,7 +203,7 @@
    <div class="issue-card-top" style="margin:11px 0 0"><small>${['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':!c.open_tasks?'No employee task':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${root.OGIssueChats?.slot(c)||''}${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the customer name, buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
   $('issues-count').textContent=`${total} ${view==='history'?'finished':'active'} case${total===1?'':'s'}`;
-  $('issues-return-filter').hidden=view!=='return';
+  returnFilters();
   disputeFilters();
   $('issues-sort').value=sort;
   $('issues-sort-caption').textContent=sortLabels[sort]+(sort.startsWith('value_')?' · grouped by currency':'');
@@ -272,7 +281,7 @@
   try{
    const result=checked(await db.rpc('list_customer_issues',{_view:view,_scope:scope,_search:search,_offset:offset,_limit:PAGE,_sort:sort,_return_stage:view==='return'?returnStage:'all',...(view==='dispute'?{_dispute_state:disputeState,_focus_case_id:options.focusCase||null}:options.focusCase?{_focus_case_id:options.focusCase}:{})}));
    if(request!==listVersion)return;
-   rows=result.rows||[];counts=result.counts||{};disputeCounts=result.dispute_states||{};total=result.total||0;
+   rows=result.rows||[];counts=result.counts||{};returnCounts=result.return_stages||null;disputeCounts=result.dispute_states||{};total=result.total||0;
    if(options.focusCase&&Number.isInteger(result.focus_offset))offset=result.focus_offset;
    if(offset>0&&offset>=total){offset=Math.max(0,Math.floor((total-1)/PAGE)*PAGE);return refresh(options);}
    await root.OGCaseNotes?.load(rows.map(c=>c.id));if(request!==listVersion)return;

@@ -1,4 +1,39 @@
 /* Current messaging workspace. Keep legacy classification tooling available in Tools. */
+.triage-read-tracking { border:1px solid var(--triage-line); border-radius:12px; padding:0 12px; font-size:13px; }
+.triage-read-tracking > summary { cursor:pointer; min-height:42px; align-content:center; color:#efd196; font-weight:600; }
+.triage-read-tracking p { color:var(--triage-muted); line-height:1.5; }
+.triage-read-date-controls,.triage-read-counts,.triage-read-pagination,.triage-read-summary { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:10px 0; }
+.triage-read-date-controls label { display:grid; gap:4px; font-size:12px; }
+.triage-workspace .triage-read-date-controls { display:grid; grid-template-columns:44px minmax(130px,180px) 44px auto; align-items:end; }
+.triage-workspace .triage-read-date-controls > .secondary-btn { width:100%; min-width:0; }
+.triage-read-date-controls input { min-width:0; min-height:44px; padding:8px; font-size:16px; color:inherit; background:#18211b; border:1px solid var(--triage-line); border-radius:8px; }
+.triage-read-counts button { min-height:44px; padding:8px 12px; color:inherit; background:#18211b; border:1px solid var(--triage-line); border-radius:10px; cursor:pointer; }
+.triage-read-counts button[aria-pressed=true] { color:#efd196; border-color:#efd196; }
+.triage-read-counts b { margin-left:8px; }
+.triage-read-day-list { max-height:420px; overflow:auto; }
+.triage-read-day-row { display:flex; gap:12px; align-items:center; padding:10px 0; border-bottom:1px solid var(--triage-line); }
+.triage-read-day-row > button { display:grid; gap:5px; min-width:0; flex:1; text-align:left; color:inherit; background:none; border:0; cursor:pointer; font:inherit; }
+.triage-read-day-row > button span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.triage-read-day-row small,.triage-read-control small { font-size:11px; color:var(--triage-muted); line-height:1.4; }
+.triage-read-control { display:inline-flex; align-items:center; flex-wrap:wrap; gap:6px; }
+.triage-read-control > button { min-height:44px !important; white-space:nowrap; }
+.triage-read-summary { font-size:12px; }
+.triage-read-summary [data-read-error] { color:#ffb2a8; }
+.triage-inbox-row { padding-bottom:8px; border-bottom:1px solid var(--triage-line); }
+.triage-inbox-row > .triage-read-control { display:flex; padding:0 12px; }
+.triage-workspace .triage-inbox-row > .ebay-conversation-row { border-bottom-color:transparent; margin-bottom:0; }
+.triage-read-history { position:fixed; inset:0; z-index:2200; background:#0009; display:grid; place-items:center; padding:16px; }
+.triage-read-history > div { width:min(640px,100%); max-height:85dvh; overflow:auto; padding:20px; border-radius:16px; background:#17201a; }
+.triage-read-history-row { display:block; padding:12px 0; border-bottom:1px solid var(--triage-line); font-size:13px; }
+.triage-read-history-row small { display:block; overflow-wrap:anywhere; color:var(--triage-muted); margin-top:4px; }
+@media(max-width:760px) {
+ .triage-workspace .triage-read-date-controls { grid-template-columns:44px minmax(0,1fr) 44px; }
+ .triage-workspace .triage-read-date-controls > [data-read-refresh] { grid-column:1 / -1; }
+ .triage-workspace .triage-read-date-controls input { width:100%; box-sizing:border-box; }
+ .triage-workspace #triage-task-composer-root .ebay-task-modal { top:var(--ebay-task-viewport-top,0px); bottom:auto; overscroll-behavior:contain; }
+ .triage-read-day-row { flex-wrap:wrap; }
+ .triage-read-day-row > button { flex-basis:100%; }
+}
 .triage-workspace { --triage-line: rgba(221,229,223,.12); --triage-muted: #aebbb5; color-scheme:dark; background: #0b100e; font-family:system-ui,sans-serif; }
 .triage-workspace .email-triage-content { padding: 22px 24px 90px; gap: 16px; }
 .triage-workspace .ebay-conversation-section { padding: 0; border: 0; background: transparent; box-shadow: none; gap: 12px; }

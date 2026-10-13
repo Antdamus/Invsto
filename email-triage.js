@@ -498,13 +498,17 @@
       0,
     );
     if (!viewportHeight) return;
-    document.documentElement.style.setProperty("--ebay-task-viewport-height", `${Math.max(320, viewportHeight)}px`);
+    document.documentElement.style.setProperty("--ebay-task-viewport-height", `${viewportHeight}px`);
+    document.documentElement.style.setProperty("--ebay-task-viewport-top", `${Math.round(window.visualViewport?.offsetTop || 0)}px`);
   }
 
   function bindEbayTaskModalViewportFallback() {
     updateEbayTaskModalViewportHeight();
     window.addEventListener("resize", updateEbayTaskModalViewportHeight, { passive: true });
-    window.visualViewport?.addEventListener("resize", updateEbayTaskModalViewportHeight, { passive: true });
+    window.visualViewport?.addEventListener("resize", () => {
+      updateEbayTaskModalViewportHeight();
+      focusEbayTaskModalFieldIntoView(document.activeElement);
+    }, { passive: true });
     window.visualViewport?.addEventListener("scroll", updateEbayTaskModalViewportHeight, { passive: true });
   }
 
@@ -515,13 +519,15 @@
     );
   }
 
+  let ebayTaskFocusTimer;
   function focusEbayTaskModalFieldIntoView(target) {
     const form = target?.closest?.("[data-ebay-message-task-form]");
     if (!form) return;
     updateEbayTaskModalViewportHeight();
-    window.setTimeout(() => {
+    window.clearTimeout(ebayTaskFocusTimer);
+    ebayTaskFocusTimer = window.setTimeout(() => {
       const card = target.closest(".ebay-task-modal-card");
-      if (!card) return;
+      if (!card || !target.isConnected || document.activeElement !== target) return;
       const cardRect = card.getBoundingClientRect();
       const targetRect = target.getBoundingClientRect();
       const topBuffer = 58;
@@ -544,6 +550,7 @@
       conversationId: form.getAttribute("data-ebay-conversation-id") || "",
       messageId: form.getAttribute("data-ebay-message-id") || "",
       draft: currentEbayConversationTaskModalDraft(),
+      activeElement: active,
       scrollTop: form.scrollTop || 0,
       activeName,
       selectionStart: canRestoreSelection ? active.selectionStart : null,
@@ -569,7 +576,7 @@
     if (form.getAttribute("data-ebay-conversation-id") !== snapshot.conversationId) return;
     if (form.getAttribute("data-ebay-message-id") !== snapshot.messageId) return;
     form.scrollTop = snapshot.scrollTop || 0;
-    if (!snapshot.activeName) return;
+    if (!snapshot.activeName || snapshot.activeElement === document.activeElement) return;
     const field = [...form.elements].find((element) => element.name === snapshot.activeName);
     if (!field) return;
     try {
@@ -3820,6 +3827,7 @@
   }
 
   function persistEbayConversationUserReadState(context, conversationId, readState = "read") {
+    if (window.EmailTriageReadTracking) return window.EmailTriageReadTracking.mark(selectedEbayConversationById(conversationId), readState);
     if (typeof saveEbayConversationUserReadState !== "function" || !conversationId) return;
     const conversation = selectedEbayConversationById(conversationId, adminClassificationState) || {};
     saveEbayConversationUserReadState(context, conversationId, readState, conversation)
@@ -3859,6 +3867,7 @@
   }
 
   function ebayConversationIsUnreadForViewer(conversation = {}, state = adminClassificationState) {
+    if (window.EmailTriageReadTracking) return window.EmailTriageReadTracking.status(conversation.id)?.is_read !== true;
     const record = getEbayConversationUserReadRecord(conversation, state);
     if (record?.state === "unread") return true;
     if (ebayConversationUserReadRecordIsCurrent(conversation, record)) return false;
@@ -4748,7 +4757,7 @@
               <i data-lucide="x"></i>
             </button>
           </div>
-          ${state.ebayConversationTaskError ? `<div class="classification-notice is-error">${escapeHtml(state.ebayConversationTaskError)}</div>` : ""}
+          <div class="classification-notice is-error" data-task-save-error ${state.ebayConversationTaskError ? "" : "hidden"}>${escapeHtml(state.ebayConversationTaskError || "")}</div>
           ${source ? `
             <div class="ebay-task-source-summary">
               <div>
@@ -4822,6 +4831,36 @@
     `;
   }
 
+  function renderEbayTaskComposer(state) {
+    const host = document.getElementById('triage-task-composer-root');
+    if (!host) return;
+    const modal = state.ebayConversationTaskModal;
+    if (!modal) { host.replaceChildren(); return; }
+    const conversation = selectedEbayConversationById(modal.conversationId, state);
+    let form = host.querySelector('[data-ebay-message-task-form]');
+    if (!form || form.dataset.ebayConversationId !== modal.conversationId || form.dataset.ebayMessageId !== modal.messageId) {
+      host.innerHTML = renderEbayConversationTaskModal(state, conversation, safeArray(state.ebayConversationMessagesById?.[modal.conversationId]));
+      form = host.querySelector('form');
+    }
+    if (!form) return;
+    // Keep the same text inputs, caret and composition session during refreshes.
+    const owner = form.elements.namedItem('assignedToUserId');
+    const options = renderEbayTaskAssigneeOptions(state, owner.value);
+    if (document.activeElement !== owner && owner.dataset.renderedOptions !== options) { owner.innerHTML = options; owner.dataset.renderedOptions = options; }
+    const target = form.querySelector('.ebay-task-target-picker');
+    const targetHtml = renderEbayConversationTaskTargetPicker(state, conversation);
+    if (target && target.dataset.renderedOptions !== targetHtml) {
+      const template = document.createElement('template'); template.innerHTML = targetHtml;
+      const replacement = template.content.firstElementChild;
+      replacement.dataset.renderedOptions = targetHtml; target.replaceWith(replacement);
+    }
+    const notice = form.querySelector('[data-task-save-error]');
+    notice.hidden = !state.ebayConversationTaskError; notice.textContent = state.ebayConversationTaskError || '';
+    form.querySelectorAll('button').forEach(button => { button.disabled = state.ebayConversationTaskSaving === true; });
+    const submit = form.querySelector('button[type="submit"]');
+    submit.textContent = state.ebayConversationTaskSaving ? 'Creating task' : 'Create Task';
+  }
+
   function syncEbayTaskRefundField(form) {
     const field = form?.querySelector("[data-ebay-refund-amount-field]");
     const input = field?.querySelector("input[name='refundAmount']");
@@ -4862,8 +4901,8 @@
       ...(adminClassificationState.ebayConversationTaskModal || {}),
       conversationId,
       messageId,
-      title: String(formData.get("taskTitle") || "").trim(),
-      description: String(formData.get("taskDescription") || "").trim(),
+      title: String(formData.get("taskTitle") || ""),
+      description: String(formData.get("taskDescription") || ""),
       assignedToUserId: String(formData.get("assignedToUserId") || "").trim(),
       requestKind: String(formData.get("message-task-request-kind") || "work"),
       priority: String(formData.get("priority") || "normal"),
@@ -6136,10 +6175,8 @@
       const primaryPreview = window.EmailTriageWorkspace.cleanPreview(compactConversationText(previewLines.summary) || compactConversationText(previewLines.preview));
       const primaryPreviewLabel = compactConversationText(previewLines.summary) ? previewLines.summaryLabel : previewLines.previewLabel;
       const unread = ebayConversationIsUnreadForViewer(conversation, state);
-      const readActionLabel = unread ? "Read" : "Unread";
-      const readActionState = unread ? "read" : "unread";
       return `
-        <button type="button" class="ebay-conversation-row is-${escapeHtml(densityMode)}${ebayConversationIsPlatform(conversation) ? " is-platform-conversation" : ""}${selected ? " is-selected" : ""}${unread ? " is-unread" : ""}" data-ebay-conversation-id="${escapeHtml(conversation.id)}">
+        <div class="triage-inbox-row"><button type="button" class="ebay-conversation-row is-${escapeHtml(densityMode)}${ebayConversationIsPlatform(conversation) ? " is-platform-conversation" : ""}${selected ? " is-selected" : ""}${unread ? " is-unread" : ""}" data-ebay-conversation-id="${escapeHtml(conversation.id)}">
           <span class="ebay-conversation-row-top">
             <span class="ebay-conversation-party">
               <span class="ebay-conversation-avatar" aria-hidden="true">${escapeHtml(ebayConversationInitials(conversation))}</span>
@@ -6150,14 +6187,7 @@
             </span>
             <span class="ebay-conversation-row-tools">
               <time>${escapeHtml(formatCompactEmailAge(ebayConversationTime(conversation)))}</time>
-              <span
-                role="button"
-                tabindex="0"
-                class="ebay-conversation-read-action ${unread ? "is-read-action" : "is-unread-action"}"
-                data-ebay-conversation-read-action="${escapeHtml(readActionState)}"
-                data-ebay-conversation-read-id="${escapeHtml(conversation.id)}"
-                title="${escapeHtml(unread ? "Clear this conversation from your unread feed" : "Move this conversation back to unread for you")}"
-              >${escapeHtml(readActionLabel)}</span>
+
               ${renderEbayConversationTaskStatusBadge(conversation, state)}
             </span>
           </span>
@@ -6171,7 +6201,7 @@
             </span>
           `}
           ${renderEbayConversationBadges(conversation, { compact, state })}
-        </button>
+        </button>${window.EmailTriageReadTracking?.control(conversation) || ''}</div>
       `;
     }).join(""));
   }
@@ -6654,6 +6684,7 @@
           ${renderEbayNotificationFacts(notification.facts)}
           <div class="ebay-notification-body">${notification.bodyHtml}</div>
           ${renderEbayNotificationActions(notification.links)}
+          ${window.EmailTriageReadTracking?.control(conversation, message) || ''}
           <div class="ebay-message-foot">
             <span>From ${copyableTextMarkup(sender, "sender", "triage-inline-copy")}</span>
             <span>To ${copyableTextMarkup(recipient, "recipient", "triage-inline-copy")}</span>
@@ -6854,6 +6885,7 @@
           </div>
           ${canGenerate || canCreateTask || canTranslate ? `
             <div class="ebay-message-actions">
+              ${direction !== 'outbound' ? window.EmailTriageReadTracking?.control(conversation, message) || '' : ''}
               ${canTranslate ? `
                 <button type="button" class="secondary-btn" data-ebay-message-translate-action="to-spanish" data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-ebay-message-id="${escapeHtml(message.id)}" ${isTranslating ? "disabled" : ""}>
                   <i data-lucide="${isTranslating ? "loader-circle" : "languages"}"></i>
@@ -8254,6 +8286,7 @@
       }, (payload) => {
         const row = payload.new || payload.old || {};
         mergeRealtimeEbayMessage(context, row);
+        window.EmailTriageReadTracking?.scheduleRefresh();
       })
       .on("postgres_changes", {
         event: "*",
@@ -8261,7 +8294,9 @@
         table: "ebay_conversations",
       }, (payload) => {
         handleEbayRealtimeConversationChange(context, payload.new || payload.old || {});
+        window.EmailTriageReadTracking?.scheduleRefresh();
       })
+      .on("postgres_changes", {event:"*",schema:"public",table:"ebay_message_team_reads"}, () => window.EmailTriageReadTracking?.scheduleRefresh())
       .on("postgres_changes", {
         event: "*",
         schema: "public",
@@ -8807,7 +8842,6 @@
     const identity = ebayBuyerIdentity(conversation);
     const isPlatformConversation = ebayConversationIsPlatform(conversation);
     const readSyncLoading = state.ebayConversationReadSyncLoadingId === conversation.id;
-    const unreadForViewer = ebayConversationIsUnreadForViewer(conversation, state);
     const facts = ebayConversationContextFacts(state, conversation);
     const classification = ebayConversationClassification(conversation);
     const orderLabel = facts.orderNumbers.length > 1 ? `${facts.orderNumbers.length} orders` : facts.orderNumbers[0] || "";
@@ -8837,10 +8871,10 @@
         <div class="ebay-detail-actions">
           ${!isPlatformConversation ? `<button type="button" class="primary-btn" data-ebay-detail-action="reply"><i data-lucide="reply"></i>Reply</button>` : ""}
           ${messages.length ? `<button type="button" class="secondary-btn" data-ebay-message-task-action="create" data-ebay-conversation-id="${escapeHtml(conversation.id)}" data-ebay-message-id="${escapeHtml((latestInboundEbayMessage(messages) || messages[messages.length - 1]).id)}"><i data-lucide="clipboard-plus"></i>Create task</button>` : ""}
-          <button type="button" class="secondary-btn" data-ebay-detail-action="personal-read-state" data-ebay-read-state="${unreadForViewer ? "read" : "unread"}" data-ebay-conversation-id="${escapeHtml(conversation.id)}"><i data-lucide="mail-check"></i>${unreadForViewer ? "Mark read" : "Mark unread"}</button>
         </div>
       </div>
       ${error ? `<div class="classification-notice is-error">Could not load eBay messages: ${escapeHtml(error)}</div>` : ""}
+      ${window.EmailTriageReadTracking?.conversationSummary(conversation) || ''}
       ${renderEbayConversationTaskNotice(state)}
       ${renderEbayConversationOrderContextStrip(state, conversation)}
       ${renderEbayConversationTaskStrip(state, conversation)}
@@ -8894,7 +8928,6 @@
       <span class="ebay-chat-bottom-sentinel" data-ebay-chat-bottom></span>
       ${isPlatformConversation ? "" : renderEbayConversationDraftCard(conversation, messages)}
       ${renderEbayChatTagModal(state, conversation)}
-      ${renderEbayConversationTaskModal(state, conversation, messages)}
     `);
     scheduleEbayChatJumpButtonUpdate();
   }
@@ -9346,6 +9379,8 @@
     renderEbayConversationList(state);
     renderEbayConversationDetail(state);
     renderEbayConversationContextPanel(state);
+    renderEbayTaskComposer(state);
+    window.EmailTriageReadTracking?.observe(safeArray(state.ebayConversations));
     paintEbayWorkspace(document.getElementById("triage-task-audit-root"), renderEbayConversationTaskAuditModal(state));
     syncEbayTaskModalDocumentState(state);
     if (window.lucide?.createIcons) window.lucide.createIcons();
@@ -9772,6 +9807,9 @@
     try {
       const isSend = values.mode === "send";
       const payload = await requestEbayConversationDraftAction(context, values);
+      if (isSend && payload.send_attempt?.attempt_status === "succeeded") {
+        window.EmailTriageReadTracking?.invalidate();
+      }
       clearEbayComposerDraftCache(conversationId);
       if (isSend) {
         await loadEbayConversationMessages(context, conversationId, { force: true }).catch((loadError) => {
@@ -11557,6 +11595,19 @@
     };
     els.ebayConversationDetail?.addEventListener("click", handleDetailClick);
     els.ebayConversationContext?.addEventListener("click", handleDetailClick);
+    const taskRoot = document.getElementById('triage-task-composer-root');
+    taskRoot?.addEventListener('click', handleDetailClick);
+    taskRoot?.addEventListener('focusin', event => focusEbayTaskModalFieldIntoView(event.target));
+    taskRoot?.addEventListener('change', event => {
+      const form = event.target.closest('[data-ebay-message-task-form]');
+      if (!form) return;
+      if (event.target.name === 'taskTag') syncEbayTaskRefundField(form);
+      if (['dueDate','dueTime'].includes(event.target.name)) syncEbayTaskDueDefaults(form, event.target.name);
+    });
+    taskRoot?.addEventListener('submit', event => {
+      const form = event.target.closest('[data-ebay-message-task-form]');
+      if (form) { event.preventDefault(); submitEbayConversationMessageTask(context, form); }
+    });
     document.addEventListener("click", handleCopyTextClick);
     document.addEventListener("keydown", (event) => {
       const copyTarget = event.target.closest("[data-copy-text]");
@@ -12429,6 +12480,20 @@
 
     const context = await requireAdmin({ greetingEl: els.greeting });
     if (!context) return;
+    window.EmailTriageReadTracking?.init({
+      context,
+      onChange: () => setEbayConversationState({}),
+      onOpen: async id => {
+        if (!selectedEbayConversationById(id)) {
+          const payload = await fetchEbayConversationById(context, id);
+          if (!payload?.conversation) throw new Error('Could not load this conversation. Please retry.');
+          setEbayConversationState({ebayConversations:[payload.conversation,...adminClassificationState.ebayConversations]});
+        }
+        await selectEbayConversation(context, id);
+        if (isEbayMobileWorkspace()) setEbayMobileWorkspaceView('message');
+        els.ebayConversationDetail.scrollIntoView({block:'start',behavior:'smooth'});
+      },
+    });
     setEbayConversationState({
       emailTriageViewerUserId: ebayConversationViewerId(context),
       ebayConversationUserReadStates: loadStoredEbayConversationUserReadStates(context),

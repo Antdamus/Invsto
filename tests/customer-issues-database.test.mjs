@@ -82,6 +82,7 @@ before(async()=>{
  await db.exec(liveDefinition.replace(/\s+/g,' '));
  await db.exec(await sqlFile('20261010193000_customer_issue_review_navigation.sql'));
  await db.exec(await sqlFile('20261012203000_customer_issue_dispute_filters.sql'));
+ await db.exec(await sqlFile('20261013100000_customer_issue_return_stage_counts.sql'));
 
 
 });
@@ -790,12 +791,24 @@ test('return filters apply before pagination and update after provider or local 
  update ebay_return_cases set ebay_status='ITEM_DELIVERED',opened_at=now()-interval '1 year' where id='${id(100)}';`);
  const filtered=(stage,offset=0)=>scalar("select list_customer_issues('return','all','',$1,30,'newest',$2) v",[offset,stage]);
  let result=await filtered('delivered');assert.equal(result.total,1);assert.equal(result.rows[0].id,id(100));assert.equal(result.rows[0].return_stage,'delivered');assert.equal(result.counts.return,36);
+ const expectedCounts={delivered:1,in_transit:35};assert.deepEqual(result.return_stages,expectedCounts);
  result=await filtered('in_transit',30);assert.equal(result.total,35);assert.equal(result.rows.length,5);
+ assert.deepEqual(result.return_stages,expectedCounts,'counts include other stages and every page');
+ for(const extra of [",null",",null,'all'"]){
+  const focused=await scalar("select list_customer_issues('return','all','',0,30,'newest','delivered'"+extra+") v");
+  assert.deepEqual(focused.return_stages,expectedCounts,'all queue overloads supply the same counts');
+ }
+ assert.deepEqual((await scalar("select list_customer_issues('return','all','01-12345-12345',0,30,'newest','in_transit') v")).return_stages,{delivered:1},'search applies even if selected stage has no matches');
+ assert.deepEqual((await scalar("select list_customer_issues('return','mine','',0,30,'newest','all') v")).return_stages,{},'responsibility applies to counts');
  await db.exec(`update ebay_return_cases set status='received' where id='${id(100)}'`);
  assert.equal((await filtered('delivered')).total,0);assert.equal((await filtered('received')).total,1);
+ assert.deepEqual((await filtered('delivered')).return_stages,{received:1,in_transit:35},'receipt moves the count to its new stage');
  assert.equal((await listIssues()).total,36,'cached six-argument clients remain unfiltered');
  assert.equal((await scalar("select list_customer_issues('attention','all','',0,30,'newest','delivered') v")).total,36,'return filter does not hide other tabs');
+ await db.exec(`update ebay_return_cases set status='closed' where id='${id(100)}'`);
+ assert.deepEqual((await filtered('all')).return_stages,{in_transit:35},'archived returns are excluded');
  await db.exec("select set_config('test.access','no',false)");assert.equal((await filtered('in_transit')).total,0);
+ assert.deepEqual((await filtered('all')).return_stages,{},'counts respect access checks');
 });
 test('customer cards use only their linked order, with name search and return-only shipping fields',async()=>{
  const payload={order:{fulfillmentStartInstructions:[{shippingStep:{shipTo:{fullName:'Robin Taylor',contactAddress:{addressLine1:'123 Example Lane',addressLine2:'Apt 4',city:'Boston',stateOrProvince:'MA',postalCode:'02108',countryCode:'US'},primaryPhone:{phoneNumber:'PRIVATE'}}}}],buyer:{buyerRegistrationAddress:{fullName:'Other name',contactAddress:{addressLine1:'WRONG REGISTRATION'}}}},returnAddress:{addressLine1:'WRONG SELLER'}};

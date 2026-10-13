@@ -18,21 +18,38 @@ before(async()=>{
  await mkdir(new URL('test-results/',root),{recursive:true});
 });
 after(async()=>{await browser?.close();await new Promise(r=>{server.close(r);server.closeAllConnections();});});
-async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false}={}){
+async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false,sendReply=false}={}){
  const context=await browser.newContext({viewport:{width,height:844},hasTouch:width<1021});t.after(()=>context.close());
  await context.route('**/*',route=>route.request().url().startsWith(origin)?route.continue():route.abort());
  const page=await context.newPage();page.setDefaultTimeout(6500);
  const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
  await page.goto(`${origin}/email-triage.html${orderEntry?'?orderLineId=11111111-1111-4111-8111-111111111111&from=pending':''}`);
- for(const file of ['task-workflow.js','email-triage.api.js','email-triage.state.js','email-triage.render-utils.js','email-triage.classifications.js','email-triage.diagnostics.js','email-triage.operations.js','email-triage.workspace.js'])await page.addScriptTag({url:origin+'/'+file});
- await page.evaluate(({linked,orderChoices,orderEntry})=>{
+ for(const file of ['task-workflow.js','email-triage.api.js','email-triage.state.js','email-triage.render-utils.js','email-triage.classifications.js','email-triage.diagnostics.js','email-triage.operations.js','email-triage.workspace.js','email-triage.read-tracking.js'])await page.addScriptTag({url:origin+'/'+file});
+ await page.evaluate(({linked,orderChoices,orderEntry,sendReply})=>{
   window.fixtureWrites=[];window.fixtureReads=[];window.fixtureTasks=[];window.fixtureFailSave=false;window.fixtureDelaySave=false;
+  window.fixtureReadReceipts={};window.fixtureReadEvents=[];window.fixtureReadFail=false;
   const now=new Date().toISOString();
   window.fixtureConversations=Array.from({length:32},(_,i)=>({id:`chat-${i}`,ebay_conversation_id:`ebay-${i}`,conversation_type:'FROM_MEMBERS',other_party_username:i===0?'jewelrybuyer':`buyer_${i}`,conversation_title:'Shipping update',latest_message_preview:'Could you check the certificate and let me know when my order will ship?',latest_message_created_at:now,unread_count:1,summary:{order_numbers:['12-34567-89012']}}));
   const session={access_token:'fixture-only',user:{id:'me',email:'manager@example.test'}};
   window.fixtureRealtime={};
+  const teamStatus=id=>{const messageIds=[`message-${id}`,...(id==='chat-0'?(window.fixtureExtraMessages||[]).filter(m=>m.direction!=='outbound').map(m=>m.id):[])];const message_states=messageIds.map(message_id=>({message_id,...(fixtureReadReceipts[message_id]||{is_read:false})}));const last=message_states.find(m=>m.read_at);return {conversation_id:id,is_read:message_states.every(m=>m.is_read),read_by:last?.read_by||null,read_at:last?.read_at||null,message_states};};
   const channel={on:(_kind,filter,callback)=>{fixtureRealtime[filter.table]=callback;return channel;},subscribe:callback=>{window.fixtureSubscribe=callback;callback('SUBSCRIBED');return channel;}};
   const client={channel:()=>channel,removeChannel:()=>{},auth:{getSession:async()=>({data:{session}})},rpc:async(name,args)=>{
+   if(name==='get_ebay_team_read_status')return {data:args._conversation_ids.map(teamStatus)};
+   if(name==='get_ebay_daily_read_activity'){
+    const rows=fixtureConversations.filter(c=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(c.latest_message_created_at))===args._date).map(c=>({...c,...teamStatus(c.id),activity_at:c.latest_message_created_at}));
+    const found=rows.filter(r=>args._state==='all'||r.is_read===(args._state==='read'));
+    return {data:{counts:{all:rows.length,read:rows.filter(r=>r.is_read).length,unread:rows.filter(r=>!r.is_read).length},total:found.length,rows:found.slice(args._offset,args._offset+args._limit)}};
+   }
+   if(name==='get_ebay_read_history')return {data:fixtureReadEvents};
+   if(name==='set_ebay_team_read_state'){
+    fixtureWrites.push({name,args});if(fixtureReadFail)return {error:{message:'Read status could not be saved. Try again.'}};
+    for(const m of teamStatus(args._conversation_id).message_states.filter(m=>!args._message_id||m.message_id===args._message_id)){
+     fixtureReadReceipts[m.message_id]={...m,is_read:args._read_state==='read',...(args._read_state==='read'?{read_by:'Sandra',read_at:now}:{})};
+     fixtureReadEvents.push({actor_name:'Sandra',is_read:args._read_state==='read',created_at:now});
+    }
+    return {data:teamStatus(args._conversation_id)};
+   }
    if(name==='get_ebay_message_recovery_health')return {data:null,error:null};
    if(name==='list_ebay_conversation_task_workspace'){fixtureReads.push({name,args});return {data:fixtureTasks.filter(t=>args._conversation_ids.includes(t.conversation_id)),error:null};}
    fixtureWrites.push({name,args});
@@ -53,6 +70,7 @@ async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false
    return {conversations,canonical_total:32,matching_total:conversations.length,loaded_at:now,mailbox_mode:'rpc',rpc_version:'v2',has_more:false,smart_folder_counts:{all:32,unread:28,needs_reply_today:8,pending_tasks:3}};
   };
   api.fetchEbayConversationSavedViews=async()=>({views:[]});
+  api.fetchEbayConversationById=async(_ctx,id)=>({conversation:fixtureConversations.find(c=>c.id===id)});
   api.fetchEbayConversationUserReadStates=async()=>({read_states:[]});
   api.runEbayMessageSync=async(_context,values)=>{fixtureReads.push({name:'provider-sync',values});return {ok:true};};
   api.fetchEbayConversationMessages=async(_context,id)=>{
@@ -80,11 +98,26 @@ async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false
   api.fetchTeamTaskAssignees=async()=>({assignees:[{user_id:'me',display_name:'Jose',email:'manager@example.test',role:'admin'},{user_id:'worker',display_name:'Sandra',email:'worker@example.test',role:'worker'}]});
   api.fetchOperationalDashboard=async()=>{fixtureReads.push({name:'dashboard'});return {};};
   api.requestEbayConversationDraftAction=async()=>{throw Error('Sending is outside these tests');};
+  if(sendReply){
+   window.fixtureSendOutcome='failed';
+   api.requestEbayConversationDraftAction=async(_ctx,args)=>{
+    fixtureWrites.push({name:'reply',args});
+    if(args.mode!=='send')throw Error('Unexpected draft action');
+    if(fixtureSendOutcome==='failed')throw Error('Send failed. Please retry.');
+    const stamp=new Date().toISOString();
+    fixtureReadReceipts[`message-${args.conversationId}`]={is_read:true,read_by:'Sandra',read_at:stamp};
+    fixtureReadEvents.push({actor_name:'Sandra',is_read:true,created_at:stamp});
+    const message={id:'sent-reply',conversation_id:args.conversationId,direction:'outbound',message_body:args.draftText,created_at_ebay:stamp};
+    fixtureExtraMessages=[message];
+    fixtureConversations.find(c=>c.id===args.conversationId).latest_message_created_at=stamp;
+    return {mode:'send',send_attempt:{id:'send-1',attempt_status:'succeeded',sent_at:stamp},local_outbound_message:message};
+   };
+  }
   if(orderEntry){
    api.fetchEbayConversationById=async(_ctx,id)=>({conversation:fixtureConversations.find(c=>c.id===id)});
    api.requestEbayConversationDraftAction=async(_ctx,args)=>{if(args.mode!=='order_chat_context')throw Error('No live sends');return {ok:true,line:{id:'11111111-1111-4111-8111-111111111111',item_title:'Gold chain',item_number:'287123456789',quantity:1},order:{id:'order-1',order_number:'12-34567-89012',buyer_username:'jewelrybuyer'},conversations:[{...fixtureConversations[0],match:'item'}],preferred_conversation_id:'chat-0'};};
   }
- },{linked,orderChoices,orderEntry});
+ },{linked,orderChoices,orderEntry,sendReply});
  await page.addScriptTag({url:origin+'/email-triage.order-chat.js'});
  await page.addScriptTag({url:origin+'/email-triage.js'});
  await expect(page.locator('.ebay-conversation-row')).toHaveCount(orderEntry?1:32);
@@ -92,6 +125,77 @@ async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false
  return page;
 }
 const noOverflow=async page=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+for(const width of [390,1366])test(`Reply read receipts ${width}px refresh after successful sends without requiring realtime`,async t=>{
+ const page=await open(t,width,{sendReply:true});
+ await page.locator('.ebay-conversation-row').first().click();
+ await page.locator('#triage-read-tracking summary').click();
+ await expect(page.locator('[data-read-filter="read"]')).toHaveText('Read 0');
+ await page.getByRole('button',{name:'Reply',exact:true}).click();
+ await page.locator('[name="draftText"]').fill('Your order will ship tomorrow.');
+ const control=page.locator('.triage-read-summary [data-team-read]');
+ await expect(control).toHaveText('Mark read','writing a draft is not a read');
+ await page.locator('[data-ebay-draft-action="send"]').click();
+ await expect(page.locator('.ebay-conversation-detail')).toContainText('Send failed');
+ await expect(control).toHaveText('Mark read');
+ await expect(page.locator('[data-read-filter="read"]')).toHaveText('Read 0');
+ await page.evaluate(()=>fixtureSendOutcome='succeeded');
+ await page.locator('[data-ebay-draft-action="send"]').click();
+ await expect(control).toHaveText('Mark unread');
+ await expect(page.locator('.triage-read-summary')).toContainText('Read by Sandra');
+ await expect(page.locator('[data-read-filter="read"]')).toHaveText('Read 1');
+ assert.equal((await page.evaluate(()=>fixtureWrites)).filter(w=>w.name==='set_ebay_team_read_state').length,0,'the browser uses the persisted server receipt');
+});
+for(const width of [390,1366])test(`Team read tracking ${width}px requires an explicit click and supports dates, read filters and history`,async t=>{
+ const page=await open(t,width);
+ await page.locator('.ebay-conversation-row').first().click();
+ await expect(page.locator('.ebay-message-bubble')).toBeVisible();
+ assert.equal(await page.evaluate(()=>fixtureWrites.length),0,'opening never marks read');
+ const mark=page.locator('.ebay-message-actions [data-team-read]').first();
+ await expect(mark).toHaveText('Mark read');await mark.click();
+ await expect(mark).toHaveText('Mark unread');
+ await expect(page.locator('.ebay-message-actions')).toContainText('Read by Sandra');
+ assert.equal((await page.evaluate(()=>fixtureWrites))[0].args._message_id,'message-chat-0');
+ await page.locator('#triage-read-tracking summary').click();
+ await expect(page.locator('[data-read-filter="read"]')).toContainText('1');
+ await expect(page.locator('[data-read-filter="unread"]')).toContainText('31');
+ await page.locator('[data-read-filter="read"]').click();await expect(page.locator('.triage-read-day-row')).toHaveCount(1);
+ await page.locator('[data-read-date]').fill('2020-01-01');await expect(page.locator('[data-read-results]')).toContainText('No conversations');
+ await page.locator('#triage-read-tracking summary').click();
+ await page.locator('[data-read-history]').click();await expect(page.getByRole('dialog',{name:'Read history',exact:true})).toContainText('Sandra');
+ await page.getByRole('button',{name:'Close read history'}).click();
+ await page.evaluate(()=>fixtureReadFail=true);await mark.click();
+ await expect(page.locator('[data-read-error]').first()).toContainText('could not be saved');await expect(mark).toHaveText('Mark unread');
+ const laterDay=await page.evaluate(()=>{
+  fixtureReadFail=false;const timestamp=new Date(Date.now()+86400000).toISOString();
+  fixtureConversations[0].latest_message_created_at=timestamp;fixtureConversations[0].latest_message_id='new-provider-message';
+  fixtureExtraMessages=[{id:'new-incoming',conversation_id:'chat-0',direction:'inbound',message_body:'One more question',created_at_ebay:timestamp}];
+  fixtureRealtime.ebay_conversation_messages({new:fixtureExtraMessages[0]});
+  return new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(timestamp));
+ });
+ await expect(page.locator('.triage-read-summary [data-team-read]')).toHaveText('Mark read');
+ await page.locator('#triage-read-tracking summary').click();await page.locator('[data-read-date]').fill(laterDay);
+ await page.locator('[data-read-filter="unread"]').click();
+ await expect(page.locator('.triage-read-day-row')).toHaveCount(1);await expect(page.locator('[data-read-filter="read"]')).toContainText('0');
+ assert.equal(await page.evaluate(()=>fixtureWrites.length),2,'new replies and date navigation never mark read');
+ await page.screenshot({path:`test-results/triage-${width}-read-tracking.png`});
+ await noOverflow(page);
+});
+test('phone task typing preserves the live field, spaces and caret during background updates and keyboard resize',async t=>{
+ const page=await open(t,390);await page.locator('.ebay-conversation-row').first().click();
+ await page.locator('[data-ebay-message-task-action="create"]').first().click();
+ const instructions=page.locator('[name="taskDescription"]');await instructions.fill('Check the clasp  \n');
+ await instructions.evaluate(el=>{window.originalTaskField=el;el.focus();el.setSelectionRange(6,6);});
+ await page.evaluate(()=>EmailTriageReadTracking.invalidate());
+ await expect.poll(()=>page.evaluate(()=>document.querySelector('[name="taskDescription"]')===originalTaskField)).toBe(true);
+ await expect(instructions).toBeFocused();await expect(instructions).toHaveValue('Check the clasp  \n');
+ assert.equal(await instructions.evaluate(el=>el.selectionStart),6);
+ await page.setViewportSize({width:390,height:420});await expect(instructions).toBeFocused();
+ await page.keyboard.type('carefully ');await expect(instructions).toHaveValue('Check carefully the clasp  \n');
+ await page.locator('[name="assignedToUserId"]').selectOption('worker');
+ await page.locator('[data-ebay-message-task-form] button[type="submit"]').click();
+ await expect(page.getByRole('dialog',{name:'Create task'})).toBeHidden();
+ assert.equal((await page.evaluate(()=>fixtureWrites)).filter(w=>w.name==='create_task_request').length,1);
+});
 for(const width of [390,1366])test(`Order entry ${width}px opens the correct chat inside the actual triage workspace`,async t=>{
  const page=await open(t,width,{orderEntry:true});await expect(page.locator('#order-chat-entry')).toContainText('Gold chain');await expect(page.locator('.ebay-message-bubble')).toBeVisible();await expect(page.getByRole('button',{name:'Reply',exact:true})).toBeVisible();await noOverflow(page);
  assert.ok(new URL(page.url()).searchParams.get('ebayConversationDbId')==='chat-0');assert.equal(await page.evaluate(()=>fixtureWrites.length),0);

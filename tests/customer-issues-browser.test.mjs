@@ -67,7 +67,16 @@ test('filters and paging stay server-side; full case data loads only on selectio
  assert.equal((await page.evaluate(()=>fixtureCalls)).filter(c=>c.table&&c.table!=='employees').length,0);
  await page.getByRole('button',{name:'Next',exact:true}).click();await expect(page.locator('.issue-card')).toHaveCount(6);
  await page.getByRole('button',{name:'Requests 12',exact:true}).click();await expect(page.locator('.issue-card')).toHaveCount(12);
+ await page.evaluate(async()=>{fixtureUpdateCase({return_stage:'delivered'});await OGCustomerIssues.refresh({detail:false});});
+ await page.getByRole('button',{name:'Returns 12',exact:true}).click();await expect(page.locator('.issue-card')).toHaveCount(12);
+ const stages=page.locator('#issues-return-stage');
+ await expect(stages.locator('option')).toHaveText(['All return stages (12)','Return requested (0)','Awaiting buyer shipment (0)','In transit (0)','Delivered (eBay) (1)','Partially received (0)','Received · needs review (0)','Received in Invsto (0)','Shipment not reported (11)']);
+ await stages.selectOption('delivered');await expect(page.locator('.issue-card')).toHaveCount(1);
+ await expect(stages).toHaveValue('delivered');await expect(stages.locator('option[value="unknown"]')).toHaveText('Shipment not reported (11)');
+ await page.locator('#issues-scope').selectOption('mine');await expect(stages.locator('option[value="all"]')).toHaveText('All return stages (6)');
+ await page.locator('#issues-scope').selectOption('all');
  await page.getByRole('button',{name:'All open 36',exact:true}).click();await page.getByRole('searchbox',{name:'Search customer issues'}).fill('alex.watches');await expect(page.locator('.issue-card')).toHaveCount(1);
+ await expect(stages.locator('option[value="all"]')).toHaveText('All return stages (1)');
  await page.locator('.issue-card').click();await page.getByRole('button',{name:'View full photo',exact:true}).click();await expect(page.locator('#issues-feedback')).toHaveText('Full evidence viewer opened');
 });
 test('background case changes keep expanded details and never erase an unsaved reply',async t=>{
