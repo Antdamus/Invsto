@@ -4829,8 +4829,8 @@ function renderOrders(options = {}) {
       `;
       const orderNumber = String(order.order_number || "").trim();
       const orderNumberMarkup = orderNumber
-        ? `<button type="button" class="buyer-line-order-copy" data-order-number-action data-order-number="${escapeHtml(orderNumber)}" title="Copy or open this eBay order"><span>Order</span><strong>${escapeHtml(orderNumber)}</strong></button>`
-        : `<span class="buyer-line-order-copy is-missing"><span>Order</span><strong>No order number</strong></span>`;
+        ? `<button type="button" class="buyer-line-order-copy" data-order-number-action data-order-number="${escapeHtml(orderNumber)}" title="Copy or open this eBay order"><span>Order number</span><strong>${escapeHtml(orderNumber)}</strong></button>`
+        : `<span class="buyer-line-order-copy is-missing"><span>Order number</span><strong>Not available</strong></span>`;
       const isAdminSelected = state.adminSelectedLineIds.has(line.id);
       const visibleLineDueLabel = lineUrgency
         ? `${lineUrgency.label} - ${formatOrderDate(order, "ship_by_date")}`
@@ -4847,11 +4847,11 @@ function renderOrders(options = {}) {
         ${adminSelect}
         <span class="buyer-line-main">
           <span class="buyer-line-copy">
+            ${orderNumberMarkup}
             <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
             <span class="line-watch-control" data-watch-line="${escapeHtml(line.id)}">${window.OGOrderWatches?.line(line) || ""}</span>
             <span data-item-search-status="${escapeHtml(line.id)}">${renderItemSearchStatus(line)}</span>
             <span class="buyer-line-order-details">
-              ${orderNumberMarkup}
               <small class="buyer-line-item-meta">Item ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
             </span>
             <span class="buyer-line-customer">

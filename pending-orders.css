@@ -4714,16 +4714,18 @@ body.pending-order-detail-open .mobile-detail-close {
 }
 
 .buyer-line-order-copy {
-  display: inline-flex;
+  display: inline-grid !important;
   align-items: center;
-  gap: 7px;
+  gap: 4px;
   width: fit-content;
   max-width: 100%;
-  min-height: 30px;
-  padding: 5px 10px;
-  border: 1px solid rgba(227, 189, 119, 0.34);
-  border-radius: 999px;
-  background: rgba(227, 189, 119, 0.11);
+  min-height: 54px;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+  padding: 9px 12px;
+  border: 1px solid rgba(227, 189, 119, 0.46);
+  border-radius: 10px;
+  background: rgba(227, 189, 119, 0.13);
   color: var(--gold-strong);
   cursor: pointer;
   font: inherit;
@@ -4744,17 +4746,21 @@ body.pending-order-detail-open .mobile-detail-close {
 }
 
 .buyer-line-order-copy span {
-  color: var(--muted);
-  font-size: 0.62rem;
-  font-weight: 950;
+  color: #d8c69e;
+  font-size: 0.66rem;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .buyer-line-order-copy strong {
   margin: 0;
-  color: var(--gold-strong);
-  font-size: 0.82rem;
+  color: #ffe4ad;
+  font-size: 1.05rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 

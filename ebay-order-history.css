@@ -1338,6 +1338,42 @@ a.history-line-finance-pill:hover {
   min-width: 0;
 }
 
+.history-line-order-number {
+  display: inline-grid;
+  gap: 4px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 54px;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+  padding: 9px 12px;
+  border: 1px solid rgba(227, 189, 119, 0.46);
+  border-radius: 10px;
+  background: rgba(227, 189, 119, 0.13);
+}
+
+.history-line-order-number span {
+  color: #d8c69e;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.history-line-order-number strong {
+  color: #ffe4ad;
+  font-size: 1.05rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+}
+
+.history-line-order-number.is-missing {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+}
+
 .history-line-title-row strong {
   flex: 1 1 auto;
 }

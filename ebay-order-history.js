@@ -6227,6 +6227,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
             const lineIssue = getHistoryLineReturnIssue(line);
             const lineFinanceStatus = getFinanceStatusBadge(line);
             const lineFocused = historyFocusMatchesLine(line);
+            const lineOrderNumber = String(getOrderFromLine(line).order_number || line.order_number || "").trim();
             return `
             <div
               class="history-line-row ${lineIssue ? "has-return-issue" : ""} ${lineIssue?.targeted ? "is-target-return-line" : ""} ${lineFocused ? "is-history-focus" : ""}"
@@ -6234,6 +6235,10 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
               data-history-line-focus="${lineFocused ? "true" : "false"}"
             >
               <div>
+                <div class="history-line-order-number${lineOrderNumber ? "" : " is-missing"}">
+                  <span>Order number</span>
+                  <strong>${escapeHtml(lineOrderNumber || "Not available")}</strong>
+                </div>
                 <div class="history-line-title-row">
                   <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
                   <b>${escapeHtml(formatMoney(getLineGross(line)))}</b>
