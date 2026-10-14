@@ -60,6 +60,7 @@
  }
  function closeBlock(c,items=[]){
   if(!c)return 'Case could not be loaded. Refresh and try again.';
+  if(['pending','changes_requested'].includes(c.final_review?.status))return 'Final review is still pending';
   if(['closed','cancelled'].includes(c.status)&&!Number(c.open_tasks))return 'Already saved in History';
   if(c.ebay_return_id&&!closed(c))return 'Still open on eBay';
   if(items.some(i=>Number(i.received_quantity)>Number(i.restocked_quantity)&&!['received_no_restock','damaged','refund_only'].includes(i.disposition)))return 'Returned items still need inspection';
@@ -78,11 +79,11 @@
   }
   return results;
  }
- const sortLabels={newest:'Newest arrivals · case opened date',oldest:'Oldest cases',order_newest:'Newest orders',order_oldest:'Oldest orders',due_soonest:'eBay deadline: soonest',due_latest:'eBay deadline: latest',value_highest:'Value: high to low',value_lowest:'Value: low to high'};
+ const sortLabels={review_due:'Refund deadlines · missing dates first, then soonest',newest:'Newest arrivals · case opened date',oldest:'Oldest cases',order_newest:'Newest orders',order_oldest:'Oldest orders',due_soonest:'eBay deadline: soonest',due_latest:'eBay deadline: latest',value_highest:'Value: high to low',value_lowest:'Value: low to high'};
  function resetSort(){
   // Each category starts with the latest eBay cases. A manual sort remains
   // active while filtering, paging and refreshing that category.
-  sort='newest';$('issues-sort').value=sort;
+  sort=view==='final_review'?'review_due':'newest';$('issues-sort').value=sort;
  }
  const money=c=>{if(c.item_value==null||!Number.isFinite(Number(c.item_value)))return 'Not available';try{return new Intl.NumberFormat(undefined,{style:'currency',currency:c.item_currency||'USD'}).format(Number(c.item_value));}catch{return `${c.item_currency||''} ${Number(c.item_value).toFixed(2)}`;}};
  function lineFacts(lines){
@@ -155,6 +156,8 @@
   return `<span class="issue-tag issue-return-badge is-${stage.tone}">${escape(stage.label)}</span>`+(refund?`<span class="issue-tag issue-return-badge issue-refund-badge is-${refund.tone}"><span>${escape(refund.label)}</span>${refundDate}</span>`:'');
  }
  function nextText(c){
+  if(c.final_review?.status==='pending')return 'Awaiting final review';
+  if(c.final_review?.status==='changes_requested')return 'Final review · more information needed';
   if(['closed','cancelled'].includes(c.status)&&!c.open_tasks)return 'Closed · saved in History';
   if(!c.order_id)return 'Match the order';
   if(c.status==='needs_review'&&kind(c)==='return')return 'Inspect returned items';
@@ -192,17 +195,17 @@
   const state=providerBadgeHtml(c);
   const nextTag=badge&&(next===badge.label||next==='Respond to the payment dispute'||badge.kind==='reviewing'&&next==='Waiting for eBay’s decision')?'':`<span class="issue-tag">${escape(next)}</span>`;
   const deadline=['waiting','protected','no_response','reviewing'].includes(badge?.kind)||closed(c)?'':c.ebay_due_at?`<span class="issue-tag ${c.overdue?'is-overdue':''}">${c.overdue?'eBay deadline overdue':'eBay deadline'} ${escape(date(c.ebay_due_at))}</span>`:'<span class="issue-tag">eBay deadline not provided</span>';
-  return returnBadge(c)+state+nextTag+deadline;
+  return returnBadge(c)+state+nextTag+(['pending','changes_requested'].includes(c.final_review?.status)?reviewDeadline(c):deadline);
  }
  function cards(){
   $('issues-list').innerHTML=rows.length?rows.map(c=>`<div class="issue-card-row ${selecting?'is-selecting':''} ${bulkSelection.has(c.id)?'is-checked':''}">${selecting?`<label class="issue-select"><input type="checkbox" data-select-case="${escape(c.id)}" aria-label="Select ${escape(c.buyer_username||'buyer')}, case ${escape(c.ebay_return_id||c.id)}" ${bulkSelection.has(c.id)?'checked':''} ${closeBlock(c)?'disabled':''}/><span>${escape(closeBlock(c)||'Select case')}</span></label>`:''}<button type="button" class="issue-card" data-case="${escape(c.id)}" aria-current="${selected===c.id}">
    <div class="issue-card-top"><span class="issue-kind is-${kind(c)}">${cardKind(c)}</span><small>${escape(c.order_number||`Case ${c.ebay_return_id||'not linked'}`)}</small></div>
-   <h2>${escape(c.buyer_username||'Buyer not identified')}</h2>${customerContact(c)}<p>${escape(c.item_title||c.return_reason||'Open this case to review the order and next step.')}</p>
-   ${cardFacts(c)}
-   <div class="issue-card-footer">${cardStatus(c)}</div>
-   <div class="issue-card-top" style="margin:11px 0 0"><small>${['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':!c.open_tasks?'No employee task':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${root.OGIssueChats?.slot(c)||''}${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
+   <h2>${escape(c.buyer_username||'Buyer not identified')}</h2>${view==='final_review'?'':customerContact(c)}<p>${escape(c.item_title||c.return_reason||'Open this case to review the order and next step.')}</p>
+   ${view==='final_review'?`<div class="issue-review-card-deadline">${reviewDeadline(c)}</div><p class="issue-review-card-submitted">Work finished ${escape(date(c.final_review?.submitted_at))}</p>`:cardFacts(c)}
+   <div class="issue-card-footer">${view==='final_review'?returnBadge(c)+`<span class="issue-tag">${escape(nextText(c))}</span>`:cardStatus(c)}</div>
+   <div class="issue-card-top" style="margin:11px 0 0"><small>${['pending','changes_requested'].includes(c.final_review?.status)?escape(person(c.next_user))+(' · '+(c.final_review.status==='pending'?'final reviewer':'information requested')):['closed','cancelled'].includes(c.status)&&!c.open_tasks?'Saved record':!c.open_tasks?'No employee task':c.watching_tasks===c.open_tasks&&c.watching_tasks?'Following eBay updates':escape(person(c.next_user))}${c.open_tasks>Number(c.watching_tasks||0)?` · ${c.open_tasks-Number(c.watching_tasks||0)} active task${c.open_tasks-Number(c.watching_tasks||0)===1?'':'s'}`:''}</small>${c.stale||c.sync_error?'<span class="issue-tag is-stale">Needs refresh</span>':''}</div></button>${root.OGIssueChats?.slot(c)||''}${root.OGCaseNotes?.card(c)||''}</div>`).join(''):
    `<div class="issues-empty"><h2>${search?'No matching cases':'You’re caught up here'}</h2><p>${search?'Try the customer name, buyer username, order number, case ID or return tracking.':'Choose another view or responsibility filter to see other work.'}</p></div>`;
-  $('issues-count').textContent=`${total} ${view==='history'?'finished':'active'} case${total===1?'':'s'}`;
+  $('issues-count').textContent=`${total} ${view==='final_review'?`return${total===1?'':'s'} awaiting review`:`${view==='history'?'finished':'active'} case${total===1?'':'s'}`}`;
   returnFilters();
   disputeFilters();
   $('issues-sort').value=sort;
@@ -214,7 +217,7 @@
  }
  function bulkToolbar(){
   const bar=$('issues-bulk-toolbar');if(!bar)return;
-  bar.hidden=ctx.employee.role!=='admin'||view==='history';
+  bar.hidden=ctx.employee.role!=='admin'||view==='history'||view==='final_review';
   bar.innerHTML=selecting?`<div class="issue-bulk-top"><strong aria-live="polite">${bulkSelection.size} selected</strong><button type="button" class="secondary-btn" data-bulk-done>Done selecting</button></div><div class="issue-bulk-actions"><button type="button" class="secondary-btn" data-bulk-page>Select eligible on this page</button><button type="button" class="secondary-btn" data-bulk-clear ${bulkSelection.size?'':'disabled'}>Clear</button><button type="button" class="primary-btn" data-bulk-review ${bulkSelection.size?'':'disabled'}>Mark selected closed (${bulkSelection.size})</button></div><p>Up to ${BULK_LIMIT} cases across pages. Only resolved cases can be closed.</p>`:'<button type="button" class="secondary-btn" data-bulk-start>Select cases</button>';
  }
  function clearBulk(){selecting=false;bulkSelection.clear();bulkToolbar();}
@@ -356,9 +359,43 @@
   if(c.source_lane==='case'&&url.startsWith('https://www.ebay.com/ReturnCase/'))return 'Open eBay case';
   return c.source_lane==='case'||c.source_lane==='payment_dispute'?'Open eBay order / case':'Open eBay case';
  }
+ function reviewDeadline(c){
+  const due=c.refund_due_at,finished=closed(c)||c.return_refund==='refunded'||c.final_review?.status==='approved',late=due&&Date.parse(due)<Date.now()&&!finished;
+  return `<span class="issue-tag ${late?'is-overdue':!due&&!finished?'is-stale':''}">${due?`${late?'Refund deadline overdue':'Refund deadline'} · ${escape(date(due))}`:finished?'No current refund deadline':'Refund deadline needs checking'}</span>`;
+ }
+ function reviewSection(c){
+  if(c.source_lane!=='return')return '';
+  const r=c.final_review,pending=r?.status==='pending',changes=r?.status==='changes_requested',approved=r?.status==='approved';
+  const canReview=r&&(ctx.employee.role==='admin'||r.reviewer_id===ctx.user.id);
+  return `<section class="issue-final-review" aria-label="Final return review"><div class="issue-final-review-heading"><span class="eyebrow">RETURN HANDOFF</span><h3>${pending?'Awaiting final review':changes?'More information needed':approved?'Final review completed':'Finished documenting this return?'}</h3></div>
+   <p>${pending?`Your work is saved. ${escape(person(r.reviewer_id))} has the final review.`:changes?`${escape(person(r.submitted_by))}, update the return information and send it back for review.`:approved?`Reviewed by ${escape(person(r.reviewed_by))} · ${escape(date(r.reviewed_at))}`:'Finish your part and send the saved information, photos and conversation to a reviewer.'}</p>
+   ${reviewDeadline(c)}<small class="issue-review-deadline-source">${c.refund_deadline_source==='ebay'?'Deadline supplied by eBay':c.refund_deadline_source==='manual'?'Deadline entered from eBay · New York time':'Check the eBay return for its refund deadline. Other response dates are kept separate.'}</small>
+   ${r?`<dl class="issue-review-audit"><div><dt>Reviewer</dt><dd>${escape(person(r.reviewer_id))}</dd></div><div><dt>Work finished by</dt><dd>${escape(person(r.submitted_by))} · ${escape(date(r.submitted_at))}</dd></div></dl><p class="issue-review-note">${escape(r.submission_note)}</p>${r.review_note?`<p class="issue-review-note"><strong>Review notes</strong><br>${escape(r.review_note)}</p>`:''}`:''}
+   <div class="issue-actions">${!pending?`<button class="primary-btn" data-return-review="submit">${changes?'Resubmit for final review':approved?'Send for another review':'Finish my part & send for review'}</button>`:''}${pending&&canReview?'<button class="primary-btn" data-return-review="approve">Complete final review</button><button class="secondary-btn" data-return-review="changes">Request more information</button>':''}${(pending||changes)&&canReview?'<button class="secondary-btn" data-return-review="reassign">Change reviewer / deadline</button>':''}</div>
+   <p class="issue-subtitle">This records internal work. Refunds are handled on eBay, and the case stays tracked until it can be archived.</p><div id="issue-review-form-slot"></div></section>`;
+ }
+ function returnReviewForm(action){
+  const c=detail.c,r=c.final_review,request=crypto.randomUUID(),choose=action==='submit'||action==='reassign';
+  const defaults=people.filter(p=>String(p.display_name||'').trim().toLowerCase()==='otello guillen');
+  const owner=r?.reviewer_id||(defaults.length===1?defaults[0].user_id:'');
+  const titles={submit:'Finish your part',approve:'Complete final review',changes:'Request more information',reassign:'Update final review'};
+  const confirmations={submit:'I have saved the return information and evidence. My part is finished and ready for review.',approve:'I have reviewed the saved information, evidence and refund status on eBay.',changes:'These notes explain what must be added before final review.',reassign:'The selected person and deadline are correct.'};
+  form(titles[action],`${choose?`<label>Final reviewer<select name="reviewer" required><option value="">Choose a reviewer</option>${people.map(p=>`<option value="${escape(p.user_id)}" ${owner===p.user_id?'selected':''}>${escape(p.display_name||p.email)}</option>`).join('')}</select></label>`:`<p class="issue-subtitle">Reviewer: ${escape(person(r.reviewer_id))}</p>`}
+   ${reviewDeadline(c)}${c.refund_deadline_source!=='ebay'?`<label>Refund deadline shown on eBay (if available)<input type="date" name="refund_date" value="${escape(r?.manual_refund_date||'')}" /></label><p class="issue-subtitle">Use the date shown on the eBay return. If it is not available, leave this blank; the queue will flag it for checking.</p>`:''}
+   <label>${action==='submit'?'Handoff notes':action==='changes'?'What needs to be added?':'Review notes'}<textarea name="note" required maxlength="10000" placeholder="What did you check, and what still needs attention?"></textarea></label>
+   <label class="issue-close-confirm"><input name="confirmed" type="checkbox" required /><span>${confirmations[action]}</span></label>`,action==='submit'?'Save & send for final review':action==='approve'?'Confirm final review':action==='changes'?'Send back for information':'Save review details','issue-review-form-slot');
+  $('issue-action-form').onsubmit=e=>submitForm(e,async f=>checked(await db.rpc('save_customer_return_review',{
+   _request_id:request,_case_id:c.id,_action:action,_owner:choose?f.get('reviewer'):r.reviewer_id,_note:f.get('note'),_expected_version:r?.version||null,
+   _manual_refund_date:f.has('refund_date')?(f.get('refund_date')||null):(r?.manual_refund_date||null),_confirmed:f.get('confirmed')==='on',_expected_case_updated_at:c.updated_at
+  })),async()=>{
+   feedback(action==='submit'?'Your part is finished. The return is saved in Final review.':action==='approve'?'Final review saved. The eBay case and refund continue to be tracked.':'Review updated. The next person and your notes are saved.');
+   await openCase(c.id,{quiet:true});await refresh({detail:false});
+  });
+ }
  function renderDetail(){
   if(!detail||detail.c.id!==selected)return;
   const {c,tasks,items,lines,events}=detail,summary=rows.find(r=>r.id===c.id)||{...c,...lineFacts(lines),open_tasks:tasks.filter(t=>root.OGTaskWorkflow.isEmployeeTask(t)&&!finish.has(t.status)).length};
+  Object.assign(summary,{final_review:c.final_review,refund_due_at:c.refund_due_at,refund_deadline_source:c.refund_deadline_source});
   const primary={...(tasks.find(t=>!finish.has(t.status))||{id:'',metadata:c.raw_payload}),order_line_ids:lines.map(l=>l.id),ebay_return_cases:c};
   const provider=root.OGIssueEvidence.providerContext(c),overrides={};
   if(provider.buyerComment)overrides.buyerComment=provider.buyerComment;
@@ -371,10 +408,11 @@
    <div class="issue-detail-content"><span class="issue-kind is-${kind(c)}">${kind(c)==='dispute'?(c.source_lane==='payment_dispute'?'Payment dispute':'Escalated eBay case'):nice(kind(c))}</span><h2>${escape(c.buyer_username||'Buyer not identified')}</h2><p class="issue-subtitle">${escape(c.item_title||summary.item_title||lines[0]?.item_title||'Review the linked order items below')}</p>
    <section class="issue-original-order"><div><small>ORIGINAL ORDER</small><strong>${escape(c.order_number||'Not identified yet')}</strong><span>${c.order_id?`${lines.length} linked item${lines.length===1?'':'s'} · Saved in Invsto`:c.order_number?'Not found in saved orders yet':'Match the original order to see its evidence'}</span></div>${c.order_number?`<a class="secondary-btn" href="ebay-order-history.html?orderHistorySearch=${encodeURIComponent(c.order_number)}&historyAllDates=true">Open full order ↗</a>`:''}</section>
    ${kind(c)==='return'&&summary.return_stage?`<div class="issue-return-summary">${returnBadge(summary)}<small>eBay delivery is separate from receipt and inspection in Invsto.</small></div>`:''}
+   ${reviewSection({...c,return_refund:summary.return_refund})}
    ${root.OGIssueChats?.slot(c)||''}
    <section id="issue-case-notes" class="issue-case-notes">${root.OGCaseNotes?.section(c)||''}</section>
    <div class="issue-next">${providerBadge(c)?`<div class="issue-provider-outcome">${providerBadgeHtml(c)}</div>`:''}<span>NEXT STEP</span><strong>${escape(nextText({...summary,raw_payload:c.raw_payload}))}</strong><p>${['closed','cancelled'].includes(c.status)&&!summary.open_tasks?'This record is saved in History. Its evidence and activity are preserved.':closed(c)?'eBay has closed its case. Keep it here while internal work remains, or finish and archive it when everything is handled.':providerBadge(c)?.kind==='reviewing'?'eBay is reviewing this escalated case. No response is currently requested. Keep it open until eBay decides the outcome; any internal work remains separate.':['protected','no_response'].includes(providerBadge(c)?.kind)?'No response is currently requested by eBay. This dispute is still awaiting an outcome; updates continue automatically. Any internal tasks remain separate.':'Keep the case open until the customer issue and your internal work are both handled.'}</p></div>
-   ${ctx.employee.role==='admin'&&(closed(c)||!c.ebay_return_id)&&(!['closed','cancelled'].includes(c.status)||tasks.some(t=>!finish.has(t.status)))?'<section class="issue-closeout"><div><strong>All internal work finished?</strong><p>Save the case and its evidence in History. No new task is needed.</p></div><button type="button" class="primary-btn" data-finish-case>Finish &amp; archive</button></section>':''}<div id="issue-close-form-slot"></div>
+   ${ctx.employee.role==='admin'&&!['pending','changes_requested'].includes(c.final_review?.status)&&(closed(c)||!c.ebay_return_id)&&(!['closed','cancelled'].includes(c.status)||tasks.some(t=>!finish.has(t.status)))?'<section class="issue-closeout"><div><strong>All internal work finished?</strong><p>Save the case and its evidence in History. No new task is needed.</p></div><button type="button" class="primary-btn" data-finish-case>Finish &amp; archive</button></section>':''}<div id="issue-close-form-slot"></div>
    <div class="issue-facts"><div><small>Item value</small><b>${escape(money(summary))}</b></div><div><small>Order placed</small><b>${escape(summary.order_placed_at?new Date(summary.order_placed_at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'Not provided')}</b></div><div><small>eBay status</small><b>${escape(root.OGDisputeResponse?.response(c)?.waiting?'Open · response submitted':nice(c.ebay_status))}</b></div><div><small>eBay deadline</small><b>${escape(closed(c)||['waiting','protected','no_response','reviewing'].includes(providerBadge(c)?.kind)?'No current response deadline':date(c.ebay_due_at))}</b></div></div>
    <p class="issue-review-meta">Opened ${escape(date(c.opened_at))}<br>Last eBay update ${escape(date(c.synced_at))} · Internal status: ${escape(nice(c.status))}</p>
    ${c.sync_error?`<p class="issue-tag is-stale">Update failed. The previous case information was kept. ${escape(c.sync_error)}</p>`:''}
@@ -459,10 +497,12 @@
     db.from('ebay_return_items').select('*').eq('return_case_id',id),db.from('ebay_return_events').select('*').eq('return_case_id',id).order('created_at',{ascending:false}).limit(50)
    ]).then(rs=>rs.map(checked));
    if(stamp!==version)return;
+   if(c.source_lane==='return')Object.assign(c,checked(await db.rpc('customer_return_review_details',{_case_id:id}))||{});
+   if(stamp!==version)return;
    if(locate){
     clearBulk();clearTimeout(timer);scope='all';search='';returnStage='all';disputeState='all';offset=0;
     const active=!['closed','cancelled'].includes(c.status)||tasks.some(t=>root.OGTaskWorkflow.isEmployeeTask(t)&&!finish.has(t.status));
-    view=active?kind(c):'history';$('issues-search').value='';$('issues-scope').value='all';$('issues-return-stage').value='all';
+    view=['pending','changes_requested'].includes(c.final_review?.status)?'final_review':active?kind(c):'history';resetSort();$('issues-search').value='';$('issues-scope').value='all';$('issues-return-stage').value='all';
     await refresh({detail:false,focusCase:id});if(stamp!==version)return;
     if(!rows.some(row=>row.id===id))throw new Error('Could not locate this case in the list. Refresh and retry.');
     listReturnPosition=captureListPosition(id);
@@ -590,6 +630,7 @@
    else if(b.hasAttribute('data-retry-case'))openCase(selected);
    else if(b.hasAttribute('data-sync-case'))sync(selected);
    else if(b.hasAttribute('data-retry-sync')&&ctx.employee.role==='admin')sync();
+   else if(b.dataset.returnReview)returnReviewForm(b.dataset.returnReview);
    else if(b.hasAttribute('data-receive'))receive();
    else if(b.dataset.taskAction)taskForm(b.dataset.task,b.dataset.taskAction);
    else if(b.dataset.followTask){const t=detail.tasks.find(t=>t.id===b.dataset.followTask);form('Reviewed · follow updates','<label>Review note<textarea name="note" required placeholder="What did you check? What are we waiting for?"></textarea></label>','Move to Following');$('issue-action-form').onsubmit=e=>submitForm(e,async f=>checked(await db.rpc('follow_customer_issue',{_task_id:t.id,_expected_updated_at:t.updated_at,_note:f.get('note')})));}

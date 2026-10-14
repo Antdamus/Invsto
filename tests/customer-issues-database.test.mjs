@@ -83,6 +83,7 @@ before(async()=>{
  await db.exec(await sqlFile('20261010193000_customer_issue_review_navigation.sql'));
  await db.exec(await sqlFile('20261012203000_customer_issue_dispute_filters.sql'));
  await db.exec(await sqlFile('20261013100000_customer_issue_return_stage_counts.sql'));
+ await db.exec(await sqlFile('20261014110000_customer_return_final_review.sql'));
 
 
 });
@@ -103,6 +104,85 @@ const receive=(key=200,qty=1,disposition='restock',caseId=100)=>scalar('select r
  id(key),id(caseId),JSON.stringify([{order_line_id:id(11),received_quantity:qty,condition_received:'used_good',disposition,destination_location_id:disposition==='restock'?id(30):null,notes:'Inspected'}]),
  '[{"bucket":"ebay-return-evidence","path":"test/photo.jpg"}]','Received carefully','TRACK1']);
 const stock=()=>scalar('select coalesce(sum(quantity),0)::int v from item_stock_locations');
+
+async function finalReview(action='submit',options={}){
+ const version=await scalar('select (select version from customer_return_reviews where return_case_id=$1) v',[id(100)]);
+ const caseVersion=await scalar('select updated_at v from ebay_return_cases where id=$1',[id(100)]);
+ return scalar('select save_customer_return_review($1,$2,$3,$4,$5,$6,$7,$8,$9) v',[
+  id(options.request||900),id(100),action,options.owner===undefined?id(2):options.owner,options.note||'Return information and photos checked.',options.version===undefined?version||null:options.version,
+  options.date||null,options.confirmed!==false,options.caseVersion||caseVersion]);
+}
+test('final review handoff saves worker, reviewer, deadline and audit once without closing eBay or changing stock',async()=>{
+ await db.exec(`select set_config('test.admin','no',false);update employees set display_name='Otello Guillen' where user_id='${id(2)}';`);
+ const caseVersion=await scalar('select updated_at v from ebay_return_cases where id=$1',[id(100)]);
+ const r=await finalReview('submit',{owner:null,date:'2026-10-16'});
+ assert.equal(r.final_review.status,'pending');assert.equal(r.final_review.reviewer_id,id(2));assert.equal(r.final_review.submitted_by,id(1));
+ assert.equal(new Date(r.refund_due_at).toISOString(),'2026-10-17T03:59:59.000Z');assert.equal(r.refund_deadline_source,'manual');
+ assert.deepEqual(await finalReview('submit',{owner:null,date:'2026-10-16',version:null,caseVersion}),r);
+ assert.equal(await scalar("select count(*)::int v from ebay_return_events where action='final_review'"),1);
+ assert.equal(await scalar('select status v from ebay_return_cases where id=$1',[id(100)]),'open');assert.equal(await stock(),0);
+ const q=await scalar("select list_customer_issues('final_review','all','',0,30,'review_due','all') v");assert.equal(q.total,1);assert.equal(q.counts.final_review,1);
+ assert.equal(q.rows[0].next_user,id(2));assert.equal(q.rows[0].mine,false);
+ await assert.rejects(finalReview('approve',{request:901}),/Only the assigned reviewer/);
+ await db.exec(`select set_config('test.actor','${id(2)}',false);`);
+ const done=await finalReview('approve',{request:902,date:'2026-10-16'});assert.equal(done.final_review.status,'approved');assert.equal(done.final_review.reviewed_by,id(2));
+ assert.equal((await scalar("select list_customer_issues('final_review','all','',0,30,'review_due','all') v")).total,0);
+ assert.equal(await scalar('select status v from ebay_return_cases where id=$1',[id(100)]),'open');
+});
+test('pending reviews survive provider closure, block both archive paths and use the selected reviewer before pagination',async()=>{
+ await finalReview();await db.exec(`update ebay_return_cases set status='closed',ebay_status='CLOSED' where id='${id(100)}';select set_config('test.actor','${id(2)}',false);`);
+ for(const extra of ['',',null',",null,'all'"]){
+  const q=await scalar(`select list_customer_issues('final_review','mine','',0,1,'review_due','all'${extra}) v`);
+  assert.equal(q.total,1);assert.equal(q.rows[0].final_review.reviewer_id,id(2));assert.equal(q.counts.history,0);
+ }
+ const stamp=await scalar('select updated_at v from ebay_return_cases where id=$1',[id(100)]);
+ await assert.rejects(scalar("select close_resolved_customer_issue($1,$2,'[]',true,'Finished') v",[id(100),stamp]),/Complete the final review/);
+ await assert.rejects(scalar("select finish_customer_issue($1,'Finished') v",[id(100)]),/Complete the final review/);
+ await finalReview('approve',{request:901});
+ assert.equal((await scalar("select list_customer_issues('history','all','',0,30,'newest','all') v")).total,1);
+});
+test('review changes go back to the worker; resubmission and reassignment retain previous decisions in the audit',async()=>{
+ await finalReview();await db.exec(`select set_config('test.actor','${id(2)}',false);select set_config('test.admin','no',false);`);
+ const changed=await finalReview('changes',{request:901,note:'Add a clasp close-up.'});assert.equal(changed.final_review.status,'changes_requested');
+ assert.equal((await scalar("select list_customer_issues('final_review','all','',0,30,'review_due','all') v")).rows[0].next_user,id(1));
+ await assert.rejects(finalReview('approve',{request:902}),/Wait for the worker/);
+ await db.exec(`select set_config('test.actor','${id(1)}',false);`);
+ const resent=await finalReview('submit',{request:903});assert.equal(resent.final_review.review_note,null);
+ await assert.rejects(finalReview('reassign',{request:904,owner:id(1)}),/Only the assigned reviewer/);
+ await db.exec(`select set_config('test.actor','${id(2)}',false);`);
+ await finalReview('reassign',{request:905,owner:id(1)});
+ assert.equal(await scalar("select payload#>>'{previous_review,review_note}' v from ebay_return_events where payload->>'action'='submit' order by created_at desc limit 1"),'Add a clasp close-up.');
+ await assert.rejects(finalReview('approve',{request:906,version:resent.final_review.version}),/review changed/);
+ await assert.rejects(finalReview('approve',{request:907,caseVersion:'2020-01-01T00:00:00Z'}),/return information changed/);
+});
+test('refund deadline uses only a matching seller refund action, not buyer actions, general due dates or estimates',async()=>{
+ const raw={ebaySummary:{returnId:'12345',sellerResponseDue:{activityDue:'SELLER_ISSUE_REFUND',respondByDate:{value:'2026-10-16T06:59:59Z'}}}};
+ const due=value=>scalar("select customer_return_refund_deadline('return','12345','ITEM_DELIVERED',$1) v",[JSON.stringify(value)]);
+ assert.equal(new Date(await due(raw)).toISOString(),'2026-10-16T06:59:59.000Z');
+ assert.equal(await due({ebaySummary:{...raw.ebaySummary,sellerResponseDue:{...raw.ebaySummary.sellerResponseDue,activityDue:'SELLER_APPROVE_REQUEST'}}}),null);
+ assert.equal(await due({ebaySummary:{returnId:'other',sellerResponseDue:raw.ebaySummary.sellerResponseDue}}),null);
+ assert.equal(await due({ebaySummary:{returnId:'12345',buyerResponseDue:raw.ebaySummary.sellerResponseDue}}),null);
+ await db.query('update ebay_return_cases set raw_payload=$1 where id=$2',[raw,id(100)]);
+ const r=await finalReview('submit',{date:'2026-11-01'});assert.equal(r.refund_deadline_source,'ebay');assert.equal(new Date(r.refund_due_at).toISOString(),'2026-10-16T06:59:59.000Z');
+ await db.exec(`update ebay_return_cases set raw_payload='{}',ebay_status='CLOSED' where id='${id(100)}';`);
+ const saved=await scalar('select customer_return_review_details($1) v',[id(100)]);assert.equal(saved.refund_due_at,r.refund_due_at);
+});
+test('review writes require explicit confirmation, active recipients, access and guarded RPCs',async()=>{
+ await assert.rejects(finalReview('submit',{confirmed:false}),/confirm/);
+ await assert.rejects(finalReview('submit',{owner:id(99)}),/active reviewer/);
+ await db.exec("select set_config('test.access','no',false)");await assert.rejects(finalReview(),/access required/);
+ await db.exec("select set_config('test.access','yes',false);set role authenticated");
+ await assert.rejects(db.exec("insert into customer_return_reviews(return_case_id,status) values(gen_random_uuid(),'approved')"),/permission denied/);
+ await assert.rejects(db.exec("update customer_return_reviews set status='approved'"),/permission denied/);
+});
+test('review queue prioritizes missing dates then the earliest refund deadline across pages',async()=>{
+ await finalReview('submit',{date:'2026-10-20'});
+ for(const n of [101,102])await db.query("insert into ebay_return_cases(id,order_id,order_number,status,source_lane,issue_kind) values($1,$2,'01-12345-12345','open','return','return')",[id(n),id(10)]);
+ await db.query("insert into customer_return_reviews(return_case_id,status,reviewer_id,submitted_by,submission_note,manual_refund_date) values($1,'pending',$3,$4,'Ready',null),($2,'pending',$3,$4,'Ready','2026-10-18')",[id(101),id(102),id(2),id(1)]);
+ const page=offset=>scalar("select list_customer_issues('final_review','all','', $1,1,'review_due','all') v",[offset]);
+ const first=await page(0);assert.equal(first.total,3);assert.equal(first.rows[0].id,id(101));
+ assert.equal((await page(1)).rows[0].id,id(102));assert.equal((await page(2)).rows[0].id,id(100));
+});
 
 test('dispute states use current provider evidence, with new action and closure overriding old responses',async()=>{
  const base={issue_kind:'dispute',source_lane:'payment_dispute',ebay_return_id:'dispute-1',ebay_status:'OPEN'};

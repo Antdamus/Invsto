@@ -13,6 +13,42 @@ before(async()=>{
 });
 after(async()=>{await browser?.close();await new Promise(r=>{server.close(r);server.closeAllConnections();});});
 
+for(const width of [320,390,1366])test(`final return review ${width}px: default Otello, durable handoff, queue and approval`,async t=>{
+ const page=await open(t,width);await page.locator('.issue-card').first().click();
+ await page.getByRole('button',{name:'Finish my part & send for review',exact:true}).click();
+ await expect(page.getByRole('combobox',{name:'Final reviewer',exact:true})).toHaveValue('otello');
+ await page.getByLabel('Handoff notes',{exact:true}).fill('Watch inspected and all photographs saved. Review the refund before the deadline.');
+ await page.getByLabel('Refund deadline shown on eBay (if available)',{exact:true}).fill('2026-10-16');
+ await page.getByLabel('I have saved the return information and evidence. My part is finished and ready for review.',{exact:true}).check();
+ assert.ok(await page.locator('#issues-detail').evaluate(e=>e.scrollWidth<=e.clientWidth+1));
+ await page.screenshot({path:`test-results/customer-issues/final-review-form-${width}.png`});
+ await page.getByRole('button',{name:'Save & send for final review',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Awaiting final review',exact:true})).toBeVisible();
+ const write=(await page.evaluate(()=>fixtureWrites)).find(x=>x.name==='save_customer_return_review');
+ assert.equal(write.args._owner,'otello');assert.equal(write.args._action,'submit');assert.equal(write.args._manual_refund_date,'2026-10-16');assert.equal(write.args._confirmed,true);
+ if(width<=900)await page.getByRole('button',{name:'← Cases',exact:true}).click();
+ await page.getByRole('button',{name:'Final review 1',exact:true}).click();await expect(page.locator('.issue-card')).toHaveCount(1);
+ await expect(page.locator('#issues-sort')).toHaveValue('review_due');await expect(page.locator('.issue-card')).toContainText('Otello');
+ await page.screenshot({path:`test-results/customer-issues/final-review-queue-${width}.png`});
+ await page.locator('.issue-card').first().click();
+ await page.getByRole('button',{name:'Complete final review',exact:true}).click();
+ await page.getByLabel('Review notes',{exact:true}).fill('Evidence and refund status checked on eBay.');
+ await page.getByLabel('I have reviewed the saved information, evidence and refund status on eBay.',{exact:true}).check();
+ await page.getByRole('button',{name:'Confirm final review',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Final review completed',exact:true})).toBeVisible();
+});
+test('failed final-review save preserves the handoff draft and a missing deadline stays explicit',async t=>{
+ const page=await open(t,390);await page.locator('.issue-card').first().click();
+ await page.getByRole('button',{name:'Finish my part & send for review',exact:true}).click();
+ await page.getByLabel('Handoff notes',{exact:true}).fill('Please review the clasp photos.');
+ await page.getByLabel('I have saved the return information and evidence. My part is finished and ready for review.',{exact:true}).check();
+ await page.evaluate(()=>window.fixtureReviewFailure=true);await page.getByRole('button',{name:'Save & send for final review',exact:true}).click();
+ await expect(page.locator('.issue-form-error')).toContainText('notes are still here');await expect(page.getByLabel('Handoff notes',{exact:true})).toHaveValue('Please review the clasp photos.');
+ await page.evaluate(()=>window.fixtureReviewFailure=false);await page.getByRole('button',{name:'Save & send for final review',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Awaiting final review',exact:true})).toBeVisible();
+ await expect(page.locator('.issue-final-review')).toContainText('Refund deadline needs checking');
+});
+
 for(const width of [390,1366])test(`return receiving ${width}px: scan, verify, inspect with media`,async t=>{
  const page=await open(t,width);
  await page.evaluate(()=>{fixtureLookup={matches:[{case_id:'case-0',order_number:'01-12345-12345',buyer:'alex.watches',status:'open'}]};fixtureItems=[{id:'return-1',order_line_id:'line-1',item_title:'Cartier Panthère',expected_quantity:1,received_quantity:1,restocked_quantity:0,disposition:'quarantine'}];});
@@ -161,7 +197,7 @@ for(const width of [390,1366])test(`quick case review ${width}px: global sort, c
  await expect(page.locator('.issue-card').first()).toContainText('Item value');await expect(page.locator('.issue-card').first()).toContainText('$150.00');
  await expect(page.locator('.issue-card').first()).toContainText('Order placed');await expect(page.locator('.issue-card').first()).toContainText('eBay deadline');
  await page.getByRole('combobox',{name:'Sort by',exact:true}).selectOption('value_highest');await expect(page.locator('.issue-card').first()).toContainText('buyer.35');
- await page.getByRole('button',{name:'Returns 12',exact:true}).click();await expect(page.getByRole('combobox',{name:'Sort by',exact:true})).toHaveValue('value_highest');await expect(page.locator('.issue-card').first()).toContainText('buyer.33');
+ await page.getByRole('button',{name:'Returns 12',exact:true}).click();await expect(page.getByRole('combobox',{name:'Sort by',exact:true})).toHaveValue('newest');await expect(page.locator('.issue-card').first()).toContainText('alex.watches');
  await page.getByRole('combobox',{name:'Sort by',exact:true}).selectOption('newest');await page.locator('.issue-card').first().click();
  await expect(page.locator('.issue-chat-message')).toHaveCount(5);await expect(page.locator('.issue-chat-message').first()).toContainText('The clasp needs checking');
  await page.getByRole('button',{name:'Show older messages (4 more)'}).click();await expect(page.locator('.issue-chat-message')).toHaveCount(9);

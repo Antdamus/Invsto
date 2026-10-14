@@ -8,6 +8,14 @@ vm.runInNewContext(await readFile(new URL('../customer-issues.js',import.meta.ur
 const {nextText}=sandbox.OGCustomerIssues.testing;
 const payment={source_lane:'payment_dispute',issue_kind:'dispute',order_id:'order',status:'open',next_user:'admin',open_tasks:1,ebay_action:'2026-10-14T06:59:59.000Z'};
 
+test('final review remains the next action after provider closure without claiming a settled refund is overdue',()=>{
+ const {cardStatus}=sandbox.OGCustomerIssues.testing;
+ const c={source_lane:'return',issue_kind:'return',status:'closed',ebay_status:'CLOSED',open_tasks:0,final_review:{status:'pending'},refund_due_at:'2020-01-01T00:00:00Z'};
+ assert.equal(nextText(c),'Awaiting final review');assert.ok(!cardStatus(c).includes('Refund deadline overdue'));
+ assert.ok(cardStatus({...c,status:'open',ebay_status:'ITEM_DELIVERED'}).includes('Refund deadline overdue'));
+ assert.ok(!cardStatus({...c,status:'open',ebay_status:'ITEM_DELIVERED',return_refund:'refunded'}).includes('Refund deadline overdue'));
+});
+
 test('escalated cases distinguish eBay review from an unknown or actionable open case',()=>{
  const {escalatedBadge,cardStatus,cardKind}=sandbox.OGCustomerIssues.testing;
  const c={...payment,source_lane:'case',ebay_return_id:'5388233234',ebay_status:'OPEN',ebay_action:null,provider_case:{caseId:'5388233234',caseType:'RETURN',nextSteps:[],sellerResponseDue:{},caseContentOnHold:false}};
