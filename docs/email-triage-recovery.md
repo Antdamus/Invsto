@@ -1,5 +1,27 @@
 # Email Triage loading and recovery
 
+## AI connection and credit failures
+
+Email reply generation, Improve Text, and translation use the project's
+`OPENAI_API_KEY`, the same server-side credential used by inventory copy and
+image processing. They do not have a separate email AI account. Switching
+between features cannot restore an exhausted shared account balance.
+
+The draft function distinguishes billing/credit failures from temporary rate
+limits and credential failures. The reply editor shows the actionable message
+and preserves unsent text. Only allowlisted provider error codes are returned;
+raw provider messages (which can contain credential fragments) are omitted.
+Credit or spend-limit failures are not classified as retryable throttling.
+
+On October 13, 2026, a live translation check using fictional sample text
+returned HTTP 429 with `credit_balance_exhausted`. No buyer conversation was
+sent for this check, no buyer message was sent, and the credential was unchanged.
+Restoring access requires replenishing that account or having an administrator
+replace `OPENAI_API_KEY` with a key from a funded API account in Supabase secrets.
+
+Tests: `draft-provider-errors.test.mjs` and the AI credit failure cases in
+`workspace-browser.test.mjs` (phone and desktop).
+
 The inbox reads the canonical Supabase mailbox first. eBay ingestion runs
 independently; loading the inbox is not evidence that every eBay conversation
 has just been reconciled.

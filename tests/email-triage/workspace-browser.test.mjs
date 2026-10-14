@@ -18,14 +18,14 @@ before(async()=>{
  await mkdir(new URL('test-results/',root),{recursive:true});
 });
 after(async()=>{await browser?.close();await new Promise(r=>{server.close(r);server.closeAllConnections();});});
-async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false,sendReply=false,sourceEntry=false}={}){
+async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false,sendReply=false,sourceEntry=false,improveFailure=false}={}){
  const context=await browser.newContext({viewport:{width,height:844},hasTouch:width<1021});t.after(()=>context.close());
  await context.route('**/*',route=>route.request().url().startsWith(origin)?route.continue():route.abort());
  const page=await context.newPage();page.setDefaultTimeout(6500);
  const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
  await page.goto(`${origin}/email-triage.html${sourceEntry?'?ebayConversationDbId=chat-0&ebayMessageDbId=message-chat-0':orderEntry?'?orderLineId=11111111-1111-4111-8111-111111111111&from=pending':''}`);
  for(const file of ['task-workflow.js','email-triage.api.js','email-triage.state.js','email-triage.render-utils.js','email-triage.classifications.js','email-triage.diagnostics.js','email-triage.operations.js','email-triage.workspace.js','email-triage.read-tracking.js'])await page.addScriptTag({url:origin+'/'+file});
- await page.evaluate(({linked,orderChoices,orderEntry,sendReply})=>{
+ await page.evaluate(({linked,orderChoices,orderEntry,sendReply,improveFailure})=>{
   window.fixtureWrites=[];window.fixtureReads=[];window.fixtureTasks=[];window.fixtureFailSave=false;window.fixtureDelaySave=false;
   window.fixtureReadReceipts={};window.fixtureReadEvents=[];window.fixtureReadFail=false;
   const now=new Date().toISOString();
@@ -104,6 +104,10 @@ async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false
   api.fetchTeamTaskAssignees=async()=>({assignees:[{user_id:'me',display_name:'Jose',email:'manager@example.test',role:'admin'},{user_id:'worker',display_name:'Sandra',email:'worker@example.test',role:'worker'}]});
   api.fetchOperationalDashboard=async()=>{fixtureReads.push({name:'dashboard'});return {};};
   api.requestEbayConversationDraftAction=async()=>{throw Error('Sending is outside these tests');};
+  if(improveFailure)api.requestEbayConversationDraftAction=async(_ctx,args)=>{
+   fixtureWrites.push({name:'draft-action',args});
+   throw Object.assign(new Error('openai_quota_exceeded'),{code:'openai_quota_exceeded',detail:'The AI account has reached its credit or spending limit. An administrator needs to check its billing. Your message is unchanged.'});
+  };
   if(sendReply){
    window.fixtureSendOutcome='failed';
    api.requestEbayConversationDraftAction=async(_ctx,args)=>{
@@ -123,7 +127,7 @@ async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false
    api.fetchEbayConversationById=async(_ctx,id)=>({conversation:fixtureConversations.find(c=>c.id===id)});
    api.requestEbayConversationDraftAction=async(_ctx,args)=>{if(args.mode!=='order_chat_context')throw Error('No live sends');return {ok:true,line:{id:'11111111-1111-4111-8111-111111111111',item_title:'Gold chain',item_number:'287123456789',quantity:1},order:{id:'order-1',order_number:'12-34567-89012',buyer_username:'jewelrybuyer'},conversations:[{...fixtureConversations[0],match:'item'}],preferred_conversation_id:'chat-0'};};
   }
- },{linked,orderChoices,orderEntry,sendReply});
+ },{linked,orderChoices,orderEntry,sendReply,improveFailure});
  await page.addScriptTag({url:origin+'/email-triage.order-chat.js'});
  await page.addScriptTag({url:origin+'/buyer-tasks.js'});
  await page.addScriptTag({url:origin+'/email-triage.js'});
@@ -132,6 +136,19 @@ async function open(t,width=390,{linked=true,orderChoices=false,orderEntry=false
  return page;
 }
 const noOverflow=async page=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+for(const width of [390,1366])test(`AI credit failure ${width}px explains recovery and preserves the unsent message`,async t=>{
+ const page=await open(t,width,{improveFailure:true});
+ await page.locator('.ebay-conversation-row').first().click();
+ await page.getByRole('button',{name:'Reply',exact:true}).click();
+ await page.locator('[name="draftText"]').fill('Hello, thanks for your message.');
+ await page.getByRole('button',{name:'Improve Text',exact:true}).click();
+ await expect(page.locator('.ebay-conversation-detail')).toContainText('The AI account has reached its credit or spending limit.');
+ await expect(page.locator('[name="draftText"]')).toHaveValue('Hello, thanks for your message.');
+ await expect(page.getByRole('button',{name:'Improve Text',exact:true})).toBeEnabled();
+ assert.deepEqual(await page.evaluate(()=>fixtureWrites.filter(w=>w.name==='draft-action').map(w=>w.args.mode)),['improve']);
+ await noOverflow(page);
+ await page.screenshot({path:`test-results/triage-ai-credit-error-${width}.png`});
+});
 test('original task conversation link opens the message pane directly on a phone',async t=>{
  const page=await open(t,390,{sourceEntry:true});
  await expect(page.getByRole('button',{name:'Message',exact:true})).toHaveAttribute('aria-pressed','true');

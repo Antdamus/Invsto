@@ -8420,6 +8420,9 @@
 
   function ebayDraftActionErrorMessage(error, mode) {
     const code = error?.code || error?.message || "ebay_conversation_draft_action_failed";
+    if (["openai_quota_exceeded", "openai_rate_limited", "openai_authentication_failed", "openai_request_failed"].includes(code) && error?.detail) {
+      return error.detail;
+    }
     if (mode !== "send") return code;
     const detail = error?.detail ? ` ${error.detail}` : "";
     const provider = error?.providerResponse && typeof error.providerResponse === "object"
@@ -9907,7 +9910,7 @@
         },
       });
     } catch (error) {
-      const code = error.code || error.message || "message_translation_failed";
+      const code = ebayDraftActionErrorMessage(error, "translate_message");
       setEbayConversationState({
         ebayMessageTranslationLoadingId: null,
         ebayMessageTranslationErrorsById: {

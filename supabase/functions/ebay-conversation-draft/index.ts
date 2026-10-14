@@ -1094,6 +1094,33 @@ function extractOutputText(payload: any): string {
   return Array.isArray(chunks) ? chunks.join("\n").trim() : "";
 }
 
+async function openAIRequestError(response: Response) {
+  const payload = await response.json().catch(() => null);
+  // Never expose the provider's raw message: authentication errors can contain key fragments.
+  const providerCode = String(payload?.error?.code || "");
+  const quotaCodes = new Set([
+    "insufficient_quota", "credit_balance_exhausted", "organization_spend_limit_exceeded",
+    "project_spend_limit_exceeded", "organization_usage_limit_exceeded",
+  ]);
+  const quota = quotaCodes.has(providerCode) || payload?.error?.type === "insufficient_quota";
+  const limited = response.status === 429 && !quota;
+  const auth = response.status === 401 || response.status === 403;
+  const code = quota ? "openai_quota_exceeded" : limited ? "openai_rate_limited" : auth ? "openai_authentication_failed" : "openai_request_failed";
+  const messages: Record<string, string> = {
+    openai_quota_exceeded: "The AI account has reached its credit or spending limit. An administrator needs to check its billing. Your message is unchanged.",
+    openai_rate_limited: "AI is temporarily rate-limited. Wait a moment and try again. Your message is unchanged.",
+    openai_authentication_failed: "The AI connection needs an administrator to check its credentials or access. Your message is unchanged.",
+    openai_request_failed: "AI could not process this request. Your message is unchanged. Please try again or contact an administrator.",
+  };
+  const safeCodes = new Set([...quotaCodes, "rate_limit_exceeded", "slow_down", "invalid_api_key", "model_not_found", "unsupported_parameter", "invalid_json_schema", "server_error", "server_is_overloaded"]);
+  return new DraftError(code, {
+    phase: "openai",
+    message: messages[code],
+    transient: !quota && TRANSIENT_OPENAI_STATUSES.has(response.status),
+    details: { status: response.status, provider_code: safeCodes.has(providerCode) ? providerCode : null },
+  });
+}
+
 async function callOpenAI(input: Record<string, unknown>, prompt: string, model: string) {
   const apiKey = requiredEnv("OPENAI_API_KEY");
   const controller = new AbortController();
@@ -1125,11 +1152,7 @@ async function callOpenAI(input: Record<string, unknown>, prompt: string, model:
     });
 
     if (!response.ok) {
-      throw new DraftError("openai_request_failed", {
-        phase: "openai",
-        transient: TRANSIENT_OPENAI_STATUSES.has(response.status),
-        details: { status: response.status },
-      });
+      throw await openAIRequestError(response);
     }
 
     const payload = await response.json().catch(() => null);
@@ -1190,11 +1213,7 @@ async function callOpenAITranslation(messageText: string) {
     });
 
     if (!response.ok) {
-      throw new DraftError("openai_request_failed", {
-        phase: "openai",
-        transient: TRANSIENT_OPENAI_STATUSES.has(response.status),
-        details: { status: response.status },
-      });
+      throw await openAIRequestError(response);
     }
 
     const payload = await response.json().catch(() => null);
