@@ -688,15 +688,17 @@ button.task-action-btn.is-assigned:hover,
 }
 
 .buyer-line-note-preview {
+  display: block;
   flex: 1 1 220px;
-  min-width: 140px;
-  max-width: 520px;
+  min-width: 0;
+  max-width: min(520px, 100%);
   border: 1px solid rgba(125, 197, 255, 0.22);
   background: rgba(125, 197, 255, 0.07);
   color: rgba(231, 242, 255, 0.86);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .bag-lookup-panel {
@@ -1325,6 +1327,7 @@ textarea:focus {
 
 .orders-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   overflow: auto;
   padding-right: 4px;
@@ -2126,7 +2129,13 @@ textarea:focus {
 .queue-completion-photo-marker.is-checking, .queue-completion-photo-marker.is-unknown { color: #cfe3ff; }
 
 .buyer-line-note-summary {
-  display: contents;
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 280px;
 }
 
 .line-note-history-section {
@@ -3973,6 +3982,8 @@ body.pending-order-detail-open .mobile-detail-close {
   --queue-tint: rgba(255, 255, 255, 0.035);
   --queue-surface: rgba(255, 255, 255, 0.032);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 12px;
   padding: 16px 18px;
   border-color: rgba(255, 255, 255, 0.1);
@@ -4004,7 +4015,7 @@ body.pending-order-detail-open .mobile-detail-close {
 }
 
 .buyer-order-card.is-collapsed .buyer-card-head {
-  grid-template-columns: minmax(0, 1fr) max-content;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   align-items: center;
   gap: 10px;
 }
@@ -4084,7 +4095,7 @@ body.pending-order-detail-open .mobile-detail-close {
 }
 
 .buyer-order-card.is-collapsed .buyer-card-alerts {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -4159,7 +4170,7 @@ body.pending-order-detail-open .mobile-detail-close {
 
 .buyer-card-head {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(320px, max-content);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   align-items: start;
   gap: 12px;
 }
@@ -4376,6 +4387,8 @@ body.pending-order-detail-open .mobile-detail-close {
 
 .buyer-card-expanded {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 10px;
   padding-top: 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
@@ -4650,6 +4663,8 @@ body.pending-order-detail-open .mobile-detail-close {
 
 .buyer-line-list {
   margin-top: 0;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 9px;
 }
 
@@ -4695,9 +4710,9 @@ body.pending-order-detail-open .mobile-detail-close {
 }
 
 .buyer-line-main {
-  grid-template-columns: minmax(260px, 1.1fr) auto minmax(210px, 0.62fr);
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 260px);
   grid-auto-rows: auto;
-  align-items: center;
+  align-items: start;
   gap: 8px 14px;
 }
 
@@ -5097,21 +5112,22 @@ a.buyer-line-finance-pill:hover {
 }
 
 .buyer-line-actions {
-  grid-column: 2;
-  justify-content: flex-end;
-  align-self: center;
+  grid-column: 1;
+  justify-content: flex-start;
+  align-self: start;
 }
 
 .buyer-line-receipt-actions {
   grid-column: 1;
-  width: max-content;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
 }
 
 .queue-video-receipt-evidence {
-  grid-column: 3;
-  grid-row: 1 / span 2;
-  align-self: center;
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: start;
   justify-self: stretch;
 }
 
@@ -5133,7 +5149,7 @@ a.buyer-line-finance-pill:hover {
 
 @media (max-width: 1080px) {
   .buyer-line-main {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .buyer-line-copy,

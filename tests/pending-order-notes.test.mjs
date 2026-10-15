@@ -121,6 +121,53 @@ async function loaded(page, count = 2) {
     && document.querySelector('[data-buyer-shared-notes]')?.textContent.includes('alex@example.com'), count);
 }
 
+for (const width of [390, 1024, 1280, 1440, 1920]) {
+  test(`${width}px: long notes keep order actions inside the row at normal zoom`, async t => {
+    const page = await open(t, {render: false, mobile: width === 390});
+    await page.setViewportSize({width, height: 800});
+    await page.evaluate(() => {
+      isAdminUser = () => true;
+      events[1].notes = 'Keep every packing instruction available. '.repeat(35) + 'LongReference'.repeat(80);
+      line.latest_line_note = events[1].notes;
+      renderOrders();
+    });
+    await loaded(page);
+    const card = page.locator('.buyer-order-card');
+    const assertFits = async () => {
+      const overflow = await card.evaluate(card => {
+        const bounds = card.getBoundingClientRect();
+        return [...card.querySelectorAll('button, .buyer-line-main, .buyer-line-note-summary, .buyer-line-note-preview')]
+          .filter(el => el.getClientRects().length)
+          .map(el => ({label: el.className, rect: el.getBoundingClientRect()}))
+          .filter(({rect}) => rect.left < bounds.left - 1 || rect.right > bounds.right + 1)
+          .map(({label, rect}) => ({label, left: rect.left, right: rect.right, cardRight: bounds.right}));
+      });
+      assert.deepEqual(overflow, []);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    };
+    await assertFits();
+    await card.locator('[data-buyer-expand-key]').click();
+    await assertFits();
+    if (width > 760) {
+      await card.locator('[data-toggle-group-notes]').click();
+      await expect(card.locator('.buyer-card-note-details')).toContainText('LongReference'.repeat(80));
+      await assertFits();
+      await card.locator('[data-toggle-group-notes]').click();
+    }
+    const row = card.locator('.buyer-line-btn');
+    const overlap = await row.evaluate(row => {
+      const actions = row.querySelector('.buyer-line-actions').getBoundingClientRect();
+      const notes = row.querySelector('.buyer-line-note-summary').getBoundingClientRect();
+      return actions.left < notes.right && actions.right > notes.left
+        && actions.top < notes.bottom && actions.bottom > notes.top;
+    });
+    assert.equal(overlap, false, 'Notes must not cover the action buttons');
+    await mkdir('test-results/pending-notes-layout', {recursive: true});
+    await row.scrollIntoViewIfNeeded();
+    await page.screenshot({path: `test-results/pending-notes-layout/${width}.png`});
+  });
+}
+
 test('customer promises are prominent in order notes and customer task creation prefills the exact buyer',async t=>{
   const page=await open(t,{render:false});
   await page.evaluate(()=>{
