@@ -135,6 +135,10 @@ body[data-page="team-tasks"] .team-task-summary-facts .task-card-assigned { widt
 .task-expand-icon { display: grid; place-items: center; color: var(--task-muted); font-size: 22px; }
 body[data-page="team-tasks"] .team-task-card-details { margin: 0 20px 20px; padding: 18px 0 0; border-top: 1px solid #ffffff14; gap: 16px; }
 .task-detail-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; color: var(--task-muted); flex-wrap: wrap; }
+.task-read-confirmation { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.task-read-saved { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; padding: 8px 12px; color: #acd4be; font-weight: 600; white-space: nowrap; }
+body[data-page="team-tasks"] .task-read-options summary { width: 44px; min-width: 44px; padding: 6px 10px; border-radius: 10px; font-size: 18px; }
+body[data-page="team-tasks"] .task-read-options .team-task-action-menu-body { position: absolute; right: 0; top: calc(100% + 8px); width: 220px; }
 body[data-page="team-tasks"] .team-task-mark-read-chip { display: inline-flex; min-height: 40px; border-radius: 10px; font-size: 12px; padding: 8px 12px; font-weight: 600; }
 body[data-page="team-tasks"] :is(.team-task-brief, .team-task-context, .team-task-update-trail, .team-task-event, .team-task-order-work-card) { background: #ffffff03; box-shadow: none; border-color: #ffffff14; }
 body[data-page="team-tasks"] :is(.team-task-instruction p, .team-task-event p, .team-task-message-focus span) { font-size: 14px; line-height: 1.65; color: #e1e6df; white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 500; }

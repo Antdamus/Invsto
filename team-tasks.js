@@ -6,6 +6,7 @@ const state = {
   removedTasks: [],
   eventsByTask: new Map(),
   taskReadStates: new Map(),
+  taskReadSaves: new Set(),
   taskReadStateSyncAvailable: true,
   taskReadFilter: "all",
   readFilterOpenTasks: new Set(),
@@ -636,10 +637,25 @@ function getTaskActivityInfo(task = {}) {
 
 function getTaskUnreadNotifications(task = {}) {
   if (isTaskViewAsWorkerMode()) return [];
+  const ownAssignment = isTaskCreatedByCurrentUser(task);
+  const assignmentNotices = new Set(['task_assigned', 'subtask_assigned', 'shipment_assigned', 'packaging_assigned', 'return_task_assigned', 'task_due_reminder', 'task_overdue']);
   return state.notifications.filter((entry) => (
     !entry.read_at
     && entry.source === task.source
     && entry.task_id === task.id
+    && !isTaskActivityByViewer(entry.actor_user_id, entry.actor_email)
+    && !(ownAssignment && assignmentNotices.has(entry.notification_type))
+  ));
+}
+
+function isTaskActivityByViewer(userId, email) {
+  return Boolean((userId && userId === getTaskViewerUserId()) || userEmailMatchesTaskViewer(email));
+}
+
+function getTaskIncomingEvents(task) {
+  return (state.eventsByTask.get(getUnifiedTaskKey(task)) || []).filter(event => (
+    !['created', 'assigned'].includes(String(event.action || '').toLowerCase())
+    && !isTaskActivityByViewer(event.signed_by, event.signed_by_email)
   ));
 }
 
@@ -726,6 +742,15 @@ function getTaskReadInfo(task = {}) {
 
   if (unreadNotifications.length) {
     return { status: "updated", label: "New update", className: "has-unseen-updates" };
+  }
+  if (isTaskCreatedByCurrentUser(task)) {
+    // Creating, assigning, or editing your own instructions is already known
+    // to you. Only activity from someone else starts an unread update.
+    const seenThrough = Math.max(lastSeen, parseTimestamp(readState?.last_seen_event_at));
+    if (getTaskIncomingEvents(task).some(event => !readState || parseTimestamp(event.created_at) > seenThrough)) {
+      return { status: "updated", label: "Updated", className: "has-unseen-updates" };
+    }
+    return { status: "read", label: readState ? "Read" : "No updates", className: "is-read" };
   }
   if (!readState) {
     return { status: "unread", label: "Unread", className: "is-unread" };
@@ -4619,6 +4644,28 @@ function getTaskSummaryTitle(task = {}) {
   return task.title || "Team task";
 }
 
+function renderTaskReadControl(task, readInfo) {
+  const key = escapeHtml(getUnifiedTaskKey(task));
+  if (state.taskReadSaves.has(getUnifiedTaskKey(task))) {
+    return '<button type="button" class="team-task-mark-read-chip" disabled>Saving…</button>';
+  }
+  if (readInfo.status !== "read") {
+    return `<button type="button" class="team-task-mark-read-chip" data-team-task-mark-read="${key}">Mark read</button>`;
+  }
+  if (readInfo.label === "No updates") {
+    return '<span class="task-read-saved" role="status">No updates</span>';
+  }
+  return `<div class="task-read-confirmation">
+    <span class="task-read-saved" role="status"><span aria-hidden="true">✓</span> Read</span>
+    <details class="team-task-action-menu task-read-options">
+      <summary aria-label="Read options" title="Read options">⋯</summary>
+      <div class="team-task-action-menu-body">
+        <button type="button" class="secondary-btn" data-team-task-mark-unread="${key}">Mark unread</button>
+      </div>
+    </details>
+  </div>`;
+}
+
 function renderTaskCard(task = {}, options = {}) {
   const taskKey = getUnifiedTaskKey(task);
   const events = state.eventsByTask.get(taskKey) || [];
@@ -4642,7 +4689,7 @@ function renderTaskCard(task = {}, options = {}) {
   const photoCount = events.reduce((total, event) => total + (event.photo_attachments?.length || 0), 0);
   const detailsHtml = !expanded ? "" : `
     <div class="task-detail-toolbar"><span>${escapeHtml(getTaskNextStepLabel(task))}</span>
-      <button type="button" class="team-task-mark-read-chip" data-team-task-mark-${unread ? "read" : "unread"}="${escapeHtml(taskKey)}">Mark ${unread ? "read" : "unread"}</button>
+      ${renderTaskReadControl(task, readInfo)}
     </div>
     ${renderTeamTaskBrief(task, events, canceled)}
     ${evidenceLoading ? '<div class="task-evidence-loading" role="status">Loading photos and task details…</div>' : `
@@ -4717,7 +4764,9 @@ function attachTaskCardInteractions(root = document) {
       event.stopPropagation();
       const key = button.dataset.teamTaskMarkRead || "";
       const task = getTaskByUnifiedKey(key);
-      if (!task) return;
+      if (!task || state.taskReadSaves.has(key)) return;
+      state.taskReadSaves.add(key);
+      button.disabled = true;
       button.textContent = "Saving...";
       button.setAttribute("aria-disabled", "true");
       try {
@@ -4726,6 +4775,7 @@ function attachTaskCardInteractions(root = document) {
         if (state.taskReadFilter === "unread" && state.expandedTaskKeys.has(key)) state.readFilterOpenTasks.add(key);
         await markTaskSeen(task);
       } finally {
+        state.taskReadSaves.delete(key);
         renderTasks();
       }
     };
@@ -4741,12 +4791,15 @@ function attachTaskCardInteractions(root = document) {
       event.stopPropagation();
       const key = button.dataset.teamTaskMarkUnread || "";
       const task = getTaskByUnifiedKey(key);
-      if (!task) return;
+      if (!task || state.taskReadSaves.has(key)) return;
+      state.taskReadSaves.add(key);
+      button.disabled = true;
       button.textContent = "Saving...";
       button.setAttribute("aria-disabled", "true");
       try {
         await markTaskUnread(task);
       } finally {
+        state.taskReadSaves.delete(key);
         renderTasks();
       }
     };

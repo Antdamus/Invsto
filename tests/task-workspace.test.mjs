@@ -385,6 +385,7 @@ async function updateFilterFixture(page) {
       state.taskEvidenceLoads.set(getUnifiedTaskKey(task), {status: 'ready'});
     });
     state.eventsByTask.set('team:progress', [{id: 'progress-event', action: 'progress', notes: 'Packing finished', signed_by: 'teammate', created_at: '2026-10-03T10:00:00Z'}]);
+    state.eventsByTask.set('team:decision', [{id: 'completion-event', action: 'completed', new_status: 'completed_by_employee', signed_by: 'teammate', created_at: '2026-10-03T10:00:00Z'}]);
     state.notifications = ['one', 'two'].map(id => ({id, source: 'team', task_id: 'reply', recipient_user_id: 'me', notification_type: 'task_progress_update', created_at: '2026-10-03T11:00:00Z'}));
     state.taskReadStates.delete('team:decision');
     loadTasks = async () => renderTasks();
@@ -420,6 +421,56 @@ test('Following counts tasks with unread activity once and filters updates acros
   assert.deepEqual(await page.evaluate(() => readWrites), []);
 });
 
+test('your new assignments and own notes have no updates until someone else responds', async t => {
+  const page = await open(t); await updateFilterFixture(page);
+  await page.evaluate(() => {
+    const base = state.tasks[0];
+    state.tasks = ['team', 'order', 'return'].map(source => ({...base, id: `new-${source}`, source,
+      title: `New ${source} assignment`, assigned_by: 'me', created_by: 'me',
+      status: 'assigned', updated_at: '2026-10-04T10:00:00Z'}));
+    state.taskReadStates.clear(); state.eventsByTask.clear(); state.notifications = [];
+    state.tasks.forEach(task => {
+      state.eventsByTask.set(getUnifiedTaskKey(task), [
+        {action: 'created', signed_by: 'me', created_at: task.created_at},
+        {action: 'progress', signed_by_email: 'ALEX@example.test', notes: 'My extra instructions', created_at: task.updated_at},
+      ]);
+      state.taskEvidenceLoads.set(getUnifiedTaskKey(task), {status: 'ready'});
+      state.notifications.push({id: `assignment-${task.source}`, source: task.source, task_id: task.id,
+        notification_type: 'task_assigned', actor_user_id: 'me', created_at: task.created_at});
+    });
+    renderTasks();
+  });
+  await page.locator('[data-task-owner-filter=following]').click();
+  await expect(page.locator('[data-task-read=unread] [data-update-count]')).toHaveText('0');
+  await expect(page.locator('[data-task-read=read] [data-update-count]')).toHaveText('3');
+  await expect(page.locator('.task-read-label')).toHaveText(['No updates', 'No updates', 'No updates']);
+  await page.locator('[data-team-task-toggle="team:new-team"]').click();
+  const card = page.locator('[data-team-task-card=new-team]');
+  await expect(card.locator('.task-read-saved')).toHaveText('No updates');
+  assert.deepEqual(await page.evaluate(() => readWrites), [], 'creating and opening tasks must not fake a manual acknowledgment');
+  await page.evaluate(() => {
+    state.eventsByTask.get('team:new-team').push({action: 'progress', signed_by: 'teammate', notes: 'I have started', created_at: '2026-10-05T10:00:00Z'});
+    renderTasks();
+  });
+  await expect(card.locator('.task-read-label')).toHaveText('Updated');
+  await expect(page.locator('[data-task-read=unread] [data-update-count]')).toHaveText('1');
+  await card.getByRole('button', {name: 'Mark read', exact: true}).click();
+  await expect(card.locator('.task-read-saved')).toHaveText('✓ Read');
+  await page.evaluate(() => {
+    const future = new Date(Date.now() + 10000).toISOString();
+    state.tasks[0].updated_at = future;
+    state.eventsByTask.get('team:new-team').push({action: 'progress', signed_by: 'me', notes: 'My own follow-up', created_at: future});
+    renderTasks();
+  });
+  await expect(card.locator('.task-read-label')).toHaveText('Read');
+  await page.evaluate(() => {
+    state.eventsByTask.get('team:new-team').push({action: 'completed', signed_by: 'teammate', created_at: new Date(Date.now() + 20000).toISOString()});
+    renderTasks();
+  });
+  await expect(card.locator('.task-read-label')).toHaveText('Updated');
+  assert.equal(await page.evaluate(() => getTaskReadInfo({id: 'received', source: 'team', created_by: 'someone-else', assigned_to_user_id: 'me'}).status), 'unread', 'incoming assignments must still alert their recipient');
+});
+
 test('opening preserves unread updates; only Mark read acknowledges them and keeps details open', async t => {
   const page = await open(t); await updateFilterFixture(page);
   await page.locator('[data-task-owner-filter=following]').click();
@@ -437,6 +488,9 @@ test('opening preserves unread updates; only Mark read acknowledges them and kee
   assert.deepEqual(await page.evaluate(() => readWrites), []);
   await card.getByRole('button', {name: 'Mark read', exact: true}).click();
   await expect(card.locator('.task-read-label')).toHaveText('Read');
+  await expect(card.locator('.task-read-saved')).toHaveText('✓ Read');
+  await expect(card.locator('.task-read-saved')).toBeVisible();
+  await expect(card.getByRole('button', {name: 'Mark unread', exact: true})).toBeHidden();
   await expect(card.locator('.team-task-card-details')).toBeVisible();
   await expect(page.locator('[data-task-owner-filter=following] [data-inbox-unread]')).toHaveText('1 new');
   await expect(page.locator('[data-task-read=unread] [data-update-count]')).toHaveText('1');
@@ -453,6 +507,40 @@ test('opening preserves unread updates; only Mark read acknowledges them and kee
   await expect(page.locator('[data-task-owner-filter=following] [data-inbox-unread]')).toHaveText('2 new');
   await page.locator('[data-task-read=unread]').click();
   await expect(card.locator('.task-read-label')).toHaveText('New update');
+});
+
+test('read confirmation survives rerenders during saving and keeps undo behind a separate menu', async t => {
+  const page = await open(t); await updateFilterFixture(page);
+  await page.evaluate(() => {
+    supabase.rpc = async (...args) => {
+      readWrites.push(args);
+      await new Promise(resolve => {window.finishReadSave = resolve;});
+      return {data: [], error: null};
+    };
+  });
+  await page.locator('[data-task-owner-filter=following]').click();
+  await page.locator('[data-team-task-toggle="team:progress"]').click();
+  const card = page.locator('[data-team-task-card=progress]');
+  await card.getByRole('button', {name: 'Mark read', exact: true}).click();
+  await expect(card.getByRole('button', {name: /Saving/})).toBeDisabled();
+  // Evidence loading and notification refreshes can rebuild an expanded card
+  // while its read RPC is pending. They must not expose an inverse action.
+  await page.evaluate(() => renderTasks());
+  await expect(card.getByRole('button', {name: /Saving/})).toBeDisabled();
+  await expect(card.locator('[data-team-task-mark-unread]')).toHaveCount(0);
+  await page.evaluate(() => finishReadSave());
+  await expect(card.locator('.task-read-saved')).toHaveText('✓ Read');
+  await expect(card.getByRole('button', {name: 'Mark read', exact: true})).toHaveCount(0);
+  await expect(card.getByRole('button', {name: 'Mark unread', exact: true})).toBeHidden();
+  assert.equal((await page.evaluate(() => readWrites)).length, 1);
+  await expect(card.locator('.task-read-options summary')).toHaveAttribute('aria-label', 'Read options');
+  await card.locator('.task-read-options summary').click();
+  await expect(card.getByRole('button', {name: 'Mark unread', exact: true})).toBeVisible();
+  const undoBounds = await card.getByRole('button', {name: 'Mark unread', exact: true}).boundingBox();
+  assert.ok(undoBounds.x >= 0 && undoBounds.x + undoBounds.width <= 390, 'read options must remain on screen');
+  await expect(card.locator('.task-read-label')).toHaveText('Read');
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await card.screenshot({path: 'test-results/task-read-confirmation-local.png'});
 });
 
 test('marking notification updates read clears the badge and remains read after reloading read states', async t => {
