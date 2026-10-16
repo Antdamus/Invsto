@@ -163,7 +163,7 @@
   body[data-phone-page=stock] .stock-location-chip b { color: #ebce98; font-size: 16px; }
   body[data-phone-page=stock] .stock-card:not(.phone-stock-expanded) .stock-location-chip:nth-child(n+3) { display: none; }
   body[data-phone-page=stock] .stock-card:not(.phone-stock-expanded) :is(.ebay-card-badges,.stock-description-wrap,.stock-card-details,.chip-section-label,.category-chips,.card-float-controls,.stock-card-action-cluster) { display: none; }
-  body[data-phone-page=stock] .stock-card:not(.phone-stock-expanded) .stock-metric-grid > span:not(.phone-price-metric) { display: none; }
+  body[data-phone-page=stock] .stock-card:not(.phone-stock-expanded) .stock-metric-grid > span:not(.phone-price-metric,.stock-watch-serial) { display: none; }
   body[data-phone-page=stock] .stock-condition-summary { order: 3; margin: 0; }
   body[data-phone-page=stock] .stock-card:not(.phone-stock-expanded) .stock-condition-summary > span:not(.has-defects) { display: none; }
   body[data-phone-page=stock] .stock-card:not(.phone-stock-expanded) .stock-condition-summary:not(:has(.has-defects)) { display: none; }

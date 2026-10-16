@@ -700,6 +700,9 @@ function buildLocationChips(item) {
       const tooltip = item.stock_tooltip || "";
       const showSensitive = canViewSensitiveStockData();
       const isDeleted = isStockItemDeleted(item);
+      const isWatch = Boolean(item.watch_details) || String(item.ebay_category_id || "") === "31387"
+        || (item.categories || []).some(category => /^(?:watches|wristwatches)$/i.test(String(category).trim()));
+      const watchSerial = String(item.watch_details?.serial || "").trim();
       const isEbaySyncOff = item.ebay_sync_enabled === false;
       const ebayCategoryOption = getEffectiveEbayCategoryOption(item);
       const descriptionText = String(item.description || "").trim() || "No description recorded.";
@@ -762,6 +765,7 @@ function buildLocationChips(item) {
             <span><small>Retail</small><strong>${item.pricing_status === 'pending' ? 'Awaiting pricing' : formatStockMoney(item.sale_price)}</strong></span>
             <span><small>Minimum sale</small><strong>${item.minimum_sale_price == null ? "Not set" : formatStockMoney(item.minimum_sale_price)}</strong></span>
             <span><small>Barcode</small><button type="button" class="stock-barcode-btn" data-barcode="${escapeStockHtml(item.barcode || "")}">${escapeStockHtml(item.barcode || "-")}</button></span>
+            ${isWatch ? `<span class="stock-watch-serial"><small>Serial number</small><strong>${escapeStockHtml(watchSerial || "Not recorded")}</strong></span>` : ""}
             ${showSensitive ? `<span><small>Cost</small><strong>${item.pricing_status === 'pending' ? 'Awaiting pricing' : formatStockMoney(item.cost)}</strong></span>` : ""}
           </div>
           <div class="stock-condition-summary">
@@ -1384,7 +1388,8 @@ function buildLocationChips(item) {
 
         return (
           (!filters.query || item.title?.toLowerCase().includes(filters.query) ||
-            item.description?.toLowerCase().includes(filters.query) || matchesStockBarcode(item, filters.query)) &&
+            item.description?.toLowerCase().includes(filters.query) || matchesStockBarcode(item, filters.query) ||
+            String(item.watch_details?.serial || "").trim().toLowerCase().includes(filters.query)) &&
           (!filters.title || item.title?.toLowerCase().includes(filters.title)) &&
           (!filters.description || item.description?.toLowerCase().includes(filters.description)) &&
           (!filters.barcode || matchesStockBarcode(item, filters.barcode)) &&

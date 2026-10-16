@@ -32,6 +32,8 @@ body.stock-body { --stock-ink:#f4f0e6; --stock-muted:#b6c3b7; --stock-gold:#ead3
 .stock-body .stock-metric-grid > span { background:#102018; border-color:var(--stock-line); border-radius:12px; padding:11px; }
 .stock-body .stock-metric-grid small { color:var(--stock-muted); font:600 10px/1.4 Manrope,sans-serif; letter-spacing:.06em; }
 .stock-body .stock-metric-grid strong { color:var(--stock-gold); font:700 16px/1.5 Manrope,sans-serif; white-space:normal; overflow-wrap:anywhere; }
+.stock-body .stock-metric-grid .stock-watch-serial { grid-column:1/-1; }
+.stock-body .stock-watch-serial strong { user-select:text; }
 .stock-body .stock-barcode-btn { color:#d1dfce; font:600 12px/1.5 Manrope,sans-serif; min-height:28px; overflow-wrap:anywhere; white-space:normal; }
 .stock-body .ebay-card-badges { display:flex; flex-wrap:wrap; gap:6px; margin:0; }
 .stock-body :is(.ebay-sync-badge,.ebay-category-badge) { background:#23392b; border:1px solid #49604b; color:#d0ddc9; font:600 11px/1.3 Manrope,sans-serif; padding:6px 9px; }
