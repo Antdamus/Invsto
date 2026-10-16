@@ -12,6 +12,14 @@
   let subscriberStatusFilter = "subscribed";
   let activeAutoMessageKey = "username_prompt";
   let autoMessages = {};
+  let activeShowPlatform = "ebay";
+  let isSending = false;
+  const showDrafts = {};
+  const SHOW_DRAFT_FIELDS = ["campaignTitle", "templateSelect", "showDate", "showTime", "messageBody", "linkUrl"];
+  const SHOW_PLATFORMS = {
+    ebay: { name: "eBay", liveName: "eBay Live", linkPlaceholder: "https://www.ebay.com/live/..." },
+    tiktok: { name: "TikTok", liveName: "TikTok LIVE", linkPlaceholder: "https://www.tiktok.com/@yourusername/live" },
+  };
 
   const SMS_TEMPLATES = {
     "starting-soon": {
@@ -33,6 +41,29 @@
     "last-call": {
       title: ({ titleDate }) => `Last call ${titleDate}`.trim(),
       message: () => "Last call: the live show is happening now. Watch here:",
+    },
+  };
+
+  const TIKTOK_SMS_TEMPLATES = {
+    "starting-soon": {
+      title: ({ titleDate, time }) => `TikTok show ${titleDate}${time ? ` ${time}` : ""}`.trim(),
+      message: ({ when }) => `Our live jewelry show on TikTok starts ${when}. Join our TikTok LIVE here:`,
+    },
+    "next-show": {
+      title: ({ titleDate, time }) => `Next TikTok show ${titleDate}${time ? ` ${time}` : ""}`.trim(),
+      message: ({ when }) => `Join our next live jewelry show on TikTok ${when}. Tap here to join:`,
+    },
+    "reminder": {
+      title: ({ titleDate, time }) => `TikTok reminder ${titleDate}${time ? ` ${time}` : ""}`.trim(),
+      message: ({ when }) => `Reminder: our TikTok LIVE jewelry show starts ${when}. Join us here:`,
+    },
+    "live-now": {
+      title: ({ titleDate }) => `TikTok live now ${titleDate}`.trim(),
+      message: () => "We are LIVE on TikTok now! Join our live jewelry show here:",
+    },
+    "last-call": {
+      title: ({ titleDate }) => `TikTok last call ${titleDate}`.trim(),
+      message: () => "Last call: our TikTok LIVE jewelry show is happening now. Join us here:",
     },
   };
 
@@ -220,7 +251,48 @@ If you win, you must provide your Instagram username so we can message you there
 
   function getSelectedTemplate() {
     const key = $("#templateSelect")?.value || "starting-soon";
-    return SMS_TEMPLATES[key] || SMS_TEMPLATES["starting-soon"];
+    const templates = activeShowPlatform === "tiktok" ? TIKTOK_SMS_TEMPLATES : SMS_TEMPLATES;
+    return templates[key] || templates["starting-soon"];
+  }
+
+  function renderShowPlatform() {
+    const platform = SHOW_PLATFORMS[activeShowPlatform];
+    $$("[data-show-platform]").forEach((button) => {
+      const active = button.dataset.showPlatform === activeShowPlatform;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+      button.disabled = isSending;
+    });
+    $("#showPlatformHeading").textContent = `Send ${platform.name} Show Alert`;
+    $("#showLinkLabel").textContent = `${platform.name} show link`;
+    $("#linkUrl").placeholder = platform.linkPlaceholder;
+    $("#showLinkHelp").textContent = `Paste your ${platform.liveName} share link. Sends to your subscribed customers.`;
+    $("#sendBtn").textContent = `Send ${platform.name} SMS Alert`;
+  }
+
+  function setShowPlatform(key) {
+    if (!SHOW_PLATFORMS[key] || key === activeShowPlatform || isSending) return;
+    showDrafts[activeShowPlatform] = {
+      fields: Object.fromEntries(SHOW_DRAFT_FIELDS.map((id) => [id, $(`#${id}`).value])),
+      messageTemplateSynced,
+      campaignTitleSynced,
+      status: $("#sendStatus").textContent,
+      statusClass: $("#sendStatus").className,
+    };
+    activeShowPlatform = key;
+    const draft = showDrafts[key];
+    const fields = draft?.fields || {
+      campaignTitle: "", templateSelect: "starting-soon", showDate: todayInputValue(),
+      showTime: "20:00", messageBody: "", linkUrl: "",
+    };
+    SHOW_DRAFT_FIELDS.forEach((id) => { $(`#${id}`).value = fields[id]; });
+    messageTemplateSynced = draft?.messageTemplateSynced ?? true;
+    campaignTitleSynced = draft?.campaignTitleSynced ?? true;
+    renderShowPlatform();
+    if (!draft) applyTemplate({ forceMessage: true, forceTitle: true });
+    else updatePreview();
+    $("#sendStatus").textContent = draft?.status || "";
+    $("#sendStatus").className = draft?.statusClass || "send-status";
   }
 
   function normalizeSpaces(value) {
@@ -294,7 +366,7 @@ If you win, you must provide your Instagram username so we can message you there
       count.style.color = body.length > 480 ? "var(--danger)" : "";
     }
     const sendBtn = $("#sendBtn");
-    if (sendBtn) sendBtn.disabled = body.length > 480;
+    if (sendBtn) sendBtn.disabled = isSending || body.length > 480;
   }
 
   async function ensureAdmin() {
@@ -600,6 +672,7 @@ If you win, you must provide your Instagram username so we can message you there
 
   async function sendCampaign(event) {
     event.preventDefault();
+    if (isSending) return;
     setStatus("");
     updatePreview();
 
@@ -611,7 +684,7 @@ If you win, you must provide your Instagram username so we can message you there
       return;
     }
     if (!cleanLink($("#linkUrl")?.value)) {
-      setStatus("Add a valid show link first.", "error");
+      setStatus(`Add a valid ${SHOW_PLATFORMS[activeShowPlatform].name} show link first.`, "error");
       $("#linkUrl")?.focus();
       return;
     }
@@ -624,10 +697,12 @@ If you win, you must provide your Instagram username so we can message you there
       return;
     }
 
-    const ok = window.confirm(`Send this SMS to ${audienceCount.toLocaleString()} subscribed customers?`);
+    const ok = window.confirm(`Send this ${SHOW_PLATFORMS[activeShowPlatform].name} show SMS to ${audienceCount.toLocaleString()} subscribed customers?\n\n${body}`);
     if (!ok) return;
 
     const sendBtn = $("#sendBtn");
+    isSending = true;
+    renderShowPlatform();
     if (sendBtn) sendBtn.disabled = true;
     setStatus("Sending SMS campaign...");
 
@@ -638,7 +713,7 @@ If you win, you must provide your Instagram username so we can message you there
         title: $("#campaignTitle")?.value || "",
         message: $("#messageBody")?.value || "",
         linkUrl: cleanLink($("#linkUrl")?.value),
-        templateId: $("#templateSelect")?.value || "starting-soon",
+        templateId: `${activeShowPlatform}:${$("#templateSelect")?.value || "starting-soon"}`,
         showDate: $("#showDate")?.value || "",
         showTime: $("#showTime")?.value || "",
       });
@@ -652,6 +727,8 @@ If you win, you must provide your Instagram username so we can message you there
     } catch (error) {
       setStatus(error?.message || "SMS campaign failed.", "error");
     } finally {
+      isSending = false;
+      renderShowPlatform();
       if (sendBtn) sendBtn.disabled = false;
       updatePreview();
     }
@@ -672,6 +749,9 @@ If you win, you must provide your Instagram username so we can message you there
       loadSummary().catch((error) => setStatus(error?.message || "Refresh failed.", "error"));
     });
     $("#smsForm")?.addEventListener("submit", sendCampaign);
+    $$("[data-show-platform]").forEach((button) => {
+      button.addEventListener("click", () => setShowPlatform(button.dataset.showPlatform));
+    });
     $("#campaignTitle")?.addEventListener("input", () => {
       campaignTitleSynced = false;
     });
@@ -700,6 +780,7 @@ If you win, you must provide your Instagram username so we can message you there
     if ($("#showDate") && !$("#showDate").value) $("#showDate").value = todayInputValue();
     if ($("#showTime") && !$("#showTime").value) $("#showTime").value = "20:00";
     updateSubscriberTabs();
+    renderShowPlatform();
     applyTemplate({ forceMessage: true, forceTitle: true });
     await loadSummary();
   }

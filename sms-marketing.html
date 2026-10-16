@@ -7,7 +7,7 @@
   <title>OG Jewelers - SMS Alerts</title>
 
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="sms-marketing.css?v=20260918-giveaway-pool-1" />
+  <link rel="stylesheet" href="sms-marketing.css?v=20261015-tiktok-shows-1" />
 </head>
 
 <body class="sms-alerts-page">
@@ -16,7 +16,7 @@
       <div>
         <p class="eyebrow">OG Jewelers customer alerts</p>
         <h1>SMS Alerts</h1>
-        <p class="hero-copy">Live show messages for customers who opted in by form or by texting the OG number.</p>
+        <p class="hero-copy">eBay Live and TikTok LIVE messages for customers who opted in by form or by texting the OG number.</p>
       </div>
       <div class="hero-actions">
         <button id="refreshBtn" class="btn ghost" type="button">Refresh</button>
@@ -48,10 +48,14 @@
 
       <section class="compose-grid">
         <form id="smsForm" class="compose-panel" autocomplete="off">
+          <div class="platform-tabs" role="group" aria-label="Show platform">
+            <button class="platform-tab is-active" type="button" data-show-platform="ebay" aria-pressed="true">eBay Live</button>
+            <button class="platform-tab" type="button" data-show-platform="tiktok" aria-pressed="false">TikTok LIVE</button>
+          </div>
           <div class="panel-head">
             <div>
               <p class="eyebrow">Broadcast</p>
-              <h2>Send Show Alert</h2>
+              <h2 id="showPlatformHeading">Send eBay Show Alert</h2>
             </div>
             <span id="audiencePill" class="pill">0 recipients</span>
           </div>
@@ -92,8 +96,9 @@
           </label>
 
           <label class="field">
-            <span>Show link</span>
-            <input id="linkUrl" type="url" placeholder="https://www.ebay.com/live/..." />
+            <span id="showLinkLabel">eBay show link</span>
+            <input id="linkUrl" type="url" placeholder="https://www.ebay.com/live/..." aria-describedby="showLinkHelp" />
+            <small id="showLinkHelp">Paste your eBay Live share link. Sends to your subscribed customers.</small>
           </label>
 
           <div class="preview-panel" aria-label="SMS preview">
@@ -104,7 +109,7 @@
 
           <div id="sendStatus" class="send-status" role="status" aria-live="polite"></div>
 
-          <button id="sendBtn" class="btn primary" type="submit">Send SMS Alert</button>
+          <button id="sendBtn" class="btn primary" type="submit">Send eBay SMS Alert</button>
         </form>
 
         <section class="side-panel">
@@ -182,6 +187,6 @@
   <script src="initSupabase.js"></script>
   <script src="task-notifications.js?v=20261010-catalogue-requests" defer></script>
   <script src="admin-nav.js?v=packaging-20261008"></script>
-  <script src="sms-marketing.js?v=20260918-giveaway-pool-1"></script>
+  <script src="sms-marketing.js?v=20261015-tiktok-shows-1"></script>
 </body>
 </html>
