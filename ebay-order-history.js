@@ -5209,12 +5209,32 @@ function renderGroupReturnControl(group) {
 
 function renderHistoryLineVideoReceiptPhotos(line = {}, events = []) {
   const photos = getHistoryLineVideoReceiptPhotos(line, events);
-  if (!photos.length) return "";
+  const receiptLink = getReturnLineVideoReceiptLink(line);
+  const hasLink = Boolean(receiptLink.url || receiptLink.orderNumber);
+  if (!photos.length && !hasLink) return "";
 
   return `
     <div class="history-video-receipt-strip">
-      <span>Video receipt screenshots</span>
-      <div class="history-video-receipt-grid">
+      <div class="history-video-receipt-head">
+        <span>Video receipt</span>
+        ${hasLink ? `
+          <a class="secondary-btn history-video-receipt-link"
+            href="${escapeHtml(receiptLink.url || receiptLink.orderDetailsUrl)}"
+            target="_blank" rel="noopener noreferrer"
+            title="${escapeHtml(receiptLink.title)}"
+            data-return-video-receipt-link="1"
+            data-order-id="${escapeHtml(receiptLink.orderId)}"
+            data-order-number="${escapeHtml(receiptLink.orderNumber)}"
+            data-order-details-url="${escapeHtml(receiptLink.orderDetailsUrl)}"
+            data-item-number="${escapeHtml(receiptLink.itemNumber)}"
+            data-transaction-id="${escapeHtml(receiptLink.transactionId)}"
+            data-item-title="${escapeHtml(receiptLink.itemTitle)}"
+            data-item-url="${escapeHtml(receiptLink.itemUrl)}"
+            data-direct="${receiptLink.direct ? "1" : "0"}"
+          >Open video receipt</a>
+        ` : ""}
+      </div>
+      ${photos.length ? `<div class="history-video-receipt-grid">
         ${photos.map((photo, index) => {
           const label = photo.label || `Video receipt ${index + 1}`;
           const meta = getEvidencePhotoViewerMeta(photo);
@@ -5230,7 +5250,7 @@ function renderHistoryLineVideoReceiptPhotos(line = {}, events = []) {
                 data-meta="${escapeHtml(meta)}"
               >
                 <span class="history-video-receipt-image" data-history-video-receipt-image>Loading...</span>
-                <span>${escapeHtml(label)}</span>
+                <span>${escapeHtml(label)}<small class="history-receipt-preview-label">View screenshot</small></span>
                 <small>${escapeHtml(getEvidencePhotoAuditText(photo))}</small>
               </button>
               <button
@@ -5245,7 +5265,7 @@ function renderHistoryLineVideoReceiptPhotos(line = {}, events = []) {
             </span>
           `;
         }).join("")}
-      </div>
+      </div>` : ""}
     </div>
   `;
 }
@@ -6388,6 +6408,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
         deleteHistoryVideoReceiptCapture(button);
       });
     });
+    bindReturnVideoReceiptLinks(card);
     list.appendChild(card);
   });
   requestHistoryFocusScroll();

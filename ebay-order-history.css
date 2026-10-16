@@ -2079,11 +2079,21 @@ a.history-line-finance-pill:hover {
   margin-top: 10px;
 }
 
-.history-video-receipt-strip > span {
+.history-video-receipt-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.history-video-receipt-head > span {
   color: var(--history-accent);
   font-size: 0.78rem;
   font-weight: 950;
 }
+
+.history-video-receipt-link { min-height: 44px; }
+.history-video-receipt-thumb .history-receipt-preview-label { display: block; color: var(--history-accent); }
 
 .history-video-receipt-grid {
   display: flex;
