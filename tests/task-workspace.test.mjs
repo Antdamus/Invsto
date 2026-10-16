@@ -44,8 +44,8 @@ async function open(t, width = 390, {admin = true, direct = false, ready = true}
   await page.addScriptTag({url: `${origin}/task-workflow.js`});
   await page.addScriptTag({url: `${origin}/team-tasks.js`});
   await page.evaluate(({admin, ready, direct}) => {
-    window.writes = [];
-    window.supabase = {rpc: async (...args) => {writes.push(args); return {data: [], error: null};}, from: table => {throw Error('Unexpected DB request: ' + table);}};
+    window.writes = []; window.readWrites = [];
+    window.supabase = {rpc: async (...args) => {(args[0] === 'mark_task_seen' ? readWrites : writes).push(args); return {data: [], error: null};}, from: table => {throw Error('Unexpected DB request: ' + table);}};
     state.user = {id: 'me', email: 'alex@example.test'};
     state.employee = {id: 'me', user_id: 'me', name: 'Alex', role: admin ? 'admin' : 'employee', active: true};
     state.assignees = [{user_id: 'me', name: 'Alex', email: 'alex@example.test', role: 'admin'}, {user_id: 'teammate', name: 'Sandra', email: 'sandra@example.test', role: 'employee'}];
@@ -83,7 +83,8 @@ for (const width of [320, 390, 430, 768, 1366]) test(`Tasks at ${width}px: reada
     assert.ok(hero.y >= header.y + header.height, 'Tasks heading and New task must be below the phone header');
   }
   if ([320, 390, 1366].includes(width)) await page.screenshot({path: `test-results/tasks-${width}-local.png`});
-  assert.ok((await card.boundingBox()).y < 630, 'work visible in the first screen below the inbox and status controls');
+  const cardTop = (await card.boundingBox()).y;
+  assert.ok(cardTop < 630, `work visible in the first screen below the inbox and status controls (${cardTop}px)`);
   await expect(page.locator('.team-task-card')).toHaveCount(20);
   await expect(page.locator('.team-task-card-details > *')).toHaveCount(0);
   await expect(card.locator('.team-task-summary-preview')).toContainText('Certificate is still missing');
@@ -177,6 +178,7 @@ test('worker view and admin worker preview preserve permissions', async t => {
   await page.locator('[data-team-task-toggle="team:task-3"]').click();
   await expect(page.locator('[data-task-assignment-action]')).toHaveCount(0);
   assert.deepEqual(await page.evaluate(() => writes), []);
+  assert.deepEqual(await page.evaluate(() => readWrites), []);
 });
 
 test('task content is escaped rather than interpreted as markup', async t => {
@@ -366,6 +368,103 @@ test('filters have three primary controls and keep team oversight collapsed', as
   await filters.getByText('Team oversight', {exact: true}).click();
   await expect(page.locator('#team-task-scope')).toBeVisible();
   await expect(page.locator('#team-task-worker-view')).toBeVisible();
+});
+
+async function updateFilterFixture(page) {
+  await page.evaluate(() => {
+    const base = state.tasks[0];
+    state.tasks = ['seen', 'progress', 'reply', 'decision', 'mine', 'unrelated'].map(id => ({...base, id, title: id,
+      assigned_to_user_id: id === 'mine' ? 'me' : 'teammate', assigned_by: id === 'unrelated' ? 'other' : 'me',
+      created_by: id === 'unrelated' ? 'other' : 'me', created_by_email: '',
+      status: id === 'decision' ? 'completed_by_employee' : 'in_progress',
+      metadata: id === 'reply' ? {source: 'ebay_conversation_message'} : {},
+      created_at: '2026-10-01T10:00:00Z', updated_at: '2026-10-01T10:00:00Z'}));
+    state.eventsByTask.clear(); state.taskReadStates.clear(); state.taskEvidenceLoads.clear();
+    state.tasks.forEach(task => {
+      state.taskReadStates.set(getUnifiedTaskKey(task), {last_seen_at: '2026-10-02T10:00:00Z'});
+      state.taskEvidenceLoads.set(getUnifiedTaskKey(task), {status: 'ready'});
+    });
+    state.eventsByTask.set('team:progress', [{id: 'progress-event', action: 'progress', notes: 'Packing finished', signed_by: 'teammate', created_at: '2026-10-03T10:00:00Z'}]);
+    state.notifications = ['one', 'two'].map(id => ({id, source: 'team', task_id: 'reply', recipient_user_id: 'me', notification_type: 'task_progress_update', created_at: '2026-10-03T11:00:00Z'}));
+    state.taskReadStates.delete('team:decision');
+    loadTasks = async () => renderTasks();
+    renderTasks();
+  });
+}
+
+test('Following counts tasks with unread activity once and filters updates across source and search', async t => {
+  const page = await open(t); await updateFilterFixture(page);
+  const following = page.locator('[data-task-owner-filter=following]');
+  await expect(following.locator('[data-inbox-count]')).toHaveText('3');
+  await expect(following.locator('[data-inbox-unread]')).toHaveText('2 new');
+  await expect(page.locator('[data-task-owner-filter=approvals] [data-inbox-unread]')).toHaveText('1 new');
+  await expect(page.locator('[data-task-owner-filter=assigned] [data-inbox-unread]')).toBeHidden();
+  await following.click();
+  await expect(page.locator('[data-task-read=unread] [data-update-count]')).toHaveText('2');
+  await expect(page.locator('[data-task-read=read] [data-update-count]')).toHaveText('1');
+  await page.locator('[data-task-read=unread]').click();
+  await expect(page.locator('.team-task-card')).toHaveCount(2);
+  await expect(page.locator('#task-read-filter')).toHaveValue('unread');
+  await page.locator('[data-task-source=ebay_triage]').click();
+  await expect(page.locator('.team-task-card')).toHaveCount(1);
+  await expect(page.locator('[data-task-read=all] [data-update-count]')).toHaveText('1');
+  await expect(following.locator('[data-inbox-unread]')).toHaveText('2 new');
+  await page.locator('[data-task-source=all]').click();
+  await page.locator('#task-search').fill('Packing finished');
+  await expect(page.locator('.team-task-card')).toHaveCount(1);
+  await expect(page.locator('[data-task-read=unread] [data-update-count]')).toHaveText('1');
+  await page.locator('#task-search').fill('');
+  await page.locator('[data-task-read=read]').click();
+  await expect(page.locator('.team-task-card')).toHaveCount(1);
+  await expect(page.locator('.team-task-card .task-read-label')).toHaveText('Read');
+  assert.deepEqual(await page.evaluate(() => readWrites), []);
+});
+
+test('opening an updated task shows Read, persists it and keeps details open until closed', async t => {
+  const page = await open(t); await updateFilterFixture(page);
+  await page.locator('[data-task-owner-filter=following]').click();
+  await page.locator('[data-task-read=unread]').click();
+  await page.locator('[data-team-task-toggle="team:progress"]').click();
+  const card = page.locator('[data-team-task-card=progress]');
+  await expect(card.locator('.task-read-label')).toHaveText('Read');
+  await expect(card.locator('.team-task-card-details')).toBeVisible();
+  await expect(page.locator('[data-task-owner-filter=following] [data-inbox-unread]')).toHaveText('1 new');
+  await expect(page.locator('[data-task-read=unread] [data-update-count]')).toHaveText('1');
+  assert.equal((await page.evaluate(() => readWrites))[0][1]._task_id, 'progress');
+  await card.locator('[data-team-task-toggle]').click();
+  await expect(card).toHaveCount(0);
+  await page.locator('[data-task-read=read]').click();
+  await expect(card.locator('.task-read-label')).toHaveText('Read');
+  await page.evaluate(() => {
+    const notifications = [...state.notifications, {id: 'new-progress', source: 'team', task_id: 'progress', recipient_user_id: 'me', notification_type: 'task_progress_update'}];
+    document.dispatchEvent(new CustomEvent('og-task-notifications-changed', {detail: {userId: 'me', notifications, unreadCount: 3}}));
+  });
+  await expect(card).toHaveCount(0);
+  await expect(page.locator('[data-task-owner-filter=following] [data-inbox-unread]')).toHaveText('2 new');
+  await page.locator('[data-task-read=unread]').click();
+  await expect(card.locator('.task-read-label')).toHaveText('New update');
+});
+
+test('marking notification updates read clears the badge and remains read after reloading read states', async t => {
+  const page = await open(t); await updateFilterFixture(page);
+  await page.evaluate(() => {
+    window.notificationReads = [];
+    supabase.from = table => ({update: values => ({in: async (column, ids) => {notificationReads.push({table, column, ids, values}); return {error: null};}})});
+  });
+  await page.locator('[data-task-owner-filter=following]').click();
+  await page.locator('[data-team-task-toggle="team:reply"]').click();
+  const card = page.locator('[data-team-task-card=reply]');
+  await expect(card.locator('.task-read-label')).toHaveText('Read');
+  assert.deepEqual((await page.evaluate(() => notificationReads))[0].ids, ['one', 'two']);
+  await page.evaluate(() => {
+    state.taskReadStates.clear(); loadLocalTaskReadStatesForTasks(state.tasks); renderTasks();
+  });
+  await expect(card.locator('.task-read-label')).toHaveText('Read');
+  await page.locator('[data-task-read=read]').click();
+  await expect(card).toBeVisible();
+  await card.locator('[data-team-task-toggle]').click();
+  await page.locator('[data-task-read=unread]').click();
+  await expect(card).toHaveCount(0);
 });
 
 test('pending order links target the order queue, while closed orders keep their history link', async t => {

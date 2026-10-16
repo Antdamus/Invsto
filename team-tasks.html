@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="team-tasks.css?v=workspace-20261007-conversation-orders-20261010" />
-  <link rel="stylesheet" href="team-tasks-workspace.css?v=20261013-photos" />
+  <link rel="stylesheet" href="team-tasks-workspace.css?v=20261016-update-filters" />
   <link rel="stylesheet" href="buyer-tasks.css?v=20261013-photos" />
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="task-request.css?v=20261007-intent-2" />
@@ -77,9 +77,9 @@
         <a class="task-back-link hidden" id="task-back-to-list" href="team-tasks.html">← All tasks</a>
         <section class="task-inboxes" id="task-inboxes" aria-label="Task inbox">
           <div class="task-inbox-tabs" role="group" aria-label="Task responsibility">
-            <button type="button" data-task-owner-filter="assigned" aria-pressed="true"><span>My work</span><b data-inbox-count>—</b></button>
-            <button type="button" data-task-owner-filter="approvals" aria-pressed="false"><span>Decisions</span><b data-inbox-count>—</b></button>
-            <button type="button" data-task-owner-filter="following" aria-pressed="false"><span>Following</span><b data-inbox-count>—</b></button>
+            <button type="button" data-task-owner-filter="assigned" aria-pressed="true"><span>My work</span><span class="task-inbox-counts"><b data-inbox-count>—</b><small data-inbox-unread hidden></small></span></button>
+            <button type="button" data-task-owner-filter="approvals" aria-pressed="false"><span>Decisions</span><span class="task-inbox-counts"><b data-inbox-count>—</b><small data-inbox-unread hidden></small></span></button>
+            <button type="button" data-task-owner-filter="following" aria-pressed="false"><span>Following</span><span class="task-inbox-counts"><b data-inbox-count>—</b><small data-inbox-unread hidden></small></span></button>
             <button type="button" data-task-owner-filter="history" aria-pressed="false"><span>History</span></button>
           </div>
           <p id="task-inbox-description">Your next steps. Work waiting on someone else is in Following.</p>
@@ -101,6 +101,11 @@
           <div class="task-search-row">
             <label class="task-search"><i data-lucide="search" aria-hidden="true"></i><span class="task-sr-only">Search tasks</span><input id="task-search" type="search" placeholder="Search tasks, notes, buyers, or orders" autocomplete="off" /></label>
             <button id="task-filters-toggle" class="secondary-btn" type="button" aria-expanded="false" aria-controls="task-filters-panel"><i data-lucide="sliders-horizontal"></i>Filters<span id="task-filter-count" class="hidden">0</span></button>
+          </div>
+          <div id="task-update-filters" class="task-update-filters" role="group" aria-label="Filter by unread task updates" title="New or unread activity. Opening a task clears its unread updates.">
+            <button type="button" data-task-read="all" aria-pressed="true">All <b data-update-count>—</b></button>
+            <button type="button" data-task-read="unread" aria-pressed="false">Has updates <b data-update-count>—</b></button>
+            <button type="button" data-task-read="read" aria-pressed="false">No updates <b data-update-count>—</b></button>
           </div>
           <div id="task-source-shortcuts" class="task-source-shortcuts" role="group" aria-label="Filter tasks by source">
             <button type="button" data-task-source="all" aria-pressed="true"><span>All sources</span><b data-source-count>—</b></button>
@@ -136,8 +141,8 @@
               <label class="team-task-sort">Read status
                 <select id="task-read-filter" aria-label="Read status">
                   <option value="all">All updates</option>
-                  <option value="unread">Unread updates</option>
-                  <option value="read">Read</option>
+                  <option value="unread">Has updates (unread)</option>
+                  <option value="read">No updates (caught up)</option>
                 </select>
               </label>
               <label id="team-task-active-sort-control" class="team-task-sort">
@@ -335,6 +340,6 @@
   <script src="admin-nav.js?v=packaging-20261008"></script>
   <script src="task-workflow.js?v=20261010-employee-tasks"></script>
   <script src="buyer-tasks.js?v=20261013-photos"></script>
-  <script src="team-tasks.js?v=20261013-photos-3"></script>
+  <script src="team-tasks.js?v=20261016-update-filters"></script>
 </body>
 </html>
