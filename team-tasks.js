@@ -4704,16 +4704,7 @@ function attachTaskCardInteractions(root = document) {
       } else {
         state.expandedTaskKeys.add(key);
       }
-      if (opening) {
-        const task = getTaskByUnifiedKey(key);
-        loadTaskEvidence(task);
-        if (task && !isTaskViewAsWorkerMode() && getTaskReadInfo(task).status !== "read") {
-          if (state.taskReadFilter === "unread") state.readFilterOpenTasks.add(key);
-          // Keep the opened card readable when clearing its unread badge removes
-          // it from the filter. Closing it or changing filters releases it.
-          void markTaskSeen(task).catch(error => console.warn("Could not mark task seen:", error)).finally(renderTasks);
-        }
-      }
+      if (opening) loadTaskEvidence(getTaskByUnifiedKey(key));
       renderTasks();
       requestAnimationFrame(() => {
         document.querySelector(`[data-team-task-card-key="${CSS.escape(key)}"]`)?.querySelector("[data-team-task-toggle]")?.focus({ preventScroll: true });
@@ -4730,6 +4721,9 @@ function attachTaskCardInteractions(root = document) {
       button.textContent = "Saving...";
       button.setAttribute("aria-disabled", "true");
       try {
+        // An explicit acknowledgment clears the badge, but keep the details
+        // open until the reader closes them or changes the update filter.
+        if (state.taskReadFilter === "unread" && state.expandedTaskKeys.has(key)) state.readFilterOpenTasks.add(key);
         await markTaskSeen(task);
       } finally {
         renderTasks();

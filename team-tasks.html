@@ -102,7 +102,7 @@
             <label class="task-search"><i data-lucide="search" aria-hidden="true"></i><span class="task-sr-only">Search tasks</span><input id="task-search" type="search" placeholder="Search tasks, notes, buyers, or orders" autocomplete="off" /></label>
             <button id="task-filters-toggle" class="secondary-btn" type="button" aria-expanded="false" aria-controls="task-filters-panel"><i data-lucide="sliders-horizontal"></i>Filters<span id="task-filter-count" class="hidden">0</span></button>
           </div>
-          <div id="task-update-filters" class="task-update-filters" role="group" aria-label="Filter by unread task updates" title="New or unread activity. Opening a task clears its unread updates.">
+          <div id="task-update-filters" class="task-update-filters" role="group" aria-label="Filter by unread task updates" title="New or unread activity. Click Mark read to clear a task's unread updates.">
             <button type="button" data-task-read="all" aria-pressed="true">All <b data-update-count>—</b></button>
             <button type="button" data-task-read="unread" aria-pressed="false">Has updates <b data-update-count>—</b></button>
             <button type="button" data-task-read="read" aria-pressed="false">No updates <b data-update-count>—</b></button>
@@ -340,6 +340,6 @@
   <script src="admin-nav.js?v=packaging-20261008"></script>
   <script src="task-workflow.js?v=20261010-employee-tasks"></script>
   <script src="buyer-tasks.js?v=20261013-photos"></script>
-  <script src="team-tasks.js?v=20261016-update-filters"></script>
+  <script src="team-tasks.js?v=20261016-manual-read"></script>
 </body>
 </html>

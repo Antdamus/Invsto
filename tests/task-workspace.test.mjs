@@ -420,12 +420,22 @@ test('Following counts tasks with unread activity once and filters updates acros
   assert.deepEqual(await page.evaluate(() => readWrites), []);
 });
 
-test('opening an updated task shows Read, persists it and keeps details open until closed', async t => {
+test('opening preserves unread updates; only Mark read acknowledges them and keeps details open', async t => {
   const page = await open(t); await updateFilterFixture(page);
   await page.locator('[data-task-owner-filter=following]').click();
   await page.locator('[data-task-read=unread]').click();
   await page.locator('[data-team-task-toggle="team:progress"]').click();
   const card = page.locator('[data-team-task-card=progress]');
+  await expect(card.locator('.task-read-label')).toHaveText('Updated');
+  await expect(card.locator('.team-task-card-details')).toBeVisible();
+  await expect(page.locator('[data-task-owner-filter=following] [data-inbox-unread]')).toHaveText('2 new');
+  await expect(page.locator('[data-task-read=unread] [data-update-count]')).toHaveText('2');
+  assert.deepEqual(await page.evaluate(() => readWrites), []);
+  await card.locator('[data-team-task-toggle]').click();
+  await card.locator('[data-team-task-toggle]').click();
+  await expect(card.locator('.task-read-label')).toHaveText('Updated');
+  assert.deepEqual(await page.evaluate(() => readWrites), []);
+  await card.getByRole('button', {name: 'Mark read', exact: true}).click();
   await expect(card.locator('.task-read-label')).toHaveText('Read');
   await expect(card.locator('.team-task-card-details')).toBeVisible();
   await expect(page.locator('[data-task-owner-filter=following] [data-inbox-unread]')).toHaveText('1 new');
@@ -454,6 +464,10 @@ test('marking notification updates read clears the badge and remains read after 
   await page.locator('[data-task-owner-filter=following]').click();
   await page.locator('[data-team-task-toggle="team:reply"]').click();
   const card = page.locator('[data-team-task-card=reply]');
+  await expect(card.locator('.task-read-label')).toHaveText('New update');
+  assert.deepEqual(await page.evaluate(() => notificationReads), []);
+  assert.deepEqual(await page.evaluate(() => readWrites), []);
+  await card.getByRole('button', {name: 'Mark read', exact: true}).click();
   await expect(card.locator('.task-read-label')).toHaveText('Read');
   assert.deepEqual((await page.evaluate(() => notificationReads))[0].ids, ['one', 'two']);
   await page.evaluate(() => {
