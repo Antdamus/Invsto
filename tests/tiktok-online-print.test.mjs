@@ -8,7 +8,7 @@ import vm from 'node:vm';
 import {chromium, expect} from '@playwright/test';
 const root = new URL('../', import.meta.url);
 const folder = 'tools/ebay-og-order-link-extension/';
-const require = createRequire(import.meta.url), {PDFDocument} = require('../vendor/pdf-lib/pdf-lib.min.js');
+const require = createRequire(import.meta.url), {PDFDocument, degrees, PDFName, PDFNumber} = require('../vendor/pdf-lib/pdf-lib.min.js');
 const background = await readFile(new URL(folder + 'online-print-background.js', root), 'utf8');
 const id = '11111111-1111-4111-8111-111111111111';
 const app = 'https://og.example/Invsto/print-stations.html';
@@ -144,8 +144,10 @@ test('probe preserves fetch responses, ignores idle PDFs, and captures a full ar
   assert.equal(await page.evaluate(() => originalResponse), atob(pdf));
 });
 
-async function receiver(t, size = [288, 432]) {
-  const page = await pageFor(t), document = await PDFDocument.create(); document.addPage(size);
+async function receiver(t, size = [288, 432], customize) {
+  const page = await pageFor(t), document = await PDFDocument.create();
+  const sheet = document.addPage(size); sheet.drawText('TikTok shipping label fixture', {x: 20, y: 30, size: 12});
+  if (customize) await customize(sheet, document);
   const base64 = Buffer.from(await document.save()).toString('base64');
   await page.evaluate(base64 => {
     window.jobs = []; window.uploads = []; window.completed = []; window.files = {}; window.signedIn = true;
@@ -178,18 +180,82 @@ test('receiver cancellation queues nothing; retry sends chosen printer once and 
   assert.equal(jobs[0].name, 'enqueue_shipping_label_print'); assert.equal(jobs[0].args._station_id, 'shipping');
   assert.match(jobs[0].args._source_path, /^online-print\/staff\/[a-f0-9]{64}\.pdf$/);
   await expect(page.locator('#og-online-print [data-print]')).toBeDisabled();
+  assert.equal(await page.evaluate(async () => btoa(String.fromCharCode(...new Uint8Array(await Object.values(files)[0].arrayBuffer()))) === payload.base64), true);
   await page.evaluate(() => postMessage({type: 'OG_ONLINE_PRINT_DATA', payload}, location.origin));
   assert.equal(await page.evaluate(() => jobs.length), 1);
 });
-test('A6 cannot enter remote 4x6 queue, and signing in can recover a waiting transfer', async t => {
-  const page = await receiver(t, [297.64, 419.53]);
+test('TikTok A6 is fitted to a validated 4x6 page and signing in can recover the transfer', async t => {
+  const page = await receiver(t, [298, 420]);
   await page.evaluate(() => signedIn = false); await load(page, 'online-print-page.js');
   await expect(page.locator('#og-online-print [data-status]')).toContainText('Sign in');
+  await expect(page.locator('#og-online-print [data-format]')).toContainText('without cropping');
   assert.equal(await page.evaluate(() => uploads.length), 0);
   await page.evaluate(() => signedIn = true); await page.locator('#og-online-print [data-print]').click();
   await page.locator('[data-destination]').selectOption('shipping'); await page.locator('[data-send]').click();
+  await expect(page.locator('#og-online-print [data-status]')).toContainText('Queued 1');
+  const sent = await page.evaluate(() => jobs[0].args);
+  const prepared = await PDFDocument.load(Buffer.from(sent._pdf_base64, 'base64'));
+  assert.deepEqual(prepared.getPage(0).getSize(), {width: 288, height: 432});
+  assert.deepEqual(sent._source_pages, [1]);
+  assert.equal(await page.evaluate(() => jobs.length), 1);
+});
+
+test('Letter/A4 still cannot enter the remote 4x6 queue', async t => {
+  const page = await receiver(t, [595.28, 841.89]); await load(page, 'online-print-page.js');
+  await expect(page.locator('[data-destination]')).toBeEnabled();
+  await page.locator('[data-destination]').selectOption('shipping'); await page.locator('[data-send]').click();
   await expect(page.locator('#og-online-print [data-status]')).toContainText('not a 4 × 6');
   assert.equal(await page.evaluate(() => jobs.length), 0);
+});
+
+for (const variant of ['portrait', 'landscape', 'rotated', 'offset']) test(`A6 fitting preserves the full ${variant} label as vector content`, async t => {
+  const size = variant === 'landscape' ? [420, 298] : [297.64, 419.53];
+  const page = await receiver(t, size, sheet => {
+    if (variant === 'rotated') sheet.setRotation(degrees(90));
+    if (variant === 'offset') { sheet.setMediaBox(10, 20, ...size); sheet.translateContent(10, 20); }
+    sheet.drawRectangle({x: variant === 'offset' ? 11 : 1, y: variant === 'offset' ? 21 : 1, width: size[0] - 2, height: size[1] - 2, borderWidth: 1, opacity: 0});
+  });
+  await load(page, 'online-print-page.js'); await expect(page.locator('[data-destination]')).toBeEnabled();
+  const result = await page.evaluate(async () => {
+    const preview = await (await fetch(document.querySelector('[data-preview]').href)).arrayBuffer();
+    const doc = await PDFLib.PDFDocument.load(preview), sheet = doc.getPage(0);
+    const again = await (await fetch(Object.values(files).map(blob => URL.createObjectURL(blob))[0])).arrayBuffer();
+    return {media: sheet.getMediaBox(), rotation: sheet.getRotation().angle, identicalUpload: Array.from(new Uint8Array(preview)).join() === Array.from(new Uint8Array(again)).join(), forms: sheet.node.Resources().lookup(PDFLib.PDFName.of('XObject')).values().map(ref => { const form = doc.context.lookup(ref); return {subtype: form.dict.get(PDFLib.PDFName.of('Subtype')).toString(), box: form.dict.lookup(PDFLib.PDFName.of('BBox')).asArray().map(n => n.asNumber())}; })};
+  });
+  assert.equal(result.identicalUpload, true);
+  assert.equal(result.rotation, variant === 'rotated' ? 90 : 0);
+  assert.deepEqual([result.media.width, result.media.height], variant === 'landscape' ? [432, 288] : [288, 432]);
+  assert.equal(result.forms[0].subtype, '/Form');
+  assert.deepEqual(result.forms[0].box, variant === 'offset' ? [10, 20, 10 + size[0], 20 + size[1]] : [0, 0, ...size]);
+  if (variant === 'portrait') {
+    await page.locator('[data-cancel]').click();
+    await page.addScriptTag({url: origin + '/pdf.min.js'});
+    const render = await page.evaluate(async origin => {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = origin + '/pdf.worker.min.js';
+      const data = new Uint8Array(await (await fetch(document.querySelector('[data-preview]').href)).arrayBuffer());
+      const task = pdfjsLib.getDocument({data, isEvalSupported: false}), pdf = await task.promise;
+      const sheet = await pdf.getPage(1), viewport = sheet.getViewport({scale: 2});
+      const canvas = document.createElement('canvas'); canvas.id = 'fitted-label-preview'; canvas.width = viewport.width; canvas.height = viewport.height;
+      document.body.append(canvas); await sheet.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+      const text = (await sheet.getTextContent()).items.map(item => item.str).join(' ');
+      await task.destroy(); return {width: canvas.width, height: canvas.height, text};
+    }, origin);
+    assert.equal(render.width, 576); assert.equal(render.height, 864);
+    assert.match(render.text, /TikTok shipping label fixture/);
+    await page.locator('#fitted-label-preview').screenshot({path: fileURLToPath(new URL('test-results/tiktok-a6-fitted.png', root))});
+  }
+});
+
+for (const invalid of ['crop', 'scale', 'annotation', 'mixed-letter']) test(`A6 conversion rejects ${invalid} before uploading or queuing`, async t => {
+  const page = await receiver(t, [298, 420], (sheet, document) => {
+    if (invalid === 'crop') sheet.setCropBox(0, 0, 280, 400);
+    if (invalid === 'scale') sheet.node.set(PDFName.of('UserUnit'), PDFNumber.of(2));
+    if (invalid === 'annotation') sheet.node.set(PDFName.of('Annots'), document.context.obj([document.context.obj({Type: 'Annot', Subtype: 'Text', Rect: [0, 0, 20, 20], Contents: 'Retain this note'})]));
+    if (invalid === 'mixed-letter') document.addPage([612, 792]);
+  });
+  await load(page, 'online-print-page.js');
+  await expect(page.locator('#og-online-print [data-status]')).toContainText(invalid === 'mixed-letter' ? 'not a 4 × 6' : 'custom crop or scale');
+  assert.equal(await page.evaluate(() => uploads.length + jobs.length), 0);
 });
 
 for (const mode of ['blob', 'signed-popup']) test(`real extension carries a TikTok ${mode} PDF into the existing OG picker`, async t => {

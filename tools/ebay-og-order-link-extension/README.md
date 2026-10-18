@@ -30,6 +30,12 @@ Version 1.0.6 stops receipt screenshot retransmissions as soon as OG accepts the
 
 ## Use
 
+Version 1.0.16 handles TikTok reprints that still return A6 after selecting 4x6.
+The OG handoff fits a standard A6 label proportionally onto a 4x6 page, keeping
+the full label and vector barcodes, and shows a conversion notice and preview.
+Letter/A4, custom crops/scales and protected documents keep the existing print
+checks. Reload the extension and refresh the OG Print stations tab after updating.
+
 Version 1.0.14 also captures TikTok's signed `easesafe` document URLs, which have
 no `.pdf` filename. A temporary capture watches only PDF tabs opened by the TikTok
 tab after **Print through OG**. It also handles a blank tab navigated to the PDF.
@@ -56,8 +62,8 @@ removed on the next handoff/read; completed handoffs discard the extension's PDF
 
 If TikTok changes its export flow or the PDF cannot be captured, download its PDF,
 open this extension's options and click **Choose PDF for online printer**. Choose
-the file on OG Print stations and use the same printer picker. A6 and Letter/A4
-documents need re-export as 4x6 for remote shipping printing. Native browser
+the file on OG Print stations and use the same printer picker. Standard A6 labels
+are fitted to 4x6; Letter/A4 documents need re-export as 4x6. Native browser
 printing remains available for other sizes.
 
 Update the existing unpacked extension folder, reload its card in Edge/Chrome, and
