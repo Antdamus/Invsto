@@ -64,6 +64,8 @@
   function decorateCards() {
     document.querySelectorAll('.buyer-order-card:not([data-phone-ready])').forEach(card => {
       card.dataset.phoneReady = 'true';
+      // Workflow cards already provide the same disclosures on every screen size.
+      if (card.classList.contains('buyer-card-workflow')) return;
       const expanded = card.querySelector('.buyer-card-expanded-actions');
       if (!expanded) return;
       const more = document.createElement('button');

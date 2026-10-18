@@ -1,0 +1,137 @@
+/* eBay queue cards: buyer context, shipping/packing, then optional tools. */
+#orders-list .buyer-card-workflow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding: 20px;
+  border-radius: 18px;
+}
+#orders-list .buyer-card-workflow .buyer-card-head {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0;
+}
+#orders-list .buyer-card-primary { flex: 1; min-width: 0; }
+#orders-list .buyer-card-workflow .buyer-kicker { color: #a8afa9; font-size: 10px; letter-spacing: .13em; }
+#orders-list .buyer-card-title-row { gap: 5px 12px; }
+#orders-list .buyer-card-buyer-name { font-size: 20px; line-height: 1.3; }
+#orders-list .buyer-card-compact-count { padding: 0; min-height: 0; border: 0; background: none; font-size: 12px; font-weight: 500; }
+#orders-list .buyer-card-customer { padding: 0; border: 0; background: none; }
+#orders-list .buyer-card-customer strong { font-size: 13px; }
+#orders-list .buyer-card-overview { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px; }
+#orders-list .buyer-card-value { padding: 0; border: 0; background: none; font-size: 18px; }
+#orders-list .buyer-card-alerts { justify-content: flex-start; gap: 8px; }
+#orders-list .buyer-card-alerts:not(:has(> :not(:empty))) { display: none; }
+#orders-list .buyer-card-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; padding: 0; gap: 6px; }
+#orders-list .buyer-card-meta > :empty { display: none; }
+#orders-list .buyer-card-meta-pill { font-size: 11px; font-weight: 600; }
+#orders-list .buyer-card-date { border: 0; background: transparent; color: #b3bab4; }
+#orders-list .buyer-card-workflow-bar { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px 24px; padding-top: 14px; border-top: 1px solid #ffffff12; }
+#orders-list .buyer-card-action-group, #orders-list .card-tool-group { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+#orders-list .card-action-label { display: block; color: #acb7ad; font-size: 10px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+#orders-list .card-action-buttons { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; max-width: 100%; }
+#orders-list .buyer-card-shipping-help { max-width: 450px; color: #a9b3ac; font-size: 11px; line-height: 1.5; }
+#orders-list .buyer-card-workflow :is(.card-action-buttons, .buyer-card-overview, .buyer-line-communication, .buyer-line-receipt-actions) > :is(button, a),
+#orders-list .buyer-card-workflow :is(.buyer-line-action-btn, .line-watch-toggle) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: normal;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+#orders-list .buyer-card-workflow :is(button, summary, a):focus-visible { outline: 2px solid #eed29b; outline-offset: 3px; }
+#orders-list .buyer-card-workflow button:disabled { cursor: default; }
+#orders-list .buyer-card-workflow button svg { width: 15px; height: 15px; flex-shrink: 0; }
+#orders-list .buyer-card-workflow .buyer-card-complete-btn { background: #ffffff06 !important; color: #eceee8 !important; border-color: #ffffff28 !important; }
+#orders-list .buyer-card-workflow .buyer-card-no-inventory-btn { background: #eed29b !important; color: #252117 !important; border-color: #eed29b !important; }
+#orders-list .buyer-card-workflow .buyer-card-no-inventory-btn:disabled { opacity: .45; }
+#orders-list .card-tools { min-width: 0; border: 1px solid #ffffff12; border-radius: 12px; background: #ffffff02; }
+#orders-list .card-tools > summary { display: flex; align-items: center; gap: 10px; padding: 11px 13px; min-height: 44px; list-style: none; cursor: pointer; color: #dbdfd9; font-size: 12px; font-weight: 700; }
+#orders-list .card-tools > summary::-webkit-details-marker { display: none; }
+#orders-list .card-tools > summary small { color: #a5afa7; font-size: 11px; font-weight: 400; }
+#orders-list .card-tools > summary::after { content: ""; width: 7px; height: 7px; margin-left: auto; margin-right: 3px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); flex-shrink: 0; }
+#orders-list .card-tools[open] > summary { border-bottom: 1px solid #ffffff10; }
+#orders-list .card-tools[open] > summary::after { transform: rotate(225deg); }
+#orders-list .card-tools-content { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px; padding: 16px; }
+#orders-list .card-tools-content .buyer-card-admin-row { display: flex; padding: 0; border: 0; }
+#orders-list .card-tools-content .admin-group-select { min-height: 38px; padding: 8px 10px; }
+#orders-list .buyer-card-expanded { padding-top: 12px; gap: 12px; }
+#orders-list .buyer-card-items-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; font-weight: 700; }
+#orders-list .buyer-card-items-heading small { color: #a6b1a8; font-weight: 400; }
+#orders-list .buyer-line-list { display: grid; gap: 12px; }
+#orders-list .buyer-card-workflow .buyer-line-btn { display: block; padding: 16px; min-width: 0; border-radius: 14px; }
+#orders-list .buyer-card-workflow .buyer-line-main { display: grid !important; grid-template-columns: minmax(0, 1fr) minmax(180px, 260px); gap: 16px 24px; width: 100%; }
+#orders-list .buyer-line-copy { gap: 8px; align-content: start; }
+#orders-list .buyer-line-copy > strong { font-size: 15px; line-height: 1.5; }
+#orders-list .buyer-line-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+#orders-list .buyer-line-heading .admin-order-select { display: inline-flex; align-items: center; padding: 6px; }
+#orders-list .buyer-line-order-copy { margin: 0; min-height: 0; padding: 6px 9px; gap: 2px; border-radius: 8px; }
+#orders-list .buyer-line-order-copy > span { font-size: 9px; }
+#orders-list .buyer-line-order-copy > strong { font-size: 12px; }
+#orders-list .buyer-line-status { margin-left: auto; font-size: 10px; color: #b7c1b9; text-transform: uppercase; letter-spacing: .05em; }
+#orders-list .buyer-line-order-details { margin: 0; flex-direction: row; justify-content: space-between; }
+#orders-list .buyer-line-item-meta, #orders-list .buyer-line-price { margin: 0; font-size: 12px; }
+#orders-list .buyer-line-customer { padding: 0; border: 0; background: none; }
+#orders-list .buyer-line-customer strong { font-size: 12px; }
+#orders-list .buyer-line-meta-row { gap: 5px; }
+#orders-list .buyer-line-meta-row > span { font-size: 10px; }
+#orders-list .buyer-line-locate { display: grid; gap: 8px; margin-top: 4px; }
+#orders-list .buyer-card-workflow .buyer-line-actions { display: flex !important; width: 100%; }
+#orders-list .buyer-card-workflow .item-found-btn { color: #b3f1ce !important; border-color: #66b88966 !important; background: #356c4a28 !important; }
+#orders-list .buyer-card-workflow .item-search-btn[aria-pressed=true] { color: #ffc29f !important; border-color: #e99b6866 !important; background: #9f53282b !important; }
+#orders-list .buyer-line-communication { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+#orders-list .buyer-line-communication .order-chat-link { display: inline-flex; align-items: center; min-height: 38px; padding: 8px 12px; border-radius: 10px; font-size: 12px; }
+#orders-list .buyer-line-note-summary:empty, #orders-list .buyer-line-inventory:empty { display: none; }
+#orders-list .buyer-line-evidence { display: flex; flex-direction: column; align-items: stretch; gap: 10px; min-width: 0; padding: 12px; border-radius: 12px; border: 1px solid #ffffff12; background: #00000018; }
+#orders-list .buyer-line-evidence .queue-video-receipt-evidence { grid-column: auto; grid-row: auto; }
+#orders-list .buyer-line-evidence .queue-video-receipt-thumb { justify-self: stretch; max-width: 100%; }
+#orders-list .buyer-line-evidence .queue-video-receipt-empty { justify-self: start; text-align: left; font-weight: 500; line-height: 1.5; }
+#orders-list .buyer-line-receipt-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+#orders-list .buyer-card-workflow .buyer-line-receipt-actions :is(.buyer-line-receipt, .receipt-screenshot-upload) { display: inline-flex !important; }
+#orders-list .buyer-line-inventory, #orders-list .buyer-item-tools { grid-column: 1 / -1; }
+#orders-list .buyer-line-identity { display: block !important; grid-column: 1 / -1; color: #a7b1a9; font-size: 10px; overflow-wrap: anywhere; }
+#orders-list .card-tool-corrections .card-action-label { color: #d5aaa0; }
+#orders-list .buyer-card-workflow .danger-btn { color: #ffb7aa !important; border-color: #b86b5e55 !important; }
+#orders-list .buyer-card-workflow .card-tools-content :is(.buyer-card-order-video-btn, .buyer-card-approval-btn, .buyer-card-task-btn, [data-phone-camera=buyer], [data-buyer-completion-photos]) { display: inline-flex; }
+
+@media (max-width: 1100px) {
+  #orders-list .buyer-card-workflow .buyer-card-head { flex-direction: column; gap: 12px; }
+  #orders-list .buyer-card-overview { justify-content: flex-start; width: 100%; }
+  #orders-list .buyer-card-overview [data-buyer-expand-key] { margin-left: auto; }
+  #orders-list .buyer-card-workflow .buyer-line-main { grid-template-columns: minmax(0, 1fr); }
+  #orders-list .buyer-line-evidence { max-width: 420px; }
+}
+@media (max-width: 760px) {
+  #orders-list .buyer-card-workflow { padding: 14px; gap: 12px; }
+  #orders-list .buyer-card-workflow .buyer-card-title-row { gap: 3px; }
+  #orders-list .buyer-card-workflow .buyer-card-buyer-name { font-size: 18px; }
+  #orders-list .buyer-card-overview { gap: 8px; }
+  #orders-list .buyer-card-workflow .buyer-card-value { font-size: 16px; margin: 0; }
+  #orders-list .buyer-card-workflow .buyer-card-date { display: inline-flex; }
+  #orders-list .buyer-card-workflow-bar { gap: 14px; }
+  #orders-list .buyer-card-action-group { width: 100%; }
+  #orders-list .buyer-card-workflow-bar .card-action-buttons { width: 100%; }
+  #orders-list .buyer-card-workflow-bar .card-action-buttons > button { flex: 1 1 100px; }
+  #orders-list .buyer-card-workflow :is(.card-action-buttons, .buyer-card-overview, .buyer-line-communication, .buyer-line-receipt-actions) > :is(button, a),
+  #orders-list .buyer-card-workflow .buyer-line-action-btn { min-height: 44px; }
+  #orders-list .card-tools > summary { flex-wrap: wrap; gap: 4px 8px; }
+  #orders-list .card-tools > summary small { font-size: 10px; }
+  #orders-list .card-tools-content { padding: 12px; gap: 18px; }
+  #orders-list .buyer-card-workflow .buyer-line-btn { padding: 12px; }
+  #orders-list .buyer-line-order-copy { min-height: 44px; }
+  #orders-list .buyer-line-evidence { max-width: none; }
+  #orders-list .buyer-line-customer { gap: 8px; }
+}

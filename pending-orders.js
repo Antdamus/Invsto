@@ -12,6 +12,7 @@ const state = {
   selectedStockRow: null,
   activeBuyerKey: "",
   expandedBuyerKeys: new Set(),
+  expandedCardToolKeys: new Set(),
   collapsedBuyerKeys: new Set(),
   expandedBuyerNoteKeys: new Set(),
   buyerPromiseSignatures: new Map(),
@@ -4461,10 +4462,32 @@ async function markCancellationReviewKeepPending(lineId) {
   }
 }
 
+// Keep tools open across receipt hydration, item status updates and card refreshes.
+function bindCardToolDisclosures(container) {
+  container.querySelectorAll("[data-card-tools]").forEach(details => {
+    details.addEventListener("toggle", () => {
+      if (!details.isConnected) return;
+      if (details.open) state.expandedCardToolKeys.add(details.dataset.cardTools);
+      else state.expandedCardToolKeys.delete(details.dataset.cardTools);
+    });
+    details.addEventListener("keydown", event => {
+      if (event.key !== "Escape" || !details.open) return;
+      event.stopPropagation();
+      details.open = false;
+      details.querySelector("summary")?.focus({preventScroll: true});
+    });
+  });
+}
+
 function renderOrders(options = {}) {
   const startedAt = nowMs();
   const list = $("orders-list");
   if (!list) return;
+  // A refresh can run before the browser delivers a disclosure's toggle event.
+  list.querySelectorAll("[data-card-tools]").forEach(details => {
+    if (details.open) state.expandedCardToolKeys.add(details.dataset.cardTools);
+    else state.expandedCardToolKeys.delete(details.dataset.cardTools);
+  });
   repaintLatestFoundButton();
   const previousCard = options.buyerKey
     ? [...list.querySelectorAll(".buyer-order-card")].find(card => card.dataset.buyerKey === options.buyerKey) : null;
@@ -4528,10 +4551,10 @@ function renderOrders(options = {}) {
       : "No task";
     const receiptCoverage = getGroupVideoReceiptCoverage(group);
     const receiptCoverageLabel = !receiptCoverage.loaded
-      ? "Shots checking"
+      ? "Checking captures"
       : receiptCoverage.total
-      ? `Shots ${receiptCoverage.withScreenshots}/${receiptCoverage.total}${receiptCoverage.missing ? ` - Miss ${receiptCoverage.missing}` : ""}`
-      : "Shots 0/0";
+      ? `Captures ${receiptCoverage.withScreenshots}/${receiptCoverage.total}${receiptCoverage.missing ? ` · ${receiptCoverage.missing} missing` : ""}`
+      : "Captures 0/0";
     const receiptCoverageClass = !receiptCoverage.loaded
       ? "is-checking"
       : receiptCoverage.missing
@@ -4562,100 +4585,96 @@ function renderOrders(options = {}) {
     const postOrderIssueStatus = getGroupPostOrderIssueStatus(group.lines);
     const ebayApiStatus = getGroupEbayApiStatus(group.lines);
     const financeStatus = getGroupFinanceStatus(group.lines);
-    card.className = `buyer-order-card ${urgencyClass} ${groupIndex % 2 ? "is-alt-group" : ""} ${hasSelectedAdminLines ? "has-admin-selected-lines" : ""} ${postOrderIssueStatus ? "has-post-order-issue" : ""} ${ebayApiStatus ? "has-sync-mismatch" : ""} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""} ${isExpanded ? "is-expanded" : "is-collapsed"}`;
+    card.className = `buyer-order-card buyer-card-workflow ${urgencyClass} ${groupIndex % 2 ? "is-alt-group" : ""} ${hasSelectedAdminLines ? "has-admin-selected-lines" : ""} ${postOrderIssueStatus ? "has-post-order-issue" : ""} ${ebayApiStatus ? "has-sync-mismatch" : ""} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""} ${isExpanded ? "is-expanded" : "is-collapsed"}`;
     card.dataset.buyerKey = group.key;
     card.dataset.buyerUsername = group.buyer;
     card.innerHTML = `
       <div class="buyer-card-head">
         <div class="buyer-card-primary">
-          <span class="buyer-kicker">Buyer username</span>
+          <span class="buyer-kicker">eBay buyer</span>
           <div class="buyer-card-title-row">
-            <button
-              type="button"
-              class="buyer-insight-link buyer-card-buyer-name"
-              data-buyer-insights="${escapeHtml(group.buyer)}"
-              data-buyer-context="pending-orders"
+            <button type="button" class="buyer-insight-link buyer-card-buyer-name"
+              data-buyer-insights="${escapeHtml(group.buyer)}" data-buyer-context="pending-orders"
               data-current-order-total="${escapeHtml(group.totalValue)}"
               data-current-order-count="${escapeHtml(group.orderNumbers.size)}"
               data-current-line-count="${escapeHtml(group.lines.length)}"
               data-current-order-numbers="${escapeHtml([...group.orderNumbers].join(","))}"
               data-current-items="${buyerInsightCurrentItemsAttribute(group.lines)}"
             >${escapeHtml(group.buyer)}</button>
-            <span class="buyer-card-compact-count">${escapeHtml(orderCountLabel)} - ${escapeHtml(lineCountLabel)} - ${escapeHtml(quantityLabel)}</span>
+            <span class="buyer-card-compact-count">${escapeHtml(orderCountLabel)} · ${escapeHtml(lineCountLabel)} · ${escapeHtml(quantityLabel)}</span>
           </div>
           ${customerMarkup}
         </div>
-        <div class="buyer-card-alerts">
+        <div class="buyer-card-overview">
           ${urgencyMarkup}
-          ${renderIssueBadgeMarkup(postOrderIssueStatus, "post-order-issue-pill")}
-          ${renderFinanceBadgeMarkup(financeStatus, "buyer-card-finance-pill")}
-          ${ebayApiStatus ? `
-            <span class="sync-mismatch-pill ${escapeHtml(ebayApiStatus.tone)}" title="${escapeHtml(ebayApiStatus.title)}">
-              <i data-lucide="${escapeHtml(ebayApiStatus.icon)}"></i>
-              ${escapeHtml(ebayApiStatus.label)}
-            </span>
-          ` : ""}
-          ${isAdminUser() ? `
-            <label class="admin-group-select buyer-card-quick-select" title="Select all open pending lines in this card">
-              <input type="checkbox" data-admin-group-select="${escapeHtml(group.key)}" />
-              <span>Select</span>
-            </label>
-          ` : ""}
           <span class="buyer-card-value">${formatMoney(group.totalValue)}</span>
-          ${taskControlMarkup}
-          ${window.OGPendingWork?.control(group) || ""}
-          <button type="button" class="buyer-card-expand-btn buyer-card-completion-photos" data-buyer-completion-photos>Completion photos</button>
-          <button type="button" class="buyer-card-expand-btn" data-phone-camera="buyer">${phoneCameraDesktop?.paired ? "Send to phone" : "Use my phone"}</button>
-          <button type="button" class="buyer-card-expand-btn" data-buyer-shipping-labels>Shipping labels</button>
-          <span class="status-badge">${group.pendingCount} pending</span>
           <button type="button" class="buyer-card-expand-btn" data-buyer-expand-key="${escapeHtml(group.key)}" aria-expanded="${isExpanded ? "true" : "false"}">
+            <span>${isExpanded ? "Hide items" : "View items"}</span>
             <i data-lucide="${isExpanded ? "chevron-up" : "chevron-down"}"></i>
-            <span>${isExpanded ? "Hide" : "Open"}</span>
           </button>
         </div>
+      </div>
+      <div class="buyer-card-alerts">
+        ${renderIssueBadgeMarkup(postOrderIssueStatus, "post-order-issue-pill")}
+        ${renderFinanceBadgeMarkup(financeStatus, "buyer-card-finance-pill")}
+        ${ebayApiStatus ? `<span class="sync-mismatch-pill ${escapeHtml(ebayApiStatus.tone)}" title="${escapeHtml(ebayApiStatus.title)}"><i data-lucide="${escapeHtml(ebayApiStatus.icon)}"></i>${escapeHtml(ebayApiStatus.label)}</span>` : ""}
+        ${assignedTask ? taskControlMarkup : ""}
+        <span data-buyer-chat-marker></span>
       </div>
       <div class="buyer-card-meta">
         <span data-group-item-search>${renderGroupItemSearch(group.lines)}</span>
         <span data-watch-buyer="${escapeHtml(group.key)}">${window.OGOrderWatches?.summary(group.lines) || ""}</span>
         ${renderQueueCompletionPhotoMarker(attachmentGroups.get(group.key))}
         ${renderQueueShippingLabelMarker(attachmentGroups.get(group.key))}
-        <span class="buyer-card-meta-pill">Placed ${escapeHtml(formatGroupOrderDate(group, "sale_date"))}</span>
-        <span class="buyer-card-meta-pill">Ship ${escapeHtml(formatGroupOrderDate(group, "ship_by_date"))}</span>
         <span class="buyer-card-meta-pill buyer-card-receipt-pill ${receiptCoverageClass}" title="${escapeHtml(receiptCoverageTitle)}">${escapeHtml(receiptCoverageLabel)}</span>
+        <span class="buyer-card-meta-pill buyer-card-date">Placed ${escapeHtml(formatGroupOrderDate(group, "sale_date"))}</span>
+        <span class="buyer-card-meta-pill buyer-card-date">Ship by ${escapeHtml(formatGroupOrderDate(group, "ship_by_date"))}</span>
       </div>
       ${window.OGPendingWork?.summary(group) || ""}
       <div data-buyer-shared-notes>${renderGroupSharedNotes(group.lines, group.key)}</div>
-      ${isExpanded ? `
-        <div class="buyer-card-expanded">
-          <div class="buyer-card-expanded-actions">
-            <button type="button" class="buyer-card-complete-btn primary-btn" data-buyer-complete-key="${escapeHtml(group.key)}" ${group.lines.some(isOpenOrderLine) ? "" : "disabled"}>Mixed Checkout</button>
-            <button type="button" class="secondary-btn buyer-card-order-video-btn task-video-action-btn" data-buyer-order-video-key="${escapeHtml(group.key)}" ${group.lines.some((line) => line.order_id) ? "" : "disabled"}>Add order video</button>
-            <button type="button" class="secondary-btn buyer-card-order-video-btn task-video-action-btn" data-buyer-view-order-videos-key="${escapeHtml(group.key)}" ${group.lines.some((line) => line.order_id) ? "" : "disabled"}>View order videos</button>
-            <button type="button" class="buyer-card-no-inventory-btn secondary-btn caution-btn" data-buyer-no-inventory-key="${escapeHtml(group.key)}" ${getNoInventoryLineIdsForGroupAction(group).length ? "" : "disabled"}>Complete order</button>
-            ${approvalActionMarkup}
+      <div class="buyer-card-workflow-bar">
+        <div class="buyer-card-action-group" role="group" aria-label="Shipping">
+          <span class="card-action-label">Shipping</span>
+          <div class="card-action-buttons">
+            <button type="button" class="secondary-btn buyer-card-label-btn" data-buyer-label-key="${escapeHtml(group.key)}" title="${escapeHtml(shippingLabelAction.help)}" ${shippingLabelAction.disabled ? "disabled" : ""}><i data-lucide="truck"></i>${shippingLabelAction.label}</button>
+            <button type="button" class="buyer-card-expand-btn" data-buyer-shipping-labels>Saved labels</button>
           </div>
-          ${shippingLabelAction.combined ? `
-            <div class="buyer-combined-shipping">
-              <button type="button" class="secondary-btn buyer-card-label-btn" data-buyer-label-key="${escapeHtml(group.key)}" ${shippingLabelAction.disabled ? "disabled" : ""}>${shippingLabelAction.label}</button>
-              <p>${escapeHtml(shippingLabelAction.help)}</p>
-            </div>
-          ` : ""}
-          ${isAdminUser() ? `
-            <div class="buyer-card-admin-row">
-              <label class="admin-group-select">
-                <input type="checkbox" data-admin-group-select="${escapeHtml(group.key)}" />
-                Select pending lines
-              </label>
-            </div>
-          ` : ""}
-          <div class="buyer-line-list"></div>
+          ${shippingLabelAction.combined ? '<small class="buyer-card-shipping-help">One package per buyer. Choose “Combine orders per buyer” on eBay.</small>' : ""}
         </div>
-      ` : `
-        <div class="buyer-card-collapsed-hint">
-          <span>Open to inspect ${escapeHtml(lineCountLabel)} for labels, video receipts, photos, and line actions.</span>
+        <div class="buyer-card-action-group buyer-card-packing-group" role="group" aria-label="Packing">
+          <span class="card-action-label">Packing</span>
+          <div class="card-action-buttons">
+            <button type="button" class="buyer-card-complete-btn secondary-btn" data-buyer-complete-key="${escapeHtml(group.key)}" ${group.lines.some(isOpenOrderLine) ? "" : "disabled"}>Mixed checkout</button>
+            <button type="button" class="buyer-card-no-inventory-btn primary-btn" data-buyer-no-inventory-key="${escapeHtml(group.key)}" ${getNoInventoryLineIdsForGroupAction(group).length ? "" : "disabled"}>Complete order<i data-lucide="arrow-right"></i></button>
+          </div>
         </div>
-      `}
+      </div>
+      <details class="card-tools buyer-order-tools" data-card-tools="buyer:${escapeHtml(group.key)}" ${state.expandedCardToolKeys.has(`buyer:${group.key}`) ? "open" : ""}>
+        <summary><span>Order tools</span><small>Photos, videos &amp; tasks</small></summary>
+        <div class="card-tools-content">
+          <div class="card-tool-group" role="group" aria-label="Order photos and videos">
+            <span class="card-action-label">Photos &amp; videos</span>
+            <div class="card-action-buttons">
+              <button type="button" class="buyer-card-expand-btn buyer-card-completion-photos" data-buyer-completion-photos>Completion photos</button>
+              <button type="button" class="buyer-card-expand-btn" data-phone-camera="buyer">${phoneCameraDesktop?.paired ? "Send to phone" : "Use my phone"}</button>
+              <button type="button" class="secondary-btn buyer-card-order-video-btn task-video-action-btn" data-buyer-order-video-key="${escapeHtml(group.key)}" ${group.lines.some((line) => line.order_id) ? "" : "disabled"}>Add order video</button>
+              <button type="button" class="secondary-btn buyer-card-order-video-btn task-video-action-btn" data-buyer-view-order-videos-key="${escapeHtml(group.key)}" ${group.lines.some((line) => line.order_id) ? "" : "disabled"}>View order videos</button>
+            </div>
+          </div>
+          <div class="card-tool-group" role="group" aria-label="Tasks and review">
+            <span class="card-action-label">Tasks &amp; review</span>
+            <div class="card-action-buttons">
+              ${!assignedTask ? taskControlMarkup : ""}
+              ${window.OGPendingWork?.control(group) || ""}
+              ${approvalActionMarkup}
+            </div>
+          </div>
+          ${isAdminUser() ? `<div class="card-tool-group buyer-card-admin-row"><span class="card-action-label">Bulk actions</span><label class="admin-group-select"><input type="checkbox" data-admin-group-select="${escapeHtml(group.key)}" />Select pending lines</label></div>` : ""}
+        </div>
+      </details>
+      ${isExpanded ? `<div class="buyer-card-expanded"><div class="buyer-card-items-heading"><span>Order items</span><small>${escapeHtml(lineCountLabel)} · ${group.pendingCount} pending</small></div><div class="buyer-line-list"></div></div>` : ""}
     `;
+    bindCardToolDisclosures(card);
 
     const expandButton = card.querySelector("[data-buyer-expand-key]");
     card.querySelector("[data-buyer-completion-photos]")?.addEventListener("click", event => {
@@ -4710,7 +4729,7 @@ function renderOrders(options = {}) {
         jumpToLatestFoundItem(foundJump.dataset.jumpFoundBuyer);
         return;
       }
-      if (event.target.closest("button,a,input,label,select,textarea,.buyer-card-expanded,.buyer-line-list,.buyer-card-note-preview")) return;
+      if (event.target.closest("button,a,input,label,select,textarea,summary,details,.buyer-card-expanded,.buyer-line-list,.buyer-card-note-preview")) return;
       if (!event.target.closest(".buyer-card-head,.buyer-card-meta,.buyer-card-collapsed-hint")) return;
       toggleBuyerGroupExpanded(group.key);
     });
@@ -4840,63 +4859,80 @@ function renderOrders(options = {}) {
       button.dataset.lineId = line.id;
       const adminSelect = isAdminUser() ? `
         <label class="admin-order-select" title="Select pending line">
-          <input type="checkbox" data-admin-line-select="${escapeHtml(line.id)}" ${state.adminSelectedLineIds.has(line.id) ? "checked" : ""} ${isAdminCloseoutSelectable(line) ? "" : "disabled"} />
+          <input type="checkbox" aria-label="Select pending item: ${escapeHtml(line.item_title || 'Untitled eBay item')}" data-admin-line-select="${escapeHtml(line.id)}" ${state.adminSelectedLineIds.has(line.id) ? "checked" : ""} ${isAdminCloseoutSelectable(line) ? "" : "disabled"} />
         </label>
       ` : "";
       button.innerHTML = `
-        ${adminSelect}
-        <span class="buyer-line-main">
-          <span class="buyer-line-copy">
-            ${orderNumberMarkup}
+        <div class="buyer-line-main">
+          <div class="buyer-line-copy">
+            <div class="buyer-line-heading">${adminSelect}${orderNumberMarkup}<span class="buyer-line-status">${escapeHtml(line.line_status || "pending")}</span></div>
             <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
-            <span class="line-watch-control" data-watch-line="${escapeHtml(line.id)}">${window.OGOrderWatches?.line(line) || ""}</span>
-            <span data-item-search-status="${escapeHtml(line.id)}">${renderItemSearchStatus(line)}</span>
-            <span class="buyer-line-order-details">
-              <small class="buyer-line-item-meta">Item ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
-            </span>
+            <span class="buyer-line-order-details"><small class="buyer-line-item-meta">Item ${escapeHtml(line.item_number || "No item #")} · Qty ${Number(line.quantity || 1)}</small><small class="buyer-line-price">${formatMoney(line.total_price || line.sold_for || 0)}</small></span>
             <span class="buyer-line-customer">
               <span><small>Customer</small><strong>${escapeHtml(lineCustomerName || "Name not saved")}</strong></span>
               <span><small>eBay username</small><strong>${escapeHtml(lineBuyerUsername || "Username not saved")}</strong></span>
             </span>
-            <span class="buyer-line-meta-row">
+            <div class="buyer-line-meta-row">
               <span class="buyer-line-created">${escapeHtml(lineCreatedLabel)}</span>
-              <span class="buyer-line-identity">${escapeHtml(transactionLabel)} - ${escapeHtml(lineSource)}</span>
-              <span class="buyer-line-due is-${escapeHtml(lineDueTone)}">
-                ${lineUrgency ? `<i data-lucide="${lineUrgency.icon}"></i>` : ""}
-                ${escapeHtml(visibleLineDueLabel)}
-              </span>
+              <span class="buyer-line-due is-${escapeHtml(lineDueTone)}">${lineUrgency ? `<i data-lucide="${lineUrgency.icon}"></i>` : ""}${escapeHtml(visibleLineDueLabel)}</span>
               ${orderLineSequence ? `<span class="buyer-line-sequence">${escapeHtml(orderLineSequence)}</span>` : ""}
               ${renderIssueBadgeMarkup(linePostOrderIssueStatus, "buyer-line-post-order-warning")}
               ${renderFinanceBadgeMarkup(lineFinanceStatus, "buyer-line-finance-pill")}
               ${lineEbayApiStatus ? `<span class="buyer-line-sync-warning ${escapeHtml(lineEbayApiStatus.tone)}" title="${escapeHtml(lineEbayApiStatus.title)}"><i data-lucide="${escapeHtml(lineEbayApiStatus.icon)}"></i>${escapeHtml(lineEbayApiStatus.label)}</span>` : ""}
-            </span>
+            </div>
             ${lineCancellationReviewActionMarkup}
-            <small class="buyer-line-price">Line total ${formatMoney(line.total_price || line.sold_for || 0)}</small>
-          </span>
-          <span class="buyer-line-actions">
-            ${shippingLabelAction.combined ? "" : `<button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) && !getLineFulfillmentBlock(line) && isOpenOrderLine(line) ? "" : "disabled"}>Create shipping label</button>`}
-            ${lineTaskActionMarkup}
-            ${renderItemFoundActions(line)}
-            ${lineTaskVideoMarkup}
-            ${lineCancellationDetailsActionMarkup}
-            <button type="button" class="secondary-btn buyer-line-action-btn refund-btn" data-line-refund="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Refunded</button>
-            <button type="button" class="secondary-btn buyer-line-action-btn danger-btn" data-line-cancel="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Cancel</button>
-          </span>
-          <span class="buyer-line-receipt-actions">
-            ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Open video receipt</a>` : ""}
-            <button type="button" class="receipt-screenshot-upload" data-upload-receipt-screenshot="${escapeHtml(line.id)}">Upload receipt screenshot</button>
-            <button type="button" class="buyer-line-note-btn" data-line-add-note="${escapeHtml(line.id)}">Notes / Add note</button>
-            <span data-line-chat-marker="${escapeHtml(line.id)}"><a class="buyer-line-note-btn order-chat-link" href="email-triage.html?orderLineId=${encodeURIComponent(line.id)}&from=pending" target="_blank" rel="noopener" aria-label="eBay chat for ${escapeHtml(line.item_title || 'this item')}">eBay chat ↗</a></span>
-            <button type="button" class="certificate-trigger" data-certificate-line="${escapeHtml(line.id)}" data-certificate-title="${escapeHtml((getOrderFromLine(line).order_number || '') + ' · ' + (line.item_title || 'Order item'))}">CGL certificate</button>
-            <span class="buyer-line-note-summary" data-line-note-summary="${escapeHtml(line.id)}">${renderLineNoteSummary(line)}</span>
-          </span>
-          <span class="queue-video-receipt-evidence" data-queue-video-evidence="${escapeHtml(line.id)}">
-            <span class="queue-video-receipt-empty">Checking saved video receipt screenshot...</span>
-          </span>
-          <span data-line-inventory="${escapeHtml(line.id)}"></span>
-        </span>
-        <b>${escapeHtml(line.line_status || "pending")}</b>
+            <div class="buyer-line-locate">
+              <span data-item-search-status="${escapeHtml(line.id)}">${renderItemSearchStatus(line)}</span>
+              <div class="buyer-line-actions" role="group" aria-label="Find this item">${renderItemFoundActions(line)}</div>
+            </div>
+            <div class="buyer-line-communication">
+              <button type="button" class="buyer-line-note-btn" data-line-add-note="${escapeHtml(line.id)}">Notes / Add note</button>
+              <span data-line-chat-marker="${escapeHtml(line.id)}"><a class="buyer-line-note-btn order-chat-link" href="email-triage.html?orderLineId=${encodeURIComponent(line.id)}&from=pending" target="_blank" rel="noopener" aria-label="eBay chat for ${escapeHtml(line.item_title || 'this item')}">eBay chat ↗</a></span>
+              ${assignedLineTask ? lineTaskActionMarkup : ""}
+            </div>
+            <div class="buyer-line-note-summary" data-line-note-summary="${escapeHtml(line.id)}">${renderLineNoteSummary(line)}</div>
+          </div>
+          <div class="buyer-line-evidence">
+            <span class="card-action-label">Receipt capture</span>
+            <div class="queue-video-receipt-evidence" data-queue-video-evidence="${escapeHtml(line.id)}"><span class="queue-video-receipt-empty">Checking saved video receipt screenshot...</span></div>
+            <div class="buyer-line-receipt-actions">
+              ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Open video receipt</a>` : ""}
+              <button type="button" class="receipt-screenshot-upload" data-upload-receipt-screenshot="${escapeHtml(line.id)}">Upload screenshot</button>
+            </div>
+          </div>
+          <div class="buyer-line-inventory" data-line-inventory="${escapeHtml(line.id)}"></div>
+          <details class="card-tools buyer-item-tools" data-card-tools="line:${escapeHtml(line.id)}" ${state.expandedCardToolKeys.has(`line:${line.id}`) ? "open" : ""}>
+            <summary><span>Item tools</span><small>Packing, tasks &amp; corrections</small></summary>
+            <div class="card-tools-content">
+              <div class="card-tool-group" role="group" aria-label="Item packing and tasks">
+                <span class="card-action-label">Packing &amp; tasks</span>
+                <div class="card-action-buttons">
+                  <button type="button" class="secondary-btn buyer-line-action-btn" data-line-pack="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Pack item</button>
+                  ${shippingLabelAction.combined ? "" : `<button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) && !getLineFulfillmentBlock(line) && canActOnLine ? "" : "disabled"}>Create shipping label</button>`}
+                  ${!assignedLineTask ? lineTaskActionMarkup : ""}
+                  <button type="button" class="certificate-trigger" data-certificate-line="${escapeHtml(line.id)}" data-certificate-title="${escapeHtml((getOrderFromLine(line).order_number || '') + ' · ' + (line.item_title || 'Order item'))}">CGL certificate</button>
+                </div>
+                <span class="line-watch-control" data-watch-line="${escapeHtml(line.id)}">${window.OGOrderWatches?.line(line) || ""}</span>
+              </div>
+              <div class="card-tool-group" role="group" aria-label="Item videos"><span class="card-action-label">Item videos</span><div class="card-action-buttons">${lineTaskVideoMarkup}</div></div>
+              <div class="card-tool-group card-tool-corrections" role="group" aria-label="Item corrections">
+                <span class="card-action-label">Corrections</span>
+                <div class="card-action-buttons">
+                  ${lineCancellationDetailsActionMarkup}
+                  <button type="button" class="secondary-btn buyer-line-action-btn refund-btn" data-line-refund="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Refunded</button>
+                  <button type="button" class="secondary-btn buyer-line-action-btn danger-btn" data-line-cancel="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Cancel</button>
+                </div>
+              </div>
+              <small class="buyer-line-identity">${escapeHtml(transactionLabel)} · ${escapeHtml(lineSource)}</small>
+            </div>
+          </details>
+        </div>
       `;
+      bindCardToolDisclosures(button);
+      button.querySelector("[data-line-pack]")?.addEventListener("click", event => {
+        event.stopPropagation();
+        selectOrderLine(line.id);
+      });
       const lineCheckbox = button.querySelector("[data-admin-line-select]");
       button.querySelector("[data-item-search]")?.addEventListener("click", event => {
         event.stopPropagation();

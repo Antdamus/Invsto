@@ -74,6 +74,9 @@ async function open(t,width=390) {
       }
       throw Error('Unexpected database operation: '+name);
     }};
+    const scannerRpc = supabase.rpc;
+    supabase.rpc = (name, args) => name === 'list_pending_customer_task_notes'
+      ? {range: async () => ({data: []})} : scannerRpc(name, args);
     watchQueueCompletionPhotos=watchQueueShippingLabels=scheduleQueueVideoReceiptEvidenceHydration=()=>{};
     loadSelectedOrderTasks=hydrateSelectedOrderDetails=hydrateQueueVideoReceiptEvidenceThumbnails=async()=>{};
     ensureQueueVideoReceiptTasksLoaded=async()=>{if(photoFailure)throw Error('Photos offline');};
@@ -94,6 +97,10 @@ async function enableHeaderNotifications(page) {
     window.noticeRows=[{id:'notice-1',recipient_user_id:'worker',task_id:'00000000-0000-4000-8000-000000000001',
       title:'Reply: The certificate is ready',body:'Please include it with the bag before packing.',created_at:new Date().toISOString(),read_at:null,source:'order',notification_type:'task_progress_update'}];
     supabase.auth={getSession:async()=>({data:{session:{user:{id:'worker'}}}}),onAuthStateChange:fn=>{window.noticeAuth=fn;}};
+    const scannerRpc = supabase.rpc;
+    supabase.rpc = (name, args) => name === 'notification_inbox'
+      ? Promise.resolve({data: {unread: structuredClone(noticeRows), entries: structuredClone(noticeRows), unread_count: noticeRows.length, total: noticeRows.length, counts: {all: noticeRows.length, tasks: noticeRows.length}}})
+      : scannerRpc(name, args);
     supabase.from=table=>{
       if(table!=='task_notifications')throw Error('Unexpected table');
       const q={select(){return q;},eq(){return q;},is(){return q;},order(){return q;},range(){return q;},limit(){return q;},
@@ -110,19 +117,19 @@ for(const width of [320,390,820,1366]) test(`${width}px: header actions stay rea
   await page.evaluate(()=>{state.orders[8].item_search={is_missing:false,updated_at:new Date().toISOString()};repaintLatestFoundButton();});
   await enableHeaderNotifications(page);
   const actions=page.getByRole('navigation',{name:'Quick order actions'}),scanNext=page.getByRole('button',{name:'Scan next bag',exact:true});
-  const latest=page.getByRole('button',{name:'Jump to latest found',exact:true}),updates=page.getByRole('button',{name:'Task updates, 1 unread',exact:true});
+  const latest=page.getByRole('button',{name:'Jump to latest found',exact:true}),updates=page.getByRole('button',{name:'Updates, 1 unread',exact:true});
   await page.evaluate(()=>window.scrollTo(0,1800));
   const boxes=await Promise.all([scanNext,latest,updates].map(el=>el.boundingBox()));
   for(const box of boxes)assert.ok(box&&box.y>=0&&box.y+box.height<200&&box.x>=0&&box.x+box.width<=width+1,JSON.stringify(box));
   for(let i=1;i<boxes.length;i++)assert.ok(boxes[i].x>=boxes[i-1].x+boxes[i-1].width,'actions have separate touch targets');
-  const alert=page.getByRole('region',{name:'New task updates'});
+  const alert=page.getByRole('region',{name:'New updates'});
   assert.ok((await alert.boundingBox()).y>=(await actions.boundingBox()).y+(await actions.boundingBox()).height);
-  await page.getByRole('button',{name:'Minimize task alert'}).click();
-  await updates.click();await expect(page.getByRole('region',{name:'Task updates inbox'})).toBeVisible();
+  await page.getByRole('button',{name:'Minimize update alert'}).click();
+  await updates.click();await expect(page.getByRole('region',{name:'Updates inbox'})).toBeVisible();
   await expect(updates).toBeVisible();
-  const inbox=await page.getByRole('region',{name:'Task updates inbox'}).boundingBox();
+  const inbox=await page.getByRole('region',{name:'Updates inbox'}).boundingBox();
   assert.ok(inbox.x>=0&&inbox.x+inbox.width<=width+1&&inbox.y>=boxes[2].y+boxes[2].height&&inbox.y+inbox.height<=844);
-  await page.getByRole('button',{name:'Close task updates'}).click();await expect(updates).toBeFocused();
+  await page.getByRole('button',{name:'Close updates'}).click();await expect(updates).toBeFocused();
   assert.equal(await page.evaluate(()=>OGTaskNotifications.snapshot().unreadCount),1,'closing does not mark it read');
   await scanNext.click();await expect(page.locator('#pending-bag-scan')).toBeFocused();
   const input=await page.locator('#pending-bag-scan').boundingBox(),bar=await actions.boundingBox();

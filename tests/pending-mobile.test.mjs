@@ -77,7 +77,9 @@ for (const width of [320, 390, 430, 760]) {
     await expect(page.locator('.mobile-header')).toBeHidden();
     await expect(page.locator('.phone-orders-header')).toBeVisible();
     const card = page.locator('.buyer-order-card').first();
-    const box = await card.boundingBox(); assert.ok(box.y < 520, `first buyer remains on the first screen below the action bar: ${box.y}px`);
+    const box = await card.boundingBox();
+    const filters = await page.locator('[data-pending-chat-status]').boundingBox();
+    assert.ok(box.y < filters.y + filters.height + 60, 'queue follows work/chat filters without packing tools taking over the page');
     await expect(card.locator('.buyer-card-note-body p')).toHaveCount(2);
     await expect(card.locator('.buyer-card-note-body p').first()).toBeVisible();
     assert.match(await card.innerText(), /Missing the silver bracelet/);
@@ -88,7 +90,7 @@ for (const width of [320, 390, 430, 760]) {
     assert.equal(await overflow(), false);
     if (width === 390) await page.screenshot({path: 'test-results/pending-mobile-queue.png'});
     await card.locator('[data-buyer-expand-key]').click();
-    await expect(page.locator('.phone-line-actions')).toHaveCount(2);
+    await expect(page.locator('.buyer-item-tools')).toHaveCount(2);
     const line = card.locator('.buyer-line-btn').first();
     await expect(line.locator('.order-chat-link')).toBeVisible();
     const chatUrl = new URL(await line.locator('.order-chat-link').getAttribute('href'), page.url());
@@ -96,8 +98,15 @@ for (const width of [320, 390, 430, 760]) {
     assert.equal(chatUrl.searchParams.get('from'), 'pending');
     await expect(line.locator('.order-chat-link')).toHaveAttribute('target', '_blank');
     await expect(page.locator('[data-line-cancel]').first()).toBeHidden();
-    await page.locator('.phone-line-actions button').nth(1).click();
+    await line.locator('.buyer-item-tools > summary').click();
     await expect(page.locator('[data-line-cancel]').first()).toBeVisible();
+    await expect(line.locator('[data-item-found]')).toBeVisible();
+    await expect(line.locator('[data-item-search]')).toBeVisible();
+    await expect(line.locator('[data-upload-receipt-screenshot]')).toBeVisible();
+    await card.locator('.buyer-order-tools > summary').click();
+    await expect(card.locator('[data-phone-camera=buyer]')).toBeVisible();
+    await expect(card.locator('[data-buyer-completion-photos]')).toBeVisible();
+    await expect(card.locator('[data-buyer-approval-key]')).toBeVisible();
     assert.equal(await overflow(), false);
     await page.locator('#phone-orders-tools').click();
     await expect(page.locator('#checkout-store-select')).toBeVisible();
@@ -126,6 +135,88 @@ test('filters work, navigation opens, and desktop restores the original tools', 
   await expect(page.locator('.phone-orders-header')).toBeHidden();
   await expect(page.locator('.buyer-card-note-details')).toBeHidden();
   await expect(page.locator('#phone-checkout-dock')).toBeHidden();
+});
+
+for (const width of [768, 1024, 1440]) {
+  test(`${width}px: grouped card tools are reachable, keyboard accessible, and preserve the expanded buyer`, async t => {
+    const page = await open(t, {width, admin: true});
+    await page.locator('#order-search').fill('jewelrylover_28');
+    const card = page.locator('.buyer-order-card');
+    await expect(card.locator('[data-buyer-no-inventory-key]')).toBeVisible();
+    await expect(card.locator('[data-buyer-complete-key]')).toBeVisible();
+    await expect(card.locator('[data-buyer-label-key]')).toBeVisible();
+    await expect(card.locator('[data-buyer-shipping-labels]')).toBeVisible();
+    await expect(card.locator('[data-buyer-completion-photos]')).toBeHidden();
+    await card.locator('.buyer-order-tools > summary').press('Enter');
+    await expect(card.locator('[data-buyer-completion-photos]')).toBeVisible();
+    await expect(card.locator('[data-buyer-expand-key]')).toHaveAttribute('aria-expanded', 'false');
+    await card.locator('[data-buyer-completion-photos]').press('Escape');
+    await expect(card.locator('.buyer-order-tools > summary')).toBeFocused();
+    await expect(card.locator('[data-buyer-completion-photos]')).toBeHidden();
+    await card.locator('[data-buyer-expand-key]').click();
+    const line = card.locator('[data-line-id="line-0"]');
+    await expect(line.locator('[data-item-found]')).toBeVisible();
+    await expect(line.locator('[data-item-search]')).toBeVisible();
+    await expect(line.locator('[data-line-cancel]')).toBeHidden();
+    await line.locator('.buyer-item-tools > summary').click();
+    await expect(line.locator('[data-line-cancel]')).toBeVisible();
+    await expect(line.locator('[data-line-pack]')).toBeVisible();
+    await card.locator('.buyer-order-tools > summary').click();
+    await expect(card.locator('[data-admin-group-select]')).toBeVisible();
+    await page.evaluate(() => renderOrders());
+    await expect(line.locator('[data-line-cancel]')).toBeVisible();
+    await expect(card.locator('[data-buyer-completion-photos]')).toBeVisible();
+    await expect(card.locator('[data-buyer-expand-key]')).toHaveAttribute('aria-expanded', 'true');
+    await card.locator('[data-admin-group-select]').check();
+    assert.deepEqual(await page.evaluate(() => [...state.adminSelectedLineIds].sort()), ['line-0', 'line-1']);
+    await card.locator('[data-admin-group-select]').uncheck();
+    assert.deepEqual(await page.evaluate(() => [...state.adminSelectedLineIds]), []);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    assert.deepEqual(await page.evaluate(() => databaseWrites), []);
+    await card.screenshot({path: `test-results/pending-card-tools-${width}.png`});
+    await line.locator('.buyer-item-tools > summary').click();
+    await card.locator('.buyer-order-tools > summary').click();
+    await card.screenshot({path: `test-results/pending-card-organized-${width}.png`});
+  });
+}
+
+test('relocated order and item actions keep their buyer/line scope without submitting', async t => {
+  const page = await open(t, {width: 1440});
+  await page.locator('#order-search').fill('jewelrylover_28');
+  await page.evaluate(() => {
+    window.actionCalls = [];
+    openCompletionPhotos = lines => actionCalls.push(['photos', lines.map(line => line.id).sort()]);
+    sendOrderToPhone = lines => actionCalls.push(['phone', lines.map(line => line.id).sort()]);
+    openOrderShippingLabels = lines => actionCalls.push(['labels', lines.map(line => line.id).sort()]);
+    openBuyerGroupSelectedEbayLabelPages = group => actionCalls.push(['create-label', group.lines.map(line => line.id).sort()]);
+    openWorkerCancelOrderModal = options => actionCalls.push(['cancel-review', options]);
+    openSavedEvidenceVideosModal = (id, options) => actionCalls.push(['videos', id, options]);
+    setItemMissing = (id, missing) => actionCalls.push(['missing', id, missing]);
+  });
+  const card = page.locator('.buyer-order-card');
+  await card.locator('[data-buyer-label-key]').click();
+  await card.locator('[data-buyer-shipping-labels]').click();
+  await card.locator('.buyer-order-tools > summary').click();
+  await card.locator('[data-buyer-completion-photos]').click();
+  await card.locator('[data-phone-camera=buyer]').click();
+  await card.locator('[data-buyer-expand-key]').click();
+  const line = card.locator('[data-line-id="line-0"]');
+  await line.locator('[data-item-found]').click();
+  await line.locator('[data-item-search]').click();
+  await line.locator('.buyer-item-tools > summary').click();
+  await line.locator('[data-line-view-videos]').click();
+  await expect.poll(() => page.evaluate(() => actionCalls.length)).toBe(7);
+  await line.locator('[data-line-refund]').click();
+  await line.locator('[data-line-cancel]').click();
+  assert.deepEqual(await page.evaluate(() => actionCalls), [
+    ['create-label', ['line-0', 'line-1']], ['labels', ['line-0', 'line-1']],
+    ['photos', ['line-0', 'line-1']], ['phone', ['line-0', 'line-1']],
+    ['missing', 'line-0', false], ['missing', 'line-0', true],
+    ['videos', 'line-0', {scope: 'line'}],
+    ['cancel-review', {lineIds: ['line-0'], mode: 'refunded'}],
+    ['cancel-review', {lineIds: ['line-0'], openEbayCancel: true}],
+  ]);
+  assert.deepEqual(await page.evaluate(() => databaseWrites), []);
 });
 
 test('packing opens without the keyboard, back preserves the staged bundle, resume and review do not submit', async t => {
