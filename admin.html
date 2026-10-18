@@ -7,7 +7,7 @@
 
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="admin.css" />
-  <link rel="stylesheet" href="admin-overview-drawer.css?v=20261011-corrections" />
+  <link rel="stylesheet" href="admin-overview-drawer.css?v=20261018-delete-shift" />
   <link rel="stylesheet" href="admin-schedule.css?v=20260901-schedule-time-selects" />
   <link rel="stylesheet" href="admin-payroll.css" />
   <link rel="stylesheet" href="admin-taxdocs.css" />
@@ -1159,7 +1159,7 @@
 
       <label class="reason">
         <span>Audit reason (required)</span>
-        <textarea id="shiftAdminReason" rows="4" placeholder="Example: Worker forgot to clock out; verified with manager."></textarea>
+        <textarea id="shiftAdminReason" rows="4" required minlength="3" maxlength="2000" placeholder="Example: Worker forgot to clock out; verified with manager."></textarea>
       </label>
 
       <div id="shiftAdminError" class="error hidden" role="alert"></div>
@@ -1483,10 +1483,10 @@
   <script src="admin-taxdocs.js?v=20261011-admin-boot"></script>
   <link rel="stylesheet" href="offsite-work.css?v=20261011-outings" />
   <script src="offsite-work.js?v=20261011-outings"></script>
-  <script src="admin-overview.js?v=20261013-shift-orders"></script>
+  <script src="admin-overview.js?v=20261018-delete-shift"></script>
   <script src="admin-stores.js?v=20261011-admin-boot"></script>
   <script src="time-correction-core.js?v=20261011-corrections"></script>
-  <script src="admin.js?v=20261013-shift-orders"></script>
+  <script src="admin.js?v=20261018-delete-shift"></script>
   <script src="admin-users.js?v=buyer-sms-thresholds-20260823" defer></script>
 
   

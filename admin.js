@@ -1451,6 +1451,26 @@ function wireEditModal(){
 let shiftAdminMode = null;
 let shiftAdminShiftId = null;
 let shiftAdminSaving = false;
+let shiftAdminShift = null, shiftAdminContext = null, shiftAdminReturnFocus = null;
+let liveDeleteLoading = false;
+
+async function openLiveShiftDeletion(entryId, displayName){
+  if (liveDeleteLoading || shiftAdminSaving || shiftAdminMode) return;
+  liveDeleteLoading = true;
+  const returnFocus = document.activeElement;
+  try{
+    const { data, error } = await supabaseClient.from('time_entries')
+      .select('id,employee_id,store_id,clock_in,clock_out').eq('id', entryId).single();
+    if (error) throw error;
+    if (!data || data.clock_out) throw new Error('This shift is no longer open. Refresh the live list or use the timesheet.');
+    await openShiftAdminModal('delete', data, { employeeId: data.employee_id, displayName });
+    shiftAdminReturnFocus = returnFocus;
+  }catch(err){
+    showToast(err?.message || 'Could not load this shift. Refresh the live list and try again.', 'err');
+  }finally{
+    liveDeleteLoading = false;
+  }
+}
 
 function shiftAdminEl(id){
   return document.getElementById(id);
@@ -1496,7 +1516,7 @@ function updateShiftAdminDuration(){
   if (!el) return;
 
   if (shiftAdminMode === 'delete'){
-    el.textContent = 'A permanent audit snapshot will be saved before this row is deleted.';
+    el.textContent = 'Your name, date, reason, original shift, photos, breaks, and history are kept in the timesheet audit trail.';
     return;
   }
 
@@ -1504,7 +1524,7 @@ function updateShiftAdminDuration(){
   let endVal = shiftAdminEl('shiftAdminOut')?.value || '';
 
   if (shiftAdminMode === 'close'){
-    const shift = currentShiftsById.get(shiftAdminShiftId);
+    const shift = shiftAdminShift;
     startVal = shift?.clock_in || '';
     endVal = shiftAdminEl('shiftAdminOutOnly')?.value || '';
   }
@@ -1515,21 +1535,25 @@ function updateShiftAdminDuration(){
   el.textContent = Number.isFinite(diff) && diff > 0 ? `Duration: ${fmtDurationHM(diff)}` : 'Duration: -';
 }
 
-async function openShiftAdminModal(mode, shift = null){
-  if (!drawerContext?.employeeId){
+async function openShiftAdminModal(mode, shift = null, context = drawerContext){
+  if (shiftAdminSaving) return;
+  if (!context?.employeeId){
     showToast('Open a worker first, then add a manual shift.', 'err');
     return;
   }
 
-  await ensureStoresCache().catch(console.warn);
+  if (mode === 'manual') await ensureStoresCache().catch(console.warn);
 
   shiftAdminMode = mode;
   shiftAdminShiftId = shift?.id || null;
+  shiftAdminShift = shift ? { ...shift } : null;
+  shiftAdminContext = { ...context };
+  shiftAdminReturnFocus = document.activeElement;
   shiftAdminSaving = false;
   setShiftAdminError('');
 
-  const workerName = drawerContext.displayName || qs('drawerTitle')?.textContent || 'Worker';
-  const monthText = drawerContext.monthStart ? monthLabel(drawerContext.monthStart) : '';
+  const workerName = context.displayName || 'Worker';
+  const monthText = context.monthStart ? monthLabel(context.monthStart) : '';
   const workerEl = shiftAdminEl('shiftAdminWorker');
   if (workerEl) workerEl.textContent = monthText ? `${workerName} / ${monthText}` : workerName;
 
@@ -1540,7 +1564,11 @@ async function openShiftAdminModal(mode, shift = null){
   const reason = shiftAdminEl('shiftAdminReason');
   const store = shiftAdminEl('shiftAdminStore');
 
-  if (reason) reason.value = '';
+  if (reason){
+    reason.value = '';
+    reason.placeholder = mode === 'delete' ? 'Example: Opened by mistake; no work was performed.' : 'Example: Worker forgot to clock out; verified with manager.';
+  }
+  saveBtn?.classList.toggle('delete-confirm', mode === 'delete');
   if (store) store.innerHTML = storeOptionsHTML(shift?.store_id || null);
 
   setShiftAdminVisible('shiftAdminClockInRow', mode === 'manual');
@@ -1570,7 +1598,7 @@ async function openShiftAdminModal(mode, shift = null){
     const range = shift ? `${fmtLocal(shift.clock_in)} to ${shift.clock_out ? fmtLocal(shift.clock_out) : 'OPEN'}` : 'this shift';
     if (title) title.textContent = 'Delete shift';
     if (subtitle) subtitle.textContent = 'Use only when the time entry should not exist.';
-    if (warning) warning.textContent = `This removes ${range}. The old shift, breaks, review status, and adjustment trail are kept in the audit log.`;
+    if (warning) warning.textContent = `Delete the shift from ${range}? It will be removed from worked hours and payroll totals.`;
     if (saveBtn) saveBtn.textContent = 'Delete shift';
   }
 
@@ -1580,6 +1608,7 @@ async function openShiftAdminModal(mode, shift = null){
   shiftAdminEl('shiftAdminModal')?.classList.remove('hidden');
   shiftAdminEl('shiftAdminModalBackdrop')?.classList.add('show');
   shiftAdminEl('shiftAdminModalBackdrop')?.classList.remove('hidden');
+  document.body.classList.add('shift-admin-open');
 
   const focusTarget = mode === 'manual'
     ? shiftAdminEl('shiftAdminIn')
@@ -1590,15 +1619,17 @@ async function openShiftAdminModal(mode, shift = null){
 }
 
 function closeShiftAdminModal(){
+  if (shiftAdminSaving) return;
   shiftAdminMode = null;
   shiftAdminShiftId = null;
-  shiftAdminSaving = false;
+  shiftAdminShift = null;
+  shiftAdminContext = null;
   shiftAdminEl('shiftAdminModal')?.classList.remove('open');
   shiftAdminEl('shiftAdminModalBackdrop')?.classList.remove('show');
-  setTimeout(()=>{
-    shiftAdminEl('shiftAdminModal')?.classList.add('hidden');
-    shiftAdminEl('shiftAdminModalBackdrop')?.classList.add('hidden');
-  }, 180);
+  shiftAdminEl('shiftAdminModal')?.classList.add('hidden');
+  shiftAdminEl('shiftAdminModalBackdrop')?.classList.add('hidden');
+  document.body.classList.remove('shift-admin-open');
+  shiftAdminReturnFocus?.focus();
 }
 
 async function refreshOverviewLiveNow(){
@@ -1607,44 +1638,49 @@ async function refreshOverviewLiveNow(){
 }
 
 async function refreshOverviewSurfaces(){
-  await refreshOverviewSummary();
-  await refreshOverviewLiveNow();
+  await Promise.all([refreshOverviewSummary(), refreshOverviewLiveNow()]);
 }
 
 async function refreshDrawerAfterAdminShiftAction(reopenAuditId = null){
-  if (drawerContext?.employeeId && drawerContext?.monthStart){
-    const shifts = await fetchWorkerShifts(drawerContext.employeeId, drawerContext.monthStart);
-    renderDrawerSummary(shifts);
-    renderDrawerList(shifts);
-  }
-
-  if (reopenAuditId && currentShiftsById.has(reopenAuditId)){
-    auditCache.delete(reopenAuditId);
-    await toggleAudit(reopenAuditId);
-  }
-
-  await refreshOverviewSurfaces();
+  await Promise.all([
+    (async () => {
+      if (drawerContext?.employeeId && drawerContext?.monthStart){
+        const shifts = await fetchWorkerShifts(drawerContext.employeeId, drawerContext.monthStart);
+        renderDrawerSummary(shifts);
+        renderDrawerList(shifts);
+      }
+      if (reopenAuditId && currentShiftsById.has(reopenAuditId)){
+        auditCache.delete(reopenAuditId);
+        await toggleAudit(reopenAuditId);
+      }
+    })(),
+    refreshOverviewSurfaces()
+  ]);
 }
 
 async function saveShiftAdminAction(){
   if (shiftAdminSaving || !shiftAdminMode) return;
 
   const reason = (shiftAdminEl('shiftAdminReason')?.value || '').trim();
-  if (reason.length < 3){
-    setShiftAdminError('Audit reason is required (minimum 3 characters).');
+  if (reason.length < 3 || reason.length > 2000){
+    setShiftAdminError('Audit reason is required (3 to 2000 characters).');
+    shiftAdminEl('shiftAdminReason')?.focus();
     return;
   }
 
   const saveBtn = shiftAdminEl('shiftAdminSaveBtn');
+  const mode = shiftAdminMode;
+  let changedShiftId = shiftAdminShiftId;
+  let saved = false;
+  setShiftAdminError('');
   shiftAdminSaving = true;
+  shiftAdminEl('shiftAdminModal').querySelectorAll('button, input, textarea, select').forEach(el => el.disabled = true);
   if (saveBtn){
     saveBtn.disabled = true;
     saveBtn.textContent = shiftAdminMode === 'delete' ? 'Deleting...' : 'Saving...';
   }
 
   try{
-    let changedShiftId = shiftAdminShiftId;
-
     if (shiftAdminMode === 'manual'){
       const inValue = shiftAdminEl('shiftAdminIn')?.value || '';
       const outValue = shiftAdminEl('shiftAdminOut')?.value || '';
@@ -1656,7 +1692,7 @@ async function saveShiftAdminAction(){
       if (outDate <= inDate) throw new Error('Clock-out must be after clock-in.');
 
       const { data, error } = await supabaseClient.rpc('admin_create_manual_shift', {
-        _employee_id: drawerContext.employeeId,
+        _employee_id: shiftAdminContext.employeeId,
         _clock_in: localInputToOffsetISO(inValue),
         _clock_out: localInputToOffsetISO(outValue),
         _store_id: shiftAdminEl('shiftAdminStore')?.value || null,
@@ -1668,7 +1704,7 @@ async function saveShiftAdminAction(){
     }
 
     if (shiftAdminMode === 'close'){
-      const shift = currentShiftsById.get(shiftAdminShiftId);
+      const shift = shiftAdminShift;
       const outValue = shiftAdminEl('shiftAdminOutOnly')?.value || '';
       const outDate = new Date(outValue);
       if (!shift) throw new Error('Shift not found.');
@@ -1690,7 +1726,9 @@ async function saveShiftAdminAction(){
       if (!shiftAdminShiftId) throw new Error('Shift not found.');
       const { error } = await supabaseClient.rpc('admin_delete_shift_entry', {
         _time_entry_id: shiftAdminShiftId,
-        _reason: reason
+        _reason: reason,
+        _expected_clock_in: shiftAdminShift.clock_in,
+        _expected_clock_out: shiftAdminShift.clock_out
       });
       if (error) throw error;
       auditCache.delete(shiftAdminShiftId);
@@ -1699,14 +1737,13 @@ async function saveShiftAdminAction(){
       showToast('Shift deleted with audit snapshot', 'ok');
     }
 
-    const shouldOpenAudit = shiftAdminMode !== 'delete';
-    closeShiftAdminModal();
-    await refreshDrawerAfterAdminShiftAction(shouldOpenAudit ? changedShiftId : null);
+    saved = true;
   }catch(err){
     console.error(err);
     setShiftAdminError(err?.message || 'Failed to save shift action.');
   }finally{
     shiftAdminSaving = false;
+    shiftAdminEl('shiftAdminModal').querySelectorAll('button, input, textarea, select').forEach(el => el.disabled = false);
     if (saveBtn){
       saveBtn.disabled = false;
       saveBtn.textContent = shiftAdminMode === 'delete'
@@ -1715,6 +1752,15 @@ async function saveShiftAdminAction(){
           ? 'Create shift'
           : 'Close shift';
     }
+  }
+  if (!saved) return;
+  closeShiftAdminModal();
+  try{
+    // Refresh the live list even if the monthly drawer cannot be reloaded.
+    await refreshDrawerAfterAdminShiftAction(mode !== 'delete' ? changedShiftId : null);
+  }catch(err){
+    console.warn(err);
+    showToast('Shift action saved. Refresh the page to reload the latest shifts and totals.', 'ok');
   }
 }
 
@@ -1731,6 +1777,7 @@ function wireShiftAdminModal(){
     if (!open) return;
     if (e.key === 'Escape'){
       e.preventDefault();
+      e.stopImmediatePropagation();
       closeShiftAdminModal();
       return;
     }
@@ -1739,7 +1786,14 @@ function wireShiftAdminModal(){
       const b = shiftAdminEl('shiftAdminSaveBtn');
       if (b && !b.disabled) b.click();
     }
-  });
+    if (e.key === 'Tab'){
+      const items = [...shiftAdminEl('shiftAdminModal').querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled)')].filter(el => el.getClientRects().length);
+      const first = items[0], last = items[items.length - 1];
+      if (!first){ e.preventDefault(); return; }
+      if (e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+    }
+  }, true);
 }
 async function fetchLiveNow(){
   // 1) open shifts
@@ -3324,6 +3378,7 @@ function setupOverview() {
 
     // This is the bridge into your existing drawer system:
     correctLiveTime: openLiveCorrection,
+    deleteLiveShift: openLiveShiftDeletion,
     openWorkerDrawer: ({ employeeId, monthStart, displayName }) => {
       // Reuse the exact drawer open flow you already have
       drawerContext = { employeeId, monthStart, displayName };

@@ -18,6 +18,7 @@ function initOverview(deps) {
     fetchMonthlyExceptionCounts,
     fetchLiveNow,            // ✅ Live Now data fetcher (kept in admin.js for now)
     correctLiveTime,
+    deleteLiveShift,
     openWorkerDrawer,        // ✅ only drawer API Overview should use
   } = deps;
 
@@ -472,6 +473,7 @@ async function loadSummary() {
         <button class="btn small ghost" type="button" data-live-details>Timesheet</button>
         <button class="btn small ghost" type="button" data-live-work>View work</button>
         <button class="btn small live-correct" type="button" data-live-correct>Correct time</button>
+        <button class="btn small ghost live-delete" type="button" data-live-delete>Delete shift</button>
       </div>
     `;
     list.appendChild(div);
@@ -481,19 +483,28 @@ async function loadSummary() {
   if (typeof tickLiveNow === 'function') tickLiveNow();
 }
 
-let liveLoading=false;
-async function loadLiveNow(){
-  if(liveLoading)return;
-  liveLoading=true;
-  try{
-    const rows = await fetchLiveNow();
-    renderLiveNow(rows);
-    await OffsiteWork.loadAdmin(supabaseClient);
-  }catch(err){
-    console.error(err);
-    const list = qs('liveList');
-    if (list) list.innerHTML = `<div class="muted">Failed to load live status.</div>`;
-  }finally{liveLoading=false;}
+let liveLoading=null, liveReloadRequested=false;
+function loadLiveNow(){
+  if(liveLoading){
+    // A mutation during a poll must get a fresh read after that poll finishes.
+    liveReloadRequested=true;
+    return liveLoading;
+  }
+  liveLoading=(async()=>{
+    do{
+      liveReloadRequested=false;
+      try{
+        const rows = await fetchLiveNow();
+        renderLiveNow(rows);
+        await OffsiteWork.loadAdmin(supabaseClient);
+      }catch(err){
+        console.error(err);
+        const list = qs('liveList');
+        if (list) list.innerHTML = `<div class="muted">Failed to load live status.</div>`;
+      }
+    }while(liveReloadRequested);
+  })().finally(()=>{liveLoading=null;});
+  return liveLoading;
 }
 
 // A live worker opens only the current shift. Timesheet remains an explicit action.
@@ -516,6 +527,9 @@ function wireLiveList(){
     if(outingButton){OffsiteWork.focus(outingButton.dataset.liveOuting);return;}
     if(e.target.closest('[data-live-correct]')){
       correctLiveTime(card.dataset.entryId,displayName); return;
+    }
+    if(e.target.closest('[data-live-delete]')){
+      deleteLiveShift(card.dataset.entryId,displayName); return;
     }
     if(!e.target.closest('[data-live-details]')){
       window.AdminWorkReport.openShift(employeeId,card.dataset.entryId,new Date(Number(card.dataset.clockInMs)).toISOString());return;

@@ -1353,8 +1353,14 @@
 .live-times{margin-top:5px; font-variant-numeric:tabular-nums; line-height:1.5;}
 .live-anoms{display:flex; flex-wrap:wrap; gap:6px; max-width:360px;}
 .live-actions{display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
-.live-actions a,.live-actions button{min-height:44px; display:inline-flex; align-items:center; justify-content:center;}
+.live-actions a,.live-actions .btn{min-height:44px; display:inline-flex; align-items:center; justify-content:center;}
 .live-actions .live-correct{background:#e8cd8c; color:#211c12; border-color:#e8cd8c; font-weight:750;}
+.live-actions .live-delete,#shiftAdminSaveBtn.delete-confirm{color:#ffd0d0; border-color:#945650; background:#462b2b; font-weight:750;}
+.live-actions .live-delete:hover,#shiftAdminSaveBtn.delete-confirm:hover{background:#5a3333;}
+body.shift-admin-open{overflow:hidden;}
+#shiftAdminModal{max-width:calc(100vw - 22px); max-height:calc(100dvh - 24px); overflow:auto;}
+#shiftAdminModal button{min-height:44px;}
+#shiftAdminModal textarea{box-sizing:border-box; font-size:16px;}
 #editModal{width:min(620px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); display:flex; flex-direction:column; overflow:hidden; border:1px solid #6e6247; border-radius:24px; background:#151a17; box-shadow:0 24px 90px #0009;}
 #editModal.hidden{display:none;}
 #editModal .modal-header,#editModal .modal-footer{flex:none; padding:20px 24px;}
@@ -1382,7 +1388,7 @@
   .live-main{min-width:0;}.live-status{align-self:start;}
   .live-anoms{grid-column:1/-1; max-width:none;}
   .live-actions{grid-column:1/-1; display:grid; grid-template-columns:repeat(2,minmax(0,1fr));}
-  .live-actions .live-correct{grid-column:2;}
+  .live-actions .live-correct{grid-column:auto;}
   .live-name{font-size:17px;}.live-times{font-size:13px;}
   #editModal{max-height:calc(100dvh - 16px); width:calc(100vw - 16px); border-radius:20px;}
   #editModal .modal-header,#editModal .modal-footer{padding:16px;}
