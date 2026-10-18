@@ -2,6 +2,8 @@
 
 TikTok uses `pending-tiktok-orders.html` and the same page with `?view=history`. eBay continues using its existing pages, tables, RPCs, checkout and packaging. The only additions to eBay pages are links styled as marketplace tabs. There is no combined marketplace view.
 
+The TikTok workspace reuses the eBay fulfillment styles and navigation shell, with expandable buyer cards, receipt links, shipping-label coverage, saved documents, preparation and notes. Shipping summaries and filters show overdue, today, tomorrow and missing dates. Date comparisons use calendar days in America/New_York (including daylight-saving changes); a date-only deadline becomes overdue the following day. Unknown deadlines never imply overdue status. A buyer's earliest verified deadline determines their group, and filters keep that buyer's orders together. Groups with any missing dates also appear under Date needed. Shipping dates on a buyer card opens the verification and editing flow. History excludes urgency indicators for completed orders.
+
 ## Export and import
 
 1. In TikTok Manage orders, select Orders → To ship.

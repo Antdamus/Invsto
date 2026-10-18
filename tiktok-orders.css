@@ -1,2 +1,114 @@
-:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#19312d;background:#f3f5f3;font-size:15px}*{box-sizing:border-box}body{margin:0}a{color:#086f64}button,input,select,textarea{font:inherit}button,.tk-action{border:1px solid #c4d2cc;background:white;color:#17483e;border-radius:8px;padding:10px 14px;cursor:pointer;text-decoration:none}button:hover,.tk-action:hover{background:#e9f3ed}button:disabled{opacity:.5;cursor:wait}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #228b78;outline-offset:3px}input,select,textarea{border:1px solid #bbc8c2;border-radius:7px;padding:10px;width:100%;background:white}label{display:grid;gap:6px;font-weight:600}label small,.tk-help{font-weight:400;font-size:13px;color:#52665f;line-height:1.6}.tk-top{display:flex;align-items:center;gap:24px;background:#153e34;color:white;padding:18px 4vw}.tk-top a{color:white}.tk-top>a:last-child{margin-left:auto}.tk-brand{font-size:21px;font-weight:750;text-decoration:none}.tk-main{max-width:1180px;margin:auto;padding:26px 24px 50px}.marketplace-tabs{display:flex;gap:8px;margin-bottom:24px;border-bottom:1px solid #cbd5cf;padding-bottom:10px}.marketplace-tabs a{display:inline-block;padding:10px 28px;border-radius:8px;text-decoration:none;font-weight:700;background:white;color:#26483b}.marketplace-tabs a[aria-current=page]{background:#164b3d;color:white}.tk-heading{display:flex;align-items:center;justify-content:space-between;gap:20px}.tk-heading h1{font-size:32px;margin:4px 0 8px}.tk-heading p{color:#50675d;line-height:1.6}.tk-eyebrow{font-size:12px;letter-spacing:.15em;font-weight:750}.tk-views{display:flex;gap:24px;margin:12px 0 20px}.tk-views a{padding:10px 0;text-decoration:none}.tk-views a[aria-current=page]{font-weight:750;border-bottom:3px solid #196850}#tk-status{min-height:24px;line-height:1.6}#tk-status[data-error=true],.tk-warning{color:#8b321c;background:#fff1df;padding:12px;border-radius:8px}.tk-card,.tk-buyer{border:1px solid #d7ded9;background:white;border-radius:12px;padding:20px;margin:16px 0}.tk-card summary{cursor:pointer;font-weight:700}.tk-card summary span{font-size:12px;color:#52665f;margin-left:12px}.tk-card ol{line-height:1.9}.tk-import-controls{display:grid;grid-template-columns:1fr 1fr;gap:16px}.tk-toolbar{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:24px 0}.tk-toolbar>label:first-child{flex:1;min-width:200px}.tk-summary{display:flex;gap:12px;flex-wrap:wrap}.tk-summary>div{background:#e5ece6;padding:16px 22px;border-radius:10px;min-width:140px}.tk-summary strong{display:block;font-size:25px}.tk-summary span{font-size:13px}.tk-buyer-head{display:flex;justify-content:space-between;gap:12px;align-items:center}.tk-buyer h2{font-size:20px;margin:0 0 4px}.tk-buyer p{color:#617369;margin:4px 0 15px}.tk-order-row{display:grid;grid-template-columns:1fr 1.6fr 1fr auto;gap:12px;align-items:center;padding:16px 0;border-top:1px solid #e6eae6}.tk-order-row small{display:block;margin:5px 0;color:#627267;overflow-wrap:anywhere}.tk-pill{display:inline-block;border-radius:5px;background:#e9efe9;padding:4px 7px;font-size:12px;margin:2px 0}.tk-pill.waiting{background:#fff0d8;color:#7d4714}.tk-muted{color:#667970}.tk-empty{padding:50px;text-align:center;border:1px dashed #9bab9e;border-radius:12px}.tk-detail{border:1px solid #d3ddd5;border-radius:14px;max-width:900px;width:94vw;max-height:90vh;padding:28px;color:#19312d}.tk-detail::backdrop{background:#122c2466}.tk-close{float:right;font-size:24px;padding:2px 10px}.tk-detail h2{font-size:23px;overflow-wrap:anywhere}.tk-detail section{border-top:1px solid #d9e1da;margin-top:20px;padding-top:18px}.tk-detail h3{font-size:17px}.tk-actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}.tk-detail table,#tk-preview table{width:100%;border-collapse:collapse;font-size:13px}.tk-detail th,.tk-detail td,#tk-preview td,#tk-preview th{text-align:left;padding:10px;border-bottom:1px solid #dce4dd;overflow-wrap:anywhere}.tk-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}.tk-detail textarea{min-height:95px}.tk-confirm{display:flex;gap:10px;align-items:flex-start;font-weight:400;margin:14px 0}.tk-confirm input{width:auto;margin-top:3px}.tk-history{max-height:240px;overflow:auto}.tk-history li{margin:10px 0;line-height:1.6;overflow-wrap:anywhere}.tk-doc{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 0;border-bottom:1px solid #e8ece8}.tk-doc span{flex:1;overflow-wrap:anywhere}.tk-preview-scroll{max-height:320px;overflow:auto}.tk-detail [role=status]{white-space:pre-wrap;line-height:1.6}.tk-detail .tk-help{margin:10px 0}
-@media(max-width:700px){.tk-main{padding:18px 14px}.tk-top{gap:12px;font-size:12px}.tk-top>span{display:none}.tk-heading h1{font-size:27px}.tk-import-controls,.tk-fields{grid-template-columns:1fr}.tk-order-row{grid-template-columns:1fr 1fr}.tk-detail{padding:20px 14px}.tk-buyer{padding:16px}.tk-buyer-head{align-items:start}.tk-toolbar>button{flex:1}.tk-summary{gap:8px}.tk-summary>div{padding:12px;flex:1;min-width:110px}.tk-summary strong{font-size:22px}.tk-detail table{font-size:12px}.tk-detail td,.tk-detail th{padding:7px}}
+/* TikTok uses the existing fulfillment shell and buyer cards. Only its additions live here. */
+.tiktok-workspace{color-scheme:dark}
+.tiktok-workspace :is(h1,h2,h3,h4){color:var(--text)}
+.tiktok-workspace a{color:var(--gold)}
+.tiktok-workspace .logo{color:#17140b;text-decoration:none}
+.tiktok-workspace .content{gap:14px}
+.tiktok-workspace .header-inner{display:flex;justify-content:space-between;align-items:center;gap:16px}
+.tiktok-workspace .header .secondary-btn{white-space:nowrap;text-decoration:none}
+.tiktok-workspace .order-marketplace-tabs{margin:0}
+.tiktok-workspace .order-marketplace-tabs a{color:#26483b}
+.tiktok-workspace .order-marketplace-tabs a[aria-current=page]{color:white}
+.tk-views{display:flex;gap:24px;border-bottom:1px solid var(--line);margin:0 0 2px}
+.tk-views a{padding:10px 0;text-decoration:none;color:var(--muted);font-weight:700;font-size:14px}
+.tk-views a[aria-current=page]{color:var(--gold);border-bottom:3px solid var(--gold)}
+.tk-help{font-size:12px;color:var(--muted);line-height:1.6;margin:0}
+.tk-utilities{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:12px;align-items:start}
+.tk-utilities details{margin:0;min-width:0}
+.tk-utilities summary{cursor:pointer;font-size:13px;font-weight:750;padding:2px}
+.tk-utilities #tk-import{padding:15px 18px}
+.tk-utilities ol{font-size:13px;line-height:1.8;padding-left:22px}
+#tk-last-import{font-size:11px;color:var(--muted);font-weight:500;margin-left:12px}
+.tk-import-controls,.tk-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0}
+.tiktok-workspace label{display:grid;gap:6px;font-size:13px;color:var(--muted)}
+.tiktok-workspace :is(input,select,textarea){max-width:100%;min-width:0}
+.tiktok-workspace button:not(.nav-link){cursor:pointer}
+.tiktok-workspace button:disabled{opacity:.55;cursor:wait}
+.tiktok-workspace :is(button,a,input,select,textarea):focus-visible{outline:2px solid var(--gold);outline-offset:3px}
+.tiktok-workspace [hidden]{display:none!important}
+#tk-status{font-size:12px;color:var(--muted);line-height:1.6;min-height:18px;margin:0}
+#tk-status[data-error=true],.tk-warning{color:#ffc0ae;background:#d9714e16;padding:12px;border:1px solid #d9714e55;border-radius:10px}
+#tk-summary{grid-template-columns:repeat(6,minmax(0,1fr));gap:9px}
+#tk-summary>div{padding:12px;min-width:0}
+#tk-summary button{border:0;background:none;color:inherit;text-align:left;padding:0;display:grid;gap:5px;width:100%;height:100%;font:inherit;border-radius:5px}
+#tk-summary strong{font-size:18px}
+#tk-summary small{font-size:11px;line-height:1.4}
+#tk-summary [aria-pressed=true]{box-shadow:inset 0 -2px var(--gold)}
+#tk-summary .is-unknown{border-color:#adacbf44;background:#8888ac0b}
+.tk-toolbar{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin:16px 0}
+.tk-toolbar>label{min-width:140px}
+.tk-toolbar>.tk-search-label{flex:1;min-width:220px}
+.tk-toolbar input,.tk-toolbar select{width:100%;min-height:44px}
+.tk-toolbar>button{font-size:12px;min-height:44px}
+.tk-sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.tiktok-workspace .buyer-shipping-due-options{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.tiktok-workspace [data-tk-due][aria-pressed=true]:not(.tk-summary-button){background:var(--gold);color:#251c0d;border-color:var(--gold)}
+#tk-orders{margin-top:14px;max-height:none;overflow:visible;padding:0}
+.tiktok-workspace .buyer-card-buyer-name{background:none;border:0;color:var(--text);padding:0;font:800 17px/1.4 Manrope,sans-serif;text-align:left;cursor:pointer}
+.tiktok-workspace .buyer-card-meta{flex-wrap:wrap!important;overflow:visible!important}
+.tiktok-workspace .buyer-card-meta-pill{max-width:none!important;white-space:normal;overflow-wrap:anywhere}
+.tiktok-workspace .buyer-card-expand-btn{color:var(--text);text-decoration:none}
+.tiktok-workspace .tk-stage{font-size:11px;border:1px solid #e3bd7744;border-radius:8px;padding:5px 8px;color:#d8c69f;background:#e3bd770c}
+.tk-stage.waiting,.tk-date.unknown{color:#ebc78c}
+.tk-date{font-weight:750}
+.tk-date.overdue{color:#ffa4a4}.tk-date.today{color:#f3d49c}.tk-date.tomorrow{color:#a5caff}
+.tk-label-saved{color:#a7e1c0!important;border-color:#77bd9644!important}
+.tk-label-missing{color:var(--muted)}
+.tk-order-row{padding:16px;border:1px solid var(--line);border-radius:12px;background:#ffffff03;min-width:0}
+.tk-order-heading{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.tk-order-heading strong{font-size:13px;overflow-wrap:anywhere}
+.tk-order-heading small{display:block;font-size:11px;color:var(--muted);margin-top:4px}
+.tk-order-items{display:grid;gap:10px}.tk-order-item{display:flex;justify-content:space-between;gap:14px;align-items:start;font-size:13px;line-height:1.5}
+.tk-order-item>div{min-width:0;overflow-wrap:anywhere}.tk-order-item small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+.tk-order-item b{white-space:nowrap;color:var(--gold)}
+.tk-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0 0}
+.tk-actions :is(button,a){font-size:12px;min-height:40px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+.tk-note{margin:8px 0 0;padding:10px 12px;border-left:2px solid #b99c64;background:#b99c640a;color:#e7d8b8;font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.tk-empty{padding:40px;text-align:center;color:var(--muted);border:1px dashed var(--line-strong);border-radius:14px}
+.tk-detail{border:1px solid var(--line-strong);border-radius:22px;width:min(980px,calc(100vw - 28px));max-height:90dvh;padding:26px;background:#151718;color:var(--text);box-shadow:0 24px 100px #0009}
+.tk-detail::backdrop{background:#000a;backdrop-filter:blur(4px)}
+.tk-detail h2{font-size:23px;overflow-wrap:anywhere;margin:7px 40px 16px 0}
+.tk-detail h3{font-size:17px;margin:0 0 12px}
+.tk-detail p{line-height:1.6;font-size:13px}
+.tk-close{float:right;font-size:25px;padding:3px 11px;min-height:40px}
+.tk-detail button,.tk-detail .tk-action,#tk-import button,#extension-updates button,#extension-download{border:1px solid var(--line-strong);background:#ffffff06;color:var(--text);border-radius:11px;padding:10px 14px;font:700 13px Manrope,sans-serif;cursor:pointer;text-decoration:none}
+.tk-detail button:hover,.tk-detail .tk-action:hover{background:#e3bd7715}
+.tk-detail section{border-top:1px solid var(--line);margin-top:22px;padding-top:20px}
+.tk-detail .tk-eyebrow{color:var(--gold);font-size:10px;letter-spacing:1.6px;font-weight:800;margin:0}
+.tk-detail input,.tk-detail select,.tk-detail textarea,#tk-import input{width:100%;background:#0b0e0f;color:var(--text);border:1px solid #ffffff25;border-radius:10px;padding:11px;font:inherit;font-size:14px}
+.tk-detail textarea{min-height:90px;resize:vertical}
+.tk-confirm{display:flex!important;gap:10px;align-items:flex-start;margin:14px 0;line-height:1.5;font-size:12px!important}
+.tk-confirm input{width:auto;flex-shrink:0;margin:3px 0}
+.tk-table-scroll{overflow-x:auto;margin:16px 0}
+.tk-detail table,#tk-preview table{width:100%;border-collapse:collapse;font-size:12px}
+.tk-detail th,.tk-detail td,#tk-preview :is(th,td){text-align:left;vertical-align:top;padding:10px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.tk-detail th,#tk-preview th{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.8px}
+.tk-history{padding-left:20px;max-height:260px;overflow:auto;font-size:12px}
+.tk-history li{margin:12px 0;line-height:1.6;overflow-wrap:anywhere}
+.tk-doc{display:flex;gap:9px;flex-wrap:wrap;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.tk-doc>span{flex:1;min-width:150px;overflow-wrap:anywhere;font-size:12px}
+.tk-doc small{color:var(--muted)}
+.tk-preview-scroll{max-height:320px;overflow:auto}
+.tk-muted{color:var(--muted)}
+.tk-detail [role=status]{white-space:pre-wrap;line-height:1.6;color:#e8ca92}
+@media(max-width:1200px){#tk-summary{grid-template-columns:repeat(3,minmax(0,1fr))}.tk-utilities{grid-template-columns:1fr}}
+@media(max-width:760px){
+ .tiktok-workspace .pending-content{padding:90px 14px 40px;gap:14px}
+ .tiktok-workspace .phone-orders-header{z-index:1200}
+ .tiktok-workspace .phone-brand{text-decoration:none;color:#251e11}
+ #tk-summary{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+ #tk-summary strong{font-size:18px}#tk-summary>div{border-radius:14px;padding:13px}
+ .tk-views{gap:20px}.tk-utilities summary{line-height:1.6}#tk-last-import{display:block;margin-left:0}
+ .tiktok-workspace .orders-panel>.panel-head{display:flex;margin:8px 0 15px}.panel-head h2{font-size:22px}
+ .tiktok-workspace .tk-toolbar{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}
+ .tk-toolbar>.tk-search-label{grid-column:1/-1;min-width:0}.tk-toolbar>label{min-width:0}.tk-toolbar>button{padding:9px 6px}
+ .tiktok-workspace .buyer-shipping-due-options{display:flex;gap:7px}.buyer-shipping-due-options>span{width:100%;font-size:11px}
+ .buyer-shipping-due-options button{font-size:11px;padding:9px!important;min-height:40px!important}
+ .tiktok-workspace .buyer-card-alerts{display:flex!important;justify-content:flex-start;flex-wrap:wrap!important}
+ .tiktok-workspace .buyer-card-alerts>.buyer-card-expand-btn{width:auto!important;flex:auto;min-height:42px!important}
+ .tiktok-workspace .buyer-card-value{margin-right:8px}
+ .tiktok-workspace .buyer-card-buyer-name{font-size:18px!important;min-height:44px!important}
+ .tiktok-workspace .buyer-card-meta{gap:6px!important}.tiktok-workspace .buyer-card-meta-pill{font-size:11px!important;max-width:100%!important}
+ .tk-import-controls,.tk-fields{grid-template-columns:1fr}.tk-detail{padding:20px 15px}.tk-detail h2{font-size:20px}
+ .tk-order-row{padding:13px}.tk-actions :is(a,button){flex:1;min-width:120px;min-height:44px}.tk-doc button{flex:1}
+}
