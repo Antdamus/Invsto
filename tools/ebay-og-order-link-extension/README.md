@@ -223,7 +223,9 @@ OG also provides TikTok item found/not found, watch/missing-watch, CGL certifica
 Extension 1.0.21 includes All-status export guidance. Known cancelled orders move into OG TikTok history with a signed import audit. Canceled-tab CSV reports also update known orders; missing rows never imply a cancellation. No new extension permissions are required. OG also offers an audited **Mark cancelled** action after staff verify the exact order in TikTok.
 
 
-## TikTok one-click export (1.0.22)
+## TikTok one-click export (1.0.23)
+
+Version 1.0.23 fixes the HTTP 400 handoff error on TikTok's single-use CSV URLs. The seller page reads the report once, saves a local CSV and sends the same bytes to OG. It no longer races a native download against a second extension request. Reload the updated extension and refresh TikTok before exporting again.
 
 Click **Export all → OG** in the TikTok orders panel. It selects All, opens the native export drawer, selects the complete tab and CSV, requests a fresh report, waits for that report's Download control, downloads it and opens the TikTok workspace's import preview. Confirm the preview to update records. TikTok's default export window is the last 12 months; older records are outside this export. The extension never mistakes an existing report for the new one, including identical minute-based filenames. The panel moves left while the export drawer is open so it does not cover native Export/Download controls.
 

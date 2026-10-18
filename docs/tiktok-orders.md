@@ -6,7 +6,7 @@ The TikTok workspace reuses the eBay fulfillment styles and navigation shell, wi
 
 ## Export and import
 
-1. In TikTok Manage orders, expand **OG · TikTok orders** and click **Export all → OG** (extension 1.0.22+).
+1. In TikTok Manage orders, expand **OG · TikTok orders** and click **Export all → OG** (extension 1.0.23+).
 2. The extension selects All, opens Export, chooses All orders under current tab and CSV, waits for the new report, downloads it and opens the OG preview. TikTok exports the last 12 months by default.
 3. Review the counts, cancellation statuses, items and actual export time, then confirm the import. Opening the preview alone changes no order records.
 4. Manual fallback: select All or Canceled, export the whole tab as CSV, download, then use **Send downloaded CSV** or upload directly in the workspace.
@@ -100,6 +100,6 @@ A shipped/completed TikTok import with undeducted inventory links remains in the
 Deploy `20261018220000_tiktok_cancellation_sync.sql` before these assets. Its import trigger logs cancellation/status changes with source import and staff identity. Older reports are ignored by the existing importer. A newer report contradicting an already recorded cancellation retains the cancellation and logs a conflict for manager review; it cannot silently return the order to shipping. The download ZIP/release manifest are extension 1.0.21 with unchanged permissions. Extract over the installed extension folder, reload the extension, then refresh TikTok and OG.
 
 
-## One-click report delivery (extension 1.0.22)
+## One-click report delivery (extension 1.0.23)
 
-The native UI controller verifies the All tab and CSV scope, generates once, and waits up to two minutes for the newly inserted report. Counts distinguish identical minute-based filenames; old Download buttons cannot satisfy the wait. The panel moves away from TikTok's drawer. After the report is ready, a 60-second MAIN-world probe captures only its CSV/blob or native download URL; the service worker validates the origin, sender tab, transfer lifetime and 10 MB maximum. Cancellation is rechecked after fetching, before opening OG. CSV capture does not share state or messages with eBay. Native downloading still runs, and the existing preview/confirmation/audit import remains unchanged. Tests in `tests/tiktok-export.test.mjs` load the real unpacked extension for both blob and signed-URL delivery.
+The native UI controller verifies the All tab and CSV scope, generates once, and waits up to two minutes for the newly inserted report. Counts distinguish identical minute-based filenames; old Download buttons cannot satisfy the wait. The panel moves away from TikTok's drawer. After the report is ready, a 60-second MAIN-world probe captures only its CSV/blob or native download URL; the service worker validates the origin, sender tab, transfer lifetime and 10 MB maximum. Cancellation is rechecked after fetching, before opening OG. CSV capture does not share state or messages with eBay. TikTok single-use report URLs are fetched once in the seller session; the same CSV bytes are downloaded locally and sent to OG, and the existing preview/confirmation/audit import remains unchanged. Tests in `tests/tiktok-export.test.mjs` load the real unpacked extension for both blob and signed-URL delivery.

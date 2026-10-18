@@ -21,11 +21,12 @@
    const timer=setTimeout(()=>finish(Error(lastError||'TikTok did not deliver the CSV. Use Download in its export history, then Send downloaded CSV.')),60000);
    async function receive(e){if(e.source!==window||e.origin!==location.origin||e.data?.transferId!==job.id||current!==job||job.cancelled)return;
     if(e.data.type==='OG_TIKTOK_REPORT_ARMED'&&!downloading){downloading=true;clearTimeout(armTimer);job.status('Downloading the new CSV and opening OG…');row.button.click();return;}
+    if(e.data.type==='OG_TIKTOK_REPORT_ERROR'){finish(Error(e.data.error||'TikTok could not download the CSV. Try Export all again.'));return;}
     if(sending||!['OG_TIKTOK_REPORT_URL','OG_TIKTOK_REPORT_CAPTURED'].includes(e.data.type))return;sending=true;
     try{await message({type:e.data.type==='OG_TIKTOK_REPORT_URL'?'OG_TIKTOK_REPORT_FETCH':'OG_TIKTOK_REPORT_CAPTURE',transferId:job.id,url:e.data.url,text:e.data.text});finish();}
     catch(error){lastError=error.message;job.status(lastError+' Waiting for TikTok’s downloaded CSV…');sending=false;}
    }
-   window.addEventListener('message',receive);window.postMessage({type:'OG_TIKTOK_REPORT_ARM',transferId:job.id},location.origin);
+   window.addEventListener('message',receive);window.postMessage({type:'OG_TIKTOK_REPORT_ARM',transferId:job.id,filename:row.name},location.origin);
   });
  }
  async function run({status,deadlines={}}){
