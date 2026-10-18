@@ -1,7 +1,7 @@
 (function(){
  'use strict';
  const $=id=>document.getElementById(id),BUCKET='tiktok-completion-photos';
- let context,controller,desktop,receiver,activeOrders=[];const urls=new Map(),uploads=new WeakMap();
+ let context,controller,desktop,receiver,activeOrders=[],reviewLoading=false;const urls=new Map(),uploads=new WeakMap();
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const lines=orders=>orders.flatMap(order=>order.lines.map(l=>({...l,item_number:l.sku_id,item_title:l.title,order})));
  async function signed(path){const cached=urls.get(path);if(cached?.until>Date.now())return cached.url;const {data,error}=await context.db.storage.from(BUCKET).createSignedUrl(path,1800);if(error)throw error;urls.set(path,{url:data.signedUrl,until:Date.now()+1500000});return data.signedUrl;}
@@ -30,7 +30,7 @@
  }
  function photos(){
   if(!controller)controller=window.TikTokCompletionPhotos.create({getClient:()=>context.db,getCustomerName:o=>o.buyer_nickname||o.buyer_username,getActor:()=>context.user?.email||'Staff',escapeHtml:esc,formatDate:v=>new Date(v).toLocaleString(),hydratePhoto:async p=>({...p,thumbnailUrl:await signed(p.thumbnail_path)}),openPhoto:view,uploadFile,
-   onOpen:()=>$('completion-photos-modal').classList.remove('hidden'),onClose:()=>$('completion-photos-modal').classList.add('hidden'),onSaved:()=>{receiver?.saved();Promise.resolve(context.refresh?.()).catch(e=>context.status?.('Photos saved. Refresh the order list: '+e.message));},keepOpen:()=>Boolean(receiver),pollMs:12000});
+   onOpen:()=>$('completion-photos-modal').classList.remove('hidden'),onClose:()=>{$('completion-photos-modal').classList.add('hidden');activeOrders=[];},onSaved:()=>{receiver?.saved();Promise.resolve(context.refresh?.()).then(()=>{syncReview();if(activeOrders.length)$('tk-completion-status').textContent='Final order photos saved. Review the orders and confirm when ready.';}).catch(e=>context.status?.('Photos saved. Refresh the order list: '+e.message));},keepOpen:()=>Boolean(receiver),pollMs:12000});
   return controller;
  }
  function phoneOrders(orders){if(!orders?.length)return;phoneLines(lines(orders));}
@@ -40,22 +40,58 @@
    watchPhotos:(items,node)=>photos().watch(items,result=>photos().renderGrid(node,result)),pollMs:12000});
   desktop.send(items);
  }
+ function renderReview(){
+  const root=$('tk-completion-review');if(!root||!activeOrders.length)return;
+  const receipts=(context.getReceiptPhotos?.()||[]).filter(p=>!p.removed_at),allLabels=activeOrders.flatMap(o=>o.documents.filter(d=>d.kind==='label'));
+  const missing=activeOrders.filter(o=>!o.documents.some(d=>d.kind==='label')).length,multiple=activeOrders.filter(o=>o.documents.filter(d=>d.kind==='label').length>1).length;
+  const quantity=activeOrders.reduce((n,o)=>n+o.lines.reduce((n,l)=>n+Number(l.quantity||0),0),0);
+  root.hidden=false;root.innerHTML=`<div class="tk-review-heading"><div><span class="tk-section-label">Selected for this review</span><h3>${activeOrders.length} order${activeOrders.length===1?'':'s'} · ${quantity} item${quantity===1?'':'s'}</h3><p>${esc([...new Set(activeOrders.map(o=>o.buyer_nickname||o.buyer_username))].join(', '))} · TikTok ${esc([...new Set(activeOrders.map(o=>'@'+o.buyer_username))].join(', '))}</p></div><button type="button" class="secondary-btn" id="tk-refresh-completion-review" ${reviewLoading?'disabled':''}>${reviewLoading?'Refreshing…':'Refresh review'}</button></div>
+   <div class="tk-review-label-summary" role="status"><strong>${allLabels.length} shipping-label attachment${allLabels.length===1?'':'s'}</strong><span class="${missing?'tk-review-warning':'tk-review-ok'}">${missing?`${missing} order${missing===1?' is':'s are'} missing a shipping label`:'Every selected order has a saved label'}</span>${multiple?`<span class="tk-review-warning">${multiple} order${multiple===1?' has':'s have'} multiple labels — check which to use.</span>`:''}</div>
+   <div class="tk-review-orders">${activeOrders.map(o=>{
+    const labels=o.documents.filter(d=>d.kind==='label');return `<article class="tk-review-order" data-review-order="${esc(o.id)}"><header><div><span class="tk-section-label">Selected order</span><h4>${esc(o.order_number)}</h4></div><span class="${labels.length===1?'tk-review-ok':'tk-review-warning'}">${labels.length===0?'Shipping label missing':labels.length===1?'1 shipping label attached':`${labels.length} shipping labels attached`}</span></header>
+     ${o.buyer_message?`<p class="tk-note"><strong>Buyer message:</strong> ${esc(o.buyer_message)}</p>`:''}${o.notes?`<p class="tk-note"><strong>Preparation note:</strong> ${esc(o.notes)}</p>`:''}
+     <div class="tk-review-items">${o.lines.map(l=>`<div class="tk-review-item"><div class="tk-review-captures"><span class="tk-section-label">Receipt capture</span>${receipts.some(p=>p.line_id===l.id)?window.TikTokReceiptPhotos.placeholder(l):'<p class="tk-muted">No receipt capture saved</p>'}<a class="tk-text-action" href="${esc(window.TikTokOrderImport.orderUrl(o.order_number,true,l.sku_id))}" target="_blank" rel="noopener">Open video receipt</a></div><div><h4>${esc(l.title)}</h4><p>Qty <strong>${esc(l.quantity)}</strong> · SKU ${esc(l.seller_sku||l.sku_id||'Unavailable')}</p>${l.variation?`<p>${esc(l.variation)}</p>`:''}<p class="tk-muted">Tracking: ${esc(l.tracking_number||'Not available yet')}</p></div></div>`).join('')}</div>
+     <section class="tk-review-labels" aria-label="Shipping labels for order ${esc(o.order_number)}"><h4>Shipping labels</h4>${labels.map(d=>`<div class="tk-review-label"><div><strong>${esc(d.filename||'Shipping label PDF')}</strong>${d.tracking_number?`<span>Tracking: ${esc(d.tracking_number)}</span>`:''}${d.created_at?`<small>Attached ${esc(new Date(d.created_at).toLocaleString())}</small>`:''}</div><button type="button" class="secondary-btn" data-review-label="${esc(d.id)}">Preview label</button></div>`).join('')||'<p class="tk-review-warning">Save a shipping-label PDF to this order before completing.</p>'}</section></article>`;
+   }).join('')}</div>`;
+  window.TikTokReceiptPhotos.hydrate(root,context.db,receipts);
+  root.querySelectorAll('[data-review-label]').forEach(button=>button.onclick=async()=>{
+   const doc=allLabels.find(d=>d.id===button.dataset.reviewLabel);if(!doc)return;
+   const tab=window.open('about:blank','_blank');if(!tab){$('tk-completion-status').textContent='Allow popups to preview this label.';return;}tab.opener=null;
+   try{const {data,error}=await context.db.storage.from('ebay-labels').createSignedUrl(doc.path,120);if(error)throw error;tab.location.replace(data.signedUrl);}catch(e){tab.close();$('tk-completion-status').textContent=e.message;}
+  });
+  $('tk-refresh-completion-review').onclick=async()=>{
+   if(reviewLoading)return;if(photos().hasPending){$('tk-completion-status').textContent='Save or remove the selected photos before refreshing this review.';return;}
+   reviewLoading=true;renderReview();$('tk-complete-orders').disabled=true;
+   try{await context.refresh();syncReview();if(activeOrders.length)photos().open(lines(activeOrders));focusReview();$('tk-completion-status').textContent='Review refreshed. Check the selected orders and confirm again.';}catch(e){$('tk-completion-status').textContent=e.message;}finally{reviewLoading=false;renderReview();$('tk-complete-orders').disabled=false;}
+  };
+ }
+ function syncReview(){
+  if(!activeOrders.length||!context.getOrders)return;
+  activeOrders=activeOrders.map(o=>context.getOrders().find(current=>current.id===o.id)).filter(Boolean);
+  if($('tk-completion-finish')){renderReview();window.TikTokInventory?.review($('tk-completion-inventory'),activeOrders);$('tk-completion-confirm').checked=false;}
+ }
+ function focusReview(){const title=$('completion-photos-title');title.tabIndex=-1;title.focus({preventScroll:true});title.closest('.packing-modal-card').scrollTop=0;}
  function open(orders){
   if(!orders?.length)return;if(photos().hasPending){photos().open(lines(orders));return;}
   activeOrders=orders;photos().open(lines(orders));let finish=$('tk-completion-finish');
-  if(!finish){finish=document.createElement('section');finish.id='tk-completion-finish';finish.innerHTML='<h3>Complete these orders</h3><div id="tk-completion-inventory"></div><p class="tk-help">Save the shipping labels and completion photos first. Completing moves these orders to TikTok history; carrier handoff is tracked separately.</p><label class="tk-confirm"><input id="tk-completion-confirm" type="checkbox">I checked every item, quantity and shipping label, the completion photos show the packed contents, and only the linked inventory quantities above should be deducted.</label><button id="tk-complete-orders" type="button" class="primary-btn">Complete order</button><p id="tk-completion-status" role="status"></p>';$('completion-photo-saved').after(finish);
+  if(!finish){finish=document.createElement('section');finish.id='tk-completion-finish';finish.innerHTML='<h3>Complete these orders</h3><div id="tk-completion-inventory"></div><label class="tk-completion-note-label">Optional completion note<textarea id="tk-completion-note" rows="3" maxlength="4000" placeholder="Packing details or anything the team should know…"></textarea><small>Saved to every selected order’s audit history when you complete. Existing preparation notes stay unchanged.</small></label><p class="tk-help">Save the shipping labels and final order photos first. Completing moves these orders to TikTok history; carrier handoff is tracked separately.</p><label class="tk-confirm"><input id="tk-completion-confirm" type="checkbox">I checked every selected order, item, quantity and shipping label, the final photos show the packed contents, and only the linked inventory quantities above should be deducted.</label><button id="tk-complete-orders" type="button" class="primary-btn">Complete order</button><p id="tk-completion-status" role="status"></p>';$('completion-photo-saved').after(finish);
    $('tk-complete-orders').onclick=async()=>{const button=$('tk-complete-orders');if(button.disabled)return;button.disabled=true;try{
+    if(reviewLoading)throw Error('Wait for the review to finish refreshing.');
+    if(!activeOrders.length)throw Error('Reopen the order review before completing.');
     if(activeOrders.some(o=>window.TikTokOrderQueue.held(o)))throw Error('Resolve the missing-item, CGL or cancellation holds before completing this buyer.');
     if(photos().hasPending)throw Error('Save or remove the selected photos before completing.');
     if(!$('tk-completion-confirm').checked)throw Error('Confirm the contents and labels before completing.');
-    const {data,error}=await context.db.rpc('complete_tiktok_orders',{_order_ids:activeOrders.map(o=>o.id),_revisions:Object.fromEntries(activeOrders.map(o=>[o.id,o.revision])),_confirmed:true});if(error)throw error;
+    if(activeOrders.some(o=>!o.documents.some(d=>d.kind==='label')))throw Error('Save the shipping label for every selected order first, then refresh this review.');
+    const {data,error}=await context.db.rpc('complete_tiktok_orders_review',{_order_ids:activeOrders.map(o=>o.id),_revisions:Object.fromEntries(activeOrders.map(o=>[o.id,o.revision])),_confirmed:true,_note:$('tk-completion-note').value.trim()||null});if(error)throw error;
     photos().close();await context.refresh();context.status(`Orders completed. ${data?.inventory_units_deducted||0} inventory units deducted. Labels, photos and stock movements are saved in TikTok history.`);
    }catch(e){$('tk-completion-status').textContent=e.message;}finally{button.disabled=false;}};
   }
-  window.TikTokInventory?.review($('tk-completion-inventory'),orders);finish.hidden=orders.every(o=>window.TikTokOrderQueue.closed(o));$('tk-completion-confirm').checked=false;$('tk-completion-status').textContent='';$('tk-complete-orders').textContent=orders.length>1?`Complete ${orders.length} orders`:'Complete order';
+  const historical=orders.every(o=>window.TikTokOrderQueue.closed(o));$('completion-photos-title').textContent=historical?'TikTok order evidence':'Review & complete TikTok orders';$('completion-photo-context').hidden=true;renderReview();
+  window.TikTokInventory?.review($('tk-completion-inventory'),orders);finish.hidden=historical;$('tk-completion-note').value='';$('tk-completion-confirm').checked=false;$('tk-completion-status').textContent='';$('tk-complete-orders').textContent=orders.length>1?`Complete ${orders.length} orders`:'Complete order';
+  finish.parentElement.append(finish);focusReview();
  }
  function bind(){document.querySelector('[data-phone-camera="photos"]').onclick=()=>phoneLines(photos().lines);}
- function start(config){context=config;bind();window.TikTokLabels?.start(config);window.TikTokInventory?.start(config);const changed=()=>{activeOrders=activeOrders.map(o=>context.getOrders().find(current=>current.id===o.id)).filter(Boolean);if($('tk-completion-inventory')){window.TikTokInventory.review($('tk-completion-inventory'),activeOrders);$('tk-completion-confirm').checked=false;}};document.addEventListener('tiktok-inventory-saved',changed);window.addEventListener('tiktok-work-saved',changed);}
+ function start(config){context=config;bind();window.TikTokLabels?.start(config);window.TikTokInventory?.start(config);document.addEventListener('tiktok-inventory-saved',syncReview);window.addEventListener('tiktok-work-saved',syncReview);}
  function connectPhone({db,onUser}){
   const sessionId=window.TikTokPhoneCamera?.sessionIdFromUrl();if(!sessionId)return false;
   context={db,user:null};bind();receiver=window.TikTokPhoneCamera.createReceiver({sessionId,getClient:()=>db,onUser:user=>{context.user=user;onUser(user);},getPhotoController:photos,pollMs:12000});receiver.connect();return true;

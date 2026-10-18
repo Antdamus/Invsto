@@ -18,7 +18,8 @@ create table metadata(id text primary key,inventory_version text,changed_item_id
 create function lock_shared_inventory() returns void language sql as $$select pg_advisory_xact_lock(817042,20261008)$$;`);
 await db.exec(await readFile(new URL('../supabase/migrations/20261018090000_tiktok_inventory_completion.sql',import.meta.url),'utf8'));
 await db.exec(`create function is_admin() returns boolean language sql as $$select false$$;`);
-await db.exec(await readFile(new URL('../supabase/migrations/20261018100000_tiktok_work_controls.sql',import.meta.url),'utf8'));});
+await db.exec(await readFile(new URL('../supabase/migrations/20261018100000_tiktok_work_controls.sql',import.meta.url),'utf8'));
+await db.exec(await readFile(new URL('../supabase/migrations/20261018180000_tiktok_completion_review.sql',import.meta.url),'utf8'));});
 after(()=>db.close());
 beforeEach(async()=>{await db.exec(`reset role;set test.allowed='yes';set test.actor='${actor}';truncate tiktok_inventory_attachments,stock_transactions,item_stock_locations,item_types,locations,store_locations,active_stock_reservations,tiktok_order_completion_photos,tiktok_order_phone_camera_requests,tiktok_order_phone_camera_sessions,tiktok_order_documents,tiktok_order_events,tiktok_order_lines,tiktok_orders,tiktok_order_imports,storage.objects cascade;`);orders=(await db.query("insert into tiktok_orders(order_number,buyer_username,marketplace_status,marketplace_substatus,source_snapshot_at) values('577620684385522369','buyer','To ship','Awaiting shipment',now()-interval '1 day'),('577620723998233281','buyer','To ship','Awaiting shipment',now()-interval '1 day') returning *")).rows;lines=(await db.query("insert into tiktok_order_lines(order_id,sku_id,title,quantity) select id,'1732759903849189622','Ring',1 from tiktok_orders returning *")).rows;});
 const scope=o=>lines.filter(l=>l.order_id===o.id).map(l=>({id:l.id,sku_id:l.sku_id,quantity:l.quantity})).sort((a,b)=>a.id.localeCompare(b.id));
@@ -26,6 +27,25 @@ const save=(o=orders[0],p=photo,s=scope(o))=>db.query('select add_tiktok_order_c
 const attach=(docs=orders.map(o=>({order_id:o.id,path:label,pages:[1]})))=>db.query('select attach_tiktok_label_batch($1) r',[JSON.stringify(docs)]);
 const complete=(os=orders,confirmed=true)=>db.query('select complete_tiktok_orders($1,$2,$3) r',[os.map(o=>o.id),JSON.stringify(Object.fromEntries(os.map(o=>[o.id,o.revision]))),confirmed]);
 async function objects(){await db.query('insert into storage.objects values($1,$2),($1,$3),($4,$5)',[photo.bucket,photo.path,photo.thumbnail_path,'ebay-labels',label]);}
+const review=(note=null,os=orders,revisions=Object.fromEntries(os.map(o=>[o.id,o.revision])))=>db.query('select complete_tiktok_orders_review($1,$2,true,$3) r',[os.map(o=>o.id),JSON.stringify(revisions),note]);
+test('completion review notes, selected orders and label evidence commit once with the authenticated actor',async()=>{
+ await objects();await attach();for(const o of orders)await save(o);
+ await db.query('update tiktok_orders set notes=$1',['Existing preparation note']);
+ assert.equal((await review('  Gift note enclosed.  ')).rows[0].r.completed,2);
+ const events=(await db.query("select * from tiktok_order_events where action='completion_review' order by order_id")).rows;assert.equal(events.length,2);
+ for(const event of events){assert.equal(event.actor,actor);assert.equal(event.details.actor_email,actor+'@fixture.test');assert.equal(event.details.notes,'Gift note enclosed.');assert.deepEqual(event.details.selected_order_ids,[...orders.map(o=>o.id)].sort());assert.equal(event.details.label_document_ids.length,1);assert.equal(event.details.items.length,1);assert.ok(event.created_at);}
+ await review('A retry cannot replace the original note');assert.equal((await db.query("select count(*)::int n from tiktok_order_events where action='completion_review'")).rows[0].n,2);
+ assert.ok((await db.query('select notes from tiktok_orders')).rows.every(o=>o.notes==='Existing preparation note'));
+ assert.deepEqual((await db.query('select * from ebay_orders')).rows,[{order_number:'keep',notes:'Unchanged'}]);
+});
+test('failed or unauthorized completion never saves a review note or bypasses existing completion guards',async()=>{
+ await objects();await attach();await save(orders[0]);
+ await assert.rejects(review('Must not save'),/completion photo/);assert.equal((await db.query("select count(*)::int n from tiktok_order_events where action='completion_review'")).rows[0].n,0);assert.ok((await db.query('select stage from tiktok_orders')).rows.every(o=>o.stage==='pending'));
+ await save(orders[1]);await assert.rejects(review('Stale',orders,{}),/changed/);await assert.rejects(review('x'.repeat(4001)),/4,000/);
+ await db.exec("set test.allowed='no';set role authenticated");await assert.rejects(review('Not allowed'),/access required/);await db.exec("reset role;set test.allowed='yes'");
+ await review(null,[orders[0]]);const events=(await db.query("select * from tiktok_order_events where action='completion_review'")).rows;assert.equal(events.length,1);assert.equal(events[0].details.notes,null);assert.deepEqual(events[0].details.selected_order_ids,[orders[0].id]);assert.equal((await db.query('select stage from tiktok_orders where id=$1',[orders[1].id])).rows[0].stage,'pending');
+});
+
 test('labels and both photo sizes are required; retries are idempotent and actor cannot be forged',async()=>{
  await assert.rejects(attach(),/Upload/);await assert.rejects(save(),/both/);await objects();
  await db.query('delete from storage.objects where name=$1',[photo.thumbnail_path]);await assert.rejects(save(),/both/);await db.query('insert into storage.objects values($1,$2)',[photo.bucket,photo.thumbnail_path]);
