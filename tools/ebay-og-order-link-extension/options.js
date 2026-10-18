@@ -49,5 +49,13 @@
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") save();
   });
+  document.getElementById('tiktok-orders').addEventListener('click', async () => {
+    const stored = await chrome.storage.sync.get(STORAGE_KEY);
+    try {
+      const url = new URL('pending-tiktok-orders.html', stored[STORAGE_KEY]);
+      if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname))) throw new Error('Save an HTTPS OG Pending Orders URL first.');
+      await chrome.tabs.create({url: url.href});
+    } catch (error) { setStatus(error.message || 'Save your OG Pending Orders URL first.'); }
+  });
   load();
 })();

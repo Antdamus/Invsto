@@ -188,3 +188,12 @@ Version 1.0.2 also captures embedded PDF downloads (`data:application/pdf`) from
 eBay's label-ready page, including links clicked before they are added to the
 document. The complete PDF is captured before browser download metadata can
 truncate its URL; the existing checks against incomplete PDFs still apply.
+# TikTok orders and receipts (1.0.15)
+
+TikTok uses its own `pending-tiktok-orders.html` workspace and history. No TikTok export is routed to the eBay importer.
+
+In TikTok Orders, expand **OG · TikTok orders**. Open Export, choose **To ship → All orders under current tab → CSV**, and download the file. Click **Send orders to OG**, select the original CSV, review the preview and export time in OG, and confirm the import. Only visible order-list ship-by dates are included; missing dates remain unknown. The app also accepts the CSV directly.
+
+The private handoff expires after one hour and its CSV is cleared after a successful import. Opening the destination never imports automatically. **Watch full receipt in TikTok** opens that order; this extension opens its video receipt automatically when the page has exactly one receipt. Multiple receipts stay available for staff to choose.
+
+The existing TikTok Print → Print through OG flow is unchanged. Shipping PDFs can also be attached to a TikTok order and sent through the shared online-printer picker. OG order packets are separate 4×6 packing slips, not postage.

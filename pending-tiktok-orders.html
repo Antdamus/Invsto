@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+ <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+ <title>TikTok orders · OG Jewelry</title>
+ <link rel="stylesheet" href="tiktok-orders.css?v=20261018"><link rel="stylesheet" href="extension-updates.css?v=20261003">
+</head>
+<body>
+ <header class="tk-top"><a href="dashboard.html" class="tk-brand">OG Jewelry</a><span>Order fulfillment</span><a href="print-stations.html" target="_blank" rel="noopener">Print stations</a></header>
+ <main class="tk-main">
+  <nav class="marketplace-tabs" aria-label="Order marketplace"><a id="ebay-tab" href="pending-orders.html">eBay</a><a href="pending-tiktok-orders.html" aria-current="page">TikTok</a></nav>
+  <div class="tk-heading"><div><p class="tk-eyebrow">TIKTOK SHOP</p><h1 id="tk-title">Pending orders</h1><p>Prepare each buyer’s orders, check the video receipts, and keep a record of every handoff.</p></div><button id="tk-refresh" type="button">Refresh</button></div>
+  <nav class="tk-views" aria-label="TikTok workflow"><a href="pending-tiktok-orders.html" id="tk-pending-link">Pending orders</a><a href="pending-tiktok-orders.html?view=history" id="tk-history-link">TikTok history</a></nav>
+  <p id="tk-status" role="status" aria-live="polite">Signing in…</p>
+  <section class="tk-card" aria-labelledby="tk-import-title">
+   <details id="tk-import"><summary id="tk-import-title">Import TikTok orders <span id="tk-last-import">No export loaded</span></summary>
+    <ol><li>Open <a href="https://seller-us.tiktok.com/order?view_mode=orders" target="_blank" rel="noopener">TikTok Manage orders</a> and select <strong>To ship</strong>.</li><li>Choose <strong>Export → All orders under current tab → CSV</strong>. This includes orders awaiting collection.</li><li>Click <strong>Send orders to OG</strong> in the extension panel, then select the downloaded CSV. You can also choose it below.</li></ol>
+    <div class="tk-import-controls"><label>TikTok orders CSV<input id="tk-file" type="file" accept=".csv,text/csv"></label><label>Export generated (your local time)<input id="tk-snapshot" type="datetime-local" required></label></div>
+    <p class="tk-help">Use the original downloaded file. Import a fresh report after combining packages or printing labels. New historical/unpaid orders are skipped; existing orders can receive status updates.</p>
+    <div id="tk-preview" hidden></div><button id="tk-import-confirm" type="button" hidden>Import into TikTok orders</button><button id="tk-import-cancel" type="button" hidden>Discard preview</button>
+   </details>
+  </section>
+  <details id="extension-updates" class="extension-updates tk-card"><summary>Extension updates <span id="extension-update-badge" role="status">Checking…</span></summary><div class="extension-update-body"><p>OG eBay Order Link also connects TikTok exports and shipping PDFs.</p><dl class="extension-update-versions"><div><dt>Installed here</dt><dd id="extension-installed-version">Checking…</dd></div><div><dt>Latest available</dt><dd id="extension-latest-version">Checking…</dd></div></dl><p id="extension-update-message"></p><a id="extension-download" href="downloads/OG-eBay-Order-Link.zip" download>Download extension ZIP</a><button id="extension-check" type="button">Check again</button><p>Extract into your existing extension folder, reload OG eBay Order Link on your browser’s extensions page, then refresh TikTok and OG.</p></div></details>
+  <div id="tk-summary" class="tk-summary" aria-label="TikTok order totals"></div>
+  <section class="tk-toolbar"><label>Search TikTok orders<input id="tk-search" type="search" placeholder="Buyer, order number, product, SKU, tracking"></label><label>OG preparation stage<select id="tk-stage-filter"><option value="">Every stage</option><option value="pending">Pending</option><option value="preparing">Preparing</option><option value="waiting">Waiting</option><option value="packed">Packed</option><option value="dispatched">Dispatched</option></select></label><button id="tk-export" type="button">Export this view</button><button id="tk-packet" type="button">Order packet PDF</button></section>
+  <div id="tk-orders" aria-live="polite"></div>
+  <p class="tk-help">OG preparation records staff work. TikTok status comes from the latest import. Marking packed or dispatched here does not buy a label, change TikTok, or deduct inventory.</p>
+ </main>
+ <dialog id="tk-detail" class="tk-detail"><button id="tk-close-detail" class="tk-close" type="button" aria-label="Close order">×</button><div id="tk-detail-body"></div></dialog>
+ <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script><script src="initSupabase.js"></script>
+ <script src="vendor/pdf-lib/pdf-lib.min.js?v=1.17.1"></script><script src="shipping-pdf.js?v=20261010-protected-labels"></script><script src="print-stations.js?v=20261010-shipping-picker-2"></script><script src="shipping-label-print.js?v=20261010-protected-labels"></script>
+ <script src="tiktok-order-import.js?v=20261018"></script><script src="tiktok-order-packet.js?v=20261018"></script><script src="tiktok-orders.js?v=20261018"></script><script src="extension-updates.js?v=20261003" defer></script>
+</body></html>
