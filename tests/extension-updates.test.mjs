@@ -142,7 +142,7 @@ test('responses with unrelated requests or origins cannot mark a missing extensi
 });
 
 test('update instructions and controls fit a narrow screen', async t => {
-  const {page} = await open(t, {width: 390, release: {...published, version: '1.0.10'}});
+  const {page} = await open(t, {width: 390, version: '1.0.9', release: {...published, version: '1.0.10'}});
   await expect(page.locator('#extension-update-badge')).toHaveText('Update available');
   await page.locator('.extension-install-help > summary').click();
   const section = await page.locator('#extension-updates').boundingBox();

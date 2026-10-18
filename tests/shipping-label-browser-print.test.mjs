@@ -14,7 +14,7 @@ before(async()=>{
     const name=new URL(req.url,'http://localhost').pathname.slice(1);
     if(!name)return res.setHeader('Content-Type','text/html').end('<!doctype html><title>Label print test</title><button id="print">Print</button>');
     if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();
-    try{res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':'text/html');res.end(await readFile(new URL(name,root)));}
+    try{res.setHeader('Content-Type',(name.endsWith('.js')?'text/javascript':'text/html')+'; charset=utf-8');res.end(await readFile(new URL(name,root)));}
     catch{res.writeHead(404).end();}
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));origin=`http://127.0.0.1:${server.address().port}`;

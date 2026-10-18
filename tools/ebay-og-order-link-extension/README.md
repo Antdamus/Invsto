@@ -30,6 +30,42 @@ Version 1.0.6 stops receipt screenshot retransmissions as soon as OG accepts the
 
 ## Use
 
+Version 1.0.14 also captures TikTok's signed `easesafe` document URLs, which have
+no `.pdf` filename. A temporary capture watches only PDF tabs opened by the TikTok
+tab after **Print through OG**. It also handles a blank tab navigated to the PDF.
+The probe and fallback share one transfer ID so only one OG window opens. Cancelled
+and expired captures cannot forward later files; ordinary TikTok printing stays
+unchanged. Reload the extension and refresh TikTok after updating.
+
+Version 1.0.13 adds TikTok online printing. In TikTok Seller Center, select the
+existing shipping label, open **Print documents**, choose **PDF** and **4x6 inches**,
+then click **Print → Print through OG**. Complete TikTok's own reprint confirmation
+if it appears. OG Print stations opens with the existing shipping destination
+picker: select your online 5XL, pages and copies, then explicitly send the labels.
+Opening or cancelling the picker does not queue a job. **Use TikTok print** keeps
+the original print flow. This is an option on TikTok's Print action, not a new OS
+printer driver or a destination inside Edge's native print dialog.
+
+The update uses the configured OG URL and its existing signed-in session. The PDF
+is saved privately under `online-print/<user>/<content-hash>.pdf` in the existing
+shipping-label bucket. It never attaches TikTok PDFs to eBay orders or changes order
+fulfillment. Failed or cancelled sends can be retried; the existing print queue's
+idempotency and printer selection checks still apply. A completed handoff cannot
+automatically print twice. Extension recovery copies expire after one hour and are
+removed on the next handoff/read; completed handoffs discard the extension's PDF.
+
+If TikTok changes its export flow or the PDF cannot be captured, download its PDF,
+open this extension's options and click **Choose PDF for online printer**. Choose
+the file on OG Print stations and use the same printer picker. A6 and Letter/A4
+documents need re-export as 4x6 for remote shipping printing. Native browser
+printing remains available for other sizes.
+
+Update the existing unpacked extension folder, reload its card in Edge/Chrome, and
+refresh TikTok and OG Print stations. No new permissions, website deployment,
+database migration or printer-helper update is needed for an existing PDF-ready
+5XL station. The handoff panel is supplied by this extension on the configured
+Print stations page only.
+
 Version 1.0.12 recovers when the background video-receipt lookup fails even though the eBay order opens normally. It opens a fresh order tab, waits for the page, and follows only a receipt matching the requested eBay item number. Existing shipping drafts remain untouched. Background requests have a short timeout; sign-in or missing-receipt failures leave the order open with instructions. No new permissions are required. Update OG eBay Order Link on the affected computer, reload the extension, and refresh Invsto and eBay.
 
 Version 1.0.11 requires **one shipping label per buyer** on eBay's single and bulk label creation pages. Keep the updated Invsto Pending Orders page open and loaded. The extension verifies all eligible pending orders for the buyer, offers **Load all orders** if any are missing, and replaces purchase controls with **Combine orders per buyer** while shipments remain separate. It guards Review purchase, Buy shipping label, Confirm and pay, and form submission. Undoing a combination blocks purchase again. If Invsto cannot verify the orders, creation stays blocked with a retry explanation. Combining does not purchase a label: review the total weight, dimensions, shipping address and service before buying. Existing label download, export and printing are unchanged. No new permissions are required. Refresh Invsto, reload the updated extension, and refresh eBay tabs on every shipping computer.
