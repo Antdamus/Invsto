@@ -93,6 +93,9 @@
 #orders-list .buyer-card-workflow .item-found-btn { color: #b3f1ce !important; border-color: #66b88966 !important; background: #356c4a28 !important; }
 #orders-list .buyer-card-workflow .item-search-btn[aria-pressed=true] { color: #ffc29f !important; border-color: #e99b6866 !important; background: #9f53282b !important; }
 #orders-list .buyer-line-communication { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+#orders-list .buyer-line-watch-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+#orders-list .buyer-line-watch-actions .line-watch-control { display: contents; }
+#orders-list .buyer-line-watch-actions :is(button, .line-cgl-toggle) { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; padding: 8px 12px; border-radius: 10px; font-size: 12px; white-space: normal; }
 #orders-list .buyer-line-communication .order-chat-link { display: inline-flex; align-items: center; min-height: 38px; padding: 8px 12px; border-radius: 10px; font-size: 12px; }
 #orders-list .buyer-line-note-summary:empty, #orders-list .buyer-line-inventory:empty { display: none; }
 #orders-list .buyer-line-evidence { display: flex; flex-direction: column; align-items: stretch; gap: 10px; min-width: 0; padding: 12px; border-radius: 12px; border: 1px solid #ffffff12; background: #00000018; }
@@ -127,6 +130,7 @@
   #orders-list .buyer-card-workflow-bar .card-action-buttons > button { flex: 1 1 100px; }
   #orders-list .buyer-card-workflow :is(.card-action-buttons, .buyer-card-overview, .buyer-line-communication, .buyer-line-receipt-actions) > :is(button, a),
   #orders-list .buyer-card-workflow .buyer-line-action-btn { min-height: 44px; }
+  #orders-list .buyer-line-watch-actions button { min-height: 44px; }
   #orders-list .card-tools > summary { flex-wrap: wrap; gap: 4px 8px; }
   #orders-list .card-tools > summary small { font-size: 10px; }
   #orders-list .card-tools-content { padding: 12px; gap: 18px; }

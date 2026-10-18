@@ -81,5 +81,5 @@
     window.setInterval(resume,60000);window.addEventListener('online',resume);document.addEventListener('visibilitychange',resume);
   }
   const watchLine=line;
-  window.OGOrderWatches={line:row=>watchLine(row)+(window.OGPendingWork?.line(row)||''),summary,load,start,marked};
+  window.OGOrderWatches={line:row=>watchLine(row)+(window.OGPendingWork?.line(row,{watchOnly:true})||''),summary,load,start,marked};
 })();

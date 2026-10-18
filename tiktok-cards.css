@@ -41,7 +41,16 @@
 .tiktok-workspace .tk-card-button.tk-complete-button:hover { background: #efd5aa; }
 .tk-card-icon { width: 16px; height: 16px; flex: none; }
 .tk-expand-button[aria-expanded=true] svg { transform: rotate(180deg); }
-.tk-buyer-workflow { display: flex; align-items: flex-end; gap: 24px; padding: 16px 22px; border-top: 1px solid #b8c9c51b; background: #0000000e; border-radius: 0 0 16px 16px; }
+.tk-buyer-workflow { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 24px; padding: 16px 22px; border-top: 1px solid #b8c9c51b; background: #0000000e; border-radius: 0 0 16px 16px; }
+.tk-item-task-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.tk-order-task-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px 0; }
+.tk-task-dialog { max-width: 650px; }
+.tk-task-dialog fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 16px; }
+.tk-task-dialog label { display: grid; gap: 7px; font-size: 13px; }
+.tk-task-dialog .tk-task-context { padding: 12px; border: 1px solid #b8c9c533; border-radius: 10px; background: #ffffff04; font-size: 12px; overflow-wrap: anywhere; }
+.tk-task-context ul { padding-left: 18px; max-height: 140px; overflow: auto; margin-bottom: 0; }
+.tk-task-dialog .tk-task-help { margin: 0; color: #acb7ad; font-size: 12px; }
+.tk-task-dialog :disabled { opacity: .55; }
 .tk-workflow-group { display: grid; gap: 8px; }
 .tk-workflow-group > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .tk-card-tools { position: relative; margin-left: auto; flex: none; }

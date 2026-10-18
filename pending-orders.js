@@ -4576,7 +4576,7 @@ function renderOrders(options = {}) {
     ` : "";
     const taskControlMarkup = assignedTask
       ? `<button type="button" class="buyer-card-task-btn task-action-btn ${approvalTask ? "is-approval" : "is-assigned"} buyer-card-assigned-pill" data-view-order-task="${escapeHtml(assignedTask.id)}" title="View ${approvalTask ? "admin approval request" : `task assigned to ${escapeHtml(assignmentLabel)}`}"><span>${escapeHtml(approvalTask ? "Pending approval" : taskCountLabel)}</span><strong>${escapeHtml(approvalTask ? "Admin review" : assignmentLabel)}</strong></button>`
-      : `<button type="button" class="buyer-card-task-btn task-action-btn is-clear" data-buyer-task-key="${escapeHtml(group.key)}"><span>No task</span><strong>Assign</strong></button>`;
+      : "";
     const approvalActionMarkup = approvalTask
       ? `<button type="button" class="buyer-card-approval-btn is-pending" data-buyer-approval-task-id="${escapeHtml(approvalTask.id)}">Pending Admin Approval</button>`
       : `<button type="button" class="buyer-card-approval-btn" data-buyer-approval-key="${escapeHtml(group.key)}" ${getPendingOrderApprovalLinesForGroup(group).length ? "" : "disabled"}>Send for Approval</button>`;
@@ -4633,6 +4633,10 @@ function renderOrders(options = {}) {
       ${window.OGPendingWork?.summary(group) || ""}
       <div data-buyer-shared-notes>${renderGroupSharedNotes(group.lines, group.key)}</div>
       <div class="buyer-card-workflow-bar">
+        <div class="buyer-card-action-group" role="group" aria-label="Tasks">
+          <span class="card-action-label">Tasks</span>
+          <div class="card-action-buttons"><button type="button" class="secondary-btn task-action-btn" data-buyer-task-key="${escapeHtml(group.key)}"><i data-lucide="clipboard-plus"></i>Create task</button></div>
+        </div>
         <div class="buyer-card-action-group" role="group" aria-label="Shipping">
           <span class="card-action-label">Shipping</span>
           <div class="card-action-buttons">
@@ -4664,7 +4668,6 @@ function renderOrders(options = {}) {
           <div class="card-tool-group" role="group" aria-label="Tasks and review">
             <span class="card-action-label">Tasks &amp; review</span>
             <div class="card-action-buttons">
-              ${!assignedTask ? taskControlMarkup : ""}
               ${window.OGPendingWork?.control(group) || ""}
               ${approvalActionMarkup}
             </div>
@@ -4841,7 +4844,7 @@ function renderOrders(options = {}) {
       const assignedLineTaskAssignee = assignedLineTask ? getOrderTaskAssigneeName(assignedLineTask) : "";
       const lineTaskActionMarkup = assignedLineTask
         ? `<button type="button" class="secondary-btn buyer-line-action-btn task-action-btn ${isPendingOrderApprovalTask(assignedLineTask) ? "is-approval" : "is-assigned"}" data-line-view-task="${escapeHtml(line.id)}" data-view-order-task="${escapeHtml(assignedLineTask.id)}" title="View ${isPendingOrderApprovalTask(assignedLineTask) ? "admin approval request" : `task assigned to ${escapeHtml(assignedLineTaskAssignee)}`}"><span>${isPendingOrderApprovalTask(assignedLineTask) ? "Pending approval" : "Task assigned"}</span><strong>${escapeHtml(assignedLineTaskAssignee)}</strong></button>`
-        : `<button type="button" class="secondary-btn buyer-line-action-btn task-action-btn" data-line-assign-task="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>Assign Task</button>`;
+        : "";
       const lineTaskVideoMarkup = `
         <button type="button" class="secondary-btn buyer-line-action-btn task-video-action-btn" data-line-add-video="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>Add item video</button>
         <button type="button" class="secondary-btn buyer-line-action-btn task-video-action-btn" data-line-view-videos="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>View saved videos</button>
@@ -4886,9 +4889,15 @@ function renderOrders(options = {}) {
               <div class="buyer-line-actions" role="group" aria-label="Find this item">${renderItemFoundActions(line)}</div>
             </div>
             <div class="buyer-line-communication">
+              <button type="button" class="secondary-btn buyer-line-action-btn task-action-btn" data-line-assign-task="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}><i data-lucide="clipboard-plus"></i>Create task</button>
+              <button type="button" class="primary-btn buyer-line-action-btn" data-line-complete-order="${escapeHtml(line.id)}" ${getNoInventoryLineIdsForGroupAction(group).length ? "" : "disabled"}>Complete order</button>
               <button type="button" class="buyer-line-note-btn" data-line-add-note="${escapeHtml(line.id)}">Notes / Add note</button>
               <span data-line-chat-marker="${escapeHtml(line.id)}"><a class="buyer-line-note-btn order-chat-link" href="email-triage.html?orderLineId=${encodeURIComponent(line.id)}&from=pending" target="_blank" rel="noopener" aria-label="eBay chat for ${escapeHtml(line.item_title || 'this item')}">eBay chat ↗</a></span>
               ${assignedLineTask ? lineTaskActionMarkup : ""}
+            </div>
+            <div class="buyer-line-watch-actions" role="group" aria-label="Watch and certificate">
+              <span class="line-watch-control" data-watch-line="${escapeHtml(line.id)}">${window.OGOrderWatches?.line(line) || ""}</span>
+              <button type="button" class="certificate-trigger" data-certificate-line="${escapeHtml(line.id)}" data-certificate-title="${escapeHtml((getOrderFromLine(line).order_number || '') + ' · ' + (line.item_title || 'Order item'))}">CGL certificate</button>
             </div>
             <div class="buyer-line-note-summary" data-line-note-summary="${escapeHtml(line.id)}">${renderLineNoteSummary(line)}</div>
           </div>
@@ -4909,16 +4918,14 @@ function renderOrders(options = {}) {
                 <div class="card-action-buttons">
                   <button type="button" class="secondary-btn buyer-line-action-btn" data-line-pack="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Pack item</button>
                   ${shippingLabelAction.combined ? "" : `<button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) && !getLineFulfillmentBlock(line) && canActOnLine ? "" : "disabled"}>Create shipping label</button>`}
-                  ${!assignedLineTask ? lineTaskActionMarkup : ""}
-                  <button type="button" class="certificate-trigger" data-certificate-line="${escapeHtml(line.id)}" data-certificate-title="${escapeHtml((getOrderFromLine(line).order_number || '') + ' · ' + (line.item_title || 'Order item'))}">CGL certificate</button>
                 </div>
-                <span class="line-watch-control" data-watch-line="${escapeHtml(line.id)}">${window.OGOrderWatches?.line(line) || ""}</span>
               </div>
               <div class="card-tool-group" role="group" aria-label="Item videos"><span class="card-action-label">Item videos</span><div class="card-action-buttons">${lineTaskVideoMarkup}</div></div>
               <div class="card-tool-group card-tool-corrections" role="group" aria-label="Item corrections">
                 <span class="card-action-label">Corrections</span>
                 <div class="card-action-buttons">
                   ${lineCancellationDetailsActionMarkup}
+                  ${window.OGPendingWork?.line(line, {cancellationOnly: true}) || ""}
                   <button type="button" class="secondary-btn buyer-line-action-btn refund-btn" data-line-refund="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Refunded</button>
                   <button type="button" class="secondary-btn buyer-line-action-btn danger-btn" data-line-cancel="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Cancel</button>
                 </div>
@@ -4964,6 +4971,10 @@ function renderOrders(options = {}) {
       });
       button.querySelector("[data-line-open-label]")?.addEventListener("click", () => {
         openEbayLabelPagesForOrderNumbers([order.order_number]);
+      });
+      button.querySelector("[data-line-complete-order]")?.addEventListener("click", event => {
+        event.stopPropagation();
+        openBuyerGroupNoInventoryModal(group);
       });
       button.querySelector("[data-line-assign-task]")?.addEventListener("click", () => {
         selectOrderLine(line.id, { openDetail: false });

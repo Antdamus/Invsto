@@ -77,6 +77,7 @@ for (const width of [320, 390, 430, 760]) {
     await expect(page.locator('.mobile-header')).toBeHidden();
     await expect(page.locator('.phone-orders-header')).toBeVisible();
     const card = page.locator('.buyer-order-card').first();
+    await expect(card.locator('[data-buyer-task-key]')).toBeVisible();
     const box = await card.boundingBox();
     const filters = await page.locator('[data-pending-chat-status]').boundingBox();
     assert.ok(box.y < filters.y + filters.height + 60, 'queue follows work/chat filters without packing tools taking over the page');
@@ -92,6 +93,9 @@ for (const width of [320, 390, 430, 760]) {
     await card.locator('[data-buyer-expand-key]').click();
     await expect(page.locator('.buyer-item-tools')).toHaveCount(2);
     const line = card.locator('.buyer-line-btn').first();
+    await expect(line.locator('[data-line-assign-task]')).toBeVisible();
+    await expect(line.locator('[data-line-complete-order]')).toBeVisible();
+    await expect(line.locator('[data-certificate-line]')).toBeVisible();
     await expect(line.locator('.order-chat-link')).toBeVisible();
     const chatUrl = new URL(await line.locator('.order-chat-link').getAttribute('href'), page.url());
     assert.equal(chatUrl.searchParams.get('orderLineId'), await line.getAttribute('data-line-id'));
@@ -143,6 +147,7 @@ for (const width of [768, 1024, 1440]) {
     await page.locator('#order-search').fill('jewelrylover_28');
     const card = page.locator('.buyer-order-card');
     await expect(card.locator('[data-buyer-no-inventory-key]')).toBeVisible();
+    await expect(card.locator('[data-buyer-task-key]')).toBeVisible();
     await expect(card.locator('[data-buyer-complete-key]')).toBeVisible();
     await expect(card.locator('[data-buyer-label-key]')).toBeVisible();
     await expect(card.locator('[data-buyer-shipping-labels]')).toBeVisible();
@@ -155,6 +160,9 @@ for (const width of [768, 1024, 1440]) {
     await expect(card.locator('[data-buyer-completion-photos]')).toBeHidden();
     await card.locator('[data-buyer-expand-key]').click();
     const line = card.locator('[data-line-id="line-0"]');
+    await expect(line.locator('[data-line-assign-task]')).toBeVisible();
+    await expect(line.locator('[data-line-complete-order]')).toBeVisible();
+    await expect(line.locator('[data-certificate-line]')).toBeVisible();
     await expect(line.locator('[data-item-found]')).toBeVisible();
     await expect(line.locator('[data-item-search]')).toBeVisible();
     await expect(line.locator('[data-line-cancel]')).toBeHidden();
@@ -179,6 +187,53 @@ for (const width of [768, 1024, 1440]) {
     await card.screenshot({path: `test-results/pending-card-organized-${width}.png`});
   });
 }
+
+test('front task, watch and completion actions keep their scope with an existing task and closed tools', async t => {
+  const page = await open(t, {width: 390});
+  await page.locator('#order-search').fill('jewelrylover_28');
+  await page.evaluate(() => {
+    window.frontCalls = [];
+    openOrderTaskModal = options => frontCalls.push({scope: options.scope, line: state.selectedLine.id});
+    const previous = window.supabase.rpc;
+    window.supabase.rpc = (name, args) => {
+      if (name === 'list_pending_order_work') return {range: async () => ({data: []})};
+      if (name === 'set_order_line_watch') return Promise.resolve({data: {order_line_id: args._order_line_id, is_watch: args._is_watch, revision: 1}});
+      return previous(name, args);
+    };
+    window.supabase.from = name => {
+      if (name !== 'order_line_watch_flags') throw Error('Unexpected table: ' + name);
+      return {select: () => ({in: async () => ({data: []})})};
+    };
+    rememberOrderTaskAssignment({id:'assigned-task', order_id:'order-0', order_line_ids:['line-0'], status:'assigned', assigned_to_email:'worker@example.test'});
+  });
+  for (const src of ['pending-watch-flags.js','pending-work-queue.js']) await page.addScriptTag({url: origin + '/' + src});
+  await page.evaluate(async () => {await OGPendingWork.load(state.orders, {paint:false}); await OGOrderWatches.load(); OGOrderWatches.start(); renderOrders();});
+  const card = page.locator('.buyer-order-card');
+  await expect(card.locator('.buyer-card-alerts [data-view-order-task]')).toBeVisible();
+  await card.locator('[data-buyer-task-key]').click();
+  await expect.poll(() => page.evaluate(() => frontCalls.length)).toBe(1);
+  if (await card.locator('[data-buyer-expand-key]').getAttribute('aria-expanded') !== 'true') await card.locator('[data-buyer-expand-key]').click();
+  const line = card.locator('[data-line-id="line-0"]');
+  await expect(line.locator('[data-line-view-task]')).toBeVisible();
+  await line.locator('[data-line-assign-task]').click();
+  await expect.poll(() => page.evaluate(() => frontCalls.length)).toBe(2);
+  const calls = await page.evaluate(() => frontCalls);
+  assert.equal(calls[0].scope, 'order'); assert.ok(['line-0','line-1'].includes(calls[0].line));
+  assert.deepEqual(calls[1], {scope:'line',line:'line-0'});
+  await expect(line.locator('[data-work-missing-add]')).toHaveCount(0);
+  await line.locator('[data-watch-toggle]').click();
+  await expect(line.locator('[data-watch-toggle]')).toHaveAttribute('aria-pressed','true');
+  await expect(line.locator('[data-work-missing-add]')).toBeVisible();
+  await expect(line.locator('[data-work-cgl-add]')).toBeVisible();
+  await expect(line.locator('[data-certificate-line]')).toBeVisible();
+  await expect(line.locator('[data-work-cancel-add]')).toBeHidden();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await card.screenshot({path:'test-results/pending-front-actions-mobile.png'});
+  await line.locator('[data-line-complete-order]').click();
+  await expect(page.locator('#worker-no-inventory-modal')).toBeVisible();
+  assert.deepEqual(await page.evaluate(() => state.workerNoInventoryCandidates.map(l => l.id).sort()), ['line-0','line-1']);
+  assert.deepEqual(await page.evaluate(() => databaseWrites), []);
+});
 
 test('relocated order and item actions keep their buyer/line scope without submitting', async t => {
   const page = await open(t, {width: 1440});

@@ -129,6 +129,15 @@ test('scan a line barcode, verify source/quantity, and deduct only linked units 
  const history=await open(t,db,{history:true});await history.locator('[data-expand="buyer-one"]').first().click();await expect(history.locator('.tk-inventory-line')).toContainText(['No inventory linked','1 deducted']);await history.locator('[data-tk-inventory="line-1"]').click();await expect(history.locator('#tk-inventory-current')).toContainText('1 deducted');await expect(history.locator('#tk-inventory-controls')).toBeHidden();
 });
 
+test('front item completion opens the buyer review without completing or changing selection rules',async t=>{
+ const db=fixture(),page=await open(t,db);db.tables.tiktok_line_work.push({line_id:'line-1',item_search:'not_found',revision:1});await page.locator('#tk-refresh').click();
+ await page.locator('[data-expand="buyer-one"]').first().click();const item=page.locator('.tk-order-item').first();
+ await expect(item.locator('[data-tk-work="watch"]')).toBeVisible();await item.locator('[data-tk-work="watch"]').click();
+ await expect(item.locator('[data-certificate-line]')).toBeVisible();await expect(item.locator('[data-tk-work="missing"]')).toBeVisible();await expect(item.locator('[data-tk-work="require_cgl"]')).toBeVisible();
+ await item.locator('[data-tk-line-finish]').click();await expect(page.locator('[data-complete-line="line-0"]')).toBeChecked();await expect(page.locator('[data-complete-line="line-1"]')).not.toBeChecked();await expect(page.locator('[data-complete-line="line-2"]')).toHaveCount(0);
+ assert.equal(db.calls.filter(c=>c.name==='complete_tiktok_order_lines_review').length,0);
+});
+
 test('item controls, missing-watch confirmation, CGL copies and cancellation filters keep buyer bundles together',async t=>{
  const db=fixture(),page=await open(t,db);await mkdir(new URL('../outputs/tiktok-pipeline/',import.meta.url),{recursive:true});await page.locator('[data-expand="buyer-one"]').first().click();const line=page.locator('[data-tk-work-line="line-0"]');
  await line.locator('[data-tk-work="not_found"]').click();await expect(line.locator('[data-tk-work="not_found"]')).toBeDisabled();await page.locator('#tk-work-filter').selectOption('not_found');await expect(page.locator('.tk-buyer')).toHaveCount(1);await expect(page.locator('.tk-order-row')).toHaveCount(2);
