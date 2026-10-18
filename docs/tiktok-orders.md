@@ -6,11 +6,12 @@ The TikTok workspace reuses the eBay fulfillment styles and navigation shell, wi
 
 ## Export and import
 
-1. In TikTok Manage orders, select Orders → All.
-2. Export **All orders under current tab** as CSV to include cancelled orders as well as Awaiting shipment/collection. A Canceled-tab CSV can also refresh known cancellations.
-3. In extension v1.0.21+, expand **OG · TikTok orders**, choose **Send orders to OG**, and select the downloaded CSV. Alternatively upload it directly in the TikTok workspace.
-4. Review the count, item preview and actual export time, then confirm.
-5. Export again after label purchases, package combinations and status changes. An All-orders export can refresh existing records into history, but does not backfill previously unseen historical/unpaid orders.
+1. In TikTok Manage orders, expand **OG · TikTok orders** and click **Export all → OG** (extension 1.0.22+).
+2. The extension selects All, opens Export, chooses All orders under current tab and CSV, waits for the new report, downloads it and opens the OG preview. TikTok exports the last 12 months by default.
+3. Review the counts, cancellation statuses, items and actual export time, then confirm the import. Opening the preview alone changes no order records.
+4. Manual fallback: select All or Canceled, export the whole tab as CSV, download, then use **Send downloaded CSV** or upload directly in the workspace.
+5. Export again after label purchases, package combinations and status changes. Known historical/cancelled orders are refreshed; previously unseen historical/unpaid orders are skipped.
+
 
 The parser preserves long IDs as text and rejects malformed rows, invalid quantities, conflicting duplicate records, unknown statuses and non-TikTok reports. Imports are transactional, serialized, audited and idempotent by file hash. Older snapshots cannot replace newer data. Missing orders/items never imply dispatch, cancellation or deletion. Reimports preserve staff notes and stages. Changed quantities on packed orders require review; dispatched orders retain their dispatch stage and receive an audit warning.
 
@@ -97,3 +98,8 @@ A shipped/completed TikTok import with undeducted inventory links remains in the
 **Update TikTok statuses / cancellations** opens the CSV instructions. The extension's **All orders (include cancellations)** button selects TikTok's All tab; export the whole tab as CSV, then Send orders to OG and review the cancellation count and statuses. Existing orders are refreshed, while unseen historical orders are skipped. Missing rows never imply cancellation. The normal Refresh button only reloads OG's saved data. No automatic TikTok API sync is implied.
 
 Deploy `20261018220000_tiktok_cancellation_sync.sql` before these assets. Its import trigger logs cancellation/status changes with source import and staff identity. Older reports are ignored by the existing importer. A newer report contradicting an already recorded cancellation retains the cancellation and logs a conflict for manager review; it cannot silently return the order to shipping. The download ZIP/release manifest are extension 1.0.21 with unchanged permissions. Extract over the installed extension folder, reload the extension, then refresh TikTok and OG.
+
+
+## One-click report delivery (extension 1.0.22)
+
+The native UI controller verifies the All tab and CSV scope, generates once, and waits up to two minutes for the newly inserted report. Counts distinguish identical minute-based filenames; old Download buttons cannot satisfy the wait. The panel moves away from TikTok's drawer. After the report is ready, a 60-second MAIN-world probe captures only its CSV/blob or native download URL; the service worker validates the origin, sender tab, transfer lifetime and 10 MB maximum. Cancellation is rechecked after fetching, before opening OG. CSV capture does not share state or messages with eBay. Native downloading still runs, and the existing preview/confirmation/audit import remains unchanged. Tests in `tests/tiktok-export.test.mjs` load the real unpacked extension for both blob and signed-URL delivery.

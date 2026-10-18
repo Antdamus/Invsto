@@ -221,3 +221,10 @@ Download the ZIP, extract over the installed extension folder, reload OG eBay Or
 OG also provides TikTok item found/not found, watch/missing-watch, CGL certificate and cancellation-review controls. Scan/link inventory on an item before completing; only linked units are deducted at completion. These app controls do not require an extension permission change. Cancellations themselves are performed in TikTok and confirmed by a fresh export.
 
 Extension 1.0.21 includes All-status export guidance. Known cancelled orders move into OG TikTok history with a signed import audit. Canceled-tab CSV reports also update known orders; missing rows never imply a cancellation. No new extension permissions are required. OG also offers an audited **Mark cancelled** action after staff verify the exact order in TikTok.
+
+
+## TikTok one-click export (1.0.22)
+
+Click **Export all → OG** in the TikTok orders panel. It selects All, opens the native export drawer, selects the complete tab and CSV, requests a fresh report, waits for that report's Download control, downloads it and opens the TikTok workspace's import preview. Confirm the preview to update records. TikTok's default export window is the last 12 months; older records are outside this export. The extension never mistakes an existing report for the new one, including identical minute-based filenames. The panel moves left while the export drawer is open so it does not cover native Export/Download controls.
+
+Progress, **Cancel export**, and explicit timeout/errors stay visible. Capture is armed only for the selected report's download, expires, and accepts a complete TikTok CSV under 10 MB. The private transfer stays bound to the configured TikTok workspace and clears after confirmed import. Cancelled transfers cannot open OG after a delayed response. If TikTok takes more than two minutes or changes its UI, use **Open export manually** and **Send downloaded CSV**. Reload the extension and TikTok after updating; no new permissions are needed.
