@@ -43,10 +43,10 @@
    const r=c.video.getBoundingClientRect();
    if(!c.video.videoWidth||c.video.readyState<2)throw Error('Wait for the receipt video to load before capturing.');
    if(r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight)throw Error('Keep the whole video visible, then capture again.');
-   status.textContent='Capturing this frame and opening its OG order line…';
+   status.textContent='Capturing this frame for its OG order line…';
    const result=await chrome.runtime.sendMessage({type:'OG_TIKTOK_RECEIPT_CAPTURE',transferId:crypto.randomUUID(),orderNumber:c.order,skuId:c.sku,videoTime:c.video.currentTime,viewport:{width:innerWidth,height:innerHeight},rect:{x:r.x,y:r.y,width:r.width,height:r.height}});
    if(!result?.ok)throw Error(result?.error||'Could not send the capture.');
-   status.textContent='Sent to OG. The matching item opens there and shows when the photo is saved.';
+   status.textContent='Sent to OG. You’ll return to the matching order line when the photo is saved.';
   }catch(e){status.textContent=e.message||'Reload the extension and TikTok, then try again.';}
   finally{overlays.forEach((el,i)=>el.style.visibility=visibility[i]);capturing=false;install();}
  }

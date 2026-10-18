@@ -52,12 +52,34 @@ test('late receipt capture saves to the exact SKU, shows its image, and duplicat
  });
  await page.locator('#tk-refresh').click();await page.evaluate(()=>window.postMessage({type:'OG_TIKTOK_RECEIPT_BRIDGE_READY'},location.origin));
  await expect(page.locator('.tk-receipt-transfer')).toContainText('Receipt photo saved');
- await expect(page.locator('#tk-detail [data-tk-photo-line="line-b"] img')).toBeVisible();await expect(page.locator('#tk-detail [data-tk-photo-line="line-a"] img')).toHaveCount(0);
- await expect(page.locator('#tk-detail [data-tk-photo-line="line-b"]')).toContainText('5:37');
- await page.evaluate(()=>window.postMessage({type:'OG_TIKTOK_RECEIPT_BRIDGE_READY'},location.origin));await page.locator('#tk-close-detail').click();
+ await expect(page.locator('dialog[open]')).toHaveCount(0);
+ await expect(page.locator('#tk-orders [data-tk-photo-line="line-b"] img')).toBeVisible();await expect(page.locator('#tk-orders [data-tk-photo-line="line-a"] img')).toHaveCount(0);
+ await expect(page.locator('.tk-capture-saved')).toContainText('Capture saved');await expect(page.locator('.tk-capture-saved')).toContainText('5:37');
+ assert.equal(await page.locator('.tk-capture-saved').evaluate(el=>el===document.activeElement),true);
+ await page.evaluate(()=>window.postMessage({type:'OG_TIKTOK_RECEIPT_BRIDGE_READY'},location.origin));
  await expect(page.locator('#tk-orders [data-tk-photo-line="line-b"] img')).toBeVisible();assert.equal(await page.evaluate(()=>window.photoSaves),1);assert.equal(await page.evaluate(()=>window.receiptDone),1);
  const uploads=await page.evaluate(()=>window.uploads);assert.equal(uploads.length,2);assert.match(uploads[1].path,/-thumb\.jpg$/);for(const file of uploads){assert.equal(file.type,'image/jpeg');assert.equal(file.options.cacheControl,'3600');assert.equal(file.options.upsert,false);}assert.ok(Math.max(uploads[1].width,uploads[1].height)<=320);
  await page.screenshot({animations:'disabled',path:new URL('../outputs/tiktok-pipeline/tiktok-receipt-saved-test.png',import.meta.url).pathname.replace(/^\/(.:)/,'$1'),fullPage:true});await page.close();
+});
+
+test('an already-open TikTok tab reveals repeated captures through filters and history without opening dialogs',async()=>{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});await setup(page);
+ await page.evaluate(()=>{
+  const t=fixtureTables;t.tiktok_orders.push({id:'return-order',order_number:'577620684385522369',buyer_username:'return-buyer',stage:'pending',marketplace_status:'To ship',marketplace_substatus:'Awaiting shipment',revision:1});
+  t.tiktok_order_lines.push({id:'return-line',order_id:'return-order',sku_id:'1732759903849189622',title:'Saved capture item',quantity:1});
+  const canvas=document.createElement('canvas');canvas.width=160;canvas.height=320;canvas.getContext('2d').fillRect(0,0,160,320);window.photo=canvas.toDataURL('image/jpeg');
+  t.tiktok_order_receipt_photos.push({id:'p1',line_id:'return-line',path:'main.jpg',thumbnail_path:'thumb.jpg',video_time:12});
+  supabase.storage={from:()=>({createSignedUrls:async paths=>({data:paths.map(path=>({path,signedUrl:photo}))})})};
+  window.addEventListener('message',e=>{if(e.data?.type==='OG_TIKTOK_RECEIPT_READY'&&e.data.transferId)window.postMessage({type:'OG_TIKTOK_RECEIPT_DATA',payload:{transferId:e.data.transferId,orderNumber:'577620684385522369',skuId:'1732759903849189622',completed:true}},location.origin);});
+ });
+ await page.locator('#tk-refresh').click();await page.locator('#tk-search').fill('different-buyer');await page.locator('#tk-stage-filter').selectOption('waiting');
+ await page.evaluate(()=>window.postMessage({type:'OG_TIKTOK_RECEIPT_AVAILABLE',transferId:'00000000-0000-4000-8000-000000000003'},location.origin));
+ await expect(page.locator('.tk-capture-saved img')).toBeVisible();await expect(page.locator('dialog[open]')).toHaveCount(0);await expect(page.locator('#tk-search')).toHaveValue('');await expect(page.locator('#tk-stage-filter')).toHaveValue('');
+ await page.getByRole('button',{name:'Open order',exact:true}).click();await expect(page.locator('#tk-detail')).toBeVisible();
+ await page.evaluate(()=>{fixtureTables.tiktok_orders[0].stage='dispatched';window.postMessage({type:'OG_TIKTOK_RECEIPT_AVAILABLE',transferId:'00000000-0000-4000-8000-000000000004'},location.origin);});
+ await expect(page.locator('#tk-title')).toHaveText('TikTok Order History');await expect(page.locator('dialog[open]')).toHaveCount(0);await expect(page.locator('.tk-capture-saved img')).toBeVisible();await expect(page.locator('#tk-history-link')).toHaveAttribute('aria-current','page');assert.equal(new URL(page.url()).searchParams.get('view'),'history');
+ await page.evaluate(()=>{fixtureTables.tiktok_orders[0].stage='pending';window.postMessage({type:'OG_TIKTOK_RECEIPT_AVAILABLE',transferId:'00000000-0000-4000-8000-000000000005'},location.origin);});
+ await expect(page.locator('#tk-title')).toHaveText('Pending TikTok Orders');await expect(page.locator('#tk-pending-link')).toHaveAttribute('aria-current','page');await expect(page.locator('dialog[open]')).toHaveCount(0);assert.equal(page.context().pages().length,1);await page.close();
 });
 
 test('TikTok capture button tracks the receipt clicked on a multi-SKU order and sends the paused video area',async()=>{

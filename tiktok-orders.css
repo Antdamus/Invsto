@@ -61,6 +61,8 @@
 .tk-order-items{display:grid;gap:10px}.tk-order-item{display:flex;justify-content:space-between;gap:14px;align-items:start;font-size:13px;line-height:1.5}
 .tk-order-item>div{min-width:0;overflow-wrap:anywhere}.tk-order-item small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
 .tk-order-item b{white-space:nowrap;color:var(--gold)}
+.tk-order-item.tk-capture-saved{outline:2px solid #85bf9b;outline-offset:6px;border-radius:6px;scroll-margin-top:110px}
+.tk-capture-confirmation{display:block;margin-top:10px;color:#a7e1c0;font-size:12px;font-weight:700}
 .tk-line-receipt-link{display:inline-block;margin-top:8px;font-size:12px}
 .tk-receipt-photos{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
 .tk-receipt-photos:empty{display:none}

@@ -30,7 +30,9 @@ Version 1.0.6 stops receipt screenshot retransmissions as soon as OG accepts the
 
 ## Use
 
-Version 1.0.17 adds **Capture item photo → OG** to TikTok order video receipts. Pause the video, check the displayed order and SKU, then capture. OG saves the visible frame to that exact TikTok order line and opens it with its photo. If an order has several items, open the specific item's Video receipt first. Update the extension, then refresh both TikTok and OG to load the new capture scripts. Receipt photos use a separate private TikTok bucket and remain available in TikTok history.
+Version 1.0.18 returns TikTok captures to the already-open OG TikTok orders tab. It saves both image sizes, expands the buyer card, highlights the matching item with **Capture saved**, and focuses that tab after the save. It does not create a new tab, reload OG, or open an order/photo dialog. Keep the OG TikTok workspace open and signed in; if it is missing, outdated, or busy saving, the capture button asks you to open/refresh it and retry. Update the extension, then refresh both OG and TikTok. eBay capture behavior is unchanged.
+
+Version 1.0.17 added **Capture item photo → OG** to TikTok order video receipts. Pause the video, check the displayed order and SKU, then capture. If an order has several items, open the specific item's Video receipt first. Receipt photos use a separate private TikTok bucket and remain available in TikTok history.
 
 Version 1.0.16 handles TikTok reprints that still return A6 after selecting 4x6.
 The OG handoff fits a standard A6 label proportionally onto a 4x6 page, keeping

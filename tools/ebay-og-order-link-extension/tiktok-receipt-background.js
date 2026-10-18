@@ -9,6 +9,12 @@
   if(active.length!==1||active[0].id!==tab.id||tab.url!==source.href)throw Error('Keep this TikTok receipt tab active while capturing.');
   return tab;
  }
+ async function receiver(destination,sourceTab){
+  const candidates=(await chrome.tabs.query({})).filter(tab=>{try{const u=new URL(tab.url);return u.origin===destination.origin&&u.pathname===destination.pathname;}catch{return false;}});
+  candidates.sort((a,b)=>Number(b.id===sourceTab.openerTabId)-Number(a.id===sourceTab.openerTabId)||Number(b.windowId===sourceTab.windowId)-Number(a.windowId===sourceTab.windowId)||(b.lastAccessed||0)-(a.lastAccessed||0));
+  for(const tab of candidates){try{const state=await chrome.tabs.sendMessage(tab.id,{type:'OG_TIKTOK_RECEIPT_PING'});if(state?.ready&&!state.busy)return tab;}catch{}}
+  throw Error(candidates.length?'Refresh your open OG TikTok orders tab and finish any capture already saving, then try again.':'Open your OG TikTok orders tab first, then capture again.');
+ }
  async function crop(dataUrl,rect,viewport){
   const bitmap=await createImageBitmap(await (await fetch(dataUrl)).blob());
   try{
@@ -32,20 +38,26 @@
    if(source.origin!=='https://seller-us.tiktok.com'||source.pathname!=='/order/detail'||source.searchParams.get('order_no')!==m.orderNumber||!/^\d{10,24}$/.test(m.orderNumber||'')||!/^\d{10,24}$/.test(m.skuId||''))throw Error('Open the matching TikTok order receipt first.');
    const r=m.rect,v=m.viewport;
    if(!r||!v||![r.x,r.y,r.width,r.height,v.width,v.height,m.videoTime].every(Number.isFinite)||r.x<0||r.y<0||r.width<40||r.height<40||v.width>16000||v.height>16000||r.x+r.width>v.width||r.y+r.height>v.height||m.videoTime<0||m.videoTime>604800)throw Error('Invalid video capture area.');
-   const tab=await assertActive(sender,source),shot=await chrome.tabs.captureVisibleTab(tab.windowId,{format:'png'});
+   const tab=await assertActive(sender,source),og=await receiver(destination,tab);
+   await assertActive(sender,source);
+   const shot=await chrome.tabs.captureVisibleTab(tab.windowId,{format:'png'});
    await assertActive(sender,source);
    const image=await crop(shot,r,v),all=await chrome.storage.local.get(null);
    const expired=Object.keys(all).filter(k=>k.startsWith(PREFIX)&&Date.now()-all[k].createdAt>TTL);if(expired.length)await chrome.storage.local.remove(expired);
-   await chrome.storage.local.set({[key]:{transferId:id,orderNumber:m.orderNumber,skuId:m.skuId,videoTime:m.videoTime,image,createdAt:Date.now(),target:destination.href}});
-   destination.searchParams.set('tiktokReceipt',id);
-   await chrome.tabs.create({url:destination.href,active:true});return {ok:true,transferId:id};
+   await chrome.storage.local.set({[key]:{transferId:id,orderNumber:m.orderNumber,skuId:m.skuId,videoTime:m.videoTime,image,createdAt:Date.now(),target:destination.href,receiverTabId:og.id}});
+   const accepted=await chrome.tabs.sendMessage(og.id,{type:'OG_TIKTOK_RECEIPT_AVAILABLE',transferId:id});
+   if(!accepted?.ok)throw Error('Refresh your open OG TikTok orders tab, then capture again.');
+   return {ok:true,transferId:id};
   }
-  if(source.origin!==destination.origin||source.pathname!==destination.pathname||source.searchParams.get('tiktokReceipt')!==id)throw Error('Open the configured TikTok workspace to receive this capture.');
+  if(source.origin!==destination.origin||source.pathname!==destination.pathname)throw Error('Open the configured TikTok workspace to receive this capture.');
   const record=(await chrome.storage.local.get(key))[key];
   if(!record||record.target!==destination.href||Date.now()-record.createdAt>TTL){if(record)await chrome.storage.local.remove(key);throw Error('This capture expired. Capture the TikTok frame again.');}
+  if(record.receiverTabId?record.receiverTabId!==sender.tab.id:source.searchParams.get('tiktokReceipt')!==id)throw Error('Use the OG tab receiving this capture.');
   if(m.type==='OG_TIKTOK_RECEIPT_GET')return {ok:true,payload:record};
   if(m.type==='OG_TIKTOK_RECEIPT_ACK'){
-   await chrome.storage.local.set({[key]:{transferId:id,orderNumber:record.orderNumber,skuId:record.skuId,target:record.target,createdAt:record.createdAt,completed:true}});return {ok:true};
+   await chrome.storage.local.set({[key]:{transferId:id,orderNumber:record.orderNumber,skuId:record.skuId,target:record.target,createdAt:record.createdAt,receiverTabId:record.receiverTabId,completed:true}});
+   if(!record.completed){const tab=await chrome.tabs.update(sender.tab.id,{active:true});if(tab.windowId)await chrome.windows.update(tab.windowId,{focused:true});}
+   return {ok:true};
   }
   throw Error('Unsupported TikTok receipt transfer.');
  }

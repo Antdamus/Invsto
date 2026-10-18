@@ -100,15 +100,20 @@
  }
  function start({db,user,getOrders,refresh,reveal,status}){
   client(db).user=user;
-  const id=new URLSearchParams(location.search).get('tiktokReceipt');if(!id)return;
+  const sessions=new Map();let saving=false;
+  function begin(id){
+  if(!/^[a-f0-9-]{36}$/i.test(id||'')||sessions.has(id))return;
+  const url=new URL(location.href);url.searchParams.set('tiktokReceipt',id);history.replaceState(null,'',url);
   let receiving=false,finished=false,pending;
   const panel=document.createElement('section');panel.className='tk-receipt-transfer';panel.setAttribute('aria-live','polite');
   const text=document.createElement('p'),retry=document.createElement('button');retry.type='button';retry.textContent='Retry saving capture';retry.hidden=true;
   text.textContent='Receiving the TikTok receipt capture…';panel.append(text,retry);document.getElementById('tk-status').after(panel);
-  const request=()=>window.postMessage({type:'OG_TIKTOK_RECEIPT_READY'},location.origin);
+  const request=()=>window.postMessage({type:'OG_TIKTOK_RECEIPT_READY',transferId:id},location.origin);
   retry.onclick=async()=>{if(!pending||pending.error){pending=null;request();return;}try{await refresh();await receive(pending);}catch(e){text.textContent=e.message;}};
   async function receive(p){
-   if(receiving||finished||p?.transferId!==id)return;receiving=true;pending=p;retry.hidden=true;
+   if(receiving||finished||p?.transferId!==id)return;
+   if(saving){pending=p;text.textContent='Another capture is saving. Retry this capture when it finishes.';retry.hidden=false;return;}
+   receiving=true;saving=true;pending=p;retry.hidden=true;document.documentElement.dataset.tkReceiptSaving='true';
    try{
     if(p.error)throw Error(p.error);
     if(!/^\d{10,24}$/.test(p.orderNumber||'')||!/^\d{10,24}$/.test(p.skuId||''))throw Error('The capture has no valid order and SKU identity. Capture it again in TikTok.');
@@ -121,19 +126,28 @@
      text.textContent=`Saving receipt photo to order ${p.orderNumber} · SKU ${p.skuId}…`;
      await upload(db,path,blob);await upload(db,thumbPath,small);
      const {error}=await db.rpc('attach_tiktok_receipt_photo_v2',{_order_number:p.orderNumber,_sku_id:p.skuId,_transfer_id:id,_path:path,_video_time:p.videoTime,_thumbnail_path:thumbPath,_image_bytes:blob.size,_thumbnail_bytes:small.size});if(error)throw error;
-     window.postMessage({type:'OG_TIKTOK_RECEIPT_DONE',transferId:id},location.origin);
     }
     await refresh();await reveal(order.id,line.id);finished=true;
     text.textContent=`Receipt photo saved to order ${p.orderNumber} · SKU ${p.skuId}.`;status(text.textContent);
+    window.postMessage({type:'OG_TIKTOK_RECEIPT_DONE',transferId:id},location.origin);pending=null;
    }catch(e){text.textContent=e.message||'Could not save this capture. Try again.';retry.hidden=false;status(text.textContent,true);}
-   finally{receiving=false;}
+   finally{receiving=false;saving=false;document.documentElement.dataset.tkReceiptSaving='false';}
+  }
+  sessions.set(id,{receive,request:()=>{if(!finished)request();}});
+  request();setTimeout(()=>{if(!receiving&&!pending&&!finished){text.textContent='Waiting for the extension. Update it, refresh this page, then retry.';retry.hidden=false;}},10000);
   }
   window.addEventListener('message',event=>{
    if(event.source!==window||event.origin!==location.origin)return;
-   if(event.data?.type==='OG_TIKTOK_RECEIPT_BRIDGE_READY')request();
-   if(event.data?.type==='OG_TIKTOK_RECEIPT_DATA')receive(event.data.payload);
+   if(event.data?.type==='OG_TIKTOK_RECEIPT_AVAILABLE')begin(event.data.transferId);
+   if(event.data?.type==='OG_TIKTOK_RECEIPT_BRIDGE_READY'){
+    for(const session of sessions.values())session.request();
+    window.postMessage({type:'OG_TIKTOK_RECEIPT_READY'},location.origin);
+   }
+   if(event.data?.type==='OG_TIKTOK_RECEIPT_DATA')sessions.get(event.data.payload?.transferId)?.receive(event.data.payload);
   });
-  request();setTimeout(()=>{if(!receiving&&!pending&&!finished){text.textContent='Waiting for the extension. Update it, refresh this page, then retry.';retry.hidden=false;}},10000);
+  document.documentElement.dataset.tkReceiptReceiver='2';
+  begin(new URLSearchParams(location.search).get('tiktokReceipt'));
+  window.postMessage({type:'OG_TIKTOK_RECEIPT_READY'},location.origin);
  }
  window.TikTokReceiptPhotos={placeholder,hydrate,start};
 })();

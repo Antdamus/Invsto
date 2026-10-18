@@ -2,7 +2,7 @@
  'use strict';
  if(!window.supabase?.auth){document.addEventListener('supabase-ready',boot,{once:true});document.addEventListener('supabase-init-error',event=>{document.getElementById('tk-status').textContent=event.detail?.message||'Could not connect. Refresh and try again.';},{once:true});return;}
  const $=id=>document.getElementById(id), db=window.supabase, adapter=window.TikTokOrderImport, queue=window.TikTokOrderQueue;
- const historyView=new URLSearchParams(location.search).get('view')==='history';
+ let historyView=new URLSearchParams(location.search).get('view')==='history';
  const state={user:null,orders:[],photos:[],preview:null,transferId:null,busy:false,detail:null,loadSequence:0,due:'all',expanded:new Set()};
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const stages={pending:'Pending',preparing:'Preparing',waiting:'Waiting',packed:'Packed',dispatched:'Dispatched'};
@@ -36,6 +36,24 @@
  function groups(){return queue.select(state.orders,{history:historyView,term:$('tk-search').value,stage:$('tk-stage-filter').value,due:state.due,sort:$('tk-sort').value});}
  function filtered(){return groups().flatMap(g=>g.orders);}
  function toggleBuyer(key){if(state.expanded.has(key))state.expanded.delete(key);else state.expanded.add(key);render();}
+ function revealCapture(id,lineId){
+  const order=state.orders.find(o=>o.id===id);if(!order)return;
+  if(closed(order)!==historyView){
+   historyView=closed(order);const url=new URL(location.href);
+   if(historyView)url.searchParams.set('view','history');else url.searchParams.delete('view');
+   history.replaceState(null,'',url);updateView();marketplaceNavigation();
+  }
+  // A saved capture must stay visible even when the queue was filtered to another buyer.
+  if(!filtered().some(o=>o.id===id)){$('tk-search').value='';$('tk-stage-filter').value='';state.due='all';}
+  state.expanded.add(order.buyer_username.toLowerCase());
+  for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();
+  render();
+  const slot=$('tk-orders').querySelector('[data-tk-photo-line="'+lineId+'"]'),line=slot?.closest('.tk-order-item');
+  if(!line)return;
+  line.classList.add('tk-capture-saved');line.tabIndex=-1;
+  const notice=document.createElement('span');notice.className='tk-capture-confirmation';notice.setAttribute('role','status');notice.textContent='✓ Capture saved';slot.before(notice);
+  line.scrollIntoView({block:'center'});line.focus({preventScroll:true});
+ }
  function dueBadge(order){const u=queue.urgency(order.ship_by_date);return `<span class="tk-date ${u.level}">${esc(historyView?'Ship '+queue.shortDate(order.ship_by_date):u.label)}</span>`;}
  function orderRow(o){const labels=o.documents.filter(d=>d.kind==='label');return `<article class="tk-order-row" data-tiktok-order="${esc(o.id)}"><div class="tk-order-heading"><div><strong>Order ${esc(o.order_number)}</strong><small>Placed ${esc(o.created_time||'Unavailable in export')}</small></div><div>${dueBadge(o)}<small>Ship by: ${esc(queue.shortDate(o.ship_by_date))}</small></div></div><div class="tk-order-items">${o.lines.map(l=>`<div class="tk-order-item"><div><strong>${esc(l.title)}</strong><small>Seller SKU ${esc(l.seller_sku||'—')} · Variation ${esc(l.variation||'—')} · SKU ID ${esc(l.sku_id)}</small><small>Package ${esc(l.package_id||'not assigned')} · Tracking ${esc(l.tracking_number||'not available')}</small><a class="tk-line-receipt-link" href="${adapter.orderUrl(o.order_number,true,l.sku_id)}" target="_blank" rel="noopener">Open item video receipt</a>${window.TikTokReceiptPhotos.placeholder(l)}</div><b>× ${l.quantity}</b></div>`).join('')}</div><div class="tk-actions"><span class="tk-stage ${esc(o.stage)}">OG: ${esc(stages[o.stage])}</span><span class="tk-help">TikTok: ${esc(o.marketplace_substatus||o.marketplace_status)}</span></div><div class="tk-actions"><a class="secondary-btn buyer-line-receipt" href="${adapter.orderUrl(o.order_number,true)}" target="_blank" rel="noopener">Open video receipt</a><button type="button" class="secondary-btn" data-order="${esc(o.id)}" data-section="labels">Shipping labels${labels.length?' ('+labels.length+')':''}</button><button type="button" class="secondary-btn" data-order="${esc(o.id)}" data-section="preparation">${o.ship_by_date?'Edit ship-by date':'Add ship-by date'}</button><button type="button" class="primary-btn" data-order="${esc(o.id)}">Open order</button></div>${o.cancel_return?'<p class="tk-warning">Cancellation / return review required</p>':''}${o.notes?`<p class="tk-note">${esc(o.notes)}</p>`:''}</article>`;}
  function render(){
@@ -119,9 +137,13 @@
  $('tk-refresh').onclick=()=>busy(refresh);$('tk-packet').onclick=()=>busy(()=>packet(filtered()));$('tk-export').onclick=()=>busy(exportView);
  $('tk-file').onchange=()=>busy(async()=>{const f=$('tk-file').files[0];if(!f)return;if(f.size>adapter.MAX_BYTES)throw Error('Choose a CSV smaller than 10 MB.');await preview(await f.text(),f.name,{modifiedAt:f.lastModified});});
  $('tk-import-confirm').onclick=()=>busy(confirmImport);$('tk-import-cancel').onclick=discard;
- $('tk-title').textContent=historyView?'TikTok Order History':'Pending TikTok Orders';$('tk-greeting').textContent=$('tk-title').textContent;$('tk-phone-title').textContent=historyView?'Order history':'Pending orders';$('tk-queue-title').textContent=historyView?'TikTok order history':'Orders to Pack';document.querySelector('.buyer-due-filters').hidden=historyView;$(historyView?'tk-history-link':'tk-pending-link').setAttribute('aria-current','page');if(historyView)$('ebay-tab').href='ebay-order-history.html';
+ function updateView(){
+  $('tk-title').textContent=historyView?'TikTok Order History':'Pending TikTok Orders';$('tk-greeting').textContent=$('tk-title').textContent;$('tk-phone-title').textContent=historyView?'Order history':'Pending orders';$('tk-queue-title').textContent=historyView?'TikTok order history':'Orders to Pack';document.querySelector('.buyer-due-filters').hidden=historyView;
+  $('tk-history-link').removeAttribute('aria-current');$('tk-pending-link').removeAttribute('aria-current');$(historyView?'tk-history-link':'tk-pending-link').setAttribute('aria-current','page');$('ebay-tab').href=historyView?'ebay-order-history.html':'pending-orders.html';
+ }
+ updateView();
  let currentDay=queue.calendarDate();setInterval(()=>{const today=queue.calendarDate();if(today!==currentDay){currentDay=today;render();}},60000);
  let ready=false;
  window.addEventListener('message',event=>{if(event.source!==window||event.origin!==location.origin)return;if(event.data?.type==='OG_TIKTOK_BRIDGE_READY'&&ready){window.postMessage({type:'OG_TIKTOK_REPORT_READY'},location.origin);return;}if(event.data?.type!=='OG_TIKTOK_REPORT_DATA')return;const p=event.data.payload;if(p?.transferId!==new URLSearchParams(location.search).get('tiktokReport'))return;if(state.preview?.hash||state.transferId===p.transferId)return;busy(async()=>{if(p.error)throw Error(p.error);if(p.completed){status('This export handoff was already imported.');return;}await preview(p.text,p.filename,p);});});
- busy(async()=>{const {data,error}=await db.auth.getSession();if(error)throw error;if(!data.session){location.href='index.html';return;}state.user=data.session.user;await refresh();}).finally(()=>{if(state.user){ready=true;window.TikTokReceiptPhotos.start({db,user:state.user,getOrders:()=>state.orders,refresh,status,reveal:async(id,lineId)=>{const order=state.orders.find(o=>o.id===id);state.expanded.add(order.buyer_username.toLowerCase());render();await detail(id);$('tk-detail-body').querySelector('[data-tk-photo-line="'+lineId+'"]')?.scrollIntoView({block:'center'});}});window.postMessage({type:'OG_TIKTOK_REPORT_READY'},location.origin);}});
+ busy(async()=>{const {data,error}=await db.auth.getSession();if(error)throw error;if(!data.session){location.href='index.html';return;}state.user=data.session.user;await refresh();}).finally(()=>{if(state.user){ready=true;window.TikTokReceiptPhotos.start({db,user:state.user,getOrders:()=>state.orders,refresh,status,reveal:revealCapture});window.postMessage({type:'OG_TIKTOK_REPORT_READY'},location.origin);}});
 })();
