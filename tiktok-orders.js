@@ -36,8 +36,9 @@
  function groups(){return queue.select(state.orders,{history:historyView,term:$('tk-search').value,stage:$('tk-stage-filter').value,due:state.due,sort:$('tk-sort').value});}
  function filtered(){return groups().flatMap(g=>g.orders);}
  function toggleBuyer(key){if(state.expanded.has(key))state.expanded.delete(key);else state.expanded.add(key);render();}
- function revealCapture(id,lineId){
+ function revealCapture(id,lineId,transferId){
   const order=state.orders.find(o=>o.id===id);if(!order)return;
+  if(!state.photos.some(p=>p.transfer_id===transferId&&!p.removed_at))throw Error('This capture is no longer on the order. Take a new capture in TikTok.');
   if(closed(order)!==historyView){
    historyView=closed(order);const url=new URL(location.href);
    if(historyView)url.searchParams.set('view','history');else url.searchParams.delete('view');

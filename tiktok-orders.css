@@ -66,6 +66,12 @@
 .tk-line-receipt-link{display:inline-block;margin-top:8px;font-size:12px}
 .tk-receipt-photos{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
 .tk-receipt-photos:empty{display:none}
+.tk-receipt-capture{width:160px;max-width:100%;display:grid;align-content:start;gap:6px}
+.tk-photo-controls{margin-top:5px}
+.tk-photo-controls [hidden]{display:none!important}
+.tiktok-workspace button.tk-photo-remove{border:1px solid var(--line-strong);border-radius:7px;padding:7px 10px;color:#e6b3a9;background:#ffffff05;font:600 11px/1.4 Manrope,sans-serif;min-height:34px;cursor:pointer}
+.tk-photo-confirm{display:flex;flex-wrap:wrap;gap:7px;max-width:300px;color:var(--text);font-size:12px;line-height:1.5}
+.tk-photo-confirm>span{width:100%}.tk-photo-message{color:var(--muted);font-size:12px;line-height:1.5}
 .tiktok-workspace button.tk-receipt-photo{display:grid;gap:5px;width:160px;max-width:100%;padding:0;border:0;background:transparent;color:var(--gold);font:500 11px/1.5 Manrope,sans-serif;text-align:left;text-decoration:none}
 .tk-receipt-photo img{display:block;max-width:160px;width:100%;height:180px;object-fit:contain;background:#080b0a;border:1px solid var(--line-strong);border-radius:9px}
 .tk-photo-viewer{border:1px solid var(--line-strong);border-radius:16px;padding:18px;max-width:calc(100vw - 28px);max-height:94dvh;background:#151718;color:var(--text)}

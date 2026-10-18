@@ -5,8 +5,8 @@ import {PGlite} from '@electric-sql/pglite';
 let db;
 const actor='00000000-0000-4000-8000-000000000001',transfer='00000000-0000-4000-8000-000000000002',order='577620684385522369',sku='1732759903849189622',path=`${actor}/${transfer}.jpg`;
 before(async()=>{
- db=new PGlite();await db.exec(`create role anon;create role authenticated;create schema auth;create schema storage;create table auth.users(id uuid primary key);insert into auth.users values('${actor}');create function auth.uid() returns uuid language sql as $$select '${actor}'::uuid$$;create function can_manage_inventory() returns boolean language sql as $$select current_setting('test.allowed',true)='yes'$$;create table storage.objects(bucket_id text,name text);alter table storage.objects enable row level security;grant usage on schema auth,storage to authenticated;grant select,insert on storage.objects to authenticated;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);create table ebay_orders(order_number text,notes text);insert into ebay_orders values('${order}','Never change eBay');`);
- for(const file of ['20261018030000_tiktok_order_workspace.sql','20261018050000_tiktok_receipt_photos.sql','20261018060000_tiktok_receipt_thumbnails.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));
+ db=new PGlite();await db.exec(`create role anon;create role authenticated;create schema auth;create schema storage;create table auth.users(id uuid primary key);insert into auth.users values('${actor}');create function auth.uid() returns uuid language sql as $$select '${actor}'::uuid$$;create function can_manage_inventory() returns boolean language sql as $$select current_setting('test.allowed',true)='yes'$$;create table storage.objects(bucket_id text,name text);alter table storage.objects enable row level security;grant usage on schema auth,storage to authenticated;grant select,insert,delete on storage.objects to authenticated;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);create table ebay_orders(order_number text,notes text);insert into ebay_orders values('${order}','Never change eBay');`);
+ for(const file of ['20261018030000_tiktok_order_workspace.sql','20261018050000_tiktok_receipt_photos.sql','20261018060000_tiktok_receipt_thumbnails.sql','20261018070000_tiktok_receipt_removal.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));
 });
 after(()=>db.close());
 beforeEach(async()=>{
@@ -76,4 +76,29 @@ test('legacy photo backfill permits other staff, preserves its line/history and 
  await db.exec("reset role;set test.allowed='no'");await assert.rejects(finish(),/access required/);
  await db.exec("set test.allowed='yes'");assert.equal((await db.query('select count(*)::int n from tiktok_order_events')).rows[0].n,1);
  assert.deepEqual((await db.query('select * from ebay_orders')).rows,[{order_number:order,notes:'Never change eBay'}]);
+});
+
+test('removal targets one capture, audits once, deletes only authorized objects and blocks replay',async()=>{
+ await db.query('insert into storage.objects values($1,$2),($1,$3),($1,$4)',['tiktok-receipt-photos',path,thumb,'unrelated/keep.jpg']);
+ const photo=(await saveV2()).rows[0].r,other='00000000-0000-4000-8000-000000000003';
+ const originalOrders=(await db.query('select * from tiktok_orders order by order_number')).rows;
+ const remove=()=>db.query('select remove_tiktok_receipt_photo($1) r',[photo.id]),finish=()=>db.query('select finish_tiktok_receipt_photo_removal($1) r',[photo.id]);
+ await assert.rejects(finish(),/Remove.*first/);
+ await db.exec('set role authenticated');await db.query('delete from storage.objects where name=$1',[path]);assert.equal((await db.query('select count(*)::int n from storage.objects')).rows[0].n,3);
+ await db.exec('reset role');await db.query('insert into auth.users values($1) on conflict do nothing',[other]);await db.exec(`create or replace function auth.uid() returns uuid language sql as $$select '${other}'::uuid$$;`);
+ await db.exec("set test.allowed='no'");await assert.rejects(remove(),/access required/);await assert.rejects(finish(),/access required/);
+ await db.exec("set test.allowed='yes';set role authenticated");const removed=(await remove()).rows[0].r;assert.ok(removed.removed_at);assert.equal(removed.removed_by,other);assert.deepEqual((await remove()).rows[0].r,removed);
+ await assert.rejects(finish(),/still need deletion/);
+ await db.query('delete from storage.objects where name in($1,$2)',[path,'unrelated/keep.jpg']);
+ assert.deepEqual((await db.query('select name from storage.objects order by name')).rows.map(x=>x.name),[thumb,'unrelated/keep.jpg']);
+ await assert.rejects(finish(),/still need deletion/);
+ await db.query('delete from storage.objects where name=$1',[thumb]);const cleaned=(await finish()).rows[0].r;assert.ok(cleaned.files_deleted_at);assert.deepEqual((await finish()).rows[0].r,cleaned);
+ assert.equal((await db.query("select count(*)::int n from tiktok_order_events where action='receipt_photo_removed'")).rows[0].n,1);
+ await db.exec(`reset role;create or replace function auth.uid() returns uuid language sql as $$select '${actor}'::uuid$$;set role authenticated;`);
+ await assert.rejects(saveV2(),/capture was removed/);await assert.rejects(save(),/capture was removed/);
+ await assert.rejects(db.query('insert into storage.objects values($1,$2)',['tiktok-receipt-photos',path]),/row-level security/);
+ await assert.rejects(db.query('insert into storage.objects values($1,$2)',['tiktok-receipt-photos',thumb]),/row-level security/);
+ await assert.rejects(db.query('select finish_tiktok_receipt_thumbnail($1,$2,150000,9000)',[photo.id,thumb]),/capture was removed/);
+ assert.deepEqual((await db.query('select * from tiktok_orders order by order_number')).rows,originalOrders);
+ await db.exec('reset role');assert.deepEqual((await db.query('select * from ebay_orders')).rows,[{order_number:order,notes:'Never change eBay'}]);
 });

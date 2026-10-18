@@ -19,12 +19,17 @@ async function fixture(){
   const canvas=document.createElement('canvas');canvas.width=1600;canvas.height=900;const ctx=canvas.getContext('2d');
   let seed=42;for(let y=0;y<900;y+=5)for(let x=0;x<1600;x+=5){seed=(seed*1664525+1013904223)>>>0;ctx.fillStyle=`hsl(${seed%360} 45% 40%)`;ctx.fillRect(x,y,5,5);}
   ctx.fillStyle='#edce82';ctx.font='bold 90px sans-serif';ctx.fillText('TikTok receipt fixture',90,430);window.photoData=canvas.toDataURL('image/jpeg',0.9);
-  window.calls={sign:[],uploads:[],rpc:[],ack:0};window.files=new Map();window.photos=[];
+  window.calls={sign:[],uploads:[],removes:[],rpc:[],ack:0};window.files=new Map();window.photos=[];
   window.db={auth:{getSession:async()=>({data:{session:{user:{id:actor}}}})},storage:{from(bucket){if(bucket!=='tiktok-receipt-photos')throw Error('Wrong bucket');return {
    upload:async(path,blob,options)=>{const image=await createImageBitmap(blob);calls.uploads.push({path,bytes:blob.size,width:image.width,height:image.height,options});image.close();if(window.failThumbnail&&path.endsWith('-thumb.jpg'))return {error:{message:'Thumbnail upload interrupted'}};if(files.has(path))return {error:{statusCode:409,message:'Already exists'}};files.set(path,blob);return {};},
-   createSignedUrls:async paths=>{calls.sign.push(paths);return {data:paths.map(path=>({path,signedUrl:location.origin+'/image/'+encodeURIComponent(path)}))};}
+   createSignedUrls:async paths=>{calls.sign.push(paths);return {data:paths.map(path=>({path,signedUrl:location.origin+'/image/'+encodeURIComponent(path)}))};},
+   remove:async paths=>{calls.removes.push(paths);if(window.failRemove)return {error:{message:'Storage unavailable'}};for(const path of paths)files.delete(path);return {data:paths.map(name=>({name}))};}
   };}},rpc:async(name,args)=>{
    calls.rpc.push({name,args});if(window.failRpc)return {error:{message:'Database unavailable'}};
+   if(name==='remove_tiktok_receipt_photo'||name==='finish_tiktok_receipt_photo_removal'){
+    const photo=photos.find(p=>p.id===args._photo_id);if(!photo)return {error:{message:'Photo not found'}};
+    if(name==='remove_tiktok_receipt_photo')photo.removed_at='2026-10-18T04:00:00Z';else photo.files_deleted_at='2026-10-18T04:00:01Z';return {data:{...photo}};
+   }
    const photo={id:'photo-1',line_id:'line-1',transfer_id:transfer,path:`${actor}/${transfer}.jpg`,thumbnail_path:args._thumbnail_path,video_time:337};window.photos=[photo];return {data:photo};
   }};
   window.render=(items=window.photos)=>{document.querySelector('#photos').innerHTML=items.map(p=>`<section data-tk-photo-line="${p.line_id}"></section>`).join('');TikTokReceiptPhotos.hydrate(document.querySelector('#photos'),db,items);};
@@ -43,8 +48,8 @@ test('visible thumbnails are batched and reused; hidden and distant photos wait,
  });
  await expect(page.locator('[data-tk-photo-line=l1] img')).toHaveAttribute('src',/thumb-1/);await expect(page.locator('[data-tk-photo-line=l2] img')).toHaveAttribute('src',/thumb-2/);
  assert.deepEqual(await page.evaluate(()=>calls.sign),[['thumb-1.jpg','thumb-2.jpg']]);assert.deepEqual(downloads.sort(),['thumb-1.jpg','thumb-2.jpg']);
- await expect(page.locator('[data-tk-photo-line=l1] button')).toHaveCount(1);
- await page.locator('[data-tk-photo-line=l1] button').click();await expect(page.locator('.tk-photo-viewer img')).toHaveAttribute('src',/main-1/);await expect.poll(()=>downloads.includes('main-1.jpg')).toBe(true);
+ await expect(page.locator('[data-tk-photo-line=l1] .tk-receipt-photo')).toHaveCount(1);
+ await page.locator('[data-tk-photo-line=l1] .tk-receipt-photo').click();await expect(page.locator('.tk-photo-viewer img')).toHaveAttribute('src',/main-1/);await expect.poll(()=>downloads.includes('main-1.jpg')).toBe(true);
  await page.getByRole('button',{name:'Close photo'}).click();
  await page.evaluate(()=>{document.querySelector('[data-tk-photo-line=l3]').classList.remove('hidden');});await expect(page.locator('[data-tk-photo-line=l3] img')).toHaveAttribute('src',/thumb-3/);
  await page.locator('[data-tk-photo-line=l4]').scrollIntoViewIfNeeded();await expect(page.locator('[data-tk-photo-line=l4] img')).toHaveAttribute('src',/thumb-4/);
@@ -87,4 +92,23 @@ test('legacy capture generates one saved thumbnail across duplicate views and la
  await expect(page.locator('.tk-receipt-photo img').first()).toHaveAttribute('src',/-thumb/);await expect(page.locator('.tk-receipt-photo img').last()).toHaveAttribute('src',/-thumb/);
  assert.equal(await page.evaluate(()=>calls.uploads.length),1);assert.equal(await page.evaluate(()=>calls.rpc.filter(c=>c.name==='finish_tiktok_receipt_thumbnail').length),1);
  await page.evaluate(()=>render());await expect(page.locator('.tk-receipt-photo img')).toHaveAttribute('src',/-thumb/);assert.equal(await page.evaluate(()=>calls.uploads.length),1);await page.close();
+});
+
+test('remove can be cancelled, failed removal leaves the photo, and success removes both files without affecting another capture',async()=>{
+ const page=await fixture();await deliver(page);await expect(page.locator('.tk-receipt-transfer')).toContainText('Receipt photo saved');
+ await page.evaluate(()=>{photos.push({id:'photo-2',line_id:'line-2',transfer_id:'keep',path:'keep.jpg',thumbnail_path:'keep-thumb.jpg',video_time:8});files.set('keep.jpg',new Blob(['keep']));render();});
+ const capture=page.locator('[data-tk-photo-line="line-1"]');await capture.getByRole('button',{name:'Remove receipt photo at 5:37'}).click();await capture.getByRole('button',{name:'Cancel',exact:true}).click();assert.equal(await page.evaluate(()=>calls.removes.length),0);
+ await capture.getByRole('button',{name:'Remove receipt photo at 5:37'}).click();await page.evaluate(()=>window.failRpc=true);await capture.getByRole('button',{name:'Remove capture',exact:true}).click();await expect(capture).toContainText('Database unavailable');await expect(capture.locator('.tk-receipt-photo')).toBeVisible();assert.equal(await page.evaluate(()=>calls.removes.length),0);
+ await page.evaluate(()=>window.failRpc=false);await capture.getByRole('button',{name:'Remove capture',exact:true}).click();await expect(capture).toContainText('Capture removed.');await expect(capture.locator('img')).toHaveCount(0);
+ assert.deepEqual(await page.evaluate(()=>calls.removes),[[`${actor}/${transfer}.jpg`,`${actor}/${transfer}-thumb.jpg`]]);assert.equal(await page.evaluate(()=>files.has('keep.jpg')),true);
+ await expect(page.locator('[data-tk-photo-line="line-2"] img')).toBeVisible();assert.equal(new URL(page.url()).searchParams.has('tiktokReceipt'),false);await expect(page.locator('.tk-receipt-transfer')).toHaveCount(0);
+ await page.evaluate(()=>render());await expect(capture.locator('img')).toHaveCount(0);await expect(page.locator('[data-tk-photo-line="line-2"] img')).toBeVisible();await page.close();
+});
+test('failed file cleanup is retryable and removed captures never reappear or download again',async()=>{
+ const page=await fixture();await deliver(page);await expect(page.locator('.tk-receipt-transfer')).toContainText('Receipt photo saved');await page.evaluate(()=>window.failRemove=true);
+ await page.getByRole('button',{name:'Remove receipt photo at 5:37'}).click();await page.getByRole('button',{name:'Remove capture',exact:true}).click();await expect(page.getByRole('button',{name:'Retry cleanup'})).toBeVisible();await expect(page.locator('.tk-receipt-photo')).toHaveCount(0);
+ await page.evaluate(()=>window.failRemove=false);await page.getByRole('button',{name:'Retry cleanup'}).click();await expect(page.locator('#photos')).toContainText('Capture removed.');assert.equal(await page.evaluate(()=>files.size),0);
+ await page.close();
+ const resumed=await fixture();await resumed.evaluate(()=>{photos=[{id:'photo-1',line_id:'line-1',path:'old.jpg',thumbnail_path:'old-thumb.jpg',removed_at:'2026-10-18T04:00:00Z'}];render();render();});
+ await expect.poll(()=>resumed.evaluate(()=>Boolean(photos[0].files_deleted_at))).toBe(true);assert.deepEqual(await resumed.evaluate(()=>calls.sign),[]);assert.equal(await resumed.evaluate(()=>calls.removes.length),1);await expect(resumed.locator('.tk-receipt-photo')).toHaveCount(0);await resumed.close();
 });
