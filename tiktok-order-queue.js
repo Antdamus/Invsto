@@ -2,7 +2,7 @@
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.TikTokOrderQueue=api;})(typeof globalThis==='object'?globalThis:this,function(){
  'use strict';
  const TIME_ZONE='America/New_York';
- const closed=o=>['dispatched','completed'].includes(o.stage)||['Canceled','Cancelled'].includes(o.marketplace_status)||(['Shipped','Completed'].includes(o.marketplace_status)&&!o.lines?.some(l=>l.inventory?.quantity>l.inventory?.consumed_quantity));
+ const closed=o=>['dispatched','completed'].includes(o.stage)||['Canceled','Cancelled'].includes(o.marketplace_status)||(!o.reopened_at&&['Shipped','Completed'].includes(o.marketplace_status)&&!o.lines?.some(l=>l.inventory?.quantity>l.inventory?.consumed_quantity));
  function calendarDate(now=new Date()){const p=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:TIME_ZONE,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now).map(p=>[p.type,p.value]));return `${p.year}-${p.month}-${p.day}`;}
  function day(value){if(!/^\d{4}-\d{2}-\d{2}$/.test(value||''))return null;const n=Date.parse(value+'T00:00:00Z');return Number.isFinite(n)&&new Date(n).toISOString().slice(0,10)===value?n/86400000:null;}
  function urgency(value,now=new Date()){const due=day(value);if(due===null)return {level:'unknown',label:'Date needed',days:null};const delta=due-day(calendarDate(now));return delta<0?{level:'overdue',label:`Overdue ${-delta}d`,days:delta}:delta===0?{level:'today',label:'Due today',days:0}:delta===1?{level:'tomorrow',label:'Due tomorrow',days:1}:{level:'upcoming',label:`Due in ${delta}d`,days:delta};}

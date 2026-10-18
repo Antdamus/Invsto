@@ -324,18 +324,18 @@
     <div class="history-modal-card revert-modal-card">
       <header class="revert-modal-header">
       <button id="close-revert-modal" type="button" class="modal-close-btn" aria-label="Close">x</button>
-      <span class="eyebrow">Admin Reversal</span>
+      <span class="eyebrow">Audited reversal</span>
       <h2 id="revert-order-title">Revert order</h2>
-      <p id="revert-order-subtitle">This will reopen the selected line(s) and restore stock when inventory was removed.</p>
+      <p id="revert-order-subtitle">Reopen these lines in Invsto and restore any deducted stock. Your identity, time, reason, and previous fulfillment are saved in the audit trail. This does not change the order on eBay.</p>
       </header>
       <div class="revert-modal-body">
       <div id="revert-order-list" class="revert-order-list"></div>
       <label class="modal-field">
         Reversal Note
-        <textarea id="revert-note" rows="3" placeholder="Explain why this order is being reverted"></textarea>
+        <textarea id="revert-note" rows="3" required minlength="3" maxlength="2000" placeholder="Explain why this order is being reverted"></textarea>
       </label>
       <label class="modal-field">
-        Admin Password
+        Your password
         <input id="revert-password" type="password" autocomplete="current-password" placeholder="Sign this reversal" />
       </label>
       </div>
@@ -661,6 +661,6 @@
 <script src="print-stations.js?v=20261010-shipping-picker-2"></script>
 <script src="shipping-label-print.js?v=20261010-protected-labels"></script>
 <script src="video-receipts.js?v=20261002-desktop-capture"></script>
-  <script src="ebay-order-history.js?v=20261016-receipt-links"></script>
+  <script src="ebay-order-history.js?v=20261018-manager-reversals"></script>
 </body>
 </html>

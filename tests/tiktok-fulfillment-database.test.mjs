@@ -132,3 +132,51 @@ test('completion can be followed by carrier dispatch without reopening or deduct
  await inventory();await link();await fresh();await objects();await attach();for(const o of orders)await save(o);await complete();await fresh();await db.exec("update tiktok_order_lines set tracking_number='TRACKING123'");
  await db.query('select update_tiktok_order($1,$2,$3,$4,null,true)',[orders[0].id,orders[0].revision,'dispatched','']);assert.equal(await stock(),4);assert.equal((await db.query('select stage from tiktok_orders where id=$1',[orders[0].id])).rows[0].stage,'dispatched');
 });
+
+let reversalInstalled=false;
+async function reversalSetup(){
+ if(!reversalInstalled){
+  await db.exec(`alter table auth.users add column email text;update auth.users set email=id::text||'@fixture.test';
+    create table employees(user_id uuid primary key,display_name text,role text,active boolean);`);
+  for(const file of ['20261018130000_order_reversal_permissions.sql','20261018132000_audited_tiktok_order_reversals.sql'])
+   await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));
+  reversalInstalled=true;
+ }
+ await db.exec(`truncate employees;insert into employees values('${actor}','Manager','manager',true);`);
+}
+const revert=(os=orders,reason='Wrong order completed',confirmed=true)=>db.query('select revert_tiktok_orders($1,$2,$3,$4) r',[os.map(o=>o.id),JSON.stringify(Object.fromEntries(os.map(o=>[o.id,o.revision]))),reason,confirmed]);
+async function finished(){await inventory();await link();await fresh();await objects();await attach();for(const o of orders)await save(o);await complete();await fresh();}
+test('TikTok manager reversal restores only consumed stock, preserves evidence and marketplace status, and records full before/after',async()=>{
+ await reversalSetup();await finished();assert.equal(await stock(),4);await db.exec("update tiktok_orders set marketplace_status='Shipped'");await fresh();
+ await db.exec('set role authenticated');const result=(await revert()).rows[0].r;await db.exec('reset role');assert.deepEqual(result,{reverted_orders:2,restored_units:1});assert.equal(await stock(),5);
+ const audits=(await db.query("select * from tiktok_order_events where action='order_reverted'")).rows;
+ assert.equal(audits.length,2);assert.ok(audits.every(a=>a.actor===actor&&a.created_at));
+ const details=audits.find(a=>a.details.restored_units===1).details;
+ assert.equal(details.actor_email,actor+'@fixture.test');assert.equal(details.actor_role,'manager');assert.equal(details.notes,'Wrong order completed');
+ assert.equal(details.before.stage,'completed');assert.equal(details.after.stage,'pending');assert.equal(details.after.marketplace_status,'Shipped');
+ assert.equal(details.inventory_before[0].consumed_quantity,1);assert.equal(details.stock_movements[0].before_quantity,4);assert.equal(details.stock_movements[0].after_quantity,5);
+ assert.equal((await db.query('select consumed_quantity from tiktok_inventory_attachments')).rows[0].consumed_quantity,0);
+ assert.equal((await db.query('select count(*)::int n from tiktok_order_completion_photos')).rows[0].n,2);assert.equal((await db.query('select count(*)::int n from tiktok_order_documents')).rows[0].n,2);
+ await assert.rejects(revert(),/changed/);assert.equal(await stock(),5);
+ await fresh();assert.ok(orders.every(o=>o.reopened_at));await assert.rejects(revert(),/already have been reverted/);
+ await complete();await fresh();assert.equal(await stock(),4);assert.ok(orders.every(o=>!o.reopened_at));
+});
+test('TikTok employee/inactive/unregistered callers cannot reverse or bypass through preparation edits',async()=>{
+ await reversalSetup();await finished();
+ await assert.rejects(db.query('select update_tiktok_order($1,$2,$3,$4)',[orders[0].id,orders[0].revision,'pending','I want to reopen']),/Use Revert order/);
+ await db.exec("update employees set role='employee'");await assert.rejects(revert(),/active admins and managers/);
+ await db.exec("update employees set role='manager',active=false");await assert.rejects(revert(),/active admins and managers/);
+ await db.exec(`set test.actor='${phone}'`);await assert.rejects(revert(),/active admins and managers/);
+ await db.exec('set role anon');await assert.rejects(revert(),/permission denied/);await db.exec('reset role');
+ await db.exec('set role authenticated');await assert.rejects(db.exec('delete from tiktok_order_events'),/permission denied/);
+ await assert.rejects(db.query("insert into tiktok_order_events(order_id,actor,action,details) values($1,$2,'order_reverted','{}')",[orders[0].id,phone]),/permission denied/);
+ await db.exec('reset role');assert.equal(await stock(),4);
+});
+test('TikTok stale/missing orders, cancellation, invalid reasons and unconfirmed reversal fail atomically',async()=>{
+ await reversalSetup();await finished();
+ await assert.rejects(revert(orders,' '),/note is required/);await assert.rejects(revert(orders,'x'.repeat(2001)),/note is required/);await assert.rejects(revert(orders,'Reason',false),/Confirm/);
+ await assert.rejects(revert([...orders,{id:request,revision:1}]),/not found/);
+ const stale=structuredClone(orders);stale[1].revision++;await assert.rejects(revert(stale),/changed/);assert.equal(await stock(),4);
+ await db.query("update tiktok_orders set marketplace_status='Canceled' where id=$1",[orders[1].id]);await assert.rejects(revert(),/cancellation/);
+ assert.equal(await stock(),4);assert.equal((await db.query("select count(*)::int n from tiktok_order_events where action='order_reverted'")).rows[0].n,0);
+});

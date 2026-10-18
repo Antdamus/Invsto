@@ -277,3 +277,46 @@ test('packed inventory cannot be reserved again without a verified stock restora
  await assert.rejects(db.query("update live_sale_lot_items set status='reserved' where lot_id=$1",[id(71)]),/restor|packed|deduct/i);
  assert.equal(await physical(),4);assert.equal(await totalheld(),0);
 });
+
+async function managerReversalSetup(){
+ await db.exec(`create table if not exists employees(user_id uuid primary key,display_name text,role text,active boolean);
+ truncate employees;insert into employees values('${id(1)}','Manager','manager',true);set test.admin='no';`);
+ await db.exec(await migration('20261018130000_order_reversal_permissions.sql'));
+ await db.exec(await migration('20261018131000_manager_ebay_order_reversals.sql'));
+}
+test('manager reversal preserves CSV and shared-bag safeguards, restores stock once, and signs with the real account',async()=>{
+ await markCsv();await bagscan();await link();await close();assert.equal(await physical(),4);
+ await managerReversalSetup();await db.exec('set role authenticated');
+ const result=await db.query('select * from admin_revert_ebay_order_lines($1,$2,$3)',[[id(11)],'Wrong order completed','spoofed@example.test']);
+ assert.equal(result.rows[0].restored_units,1);
+ const event=(await db.query('select * from ebay_order_revert_events')).rows[0];
+ assert.equal(event.signed_by,id(1));assert.equal(event.signed_by_email,'staff@example.test');assert.ok(event.created_at);
+ assert.equal(event.notes,'Wrong order completed');assert.equal(event.payload.line_snapshots[0].previous_status,'fulfilled');
+ await assert.rejects(revertOrder(),/No closed/);
+ await assert.rejects(db.exec('delete from ebay_order_revert_events'),/permission denied/);
+ await assert.rejects(db.exec("insert into ebay_order_revert_events(notes) values('Forged audit')"),/permission denied/);
+ await db.exec('reset role');assert.equal(await physical(),5);assert.equal(await scalar('select count(*)::int v from ebay_order_revert_events'),1);
+});
+test('only active database managers/admins can revert; JWT admin claims and direct writes do not grant this permission',async()=>{
+ await managerReversalSetup();await markCsv();await db.exec("update ebay_order_lines set line_status='fulfilled';update ebay_orders set status='fulfilled';set role authenticated");
+ await db.exec("set app.ebay_admin_reversal='on'");await assert.rejects(db.exec("update ebay_order_lines set line_status='pending'"),/CSV imports cannot reopen/);
+ await db.exec("reset role;reset app.ebay_admin_reversal;set test.admin='yes';update employees set role='employee'");
+ await assert.rejects(revertOrder(),/active admins and managers/);
+ await db.exec("update employees set role='manager',active=false");await assert.rejects(revertOrder(),/active admins and managers/);
+ await db.exec("update employees set role='admin',active=true");await assert.rejects(revertOrder([11],'a'),/3 to 2000/);
+ await assert.rejects(revertOrder([11],'x'.repeat(2001)),/3 to 2000/);
+ assert.equal(await scalar('select count(*)::int v from ebay_order_revert_events'),0);
+});
+test('manager migration supports pre-wrapper CSV guards without weakening direct-write protection',async()=>{
+ await db.exec('drop function admin_revert_ebay_order_lines(uuid[],text,text);alter function admin_revert_ebay_order_lines_audited(uuid[],text,text) rename to admin_revert_ebay_order_lines');
+ await db.exec(await migration('20261006223000_guard_pending_csv_imports.sql'));
+ await managerReversalSetup();await markCsv();await db.exec("update ebay_order_lines set line_status='fulfilled';update ebay_orders set status='fulfilled';set role authenticated;set app.ebay_admin_reversal='on'");
+ await assert.rejects(db.exec("update ebay_order_lines set line_status='pending'"),/CSV imports cannot reopen/);
+ await db.exec('reset app.ebay_admin_reversal');await revertOrder();await db.exec('reset role');
+ assert.equal(await scalar('select count(*)::int v from ebay_order_revert_events'),1);assert.equal(await physical(),5);
+});
+test('manager migration also installs on legacy deployments without CSV guard functions',async()=>{
+ await db.exec('drop function guard_pending_csv_order_import() cascade;drop function guard_pending_csv_line_import() cascade');
+ await managerReversalSetup();await db.exec("update ebay_order_lines set line_status='skipped';update ebay_orders set status='fulfilled';set role authenticated");
+ await revertOrder();await db.exec('reset role');assert.equal(await scalar('select count(*)::int v from ebay_order_revert_events'),1);
+});

@@ -4,6 +4,14 @@ import {createRequire} from 'node:module';
 const q=createRequire(import.meta.url)('../tiktok-order-queue.js');
 const now=new Date('2026-10-18T02:30:00Z'); // Still Oct 17 in the shop's timezone.
 const order=(id,buyer,date,extra={})=>({id,order_number:'57762364879664333'+id,buyer_username:buyer,ship_by_date:date,stage:'pending',marketplace_status:'To ship',order_amount:'25.68',created_time:'10/17/2026 11:48:52 AM',lines:[{quantity:1,title:'Gold ring',seller_sku:id,tracking_number:''}],documents:[],...extra});
+
+test('audited reversals of shipped orders stay pending, while marketplace cancellations and new completions remain closed',()=>{
+ const reopened=order('1','Alice',null,{marketplace_status:'Shipped',reopened_at:'2026-10-18T12:00:00Z'});
+ assert.equal(q.closed(reopened),false);assert.equal(q.select([reopened]).length,1);
+ assert.equal(q.closed({...reopened,marketplace_status:'Canceled'}),true);
+ assert.equal(q.closed({...reopened,stage:'completed'}),true);
+ assert.equal(q.closed({...reopened,reopened_at:null}),true);
+});
 test('shipping urgency uses New York calendar days, including UTC midnight and DST',()=>{
  assert.equal(q.calendarDate(now),'2026-10-17');assert.equal(q.urgency('2026-10-16',now).level,'overdue');assert.equal(q.urgency('2026-10-17',now).level,'today');assert.equal(q.urgency('2026-10-18',now).level,'tomorrow');assert.equal(q.urgency('2026-10-20',now).days,3);
  assert.equal(q.urgency('2026-11-01',new Date('2026-11-02T04:30:00Z')).level,'today');assert.equal(q.urgency('2026-03-08',new Date('2026-03-09T03:30:00Z')).level,'today');

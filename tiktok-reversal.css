@@ -1,0 +1,15 @@
+.tiktok-workspace .tk-revert-button{border-color:#a96b45;color:#ffcba6;}
+.tk-revert-dialog{box-sizing:border-box;width:min(560px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;border:1px solid #72543f;border-radius:18px;background:#171a20;color:#f4f0e8;padding:24px;}
+.tk-revert-dialog::backdrop{background:#000a;backdrop-filter:blur(4px);}
+.tk-revert-dialog h2{margin:8px 0 14px;font-size:24px;}
+.tk-revert-dialog p{line-height:1.55;}
+.tk-revert-dialog label{display:grid;gap:8px;margin:16px 0;}
+.tk-revert-dialog textarea,.tk-revert-dialog input[type=password]{box-sizing:border-box;width:100%;min-width:0;background:#0f1216;color:#fff;border:1px solid #666;border-radius:9px;padding:12px;font:inherit;font-size:16px;}
+.tk-revert-dialog .tk-confirm{display:flex;align-items:flex-start;line-height:1.5;}
+.tk-revert-dialog input[type=checkbox]{flex:none;width:20px;height:20px;}
+.tk-revert-dialog footer{display:flex;justify-content:flex-end;gap:12px;}
+.tk-revert-dialog button{min-height:44px;padding:10px 16px;border-radius:10px;border:1px solid #74624f;background:#292724;color:#fff;font:inherit;}
+#tk-revert-save{background:#e8cd8c;color:#211c12;font-weight:700;}
+#tk-revert-error{color:#ffc0b7;}
+.tk-revert-dialog :focus-visible{outline:2px solid #e8cd8c;outline-offset:3px;}
+@media(max-width:430px){.tk-revert-dialog{padding:18px;}.tk-revert-dialog footer button{flex:1;}}

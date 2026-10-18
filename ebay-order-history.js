@@ -1014,6 +1014,10 @@ function isAdminUser() {
   return String(state.employee?.role || "").toLowerCase() === "admin";
 }
 
+function canRevertOrders() {
+  return state.employee?.active === true && ["admin", "manager"].includes(String(state.employee.role).toLowerCase());
+}
+
 function employeeHasPostOrderIssueAccess(employee = {}) {
   return String(employee.role || "").toLowerCase() === "admin"
     || employee.post_order_issue_access === true;
@@ -1799,9 +1803,10 @@ async function checkHistoryAuth() {
   if (mode) mode.textContent = isReturnsWorkbenchPage() ? "Post-order issues" : isAdminUser() ? "Admin" : "Proof";
   if (!isAdminUser()) {
     document.body.classList.add("history-worker-proof-mode");
-    $("history-status")?.querySelector('option[value="reverted"]')?.remove();
+    if (!canRevertOrders()) $("history-status")?.querySelector('option[value="reverted"]')?.remove();
     if ($("return-task-status-filter")) $("return-task-status-filter").value = "mine";
   }
+  if (canRevertOrders()) $("summary-reversals")?.closest('[data-admin-only]')?.removeAttribute('data-admin-only');
   if (window.OGRoleNavigation?.render) {
     window.OGRoleNavigation.render(isAdminUser() ? "admin" : "worker");
   }
@@ -2431,7 +2436,7 @@ async function loadOrderHistory() {
     .order("created_at", { ascending: false })
     .limit(300);
 
-  const revertEventsQuery = isAdminUser()
+  const revertEventsQuery = canRevertOrders()
     ? supabase
       .from("ebay_order_revert_events")
       .select("*")
@@ -2510,7 +2515,7 @@ async function loadOrderHistory() {
   if (closedLineIds.length) {
     const [relatedAdminResult, relatedRevertResult, relatedLabelResult, returnCasesResult, relatedReturnResult, relatedOrderTaskResult] = await Promise.all([
       fetchOverlappingRows("ebay_order_admin_events", "order_line_ids", closedLineIds),
-      isAdminUser()
+      canRevertOrders()
         ? fetchOverlappingRows("ebay_order_revert_events", "order_line_ids", closedLineIds)
         : Promise.resolve({ data: [], error: null }),
       fetchOverlappingRows("ebay_order_label_events", "order_line_ids", closedLineIds),
@@ -6279,7 +6284,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
               <div class="history-line-actions">
                 ${!isEbayApiHistoryLine(line) ? `<button type="button" class="certificate-trigger" data-certificate-line="${escapeHtml(line.id)}" data-certificate-title="${escapeHtml((getOrderFromLine(line).order_number || '') + ' · ' + (line.item_title || 'Order item'))}">CGL certificate</button>` : ""}
                 <span class="history-status ${getLineStatusClass(line)}">${escapeHtml(getLineStatusLabel(line))}</span>
-                ${isAdminUser() ? `<button type="button" class="secondary-btn revert-line-btn" data-revert-line="${escapeHtml(line.id)}">Revert Line</button>` : ""}
+                ${canRevertOrders() ? `<button type="button" class="secondary-btn revert-line-btn" data-revert-line="${escapeHtml(line.id)}">Revert Line</button>` : ""}
               </div>
             </div>
           `;
@@ -6287,7 +6292,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
         </div>
         ${auditEvents.length ? `
           <details class="history-audit-details">
-            <summary>${isAdminUser() ? "Audit trail" : "Packing proof"} for this group</summary>
+            <summary>${canRevertOrders() ? "Audit trail" : "Packing proof"} for this group</summary>
             <div class="history-audit-timeline">
               ${auditEvents.map((event) => `
                 <article>
@@ -6341,7 +6346,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
           <div class="history-order-summary-buttons">
             <button type="button" class="secondary-btn history-task-btn" data-history-order-task="${escapeHtml(groupKey)}">Add Task</button>
             <button type="button" class="secondary-btn history-extra-photo-btn" data-history-extra-photo="${escapeHtml(groupKey)}">Add Evidence</button>
-            ${isAdminUser() ? `<button type="button" class="secondary-btn revert-order-btn" data-revert-lines="${escapeHtml(lineIds.join(","))}">Revert Order</button>` : ""}
+            ${canRevertOrders() ? `<button type="button" class="secondary-btn revert-order-btn" data-revert-lines="${escapeHtml(lineIds.join(","))}">Revert Order</button>` : ""}
             <button type="button" class="secondary-btn history-group-toggle" data-history-group-toggle="${escapeHtml(groupKey)}" aria-expanded="${isExpanded ? "true" : "false"}">${isExpanded ? "Close" : "Open"}</button>
           </div>
         </div>
@@ -7251,8 +7256,8 @@ function closeModal(id) {
 }
 
 function openRevertModal(lineIds) {
-  if (!isAdminUser()) return;
-  state.selectedRevertLineIds = lineIds;
+  if (state.busy || !canRevertOrders()) return;
+  state.selectedRevertLineIds = [...new Set(lineIds)];
   const lines = state.lines.filter((line) => lineIds.includes(line.id));
   const list = $("revert-order-list");
   if (list) {
@@ -7271,7 +7276,9 @@ function openRevertModal(lineIds) {
 }
 
 function closeRevertModal() {
+  if (state.busy) return;
   state.selectedRevertLineIds = [];
+  $("revert-password").value = "";
   closeModal("revert-order-modal");
 }
 
@@ -7285,49 +7292,55 @@ async function verifyAdminPassword(password) {
 }
 
 async function confirmRevert() {
-  if (state.busy || !isAdminUser()) return;
+  if (state.busy || !canRevertOrders()) return;
   const note = String($("revert-note")?.value || "").trim();
-  const password = String($("revert-password")?.value || "").trim();
+  const password = String($("revert-password")?.value || "");
   const errorEl = $("revert-error");
 
   if (!state.selectedRevertLineIds.length) {
     if (errorEl) errorEl.textContent = "No order lines were selected.";
     return;
   }
-  if (!note) {
-    if (errorEl) errorEl.textContent = "A reversal note is required.";
+  if (note.length < 3 || note.length > 2000) {
+    if (errorEl) errorEl.textContent = "A reversal note is required (3 to 2000 characters).";
     $("revert-note")?.focus();
     return;
   }
   if (!password) {
-    if (errorEl) errorEl.textContent = "Admin password is required.";
+    if (errorEl) errorEl.textContent = "Your password is required.";
     $("revert-password")?.focus();
     return;
   }
 
+  const selectedIds = [...state.selectedRevertLineIds];
+  let saved = false;
   try {
     state.busy = true;
-    $("confirm-revert").disabled = true;
+    $("revert-order-modal").querySelectorAll('button,input,textarea').forEach(el => el.disabled = true);
     if (errorEl) errorEl.textContent = "";
 
     const valid = await verifyAdminPassword(password);
     if (!valid) throw new Error("Incorrect password. Please try again.");
 
     const { error } = await supabase.rpc("admin_revert_ebay_order_lines", {
-      _order_line_ids: state.selectedRevertLineIds,
+      _order_line_ids: selectedIds,
       _notes: note,
       _signed_by_email: state.user.email,
     });
     if (error) throw error;
 
-    closeRevertModal();
-    await loadOrderHistory();
+    saved = true;
   } catch (error) {
     console.error("Could not revert eBay order:", error);
     if (errorEl) errorEl.textContent = error.message || "Could not revert this order.";
   } finally {
     state.busy = false;
-    $("confirm-revert").disabled = false;
+    $("revert-order-modal").querySelectorAll('button,input,textarea').forEach(el => el.disabled = false);
+  }
+  if (saved) {
+    closeRevertModal();
+    try { await loadOrderHistory(); }
+    catch (error) { console.error(error); window.alert('Order reverted and audit saved. Refresh order history to reload the latest status.'); }
   }
 }
 
