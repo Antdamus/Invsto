@@ -55,9 +55,10 @@
       awaitingCollection:new Set(rows.filter(r=>r.marketplace_substatus==='Awaiting collection').map(r=>r.order_number)).size,
       historyCount:new Set(rows.filter(r=>r.marketplace_status!=='To ship').map(r=>r.order_number)).size};
   }
-  function orderUrl(id, receipt=false) {
+  function orderUrl(id, receipt=false, sku='') {
     if (!/^\d{10,24}$/.test(String(id))) throw Error('Invalid TikTok order ID.');
-    return `https://seller-us.tiktok.com/order/detail?order_no=${id}&shop_region=US${receipt ? '&ogReceipt=1' : ''}`;
+    if(sku&&!/^\d{10,24}$/.test(String(sku)))throw Error('Invalid TikTok SKU ID.');
+    return `https://seller-us.tiktok.com/order/detail?order_no=${id}&shop_region=US${receipt ? '&ogReceipt=1' : ''}${sku?'&ogSku='+sku:''}`;
   }
   return {parse, csv, orderUrl, MAX_BYTES};
 });

@@ -16,7 +16,13 @@
  let receiptOpened=false;
  function receipt(){
   if(receiptOpened||location.pathname!=='/order/detail'||new URLSearchParams(location.search).get('ogReceipt')!=='1')return;
-  const matches=[...document.querySelectorAll('button,span,div')].filter(e=>e.textContent.trim()==='Video receipt'&&!e.querySelector('button,span,div')&&e.getClientRects().length);
+  const sku=new URLSearchParams(location.search).get('ogSku');
+  const matches=[...document.querySelectorAll('button,span,div')].filter(e=>{
+   if(e.textContent.trim()!=='Video receipt'||e.querySelector('button,span,div')||!e.getClientRects().length)return false;
+   if(!sku)return true;
+   for(let node=e.parentElement;node&&node!==document.body;node=node.parentElement){const ids=[...new Set([...node.innerText.matchAll(/SKU\s*ID\s*:\s*(\d{10,24})(?!\d)/gi)].map(m=>m[1]))];if(ids.length)return ids.length===1&&ids[0]===sku;}
+   return false;
+  });
   // A multi-item order can have multiple receipts. Let staff choose in TikTok.
   if(matches.length===1){receiptOpened=true;matches[0].click();}
  }

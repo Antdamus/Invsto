@@ -61,6 +61,13 @@
 .tk-order-items{display:grid;gap:10px}.tk-order-item{display:flex;justify-content:space-between;gap:14px;align-items:start;font-size:13px;line-height:1.5}
 .tk-order-item>div{min-width:0;overflow-wrap:anywhere}.tk-order-item small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
 .tk-order-item b{white-space:nowrap;color:var(--gold)}
+.tk-line-receipt-link{display:inline-block;margin-top:8px;font-size:12px}
+.tk-receipt-photos{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.tk-receipt-photos:empty{display:none}
+.tk-receipt-photo{display:grid;gap:5px;max-width:160px;font-size:11px;text-decoration:none}
+.tk-receipt-photo img{display:block;max-width:160px;width:100%;height:180px;object-fit:contain;background:#080b0a;border:1px solid var(--line-strong);border-radius:9px}
+.tk-receipt-transfer{border:1px solid var(--gold);border-radius:12px;padding:14px;font-size:13px;overflow-wrap:anywhere}
+.tk-receipt-transfer button{padding:10px;border-radius:8px;background:var(--gold);color:#251c0d}
 .tk-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0 0}
 .tk-actions :is(button,a){font-size:12px;min-height:40px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
 .tk-note{margin:8px 0 0;padding:10px 12px;border-left:2px solid #b99c64;background:#b99c640a;color:#e7d8b8;font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}

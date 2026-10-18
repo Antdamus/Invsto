@@ -28,12 +28,16 @@ These stages track work only: they do not debit stock, create sales, change TikT
 
 Watch receipt opens the full receipt in TikTok, under the staff member's TikTok login. Videos and signed media URLs are not copied or retained.
 
+Extension **v1.0.17+** adds **Capture item photo → OG** beside the open TikTok receipt. Pause on the item and click Capture. The button shows the order number and SKU ID. For a multi-item order, the extension remembers the SKU of the receipt clicked; it refuses to guess when that identity is missing. Each OG item also has an **Open item video receipt** link that targets its SKU.
+
+Only the visible video rectangle is cropped and sent to the configured TikTok workspace. OG saves the JPEG to the exact `(order_number, sku_id)` line and opens that order with its receipt thumbnail. The private `tiktok-receipt-photos` bucket and `tiktok_order_receipt_photos` table are separate from eBay. Stills remain attached to stable line IDs through CSV refreshes and TikTok history. Saves are audited and idempotent by transfer ID. A missing match leaves a retry action; staff can import the order and retry within one hour. Successful saves clear the image from extension handoff storage. Raw videos, full-page screenshots, and signed TikTok media URLs are not retained.
+
 Download an order packet for one order, one buyer or the filtered view (up to 250 orders). Packets are paginated 4×6 PDFs marked **ORDER PACKET - NOT POSTAGE**. Print order packet saves its PDF and uses the existing shipping-printer picker. Shipping labels are downloaded from TikTok and attached only after checking recipient/order coverage. Documents use private paths under `tiktok-orders/<user-id>/<sha256>.pdf` in the existing PDF storage bucket; associations and events exist only in TikTok tables. Printing does not change any order stage. Review the PDF before printing; historical attachments remain available even if TikTok replaces tracking later.
 
 Export this view downloads a TikTok-only tracking CSV. It is not a TikTok source import format.
 
 ## Deployment and checks
 
-Apply `20261018030000_tiktok_order_workspace.sql` only, without replaying unrelated eBay migrations. Publish the new app files and the rebuilt extension ZIP/release metadata together. No Edge Function or TikTok API credential is needed for CSV imports.
+Apply `20261018030000_tiktok_order_workspace.sql` and `20261018050000_tiktok_receipt_photos.sql`, without replaying unrelated eBay migrations. Publish the new app files and the rebuilt extension ZIP/release metadata together. No Edge Function or TikTok API credential is needed for CSV imports or receipt stills.
 
-Tests: `node --test tests/tiktok-orders.test.mjs tests/tiktok-orders-browser.test.mjs`. Also run the existing TikTok printing, extension-updates and eBay CSV import suites when releasing the extension. Browser tests use isolated mock sessions and do not queue physical jobs.
+Tests: `node --test tests/tiktok-orders.test.mjs tests/tiktok-orders-browser.test.mjs tests/tiktok-receipt-database.test.mjs tests/tiktok-receipt-extension.test.mjs`. Also run the existing TikTok printing, extension-updates and eBay CSV import suites when releasing the extension. Browser tests use isolated mock sessions and do not queue physical jobs.
