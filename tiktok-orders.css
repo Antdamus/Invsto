@@ -133,12 +133,13 @@ body.phone-camera-mode>.tk-proof-viewer[open]{display:block!important}
 .tk-sync-actions>span,.tk-purchase-filter>small{font-size:12px;color:var(--muted);line-height:1.5}
 .tk-purchase-filter>small{flex-basis:100%}
 .tk-purchase-filter label{font-size:13px;font-weight:700}
-.tk-purchase-filter input{min-height:44px;max-width:100%;padding:8px 12px;border:1px solid var(--line-strong);border-radius:10px;background:#111715;color:var(--text);color-scheme:dark;font:inherit}
+.tk-purchase-filter input{width:auto;min-height:44px;max-width:100%;padding:8px 12px;border:1px solid var(--line-strong);border-radius:10px;background:#111715;color:var(--text);color-scheme:dark;font:inherit}
 .tk-sync-actions button{min-height:44px;white-space:normal}
 .tk-cancelled-badge{color:#efb4a2;font-size:12px}
 .tk-cancellation-dialog form{display:grid;gap:14px}
 .tk-confirm{display:flex!important;gap:10px;align-items:flex-start;margin:14px 0;line-height:1.5;font-size:12px!important}
 .tk-confirm input{width:auto;flex-shrink:0;margin:3px 0}
+.tk-cancellation-dialog .tk-confirm input{width:16px;height:16px;min-height:0;padding:0;margin:2px 0 0;accent-color:var(--gold)}
 .tk-table-scroll{overflow-x:auto;margin:16px 0}
 .tk-detail table,#tk-preview table{width:100%;border-collapse:collapse;font-size:12px}
 .tk-detail th,.tk-detail td,#tk-preview :is(th,td){text-align:left;vertical-align:top;padding:10px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
