@@ -45,7 +45,7 @@ test('shipping buttons prepare single buyers and selected batches, including sib
  await page.evaluate(()=>{
   const t=fixtureTables;for(const [id,number,buyer] of [['a','577620684385522369','one'],['b','577620723998233281','one'],['c','577620723998233282','two']]){t.tiktok_orders.push({id,order_number:number,buyer_username:buyer,marketplace_status:'To ship',marketplace_substatus:'Awaiting shipment',stage:'pending'});t.tiktok_order_lines.push({id:'line-'+id,order_id:id,title:'Jewelry',quantity:1});}
   window.opened=[];window.closedPopups=0;window.open=()=>({opener:null,close(){closedPopups++;},location:{replace:url=>opened.push(url)}});
-  window.extensionVersion='1.0.19';window.addEventListener('message',e=>{if(e.data?.type==='OG_EBAY_EXTENSION_VERSION_REQUEST')window.postMessage({type:'OG_EBAY_EXTENSION_VERSION_RESPONSE',requestId:e.data.requestId,version:extensionVersion},location.origin);});
+  window.extensionVersion='1.0.20';window.addEventListener('message',e=>{if(e.data?.type==='OG_EBAY_EXTENSION_VERSION_REQUEST')window.postMessage({type:'OG_EBAY_EXTENSION_VERSION_RESPONSE',requestId:e.data.requestId,version:extensionVersion},location.origin);});
  });
  await page.locator('#tk-refresh').click();await expect(page.getByRole('button',{name:'Create combined label',exact:true})).toHaveCount(1);await expect(page.getByRole('button',{name:'Create shipping label',exact:true})).toHaveCount(1);
  await page.locator('#tk-search').fill('577620684385522369');await page.getByRole('button',{name:'Create combined label',exact:true}).click();await expect.poll(()=>page.evaluate(()=>opened.length)).toBe(1);
@@ -53,7 +53,22 @@ test('shipping buttons prepare single buyers and selected batches, including sib
  await page.locator('#tk-search').fill('');await page.getByRole('button',{name:'Select visible buyers',exact:true}).click();await expect(page.locator('#tk-label-selection')).toContainText('2 buyers · 3 orders');await page.locator('#tk-create-labels').click();await expect.poll(()=>page.evaluate(()=>opened.length)).toBe(2);
  assert.equal(new URLSearchParams(new URL(await page.evaluate(()=>opened[1])).hash.slice(1)).get('ogLabels').split(';').length,3);
  await page.getByRole('button',{name:'Clear selection',exact:true}).click();await expect(page.locator('#tk-create-labels')).toBeDisabled();
- await page.evaluate(()=>extensionVersion='1.0.18');await page.getByRole('button',{name:'Create shipping label',exact:true}).click();await expect(page.locator('#tk-status')).toContainText('v1.0.19');assert.equal(await page.evaluate(()=>opened.length),2);assert.equal(await page.evaluate(()=>closedPopups),1);await page.close();
+ await page.evaluate(()=>extensionVersion='1.0.19');await page.getByRole('button',{name:'Create shipping label',exact:true}).click();await expect(page.locator('#tk-status')).toContainText('v1.0.20');assert.equal(await page.evaluate(()=>opened.length),2);assert.equal(await page.evaluate(()=>closedPopups),1);await page.close();
+});
+
+test('missing saved PDFs offer retrieval or mixed creation and stop offering saved labels',async()=>{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});await setup(page);
+ await page.evaluate(()=>{
+  const t=fixtureTables;
+  for(const [id,buyer,substatus] of [['a','existing-buyer','Awaiting collection'],['b','mixed-buyer','Awaiting collection'],['c','mixed-buyer','Awaiting shipment']]){
+   t.tiktok_orders.push({id,order_number:'57762072399823328'+id.charCodeAt(0),buyer_username:buyer,marketplace_status:'To ship',marketplace_substatus:substatus,stage:'pending'});
+   t.tiktok_order_lines.push({id:'line-'+id,order_id:id,title:'Jewelry',quantity:1,tracking_number:substatus==='Awaiting collection'?'9234690390470913256596':''});
+  }
+ });
+ await page.locator('#tk-refresh').click();await expect(page.getByRole('button',{name:'Get shipping label',exact:true})).toHaveCount(1);await expect(page.getByRole('button',{name:'Create / get labels',exact:true})).toHaveCount(1);
+ await page.getByRole('button',{name:'Select visible buyers',exact:true}).click();await expect(page.locator('#tk-label-selection')).toContainText('2 buyers · 3 orders');
+ await page.screenshot({animations:'disabled',path:new URL('../outputs/tiktok-pipeline/tiktok-label-recovery.png',import.meta.url).pathname.replace(/^\/(.:)/,'$1'),fullPage:true});
+ await page.evaluate(()=>fixtureTables.tiktok_order_documents.push({id:'doc-a',order_id:'a',kind:'label',path:'saved.pdf'}));await page.locator('#tk-refresh').click();await expect(page.getByRole('button',{name:'Get shipping label',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Create / get labels',exact:true})).toHaveCount(1);await page.close();
 });
 
 test('late receipt capture saves to the exact SKU, shows its image, and duplicate deliveries do not save again',async()=>{

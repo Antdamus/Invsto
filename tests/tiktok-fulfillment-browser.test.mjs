@@ -49,6 +49,16 @@ test('bulk PDFs match and split exact pages, retry saves once, and printing star
  for(const file of db.files.values()){const output=await PDFDocument.load(Buffer.from(file.base64,'base64'));assert.equal(output.getPageCount(),1);}
  assert.equal(await page.evaluate(()=>prints.length),0);await page.locator('[data-label-print]').click();await expect(page.locator('[data-label-status]')).toContainText('printer picker');assert.equal(await page.evaluate(()=>prints.length),1);assert.equal(db.files.size,3);assert.equal((await PDFDocument.load(Buffer.from([...db.files.values()][2].base64,'base64'))).getPageCount(),2);
 });
+test('successive PDF batches reset confirmation and printing until the new labels are saved',async t=>{
+ const db=fixture(),page=await open(t,db);
+ for(const [i,order] of db.tables.tiktok_orders.slice(0,2).entries()){
+  await page.locator('.tk-label-file input').setInputFiles({name:'label-'+i+'.pdf',mimeType:'application/pdf',buffer:await pdf([order.order_number])});
+  await expect(page.locator('[data-page-orders]')).toHaveValue(order.order_number);await expect(page.locator('[data-label-save]')).toHaveText('Save labels to orders');await expect(page.locator('[data-label-print]')).toBeDisabled();await expect(page.locator('[data-label-confirm]')).toBeEnabled();await expect(page.locator('[data-label-confirm]')).not.toBeChecked();
+  await page.locator('[data-label-confirm]').check();await page.locator('[data-label-save]').click();await expect(page.locator('[data-label-save]')).toHaveText('Labels saved');await expect(page.locator('[data-label-print]')).toBeEnabled();await expect(page.locator('[data-label-confirm]')).toBeDisabled();
+ }
+ assert.equal(db.tables.tiktok_order_documents.length,2);assert.equal(await page.evaluate(()=>prints.length),0);
+});
+
 test('unmatched or mixed-buyer pages cannot attach until their coverage is corrected',async t=>{
  const db=fixture(),page=await open(t,db);await page.locator('.tk-label-file input').setInputFiles({name:'label.pdf',mimeType:'application/pdf',buffer:await pdf(['Unidentified label'])});await expect(page.locator('[data-label-save]')).toBeEnabled();await page.locator('[data-label-confirm]').check();await page.locator('[data-label-save]').click();await expect(page.locator('[data-label-status]')).toContainText('Choose the order IDs');
  await page.locator('[data-page-orders]').fill(db.tables.tiktok_orders[0].order_number+';'+db.tables.tiktok_orders[2].order_number);await page.locator('[data-label-save]').click();await expect(page.locator('[data-label-status]')).toContainText('different buyers');assert.equal(db.uploads.length,0);

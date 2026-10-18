@@ -44,29 +44,28 @@
  function createLabelButton(key){
   if(historyView)return '';
   const orders=window.TikTokShipping.buyerOrders(state.orders,key);if(!orders.length)return '';
-  const combined=orders.reduce((n,o)=>n+o.lines.length,0)>1;
-  return `<button type="button" class="tk-card-button tk-label-create" data-create-labels="${esc(key)}">${combined?'Create combined label':'Create shipping label'}</button>`;
+  return `<button type="button" class="tk-card-button tk-label-create" data-create-labels="${esc(key)}">${esc(window.TikTokShipping.actionLabel(orders))}</button>`;
  }
  function updateLabelSelection(){
   const visible=new Set(groups().filter(g=>window.TikTokShipping.buyerOrders(state.orders,g.key).length).map(g=>g.key));
   for(const key of state.labelBuyers)if(!visible.has(key))state.labelBuyers.delete(key);
   const count=[...state.labelBuyers].reduce((n,key)=>n+window.TikTokShipping.buyerOrders(state.orders,key).length,0);
   $('tk-label-batch').hidden=historyView;
-  $('tk-create-labels').disabled=!count;$('tk-create-labels').textContent=`Create shipping labels${count?' ('+count+')':''}`;
+  $('tk-create-labels').disabled=!count;$('tk-create-labels').textContent=`Create / get shipping labels${count?' ('+count+')':''}`;
   $('tk-label-selection').textContent=count?`${state.labelBuyers.size} buyers · ${count} orders selected`:'Select buyers for a bulk label batch (up to 50 orders).';
   for(const box of $('tk-orders').querySelectorAll('[data-label-buyer]'))box.checked=state.labelBuyers.has(box.dataset.labelBuyer);
  }
  function shippingExtension(){return new Promise(resolve=>{
   const requestId=crypto.randomUUID();let timer;
-  const listener=e=>{if(e.source!==window||e.origin!==location.origin||e.data?.type!=='OG_EBAY_EXTENSION_VERSION_RESPONSE'||e.data.requestId!==requestId)return;clearTimeout(timer);window.removeEventListener('message',listener);const parts=String(e.data.version||'').split('.').map(Number);resolve(parts[0]>1||(parts[0]===1&&(parts[1]>0||(parts[1]===0&&parts[2]>=19))));};
+  const listener=e=>{if(e.source!==window||e.origin!==location.origin||e.data?.type!=='OG_EBAY_EXTENSION_VERSION_RESPONSE'||e.data.requestId!==requestId)return;clearTimeout(timer);window.removeEventListener('message',listener);const parts=String(e.data.version||'').split('.').map(Number);resolve(parts[0]>1||(parts[0]===1&&(parts[1]>0||(parts[1]===0&&parts[2]>=20))));};
   window.addEventListener('message',listener);timer=setTimeout(()=>{window.removeEventListener('message',listener);resolve(false);},2000);
   window.postMessage({type:'OG_EBAY_EXTENSION_VERSION_REQUEST',requestId},location.origin);
  });}
  async function openLabels(keys){
   let request;try{request=window.TikTokShipping.request(state.orders,keys);}catch(e){status(e.message,true);return;}
-  const tab=window.open('about:blank','_blank');if(!tab){status('Allow popups, then click Create shipping labels again.',true);return;}tab.opener=null;
-  if(!await shippingExtension()){tab.close();$('extension-updates').open=true;$('extension-updates').scrollIntoView({block:'center'});status('Update OG eBay Order Link to v1.0.19 or newer, refresh TikTok and OG, then create the labels.',true);return;}
-  tab.location.replace(request.url);status(`Opening TikTok shipping review for ${request.ids.length} orders across ${request.buyers} buyers. Confirm package combinations and postage in TikTok, then choose Print through OG.`);
+  const tab=window.open('about:blank','_blank');if(!tab){status('Allow popups, then click the shipping label button again.',true);return;}tab.opener=null;
+  if(!await shippingExtension()){tab.close();$('extension-updates').open=true;$('extension-updates').scrollIntoView({block:'center'});status('Update OG eBay Order Link to v1.0.20 or newer, refresh TikTok and OG, then open the labels.',true);return;}
+  tab.location.replace(request.url);status(`Checking ${request.ids.length} TikTok order(s) across ${request.buyers} buyer(s). TikTok opens shipment review for new labels or Print documents for existing labels. Choose Print through OG, then review and save the returned labels here.`);
  }
  function revealCapture(id,lineId,transferId){
   const order=state.orders.find(o=>o.id===id);if(!order)return;

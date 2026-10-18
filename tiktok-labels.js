@@ -30,7 +30,7 @@
   document.getElementById('tk-status').after(panel);panel.querySelector('[data-label-save]').onclick=save;panel.querySelector('[data-label-print]').onclick=print;panel.querySelector('[data-label-close]').onclick=()=>{if(saving)return;panel.hidden=true;};
  }
  async function receive(value,suggested=[]){
-  build();panel.hidden=false;saved=false;printPath=null;bytes=null;panel.querySelector('[data-label-save]').disabled=true;panel.querySelector('[data-label-print]').disabled=true;panel.querySelector('[data-label-confirm]').checked=false;
+  build();panel.hidden=false;saved=false;printPath=null;bytes=null;panel.querySelector('[data-label-save]').disabled=true;panel.querySelector('[data-label-save]').textContent='Save labels to orders';panel.querySelector('[data-label-print]').disabled=true;panel.querySelector('[data-label-print]').textContent='Choose printer';panel.querySelector('[data-label-confirm]').checked=false;panel.querySelector('[data-label-confirm]').disabled=false;
   for(const url of previews.splice(0))URL.revokeObjectURL(url);panel.querySelector('[data-label-pages]').replaceChildren();
   status('Reading and matching the label pages in this browser…');
   await window.shippingLabelPrint.assertComplete(value);const normalized=await fitA6Labels(value);bytes=normalized.value;

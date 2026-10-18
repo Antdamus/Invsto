@@ -208,9 +208,9 @@ The private handoff expires after one hour and its CSV is cleared after a succes
 
 OG order packets are separate 4×6 packing slips, not postage.
 
-## TikTok shipping and completion (1.0.19)
+## TikTok shipping and completion (1.0.20)
 
-OG offers single/combined labels per buyer and bulk labels for selected buyers (up to 50 orders). The extension searches those exact IDs in TikTok, checks that all requested orders are awaiting shipment and selects them before opening Arrange shipment. Missing rows, AI search, changed statuses or extra selections stop the handoff. Review combinations, package details and postage in TikTok; the extension does not buy postage.
+OG offers single/combined labels per buyer and bulk labels for selected buyers (up to 50 orders). Orders awaiting shipment or collection are eligible when their label PDF has not been saved in OG, including orders with tracking. The extension searches exact IDs and checks live statuses: **Arrange shipment** opens new-label review; **Print documents** retrieves labels already created on TikTok. Mixed batches offer separate new/existing label groups. Missing rows, AI search, blocked statuses or extra selections stop the handoff. The extension waits for TikTok's review panel before reporting success. Review combinations, package details and postage in TikTok; the extension does not buy postage.
 
 **Print → Print through OG** now sends TikTok labels to `pending-tiktok-orders.html`. Review the page-to-order matches and save; each order receives only its matching PDF pages. Then use the existing printer picker. Unknown PDF matches require entering the order IDs. The private transfer expires after one hour and clears its PDF after successful attachment. Manual **Add shipping-label PDF** in OG provides the same flow.
 
