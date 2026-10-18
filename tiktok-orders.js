@@ -149,7 +149,7 @@
  $('tk-create-labels').onclick=()=>busy(()=>openLabels([...state.labelBuyers]));
  $('tk-select-labels').onclick=()=>{for(const g of groups())if(window.TikTokShipping.buyerOrders(state.orders,g.key).length)state.labelBuyers.add(g.key);updateLabelSelection();};
  $('tk-clear-labels').onclick=()=>{state.labelBuyers.clear();updateLabelSelection();};
- function bindLineCompletion(root){root.querySelectorAll('[data-tk-line-finish]').forEach(b=>b.onclick=()=>{const order=state.orders.find(o=>o.id===b.dataset.tkLineFinish);if(order)window.TikTokFulfillment.open(state.orders.filter(o=>o.buyer_username.toLowerCase()===order.buyer_username.toLowerCase()&&closed(o)===historyView));});}
+ function bindLineCompletion(root){root.querySelectorAll('[data-tk-line-finish]').forEach(b=>b.onclick=()=>{const order=state.orders.find(o=>o.id===b.dataset.tkLineFinish);if(order){if($('tk-detail').open)$('tk-detail').close();window.TikTokFulfillment.open(state.orders.filter(o=>o.buyer_username.toLowerCase()===order.buyer_username.toLowerCase()&&closed(o)===historyView));}});}
  function bindOrderButtons(root){root.querySelectorAll('[data-order]').forEach(b=>b.onclick=()=>busy(async()=>{if($('tk-buyer-tools').open)$('tk-buyer-tools').close();await detail(b.dataset.order,b.dataset.section);}));}
  async function previewDocument(d){const {data,error}=await db.storage.from('ebay-labels').createSignedUrl(d.path,120);if(error)throw error;const a=document.createElement('a');a.href=data.signedUrl;a.target='_blank';a.rel='noopener';a.click();}
  async function buyerTools(key,tool){

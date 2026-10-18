@@ -136,6 +136,11 @@ test('front item completion opens the buyer review without completing or changin
  await expect(item.locator('[data-certificate-line]')).toBeVisible();await expect(item.locator('[data-tk-work="missing"]')).toBeVisible();await expect(item.locator('[data-tk-work="require_cgl"]')).toBeVisible();
  await item.locator('[data-tk-line-finish]').click();await expect(page.locator('[data-complete-line="line-0"]')).toBeChecked();await expect(page.locator('[data-complete-line="line-1"]')).not.toBeChecked();await expect(page.locator('[data-complete-line="line-2"]')).toHaveCount(0);
  assert.equal(db.calls.filter(c=>c.name==='complete_tiktok_order_lines_review').length,0);
+ await page.locator('#done-completion-photos').click();
+ await page.locator('[data-tiktok-order="order-0"]').getByRole('button',{name:'Open order',exact:true}).click();
+ await expect(page.locator('#tk-detail')).toBeVisible();await page.locator('#tk-detail [data-tk-line-finish]').first().click();
+ await expect(page.locator('#tk-detail')).not.toBeVisible();await expect(page.locator('[data-complete-line="line-0"]')).toBeVisible();
+ await page.locator('[data-complete-line="line-0"]').uncheck();await expect(page.locator('#tk-complete-orders')).toBeDisabled();
 });
 
 test('item controls, missing-watch confirmation, CGL copies and cancellation filters keep buyer bundles together',async t=>{
