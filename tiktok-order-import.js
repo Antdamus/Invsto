@@ -32,7 +32,7 @@
     if (new Set(headers).size !== headers.length) throw Error('The report has duplicate columns. Export a fresh TikTok report.');
     const read = (row, key) => clean(row[headers.indexOf(key)]);
     const rows = [], identities = new Map(), orders = new Map(); let duplicateRows = 0;
-    const amount = (row, key) => { const v = read(row,key); if (!v) return null; if (!/^\d+(\.\d{1,2})?$/.test(v)) throw Error(`Invalid ${key}. Keep the original TikTok CSV format.`); return v; };
+    const amount = (row, key) => { const v = read(row,key); if (!v) return null; if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(\.\d{1,2})?$/.test(v)) throw Error(`Invalid ${key}. Keep the original TikTok CSV format.`); return v.replaceAll(',',''); };
     grid.forEach((row, index) => {
       if (row.length !== headers.length) throw Error(`Row ${index + 2} has missing or extra columns. No orders were imported.`);
       const id = read(row,'Order ID'), sku = read(row,'SKU ID'), quantity = read(row,'Quantity');
