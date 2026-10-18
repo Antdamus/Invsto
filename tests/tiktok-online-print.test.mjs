@@ -63,6 +63,15 @@ test('signed PDF popup fallback follows only an armed TikTok opener and deduplic
   assert.equal(w.data['ogOnlinePrint:' + id].base64, pdf);
 });
 
+test('TikTok order-label handoffs are bound to the TikTok receiver and retain exact string order IDs',async()=>{
+ const w=worker(),target='https://og.example/Invsto/pending-tiktok-orders.html?tiktokLabels='+id;
+ const send={type:'OG_ONLINE_PRINT_SEND',payload:{transferId:id,base64:pdf,tiktokOrders:true,orderNumbers:['577620684385522369','577620723998233281',577620684385522369,'bad']}};
+ assert.equal((await w.call(send,'https://seller-us.tiktok.com/order')).ok,true);assert.equal(w.tabs[0].url,target);
+ const get={type:'OG_ONLINE_PRINT_GET',transferId:id};assert.equal((await w.call(get,app+'?onlinePrintTransfer='+id)).ok,false);
+ const record=(await w.call(get,target)).payload;assert.equal(record.base64,pdf);assert.deepEqual(Array.from(record.orderNumbers),['577620684385522369','577620723998233281']);
+ assert.equal((await w.call({type:'OG_ONLINE_PRINT_DONE',transferId:id},target)).ok,true);assert.equal((await w.call(get,target)).payload.base64,undefined);
+});
+
 test('cancelling a signed PDF fetch prevents a late handoff', async () => {
   let release;
   const w = worker(() => new Promise(resolve => release = resolve)), source = 'https://seller-us.tiktok.com/shipment/labels';
@@ -258,7 +267,7 @@ for (const invalid of ['crop', 'scale', 'annotation', 'mixed-letter']) test(`A6 
   assert.equal(await page.evaluate(() => uploads.length + jobs.length), 0);
 });
 
-for (const mode of ['blob', 'signed-popup']) test(`real extension carries a TikTok ${mode} PDF into the existing OG picker`, async t => {
+for (const mode of ['blob', 'signed-popup']) test(`real extension carries a TikTok ${mode} PDF to order attachment and then the existing OG picker`, async t => {
   const extensionPath = fileURLToPath(new URL(folder, root));
   const context = await chromium.launchPersistentContext('', {channel: 'chromium', headless: true,
     args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`]});
@@ -274,9 +283,9 @@ for (const mode of ['blob', 'signed-popup']) test(`real extension carries a TikT
     if (url.href === signedUrl) return route.fulfill({contentType: 'application/pdf', body: Buffer.from(label, 'base64')});
     if (url.origin === 'https://seller-us.tiktok.com') return route.fulfill({contentType: 'text/html; charset=utf-8', body: `<!doctype html><meta charset="utf-8"><div role="dialog"><h2>Print document</h2><label data-id="fulfillment.print_document.selection.shipping_label"><input type="checkbox" checked>Shipping label</label><p>PDF · 4x6 inches</p><button id="print">Print</button></div><script>document.getElementById('print').onclick=()=>{${createPdf}};</script>`});
     if (url.origin !== ogOrigin) return route.abort();
-    if (url.pathname === '/Invsto/print-stations.html') return route.fulfill({contentType: 'text/html; charset=utf-8', body: `<!doctype html><meta charset="utf-8"><main><h1>Print stations</h1></main><script>
-      window.jobs=[];window.savedFiles={};window.supabase={auth:{getSession:async()=>({data:{session:{user:{id:'staff'}}}})},storage:{from:()=>({upload:async(path,blob)=>{savedFiles[path]=blob;return {};},createSignedUrl:async path=>({data:{signedUrl:URL.createObjectURL(savedFiles[path])}})})},rpc:async(name,args)=>name==='list_print_stations'?{data:[{id:'shipping',name:'Online shipping printer',paired:true,online:true,printer_connected:true,printer_name:'DYMO 5XL',pdf_print_ready:true}]}:(jobs.push({name,args}),{data:{id:'job'}})};
-      </script><script src="print-stations.js"></script>`});
+    if (url.pathname === '/Invsto/pending-tiktok-orders.html') return route.fulfill({contentType: 'text/html; charset=utf-8', body: `<!doctype html><meta charset="utf-8"><main><h1>TikTok orders</h1><p id="tk-status"></p><div id="tk-label-batch"></div></main><script>
+      window.jobs=[];window.attachments=[];window.savedFiles={};window.supabase={auth:{getSession:async()=>({data:{session:{user:{id:'staff'}}}})},storage:{from:()=>({upload:async(path,blob)=>{savedFiles[path]=blob;return {};},createSignedUrl:async path=>({data:{signedUrl:URL.createObjectURL(savedFiles[path])}})})},rpc:async(name,args)=>name==='list_print_stations'?{data:[{id:'shipping',name:'Online shipping printer',paired:true,online:true,printer_connected:true,printer_name:'DYMO 5XL',pdf_print_ready:true}]}:name==='attach_tiktok_label_batch'?(attachments.push(args),{data:{}}):(jobs.push({name,args}),{data:{id:'job'}})};
+      </script><script src="vendor/pdf-lib/pdf-lib.min.js"></script><script src="shipping-pdf.js"></script><script src="shipping-label-print.js"></script><script src="print-stations.js"></script><script src="tiktok-labels.js"></script><script>TikTokLabels.start({db:supabase,user:{id:'staff'},refresh:async()=>{},getOrders:()=>[{id:'order',order_number:'577620684385522369',buyer_username:'fixture',lines:[]}]});</script>`});
     const path = url.pathname.slice('/Invsto/'.length);
     if (!/^[\w./-]+$/.test(path) || path.includes('..')) return route.abort();
     try { await route.fulfill({contentType: (path.endsWith('.js') ? 'text/javascript' : 'text/css') + '; charset=utf-8', body: await readFile(new URL(path, root))}); }
@@ -293,18 +302,20 @@ for (const mode of ['blob', 'signed-popup']) test(`real extension carries a TikT
   }, {signedUrl, label});
   const source = await context.newPage(); await source.goto('https://seller-us.tiktok.com/shipment/labels');
   await source.locator('#print').click();
-  const opened = context.waitForEvent('page', {predicate: page => page.waitForURL(ogOrigin + '/Invsto/print-stations.html?onlinePrintTransfer=*', {timeout: 15000}).then(() => true, () => false)});
+  const opened = context.waitForEvent('page', {predicate: page => page.waitForURL(ogOrigin + '/Invsto/pending-tiktok-orders.html?tiktokLabels=*', {timeout: 15000}).then(() => true, () => false)});
   await source.getByRole('button', {name: 'Print through OG', exact: true}).click();
   const receiver = await opened;
+  await expect(receiver.locator('[data-label-save]')).toBeEnabled({timeout:15000});
+  await receiver.locator('[data-page-orders]').fill('577620684385522369');await receiver.locator('[data-label-confirm]').check();await receiver.locator('[data-label-save]').click();await expect(receiver.locator('[data-label-print]')).toBeEnabled();assert.equal(await receiver.evaluate(()=>attachments.length),1);await receiver.locator('[data-label-print]').click();
   await expect(receiver.locator('[data-destination]')).toBeEnabled({timeout: 15000});
   await receiver.locator('[data-destination]').selectOption('shipping');
   assert.equal(await receiver.evaluate(() => jobs.length), 0);
   await receiver.screenshot({path: fileURLToPath(new URL('test-results/tiktok-online-printer.png', root))});
   await receiver.locator('[data-send]').click();
-  await expect(receiver.locator('#og-online-print [data-status]')).toContainText('Queued 1');
+  await expect(receiver.locator('[data-label-status]')).toContainText('Queued');
   assert.equal(await receiver.evaluate(() => jobs.length), 1);
   await expect.poll(() => worker.evaluate(async () => Object.values(await chrome.storage.local.get(null)).filter(record => record.completed).length)).toBe(1);
   await receiver.reload();
-  await expect(receiver.locator('#og-online-print [data-status]')).toContainText('Queued 1');
+  await expect(receiver.locator('[data-label-status]')).toContainText('already saved');
   assert.equal(await receiver.locator('[data-destination]').count(), 0);
 });

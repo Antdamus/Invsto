@@ -605,3 +605,8 @@ entrypoint = "./functions/sms-marketing-admin/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/archive-order-certificate/index.ts"
+
+[functions.archive-tiktok-certificate]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/archive-tiktok-certificate/index.ts"

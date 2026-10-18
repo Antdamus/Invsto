@@ -1,0 +1,449 @@
+/* Shared completion evidence for pending orders, including uploads from another device. */
+(function () {
+  "use strict";
+
+  function renderOrderContext(container, lines = [], getCustomerName = order => order.buyer_name) {
+    if (!container) return;
+    const customers = new Map();
+    for (const line of lines) {
+      const order = line.order || line.tiktok_orders || {};
+      const username = String(order.buyer_username || "").trim();
+      const name = String(getCustomerName(order) || "").trim();
+      const orderKey = line.order_id || order.id || order.order_number || line.id;
+      const customerKey = `${username.toLowerCase() || name.toLowerCase() || orderKey}:${name.toLowerCase()}`;
+      if (!customers.has(customerKey)) customers.set(customerKey, {name, username, items: new Map()});
+      const customer = customers.get(customerKey);
+      customer.items.set(line.id || line.item_number,
+        `${line.item_title || line.item_number || "Item title unavailable"} · Qty ${line.quantity || 1}${order.order_number ? " · Order " + order.order_number : ""}`);
+    }
+    const groups = [...customers.values()].map(customer => ({...customer, items: [...customer.items.values()]}));
+    const signature = JSON.stringify(groups);
+    if (container.dataset.orderContext === signature) return;
+    container.dataset.orderContext = signature;
+    container.replaceChildren();
+    function element(tag, className, text) {
+      const node = document.createElement(tag);
+      node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+    for (const customer of groups) {
+      const section = element("section", "photo-order-customer");
+      section.append(element("h3", "photo-order-customer-name", customer.name || customer.username || "Customer"));
+      if (customer.username) section.append(element("p", "photo-order-username", `TikTok username: ${customer.username}`));
+      const items = element("ul", "photo-order-items");
+      for (const title of customer.items) items.append(element("li", "", title));
+      section.append(items);
+      container.append(section);
+    }
+  }
+
+  function create(config) {
+    const $ = id => document.getElementById(id);
+    const esc = config.escapeHtml;
+    const watchers = new Set();
+    const previews = new Map();
+    const orderReads = new Map();
+    let scope = [], pending = [], saving = false, stopModalWatch = null, returnFocus = null;
+    let savedPhotos = [], replacementTarget = null, revision = 0;
+
+    function targets(lines) {
+      const orders = new Map();
+      for (const line of lines) {
+        if (!line?.id || !line.order_id) continue;
+        if (!orders.has(line.order_id)) orders.set(line.order_id, []);
+        if (!orders.get(line.order_id).includes(line.id)) orders.get(line.order_id).push(line.id);
+      }
+      return orders;
+    }
+
+    function readOrder(orderId) {
+      if (!orderReads.has(orderId)) {
+        const read = fetchOrder(orderId).finally(() => {if (orderReads.get(orderId) === read) orderReads.delete(orderId);});
+        orderReads.set(orderId, read);
+      }
+      return orderReads.get(orderId);
+    }
+    async function fetchOrder(orderId) {
+      const rows = [];
+      for (let offset = 0; ; offset += 500) {
+        const {data, error} = await config.getClient().from("tiktok_order_completion_photos")
+          .select("id,order_id,created_at,signed_by_email,payload,photo_attachments")
+          .eq("order_id", orderId).eq("payload->>proof_type", "completion_photo")
+          .order("created_at", {ascending: false}).order("id", {ascending: false})
+          .range(offset, offset + 499);
+        if (error) throw error;
+        rows.push(...(data || []));
+        if ((data || []).length < 500) return rows;
+      }
+    }
+
+    async function read(lines) {
+      const photos = new Map();
+      await Promise.all([...targets(lines)].map(async ([orderId, lineIds]) => {
+        for (const event of await readOrder(orderId)) {
+          if (event.payload?.history_removed) continue;
+          const eventIds = event.payload?.order_line_ids || [];
+          if (!eventIds.some(id => lineIds.includes(id))) continue;
+          for (const photo of event.photo_attachments || []) {
+            if (!photo.path || !photo.bucket) continue;
+            const key = `${photo.bucket}:${photo.path}`;
+            if (!photos.has(key)) photos.set(key, {...photo, eventIds: [], orderIds: [],
+              created_at: photo.created_at || event.created_at,
+              signed_by_email: photo.signed_by_email || event.signed_by_email,
+              auditText: `${photo.signed_by_email || event.signed_by_email || "Staff"} · ${config.formatDate(photo.created_at || event.created_at)}`,
+            });
+            photos.get(key).eventIds.push(event.id);
+            if (!photos.get(key).orderIds.includes(orderId)) photos.get(key).orderIds.push(orderId);
+          }
+        }
+      }));
+      return Promise.all([...photos.values()].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+        .map(async photo => {
+          photo.eventIds.sort();
+          photo.orderIds.sort();
+          const key = `${photo.bucket}:${photo.path}`;
+          let cached = previews.get(key);
+          if (!cached || Date.now() - cached.at > 300000) {
+            cached = {photo: await config.hydratePhoto(photo), at: Date.now()};
+            previews.set(key, cached);
+          }
+          return {...photo, previewUrl: cached.photo.previewUrl, thumbnailUrl: cached.photo.thumbnailUrl};
+        }));
+    }
+
+    async function readCoverage(lines) {
+      const orders = targets(lines);
+      const coverage = new Map(lines.map(line => [line.id, false]));
+      const orderIds = [...orders.keys()];
+      // Only read attachment metadata, in batches; the queue does not need signed image URLs.
+      for (let index = 0; index < orderIds.length; index += 100) {
+        for (let offset = 0; ; offset += 500) {
+          const {data, error} = await config.getClient().from("tiktok_order_completion_photos")
+            .select("id,order_id,payload,photo_attachments")
+            .in("order_id", orderIds.slice(index, index + 100)).eq("payload->>proof_type", "completion_photo")
+            .order("id", {ascending: true}).range(offset, offset + 499);
+          if (error) throw error;
+          for (const event of data || []) {
+            if (event.payload?.history_removed || !Array.isArray(event.photo_attachments)
+              || !event.photo_attachments.some(photo => photo?.bucket && photo?.path)) continue;
+            const lineIds = Array.isArray(event.payload?.order_line_ids) ? event.payload.order_line_ids : [];
+            for (const id of lineIds) {
+              if (orders.get(event.order_id)?.includes(id)) coverage.set(id, true);
+            }
+          }
+          if ((data || []).length < 500) break;
+        }
+      }
+      return coverage;
+    }
+
+    function watch(lines, onChange, onError = () => {}, readData = read, pollMs = config.pollMs || 12000) {
+      let active = true, loading = false, rerun = false, lastReadAt = 0, liveTimer;
+      const orderIds = new Set(lines.map(line => line.order_id));
+      async function refresh() {
+        if (!active) return;
+        if (loading) { rerun = true; return; }
+        loading = true;
+        lastReadAt = Date.now();
+        const startedAtRevision = revision;
+        try {
+          const photos = await readData(lines);
+          if (active && !saving && startedAtRevision === revision) onChange(photos);
+          else if (active) rerun = true;
+        } catch (error) { if (active && !saving && startedAtRevision === revision) onError(error); }
+        finally {
+          loading = false;
+          if (rerun && active && !saving) { rerun = false; refresh(); }
+        }
+      }
+      const stopLive = window.TikTokOrderLiveUpdates?.subscribe(config.getClient(), change => {
+        if (change.kind !== "reconnected" && (change.kind !== "completion_photo" || !orderIds.has(change.order_id))) return;
+        // A request started before this notification may still return the older snapshot.
+        for (const orderId of orderIds) orderReads.delete(orderId);
+        clearTimeout(liveTimer);
+        liveTimer = setTimeout(() => {if (!document.hidden) refresh();}, 80);
+      });
+      const interval = setInterval(() => {
+        if (!document.hidden && (!stopLive?.isConnected?.() || Date.now() - lastReadAt >= 30000)) refresh();
+      }, pollMs);
+      const onVisible = () => { if (!document.hidden) refresh(); };
+      document.addEventListener("visibilitychange", onVisible);
+      watchers.add(refresh);
+      refresh();
+      return () => {
+        active = false;
+        clearInterval(interval);
+        clearTimeout(liveTimer); stopLive?.();
+        watchers.delete(refresh);
+        document.removeEventListener("visibilitychange", onVisible);
+      };
+    }
+
+    function renderGrid(container, photos, editable = false) {
+      if (!container) return;
+      const disabled = saving || pending.length > 0;
+      const signature = JSON.stringify([editable, disabled, photos.map(p => [p.path, p.thumbnailUrl, p.auditText, p.eventIds])]);
+      if (container.dataset.photos === signature) return;
+      container.dataset.photos = signature;
+      container.innerHTML = photos.length ? photos.map((photo, index) => `
+        <article class="completion-photo-card">
+          <button type="button" data-completion-photo="${index}" aria-label="Open ${esc(photo.label || "completion photo")}">
+            <img src="${esc(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${esc(photo.label || "Completion photo")}" />
+            <span>Saved to order</span>
+          </button>
+          <small>${esc(photo.auditText || "")}</small>
+          ${editable ? `<small>${photo.orderIds.length} order${photo.orderIds.length === 1 ? "" : "s"} in this view</small>` : ""}
+          <div class="completion-photo-edit-actions">
+            ${editable ? `<button type="button" class="secondary-btn" data-replace-saved-photo="${index}" ${disabled ? "disabled" : ""}>Replace</button>` : ""}
+            <button type="button" class="secondary-btn" data-remove-saved-photo="${index}" ${disabled ? "disabled" : ""}>Remove</button>
+          </div>
+          ${editable ? `
+            <div class="completion-photo-replacement-options hidden" data-replacement-options="${index}">
+              <button type="button" class="secondary-btn" data-replacement-camera="${index}" ${disabled ? "disabled" : ""}>Take new photo</button>
+              <button type="button" class="secondary-btn" data-replacement-file="${index}" ${disabled ? "disabled" : ""}>Choose replacement</button>
+            </div>` : '<p class="completion-photo-correction-status hidden" role="status" aria-live="polite"></p>'}
+        </article>`).join("") : '<p class="completion-photo-empty">No completion photos saved yet.</p>';
+      container.querySelectorAll("[data-completion-photo]").forEach(button => {
+        button.addEventListener("click", () => config.openPhoto(photos[Number(button.dataset.completionPhoto)]));
+      });
+      container.querySelectorAll("[data-remove-saved-photo]").forEach(button => {
+        button.addEventListener("click", () => {
+          const feedback = button.closest(".completion-photo-card").querySelector(".completion-photo-correction-status");
+          const report = editable ? status : (message, error = false) => {
+            feedback.textContent = message;
+            feedback.classList.remove("hidden");
+            feedback.classList.toggle("is-error", error);
+          };
+          removeSavedPhoto(photos[Number(button.dataset.removeSavedPhoto)], report);
+        });
+      });
+      container.querySelectorAll("[data-replace-saved-photo]").forEach(button => {
+        button.addEventListener("click", () => {
+          const options = container.querySelector(`[data-replacement-options="${button.dataset.replaceSavedPhoto}"]`);
+          options.classList.toggle("hidden");
+          button.setAttribute("aria-expanded", String(!options.classList.contains("hidden")));
+        });
+      });
+      container.querySelectorAll("[data-replacement-camera], [data-replacement-file]").forEach(button => {
+        button.addEventListener("click", () => {
+          replacementTarget = photos[Number(button.dataset.replacementCamera ?? button.dataset.replacementFile)];
+          const input = $("completion-photo-replacement");
+          if (button.hasAttribute("data-replacement-camera")) input.setAttribute("capture", "environment");
+          else input.removeAttribute("capture");
+          input.click();
+        });
+      });
+    }
+
+    function refreshSaved() {
+      renderGrid($("completion-photo-saved"), savedPhotos, true);
+    }
+
+    async function correctPhoto(photo, requestId, replacement = null) {
+      const {error} = await config.getClient().rpc("correct_tiktok_order_completion_photo", {
+        _event_ids: photo.eventIds, _bucket: photo.bucket, _path: photo.path,
+        _request_id: requestId, _replacement: replacement,
+      });
+      if (error) throw error;
+    }
+
+    async function removeSavedPhoto(photo, report = status) {
+      if (saving || pending.length) return;
+      saving = true; revision++;
+      renderPending();
+      report("Removing completion photo…");
+      try {
+        await correctPhoto(photo, crypto.randomUUID());
+        // An inline checkout may show fewer orders than the photo management panel.
+        savedPhotos = savedPhotos.map(p => p.bucket !== photo.bucket || p.path !== photo.path ? p :
+          {...p, eventIds: p.eventIds.filter(id => !photo.eventIds.includes(id))}).filter(p => p.eventIds.length);
+        report("Photo removed from the orders shown here. The other device will update automatically.");
+      } catch (error) {
+        report(`${error.message || "Could not remove this photo."} Try again or refresh the saved photos.`, true);
+      } finally {
+        saving = false; revision++;
+        renderPending();
+        watchers.forEach(refresh => refresh());
+      }
+    }
+
+    function status(message, error = false) {
+      $("completion-photo-status").textContent = message;
+      $("completion-photo-status").classList.toggle("is-error", error);
+    }
+
+    function renderPending() {
+      $("completion-photo-pending").innerHTML = pending.map((entry, index) => `
+        <article class="completion-photo-card">
+          <button type="button" id="completion-pending-${entry.requestId}" data-inspect-pending-photo="${index}" aria-label="Inspect ${esc(entry.file.name)}" ${saving ? "disabled" : ""}>
+            <img src="${esc(entry.url)}" alt="${esc(entry.file.name)}" />
+            <span>Tap to inspect</span>
+          </button>
+          <small>${esc(entry.file.name)}</small>
+          ${entry.replacement ? `<small>Replaces: ${esc(entry.replacement.label || "saved photo")}. The original stays until you save.</small>` : ""}
+          <button type="button" class="secondary-btn" data-remove-photo="${index}" ${saving ? "disabled" : ""}>Remove</button>
+        </article>`).join("");
+      $("completion-photo-pending").querySelectorAll("[data-inspect-pending-photo]").forEach(button => {
+        button.addEventListener("click", () => {
+          const entry = pending[Number(button.dataset.inspectPendingPhoto)];
+          if (!entry || saving) return;
+          config.openPhoto({previewUrl: entry.url, label: entry.file.name, mime_type: entry.file.type}, button.id);
+        });
+      });
+      $("completion-photo-pending").querySelectorAll("[data-remove-photo]").forEach(button => {
+        button.addEventListener("click", () => {
+          const [entry] = pending.splice(Number(button.dataset.removePhoto), 1);
+          URL.revokeObjectURL(entry.url);
+          renderPending();
+        });
+      });
+      $("save-completion-photos").disabled = saving || !pending.length;
+      $("save-completion-photos").textContent = saving ? "Saving photos…" : `Save ${pending.length || ""} photo${pending.length === 1 ? "" : "s"}`;
+      $("completion-photo-camera").disabled = saving;
+      $("completion-photo-files").disabled = saving;
+      $("close-completion-photos").disabled = saving;
+      $("done-completion-photos").disabled = saving;
+      refreshSaved();
+      // Keep correction buttons in checkout and phone-pairing grids in sync, too.
+      document.querySelectorAll("[data-remove-saved-photo], [data-replace-saved-photo], [data-replacement-camera], [data-replacement-file]")
+        .forEach(button => { button.disabled = saving || pending.length > 0; });
+    }
+
+    function chooseFiles(event) {
+      if (saving) return;
+      const files = Array.from(event.target.files || []);
+      const replacement = event.target.id === "completion-photo-replacement" ? replacementTarget : null;
+      replacementTarget = null;
+      event.target.value = "";
+      if (!files.length) return;
+      let rejected = false;
+      for (const file of files) {
+        if (!(file.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif|gif|avif)$/i.test(file.name))) {
+          rejected = true; continue;
+        }
+        if (pending.some(p => p.file.name === file.name && p.file.size === file.size && p.file.lastModified === file.lastModified)) continue;
+        pending.push({file, url: URL.createObjectURL(file), uploaded: null, saved: new Set(), attempted: new Set(),
+          replacement, requestId: crypto.randomUUID()});
+      }
+      renderPending();
+      status(rejected ? "Choose image files only. Accepted photos are ready to save." : "Photos ready. Save them to share with the other device.", rejected);
+    }
+
+    async function save() {
+      if (saving || !pending.length) return;
+      saving = true; revision++;
+      renderPending();
+      status("Saving completion photos…");
+      try {
+        const entries = [...pending];
+        let next = 0, failure, recordTail = Promise.resolve();
+        async function saveNext() {
+          while (!failure && next < entries.length) {
+            const entry = entries[next++];
+            try {
+              if (!entry.uploaded) entry.uploaded = await config.uploadFile(entry.file);
+              // Upload together, but serialize audit writes to each shared order task.
+              await (recordTail = recordTail.catch(() => {}).then(async () => {
+                if (entry.replacement) {
+                  await correctPhoto(entry.replacement, entry.requestId, entry.uploaded);
+                } else for (const [orderId, lineIds] of targets(scope)) {
+                  if (entry.saved.has(orderId)) continue;
+                  // A lost response may have committed. Read before retrying the same photo.
+                  if (entry.attempted.has(orderId)) {
+                    const exists = (await fetchOrder(orderId)).some(event =>
+                      lineIds.every(id => event.payload?.order_line_ids?.includes(id)) &&
+                      event.photo_attachments?.some(p => p.path === entry.uploaded.path && p.bucket === entry.uploaded.bucket));
+                    if (exists) { entry.saved.add(orderId); continue; }
+                  }
+                  entry.attempted.add(orderId);
+                  const {error} = await config.getClient().rpc("add_tiktok_order_completion_photos", {
+                    _order_id: orderId, _order_line_ids: lineIds, _photo_attachments: [entry.uploaded],
+                    _note: null, _proof_type: "completion_photo", _signed_by_email: config.getActor(),
+                    _item_scope: scope.filter(l=>l.order_id===orderId).map(l=>({id:l.id,sku_id:l.item_number,quantity:l.quantity})).sort((a,b)=>a.id.localeCompare(b.id)),
+                  });
+                  if (error) throw error;
+                  entry.saved.add(orderId);
+                }
+              }));
+              pending = pending.filter(p => p !== entry);
+              URL.revokeObjectURL(entry.url);
+              renderPending();
+            } catch (error) { failure ||= error; }
+          }
+        }
+        // Bound memory/network use on phones; wait for both workers before enabling Retry.
+        await Promise.all([saveNext(), saveNext()]);
+        if (failure) throw failure;
+        status("Saved to the order. These photos also appear on the other device and in Order History.");
+        config.onSaved?.();
+      } catch (error) {
+        status(`${error.message || "Could not save photos."} Your remaining photos are still here; tap Save to retry.`, true);
+      } finally {
+        saving = false; revision++;
+        renderPending();
+        watchers.forEach(refresh => refresh());
+      }
+    }
+
+    function open(lines, picker = "") {
+      if (saving || pending.length) {
+        config.onOpen();
+        status("Save or remove the selected photos before switching orders.", true);
+        return;
+      }
+      if (!targets(lines).size) return;
+      scope = lines.filter(line => line?.id && line.order_id).map(line => ({...line}));
+      savedPhotos = []; replacementTarget = null;
+      returnFocus = document.activeElement;
+      renderOrderContext($("completion-photo-context"), scope, config.getCustomerName);
+      status("");
+      renderPending();
+      config.onOpen();
+      stopModalWatch?.();
+      $("completion-photo-saved").dataset.photos = "";
+      $("completion-photo-saved").textContent = "Loading saved photos…";
+      stopModalWatch = watch(scope, photos => {
+        savedPhotos = photos;
+        refreshSaved();
+        if ($("completion-photo-status").textContent.startsWith("Could not refresh saved photos:")) status("");
+      },
+        error => status(`Could not refresh saved photos: ${error.message || "Try again."}`, true));
+      if (picker) $(picker === "camera" ? "completion-photo-camera" : "completion-photo-files").click();
+      else $("done-completion-photos").focus();
+    }
+
+    function close() {
+      if (config.keepOpen?.()) return false;
+      if (saving || pending.length) {
+        status("Save or remove the selected photos before closing.", true);
+        return false;
+      }
+      stopModalWatch?.(); stopModalWatch = null;
+      config.onClose();
+      if (returnFocus?.isConnected) returnFocus.focus();
+      return true;
+    }
+
+    $("completion-photo-camera").addEventListener("change", chooseFiles);
+    $("completion-photo-files").addEventListener("change", chooseFiles);
+    $("completion-photo-replacement").addEventListener("change", chooseFiles);
+    $("completion-photo-replacement").addEventListener("cancel", () => {replacementTarget = null;});
+    $("save-completion-photos").addEventListener("click", save);
+    $("close-completion-photos").addEventListener("click", close);
+    $("done-completion-photos").addEventListener("click", close);
+    $("refresh-completion-photos").addEventListener("click", () => watchers.forEach(refresh => refresh()));
+    $("completion-photos-modal").addEventListener("click", event => {
+      if (event.target.id === "completion-photos-modal") close();
+    });
+    window.addEventListener("beforeunload", event => {
+      if (saving || pending.length) { event.preventDefault(); event.returnValue = ""; }
+    });
+    return {open, close, watch, renderGrid,
+      watchCoverage: (lines, onChange, onError) => watch(lines, onChange, onError, readCoverage, config.pollMs || 15000),
+      get lines() {return scope.map(line => ({...line}));},
+      get hasPending() { return saving || pending.length > 0; }};
+  }
+
+  window.TikTokCompletionPhotos = {create, renderOrderContext};
+})();

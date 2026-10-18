@@ -1,4 +1,4 @@
-/* Private, expiring PDF handoff to the configured Invsto print-stations page. */
+/* Private, expiring PDF handoff to the configured Invsto receiver. */
 (function () {
   'use strict';
   const PREFIX = 'ogOnlinePrint:', MAX = 10 * 1024 * 1024, TTL = 60 * 60 * 1000;
@@ -8,29 +8,31 @@
     try { const url = new URL(value); return url.origin === 'https://seller-us.tiktok.com' && /^\/easesafe\/oec_fulfillment_doc_na\/object\/[a-zA-Z0-9_-]+$/.test(url.pathname); }
     catch (_) { return false; }
   }
-  async function destination() {
+  async function destination(tiktokOrders = false) {
     const settings = await chrome.storage.sync.get('ogPendingOrdersUrl');
     if (!settings.ogPendingOrdersUrl) throw new Error('Set your OG Pending Orders URL in the extension options first.');
     const app = new URL(settings.ogPendingOrdersUrl);
     if (app.protocol !== 'https:' && !(app.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(app.hostname))) throw new Error('Use an HTTPS OG address.');
-    return new URL('print-stations.html', app);
+    return new URL(tiktokOrders ? 'pending-tiktok-orders.html' : 'print-stations.html', app);
   }
   function senderUrl(sender) {
     // sender.url identifies the frame; tab.url alone would trust unrelated frames.
     return new URL(sender.url || sender.tab?.url || 'about:blank');
   }
   function validId(id) { return typeof id === 'string' && /^[a-f0-9-]{36}$/i.test(id); }
+  function validOrders(value){return Array.isArray(value)?[...new Set(value.filter(id=>typeof id==='string'&&/^\d{10,24}$/.test(id)))].slice(0,50):[];}
   function validatePdf(base64) {
     if (typeof base64 !== 'string' || !base64 || base64.length > Math.ceil(MAX / 3) * 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) throw new Error('Choose a PDF smaller than 10 MB.');
     const binary = atob(base64);
     if (binary.length > MAX || !binary.slice(0, 1024).includes('%PDF-') || !binary.slice(-4096).includes('%%EOF')) throw new Error('TikTok returned an incomplete PDF. Download the full PDF and try again.');
   }
   async function handle(message, sender) {
-    const target = await destination(), source = senderUrl(sender);
+    const source = senderUrl(sender), tiktokOrders = message.type==='OG_ONLINE_PRINT_SEND' ? message.payload?.tiktokOrders===true : source.pathname.endsWith('/pending-tiktok-orders.html') && source.searchParams.has('tiktokLabels');
+    const target = await destination(tiktokOrders);
     if (['OG_TIKTOK_PRINT_BEGIN', 'OG_TIKTOK_PRINT_CANCEL'].includes(message.type)) {
       if (!isTikTok(source, sender) || !Number.isInteger(sender.tab?.id) || !validId(message.transferId)) throw new Error('Open TikTok Seller Center to print.');
       const key = CAPTURE + sender.tab.id;
-      if (message.type === 'OG_TIKTOK_PRINT_BEGIN') await chrome.storage.session.set({[key]: {id: message.transferId, until: Date.now() + 120000, sourceUrl: source.href}});
+      if (message.type === 'OG_TIKTOK_PRINT_BEGIN') await chrome.storage.session.set({[key]: {id: message.transferId, until: Date.now() + 120000, sourceUrl: source.href,tiktokOrders:message.tiktokOrders===true,orderNumbers:validOrders(message.orderNumbers)}});
       else if ((await chrome.storage.session.get(key))[key]?.id === message.transferId) await chrome.storage.session.remove(key);
       return {ok: true};
     }
@@ -44,18 +46,18 @@
       if (expired.length) await chrome.storage.local.remove(expired);
       const existing = stored[key];
       if (existing && Date.now() - existing.createdAt <= TTL) return {ok: true, transferId};
-      await chrome.storage.local.set({[key]: {transferId, base64: message.payload.base64, title: 'TikTok shipping label', target: target.href, createdAt: Date.now()}});
-      target.searchParams.set('onlinePrintTransfer', transferId);
+      await chrome.storage.local.set({[key]: {transferId, base64: message.payload.base64, title: 'TikTok shipping label', target: target.href, createdAt: Date.now(),orderNumbers:validOrders(message.payload.orderNumbers)}});
+      target.searchParams.set(tiktokOrders?'tiktokLabels':'onlinePrintTransfer', transferId);
       try { await chrome.tabs.create({url: target.href, active: true}); }
       catch (error) { await chrome.storage.local.remove(key); throw error; }
       return {ok: true, transferId};
     }
-    if (source.origin !== target.origin || source.pathname !== target.pathname || sender.frameId > 0) throw new Error('Open the configured OG Print stations page.');
+    if (source.origin !== target.origin || source.pathname !== target.pathname || sender.frameId > 0) throw new Error('Open the configured OG receiver page.');
     const id = message.transferId;
-    if (!validId(id) || source.searchParams.get('onlinePrintTransfer') !== id) throw new Error('Invalid print transfer.');
+    if (!validId(id) || source.searchParams.get(tiktokOrders?'tiktokLabels':'onlinePrintTransfer') !== id) throw new Error('Invalid print transfer.');
     const key = PREFIX + id, record = (await chrome.storage.local.get(key))[key];
     if (!record || record.target !== target.href || Date.now() - record.createdAt > TTL) {
-      if (record) await chrome.storage.local.remove(key);
+      if (record && Date.now() - record.createdAt > TTL) await chrome.storage.local.remove(key);
       throw new Error('This label handoff expired. Send the PDF from TikTok again.');
     }
     if (message.type === 'OG_ONLINE_PRINT_GET') return {ok: true, payload: record};
@@ -96,7 +98,7 @@
       for (const chunk of chunks) for (let i = 0; i < chunk.length; i += 32768) binary += String.fromCharCode(...chunk.subarray(i, i + 32768));
       const current = (await chrome.storage.session.get(key))[key];
       if (current?.id !== capture.id || current.until < Date.now()) return;
-      await dispatch({type: 'OG_ONLINE_PRINT_SEND', payload: {transferId: capture.id, base64: btoa(binary)}}, {url: capture.sourceUrl, tab: {id: sourceId}, frameId: 0});
+      await dispatch({type: 'OG_ONLINE_PRINT_SEND', payload: {transferId: capture.id, base64: btoa(binary),tiktokOrders:capture.tiktokOrders,orderNumbers:capture.orderNumbers}}, {url: capture.sourceUrl, tab: {id: sourceId}, frameId: 0});
       await chrome.storage.session.remove(key);
       await chrome.tabs.sendMessage(sourceId, {type: 'OG_TIKTOK_PRINT_CAPTURE_STATUS', transferId: capture.id, ok: true}).catch(() => {});
     } catch (error) {

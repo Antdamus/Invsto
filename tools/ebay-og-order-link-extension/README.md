@@ -206,4 +206,16 @@ In TikTok Orders, expand **OG · TikTok orders**. Open Export, choose **To ship 
 
 The private handoff expires after one hour and its CSV is cleared after a successful import. Opening the destination never imports automatically. **Watch full receipt in TikTok** opens that order; this extension opens its video receipt automatically when the page has exactly one receipt. Multiple receipts stay available for staff to choose.
 
-The existing TikTok Print → Print through OG flow is unchanged. Shipping PDFs can also be attached to a TikTok order and sent through the shared online-printer picker. OG order packets are separate 4×6 packing slips, not postage.
+OG order packets are separate 4×6 packing slips, not postage.
+
+## TikTok shipping and completion (1.0.19)
+
+OG offers single/combined labels per buyer and bulk labels for selected buyers (up to 50 orders). The extension searches those exact IDs in TikTok, checks that all requested orders are awaiting shipment and selects them before opening Arrange shipment. Missing rows, AI search, changed statuses or extra selections stop the handoff. Review combinations, package details and postage in TikTok; the extension does not buy postage.
+
+**Print → Print through OG** now sends TikTok labels to `pending-tiktok-orders.html`. Review the page-to-order matches and save; each order receives only its matching PDF pages. Then use the existing printer picker. Unknown PDF matches require entering the order IDs. The private transfer expires after one hour and clears its PDF after successful attachment. Manual **Add shipping-label PDF** in OG provides the same flow.
+
+Use **Complete order** or **Use my phone** in OG to pair a staff phone, add completion photos, and finish the order in separate TikTok history. The phone makes large and thumbnail JPEGs locally. Completion requires label coverage, current-item photos and the staff confirmation. eBay's label, phone and completion workflows are unchanged.
+
+Download the ZIP, extract over the installed extension folder, reload OG eBay Order Link in the browser's extensions page, and refresh TikTok and OG. The phone itself only needs OG and a staff login.
+
+OG also provides TikTok item found/not found, watch/missing-watch, CGL certificate and cancellation-review controls. Scan/link inventory on an item before completing; only linked units are deducted at completion. These app controls do not require an extension permission change. Cancellations themselves are performed in TikTok and confirmed by a fresh export.

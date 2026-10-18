@@ -3,6 +3,7 @@
   if (window.__ogTikTokPrintUI) return;
   window.__ogTikTokPrintUI = true;
   let bypass = null, pending = null, timer, dialog, sending = false;
+  function orderNumbers(){try{const c=JSON.parse(sessionStorage.getItem('ogTikTokLabelContext')||'null');return c&&Date.now()-c.at<3600000&&Array.isArray(c.ids)?c.ids:[];}catch{return [];}}
   function message(text) {
     let box = document.getElementById('og-tiktok-print-status');
     if (!box) {
@@ -22,7 +23,7 @@
     if (dialog?.open || pending) return;
     dialog = document.createElement('dialog');
     dialog.style.cssText = 'border:0;border-radius:16px;padding:28px;max-width:440px;color:#172b29;font:16px/1.5 system-ui;box-shadow:0 16px 80px #0006';
-    dialog.innerHTML = '<h2 style="margin-top:0">Print shipping label</h2><p>Send this TikTok label to your online printer through OG.</p><p>Choose <strong>PDF</strong> and <strong>4x6 inches</strong> in TikTok. In OG, choose the printer, pages and copies before sending.</p><div style="display:flex;gap:10px;flex-wrap:wrap"><button data-og>Print through OG</button><button data-native>Use TikTok print</button><button data-cancel>Cancel</button></div>';
+    dialog.innerHTML = '<h2 style="margin-top:0">Print shipping label</h2><p>Send this TikTok label to your online printer through OG.</p><p>Choose <strong>PDF</strong> and <strong>4x6 inches</strong> in TikTok. In OG, confirm the orders covered by each label page, then choose your printer and copies.</p><div style="display:flex;gap:10px;flex-wrap:wrap"><button data-og>Print through OG</button><button data-native>Use TikTok print</button><button data-cancel>Cancel</button></div>';
     for (const item of dialog.querySelectorAll('button')) item.style.cssText = 'padding:10px 14px;border:1px solid #b9c9c6;border-radius:8px;cursor:pointer';
     dialog.querySelector('[data-og]').style.cssText += ';background:#09675d;color:white';
     const close = () => { dialog.close(); dialog.remove(); dialog = null; };
@@ -35,7 +36,7 @@
       timer = setTimeout(() => { cancel(); message('No PDF was received. Try Print again with PDF and 4x6 inches selected, or download the PDF and use Choose PDF in the extension options.'); }, 120000);
       const id = pending.id;
       try {
-        const response = await chrome.runtime.sendMessage({type: 'OG_TIKTOK_PRINT_BEGIN', transferId: id});
+        const response = await chrome.runtime.sendMessage({type: 'OG_TIKTOK_PRINT_BEGIN', transferId: id,tiktokOrders:true,orderNumbers:orderNumbers()});
         if (!response?.ok) throw new Error(response?.error || 'Could not prepare OG printing.');
         if (pending?.id === id) window.postMessage({type: 'OG_TIKTOK_PRINT_ARM', id}, location.origin);
       } catch (error) { if (pending?.id === id) { cancel(); message(error.message); } }
@@ -60,7 +61,7 @@
   }, true);
   chrome.runtime.onMessage?.addListener(incoming => {
     if (incoming?.type !== 'OG_TIKTOK_PRINT_CAPTURE_STATUS' || incoming.transferId !== pending?.id) return;
-    cancel(); message(incoming.ok ? 'The PDF is ready in OG. Choose your online printer there and press Send labels.' : incoming.error);
+    cancel(); message(incoming.ok ? 'The PDF is ready in TikTok orders in OG. Confirm which orders its pages cover, then choose your printer.' : incoming.error);
   });
   window.addEventListener('message', async event => {
     if (event.source !== window || event.origin !== location.origin || !pending) return;
@@ -71,9 +72,9 @@
     if (event.data?.type !== 'OG_TIKTOK_PDF' || event.data.payload?.transferId !== pending?.id || sending) return;
     sending = true;
     try {
-      const response = await chrome.runtime.sendMessage({type: 'OG_ONLINE_PRINT_SEND', payload: event.data.payload});
+      const response = await chrome.runtime.sendMessage({type: 'OG_ONLINE_PRINT_SEND', payload: {...event.data.payload,tiktokOrders:true,orderNumbers:orderNumbers()}});
       if (!response?.ok) throw new Error(response?.error || 'Could not open OG.');
-      cancel(); message('The PDF is ready in OG. Choose your online printer there and press Send labels.');
+      cancel(); message('The PDF is ready in TikTok orders in OG. Confirm which orders its pages cover, then choose your printer.');
     } catch (error) { cancel(); message(error.message + ' Download the PDF and use Choose PDF in the extension options to retry.'); }
     finally { sending = false; }
   });

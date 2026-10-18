@@ -19,7 +19,7 @@ async function setup(page,{receiptId=''}={}){
   const tables={tiktok_orders:[],tiktok_order_lines:[],tiktok_order_imports:[],tiktok_order_events:[],tiktok_order_documents:[],tiktok_order_receipt_photos:[]};window.fixtureTables=tables;window.fixtureCalls=[];
   window.supabase={auth:{getSession:async()=>({data:{session:{user:{id:'fixture-user'}}}})},from(name){if(!name.startsWith('tiktok_'))throw Error('Cross-marketplace access: '+name);let matches=tables[name]||[];const q={select(){return q;},order(){return q;},in(k,values){matches=matches.filter(x=>values.includes(x[k]));return q;},eq(k,v){matches=matches.filter(x=>x[k]===v);return q;},range(a,b){return Promise.resolve({data:matches.slice(a,b+1)});},limit(n){return Promise.resolve({data:matches.slice(0,n)});},then(resolve){return Promise.resolve({data:matches}).then(resolve);}};return q;},rpc:async(name,args)=>{window.fixtureCalls.push({name,args});if(name==='import_tiktok_orders'){for(const r of args._rows){tables.tiktok_orders.push({...r,id:'order-1',revision:1,stage:'pending',notes:'',source_snapshot_at:args._snapshot_at});tables.tiktok_order_lines.push({...r,id:'line-1',order_id:'order-1'});}tables.tiktok_order_imports.push({filename:args._filename,snapshot_at:args._snapshot_at,imported_at:new Date().toISOString()});return {data:{added:1,refreshed:0,stale:0,history_skipped:0}};}if(name==='update_tiktok_order'){Object.assign(tables.tiktok_orders[0],{stage:args._stage,notes:args._notes,ship_by_date:args._ship_by,revision:2});return {data:tables.tiktok_orders[0]};}throw Error('Unexpected RPC '+name);}};
  });
- for(const src of ['vendor/pdf-lib/pdf-lib.min.js','tiktok-order-import.js','tiktok-order-packet.js','tiktok-order-queue.js','tiktok-receipt-photos.js','tiktok-orders.js'])await page.addScriptTag({url:origin+'/'+src});
+ for(const src of ['vendor/pdf-lib/pdf-lib.min.js','tiktok-order-import.js','tiktok-order-packet.js','tiktok-order-queue.js','tiktok-receipt-photos.js','tiktok-shipping.js','tiktok-orders.js'])await page.addScriptTag({url:origin+'/'+src});
  await expect(page.locator('#tk-status')).toContainText('Import your first');
 }
 test('TikTok preview, import, preparation/history and packet download use only TikTok data on desktop and mobile',async()=>{
@@ -38,6 +38,22 @@ test('TikTok preview, import, preparation/history and packet download use only T
  await page.evaluate(()=>scrollTo(0,0));await page.screenshot({animations:'disabled',path:new URL('../outputs/tiktok-pipeline/tiktok-detail.png',import.meta.url).pathname.replace(/^\/(.:)/,'$1'),fullPage:true});
  await page.locator('#tk-close-detail').click();await page.setViewportSize({width:390,height:844});await page.evaluate(()=>scrollTo(0,0));await page.screenshot({animations:'disabled',path:new URL('../outputs/tiktok-pipeline/tiktok-mobile.png',import.meta.url).pathname.replace(/^\/(.:)/,'$1'),fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  assert.deepEqual(errors,[]);await page.close();
+});
+
+test('shipping buttons prepare single buyers and selected batches, including siblings hidden by an order search',async()=>{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});await setup(page);
+ await page.evaluate(()=>{
+  const t=fixtureTables;for(const [id,number,buyer] of [['a','577620684385522369','one'],['b','577620723998233281','one'],['c','577620723998233282','two']]){t.tiktok_orders.push({id,order_number:number,buyer_username:buyer,marketplace_status:'To ship',marketplace_substatus:'Awaiting shipment',stage:'pending'});t.tiktok_order_lines.push({id:'line-'+id,order_id:id,title:'Jewelry',quantity:1});}
+  window.opened=[];window.closedPopups=0;window.open=()=>({opener:null,close(){closedPopups++;},location:{replace:url=>opened.push(url)}});
+  window.extensionVersion='1.0.19';window.addEventListener('message',e=>{if(e.data?.type==='OG_EBAY_EXTENSION_VERSION_REQUEST')window.postMessage({type:'OG_EBAY_EXTENSION_VERSION_RESPONSE',requestId:e.data.requestId,version:extensionVersion},location.origin);});
+ });
+ await page.locator('#tk-refresh').click();await expect(page.getByRole('button',{name:'Create combined label',exact:true})).toHaveCount(1);await expect(page.getByRole('button',{name:'Create shipping label',exact:true})).toHaveCount(1);
+ await page.locator('#tk-search').fill('577620684385522369');await page.getByRole('button',{name:'Create combined label',exact:true}).click();await expect.poll(()=>page.evaluate(()=>opened.length)).toBe(1);
+ assert.equal(new URLSearchParams(new URL(await page.evaluate(()=>opened[0])).hash.slice(1)).get('ogLabels'),'577620684385522369;577620723998233281');
+ await page.locator('#tk-search').fill('');await page.getByRole('button',{name:'Select visible buyers',exact:true}).click();await expect(page.locator('#tk-label-selection')).toContainText('2 buyers · 3 orders');await page.locator('#tk-create-labels').click();await expect.poll(()=>page.evaluate(()=>opened.length)).toBe(2);
+ assert.equal(new URLSearchParams(new URL(await page.evaluate(()=>opened[1])).hash.slice(1)).get('ogLabels').split(';').length,3);
+ await page.getByRole('button',{name:'Clear selection',exact:true}).click();await expect(page.locator('#tk-create-labels')).toBeDisabled();
+ await page.evaluate(()=>extensionVersion='1.0.18');await page.getByRole('button',{name:'Create shipping label',exact:true}).click();await expect(page.locator('#tk-status')).toContainText('v1.0.19');assert.equal(await page.evaluate(()=>opened.length),2);assert.equal(await page.evaluate(()=>closedPopups),1);await page.close();
 });
 
 test('late receipt capture saves to the exact SKU, shows its image, and duplicate deliveries do not save again',async()=>{

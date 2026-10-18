@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "OG eBay Order Link",
   "description": "Connects eBay orders and separate TikTok exports, receipts and shipping labels to OG.",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "permissions": [
     "storage",
     "activeTab",
@@ -45,7 +45,7 @@
     },
     {
       "matches": ["https://seller-us.tiktok.com/*"],
-      "js": ["tiktok-print.js", "tiktok-receipt-capture.js", "tiktok-orders.js"],
+      "js": ["tiktok-print.js", "tiktok-receipt-capture.js", "tiktok-orders.js", "tiktok-shipping.js"],
       "run_at": "document_start"
     },
     {
@@ -72,6 +72,7 @@
         "app-bridge.js",
         "online-print-bridge.js",
         "tiktok-orders-bridge.js",
+        "tiktok-labels-bridge.js",
         "tiktok-receipt-bridge.js"
       ],
       "run_at": "document_idle"
