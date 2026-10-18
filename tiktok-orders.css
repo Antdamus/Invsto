@@ -25,7 +25,7 @@
 .tiktok-workspace .order-marketplace-tabs{margin:0}
 .tiktok-workspace .order-marketplace-tabs a{color:#26483b}
 .tiktok-workspace .order-marketplace-tabs a[aria-current=page]{color:white}
-.tk-views{display:flex;gap:24px;border-bottom:1px solid var(--line);margin:0 0 2px}
+.tk-views{display:flex;flex-wrap:wrap;gap:0 24px;border-bottom:1px solid var(--line);margin:0 0 2px}
 .tk-views a{padding:10px 0;text-decoration:none;color:var(--muted);font-weight:700;font-size:14px}
 .tk-views a[aria-current=page]{color:var(--gold);border-bottom:3px solid var(--gold)}
 .tk-help{font-size:12px;color:var(--muted);line-height:1.6;margin:0}
@@ -177,3 +177,17 @@ body.phone-camera-mode>.tk-proof-viewer[open]{display:block!important}
 .tk-work-line{margin-top:12px;padding-top:10px;border-top:1px solid #d9e3dc}.tk-work-line .tk-actions{gap:7px;margin:6px 0}.tk-work-line button{font-size:12px;padding:7px 10px}.tk-work-line .is-selected,.tk-work-ok{color:#16633f;background:#edf8f1}.tk-work-alert{color:#90350f;background:#fff1e5}.tk-work-alert,.tk-work-ok{padding:5px 8px;border-radius:8px;font-size:12px}.tk-work-line [data-work-status]:empty{display:none}.tk-work-dialog textarea{width:100%;min-height:80px;margin:8px 0}.tk-work-dialog h2{padding-right:30px}.tk-work-line button:disabled{opacity:.7}.tk-work-line .is-selected:disabled{opacity:1}
 
 .tk-review-selection{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:16px 0}.tk-review-selection p{flex-basis:100%;margin:0;color:var(--muted,#b8c0cc)}.tiktok-workspace .tk-review-select{display:flex;align-items:center;gap:10px;min-height:44px;cursor:pointer;font-weight:650}.tk-review-select input{width:20px;height:20px;accent-color:#e7cd83;flex:0 0 auto}.tk-review-item.is-excluded{border-left:3px solid #7c7f86;padding-left:12px}.tk-review-item:not(.is-excluded) .tk-review-select{color:#eed893}
+
+/* Cancellation is visible in collapsed cards, item rows and import previews. */
+.tiktok-workspace .tk-cancelled-badge{display:inline-flex;align-items:center;width:fit-content;max-width:100%;padding:6px 10px;border:1px solid #e37b7b88;border-radius:999px;background:#a82f3833;color:#ffc7c7;font-size:12px;font-weight:750;line-height:1.4;text-decoration:none}
+.tiktok-workspace .orders-panel .tk-buyer.buyer-order-card.has-cancellation{border-color:#b85b6480}
+.tiktok-workspace .tk-order-row.has-cancellation,.tiktok-workspace .tk-order-item.is-cancelled{border-left:4px solid #db737d;background:linear-gradient(100deg,#94283824,transparent)}
+.tiktok-workspace .tk-order-item.is-cancelled .tk-item-title h4{color:#ffc7c7}
+.tiktok-workspace .tk-cancel-action{border-color:#d77a7a77;color:#ffc7c7;background:#9d343422}
+.tiktok-workspace .tk-cancel-action:hover{background:#9d343444}
+.tk-cancel-order-list{display:grid;gap:10px;border:1px solid #d77a7a55;border-radius:12px;padding:14px;min-width:0}
+.tk-cancel-order-list small{display:block;font-weight:400;overflow-wrap:anywhere;margin-top:4px}
+.tk-cancellation-scope{padding:12px;border-left:4px solid #db737d;background:#94283824;border-radius:8px}
+.tk-preview-scroll tr.is-cancelled{background:#94283824}
+.tiktok-cancelled-view .tk-packing-actions{display:none}
+.tk-order-deadline[hidden]{display:none}

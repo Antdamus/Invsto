@@ -162,3 +162,8 @@ test('work buttons remain usable on a phone and closed history keeps changes rea
  }
  db.tables.tiktok_orders[0].stage='completed';const history=await open(t,db,{history:true});await history.locator('[data-expand="buyer-one"]').first().click();await expect(history.locator('[data-tk-work="found"]')).toBeDisabled();await expect(history.locator('[data-tk-cancel]')).toBeDisabled();await expect(history.locator('[data-certificate-line]')).toBeEnabled();
 });
+
+test('completion automatically excludes cancelled items while keeping the other buyer items selectable',async t=>{
+ const db=fixture();db.tables.tiktok_order_lines[0].cancelled_at='2026-10-18';db.tables.tiktok_order_lines.push({id:'line-extra',order_id:'order-0',sku_id:'1732759903849189629',title:'Available necklace',quantity:1});
+ const page=await open(t,db);await page.locator('[data-tiktok-finish="buyer-one"]').click();const cancelled=page.locator('[data-review-line="line-0"]');await expect(cancelled).toContainText('Cancelled · excluded from completion');await expect(cancelled.locator('[data-complete-line]')).not.toBeChecked();await expect(cancelled.locator('[data-complete-line]')).toBeDisabled();await expect(page.locator('[data-complete-line="line-extra"]')).toBeChecked();await expect(page.locator('[data-complete-line="line-1"]')).toBeChecked();
+});

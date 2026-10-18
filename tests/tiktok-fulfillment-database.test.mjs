@@ -20,7 +20,7 @@ await db.exec(await readFile(new URL('../supabase/migrations/20261018090000_tikt
 await db.exec(`create function is_admin() returns boolean language sql as $$select false$$;`);
 await db.exec(await readFile(new URL('../supabase/migrations/20261018100000_tiktok_work_controls.sql',import.meta.url),'utf8'));
 await db.exec(await readFile(new URL('../supabase/migrations/20261018180000_tiktok_completion_review.sql',import.meta.url),'utf8'));
-await reversalSetup();for(const file of ['20261018200000_tiktok_line_completion.sql','20261018220000_tiktok_cancellation_sync.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));});
+await reversalSetup();for(const file of ['20261018200000_tiktok_line_completion.sql','20261018220000_tiktok_cancellation_sync.sql','20261018230000_tiktok_line_cancellations.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));});
 after(()=>db.close());
 beforeEach(async()=>{await db.exec(`reset role;set test.allowed='yes';set test.actor='${actor}';truncate tiktok_inventory_attachments,stock_transactions,item_stock_locations,item_types,locations,store_locations,active_stock_reservations,tiktok_order_completion_photos,tiktok_order_phone_camera_requests,tiktok_order_phone_camera_sessions,tiktok_order_documents,tiktok_order_events,tiktok_order_lines,tiktok_orders,tiktok_order_imports,storage.objects cascade;`);orders=(await db.query("insert into tiktok_orders(order_number,buyer_username,marketplace_status,marketplace_substatus,source_snapshot_at) values('577620684385522369','buyer','To ship','Awaiting shipment',now()-interval '1 day'),('577620723998233281','buyer','To ship','Awaiting shipment',now()-interval '1 day') returning *")).rows;lines=(await db.query("insert into tiktok_order_lines(order_id,sku_id,title,quantity) select id,'1732759903849189622','Ring',1 from tiktok_orders returning *")).rows;});
 const scope=o=>lines.filter(l=>l.order_id===o.id).map(l=>({id:l.id,sku_id:l.sku_id,quantity:l.quantity})).sort((a,b)=>a.id.localeCompare(b.id));
@@ -275,13 +275,13 @@ test('only managers correct manual marks, restoring the original cancellation ho
  await db.exec("update employees set role='manager'");await markCancelled(orders[0],false,'Mistaken order number');await fresh();assert.equal(orders[0].marketplace_status,'To ship');assert.equal(orders[0].cancellation_record,null);
  const hold=(await db.query('select * from tiktok_order_cancellations where order_id=$1',[orders[0].id])).rows[0];assert.equal(hold.pending,true);assert.equal(hold.reason,'Hold for buyer');assert.equal((await db.query("select count(*)::int n from tiktok_order_events where action='cancellation_corrected'")).rows[0].n,1);
 });
-test('status refresh audits known cancellations, skips unknown history, ignores stale reports and cannot silently reopen cancellations',async()=>{
+test('status refresh audits known and newly discovered cancellations, ignores stale reports and cannot silently reopen cancellations',async()=>{
  await reversalSetup();await inventory();await link();await db.query("select set_tiktok_cancellation($1,0,true,'Waiting for TikTok')",[orders[0].id]);await fresh();
  const row={order_number:orders[0].order_number,sku_id:lineOf(orders[0]).sku_id,title:'Ring',quantity:1,buyer_username:'buyer',marketplace_status:'Canceled',marketplace_substatus:'Canceled',cancel_return:'Cancelled by buyer'};
  const imported=(rows,hash,offset)=>db.query("select import_tiktok_orders($1,$2,'All orders.csv',now()+$3::interval) r",[JSON.stringify(rows),hash.repeat(64),offset]);
- const result=(await imported([row,{...row,order_number:'577623648796643333'}],'a','-1 hour')).rows[0].r;assert.equal(result.refreshed,1);assert.equal(result.history_skipped,1);await fresh();assert.equal(orders[0].cancellation_record.source,'export');assert.equal(orders[1].marketplace_status,'To ship');assert.equal(await stock(),5);
+ const result=(await imported([row,{...row,order_number:'577623648796643333'}],'a','-1 hour')).rows[0].r;assert.equal(result.refreshed,1);assert.equal(result.history_skipped,0);assert.equal(result.added,1);await fresh();assert.equal(orders[0].cancellation_record.source,'export');assert.equal(orders[1].marketplace_status,'To ship');assert.equal(await stock(),5);
  assert.equal((await db.query('select pending from tiktok_order_cancellations where order_id=$1',[orders[0].id])).rows[0].pending,false);
- const audit=(await db.query("select * from tiktok_order_events where action='cancellation_imported'")).rows;assert.equal(audit.length,1);assert.equal(audit[0].details.before.marketplace_status,'To ship');assert.equal(audit[0].details.source,'export');assert.equal(audit[0].actor,actor);
+ const audit=(await db.query("select * from tiktok_order_events where action='cancellation_imported'")).rows;assert.equal(audit.length,2);assert.equal(audit.find(e=>e.order_id===orders[0].id).details.before.marketplace_status,'To ship');assert.equal(audit[0].details.source,'export');assert.equal(audit[0].actor,actor);
  assert.equal((await imported([row],'a','-1 hour')).rows[0].r.already_imported,true);
  const active={...row,marketplace_status:'To ship',marketplace_substatus:'Awaiting shipment'};assert.equal((await imported([active],'b','-2 hours')).rows[0].r.stale,1);
  await imported([active],'c','-30 minutes');await fresh();assert.equal(orders[0].marketplace_status,'Canceled');assert.equal((await db.query("select count(*)::int n from tiktok_order_events where action='cancellation_refresh_conflict'")).rows[0].n,1);
@@ -291,4 +291,38 @@ test('cancellation cannot bypass staff permissions or directly edit audit rows, 
  await finished();assert.equal(await stock(),4);await markCancelled();assert.equal(await stock(),4);await fresh();assert.equal(orders[0].stage,'completed');
  await db.exec("set test.allowed='no';set role authenticated");await assert.rejects(markCancelled(orders[1]),/access required/);await assert.rejects(db.query("update tiktok_orders set marketplace_status='Canceled'"),/permission denied/);await assert.rejects(db.query('delete from tiktok_order_events'),/permission denied/);
  await db.exec("reset role;set test.allowed='yes';set test.actor=''");await assert.rejects(markCancelled(orders[1]));
+});
+
+const cancelLine=(line,o=orders[0],cancelled=true,reason='Item cancellation verified in TikTok',confirmed=true)=>db.query('select record_tiktok_line_cancellation($1,$2,$3,$4,$5) r',[line.id,o.revision,cancelled,reason,confirmed]);
+test('item cancellation is audited, retry-safe, survives imports and cannot deduct the cancelled stock',async()=>{
+ const extra=await extraLine(),live=lineOf(orders[0]);await inventory();await link();await db.query('select save_tiktok_inventory_attachment($1,$2,$3,$4,2,0)',[extra.id,itemId,stockId,storeId]);
+ await objects();await attach([{order_id:orders[0].id,path:label,pages:[1]}]);await save(orders[0],photo,[scope(orders[0]).find(l=>l.id===live.id)]);await fresh();const previous=orders[0];
+ await db.exec('set role authenticated');await cancelLine(extra,previous);await cancelLine(extra,previous);await db.exec('reset role');await fresh();assert.equal(await stock(),5);
+ const events=(await db.query("select * from tiktok_order_events where action='line_cancellation_confirmed'")).rows;assert.equal(events.length,1);assert.equal(events[0].actor,actor);assert.equal(events[0].details.sku_id,extra.sku_id);assert.equal(events[0].details.quantity,2);assert.equal(events[0].details.inventory_changed,false);
+ await assert.rejects(completeLines([extra.id]),/cancelled/);await assert.rejects(complete([orders[0]]),/cancelled/);await assert.rejects(db.query("select save_tiktok_line_work($1,0,'found')",[extra.id]),/read-only/);
+ const row={order_number:orders[0].order_number,buyer_username:'buyer',marketplace_status:'To ship',marketplace_substatus:'Awaiting shipment',sku_id:extra.sku_id,title:extra.title,quantity:extra.quantity};
+ await db.query("select import_tiktok_orders($1,$2,'All orders.csv',now())",[JSON.stringify([row]),'d'.repeat(64)]);assert.ok((await db.query('select cancelled_at from tiktok_order_lines where id=$1',[extra.id])).rows[0].cancelled_at);await fresh();
+ assert.equal((await completeLines([live.id])).rows[0].r.completed,1);assert.equal(await stock(),4);await fresh();assert.equal(orders[0].stage,'completed');
+ const stopped=(await db.query('select * from tiktok_order_lines where id=$1',[extra.id])).rows[0];assert.ok(stopped.cancelled_at);assert.equal(stopped.fulfilled_at,null);
+ assert.equal((await db.query('select consumed_quantity from tiktok_inventory_attachments where line_id=$1',[extra.id])).rows[0].consumed_quantity,0);
+ await reversalSetup();await cancelLine(extra,orders[0],false,'Wrong item was selected');await fresh();assert.equal(orders[0].stage,'preparing');assert.ok(orders[0].reopened_at);assert.equal(await stock(),4);
+ assert.equal((await db.query("select count(*)::int n from tiktok_order_events where action='line_cancellation_corrected'")).rows[0].n,1);
+});
+test('item cancellation rejects stale, unconfirmed, unauthorized and non-manager corrections',async()=>{
+ const line=lineOf(orders[0]);await assert.rejects(cancelLine(line,orders[0],true,'Valid reason',false),/Confirm/);await assert.rejects(cancelLine(line,orders[0],true,'x'),/reason/);await assert.rejects(cancelLine(line,{...orders[0],revision:999}),/changed/);
+ await cancelLine(line);await fresh();await assert.rejects(db.query("select update_tiktok_order($1,$2,'packed','',null,true)",[orders[0].id,orders[0].revision]),/cancelled/);await db.exec("update employees set role='employee'");await assert.rejects(cancelLine(line,orders[0],false,'Wrong item'),/managers/);
+ await db.exec("set test.allowed='no'");await assert.rejects(cancelLine(line),/access required/);await db.exec("set test.allowed='yes';set role authenticated");await assert.rejects(db.query('update tiktok_order_lines set cancelled_at=null'),/permission denied/);await db.exec('reset role');
+});
+test('buyer cancellation is atomic, scoped to selected orders, and preserves their evidence',async()=>{
+ const args=()=>[orders.map(o=>o.id),JSON.stringify(Object.fromEntries(orders.map(o=>[o.id,o.revision]))),'Buyer cancellation confirmed in TikTok',true];
+ const stale=args();stale[1]=JSON.stringify({[orders[0].id]:orders[0].revision,[orders[1].id]:999});await assert.rejects(db.query('select record_tiktok_buyer_cancellations($1,$2,$3,$4)',stale),/changed/);assert.equal((await db.query("select count(*)::int n from tiktok_order_events where action='cancellation_confirmed'")).rows[0].n,0);
+ await db.query('select record_tiktok_buyer_cancellations($1,$2,$3,$4)',[[orders[0].id],args()[1],args()[2],true]);await fresh();assert.equal(orders[0].marketplace_status,'Canceled');assert.equal(orders[1].marketplace_status,'To ship');
+ assert.equal((await db.query("select count(*)::int n from tiktok_order_events where action='cancellation_confirmed'")).rows[0].n,1);
+});
+
+test('reimporting an old file recovers only its skipped cancellations, once, without refreshing existing orders',async()=>{
+ const hash='e'.repeat(64);await db.query("insert into tiktok_order_imports(file_hash,filename,snapshot_at,imported_by,result) values($1,'All orders.csv',now()-interval '1 hour',$2,$3)",[hash,actor,JSON.stringify({added:0,refreshed:1,history_skipped:1})]);
+ const rows=[{order_number:orders[0].order_number,buyer_username:'buyer',marketplace_status:'To ship',marketplace_substatus:'Awaiting shipment',sku_id:lineOf(orders[0]).sku_id,title:'Changed title must be ignored',quantity:5},{order_number:'577623648796643339',buyer_username:'buyer',marketplace_status:'Canceled',marketplace_substatus:'Canceled',sku_id:'1732765489814737199',title:'Cancelled ring',quantity:1}];
+ const call=()=>db.query("select import_tiktok_orders($1,$2,'All orders.csv',now()) r",[JSON.stringify(rows),hash]);assert.equal((await call()).rows[0].r.cancelled_recovered,1);assert.equal((await call()).rows[0].r.already_imported,true);
+ assert.equal((await db.query('select quantity from tiktok_order_lines where id=$1',[lineOf(orders[0]).id])).rows[0].quantity,1);assert.equal((await db.query('select count(*)::int n from tiktok_order_imports')).rows[0].n,1);assert.equal((await db.query("select count(*)::int n from tiktok_order_events where action='cancellation_imported'")).rows[0].n,1);
 });

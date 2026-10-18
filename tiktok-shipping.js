@@ -2,7 +2,7 @@
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.TikTokShipping=api;})(typeof globalThis==='object'?globalThis:this,function(){
  'use strict';
  const MAX_ORDERS=50;
- function eligible(o){return o.marketplace_status==='To ship'&&['Awaiting shipment','Awaiting collection'].includes(o.marketplace_substatus)&&!['dispatched','completed'].includes(o.stage)&&!o.cancel_return&&!o.cancellation?.pending&&o.lines?.length>0&&!o.documents?.some(d=>d.kind==='label');}
+ function eligible(o){return o.marketplace_status==='To ship'&&['Awaiting shipment','Awaiting collection'].includes(o.marketplace_substatus)&&!['dispatched','completed'].includes(o.stage)&&!o.cancel_return&&!o.cancellation?.pending&&o.lines?.some(l=>!l.cancelled_at&&!l.fulfilled_at)&&!o.documents?.some(d=>d.kind==='label');}
  function hasLabel(o){return o.marketplace_substatus==='Awaiting collection'||o.lines?.some(l=>l.tracking_number);}
  function actionLabel(orders){
   const existing=orders.filter(hasLabel).length;

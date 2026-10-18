@@ -44,3 +44,11 @@ test('a shipped export cannot hide inventory links still awaiting OG completion'
  const o=order('1','buyer','2026-10-17',{marketplace_status:'Shipped',lines:[{quantity:1,inventory:{quantity:1,consumed_quantity:0}}]});assert.equal(q.closed(o),false);
  o.lines[0].inventory.consumed_quantity=1;assert.equal(q.closed(o),true);o.lines[0].inventory.consumed_quantity=0;o.marketplace_status='Canceled';assert.equal(q.closed(o),true);
 });
+
+test('cancelled items stay visible but unavailable; mixed orders close only after active items complete',()=>{
+ const partial=order('1','Alice',null,{lines:[{id:'cancel',quantity:1,cancelled_at:'2026-10-18',work:{item_search:'not_found'}},{id:'live',quantity:1}]});
+ assert.equal(q.closed(partial),false);assert.equal(q.held(partial),false);assert.equal(q.hasCancellation(partial),true);assert.equal(q.lineCancelled(partial.lines[0],partial),true);
+ assert.equal(q.select([partial],{history:true,cancelledOnly:true}).length,1);assert.equal(q.select([partial],{history:true}).length,0);
+ partial.lines[1].fulfilled_at='2026-10-18';assert.equal(q.closed(partial),true);assert.equal(q.cancelled(partial),false);
+ partial.lines[1].cancelled_at='2026-10-18';assert.equal(q.cancelled(partial),true);
+});
