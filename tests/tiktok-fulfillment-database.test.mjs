@@ -19,7 +19,8 @@ create function lock_shared_inventory() returns void language sql as $$select pg
 await db.exec(await readFile(new URL('../supabase/migrations/20261018090000_tiktok_inventory_completion.sql',import.meta.url),'utf8'));
 await db.exec(`create function is_admin() returns boolean language sql as $$select false$$;`);
 await db.exec(await readFile(new URL('../supabase/migrations/20261018100000_tiktok_work_controls.sql',import.meta.url),'utf8'));
-await db.exec(await readFile(new URL('../supabase/migrations/20261018180000_tiktok_completion_review.sql',import.meta.url),'utf8'));});
+await db.exec(await readFile(new URL('../supabase/migrations/20261018180000_tiktok_completion_review.sql',import.meta.url),'utf8'));
+await reversalSetup();await db.exec(await readFile(new URL('../supabase/migrations/20261018200000_tiktok_line_completion.sql',import.meta.url),'utf8'));});
 after(()=>db.close());
 beforeEach(async()=>{await db.exec(`reset role;set test.allowed='yes';set test.actor='${actor}';truncate tiktok_inventory_attachments,stock_transactions,item_stock_locations,item_types,locations,store_locations,active_stock_reservations,tiktok_order_completion_photos,tiktok_order_phone_camera_requests,tiktok_order_phone_camera_sessions,tiktok_order_documents,tiktok_order_events,tiktok_order_lines,tiktok_orders,tiktok_order_imports,storage.objects cascade;`);orders=(await db.query("insert into tiktok_orders(order_number,buyer_username,marketplace_status,marketplace_substatus,source_snapshot_at) values('577620684385522369','buyer','To ship','Awaiting shipment',now()-interval '1 day'),('577620723998233281','buyer','To ship','Awaiting shipment',now()-interval '1 day') returning *")).rows;lines=(await db.query("insert into tiktok_order_lines(order_id,sku_id,title,quantity) select id,'1732759903849189622','Ring',1 from tiktok_orders returning *")).rows;});
 const scope=o=>lines.filter(l=>l.order_id===o.id).map(l=>({id:l.id,sku_id:l.sku_id,quantity:l.quantity})).sort((a,b)=>a.id.localeCompare(b.id));
@@ -61,7 +62,7 @@ test('bulk completion is atomic, requires current proof and labels, and cannot b
  await assert.rejects(db.query('select update_tiktok_order($1,$2,$3,$4)',[orders[0].id,orders[0].revision,'completed','']),/Use Complete/);
  assert.equal((await complete()).rows[0].r.completed,2);assert.equal((await complete()).rows[0].r.completed,0);
  assert.ok((await db.query('select stage from tiktok_orders')).rows.every(o=>o.stage==='completed'));
- const o=(await db.query('select * from tiktok_orders where id=$1',[orders[0].id])).rows[0];await assert.rejects(db.query('select update_tiktok_order($1,$2,$3,$4)',[o.id,o.revision,'pending','']),/reopened/);
+ const o=(await db.query('select * from tiktok_orders where id=$1',[orders[0].id])).rows[0];await assert.rejects(db.query('select update_tiktok_order($1,$2,$3,$4)',[o.id,o.revision,'pending','']),/Use Revert order/);
 });
 test('item changes reject stale phone photos and previous proof, and new imports reopen completed orders',async()=>{
  await objects();await attach();for(const o of orders)await save(o);await complete();
@@ -165,6 +166,61 @@ async function reversalSetup(){
  await db.exec(`truncate employees;insert into employees values('${actor}','Manager','manager',true);`);
 }
 const revert=(os=orders,reason='Wrong order completed',confirmed=true)=>db.query('select revert_tiktok_orders($1,$2,$3,$4) r',[os.map(o=>o.id),JSON.stringify(Object.fromEntries(os.map(o=>[o.id,o.revision]))),reason,confirmed]);
+const completeLines=(ids,note='Packed selected items',revisions=Object.fromEntries(orders.map(o=>[o.id,o.revision])),confirmed=true)=>db.query('select complete_tiktok_order_lines_review($1,$2,$3,$4) r',[ids,JSON.stringify(revisions),confirmed,note]);
+async function extraLine(){const l=(await db.query("insert into tiktok_order_lines(order_id,sku_id,title,quantity) values($1,'1732759903849189623','Necklace',2) returning *",[orders[0].id])).rows[0];lines.push(l);return l;}
+test('partial completion excludes lost lines and other orders from evidence, notes and inventory; retry is idempotent',async()=>{
+ const extra=await extraLine(),selected=lineOf(orders[0]);await inventory();await link();await link(orders[1]);
+ await db.query('select save_tiktok_inventory_attachment($1,$2,$3,$4,2,0)',[extra.id,itemId,stockId,storeId]);
+ await db.query("select save_tiktok_line_work($1,0,'not_found')",[extra.id]);await work('not_found',{o:orders[1]});
+ await objects();await attach([{order_id:orders[0].id,path:label,pages:[1]}]);await save(orders[0],photo,[scope(orders[0]).find(l=>l.id===selected.id)]);await fresh();
+ const revisions=Object.fromEntries(orders.map(o=>[o.id,o.revision]));await db.exec('set role authenticated');
+ const result=(await completeLines([selected.id], '  Box 1 packed  ',revisions)).rows[0].r;await db.exec('reset role');
+ assert.deepEqual(result,{completed:0,completed_lines:1,inventory_units_deducted:1});assert.equal(await stock(),4);
+ await fresh();assert.equal(orders[0].stage,'preparing');assert.ok(orders[0].reopened_at);assert.equal(orders[1].stage,'pending');
+ const states=(await db.query('select id,fulfilled_at,fulfilled_by from tiktok_order_lines')).rows;assert.equal(states.filter(l=>l.fulfilled_at).length,1);assert.equal(states.find(l=>l.id===selected.id).fulfilled_by,actor);
+ assert.equal((await db.query('select consumed_quantity from tiktok_inventory_attachments where line_id=$1',[extra.id])).rows[0].consumed_quantity,0);
+ const audit=(await db.query("select * from tiktok_order_events where action='completion_review'")).rows;assert.equal(audit.length,1);assert.equal(audit[0].order_id,orders[0].id);assert.equal(audit[0].details.notes,'Box 1 packed');assert.deepEqual(audit[0].details.selected_line_ids,[selected.id]);assert.deepEqual(audit[0].details.remaining_line_ids,[extra.id]);assert.equal(audit[0].details.completion_photo_ids.length,1);
+ assert.equal((await completeLines([selected.id], 'Retry',revisions)).rows[0].r.completed_lines,0);assert.equal(await stock(),4);
+ await assert.rejects(work('not_found'),/read-only/);await assert.rejects(link(orders[0],0,2),/Only open/);
+ await db.exec("update tiktok_order_lines set tracking_number='TRACKING123'");await assert.rejects(db.query("select update_tiktok_order($1,$2,'dispatched','',null,true)",[orders[0].id,orders[0].revision]),/remaining|deduct|Use Complete order/);
+ await db.query("select save_tiktok_line_work($1,1,'found')",[extra.id]);
+ const second={...photo,path:`${actor}/${other}.jpg`,thumbnail_path:`${actor}/${other}-thumb.jpg`};await db.query('insert into storage.objects values($1,$2),($1,$3)',[second.bucket,second.path,second.thumbnail_path]);await save(orders[0],second,[scope(orders[0]).find(l=>l.id===extra.id)]);await fresh();
+ assert.equal((await completeLines([extra.id])).rows[0].r.completed,1);assert.equal(await stock(),2);await fresh();assert.equal(orders[0].stage,'completed');assert.equal(orders[1].stage,'pending');
+});
+test('line completion rejects lost, CGL, cancelled, stale, empty, foreign and unauthorized requests atomically',async()=>{
+ await inventory();await link();await objects();await attach();for(const o of orders)await save(o);await fresh();const ids=lines.map(l=>l.id);
+ await assert.rejects(completeLines([]),/Select/);await assert.rejects(completeLines([request]),/not found/);await assert.rejects(completeLines(ids,null,{},false),/Confirm/);await assert.rejects(completeLines(ids,null,{}),/changed/);await assert.rejects(completeLines(ids,'x'.repeat(4001)),/4,000/);
+ const stale=Object.fromEntries(orders.map(o=>[o.id,o.revision]));await work('not_found',{o:orders[1]});await assert.rejects(completeLines(ids,null,stale),/changed/);await fresh();await assert.rejects(completeLines(ids),/lost/);assert.equal(await stock(),5);
+ await work('found',{o:orders[1]});await work('watch',{o:orders[1]});await work('require_cgl',{o:orders[1]});await fresh();await assert.rejects(completeLines(ids),/CGL/);
+ await work('remove_cgl',{o:orders[1],note:'Not needed'});await db.query("select set_tiktok_cancellation($1,0,true,'Buyer requested cancellation')",[orders[1].id]);await fresh();await assert.rejects(completeLines(ids),/cancellation/);
+ await db.exec("set test.allowed='no';set role authenticated");await assert.rejects(completeLines(ids),/access required/);await db.exec('reset role');await db.exec('set role anon');await assert.rejects(completeLines(ids),/permission denied/);await db.exec('reset role');
+ assert.equal(await stock(),5);assert.equal((await db.query("select count(*)::int n from tiktok_order_events where action='completion_review'")).rows[0].n,0);assert.equal((await db.query('select count(*)::int n from tiktok_order_lines where fulfilled_at is not null')).rows[0].n,0);
+});
+test('selected photo proof supports subsets, rejects foreign or stale scopes, and cannot cover an unpictured item',async()=>{
+ const extra=await extraLine(),selected=lineOf(orders[0]);await objects();await attach();const subset=scope(orders[0]).filter(l=>l.id===selected.id);await save(orders[0],photo,subset);
+ await assert.rejects(save(orders[0],photo,scope(orders[1])),/items changed/);await assert.rejects(save(orders[0],photo,[{...subset[0],quantity:99}]),/items changed/);
+ await assert.rejects(completeLines([extra.id]),/completion photo/);await assert.rejects(completeLines([selected.id,extra.id]),/completion photo/);
+ await db.query("update tiktok_order_completion_photos set payload=payload||'{\"history_removed\":true}',photo_attachments='[]'");await assert.rejects(completeLines([selected.id]),/completion photo/);
+});
+test('selected-line stock failure rolls back every deduction, completion marker and audit note',async()=>{
+ await inventory();await link();await link(orders[1]);await objects();await attach();for(const o of orders)await save(o);await fresh();
+ await db.query('update item_stock_locations set quantity=1 where id=$1',[stockId]);await assert.rejects(completeLines(lines.map(l=>l.id)),/no longer available/);assert.equal(await stock(),1);
+ assert.equal((await db.query('select count(*)::int n from stock_transactions')).rows[0].n,0);assert.equal((await db.query('select count(*)::int n from tiktok_order_lines where fulfilled_at is not null')).rows[0].n,0);
+ assert.equal((await db.query("select count(*)::int n from tiktok_order_events where action='completion_review'")).rows[0].n,0);
+});
+test('a manager can reverse partial completion and the audit retains the completed line snapshot',async()=>{
+ await reversalSetup();await extraLine();await inventory();await link();await objects();await attach();await save(orders[0]);await fresh();const selected=lineOf(orders[0]);await completeLines([selected.id]);await fresh();
+ assert.equal(orders[0].stage,'preparing');assert.equal(await stock(),4);const result=(await revert([orders[0]])).rows[0].r;assert.equal(result.restored_units,1);assert.equal(await stock(),5);
+ assert.equal((await db.query('select count(*)::int n from tiktok_order_lines where fulfilled_at is not null')).rows[0].n,0);
+ const audit=(await db.query("select details from tiktok_order_events where action='order_reverted'")).rows[0].details;assert.equal(audit.lines.filter(l=>l.fulfilled_at).length,1);assert.equal(audit.before.stage,'preparing');assert.equal(audit.after.stage,'pending');
+});
+test('unchanged imports preserve completed lines while changed quantities and new lines reopen their work',async()=>{
+ await objects();await attach();await save(orders[0]);await fresh();const selected=lineOf(orders[0]);await completeLines([selected.id]);
+ const row={order_number:orders[0].order_number,sku_id:selected.sku_id,quantity:1,title:'Ring',buyer_username:'buyer',marketplace_status:'Shipped',marketplace_substatus:'Awaiting delivery'};
+ await db.query('select import_tiktok_orders($1,$2,$3,now())',[JSON.stringify([row]),'c'.repeat(64),'same.csv']);await fresh();assert.equal(orders[0].stage,'completed');assert.ok((await db.query('select fulfilled_at from tiktok_order_lines where id=$1',[selected.id])).rows[0].fulfilled_at);
+ const newRow={...row,sku_id:'1732759903849189623',title:'New necklace'};await db.query("select import_tiktok_orders($1,$2,$3,now()+interval '0.5 seconds')",[JSON.stringify([row,newRow]),'e'.repeat(64),'new-item.csv']);await fresh();assert.equal(orders[0].stage,'waiting');assert.ok(orders[0].reopened_at);assert.equal((await db.query('select count(*)::int n from tiktok_order_lines where order_id=$1 and fulfilled_at is null',[orders[0].id])).rows[0].n,1);
+ row.quantity=2;await db.query("select import_tiktok_orders($1,$2,$3,now()+interval '1 second')",[JSON.stringify([row]),'d'.repeat(64),'changed.csv']);await fresh();assert.equal(orders[0].stage,'waiting');assert.ok(orders[0].reopened_at);assert.equal((await db.query('select fulfilled_at from tiktok_order_lines where id=$1',[selected.id])).rows[0].fulfilled_at,null);await assert.rejects(completeLines([selected.id]),/current quantity/);
+});
 async function finished(){await inventory();await link();await fresh();await objects();await attach();for(const o of orders)await save(o);await complete();await fresh();}
 test('TikTok manager reversal restores only consumed stock, preserves evidence and marketplace status, and records full before/after',async()=>{
  await reversalSetup();await finished();assert.equal(await stock(),4);await db.exec("update tiktok_orders set marketplace_status='Shipped'");await fresh();

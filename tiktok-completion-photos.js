@@ -300,10 +300,11 @@
       });
       $("save-completion-photos").disabled = saving || !pending.length;
       $("save-completion-photos").textContent = saving ? "Saving photos…" : `Save ${pending.length || ""} photo${pending.length === 1 ? "" : "s"}`;
-      $("completion-photo-camera").disabled = saving;
-      $("completion-photo-files").disabled = saving;
+      $("completion-photo-camera").disabled = saving || !scope.length;
+      $("completion-photo-files").disabled = saving || !scope.length;
       $("close-completion-photos").disabled = saving;
       $("done-completion-photos").disabled = saving;
+      document.querySelectorAll('[data-phone-camera="photos"]').forEach(button => {button.disabled = saving || !scope.length;});
       refreshSaved();
       // Keep correction buttons in checkout and phone-pairing grids in sync, too.
       document.querySelectorAll("[data-remove-saved-photo], [data-replace-saved-photo], [data-replacement-camera], [data-replacement-file]")
@@ -311,7 +312,7 @@
     }
 
     function chooseFiles(event) {
-      if (saving) return;
+      if (saving || !scope.length) return;
       const files = Array.from(event.target.files || []);
       const replacement = event.target.id === "completion-photo-replacement" ? replacementTarget : null;
       replacementTarget = null;
@@ -332,6 +333,7 @@
 
     async function save() {
       if (saving || !pending.length) return;
+      let succeeded = false;
       saving = true; revision++;
       renderPending();
       status("Saving completion photos…");
@@ -376,26 +378,27 @@
         await Promise.all([saveNext(), saveNext()]);
         if (failure) throw failure;
         status("Saved to the order. These photos also appear on the other device and in Order History.");
-        config.onSaved?.();
+        succeeded = true;
       } catch (error) {
         status(`${error.message || "Could not save photos."} Your remaining photos are still here; tap Save to retry.`, true);
       } finally {
         saving = false; revision++;
+        orderReads.clear();
         renderPending();
         watchers.forEach(refresh => refresh());
       }
+      if (succeeded) config.onSaved?.();
     }
 
-    function open(lines, picker = "") {
+    function open(lines, picker = "", preserveFocus = false) {
       if (saving || pending.length) {
         config.onOpen();
         status("Save or remove the selected photos before switching orders.", true);
         return;
       }
-      if (!targets(lines).size) return;
       scope = lines.filter(line => line?.id && line.order_id).map(line => ({...line}));
       savedPhotos = []; replacementTarget = null;
-      returnFocus = document.activeElement;
+      if (!preserveFocus) returnFocus = document.activeElement;
       renderOrderContext($("completion-photo-context"), scope, config.getCustomerName);
       status("");
       renderPending();
@@ -410,7 +413,7 @@
       },
         error => status(`Could not refresh saved photos: ${error.message || "Try again."}`, true));
       if (picker) $(picker === "camera" ? "completion-photo-camera" : "completion-photo-files").click();
-      else $("done-completion-photos").focus();
+      else if (!preserveFocus) $("done-completion-photos").focus();
     }
 
     function close() {

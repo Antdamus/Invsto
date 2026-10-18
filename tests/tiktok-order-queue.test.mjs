@@ -4,6 +4,11 @@ import {createRequire} from 'node:module';
 const q=createRequire(import.meta.url)('../tiktok-order-queue.js');
 const now=new Date('2026-10-18T02:30:00Z'); // Still Oct 17 in the shop's timezone.
 const order=(id,buyer,date,extra={})=>({id,order_number:'57762364879664333'+id,buyer_username:buyer,ship_by_date:date,stage:'pending',marketplace_status:'To ship',order_amount:'25.68',created_time:'10/17/2026 11:48:52 AM',lines:[{quantity:1,title:'Gold ring',seller_sku:id,tracking_number:''}],documents:[],...extra});
+test('partially completed shipped orders stay pending and completed lines no longer hold remaining work',()=>{
+ const partial=order('1','Alice',null,{stage:'preparing',marketplace_status:'Shipped',lines:[{fulfilled_at:'2026-10-18',work:{item_search:'not_found'}},{work:{item_search:'found'}}]});
+ assert.equal(q.closed(partial),false);assert.equal(q.held(partial),false);assert.equal(q.lineCompleted(partial.lines[0]),true);assert.equal(q.lost({work:{item_search:'not_found'}}),true);assert.equal(q.lineHeld({work:{watch_missing:true}}),true);
+ assert.equal(q.closed({...partial,stage:'completed'}),true);
+});
 
 test('audited reversals of shipped orders stay pending, while marketplace cancellations and new completions remain closed',()=>{
  const reopened=order('1','Alice',null,{marketplace_status:'Shipped',reopened_at:'2026-10-18T12:00:00Z'});

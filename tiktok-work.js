@@ -4,12 +4,12 @@
  let context,busy=false;
  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const lookup=id=>{const order=context?.getOrders().find(o=>o.lines.some(l=>l.id===id));return {order,line:order?.lines.find(l=>l.id===id)};};
- const closed=id=>{const {order}=lookup(id);return !order||window.TikTokOrderQueue.closed(order);};
+ const closed=id=>{const {order,line}=lookup(id);return !order||Boolean(line?.fulfilled_at)||window.TikTokOrderQueue.closed(order);};
  function line(l,o){
-  const w=l.work||{},readonly=window.TikTokOrderQueue.closed(o);
+  const w=l.work||{},readonly=Boolean(l.fulfilled_at)||window.TikTokOrderQueue.closed(o);
   const button=(action,title,selected=false)=>`<button type="button" class="secondary-btn ${selected?'is-selected':''}" data-tk-work="${action}" data-line="${esc(l.id)}" aria-pressed="${selected}" ${readonly||selected?'disabled':''}>${title}</button>`;
   return `<div class="tk-work-line" data-tk-work-line="${esc(l.id)}">
-   <div class="tk-item-check"><span class="tk-section-label">Item check</span><div class="tk-found-options" role="group" aria-label="Item found status">${button('found','Item found',w.item_search==='found')}${button('not_found','Item not found',w.item_search==='not_found')}</div><small class="tk-check-status">${w.item_search==='not_found'?'Not located · waiting':w.item_search==='found'?'Located and checked':'Mark when you locate the item'}</small></div>
+   ${l.fulfilled_at?'<p class="tk-work-ok">Completed · '+esc(new Date(l.fulfilled_at).toLocaleString())+'</p>':''}<div class="tk-item-check"><span class="tk-section-label">Item check</span><div class="tk-found-options" role="group" aria-label="Item found status">${button('found','Mark found',w.item_search==='found')}${button('not_found','Mark lost',w.item_search==='not_found')}</div><small class="tk-check-status">${w.item_search==='not_found'?'Lost · excluded from completion':w.item_search==='found'?'Found · located and checked':'Mark when you locate the item'}</small></div>
    <div class="tk-item-processing"><span class="tk-section-label">Watch &amp; certificate</span><div class="tk-processing-buttons">${button(w.is_watch?'unwatch':'watch',w.is_watch?'Watch · Extra processing':'Watch')}<button type="button" class="certificate-trigger secondary-btn" data-certificate-line="${esc(l.id)}" data-certificate-title="${esc(o.order_number+' · '+l.title)}">CGL certificate</button></div>${w.is_watch?`<div class="tk-watch-options">${button(w.watch_missing?'watch_found':'missing',w.watch_missing?'Mark watch found':'Watch missing')}${button(w.cgl_required?'remove_cgl':'require_cgl',w.cgl_required?'Remove CGL requirement':'Set Pending CGL')}</div>`:''}<div class="tk-processing-status">${w.watch_missing?'<span class="tk-work-alert">Watch missing</span>':''}${w.cgl_required?`<span class="${w.certificate_id?'tk-work-ok':'tk-work-alert'}">${w.certificate_id?'CGL confirmed':'Pending CGL'}</span>`:''}</div></div>
    ${w.updated_at?`<small class="tk-work-updated">Updated ${esc(new Date(w.updated_at).toLocaleString())}</small>`:''}<p data-work-status role="status"></p></div>`;
  }
@@ -22,7 +22,7 @@
   d.querySelector('[data-save]').onclick=async()=>{if(busy)return;busy=true;d.querySelector('[data-save]').disabled=true;try{await onSave(d);d.close();}catch(e){d.querySelector('[data-status]').textContent=e.message;}finally{busy=false;d.querySelector('[data-save]').disabled=false;}};d.showModal();return d;
  }
  async function action(button){
-  if(busy)return;const {line:l,order}=lookup(button.dataset.line);if(!l||window.TikTokOrderQueue.closed(order))return;
+  if(busy)return;const {line:l,order}=lookup(button.dataset.line);if(!l||l.fulfilled_at||window.TikTokOrderQueue.closed(order))return;
   const action=button.dataset.tkWork,args={_line_id:l.id,_revision:l.work?.revision||0,_action:action};
   if(action==='watch_found'||action==='remove_cgl'){
    modal(action==='watch_found'?'Mark watch found':'Remove CGL requirement',`<p>${esc(order.order_number+' · '+l.title)}</p>${action==='watch_found'?'<label class="tk-confirm"><input type="checkbox" data-confirm>I physically located and checked this watch.</label><p>Its CGL requirement stays in place.</p>':'<label>Correction reason<textarea maxlength="1000" data-note required></textarea></label><p>The certificate copies remain in history.</p>'}`,async d=>{
@@ -44,6 +44,6 @@
   document.addEventListener('click',e=>{const work=e.target.closest('[data-tk-work]'),cancelButton=e.target.closest('[data-tk-cancel]');if(work){e.preventDefault();void action(work);}else if(cancelButton){e.preventDefault();cancel(cancelButton.dataset.tkCancel);}});
   window.addEventListener('tiktok-work-changed',()=>{void changed().catch(e=>context.status('Certificate saved. Refresh the order list: '+e.message,true));});
  }
- function summary(g){const count=fn=>g.lines.filter(fn).length,found=count(l=>l.work?.item_search==='found'),missing=count(l=>l.work?.item_search==='not_found'),watches=count(l=>l.work?.watch_missing),cgl=count(l=>l.work?.cgl_required&&!l.work?.certificate_id),cancel=g.orders.filter(o=>o.cancellation?.pending).length;return [[found,'items found','tk-work-ok'],[missing,'items not found','tk-work-alert'],[watches,'watches missing','tk-work-alert'],[cgl,'pending CGL','tk-work-alert'],[cancel,'pending cancellation','tk-work-alert']].filter(([n])=>n).map(([n,label,cls])=>`<span class="buyer-card-meta-pill ${cls}">${n} ${label}</span>`).join('');}
+ function summary(g){const count=fn=>g.lines.filter(fn).length,found=count(l=>l.work?.item_search==='found'),missing=count(l=>l.work?.item_search==='not_found'),watches=count(l=>l.work?.watch_missing),cgl=count(l=>l.work?.cgl_required&&!l.work?.certificate_id),cancel=g.orders.filter(o=>o.cancellation?.pending).length;return [[found,'items found','tk-work-ok'],[missing,'items lost','tk-work-alert'],[watches,'watches missing','tk-work-alert'],[cgl,'pending CGL','tk-work-alert'],[cancel,'pending cancellation','tk-work-alert']].filter(([n])=>n).map(([n,label,cls])=>`<span class="buyer-card-meta-pill ${cls}">${n} ${label}</span>`).join('');}
  window.TikTokWork={line,cancellation,start,closed,summary};
 })();

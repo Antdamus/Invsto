@@ -3,7 +3,7 @@
   let context, allowed=false, saving=false, selected=null, returnFocus=null;
   const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const $=id=>document.getElementById(id);
-  const eligible=o=>['completed','dispatched'].includes(o.stage)&&['To ship','Shipped','Completed'].includes(o.marketplace_status)&&!o.cancel_return;
+  const eligible=o=>(['completed','dispatched'].includes(o.stage)||o.lines?.some(l=>l.fulfilled_at))&&['To ship','Shipped','Completed'].includes(o.marketplace_status)&&!o.cancel_return;
   function button(o){return allowed&&eligible(o)?`<button type="button" class="tk-card-button tk-revert-button" data-tiktok-revert="${esc(o.id)}">Revert order</button>`:'';}
   function audit(e){
     if(e.action!=='order_reverted')return '';
