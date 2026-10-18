@@ -49,7 +49,7 @@
    onOpen:()=>$('completion-photos-modal').classList.remove('hidden'),onClose:()=>{$('completion-photos-modal').classList.add('hidden');activeOrders=[];},onSaved:()=>{receiver?.saved();Promise.resolve(context.refresh?.()).then(()=>{syncReview();if(activeOrders.length)$('tk-completion-status').textContent='Final order photos saved. Review the orders and confirm when ready.';}).catch(e=>context.status?.('Photos saved. Refresh the order list: '+e.message));},keepOpen:()=>Boolean(receiver),pollMs:12000});
   return controller;
  }
- function phoneOrders(orders){if(!orders?.length)return;phoneLines(lines(orders.map(o=>({...o,lines:o.lines.filter(l=>selectable(l,o))}))).filter(Boolean));}
+ function phoneOrders(orders){if(!orders?.length)return;phoneLines(lines(orders.every(o=>window.TikTokOrderQueue.closed(o))?orders:orders.map(o=>({...o,lines:o.lines.filter(l=>selectable(l,o))}))));}
  function phoneLines(items){
   if(!items.length){context.status?.('No available items selected for final photos. Mark lost items found before continuing.');return;}
   if(!desktop)desktop=window.TikTokPhoneCamera.createDesktop({getClient:()=>context.db,getUserId:()=>context.user.id,getCustomerName:o=>o.buyer_nickname||o.buyer_username,
