@@ -1,6 +1,6 @@
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
+import {readFile,mkdir} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {createRequire} from 'node:module';
 import {chromium,expect} from '@playwright/test';
@@ -72,9 +72,10 @@ test('scan a line barcode, verify source/quantity, and deduct only linked units 
 });
 
 test('item controls, missing-watch confirmation, CGL copies and cancellation filters keep buyer bundles together',async t=>{
- const db=fixture(),page=await open(t,db);await page.locator('[data-expand="buyer-one"]').first().click();const line=page.locator('[data-tk-work-line="line-0"]');
+ const db=fixture(),page=await open(t,db);await mkdir(new URL('../outputs/tiktok-pipeline/',import.meta.url),{recursive:true});await page.locator('[data-expand="buyer-one"]').first().click();const line=page.locator('[data-tk-work-line="line-0"]');
  await line.locator('[data-tk-work="not_found"]').click();await expect(line.locator('[data-tk-work="not_found"]')).toBeDisabled();await page.locator('#tk-work-filter').selectOption('not_found');await expect(page.locator('.tk-buyer')).toHaveCount(1);await expect(page.locator('.tk-order-row')).toHaveCount(2);
  await line.locator('[data-tk-work="found"]').click();await expect(page.locator('.tk-buyer')).toHaveCount(0);await page.locator('#tk-work-filter').selectOption('');await line.locator('[data-tk-work="watch"]').click();await line.locator('[data-tk-work="require_cgl"]').click();await line.locator('[data-tk-work="missing"]').click();await expect(line).toContainText('Watch missing');await line.locator('[data-tk-work="watch_found"]').click();await page.locator('.tk-work-dialog [data-save]').click();await expect(page.locator('.tk-work-dialog [data-status]')).toContainText('physically');await page.locator('.tk-work-dialog [data-confirm]').check();await page.locator('.tk-work-dialog [data-save]').click();await expect(line.locator('[data-tk-work="missing"]')).toBeVisible();await expect(line).toContainText('Pending CGL');
+ await page.locator('.tk-buyer').first().screenshot({animations:'disabled',style:'.header,.phone-orders-header{visibility:hidden!important}',path:new URL('../outputs/tiktok-pipeline/tiktok-organized-desktop.png',import.meta.url).pathname.replace(/^\/(.:)/,'$1')});
  await line.locator('[data-certificate-line]').click();await expect(page.locator('[data-scan-target="certificate-qr"]')).toBeVisible();await page.locator('#certificate-files').setInputFiles({name:'CGL.pdf',mimeType:'application/pdf',buffer:await pdf(['Certificate copy fixture'])});await page.locator('.certificate-identifiers summary').click();await page.locator('#certificate-report').fill('CGL-123');await page.locator('#certificate-save').click();await expect(page.locator('#certificate-status')).toContainText('copy saved');assert.equal(db.tables.tiktok_line_work[0].certificate_id,undefined);assert.equal(db.uploads.at(-1).bucket,'tiktok-order-certificates');assert.match(db.uploads.at(-1).path,/^certificates\/00000000-0000-4000-8000-000000000001\/line-0\//);
  await page.locator('[data-certificate-verify]').click();await expect(page.locator('#certificate-status')).toContainText('Check');await page.locator('[data-certificate-checked]').check();await page.locator('[data-certificate-verify]').click();await expect(page.locator('#certificate-saved')).toContainText('CGL confirmed');await page.locator('#certificate-close').click();await expect(line).toContainText('CGL confirmed');
  await line.locator('[data-certificate-line]').click();await page.getByText('Wrong certificate?',{exact:true}).click();await page.locator('textarea[aria-label="Correction reason"]').fill('Wrong watch report');await page.locator('[data-certificate-incorrect]').click();await expect(page.locator('#certificate-saved')).toContainText('Marked incorrect');await page.locator('#certificate-close').click();await expect(line).toContainText('Pending CGL');
@@ -83,5 +84,9 @@ test('item controls, missing-watch confirmation, CGL copies and cancellation fil
 });
 test('work buttons remain usable on a phone and closed history keeps changes read-only',async t=>{
  const db=fixture(),page=await open(t,db);await page.setViewportSize({width:390,height:844});await page.locator('[data-expand="buyer-one"]').first().click();await page.locator('[data-tk-work-line="line-0"] [data-tk-work="watch"]').click();await expect(page.locator('[data-tk-work-line="line-0"] [data-tk-work="require_cgl"]')).toBeVisible();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ await page.locator('.tk-buyer').first().screenshot({animations:'disabled',style:'.header,.phone-orders-header{visibility:hidden!important}',path:new URL('../outputs/tiktok-pipeline/tiktok-organized-mobile.png',import.meta.url).pathname.replace(/^\/(.:)/,'$1')});
+ for(const width of [320,820,1024,1440]){
+  await page.setViewportSize({width,height:950});const card=page.locator('.tk-buyer').first(),menu=card.locator('.tk-card-tools');await menu.locator('summary').click();await expect(menu.getByRole('button',{name:'Buyer packet PDF'})).toBeVisible();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`Card fits ${width}px viewport`);await menu.locator('summary').press('Escape');await expect(menu).not.toHaveAttribute('open','');await expect(menu.locator('summary')).toBeFocused();await expect(card).toHaveClass(/is-expanded/);
+ }
  db.tables.tiktok_orders[0].stage='completed';const history=await open(t,db,{history:true});await history.locator('[data-expand="buyer-one"]').first().click();await expect(history.locator('[data-tk-work="found"]')).toBeDisabled();await expect(history.locator('[data-tk-cancel]')).toBeDisabled();await expect(history.locator('[data-certificate-line]')).toBeEnabled();
 });

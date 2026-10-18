@@ -1,0 +1,161 @@
+/* TikTok card layout. Keep marketplace-specific controls out of the eBay styles. */
+.tiktok-workspace .orders-panel .tk-buyer.buyer-order-card {
+  --tk-surface: #181d1c;
+  display: grid;
+  gap: 0;
+  padding: 0;
+  border: 1px solid #b8c9c526;
+  border-radius: 16px;
+  background: var(--tk-surface);
+  box-shadow: 0 3px 12px #0002;
+  overflow: visible;
+  transform: none;
+}
+.tiktok-workspace .orders-panel .tk-buyer.is-overdue { border-top: 3px solid #cf8a7d; }
+.tiktok-workspace .orders-panel .tk-buyer.is-due-today { border-top: 3px solid #d6b477; }
+.tiktok-workspace .orders-panel .tk-buyer.is-due-tomorrow { border-top: 3px solid #87a4c4; }
+.tk-buyer-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 22px 10px; }
+.tk-buyer-identity, .tk-buyer-overview { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.tk-buyer-identity { flex: 1; }
+.tiktok-workspace .tk-buyer .tk-label-select { display: flex; align-items: center; flex: none; margin: 0; min-height: 44px; padding-right: 2px; }
+.tk-buyer-avatar { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border: 1px solid #e3bd7726; border-radius: 12px; background: #e3bd770c; color: #ddc69f; font-size: 12px; font-weight: 800; letter-spacing: 1px; }
+.tk-buyer-name { display: grid; gap: 2px; min-width: 0; }
+.tiktok-workspace .orders-panel .tk-buyer .buyer-card-buyer-name { padding: 0; min-height: 0; font-size: 17px; line-height: 1.5; overflow-wrap: anywhere; color: #f1f2ed; }
+.tiktok-workspace .orders-panel .tk-buyer .buyer-card-compact-count { display: block; min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; color: #a4b1ac; font-size: 12px; font-weight: 500; line-height: 1.6; white-space: normal; }
+.tiktok-workspace .orders-panel .tk-buyer .buyer-card-value { background: none; border: 0; padding: 0 4px; margin: 0; min-height: 0; min-width: 0; font-size: 19px; font-weight: 750; letter-spacing: -.4px; color: #eee9de; }
+.tk-buyer-due { font-size: 11px; padding: 6px 9px; border-radius: 6px; background: #ffffff06; white-space: nowrap; }
+.tk-buyer-due.overdue { background: #cf8a7d12; }
+.tk-buyer-due.today { background: #d6b47712; }
+.tiktok-workspace .orders-panel .tk-buyer .tk-buyer-meta { display: flex; justify-content: flex-start; align-items: center; flex-wrap: wrap; gap: 6px 18px !important; margin: 0; padding: 0 22px 16px; font-size: 11px; line-height: 1.6; color: #a4b1ac; }
+.tiktok-workspace .tk-buyer .tk-buyer-meta > .buyer-card-meta-pill { display: inline-flex !important; min-height: 0; padding: 3px 7px; border-radius: 5px; font-size: 10px; }
+.tk-section-label { display: block; font-size: 10px; line-height: 1.5; font-weight: 750; letter-spacing: 1px; text-transform: uppercase; color: #9faea7; }
+.tiktok-workspace .tk-card-button, .tiktok-workspace .tk-card-tools > summary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 40px; padding: 9px 12px; border: 1px solid #b8c9c52b; border-radius: 8px;
+  background: #ffffff03; color: #e0e5df; font: 650 12px/1.4 Manrope, sans-serif;
+  text-decoration: none; cursor: pointer; transition: background .15s, border-color .15s;
+}
+.tiktok-workspace .tk-card-button:hover, .tiktok-workspace .tk-card-tools > summary:hover { background: #ffffff09; border-color: #b8c9c552; }
+.tiktok-workspace .tk-card-button.tk-label-create { border-color: #e3bd7755; color: #e8ca96; background: #e3bd7708; }
+.tiktok-workspace .tk-card-button.tk-complete-button { color: #282113; background: #e2c38d; border-color: #e2c38d; font-weight: 800; }
+.tiktok-workspace .tk-card-button.tk-complete-button:hover { background: #efd5aa; }
+.tk-card-icon { width: 16px; height: 16px; flex: none; }
+.tk-expand-button[aria-expanded=true] svg { transform: rotate(180deg); }
+.tk-buyer-workflow { display: flex; align-items: flex-end; gap: 24px; padding: 16px 22px; border-top: 1px solid #b8c9c51b; background: #0000000e; border-radius: 0 0 16px 16px; }
+.tk-workflow-group { display: grid; gap: 8px; }
+.tk-workflow-group > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.tk-card-tools { position: relative; margin-left: auto; flex: none; }
+.tk-card-tools > summary { list-style: none; }
+.tk-card-tools > summary::-webkit-details-marker { display: none; }
+.tk-card-tools > summary:focus-visible, .tk-item-identifiers > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.tk-tools-list { position: absolute; z-index: 20; right: 0; top: calc(100% + 8px); width: 220px; max-width: calc(100vw - 70px); display: grid; gap: 2px; padding: 6px; border: 1px solid #b8c9c53a; border-radius: 10px; background: #252c28; box-shadow: 0 12px 30px #0006; }
+.tiktok-workspace .tk-tools-list > :is(a,button) { display: flex; justify-content: flex-start; align-items: center; width: 100%; text-align: left; min-height: 42px; padding: 10px 12px; border: 0; border-radius: 6px; background: transparent; color: #e0e5df; font: 600 12px/1.4 Manrope,sans-serif; text-decoration: none; }
+.tiktok-workspace .tk-tools-list > :is(a,button):hover { background: #ffffff09; }
+.tiktok-workspace .tk-text-action { display: inline-flex; align-items: center; padding: 0; border: 0; background: none; color: #c6ba9f; font: 600 11px/1.6 Manrope,sans-serif; text-align: left; border-radius: 3px; }
+.tiktok-workspace .tk-text-action:hover { color: #f0d5a3; background: none; text-decoration: underline; text-underline-offset: 3px; }
+.tiktok-workspace .orders-panel .tk-buyer .buyer-card-expanded { display: grid; gap: 12px; margin: 0; padding: 18px 22px 22px; border-top: 1px solid #b8c9c51b; cursor: default; }
+.tk-items-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tk-items-heading h3 { margin: 0; font-size: 13px; font-weight: 700; color: #ced7d0; }
+.tk-items-heading > span { color: #8f9e97; font-size: 11px; }
+.tk-buyer .buyer-line-list, .tk-detail-items { display: grid; gap: 14px; }
+.tiktok-workspace .tk-order-row { padding: 0; border: 1px solid #b8c9c522; border-radius: 12px; background: #111715; }
+.tk-order-heading { align-items: center; margin: 0; padding: 12px 16px; border-bottom: 1px solid #b8c9c51b; }
+.tk-order-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; min-width: 0; }
+.tk-order-identity > strong { font-size: 12px; font-weight: 650; letter-spacing: .2px; color: #d6dfd8; }
+.tk-order-identity .tk-stage { padding: 3px 7px; border-radius: 5px; font-size: 10px; border-color: #a4b1ac30; color: #a4b1ac; background: transparent; }
+.tk-order-deadline { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; font-size: 11px; }
+.tk-order-items { gap: 0; }
+.tk-order-item { display: grid; grid-template-columns: 132px minmax(0,1fr); gap: 24px; align-items: start; padding: 20px 16px; }
+.tk-order-item + .tk-order-item { border-top: 1px solid #b8c9c51b; }
+.tk-item-media { display: grid; gap: 8px; }
+.tk-item-media .tk-receipt-photos { display: flex; flex-direction: column; gap: 14px; margin: 0; }
+.tk-item-media .tk-receipt-photos:empty { display: grid; place-items: center; min-height: 132px; padding: 16px; border: 1px dashed #b8c9c529; border-radius: 8px; background: #ffffff02; }
+.tk-item-media .tk-receipt-photos:empty::after { content: 'No capture yet'; color: #8c9a93; font-size: 11px; text-align: center; }
+.tk-item-media .tk-receipt-capture, .tiktok-workspace .tk-item-media button.tk-receipt-photo { width: 132px; }
+.tk-item-media .tk-receipt-photo img { height: 158px; max-width: 100%; border-color: #b8c9c529; }
+.tk-item-media .tk-photo-controls { margin: 0; }
+.tiktok-workspace .tk-item-media .tk-photo-remove { padding: 4px 8px; min-height: 30px; border-color: #b8c9c51b; color: #bfa39a; font-size: 10px; }
+.tk-line-receipt-link { display: flex; align-items: center; gap: 7px; margin: 2px 0 0; font-size: 11px; line-height: 1.6; text-decoration: none; }
+.tk-line-receipt-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.tk-line-receipt-link svg { width: 13px; height: 13px; }
+.tk-item-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-bottom: 14px; }
+.tk-item-title h4 { font-size: 14px; line-height: 1.5; font-weight: 700; margin: 0 0 4px; }
+.tk-item-title p { font-size: 11px; color: #98a69f; margin: 0; line-height: 1.6; }
+.tk-item-quantity { display: flex; align-items: center; gap: 7px; flex: none; padding: 4px 8px; border: 1px solid #b8c9c526; border-radius: 6px; font-size: 10px; color: #a4b1ac; }
+.tk-item-quantity strong { font-size: 12px; color: #eee9de; }
+.tk-work-line { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.25fr); gap: 10px 18px; margin: 0; padding: 0; border: 0; }
+.tk-item-check, .tk-item-processing { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 12px; background: #ffffff03; border: 1px solid #b8c9c519; border-radius: 8px; }
+.tk-found-options, .tk-processing-buttons, .tk-watch-options, .tk-processing-status { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.tk-processing-status:empty { display: none; }
+.tiktok-workspace .tk-work-line button, .tiktok-workspace .tk-item-content .tk-inventory-line button { min-height: 36px; padding: 7px 10px; border: 1px solid #b8c9c533; border-radius: 6px; background: #ffffff03; color: #d3ded6; font: 600 11px/1.5 Manrope,sans-serif; white-space: normal; text-align: left; }
+.tiktok-workspace .tk-work-line button:not(:disabled):hover, .tiktok-workspace .tk-item-content .tk-inventory-line button:hover { background: #ffffff0b; border-color: #b8c9c566; }
+.tiktok-workspace .tk-work-line button.is-selected, .tiktok-workspace .tk-work-ok { color: #a4d8b9; background: #53a77516; border-color: #66ad8559; }
+.tiktok-workspace .tk-work-line [data-tk-work=not_found].is-selected, .tiktok-workspace .tk-work-alert { color: #e5ba8e; background: #e2b47a12; border-color: #c79b5f55; }
+.tk-order-item .tk-check-status { margin: 0; font-size: 10px; line-height: 1.7; color: #8e9d94; }
+.tk-work-updated, .tk-work-line [data-work-status] { grid-column: 1 / -1; margin: 0; }
+.tk-work-line .tk-work-updated { font-size: 10px; color: #829087; }
+.tk-work-line .tk-work-alert, .tk-work-line .tk-work-ok { font-size: 10px; padding: 4px 7px; border-radius: 5px; }
+.tk-item-content .tk-inventory-line { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0; margin: 12px 0 0; border: 0; border-top: 1px solid #b8c9c51b; }
+.tk-item-content .tk-inventory-line small { margin: 3px 0 0; font-size: 11px; line-height: 1.6; color: #a4b1ac; }
+.tk-item-content .tk-inventory-line button { flex: none; }
+.tk-item-identifiers { border-top: 1px solid #b8c9c51b; padding-top: 10px; color: #91a198; font-size: 10px; }
+.tk-item-identifiers > summary { cursor: pointer; padding: 3px 0; width: fit-content; }
+.tk-item-identifiers dl { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 10px 0 0; }
+.tk-item-identifiers dt { font-weight: 700; margin-bottom: 2px; }
+.tk-item-identifiers dd { margin: 0; color: #bdc9c1; overflow-wrap: anywhere; }
+.tk-order-footer, .tk-order-links, .tk-order-cancel { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.tk-order-footer { justify-content: space-between; padding: 10px 16px; border-top: 1px solid #b8c9c51b; background: #ffffff02; border-radius: 0 0 12px 12px; }
+.tk-order-footer .tk-card-button { min-height: 34px; font-size: 11px; padding: 6px 10px; }
+.tk-market-status { font-size: 10px; color: #91a198; }
+.tiktok-workspace .tk-order-cancel [data-tk-cancel] { border: 0; border-radius: 4px; background: none; color: #c5a59b; padding: 6px 0; font-size: 10px; min-height: 34px; }
+.tiktok-workspace .tk-order-cancel [data-tk-cancel]:hover { color: #efb4a2; text-decoration: underline; }
+.tk-order-row > :is(.tk-note,.tk-warning) { margin: 12px 16px; }
+.tk-detail-items { margin-top: 18px; }
+.tk-detail-items > .tk-order-item { border: 1px solid #b8c9c522; border-radius: 12px; background: #111715; }
+@media (max-width: 1100px) {
+  .tk-buyer-workflow { flex-wrap: wrap; gap: 16px 22px; }
+  .tk-work-line { grid-template-columns: 1fr; }
+  .tk-buyer-overview { flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+}
+@media (max-width: 760px) {
+  .tk-buyer-header { flex-wrap: wrap; gap: 12px; padding: 16px 14px 10px; }
+  .tk-buyer-identity { flex-basis: 100%; gap: 9px; }
+  .tk-buyer-avatar { width: 34px; height: 34px; border-radius: 10px; font-size: 10px; }
+  .tiktok-workspace .orders-panel .tk-buyer .buyer-card-buyer-name { font-size: 16px !important; min-height: 0 !important; }
+  .tk-buyer-overview { width: 100%; justify-content: flex-start; }
+  .tiktok-workspace .orders-panel .tk-buyer .buyer-card-value { margin-left: auto; font-size: 17px; }
+  .tiktok-workspace .tk-card-button, .tiktok-workspace .tk-card-tools > summary { min-height: 44px; font-size: 11px; padding: 9px 10px; }
+  .tiktok-workspace .orders-panel .tk-buyer .tk-buyer-meta { padding: 0 14px 12px; gap: 5px 12px !important; font-size: 10px; }
+  .tk-buyer-workflow { display: grid; grid-template-columns: 1fr; gap: 14px; padding: 14px; }
+  .tk-workflow-group { gap: 6px; }
+  .tk-workflow-group > div { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .tk-card-tools { margin: 0; justify-self: end; }
+  .tiktok-workspace .tk-card-tools > summary { min-height: 36px; padding: 6px 10px; border: 0; color: #9faea7; }
+  .tiktok-workspace .orders-panel .tk-buyer .buyer-card-expanded { gap: 10px; padding: 14px 10px; }
+  .tk-items-heading { padding: 0 4px; }
+  .tk-order-heading { padding: 12px; gap: 8px; }
+  .tk-order-identity { gap: 6px; }
+  .tk-order-identity .tk-section-label { flex-basis: 100%; }
+  .tk-order-deadline { gap: 10px; }
+  .tk-order-item { grid-template-columns: minmax(0,1fr); gap: 16px; padding: 14px 12px; }
+  .tk-item-media { display: grid; grid-template-columns: 104px minmax(0,1fr); align-items: center; gap: 6px 14px; }
+  .tk-item-media > .tk-section-label { grid-column: 1 / -1; }
+  .tk-item-media .tk-receipt-photos { flex-direction: row; flex-wrap: wrap; gap: 12px; }
+  .tk-item-media .tk-receipt-photos:empty { min-height: 88px; padding: 10px; }
+  .tk-item-media .tk-receipt-capture, .tiktok-workspace .tk-item-media button.tk-receipt-photo { width: 104px; }
+  .tk-item-media .tk-receipt-photo img { height: 120px; }
+  .tk-item-media .tk-photo-remove { min-height: 40px !important; }
+  .tk-item-media .tk-capture-confirmation { grid-column: 1 / -1; margin: 0; }
+  .tk-line-receipt-link { min-height: 44px; max-width: 125px; }
+  .tk-item-title { gap: 8px; }
+  .tk-item-title h4 { font-size: 13px; }
+  .tk-item-check, .tk-item-processing { padding: 10px; }
+  .tiktok-workspace .tk-work-line button, .tiktok-workspace .tk-item-content .tk-inventory-line button { min-height: 44px; font-size: 11px; }
+  .tk-item-content .tk-inventory-line { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .tk-item-content .tk-inventory-line button { width: 100%; text-align: center; }
+  .tk-order-footer { padding: 10px 12px; gap: 4px; }
+  .tk-order-links { gap: 10px; }
+  .tk-market-status { flex-basis: 100%; }
+  .tk-order-footer .tk-text-action, .tk-order-deadline .tk-text-action, .tk-item-identifiers > summary { min-height: 36px; display: inline-flex; align-items: center; }
+  .tiktok-workspace .tk-order-cancel [data-tk-cancel] { min-height: 44px; }
+}
