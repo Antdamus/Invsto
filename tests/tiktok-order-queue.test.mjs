@@ -4,6 +4,16 @@ import {createRequire} from 'node:module';
 const q=createRequire(import.meta.url)('../tiktok-order-queue.js');
 const now=new Date('2026-10-18T02:30:00Z'); // Still Oct 17 in the shop's timezone.
 const order=(id,buyer,date,extra={})=>({id,order_number:'57762364879664333'+id,buyer_username:buyer,ship_by_date:date,stage:'pending',marketplace_status:'To ship',order_amount:'25.68',created_time:'10/17/2026 11:48:52 AM',lines:[{quantity:1,title:'Gold ring',seller_sku:id,tracking_number:''}],documents:[],...extra});
+
+test('purchase date matches any order and retains earlier, later and unknown-date buyer companions',()=>{
+ const orders=[order('1','Alice',null,{created_time:'10/16/2026 11:59:59 PM'}),order('2','alice',null),order('3','Alice',null,{created_time:'10/18/2026 12:01:00 AM'}),order('4','Alice',null,{created_time:''}),order('5','Bob',null,{created_time:'10/16/2026'}),order('6','Alice',null,{marketplace_status:'Canceled'})];
+ assert.deepEqual(q.select(orders,{purchase:'2026-10-17'})[0].orders.map(o=>o.id),['1','2','3','4']);assert.equal(q.select(orders,{purchase:'2026-10-19'}).length,0);
+ assert.deepEqual(q.select(orders,{history:true,purchase:'2026-10-17'})[0].orders.map(o=>o.id),['6']);assert.equal(q.select(orders).length,2);
+});
+test('purchase dates retain the source calendar day and reject unknown or invalid dates',()=>{
+ assert.equal(q.purchaseDate('10/17/2026 11:59:59 PM\t'),'2026-10-17');assert.equal(q.purchaseDate('2026-10-18T00:01:00Z'),'2026-10-18');
+ for(const value of [null,'','unknown','2/30/2026','2026-02-30','10/17/20260'])assert.equal(q.purchaseDate(value),'');
+});
 test('partially completed shipped orders stay pending and completed lines no longer hold remaining work',()=>{
  const partial=order('1','Alice',null,{stage:'preparing',marketplace_status:'Shipped',lines:[{fulfilled_at:'2026-10-18',work:{item_search:'not_found'}},{work:{item_search:'found'}}]});
  assert.equal(q.closed(partial),false);assert.equal(q.held(partial),false);assert.equal(q.lineCompleted(partial.lines[0]),true);assert.equal(q.lost({work:{item_search:'not_found'}}),true);assert.equal(q.lineHeld({work:{watch_missing:true}}),true);

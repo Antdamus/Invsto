@@ -28,7 +28,7 @@
   function parse(text) {
     const grid = csv(text), headers = (grid.shift() || []).map(clean);
     const required = ['Order ID', 'Order Status', 'Order Substatus', 'SKU ID', 'Seller SKU', 'Product Name', 'Quantity', 'Buyer Username', 'Package ID'];
-    if (!required.every(k => headers.includes(k))) throw Error('This is not a TikTok orders CSV. In TikTok: Orders → To ship → Export → CSV.');
+    if (!required.every(k => headers.includes(k))) throw Error('This is not a TikTok orders CSV. In TikTok: Orders → All → Export → CSV.');
     if (new Set(headers).size !== headers.length) throw Error('The report has duplicate columns. Export a fresh TikTok report.');
     const read = (row, key) => clean(row[headers.indexOf(key)]);
     const rows = [], identities = new Map(), orders = new Map(); let duplicateRows = 0;
@@ -53,6 +53,7 @@
     return {rows, orderCount:orders.size, buyerCount:new Set(rows.map(r=>r.buyer_username.toLowerCase())).size, duplicateRows,
       awaitingShipment:new Set(rows.filter(r=>r.marketplace_substatus==='Awaiting shipment').map(r=>r.order_number)).size,
       awaitingCollection:new Set(rows.filter(r=>r.marketplace_substatus==='Awaiting collection').map(r=>r.order_number)).size,
+      cancelledCount:new Set(rows.filter(r=>['Canceled','Cancelled'].includes(r.marketplace_status)).map(r=>r.order_number)).size,
       historyCount:new Set(rows.filter(r=>r.marketplace_status!=='To ship').map(r=>r.order_number)).size};
   }
   function orderUrl(id, receipt=false, sku='') {

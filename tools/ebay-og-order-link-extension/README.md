@@ -202,7 +202,7 @@ truncate its URL; the existing checks against incomplete PDFs still apply.
 
 TikTok uses its own `pending-tiktok-orders.html` workspace and history. No TikTok export is routed to the eBay importer.
 
-In TikTok Orders, expand **OG · TikTok orders**. Open Export, choose **To ship → All orders under current tab → CSV**, and download the file. Click **Send orders to OG**, select the original CSV, review the preview and export time in OG, and confirm the import. Only visible order-list ship-by dates are included; missing dates remain unknown. The app also accepts the CSV directly.
+In TikTok Orders, expand **OG · TikTok orders**. Click **All orders (include cancellations)**, open Export, choose **All orders under current tab → CSV**, and download the file. Click **Send orders to OG**, select the original CSV, review the preview and export time in OG, and confirm the import. Only visible order-list ship-by dates are included; missing dates remain unknown. The app also accepts the CSV directly.
 
 The private handoff expires after one hour and its CSV is cleared after a successful import. Opening the destination never imports automatically. **Watch full receipt in TikTok** opens that order; this extension opens its video receipt automatically when the page has exactly one receipt. Multiple receipts stay available for staff to choose.
 
@@ -219,3 +219,5 @@ Use **Complete order** or **Use my phone** in OG to pair a staff phone, add comp
 Download the ZIP, extract over the installed extension folder, reload OG eBay Order Link in the browser's extensions page, and refresh TikTok and OG. The phone itself only needs OG and a staff login.
 
 OG also provides TikTok item found/not found, watch/missing-watch, CGL certificate and cancellation-review controls. Scan/link inventory on an item before completing; only linked units are deducted at completion. These app controls do not require an extension permission change. Cancellations themselves are performed in TikTok and confirmed by a fresh export.
+
+Extension 1.0.21 includes All-status export guidance. Known cancelled orders move into OG TikTok history with a signed import audit. Canceled-tab CSV reports also update known orders; missing rows never imply a cancellation. No new extension permissions are required. OG also offers an audited **Mark cancelled** action after staff verify the exact order in TikTok.

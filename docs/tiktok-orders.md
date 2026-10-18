@@ -6,9 +6,9 @@ The TikTok workspace reuses the eBay fulfillment styles and navigation shell, wi
 
 ## Export and import
 
-1. In TikTok Manage orders, select Orders → To ship.
-2. Export **All orders under current tab** as CSV, including Awaiting collection.
-3. In extension v1.0.15+, expand **OG · TikTok orders**, choose **Send orders to OG**, and select the downloaded CSV. Alternatively upload it directly in the TikTok workspace.
+1. In TikTok Manage orders, select Orders → All.
+2. Export **All orders under current tab** as CSV to include cancelled orders as well as Awaiting shipment/collection. A Canceled-tab CSV can also refresh known cancellations.
+3. In extension v1.0.21+, expand **OG · TikTok orders**, choose **Send orders to OG**, and select the downloaded CSV. Alternatively upload it directly in the TikTok workspace.
 4. Review the count, item preview and actual export time, then confirm.
 5. Export again after label purchases, package combinations and status changes. An All-orders export can refresh existing records into history, but does not backfill previously unseen historical/unpaid orders.
 
@@ -81,8 +81,19 @@ Each item has **Scan / link inventory**. Select the store, scan a barcode (inclu
 
 **CGL certificate** accepts QR/link, PDF and photos, report number and watch serial. Supported CGL QR links archive the PDF on demand through `archive-tiktok-certificate`, reusing the existing validated provider-download helper without changing the eBay function. Uploading a copy alone does not clear Pending CGL: staff must explicitly confirm it belongs to this watch. Copies use a separate private `tiktok-order-certificates` bucket and stable TikTok line IDs. An author/admin may mark a copy incorrect with a reason; originals remain for audit and the confirmed requirement reopens. Copies load only on request and involve no image transformations.
 
-**Cancel order** records a reason and holds the buyer's OG work. It links to TikTok for the actual cancellation; it does not claim to cancel the sale or issue a refund. Import a fresh TikTok export to confirm the marketplace result. **Manage cancellation** can update the reason or release a mistaken/reversed hold with an audited reason. A cancelled source order goes to TikTok history without consuming inventory.
+**Cancellation hold** records a reason and holds the buyer's OG work. It links to TikTok for the actual cancellation; it does not claim to cancel the sale or issue a refund. Import a fresh TikTok export to confirm the marketplace result. **Manage cancellation hold** can update the reason or release a mistaken/reversed hold with an audited reason. A cancelled source order goes to TikTok history without consuming inventory.
 
 The tracking CSV includes found/watch/CGL/cancellation markers and linked/deducted inventory quantities. The new line-work/cancellation/certificate tables are TikTok-only. Completion and stage guards run on the server even if a second staff screen is stale. Certificate copies are never mixed with eBay records.
 
 A shipped/completed TikTok import with undeducted inventory links remains in the OG pending queue for completion review. Importing a marketplace status never silently checks out stock. After OG completion, carrier-handoff confirmation can move Completed directly to Dispatched without reopening the order.
+
+
+## Purchase dates and confirmed cancellations (extension 1.0.21)
+
+**Purchase date** matches the Created Time calendar date from TikTok's CSV. A match on any order keeps all of that buyer's orders and item lines in the current Pending/History view, including other purchase dates. It never selects an arbitrary timezone for source dates or splits a buyer bundle. Clear date restores the unfiltered queue.
+
+**Mark cancelled** records an already confirmed TikTok cancellation for the exact order. Staff must verify the order on TikTok, enter a reason and check the confirmation. The order moves to TikTok history; its buyer's other pending orders remain. Server-side permission and revision checks, authenticated staff identity, timestamp, reason and complete before/after states are recorded. It releases that order's pending cancellation hold but never refunds, deducts/restores inventory, removes captures or deletes fulfillment evidence. Managers/admins can correct a mistaken manual mark with a reason; its original status and pending cancellation hold are restored. Export-confirmed cancellations cannot be manually reopened.
+
+**Update TikTok statuses / cancellations** opens the CSV instructions. The extension's **All orders (include cancellations)** button selects TikTok's All tab; export the whole tab as CSV, then Send orders to OG and review the cancellation count and statuses. Existing orders are refreshed, while unseen historical orders are skipped. Missing rows never imply cancellation. The normal Refresh button only reloads OG's saved data. No automatic TikTok API sync is implied.
+
+Deploy `20261018220000_tiktok_cancellation_sync.sql` before these assets. Its import trigger logs cancellation/status changes with source import and staff identity. Older reports are ignored by the existing importer. A newer report contradicting an already recorded cancellation retains the cancellation and logs a conflict for manager review; it cannot silently return the order to shipping. The download ZIP/release manifest are extension 1.0.21 with unchanged permissions. Extract over the installed extension folder, reload the extension, then refresh TikTok and OG.
