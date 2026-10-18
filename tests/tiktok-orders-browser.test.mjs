@@ -28,7 +28,11 @@ test('TikTok preview, import, preparation/history and packet download use only T
  await page.locator('#tk-import').evaluate(e=>e.open=true);await page.locator('#tk-file').setInputFiles({name:'To Ship order-2026-10-17-22_04.csv',mimeType:'text/csv',buffer:Buffer.from(csv)});await expect(page.locator('#tk-preview')).toContainText('1 orders');assert.equal(await page.evaluate(()=>window.fixtureCalls.length),0);
  await page.locator('#tk-import-confirm').click();await expect(page.locator('#tk-orders')).toContainText('fixture-buyer');await expect(page.locator('#tk-status')).toContainText('1 new');
  await page.evaluate(()=>scrollTo(0,0));await page.screenshot({animations:'disabled',path:new URL('../outputs/tiktok-pipeline/tiktok-desktop.png',import.meta.url).pathname.replace(/^\/(.:)/,'$1'),fullPage:true});
- await page.locator('.tk-buyer').getByRole('button',{name:'Open',exact:true}).click();await page.getByRole('button',{name:'Open order',exact:true}).click();await expect(page.getByRole('link',{name:'Watch full receipt in TikTok'})).toHaveAttribute('href',/ogReceipt=1/);
+ const card=page.locator('.tk-buyer');await card.locator('.buyer-card-compact-count').click();await expect(card).toHaveClass(/is-expanded/);
+ await card.locator('.tk-order-heading').click();await expect(card).toHaveClass(/is-expanded/);
+ await card.locator('.buyer-card-meta span').first().click();await expect(card).toHaveClass(/is-collapsed/);
+ await card.getByRole('button',{name:'Open',exact:true}).click();await expect(card.getByRole('button',{name:'Hide',exact:true})).toHaveAttribute('aria-expanded','true');
+ await page.getByRole('button',{name:'Open order',exact:true}).click();await expect(page.getByRole('link',{name:'Watch full receipt in TikTok'})).toHaveAttribute('href',/ogReceipt=1/);
  await page.locator('#tk-order-notes').fill('Locate matching bag');await page.locator('#tk-order-stage').selectOption('waiting');await page.locator('#tk-save-work').click();await expect(page.locator('#tk-detail-status')).toContainText('Preparation saved');
  const download=page.waitForEvent('download');await page.getByRole('button',{name:'Download order PDF',exact:true}).click();const file=await download;const bytes=await readFile(await file.path());assert.equal(bytes.subarray(0,5).toString(),'%PDF-');
  await page.evaluate(()=>scrollTo(0,0));await page.screenshot({animations:'disabled',path:new URL('../outputs/tiktok-pipeline/tiktok-detail.png',import.meta.url).pathname.replace(/^\/(.:)/,'$1'),fullPage:true});
