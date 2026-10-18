@@ -1,5 +1,6 @@
-(function(){
+(function boot(){
  'use strict';
+ if(!window.supabase?.auth){document.addEventListener('supabase-ready',boot,{once:true});document.addEventListener('supabase-init-error',event=>{document.getElementById('tk-status').textContent=event.detail?.message||'Could not connect. Refresh and try again.';},{once:true});return;}
  const $=id=>document.getElementById(id), db=window.supabase, adapter=window.TikTokOrderImport;
  const historyView=new URLSearchParams(location.search).get('view')==='history';
  const state={user:null,orders:[],preview:null,transferId:null,busy:false,detail:null,loadSequence:0};

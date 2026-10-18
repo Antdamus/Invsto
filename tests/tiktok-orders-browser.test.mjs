@@ -5,8 +5,14 @@ import {createServer} from 'node:http';
 import {chromium,expect} from '@playwright/test';
 const root=new URL('../',import.meta.url);let server,browser,origin;
 const csv='Order ID,Order Status,Order Substatus,SKU ID,Seller SKU,Product Name,Quantity,Buyer Username,Package ID,Order Amount\n577623648796643332,To ship,Awaiting shipment,1732765489814737142,1,JEWELRY AS SEEN ON SCREEN,1,fixture-buyer,987654321123456789,25.68';
-before(async()=>{server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;browser=await chromium.launch();await mkdir(new URL('../outputs/tiktok-pipeline/',import.meta.url),{recursive:true});});
+before(async()=>{server=createServer(async(req,res)=>{const name=new URL(req.url,'http://localhost').pathname.slice(1);if(!/^[\w./-]+$/.test(name)||name.includes('..'))return res.writeHead(404).end();try{let content=await readFile(new URL(name,root));if(name.endsWith('.html')&&!new URL(req.url,'http://localhost').searchParams.has('boot'))content=content.toString().replace(/<script\b[\s\S]*?<\/script>/gi,'');res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.writeHead(404).end();}});await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;browser=await chromium.launch();await mkdir(new URL('../outputs/tiktok-pipeline/',import.meta.url),{recursive:true});});
 after(async()=>{await browser?.close();if(server)await new Promise(r=>{server.close(r);server.closeAllConnections();});});
+test('published script order waits for the real Supabase initializer before using auth',async()=>{
+ const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.route('https://cdn.jsdelivr.net/npm/@supabase/supabase-js',route=>route.fulfill({contentType:'text/javascript',body:`window.supabase={createClient(){return {auth:{getSession:async()=>({data:{session:{user:{id:'fixture-user'}}}})},from(){const q={select(){return q},order(){return q},range:async()=>({data:[]}),limit:async()=>({data:[]})};return q}}}};`}));
+ await page.goto(origin+'/pending-tiktok-orders.html?boot=1');
+ await expect(page.locator('#tk-status')).toContainText('Import your first');await expect(page.locator('#tk-orders')).toContainText('No TikTok orders imported yet');assert.deepEqual(errors,[]);await page.close();
+});
 async function setup(page){
  await page.goto(origin+'/pending-tiktok-orders.html');
  await page.evaluate(()=>{
