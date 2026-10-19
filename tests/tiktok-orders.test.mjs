@@ -10,6 +10,11 @@ const id='577623648796643332',sku='1732765489814737142',actor='00000000-0000-400
 const values=[id+'\t','To ship','Awaiting shipment',sku+'\t','1','JEWELRY AS SEEN ON SCREEN','1','fixture-buyer','987654321123456789\t','25.68','24','10/17/2026 11:48:52 AM\t'];
 const csv=(data=[values])=>'\uFEFF'+[headers,...data].map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\r\n');
 const fixture=()=>adapter.parse(csv()).rows[0];
+test('recipient names are retained separately from TikTok usernames and conflicting recipients are rejected',()=>{
+ const make=rows=>[headers.concat(['Recipient','Buyer Nickname']),...rows].map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\r\n');
+ const row=values.concat(['  Pat Rivera  ','Pat Shop']);const parsed=adapter.parse(make([row]));assert.equal(parsed.rows[0].recipient_name,'Pat Rivera');assert.equal(parsed.rows[0].buyer_username,'fixture-buyer');assert.equal(parsed.rows[0].buyer_nickname,'Pat Shop');
+ const second=[...row];second[3]='1732765489814737143';second[headers.length]='Someone else';assert.throws(()=>adapter.parse(make([row,second])),/Conflicting order details/);assert.equal(fixture().recipient_name,'');
+});
 let db,serial=0;
 const snapshot=n=>new Date(Date.now()-3600000+n*1000).toISOString();
 const importing=async(items=[fixture()],n=0,hash=String(++serial).padStart(64,'0'))=>(await db.query('select import_tiktok_orders($1,$2,$3,$4) r',[JSON.stringify(items),hash,'To Ship order-2026-10-17-22_04.csv',snapshot(n)])).rows[0].r;

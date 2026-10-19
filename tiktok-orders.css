@@ -191,3 +191,17 @@ body.phone-camera-mode>.tk-proof-viewer[open]{display:block!important}
 .tk-preview-scroll tr.is-cancelled{background:#94283824}
 .tiktok-cancelled-view .tk-packing-actions{display:none}
 .tk-order-deadline[hidden]{display:none}
+.tk-customer-identity{display:flex;flex-wrap:wrap;gap:8px 24px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #ffffff12;min-width:0}
+.tk-customer-identity>span,.tk-buyer-customer{display:flex;flex-direction:column;min-width:0;gap:3px;overflow-wrap:anywhere}
+.tk-customer-identity small,.tk-buyer-customer small{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#abbdb7}
+.tk-customer-identity strong,.tk-buyer-customer strong{font-size:15px;color:#f4eddf;overflow-wrap:anywhere}
+.tk-buyer-customer{margin-bottom:7px}.tk-buyer-name>.tk-section-label{display:block;font-size:9px;margin-bottom:2px}
+.tk-review-customer{overflow-wrap:anywhere;color:#c4d6cd}
+.tk-label-receiver.is-completion-labels{margin:16px 0;padding:18px;border:1px solid #b79a59;border-radius:14px;background:#172a24}
+.tk-label-receiver [hidden]{display:none!important}
+.tk-label-receiver.is-completion-labels .tk-actions{padding:10px 0 0}
+.tk-label-page-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}.tk-label-page-head h3{margin:8px 0}
+.tk-label-page>details>summary{cursor:pointer;overflow-wrap:anywhere;padding:8px 0;color:#e3c58b}.tk-label-customer{overflow-wrap:anywhere;font-weight:600}
+.tk-label-receiver.is-completion-labels .tk-confirm{display:flex;align-items:flex-start;gap:8px;margin-top:16px}
+.tk-label-receiver.is-completion-labels .tk-confirm input{width:auto;flex:0 0 auto;margin-top:4px}
+.tk-label-receiver.is-saved>p:first-of-type{display:none}

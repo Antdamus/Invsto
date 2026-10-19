@@ -1,7 +1,7 @@
 /* TikTok-only label receipt: match pages in the browser, save once, then use the printer picker. */
 (function(){
  'use strict';
- let config,panel,bytes,pageCount=0,received=false,saving=false,saved=false,printPath,loadReader;const previews=[];
+ let config,panel,bytes,pageCount=0,received=false,saving=false,saved=false,printPath,loadReader,autoReview=false;const previews=[];
  const id=new URLSearchParams(location.search).get('tiktokLabels');
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const status=message=>panel.querySelector('[data-label-status]').textContent=message;
@@ -26,11 +26,12 @@
  }
  function build(){
   if(panel)return;panel=document.createElement('section');panel.className='tk-label-receiver';panel.id='tk-label-receiver';
-  panel.innerHTML='<h2>TikTok shipping labels</h2><p>Check which order each label page covers. Combined labels may cover several orders from the same buyer.</p><p data-label-status role="status">Receiving the PDF…</p><div data-label-pages></div><label class="tk-confirm"><input data-label-confirm type="checkbox">I checked the recipient, items and order IDs for every label page.</label><div class="tk-actions"><button data-label-save type="button" disabled>Save labels to orders</button><button data-label-print type="button" disabled>Choose printer</button><button data-label-close type="button">Close</button></div>';
-  document.getElementById('tk-status').after(panel);panel.querySelector('[data-label-save]').onclick=save;panel.querySelector('[data-label-print]').onclick=print;panel.querySelector('[data-label-close]').onclick=()=>{if(saving)return;panel.hidden=true;};
+  panel.innerHTML='<h2>TikTok shipping labels</h2><p>Check which order each label page covers. Combined labels may cover several orders from the same buyer.</p><p data-label-status role="status">Receiving the PDF…</p><div data-label-pages></div><label class="tk-confirm"><input data-label-confirm type="checkbox">I checked the recipient, items and order IDs for every label page.</label><div class="tk-actions"><button data-label-save type="button" disabled>Save labels to orders</button><button data-label-print type="button" disabled>Choose printer</button><button data-label-details type="button" hidden>Review label pages</button><button data-label-review type="button" hidden>Review &amp; complete orders</button><button data-label-close type="button">Close</button></div>';
+  document.getElementById('tk-status').after(panel);panel.querySelector('[data-label-save]').onclick=save;panel.querySelector('[data-label-print]').onclick=print;panel.querySelector('[data-label-details]').onclick=()=>{const pages=panel.querySelector('[data-label-pages]');pages.hidden=!pages.hidden;panel.querySelector('[data-label-details]').textContent=pages.hidden?'Review label pages':'Hide label pages';};panel.querySelector('[data-label-review]').onclick=()=>{try{if(!openReview())status('Save or remove the photos and notes in the current review before switching orders.');}catch(e){status(e.message);}};panel.querySelector('[data-label-close]').onclick=()=>{if(saving)return;panel.hidden=true;};
  }
- async function receive(value,suggested=[]){
-  build();panel.hidden=false;saved=false;printPath=null;bytes=null;panel.querySelector('[data-label-save]').disabled=true;panel.querySelector('[data-label-save]').textContent='Save labels to orders';panel.querySelector('[data-label-print]').disabled=true;panel.querySelector('[data-label-print]').textContent='Choose printer';panel.querySelector('[data-label-confirm]').checked=false;panel.querySelector('[data-label-confirm]').disabled=false;
+ async function receive(value,suggested=[],review=false){
+  releaseReview();autoReview=review;
+  build();panel.hidden=false;panel.classList.remove('is-saved');panel.querySelector('[data-label-pages]').hidden=false;panel.querySelector('[data-label-confirm]').closest('label').hidden=false;panel.querySelector('[data-label-save]').hidden=false;panel.querySelector('[data-label-details]').hidden=true;saved=false;printPath=null;bytes=null;panel.querySelector('[data-label-save]').disabled=true;panel.querySelector('[data-label-save]').textContent=autoReview?'Save labels & choose printer':'Save labels to orders';panel.querySelector('[data-label-print]').disabled=true;panel.querySelector('[data-label-print]').textContent='Choose printer';panel.querySelector('[data-label-confirm]').checked=false;panel.querySelector('[data-label-confirm]').disabled=false;panel.querySelector('[data-label-review]').hidden=!autoReview;
   for(const url of previews.splice(0))URL.revokeObjectURL(url);panel.querySelector('[data-label-pages]').replaceChildren();
   status('Reading and matching the label pages in this browser…');
   await window.shippingLabelPrint.assertComplete(value);const normalized=await fitA6Labels(value);bytes=normalized.value;
@@ -41,11 +42,28 @@
    let suggestedOnly=false;if(!matched.length&&pageCount===1&&suggested.length&&suggested.every(n=>known.has(n))&&new Set(suggested.map(n=>known.get(n).buyer_username.toLowerCase())).size===1){matched=suggested;suggestedOnly=true;}
    const tracking=[...new Set((text[i].match(/\b1Z[A-Z0-9]{16}\b|\b9(?:[ -]?\d){19,21}\b/g)||[]).map(n=>n.replace(/[ -]/g,'')))];
    const row=document.createElement('section');row.className='tk-label-page';row.dataset.page=String(i+1);
-   row.innerHTML=`<h3>Label page ${i+1}</h3><button type="button" data-preview-page>Preview this page</button><label>TikTok order IDs (separate with semicolons)<input data-page-orders value="${esc(matched.join(';'))}" spellcheck="false"></label><label>Tracking number (if visible)<input data-page-tracking value="${esc(tracking.length===1?tracking[0]:'')}" spellcheck="false"></label><p class="tk-help">${suggestedOnly?'Suggested from your label-creation request; verify the actual PDF before saving.':matched.length?'Matched from the PDF. Verify the recipient and order coverage.':'No exact match found. Read the PDF and enter the order ID(s) it covers.'}</p>`;
+   row.innerHTML=`<div class="tk-label-page-head"><h3>Label page ${i+1}</h3><button type="button" data-preview-page>Preview this page</button></div><p class="tk-label-customer">${esc([...new Set(matched.map(n=>window.TikTokOrderQueue.customerName(known.get(n))+' · @'+known.get(n).buyer_username))].join('; '))}</p><details ${!matched.length?'open':''}><summary>${matched.length?esc(matched.join(' · '))+' · Review matching':'Choose the orders for this page'}</summary><label>TikTok order IDs (separate with semicolons)<input data-page-orders value="${esc(matched.join(';'))}" spellcheck="false"></label><label>Tracking number (if visible)<input data-page-tracking value="${esc(tracking.length===1?tracking[0]:'')}" spellcheck="false"></label><p class="tk-help">${suggestedOnly?'Suggested from your label-creation request; verify the actual PDF before saving.':matched.length?'Matched from the PDF. Verify the recipient and order coverage.':'No exact match found. Read the PDF and enter the order ID(s) it covers.'}</p></details>`;
    row.querySelector('[data-preview-page]').onclick=async()=>{const tab=window.open('about:blank','_blank');if(!tab){status('Allow a new tab to preview the label page.');return;}tab.opener=null;try{const output=await window.shippingPdf.prepare(bytes,String(i+1)),url=URL.createObjectURL(new Blob([output.bytes],{type:'application/pdf'}));previews.push(url);tab.location.replace(url);}catch(e){tab.close();status(e.message);}};
+   row.querySelectorAll('input').forEach(input=>input.oninput=()=>{
+    panel.querySelector('[data-label-confirm]').checked=false;
+    const ids=[...new Set(row.querySelector('[data-page-orders]').value.split(/[;,\s]+/).filter(Boolean))],matches=ids.map(n=>config.getOrders().find(o=>o.order_number===n));
+    row.querySelector('.tk-label-customer').textContent=matches.length&&matches.every(Boolean)?[...new Set(matches.map(o=>window.TikTokOrderQueue.customerName(o)+' · @'+o.buyer_username))].join('; '):'Enter imported order IDs to show the customer.';
+    row.querySelector('summary').textContent=ids.length?ids.join(' · ')+' · Review matching':'Choose the orders for this page';
+    row.querySelector('.tk-help').textContent='Matching edited. Check the PDF recipient and order coverage again before saving.';
+   });
    panel.querySelector('[data-label-pages]').append(row);
   }
-  panel.querySelector('[data-label-save]').disabled=false;status(`${pageCount} label page(s) ready.${normalized.fitted?' A6 pages were fitted to 4 × 6 in this browser.':''} Review the pages, then save.`);panel.scrollIntoView({block:'start'});
+  panel.querySelector('[data-label-save]').disabled=false;status(`${pageCount} label page(s) ready.${normalized.fitted?' A6 pages were fitted to 4 × 6 in this browser.':''} Review the pages, then save.`);if(autoReview){try{if(!openReview())status('Labels received. Finish the photos or notes in your open review, then select Review & complete orders.');}catch{status('Review the label page order IDs below. Saving opens completion review and printer selection.');}}panel.scrollIntoView({block:'start'});
+ }
+ function entries(){return [...panel.querySelectorAll('.tk-label-page')].map(row=>({page:Number(row.dataset.page),orders:row.querySelector('[data-page-orders]').value.trim(),tracking:row.querySelector('[data-page-tracking]').value.trim()}));}
+ function openReview(){
+  const targets=mapping(config.getOrders(),entries());
+  const opened=window.TikTokFulfillment.openLabels(targets.map(t=>t.order),panel);
+  if(opened){panel.querySelector('[data-label-close]').hidden=true;panel.querySelector('[data-label-review]').hidden=true;}
+  return opened;
+ }
+ function releaseReview(){
+  if(!panel)return;panel.classList.remove('is-completion-labels');document.getElementById('tk-status').after(panel);panel.querySelector('[data-label-close]').hidden=false;panel.querySelector('[data-label-review]').hidden=!autoReview;
  }
  async function upload(value){
   const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',value)),n=>n.toString(16).padStart(2,'0')).join(''),path=`tiktok-orders/${config.user.id}/${hash}.pdf`;
@@ -53,20 +71,21 @@
   if(error&&!['409','Duplicate'].includes(String(error.statusCode||error.code))&&!/already exists/i.test(error.message||''))throw error;return path;
  }
  async function save(){
-  if(saving||saved||!bytes)return;saving=true;const button=panel.querySelector('[data-label-save]');button.disabled=true;
+  if(saving||saved||!bytes)return;saving=true;let continueToPrint=false;const button=panel.querySelector('[data-label-save]');button.disabled=true;
   try{
    if(!panel.querySelector('[data-label-confirm]').checked)throw Error('Confirm the recipient and order coverage before saving.');
-   const entries=[...panel.querySelectorAll('.tk-label-page')].map(row=>({page:Number(row.dataset.page),orders:row.querySelector('[data-page-orders]').value.trim(),tracking:row.querySelector('[data-page-tracking]').value.trim()}));
-   const targets=mapping(config.getOrders(),entries),files=new Map(),documents=[];
+   const targets=mapping(config.getOrders(),entries()),files=new Map(),documents=[];
+   if(autoReview&&!openReview())throw Error('Save or remove the photos and notes in the current review before switching orders.');
    for(const target of targets){const selection=target.pages.join(',');if(!files.has(selection)){const prepared=await window.shippingPdf.prepare(bytes,selection);files.set(selection,await upload(prepared.bytes));}documents.push({order_id:target.order.id,path:files.get(selection),filename:`TikTok-label-${target.order.order_number}.pdf`,tracking_number:[...target.tracking].join(', '),pages:target.pages});}
    const {error}=await config.db.rpc('attach_tiktok_label_batch',{_documents:documents});if(error)throw error;saved=true;
    panel.querySelectorAll('[data-page-orders],[data-page-tracking],[data-label-confirm]').forEach(el=>el.disabled=true);
-   button.textContent='Labels saved';status(`Labels saved to ${targets.length} TikTok order(s). Each order has only its matching label pages. Choose your printer, then add completion photos.`);
+   button.textContent='Labels saved';if(autoReview){panel.classList.add('is-saved');panel.querySelector('[data-label-pages]').hidden=true;panel.querySelector('[data-label-confirm]').closest('label').hidden=true;button.hidden=true;panel.querySelector('[data-label-details]').hidden=false;}status(`Labels saved to ${targets.length} TikTok order(s). Each order has only its matching label pages. Choose your printer, then add completion photos.`);
    if(id)window.postMessage({type:'OG_TIKTOK_LABELS_DONE',transferId:id},location.origin);
    const all=Array.from({length:pageCount},(_,i)=>i+1).join(',');if(files.has(all))printPath=files.get(all);
    panel.querySelector('[data-label-print]').disabled=false;
-   try{await config.refresh();}catch(e){status('Labels saved. Refresh the order list to see them. You can still choose your printer here.');}
+   try{await config.refresh();if(autoReview){if(!openReview())throw Error('Review is busy');continueToPrint=true;}}catch(e){status('Labels saved. Refresh the order list to see them. You can still choose your printer here.');}
   }catch(e){status(e.message||'Could not save these labels. Retry saving.');}finally{saving=false;button.disabled=saved;}
+  if(continueToPrint)await print();
  }
  async function print(){
   if(saving||!saved||!bytes)return;saving=true;const button=panel.querySelector('[data-label-print]');button.disabled=true;
@@ -84,7 +103,7 @@
   if(e.data?.type!=='OG_TIKTOK_LABELS_DATA'||!config||received)return;
   const p=e.data.payload;build();if(p?.error){status(p.error);return;}if(p?.transferId!==id)return;received=true;
   if(p.completed){status('These labels are already saved to their TikTok orders. Open Shipping labels on the buyer card to preview or print.');return;}
-  try{if(typeof p.base64!=='string'||p.base64.length>13981016)throw Error('Choose a PDF smaller than 10 MB.');await receive(Uint8Array.from(atob(p.base64),c=>c.charCodeAt(0)),p.orderNumbers||[]);}catch(error){status(error.message);}
+  try{if(typeof p.base64!=='string'||p.base64.length>13981016)throw Error('Choose a PDF smaller than 10 MB.');await receive(Uint8Array.from(atob(p.base64),c=>c.charCodeAt(0)),p.orderNumbers||[],true);}catch(error){status(error.message);}
  });
   async function fitA6Labels(value) {
     let info;
@@ -131,5 +150,5 @@
     return {value: result, fitted};
   }
 
- window.TikTokLabels={start,mapping};
+ window.TikTokLabels={start,mapping,releaseReview};
 })();

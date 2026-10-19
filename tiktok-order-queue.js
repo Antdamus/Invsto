@@ -2,9 +2,14 @@
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.TikTokOrderQueue=api;})(typeof globalThis==='object'?globalThis:this,function(){
  'use strict';
  const TIME_ZONE='America/New_York';
+ const customerName=o=>String(o.recipient_name||o.buyer_nickname||'').trim()||'Name not provided';
  const lineCancelled=(l,o)=>Boolean(l.cancelled_at)||['Canceled','Cancelled'].includes(o?.marketplace_status);
  const cancelled=o=>['Canceled','Cancelled'].includes(o.marketplace_status)||Boolean(o.lines?.length&&o.lines.every(l=>lineCancelled(l)));
  const hasCancellation=o=>cancelled(o)||Boolean(o.lines?.some(l=>lineCancelled(l)));
+ const cancellationReview=o=>!cancelled(o)&&Boolean(o.cancellation?.pending||o.cancel_return);
+ const needsCancellation=o=>cancellationReview(o)||(cancelled(o)&&!o.cancellation_signed_at&&o.lines.some(l=>!l.cancellation_signed_at))||o.lines.some(l=>lineCancelled(l,o)&&!l.cancellation_signed_at);
+ const inView=(o,{history=false,cancelledOnly=false}={})=>cancelledOnly?needsCancellation(o):history?(!needsCancellation(o)&&closed(o))||o.lines.some(l=>lineCancelled(l,o)&&l.cancellation_signed_at):!closed(o)&&!cancellationReview(o);
+ const visibleLines=(o,{history=false,cancelledOnly=false}={})=>(o.lines||[]).filter(l=>cancelledOnly?cancellationReview(o)||(lineCancelled(l,o)&&!l.cancellation_signed_at):history?(lineCancelled(l,o)?Boolean(l.cancellation_signed_at):closed(o)):!lineCancelled(l,o));
  const lineCompleted=l=>Boolean(l.fulfilled_at);
  const lost=l=>l.work?.item_search==='not_found'||Boolean(l.work?.watch_missing);
  const lineHeld=l=>!lineCancelled(l)&&!lineCompleted(l)&&(lost(l)||Boolean(l.work?.cgl_required&&!l.work?.certificate_id));
@@ -15,15 +20,15 @@
  function shortDate(value){return day(value)===null?'Date needed':new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}).format(new Date(value+'T12:00:00Z'));}
  function purchaseDate(value){const raw=String(value||'').trim(),m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s|$)/.exec(raw);const date=m?`${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`:/^\d{4}-\d{2}-\d{2}(?:T|\s|$)/.test(raw)?raw.slice(0,10):'';return day(date)===null?'':date;}
  function sourceTime(value){const m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM))?/i.exec(value||'');if(!m)return 0;const h=m[4]?(+m[4]%12)+(m[7]?.toUpperCase()==='PM'?12:0):0;return Date.UTC(+m[3],+m[1]-1,+m[2],h,+(m[5]||0),+(m[6]||0));}
- const held=o=>Boolean(o.cancellation?.pending||o.lines?.some(lineHeld));
+ const held=o=>Boolean(cancellationReview(o)||o.lines?.some(lineHeld));
  function group(orders,now=new Date()){
   const groups=new Map();for(const o of orders){const key=o.buyer_username.toLowerCase();if(!groups.has(key))groups.set(key,{key,buyer:o.buyer_username,orders:[]});groups.get(key).orders.push(o);}
   return [...groups.values()].map(g=>{const dates=g.orders.map(o=>o.ship_by_date).filter(d=>day(d)!==null).sort();const lines=g.orders.flatMap(o=>o.lines||[]);return {...g,lines,quantity:lines.reduce((n,l)=>n+l.quantity,0),total:g.orders.reduce((n,o)=>n+Number(o.order_amount||0),0),shipBy:dates[0]||null,unknown:g.orders.filter(o=>day(o.ship_by_date)===null).length,urgency:urgency(dates[0],now),created:Math.min(...g.orders.map(o=>sourceTime(o.created_time))),waiting:g.orders.filter(o=>o.stage==='waiting'||held(o)).length,labelCount:g.orders.filter(o=>o.documents?.some(d=>d.kind==='label')).length};});
  }
  function select(orders,{history=false,cancelledOnly=false,term='',stage='',work='',due='all',purchase='',sort='oldest',now=new Date()}={}){
-  const needle=term.trim().toLowerCase();const groups=group(orders.filter(o=>cancelledOnly?hasCancellation(o):closed(o)===history),now).filter(g=>(!purchase||g.orders.some(o=>purchaseDate(o.created_time)===purchase))&&(!work||(work==='waiting'?g.waiting>0:work==='ready'?g.waiting===0:work==='cancel'?g.orders.some(o=>o.cancellation?.pending):g.lines.some(l=>work==='not_found'?l.work?.item_search==='not_found':work==='missing'?l.work?.watch_missing:work==='cgl'?l.work?.cgl_required&&!l.work?.certificate_id:false)))&&(!stage||g.orders.some(o=>o.stage===stage))&&(!needle||g.orders.some(o=>JSON.stringify([o.order_number,o.buyer_username,o.buyer_nickname,o.lines?.map(l=>[l.title,l.seller_sku,l.sku_id,l.tracking_number])]).toLowerCase().includes(needle)))&&(history||due==='all'||(due==='unknown'?g.unknown>0:g.urgency.level===due)));
+  const needle=term.trim().toLowerCase();const groups=group(orders.filter(o=>inView(o,{history,cancelledOnly})),now).map(g=>{const lines=g.orders.flatMap(o=>visibleLines(o,{history,cancelledOnly}));return {...g,lines,quantity:lines.reduce((n,l)=>n+l.quantity,0)};}).filter(g=>(!purchase||g.orders.some(o=>purchaseDate(o.created_time)===purchase))&&(!work||(work==='waiting'?g.waiting>0:work==='ready'?g.waiting===0:work==='cancel'?g.orders.some(o=>o.cancellation?.pending):g.lines.some(l=>work==='not_found'?l.work?.item_search==='not_found':work==='missing'?l.work?.watch_missing:work==='cgl'?l.work?.cgl_required&&!l.work?.certificate_id:false)))&&(!stage||g.orders.some(o=>o.stage===stage))&&(!needle||g.orders.some(o=>JSON.stringify([o.order_number,o.buyer_username,o.buyer_nickname,o.recipient_name,o.lines?.map(l=>[l.title,l.seller_sku,l.sku_id,l.tracking_number])]).toLowerCase().includes(needle)))&&(history||due==='all'||(due==='unknown'?g.unknown>0:g.urgency.level===due)));
   const compare=sort==='due'?(a,b)=>(a.shipBy||'9999').localeCompare(b.shipBy||'9999'):sort==='newest'?(a,b)=>b.created-a.created:sort==='value'?(a,b)=>b.total-a.total:sort==='buyer'?(a,b)=>a.buyer.localeCompare(b.buyer):(a,b)=>a.created-b.created;
   return groups.sort((a,b)=>compare(a,b)||a.buyer.localeCompare(b.buyer));
  }
- return {TIME_ZONE,closed,held,cancelled,hasCancellation,lineCancelled,lineCompleted,lost,lineHeld,calendarDate,day,urgency,shortDate,purchaseDate,group,select};
+ return {TIME_ZONE,customerName,inView,visibleLines,cancellationReview,needsCancellation,closed,held,cancelled,hasCancellation,lineCancelled,lineCompleted,lost,lineHeld,calendarDate,day,urgency,shortDate,purchaseDate,group,select};
 });

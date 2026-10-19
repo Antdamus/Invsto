@@ -20,10 +20,31 @@ await db.exec(await readFile(new URL('../supabase/migrations/20261018090000_tikt
 await db.exec(`create function is_admin() returns boolean language sql as $$select false$$;`);
 await db.exec(await readFile(new URL('../supabase/migrations/20261018100000_tiktok_work_controls.sql',import.meta.url),'utf8'));
 await db.exec(await readFile(new URL('../supabase/migrations/20261018180000_tiktok_completion_review.sql',import.meta.url),'utf8'));
-await reversalSetup();for(const file of ['20261018200000_tiktok_line_completion.sql','20261018220000_tiktok_cancellation_sync.sql','20261018230000_tiktok_line_cancellations.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));});
+await reversalSetup();for(const file of ['20261018200000_tiktok_line_completion.sql','20261018220000_tiktok_cancellation_sync.sql','20261018230000_tiktok_line_cancellations.sql','20261018233000_tiktok_customer_names.sql','20261018234500_tiktok_signed_cancellation_closeout.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));});
 after(()=>db.close());
 beforeEach(async()=>{await db.exec(`reset role;set test.allowed='yes';set test.actor='${actor}';truncate tiktok_inventory_attachments,stock_transactions,item_stock_locations,item_types,locations,store_locations,active_stock_reservations,tiktok_order_completion_photos,tiktok_order_phone_camera_requests,tiktok_order_phone_camera_sessions,tiktok_order_documents,tiktok_order_events,tiktok_order_lines,tiktok_orders,tiktok_order_imports,storage.objects cascade;`);orders=(await db.query("insert into tiktok_orders(order_number,buyer_username,marketplace_status,marketplace_substatus,source_snapshot_at) values('577620684385522369','buyer','To ship','Awaiting shipment',now()-interval '1 day'),('577620723998233281','buyer','To ship','Awaiting shipment',now()-interval '1 day') returning *")).rows;lines=(await db.query("insert into tiktok_order_lines(order_id,sku_id,title,quantity) select id,'1732759903849189622','Ring',1 from tiktok_orders returning *")).rows;});
 const scope=o=>lines.filter(l=>l.order_id===o.id).map(l=>({id:l.id,sku_id:l.sku_id,quantity:l.quantity})).sort((a,b)=>a.id.localeCompare(b.id));
+test('customer names import independently, backfill the original snapshot once, and preserve preparation and cancellation work',async()=>{
+ const row={order_number:orders[0].order_number,sku_id:lines[0].sku_id,title:'Ring',quantity:1,buyer_username:'buyer',buyer_nickname:'Display name',marketplace_status:'To ship',marketplace_substatus:'Awaiting shipment'};
+ const imported=rows=>db.query("select import_tiktok_orders($1,$2,'Original.csv',now()) r",[JSON.stringify(rows),'f'.repeat(64)]);
+ await imported([row]);const initial=(await db.query('select * from tiktok_orders where id=$1',[orders[0].id])).rows[0];
+ await db.query("update tiktok_orders set notes='Keep this note',stage='preparing' where id=$1",[orders[0].id]);
+ await db.query("update tiktok_order_lines set cancelled_at=now(),cancellation_record='{}' where order_id=$1",[orders[0].id]);
+ assert.equal((await imported([{...row,recipient_name:'Pat Rivera'}])).rows[0].r.recipient_names_updated,1);
+ const saved=(await db.query('select * from tiktok_orders where id=$1',[orders[0].id])).rows[0];assert.equal(saved.recipient_name,'Pat Rivera');assert.equal(saved.buyer_username,'buyer');assert.equal(saved.notes,'Keep this note');assert.equal(saved.stage,'preparing');assert.equal(saved.revision,initial.revision+1);assert.equal(saved.last_import_id,initial.last_import_id);
+ assert.ok((await db.query('select cancelled_at from tiktok_order_lines where order_id=$1',[orders[0].id])).rows[0].cancelled_at);
+ const audit=(await db.query("select * from tiktok_order_events where action='recipient_name_imported'")).rows;assert.equal(audit.length,1);assert.equal(audit[0].actor,actor);assert.equal(audit[0].details.after,'Pat Rivera');
+ assert.equal((await imported([{...row,recipient_name:'Other name'}])).rows[0].r.already_imported,true);assert.equal((await db.query('select recipient_name from tiktok_orders where id=$1',[orders[0].id])).rows[0].recipient_name,'Pat Rivera');
+});
+test('fresh customer names survive older clients, reject stale recovery and require staff access',async()=>{
+ const row={order_number:orders[0].order_number,sku_id:lines[0].sku_id,title:'Ring',quantity:1,buyer_username:'buyer',recipient_name:'Pat Rivera',marketplace_status:'To ship',marketplace_substatus:'Awaiting shipment'};
+ const imported=(rows,hash,offset='0 seconds')=>db.query("select import_tiktok_orders($1,$2,'Orders.csv',now()+$3::interval) r",[JSON.stringify(rows),hash.repeat(64),offset]);
+ await imported([row],'b');assert.equal((await db.query('select recipient_name from tiktok_orders where id=$1',[orders[0].id])).rows[0].recipient_name,'Pat Rivera');
+ await imported([{...row,recipient_name:''}],'c','1 second');assert.equal((await db.query('select recipient_name from tiktok_orders where id=$1',[orders[0].id])).rows[0].recipient_name,'Pat Rivera');
+ await db.query("update tiktok_orders set recipient_name='' where id=$1",[orders[0].id]);assert.equal((await imported([row],'b')).rows[0].r.recipient_names_updated,0);
+ await assert.rejects(imported([{...row,recipient_name:'x'.repeat(241)}],'d'),/customer names/);
+ await db.exec("set test.allowed='no'");await assert.rejects(imported([row],'c'),/access required/);
+});
 const save=(o=orders[0],p=photo,s=scope(o))=>db.query('select add_tiktok_order_completion_photos($1,$2,$3,null,$4,$5,$6) r',[o.id,s.map(l=>l.id),JSON.stringify([p]),'completion_photo','spoofed@example.com',JSON.stringify(s)]);
 const attach=(docs=orders.map(o=>({order_id:o.id,path:label,pages:[1]})))=>db.query('select attach_tiktok_label_batch($1) r',[JSON.stringify(docs)]);
 const complete=(os=orders,confirmed=true)=>db.query('select complete_tiktok_orders($1,$2,$3) r',[os.map(o=>o.id),JSON.stringify(Object.fromEntries(os.map(o=>[o.id,o.revision]))),confirmed]);
@@ -325,4 +346,32 @@ test('reimporting an old file recovers only its skipped cancellations, once, wit
  const rows=[{order_number:orders[0].order_number,buyer_username:'buyer',marketplace_status:'To ship',marketplace_substatus:'Awaiting shipment',sku_id:lineOf(orders[0]).sku_id,title:'Changed title must be ignored',quantity:5},{order_number:'577623648796643339',buyer_username:'buyer',marketplace_status:'Canceled',marketplace_substatus:'Canceled',sku_id:'1732765489814737199',title:'Cancelled ring',quantity:1}];
  const call=()=>db.query("select import_tiktok_orders($1,$2,'All orders.csv',now()) r",[JSON.stringify(rows),hash]);assert.equal((await call()).rows[0].r.cancelled_recovered,1);assert.equal((await call()).rows[0].r.already_imported,true);
  assert.equal((await db.query('select quantity from tiktok_order_lines where id=$1',[lineOf(orders[0]).id])).rows[0].quantity,1);assert.equal((await db.query('select count(*)::int n from tiktok_order_imports')).rows[0].n,1);assert.equal((await db.query("select count(*)::int n from tiktok_order_events where action='cancellation_imported'")).rows[0].n,1);
+});
+
+
+const signCancellation=(os=orders,ls=[],note=null)=>db.query('select sign_tiktok_cancellations($1,$2,$3,$4) r',[os.map(o=>o.id),ls.map(l=>l.id),JSON.stringify(Object.fromEntries(orders.map(o=>[o.id,o.revision]))),note]);
+test('signing imported cancellations preserves stock and evidence and records an authenticated, retry-safe closeout',async()=>{
+ await inventory();await link();await objects();await attach();for(const o of orders)await save(o);
+ await db.query("update tiktok_orders set marketplace_status='Canceled' where id=$1",[orders[0].id]);await fresh();
+ await signCancellation([orders[0]]);const signed=(await db.query('select * from tiktok_orders where id=$1',[orders[0].id])).rows[0];assert.ok(signed.cancellation_signed_at);assert.equal(signed.marketplace_status,'Canceled');assert.equal(await stock(),5);
+ const event=(await db.query("select * from tiktok_order_events where action='cancellation_signed'")).rows[0];assert.equal(event.actor,actor);assert.equal(event.details.actor_email,actor+'@fixture.test');assert.equal(event.details.notes,'Cancellation verified in TikTok');assert.equal(event.details.inventory_changed,false);assert.equal(event.details.line_ids.length,1);
+ await signCancellation([orders[0]]);assert.equal((await db.query("select count(*)::int n from tiktok_order_events where action='cancellation_signed'")).rows[0].n,1);assert.equal((await db.query('select count(*)::int n from tiktok_order_documents')).rows[0].n,2);
+});
+test('signed cancellation validates all revisions and permissions atomically and cannot sign another buyer',async()=>{
+ const saved=orders[1].revision;orders[1].revision++;await assert.rejects(signCancellation(),/changed/);assert.equal((await db.query('select count(*)::int n from tiktok_orders where cancellation_signed_at is not null')).rows[0].n,0);orders[1].revision=saved;
+ await db.exec("set test.allowed='no'");await assert.rejects(signCancellation(),/access required/);await db.exec("set test.allowed='yes'");
+ await db.query("update tiktok_orders set buyer_username='other' where id=$1",[orders[1].id]);await assert.rejects(signCancellation(),/one buyer/);
+ await db.exec('set role authenticated');await assert.rejects(db.exec('update tiktok_orders set cancellation_signed_at=now()'),/permission denied/);await db.exec('reset role');
+});
+test('signed item cancellation leaves other items pending and a correction resets its signature',async()=>{
+ await reversalSetup();const target=lines[0];await db.query("insert into tiktok_order_lines(order_id,sku_id,title,quantity) values($1,'1732759903849189629','Other item',1)",[target.order_id]);await fresh();
+ await signCancellation([], [target], 'Wrong item ordered');let item=(await db.query('select * from tiktok_order_lines where id=$1',[target.id])).rows[0];assert.ok(item.cancelled_at);assert.ok(item.cancellation_signed_at);assert.equal((await db.query('select marketplace_status from tiktok_orders where id=$1',[target.order_id])).rows[0].marketplace_status,'To ship');assert.equal((await db.query('select count(*)::int n from tiktok_order_lines where cancelled_at is null')).rows[0].n,2);
+ await fresh();await db.query('select record_tiktok_line_cancellation($1,$2,false,$3,true)',[target.id,orders.find(o=>o.id===target.order_id).revision,'Correction verified']);item=(await db.query('select * from tiktok_order_lines where id=$1',[target.id])).rows[0];assert.equal(item.cancellation_signed_at,null);
+});
+
+
+test('whole-order correction clears signatures, and new cancelled lines require a new closeout',async()=>{
+ await reversalSetup();await signCancellation([orders[0]]);await fresh();
+ await db.query('select record_tiktok_cancellation($1,$2,false,$3,true)',[orders[0].id,orders[0].revision,'Marked wrong order']);let current=(await db.query('select * from tiktok_orders where id=$1',[orders[0].id])).rows[0];assert.equal(current.cancellation_signed_at,null);assert.equal((await db.query('select cancellation_signed_at from tiktok_order_lines where order_id=$1',[current.id])).rows[0].cancellation_signed_at,null);
+ await fresh();await signCancellation([orders[0]]);await db.query("insert into tiktok_order_lines(order_id,sku_id,title,quantity) values($1,'1732759903849189629','New cancelled item',1)",[orders[0].id]);await fresh();await signCancellation([orders[0]]);assert.equal((await db.query('select count(*)::int n from tiktok_order_lines where order_id=$1 and cancellation_signed_at is null',[orders[0].id])).rows[0].n,0);
 });
