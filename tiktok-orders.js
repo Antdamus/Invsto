@@ -126,7 +126,10 @@
   </section>`;
  }
  function render(){
-  $('tk-cancelled-link').textContent='Cancellations ('+state.orders.filter(o=>queue.inView(o,{cancelledOnly:true})).length+')';
+  const cancellationCount=state.orders.filter(o=>queue.inView(o,{cancelledOnly:true})).length;
+  $('tk-cancelled-link').textContent='Cancellations ('+cancellationCount+')';
+  $('tk-cancellation-count').textContent=cancellationCount;
+  $('tk-cancellation-toggle').classList.toggle('has-cancellations',cancellationCount>0);
   $('tk-clear-purchase-date').hidden=!$('tk-purchase-date').value;
   const all=queue.select(state.orders,viewOptions()),visible=groups(),list=visible.flatMap(g=>g.orders);
   const total=all.reduce((n,g)=>n+g.orders.length,0),items=all.reduce((n,g)=>n+g.quantity,0),unknown=all.reduce((n,g)=>n+g.unknown,0);
@@ -221,7 +224,18 @@
  $('tk-refresh').onclick=()=>busy(refresh);$('tk-packet').onclick=()=>busy(()=>packet(filtered()));$('tk-export').onclick=()=>busy(exportView);
  $('tk-file').onchange=()=>busy(async()=>{const f=$('tk-file').files[0];if(!f)return;if(f.size>adapter.MAX_BYTES)throw Error('Choose a CSV smaller than 10 MB.');await preview(await f.text(),f.name,{modifiedAt:f.lastModified});});
  $('tk-import-confirm').onclick=()=>busy(confirmImport);$('tk-import-cancel').onclick=discard;
+ $('tk-cancellation-toggle').onclick=()=>{
+  cancellationView=!cancellationView;historyView=cancellationView;
+  // Open the entire cancellation queue, even when packing was filtered to another buyer or date.
+  $('tk-search').value='';$('tk-stage-filter').value='';$('tk-work-filter').value='';$('tk-purchase-date').value='';state.due='all';state.labelBuyers.clear();
+  const url=new URL(location.href);url.searchParams.delete('buyer');
+  if(cancellationView)url.searchParams.set('view','cancellations');else url.searchParams.delete('view');
+  history.replaceState(null,'',url);updateView();marketplaceNavigation();render();
+ };
  function updateView(){
+  $('tk-cancellation-toggle').setAttribute('aria-pressed',String(cancellationView));
+  $('tk-cancellation-toggle').classList.toggle('is-active',cancellationView);
+  $('tk-cancellation-toggle').title=cancellationView?'Return to pending orders':'Show all orders and items awaiting cancellation';
   $('tk-work-filter').querySelector('[value=cancel]').hidden=true;
   document.body.classList.toggle('tiktok-cancelled-view',cancellationView);$('tk-title').textContent=cancellationView?'TikTok Cancellations':historyView?'TikTok Order History':'Pending TikTok Orders';$('tk-greeting').textContent=$('tk-title').textContent;$('tk-phone-title').textContent=cancellationView?'Cancellations':historyView?'Order history':'Pending orders';$('tk-queue-title').textContent=cancellationView?'Cancellations':historyView?'TikTok order history':'Orders to Pack';document.querySelector('.buyer-due-filters').hidden=historyView;
   $('tk-cancelled-link').removeAttribute('aria-current');$('tk-history-link').removeAttribute('aria-current');$('tk-pending-link').removeAttribute('aria-current');$(cancellationView?'tk-cancelled-link':historyView?'tk-history-link':'tk-pending-link').setAttribute('aria-current','page');$('ebay-tab').href=historyView?'ebay-order-history.html':'pending-orders.html';
