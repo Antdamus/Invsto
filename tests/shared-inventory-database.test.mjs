@@ -95,6 +95,8 @@ beforeEach(async()=>{
 after(async()=>db?.close());
 
 
+
+
 beforeEach(async()=>{
  await db.exec(`truncate shared_inventory_reviews,shared_inventory_consumptions,shared_inventory_transfers,shared_inventory_bag_links,live_bag_order_links,live_sale_events,ebay_live_attempts,ebay_live_connections,live_sale_lots,live_sale_sessions cascade;
  insert into live_sale_sessions(id,store_id) values('${id(61)}','${id(41)}');
@@ -319,4 +321,30 @@ test('manager migration also installs on legacy deployments without CSV guard fu
  await db.exec('drop function guard_pending_csv_order_import() cascade;drop function guard_pending_csv_line_import() cascade');
  await managerReversalSetup();await db.exec("update ebay_order_lines set line_status='skipped';update ebay_orders set status='fulfilled';set role authenticated");
  await revertOrder();await db.exec('reset role');assert.equal(await scalar('select count(*)::int v from ebay_order_revert_events'),1);
+});
+
+test('partial refund approval uses the real completion RPC and deducts linked stock exactly once',async()=>{
+ await db.exec(`alter table ebay_orders add column label_file_path text;
+ create table ebay_order_label_events(order_ids uuid[],action text);
+ create table packaging_shipments(id uuid primary key,order_ids uuid[],status text,revision int default 1,hold_reason text,updated_at timestamptz,created_by uuid);
+ create table packaging_events(shipment_id uuid,request_id uuid,action text,notes text,payload jsonb,created_by uuid);
+ create table packaging_items(shipment_id uuid,order_line_id uuid);
+ create or replace function can_revert_order_fulfillment() returns boolean language sql stable as $$select public.is_admin()$$;
+ create or replace function auth.jwt() returns jsonb language sql stable as $$select jsonb_build_object('email','staff@example.test','amr',jsonb_build_array(jsonb_build_object('method','password','timestamp',floor(extract(epoch from now())))))$$;`);
+ await db.exec(await migration('20261009060000_fulfillment_payment_safety.sql'));
+ await db.exec(await migration('20261009061000_fulfillment_safety_observations.sql'));
+ await db.exec(await migration('20261022020000_ebay_partial_refund_review.sql'));
+ await attach(1);await db.exec(`update ebay_orders set raw_payload='{"orderPaymentStatus":"PARTIALLY_REFUNDED"}' where id='${id(2)}'`);
+ await assert.rejects(close(),/Refund/);
+ assert.equal(await scalar(`select quantity v from item_stock_locations where id='${id(31)}'`),5);
+ const snapshot=await scalar('select get_ebay_partial_refund_reviews($1)->0->\'snapshot\' v',[[id(2)]]);
+ await scalar('select approve_ebay_partial_refund($1,$2,$3,true) v',[id(2),snapshot,'Verified partial price adjustment; fulfill these items']);
+ await close();
+ assert.equal(await scalar(`select quantity v from item_stock_locations where id='${id(31)}'`),4);
+ assert.equal(await scalar(`select line_status v from ebay_order_lines where id='${id(11)}'`),'fulfilled');
+ assert.equal(await scalar(`select line_status v from ebay_order_lines where id='${id(12)}'`),'pending');
+ await assert.rejects(close(),/pending|fulfilled|completed/i);
+ assert.equal(await scalar(`select quantity v from item_stock_locations where id='${id(31)}'`),4);
+ assert.equal(await scalar('select count(*)::int v from ebay_order_admin_events'),1);
+ assert.equal(await scalar('select count(*)::int v from ebay_partial_refund_approvals'),1);
 });

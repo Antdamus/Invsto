@@ -645,6 +645,11 @@ function isActiveCancellationReviewLine(line = {}) {
 }
 
 function getLineFulfillmentBlock(line) {
+  const reason = getLineFulfillmentBlockUnreviewed(line);
+  return /^Refund/.test(reason) && window.OGPartialRefunds?.approved(line) ? "" : reason;
+}
+
+function getLineFulfillmentBlockUnreviewed(line) {
   if (!line) return "Select an order item.";
   if (["cancelled","canceled","closed","archived","refunded"].includes(String(getOrderFromLine(line)?.status || "").toLowerCase())) return "Order cancelled or closed · do not ship";
   if (["cancelled","canceled","closed","skipped","refunded"].includes(String(line.line_status || "").toLowerCase())) return "Item cancelled or closed · do not ship";
@@ -3123,6 +3128,7 @@ async function loadOrders() {
   state.orderTaskAssignmentsByLineId.clear();
   const normalizeStartedAt = nowMs();
   state.orders = data.map(normalizeLine);
+  await window.OGPartialRefunds?.load(state.orders);
   window.OGPendingWork?.reset();
   logPendingOrderPerf("loadOrders normalize", normalizeStartedAt, { rows: state.orders.length });
   if (state.selectedLiveLot) {
@@ -4884,6 +4890,7 @@ function renderOrders(options = {}) {
               ${lineEbayApiStatus ? `<span class="buyer-line-sync-warning ${escapeHtml(lineEbayApiStatus.tone)}" title="${escapeHtml(lineEbayApiStatus.title)}"><i data-lucide="${escapeHtml(lineEbayApiStatus.icon)}"></i>${escapeHtml(lineEbayApiStatus.label)}</span>` : ""}
             </div>
             ${lineCancellationReviewActionMarkup}
+            ${window.OGPartialRefunds?.markup(line) || ""}
             <div class="buyer-line-locate">
               <span data-item-search-status="${escapeHtml(line.id)}">${renderItemSearchStatus(line)}</span>
               <div class="buyer-line-actions" role="group" aria-label="Find this item">${renderItemFoundActions(line)}</div>
@@ -4975,6 +4982,10 @@ function renderOrders(options = {}) {
       button.querySelector("[data-line-complete-order]")?.addEventListener("click", event => {
         event.stopPropagation();
         openBuyerGroupNoInventoryModal(group);
+      });
+      button.querySelector("[data-review-partial-refund]")?.addEventListener("click", event => {
+        event.stopPropagation();
+        void window.OGPartialRefunds?.open(line);
       });
       button.querySelector("[data-line-assign-task]")?.addEventListener("click", () => {
         selectOrderLine(line.id, { openDetail: false });

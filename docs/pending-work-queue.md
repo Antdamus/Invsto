@@ -77,3 +77,12 @@ page renderer with isolated fixture data, plus a read-only check of the live UI.
 Partial shipments require `20261013201000_partial_pending_watch_fulfillment.sql`
 and `20261013202000_partial_order_packaging.sql` before publishing the pending
 and packaging pages. No existing order, hold or package is completed by deployment.
+# Partial refunds and completion
+
+An eBay finance refund remains blocked until reviewed, including when eBay still reports PAID. The finance feed does not supply a reliable full-versus-partial classification in every imported record; do not compare a seller payout or hold amount to the order total to make that decision.
+
+Active managers/admins can choose **Review partial refund** on an affected pending item. The review lists every item in that eBay order, links to eBay, and requires a reason with the verified refund amount, confirmation that payment remains and the items should ship, and the current manager's password. Approval enables normal completion, labels, and packaging dispatch for the reviewed order. It does not complete the order itself or bypass photos, missing-item checks, or inventory rules. Known full/pending refunds, cancellations, closed items, and unpaid statuses remain blocked.
+
+Approvals are stored separately in `ebay_partial_refund_approvals` with the server-authenticated signer, timestamp, reason, and exact refund/item snapshot. The database requires a password authentication within five minutes using the signed [Supabase AMR claim](https://supabase.com/docs/guides/auth/jwt-fields). Passwords are never sent to the approval RPC or saved in audit records. A changed refund, payment/cancellation state, item identity, quantity, or price invalidates approval and holds active packaging. A new review is required; unchanged poll timestamps do not invalidate approval.
+
+Deploy `20261022020000_ebay_partial_refund_review.sql` after the fulfillment-payment safety and manager-permission migrations, then publish `pending-partial-refunds.js`, `pending-orders.js`, `pending-orders.html`, and `pending-orders.css` together. No extension update is needed. Tests: `fulfillment-payment-safety`, `partial-refund-browser`, `shared-inventory-database`, `noninventory-database`, `pending-checkout`, and `ebay-combined-shipping`.

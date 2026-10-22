@@ -5530,3 +5530,14 @@ body.phone-camera-mode #pending-quick-actions { display: none; }
 .finance-sync-panel button { flex-shrink:0; }
 @media(max-width:640px) { .finance-sync-panel { align-items:stretch; flex-direction:column; } .finance-sync-panel button { width:100%; min-height:44px; } }
 .fulfillment-blocked{display:block;padding:9px 12px;border:1px solid #d9877977;border-radius:10px;color:#f7b5a8;background:#472724;font-size:12px;font-weight:600;line-height:1.5;overflow-wrap:anywhere}
+.fulfillment-refund-approved{display:block;padding:9px 12px;border:1px solid #70b99777;border-radius:10px;color:#a8e2c2;background:#203c30;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.partial-refund-help{color:#e3cfa2;line-height:1.5}
+.partial-refund-dialog{box-sizing:border-box;width:min(620px,calc(100vw - 24px));max-height:calc(100dvh - 32px);overflow:auto;background:#202320;color:#eee;border:1px solid #a48c58;border-radius:16px;padding:24px;font:14px/1.5 system-ui,sans-serif}
+.partial-refund-dialog::backdrop{background:#000b}
+.partial-refund-dialog p,.partial-refund-dialog li{line-height:1.5;font-size:14px}
+.partial-refund-dialog label{display:flex;flex-direction:column;gap:8px;margin:16px 0;font-size:14px}
+.partial-refund-dialog input[type=password],.partial-refund-dialog textarea{box-sizing:border-box;width:100%;padding:12px;border:1px solid #666;border-radius:8px;background:#151815;color:#fff;font:inherit}
+.partial-refund-dialog .partial-refund-confirm{flex-direction:row;align-items:flex-start;line-height:1.5}
+.partial-refund-dialog input[type=checkbox]{width:18px;max-width:18px;height:18px;min-height:18px;padding:0;margin:3px 0 0;flex:0 0 18px}
+.partial-refund-dialog a{color:#e3cfa2}.partial-refund-dialog #partial-refund-error{color:#f7b5a8}
+.partial-refund-dialog .modal-actions{display:flex;gap:12px;flex-wrap:wrap}.partial-refund-dialog button{min-height:44px}
