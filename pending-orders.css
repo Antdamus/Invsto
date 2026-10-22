@@ -5534,6 +5534,7 @@ body.phone-camera-mode #pending-quick-actions { display: none; }
 .partial-refund-help{color:#e3cfa2;line-height:1.5}
 .partial-refund-dialog{box-sizing:border-box;width:min(620px,calc(100vw - 24px));max-height:calc(100dvh - 32px);overflow:auto;background:#202320;color:#eee;border:1px solid #a48c58;border-radius:16px;padding:24px;font:14px/1.5 system-ui,sans-serif}
 .partial-refund-dialog::backdrop{background:#000b}
+.partial-refund-dialog h2{color:#f5f1e9;font:700 22px/1.3 system-ui,sans-serif;margin:0 0 12px}
 .partial-refund-dialog p,.partial-refund-dialog li{line-height:1.5;font-size:14px}
 .partial-refund-dialog label{display:flex;flex-direction:column;gap:8px;margin:16px 0;font-size:14px}
 .partial-refund-dialog input[type=password],.partial-refund-dialog textarea{box-sizing:border-box;width:100%;padding:12px;border:1px solid #666;border-radius:8px;background:#151815;color:#fff;font:inherit}
