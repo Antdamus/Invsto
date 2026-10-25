@@ -896,7 +896,7 @@ async function loadExistingOrders(supabase: any, orderNumbers: string[]): Promis
 }
 
 function existingOrderDetailsUpdate(entry: PreparedOrder, existing: any, now: string, includeEvidence = true) {
-  const finance = entry.order.raw_payload?.ebayFinance;
+  const finance = (entry.order.raw_payload as JsonRecord | undefined)?.ebayFinance;
   const rawPayload = existing.raw_payload && typeof existing.raw_payload === "object" ? existing.raw_payload : {};
   const dates = Object.fromEntries(["sale_date", "paid_on_date", "ship_by_date"]
     .map(field => [field, toIsoDate(entry.order[field])]).filter(([, value]) => value));
@@ -1289,6 +1289,37 @@ async function processFinanceQueue(supabase: any, dispatchToken: unknown): Promi
   return jsonResponse(200, {ok:true,completed,retrying});
 }
 
+async function authorizeOrderSync(req: Request, db: any): Promise<boolean> {
+  const authorization=req.headers.get('Authorization') || '';
+  if (SUPABASE_SERVICE_ROLE_KEY && authorization===`Bearer ${SUPABASE_SERVICE_ROLE_KEY}`) return true;
+  if (!authorization.startsWith('Bearer ')) return false;
+  const {data,error}=await db.auth.getUser(authorization.slice(7));
+  if(error || !data?.user) return false;
+  const staff=createClient(SUPABASE_URL,Deno.env.get('SUPABASE_ANON_KEY') || '',{
+    global:{headers:{Authorization:authorization}},auth:{persistSession:false,autoRefreshToken:false},
+  });
+  const permission=await staff.rpc('can_manage_inventory');
+  return !permission.error && permission.data===true;
+}
+
+async function claimOrderSyncLease(db: any, token: string, automatic: boolean): Promise<boolean> {
+  const result=await db.rpc('claim_ebay_order_sync',{_token:token,_automatic:automatic});
+  if(result.error) throw result.error;
+  return result.data===true;
+}
+
+async function finishOrderSyncLease(db: any, token: string, runId: string | null, failure: string | null) {
+  await db.rpc('finish_ebay_order_sync',{_token:token,_run_id:runId,_error:failure});
+}
+
+function automaticOrderSyncError(error: unknown): string {
+  const message=compactError(error);
+  if (/invalid_grant|refresh token.*invalid|revoked/i.test(message)) return 'eBay authorization needs to be reconnected by an administrator.';
+  if (/1,000-order limit/.test(message)) return message;
+  if (/429|rate limit/i.test(message)) return 'eBay is limiting requests. Automatic retry is scheduled.';
+  return 'The eBay sync could not finish. Automatic retry is scheduled; use the sync tools to review details.';
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse(405, { ok: false, error: "Method not allowed" });
@@ -1299,18 +1330,37 @@ Deno.serve(async (req) => {
 
   let runId: string | null = null;
   let body: JsonRecord = {};
+  let leaseToken: string | null = null;
+  let automatic = false;
+  let syncFailure: string | null = null;
 
   try {
     body = await req.json().catch(() => ({}));
     if ("financeWorkerToken" in body) return await processFinanceQueue(supabase,body.financeWorkerToken);
     if (body.captureEventId) return await refreshCapturedShowOrders(supabase,req,toText(body.captureEventId));
+    automatic='orderWorkerToken' in body;
+    if(automatic){
+      const token=toText(body.orderWorkerToken);
+      if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) return jsonResponse(403,{ok:false,error:'Invalid order-sync lease.'});
+      if(!await claimOrderSyncLease(supabase,token,true)) return jsonResponse(409,{ok:false,error:'Order sync is already running or the request expired.'});
+      leaseToken=token;
+      // Fixed server-owned settings: a worker request cannot select another
+      // scope, disable safety checks, or turn a background import into a preview.
+      body={dryRun:false,reserve:true,syncFinance:true,syncCancellations:true,daysBack:90,limit:1000,
+        cancellationDetailLimit:50,localMismatchLimit:120,responseBudgetMs:110000};
+    }else{
+      if(!await authorizeOrderSync(req,supabase)) return jsonResponse(401,{ok:false,error:'Sign in to Invsto with inventory staff access.'});
+      const token=crypto.randomUUID();
+      if(!await claimOrderSyncLease(supabase,token,false)) return jsonResponse(409,{ok:false,error:'An eBay order sync is already running. Try again after it finishes.'});
+      leaseToken=token;
+    }
     const responseDeadlineMs = getResponseDeadline(body);
     const dryRun = body.dryRun !== false;
     const shouldReserve = body.reserve !== false;
 
     const { data: run, error: runError } = await supabase
       .from("ebay_order_sync_runs")
-      .insert({ dry_run: dryRun, status: "running" })
+      .insert({ dry_run: dryRun, status: "running", automatic })
       .select("id")
       .single();
     if (runError) throw runError;
@@ -1321,6 +1371,7 @@ Deno.serve(async (req) => {
       throw new Error("Choose explicit order IDs when refreshing order details.");
     }
     let rawOrders = await fetchOrders(token, body);
+    if(automatic && rawOrders.length>=MAX_ORDER_LIMIT) throw Error('The eBay sync reached its 1,000-order limit. An administrator must review the order backlog before automatic sync can finish.');
     if (body.datesOnly === true || body.detailsOnly === true) {
       // Refresh existing dates/evidence without importing lines, reserving stock,
       // changing fulfillment status, or running cancellation/finance workflows.
@@ -1534,6 +1585,7 @@ Deno.serve(async (req) => {
             item_number: existing?.item_number || line.item_number,
             transaction_id: existing?.transaction_id || line.transaction_id,
             internal_item_id: line.internal_item_id || existing?.internal_item_id || null,
+            line_status: existing?.line_status || line.line_status,
           };
         })
         .filter((line) => {
@@ -1544,13 +1596,7 @@ Deno.serve(async (req) => {
 
     let upsertedLines: any[] = [];
     if (lineRows.length) {
-      const { data, error } = await supabase
-        .from("ebay_order_lines")
-        .upsert(lineRows, {
-          onConflict: "order_id,item_number,transaction_id",
-          ignoreDuplicates: false,
-        })
-        .select("id,order_id,custom_label,quantity,line_status,internal_item_id");
+      const { data, error } = await supabase.rpc('upsert_ebay_order_sync_lines',{_rows:lineRows});
       if (error) throw error;
       upsertedLines = data || [];
     }
@@ -1666,6 +1712,7 @@ Deno.serve(async (req) => {
     });
   } catch (error) {
     const message = compactError(error);
+    syncFailure=automaticOrderSyncError(error);
     if (runId) {
       await supabase
         .from("ebay_order_sync_runs")
@@ -1681,5 +1728,7 @@ Deno.serve(async (req) => {
       runId,
       error: message,
     });
+  } finally {
+    if(leaseToken) await finishOrderSyncLease(supabase,leaseToken,runId,syncFailure);
   }
 });

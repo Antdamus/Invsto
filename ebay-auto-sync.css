@@ -1,0 +1,5 @@
+.ebay-auto-sync{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:16px 0;padding:16px 20px;border:1px solid rgba(205,190,150,.25);border-radius:16px;background:rgba(29,44,36,.55)}
+.ebay-auto-sync[hidden],.ebay-auto-sync [hidden]{display:none!important}
+.ebay-auto-sync p{margin:5px 0 0;color:#c8c9c4;font-size:.85rem}
+.ebay-auto-sync-actions{display:flex;gap:8px;flex-wrap:wrap}
+@media(max-width:600px){.ebay-auto-sync{margin:10px 0;padding:12px}.ebay-auto-sync-actions{gap:6px}.ebay-auto-sync-actions button{font-size:.75rem;padding:8px 10px}}

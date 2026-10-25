@@ -2357,9 +2357,11 @@ function getEbayOAuthCallbackUrl() {
 }
 
 async function postEbayOrderSyncPayload(payload) {
+  const {data:sessionData,error:sessionError}=await supabase.auth.getSession();
+  if(sessionError || !sessionData?.session?.access_token) throw Error('Sign in to Invsto again to sync eBay.');
   const response = await fetch(getEbayOrderSyncUrl(), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${sessionData.session.access_token}` },
     body: JSON.stringify(payload),
   });
   const text = await response.text();
@@ -13417,6 +13419,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   window.PendingOrderChats?.start({client:supabase,userId:state.user.id,getLines:()=>state.orders});
   await Promise.all([loadCheckoutStores(), loadOrders()]);
   startFinanceQueueStatus();
+  window.EbayAutoSync?.start({db:supabase,refresh:()=>$("refresh-orders")?.click()});
   const bagParams = new URLSearchParams(window.location.search);
   if (bagParams.get("bag")) {
     if (window.PendingBagScan && !bagParams.get("bagLine")) await window.PendingBagScan.enqueue(bagParams.get("bag"));

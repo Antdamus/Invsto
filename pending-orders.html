@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="buyer-tasks.css?v=20261013-photos" />
   <link rel="stylesheet" href="pending-orders.css?v=20261022-partial-refunds-2" />
+  <link rel="stylesheet" href="ebay-auto-sync.css?v=20261025" />
   <link rel="stylesheet" href="pending-work-queue.css?v=20261012-cancel-summary" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
   <script src="extension-updates.js?v=20261003" defer></script>
@@ -189,6 +190,14 @@
         </div>
         </section>
 
+      <section id="ebay-auto-sync" class="ebay-auto-sync" aria-label="Automatic eBay order sync" hidden>
+        <div><strong>eBay automatic sync</strong><p id="ebay-auto-sync-status" role="status" aria-live="polite">Checking connection…</p></div>
+        <div class="ebay-auto-sync-actions">
+          <button id="ebay-auto-sync-now" class="secondary-btn" type="button">Sync now</button>
+          <button id="ebay-auto-sync-reload" class="secondary-btn" type="button">Check & reload orders</button>
+          <button id="ebay-auto-sync-toggle" class="secondary-btn" type="button" hidden>Pause auto sync</button>
+        </div>
+      </section>
       <details id="extension-updates" class="extension-updates">
         <summary>Extension updates <span id="extension-update-badge" role="status">Checking…</span></summary>
         <div class="extension-update-body">
@@ -303,7 +312,7 @@
           <div>
             <span class="eyebrow">eBay Orders</span>
             <h2>Sync & Reconciliation Tools</h2>
-            <p>Open only when you need to sync awaiting shipments, reconcile eBay, or import a CSV fallback.</p>
+            <p>Orders update automatically. Open these tools for a manual check, reconciliation, or CSV fallback.</p>
           </div>
           <span class="secondary-btn import-panel-summary-action">
             <i data-lucide="chevron-down"></i>
@@ -1299,7 +1308,8 @@
   <script src="buyer-tasks.js?v=20261013-photos"></script>
   <script src="buyer-promise-checkout.js?v=20261013-photos"></script>
   <script src="pending-partial-refunds.js?v=20261022"></script>
-  <script src="pending-orders.js?v=20261022-partial-refunds"></script>
+  <script src="ebay-auto-sync.js?v=20261025"></script>
+  <script src="pending-orders.js?v=20261025-auto-sync"></script>
   <script src="pending-inventory.js?v=20261008-shared-bag-2"></script>
   <script src="pending-bag-scan.js?v=20261008-shared-inventory"></script>
   <script src="pending-orders-mobile.js?v=20261018-organized"></script>

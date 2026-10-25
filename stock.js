@@ -3076,9 +3076,11 @@ function buildLocationChips(item) {
   }
 
   async function postEbayOrderSyncPayload(payload) {
+    const {data:sessionData,error:sessionError}=await supabase.auth.getSession();
+    if(sessionError || !sessionData?.session?.access_token) throw Error('Sign in to Invsto again to sync eBay.');
     const response = await fetch(getEbayOrderSyncUrl(), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${sessionData.session.access_token}` },
       body: JSON.stringify(payload),
     });
     const text = await response.text();

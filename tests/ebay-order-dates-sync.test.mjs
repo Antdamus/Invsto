@@ -5,9 +5,10 @@ import vm from 'node:vm';
 import {test} from 'node:test';
 
 const plain=value=>JSON.parse(JSON.stringify(value));
-function backend(){
-  const ctx={Deno:{env:{get:()=>''},serve(handler){ctx.handler=handler;}},console,URL,URLSearchParams,Response,Request,AbortSignal};
+function backend({routing=false}={}){
+  const ctx={Deno:{env:{get:()=>''},serve(handler){ctx.handler=handler;}},console,URL,URLSearchParams,Response,Request,AbortSignal,crypto};
   vm.createContext(ctx);vm.runInContext(stripTypeScriptTypes(readFileSync(new URL('../supabase/functions/ebay-order-sync/index.ts',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'')),ctx);
+  if(!routing){ctx.authorizeOrderSync=async()=>true;ctx.claimOrderSyncLease=async()=>true;ctx.finishOrderSyncLease=async()=>{};}
   return ctx;
 }
 const raw={orderId:'23-15215-33555',creationDate:'2026-10-01T20:17:45Z',
@@ -179,7 +180,7 @@ test('normal sync saves order lines and queues finance without contacting the fi
  ctx.loadExistingLines=async()=>({exact:new Map(),fallback:new Map()});
  for(const name of ['loadFinanceTransactionsByOrder','updateLocalOrderFinancePayloads','ebayFinanceRequest'])
   ctx[name]=async()=>{assert.fail('finance API must not block the main sync');};
- ctx.createClient=()=>({rpc:async(name,args)=>{assert.equal(name,'enqueue_ebay_finance_jobs');queued.push(plain(args));return {data:2};},from(table){return {
+ ctx.createClient=()=>({rpc:async(name,args)=>{if(name==='upsert_ebay_order_sync_lines'){writes.push({table:'ebay_order_lines',rows:plain(args._rows)});return {data:args._rows.map(row=>({...row,id:'line-a'}))};}assert.equal(name,'enqueue_ebay_finance_jobs');queued.push(plain(args));return {data:2};},from(table){return {
   insert(){assert.equal(table,'ebay_order_sync_runs');return {select(){return {single:async()=>({data:{id:'run-a'}})};}};},
   update(patch){return {eq:async()=>{writes.push({table,patch:plain(patch)});return {};}};},
   upsert(rows){assert.equal(table,'ebay_order_lines');writes.push({table,rows:plain(rows)});return {select:async()=>({data:rows.map(row=>({...row,id:'line-a'}))})};},
@@ -213,4 +214,38 @@ test('automatic capture check does not call eBay when another receiver owns the 
  const client={auth:{getUser:async()=>({data:{user:{id:'worker'}}})}};
  const result=await ctx.refreshCapturedShowOrders(client,new Request('https://example.invalid',{headers:{Authorization:'Bearer signed-in'}}),'EVENT123');
  assert.equal(result.status,200);assert.equal((await result.json()).orderCheck.state,'checking');
+});
+
+test('order sync rejects unsigned requests and invalid or replayed worker leases before any eBay access',async()=>{
+ const ctx=backend({routing:true});let claims=0;
+ ctx.createClient=()=>({rpc:async()=>{claims++;return {data:false};}});
+ ctx.getEbayAccessToken=async()=>assert.fail('must not contact eBay');
+ const call=body=>ctx.handler(new Request('https://example.invalid',{method:'POST',body:JSON.stringify(body)}));
+ assert.equal((await call({dryRun:false})).status,401);assert.equal(claims,0);
+ assert.equal((await call({orderWorkerToken:'bad'})).status,403);assert.equal(claims,0);
+ assert.equal((await call({orderWorkerToken:'00000000-0000-4000-8000-000000000001'})).status,409);assert.equal(claims,1);
+});
+
+test('staff authorization requires a valid session and inventory permission',async()=>{
+ const ctx=backend({routing:true}),request=new Request('https://example.invalid',{headers:{Authorization:'Bearer fixture'}});
+ const user={auth:{getUser:async()=>({data:{user:{id:'staff'}}})}};
+ ctx.createClient=()=>({rpc:async()=>({data:false})});assert.equal(await ctx.authorizeOrderSync(request,user),false);
+ ctx.createClient=()=>({rpc:async()=>({data:true})});assert.equal(await ctx.authorizeOrderSync(request,user),true);
+ assert.equal(await ctx.authorizeOrderSync(request,{auth:{getUser:async()=>({error:{message:'expired'}})}}),false);
+});
+
+test('automatic worker uses server-owned settings, records its source and releases failed leases for retry',async()=>{
+ const ctx=backend({routing:true}),calls=[],writes=[];let settings;
+ ctx.createClient=()=>({rpc:async(name,args)=>{calls.push({name,args:plain(args)});return {data:true};},from(table){return {
+  insert(row){writes.push({table,row:plain(row)});return {select:()=>({single:async()=>({data:{id:'run-a'}})})};},
+  update(row){writes.push({table,row:plain(row)});return {eq:async()=>({})};},
+ };}});
+ ctx.getEbayAccessToken=async()=> 'fixture';ctx.fetchOrders=async(_token,body)=>{settings=plain(body);throw Error('invalid_grant');};
+ const response=await ctx.handler(new Request('https://example.invalid',{method:'POST',body:JSON.stringify({orderWorkerToken:'00000000-0000-4000-8000-000000000001',dryRun:true,daysBack:1,limit:1,syncFinance:false})}));
+ assert.equal(response.status,500);assert.equal(settings.dryRun,false);assert.equal(settings.daysBack,90);assert.equal(settings.limit,1000);assert.equal(settings.syncFinance,true);
+ assert.equal(writes[0].row.automatic,true);assert.equal(writes.at(-1).row.status,'failed');
+ assert.equal(calls.at(-1).name,'finish_ebay_order_sync');assert.match(calls.at(-1).args._error,/reconnected/);
+ ctx.fetchOrders=async()=>Array(1000).fill(raw);calls.length=0;
+ assert.equal((await ctx.handler(new Request('https://example.invalid',{method:'POST',body:JSON.stringify({orderWorkerToken:'00000000-0000-4000-8000-000000000001'})}))).status,500);
+ assert.match(calls.at(-1).args._error,/1,000-order limit/,'a capped fetch must not report a complete background sync');
 });
