@@ -61,7 +61,8 @@ Deno.serve(async req => {
       const state = url.searchParams.get('state') || '', code = url.searchParams.get('code') || '';
       if (!/^[a-f0-9]{64}$/.test(state) || !code || code === 'null' || code.length>2048 || url.searchParams.has('error')) throw Error('TikTok connection was cancelled or expired. Start again from Invsto.');
       const actor = check(await db.rpc('consume_tiktok_oauth_state',{_hash:await sha256(state)}));
-      if (!actor || !check(await db.rpc('tiktok_api_authorizer_allowed',{_user:actor}))) throw Error('This connection request expired. Start again from Invsto.');
+      if (!actor) throw Error('This connection request expired. Start again from Invsto.');
+      if (!check(await db.rpc('tiktok_api_authorizer_allowed',{_user:actor}))) throw Error('An active staff administrator must connect TikTok.');
       const api = client(env('TIKTOK_APP_KEY'),env('TIKTOK_APP_SECRET'));
       const tokens = await api.token(code);
       const shops = await api.read(SHOPS_PATH,tokens.access_token);
@@ -92,7 +93,7 @@ Deno.serve(async req => {
       return json(200,{configured,admin,connection:c ? {...c,page_token:undefined,syncing:Boolean(c.page_token || c.lease_until && Date.parse(c.lease_until)>Date.now())} : null});
     }
     if (body.action === 'connect') {
-      if (!admin) return json(403,{error:'Only administrators can connect TikTok.'});
+      if (!admin || !check(await db.rpc('tiktok_api_authorizer_allowed',{_user:auth.data.user.id}))) return json(403,{error:'Only active staff administrators can connect TikTok.'});
       env('TIKTOK_APP_SECRET');env('TIKTOK_TOKEN_ENCRYPTION_KEY');
       const state = Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('');
       check(await db.from('tiktok_api_oauth_states').delete().eq('requested_by',auth.data.user.id));
