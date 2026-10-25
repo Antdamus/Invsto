@@ -14,10 +14,10 @@ before(async()=>{
   });await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));origin=`http://127.0.0.1:${server.address().port}`;browser=await chromium.launch();
 });
 after(async()=>{await browser?.close();await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});});
-async function open(t,{configured=true,sharedContext,seed}={}){
+async function open(t,{configured=true,sharedContext,seed,capture=false,existingPage}={}){
   const context=sharedContext||await browser.newContext({viewport:{width:1280,height:760}});if(!sharedContext)t.after(()=>context.close());
   await context.route('**/*',route=>route.request().url().startsWith(origin)?route.continue():route.abort());
-  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
+  const page=existingPage||await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
   await page.goto(origin+'/ebaylive/host/events/EVENT123?capture=1');
   await page.evaluate(({configured,seed})=>{
     window.calls=[];window.jobs=[];window.ended=false;window.failAfterQueue=false;window.delayedPrint=false;window.runtimeListeners=[];window.photoFiles={};window.photos=[];window.captureCount=0;
@@ -76,17 +76,91 @@ async function open(t,{configured=true,sharedContext,seed}={}){
     }}};
     if(seed){sales=seed.sales;jobs=seed.jobs;lots=seed.lots;}
   },{configured,seed});
-  for(const script of ['live-bag-label.js','print-stations.js','live-bag-print-bridge.js','tools/ebay-live-capture/receiver.js','tools/ebay-live-capture/bag-label.js'])await page.addScriptTag({url:origin+'/'+script});
-  await page.evaluate(()=>{
+  for(const script of ['live-bag-label.js','print-stations.js','live-bag-print-bridge.js','tools/ebay-live-capture/receiver.js','tools/ebay-live-capture/panel.js','tools/ebay-live-capture/bag-label.js'])await page.addScriptTag({url:origin+'/'+script});
+  await page.evaluate(capture=>{
     liveBagPrintBridge.install({async printBag(id,options){
       calls.push({name:'existing-live-sales-print',id,options});
       const lot=lots.find(l=>l.id===id),sale=sales.find(s=>s.lot_id===id);
       return printStations.printLabel(liveBagLabel.build(liveBagLabel.identity(lot,sale)),{...options,title:sale.listing_title,barcode:lot.lot_code});
     }},rows=>rows.toSorted((a,b)=>Date.parse(b.sold_at)-Date.parse(a.sold_at)));
-    const box=document.createElement('div');box.id='invsto-capture-helper';document.body.append(box);InvstoBagLabelPanel.mount(box);
-  });
+    if(capture){
+      document.body.insertAdjacentHTML('beforeend','<button role="tab" aria-selected="true">Activity</button><button role="tab" aria-selected="true">Sold (1)</button><div id="activity-panel"><div aria-label="Filter activity"><button aria-pressed="true">All</button></div></div>');
+      window.packets=[];window.nextEvidence=[];
+      window.InvstoLiveParser={hasEnded:()=>false,createHistoryTracker:()=>({observe:()=>null}),historyContainers:()=>({}),parse:()=>({cache:{},events:nextEvidence,elapsed:1,supported:true,panelPresent:true,broadcastEnded:false})};
+      const send=chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage=async message=>{
+        if(message.type==='INVSTO_RESUME_CAPTURE')return {ok:true,resume:true,stream:{title:'Fixture show'}};
+        if(message.type==='INVSTO_CAPTURE'){packets.push(message);return {ok:true,status:'Connected'};}
+        return send(message);
+      };
+    }else{
+      const box=document.createElement('div');box.id='invsto-capture-helper';document.body.append(box);InvstoBagLabelPanel.mount(box);
+    }
+  },capture);
+  if(capture)await page.addScriptTag({url:origin+'/tools/ebay-live-capture/capture.js'});
   await expect(page.locator('.bag-number')).not.toHaveText('—');return page;
 }
+
+async function dragPanel(page,handle,dx,dy){
+  const rect=await handle.boundingBox();await page.mouse.move(rect.x+rect.width/2,rect.y+rect.height/2);await page.mouse.down();
+  await page.mouse.move(rect.x+rect.width/2+dx,rect.y+rect.height/2+dy,{steps:8});await page.mouse.up();
+}
+
+test('minimized capture still sends new evidence and automatically prints once, then restores the selected bag',async t=>{
+  const page=await open(t,{capture:true});
+  await expect(page.locator('[data-panel-capture]')).toHaveText('Capture on');
+  await page.locator('[data-bag-choice]').selectOption('00000000-0000-4000-8000-000000000001');
+  await page.getByRole('button',{name:'Minimize Invsto panel',exact:true}).click();
+  const launcher=page.getByRole('button',{name:'Open Invsto panel',exact:true});await expect(launcher).toBeFocused();
+  await expect(page.locator('[data-bag-print]')).toBeHidden();
+  const mini=await page.locator('#invsto-capture-helper').boundingBox();assert.ok(mini.width<=114&&mini.height<=44);
+  await page.evaluate(()=>{nextEvidence=[{key:'paid-while-minimized',listing_id:'new-listing',kind:'paid',buyer:'new-winner',amount:25}];sales[2].payment_state='paid';});
+  await expect.poll(()=>page.evaluate(()=>packets.some(p=>p.events.some(e=>e.key==='paid-while-minimized')&&p.health.running&&p.health.ready))).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>jobs.length),{timeout:8000}).toBe(1);
+  await expect(launcher).toHaveAttribute('title',/Capture on.*Auto print/);
+  await mkdir(new URL('../test-results',import.meta.url),{recursive:true});await page.screenshot({path:'test-results/live-panel-minimized.png'});
+  await page.locator('#invsto-capture-helper').screenshot({path:'test-results/live-panel-mini-button.png'});
+  await launcher.press('Enter');await expect(page.locator('.bag-number')).toHaveText('#004');
+  await expect(page.locator('[data-bag-choice]')).toHaveValue('00000000-0000-4000-8000-000000000001');
+  assert.equal(await page.evaluate(()=>jobs.length),1);
+  await page.locator('#invsto-capture-helper').screenshot({path:'test-results/live-panel-expanded.png'});
+});
+
+test('both panel sizes can be dragged, remember placement on reload, and stay reachable on small screens',async t=>{
+  const page=await open(t,{capture:true}),box=page.locator('#invsto-capture-helper');
+  const before=await box.boundingBox();await dragPanel(page,page.locator('[data-panel-move]'),550,-220);
+  const moved=await box.boundingBox();assert.ok(Math.abs(moved.x-before.x-550)<2);assert.ok(Math.abs(moved.y-before.y+220)<2);
+  await page.locator('[data-panel-minimize]').click();
+  const mini=await box.boundingBox();await dragPanel(page,page.locator('[data-panel-open]'),80,-40);
+  await expect(page.locator('[data-panel-open]')).toBeVisible();const dragged=await box.boundingBox();assert.ok(Math.abs(dragged.x-mini.x-80)<2);
+  const seed=await page.evaluate(()=>({sales,jobs,lots}));
+  await open(t,{sharedContext:page.context(),existingPage:page,seed,capture:true});
+  await expect(page.locator('[data-panel-open]')).toBeVisible();
+  const restored=await box.boundingBox();assert.ok(Math.abs(restored.x-dragged.x)<2);assert.ok(Math.abs(restored.y-dragged.y)<2);
+  await page.setViewportSize({width:360,height:420});
+  await page.locator('[data-panel-open]').click();await page.locator('summary').click();
+  const onScreen=()=>box.evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=7&&r.top>=7&&r.right<=innerWidth-7&&r.bottom<=innerHeight-7;});
+  await expect.poll(onScreen).toBe(true);
+  await page.getByRole('button',{name:'Reset panel position'}).click();await expect.poll(onScreen).toBe(true);
+  await page.screenshot({path:'test-results/live-panel-small-screen.png'});
+  await page.locator('[data-panel-move]').focus();await page.keyboard.press('ArrowRight');
+  assert.ok(Math.abs((await box.boundingBox()).x-8)<2,'a panel as wide as the viewport cannot move off screen');
+  await page.locator('[data-panel-minimize]').click();await page.locator('[data-panel-open]').press('Home');
+  const start=await box.boundingBox();await page.locator('[data-panel-open]').press('ArrowRight');
+  assert.ok(Math.abs((await box.boundingBox()).x-start.x-10)<2);
+  await page.locator('[data-panel-open]').press('Space');await expect(page.locator('[data-panel-minimize]')).toBeFocused();
+});
+
+test('minimizing during a photo save preserves the pending photo and its retry identity',async t=>{
+  const page=await open(t);await page.evaluate(()=>{window.delayedPhoto=true;window.failPhotoAck=true;});
+  await page.locator('[data-bag-camera]').click();await expect.poll(()=>page.evaluate(()=>photos.length)).toBe(1);
+  await page.locator('[data-panel-minimize]').click();
+  await page.evaluate(()=>{window.delayedPhoto=false;finishPhoto();});
+  await expect(page.locator('[data-panel-open]')).toHaveAttribute('title',/Photo confirmation lost/);
+  await page.locator('[data-panel-open]').click();await expect(page.locator('[data-bag-camera]')).toHaveAttribute('aria-label','Retry saving photo to bag #012');
+  await page.locator('[data-bag-camera]').click();await expect(page.locator('[data-bag-status]')).toContainText('Photo saved to #012');
+  assert.equal(await page.evaluate(()=>photos.length),1);assert.equal(await page.evaluate(()=>captureCount),1);
+});
 test('compact panel prints the exact saved paid bag through the existing queue and preserves QR identity',async t=>{
   const page=await open(t);
   await expect(page.locator('.bag-buyer')).toHaveText('current-winner');

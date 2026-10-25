@@ -1,4 +1,14 @@
-# Invsto Live Capture (1.7.2)
+# Invsto Live Capture (1.7.3)
+
+## Movable panel and mini button (1.7.3)
+
+Drag the **Invsto** header to move the panel anywhere on Stream Manager. Click the **minus** in the upper-right corner to shrink it into a small **Invsto** button; click the button to reopen it. The small button is also draggable. Capture and automatic printing keep running while minimized, in-flight label/photo saves finish normally, and the selected bag stays selected. Requests needing a manual retry remain available when reopened.
+
+The header shows capture status. The small button shows a status dot; hover for capture and printing details. Amber indicates waiting or attention needed, green indicates capture is ready, and gray indicates capture is off. The panel never opens itself over the seller's controls.
+
+Position and minimized state are remembered in this browser across refreshes and shows. Both sizes stay inside the window when resized. Keyboard users can focus the header or small button and use arrow keys to move (Shift moves farther), or Home to reset. **Settings → Reset panel position** returns it to the bottom-left corner.
+
+Replace the installed extension files, reload its extension card, then refresh Stream Manager and the signed-in receiver. Refresh reconnects to the same unfinished show. Keep both tabs open as usual.
 
 ## Current payment capture (1.7.2)
 

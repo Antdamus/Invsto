@@ -14,6 +14,7 @@
     const camera=document.createElement('button');camera.type='button';camera.dataset.bagCamera='';camera.style.cssText='padding:9px;min-width:40px;height:42px;flex:none;display:grid;place-items:center';camera.innerHTML='<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 5l1.5-2h5L16 5h4a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V7a2 2 0 012-2z"/><circle cx="12" cy="13" r="4"/></svg>';print.before(camera);
     const receipt=document.createElement('div');receipt.dataset.bagReceipt='';receipt.setAttribute('role','status');receipt.setAttribute('aria-live','polite');receipt.innerHTML='<strong></strong><small></small>';choice.before(receipt);
     const clear=document.createElement('button');clear.type='button';clear.textContent='Clear pending send';clear.hidden=true;$('.bag-settings').append(clear);
+    const panel=window.InvstoCapturePanel?.mount(box);
     let sales=[],printer=null,automatic=null,chosen='',busy=false,loading=false,ready=false,pending=null,completed=new Set(),printStatusAvailable=false;
     let photoPending=null,photoTaking=false,photoSale=null;
     try{pending=JSON.parse(sessionStorage.getItem(key)||'null');}catch{}
@@ -63,6 +64,8 @@
       autoStatus.textContent=automatic?.error|| (automatic?.pending?`${automatic.pending} bag label${automatic.pending===1?'':'s'} waiting for auto print`:'');autoStatus.hidden=!autoStatus.textContent;autoStatus.style.color=automatic?.error?'#ffb8aa':'#c5d9c0';
       configure.textContent=printer?'Change printer':'Choose printer';
       $('[data-bag-printer-name]').textContent=printer?`${printer.name}${printer.roll&&printer.roll!=='default'?' · '+printer.roll+' roll':''}${printer.local?' · downloads to the existing helper':printer.online&&printer.connected?'':' · offline; labels will wait'}`:'Uses the same printer setup as Live Sales. Choose it once for one-click printing.';
+      const needsAttention=!ready||!!pending||!!photoPending||!!automatic?.error||['failed','uncertain'].includes(job?.status)||$('[data-bag-status]').classList.contains('error');
+      panel?.setBagStatus({state:needsAttention?'attention':automatic?.enabled===false?'paused':'active',label:[needsAttention?autoStatus.textContent||$('[data-bag-status]').textContent||receipt.querySelector('strong').textContent:'', $('[data-bag-auto-state]').textContent,sale?.number?'Bag #'+sale.number:''].filter(Boolean).join(' · ')});
     }
     async function refresh() {
       if(loading||busy)return;loading=true;
@@ -121,7 +124,7 @@
       finally{busy=false;render();}
     };
     void refresh();setInterval(refresh,2000);
-    return {settings:$('[data-capture-settings]')};
+    return {settings:$('[data-capture-settings]'),setCaptureStatus:panel?.setCaptureStatus};
   }
   window.InvstoBagLabelPanel={mount};
 })();
