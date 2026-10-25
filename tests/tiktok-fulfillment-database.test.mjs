@@ -24,6 +24,43 @@ await reversalSetup();for(const file of ['20261018200000_tiktok_line_completion.
 after(()=>db.close());
 beforeEach(async()=>{await db.exec(`reset role;set test.allowed='yes';set test.actor='${actor}';truncate tiktok_inventory_attachments,stock_transactions,item_stock_locations,item_types,locations,store_locations,active_stock_reservations,tiktok_order_completion_photos,tiktok_order_phone_camera_requests,tiktok_order_phone_camera_sessions,tiktok_order_documents,tiktok_order_events,tiktok_order_lines,tiktok_orders,tiktok_order_imports,storage.objects cascade;`);orders=(await db.query("insert into tiktok_orders(order_number,buyer_username,marketplace_status,marketplace_substatus,source_snapshot_at) values('577620684385522369','buyer','To ship','Awaiting shipment',now()-interval '1 day'),('577620723998233281','buyer','To ship','Awaiting shipment',now()-interval '1 day') returning *")).rows;lines=(await db.query("insert into tiktok_order_lines(order_id,sku_id,title,quantity) select id,'1732759903849189622','Ring',1 from tiktok_orders returning *")).rows;});
 const scope=o=>lines.filter(l=>l.order_id===o.id).map(l=>({id:l.id,sku_id:l.sku_id,quantity:l.quantity})).sort((a,b)=>a.id.localeCompare(b.id));
+let apiInstalled=false;
+async function apiSetup(){
+ if(!apiInstalled){
+  await db.exec(`create role service_role;create schema net;create schema cron;alter table auth.users add column if not exists email text;
+   create function net.http_post(url text,headers jsonb,body jsonb,timeout_milliseconds integer) returns bigint language sql as $$select 1::bigint$$;
+   create function cron.schedule(name text,schedule text,command text) returns bigint language sql as $$select 1::bigint$$;`);
+  await db.exec(await readFile(new URL('../supabase/migrations/20261025193000_tiktok_api_connection.sql',import.meta.url),'utf8'));apiInstalled=true;
+ }
+ await db.exec(`truncate tiktok_api_connection,tiktok_api_oauth_states;insert into tiktok_api_connection(shop_id,shop_cipher,shop_name,credentials,authorized_by,access_expires_at,authorization_expires_at,dispatch_token,lease_until)
+ values('7494924429697648999','cipher','Real test shop','v1.encrypted.fixture','${actor}',now()+interval '1 day',now()+interval '90 days','${request}',now()+interval '3 minutes');`);
+}
+test('TikTok API worker claims once, imports idempotently, preserves evidence and existing handles, and audits its source',async()=>{
+ await apiSetup();await objects();await attach();
+ await db.query("update tiktok_orders set stage='preparing',notes='Keep notes',seller_note='Keep seller note',recipient_name='Known customer',ship_by_date='2026-11-02',ship_by_source='staff' where id=$1",[orders[0].id]);
+ await db.query("update tiktok_orders set api_buyer_id='7021436810468230477',buyer_username='TikTok buyer 7021436810468230477' where id=$1",[orders[1].id]);
+ await db.query("update tiktok_order_lines set tracking_number='KEEP123',package_id='PACKAGE' where order_id=$1",[orders[0].id]);
+ assert.ok((await db.query('select claim_tiktok_api_worker($1) c',[request])).rows[0].c);
+ assert.equal((await db.query('select claim_tiktok_api_worker($1) c',[request])).rows[0].c,null);
+ const row={order_number:orders[0].order_number,sku_id:lines[0].sku_id,title:'Ring',quantity:1,buyer_username:'TikTok buyer 7021436810468230477',recipient_name:'',marketplace_status:'To ship',marketplace_substatus:'Awaiting shipment',ship_by_date:'2026-11-01',api_buyer_id:'7021436810468230477',api_update_time:new Date().toISOString(),api_cancelled:true};
+ const run=()=>db.query('select import_tiktok_api_order($1,$2,$3) r',[request,JSON.stringify([row]),'e'.repeat(64)]);
+ const result=(await run()).rows[0].r;assert.equal(result.refreshed,1);
+ const saved=(await db.query('select * from tiktok_orders where id=$1',[orders[0].id])).rows[0];assert.equal(saved.buyer_username,'buyer');assert.equal(saved.notes,'Keep notes');assert.equal(saved.seller_note,'Keep seller note');assert.equal(saved.recipient_name,'Known customer');assert.equal(saved.stage,'preparing');assert.equal(saved.api_buyer_id,row.api_buyer_id);
+ assert.equal(new Date(saved.ship_by_date).toISOString().slice(0,10),'2026-11-02');assert.equal(saved.ship_by_source,'staff');assert.equal((await db.query('select buyer_username from tiktok_orders where id=$1',[orders[1].id])).rows[0].buyer_username,'buyer');
+ const line=(await db.query('select * from tiktok_order_lines where id=$1',[lines[0].id])).rows[0];assert.equal(line.tracking_number,'KEEP123');assert.equal(line.package_id,'PACKAGE');assert.ok(line.cancelled_at);assert.equal(line.cancellation_record.source,'api');
+ assert.equal((await db.query('select source from tiktok_order_imports where id=$1',[result.import_id])).rows[0].source,'api');
+ const audit=(await db.query("select details from tiktok_order_events where action='import' and order_id=$1",[orders[0].id])).rows[0].details;assert.equal(audit.automatic,true);assert.equal(audit.source,'api');assert.equal(audit.authorized_by,actor);
+ assert.equal((await run()).rows[0].r.already_imported,true);assert.equal((await db.query('select count(*)::int n from tiktok_order_documents')).rows[0].n,2);assert.equal((await db.query('select count(*)::int n from stock_transactions')).rows[0].n,0);
+ await db.exec("set role authenticated");await assert.rejects(run(),/permission denied/);await assert.rejects(db.query('select credentials from tiktok_api_connection'),/permission denied/);
+});
+test('TikTok OAuth states expire and are single use; expired worker leases cannot import',async()=>{
+ await apiSetup();await db.query("insert into tiktok_api_oauth_states values($1,$2,now()+interval '1 minute',now()),($3,$2,now()-interval '1 minute',now())",['a'.repeat(64),actor,'b'.repeat(64)]);
+ assert.equal((await db.query('select consume_tiktok_oauth_state($1) actor',['a'.repeat(64)])).rows[0].actor,actor);
+ assert.equal((await db.query('select consume_tiktok_oauth_state($1) actor',['a'.repeat(64)])).rows[0].actor,null);
+ assert.equal((await db.query('select consume_tiktok_oauth_state($1) actor',['b'.repeat(64)])).rows[0].actor,null);
+ await db.exec("update tiktok_api_connection set claimed=true,lease_until=now()-interval '1 minute'");
+ await assert.rejects(db.query('select import_tiktok_api_order($1,$2,$3)',[request,'[]','c'.repeat(64)]),/lease expired/);
+});
 test('customer names import independently, backfill the original snapshot once, and preserve preparation and cancellation work',async()=>{
  const row={order_number:orders[0].order_number,sku_id:lines[0].sku_id,title:'Ring',quantity:1,buyer_username:'buyer',buyer_nickname:'Display name',marketplace_status:'To ship',marketplace_substatus:'Awaiting shipment'};
  const imported=rows=>db.query("select import_tiktok_orders($1,$2,'Original.csv',now()) r",[JSON.stringify(rows),'f'.repeat(64)]);

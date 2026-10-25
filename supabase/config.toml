@@ -610,3 +610,8 @@ entrypoint = "./functions/archive-order-certificate/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/archive-tiktok-certificate/index.ts"
+
+[functions.tiktok-order-sync]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/tiktok-order-sync/index.ts"
