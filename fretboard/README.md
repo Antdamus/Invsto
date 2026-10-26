@@ -12,16 +12,18 @@ A standalone guitar sight-reading and fretboard trainer. Open `index.html` throu
 - Start slow, then raise the tempo. At the chosen target BPM, each exact pitch needs at least two clean, unaided passes and four correct occurrences in the chosen rhythm. Manual milestones are self-rated. Wait mode and hinted/revealed answers do not earn milestones. This is practice evidence, not a guarantee of permanent recall or physical-position mastery.
 - Recommendations first identify weak/unlearned exact pitches, then choose a nearby unused scale pitch class. Adding a pitch class adds all its available selected octaves. Optional automatic progression adds it between phrases.
 - A tonic/fifth drone or bass groove follows key and tempo. Local audio files loop unchanged; no automatic key detection, transposition or tempo stretching is claimed. The chromatic family warns that a fixed-key accompaniment may clash.
-- Setup, completed session summaries and pitch progress are stored in this browser's localStorage. Microphone audio is processed transiently and is never recorded or transmitted. Audio files are used through local object URLs. No network calls are made by the app itself.
+- Recorded acoustic drums follow the score's BPM in pop, rock, shuffle and half-time grooves. Kick, snare, closed/open hats, three toms, ride and crash use 24 real recordings with alternate takes and velocity layers. Optional fills finish every four bars. Drum level is independent of the backing, under the master volume. Preview plays four bars without starting practice. Drums start after the count-in, stop with the transport, and respect microphone/headphone muting. The swung subdivision in the shuffle accompanies the score; written quarter/half/whole notes keep their normal beat lengths.
+- Samples are a compact CC0 subset of Karoryfer's Big Rusty Drums, mixed with the original room recordings. They are fetched on demand from this site's own assets (about 18.2 MiB); no account, subscription or external audio service is required. See `samples/acoustic/README.md` for source, license and rebuilding instructions. Failed loading offers retry or drums-off practice.
+- Setup, completed session summaries and pitch progress are stored in this browser's localStorage. Microphone audio is processed transiently and is never recorded or transmitted. User audio files are used through local object URLs. Network requests by the app are limited to its bundled static drum samples.
 
 ## Run and verify
 
 Serve the repository with a local static server and open `/fretboard/index.html`.
 
 ```
-node --test tests/fretboard-music.test.mjs tests/fretboard-browser.test.mjs
+node --test tests/fretboard-music.test.mjs tests/fretboard-drums.test.mjs tests/fretboard-browser.test.mjs
 ```
 
-Browser tests use the existing Playwright dependency. Set `PLAYWRIGHT_BROWSERS_PATH` to the installed browser directory where required. Tests cover octave separation, harmonic-rich pitch detection, scale spelling, coverage, string constraints, clean-pass progression, transport, responsive layout, permission denial and microphone input simulated through a real AudioContext.
+Browser tests use the existing Playwright dependency. Set `PLAYWRIGHT_BROWSERS_PATH` to the installed browser directory where required. Tests cover octave separation, harmonic-rich pitch detection, scale spelling, coverage, string constraints, clean-pass progression, transport, responsive layout, permission denial and microphone input simulated through a real AudioContext. Drum checks validate every bundled recording against its manifest, decode and render real samples through Web Audio, check alternate takes and hi-hat choking, and exercise preview, count-in, loop timing, pause/resume, microphone muting, failed downloads, retry and cancellation.
 
 References: [Yamaha guitar notation and tuning](https://www.yamaha.com/en/musical_instrument_guide/classical_guitar/play/play002.html), [MDN microphone requirements](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia).

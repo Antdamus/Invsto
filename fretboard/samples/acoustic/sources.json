@@ -1,0 +1,416 @@
+{
+  "library": "Big Rusty Drums",
+  "author": "Karoryfer Samples",
+  "license": "CC0-1.0",
+  "revision": "f07ce00df34a46b6b08375be56fe116cf15782bc",
+  "samples": [
+    {
+      "file": "kick-soft-1.wav",
+      "bytes": 299706,
+      "sha256": "4b1f6faa34d0347130109a1b18e6b735be5a0ab75a10cb242d0dc9181baeeedc",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/kick_24/kick/kick/k_vl7_rr1.flac",
+          "sha256": "a2ec22a813e71a53660438fdafa83c649886ffaaccb6bbff4f49853b0146c115"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/kick_24/kick/oh/k_vl7_rr1.flac",
+          "sha256": "b0239925dba7c5ef72a62941406c57194f4f262309c56c01aae8e2e0f8224f43"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 1.5858041619616068
+    },
+    {
+      "file": "kick-soft-2.wav",
+      "bytes": 299706,
+      "sha256": "039dbf32b78f46dcb5694adc2cc6133418e7bafb7b969cddeeb49c4f0b29a9ab",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/kick_24/kick/kick/k_vl7_rr2.flac",
+          "sha256": "df76e9b5cd8131d14e85263a8353697c7798bbdd7248b3af4135a8d19780e736"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/kick_24/kick/oh/k_vl7_rr2.flac",
+          "sha256": "8f9f59ab88176e1461f20319d0c949521316ec9307371c8c5666619a80573dcf"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 1.5858041619616068
+    },
+    {
+      "file": "kick-hard-1.wav",
+      "bytes": 299706,
+      "sha256": "41d05e8a4dfb7f53e9f8035d824ed4ec9bf2f17b0bcf500c66821f4087cd12d9",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/kick_24/kick/kick/k_vl12_rr1.flac",
+          "sha256": "fb9e06f70661d4e9c64c557d13ab113e76c5d77f99376b3d468d3d86836db010"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/kick_24/kick/oh/k_vl12_rr1.flac",
+          "sha256": "198f0ed6c7ccefe88f2ed0663e3c241ce5cae611193cfb8e92ee60682ac2b975"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 1.5858041619616068
+    },
+    {
+      "file": "kick-hard-2.wav",
+      "bytes": 299706,
+      "sha256": "eb22a8caacd4fb1c89748eee04ec58e7abf8e94b6f14e4cae0bea0f94e00a4f5",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/kick_24/kick/kick/k_vl12_rr2.flac",
+          "sha256": "780875fe6b3c34ff0f704c0d01613a33425d100a00272cf0d40f458441e54515"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/kick_24/kick/oh/k_vl12_rr2.flac",
+          "sha256": "1b09ec25516a435fde6db1b776e281ae554509b4dc046c2c0accc5cddc2fdc41"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 1.5858041619616068
+    },
+    {
+      "file": "snare-soft-1.wav",
+      "bytes": 340090,
+      "sha256": "e8a35c9615b5e74a905697aa253b6b6aa0ccd4e265676259cec2f857795e002d",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/snare_14/center/top/sn_center_vl4_rr1.flac",
+          "sha256": "3f3b87ca3173a82c3da737ab3ece1186cd34b0c6625a04fcf384b1e1591729f9"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/snare_14/center/oh/sn_center_vl4_rr1.flac",
+          "sha256": "91c4d639e2e9c14fa7379b495cabc3ba014645ab27ca6bd3bf942e2b5b0d6ff2"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 3.3208006080567523
+    },
+    {
+      "file": "snare-soft-2.wav",
+      "bytes": 340090,
+      "sha256": "907a871acb307c6e8dbdce101b6b89980ab0525065186bf76d2e38770593db5f",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/snare_14/center/top/sn_center_vl4_rr2.flac",
+          "sha256": "db0611d4f47e612e7ceb04170ec4d7a21f501a80140d6bce59cef5239bdd317b"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/snare_14/center/oh/sn_center_vl4_rr2.flac",
+          "sha256": "b7ace96da252a41198b5e793813042abe9a2338489d242a2f44f5bc574b1f49f"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 3.3208006080567523
+    },
+    {
+      "file": "snare-hard-1.wav",
+      "bytes": 340090,
+      "sha256": "b286c5096b1ee9c5c621a0d3a902fa83124e2fa11ecc0faa485cd32b87a360b7",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/snare_14/center/top/sn_center_vl9_rr1.flac",
+          "sha256": "bce1459c07e2960252e8b7d67bbcd725c5333848bfa997828221f231781cf848"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/snare_14/center/oh/sn_center_vl9_rr1.flac",
+          "sha256": "034948624fe5068a4c52ca4745d3350da1b1258548d3642a9c398aadcb793404"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 3.3208006080567523
+    },
+    {
+      "file": "snare-hard-2.wav",
+      "bytes": 340090,
+      "sha256": "e4d60c46675117cdf82e57ffc0f5e62f14c4d6e84f5da00bbf6c213c32041694",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/snare_14/center/top/sn_center_vl9_rr2.flac",
+          "sha256": "bc20f04dfcde5030c113c5a0e768f8423962ae693522a2877a9f39ac4cdb6655"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/snare_14/center/oh/sn_center_vl9_rr2.flac",
+          "sha256": "c3f20747a69676ea90c0b8d539c32d18af015721cf4cc58122963e9bb5ded8b3"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 3.3208006080567523
+    },
+    {
+      "file": "hat-soft-1.wav",
+      "bytes": 219230,
+      "sha256": "eaefe6d589a53b5521ca3a2dd0dc2303d4bdb803e247a9f5bb3683408bcb3b2e",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/hihat_14/cl/cl/ht_cl_vl3_rr1.flac",
+          "sha256": "ce3d062d8de07cb3f273e84fbb8b9387fe951e21284cdceb8a0ec1e71cbc6bdc"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/hihat_14/cl/oh/ht_cl_vl3_rr1.flac",
+          "sha256": "931bbbcd65423b4ffc5657df6c57f6a56e535bc344606f2db0c0d7cbe4c36082"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 1.484805155573457
+    },
+    {
+      "file": "hat-soft-2.wav",
+      "bytes": 219230,
+      "sha256": "df06c000baf5ced22a988d6ae6d15ad4f91639d5fdc3b99e34317a001da5b7e0",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/hihat_14/cl/cl/ht_cl_vl3_rr2.flac",
+          "sha256": "bc4661e4178f068a6a5dfc623a591761da1f98a9041e36d7ad0a8d2bac246ad8"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/hihat_14/cl/oh/ht_cl_vl3_rr2.flac",
+          "sha256": "555e02fb5215d786abcea3d2ea1552b13f06da14deb7107e85fb90c230479bb8"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 1.484805155573457
+    },
+    {
+      "file": "hat-hard-1.wav",
+      "bytes": 219230,
+      "sha256": "b209973029274134110b94addb3cf479f3f2a3dee58b10dc97d844812e9d55ee",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/hihat_14/cl/cl/ht_cl_vl6_rr1.flac",
+          "sha256": "c51da9e592588bf5402627d9939521a69d5a178cd4d9dbbcc4d53e8195c60c30"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/hihat_14/cl/oh/ht_cl_vl6_rr1.flac",
+          "sha256": "fa0599a70e95cdcd4fff5e2f18636253eb673a0116ee3f7b347e85a272051f06"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 1.484805155573457
+    },
+    {
+      "file": "hat-hard-2.wav",
+      "bytes": 219230,
+      "sha256": "332bbb18a6b9535f4edd2f76eda0e6b21978ab432d641c806d3d13c91ed5dc50",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/hihat_14/cl/cl/ht_cl_vl6_rr2.flac",
+          "sha256": "8ddcb7b8a13309f75acc85982ad74f953d21629e4fc028028bfb5b6074f825b6"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/hihat_14/cl/oh/ht_cl_vl6_rr2.flac",
+          "sha256": "31ec7348ebb7cb0e1b94e4ad3d53e2b0f8d8f1ba1d916c0d5b2e91bb89438fa5"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 1.484805155573457
+    },
+    {
+      "file": "openhat-hard-1.wav",
+      "bytes": 668646,
+      "sha256": "ecc815fc2e12d74989e634caab4746f06c3b3e4aeea80605d00fbe2b911f6b6d",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/hihat_14/ho/cl/ht_ho_vl3_rr1.flac",
+          "sha256": "f7268f9d3cd0b1152777107ef19b095d767d2c85a9a8936c6d0b4964bc0d3323"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/hihat_14/ho/oh/ht_ho_vl3_rr1.flac",
+          "sha256": "b5126c2ba79cc84b31771f9ce12aa068dc5bf41b15d4a62255ad7c76b875ffbf"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 1.8870744816995138
+    },
+    {
+      "file": "openhat-hard-2.wav",
+      "bytes": 668646,
+      "sha256": "4c61ca77523bc1674945c942d5e9b93060887a0264d72bae885823f95538b2a4",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/hihat_14/ho/cl/ht_ho_vl3_rr2.flac",
+          "sha256": "17974d18322c605450a05da86175003489e24a0427b4605dd28fd514bf314b61"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/hihat_14/ho/oh/ht_ho_vl3_rr2.flac",
+          "sha256": "04cc7f1f891f931708c7a11eba6a214efc47a933d4ec962622e82ce500821957"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 1.8870744816995138
+    },
+    {
+      "file": "tomhi-hard-1.wav",
+      "bytes": 440498,
+      "sha256": "b5fb0fb1f7f8fe0dfbd40d4d21d347310ad060695c846ba62c841a370d683c6d",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/tom_14/center/cl/t14_vl5_rr1.flac",
+          "sha256": "7aabe82391ff96cda9203cee81fc72fa1665ca225ddfab8bc05abd883c18c727"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/tom_14/center/oh/t14_vl5_rr1.flac",
+          "sha256": "6291e1080fe2579239ace581c2f37dcb500053cf062c914c06d4fb39c2308c75"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 2.7536134453781513
+    },
+    {
+      "file": "tomhi-hard-2.wav",
+      "bytes": 440498,
+      "sha256": "13cf7babef76cb187970fcd9d452315fed0f838e5098fc71a3e1beda988df5e2",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/tom_14/center/cl/t14_vl5_rr2.flac",
+          "sha256": "60d8d9475ae9a63ca8e2144dd3c854496f11d6bf65ec51c22091c7ac94464b71"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/tom_14/center/oh/t14_vl5_rr2.flac",
+          "sha256": "5e7a0cac2de2ef817bf36088c1274d2fa1b7ff3c61d1b96a4f0de7fef5a4727e"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 2.7536134453781513
+    },
+    {
+      "file": "tommid-hard-1.wav",
+      "bytes": 412494,
+      "sha256": "b7a839110d853419c740536561343aac8644e22c89fc4a36b06af1c471f26e54",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/tom_15/center/cl/t15_vl6_rr1.flac",
+          "sha256": "8aa9c75b965c802975485a2aaed3244f4759d0c6e6ae6705cf6f7be302a9d3f7"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/tom_15/center/oh/t15_vl6_rr1.flac",
+          "sha256": "88db4b563aa4df6144fa35b42156faebd70258bd79b4b7ba0161227fc2fedf51"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 2.636998289910472
+    },
+    {
+      "file": "tommid-hard-2.wav",
+      "bytes": 412494,
+      "sha256": "fe573bd4bc5c62886102b0e841c70ddd50bd5133adca399785bab02867943cb2",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/tom_15/center/cl/t15_vl6_rr2.flac",
+          "sha256": "8858b3c56b4fd42a6d71ae7cf4efb184ee703d3400b815e79f1dde665ade9f7f"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/tom_15/center/oh/t15_vl6_rr2.flac",
+          "sha256": "e53b4b12707f7903cf0bc7e60d12eb0075a07395c57b76aa5ff5a55bd54ecd5b"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 2.636998289910472
+    },
+    {
+      "file": "tomlow-hard-1.wav",
+      "bytes": 400490,
+      "sha256": "9ad5c3f09c9f3db8b96e02d2950801c203ebeee6bfc01b8676f314f71aec35bb",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/tom_18/center/cl/t18_vl6_rr1.flac",
+          "sha256": "453fb9278102b8064c9b821857f81fc661b95c5804645da9e25f12c86cb1166c"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/tom_18/center/oh/t18_vl6_rr1.flac",
+          "sha256": "e47f1c55541a76e2eadc9d7abdfd19dd29eb17d2fcaf378ba69fd6a6e1fdfa13"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 2.246499271574257
+    },
+    {
+      "file": "tomlow-hard-2.wav",
+      "bytes": 400490,
+      "sha256": "8e46eff702b064ce8f821730b35165a437521371de62bf37ffc8c5a87d36954e",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/tom_18/center/cl/t18_vl6_rr2.flac",
+          "sha256": "133bac8fdc70fdfa994d044afc260301ce0143e95a4afa9b71c579f1da2de663"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/tom_18/center/oh/t18_vl6_rr2.flac",
+          "sha256": "a2f955206e74d366f0fd904130b3e64cc87ab799e91781b3bb2ba76cb0ff14b5"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 2.246499271574257
+    },
+    {
+      "file": "ride-hard-1.wav",
+      "bytes": 3247850,
+      "sha256": "095f3854a541a027376bfd396927bdcb8bc0387ec7acbae3b0da26d487d3c30a",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/ride_22/rd/cl/rd_vl7_rr1.flac",
+          "sha256": "dabedc20c2464c50b26729d42714eecaf85a6658e29c98504070568b954bec1b"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/ride_22/rd/oh/rd_vl7_rr1.flac",
+          "sha256": "11b78424297ab0a3f9cf49d301ea009ef0d8975b0391a9d9ac36da2d5327cd6a"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 1.9239926605504587
+    },
+    {
+      "file": "ride-hard-2.wav",
+      "bytes": 3247850,
+      "sha256": "33feb3402f20579446409feafd571dd37fe69475e4b05d03d2d35795305b1d94",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/ride_22/rd/cl/rd_vl7_rr2.flac",
+          "sha256": "90e3627953ab6e16f2cde881a1fbf785a37595d51e9095fb2d3226227810db26"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/ride_22/rd/oh/rd_vl7_rr2.flac",
+          "sha256": "2305a170d489230a3a31d88b77c3c743b3119a6ec02d3281abcbfbd3086f3e51"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 1.9239926605504587
+    },
+    {
+      "file": "crash-hard-1.wav",
+      "bytes": 2745402,
+      "sha256": "14694be6588240b020665211f0edd3e9080562af8b0e1c54fb2bf31048c1a534",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/crash_17/cr/cl/cr_vl4_rr1.flac",
+          "sha256": "79afe7dc4a68a733d89207184f2e64e9815fb45ce82901a8c7e883562e584a9d"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/crash_17/cr/oh/cr_vl4_rr1.flac",
+          "sha256": "84150bf1f6842d3cb7738c579ac06bdfb5319a5ab180a4b7663e8058fd0a0e46"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 1.9144253239855535
+    },
+    {
+      "file": "crash-hard-2.wav",
+      "bytes": 2570138,
+      "sha256": "660ce168c6ad46617c715a0fae4b48d18bf859d330f8c9dd82e871ca108b0096",
+      "sources": [
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/crash_17/cr/cl/cr_vl4_rr2.flac",
+          "sha256": "434168a1ad2b94c145d190a1734da6360f41dd5ddf07bf52123e0b33622075c9"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/sfzinstruments/karoryfer.big-rusty-drums/f07ce00df34a46b6b08375be56fe116cf15782bc/Samples/crash_17/cr/oh/cr_vl4_rr2.flac",
+          "sha256": "24e1d0b6ee0e87de85637f0e1591bda6ec1cb528713b276ffaf285a2801cc843"
+        }
+      ],
+      "trimSeconds": 0,
+      "gain": 1.9144253239855535
+    }
+  ]
+}

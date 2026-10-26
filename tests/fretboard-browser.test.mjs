@@ -5,7 +5,7 @@ import {test,before,after} from 'node:test';
 import {chromium,expect} from '@playwright/test';
 const root=new URL('../',import.meta.url);let server,browser,origin;
 before(async()=>{
-  server=createServer(async(req,res)=>{const path=decodeURIComponent(new URL(req.url,'http://local').pathname);if(!/^\/fretboard\/[a-z.-]+$/.test(path)){res.writeHead(404).end();return;}try{const body=await readFile(new URL('.'+path,root));res.setHeader('Content-Type',path.endsWith('.mjs')?'text/javascript':path.endsWith('.css')?'text/css':'text/html');res.end(body);}catch{res.writeHead(404).end();}});
+  server=createServer(async(req,res)=>{const path=decodeURIComponent(new URL(req.url,'http://local').pathname);if(!/^\/fretboard\/(?:[a-z.-]+|samples\/acoustic\/[a-zA-Z0-9.-]+)$/.test(path)){res.writeHead(404).end();return;}try{const body=await readFile(new URL('.'+path,root));res.setHeader('Content-Type',path.endsWith('.mjs')?'text/javascript':path.endsWith('.css')?'text/css':path.endsWith('.wav')?'audio/wav':'text/html');res.end(body);}catch{res.writeHead(404).end();}});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;
   browser=await chromium.launch();await mkdir(new URL('test-results/',root),{recursive:true});
 });
@@ -86,4 +86,63 @@ test('microphone checks real octave from synthetic audio; a held note cannot ans
   await page.evaluate(()=>{window.testTone.o.frequency.value=261.6256;});await expect(page.locator('#correct')).toHaveText('1',{timeout:3000});
   await page.waitForTimeout(900);await expect(page.locator('#correct')).toHaveText('1');
   await page.locator('#mic').click();await expect(page.locator('#pitch-meter')).toBeHidden();await expect(page.locator('#headphones-wrap')).toBeHidden();await page.evaluate(()=>window.testTone.c.close());
+});
+
+async function watchDrums(page){
+  await page.evaluate(async()=>{
+    const {AcousticKit}=await import('/fretboard/drums.mjs?v=1'),original=AcousticKit.prototype.hit;
+    window.testDrumHits=[];AcousticKit.prototype.hit=function(piece,time,velocity){window.testKit=this;window.testDrumHits.push({piece,time,velocity,now:this.context.currentTime});return original.call(this,piece,time,velocity);};
+  });
+}
+test('real acoustic kit loads only on demand, previews without scoring, and persists its mix',async t=>{
+  const page=await open(t);let samples=0;page.on('request',r=>{if(r.url().endsWith('.wav'))samples++;});await watchDrums(page);
+  assert.equal(samples,0);await page.locator('#drums').selectOption('pop');assert.equal(samples,0);
+  await page.locator('#drum-volume').fill('42');await page.locator('#drum-fills').uncheck();await page.locator('#drum-preview').click();
+  await expect(page.locator('#drum-status')).toContainText('Acoustic kit ready',{timeout:15000});await page.waitForFunction(()=>window.testDrumHits.length>0);
+  assert.equal(samples,24);await expect(page.locator('#clock')).toHaveText('00:00');await expect(page.locator('#correct')).toHaveText('0');
+  const info=await page.evaluate(()=>({buffers:window.testKit.buffers.size,durations:[...window.testKit.buffers.values()].map(b=>b.duration),voices:window.testKit.voices.size}));
+  assert.equal(info.buffers,24);assert.ok(info.durations.every(n=>n>.1&&n<30));assert.ok(info.voices>0);
+  await page.locator('#drum-preview').click();assert.equal(await page.evaluate(()=>window.testKit.voices.size),0);
+  await page.reload();await expect(page.locator('#drums')).toHaveValue('pop');await expect(page.locator('#drum-volume')).toHaveValue('42');await expect(page.locator('#drum-fills')).not.toBeChecked();
+  await page.setViewportSize({width:390,height:900});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.locator('.drum-room').screenshot({path:new URL('test-results/fretwise-drums-mobile.png',root).pathname.replace(/^\/(\w:)/,'$1')});
+});
+test('drums begin after the count-in, follow transport, and stop when switched off',async t=>{
+  const page=await open(t);await watchDrums(page);await page.locator('#bpm').fill('180');await page.locator('#bpm').press('Tab');await page.locator('#metronome').uncheck();await page.locator('#drums').selectOption('rock');
+  await page.locator('#play').click();await expect(page.locator('#play')).toContainText('Pause',{timeout:15000});assert.equal(await page.evaluate(()=>window.testDrumHits.length),0);
+  await page.waitForFunction(()=>window.testDrumHits.length>0,{timeout:5000});await expect(page.locator('#drum-preview')).toBeDisabled();
+  await page.waitForFunction(()=>window.testDrumHits.filter(h=>h.piece==='crash').length>=2,null,{timeout:10000});
+  const downbeats=await page.evaluate(()=>window.testDrumHits.filter(h=>h.piece==='crash').map(h=>h.time));
+  assert.ok(Math.abs(downbeats[1]-downbeats[0]-16*60/180)<.04,`four-bar loop drifted: ${downbeats}`);
+  await page.locator('#play').click();const paused=await page.evaluate(()=>({hits:window.testDrumHits.length,voices:window.testKit.voices.size}));assert.equal(paused.voices,0);
+  await page.waitForTimeout(400);assert.equal(await page.evaluate(()=>window.testDrumHits.length),paused.hits);
+  await page.locator('#play').click();await page.waitForFunction(n=>window.testDrumHits.length>n,paused.hits);
+  await page.locator('#drums').selectOption('off');await expect(page.locator('#drum-controls')).toBeHidden();assert.equal(await page.evaluate(()=>window.testKit.voices.size),0);
+});
+test('failed samples offer retry and do not prevent drums-off manual practice',async t=>{
+  const page=await open(t);await page.route('**/samples/acoustic/*.wav',route=>route.abort());await page.locator('#drums').selectOption('pop');await page.locator('#play').click();
+  await expect(page.locator('#drum-status')).toContainText('Kit download failed');await expect(page.locator('#drum-retry')).toBeVisible();await expect(page.locator('#play')).toContainText('Play score');
+  await page.unroute('**/samples/acoustic/*.wav');await page.locator('#drum-retry').click();await expect(page.locator('#drum-status')).toContainText('Acoustic kit ready',{timeout:15000});
+  await page.locator('#drums').selectOption('off');await page.locator('#play').click();await expect(page.locator('#play')).toContainText('Pause');
+});
+test('canceling playback while the kit loads cannot start the score later',async t=>{
+  const page=await open(t);let release;const gate=new Promise(resolve=>{release=resolve;});await page.route('**/samples/acoustic/*.wav',async route=>{await gate;await route.continue();});await page.locator('#drums').selectOption('pop');await page.locator('#play').click();
+  await expect(page.locator('#drum-status')).toContainText('Loading 24');await page.locator('#play').click();await expect(page.locator('#play')).toContainText('Play score');
+  release();await expect(page.locator('#drum-status')).toContainText('Acoustic kit ready',{timeout:15000});
+  await expect(page.locator('#play')).toContainText('Play score');await expect(page.locator('#clock')).toHaveText('00:00');
+});
+test('sample engine renders actual audio, alternates takes, chokes hats and mutes microphone playback',async t=>{
+  const page=await open(t);
+  const rendered=await page.evaluate(async()=>{
+    const {AcousticKit}=await import('/fretboard/drums.mjs?v=1'),{StudioAudio}=await import('/fretboard/audio.mjs?v=3');
+    const context=new OfflineAudioContext(2,44100*2,44100),kit=new AcousticKit(context,context.destination);await kit.load();
+    kit.hit('openhat',.05,.8);const open=[...kit.voices][0];kit.hit('hat',.3,.8);kit.hit('hat',.6,.8);kit.hit('kick',.1,.8);kit.hit('kick',1,.8);
+    const kickBuffers=[...kit.voices].filter(v=>v.piece==='kick').map(v=>v.source.buffer);const alternates=kickBuffers[0]!==kickBuffers[1],chokedAt=open.chokedAt;
+    const buffer=await context.startRendering();let peak=0,energy=0;for(const v of buffer.getChannelData(0)){peak=Math.max(peak,Math.abs(v));energy+=v*v;}
+    const audio=new StudioAudio();await audio.init();let calls=0;audio.drums.beat=()=>calls++;
+    const settings={drums:'pop',drumVolume:60,drumFills:true,metronome:false,backing:'off',bpm:120};
+    audio.muted=true;audio.beat(audio.context.currentTime,0,settings);const mutedCalls=calls;audio.muted=false;audio.beat(audio.context.currentTime,0,settings);audio.stopVoices();await audio.context.close();
+    return {alternates,chokedAt,peak,energy,mutedCalls,calls};
+  });
+  assert.equal(rendered.alternates,true);assert.equal(rendered.chokedAt,.3);assert.ok(rendered.energy>5);assert.ok(rendered.peak>0&&rendered.peak<1);assert.equal(rendered.mutedCalls,0);assert.equal(rendered.calls,1);
 });

@@ -1,7 +1,9 @@
-import {frequency,detectPitch} from './music.mjs?v=2';
+import {frequency,detectPitch} from './music.mjs?v=3';
+import {AcousticKit} from './drums.mjs?v=1';
 export class StudioAudio {
   context=null;voices=new Set();stream=null;analyser=null;micTimer=null;micGeneration=0;muted=false;
-  async init(){if(!this.context){const C=window.AudioContext||window.webkitAudioContext;if(!C)throw Error('Audio is not supported in this browser.');this.context=new C();this.master=this.context.createGain();this.master.gain.value=.35;this.master.connect(this.context.destination);}await this.context.resume();return this.context;}
+  async init(){if(!this.context){const C=window.AudioContext||window.webkitAudioContext;if(!C)throw Error('Audio is not supported in this browser.');this.context=new C();this.master=this.context.createGain();this.master.gain.value=.35;this.master.connect(this.context.destination);this.drums=new AcousticKit(this.context,this.master);}await this.context.resume();return this.context;}
+  async loadDrums(){await this.init();await this.drums.load();}
   setVolume(value){if(this.master)this.master.gain.value=this.muted?0:value/100;}
   tone(midi,time,length=.5,gain=.2,type='triangle'){
     if(!this.context||this.muted)return;
@@ -11,6 +13,7 @@ export class StudioAudio {
   }
   beat(time,beat,s){
     if(s.metronome||beat<0)this.tone(beat%4===0?94:87,time,.045,.18,'sine');
+    if(!this.muted&&beat>=0&&s.drums!=='off')this.drums?.beat(time,beat,s);
     if(beat<0||s.backing==='off'||s.backing==='upload')return;
     const duration=60/s.bpm,root=36+s.root;
     if(s.backing==='drone'&&beat%4===0){this.tone(root,time,duration*3.8,.16,'sine');this.tone(root+7,time,duration*3.8,.07,'sine');}
@@ -21,7 +24,7 @@ export class StudioAudio {
       if(beat%4===0){this.tone(root+12,time,duration*3,.065,'sine');this.tone(root+19,time,duration*3,.045,'sine');}
     }
   }
-  stopVoices(){for(const voice of this.voices){try{voice.stop();}catch{}}this.voices.clear();}
+  stopVoices(){for(const voice of this.voices){try{voice.stop();}catch{}}this.voices.clear();this.drums?.stop();}
   async startMic(onPitch){
     const generation=++this.micGeneration;
     if(!navigator.mediaDevices?.getUserMedia)throw Error('Microphone needs HTTPS or localhost and a supported browser. Manual practice still works.');
