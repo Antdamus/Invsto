@@ -1,0 +1,24 @@
+{
+  "author": "Joseph SARDIN / BigSoundBank",
+  "title": "Mechanical metronome (sound 0468)",
+  "license": "CC0-1.0",
+  "page": "https://bigsoundbank.com/metronome-a-120bpm-s0468.html",
+  "source": "https://bigsoundbank.com/UPLOAD/bwf-en/0468.wav",
+  "sourceSha256": "074258b196648c07df1366a1f038fde7a296a7d85a7f3e8bcf0c528528767dfe",
+  "samples": [
+    {
+      "file": "tick.wav",
+      "sourceStartSeconds": 2.0198125,
+      "durationSeconds": 0.23,
+      "sha256": "48eb6b65bb935a314c32ea1318e74ee644bdcdc249a274a2c8d1e4a6bb087c93",
+      "bytes": 22124
+    },
+    {
+      "file": "tock.wav",
+      "sourceStartSeconds": 2.4992708333333336,
+      "durationSeconds": 0.23,
+      "sha256": "69058bdbd939f45c3200578fc3b954ab4e1a1f58b3b8a9fb6b809de9c0d07bee",
+      "bytes": 22124
+    }
+  ]
+}

@@ -1,5 +1,5 @@
-import {TUNING,ROOTS,SCALES,DEFAULTS,mod,frequency,octave,spell,noteName,positions,makeScore,scalePCs,sanitizeSettings,pitchMatch,timingGrade,recommendation,masteryFor} from './music.mjs?v=3';
-import {StudioAudio} from './audio.mjs?v=3';
+import {TUNING,ROOTS,SCALES,DEFAULTS,mod,frequency,octave,spell,noteName,positions,makeScore,scalePCs,sanitizeSettings,pitchMatch,timingGrade,recommendation,masteryFor} from './music.mjs?v=4';
+import {StudioAudio} from './audio.mjs?v=4';
 const $=id=>document.getElementById(id),audio=new StudioAudio(),STORE='fretwise.v1';
 let saved={};try{saved=JSON.parse(localStorage.getItem(STORE)||'{}')||{};}catch{}
 let settings=sanitizeSettings(saved.settings),progress={sessions:[],notes:{},positionUse:{},...saved.progress};
@@ -10,6 +10,7 @@ let score=[],results=[],active=0,running=false,starting=false,finished=false,rev
 let position=-4,phaseTime=0,phaseOffset=-4,nextBeat=-4,raf=0,scheduler=0,runStarted=0,practiceMs=0,sessionSaved=false;
 let stats={correct:0,wrong:0,missed:0,streak:0,best:0,onTime:0,manual:0},cleanPasses=0,noticeTimeout,waitAdvance=0,trackURL=null;
 let micPitch=null,micSince=0,micOnset=0,micLatched=false,lastRms=0,lastAttack=0;
+let metronomeState='idle',metronomePreviewTimer=0;
 let startGeneration=0,drumState='idle',previewTimer=0,previewGeneration=0;
 const secondsPerBeat=()=>60/settings.bpm;
 const audible=()=>!micOn||settings.headphones;
@@ -26,8 +27,8 @@ function setupControls(){
   syncControls();
 }
 function syncControls(){
-  for(const [id,key] of [['root','root'],['scale','scale'],['duration','duration'],['mode','mode'],['bpm','bpm'],['min-fret','minFret'],['max-fret','maxFret'],['target-bpm','targetBpm'],['backing','backing'],['volume','volume'],['goal','goal'],['drums','drums'],['drum-volume','drumVolume']])$(id).value=settings[key];
-  for(const [id,key] of [['hints','hints'],['auto-add','autoAdd'],['loop','loop'],['metronome','metronome'],['headphones','headphones'],['drum-fills','drumFills']])$(id).checked=settings[key];
+  for(const [id,key] of [['root','root'],['scale','scale'],['duration','duration'],['mode','mode'],['bpm','bpm'],['min-fret','minFret'],['max-fret','maxFret'],['target-bpm','targetBpm'],['backing','backing'],['volume','volume'],['goal','goal'],['drums','drums'],['drum-volume','drumVolume'],['metronome-sound','metronomeSound'],['metronome-volume','metronomeVolume']])$(id).value=settings[key];
+  for(const [id,key] of [['hints','hints'],['auto-add','autoAdd'],['loop','loop'],['metronome','metronome'],['headphones','headphones'],['drum-fills','drumFills'],['metronome-accent','metronomeAccent']])$(id).checked=settings[key];
   $('start-note').innerHTML=scalePCs(settings).map(pc=>`<option value="${pc}">${pitchClassName(pc)} · all octaves in range</option>`).join('');$('start-note').value=settings.pool[0];
   $('note-palette').innerHTML=scalePCs(settings).map(pc=>`<button type="button" data-pc="${pc}" class="${settings.pool.includes(pc)?'selected':''}" aria-pressed="${settings.pool.includes(pc)}" aria-label="Include ${pitchClassName(pc)} in all selected octaves">${pitchClassName(pc)}</button>`).join('');
   $('pool-count').textContent=`${settings.pool.length} of ${scalePCs(settings).length}`;
@@ -36,23 +37,49 @@ function syncControls(){
   $('range-summary').textContent=`${settings.strings.length===6?'All strings':settings.strings.length+' strings'} · frets ${settings.minFret}–${settings.maxFret}`;
   $('upload-wrap').hidden=settings.backing!=='upload';$('user-track').volume=settings.volume/100;
   $('backing-help').textContent=settings.scale==='chromatic'?'Chromatic notes can clash with a fixed key. Use just your guitar, or a track you choose.':'A tonic + fifth accompaniment follows your key and tempo.';
-  updateDrumControls();
+  updateSoundControls();
   updateRecommendation();
 }
-function updateDrumControls(){
+function updateSoundControls(){
   $('drum-controls').hidden=settings.drums==='off';
   $('drum-volume-value').textContent=`${settings.drumVolume}%`;
   $('drum-retry').hidden=drumState!=='error'||settings.drums==='off';
   $('drum-status').textContent=settings.drums==='off'?'Recorded acoustic drums, ready when you are.':drumState==='loading'?'Loading 24 real drum recordings (18 MB)…':drumState==='error'?'Kit download failed. Retry, or switch drums off to practice.':!audible()?'Muted while listening. Enable headphones above to hear drums.':drumState==='ready'?`Acoustic kit ready · follows ${settings.bpm} BPM · 4/4`:'Loads when you press Play or Preview groove.';
   $('drum-preview').disabled=running||starting||!audible();
+  $('metronome-preview').disabled=running||starting||!audible();
+  $('metronome-volume-value').textContent=`${settings.metronomeVolume}%`;
+  $('metronome-status').textContent=!audible()?'Muted while listening. Enable headphones to hear the metronome.':settings.metronomeSound==='digital'?'Electronic click · same tempo as your score.':metronomeState==='loading'?'Loading the recorded tick and tock…':metronomeState==='error'?'Recording unavailable; using a digital click. Press Preview to retry.':'Actual pendulum metronome recordings · alternating tick-tock.';
 }
 async function prepareDrums(){
-  drumState='loading';updateDrumControls();
-  try{await audio.loadDrums();audio.setVolume(settings.volume);drumState='ready';updateDrumControls();return true;}
-  catch(error){drumState='error';updateDrumControls();notice(error.message);return false;}
+  drumState='loading';updateSoundControls();
+  try{await audio.loadDrums();audio.setVolume(settings.volume);drumState='ready';updateSoundControls();return true;}
+  catch(error){drumState='error';updateSoundControls();notice(error.message);return false;}
+}
+async function prepareMetronome(){
+  if(settings.metronomeSound==='digital')return;
+  metronomeState='loading';updateSoundControls();
+  try{await audio.loadMetronome();metronomeState='ready';}
+  catch{metronomeState='error';}
+  updateSoundControls();
+}
+async function previewMetronome(){
+  if(metronomePreviewTimer||$('metronome-preview').dataset.loading==='true'){stopPreview();return;}
+  if(running||starting||!audible())return;stopPreview();const generation=previewGeneration;
+  $('metronome-preview').dataset.loading='true';$('metronome-preview').textContent='Cancel preview';
+  try{await audio.init();audio.setVolume(settings.volume);await prepareMetronome();}
+  catch{if(generation===previewGeneration){stopPreview();notice('Audio is unavailable in this browser.');}return;}
+  if(generation!==previewGeneration)return;delete $('metronome-preview').dataset.loading;$('metronome-preview').textContent='■ Stop preview';
+  const begins=audio.context.currentTime+.08;let next=0;
+  const schedule=()=>{
+    if(!audible()){stopPreview();return;}
+    const now=audio.context.currentTime;
+    while(next<4&&begins+next*secondsPerBeat()<now+.12){const time=begins+next*secondsPerBeat();if(time>=now-.04)audio.metronome.beat(time,next,settings);next++;}
+    if(now>=begins+4*secondsPerBeat())stopPreview();
+  };
+  metronomePreviewTimer=setInterval(schedule,25);schedule();
 }
 function stopPreview(){
-  previewGeneration++;clearInterval(previewTimer);previewTimer=0;delete $('drum-preview').dataset.loading;audio.drums?.stop();$('drum-preview').textContent='▶ Preview groove';
+  previewGeneration++;clearInterval(previewTimer);previewTimer=0;clearInterval(metronomePreviewTimer);metronomePreviewTimer=0;audio.metronome?.stop();delete $('metronome-preview').dataset.loading;$('metronome-preview').textContent='▶ Preview metronome';delete $('drum-preview').dataset.loading;audio.drums?.stop();$('drum-preview').textContent='▶ Preview groove';
 }
 async function previewDrums(){
   if(previewTimer||$('drum-preview').dataset.loading==='true'){stopPreview();delete $('drum-preview').dataset.loading;return;}
@@ -174,12 +201,15 @@ function showCurrent(){
 function lockSetup(locked){$('score-settings').disabled=locked;for(const id of ['bpm','bpm-up','bpm-down','target-bpm','new-phrase','hints','add-note'])$(id).disabled=locked;updateRecommendation();}
 function beatNow(){return running?phaseOffset+(performance.now()-phaseTime)/1000/secondsPerBeat():position;}
 async function start(){
-  if(starting||running||!score.length)return;stopPreview();const generation=++startGeneration;starting=true;$('play').innerHTML='× <span>Cancel start</span>';updateDrumControls();
+  if(starting||running||!score.length)return;stopPreview();const generation=++startGeneration;starting=true;$('play').innerHTML='× <span>Cancel start</span>';updateSoundControls();
   try{await audio.init();audio.setVolume(settings.volume);}catch{notice('Audio is unavailable; the visual playhead still works.');}
+  if(generation!==startGeneration)return;
+  await prepareMetronome();
+  if(generation!==startGeneration)return;
   if(settings.drums!=='off'&&!await prepareDrums()){if(generation===startGeneration)pause();return;}
   if(generation!==startGeneration||document.hidden){if(generation===startGeneration)pause();return;}
   if(finished)newScore();sessionSaved=false;running=true;starting=false;runStarted=performance.now();phaseTime=runStarted;phaseOffset=position;nextBeat=Math.ceil(position);
-  $('play').innerHTML='Ⅱ <span>Pause</span>';lockSetup(true);updateDrumControls();
+  $('play').innerHTML='Ⅱ <span>Pause</span>';lockSetup(true);updateSoundControls();
   if(settings.backing==='upload'&&audible()&&position>=0)playUserTrack();
   scheduler=setInterval(scheduleAudio,25);scheduleAudio();raf=requestAnimationFrame(tick);
   if(settings.mode==='wait'&&results[active])queueWaitAdvance();
@@ -193,8 +223,8 @@ function scheduleAudio(){
 }
 function pause(){
   startGeneration++;starting=false;stopPreview();
-  if(!running){$('play').innerHTML='▶ <span>Play score</span>';updateDrumControls();return;}
-  position=beatNow();practiceMs+=performance.now()-runStarted;running=false;clearInterval(scheduler);cancelAnimationFrame(raf);clearTimeout(waitAdvance);audio.stopVoices();$('user-track').pause();$('play').innerHTML='▶ <span>Resume</span>';lockSetup(false);updateDrumControls();updateStats();updatePlayhead();
+  if(!running){$('play').innerHTML='▶ <span>Play score</span>';updateSoundControls();return;}
+  position=beatNow();practiceMs+=performance.now()-runStarted;running=false;clearInterval(scheduler);cancelAnimationFrame(raf);clearTimeout(waitAdvance);audio.stopVoices();$('user-track').pause();$('play').innerHTML='▶ <span>Resume</span>';lockSetup(false);updateSoundControls();updateStats();updatePlayhead();
 }
 function tick(){
   if(!running)return;position=beatNow();
@@ -271,9 +301,9 @@ function routeAudio(){
   audio.muted=!audible();audio.setVolume(settings.volume);
   if(!audible()){audio.stopVoices();$('user-track').pause();}else if(running&&position>=0)playUserTrack();
   if(micOn)$('mic-status').textContent=settings.headphones?'Headphones mode: drums, metronome and backing are on. Play one string at a time. Your microphone audio stays on this device.':'Exact pitch + octave + timing. App audio is muted to avoid false matches. Use headphones below to hear drums, the metronome and backing.';
-  updateDrumControls();
+  updateSoundControls();
 }
-function disableMic(){audio.stopMic();audio.setVolume(settings.volume);micOn=false;micPending=false;micLatched=false;micPitch=null;lastRms=0;$('mic').classList.remove('active');$('mic').innerHTML='<span>◉</span> Enable microphone';$('mic').disabled=false;$('pitch-meter').hidden=true;$('headphones-wrap').hidden=true;$('hear').disabled=false;$('got-it').disabled=false;$('mic-status').textContent='Manual mode. Tap the fretboard, or self-check with “I played it.”';updateDrumControls();}
+function disableMic(){audio.stopMic();audio.setVolume(settings.volume);micOn=false;micPending=false;micLatched=false;micPitch=null;lastRms=0;$('mic').classList.remove('active');$('mic').innerHTML='<span>◉</span> Enable microphone';$('mic').disabled=false;$('pitch-meter').hidden=true;$('headphones-wrap').hidden=true;$('hear').disabled=false;$('got-it').disabled=false;$('mic-status').textContent='Manual mode. Tap the fretboard, or self-check with “I played it.”';updateSoundControls();}
 async function toggleMic(){
   if(micOn||micPending){disableMic();return;}pause();micPending=true;$('mic').disabled=true;$('mic').textContent='Waiting for microphone permission…';
   try{const started=await audio.startMic(onPitch);if(!started)return;micOn=true;micPending=false;$('mic').disabled=false;$('mic').classList.add('active');$('mic').innerHTML='<span>◉</span> Microphone on · turn off';$('pitch-meter').hidden=false;$('headphones-wrap').hidden=false;$('hear').disabled=true;$('got-it').disabled=true;routeAudio();notice('Microphone ready. Pluck a single note, then press Play.');}
@@ -312,13 +342,17 @@ for(const [id,amount] of [['bpm-up',5],['bpm-down',-5]])$(id).onclick=()=>{setti
 $('hints').onchange=()=>{settings.hints=$('hints').checked;changeSetup();};
 $('auto-add').onchange=()=>{settings.autoAdd=$('auto-add').checked;persist();};
 $('loop').onchange=()=>{settings.loop=$('loop').checked;persist();};
-$('metronome').onchange=()=>{settings.metronome=$('metronome').checked;persist();};
+$('metronome').onchange=()=>{settings.metronome=$('metronome').checked;if(!settings.metronome&&position>=0)audio.metronome?.stop();persist();};
+$('metronome-sound').onchange=()=>{pause();settings.metronomeSound=$('metronome-sound').value;updateSoundControls();persist();};
+$('metronome-volume').oninput=()=>{settings.metronomeVolume=Number($('metronome-volume').value);audio.metronome?.setVolume(settings.metronomeVolume);updateSoundControls();persist();};
+$('metronome-accent').onchange=()=>{settings.metronomeAccent=$('metronome-accent').checked;persist();};
+$('metronome-preview').onclick=previewMetronome;
 $('headphones').onchange=()=>{settings.headphones=$('headphones').checked;routeAudio();persist();};
 $('goal').onchange=()=>{settings.goal=Number($('goal').value);updateStats();persist();};
 $('volume').oninput=()=>{settings.volume=Number($('volume').value);audio.setVolume(settings.volume);$('user-track').volume=settings.volume/100;persist();};
 $('backing').onchange=()=>{settings.backing=$('backing').value;audio.stopVoices();$('user-track').pause();syncControls();if(running&&position>=0)playUserTrack();persist();};
-$('drums').onchange=()=>{pause();settings.drums=$('drums').value;updateDrumControls();persist();};
-$('drum-volume').oninput=()=>{settings.drumVolume=Number($('drum-volume').value);audio.drums?.setVolume(settings.drumVolume);updateDrumControls();persist();};
+$('drums').onchange=()=>{pause();settings.drums=$('drums').value;updateSoundControls();persist();};
+$('drum-volume').oninput=()=>{settings.drumVolume=Number($('drum-volume').value);audio.drums?.setVolume(settings.drumVolume);updateSoundControls();persist();};
 $('drum-fills').onchange=()=>{settings.drumFills=$('drum-fills').checked;persist();};
 $('drum-preview').onclick=previewDrums;
 $('drum-retry').onclick=prepareDrums;

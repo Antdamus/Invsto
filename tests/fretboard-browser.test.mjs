@@ -5,7 +5,7 @@ import {test,before,after} from 'node:test';
 import {chromium,expect} from '@playwright/test';
 const root=new URL('../',import.meta.url);let server,browser,origin;
 before(async()=>{
-  server=createServer(async(req,res)=>{const path=decodeURIComponent(new URL(req.url,'http://local').pathname);if(!/^\/fretboard\/(?:[a-z.-]+|samples\/acoustic\/[a-zA-Z0-9.-]+)$/.test(path)){res.writeHead(404).end();return;}try{const body=await readFile(new URL('.'+path,root));res.setHeader('Content-Type',path.endsWith('.mjs')?'text/javascript':path.endsWith('.css')?'text/css':path.endsWith('.wav')?'audio/wav':'text/html');res.end(body);}catch{res.writeHead(404).end();}});
+  server=createServer(async(req,res)=>{const path=decodeURIComponent(new URL(req.url,'http://local').pathname);if(!/^\/fretboard\/(?:[a-z.-]+|samples\/(?:acoustic|metronome)\/[a-zA-Z0-9.-]+)$/.test(path)){res.writeHead(404).end();return;}try{const body=await readFile(new URL('.'+path,root));res.setHeader('Content-Type',path.endsWith('.mjs')?'text/javascript':path.endsWith('.css')?'text/css':path.endsWith('.wav')?'audio/wav':'text/html');res.end(body);}catch{res.writeHead(404).end();}});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;
   browser=await chromium.launch();await mkdir(new URL('test-results/',root),{recursive:true});
 });
@@ -134,7 +134,7 @@ test('canceling playback while the kit loads cannot start the score later',async
 test('sample engine renders actual audio, alternates takes, chokes hats and mutes microphone playback',async t=>{
   const page=await open(t);
   const rendered=await page.evaluate(async()=>{
-    const {AcousticKit}=await import('/fretboard/drums.mjs?v=1'),{StudioAudio}=await import('/fretboard/audio.mjs?v=3');
+    const {AcousticKit}=await import('/fretboard/drums.mjs?v=1'),{StudioAudio}=await import('/fretboard/audio.mjs?v=4');
     const context=new OfflineAudioContext(2,44100*2,44100),kit=new AcousticKit(context,context.destination);await kit.load();
     kit.hit('openhat',.05,.8);const open=[...kit.voices][0];kit.hit('hat',.3,.8);kit.hit('hat',.6,.8);kit.hit('kick',.1,.8);kit.hit('kick',1,.8);
     const kickBuffers=[...kit.voices].filter(v=>v.piece==='kick').map(v=>v.source.buffer);const alternates=kickBuffers[0]!==kickBuffers[1],chokedAt=open.chokedAt;
@@ -145,4 +145,38 @@ test('sample engine renders actual audio, alternates takes, chokes hats and mute
     return {alternates,chokedAt,peak,energy,mutedCalls,calls};
   });
   assert.equal(rendered.alternates,true);assert.equal(rendered.chokedAt,.3);assert.ok(rendered.energy>5);assert.ok(rendered.peak>0&&rendered.peak<1);assert.equal(rendered.mutedCalls,0);assert.equal(rendered.calls,1);
+});
+
+test('mechanical metronome previews four recorded beats at tempo and saves its controls',async t=>{
+  const page=await open(t,390);await expect(page.locator('#metronome-sound')).toHaveValue('mechanical');
+  await page.evaluate(async()=>{const {PendulumMetronome}=await import('/fretboard/metronome.mjs?v=1'),beat=PendulumMetronome.prototype.beat;window.testClicks=[];PendulumMetronome.prototype.beat=function(time,n,s){window.testMetronome=this;window.testClicks.push({time,n});return beat.call(this,time,n,s);};});
+  await page.locator('#bpm').fill('180');await page.locator('#bpm').press('Tab');await page.locator('#metronome-volume').fill('56');await page.locator('#metronome-accent').uncheck();await page.locator('#metronome-preview').click();
+  await expect(page.locator('#metronome-preview')).toHaveText('■ Stop preview');await expect(page.locator('#metronome-preview')).toHaveText('▶ Preview metronome',{timeout:5000});
+  const preview=await page.evaluate(()=>({clicks:window.testClicks,buffers:window.testMetronome.buffers.size,voices:window.testMetronome.voices.size}));
+  assert.equal(preview.buffers,2);assert.equal(preview.voices,0);assert.deepEqual(preview.clicks.map(c=>c.n),[0,1,2,3]);for(let i=1;i<4;i++)assert.ok(Math.abs(preview.clicks[i].time-preview.clicks[i-1].time-1/3)<.001);
+  await expect(page.locator('#clock')).toHaveText('00:00');await expect(page.locator('#correct')).toHaveText('0');assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.locator('.metronome-room').screenshot({path:new URL('test-results/fretwise-metronome-mobile.png',root).pathname.replace(/^\/(\w:)/,'$1')});
+  await page.reload();await expect(page.locator('#metronome-volume')).toHaveValue('56');await expect(page.locator('#metronome-accent')).not.toBeChecked();
+});
+test('metronome download failure uses a disclosed digital fallback and preview can retry',async t=>{
+  const page=await open(t);await page.route('**/samples/metronome/*.wav',route=>route.abort());await page.locator('#metronome-preview').click();
+  await expect(page.locator('#metronome-status')).toContainText('using a digital click');await expect(page.locator('#metronome-preview')).toHaveText('■ Stop preview');await page.locator('#metronome-preview').click();
+  await page.unroute('**/samples/metronome/*.wav');await page.locator('#metronome-preview').click();await expect(page.locator('#metronome-status')).toContainText('Actual pendulum');await page.locator('#metronome-preview').click();
+  await page.locator('#metronome-sound').selectOption('digital');await page.locator('#play').click();await expect(page.locator('#play')).toContainText('Pause');
+});
+test('recorded metronome alternates tick and tock, accents beat one and obeys mute/count-in rules',async t=>{
+  const page=await open(t);
+  const result=await page.evaluate(async()=>{
+    const {PendulumMetronome}=await import('/fretboard/metronome.mjs?v=1'),{StudioAudio}=await import('/fretboard/audio.mjs?v=4');
+    const context=new OfflineAudioContext(1,48000*3,48000),m=new PendulumMetronome(context,context.destination);await m.load();
+    const settings={metronomeSound:'mechanical',metronomeVolume:75,metronomeAccent:true,metronome:false,drums:'off',backing:'off'};
+    for(let n=0;n<4;n++)m.beat(.1+n*.5,n,settings);
+    const voices=[...m.voices],alternates=voices[0].buffer===voices[2].buffer&&voices[0].buffer!==voices[1].buffer;
+    const rendered=await context.startRendering(),data=rendered.getChannelData(0),energies=[];
+    for(let n=0;n<4;n++){let sum=0;for(let i=Math.round((.1+n*.5)*48000);i<(.34+n*.5)*48000;i++)sum+=data[i]**2;energies.push(sum);}
+    const audio=new StudioAudio();await audio.init();const heard=[];audio.metronome.beat=(_,beat)=>heard.push(beat);
+    audio.beat(audio.context.currentTime,-4,settings);audio.beat(audio.context.currentTime,0,settings);audio.muted=true;audio.beat(audio.context.currentTime,-3,settings);audio.muted=false;audio.beat(audio.context.currentTime,1,{...settings,metronome:true});audio.stopVoices();await audio.context.close();
+    return {alternates,energies,heard};
+  });
+  assert.equal(result.alternates,true);assert.ok(result.energies.every(e=>e>1));assert.ok(Math.abs(result.energies[0]/result.energies[2]-1/.7**2)<.02);assert.deepEqual(result.heard,[-4,1]);
 });
