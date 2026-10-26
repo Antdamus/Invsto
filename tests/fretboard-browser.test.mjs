@@ -15,6 +15,64 @@ async function open(t,width=1440){
   const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
   await page.goto(origin+'/fretboard/index.html');await expect(page.locator('.sheet-note')).toHaveCount(8);return page;
 }
+
+for(const width of [1440,390])test(`note map links every C octave to classical notation and physical locations at ${width}px`,async t=>{
+  const page=await open(t,width);await page.locator('#map-open').click();
+  await expect(page.locator('#note-map-dialog')).toBeVisible();await expect(page.locator('#map-note')).toBeFocused();
+  await expect(page.locator('#map-neck .map-position')).toHaveCount(11);await expect(page.locator('.map-octave-card')).toHaveCount(4);
+  assert.deepEqual(await page.locator('.map-card-heading h3').allTextContents(),['C3','C4','C5','C6']);
+  await page.locator('#map-staves [data-map-string="3"][data-map-fret="5"]').click();
+  await expect(page.locator('#map-selection')).toHaveText('C4 · string 3 · fret 5 · 261.6 Hz');
+  await expect(page.locator('#map-neck [aria-pressed=true]')).toHaveCount(1);await expect(page.locator('[data-map-card="60"] .map-string-mark')).toHaveAttribute('visibility','visible');
+  await expect(page.locator('[data-map-card="60"] .map-string-mark text')).toHaveText('3');
+  await page.locator('#map-hear').click();await expect(page.locator('#correct')).toHaveText('0');await expect(page.locator('#clock')).toHaveText('00:00');
+  await page.locator('#note-map-dialog').evaluate(el=>{el.scrollTop=0;});
+  assert.ok(await page.evaluate(()=>{const d=document.getElementById('note-map-dialog');return document.documentElement.scrollWidth<=innerWidth&&d.scrollWidth<=d.clientWidth;}));
+  await page.locator('#note-map-dialog').screenshot({path:new URL(`test-results/fretwise-map-${width}.png`,root).pathname.replace(/^\/(\w:)/,'$1')});
+  await page.locator('[data-map-octave="60"]').click();await expect(page.locator('#map-neck .map-position')).toHaveCount(5);await expect(page.locator('.map-octave-card')).toHaveCount(1);
+  const dot=page.locator('#map-neck [data-map-string="2"][data-map-fret="1"]');await dot.focus();await page.keyboard.press('Enter');await expect(dot).toHaveAttribute('aria-pressed','true');
+  await page.keyboard.press('Escape');await expect(page.locator('#note-map-dialog')).not.toBeVisible();await expect(page.locator('#map-open')).toBeFocused();
+});
+
+test('note map ignores practice filters and previews the recommendation without adding it',async t=>{
+  const page=await open(t);await page.locator('.range-details summary').click();
+  await page.locator('#min-fret').fill('1');await page.locator('#min-fret').press('Tab');await page.locator('#max-fret').fill('5');await page.locator('#max-fret').press('Tab');
+  for(const oct of [2,3,5,6])await page.locator(`#octaves [data-octave="${oct}"]`).click();
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('fretwise.v1')).settings);
+  await page.locator('#map-open').click();await expect(page.locator('#map-neck .map-position')).toHaveCount(11);
+  await page.locator('#map-note').selectOption('4');await expect(page.locator('.map-octave-card')).toHaveCount(4);await expect(page.locator('#map-neck [data-map-string="6"][data-map-fret="0"]')).toBeVisible();
+  await page.locator('#map-note').selectOption('1');await expect(page.locator('#map-title')).toHaveText('Meet C♯, everywhere.');
+  await page.getByRole('button',{name:'Back to practice'}).click();
+  const next=(await page.locator('#map-next').textContent()).match(/^Preview (.+) on/)[1];await page.locator('#map-next').click();await expect(page.locator('#map-title')).toHaveText(`Meet ${next}, everywhere.`);
+  await page.keyboard.press('Escape');await expect(page.locator('#pool-count')).toHaveText('1 of 7');
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('fretwise.v1')).settings),before);
+});
+
+test('studying during a hidden-hint phrase pauses the timer and prevents an unaided milestone',async t=>{
+  const page=await open(t);await page.clock.install();await page.locator('#bpm').fill('180');await page.locator('#bpm').press('Tab');await page.locator('#hints').uncheck();
+  await page.locator('#play').click();await page.clock.runFor(1400);await page.locator('#map-current').click();
+  const time=await page.locator('#clock').textContent();await page.clock.runFor(3000);await expect(page.locator('#clock')).toHaveText(time);
+  await page.keyboard.press('Escape');await page.locator('#play').click();
+  for(let n=0;n<8;n++){await page.locator('#got-it').click();await page.clock.runFor(n===7?670:667);}
+  await page.locator('#play').click();
+  const data=await page.evaluate(()=>JSON.parse(localStorage.getItem('fretwise.v1')));
+  assert.ok(Object.values(data.progress.notes).every(n=>n.passes.length===0));await expect(page.locator('#correct')).toHaveText('8');
+});
+
+test('note-map reference tones respect microphone headphones mode and play the selected octave',async t=>{
+  const page=await open(t);
+  await page.evaluate(async()=>{
+    const {StudioAudio}=await import('/fretboard/audio.mjs?v=4'),tone=StudioAudio.prototype.tone;window.mapTones=[];
+    StudioAudio.prototype.tone=function(midi,...args){window.mapTones.push(midi);return tone.call(this,midi,...args);};
+    navigator.mediaDevices.getUserMedia=async()=>{window.mapMicContext=new AudioContext();return window.mapMicContext.createMediaStreamDestination().stream;};
+  });
+  await page.locator('#mic').click();await expect(page.locator('#headphones-wrap')).toBeVisible();await page.locator('#map-open').click();
+  await page.locator('#map-staves [data-map-string="1"][data-map-fret="20"]').click();await expect(page.locator('#map-hear')).toBeDisabled();await expect(page.locator('#map-audio-help')).toContainText('muted');
+  await page.keyboard.press('Escape');await page.locator('#headphones').check();await page.locator('#map-open').click();
+  await page.locator('#map-staves [data-map-string="1"][data-map-fret="20"]').click();await page.locator('#map-hear').click();
+  assert.deepEqual(await page.evaluate(()=>window.mapTones),[84]);await expect(page.locator('#correct')).toHaveText('0');
+  await page.keyboard.press('Escape');await page.locator('#mic').click();await page.evaluate(()=>window.mapMicContext.close());
+});
 for(const width of [1440,390])test(`real notation and full-neck setup render without page overflow at ${width}px`,async t=>{
   const page=await open(t,width);await expect(page.locator('#range-summary')).toHaveText('All strings · frets 0–21');
   assert.equal(await page.locator('#octaves [aria-pressed=true]').count(),5);

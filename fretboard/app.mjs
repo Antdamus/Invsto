@@ -1,5 +1,6 @@
 import {TUNING,ROOTS,SCALES,DEFAULTS,mod,frequency,octave,spell,noteName,positions,makeScore,scalePCs,sanitizeSettings,pitchMatch,timingGrade,recommendation,masteryFor} from './music.mjs?v=4';
 import {StudioAudio} from './audio.mjs?v=4';
+import {createNoteMap} from './note-map.mjs?v=1';
 const $=id=>document.getElementById(id),audio=new StudioAudio(),STORE='fretwise.v1';
 let saved={};try{saved=JSON.parse(localStorage.getItem(STORE)||'{}')||{};}catch{}
 let settings=sanitizeSettings(saved.settings),progress={sessions:[],notes:{},positionUse:{},...saved.progress};
@@ -100,6 +101,8 @@ async function previewDrums(){
 }
 function updateRecommendation(){
   const rec=recommendation(settings,progress);
+  $('map-next').hidden=rec.next===null;
+  $('map-next').textContent=rec.next===null?'':`Preview ${pitchClassName(rec.next)} on the map ↗`;
   $('add-note').disabled=running||rec.next===null;
   $('add-note').classList.toggle('ready',rec.ready);
   $('add-note').textContent=rec.next===null?'All notes in this family included':`＋ Add ${pitchClassName(rec.next)} · recommended next`;
@@ -367,6 +370,16 @@ function fretAnswer(el){if(!el||!currentEvent())return;const string=Number(el.da
 $('fretboard').onclick=e=>fretAnswer(e.target.closest('[data-string][data-fret]'));
 $('fretboard').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){const el=e.target.closest('[data-string][data-fret]');if(el){e.preventDefault();e.stopPropagation();fretAnswer(el);}}};
 $('add-note').onclick=()=>{const rec=recommendation(settings,progress);if(rec.next!==null){settings.pool.push(rec.next);changeSetup();notice(`${pitchClassName(rec.next)} added in every selected octave. Lower the tempo while it feels new.`);}};
+const noteMap=createNoteMap({
+  getSettings:()=>settings,
+  beforeOpen:()=>{pause();if(position>=0&&position<16&&!finished)score.forEach(note=>{note.hadError=true;});},
+  canHear:audible,
+  hear:async(midi,isCurrent)=>{await audio.init();if(isCurrent()){audio.setVolume(settings.volume);audio.tone(midi,audio.context.currentTime,1,.35);}},
+  stopSound:()=>audio.stopVoices()
+});
+$('map-open').onclick=()=>noteMap.open(settings.pool[0]);
+$('map-current').onclick=()=>noteMap.open(currentEvent()?mod(currentEvent().midi):settings.pool[0]);
+$('map-next').onclick=()=>{const next=recommendation(settings,progress).next;if(next!==null)noteMap.open(next);};
 $('help-open').onclick=()=>{pause();$('help-dialog').showModal();};
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.closest('dialog').close());
 $('reset-progress').onclick=()=>{pause();if(!confirm('Reset saved practice history and note progress on this device? Your practice settings will stay.'))return;progress={sessions:[],notes:{},positionUse:{}};cleanPasses=0;persist();renderHistory();updateRecommendation();notice('Saved practice progress reset.');};
