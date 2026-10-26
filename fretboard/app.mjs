@@ -1,8 +1,8 @@
 import {TUNING,ROOTS,SCALES,DEFAULTS,mod,frequency,octave,spell,noteName,positions,makeScore,scalePCs,sanitizeSettings,pitchMatch,timingGrade,recommendation,masteryFor} from './music.mjs?v=5';
 import {StudioAudio} from './audio.mjs?v=5';
-import {createNoteMap} from './note-map.mjs?v=3';
+import {createNoteMap} from './note-map.mjs?v=4';
 import {GUITAR_TOUCHES,guitarVoiceLabel} from './guitar.mjs?v=1';
-import {stringMarkerY} from './notation.mjs?v=1';
+import {needsStringNumber,stringMarkerY} from './notation.mjs?v=2';
 const $=id=>document.getElementById(id),audio=new StudioAudio(),STORE='fretwise.v1';
 let saved={};try{saved=JSON.parse(localStorage.getItem(STORE)||'{}')||{};}catch{}
 let settings=sanitizeSettings(saved.settings),progress={sessions:[],notes:{},positionUse:{},...saved.progress};
@@ -170,12 +170,14 @@ function renderScore(){
         if(change)svg+=`<text class="note-ink" x="${x-29}" y="${y+8}" font-size="24" stroke-width="0" font-family="Segoe UI Symbol,serif">${n.acc===0?'♮':n.acc>0?'♯'.repeat(n.acc):'♭'.repeat(-n.acc)}</text>`;
         svg+=`<ellipse class="note-ink note-head ${event.duration>1?'open':''}" cx="${x}" cy="${y}" rx="${event.duration===4?12:10}" ry="6.7" transform="rotate(${event.duration===4?0:-18} ${x} ${y})" stroke-width="2.2"/>`;
         if(event.duration<4){const up=y>=100;svg+=`<line class="note-ink" x1="${x+(up?9:-9)}" y1="${y}" x2="${x+(up?9:-9)}" y2="${y+(up?-38:38)}" stroke-width="1.7"/>`;}
-        svg+=`<text class="note-hint" x="${x}" y="${hintYs[index]}" text-anchor="middle">${settings.hints?noteName(event.midi,settings):''}</text><g class="string-indication" aria-label="Required string ${event.position.string}"><circle cx="${x}" cy="${marks[index]}" r="9" fill="#fffef9" stroke="#67745f" stroke-width="1"/><text x="${x}" y="${marks[index]+4}" text-anchor="middle" font-size="12" font-weight="600" fill="#45533e">${event.position.string}</text></g></g>`;
+        svg+=`<text class="note-hint" x="${x}" y="${hintYs[index]}" text-anchor="middle">${settings.hints?noteName(event.midi,settings):''}</text>`;
+        if(needsStringNumber(event.midi))svg+=`<g class="string-indication" aria-label="Required string ${event.position.string}"><circle cx="${x}" cy="${marks[index]}" r="9" fill="#fffef9" stroke="#67745f" stroke-width="1"/><text x="${x}" y="${marks[index]+4}" text-anchor="middle" font-size="12" font-weight="600" fill="#45533e">${event.position.string}</text></g>`;
+        svg+='</g>';
       });
     }svg+=`<line class="score-playhead" data-system="${system}" x1="0" x2="0" y1="${top+20}" y2="${bottom}" stroke="#c95d3e" stroke-width="1.4" opacity="0"/></g>`;
   }
   $('sheet').innerHTML=svg+'</svg>';
-  $('sheet').setAttribute('aria-label',`Four bars of 4/4 guitar music, ${settings.duration} beats per note. ${settings.hints?score.map(n=>noteName(n.midi,settings)).join(', '):'Note names hidden for sight reading.'} Circled numbers indicate strings.`);
+  $('sheet').setAttribute('aria-label',`Four bars of 4/4 guitar music, ${settings.duration} beats per note. ${settings.hints?score.map(n=>noteName(n.midi,settings)).join(', '):'Note names hidden for sight reading.'} Circled numbers indicate strings when a pitch has multiple locations on the guitar.`);
   updateScoreMarks();
 }
 function updateScoreMarks(){

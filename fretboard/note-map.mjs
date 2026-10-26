@@ -1,6 +1,6 @@
 import {TUNING,DEFAULTS,mod,spell,noteName,accidental,frequency} from './music.mjs?v=5';
 import {GUITAR_TOUCHES,guitarVoiceLabel} from './guitar.mjs?v=1';
-import {stringMarkerY} from './notation.mjs?v=1';
+import {needsStringNumber,stringMarkerY} from './notation.mjs?v=2';
 
 export const MAP_FRETS=21;
 const COLORS=['#e6c478','#dc9b80','#a3c4ab','#95bcd5','#c1ace0'];
@@ -38,7 +38,7 @@ function staffSVG(group,settings,top,bottom){
     ${written.acc?`<text x="${x-32}" y="${y+8}" font-size="25" fill="#28382f" font-family="Segoe UI Symbol,serif">${accidental(written.acc)}</text>`:''}
     <ellipse cx="${x}" cy="${y}" rx="10" ry="6.7" transform="rotate(-18 ${x} ${y})" fill="#28382f"/>
     <line x1="${x+(up?9:-9)}" y1="${y}" x2="${x+(up?9:-9)}" y2="${y+(up?-38:38)}" stroke="#28382f" stroke-width="1.7"/>
-    <g class="map-string-mark" visibility="hidden"><circle cx="${x}" cy="${markY}" r="10" fill="#fffef9" stroke="#63705e"/><text x="${x}" y="${markY+4}" text-anchor="middle" font-size="12" fill="#28382f"></text></g>
+    ${needsStringNumber(group.midi)?`<g class="map-string-mark" visibility="hidden"><circle cx="${x}" cy="${markY}" r="10" fill="#fffef9" stroke="#63705e"/><text x="${x}" y="${markY+4}" text-anchor="middle" font-size="12" fill="#28382f"></text></g>`:''}
   </svg>`;
 }
 
@@ -94,7 +94,7 @@ export function createNoteMap({getSettings,beforeOpen,canHear,hear,stopSound,onS
     dialog.querySelectorAll('[data-map-string][data-map-fret]').forEach(el=>el.setAttribute('aria-pressed',String(!!selected&&Number(el.dataset.mapString)===selected.string&&Number(el.dataset.mapFret)===selected.fret)));
     dialog.querySelectorAll('[data-map-card]').forEach(card=>{
       const active=!!selected&&Number(card.dataset.mapCard)===selected.midi;card.classList.toggle('selected',active);
-      const mark=card.querySelector('.map-string-mark');mark.setAttribute('visibility',active?'visible':'hidden');mark.querySelector('text').textContent=active?selected.string:'';
+      const mark=card.querySelector('.map-string-mark');if(mark){mark.setAttribute('visibility',active?'visible':'hidden');mark.querySelector('text').textContent=active?selected.string:'';}
     });
     $('map-selection').textContent=selected?`${noteName(selected.midi,settings)} · string ${selected.string} · ${selected.fret===0?'open string':'fret '+selected.fret} · ${frequency(selected.midi).toFixed(1)} Hz`:'Choose a colored dot or a string / fret below to connect it to the staff.';
     $('map-hear').textContent=selected?`♫ Hear ${noteName(selected.midi,settings)}`:'♫ Hear note';
