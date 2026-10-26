@@ -1,5 +1,6 @@
 import {TUNING,DEFAULTS,mod,spell,noteName,accidental,frequency} from './music.mjs?v=5';
 import {GUITAR_TOUCHES,guitarVoiceLabel} from './guitar.mjs?v=1';
+import {stringMarkerY} from './notation.mjs?v=1';
 
 export const MAP_FRETS=21;
 const COLORS=['#e6c478','#dc9b80','#a3c4ab','#95bcd5','#c1ace0'];
@@ -29,7 +30,7 @@ export function staffGeometry(midi,settings=DEFAULTS){
 }
 
 function staffSVG(group,settings,top,bottom){
-  const {written,y,ledgers}=staffGeometry(group.midi,settings),x=135,up=y>=100;
+  const {written,y,ledgers}=staffGeometry(group.midi,settings),x=135,up=y>=100,markY=stringMarkerY(y);
   return `<svg class="map-staff" viewBox="0 ${top} 230 ${bottom-top}" role="img" aria-label="${group.name} sounding, written ${group.writtenName} in guitar treble notation">
     ${[72,86,100,114,128].map(line=>`<line x1="14" y1="${line}" x2="216" y2="${line}" stroke="#9da899"/>`).join('')}
     <text x="20" y="132" font-size="80" fill="#28382f" font-family="Segoe UI Symbol,serif">𝄞</text><text x="39" y="157" font-size="12" fill="#63705e">8</text>
@@ -37,7 +38,7 @@ function staffSVG(group,settings,top,bottom){
     ${written.acc?`<text x="${x-32}" y="${y+8}" font-size="25" fill="#28382f" font-family="Segoe UI Symbol,serif">${accidental(written.acc)}</text>`:''}
     <ellipse cx="${x}" cy="${y}" rx="10" ry="6.7" transform="rotate(-18 ${x} ${y})" fill="#28382f"/>
     <line x1="${x+(up?9:-9)}" y1="${y}" x2="${x+(up?9:-9)}" y2="${y+(up?-38:38)}" stroke="#28382f" stroke-width="1.7"/>
-    <g class="map-string-mark" visibility="hidden"><circle cx="${x}" cy="${bottom-15}" r="10" fill="#fffef9" stroke="#63705e"/><text x="${x}" y="${bottom-11}" text-anchor="middle" font-size="12" fill="#28382f"></text></g>
+    <g class="map-string-mark" visibility="hidden"><circle cx="${x}" cy="${markY}" r="10" fill="#fffef9" stroke="#63705e"/><text x="${x}" y="${markY+4}" text-anchor="middle" font-size="12" fill="#28382f"></text></g>
   </svg>`;
 }
 
@@ -77,7 +78,7 @@ export function createNoteMap({getSettings,beforeOpen,canHear,hear,stopSound,onS
   }
   function render(){
     const visible=visibleGroups(),ys=groups.map(g=>staffGeometry(g.midi,settings).y);
-    const top=Math.min(26,...ys.map(y=>y-44)),bottom=Math.max(190,...ys.map(y=>y+66));
+    const top=Math.min(26,...ys.map(y=>Math.min(y-44,stringMarkerY(y)-16))),bottom=Math.max(174,...ys.map(y=>Math.max(y+44,stringMarkerY(y)+16)));
     $('map-title').textContent=`Meet ${pitchClassName(pc,settings)}, everywhere.`;
     $('map-count').textContent=`${visible.reduce((sum,g)=>sum+g.positions.length,0)} locations · ${visible.length} sounding ${visible.length===1?'octave':'octaves'} · frets 0–21`;
     $('map-neck').innerHTML=neckSVG(visible);

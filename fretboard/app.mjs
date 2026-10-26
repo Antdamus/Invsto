@@ -1,7 +1,8 @@
 import {TUNING,ROOTS,SCALES,DEFAULTS,mod,frequency,octave,spell,noteName,positions,makeScore,scalePCs,sanitizeSettings,pitchMatch,timingGrade,recommendation,masteryFor} from './music.mjs?v=5';
 import {StudioAudio} from './audio.mjs?v=5';
-import {createNoteMap} from './note-map.mjs?v=2';
+import {createNoteMap} from './note-map.mjs?v=3';
 import {GUITAR_TOUCHES,guitarVoiceLabel} from './guitar.mjs?v=1';
+import {stringMarkerY} from './notation.mjs?v=1';
 const $=id=>document.getElementById(id),audio=new StudioAudio(),STORE='fretwise.v1';
 let saved={};try{saved=JSON.parse(localStorage.getItem(STORE)||'{}')||{};}catch{}
 let settings=sanitizeSettings(saved.settings),progress={sessions:[],notes:{},positionUse:{},...saved.progress};
@@ -143,7 +144,11 @@ async function hearGuitar(position,isCurrent=()=>true,onStatus=()=>{}){
 function changeGuitarSound(key,value){audio.stopGuitar();settings[key]=value;guitarStatus='Recordings load when you press Hear.';updateSoundControls();persist();}
 function renderScore(){
   if(!score.length){$('sheet').innerHTML='<div class="empty-score">No notes match this setup.<br>Widen your octave, string or fret range.</div>';return;}
-  const ys=score.map(n=>128-(spell(n.midi+12,settings).step-30)*7),top=Math.min(26,...ys.map(y=>y-40)),bottom=Math.max(198,...ys.map(y=>y+45)),height=bottom-top;
+  const ys=score.map(n=>128-(spell(n.midi+12,settings).step-30)*7),marks=ys.map(stringMarkerY);
+  const hintYs=ys.map((y,i)=>marks[i]<y?marks[i]-16:marks[i]+25);
+  const contentTop=Math.min(60,...ys.map((y,i)=>Math.min(y-(score[i].duration<4&&y>=100?40:9),marks[i]-10,settings.hints?hintYs[i]-13:Infinity)));
+  const contentBottom=Math.max(162,...ys.map((y,i)=>Math.max(y+(score[i].duration<4&&y<100?40:9),marks[i]+10,settings.hints?hintYs[i]+3:-Infinity)));
+  const top=contentTop-26,bottom=contentBottom+12,height=bottom-top;
   let svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 830 ${height*2+12}" aria-hidden="true">`;
   for(let system=0;system<2;system++){
     svg+=`<g transform="translate(0 ${system*height-top})">`;
@@ -159,13 +164,13 @@ function renderScore(){
         if(Math.floor(event.beat/4)!==globalBar)return;
         const x=start+50+(event.beat%4)*(285/4),y=ys[index],n=spell(event.midi+12,settings),accKey=n.letter+n.oct;
         const change=(accState.get(accKey)||0)!==n.acc;accState.set(accKey,n.acc);
-        svg+=`<g class="sheet-note ${index===active?'current':''}" data-note-index="${index}"><rect class="focus-box" x="${x-30}" y="${top+21}" width="61" height="${height-34}" rx="12"/>`;
+        svg+=`<g class="sheet-note ${index===active?'current':''}" data-note-index="${index}"><rect class="focus-box" x="${x-30}" y="${contentTop-8}" width="61" height="${contentBottom-contentTop+16}" rx="12"/>`;
         for(let ledger=142;ledger<=y+1;ledger+=14)svg+=`<line class="note-ink ledger" x1="${x-16}" y1="${ledger}" x2="${x+16}" y2="${ledger}"/>`;
         for(let ledger=58;ledger>=y-1;ledger-=14)svg+=`<line class="note-ink ledger" x1="${x-16}" y1="${ledger}" x2="${x+16}" y2="${ledger}"/>`;
         if(change)svg+=`<text class="note-ink" x="${x-29}" y="${y+8}" font-size="24" stroke-width="0" font-family="Segoe UI Symbol,serif">${n.acc===0?'♮':n.acc>0?'♯'.repeat(n.acc):'♭'.repeat(-n.acc)}</text>`;
         svg+=`<ellipse class="note-ink note-head ${event.duration>1?'open':''}" cx="${x}" cy="${y}" rx="${event.duration===4?12:10}" ry="6.7" transform="rotate(${event.duration===4?0:-18} ${x} ${y})" stroke-width="2.2"/>`;
         if(event.duration<4){const up=y>=100;svg+=`<line class="note-ink" x1="${x+(up?9:-9)}" y1="${y}" x2="${x+(up?9:-9)}" y2="${y+(up?-38:38)}" stroke-width="1.7"/>`;}
-        svg+=`<text class="note-hint" x="${x}" y="${bottom-28}" text-anchor="middle">${settings.hints?noteName(event.midi,settings):''}</text><g class="string-indication" aria-label="Required string ${event.position.string}"><circle cx="${x}" cy="${bottom-10}" r="9" fill="#fffef9" stroke="#67745f" stroke-width="1"/><text x="${x}" y="${bottom-6}" text-anchor="middle" font-size="12" font-weight="600" fill="#45533e">${event.position.string}</text></g></g>`;
+        svg+=`<text class="note-hint" x="${x}" y="${hintYs[index]}" text-anchor="middle">${settings.hints?noteName(event.midi,settings):''}</text><g class="string-indication" aria-label="Required string ${event.position.string}"><circle cx="${x}" cy="${marks[index]}" r="9" fill="#fffef9" stroke="#67745f" stroke-width="1"/><text x="${x}" y="${marks[index]+4}" text-anchor="middle" font-size="12" font-weight="600" fill="#45533e">${event.position.string}</text></g></g>`;
       });
     }svg+=`<line class="score-playhead" data-system="${system}" x1="0" x2="0" y1="${top+20}" y2="${bottom}" stroke="#c95d3e" stroke-width="1.4" opacity="0"/></g>`;
   }
