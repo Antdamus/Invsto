@@ -85,5 +85,5 @@ test('microphone checks real octave from synthetic audio; a held note cannot ans
   await page.waitForTimeout(400);await expect(page.locator('#correct')).toHaveText('0');
   await page.evaluate(()=>{window.testTone.o.frequency.value=261.6256;});await expect(page.locator('#correct')).toHaveText('1',{timeout:3000});
   await page.waitForTimeout(900);await expect(page.locator('#correct')).toHaveText('1');
-  await page.locator('#mic').click();await expect(page.locator('#pitch-meter')).toBeHidden();await page.evaluate(()=>window.testTone.c.close());
+  await page.locator('#mic').click();await expect(page.locator('#pitch-meter')).toBeHidden();await expect(page.locator('#headphones-wrap')).toBeHidden();await page.evaluate(()=>window.testTone.c.close());
 });
