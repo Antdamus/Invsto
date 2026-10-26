@@ -78,7 +78,9 @@ test('microphone checks real octave from synthetic audio; a held note cannot ans
   const page=await open(t);await page.locator('#mode').selectOption('wait');await page.locator('#bpm').fill('180');await page.locator('#bpm').press('Tab');
   for(const oct of [2,3,5,6])await page.locator(`[data-octave="${oct}"]`).click();
   await page.evaluate(()=>{navigator.mediaDevices.getUserMedia=async()=>{const c=new AudioContext(),o=c.createOscillator(),g=c.createGain(),out=c.createMediaStreamDestination();o.frequency.value=523.251;g.gain.value=.15;o.connect(g);g.connect(out);o.start();window.testTone={c,o,g};await c.resume();return out.stream;};});
-  await page.locator('#mic').click();await expect(page.locator('#heard-pitch')).toHaveText('C5');await page.locator('#play').click();
+  await page.locator('#mic').click();await expect(page.locator('#heard-pitch')).toHaveText('C5');
+  await page.locator('#headphones').check();await expect(page.locator('#mic-status')).toContainText('Headphones mode');
+  await page.locator('#headphones').uncheck();await expect(page.locator('#mic-status')).toContainText('App audio is muted');await page.locator('#play').click();
   await expect(page.locator('#cue-label')).toHaveText('NOW · SOUNDING PITCH',{timeout:5000});
   await page.waitForTimeout(400);await expect(page.locator('#correct')).toHaveText('0');
   await page.evaluate(()=>{window.testTone.o.frequency.value=261.6256;});await expect(page.locator('#correct')).toHaveText('1',{timeout:3000});

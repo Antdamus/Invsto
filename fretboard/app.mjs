@@ -1,5 +1,5 @@
-import {TUNING,ROOTS,SCALES,DEFAULTS,mod,frequency,octave,spell,noteName,positions,makeScore,scalePCs,sanitizeSettings,pitchMatch,timingGrade,recommendation,masteryFor} from './music.mjs';
-import {StudioAudio} from './audio.mjs';
+import {TUNING,ROOTS,SCALES,DEFAULTS,mod,frequency,octave,spell,noteName,positions,makeScore,scalePCs,sanitizeSettings,pitchMatch,timingGrade,recommendation,masteryFor} from './music.mjs?v=2';
+import {StudioAudio} from './audio.mjs?v=2';
 const $=id=>document.getElementById(id),audio=new StudioAudio(),STORE='fretwise.v1';
 let saved={};try{saved=JSON.parse(localStorage.getItem(STORE)||'{}')||{};}catch{}
 let settings=sanitizeSettings(saved.settings),progress={sessions:[],notes:{},positionUse:{},...saved.progress};
@@ -11,6 +11,7 @@ let position=-4,phaseTime=0,phaseOffset=-4,nextBeat=-4,raf=0,scheduler=0,runStar
 let stats={correct:0,wrong:0,missed:0,streak:0,best:0,onTime:0,manual:0},cleanPasses=0,noticeTimeout,waitAdvance=0,trackURL=null;
 let micPitch=null,micSince=0,micOnset=0,micLatched=false,lastRms=0,lastAttack=0;
 const secondsPerBeat=()=>60/settings.bpm;
+const audible=()=>!micOn||settings.headphones;
 const currentEvent=()=>score[active];
 const elapsed=()=>practiceMs+(running?performance.now()-runStarted:0);
 const clockText=ms=>`${String(Math.floor(ms/60000)).padStart(2,'0')}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`;
@@ -25,7 +26,7 @@ function setupControls(){
 }
 function syncControls(){
   for(const [id,key] of [['root','root'],['scale','scale'],['duration','duration'],['mode','mode'],['bpm','bpm'],['min-fret','minFret'],['max-fret','maxFret'],['target-bpm','targetBpm'],['backing','backing'],['volume','volume'],['goal','goal']])$(id).value=settings[key];
-  for(const [id,key] of [['hints','hints'],['auto-add','autoAdd'],['loop','loop'],['metronome','metronome']])$(id).checked=settings[key];
+  for(const [id,key] of [['hints','hints'],['auto-add','autoAdd'],['loop','loop'],['metronome','metronome'],['headphones','headphones']])$(id).checked=settings[key];
   $('start-note').innerHTML=scalePCs(settings).map(pc=>`<option value="${pc}">${pitchClassName(pc)} · all octaves in range</option>`).join('');$('start-note').value=settings.pool[0];
   $('note-palette').innerHTML=scalePCs(settings).map(pc=>`<button type="button" data-pc="${pc}" class="${settings.pool.includes(pc)?'selected':''}" aria-pressed="${settings.pool.includes(pc)}" aria-label="Include ${pitchClassName(pc)} in all selected octaves">${pitchClassName(pc)}</button>`).join('');
   $('pool-count').textContent=`${settings.pool.length} of ${scalePCs(settings).length}`;
@@ -144,7 +145,7 @@ async function start(){
   if(document.hidden){starting=false;return;}
   if(finished)newScore();sessionSaved=false;running=true;starting=false;runStarted=performance.now();phaseTime=runStarted;phaseOffset=position;nextBeat=Math.ceil(position);
   $('play').innerHTML='Ⅱ <span>Pause</span>';lockSetup(true);
-  if(settings.backing==='upload'&&!micOn&&position>=0)playUserTrack();
+  if(settings.backing==='upload'&&audible()&&position>=0)playUserTrack();
   scheduler=setInterval(scheduleAudio,25);scheduleAudio();raf=requestAnimationFrame(tick);
   if(settings.mode==='wait'&&results[active])queueWaitAdvance();
 }
@@ -161,14 +162,14 @@ function pause(){
 function tick(){
   if(!running)return;position=beatNow();
   const beat=Math.floor(position);document.querySelectorAll('.beat-dots i').forEach((el,i)=>el.classList.toggle('active',mod(beat,4)===i));
-  if(position<0){$('cue-label').textContent='COUNT IN';$('current-pitch').textContent=Math.ceil(-position);setCue('One, two, three, four…',micOn?'Watch the pulse. Sounds are muted while listening.':'Get ready. The first note starts after four beats.');}
+  if(position<0){$('cue-label').textContent='COUNT IN';$('current-pitch').textContent=Math.ceil(-position);setCue('One, two, three, four…',!audible()?'Watch the pulse. Enable headphones for an audible count-in.':'Get ready. The first note starts after four beats.');}
   else{
     if(settings.mode==='timed'&&position>=16){completePhrase();return;}
     const next=settings.mode==='timed'?Math.min(score.length-1,Math.floor(position/settings.duration)):active;
     if(next!==active||$('cue-label').textContent==='COUNT IN'){
       for(let i=active;i<next;i++)if(!results[i])markMiss(i);
       active=next;revealed=false;showCurrent();
-      if(settings.backing==='upload'&&!micOn&&$('user-track').paused)playUserTrack();
+      if(settings.backing==='upload'&&audible()&&$('user-track').paused)playUserTrack();
     }
   }
   updateStats();updatePlayhead();if(settings.goal&&elapsed()>=settings.goal*60000){finishSession();return;}
@@ -228,10 +229,15 @@ function finishSession(){
   $('summary-stats').innerHTML=`<div><strong>${stats.correct}</strong><span>notes played</span></div><div><strong>${stats.best}</strong><span>best streak</span></div><div><strong>${stats.onTime}</strong><span>on-time notes</span></div><div><strong>${stats.missed}</strong><span>unplayed / unmarked</span></div>`;
   $('summary-dialog').showModal();renderHistory();practiceMs=0;stats={correct:0,wrong:0,missed:0,streak:0,best:0,onTime:0,manual:0};newScore();updateStats();
 }
-function disableMic(){audio.stopMic();audio.setVolume(settings.volume);micOn=false;micPending=false;micLatched=false;micPitch=null;lastRms=0;$('mic').classList.remove('active');$('mic').innerHTML='<span>◉</span> Enable microphone';$('mic').disabled=false;$('pitch-meter').hidden=true;$('hear').disabled=false;$('got-it').disabled=false;$('mic-status').textContent='Manual mode. Tap the fretboard, or self-check with “I played it.”';}
+function routeAudio(){
+  audio.muted=!audible();audio.setVolume(settings.volume);
+  if(!audible()){audio.stopVoices();$('user-track').pause();}else if(running&&position>=0)playUserTrack();
+  if(micOn)$('mic-status').textContent=settings.headphones?'Headphones mode: metronome and backing are on. Play one string at a time. Your microphone audio stays on this device.':'Exact pitch + octave + timing. App audio is muted to avoid false matches. Use headphones below to hear the metronome and backing.';
+}
+function disableMic(){audio.stopMic();audio.setVolume(settings.volume);micOn=false;micPending=false;micLatched=false;micPitch=null;lastRms=0;$('mic').classList.remove('active');$('mic').innerHTML='<span>◉</span> Enable microphone';$('mic').disabled=false;$('pitch-meter').hidden=true;$('headphones-wrap').hidden=true;$('hear').disabled=false;$('got-it').disabled=false;$('mic-status').textContent='Manual mode. Tap the fretboard, or self-check with “I played it.”';}
 async function toggleMic(){
   if(micOn||micPending){disableMic();return;}pause();micPending=true;$('mic').disabled=true;$('mic').textContent='Waiting for microphone permission…';
-  try{const started=await audio.startMic(onPitch);if(!started)return;micOn=true;micPending=false;$('mic').disabled=false;$('mic').classList.add('active');$('mic').innerHTML='<span>◉</span> Microphone on · turn off';$('pitch-meter').hidden=false;$('hear').disabled=true;$('got-it').disabled=true;$('user-track').pause();$('mic-status').textContent='Exact pitch + octave + timing. App audio is muted to avoid false matches. Audio stays on your device.';notice('Microphone ready. Pluck a single note, then press Play.');}
+  try{const started=await audio.startMic(onPitch);if(!started)return;micOn=true;micPending=false;$('mic').disabled=false;$('mic').classList.add('active');$('mic').innerHTML='<span>◉</span> Microphone on · turn off';$('pitch-meter').hidden=false;$('headphones-wrap').hidden=false;$('hear').disabled=true;$('got-it').disabled=true;routeAudio();notice('Microphone ready. Pluck a single note, then press Play.');}
   catch(error){disableMic();$('mic-status').textContent=error.name==='NotAllowedError'?'Microphone permission was declined. Manual practice still works.':error.name==='NotFoundError'?'No microphone was found. Manual practice still works.':error.message;}
 }
 function onPitch(detection){
@@ -251,7 +257,7 @@ function onPitch(detection){
 }
 function changeSetup(){pause();settings=sanitizeSettings(settings);cleanPasses=0;syncControls();newScore();persist();updateStats();}
 function toggleArray(key,value){const a=settings[key];if(a.includes(value)){if(a.length===1){notice('Keep at least one selected.');return;}settings[key]=a.filter(v=>v!==value);}else settings[key]=[...a,value];changeSetup();}
-function playUserTrack(){if(trackURL&&settings.backing==='upload'&&!micOn)$('user-track').play().catch(()=>notice('Tap Play again to allow your audio file to start.'));}
+function playUserTrack(){if(trackURL&&settings.backing==='upload'&&audible())$('user-track').play().catch(()=>notice('Tap Play again to allow your audio file to start.'));}
 $('play').onclick=()=>running?pause():start();
 $('restart').onclick=()=>{pause();newScore();$('user-track').currentTime=0;$('play').innerHTML='▶ <span>Play score</span>';};
 $('new-phrase').onclick=()=>{pause();newScore();};
@@ -268,6 +274,7 @@ $('hints').onchange=()=>{settings.hints=$('hints').checked;changeSetup();};
 $('auto-add').onchange=()=>{settings.autoAdd=$('auto-add').checked;persist();};
 $('loop').onchange=()=>{settings.loop=$('loop').checked;persist();};
 $('metronome').onchange=()=>{settings.metronome=$('metronome').checked;persist();};
+$('headphones').onchange=()=>{settings.headphones=$('headphones').checked;routeAudio();persist();};
 $('goal').onchange=()=>{settings.goal=Number($('goal').value);updateStats();persist();};
 $('volume').oninput=()=>{settings.volume=Number($('volume').value);audio.setVolume(settings.volume);$('user-track').volume=settings.volume/100;persist();};
 $('backing').onchange=()=>{settings.backing=$('backing').value;audio.stopVoices();$('user-track').pause();syncControls();if(running&&position>=0)playUserTrack();persist();};

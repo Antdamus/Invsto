@@ -1,4 +1,4 @@
-import {frequency,detectPitch} from './music.mjs';
+import {frequency,detectPitch} from './music.mjs?v=2';
 export class StudioAudio {
   context=null;voices=new Set();stream=null;analyser=null;micTimer=null;micGeneration=0;muted=false;
   async init(){if(!this.context){const C=window.AudioContext||window.webkitAudioContext;if(!C)throw Error('Audio is not supported in this browser.');this.context=new C();this.master=this.context.createGain();this.master.gain.value=.35;this.master.connect(this.context.destination);}await this.context.resume();return this.context;}
