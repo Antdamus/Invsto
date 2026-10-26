@@ -1,0 +1,3141 @@
+{
+  "library": "Meta Nylon Guitar",
+  "author": "Meta Creative Audio",
+  "license": "CC0-1.0",
+  "revision": "251c0be57d5d1b3242b91f53e0cde62ab1cb42d9",
+  "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar",
+  "samples": [
+    {
+      "file": "nylon/s6-40-v1.ogg",
+      "string": 6,
+      "midi": 40,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_E2_01.ogg",
+      "sha256": "145ce2503392ccf2d042e3f4cdbcebeec8acf45178850eae8ab1988e6fafb623",
+      "bytes": 77832
+    },
+    {
+      "file": "nylon/s6-41-v1.ogg",
+      "string": 6,
+      "midi": 41,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_F2_01.ogg",
+      "sha256": "f1d8c42a1e2e49aab669082d2282ea7e27f09e99a320141a99e52f22429307f2",
+      "bytes": 76657
+    },
+    {
+      "file": "nylon/s6-42-v1.ogg",
+      "string": 6,
+      "midi": 42,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_Fs2_01.ogg",
+      "sha256": "136b7f80f042e2dadabce120839a6c0db35fadb9aecae5fecbb05d82c92b8a7c",
+      "bytes": 59690
+    },
+    {
+      "file": "nylon/s6-43-v1.ogg",
+      "string": 6,
+      "midi": 43,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_G2_01.ogg",
+      "sha256": "ad7558174f93be08f3f99c56fdbbda1700156751357160ce623ac43ad7e7f088",
+      "bytes": 79197
+    },
+    {
+      "file": "nylon/s6-44-v1.ogg",
+      "string": 6,
+      "midi": 44,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_Gs2_01.ogg",
+      "sha256": "06737bc5a2613b343b14418d2454a56615b9d5b06e2538fdafa8c858efee29d5",
+      "bytes": 93733
+    },
+    {
+      "file": "nylon/s6-45-v1.ogg",
+      "string": 6,
+      "midi": 45,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_A2_01.ogg",
+      "sha256": "df7475a7a9cf885120694bfda0dec66c0bff33ae680fbc82710b4ca45fbdca91",
+      "bytes": 91567
+    },
+    {
+      "file": "nylon/s6-46-v1.ogg",
+      "string": 6,
+      "midi": 46,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_As2_01.ogg",
+      "sha256": "63454909e5a2c9a41dbfdecf8f2509c886683fd093086db2d55e8d07238372a0",
+      "bytes": 70070
+    },
+    {
+      "file": "nylon/s6-47-v1.ogg",
+      "string": 6,
+      "midi": 47,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_B2_01.ogg",
+      "sha256": "917f8cc9868e52e70be68d4b492a6edc2e6d8fe48a19640fa9ec868c34447d54",
+      "bytes": 67561
+    },
+    {
+      "file": "nylon/s6-48-v1.ogg",
+      "string": 6,
+      "midi": 48,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_C3_01.ogg",
+      "sha256": "789855078d2d0a78b715b7fbd6cc62181b1921bd1c5d933c0f2f9690143f6fee",
+      "bytes": 54235
+    },
+    {
+      "file": "nylon/s6-49-v1.ogg",
+      "string": 6,
+      "midi": 49,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_Cs3_01.ogg",
+      "sha256": "2ee9a718b0a2364871952ba07bb0d759c08af7c5efa71234dd7b235782dbdb55",
+      "bytes": 77618
+    },
+    {
+      "file": "nylon/s6-50-v1.ogg",
+      "string": 6,
+      "midi": 50,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_D3_01.ogg",
+      "sha256": "ba16bb3ac62f499205b2fd73bbcbd0573579323227cf658528581a85834930f3",
+      "bytes": 66754
+    },
+    {
+      "file": "nylon/s6-51-v1.ogg",
+      "string": 6,
+      "midi": 51,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_Ds3_01.ogg",
+      "sha256": "ca254d8be8be803b199ea6fa603e271a8a7bd5400c815ae2e37426c3e2157828",
+      "bytes": 85375
+    },
+    {
+      "file": "nylon/s6-52-v1.ogg",
+      "string": 6,
+      "midi": 52,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_E3_01.ogg",
+      "sha256": "42b83ea403d5cd0202b23f841a99023d4d7cb3839ac76a78e704c9c5345106f9",
+      "bytes": 51882
+    },
+    {
+      "file": "nylon/s6-53-v1.ogg",
+      "string": 6,
+      "midi": 53,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_F3_01.ogg",
+      "sha256": "067eb027764d92020a7e280260ed70c51577f002d58a7ee143cd58d04b62e35d",
+      "bytes": 36416
+    },
+    {
+      "file": "nylon/s6-54-v1.ogg",
+      "string": 6,
+      "midi": 54,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_Fs3_01.ogg",
+      "sha256": "511a4daa6fa86388d5a9d67b5035c4ea14f2d79c2c6dfc125218faaec580b5aa",
+      "bytes": 38375
+    },
+    {
+      "file": "nylon/s6-55-v1.ogg",
+      "string": 6,
+      "midi": 55,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_G3_01.ogg",
+      "sha256": "620facaeee542b42ee4938bbde242ed325243a10d85f3ed0c23937d736c95b96",
+      "bytes": 49844
+    },
+    {
+      "file": "nylon/s6-56-v1.ogg",
+      "string": 6,
+      "midi": 56,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_Gs3_01.ogg",
+      "sha256": "120ffe6c94f4cb7e12cfe963956fc6329e67934da3e1b0e57c5e5a693526360d",
+      "bytes": 36330
+    },
+    {
+      "file": "nylon/s6-57-v1.ogg",
+      "string": 6,
+      "midi": 57,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_A3_01.ogg",
+      "sha256": "b8a57cd8f5ef1d01a6212a1056c88c6a87dcb07316cb5637a668424cfa80e969",
+      "bytes": 47813
+    },
+    {
+      "file": "nylon/s6-58-v1.ogg",
+      "string": 6,
+      "midi": 58,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_As3_01.ogg",
+      "sha256": "f1853f46113141a5adb0b30c5ff38d822055d7999691653a988ffa37e890d6d5",
+      "bytes": 31081
+    },
+    {
+      "file": "nylon/s6-59-v1.ogg",
+      "string": 6,
+      "midi": 59,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel01Finger_B3_01.ogg",
+      "sha256": "5164e66c3e7f05b44ec16cd324fcca7fb401c77b8d5c1d32116ea890a1c6d6f0",
+      "bytes": 33827
+    },
+    {
+      "file": "nylon/s6-40-v2.ogg",
+      "string": 6,
+      "midi": 40,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_E2_01.ogg",
+      "sha256": "e09f5cc4f8dd171e467fcfdfab52a5439797f933b3187369657da83825471bc5",
+      "bytes": 95801
+    },
+    {
+      "file": "nylon/s6-41-v2.ogg",
+      "string": 6,
+      "midi": 41,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_F2_01.ogg",
+      "sha256": "0ff74dacbb302fdb0e7b5efc7818d43b734870c23bf9f11530be7b108446c14e",
+      "bytes": 82211
+    },
+    {
+      "file": "nylon/s6-42-v2.ogg",
+      "string": 6,
+      "midi": 42,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_Fs2_01.ogg",
+      "sha256": "ede6737d596f1c1817aafa43cf9e1e38281e57ce955414e23e4b7f220e6356fc",
+      "bytes": 65596
+    },
+    {
+      "file": "nylon/s6-43-v2.ogg",
+      "string": 6,
+      "midi": 43,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_G2_01.ogg",
+      "sha256": "9811677b8dadc9b20a57565e650ab92517bb75b73916228fb115dac9478d6d8e",
+      "bytes": 69257
+    },
+    {
+      "file": "nylon/s6-44-v2.ogg",
+      "string": 6,
+      "midi": 44,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_Gs2_01.ogg",
+      "sha256": "87bfdc09e602757dcd6c4270d50b904711eafcb064744f1cd5f164da6444dedc",
+      "bytes": 69505
+    },
+    {
+      "file": "nylon/s6-45-v2.ogg",
+      "string": 6,
+      "midi": 45,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_A2_01.ogg",
+      "sha256": "5b3e8be95a8d7464ba69380335b1f6be655f3d261d811fcb86740705a646ec9d",
+      "bytes": 97744
+    },
+    {
+      "file": "nylon/s6-46-v2.ogg",
+      "string": 6,
+      "midi": 46,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_As2_01.ogg",
+      "sha256": "0fd62b1436b14c100a6f0b5a5309fed4914e93323018ec4f629c64610aa91fcc",
+      "bytes": 76838
+    },
+    {
+      "file": "nylon/s6-47-v2.ogg",
+      "string": 6,
+      "midi": 47,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_B2_01.ogg",
+      "sha256": "6960cfc9ec40adf330a9382ec57585f7496488db489f5da166e90131b513f1e2",
+      "bytes": 64838
+    },
+    {
+      "file": "nylon/s6-48-v2.ogg",
+      "string": 6,
+      "midi": 48,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_C3_01.ogg",
+      "sha256": "2a2d21730a5bddad9c3af5855ee56b3564e84b9728ae3b4df9eaeeabf10b19d6",
+      "bytes": 62819
+    },
+    {
+      "file": "nylon/s6-49-v2.ogg",
+      "string": 6,
+      "midi": 49,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_Cs3_01.ogg",
+      "sha256": "2fafea581d6a020ece836de0813ea7c8f4df46a4d83634a22438c414da88c56e",
+      "bytes": 66338
+    },
+    {
+      "file": "nylon/s6-50-v2.ogg",
+      "string": 6,
+      "midi": 50,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_D3_01.ogg",
+      "sha256": "0087b367887e2eed4d155804c488c5093a515e1f38b0b154fbfdba59f3cde95a",
+      "bytes": 77223
+    },
+    {
+      "file": "nylon/s6-51-v2.ogg",
+      "string": 6,
+      "midi": 51,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_Ds3_01.ogg",
+      "sha256": "e06e3718e17b413401d9e71c4fa9dc78543e172ef4fdcd3ba2d357149fb24504",
+      "bytes": 54071
+    },
+    {
+      "file": "nylon/s6-52-v2.ogg",
+      "string": 6,
+      "midi": 52,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_E3_01.ogg",
+      "sha256": "914435ae14d030775a49905ded778f703a68896e330f6de41dc21b9c3396b7a6",
+      "bytes": 72638
+    },
+    {
+      "file": "nylon/s6-53-v2.ogg",
+      "string": 6,
+      "midi": 53,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_F3_01.ogg",
+      "sha256": "189d92514698a443ac9b41c1a9d89e3f2cc1c83766505a6c95c96d893b3e802e",
+      "bytes": 43439
+    },
+    {
+      "file": "nylon/s6-54-v2.ogg",
+      "string": 6,
+      "midi": 54,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_Fs3_01.ogg",
+      "sha256": "6e2edf78dcde5ff4b455e4c4909d7be6bf3ff943a2fc9a2192aee2396c0205a0",
+      "bytes": 42744
+    },
+    {
+      "file": "nylon/s6-55-v2.ogg",
+      "string": 6,
+      "midi": 55,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_G3_01.ogg",
+      "sha256": "4a99a5682ab87b89e2e6e3be3a1e499b7049580f5bef7cc50046d6ab8cc94557",
+      "bytes": 65344
+    },
+    {
+      "file": "nylon/s6-56-v2.ogg",
+      "string": 6,
+      "midi": 56,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_Gs3_01.ogg",
+      "sha256": "150f3b54168f4044eeb63257fb91e0bdad1522facc21e636621bf887d90264a3",
+      "bytes": 42443
+    },
+    {
+      "file": "nylon/s6-57-v2.ogg",
+      "string": 6,
+      "midi": 57,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_A3_01.ogg",
+      "sha256": "a44c98d5d4a7af993241ff9696e331206ae798eac4e49fdc56cb2aeb9c844c36",
+      "bytes": 63886
+    },
+    {
+      "file": "nylon/s6-58-v2.ogg",
+      "string": 6,
+      "midi": 58,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_As3_01.ogg",
+      "sha256": "b35b4e42dccb4e7e8db91b92f6a4dce9f70e7bd062dddfba4fba845fb8f56db3",
+      "bytes": 29715
+    },
+    {
+      "file": "nylon/s6-59-v2.ogg",
+      "string": 6,
+      "midi": 59,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel02Pick_B3_01.ogg",
+      "sha256": "09ac4a3d2ddfda7cbf050a76d6b87a288a994aa496493fe068b92b0cc838dd70",
+      "bytes": 29119
+    },
+    {
+      "file": "nylon/s6-40-v3.ogg",
+      "string": 6,
+      "midi": 40,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_E2_01.ogg",
+      "sha256": "38e9e6d8b1a1700c6aefb11610d83319b009fcb1fb2168cebb5a157de4ab7619",
+      "bytes": 73132
+    },
+    {
+      "file": "nylon/s6-41-v3.ogg",
+      "string": 6,
+      "midi": 41,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_F2_01.ogg",
+      "sha256": "e0785cfabc2721ea3eba14f7fec20a00e25f690650da6133b7895dabaffe1f01",
+      "bytes": 74222
+    },
+    {
+      "file": "nylon/s6-42-v3.ogg",
+      "string": 6,
+      "midi": 42,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_Fs2_01.ogg",
+      "sha256": "6151ea488bb45cdc7e396b337071110c4c8e8861cac318a63beca06aae6ac566",
+      "bytes": 92349
+    },
+    {
+      "file": "nylon/s6-43-v3.ogg",
+      "string": 6,
+      "midi": 43,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_G2_01.ogg",
+      "sha256": "d95708b8a70e9d02edb80b7b77ffff504e6668e4c86726d942989f3d058a503b",
+      "bytes": 79530
+    },
+    {
+      "file": "nylon/s6-44-v3.ogg",
+      "string": 6,
+      "midi": 44,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_Gs2_01.ogg",
+      "sha256": "c0332e28e92ad839aacc4e212227f9ecd6b1cff877b1d92a7dfe7de1abb38d57",
+      "bytes": 89213
+    },
+    {
+      "file": "nylon/s6-45-v3.ogg",
+      "string": 6,
+      "midi": 45,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_A2_01.ogg",
+      "sha256": "fce78c8a682cd1f895a8e8277e60db41527a159abdfdd0b23b6d80cdcfeae5c2",
+      "bytes": 118130
+    },
+    {
+      "file": "nylon/s6-46-v3.ogg",
+      "string": 6,
+      "midi": 46,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_As2_01.ogg",
+      "sha256": "d2f1f79b4372f070053cc235400b2f4bf586ad287140cd59fda33a5e29ba1303",
+      "bytes": 82531
+    },
+    {
+      "file": "nylon/s6-47-v3.ogg",
+      "string": 6,
+      "midi": 47,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_B2_01.ogg",
+      "sha256": "23f3cdc054b893b32956b3bf7407819402ec85096ce808aba68343b21d1627fa",
+      "bytes": 86265
+    },
+    {
+      "file": "nylon/s6-48-v3.ogg",
+      "string": 6,
+      "midi": 48,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_C3_01.ogg",
+      "sha256": "55158a5a58c02085218e5990b1ded00cc9c8dfd1c91bb12cd1d0ab679ab67a9f",
+      "bytes": 76321
+    },
+    {
+      "file": "nylon/s6-49-v3.ogg",
+      "string": 6,
+      "midi": 49,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_Cs3_01.ogg",
+      "sha256": "8660e79d800a0baa3961cdb3cbcdb040cc8f5c17616fef5cfde68444e28e6868",
+      "bytes": 75593
+    },
+    {
+      "file": "nylon/s6-50-v3.ogg",
+      "string": 6,
+      "midi": 50,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_D3_01.ogg",
+      "sha256": "f459919e5559d58a06c851383a3589c30ffa8168a22eabab8661d37c2dc329a7",
+      "bytes": 83879
+    },
+    {
+      "file": "nylon/s6-51-v3.ogg",
+      "string": 6,
+      "midi": 51,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_Ds3_01.ogg",
+      "sha256": "db7320e75bab12f3281afb2f0c3b0c1d04bd75c18d5f253177cb2ee12e352b64",
+      "bytes": 92889
+    },
+    {
+      "file": "nylon/s6-52-v3.ogg",
+      "string": 6,
+      "midi": 52,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_E3_01.ogg",
+      "sha256": "625cc1966d8babd8b46b5c17e34450abf11f136f280fb342547a8079902ee086",
+      "bytes": 106246
+    },
+    {
+      "file": "nylon/s6-53-v3.ogg",
+      "string": 6,
+      "midi": 53,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_F3_01.ogg",
+      "sha256": "7f5ef3d4eeb98b98f73b8527b09d71800f87c38220a2e9b3a8cf6a6369668c87",
+      "bytes": 54434
+    },
+    {
+      "file": "nylon/s6-54-v3.ogg",
+      "string": 6,
+      "midi": 54,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_Fs3_01.ogg",
+      "sha256": "d6e922fa900bff028bf63d24210762900d066f4df24cdc51f683e548940c091a",
+      "bytes": 66471
+    },
+    {
+      "file": "nylon/s6-55-v3.ogg",
+      "string": 6,
+      "midi": 55,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_G3_01.ogg",
+      "sha256": "d2261bd928b834800209fc507cde50ea958a4c4237612847fce188c7d1f74081",
+      "bytes": 74931
+    },
+    {
+      "file": "nylon/s6-56-v3.ogg",
+      "string": 6,
+      "midi": 56,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_Gs3_01.ogg",
+      "sha256": "88709981242a6206d6ee5a5e7f0b72d257629d15ddedf3c6b41f8e91631c870f",
+      "bytes": 42884
+    },
+    {
+      "file": "nylon/s6-57-v3.ogg",
+      "string": 6,
+      "midi": 57,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_A3_01.ogg",
+      "sha256": "9494ad9c6d9129b30cb74c8a9d7c8519dce91c54b84e23c98d954b19459582ff",
+      "bytes": 72208
+    },
+    {
+      "file": "nylon/s6-58-v3.ogg",
+      "string": 6,
+      "midi": 58,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_As3_01.ogg",
+      "sha256": "7127773625397ddb91068c7d817adf4539487888337e0e2dc3a3f98df87549ce",
+      "bytes": 41439
+    },
+    {
+      "file": "nylon/s6-59-v3.ogg",
+      "string": 6,
+      "midi": 59,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringLowE_Vel03Pick_B3_01.ogg",
+      "sha256": "21e5b145a33bf6e0d458ee6998ca16b5f3d30446275c5e3be416e5e33c576385",
+      "bytes": 32398
+    },
+    {
+      "file": "nylon/s5-45-v1.ogg",
+      "string": 5,
+      "midi": 45,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_A2_01.ogg",
+      "sha256": "bdccb28f3c24422351d9f8aece2c53efbb8b8ef69df571457aadc6612a882d9d",
+      "bytes": 101583
+    },
+    {
+      "file": "nylon/s5-46-v1.ogg",
+      "string": 5,
+      "midi": 46,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_As2_01.ogg",
+      "sha256": "442e1614f2b580bde2fec203111c4d91fed2fdb142c48b9d842712dcb16e1db8",
+      "bytes": 64844
+    },
+    {
+      "file": "nylon/s5-47-v1.ogg",
+      "string": 5,
+      "midi": 47,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_B2_01.ogg",
+      "sha256": "ec56cfbdc0659aebb17c17cd3fa38f598f44e158fd7307a630e411398cd2677f",
+      "bytes": 66866
+    },
+    {
+      "file": "nylon/s5-48-v1.ogg",
+      "string": 5,
+      "midi": 48,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_C3_01.ogg",
+      "sha256": "1d2fc1967e765530d1182f11896fef16a52427b81eae3a5e3386aa56828bc2a2",
+      "bytes": 79431
+    },
+    {
+      "file": "nylon/s5-49-v1.ogg",
+      "string": 5,
+      "midi": 49,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_Cs3_01.ogg",
+      "sha256": "4d200de2a8b9a39be75e0a94a70605a92dd8ff84b84909331479469d5faa3ebf",
+      "bytes": 61917
+    },
+    {
+      "file": "nylon/s5-50-v1.ogg",
+      "string": 5,
+      "midi": 50,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_D3_01.ogg",
+      "sha256": "43afba225f1fcf91801b54678cc7e502c6da532c36366491410b960c50ac9a4d",
+      "bytes": 84240
+    },
+    {
+      "file": "nylon/s5-51-v1.ogg",
+      "string": 5,
+      "midi": 51,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_Ds3_01.ogg",
+      "sha256": "3e9b808be826f691a7f1fb21e43b6ae16f82f56dd34b46848eb8baa7c37d8aa9",
+      "bytes": 112551
+    },
+    {
+      "file": "nylon/s5-52-v1.ogg",
+      "string": 5,
+      "midi": 52,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_E3_01.ogg",
+      "sha256": "764fa83b90ccc144ec58d674d31b4e590a4d63dfedee23f50738d9b48e9d83bd",
+      "bytes": 83474
+    },
+    {
+      "file": "nylon/s5-53-v1.ogg",
+      "string": 5,
+      "midi": 53,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_F3_01.ogg",
+      "sha256": "86d575ad105d721d31cd87bc79aad0036a34e48216f9ff3c99272f94629ffb46",
+      "bytes": 50479
+    },
+    {
+      "file": "nylon/s5-54-v1.ogg",
+      "string": 5,
+      "midi": 54,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_Fs3_01.ogg",
+      "sha256": "854befc401a62054d67a5b77e2d0e9465760945688872d799e47bc922e6da53d",
+      "bytes": 49155
+    },
+    {
+      "file": "nylon/s5-55-v1.ogg",
+      "string": 5,
+      "midi": 55,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_G3_01.ogg",
+      "sha256": "917bd3ca422524ff1353532156e63f01a5d6936db0e74397bb3d56d5bac2b92f",
+      "bytes": 68607
+    },
+    {
+      "file": "nylon/s5-56-v1.ogg",
+      "string": 5,
+      "midi": 56,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_Gs3_01.ogg",
+      "sha256": "3b06afd955c76c0770a96b903fd627599010e1cf5306c79a23d0304eb140faad",
+      "bytes": 34067
+    },
+    {
+      "file": "nylon/s5-57-v1.ogg",
+      "string": 5,
+      "midi": 57,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_A3_01.ogg",
+      "sha256": "2037b422eb3b0512bf629e59c1e457f2cd2e0dd265cf3e3e1ad3e42c224c5f00",
+      "bytes": 42270
+    },
+    {
+      "file": "nylon/s5-58-v1.ogg",
+      "string": 5,
+      "midi": 58,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_As3_01.ogg",
+      "sha256": "06b51af26a1a83a80835dcfcac0ffd83ef6ce57db9a94070b6ca6d15b3377152",
+      "bytes": 40944
+    },
+    {
+      "file": "nylon/s5-59-v1.ogg",
+      "string": 5,
+      "midi": 59,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_B3_01.ogg",
+      "sha256": "9747fae429d6c45937e321ac516c39fef1aeaa9390967bf17ce27fa26e85763b",
+      "bytes": 40501
+    },
+    {
+      "file": "nylon/s5-60-v1.ogg",
+      "string": 5,
+      "midi": 60,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_C4_01.ogg",
+      "sha256": "7b10691400013ef6c392e9caee88bfbc14aee7599c353a2bd30a7a5cb1c88b53",
+      "bytes": 39130
+    },
+    {
+      "file": "nylon/s5-61-v1.ogg",
+      "string": 5,
+      "midi": 61,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_Cs4_01.ogg",
+      "sha256": "7fb9065d460d7ec141055436667129a7fa15e99211e768a771fe2c3352051c79",
+      "bytes": 40577
+    },
+    {
+      "file": "nylon/s5-62-v1.ogg",
+      "string": 5,
+      "midi": 62,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_D4_01.ogg",
+      "sha256": "a22c70b12e197f7b453c8c7a729296fa8e47df3b34eaae96231870169a95ee67",
+      "bytes": 58449
+    },
+    {
+      "file": "nylon/s5-63-v1.ogg",
+      "string": 5,
+      "midi": 63,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel01Finger_Ds4_01.ogg",
+      "sha256": "7bd40f4477b820901ad81db1e1de90d425535b535c915f6e01943aa40ad99808",
+      "bytes": 33237
+    },
+    {
+      "file": "nylon/s5-45-v2.ogg",
+      "string": 5,
+      "midi": 45,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_A2_01.ogg",
+      "sha256": "e22de8b0e28a2cd4b532cbfd8ac90ac1463bbfa48333dcb97a4f17ecd7c25344",
+      "bytes": 94086
+    },
+    {
+      "file": "nylon/s5-46-v2.ogg",
+      "string": 5,
+      "midi": 46,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_As2_01.ogg",
+      "sha256": "625beb126f980801cb32e5f6979619903f057ed89a47bb29184cf815628a259e",
+      "bytes": 60186
+    },
+    {
+      "file": "nylon/s5-47-v2.ogg",
+      "string": 5,
+      "midi": 47,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_B2_01.ogg",
+      "sha256": "ee4a7932a9712ee76445ee9ae8d406ea625dbfff035dca06c171379d9132e903",
+      "bytes": 69022
+    },
+    {
+      "file": "nylon/s5-48-v2.ogg",
+      "string": 5,
+      "midi": 48,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_C3_01.ogg",
+      "sha256": "c1424fe2599a57723468eec00275114217e4e854427405fa1213c68fcbd075a4",
+      "bytes": 87844
+    },
+    {
+      "file": "nylon/s5-49-v2.ogg",
+      "string": 5,
+      "midi": 49,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_Cs3_01.ogg",
+      "sha256": "04f66c8e6082935b23dfbc3abfe4b4ad10c0a0d5f7fb7bae29ad13944b2f07a5",
+      "bytes": 54326
+    },
+    {
+      "file": "nylon/s5-50-v2.ogg",
+      "string": 5,
+      "midi": 50,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_D3_01.ogg",
+      "sha256": "f7f380977b7c7634bb51d55dd84cde158bf80eea13db770c7fa6da190d958ed2",
+      "bytes": 90597
+    },
+    {
+      "file": "nylon/s5-51-v2.ogg",
+      "string": 5,
+      "midi": 51,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_Ds3_01.ogg",
+      "sha256": "5b22b4b817c905eda7b964ff47085671353757da6c428bea08c29a8aba7a4186",
+      "bytes": 116125
+    },
+    {
+      "file": "nylon/s5-52-v2.ogg",
+      "string": 5,
+      "midi": 52,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_E3_01.ogg",
+      "sha256": "7b0e2810dd109bd3ccfbbbdd447fad4f21f718c39c8c3240fddba33198186006",
+      "bytes": 32000
+    },
+    {
+      "file": "nylon/s5-53-v2.ogg",
+      "string": 5,
+      "midi": 53,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_F3_01.ogg",
+      "sha256": "46f1793b8fc0ff7ee509fe9cb518d31218cef6a697e3cf66da20a3465a4380c0",
+      "bytes": 51175
+    },
+    {
+      "file": "nylon/s5-54-v2.ogg",
+      "string": 5,
+      "midi": 54,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_Fs3_01.ogg",
+      "sha256": "aab7f6705a5e4c7c631f47442ff6f89796edf71636b4ae11f85a1a64cbdcbc6b",
+      "bytes": 67626
+    },
+    {
+      "file": "nylon/s5-55-v2.ogg",
+      "string": 5,
+      "midi": 55,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_G3_01.ogg",
+      "sha256": "4fb4ea6d56f129fd9028e250f577997319974253c65b114f3ddb9ea4da7acc6c",
+      "bytes": 54627
+    },
+    {
+      "file": "nylon/s5-56-v2.ogg",
+      "string": 5,
+      "midi": 56,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_Gs3_01.ogg",
+      "sha256": "a756b8937d31dde8cfe4966b95734ae4b6bec601bafefd2eab7f88898ffe2f7a",
+      "bytes": 37623
+    },
+    {
+      "file": "nylon/s5-57-v2.ogg",
+      "string": 5,
+      "midi": 57,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_A3_01.ogg",
+      "sha256": "a2a681c269d5c3dd72fe2a3c608d88794ded47269c83b3b834219b64628abc90",
+      "bytes": 49803
+    },
+    {
+      "file": "nylon/s5-58-v2.ogg",
+      "string": 5,
+      "midi": 58,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_As3_01.ogg",
+      "sha256": "8818b3baf441dc43a8f6fa231df316c6867efa0efcf76f7b07c5d98d25148e06",
+      "bytes": 45605
+    },
+    {
+      "file": "nylon/s5-59-v2.ogg",
+      "string": 5,
+      "midi": 59,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_B3_01.ogg",
+      "sha256": "180b44776e22881e42af1a0094e76c6cab4feb6bac35cb9046acb81eaaf710da",
+      "bytes": 50316
+    },
+    {
+      "file": "nylon/s5-60-v2.ogg",
+      "string": 5,
+      "midi": 60,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_C4_01.ogg",
+      "sha256": "269af7791c119ebb0e2db00b7958435fc95c366aba70044a932684cd913fc238",
+      "bytes": 40977
+    },
+    {
+      "file": "nylon/s5-61-v2.ogg",
+      "string": 5,
+      "midi": 61,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_Cs4_01.ogg",
+      "sha256": "787b625af122815c8017c193d5c79c00eccd89a52d5be3960e943da50b98c74e",
+      "bytes": 45272
+    },
+    {
+      "file": "nylon/s5-62-v2.ogg",
+      "string": 5,
+      "midi": 62,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_D4_01.ogg",
+      "sha256": "47889993f3931121061c19c16fc5f2685f8dfa66b32046d4ba08b83c392ca1b7",
+      "bytes": 58953
+    },
+    {
+      "file": "nylon/s5-63-v2.ogg",
+      "string": 5,
+      "midi": 63,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel02Pick_Ds4_01.ogg",
+      "sha256": "f5763bcbd63839991233894d72fd36bf338ff379d7a067e2a7341edda3e9784d",
+      "bytes": 32299
+    },
+    {
+      "file": "nylon/s5-45-v3.ogg",
+      "string": 5,
+      "midi": 45,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_A2_01.ogg",
+      "sha256": "815a66f75e3bd10a031c29d9596cd145340b1a1c5b245be1d7e8b8051425404c",
+      "bytes": 104601
+    },
+    {
+      "file": "nylon/s5-46-v3.ogg",
+      "string": 5,
+      "midi": 46,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_As2_01.ogg",
+      "sha256": "47a82e409c6e442f2efdd3df0d925c9ed855ca788d71dec40af7cfe06b848b1e",
+      "bytes": 86632
+    },
+    {
+      "file": "nylon/s5-47-v3.ogg",
+      "string": 5,
+      "midi": 47,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_B2_01.ogg",
+      "sha256": "1b3ea9d3783ae77be4d6dddf7d9936e6329abe0e329eda963c698434c811c590",
+      "bytes": 65176
+    },
+    {
+      "file": "nylon/s5-48-v3.ogg",
+      "string": 5,
+      "midi": 48,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_C3_01.ogg",
+      "sha256": "b0976d11d62960c75a93b148e5359791b1c85e26913acf1f3e0f459da218ef29",
+      "bytes": 90862
+    },
+    {
+      "file": "nylon/s5-49-v3.ogg",
+      "string": 5,
+      "midi": 49,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_Cs3_01.ogg",
+      "sha256": "4d05794c0e0ad0d7e4eaf25f836b9095228b15dd0ca5b6ced5de9317eac6ecf4",
+      "bytes": 61520
+    },
+    {
+      "file": "nylon/s5-50-v3.ogg",
+      "string": 5,
+      "midi": 50,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_D3_01.ogg",
+      "sha256": "469cffd2038019042157bf6fbc12d6cac33fab174fdf1571e26df12bc2a8f6bb",
+      "bytes": 100156
+    },
+    {
+      "file": "nylon/s5-51-v3.ogg",
+      "string": 5,
+      "midi": 51,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_Ds3_01.ogg",
+      "sha256": "e03645d43658bef0f020c866018e4ad2ac613e1b975980fa0f31f5ad439a3128",
+      "bytes": 112364
+    },
+    {
+      "file": "nylon/s5-52-v3.ogg",
+      "string": 5,
+      "midi": 52,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_E3_01.ogg",
+      "sha256": "8d27b3ba8c909e12c9417a7a3762e6aed718160dc68e7fde2e6ad445d3090c04",
+      "bytes": 88775
+    },
+    {
+      "file": "nylon/s5-53-v3.ogg",
+      "string": 5,
+      "midi": 53,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_F3_01.ogg",
+      "sha256": "39b15a035fbbafe759e409d4167ba835b6de3673a8a9574ecebe5f8d453f8669",
+      "bytes": 50964
+    },
+    {
+      "file": "nylon/s5-54-v3.ogg",
+      "string": 5,
+      "midi": 54,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_Fs3_01.ogg",
+      "sha256": "7a74dc86fac5a399b4e8fb65170eea486fa5d66a36b92bd8ff7bb9da10f12034",
+      "bytes": 60673
+    },
+    {
+      "file": "nylon/s5-55-v3.ogg",
+      "string": 5,
+      "midi": 55,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_G3_01.ogg",
+      "sha256": "73333d8af1d8dba46773fa51394cee1a8caa3a82accdda81c2a29a3e0d6e0610",
+      "bytes": 63019
+    },
+    {
+      "file": "nylon/s5-56-v3.ogg",
+      "string": 5,
+      "midi": 56,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_Gs3_01.ogg",
+      "sha256": "9d64c239c99bc997ddbe4e6c05ef75c09e80caaaae46b82bc789d2bb0e92910d",
+      "bytes": 48312
+    },
+    {
+      "file": "nylon/s5-57-v3.ogg",
+      "string": 5,
+      "midi": 57,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_A3_01.ogg",
+      "sha256": "2d3745640d461554dea0817748e377439a086eebdef1c21e12a649650ffc1eea",
+      "bytes": 69835
+    },
+    {
+      "file": "nylon/s5-58-v3.ogg",
+      "string": 5,
+      "midi": 58,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_As3_01.ogg",
+      "sha256": "ab667b845d2fbcb5977d131ae1e0e1568696dc263d4a83ba11301fd9ab73ebb4",
+      "bytes": 60738
+    },
+    {
+      "file": "nylon/s5-59-v3.ogg",
+      "string": 5,
+      "midi": 59,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_B3_01.ogg",
+      "sha256": "b18ac00db90f6c6b16e908900b4899245ece7e2f29e54710047e68c7844b9a98",
+      "bytes": 51833
+    },
+    {
+      "file": "nylon/s5-60-v3.ogg",
+      "string": 5,
+      "midi": 60,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_C4_01.ogg",
+      "sha256": "30fa0f4f9fd9df7a9f4fd67b1a49153dff67a53e2c8ded967ce787dfeecf3d91",
+      "bytes": 44983
+    },
+    {
+      "file": "nylon/s5-61-v3.ogg",
+      "string": 5,
+      "midi": 61,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_Cs4_01.ogg",
+      "sha256": "90b40a9006dbda42cf9bd781cee2c78461515fb15666d00cf3089a65a2a14dab",
+      "bytes": 49091
+    },
+    {
+      "file": "nylon/s5-62-v3.ogg",
+      "string": 5,
+      "midi": 62,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_D4_01.ogg",
+      "sha256": "e46a1a51147caab9aa1d1564eba469d50a1cff5d198a9870c94e95135d5a9b39",
+      "bytes": 58887
+    },
+    {
+      "file": "nylon/s5-63-v3.ogg",
+      "string": 5,
+      "midi": 63,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringA_Vel03Pick_Ds4_01.ogg",
+      "sha256": "a428024eeef68266931beb8f59677520f425a91bcce8d16c2b4091fb54e9ebfe",
+      "bytes": 37885
+    },
+    {
+      "file": "nylon/s4-50-v1.ogg",
+      "string": 4,
+      "midi": 50,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_D3_01.ogg",
+      "sha256": "ece6dc347e579a9f7c0686596075ee1a45ce425586c9841a597e9518b2ed5b97",
+      "bytes": 97995
+    },
+    {
+      "file": "nylon/s4-51-v1.ogg",
+      "string": 4,
+      "midi": 51,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_Ds3_01.ogg",
+      "sha256": "6c0cff1892497b1c9790d35c3cea48793813b002b3de64ef496b7496abc80010",
+      "bytes": 76070
+    },
+    {
+      "file": "nylon/s4-52-v1.ogg",
+      "string": 4,
+      "midi": 52,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_E3_01.ogg",
+      "sha256": "bb708d759c86ead11a307da883e07aa81adb99b2f6c63dd9ee9f146529cf5c53",
+      "bytes": 67345
+    },
+    {
+      "file": "nylon/s4-53-v1.ogg",
+      "string": 4,
+      "midi": 53,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_F3_01.ogg",
+      "sha256": "284562ba17dc0737e6b6a461de228bfe74621067dfb6f4133f7092aa9e824c53",
+      "bytes": 54782
+    },
+    {
+      "file": "nylon/s4-54-v1.ogg",
+      "string": 4,
+      "midi": 54,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_Fs3_01.ogg",
+      "sha256": "02469d96231bb334bbc8d9bd1a036facae393736311d0e204bc0a638c48f3c31",
+      "bytes": 58905
+    },
+    {
+      "file": "nylon/s4-55-v1.ogg",
+      "string": 4,
+      "midi": 55,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_G3_01.ogg",
+      "sha256": "2b749530ab86dbc3479533778367672d67bf541a618c9d6cbc8963449d5f057a",
+      "bytes": 59905
+    },
+    {
+      "file": "nylon/s4-56-v1.ogg",
+      "string": 4,
+      "midi": 56,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_Gs3_01.ogg",
+      "sha256": "a6e4062503847b2e50de6b2a9003afef4f28b572c48eec46a1460963ff5cd6e5",
+      "bytes": 40506
+    },
+    {
+      "file": "nylon/s4-57-v1.ogg",
+      "string": 4,
+      "midi": 57,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_A3_01.ogg",
+      "sha256": "569fe8927db6d4cd564612fa8a077fbbd30c916bc351d4a452258514c0f2c2e6",
+      "bytes": 63624
+    },
+    {
+      "file": "nylon/s4-58-v1.ogg",
+      "string": 4,
+      "midi": 58,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_As3_01.ogg",
+      "sha256": "b39a6fd451e609da7a9cefd18e68ccc1a254bc1563b29c5fe0d7f31b53223d2d",
+      "bytes": 55458
+    },
+    {
+      "file": "nylon/s4-59-v1.ogg",
+      "string": 4,
+      "midi": 59,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_B3_01.ogg",
+      "sha256": "486578e484f5ec51788e55b8b0d03dcf56326531cafbffcc105a4c5fe0426452",
+      "bytes": 64890
+    },
+    {
+      "file": "nylon/s4-60-v1.ogg",
+      "string": 4,
+      "midi": 60,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_C4_01.ogg",
+      "sha256": "555892f930eccf423dedb120742ea456d614174f0ee6f6ad7f058b5a264f6de7",
+      "bytes": 52506
+    },
+    {
+      "file": "nylon/s4-61-v1.ogg",
+      "string": 4,
+      "midi": 61,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_Cs4_01.ogg",
+      "sha256": "e7e6b5c36ee6242468850b1face5c862239f8f5a606a095c027afd794a1078c1",
+      "bytes": 41519
+    },
+    {
+      "file": "nylon/s4-62-v1.ogg",
+      "string": 4,
+      "midi": 62,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_D4_01.ogg",
+      "sha256": "a586aa2fc1244b14c8b235e11c692bb0efdd4a3fb25e207358d610e04732a360",
+      "bytes": 48673
+    },
+    {
+      "file": "nylon/s4-63-v1.ogg",
+      "string": 4,
+      "midi": 63,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_Ds4_01.ogg",
+      "sha256": "04f6df8700ffed148b7f1a7222da541726d47483e887dce845de31b54a933f24",
+      "bytes": 52207
+    },
+    {
+      "file": "nylon/s4-64-v1.ogg",
+      "string": 4,
+      "midi": 64,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_E4_01.ogg",
+      "sha256": "cd520b69e8f34a7e4d9ca7e5bb1c7099f8fc8dbf33f84ec89f8a9fa817f1b0b5",
+      "bytes": 47126
+    },
+    {
+      "file": "nylon/s4-65-v1.ogg",
+      "string": 4,
+      "midi": 65,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_F4_01.ogg",
+      "sha256": "6c3ad14923644c9d440326de5d6836ced651951171fab79cfc1dccb619af7299",
+      "bytes": 38073
+    },
+    {
+      "file": "nylon/s4-66-v1.ogg",
+      "string": 4,
+      "midi": 66,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_Fs4_01.ogg",
+      "sha256": "28fb1dafd6b2ac10c5ee03ea269c6a0834ed5e55b7e21f18a2db529fc7ddec4a",
+      "bytes": 40140
+    },
+    {
+      "file": "nylon/s4-67-v1.ogg",
+      "string": 4,
+      "midi": 67,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_G4_01.ogg",
+      "sha256": "839f9359a3f8c195d204c6706532196e939dd589bffb73dc94eace8598149899",
+      "bytes": 38310
+    },
+    {
+      "file": "nylon/s4-68-v1.ogg",
+      "string": 4,
+      "midi": 68,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel01Finger_Gs4_01.ogg",
+      "sha256": "692aebe370beda4eaf25291af3f62bff1679a419a6df5126effa2fc07624d383",
+      "bytes": 20093
+    },
+    {
+      "file": "nylon/s4-50-v2.ogg",
+      "string": 4,
+      "midi": 50,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_D3_01.ogg",
+      "sha256": "6a40fe82d5954a1912650814d2a7b2ebae824e6997602f72f2bde822c9fab8d6",
+      "bytes": 92650
+    },
+    {
+      "file": "nylon/s4-51-v2.ogg",
+      "string": 4,
+      "midi": 51,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_Ds3_01.ogg",
+      "sha256": "7ac917b546ae0494e99bf425b8e10ea1aaaf4bf2afc217f0cfb875c3f90a9822",
+      "bytes": 80052
+    },
+    {
+      "file": "nylon/s4-52-v2.ogg",
+      "string": 4,
+      "midi": 52,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_E3_01.ogg",
+      "sha256": "f4d233e6aacf008afc0db2f501850897c105b26a3a4a562008d357d09b0240aa",
+      "bytes": 70226
+    },
+    {
+      "file": "nylon/s4-53-v2.ogg",
+      "string": 4,
+      "midi": 53,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_F3_01.ogg",
+      "sha256": "891fdb7a05db0892997f0172d3394d07dfef0a983aa285c99b6d7f934e72dcfb",
+      "bytes": 61013
+    },
+    {
+      "file": "nylon/s4-54-v2.ogg",
+      "string": 4,
+      "midi": 54,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_Fs3_01.ogg",
+      "sha256": "12dde0952a437debf6ed5a6854dc37023d1f1d434bfa215563d4aa6bff182a4e",
+      "bytes": 69695
+    },
+    {
+      "file": "nylon/s4-55-v2.ogg",
+      "string": 4,
+      "midi": 55,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_G3_01.ogg",
+      "sha256": "15a9b32cf32f630d5156ff6fe9cc5c248f79d03086f76e8e94ccd95fa31ea3c2",
+      "bytes": 61397
+    },
+    {
+      "file": "nylon/s4-56-v2.ogg",
+      "string": 4,
+      "midi": 56,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_Gs3_01.ogg",
+      "sha256": "7b8a844881910fe084ebd4b5f57bcdb15dce2b2ebd9fc534a5d03f4f39766e58",
+      "bytes": 46493
+    },
+    {
+      "file": "nylon/s4-57-v2.ogg",
+      "string": 4,
+      "midi": 57,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_A3_01.ogg",
+      "sha256": "c49bfe7f82646b0a1a28dacca66426e1b7a85627b94ec6ec7a99e0ae4de292e5",
+      "bytes": 71657
+    },
+    {
+      "file": "nylon/s4-58-v2.ogg",
+      "string": 4,
+      "midi": 58,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_As3_01.ogg",
+      "sha256": "ea2d45c8a85124faca84ad3ff391d688d8c29e7b998b82468f069623fc225511",
+      "bytes": 63661
+    },
+    {
+      "file": "nylon/s4-59-v2.ogg",
+      "string": 4,
+      "midi": 59,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_B3_01.ogg",
+      "sha256": "9c33a035c882c5f35b689b418624a3bf807691e4328983ed5b2167b06d0a7408",
+      "bytes": 63227
+    },
+    {
+      "file": "nylon/s4-60-v2.ogg",
+      "string": 4,
+      "midi": 60,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_C4_01.ogg",
+      "sha256": "a24391f72042fcb321824c4426cf57f703b76883f5b950339557cc1727f77411",
+      "bytes": 55710
+    },
+    {
+      "file": "nylon/s4-61-v2.ogg",
+      "string": 4,
+      "midi": 61,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_Cs4_01.ogg",
+      "sha256": "d78d2e8deb541250064f5e331d922133086a6f14ff7654c146b2bea83d945151",
+      "bytes": 50935
+    },
+    {
+      "file": "nylon/s4-62-v2.ogg",
+      "string": 4,
+      "midi": 62,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_D4_01.ogg",
+      "sha256": "2ff82a743bc32550259e54cf8b693c687e29c3e167ed95e70047ef4b33ce4a64",
+      "bytes": 66130
+    },
+    {
+      "file": "nylon/s4-63-v2.ogg",
+      "string": 4,
+      "midi": 63,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_Ds4_01.ogg",
+      "sha256": "b7bc622befcc8235ebaad64d8a5c4edfd39a974882067374bbf38cf5a1de9477",
+      "bytes": 42059
+    },
+    {
+      "file": "nylon/s4-64-v2.ogg",
+      "string": 4,
+      "midi": 64,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_E4_01.ogg",
+      "sha256": "6d945219ae3b7c1ba8f38be4c637775e507cd4bf7981aa0356b62827d8c52367",
+      "bytes": 48528
+    },
+    {
+      "file": "nylon/s4-65-v2.ogg",
+      "string": 4,
+      "midi": 65,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_F4_01.ogg",
+      "sha256": "e2ce106538d8c5bfc721e08b925553368f59da0f63f3b54cacaf29990129d3a5",
+      "bytes": 60274
+    },
+    {
+      "file": "nylon/s4-66-v2.ogg",
+      "string": 4,
+      "midi": 66,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_Fs4_01.ogg",
+      "sha256": "171c3cf01f5423a53e32a840ca6125f68a31d7a281bf82fff5e8058647860e51",
+      "bytes": 43853
+    },
+    {
+      "file": "nylon/s4-67-v2.ogg",
+      "string": 4,
+      "midi": 67,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_G4_01.ogg",
+      "sha256": "19918ef0ae1bbaf4fc3efe75a22b86d694963a77ae52290213720c477f6000e4",
+      "bytes": 40918
+    },
+    {
+      "file": "nylon/s4-68-v2.ogg",
+      "string": 4,
+      "midi": 68,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel02Pick_Gs4_01.ogg",
+      "sha256": "e2566eaf664c31fb84485d91c2440aa23a730f2ffaa5999ac00fda6db27f1bda",
+      "bytes": 26482
+    },
+    {
+      "file": "nylon/s4-50-v3.ogg",
+      "string": 4,
+      "midi": 50,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_D3_01.ogg",
+      "sha256": "eb2633044c0482bcce2a40f2b5f1c2e45eb655c4d38942212e614853d2195ff8",
+      "bytes": 100654
+    },
+    {
+      "file": "nylon/s4-51-v3.ogg",
+      "string": 4,
+      "midi": 51,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_Ds3_01.ogg",
+      "sha256": "f149014dfbdc88bc34efee38dc7ae8944e059dbdc5c255bff3cd4f20a97fc029",
+      "bytes": 79158
+    },
+    {
+      "file": "nylon/s4-52-v3.ogg",
+      "string": 4,
+      "midi": 52,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_E3_01.ogg",
+      "sha256": "b3429ec16f81292e4f95106217b3763eb60562f9234e4325f1cd86bcec538b1f",
+      "bytes": 74781
+    },
+    {
+      "file": "nylon/s4-53-v3.ogg",
+      "string": 4,
+      "midi": 53,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_F3_01.ogg",
+      "sha256": "a532471f609c47c090470f341797bda43f6d10ebd00f99dcd72ca86959af2195",
+      "bytes": 62170
+    },
+    {
+      "file": "nylon/s4-54-v3.ogg",
+      "string": 4,
+      "midi": 54,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_Fs3_01.ogg",
+      "sha256": "6496885a5a72dd4fe6d00c0340e36792fd1796c073a639056b1aa2fe80c846e4",
+      "bytes": 66190
+    },
+    {
+      "file": "nylon/s4-55-v3.ogg",
+      "string": 4,
+      "midi": 55,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_G3_01.ogg",
+      "sha256": "52fc4458fe4941dcf348d9cb865e05af64d05082647c20c813dfe04ffc840cde",
+      "bytes": 64358
+    },
+    {
+      "file": "nylon/s4-56-v3.ogg",
+      "string": 4,
+      "midi": 56,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_Gs3_01.ogg",
+      "sha256": "83fc45cab8450ec23688f014b683446ad760af24d57f4deefeeccee8b967e4fb",
+      "bytes": 49081
+    },
+    {
+      "file": "nylon/s4-57-v3.ogg",
+      "string": 4,
+      "midi": 57,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_A3_01.ogg",
+      "sha256": "e0cff62a417d4a5d05e904fe34d0eb67a162019e1d4f11cf44d6cc5fae227d8c",
+      "bytes": 88197
+    },
+    {
+      "file": "nylon/s4-58-v3.ogg",
+      "string": 4,
+      "midi": 58,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_As3_01.ogg",
+      "sha256": "ae41978fff50a3c2f6e905fa10c6634a4330fcf17c6726932d3da3917f6899de",
+      "bytes": 71946
+    },
+    {
+      "file": "nylon/s4-59-v3.ogg",
+      "string": 4,
+      "midi": 59,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_B3_01.ogg",
+      "sha256": "4a1823d1ff9c91dfc6059f933ff3791bdd4d5040269a96e5282ac0d847e839a6",
+      "bytes": 65551
+    },
+    {
+      "file": "nylon/s4-60-v3.ogg",
+      "string": 4,
+      "midi": 60,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_C4_01.ogg",
+      "sha256": "f01bb87779aa8c7e6cbee8fd6ac8955fb3b45e6d9c6daa0a82beaaa3479167a3",
+      "bytes": 57810
+    },
+    {
+      "file": "nylon/s4-61-v3.ogg",
+      "string": 4,
+      "midi": 61,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_Cs4_01.ogg",
+      "sha256": "ef3e67983a48f6d1092895aa3ce37b43a4156bb4a1033b5716c24537999d0804",
+      "bytes": 46439
+    },
+    {
+      "file": "nylon/s4-62-v3.ogg",
+      "string": 4,
+      "midi": 62,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_D4_01.ogg",
+      "sha256": "0da5e24690ec04c030cb9a24643758135f965bfbf343d5d59cde7f0b96819546",
+      "bytes": 59081
+    },
+    {
+      "file": "nylon/s4-63-v3.ogg",
+      "string": 4,
+      "midi": 63,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_Ds4_01.ogg",
+      "sha256": "8f46e8e260ad7d717b0eb84988b66ab06dd34f6ea80c16c4da46f687bd969342",
+      "bytes": 39490
+    },
+    {
+      "file": "nylon/s4-64-v3.ogg",
+      "string": 4,
+      "midi": 64,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_E4_01.ogg",
+      "sha256": "76be985e58b17ac7a97d6c1cabb8a5448362589ad86139fbccbaca11553ab7f8",
+      "bytes": 56148
+    },
+    {
+      "file": "nylon/s4-65-v3.ogg",
+      "string": 4,
+      "midi": 65,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_F4_01.ogg",
+      "sha256": "a469daf541f3cb801147046d45219394841c5644fcf57a847d2308026777a404",
+      "bytes": 46867
+    },
+    {
+      "file": "nylon/s4-66-v3.ogg",
+      "string": 4,
+      "midi": 66,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_Fs4_01.ogg",
+      "sha256": "8bde3bfc6dbdcc90706318d32a04ff1bc24de539feceb83a9ece21a5776a0eef",
+      "bytes": 43257
+    },
+    {
+      "file": "nylon/s4-67-v3.ogg",
+      "string": 4,
+      "midi": 67,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_G4_01.ogg",
+      "sha256": "4a11f943445fc985319f4a1e8383e7d61a5e64abfce0f1a967c20dd0ddb82752",
+      "bytes": 40607
+    },
+    {
+      "file": "nylon/s4-68-v3.ogg",
+      "string": 4,
+      "midi": 68,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringD_Vel03Pick_Gs4_01.ogg",
+      "sha256": "edf4680971ede83551ecb567b5e15562a931f214c655cce2e98d811207ebd660",
+      "bytes": 32279
+    },
+    {
+      "file": "nylon/s3-55-v1.ogg",
+      "string": 3,
+      "midi": 55,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_G3_01.ogg",
+      "sha256": "f02c4b08753e037e03e7445414159ebe515401361fb2a85c185b90f554931d31",
+      "bytes": 49013
+    },
+    {
+      "file": "nylon/s3-56-v1.ogg",
+      "string": 3,
+      "midi": 56,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_Gs3_01.ogg",
+      "sha256": "627d127c2530d1f5eaeb582936e165d5d8fa9eb5dff16f80a4fe197efa8644db",
+      "bytes": 34436
+    },
+    {
+      "file": "nylon/s3-57-v1.ogg",
+      "string": 3,
+      "midi": 57,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_A3_01.ogg",
+      "sha256": "b920b3aa7eb3597acd7a7f1498f082785feb537a548fcf20cb076aee1ebca96c",
+      "bytes": 44661
+    },
+    {
+      "file": "nylon/s3-58-v1.ogg",
+      "string": 3,
+      "midi": 58,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_As3_01.ogg",
+      "sha256": "9d3cd572dd2a51ce68531e9444bb3e5dfe613507462c22c56ff3050c3b7d13fc",
+      "bytes": 38061
+    },
+    {
+      "file": "nylon/s3-59-v1.ogg",
+      "string": 3,
+      "midi": 59,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_B3_01.ogg",
+      "sha256": "0059878659ba5fd0168345d471ea1f811958b863d149f3b0ed9dd28f6fe9d2d2",
+      "bytes": 45258
+    },
+    {
+      "file": "nylon/s3-60-v1.ogg",
+      "string": 3,
+      "midi": 60,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_C4_01.ogg",
+      "sha256": "533c744a20b9b561e2e7ed25d487d8c8a507b6be677234059b37dce4c8708b9f",
+      "bytes": 51555
+    },
+    {
+      "file": "nylon/s3-61-v1.ogg",
+      "string": 3,
+      "midi": 61,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_Cs4_01.ogg",
+      "sha256": "ec89f5fc022225ecbf4974362fc6903a118c29a2b95866740ab54c74b6af5b85",
+      "bytes": 53892
+    },
+    {
+      "file": "nylon/s3-62-v1.ogg",
+      "string": 3,
+      "midi": 62,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_D4_01.ogg",
+      "sha256": "f7539aa1bd52f3c178c9b4061fef8e65fe6c2c7a141c3498a13b3ad8e9ae04f2",
+      "bytes": 53935
+    },
+    {
+      "file": "nylon/s3-63-v1.ogg",
+      "string": 3,
+      "midi": 63,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_Ds4_01.ogg",
+      "sha256": "12e97155d66e17a0768def260dad0737cfd60d0e33a6bd4b685036747bf9b210",
+      "bytes": 39369
+    },
+    {
+      "file": "nylon/s3-64-v1.ogg",
+      "string": 3,
+      "midi": 64,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_E4_01.ogg",
+      "sha256": "9dc1a5b3001c0007f40e3cd4eb95ec070078e4d2442b1806dfd86b81895ecaf2",
+      "bytes": 48131
+    },
+    {
+      "file": "nylon/s3-65-v1.ogg",
+      "string": 3,
+      "midi": 65,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_F4_01.ogg",
+      "sha256": "6ab5b233ff9551248f94b04c20c051d07494909a7378d8f2df8666448f109613",
+      "bytes": 43592
+    },
+    {
+      "file": "nylon/s3-66-v1.ogg",
+      "string": 3,
+      "midi": 66,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_Fs4_01.ogg",
+      "sha256": "89d5e46b90652ffb77d767f26e8c5e72d8dc1649931d2289be6602b7fa56ff9a",
+      "bytes": 33653
+    },
+    {
+      "file": "nylon/s3-67-v1.ogg",
+      "string": 3,
+      "midi": 67,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_G4_01.ogg",
+      "sha256": "3a97215607e8d08ff9cc54bbdc01cf06270fb0a1e6007624ee6428cec6b04927",
+      "bytes": 27924
+    },
+    {
+      "file": "nylon/s3-68-v1.ogg",
+      "string": 3,
+      "midi": 68,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_Gs4_01.ogg",
+      "sha256": "3bee291befa602e6d1876322f512f2ec5df5afbf5194e977549491a7fd1315a9",
+      "bytes": 21909
+    },
+    {
+      "file": "nylon/s3-69-v1.ogg",
+      "string": 3,
+      "midi": 69,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_A4_01.ogg",
+      "sha256": "ea3c2943d15e9093c5a6258d755e0346e7bc6bb645033ecf6e65a5b2b2de8965",
+      "bytes": 30388
+    },
+    {
+      "file": "nylon/s3-70-v1.ogg",
+      "string": 3,
+      "midi": 70,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_As4_01.ogg",
+      "sha256": "c8ee6598ec0c0ffc1fce8faa7b132cb87d6f22e69c7e0238f9fce98e1606a9b5",
+      "bytes": 33071
+    },
+    {
+      "file": "nylon/s3-71-v1.ogg",
+      "string": 3,
+      "midi": 71,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_B4_01.ogg",
+      "sha256": "12c9ad027d35366d9f24327fcff65ca533ead708334cc66c1f885a06a242f607",
+      "bytes": 25933
+    },
+    {
+      "file": "nylon/s3-72-v1.ogg",
+      "string": 3,
+      "midi": 72,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_C5_01.ogg",
+      "sha256": "1b9000315a29c57e562f5299ad889f9c3071e60e967058ee649498a557ada134",
+      "bytes": 17027
+    },
+    {
+      "file": "nylon/s3-73-v1.ogg",
+      "string": 3,
+      "midi": 73,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel01Finger_Cs5_01.ogg",
+      "sha256": "4b33a1d7ce7e8891a54c955acf3032151eb12942ef8d5903c1921e7f57d89def",
+      "bytes": 17829
+    },
+    {
+      "file": "nylon/s3-55-v2.ogg",
+      "string": 3,
+      "midi": 55,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_G3_01.ogg",
+      "sha256": "9b0189aed03b9a3ba60b0673abe88961b932e6fa367bc876bcadc1b6b20d8863",
+      "bytes": 49696
+    },
+    {
+      "file": "nylon/s3-56-v2.ogg",
+      "string": 3,
+      "midi": 56,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_Gs3_01.ogg",
+      "sha256": "c09574df87bca835e2b7b4a1f87471307542ccefc4f163b334f57e1784f3a495",
+      "bytes": 34678
+    },
+    {
+      "file": "nylon/s3-57-v2.ogg",
+      "string": 3,
+      "midi": 57,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_A3_01.ogg",
+      "sha256": "3868fb5d21b2fc5a3fae471c9b6fe1d7822df05d3cadacb58e813598b7ae111a",
+      "bytes": 41499
+    },
+    {
+      "file": "nylon/s3-58-v2.ogg",
+      "string": 3,
+      "midi": 58,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_As3_01.ogg",
+      "sha256": "18a00f3abb22f73cd42bf7b2d0fc3e6e48240403a7bf0c62e62fed6533d6600a",
+      "bytes": 45374
+    },
+    {
+      "file": "nylon/s3-59-v2.ogg",
+      "string": 3,
+      "midi": 59,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_B3_01.ogg",
+      "sha256": "dd7506f8f3fff8fe06e30da3302263309cf3631e8bf7aabdb96bfc21209f0261",
+      "bytes": 49875
+    },
+    {
+      "file": "nylon/s3-60-v2.ogg",
+      "string": 3,
+      "midi": 60,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_C4_01.ogg",
+      "sha256": "fea7bb19ec21ebe84aabe47a66b15c0c9b966708eea92d394e44b2fd61d4a171",
+      "bytes": 50174
+    },
+    {
+      "file": "nylon/s3-61-v2.ogg",
+      "string": 3,
+      "midi": 61,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_Cs4_01.ogg",
+      "sha256": "b31583de4a2981b7afd4cb6f1c9f11016ae0176e11049d8255c9c0f2c3499430",
+      "bytes": 52041
+    },
+    {
+      "file": "nylon/s3-62-v2.ogg",
+      "string": 3,
+      "midi": 62,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_D4_01.ogg",
+      "sha256": "8d68699e1970d1b9af3875e35d11ccdc6efe1edaa8f971838081bba0c7a5be79",
+      "bytes": 53959
+    },
+    {
+      "file": "nylon/s3-63-v2.ogg",
+      "string": 3,
+      "midi": 63,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_Ds4_01.ogg",
+      "sha256": "885a98e4f953e6ad38538103b0dcb44596266bc2ae8b6aab548377d2bd8ae7e1",
+      "bytes": 63647
+    },
+    {
+      "file": "nylon/s3-64-v2.ogg",
+      "string": 3,
+      "midi": 64,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_E4_01.ogg",
+      "sha256": "2fd4853479393c8b07c22957746ed8e136a187165312abee450feb9ce51e3954",
+      "bytes": 43369
+    },
+    {
+      "file": "nylon/s3-65-v2.ogg",
+      "string": 3,
+      "midi": 65,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_F4_01.ogg",
+      "sha256": "a4428ce0baae13049760ed023ae76cad2ebc62ffc638700865682158d0ec5850",
+      "bytes": 45375
+    },
+    {
+      "file": "nylon/s3-66-v2.ogg",
+      "string": 3,
+      "midi": 66,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_Fs4_01.ogg",
+      "sha256": "7df93814c4101abe1fa364db0c95b4160de9d40acb3b78e905047d92c55cca19",
+      "bytes": 32409
+    },
+    {
+      "file": "nylon/s3-67-v2.ogg",
+      "string": 3,
+      "midi": 67,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_G4_01.ogg",
+      "sha256": "962c7e721bbd7bb0ce2155146d45770d028c5104c68d4307a9cdea0e08a48b89",
+      "bytes": 32843
+    },
+    {
+      "file": "nylon/s3-68-v2.ogg",
+      "string": 3,
+      "midi": 68,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_Gs4_01.ogg",
+      "sha256": "8045ca1a79ab70c9da1c333e2d6bf6d520d2834b1bf548a5a2577a2e68ae7b6e",
+      "bytes": 27705
+    },
+    {
+      "file": "nylon/s3-69-v2.ogg",
+      "string": 3,
+      "midi": 69,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_A4_01.ogg",
+      "sha256": "33b1ce5b1efefcdeed6023b516c822272c563be5b0222483d3e9cc1e9d5a7184",
+      "bytes": 37380
+    },
+    {
+      "file": "nylon/s3-70-v2.ogg",
+      "string": 3,
+      "midi": 70,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_As4_01.ogg",
+      "sha256": "44219b980c4aed323693c7910f0014e19b78adbff5ddf3376561638989732b08",
+      "bytes": 34091
+    },
+    {
+      "file": "nylon/s3-71-v2.ogg",
+      "string": 3,
+      "midi": 71,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_B4_01.ogg",
+      "sha256": "89447d57a1f2e278b43433a2471d39383f54f15fc7c841f20af816508229627a",
+      "bytes": 23371
+    },
+    {
+      "file": "nylon/s3-72-v2.ogg",
+      "string": 3,
+      "midi": 72,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_C5_01.ogg",
+      "sha256": "6fec3810f9e17bb19be2f69210bcdd27f1a64548d225cbbc29bd55ceefc8a3a3",
+      "bytes": 18725
+    },
+    {
+      "file": "nylon/s3-73-v2.ogg",
+      "string": 3,
+      "midi": 73,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel02Pick_Cs5_01.ogg",
+      "sha256": "3fa502d88918825690ec2706d1b3e5f31a5d2904fd5f6f9299b6824a30e59b25",
+      "bytes": 16163
+    },
+    {
+      "file": "nylon/s3-55-v3.ogg",
+      "string": 3,
+      "midi": 55,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_G3_01.ogg",
+      "sha256": "50d4914c68672e1fed11dd6e3c624358018914fed87c33f8103a63187ab4c4f7",
+      "bytes": 36883
+    },
+    {
+      "file": "nylon/s3-56-v3.ogg",
+      "string": 3,
+      "midi": 56,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_Gs3_01.ogg",
+      "sha256": "04e6f543d5141256f44dc11cbe9aab24612293bb336b359a4ca45cba3036c9d4",
+      "bytes": 40180
+    },
+    {
+      "file": "nylon/s3-57-v3.ogg",
+      "string": 3,
+      "midi": 57,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_A3_01.ogg",
+      "sha256": "5e5efb42203746d1567b2db1d28601cde139f56c688f0c47092cc60e6fd91d56",
+      "bytes": 49025
+    },
+    {
+      "file": "nylon/s3-58-v3.ogg",
+      "string": 3,
+      "midi": 58,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_As3_01.ogg",
+      "sha256": "4cd38703211898061e503d90f7ba10e5299cac22823b5c8c3cbbb05f19cc6b1d",
+      "bytes": 50556
+    },
+    {
+      "file": "nylon/s3-59-v3.ogg",
+      "string": 3,
+      "midi": 59,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_B3_01.ogg",
+      "sha256": "52edc161188c0d955b23ecd5cadd284d1007259689d4972180a369f9fe0b674e",
+      "bytes": 57518
+    },
+    {
+      "file": "nylon/s3-60-v3.ogg",
+      "string": 3,
+      "midi": 60,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_C4_01.ogg",
+      "sha256": "d6b967477eff0ea3ebcd3ef181fd3f90b5efee30a31ccbe460499f6c196d6b64",
+      "bytes": 49644
+    },
+    {
+      "file": "nylon/s3-61-v3.ogg",
+      "string": 3,
+      "midi": 61,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_Cs4_01.ogg",
+      "sha256": "e667a878b704d446b285d345d87f387c5ad80f7b7fb90c8f225d297b34d83911",
+      "bytes": 49371
+    },
+    {
+      "file": "nylon/s3-62-v3.ogg",
+      "string": 3,
+      "midi": 62,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_D4_01.ogg",
+      "sha256": "90dbc9fca2b7c8e5c592502427d0951c4457084ad2212af63d5cd6b88f2560bd",
+      "bytes": 60371
+    },
+    {
+      "file": "nylon/s3-63-v3.ogg",
+      "string": 3,
+      "midi": 63,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_Ds4_01.ogg",
+      "sha256": "7827594b9dbaef59e1baac94aa5512144151a0e61849be63023842d63f1f14d3",
+      "bytes": 61989
+    },
+    {
+      "file": "nylon/s3-64-v3.ogg",
+      "string": 3,
+      "midi": 64,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_E4_01.ogg",
+      "sha256": "ad0c98c32b1e1b63604d41bac05252d526573e490e442ca51cab5dc2937f6d94",
+      "bytes": 50199
+    },
+    {
+      "file": "nylon/s3-65-v3.ogg",
+      "string": 3,
+      "midi": 65,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_F4_01.ogg",
+      "sha256": "cccf703174314a856ee4fe97693f86d3021f27d211a63f9954ce00458afbbf5e",
+      "bytes": 43182
+    },
+    {
+      "file": "nylon/s3-66-v3.ogg",
+      "string": 3,
+      "midi": 66,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_Fs4_01.ogg",
+      "sha256": "6508584c681b97ed3065826a56ce9b1c6313eb9139b581389c1c79926e3b67e7",
+      "bytes": 48042
+    },
+    {
+      "file": "nylon/s3-67-v3.ogg",
+      "string": 3,
+      "midi": 67,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_G4_01.ogg",
+      "sha256": "e3d6e64830bcfab51051e3a45084135b9de9c53a0ca1d4be33105fbfef69a50d",
+      "bytes": 35758
+    },
+    {
+      "file": "nylon/s3-68-v3.ogg",
+      "string": 3,
+      "midi": 68,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_Gs4_01.ogg",
+      "sha256": "d59b29c88518386166491a0938f21be4fc462be21048a2c15e1e67e1fa48b801",
+      "bytes": 30558
+    },
+    {
+      "file": "nylon/s3-69-v3.ogg",
+      "string": 3,
+      "midi": 69,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_A4_01.ogg",
+      "sha256": "570fff8de54f3312b9d19be1e921a74d013ac8da91484b000716d298c26bf357",
+      "bytes": 41338
+    },
+    {
+      "file": "nylon/s3-70-v3.ogg",
+      "string": 3,
+      "midi": 70,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_As4_01.ogg",
+      "sha256": "18c994ddd95a6416e665708845e2d3c435d30597cd0ea29d02df4cd10ceb529c",
+      "bytes": 30646
+    },
+    {
+      "file": "nylon/s3-71-v3.ogg",
+      "string": 3,
+      "midi": 71,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_B4_01.ogg",
+      "sha256": "b3e233d6c25278f23d956ce54a388dcbcde602b26dbe1a31fecd27f3359409e9",
+      "bytes": 25306
+    },
+    {
+      "file": "nylon/s3-72-v3.ogg",
+      "string": 3,
+      "midi": 72,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_C5_01.ogg",
+      "sha256": "deff4b644d6620fb75706ec0b2cbbed4c71d843b92e218762e9e53cbdfdd03f4",
+      "bytes": 20008
+    },
+    {
+      "file": "nylon/s3-73-v3.ogg",
+      "string": 3,
+      "midi": 73,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringG_Vel03Pick_Cs5_01.ogg",
+      "sha256": "106040f2a1a9378bf214886f7ef14e0d2898cb38dd57828fc2d6f5df0f2ed515",
+      "bytes": 20542
+    },
+    {
+      "file": "nylon/s2-59-v1.ogg",
+      "string": 2,
+      "midi": 59,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_B3_01.ogg",
+      "sha256": "dda8784fa36a36decddd7b39e729258755c89f74817bdfc18c842e5b50f02d7c",
+      "bytes": 41191
+    },
+    {
+      "file": "nylon/s2-60-v1.ogg",
+      "string": 2,
+      "midi": 60,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_C4_01.ogg",
+      "sha256": "61921298564aa209f0e228dcf48e47fb5cb612e048c88cd66d99a212a33ed55f",
+      "bytes": 39067
+    },
+    {
+      "file": "nylon/s2-61-v1.ogg",
+      "string": 2,
+      "midi": 61,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_Cs4_01.ogg",
+      "sha256": "69ad3f2979339d6fe63e05cbb165880ab1b27048a7cc72a3d8dcebd53cfb09f4",
+      "bytes": 34055
+    },
+    {
+      "file": "nylon/s2-62-v1.ogg",
+      "string": 2,
+      "midi": 62,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_D4_01.ogg",
+      "sha256": "8421ff65db84f4ab166fb95a9b44805245601e49f36f59cd64e99de905c0faee",
+      "bytes": 48368
+    },
+    {
+      "file": "nylon/s2-63-v1.ogg",
+      "string": 2,
+      "midi": 63,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_Ds4_01.ogg",
+      "sha256": "fc759679f42854eef0a3e2d136a42d8a2c38fbf4a9966a180706c8f5e03fbdb0",
+      "bytes": 53377
+    },
+    {
+      "file": "nylon/s2-64-v1.ogg",
+      "string": 2,
+      "midi": 64,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_E4_01.ogg",
+      "sha256": "40be3cd8a3e32e9f5da03d5a51dff7b4367df126a8dad5bd5cc929d9b22c971c",
+      "bytes": 46515
+    },
+    {
+      "file": "nylon/s2-65-v1.ogg",
+      "string": 2,
+      "midi": 65,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_F4_01.ogg",
+      "sha256": "7f1b1aa9f93e8203bedc57cc7a1e6e4ee5bf9c1f84a1f01d4f3638954904d3f3",
+      "bytes": 35944
+    },
+    {
+      "file": "nylon/s2-66-v1.ogg",
+      "string": 2,
+      "midi": 66,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_Fs4_01.ogg",
+      "sha256": "d287bcac109a2fbedad70936909b888ee79419917ffa9630dcb8abf3b51566aa",
+      "bytes": 44955
+    },
+    {
+      "file": "nylon/s2-67-v1.ogg",
+      "string": 2,
+      "midi": 67,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_G4_01.ogg",
+      "sha256": "f6198f683385f85afa61058002fa95ba3ed7ae3753dcc6acc738af5af0fd2d40",
+      "bytes": 34808
+    },
+    {
+      "file": "nylon/s2-68-v1.ogg",
+      "string": 2,
+      "midi": 68,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_Gs4_01.ogg",
+      "sha256": "2ac3ce6fb43a674cd41ff50678093c514b3e6331696908bfe79196b931471d6d",
+      "bytes": 38554
+    },
+    {
+      "file": "nylon/s2-69-v1.ogg",
+      "string": 2,
+      "midi": 69,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_A4_01.ogg",
+      "sha256": "f176f33ac1a6e4a0b9c725776e2f3313e87975e6ce792b4ad005d9acea87b075",
+      "bytes": 38902
+    },
+    {
+      "file": "nylon/s2-70-v1.ogg",
+      "string": 2,
+      "midi": 70,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_As4_01.ogg",
+      "sha256": "fc860e977247c23a98584db1c6289d48f59df062146c0959d547124a4d43a15c",
+      "bytes": 32833
+    },
+    {
+      "file": "nylon/s2-71-v1.ogg",
+      "string": 2,
+      "midi": 71,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_B4_01.ogg",
+      "sha256": "c680214fd4fc08c99f59afce6b3936392c581bdd9c3b2fc9c3977c6d9599e3dd",
+      "bytes": 29031
+    },
+    {
+      "file": "nylon/s2-72-v1.ogg",
+      "string": 2,
+      "midi": 72,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_C5_01.ogg",
+      "sha256": "974b52c4cfd820c97d304c18bfea956a42efe8298d954f535200908ff2196863",
+      "bytes": 21799
+    },
+    {
+      "file": "nylon/s2-73-v1.ogg",
+      "string": 2,
+      "midi": 73,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_Cs5_01.ogg",
+      "sha256": "f90d49735b56e75ace900dc93dd7d81bf52dacacbc40ea8496a926c30bdb627b",
+      "bytes": 22658
+    },
+    {
+      "file": "nylon/s2-74-v1.ogg",
+      "string": 2,
+      "midi": 74,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_D5_01.ogg",
+      "sha256": "ae5010227d5cc3179fc8961a984480d3db26348cfc1652b0a31268326a8e2312",
+      "bytes": 17411
+    },
+    {
+      "file": "nylon/s2-75-v1.ogg",
+      "string": 2,
+      "midi": 75,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_Ds5_01.ogg",
+      "sha256": "937269e320134de02894c9e87adbe1a6e32be24a0955ce49f6ecbfc96a168c45",
+      "bytes": 20883
+    },
+    {
+      "file": "nylon/s2-76-v1.ogg",
+      "string": 2,
+      "midi": 76,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_E5_01.ogg",
+      "sha256": "d556500964ec14d9ce24bca2a63fe91a883e64e3c9e1645f16c78ef725301d01",
+      "bytes": 23590
+    },
+    {
+      "file": "nylon/s2-77-v1.ogg",
+      "string": 2,
+      "midi": 77,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel01Finger_F5_01.ogg",
+      "sha256": "927d69fa411a4452a594669bb1f1e2146aa5f1490665ba0094829ff328c19467",
+      "bytes": 18799
+    },
+    {
+      "file": "nylon/s2-59-v2.ogg",
+      "string": 2,
+      "midi": 59,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_B3_01.ogg",
+      "sha256": "31afb1de95133b65cdc772988ec9476c7ce139898e56f54fb1d4c0ea724d3aba",
+      "bytes": 40344
+    },
+    {
+      "file": "nylon/s2-60-v2.ogg",
+      "string": 2,
+      "midi": 60,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_C4_01.ogg",
+      "sha256": "fc3beb04968e9689e5227d578a2f94af41026878c6dea15ffc81bd2992f9b543",
+      "bytes": 37620
+    },
+    {
+      "file": "nylon/s2-61-v2.ogg",
+      "string": 2,
+      "midi": 61,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_Cs4_01.ogg",
+      "sha256": "63b4453867dbd02eff17ddfd0bc7d1882437322a59c8adfc4d2d73f154ab9b25",
+      "bytes": 33097
+    },
+    {
+      "file": "nylon/s2-62-v2.ogg",
+      "string": 2,
+      "midi": 62,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_D4_01.ogg",
+      "sha256": "cc49f6c06ce11bdd752cbdfca8614a80edf727e6089b24175f1a9b24a60244b3",
+      "bytes": 42940
+    },
+    {
+      "file": "nylon/s2-63-v2.ogg",
+      "string": 2,
+      "midi": 63,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_Ds4_01.ogg",
+      "sha256": "dd067befa3fe4c75364410773ffa7f08faf7c168878c75a083921792bec90c50",
+      "bytes": 51734
+    },
+    {
+      "file": "nylon/s2-64-v2.ogg",
+      "string": 2,
+      "midi": 64,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_E4_01.ogg",
+      "sha256": "b7dc1e91d870ca1a5c92a7079bacc2db59b2cb43632b1f332bade03437800836",
+      "bytes": 46506
+    },
+    {
+      "file": "nylon/s2-65-v2.ogg",
+      "string": 2,
+      "midi": 65,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_F4_01.ogg",
+      "sha256": "cef8a8cc3855455fa0334eb3e2d87249d1de41af220ab9f6c6482b4b17391bc5",
+      "bytes": 39231
+    },
+    {
+      "file": "nylon/s2-66-v2.ogg",
+      "string": 2,
+      "midi": 66,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_Fs4_01.ogg",
+      "sha256": "35ad92f01c71447e841416fb1f43ea58536932bf10268e5b14759f87f6d82931",
+      "bytes": 48053
+    },
+    {
+      "file": "nylon/s2-67-v2.ogg",
+      "string": 2,
+      "midi": 67,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_G4_01.ogg",
+      "sha256": "274274ca921e2617ffc7db326d8b50ad6c925613c37a851579631eb6fae7b4ee",
+      "bytes": 40463
+    },
+    {
+      "file": "nylon/s2-68-v2.ogg",
+      "string": 2,
+      "midi": 68,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_Gs4_01.ogg",
+      "sha256": "2fc15bab16a5eb3fc6803ac6144ab7a5ea21a27ce3a513c96ed72c08da6da07f",
+      "bytes": 39080
+    },
+    {
+      "file": "nylon/s2-69-v2.ogg",
+      "string": 2,
+      "midi": 69,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_A4_01.ogg",
+      "sha256": "1ecbc8f5e867ff777c2c4b0fd447e64f7852c5f750e39d9cfe6724c0665d00e2",
+      "bytes": 43492
+    },
+    {
+      "file": "nylon/s2-70-v2.ogg",
+      "string": 2,
+      "midi": 70,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_As4_01.ogg",
+      "sha256": "89d3134ecd8ab4dc2f85684de68110b30b3d45e327bd97a643598c83fcdfc76d",
+      "bytes": 38672
+    },
+    {
+      "file": "nylon/s2-71-v2.ogg",
+      "string": 2,
+      "midi": 71,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_B4_01.ogg",
+      "sha256": "a3b1f4927c258cf31bc03be92ea5d7aa4e4e444b18e6965714be6a24d5c209ab",
+      "bytes": 32419
+    },
+    {
+      "file": "nylon/s2-72-v2.ogg",
+      "string": 2,
+      "midi": 72,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_C5_01.ogg",
+      "sha256": "aab571595c9424f8679b04ed3a6ae7a3e78d4a960f161176000c8341c258ae72",
+      "bytes": 23957
+    },
+    {
+      "file": "nylon/s2-73-v2.ogg",
+      "string": 2,
+      "midi": 73,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_Cs5_01.ogg",
+      "sha256": "a00c5ebb5a65c80e748f7b7ce71d98e01142e656c8e6a95aa967b60d21f8ba10",
+      "bytes": 26919
+    },
+    {
+      "file": "nylon/s2-74-v2.ogg",
+      "string": 2,
+      "midi": 74,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_D5_01.ogg",
+      "sha256": "84154cef16b77be9ccc59eb996c807923c4f1600ec5121b56f1df30b04cefbfd",
+      "bytes": 23464
+    },
+    {
+      "file": "nylon/s2-75-v2.ogg",
+      "string": 2,
+      "midi": 75,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_Ds5_01.ogg",
+      "sha256": "9aacffa866b7b085545a989674643fb6005feae1582fa46afc4b2d2c9c1b7076",
+      "bytes": 19394
+    },
+    {
+      "file": "nylon/s2-76-v2.ogg",
+      "string": 2,
+      "midi": 76,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_E5_01.ogg",
+      "sha256": "f27f5a07dab282991e0d0e46e180f97aaa818221d98edc0acd3711437ae6eb83",
+      "bytes": 19445
+    },
+    {
+      "file": "nylon/s2-77-v2.ogg",
+      "string": 2,
+      "midi": 77,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel02Pick_F5_01.ogg",
+      "sha256": "a78d8e42fbe78f46bc1afe8d92b74f554ae18f57a739e99127019331f83a739e",
+      "bytes": 16727
+    },
+    {
+      "file": "nylon/s2-59-v3.ogg",
+      "string": 2,
+      "midi": 59,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_B3_01.ogg",
+      "sha256": "fd7c44812f96b61c67686ed045d7463ea880610e59a2006d8f1de38e438be676",
+      "bytes": 42013
+    },
+    {
+      "file": "nylon/s2-60-v3.ogg",
+      "string": 2,
+      "midi": 60,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_C4_01.ogg",
+      "sha256": "1cb42adbc0475a862ebb90b31eabffac9c6262a3f8c287834f6efdc6aa0f2b8d",
+      "bytes": 35904
+    },
+    {
+      "file": "nylon/s2-61-v3.ogg",
+      "string": 2,
+      "midi": 61,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_Cs4_01.ogg",
+      "sha256": "38b8283d8ef5ebf8d3b5380a7c3b93de15fc5399ce403ffb0f8a074d2fe1f65a",
+      "bytes": 36770
+    },
+    {
+      "file": "nylon/s2-62-v3.ogg",
+      "string": 2,
+      "midi": 62,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_D4_01.ogg",
+      "sha256": "3eb8c93299a935a9d205d867ee3b7da813274c5104c1ef33bf4f5d8f5de8c954",
+      "bytes": 48033
+    },
+    {
+      "file": "nylon/s2-63-v3.ogg",
+      "string": 2,
+      "midi": 63,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_Ds4_01.ogg",
+      "sha256": "6b152ee385e9735218109c17040a6cc80b4e481c62663ed96f9dd13e990d78ab",
+      "bytes": 55472
+    },
+    {
+      "file": "nylon/s2-64-v3.ogg",
+      "string": 2,
+      "midi": 64,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_E4_01.ogg",
+      "sha256": "fef24ef69347d7f9c9a15df68e35589526f3d0411c76d1e3cb34eed56b815a43",
+      "bytes": 48820
+    },
+    {
+      "file": "nylon/s2-65-v3.ogg",
+      "string": 2,
+      "midi": 65,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_F4_01.ogg",
+      "sha256": "b016e12e8f19b5176f5ea7f8e06ffaf5fc10211289381b0f446d1105ea117391",
+      "bytes": 45710
+    },
+    {
+      "file": "nylon/s2-66-v3.ogg",
+      "string": 2,
+      "midi": 66,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_Fs4_01.ogg",
+      "sha256": "cb83d753b702c85451648dc9bcc979096163a822ffb3116d93d1236da93b1c4f",
+      "bytes": 48557
+    },
+    {
+      "file": "nylon/s2-67-v3.ogg",
+      "string": 2,
+      "midi": 67,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_G4_01.ogg",
+      "sha256": "4a56a299f6879773034962a5af14c7656f627567f5c74acd330ddfb259d50e97",
+      "bytes": 44396
+    },
+    {
+      "file": "nylon/s2-68-v3.ogg",
+      "string": 2,
+      "midi": 68,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_Gs4_01.ogg",
+      "sha256": "a35290cfa9701d53394d8a61d77210b835a4afc77e318c26b8c914ce07400599",
+      "bytes": 39107
+    },
+    {
+      "file": "nylon/s2-69-v3.ogg",
+      "string": 2,
+      "midi": 69,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_A4_01.ogg",
+      "sha256": "6ea066e578a08ab0ca8b18dd10a5dff79c6ccd48e2850b2062dc3d834bd45baf",
+      "bytes": 49076
+    },
+    {
+      "file": "nylon/s2-70-v3.ogg",
+      "string": 2,
+      "midi": 70,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_As4_01.ogg",
+      "sha256": "e14297c166e76e03d1636ce7a5beaabeeba3f43f6db7d11277c4478c208fa1df",
+      "bytes": 43144
+    },
+    {
+      "file": "nylon/s2-71-v3.ogg",
+      "string": 2,
+      "midi": 71,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_B4_01.ogg",
+      "sha256": "6f270807053f76683b1815d2fe41da0ec800b356e58ac7369c1064ed1958ecc2",
+      "bytes": 32773
+    },
+    {
+      "file": "nylon/s2-72-v3.ogg",
+      "string": 2,
+      "midi": 72,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_C5_01.ogg",
+      "sha256": "fad08b3afe305de6428023408eb778265e3c206bfa236d6c0f64fe3e701f0050",
+      "bytes": 24330
+    },
+    {
+      "file": "nylon/s2-73-v3.ogg",
+      "string": 2,
+      "midi": 73,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_Cs5_01.ogg",
+      "sha256": "ad36a781e5406f7f1d44ac6b449716560098b14050bda2506c4f75f2e970a63e",
+      "bytes": 27872
+    },
+    {
+      "file": "nylon/s2-74-v3.ogg",
+      "string": 2,
+      "midi": 74,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_D5_01.ogg",
+      "sha256": "63e4d6331558ba53e8d9d4858b5633fec6d454dc634b9948a3a389ee4b9e8e4c",
+      "bytes": 23088
+    },
+    {
+      "file": "nylon/s2-75-v3.ogg",
+      "string": 2,
+      "midi": 75,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_Ds5_01.ogg",
+      "sha256": "f2ce30004f3bed841cf3261b3ce137a2ef315e3b39d2ce894e15424804d869fb",
+      "bytes": 26086
+    },
+    {
+      "file": "nylon/s2-76-v3.ogg",
+      "string": 2,
+      "midi": 76,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_E5_01.ogg",
+      "sha256": "6f8013147f6c77b28fe2f6c84fe352af9b88f0969f9e18175f3c97508ce47a08",
+      "bytes": 26566
+    },
+    {
+      "file": "nylon/s2-77-v3.ogg",
+      "string": 2,
+      "midi": 77,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringB_Vel03Pick_F5_01.ogg",
+      "sha256": "7468b0ae668675b2f58259e85774959bd4fa4320241c22c5fe635e04bf64669c",
+      "bytes": 20852
+    },
+    {
+      "file": "nylon/s1-64-v1.ogg",
+      "string": 1,
+      "midi": 64,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_E4_01.ogg",
+      "sha256": "7743bd063c273a2e9e01252d74352ab86e0fc6d14a8206e9f53d5d2f98db0e65",
+      "bytes": 44864
+    },
+    {
+      "file": "nylon/s1-65-v1.ogg",
+      "string": 1,
+      "midi": 65,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_F4_01.ogg",
+      "sha256": "70c3bfc3830a5faff48b4d714d2fa5782c5fc9d2fa3e201c4bf1e912d999b7a0",
+      "bytes": 39778
+    },
+    {
+      "file": "nylon/s1-66-v1.ogg",
+      "string": 1,
+      "midi": 66,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_Fs4_01.ogg",
+      "sha256": "4af385c3178a8f091a9eca1deb01bb15b65b468ef156f5075338e8aeeb2ee039",
+      "bytes": 33598
+    },
+    {
+      "file": "nylon/s1-67-v1.ogg",
+      "string": 1,
+      "midi": 67,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_G4_01.ogg",
+      "sha256": "fb75da29d5b76d90f617a9f5ba5813e0bed4cac8c087741b6f78d5b586d20a30",
+      "bytes": 35869
+    },
+    {
+      "file": "nylon/s1-68-v1.ogg",
+      "string": 1,
+      "midi": 68,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_Gs4_01.ogg",
+      "sha256": "36a2694582dee670e11257f9a924398ecff2e3c08bb850bbd060bea1d1c1a76a",
+      "bytes": 33017
+    },
+    {
+      "file": "nylon/s1-69-v1.ogg",
+      "string": 1,
+      "midi": 69,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_A4_01.ogg",
+      "sha256": "3fdd6e8979442633ed2093a8584df66b03109e3926714fa91b6eeeed062ee03c",
+      "bytes": 33805
+    },
+    {
+      "file": "nylon/s1-70-v1.ogg",
+      "string": 1,
+      "midi": 70,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_As4_01.ogg",
+      "sha256": "000a1e8514fb95d2728dc9400acd044e782f3f8c179121f2e2877af8b77a969f",
+      "bytes": 20884
+    },
+    {
+      "file": "nylon/s1-71-v1.ogg",
+      "string": 1,
+      "midi": 71,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_B4_01.ogg",
+      "sha256": "e432ba2c6f43464c964b254186827a3087c89661513eb306ddc8cbbdfc37f43c",
+      "bytes": 22097
+    },
+    {
+      "file": "nylon/s1-72-v1.ogg",
+      "string": 1,
+      "midi": 72,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_C5_01.ogg",
+      "sha256": "df6ebe090857222e3f7679f696f1c54a69248211f9b3f7e561e617fbf4350d13",
+      "bytes": 20465
+    },
+    {
+      "file": "nylon/s1-73-v1.ogg",
+      "string": 1,
+      "midi": 73,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_Cs5_01.ogg",
+      "sha256": "0e8bd6827f4c36381b1ed249b7ddab924a6fb77f3add10160093d922423726bd",
+      "bytes": 23324
+    },
+    {
+      "file": "nylon/s1-74-v1.ogg",
+      "string": 1,
+      "midi": 74,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_D5_01.ogg",
+      "sha256": "ff4de1840951cf2e628622581b89d22cd926dbe983a8368abdbce8fdbf325edd",
+      "bytes": 16312
+    },
+    {
+      "file": "nylon/s1-75-v1.ogg",
+      "string": 1,
+      "midi": 75,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_Ds5_01.ogg",
+      "sha256": "99ac9b46b246ba7c7ae7485acb896a344964a17706b56b87cea7eaea787c1b5d",
+      "bytes": 19882
+    },
+    {
+      "file": "nylon/s1-76-v1.ogg",
+      "string": 1,
+      "midi": 76,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_E5_01.ogg",
+      "sha256": "57f9c073cd1ee1365857151fb378c9fa452942eaf8a08de7d2a3a7beb12134a8",
+      "bytes": 16869
+    },
+    {
+      "file": "nylon/s1-77-v1.ogg",
+      "string": 1,
+      "midi": 77,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_F5_01.ogg",
+      "sha256": "4bca4cfbc5c53b9541d4129c7ff1525c3249a0799eef73bc121fcf93338a8b63",
+      "bytes": 18011
+    },
+    {
+      "file": "nylon/s1-78-v1.ogg",
+      "string": 1,
+      "midi": 78,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_Fs5_01.ogg",
+      "sha256": "411956d066c34dbfd05337a494a2dbda0fb5a5bed4baf5aa03578de624823077",
+      "bytes": 19202
+    },
+    {
+      "file": "nylon/s1-79-v1.ogg",
+      "string": 1,
+      "midi": 79,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_G5_01.ogg",
+      "sha256": "4f258f3d279ba879bbf72e604965beae90a90be7fa7b2df6ae5f060836212ca7",
+      "bytes": 18750
+    },
+    {
+      "file": "nylon/s1-80-v1.ogg",
+      "string": 1,
+      "midi": 80,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_Gs5_01.ogg",
+      "sha256": "775cc5a4642c51b8987b78d9fbda884b3e8464fa1d54c578b84d9609c215ff71",
+      "bytes": 14058
+    },
+    {
+      "file": "nylon/s1-81-v1.ogg",
+      "string": 1,
+      "midi": 81,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_A5_01.ogg",
+      "sha256": "f01bccae8b556bf9defc0fa8d4abdef65a6d3fd76f37be2773848c97d9dc304d",
+      "bytes": 18750
+    },
+    {
+      "file": "nylon/s1-82-v1.ogg",
+      "string": 1,
+      "midi": 82,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_As5_01.ogg",
+      "sha256": "aefaf0a981bc9961db7116144bb4b4ffba82bca932e35dc30ae979a31e912305",
+      "bytes": 18013
+    },
+    {
+      "file": "nylon/s1-83-v1.ogg",
+      "string": 1,
+      "midi": 83,
+      "layer": 1,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel01Finger_B5_01.ogg",
+      "sha256": "3c6a7deb256f9a54fad4e3967ba9d364415ffb6fd02f5717ec713b0ebcb2c558",
+      "bytes": 17627
+    },
+    {
+      "file": "nylon/s1-64-v2.ogg",
+      "string": 1,
+      "midi": 64,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_E4_01.ogg",
+      "sha256": "e34a00254690b2a3f46dc8e38878b04997d3aec499cc589d0a5053ad8ea6c1cc",
+      "bytes": 47464
+    },
+    {
+      "file": "nylon/s1-65-v2.ogg",
+      "string": 1,
+      "midi": 65,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_F4_01.ogg",
+      "sha256": "a59f97da015a54beaf5497e701256e7aad56735a7fe4372e4269611c976c0ddb",
+      "bytes": 38344
+    },
+    {
+      "file": "nylon/s1-66-v2.ogg",
+      "string": 1,
+      "midi": 66,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_Fs4_01.ogg",
+      "sha256": "fe8de0b661d676caab284d415cc16fffca01b3d310ef3c79e73b4d2dc1bc3a86",
+      "bytes": 35326
+    },
+    {
+      "file": "nylon/s1-67-v2.ogg",
+      "string": 1,
+      "midi": 67,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_G4_01.ogg",
+      "sha256": "1abac816b9da39f145881bda26d064d8fff7a93b63032ca5db1702c8df30c4d7",
+      "bytes": 39584
+    },
+    {
+      "file": "nylon/s1-68-v2.ogg",
+      "string": 1,
+      "midi": 68,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_Gs4_01.ogg",
+      "sha256": "96b47b2624f24d030867fec20812eb4ffe85e97a0ebf02313717d219a4472be1",
+      "bytes": 35091
+    },
+    {
+      "file": "nylon/s1-69-v2.ogg",
+      "string": 1,
+      "midi": 69,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_A4_01.ogg",
+      "sha256": "a78ac99f02659ad30bd6d4db24ca323b318d56bd09c0cb3271229aaf9f32d9b4",
+      "bytes": 27327
+    },
+    {
+      "file": "nylon/s1-70-v2.ogg",
+      "string": 1,
+      "midi": 70,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_As4_01.ogg",
+      "sha256": "59c78a9c78f22d94e6842ed6a6f8b023f27356cff59520e03349e804fab4fa71",
+      "bytes": 31960
+    },
+    {
+      "file": "nylon/s1-71-v2.ogg",
+      "string": 1,
+      "midi": 71,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_B4_01.ogg",
+      "sha256": "696991a367361b169688835484f794a9284e36c8cc51c3d919587becc354a31d",
+      "bytes": 29360
+    },
+    {
+      "file": "nylon/s1-72-v2.ogg",
+      "string": 1,
+      "midi": 72,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_C5_01.ogg",
+      "sha256": "821972fb813dad74b53ecfe615c60877f9138fa7a0a6a1b68132bb374a684867",
+      "bytes": 25707
+    },
+    {
+      "file": "nylon/s1-73-v2.ogg",
+      "string": 1,
+      "midi": 73,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_Cs5_01.ogg",
+      "sha256": "09feffdfd48d6641a741a048a14b84b9b6af1d55e37f3f62f7a5ca114c71ca4b",
+      "bytes": 25789
+    },
+    {
+      "file": "nylon/s1-74-v2.ogg",
+      "string": 1,
+      "midi": 74,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_D5_01.ogg",
+      "sha256": "e05a71362854c6f003cdf2334fd9d840304c7779130c2a4039ac60f144dcc0f1",
+      "bytes": 24761
+    },
+    {
+      "file": "nylon/s1-75-v2.ogg",
+      "string": 1,
+      "midi": 75,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_Ds5_01.ogg",
+      "sha256": "092c3e87dac6bd8a78cc4832df9c15b23a39d8964c309c43feb62bc66b0ec261",
+      "bytes": 24891
+    },
+    {
+      "file": "nylon/s1-76-v2.ogg",
+      "string": 1,
+      "midi": 76,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_E5_01.ogg",
+      "sha256": "997452f7cd2f6b3248801aeb041266bcad75e5455d36b11885aba6a489c6bd6c",
+      "bytes": 24559
+    },
+    {
+      "file": "nylon/s1-77-v2.ogg",
+      "string": 1,
+      "midi": 77,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_F5_01.ogg",
+      "sha256": "7b59d7cb3cfa83fea3ca7f9448b97e0bb4edaf6c51328dfff3b2d4906bd893f0",
+      "bytes": 21321
+    },
+    {
+      "file": "nylon/s1-78-v2.ogg",
+      "string": 1,
+      "midi": 78,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_Fs5_01.ogg",
+      "sha256": "cc787624845dda57cbe6141c289637b58ca728df086c85f3834fe91e27a46161",
+      "bytes": 23187
+    },
+    {
+      "file": "nylon/s1-79-v2.ogg",
+      "string": 1,
+      "midi": 79,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_G5_01.ogg",
+      "sha256": "7cb1460013bc7195ecf6b613992a2348f1699685173080709cc946a08aacd1be",
+      "bytes": 21205
+    },
+    {
+      "file": "nylon/s1-80-v2.ogg",
+      "string": 1,
+      "midi": 80,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_Gs5_01.ogg",
+      "sha256": "02331a668dacddb525cd07c0bf6de1159dcbd6ad82d6bbf4b89071067a08e3c0",
+      "bytes": 21359
+    },
+    {
+      "file": "nylon/s1-81-v2.ogg",
+      "string": 1,
+      "midi": 81,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_A5_01.ogg",
+      "sha256": "62806f60576fc3725a5f3203597ad32119e68f15418821abcf9c31c8df00d912",
+      "bytes": 19155
+    },
+    {
+      "file": "nylon/s1-82-v2.ogg",
+      "string": 1,
+      "midi": 82,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_As5_01.ogg",
+      "sha256": "f432eef276011b28e6f0fa10034b5efebcd5a5941df5aff3c91d20e0bb15f75e",
+      "bytes": 17900
+    },
+    {
+      "file": "nylon/s1-83-v2.ogg",
+      "string": 1,
+      "midi": 83,
+      "layer": 2,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel02Pick_B5_01.ogg",
+      "sha256": "353a57c288876202c134c297db3760d53be4f47050602086444dfa4d6799d960",
+      "bytes": 18762
+    },
+    {
+      "file": "nylon/s1-64-v3.ogg",
+      "string": 1,
+      "midi": 64,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_E4_01.ogg",
+      "sha256": "611560c02d33f4cb2e8ddb043993ceba62e5426c225829569829c9bd92b19541",
+      "bytes": 51113
+    },
+    {
+      "file": "nylon/s1-65-v3.ogg",
+      "string": 1,
+      "midi": 65,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_F4_01.ogg",
+      "sha256": "39e8273710baac6449617d089bd2511c91567cf81153c5bc04c6a2f5759e1a6a",
+      "bytes": 40280
+    },
+    {
+      "file": "nylon/s1-66-v3.ogg",
+      "string": 1,
+      "midi": 66,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_Fs4_01.ogg",
+      "sha256": "9921e39ca921255f91702f42b52bc7bfeec627f346b471c677c1194088e9b780",
+      "bytes": 37378
+    },
+    {
+      "file": "nylon/s1-67-v3.ogg",
+      "string": 1,
+      "midi": 67,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_G4_01.ogg",
+      "sha256": "f3ce46abfb06371204eeffd5a9539803fea877125976a9351fd8174c172d25e2",
+      "bytes": 43712
+    },
+    {
+      "file": "nylon/s1-68-v3.ogg",
+      "string": 1,
+      "midi": 68,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_Gs4_01.ogg",
+      "sha256": "3624a87c7887977487ac5e3926474c3fd0c4c34ec147a895972a4b17c0bcd597",
+      "bytes": 38313
+    },
+    {
+      "file": "nylon/s1-69-v3.ogg",
+      "string": 1,
+      "midi": 69,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_A4_01.ogg",
+      "sha256": "54ab152bc340461c2d9e3dec7528add4a1ca97f047e858abe8efdaacb8b62fc5",
+      "bytes": 33566
+    },
+    {
+      "file": "nylon/s1-70-v3.ogg",
+      "string": 1,
+      "midi": 70,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_As4_01.ogg",
+      "sha256": "4f9bd83ee8b8eef91b79c5dd0371a467fd90a2bc429ef03be3a79ebed462973b",
+      "bytes": 31901
+    },
+    {
+      "file": "nylon/s1-71-v3.ogg",
+      "string": 1,
+      "midi": 71,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_B4_01.ogg",
+      "sha256": "246e7874f56370c49d36af5bfb3cfc08419212d49ae29b77f30117eb02db5f19",
+      "bytes": 31276
+    },
+    {
+      "file": "nylon/s1-72-v3.ogg",
+      "string": 1,
+      "midi": 72,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_C5_01.ogg",
+      "sha256": "88ccb55b06332bc9dca4a8e032f16ae102532aaad2e072e64ec038cf14eed688",
+      "bytes": 26584
+    },
+    {
+      "file": "nylon/s1-73-v3.ogg",
+      "string": 1,
+      "midi": 73,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_Cs5_01.ogg",
+      "sha256": "66e55ecef33b9710c35c22bb3b1f817912e64b5128e2479782e6fa4cbfeb5f60",
+      "bytes": 31131
+    },
+    {
+      "file": "nylon/s1-74-v3.ogg",
+      "string": 1,
+      "midi": 74,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_D5_01.ogg",
+      "sha256": "9abc4b8d030a6088eff5b2f37af4e161733c2a4eede8b77a6d8b89483ef473a3",
+      "bytes": 25818
+    },
+    {
+      "file": "nylon/s1-75-v3.ogg",
+      "string": 1,
+      "midi": 75,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_Ds5_01.ogg",
+      "sha256": "a6fd5971d98ea9c0a03e5f4c9a27702da72f6c69523e33e5df1c7599da95f995",
+      "bytes": 22054
+    },
+    {
+      "file": "nylon/s1-76-v3.ogg",
+      "string": 1,
+      "midi": 76,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_E5_01.ogg",
+      "sha256": "2ceaa3bd4bc0043d3635625ba76c025a10a27725b6ec5fffe1d5b25b30f2abe4",
+      "bytes": 23849
+    },
+    {
+      "file": "nylon/s1-77-v3.ogg",
+      "string": 1,
+      "midi": 77,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_F5_01.ogg",
+      "sha256": "02ece80c4ddbe0575a42722002f40c6d66b8db904a89e77a74e1302996c10ec9",
+      "bytes": 26133
+    },
+    {
+      "file": "nylon/s1-78-v3.ogg",
+      "string": 1,
+      "midi": 78,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_Fs5_01.ogg",
+      "sha256": "4ee920f16d0fa3ac75ad925fbc8efce7f13bb206d9f62b667a136e7dd3e6f3f7",
+      "bytes": 21972
+    },
+    {
+      "file": "nylon/s1-79-v3.ogg",
+      "string": 1,
+      "midi": 79,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_G5_01.ogg",
+      "sha256": "ba969e265e114646d10f66e61ba6bbeb5062d8edd831765f414ba372b19f523b",
+      "bytes": 22538
+    },
+    {
+      "file": "nylon/s1-80-v3.ogg",
+      "string": 1,
+      "midi": 80,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_Gs5_01.ogg",
+      "sha256": "d10372ee0aa203f360081ffe84c3ea689a403f81d106dd8d26ab51cfc7f2d962",
+      "bytes": 24038
+    },
+    {
+      "file": "nylon/s1-81-v3.ogg",
+      "string": 1,
+      "midi": 81,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_A5_01.ogg",
+      "sha256": "f3b94623463d698d7d96f334c87c100463ba4070641ea14592ee4c45f31ddb72",
+      "bytes": 28147
+    },
+    {
+      "file": "nylon/s1-82-v3.ogg",
+      "string": 1,
+      "midi": 82,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_As5_01.ogg",
+      "sha256": "a1f3f3dea91a2216eb16c6eb7931ad60a9806b286f0b574dbee14d649a01c42a",
+      "bytes": 20863
+    },
+    {
+      "file": "nylon/s1-83-v3.ogg",
+      "string": 1,
+      "midi": 83,
+      "layer": 3,
+      "source": "https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/systems/instruments/meta-nylon-guitar/ogg/INSGuitarNylon_StringHighE_Vel03Pick_B5_01.ogg",
+      "sha256": "68b98884e26e99f2bf0cb4e43538b5758a5b786ab5d5e15bca966fbefe05e4ee",
+      "bytes": 20980
+    }
+  ]
+}

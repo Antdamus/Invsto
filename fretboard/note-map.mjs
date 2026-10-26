@@ -1,4 +1,5 @@
-import {TUNING,DEFAULTS,mod,spell,noteName,accidental,frequency} from './music.mjs?v=4';
+import {TUNING,DEFAULTS,mod,spell,noteName,accidental,frequency} from './music.mjs?v=5';
+import {GUITAR_TOUCHES,guitarVoiceLabel} from './guitar.mjs?v=1';
 
 export const MAP_FRETS=21;
 const COLORS=['#e6c478','#dc9b80','#a3c4ab','#95bcd5','#c1ace0'];
@@ -62,11 +63,15 @@ function neckSVG(groups){
   return svg+'</svg>';
 }
 
-export function createNoteMap({getSettings,beforeOpen,canHear,hear,stopSound}){
+export function createNoteMap({getSettings,beforeOpen,canHear,hear,stopSound,onSoundChange}){
   const $=id=>document.getElementById(id),dialog=$('note-map-dialog');
   let settings=DEFAULTS,pc=0,groups=[],octave='all',selected=null,generation=0;
   const visibleGroups=()=>octave==='all'?groups:groups.filter(g=>g.midi===Number(octave));
-  function cancelSound(){generation++;stopSound();}
+  function cancelSound(){generation++;stopSound();$('map-hear').removeAttribute('aria-busy');}
+  function syncSoundControls(){
+    const s=getSettings();$('map-guitar-sound').value=s.guitarSound;
+    $('map-guitar-touch').innerHTML=GUITAR_TOUCHES[s.guitarSound].map((label,i)=>`<option value="${i+1}">${label}</option>`).join('');$('map-guitar-touch').value=s.guitarTouch;
+  }
   function renderOctaves(){
     $('map-octaves').innerHTML=[{value:'all',label:'All octaves'},...groups.map(g=>({value:g.midi,label:g.name}))].map(o=>`<button type="button" data-map-octave="${o.value}" aria-pressed="${String(o.value)===octave}">${o.label}</button>`).join('');
   }
@@ -93,7 +98,7 @@ export function createNoteMap({getSettings,beforeOpen,canHear,hear,stopSound}){
     $('map-selection').textContent=selected?`${noteName(selected.midi,settings)} · string ${selected.string} · ${selected.fret===0?'open string':'fret '+selected.fret} · ${frequency(selected.midi).toFixed(1)} Hz`:'Choose a colored dot or a string / fret below to connect it to the staff.';
     $('map-hear').textContent=selected?`♫ Hear ${noteName(selected.midi,settings)}`:'♫ Hear note';
     $('map-hear').disabled=!selected||!canHear();
-    $('map-audio-help').textContent=canHear()?'Reference tone · note names are the pitches you hear.':'Reference tone muted while the microphone is on. Enable headphones in practice to listen.';
+    $('map-audio-help').textContent=canHear()?`${guitarVoiceLabel(getSettings())} · recorded strings. Some upper frets use pitch-adjusted recordings.`:'Guitar sound muted while the microphone is on. Enable headphones in practice to listen.';
   }
   function choosePosition(el){
     if(!el)return;cancelSound();
@@ -111,15 +116,18 @@ export function createNoteMap({getSettings,beforeOpen,canHear,hear,stopSound}){
   $('map-neck').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choosePosition(e.target.closest('[data-map-string][data-map-fret]'));}};
   $('map-hear').onclick=async()=>{
     if(!selected||!canHear())return;cancelSound();const token=generation;
-    $('map-audio-help').textContent='Playing reference tone…';
-    try{await hear(selected.midi,()=>token===generation&&dialog.open&&canHear());if(token===generation)updateSelection();}
-    catch{if(token===generation)$('map-audio-help').textContent='Audio is unavailable. You can still study the map.';}
+    $('map-hear').setAttribute('aria-busy','true');
+    try{await hear(selected,()=>token===generation&&dialog.open&&canHear(),message=>{if(token===generation)$('map-audio-help').textContent=message;});}
+    catch{if(token===generation)$('map-audio-help').textContent='Guitar recording could not load. Press Hear to retry.';}
+    finally{if(token===generation)$('map-hear').removeAttribute('aria-busy');}
   };
+  $('map-guitar-sound').onchange=()=>{cancelSound();onSoundChange('guitarSound',$('map-guitar-sound').value);syncSoundControls();updateSelection();};
+  $('map-guitar-touch').onchange=()=>{cancelSound();onSoundChange('guitarTouch',Number($('map-guitar-touch').value));updateSelection();};
   dialog.addEventListener('close',cancelSound);
   document.addEventListener('visibilitychange',()=>{if(dialog.open){if(document.hidden)cancelSound();queueMicrotask(updateSelection);}});
   return {open(note){
     beforeOpen();cancelSound();settings={...getSettings()};pc=mod(note);groups=noteMapGroups(pc,settings);octave='all';selected=null;
     $('map-note').innerHTML=Array.from({length:12},(_,i)=>`<option value="${i}">${pitchClassName(i,settings)}</option>`).join('');$('map-note').value=String(pc);
-    renderOctaves();render();dialog.showModal();dialog.scrollTop=0;$('map-neck-scroll').scrollLeft=0;$('map-note').focus();
+    syncSoundControls();renderOctaves();render();dialog.showModal();dialog.scrollTop=0;$('map-neck-scroll').scrollLeft=0;$('map-note').focus();
   }};
 }

@@ -1,11 +1,22 @@
-import {frequency,detectPitch} from './music.mjs?v=4';
+import {frequency,detectPitch} from './music.mjs?v=5';
 import {AcousticKit} from './drums.mjs?v=1';
 import {PendulumMetronome} from './metronome.mjs?v=1';
+import {SampledGuitar} from './guitar.mjs?v=1';
 export class StudioAudio {
-  context=null;voices=new Set();stream=null;analyser=null;micTimer=null;micGeneration=0;muted=false;
-  async init(){if(!this.context){const C=window.AudioContext||window.webkitAudioContext;if(!C)throw Error('Audio is not supported in this browser.');this.context=new C();this.master=this.context.createGain();this.master.gain.value=.35;this.master.connect(this.context.destination);this.drums=new AcousticKit(this.context,this.master);this.metronome=new PendulumMetronome(this.context,this.master);}await this.context.resume();return this.context;}
+  context=null;voices=new Set();stream=null;analyser=null;micTimer=null;micGeneration=0;muted=false;guitarGeneration=0;
+  async init(){if(!this.context){const C=window.AudioContext||window.webkitAudioContext;if(!C)throw Error('Audio is not supported in this browser.');this.context=new C();this.master=this.context.createGain();this.master.gain.value=.35;this.master.connect(this.context.destination);this.drums=new AcousticKit(this.context,this.master);this.metronome=new PendulumMetronome(this.context,this.master);this.guitar=new SampledGuitar(this.context,this.master);}await this.context.resume();return this.context;}
   async loadDrums(){await this.init();await this.drums.load();}
   async loadMetronome(){await this.init();await this.metronome.load();}
+  stopGuitar(){this.guitarGeneration++;this.guitar?.stop();}
+  async playGuitar(position,settings,isCurrent=()=>true){
+    this.stopGuitar();const generation=this.guitarGeneration;
+    if(this.muted||!isCurrent())return null;await this.init();
+    if(generation!==this.guitarGeneration||this.muted||!isCurrent())return null;
+    let sample;try{sample=await this.guitar.prepare({...position,kind:settings.guitarSound,layer:settings.guitarTouch});}
+    catch(error){if(generation!==this.guitarGeneration||this.muted||!isCurrent())return null;throw error;}
+    if(generation!==this.guitarGeneration||this.muted||!isCurrent())return null;
+    this.guitar.setVolume(settings.guitarVolume);this.guitar.play(sample);return sample;
+  }
   setVolume(value){if(this.master)this.master.gain.value=this.muted?0:value/100;}
   tone(midi,time,length=.5,gain=.2,type='triangle'){
     if(!this.context||this.muted)return;
@@ -26,7 +37,7 @@ export class StudioAudio {
       if(beat%4===0){this.tone(root+12,time,duration*3,.065,'sine');this.tone(root+19,time,duration*3,.045,'sine');}
     }
   }
-  stopVoices(){for(const voice of this.voices){try{voice.stop();}catch{}}this.voices.clear();this.drums?.stop();this.metronome?.stop();}
+  stopVoices(){this.stopGuitar();for(const voice of this.voices){try{voice.stop();}catch{}}this.voices.clear();this.drums?.stop();this.metronome?.stop();}
   async startMic(onPitch){
     const generation=++this.micGeneration;
     if(!navigator.mediaDevices?.getUserMedia)throw Error('Microphone needs HTTPS or localhost and a supported browser. Manual practice still works.');

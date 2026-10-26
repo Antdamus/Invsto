@@ -1,6 +1,7 @@
-import {TUNING,ROOTS,SCALES,DEFAULTS,mod,frequency,octave,spell,noteName,positions,makeScore,scalePCs,sanitizeSettings,pitchMatch,timingGrade,recommendation,masteryFor} from './music.mjs?v=4';
-import {StudioAudio} from './audio.mjs?v=4';
-import {createNoteMap} from './note-map.mjs?v=1';
+import {TUNING,ROOTS,SCALES,DEFAULTS,mod,frequency,octave,spell,noteName,positions,makeScore,scalePCs,sanitizeSettings,pitchMatch,timingGrade,recommendation,masteryFor} from './music.mjs?v=5';
+import {StudioAudio} from './audio.mjs?v=5';
+import {createNoteMap} from './note-map.mjs?v=2';
+import {GUITAR_TOUCHES,guitarVoiceLabel} from './guitar.mjs?v=1';
 const $=id=>document.getElementById(id),audio=new StudioAudio(),STORE='fretwise.v1';
 let saved={};try{saved=JSON.parse(localStorage.getItem(STORE)||'{}')||{};}catch{}
 let settings=sanitizeSettings(saved.settings),progress={sessions:[],notes:{},positionUse:{},...saved.progress};
@@ -13,6 +14,7 @@ let stats={correct:0,wrong:0,missed:0,streak:0,best:0,onTime:0,manual:0},cleanPa
 let micPitch=null,micSince=0,micOnset=0,micLatched=false,lastRms=0,lastAttack=0;
 let metronomeState='idle',metronomePreviewTimer=0;
 let startGeneration=0,drumState='idle',previewTimer=0,previewGeneration=0;
+let guitarStatus='Recordings load when you press Hear.',guitarRequest=0;
 const secondsPerBeat=()=>60/settings.bpm;
 const audible=()=>!micOn||settings.headphones;
 const currentEvent=()=>score[active];
@@ -42,6 +44,11 @@ function syncControls(){
   updateRecommendation();
 }
 function updateSoundControls(){
+  $('guitar-sound').value=settings.guitarSound;
+  $('guitar-touch').innerHTML=GUITAR_TOUCHES[settings.guitarSound].map((label,i)=>`<option value="${i+1}">${label}</option>`).join('');$('guitar-touch').value=settings.guitarTouch;
+  $('guitar-volume').value=settings.guitarVolume;$('guitar-volume-value').textContent=`${settings.guitarVolume}%`;
+  $('guitar-status').textContent=audible()?guitarStatus:'Muted while listening. Enable headphones to hear the guitar.';
+  $('hear').disabled=!audible()||!currentEvent();
   $('drum-controls').hidden=settings.drums==='off';
   $('drum-volume-value').textContent=`${settings.drumVolume}%`;
   $('drum-retry').hidden=drumState!=='error'||settings.drums==='off';
@@ -80,6 +87,7 @@ async function previewMetronome(){
   metronomePreviewTimer=setInterval(schedule,25);schedule();
 }
 function stopPreview(){
+  audio.stopGuitar();
   previewGeneration++;clearInterval(previewTimer);previewTimer=0;clearInterval(metronomePreviewTimer);metronomePreviewTimer=0;audio.metronome?.stop();delete $('metronome-preview').dataset.loading;$('metronome-preview').textContent='▶ Preview metronome';delete $('drum-preview').dataset.loading;audio.drums?.stop();$('drum-preview').textContent='▶ Preview groove';
 }
 async function previewDrums(){
@@ -118,7 +126,21 @@ function newScore(){
   renderScore();renderFretboard();showCurrent();setCue('Read it. Find it. Play it.','Press Play for a four-beat count-in.');
   $('play').disabled=!score.length;
   if(!score.length)setCue('No playable notes in this range.','Include another octave, string, or fret range.');
+  updateSoundControls();
 }
+async function hearGuitar(position,isCurrent=()=>true,onStatus=()=>{}){
+  if(!audible()||!isCurrent())return;
+  const request=++guitarRequest,voiceSettings={...settings};guitarStatus='Loading guitar recording…';updateSoundControls();onStatus(guitarStatus);
+  try{
+    const sample=await audio.playGuitar(position,voiceSettings,()=>isCurrent()&&audible()&&!document.hidden);
+    if(!sample){if(request===guitarRequest&&guitarStatus==='Loading guitar recording…'){guitarStatus='Recordings load when you press Hear.';updateSoundControls();}return;}
+    audio.setVolume(settings.volume);
+    const shift=sample.semitones?` · nearby recording adjusted ${sample.semitones>0?'+':''}${sample.semitones} ${Math.abs(sample.semitones)===1?'semitone':'semitones'}`:'';
+    guitarStatus=`${guitarVoiceLabel(voiceSettings)} · ${noteName(sample.midi,settings)} on string ${sample.string}${shift}`;
+    updateSoundControls();onStatus(guitarStatus);return guitarStatus;
+  }catch(error){guitarStatus=error.message;updateSoundControls();onStatus(guitarStatus);throw error;}
+}
+function changeGuitarSound(key,value){audio.stopGuitar();settings[key]=value;guitarStatus='Recordings load when you press Hear.';updateSoundControls();persist();}
 function renderScore(){
   if(!score.length){$('sheet').innerHTML='<div class="empty-score">No notes match this setup.<br>Widen your octave, string or fret range.</div>';return;}
   const ys=score.map(n=>128-(spell(n.midi+12,settings).step-30)*7),top=Math.min(26,...ys.map(y=>y-40)),bottom=Math.max(198,...ys.map(y=>y+45)),height=bottom-top;
@@ -350,6 +372,9 @@ $('metronome-sound').onchange=()=>{pause();settings.metronomeSound=$('metronome-
 $('metronome-volume').oninput=()=>{settings.metronomeVolume=Number($('metronome-volume').value);audio.metronome?.setVolume(settings.metronomeVolume);updateSoundControls();persist();};
 $('metronome-accent').onchange=()=>{settings.metronomeAccent=$('metronome-accent').checked;persist();};
 $('metronome-preview').onclick=previewMetronome;
+$('guitar-sound').onchange=()=>changeGuitarSound('guitarSound',$('guitar-sound').value);
+$('guitar-touch').onchange=()=>changeGuitarSound('guitarTouch',Number($('guitar-touch').value));
+$('guitar-volume').oninput=()=>{settings.guitarVolume=Number($('guitar-volume').value);audio.guitar?.setVolume(settings.guitarVolume);$('guitar-volume-value').textContent=`${settings.guitarVolume}%`;persist();};
 $('headphones').onchange=()=>{settings.headphones=$('headphones').checked;routeAudio();persist();};
 $('goal').onchange=()=>{settings.goal=Number($('goal').value);updateStats();persist();};
 $('volume').oninput=()=>{settings.volume=Number($('volume').value);audio.setVolume(settings.volume);$('user-track').volume=settings.volume/100;persist();};
@@ -363,7 +388,7 @@ $('audio-file').onchange=()=>{const file=$('audio-file').files?.[0];if(!file)ret
 $('user-track').onerror=()=>notice('This audio file could not be played. Try MP3, WAV, or another supported format.');
 $('mic').onclick=toggleMic;
 $('reveal').onclick=()=>{revealed=!revealed;if(running&&position>=0&&currentEvent())currentEvent().hadError=true;showCurrent();};
-$('hear').onclick=async()=>{if(!currentEvent())return;try{await audio.init();audio.setVolume(settings.volume);audio.tone(currentEvent().midi,audio.context.currentTime,.9,.45);if(running)currentEvent().hadError=true;}catch(e){notice(e.message);}};
+$('hear').onclick=async()=>{const event=currentEvent();if(!event||!audible())return;if(running)event.hadError=true;try{await hearGuitar(event.position,()=>currentEvent()===event);}catch(e){notice(e.message);}};
 $('got-it').onclick=()=>{if(currentEvent())answer(currentEvent().midi,{manual:true});};
 $('skip').onclick=()=>{if(!running||position<0)return;if(!results[active])markMiss(active);if(settings.mode==='wait'){if(active===score.length-1)completePhrase();else{active++;revealed=false;showCurrent();}}else{updateScoreMarks();setCue('Note skipped.','Join back in on the next highlighted note.');}updateStats();};
 function fretAnswer(el){if(!el||!currentEvent())return;const string=Number(el.dataset.string),fret=Number(el.dataset.fret);if(!settings.strings.includes(string)||fret<settings.minFret)return;answer(TUNING[string-1]+fret,{string});}
@@ -374,7 +399,8 @@ const noteMap=createNoteMap({
   getSettings:()=>settings,
   beforeOpen:()=>{pause();if(position>=0&&position<16&&!finished)score.forEach(note=>{note.hadError=true;});},
   canHear:audible,
-  hear:async(midi,isCurrent)=>{await audio.init();if(isCurrent()){audio.setVolume(settings.volume);audio.tone(midi,audio.context.currentTime,1,.35);}},
+  hear:hearGuitar,
+  onSoundChange:changeGuitarSound,
   stopSound:()=>audio.stopVoices()
 });
 $('map-open').onclick=()=>noteMap.open(settings.pool[0]);

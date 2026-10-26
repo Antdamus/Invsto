@@ -5,7 +5,7 @@ import {test,before,after} from 'node:test';
 import {chromium,expect} from '@playwright/test';
 const root=new URL('../',import.meta.url);let server,browser,origin;
 before(async()=>{
-  server=createServer(async(req,res)=>{const path=decodeURIComponent(new URL(req.url,'http://local').pathname);if(!/^\/fretboard\/(?:[a-z.-]+|samples\/(?:acoustic|metronome)\/[a-zA-Z0-9.-]+)$/.test(path)){res.writeHead(404).end();return;}try{const body=await readFile(new URL('.'+path,root));res.setHeader('Content-Type',path.endsWith('.mjs')?'text/javascript':path.endsWith('.css')?'text/css':path.endsWith('.wav')?'audio/wav':'text/html');res.end(body);}catch{res.writeHead(404).end();}});
+  server=createServer(async(req,res)=>{const path=decodeURIComponent(new URL(req.url,'http://local').pathname);if(!/^\/fretboard\/(?:[a-z.-]+|samples\/(?:(?:acoustic|metronome)\/[a-zA-Z0-9.-]+|guitar\/(?:steel|nylon)\/[a-zA-Z0-9.-]+))$/.test(path)){res.writeHead(404).end();return;}try{const body=await readFile(new URL('.'+path,root));res.setHeader('Content-Type',path.endsWith('.mjs')?'text/javascript':path.endsWith('.css')?'text/css':path.endsWith('.wav')?'audio/wav':path.endsWith('.ogg')?'audio/ogg':'text/html');res.end(body);}catch{res.writeHead(404).end();}});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${server.address().port}`;
   browser=await chromium.launch();await mkdir(new URL('test-results/',root),{recursive:true});
 });
@@ -62,16 +62,63 @@ test('studying during a hidden-hint phrase pauses the timer and prevents an unai
 test('note-map reference tones respect microphone headphones mode and play the selected octave',async t=>{
   const page=await open(t);
   await page.evaluate(async()=>{
-    const {StudioAudio}=await import('/fretboard/audio.mjs?v=4'),tone=StudioAudio.prototype.tone;window.mapTones=[];
-    StudioAudio.prototype.tone=function(midi,...args){window.mapTones.push(midi);return tone.call(this,midi,...args);};
+    const {SampledGuitar}=await import('/fretboard/guitar.mjs?v=1'),play=SampledGuitar.prototype.play;window.mapTones=[];
+    SampledGuitar.prototype.play=function(sample,...args){window.mapTones.push(sample.midi);return play.call(this,sample,...args);};
     navigator.mediaDevices.getUserMedia=async()=>{window.mapMicContext=new AudioContext();return window.mapMicContext.createMediaStreamDestination().stream;};
   });
   await page.locator('#mic').click();await expect(page.locator('#headphones-wrap')).toBeVisible();await page.locator('#map-open').click();
   await page.locator('#map-staves [data-map-string="1"][data-map-fret="20"]').click();await expect(page.locator('#map-hear')).toBeDisabled();await expect(page.locator('#map-audio-help')).toContainText('muted');
   await page.keyboard.press('Escape');await page.locator('#headphones').check();await page.locator('#map-open').click();
   await page.locator('#map-staves [data-map-string="1"][data-map-fret="20"]').click();await page.locator('#map-hear').click();
-  assert.deepEqual(await page.evaluate(()=>window.mapTones),[84]);await expect(page.locator('#correct')).toHaveText('0');
+  await expect(page.locator('#map-audio-help')).toContainText('C6 on string 1');assert.deepEqual(await page.evaluate(()=>window.mapTones),[84]);await expect(page.locator('#correct')).toHaveText('0');
   await page.keyboard.press('Escape');await page.locator('#mic').click();await page.evaluate(()=>window.mapMicContext.close());
+});
+
+test('sampled guitar previews load on demand, retain string identity and save sound choices',async t=>{
+  const page=await open(t,390),requests=[];page.on('request',r=>{if(r.url().endsWith('.ogg'))requests.push(r.url());});
+  await page.evaluate(async()=>{const {SampledGuitar}=await import('/fretboard/guitar.mjs?v=1'),play=SampledGuitar.prototype.play;window.guitarPlays=[];SampledGuitar.prototype.play=function(sample,...args){window.guitarPlays.push({file:sample.file,midi:sample.midi,string:sample.string});window.testGuitar=this;return play.call(this,sample,...args);};});
+  await page.locator('#map-open').click();assert.equal(requests.length,0);
+  for(const [string,fret] of [[2,1],[6,20]]){
+    await page.locator(`#map-staves [data-map-string="${string}"][data-map-fret="${fret}"]`).click();await page.locator('#map-hear').click();await expect(page.locator('#map-audio-help')).toContainText(`C4 on string ${string}`);
+  }
+  await page.locator('#map-guitar-sound').selectOption('nylon');await page.locator('#map-guitar-touch').selectOption('1');await page.locator('#map-hear').click();await expect(page.locator('#map-audio-help')).toContainText('Nylon · fingerstyle');await expect(page.locator('#map-audio-help')).toContainText('adjusted +1 semitone');
+  assert.deepEqual(await page.evaluate(()=>window.guitarPlays.map(p=>p.file)),['steel/s2-60-v2.ogg','steel/s6-60-v2.ogg','nylon/s6-59-v1.ogg']);
+  await page.locator('#note-map-dialog').evaluate(el=>{el.scrollTop=el.scrollHeight;});await page.locator('#note-map-dialog').screenshot({path:new URL('test-results/fretwise-guitar-map-mobile.png',root).pathname.replace(/^\/(\w:)/,'$1')});
+  await page.keyboard.press('Escape');await expect(page.locator('#guitar-sound')).toHaveValue('nylon');await page.locator('#guitar-volume').fill('62');
+  await page.locator('.guitar-room').screenshot({path:new URL('test-results/fretwise-guitar-controls.png',root).pathname.replace(/^\/(\w:)/,'$1')});
+  await page.reload();await expect(page.locator('#guitar-sound')).toHaveValue('nylon');await expect(page.locator('#guitar-touch')).toHaveValue('1');await expect(page.locator('#guitar-volume')).toHaveValue('62');
+  await page.locator('#hear').click();await expect(page.locator('#guitar-status')).toContainText('Nylon · fingerstyle');await expect(page.locator('#correct')).toHaveText('0');
+});
+
+test('guitar loading failure can retry and a canceled download cannot play after closing the map',async t=>{
+  const page=await open(t);await page.locator('#map-open').click();await page.locator('#map-staves [data-map-string="2"][data-map-fret="1"]').click();
+  await page.route('**/samples/guitar/**/*.ogg',route=>route.abort());await page.locator('#map-hear').click();await expect(page.locator('#map-audio-help')).toContainText('Press Hear to retry');
+  await page.unroute('**/samples/guitar/**/*.ogg');let release,requested;
+  const gate=new Promise(resolve=>{release=resolve;}),seen=new Promise(resolve=>{requested=resolve;});
+  await page.route('**/samples/guitar/**/*.ogg',async route=>{requested();await gate;await route.continue();});
+  await page.evaluate(async()=>{const {SampledGuitar}=await import('/fretboard/guitar.mjs?v=1'),play=SampledGuitar.prototype.play;window.latePlays=0;SampledGuitar.prototype.play=function(...args){window.latePlays++;return play.apply(this,args);};});
+  await page.locator('#map-hear').click();await seen;await page.keyboard.press('Escape');release();
+  await expect(page.locator('#guitar-status')).not.toContainText('Loading');assert.equal(await page.evaluate(()=>window.latePlays),0);
+  await page.unroute('**/samples/guitar/**/*.ogg');await page.locator('#map-open').click();await page.locator('#map-staves [data-map-string="2"][data-map-fret="1"]').click();await page.locator('#map-hear').click();await expect(page.locator('#map-audio-help')).toContainText('C4 on string 2');assert.equal(await page.evaluate(()=>window.latePlays),1);
+});
+
+test('real guitar audio decodes, preserves octave, rings naturally and damps a retriggered string',async t=>{
+  const page=await open(t);
+  const result=await page.evaluate(async()=>{
+    const {SampledGuitar}=await import('/fretboard/guitar.mjs?v=1'),{detectPitch,frequency}=await import('/fretboard/music.mjs?v=5');
+    const context=new OfflineAudioContext(1,48000*4,48000),guitar=new SampledGuitar(context,context.destination),pitches=[];
+    for(const kind of ['steel','nylon'])for(const [midi,string] of [[40,6],[48,5],[60,4],[60,3],[60,2],[84,1]]){
+      const sample=await guitar.prepare({kind,midi,string,layer:2});let detection;
+      for(const start of [.08,.15,.3,.5]){const data=sample.buffer.getChannelData(0).slice(Math.floor(start*48000),Math.floor(start*48000)+4096);let peak=Math.max(...data.map(Math.abs));if(peak)for(let i=0;i<data.length;i++)data[i]*=.5/peak;detection=detectPitch(data,48000);if(detection)break;}
+      pitches.push({kind,midi,string,duration:sample.buffer.duration,cents:detection?1200*Math.log2(detection.frequency*sample.rate/frequency(midi)):null});
+    }
+    const a=await guitar.prepare({midi:60,string:2}),b=await guitar.prepare({midi:60,string:3}),c=await guitar.prepare({midi:62,string:2});
+    const first=guitar.play(a,.05);guitar.play(b,.1);guitar.play(c,.7);const released=first.released,voices=guitar.voices.size;
+    const audio=await context.startRendering(),data=audio.getChannelData(0);let energy=0,peak=0,tail=0;for(let i=0;i<data.length;i++){energy+=data[i]**2;peak=Math.max(peak,Math.abs(data[i]));if(i>48000*2)tail+=data[i]**2;}
+    return {pitches,released,voices,energy,peak,tail};
+  });
+  for(const p of result.pitches){assert.ok(p.duration>1);assert.notEqual(p.cents,null,JSON.stringify(p));assert.ok(Math.abs(p.cents)<45,JSON.stringify(p));}
+  assert.equal(result.released,true);assert.equal(result.voices,2);assert.ok(result.energy>1);assert.ok(result.tail>.01);assert.ok(result.peak>0&&result.peak<1);
 });
 for(const width of [1440,390])test(`real notation and full-neck setup render without page overflow at ${width}px`,async t=>{
   const page=await open(t,width);await expect(page.locator('#range-summary')).toHaveText('All strings · frets 0–21');
@@ -192,7 +239,7 @@ test('canceling playback while the kit loads cannot start the score later',async
 test('sample engine renders actual audio, alternates takes, chokes hats and mutes microphone playback',async t=>{
   const page=await open(t);
   const rendered=await page.evaluate(async()=>{
-    const {AcousticKit}=await import('/fretboard/drums.mjs?v=1'),{StudioAudio}=await import('/fretboard/audio.mjs?v=4');
+    const {AcousticKit}=await import('/fretboard/drums.mjs?v=1'),{StudioAudio}=await import('/fretboard/audio.mjs?v=5');
     const context=new OfflineAudioContext(2,44100*2,44100),kit=new AcousticKit(context,context.destination);await kit.load();
     kit.hit('openhat',.05,.8);const open=[...kit.voices][0];kit.hit('hat',.3,.8);kit.hit('hat',.6,.8);kit.hit('kick',.1,.8);kit.hit('kick',1,.8);
     const kickBuffers=[...kit.voices].filter(v=>v.piece==='kick').map(v=>v.source.buffer);const alternates=kickBuffers[0]!==kickBuffers[1],chokedAt=open.chokedAt;
@@ -225,7 +272,7 @@ test('metronome download failure uses a disclosed digital fallback and preview c
 test('recorded metronome alternates tick and tock, accents beat one and obeys mute/count-in rules',async t=>{
   const page=await open(t);
   const result=await page.evaluate(async()=>{
-    const {PendulumMetronome}=await import('/fretboard/metronome.mjs?v=1'),{StudioAudio}=await import('/fretboard/audio.mjs?v=4');
+    const {PendulumMetronome}=await import('/fretboard/metronome.mjs?v=1'),{StudioAudio}=await import('/fretboard/audio.mjs?v=5');
     const context=new OfflineAudioContext(1,48000*3,48000),m=new PendulumMetronome(context,context.destination);await m.load();
     const settings={metronomeSound:'mechanical',metronomeVolume:75,metronomeAccent:true,metronome:false,drums:'off',backing:'off'};
     for(let n=0;n<4;n++)m.beat(.1+n*.5,n,settings);
