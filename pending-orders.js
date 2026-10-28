@@ -238,7 +238,12 @@ function formatOrderDate(order, field) {
     const day = date.toLocaleDateString([], {month: "short", day: "numeric", timeZone: "UTC"});
     return day + (field === "sale_date" || field === "paid_on_date" ? " · time not provided" : "");
   }
-  return date.toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short"});
+  return date.toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
+    ...(field === "ship_by_date" ? {timeZone: "America/Los_Angeles"} : {})});
+}
+
+function getGroupShipByOrder(group) {
+  return group.lines?.find(line => line.order?.ship_by_date === group.nextShipBy)?.order;
 }
 
 function formatOrderCreatedDate(line) {
@@ -379,16 +384,29 @@ function getOrderCreatedTimestamp(value) {
   return Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time;
 }
 
-function getOrderUrgency(value) {
+const ebayShippingDayFormatters = new Map();
+function getEbayShippingDay(value, timeZone = "America/Los_Angeles") {
+  if (!ebayShippingDayFormatters.has(timeZone)) {
+    ebayShippingDayFormatters.set(timeZone, new Intl.DateTimeFormat("en-US", {timeZone, year: "numeric", month: "2-digit", day: "2-digit"}));
+  }
+  const parts = ebayShippingDayFormatters.get(timeZone).formatToParts(value);
+  const part = type => parts.find(entry => entry.type === type).value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function getOrderUrgency(value, order = null, now = new Date()) {
   if (!value) return null;
   const shipBy = new Date(value);
   if (Number.isNaN(shipBy.getTime())) return null;
 
-  const shipDay = startOfLocalDay(shipBy);
-  const today = startOfLocalDay();
-  const tomorrow = startOfLocalDay();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  if (shipDay < today) {
+  // API deadlines are exact instants. CSV dates have no clock: noon UTC is
+  // only a storage placeholder, so keep them due through that eBay day.
+  const dateOnly = order ? getOrderDatePrecision(order, "ship_by_date") === "day" : isEbayDateOnly(value);
+  const shipDay = getEbayShippingDay(shipBy, dateOnly ? "UTC" : "America/Los_Angeles");
+  const today = getEbayShippingDay(now);
+  const tomorrow = new Date(`${today}T12:00:00Z`);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  if (dateOnly ? shipDay < today : shipBy.getTime() < now.getTime()) {
     return {
       level: "overdue",
       label: "Overdue",
@@ -396,7 +414,7 @@ function getOrderUrgency(value) {
     };
   }
 
-  if (sameLocalDay(shipBy)) {
+  if (shipDay === today) {
     return {
       level: "today",
       label: "Due today",
@@ -404,7 +422,7 @@ function getOrderUrgency(value) {
     };
   }
 
-  if (shipDay.getTime() === tomorrow.getTime()) {
+  if (shipDay === tomorrow.toISOString().slice(0, 10)) {
     return {
       level: "tomorrow",
       label: "Due tomorrow",
@@ -413,6 +431,26 @@ function getOrderUrgency(value) {
   }
 
   return null;
+}
+
+let orderDeadlineSignature = "";
+let orderDeadlineTimer = null;
+function getOrderDeadlineSignature() {
+  return JSON.stringify(state.orders.filter(isOpenOrderLine).map(line =>
+    [line.id, getOrderUrgency(line.order?.ship_by_date, line.order)?.level || ""]));
+}
+
+function refreshOrderDeadlines() {
+  if (document.hidden || state.busy || getOrderDeadlineSignature() === orderDeadlineSignature) return;
+  applyOrderFilters();
+}
+
+function startOrderDeadlineUpdates() {
+  if (orderDeadlineTimer !== null || !state.user?.id) return;
+  orderDeadlineTimer = window.setInterval(refreshOrderDeadlines, 60000);
+  document.addEventListener("visibilitychange", refreshOrderDeadlines);
+  window.addEventListener("focus", refreshOrderDeadlines);
+  refreshOrderDeadlines();
 }
 
 function setStatus(message = "", type = "info") {
@@ -3257,7 +3295,7 @@ function applyOrderFilters() {
 
   if (filterByDue) {
     filtered = filterBuyerBundles(filtered, line => isOpenOrderLine(line)
-      && getOrderUrgency(line.order?.ship_by_date)?.level === state.orderDueFilter);
+      && getOrderUrgency(line.order?.ship_by_date, line.order)?.level === state.orderDueFilter);
   }
 
   if (state.selectedLiveLot) {
@@ -3280,6 +3318,7 @@ function applyOrderFilters() {
   renderAdminOrderActions();
   renderLiveLotOrderMatches();
   renderOrders();
+  orderDeadlineSignature = getOrderDeadlineSignature();
 }
 
 function clearEbayLaunchFilter({ apply = true } = {}) {
@@ -3474,7 +3513,7 @@ function renderSummaryStrip() {
 
   openGroups.forEach((group) => {
     const lines = group.lines.filter(isOpenOrderLine);
-    const buckets = new Set(lines.map(line => getOrderUrgency(line.order?.ship_by_date)?.level));
+    const buckets = new Set(lines.map(line => getOrderUrgency(line.order?.ship_by_date, line.order)?.level));
     for (const bucket of buckets) {
       if (!urgencyCounts[bucket]) continue;
       urgencyCounts[bucket].groups += 1;
@@ -4071,7 +4110,7 @@ function sortBuyerGroups(groups) {
   const byDue = (a, b) => getShipTimestamp(a.nextShipBy) - getShipTimestamp(b.nextShipBy);
   const byCreated = (a, b) => getOrderCreatedTimestamp(a.earliestPendingOrderCreatedAt) - getOrderCreatedTimestamp(b.earliestPendingOrderCreatedAt);
   const byTotal = (a, b) => Number(a.totalValue || 0) - Number(b.totalValue || 0);
-  const byUrgency = (a, b) => getEbayPriorityRank(a.nextShipBy) - getEbayPriorityRank(b.nextShipBy);
+  const byUrgency = (a, b) => getEbayPriorityRank(a.nextShipBy, getGroupShipByOrder(a)) - getEbayPriorityRank(b.nextShipBy, getGroupShipByOrder(b));
 
   return groups.sort((a, b) => {
     if (sort === "created_asc") return byCreated(a, b) || byDue(a, b) || byBuyer(a, b);
@@ -4543,7 +4582,7 @@ function renderOrders(options = {}) {
   if (!partial) list.innerHTML = "";
   const appendGroup = (group, groupIndex) => {
     const shippingLabelAction = getShippingLabelAction(getBuyerShippingLabelLines(group.lines[0]));
-    const urgency = group.pendingCount ? getOrderUrgency(group.nextShipBy) : null;
+    const urgency = group.pendingCount ? getOrderUrgency(group.nextShipBy, getGroupShipByOrder(group)) : null;
     const urgencyClass = urgency?.level === "today" ? "is-due-today" : urgency ? `is-${urgency.level}` : "";
     const isExpanded = isBuyerGroupExpanded(group);
     const assignedTasks = getAssignedOrderTasksForGroup(group);
@@ -4831,7 +4870,7 @@ function renderOrders(options = {}) {
         : "";
       const lineCancellationReviewActionMarkup = getLineFulfillmentBlock(line)
         ? `<span class="fulfillment-blocked" role="status">${escapeHtml(getLineFulfillmentBlock(line))}</span>` : "";
-      const lineUrgency = canActOnLine ? getOrderUrgency(order.ship_by_date) : null;
+      const lineUrgency = canActOnLine ? getOrderUrgency(order.ship_by_date, order) : null;
       const lineDueTone = lineUrgency?.level || "neutral";
       const orderLineKey = normalizeEbayOrderNumber(order.order_number) || order.order_number || order.id || line.order_id || line.id;
       const orderLineTotal = orderLineTotals.get(orderLineKey) || 1;
@@ -12717,8 +12756,8 @@ function normalizeEbayPriorityBuyerKey(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function getEbayPriorityRank(shipByDate) {
-  const urgency = getOrderUrgency(shipByDate);
+function getEbayPriorityRank(shipByDate, order = null) {
+  const urgency = getOrderUrgency(shipByDate, order);
   if (urgency?.level === "overdue") return 0;
   if (urgency?.level === "today") return 1;
   if (urgency?.level === "tomorrow") return 2;
@@ -12755,8 +12794,8 @@ function buildEbayPendingPriorityPayload() {
     group.pendingUnits += remainingQuantity;
 
     const shipBy = line.order?.ship_by_date || "";
-    const rank = getEbayPriorityRank(shipBy);
-    const urgency = getOrderUrgency(shipBy);
+    const rank = getEbayPriorityRank(shipBy, line.order);
+    const urgency = getOrderUrgency(shipBy, line.order);
     group.lines.push({
       orderNumber,
       itemNumber: line.item_number || "",
@@ -13436,6 +13475,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   markEbayTransferReceiverReady();
   startItemSearchUpdates();
+  startOrderDeadlineUpdates();
   window.OGOrderWatches?.start();
   window.OGPendingWork?.start();
   getReceiptPreviewJobs()?.start();

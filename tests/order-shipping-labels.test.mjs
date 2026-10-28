@@ -809,7 +809,7 @@ test('CSV dates never display placeholder sale or due times, including opposite 
   }
 });
 
-test('API-refreshed CSV orders show exact local timestamps and timezone, including genuine 8 AM sales',async t=>{
+test('API-refreshed CSV orders show local purchase times and eBay Pacific shipping deadlines',async t=>{
   const page=await open(t,database());
   const result=await page.evaluate(()=>{
     const order={sale_date:'2026-10-01T20:17:45Z',paid_on_date:'2026-10-01T20:20:00Z',ship_by_date:'2026-10-06T06:59:00Z',
@@ -819,7 +819,7 @@ test('API-refreshed CSV orders show exact local timestamps and timezone, includi
     order.sale_date='2026-10-01T12:00:00Z';
     return {sale,due,noon:formatOrderDate(order,'sale_date')};
   });
-  assert.match(result.sale,/Oct 1.*4:17 PM EDT/);assert.match(result.due,/Oct 6.*2:59 AM EDT/);
+  assert.match(result.sale,/Oct 1.*4:17 PM EDT/);assert.match(result.due,/Oct 5.*11:59 PM PDT/);
   assert.match(result.noon,/Oct 1.*8:00 AM EDT/);assert.doesNotMatch(result.noon,/not provided/);
 });
 
