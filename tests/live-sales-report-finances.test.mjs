@@ -42,6 +42,9 @@ test('multi-line fees allocate exact cents once, including lines outside the sho
 test('shipping fallback uses signed order discount, and unknown checkout stays visibly provisional',()=>{
  const p=fixture(53,1,4.32,null);delete p.evidence.a.order.financials.lineItems[0].deliveryCost;
  assert.equal(M.makeModel(p).rows[0].finance.shipping,100);
+ delete p.evidence.a.order.financials.totalFeeBasisAmount;
+ delete p.evidence.a.order.financials.lineItems[0].total;
+ const partial=M.makeModel(p).rows[0];assert.equal(partial.finance.fee,351);assert.equal(partial.finance.basis,5832);
  const early=M.makeModel({attempts:p.attempts,costs:p.costs});assert.equal(early.rows[0].finance.fee,322);assert.equal(early.rows[0].finance.shipping,null);assert.equal(early.rows[0].finance.basisKnown,false);assert.match(early.rows[0].finance.caveat,/Shipping \/ tax/);
  assert.equal(early.stats.profit,3878);assert.equal(M.buyerProfit(early.stats).label,'Estimated profit');
 });
