@@ -12,6 +12,7 @@
 #pending-work-missing[aria-pressed=true]{background:#f2b5a6;color:#32201c!important;border-color:#f2b5a6}
 #pending-work-status{font-size:12px;color:#acb8ad;margin:5px 0 16px;line-height:1.5}
 #pending-work-status button,.pending-work-summary button,.pending-work-summary a{color:#eed29b;background:none;border:0;font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+#pending-work-show-all{margin:4px 0;min-height:44px}#pending-work-show-all[hidden]{display:none}
 .pending-work-summary{border:1px solid #d6ab653d;border-left:3px solid #d6ab65;border-radius:10px;padding:10px 13px;margin:8px 0 12px;background:#d6ab650a;font-size:13px}
 .pending-work-badges{display:flex;gap:10px;align-items:center;flex-wrap:wrap;color:#efcf97}
 .pending-work-summary p{margin:7px 0 0;overflow-wrap:anywhere;line-height:1.5;color:#eee9db}

@@ -1,7 +1,7 @@
 /* Explicit blockers decide the work queue; ordinary customer tasks remain notes. */
 (() => {
   const records = new Map(), known = new Set();
-  let view = 'ready', watchFilter = '', failure = '', generation = 0, started = false, timer, filterRows = [];
+  let view = 'ready', watchFilter = '', showAllBuyerLines = false, failure = '', generation = 0, started = false, timer, filterRows = [];
   let dialog, context, requestId, saving = false, dialogRun = 0;
   let notice, undoEntry = null, undoBusy = false;
   const esc = value => escapeHtml(String(value ?? ''));
@@ -105,36 +105,49 @@
     filterRows=rows;
     const groups=groupLinesByBuyer(rows), history=$('order-status-filter')?.value==='fulfilled';
     const searching=isSearch();
-    const counts={ready:0,waiting:0,all:groups.length,cgl:0,missing:0,cancel:0,'not-found':rows.filter(isNotFound).length,checking:0};
-    for(const g of groups){
+    const itemFilter=history||searching?'':watchFilter, workView=history||searching?'all':view;
+    const missingOnly=['not-found','missing'].includes(itemFilter);
+    const matchesMissingLine=row=>itemFilter==='not-found'?isNotFound(row):isOpenOrderLine(row)&&Boolean(missingFor(row.id));
+    const matchesItem=g=>!itemFilter||(itemFilter==='not-found'?g.lines.some(isNotFound):
+      (itemFilter==='cgl'?pendingCgl(g.key):itemFilter==='cancel'?pendingCancellations(g.key):missingWatches(g.key)).length>0);
+    const matchesView=g=>workView==='all'||(isKnown(g.key)&&(workView==='waiting')===Boolean(active(g.key).length));
+    // Each set of counts applies the other filter, so it describes the buyers/items
+    // that choosing that button will show instead of the unfiltered queue.
+    const matching=groups.filter(matchesItem), visible=matching.filter(matchesView);
+    const counts={ready:0,waiting:0,all:matching.length,cgl:0,missing:0,cancel:0,'not-found':0,checking:0};
+    for(const g of matching){
       if(!g.lines.some(isOpenOrderLine))continue;
       if(!isKnown(g.key))counts.checking++;
       else counts[active(g.key).length?'waiting':'ready']++;
+    }
+    const workUnknown=groups.some(g=>g.lines.some(isOpenOrderLine)&&!isKnown(g.key));
+    const itemUnknown=Boolean(itemFilter&&itemFilter!=='not-found'&&workUnknown);
+    for(const g of groups){
+      if(!matchesView(g))continue;
+      if(!g.lines.some(isOpenOrderLine))continue;
       counts.cgl+=pendingCgl(g.key).length;
       counts.missing+=missingWatches(g.key).length;
       counts.cancel+=pendingCancellations(g.key).length;
+      counts['not-found']+=g.lines.filter(isNotFound).length;
     }
     document.querySelectorAll('[data-work-view]').forEach(b=>{
       b.setAttribute('aria-pressed',String(!searching&&b.dataset.workView===view));b.disabled=history||searching;
-      const counter=b.querySelector('[data-work-count]');if(counter)counter.textContent=counts.checking?'…':String(counts[b.dataset.workView]);
+      const counter=b.querySelector('[data-work-count]');if(counter)counter.textContent=itemUnknown||(counts.checking&&b.dataset.workView!=='all')?'…':String(counts[b.dataset.workView]);
     });
     for(const kind of ['cgl','missing','cancel','not-found']){
       const button=$(`pending-work-${kind}`);
-      if(button){button.setAttribute('aria-pressed',String(!searching&&watchFilter===kind));button.disabled=history||searching;button.querySelector('span').textContent=counts.checking&&kind!=='not-found'?'…':String(counts[kind]);}
+      if(button){button.setAttribute('aria-pressed',String(!searching&&watchFilter===kind));button.disabled=history||searching;button.querySelector('span').textContent=workUnknown&&(kind!=='not-found'||workView!=='all')?'…':String(counts[kind]);}
     }
     for(const id of ['summary-cancel-button','phone-summary-cancel-button'])$(id)?.setAttribute('aria-pressed',String(!history&&!searching&&watchFilter==='cancel'));
     for(const id of ['summary-not-found-button','phone-summary-not-found-button'])$(id)?.setAttribute('aria-pressed',String(!history&&!searching&&watchFilter==='not-found'));
+    const showAll=$('pending-work-show-all');
+    if(showAll){showAll.hidden=!missingOnly;showAll.setAttribute('aria-pressed',String(showAllBuyerLines));showAll.textContent=showAllBuyerLines?'Show only missing order lines':'Show all buyer order lines';}
     const help=$('pending-work-status');
     if(help){help.innerHTML=failure?`${esc(failure)} <button type="button" data-work-retry>Retry</button>`
-      :history?'Completed orders are shown here.':searching?'Search and scans include ready and waiting orders.':counts.checking?'Checking which orders are ready…':watchFilter==='not-found'?'Items explicitly marked not found, across Ready and Waiting. Counts are item lines; each buyer’s package stays together.':'Waiting orders keep their shipping deadlines. Counts are buyer groups; item filters count lines.';}
+      :history?'Completed orders are shown here.':searching?'Search and scans include ready and waiting orders.':counts.checking||itemUnknown?'Checking which orders are ready…':missingOnly?`Showing ${visible.length} ${visible.length===1?'buyer':'buyers'} with ${counts[itemFilter]} missing item ${counts[itemFilter]===1?'line':'lines'}. ${showAllBuyerLines?'All their order lines are included.':'Only missing order lines are shown.'} Ready, Waiting and All count matching buyers.`:'Buyer counts match the selected item filter; item counts match the selected work status. Click the selected item filter again to clear it.';}
     if(history||searching)return rows;
-    const keys=new Set(groups.filter(g=>{
-      if(watchFilter==='not-found'&&!g.lines.some(isNotFound))return false;
-      if(!isKnown(g.key))return view==='all';
-      const blockers=active(g.key);
-      return (view==='all'||(view==='waiting')===Boolean(blockers.length))&&(!watchFilter||watchFilter==='not-found'||(watchFilter==='cgl'?pendingCgl(g.key).length:watchFilter==='cancel'?pendingCancellations(g.key).length:missingWatches(g.key).length));
-    }).map(g=>g.key));
-    return rows.filter(r=>keys.has(getBuyerKey(r)));
+    const keys=new Set(visible.map(g=>g.key));
+    return rows.filter(r=>keys.has(getBuyerKey(r))&&(!missingOnly||showAllBuyerLines||matchesMissingLine(r)));
   }
   function itemSearchChanged() {
     // The existing item-search stream supplies changes; no extra reads or writes.
@@ -319,7 +332,7 @@
   }
   function schedule(){clearTimeout(timer);timer=setTimeout(()=>{if(document.visibilityState!=='hidden')void load();},250);}
   async function showPendingItemFilter(kind) {
-    view=kind==='not-found'?'all':'waiting';watchFilter=kind;state.orderDueFilter='all';
+    view=kind==='not-found'?'all':'waiting';watchFilter=kind;showAllBuyerLines=false;state.orderDueFilter='all';
     clearOrderSearch({apply:false});clearOrderCreatedDateFilter({apply:false});clearEbayLaunchFilter({apply:false});
     for(const id of ['buyer-refund-filter','buyer-refund-timing']){const el=$(id);if(el)el.value='all';}
     if(state.selectedLiveLot){clearLiveLotSelection({render:false});renderLiveLotPanel();}
@@ -334,9 +347,10 @@
   function start() {
     if(started)return;started=true;
     document.addEventListener('click',event=>{
-      const b=event.target.closest('[data-work-view],[data-work-summary-view],[data-work-buyer],[data-work-cgl-add],[data-work-cgl-manage],[data-work-missing-add],[data-work-missing-manage],[data-work-cancel-add],[data-work-cancel-clear],[data-work-retry],#pending-work-cgl,#pending-work-missing,#pending-work-cancel,#pending-work-not-found,#summary-cgl-button,#summary-missing-button,#summary-cancel-button,#phone-summary-cancel-button,#summary-not-found-button,#phone-summary-not-found-button');if(!b)return;
+      const b=event.target.closest('[data-work-view],[data-work-summary-view],[data-work-buyer],[data-work-cgl-add],[data-work-cgl-manage],[data-work-missing-add],[data-work-missing-manage],[data-work-cancel-add],[data-work-cancel-clear],[data-work-retry],#pending-work-cgl,#pending-work-missing,#pending-work-cancel,#pending-work-not-found,#pending-work-show-all,#summary-cgl-button,#summary-missing-button,#summary-cancel-button,#phone-summary-cancel-button,#summary-not-found-button,#phone-summary-not-found-button');if(!b)return;
       event.preventDefault();event.stopPropagation();
       if(b.disabled||saving||undoBusy)return;
+      if(b.id==='pending-work-show-all'){showAllBuyerLines=!showAllBuyerLines;applyOrderFilters();return;}
       if(b.hasAttribute('data-work-retry')){void load();return;}
       if(['summary-cancel-button','phone-summary-cancel-button'].includes(b.id)){void showPendingItemFilter('cancel');return;}
       if(['summary-not-found-button','phone-summary-not-found-button'].includes(b.id)){void showPendingItemFilter('not-found');return;}
@@ -347,9 +361,9 @@
       if(b.dataset.workMissingManage){const row=state.orders.find(r=>r.id===b.dataset.workMissingManage);if(row)void show(getBuyerKey(row),{onlyMissing:row.id});return;}
       if(b.dataset.workCglManage){const row=state.orders.find(r=>r.id===b.dataset.workCglManage);if(row)void show(getBuyerKey(row),{onlyCgl:row.id});return;}
       if(b.dataset.workBuyer){void show(b.dataset.workBuyer);return;}
-      if(['pending-work-cgl','pending-work-missing','pending-work-cancel','pending-work-not-found'].includes(b.id)){const kind=b.id.slice('pending-work-'.length);watchFilter=watchFilter===kind?'':kind;if(watchFilter)view=kind==='not-found'?'all':'waiting';}
-      else if(['summary-cgl-button','summary-missing-button'].includes(b.id)){watchFilter=b.id==='summary-cgl-button'?'cgl':'missing';view='waiting';state.orderDueFilter='all';clearOrderSearch({apply:false});}
-      else{view=b.dataset.workView||b.dataset.workSummaryView;watchFilter='';if(b.dataset.workDue){state.orderDueFilter=b.dataset.workDue;clearOrderSearch({apply:false});}}
+      if(['pending-work-cgl','pending-work-missing','pending-work-cancel','pending-work-not-found'].includes(b.id)){const kind=b.id.slice('pending-work-'.length);watchFilter=watchFilter===kind?'':kind;showAllBuyerLines=false;if(watchFilter)view=kind==='not-found'?'all':'waiting';}
+      else if(['summary-cgl-button','summary-missing-button'].includes(b.id)){watchFilter=b.id==='summary-cgl-button'?'cgl':'missing';showAllBuyerLines=false;view='waiting';state.orderDueFilter='all';clearOrderSearch({apply:false});}
+      else{view=b.dataset.workView||b.dataset.workSummaryView;if(b.dataset.workDue){watchFilter='';state.orderDueFilter=b.dataset.workDue;clearOrderSearch({apply:false});}}
       applyOrderFilters();
     },true);
     window.OGOrderLiveUpdates?.subscribe(supabase,change=>{if(['work_blocker','reconnected'].includes(change.kind))schedule();});

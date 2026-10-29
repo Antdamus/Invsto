@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="buyer-tasks.css?v=20261013-photos" />
   <link rel="stylesheet" href="pending-orders.css?v=20261022-partial-refunds-2" />
   <link rel="stylesheet" href="ebay-auto-sync.css?v=20261025" />
-  <link rel="stylesheet" href="pending-work-queue.css?v=20261029-not-found-summary" />
+  <link rel="stylesheet" href="pending-work-queue.css?v=20261029-filter-counts" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
   <script src="extension-updates.js?v=20261003" defer></script>
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
@@ -528,6 +528,7 @@
               <button type="button" id="pending-work-not-found" aria-pressed="false">Item not found <span>…</span></button>
             </div>
           </div>
+          <button type="button" id="pending-work-show-all" class="secondary-btn" aria-pressed="false" hidden>Show all buyer order lines</button>
           <p id="pending-work-status" role="status">Checking which orders are ready…</p>
           <p class="pending-chat-live" data-pending-chat-status>Checking buyer chats…</p>
           <span class="pending-chat-sr-only" data-pending-chat-announcement role="status" aria-live="polite"></span>
@@ -1331,7 +1332,7 @@
   </div>
   <script src="pending-order-chats.js?v=20261009"></script>
   <script src="pending-watch-flags.js?v=20261018-front-tasks"></script>
-  <script src="pending-work-queue.js?v=20261029-not-found-summary"></script>
+  <script src="pending-work-queue.js?v=20261029-filter-counts"></script>
   <script src="buyer-tasks.js?v=20261013-photos"></script>
   <script src="buyer-promise-checkout.js?v=20261013-photos"></script>
   <script src="pending-partial-refunds.js?v=20261029-approval-cache"></script>
