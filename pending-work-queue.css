@@ -55,3 +55,4 @@
 .pending-work-notice [data-work-dismiss]{background:transparent;color:#edcf94;padding:8px;font-size:20px}
 .pending-work-notice button:disabled{opacity:.55;cursor:wait}.pending-work-notice.is-error{background:#492d26;border-color:#e99b84}
 @media(max-width:760px){.pending-work-filters{display:grid;grid-template-columns:1fr 1fr auto;gap:6px}.pending-work-filters button{font-size:12px;padding:9px 8px}.pending-watch-filters{grid-column:1/-1;margin-left:0;gap:6px}.pending-work-dialog{padding:18px;max-height:calc(100dvh - 20px)}.pending-work-dialog h2{font-size:21px}.pending-work-summary{font-size:13px}.pending-work-dialog #pending-work-save{width:100%}}
+.pending-report-actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:12px 0}.pending-report-actions a{display:inline-flex;align-items:center;gap:8px;text-decoration:none}

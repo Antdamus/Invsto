@@ -68,11 +68,11 @@
     for (let start = 0; start < values.length; start += 60) rows.push(...await read(values.slice(start, start + 60)));
     return unique(rows);
   }
-  async function loadRecords(client, buyer, progress = () => {}) {
+  async function loadRecords(client, buyer, progress = () => {}, {evidenceLineIds = null} = {}) {
     if (!cleanBuyer(buyer)) throw new Error('Choose a buyer from Pending Orders or Order History.');
     progress('Loading all saved orders for this buyer...');
     const orders = (await paged(() => client.from('ebay_orders')
-      .select('id,order_number,buyer_username,sale_date,status,shipped_on_date,shipping_and_handling,total_price,label_metadata,raw_payload')
+      .select('id,order_number,buyer_username,buyer_name,sale_date,ship_by_date,status,shipped_on_date,shipping_and_handling,total_price,label_metadata,raw_payload')
       .ilike('buyer_username', exactPattern(buyer)).order('id')))
       .filter(order => cleanBuyer(order.buyer_username).toLowerCase() === cleanBuyer(buyer).toLowerCase());
     const lines = await chunks(orders.map(order => order.id), ids => paged(() => client.from('ebay_order_lines')
@@ -86,19 +86,20 @@
     ]);
     const returnCases=unique([...orderCases,...buyerCases.filter(c=>cleanBuyer(c.buyer_username).toLowerCase()===cleanBuyer(buyer).toLowerCase())]);
     progress(`Found ${orders.length} orders. Loading saved item screenshots...`);
-    const taskSelect = 'id,order_id,order_line_ids';
+    const evidenceLines = evidenceLineIds ? lines.filter(line => evidenceLineIds.includes(line.id)) : lines;
+    const taskSelect = 'id,order_id,order_line_ids,metadata';
     const [byOrder, byLine, adminEvents] = await Promise.all([
-      chunks(orders.map(order => order.id), ids => paged(() => client.from('ebay_order_tasks').select(taskSelect).in('order_id', ids).order('id'))),
-      chunks(lines.map(line => line.id), ids => paged(() => client.from('ebay_order_tasks').select(taskSelect).overlaps('order_line_ids', ids).order('id'))),
-      chunks(lines.map(line => line.id), ids => paged(() => client.from('ebay_order_admin_events')
+      chunks(evidenceLines.map(line => line.order_id), ids => paged(() => client.from('ebay_order_tasks').select(taskSelect).in('order_id', ids).order('id'))),
+      chunks(evidenceLines.map(line => line.id), ids => paged(() => client.from('ebay_order_tasks').select(taskSelect).overlaps('order_line_ids', ids).order('id'))),
+      chunks(evidenceLines.map(line => line.id), ids => paged(() => client.from('ebay_order_admin_events')
         .select('id,order_line_ids,action,payload,created_at').overlaps('order_line_ids', ids).order('id'))),
     ]);
     const tasks = unique([...byOrder, ...byLine]), taskById = new Map(tasks.map(task => [task.id, task]));
     const events = await chunks(tasks.map(task => task.id), ids => paged(() => client.from('ebay_order_task_events')
-      .select('id,task_id,payload,photo_attachments,created_at').in('task_id', ids).order('id')));
+      .select('id,task_id,action,notes,payload,photo_attachments,created_at').in('task_id', ids).order('id')));
     return {orders, lines, returnCases, adminEvents, events: [...adminEvents, ...events.map(event => {
       const task = taskById.get(event.task_id) || {};
-      return {...event, order_line_ids: task.order_line_ids?.length ? task.order_line_ids : lines.filter(line => line.order_id === task.order_id).map(line => line.id)};
+      return {...event, task_metadata: task.metadata, order_line_ids: task.order_line_ids?.length ? task.order_line_ids : lines.filter(line => line.order_id === task.order_id).map(line => line.id)};
     })]};
   }
   function photosForLine(line, events) {
