@@ -13,6 +13,106 @@
     return new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'short',day:'numeric'}).format(new Date(text));
   };
   const formatted = (cents,currency='USD') => cents == null ? 'Amount not confirmed' : new Intl.NumberFormat('en-US',{style:'currency',currency}).format(cents/100);
+  const timingLabels = {after_shipment:'After shipment',before_shipment:'Before shipment',
+    after_completion:'After system completion; shipment timing unconfirmed',timing_unknown:'Timing needs verification',none:'No refund or cancellation recorded'};
+  function instant(value) {
+    const text=String(value?.value || value || '');
+    return /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(text) && Number.isFinite(Date.parse(text)) ? Date.parse(text) : null;
+  }
+  function dateRange(value,day=false) {
+    const text=String(value?.value || value || ''), time=instant(text);
+    if(time!=null && !day)return {min:time,max:time,value:text};
+    if(day || /^\d{4}-\d{2}-\d{2}$/.test(text)) {
+      const parsed=Date.parse(text);if(!Number.isFinite(parsed))return null;
+      const midnight=Date.parse(new Date(parsed).toISOString().slice(0,10));
+      // An export's calendar day has no clock/zone. Overlapping days cannot prove sequence.
+      return {min:midnight-14*3600000,max:midnight+38*3600000-1,value:new Date(parsed).toISOString().slice(0,10)};
+    }
+    return null;
+  }
+  function timingDate(value) {
+    if(/^\d{4}-\d{2}-\d{2}$/.test(String(value || '')))return new Intl.DateTimeFormat('en-US',{timeZone:'UTC',month:'short',day:'numeric',year:'numeric'}).format(new Date(value))+' (time not recorded)';
+    const time=instant(value);
+    return time==null?'Date not recorded':new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',timeZoneName:'short'}).format(new Date(time));
+  }
+  function shipmentDates(order,lines) {
+    const raw=order.raw_payload || {}, api=raw.order || {}, source=String(raw.source || '');
+    const values=[api.shippedDate,api.fulfillmentSummary?.shippedDate,api.fulfillmentStatus?.shippedDate,api.shippingFulfillment?.shippedDate,
+      ...array(api.fulfillments).map(f=>f.shippedDate),...array(api.shippingFulfillments).map(f=>f.shippedDate),
+      ...[...array(api.lineItems),...lines.map(l=>l.raw_payload?.line)].filter(Boolean).flatMap(l=>[l.shippedDate,l.lineItemFulfillmentInstructions?.shippedDate,l.fulfillmentInstructions?.shippedDate])];
+    const dates=values.map(value=>dateRange(value)).filter(Boolean);
+    const csv=raw.first_row?.['Shipped On Date'];
+    // Legacy API archive imports used lastModifiedDate as shipped_on_date. They are not shipment evidence.
+    if(order.shipped_on_date && (!/ebay_(account|buyer)_history_sync/.test(source) || raw.date_precision?.shipped_on_date==='timestamp')) {
+      const day=raw.date_precision?.shipped_on_date==='day' || Boolean(csv && /^(?:[A-Za-z]{3}-\d{1,2}-\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4})$/.test(csv));
+      const saved=dateRange(order.shipped_on_date,day);if(saved)dates.push(saved);
+    }
+    return dates;
+  }
+  function refundTiming(order,lines,requests,refundEntries,finance,hasRefund,identityConflict) {
+    const raw=order.raw_payload || {}, signals=[raw,...lines.map(l=>l.raw_payload || {})];
+    const cancellations=signals.flatMap(p=>[p.api_cancellation_case,p.cancellation_page_case,p.order?.cancelStatus]).filter(Boolean);
+    const normal=new Set(['','NONE_REQUESTED','NOT_REQUESTED','NO_CANCEL','NOT_CANCELLED','CANCEL_REJECTED','CANCEL_CLOSED_WITHOUT_REFUND']);
+    const cancelStates=signals.flatMap(p=>[p.orderCancelStatus,p.api_order_status?.cancel_status,p.order?.cancelStatus?.cancelState])
+      .concat(cancellations.map(c=>c.cancelStatus || c.cancelState || c.cancellationStatus)).map(upper);
+    const cancelled=upper(order.status)==='CANCELLED' || (lines.length>0 && lines.every(l=>upper(l.line_status)==='CANCELLED')) || cancelStates.some(s=>['CANCELED','CANCELLED','CANCEL_CLOSED_WITH_REFUND','CANCEL_COMPLETE','CANCEL_COMPLETED'].includes(s));
+    const hasCancellation=cancelled || cancelStates.some(s=>!normal.has(s));
+    const relevant=requests.filter(r=>r.state!=='closed' || hasRefund);
+    const activity=hasRefund || relevant.length>0 || hasCancellation;
+    if(!activity)return {flags:[],label:timingLabels.none,events:[],cancelled:false};
+    const ships=shipmentDates(order,lines), shippedAt=[...new Set(ships.map(d=>d.value))];
+    const states=signals.flatMap(p=>[p.orderFulfillmentStatus,p.order?.orderFulfillmentStatus,p.api_order_status?.fulfillment_status]).map(upper).filter(Boolean);
+    const unshipped=states.includes('NOT_STARTED') && states.every(s=>s==='NOT_STARTED');
+    const completionDates=lines.map(l=>{
+      const p=l.raw_payload || {}, history=/ebay_(account|buyer)_history_sync/.test(String(p.source || raw.source || ''));
+      return upper(l.line_status)==='FULFILLED' && !history && !p.history_date_corrected_at ? instant(l.fulfilled_at) : null;
+    });
+    const closedAt=completionDates.length && completionDates.every(t=>t!=null) ? Math.max(...completionDates) : null;
+    const events=relevant.map(r=>{
+      const p=r.case.raw_payload || {};
+      // opened_at can be the import time. Only use an original provider request date or actual refund date.
+      const requested=p.requestedAt || p.apiExtractedDetails?.requestedAt || p.ebayDetail?.creationInfo?.creationDate;
+      return {kind:instant(requested)!=null?'Request opened':r.state==='completed'?'Refund issued':'Request date unavailable',
+        at:instant(requested)!=null?(requested.value || requested):r.refundedAt || '',caseNumber:r.caseNumber};
+    });
+    if(hasCancellation) {
+      const candidates=cancellations.flatMap(c=>[c.requestedAt,c.cancelRequestDate,...array(c.cancelRequests).map(r=>r.cancelRequestDate),c.completedAt,c.cancelCompletedDate,c.cancelCloseDate]);
+      const times=candidates.map(instant).filter(t=>t!=null);
+      events.push({kind:'Cancellation',at:times.length?new Date(Math.min(...times)).toISOString():''});
+    }
+    // A request made before shipping stays in that category even if its refund was paid later.
+    if(!events.length) {
+      const dated=refundEntries.filter(r=>instant(r.at)!=null);
+      const fallback=finance.filter(t=>upper(t.transactionStatus)!=='FAILED' && instant(t.transactionDate)!=null);
+      for(const r of dated)events.push({kind:'Refund issued',at:r.at});
+      if(!dated.length)for(const t of fallback)events.push({kind:'Refund transaction recorded',at:t.transactionDate});
+      if(!events.length)events.push({kind:'Refund date unavailable',at:''});
+    }
+    const preCancellation=cancelled && unshipped && !ships.length && !lines.some(l=>upper(l.line_status)==='FULFILLED');
+    for(const event of events) {
+      const time=instant(event.at);let category='timing_unknown',basis='The saved dates do not establish whether this happened before or after shipment.';
+      if(!identityConflict && ships.length && time!=null && !states.includes('IN_PROGRESS')) {
+        if(time>Math.max(...ships.map(d=>d.max))){category='after_shipment';basis='The event occurred after the recorded shipment date.';}
+        else if(time<Math.min(...ships.map(d=>d.min))){category='before_shipment';basis='The event occurred before the recorded shipment date.';}
+      } else if(!identityConflict && preCancellation) {
+        category='before_shipment';basis='Cancellation recorded while eBay shows fulfillment not started, with no shipment or completed packing recorded.';
+      } else if(!identityConflict && !ships.length && time!=null && closedAt!=null && time>closedAt) {
+        category='after_completion';basis='The event occurred after all saved item lines were completed in the system. An actual shipment date is not confirmed.';
+      }
+      if(identityConflict)basis='The case and order buyer identities disagree; verify their association.';
+      event.category=category;event.basis=basis;
+    }
+    const flags=[...new Set(events.map(e=>e.category))];
+    return {flags,label:flags.map(k=>timingLabels[k]).join(' / '),events,shippedAt,
+      completedAt:closedAt!=null?new Date(closedAt).toISOString():'',cancelled};
+  }
+  function timingCounts(financial) {
+    return Object.fromEntries(['after_shipment','before_shipment','after_completion','timing_unknown'].map(key=>[key,financial.orders.filter(o=>o.timing?.flags.includes(key)).length]));
+  }
+  function timingText(financial) {
+    const count=timingCounts(financial);
+    return `Refund / cancellation timing (orders): ${count.after_shipment} after shipment; ${count.before_shipment} before shipment; ${count.after_completion} after system completion with shipment unconfirmed; ${count.timing_unknown} timing to verify. An order can appear in more than one category.`;
+  }
   function orderAmount(order) {
     const raw=order.raw_payload || {}, value=raw.order?.pricingSummary?.total;
     return {cents:numeric(value?.value ?? order.total_price),currency:upper(value?.currency || raw.first_row?.Currency || 'USD')};
@@ -93,7 +193,8 @@
       const refundSignal=entries.length>0 || finance.length>0 || partial || full;
       const label=unknown?'Refund recorded - amount needs verification':refundCents>0?(full || refundCents===gross.cents?'Full refund completed':'Partial refund completed'):
         pending?'Refund pending':failed?'Refund failed':requests.some(r=>r.state==='requested')?'Return / refund requested':requests.length?'Case closed - refund not confirmed':'No refund recorded';
-      return {id:order.id,orderNumber:order.order_number,lines,gross,requests,refunds,refundCents,unknown,source,refundSignal,pending,failed,label,
+      const timing=refundTiming(order,lines,requests,entries,finance,refundSignal || pending || failed,identityConflict);
+      return {id:order.id,orderNumber:order.order_number,lines,gross,requests,refunds,refundCents,unknown,source,refundSignal,pending,failed,label,timing,
         netCents:unknown || gross.cents==null ? null : gross.cents-refundCents,
         refundedDates:[...new Set(entries.map(e=>e.at).filter(Boolean))],
         scope:lines.length>1?'Order total across all items; counted once. Refunds are not allocated between items.':'Order total.',
@@ -125,6 +226,12 @@
   function detailLines(f) {
     if(!f)return [];
     const lines=[`Order refund status: ${f.label}`,`${f.scope} Before refunds: ${formatted(f.gross.cents,f.gross.currency)} | Completed refunds: ${formatted(f.refundCents,f.gross.currency)}${f.unknown?' confirmed only':''} | Net spent: ${f.netCents==null?'Not confirmed':formatted(f.netCents,f.gross.currency)}`];
+    if(f.timing?.flags.length) {
+      lines.splice(1,0,`Refund / cancellation timing: ${f.timing.label}`);
+      if(f.timing.shippedAt?.length)lines.push(`Recorded shipment: ${f.timing.shippedAt.map(timingDate).join(', ')}`);
+      if(f.timing.completedAt)lines.push(`System completion: ${timingDate(f.timing.completedAt)} (not proof of shipment)`);
+      for(const event of f.timing.events)lines.push(`${event.kind}${event.caseNumber?` (case ${event.caseNumber})`:''}: ${timingDate(event.at)} - ${timingLabels[event.category]}. ${event.basis}`);
+    }
     if(f.note)lines.push(f.note);
     if(f.source)lines.push(`Refund source: ${f.source}${f.refundedDates.length?` | Issued: ${f.refundedDates.map(date).join(', ')}`:''}`);
     if(f.pending)lines.push('An additional refund is pending confirmation; it is not included in completed refunds.');
@@ -138,7 +245,7 @@
     }
     return lines;
   }
-  const api={model,forLine,totalText,detailLines,caseRefund,caseLineIds,formatted};
+  const api={model,forLine,totalText,detailLines,caseRefund,caseLineIds,formatted,timingCounts,timingText};
   root.OGBuyerRefundReport=api;
   if(typeof module!=='undefined')module.exports=api;
 })(typeof window!=='undefined'?window:globalThis);

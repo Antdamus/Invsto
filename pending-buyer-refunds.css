@@ -1,5 +1,5 @@
 .buyer-refund-controls{display:flex;flex-wrap:wrap;align-items:end;gap:12px;margin:12px 0 18px;padding:16px;border:1px solid var(--border-color,#45403a);border-radius:14px;background:rgba(212,171,96,.05)}
-.buyer-refund-field{display:flex;flex-direction:column;gap:6px}
+.buyer-refund-field{display:flex;flex-direction:column;gap:6px;max-width:100%;min-width:0}
 .buyer-refund-controls label{font-size:.82rem;font-weight:700;margin:0}
 .buyer-refund-controls select{min-width:270px;max-width:100%;padding:10px 12px;border-radius:9px;background:var(--input-bg,#242321);color:var(--text-color,#f5f1e9);border:1px solid var(--border-color,#62584b)}
 .buyer-refund-controls p{flex-basis:100%;margin:0;color:var(--muted-text,#b8b4ad);font-size:.78rem;line-height:1.6}
@@ -14,4 +14,8 @@
 .buyer-refund-section.is-confirmed{border-color:#e08ca5;background:#482b35;color:#ffc3d2}
 .buyer-refund-section.is-requested{border-color:#d7b46b;background:#3f3523;color:#ffe0a0}
 .buyer-refund-section.is-verification{border-color:#b59bd4;background:#342c43;color:#d9c6ff}
+.buyer-refund-badge.is-after_shipment,.buyer-refund-section.is-after_shipment{color:#ffc3d2;border-color:#95536a;background:#482b35}
+.buyer-refund-badge.is-before_shipment,.buyer-refund-section.is-before_shipment{color:#baddff;border-color:#537fa6;background:#243749}
+.buyer-refund-badge.is-after_completion,.buyer-refund-section.is-after_completion{color:#d9c6ff;border-color:#796295;background:#342c43}
+.buyer-refund-badge.is-timing_unknown,.buyer-refund-section.is-timing_unknown{color:#ffe0a0;border-color:#8d733f;background:#3f3523}
 @media(max-width:700px){.buyer-refund-controls{padding:12px;gap:10px}.buyer-refund-field,.buyer-refund-controls select{width:100%;min-width:0}.buyer-refund-controls .secondary-btn{min-height:42px}.buyer-refund-section{font-size:.88rem}}

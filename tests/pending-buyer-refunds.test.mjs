@@ -16,7 +16,7 @@ function fixture() {
       {id:'wrong-buyer',order_id:'mismatch',buyer_username:'AnotherBuyer',source_lane:'return',ebay_return_id:'123',status:'closed',ebay_status:'REFUNDED',raw_payload:{ebayReturnId:'123',ebayDetail:{returnId:'123',refundInfo:{actualRefundDetail:{refundStatus:'SUCCESS',actualRefund:{totalAmount:{value:100,currency:'USD'}}}}}}}]};
 }
 function harness(read=async()=>fixture()) {
-  const elements = new Map(['buyer-refund-filter','order-sort','buyer-refund-refresh','buyer-refund-status'].map(id=>[id,{value:id==='order-sort'?'created_asc':'all',dataset:{},events:{},addEventListener(name,fn){this.events[name]=fn;}}]));
+  const elements = new Map(['buyer-refund-filter','buyer-refund-timing','order-sort','buyer-refund-refresh','buyer-refund-status'].map(id=>[id,{value:id==='order-sort'?'created_asc':'all',dataset:{},events:{},addEventListener(name,fn){this.events[name]=fn;}}]));
   let lines = [line('a1','BuyerA'),line('a2','BUYERA'),line('b','BuyerB'),line('c','BuyerC'),line('d','BuyerD'),line('e','BuyerE'),line('f','BuyerF')],changes=0;
   const controller = api.createController({client:{},getLines:()=>lines,onChange:()=>changes++,document:{getElementById:id=>elements.get(id)},read});
   controller.init();
@@ -88,8 +88,24 @@ test('grouping has one heading per category and uses deterministic category orde
   elements.get('order-sort').value='refund_history';
   const groups=['BuyerD','BuyerC','BuyerB','BuyerA'].map(buyer=>({buyer})).sort(controller.compare);
   assert.deepEqual(groups.map(row=>row.buyer),['BuyerA','BuyerB','BuyerC','BuyerD']);
-  assert.match(controller.heading(groups[0],0,groups),/completed refunds/);
+  assert.match(controller.heading(groups[0],0,groups),/timing needs verification/);
   assert.equal(controller.heading(groups[0],1,[groups[0],groups[0]]),'');
+});
+
+test('timing and payment status must match the same historical order, not unrelated purchases',async()=>{
+  const records={orders:[{...order('before','BuyerA',paid),shipped_on_date:'2026-10-05T12:00:00Z'},order('after','BuyerA')],lines:[],returnCases:[]};
+  records.orders[0].raw_payload=structuredClone(paid);records.orders[0].raw_payload.order.paymentSummary.refunds[0].refundDate='2026-10-01T12:00:00Z';
+  records.orders[1].shipped_on_date='2026-10-02T12:00:00Z';
+  records.returnCases.push({id:'request',order_id:'after',source_lane:'return',status:'open',ebay_status:'RETURN_REQUESTED',raw_payload:{requestedAt:'2026-10-08T12:00:00Z'}});
+  const {controller,elements,lines}=harness(async()=>records);await controller.ensure();
+  elements.get('buyer-refund-filter').value='confirmed';elements.get('buyer-refund-timing').value='after_shipment';
+  assert.deepEqual(controller.filter(lines),[],'a later open request is not a completed refund after shipment');
+  elements.get('buyer-refund-timing').value='before_shipment';
+  assert.deepEqual(controller.filter(lines).map(l=>l.id),['a1','a2']);
+  assert.equal(controller.category('BuyerA'),'before_shipment');
+  elements.get('buyer-refund-filter').value='requested';elements.get('buyer-refund-timing').value='after_shipment';
+  assert.deepEqual(controller.filter(lines).map(l=>l.id),['a1','a2']);
+  assert.equal(controller.category('BuyerA'),'after_shipment');
 });
 
 test('exact buyer filters escape LIKE wildcards and PostgREST separators',()=>{

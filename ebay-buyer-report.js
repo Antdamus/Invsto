@@ -72,11 +72,11 @@
     if (!cleanBuyer(buyer)) throw new Error('Choose a buyer from Pending Orders or Order History.');
     progress('Loading all saved orders for this buyer...');
     const orders = (await paged(() => client.from('ebay_orders')
-      .select('id,order_number,buyer_username,sale_date,status,shipping_and_handling,total_price,label_metadata,raw_payload')
+      .select('id,order_number,buyer_username,sale_date,status,shipped_on_date,shipping_and_handling,total_price,label_metadata,raw_payload')
       .ilike('buyer_username', exactPattern(buyer)).order('id')))
       .filter(order => cleanBuyer(order.buyer_username).toLowerCase() === cleanBuyer(buyer).toLowerCase());
     const lines = await chunks(orders.map(order => order.id), ids => paged(() => client.from('ebay_order_lines')
-      .select('id,order_id,item_number,transaction_id,item_title,quantity,sold_for,line_status,raw_payload')
+      .select('id,order_id,item_number,transaction_id,item_title,quantity,sold_for,line_status,fulfilled_at,raw_payload')
       .in('order_id', ids).order('id')));
     progress('Loading refund requests and completed refund records...');
     const caseSelect='id,order_id,order_number,buyer_username,ebay_return_id,source_lane,issue_kind,status,ebay_status,opened_at,received_at,closed_at,return_reason,synced_at,raw_payload,ebay_return_items(order_line_id),ebay_return_tasks(order_line_ids)';
@@ -273,6 +273,8 @@
       <p class="notes">${html(reportNotes())}</p>
       <p class="refund-legend">Rose background marks an item with a confirmed full or partial refund.</p>
       <p>${financial.refundedOrders} orders with confirmed refund amounts / ${financial.requestedOrders} orders with open requests or pending refunds / ${financial.unverifiedOrders} orders with refund amounts needing verification.</p>
+      <p>${html(refunds.timingText(financial))}</p>
+      <p class="notes">Timing uses the original request date when available, otherwise the refund date. System completion is shown separately from shipment; imported history and missing dates do not establish shipment timing.</p>
       ${financial.unmatched.length?`<p class="warning">${financial.unmatched.length} buyer cases could not be matched to a saved order; totals need review: ${html(financial.unmatched.map(c=>`${c.order_number || 'Order unknown'} (case ${c.ebay_return_id || c.id})`).join(', '))}.</p>`:''}
       ${rows.some(row=>row.price.total == null) ? '<p class="warning">Some original item prices are unavailable and excluded from totals.</p>' : ''}
       ${missingOrders.length ? `<p class="warning">No item details were saved for orders: ${html(missingOrders.map(order=>order.order_number).join(', '))}.</p>` : ''}
@@ -358,6 +360,8 @@
     y=await paragraph(page,`${records.orders.length} orders / ${rows.length} item lines`,36,y,540,14,true);
     for(const [label,key] of [['Purchases before refunds','gross'],['Completed refunds','refunds'],['Net spent after refunds','net']])y=await paragraph(page,`${label}: ${refunds.totalText(financial,key)}`,36,y-5,540,13,true);
     y=await paragraph(page,`${financial.refundedOrders} orders with confirmed refund amounts / ${financial.requestedOrders} with open requests or pending refunds / ${financial.unverifiedOrders} with refund amounts needing verification.`,36,y-8,540,9);
+    y=await paragraph(page,refunds.timingText(financial),36,y-8,540,9,true);
+    y=await paragraph(page,'Timing uses original requests when available, otherwise refund dates. System completion is separate from shipment. Missing or imported history dates cannot establish shipment timing.',36,y-8,540,9,false,muted);
     y=await paragraph(page,`${rows.filter(row=>row.image).length} of ${rows.length} items have a loaded screenshot.`,36,y-8,540,10);
     y=await paragraph(page,reportNotes(),36,y-12,540,9,false,muted);
     y=await paragraph(page,'Rose background marks an item with a confirmed full or partial refund.',36,y-8,540,9,true,rgb(.54,.16,.20));
@@ -371,12 +375,13 @@
     for(let i=0;i<rows.length;i++){
       if(y<110){page=await pageHeader('Purchase overview / continued');y=678;}
       const row=rows[i];
-      if(row.refund?.itemRefundConfirmed)page.drawRectangle({x:30,y:y-33,width:552,height:43,color:rgb(1,.91,.91)});
+      if(row.refund?.itemRefundConfirmed)page.drawRectangle({x:30,y:y-47,width:552,height:57,color:rgb(1,.91,.91)});
       await lineText(page,`${i+1}. ${row.orderNumber}`,36,y,9,true);
       await lineText(page,money(row.price.total,row.price.currency),448,y,10,true);
       const overviewTitle=row.title.length>75?`${row.title.slice(0,72)}...`:row.title;
       await lineText(page,overviewTitle,36,y-13,8,false,muted);
-      await lineText(page,row.refund?.label || 'Refund status not recorded',36,y-26,8,false,gold);y-=44;
+      await lineText(page,row.refund?.label || 'Refund status not recorded',36,y-26,8,false,gold);
+      y=await paragraph(page,row.refund?.timing?.label || 'Timing not recorded',36,y-39,540,8,false,muted);y-=12;
     }
     for(let i=0;i<rows.length;i++){
       const row=rows[i];progress(`Building PDF: ${i+1} of ${rows.length} items...`);
