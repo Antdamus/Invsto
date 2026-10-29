@@ -4648,6 +4648,7 @@ function renderOrders(options = {}) {
               data-current-order-numbers="${escapeHtml([...group.orderNumbers].join(","))}"
               data-current-items="${buyerInsightCurrentItemsAttribute(group.lines)}"
             >${escapeHtml(group.buyer)}</button>
+            <a class="buyer-purchase-report-link" href="ebay-buyer-report.html?buyer=${encodeURIComponent(group.buyer)}" target="_blank" rel="noopener" title="Generate all saved purchases with prices and screenshots">Purchase report</a>
             <span class="buyer-card-compact-count">${escapeHtml(orderCountLabel)} · ${escapeHtml(lineCountLabel)} · ${escapeHtml(quantityLabel)}</span>
           </div>
           ${customerMarkup}

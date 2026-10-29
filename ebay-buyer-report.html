@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Buyer purchase report | OG Jewelers</title>
+  <link rel="stylesheet" href="ebay-buyer-report.css?v=20261029-1" />
+</head>
+<body data-page="ebay-buyer-report">
+  <header class="toolbar">
+    <a id="history-link" href="ebay-order-history.html">Back to order history</a>
+    <div><button id="retry" type="button" hidden>Try again</button><a id="download" class="primary" hidden>Download PDF</a></div>
+  </header>
+  <main>
+    <span class="eyebrow">OG JEWELERS / PURCHASE REVIEW</span>
+    <h1 id="buyer-title">Buyer purchase report</h1>
+    <p id="progress" role="status" aria-live="polite">Loading purchase history...</p>
+    <p id="error" role="alert" hidden></p>
+    <a id="sign-in" href="index.html" hidden>Sign in to your system, then return to this report.</a>
+    <section id="report" aria-label="Purchase report"></section>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
+  <script src="vendor/pdf-lib/pdf-lib.min.js?v=1.17.1"></script>
+  <script src="ebay-buyer-report.js?v=20261029-1"></script>
+</body>
+</html>

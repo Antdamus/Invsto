@@ -136,6 +136,7 @@
             <p id="buyer-insights-subtitle">Loading synced eBay order history...</p>
           </div>
           <div class="buyer-insights-actions">
+            <a id="buyer-insights-report-link" class="buyer-purchase-report-link" href="ebay-buyer-report.html" target="_blank" rel="noopener">Purchase report</a>
             <a id="buyer-insights-history-link" class="buyer-insights-history-link" href="ebay-order-history.html">Open history</a>
             <span class="buyer-insights-archive-pill">Covered by account archive</span>
           </div>
@@ -184,6 +185,7 @@
     activeInsightsData = null;
     modal.classList.remove("hidden");
     modal.querySelector("#buyer-insights-title").textContent = buyerUsername || "Buyer history";
+    modal.querySelector("#buyer-insights-report-link").href = `ebay-buyer-report.html?buyer=${encodeURIComponent(buyerUsername || "")}`;
     modal.querySelector("#buyer-insights-subtitle").textContent = "Pulling synced eBay orders, returns, and item mix...";
     modal.querySelector("#buyer-insights-history-link").href = `ebay-order-history.html?buyer=${encodeURIComponent(buyerUsername || "")}`;
     modal.querySelector("#buyer-insights-body").innerHTML = `

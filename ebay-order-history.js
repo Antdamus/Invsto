@@ -6327,6 +6327,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
               data-current-order-numbers="${escapeHtml(orderNumbers.join(","))}"
               data-current-items="${buyerInsightCurrentItemsAttribute(group.lines)}"
             >${escapeHtml(group.buyer)}</button>
+            <a class="buyer-purchase-report-link" href="ebay-buyer-report.html?buyer=${encodeURIComponent(group.buyer)}" target="_blank" rel="noopener" title="Generate all saved purchases with prices and screenshots">Purchase report</a>
             <span class="history-order-count-pill">${groupOrders.length || 1} order${(groupOrders.length || 1) === 1 ? "" : "s"} - ${group.lines.length} line${group.lines.length === 1 ? "" : "s"} - Qty ${groupQty.toLocaleString()}</span>
           </div>
           <div class="history-order-summary-facts">

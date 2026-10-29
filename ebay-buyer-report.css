@@ -1,0 +1,32 @@
+:root { color-scheme: light; font: 15px/1.5 Arial, sans-serif; color: #192f43; background: #f2f5f7; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+[hidden] { display: none !important; }
+a { color: #284e6c; text-underline-offset: 3px; }
+button, .primary { font: inherit; cursor: pointer; border-radius: 8px; padding: 10px 18px; border: 1px solid #c9d4dd; background: white; text-decoration: none; }
+.primary { background: #19364f; color: white; font-weight: 700; display: inline-block; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px max(20px, calc((100% - 1100px)/2)); background: white; border-bottom: 1px solid #dce3e9; }
+.toolbar > div { display: flex; gap: 8px; align-items: center; }
+main { max-width: 1140px; margin: 32px auto 60px; padding: 0 20px; }
+.eyebrow { color: #96712e; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+h1 { font-size: clamp(27px, 4vw, 40px); margin: 8px 0; overflow-wrap: anywhere; }
+h2 { font-size: 21px; margin: 12px 0; overflow-wrap: anywhere; }
+p { margin: 10px 0; }
+.stats { display: flex; flex-wrap: wrap; gap: 16px; margin: 24px 0; }
+.stats > div { background: #19364f; color: white; border-radius: 10px; padding: 18px 24px; flex: 1 1 210px; }
+.stats small, .stats strong { display: block; }
+.stats strong { font-size: 26px; }
+.notes, .muted { color: #586f80; }
+.notes { margin-bottom: 26px; }
+.warning, #error { color: #794a06; background: #fff1d7; padding: 10px 14px; border-radius: 6px; overflow-wrap: anywhere; }
+.purchase { padding: 24px; margin: 22px 0; background: white; border: 1px solid #d7e0e7; border-radius: 12px; }
+.purchase-head { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; font-weight: 700; }
+.purchase-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; margin-top: 18px; }
+.purchase img { display: block; width: 100%; max-height: 490px; object-fit: contain; background: #f3f5f6; }
+.price { font-size: 32px; font-weight: 700; margin: 14px 0 0; }
+.links { display: flex; flex-wrap: wrap; gap: 16px; margin: 20px 0; }
+.original { margin-top: 18px; }
+.original img { max-height: 230px; }
+.caption { font-size: 12px; color: #607387; }
+.no-image { min-height: 240px; display: grid; place-items: center; background: #f3f5f6; color: #607387; padding: 25px; text-align: center; }
+@media(max-width: 680px) { .purchase-body { grid-template-columns: 1fr; } .toolbar { align-items: flex-start; font-size: 13px; } .purchase { padding: 18px; } }
