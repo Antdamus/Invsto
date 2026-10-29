@@ -1,4 +1,12 @@
-# Invsto Live Capture (1.7.4)
+# Invsto Live Capture (1.7.5)
+
+## Sold-card layout recovery (1.7.5)
+
+Capture reads both editable listing titles and the plain titles eBay displays on sold cards, with the listing image's accessible label as a fallback. Listing IDs, buyers, amounts and explicit payment badges remain required for matching; a win never proves payment.
+
+Unreadable cards produce a visible warning with the count and missing fields, including when eBay shows Sold items but no readable cards. Other readable sales continue syncing. Layout diagnostics are collected during the live show as well as afterward. When listing details become readable, the existing Activity observations are resent with their original identities so missed sales can reconcile without duplicates. The receiver now reports the installed manifest version instead of a hard-coded version.
+
+Reload the existing extension, then refresh Stream Manager and the receiver. Do not remove/reinstall the extension: keeping the installation preserves its capture queue and print-request identities.
 
 ## Photos and bag labels for every payment state (1.7.4)
 

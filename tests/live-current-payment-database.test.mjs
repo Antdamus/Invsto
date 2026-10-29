@@ -38,6 +38,13 @@ beforeEach(async()=>{await db.exec(`truncate ebay_live_listing_payments,ebay_liv
  set test.allowed='yes';insert into live_sale_sessions values('${sid}','active');insert into ebay_live_connections(event_id,session_id,stream_start_at,stream_metadata,broadcast_ended_at) values('${event}','${sid}','${day}T01:00:00Z','{"activity_timezone":"UTC"}',now());`);});
 after(async()=>db?.close());
 const perms=a=>a.length?a.flatMap((v,i)=>perms(a.filter((_,j)=>j!==i)).map(p=>[v,...p])):[[]];
+test('unmatched Activity recovers when a later readable card supplies its listing ID without duplicating the sale',async()=>{
+ await ingest([obs('won',{listing_id:undefined})]);assert.equal((await rows()).length,0);
+ await ingest([obs('paid'),obs('won')]);const first=await rows();assert.equal(first.length,1);assert.equal(first[0].payment_state,'paid');
+ await ingest([obs('paid'),obs('won')]);const again=await rows();assert.equal(again.length,1);assert.equal(again[0].id,first[0].id);
+ const observations=(await db.query('select listing_id,disposition from ebay_live_observations')).rows;
+ assert.equal(observations.length,2);assert.ok(observations.every(o=>o.listing_id==='287636925068'&&o.disposition==='matched'));
+});
 for(const seq of perms(['failed','won','paid']))test(`ended show Paid wins over historical failure: ${seq.join(' → ')}`,async()=>{
  for(const k of seq)await ingest([obs(k)]);
  let a=await rows();assert.equal(a.length,1);assert.equal(a[0].payment_state,'paid');assert.equal(a[0].win_key,'won');

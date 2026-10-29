@@ -19,6 +19,9 @@
   };
   // eBay's terminal control, not a frozen/zero clock or a chat message.
   const hasEnded = doc => [...doc.querySelectorAll('button[disabled]')].some(button => text(button)==='Event ended' && !button.closest('#activity-panel,[role="log"],[role="region"]'));
+  // eBay uses an editable title while preparing a listing and a plain title
+  // once it is sold. The image's accessible label is a final identity fallback.
+  const listingTitle = tile => text(tile.querySelector('[data-testid="inline-edit-title"]')) || text(part(tile, 'title')) || (tile.querySelector('[data-testid="listing-image"]')?.getAttribute('alt') || '').replace(/\s+/g,' ').trim();
   function parse(doc, cache = {}, now = new Date()) {
     const observed_at = now.toISOString();
     const events = [];
@@ -27,11 +30,14 @@
     const elapsedParts = elapsedText.split(':').map(Number);
     const broadcastEnded=hasEnded(doc);
     const elapsed = !broadcastEnded && /^\d+:\d{2}:\d{2}$/.test(elapsedText) ? elapsedParts[0]*3600+elapsedParts[1]*60+elapsedParts[2] : null;
-    for (const tile of doc.querySelectorAll('[data-testid="listing-tile"]')) {
+    const tiles=[...doc.querySelectorAll('[data-testid="listing-tile"]')];
+    const layout={total:tiles.length,readable:0,missingIds:0,missingTitles:0,message:''};
+    for (const tile of tiles) {
       const listing_id = tile.querySelector('[data-testid^="checkbox-"]')?.dataset.testid?.match(/^checkbox-(\d{8,20})$/)?.[1];
-      const title = text(tile.querySelector('[data-testid="inline-edit-title"]'));
+      const title = listingTitle(tile);
       const ordinal = tile.querySelector('[data-testid="ordinal-id"]')?.value || '';
-      if (!listing_id || !title) {supported=false;continue;}
+      if (!listing_id || !title) {supported=false;if(!listing_id)layout.missingIds++;if(!title)layout.missingTitles++;continue;}
+      layout.readable++;
       cache[listing_id] = {listing_id, title, ordinal};
       const buyer = part(tile, 'soldLabel')?.getAttribute('title')?.trim() || '';
       const amount = money(text(part(tile, 'price')));
@@ -69,7 +75,11 @@
     const counts=new Map();
     for(const e of events.filter(e=>e.source==='activity'))counts.set(e.key,(counts.get(e.key)||0)+1);
     for(const [k,count] of counts)if(count>1)events.push({key:'ambiguous|'+k,kind:'unknown',source:'activity',observed_at,evidence:'Identical auction notifications cannot be distinguished. Verify each auction attempt on eBay.'});
-    return {events, cache, supported, panelPresent: !!panel, elapsed, broadcastEnded};
+    const soldTab=[...doc.querySelectorAll('[role="tab"]')].find(el=>/^Sold\s*\([\d,]+\)$/i.test(text(el)));
+    const soldCount=Number(text(soldTab).match(/\(([\d,]+)\)/)?.[1]?.replace(/,/g,''));
+    if(soldTab?.getAttribute('aria-selected')==='true'&&soldCount>0&&!tiles.length){supported=false;layout.message='Capture needs attention: eBay shows sold items, but their listing cards cannot be read. Keep Sold and Activity open.';}
+    else if(!supported)layout.message=`Capture needs attention: ${layout.total-layout.readable} of ${layout.total} listing cards could not be read (${layout.missingIds} missing IDs, ${layout.missingTitles} missing titles). Other readable sales still sync. Update Live Capture if this persists.`;
+    return {events, cache, supported, layout, panelPresent: !!panel, elapsed, broadcastEnded};
   }
   function streamMetadata(doc) {
     const start=doc.querySelector('input#startDate'), zone=doc.querySelector('input#timezone'), title=doc.querySelector('input#title');

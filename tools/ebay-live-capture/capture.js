@@ -1,5 +1,6 @@
 'use strict';
 (() => {
+  const version=chrome.runtime.getManifest?.().version||'1.7.5';
   const event_id=location.pathname.split('/')[4];
   if (!/^[\w-]{6,100}$/.test(event_id||'')) return;
   const tab = name => [...document.querySelectorAll('[role="tab"]')].find(el=>new RegExp('^'+name+'(?:\\s|\\(|$)','i').test(el.textContent.trim()));
@@ -29,9 +30,11 @@
   box.style.cssText='position:fixed;bottom:12px;left:12px;z-index:2147483647;background:#18251f;color:white;border:1px solid #98ba8b;border-radius:12px;padding:12px;max-width:330px;font:14px/1.4 system-ui;box-shadow:0 3px 15px #0008';
   const button=document.createElement('button');button.textContent='Start Invsto capture';button.style.cssText='font:inherit;padding:8px 14px;border-radius:8px;cursor:pointer';
   const movement=document.createElement('button');movement.textContent='Keep page still';movement.style.cssText=button.style.cssText;
-  const receiver=document.createElement('a');receiver.textContent='Open Invsto receiver';receiver.href='https://antdamus.github.io/Invsto/live-sales.html?capture=1&v=1.7.3';receiver.target='_blank';receiver.rel='noopener';receiver.style.cssText='display:block;color:#efd69b;margin-top:8px';
+  const receiver=document.createElement('a');receiver.textContent='Open Invsto receiver';receiver.href='https://antdamus.github.io/Invsto/live-sales.html?capture=1&v='+encodeURIComponent(version);receiver.target='_blank';receiver.rel='noopener';receiver.style.cssText='display:block;color:#efd69b;margin-top:8px';
   const note=document.createElement('div');note.textContent='Automatic capture checks Activity and Sold. Use a separate tab for uninterrupted capture while editing.';
   const bagPanel=window.InvstoBagLabelPanel?.mount(box);
+  const layoutWarning=document.createElement('p');layoutWarning.setAttribute('role','alert');layoutWarning.dataset.captureWarning='';layoutWarning.hidden=true;layoutWarning.style.cssText='padding:10px;border:1px solid #d89a62;border-radius:8px;background:#713c252b;color:#ffcf9a;font-size:12px';
+  (box.querySelector('.capture-panel-content')||box).append(layoutWarning);
   const panelStatus=(label,state='waiting',detail='')=>bagPanel?.setCaptureStatus?.({label,state,detail});
   (bagPanel?.settings||box).append(button,movement,note,receiver);document.body.append(box);
   receiver.href+='&capture_event='+encodeURIComponent(event_id);
@@ -109,6 +112,7 @@
         if(all && all.getAttribute('aria-pressed')!=='true') all.click();
       }
       const parsed=InvstoLiveParser.parse(document,cache);cache=parsed.cache;
+      layoutWarning.hidden=parsed.supported;layoutWarning.textContent=parsed.supported?'':parsed.layout?.message||'Capture needs attention: eBay listing details cannot be read. Update Live Capture if this persists.';
       const activitySelected=tab('Activity')?.getAttribute('aria-selected')==='true';
       const soldSelected=tab('Sold')?.getAttribute('aria-selected')==='true';
       // eBay disables Sold before the first sale. Watch Activity and the All
@@ -122,12 +126,12 @@
       const filtered=[...document.querySelectorAll('#activity-panel [aria-label="Filter activity"] button')].some(b=>b.textContent.trim()==='All'&&b.getAttribute('aria-pressed')==='true');
       const canRead=active&&!working&&navigator.onLine&&parsed.supported&&parsed.panelPresent&&activitySelected&&listingsReady&&filtered&&!document.querySelector('[aria-busy="true"],[role="progressbar"]');
       const recovery=history?.observe(document,parsed,{canRead,reason:!active?'stopped':working?'working':!navigator.onLine?'offline':'waiting'});
-      if(parsed.broadcastEnded&&(!diagnostics||Date.now()-diagnosticsAt>=15000)){
+      if((parsed.broadcastEnded||!parsed.supported)&&(!diagnostics||Date.now()-diagnosticsAt>=15000)){
         try{diagnostics={...InvstoLiveParser.captureDiagnostics(document),observed_at:new Date().toISOString()};}catch{diagnostics=null;}
         diagnosticsAt=Date.now();
       }
       const recoveryText=recovery?.phase==='read'?'Available history read. Compare the recovered sales with eBay.':recovery?.phase==='needs_review'?'History needs review. Check the recovery details in Invsto.':recovery?.phase==='paused'?'History reading paused. Resume capture to finish.':'Reading finished-show history…';
-      const reason=parsed.broadcastEnded?recoveryText:!active?'Capture stopped':working?'Page stays still while you work. Close open panels and leave fields to resume full capture, or use a separate capture tab.':!navigator.onLine?'Capture computer is offline':!parsed.supported?'Stream Manager layout is not recognized; verify payment manually':!activitySelected||!parsed.panelPresent?'Waiting for the Activity panel to load':!listingsReady?'Waiting for the Sold or All listings panel':!clockReady?'Bring Stream Manager forward; its clock must keep updating':waitingForSales?'Watching Activity; waiting for the first sale':'Reading Activity and Sold items';
+      const reason=parsed.broadcastEnded?recoveryText:!active?'Capture stopped':working?'Page stays still while you work. Close open panels and leave fields to resume full capture, or use a separate capture tab.':!navigator.onLine?'Capture computer is offline':!parsed.supported?layoutWarning.textContent:!activitySelected||!parsed.panelPresent?'Waiting for the Activity panel to load':!listingsReady?'Waiting for the Sold or All listings panel':!clockReady?'Bring Stream Manager forward; its clock must keep updating':waitingForSales?'Watching Activity; waiting for the first sale':'Reading Activity and Sold items';
       const events=[];
       if(active) for(const event of parsed.events) {
         const signature=JSON.stringify([event.listing_id,event.kind,event.buyer,event.amount]);

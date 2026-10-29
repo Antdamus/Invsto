@@ -1,0 +1,19 @@
+// Shared browser regression checks; no network requests or production writes.
+window.runLiveCaptureLayoutChecks = () => {
+  const results=[];
+  const assert=(value,message)=>{if(!value)throw Error(message);};
+  const check=(name,fn)=>{try{fn();results.push({name,passed:true});}catch(error){results.push({name,passed:false,error:error.message});}};
+  const tile=({id='123456789012',title='#001 - Test watch',layout='static',state='Paid',buyer='test-buyer'}={})=>`<div data-testid="listing-tile">${id?`<input data-testid="checkbox-${id}">`:''}<input data-testid="ordinal-id" value="1">${layout==='editable'?`<button data-testid="inline-edit-title">${title}</button>`:layout==='static'?`<div class="_title_changed_187">${title}</div>`:layout==='image'?`<img data-testid="listing-image" alt="${title}">`:''}<span class="_price_changed_59">$100.00</span><span class="_soldLabel_changed_73" title="${buyer}">${buyer}</span><span class="_statusText_changed_59">${state}</span></div>`;
+  const activity=(title='#001 - Test watch')=>`<div id="activity-panel"><div class="_rowContent_changed_1"><div class="_messageLine_changed_1"><span class="_username_changed_1">test-buyer</span><span class="_actionSuccess_changed_1">won the auction</span><span class="_timestamp_changed_1">2:01 PM</span></div><div class="_itemSummary_changed_1"><span>$100.00</span><span class="_listingTitle_changed_1">${title}</span></div></div></div>`;
+  const parse=(html,cache={})=>InvstoLiveParser.parse(new DOMParser().parseFromString(html,'text/html'),cache,new Date('2026-10-29T18:05:00Z'));
+  for(const layout of ['editable','static','image'])check(`${layout} title preserves sale identity and joins Activity`,()=>{
+    const r=parse(tile({layout})+activity());assert(r.supported,'layout rejected');assert(r.events.length===2,'missing evidence');assert(r.events.every(e=>e.listing_id==='123456789012'),'wrong listing');assert(r.events[0].kind==='paid'&&r.events[1].kind==='won','payment inferred from win');assert(r.events[0].amount===100,'amount changed');
+  });
+  for(const [state,kind] of [['Paid','paid'],['Payment failed','failed'],['Cancelled','cancelled'],['Pending payment','unknown']])check(`${state} stays explicit`,()=>{const r=parse(tile({state}));assert(r.supported,'layout rejected');assert(r.events[0].kind===kind,'wrong payment classification');});
+  check('one unreadable card cannot hide other readable sales',()=>{const r=parse(tile()+tile({id:'222222222222',layout:'missing'}));assert(!r.supported,'missing warning');assert(r.events.length===1,'good sale lost or bad sale invented');assert(r.layout.missingTitles===1&&r.layout.readable===1,'wrong diagnostic counts');assert(r.layout.message.includes('Other readable sales still sync'),'unclear warning');});
+  check('missing listing ID is never guessed',()=>{const r=parse(tile({id:''})+activity());assert(!r.supported&&r.layout.missingIds===1,'missing ID not flagged');assert(r.events.every(e=>!e.listing_id),'invented ID');});
+  check('Sold count with missing cards is reported',()=>{const r=parse('<button role="tab" aria-selected="true">Sold (5)</button>'+activity());assert(!r.supported&&r.layout.message.includes('listing cards cannot be read'),'empty layout silently accepted');});
+  check('Activity gets replayed under the same identity once its title becomes readable',()=>{const a=parse(activity());const b=parse(tile()+activity(),a.cache);const first=a.events[0],second=b.events.find(e=>e.source==='activity');assert(first.key===second.key,'changed event identity');assert(!first.listing_id&&second.listing_id==='123456789012','listing did not recover');});
+  check('duplicate titles remain unmatched instead of choosing another item',()=>{const r=parse(tile()+tile({id:'222222222222'})+activity());assert(!r.events.find(e=>e.source==='activity').listing_id,'ambiguous title matched');});
+  return results;
+};
