@@ -71,11 +71,11 @@
     if (!cleanBuyer(buyer)) throw new Error('Choose a buyer from Pending Orders or Order History.');
     progress('Loading all saved orders for this buyer...');
     const orders = (await paged(() => client.from('ebay_orders')
-      .select('id,order_number,buyer_username,sale_date,status,shipping_and_handling,total_price,raw_payload')
+      .select('id,order_number,buyer_username,sale_date,status,shipping_and_handling,total_price,label_metadata,raw_payload')
       .ilike('buyer_username', exactPattern(buyer)).order('id')))
       .filter(order => cleanBuyer(order.buyer_username).toLowerCase() === cleanBuyer(buyer).toLowerCase());
     const lines = await chunks(orders.map(order => order.id), ids => paged(() => client.from('ebay_order_lines')
-      .select('id,order_id,item_number,item_title,quantity,sold_for,line_status,raw_payload')
+      .select('id,order_id,item_number,transaction_id,item_title,quantity,sold_for,line_status,raw_payload')
       .in('order_id', ids).order('id')));
     progress(`Found ${orders.length} orders. Loading saved item screenshots...`);
     const taskSelect = 'id,order_id,order_line_ids';
@@ -124,16 +124,52 @@
       seen.add(key); return true;
     });
   }
-  function receiptUrl(photo, item) {
+  function metadataReceiptUrls(metadata = {}) {
+    if (!metadata || typeof metadata !== 'object') return [];
+    return [metadata, metadata.returnDetails || {}].flatMap(value => [
+      value.videoReceiptUrl, value.videoReceiptURL,
+      ...(Array.isArray(value.videoReceiptUrls) ? value.videoReceiptUrls : []),
+    ]).filter(Boolean);
+  }
+  function normalizeReceiptUrl(value, item) {
     try {
-      const url = new URL(photo?.metadata?.videoReceiptUrl || photo?.metadata?.pageUrl || '');
+      if (!item) return '';
+      const url = new URL(String(value || '').trim().replace(/&amp;/g, '&'));
       if (url.protocol !== 'https:' || url.username || url.password || url.port || !/(^|\.)ebay\.com$/i.test(url.hostname)
         || !/^\/ebaylive\/events\/[^/]+(?:\/stream)?\/?$/i.test(url.pathname)) return '';
       if (url.searchParams.get('selectedItemId') !== String(item)
-        && !String(url.searchParams.get('itemIds') || '').split(',').includes(String(item))) return '';
+        && !String(url.searchParams.get('itemIds') || '').split(',').map(id=>id.trim()).includes(String(item))) return '';
       url.searchParams.set('selectedItemId', item); url.searchParams.set('playback', 'true');
       return url.href;
     } catch { return ''; }
+  }
+  function receiptUrl(photo, item) {
+    return [...metadataReceiptUrls(photo?.metadata), photo?.metadata?.pageUrl]
+      .map(value=>normalizeReceiptUrl(value,item)).find(Boolean) || '';
+  }
+  function savedReceiptUrl(line, order, photos, events) {
+    return [
+      ...metadataReceiptUrls(order.label_metadata),
+      ...metadataReceiptUrls(line.label_metadata),
+      ...metadataReceiptUrls(line.raw_payload),
+      ...metadataReceiptUrls(order.raw_payload),
+      line.videoReceiptUrl,
+      ...photos.map(photo=>receiptUrl(photo,line.item_number)),
+      ...events.filter(event=>event.order_line_ids?.includes(line.id)).flatMap(event=>metadataReceiptUrls(event.payload)),
+    ].map(value=>normalizeReceiptUrl(value,line.item_number)).find(Boolean) || '';
+  }
+  function receiptAction(row) {
+    return {href:row.videoUrl || row.orderUrl, label:row.videoUrl ? 'Video receipt' : 'Find video receipt',
+      pdfLabel:row.videoUrl ? 'Video receipt' : 'Video receipt via eBay', direct:Boolean(row.videoUrl)};
+  }
+  function bindReceiptLinks(container, rows) {
+    const byId = new Map(rows.map(row=>[row.id,row]));
+    container.querySelectorAll('[data-report-receipt]').forEach(anchor=>anchor.addEventListener('click',event=>{
+      const row=byId.get(anchor.dataset.reportReceipt);
+      if (!row || !root.OGVideoReceipts?.open) return;
+      root.OGVideoReceipts.open(event,{url:row.videoUrl,orderId:row.orderId,orderNumber:row.orderNumber,
+        itemNumber:row.item,transactionId:row.transactionId,itemTitle:row.title});
+    }));
   }
   function buildRows(records, baseUrl) {
     const orderById = new Map(records.orders.map(order => [order.id, order]));
@@ -150,10 +186,10 @@
       historyUrl.searchParams.set('focusOrder', order.order_number);
       historyUrl.searchParams.set('focusLineId', line.id);
       return {id: line.id, orderId: order.id, orderNumber: order.order_number, title: line.item_title || 'Untitled item',
-        item: line.item_number || '', price: itemPrice(line), date: purchaseDate(order), sortDate: order.sale_date || '',
+        item: line.item_number || '', transactionId:line.transaction_id || '', price: itemPrice(line), date: purchaseDate(order), sortDate: order.sale_date || '',
         status: line.line_status || order.status || 'Not recorded', photos, groups,
         orderUrl: `https://www.ebay.com/mesh/ord/details?orderid=${encodeURIComponent(order.order_number)}`,
-        historyUrl: historyUrl.href, videoUrl: receiptUrl(photos[0], line.item_number), image: null,
+        historyUrl: historyUrl.href, videoUrl: savedReceiptUrl(line,order,photos,records.events), image: null,
         review: '', imageStatus: photos.length ? 'Loading saved screenshot...' : 'No saved item screenshot'};
     }).sort((a,b) => a.sortDate.localeCompare(b.sortDate) || a.orderNumber.localeCompare(b.orderNumber) || a.id.localeCompare(b.id));
   }
@@ -198,7 +234,7 @@
             const digest = await root.crypto.subtle.digest('SHA-256', new TextEncoder().encode(photo.path));
             const fingerprint = [...new Uint8Array(digest)].map(value=>value.toString(16).padStart(2,'0')).join('');
             row.review = photo.metadata?.reviewNote || SCREENSHOT_REVIEWS[fingerprint] || '';
-            row.videoUrl = receiptUrl(photo, row.item);
+            row.videoUrl = row.videoUrl || receiptUrl(photo, row.item);
             row.imageStatus = 'Saved item screenshot';
             break;
           } catch { row.imageStatus = 'Saved screenshot could not be loaded. Retry the report or open the system record.'; }
@@ -227,7 +263,8 @@
           <div><span class="eyebrow">ORIGINAL ITEM TITLE</span><h2>${html(row.title)}</h2>
           <p class="price">${html(money(row.price.total,row.price.currency))}</p><p class="muted">Item amount (${html(row.price.currency)}) / Qty ${row.price.quantity}${row.price.quantity>1 && row.price.total!=null ? ` / ${html(money(row.price.total/row.price.quantity,row.price.currency))} each` : ''}</p>
           <p>${html(row.date)}</p><p class="muted">eBay item ${html(row.item || 'Not recorded')}</p><p class="caption">${html(row.price.source)}</p>
-          <div class="links"><a href="${html(row.orderUrl)}" target="_blank" rel="noopener">eBay order</a><a href="${html(row.historyUrl)}" target="_blank" rel="noopener">System record</a>${row.videoUrl ? `<a href="${html(row.videoUrl)}" target="_blank" rel="noopener">Video receipt</a>` : ''}</div>
+          <div class="links"><a href="${html(row.orderUrl)}" target="_blank" rel="noopener">eBay order</a><a href="${html(row.historyUrl)}" target="_blank" rel="noopener">System record</a><a data-report-receipt="${html(row.id)}" href="${html(receiptAction(row).href)}" target="_blank" rel="noopener">${html(receiptAction(row).label)}</a></div>
+          ${!row.videoUrl ? '<p class="caption">No direct receipt link saved yet. Find it through the eBay order, even before a screenshot is captured.</p>' : ''}
           ${row.image?.cropped ? `<div class="original"><img src="${row.image.full}" alt="Complete original screenshot for order ${html(row.orderNumber)}" /><p class="caption">Complete saved screenshot</p></div>` : ''}</div></div>
       </article>`).join('')}`;
   }
@@ -321,7 +358,7 @@
       for(const group of row.groups)y=await paragraph(page,group,36,y-5,540,8,false,muted);
       // Long titles and grouped-order notes flow to another page instead of overlapping the image.
       if(y<370){page=await pageHeader(`Order ${row.orderNumber} / screenshots`);y=680;}
-      const imageHeight=Math.min(350,y-125), imageBottom=y-12-imageHeight;
+      const imageHeight=Math.min(350,y-(row.videoUrl?125:145)), imageBottom=y-12-imageHeight;
       if(row.image){
         if(row.image.cropped){
           await placeImage(page,row.image.crop,36,imageBottom,268,imageHeight);
@@ -331,7 +368,9 @@
         await lineText(page,'Saved screenshot - verify the item against the title.',36,imageBottom-16,8,false,muted);
       }else await paragraph(page,row.imageStatus,36,y-70,500,12,false,muted);
       link(page,'eBay order',row.orderUrl,36,71);link(page,'System record',row.historyUrl,166,71);
-      if(row.videoUrl)link(page,'Video receipt',row.videoUrl,310,71);
+      const receipt=receiptAction(row);
+      link(page,receipt.pdfLabel,receipt.href,310,71);
+      if(!receipt.direct)await paragraph(page,'Video receipt: open the eBay order, then select the item image with the Live icon.',36,94,540,8,false,muted);
       await new Promise(resolve=>setTimeout(resolve,0));
     }
     const pages=pdf.getPages();
@@ -361,6 +400,7 @@
       const rows=buildRows(records,location.href);
       await loadImages(client,rows,progress);
       $('report').innerHTML=renderReport(buyer,records,rows);
+      bindReceiptLinks($('report'),rows);
       const bytes=await buildPdf(buyer,records,rows,progress);
       pdfUrl=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
       $('download').href=pdfUrl;$('download').download=`${buyer.replace(/[^a-z0-9_.-]/gi,'_')}-purchase-report.pdf`;$('download').hidden=false;
@@ -369,7 +409,7 @@
       progress(`Report ready: ${records.orders.length} orders, ${rows.length} item lines.${missing?` ${missing} items have no loaded screenshot; details are marked below.`:''}`);
     }catch(error){progress('Report could not be completed.');$('error').textContent=error.message||'Could not generate report.';$('error').hidden=false;$('retry').textContent='Try again';$('retry').hidden=false;}
   }
-  const api={amount,itemPrice,purchaseDate,exactPattern,paged,loadRecords,photosForLine,receiptUrl,buildRows,totalsFor,loadImages,renderReport,buildPdf,start};
+  const api={amount,itemPrice,purchaseDate,exactPattern,paged,loadRecords,photosForLine,receiptUrl,savedReceiptUrl,receiptAction,bindReceiptLinks,buildRows,totalsFor,loadImages,renderReport,buildPdf,start};
   root.OGBuyerReport=api;
   if(typeof module!=='undefined')module.exports=api;
   if(typeof document!=='undefined' && document.body?.dataset.page==='ebay-buyer-report'){

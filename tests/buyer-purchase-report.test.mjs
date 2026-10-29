@@ -45,6 +45,36 @@ test('grouped purchases retain separate order numbers and missing image states; 
   const rendered=report.renderReport('buyer',records,rows);
   assert.ok(!rendered.includes('<img onerror='));assert.match(rendered,/&lt;img onerror=/);
 });
+test('video receipt links are independent of screenshots and select the correct item from order metadata',()=>{
+  const wrong='https://www.ebay.com/ebaylive/events/other?selectedItemId=999';
+  const saved='https://www.ebay.com/ebaylive/events/correct?selectedItemId=999&amp;itemIds=999,123';
+  const records={orders:[{id:'a',order_number:'01-test',label_metadata:{videoReceiptUrl:wrong,returnDetails:{videoReceiptUrls:[saved]}}}],
+    lines:[{id:'la',order_id:'a',item_number:'123',transaction_id:'tx',sold_for:10}],events:[],adminEvents:[]};
+  const [row]=report.buildRows(records,'https://example.test/Invsto/ebay-buyer-report.html');
+  assert.equal(row.photos.length,0);assert.match(row.videoUrl,/events\/correct\?selectedItemId=123/);
+  assert.equal(row.transactionId,'tx');assert.equal(report.receiptAction(row).label,'Video receipt');
+  assert.match(report.renderReport('buyer',records,[row]),/data-report-receipt="la"[^>]*>Video receipt<\/a>/);
+});
+test('missing direct receipts always have a find action and an honest PDF fallback',()=>{
+  const records={orders:[{id:'a',order_number:'01-test',label_metadata:{videoReceiptUrl:'https://www.ebay.com/ebaylive/events/wrong?selectedItemId=999'}}],
+    lines:[{id:'la',order_id:'a',item_number:'123',sold_for:10}],events:[],adminEvents:[]};
+  const [row]=report.buildRows(records,'https://example.test/Invsto/ebay-buyer-report.html');
+  assert.equal(row.videoUrl,'');assert.equal(report.receiptAction(row).href,row.orderUrl);
+  assert.equal(report.receiptAction(row).pdfLabel,'Video receipt via eBay');
+  assert.match(report.renderReport('buyer',records,[row]),/>Find video receipt<\/a>/);
+});
+test('a matching scoped receipt event works before photo capture; receipt binding passes item and transaction to the existing lookup',()=>{
+  const line={id:'la',item_number:'123'}, url='https://www.ebay.com/ebaylive/events/saved?selectedItemId=123';
+  assert.equal(report.savedReceiptUrl(line,{},[],[{order_line_ids:['other'],payload:{videoReceiptUrl:url}}]),'');
+  assert.match(report.savedReceiptUrl(line,{},[],[{order_line_ids:['la'],payload:{videoReceiptUrl:url}}]),/selectedItemId=123/);
+  let handler,received;
+  const anchor={dataset:{reportReceipt:'la'},addEventListener(name,callback){assert.equal(name,'click');handler=callback;}};
+  globalThis.OGVideoReceipts={open(event,receipt){received=receipt;}};
+  try{
+    report.bindReceiptLinks({querySelectorAll:()=>[anchor]},[{id:'la',orderId:'a',orderNumber:'01-test',item:'123',transactionId:'tx',title:'Watch',videoUrl:''}]);
+    handler({currentTarget:anchor});assert.equal(received.itemNumber,'123');assert.equal(received.transactionId,'tx');assert.equal(received.orderId,'a');
+  }finally{delete globalThis.OGVideoReceipts;}
+});
 test('all pages are fetched and a later-page error stops incomplete reports',async()=>{
   let requests=0;const rows=await report.paged(()=>({range:async start=>{requests++;return {data:Array.from({length:start===0?250:2},(_,i)=>({id:start+i}))};}}));
   assert.equal(rows.length,252);assert.equal(requests,2);
@@ -60,6 +90,7 @@ test('buyer data reads use exact usernames and keep pending and closed orders',a
   const records=await report.loadRecords(client,'buy_er');
   assert.equal(records.orders.length,2);
   assert.deepEqual(calls[0].filters,[['ilike','buyer_username','buy\\_er']]);
+  assert.ok(calls[0].columns.includes('label_metadata'));
   assert.ok(calls.some(call=>call.table==='ebay_order_admin_events'&&!call.columns.includes('evidence_photos')));
   await assert.rejects(()=>report.loadRecords(client,''),/Choose a buyer/);
 });
