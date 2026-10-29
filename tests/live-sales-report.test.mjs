@@ -2,6 +2,33 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import M from '../live-sales-report-model.js';
 const settings={rates:{gold_10:30,gold_14:42,silver:1.25},fee_percent:10,fee_fixed:1,shipping_per_sale:5};
+
+test('item-index profit uses the same paid amounts and expense basis as buyer totals',()=>{
+  const attempts=[53,32,11,5].map((amount,i)=>({id:String(i),buyer:'buyer',amount,payment_state:'paid'}));
+  const costs=Object.fromEntries(attempts.map(a=>[a.id,{mode:'manual',base_cost:11}]));
+  const before=M.makeModel({attempts,costs});
+  assert.deepEqual(before.rows.map(r=>M.itemProfit(r,false).amount),[4200,2100,0,-600]);
+  assert.equal(M.itemProfit(before.rows[2],false).status,'Break-even');
+  assert.equal(M.itemProfit(before.rows[3],false).status,'Loss');
+  assert.equal(M.itemProfit(before.rows[0],false).label,'Profit before expenses');
+  assert.equal(before.rows.reduce((sum,r)=>sum+M.itemProfit(r,false).amount,0),before.stats.margin);
+  const after=M.makeModel({attempts,costs,settings});
+  assert.equal(M.itemProfit(after.rows[0],true).amount,3070);
+  assert.equal(M.itemProfit(after.rows[0],true).label,'Estimated profit');
+  assert.equal(after.rows.reduce((sum,r)=>sum+M.itemProfit(r,true).amount,0),after.stats.profit);
+});
+
+test('item-index profit excludes unpaid purchases and distinguishes missing costs from zero',()=>{
+  const attempts=['paid','waiting','failed','cancelled','review'].map((payment_state,i)=>({id:String(i),buyer:'buyer',payment_state,amount:53}));
+  attempts.push({id:'held',buyer:'buyer',amount:53,payment_state:'paid',payment_hold:true},{id:'missing-price',buyer:'buyer',payment_state:'paid'});
+  const costs=Object.fromEntries(attempts.filter(a=>a.id!=='0').map(a=>[a.id,{mode:'manual',base_cost:11}]));
+  const m=M.makeModel({attempts,costs});
+  assert.equal(M.itemProfit(m.rows[0],false).status,'Needs base price');
+  for(const r of m.rows.slice(1,6)){assert.equal(M.itemProfit(r,false).status,'Excluded');assert.equal(M.itemProfit(r,false).amount,null);}
+  assert.equal(M.itemProfit(m.rows[6],false).status,'Missing sale amount');
+  const zero=M.makeModel({attempts:[attempts[0]],costs:{'0':{mode:'manual',base_cost:0}},settings:{fee_percent:0,fee_fixed:0,shipping_per_sale:0}});
+  assert.equal(M.itemProfit(zero.rows[0],true).amount,5300);
+});
 test('profit categories separate material and type, include assumed silver and recognize earrings spellings',()=>{
   const titles=['Gold earrings 2g','Silver earings 3g','4 grams errings','14k ear-rings 2g','Seiko watch','WATCHES','wristwatch','timepiece','watch box','Gold plated ring 4g'];
   const attempts=titles.map((listing_title,i)=>({id:String(i),listing_title,buyer:'buyer',amount:100,payment_state:i===5?'waiting':'paid'}));

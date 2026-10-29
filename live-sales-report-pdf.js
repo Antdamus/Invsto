@@ -96,7 +96,19 @@
       await cards(f,[['Expected paid items',String(b.stats.expectedItems),`${b.stats.paid.count} paid / ${b.stats.items} total purchases`,green],['Confirmed paid',M.money(b.stats.paid.amount),`${b.stats.waiting.count} pending / ${b.stats.failed.count} failed`],[profit.label,profit.amount==null?profit.status:M.money(profit.amount),`${profit.partial?'PARTIAL / ':''}${profit.coverage}. ${profit.basis}.${profit.missing?' '+profit.missing:''}`,profit.amount<0?rose:profit.partial?amber:white]]);
       if(b.stats.lossItems)await f.write(`REVIEW ${b.stats.lossItems} PAID ${b.stats.lossItems===1?'PURCHASE':'PURCHASES'} AT A LOSS / ${M.money(b.stats.lossAmount)} / ${model.lossBasis}. Highlighted items below need inspection.`,11,1,lossRed,14);
       await f.write('Select an item below for photos, links and cost details.',9,0,muted,16);
-      for(const r of b.rows){const title=`#${r.ordinal} / ${r.title}`,h=72+wrap(title,510,11,1).length*15.4+(r.loss>0?32:0);await f.ensure(h+12);const top=f.y;rect(f.p,36,top-h,540,h,tint(r));let y=await block(f.p,title,50,top-19,510,11,1);y=await block(f.p,`${M.money(r.price)} / ${r.stateLabel} / Base: ${r.cost.base==null?'NEEDS BASE PRICE':M.money(r.cost.base)}${r.cost.rule?(r.cost.rule.conflict?' / CONFLICTING TITLE RULES':' / Title rule'):r.cost.parsed?.assumption?' ('+r.cost.parsed.assumption+')':''}`,50,y-7,510,9,1);if(r.loss>0)y=await block(f.p,`${M.money(r.loss)} LOSS / ${model.lossBasis}`,50,y-7,510,10,1,lossRed);await block(f.p,`${r.time} / ${r.photos.length} screenshots${r.orderNumber?' / Order '+r.orderNumber:''}`,50,y-5,510,8,0,muted);jumps.push({p:f.p,box:[36,top-h,576,top],key:r.key});f.y-=h+12;}
+      for(const r of b.rows){
+        const profit=M.itemProfit(r,model.expensesKnown);
+        const lines=[
+          {value:`#${r.ordinal} / ${r.title}`,size:11,gap:7,fill:ink},
+          {value:`${M.money(r.price)} / ${r.stateLabel} / Base: ${r.cost.base==null?'NEEDS BASE PRICE':M.money(r.cost.base)}${r.cost.rule?(r.cost.rule.conflict?' / CONFLICTING TITLE RULES':' / Title rule'):r.cost.parsed?.assumption?' ('+r.cost.parsed.assumption+')':''}`,size:9,gap:7,fill:ink},
+          {value:`${profit.label}: ${profit.amount==null?profit.status:M.money(profit.amount)}${profit.status==='Loss'?' / LOSS':profit.status==='Break-even'?' / Break-even':''} / ${profit.basis}`,size:10,gap:5,fill:profit.amount<0?lossRed:profit.amount>0?color('276649'):muted},
+          {value:`${r.time} / ${r.photos.length} screenshots${r.orderNumber?' / Order '+r.orderNumber:''}`,size:8,gap:0,fill:muted,font:0}
+        ];
+        const h=25+lines.reduce((height,l)=>height+wrap(l.value,510,l.size,l.font??1).length*l.size*1.4+l.gap,0);
+        await f.ensure(h+12);const top=f.y;rect(f.p,36,top-h,540,h,tint(r));let y=top-19;
+        for(const l of lines)y=await block(f.p,l.value,50,y,510,l.size,l.font??1,l.fill)-l.gap;
+        jumps.push({p:f.p,box:[36,top-h,576,top],key:r.key});f.y-=h+12;
+      }
       for(const r of b.rows){progress(`Building PDF: ${r.username} / Bag #${r.ordinal}...`);f=await start(`Bag #${r.ordinal} / ${r.username}`,r.key,r);await f.write(`BAG #${r.ordinal} / ${r.username}`,10,1,gold,8);await f.write(r.title,24,2,ink,12);
         await f.ensure(52);rect(f.p,36,f.y-42,540,42,tint(r));await text(f.p,`${M.money(r.price)} / ${r.stateLabel}`,50,f.y-26,17,1);f.y-=60;
         await f.write(`Buyer: ${r.username}${r.name?' / '+r.name:b.name?' / '+b.name:''}`,10,1,ink,5);await f.write(`Sold: ${r.time}${r.timeNote?' / '+r.timeNote:''}`,10,0,ink,5);await f.write(`Order: ${r.orderNumber||'Awaiting order import / matching'} / Quantity: ${r.quantity}`,10,0,muted,5);await f.write(`Seller: ${r.seller_name||'Not recorded'} / Bag: ${r.closed_at?'Closed':r.resolved_at?'Resolved':'Open'}${r.payment_hold?' / Payment hold':''}`,9,0,muted,16);

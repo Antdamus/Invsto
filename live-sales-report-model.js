@@ -18,6 +18,15 @@
       status:!total?'No paid purchases':!covered?'Unavailable':partial?'Partial':'Complete',
       partial,coverage:`${covered} of ${total} paid purchases included`,missing:missing.join(' · ')};
   }
+  function itemProfit(row,expensesKnown){
+    const label=expensesKnown?'Estimated profit':'Profit before expenses';
+    const basis=expensesKnown?'After estimated fees and shipping':'Before fees and shipping';
+    if(row.state!=='paid')return {amount:null,label,basis:'Only confirmed paid purchases count',status:'Excluded'};
+    if(row.price==null)return {amount:null,label,basis:'Sale amount is not available',status:'Missing sale amount'};
+    if(row.cost.base==null)return {amount:null,label,basis:'Add a cost to calculate profit',status:'Needs base price'};
+    const amount=expensesKnown?row.profit:row.margin;
+    return {amount,label,basis,status:amount==null?'Costs incomplete':amount<0?'Loss':amount>0?'Profit':'Break-even'};
+  }
   function parseTitle(title){
     const text=String(title||'');
     const weights=[...text.matchAll(/(?<![\d.,-])(\d+(?:\.\d+)?)\s*(?:grams?|grs?|g)\b/gi)].map(m=>Number(m[1]));
@@ -117,5 +126,5 @@
     const breakdowns={materials:group('material',[['gold','Gold'],['silver','Silver / assumed silver'],['other','Other / unclear material']]),types:group('type',[['earrings','Earrings'],['watches','Watches'],['other','Other / unclear item type']])};
     return {sessionId:payload.show?.id||c.session_id,show:payload.show||{},title:payload.show?.title||c.stream_metadata?.title||'Live sales report',connection:c,settings,customers,rows,breakdowns,stats:summarize(rows),expensesKnown,lossBasis:expensesKnown?'after estimated fees and shipping':'before fees and shipping',generatedAt:now.toISOString(),updatedAt:payload.server_time||now.toISOString(),date:date(now.toISOString()),unmatched:(payload.unmatched||[]).length,origin};
   }
-  const api={RATE_KEYS,labels,number,cents,money,rateMoney,date,parseTitle,costFor,makeModel,buyerProfit,normalizeTitle,titleRuleFor};root.OGLiveReportModel=api;if(typeof module!=='undefined')module.exports=api;
+  const api={RATE_KEYS,labels,number,cents,money,rateMoney,date,parseTitle,costFor,makeModel,buyerProfit,itemProfit,normalizeTitle,titleRuleFor};root.OGLiveReportModel=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof window!=='undefined'?window:globalThis);
