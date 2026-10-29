@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="buyer-tasks.css?v=20261013-photos" />
   <link rel="stylesheet" href="pending-orders.css?v=20261022-partial-refunds-2" />
   <link rel="stylesheet" href="ebay-auto-sync.css?v=20261025" />
-  <link rel="stylesheet" href="pending-work-queue.css?v=20261012-cancel-summary" />
+  <link rel="stylesheet" href="pending-work-queue.css?v=20261029-not-found-summary" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
   <script src="extension-updates.js?v=20261003" defer></script>
   <link rel="stylesheet" href="bag-order-links.css?v=20260930" />
@@ -172,6 +172,7 @@
             <button type="button" data-order-due-filter="tomorrow" aria-pressed="false"><strong data-phone-count="tomorrow">—</strong><span>Tomorrow</span></button>
           </div>
           <button type="button" id="phone-summary-cancel-button" class="phone-cancel-summary" aria-pressed="false"><span>Pending to cancel <small>View marked orders</small></span><strong id="phone-summary-pending-cancel">…</strong></button>
+          <button type="button" id="phone-summary-not-found-button" class="phone-cancel-summary phone-not-found-summary" aria-pressed="false"><span>Not found <small>Item lines · View all marked items</small></span><strong id="phone-summary-not-found">…</strong></button>
         </section>
         <section class="pending-header">
         <div>
@@ -256,6 +257,7 @@
         <div><button type="button" id="summary-cgl-button"><span>Pending CGL</span><strong id="summary-pending-cgl">…</strong><small>Watch item lines · View waiting</small></button></div>
         <div><button type="button" id="summary-missing-button"><span>Missing watches</span><strong id="summary-missing-watches">…</strong><small>Watch item lines · View waiting</small></button></div>
         <div class="summary-pending-cancel-card"><button type="button" id="summary-cancel-button" aria-pressed="false"><span>Pending to cancel</span><strong id="summary-pending-cancel">…</strong><small>Item lines · View marked orders</small></button></div>
+        <div class="summary-not-found-card"><button type="button" id="summary-not-found-button" aria-pressed="false"><span>Not found</span><strong id="summary-not-found">…</strong><small>Item lines · View all marked items</small></button></div>
       </section>
 
       <div class="fulfillment-utility-strip">
@@ -1329,14 +1331,14 @@
   </div>
   <script src="pending-order-chats.js?v=20261009"></script>
   <script src="pending-watch-flags.js?v=20261018-front-tasks"></script>
-  <script src="pending-work-queue.js?v=20261018-front-tasks"></script>
+  <script src="pending-work-queue.js?v=20261029-not-found-summary"></script>
   <script src="buyer-tasks.js?v=20261013-photos"></script>
   <script src="buyer-promise-checkout.js?v=20261013-photos"></script>
   <script src="pending-partial-refunds.js?v=20261029-approval-cache"></script>
   <script src="ebay-auto-sync.js?v=20261025"></script>
   <script src="buyer-report-refunds.js?v=20261029-timing"></script>
   <script src="pending-buyer-refunds.js?v=20261029-timing"></script>
-  <script src="pending-orders.js?v=20261029-buyer-refunds"></script>
+  <script src="pending-orders.js?v=20261029-not-found-summary"></script>
   <script src="pending-inventory.js?v=20261008-shared-bag-2"></script>
   <script src="pending-bag-scan.js?v=20261008-shared-inventory"></script>
   <script src="pending-orders-mobile.js?v=20261018-organized"></script>

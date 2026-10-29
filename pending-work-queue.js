@@ -123,6 +123,7 @@
       if(button){button.setAttribute('aria-pressed',String(!searching&&watchFilter===kind));button.disabled=history||searching;button.querySelector('span').textContent=counts.checking&&kind!=='not-found'?'…':String(counts[kind]);}
     }
     for(const id of ['summary-cancel-button','phone-summary-cancel-button'])$(id)?.setAttribute('aria-pressed',String(!history&&!searching&&watchFilter==='cancel'));
+    for(const id of ['summary-not-found-button','phone-summary-not-found-button'])$(id)?.setAttribute('aria-pressed',String(!history&&!searching&&watchFilter==='not-found'));
     const help=$('pending-work-status');
     if(help){help.innerHTML=failure?`${esc(failure)} <button type="button" data-work-retry>Retry</button>`
       :history?'Completed orders are shown here.':searching?'Search and scans include ready and waiting orders.':counts.checking?'Checking which orders are ready…':watchFilter==='not-found'?'Items explicitly marked not found, across Ready and Waiting. Counts are item lines; each buyer’s package stays together.':'Waiting orders keep their shipping deadlines. Counts are buyer groups; item filters count lines.';}
@@ -137,10 +138,16 @@
   }
   function itemSearchChanged() {
     // The existing item-search stream supplies changes; no extra reads or writes.
+    notFoundCounts();
     if(watchFilter==='not-found'&&!isSearch())refreshView();
     else filter(filterRows);
   }
+  function notFoundCounts() {
+    const count=$('order-status-filter')?.value==='fulfilled'?'—':String(state.orders.filter(isNotFound).length);
+    for(const id of ['summary-not-found','phone-summary-not-found']){const el=$(id);if(el&&el.textContent!==count)el.textContent=count;}
+  }
   function summaryCounts() {
+    notFoundCounts();
     const groups=groupLinesByBuyer(openRows(state.orders));
     for(const name of ['all','overdue','today','tomorrow']){
       const matching=groups.filter(g=>name==='all'||g.lines.some(l=>getOrderUrgency(l.order?.ship_by_date)?.level===name));
@@ -311,26 +318,28 @@
     }
   }
   function schedule(){clearTimeout(timer);timer=setTimeout(()=>{if(document.visibilityState!=='hidden')void load();},250);}
-  async function showPendingCancellations() {
-    view='waiting';watchFilter='cancel';state.orderDueFilter='all';
+  async function showPendingItemFilter(kind) {
+    view=kind==='not-found'?'all':'waiting';watchFilter=kind;state.orderDueFilter='all';
     clearOrderSearch({apply:false});clearOrderCreatedDateFilter({apply:false});clearEbayLaunchFilter({apply:false});
+    for(const id of ['buyer-refund-filter','buyer-refund-timing']){const el=$(id);if(el)el.value='all';}
     if(state.selectedLiveLot){clearLiveLotSelection({render:false});renderLiveLotPanel();}
     const status=$('order-status-filter'),previous=status?.value;
     if(status)status.value='pending';
     if(previous==='fulfilled'||previous==='all')await loadOrders();
     else applyOrderFilters();
-    const filterButton=$('pending-work-cancel');
+    const filterButton=$(`pending-work-${kind}`);
     filterButton?.closest('.pending-work-filters')?.scrollIntoView({block:'start',behavior:'smooth'});
     filterButton?.focus({preventScroll:true});
   }
   function start() {
     if(started)return;started=true;
     document.addEventListener('click',event=>{
-      const b=event.target.closest('[data-work-view],[data-work-summary-view],[data-work-buyer],[data-work-cgl-add],[data-work-cgl-manage],[data-work-missing-add],[data-work-missing-manage],[data-work-cancel-add],[data-work-cancel-clear],[data-work-retry],#pending-work-cgl,#pending-work-missing,#pending-work-cancel,#pending-work-not-found,#summary-cgl-button,#summary-missing-button,#summary-cancel-button,#phone-summary-cancel-button');if(!b)return;
+      const b=event.target.closest('[data-work-view],[data-work-summary-view],[data-work-buyer],[data-work-cgl-add],[data-work-cgl-manage],[data-work-missing-add],[data-work-missing-manage],[data-work-cancel-add],[data-work-cancel-clear],[data-work-retry],#pending-work-cgl,#pending-work-missing,#pending-work-cancel,#pending-work-not-found,#summary-cgl-button,#summary-missing-button,#summary-cancel-button,#phone-summary-cancel-button,#summary-not-found-button,#phone-summary-not-found-button');if(!b)return;
       event.preventDefault();event.stopPropagation();
       if(b.disabled||saving||undoBusy)return;
       if(b.hasAttribute('data-work-retry')){void load();return;}
-      if(['summary-cancel-button','phone-summary-cancel-button'].includes(b.id)){void showPendingCancellations();return;}
+      if(['summary-cancel-button','phone-summary-cancel-button'].includes(b.id)){void showPendingItemFilter('cancel');return;}
+      if(['summary-not-found-button','phone-summary-not-found-button'].includes(b.id)){void showPendingItemFilter('not-found');return;}
       if(b.dataset.workCglAdd){void addLineHold(b.dataset.workCglAdd,b,'cgl');return;}
       if(b.dataset.workMissingAdd){void addLineHold(b.dataset.workMissingAdd,b,'watch_missing');return;}
       if(b.dataset.workCancelAdd){void addLineHold(b.dataset.workCancelAdd,b,'pending_cancel');return;}

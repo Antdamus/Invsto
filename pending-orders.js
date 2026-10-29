@@ -3485,6 +3485,7 @@ function renderPendingOrderSummaryLoading() {
   $("summary-today-lines").textContent = "Checking due dates...";
   $("summary-tomorrow-orders").textContent = "Loading";
   $("summary-tomorrow-lines").textContent = "Checking due dates...";
+  for (const id of ["summary-not-found", "phone-summary-not-found"]) { const el = $(id); if (el) el.textContent = "…"; }
   $("order-count-pill").textContent = "Loading orders";
   const cancellationCount = $("cancellation-review-count");
   if (cancellationCount) cancellationCount.textContent = "0";
@@ -3500,6 +3501,7 @@ function renderPendingOrderSummaryError() {
     $(id).textContent = "Refresh to try again";
   }
   $("order-count-pill").textContent = "Could not load orders";
+  for (const id of ["summary-not-found", "phone-summary-not-found"]) { const el = $(id); if (el) el.textContent = "Unavailable"; }
 }
 
 function renderSummaryStrip() {

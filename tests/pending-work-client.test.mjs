@@ -89,6 +89,36 @@ test('item not found counts honor the date-filtered input and are independent of
  assert.deepEqual(Array.from(f.api.filter(f.rows.slice(0,2)),r=>r.id),['a','b']);assert.equal(counter.textContent,'1');
 });
 
+test('not-found summary opens all marked pending buyers and keeps its total current outside the active filters',async()=>{
+ for(const buttonId of ['summary-not-found-button','phone-summary-not-found-button']){
+  const f=fixture(),pressed={};
+  f.elements[buttonId]={setAttribute:(name,value)=>pressed[name]=value};
+  for(const id of ['summary-not-found','phone-summary-not-found'])f.elements[id]={textContent:''};
+  for(const id of ['buyer-refund-filter','buyer-refund-timing'])f.elements[id]={value:'restricted'};
+  f.rows[0].item_search={is_missing:true};f.rows[2].item_search={is_missing:true};
+  f.api.summaryCounts();assert.equal(f.elements['summary-not-found'].textContent,'2','count needs no waiting-status request');
+  await f.load([blocker()]);
+  f.elements['order-search'].value='unrelated';f.elements['order-created-date-filter'].value='2026-10-12';
+  f.state.orderDueFilter='tomorrow';f.state.selectedLiveLot={id:'bag'};f.state.ebayLaunchBuyerKeys=new Set(['other']);
+  f.click({},buttonId);
+  assert.deepEqual(Array.from(f.state.filteredOrders,r=>r.id),['a','b','c'],'includes ready and waiting buyers, keeping their packages together');
+  assert.equal(pressed['aria-pressed'],'true');assert.equal(f.state.orderDueFilter,'all');
+  assert.equal(f.elements['order-search'].value,'');assert.equal(f.elements['order-created-date-filter'].value,'');
+  assert.equal(f.state.selectedLiveLot,null);assert.equal(f.state.ebayLaunchBuyerKeys.size,0);
+  for(const id of ['buyer-refund-filter','buyer-refund-timing'])assert.equal(f.elements[id].value,'all');
+  f.rows[0].item_search={is_missing:false};f.api.itemSearchChanged();
+  assert.deepEqual(Array.from(f.state.filteredOrders,r=>r.id),['c']);
+  f.click({workView:'ready'});assert.equal(pressed['aria-pressed'],'false');
+  f.rows[2].line_status='fulfilled';f.api.itemSearchChanged();
+  for(const id of ['summary-not-found','phone-summary-not-found'])assert.equal(f.elements[id].textContent,'0');
+  f.rows[1].item_search={is_missing:true};f.api.filter(f.rows.slice(2));f.api.itemSearchChanged();
+  assert.equal(f.elements['summary-not-found'].textContent,'1','summary is the full pending queue, not the narrowed work view');
+  f.elements['order-status-filter'].value='fulfilled';f.api.summaryCounts();
+  assert.equal(f.elements['summary-not-found'].textContent,'—');
+  f.click({},buttonId);assert.equal(f.state.reloads,1);assert.equal(f.elements['order-status-filter'].value,'pending');
+ }
+});
+
 test('pending cancellation is available on ordinary lines, counted per line and keeps the buyer together',async()=>{
  const f=fixture({watch:false}),counter={textContent:''};
  f.elements['pending-work-cancel']={setAttribute(){},querySelector:()=>counter};
