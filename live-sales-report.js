@@ -12,7 +12,7 @@
   async function rpc(name,args){const {data,error}=await window.supabase.rpc(name,args);if(error)throw Error(error.message);return data;}
   function fillSettings(){
     if(!model||settingsDirty)return;const settings=model.settings;
-    for(const key of M.RATE_KEYS){forms[key].value=settings.showRates?.[key]??'';const rate=settings.globalRates?.[key];forms[key].placeholder=rate==null?'No global rate':'Global: $'+Number(rate).toFixed(2);$('rate-note-'+key).textContent=rate==null?'No global default. Enter a show rate if known.':'Global default $'+Number(rate).toFixed(2)+'/g · leave blank to use it.';}
+    for(const key of M.RATE_KEYS){forms[key].value=settings.showRates?.[key]??'';const rate=settings.globalRates?.[key];forms[key].placeholder=rate==null?'No global rate':'Global: '+M.rateMoney(rate);$('rate-note-'+key).textContent=rate==null?'No global default. Enter a show rate if known.':'Global default '+M.rateMoney(rate)+'/g · leave blank to use it.';}
     for(const key of ['fee_percent','fee_fixed','shipping_per_sale'])forms[key].value=settings[key]??'';
     settingsVersion=settings.updated_at||null;
   }

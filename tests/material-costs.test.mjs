@@ -49,6 +49,7 @@ test('global defaults flow into live costs, show overrides and manual zero retai
  assert.equal(M.costFor({listing_title:'999 silver 10g'},{},{rates:defaults}).base,null);
  assert.equal(M.costFor({listing_title:'925 silver 10g'},{},{rates:defaults}).parsed.assumed,false);
  for(const item of [{metal:'silver',purity_basis_points:9990,weight:3},{metal:'gold',weight:3,title:'Gold filled ring'},{metal:'silver',weight:3,coin_details:{}}])assert.equal(C.estimate(item,defaults),null);
+ assert.match(M.costFor({listing_title:'Silver 10g'},{},{rates:{silver:5.805}}).source,/\$5\.805\/g/);
  assert.equal(C.estimate({metal:'gold',purity_basis_points:5833,weight:2},defaults).cost,198);
 });
 test('stock preview counts eligible records and quantity without changing data',async()=>{

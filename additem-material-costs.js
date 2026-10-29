@@ -12,7 +12,7 @@
    // Clear the previous computed cost when the material has no configured rate.
    if(rate==null&&$('auto-cost-checkbox').checked&&!window.addItemPricing?.deferred()){$('cost').value='';window.addItemPricing?.calculateMinimum();}
    price.dispatchEvent(new Event('input',{bubbles:true}));applying=false;
-   $('shared-material-status').textContent=!config?'Shared rates unavailable. Reload the page or enter a custom cost.':rate!=null?`${window.MaterialCosts.label(key)} · $${Number(rate).toFixed(2)}/g${!purity?' (purity assumed)':''}`:'No matching shared rate. Enter a custom cost or configure this material.';
+   $('shared-material-status').textContent=!config?'Shared rates unavailable. Reload the page or enter a custom cost.':rate!=null?`${window.MaterialCosts.label(key)} · ${window.MaterialCosts.rateMoney(rate)}/g${!purity?' (purity assumed)':''}`:'No matching shared rate. Enter a custom cost or configure this material.';
  }
  function manual(){if(applying)return;shared.checked=false;delete price.dataset.sharedMaterialKey;$('shared-material-status').textContent='Custom cost for this item. Check Use shared material cost to return to the global rate.';}
  price.addEventListener('input',manual);

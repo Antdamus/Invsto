@@ -5,6 +5,7 @@
   const number=value=>value==null||value===''?null:Number.isFinite(Number(value))&&Number(value)>=0?Number(value):null;
   const cents=value=>number(value)==null?null:Math.round(Number(value)*100);
   const money=value=>value==null?'Not set':new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(value/100);
+  const rateMoney=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:4}).format(value);
   const date=value=>Number.isFinite(Date.parse(value))?new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(new Date(value)):null;
   function parseTitle(title){
     const text=String(title||'');
@@ -30,7 +31,7 @@
     const key=metal.material==='gold'?'gold_'+metal.purity:metal.material==='silver'?'silver':null;
     const rate=number(settings.rates?.[key]);
     const ready=!metal.ambiguous&&!!metal.material&&metal.grams>0&&rate!=null&&(metal.material!=='gold'||metal.purity>0);
-    const source=ready?`${metal.grams} g × ${money(Math.round(rate*100))}/g · ${metal.material==='gold'?metal.purity+'K gold':'sterling silver 925'}${metal.assumption?' ('+metal.assumption+')':''}${settings.globalRates?.[key]!=null&&!Object.hasOwn(settings.showRates||{},key)?' · Global rate':settings.showRates&&Object.hasOwn(settings.showRates,key)?' · Show override':''}`:mode==='auto'?parsed.note:'Enter a matching metal rate or manual base cost.';
+    const source=ready?`${metal.grams} g × ${rateMoney(rate)}/g · ${metal.material==='gold'?metal.purity+'K gold':'sterling silver 925'}${metal.assumption?' ('+metal.assumption+')':''}${settings.globalRates?.[key]!=null&&!Object.hasOwn(settings.showRates||{},key)?' · Global rate':settings.showRates&&Object.hasOwn(settings.showRates,key)?' · Show override':''}`:mode==='auto'?parsed.note:'Enter a matching metal rate or manual base cost.';
     return {mode,base:ready?Math.round(metal.grams*rate*100):null,source:ready?source:source+(metal.material&&metal.grams>0&&!metal.ambiguous&&rate==null?' Set the matching cost per gram.':''),parsed:metal,note:override.note||''};
   }
   function makeModel(payload,origin='https://antdamus.github.io/Invsto/',now=new Date()){
@@ -71,5 +72,5 @@
     for(const buyer of customers){buyer.rows.sort((a,b)=>(Date.parse(a.sold_at)||0)-(Date.parse(b.sold_at)||0)||a.title.localeCompare(b.title));buyer.stats=summarize(buyer.rows);}
     return {sessionId:payload.show?.id||c.session_id,show:payload.show||{},title:payload.show?.title||c.stream_metadata?.title||'Live sales report',connection:c,settings,customers,rows,stats:summarize(rows),expensesKnown,generatedAt:now.toISOString(),updatedAt:payload.server_time||now.toISOString(),date:date(now.toISOString()),unmatched:(payload.unmatched||[]).length,origin};
   }
-  const api={RATE_KEYS,labels,number,cents,money,date,parseTitle,costFor,makeModel};root.OGLiveReportModel=api;if(typeof module!=='undefined')module.exports=api;
+  const api={RATE_KEYS,labels,number,cents,money,rateMoney,date,parseTitle,costFor,makeModel};root.OGLiveReportModel=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof window!=='undefined'?window:globalThis);
