@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import M from '../live-sales-report-model.js';
 const settings={rates:{gold_10:30,gold_14:42,silver:1.25},fee_percent:10,fee_fixed:1,shipping_per_sale:5};
 test('title parser uses explicit purity or the requested 10K assumption',()=>{
-  assert.deepEqual(M.parseTitle('Gold necklace 12.5 g'),{material:'gold',grams:12.5,purity:10,assumed:true,ambiguous:false,note:'10K gold assumed because purity is not specified.'});
+  assert.deepEqual(M.parseTitle('Gold necklace 12.5 g'),{material:'gold',grams:12.5,purity:10,assumed:true,assumption:'10K assumed',ambiguous:false,note:'10K gold assumed because purity is not specified.'});
   assert.equal(M.costFor({listing_title:'14kt gold 2 grams'}, {},settings).base,8400);
   assert.equal(M.costFor({listing_title:'925 sterling silver 10g'}, {},settings).base,1250);
   assert.equal(M.costFor({listing_title:'Gold 5gr'}, {},settings).base,15000);

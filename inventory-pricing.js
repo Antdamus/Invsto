@@ -3,6 +3,7 @@
   const $=id=>document.getElementById(id), esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const date=value=>value?new Date(value).toLocaleString(undefined,{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}):'Not recorded';
   const money=value=>value==null?'Not set':new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(value);
+  let materialSettings=null;
   let config,items=[],selected=null,total=0,offset=0,status='waiting',busy=false,loading=false,request=0,photoVersion=0,searchTimer;
   const drafts=new Map(),photoCache=new Map();
   const message=(text,error=false)=>{$('pricing-message').textContent=text;$('pricing-message').classList.toggle('is-error',error);};
@@ -40,16 +41,18 @@
     if(!i){
       $('pricing-detail').innerHTML=`<div class="pricing-empty"><span class="pricing-pill">${status==='priced'?'PRICING RECORDS':'PRICING QUEUE'}</span><h2>${status==='skipped'?'Nothing set aside.':status==='priced'?'No priced items here yet.':'All clear in this queue.'}</h2><p>${status==='skipped'?'Skip for now keeps an item here until you are ready to price it.':status==='priced'?'Items priced through this queue are recorded here.':'New items appear here when employees save them for pricing.'}</p><p>Use Everyone to see other owners, or check Skipped for items saved for later.</p><a href="add-item.html">Add an item ↗</a></div>`;return;
     }
+    const estimate=window.MaterialCosts?.estimate(i,materialSettings?.rates);
     const ready=i.pricing_status==='ready',d=drafts.get(i.id)||{cost:'',retail:'',minimum:''};
     const facts=[fact('Barcode',i.barcode),fact('Category',(i.categories||[]).join(', ')),fact('Brand',i.watch_details?.brand),fact('Reference',i.watch_details?.model),fact('Condition',i.watch_details?.condition?.replaceAll('_',' ').toLowerCase()),fact('Year',i.coin_details?.year),fact('Grade',i.coin_details?.grade),fact('Weight',i.weight==null?'Not recorded':`${i.weight} g`),fact('Material',i.metal),fact('Stone',i.stone_type),fact('Length',i.item_length),fact('Supplier',i.distributor_name),fact('Stock location',(i.locations||[]).map(l=>`${l.name} · ${l.quantity}`).join('; '))].join('');
     const special=Object.entries(i.watch_details||i.coin_details||{}).filter(([key,value])=>value && typeof value!=='object').map(([key,value])=>fact(key.replace(/([A-Z])/g,' $1').replace(/^./,c=>c.toUpperCase()),value)).join('');
     $('pricing-detail').innerHTML=`<header class="pricing-item-header"><span class="pricing-pill">${ready?'PRICED':i.pricing_skipped_at?'SAVED FOR LATER':'AWAITING PRICING'}</span><h2 tabindex="-1" id="pricing-item-title">${esc(i.title)}</h2><p>Added ${esc(date(i.created_at))} · ${esc(i.added_by_name || i.added_by_email || 'Inventory team')}<br>Pricing owner: ${esc(i.owner_name || 'Unassigned')}</p></header>
       <div class="pricing-item-body"><div class="pricing-gallery" id="pricing-gallery"><div class="pricing-no-photo">Loading photos…</div></div>
       <div class="pricing-info"><dl>${facts}</dl><details><summary>Full item details</summary><p>${esc(i.description || 'No description added.')}</p><dl>${special}</dl>${i.distributor_notes?`<p>Supplier notes: ${esc(i.distributor_notes)}</p>`:''}${i.distributor_phone?`<p>Supplier phone: ${esc(i.distributor_phone)}</p>`:''}</details><a href="stock.html?barcode=${encodeURIComponent(i.barcode||'')}" target="_blank" rel="noopener">View in Stock ↗</a></div></div>
-      ${ready?`<div class="pricing-entry"><h3>Pricing saved ${esc(date(i.pricing_completed_at))}</h3><div class="pricing-info"><dl>${fact('Cost',money(i.cost))}${fact('Retail',money(i.sale_price))}${fact('Minimum sale',money(i.minimum_sale_price))}</dl></div></div>`:i.can_price?`<form id="pricing-form" class="pricing-entry"><h3>Set prices <small>· USD</small></h3><div class="pricing-amounts"><label>Cost ($)<input name="cost" inputmode="decimal" autocomplete="off" required placeholder="0.00" value="${esc(d.cost)}"></label><label>Retail price ($)<input name="retail" inputmode="decimal" autocomplete="off" required placeholder="0.00" value="${esc(d.retail)}"></label><label>Minimum selling price ($)<input name="minimum" inputmode="decimal" autocomplete="off" placeholder="Optional" value="${esc(d.minimum)}"><small>Your selling floor. Online listings use retail.</small></label></div><p class="pricing-form-error" id="pricing-form-error" role="alert"></p><div class="pricing-actions"><button type="button" id="pricing-skip">Skip for now</button><button type="submit" class="pricing-primary">Save &amp; next →</button></div></form>`:`<div class="pricing-entry">Waiting for ${esc(i.owner_name || 'the pricing owner')} to set the cost and selling prices.</div>`}
+      ${ready?`<div class="pricing-entry"><h3>Pricing saved ${esc(date(i.pricing_completed_at))}</h3><div class="pricing-info"><dl>${fact('Cost',money(i.cost))}${fact('Retail',money(i.sale_price))}${fact('Minimum sale',money(i.minimum_sale_price))}</dl></div></div>`:i.can_price?`<form id="pricing-form" class="pricing-entry"><h3>Set prices <small>· USD</small></h3>${estimate?`<p><button type="button" id="pricing-use-material">Use shared cost · ${money(estimate.cost)}</button> ${esc(window.MaterialCosts.label(estimate.key))} · ${esc(i.weight)} g × ${money(estimate.rate)}/g</p><small id="pricing-material-note">${d.material?'Shared rate selected.':'Optional: use the global material rate, or enter an individual cost.'}</small>`:''}<div class="pricing-amounts"><label>Cost ($)<input name="cost" inputmode="decimal" autocomplete="off" required placeholder="0.00" value="${esc(d.cost)}"></label><label>Retail price ($)<input name="retail" inputmode="decimal" autocomplete="off" required placeholder="0.00" value="${esc(d.retail)}"></label><label>Minimum selling price ($)<input name="minimum" inputmode="decimal" autocomplete="off" placeholder="Optional" value="${esc(d.minimum)}"><small>Your selling floor. Online listings use retail.</small></label></div><p class="pricing-form-error" id="pricing-form-error" role="alert"></p><div class="pricing-actions"><button type="button" id="pricing-skip">Skip for now</button><button type="submit" class="pricing-primary">Save &amp; next →</button></div></form>`:`<div class="pricing-entry">Waiting for ${esc(i.owner_name || 'the pricing owner')} to set the cost and selling prices.</div>`}
       ${!ready&&config.is_admin?`<details class="pricing-reassign"><summary>Change this item’s pricing owner</summary><form id="pricing-reassign-form"><label>Pricing owner<select name="owner">${ownerOptions(i.pricing_owner)}</select></label><button type="submit">Reassign</button></form></details>`:''}`;
     const form=$('pricing-form');
-    form?.addEventListener('input',()=>drafts.set(i.id,Object.fromEntries(new FormData(form))));
+    form?.addEventListener('input',event=>{const previous=drafts.get(i.id);const useMaterial=event.target.name!=='cost'&&previous?.material;drafts.set(i.id,{...Object.fromEntries(new FormData(form)),material:Boolean(useMaterial),ratesAt:previous?.ratesAt});if(event.target.name==='cost'&&$('pricing-material-note'))$('pricing-material-note').textContent='Individual cost selected.';});
+    $('pricing-use-material')?.addEventListener('click',()=>{form.elements.cost.value=estimate.cost.toFixed(2);drafts.set(i.id,{...Object.fromEntries(new FormData(form)),material:true,ratesAt:materialSettings.updated_at});$('pricing-material-note').textContent='Shared rate selected. Future stock updates can include this item.';});
     form?.addEventListener('submit',event=>{event.preventDefault();let prices;try{prices=window.InventoryPricing.prices(form.elements.cost.value,form.elements.retail.value,form.elements.minimum.value);}catch(error){$('pricing-form-error').textContent=error.message;return;}void act(i,'price',{_cost:prices.cost,_retail:prices.retail,_minimum:prices.minimum});});
     $('pricing-skip')?.addEventListener('click',()=>act(i,'skip'));
     $('pricing-reassign-form')?.addEventListener('submit',event=>{event.preventDefault();void act(i,'reassign',{_owner:event.target.elements.owner.value});});
@@ -78,7 +81,8 @@
     const index=items.findIndex(row=>row.id===i.id),next=items[index+1]?.id || items[index-1]?.id;
     setBusy(true);
     try {
-      await rpc('act_inventory_pricing',{_item_id:i.id,_revision:i.pricing_revision,_action:action,...extra});
+      if(action==='price'&&drafts.get(i.id)?.material)await rpc('price_inventory_with_material_rate',{_item_id:i.id,_revision:i.pricing_revision,_retail:extra._retail,_minimum:extra._minimum,_expected_rates_at:drafts.get(i.id).ratesAt});
+      else await rpc('act_inventory_pricing',{_item_id:i.id,_revision:i.pricing_revision,_action:action,...extra});
       if(action==='price')drafts.delete(i.id);
       setBusy(false);await load(next,{quiet:true});
       const heading=$('pricing-item-title');heading?.focus({preventScroll:true});(heading || $('pricing-detail')).scrollIntoView({block:'start',behavior:'instant'});
@@ -89,6 +93,7 @@
   async function boot(){
     try {
       config=await rpc('inventory_pricing_config');
+      materialSettings=await rpc('get_material_cost_settings');
       $('pricing-settings').hidden=!config.is_admin;
       $('pricing-default-owner').innerHTML=`<option value="">Choose owner</option>${ownerOptions(config.default_owner)}`;
       await load();
@@ -96,7 +101,7 @@
   }
   $('pricing-list').addEventListener('click',e=>{const button=e.target.closest('[data-item]');if(button)choose(button.dataset.item);});
   $('pricing-picker').addEventListener('change',e=>choose(e.target.value));
-  $('pricing-refresh').addEventListener('click',()=>config?load():boot());
+  $('pricing-refresh').addEventListener('click',()=>boot());
   $('pricing-scope').addEventListener('change',()=>{offset=0;void load(null);});
   $('pricing-search').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{offset=0;void load(null);},350);});
   document.querySelectorAll('[data-pricing-status]').forEach(button=>button.addEventListener('click',()=>{status=button.dataset.pricingStatus;offset=0;document.querySelectorAll('[data-pricing-status]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));void load(null);}));

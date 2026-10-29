@@ -609,6 +609,7 @@
         ebaySyncEnabled: Boolean(document.getElementById("ebay-sync-enabled")?.checked),
         ebayCategoryId: getInputValueById("ebay-category-id"),
         pricePerWeight: getInputValueById("price-per-weight"),
+        sharedMaterialRate: Boolean(document.getElementById("use-shared-material-cost")?.checked),
         cost: getInputValueById("cost"),
         salePrice: getInputValueById("sale-price"),
         minimumSalePrice: getInputValueById("minimum-sale-price"),
@@ -838,6 +839,7 @@
     setInputValueById("ebay-sync-enabled", main.ebaySyncEnabled, { dispatch: false });
     setInputValueById("ebay-category-id", main.ebayCategoryId, { dispatch: false });
     setInputValueById("price-per-weight", main.pricePerWeight, { dispatch: false });
+    window.addItemMaterialCosts?.restore(main);
     setInputValueById("cost", main.cost, { dispatch: false });
     setInputValueById("sale-price", main.salePrice, { dispatch: false });
     setInputValueById("minimum-sale-price", main.minimumSalePrice, { dispatch: false });
@@ -1009,24 +1011,7 @@
   }
 
   function syncSilver925Pricing(elements) {
-    if (window.addItemWizard?.usesDirectPricing()) return;
-    const priceInput = document.getElementById("price-per-weight");
-    if (!priceInput) return;
-
-    const isSilver925 = asTrimmedString(elements.materialSelect?.value) === "Silver"
-      && asTrimmedString(elements.puritySelect?.value) === "925";
-
-    if (isSilver925) {
-      priceInput.value = "7";
-      priceInput.dataset.autoSilver925 = "true";
-      priceInput.dispatchEvent(new Event("input", { bubbles: true }));
-      priceInput.dispatchEvent(new Event("change", { bubbles: true }));
-    } else if (priceInput.dataset.autoSilver925 === "true") {
-      priceInput.value = "";
-      delete priceInput.dataset.autoSilver925;
-      priceInput.dispatchEvent(new Event("input", { bubbles: true }));
-      priceInput.dispatchEvent(new Event("change", { bubbles: true }));
-    }
+    window.addItemMaterialCosts?.sync();
   }
 
   function applyDefaultSilver925Selection(elements) {

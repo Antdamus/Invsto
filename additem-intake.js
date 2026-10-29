@@ -15,6 +15,7 @@
     if(wizard.coinDetails.ebay?.categoryId)coin.ebay={categoryId:wizard.coinDetails.ebay.categoryId,categoryLabel:wizard.coinDetails.ebay.categoryLabel || '',photosConfirmed:false};
     const main=snapshotFields([['category','category'],['pricePerWeight','price-per-weight'],['distributorName','distributor-name'],['distributorPhone','distributor-phone'],['distributorNotes','distributor-notes']]);
     if($('item-keep-prices').checked)Object.assign(main,snapshotFields([['cost','cost'],['salePrice','sale-price'],['minimumSalePrice','minimum-sale-price']]));
+    main.sharedMaterialRate=Boolean($('use-shared-material-cost')?.checked);
     main.ebaySyncEnabled=$('ebay-sync-enabled').checked;
     if(wizard.itemKind!=='coin')main.ebayCategoryId=text('ebay-category-id');
     const material=window.addItemAssistedModule.getSelectedMaterialPurity();

@@ -14,24 +14,29 @@
     const plated=/\b(?:plated|filled|vermeil|tone|colou?r(?:ed)?|gp|gf|hge|overlay)\b/i.test(text);
     const ambiguous=plated||(gold&&silver)||weights.length>1||new Set(purities).size>1||/\d\s*(?:[-–/]|to)\s*\d+(?:\.\d+)?\s*(?:g|grams?)\b/i.test(text)||/\d,\d+\s*(?:g|grams?)\b/i.test(text);
     const material=gold&&!silver?'gold':silver&&!gold?'silver':null;
+    const silverPurities=[...text.matchAll(/\b(800|835|850|900|925|950|958|999)(?:\.9)?\b/g)].map(m=>Number(m[1]));
+    const unsupportedSilver=material==='silver'&&(silverPurities.some(p=>p!==925)||/\b(?:fine|pure)\s+silver\b/i.test(text));
     const grams=weights.length===1||new Set(weights).size===1?weights[0]:null;
-    const purity=material==='gold'?(purities[0]??10):null;
-    const assumed=material==='gold'&&!purities.length;
-    return {material,grams:grams>0?grams:null,purity:purity>0&&purity<=24?purity:null,assumed,ambiguous,
-      note:ambiguous?'Mixed, plated or ambiguous title: enter a manual base cost.':!material?'Material not specified.':!grams?'Gram weight not specified.':assumed?'10K gold assumed because purity is not specified.':'Read from item title.'};
+    const purity=material==='gold'?(purities[0]??10):material==='silver'?(silverPurities[0]??925):null;
+    const assumed=material==='gold'&&!purities.length||material==='silver'&&!silverPurities.length;
+    const assumption=assumed?(material==='gold'?'10K assumed':'925 assumed'):'';
+    return {material,grams:grams>0?grams:null,purity:purity>0&&(material==='silver'||purity<=24)?purity:null,assumed,assumption,ambiguous:ambiguous||unsupportedSilver,
+      note:unsupportedSilver?'Silver purity is not 925: enter a manual base cost.':ambiguous?'Mixed, plated or ambiguous title: enter a manual base cost.':!material?'Material not specified.':!grams?'Gram weight not specified.':assumed?(material==='gold'?'10K gold assumed because purity is not specified.':'Sterling silver 925 assumed because purity is not specified.'):'Read from item title.'};
   }
   function costFor(a,override={},settings={}){
     const parsed=parseTitle(a.listing_title),mode=override.mode||'auto';
     if(mode==='manual')return {mode,base:cents(override.base_cost),source:'Manual base cost',parsed,note:override.note||''};
-    const metal=mode==='metal'?{material:override.material,grams:number(override.grams),purity:number(override.purity),assumed:false,ambiguous:false}:parsed;
+    const metal=mode==='metal'?{material:override.material,grams:number(override.grams),purity:override.material==='silver'?925:number(override.purity),assumed:false,ambiguous:false}:parsed;
     const key=metal.material==='gold'?'gold_'+metal.purity:metal.material==='silver'?'silver':null;
     const rate=number(settings.rates?.[key]);
     const ready=!metal.ambiguous&&!!metal.material&&metal.grams>0&&rate!=null&&(metal.material!=='gold'||metal.purity>0);
-    const source=ready?`${metal.grams} g × ${money(Math.round(rate*100))}/g · ${metal.material==='gold'?metal.purity+'K gold':'silver'}${metal.assumed?' (10K assumed)':''}`:mode==='auto'?parsed.note:'Enter a matching metal rate or manual base cost.';
+    const source=ready?`${metal.grams} g × ${money(Math.round(rate*100))}/g · ${metal.material==='gold'?metal.purity+'K gold':'sterling silver 925'}${metal.assumption?' ('+metal.assumption+')':''}${settings.globalRates?.[key]!=null&&!Object.hasOwn(settings.showRates||{},key)?' · Global rate':settings.showRates&&Object.hasOwn(settings.showRates,key)?' · Show override':''}`:mode==='auto'?parsed.note:'Enter a matching metal rate or manual base cost.';
     return {mode,base:ready?Math.round(metal.grams*rate*100):null,source:ready?source:source+(metal.material&&metal.grams>0&&!metal.ambiguous&&rate==null?' Set the matching cost per gram.':''),parsed:metal,note:override.note||''};
   }
   function makeModel(payload,origin='https://antdamus.github.io/Invsto/',now=new Date()){
-    const c=payload.connection||{},settings=payload.settings||{rates:{},fee_percent:c.fee_percent,fee_fixed:c.fee_fixed,shipping_per_sale:c.shipping_per_sale};
+    const c=payload.connection||{},saved=payload.settings||{rates:{},fee_percent:c.fee_percent,fee_fixed:c.fee_fixed,shipping_per_sale:c.shipping_per_sale};
+    const globalRates=payload.global_material_costs?.rates||{};
+    const settings={...saved,showRates:saved.rates||{},globalRates,globalUpdatedAt:payload.global_material_costs?.updated_at,rates:{...globalRates,...saved.rates}};
     const feePercent=number(settings.fee_percent),fixed=cents(settings.fee_fixed),shipping=cents(settings.shipping_per_sale);
     const expensesKnown=feePercent!=null&&fixed!=null&&shipping!=null;
     const buyers=new Map();const rows=(payload.attempts||[]).filter(a=>!a.merged_into).map(a=>{

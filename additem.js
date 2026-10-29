@@ -634,7 +634,7 @@ let uploadedImages = [];
     window.latestDymoBarcode = "";
     window.latestDymoGeneratedAt = "";
     latestDymoXml = "";
-    if (pricePerWeightInput && pricePerWeightInput.dataset.autoSilver925 !== "true") {
+    if (pricePerWeightInput && !pricePerWeightInput.dataset.sharedMaterialKey) {
       pricePerWeightInput.value = "";
     }
     if (autoCostCheckbox) autoCostCheckbox.checked = true;
@@ -3141,6 +3141,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
       ebay_condition: coin_details ? window.CoinEbay?.CONDITION_ENUMS[coin_details.ebay?.conditionId] || null : watch_details ? watch_details.condition || null : "NEW",
       ebay_aspects,
       price_per_weight,
+      ...window.addItemMaterialCosts?.fields(),
       categories,
       cost,
       sale_price,
