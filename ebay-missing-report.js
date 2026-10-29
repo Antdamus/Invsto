@@ -85,10 +85,15 @@
     for(const o of orders)totals.set(o.gross.currency,(totals.get(o.gross.currency)||0)+o.refundCents);
     return {count:orders.length,amount:[...totals].map(([c,v])=>money(v/100,c)).join(' + ')||'None recorded'};
   }
-  function timeline(order,markedAt,due,now){
+  function missingAge(markedAt,now){
+    const timestamp=Date.parse(markedAt);
+    if(!Number.isFinite(timestamp))return 'Not recorded';
+    return timestamp>Number(now)?'Date needs verification':elapsed(Number(now)-timestamp);
+  }
+  function timeline(order,markedAt,due,now,markedBy='Not recorded'){
     return [
       {label:'Purchased',text:buyer.purchaseDate(order),at:Date.parse(order.sale_date),tone:'normal'},
-      {label:'Marked missing',text:date(markedAt),at:Date.parse(markedAt),tone:'missing'},
+      {label:'Marked missing',text:`${date(markedAt)}\nMarked by: ${markedBy}`,at:Date.parse(markedAt),tone:'missing'},
       {label:'Shipping deadline',text:due.due,at:due.sort,tone:due.level},
       {label:due.level==='overdue'?`Still missing / ${due.age} overdue`:'Report snapshot / still missing',text:date(now),at:Number(now),tone:due.level==='overdue'?'overdue':'normal'},
     ].filter(e=>Number.isFinite(e.at)).sort((a,b)=>a.at-b.at);
@@ -119,13 +124,14 @@
     const rows=all.filter(r=>missing.has(r.id)&&open(lineMap.get(r.id))).map(row=>{
       const q=missing.get(row.id),order=orderMap.get(row.orderId),marker=q.item_search?.is_missing?q.item_search:null;
       const pendingUrl=new URL('pending-orders.html',baseUrl);pendingUrl.searchParams.set('orderId',row.orderNumber);
-      const due=deadline(order,now),markedAt=marker?.updated_at||q.missingWatch?.created_at;
+      const due=deadline(order,now),markedAt=marker?marker.updated_at:q.missingWatch?.created_at;
+      const markedBy=String((marker?marker.updated_by_email:q.missingWatch?.created_by_email)||'').trim()||'Not recorded';
       const notes=itemNotes(records,row.id),savedNote=q.latest_line_note;
       const fallbackNote=(typeof savedNote==='string'?savedNote:savedNote?.notes||savedNote?.note)||q.missingWatch?.reason||'';
       if(!notes.length&&fallbackNote)notes.push({text:fallbackNote,author:savedNote?.signed_by_email||'Author not recorded',createdAt:savedNote?.created_at||null,date:date(savedNote?.created_at)});
-      return {...row,customerName:String(order.buyer_name||q.buyer_name||'').trim()||customerName,deadline:due,timeline:timeline(order,markedAt,due,now),pendingUrl:pendingUrl.href,
+      return {...row,customerName:String(order.buyer_name||q.buyer_name||'').trim()||customerName,deadline:due,timeline:timeline(order,markedAt,due,now,markedBy),pendingUrl:pendingUrl.href,
         missingReason:[marker?'Item marked not found':'',q.missingWatch?'Watch marked missing':''].filter(Boolean).join(' / '),
-        markedAt:date(markedAt),markedBy:marker?.updated_by_email||q.missingWatch?.assignee||'Staff',
+        markedAt:date(markedAt),markedBy,missingAge:missingAge(markedAt,now),
         notes,note:notes[0]?.text||'',
         ebayStatus:[q.ebay_payment_status&&`Payment: ${q.ebay_payment_status}`,q.ebay_fulfillment_status&&`Fulfillment: ${q.ebay_fulfillment_status}`,q.ebay_cancel_status&&q.ebay_cancel_status!=='NONE'&&`Cancellation: ${q.ebay_cancel_status}`].filter(Boolean).join(' | ')||'Not recorded'};
     }).sort((a,b)=>a.deadline.sort-b.deadline.sort||a.orderNumber.localeCompare(b.orderNumber));
@@ -176,7 +182,8 @@
         <div class="customer-history"><span><b>First purchase</b> ${html(c.firstPurchase)}</span><span><b>Most recent purchase</b> ${html(c.lastPurchase)}</span></div>
         ${c.financial.unverifiedOrders||c.financial.unmatched.length?`<p class="verification">Financial verification needed: ${c.financial.unverifiedOrders} orders with uncertain refund amounts; ${c.financial.unmatched.length} unmatched cases. Net spent may be unconfirmed.</p>`:''}
         <p class="timing-note">${html(refunds.timingText(c.financial))}</p>
-        ${c.rows.map((r,j)=>`<article class="missing-item ${r.deadline.level}"><div class="item-heading"><div><strong class="item-customer">${html(r.customerName||c.name||'Customer name not recorded')}</strong><span class="item-owner">eBay: ${html(c.username)}</span><span>ITEM ${j+1} / ORDER ${html(r.orderNumber)}</span></div><span class="pill ${r.deadline.level}">${html(r.deadline.label)}</span></div>
+        <h3 class="item-index-heading">Missing item index</h3><nav class="missing-item-index" aria-label="Missing items for ${html(c.name||c.username)}">${c.rows.map((r,j)=>`<a href="#missing-item-${html(r.id)}" class="${r.deadline.level}"><span><strong>${j+1}. ${html(r.title)}</strong><small>Order ${html(r.orderNumber)}</small></span><span><small>Original item amount</small><strong class="index-item-price">${html(money(r.price.total,r.price.currency))}</strong><small>Qty ${r.price.quantity}</small></span><span><small>Marked missing for</small><strong>${html(r.missingAge)}</strong><small class="index-item-deadline">${html(r.deadline.level==='overdue'?`Overdue: ${r.deadline.age}`:r.deadline.label)}</small></span></a>`).join('')}</nav>
+        ${c.rows.map((r,j)=>`<article class="missing-item ${r.deadline.level}" id="missing-item-${html(r.id)}"><div class="item-heading"><div><strong class="item-customer">${html(r.customerName||c.name||'Customer name not recorded')}</strong><span class="item-owner">eBay: ${html(c.username)}</span><span>ITEM ${j+1} / ORDER ${html(r.orderNumber)}</span></div><span class="pill ${r.deadline.level}">${html(r.deadline.label)}</span></div>
           <div class="deadline-banner"><strong>${r.deadline.level==='overdue'?`Overdue for ${html(r.deadline.age)}`:html(r.deadline.label)}</strong><span>${r.deadline.since?`Overdue since ${html(r.deadline.since)}`:`Ship by ${html(r.deadline.due)}`}</span></div>
           <div class="item-body"><div class="item-image">${r.image?`<img src="${r.image.crop}" alt="Saved screenshot for ${html(r.title)}"><small>Saved item evidence · verify against the title</small>`:`<div class="image-placeholder"><span>ITEM EVIDENCE</span><p>${html(r.imageStatus)}</p><a data-report-receipt="${html(r.id)}" href="${html(buyer.receiptAction(r).href)}" target="_blank" rel="noopener">${html(buyer.receiptAction(r).label)} ↗</a></div>`}</div>
           <div class="item-details"><div class="eyebrow">ORIGINAL PURCHASE</div><h3>${html(r.title)}</h3><p class="item-price">${html(money(r.price.total,r.price.currency))}<small>Qty ${r.price.quantity} · original item amount</small></p><ol class="item-timeline" aria-label="Item timeline">${r.timeline.map(e=>`<li class="${e.tone}"><b>${html(e.label)}</b><span>${html(e.text)}</span></li>`).join('')}</ol><dl><dt>Missing marker</dt><dd>${html(r.markedBy)}<small>${html(r.markedAt)}</small></dd><dt>eBay item</dt><dd>${html(r.item||'Not recorded')}</dd><dt>Saved eBay status</dt><dd>${html(r.ebayStatus)}</dd></dl></div></div>
@@ -186,7 +193,7 @@
           <nav class="item-navigation" aria-label="Report navigation"><a href="#customer-directory">↑ Customer directory</a><a href="#customer-${i}">↑ Customer profile</a></nav>
           <div class="item-links"><a href="${html(r.orderUrl)}" target="_blank" rel="noopener">eBay order ↗</a><a href="${html(r.pendingUrl)}" target="_blank" rel="noopener">Pending order ↗</a><a href="${html(r.historyUrl)}" target="_blank" rel="noopener">System record ↗</a><a data-report-receipt="${html(r.id)}" href="${html(buyer.receiptAction(r).href)}" target="_blank" rel="noopener">${html(buyer.receiptAction(r).label)} ↗</a></div>
           ${!r.videoUrl?'<p class="fallback-note">No direct video link is saved. The receipt action opens the eBay order so the item’s Live receipt can be found.</p>':''}</article>`).join('')}</section>`).join('')}
-      <footer class="report-notes"><div class="eyebrow">HOW TO READ THIS REPORT</div><p>${NOTES}</p><p>Missing means explicitly marked not found or an active missing-watch hold. Unreviewed items are not treated as missing. Overdue duration is measured at the report preparation time.</p></footer>`;
+      <footer class="report-notes"><div class="eyebrow">HOW TO READ THIS REPORT</div><p>${NOTES}</p><p>Missing means explicitly marked not found or an active missing-watch hold. Unreviewed items are not treated as missing. Missing duration runs from the current saved missing marker; overdue duration runs from the shipping deadline. Both are measured at report preparation time.</p></footer>`;
   }
   let pdfUrl='',busy=false;
   async function start(){
@@ -207,7 +214,7 @@
     }catch(error){progress('Report could not be completed.');$('error').textContent=error.message||'Please try again.';$('error').hidden=false;}
     finally{busy=false;$('refresh-report').disabled=false;$('report-scope').disabled=false;}
   }
-  const api={loadQueue,selectMissing,deadline,elapsed,timeline,itemNotes,latestNote,directoryUrgency,makeCustomer,makeReport,load,stats,render,start,money,date,NOTICE,NOTES,POLICY_URL};
+  const api={loadQueue,selectMissing,deadline,elapsed,missingAge,timeline,itemNotes,latestNote,directoryUrgency,makeCustomer,makeReport,load,stats,render,start,money,date,NOTICE,NOTES,POLICY_URL};
   root.OGMissingReport=api;if(typeof module!=='undefined')module.exports=api;
   if(typeof document!=='undefined'&&document.body?.dataset.page==='ebay-missing-report'){
     const boot=()=>{document.getElementById('refresh-report').addEventListener('click',start);document.getElementById('report-scope').addEventListener('change',start);start();};

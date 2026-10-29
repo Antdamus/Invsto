@@ -188,3 +188,34 @@ test('all written item notes include saved author and Eastern timestamp, newest 
   const q=queue();q[0].latest_line_note='Saved summary';
   assert.equal(customer(record(),q).rows[0].notes[0].author,'Author not recorded');
 });
+
+
+test('each missing index line retains its own amount and time since its current missing marker',()=>{
+  const data=record();data.lines[1].sold_for=42;data.lines[1].quantity=2;
+  const q=[...queue(),{...data.lines[1],item_search:{is_missing:true,updated_at:'2026-10-29T16:30:00Z',updated_by_email:'second@example.test'}}];
+  const c=customer(data,q),first=c.rows.find(r=>r.id==='a1'),second=c.rows.find(r=>r.id==='a2');
+  assert.equal(first.price.total,100);assert.equal(second.price.total,84);
+  assert.equal(first.missingAge,'21 hours');assert.equal(second.missingAge,'1 hour 30 min');
+  assert.equal(first.deadline.age,'11 hours');assert.equal(second.deadline.age,'11 hours');
+  assert.match(first.timeline.find(e=>e.label==='Marked missing').text,/Marked by: staff@example.test/);
+  assert.match(second.timeline.find(e=>e.label==='Marked missing').text,/Marked by: second@example.test/);
+  const html=report.render(report.makeReport([c],'all',now.toISOString()));
+  const index=html.match(/<nav class="missing-item-index"[\s\S]*?<\/nav>/)[0];
+  for(const expected of ['$100.00','$84.00','21 hours','1 hour 30 min','Overdue: 11 hours','href="#missing-item-a1"','href="#missing-item-a2"'])assert.ok(index.includes(expected),expected);
+});
+
+test('missing watch markers use the recorded creator and keep unknown or future marker times honest',()=>{
+  const q=queue();delete q[0].item_search;
+  q[0].missingWatch={created_at:'2026-10-27T15:00:00Z',created_by_email:'creator@example.test',assignee:'Different task owner'};
+  let row=customer(record(),q).rows[0];
+  assert.equal(row.missingAge,'2 days 3 hours');assert.equal(row.markedBy,'creator@example.test');
+  assert.match(row.timeline.find(e=>e.label==='Marked missing').text,/creator@example.test/);
+  delete q[0].missingWatch.created_by_email;delete q[0].missingWatch.created_at;
+  row=customer(record(),q).rows[0];assert.equal(row.markedBy,'Not recorded');assert.equal(row.missingAge,'Not recorded');
+  assert.equal(row.timeline.some(e=>e.label==='Marked missing'),false);
+  q[0].item_search={is_missing:true,updated_by_email:'<script>bad</script>',updated_at:'2026-10-30T18:00:00Z'};
+  row=customer(record(),q).rows[0];assert.equal(row.missingAge,'Date needs verification');
+  const html=report.render(report.makeReport([customer(record(),q)],'all',now.toISOString()));
+  assert.ok(!html.includes('<script>bad'));assert.match(html,/Marked by: &lt;script&gt;bad/);
+  assert.equal(report.missingAge('not-a-date',now),'Not recorded');
+});

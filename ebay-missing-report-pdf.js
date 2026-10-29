@@ -133,10 +133,18 @@
       await f.ensure(30);await link(f.page,'Open complete buyer report',c.historyUrl,36,f.y);f.y-=34;
       await f.write('MISSING ITEM INDEX',9,1,gold,12);
       for(const [ri,r] of c.rows.entries()){
-        const lines=wrap(`${ri+1}. ${r.title}`,330,9,1),h=Math.max(44,lines.length*13+25);await f.ensure(h);
+        const title=`${ri+1}. ${r.title}`,price=report.money(r.price.total,r.price.currency);
+        const status=r.deadline.level==='overdue'?`Overdue: ${r.deadline.age}`:r.deadline.label;
+        const titleH=wrap(title,250,9,1).length*12.6+wrap(`Order ${r.orderNumber}`,250,8).length*11.2+8;
+        const priceH=20+wrap(price,100,13,1).length*18.2+11.2;
+        const ageH=20+wrap(r.missingAge,135,11,1).length*15.4+wrap(status,135,8,1).length*11.2;
+        const h=Math.max(70,titleH+22,priceH+22,ageH+22);await f.ensure(h);
         rect(f.page,36,f.y-h+13,540,h-4,tint(r.deadline.level));
-        const y=await block(f.page,`${ri+1}. ${r.title}`,48,f.y-2,330,9,1);await text(f.page,`Order ${r.orderNumber}`,48,y-2,8,0,muted);
-        await text(f.page,r.deadline.label,427,f.y-2,10,1,tone(r.deadline.level));
+        const y=await block(f.page,title,48,f.y-2,250,9,1);await block(f.page,`Order ${r.orderNumber}`,48,y-4,250,8,0,muted);
+        await text(f.page,'ORIGINAL ITEM AMOUNT',310,f.y-1,6,1,muted);
+        const priceY=await block(f.page,price,310,f.y-21,100,13,1);await text(f.page,`Qty ${r.price.quantity}`,310,priceY-3,8,0,muted);
+        await text(f.page,'MARKED MISSING FOR',429,f.y-1,7,1,muted);
+        const ageY=await block(f.page,r.missingAge,429,f.y-21,135,11,1);await block(f.page,status,429,ageY-4,135,8,1,tone(r.deadline.level));
         jumps.push({page:f.page,rect:[36,f.y-h+13,576,f.y+9],key:`item:${r.id}`});f.y-=h+5;
       }
       for(const [ri,r] of c.rows.entries()){
@@ -197,7 +205,7 @@
     for(const [title,body] of [
       ['MISSING ITEMS','Only pending item lines explicitly marked not found or attached to an active missing-watch hold appear. Unreviewed items are not assumed missing. Other items in the same buyer package are excluded; grouped order context is shown when saved.'],
       ['CUSTOMER FINANCES',report.NOTES],
-      ['DEADLINES & TIMELINE','The timeline follows the dates available in saved records. Date-only purchases do not imply an exact purchase time. Overdue duration is measured at the report preparation time. A date-only shipping deadline becomes overdue at the start of the next Pacific day; exact eBay timestamps are respected.'],
+      ['DEADLINES & TIMELINE','The timeline follows the dates available in saved records. Date-only purchases do not imply an exact purchase time. Missing duration runs from the current saved missing marker; overdue duration runs from the shipping deadline. Both are measured at report preparation time. A date-only shipping deadline becomes overdue at the start of the next Pacific day; exact eBay timestamps are respected.'],
       ['ITEM EVIDENCE & LINKS','Screenshots are matched to the individual item. If a direct video receipt is not saved, the PDF links to the eBay order to find the Live receipt. Order, system, buyer-report and case links may require sign-in. Customer directory and item index entries are clickable.'],
       ['SHIPPING PRIORITY',report.NOTICE],
     ]){await f.ensure(50);await f.write(title,9,1,gold,7);await f.write(body,10,0,ink,18);}
