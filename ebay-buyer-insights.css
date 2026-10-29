@@ -1,4 +1,5 @@
-.buyer-purchase-report-link {
+a.buyer-purchase-report-link,
+a.buyer-purchase-report-link:visited {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
@@ -12,8 +13,9 @@
   line-height: 1.3;
   text-decoration: none;
 }
-.buyer-purchase-report-link:hover,
-.buyer-purchase-report-link:focus-visible {
+a.buyer-purchase-report-link:hover,
+a.buyer-purchase-report-link:focus-visible {
+  color: #f5d59c;
   background: rgba(245, 213, 156, 0.18);
   outline: 2px solid #f5d59c;
   outline-offset: 2px;
