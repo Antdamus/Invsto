@@ -2,6 +2,7 @@
   'use strict';
   const PAGE_SIZE = 250;
   const TIME_ZONE = 'America/New_York';
+  const refunds = root.OGBuyerRefundReport || (typeof require==='function' ? require('./buyer-report-refunds.js') : null);
   // Review applies to this exact saved file, not to later replacement captures.
   const SCREENSHOT_REVIEWS = {
     'f48b550dab3f994e67745fbe20d485486f37d8dd774dee0efe8c468117d6b8c0':
@@ -77,6 +78,13 @@
     const lines = await chunks(orders.map(order => order.id), ids => paged(() => client.from('ebay_order_lines')
       .select('id,order_id,item_number,transaction_id,item_title,quantity,sold_for,line_status,raw_payload')
       .in('order_id', ids).order('id')));
+    progress('Loading refund requests and completed refund records...');
+    const caseSelect='id,order_id,order_number,buyer_username,ebay_return_id,source_lane,issue_kind,status,ebay_status,opened_at,received_at,closed_at,return_reason,synced_at,raw_payload,ebay_return_items(order_line_id),ebay_return_tasks(order_line_ids)';
+    const [orderCases,buyerCases]=await Promise.all([
+      chunks(orders.map(order=>order.id),ids=>paged(()=>client.from('ebay_return_cases').select(caseSelect).in('order_id',ids).order('id'))),
+      paged(()=>client.from('ebay_return_cases').select(caseSelect).ilike('buyer_username',exactPattern(buyer)).order('id')),
+    ]);
+    const returnCases=unique([...orderCases,...buyerCases.filter(c=>cleanBuyer(c.buyer_username).toLowerCase()===cleanBuyer(buyer).toLowerCase())]);
     progress(`Found ${orders.length} orders. Loading saved item screenshots...`);
     const taskSelect = 'id,order_id,order_line_ids';
     const [byOrder, byLine, adminEvents] = await Promise.all([
@@ -88,7 +96,7 @@
     const tasks = unique([...byOrder, ...byLine]), taskById = new Map(tasks.map(task => [task.id, task]));
     const events = await chunks(tasks.map(task => task.id), ids => paged(() => client.from('ebay_order_task_events')
       .select('id,task_id,payload,photo_attachments,created_at').in('task_id', ids).order('id')));
-    return {orders, lines, adminEvents, events: [...adminEvents, ...events.map(event => {
+    return {orders, lines, returnCases, adminEvents, events: [...adminEvents, ...events.map(event => {
       const task = taskById.get(event.task_id) || {};
       return {...event, order_line_ids: task.order_line_ids?.length ? task.order_line_ids : lines.filter(line => line.order_id === task.order_id).map(line => line.id)};
     })]};
@@ -172,6 +180,7 @@
     }));
   }
   function buildRows(records, baseUrl) {
+    const financial=refunds.model(records);
     const orderById = new Map(records.orders.map(order => [order.id, order]));
     const lineById = new Map(records.lines.map(line => [line.id, line]));
     return records.lines.filter(line => orderById.has(line.order_id)).map(line => {
@@ -187,7 +196,7 @@
       historyUrl.searchParams.set('focusLineId', line.id);
       return {id: line.id, orderId: order.id, orderNumber: order.order_number, title: line.item_title || 'Untitled item',
         item: line.item_number || '', transactionId:line.transaction_id || '', price: itemPrice(line), date: purchaseDate(order), sortDate: order.sale_date || '',
-        status: line.line_status || order.status || 'Not recorded', photos, groups,
+        status: line.line_status || order.status || 'Not recorded', photos, groups, refund:refunds.forLine(financial,line,baseUrl),
         orderUrl: `https://www.ebay.com/mesh/ord/details?orderid=${encodeURIComponent(order.order_number)}`,
         historyUrl: historyUrl.href, videoUrl: savedReceiptUrl(line,order,photos,records.events), image: null,
         review: '', imageStatus: photos.length ? 'Loading saved screenshot...' : 'No saved item screenshot'};
@@ -245,20 +254,32 @@
     await Promise.all(Array.from({length: Math.min(3, rows.length)}, worker));
   }
   function reportNotes() {
-    return 'All saved orders for this exact buyer, including pending and closed orders. Item amounts exclude shipping and tax and are before refunds; they are not the current balance. Times use America/New_York. Screenshots are saved evidence, not an automatic visual verification; on-screen bids may differ from final purchase prices.';
+    return 'All saved orders for this exact buyer, including pending and closed orders. Net spent is saved order totals minus confirmed buyer refunds, counted once per order. Order totals include recorded shipping and taxes; item prices below exclude them and stay at the original purchase price. Pending requests and failed refunds are not deducted. A closed case is not proof of a refund. Missing or inconsistent refund amounts leave net spent unconfirmed. Based on saved eBay records, not a live balance. Times use America/New_York. Screenshots are saved evidence; on-screen bids may differ from final purchase prices.';
+  }
+  function renderRefund(row) {
+    const f=row.refund;if(!f)return '';
+    const details=refunds.detailLines(f);
+    return `<section class="refund-detail ${f.unknown?'needs-check':''}" aria-label="Refund status"><strong>${html(details[0])}</strong>${details.slice(1).map(text=>`<p>${html(text)}</p>`).join('')}
+      ${f.requests.map(r=>`<a href="${html(r.url)}" target="_blank" rel="noopener">Review case ${html(r.caseNumber)}</a>`).join(' ')}</section>`;
   }
   function renderReport(buyer, records, rows) {
+    const financial=refunds.model(records);
     const missingOrders = records.orders.filter(order => !rows.some(row => row.orderId === order.id));
     return `<div class="stats"><div><small>ORDERS / ITEM LINES</small><strong>${records.orders.length} / ${rows.length}</strong></div>
-      <div><small>ITEM AMOUNTS</small><strong>${html(totalsFor(rows))}</strong></div>
+      <div><small>PURCHASES BEFORE REFUNDS</small><strong>${html(refunds.totalText(financial,'gross'))}</strong></div>
+      <div><small>COMPLETED REFUNDS</small><strong>${html(refunds.totalText(financial,'refunds'))}</strong></div>
+      <div><small>NET SPENT AFTER REFUNDS</small><strong>${html(refunds.totalText(financial,'net'))}</strong></div>
       <div><small>SAVED SCREENSHOTS</small><strong>${rows.filter(row=>row.image).length} of ${rows.length}</strong></div></div>
       <p class="notes">${html(reportNotes())}</p>
+      <p>${financial.refundedOrders} orders with confirmed refund amounts / ${financial.requestedOrders} orders with open requests or pending refunds / ${financial.unverifiedOrders} orders with refund amounts needing verification.</p>
+      ${financial.unmatched.length?`<p class="warning">${financial.unmatched.length} buyer cases could not be matched to a saved order; totals need review: ${html(financial.unmatched.map(c=>`${c.order_number || 'Order unknown'} (case ${c.ebay_return_id || c.id})`).join(', '))}.</p>`:''}
       ${rows.some(row=>row.price.total == null) ? '<p class="warning">Some original item prices are unavailable and excluded from totals.</p>' : ''}
       ${missingOrders.length ? `<p class="warning">No item details were saved for orders: ${html(missingOrders.map(order=>order.order_number).join(', '))}.</p>` : ''}
       ${rows.map((row,index)=>`<article class="purchase">
         <div class="purchase-head"><span>${index+1} / ORDER ${html(row.orderNumber)}</span><span>System: ${html(row.status)}</span></div>
         ${row.review ? `<p class="warning">${html(row.review)}</p>` : ''}
         ${row.groups.map(group=>`<p class="caption">${html(group)}</p>`).join('')}
+        ${renderRefund(row)}
         <div class="purchase-body"><div>${row.image ? `<img src="${row.image.crop}" alt="Saved screenshot for ${html(row.title)}" /><p class="caption">${row.image.cropped ? 'Enlarged video area from saved screenshot' : 'Full saved screenshot'} - verify against the item title.</p>` : `<div class="no-image">${html(row.imageStatus)}</div>`}</div>
           <div><span class="eyebrow">ORIGINAL ITEM TITLE</span><h2>${html(row.title)}</h2>
           <p class="price">${html(money(row.price.total,row.price.currency))}</p><p class="muted">Item amount (${html(row.price.currency)}) / Qty ${row.price.quantity}${row.price.quantity>1 && row.price.total!=null ? ` / ${html(money(row.price.total/row.price.quantity,row.price.currency))} each` : ''}</p>
@@ -269,6 +290,7 @@
       </article>`).join('')}`;
   }
   async function buildPdf(buyer, records, rows, progress = () => {}) {
+    const financial=refunds.model(records);
     const {PDFDocument, StandardFonts, rgb, PDFName, PDFString} = root.PDFLib;
     const pdf = await PDFDocument.create();
     const regular = await pdf.embedFont(StandardFonts.Helvetica), bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -328,22 +350,26 @@
       page.drawImage(image,{x:x+(w-image.width*scale)/2,y:y+(h-image.height*scale)/2,width:image.width*scale,height:image.height*scale});
     }
     let page=await pageHeader('Purchase overview'), y=678;
-    y=await paragraph(page,`${records.orders.length} orders / ${rows.length} item lines / ${totalsFor(rows)} in item amounts`,36,y,540,14,true);
+    y=await paragraph(page,`${records.orders.length} orders / ${rows.length} item lines`,36,y,540,14,true);
+    for(const [label,key] of [['Purchases before refunds','gross'],['Completed refunds','refunds'],['Net spent after refunds','net']])y=await paragraph(page,`${label}: ${refunds.totalText(financial,key)}`,36,y-5,540,13,true);
+    y=await paragraph(page,`${financial.refundedOrders} orders with confirmed refund amounts / ${financial.requestedOrders} with open requests or pending refunds / ${financial.unverifiedOrders} with refund amounts needing verification.`,36,y-8,540,9);
     y=await paragraph(page,`${rows.filter(row=>row.image).length} of ${rows.length} items have a loaded screenshot.`,36,y-8,540,10);
     y=await paragraph(page,reportNotes(),36,y-12,540,9,false,muted);
     const missingOrders=records.orders.filter(order=>!rows.some(row=>row.orderId===order.id));
     const warnings=[rows.some(row=>row.price.total==null)?'Unavailable item prices are excluded from totals.':'',
       missingOrders.length?`No saved item details for orders: ${missingOrders.map(order=>order.order_number).join(', ')}.`:'',
       rows.some(row=>row.review)?'Screenshot review warnings appear beside the affected items.':''].filter(Boolean);
+    if(financial.unmatched.length)warnings.push(`Unmatched buyer cases require review: ${financial.unmatched.map(c=>`${c.order_number || 'Order unknown'} (case ${c.ebay_return_id || c.id})`).join(', ')}`);
     for(const warning of warnings)y=await paragraph(page,warning,36,y-7,540,9,true,gold);
     y-=24;
     for(let i=0;i<rows.length;i++){
-      if(y<85){page=await pageHeader('Purchase overview / continued');y=678;}
+      if(y<110){page=await pageHeader('Purchase overview / continued');y=678;}
       const row=rows[i];
       await lineText(page,`${i+1}. ${row.orderNumber}`,36,y,9,true);
       await lineText(page,money(row.price.total,row.price.currency),448,y,10,true);
       const overviewTitle=row.title.length>75?`${row.title.slice(0,72)}...`:row.title;
-      await lineText(page,overviewTitle,36,y-13,8,false,muted);y-=30;
+      await lineText(page,overviewTitle,36,y-13,8,false,muted);
+      await lineText(page,row.refund?.label || 'Refund status not recorded',36,y-26,8,false,gold);y-=44;
     }
     for(let i=0;i<rows.length;i++){
       const row=rows[i];progress(`Building PDF: ${i+1} of ${rows.length} items...`);
@@ -356,6 +382,15 @@
       y=await paragraph(page,`${row.price.source}. Item amount excludes shipping and tax.`,36,y,540,8,false,muted);
       if(row.review)y=await paragraph(page,row.review,36,y-6,540,9,true,gold);
       for(const group of row.groups)y=await paragraph(page,group,36,y-5,540,8,false,muted);
+      for(const [index,text] of refunds.detailLines(row.refund).entries()){
+        // Refund histories can span pages; never draw below the footer.
+        if(y<160){page=await pageHeader(`Order ${row.orderNumber} / refund details`);y=678;}
+        y=await paragraph(page,text,36,y-6,540,index===0?11:9,index===0,index===0?gold:ink);
+      }
+      for(const request of row.refund?.requests || []){
+        if(y<130){page=await pageHeader(`Order ${row.orderNumber} / refund details`);y=678;}
+        link(page,`Review case ${request.caseNumber}`,request.url,36,y-8);y-=28;
+      }
       // Long titles and grouped-order notes flow to another page instead of overlapping the image.
       if(y<370){page=await pageHeader(`Order ${row.orderNumber} / screenshots`);y=680;}
       const imageHeight=Math.min(350,y-(row.videoUrl?125:145)), imageBottom=y-12-imageHeight;
