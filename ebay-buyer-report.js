@@ -271,11 +271,12 @@
       <div><small>NET SPENT AFTER REFUNDS</small><strong>${html(refunds.totalText(financial,'net'))}</strong></div>
       <div><small>SAVED SCREENSHOTS</small><strong>${rows.filter(row=>row.image).length} of ${rows.length}</strong></div></div>
       <p class="notes">${html(reportNotes())}</p>
+      <p class="refund-legend">Rose background marks an item with a confirmed full or partial refund.</p>
       <p>${financial.refundedOrders} orders with confirmed refund amounts / ${financial.requestedOrders} orders with open requests or pending refunds / ${financial.unverifiedOrders} orders with refund amounts needing verification.</p>
       ${financial.unmatched.length?`<p class="warning">${financial.unmatched.length} buyer cases could not be matched to a saved order; totals need review: ${html(financial.unmatched.map(c=>`${c.order_number || 'Order unknown'} (case ${c.ebay_return_id || c.id})`).join(', '))}.</p>`:''}
       ${rows.some(row=>row.price.total == null) ? '<p class="warning">Some original item prices are unavailable and excluded from totals.</p>' : ''}
       ${missingOrders.length ? `<p class="warning">No item details were saved for orders: ${html(missingOrders.map(order=>order.order_number).join(', '))}.</p>` : ''}
-      ${rows.map((row,index)=>`<article class="purchase">
+      ${rows.map((row,index)=>`<article class="purchase${row.refund?.itemRefundConfirmed?' is-refunded':''}">
         <div class="purchase-head"><span>${index+1} / ORDER ${html(row.orderNumber)}</span><span>System: ${html(row.status)}</span></div>
         ${row.review ? `<p class="warning">${html(row.review)}</p>` : ''}
         ${row.groups.map(group=>`<p class="caption">${html(group)}</p>`).join('')}
@@ -331,9 +332,13 @@
       if(line) {await lineText(page,line.trimEnd(),x,y,size,heavy,color);y-=size*1.4;}
       return y;
     }
-    async function pageHeader(subtitle) {
+    async function pageHeader(subtitle, refunded=false) {
       const page=pdf.addPage([612,792]);
-      page.drawRectangle({x:0,y:0,width:612,height:792,color:rgb(.96,.97,.98)});
+      page.drawRectangle({x:0,y:0,width:612,height:792,color:refunded?rgb(1,.945,.945):rgb(.96,.97,.98)});
+      if(refunded){
+        page.drawRectangle({x:0,y:784,width:612,height:8,color:rgb(.61,.23,.27)});
+        await lineText(page,'REFUNDED ITEM | Full or partial refund confirmed',36,698,9,true,rgb(.54,.16,.20));
+      }
       await lineText(page,'OG JEWELERS',36,754,10,true,gold);
       await lineText(page,`Prepared ${prepared}`,400,754,8,false,muted);
       await paragraph(page,`${buyer} / ${subtitle}`,36,726,540,18,true);
@@ -355,6 +360,7 @@
     y=await paragraph(page,`${financial.refundedOrders} orders with confirmed refund amounts / ${financial.requestedOrders} with open requests or pending refunds / ${financial.unverifiedOrders} with refund amounts needing verification.`,36,y-8,540,9);
     y=await paragraph(page,`${rows.filter(row=>row.image).length} of ${rows.length} items have a loaded screenshot.`,36,y-8,540,10);
     y=await paragraph(page,reportNotes(),36,y-12,540,9,false,muted);
+    y=await paragraph(page,'Rose background marks an item with a confirmed full or partial refund.',36,y-8,540,9,true,rgb(.54,.16,.20));
     const missingOrders=records.orders.filter(order=>!rows.some(row=>row.orderId===order.id));
     const warnings=[rows.some(row=>row.price.total==null)?'Unavailable item prices are excluded from totals.':'',
       missingOrders.length?`No saved item details for orders: ${missingOrders.map(order=>order.order_number).join(', ')}.`:'',
@@ -365,6 +371,7 @@
     for(let i=0;i<rows.length;i++){
       if(y<110){page=await pageHeader('Purchase overview / continued');y=678;}
       const row=rows[i];
+      if(row.refund?.itemRefundConfirmed)page.drawRectangle({x:30,y:y-33,width:552,height:43,color:rgb(1,.91,.91)});
       await lineText(page,`${i+1}. ${row.orderNumber}`,36,y,9,true);
       await lineText(page,money(row.price.total,row.price.currency),448,y,10,true);
       const overviewTitle=row.title.length>75?`${row.title.slice(0,72)}...`:row.title;
@@ -373,7 +380,7 @@
     }
     for(let i=0;i<rows.length;i++){
       const row=rows[i];progress(`Building PDF: ${i+1} of ${rows.length} items...`);
-      page=await pageHeader(`Purchase ${i+1} of ${rows.length}`);
+      page=await pageHeader(`Purchase ${i+1} of ${rows.length}`,row.refund?.itemRefundConfirmed);
       await lineText(page,`ORDER ${row.orderNumber}`,36,675,12,true);
       await lineText(page,`System: ${row.status}`,400,675,9,false,muted);
       y=await paragraph(page,row.title,36,646,540,15,true);
@@ -384,15 +391,15 @@
       for(const group of row.groups)y=await paragraph(page,group,36,y-5,540,8,false,muted);
       for(const [index,text] of refunds.detailLines(row.refund).entries()){
         // Refund histories can span pages; never draw below the footer.
-        if(y<160){page=await pageHeader(`Order ${row.orderNumber} / refund details`);y=678;}
+        if(y<160){page=await pageHeader(`Order ${row.orderNumber} / refund details`,row.refund?.itemRefundConfirmed);y=678;}
         y=await paragraph(page,text,36,y-6,540,index===0?11:9,index===0,index===0?gold:ink);
       }
       for(const request of row.refund?.requests || []){
-        if(y<130){page=await pageHeader(`Order ${row.orderNumber} / refund details`);y=678;}
+        if(y<130){page=await pageHeader(`Order ${row.orderNumber} / refund details`,row.refund?.itemRefundConfirmed);y=678;}
         link(page,`Review case ${request.caseNumber}`,request.url,36,y-8);y-=28;
       }
       // Long titles and grouped-order notes flow to another page instead of overlapping the image.
-      if(y<370){page=await pageHeader(`Order ${row.orderNumber} / screenshots`);y=680;}
+      if(y<370){page=await pageHeader(`Order ${row.orderNumber} / screenshots`,row.refund?.itemRefundConfirmed);y=680;}
       const imageHeight=Math.min(350,y-(row.videoUrl?125:145)), imageBottom=y-12-imageHeight;
       if(row.image){
         if(row.image.cropped){

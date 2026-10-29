@@ -34,4 +34,8 @@ p { margin: 10px 0; }
 .refund-detail strong { font-size: 15px; }
 .refund-detail a { display: inline-block; margin: 8px 16px 0 0; }
 .refund-detail.needs-check { background: #fff1d7; border-color: #9b6a20; }
+.purchase.is-refunded { background: #fff1f1; border-color: #ddb1b5; }
+.purchase.is-refunded .refund-detail { background: #ffe4e5; border-color: #9c3b45; }
+.purchase.is-refunded .refund-detail strong, .refund-legend { color: #8a2933; }
+.refund-legend { border-left: 6px solid #d3949b; padding: 8px 14px; background: #fff1f1; font-size: 13px; }
 @media(max-width: 680px) { .purchase-body { grid-template-columns: 1fr; } .toolbar { align-items: flex-start; font-size: 13px; } .purchase { padding: 18px; } }

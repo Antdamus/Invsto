@@ -115,7 +115,9 @@
     const requests=order.requests.filter(r=>!r.lineIds.length || r.lineIds.includes(line.id)).map(r=>({ ...r,
       scope:r.lineIds.includes(line.id)?'Matched to this item':'Order-level case; affected item not confirmed',
       url:new URL(`ebay-returns.html?caseId=${encodeURIComponent(r.id)}`,baseUrl).href}));
-    return {...order,requests};
+    const itemRefundConfirmed=requests.some(r=>r.lineIds.includes(line.id) && r.state==='completed' && r.cents>0 && r.currency===order.gross.currency)
+      || (!order.unknown && order.refundCents>0 && (order.lines.length===1 || order.netCents===0));
+    return {...order,requests,itemRefundConfirmed};
   }
   function totalText(financial,key) {
     return financial.totals.map(t=>key==='net' && t.net==null?'Not confirmed':`${formatted(t[key],t.currency)}${key==='refunds'&&t.unknown?' confirmed; more unverified':''}`).join(' + ') || 'Not recorded';

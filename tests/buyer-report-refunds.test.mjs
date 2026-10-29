@@ -79,3 +79,13 @@ test('a refund-record read failure cannot produce a clean zero-refund report',as
     async range(){return table==='ebay_return_cases'?{error:{message:'Refund records unavailable'}}:{data:[]};}};return q;}};
   await assert.rejects(()=>report.loadRecords(client,'buyer'),/Refund records unavailable/);
 });
+test('refunded-item highlighting does not mark an unrelated sibling or a pending request',()=>{
+  const c=request();c.raw_payload.ebayDetail.refundInfo.actualRefundDetail.actualRefund.totalAmount.value=25;
+  const data=records(undefined,[c],[line(),line('lb')]), f=refunds.model(data);
+  assert.equal(refunds.forLine(f,line(),'https://example.test').itemRefundConfirmed,true);
+  assert.equal(refunds.forLine(f,line('lb'),'https://example.test').itemRefundConfirmed,false);
+  const pending=records(undefined,[request({status:'open',ebay_status:'RETURN_REQUESTED',raw_payload:{}})]);
+  assert.equal(refunds.forLine(refunds.model(pending),line(),'https://example.test').itemRefundConfirmed,false);
+  const rendered=report.renderReport('buyer',data,report.buildRows(data,'https://example.test'));
+  assert.equal((rendered.match(/class="purchase is-refunded"/g)||[]).length,1);
+});
