@@ -111,6 +111,7 @@
   function render() {
     if(!api)return;
     const c=linked()?data.connection:null;
+    const reportLink=$('ebay-live-report');if(reportLink){reportLink.hidden=!c;reportLink.href='live-sales-report.html?session='+encodeURIComponent(session()||'');}
     window.liveListingIntake?.sync(c);
     const showSelect=$('ebay-show-select');
     if(document.activeElement!==showSelect){
@@ -313,7 +314,7 @@
     window.liveBagPrintBridge?.install(api,newestAuctions,eventId=>linked()&&!sessionError&&Date.now()-lastRead<5000&&data.connection.event_id===eventId?data:null);
     const section=document.createElement('section');section.className='live-panel ebay-live-panel';section.id='ebay-live-panel';
     section.innerHTML=`
-      <div class="panel-head"><div><span class="eyebrow">eBay Live</span><h2 id="ebay-phase-heading">Paid auctions</h2></div><button type="button" id="ebay-live-refresh" class="secondary-btn">Refresh</button></div>
+      <div class="panel-head"><div><span class="eyebrow">eBay Live</span><h2 id="ebay-phase-heading">Paid auctions</h2></div><div class="hero-actions"><a id="ebay-live-report" class="secondary-btn" target="_blank" rel="noopener" hidden>Live report</a><button type="button" id="ebay-live-refresh" class="secondary-btn">Refresh</button></div></div>
       <label id="ebay-show-selector">Current show<select id="ebay-show-select"></select></label>
       <p id="ebay-live-message" role="status"></p>
       <div id="ebay-live-setup"><p id="ebay-live-session-hint"></p><label>Connect the selected show to eBay<input id="ebay-live-url" type="url" placeholder="Paste the Stream Manager event URL"></label><button id="ebay-link" type="button">Connect selected show</button></div>
