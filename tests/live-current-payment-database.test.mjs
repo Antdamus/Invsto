@@ -32,6 +32,7 @@ before(async()=>{
  await db.exec(await read('20261007170000_ebay_live_paid_retry.sql'));
  await db.exec(await read('20261007173000_ebay_live_paid_retry_badges.sql'));
  await db.exec(await read('20261009030000_ebay_live_current_payment.sql'));
+ await db.exec(await read('20261029223000_live_unknown_payment_preserves_evidence.sql'));
  day=(await db.query("select to_char(now()-interval '1 day','YYYY-MM-DD') as day")).rows[0].day;
 });
 beforeEach(async()=>{await db.exec(`truncate ebay_live_listing_payments,ebay_live_audit,ebay_live_observations,ebay_live_attempts,ebay_live_connections,live_sale_sessions,live_sale_lots,ebay_order_lines,ebay_orders cascade;
@@ -60,14 +61,50 @@ test('Paid → failed → Paid uses the current snapshot, and delayed old eviden
  await ingest([obs('paid',{observed_at:day+'T12:02:00Z'})]);assert.equal((await rows())[0].payment_state,'paid');
  await ingest([obs('failed',{source:'listing',key:'old-failed',observed_at:day+'T12:00:30Z'})]);assert.equal((await rows())[0].payment_state,'paid');
  assert.equal((await rows())[0].id,id);
- await ingest([obs('unknown',{source:'listing',key:'no-paid',payment_snapshot:true,evidence:'AUC',observed_at:day+'T12:03:00Z'})]);assert.equal((await rows())[0].payment_state,'waiting');
- assert.equal((await db.query('select ebay_live_recovery_status($1) r',[event])).rows[0].r.paid_total,0);
+ await ingest([obs('unknown',{source:'listing',key:'no-paid',payment_snapshot:true,evidence:'AUC',observed_at:day+'T12:03:00Z'})]);assert.equal((await rows())[0].payment_state,'paid');
+ assert.equal((await db.query('select ebay_live_recovery_status($1) r',[event])).rows[0].r.paid_total,3000);
 });
 test('an existing bag is preserved when a later win is merged; no inventory or extra bag is created',async()=>{
  await ingest([obs('failed')]);const a=(await rows())[0];
  await db.exec(`insert into live_sale_lots values('${sid}');update ebay_live_attempts set lot_id='${sid}' where id='${a.id}'`);
  await ingest([obs('won'),obs('paid')]);const after=await rows();assert.equal(after.length,1);assert.equal(after[0].id,a.id);assert.equal(after[0].lot_id,sid);assert.equal(after[0].win_key,'won');
  assert.equal((await db.query('select count(*)::int n from live_sale_lots')).rows[0].n,1);
+});
+
+test('unread cards do not erase paid evidence needed to reject delayed historical failures',async()=>{
+ await ingest([obs('paid',{observed_at:day+'T13:00:00Z'})]);
+ await ingest([obs('unknown',{source:'listing',key:'unread',payment_snapshot:true,observed_at:day+'T14:00:00Z'})]);
+ await ingest([obs('failed',{observed_at:day+'T12:00:00Z'})]);
+ assert.equal((await rows())[0].payment_state,'paid');
+ assert.equal((await db.query('select kind from ebay_live_listing_payments')).rows[0].kind,'paid');
+ // A genuinely newer explicit failed badge still supersedes the payment.
+ await ingest([obs('failed',{source:'listing',key:'new-failure',observed_at:day+'T15:00:00Z'})]);
+ assert.equal((await rows())[0].payment_state,'failed');
+});
+
+test('an unread listing badge preserves every explicit payment state and operator decision',async()=>{
+ await ingest([obs('won')]);const id=(await rows())[0].id;
+ for(const state of ['paid','failed','cancelled','review','waiting']){
+  await db.query("update ebay_live_attempts set payment_state=$1,payment_source='order_import',review_note='Retain evidence' where id=$2",[state,id]);
+  await ingest([obs('unknown',{source:'listing',key:'unread-'+state,payment_snapshot:true,evidence:'',observed_at:day+'T14:00:00Z'})]);
+  const a=(await rows())[0];assert.equal(a.payment_state,state);assert.equal(a.payment_source,'order_import');assert.equal(a.review_note,'Retain evidence');
+ }
+ assert.equal((await db.query("select count(*)::int n from ebay_live_observations where kind='unknown' and disposition<>'matched'")).rows[0].n,0);
+});
+
+test('reconciliation can restore an imported paid order without an unread card reverting it',async()=>{
+ await ingest([obs('won'),obs('unknown',{source:'listing',key:'unread',payment_snapshot:true,evidence:''})]);
+ assert.equal((await rows())[0].payment_state,'waiting');
+ await db.exec("create or replace function reconcile_ebay_live_orders_before_current_payment(text) returns void language plpgsql as $$begin update public.ebay_live_attempts set payment_state='paid',payment_source='order_import' where event_id=$1;end$$");
+ try{
+  await db.query('select reconcile_ebay_live_orders_internal($1)',[event]);
+  assert.equal((await rows())[0].payment_state,'paid');
+  await ingest([obs('unknown',{source:'listing',key:'unread-later',payment_snapshot:true,evidence:'AUC',observed_at:day+'T14:00:00Z'})]);
+  assert.equal((await rows())[0].payment_state,'paid');
+  assert.equal((await rows()).length,1);
+ }finally{
+  await db.exec('create or replace function reconcile_ebay_live_orders_before_current_payment(text) returns void language plpgsql as $$begin return;end$$');
+ }
 });
 test('different buyers do not merge and a cancelled card removes the prior winner from paid totals',async()=>{
  await ingest([obs('failed'),obs('won'),obs('paid',{buyer:'another-buyer'})]);let a=await rows();
