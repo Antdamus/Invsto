@@ -22,7 +22,7 @@
  $('item-pricing-mode').addEventListener('change',sync);
  $('title').addEventListener('input',sync);
  document.addEventListener('add-item-form:reset',()=>{shared.checked=true;sync();});
- window.addItemMaterialCosts={sync,restore(main){shared.checked=main?.sharedMaterialRate??!Boolean(main?.pricePerWeight||main?.cost);if(!shared.checked)delete price.dataset.sharedMaterialKey;},fields(){
+ window.addItemMaterialCosts={sync,restore(main){shared.checked=main?.sharedMaterialRate??!Boolean(main?.pricePerWeight||main?.cost);if(!shared.checked)manual();else queueMicrotask(sync);},fields(){
    const eligible=!window.addItemPricing?.deferred()&&!window.addItemWizard?.usesDirectPricing()&&shared.checked&&$('auto-cost-checkbox').checked&&price.dataset.sharedMaterialKey;
    return {material_cost_key:eligible||null,material_cost_manual:!eligible&&!window.addItemPricing?.deferred()};
  }};
