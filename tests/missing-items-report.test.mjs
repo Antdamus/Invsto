@@ -190,7 +190,7 @@ test('all written item notes include saved author and Eastern timestamp, newest 
 });
 
 
-test('each missing index line retains its own amount and time since its current missing marker',()=>{
+test('each missing index line prioritizes overdue duration and price, keeping marking details in the timeline',()=>{
   const data=record();data.lines[1].sold_for=42;data.lines[1].quantity=2;
   const q=[...queue(),{...data.lines[1],item_search:{is_missing:true,updated_at:'2026-10-29T16:30:00Z',updated_by_email:'second@example.test'}}];
   const c=customer(data,q),first=c.rows.find(r=>r.id==='a1'),second=c.rows.find(r=>r.id==='a2');
@@ -201,7 +201,11 @@ test('each missing index line retains its own amount and time since its current 
   assert.match(second.timeline.find(e=>e.label==='Marked missing').text,/Marked by: second@example.test/);
   const html=report.render(report.makeReport([c],'all',now.toISOString()));
   const index=html.match(/<nav class="missing-item-index"[\s\S]*?<\/nav>/)[0];
-  for(const expected of ['$100.00','$84.00','21 hours','1 hour 30 min','Overdue: 11 hours','href="#missing-item-a1"','href="#missing-item-a2"'])assert.ok(index.includes(expected),expected);
+  for(const expected of ['$100.00','$84.00','Overdue for','11 hours','href="#missing-item-a1"','href="#missing-item-a2"'])assert.ok(index.includes(expected),expected);
+  for(const hidden of ['Marked missing for','21 hours','1 hour 30 min'])assert.ok(!index.includes(hidden));
+  first.deadline=report.deadline({ship_by_date:'2026-10-30T06:59:59Z'},now);
+  const current=report.render(report.makeReport([c],'all',now.toISOString())).match(/<nav class="missing-item-index"[\s\S]*?<\/nav>/)[0];
+  assert.match(current,/Shipping status/);assert.match(current,/Due today/);
 });
 
 test('missing watch markers use the recorded creator and keep unknown or future marker times honest',()=>{
