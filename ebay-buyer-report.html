@@ -4,17 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Buyer purchase report | OG Jewelers</title>
-  <link rel="stylesheet" href="ebay-buyer-report.css?v=20261029-refund-colors" />
+  <link rel="stylesheet" href="ebay-missing-report.css?v=20261029-overdue-index" />
+  <link rel="stylesheet" href="ebay-customer-report.css?v=20261029-collection" />
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
 </head>
-<body data-page="ebay-buyer-report">
+<body data-page="ebay-customer-report">
   <header class="toolbar">
     <a id="history-link" href="ebay-order-history.html">Back to order history</a>
-    <div><button id="retry" type="button" hidden>Try again</button><a id="download" class="primary" hidden>Download PDF</a></div>
+    <div class="report-controls"><label for="report-scope">Report edition</label><select id="report-scope"><option value="all">Full history</option><option value="pending">Pending items only</option></select><button id="retry" type="button">Refresh report</button><a id="download" class="primary" hidden>Download PDF</a></div>
   </header>
   <main>
-    <span class="eyebrow">OG JEWELERS / PURCHASE REVIEW</span>
-    <h1 id="buyer-title">Buyer purchase report</h1>
     <p id="progress" role="status" aria-live="polite">Loading purchase history...</p>
     <p id="error" role="alert" hidden></p>
     <a id="sign-in" href="index.html" hidden>Sign in to your system, then return to this report.</a>
@@ -25,6 +24,9 @@
   <script src="vendor/pdf-lib/pdf-lib.min.js?v=1.17.1"></script>
   <script src="video-receipts.js?v=20261002-desktop-capture"></script>
   <script src="buyer-report-refunds.js?v=20261029-timing"></script>
-  <script src="ebay-buyer-report.js?v=20261029-note-authors"></script>
+  <script src="ebay-buyer-report.js?v=20261029-label-fields"></script>
+  <script src="ebay-missing-report.js?v=20261029-overdue-index"></script>
+  <script src="ebay-customer-report-pdf.js?v=20261029-collection"></script>
+  <script src="ebay-customer-report.js?v=20261029-collection"></script>
 </body>
 </html>

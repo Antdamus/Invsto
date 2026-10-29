@@ -72,7 +72,7 @@
     if (!cleanBuyer(buyer)) throw new Error('Choose a buyer from Pending Orders or Order History.');
     progress('Loading all saved orders for this buyer...');
     const orders = (await paged(() => client.from('ebay_orders')
-      .select('id,order_number,buyer_username,buyer_name,sale_date,ship_by_date,status,shipped_on_date,shipping_and_handling,total_price,label_metadata,raw_payload')
+      .select('id,order_number,buyer_username,buyer_name,sale_date,ship_by_date,status,shipped_on_date,shipping_and_handling,total_price,label_file_path,label_uploaded_at,label_status,label_metadata,raw_payload')
       .ilike('buyer_username', exactPattern(buyer)).order('id')))
       .filter(order => cleanBuyer(order.buyer_username).toLowerCase() === cleanBuyer(buyer).toLowerCase());
     const lines = await chunks(orders.map(order => order.id), ids => paged(() => client.from('ebay_order_lines')
