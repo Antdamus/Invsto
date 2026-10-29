@@ -9,10 +9,37 @@ test('title parser uses explicit purity or the requested 10K assumption',()=>{
   assert.equal(M.costFor({listing_title:'Gold 5gr'}, {},settings).base,15000);
 });
 test('ambiguous, plated, missing and invalid title information never becomes a zero cost',()=>{
-  for(const title of ['Watch','Gold ring','10g bracelet','Gold 5-10g','Gold 5 to 10g','Gold 5,5g','Gold 1/2 grams','Gold 5g silver 3g','Gold plated 5g','Gold colored 5g','Gold filled 5g','14k 18k 5g','30k gold 5g','Gold 5g + 2g','Gold 5g + 5g','Gold -5g','Gold .5g']){
+  for(const title of ['Watch','Gold ring','Gold 5-10g','Gold 5 to 10g','Gold 5,5g','Gold 1/2 grams','Gold 5g silver 3g','Gold plated 5g','Gold colored 5g','Gold filled 5g','14k 18k 5g','30k gold 5g','Gold 5g + 2g','Gold 5g + 5g','Gold -5g','Gold .5g']){
     assert.equal(M.costFor({listing_title:title},{},settings).base,null,title);
   }
   assert.equal(M.costFor({listing_title:'18k gold 2g'},{},settings).base,null);
+});
+
+test('a clear gram weight without a material defaults to labeled sterling silver 925',()=>{
+  for(const title of ['10g bracelet','10 grams','JEWELRY ITEM 10 GRAMS - AS SEEN ON SCREEN','10gr chain','10 grs pendant']){
+    const cost=M.costFor({listing_title:title},{},{rates:{silver:5.8,gold_10:78}});
+    assert.equal(cost.base,5800,title);assert.equal(cost.parsed.material,'silver');assert.equal(cost.parsed.purity,925);
+    assert.equal(cost.parsed.assumption,'Silver 925 assumed');assert.match(cost.source,/sterling silver 925 \(Silver 925 assumed\)/);
+    assert.match(cost.parsed.note,/material is not specified/);
+  }
+  const title='#008 - JEWELRY ITEM 4 Grams 24inches Diamond Cut Chain- AS SEEN ON SCREEN';
+  const payload={attempts:[{id:'weight',buyer:'a',listing_title:title,amount:44,payment_state:'paid'}],global_material_costs:{rates:{silver:5.8}}};
+  const m=M.makeModel(payload);assert.equal(m.rows[0].cost.base,2320);assert.equal(m.stats.missingCosts,0);
+  assert.equal(M.buyerProfit(m.customers[0].stats,m.expensesKnown).amount,2080);
+  assert.equal(M.makeModel({...payload,settings:{rates:{silver:6}}}).rows[0].cost.base,2400);
+  assert.equal(M.makeModel({...payload,costs:{weight:{mode:'manual',base_cost:0}}}).rows[0].cost.base,0);
+  assert.equal(M.costFor({listing_title:title},{mode:'metal',material:'gold',purity:14,grams:4},{rates:{gold_14:99}}).base,39600);
+});
+
+test('the silver default does not replace explicit materials, ambiguous weights or unsupported purities',()=>{
+  const rates={silver:5.8,gold_10:78,gold_14:99};
+  for(const title of ['Platinum 4g','Stainless steel 4 grams','Copper 4g','Brass 4g','Titanium 4g','Leather 4g','Silver and steel 4g','4g plated bracelet','4-5g bracelet','4 to 5 grams','4g + 5g','4g + 4g','4,5g','1/2 grams','-4g','.5g','0 grams','Bracelet','950 silver 4g','999 bracelet 4g']){
+    assert.equal(M.costFor({listing_title:title},{},{rates}).base,null,title);
+  }
+  assert.equal(M.costFor({listing_title:'Gold 4g'},{},{rates}).base,31200);
+  assert.equal(M.costFor({listing_title:'14k 4g'},{},{rates}).base,39600);
+  assert.equal(M.parseTitle('925 silver 4g').assumed,false);
+  assert.equal(M.costFor({listing_title:'4g bracelet'},{},{rates:{}}).base,null);
 });
 test('manual total costs, including explicit zero, take priority and metal corrections are explicit',()=>{
   assert.equal(M.costFor({listing_title:'Gold 5g'},{mode:'manual',base_cost:0},settings).base,0);

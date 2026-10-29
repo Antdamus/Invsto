@@ -6,6 +6,7 @@ These rates are separate from `metal_spot_prices`, which drives storefront retai
 
 Inventory staff can read rates; administrators can update them. Other gold purities are optional.
 Unknown gold purity assumes 10K and unknown silver purity assumes 925 when material is known.
+Live report titles with one clear positive gram weight and no specified material default to sterling silver 925. The item is labeled **Silver 925 assumed**, uses the shared silver rate (or show override), and updates buyer profit and loss totals. Explicit materials, unsupported purities, ambiguous weights, plated items, and saved manual or material overrides retain their existing treatment.
 Unsupported purities, plated items, watches, coins, or missing weights require individual costs.
 
 - Add Item uses shared rates with **Set prices now** and **Use shared material cost**. Editing cost or cost per gram selects a custom cost. Saved drafts preserve that choice. New globally priced items are rejected if their rate became stale before saving.

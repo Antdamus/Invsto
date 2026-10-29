@@ -23,17 +23,19 @@
     const weights=[...text.matchAll(/(?<![\d.,-])(\d+(?:\.\d+)?)\s*(?:grams?|grs?|g)\b/gi)].map(m=>Number(m[1]));
     const purities=[...text.matchAll(/\b(\d{1,2}(?:\.\d+)?)\s*(?:karats?|carats?|kt|k)\b/gi)].map(m=>Number(m[1]));
     const gold=/\bgold\b/i.test(text)||purities.length>0,silver=/\b(?:silver|sterling)\b/i.test(text);
+    const otherMaterial=/\b(?:platinum|palladium|copper|brass|bronze|steel|titanium|tungsten|alumin(?:um|ium)|nickel|pewter|rhodium|cobalt|zinc|wood|resin|acrylic|plastic|ceramic|leather|silicone)\b/i.test(text);
     const plated=/\b(?:plated|filled|vermeil|tone|colou?r(?:ed)?|gp|gf|hge|overlay)\b/i.test(text);
-    const ambiguous=plated||(gold&&silver)||weights.length>1||new Set(purities).size>1||/\d\s*(?:[-–/]|to)\s*\d+(?:\.\d+)?\s*(?:g|grams?)\b/i.test(text)||/\d,\d+\s*(?:g|grams?)\b/i.test(text);
-    const material=gold&&!silver?'gold':silver&&!gold?'silver':null;
+    const ambiguous=plated||(gold&&silver)||(otherMaterial&&(gold||silver))||weights.length>1||new Set(purities).size>1||/\d\s*(?:[-–/]|to)\s*\d+(?:\.\d+)?\s*(?:g|grams?)\b/i.test(text)||/\d,\d+\s*(?:g|grams?)\b/i.test(text);
+    const grams=weights.length===1||new Set(weights).size===1?weights[0]:null;
+    const silverDefault=!gold&&!silver&&!otherMaterial&&!ambiguous&&grams>0;
+    const material=gold&&!silver?'gold':(silver&&!gold||silverDefault)?'silver':null;
     const silverPurities=[...text.matchAll(/\b(800|835|850|900|925|950|958|999)(?:\.9)?\b/g)].map(m=>Number(m[1]));
     const unsupportedSilver=material==='silver'&&(silverPurities.some(p=>p!==925)||/\b(?:fine|pure)\s+silver\b/i.test(text));
-    const grams=weights.length===1||new Set(weights).size===1?weights[0]:null;
     const purity=material==='gold'?(purities[0]??10):material==='silver'?(silverPurities[0]??925):null;
-    const assumed=material==='gold'&&!purities.length||material==='silver'&&!silverPurities.length;
-    const assumption=assumed?(material==='gold'?'10K assumed':'925 assumed'):'';
+    const assumed=silverDefault||material==='gold'&&!purities.length||material==='silver'&&!silverPurities.length;
+    const assumption=silverDefault?(purity===925?'Silver 925 assumed':'Silver assumed'):assumed?(material==='gold'?'10K assumed':'925 assumed'):'';
     return {material,grams:grams>0?grams:null,purity:purity>0&&(material==='silver'||purity<=24)?purity:null,assumed,assumption,ambiguous:ambiguous||unsupportedSilver,
-      note:unsupportedSilver?'Silver purity is not 925: enter a manual base cost.':ambiguous?'Mixed, plated or ambiguous title: enter a manual base cost.':!material?'Material not specified.':!grams?'Gram weight not specified.':assumed?(material==='gold'?'10K gold assumed because purity is not specified.':'Sterling silver 925 assumed because purity is not specified.'):'Read from item title.'};
+      note:unsupportedSilver?'Silver purity is not 925: enter a manual base cost.':ambiguous?'Mixed, plated or ambiguous title: enter a manual base cost.':otherMaterial?'Material is not supported: enter a manual base cost.':silverDefault?'Sterling silver 925 assumed because a gram weight is present but material is not specified.':!material?'Material not specified.':!grams?'Gram weight not specified.':assumed?(material==='gold'?'10K gold assumed because purity is not specified.':'Sterling silver 925 assumed because purity is not specified.'):'Read from item title.'};
   }
   function costFor(a,override={},settings={}){
     const parsed=parseTitle(a.listing_title),mode=override.mode||'auto';
