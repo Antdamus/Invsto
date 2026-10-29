@@ -17,7 +17,7 @@ async function app() {
   run(pending); run(refunds);
   run(`var approvedReview={order_id:'order',order_number:'01-12345-12345',reviewable:true,
       approval:{id:'approval',by:'manager@example.test',at:'2026-10-23T04:58:12Z',reason:'Verified discount'}};
-    var calls=[],completionError=null;
+    var calls=[],completionError=null,lineRawOverride=null;
     var supabase={rpc:async(name,args)=>{
       calls.push({name,args});
       if(name==='get_ebay_partial_refund_reviews')return {data:[approvedReview]};
@@ -25,7 +25,7 @@ async function app() {
       throw Error('Unexpected RPC '+name);
     },from(table){return {select(){return this},eq(){return this},async maybeSingle(){return {data:table==='ebay_orders'
       ?{id:'order',raw_payload:structuredClone(state.orders[0].order.raw_payload),label_metadata:{},label_status:null,label_file_path:null}
-      :{id:'line',raw_payload:structuredClone(state.orders[0].raw_payload)}}}}}};
+      :{id:'line',raw_payload:structuredClone(lineRawOverride||state.orders[0].raw_payload)}}}}}};
     state.orders=[normalizeLine({id:'line',order_id:'order',line_status:'pending',quantity:1,fulfilled_quantity:0,
       raw_payload:{},order:{id:'order',order_number:'01-12345-12345',status:'pending',buyer_username:'buyer',
         raw_payload:{orderPaymentStatus:'PARTIALLY_REFUNDED',orderCancelStatus:'NONE_REQUESTED',
@@ -56,6 +56,19 @@ test('sync timestamps, photos and payout metadata do not change reviewed refund 
     order.raw_payload.ebayFinance.checkedAt='new';
     order.label_metadata={completionPhoto:'saved.jpg'};
     state.selectedLine.raw_payload.video_receipt_url='receipt';`);
+  assert.equal(run('getLineFulfillmentBlock(state.selectedLine)'), '');
+});
+
+test('real queue status projections remain approved when hydration removes duplicate synthetic fields', async () => {
+  const {run} = await app();
+  run(`state.selectedLine.raw_payload={orderPaymentStatus:'PAID',orderCancelStatus:'NONE_REQUESTED',
+      pending_order_sync_mismatch:{ebayPaymentStatus:'PARTIALLY_REFUNDED',ebayCancelStatus:'NONE_REQUESTED'}};
+    state.selectedLine.ebay_api_status={payment_status:'PARTIALLY_REFUNDED',cancel_status:'NONE_REQUESTED'};
+    lineRawOverride={orderPaymentStatus:'PAID',orderCancelStatus:'NONE_REQUESTED'};`);
+  await run('window.OGPartialRefunds.load(state.orders)');
+  await run("hydrateSelectedOrderDetails('line')");
+  assert.equal(run('state.selectedLine.raw_payload.pending_order_sync_mismatch'), undefined);
+  assert.equal(run('window.OGPartialRefunds.approved(state.selectedLine)'), true);
   assert.equal(run('getLineFulfillmentBlock(state.selectedLine)'), '');
 });
 

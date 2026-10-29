@@ -10,6 +10,7 @@
   const refundTransactions = finance => (Array.isArray(finance?.transactions) ? finance.transactions : [])
     .filter(t => String(t.transactionType || '').toUpperCase() === 'REFUND')
     .map(t => JSON.stringify(canonical(t))).sort();
+  const statuses = values => [...new Set(values.map(v => String(v || '').trim().toUpperCase()).filter(Boolean))].sort();
   // Match the facts in ebay_refund_review_facts, plus the queue's status projections.
   // Loading labels, receipts or a newer sync timestamp must not expire an approval.
   function reviewFacts(row = {}) {
@@ -18,11 +19,13 @@
       id: row.id, orderId: row.order_id, status: row.status, lineStatus: row.line_status,
       quantity: row.quantity, item: row.item_number, transaction: row.transaction_id,
       total: row.total_price, soldFor: row.sold_for, sourceTotal: order.pricingSummary?.total,
-      payments: [p.orderPaymentStatus, order.orderPaymentStatus, p.pending_order_sync_mismatch?.ebayPaymentStatus,
-        p.api_order_status?.payment_status, order.paymentSummary?.payments?.[0]?.paymentStatus, api.payment_status],
-      cancellations: [p.orderCancelStatus, order.cancelStatus?.cancelState, order.cancelStatus?.cancelStatus,
+      // The queue repeats API statuses in a synthetic mismatch payload; detail
+      // hydration removes that duplicate while retaining the API projection.
+      payments: statuses([p.orderPaymentStatus, order.orderPaymentStatus, p.pending_order_sync_mismatch?.ebayPaymentStatus,
+        p.api_order_status?.payment_status, order.paymentSummary?.payments?.[0]?.paymentStatus, api.payment_status]),
+      cancellations: statuses([p.orderCancelStatus, order.cancelStatus?.cancelState, order.cancelStatus?.cancelStatus,
         p.pending_order_sync_mismatch?.ebayCancelStatus, p.api_order_status?.cancel_status,
-        p.api_cancellation_case?.cancelStatus, p.cancellation_page_case?.cancelStatus, api.cancel_status],
+        p.api_cancellation_case?.cancelStatus, p.cancellation_page_case?.cancelStatus, api.cancel_status]),
       refunds: order.paymentSummary?.refunds,
       transactions: [p.ebayFinance, row.ebay_finance, row.finance].map(refundTransactions),
     };
