@@ -51,13 +51,13 @@
       lines.length>1?null:partialBasis==null?null:Math.round(partialBasis*percent/100)+fixed;
     const fee=allocatedActual??estimate,source=allocatedActual!=null?'actual':fee!=null?'estimated':'unavailable';
     const basisKnown=allocatedBasis!=null,shippingKnown=shipping!=null;
-    const complete=source==='actual'&&shippingKnown;
+    const complete=source==='actual';
     const note=source==='actual'?'Actual eBay fee from the latest order sync':source==='estimated'?`${percent}% + $${(fixed/100).toFixed(2)} per eBay order`:'Order fee could not be allocated; review the matched order';
     const allocation=lines.length>1?'Order fee allocated across all order lines by checkout amount (item amount if checkout detail is unavailable).':'';
     return {fee,source,percent,fixed,postage,shipping,basis:allocatedBasis??partialBasis,basisKnown,shippingKnown,complete,note,allocation,
       syncedAt:order.updated_at||'',beforePostage:postage==null,
-      caveat:!basisKnown&&source!=='actual'?'Shipping / tax may be incomplete; estimate updates after order import.':!shippingKnown?'Buyer-paid shipping is not yet known; profit will update after import.':'',
-      revenue:price==null?null:price+(shipping??0),
+      caveat:!basisKnown&&source!=='actual'?'Shipping / tax may be incomplete; fee estimate updates after order import.':!shippingKnown?'Shipping funds are not yet known; they will appear separately after import.':'',
+      revenue:price,
       expenses:fee==null?null:fee+(postage??0)};
   }
   const api={forItem,allocate,usd};root.OGLiveReportFinances=api;if(typeof module!=='undefined')module.exports=api;

@@ -49,11 +49,11 @@ test('item-index profit uses the same paid amounts and expense basis as buyer to
   assert.deepEqual(before.rows.map(r=>M.itemProfit(r,false).amount),[3878,1894,-91,-658]);
   assert.equal(M.itemProfit(before.rows[2],false).status,'Loss');
   assert.equal(M.itemProfit(before.rows[3],false).status,'Loss');
-  assert.equal(M.itemProfit(before.rows[0],false).label,'Estimated profit');
+  assert.equal(M.itemProfit(before.rows[0],false).label,'Estimated profit after fees');
   assert.equal(before.rows.reduce((sum,r)=>sum+M.itemProfit(r,false).amount,0),before.stats.profit);
   const after=M.makeModel({attempts,costs,settings});
   assert.equal(M.itemProfit(after.rows[0],true).amount,3070);
-  assert.equal(M.itemProfit(after.rows[0],true).label,'Estimated profit');
+  assert.equal(M.itemProfit(after.rows[0],true).label,'Estimated profit after fees');
   assert.equal(after.rows.reduce((sum,r)=>sum+M.itemProfit(r,true).amount,0),after.stats.profit);
 });
 
@@ -224,10 +224,10 @@ test('buyer profit reports partial coverage without treating missing costs or sa
   const p=M.buyerProfit(model.customers[0].stats,model.expensesKnown);
   assert.equal(p.amount,4400);assert.equal(p.status,'Partial');assert.equal(p.partial,true);
   assert.equal(p.coverage,'1 of 3 paid purchases included');assert.equal(p.missing,'1 missing base cost · 1 missing sale amount');
-  assert.equal(p.label,'Estimated profit');assert.equal(p.basis,'0 actual / 1 estimated fees · after estimated postage');
+  assert.equal(p.label,'Estimated profit after fees');assert.equal(p.basis,'0 actual / 1 estimated fees · after estimated postage');
   const before=M.makeModel({attempts,costs});
   assert.equal(M.buyerProfit(before.stats,before.expensesKnown).amount,5420);
-  assert.equal(M.buyerProfit(before.stats,before.expensesKnown).label,'Estimated profit');
+  assert.equal(M.buyerProfit(before.stats,before.expensesKnown).label,'Estimated profit after fees');
   const fixed=M.makeModel({attempts:attempts.map(a=>a.id==='amount-missing'?{...a,amount:50}:a),costs:{...costs,'cost-missing':{mode:'manual',base_cost:100}},settings});
   const complete=M.buyerProfit(fixed.stats,fixed.expensesKnown);
   assert.equal(complete.amount,12700);assert.equal(complete.status,'Complete');assert.equal(complete.missing,'');

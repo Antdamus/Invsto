@@ -8,33 +8,33 @@ function fixture(price=53,shipping=1,tax=4.32,fee=3.51){
  return {attempts:[{id:'a',amount:price,buyer:'buyer',payment_state:'paid'}],costs:{a:{mode:'manual',base_cost:11}},evidence:{a:{line:{raw_payload:{line}},order:{id:'order',order_number:'07-15366-59131',updated_at:'2026-10-29T23:00:00Z',financials:{totalMarketplaceFee:fee==null?null:usd(fee),totalFeeBasisAmount:usd(price+shipping+tax),pricingSummary:{deliveryCost:usd(10),deliveryDiscount:usd(-9)},lineItems:[line]}}}}};
 }
 test('four verified eBay order fees and checkout bases; shipping discounts are not deducted twice',()=>{
- for(const [price,shipping,tax,fee,profit] of [[53,1,4.32,3.51,3949],[32,1,2.64,2.26,1974],[10,10,1.4,1.48,752],[199,10,14.84,12.61,18539]]){
+ for(const [price,shipping,tax,fee,profit] of [[53,1,4.32,3.51,3849],[32,1,2.64,2.26,1874],[10,10,1.4,1.48,-248],[199,10,14.84,12.61,17539]]){
   const r=M.makeModel(fixture(price,shipping,tax,fee)).rows[0];
   assert.equal(r.finance.source,'actual');assert.equal(r.finance.fee,Math.round(fee*100));assert.equal(r.finance.shipping,shipping*100);
   assert.equal(r.finance.basis,Math.round((price+shipping+tax)*100));assert.equal(r.profit,profit);assert.equal(r.finance.postage,null);
-  assert.equal(M.itemProfit(r).label,'Profit');assert.match(M.itemProfit(r).basis,/before postage/);
+  assert.equal(M.itemProfit(r).label,'Profit after fees');assert.match(M.itemProfit(r).basis,/before postage/);
  }
 });
 test('an early estimate automatically becomes actual, including known zero and custom estimates',()=>{
  const p=fixture(53,1,4.32,null);p.settings={fee_percent:10,fee_fixed:1};
- let m=M.makeModel(p);assert.equal(m.rows[0].finance.fee,683);assert.equal(m.rows[0].profit,3617);assert.equal(m.stats.estimatedFeeItems,1);
+ let m=M.makeModel(p);assert.equal(m.rows[0].finance.fee,683);assert.equal(m.rows[0].profit,3517);assert.equal(m.stats.estimatedFeeItems,1);
  p.evidence.a.order.financials.totalMarketplaceFee=usd(3.51);
- m=M.makeModel(p);assert.equal(m.rows[0].finance.fee,351);assert.equal(m.rows[0].profit,3949);assert.equal(m.stats.actualFeeItems,1);assert.equal(m.stats.estimatedFeeItems,0);
- p.evidence.a.order.financials.totalMarketplaceFee=usd(0);m=M.makeModel(p);assert.equal(m.rows[0].finance.source,'actual');assert.equal(m.rows[0].profit,4300);
- p.settings.shipping_per_sale=5;assert.equal(M.makeModel(p).rows[0].profit,3800);
+ m=M.makeModel(p);assert.equal(m.rows[0].finance.fee,351);assert.equal(m.rows[0].profit,3849);assert.equal(m.stats.actualFeeItems,1);assert.equal(m.stats.estimatedFeeItems,0);
+ p.evidence.a.order.financials.totalMarketplaceFee=usd(0);m=M.makeModel(p);assert.equal(m.rows[0].finance.source,'actual');assert.equal(m.rows[0].profit,4200);
+ p.settings.shipping_per_sale=5;assert.equal(M.makeModel(p).rows[0].profit,3700);
 });
 test('default estimate includes checkout shipping and tax; raw NET tax is included once if fee basis absent',()=>{
  const p=fixture(53,1,4.32,null);assert.equal(M.makeModel(p).rows[0].finance.fee,351);
  delete p.evidence.a.order.financials.totalFeeBasisAmount;assert.equal(M.makeModel(p).rows[0].finance.fee,351);
  const line=p.evidence.a.order.financials.lineItems[0];line.total=usd(58.32);line.ebayCollectAndRemitTaxes[0].collectionMethod='GROSS';
- assert.equal(M.makeModel(p).rows[0].finance.fee,351);assert.equal(M.makeModel(p).rows[0].finance.revenue,5400);
+ assert.equal(M.makeModel(p).rows[0].finance.fee,351);assert.equal(M.makeModel(p).rows[0].finance.revenue,5300);
 });
 test('multi-line fees allocate exact cents once, including lines outside the show and item order changes',()=>{
  const p=fixture(10,1,0,1.01),fin=p.evidence.a.order.financials;
  const second={...structuredClone(fin.lineItems[0]),lineItemId:'line-2',lineItemCost:usd(20),total:usd(21)};
  fin.lineItems.push(second);fin.totalFeeBasisAmount=usd(32);
  p.attempts.push({id:'b',amount:20,buyer:'buyer',payment_state:'paid'});p.costs.b={mode:'manual',base_cost:0};p.evidence.b={order:p.evidence.a.order,line:{raw_payload:{line:second}}};
- const m=M.makeModel(p);assert.deepEqual(m.rows.map(r=>r.finance.fee),[35,66]);assert.equal(m.stats.actualFees,101);assert.equal(m.stats.profit,1999);
+ const m=M.makeModel(p);assert.deepEqual(m.rows.map(r=>r.finance.fee),[35,66]);assert.equal(m.stats.actualFees,101);assert.equal(m.stats.profit,1799);
  assert.equal(M.makeModel({...p,attempts:p.attempts.slice(0,1)}).stats.actualFees,35);
  fin.lineItems.reverse();assert.deepEqual(M.makeModel(p).rows.map(r=>r.finance.fee),[35,66]);
  delete fin.totalMarketplaceFee;const estimated=M.makeModel(p);assert.equal(estimated.stats.estimatedFees,206);assert.equal(estimated.rows.reduce((s,r)=>s+r.finance.shipping,0),200);
@@ -46,7 +46,7 @@ test('shipping fallback uses signed order discount, and unknown checkout stays v
  delete p.evidence.a.order.financials.lineItems[0].total;
  const partial=M.makeModel(p).rows[0];assert.equal(partial.finance.fee,351);assert.equal(partial.finance.basis,5832);
  const early=M.makeModel({attempts:p.attempts,costs:p.costs});assert.equal(early.rows[0].finance.fee,322);assert.equal(early.rows[0].finance.shipping,null);assert.equal(early.rows[0].finance.basisKnown,false);assert.match(early.rows[0].finance.caveat,/Shipping \/ tax/);
- assert.equal(early.stats.profit,3878);assert.equal(M.buyerProfit(early.stats).label,'Estimated profit');
+ assert.equal(early.stats.profit,3878);assert.equal(M.buyerProfit(early.stats).label,'Estimated profit after fees');
 });
 test('foreign currency, malformed fees and unmapped multi-line orders do not become actual USD charges',()=>{
  const p=fixture();p.evidence.a.order.financials.totalMarketplaceFee={value:'3.51',currency:'CAD'};
@@ -62,4 +62,43 @@ test('unpaid and unknown base costs remain excluded; fee-only loss appears in bu
  for(const groups of Object.values(m.breakdowns))assert.equal(groups.reduce((s,g)=>s+g.stats.profit,0),-85);
  delete p.costs.a;m=M.makeModel(p);assert.equal(m.rows[0].profit,null);assert.equal(m.stats.actualFees,85);
  for(const payment_state of ['waiting','failed','review','cancelled']){p.attempts[0].payment_state=payment_state;m=M.makeModel(p);assert.equal(m.stats.actualFees,0);assert.equal(m.stats.profit,0);}
+});
+
+test('every profit view and cost preview deduct the full actual fee and keep shipping funds separate',()=>{
+ const p=fixture(53,10,5,9); // Full recorded charge takes priority over the lower percentage estimate.
+ const m=M.makeModel(p),r=m.rows[0];
+ assert.equal(r.profit,3300);assert.equal(M.profitFor(r,2000),2400);
+ assert.equal(M.itemProfit(r).amount,3300);assert.equal(M.buyerProfit(m.stats).amount,3300);
+ assert.equal(m.stats.profitItemRevenue,5300);assert.equal(m.stats.profitDeductions,2000);
+ assert.equal(m.stats.profit,m.stats.profitItemRevenue-m.stats.profitDeductions);
+ assert.equal(m.stats.shippingCollected,1000);assert.equal(m.stats.profitFees,900);
+ for(const groups of Object.values(m.breakdowns))assert.equal(groups.reduce((s,g)=>s+g.stats.profit,0),3300);
+ assert.equal(M.feeAmountLabel(r),'eBay fees: $9.00 · Actual');
+ assert.equal(M.profitEquation(r),'$53.00 item sale - $11.00 base cost - $9.00 eBay fees = $33.00 before postage. Shipping funds are separate.');
+ const withoutShipping=M.makeModel(fixture(53,0,0,9));assert.equal(withoutShipping.stats.profit,m.stats.profit);
+ p.settings={shipping_per_sale:5};const withPostage=M.makeModel(p);assert.equal(withPostage.stats.profit,2800);assert.equal(withPostage.stats.profitDeductions,2500);assert.equal(withPostage.stats.shippingCollected,1000);
+ assert.match(M.profitEquation(withPostage.rows[0]),/\$5.00 postage estimate/);
+});
+
+test('shipping fund totals include paid items lacking base costs but exclude unpaid and held purchases',()=>{
+ const p=fixture();p.attempts.push({id:'b',amount:53,payment_state:'paid'}, {id:'c',amount:53,payment_state:'waiting'}, {id:'d',amount:53,payment_state:'paid',payment_hold:true}, {id:'unknown',amount:20,payment_state:'paid'});
+ for(const id of ['b','c','d'])p.evidence[id]=structuredClone(p.evidence.a);
+ const m=M.makeModel(p);assert.equal(m.stats.shippingCollected,200);assert.equal(m.stats.shippingKnownItems,2);assert.equal(m.stats.shippingUnknownItems,1);
+ assert.equal(m.stats.profit,3849);assert.equal(m.stats.profitCovered,1);assert.equal(m.stats.missingCosts,2);
+ assert.equal(M.profitFor(m.rows[1]),null);assert.equal(M.profitFor(m.rows[2],0),null);assert.equal(M.profitFor(m.rows[3],0),null);
+});
+
+test('fee summary includes every paid purchase regardless of base cost and distinguishes estimates from actual charges',()=>{
+ const p=fixture();p.attempts.push({id:'early',amount:20,payment_state:'paid'},{id:'unpaid',amount:53,payment_state:'waiting'});
+ p.evidence.unpaid=structuredClone(p.evidence.a);
+ const m=M.makeModel(p),summary=M.feeSummary(m.stats);
+ assert.equal(summary.total,491);assert.equal(summary.value,'$4.91');assert.equal(summary.basis,'Actual + estimated fees');
+ assert.match(summary.coverage,/All 2 paid purchases, including those awaiting base costs/);
+ assert.equal(m.stats.actualFees,351);assert.equal(m.stats.estimatedFees,140);assert.equal(m.stats.profitFees,351);
+ assert.equal(M.shippingFunds(m.stats),'$1.00 · partial');
+ const known=M.makeModel(fixture());assert.equal(M.feeSummary(known.stats).basis,'Actual fees only');assert.equal(M.shippingFunds(known.stats),'$1.00');
+ const early=M.makeModel({attempts:[{id:'a',amount:20,payment_state:'paid'}]});assert.equal(M.shippingFunds(early.stats),'Awaiting details');
+ assert.doesNotMatch(M.buyerProfit(early.stats).basis,/after estimated postage/);
+ const unknown=fixture();unknown.evidence.a.order.financials.lineItems.push({...unknown.evidence.a.order.financials.lineItems[0],lineItemId:'other'});unknown.evidence.a.line={};
+ const unknownSummary=M.feeSummary(M.makeModel(unknown).stats);assert.equal(unknownSummary.value,'Awaiting details');assert.match(unknownSummary.coverage,/1 fees awaiting details/);
 });

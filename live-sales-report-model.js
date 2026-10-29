@@ -8,20 +8,42 @@
   const money=value=>value==null?'Not set':new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(value/100);
   const rateMoney=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:4}).format(value);
   const date=value=>Number.isFinite(Date.parse(value))?new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(new Date(value)):null;
+  function profitFor(row,base=row.cost?.base){
+    return row.state==='paid'&&row.price!=null&&base!=null&&row.finance?.expenses!=null
+      ?row.price-base-row.finance.expenses:null;
+  }
+  function feeAmountLabel(row){
+    const f=row.finance;
+    return f.fee==null?'eBay fees: awaiting details':`eBay fees: ${money(f.fee)} · ${f.source==='actual'?'Actual':'Estimated'}`;
+  }
+  function feeSummary(stats){
+    const count=stats.actualFeeItems+stats.estimatedFeeItems,total=stats.actualFees+stats.estimatedFees;
+    return {total,value:!count&&stats.missingFees?'Awaiting details':money(total),
+      basis:stats.estimatedFeeItems?'Actual + estimated fees':'Actual fees only',
+      coverage:`All ${stats.paid.count} paid purchases, including those awaiting base costs${stats.missingFees?' · '+stats.missingFees+' fees awaiting details':''}`};
+  }
+  function shippingFunds(stats){
+    return !stats.shippingKnownItems&&stats.shippingUnknownItems?'Awaiting details':money(stats.shippingCollected)+(stats.shippingUnknownItems?' · partial':'');
+  }
+  function profitEquation(row,base=row.cost?.base){
+    const profit=profitFor(row,base);
+    if(profit==null)return '';
+    return `${money(row.price)} item sale - ${money(base)} base cost - ${money(row.finance.fee)} eBay fees${row.finance.postage!=null?' - '+money(row.finance.postage)+' postage estimate':''} = ${money(profit)}${row.finance.beforePostage?' before postage':''}. Shipping funds are separate.`;
+  }
   function buyerProfit(stats){
     const covered=stats.profitCovered,total=stats.paid.count,partial=covered>0&&covered<total;
     const missing=[];
     if(stats.missingCosts)missing.push(`${stats.missingCosts} missing base ${stats.missingCosts===1?'cost':'costs'}`);
     if(stats.missingPaidAmounts)missing.push(`${stats.missingPaidAmounts} missing sale ${stats.missingPaidAmounts===1?'amount':'amounts'}`);
     if(stats.missingFees)missing.push(`${stats.missingFees} fees need review`);
-    return {amount:covered?stats.profit:null,label:stats.estimatedProfit?'Estimated profit':'Profit',
-      basis:`${stats.actualProfitFees} actual / ${stats.estimatedProfitFees} estimated fees · ${stats.postagePending?'before postage':'after estimated postage'}`,
+    return {amount:covered?stats.profit:null,label:stats.estimatedProfit?'Estimated profit after fees':'Profit after fees',
+      basis:covered?`${stats.actualProfitFees} actual / ${stats.estimatedProfitFees} estimated fees · ${stats.postagePending?'before postage':'after estimated postage'}`:'No profit calculated yet · shipping funds excluded',
       status:!total?'No paid purchases':!covered?'Unavailable':partial?'Partial':'Complete',
-      partial,coverage:`${covered} of ${total} paid purchases included`,missing:missing.join(' · ')};
+      partial,fees:covered?`eBay fees deducted: ${money(stats.profitFees)}`:'',coverage:`${covered} of ${total} paid purchases included`,missing:missing.join(' · ')};
   }
   function itemProfit(row){
-    const f=row.finance,label=!f.complete||f.postage!=null?'Estimated profit':'Profit';
-    const basis=`${f.source==='actual'?'Actual eBay fee':f.source==='estimated'?'Estimated eBay fee':'Fee unavailable'} · ${f.beforePostage?'before postage':'after estimated postage'}${!f.shippingKnown?' · shipping income pending':''}`;
+    const f=row.finance,label=f.source!=='actual'||f.postage!=null?'Estimated profit after fees':'Profit after fees';
+    const basis=`${f.source==='actual'?'Actual eBay fee':f.source==='estimated'?'Estimated eBay fee':'Fee unavailable'} · ${f.beforePostage?'before postage':'after estimated postage'} · shipping funds excluded`;
     if(row.state!=='paid')return {amount:null,label,basis:'Only confirmed paid purchases count',status:'Excluded'};
     if(row.price==null)return {amount:null,label,basis:'Sale amount is not available',status:'Missing sale amount'};
     if(row.cost.base==null)return {amount:null,label,basis:'Add a cost to calculate profit',status:'Needs base price'};
@@ -122,7 +144,7 @@
       const systemUrl=new URL(['fulfilled','cancelled','canceled','closed'].includes(order.status)?'ebay-order-history.html':'pending-orders.html',origin);
       systemUrl.search=new URLSearchParams({orderId:order.order_number||'',historySearch:order.order_number||'',focusOrder:order.order_number||'',focusLineId:line.id||''}).toString();
       const links=[['eBay listing',a.listing_id?'https://www.ebay.com/itm/'+encodeURIComponent(a.listing_id):''],['eBay order',orderUrl],['Video receipt',videoUrl],['Find receipt in order',!videoUrl?orderUrl:''],['System order',order.order_number?systemUrl.href:''],['Live show',c.event_id?'https://www.ebay.com/ebaylive/events/'+encodeURIComponent(c.event_id):'']].filter(([,url])=>url);
-      const row={...a,id:a.id,key:'item-'+a.id,username,customerKey:customer.key,name:order.buyer_name||'',state,stateLabel:labels[state],price,cost,margin,finance,expenses,profit:margin!=null&&expenses!=null?finance.revenue-cost.base-expenses:null,
+      const row={...a,id:a.id,key:'item-'+a.id,username,customerKey:customer.key,name:order.buyer_name||'',state,stateLabel:labels[state],price,cost,margin,finance,expenses,profit:profitFor({state,price,cost,finance}),
         quantity:Number.isInteger(Number(line.quantity))&&Number(line.quantity)>0?Number(line.quantity):1,
         time:date(a.sold_at)||(a.win_time_label?`${a.win_time_label} · date unverified`:'Sale time not yet verified'),timeNote:a.sale_time_source==='ebay_activity'?'eBay Activity · minute precision':a.sale_time_source==='ebay_order'?'eBay order timestamp':'',
         orderNumber:order.order_number||'',orderId:order.id||'',photos:evidence.photos||[],links,videoUrl,videoSource:receipt.source,
@@ -133,11 +155,11 @@
       customer.rows.push(row);return row;
     });
     const summarize=list=>{
-      const result={items:list.length,expectedItems:0,missingCosts:0,pricedPaid:0,base:0,margin:0,profit:0,missingAmounts:0,missingPaidAmounts:0,lossItems:0,lossAmount:0,profitCovered:0,actualFees:0,estimatedFees:0,actualFeeItems:0,estimatedFeeItems:0,actualProfitFees:0,estimatedProfitFees:0,estimatedProfit:0,postagePending:0,missingFees:0};
+      const result={items:list.length,expectedItems:0,missingCosts:0,pricedPaid:0,base:0,margin:0,profit:0,missingAmounts:0,missingPaidAmounts:0,lossItems:0,lossAmount:0,profitCovered:0,actualFees:0,estimatedFees:0,actualFeeItems:0,estimatedFeeItems:0,actualProfitFees:0,estimatedProfitFees:0,estimatedProfit:0,postagePending:0,missingFees:0,profitItemRevenue:0,profitShipping:0,profitBase:0,profitFees:0,profitPostage:0,profitDeductions:0,shippingCollected:0,shippingKnownItems:0,shippingUnknownItems:0};
       for(const state of Object.keys(labels))result[state]={count:0,amount:0};
       for(const r of list){result[r.state].count++;if(r.price==null)result.missingAmounts++;else result[r.state].amount+=r.price;
         if(r.loss>0){result.lossItems++;result.lossAmount+=r.loss;}
-        if(r.state==='paid'){if(r.finance.fee==null){if(r.price!=null)result.missingFees++;}else{const actual=r.finance.source==='actual';result[actual?'actualFees':'estimatedFees']+=r.finance.fee;result[actual?'actualFeeItems':'estimatedFeeItems']++;}result.expectedItems+=r.quantity;if(r.price==null)result.missingPaidAmounts++;if(r.cost.base==null)result.missingCosts++;else if(r.price!=null){result.pricedPaid++;result.base+=r.cost.base;result.margin+=r.margin;if(r.profit!=null){result.profit+=r.profit;result.profitCovered++;result[r.finance.source==='actual'?'actualProfitFees':'estimatedProfitFees']++;if(!r.finance.complete||r.finance.postage!=null)result.estimatedProfit++;if(r.finance.beforePostage)result.postagePending++;}}}
+        if(r.state==='paid'){if(r.finance.shippingKnown){result.shippingCollected+=r.finance.shipping;result.shippingKnownItems++;}else result.shippingUnknownItems++;if(r.finance.fee==null){if(r.price!=null)result.missingFees++;}else{const actual=r.finance.source==='actual';result[actual?'actualFees':'estimatedFees']+=r.finance.fee;result[actual?'actualFeeItems':'estimatedFeeItems']++;}result.expectedItems+=r.quantity;if(r.price==null)result.missingPaidAmounts++;if(r.cost.base==null)result.missingCosts++;else if(r.price!=null){result.pricedPaid++;result.base+=r.cost.base;result.margin+=r.margin;if(r.profit!=null){result.profit+=r.profit;result.profitCovered++;result.profitItemRevenue+=r.price;result.profitShipping+=r.finance.shipping??0;result.profitBase+=r.cost.base;result.profitFees+=r.finance.fee;result.profitPostage+=r.finance.postage??0;result.profitDeductions+=r.cost.base+r.finance.expenses;result[r.finance.source==='actual'?'actualProfitFees':'estimatedProfitFees']++;if(r.finance.source!=='actual'||r.finance.postage!=null)result.estimatedProfit++;if(r.finance.beforePostage)result.postagePending++;}}}
       }return result;
     };
     const customers=[...buyers.values()].sort((a,b)=>a.username.localeCompare(b.username));
@@ -148,5 +170,5 @@
     const breakdowns={materials:group('material',[['gold','Gold'],['silver','Silver / assumed silver'],['other','Other / unclear material']]),types:group('type',[['earrings','Earrings'],['watches','Watches'],['other','Other / unclear item type']])};
     return {sessionId:payload.show?.id||c.session_id,show:payload.show||{},title:payload.show?.title||c.stream_metadata?.title||'Live sales report',connection:c,settings,customers,rows,breakdowns,stats:summarize(rows),expensesKnown,lossBasis:'after eBay fees; postage excluded unless entered',generatedAt:now.toISOString(),updatedAt:payload.server_time||now.toISOString(),date:date(now.toISOString()),unmatched:(payload.unmatched||[]).length,origin};
   }
-  const api={RATE_KEYS,labels,number,cents,money,rateMoney,date,parseTitle,costFor,makeModel,buyerProfit,itemProfit,normalizeTitle,titleRuleFor,receiptFor,receiptNote};root.OGLiveReportModel=api;if(typeof module!=='undefined')module.exports=api;
+  const api={RATE_KEYS,labels,number,cents,money,rateMoney,date,parseTitle,costFor,makeModel,buyerProfit,itemProfit,profitFor,feeAmountLabel,feeSummary,shippingFunds,profitEquation,normalizeTitle,titleRuleFor,receiptFor,receiptNote};root.OGLiveReportModel=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof window!=='undefined'?window:globalThis);
