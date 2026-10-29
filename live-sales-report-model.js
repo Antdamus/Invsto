@@ -7,6 +7,17 @@
   const money=value=>value==null?'Not set':new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(value/100);
   const rateMoney=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:4}).format(value);
   const date=value=>Number.isFinite(Date.parse(value))?new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(new Date(value)):null;
+  function buyerProfit(stats,expensesKnown){
+    const covered=stats.pricedPaid,total=stats.paid.count,partial=covered>0&&covered<total;
+    const missing=[];
+    if(stats.missingCosts)missing.push(`${stats.missingCosts} missing base ${stats.missingCosts===1?'cost':'costs'}`);
+    if(stats.missingPaidAmounts)missing.push(`${stats.missingPaidAmounts} missing sale ${stats.missingPaidAmounts===1?'amount':'amounts'}`);
+    return {amount:covered?(expensesKnown?stats.profit:stats.margin):null,
+      label:expensesKnown?'Estimated profit':'Profit before expenses',
+      basis:expensesKnown?'After estimated fees and shipping':'Before fees and shipping',
+      status:!total?'No paid purchases':!covered?'Unavailable':partial?'Partial':'Complete',
+      partial,coverage:`${covered} of ${total} paid purchases included`,missing:missing.join(' · ')};
+  }
   function parseTitle(title){
     const text=String(title||'');
     const weights=[...text.matchAll(/(?<![\d.,-])(\d+(?:\.\d+)?)\s*(?:grams?|grs?|g)\b/gi)].map(m=>Number(m[1]));
@@ -64,11 +75,11 @@
       customer.rows.push(row);return row;
     });
     const summarize=list=>{
-      const result={items:list.length,expectedItems:0,missingCosts:0,pricedPaid:0,base:0,margin:0,profit:0,missingAmounts:0,lossItems:0,lossAmount:0};
+      const result={items:list.length,expectedItems:0,missingCosts:0,pricedPaid:0,base:0,margin:0,profit:0,missingAmounts:0,missingPaidAmounts:0,lossItems:0,lossAmount:0};
       for(const state of Object.keys(labels))result[state]={count:0,amount:0};
       for(const r of list){result[r.state].count++;if(r.price==null)result.missingAmounts++;else result[r.state].amount+=r.price;
         if(r.loss>0){result.lossItems++;result.lossAmount+=r.loss;}
-        if(r.state==='paid'){result.expectedItems+=r.quantity;if(r.cost.base==null)result.missingCosts++;else if(r.price!=null){result.pricedPaid++;result.base+=r.cost.base;result.margin+=r.margin;if(r.profit!=null)result.profit+=r.profit;}}
+        if(r.state==='paid'){result.expectedItems+=r.quantity;if(r.price==null)result.missingPaidAmounts++;if(r.cost.base==null)result.missingCosts++;else if(r.price!=null){result.pricedPaid++;result.base+=r.cost.base;result.margin+=r.margin;if(r.profit!=null)result.profit+=r.profit;}}
       }return result;
     };
     const customers=[...buyers.values()].sort((a,b)=>a.username.localeCompare(b.username));
@@ -77,5 +88,5 @@
     customers.sort((a,b)=>b.stats.lossAmount-a.stats.lossAmount||a.username.localeCompare(b.username));
     return {sessionId:payload.show?.id||c.session_id,show:payload.show||{},title:payload.show?.title||c.stream_metadata?.title||'Live sales report',connection:c,settings,customers,rows,stats:summarize(rows),expensesKnown,lossBasis:expensesKnown?'after estimated fees and shipping':'before fees and shipping',generatedAt:now.toISOString(),updatedAt:payload.server_time||now.toISOString(),date:date(now.toISOString()),unmatched:(payload.unmatched||[]).length,origin};
   }
-  const api={RATE_KEYS,labels,number,cents,money,rateMoney,date,parseTitle,costFor,makeModel};root.OGLiveReportModel=api;if(typeof module!=='undefined')module.exports=api;
+  const api={RATE_KEYS,labels,number,cents,money,rateMoney,date,parseTitle,costFor,makeModel,buyerProfit};root.OGLiveReportModel=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof window!=='undefined'?window:globalThis);

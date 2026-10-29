@@ -69,3 +69,36 @@ test('loss assessment uses complete expense estimates but excludes unassessed an
   const incomplete=M.makeModel({attempts,costs,settings:{fee_percent:10,fee_fixed:null,shipping_per_sale:5}});assert.equal(incomplete.stats.lossItems,0);assert.equal(incomplete.lossBasis,'before fees and shipping');
   const corrected=M.makeModel({attempts,costs:{...costs,'0':{mode:'manual',base_cost:0}},settings:{fee_percent:10,fee_fixed:1,shipping_per_sale:5}});assert.equal(corrected.stats.lossItems,0);
 });
+
+test('buyer profit reports partial coverage without treating missing costs or sale amounts as zero',()=>{
+  const attempts=[{id:'known',buyer:'a',amount:100,payment_state:'paid'},
+    {id:'cost-missing',buyer:'a',amount:200,payment_state:'paid'},
+    {id:'amount-missing',buyer:'a',amount:null,payment_state:'paid'},
+    {id:'pending',buyer:'a',amount:300,payment_state:'waiting'},
+    {id:'held',buyer:'a',amount:100,payment_state:'paid',payment_hold:true},
+    {id:'resolved',buyer:'a',amount:100,payment_state:'paid',resolved_at:'2026-10-29'}];
+  const costs={known:{mode:'manual',base_cost:40},'amount-missing':{mode:'manual',base_cost:30}};
+  const model=M.makeModel({attempts,costs,settings});
+  const p=M.buyerProfit(model.customers[0].stats,model.expensesKnown);
+  assert.equal(p.amount,4400);assert.equal(p.status,'Partial');assert.equal(p.partial,true);
+  assert.equal(p.coverage,'1 of 3 paid purchases included');assert.equal(p.missing,'1 missing base cost · 1 missing sale amount');
+  assert.equal(p.label,'Estimated profit');assert.equal(p.basis,'After estimated fees and shipping');
+  const before=M.makeModel({attempts,costs});
+  assert.equal(M.buyerProfit(before.stats,before.expensesKnown).amount,6000);
+  assert.equal(M.buyerProfit(before.stats,before.expensesKnown).label,'Profit before expenses');
+  const fixed=M.makeModel({attempts:attempts.map(a=>a.id==='amount-missing'?{...a,amount:50}:a),costs:{...costs,'cost-missing':{mode:'manual',base_cost:100}},settings});
+  const complete=M.buyerProfit(fixed.stats,fixed.expensesKnown);
+  assert.equal(complete.amount,12700);assert.equal(complete.status,'Complete');assert.equal(complete.missing,'');
+});
+
+test('buyer profit distinguishes unavailable, no paid purchases, known zero and a net loss',()=>{
+  const a={id:'one',buyer:'a',amount:10,payment_state:'paid'};
+  const profit=(attempts,costs={})=>{const m=M.makeModel({attempts,costs});return M.buyerProfit(m.stats,m.expensesKnown);};
+  assert.equal(profit([a]).amount,null);assert.equal(profit([a]).status,'Unavailable');
+  assert.equal(profit([{...a,amount:null}],{one:{mode:'manual',base_cost:0}}).amount,null);
+  assert.equal(profit([{...a,payment_state:'failed'}]).status,'No paid purchases');
+  assert.equal(profit([]).amount,null);
+  assert.equal(profit([a],{one:{mode:'manual',base_cost:10}}).amount,0);
+  assert.equal(profit([a],{one:{mode:'manual',base_cost:0}}).amount,1000);
+  assert.equal(profit([a],{one:{mode:'manual',base_cost:20}}).amount,-1000);
+});
