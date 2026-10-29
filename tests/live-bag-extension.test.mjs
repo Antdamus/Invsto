@@ -113,7 +113,8 @@ test('minimized capture still sends new evidence and automatically prints once, 
   await page.getByRole('button',{name:'Minimize Invsto panel',exact:true}).click();
   const launcher=page.getByRole('button',{name:'Open Invsto panel',exact:true});await expect(launcher).toBeFocused();
   await expect(page.locator('[data-bag-print]')).toBeHidden();
-  const mini=await page.locator('#invsto-capture-helper').boundingBox();assert.ok(mini.width<=114&&mini.height<=44);
+  const mini=await page.locator('#invsto-capture-helper').boundingBox();assert.ok(mini.width<=274&&mini.height<=90);
+  await expect(page.locator('[data-panel-camera]')).toContainText('Bag #004');
   await page.evaluate(()=>{nextEvidence=[{key:'paid-while-minimized',listing_id:'new-listing',kind:'paid',buyer:'new-winner',amount:25}];sales[2].buyer='waiting-winner';});
   await expect.poll(()=>page.evaluate(()=>packets.some(p=>p.events.some(e=>e.key==='paid-while-minimized')&&p.health.running&&p.health.ready))).toBe(true);
   await expect.poll(()=>page.evaluate(()=>jobs.length),{timeout:8000}).toBe(1);
@@ -160,6 +161,54 @@ test('minimizing during a photo save preserves the pending photo and its retry i
   await page.locator('[data-panel-open]').click();await expect(page.locator('[data-bag-camera]')).toHaveAttribute('aria-label','Retry saving photo to bag #012');
   await page.locator('[data-bag-camera]').click();await expect(page.locator('[data-bag-status]')).toContainText('Photo saved to #012');
   assert.equal(await page.evaluate(()=>photos.length),1);assert.equal(await page.evaluate(()=>captureCount),1);
+});
+
+test('minimized camera saves the selected bag and confirms only after acknowledgement without expanding',async t=>{
+  const page=await open(t);
+  await page.locator('[data-bag-choice]').selectOption('00000000-0000-4000-8000-000000000001');
+  await page.locator('[data-panel-minimize]').click();
+  const camera=page.locator('[data-panel-camera]'),receipt=page.locator('[data-panel-photo-status]');
+  await expect(camera).toHaveAttribute('aria-label','Save live photo to bag #004');
+  await page.evaluate(()=>{window.delayedPhoto=true;});
+  await camera.press('Enter');await expect.poll(()=>page.evaluate(()=>photos.length)).toBe(1);
+  await expect(camera).toBeDisabled();await expect(camera).toHaveAttribute('aria-busy','true');
+  await expect(receipt).toHaveText('Saving to bag #004…');await expect(receipt).not.toContainText('Saved');
+  await page.evaluate(()=>{window.delayedPhoto=false;finishPhoto();});
+  await expect(receipt).toHaveText('✓ Saved to bag #004');await expect(camera).toBeEnabled();
+  await expect(page.locator('[data-bag-camera]')).toBeHidden();
+  assert.equal(await page.evaluate(()=>photos[0]._attempt_id),'00000000-0000-4000-8000-000000000001');
+  assert.equal(await page.evaluate(()=>captureCount),1);
+});
+
+test('minimized photo retry keeps its bag and original image when another sale arrives',async t=>{
+  const page=await open(t);
+  await page.locator('[data-panel-minimize]').click();
+  const camera=page.locator('[data-panel-camera]'),receipt=page.locator('[data-panel-photo-status]');
+  await page.evaluate(()=>{window.delayedPhoto=true;window.failPhotoAck=true;});
+  await camera.click();await expect.poll(()=>page.evaluate(()=>photos.length)).toBe(1);
+  await page.evaluate(()=>{sales[2].buyer='next-winner';window.delayedPhoto=false;finishPhoto();});
+  await expect(receipt).toHaveText('Unconfirmed · retry bag #012');
+  await expect(camera).toContainText('Retry photo');await expect(camera).toContainText('Bag #012');
+  await camera.click();await expect(receipt).toHaveText('✓ Saved to bag #012');
+  await expect(camera).toContainText('Bag #013');
+  await expect(receipt).toHaveText('✓ Saved to bag #012');
+  assert.equal(await page.evaluate(()=>photos.length),1);assert.equal(await page.evaluate(()=>captureCount),1);
+  assert.equal(await page.evaluate(()=>photos[0]._attempt_id),'00000000-0000-4000-8000-000000000002');
+});
+
+test('minimized camera reports frame failures and saves pending or failed payment bags',async t=>{
+  const page=await open(t);
+  await page.evaluate(()=>{sales[1].payment_state='failed';window.failFrame=true;});
+  await page.locator('[data-panel-minimize]').click();
+  const camera=page.locator('[data-panel-camera]'),receipt=page.locator('[data-panel-photo-status]');
+  await camera.click();await expect(receipt).toHaveText('Photo failed · bag #012');
+  await expect(receipt).toHaveAttribute('title','Video is not playing');assert.equal(await page.evaluate(()=>photos.length),0);
+  await page.evaluate(()=>{window.failFrame=false;});
+  await camera.click();await expect(receipt).toHaveText('✓ Saved to bag #012');
+  await page.evaluate(()=>{sales[2].buyer='pending-winner';});
+  await expect(camera).toContainText('Bag #013');
+  await camera.click();await expect(receipt).toHaveText('✓ Saved to bag #013');
+  assert.deepEqual(await page.evaluate(()=>photos.map(p=>p._attempt_id)),['00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000003']);
 });
 test('compact panel prints the exact saved paid bag through the existing queue and preserves QR identity',async t=>{
   const page=await open(t);

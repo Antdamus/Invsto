@@ -16,7 +16,7 @@
     const clear=document.createElement('button');clear.type='button';clear.textContent='Clear pending send';clear.hidden=true;$('.bag-settings').append(clear);
     const panel=window.InvstoCapturePanel?.mount(box);
     let sales=[],printer=null,automatic=null,chosen='',busy=false,loading=false,ready=false,pending=null,completed=new Set(),printStatusAvailable=false;
-    let photoPending=null,photoTaking=false,photoSale=null;
+    let photoPending=null,photoTaking=false,photoSale=null,photoFeedback=null;
     try{pending=JSON.parse(sessionStorage.getItem(key)||'null');}catch{}
     try{photoPending=JSON.parse(sessionStorage.getItem(photoKey)||'null');}catch{}
     const status=(text,error=false)=>{$('[data-bag-status]').textContent=text;$('[data-bag-status]').classList.toggle('error',error);};
@@ -40,8 +40,15 @@
       print.disabled=busy||!!photoPending||!!automatic?.busy||!ready||!sale||!!(activeJob&&!pending);
       print.textContent=busy&&!photoTaking?'Sending…':pending?'Retry send':activeJob?'Label queued':!printer?'Choose printer':(job||completed.has(sale?.id)||automatic?.completed?.includes(sale?.id))?'Reprint label':'Print label';
       camera.disabled=busy||!!pending||!ready||!sale;
-      camera.title=photoTaking?'Saving photo…':`${photoPending?'Retry saving photo':'Save live photo'} to bag ${sale?.number?'#'+sale.number:''}`;
+      camera.title=photoTaking?`Saving photo to bag ${sale?.number?'#'+sale.number:''}…`:`${photoPending?'Retry saving photo':'Save live photo'} to bag ${sale?.number?'#'+sale.number:''}`;
       camera.setAttribute('aria-label',camera.title);
+      panel?.setPhotoAction({
+        disabled:camera.disabled,onClick:takePhoto,label:camera.title,buyer:sale?.buyer,
+        target:sale?.number?'Bag #'+sale.number:sale?'Selected bag':ready?'No bag yet':'Connecting…',retry:!!photoPending,
+        phase:photoTaking?'saving':!ready?'error':photoFeedback?.phase|| (photoPending?'error':'idle'),
+        message:photoTaking?`Saving to bag #${sale.number||'—'}…`:!ready?'Connect Invsto to save photos':photoFeedback?.message||(photoPending?`Unconfirmed · retry bag #${sale?.number||'—'}`:sale?`Ready · ${sale.buyer}`:'Waiting for an item with a buyer'),
+        detail:!ready?$('[data-bag-status]').textContent:photoFeedback?.detail
+      });
       choice.disabled=busy||!!pending||!!photoPending;configure.disabled=busy||!!pending||!!photoPending;
       clear.hidden=!pending&&!photoPending;clear.disabled=busy;clear.textContent=photoPending?'Discard pending photo':'Clear pending send';
       const signature=JSON.stringify([printStatusAvailable,sales.map(s=>[s.id,s.number,s.buyer,s.payment_state,s.payment_hold,s.resolved,s.printJob?.status])]);
@@ -91,13 +98,13 @@
     };
     clear.onclick=()=>{
       if(busy)return;
-      if(photoPending){if(!confirm('Discard this pending photo? It may already be saved to the bag if the confirmation was lost.'))return;photoPending=null;sessionStorage.removeItem(photoKey);status('Pending photo cleared.');render();return;}
+      if(photoPending){if(!confirm('Discard this pending photo? It may already be saved to the bag if the confirmation was lost.'))return;photoPending=null;photoFeedback=null;sessionStorage.removeItem(photoKey);status('Pending photo cleared.');render();return;}
       if(!pending||!confirm('This label may already have been sent. Check the printer or Print Stations before clearing it. A later print will request a new copy. Clear this pending send?'))return;pending=null;sessionStorage.removeItem(key);status('Pending send cleared. Check the earlier job before printing another copy.');render();
     };
     choice.onchange=()=>{chosen=choice.value;status('');render();};
-    camera.onclick=async()=>{
+    async function takePhoto(){
       const sale=selected();if(busy||pending||!ready||!sale)return;
-      busy=true;photoTaking=true;photoSale=sale;render();status(`Saving live photo to #${sale.number||'bag'}…`);
+      busy=true;photoTaking=true;photoSale=sale;photoFeedback=null;render();status(`Saving live photo to #${sale.number||'bag'}…`);
       try{
         if(!photoPending){
           const result=await command('capture');
@@ -107,9 +114,15 @@
         }
         await command('photo',photoPending);
         photoPending=null;sessionStorage.removeItem(photoKey);status(`✓ Photo saved to #${sale.number||'bag'}.`);
-      }catch(error){status(`${error.message}${photoPending?' Click the camera to retry this same photo.':''}`,true);}
+        // Keep the saved destination in the receipt when automatic selection moves to a newer bag.
+        photoFeedback={phase:'success',message:`✓ Saved to bag #${sale.number||'—'}`,detail:`Photo saved to ${sale.buyer||'the selected buyer'} · bag #${sale.number||'—'}`};
+      }catch(error){
+        const detail=`${error.message}${photoPending?' Click the camera to retry this same photo.':''}`;
+        status(detail,true);photoFeedback={phase:'error',message:photoPending?`Unconfirmed · retry bag #${sale.number||'—'}`:`Photo failed · bag #${sale.number||'—'}`,detail};
+      }
       finally{photoTaking=false;photoSale=null;busy=false;render();}
-    };
+    }
+    camera.onclick=takePhoto;
     print.onclick=async()=>{
       const sale=selected();if(busy||photoPending||!ready||!sale)return;
       if(!printer&&!pending)return settings();

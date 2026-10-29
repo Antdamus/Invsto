@@ -13,8 +13,23 @@
       #invsto-capture-helper [data-panel-capture]{margin-left:auto;font-size:10px;font-weight:400;color:#bfcabe}
       #invsto-capture-helper [data-panel-minimize]{display:grid;place-items:center;width:30px;height:30px;padding:0;flex:none;background:#ffffff08}
       #invsto-capture-helper .capture-panel-content{min-height:0;overflow:auto;overscroll-behavior:contain;padding:0 12px 12px}
-      #invsto-capture-helper.capture-panel-minimized{width:112px;border-radius:999px}
-      #invsto-capture-helper [data-panel-open]{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:40px;padding:0 10px;border:0;border-radius:inherit;background:none;font-weight:700;font-size:12px;touch-action:none;user-select:none}
+      #invsto-capture-helper.capture-panel-minimized{width:272px;border-radius:18px;overflow:hidden}
+      #invsto-capture-helper .capture-panel-mini{padding:6px}
+      #invsto-capture-helper .capture-panel-mini button{margin:0}
+      #invsto-capture-helper .capture-panel-mini-row{display:flex;align-items:stretch;gap:6px}
+      #invsto-capture-helper [data-panel-open]{display:flex;align-items:center;justify-content:center;gap:7px;flex:none;width:94px;min-height:46px;padding:0 6px;border:0;background:none;font-weight:700;font-size:12px;touch-action:none;user-select:none;cursor:grab}
+      #invsto-capture-helper [data-panel-camera]{display:flex;align-items:center;justify-content:center;gap:10px;flex:1;min-width:0;padding:7px 10px;border:1px solid #f6dfaf80;border-radius:12px;background:linear-gradient(135deg,#f6dfad,#e8c47f);color:#19291f;box-shadow:0 2px 8px #0002;text-align:left}
+      #invsto-capture-helper [data-panel-camera]:hover:not(:disabled){background:#f8e3b7}
+      #invsto-capture-helper [data-panel-camera] svg{flex:none}
+      #invsto-capture-helper [data-panel-camera] span{min-width:0}
+      #invsto-capture-helper [data-panel-camera] small{display:block;font-size:9px;line-height:1.3;letter-spacing:.08em;text-transform:uppercase;font-weight:650}
+      #invsto-capture-helper [data-panel-camera] strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;line-height:1.4;font-weight:750}
+      #invsto-capture-helper [data-panel-camera][aria-busy="true"] svg{animation:invsto-photo-pulse 1s ease-in-out infinite alternate}
+      #invsto-capture-helper [data-panel-photo-status]{margin:6px 7px 1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;line-height:1.5;color:#bfccc2}
+      #invsto-capture-helper [data-panel-photo-status][data-state="success"]{color:#bce9c6}
+      #invsto-capture-helper [data-panel-photo-status][data-state="error"]{color:#ffb8aa}
+      @keyframes invsto-photo-pulse{to{opacity:.35}}
+      @media(prefers-reduced-motion:reduce){#invsto-capture-helper [data-panel-camera][aria-busy="true"] svg{animation:none}}
       #invsto-capture-helper .capture-panel-dot{width:7px;height:7px;border-radius:50%;background:#a8b3aa;flex:none}
       #invsto-capture-helper[data-panel-state="active"] .capture-panel-dot{background:#9ddeaa;box-shadow:0 0 0 3px #9ddeaa16}
       #invsto-capture-helper[data-panel-state="attention"] .capture-panel-dot,#invsto-capture-helper[data-panel-state="waiting"] .capture-panel-dot{background:#efd295}
@@ -30,8 +45,14 @@
     header.innerHTML='<button type="button" data-panel-move aria-label="Move Invsto panel" title="Drag to move · arrow keys to adjust · Home to reset"><svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><path d="M2 2h2v2H2zm6 0h2v2H8zM2 7h2v2H2zm6 0h2v2H8zM2 12h2v2H2zm6 0h2v2H8z"/></svg><strong>Invsto</strong><span data-panel-capture>Checking capture…</span></button><button type="button" data-panel-minimize aria-label="Minimize Invsto panel" title="Minimize · capture and auto print keep running" aria-controls="invsto-capture-panel-content" aria-expanded="true"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
     const launcher=document.createElement('button');launcher.type='button';launcher.dataset.panelOpen='';launcher.setAttribute('aria-label','Open Invsto panel');launcher.setAttribute('aria-controls',content.id);launcher.setAttribute('aria-expanded','false');launcher.setAttribute('aria-describedby','invsto-capture-panel-status');
     launcher.innerHTML='<span class="capture-panel-dot" aria-hidden="true"></span>Invsto<svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="m3 7 3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    const mini=document.createElement('div');mini.className='capture-panel-mini';
+    const miniRow=document.createElement('div');miniRow.className='capture-panel-mini-row';
+    const camera=document.createElement('button');camera.type='button';camera.dataset.panelCamera='';camera.disabled=true;camera.setAttribute('aria-describedby','invsto-panel-photo-status');
+    camera.innerHTML='<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 5l1.5-2h5L16 5h4a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V7a2 2 0 012-2z"/><circle cx="12" cy="13" r="4"/></svg><span><small>Screenshot</small><strong>Connecting…</strong></span>';
+    const photoStatus=document.createElement('p');photoStatus.id='invsto-panel-photo-status';photoStatus.dataset.panelPhotoStatus='';photoStatus.setAttribute('role','status');photoStatus.setAttribute('aria-live','polite');photoStatus.setAttribute('aria-atomic','true');
+    miniRow.append(launcher,camera);mini.append(miniRow,photoStatus);
     const description=document.createElement('span');description.id='invsto-capture-panel-status';description.className='capture-panel-sr';
-    box.append(header,content,launcher,description);
+    box.append(header,content,mini,description);
     const move=header.querySelector('[data-panel-move]'),minimize=header.querySelector('[data-panel-minimize]'),captureLabel=header.querySelector('[data-panel-capture]');
     let position=home(),minimized=false,capture={state:'waiting',label:'Checking capture…'},bag={state:'waiting',label:'Connecting auto print…'};
     try {
@@ -62,7 +83,7 @@
     }
     function collapse(value,focus=false) {
       minimized=value;box.classList.toggle('capture-panel-minimized',minimized);
-      header.hidden=content.hidden=minimized;launcher.hidden=!minimized;
+      header.hidden=content.hidden=minimized;mini.hidden=!minimized;
       place();
       if(focus)(minimized?launcher:minimize).focus({preventScroll:true});
     }
@@ -111,7 +132,16 @@
     requestAnimationFrame(place);new ResizeObserver(place).observe(box);window.addEventListener('resize',place);
     return {
       setCaptureStatus(value){capture=value;renderStatus();},
-      setBagStatus(value){bag=value;renderStatus();}
+      setBagStatus(value){bag=value;renderStatus();},
+      setPhotoAction(value){
+        camera.disabled=value.disabled;camera.onclick=value.onClick;
+        camera.setAttribute('aria-busy',String(value.phase==='saving'));
+        camera.setAttribute('aria-label',value.label);camera.title=[value.label,value.buyer].filter(Boolean).join(' · ');
+        camera.querySelector('small').textContent=value.phase==='saving'?'Saving…':value.retry?'Retry photo':'Screenshot';
+        camera.querySelector('strong').textContent=value.target;
+        photoStatus.dataset.state=value.phase;photoStatus.title=value.detail||value.message;
+        if(photoStatus.textContent!==value.message)photoStatus.textContent=value.message;
+      }
     };
   }
   window.InvstoCapturePanel={mount};

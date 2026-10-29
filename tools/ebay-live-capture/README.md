@@ -1,4 +1,12 @@
-# Invsto Live Capture (1.7.5)
+# Invsto Live Capture (1.7.6)
+
+## Minimized screenshot button (1.7.6)
+
+The minimized panel now has a gold **Screenshot / Bag #…** button beside Invsto. Check the displayed bag and click to save the live video frame without opening the full panel. It follows the same latest or manually selected bag as the full camera, regardless of payment state. Click **Invsto** to expand and choose a different bag; drag that side to move the panel.
+
+The receipt shows **Saving**, then a green **Saved to bag #…** only after Invsto confirms the attachment. If another sale arrives, the button moves to the new bag while the last saved receipt retains its original bag number. An unconfirmed save shows **Retry photo** and stays on its original bag and image; retrying cannot create a duplicate attachment. A video-frame failure shows an error instead of success. The controls are disabled while a photo is being saved.
+
+Reload the existing extension from its extension card, then refresh Stream Manager and the receiver. No new permissions or database update are needed.
 
 ## Sold-card layout recovery (1.7.5)
 
