@@ -3048,6 +3048,16 @@
     };
   }
 
+  function renderEbayBuyerPurchaseReport(conversation) {
+    if (ebayConversationIsPlatform(conversation)) return "";
+    const username = ebayUsableParticipantUsername(
+      conversation?.buyer_identity?.username || conversation?.other_party_username,
+      conversation,
+    );
+    if (!username) return "";
+    return `<a class="secondary-btn triage-purchase-report" href="ebay-buyer-report.html?buyer=${escapeHtml(encodeURIComponent(username))}&amp;scope=all" target="_blank" rel="noopener noreferrer" aria-label="Open full purchase history for ${escapeHtml(username)} (new tab)" title="Full purchase history, refunds, item photos and PDF · opens in a new tab"><i data-lucide="file-clock" aria-hidden="true"></i>Purchase history<i data-lucide="arrow-up-right" aria-hidden="true"></i></a>`;
+  }
+
   function ebayConversationIdentitySearchParts(conversation) {
     const identity = ebayBuyerIdentity(conversation);
     const rawIdentity = conversation?.raw?.buyer_identity && typeof conversation.raw.buyer_identity === "object"
@@ -8861,7 +8871,7 @@
       <div class="ebay-detail-head" data-triage-selected="${escapeHtml(conversation.id)}">
         <div>
           <span class="eyebrow">${escapeHtml(isPlatformConversation ? "eBay notification" : "Conversation")}</span>
-          <h3>${copyableTextMarkup(buyerHeading, isPlatformConversation ? "conversation title" : "buyer id", "triage-title-copy")}</h3>
+          <div class="triage-buyer-heading"><h3>${copyableTextMarkup(buyerHeading, isPlatformConversation ? "conversation title" : "buyer id", "triage-title-copy")}</h3>${renderEbayBuyerPurchaseReport(conversation)}</div>
           <div class="selected-email-meta ebay-triage-header-meta">
             ${orderLabel ? `<span>Order ${copyableTextMarkup(orderLabel, "order number", "triage-inline-copy")}</span>` : ""}
             ${valueLabel ? `<span>${escapeHtml(valueLabel)}</span>` : ""}
@@ -9028,7 +9038,7 @@
     const compactSummary = context ? `
       <section class="context-card ebay-context-compact-summary">
         <div class="context-card-head">
-          <h4>${copyableTextMarkup(identity.displayName, "buyer id", "triage-inline-copy")}</h4>
+          <div class="triage-buyer-heading"><h4>${copyableTextMarkup(identity.displayName, "buyer id", "triage-inline-copy")}</h4>${renderEbayBuyerPurchaseReport(conversation)}</div>
           ${renderBadge(facts.orderNumbers.length ? (facts.orderConfirmed ? "Order linked" : "Verify order") : facts.buyerOrders.length ? "Choose order" : "Buyer identified", facts.orderNumbers.length ? "success" : "category")}
         </div>
         ${renderContextFactGrid([
