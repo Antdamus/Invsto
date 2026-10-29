@@ -113,7 +113,7 @@ test('minimized capture still sends new evidence and automatically prints once, 
   await page.getByRole('button',{name:'Minimize Invsto panel',exact:true}).click();
   const launcher=page.getByRole('button',{name:'Open Invsto panel',exact:true});await expect(launcher).toBeFocused();
   await expect(page.locator('[data-bag-print]')).toBeHidden();
-  const mini=await page.locator('#invsto-capture-helper').boundingBox();assert.ok(mini.width<=274&&mini.height<=90);
+  const mini=await page.locator('#invsto-capture-helper').boundingBox();assert.ok(mini.width<=342&&mini.height<=104);
   await expect(page.locator('[data-panel-camera]')).toContainText('Bag #004');
   await page.evaluate(()=>{nextEvidence=[{key:'paid-while-minimized',listing_id:'new-listing',kind:'paid',buyer:'new-winner',amount:25}];sales[2].buyer='waiting-winner';});
   await expect.poll(()=>page.evaluate(()=>packets.some(p=>p.events.some(e=>e.key==='paid-while-minimized')&&p.health.running&&p.health.ready))).toBe(true);
@@ -146,6 +146,7 @@ test('both panel sizes can be dragged, remember placement on reload, and stay re
   await page.screenshot({path:'test-results/live-panel-small-screen.png'});
   await page.locator('[data-panel-move]').focus();await page.keyboard.press('ArrowRight');
   assert.ok(Math.abs((await box.boundingBox()).x-8)<2,'a panel as wide as the viewport cannot move off screen');
+  await page.setViewportSize({width:480,height:420});
   await page.locator('[data-panel-minimize]').click();await page.locator('[data-panel-open]').press('Home');
   const start=await box.boundingBox();await page.locator('[data-panel-open]').press('ArrowRight');
   assert.ok(Math.abs((await box.boundingBox()).x-start.x-10)<2);
@@ -209,6 +210,33 @@ test('minimized camera reports frame failures and saves pending or failed paymen
   await expect(camera).toContainText('Bag #013');
   await camera.click();await expect(receipt).toHaveText('✓ Saved to bag #013');
   assert.deepEqual(await page.evaluate(()=>photos.map(p=>p._attempt_id)),['00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000003']);
+});
+
+test('minimized printer receipt follows acknowledged jobs for the displayed bag and remains separate from photos',async t=>{
+  const page=await open(t),badge=page.locator('[data-panel-print-status]');
+  await page.locator('[data-bag-print]').click();
+  await page.locator('[data-panel-minimize]').click();
+  await expect(page.locator('[data-panel-buyer]')).toHaveText('current-winner');
+  await expect(badge).toHaveText('Bag #012 · Waiting for printer');await expect(badge).toHaveAttribute('data-state','queued');
+  await page.evaluate(()=>{jobs[0].status='claimed';});
+  await expect(badge).toHaveText('Bag #012 · Sending to printer');
+  await page.evaluate(()=>{jobs[0].status='submitted';});
+  await expect(badge).toHaveText('✓ Bag #012 · Received by printer');await expect(badge).toHaveAttribute('data-state','submitted');
+  await page.locator('[data-panel-camera]').click();
+  await expect(page.locator('[data-panel-photo-status]')).toHaveText('✓ Saved to bag #012');
+  await expect(badge).toHaveText('✓ Bag #012 · Received by printer');
+  await page.evaluate(()=>{window.receiptsUnavailable=true;});
+  await expect(badge).toHaveText('Bag #012 · Print status unavailable');await expect(badge).toHaveAttribute('data-state','unknown');
+  await page.evaluate(()=>{window.receiptsUnavailable=false;jobs[0].status='failed';});
+  await expect(badge).toHaveText('Bag #012 · Print failed');await expect(badge).toHaveAttribute('data-state','failed');
+  await page.evaluate(()=>{jobs[0].status='uncertain';});
+  await expect(badge).toHaveText('Bag #012 · Check printer');await expect(badge).toHaveAttribute('data-state','uncertain');
+  await page.evaluate(()=>{jobs[0].status='submitted';sales[2].buyer='next-winner';});
+  await expect(page.locator('[data-panel-camera]')).toContainText('Bag #013');
+  await expect(page.locator('[data-panel-buyer]')).toHaveText('next-winner');
+  await expect(badge).not.toHaveAttribute('data-state','submitted');await expect(badge).toContainText('Bag #013');
+  await page.locator('[data-panel-open]').click();await page.locator('[data-bag-choice]').selectOption('00000000-0000-4000-8000-000000000002');
+  await page.locator('[data-panel-minimize]').click();await expect(badge).toHaveText('✓ Bag #012 · Received by printer');
 });
 test('compact panel prints the exact saved paid bag through the existing queue and preserves QR identity',async t=>{
   const page=await open(t);

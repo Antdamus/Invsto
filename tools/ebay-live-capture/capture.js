@@ -1,6 +1,6 @@
 'use strict';
 (() => {
-  const version=chrome.runtime.getManifest?.().version||'1.7.6';
+  const version=chrome.runtime.getManifest?.().version||'1.7.7';
   const event_id=location.pathname.split('/')[4];
   if (!/^[\w-]{6,100}$/.test(event_id||'')) return;
   const tab = name => [...document.querySelectorAll('[role="tab"]')].find(el=>new RegExp('^'+name+'(?:\\s|\\(|$)','i').test(el.textContent.trim()));

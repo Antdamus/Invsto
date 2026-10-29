@@ -1,4 +1,10 @@
-# Invsto Live Capture (1.7.6)
+# Invsto Live Capture (1.7.7)
+
+## Printer receipt beside the buyer (1.7.7)
+
+The minimized panel keeps the buyer's name visible beside a colored receipt for the displayed bag. **Green: Bag #… · Received by printer** appears only after the printer software acknowledges that bag's print job. **Amber** means queued, sending, or needing a printer check; **red** means failed or canceled. An unsent label or unavailable status stays neutral. Hover for the acknowledgement time, station and roll when available. The receipt does not prove the physical label emerged from the printer.
+
+The badge follows the selected bag, including earlier bags, and updates automatically. Photo-saving feedback has its own line, so taking a screenshot does not hide the buyer or printer receipt. Reload the existing extension, then refresh Stream Manager and the signed-in receiver.
 
 ## Minimized screenshot button (1.7.6)
 

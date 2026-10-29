@@ -1,5 +1,5 @@
 'use strict';
-const captureVersion=chrome.runtime.getManifest?.().version||'1.7.6';
+const captureVersion=chrome.runtime.getManifest?.().version||'1.7.7';
 let serial = Promise.resolve();
 // A receiver's own timer stops when Edge suspends that page. Keep the deadline
 // in the worker so one unanswered message cannot hold the persisted outbox lock.

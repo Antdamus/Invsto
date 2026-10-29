@@ -46,7 +46,7 @@
         disabled:camera.disabled,onClick:takePhoto,label:camera.title,buyer:sale?.buyer,
         target:sale?.number?'Bag #'+sale.number:sale?'Selected bag':ready?'No bag yet':'Connecting…',retry:!!photoPending,
         phase:photoTaking?'saving':!ready?'error':photoFeedback?.phase|| (photoPending?'error':'idle'),
-        message:photoTaking?`Saving to bag #${sale.number||'—'}…`:!ready?'Connect Invsto to save photos':photoFeedback?.message||(photoPending?`Unconfirmed · retry bag #${sale?.number||'—'}`:sale?`Ready · ${sale.buyer}`:'Waiting for an item with a buyer'),
+        message:photoTaking?`Saving to bag #${sale.number||'—'}…`:!ready?'Connect Invsto to save photos':photoFeedback?.message||(photoPending?`Unconfirmed · retry bag #${sale?.number||'—'}`:sale?'':'Waiting for an item with a buyer'),
         detail:!ready?$('[data-bag-status]').textContent:photoFeedback?.detail
       });
       choice.disabled=busy||!!pending||!!photoPending;configure.disabled=busy||!!pending||!!photoPending;
@@ -68,6 +68,11 @@
       }else if(ready&&sale)details.push('Checking again automatically. Open Print Stations to verify.');
       receipt.querySelector('small').textContent=details.filter(Boolean).join(' · ');
       receipt.title=job?.detail||'';
+      // Only the selected bag's acknowledged job can turn the mini receipt green.
+      const printState=!ready||!printStatusAvailable?'unknown':pending?(busy&&!photoTaking?'claimed':'uncertain'):job?.status||'unsent';
+      const printMessage=({submitted:'Received by printer',queued:'Waiting for printer',claimed:'Sending to printer',failed:'Print failed',uncertain:'Check printer',cancelled:'Print cancelled',unknown:'Print status unavailable',unsent:printer?.local&&completed.has(sale?.id)?'Downloaded · unconfirmed':'Label not sent'})[printState]||'Print status unavailable';
+      panel?.setPrintStatus({buyer:sale?.buyer,state:printState,message:`${printState==='submitted'?'✓ ':''}${sale?.number?'Bag #'+sale.number:'Bag'} · ${printMessage}`,
+        detail:[printMessage,details.filter(Boolean).join(' · '),job?.detail,printState==='submitted'?'The printer software acknowledged this label. Check the printer for the physical label.':''].filter(Boolean).join(' · ')});
       const toggle=$('[data-bag-auto-toggle]');toggle.disabled=busy||!ready;toggle.textContent=automatic?.enabled===false?'Resume':'Pause';toggle.setAttribute('aria-label',automatic?.enabled===false?'Resume automatic printing':'Pause automatic printing');
       $('[data-bag-auto-state]').textContent=automatic?.enabled===false?'Auto print paused':automatic?.busy?'Auto print · sending…':!printer?.stationId?'Auto print · choose printer':'Auto print on · '+printer.name;
       const autoStatus=$('[data-bag-auto-status]');

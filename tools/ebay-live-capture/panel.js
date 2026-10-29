@@ -13,7 +13,7 @@
       #invsto-capture-helper [data-panel-capture]{margin-left:auto;font-size:10px;font-weight:400;color:#bfcabe}
       #invsto-capture-helper [data-panel-minimize]{display:grid;place-items:center;width:30px;height:30px;padding:0;flex:none;background:#ffffff08}
       #invsto-capture-helper .capture-panel-content{min-height:0;overflow:auto;overscroll-behavior:contain;padding:0 12px 12px}
-      #invsto-capture-helper.capture-panel-minimized{width:272px;border-radius:18px;overflow:hidden}
+      #invsto-capture-helper.capture-panel-minimized{width:340px;border-radius:18px;overflow:hidden}
       #invsto-capture-helper .capture-panel-mini{padding:6px}
       #invsto-capture-helper .capture-panel-mini button{margin:0}
       #invsto-capture-helper .capture-panel-mini-row{display:flex;align-items:stretch;gap:6px}
@@ -25,6 +25,12 @@
       #invsto-capture-helper [data-panel-camera] small{display:block;font-size:9px;line-height:1.3;letter-spacing:.08em;text-transform:uppercase;font-weight:650}
       #invsto-capture-helper [data-panel-camera] strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;line-height:1.4;font-weight:750}
       #invsto-capture-helper [data-panel-camera][aria-busy="true"] svg{animation:invsto-photo-pulse 1s ease-in-out infinite alternate}
+      #invsto-capture-helper .capture-panel-bag-status{display:flex;align-items:center;flex-wrap:wrap;gap:5px 8px;margin:7px 7px 1px;font-size:11px;line-height:1.5}
+      #invsto-capture-helper [data-panel-buyer]{flex:1;min-width:45px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#d7ded7}
+      #invsto-capture-helper [data-panel-print-status]{max-width:100%;padding:3px 7px;border:1px solid #ffffff20;border-radius:7px;background:#ffffff08;color:#c4cfc8;font-size:10px;overflow-wrap:anywhere}
+      #invsto-capture-helper [data-panel-print-status][data-state="submitted"]{background:#9ddeaa18;border-color:#9ddeaa50;color:#bce9c6}
+      #invsto-capture-helper [data-panel-print-status][data-state="queued"],#invsto-capture-helper [data-panel-print-status][data-state="claimed"],#invsto-capture-helper [data-panel-print-status][data-state="uncertain"]{background:#efd29512;border-color:#efd29550;color:#efd295}
+      #invsto-capture-helper [data-panel-print-status][data-state="failed"],#invsto-capture-helper [data-panel-print-status][data-state="cancelled"]{background:#ffb8aa12;border-color:#ffb8aa50;color:#ffb8aa}
       #invsto-capture-helper [data-panel-photo-status]{margin:6px 7px 1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;line-height:1.5;color:#bfccc2}
       #invsto-capture-helper [data-panel-photo-status][data-state="success"]{color:#bce9c6}
       #invsto-capture-helper [data-panel-photo-status][data-state="error"]{color:#ffb8aa}
@@ -50,7 +56,11 @@
     const camera=document.createElement('button');camera.type='button';camera.dataset.panelCamera='';camera.disabled=true;camera.setAttribute('aria-describedby','invsto-panel-photo-status');
     camera.innerHTML='<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 5l1.5-2h5L16 5h4a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V7a2 2 0 012-2z"/><circle cx="12" cy="13" r="4"/></svg><span><small>Screenshot</small><strong>Connecting…</strong></span>';
     const photoStatus=document.createElement('p');photoStatus.id='invsto-panel-photo-status';photoStatus.dataset.panelPhotoStatus='';photoStatus.setAttribute('role','status');photoStatus.setAttribute('aria-live','polite');photoStatus.setAttribute('aria-atomic','true');
-    miniRow.append(launcher,camera);mini.append(miniRow,photoStatus);
+    const bagStatus=document.createElement('div');bagStatus.className='capture-panel-bag-status';bagStatus.hidden=true;
+    const buyer=document.createElement('span');buyer.dataset.panelBuyer='';
+    const printStatus=document.createElement('span');printStatus.dataset.panelPrintStatus='';printStatus.setAttribute('role','status');printStatus.setAttribute('aria-live','polite');printStatus.setAttribute('aria-atomic','true');
+    bagStatus.append(buyer,printStatus);
+    miniRow.append(launcher,camera);mini.append(miniRow,bagStatus,photoStatus);
     const description=document.createElement('span');description.id='invsto-capture-panel-status';description.className='capture-panel-sr';
     box.append(header,content,mini,description);
     const move=header.querySelector('[data-panel-move]'),minimize=header.querySelector('[data-panel-minimize]'),captureLabel=header.querySelector('[data-panel-capture]');
@@ -133,13 +143,18 @@
     return {
       setCaptureStatus(value){capture=value;renderStatus();},
       setBagStatus(value){bag=value;renderStatus();},
+      setPrintStatus(value){
+        bagStatus.hidden=!value.buyer;buyer.textContent=value.buyer||'';buyer.title=value.buyer||'';
+        printStatus.dataset.state=value.state;printStatus.title=value.detail;
+        if(printStatus.textContent!==value.message)printStatus.textContent=value.message;
+      },
       setPhotoAction(value){
         camera.disabled=value.disabled;camera.onclick=value.onClick;
         camera.setAttribute('aria-busy',String(value.phase==='saving'));
         camera.setAttribute('aria-label',value.label);camera.title=[value.label,value.buyer].filter(Boolean).join(' · ');
         camera.querySelector('small').textContent=value.phase==='saving'?'Saving…':value.retry?'Retry photo':'Screenshot';
         camera.querySelector('strong').textContent=value.target;
-        photoStatus.dataset.state=value.phase;photoStatus.title=value.detail||value.message;
+        photoStatus.hidden=!value.message;photoStatus.dataset.state=value.phase;photoStatus.title=value.detail||value.message;
         if(photoStatus.textContent!==value.message)photoStatus.textContent=value.message;
       }
     };
