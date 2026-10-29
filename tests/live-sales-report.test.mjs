@@ -46,11 +46,11 @@ test('item-index profit uses the same paid amounts and expense basis as buyer to
   const attempts=[53,32,11,5].map((amount,i)=>({id:String(i),buyer:'buyer',amount,payment_state:'paid'}));
   const costs=Object.fromEntries(attempts.map(a=>[a.id,{mode:'manual',base_cost:11}]));
   const before=M.makeModel({attempts,costs});
-  assert.deepEqual(before.rows.map(r=>M.itemProfit(r,false).amount),[4200,2100,0,-600]);
-  assert.equal(M.itemProfit(before.rows[2],false).status,'Break-even');
+  assert.deepEqual(before.rows.map(r=>M.itemProfit(r,false).amount),[3878,1894,-91,-658]);
+  assert.equal(M.itemProfit(before.rows[2],false).status,'Loss');
   assert.equal(M.itemProfit(before.rows[3],false).status,'Loss');
-  assert.equal(M.itemProfit(before.rows[0],false).label,'Profit before expenses');
-  assert.equal(before.rows.reduce((sum,r)=>sum+M.itemProfit(r,false).amount,0),before.stats.margin);
+  assert.equal(M.itemProfit(before.rows[0],false).label,'Estimated profit');
+  assert.equal(before.rows.reduce((sum,r)=>sum+M.itemProfit(r,false).amount,0),before.stats.profit);
   const after=M.makeModel({attempts,costs,settings});
   assert.equal(M.itemProfit(after.rows[0],true).amount,3070);
   assert.equal(M.itemProfit(after.rows[0],true).label,'Estimated profit');
@@ -140,7 +140,7 @@ test('a clear gram weight without a material defaults to labeled sterling silver
   const title='#008 - JEWELRY ITEM 4 Grams 24inches Diamond Cut Chain- AS SEEN ON SCREEN';
   const payload={attempts:[{id:'weight',buyer:'a',listing_title:title,amount:44,payment_state:'paid'}],global_material_costs:{rates:{silver:5.8}}};
   const m=M.makeModel(payload);assert.equal(m.rows[0].cost.base,2320);assert.equal(m.stats.missingCosts,0);
-  assert.equal(M.buyerProfit(m.customers[0].stats,m.expensesKnown).amount,2080);
+  assert.equal(M.buyerProfit(m.customers[0].stats,m.expensesKnown).amount,1808);
   assert.equal(M.makeModel({...payload,settings:{rates:{silver:6}}}).rows[0].cost.base,2400);
   assert.equal(M.makeModel({...payload,costs:{weight:{mode:'manual',base_cost:0}}}).rows[0].cost.base,0);
   assert.equal(M.costFor({listing_title:title},{mode:'metal',material:'gold',purity:14,grams:4},{rates:{gold_14:99}}).base,39600);
@@ -171,9 +171,9 @@ test('paid totals exclude held, merged, resolved and unpaid attempts; margin sho
   assert.deepEqual(model.stats.paid,{count:2,amount:12000});assert.equal(model.stats.expectedItems,3);
   assert.equal(model.stats.missingCosts,1);assert.equal(model.stats.pricedPaid,1);assert.equal(model.stats.base,6000);assert.equal(model.stats.margin,4000);assert.equal(model.stats.profit,2400);
 });
-test('blank expenses stay unknown, zero is known, unknown amount is not inferred',()=>{
+test('blank fees use defaults while postage stays unknown; zero and missing amounts are preserved',()=>{
   const a={id:'1',buyer:'A',amount:10,payment_state:'paid'},costs={'1':{mode:'manual',base_cost:2}};
-  assert.equal(M.makeModel({attempts:[a],costs}).rows[0].profit,null);
+  assert.equal(M.makeModel({attempts:[a],costs}).rows[0].profit,715);
   const m=M.makeModel({attempts:[a,{...a,id:'2',amount:null}],costs,settings:{fee_percent:0,fee_fixed:0,shipping_per_sale:0}});
   assert.equal(m.rows[0].profit,800);assert.equal(m.stats.missingAmounts,1);assert.equal(m.stats.paid.amount,1000);
 });
@@ -196,9 +196,9 @@ test('individual losses remain visible despite a profitable buyer total and sort
   const costs=Object.fromEntries(attempts.map(a=>[a.id,{mode:'manual',base_cost:100}]));
   const m=M.makeModel({attempts,costs});
   assert.deepEqual(m.customers.map(b=>b.username),['z.biggest','offset.buyer','a.break-even']);
-  assert.equal(m.customers[1].stats.margin,15000);assert.equal(m.customers[1].stats.lossItems,1);assert.equal(m.customers[1].stats.lossAmount,5000);
-  assert.equal(m.stats.lossItems,2);assert.equal(m.stats.lossAmount,14000);assert.equal(m.rows.find(r=>r.id==='even').loss,0);
-  assert.equal(m.lossBasis,'before fees and shipping');
+  assert.equal(m.customers[1].stats.margin,15000);assert.equal(m.customers[1].stats.lossItems,1);assert.equal(m.customers[1].stats.lossAmount,5305);
+  assert.equal(m.stats.lossItems,3);assert.equal(m.stats.lossAmount,14970);assert.equal(m.rows.find(r=>r.id==='even').loss,580);
+  assert.equal(m.lossBasis,'after eBay fees; postage excluded unless entered');
 });
 
 test('loss assessment uses complete expense estimates but excludes unassessed and unpaid items',()=>{
@@ -206,9 +206,9 @@ test('loss assessment uses complete expense estimates but excludes unassessed an
   attempts.push({id:'held',buyer:'buyer',amount:100,payment_state:'paid',payment_hold:true},{id:'unknown-cost',buyer:'buyer',amount:100,payment_state:'paid'},{id:'unknown-amount',buyer:'buyer',amount:null,payment_state:'paid'},{id:'resolved',buyer:'buyer',amount:100,payment_state:'paid',resolved_at:'2026-10-29'});
   const costs=Object.fromEntries(attempts.filter(a=>a.id!=='unknown-cost').map(a=>[a.id,{mode:'manual',base_cost:95}]));
   const m=M.makeModel({attempts,costs,settings:{fee_percent:10,fee_fixed:1,shipping_per_sale:5}});
-  assert.equal(m.rows[0].margin,500);assert.equal(m.rows[0].loss,1100);assert.equal(m.stats.lossItems,1);assert.equal(m.stats.lossAmount,1100);assert.equal(m.lossBasis,'after estimated fees and shipping');
+  assert.equal(m.rows[0].margin,500);assert.equal(m.rows[0].loss,1100);assert.equal(m.stats.lossItems,1);assert.equal(m.stats.lossAmount,1100);assert.equal(m.lossBasis,'after eBay fees; postage excluded unless entered');
   assert.ok(m.rows.slice(1).every(r=>r.loss===0));
-  const incomplete=M.makeModel({attempts,costs,settings:{fee_percent:10,fee_fixed:null,shipping_per_sale:5}});assert.equal(incomplete.stats.lossItems,0);assert.equal(incomplete.lossBasis,'before fees and shipping');
+  const incomplete=M.makeModel({attempts,costs,settings:{fee_percent:10,fee_fixed:null,shipping_per_sale:5}});assert.equal(incomplete.stats.lossItems,1);assert.equal(incomplete.rows[0].loss,1030);assert.equal(incomplete.rows[0].finance.fixed,30);
   const corrected=M.makeModel({attempts,costs:{...costs,'0':{mode:'manual',base_cost:0}},settings:{fee_percent:10,fee_fixed:1,shipping_per_sale:5}});assert.equal(corrected.stats.lossItems,0);
 });
 
@@ -224,10 +224,10 @@ test('buyer profit reports partial coverage without treating missing costs or sa
   const p=M.buyerProfit(model.customers[0].stats,model.expensesKnown);
   assert.equal(p.amount,4400);assert.equal(p.status,'Partial');assert.equal(p.partial,true);
   assert.equal(p.coverage,'1 of 3 paid purchases included');assert.equal(p.missing,'1 missing base cost · 1 missing sale amount');
-  assert.equal(p.label,'Estimated profit');assert.equal(p.basis,'After estimated fees and shipping');
+  assert.equal(p.label,'Estimated profit');assert.equal(p.basis,'0 actual / 1 estimated fees · after estimated postage');
   const before=M.makeModel({attempts,costs});
-  assert.equal(M.buyerProfit(before.stats,before.expensesKnown).amount,6000);
-  assert.equal(M.buyerProfit(before.stats,before.expensesKnown).label,'Profit before expenses');
+  assert.equal(M.buyerProfit(before.stats,before.expensesKnown).amount,5420);
+  assert.equal(M.buyerProfit(before.stats,before.expensesKnown).label,'Estimated profit');
   const fixed=M.makeModel({attempts:attempts.map(a=>a.id==='amount-missing'?{...a,amount:50}:a),costs:{...costs,'cost-missing':{mode:'manual',base_cost:100}},settings});
   const complete=M.buyerProfit(fixed.stats,fixed.expensesKnown);
   assert.equal(complete.amount,12700);assert.equal(complete.status,'Complete');assert.equal(complete.missing,'');
@@ -240,7 +240,7 @@ test('buyer profit distinguishes unavailable, no paid purchases, known zero and 
   assert.equal(profit([{...a,amount:null}],{one:{mode:'manual',base_cost:0}}).amount,null);
   assert.equal(profit([{...a,payment_state:'failed'}]).status,'No paid purchases');
   assert.equal(profit([]).amount,null);
-  assert.equal(profit([a],{one:{mode:'manual',base_cost:10}}).amount,0);
-  assert.equal(profit([a],{one:{mode:'manual',base_cost:0}}).amount,1000);
-  assert.equal(profit([a],{one:{mode:'manual',base_cost:20}}).amount,-1000);
+  assert.equal(profit([a],{one:{mode:'manual',base_cost:10}}).amount,-85);
+  assert.equal(profit([a],{one:{mode:'manual',base_cost:0}}).amount,915);
+  assert.equal(profit([a],{one:{mode:'manual',base_cost:20}}).amount,-1085);
 });
