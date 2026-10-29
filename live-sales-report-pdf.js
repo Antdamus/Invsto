@@ -49,7 +49,8 @@
     let f=await start('Show overview','overview');
     await f.write('THE LIVE SALES COLLECTION',9,1,gold,16);await f.write(model.title,33,2,ink,12);
     await f.write(`${model.show.session_code||'Live show'} / ${model.customers.length} buyers / ${model.rows.length} purchases`,11,1,ink,7);
-    await f.write(`Snapshot ${model.date} · All times Eastern`,9,0,muted,22);
+    await f.write(`Snapshot ${model.date} · All times Eastern`,9,0,muted,5);
+    await f.write(`Report data updated: ${M.date(model.updatedAt)||'Unknown'} / Capture signal: ${M.date(model.connection.source_seen_at)||'Not recorded'}`,8,0,muted,18);
     const s=model.stats;
     await cards(f,[['Confirmed paid',M.money(s.paid.amount),`${s.paid.count} purchases / ${s.expectedItems} expected paid items`,green],['Pending payment',M.money(s.waiting.amount),`${s.waiting.count} purchases / excluded from paid`,amber],['Payment failed',M.money(s.failed.amount),`${s.failed.count} purchases / excluded from paid`,rose]]);
     await cards(f,[['Gross margin',s.pricedPaid?M.money(s.margin):'Not priced',`${s.pricedPaid}/${s.paid.count} paid purchases priced; before expenses / refunds`],['Estimated profit',model.expensesKnown&&s.pricedPaid?M.money(s.profit):'Not complete','After saved fee and shipping assumptions; priced paid items only'],['Needs base cost',String(s.missingCosts),'Paid purchases excluded from margin until a cost is set',amber]]);

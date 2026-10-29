@@ -11,8 +11,8 @@
     const weights=[...text.matchAll(/(?<![\d.,-])(\d+(?:\.\d+)?)\s*(?:grams?|grs?|g)\b/gi)].map(m=>Number(m[1]));
     const purities=[...text.matchAll(/\b(\d{1,2}(?:\.\d+)?)\s*(?:karats?|carats?|kt|k)\b/gi)].map(m=>Number(m[1]));
     const gold=/\bgold\b/i.test(text)||purities.length>0,silver=/\b(?:silver|sterling)\b/i.test(text);
-    const plated=/\b(?:plated|filled|vermeil|tone|gp|gf|hge|overlay)\b/i.test(text);
-    const ambiguous=plated||(gold&&silver)||new Set(weights).size>1||new Set(purities).size>1||/\d\s*[-–]\s*\d+(?:\.\d+)?\s*(?:g|grams?)\b/i.test(text)||/\d,\d+\s*(?:g|grams?)\b/i.test(text);
+    const plated=/\b(?:plated|filled|vermeil|tone|colou?r(?:ed)?|gp|gf|hge|overlay)\b/i.test(text);
+    const ambiguous=plated||(gold&&silver)||weights.length>1||new Set(purities).size>1||/\d\s*(?:[-–/]|to)\s*\d+(?:\.\d+)?\s*(?:g|grams?)\b/i.test(text)||/\d,\d+\s*(?:g|grams?)\b/i.test(text);
     const material=gold&&!silver?'gold':silver&&!gold?'silver':null;
     const grams=weights.length===1||new Set(weights).size===1?weights[0]:null;
     const purity=material==='gold'?(purities[0]??10):null;

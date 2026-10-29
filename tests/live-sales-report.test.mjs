@@ -9,7 +9,7 @@ test('title parser uses explicit purity or the requested 10K assumption',()=>{
   assert.equal(M.costFor({listing_title:'Gold 5gr'}, {},settings).base,15000);
 });
 test('ambiguous, plated, missing and invalid title information never becomes a zero cost',()=>{
-  for(const title of ['Watch','Gold ring','10g bracelet','Gold 5-10g','Gold 5,5g','Gold 5g silver 3g','Gold plated 5g','Gold filled 5g','14k 18k 5g','30k gold 5g','Gold 5g + 2g','Gold -5g','Gold .5g']){
+  for(const title of ['Watch','Gold ring','10g bracelet','Gold 5-10g','Gold 5 to 10g','Gold 5,5g','Gold 1/2 grams','Gold 5g silver 3g','Gold plated 5g','Gold colored 5g','Gold filled 5g','14k 18k 5g','30k gold 5g','Gold 5g + 2g','Gold 5g + 5g','Gold -5g','Gold .5g']){
     assert.equal(M.costFor({listing_title:title},{},settings).base,null,title);
   }
   assert.equal(M.costFor({listing_title:'18k gold 2g'},{},settings).base,null);
