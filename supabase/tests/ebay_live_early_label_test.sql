@@ -18,7 +18,8 @@ begin
  obs:=jsonb_build_object('key','won','kind','won','listing_id','777777777772','title','#001 - Test ring','buyer','labelwinner','amount',600,'currency','USD','time_label','12:00 PM','source','activity','observed_at',clock_timestamp());
  perform public.ingest_ebay_live_events(event,jsonb_build_array(obs),jsonb_build_object('observed_at',clock_timestamp(),'ready',true));
  select id into a from public.ebay_live_attempts where event_id=event and win_key='won';
- insert into label_tap_results select throws_ok(format('select public.prepare_ebay_live_bag_label(%L)',a),'22023','Payment is not confirmed for this bag','waiting payment cannot prepare a label');
+ l:=public.prepare_ebay_live_bag_label(a);
+ insert into label_tap_results select is((select payment_state from public.ebay_live_attempts where id=a),'waiting','unpaid label preserves payment state');
  perform public.ingest_ebay_live_events(event,jsonb_build_array(obs||'{"key":"paid","kind":"paid"}'),jsonb_build_object('observed_at',clock_timestamp(),'ready',true));
  l:=public.prepare_ebay_live_bag_label(a);
  insert into label_tap_results select ok(l.lot_code like 'LIVE-%','paid auction receives a unique QR bag ID before scanning');
@@ -42,13 +43,16 @@ begin
  insert into label_tap_results select throws_ok(format('select public.close_ebay_live_bag(%L)',a),'22023','Scan the sold item before closing the bag','an empty printed bag cannot be closed');
  foreach state_value in array array['waiting','failed','cancelled','review'] loop
   update public.ebay_live_attempts set payment_state=state_value where id=a;
-  insert into label_tap_results select throws_ok(format('select public.prepare_ebay_live_bag_label(%L)',a),'22023','Payment is not confirmed for this bag',state_value||' blocks reprints');
+  again:=public.prepare_ebay_live_bag_label(a);
+  insert into label_tap_results select is(again.id,l.id,state_value||' permits the same identification label');
  end loop;
  update public.ebay_live_attempts set payment_state='paid',resolved_at=now() where id=a;
- insert into label_tap_results select throws_ok(format('select public.prepare_ebay_live_bag_label(%L)',a),'22023','Payment is not confirmed for this bag','resolved sale blocks label');
+ again:=public.prepare_ebay_live_bag_label(a);
+ insert into label_tap_results select is(again.id,l.id,'resolved sale retains its identification label');
  update public.ebay_live_attempts set resolved_at=null where id=a;
  update public.live_sale_lots set status='released' where id=l.id;
- insert into label_tap_results select throws_ok(format('select public.prepare_ebay_live_bag_label(%L)',a),'22023','Payment is not confirmed for this bag','released bag blocks label');
+ again:=public.prepare_ebay_live_bag_label(a);
+ insert into label_tap_results select is(again.status,'released','reprinting never reopens a released bag');
  update public.live_sale_lots set status='open' where id=l.id;
  insert into public.ebay_live_attempts(event_id,listing_id,listing_title,buyer,amount,payment_state,seller_id) values(event,'777777777773','#001 - Rerun','anotherwinner',500,'paid',seller) returning id into b;
  again:=public.prepare_ebay_live_bag_label(b);

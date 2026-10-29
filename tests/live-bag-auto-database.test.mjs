@@ -27,6 +27,9 @@ before(async()=>{
  await db.exec(source.slice(source.indexOf('create or replace function public.enqueue_label_print'),source.indexOf('create or replace function public.poll_print_station')));
  await db.exec(await readFile(new URL('../supabase/migrations/20261006120000_ebay_live_auto_labels.sql',import.meta.url),'utf8'));
  await db.exec(await readFile(new URL('../supabase/migrations/20261006160000_ebay_live_bag_print_status.sql',import.meta.url),'utf8'));
+ const update=await readFile(new URL('../supabase/migrations/20261029180000_live_capture_any_payment.sql',import.meta.url),'utf8');
+ const start=update.indexOf('create or replace function public.enqueue_ebay_live_auto_label');
+ await db.exec(update.slice(start,update.indexOf('end $$;',start)+7));
 });
 beforeEach(async()=>db.exec("truncate label_print_jobs;set test.allowed='yes';set test.actor='00000000-0000-4000-8000-000000000010'"));
 test('a manually printed bag is not printed again by an automatic send',async()=>{
@@ -35,9 +38,9 @@ test('a manually printed bag is not printed again by an automatic send',async()=
  const first=(await db.query('select id from label_print_jobs')).rows[0].id;assert.equal((await send()).id,first);
  assert.equal((await db.query('select count(*)::int as count from label_print_jobs')).rows[0].count,1);
 });
-test('automatic printing rejects unpaid, held, resolved and mismatched bags and unauthorized callers',async()=>{
- for(const change of ["payment_state='waiting'","hold=true","resolved_at=now()","merged_into=gen_random_uuid()","buyer=''"]){
-  await db.exec('update ebay_live_attempts set '+change);await assert.rejects(send,/Payment is not confirmed/);await db.exec("update ebay_live_attempts set payment_state='paid',hold=false,resolved_at=null,merged_into=null,buyer='winner'");
+test('automatic printing retains buyer, bag identity and authorization checks',async()=>{
+ for(const change of ["merged_into=gen_random_uuid()","buyer=''"]){
+  await db.exec('update ebay_live_attempts set '+change);await assert.rejects(send,/current auction record/);await db.exec("update ebay_live_attempts set payment_state='paid',hold=false,resolved_at=null,merged_into=null,buyer='winner'");
  }
  await assert.rejects(db.query('select enqueue_ebay_live_auto_label($1,$2,$3,$4)',[attempt,station,'<DesktopLabel>WRONG</DesktopLabel>','Left']),/does not identify/);
  await db.exec("set test.allowed='no'");await assert.rejects(send,/Inventory access required/);await db.exec("set test.allowed='yes'");
@@ -67,4 +70,14 @@ test('automatic sends across staff reuse one existing queue job and preserve its
  assert.equal(first.id,again.id);assert.equal(again.station_name,'Show printer');
  assert.equal((await db.query('select count(*)::int as count from label_print_jobs')).rows[0].count,1);
  const job=(await db.query('select * from label_print_jobs')).rows[0];assert.equal(job.request_id,attempt);assert.equal(job.copies,1);assert.equal(job.printer_roll,'Left');assert.equal(job.label_xml,xml);
+});
+
+test('all payment states, holds and resolved/released bags can print without changing their state',async()=>{
+ for(const state of ['paid','waiting','failed','review','cancelled']){
+  await db.exec('truncate label_print_jobs');await db.query("update ebay_live_attempts set payment_state=$1,hold=true,resolved_at=now()",[state]);
+  await db.exec("update live_sale_lots set status='released'");
+  const before=(await db.query('select * from ebay_live_attempts')).rows[0];
+  await send();assert.deepEqual((await db.query('select * from ebay_live_attempts')).rows[0],before);
+  assert.equal((await db.query('select status from live_sale_lots')).rows[0].status,'released');
+ }
 });

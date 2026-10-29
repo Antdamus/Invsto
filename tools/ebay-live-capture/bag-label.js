@@ -9,7 +9,7 @@
     document.head.append(style);
     style.textContent+=`#invsto-capture-helper [data-bag-receipt]{display:grid;gap:2px;margin:9px 0 0;padding:9px 11px;border-radius:10px;background:#ffffff0a;border:1px solid #ffffff16}#invsto-capture-helper [data-bag-receipt] strong{font-size:13px}#invsto-capture-helper [data-bag-receipt] small{font-size:11px;color:#bfccc2}#invsto-capture-helper [data-bag-receipt][data-state="submitted"]{background:#263e31;border-color:#5c8968;color:#c4ebcc}#invsto-capture-helper [data-bag-receipt][data-state="failed"],#invsto-capture-helper [data-bag-receipt][data-state="uncertain"]{border-color:#98644f;color:#ffceb5}`;
     box.removeAttribute('style');
-    box.innerHTML='<div class="bag-bar"><div class="bag-identity"><small data-bag-heading>Latest paid bag</small><strong class="bag-number">—</strong><span class="bag-buyer">Connecting to Invsto…</span></div><button type="button" data-bag-print disabled>Print label</button></div><select data-bag-choice aria-label="Choose a bag to print" style="margin-top:10px"><option value="">Latest paid bag · automatic</option></select><div class="bag-auto" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px"><small data-bag-auto-state role="status">Connecting auto print…</small><button type="button" data-bag-auto-toggle style="padding:4px 8px;font-size:11px" disabled>Pause</button></div><p data-bag-auto-status role="status" style="font-size:11px;margin:5px 0 0" hidden></p><p data-bag-status role="status" aria-live="polite"></p><details><summary>Settings</summary><div class="bag-settings"><button type="button" data-bag-printer>Choose printer</button><small data-bag-printer-name></small><div data-capture-settings></div></div></details>';
+    box.innerHTML='<div class="bag-bar"><div class="bag-identity"><small data-bag-heading>Latest sold item</small><strong class="bag-number">—</strong><span class="bag-buyer">Connecting to Invsto…</span><small data-bag-payment></small></div><button type="button" data-bag-print disabled>Print label</button></div><select data-bag-choice aria-label="Choose a bag to print" style="margin-top:10px"><option value="">Latest sold item · automatic</option></select><div class="bag-auto" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px"><small data-bag-auto-state role="status">Connecting auto print…</small><button type="button" data-bag-auto-toggle style="padding:4px 8px;font-size:11px" disabled>Pause</button></div><p data-bag-auto-status role="status" style="font-size:11px;margin:5px 0 0" hidden></p><p data-bag-status role="status" aria-live="polite"></p><details><summary>Settings</summary><div class="bag-settings"><button type="button" data-bag-printer>Choose printer</button><small data-bag-printer-name></small><div data-capture-settings></div></div></details>';
     const $=s=>box.querySelector(s),print=$('[data-bag-print]'),choice=$('[data-bag-choice]'),configure=$('[data-bag-printer]');
     const camera=document.createElement('button');camera.type='button';camera.dataset.bagCamera='';camera.style.cssText='padding:9px;min-width:40px;height:42px;flex:none;display:grid;place-items:center';camera.innerHTML='<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 5l1.5-2h5L16 5h4a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V7a2 2 0 012-2z"/><circle cx="12" cy="13" r="4"/></svg>';print.before(camera);
     const receipt=document.createElement('div');receipt.dataset.bagReceipt='';receipt.setAttribute('role','status');receipt.setAttribute('aria-live','polite');receipt.innerHTML='<strong></strong><small></small>';choice.before(receipt);
@@ -27,13 +27,16 @@
     };
     const selected=()=>sales.find(s=>s.id===(pending?.attemptId||photoPending?.attemptId||photoSale?.id||chosen))||pending?.sale||photoPending?.sale||photoSale||(!chosen&&!pending?sales[0]:null);
     const jobText=state=>({queued:'Waiting for printer',claimed:'Sending to printer',submitted:'Sent to printer',failed:'Print failed',uncertain:'Check printer',cancelled:'Print cancelled'})[state]||'Not sent yet';
+    const paymentText=sale=>!sale?'':(sale.payment_hold?'Payment needs review':({paid:'Payment confirmed',waiting:'Payment pending',failed:'Payment failed',cancelled:'Canceled',review:'Payment needs review'}[sale.payment_state]||'Payment not confirmed'))+(sale.resolved?' · Resolved':'');
     const sentTime=value=>{const date=new Date(value);return Number.isFinite(date.getTime())?date.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'';};
     function render() {
       const sale=selected(),job=sale?.printJob,activeJob=job&&['queued','claimed'].includes(job.status);
-      $('[data-bag-heading]').textContent=chosen?'Selected bag':'Latest paid bag';
+      $('[data-bag-heading]').textContent=chosen?'Selected bag':'Latest sold item';
       $('.bag-number').textContent=sale?.number?'#'+sale.number:sale?'Bag label':'—';
-      $('.bag-buyer').textContent=sale?.buyer||(pending?'Previous send needs checking':ready?'Waiting for a paid sale':'Connect Invsto in Settings');
+      $('.bag-buyer').textContent=sale?.buyer||(pending?'Previous send needs checking':ready?'Waiting for a sold item':'Connect Invsto in Settings');
       $('.bag-identity').title=sale?.title||'';
+      $('[data-bag-payment]').textContent=paymentText(sale);
+      $('[data-bag-payment]').style.color=sale?.payment_state==='paid'&&!sale?.payment_hold?'#bce2c2':'#ffcf9a';
       print.disabled=busy||!!photoPending||!!automatic?.busy||!ready||!sale||!!(activeJob&&!pending);
       print.textContent=busy&&!photoTaking?'Sending…':pending?'Retry send':activeJob?'Label queued':!printer?'Choose printer':(job||completed.has(sale?.id)||automatic?.completed?.includes(sale?.id))?'Reprint label':'Print label';
       camera.disabled=busy||!!pending||!ready||!sale;
@@ -41,11 +44,11 @@
       camera.setAttribute('aria-label',camera.title);
       choice.disabled=busy||!!pending||!!photoPending;configure.disabled=busy||!!pending||!!photoPending;
       clear.hidden=!pending&&!photoPending;clear.disabled=busy;clear.textContent=photoPending?'Discard pending photo':'Clear pending send';
-      const signature=JSON.stringify([printStatusAvailable,sales.map(s=>[s.id,s.number,s.buyer,s.printJob?.status])]);
-      if(choice.dataset.sales!==signature){choice.dataset.sales=signature;choice.replaceChildren(new Option('Latest paid bag · automatic',''),...sales.map(s=>new Option(`${s.number?'#'+s.number+' · ':''}${s.buyer} · ${printStatusAvailable?jobText(s.printJob?.status):'Status unavailable'}`,s.id)));}
+      const signature=JSON.stringify([printStatusAvailable,sales.map(s=>[s.id,s.number,s.buyer,s.payment_state,s.payment_hold,s.resolved,s.printJob?.status])]);
+      if(choice.dataset.sales!==signature){choice.dataset.sales=signature;choice.replaceChildren(new Option('Latest sold item · automatic',''),...sales.map(s=>new Option(`${s.number?'#'+s.number+' · ':''}${s.buyer} · ${paymentText(s)} · ${printStatusAvailable?jobText(s.printJob?.status):'Status unavailable'}`,s.id)));}
       choice.value=chosen;
       receipt.dataset.state=printStatusAvailable?job?.status||'unsent':'unknown';
-      receipt.querySelector('strong').textContent=!ready?'Connecting…':!sale?'Waiting for a paid sale':!printStatusAvailable?'Print status unavailable':(job?.status==='submitted'?'✓ ':'')+jobText(job?.status);
+      receipt.querySelector('strong').textContent=!ready?'Connecting…':!sale?'Waiting for a sold item':!printStatusAvailable?'Print status unavailable':(job?.status==='submitted'?'✓ ':'')+jobText(job?.status);
       const details=[];
       if(ready&&sale&&printStatusAvailable){
         if(job){

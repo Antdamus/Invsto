@@ -31,7 +31,7 @@
       const signature=JSON.stringify(data||[]);
       if(state.signature===signature&&!previous?.failed&&Date.now()-(previous?.renderedAt||0)<3000000){state.renderedAt=previous.renderedAt;return;}
       state.signature=signature;state.renderedAt=Date.now();container.replaceChildren();
-      if(!data?.length){container.hidden=!showEmpty;if(showEmpty){const empty=document.createElement('p');empty.className='live-bag-photo-empty';empty.textContent='No live photos saved yet. In the eBay console, select this paid bag and tap the camera beside Print label. Each click adds another photo.';container.append(empty);}return;}
+      if(!data?.length){container.hidden=!showEmpty;if(showEmpty){const empty=document.createElement('p');empty.className='live-bag-photo-empty';empty.textContent='No live photos saved yet. In the eBay console, select this sold item and tap the camera beside Print label. Each click adds another photo.';container.append(empty);}return;}
       const heading=document.createElement('h3');heading.textContent=`Live photos · ${data.length}`;
       const grid=document.createElement('div');grid.className='live-bag-photo-grid';container.append(heading,grid);container.hidden=false;
       await Promise.all(data.map(async(photo,index)=>{

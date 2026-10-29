@@ -24,8 +24,8 @@ async function open(t,{configured=true,sharedContext,seed,capture=false,existing
     window.sales=[
       {id:'00000000-0000-4000-8000-000000000001',listing_title:'#004 - Gold chain',buyer:'earlier-winner',payment_state:'paid',sold_at:'2026-10-06T15:01:00Z',event_id:'EVENT123'},
       {id:'00000000-0000-4000-8000-000000000002',listing_title:'#012 - Silver bracelet',buyer:'current-winner',payment_state:'paid',sold_at:'2026-10-06T15:03:00Z',event_id:'EVENT123'},
-      {id:'00000000-0000-4000-8000-000000000003',listing_title:'#013 - Watch',buyer:'waiting-winner',payment_state:'waiting',sold_at:'2026-10-06T15:04:00Z',event_id:'EVENT123'},
-      {id:'00000000-0000-4000-8000-000000000004',listing_title:'#014 - Watch',buyer:'held-winner',payment_state:'paid',payment_hold:true,sold_at:'2026-10-06T15:05:00Z',event_id:'EVENT123'}];
+      {id:'00000000-0000-4000-8000-000000000003',listing_title:'#013 - Watch',buyer:'',payment_state:'waiting',sold_at:'2026-10-06T15:04:00Z',event_id:'EVENT123'},
+      {id:'00000000-0000-4000-8000-000000000004',listing_title:'#014 - Watch',buyer:'',payment_state:'paid',payment_hold:true,sold_at:'2026-10-06T15:05:00Z',event_id:'EVENT123'}];
     window.lots=[];window.stations=[{id:'station-a',name:'Show computer',printer_name:'DYMO LabelWriter 450 Twin Turbo',paired:true,online:true,printer_connected:true,roll_selection_ready:true,default_roll:'Left'}];
     if(configured)localStorage.setItem('invsto.print.destination.v1','station-a');
     window.supabase={auth:{getSession:async()=>({data:{session:{user:{id:'staff-a'}}}})},storage:{from:()=>({upload:async(path,blob,options)=>{
@@ -37,7 +37,7 @@ async function open(t,{configured=true,sharedContext,seed,capture=false,existing
       calls.push({name,args});
       if(name==='list_print_stations')return {data:stations};
       if(name==='attach_ebay_live_bag_photo'){
-        const sale=sales.find(s=>s.id===args._attempt_id);if(sale?.payment_state!=='paid')return {error:{message:'Payment is not confirmed'}};
+        const sale=sales.find(s=>s.id===args._attempt_id);if(!sale?.buyer||sale.merged_into)return {error:{message:'Payment is not confirmed'}};
         let photo=photos.find(p=>p.id===args._photo_id);if(!photo){photo={id:args._photo_id,...args};photos.push(photo);}
         if(window.delayedPhoto)await new Promise(resolve=>window.finishPhoto=resolve);
         if(window.failPhotoAck){window.failPhotoAck=false;return {error:{message:'Photo confirmation lost'}};}
@@ -52,7 +52,7 @@ async function open(t,{configured=true,sharedContext,seed,capture=false,existing
         })};
       }
       if(name==='prepare_ebay_live_bag_label'){
-        const sale=sales.find(s=>s.id===args._attempt_id);if(!sale||sale.payment_state!=='paid')return {error:{message:'Payment not confirmed'}};
+        const sale=sales.find(s=>s.id===args._attempt_id);if(!sale?.buyer||sale.merged_into)return {error:{message:'Payment not confirmed'}};
         let lot=lots.find(l=>l.id===sale.lot_id);if(!lot){lot={id:'lot-'+sale.id,lot_code:'LIVE-'+sale.id.slice(-8),auction_number:'EB-12-TEST'};lots.push(lot);sale.lot_id=lot.id;}return {data:lot};
       }
       if(name==='enqueue_ebay_live_auto_label'){const prior=jobs.find(j=>j.requestId===args._attempt_id);if(prior)return {data:prior};args={...args,_request_id:args._attempt_id};}
@@ -114,7 +114,7 @@ test('minimized capture still sends new evidence and automatically prints once, 
   const launcher=page.getByRole('button',{name:'Open Invsto panel',exact:true});await expect(launcher).toBeFocused();
   await expect(page.locator('[data-bag-print]')).toBeHidden();
   const mini=await page.locator('#invsto-capture-helper').boundingBox();assert.ok(mini.width<=114&&mini.height<=44);
-  await page.evaluate(()=>{nextEvidence=[{key:'paid-while-minimized',listing_id:'new-listing',kind:'paid',buyer:'new-winner',amount:25}];sales[2].payment_state='paid';});
+  await page.evaluate(()=>{nextEvidence=[{key:'paid-while-minimized',listing_id:'new-listing',kind:'paid',buyer:'new-winner',amount:25}];sales[2].buyer='waiting-winner';});
   await expect.poll(()=>page.evaluate(()=>packets.some(p=>p.events.some(e=>e.key==='paid-while-minimized')&&p.health.running&&p.health.ready))).toBe(true);
   await expect.poll(()=>page.evaluate(()=>jobs.length),{timeout:8000}).toBe(1);
   await expect(launcher).toHaveAttribute('title',/Capture on.*Auto print/);
@@ -166,7 +166,7 @@ test('compact panel prints the exact saved paid bag through the existing queue a
   await expect(page.locator('.bag-buyer')).toHaveText('current-winner');
   await expect(page.locator('#og-ebay-cancellation-panel')).toBeHidden();
   assert.equal(await page.locator('#invsto-listing-helper').count(),0);
-  assert.equal(await page.locator('[data-bag-choice] option').count(),3,'waiting and held sales are not printable');
+  assert.equal(await page.locator('[data-bag-choice] option').count(),3,'auction records without a buyer are excluded');
   assert.equal(await page.evaluate(()=>calls.some(c=>/prepare|enqueue|claim/.test(c.name))),false,'viewing the panel does not create a bag or print');
   await page.getByRole('button',{name:'Print label',exact:true}).click();
   await expect(page.locator('[data-bag-receipt]')).toContainText('Waiting for printer');
@@ -212,9 +212,9 @@ test('the visible dropdown prints an earlier bag even after many newer sales and
   const job=await page.evaluate(()=>jobs[0]);assert.match(job.args._label_xml,/#004/);assert.match(job.args._label_xml,/EARLIER-WINNER/);
   assert.doesNotMatch(job.args._label_xml,/LATEST-WINNER/);
   await mkdir(new URL('../test-results',import.meta.url),{recursive:true});await page.locator('#invsto-capture-helper').screenshot({path:'test-results/live-bag-extension-previous.png'});
-  await choice.selectOption('');await expect(page.locator('.bag-number')).toHaveText('#099');await expect(page.locator('[data-bag-heading]')).toHaveText('Latest paid bag');
+  await choice.selectOption('');await expect(page.locator('.bag-number')).toHaveText('#099');await expect(page.locator('[data-bag-heading]')).toHaveText('Latest sold item');
 });
-test('a sale arriving during print cannot replace the bag being sent and stale payment blocks printing',async t=>{
+test('a sale arriving during print cannot replace the bag being sent and a later failed payment still permits printing',async t=>{
   const page=await open(t);await page.evaluate(()=>{delayedPrint=true;});await page.locator('[data-bag-print]').click();
   await expect.poll(()=>page.evaluate(()=>jobs.length)).toBe(1);
   await page.evaluate(()=>{sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000009',listing_title:'#020 - Ring',buyer:'new-winner',sold_at:'2026-10-06T16:00:00Z',lot_id:null});finishPrint();});
@@ -222,19 +222,19 @@ test('a sale arriving during print cannot replace the bag being sent and stale p
   assert.match(await page.evaluate(()=>jobs[0].args._label_xml),/CURRENT-WINNER/);
   await expect(page.locator('.bag-number')).toHaveText('#020',{timeout:8000});
   await page.evaluate(()=>{sales.at(-1).payment_state='failed';});await page.locator('[data-bag-print]').click();
-  await expect(page.locator('[data-bag-status]')).toContainText('not cleared');assert.equal(await page.evaluate(()=>jobs.length),1);
+  await expect.poll(()=>page.evaluate(()=>jobs.length)).toBe(2);await expect(page.locator('[data-bag-payment]')).toContainText('Payment failed');
 });
 test('receiver requests are scoped to the supplied event, never the selected show or another auction attempt',async t=>{
   const page=await open(t);
   const result=await page.evaluate(async()=>{
     const requestId=crypto.randomUUID();
     return chrome.runtime.sendMessage({type:'INVSTO_BAG_LABEL_COMMAND',command:{action:'print',event_id:'OTHER123',attemptId:sales[1].id,requestId}});
-  });assert.equal(result.ok,false);assert.match(result.error,/not cleared/);assert.equal(await page.evaluate(()=>jobs.length),0);
+  });assert.equal(result.ok,false);assert.match(result.error,/unavailable/);assert.equal(await page.evaluate(()=>jobs.length),0);
 });
 test('new paid sales print automatically, retain the earlier-bag selection, and survive receiver reloads without duplicates',async t=>{
   const page=await open(t);await expect(page.locator('[data-bag-auto-state]')).toContainText('Auto print on');
   await page.getByRole('combobox',{name:'Choose a bag to print'}).selectOption('00000000-0000-4000-8000-000000000001');
-  await page.evaluate(()=>{sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000080',listing_title:'#080 - Pendant',buyer:'auto-winner',sold_at:new Date().toISOString(),lot_id:null});sales[2].payment_state='paid';});
+  await page.evaluate(()=>{sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000080',listing_title:'#080 - Pendant',buyer:'auto-winner',sold_at:new Date().toISOString(),lot_id:null});sales[2].buyer='waiting-winner';});
   await expect.poll(()=>page.evaluate(()=>jobs.length),{timeout:10000}).toBe(2);
   const sent=await page.evaluate(()=>jobs);assert.ok(sent.every(j=>j.args._attempt_id));assert.ok(sent.some(j=>j.args._label_xml.includes('AUTO-WINNER')));
   await expect(page.locator('.bag-number')).toHaveText('#004');
@@ -246,7 +246,7 @@ test('new paid sales print automatically, retain the earlier-bag selection, and 
   await reloaded.locator('#invsto-capture-helper').screenshot({path:'test-results/live-bag-extension-auto.png'});
 });
 test('automatic retries reuse the same job after a lost acknowledgement and ignore historical backfills',async t=>{
-  const page=await open(t);await page.evaluate(()=>{failAfterQueue=true;sales[2].payment_state='paid';sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000070',listing_title:'#070 - History',sold_at:'2026-01-01T00:00:00Z'});});
+  const page=await open(t);await page.evaluate(()=>{failAfterQueue=true;sales[2].buyer='waiting-winner';sales.push({...sales[1],id:'00000000-0000-4000-8000-000000000070',listing_title:'#070 - History',sold_at:'2026-01-01T00:00:00Z'});});
   await expect(page.locator('[data-bag-auto-status]')).toContainText('Acknowledgement lost',{timeout:8000});
   await expect(page.locator('[data-bag-auto-status]')).toBeHidden({timeout:8000});
   await expect(page.locator('[data-bag-receipt]')).toContainText('Waiting for printer');
@@ -284,25 +284,25 @@ test('late timestamps for historical or paused paid cards never backfill automat
 test('auto pause, resume and completed shows do not dump old sales into the printer',async t=>{
   const page=await open(t);await page.getByRole('button',{name:'Pause automatic printing'}).click();
   await expect(page.locator('[data-bag-auto-state]')).toHaveText('Auto print paused');
-  await page.evaluate(()=>{sales[2].payment_state='paid';});
+  await page.evaluate(()=>{sales[2].buyer='waiting-winner';});
   await expect(page.locator('[data-bag-choice] option')).toHaveCount(4,{timeout:8000});
   assert.equal(await page.evaluate(()=>jobs.length),0);
   await page.getByRole('button',{name:'Resume automatic printing'}).click();
   assert.equal(await page.evaluate(()=>jobs.length),0);
-  await page.evaluate(()=>{ended=true;sales[3].payment_hold=false;});
+  await page.evaluate(()=>{ended=true;sales[3].buyer='held-winner';});
   await expect(page.locator('[data-bag-choice] option')).toHaveCount(5,{timeout:8000});assert.equal(await page.evaluate(()=>jobs.length),0);
 });
 test('pausing during an in-flight automatic send is retained before the next bag',async t=>{
-  const page=await open(t);await page.evaluate(()=>{delayedPrint=true;sales[2].payment_state='paid';});
+  const page=await open(t);await page.evaluate(()=>{delayedPrint=true;sales[2].buyer='waiting-winner';});
   await expect.poll(()=>page.evaluate(()=>jobs.length),{timeout:8000}).toBe(1);
   await page.getByRole('button',{name:'Pause automatic printing'}).click();
-  await page.evaluate(()=>{sales[3].payment_hold=false;finishPrint();});
+  await page.evaluate(()=>{sales[3].buyer='held-winner';finishPrint();});
   await expect(page.locator('[data-bag-auto-state]')).toHaveText('Auto print paused',{timeout:8000});
   await expect(page.locator('[data-bag-choice] option')).toHaveCount(5,{timeout:8000});assert.equal(await page.evaluate(()=>jobs.length),1);
 });
 test('two receiver tabs share automatic sends and missing printers wait without downloading files',async t=>{
   const page=await open(t,{configured:false});await expect(page.locator('[data-bag-auto-status]')).toContainText('Choose a paired printer');
-  await page.evaluate(()=>{sales[2].payment_state='paid';});await expect(page.locator('[data-bag-choice] option')).toHaveCount(4,{timeout:8000});
+  await page.evaluate(()=>{sales[2].buyer='waiting-winner';});await expect(page.locator('[data-bag-choice] option')).toHaveCount(4,{timeout:8000});
   assert.equal(await page.evaluate(()=>jobs.length),0);
   const seed=await page.evaluate(()=>({sales,jobs,lots})),other=await open(t,{sharedContext:page.context(),seed,configured:true});
   await expect.poll(async()=>await page.evaluate(()=>jobs.length)+await other.evaluate(()=>jobs.length),{timeout:8000}).toBe(1);
@@ -331,7 +331,7 @@ test('receipts follow the real queue through submission and failures, including 
   await fresh.locator('#invsto-capture-helper').screenshot({path:'test-results/live-bag-extension-status.png'});
 });
 test('missing receipts cannot claim a bag was sent and do not stop automatic printing',async t=>{
-  const page=await open(t);await page.evaluate(()=>{window.receiptsUnavailable=true;sales[2].payment_state='paid';});
+  const page=await open(t);await page.evaluate(()=>{window.receiptsUnavailable=true;sales[2].buyer='waiting-winner';});
   await expect(page.locator('[data-bag-receipt]')).toContainText('Print status unavailable',{timeout:8000});
   assert.equal(await page.evaluate(()=>jobs.length),1);
   await page.evaluate(()=>{jobs[0].status='submitted';window.receiptsUnavailable=false;});
@@ -355,7 +355,7 @@ test('one camera click saves only the selected paid bag and retries the original
   assert.equal(await page.evaluate(()=>captureCount),2,'a deliberate second photo gets a new capture');
   await page.locator('#invsto-capture-helper').screenshot({path:'test-results/live-bag-camera.png'});
 });
-test('the selected bag is frozen during a photo save, while failed capture and changed payment cannot attach a photo',async t=>{
+test('the selected bag is frozen during a photo save, while failed capture remains retryable and changed payment permits photos',async t=>{
   const page=await open(t);await page.evaluate(()=>{window.failFrame=true;});await page.locator('[data-bag-camera]').click();
   await expect(page.locator('[data-bag-status]')).toContainText('Video is not playing');assert.equal(await page.evaluate(()=>photos.length),0);
   await page.evaluate(()=>{window.failFrame=false;window.delayedPhoto=true;});await page.locator('[data-bag-camera]').click();
@@ -365,7 +365,7 @@ test('the selected bag is frozen during a photo save, while failed capture and c
   await page.evaluate(()=>{window.delayedPhoto=false;finishPhoto();});await expect(page.locator('[data-bag-status]')).toContainText('Photo saved to #012');
   await expect(page.locator('.bag-number')).toHaveText('#099',{timeout:8000});
   await page.evaluate(()=>{sales.at(-1).payment_state='failed';});await page.locator('[data-bag-camera]').click();
-  await expect(page.locator('[data-bag-status]')).toContainText('not cleared');assert.equal(await page.evaluate(()=>photos.length),1);
+  await expect.poll(()=>page.evaluate(()=>photos.length)).toBe(2);await expect(page.locator('[data-bag-status]')).toContainText('Photo saved to #099');
 });
 test('worker binds bag requests to their eBay event and does not automatically duplicate a disconnected print',async()=>{
   const source=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');let handler,sent=[],focused=[],fail=false;

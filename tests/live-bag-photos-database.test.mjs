@@ -23,6 +23,9 @@ before(async()=>{
  create table storage.objects(bucket_id text,name text,metadata jsonb);
  `);
  await db.exec(await readFile(new URL('../supabase/migrations/20261006210000_live_bag_stream_photos.sql',import.meta.url),'utf8'));
+ const update=await readFile(new URL('../supabase/migrations/20261029180000_live_capture_any_payment.sql',import.meta.url),'utf8');
+ const start=update.indexOf('create or replace function public.attach_ebay_live_bag_photo');
+ await db.exec(update.slice(start,update.indexOf('end $$;',start)+7));
 });
 beforeEach(async()=>{await db.exec(`set test.actor='${actor}';set test.allowed='yes';truncate live_sale_bag_photos,ebay_live_audit,storage.objects;update ebay_live_attempts set payment_state='paid',buyer='winner',resolved_at=null,merged_into=null,hold=false;update live_sale_lots set status='open';`);});
 after(async()=>db?.close());
@@ -45,12 +48,22 @@ test('wrong bag paths, untrusted formats, oversized photos, and unauthorized acc
  assert.equal((await db.query("select has_function_privilege('anon','attach_ebay_live_bag_photo(uuid,uuid,text,integer,integer,timestamptz)','execute') allowed")).rows[0].allowed,false);
  assert.equal((await db.query("select has_table_privilege('authenticated','live_sale_bag_photos','insert') allowed")).rows[0].allowed,false);
 });
-test('changed payment, holds, merged attempts and cancelled bags cannot receive photos',async()=>{
+test('missing buyers and superseded attempts cannot receive misattributed photos',async()=>{
  await uploaded();
- for(const change of ["payment_state='waiting'","payment_state='failed'","buyer=''","resolved_at=now()","merged_into=gen_random_uuid()","hold=true"]){
-  await db.exec('update ebay_live_attempts set '+change);await assert.rejects(attach(),/Payment is not confirmed/);
-  await db.exec("update ebay_live_attempts set payment_state='paid',buyer='winner',resolved_at=null,merged_into=null,hold=false");
+ for(const change of ["buyer=''","merged_into=gen_random_uuid()"]){
+  await db.exec('update ebay_live_attempts set '+change);await assert.rejects(attach(),/current auction record/);
+  await db.exec("update ebay_live_attempts set buyer='winner',merged_into=null");
  }
- await db.exec("update live_sale_lots set status='cancelled'");await assert.rejects(attach(),/no longer available/);
  assert.equal((await db.query('select count(*)::int n from live_sale_bag_photos')).rows[0].n,0);
+});
+test('photos survive payment changes, holds and resolved/canceled bags without altering payment or contents',async()=>{
+ await uploaded();
+ for(const state of ['paid','waiting','failed','review','cancelled']){
+  await db.exec('truncate live_sale_bag_photos,ebay_live_audit');await db.query("update ebay_live_attempts set payment_state=$1,hold=true,resolved_at=now()",[state]);
+  await db.exec("update live_sale_lots set status='cancelled'");
+  const before=(await db.query('select * from ebay_live_attempts')).rows[0];
+  await attach();await attach();assert.deepEqual((await db.query('select * from ebay_live_attempts')).rows[0],before);
+  assert.equal((await db.query('select status from live_sale_lots')).rows[0].status,'cancelled');
+  assert.equal((await db.query('select count(*)::int n from live_sale_bag_photos')).rows[0].n,1);
+ }
 });

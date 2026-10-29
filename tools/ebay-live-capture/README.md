@@ -1,4 +1,12 @@
-# Invsto Live Capture (1.7.3)
+# Invsto Live Capture (1.7.4)
+
+## Photos and bag labels for every payment state (1.7.4)
+
+Select any captured sold item with a recorded buyer to save a live photo or print its identification label. Paid, pending, failed, canceled and review-needed payments all stay available, including resolved bags. The panel and dropdown show the current payment state. Printing and taking photos do not mark an order paid, clear a hold, reserve stock, close a bag, or authorize shipment.
+
+Automatic printing now queues newly observed sales with a buyer regardless of payment state. A later payment change does not produce another label. Existing retry/deduplication, Pause / Resume and finished-show behavior are preserved. Installing this update does not print the existing unpaid backlog; those items can be selected and printed manually. A superseded/merged record uses its current auction entry, and new bags still need an active show.
+
+Replace the files in the installed extension folder, reload its extension card, and refresh Stream Manager and the signed-in Invsto receiver. Use the same installation to retain saved requests and capture history.
 
 ## Movable panel and mini button (1.7.3)
 
@@ -12,7 +20,7 @@ Replace the installed extension files, reload its extension card, then refresh S
 
 ## Current payment capture (1.7.2)
 
-Current listing payment changes are resent even when a status appeared earlier. A current Paid card recovers an earlier failed payment. Cards without Paid remain excluded. Visible listing payment snapshots refresh every 30 seconds while capture runs. The server ignores older snapshots.
+Current listing payment changes are resent even when a status appeared earlier. A current Paid card recovers an earlier failed payment. Cards without Paid remain excluded from paid totals and shipping clearance; they remain available for photos and bag labels. Visible listing payment snapshots refresh every 30 seconds while capture runs. The server ignores older snapshots.
 
 ## Receiver recovery (1.7.1)
 
@@ -20,23 +28,23 @@ A suspended receiver can no longer leave the shared capture queue waiting indefi
 
 This does not override Edge's sleeping-tab or background scheduling settings. Add `www.ebay.com` and `antdamus.github.io` to **Always keep these sites active**, keep the computer awake, and leave both the capture and receiver tabs open and signed in. Replace the installed extension files, reload its extension card, and refresh the capture tab and receiver to use this release. Refresh resumes the same unfinished show; do not start a new show.
 
-This helper copies visible eBay Stream Manager auction and payment evidence into Invsto. Its compact bag-label panel shows the latest confirmed paid sale, the bag number from its listing title, and the winner. It never bids, charges buyers, or cancels eBay orders.
+This helper copies visible eBay Stream Manager auction and payment evidence into Invsto. Its compact bag-label panel shows the latest sold item, the bag number from its listing title, and the winner. It never bids, charges buyers, or cancels eBay orders.
 
 ## Bag labels from Stream Manager (1.7.0)
 
-Keep the signed-in Invsto capture receiver open. **Print label** uses Live Sales' existing saved bag, 30299 label template and print system. Its QR identifies the unique bag, including the precise auction attempt; shipping can scan it to find the buyer and linked order lines. Printing does not close the bag, claim a scanner, or remove inventory. Only a paid, unresolved sale without a payment hold can print.
+Keep the signed-in Invsto capture receiver open. **Print label** uses Live Sales' existing saved bag, 30299 label template and print system. Its QR identifies the unique bag, including the precise auction attempt; shipping can scan it to find the buyer and linked order lines. Printing does not close the bag, claim a scanner, or remove inventory. Payment state does not block identification-label printing or photos.
 
-**Automatic printing:** new paid sales with a winner go straight to the saved paired print station, without clicking Print. The panel checks every two seconds while the receiver is connected; the existing station helper then prints the queued label. **Pause / Resume** is visible on the panel. Selecting an earlier bag does not interrupt automatic printing. Opening a show for the first time, resuming after a pause, or reading finished-show history does not print earlier sales. Earlier bags remain in the dropdown for manual printing. Unknown older wins without a verified sale time also stay manual.
+**Automatic printing:** new sales with a winner, regardless of payment state, go straight to the saved paired print station, without clicking Print. The panel checks every two seconds while the receiver is connected; the existing station helper then prints the queued label. **Pause / Resume** is visible on the panel. Selecting an earlier bag does not interrupt automatic printing. Opening a show for the first time, resuming after a pause, or reading finished-show history does not print earlier sales. Earlier bags remain in the dropdown for manual printing. Unknown older wins without a verified sale time also stay manual.
 
 Automatic sends retain their queue identity across reloads and interrupted responses. The database reuses the same bag's existing print job across receiver tabs, staff and computers; failed or uncertain jobs require checking Print Stations before requesting another copy. A missing printer holds newly observed sales until one is chosen. Automatic mode needs a paired print station; the legacy local-file download option remains available for manual printing. Keep both Stream Manager and the signed-in receiver open.
 
 Under **Settings**, choose the printer once using Invsto's existing print dialog. Later clicks reuse that computer and label roll. The previously selected Live Sales destination is used when its roll is already configured. This is the configured Invsto print destination, not automatic detection of the operating system's default printer. The local-helper option downloads the same label file for an already-running helper; a download alone does not confirm a physical print. Paired computers use the existing print queue, including when offline.
 
-The panel follows the latest paid sale automatically. The dropdown directly below the bag and Print button lists all eligible paid bags from this show by number and winner, newest first. Select a previous bag, check the displayed winner, and click **Print label**. A newer sale does not change your selection. Choose **Latest paid bag · automatic** to resume following sales. **Reprint label** deliberately requests another copy. A lost acknowledgement retains the same request ID when retried, so the print queue does not duplicate it. The selected bag and every dropdown entry show the current queue status: Waiting for printer, Sending to printer, Sent to printer, or a problem that needs checking. Sent to printer means the printer software accepted the job; it is not proof that a physical label emerged. The receipt includes the acknowledgement time and destination/roll. These receipts include manual jobs, other staff computers, and older bags outside the latest 100 jobs. Active queued/sending labels cannot be sent again from the panel. If status cannot be read, the panel says Print status unavailable and keeps checking without sending extra copies. Capture start/stop, connection detail and movement controls are in Settings. The stock-listing helper is not loaded in this release, and the unrelated cancellation banner is hidden on Stream Manager.
+The panel follows the latest sold item automatically. The dropdown directly below the bag and Print button lists all captured bags with a buyer from this show by number and winner, newest first. Select a previous bag, check the displayed winner, and click **Print label**. A newer sale does not change your selection. Choose **Latest sold item · automatic** to resume following sales. **Reprint label** deliberately requests another copy. A lost acknowledgement retains the same request ID when retried, so the print queue does not duplicate it. The selected bag and every dropdown entry show the current queue status: Waiting for printer, Sending to printer, Sent to printer, or a problem that needs checking. Sent to printer means the printer software accepted the job; it is not proof that a physical label emerged. The receipt includes the acknowledgement time and destination/roll. These receipts include manual jobs, other staff computers, and older bags outside the latest 100 jobs. Active queued/sending labels cannot be sent again from the panel. If status cannot be read, the panel says Print status unavailable and keeps checking without sending extra copies. Capture start/stop, connection detail and movement controls are in Settings. The stock-listing helper is not loaded in this release, and the unrelated cancellation banner is hidden on Stream Manager.
 
 ## One-click live photos (1.7.0)
 
-The small camera button beside Print saves a JPEG frame from the live video to the selected paid bag. The original video frame excludes chat, controls and dashboard content. Put the sold item in view, check the bag number/winner, then click the camera once. A saved message confirms the exact bag. The dropdown can select an earlier paid bag. This does not print a label, add an inventory item, or close the bag.
+The small camera button beside Print saves a JPEG frame from the live video to the selected bag. The original video frame excludes chat, controls and dashboard content. Put the sold item in view, check the bag number/winner, then click the camera once. A saved message confirms the exact bag. The dropdown can select an earlier bag in any payment state. This does not print a label, add an inventory item, or close the bag.
 
 Photos appear in Live Sales for the selected bag and bag history, and under Live photos when shipping scans its unique bag QR. Tap a thumbnail for the full image. Signed URLs use the existing private photos storage and staff access.
 
