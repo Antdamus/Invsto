@@ -1372,6 +1372,7 @@ function setupOrderSortOptions() {
     ["total_asc", "Order total low to high"],
     ["buyer_asc", "Username A to Z"],
     ["buyer_desc", "Username Z to A"],
+    ["refund_history", "Group by refund history"],
   ];
 
   select.innerHTML = options
@@ -3170,6 +3171,7 @@ async function loadOrders() {
   state.orders = data.map(normalizeLine);
   await window.OGPartialRefunds?.load(state.orders);
   window.OGPendingWork?.reset();
+  window.OGPendingBuyerRefunds?.queueChanged?.();
   logPendingOrderPerf("loadOrders normalize", normalizeStartedAt, { rows: state.orders.length });
   if (state.selectedLiveLot) {
     await state.liveBagConnectionsUI?.load();
@@ -3311,6 +3313,7 @@ function applyOrderFilters() {
   }
 
   filtered = expandSearchMatchesToBuyerBundles(filtered, term);
+  filtered = window.OGPendingBuyerRefunds?.filter?.(filtered) || filtered;
 
   state.filteredOrders = window.OGPendingWork?.filter(filtered) || filtered;
   renderSummaryStrip();
@@ -4113,6 +4116,7 @@ function sortBuyerGroups(groups) {
   const byUrgency = (a, b) => getEbayPriorityRank(a.nextShipBy, getGroupShipByOrder(a)) - getEbayPriorityRank(b.nextShipBy, getGroupShipByOrder(b));
 
   return groups.sort((a, b) => {
+    if (sort === "refund_history") return (window.OGPendingBuyerRefunds?.compare?.(a, b) || 0) || byDue(a, b) || byBuyer(a, b);
     if (sort === "created_asc") return byCreated(a, b) || byDue(a, b) || byBuyer(a, b);
     if (sort === "created_desc") return byCreated(b, a) || byDue(a, b) || byBuyer(a, b);
     if (sort === "urgency_asc") return byUrgency(a, b) || byDue(a, b) || byTotal(b, a) || byBuyer(a, b);
@@ -4574,13 +4578,17 @@ function renderOrders(options = {}) {
     }, { rootMargin: "300px" })
     : null;
   if (!groups.length) {
-    list.innerHTML = `<div class="empty-state">${escapeHtml(window.OGPendingWork?.emptyMessage() || "No orders match this view.")}</div>`;
+    list.innerHTML = `<div class="empty-state">${escapeHtml(window.OGPendingBuyerRefunds?.emptyMessage?.() || window.OGPendingWork?.emptyMessage() || "No orders match this view.")}</div>`;
     logPendingOrderPerf("renderOrders empty", startedAt, { rows: state.filteredOrders.length });
     return;
   }
 
   if (!partial) list.innerHTML = "";
   const appendGroup = (group, groupIndex) => {
+    if (!partial) {
+      const heading = window.OGPendingBuyerRefunds?.heading?.(group, groupIndex, groups);
+      if (heading) list.insertAdjacentHTML("beforeend", heading);
+    }
     const shippingLabelAction = getShippingLabelAction(getBuyerShippingLabelLines(group.lines[0]));
     const urgency = group.pendingCount ? getOrderUrgency(group.nextShipBy, getGroupShipByOrder(group)) : null;
     const urgencyClass = urgency?.level === "today" ? "is-due-today" : urgency ? `is-${urgency.level}` : "";
@@ -4663,6 +4671,7 @@ function renderOrders(options = {}) {
         </div>
       </div>
       <div class="buyer-card-alerts">
+        ${window.OGPendingBuyerRefunds?.badge?.(group.buyer) || ""}
         ${renderIssueBadgeMarkup(postOrderIssueStatus, "post-order-issue-pill")}
         ${renderFinanceBadgeMarkup(financeStatus, "buyer-card-finance-pill")}
         ${ebayApiStatus ? `<span class="sync-mismatch-pill ${escapeHtml(ebayApiStatus.tone)}" title="${escapeHtml(ebayApiStatus.title)}"><i data-lucide="${escapeHtml(ebayApiStatus.icon)}"></i>${escapeHtml(ebayApiStatus.label)}</span>` : ""}
@@ -12979,6 +12988,7 @@ function setupListeners() {
   $("clear-order-created-date-filter")?.addEventListener("click", () => clearOrderCreatedDateFilter());
   $("order-sort")?.addEventListener("change", (event) => {
     state.orderSort = event.target.value;
+    window.OGPendingBuyerRefunds?.sortChanged?.();
     applyOrderFilters();
   });
   $("checkout-store-select")?.addEventListener("change", handleCheckoutStoreChange);
@@ -13451,6 +13461,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupDashboardShell();
   setupImportVisibility();
   setupListeners();
+  window.OGPendingBuyerRefunds?.init({client:supabase,getLines:()=>state.orders,onChange:applyOrderFilters});
   state.launchOrderTaskId = getRequestedOrderTaskId();
   loadOrderTaskAssignees().catch((error) => console.warn("Could not preload order task assignees:", error));
   loadPackingSellerDirectory().catch((error) => console.warn("Could not preload seller directory:", error));

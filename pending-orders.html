@@ -26,6 +26,7 @@
   <link rel="stylesheet" href="order-certificates.css?v=20261011-work">
   <link rel="stylesheet" href="pending-order-chats.css?v=20261009">
   <link rel="stylesheet" href="pending-order-cards.css?v=20261018-front-tasks">
+  <link rel="stylesheet" href="pending-buyer-refunds.css?v=20261029">
   <script src="order-certificates.js?v=20261011-work" defer></script>
 </head>
 <body>
@@ -490,6 +491,20 @@
             <output id="buyer-remaining-count" class="count-pill" aria-live="polite" aria-atomic="true">Loading...</output>
           </div>
           <p class="buyer-due-filter-help">Purchase date matches the customer's earliest pending purchase. All their orders stay together, regardless of date.</p>
+          <div class="buyer-refund-controls" role="group" aria-label="Buyer refund controls">
+            <div class="buyer-refund-field">
+              <label for="buyer-refund-filter">Buyer refund history</label>
+              <select id="buyer-refund-filter">
+                <option value="all">All buyers</option>
+                <option value="confirmed">Buyers with completed refunds</option>
+                <option value="requested">Buyers with requests / pending refunds</option>
+                <option value="verification">Buyers with refund records to verify</option>
+                <option value="none">Buyers with no refunds recorded</option>
+              </select>
+            </div>
+            <button id="buyer-refund-refresh" type="button" class="secondary-btn">Check buyer refunds</button>
+            <p id="buyer-refund-status" role="status" aria-live="polite">Check saved buyer history, including closed orders. Each buyer’s current orders stay together.</p>
+          </div>
           <div class="pending-work-filters" role="group" aria-label="Order work status">
             <button type="button" data-work-view="ready" aria-pressed="true">Ready to work <span data-work-count>…</span></button>
             <button type="button" data-work-view="waiting" aria-pressed="false">Waiting <span data-work-count>…</span></button>
@@ -1309,7 +1324,9 @@
   <script src="buyer-promise-checkout.js?v=20261013-photos"></script>
   <script src="pending-partial-refunds.js?v=20261029-approval-cache"></script>
   <script src="ebay-auto-sync.js?v=20261025"></script>
-  <script src="pending-orders.js?v=20261029-buyer-report"></script>
+  <script src="buyer-report-refunds.js?v=20261029"></script>
+  <script src="pending-buyer-refunds.js?v=20261029"></script>
+  <script src="pending-orders.js?v=20261029-buyer-refunds"></script>
   <script src="pending-inventory.js?v=20261008-shared-bag-2"></script>
   <script src="pending-bag-scan.js?v=20261008-shared-inventory"></script>
   <script src="pending-orders-mobile.js?v=20261018-organized"></script>
