@@ -44,3 +44,28 @@ test('buyer anchors are safe and system links use real order numbers and correct
   assert.match(m.customers[0].key,/^buyer-[a-f0-9-]+$/);
   const url=new URL(m.rows[0].links.find(([label])=>label==='System order')[1]);assert.equal(url.pathname,'/Invsto/ebay-order-history.html');assert.equal(url.searchParams.get('focusOrder'),'01-12345-12345');
 });
+
+
+test('individual losses remain visible despite a profitable buyer total and sort buyers by loss',()=>{
+  const attempts=[{id:'win',buyer:'offset.buyer',amount:300,payment_state:'paid'},
+    {id:'loss',buyer:'offset.buyer',amount:50,payment_state:'paid'},
+    {id:'bigger',buyer:'z.biggest',amount:10,payment_state:'paid'},
+    {id:'even',buyer:'a.break-even',amount:100,payment_state:'paid'}];
+  const costs=Object.fromEntries(attempts.map(a=>[a.id,{mode:'manual',base_cost:100}]));
+  const m=M.makeModel({attempts,costs});
+  assert.deepEqual(m.customers.map(b=>b.username),['z.biggest','offset.buyer','a.break-even']);
+  assert.equal(m.customers[1].stats.margin,15000);assert.equal(m.customers[1].stats.lossItems,1);assert.equal(m.customers[1].stats.lossAmount,5000);
+  assert.equal(m.stats.lossItems,2);assert.equal(m.stats.lossAmount,14000);assert.equal(m.rows.find(r=>r.id==='even').loss,0);
+  assert.equal(m.lossBasis,'before fees and shipping');
+});
+
+test('loss assessment uses complete expense estimates but excludes unassessed and unpaid items',()=>{
+  const attempts=['paid','waiting','failed','cancelled'].map((payment_state,i)=>({id:String(i),buyer:'buyer',amount:100,payment_state}));
+  attempts.push({id:'held',buyer:'buyer',amount:100,payment_state:'paid',payment_hold:true},{id:'unknown-cost',buyer:'buyer',amount:100,payment_state:'paid'},{id:'unknown-amount',buyer:'buyer',amount:null,payment_state:'paid'},{id:'resolved',buyer:'buyer',amount:100,payment_state:'paid',resolved_at:'2026-10-29'});
+  const costs=Object.fromEntries(attempts.filter(a=>a.id!=='unknown-cost').map(a=>[a.id,{mode:'manual',base_cost:95}]));
+  const m=M.makeModel({attempts,costs,settings:{fee_percent:10,fee_fixed:1,shipping_per_sale:5}});
+  assert.equal(m.rows[0].margin,500);assert.equal(m.rows[0].loss,1100);assert.equal(m.stats.lossItems,1);assert.equal(m.stats.lossAmount,1100);assert.equal(m.lossBasis,'after estimated fees and shipping');
+  assert.ok(m.rows.slice(1).every(r=>r.loss===0));
+  const incomplete=M.makeModel({attempts,costs,settings:{fee_percent:10,fee_fixed:null,shipping_per_sale:5}});assert.equal(incomplete.stats.lossItems,0);assert.equal(incomplete.lossBasis,'before fees and shipping');
+  const corrected=M.makeModel({attempts,costs:{...costs,'0':{mode:'manual',base_cost:0}},settings:{fee_percent:10,fee_fixed:1,shipping_per_sale:5}});assert.equal(corrected.stats.lossItems,0);
+});
