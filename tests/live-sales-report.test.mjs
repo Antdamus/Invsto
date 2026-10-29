@@ -1,7 +1,46 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import M from '../live-sales-report-model.js';
+import '../ebay-buyer-report.js';
 const settings={rates:{gold_10:30,gold_14:42,silver:1.25},fee_percent:10,fee_fixed:1,shipping_per_sale:5};
+
+test('live receipts target each captured item without waiting for payment, screenshots or order import',()=>{
+  const attempts=['paid','waiting','failed'].map((payment_state,i)=>({id:String(i),event_id:'show-1',listing_id:String(287690196464+i),payment_state}));
+  const m=M.makeModel({connection:{event_id:'show-1'},attempts});
+  for(const row of m.rows){
+    const url=new URL(row.videoUrl);
+    assert.equal(url.origin,'https://www.ebay.com');assert.equal(url.pathname,'/ebaylive/events/show-1/stream');
+    assert.equal(url.searchParams.get('selectedItemId'),row.listing_id);assert.equal(url.searchParams.get('itemIds'),row.listing_id);
+    assert.equal(url.searchParams.get('playback'),'true');assert.equal(row.videoSource,'live_event');
+    assert.equal(row.links.find(([label])=>label==='Video receipt')[1],row.videoUrl);
+    assert.ok(!row.links.some(([label])=>label==='Find receipt in order'));
+    assert.match(M.receiptNote(row),/Order details are awaiting import/);assert.match(M.receiptNote(row),/after the livestream ends/);
+  }
+});
+test('a saved item-matched receipt takes priority, including a receipt saved after first refresh',()=>{
+  const item='287690196464',other='287690196476';
+  const payload={connection:{event_id:'show-1'},attempts:[{id:'a',listing_id:item,event_id:'show-1'}],evidence:{a:{order:{order_number:'01-12345-12345'},line:{id:'line',item_number:item}}}};
+  assert.equal(M.makeModel(payload).rows[0].videoSource,'live_event');
+  payload.evidence.a.order.label_metadata={videoReceiptUrl:`https://www.ebay.com/ebaylive/events/show-1/stream?selectedItemId=${other}&itemIds=${item},${other}`};
+  const saved=M.makeModel(payload).rows[0],url=new URL(saved.videoUrl);
+  assert.equal(saved.videoSource,'saved');assert.equal(url.searchParams.get('selectedItemId'),item);
+  assert.equal(url.searchParams.get('itemIds'),`${item},${other}`);assert.equal(M.receiptNote(saved),'');
+  payload.evidence.a.line.item_number=other;
+  assert.equal(M.makeModel(payload).rows[0].videoSource,'live_event');
+  assert.equal(new URL(M.makeModel(payload).rows[0].videoUrl).searchParams.get('selectedItemId'),item);
+});
+test('receipt links appear when identifying evidence arrives and reject unsafe or conflicting identifiers',()=>{
+  const payload={attempts:[{id:'a'}],evidence:{a:{order:{order_number:'01-12345-12345'},line:{item_number:'287690196464'}}}};
+  let row=M.makeModel(payload).rows[0];assert.equal(row.videoUrl,'');assert.ok(row.links.some(([label])=>label==='Find receipt in order'));
+  payload.connection={event_id:'show-1'};row=M.makeModel(payload).rows[0];assert.ok(row.videoUrl);assert.equal(row.videoSource,'live_event');
+  for(const [attempt,connection] of [[{listing_id:'bad'},{event_id:'show-1'}],[{listing_id:'287690196464'},{event_id:'../bad'}],[{listing_id:'287690196464',event_id:'other-show'},{event_id:'show-1'}],[{listing_id:'287690196464'},{}]]){
+    assert.equal(M.receiptFor(attempt,connection).url,'');
+  }
+  payload.evidence.a.order.label_metadata={videoReceiptUrl:'https://not-ebay.com/ebaylive/events/show-1/stream?selectedItemId=287690196464'};
+  assert.equal(M.makeModel(payload).rows[0].videoSource,'live_event');
+  payload.evidence.a.order.label_metadata.videoReceiptUrl='https://www.ebay.com/ebaylive/events/show-1/stream?selectedItemId=287690196476';
+  assert.equal(M.makeModel(payload).rows[0].videoSource,'live_event');
+});
 
 test('item-index profit uses the same paid amounts and expense basis as buyer totals',()=>{
   const attempts=[53,32,11,5].map((amount,i)=>({id:String(i),buyer:'buyer',amount,payment_state:'paid'}));

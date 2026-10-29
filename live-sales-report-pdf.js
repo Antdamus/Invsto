@@ -117,7 +117,7 @@
         await f.write(`Gross margin: ${r.state!=='paid'?'Excluded until confirmed paid':r.margin==null?'Needs base price':M.money(r.margin)} / Estimated profit: ${r.state!=='paid'?'Excluded':r.profit==null?'Costs / expenses incomplete':M.money(r.profit)}`,10,1,ink,12);
         await f.ensure(60);await f.write('ORDER & RECEIPT LINKS',8,1,gold,6);let x=36;
         for(const [label,url]of r.links){const w=width(label,9,1)+22;if(x+w>576){f.y-=23;x=36;await f.ensure(24);}await external(f.p,label,url,x,f.y,9);x+=w;}f.y-=29;
-        if(!r.orderNumber||!r.videoUrl)await f.write(!r.orderNumber?'Order and video receipt are not yet matched. New links appear in the live report after import.':'No direct video URL is saved. Find receipt in order opens eBay to check the Live receipt.',9,0,muted,14);
+        if(M.receiptNote(r))await f.write(M.receiptNote(r),9,0,muted,14);
         if(!r.photos.length){await f.ensure(150);rect(f.p,36,f.y-135,540,135,green);await text(f.p,'ITEM EVIDENCE',54,f.y-35,9,1,muted);await text(f.p,'No screenshots attached yet.',54,f.y-66,21,2,muted);await text(f.p,'New saved screenshots will appear in the live report.',54,f.y-92,10,0,muted);f.y-=150;}
         for(const [i,photo]of r.photos.entries()){
           await f.ensure(210);const h=Math.min(430,f.y-90);rect(f.p,36,f.y-h,540,h,white);

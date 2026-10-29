@@ -80,6 +80,29 @@
     const watchAccessory=/\b(?:watch(?:es)?|wristwatch)\s+(?:bands?|straps?|boxes|box|links?|batter(?:y|ies)|tools?)\b/i.test(title)&&!/\b(?:with|includes?)\b/i.test(title);
     return {material,assumedSilver:material==='silver'&&parsed.assumption==='Silver 925 assumed',type:earrings&&!watch?'earrings':watch&&!earrings&&!watchAccessory?'watches':'other'};
   }
+  function receiptFor(attempt,connection,evidence={}){
+    const line=evidence.line||{},order=evidence.order||{};
+    const listing=String(attempt.listing_id||'').trim(),matchedItem=String(line.item_number||'').trim();
+    const item=listing||matchedItem;
+    // Never attach another order line's saved receipt to this captured auction.
+    const saved=(!listing||!matchedItem||listing===matchedItem)
+      ?root.OGBuyerReport?.savedReceiptUrl({...line,item_number:item},order,evidence.photos||[],evidence.events||[])||'':'';
+    if(saved)return {url:saved,source:'saved'};
+    const event=String(attempt.event_id||connection.event_id||'').trim();
+    const connectedEvent=String(connection.event_id||'').trim();
+    if(!/^[A-Za-z0-9_-]{1,128}$/.test(event)||!/^\d{9,15}$/.test(item)
+      ||(connectedEvent&&event!==connectedEvent))return {url:'',source:''};
+    // eBay receipts are item-selected show replays, available after the stream ends.
+    // Keep this independent of order import, payment state, and whether a screenshot was saved.
+    const url=new URL('https://www.ebay.com/ebaylive/events/'+encodeURIComponent(event)+'/stream');
+    url.search=new URLSearchParams({playback:'true',selectedItemId:item,itemIds:item}).toString();
+    return {url:url.href,source:'live_event'};
+  }
+  function receiptNote(row){
+    return [!row.orderNumber?'Order details are awaiting import / matching.':'',
+      row.videoSource==='live_event'?'Opens this item in the show replay. eBay makes video receipts available after the livestream ends.':
+      !row.videoUrl?(row.orderNumber?'A direct receipt link is not available yet. Use Find receipt in order to check eBay.':'A direct receipt link will appear when the show and item are identified.'):''].filter(Boolean).join(' ');
+  }
   function makeModel(payload,origin='https://antdamus.github.io/Invsto/',now=new Date()){
     const c=payload.connection||{},saved=payload.settings||{rates:{},fee_percent:c.fee_percent,fee_fixed:c.fee_fixed,shipping_per_sale:c.shipping_per_sale};
     const globalRates=payload.global_material_costs?.rates||{};
@@ -96,14 +119,14 @@
       const price=cents(a.amount),cost=costFor(a,payload.costs?.[a.id],settings),margin=state==='paid'&&price!=null&&cost.base!=null?price-cost.base:null;
       const expenses=price!=null&&expensesKnown?Math.round(price*feePercent/100)+fixed+shipping:null;
       const orderUrl=order.order_number?'https://www.ebay.com/mesh/ord/details?orderid='+encodeURIComponent(order.order_number):'';
-      const videoUrl=root.OGBuyerReport?.savedReceiptUrl(line,order,[],[])||'';
+      const receipt=receiptFor(a,c,evidence),videoUrl=receipt.url;
       const systemUrl=new URL(['fulfilled','cancelled','canceled','closed'].includes(order.status)?'ebay-order-history.html':'pending-orders.html',origin);
       systemUrl.search=new URLSearchParams({orderId:order.order_number||'',historySearch:order.order_number||'',focusOrder:order.order_number||'',focusLineId:line.id||''}).toString();
       const links=[['eBay listing',a.listing_id?'https://www.ebay.com/itm/'+encodeURIComponent(a.listing_id):''],['eBay order',orderUrl],['Video receipt',videoUrl],['Find receipt in order',!videoUrl?orderUrl:''],['System order',order.order_number?systemUrl.href:''],['Live show',c.event_id?'https://www.ebay.com/ebaylive/events/'+encodeURIComponent(c.event_id):'']].filter(([,url])=>url);
       const row={...a,id:a.id,key:'item-'+a.id,username,customerKey:customer.key,name:order.buyer_name||'',state,stateLabel:labels[state],price,cost,margin,expenses,profit:margin!=null&&expenses!=null?margin-expenses:null,
         quantity:Number.isInteger(Number(line.quantity))&&Number(line.quantity)>0?Number(line.quantity):1,
         time:date(a.sold_at)||(a.win_time_label?`${a.win_time_label} · date unverified`:'Sale time not yet verified'),timeNote:a.sale_time_source==='ebay_activity'?'eBay Activity · minute precision':a.sale_time_source==='ebay_order'?'eBay order timestamp':'',
-        orderNumber:order.order_number||'',orderId:order.id||'',photos:evidence.photos||[],links,videoUrl,
+        orderNumber:order.order_number||'',orderId:order.id||'',photos:evidence.photos||[],links,videoUrl,videoSource:receipt.source,
         ordinal:a.ordinal||String(a.listing_title||'').match(/^#(\d+)/)?.[1]||'—',title:a.listing_title||'Title not recorded',override:payload.costs?.[a.id]||{}};
       const assessedMargin=row.profit??row.margin;
       row.loss=assessedMargin!=null&&assessedMargin<0?-assessedMargin:0;
@@ -126,5 +149,5 @@
     const breakdowns={materials:group('material',[['gold','Gold'],['silver','Silver / assumed silver'],['other','Other / unclear material']]),types:group('type',[['earrings','Earrings'],['watches','Watches'],['other','Other / unclear item type']])};
     return {sessionId:payload.show?.id||c.session_id,show:payload.show||{},title:payload.show?.title||c.stream_metadata?.title||'Live sales report',connection:c,settings,customers,rows,breakdowns,stats:summarize(rows),expensesKnown,lossBasis:expensesKnown?'after estimated fees and shipping':'before fees and shipping',generatedAt:now.toISOString(),updatedAt:payload.server_time||now.toISOString(),date:date(now.toISOString()),unmatched:(payload.unmatched||[]).length,origin};
   }
-  const api={RATE_KEYS,labels,number,cents,money,rateMoney,date,parseTitle,costFor,makeModel,buyerProfit,itemProfit,normalizeTitle,titleRuleFor};root.OGLiveReportModel=api;if(typeof module!=='undefined')module.exports=api;
+  const api={RATE_KEYS,labels,number,cents,money,rateMoney,date,parseTitle,costFor,makeModel,buyerProfit,itemProfit,normalizeTitle,titleRuleFor,receiptFor,receiptNote};root.OGLiveReportModel=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof window!=='undefined'?window:globalThis);
