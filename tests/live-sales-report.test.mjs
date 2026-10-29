@@ -35,6 +35,10 @@ test('blank expenses stay unknown, zero is known, unknown amount is not inferred
   const m=M.makeModel({attempts:[a,{...a,id:'2',amount:null}],costs,settings:{fee_percent:0,fee_fixed:0,shipping_per_sale:0}});
   assert.equal(m.rows[0].profit,800);assert.equal(m.stats.missingAmounts,1);assert.equal(m.stats.paid.amount,1000);
 });
+test('payment holds do not disguise recorded failures or pending payments',()=>{
+  const m=M.makeModel({attempts:[{id:'1',amount:10,payment_state:'failed',payment_hold:true},{id:'2',amount:20,payment_state:'waiting',payment_hold:true},{id:'3',amount:30,payment_state:'paid',payment_hold:true}]});
+  assert.deepEqual(m.stats.failed,{count:1,amount:1000});assert.deepEqual(m.stats.waiting,{count:1,amount:2000});assert.deepEqual(m.stats.paid,{count:0,amount:0});assert.deepEqual(m.stats.review,{count:1,amount:3000});
+});
 test('buyer anchors are safe and system links use real order numbers and correct page',()=>{
   const m=M.makeModel({attempts:[{id:'1',buyer:'A % é',amount:10,payment_state:'paid'}],evidence:{'1':{order:{id:'uuid',order_number:'01-12345-12345',status:'fulfilled'},line:{id:'line'}}}});
   assert.match(m.customers[0].key,/^buyer-[a-f0-9-]+$/);

@@ -39,7 +39,8 @@
       const username=String(a.buyer||'').trim()||'Buyer not recorded',key=username.toLowerCase();
       if(!buyers.has(key))buyers.set(key,{key:'buyer-'+Array.from(key,c=>c.codePointAt(0).toString(16)).join('-'),username,name:order.buyer_name||'',rows:[]});
       const customer=buyers.get(key);if(!customer.name&&order.buyer_name)customer.name=order.buyer_name;
-      const state=a.resolved_at?'resolved':a.payment_hold?'review':Object.hasOwn(labels,a.payment_state)?a.payment_state:'review';
+      // A hold disqualifies a paid amount; it must not hide an explicit failure or pending payment.
+      const state=a.resolved_at?'resolved':a.payment_hold&&a.payment_state==='paid'?'review':Object.hasOwn(labels,a.payment_state)?a.payment_state:'review';
       const price=cents(a.amount),cost=costFor(a,payload.costs?.[a.id],settings),margin=state==='paid'&&price!=null&&cost.base!=null?price-cost.base:null;
       const expenses=price!=null&&expensesKnown?Math.round(price*feePercent/100)+fixed+shipping:null;
       const orderUrl=order.order_number?'https://www.ebay.com/mesh/ord/details?orderid='+encodeURIComponent(order.order_number):'';
