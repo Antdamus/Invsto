@@ -18,3 +18,16 @@ Unsupported purities, plated items, watches, coins, or missing weights require i
 
 Migration: `20261029210000_shared_material_costs.sql`.
 Validation: `node --test tests/material-costs.test.mjs tests/live-sales-report.test.mjs tests/live-sales-report-database.test.mjs tests/inventory-pricing-database.test.mjs`.
+
+## Live report title rules and profit categories
+
+Open **Cost studio → Manage title cost rules** in a live report. An administrator can add a title phrase and a total base cost per auction, preview matching purchases in that show, enable or disable rules, and save them globally. Rules begin empty; no example prices are installed.
+
+Matches are literal substrings, ignoring case and repeated whitespace. Manual costs and explicit material corrections win, followed by the longest enabled matching phrase, then automatic gram-based pricing. Equal-length matches with different costs remain unknown and are flagged for review. Duplicate phrases and invalid costs are rejected. A deliberate zero is supported.
+
+Shared rules recalculate existing and future live reports, including buyer profit and loss flags; PDFs retain their export snapshot and list the rules used. Inventory stock costs are not rewritten. Saves use a separate version check from material rates and record actor, time, and before/after rules in `title_cost_rule_events`.
+
+The overview and PDF also separate profit by material (Gold, Silver including assumed silver, Other) and by item type (Earrings, Watches, Other). These are separate, exhaustive views of paid purchases, not additive categories across both views. Title clues recognize common earrings spellings and watch terms/brands; explicit material corrections override title guesses. Category totals preserve partial/unknown coverage and exclude unpaid revenue. The screen links each category to its included paid purchases.
+
+Migration: `20261029220000_title_cost_rules.sql`.
+Validation: `node --test tests/live-sales-report.test.mjs tests/title-cost-rules-database.test.mjs tests/material-costs.test.mjs tests/live-sales-report-database.test.mjs`.

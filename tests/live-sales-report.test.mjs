@@ -2,6 +2,55 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import M from '../live-sales-report-model.js';
 const settings={rates:{gold_10:30,gold_14:42,silver:1.25},fee_percent:10,fee_fixed:1,shipping_per_sale:5};
+test('profit categories separate material and type, include assumed silver and recognize earrings spellings',()=>{
+  const titles=['Gold earrings 2g','Silver earings 3g','4 grams errings','14k ear-rings 2g','Seiko watch','WATCHES','wristwatch','timepiece','watch box','Gold plated ring 4g'];
+  const attempts=titles.map((listing_title,i)=>({id:String(i),listing_title,buyer:'buyer',amount:100,payment_state:i===5?'waiting':'paid'}));
+  const costs=Object.fromEntries(attempts.map(a=>[a.id,{mode:'manual',base_cost:20}]));
+  const m=M.makeModel({attempts,costs,settings});
+  assert.deepEqual(m.rows.slice(0,4).map(r=>r.categories.type),['earrings','earrings','earrings','earrings']);
+  assert.deepEqual(m.rows.slice(4,8).map(r=>r.categories.type),['watches','watches','watches','watches']);
+  assert.equal(m.rows[8].categories.type,'other');assert.equal(m.rows[9].categories.material,'other');
+  assert.equal(m.rows[2].categories.material,'silver');assert.equal(m.rows[2].categories.assumedSilver,true);
+  assert.equal(m.breakdowns.materials.find(g=>g.key==='silver').assumedSilver,1);
+  for(const groups of Object.values(m.breakdowns)){
+    assert.equal(groups.reduce((sum,g)=>sum+g.stats.paid.count,0),m.stats.paid.count);
+    assert.equal(groups.reduce((sum,g)=>sum+g.stats.profit,0),m.stats.profit);
+  }
+  assert.equal(m.breakdowns.types.find(g=>g.key==='watches').stats.paid.count,3);
+});
+test('category profits retain partial coverage and material corrections override title assumptions',()=>{
+  const attempts=[{id:'a',listing_title:'4g earrrings',buyer:'buyer',amount:100,payment_state:'paid'},{id:'b',listing_title:'Gold earrings',buyer:'buyer',amount:50,payment_state:'paid'}];
+  const m=M.makeModel({attempts,settings,costs:{a:{mode:'metal',material:'gold',grams:2,purity:14}}});
+  assert.equal(m.rows[0].categories.material,'gold');assert.equal(m.rows[0].categories.assumedSilver,false);
+  const gold=m.breakdowns.materials.find(g=>g.key==='gold');assert.equal(gold.stats.missingCosts,1);assert.equal(M.buyerProfit(gold.stats,m.expensesKnown).partial,true);
+});
+test('title rules match literal phrases regardless of case and spaces; longest match wins',()=>{
+  const titleRules=[{phrase:'watch',base_cost:10,enabled:true},{phrase:'watch box',base_cost:25,enabled:true},{phrase:'[special]',base_cost:0,enabled:true}];
+  const cost=M.costFor({listing_title:'#22 WATCH   BOX / leather'},{},{...settings,titleRules});
+  assert.equal(cost.base,2500);assert.equal(cost.rule.phrase,'watch box');assert.match(cost.source,/Title rule/);
+  assert.equal(M.costFor({listing_title:'watch gold 2g'},{},{...settings,titleRules}).base,1000);
+  assert.equal(M.costFor({listing_title:'[SPECIAL]'},{},{titleRules}).base,0);
+  assert.equal(M.costFor({listing_title:'special'},{},{titleRules}).base,null);
+  assert.equal(M.costFor({listing_title:'watch box'},{},{titleRules:titleRules.map(r=>({...r,enabled:false}))}).base,null);
+  assert.equal(M.costFor({listing_title:'Silver 2g'},{},{...settings,titleRules}).base,250);
+});
+test('manual and corrected costs beat rules; conflicting equally specific phrases stay unknown',()=>{
+  const titleRules=[{phrase:'ring',base_cost:20,enabled:true},{phrase:'gold',base_cost:30,enabled:true}];
+  const a={listing_title:'gold ring 2g'};
+  const conflict=M.costFor(a,{},{...settings,titleRules});assert.equal(conflict.base,null);assert.equal(conflict.rule.conflict,true);
+  assert.equal(M.costFor(a,{mode:'manual',base_cost:0},{...settings,titleRules}).base,0);
+  assert.equal(M.costFor(a,{mode:'metal',material:'silver',grams:2},{...settings,titleRules}).base,250);
+  assert.equal(M.costFor(a,{},{...settings,titleRules:[titleRules[0],{...titleRules[1],base_cost:20}]}).base,2000);
+  assert.equal(M.costFor(a,{},{...settings,titleRules:[{...titleRules[0],base_cost:null}]}).base,6000);
+});
+test('global title rules recalculate buyer profit and losses but never count unpaid purchases',()=>{
+  const payload={global_material_costs:{rates:{silver:5.8},title_cost_rules:[{phrase:'watch',base_cost:120,enabled:true}]},attempts:[
+    {id:'paid',listing_title:'Vintage watch',buyer:'buyer',payment_state:'paid',amount:100},
+    {id:'waiting',listing_title:'Vintage watch',buyer:'buyer',payment_state:'waiting',amount:200}
+  ]};
+  const model=M.makeModel(payload);assert.equal(model.rows[0].cost.base,12000);assert.equal(model.stats.margin,-2000);assert.equal(model.stats.lossItems,1);assert.equal(model.stats.pricedPaid,1);assert.equal(model.rows[1].margin,null);
+  assert.equal(M.makeModel({...payload,costs:{paid:{mode:'manual',base_cost:50}}}).stats.margin,5000);
+});
 test('title parser uses explicit purity or the requested 10K assumption',()=>{
   assert.deepEqual(M.parseTitle('Gold necklace 12.5 g'),{material:'gold',grams:12.5,purity:10,assumed:true,assumption:'10K assumed',ambiguous:false,note:'10K gold assumed because purity is not specified.'});
   assert.equal(M.costFor({listing_title:'14kt gold 2 grams'}, {},settings).base,8400);

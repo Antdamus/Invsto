@@ -37,9 +37,25 @@
     return {material,grams:grams>0?grams:null,purity:purity>0&&(material==='silver'||purity<=24)?purity:null,assumed,assumption,ambiguous:ambiguous||unsupportedSilver,
       note:unsupportedSilver?'Silver purity is not 925: enter a manual base cost.':ambiguous?'Mixed, plated or ambiguous title: enter a manual base cost.':otherMaterial?'Material is not supported: enter a manual base cost.':silverDefault?'Sterling silver 925 assumed because a gram weight is present but material is not specified.':!material?'Material not specified.':!grams?'Gram weight not specified.':assumed?(material==='gold'?'10K gold assumed because purity is not specified.':'Sterling silver 925 assumed because purity is not specified.'):'Read from item title.'};
   }
+  const normalizeTitle=value=>String(value??'').replace(/\s+/g,' ').trim().toLowerCase();
+  function titleRuleFor(title,rules=[]){
+    const text=normalizeTitle(title);
+    const matches=(Array.isArray(rules)?rules:[]).map((r,index)=>({...r,index,normalized:normalizeTitle(r.phrase)}))
+      .filter(r=>r.enabled===true&&r.normalized.length>=2&&number(r.base_cost)!=null&&text.includes(r.normalized));
+    if(!matches.length)return null;
+    const length=Math.max(...matches.map(r=>r.normalized.length)),best=matches.filter(r=>r.normalized.length===length);
+    if(new Set(best.map(r=>cents(r.base_cost))).size>1)return {conflict:true,matches:best};
+    return {...best[0],matches};
+  }
   function costFor(a,override={},settings={}){
     const parsed=parseTitle(a.listing_title),mode=override.mode||'auto';
     if(mode==='manual')return {mode,base:cents(override.base_cost),source:'Manual base cost',parsed,note:override.note||''};
+    if(mode==='auto'){
+      const rule=titleRuleFor(a.listing_title,settings.titleRules);
+      if(rule)return {mode,base:rule.conflict?null:cents(rule.base_cost),rule,
+        source:rule.conflict?'Conflicting title rules: '+rule.matches.map(r=>'“'+r.phrase+'”').join(' / ')+'. Set an item cost or revise the rules.':`Title rule: “${rule.phrase}” → ${money(cents(rule.base_cost))} total base cost per auction`,
+        parsed:{...parsed,assumed:false,assumption:''},note:override.note||''};
+    }
     const metal=mode==='metal'?{material:override.material,grams:number(override.grams),purity:override.material==='silver'?925:number(override.purity),assumed:false,ambiguous:false}:parsed;
     const key=metal.material==='gold'?'gold_'+metal.purity:metal.material==='silver'?'silver':null;
     const rate=number(settings.rates?.[key]);
@@ -47,10 +63,18 @@
     const source=ready?`${metal.grams} g × ${rateMoney(rate)}/g · ${metal.material==='gold'?metal.purity+'K gold':'sterling silver 925'}${metal.assumption?' ('+metal.assumption+')':''}${settings.globalRates?.[key]!=null&&!Object.hasOwn(settings.showRates||{},key)?' · Global rate':settings.showRates&&Object.hasOwn(settings.showRates,key)?' · Show override':''}`:mode==='auto'?parsed.note:'Enter a matching metal rate or manual base cost.';
     return {mode,base:ready?Math.round(metal.grams*rate*100):null,source:ready?source:source+(metal.material&&metal.grams>0&&!metal.ambiguous&&rate==null?' Set the matching cost per gram.':''),parsed:metal,note:override.note||''};
   }
+  function categoriesFor(row){
+    const parsed=row.cost.mode==='metal'?row.cost.parsed:parseTitle(row.title),title=String(row.title||'');
+    const material=!parsed.ambiguous&&['gold','silver'].includes(parsed.material)?parsed.material:'other';
+    const earrings=/\b(?:ear[\s-]*rings?|ear{1,4}ings?|er{1,4}ings?|aretes?)\b/i.test(title);
+    const watch=/\b(?:watch(?:es)?|wrist[\s-]*watch(?:es)?|time[\s-]*pieces?|chronographs?|reloj(?:es)?|rolex|seiko|citizen|bulova|invicta|tissot|movado|tag\s+heuer)\b/i.test(title);
+    const watchAccessory=/\b(?:watch(?:es)?|wristwatch)\s+(?:bands?|straps?|boxes|box|links?|batter(?:y|ies)|tools?)\b/i.test(title)&&!/\b(?:with|includes?)\b/i.test(title);
+    return {material,assumedSilver:material==='silver'&&parsed.assumption==='Silver 925 assumed',type:earrings&&!watch?'earrings':watch&&!earrings&&!watchAccessory?'watches':'other'};
+  }
   function makeModel(payload,origin='https://antdamus.github.io/Invsto/',now=new Date()){
     const c=payload.connection||{},saved=payload.settings||{rates:{},fee_percent:c.fee_percent,fee_fixed:c.fee_fixed,shipping_per_sale:c.shipping_per_sale};
     const globalRates=payload.global_material_costs?.rates||{};
-    const settings={...saved,showRates:saved.rates||{},globalRates,globalUpdatedAt:payload.global_material_costs?.updated_at,rates:{...globalRates,...saved.rates}};
+    const settings={...saved,titleRules:payload.global_material_costs?.title_cost_rules||[],showRates:saved.rates||{},globalRates,globalUpdatedAt:payload.global_material_costs?.updated_at,rates:{...globalRates,...saved.rates}};
     const feePercent=number(settings.fee_percent),fixed=cents(settings.fee_fixed),shipping=cents(settings.shipping_per_sale);
     const expensesKnown=feePercent!=null&&fixed!=null&&shipping!=null;
     const buyers=new Map();const rows=(payload.attempts||[]).filter(a=>!a.merged_into).map(a=>{
@@ -74,6 +98,7 @@
         ordinal:a.ordinal||String(a.listing_title||'').match(/^#(\d+)/)?.[1]||'—',title:a.listing_title||'Title not recorded',override:payload.costs?.[a.id]||{}};
       const assessedMargin=row.profit??row.margin;
       row.loss=assessedMargin!=null&&assessedMargin<0?-assessedMargin:0;
+      row.categories=categoriesFor(row);
       customer.rows.push(row);return row;
     });
     const summarize=list=>{
@@ -88,7 +113,9 @@
     for(const buyer of customers){buyer.rows.sort((a,b)=>(Date.parse(a.sold_at)||0)-(Date.parse(b.sold_at)||0)||a.title.localeCompare(b.title));buyer.stats=summarize(buyer.rows);}
     // Individual losses stay visible even when other purchases offset them.
     customers.sort((a,b)=>b.stats.lossAmount-a.stats.lossAmount||a.username.localeCompare(b.username));
-    return {sessionId:payload.show?.id||c.session_id,show:payload.show||{},title:payload.show?.title||c.stream_metadata?.title||'Live sales report',connection:c,settings,customers,rows,stats:summarize(rows),expensesKnown,lossBasis:expensesKnown?'after estimated fees and shipping':'before fees and shipping',generatedAt:now.toISOString(),updatedAt:payload.server_time||now.toISOString(),date:date(now.toISOString()),unmatched:(payload.unmatched||[]).length,origin};
+    const group=(axis,entries)=>entries.map(([key,label])=>{const items=rows.filter(r=>r.categories[axis]===key);return {key,label,rows:items,stats:summarize(items),assumedSilver:items.filter(r=>r.state==='paid'&&r.categories.assumedSilver).length};});
+    const breakdowns={materials:group('material',[['gold','Gold'],['silver','Silver / assumed silver'],['other','Other / unclear material']]),types:group('type',[['earrings','Earrings'],['watches','Watches'],['other','Other / unclear item type']])};
+    return {sessionId:payload.show?.id||c.session_id,show:payload.show||{},title:payload.show?.title||c.stream_metadata?.title||'Live sales report',connection:c,settings,customers,rows,breakdowns,stats:summarize(rows),expensesKnown,lossBasis:expensesKnown?'after estimated fees and shipping':'before fees and shipping',generatedAt:now.toISOString(),updatedAt:payload.server_time||now.toISOString(),date:date(now.toISOString()),unmatched:(payload.unmatched||[]).length,origin};
   }
-  const api={RATE_KEYS,labels,number,cents,money,rateMoney,date,parseTitle,costFor,makeModel,buyerProfit};root.OGLiveReportModel=api;if(typeof module!=='undefined')module.exports=api;
+  const api={RATE_KEYS,labels,number,cents,money,rateMoney,date,parseTitle,costFor,makeModel,buyerProfit,normalizeTitle,titleRuleFor};root.OGLiveReportModel=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof window!=='undefined'?window:globalThis);
