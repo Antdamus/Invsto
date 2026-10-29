@@ -96,7 +96,7 @@
     ]);
     const tasks = unique([...byOrder, ...byLine]), taskById = new Map(tasks.map(task => [task.id, task]));
     const events = await chunks(tasks.map(task => task.id), ids => paged(() => client.from('ebay_order_task_events')
-      .select('id,task_id,action,notes,payload,photo_attachments,created_at').in('task_id', ids).order('id')));
+      .select('id,task_id,action,notes,payload,photo_attachments,created_at,signed_by_email').in('task_id', ids).order('id')));
     return {orders, lines, returnCases, adminEvents, events: [...adminEvents, ...events.map(event => {
       const task = taskById.get(event.task_id) || {};
       return {...event, task_metadata: task.metadata, order_line_ids: task.order_line_ids?.length ? task.order_line_ids : lines.filter(line => line.order_id === task.order_id).map(line => line.id)};

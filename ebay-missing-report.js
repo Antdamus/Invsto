@@ -8,7 +8,7 @@
   const unique=rows=>[...new Map(rows.map(row=>[row.id,row])).values()];
   const POLICY_URL='https://pages.ebay.com/payment/2.0/terms.html';
   const NOTICE='Resolve missing items promptly so orders can ship. Late deliveries and increased buyer claims can lead to eBay payout holds. This is a risk reminder, not confirmation that the seller account is on hold.';
-  const NOTES='Customer statistics cover all saved purchases for each exact eBay username, including closed orders. Confirmed refunds are counted once per order; partial refunds are included in total refunds, not added again. Requests and pending refunds are not deducted. Missing or inconsistent amounts leave net spending unconfirmed. Order totals include recorded shipping and tax; missing-item values use original item amounts. Ship-by deadlines follow eBay Pacific time; purchases and report preparation use Eastern time. This is a saved-record snapshot; regenerate after updates.';
+  const NOTES='Customer statistics cover all saved purchases for each exact eBay username, including closed orders. Confirmed refunds are counted once per order; partial refunds are included in total refunds, not added again. Requests and pending refunds are not deducted. Missing or inconsistent amounts leave net spending unconfirmed. Order totals include recorded shipping and tax; missing-item values use original item amounts. Deadlines show Eastern time first and the equivalent eBay Pacific time, including the date in each zone. Due-today and due-tomorrow labels follow the eBay Pacific shipping calendar. Purchases and report preparation use Eastern time. This is a saved-record snapshot; regenerate after updates.';
   const money=(value,currency='USD')=>value==null?'Not recorded':new Intl.NumberFormat('en-US',{style:'currency',currency}).format(value);
   const date=(value,zone='America/New_York')=>value!=null&&value!==''&&Number.isFinite(new Date(value).getTime())?new Intl.DateTimeFormat('en-US',{timeZone:zone,month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(new Date(value)):'Not recorded';
   const day=(value,zone='America/Los_Angeles')=>{
@@ -51,9 +51,12 @@
     const cutoff=dateOnly?pacificMidnight(nextDay.toISOString().slice(0,10)):instant;
     const overdue=dateOnly?Number(now)>=cutoff:Number(now)>cutoff;
     const level=overdue?'overdue':shipDay===today?'today':shipDay===tomorrow.toISOString().slice(0,10)?'tomorrow':'upcoming';
+    const dueEastern=dateOnly?`Before ${date(cutoff)}`:date(instant);
+    const duePacific=dateOnly?`${new Intl.DateTimeFormat('en-US',{timeZone:'UTC',month:'short',day:'numeric',year:'numeric'}).format(new Date(`${shipDay}T12:00:00Z`))} - end of eBay Pacific day`:date(instant,'America/Los_Angeles');
+    const bothZones=(eastern,pacific)=>`Eastern (your time): ${eastern}\nPacific (eBay): ${pacific}`;
     return {level,label:{overdue:'Overdue',today:'Due today',tomorrow:'Due tomorrow',upcoming:'Upcoming'}[level],sort:cutoff,
-      due:dateOnly?`${new Intl.DateTimeFormat('en-US',{timeZone:'UTC',month:'short',day:'numeric',year:'numeric'}).format(new Date(`${shipDay}T12:00:00Z`))} - end of eBay Pacific day`:date(instant,'America/Los_Angeles'),
-      since:overdue?date(cutoff,'America/Los_Angeles'):'',age:overdue?elapsed(Number(now)-cutoff):'',dateOnly};
+      dueEastern,duePacific,due:bothZones(dueEastern,duePacific),
+      since:overdue?bothZones(date(cutoff),date(cutoff,'America/Los_Angeles')):'',age:overdue?elapsed(Number(now)-cutoff):'',dateOnly};
   }
   async function loadQueue(client){
     const rows=[];
@@ -90,17 +93,26 @@
       {label:due.level==='overdue'?`Still missing / ${due.age} overdue`:'Report snapshot / still missing',text:date(now),at:Number(now),tone:due.level==='overdue'?'overdue':'normal'},
     ].filter(e=>Number.isFinite(e.at)).sort((a,b)=>a.at-b.at);
   }
-  function latestNote(records,lineId){
+  function itemNotes(records,lineId){
     return (records.events||[]).filter(e=>{
       const p=e.payload||{},ids=[...(Array.isArray(p.order_line_ids)?p.order_line_ids:[]),p.order_line_id].filter(Boolean);
       if(!(ids.length?ids:e.order_line_ids||[]).includes(lineId)||e.task_metadata?.history_removed_at)return false;
       if((p.source||e.task_metadata?.source)!=='pending_order_line_note'||e.action&&e.action!=='commented'||!e.notes?.trim())return false;
       if(e.photo_attachments?.length)return e.photo_attachments.every(p=>p.metadata?.source==='pending_order_line_note'||p.source_path==='manual-line-note'||String(p.path||'').startsWith('line-notes/'));
       return !/^(?:Video receipt screenshot uploaded for eBay item [^\n]+\.\n|(?:Video|Photo) evidence added manually for (?:eBay item [^\n]+|the full order)\.\n)/.test(e.notes);
-    }).sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at))[0]?.notes||'';
+    }).sort((a,b)=>(Date.parse(b.created_at)||0)-(Date.parse(a.created_at)||0)||String(b.id||'').localeCompare(String(a.id||'')))
+      .filter((e,i,all)=>!e.id||all.findIndex(n=>n.id===e.id)===i)
+      .map(e=>({id:e.id,text:e.notes,author:String(e.signed_by_email||'').trim()||'Author not recorded',createdAt:e.created_at||null,date:date(e.created_at)}));
+  }
+  const latestNote=(records,lineId)=>itemNotes(records,lineId)[0]?.text||'';
+  function directoryUrgency(c){
+    const oldest=c.rows.filter(r=>r.deadline.level==='overdue').sort((a,b)=>a.deadline.sort-b.deadline.sort)[0];
+    return oldest?{level:'overdue',label:'Oldest overdue',value:oldest.deadline.age}:
+      {level:c.rows[0]?.deadline.level||'unknown',label:'Next shipping deadline',value:c.rows[0]?.deadline.label||'Deadline not recorded'};
   }
   function makeCustomer(username,records,queue,baseUrl,now){
     const financial=refunds.model(records),missing=new Map(queue.map(q=>[q.id,q]));
+    const customerName=[...queue,...records.orders].map(q=>String(q.buyer_name||'').trim()).find(Boolean)||'';
     const all=buyer.buildRows(records,baseUrl),lineMap=new Map(records.lines.map(l=>[l.id,l]));
     const orderMap=new Map(records.orders.map(o=>[o.id,o]));
     for(const q of queue)if(!lineMap.has(q.id)||!orderMap.has(q.order_id))throw new Error(`Order ${q.order_number}: item details could not be loaded. Refresh the report.`);
@@ -108,15 +120,18 @@
       const q=missing.get(row.id),order=orderMap.get(row.orderId),marker=q.item_search?.is_missing?q.item_search:null;
       const pendingUrl=new URL('pending-orders.html',baseUrl);pendingUrl.searchParams.set('orderId',row.orderNumber);
       const due=deadline(order,now),markedAt=marker?.updated_at||q.missingWatch?.created_at;
-      return {...row,deadline:due,timeline:timeline(order,markedAt,due,now),pendingUrl:pendingUrl.href,
+      const notes=itemNotes(records,row.id),savedNote=q.latest_line_note;
+      const fallbackNote=(typeof savedNote==='string'?savedNote:savedNote?.notes||savedNote?.note)||q.missingWatch?.reason||'';
+      if(!notes.length&&fallbackNote)notes.push({text:fallbackNote,author:savedNote?.signed_by_email||'Author not recorded',createdAt:savedNote?.created_at||null,date:date(savedNote?.created_at)});
+      return {...row,customerName:String(order.buyer_name||q.buyer_name||'').trim()||customerName,deadline:due,timeline:timeline(order,markedAt,due,now),pendingUrl:pendingUrl.href,
         missingReason:[marker?'Item marked not found':'',q.missingWatch?'Watch marked missing':''].filter(Boolean).join(' / '),
         markedAt:date(markedAt),markedBy:marker?.updated_by_email||q.missingWatch?.assignee||'Staff',
-        note:latestNote(records,row.id)||(typeof q.latest_line_note==='string'?q.latest_line_note:q.latest_line_note?.notes||q.latest_line_note?.note)||q.missingWatch?.reason||'',
+        notes,note:notes[0]?.text||'',
         ebayStatus:[q.ebay_payment_status&&`Payment: ${q.ebay_payment_status}`,q.ebay_fulfillment_status&&`Fulfillment: ${q.ebay_fulfillment_status}`,q.ebay_cancel_status&&q.ebay_cancel_status!=='NONE'&&`Cancellation: ${q.ebay_cancel_status}`].filter(Boolean).join(' | ')||'Not recorded'};
     }).sort((a,b)=>a.deadline.sort-b.deadline.sort||a.orderNumber.localeCompare(b.orderNumber));
     const historyUrl=new URL('ebay-buyer-report.html',baseUrl);historyUrl.searchParams.set('buyer',username);
     const dates=records.orders.filter(o=>o.sale_date).sort((a,b)=>a.sale_date.localeCompare(b.sale_date));
-    return {username,name:queue.find(q=>q.buyer_name)?.buyer_name||records.orders.find(o=>o.buyer_name)?.buyer_name||'',rows,financial,
+    return {username,name:customerName,rows,financial,
       orderCount:records.orders.length,itemCount:records.lines.length,openOrders:new Set(records.lines.filter(open).map(l=>l.order_id)).size,
       full:breakdown(financial,'Full refund completed'),partial:breakdown(financial,'Partial refund completed'),
       firstPurchase:dates.length?buyer.purchaseDate(dates[0]):'Not recorded',lastPurchase:dates.length?buyer.purchaseDate(dates.at(-1)):'Not recorded',
@@ -155,19 +170,20 @@
       <div class="overview"><div><strong>${model.count}</strong><span>Missing item lines</span></div><div><strong>${model.customers.length}</strong><span>Customers</span></div><div class="is-overdue"><strong>${model.overdue}</strong><span>Overdue lines</span></div><div class="is-today"><strong>${model.today}</strong><span>Due today</span></div></div>
       <aside class="urgency-notice"><strong>Shipping needs attention</strong><p>${NOTICE}</p><a href="${POLICY_URL}" target="_blank" rel="noopener">eBay payment-hold policy</a></aside>
       <div class="section-title"><span>01 / AT A GLANCE</span><h2>The missing-item queue</h2><p>${model.orders} orders affected · Original missing-item value: ${html(model.missingValue)}${model.unknown?` · ${model.unknown} deadlines need verification`:''}</p></div>
-      <nav class="customer-index" aria-label="Customers in this report">${model.customers.map((c,i)=>`<a href="#customer-${i}"><span class="index-number">${String(i+1).padStart(2,'0')}</span><span><strong>${html(c.username)}</strong><small>${html(c.name||'Customer name not recorded')}</small></span><span>${c.rows.length} missing ${c.rows.length===1?'line':'lines'}</span><span class="pill ${c.rows[0].deadline.level}">${html(c.rows[0].deadline.label)}</span></a>`).join('')}</nav>
-      ${model.customers.map((c,i)=>`<section class="customer-section" id="customer-${i}"><header class="customer-heading"><div><div class="eyebrow">CUSTOMER ${String(i+1).padStart(2,'0')} / ${model.customers.length}</div><h2>${html(c.username)}</h2><p>${html(c.name)} · ${c.rows.length} missing ${c.rows.length===1?'line':'lines'} · ${c.openOrders} open orders</p></div><a class="outline-link" href="${html(c.historyUrl)}" target="_blank" rel="noopener">Full buyer report ↗</a></header>
+      <nav class="customer-index" id="customer-directory" aria-label="Customers in this report">${model.customers.map((c,i)=>{const urgency=directoryUrgency(c);return `<a href="#customer-${i}"><span class="index-number">${String(i+1).padStart(2,'0')}</span><span class="index-customer"><strong>${html(c.name||'Customer name not recorded')}</strong><small>eBay: ${html(c.username)}</small><small>${c.rows.length} missing ${c.rows.length===1?'line':'lines'}</small></span><span class="index-value"><small>Missing-item value</small><strong>${html(c.missingValue)}</strong></span><span class="index-urgency ${urgency.level}"><small>${html(urgency.label)}</small><strong>${html(urgency.value)}</strong></span></a>`;}).join('')}</nav>
+      ${model.customers.map((c,i)=>`<section class="customer-section" id="customer-${i}"><header class="customer-heading"><div><div class="eyebrow">CUSTOMER ${String(i+1).padStart(2,'0')} / ${model.customers.length}</div><h2>${html(c.name||'Customer name not recorded')}</h2><p>eBay: ${html(c.username)} · ${c.rows.length} missing ${c.rows.length===1?'line':'lines'} · ${c.openOrders} open orders</p></div><a class="outline-link" href="${html(c.historyUrl)}" target="_blank" rel="noopener">Full buyer report ↗</a></header>
         <div class="customer-stats">${stats(c).map(([label,value,note])=>`<div><small>${label}</small><strong>${html(value)}</strong><span>${html(note)}</span></div>`).join('')}</div>
         <div class="customer-history"><span><b>First purchase</b> ${html(c.firstPurchase)}</span><span><b>Most recent purchase</b> ${html(c.lastPurchase)}</span></div>
         ${c.financial.unverifiedOrders||c.financial.unmatched.length?`<p class="verification">Financial verification needed: ${c.financial.unverifiedOrders} orders with uncertain refund amounts; ${c.financial.unmatched.length} unmatched cases. Net spent may be unconfirmed.</p>`:''}
         <p class="timing-note">${html(refunds.timingText(c.financial))}</p>
-        ${c.rows.map((r,j)=>`<article class="missing-item ${r.deadline.level}"><div class="item-heading"><span>ITEM ${j+1} / ORDER ${html(r.orderNumber)}</span><span class="pill ${r.deadline.level}">${html(r.deadline.label)}</span></div>
+        ${c.rows.map((r,j)=>`<article class="missing-item ${r.deadline.level}"><div class="item-heading"><div><strong class="item-customer">${html(r.customerName||c.name||'Customer name not recorded')}</strong><span class="item-owner">eBay: ${html(c.username)}</span><span>ITEM ${j+1} / ORDER ${html(r.orderNumber)}</span></div><span class="pill ${r.deadline.level}">${html(r.deadline.label)}</span></div>
           <div class="deadline-banner"><strong>${r.deadline.level==='overdue'?`Overdue for ${html(r.deadline.age)}`:html(r.deadline.label)}</strong><span>${r.deadline.since?`Overdue since ${html(r.deadline.since)}`:`Ship by ${html(r.deadline.due)}`}</span></div>
           <div class="item-body"><div class="item-image">${r.image?`<img src="${r.image.crop}" alt="Saved screenshot for ${html(r.title)}"><small>Saved item evidence · verify against the title</small>`:`<div class="image-placeholder"><span>ITEM EVIDENCE</span><p>${html(r.imageStatus)}</p><a data-report-receipt="${html(r.id)}" href="${html(buyer.receiptAction(r).href)}" target="_blank" rel="noopener">${html(buyer.receiptAction(r).label)} ↗</a></div>`}</div>
           <div class="item-details"><div class="eyebrow">ORIGINAL PURCHASE</div><h3>${html(r.title)}</h3><p class="item-price">${html(money(r.price.total,r.price.currency))}<small>Qty ${r.price.quantity} · original item amount</small></p><ol class="item-timeline" aria-label="Item timeline">${r.timeline.map(e=>`<li class="${e.tone}"><b>${html(e.label)}</b><span>${html(e.text)}</span></li>`).join('')}</ol><dl><dt>Missing marker</dt><dd>${html(r.markedBy)}<small>${html(r.markedAt)}</small></dd><dt>eBay item</dt><dd>${html(r.item||'Not recorded')}</dd><dt>Saved eBay status</dt><dd>${html(r.ebayStatus)}</dd></dl></div></div>
           ${r.groups.length?`<div class="item-note"><b>Grouped order context</b>${r.groups.map(g=>`<p>${html(g)}</p>`).join('')}</div>`:''}
-          ${r.note?`<div class="item-note"><b>Latest item note</b><p>${html(r.note)}</p></div>`:''}${r.review?`<p class="verification">${html(r.review)}</p>`:''}
+          ${r.notes.length?`<div class="item-note"><b>Item notes · newest first</b>${r.notes.map(n=>`<div class="item-note-entry"><strong>${html(n.author)}</strong><small>${html(n.date)}${n.date!=='Not recorded'?' · Eastern time':' · Date/time not recorded'}</small><p>${html(n.text)}</p></div>`).join('')}</div>`:''}${r.review?`<p class="verification">${html(r.review)}</p>`:''}
           <details class="refund-context"${r.refund?.refundSignal||r.refund?.requests.length?' open':''}><summary>${html(r.refund?.label||'Refund status not recorded')}</summary>${refunds.detailLines(r.refund).map(s=>`<p>${html(s)}</p>`).join('')}${(r.refund?.requests||[]).map(q=>`<a href="${html(q.url)}" target="_blank" rel="noopener">Review case ${html(q.caseNumber)}</a>`).join(' ')}</details>
+          <nav class="item-navigation" aria-label="Report navigation"><a href="#customer-directory">↑ Customer directory</a><a href="#customer-${i}">↑ Customer profile</a></nav>
           <div class="item-links"><a href="${html(r.orderUrl)}" target="_blank" rel="noopener">eBay order ↗</a><a href="${html(r.pendingUrl)}" target="_blank" rel="noopener">Pending order ↗</a><a href="${html(r.historyUrl)}" target="_blank" rel="noopener">System record ↗</a><a data-report-receipt="${html(r.id)}" href="${html(buyer.receiptAction(r).href)}" target="_blank" rel="noopener">${html(buyer.receiptAction(r).label)} ↗</a></div>
           ${!r.videoUrl?'<p class="fallback-note">No direct video link is saved. The receipt action opens the eBay order so the item’s Live receipt can be found.</p>':''}</article>`).join('')}</section>`).join('')}
       <footer class="report-notes"><div class="eyebrow">HOW TO READ THIS REPORT</div><p>${NOTES}</p><p>Missing means explicitly marked not found or an active missing-watch hold. Unreviewed items are not treated as missing. Overdue duration is measured at the report preparation time.</p></footer>`;
@@ -191,7 +207,7 @@
     }catch(error){progress('Report could not be completed.');$('error').textContent=error.message||'Please try again.';$('error').hidden=false;}
     finally{busy=false;$('refresh-report').disabled=false;$('report-scope').disabled=false;}
   }
-  const api={loadQueue,selectMissing,deadline,elapsed,timeline,latestNote,makeCustomer,makeReport,load,stats,render,start,money,date,NOTICE,NOTES,POLICY_URL};
+  const api={loadQueue,selectMissing,deadline,elapsed,timeline,itemNotes,latestNote,directoryUrgency,makeCustomer,makeReport,load,stats,render,start,money,date,NOTICE,NOTES,POLICY_URL};
   root.OGMissingReport=api;if(typeof module!=='undefined')module.exports=api;
   if(typeof document!=='undefined'&&document.body?.dataset.page==='ebay-missing-report'){
     const boot=()=>{document.getElementById('refresh-report').addEventListener('click',start);document.getElementById('report-scope').addEventListener('change',start);start();};

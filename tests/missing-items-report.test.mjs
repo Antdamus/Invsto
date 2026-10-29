@@ -50,6 +50,40 @@ test('timeline is chronological, dates are labeled, and unavailable milestones a
   assert.equal(report.timeline({},undefined,report.deadline({}),now).length,1);
 });
 
+test('deadlines display Eastern and Pacific dates for the same instant, including midnight and DST changes',()=>{
+  const due=report.deadline({ship_by_date:'2026-10-29T06:59:59Z'},now);
+  assert.match(due.dueEastern,/Oct 29, 2026.*2:59 AM EDT/);
+  assert.match(due.duePacific,/Oct 28, 2026.*11:59 PM PDT/);
+  assert.match(due.since,/Eastern \(your time\): Oct 29, 2026.*2:59 AM EDT\nPacific \(eBay\): Oct 28, 2026.*11:59 PM PDT/);
+  assert.equal(report.timeline({sale_date:'2026-10-20'},null,due,now).find(e=>e.label==='Shipping deadline').text,due.due);
+  for(const [value,eastern,pacific] of [
+    ['2026-03-08T09:30:00Z',/5:30 AM EDT/,/1:30 AM PST/],
+    ['2026-11-01T08:30:00Z',/3:30 AM EST/,/1:30 AM PDT/],
+  ]){
+    const result=report.deadline({ship_by_date:value},new Date(value));
+    assert.match(result.dueEastern,eastern);assert.match(result.duePacific,pacific);
+    assert.equal(result.sort,Date.parse(value));
+  }
+  const dateOnly=report.deadline({ship_by_date:'2026-10-28'},now);
+  assert.match(dateOnly.dueEastern,/Before Oct 29, 2026.*3:00 AM EDT/);
+  assert.match(dateOnly.duePacific,/Oct 28, 2026 - end of eBay Pacific day/);
+  assert.equal(report.deadline({}).due,'Not recorded');
+});
+
+test('customer names are prominent in profiles and each item, retaining eBay usernames and order-specific names',()=>{
+  const data=record();data.orders[0].buyer_name='Saved Order Name';
+  const c=customer(data),html=report.render(report.makeReport([c],'all',now.toISOString()));
+  assert.equal(c.name,'Sample Customer');assert.equal(c.rows[0].customerName,'Saved Order Name');
+  assert.match(html,/<h2>Sample Customer<\/h2>/);
+  assert.match(html,/class="item-customer">Saved Order Name<\/strong>/);
+  assert.match(html,/class="item-owner">eBay: sample_buyer<\/span>/);
+  data.orders[0].buyer_name='<img onerror=attack()>';
+  const unsafe=report.render(report.makeReport([customer(data)],'all',now.toISOString()));
+  assert.ok(!unsafe.includes('<img onerror'));assert.match(unsafe,/&lt;img onerror=/);
+  const q=queue();delete q[0].buyer_name;delete data.orders[0].buyer_name;
+  assert.match(report.render(report.makeReport([customer(data,q)],'all',now.toISOString())),/class="item-customer">Customer name not recorded/);
+});
+
 test('customer figures include closed history while only missing lines are listed; completed partial refunds are counted once',()=>{
   const data=record();data.orders[1].raw_payload={orderPaymentStatus:'FULLY_REFUNDED'};
   const paid={refundReferenceId:'r',refundStatus:'REFUNDED',amount:{value:25,currency:'USD'}};
@@ -107,12 +141,50 @@ test('scoped screenshots retain full financial history and use only missing-line
 
 test('PDF is generated locally with clickable customer, item and external links; long notes flow to extra pages',async()=>{
   globalThis.PDFLib=PDFLib;
-  const c=customer();c.rows[0].note='A detailed staff note with important item information. '.repeat(100);
+  const c=customer();c.rows[0].notes=[{text:'A detailed staff note with important item information. '.repeat(100),author:'staff@example.test',date:'Oct 29, 2026, 2:00 PM EDT'}];
   const bytes=await pdfReport.build(report.makeReport([c],'all',now.toISOString()));
   const pdf=await PDFLib.PDFDocument.load(bytes);assert.ok(pdf.getPageCount()>=6);
   let internal=0,external=0;
+  const directoryRef=pdf.getPages()[1].ref.toString(),profileRef=pdf.getPages()[2].ref.toString();
+  for(const [i,page] of pdf.getPages().entries()){
+    const footerLinks=(page.node.lookup(PDFLib.PDFName.of('Annots'))?.asArray()||[]).map(ref=>pdf.context.lookup(ref)).filter(a=>a.lookup(PDFLib.PDFName.of('Rect')).asArray()[1].asNumber()===23);
+    assert.ok(footerLinks.some(a=>a.lookup(PDFLib.PDFName.of('Dest')).asArray()[0].toString()===directoryRef),`Directory footer missing on page ${i+1}`);
+    if(i>=2&&i<pdf.getPageCount()-1)assert.ok(footerLinks.some(a=>a.lookup(PDFLib.PDFName.of('Dest')).asArray()[0].toString()===profileRef),`Customer footer missing on page ${i+1}`);
+  }
   for(const page of pdf.getPages())for(const ann of page.node.lookup(PDFLib.PDFName.of('Annots'))?.asArray()||[]){
     const value=pdf.context.lookup(ann);if(value.has(PDFLib.PDFName.of('Dest')))internal++;if(value.has(PDFLib.PDFName.of('A')))external++;
   }
   assert.ok(internal>=2);assert.ok(external>=10);
+});
+
+
+test('directory totals only missing lines and shows the oldest overdue missing line',()=>{
+  const data=record();data.orders[0].ship_by_date='2026-10-25T06:59:59Z';data.orders[2].ship_by_date='2026-10-28T06:59:59Z';
+  data.orders[1].ship_by_date='2026-09-01T06:59:59Z';
+  const c=customer(data,[...queue(),{...line('c1','c'),item_search:{is_missing:true}}]);
+  assert.equal(c.missingValue,'$200.00');
+  assert.deepEqual(report.directoryUrgency(c),{level:'overdue',label:'Oldest overdue',value:'4 days 11 hours'});
+  const index=report.render(report.makeReport([c],'all',now.toISOString())).match(/<nav class="customer-index"[\s\S]*?<\/nav>/)[0];
+  assert.match(index,/Missing-item value/);assert.match(index,/\$200.00/);assert.match(index,/4 days 11 hours/);
+  c.rows.forEach(r=>r.deadline=report.deadline({ship_by_date:'2026-10-30T06:59:59Z'},now));
+  assert.equal(report.directoryUrgency(c).value,'Due today');
+  c.rows.forEach(r=>r.deadline=report.deadline({}));
+  assert.equal(report.directoryUrgency(c).value,'Deadline not recorded');
+});
+
+test('all written item notes include saved author and Eastern timestamp, newest first',()=>{
+  const data=record(),base={order_line_ids:['a1'],action:'commented',payload:{source:'pending_order_line_note'}};
+  data.events=[{...base,id:'old',notes:'First search',signed_by_email:'first@example.test',created_at:'2026-10-28T18:00:00Z'},
+    {...base,id:'new',notes:'Second search',signed_by_email:'second@example.test',created_at:'2026-10-29T03:00:00Z'},
+    {...base,id:'unknown',notes:'Legacy note'}];
+  data.events.push(data.events[0]);
+  const c=customer(data),notes=c.rows[0].notes;
+  assert.deepEqual(notes.map(n=>n.text),['Second search','First search','Legacy note']);
+  assert.equal(notes[0].author,'second@example.test');assert.match(notes[0].date,/Oct 28, 2026.*11:00 PM EDT/);
+  assert.equal(notes[2].author,'Author not recorded');assert.equal(notes[2].date,'Not recorded');
+  const html=report.render(report.makeReport([c],'all',now.toISOString()));
+  for(const expected of ['First search','Second search','first@example.test','second@example.test','Eastern time','Date/time not recorded'])assert.ok(html.includes(expected));
+  assert.match(html,/href="#customer-directory"/);assert.match(html,/href="#customer-0">↑ Customer profile/);
+  const q=queue();q[0].latest_line_note='Saved summary';
+  assert.equal(customer(record(),q).rows[0].notes[0].author,'Author not recorded');
 });
