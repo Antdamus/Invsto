@@ -131,6 +131,14 @@ test('filters work, navigation opens, and desktop restores the original tools', 
   await expect(page.locator('#order-sort')).toBeVisible();
   await page.locator('#order-search').fill('jewelrylover_28');
   await expect(page.locator('.buyer-order-card')).toHaveCount(1);
+  const selectAll = page.locator('[data-buyer-select-all]');
+  await expect(selectAll).toBeVisible();
+  await selectAll.click();
+  await expect(selectAll).toHaveText('Deselect all lines');
+  assert.deepEqual(await page.evaluate(() => [...state.adminSelectedLineIds].sort()), ['line-0', 'line-1']);
+  await expect(page.locator('#phone-selection-count')).toHaveText('2');
+  await selectAll.click();
+  assert.deepEqual(await page.evaluate(() => [...state.adminSelectedLineIds]), []);
   await page.locator('#phone-orders-tools').click();
   await expect(page.locator('#admin-order-actions-panel')).toBeVisible();
   await page.setViewportSize({width: 1280, height: 900});
@@ -151,6 +159,16 @@ for (const width of [768, 1024, 1440]) {
     await expect(card.locator('[data-buyer-complete-key]')).toBeVisible();
     await expect(card.locator('[data-buyer-label-key]')).toBeVisible();
     await expect(card.locator('[data-buyer-shipping-labels]')).toBeVisible();
+    const selectAll = card.locator('[data-buyer-select-all]');
+    await expect(selectAll).toBeVisible();
+    await selectAll.press('Enter');
+    await expect(selectAll).toHaveText('Deselect all lines');
+    await expect(selectAll).toHaveAttribute('aria-pressed', 'true');
+    await expect(selectAll).toBeFocused();
+    await expect(card.locator('[data-buyer-expand-key]')).toHaveAttribute('aria-expanded', 'false');
+    assert.deepEqual(await page.evaluate(() => [...state.adminSelectedLineIds].sort()), ['line-0', 'line-1']);
+    await selectAll.press('Enter');
+    assert.deepEqual(await page.evaluate(() => [...state.adminSelectedLineIds]), []);
     await expect(card.locator('[data-buyer-completion-photos]')).toBeHidden();
     await card.locator('.buyer-order-tools > summary').press('Enter');
     await expect(card.locator('[data-buyer-completion-photos]')).toBeVisible();
@@ -179,6 +197,12 @@ for (const width of [768, 1024, 1440]) {
     assert.deepEqual(await page.evaluate(() => [...state.adminSelectedLineIds].sort()), ['line-0', 'line-1']);
     await card.locator('[data-admin-group-select]').uncheck();
     assert.deepEqual(await page.evaluate(() => [...state.adminSelectedLineIds]), []);
+    await line.locator('[data-admin-line-select]').check();
+    await expect(selectAll).toHaveAttribute('aria-pressed', 'mixed');
+    await selectAll.click();
+    await expect(card.locator('[data-admin-group-select]')).toBeChecked();
+    assert.deepEqual(await page.evaluate(() => [...state.adminSelectedLineIds].sort()), ['line-0', 'line-1']);
+    await selectAll.click();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     assert.deepEqual(await page.evaluate(() => databaseWrites), []);
     await card.screenshot({path: `test-results/pending-card-tools-${width}.png`});
@@ -236,7 +260,7 @@ test('front task, watch and completion actions keep their scope with an existing
 });
 
 test('relocated order and item actions keep their buyer/line scope without submitting', async t => {
-  const page = await open(t, {width: 1440});
+  const page = await open(t, {width: 1440, admin: true});
   await page.locator('#order-search').fill('jewelrylover_28');
   await page.evaluate(() => {
     window.actionCalls = [];
@@ -249,6 +273,7 @@ test('relocated order and item actions keep their buyer/line scope without submi
     setItemMissing = (id, missing) => actionCalls.push(['missing', id, missing]);
   });
   const card = page.locator('.buyer-order-card');
+  await card.locator('[data-buyer-select-all]').click();
   await card.locator('[data-buyer-label-key]').click();
   await card.locator('[data-buyer-shipping-labels]').click();
   await card.locator('.buyer-order-tools > summary').click();

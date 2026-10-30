@@ -4227,7 +4227,7 @@ function getShippingLabelAction(lines = []) {
   return {
     combined,
     label: combined ? "Create combined label" : "Create shipping label",
-    help: !lines.length ? "Select the orders to ship. Use Select pending lines to include all orders in this buyer card." : combined
+    help: !lines.length ? "Select the orders to ship. Use Select all lines to include all pending lines in this buyer card." : combined
       ? `${lines.length} selected item lines · selected orders only. On eBay, choose “Combine orders per buyer” before buying the label.`
       : "Create a shipping label for the selected order only.",
     disabled: !lines.length || lines.some(line => !normalizeEbayOrderNumber(line.order?.order_number)),
@@ -4404,7 +4404,7 @@ function setAdminGroupSelection(group, checked) {
     if (checked) state.adminSelectedLineIds.add(line.id);
     else state.adminSelectedLineIds.delete(line.id);
   });
-  renderOrders();
+  renderOrders({ buyerKey: group.key });
   renderAdminOrderActions();
 }
 
@@ -4639,6 +4639,9 @@ function renderOrders(options = {}) {
       ? `<button type="button" class="buyer-card-approval-btn is-pending" data-buyer-approval-task-id="${escapeHtml(approvalTask.id)}">Pending Admin Approval</button>`
       : `<button type="button" class="buyer-card-approval-btn" data-buyer-approval-key="${escapeHtml(group.key)}" ${getPendingOrderApprovalLinesForGroup(group).length ? "" : "disabled"}>Send for Approval</button>`;
     const card = document.createElement("article");
+    const selectableGroupLines = group.lines.filter(isAdminCloseoutSelectable);
+    const selectedGroupLineCount = selectableGroupLines.filter((line) => state.adminSelectedLineIds.has(line.id)).length;
+    const allGroupLinesSelected = selectableGroupLines.length > 0 && selectedGroupLineCount === selectableGroupLines.length;
     const hasSelectedAdminLines = group.lines.some((line) => state.adminSelectedLineIds.has(line.id));
     const postOrderIssueStatus = getGroupPostOrderIssueStatus(group.lines);
     const ebayApiStatus = getGroupEbayApiStatus(group.lines);
@@ -4669,6 +4672,7 @@ function renderOrders(options = {}) {
         <div class="buyer-card-overview">
           ${urgencyMarkup}
           <span class="buyer-card-value">${formatMoney(group.totalValue)}</span>
+          ${isAdminUser() ? `<button type="button" class="secondary-btn buyer-card-select-all-btn" data-buyer-select-all="${escapeHtml(group.key)}" aria-pressed="${allGroupLinesSelected ? "true" : selectedGroupLineCount ? "mixed" : "false"}" title="${allGroupLinesSelected ? "Deselect" : "Select"} all eligible pending lines in this buyer card" ${selectableGroupLines.length ? "" : "disabled"}>${allGroupLinesSelected ? "Deselect all lines" : "Select all lines"}</button>` : ""}
           <button type="button" class="buyer-card-expand-btn" data-buyer-expand-key="${escapeHtml(group.key)}" aria-expanded="${isExpanded ? "true" : "false"}">
             <span>${isExpanded ? "Hide items" : "View items"}</span>
             <i data-lucide="${isExpanded ? "chevron-up" : "chevron-down"}"></i>
@@ -4760,6 +4764,12 @@ function renderOrders(options = {}) {
       openBuyerGroupSelectedEbayLabelPages(group);
     });
     const groupCheckboxes = [...card.querySelectorAll("[data-admin-group-select]")];
+    card.querySelector("[data-buyer-select-all]")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setAdminGroupSelection(group, !allGroupLinesSelected);
+      [...list.querySelectorAll(".buyer-order-card")].find((entry) => entry.dataset.buyerKey === group.key)
+        ?.querySelector("[data-buyer-select-all]")?.focus({ preventScroll: true });
+    });
     const completeButton = card.querySelector("[data-buyer-complete-key]");
     const taskButton = card.querySelector("[data-buyer-task-key]");
     const viewTaskButton = card.querySelector("[data-view-order-task]");
@@ -4799,12 +4809,10 @@ function renderOrders(options = {}) {
       toggleBuyerGroupExpanded(group.key);
     });
     if (groupCheckboxes.length) {
-      const selectable = group.lines.filter(isAdminCloseoutSelectable);
-      const selected = selectable.filter((line) => state.adminSelectedLineIds.has(line.id));
       groupCheckboxes.forEach((groupCheckbox) => {
-        groupCheckbox.checked = selectable.length > 0 && selected.length === selectable.length;
-        groupCheckbox.indeterminate = selected.length > 0 && selected.length < selectable.length;
-        groupCheckbox.disabled = selectable.length === 0;
+        groupCheckbox.checked = allGroupLinesSelected;
+        groupCheckbox.indeterminate = selectedGroupLineCount > 0 && !allGroupLinesSelected;
+        groupCheckbox.disabled = selectableGroupLines.length === 0;
         groupCheckbox.addEventListener("click", (event) => event.stopPropagation());
         groupCheckbox.addEventListener("change", (event) => setAdminGroupSelection(group, event.target.checked));
       });
@@ -4856,7 +4864,10 @@ function renderOrders(options = {}) {
     });
 
     if (!lineList) {
-      list.appendChild(card);
+      if (partial) {
+        state.orderNotesObserver?.unobserve(previousCard);
+        previousCard.replaceWith(card);
+      } else list.appendChild(card);
       if (state.orderNotesObserver) state.orderNotesObserver.observe(card);
       else hydrateBuyerGroupNotes(card, group);
       window.PendingOrderChats?.rendered(card);
