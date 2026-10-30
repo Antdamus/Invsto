@@ -92,15 +92,19 @@
     await text(page,'Every detail, in one place.',36,609,26,2,color('e7dcc9'));
     await text(page,'Customer history, item evidence and shipping deadlines.',36,572,11,0,color('c3d1d4'));
     await text(page,`Scope: ${{all:'All marked missing items',watches:'Missing watches','not-found':'Items marked not found'}[model.scope]}`,36,533,9,0,color('d6bc8e'));
+    rect(page,36,400,540,78,color('f1e3c7'));
+    await text(page,'TOTAL VALUE OF MISSING ITEMS',50,460,9,1,ink);
+    let totalSize=30;while(totalSize>12&&width(model.missingValue,totalSize,1)>512)totalSize--;
+    await text(page,model.missingValue,50,426,totalSize,1,ink);
+    await text(page,'Original item prices for missing lines / Excludes shipping and tax',50,412,8,0,color('62543b'));
     for(const [i,[value,label,bg,fg]] of [[model.count,'MISSING LINES',white,ink],[model.customers.length,'CUSTOMERS',white,ink],[model.overdue,'OVERDUE',roseBg,rose],[model.today,'DUE TODAY',amberBg,amber]].entries()){
-      const x=36+i*138;rect(page,x,384,126,94,bg);await text(page,String(value),x+14,430,30,1,fg);await text(page,label,x+14,403,8,1,fg);
+      const x=36+i*138;rect(page,x,284,126,94,bg);await text(page,String(value),x+14,330,30,1,fg);await text(page,label,x+14,303,8,1,fg);
     }
-    let f=flow(page,354,'Report overview');
-    await f.write(`${model.orders} orders affected | Original missing-item value: ${model.missingValue}`,11,1);
+    let f=flow(page,262,'Report overview');
+    await f.write(`${model.orders} orders affected`,11,1);
     await f.write('SHIPPING NEEDS ATTENTION',9,1,amber);
     await f.write(report.NOTICE,10,0,ink,12);await link(f.page,'eBay payment-hold policy',report.POLICY_URL,36,f.y,9);f.y-=30;
-    await f.write('READ THE TIMELINE',9,1,gold);
-    await f.write('Purchased / Marked missing / Shipping deadline / Report snapshot. Milestones follow date order. Red identifies overdue items; amber identifies items due today. Each overdue item states its deadline and elapsed time.',10);
+    await f.write('Red: overdue. Amber: due today. Use the customer directory and item index to jump to each item.',9,0,muted);
     if(model.unknown)await f.write(`${model.unknown} item lines have no saved shipping deadline and need verification.`,10,1,amber);
     // Customer navigation starts on its own page so the cover stays calm and easy to scan.
     page=await newPage('Customer index');f=flow(page,709,'Customer index');

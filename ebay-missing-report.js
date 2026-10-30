@@ -187,6 +187,7 @@
   }
   function render(model){
     return `<header class="report-hero"><div class="eyebrow">OG JEWELERS / FULFILLMENT PRIORITIES</div><h1>Missing items.<br><em>Every detail, in one place.</em></h1><p>Customer history, item evidence and shipping deadlines.</p><div class="edition">Prepared ${html(model.date)}<br>Scope: ${html({all:'All marked missing items',watches:'Missing watches','not-found':'Items marked not found'}[model.scope])}</div></header>
+      <div class="missing-total"><div><span>Total value of missing items</span><strong>${html(model.missingValue)}</strong></div><p>Original item prices for the missing lines in this report.<br>Excludes shipping and tax.</p></div>
       <div class="overview"><div><strong>${model.count}</strong><span>Missing item lines</span></div><div><strong>${model.customers.length}</strong><span>Customers</span></div><div class="is-overdue"><strong>${model.overdue}</strong><span>Overdue lines</span></div><div class="is-today"><strong>${model.today}</strong><span>Due today</span></div></div>
       <aside class="urgency-notice"><strong>Shipping needs attention</strong><p>${NOTICE}</p><a href="${POLICY_URL}" target="_blank" rel="noopener">eBay payment-hold policy</a></aside>
       <div class="section-title"><span>01 / AT A GLANCE</span><h2>The missing-item queue</h2><p>${model.orders} orders affected · Original missing-item value: ${html(model.missingValue)}${model.unknown?` · ${model.unknown} deadlines need verification`:''}</p></div>

@@ -16,6 +16,11 @@
 
 .missing-item-index .overdue .index-shipping small{color:var(--rose);font-weight:bold;text-transform:uppercase;letter-spacing:.05em}
 
+.missing-total{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:24px 28px;background:#f1e3c7;border:1px solid #dcc496;color:var(--ink)}
+.missing-total>div{min-width:0}.missing-total span{display:block;font-size:12px;font-weight:bold;text-transform:uppercase;letter-spacing:.08em}.missing-total strong{display:block;margin-top:8px;font-size:42px;line-height:1.15;overflow-wrap:anywhere}.missing-total p{margin:0;font-size:12px;line-height:1.6;color:#62543b}
+@media(max-width:700px){.missing-total{align-items:flex-start;flex-direction:column;gap:12px;padding:22px 20px}.missing-total strong{font-size:36px}}
+@media print{.missing-total{break-inside:avoid;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+
 .evidence-shot{margin:0;min-width:0;overflow:hidden;border:1px solid #d9dfda;border-radius:12px;background:#f3f4f0;break-inside:avoid}
 .evidence-shot img{display:block;width:100%;height:340px;object-fit:contain}
 .evidence-shot figcaption{padding:14px 16px;background:#edf3ef;border-top:1px solid #d9dfda;overflow-wrap:anywhere}
