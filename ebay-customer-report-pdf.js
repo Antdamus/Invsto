@@ -127,7 +127,7 @@
       await f.write(`${section.title} / ${selected.length}`,11,1,gold,10);
       if(section.note)await f.write(section.note,9,0,muted,14);
       for(const {r,i} of selected){
-        const left=[`${r.showMap&&r.showMap.number!=null?'Item #'+r.showMap.number:i+1+'.'} ${r.title}`,`Order ${r.orderNumber}`,`Purchased ${r.date}`,...(r.groups.length?['Grouped completion / see item details']:[])];
+        const left=[`${r.showMap&&r.showMap.number!=null?'Item #'+r.showMap.number:i+1+'.'} ${r.title}`,`Order ${r.orderNumber}`,`${r.purchaseLabel||'Purchased'} ${r.date}`,...(r.groups.length?['Grouped completion / see item details']:[])];
         const right=[r.state.label,...(r.pending?[report.urgency(r),r.shippingLabel.label,`Ship by ${r.deadline.dueEastern||'Not recorded'}`]:[])];
         const amount=shared.money(r.price.total,r.price.currency),refundLabel=r.refund?.label||'Refund status not recorded';
         const leftH=wrap(left[0],236,9,1).length*12.6+left.slice(1).reduce((sum,s)=>sum+wrap(s,236,8).length*11.2+4,0);
@@ -155,7 +155,7 @@
       const label=`${model.username} / Order ${r.orderNumber}`;
       page=await newPage(label,r);destinations.set(`item:${r.id}`,page.ref);f=flow(page,714,label,r);
       await f.write(`ITEM ${i+1} OF ${model.count} / ${r.customerName||c.name||model.username}`,10,1,gold,8);
-      if(r.showMap){await f.write(`${r.showMap.day} / ${r.showMap.label} / ${r.showMap.number==null?'Item number not recorded':'Item #'+r.showMap.number}`,11,1,green);await f.write(`${r.showMap.reason}${r.showMap.hostEstimated?' / Host: schedule estimate':''}`,8,0,muted);}
+      if(r.showMap){await f.write(`${r.showMap.day} / ${r.showMap.label} / ${r.showMap.number==null?'Item number not recorded':'Item #'+r.showMap.number}`,11,1,green);await f.write(`${r.showMap.reason}${r.showMap.hostEstimated?' / Host: schedule estimate':''}`,8,0,muted);if(r.purchaseNote)await f.write(r.purchaseNote,9,0,muted);}
       if(r.pending){
         const content=r.deadline.since?`Overdue since ${r.deadline.since}`:`Ship by ${r.deadline.due}`;
         const h=48+wrap(content,510,9).length*12.6;await f.ensure(h+10);rect(f.page,36,f.y-h,540,h,tint(r.deadline.level));

@@ -35,6 +35,14 @@ test('map counts only matched pending lines and keeps regular purchases outside 
  const model=fixture();assert.equal(model.count,1);assert.equal(model.orderMap.excluded.length,1);assert.equal(model.orderMap.groups[0].quantity,2);assert.equal(model.orderCount,1);assert.equal(model.itemValue,'$100.00');
  const html=customer.render(model);assert.match(html,/One buyer\. Every show/);assert.match(html,/href="#show-abc"/);assert.match(html,/HOST: SCHEDULE ESTIMATE/);assert.ok(!html.includes('id="purchase-regular"'));
 });
+test('delayed checkout keeps the receipt show and labels its later order timestamp honestly',()=>{
+ const model=fixture(),r=model.rows[0];r.videoUrl='https://www.ebay.com/ebaylive/events/abc/stream?selectedItemId=123';r.sortDate='2026-11-02T20:00:00Z';
+ map.attach(model,evidence);assert.equal(r.showMap.show.event_id,'abc');assert.equal(r.purchaseLabel,'eBay order recorded');assert.ok(r.timeline.some(e=>e.label==='Original live show started'));assert.match(customer.render(model),/original sale time is not recorded/);
+});
+test('an exact captured sale timestamp takes priority over a later checkout timestamp',()=>{
+ const model=fixture(),r=model.rows[0];r.sortDate='2026-11-02T20:00:00Z';
+ map.attach(model,{...evidence,attempts:[{order_line_id:'line',event_id:'abc',sold_at:row.sortDate}]});assert.equal(r.sortDate,row.sortDate);assert.equal(r.purchaseLabel,undefined);
+});
 test('PDF show directory and every item return link resolve to existing pages',async()=>{
  globalThis.PDFLib=PDFLib;const bytes=await pdf.build(fixture());const doc=await PDFLib.PDFDocument.load(bytes),refs=new Set(doc.getPages().map(p=>p.ref.toString()));let count=0;
  for(const p of doc.getPages())for(const ref of p.node.lookup(PDFLib.PDFName.of('Annots')).asArray()){
