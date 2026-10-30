@@ -22,9 +22,11 @@
  }
  window.liveBagPrintBridge.install({printBag},sort,id=>data?.connection.event_id===id&&Date.now()-Date.parse(data.server_time)<8000?data:null,{platform:'tiktok'});
  function updateStatus(){
-  if(!data)return;const c=data.connection,age=Date.now()-Date.parse(c.last_received_at),live=age<20000&&c.health?.ready;
-  $('connection-title').textContent=live?'TikTok capture connected':age<20000?'Capture needs attention':'Waiting for the TikTok console';
-  status(`${c.health?.message||'Start capture in the TikTok console.'} · ${data.attempts.length} saved auction records${c.last_received_at?' · Last update '+time(c.last_received_at):''}`,!live);
+  if(!data)return;const c=data.connection,observed=c.health?.observed_at,age=Date.now()-Date.parse(observed),fresh=Number.isFinite(age)&&age>=-30000&&age<20000,live=fresh&&c.health?.ready;
+  $('connection-title').textContent=live?'TikTok capture connected':fresh?'Capture needs attention':'Waiting for the TikTok console';
+  const message=fresh?(c.health?.message||'Reading TikTok sold auctions.'):'The TikTok console is not sending current observations.';
+  const version=/^\d+\.\d+\.\d+$/.test(c.health?.version||'')?' · Capture v'+c.health.version:'';
+  status(`${message} · ${data.attempts.length} saved auction records${observed?' · Last capture '+time(observed):''}${version}`,!live);
  }
  function render(force=false){
   if(!data)return;updateStatus();
