@@ -1,4 +1,5 @@
 'use strict';
+if(typeof importScripts==='function')importScripts('tiktok-worker.js');
 const captureVersion=chrome.runtime.getManifest?.().version||'1.7.7';
 let serial = Promise.resolve();
 // A receiver's own timer stops when Edge suspends that page. Keep the deadline

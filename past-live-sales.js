@@ -378,6 +378,7 @@ async function loadPastLiveSales({ keepSelection = true } = {}) {
     let query = supabase
       .from("live_sale_sessions")
       .select("*")
+      .neq("workflow_mode", "tiktok_live")
       .gte("started_at", fromIso)
       .lte("started_at", toIso)
       .order("started_at", { ascending: false })

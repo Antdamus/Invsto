@@ -1,9 +1,9 @@
 'use strict';
 (() => {
-  const eventId=location.pathname.split('/')[4];
-  const key='invsto-bag-label-request:'+eventId;
-  const photoKey='invsto-bag-photo-request:'+eventId;
-  function mount(box) {
+  function mount(box, options = {}) {
+    const eventId=options.eventId||location.pathname.split('/')[4];
+    const key='invsto-bag-label-request:'+eventId;
+    const photoKey='invsto-bag-photo-request:'+eventId;
     const style=document.createElement('style');
     style.textContent=`#invsto-capture-helper{position:fixed;bottom:12px;left:12px;z-index:2147483646;background:#18251f;color:#f8f6ee;border:1px solid #526454;border-radius:16px;padding:12px;width:340px;max-width:calc(100vw - 48px);font:13px/1.4 system-ui;box-shadow:0 8px 30px #0004}#invsto-capture-helper *{box-sizing:border-box}#invsto-capture-helper .bag-bar{display:flex;align-items:center;gap:12px}#invsto-capture-helper .bag-identity{flex:1;min-width:0}#invsto-capture-helper .bag-identity small{display:block;text-transform:uppercase;letter-spacing:.12em;font-size:9px;color:#b6c1b7}#invsto-capture-helper .bag-number{display:block;font-size:24px;line-height:1.2;font-weight:750}#invsto-capture-helper .bag-buyer{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#d7ded7}#invsto-capture-helper button,#invsto-capture-helper select{font:inherit;border:1px solid #546356;border-radius:10px;padding:9px 11px;background:#29372e;color:inherit;cursor:pointer}#invsto-capture-helper button:disabled{opacity:.45;cursor:default}#invsto-capture-helper [data-bag-print]{background:#efd295;color:#19241d;border:0;font-weight:750;min-height:42px;white-space:nowrap}#invsto-capture-helper details{margin-top:8px}#invsto-capture-helper summary{cursor:pointer;color:#bfcabe;font-size:11px;width:fit-content}#invsto-capture-helper .bag-settings{display:grid;gap:8px;padding-top:10px;max-height:45vh;overflow:auto}#invsto-capture-helper .bag-settings label{display:grid;gap:4px}#invsto-capture-helper select{width:100%;min-width:0}#invsto-capture-helper [data-bag-status]{margin:6px 0 0;font-size:11px;color:#c5d9c0}#invsto-capture-helper [data-bag-status]:empty{display:none}#invsto-capture-helper [data-bag-status].error{color:#ffb8aa}#og-ebay-cancellation-panel{display:none!important}`;
     document.head.append(style);

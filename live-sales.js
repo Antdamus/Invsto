@@ -485,7 +485,7 @@ async function loadSessions({ keepSelection = true } = {}) {
     console.warn("Live sale session load failed:", error);
     state.sessions = [];
   } else {
-    state.sessions = data || [];
+    state.sessions = (data || []).filter(session=>session.workflow_mode!=='tiktok_live');
   }
 
   if (keepSelection && state.currentSession) {
@@ -3668,7 +3668,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     async reload(){
       const {data,error}=await supabase.from("live_sale_sessions").select("*").eq("status","active").order("started_at",{ascending:false}).limit(1000);
       if(error)throw error;
-      state.sessions=data||[];
+      state.sessions=(data||[]).filter(session=>session.workflow_mode!=='tiktok_live');
       const selected=state.sessions.find(s=>s.id===state.currentSession?.id);
       if(selected)state.currentSession=selected;
       else if(state.currentSession){state.currentSession=null;state.currentLot=null;state.lotItems=[];state.bagHistoryLots=[];state.bagHistoryItems=[];clearScan();localStorage.removeItem("invsto-live-show");window.ebayLive?.resetSelection();setFlowStep("session");await window.ebayLive?.refresh();}

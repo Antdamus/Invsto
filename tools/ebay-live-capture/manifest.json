@@ -1,13 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Invsto Live Capture",
-  "version": "1.7.7",
-  "description": "Capture eBay Live sales and print saved bag labels from Stream Manager.",
+  "version": "1.8.0",
+  "description": "Capture eBay and TikTok LIVE auctions, save item photos, and print bag labels.",
   "permissions": ["storage", "alarms"],
   "background": {"service_worker": "worker.js"},
   "content_scripts": [
     {"matches": ["https://ir.ebaystatic.com/cr/ebaylivepubweb/liveassets/shoplive/*/player.html*"], "js": ["stream-photo.js"], "all_frames": true},
     {"matches": ["https://www.ebay.com/ebaylive/host/events/*"], "js": ["parser.js", "panel.js", "bag-label.js", "capture.js"]},
-    {"matches": ["https://antdamus.github.io/Invsto/live-sales.html*"], "js": ["receiver.js"]}
+    {"matches": ["https://antdamus.github.io/Invsto/live-sales.html*"], "js": ["receiver.js"]},
+    {"matches": ["https://shop.tiktok.com/streamer/live/product/dashboard*"], "js": ["tiktok-parser.js", "panel.js", "bag-label.js", "tiktok-capture.js"]},
+    {"matches": ["https://antdamus.github.io/Invsto/tiktok-live-sales.html*"], "js": ["tiktok-receiver.js"]}
   ]
 }

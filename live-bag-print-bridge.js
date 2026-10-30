@@ -6,21 +6,21 @@
   const prefix = 'invsto.live.bagPrinter.v1.';
   const requests = new Map();
   let installed = false;
-  function install(api, sortAuctions, snapshot = () => null) {
+  function install(api, sortAuctions, snapshot = () => null, {platform = 'ebay'} = {}) {
     if (installed || new URL(location.href).searchParams.get('capture') !== '1') return;
     installed = true;
-    const rpc = async (name, args = {}) => {const {data,error}=await window.supabase.rpc(name,args);if(error)throw error;return data;};
+    const rpc = async (name, args = {}) => {const {data,error}=await window.supabase.rpc(platform==='tiktok'?name.replace('ebay_live','tiktok_live'):name,args);if(error)throw error;return data;};
     async function user() {
       const {data,error}=await window.supabase.auth.getSession();
       if(error || !data?.session?.user?.id)throw Error('Sign in to the Invsto receiver.');
       return data.session.user.id;
     }
     async function dashboard(eventId) {
-      const {data:connection,error}=await window.supabase.from('ebay_live_connections').select('event_id,session_id').eq('event_id',eventId).maybeSingle();
+      const {data:connection,error}=await window.supabase.from(platform==='tiktok'?'tiktok_live_connections':'ebay_live_connections').select('event_id,session_id').eq('event_id',eventId).maybeSingle();
       if(error)throw error;
       if(!connection)throw Error('Start Invsto capture and choose the sellers for this show first.');
       const result=await rpc('get_ebay_live_dashboard',{_session_id:connection.session_id});
-      if(result?.connection?.event_id!==eventId)throw Error('The receiver could not verify this eBay show.');
+      if(result?.connection?.event_id!==eventId)throw Error('The receiver could not verify this show.');
       return result;
     }
     // Photos and identification labels do not authorize packing or shipment.
@@ -94,7 +94,7 @@
         online:!!station.online,connected:!!station.printer_connected};
     }
     async function run(command) {
-      if(!/^[A-Za-z0-9_-]{6,100}$/.test(command?.event_id||''))throw Error('Invalid eBay show.');
+      if(!/^[A-Za-z0-9_-]{6,100}$/.test(command?.event_id||'') || (platform==='tiktok')!==String(command.event_id).startsWith('tiktok-'))throw Error('Invalid capture show.');
       const userId=await user();
       if(command.action==='configure') {
         const chosen=await window.printStations.chooseDestination({copies:1,configureOnly:true});
