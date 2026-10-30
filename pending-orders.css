@@ -464,6 +464,11 @@ button.task-action-btn.is-assigned:hover,
     var(--panel);
 }
 
+.summary-strip .summary-money-value { margin-top: 9px; color: var(--gold-strong); font-size: clamp(.9rem, 1.15vw, 1.08rem); font-variant-numeric: tabular-nums; }
+.summary-strip .summary-money-fees { font-weight: 500; line-height: 1.4; }
+.summary-strip .summary-shipping-value { margin-top: 4px; color: #b9d5ef; font-weight: 600; line-height: 1.4; }
+.summary-strip .summary-money-disclaimer { grid-column: 1 / -1; margin: 0; padding: 2px 4px 6px; color: var(--muted); font-size: .74rem; line-height: 1.45; }
+
 .summary-urgency.is-today {
   border-color: rgba(227, 189, 119, 0.34);
   background:

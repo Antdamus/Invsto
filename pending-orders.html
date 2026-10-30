@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="buyer-tasks.css?v=20261013-photos" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261022-partial-refunds-2" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261030-summary-values" />
   <link rel="stylesheet" href="ebay-auto-sync.css?v=20261025" />
   <link rel="stylesheet" href="pending-work-queue.css?v=20261029-missing-report" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
@@ -234,26 +234,39 @@
           <span>Open Queue</span>
           <strong id="summary-pending">0 groups</strong>
           <small id="summary-pending-lines">0 item lines</small>
+          <strong id="summary-pending-value" class="summary-money-value">Loading value…</strong>
+          <small id="summary-pending-shipping" class="summary-shipping-value"></small>
+          <small id="summary-pending-fees" class="summary-money-fees"></small>
           <small class="pending-work-totals" data-work-summary="all">Checking work status…</small>
         </div>
         <div class="summary-urgency is-overdue">
           <span>Overdue</span>
           <strong id="summary-overdue-orders">0 groups</strong>
           <small id="summary-overdue-lines">0 item lines</small>
+          <strong id="summary-overdue-value" class="summary-money-value">Loading value…</strong>
+          <small id="summary-overdue-shipping" class="summary-shipping-value"></small>
+          <small id="summary-overdue-fees" class="summary-money-fees"></small>
           <small class="pending-work-totals" data-work-summary="overdue">Checking work status…</small>
         </div>
         <div class="summary-urgency is-today">
           <span>Due Today</span>
           <strong id="summary-today-orders">0 groups</strong>
           <small id="summary-today-lines">0 item lines</small>
+          <strong id="summary-today-value" class="summary-money-value">Loading value…</strong>
+          <small id="summary-today-shipping" class="summary-shipping-value"></small>
+          <small id="summary-today-fees" class="summary-money-fees"></small>
           <small class="pending-work-totals" data-work-summary="today">Checking work status…</small>
         </div>
         <div class="summary-urgency is-tomorrow">
           <span>Due Tomorrow</span>
           <strong id="summary-tomorrow-orders">0 groups</strong>
           <small id="summary-tomorrow-lines">0 item lines</small>
+          <strong id="summary-tomorrow-value" class="summary-money-value">Loading value…</strong>
+          <small id="summary-tomorrow-shipping" class="summary-shipping-value"></small>
+          <small id="summary-tomorrow-fees" class="summary-money-fees"></small>
           <small class="pending-work-totals" data-work-summary="tomorrow">Checking work status…</small>
         </div>
+        <p class="summary-money-disclaimer">Item sales and shipping collected cover open item lines, before fees and excluding tax. Combined after-fee amounts deduct actual eBay marketplace fees only; shipping labels, refunds and item costs are not deducted. Due cards include whole buyer groups and can overlap.</p>
         <div><button type="button" id="summary-cgl-button"><span>Pending CGL</span><strong id="summary-pending-cgl">…</strong><small>Watch item lines · View waiting</small></button></div>
         <div><button type="button" id="summary-missing-button"><span>Missing watches</span><strong id="summary-missing-watches">…</strong><small>Watch item lines · View waiting</small></button></div>
         <div class="summary-pending-cancel-card"><button type="button" id="summary-cancel-button" aria-pressed="false"><span>Pending to cancel</span><strong id="summary-pending-cancel">…</strong><small>Item lines · View marked orders</small></button></div>
@@ -1342,7 +1355,8 @@
   <script src="ebay-auto-sync.js?v=20261025"></script>
   <script src="buyer-report-refunds.js?v=20261029-timing"></script>
   <script src="pending-buyer-refunds.js?v=20261029-timing"></script>
-  <script src="pending-orders.js?v=20261030-group-selection"></script>
+  <script src="live-sales-report-finances.js?v=20261030-pending-totals"></script>
+  <script src="pending-orders.js?v=20261030-summary-values"></script>
   <script src="pending-inventory.js?v=20261008-shared-bag-2"></script>
   <script src="pending-bag-scan.js?v=20261008-shared-inventory"></script>
   <script src="pending-orders-mobile.js?v=20261018-organized"></script>

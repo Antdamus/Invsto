@@ -31,6 +31,7 @@ async function open(t, {width = 390, admin = false} = {}) {
   const page = await context.newPage(); page.setDefaultTimeout(7000);
   const errors = []; page.on('pageerror', e => errors.push(e.message)); t.after(() => assert.deepEqual(errors, []));
   await page.goto(origin + '/pending-orders.html');
+  await page.addScriptTag({url: origin + '/live-sales-report-finances.js'});
   await page.addScriptTag({url: origin + '/pending-orders.js'});
   await page.evaluate(admin => {
     state.user = {id: 'worker', email: 'worker@example.test'};
@@ -43,7 +44,7 @@ async function open(t, {width = 390, admin = false} = {}) {
     state.orders = Array.from({length: 8}, (_, i) => ({
       id: `line-${i}`, order_id: `order-${i}`, item_title: i === 0 ? 'Sterling silver bracelet with a heart charm' : 'Gold chain, 18 inch',
       item_number: `12345678901${i}`, line_status: 'pending', quantity: 1, fulfilled_quantity: 0,
-      video_receipt_photo_count: i === 1 ? 0 : 1, total_price: 89, sold_for: 89,
+      video_receipt_photo_count: i === 1 ? 0 : 1, total_price: 89, sold_for: 89, shipping_and_handling: 0,
       order: {id: `order-${i}`, order_number: `11-22222-3333${i}`, buyer_username: i < 2 ? 'jewelrylover_28' : `buyer_${i}`,
         buyer_name: i < 2 ? 'Olivia Bennett' : `Customer ${i}`, sale_date: i < 2 ? '2026-09-30T12:00:00Z' : '2026-10-01T12:00:00Z', ship_by_date: '2026-10-02T12:00:00Z'}
     }));
@@ -70,6 +71,29 @@ async function open(t, {width = 390, admin = false} = {}) {
   await expect(page.locator('.buyer-order-card')).toHaveCount(7);
   return page;
 }
+
+test('queue summary shows before-fee value and confirmed after-fee amounts with a visible disclaimer', async t => {
+  const page = await open(t, {width: 1440, admin: true});
+  await expect(page.locator('#summary-pending-value')).toHaveText('$712.00 item sales · before fees');
+  await expect(page.locator('#summary-pending-fees')).toContainText('fees missing for 8 of 8 lines');
+  await page.evaluate(() => {
+    const usd = value => ({value: String(value), currency: 'USD'});
+    state.orders.forEach(line => {
+      const item = {lineItemId: line.id, lineItemCost: usd(89), total: usd(94), deliveryCost: {shippingCost: usd(5)}, ebayCollectAndRemitTaxes: []};
+      line.raw_payload = {line: item};
+      line.order.raw_payload = {order: {totalMarketplaceFee: usd(3), lineItems: [item]}};
+    });
+    renderSummaryStrip();
+  });
+  await expect(page.locator('#summary-pending-value')).toHaveText('$712.00 item sales · before fees');
+  await expect(page.locator('#summary-pending-shipping')).toHaveText('Shipping collected: $40.00');
+  await expect(page.locator('#summary-pending-fees')).toHaveText('$728.00 items + shipping after eBay fees');
+  await expect(page.locator('.summary-money-disclaimer')).toBeVisible();
+  await expect(page.locator('.summary-money-disclaimer')).toContainText('shipping labels, refunds and item costs are not deducted');
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await page.locator('#summary-strip').screenshot({path: 'test-results/pending-summary-values.png'});
+  assert.deepEqual(await page.evaluate(() => databaseWrites), []);
+});
 
 for (const width of [320, 390, 430, 760]) {
   test(`${width}px: queue comes first, all notes are readable, tools and expanded cards fit`, async t => {

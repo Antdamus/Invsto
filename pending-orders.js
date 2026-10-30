@@ -3477,6 +3477,7 @@ function renderRemainingBuyerCount(message = "") {
 
 function renderPendingOrderSummaryLoading() {
   renderRemainingBuyerCount("Loading...");
+  resetPendingOrderMoneySummary("Loading value…");
   $("summary-pending").textContent = "Loading";
   $("summary-pending-lines").textContent = "Checking eBay queue...";
   $("summary-overdue-orders").textContent = "Loading";
@@ -3494,6 +3495,7 @@ function renderPendingOrderSummaryLoading() {
 
 function renderPendingOrderSummaryError() {
   renderRemainingBuyerCount("Count unavailable");
+  resetPendingOrderMoneySummary("Value unavailable");
   for (const id of ["summary-pending", "summary-overdue-orders", "summary-today-orders", "summary-tomorrow-orders"]) {
     $(id).textContent = "Unavailable";
   }
@@ -3502,6 +3504,88 @@ function renderPendingOrderSummaryError() {
   }
   $("order-count-pill").textContent = "Could not load orders";
   for (const id of ["summary-not-found", "phone-summary-not-found"]) { const el = $(id); if (el) el.textContent = "Unavailable"; }
+}
+
+function getPendingOrderLineAmounts(line) {
+  const cents = value => value == null || String(value).trim() === "" || !Number.isFinite(Number(value)) || Number(value) < 0
+    ? null : Math.round(Number(value) * 100);
+  const order = getOrderFromLine(line);
+  const rawLine = line.raw_payload?.line || {};
+  const financials = order.raw_payload?.order || {};
+  const currency = rawLine.total?.currency || rawLine.lineItemCost?.currency || financials.pricingSummary?.total?.currency;
+  // Older net_payout fields can be estimates before marketplace fees. Use only
+  // an actual eBay fee, allocated over ALL original order lines, including closed ones.
+  const orderLines = Array.isArray(financials.lineItems) ? financials.lineItems : [];
+  const lineItemId = rawLine.lineItemId || line.transaction_id;
+  const matches = orderLines.filter(item => lineItemId && item.lineItemId === lineItemId);
+  const itemMatches = orderLines.filter(item => line.item_number && String(item.legacyItemId) === String(line.item_number));
+  const matched = matches.length === 1 ? matches[0] : itemMatches.length === 1 ? itemMatches[0] : null;
+  if (currency && currency !== "USD") return { gross: null, shipping: null, fee: null };
+  const item = matched || rawLine;
+  const usd = amount => amount?.currency === "USD" ? cents(amount.value) : null;
+  const isApi = line.raw_payload?.source === "ebay_fulfillment_api" || Boolean(rawLine.lineItemId) || orderLines.length > 0;
+  // API lineItemCost already covers the entire quantity and excludes shipping/tax.
+  // Imported sold_for is a unit price; total_price can include shipping and tax.
+  let gross = usd(item.discountedLineItemCost ?? item.lineItemCost);
+  if (gross == null && !isApi) {
+    const unit = cents(line.sold_for);
+    const quantity = Number(line.quantity ?? 1);
+    if (unit != null && Number.isInteger(quantity) && quantity > 0) gross = unit * quantity;
+  }
+  let shipping = isApi ? usd(item.deliveryCost?.shippingCost) : cents(line.shipping_and_handling);
+  let fee = null;
+  if (matched && window.OGLiveReportFinances) {
+    const result = window.OGLiveReportFinances.forItem({ amount: gross == null ? null : gross / 100 }, {
+      line: { ...line, raw_payload: { line: matched } },
+      order: { ...order, financials },
+    });
+    shipping = result.shipping;
+    if (result.source === "actual") fee = result.fee;
+  }
+  return { gross, shipping, fee };
+}
+
+function getPendingOrderMoneySummary(lines, amounts = new Map()) {
+  let gross = 0, shipping = 0, fees = 0, missingPrices = 0, missingShipping = 0, missingFees = 0;
+  for (const line of lines) {
+    const value = amounts.get(line) || getPendingOrderLineAmounts(line);
+    if (value.gross == null) missingPrices += 1;
+    else gross += value.gross;
+    if (value.shipping == null) missingShipping += 1;
+    else shipping += value.shipping;
+    if (value.fee == null) missingFees += 1;
+    else fees += value.fee;
+  }
+  return { gross, shipping, fees, missingPrices, missingShipping, missingFees,
+    afterFees: missingPrices || missingShipping || missingFees ? null : gross + shipping - fees };
+}
+
+function resetPendingOrderMoneySummary(message) {
+  for (const bucket of ["pending", "overdue", "today", "tomorrow"]) {
+    const value = $(`summary-${bucket}-value`);
+    const fees = $(`summary-${bucket}-fees`);
+    const shipping = $(`summary-${bucket}-shipping`);
+    if (value) value.textContent = message;
+    if (fees) fees.textContent = "";
+    if (shipping) shipping.textContent = "";
+  }
+}
+
+function renderPendingOrderMoneySummary(bucket, lines, amounts) {
+  const value = $(`summary-${bucket}-value`);
+  const fees = $(`summary-${bucket}-fees`);
+  const shipping = $(`summary-${bucket}-shipping`);
+  if (!value || !fees) return;
+  const totals = getPendingOrderMoneySummary(lines, amounts);
+  value.textContent = `${formatMoney(totals.gross / 100)} ${totals.missingPrices ? "known item sales" : "item sales"} · before fees`;
+  if (shipping) shipping.textContent = `Shipping collected: ${formatMoney(totals.shipping / 100)}${totals.missingShipping ? ` known · ${totals.missingShipping} line${totals.missingShipping === 1 ? "" : "s"} unavailable` : ""}`;
+  fees.textContent = totals.missingPrices
+    ? `${totals.missingPrices} line price${totals.missingPrices === 1 ? "" : "s"} unavailable; after-fee total unavailable`
+    : totals.missingShipping
+      ? "After-fee total unavailable · shipping details incomplete"
+      : totals.missingFees
+      ? `After-fee total unavailable · fees missing for ${totals.missingFees} of ${lines.length} lines`
+      : lines.length ? `${formatMoney(totals.afterFees / 100)} items + shipping after eBay fees` : "No open item lines";
 }
 
 function renderSummaryStrip() {
@@ -3515,6 +3599,8 @@ function renderSummaryStrip() {
     today: { groups: 0, lines: 0 },
     tomorrow: { groups: 0, lines: 0 },
   };
+  const urgencyLines = { overdue: [], today: [], tomorrow: [] };
+  const amounts = new Map(openLines.map(line => [line, getPendingOrderLineAmounts(line)]));
 
   openGroups.forEach((group) => {
     const lines = group.lines.filter(isOpenOrderLine);
@@ -3523,6 +3609,7 @@ function renderSummaryStrip() {
       if (!urgencyCounts[bucket]) continue;
       urgencyCounts[bucket].groups += 1;
       urgencyCounts[bucket].lines += lines.length;
+      urgencyLines[bucket].push(...lines);
     }
   });
 
@@ -3534,6 +3621,8 @@ function renderSummaryStrip() {
   $("summary-today-lines").textContent = `${urgencyCounts.today.lines.toLocaleString()} item line${urgencyCounts.today.lines === 1 ? "" : "s"}`;
   $("summary-tomorrow-orders").textContent = `${urgencyCounts.tomorrow.groups.toLocaleString()} group${urgencyCounts.tomorrow.groups === 1 ? "" : "s"}`;
   $("summary-tomorrow-lines").textContent = `${urgencyCounts.tomorrow.lines.toLocaleString()} item line${urgencyCounts.tomorrow.lines === 1 ? "" : "s"}`;
+  renderPendingOrderMoneySummary("pending", openLines, amounts);
+  for (const bucket of Object.keys(urgencyLines)) renderPendingOrderMoneySummary(bucket, urgencyLines[bucket], amounts);
   const buyerGroupCount = groupLinesByBuyer(state.filteredOrders).length;
   const visibleLineCount = state.filteredOrders.length;
   $("order-count-pill").textContent = `${visibleLineCount.toLocaleString()} line${visibleLineCount === 1 ? "" : "s"} / ${buyerGroupCount.toLocaleString()} buyer${buyerGroupCount === 1 ? "" : "s"}`;
