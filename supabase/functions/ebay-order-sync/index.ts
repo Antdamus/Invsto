@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { inspectShippingFulfillments } from "./shipments.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -1350,6 +1351,10 @@ Deno.serve(async (req) => {
         cancellationDetailLimit:50,localMismatchLimit:120,responseBudgetMs:110000};
     }else{
       if(!await authorizeOrderSync(req,supabase)) return jsonResponse(401,{ok:false,error:'Sign in to Invsto with inventory staff access.'});
+      if (body.shipmentsOnly === true) {
+        const token = await getEbayAccessToken();
+        return jsonResponse(200, await inspectShippingFulfillments(supabase, body, path => ebayRequest(token, path)));
+      }
       const token=crypto.randomUUID();
       if(!await claimOrderSyncLease(supabase,token,false)) return jsonResponse(409,{ok:false,error:'An eBay order sync is already running. Try again after it finishes.'});
       leaseToken=token;

@@ -127,3 +127,15 @@ test('staff authorization and admin-only columns remain enforced', async () => {
     has_function_privilege('authenticated','public.list_pending_ebay_order_queue_v2(text,boolean,integer,integer)','execute') as staff`)).rows[0];
   assert.deepEqual(grants,{anon:false,staff:true});
 });
+
+test('pending queue includes saved tracking metadata without losing its existing fields', async () => {
+  await db.exec("set test.staff='yes'; set test.admin='yes'; alter table ebay_orders add column label_metadata jsonb default '{}', add column tracking_number text");
+  const source=await migration('20261030140000_pending_shipping_reconciliation.sql');
+  await db.exec(source.slice(source.indexOf('-- Fetch the requested lines once')));
+  await db.exec(`update ebay_orders set tracking_number='9400123456789',label_metadata='{"trackingNumbers":["9400123456789"]}' where order_number='order-1'`);
+  const rows=await queue(['pending',true,1000,0]);const row=rows.find(r=>r.item_number==='item-1');
+  assert.equal(row.order_tracking_number,'9400123456789');
+  assert.deepEqual(row.order_label_metadata,{trackingNumbers:['9400123456789']});
+  for(const r of rows){delete r.order_tracking_number;delete r.order_label_metadata;}
+  assert.deepEqual(rows,baseline.get(JSON.stringify(['pending',true,1000,0])));
+});

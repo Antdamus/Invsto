@@ -39,6 +39,7 @@ async function open(t, {mobile = false, render = true} = {}) {
   await page.goto(`${origin}/pending-orders.html`);
   await page.addScriptTag({url: `${origin}/buyer-tasks.js`});
   await page.addScriptTag({url: `${origin}/buyer-promise-checkout.js`});
+  await page.addScriptTag({url: `${origin}/pending-shipment-evidence.js`});
   await page.addScriptTag({url: `${origin}/pending-orders.js`});
   await page.evaluate(() => {
     window.calls = [];
@@ -120,6 +121,29 @@ async function loaded(page, count = 2) {
   await page.waitForFunction(count => document.querySelectorAll('[data-buyer-shared-notes] .buyer-card-note-preview-item').length === count
     && document.querySelector('[data-buyer-shared-notes]')?.textContent.includes('alex@example.com'), count);
 }
+
+for (const mobile of [false, true]) test(`shipment verification and tracking search ${mobile?'phone':'desktop'}`,async t=>{
+ const page=await open(t,{mobile,render:false});
+ await page.evaluate(()=>{
+  line.raw_payload={shipping_reconciliation:{note:'Done by valentine and verified by otello',shipments:[{
+    trackingNumber:'9400108106244699797482',carrier:'USPS',shippedAt:'2026-10-30T08:30:27Z'}]}};
+  state.orders=[normalizeLine(line),normalizeLine({...line,id:'line-b',raw_payload:{},order:{...line.order,id:'order-b',order_number:'09-12345-12345'}})];
+  state.filteredOrders=state.orders;renderOrders();
+ });
+ const card=page.locator('.buyer-order-card');
+ await expect(card.locator('.shipment-verification-group')).toContainText('1 of 2 pending item lines');
+ await card.locator('[data-buyer-expand-key]').click();
+ await expect(card.locator('.shipment-verification-line')).toHaveCount(1);
+ await expect(card.locator('.shipment-verification-line')).toContainText('Done by valentine and verified by otello');
+ const result=await page.evaluate(()=>{
+   const filtered=expandSearchMatchesToBuyerBundles(state.orders,'9400 1081 0624 4699 7974 82');
+   return {count:filtered.length,overflow:document.documentElement.scrollWidth>innerWidth};
+ });
+ assert.equal(result.count,2,'a tracking match brings back the buyer group');assert.equal(result.overflow,false);
+ await mkdir('test-results/pending-shipping',{recursive:true});
+ await card.locator('.shipment-verification-line').scrollIntoViewIfNeeded();
+ await page.screenshot({path:`test-results/pending-shipping/${mobile?'phone':'desktop'}.png`});
+});
 
 for (const width of [390, 1024, 1280, 1440, 1920]) {
   test(`${width}px: long notes keep order actions inside the row at normal zoom`, async t => {

@@ -1557,6 +1557,7 @@ function normalizeLine(line) {
       line.custom_label,
       videoReceiptUrl,
       labelSearchText,
+      window.OGPendingShipments?.search({...line, order}) || "",
       ebayApiStatusText,
       postOrderIssueText,
     ].filter(Boolean).join(" ").toLowerCase(),
@@ -2792,7 +2793,7 @@ function buildOrderLineQueueQuery(status, admin) {
         net_payout,` : "";
   const lineAuditFields = "";
   const orderAuditFields = "";
-  const orderLabelMetadataFields = "";
+  const orderLabelMetadataFields = ",label_metadata,tracking_number";
 
   let query = supabase
     .from("ebay_order_lines")
@@ -2966,6 +2967,8 @@ function normalizePendingOrderQueueRpcRow(row = {}) {
       label_storage_bucket: row.label_storage_bucket,
       label_file_path: row.label_file_path,
       label_uploaded_at: row.label_uploaded_at,
+      label_metadata: row.order_label_metadata || {},
+      tracking_number: row.order_tracking_number || "",
       ebay_api_status: ebayApiStatus,
       post_order_issue: postOrderIssue,
       raw_payload: orderRawPayload,
@@ -3233,7 +3236,8 @@ function clearOrderCreatedDateFilter({ apply = true } = {}) {
 
 function expandSearchMatchesToBuyerBundles(lines = [], term = "") {
   if (!term) return lines;
-  return filterBuyerBundles(lines, line => (line.searchText || "").includes(term));
+  return filterBuyerBundles(lines, line => (line.searchText || "").includes(term)
+    || window.OGPendingShipments?.matchesTracking(line, term));
 }
 
 function filterBuyerBundles(lines, matches) {
@@ -4827,6 +4831,7 @@ function renderOrders(options = {}) {
         <span class="buyer-card-meta-pill buyer-card-date">Ship by ${escapeHtml(formatGroupOrderDate(group, "ship_by_date"))}</span>
       </div>
       ${window.OGPendingWork?.summary(group) || ""}
+      ${window.OGPendingShipments?.groupMarkup(group.lines) || ""}
       <div data-buyer-shared-notes>${renderGroupSharedNotes(group.lines, group.key)}</div>
       <div class="buyer-card-workflow-bar">
         <div class="buyer-card-action-group" role="group" aria-label="Tasks">
@@ -5087,6 +5092,7 @@ function renderOrders(options = {}) {
               ${lineEbayApiStatus ? `<span class="buyer-line-sync-warning ${escapeHtml(lineEbayApiStatus.tone)}" title="${escapeHtml(lineEbayApiStatus.title)}"><i data-lucide="${escapeHtml(lineEbayApiStatus.icon)}"></i>${escapeHtml(lineEbayApiStatus.label)}</span>` : ""}
             </div>
             ${lineCancellationReviewActionMarkup}
+            ${window.OGPendingShipments?.lineMarkup(line) || ""}
             ${window.OGPartialRefunds?.markup(line) || ""}
             <div class="buyer-line-locate">
               <span data-item-search-status="${escapeHtml(line.id)}">${renderItemSearchStatus(line)}</span>

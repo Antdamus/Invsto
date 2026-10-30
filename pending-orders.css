@@ -5547,3 +5547,16 @@ body.phone-camera-mode #pending-quick-actions { display: none; }
 .partial-refund-dialog input[type=checkbox]{width:18px;max-width:18px;height:18px;min-height:18px;padding:0;margin:3px 0 0;flex:0 0 18px}
 .partial-refund-dialog a{color:#e3cfa2}.partial-refund-dialog #partial-refund-error{color:#f7b5a8}
 .partial-refund-dialog .modal-actions{display:flex;gap:12px;flex-wrap:wrap}.partial-refund-dialog button{min-height:44px}
+.shipment-verification {
+  display: flex; flex-direction: column; gap: .5rem;
+  padding: 1rem 1.15rem; margin: .8rem 0;
+  color: #e5fff2; background: #123c30; border: 1px solid #67d7a1;
+  border-left: 5px solid #86efac; border-radius: 14px;
+  box-shadow: 0 3px 15px #0002;
+}
+.shipment-verification > strong {font-size: 1.1rem; line-height: 1.4; color: #fff;}
+.shipment-verification-kicker {font-size: .75rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: #a6edc9;}
+.shipment-verification-tracking {display: flex; flex-wrap: wrap; gap: .4rem .8rem; min-width: 0;}
+.shipment-verification-tracking a {color: #e5fff2; font-weight: 700; text-decoration: underline; overflow-wrap: anywhere;}
+.shipment-verification small {color: #c6e5d6; line-height: 1.5;}
+@media(max-width: 640px) {.shipment-verification {padding: .8rem;}.shipment-verification > strong {font-size: 1rem;}}
