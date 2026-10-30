@@ -71,6 +71,9 @@
 #orders-list .buyer-card-expanded { padding-top: 12px; gap: 12px; }
 #orders-list .buyer-card-items-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; font-weight: 700; }
 #orders-list .buyer-card-items-heading small { color: #a6b1a8; font-weight: 400; }
+#orders-list .buyer-card-items-heading { flex-wrap: wrap; }
+#orders-list .buyer-card-items-selection { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+#orders-list .buyer-card-select-all-btn { min-height: 44px; padding: 8px 12px; border-radius: 10px; font-size: 12px; font-weight: 700; }
 #orders-list .buyer-line-list { display: grid; gap: 12px; }
 #orders-list .buyer-card-workflow .buyer-line-btn { display: block; padding: 16px; min-width: 0; border-radius: 14px; }
 #orders-list .buyer-card-workflow .buyer-line-main { display: grid !important; grid-template-columns: minmax(0, 1fr) minmax(180px, 260px); gap: 16px 24px; width: 100%; }

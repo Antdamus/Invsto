@@ -4642,6 +4642,9 @@ function renderOrders(options = {}) {
     const selectableGroupLines = group.lines.filter(isAdminCloseoutSelectable);
     const selectedGroupLineCount = selectableGroupLines.filter((line) => state.adminSelectedLineIds.has(line.id)).length;
     const allGroupLinesSelected = selectableGroupLines.length > 0 && selectedGroupLineCount === selectableGroupLines.length;
+    const groupSelectAllMarkup = isAdminUser()
+      ? `<button type="button" class="secondary-btn buyer-card-select-all-btn" data-buyer-select-all="${escapeHtml(group.key)}" aria-pressed="${allGroupLinesSelected ? "true" : selectedGroupLineCount ? "mixed" : "false"}" title="${allGroupLinesSelected ? "Deselect" : "Select"} all eligible pending lines in this grouped order" ${selectableGroupLines.length ? "" : "disabled"}>${allGroupLinesSelected ? "Deselect all lines" : "Select all lines"}</button>`
+      : "";
     const hasSelectedAdminLines = group.lines.some((line) => state.adminSelectedLineIds.has(line.id));
     const postOrderIssueStatus = getGroupPostOrderIssueStatus(group.lines);
     const ebayApiStatus = getGroupEbayApiStatus(group.lines);
@@ -4672,7 +4675,6 @@ function renderOrders(options = {}) {
         <div class="buyer-card-overview">
           ${urgencyMarkup}
           <span class="buyer-card-value">${formatMoney(group.totalValue)}</span>
-          ${isAdminUser() ? `<button type="button" class="secondary-btn buyer-card-select-all-btn" data-buyer-select-all="${escapeHtml(group.key)}" aria-pressed="${allGroupLinesSelected ? "true" : selectedGroupLineCount ? "mixed" : "false"}" title="${allGroupLinesSelected ? "Deselect" : "Select"} all eligible pending lines in this buyer card" ${selectableGroupLines.length ? "" : "disabled"}>${allGroupLinesSelected ? "Deselect all lines" : "Select all lines"}</button>` : ""}
           <button type="button" class="buyer-card-expand-btn" data-buyer-expand-key="${escapeHtml(group.key)}" aria-expanded="${isExpanded ? "true" : "false"}">
             <span>${isExpanded ? "Hide items" : "View items"}</span>
             <i data-lucide="${isExpanded ? "chevron-up" : "chevron-down"}"></i>
@@ -4741,7 +4743,7 @@ function renderOrders(options = {}) {
           ${isAdminUser() ? `<div class="card-tool-group buyer-card-admin-row"><span class="card-action-label">Bulk actions</span><label class="admin-group-select"><input type="checkbox" data-admin-group-select="${escapeHtml(group.key)}" />Select pending lines</label></div>` : ""}
         </div>
       </details>
-      ${isExpanded ? `<div class="buyer-card-expanded"><div class="buyer-card-items-heading"><span>Order items</span><small>${escapeHtml(lineCountLabel)} · ${group.pendingCount} pending</small></div><div class="buyer-line-list"></div></div>` : ""}
+      ${isExpanded ? `<div class="buyer-card-expanded"><div class="buyer-card-items-heading"><span>Order items</span><div class="buyer-card-items-selection"><small>${escapeHtml(lineCountLabel)} · ${group.pendingCount} pending</small>${groupSelectAllMarkup}</div></div><div class="buyer-line-list"></div></div>` : ""}
     `;
     bindCardToolDisclosures(card);
 
