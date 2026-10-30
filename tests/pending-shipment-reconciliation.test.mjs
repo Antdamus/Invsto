@@ -44,6 +44,9 @@ test('atomic reconciliation preserves local workflow, exact line scope, existing
 test('prominent line and group evidence excludes unmarked siblings, safely links tracking, and supports spaced scans',()=>{
  const line={id:lineId,order_id:orderId,raw_payload:{shipping_reconciliation:{note,shipments:[shipment]}},order:{order_number:entry.orderNumber}};
  const sibling={id:'other',order_id:orderId,order:line.order};
+ assert.equal(ui.isVerified(line),true);
+ assert.equal(ui.isVerified({...sibling,order:{...line.order,tracking_number:shipment.trackingNumber,raw_payload:line.raw_payload}}),false,'shared order evidence never marks an unshipped sibling');
+ assert.equal(ui.isVerified({...line,raw_payload:{shipping_reconciliation:{note,shipments:[{}]}}}),false,'a shipment must identify a tracking number');
  assert.match(ui.lineMarkup(line),/Done by valentine and verified by otello/);
  assert.match(ui.lineMarkup(line),/4:30 AM EDT/);assert.match(ui.lineMarkup(line),/tools.usps.com/);
  assert.equal(ui.lineMarkup(sibling),'');assert.match(ui.groupMarkup([line,sibling]),/1 of 2 pending item lines/);

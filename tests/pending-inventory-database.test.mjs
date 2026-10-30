@@ -93,6 +93,9 @@ test('quick completion consumes only the attached quantity, records accounting, 
  assert.equal(await scalar("select jsonb_array_length(payload->'inventory_attachment_removals') v from ebay_order_admin_events"),1);
  assert.equal((await read())[0].status,'consumed');
  assert.equal(await scalar(`select fulfilled_quantity v from ebay_order_lines where id='${id(11)}'`),3);
+ assert.equal(await scalar(`select line_status v from ebay_order_lines where id='${id(12)}'`),'pending','unchecked sibling stays open');
+ assert.equal(await scalar(`select fulfilled_quantity v from ebay_order_lines where id='${id(12)}'`),0);
+ assert.equal(await scalar(`select status v from ebay_orders where id='${id(2)}'`),'partially_fulfilled','the parent order remains open until every line is completed');
  assert.deepEqual(await scalar(`select raw_payload v from ebay_order_lines where id='${id(11)}'`),{},'inventory completion cannot restart payment reconciliation by changing imported evidence');
  await assert.rejects(close(),/Only untouched pending/);
  assert.equal(await scalar(`select quantity v from item_stock_locations where id='${id(31)}'`),3);

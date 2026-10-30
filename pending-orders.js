@@ -48,6 +48,7 @@ const state = {
   workerNoInventoryGps: null,
   workerNoInventoryCandidates: [],
   workerNoInventoryLineIds: new Set(),
+  workerNoInventoryVerifiedOnly: false,
   noInventoryCaptureStations: [],
   selectedNoInventoryCaptureStationId: "",
   noInventoryEvidencePhotos: [],
@@ -4296,6 +4297,10 @@ function isNoInventoryCompletionLine(line) {
 
 function getNoInventoryCandidateLines(line = state.selectedLine) {
   if (!line) return [];
+  const buyerLines = getBuyerLines(getBuyerKey(line));
+  if (buyerLines.some(entry => isOpenOrderLine(entry) && window.OGPendingShipments?.isVerified(entry))) {
+    return buyerLines.filter(isNoInventoryCompletionLine);
+  }
   const selectedLines = getSelectedAdminLines().filter(isNoInventoryCompletionLine);
   if (selectedLines.length) return selectedLines;
   return getBuyerLines(getBuyerKey(line)).filter(isNoInventoryCompletionLine);
@@ -4430,6 +4435,9 @@ function openBuyerGroupSelectedEbayLabelPages(group) {
 
 function getNoInventoryLineIdsForGroupAction(group) {
   const noInventoryLines = group.lines.filter(isNoInventoryCompletionLine);
+  if (group.lines.some(line => isOpenOrderLine(line) && window.OGPendingShipments?.isVerified(line))) {
+    return noInventoryLines.filter(line => window.OGPendingShipments.isVerified(line)).map(line => line.id);
+  }
   const selectedNoInventoryLines = noInventoryLines.filter((line) => state.adminSelectedLineIds.has(line.id));
   return (selectedNoInventoryLines.length ? selectedNoInventoryLines : noInventoryLines).map((line) => line.id);
 }
@@ -9814,6 +9822,7 @@ function closeWorkerNoInventoryModal(options = {}) {
   state.workerNoInventoryGps = null;
   state.workerNoInventoryCandidates = [];
   state.workerNoInventoryLineIds.clear();
+  state.workerNoInventoryVerifiedOnly = false;
   state.noInventoryEvidencePhotos = [];
   state.noInventoryEvidencePhotoUploadKeys.clear();
   closeModal("worker-no-inventory-modal");
@@ -9841,12 +9850,25 @@ function setWorkerNoInventoryLineSelection(lineId, checked) {
 function setAllWorkerNoInventoryLines(checked) {
   state.workerNoInventoryLineIds.clear();
   if (checked) {
-    state.workerNoInventoryCandidates.filter((line) => getLineVideoReceiptPhotoCount(line) > 0 && !window.OGPendingWork?.missingWatch?.(line.id))
+    state.workerNoInventoryCandidates.filter(isWorkerNoInventoryDefaultSelectedLine)
       .forEach((line) => state.workerNoInventoryLineIds.add(line.id));
   }
   renderWorkerNoInventoryList();
   watchCompletionPhotos("no-inventory");
   watchOrderShippingLabels("no-inventory");
+}
+
+function isWorkerNoInventoryDefaultSelectedLine(line) {
+  return !window.OGPendingWork?.missingWatch?.(line.id)
+    && (state.workerNoInventoryVerifiedOnly
+      ? Boolean(window.OGPendingShipments?.isVerified(line))
+      : getLineVideoReceiptPhotoCount(line) > 0);
+}
+
+function setWorkerNoInventoryVerificationScope(lines) {
+  state.workerNoInventoryVerifiedOnly = lines.some(line => isOpenOrderLine(line) && window.OGPendingShipments?.isVerified(line));
+  $("select-all-worker-no-inventory").textContent = state.workerNoInventoryVerifiedOnly ? "Select verified lines" : "Select with screenshots";
+  $("worker-no-inventory-shipment-scope")?.classList.toggle("hidden", !state.workerNoInventoryVerifiedOnly);
 }
 
 function renderWorkerNoInventoryCustomerIdentity() {
@@ -9884,6 +9906,7 @@ function renderWorkerNoInventoryList() {
             <strong>${escapeHtml(line?.item_title || "Untitled eBay item")}</strong>
             <span>${escapeHtml(order.order_number || "No order")} - ${escapeHtml(order.buyer_username || "No buyer")}</span>
           </div>
+          ${window.OGPendingShipments?.lineMarkup(line) || ""}
           ${window.OGPendingWork?.missingWatch?.(line.id) ? '<p class="missing-watch-badge">Watch missing · leave unchecked to ship the other items</p>' : ''}
           <small>Qty ${Number(getRemainingLineQuantity(line) || line?.quantity || 1).toLocaleString()} - ${escapeHtml(storeName)} - ${escapeHtml(window.PendingInventory?.summary(line.id) || "No saved inventory attachment")}</small>
           ${receiptLink.url || receiptLink.orderNumber ? `<button type="button" class="buyer-line-receipt no-inventory-video-receipt" title="${escapeHtml(receiptLink.title)}">View video receipt</button>` : ""}
@@ -9908,7 +9931,8 @@ function renderWorkerNoInventoryList() {
     });
   });
   list.querySelectorAll("[data-no-inventory-card]").forEach((card) => {
-    card.addEventListener("click", () => {
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("a")) return;
       const lineId = card.dataset.noInventoryCard;
       setWorkerNoInventoryLineSelection(lineId, !state.workerNoInventoryLineIds.has(lineId));
     });
@@ -10013,18 +10037,24 @@ async function openWorkerNoInventoryModal(options = {}) {
 
   state.workerNoInventoryGps = null;
   state.workerNoInventoryCandidates = candidates;
+  // Use line-level shipment evidence, never a shared buyer/order tracking number.
+  // Explicit label handoffs keep their own candidate scope.
+  setWorkerNoInventoryVerificationScope(batchCandidateIds ? candidates : getBuyerLines(getBuyerKey(line)));
   const validRequestedLineIds = requestedLineIds.filter((lineId) => candidates.some((entry) => entry.id === lineId));
-  state.workerNoInventoryLineIds = validRequestedLineIds.length
+  state.workerNoInventoryLineIds = state.workerNoInventoryVerifiedOnly
+    ? new Set(candidates.filter(entry => window.OGPendingShipments?.isVerified(entry)).map(entry => entry.id))
+    : validRequestedLineIds.length
     ? new Set(validRequestedLineIds)
     : state.ebayLaunchOrderNumbers.size
     ? new Set(candidates
       .filter((entry) => state.ebayLaunchOrderNumbers.has(String(entry.order?.order_number || "")))
       .map((entry) => entry.id))
     : new Set(candidates.map((entry) => entry.id));
-  // Default bulk checkout to saved item receipts, not group completion photos.
+  // Verified shipments already have line-specific shipping evidence. Other
+  // groups still default to saved item receipts, not group completion photos.
   // Individual checkboxes remain available for an intentional manual selection.
   state.workerNoInventoryLineIds = new Set(candidates
-    .filter((entry) => state.workerNoInventoryLineIds.has(entry.id) && getLineVideoReceiptPhotoCount(entry) > 0 && !window.OGPendingWork?.missingWatch?.(entry.id))
+    .filter((entry) => state.workerNoInventoryLineIds.has(entry.id) && isWorkerNoInventoryDefaultSelectedLine(entry))
     .map((entry) => entry.id));
   state.noInventoryEvidencePhotos = [];
   state.noInventoryEvidencePhotoUploadKeys.clear();
@@ -10032,7 +10062,7 @@ async function openWorkerNoInventoryModal(options = {}) {
   $("worker-no-inventory-error").textContent = "";
   setNoInventoryPhotoStatus("");
   $("worker-no-inventory-subtitle").textContent =
-    `Complete only the items shipping now for ${getBuyerLabel(line)}. Unchecked items stay pending; leave missing watches unchecked to send a partial order. Selected items move to Packaging. Saved inventory attachments are deducted automatically; items without an attachment do not remove stock. Items without a saved receipt screenshot start unchecked. Signed by your account at ${getCheckoutStoreName() || "the selected store"}.`;
+    `Complete only the checked items for ${getBuyerLabel(line)}. Unchecked items stay pending; leave missing watches unchecked to send a partial order. Selected items move to Packaging. Saved inventory attachments are deducted automatically; items without an attachment do not remove stock. ${state.workerNoInventoryVerifiedOnly ? "Verified shipment lines start selected even without a receipt screenshot." : "Items without a saved receipt screenshot start unchecked."} Signed by your account at ${getCheckoutStoreName() || "the selected store"}.`;
   renderWorkerNoInventoryList();
   renderEbayLabelPanel();
   renderNoInventoryEvidencePhotos();
@@ -10907,6 +10937,7 @@ function clearSelection() {
   state.workerNoInventoryGps = null;
   state.workerNoInventoryCandidates = [];
   state.workerNoInventoryLineIds.clear();
+  state.workerNoInventoryVerifiedOnly = false;
   state.noInventoryEvidencePhotos = [];
   state.noInventoryEvidencePhotoUploadKeys.clear();
   renderEbayLabelPanel();
@@ -11235,6 +11266,7 @@ async function openPendingNoInventorySessionForLabel(orderNumbers, options = {})
   } else {
     // Only the orders on this label may enter the completion selection.
     state.workerNoInventoryCandidates = candidates;
+    setWorkerNoInventoryVerificationScope(candidates);
     setAllWorkerNoInventoryLines(true);
     renderEbayLabelPanel();
   }

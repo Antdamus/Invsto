@@ -4,6 +4,11 @@
   const unique = values => [...new Set(values.filter(Boolean).map(String))];
   const order = line => line.order || line.ebay_orders || {};
   const evidence = line => line.raw_payload?.shipping_reconciliation || null;
+  function isVerified(line) {
+    const e = evidence(line);
+    // A buyer/order-level tracking number does not prove that this item shipped.
+    return Boolean(e?.note && Array.isArray(e.shipments) && e.shipments.some(s => String(s?.trackingNumber || '').trim()));
+  }
   function metadataTracking(metadata = {}) {
     return unique([metadata.trackingNumber, metadata.shippingBarcodeNumber,
       ...(metadata.trackingNumbers || []), ...(metadata.shippingBarcodeNumbers || []),
@@ -38,7 +43,7 @@
   }
   function lineMarkup(line) {
     const e = evidence(line);
-    if (!e?.note || !e.shipments?.length) return '';
+    if (!isVerified(line)) return '';
     return `<section class="shipment-verification shipment-verification-line" aria-label="Shipment verification">
       <span class="shipment-verification-kicker">eBay marked shipped · Pending in Invsto</span>
       <strong>${escape(e.note)}</strong>
@@ -50,7 +55,7 @@
     </section>`;
   }
   function groupMarkup(lines) {
-    const marked = lines.filter(l => evidence(l)?.note && evidence(l)?.shipments?.length);
+    const marked = lines.filter(isVerified);
     if (!marked.length) return '';
     const shipments = new Map();
     for (const l of marked) for (const s of evidence(l).shipments) shipments.set(s.trackingNumber,{...s,orderNumber:order(l).order_number});
@@ -61,7 +66,7 @@
       <div class="shipment-verification-tracking">${[...shipments.values()].map(s=>link(s,s.orderNumber)).join('')}</div>
     </section>`;
   }
-  const api = {tracking,search,matchesTracking,lineMarkup,groupMarkup};
+  const api = {isVerified,tracking,search,matchesTracking,lineMarkup,groupMarkup};
   if (typeof module !== 'undefined') module.exports = api;
   root.OGPendingShipments = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -24,7 +24,9 @@ async function open(t,{width=1280}={}) {
   const context=await browser.newContext({viewport:{width,height:950}});t.after(()=>context.close());
   await context.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
   const p=await context.newPage();const errors=[];p.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
-  await p.goto(origin+'/pending-orders.html');await p.addScriptTag({url:origin+'/pending-orders.js'});
+  await p.goto(origin+'/pending-orders.html');
+  await p.addScriptTag({url:origin+'/pending-shipment-evidence.js'});
+  await p.addScriptTag({url:origin+'/pending-orders.js'});
   await p.evaluate(()=>{
     window.calls=[];window.lookupDelay=0;window.sourceDelay=0;window.saveDelay=0;window.lookupError=false;window.sourceError=false;
     window.loseResponse=false;window.refreshError=false;window.receipts=new Map();window.stockQuantity=5;
@@ -97,6 +99,91 @@ async function prepareNoInventoryReview(p) {
     state.noInventoryEvidencePhotos = [{bucket:'order-evidence-photos', path:'completion.png'}];
   });
 }
+
+async function prepareVerifiedShipmentReview(p) {
+  await p.evaluate(() => {
+    hydrateNoInventoryVideoReceiptEvidenceThumbnails = loadNoInventoryCaptureStations = async () => {};
+    captureAuditLocation = async () => ({status:'not_available'});
+    hydrateBuyerGroupNotes = scheduleQueueVideoReceiptEvidenceHydration = () => {};
+    const evidence = {note:'Done by valentine and verified by otello', source:'ebay_fulfillment_api',
+      shipments:[{trackingNumber:'9400108106244699776616',carrier:'USPS',shippedAt:'2026-10-30T08:00:00Z'}]};
+    databaseLines = Array.from({length:15}, (_, i) => ({
+      id:`verified-${i}`, order_id:'order-a', item_title:`${i < 10 ? 'Verified shipped' : 'Still pending'} item ${i+1}`,
+      line_status:'pending', quantity:1, fulfilled_quantity:0, video_receipt_photo_count:i < 10 ? 0 : 1,
+      raw_payload:i < 10 ? {shipping_reconciliation:structuredClone(evidence)} : {},
+      // The five unmarked siblings share an order and its tracking metadata.
+      order:{order_number:'11-22222-33333',buyer_username:'fixture-buyer',tracking_number:evidence.shipments[0].trackingNumber,
+        raw_payload:{shipping_reconciliation:structuredClone(evidence)}}
+    }));
+    state.orders=structuredClone(databaseLines);
+    state.adminSelectedLineIds=new Set(databaseLines.map(line=>line.id));
+    renderOrders=realRenderOrders;
+    const rpc=supabase.rpc;
+    supabase.rpc=async(name,args)=>{
+      if(name!=='complete_ebay_order_lines_without_inventory_evidence')return rpc(name,args);
+      calls.push({name,args:structuredClone(args)});
+      args._order_line_ids.forEach(id=>{const line=databaseLines.find(line=>line.id===id);line.line_status='fulfilled';line.fulfilled_quantity=1;});
+      return {data:[{updated_lines:args._order_line_ids.length}]};
+    };
+    loadOrders=async()=>{state.orders=structuredClone(databaseLines).filter(isOpenOrderLine);applyOrderFilters();};
+    selectOrderLine('verified-0',{openDetail:false});applyOrderFilters();
+  });
+}
+
+for (const width of [390,1366]) test(`verified shipment completion at ${width}px selects and closes only the ten marked lines out of fifteen`, async t => {
+  const p=await open(t,{width});await prepareVerifiedShipmentReview(p);
+  if(width===390) {
+    await p.addScriptTag({url:origin+'/pending-orders-mobile.js'});
+    await p.evaluate(()=>PendingOrdersMobile.dismissCheckout());
+  }
+  if(width===390) {
+    if (await p.locator('[data-buyer-expand-key]').getAttribute('aria-expanded') !== 'true') await p.locator('[data-buyer-expand-key]').click();
+    await p.locator('[data-line-complete-order="verified-0"]').click();
+  } else await p.locator('[data-buyer-no-inventory-key]').click();
+  await p.locator('#worker-no-inventory-modal').waitFor({state:'visible'});
+  const marked=Array.from({length:10},(_,i)=>`verified-${i}`);
+  assert.deepEqual(await p.evaluate(()=>[...state.workerNoInventoryLineIds]),marked);
+  assert.match(await p.locator('#worker-no-inventory-count').innerText(),/10 of 15 selected.*5 remain pending/);
+  assert.equal(await p.locator('[data-no-inventory-line="verified-10"]').isChecked(),false);
+  assert.equal(await p.locator('#worker-no-inventory-shipment-scope').isVisible(),true);
+  assert.equal(await p.locator('#select-all-worker-no-inventory').innerText(),'Select verified lines');
+  assert.equal(await p.locator('#worker-no-inventory-list .shipment-verification').count(),10);
+  // Opening the tracking link must not toggle a selected item.
+  await p.evaluate(()=>document.querySelector('#worker-no-inventory-list a').addEventListener('click',event=>event.preventDefault()));
+  await p.locator('#worker-no-inventory-list a').first().click();
+  assert.deepEqual(await p.evaluate(()=>[...state.workerNoInventoryLineIds]),marked);
+  await p.locator('#deselect-all-worker-no-inventory').click();
+  await p.locator('#select-all-worker-no-inventory').click();
+  assert.deepEqual(await p.evaluate(()=>[...state.workerNoInventoryLineIds]),marked);
+  assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await mkdir(new URL('../test-results',import.meta.url),{recursive:true});
+  await p.locator('#worker-no-inventory-modal').screenshot({path:`test-results/verified-shipment-review-${width}.png`});
+  await p.locator('#confirm-worker-no-inventory').click();await p.waitForFunction(()=>!state.busy);
+  const writes=await p.evaluate(()=>calls.filter(c=>c.name==='complete_ebay_order_lines_without_inventory_evidence'));
+  assert.equal(writes.length,1);assert.deepEqual(writes[0].args._order_line_ids,marked);
+  assert.equal(await p.evaluate(()=>databaseLines.filter(line=>line.line_status==='fulfilled').length),10);
+  assert.deepEqual(await p.evaluate(()=>databaseLines.filter(line=>line.line_status==='pending').map(line=>line.id)),Array.from({length:5},(_,i)=>`verified-${i+10}`));
+});
+
+test('verified shipment defaults override stale admin checks, retain missing-watch guards, and reset for a new label batch',async t=>{
+  const p=await open(t);await prepareVerifiedShipmentReview(p);
+  await p.evaluate(async()=>{
+    state.adminSelectedLineIds=new Set(['verified-10']);
+    selectOrderLine('verified-10');
+    window.OGPendingWork={missingWatch:id=>id==='verified-0'};
+    await openWorkerNoInventoryModal();
+  });
+  assert.deepEqual(await p.evaluate(()=>[...state.workerNoInventoryLineIds]),Array.from({length:9},(_,i)=>`verified-${i+1}`));
+  await p.locator('#select-all-worker-no-inventory').click();
+  assert.equal(await p.locator('[data-no-inventory-line="verified-0"]').isChecked(),false);
+  await p.evaluate(async()=>{
+    closeWorkerNoInventoryModal();
+    await openWorkerNoInventoryModal({lineIds:['verified-10'],batchCandidateIds:['verified-10']});
+  });
+  assert.deepEqual(await p.evaluate(()=>[...state.workerNoInventoryLineIds]),['verified-10']);
+  assert.equal(await p.locator('#worker-no-inventory-shipment-scope').isVisible(),false);
+  assert.equal(await p.locator('#select-all-worker-no-inventory').innerText(),'Select with screenshots');
+});
 
 test('noninventory bulk review selects only items with saved receipt screenshots and respects the requested scope', async t => {
   const p = await open(t);
