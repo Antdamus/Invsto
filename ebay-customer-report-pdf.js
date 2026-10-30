@@ -67,7 +67,7 @@
     }
     // Flow text breaks at actual measured line boundaries, including long notes and case histories.
     function flow(page,y,label,row=null){
-      return {page,y,async ensure(height){if(this.y-height<(row?118:78)){this.page=await newPage(label,row);this.y=await block(this.page,`DETAILS / CONTINUED / ${label}`,36,712,540,9,1,gold);this.y-=14;}},
+      return {page,y,label,async ensure(height){if(this.y-height<(row?118:78)){this.page=await newPage(this.label,row);this.y=await block(this.page,`DETAILS / CONTINUED / ${this.label}`,36,712,540,9,1,gold);this.y-=14;}},
         async write(value,size=10,font=0,fill=ink,gap=8){
           for(const s of wrap(value,540,size,font)){await this.ensure(size*1.4);await text(this.page,s,36,this.y,size,font,fill);this.y-=size*1.4;}this.y-=gap;
         }};
@@ -86,6 +86,11 @@
     }
     let f=flow(page,354,'Customer summary');
     await f.write(`Original item value in this edition: ${model.itemValue}`,13,1);
+    if(model.orderMap){
+      await f.write(`${model.orderMap.groups.length} live shows / ${model.count} matched pending item lines`,11,1);
+      await f.write('Show schedule and overnight grouping use Eastern time. Host estimates are labeled; regular purchases are excluded.',9,0,muted);
+      if(model.orderMap.warning)await f.write(model.orderMap.warning,9,1,amber);
+    }
     if(model.unknownPrices)await f.write(`${model.unknownPrices} item amounts are not recorded and are excluded from that value.`,9,0,amber);
     await f.write(`${model.labeled} pending lines have a shipping label attached; ${model.unlabeled} do not.`,10);
     if(model.unknown)await f.write(`${model.unknown} lines have a status that needs review.`,9,1,amber);
@@ -111,14 +116,18 @@
     await f.write(report.NOTES,9,0,muted);
     if(model.missingOrders.length)await f.write(`Saved orders without item lines: ${model.missingOrders.map(o=>o.order_number).join(', ')}. Their totals are in lifetime finances; item details are unavailable.`,9,1,amber);
     page=await newPage('Item index');destinations.set('index',page.ref);f=flow(page,710,'Item index');
-    await f.write('Your item index.',29,2,ink,12);
+    await f.write(model.orderMap?'Your show route.':'Your item index.',29,2,ink,12);
     await f.write('Select any row to open its item details. Every page has a return link. Item prices are original purchase amounts, before refunds.',10,0,muted,18);
     if(!model.count)await f.write('No pending item lines are saved for this buyer.',16,2);
-    for(const kind of ['pending','closed','unknown']){
-      const selected=model.rows.map((r,i)=>({r,i})).filter(({r})=>r.state.kind===kind);if(!selected.length)continue;
-      await f.ensure(145);await f.write(`${{pending:'PENDING / EARLIEST DEADLINE FIRST',closed:'CLOSED / NEWEST PURCHASES FIRST',unknown:'STATUS NEEDS REVIEW'}[kind]} / ${selected.length}`,9,1,gold,14);
+    const sections=model.orderMap?model.orderMap.groups.map(g=>({key:g.key,title:`${g.day} / ${g.label}`,note:`${g.estimated?'Host: schedule estimate. ':''}${g.rows.length} item lines / ${g.quantity} units. ${g.show.title}`,selected:g.rows.map(r=>({r,i:model.rows.indexOf(r)}))})):['pending','closed','unknown'].map(kind=>({title:{pending:'PENDING / EARLIEST DEADLINE FIRST',closed:'CLOSED / NEWEST PURCHASES FIRST',unknown:'STATUS NEEDS REVIEW'}[kind],selected:model.rows.map((r,i)=>({r,i})).filter(({r})=>r.state.kind===kind)}));
+    for(const section of sections){
+      const selected=section.selected;if(!selected.length)continue;
+      if(model.orderMap)f.label=section.title;
+      await f.ensure(180);if(section.key)destinations.set(section.key,f.page.ref);
+      await f.write(`${section.title} / ${selected.length}`,11,1,gold,10);
+      if(section.note)await f.write(section.note,9,0,muted,14);
       for(const {r,i} of selected){
-        const left=[`${i+1}. ${r.title}`,`Order ${r.orderNumber}`,`Purchased ${r.date}`,...(r.groups.length?['Grouped completion / see item details']:[])];
+        const left=[`${r.showMap&&r.showMap.number!=null?'Item #'+r.showMap.number:i+1+'.'} ${r.title}`,`Order ${r.orderNumber}`,`Purchased ${r.date}`,...(r.groups.length?['Grouped completion / see item details']:[])];
         const right=[r.state.label,...(r.pending?[report.urgency(r),r.shippingLabel.label,`Ship by ${r.deadline.dueEastern||'Not recorded'}`]:[])];
         const amount=shared.money(r.price.total,r.price.currency),refundLabel=r.refund?.label||'Refund status not recorded';
         const leftH=wrap(left[0],236,9,1).length*12.6+left.slice(1).reduce((sum,s)=>sum+wrap(s,236,8).length*11.2+4,0);
@@ -134,11 +143,19 @@
         jumps.push({page:f.page,rect:[36,top-h,576,top],key:`item:${r.id}`});f.y=top-h-14;
       }f.y-=12;
     }
+    if(model.orderMap){
+      const m=model.orderMap;
+      await f.ensure(90);await f.write('OUTSIDE THIS SHOW MAP',10,1,gold);
+      await f.write(`${m.excluded.length} other pending lines have no live-show evidence. ${m.unassigned.length} likely live or conflicting items still need a verified show match. See the pending-items report for all purchases.`,9,0,muted);
+      for(const r of m.unassigned){await f.ensure(65);await f.write(`${r.orderNumber} / ${r.title}`,10,1);await f.write(r.mapReason,9,0,amber);await link(f.page,'Review eBay order',r.orderUrl,36,f.y,9);f.y-=24;}
+      if(m.coverage?.complete)await f.write(`eBay history captured from ${shared.date(m.coverage.since)} through ${shared.date(m.coverage.until)} / ${m.coverage.orders} orders across all buyers.`,9,0,muted);
+    }
     for(const [i,r] of model.rows.entries()){
       progress(`Building ${model.title.toLowerCase()}: item ${i+1} of ${model.count}...`);
       const label=`${model.username} / Order ${r.orderNumber}`;
       page=await newPage(label,r);destinations.set(`item:${r.id}`,page.ref);f=flow(page,714,label,r);
       await f.write(`ITEM ${i+1} OF ${model.count} / ${r.customerName||c.name||model.username}`,10,1,gold,8);
+      if(r.showMap){await f.write(`${r.showMap.day} / ${r.showMap.label} / ${r.showMap.number==null?'Item number not recorded':'Item #'+r.showMap.number}`,11,1,green);await f.write(`${r.showMap.reason}${r.showMap.hostEstimated?' / Host: schedule estimate':''}`,8,0,muted);}
       if(r.pending){
         const content=r.deadline.since?`Overdue since ${r.deadline.since}`:`Ship by ${r.deadline.due}`;
         const h=48+wrap(content,510,9).length*12.6;await f.ensure(h+10);rect(f.page,36,f.y-h,540,h,tint(r.deadline.level));
@@ -198,7 +215,7 @@
         if(!meta.row.videoUrl)await text(p,'Receipt opens the eBay order because no direct video URL is saved.',36,65,7,0,muted);
       }
       rule(p,36,47,540);
-      for(const [label,key,x] of [['Item index','index',36],['Customer summary','summary',160]]){await text(p,label,x,29,8,1);rule(p,x,26,width(label,8,1),gold);jumps.push({page:p,rect:[x,23,x+width(label,8,1),40],key});}
+      for(const [label,key,x] of [[model.orderMap?'Show directory':'Item index','index',36],['Customer summary','summary',160],...(meta.row?.showMap?[['This show',meta.row.showMap.key,300]]:[])]){await text(p,label,x,29,8,1);rule(p,x,26,width(label,8,1),gold);jumps.push({page:p,rect:[x,23,x+width(label,8,1),40],key});}
       await text(p,`${i+1} / ${pageMeta.length}`,530,29,8,0,muted);
     }
     for(const jump of jumps)annotation(jump.page,jump.rect,{Dest:[destinations.get(jump.key),PDFName.of('Fit')]});

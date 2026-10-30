@@ -4660,6 +4660,7 @@ function renderOrders(options = {}) {
             >${escapeHtml(group.buyer)}</button>
             <a class="buyer-purchase-report-link" href="ebay-buyer-report.html?buyer=${encodeURIComponent(group.buyer)}&scope=all" target="_blank" rel="noopener" title="Customer report with all saved purchases">Full history report</a>
             <a class="buyer-purchase-report-link" href="ebay-buyer-report.html?buyer=${encodeURIComponent(group.buyer)}&scope=pending" target="_blank" rel="noopener" title="Customer report with pending item lines and shipping deadlines">Pending items report</a>
+            <a class="buyer-purchase-report-link" href="ebay-buyer-report.html?buyer=${encodeURIComponent(group.buyer)}&scope=map" target="_blank" rel="noopener">Generate order map</a>
             <span class="buyer-card-compact-count">${escapeHtml(orderCountLabel)} · ${escapeHtml(lineCountLabel)} · ${escapeHtml(quantityLabel)}</span>
           </div>
           ${customerMarkup}
