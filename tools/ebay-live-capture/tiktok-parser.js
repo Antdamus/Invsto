@@ -2,7 +2,7 @@
 ((root)=>{
  'use strict';
  const text=n=>(n?.textContent||'').replace(/\s+/g,' ').trim();
- const payment=s=>/^Payment complete$/i.test(s)?'paid':/^Payment failed$/i.test(s)?'failed':/^(Payment pending|Awaiting payment|Pending payment|Waiting for payment|Processing payment)$/i.test(s)?'waiting':/^(Cancelled|Canceled|Order cancelled|Order canceled)$/i.test(s)?'cancelled':'review';
+ const payment=s=>/^Payment complete$/i.test(s)?'paid':/^Payment failed$/i.test(s)?'failed':/^(Payment pending|Awaiting payment|Pending payment|Waiting for payment|Processing payment|Payment processing)(?:\.{3}|…)?$/i.test(s)?'waiting':/^(Cancelled|Canceled|Order cancelled|Order canceled)$/i.test(s)?'cancelled':'review';
  function metadata(doc,url){
   const link=[...doc.querySelectorAll('a[href]')].find(a=>a.href.includes('/workbench/live/overview?room_id='));
   const room=link&&new URL(link.href).searchParams.get('room_id');
