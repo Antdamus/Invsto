@@ -45,7 +45,7 @@
     status('Opening TikTok sold auctions…');return;
    }
    const events=[];
-   for(const e of result.events){const signature=JSON.stringify([e.key,e.title,e.payment_state,e.payment_label]);const previous=seen.get(e.key);if(!previous||previous.signature!==signature){events.push(e);seen.set(e.key,{signature,event:e});}}
+   for(const e of result.events){const signature=JSON.stringify([e.key,e.title,e.payment_state,e.payment_label,!!e.sold_at]);const previous=seen.get(e.key);if(!previous||previous.signature!==signature){events.push(e);seen.set(e.key,{signature,event:e});}}
    const health={ready:result.supported,observed_at:new Date().toISOString(),history_read:historyRead,rows_seen:seen.size,message:result.errors[0]||(historyRead?'Current sold history read; watching new sales':'Reading available sold history')};
    const delivered=await send('TIKTOK_LIVE_OBSERVE',{events,health});
    if(!delivered?.ok){for(const e of events)seen.delete(e.key);throw Error(delivered?.error||'Capture could not be saved.');}
