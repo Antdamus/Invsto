@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="buyer-tasks.css?v=20261013-photos" />
-  <link rel="stylesheet" href="pending-orders.css?v=20261030-shipment-verification" />
+  <link rel="stylesheet" href="pending-orders.css?v=20261030-phone-tracking" />
   <link rel="stylesheet" href="ebay-auto-sync.css?v=20261025" />
   <link rel="stylesheet" href="pending-work-queue.css?v=20261029-missing-report" />
   <link rel="stylesheet" href="extension-updates.css?v=20261003" />
@@ -21,7 +21,7 @@
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
   <link rel="stylesheet" href="pending-orders-mobile.css?v=line-customer-20261010" />
   <link rel="stylesheet" href="pending-bag-scan.css?v=20261007-bag-photos-2" />
-  <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
+  <script src="barcode-scanner.js?v=20261030-tracking" defer></script>
   <link rel="stylesheet" href="task-request.css?v=20261007-intent-2" />
   <link rel="stylesheet" href="order-certificates.css?v=20261011-work">
   <link rel="stylesheet" href="pending-order-chats.css?v=20261009">
@@ -449,6 +449,7 @@
           <div class="filter-row">
             <input
               id="order-search"
+              data-camera-scan data-camera-mode="tracking"
               name="pending-orders-search"
               type="search"
               placeholder="Search tracking number, order, buyer, title..."
@@ -457,6 +458,7 @@
               autocorrect="off"
               spellcheck="false"
               aria-label="Search pending orders"
+              aria-describedby="pending-tracking-search-help"
             />
             <button id="phone-order-filters" type="button" class="phone-only secondary-btn" aria-expanded="false" aria-controls="order-status-filter order-sort cancellation-review-toggle phone-queue-filter-options"><i data-lucide="list-filter"></i><span>Filters</span></button>
             <select id="order-status-filter" aria-label="Order status">
@@ -490,6 +492,7 @@
             </select>
           </div>
 
+          <p id="pending-tracking-search-help" class="tracking-search-help">Scan a shipping label or enter the last 6+ tracking digits. All matching buyer groups are shown.</p>
           <div class="buyer-due-filters" id="phone-queue-filter-options">
             <div class="buyer-shipping-due-options" role="group" aria-label="Shipping due date">
               <span>Shipping due · eBay Pacific time</span>
@@ -1356,10 +1359,11 @@
   <script src="buyer-report-refunds.js?v=20261029-timing"></script>
   <script src="pending-buyer-refunds.js?v=20261029-timing"></script>
   <script src="live-sales-report-finances.js?v=20261030-pending-totals"></script>
-  <script src="pending-shipment-evidence.js?v=20261030"></script>
+  <script src="order-tracking-search.js?v=20261030"></script>
+  <script src="pending-shipment-evidence.js?v=20261030-phone-tracking"></script>
   <script src="pending-orders.js?v=20261030-shipment-verification"></script>
   <script src="pending-inventory.js?v=20261008-shared-bag-2"></script>
   <script src="pending-bag-scan.js?v=20261008-shared-inventory"></script>
-  <script src="pending-orders-mobile.js?v=20261018-organized"></script>
+  <script src="pending-orders-mobile.js?v=20261030-phone-tracking"></script>
 </body>
 </html>

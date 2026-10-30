@@ -72,6 +72,40 @@ async function open(t, {width = 390, admin = false} = {}) {
   return page;
 }
 
+test('phone tracking search keeps its camera visible and finds every matching buyer with partial or prefixed scans', async t => {
+  const page = await open(t);
+  await page.addScriptTag({url: origin + '/order-tracking-search.js'});
+  await page.addScriptTag({url: origin + '/pending-shipment-evidence.js'});
+  await page.addScriptTag({url: origin + '/barcode-scanner.js'});
+  await page.evaluate(() => {
+    state.orders[0].order.tracking_number = '9400108106245736262406';
+    state.orders[2].order.label_metadata = {trackingNumbers: ['9400108106245700262406']};
+    applyOrderFilters();
+  });
+  const input = page.locator('#order-search');
+  const camera = page.locator('[data-scan-target="order-search"]');
+  await expect(camera).toBeVisible();
+  await expect(camera).toHaveAttribute('data-scan-mode', 'tracking');
+  for (const [scan, count] of [['262406', 2], [']C1420331319400108106245736262406', 1], ['9400 1081 0624 5736 2624 06', 1]]) {
+    await input.fill(scan);
+    await expect(page.locator('.buyer-order-card')).toHaveCount(count);
+  }
+  await expect(page.locator('.buyer-order-card')).toContainText('jewelrylover_28');
+  await input.fill('262406');
+  for (const width of [320, 390, 1440]) {
+    await page.setViewportSize({width, height: 844});
+    await expect(camera).toBeVisible();
+    const buttonBox = await camera.boundingBox(), fieldBox = await input.boundingBox();
+    assert.ok(buttonBox.width >= 44 && buttonBox.height >= 44 && buttonBox.x + buttonBox.width <= width);
+    assert.ok(fieldBox.height < 100 && Math.abs(buttonBox.y - fieldBox.y) < 12);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    if (width === 390) await page.screenshot({path: 'test-results/pending-mobile-tracking-search.png'});
+  }
+  await input.fill('');
+  await expect(page.locator('.buyer-order-card')).toHaveCount(7);
+  assert.deepEqual(await page.evaluate(() => databaseWrites), []);
+});
+
 test('queue summary shows shipping separately and the dollar amount of estimated fees, updating to actual fees', async t => {
   const page = await open(t, {width: 1440, admin: true});
   await expect(page.locator('#summary-pending-value')).toHaveText('$712.00 item sales · before fees');

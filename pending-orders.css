@@ -5560,3 +5560,11 @@ body.phone-camera-mode #pending-quick-actions { display: none; }
 .shipment-verification-tracking a {color: #e5fff2; font-weight: 700; text-decoration: underline; overflow-wrap: anywhere;}
 .shipment-verification small {color: #c6e5d6; line-height: 1.5;}
 @media(max-width: 640px) {.shipment-verification {padding: .8rem;}.shipment-verification > strong {font-size: 1rem;}}
+.orders-panel .filter-row > .camera-scan-field {flex: 2 1 360px; width: auto; flex-direction: row; align-items: center;}
+.orders-panel .filter-row > .camera-scan-field > input {flex: 1 1 0; min-width: 0;}
+.orders-panel .filter-row > .camera-scan-field > .camera-scan-button {flex: 0 0 auto; width: auto; min-height: 48px;}
+.tracking-search-help {margin: 0 0 12px; font-size: .8rem; line-height: 1.5; color: #a9b8af;}
+@media (max-width: 760px) {
+  .orders-panel .filter-row > .camera-scan-field {width: 100%; min-width: 0; gap: 8px;}
+  .orders-panel .filter-row > .camera-scan-field > .camera-scan-button {flex: 0 0 48px; width: 48px; font-size: 0; padding: 8px; background: #eed29b; color: #241e17;}
+}

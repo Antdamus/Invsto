@@ -13,9 +13,9 @@
   <link rel="stylesheet" href="video-receipts.css?v=20260930" />
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="barcode-scanner.css?v=20260926-closeup" />
-  <script src="barcode-scanner.js?v=20260926-closeup" defer></script>
+  <script src="barcode-scanner.js?v=20261030-tracking" defer></script>
   <link rel="stylesheet" href="phone-workspace.css?v=20261006-4" />
-  <script src="phone-workspace.js?v=20261006-2" defer></script>
+  <script src="phone-workspace.js?v=20261030-tracking" defer></script>
   <link rel="stylesheet" href="task-request.css?v=20261007-intent-2" />
   <link rel="stylesheet" href="order-certificates.css?v=20261011-work">
   <script src="order-certificates.js?v=20261011-work" defer></script>
@@ -214,7 +214,7 @@
           <label class="wide">
             Search
             <input
-              id="history-search" data-camera-scan
+              id="history-search" data-camera-scan data-camera-mode="tracking"
               type="text"
               role="searchbox"
               placeholder="Buyer, order #, title, item #, worker, tracking scan..."
@@ -227,12 +227,14 @@
               data-lpignore="true"
               data-1p-ignore="true"
               inputmode="search"
+              aria-describedby="history-tracking-search-help"
             />
+            <small id="history-tracking-search-help">Scan a label or enter the last 6+ tracking digits. All matches are shown. Use All dates to search older orders.</small>
           </label>
           <label class="wide history-title-check-field">
             Title check
             <input
-              id="history-title-check"
+              id="history-title-check" data-camera-scan
               type="text"
               placeholder="Word to verify in matched item titles..."
               autocomplete="off"
@@ -661,6 +663,7 @@
 <script src="print-stations.js?v=20261010-shipping-picker-2"></script>
 <script src="shipping-label-print.js?v=20261010-protected-labels"></script>
 <script src="video-receipts.js?v=20261002-desktop-capture"></script>
-  <script src="ebay-order-history.js?v=20261029-customer-reports"></script>
+  <script src="order-tracking-search.js?v=20261030"></script>
+  <script src="ebay-order-history.js?v=20261030-phone-tracking"></script>
 </body>
 </html>

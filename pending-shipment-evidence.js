@@ -20,6 +20,7 @@
     return [...tracking(line), evidence(line)?.note || ''].join(' ').toLowerCase();
   }
   function matchesTracking(line, term) {
+    if (root.OGTrackingSearch?.isScan(term)) return tracking(line).some(t => root.OGTrackingSearch.matches(t, term));
     const compact = String(term || '').replace(/[\s-]/g,'').toLowerCase();
     return compact.length >= 6 && /^[a-z0-9]+$/.test(compact) &&
       tracking(line).some(t => t.replace(/[\s-]/g,'').toLowerCase().includes(compact));

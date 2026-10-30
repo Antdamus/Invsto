@@ -111,7 +111,7 @@
     const actions = byId('pending-quick-actions');
     if (actions) (isPhone() ? document.querySelector('.phone-orders-header') : byId('pending-desktop-actions'))?.append(actions);
     syncHeaderHeight();
-    byId('order-search').placeholder = isPhone() ? 'Search buyer, order or item…' : 'Search order, title, buyer, item number...';
+    byId('order-search').placeholder = isPhone() ? 'Tracking, buyer or order…' : 'Search tracking number, order, buyer, title...';
     sync();
   }
 

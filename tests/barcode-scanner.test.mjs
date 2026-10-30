@@ -78,6 +78,38 @@ test('real photo decoder reads Code 128, EAN-13, UPC and QR; preserves leading z
   }
 });
 
+test('phone order searches accept full and partial tracking photos and keep scans after camera focus returns',async t=>{
+ for(const [name,field] of [['pending-orders.html','order-search'],['ebay-order-history.html','history-search']]){
+  const page=await pageFor(t,name);await deniedCamera(page);
+  await page.addScriptTag({url:`${origin}/order-tracking-search.js`});
+  if(field==='history-search'){
+   await page.addScriptTag({url:`${origin}/ebay-order-history.js`});
+   await page.evaluate(()=>setupHistorySearchAutofillGuard());
+  }
+  await page.evaluate(field=>{window.scanInputs=0;document.getElementById(field).addEventListener('input',()=>scanInputs++);},field);
+  const trigger=page.locator(`[data-scan-target="${field}"]`);
+  assert.equal(await trigger.isVisible(),true);assert.equal(await trigger.getAttribute('data-scan-mode'),'tracking');
+  for(const code of ['9400108106245736262406','262406',']C142033131\x1d9400108106245736262406']){
+   const photo=await fixture(page,'CODE128',code);
+   await trigger.click();
+   assert.equal(await page.locator('#camera-scanner-title').textContent(),'Scan a shipping label');
+   await page.locator('[data-camera="photo"]').setInputFiles(photo);
+   await page.waitForFunction(()=>!document.querySelector('[data-camera="use"]').disabled);
+   await page.locator('[data-camera="use"]').click();
+   assert.equal(await page.locator(`#${field}`).inputValue(),code);
+   assert(await page.evaluate(field=>OGTrackingSearch.matches('9400108106245736262406',document.getElementById(field).value),field));
+   await page.evaluate(()=>{window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));});
+   await page.waitForTimeout(750);
+   assert.equal(await page.locator(`#${field}`).inputValue(),code,'returning from the camera must preserve the accepted scan');
+  }
+  assert.equal(await page.evaluate(()=>scanInputs),3);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  if(field==='history-search') assert.equal(await page.locator('[data-scan-target="history-title-check"]').count(),1);
+  await mkdir('test-results/tracking-camera',{recursive:true});
+  await trigger.scrollIntoViewIfNeeded();await page.screenshot({path:`test-results/tracking-camera/${field}.png`});
+ }
+});
+
 test('website QR is rejected without navigation; unreadable photos and denied cameras explain recovery', async t => {
   const page = await pageFor(t);
   await deniedCamera(page);
@@ -315,7 +347,7 @@ test('barcode entry fields across the app have one adjacent camera control, incl
     assert.deepEqual(badActions, [], `${name}: every lookup action exists`);
     await page.close();
   }
-  assert.equal(covered, 43);
+  assert.equal(covered, 48);
   const page = await pageFor(t);
   await page.evaluate(() => {
     const holder = document.createElement('div'); holder.id = 'dynamic-test-field';

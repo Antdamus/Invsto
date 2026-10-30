@@ -146,7 +146,7 @@
       // Move the whole label to retain its scanner wrapper.
       const searchLabel = byId('history-search')?.closest('label');
       if (searchLabel) { searchLabel.id = 'phone-history-search-label'; move('#phone-history-search-label', byId('phone-primary-search')); }
-      byId('history-search').placeholder = 'Buyer, order, item or tracking…';
+      byId('history-search').placeholder = 'Tracking, buyer or order…';
       move('.history-filter-toggle', byId('phone-history-all-dates'));
       move('.history-filters', filterBody);
       move('.history-actions', toolBody);

@@ -77,6 +77,7 @@
       button.textContent = 'Scan with camera';
       button.setAttribute('aria-label', `Scan with camera: ${input.getAttribute('aria-label') || input.placeholder || input.id}`);
       if (input.dataset.cameraAction) button.dataset.scanAction = input.dataset.cameraAction;
+      if (input.dataset.cameraMode) button.dataset.scanMode = input.dataset.cameraMode;
       const wrapper = document.createElement('span');
       wrapper.className = 'camera-scan-field';
       input.before(wrapper);
@@ -140,9 +141,9 @@
     returnErrors: true, textMode: 'Plain',
   };
 
-  function isInventoryCode(raw) {
+  function isInventoryCode(raw, mode = 'inventory') {
     const code = String(raw).trim();
-    return code.length > 0 && code.length <= 128 && !/[^\x20-\x7e]/.test(code)
+    return code.length > 0 && code.length <= 128 && !(mode === 'tracking' ? /[^\x1d\x20-\x7e\u241d]/ : /[^\x20-\x7e]/).test(code)
       && !/^(?:[a-z][a-z\d+.-]*:|\/\/|www\.)/i.test(code);
   }
 
@@ -159,7 +160,7 @@
       return result;
     });
     return { result: certificate ? valid.find(result => result.format === 'QRCode')
-      : valid.find(result => isInventoryCode(result.text)) || valid[0], detected: results.length > 0 };
+      : valid.find(result => isInventoryCode(result.text, mode)) || valid[0], detected: results.length > 0 };
   }
 
   function scanVideo(library, session, token) {
@@ -255,7 +256,7 @@
       message('This QR code opens a website or app. Scan the striped item barcode, or a QR code containing just the inventory code.');
       return;
     }
-    if (!code || (certificate ? code.length > 2048 || /[\x00-\x1f\x7f]/.test(code) : code.length > 128 || /[^\x20-\x7e]/.test(code))) {
+    if (!code || (certificate ? code.length > 2048 || /[\x00-\x1f\x7f]/.test(code) : !isInventoryCode(code, active.mode))) {
       message(certificate ? 'This QR could not be used. Paste the certificate QR contents on one line (up to 2,048 characters).'
         : 'This code is not a supported inventory identifier. Scan the item or location label, or enter its code manually.');
       return;
@@ -463,13 +464,14 @@
     createDialog();
     if (active) finish();
     const certificate = trigger.dataset.scanMode === 'certificate';
-    active = { target, trigger, code: '', mode: certificate ? 'certificate' : 'inventory' };
-    dialog.querySelector('#camera-scanner-title').textContent = certificate ? 'Scan a certificate QR' : 'Scan a barcode';
+    const tracking = trigger.dataset.scanMode === 'tracking';
+    active = { target, trigger, code: '', mode: certificate ? 'certificate' : tracking ? 'tracking' : 'inventory' };
+    dialog.querySelector('#camera-scanner-title').textContent = certificate ? 'Scan a certificate QR' : tracking ? 'Scan a shipping label' : 'Scan a barcode';
     dialog.querySelector('.camera-scanner-help').textContent = certificate
       ? 'Scan the QR on the CGL certificate or choose a clear photo of it.'
-      : 'Scan a striped barcode or an inventory QR code.';
+      : tracking ? 'Scan the tracking barcode. A partial tracking number can also find the order.' : 'Scan a striped barcode or an inventory QR code.';
     ui.use.textContent = certificate ? 'Use QR contents' : 'Use code';
-    ui.hint.textContent = trigger.dataset.scanHint || 'Use this code in the selected barcode field.';
+    ui.hint.textContent = trigger.dataset.scanHint || (tracking ? 'Search matching orders with this tracking scan.' : 'Use this code in the selected barcode field.');
     ui.photo.value = '';
     dialog.showModal();
     startCamera();

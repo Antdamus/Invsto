@@ -10,6 +10,12 @@ HTTPS and browser camera permission; the GitHub Pages deployment provides HTTPS.
 - **Stock:** use **Scan with camera** directly below the barcode search field;
   it fills that filter and keeps the other filters. The separate **Scan item**
   shortcut in the header clears other filters to search the whole current stock list.
+- **Pending Orders / Order History:** the main search has a camera button. Scan
+  a shipping-label barcode or enter at least the last six tracking digits. Postal
+  routing prefixes and barcode separators are handled automatically. Every
+  matching buyer group remains visible when a fragment matches several packages;
+  a search never completes an order or attaches new tracking. In Order History,
+  use **All dates** for older orders. Its title-check field also has a camera button.
 - **Other barcode fields:** camera buttons appear beside item, tray, parent storage,
   container, auction/bag, and tracking fields across sales, orders, returns, transfers,
   locations, and activity searches. Buttons follow disabled/read-only field states.

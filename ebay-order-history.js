@@ -518,6 +518,8 @@ function historySearchTextIncludes(haystack, term) {
   const text = String(haystack || "").toLowerCase();
   const needles = getHistorySearchNeedles(term);
   if (!needles.length || needles.some((needle) => text.includes(needle))) return true;
+  const trackingPart = window.OGTrackingSearch?.needle(term);
+  if (trackingPart && text.includes(trackingPart)) return true;
   if (!historySearchLooksLikeLabelScan(term)) return false;
   return getBarcodeLookupCandidates(term)
     .map((candidate) => candidate.toLowerCase())
@@ -525,6 +527,7 @@ function historySearchTextIncludes(haystack, term) {
 }
 
 function historySearchLooksLikeLabelScan(value) {
+  if (window.OGTrackingSearch) return window.OGTrackingSearch.isScan(value);
   const digits = normalizeBarcode(value).replace(/\D/g, "");
   return digits.length >= 12;
 }
@@ -1892,9 +1895,9 @@ function setupHistorySearchAutofillGuard() {
     }, 80);
   });
   window.addEventListener("pageshow", () => preventHistorySearchAutofill({ force: true }));
-  window.addEventListener("focus", () => preventHistorySearchAutofill({ force: true }));
+  window.addEventListener("focus", () => preventHistorySearchAutofill({ force: false }));
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) preventHistorySearchAutofill({ force: true });
+    if (!document.hidden) preventHistorySearchAutofill({ force: false });
   });
 }
 
@@ -1938,6 +1941,15 @@ function getHistoryLabelLookupCandidates(searchTerm) {
 
 async function fetchOrderIdsByLabelMetadataSearch(searchTerm) {
   if (!historySearchLooksLikeLabelScan(searchTerm)) return [];
+  const partialFilter = window.OGTrackingSearch?.filter([
+    'tracking_number', 'label_metadata->>trackingNumber', 'label_metadata->>shippingBarcodeNumber',
+    'label_metadata->>trackingNumbers', 'label_metadata->>shippingBarcodeNumbers', 'label_metadata->>lookupKeys', 'label_metadata->>labelRows',
+  ], searchTerm);
+  if (partialFilter) {
+    const {data, error} = await supabase.from('ebay_orders').select('id').or(partialFilter).limit(250);
+    if (error) throw error;
+    return unique((data || []).map(order => order.id));
+  }
   const candidates = getHistoryLabelLookupCandidates(searchTerm);
   if (!candidates.length) return [];
   const orderIds = new Set();
@@ -1996,6 +2008,12 @@ async function fetchOrderIdsByOrderNumberSearch(searchTerm) {
 
 async function fetchOrderIdsByReturnTrackingSearch(searchTerm) {
   if (!historySearchLooksLikeLabelScan(searchTerm)) return [];
+  const partialFilter = window.OGTrackingSearch?.filter(['return_tracking_number'], searchTerm);
+  if (partialFilter) {
+    const {data, error} = await supabase.from('ebay_return_cases').select('order_id').or(partialFilter).limit(250);
+    if (error) throw error;
+    return unique((data || []).map(row => row.order_id));
+  }
   const candidates = getHistoryLabelLookupCandidates(searchTerm);
   if (!candidates.length) return [];
   const orderIds = new Set();
@@ -2092,6 +2110,11 @@ async function fetchOrderHistoryLinesByOrderIds(orderIds = [], options = {}) {
 
 async function fetchLabelEventsByTrackingSearch(searchTerm) {
   if (!historySearchLooksLikeLabelScan(searchTerm)) return { data: [], error: null };
+  const partialFilter = window.OGTrackingSearch?.filter([
+    'label_metadata->>trackingNumber', 'label_metadata->>shippingBarcodeNumber',
+    'label_metadata->>trackingNumbers', 'label_metadata->>shippingBarcodeNumbers', 'label_metadata->>lookupKeys', 'label_metadata->>labelRows',
+  ], searchTerm);
+  if (partialFilter) return await supabase.from('ebay_order_label_events').select('*').or(partialFilter).limit(250);
   const candidates = getHistoryLabelLookupCandidates(searchTerm);
   if (!candidates.length) return { data: [], error: null };
   const events = [];
