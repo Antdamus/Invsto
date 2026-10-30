@@ -127,6 +127,9 @@ async function deliver(data) {
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   const url = sender.tab?.url || sender.url || '';
   if (sender.id !== chrome.runtime.id) return;
+  // Only the TikTok handler may answer its messages. Chrome uses the first
+  // response, so the eBay fallback must not race it with {ok:false}.
+  if (message.type?.startsWith('TIKTOK_')) return;
   if(message.type==='INVSTO_STREAM_FRAME'){
     if(!/^https:\/\/ir\.ebaystatic\.com\/cr\/ebaylivepubweb\/liveassets\/shoplive\/[^/]+\/player\.html(?:\?|$)/.test(sender.url||'')||!/^https:\/\/www\.ebay\.com\/ebaylive\/host\/events\//.test(url)||!sender.frameId)return;
     enqueue(async()=>{const data=await read();data.streamFrames||={};data.streamFrames[sender.tab.id]={frameId:sender.frameId,documentId:sender.documentId,eventId:new URL(url).pathname.split('/')[4],seen:Date.now()};await save(data);return {ok:true};}).then(reply);return true;

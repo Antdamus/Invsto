@@ -156,7 +156,7 @@ Capture does not reload Stream Manager. Its automatic mode scrolls the virtualiz
 Choose **Keep page still** to hold the lists until you click **Resume automatic capture**. This mode still records visible evidence, but does not claim complete capture readiness. Keep another Stream Manager tab in automatic capture for uninterrupted bag scanning while you work. A working or stopped tab no longer replaces the fresh health of another automatic capture tab for the same show.
 
 Both helper panels link directly to **Open Invsto receiver**. Keep that signed-in tab open; its title identifies it as the capture receiver. The worker now tries registered receivers even when their background heartbeat timer is delayed. Reload the receiver after updating the extension.
-# TikTok LIVE capture (1.8.0)
+# TikTok LIVE capture (1.8.1)
 
 Open the TikTok Shop LIVE console at `shop.tiktok.com/streamer/live/product/dashboard`. In the Invsto panel, expand Settings and choose **Start TikTok capture**. The signed-in TikTok receiver opens; choose the seller once. TikTok Live is also linked from Invsto’s Live Sales page. TikTok records, payment evidence and show identity are separate from eBay; the existing bag-label printer, QR bag lookup and private photo storage are shared.
 
@@ -168,4 +168,4 @@ New sales print one identification label automatically when a paired bag printer
 
 The Screenshot button saves only the live video frame to the exact selected bag, including from the minimized panel. Check that the item currently on camera matches that bag before clicking. Prior sales cannot receive an accurate historical screenshot from the current live frame. Failed saves retain the original frame and bag for an idempotent retry. Photos appear in the TikTok receiver and the shared bag QR lookup. The receiver provides buyer/payment filters, buyer index links, totals and a print/save report layout for desktop and phones.
 
-Deploy `20261030020000_tiktok_live_capture.sql` and the new receiver assets before updating the extension. Reload Invsto Live Capture and the TikTok console to activate v1.8.0. Added content-script access is limited to the TikTok console and Invsto’s TikTok receiver. No new cookie, authentication, desktop-capture or broad browsing permissions are requested.
+Deploy `20261030020000_tiktok_live_capture.sql` and the new receiver assets before updating the extension. Reload Invsto Live Capture and the TikTok console to activate v1.8.1. Added content-script access is limited to the TikTok console and Invsto’s TikTok receiver. No new cookie, authentication, desktop-capture or broad browsing permissions are requested.

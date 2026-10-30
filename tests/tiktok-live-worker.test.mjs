@@ -3,14 +3,16 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import {test} from 'node:test';
 const source=await readFile(new URL('../tools/ebay-live-capture/tiktok-worker.js',import.meta.url),'utf8');
+const sharedSource=await readFile(new URL('../tools/ebay-live-capture/worker.js',import.meta.url),'utf8');
 const event_id='tiktok-7702243594937125663',url='https://shop.tiktok.com/streamer/live/product/dashboard?session_id=13104336646';
-function worker(){let stored={},handler,ack=false,failPrint=false;const deliveries=[],tabs=[];const chrome={runtime:{id:'extension',getManifest:()=>({version:'1.8.0'}),onMessage:{addListener:f=>handler=f}},storage:{local:{get:async()=>structuredClone(stored),set:async d=>Object.assign(stored,structuredClone(d))}},alarms:{create(){},onAlarm:{addListener(){}}},tabs:{create:async o=>{const t={id:10+tabs.length,...o};tabs.push(t);return t;},update:async()=>{},sendMessage:async(tab,m)=>{deliveries.push(m);if(m.type==='TIKTOK_LIVE_CONTEXT')return {event_id};if(m.type==='TIKTOK_BAG_BRIDGE'&&failPrint)throw Error('lost print acknowledgement');return m.type==='TIKTOK_LIVE_DELIVER'?{ok:ack,error:'Choose the seller'}:{ok:true};}}};
+function worker(){let stored={},ack=false,failPrint=false;const handlers=[],deliveries=[],tabs=[];const chrome={runtime:{id:'extension',getManifest:()=>({version:'1.8.1'}),onMessage:{addListener:f=>handlers.push(f)}},storage:{local:{get:async()=>structuredClone(stored),set:async d=>Object.assign(stored,structuredClone(d))}},alarms:{create(){},onAlarm:{addListener(){}}},tabs:{create:async o=>{await new Promise(setImmediate);const t={id:10+tabs.length,...o};tabs.push(t);return t;},update:async()=>{},sendMessage:async(tab,m)=>{deliveries.push(m);if(m.type==='TIKTOK_LIVE_CONTEXT')return {event_id};if(m.type==='TIKTOK_BAG_BRIDGE'&&failPrint)throw Error('lost print acknowledgement');return m.type==='TIKTOK_LIVE_DELIVER'?{ok:ack,error:'Choose the seller'}:{ok:true};}}};
  vm.runInNewContext(source,{chrome,URL,Date,Promise,Error,Object,Number,String,JSON,setTimeout,clearTimeout});
- const send=(m,at=url,tab=1)=>new Promise(resolve=>{const handled=handler(m,{id:'extension',tab:{id:tab,url:at}},resolve);if(!handled)resolve(undefined);});
+ vm.runInNewContext(sharedSource,{chrome,URL,Date,Promise,Error,Object,Number,String,JSON,setTimeout,clearTimeout});
+ const send=(m,at=url,tab=1)=>new Promise(resolve=>{let handled=false;for(const handler of handlers)handled=handler(m,{id:'extension',tab:{id:tab,url:at}},resolve)||handled;if(!handled)resolve(undefined);});
  return {send,tabs,deliveries,get data(){return stored.tiktokLive;},accept(){ack=true;},losePrint(){failPrint=true;}};
 }
 test('unacknowledged TikTok sales persist, retries update one identity, and only saved batches leave the outbox',async()=>{
- const w=worker();await w.send({type:'TIKTOK_LIVE_START',event_id,stream:{event_id,url}});const e={key:'16|buyer|20.00',payment_state:'failed',observed_at:'2026-10-30T01:00:00Z'};
+ const w=worker();assert.equal((await w.send({type:'TIKTOK_LIVE_START',event_id,stream:{event_id,url}})).ok,true,'eBay handler must not race TikTok startup');const e={key:'16|buyer|20.00',payment_state:'failed',observed_at:'2026-10-30T01:00:00Z'};
  await w.send({type:'TIKTOK_LIVE_OBSERVE',event_id,events:[e],health:{ready:true}});assert.equal(Object.keys(w.data.events).length,1);
  await w.send({type:'TIKTOK_LIVE_OBSERVE',event_id,events:[{...e,payment_state:'paid',observed_at:'2026-10-30T01:01:00Z'}],health:{ready:true}});assert.equal(Object.values(w.data.events)[0].event.payment_state,'paid');
  w.accept();await w.send({type:'TIKTOK_LIVE_OBSERVE',event_id,events:[],health:{ready:true}});assert.equal(Object.keys(w.data.events).length,0);assert.equal(w.tabs.length,1);

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Invsto Live Capture",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "Capture eBay and TikTok LIVE auctions, save item photos, and print bag labels.",
   "permissions": ["storage", "alarms"],
   "background": {"service_worker": "worker.js"},
